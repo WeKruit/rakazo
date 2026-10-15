@@ -14,24 +14,27 @@
 
 | 阶段 | 当前证据 | 退出条件 |
 | --- | --- | --- |
-| P0 部署与状态 | 云端登录、独立数据库、Crew、聊天重启延续已验证；文件暂停/恢复未验证 | 同一部署可用，状态及测试文件重启后可读，原 CRM 不变 |
+| P0 部署与状态 | 云端登录、独立数据库、Crew、聊天重启延续已验证；实际 E2B 暂停、Volume checkpoint、容器替换后的原文件只读恢复已验证 | 同一部署可用，状态及测试文件重启后可读，原 CRM 不变 |
 | P1 模型连接 | 官方 Codex OAuth 与真实回复已验证 | 保存连接跨重启继续，明确过期/重连行为 |
 | P2 原生产品与迁移准备 | Crew 上下文、Main/Sourcer 及共享记忆跨对话召回已验证；选择原卡跨重启继续、全对话归档已验证；自定义 input/一次性审批原卡跨重启继续、角色与五份 skills 已验证；其余卡片和迁移待验收 | 记忆、原卡恢复通过；Grok 完整归档与服务清单可核查 |
-| P3 Autumn | 官方 MCP 原生传输与现有认证只读通过；尚未云端验收 | 创建、证据、反馈、原任务续搜回执一致 |
-| P4 现有 CRM | 独立数据库不等于现有身份/CRM 接入 | 用户/组织鉴权、获准写入读回及越权拒绝通过 |
+| P3 Autumn | 官方 MCP 原生传输与现有认证只读通过；两个 Dyna Data Infra 任务状态/分页已核对，原 Grok 批次关联未确认；尚未云端验收 | 创建、证据、反馈、原任务续搜回执一致 |
+| P4 现有 CRM | 原 SSR consent、官方用户 OAuth/MCP、固定评审写入/原审计回执读回代码已保存并检查；未部署或真实用户验收 | 用户/组织鉴权、获准写入读回及越权拒绝通过 |
 | P5 审批发送 | 官方 MCP Bearer 及三个只读 list 调用通过；云端发送未验收 | 精确内容一次性审批、发送确认和回复停止通过 |
 | P6 全链路 | 未验收 | 完成任务 9 的权限、恢复、业务与无重复效果检查 |
 
-先执行任务 1–3，不等待其他服务 OAuth；再执行 4–8，最后验收 9。
+按明确的文件和责任边界并行执行：网页原生能力与恢复、源工作迁移、Autumn 任务关联、CRM/Instantly 接入准备。
+只有真实依赖串行：先保存精确审批规则再开放写工具、先获得具体批准再执行副作用、先核对原任务再续搜；最后集中验收任务 9。
 只有实际验收后才能勾选。文档更新不要求重新部署，仅部署产品修复或配置变更。
 
 ## 当前优先修复：切换对话空白
 
 网页已复现：只有一份全局 snapshot，切换目标后先显示空消息，远程查询完成前无加载状态。
 在现有 Shell 中保留本次登录最近 20 个 thread 的原生 snapshot，原生 refresh/SSE 继续更新；
-首次加载使用既有 Shimmer 显示 Loading…。账号/space 切换沿原生完整重载清空。
+首次加载使用既有 Shimmer 显示 Loading…；路由模块加载复用现有 ShellSkeleton，显示 Opening your Space…。账号/space 改变时直接重建认证路由树，跨标签页原生 session/storage 更新同样隔离；旧异步 bootstrap 不再污染新身份。
 复用现有 Web E2E 验证延迟 snapshot 返回时仍展示该会话记录且不泄露另一个会话。
 状态：已部署并在真实网页验证。首次打开显示 Loading…；已访问对话切回立即显示自己的历史，原生 refresh/SSE 继续更新。组件检查 10 项通过；延迟请求的现有 Web E2E 回归已添加，尚未执行，不作为已通过证据。
+
+追加审查已修复账号/space 所有者切换和 MCP 工具权限刷新后控件残留的两个状态边界：相关 6 个 focused 检查先红后绿；多人真实账号/组织权限仍单独验收，组件回归不替代该项。
 
 ## 任务 1：Main/Sourcer 持久记忆及跨对话召回
 
@@ -69,11 +72,12 @@ packages/adapters/src/executor.ts、infra/modal/app.py 及原生 sandbox/checkpo
 - [x] 使用原生 save_shared_memory 的精确 require_approval 规则，对新共享评审文档做无外发/费用的真实审批；普通 shell/write_file 不充当审批证明。
 - [x] 已修共享审批生成函数，展示真实参数并保护凭证；待定时记录原卡/effect/run 与参数 hash 后重启，全部保持一致。
 - [x] 原卡仅 Allow once 后，同一 effect/run 完成，新共享文档仅 revision 1、仅一条继续回复；另已实测 Deny 无写入，未创建永久允许规则。
-- [ ] 验证重复点击、重试及再次重启不产生第二个效果；上游缺陷复现后只修改共享调用链。
-- [ ] 原生文件工具写入公开测试文件，经 sandbox 暂停/恢复及服务替换后读回一致内容，核对持久副本位置。
+- [x] 再次实际容器替换后核对已完成的原 effect/run/参数 hash、记忆 revision 1 保持不变，没有重放旧写入。
+- [ ] 验证重复点击及未知结果重试不产生第二个效果；上游缺陷复现后只修改共享调用链。
+- [x] 原生文件工具写入公开测试文件，经实际 E2B paused、Modal Volume checkpoint 及服务容器替换后，同一 Sourcer 对话仅调用 read_file 读回原内容；未重建文件。
 - [x] 已保存待审批、重启后原卡、Allow once 后继续和原生记忆页面截图及数据库回执，未执行历史外发。
 
-当前文件检查：原生 write_file/read_file 成功，尚未通过暂停恢复。E2B 的预期非零闲置探测被 SDK CommandExitError 丢弃，导致保持 running；最小共享 provider 修复与 73 个相关检查已通过，待部署和真实暂停读回。
+文件检查已通过：E2B 的预期非零闲置探测曾被 SDK CommandExitError 丢弃，导致保持 running；共享 provider 最小修复及 73 个相关检查通过，已部署。静态 provider getInfo 独立确认 paused，Volume 原路径读回测试内容；服务替换后原 provider 恢复 running，同一对话的真实 tool audit 只有 read_file。云端 adapters 类型检查通过。
 
 **通过：** 待审批原卡恢复，授权绑定相同 payload，操作一次，文件经原生恢复路径读回。
 
@@ -90,7 +94,7 @@ packages/adapters/src/executor.ts、infra/modal/app.py 及原生 sandbox/checkpo
 - [x] 历史动作仅归档；迁移包不包含永久自动批准规则或激活旧队列。
 
 当前导出证据：原生只读接口枚举 11 个可访问 Bot/群聊、11 个 session，7,074 条 transcript entries；
-分页全部完成、无失败，会话文件校验通过。177 条附件引用（115 条 Bot 附件、62 条用户附件）已保留，尚未下载附件文件。
+分页全部完成、无失败，会话文件校验通过。原始归档保留 177 条附件引用（115 条 Bot 附件、62 条用户附件）；其中两份历史 Dyna CSV 已另行下载并验证 SHA/EOF，其余引用没有文件 payload。
 UI 已盘点 9 项已安装插件，8 项显示 Connected，1 项待认证；方法/脚本依赖已按来源核对。两份关键 CSV 已只读下载并校验；其余附件、脚本及真实 provider task/checkpoint 仍待迁入。
 
 **通过：** 所有可访问 session 有完整或明确失败记录；服务清单可追溯到真实配置/调用。
@@ -101,6 +105,7 @@ UI 已盘点 9 项已安装插件，8 项显示 Connected，1 项待认证；方
 packages/adapters/src/mcp-connector.ts、apps/api/src/integration-catalog.ts 及原生 bot settings/memory/skills/secrets。
 
 - [x] Main/Sourcer 职责与五份招聘方法已通过原生设置/skill_create 保存并读回核对，附归档来源；另三份历史记忆草稿尚未合并，不冒充已导入。
+- [x] Main 通过原生 handoff_to_bot 委派 Sourcer，后者使用已安装技能和共享规则，在原 Crew 返回实际 Dyna 检索计划与证据表；本次没有执行业务检索。
 - [ ] 原始聊天保留为归档；只有原生导入/召回验收的内容标记为可用记忆，不将全部聊天拼成系统提示词。
 - [ ] 服务清单映射原生 connector、已安装 API 或 MCP；已有能力直接配置，不加第二套注册系统。
 - [ ] 在服务端原生加密 secret store 配置已提供的 Autumn、Instantly、LeadMagic、ContactOut、FullEnrich 等实际所需凭证。
@@ -122,6 +127,8 @@ packages/adapters/src/mcp-connector.ts、apps/api/src/integration-catalog.ts 及
 
 **通过：** 创建、证据、反馈及同一外部任务续搜有真实回执；缺失继续接口不能换新任务冒充。
 
+当前只读进展：官方任务列表/状态核对两个完成的 Dyna Data Infra 任务，各 15 行；代表任务 get_rows 读取一行并返回真实 next_cursor。两个检查窗口余额变化均为 0。全部旧对话中没有这些 provider ID 的精确来源，不能把相似岗位任务认定为旧批次；原工作区任务索引仍缺。没有调用 research/reply/stop_task。
+
 ## 任务 7：现有 Supabase 身份、组织与 CRM（P4）
 
 **复用：** 原生认证/连接鉴权、现有 CRM 身份、成员、RLS 及业务接口。
@@ -132,6 +139,8 @@ packages/adapters/src/mcp-connector.ts、apps/api/src/integration-catalog.ts 及
 - [ ] 验证其他用户/组织不能读任务、记忆、credential、CRM 行或批准卡。
 
 **通过：** 获准写入/读回一致，越权实际拒绝，现有 CRM 结构与规则保持不变。
+
+当前实现准备：复用现有 CRM 的 HttpOnly SSR 登录、官方 Supabase 用户 OAuth/MCP 和原 RLS；固定只读工具及 crm_review_candidate/get_crm_candidate_review 已保存，后者核对原组织/候选/用户和实际 audit receipt，保留 stage。代码检查通过，真实用户授权、部署、写读及越权仍待验收。现有 sourced-person/evidence 后台 RPC 不允许 authenticated 调用，不借 service-role 绕过。
 
 ## 任务 8：Instantly 审批发送与回复停止（P5）
 
@@ -144,6 +153,8 @@ packages/adapters/src/mcp-connector.ts、apps/api/src/integration-catalog.ts 及
 - [ ] 单独验证附件和服务 API 限制，不用浏览器绕过缺失接口或新增权限。
 
 **通过：** 一次精确批准对应一次确认发送；重复点击、重试、重启及已确认回复不引发第二次外发。
+
+现有 CRM 的 post-message RPC 会立即插入 pending 发送队列，不是未批准草稿，不在本轮调用。先复用 Rakazo 原生持久化 tool approval 保存精确 Instantly 参数；不得同时把同一消息加入 CRM pending 造成双发。现有 CRM 还缺只记录已发 provider receipt 的用户入口，业务验收需单独对齐这一边界。
 
 ## 任务 9：P6 全链路验收与交付
 

@@ -139,7 +139,7 @@ function SessionApp() {
   const user = session.data?.user;
   return (
     <div className="h-full" data-rakazo-app-state="ready">
-      <Suspense fallback={<div className="h-full bg-background" />}>
+      <Suspense fallback={<GateFallback />}>
         <Routes key={identity}>
           <Route path="/" element={user ? <Navigate to="/app" replace /> : <WelcomePage />} />
           <Route
