@@ -55,9 +55,15 @@ permission, memory, and recruiting-loop acceptance comes after this baseline.
 The cloud Web/API/worker deployment is running and native readiness is HTTP 200.
 All 102 original migrations completed in the independent database, Graphile's
 schema exists, and the CRM table schema fingerprint is unchanged. The actual
-signup page awaits the owner's password entry. Codex OAuth, Crew conversation,
-file pause/resume, and restart acceptance remain pending; local pilot results
-are separate evidence.
+owner has signed up, connected Codex through official device OAuth, and used
+Main/Sourcer in a native Crew. Normal @ selection, two-turn shared context,
+refresh, actual service-container replacement and a subsequent natural-chat
+reply have passed. Original group/thread/connection/message/run identities were
+preserved; the final continuation added exactly one user message, one reply and
+one completed run. A shared two-second frontend snapshot deadline was corrected
+because it cancelled valid remote history reads before they completed.
+File pause/resume, separate logout/login, and the later full card/business tests
+remain pending; earlier local pilot results are separate evidence.
 
 ### Persistence and capacity, checked 2026-10-15
 

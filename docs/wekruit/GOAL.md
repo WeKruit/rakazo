@@ -64,7 +64,7 @@ temporary administrator SET ROLE grant was revoked. All 102 unchanged upstream
 migrations completed, with no unfinished migration; Graphile's schema is present.
 The original CRM `threads` schema fingerprint matches the pre-deployment baseline.
 The free IPv4 Session pooler reaches the correct database and supports LISTEN.
-The original custom-schema investigation was withdrawn; no runtime patch ships.
+The original custom-schema investigation was withdrawn; no database adapter patch ships.
 
 Modal SDK 1.6.1 is installed in a project-specific environment. The user authorizes
 Modal use after the existing workspace's exhausted free credit was reported; this
@@ -72,8 +72,17 @@ validation was proposed with a $5 cap. A dedicated App, Secret and Volume are
 deployed. Native readiness is HTTP 200 with Pi, E2B, Graphile, Postgres realtime,
 and the encrypted secret store; Web production build and API typecheck pass.
 The replacement E2B key passes official read-only authentication; its account
-shows $100 credit and no payment method. No agent sandbox has started yet.
-The actual HTTPS signup page is open in Chrome, awaiting the owner's first
-password entry. Cloud owner login, Codex OAuth, Crew replies, file persistence,
-and controlled restart acceptance are still open. Do not equate readiness with
-an accepted agent conversation or P0–P6 completion.
+shows $100 credit and no payment method. The native shared E2B computer has run.
+Owner signup and official Codex device OAuth completed on the deployed website.
+Main and Sourcer replied in a native Crew using the saved OpenAI Codex connection.
+Sourcer retained the first turn's role, requirements and marker while incorporating
+the next turn's feedback. After container replacement, group/thread/member/model
+connection IDs and the original four message hashes and two runs were unchanged.
+A new natural chat message then received a correct context-based Main reply,
+leaving six messages and three completed runs with no duplicated earlier run.
+
+The frontend's shared two-second thread snapshot deadline cancelled valid remote
+history responses. Raising that deadline to cover the API's transaction/pool
+budget restored history after refresh; this is the only product source change
+in the current deployment. Native sandbox file pause/resume, a separate logout/
+login test, exhaustive cards and P0–P6 business acceptance remain open.
