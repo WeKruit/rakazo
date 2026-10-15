@@ -57,6 +57,8 @@ subagent 和文件存储沿用 Rakazo 已有边界，后续更换模型或运行
 
 原生 sandbox 文件恢复另已通过：静态 E2B 状态确认 paused，文件 checkpoint 在 Modal Volume 实际可读；替换服务容器后，Sourcer 在原对话仅调用 read_file 返回既存文件内容，原 provider 恢复 running，未重建文件。再次重启没有重放此前已完成的审批效果。
 
+追加已实测取消原卡，以及未答 Sourcer 原卡上的原生继续任务重投：job 被消费后没有新增 attempt 或改变原卡；正常回答后同一 run 仅新增一条继续回复。共享等待 guard 已部署，320 项相关检查通过。来源核对后的 Sourcer 稳定偏好另已实际写入原生 bot memory revision 1。CRM 原站点 consent 页面已随 PR #39 上线，Function/OAuth 新入口仍待具体确认及真实用户验收。
+
 **尚未验收**：全部原生卡片边界与多人权限、剩余历史业务状态迁入、招聘服务云端接入与 P3–P6 业务闭环。两个真实 Dyna provider 任务已只读确认，但缺少与旧 Grok 批次的确定映射；CRM 原 OAuth/MCP 及评审写读代码已准备，尚未真实用户验收。远端 MCP 多字段 elicitation 当前缺原生协议桥接及服务端恢复能力，不能用文本卡或重发调用冒充。普通聊天上下文记住信息不算长期记忆证明。
 
 ## 完成标准

@@ -18,7 +18,7 @@
 | P1 模型连接 | 官方 Codex OAuth 与真实回复已验证 | 保存连接跨重启继续，明确过期/重连行为 |
 | P2 原生产品与迁移准备 | Crew 上下文、Main/Sourcer 及共享记忆跨对话召回已验证；选择原卡跨重启继续、全对话归档已验证；自定义 input/一次性审批原卡跨重启继续、角色与五份 skills 已验证；其余卡片和迁移待验收 | 记忆、原卡恢复通过；Grok 完整归档与服务清单可核查 |
 | P3 Autumn | 官方 MCP 原生传输与现有认证只读通过；两个 Dyna Data Infra 任务状态/分页已核对，原 Grok 批次关联未确认；尚未云端验收 | 创建、证据、反馈、原任务续搜回执一致 |
-| P4 现有 CRM | 原 SSR consent、官方用户 OAuth/MCP、固定评审写入/原审计回执读回代码已保存并检查；未部署或真实用户验收 | 用户/组织鉴权、获准写入读回及越权拒绝通过 |
+| P4 现有 CRM | PR #39 已合并，原站点 consent 页面已上线，main CI/RLS 与 Vercel 通过；MCP Function 发布及 OAuth 配置待确认，真实用户验收未完成 | 用户/组织鉴权、获准写入读回及越权拒绝通过 |
 | P5 审批发送 | 官方 MCP Bearer 及三个只读 list 调用通过；云端发送未验收 | 精确内容一次性审批、发送确认和回复停止通过 |
 | P6 全链路 | 未验收 | 完成任务 9 的权限、恢复、业务与无重复效果检查 |
 
@@ -61,6 +61,10 @@ apps/api/src/router.ts、packages/db/src 的现有卡片/任务持久化。
 - [x] 点击原卡选项，核对保存的 action、真实继续回复及原任务关联；截图待答和继续结果。
 - [x] 同一业务上下文生成第二张原生卡，跨部署保留待答状态，使用原生自定义答案输入框填写新值并继续；原 8 个 run ID、16 条原消息保留，同一 waiting run 完成，仅增加 1 条继续回复。
 - [ ] 检查取消、重复回答与失效卡：取消无业务效果，重复回答不重新执行，旧卡不能回答新任务。
+
+追加真实边界验收：Main 私聊待答卡经原生 Stop 后显示 No longer active，原 run cancelled、无外部效果；Crew 原卡保持等待。重复回答/失效卡的完整真实验收仍未完成，不因离线检查通过而勾选整项。
+
+`6108bad` 修复并部署了共享执行入口的已复现缺口：重复 run.continue 原先可以领取未回答的 waiting_input。现只有原生回答事务将原 run 变 queued 后才继续；原队列、事务、takeover 和审批规则保持原样。320 项相关检查通过，独立审查通过。云端对 Sourcer 的新待答卡实际重投一次原生继续任务，job 消费后原 run/card/checkpoint/attempt/effect 均未变；再点原卡选项，同一 run completed、只新增一条继续回复。该场景不是重复 HTTP 回答或未知外发结果的完整验收。
 
 **通过：** 按钮选择及自定义答案都走原生 answer 路径，等待卡跨重启继续，无人工改库或伪造卡。
 
@@ -117,6 +121,8 @@ packages/adapters/src/mcp-connector.ts、apps/api/src/integration-catalog.ts 及
 
 **通过：** 服务在网页原生设置可见，agent 使用获准工具，凭证隔离，工作能调用迁入规则和记忆。
 
+来源审阅后已通过原生 remember 迁入 Sourcer 的一条稳定偏好：每批展示实际完整 prompt/brief 和规则；实际 bot scope、revision 1、source run/thread 已读回。其余历史流程主要已由五份 skills/角色指令覆盖，不整份重复塞入 memory；历史岗位标准与任务 checkpoint 仍不是当前授权或已恢复状态。
+
 服务准备追加进展：LeadMagic、ContactOut、FullEnrich 官方账户读取各 HTTP 200，没有候选补全/查询调用；三者均有官方 hosted MCP，可直接复用现有 HTTP MCP/OAuth/工具 allowlist。LeadMagic hosted MCP 需 OAuth，不能把 REST key 当作登录；其他准确工具名仍以连接后的 tools/list 为准。这些只是账户认证与配置准备，尚未安装云端凭证或分配给 bot。
 
 ## 任务 6：Autumn → 证据 → 反馈 → 原任务续搜（P3）
@@ -144,7 +150,9 @@ packages/adapters/src/mcp-connector.ts、apps/api/src/integration-catalog.ts 及
 
 **通过：** 获准写入/读回一致，越权实际拒绝，现有 CRM 结构与规则保持不变。
 
-当前实现准备：复用现有 CRM 的 HttpOnly SSR 登录、官方 Supabase 用户 OAuth/MCP 和原 RLS；固定只读工具及 crm_review_candidate/get_crm_candidate_review 已保存，后者核对原组织/候选/用户和实际 audit receipt，保留 stage。代码检查通过，真实用户授权、部署、写读及越权仍待验收。现有 sourced-person/evidence 后台 RPC 不允许 authenticated 调用，不借 service-role 绕过。
+当前实现准备：复用现有 CRM 的 HttpOnly SSR 登录、官方 Supabase 用户 OAuth/MCP 和原 RLS；固定只读工具及 crm_review_candidate/get_crm_candidate_review 已经 PR #39 合并至 main，正式站点 consent 页面已上线；main CI verify/RLS 与 Vercel 通过。Supabase 原生编辑器已准备所审阅的八个源/依赖文件，尚未点击 Deploy；OAuth Server 仍关闭，启用和函数发布待具体确认。真实用户授权、写读及越权仍待验收，现有 CRM schema/业务行未改。
+
+只读 catalog 审计另确认现有 candidates/candidate_sources 表已有 authenticated 权限及组织 RLS，可沿固定用户操作复用，不必改 CRM schema；当前 MCP 尚无该创建/来源写入口。来源语义、同 org/candidate 校验和可信原始 artifact 必须对齐，不能借后台 service-only RPC、任意 JSON 或模型自报的 provider receipt 冒充完整接入。
 
 ## 任务 8：Instantly 审批发送与回复停止（P5）
 
