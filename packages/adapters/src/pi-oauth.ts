@@ -24,6 +24,7 @@ import {
   ThinkingLevelSchema,
 } from "@rakazo/contracts";
 import type { PrismaClient } from "@rakazo/db";
+import { retireModelCredential } from "@rakazo/db";
 import { getLogger } from "@rakazo/logging";
 import { createManualAnthropicOAuthLogin } from "./pi-anthropic-oauth.js";
 
@@ -747,7 +748,7 @@ export function persistStoredModelSecret(
  * The catalog itself never writes credentials — this is the run path's writer.
  */
 export async function refreshExpiredModelCredential(
-  prisma: Pick<PrismaClient, "secret">,
+  prisma: Pick<PrismaClient, "secret" | "userModelCredential" | "$transaction">,
   secretStore: Pick<SecretStore, "load" | "put">,
   scope: { userId: string; spaceId: string },
   secretId: string,
@@ -770,6 +771,23 @@ export async function refreshExpiredModelCredential(
     await resolveModelAuth(plaintext, provider, {
       ...opts,
       persist: persistStoredModelSecret(prisma, secretStore, scope, row.id),
+      retire: async (_reason, _detail, failed) => {
+        if (!failed) return false;
+        const credential = await prisma.userModelCredential.findFirst({
+          where: { userId: scope.userId, provider, secretId: row.id },
+          select: { id: true },
+        });
+        if (!credential) return false;
+        return retireModelCredential(prisma, {
+          userId: scope.userId,
+          credentialId: credential.id,
+          secretId: row.id,
+          matchesFailedSecret: matchesFailedOAuthSecret(
+            (ciphertext, secretId) => secretStore.load(ciphertext, secretId),
+            failed,
+          ),
+        });
+      },
     });
   });
 }
@@ -783,7 +801,7 @@ const credentialRefreshKicks = new Map<string, Promise<void>>();
  * kick frees the slot so the next expired read can retry.
  */
 export function kickModelCredentialRefresh(
-  prisma: Pick<PrismaClient, "secret">,
+  prisma: Pick<PrismaClient, "secret" | "userModelCredential" | "$transaction">,
   secretStore: Pick<SecretStore, "load" | "put">,
   scope: { userId: string; spaceId: string },
   secretId: string,
