@@ -2,20 +2,41 @@
 
 Run the upstream Rakazo product as a whole: Web, API, worker, Pi runtime, native
 Crew, memory, tools, and interaction cards. Use Supabase Postgres and cloud
-compute. Configure upstream features before writing application code.
+compute. Reuse upstream features and the native sandbox executor.
 
-## Immediate delivery
+## Immediate delivery — Modal login and Crew chat
 
-1. Preserve upstream executable source at revision `7d5e64c` without local
-   no-computer changes or an extra harness. The WeKruit fork may add this plan.
-2. Reuse authorized Supabase and cloud resources. Check database permissions and
-   schema collisions before applying upstream migrations. Never replace CRM tables.
-3. Deploy the unchanged product with its supported computer provider and durable
-   application storage. No Docker installation on the user's Mac. Stop before
-   creating any newly billable resource or starting a new subscription.
-4. Use the existing Codex subscription through native OAuth. Deliver the actual
-   cloud webpage with a real model reply and screenshots; infrastructure startup
-   alone does not establish agent acceptance.
+The current deliverable is one real HTTPS webpage on Modal. A user can sign in
+through Rakazo's existing authentication, connect the existing Codex subscription,
+and converse continuously with Main and Sourcer in a native Crew group. Refresh,
+reopening, and a controlled restart preserve the chat and provider connection.
+
+Use Supabase Postgres for Rakazo's own account, chat, task, card, and memory state.
+Retain native authentication; integration with existing Supabase Auth/CRM is later
+work. Initialize a dedicated PostgreSQL database in the existing Supabase cluster,
+subject to the pending database-creation approval: the existing CRM already has an
+incompatible `threads` table. This keeps upstream migrations and runtime unchanged.
+The additional database is managed through Postgres, not Supabase Dashboard/Auth/
+PostgREST. Do not create a newly paid project or overwrite existing CRM objects.
+
+The user accepts keeping a sandbox to reproduce the native product first. Defer
+the optional-computer refactor. Use an already-supported cloud provider, initially
+E2B Hobby if usable credit is verified, with the native Team Computer shared by
+Main and Sourcer. Retain native provisioning, workspace persistence, and idle
+sleep. Browser work is not part of the initial acceptance. Verify actual resource
+allocation, pause/resume, and credit/spending controls before starting compute;
+do not infer that a free plan makes usage free or upgrade to a paid subscription.
+
+Modal runs the original Web/API/worker/Pi with deployment configuration. Keep a
+small persistent volume for native file artifacts; task, chat, memory, and OAuth
+credentials remain in Postgres, with encryption keys in server-side secrets.
+No Docker on the user's Mac, new subscriptions, or unapproved paid usage. Check
+the existing Modal and sandbox accounts' usable credit and spending limits before deployment.
+
+Do not connect or migrate Autumn, Instantly, Gmail, Calendar, enrichment, CRM,
+Slack, or business scripts in this iteration. Existing pilot connections remain
+untouched. Script/file-based sourcing and deduplication reported in the current
+workflow are later business migration requirements, not completed capabilities.
 
 ## Recruiting journey through P6
 
@@ -39,6 +60,13 @@ source and encrypted secret store. Each Instantly operation returned HTTP 200.
 No email was sent or campaign modified. These are pilot results, not cloud proof.
 
 Supabase is reachable with the provided restricted database role. That role cannot
-create tables, and the existing CRM `threads` table conflicts with upstream's
-schema. Cloud database initialization has not run. The project's Compute page
-reports access is not enabled. Cloud deployment and P0–P6 acceptance remain open.
+initialize the existing database; the CRM `threads` table conflicts with upstream.
+Custom-schema investigation also reproduced two historical migration blockers, so
+its runtime changes were withdrawn. A separate database creation is awaiting approval.
+
+Modal SDK 1.6.1 is installed in a project-specific environment. The user authorizes
+Modal use after the existing workspace's exhausted free credit was reported; this
+validation was proposed with a $5 cap. A new dedicated App/Secret/Volume configuration
+is prepared. Web production build and API typecheck pass. The supplied sandbox key
+failed official E2B read-only authentication and needs replacement. No cloud app or
+sandbox has started; cloud login/Codex/Crew and P0–P6 acceptance remain open.

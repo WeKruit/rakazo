@@ -4,22 +4,86 @@ Deliver the [approved goal](GOAL.md) through P6. Each phase must leave a runnabl
 check and a reviewable result; stop dependent work when its contract is unproved.
 The local pilot is not cloud deployment or live recruitment-loop proof.
 
-## Current delivery checkpoint — 2026-10-15
+## Active iteration — deploy login and continuous Crew chat
 
-User direction: unchanged upstream executable code, Supabase database, cloud
-hosting. Retire the custom local no-computer path; do not extend it. Preserve the
-local pilot's credentials and messages while preparing the supported deployment.
+Current user direction: Modal hosting, Supabase Postgres, and a native cloud
+sandbox to preserve the upstream executor and avoid the optional-computer refactor.
+Do not build recruiting integrations in this iteration. Keep the later P0–P6
+journey below as deferred scope, not as acceptance for this first delivery.
 
-Codex OAuth completed in the pilot and one actual model response was saved.
-Instantly's native encrypted API source verified three GET tools (accounts,
-campaigns, emails), all HTTP 200. No sending acceptance is claimed.
+### Work order
 
-The existing Supabase database is reachable, but the supplied role cannot create
-tables and the CRM already owns an incompatible `threads` table. Do not apply the
-upstream public-schema migrations over it. Use an appropriate existing database
-or resolve the target before migration. No newly paid project may be created.
-The current Supabase project does not have Compute access; inspect the existing
-cloud account for a usable host and native computer provider before deployment.
+1. Resolve deployment prerequisites first: use the project-specific Modal SDK,
+   verify its authenticated workspace and spending controls, and obtain approval
+   to create a dedicated database in the existing Supabase cluster. Its runtime
+   role owns this new database; no CRM permissions or tables change. Upstream's
+   historical migrations cannot initialize a custom schema unchanged. Do not run
+   migrations over the CRM or create a newly paid Supabase project.
+2. Configure an existing native cloud sandbox adapter; prefer E2B Hobby if its
+   account has usable credit. Verify the real template size and tier restrictions.
+   Do not implement a Modal sandbox adapter or change the executor to bypass its
+   computer dependency. Do not upgrade a subscription or create billable usage.
+3. Use native Team Computer for Main/Sourcer and retain the existing 10-minute
+   idle sleep. Verify actual pause and resume with persisted workspace data; include
+   running idle time in costs. Browser workflows and recruiting scripts are not
+   acceptance for this iteration. Do not add business credentials to the computer.
+4. Deploy original Web/API/worker/Pi via a Modal deployment entrypoint, with one
+   initial service instance and shared native file storage. Preserve necessary
+   backend activity without relying on an open browser. Store keys as server-side
+   secrets and verify volume persistence across container replacement. Do not
+   publish a webpage as functional if its agent requests still cannot execute.
+5. Complete native owner sign-in and Codex OAuth on the deployed product, create
+   Main/Sourcer and a native Crew, and run a short real two-round conversation.
+   Verify refresh, logout/login, and one controlled restart. No business API calls,
+   outreach, business scripts, or out-of-pocket charges are part of this check.
+
+### Deliverables and acceptance
+
+- A working HTTPS URL with native sign-in; no local-only or bypass login page.
+- A saved Codex subscription connection and an actual streamed model response.
+- Main and Sourcer visible in Crew; normal @ selection and two-round context work.
+- Reload/reopen/restart retain the same persisted chat, messages, and connection;
+  reopening does not resend an earlier message.
+- One native Team Computer provisions, pauses when idle, and resumes without
+  losing a small public test file; no browser workflow is required.
+- Screenshots of login, model connection, and Crew replies, plus exact deployed
+  revision and a short pass/fail receipt. Reuse existing checks for any changed boundary;
+  no additional testing harness is introduced.
+
+Native memory and interaction implementations remain in use; exhaustive card,
+permission, memory, and recruiting-loop acceptance comes after this baseline.
+Cloud deployment has not completed; prior local pilot results are separate evidence.
+
+### Persistence and capacity, checked 2026-10-15
+
+Use Supabase Postgres for native users, sessions, conversations, runs, cards, and
+MarkdownMemoryStore documents. Keep encrypted connection records in the database
+and their encryption key in server secrets. Mount the native DATA_DIR on a Modal
+Volume for artifacts and LocalAgentHomeStore checkpoints; the sandbox filesystem
+is a working copy, not the only durable copy. Reuse upstream checkpoint/export
+and restore paths. Verify the Volume commit and replacement-container restore;
+an abrupt sandbox loss can lose changes since its last successful checkpoint.
+Do not add an S3 adapter or move recruiting state in this baseline iteration.
+
+The existing Grok Crew was directly asked about timing, size, and restart needs.
+All six members replied. Their timings and daily counts are estimates, not an
+independent benchmark: sourcing 30–90 minutes per batch, enrichment 10–40 minutes,
+Instantly and scheduling 1–3 minutes per ordinary task, executive assistant 3–10
+minutes, and chief-of-staff daily check 5–10 minutes. They report predominantly
+remote-service waiting and restartable scripts using saved job IDs and caches.
+This does not prove our deployed runtime safely resumes those business effects.
+
+They report measured shared workspace size 1.9 GB, including role folders 98 MB
+and enrichment cache 21 MB. These overlap and must not be added as independent
+totals. Start with a 5–10 GB planning allowance for workspace and checkpoint
+staging; actual capacity and costs must be observed on our deployment.
+
+The upstream executor provisions a computer even for plain chat, so billable
+runtime includes model/API waits and the trailing idle interval. Frequent routines
+may keep one shared computer running most of the workday. Do not budget only CPU
+seconds, multiply one shared computer by bot count, or promise $5–10/month for the
+entire existing Crew. E2B Hobby's one-hour continuous runtime limit needs checking
+before later 90-minute sourcing runs; do not upgrade a subscription to bypass it.
 
 ## Reuse before adding code
 
@@ -38,15 +102,12 @@ state, worker/Pi/tool execution, and the rendered result before changing it.
 Autumn, Supabase, and Instantly adapters reuse those boundaries and protected
 server-side connections. No second harness, gateway, or parallel credential store.
 
-## A — Baseline, Codex, Crew, cards, and memory (P0–P2)
+## Deferred roadmap after the baseline: A — Codex, Crew, cards, and memory (P0–P2)
 
-**P0: unchanged upstream cloud deployment.** Preserve upstream revision `7d5e64c`
-for all executable source. Use native Web/API/worker/Pi with Supabase PostgreSQL,
-a supported cloud computer provider, and durable application storage. Verify
-migration privileges and table-name compatibility before writing. Reuse existing
-authorized resources; no local Docker, new purchases, or new subscriptions.
-Deliver the actual HTTPS product URL and record the running revision. Keep local
-pilot evidence distinct from acceptance of this cloud deployment.
+**P0: Modal baseline above.** Complete the current iteration before expanding
+recruitment scope. Retain upstream Web/API/worker/Pi, with only the authorized
+deployment scoping changes. Retain the native cloud sandbox. No local Docker or new paid
+resources; no integration work in place of a working login and chat webpage.
 
 **P1: existing Codex OAuth.** Connect the available subscription through the saved
 model-connection flow. Verify a real Pi response, saved connection reuse after a
