@@ -15,7 +15,7 @@ from urllib.parse import urlsplit
 
 import modal
 
-ROOT = Path(__file__).resolve().parents[2]
+ROOT = Path(__file__).resolve().parents[2] if modal.is_local() else Path("/app")
 APP_NAME = os.environ.get("MODAL_APP_NAME", "rakazo-recruiting")
 SECRET_NAME = os.environ.get("MODAL_SECRET_NAME", f"{APP_NAME}-config")
 VOLUME_NAME = os.environ.get("MODAL_VOLUME_NAME", f"{APP_NAME}-files")
