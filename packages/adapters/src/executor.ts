@@ -3244,7 +3244,8 @@ export function createRunExecutor(deps: ExecutorDeps) {
     async continueRun(runId: string, workerId: string) {
       const run = await deps.prisma.run.findUnique({ where: { id: runId } });
       if (!run) return;
-      if (isTerminal(run.status as RunStatus)) return;
+      // Only an answer queues a waiting ask; a redelivered wake must leave its card pending.
+      if (isTerminal(run.status as RunStatus) || run.status === "waiting_input") return;
       let { resumeCheckpoint, heldForTakeover, resumeHeldLease, takeoverResume } =
         takeoverContinuePlan(run);
 
@@ -3255,7 +3256,7 @@ export function createRunExecutor(deps: ExecutorDeps) {
           id: runId,
           ...continueRunClaimFence(run),
           OR: [
-            { status: { in: ["queued", "waiting_input", "waiting_takeover"] } },
+            { status: { in: ["queued", "waiting_takeover"] } },
             {
               status: { in: ["leased", "running"] },
               leaseExpiresAt: { lte: now },
@@ -3279,7 +3280,6 @@ export function createRunExecutor(deps: ExecutorDeps) {
       if (
         current.status === "queued" ||
         current.status === "leased" ||
-        current.status === "waiting_input" ||
         current.status === "waiting_takeover"
       ) {
         assertTransition(current.status as RunStatus, "running");

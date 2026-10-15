@@ -1406,6 +1406,42 @@ describe("persistentComputerInstruction", () => {
 });
 
 describe("createRunExecutor", () => {
+  it("does not claim an unanswered run when a continue job is delivered again", async () => {
+    const run = { status: "waiting_input", checkpoint: null, leaseFence: 0 };
+    const updateMany = vi.fn().mockRejectedValue(new Error("Unanswered run reached lease claim"));
+    const createAttempt = vi.fn();
+    const runtime = { run: vi.fn() };
+    const home = { checkout: vi.fn() };
+    const prisma = {
+      attempt: { create: createAttempt },
+      run: {
+        findUnique: vi.fn(async () => run),
+        updateMany,
+      },
+    } as unknown as PrismaClient;
+    const executor = createRunExecutor({
+      prisma,
+      runtime,
+      home,
+    } as unknown as Parameters<typeof createRunExecutor>[0]);
+
+    await expect(executor.continueRun("run-1", "worker-1")).resolves.toBeUndefined();
+    expect(updateMany).not.toHaveBeenCalled();
+    expect(createAttempt).not.toHaveBeenCalled();
+    expect(runtime.run).not.toHaveBeenCalled();
+    expect(home.checkout).not.toHaveBeenCalled();
+
+    // The answer transaction makes this same run queued before publishing its continuation.
+    run.status = "queued";
+    updateMany.mockResolvedValue({ count: 0 });
+    await executor.continueRun("run-1", "worker-1");
+    expect(updateMany).toHaveBeenCalledExactlyOnceWith(
+      expect.objectContaining({
+        where: expect.objectContaining({ id: "run-1", status: "queued" }),
+      }),
+    );
+  });
+
   it("excludes private summaries and memory tools from group messaging runs", () => {
     const messages = [{ role: "user", content: "Group request" }];
     expect(
