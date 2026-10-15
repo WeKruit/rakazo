@@ -4,6 +4,17 @@ Deliver the [approved goal](GOAL.md) through P6. Each phase must leave a runnabl
 check and a reviewable result; stop dependent work when its contract is unproved.
 The current local baseline is not a connected model or live recruitment proof.
 
+## Current delivery checkpoint — 2026-10-15
+
+Deploy the existing Web product first for user review. Main and Sourcer are in a
+real Crew group. Additional business implementation is on hold for that review.
+Instantly uses the existing API installation and encrypted secret store, with
+three read-only tools: `/api/v2/accounts`, `/api/v2/campaigns`, `/api/v2/emails`.
+All three returned HTTP 200 through Rakazo's installed connector. Agent invocation
+and sending remain untested; P5 still requires the exact-payload approval/send
+journey. Do not add a second sender or gateway to demonstrate a connection.
+Codex OAuth remains incomplete, so P1–P6 are not accepted.
+
 ## Reuse before adding code
 
 | Responsibility | Existing boundary |

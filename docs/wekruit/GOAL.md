@@ -38,6 +38,20 @@ the sending service. Adopt Rakazo's Web, API, worker, and Pi runtime as a whole.
   bindings remain product gaps to verify and resolve before claiming those flows.
   One successful Crew session does not establish those capabilities.
 
+## Current checkpoint — 2026-10-15
+
+The immediate delivery is the existing Rakazo Web product for review. Main,
+Sourcer, and their Recruiting Crew are created. Defer further business schemas
+and connector code until that review; retain the journey through P6 below.
+Instantly is required alongside Autumn and the existing CRM. Its native API
+installation has an encrypted credential and three GET tools (accounts,
+campaigns, emails), each verified through the installed connector with HTTP 200.
+This is read connectivity, not agent-chat or approved-send acceptance. No campaign
+was edited or activated, no email was sent, and no purchase was made.
+
+Codex OAuth is not complete: the official authorization page returned an error.
+No connected-model, Crew conversation, memory, card, or P6 result is claimed.
+
 ## What is established
 
 The Apache-2.0 fork starts from upstream revision `7d5e64c`. Local infrastructure
