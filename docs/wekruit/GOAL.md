@@ -1,88 +1,63 @@
-# WeKruit recruiting workspace
+# WeKruit 招聘 Agent 产品 Goal
 
-Run the upstream Rakazo product as a whole: Web, API, worker, Pi runtime, native
-Crew, memory, tools, and interaction cards. Use Supabase Postgres and cloud
-compute. Reuse upstream features and the native sandbox executor.
+更新：2026-10-15。此文件与 [PLAN.md](PLAN.md) 是当前执行依据，取代此前仅部署登录和 Crew 的迭代范围。
 
-## Immediate delivery — Modal login and Crew chat
+## 目标
 
-The current deliverable is one real HTTPS webpage on Modal. A user can sign in
-through Rakazo's existing authentication, connect the existing Codex subscription,
-and converse continuously with Main and Sourcer in a native Crew group. Refresh,
-reopening, and a controlled restart preserve the chat and provider connection.
+基于 WeKruit/Rakazo 整套原生前后端，交付可以在网页直接使用的招聘 Agent 产品。
+Main 负责需求、协调和人工审批；Sourcer 负责检索、证据和反馈后的续搜。
+用户在正常聊天和 Crew 中连续工作，切换对话或重启后仍能回到同一任务及原卡继续。
 
-Use Supabase Postgres for Rakazo's own account, chat, task, card, and memory state.
-Retain native authentication; integration with existing Supabase Auth/CRM is later
-work. Initialize a dedicated PostgreSQL database in the existing Supabase cluster,
-with the user's database-creation approval: the existing CRM already has an
-incompatible `threads` table. This keeps upstream migrations and runtime unchanged.
-The additional database is managed through Postgres, not Supabase Dashboard/Auth/
-PostgREST. Do not create a newly paid project or overwrite existing CRM objects.
+先使用现有 Codex subscription OAuth。当前执行器是 Rakazo 原生 Pi，不将它描述为
+Codex CLI 的原生 session。模型连接、逐 bot 配置、memory、skills、tools、MCP、
+subagent 和文件存储沿用 Rakazo 已有边界，后续更换模型或运行服务不重建产品。
 
-The user accepts keeping a sandbox to reproduce the native product first. Defer
-the optional-computer refactor. Use an already-supported cloud provider, initially
-E2B Hobby if usable credit is verified, with the native Team Computer shared by
-Main and Sourcer. Retain native provisioning, workspace persistence, and idle
-sleep. Browser work is not part of the initial acceptance. Verify actual resource
-allocation, pause/resume, and credit/spending controls before starting compute;
-do not infer that a free plan makes usage free or upgrade to a paid subscription.
+## 交付顺序
 
-Modal runs the original Web/API/worker/Pi with deployment configuration. Keep a
-small persistent volume for native file artifacts; task, chat, memory, and OAuth
-credentials remain in Postgres, with encryption keys in server-side secrets.
-No Docker on the user's Mac, new subscriptions, or unapproved paid usage. Check
-the existing Modal and sandbox accounts' usable credit and spending limits before deployment.
+1. **网页原生能力**：Main/Sourcer 写入持久记忆，在另一对话召回；Crew 连续沟通；
+   选择题、自定义 input、一次性审批实际执行。重启发生在卡片等待时，原卡和原任务保留，
+   回答后继续，重复提交不产生第二次效果。
+2. **现有工作迁移**：导出当前 Grok Bot 账号全部可访问的 bot、群聊及其对话，保留原始
+   结构、分页完整性和来源清单；盘点实际使用的服务、技能、文件、任务及例行工作。
+   原始归档与迁入的记忆/配置分开；历史消息及批准规则不构成新的执行授权。
+3. **招聘闭环至 P6**：通过原生 tools/API/MCP/连接器接入实际服务，完成
+   Autumn → 候选证据 → 人工反馈 → 同一外部任务续搜 → 现有 Supabase CRM →
+   精确内容审批 → Instantly 发送确认 → 回复后停止跟进。依据服务清单接入邮件、日历、
+   Drive、enrichment 等实际依赖，区分已配置、已连接和业务验收通过。
 
-Do not connect or migrate Autumn, Instantly, Gmail, Calendar, enrichment, CRM,
-Slack, or business scripts in this iteration. Existing pilot connections remain
-untouched. Script/file-based sourcing and deduplication reported in the current
-workflow are later business migration requirements, not completed capabilities.
+## 固定边界
 
-## Recruiting journey through P6
+- 网页优先；Slack 不在当前实现范围。不再建设另一套 gateway、agent harness 或测试产品。
+- 复用当前 Modal 部署、Supabase 中独立的 rakazo 数据库、Modal Volume 与原生 E2B sandbox。
+  数据库保存状态，Volume 保存原生文件和检查点；不在 Mac 运行 Docker 或重复启动旧服务。
+- 不改变现有 CRM 结构；CRM 身份及组织权限独立验证，数据库连接成功不代表已接通。
+- 使用现有凭证和授权额度；新增付费、订阅或超出既有验证预算时停止。
+- 外发、付费检索或 enrichment、活动启用、OAuth 扩权依据具体操作及授权办理；
+  不批量重放 Grok 历史动作，不迁入历史永久自动批准规则。
+- 缺失能力先检查上游实现和已有依赖，只修改被全链路验证确认的缺口。
 
-Main owns scope, calibration, and human approvals. Sourcer returns candidate
-sources and evidence. Native Crew, choices/custom input, once-only approvals, and
-memory must work before the recruitment loop is accepted. Then connect Autumn,
-continue the same sourcing task after feedback, persist evidence and decisions in
-the existing authorized CRM, and send through Instantly only after exact-payload
-approval. A confirmed reply stops follow-ups. Verify permissions, session switching,
-and restart without duplicate effects. Slack is outside scope.
+## 已验证基线
 
-Use existing integration and memory boundaries. Retain upstream authentication for
-the initial deployment; a PostgreSQL connection does not establish integration with
-existing Supabase Auth or CRM permissions. Do not claim either without acceptance.
+以下来自此前云端验收，尚不代表本轮新增验收通过：
 
-## Current evidence
+- 原生网页登录、官方 Codex OAuth 与保存后的真实模型回复已完成。
+- Main/Sourcer 已在原生 Crew 连续回复并共享上下文。
+- 服务容器替换后，原 group/thread、成员、模型连接、消息及 run 保持不变；
+  后续自然聊天继续成功，未重复执行之前的 run。
+- 独立数据库完成原始迁移，原 CRM 表结构指纹保持不变。
+- 云端历史加载超时已在共享调用处修复，本轮继续复用该部署。
 
-The earlier local pilot connected Codex OAuth, obtained one real model reply, and
-installed Instantly's accounts/campaigns/emails GET tools through the native API
-source and encrypted secret store. Each Instantly operation returned HTTP 200.
-No email was sent or campaign modified. These are pilot results, not cloud proof.
+本轮另已通过网页验证 Main/Sourcer 各自记忆写入、不同对话召回及共享记忆读取；
+独立数据库中三份原生 memory 文档及其来源 run/thread 已核对。Main→Sourcer
+原生 Crew 委派也有真实记录。原生选择卡已跨实际容器替换恢复，回答后同一 run
+完成并恰好增加一条继续回复。当前账号全部 11 个可访问 Bot/群聊、11 个 session
+的 7,074 条原生 transcript entries 已完成私有归档；附件文件仍仅保留引用。
 
-The approved independent database is created and owned by its runtime role. The
-temporary administrator SET ROLE grant was revoked. All 102 unchanged upstream
-migrations completed, with no unfinished migration; Graphile's schema is present.
-The original CRM `threads` schema fingerprint matches the pre-deployment baseline.
-The free IPv4 Session pooler reaches the correct database and supports LISTEN.
-The original custom-schema investigation was withdrawn; no database adapter patch ships.
+**尚未验收**：切换对话空白修复、自定义 input 与一次性审批、归档工作内容迁入、
+招聘服务云端接入与 P3–P6 业务闭环。普通聊天上下文记住信息不算长期记忆证明。
 
-Modal SDK 1.6.1 is installed in a project-specific environment. The user authorizes
-Modal use after the existing workspace's exhausted free credit was reported; this
-validation was proposed with a $5 cap. A dedicated App, Secret and Volume are
-deployed. Native readiness is HTTP 200 with Pi, E2B, Graphile, Postgres realtime,
-and the encrypted secret store; Web production build and API typecheck pass.
-The replacement E2B key passes official read-only authentication; its account
-shows $100 credit and no payment method. The native shared E2B computer has run.
-Owner signup and official Codex device OAuth completed on the deployed website.
-Main and Sourcer replied in a native Crew using the saved OpenAI Codex connection.
-Sourcer retained the first turn's role, requirements and marker while incorporating
-the next turn's feedback. After container replacement, group/thread/member/model
-connection IDs and the original four message hashes and two runs were unchanged.
-A new natural chat message then received a correct context-based Main reply,
-leaving six messages and three completed runs with no duplicated earlier run.
+## 完成标准
 
-The frontend's shared two-second thread snapshot deadline cancelled valid remote
-history responses. Raising that deadline to cover the API's transaction/pool
-budget restored history after refresh; this is the only product source change
-in the current deployment. Native sandbox file pause/resume, a separate logout/
-login test, exhaustive cards and P0–P6 business acceptance remain open.
+每阶段留下直接测试的 HTTPS 页面、实际网页截图和可核查回执。
+聊天、记忆、原卡、任务和外部服务 ID 相互对应；实现存在、离线检查通过、真实业务
+验收通过分别记录。只有 PLAN.md 中 P0–P6 退出条件全部满足，Goal 才完成。

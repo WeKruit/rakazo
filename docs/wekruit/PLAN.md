@@ -1,210 +1,165 @@
-# Recruiting delivery plan
+# WeKruit Recruiting Implementation Plan
 
-Deliver the [approved goal](GOAL.md) through P6. Each phase must leave a runnable
-check and a reviewable result; stop dependent work when its contract is unproved.
-The local pilot is not cloud deployment or live recruitment-loop proof.
+> **For agentic workers:** Use superpowers:executing-plans to execute this plan inline, task by task. Do not dispatch additional agents without authorization.
 
-## Active iteration — deploy login and continuous Crew chat
+**Goal:** 在现有 Rakazo 网页交付 Main/Sourcer 原生协作、可恢复交互与记忆，迁入现有招聘工作，完成 [GOAL.md](GOAL.md) 的 P0–P6。
 
-Current user direction: Modal hosting, Supabase Postgres, and a native cloud
-sandbox to preserve the upstream executor and avoid the optional-computer refactor.
-Do not build recruiting integrations in this iteration. Keep the later P0–P6
-journey below as deferred scope, not as acceptance for this first delivery.
+**Architecture:** 沿用 Rakazo Web → authenticated API → Postgres/worker → Pi → native tools/connectors → persisted result → Web。Supabase 独立数据库保存状态，原生 memory provider 保存记忆，Modal Volume 保存文件/检查点，E2B 提供原生执行环境。集成进入已有边界，不另建 harness。
 
-### Work order
+**Tech Stack:** Rakazo/TypeScript、Pi、官方 Codex OAuth、Supabase Postgres、Graphile、Modal、E2B。
 
-1. Resolve deployment prerequisites first: use the project-specific Modal SDK,
-   verify its authenticated workspace and spending controls, and obtain approval
-   to create a dedicated database in the existing Supabase cluster. Its runtime
-   role owns this new database; no CRM permissions or tables change. Upstream's
-   historical migrations cannot initialize a custom schema unchanged. Do not run
-   migrations over the CRM or create a newly paid Supabase project.
-2. Configure an existing native cloud sandbox adapter; prefer E2B Hobby if its
-   account has usable credit. Verify the real template size and tier restrictions.
-   Do not implement a Modal sandbox adapter or change the executor to bypass its
-   computer dependency. Do not upgrade a subscription or create billable usage.
-3. Use native Team Computer for Main/Sourcer and retain the existing 10-minute
-   idle sleep. Verify actual pause and resume with persisted workspace data; include
-   running idle time in costs. Browser workflows and recruiting scripts are not
-   acceptance for this iteration. Do not add business credentials to the computer.
-4. Deploy original Web/API/worker/Pi via a Modal deployment entrypoint, with one
-   initial service instance and shared native file storage. Preserve necessary
-   backend activity without relying on an open browser. Store keys as server-side
-   secrets and verify volume persistence across container replacement. Do not
-   publish a webpage as functional if its agent requests still cannot execute.
-5. Complete native owner sign-in and Codex OAuth on the deployed product, create
-   Main/Sourcer and a native Crew, and run a short real two-round conversation.
-   Verify refresh, logout/login, and one controlled restart. No business API calls,
-   outreach, business scripts, or out-of-pocket charges are part of this check.
+---
 
-### Deliverables and acceptance
+## 当前进度
 
-- A working HTTPS URL with native sign-in; no local-only or bypass login page.
-- A saved Codex subscription connection and an actual streamed model response.
-- Main and Sourcer visible in Crew; normal @ selection and two-round context work.
-- Reload/reopen/restart retain the same persisted chat, messages, and connection;
-  reopening does not resend an earlier message.
-- One native Team Computer provisions, pauses when idle, and resumes without
-  losing a small public test file; no browser workflow is required.
-- Screenshots of login, model connection, and Crew replies, plus exact deployed
-  revision and a short pass/fail receipt. Reuse existing checks for any changed boundary;
-  no additional testing harness is introduced.
+| 阶段 | 当前证据 | 退出条件 |
+| --- | --- | --- |
+| P0 部署与状态 | 云端登录、独立数据库、Crew、聊天重启延续已验证；文件暂停/恢复未验证 | 同一部署可用，状态及测试文件重启后可读，原 CRM 不变 |
+| P1 模型连接 | 官方 Codex OAuth 与真实回复已验证 | 保存连接跨重启继续，明确过期/重连行为 |
+| P2 原生产品与迁移准备 | Crew 上下文、Main/Sourcer 及共享记忆跨对话召回已验证；选择原卡跨重启继续、全对话归档已验证；自定义 input/审批及迁移未验收 | 记忆、原卡恢复通过；Grok 完整归档与服务清单可核查 |
+| P3 Autumn | 尚未云端验收 | 创建、证据、反馈、原任务续搜回执一致 |
+| P4 现有 CRM | 独立数据库不等于现有身份/CRM 接入 | 用户/组织鉴权、获准写入读回及越权拒绝通过 |
+| P5 审批发送 | 旧本机 pilot 的 Instantly GET 成功；云端未验收 | 精确内容一次性审批、发送确认和回复停止通过 |
+| P6 全链路 | 未验收 | 完成任务 9 的权限、恢复、业务与无重复效果检查 |
 
-Native memory and interaction implementations remain in use; exhaustive card,
-permission, memory, and recruiting-loop acceptance comes after this baseline.
-The cloud Web/API/worker deployment is running and native readiness is HTTP 200.
-All 102 original migrations completed in the independent database, Graphile's
-schema exists, and the CRM table schema fingerprint is unchanged. The actual
-owner has signed up, connected Codex through official device OAuth, and used
-Main/Sourcer in a native Crew. Normal @ selection, two-turn shared context,
-refresh, actual service-container replacement and a subsequent natural-chat
-reply have passed. Original group/thread/connection/message/run identities were
-preserved; the final continuation added exactly one user message, one reply and
-one completed run. A shared two-second frontend snapshot deadline was corrected
-because it cancelled valid remote history reads before they completed.
-File pause/resume, separate logout/login, and the later full card/business tests
-remain pending; earlier local pilot results are separate evidence.
+先执行任务 1–3，不等待其他服务 OAuth；再执行 4–8，最后验收 9。
+只有实际验收后才能勾选。文档更新不要求重新部署，仅部署产品修复或配置变更。
 
-### Persistence and capacity, checked 2026-10-15
+## 当前优先修复：切换对话空白
 
-Use Supabase Postgres for native users, sessions, conversations, runs, cards, and
-MarkdownMemoryStore documents. Keep encrypted connection records in the database
-and their encryption key in server secrets. Mount the native DATA_DIR on a Modal
-Volume for artifacts and LocalAgentHomeStore checkpoints; the sandbox filesystem
-is a working copy, not the only durable copy. Reuse upstream checkpoint/export
-and restore paths. Verify the Volume commit and replacement-container restore;
-an abrupt sandbox loss can lose changes since its last successful checkpoint.
-Do not add an S3 adapter or move recruiting state in this baseline iteration.
+网页已复现：只有一份全局 snapshot，切换目标后先显示空消息，远程查询完成前无加载状态。
+在现有 Shell 中保留本次登录最近 20 个 thread 的原生 snapshot，原生 refresh/SSE 继续更新；
+首次加载使用既有 Shimmer 显示 Loading messages…。账号/space 切换沿原生完整重载清空。
+复用现有 Web E2E 验证延迟 snapshot 返回时仍展示该会话记录且不泄露另一个会话。
+状态：已复现，修复待部署/真实网页验收。
 
-The existing Grok Crew was directly asked about timing, size, and restart needs.
-All six members replied. Their timings and daily counts are estimates, not an
-independent benchmark: sourcing 30–90 minutes per batch, enrichment 10–40 minutes,
-Instantly and scheduling 1–3 minutes per ordinary task, executive assistant 3–10
-minutes, and chief-of-staff daily check 5–10 minutes. They report predominantly
-remote-service waiting and restartable scripts using saved job IDs and caches.
-This does not prove our deployed runtime safely resumes those business effects.
+## 任务 1：Main/Sourcer 持久记忆及跨对话召回
 
-They report measured shared workspace size 1.9 GB, including role folders 98 MB
-and enrichment cache 21 MB. These overlap and must not be added as independent
-totals. Start with a 5–10 GB planning allowance for workspace and checkpoint
-staging; actual capacity and costs must be observed on our deployment.
+**复用：** packages/memory/src/index.ts、packages/adapters/src/memory-context.ts、
+packages/adapters/src/executor.ts、apps/api/src/router.ts；原生 remember、save_shared_memory 与 memory 页面。
 
-The upstream executor provisions a computer even for plain chat, so billable
-runtime includes model/API waits and the trailing idle interval. Frequent routines
-may keep one shared computer running most of the workday. Do not budget only CPU
-seconds, multiply one shared computer by bot count, or promise $5–10/month for the
-entire existing Crew. E2B Hobby's one-hour continuous runtime limit needs checking
-before later 90-minute sourcing runs; do not upgrade a subscription to bypass it.
+- [x] 当前网页让 Main 调用 remember，写入一条新测试偏好和唯一标记；记录 memory revision、sourceRunId、sourceThreadId。
+- [x] 切到另一 Main 对话，仅询问偏好，不在问题泄露标记；核对真实回复及持久记录。
+- [x] Sourcer 独立写入并跨对话召回，核对原生 bot scope；多用户隔离由任务 7/9 验收。
+- [x] Main 用 save_shared_memory 写一份新共享招聘约束，Sourcer 在另一对话召回；只覆盖专用测试文档。
+- [ ] 截图展示记忆页面和另一对话的召回，记录 bot/private 与 shared 的可见范围。
 
-## Reuse before adding code
+**通过：** 真实工具调用、持久 revision、不同对话的回复对应；共享事实通过共享 scope 读取。
 
-| Responsibility | Existing boundary |
-| --- | --- |
-| Web, API, worker | [web](../../apps/web), [router](../../apps/api/src/router.ts), [worker](../../apps/worker/src/index.ts) |
-| Agent runtime and connections | [Pi](../../packages/adapters/src/pi-runtime.ts), [OAuth](../../packages/adapters/src/pi-oauth.ts), [model providers](../../packages/core/src/model-providers.ts) |
-| Tool/result and event contracts | [contracts](../../packages/contracts/src), [adapter interfaces](../../packages/adapter-kit/src/interfaces.ts) |
-| Crew and bot handoffs | [groups](../../packages/db/src/groups.ts), [handoffs](../../packages/adapters/src/group-handoff.ts) |
-| Choices, approval, secrets | [Pi choice checks](../../packages/adapters/src/pi-runtime-choice.test.ts), [approval](../../packages/core/src/action-approval.ts), [secret boundary](../bot-secrets.md) |
-| Memory and continued context | [memory](../../packages/memory/src/index.ts), [history](../../packages/db/src/history-retrieval.ts) |
-| Routines and jobs | [schedule tools](../../packages/adapters/src/schedule-tools.ts), [routine runs](../../apps/api/src/routine-runs.ts), [jobs](../../packages/adapter-kit/src/background-jobs.ts) |
+## 任务 2：选择、自定义 input 与原卡续跑
 
-Read each real call chain from Web intent through API authorization, persisted
-state, worker/Pi/tool execution, and the rendered result before changing it.
-Autumn, Supabase, and Instantly adapters reuse those boundaries and protected
-server-side connections. No second harness, gateway, or parallel credential store.
+**复用：** packages/adapters/src/pi-runtime.ts、apps/web/src/components/AskCard.tsx、
+apps/api/src/router.ts、packages/db/src 的现有卡片/任务持久化。
 
-## Deferred roadmap after the baseline: A — Codex, Crew, cards, and memory (P0–P2)
+- [x] 正常招聘讨论中生成原生 ask_user 的 2–4 选项，记录 card/message/run/thread ID 及待答状态。
+- [x] 保持卡片未答，受控重启当前服务；重开网页核对同一原卡和消息，无重发任务。
+- [x] 点击原卡选项，核对保存的 action、真实继续回复及原任务关联；截图待答和继续结果。
+- [ ] 同一业务上下文生成第二张原生卡，使用原生自定义答案输入框填写新值，验证返回对应原卡并继续。
+- [ ] 检查取消、重复回答与失效卡：取消无业务效果，重复回答不重新执行，旧卡不能回答新任务。
 
-**P0: Modal baseline above.** Complete the current iteration before expanding
-recruitment scope. Retain upstream Web/API/worker/Pi, with only the authorized
-deployment scoping changes. Retain the native cloud sandbox. No local Docker or new paid
-resources; no integration work in place of a working login and chat webpage.
+**通过：** 按钮选择及自定义答案都走原生 answer 路径，等待卡跨重启继续，无人工改库或伪造卡。
 
-**P1: existing Codex OAuth.** Connect the available subscription through the saved
-model-connection flow. Verify a real Pi response, saved connection reuse after a
-restart, and the existing expiry/reconnect behavior. Protect tokens throughout.
-Additional models/providers are later work; native Codex App-session preservation
-is not required to adopt Rakazo.
+## 任务 3：一次性审批、文件与恢复
 
-**P2: Main/Sourcer Crew.** Use a real group and existing bot handoffs. Main owns
-scope, human calibration, and approval; Sourcer returns evidence to that task.
-Verify choices with custom text, cancellation, and once-only approval using real
-persisted cards. Duplicate, stale, or wrong-user submissions cannot run effects.
-Explicitly save a preference, open a fresh chat, recall it, and verify that an
-unrelated user or organization cannot retrieve it. A transcript mention is not
-proof of a saved memory. No fake cards or automatic approval.
+**复用：** packages/core/src/action-approval.ts、packages/adapters/src/approval-effect.ts、
+packages/adapters/src/executor.ts、infra/modal/app.py 及原生 sandbox/checkpoint。
 
-Exit: a live Codex-driven Crew completes these interactions and retains them
-after restart; deterministic checks cover each state/authorization boundary.
+- [ ] 读取实际审批分类，选无外部收件人、无付费效果的原生操作；普通 shell/write_file 成功不算审批卡证明。
+- [ ] 展示完整操作与目标，保持审批待定，记录 card/action/effect/run ID 后重启服务。
+- [ ] 回同一原卡仅批准一次，确认真实效果一次；拒绝无效果，不写永久批准规则。
+- [ ] 验证重复点击、重试及再次重启不产生第二个效果；上游缺陷复现后只修改共享调用链。
+- [ ] 原生文件工具写入公开测试文件，经 sandbox 暂停/恢复及服务替换后读回一致内容，核对持久副本位置。
+- [ ] 保存原卡、继续结果截图及回执；不执行历史邮件或活动来制造审批测试。
 
-## B — Autumn task, evidence, and calibration (P3)
+**通过：** 待审批原卡恢复，授权绑定相同 payload，操作一次，文件经原生恢复路径读回。
 
-**P3: one persisted sourcing task.** Trace the actual Autumn integration contract
-before implementation. Create one authorized external task; persist its external
-identifier with local task, user, organization, bot, and chat references. Read
-service status and candidate evidence with provenance, separating facts,
-inferences, and missing evidence. No inferred success from model narration.
+## 任务 4：完整导出 Grok Bot 与服务盘点
 
-Record the human's calibration as task feedback, submit it through Autumn's
-supported continuation operation, and resume the **same external task**. A changed
-external task identifier fails acceptance. Reopening a chat or restarting a worker
-must retain the task, feedback, and provider receipts without duplicate creation.
-Honor actual provider capability; a missing continuation contract blocks P3.
+**产物：** 私有原始对话归档、完整性 manifest、脱敏能力/服务清单。原始聊天、个人资料、
+凭证、附件和私有路径不进入公开仓库。
 
-Exit: live creation, evidence retrieval, human feedback, and continuation receipts
-show the same external task; offline checks cover scoping and duplicate requests.
+- [x] 优先使用原生导出，枚举全部可访问 bot、群聊及各 session，包含可访问的归档对话。
+- [x] 导出每个 session 全部分页，保留消息顺序、交互结构、来源 ID、时间、附件引用；区分已下载附件与仅引用。
+- [x] manifest 记录会话/消息数量、分页结束、校验值和逐项失败；未完成分页不得声称全部导出。
+- [ ] 若需超出旧单 bot 探测范围使用加密会话，先展示只读范围、官方 host、私有存储及不输出凭证的方式，再取得新增范围授权。
+- [ ] 对照连接设置与真实调用，列出服务、使用 bot、操作、认证、文件/脚本依赖和 routines；区分配置证据与 agent 自述。
+- [ ] 历史待审批/已批准动作只归档，不执行，不迁入永久自动批准规则。
 
-## C — Existing CRM, approved outreach, and routines (P4–P5)
+当前导出证据：原生只读接口枚举 11 个可访问 Bot/群聊、11 个 session，7,074 条 transcript entries；
+分页全部完成、无失败，会话文件校验通过。115 条附件消息保留引用，尚未下载附件文件。
+UI 已盘点 9 项已安装插件，8 项显示 Connected，1 项待认证；工作方法/脚本依赖仍需从归档核对。
 
-**P4: existing Supabase CRM.** Trace existing Auth, organization membership, CRM
-schema, and RLS before adding the connection. Bind Rakazo's acting user to the
-existing identity and selected organization on the backend; verify membership on
-every operation. Use that user's authorized context for CRM reads/writes, without
-service-role bypass or a replacement identity/CRM. Store evidence and review
-decisions in existing semantics; do not silently change stage. Confirm a permitted
-write by reading it back, and prove cross-user/cross-organization denial.
+**通过：** 所有可访问 session 有完整或明确失败记录；服务清单可追溯到真实配置/调用。
 
-**P5: draft → approval → confirmed send.** Bind the draft to task, candidate,
-recipient, sender, and content. Show an explicit once-only approval for that exact
-payload; edits invalidate it. Only the backend executes the approved Instantly
-request. Persist the existing outbox/job state and provider receipt so retries or
-restarts cannot create a second send. Provider acceptance/queueing is not a sent
-confirmation; do not label an email sent without the corresponding service proof.
+## 任务 5：通过原生配置迁入招聘能力
 
-Use existing routines to resume the scoped task and schedule authorized follow-ups.
-Ingest replies, persist the stop decision, cancel pending follow-ups, and recheck
-reply/approval state immediately before dispatch. A reply observed before dispatch
-prevents sending even when a job was already queued or retried. Do not promise to
-recall a request already accepted by the provider.
+**复用：** packages/adapters/src/builtin-tools.ts、packages/adapters/src/installed-connectors.ts、
+packages/adapters/src/mcp-connector.ts、apps/api/src/integration-catalog.ts 及原生 bot settings/memory/skills/secrets。
 
-Exit: live CRM readback and an explicitly approved, service-confirmed Instantly
-send; deterministic checks cover stale approvals, retries, and reply/send races.
+- [ ] 从归档提取 Main/Sourcer 职责、招聘约束、去重及工作方法，使用原生配置、memory/skills 导入并记录来源。
+- [ ] 原始聊天保留为归档；只有原生导入/召回验收的内容标记为可用记忆，不将全部聊天拼成系统提示词。
+- [ ] 服务清单映射原生 connector、已安装 API 或 MCP；已有能力直接配置，不加第二套注册系统。
+- [ ] 在服务端原生加密 secret store 配置已提供的 Autumn、Instantly、LeadMagic、ContactOut、FullEnrich 等实际所需凭证。
+- [ ] Gmail、Calendar、Drive 及其他实际发现的服务用原生 OAuth；新权限展示真实授权页，不复制 Grok OAuth token。
+- [ ] 各服务分别记录配置存在、认证通过、agent 调用通过、业务闭环通过；先验证不消费检索/enrichment 额度的操作。
+- [ ] 原生 routines 依据迁入后的任务及权限重建；不激活旧待发送队列或自动触发历史动作。
 
-## D — Complete permissions and recovery acceptance (P6)
+**通过：** 服务在网页原生设置可见，agent 使用获准工具，凭证隔离，工作能调用迁入规则和记忆。
 
-**P6: exercise the full journey through P5.** Verify the following through the
-product boundary, preserving task identity and authoritative external receipts:
+## 任务 6：Autumn → 证据 → 反馈 → 原任务续搜（P3）
 
-| Acceptance | Required result |
-| --- | --- |
-| Read/switch permissions | User/org/bot/chat switches cannot reuse another scope's task, memory, credential, CRM row, or approval. |
-| Cards | Choice/custom text survive reopening; cancel/deny have no effect; once approval cannot be replayed. |
-| Restart | API/worker restart and a fresh chat restore task, memory, feedback, pending card, outbox, and routine state. |
-| Reply stop | A confirmed reply stops scheduled and queued follow-ups; retry/restart cannot restart outreach. |
-| Full live run | Codex → Crew → Autumn evidence → human calibration → same task → existing CRM → draft → approval → confirmed send → reply stop. |
+**复用：** 原生 API/tools、任务/run 存储、Crew、choice/input 与实际 Autumn 官方接口。
 
-Track multi-human groups, multiple chats per bot, and explicit per-bot credential
-bindings as open capability gaps. Test authorized sharing and denied access before
-claiming each supported; do not treat the initial single-user Crew as proof.
+- [ ] 核对创建、查询、反馈/继续接口及费用，确认既有账户授权覆盖实际检索，否则停在待授权步骤。
+- [ ] 约定招聘需求后创建一个外部任务，保存外部 ID 与用户/组织/bot/thread 的对应关系。
+- [ ] 在原 thread 展示真实候选来源与证据，区分事实、推断、缺口及模型评分。
+- [ ] 原生 choice/input 收集反馈，通过支持的继续操作续搜；外部任务 ID 保持不变。
+- [ ] 持久化任务状态、去重与反馈；重试/重启不重复创建或重复消耗相同请求。
 
-## Evidence and completion
+**通过：** 创建、证据、反馈及同一外部任务续搜有真实回执；缺失继续接口不能换新任务冒充。
 
-Follow [agent verification](../agent-verification.md): implementation/test coverage
-and live provider proof are separate columns in each phase's acceptance record.
-Use existing deterministic suites with synthetic inputs; add one minimal runnable
-regression check per new non-trivial contract. No new testing harness is needed.
-Record phase, revision, scenario, expected/observed result, and redacted receipt
-reference. Keep raw receipts, credentials, account identifiers, machine paths, and
-candidate/contact data outside public repository content. Never cite private chats.
-Mark unavailable live steps **not run**. Finish only when P0–P6 gates are evidenced;
-passing tests alone cannot establish sourcing quality, delivery, or provider access.
+## 任务 7：现有 Supabase 身份、组织与 CRM（P4）
+
+**复用：** 原生认证/连接鉴权、现有 CRM 身份、成员、RLS 及业务接口。
+
+- [ ] 只读核对现有身份、组织和 CRM schema；独立 rakazo 数据库不代表现有 Auth/CRM 已连接。
+- [ ] 后端绑定实际操作人及组织，每次调用核验权限；不通过通用 service-role 工具绕过权限。
+- [ ] 将获准候选来源、证据、反馈和内部备注写入现有 CRM 后读回，不无意改变候选阶段。
+- [ ] 验证其他用户/组织不能读任务、记忆、credential、CRM 行或批准卡。
+
+**通过：** 获准写入/读回一致，越权实际拒绝，现有 CRM 结构与规则保持不变。
+
+## 任务 8：Instantly 审批发送与回复停止（P5）
+
+**复用：** 原生 API connector、draft/approval、持久 jobs/routines 与已安装 Instantly 操作。
+
+- [ ] 草稿绑定 task、candidate、sender、recipient、正文和附件；修改使旧批准失效。
+- [ ] 确定真实收件人及用途并获准后，仅一次批准并发送；没有批准保持草稿。
+- [ ] 保存服务回执，区分排队、接收与发送确认；网络不确定先查询服务状态，不盲目重发。
+- [ ] 回复后持久化停止状态并取消跟进；发送前复查回复/审批，重启不恢复已停止的跟进。
+- [ ] 单独验证附件和服务 API 限制，不用浏览器绕过缺失接口或新增权限。
+
+**通过：** 一次精确批准对应一次确认发送；重复点击、重试、重启及已确认回复不引发第二次外发。
+
+## 任务 9：P6 全链路验收与交付
+
+- [ ] 网页实际完成 Main → Sourcer → Autumn → 证据 → 反馈 → 原任务续搜 → CRM → 草稿 → 审批 → 发送确认 → 回复停止。
+- [ ] 在等待选择、等待 input、等待审批、外部任务运行、发送状态未知各状态恢复，核对原任务/原卡及回执。
+- [ ] 验证对话切换、多用户/组织权限、独立 bot 配置、取消/拒绝/失效卡及重复提交；单账号 Crew 不代表多人权限通过。
+- [ ] bot/subagent 使用原生连接配置，换模型不重建聊天、memory、服务连接；不同 runtime 内部 session 不承诺相同。
+- [ ] 更新 revision、测试网址、截图、阶段状态和剩余缺口；业务证据完整才标记 P6 完成。
+
+## 检查与修复规则
+
+先用网页复现，再沿 Web intent → API 鉴权 → 持久状态 → worker/Pi/tool → 服务回执 → Web 定位。
+原生能力通过就不改代码；确认缺陷才在共享函数修复，并留下一个捕获该缺陷的最小检查。
+不运行 Docker/Electron 测试、不启动旧本机服务，不为文档变更执行整个测试集。
+
+实际修改对应边界时，从仓库根目录选择已有检查：
+
+    pnpm exec vitest run packages/memory/src/index.test.ts packages/adapters/src/memory-context.test.ts
+    pnpm exec vitest run packages/adapters/src/pi-runtime-choice.test.ts apps/web/src/components/AskCard.test.tsx
+    pnpm exec vitest run packages/core/src/action-approval.test.ts packages/adapters/src/approval-effect.test.ts packages/adapters/src/executor-approval-replay.test.ts
+
+预期为所选检查通过；离线结果不替代真实 Codex、数据库、原卡恢复与业务服务验收。
+私有回执记录 revision、场景、原生 ID、预期/实际及截图；公开仓库只放脱敏结论。
