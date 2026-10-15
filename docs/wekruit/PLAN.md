@@ -16,7 +16,7 @@
 | --- | --- | --- |
 | P0 部署与状态 | 云端登录、独立数据库、Crew、聊天重启延续已验证；文件暂停/恢复未验证 | 同一部署可用，状态及测试文件重启后可读，原 CRM 不变 |
 | P1 模型连接 | 官方 Codex OAuth 与真实回复已验证 | 保存连接跨重启继续，明确过期/重连行为 |
-| P2 原生产品与迁移准备 | Crew 上下文、Main/Sourcer 及共享记忆跨对话召回已验证；选择原卡跨重启继续、全对话归档已验证；自定义 input 原卡跨部署继续已验证；审批及迁移未验收 | 记忆、原卡恢复通过；Grok 完整归档与服务清单可核查 |
+| P2 原生产品与迁移准备 | Crew 上下文、Main/Sourcer 及共享记忆跨对话召回已验证；选择原卡跨重启继续、全对话归档已验证；自定义 input/一次性审批原卡跨重启继续、角色与五份 skills 已验证；其余卡片和迁移待验收 | 记忆、原卡恢复通过；Grok 完整归档与服务清单可核查 |
 | P3 Autumn | 官方 MCP 原生传输与现有认证只读通过；尚未云端验收 | 创建、证据、反馈、原任务续搜回执一致 |
 | P4 现有 CRM | 独立数据库不等于现有身份/CRM 接入 | 用户/组织鉴权、获准写入读回及越权拒绝通过 |
 | P5 审批发送 | 官方 MCP Bearer 及三个只读 list 调用通过；云端发送未验收 | 精确内容一次性审批、发送确认和回复停止通过 |
@@ -42,7 +42,7 @@ packages/adapters/src/executor.ts、apps/api/src/router.ts；原生 remember、s
 - [x] 切到另一 Main 对话，仅询问偏好，不在问题泄露标记；核对真实回复及持久记录。
 - [x] Sourcer 独立写入并跨对话召回，核对原生 bot scope；多用户隔离由任务 7/9 验收。
 - [x] Main 用 save_shared_memory 写一份新共享招聘约束，Sourcer 在另一对话召回；只覆盖专用测试文档。
-- [ ] 截图展示记忆页面和另一对话的召回，记录 bot/private 与 shared 的可见范围。
+- [x] 已保存原生共享记忆页面与跨对话召回截图；bot/user scope 由持久记录核对。跨人/组织隔离仍由任务 7/9 单独验收。
 
 **通过：** 真实工具调用、持久 revision、不同对话的回复对应；共享事实通过共享 scope 读取。
 
@@ -59,17 +59,21 @@ apps/api/src/router.ts、packages/db/src 的现有卡片/任务持久化。
 
 **通过：** 按钮选择及自定义答案都走原生 answer 路径，等待卡跨重启继续，无人工改库或伪造卡。
 
+**明确缺口：** 当前 MCP 两条路径未声明/注册 elicitation/create；MessageBlock 与 answer 只有字符串交互，尚无多字段 schema。原生 OAuth 连接流程已经存在，不能替代远端 URL elicitation。补接时复用 SDK 类型/handler 与原生持久状态；远端必须支持 session replay/tasks，才能证明重启恢复同一请求，不能重新发起有副作用 tools/call。
+
 ## 任务 3：一次性审批、文件与恢复
 
 **复用：** packages/core/src/action-approval.ts、packages/adapters/src/approval-effect.ts、
 packages/adapters/src/executor.ts、infra/modal/app.py 及原生 sandbox/checkpoint。
 
-- [ ] 读取实际审批分类，选无外部收件人、无付费效果的原生操作；普通 shell/write_file 成功不算审批卡证明。
-- [ ] 展示完整操作与目标，保持审批待定，记录 card/action/effect/run ID 后重启服务。
-- [ ] 回同一原卡仅批准一次，确认真实效果一次；拒绝无效果，不写永久批准规则。
+- [x] 使用原生 save_shared_memory 的精确 require_approval 规则，对新共享评审文档做无外发/费用的真实审批；普通 shell/write_file 不充当审批证明。
+- [x] 已修共享审批生成函数，展示真实参数并保护凭证；待定时记录原卡/effect/run 与参数 hash 后重启，全部保持一致。
+- [x] 原卡仅 Allow once 后，同一 effect/run 完成，新共享文档仅 revision 1、仅一条继续回复；另已实测 Deny 无写入，未创建永久允许规则。
 - [ ] 验证重复点击、重试及再次重启不产生第二个效果；上游缺陷复现后只修改共享调用链。
 - [ ] 原生文件工具写入公开测试文件，经 sandbox 暂停/恢复及服务替换后读回一致内容，核对持久副本位置。
-- [ ] 保存原卡、继续结果截图及回执；不执行历史邮件或活动来制造审批测试。
+- [x] 已保存待审批、重启后原卡、Allow once 后继续和原生记忆页面截图及数据库回执，未执行历史外发。
+
+当前文件检查：原生 write_file/read_file 成功，尚未通过暂停恢复。E2B 的预期非零闲置探测被 SDK CommandExitError 丢弃，导致保持 running；最小共享 provider 修复与 73 个相关检查已通过，待部署和真实暂停读回。
 
 **通过：** 待审批原卡恢复，授权绑定相同 payload，操作一次，文件经原生恢复路径读回。
 
@@ -81,13 +85,13 @@ packages/adapters/src/executor.ts、infra/modal/app.py 及原生 sandbox/checkpo
 - [x] 优先使用原生导出，枚举全部可访问 bot、群聊及各 session，包含可访问的归档对话。
 - [x] 导出每个 session 全部分页，保留消息顺序、交互结构、来源 ID、时间、附件引用；区分已下载附件与仅引用。
 - [x] manifest 记录会话/消息数量、分页结束、校验值和逐项失败；未完成分页不得声称全部导出。
-- [ ] 若需超出旧单 bot 探测范围使用加密会话，先展示只读范围、官方 host、私有存储及不输出凭证的方式，再取得新增范围授权。
-- [ ] 对照连接设置与真实调用，列出服务、使用 bot、操作、认证、文件/脚本依赖和 routines；区分配置证据与 agent 自述。
-- [ ] 历史待审批/已批准动作只归档，不执行，不迁入永久自动批准规则。
+- [x] 本次全量导出沿获准的只读原生接口，内存解密、仅官方 host、私有存储；无凭证输出/落盘，无旧任务执行。
+- [x] 已将原生连接设置与对话来源映射为服务/角色/认证/文件脚本/routine 清单，明确配置证据、调用报告及未迁入状态的差别。
+- [x] 历史动作仅归档；迁移包不包含永久自动批准规则或激活旧队列。
 
 当前导出证据：原生只读接口枚举 11 个可访问 Bot/群聊、11 个 session，7,074 条 transcript entries；
 分页全部完成、无失败，会话文件校验通过。177 条附件引用（115 条 Bot 附件、62 条用户附件）已保留，尚未下载附件文件。
-UI 已盘点 9 项已安装插件，8 项显示 Connected，1 项待认证；工作方法/脚本依赖仍需从归档核对。
+UI 已盘点 9 项已安装插件，8 项显示 Connected，1 项待认证；方法/脚本依赖已按来源核对。两份关键 CSV 已只读下载并校验；其余附件、脚本及真实 provider task/checkpoint 仍待迁入。
 
 **通过：** 所有可访问 session 有完整或明确失败记录；服务清单可追溯到真实配置/调用。
 
@@ -96,7 +100,7 @@ UI 已盘点 9 项已安装插件，8 项显示 Connected，1 项待认证；工
 **复用：** packages/adapters/src/builtin-tools.ts、packages/adapters/src/installed-connectors.ts、
 packages/adapters/src/mcp-connector.ts、apps/api/src/integration-catalog.ts 及原生 bot settings/memory/skills/secrets。
 
-- [ ] 从归档提取 Main/Sourcer 职责、招聘约束、去重及工作方法，使用原生配置、memory/skills 导入并记录来源。
+- [x] Main/Sourcer 职责与五份招聘方法已通过原生设置/skill_create 保存并读回核对，附归档来源；另三份历史记忆草稿尚未合并，不冒充已导入。
 - [ ] 原始聊天保留为归档；只有原生导入/召回验收的内容标记为可用记忆，不将全部聊天拼成系统提示词。
 - [ ] 服务清单映射原生 connector、已安装 API 或 MCP；已有能力直接配置，不加第二套注册系统。
 - [ ] 在服务端原生加密 secret store 配置已提供的 Autumn、Instantly、LeadMagic、ContactOut、FullEnrich 等实际所需凭证。
