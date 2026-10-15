@@ -138,6 +138,7 @@ import { useNavigate, useParams, useSearchParams } from "react-router-dom";
 import { ArtifactFileCard } from "../components/ArtifactFileCard";
 import { AskCard } from "../components/AskCard";
 import { ActiveBotGlyph, CollaborationMarker } from "../components/ai/CollaborationMarker";
+import { Shimmer } from "../components/ai/primitives";
 import { CloudAgentCard } from "../components/CloudAgentCard";
 import { ComputerMaintenanceActions } from "../components/ComputerMaintenanceActions";
 import {
@@ -523,6 +524,9 @@ export function ShellPage() {
   const computerRef = useRef<ComputerStatus | null>(null);
   const threadRefreshEpoch = useRef(0);
   const groupRefreshEpoch = useRef(0);
+  // ponytail: keep at most 20 threads in this authenticated shell; switching
+  // account/space reloads it. Native refresh/SSE remains authoritative.
+  const threadSnapshotCache = useRef(new Map<string, ThreadSnapshot>());
   const botsRefreshEpoch = useRef(0);
   const botsRefreshApplied = useRef(0);
   const archivedBotsRefreshEpoch = useRef(0);
@@ -557,6 +561,13 @@ export function ShellPage() {
   }
 
   function commitSnapshot(next: ThreadSnapshot | null) {
+    if (next) {
+      const key = next.groupId ? `group:${next.groupId}` : `bot:${next.botId}`;
+      const cache = threadSnapshotCache.current;
+      cache.delete(key);
+      cache.set(key, next);
+      if (cache.size > 20) cache.delete(cache.keys().next().value!);
+    }
     snapshotRef.current = next;
     setSnapshot(withLiveStreamingProgress(next, streamResponsesRef.current));
   }
@@ -1794,13 +1805,16 @@ export function ShellPage() {
       });
     }
   }, [active?.id, groupId, inGroup, routines, routinesBotId, searchParams, setSearchParams]);
-  const activeSnapshot = inGroup
-    ? snapshot?.groupId === groupId
-      ? snapshot
-      : null
-    : snapshot?.botId === active?.id
-      ? snapshot
-      : null;
+  const activeSnapshot =
+    (inGroup
+      ? snapshot?.groupId === groupId
+        ? snapshot
+        : null
+      : snapshot?.botId === active?.id
+        ? snapshot
+        : null) ??
+    threadSnapshotCache.current.get(inGroup ? `group:${groupId}` : `bot:${active?.id}`) ??
+    null;
   // Keep the armed reply even when its parent leaves the loaded page: the
   // server resolves a paged-out target and degrades a deleted one to a plain
   // reply instead of failing the send.
@@ -1981,21 +1995,28 @@ export function ShellPage() {
   useLayoutEffect(() => {
     const pin = pinnedAroundRef.current;
     if (inGroup) {
-      if (!groupId || !snapshot || snapshot.groupId !== groupId) return;
-      if (initiallyScrolledThread.current === snapshot.threadId) return;
-      if (expandedHistoryThread.current === snapshot.threadId) return;
+      if (!groupId || !activeSnapshot || activeSnapshot.groupId !== groupId) return;
+      if (initiallyScrolledThread.current === activeSnapshot.threadId) return;
+      if (expandedHistoryThread.current === activeSnapshot.threadId) return;
       if (pin?.groupId === groupId) return;
     } else {
-      if (!active || !snapshot || snapshot.botId !== active.id) return;
-      if (initiallyScrolledThread.current === snapshot.threadId) return;
-      if (expandedHistoryThread.current === snapshot.threadId) return;
+      if (!active || !activeSnapshot || activeSnapshot.botId !== active.id) return;
+      if (initiallyScrolledThread.current === activeSnapshot.threadId) return;
+      if (expandedHistoryThread.current === activeSnapshot.threadId) return;
       if (pin?.botId === active.id) return;
     }
     const element = messageScroll.current;
     if (!element) return;
     element.scrollTop = element.scrollHeight;
-    initiallyScrolledThread.current = snapshot.threadId;
-  }, [active, groupId, inGroup, snapshot?.botId, snapshot?.groupId, snapshot?.threadId]);
+    initiallyScrolledThread.current = activeSnapshot.threadId;
+  }, [
+    active,
+    groupId,
+    inGroup,
+    activeSnapshot?.botId,
+    activeSnapshot?.groupId,
+    activeSnapshot?.threadId,
+  ]);
 
   const openBot = useCallback((id: string) => navigate(`/app/${id}`), [navigate]);
   const loadOlder = useCallback(() => loadOlderMessagesRef.current(), []);
@@ -3670,6 +3691,12 @@ export function ShellPage() {
               <Plus size={16} aria-hidden="true" />
               <Trans>Create new Bot</Trans>
             </Button>
+          </div>
+        ) : !activeSnapshot ? (
+          <div role="status" className="grid flex-1 place-items-center text-muted-foreground">
+            <Shimmer>
+              <Trans>Loading messages…</Trans>
+            </Shimmer>
           </div>
         ) : (
           <Transcript

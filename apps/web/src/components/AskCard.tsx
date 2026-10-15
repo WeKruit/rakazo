@@ -132,7 +132,7 @@ export function AskCard({
         <div className="mt-3.5 text-[13.5px] font-medium text-muted-foreground">
           <Trans>No longer active</Trans>
         </div>
-      ) : askActions?.length ? (
+      ) : askActions?.length && !editing ? (
         <div className="mt-3.5 space-y-1.5">
           {askActions.map((action) => (
             <Button
@@ -151,6 +151,11 @@ export function AskCard({
               )}
             </Button>
           ))}
+          {!approvalActions && !secretInput ? (
+            <Button variant="outline" disabled={submitting} onClick={() => setEditing(true)}>
+              <Trans>Other answer</Trans>
+            </Button>
+          ) : null}
         </div>
       ) : secretInput ? (
         <form

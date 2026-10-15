@@ -1,5 +1,7 @@
-import { expect, type Page, test } from "@playwright/test";
+import type { Page, Route } from "@playwright/test";
+import { expect, test } from "@playwright/test";
 import {
+  activeBotId,
   captureScreenshot,
   completeOnboarding,
   createNamedBot,
@@ -11,6 +13,57 @@ import {
 async function createBot(page: Page, name: string) {
   return createNamedBot(page, name);
 }
+
+test("loaded group history stays visible while a return refresh waits", async ({
+  page,
+}, testInfo) => {
+  await signup(page, `history-${Date.now()}@rakazo.test`, "password12", "History E2E");
+  await completeOnboarding(page);
+  const mainId = activeBotId(page);
+  const sourcerId = await createBot(page, "Sourcer");
+  const group = await rpc<{ id: string }>(page, "groups/create", {
+    name: "History team",
+    botIds: [mainId, sourcerId],
+  });
+  await rpc(page, "threads/send", { groupId: group.id, text: "Keep this recruiting context" });
+  let gate = Promise.withResolvers<void>();
+  const holdSnapshot = async (route: Route) => {
+    if (route.request().postDataJSON()?.json?.groupId === group.id) await gate.promise;
+    await route.continue();
+  };
+  await page.route("**/rpc/threads/get", holdSnapshot);
+  try {
+    await page.goto(`/app/g/${group.id}`);
+    await expect(page.getByRole("status")).toHaveText("Loading messages…");
+    await captureScreenshot(page, testInfo, "history-loading");
+    gate.resolve();
+    await expect(page.getByTestId("transcript")).toContainText("Keep this recruiting context");
+    await page.unroute("**/rpc/threads/get", holdSnapshot);
+
+    await page
+      .locator("aside")
+      .first()
+      .getByRole("button", { name: /^Sourcer / })
+      .click();
+    await expect(page.getByTestId("transcript")).toBeVisible();
+    await expect(page.getByTestId("transcript")).not.toContainText("Keep this recruiting context");
+
+    gate = Promise.withResolvers<void>();
+    await page.route("**/rpc/threads/get", holdSnapshot);
+    await page
+      .locator("aside")
+      .first()
+      .getByRole("button", { name: /^History team / })
+      .click();
+    await expect(page.getByTestId("transcript")).toContainText("Keep this recruiting context", {
+      timeout: 1_000,
+    });
+    await captureScreenshot(page, testInfo, "history-return-with-refresh-pending");
+  } finally {
+    gate.resolve();
+    await page.unroute("**/rpc/threads/get", holdSnapshot);
+  }
+});
 
 test("create group from + and see two bots in one transcript", async ({ page }, testInfo) => {
   const stamp = Date.now();

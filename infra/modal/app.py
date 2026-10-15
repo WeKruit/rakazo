@@ -40,6 +40,7 @@ image = (
     .run_commands(
         "pnpm install --frozen-lockfile",
         "pnpm --filter @rakazo/db generate",
+        "pnpm --filter @rakazo/web check",
         "RAKAZO_ALLOW_DEV_SECRETS=1 pnpm --filter @rakazo/web build",
     )
     .run_commands(
