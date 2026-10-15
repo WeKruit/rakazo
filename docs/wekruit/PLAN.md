@@ -2,18 +2,24 @@
 
 Deliver the [approved goal](GOAL.md) through P6. Each phase must leave a runnable
 check and a reviewable result; stop dependent work when its contract is unproved.
-The current local baseline is not a connected model or live recruitment proof.
+The local pilot is not cloud deployment or live recruitment-loop proof.
 
 ## Current delivery checkpoint — 2026-10-15
 
-Deploy the existing Web product first for user review. Main and Sourcer are in a
-real Crew group. Additional business implementation is on hold for that review.
-Instantly uses the existing API installation and encrypted secret store, with
-three read-only tools: `/api/v2/accounts`, `/api/v2/campaigns`, `/api/v2/emails`.
-All three returned HTTP 200 through Rakazo's installed connector. Agent invocation
-and sending remain untested; P5 still requires the exact-payload approval/send
-journey. Do not add a second sender or gateway to demonstrate a connection.
-Codex OAuth remains incomplete, so P1–P6 are not accepted.
+User direction: unchanged upstream executable code, Supabase database, cloud
+hosting. Retire the custom local no-computer path; do not extend it. Preserve the
+local pilot's credentials and messages while preparing the supported deployment.
+
+Codex OAuth completed in the pilot and one actual model response was saved.
+Instantly's native encrypted API source verified three GET tools (accounts,
+campaigns, emails), all HTTP 200. No sending acceptance is claimed.
+
+The existing Supabase database is reachable, but the supplied role cannot create
+tables and the CRM already owns an incompatible `threads` table. Do not apply the
+upstream public-schema migrations over it. Use an appropriate existing database
+or resolve the target before migration. No newly paid project may be created.
+The current Supabase project does not have Compute access; inspect the existing
+cloud account for a usable host and native computer provider before deployment.
 
 ## Reuse before adding code
 
@@ -34,11 +40,13 @@ server-side connections. No second harness, gateway, or parallel credential stor
 
 ## A — Baseline, Codex, Crew, cards, and memory (P0–P2)
 
-**P0: reproducible baseline.** Preserve the Apache-2.0 upstream revision `7d5e64c`,
-boot Web/API/worker against an isolated local database, and record exact checks.
-Current observation: local infrastructure at `http://127.0.0.1:5187`, model not
-connected, selected 192 tests passing. Do not promote this to provider acceptance.
-Computer use stays disabled; no Docker, purchases, or new subscriptions.
+**P0: unchanged upstream cloud deployment.** Preserve upstream revision `7d5e64c`
+for all executable source. Use native Web/API/worker/Pi with Supabase PostgreSQL,
+a supported cloud computer provider, and durable application storage. Verify
+migration privileges and table-name compatibility before writing. Reuse existing
+authorized resources; no local Docker, new purchases, or new subscriptions.
+Deliver the actual HTTPS product URL and record the running revision. Keep local
+pilot evidence distinct from acceptance of this cloud deployment.
 
 **P1: existing Codex OAuth.** Connect the available subscription through the saved
 model-connection flow. Verify a real Pi response, saved connection reuse after a

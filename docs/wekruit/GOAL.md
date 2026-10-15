@@ -1,64 +1,44 @@
 # WeKruit recruiting workspace
 
-Give a recruiter one working workspace to direct Main and Sourcer, review candidate
-evidence, calibrate an ongoing search, and approve outreach that is confirmed by
-the sending service. Adopt Rakazo's Web, API, worker, and Pi runtime as a whole.
+Run the upstream Rakazo product as a whole: Web, API, worker, Pi runtime, native
+Crew, memory, tools, and interaction cards. Use Supabase Postgres and cloud
+compute. Configure upstream features before writing application code.
 
-## Approved journey
+## Immediate delivery
 
-1. Connect the existing Codex subscription through Rakazo's OAuth connection.
-2. Open a Crew group with Main and Sourcer. Main owns the task and human decisions;
-   Sourcer gathers evidence and continues the scoped search.
-3. Answer real choice cards, including custom text, and approve one specific action
-   once. Explicitly save a preference and recall it from a fresh chat.
-4. Start an actual Autumn sourcing task, inspect candidate evidence, and provide
-   human calibration. Continue the **same external task**, retaining its identifier,
-   feedback, status, and receipts across chats and restarts.
-5. Resolve the existing Supabase user and organization, then read and write the
-   existing CRM under its Auth/RLS permissions. Persist candidate evidence and the
-   human decision without changing the candidate's stage implicitly.
-6. Review an outreach draft, explicitly approve its exact recipient and content,
-   send through Instantly, and retain the service's confirmation. A reply stops
-   subsequent follow-ups, including queued or retried work.
-7. Run authorized routines through the same persisted task, approvals, permissions,
-   and send boundaries. Complete the acceptance checks through P6 in [PLAN](PLAN.md).
+1. Preserve upstream executable source at revision `7d5e64c` without local
+   no-computer changes or an extra harness. The WeKruit fork may add this plan.
+2. Reuse authorized Supabase and cloud resources. Check database permissions and
+   schema collisions before applying upstream migrations. Never replace CRM tables.
+3. Deploy the unchanged product with its supported computer provider and durable
+   application storage. No Docker installation on the user's Mac. Stop before
+   creating any newly billable resource or starting a new subscription.
+4. Use the existing Codex subscription through native OAuth. Deliver the actual
+   cloud webpage with a real model reply and screenshots; infrastructure startup
+   alone does not establish agent acceptance.
 
-## Product boundaries
+## Recruiting journey through P6
 
-- Reuse Rakazo's contracts, providers, tools, groups, memory, and scheduler. Add
-  service adapters at existing boundaries; no second harness or redundant gateway.
-- Existing Codex OAuth is first. More model/provider connections come later;
-  preserving a native Codex App session is not an adoption prerequisite.
-- No Slack, Docker, purchases, or new subscriptions in this scope. Computer use is
-  disabled. Live service work uses already available, authorized accounts.
-- Keep credentials in protected backend storage. Models and browser-visible state
-  receive references and permitted results, never stored secrets. Use the existing
-  Supabase identity and organization; a service credential cannot replace user RLS.
-- Multi-human groups, multiple chats per bot, and explicit per-bot credential
-  bindings remain product gaps to verify and resolve before claiming those flows.
-  One successful Crew session does not establish those capabilities.
+Main owns scope, calibration, and human approvals. Sourcer returns candidate
+sources and evidence. Native Crew, choices/custom input, once-only approvals, and
+memory must work before the recruitment loop is accepted. Then connect Autumn,
+continue the same sourcing task after feedback, persist evidence and decisions in
+the existing authorized CRM, and send through Instantly only after exact-payload
+approval. A confirmed reply stops follow-ups. Verify permissions, session switching,
+and restart without duplicate effects. Slack is outside scope.
 
-## Current checkpoint — 2026-10-15
+Use existing integration and memory boundaries. Retain upstream authentication for
+the initial deployment; a PostgreSQL connection does not establish integration with
+existing Supabase Auth or CRM permissions. Do not claim either without acceptance.
 
-The immediate delivery is the existing Rakazo Web product for review. Main,
-Sourcer, and their Recruiting Crew are created. Defer further business schemas
-and connector code until that review; retain the journey through P6 below.
-Instantly is required alongside Autumn and the existing CRM. Its native API
-installation has an encrypted credential and three GET tools (accounts,
-campaigns, emails), each verified through the installed connector with HTTP 200.
-This is read connectivity, not agent-chat or approved-send acceptance. No campaign
-was edited or activated, no email was sent, and no purchase was made.
+## Current evidence
 
-Codex OAuth is not complete: the official authorization page returned an error.
-No connected-model, Crew conversation, memory, card, or P6 result is claimed.
+The earlier local pilot connected Codex OAuth, obtained one real model reply, and
+installed Instantly's accounts/campaigns/emails GET tools through the native API
+source and encrypted secret store. Each Instantly operation returned HTTP 200.
+No email was sent or campaign modified. These are pilot results, not cloud proof.
 
-## What is established
-
-The Apache-2.0 fork starts from upstream revision `7d5e64c`. Local infrastructure
-is available at `http://127.0.0.1:5187` with an isolated local database; no model is
-connected. A selected set of 192 tests passed. These observations establish a
-baseline, not a live recruiting result or completion of the approved journey.
-
-Completion requires both deterministic implementation checks and live, redacted
-provider receipts. Missing credentials or unavailable providers mean **not run**.
-Keep real candidate/contact data and all private evidence out of public docs.
+Supabase is reachable with the provided restricted database role. That role cannot
+create tables, and the existing CRM `threads` table conflicts with upstream's
+schema. Cloud database initialization has not run. The project's Compute page
+reports access is not enabled. Cloud deployment and P0–P6 acceptance remain open.
