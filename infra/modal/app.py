@@ -42,6 +42,13 @@ image = (
         "pnpm --filter @rakazo/db generate",
         "RAKAZO_ALLOW_DEV_SECRETS=1 pnpm --filter @rakazo/web build",
     )
+    .run_commands(
+        "python -c \"import urllib.request; urllib.request.urlretrieve("
+        "'https://supabase-downloads.s3-ap-southeast-1.amazonaws.com/prod/ssl/prod-ca-2021.crt',"
+        "'/usr/local/share/ca-certificates/supabase.crt')\"",
+        "update-ca-certificates",
+    )
+    .env({"NODE_EXTRA_CA_CERTS": "/usr/local/share/ca-certificates/supabase.crt"})
 )
 
 
