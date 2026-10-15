@@ -14,7 +14,7 @@ reopening, and a controlled restart preserve the chat and provider connection.
 Use Supabase Postgres for Rakazo's own account, chat, task, card, and memory state.
 Retain native authentication; integration with existing Supabase Auth/CRM is later
 work. Initialize a dedicated PostgreSQL database in the existing Supabase cluster,
-subject to the pending database-creation approval: the existing CRM already has an
+with the user's database-creation approval: the existing CRM already has an
 incompatible `threads` table. This keeps upstream migrations and runtime unchanged.
 The additional database is managed through Postgres, not Supabase Dashboard/Auth/
 PostgREST. Do not create a newly paid project or overwrite existing CRM objects.
@@ -59,14 +59,21 @@ installed Instantly's accounts/campaigns/emails GET tools through the native API
 source and encrypted secret store. Each Instantly operation returned HTTP 200.
 No email was sent or campaign modified. These are pilot results, not cloud proof.
 
-Supabase is reachable with the provided restricted database role. That role cannot
-initialize the existing database; the CRM `threads` table conflicts with upstream.
-Custom-schema investigation also reproduced two historical migration blockers, so
-its runtime changes were withdrawn. A separate database creation is awaiting approval.
+The approved independent database is created and owned by its runtime role. The
+temporary administrator SET ROLE grant was revoked. All 102 unchanged upstream
+migrations completed, with no unfinished migration; Graphile's schema is present.
+The original CRM `threads` schema fingerprint matches the pre-deployment baseline.
+The free IPv4 Session pooler reaches the correct database and supports LISTEN.
+The original custom-schema investigation was withdrawn; no runtime patch ships.
 
 Modal SDK 1.6.1 is installed in a project-specific environment. The user authorizes
 Modal use after the existing workspace's exhausted free credit was reported; this
-validation was proposed with a $5 cap. A new dedicated App/Secret/Volume configuration
-is prepared. Web production build and API typecheck pass. The supplied sandbox key
-failed official E2B read-only authentication and needs replacement. No cloud app or
-sandbox has started; cloud login/Codex/Crew and P0–P6 acceptance remain open.
+validation was proposed with a $5 cap. A dedicated App, Secret and Volume are
+deployed. Native readiness is HTTP 200 with Pi, E2B, Graphile, Postgres realtime,
+and the encrypted secret store; Web production build and API typecheck pass.
+The replacement E2B key passes official read-only authentication; its account
+shows $100 credit and no payment method. No agent sandbox has started yet.
+The actual HTTPS signup page is open in Chrome, awaiting the owner's first
+password entry. Cloud owner login, Codex OAuth, Crew replies, file persistence,
+and controlled restart acceptance are still open. Do not equate readiness with
+an accepted agent conversation or P0–P6 completion.

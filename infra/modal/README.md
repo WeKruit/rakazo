@@ -15,6 +15,9 @@ provides account access and billing; unrelated applications are not modified.
   Upstream migrations expect `public`; do not run them over an existing CRM.
 - The image installs the public CA provided by Supabase's database settings and
   supplies it to Node. TLS verification stays enabled; no host trust settings change.
+- On Modal's IPv4 network, use Supabase's free Session pooler, with the qualified
+  role name and the dedicated database. Verify `current_database()` and `LISTEN`
+  before migrating; transaction pooling does not preserve the worker's sessions.
 - Keep the existing native authentication and encryption keys stable in a private
   dotenv file. Set `SIGNUP_ALLOWLIST` to the owner allowed to claim this deployment.
 - Supply `SANDBOX_PROVIDER=e2b` and a verified `E2B_API_KEY`. Confirm the sandbox

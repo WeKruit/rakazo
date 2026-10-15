@@ -52,7 +52,12 @@ journey below as deferred scope, not as acceptance for this first delivery.
 
 Native memory and interaction implementations remain in use; exhaustive card,
 permission, memory, and recruiting-loop acceptance comes after this baseline.
-Cloud deployment has not completed; prior local pilot results are separate evidence.
+The cloud Web/API/worker deployment is running and native readiness is HTTP 200.
+All 102 original migrations completed in the independent database, Graphile's
+schema exists, and the CRM table schema fingerprint is unchanged. The actual
+signup page awaits the owner's password entry. Codex OAuth, Crew conversation,
+file pause/resume, and restart acceptance remain pending; local pilot results
+are separate evidence.
 
 ### Persistence and capacity, checked 2026-10-15
 
