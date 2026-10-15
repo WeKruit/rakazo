@@ -3695,7 +3695,7 @@ export function ShellPage() {
         ) : !activeSnapshot ? (
           <div role="status" className="grid flex-1 place-items-center text-muted-foreground">
             <Shimmer>
-              <Trans>Loading messages…</Trans>
+              <Trans>Loading…</Trans>
             </Shimmer>
           </div>
         ) : (

@@ -34,7 +34,7 @@ test("loaded group history stays visible while a return refresh waits", async ({
   await page.route("**/rpc/threads/get", holdSnapshot);
   try {
     await page.goto(`/app/g/${group.id}`);
-    await expect(page.getByRole("status")).toHaveText("Loading messages…");
+    await expect(page.getByRole("status")).toHaveText("Loading…");
     await captureScreenshot(page, testInfo, "history-loading");
     gate.resolve();
     await expect(page.getByTestId("transcript")).toContainText("Keep this recruiting context");

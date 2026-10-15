@@ -153,7 +153,7 @@ export function AskCard({
           ))}
           {!approvalActions && !secretInput ? (
             <Button variant="outline" disabled={submitting} onClick={() => setEditing(true)}>
-              <Trans>Other answer</Trans>
+              <Trans>Type your answer</Trans>
             </Button>
           ) : null}
         </div>

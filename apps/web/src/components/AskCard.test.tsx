@@ -52,7 +52,7 @@ it("submits a custom answer on the original choice card", async () => {
   try {
     act(() => root.render(<AskCard block={block} canAnswer onAnswer={answer} />));
     const other = [...container.querySelectorAll("button")].find(
-      (button) => button.textContent === "Other answer",
+      (button) => button.textContent === "Type your answer",
     );
     expect(other).toBeDefined();
     act(() => other!.click());
