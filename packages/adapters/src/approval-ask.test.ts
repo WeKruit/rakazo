@@ -51,6 +51,25 @@ describe("buildApprovalAskBlock", () => {
     expect(block.detail).toContain("to: person@example.test");
   });
 
+  it("shows the actual arguments for native memory and nested MCP actions without exposing credentials", () => {
+    const block = buildApprovalAskBlock(
+      "effect-memory",
+      "save_shared_memory",
+      {
+        path: "recruiting/review-guidelines.md",
+        content: "Separate facts, inference and missing evidence.",
+        context: { task: "existing-task", apiKey: "private-key" },
+      },
+      [],
+    );
+    if (block.kind !== "ask") throw new Error("expected ask block");
+    expect(block.detail).toContain("path: recruiting/review-guidelines.md");
+    expect(block.detail).toContain("content: Separate facts, inference and missing evidence.");
+    expect(block.detail).toContain('"task": "existing-task"');
+    expect(block.detail).toContain("[redacted]");
+    expect(JSON.stringify(block)).not.toContain("private-key");
+  });
+
   it("uses a one-time create or cancel choice for a new security boundary", () => {
     const block = buildApprovalAskBlock(
       "effect-1",

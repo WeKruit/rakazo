@@ -9,6 +9,7 @@ import {
   CardContent,
   CardHeader,
   CardTitle,
+  Checkbox,
   Dialog,
   DialogClose,
   DialogContent,
@@ -22,6 +23,7 @@ import {
   Tabs,
   TabsList,
   TabsTrigger,
+  Textarea,
 } from "@rakazo/ui-web";
 import { Check, X } from "lucide-react";
 import { useEffect, useState } from "react";
@@ -57,6 +59,7 @@ export function McpServersOverlay({ onClose }: { onClose: () => void }) {
   const [args, setArgs] = useState("");
   const [error, setError] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
+  const [savingAccess, setSavingAccess] = useState(false);
   const [oauthPending, setOauthPending] = useState<string | null>(null);
 
   async function refresh() {
@@ -196,6 +199,8 @@ export function McpServersOverlay({ onClose }: { onClose: () => void }) {
   }
 
   async function toggleAssignment(server: McpServer, botId: string) {
+    if (saving || savingAccess) return;
+    setSavingAccess(true);
     setError(null);
     const current = botAssignments[botId] ?? [];
     const assigned = current.some((entry) => entry.serverId === server.id);
@@ -207,6 +212,36 @@ export function McpServersOverlay({ onClose }: { onClose: () => void }) {
       setBotAssignments((map) => ({ ...map, [botId]: updated }));
     } catch (err) {
       setError(errorText(err, t`Could not update agent access`));
+    } finally {
+      setSavingAccess(false);
+    }
+  }
+
+  async function saveToolAccess(serverId: string, botId: string, form: HTMLFormElement) {
+    if (saving || savingAccess) return;
+    const values = new FormData(form);
+    const current = botAssignments[botId] ?? [];
+    const allowedTools = [
+      ...new Set(
+        String(values.get("allowedTools") ?? "")
+          .split(/\r?\n/)
+          .map((tool) => tool.trim())
+          .filter(Boolean),
+      ),
+    ];
+    const access = { serverId, allowAllTools: values.has("allowAllTools"), allowedTools };
+    const assignments = current.some((entry) => entry.serverId === serverId)
+      ? current.map((entry) => (entry.serverId === serverId ? { ...entry, ...access } : entry))
+      : [...current, access];
+    setSavingAccess(true);
+    setError(null);
+    try {
+      const updated = await rpc.mcp.assignments.replace({ botId, assignments });
+      setBotAssignments((map) => ({ ...map, [botId]: updated }));
+    } catch (err) {
+      setError(errorText(err, t`Could not update agent access`));
+    } finally {
+      setSavingAccess(false);
     }
   }
 
@@ -408,7 +443,7 @@ export function McpServersOverlay({ onClose }: { onClose: () => void }) {
               <Button
                 type="button"
                 className="mt-5 w-full"
-                disabled={saving}
+                disabled={saving || savingAccess}
                 onClick={() => void addServer()}
               >
                 {saving ? <Trans>Adding…</Trans> : <Trans>Add server</Trans>}
@@ -462,6 +497,7 @@ export function McpServersOverlay({ onClose }: { onClose: () => void }) {
                                 size="xs"
                                 className="rounded-full"
                                 aria-pressed={assigned}
+                                disabled={saving || savingAccess}
                                 onClick={() => void toggleAssignment(server, bot.id)}
                               >
                                 {assigned ? <Check aria-hidden="true" /> : null}
@@ -470,6 +506,60 @@ export function McpServersOverlay({ onClose }: { onClose: () => void }) {
                             );
                           })}
                         </div>
+                        {bots.length > 0 ? (
+                          <details className="mt-3 text-sm">
+                            <summary className="cursor-pointer text-muted-foreground">
+                              <Trans>Tool access</Trans>
+                            </summary>
+                            {bots.map((bot) => {
+                              const assignment = (botAssignments[bot.id] ?? []).find(
+                                (entry) => entry.serverId === server.id,
+                              );
+                              return (
+                                <form
+                                  key={`${bot.id}-${Boolean(assignment)}`}
+                                  aria-label={`${server.name} · ${bot.name}`}
+                                  className="mt-3 space-y-2"
+                                  onSubmit={(event) => {
+                                    event.preventDefault();
+                                    void saveToolAccess(server.id, bot.id, event.currentTarget);
+                                  }}
+                                >
+                                  <div className="font-medium">{bot.name}</div>
+                                  <div className="flex items-center gap-2">
+                                    <Checkbox
+                                      id={`mcp-all-${server.id}-${bot.id}`}
+                                      name="allowAllTools"
+                                      defaultChecked={assignment?.allowAllTools ?? false}
+                                      disabled={saving || savingAccess}
+                                    />
+                                    <FieldLabel htmlFor={`mcp-all-${server.id}-${bot.id}`}>
+                                      <Trans>All tools</Trans>
+                                    </FieldLabel>
+                                  </div>
+                                  <FieldLabel htmlFor={`mcp-tools-${server.id}-${bot.id}`}>
+                                    <Trans>Allowed tools</Trans>
+                                  </FieldLabel>
+                                  <Textarea
+                                    id={`mcp-tools-${server.id}-${bot.id}`}
+                                    name="allowedTools"
+                                    defaultValue={(assignment?.allowedTools ?? []).join("\n")}
+                                    placeholder={t`One tool per line. Empty means no tools.`}
+                                    disabled={saving || savingAccess}
+                                  />
+                                  <Button
+                                    type="submit"
+                                    variant="outline"
+                                    size="sm"
+                                    disabled={saving || savingAccess}
+                                  >
+                                    <Trans>Save</Trans>
+                                  </Button>
+                                </form>
+                              );
+                            })}
+                          </details>
+                        ) : null}
                         <div className="mt-3 flex flex-wrap gap-2">
                           {server.transport !== "stdio" ? (
                             <>

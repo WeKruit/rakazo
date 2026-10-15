@@ -4856,3 +4856,19 @@ msgstr "Your name"
 #: src/pages/Welcome.tsx
 msgid "Your team of always-on agents<0/>that you can give real work to."
 msgstr "Your team of always-on agents<0/>that you can give real work to."
+
+#: src/pages/McpServersOverlay.tsx
+msgid "All tools"
+msgstr "All tools"
+
+#: src/pages/McpServersOverlay.tsx
+msgid "Allowed tools"
+msgstr "Allowed tools"
+
+#: src/pages/McpServersOverlay.tsx
+msgid "One tool per line. Empty means no tools."
+msgstr "One tool per line. Empty means no tools."
+
+#: src/pages/McpServersOverlay.tsx
+msgid "Tool access"
+msgstr "Tool access"

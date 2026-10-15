@@ -1,5 +1,6 @@
 import type { MessageBlock } from "@rakazo/contracts";
 import { redactSecrets } from "@rakazo/core";
+import { redactToolArgsForReview } from "./auto-review.js";
 
 const MAX_APPROVAL_SUMMARY_LENGTH = 500;
 const MAX_APPROVAL_DETAIL_LENGTH = 4_000;
@@ -12,7 +13,11 @@ export function buildApprovalAskBlock(
   options?: { reviewReason?: string },
 ): MessageBlock {
   const summary = describeApprovalAction(toolName, args);
-  const detail = formatApprovalDetail(toolName, args, options?.reviewReason);
+  const detail = formatApprovalDetail(
+    toolName,
+    redactToolArgsForReview(args, secrets),
+    options?.reviewReason,
+  );
   const safeDetail = detail ? redactSecrets(detail, secrets) : undefined;
   return {
     kind: "ask",
@@ -72,10 +77,11 @@ function formatApprovalDetail(
       "Bots, groups, chats, files, memory, and integrations in this space stay separate from other spaces.",
     );
   }
-  for (const key of ["collection", "title", "to", "subject", "amount", "body"]) {
-    const value = args[key];
-    if (value == null || value === "") continue;
-    lines.push(`${key}: ${String(value)}`);
+  for (const [key, value] of Object.entries(args)) {
+    if (value === undefined) continue;
+    lines.push(
+      `${key}: ${typeof value === "string" && value ? value : JSON.stringify(value, null, 2)}`,
+    );
   }
   if (lines.length === 0) return undefined;
   return lines.join("\n");
