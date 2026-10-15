@@ -3,7 +3,7 @@ import type { Actor, MessageBlock } from "@rakazo/contracts";
 import { callClientNonce } from "@rakazo/core";
 import type * as MessageQuoteModule from "@rakazo/core/message-quote";
 import type { PrismaClient } from "@rakazo/db";
-import { describe, expect, it, vi } from "vitest";
+import { describe, expect, it, onTestFinished, vi } from "vitest";
 import type { ThreadTarget } from "./thread-target.js";
 import {
   cancelSupersededQueuedRuns,
@@ -2978,7 +2978,10 @@ describe("sendThreadMessage", () => {
     expect(tx.message.create.mock.calls[0][0].data.replyQuote).toBeUndefined();
   });
 
-  it("persists the quote excerpt on a group send", async () => {
+  it("commits a directed group send beyond the default transaction deadline", async () => {
+    vi.useFakeTimers();
+    onTestFinished(() => vi.useRealTimers());
+    const completionOrder: string[] = [];
     let messageSeq = 0;
     let eventSeq = 0;
     const tx = {
@@ -3010,9 +3013,11 @@ describe("sendThreadMessage", () => {
       run: {
         findMany: vi.fn().mockResolvedValue([]),
         findUnique: vi.fn().mockResolvedValue({ status: "queued", startedAt: null }),
-        create: vi
-          .fn()
-          .mockResolvedValue({ id: "run-1", taskId: "task-1", botId: "bot-a", status: "queued" }),
+        create: vi.fn(async () => {
+          // Virtual elapsed DB work, not a claim about any one production query.
+          await new Promise((resolve) => setTimeout(resolve, 6_000));
+          return { id: "run-1", taskId: "task-1", botId: "bot-a", status: "queued" };
+        }),
       },
       task: { create: vi.fn().mockResolvedValue({ id: "task-1" }) },
       event: {
@@ -3033,7 +3038,29 @@ describe("sendThreadMessage", () => {
     };
     const prisma = {
       message: { findUnique: vi.fn().mockResolvedValue(null) },
-      $transaction: vi.fn(async (callback: (client: typeof tx) => unknown) => callback(tx)),
+      $transaction: vi.fn(
+        async (
+          callback: (client: typeof tx) => Promise<unknown>,
+          options?: { timeout?: number; maxWait?: number },
+        ) => {
+          let timer: ReturnType<typeof setTimeout> | undefined;
+          try {
+            const result = await Promise.race([
+              callback(tx),
+              new Promise((_, reject) => {
+                timer = setTimeout(
+                  () => reject(Object.assign(new Error("Transaction expired"), { code: "P2028" })),
+                  options?.timeout ?? 5_000,
+                );
+              }),
+            ]);
+            completionOrder.push("commit");
+            return result;
+          } finally {
+            clearTimeout(timer);
+          }
+        },
+      ),
     } as unknown as PrismaClient;
     const actor = { spaceId: "workspace-1", userId: "user-1" } as Actor;
     const target = {
@@ -3045,23 +3072,47 @@ describe("sendThreadMessage", () => {
       memberBotIds: ["bot-a", "bot-b"],
     } satisfies ThreadTarget;
 
-    const result = await sendThreadMessage(
+    const notify = vi.fn(async () => {
+      completionOrder.push("notify");
+    });
+    const enqueue = vi.fn(async () => {
+      completionOrder.push("enqueue");
+    });
+    const sending = sendThreadMessage(
       {
         prisma,
-        events: { notify: vi.fn().mockResolvedValue(undefined) } as never,
-        jobs: { enqueue: vi.fn().mockResolvedValue(undefined) } as never,
+        events: { notify } as never,
+        jobs: { enqueue } as never,
       },
       actor,
       target,
       {
         text: "why this?",
+        mentions: ["bot-a"],
         replyToMessageId: "parent",
         replyQuote: "just this span",
         clientNonce: "nonce-1",
       },
     );
 
-    expect(result).toMatchObject({ runId: "run-1", taskId: "task-1" });
+    expect(notify).not.toHaveBeenCalled();
+    expect(enqueue).not.toHaveBeenCalled();
+    const [result] = await Promise.all([sending, vi.advanceTimersByTimeAsync(6_000)]);
+
+    expect(result).toMatchObject({ runId: "run-1", taskId: "task-1", runIds: ["run-1"] });
+    expect(prisma.$transaction).toHaveBeenCalledExactlyOnceWith(expect.any(Function), {
+      timeout: 15_000,
+      maxWait: 5_000,
+    });
+    expect(tx.run.create).toHaveBeenCalledTimes(1);
+    expect(tx.run.create).toHaveBeenCalledWith({
+      data: expect.objectContaining({ botId: "bot-a" }),
+    });
+    expect(completionOrder).toEqual(["commit", "notify", "enqueue"]);
+    expect(notify).toHaveBeenCalledTimes(1);
+    expect(enqueue).toHaveBeenCalledExactlyOnceWith(
+      expect.objectContaining({ name: "run.continue", payload: { runId: "run-1" } }),
+    );
     expect(tx.message.create).toHaveBeenCalledWith({
       data: expect.objectContaining({
         replyToMessageId: "parent",
