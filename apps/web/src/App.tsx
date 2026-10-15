@@ -17,10 +17,14 @@ import { LoadingState } from "./components/ai/primitives";
 import { ErrorBoundary } from "./components/ErrorBoundary";
 import { SubscriptionGate } from "./components/SubscriptionGate";
 import { authClient } from "./lib/auth";
-import { getTicketBoardEnabled, subscribeTicketBoardEnabled } from "./lib/bootstrap";
+import {
+  getTicketBoardEnabled,
+  invalidateInitialBootstrap,
+  subscribeTicketBoardEnabled,
+} from "./lib/bootstrap";
 import { markAfterPaint, markOnce } from "./lib/performance";
 import { getRemoteImagesEnabled, subscribeRemoteImages } from "./lib/remote-images-preference";
-import { rpc } from "./lib/rpc";
+import { rpc, selectedSpaceId, subscribeSpaceSelection } from "./lib/rpc";
 import {
   holdUnreachableGate,
   sessionGate,
@@ -97,6 +101,14 @@ function SessionApp() {
     () => false,
   );
   const session = authClient.useSession();
+  const spaceId = useSyncExternalStore(subscribeSpaceSelection, selectedSpaceId, () => null);
+  const identity = JSON.stringify([session.data?.user.id ?? null, spaceId]);
+  const previousIdentity = useRef(identity);
+  if (previousIdentity.current !== identity) {
+    previousIdentity.current = identity;
+    // Retire the prior identity's preload before a new route can consume it.
+    invalidateInitialBootstrap();
+  }
   const gate = sessionGate(session);
   const [holdingUnreachable, setHoldingUnreachable] = useState(false);
   const nextHolding = holdUnreachableGate(gate, holdingUnreachable);
@@ -128,7 +140,7 @@ function SessionApp() {
   return (
     <div className="h-full" data-rakazo-app-state="ready">
       <Suspense fallback={<div className="h-full bg-background" />}>
-        <Routes>
+        <Routes key={identity}>
           <Route path="/" element={user ? <Navigate to="/app" replace /> : <WelcomePage />} />
           <Route
             path="/sign-in"

@@ -60,9 +60,14 @@ afterEach(() => vi.unstubAllGlobals());
 
 it("assigns exact tools without an all-tools grant and keeps other servers and failed edits intact", async () => {
   vi.stubGlobal("IS_REACT_ACT_ENVIRONMENT", true);
+  let channel!: { onmessage?: (event: { data: { type: string } }) => void };
   vi.stubGlobal(
     "BroadcastChannel",
     class {
+      constructor() {
+        channel = this;
+      }
+      onmessage?: (event: { data: { type: string } }) => void;
       close() {}
     },
   );
@@ -173,6 +178,19 @@ it("assigns exact tools without an all-tools grant and keeps other servers and f
     expect(stored.find((entry) => entry.serverId === "server-b")).toMatchObject({
       allowAllTools: false,
       allowedTools: ["read_notes"],
+    });
+    stored = stored.map((entry) =>
+      entry.serverId === "server-a"
+        ? { ...entry, allowAllTools: false, allowedTools: ["get_task"] }
+        : entry,
+    );
+    await act(async () => channel.onmessage?.({ data: { type: "mcp-oauth-complete" } }));
+    expect(all().checked).toBe(false);
+    expect(tools().value).toBe("get_task");
+    await save();
+    expect(stored.find((entry) => entry.serverId === "server-a")).toMatchObject({
+      allowAllTools: false,
+      allowedTools: ["get_task"],
     });
   } finally {
     await act(async () => root.unmount());

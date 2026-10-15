@@ -517,7 +517,7 @@ export function McpServersOverlay({ onClose }: { onClose: () => void }) {
                               );
                               return (
                                 <form
-                                  key={`${bot.id}-${Boolean(assignment)}`}
+                                  key={`${bot.id}-${assignment?.allowAllTools}-${JSON.stringify(assignment?.allowedTools)}`}
                                   aria-label={`${server.name} · ${bot.name}`}
                                   className="mt-3 space-y-2"
                                   onSubmit={(event) => {
