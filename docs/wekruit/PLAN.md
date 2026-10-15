@@ -1,6 +1,6 @@
 # WeKruit Recruiting Implementation Plan
 
-> **For agentic workers:** Use superpowers:executing-plans to execute this plan inline, task by task. Do not dispatch additional agents without authorization.
+> **For agentic workers:** Use superpowers:executing-plans to execute this plan inline, task by task. Independent work may run in parallel under the user's explicit authorization; keep file ownership separate and centralize deployment/acceptance.
 
 **Goal:** 在现有 Rakazo 网页交付 Main/Sourcer 原生协作、可恢复交互与记忆，迁入现有招聘工作，完成 [GOAL.md](GOAL.md) 的 P0–P6。
 
@@ -16,10 +16,10 @@
 | --- | --- | --- |
 | P0 部署与状态 | 云端登录、独立数据库、Crew、聊天重启延续已验证；文件暂停/恢复未验证 | 同一部署可用，状态及测试文件重启后可读，原 CRM 不变 |
 | P1 模型连接 | 官方 Codex OAuth 与真实回复已验证 | 保存连接跨重启继续，明确过期/重连行为 |
-| P2 原生产品与迁移准备 | Crew 上下文、Main/Sourcer 及共享记忆跨对话召回已验证；选择原卡跨重启继续、全对话归档已验证；自定义 input/审批及迁移未验收 | 记忆、原卡恢复通过；Grok 完整归档与服务清单可核查 |
-| P3 Autumn | 尚未云端验收 | 创建、证据、反馈、原任务续搜回执一致 |
+| P2 原生产品与迁移准备 | Crew 上下文、Main/Sourcer 及共享记忆跨对话召回已验证；选择原卡跨重启继续、全对话归档已验证；自定义 input 原卡跨部署继续已验证；审批及迁移未验收 | 记忆、原卡恢复通过；Grok 完整归档与服务清单可核查 |
+| P3 Autumn | 官方 MCP 原生传输与现有认证只读通过；尚未云端验收 | 创建、证据、反馈、原任务续搜回执一致 |
 | P4 现有 CRM | 独立数据库不等于现有身份/CRM 接入 | 用户/组织鉴权、获准写入读回及越权拒绝通过 |
-| P5 审批发送 | 旧本机 pilot 的 Instantly GET 成功；云端未验收 | 精确内容一次性审批、发送确认和回复停止通过 |
+| P5 审批发送 | 官方 MCP Bearer 及三个只读 list 调用通过；云端发送未验收 | 精确内容一次性审批、发送确认和回复停止通过 |
 | P6 全链路 | 未验收 | 完成任务 9 的权限、恢复、业务与无重复效果检查 |
 
 先执行任务 1–3，不等待其他服务 OAuth；再执行 4–8，最后验收 9。
@@ -29,9 +29,9 @@
 
 网页已复现：只有一份全局 snapshot，切换目标后先显示空消息，远程查询完成前无加载状态。
 在现有 Shell 中保留本次登录最近 20 个 thread 的原生 snapshot，原生 refresh/SSE 继续更新；
-首次加载使用既有 Shimmer 显示 Loading messages…。账号/space 切换沿原生完整重载清空。
+首次加载使用既有 Shimmer 显示 Loading…。账号/space 切换沿原生完整重载清空。
 复用现有 Web E2E 验证延迟 snapshot 返回时仍展示该会话记录且不泄露另一个会话。
-状态：已复现，修复待部署/真实网页验收。
+状态：已部署并在真实网页验证。首次打开显示 Loading…；已访问对话切回立即显示自己的历史，原生 refresh/SSE 继续更新。组件检查 10 项通过；延迟请求的现有 Web E2E 回归已添加，尚未执行，不作为已通过证据。
 
 ## 任务 1：Main/Sourcer 持久记忆及跨对话召回
 
@@ -54,7 +54,7 @@ apps/api/src/router.ts、packages/db/src 的现有卡片/任务持久化。
 - [x] 正常招聘讨论中生成原生 ask_user 的 2–4 选项，记录 card/message/run/thread ID 及待答状态。
 - [x] 保持卡片未答，受控重启当前服务；重开网页核对同一原卡和消息，无重发任务。
 - [x] 点击原卡选项，核对保存的 action、真实继续回复及原任务关联；截图待答和继续结果。
-- [ ] 同一业务上下文生成第二张原生卡，使用原生自定义答案输入框填写新值，验证返回对应原卡并继续。
+- [x] 同一业务上下文生成第二张原生卡，跨部署保留待答状态，使用原生自定义答案输入框填写新值并继续；原 8 个 run ID、16 条原消息保留，同一 waiting run 完成，仅增加 1 条继续回复。
 - [ ] 检查取消、重复回答与失效卡：取消无业务效果，重复回答不重新执行，旧卡不能回答新任务。
 
 **通过：** 按钮选择及自定义答案都走原生 answer 路径，等待卡跨重启继续，无人工改库或伪造卡。

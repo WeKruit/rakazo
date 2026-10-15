@@ -1,7 +1,7 @@
 import { t } from "@lingui/core/macro";
 import { Trans, useLingui } from "@lingui/react/macro";
 import type { ActionApprovalRule, ActionAutoReviewSettings } from "@rakazo/contracts";
-import { Button, Label, Switch } from "@rakazo/ui-web";
+import { Button, Input, Label, Switch } from "@rakazo/ui-web";
 import { useEffect, useId, useState } from "react";
 import { rpc } from "../lib/rpc";
 import { errorText } from "../lib/user-error";
@@ -28,10 +28,12 @@ function describeRule(rule: ActionApprovalRule): string {
 export function ApprovalRulesSettings() {
   const { t } = useLingui();
   const autoReviewId = useId();
+  const toolNameId = useId();
   const [rules, setRules] = useState<ActionApprovalRule[]>([]);
   const [autoReview, setAutoReview] = useState<ActionAutoReviewSettings | null>(null);
   const [loading, setLoading] = useState(true);
-  const [savingPreset, setSavingPreset] = useState<"email" | "purchase" | null>(null);
+  const [toolName, setToolName] = useState("");
+  const [savingRule, setSavingRule] = useState<string | null>(null);
   const [savingAutoReview, setSavingAutoReview] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -56,31 +58,33 @@ export function ApprovalRulesSettings() {
     void refresh();
   }, []);
 
-  async function setPreset(matchValue: "email" | "purchase") {
-    if (loading || savingPreset) return;
+  async function requireApproval(matchKind: "category" | "tool", value: string) {
+    const matchValue = value.trim();
+    if (loading || savingRule || !matchValue) return;
     if (
       rules.some(
         (rule) =>
           rule.effect === "require_approval" &&
-          rule.matchKind === "category" &&
-          rule.matchValue === matchValue,
+          rule.matchKind === matchKind &&
+          rule.matchValue.toLowerCase() === matchValue.toLowerCase(),
       )
     ) {
       return;
     }
-    setSavingPreset(matchValue);
+    setSavingRule(matchValue);
     setError(null);
     try {
       const saved = await rpc.approvalRules.set({
         effect: "require_approval",
-        matchKind: "category",
+        matchKind,
         matchValue,
       });
       setRules((current) => [...current, saved]);
+      if (matchKind === "tool") setToolName("");
     } catch (err) {
       setError(errorText(err, t`Could not save rule`));
     } finally {
-      setSavingPreset(null);
+      setSavingRule(null);
     }
   }
 
@@ -115,19 +119,53 @@ export function ApprovalRulesSettings() {
       <div className="mt-4 flex flex-col items-start gap-2">
         <Button
           variant="outline"
-          disabled={loading || savingPreset !== null}
-          onClick={() => void setPreset("email")}
+          disabled={loading || savingRule !== null}
+          onClick={() => void requireApproval("category", "email")}
         >
           <Trans>Ask before sending external email</Trans>
         </Button>
         <Button
           variant="outline"
-          disabled={loading || savingPreset !== null}
-          onClick={() => void setPreset("purchase")}
+          disabled={loading || savingRule !== null}
+          onClick={() => void requireApproval("category", "purchase")}
         >
           <Trans>Ask before purchases</Trans>
         </Button>
       </div>
+      <details className="mt-4 text-sm">
+        <summary className="cursor-pointer text-foreground/75">
+          <Trans>Ask before a specific tool</Trans>
+        </summary>
+        <form
+          className="mt-3 space-y-2"
+          onSubmit={(event) => {
+            event.preventDefault();
+            void requireApproval("tool", toolName);
+          }}
+        >
+          <Label htmlFor={toolNameId}>
+            <Trans>Tool name</Trans>
+          </Label>
+          <div className="flex gap-2">
+            <Input
+              id={toolNameId}
+              aria-label={t`Tool name`}
+              value={toolName}
+              onChange={(event) => setToolName(event.target.value)}
+              placeholder="mcp__service__tool"
+              maxLength={200}
+              disabled={loading || savingRule !== null}
+            />
+            <Button
+              type="submit"
+              variant="outline"
+              disabled={loading || savingRule !== null || !toolName.trim()}
+            >
+              <Trans>Ask first</Trans>
+            </Button>
+          </div>
+        </form>
+      </details>
       <div className="mt-5 flex items-start gap-3">
         <Switch
           id={autoReviewId}

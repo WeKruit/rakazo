@@ -578,6 +578,10 @@ msgid "Ask before {0} connector"
 msgstr "Ask before {0} connector"
 
 #: src/components/ApprovalRulesSettings.tsx
+msgid "Ask before a specific tool"
+msgstr "Ask before a specific tool"
+
+#: src/components/ApprovalRulesSettings.tsx
 msgid "Ask before email actions"
 msgstr "Ask before email actions"
 
@@ -592,6 +596,10 @@ msgstr "Ask before purchases"
 #: src/components/ApprovalRulesSettings.tsx
 msgid "Ask before sending external email"
 msgstr "Ask before sending external email"
+
+#: src/components/ApprovalRulesSettings.tsx
+msgid "Ask first"
+msgstr "Ask first"
 
 #: src/components/integrations/IntegrationSetup.tsx
 msgid "Ask the server owner to configure this provider."
@@ -4491,6 +4499,10 @@ msgstr "To:"
 #: src/pages/shell/chat-context.tsx
 msgid "Today"
 msgstr "Today"
+
+#: src/components/ApprovalRulesSettings.tsx
+msgid "Tool name"
+msgstr "Tool name"
 
 #: src/pages/PluginsOverlay.tsx
 msgid "Tool sources"
