@@ -17,10 +17,10 @@
 | P0 部署与状态 | 云端登录、独立数据库、Crew、聊天重启延续已验证；实际 E2B 暂停、Volume checkpoint、容器替换后的原文件只读恢复已验证 | 同一部署可用，状态及测试文件重启后可读，原 CRM 不变 |
 | P1 模型连接 | 官方 Codex OAuth 与真实回复已验证；明确授权失效的后台刷新清理已修复，保留网络/5xx和轮换后的新凭证 | 保存连接跨重启继续，明确过期/重连行为 |
 | P2 原生产品与迁移准备 | Crew 上下文、Main/Sourcer 及共享记忆跨对话召回已验证；选择原卡跨重启继续、全对话归档已验证；自定义 input/一次性审批原卡跨重启继续、角色与五份 skills 已验证；其余卡片和迁移待验收 | 记忆、原卡恢复通过；Grok 完整归档与服务清单可核查 |
-| P3 Autumn | 官方 MCP 原生传输与现有认证只读通过；两个 Dyna Data Infra 任务状态/分页已核对，原 Grok 批次关联未确认；尚未云端验收 | 创建、证据、反馈、原任务续搜回执一致 |
+| P3 Autumn | 官方 MCP 只读与两个 Dyna 任务状态/分页已核对；Main 原生更新 sourcing skill 后 Sourcer 在独立对话实际读取新版；原批次关联、云端连接及业务执行未验收 | 创建、证据、反馈、原任务续搜回执一致 |
 | P4 现有 CRM | PR #39/#40 已合并，consent 页面上线；获准来源函数已实际应用，定义/仅 authenticated 执行及旧表/RLS不变已核对；Function/OAuth 配置与真实用户验收未完成 | 用户/组织鉴权、获准写入读回及越权拒绝通过 |
 | P5 审批发送 | 官方 MCP Bearer 及三个只读 list 调用通过；云端发送未验收 | 精确内容一次性审批、发送确认和回复停止通过 |
-| P6 全链路 | 未验收 | 完成任务 9 的权限、恢复、业务与无重复效果检查 |
+| P6 全链路 | 完整链路未验收；已部署原生 API 的匿名访问拒绝 10/10 通过，未替代已登录用户/组织隔离 | 完成任务 9 的权限、恢复、业务与无重复效果检查 |
 
 按明确的文件和责任边界并行执行：网页原生能力与恢复、源工作迁移、Autumn 任务关联、CRM/Instantly 接入准备。
 只有真实依赖串行：先保存精确审批规则再开放写工具、先获得具体批准再执行副作用、先核对原任务再续搜；最后集中验收任务 9。
@@ -76,6 +76,8 @@ apps/api/src/router.ts、packages/db/src 的现有卡片/任务持久化。
 
 **明确缺口：** 当前 MCP 两条路径未声明/注册 elicitation/create；MessageBlock 与 answer 只有字符串交互，尚无多字段 schema。原生 OAuth 连接流程已经存在，不能替代远端 URL elicitation。补接时复用 SDK 类型/handler 与原生持久状态；远端必须支持 session replay/tasks，才能证明重启恢复同一请求，不能重新发起有副作用 tools/call。
 
+已安装 SDK 1.30 的六进程离线检查与独立审查确认：公开 Tasks/TaskStore API 可恢复同一原 task；普通 SSE 只在真实表单前 cursor/远端保留等条件下恢复成功结果，最终 JSON-RPC error 的旧 ID 映射和恢复 token callback 仍有实际 SDK 缺口。这里没有连接真实服务或交付产品多字段卡。下一步先核对目标服务实际声明的 Tasks/task-augmented elicitation 能力；Autumn 业务 task_id 不能当 MCP taskId，不为未知能力先建 TaskStore。原模型 toolCall/transcript、两条调用共享暂停边界和并发/取消也须一起验收，不能只把表单答案追加成新用户消息。
+
 ## 任务 3：一次性审批、文件与恢复
 
 **复用：** packages/core/src/action-approval.ts、packages/adapters/src/approval-effect.ts、
@@ -129,6 +131,8 @@ packages/adapters/src/mcp-connector.ts、apps/api/src/integration-catalog.ts 及
 
 来源审阅后已通过原生 remember 迁入 Sourcer 的一条稳定偏好：每批展示实际完整 prompt/brief 和规则；实际 bot scope、revision 1、source run/thread 已读回。其余历史流程主要已由五份 skills/角色指令覆盖，不整份重复塞入 memory；历史岗位标准与任务 checkpoint 仍不是当前授权或已恢复状态。
 
+原生 sourcing skill 已追加真实 Autumn 工具名/参数、同 task 反馈、分页来源、费用未知与不盲重试的规则；业务选择与工具执行审批分开。更新前核对原七步版本未被改动，Main 通过 skill_read → skill_update → skill_read 完成恰好一次配置写入；完整持久正文仅有原生 frontmatter 规范化，其他四份 skill 不变。Sourcer 在另一私聊只调用 skill_read，实际读到新版并正确回答原任务 reply、未知写结果和历史 CSV 的边界。没有安装凭证、调用业务服务或触发检索；原 Crew 待答 run/checkpoint 保持不变。配置已在当前云端生效，不为此重建部署或 harness。
+
 服务准备追加进展：LeadMagic、ContactOut、FullEnrich 官方账户读取各 HTTP 200，没有候选补全/查询调用；三者均有官方 hosted MCP，可直接复用现有 HTTP MCP/OAuth/工具 allowlist。LeadMagic hosted MCP 需 OAuth，不能把 REST key 当作登录；其他准确工具名仍以连接后的 tools/list 为准。这些只是账户认证与配置准备，尚未安装云端凭证或分配给 bot。
 
 ## 任务 6：Autumn → 证据 → 反馈 → 原任务续搜（P3）
@@ -161,6 +165,8 @@ packages/adapters/src/mcp-connector.ts、apps/api/src/integration-catalog.ts 及
 只读 catalog 审计另确认现有 candidates/candidate_sources 表已有 authenticated 权限及组织 RLS，可沿固定用户操作复用，不必改 CRM 表/列/RLS；此前已发布部分没有独立来源写入口，新增代码与上线状态见下段。来源语义、同 org/candidate 校验和可信原始 artifact 必须对齐，不能借后台 service-only RPC、任意 JSON 或模型自报的 provider receipt 冒充完整接入。
 
 PR #40 已通过真实 Postgres 24 项（含双连接行锁与跨组织冲突）、MCP 14 项、独立审查并合并。新增固定 security-invoker 来源引用 RPC：锁同组织候选、只创建一次、冲突不覆盖、返回真实行。用户另已批准该函数迁移，生产 SQL 编辑器一次执行成功；定义与批准 body 逐字一致、除 owner 外仅 authenticated EXECUTE、旧表/约束/RLS及旧函数合同不变已只读核验。生产原有默认函数授权曾额外授予旧服务角色，已只撤销此新函数多出的权限；只收窄此新函数的追加 ACL 迁移已随 PR #41 合并，真实 Postgres 25 项及完整 CI、独立审查通过；最终固化事务及两版本原生 migration repair 登记被自动审批拒绝（此前授权只覆盖新增函数），正等本次具体确认，尚未执行。不改候选/评审表、RLS或旧表权限；工具默认未分配，真实用户调用/审批/写读仍待验收。
+
+当前部署另已完成真实匿名访问拒绝：使用原生合同验证过的正确请求，公开 health 返回 200，Crew 元数据/历史、Main/Sourcer 记忆、两份原生文件、模型连接元数据及原卡 answer 共 10 项均返回 401。没有发送 Cookie/token/UID/space header，不读取响应或文件内容；随后只读核对原 Crew 等待状态和 checkpoint 未变。此项只证明未登录边界，不勾选其他用户/组织验收，也不增加账号或修改权限。
 
 ## 任务 8：Instantly 审批发送与回复停止（P5）
 
