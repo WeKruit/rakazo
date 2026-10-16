@@ -1,4 +1,5 @@
 import type { RealtimeFanout } from "@rakazo/adapter-kit";
+import type { MessageBlock } from "@rakazo/contracts";
 import { encodeLoginSecret } from "@rakazo/contracts";
 import { describe, expect, it, vi } from "vitest";
 import type { PrismaClient } from "./client.js";
@@ -943,6 +944,124 @@ describe("pauseRunForTakeover", () => {
 });
 
 describe("answerRunInput", () => {
+  it("keeps a cancelled run's pending card from answering a new run and rejects repeat answers", async () => {
+    const fanout = new TestFanout();
+    const publish = vi.spyOn(fanout, "publish");
+    const runs = [
+      { id: "run-old", status: "cancelled" },
+      { id: "run-new", status: "waiting_input" },
+    ].map((run) => ({
+      ...run,
+      spaceId: "workspace-1",
+      threadId: "thread-1",
+      botId: "bot-1",
+      userId: "user-1",
+    }));
+    const messages = runs.map((run) => ({
+      id: run.id === "run-old" ? "message-old" : "message-new",
+      runId: run.id,
+      threadId: "thread-1",
+      role: "bot",
+      blocks: [{ kind: "ask", text: "Which city?", status: "pending" }] as MessageBlock[],
+    }));
+    const tx = {
+      $queryRaw: vi.fn().mockResolvedValue([{ id: "thread-1" }]),
+      run: {
+        findFirst: vi.fn(
+          async ({ where }: { where: Record<string, string> }) =>
+            runs.find((run) =>
+              Object.entries(where).every(([key, value]) => Reflect.get(run, key) === value),
+            ) ?? null,
+        ),
+        findUnique: vi.fn(async ({ where }: { where: { id: string } }) =>
+          runs.find((run) => run.id === where.id),
+        ),
+        updateMany: vi.fn(
+          async ({ where, data }: { where: Record<string, string>; data: { status: string } }) => {
+            const run = runs.find((row) =>
+              Object.entries(where).every(([key, value]) => Reflect.get(row, key) === value),
+            );
+            if (!run) return { count: 0 };
+            Object.assign(run, data);
+            return { count: 1 };
+          },
+        ),
+      },
+      message: {
+        findFirst: vi.fn(
+          async ({ where }: { where: Record<string, string> }) =>
+            messages.find((message) =>
+              Object.entries(where).every(([key, value]) => Reflect.get(message, key) === value),
+            ) ?? null,
+        ),
+        update: vi.fn(
+          async ({ where, data }: { where: { id: string }; data: { blocks: MessageBlock[] } }) => {
+            const message = messages.find((row) => row.id === where.id)!;
+            Object.assign(message, data);
+            return message;
+          },
+        ),
+      },
+      task: { updateMany: vi.fn().mockResolvedValue({ count: 1 }) },
+      thread: { update: vi.fn().mockResolvedValue({ nextEventSeq: 10 }) },
+      event: {
+        create: vi.fn(async ({ data }: { data: { seq: number; type: string } }) => ({
+          ...event(data.seq),
+          ...data,
+        })),
+      },
+    };
+    const prisma = {
+      $transaction: vi.fn(async (callback: (client: typeof tx) => unknown) => callback(tx)),
+    } as unknown as PrismaClient;
+    const input = {
+      spaceId: "workspace-1",
+      threadId: "thread-1",
+      runId: "run-old",
+      messageId: "message-old",
+      answeredByUserId: "user-1",
+      answer: "Paris",
+    };
+
+    await expect(answerRunInput(prisma, input, fanout)).resolves.toBe(false);
+    await expect(answerRunInput(prisma, { ...input, runId: "run-new" }, fanout)).resolves.toBe(
+      false,
+    );
+    expect(runs.map((run) => run.status)).toEqual(["cancelled", "waiting_input"]);
+    expect(messages.map((message) => message.blocks[0])).toEqual([
+      { kind: "ask", text: "Which city?", status: "pending" },
+      { kind: "ask", text: "Which city?", status: "pending" },
+    ]);
+    expect(tx.run.updateMany).not.toHaveBeenCalled();
+    expect(tx.message.update).not.toHaveBeenCalled();
+    expect(tx.task.updateMany).not.toHaveBeenCalled();
+    expect(tx.event.create).not.toHaveBeenCalled();
+    expect(publish).not.toHaveBeenCalled();
+
+    const current = { ...input, runId: "run-new", messageId: "message-new" };
+    await expect(answerRunInput(prisma, current, fanout)).resolves.toBe(true);
+    await expect(answerRunInput(prisma, current, fanout)).resolves.toBe(false);
+    expect(runs.map((run) => run.status)).toEqual(["cancelled", "queued"]);
+    expect(messages[0]!.blocks[0]).toEqual({ kind: "ask", text: "Which city?", status: "pending" });
+    expect(messages[1]!.blocks[0]).toEqual({
+      kind: "ask",
+      text: "Which city?",
+      status: "answered",
+      answer: "Paris",
+    });
+    expect(tx.run.updateMany).toHaveBeenCalledOnce();
+    expect(tx.message.update).toHaveBeenCalledOnce();
+    expect(tx.task.updateMany).toHaveBeenCalledOnce();
+    expect(tx.event.create).toHaveBeenCalledExactlyOnceWith({
+      data: expect.objectContaining({
+        type: "thread.message.updated",
+        runId: "run-new",
+        payload: expect.objectContaining({ messageId: "message-new" }),
+      }),
+    });
+    expect(publish).toHaveBeenCalledOnce();
+  });
+
   it("answers only the selected pending prompt and publishes its update", async () => {
     const fanout = new TestFanout();
     const publish = vi.spyOn(fanout, "publish");
