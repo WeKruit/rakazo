@@ -2,11 +2,25 @@
 
 > **For agentic workers:** Use superpowers:executing-plans to execute this plan inline, task by task. Independent work may run in parallel under the user's explicit authorization; keep file ownership separate and centralize deployment/acceptance.
 
-**Goal:** 在现有 Rakazo 网页交付 Main/Sourcer 原生协作、可恢复交互与记忆，迁入现有招聘工作，完成 [GOAL.md](GOAL.md) 的 P0–P6。
+**Goal:** 在现有 Rakazo 网页交付 Main/Sourcer 原生协作、可恢复交互与记忆，迁入现有招聘工作，完成 [GOAL.md](GOAL.md) 的 P0–P6 基础闭环与 [PRODUCT-SCOPE.md](PRODUCT-SCOPE.md) 的 Juicebox / Metix / Grok Bot 完整产品范围。
 
 **Architecture:** 沿用 Rakazo Web → authenticated API → Postgres/worker → Pi → native tools/connectors → persisted result → Web。Supabase 独立数据库保存状态，原生 memory provider 保存记忆，Modal Volume 保存文件/检查点，E2B 提供原生执行环境。集成进入已有边界，不另建 harness。
 
 **Tech Stack:** Rakazo/TypeScript、Pi、官方 Codex OAuth、Supabase Postgres、Graphile、Modal、E2B。
+
+## 总交付范围（2026-10-16 扩展确认）
+
+P0–P6 保留为 M1，不能再作为最终停止条件。完整动作与验收见 [PRODUCT-SCOPE.md](PRODUCT-SCOPE.md)：原 Grok 139 项加已研究工作台/Agent 补充能力，共 181 个稳定 ID。上游现成能力先检查实际调用链并验收；没有逐项核对的能力保守标为待验，不一律重写。
+
+| 里程碑 | 实施范围 | 当前进度 |
+| --- | --- | --- |
+| M1 基础闭环 | 本文 P0–P6、T01–T10、CRM/审批发送/回复停止 | 继续执行，未完成 |
+| M2 招聘工作台 | JD/条件、项目/岗位、候选 card/table、证据定位、校准、搜索轮次/名单/外联/interview 与用量 | 五视图只读部分在开发；其他动作逐项复用/实施/验收 |
+| M3 完整 Agent 产品 | Agent/群聊/A2A/subagent、每 bot 配置、可替换 runtime/memory/skills/MCP、全部卡片、文件/Library/Computer/routines | 部分原生能力已有窄范围线上证明；完整动作未验收 |
+| M4 服务/工作迁入 | 原 Grok 服务、文件、任务/去重/checkpoint、例行工作，招聘业务集成 | 对话已归档，三服务只读已接，完整迁入未完成 |
+| M5 整品验收部署 | 全量动作、多个真实用户/组织、当前版本网页/适用跨端、恢复/取消/幂等及部署 | 未完成；不能以 M1 或离线 green 代替 |
+
+并行顺序：先收口当前读取恢复、原生面板与证据 core；同时按矩阵核对已有 Rakazo agent/settings/group/plugin/routine 能力。源材料与 UI/API/业务权限独立推进，所有共享 executor/contracts/router 仍统一集成。所有参考分析发现保留出处与“已观察/静态推断/未知”的差别，不把分析工具的输出当产品正确性证明。
 
 ## 当前执行重心：招聘产品
 
@@ -21,9 +35,9 @@
 | T03 memory 生命周期 | P2/P6 | CAS 已贯通 Web、原生工具/Pi、模拟执行器及导入；撤销和受权历史检查通过；T04 已补采用快照的代码，均随 `6554c46` 发布；新生命周期网页验收仍待完成 |
 | T04 语义写入/上下文采用 | P2/P3 | 原生岗位/上下文快照、四类反馈、偏好写入守卫及普通原卡回答作者链已有代码；偏好来源 UI 和完整验收仍待完成；已有代码随 `6554c46` 发布 |
 | T05 Autumn 业务 action/恢复 | P3/P6 | 五个原生操作、冻结请求/回执、跨 run action 与同 task 续搜代码已随 `6554c46` 发布；原读回执跨新 run 自动补齐、云端验收仍待完成 |
-| T06 证据与资格判断 | P3/P6 | 未实现；provider 标签和四行转述表不算本方核验 |
+| T06 证据与资格判断 | P3/P6 | 确定性条件组合与显式规则的年限边界已有代码，33 项 focused 与独立审查通过；材料真实性、原生评估工具和持久评估未贯通，尚未部署 |
 | T07 补问/局部重评 | P2/P3/P6 | 通用原卡可用；招聘缺口/条件依赖尚未关联 |
-| T08 五视图/手机原卡 | P2/P6 | Web 只读面板已有本地实现，18 项检查、类型检查和构建通过，尚未集成发布；编辑/回答/重评与手机仍待完成 |
+| T08 五视图/手机原卡 | P2/P6 | Web 只读面板已提交 `9427a15`，23 项检查、类型/构建与独立审查通过，尚未发布；原消息导航、编辑/回答/重评与手机仍待完成 |
 | T09 隔离/恢复全链路 | P6 | 现有窄范围回归保留，新增领域链未验收 |
 | T10 真实样本报告 | P3/P6 | 产品接通后再验收，不现在运行样例搜索 |
 

@@ -4,7 +4,7 @@
 
 ## 目标
 
-基于 WeKruit/Rakazo 整套原生前后端，交付可以在网页直接使用的招聘 Agent 产品。
+基于 WeKruit/Rakazo 整套原生前后端，交付可以在网页直接使用、覆盖 Juicebox、Metix、Grok Bot 已分析用户能力的完整招聘 Agent 产品。P0–P6 是第一个闭环里程碑，不是总 Goal 的完成线。
 Main 负责需求、协调和人工审批；Sourcer 负责检索、证据和反馈后的续搜。
 用户在正常聊天和 Crew 中连续工作，切换对话或重启后仍能回到同一任务及原卡继续。
 招聘入口支持直接粘贴 JD 链接、岗位描述或附件；无需先建 CRM 岗位或提供历史 task ID。先核对本轮实际岗位正文，再形成 brief 与首批检索草案；后续反馈沿同一真实 provider task 继续。
@@ -14,6 +14,18 @@ Main 负责需求、协调和人工审批；Sourcer 负责检索、证据和反�
 先使用现有 Codex subscription OAuth。当前执行器是 Rakazo 原生 Pi，不将它描述为
 Codex CLI 的原生 session。模型连接、逐 bot 配置、memory、skills、tools、MCP、
 subagent 和文件存储沿用 Rakazo 已有边界，后续更换模型或运行服务不重建产品。
+
+## 完整产品范围
+
+[PRODUCT-SCOPE.md](PRODUCT-SCOPE.md) 是总范围及逐动作验收矩阵：保留原 Grok 功能清单的 139 个动作 ID，补齐工作台、Knowledge Vault、模板与 Reset 等已研究能力，共 181 项；同一底层能力复用，不按行重复造模块。范围包括：
+
+- Juicebox / Metix：项目/岗位工作台、JD/附件/描述入口、条件编辑、候选卡片与表格/筛选/分页、逐项证据、反馈校准、搜索轮次、候选/聊天/外联/interview 导航、sequence、真实进展与用量。
+- Grok Bot：完整 agent 生命周期、每 bot/subagent 独立 runtime/model/connection、OAuth/API key、群聊/@/A2A/委派、原生各类卡片、memory/skills/plugins/MCP 可替换、Library/文件/sandbox/Computer、后台任务/routines、账号/团队/权限及恢复。
+- 现有工作迁移：已用服务、历史材料与任务关联、去重/缓存、日历/邮件/Drive、enrichment 与已批准业务，不止完成三个只读连接。
+
+M2 的界面沿用 Rakazo 原生组件与交互，结合用户提供的既有前端模板作 WeKruit 品牌和 UI/UX 参考，不另建前端脚手架。
+
+M1=P0–P6，M2=招聘工作台，M3=完整 Agent 产品，M4=服务/工作迁入，M5=全量验收部署。M2–M4 可与 M1 并行。研究仅观察到入口、静态协议或未知后端语义的项目先核对，保持缺口，不自动删除或冒称已支持。Slack 保留为明确延期项，不恢复到当前执行优先级。
 
 ## 交付顺序
 
@@ -104,4 +116,4 @@ T04 后续代码已补四类反馈及原生偏好添加/精确修改/撤销，�
 
 每阶段留下直接测试的 HTTPS 页面、实际网页截图和可核查回执。
 聊天、记忆、原卡、任务和外部服务 ID 相互对应；实现存在、离线检查通过、真实业务
-验收通过分别记录。只有 PLAN.md 中 P0–P6 退出条件全部满足，Goal 才完成。
+验收通过分别记录。PLAN.md 的 P0–P6、T01–T10 与 PRODUCT-SCOPE.md 的全部适用动作都实现并验收，M1–M5 均满足，Goal 才完成。P6 通过后继续执行整品范围，不将 Goal 缩小为一条招聘流程。
