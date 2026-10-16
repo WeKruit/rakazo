@@ -1,4 +1,5 @@
 import { randomUUID } from "node:crypto";
+import { isDeepStrictEqual } from "node:util";
 import type {
   OAuthClientProvider,
   OAuthDiscoveryState,
@@ -167,7 +168,12 @@ const COMMON_CONFIG_VALUES = new Set([
   "async",
 ]);
 
-type ServerRef = { id: string; endpoint: string | null; secretId: string | null };
+type ServerRef = {
+  id: string;
+  endpoint: string | null;
+  secretId: string | null;
+  revision: number;
+};
 type ActorRef = { spaceId: string; userId: string };
 
 export class McpReauthorizationRequiredError extends Error {
@@ -179,6 +185,8 @@ export class McpReauthorizationRequiredError extends Error {
 }
 
 type ProviderOptions = {
+  /** Stage interactive state until tokens and the new generation can be published together. */
+  interactive?: boolean;
   redirectUri?: string;
   state?: string;
   onAuthorization?: (url: URL) => void;
@@ -383,6 +391,8 @@ type Pending = {
   spaceId: string;
   userId: string;
   endpoint: string;
+  revision: number;
+  material: OAuthMaterial;
   provider: StoredMcpOAuthProvider;
   createdAt: number;
   expiry?: ReturnType<typeof setTimeout>;
@@ -601,12 +611,14 @@ export class McpOAuthBroker {
     const loaded = await this.loadMaterial(server, context);
     let authorizationUrl: URL | undefined;
     const provider = this.createProvider(server, context, loaded, {
+      interactive: true,
       redirectUri: input.redirectUri,
       state: sessionId,
       onAuthorization: (url) => {
         authorizationUrl = url;
       },
     });
+    const initialOAuth = structuredClone(loaded.material.oauth);
     // Never destroy working tokens here: if this attempt fails (network error,
     // cancelled popup), the server keeps its valid connection. The SDK itself
     // invalidates dead tokens when a refresh is rejected with invalid_grant.
@@ -634,12 +646,21 @@ export class McpOAuthBroker {
     }
     if (!authorizationUrl) {
       if (await provider.tokens()) {
+        if (!isDeepStrictEqual(initialOAuth, loaded.material.oauth))
+          await this.replaceMaterial(
+            server.id,
+            loaded.material,
+            context,
+            false,
+            server.revision,
+            server.endpoint,
+          );
         return { status: "already_connected" };
       }
       return { status: "authorization_not_requested" };
     }
     const sessionMaterial = await this.secrets.put(
-      JSON.stringify(loaded.material),
+      JSON.stringify({ ...loaded.material, authorizationRevision: server.revision }),
       {
         operationId: "mcp.oauth.session",
         traceId: "mcp.oauth.session",
@@ -673,6 +694,8 @@ export class McpOAuthBroker {
       spaceId: input.spaceId,
       userId: input.userId,
       endpoint: server.endpoint,
+      revision: server.revision,
+      material: loaded.material,
       provider,
       createdAt: Date.now(),
       expiry,
@@ -719,8 +742,18 @@ export class McpOAuthBroker {
       });
       if (!server?.endpoint) throw new Error("MCP OAuth session is invalid or expired");
       const context = { spaceId: input.spaceId, userId: input.userId };
+      const material = (await this.read(session.oauthCiphertext, session.id)) as OAuthMaterial & {
+        authorizationRevision?: unknown;
+      };
+      if (
+        typeof material.authorizationRevision !== "number" ||
+        !Number.isSafeInteger(material.authorizationRevision) ||
+        material.authorizationRevision !== server.revision
+      )
+        throw new Error("MCP OAuth session is invalid or expired");
+      delete material.authorizationRevision;
       const loaded = {
-        material: await this.read(session.oauthCiphertext, session.id),
+        material,
         ...(server.secretId ? { secretId: server.secretId } : {}),
       };
       pending = {
@@ -728,7 +761,10 @@ export class McpOAuthBroker {
         spaceId: input.spaceId,
         userId: input.userId,
         endpoint: session.endpoint,
+        revision: server.revision,
+        material,
         provider: this.createProvider(server, context, loaded, {
+          interactive: true,
           redirectUri: session.redirectUri,
           state: session.id,
         }),
@@ -768,11 +804,14 @@ export class McpOAuthBroker {
       await networkFetch.close().catch(() => undefined);
     }
     if (!(await pending.provider.tokens())) throw new Error("MCP OAuth authorization failed");
-    // Bump the revision so cached runtime sessions rebuild with the fresh tokens.
-    await this.prisma.mcpServer.update({
-      where: { id: pending.serverId },
-      data: { revision: { increment: 1 } },
-    });
+    await this.replaceMaterial(
+      pending.serverId,
+      pending.material,
+      input,
+      true,
+      pending.revision,
+      pending.endpoint,
+    );
   }
 
   private async sweepExpiredPending(): Promise<void> {
@@ -803,7 +842,7 @@ export class McpOAuthBroker {
     if (!row) return;
     const material = await this.read(row.ciphertext, row.id);
     delete material.oauth;
-    await this.replaceMaterial(server.id, material, input, true);
+    await this.replaceMaterial(server.id, material, input, true, server.revision, server.endpoint);
   }
 
   private async loadMaterial(
@@ -825,17 +864,19 @@ export class McpOAuthBroker {
     loaded: { material: OAuthMaterial; secretId?: string },
     options: ProviderOptions = {},
   ): StoredMcpOAuthProvider {
-    const endpoint = server.endpoint;
+    const { id, endpoint, revision } = server;
     return new StoredMcpOAuthProvider(
-      server.id,
+      id,
       loaded.material,
       async (material) => {
+        if (options.interactive) return;
         await this.replaceMaterial(
-          server.id,
+          id,
           material,
           context,
           false,
-          server.endpoint,
+          revision,
+          endpoint,
           options.onPersisted,
         );
       },
@@ -865,6 +906,7 @@ export class McpOAuthBroker {
     material: OAuthMaterial,
     context: ActorRef,
     incrementRevision: boolean,
+    expectedRevision: number,
     expectedEndpoint?: string | null,
     onPersisted?: ProviderOptions["onPersisted"],
   ): Promise<string | undefined> {
@@ -874,13 +916,15 @@ export class McpOAuthBroker {
       const snapshot = await this.prisma.$transaction(async (tx) => {
         const server = await tx.mcpServer.findFirst({
           where: { id: serverId, spaceId: context.spaceId, userId: context.userId },
-          select: { endpoint: true, secretId: true },
+          select: { endpoint: true, secretId: true, revision: true },
         });
         if (!server) throw new Error("MCP server is unavailable");
         if (expectedEndpoint !== undefined && server.endpoint !== expectedEndpoint)
           throw new Error(
             "MCP server endpoint changed during authorization; reconnect this server",
           );
+        if (server.revision !== expectedRevision)
+          throw new Error("MCP server changed during authorization; reconnect this server");
         const secret = server.secretId
           ? await tx.secret.findFirst({
               where: { id: server.secretId, spaceId: context.spaceId, userId: context.userId },
@@ -918,10 +962,11 @@ export class McpOAuthBroker {
             await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtext('mcp-oauth-material'), hashtext(${serverId}))`;
             const server = await tx.mcpServer.findFirst({
               where: { id: serverId, spaceId: context.spaceId, userId: context.userId },
-              select: { endpoint: true, secretId: true },
+              select: { endpoint: true, secretId: true, revision: true },
             });
             if (!server) throw new Error("MCP server is unavailable");
             if (
+              server.revision !== expectedRevision ||
               server.endpoint !== snapshot.server.endpoint ||
               server.secretId !== snapshot.server.secretId
             )

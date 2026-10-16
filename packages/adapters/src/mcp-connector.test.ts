@@ -824,6 +824,88 @@ describe("MCP connector session cache", () => {
     await connector.close();
   });
 
+  it.each([
+    ["direct", "stale"],
+    ["direct", "missing"],
+    ["catalog", "stale"],
+    ["catalog", "missing"],
+  ] as const)(
+    "rejects a %s call with a %s server revision before connecting",
+    async (path, revision) => {
+      let assignment = ASSIGNMENT;
+      const state = {
+        failNext: false,
+        initializations: 0,
+        calls: [] as string[],
+        tools: Array.from({ length: path === "direct" ? 1 : 21 }, (_, index) => ({
+          name: `tool_${index}`,
+          inputSchema: { type: "object", properties: { value: { type: "string" } } },
+        })),
+      };
+      vi.stubGlobal("fetch", mcpFetch(state));
+      const prisma = {
+        botMcpServer: {
+          findMany: vi.fn(async () => [assignment]),
+          findFirst: vi.fn(async () => assignment),
+        },
+      };
+      const connector = new McpConnector(prisma as never, {} as never, { network: TEST_NETWORK });
+      const context = {
+        spaceId: "w1",
+        userId: "u1",
+        botId: "bot-1",
+        signal: new AbortController().signal,
+      } as never;
+      const resolve = async () => {
+        const exposed = await connector.discoverTools(context);
+        const call = {
+          tool: exposed[0]!.name,
+          args: { value: "approved fixture" },
+          executionId: "fixture",
+          route: exposed[0]!.route,
+        };
+        if (path === "direct") return call;
+        const execute = exposed.find((tool) => tool.name === "connectors_execute_tool")!;
+        return (await connector.resolveCall(
+          {
+            ...call,
+            tool: execute.name,
+            route: execute.route,
+            args: { id: "server-1:tool_0", arguments: call.args },
+          },
+          context,
+        ))!.call;
+      };
+      const collect = async (call: Parameters<McpConnector["execute"]>[0]) => {
+        const events = [];
+        for await (const event of connector.execute(call, context)) events.push(event);
+        return events;
+      };
+      try {
+        const old = await resolve();
+        assignment = { ...ASSIGNMENT, server: { ...SERVER, revision: 2 } };
+        const route = { ...old.route! };
+        if (revision === "missing") delete route.resourceRevision;
+        const initializations = state.initializations;
+        expect(await collect({ ...old, route })).toEqual([
+          { type: "error", message: "MCP server changed; rediscover the tool before trying again" },
+        ]);
+        expect(state.initializations).toBe(initializations);
+        expect(state.calls).toEqual([]);
+        expect(prisma.botMcpServer.findFirst).toHaveBeenCalledOnce();
+
+        const fresh = await resolve();
+        expect(fresh.route?.resourceRevision).toBe(2);
+        expect(await collect(fresh)).toMatchObject([{ type: "result" }]);
+        expect(state.initializations).toBe(initializations + 1);
+        expect(state.calls).toEqual(["tool_0"]);
+        expect(prisma.botMcpServer.findFirst).toHaveBeenCalledTimes(2);
+      } finally {
+        await connector.close();
+      }
+    },
+  );
+
   it("executes authoritative MCP tools whose names match catalog controls", async () => {
     const state = {
       failNext: false,
@@ -1029,7 +1111,12 @@ describe("MCP connector session cache", () => {
     const call = {
       tool: "mcp__demo__echo",
       args: {},
-      route: { connectorId: "mcp", resourceId: "server-1", toolName: "echo" },
+      route: {
+        connectorId: "mcp",
+        resourceId: "server-1",
+        resourceRevision: SERVER.revision,
+        toolName: "echo",
+      },
     } as never;
 
     const tools = await connector.discoverTools(context);

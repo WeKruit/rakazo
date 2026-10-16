@@ -282,6 +282,13 @@ export class McpConnector implements ConnectorProvider {
       yield { type: "error", message: "MCP tool is not assigned to this bot" };
       return;
     }
+    if (call.route.resourceRevision !== assignment.server.revision) {
+      yield {
+        type: "error",
+        message: "MCP server changed; rediscover the tool before trying again",
+      };
+      return;
+    }
     // Capture material before callTool so a concurrent eviction/replace cannot
     // drop this call's OAuth secrets from model-visible redaction. Recompute via
     // oauthMaterialSecrets(material) so in-place token refresh stays covered.
