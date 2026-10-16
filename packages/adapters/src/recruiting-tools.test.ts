@@ -43,6 +43,14 @@ const actor: Actor = {
   isDeploymentOwner: false,
 };
 const context = { actor, runId: "run", sourceMessageId: "human-message" };
+const mutation = {
+  threadId: "actual-thread",
+  botId: "bot",
+  leaseOwner: "worker",
+  leaseFence: 1,
+  effectId: "role-effect",
+  effectRequest: {},
+};
 const workspace = { role: { id: "role" }, revision: { id: "revision" } };
 
 describe("native recruiting_role", () => {
@@ -116,11 +124,18 @@ describe("native recruiting_role", () => {
         signal: new AbortController().signal,
       },
     } as unknown as Parameters<typeof executeRecruitingRoleTool>[3];
-    expect(await executeRecruitingRoleTool(prisma, context, input, material)).toEqual(receipt);
+    expect(
+      await executeRecruitingRoleTool(
+        prisma,
+        { ...context, mutation: { ...mutation, effectRequest: input } },
+        input,
+        material,
+      ),
+    ).toEqual(receipt);
     expect(executeRecruitingRoleMutation).toHaveBeenCalledWith(
       prisma,
       actor,
-      { runId: "run", sourceMessageId: "human-message" },
+      { ...mutation, effectRequest: input, runId: "run", sourceMessageId: "human-message" },
       input,
       material,
     );
@@ -139,11 +154,17 @@ describe("native recruiting_role", () => {
     };
     const receipt = { status: "saved", changed: true, workspace, source: { id: "verified-human" } };
     vi.mocked(executeRecruitingRoleMutation).mockResolvedValue(receipt as never);
-    expect(await executeRecruitingRoleTool(prisma, context, input)).toEqual(receipt);
+    expect(
+      await executeRecruitingRoleTool(
+        prisma,
+        { ...context, mutation: { ...mutation, effectRequest: input } },
+        input,
+      ),
+    ).toEqual(receipt);
     expect(executeRecruitingRoleMutation).toHaveBeenCalledExactlyOnceWith(
       prisma,
       actor,
-      { runId: "run", sourceMessageId: "human-message" },
+      { ...mutation, effectRequest: input, runId: "run", sourceMessageId: "human-message" },
       input,
       undefined,
     );
@@ -153,6 +174,17 @@ describe("native recruiting_role", () => {
       ).rejects.toThrow();
     }
     expect(executeRecruitingRoleMutation).toHaveBeenCalledOnce();
+  });
+
+  it("rejects native mutations without a runtime-owned receipt identity", async () => {
+    await expect(
+      executeRecruitingRoleTool({} as PrismaClient, context, {
+        operation: "bind",
+        roleId: null,
+        intent: { basis: "direct", quote: "Clear this role" },
+      }),
+    ).rejects.toThrow(IsolationError);
+    expect(executeRecruitingRoleMutation).not.toHaveBeenCalled();
   });
 
   it("rejects model-selected identity before dispatch", async () => {

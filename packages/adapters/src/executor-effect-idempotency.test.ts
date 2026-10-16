@@ -384,6 +384,17 @@ function fixture(runId = "run-1", secrets: string[] = []) {
   };
 }
 
+function roleReceipt(f: ReturnType<typeof fixture>, result: RecruitingRoleToolResult) {
+  return async (
+    _db: Parameters<typeof executeRecruitingRoleTool>[0],
+    trusted: Parameters<typeof executeRecruitingRoleTool>[1],
+  ) => {
+    const effect = f.effects.find((item) => item.id === trusted.mutation?.effectId);
+    if (effect?.status === "executing") Object.assign(effect, { status: "completed", result });
+    return result;
+  };
+}
+
 describe("mutating tool effect idempotency keys", () => {
   it("executes different tools that share a reused provider tool-call id", async () => {
     const f = fixture("run-a");
@@ -874,12 +885,24 @@ describe("native recruiting role effect delivery", () => {
         actor: { spaceId: "space-1", userId: "user-1", email: "", isDeploymentOwner: false },
         runId: "run-role",
         sourceMessageId: "human-message",
+        mutation: {
+          threadId: "thread-1",
+          botId: "bot-1",
+          leaseOwner: "worker-1",
+          leaseFence: f.runData.leaseFence,
+          effectId: f.effects[0]!.id,
+          effectRequest: args,
+        },
       });
       expect(input).toEqual(args);
       expect(f.effects).toEqual([
-        expect.objectContaining({ kind: "recruiting_role", status: "executing", request: args }),
+        expect.objectContaining({
+          kind: "recruiting_role",
+          status: expect.stringMatching(/executing|completed/),
+          request: args,
+        }),
       ]);
-      return receipt;
+      return roleReceipt(f, receipt)(prisma, trusted);
     });
     vi.mocked(loadRecruitingRunContext).mockImplementation(
       async (deps, run, memory, context, options) => {
@@ -906,7 +929,7 @@ describe("native recruiting role effect delivery", () => {
 
     expect(f.results).toEqual([delivered]);
     expect(f.effects).toHaveLength(1);
-    expect(f.effects[0]?.result).toEqual(delivered);
+    expect(f.effects[0]?.result).toEqual(receipt);
     expect(f.effects[0]?.idempotencyKey).toBe(
       toolEffectIdempotencyKey("run-role", "recruiting_role", args),
     );
@@ -916,15 +939,42 @@ describe("native recruiting role effect delivery", () => {
     f.setCalls([{ name: "recruiting_role", args, executionId: "call-after-restart" }]);
     await f.run();
 
-    expect(executeRecruitingRoleTool).toHaveBeenCalledOnce();
+    expect(executeRecruitingRoleTool).toHaveBeenCalledTimes(2);
     expect(f.effects).toHaveLength(1);
     expect(f.results).toEqual([delivered, delivered]);
-    expect(f.effects[0]?.result).toEqual(delivered);
+    expect(f.effects[0]?.result).toEqual(receipt);
+  });
+
+  it("revalidates an atomically completed role receipt after its commit acknowledgement is lost", async () => {
+    const f = fixture("run-role-ack-loss");
+    let commits = 0;
+    vi.mocked(executeRecruitingRoleTool).mockImplementation(async (db, trusted) => {
+      const effect = f.effects.find((item) => item.id === trusted.mutation?.effectId)!;
+      if (effect.status !== "completed") {
+        commits++;
+        await roleReceipt(f, receipt)(db, trusted);
+        throw new Error("role commit acknowledgement lost");
+      }
+      return receipt;
+    });
+    vi.mocked(loadRecruitingRunContext).mockResolvedValue(adopted);
+    f.setCalls([{ name: "recruiting_role", args, executionId: "role-before-ack-loss" }]);
+    await f.run("role commit acknowledgement lost");
+    expect(f.effects[0]).toMatchObject({ status: "completed", result: receipt });
+    await f.run();
+    expect(commits).toBe(1);
+    expect(executeRecruitingRoleTool).toHaveBeenCalledTimes(2);
+    expect(f.results).toEqual([delivered]);
+    expect(f.effects[0]?.result).toEqual(receipt);
+    vi.mocked(executeRecruitingRoleTool).mockRejectedValueOnce(new IsolationError());
+    await f.run();
+    expect(f.results.at(-1)).toEqual({ error: "Recruiting role or source is unavailable" });
+    expect(f.effects[0]).toMatchObject({ status: "completed", result: receipt });
   });
 
   it("rebuilds context from a completed base receipt after materialization fails without creating again", async () => {
     const f = fixture("run-role-recovery");
-    vi.mocked(executeRecruitingRoleTool).mockResolvedValue(receipt);
+    vi.mocked(executeRecruitingRoleTool).mockImplementation(roleReceipt(f, receipt));
     vi.mocked(loadRecruitingRunContext)
       .mockImplementationOnce(async () => {
         expect(f.effects[0]).toEqual(
@@ -943,13 +993,11 @@ describe("native recruiting role effect delivery", () => {
 
     await f.run();
 
-    expect(executeRecruitingRoleTool).toHaveBeenCalledOnce();
+    expect(executeRecruitingRoleTool).toHaveBeenCalledTimes(2);
     expect(loadRecruitingRunContext).toHaveBeenCalledTimes(2);
     expect(f.effects).toHaveLength(1);
     expect(f.results).toEqual([delivered]);
-    expect(f.effects[0]).toEqual(
-      expect.objectContaining({ status: "completed", result: delivered }),
-    );
+    expect(f.effects[0]).toEqual(expect.objectContaining({ status: "completed", result: receipt }));
   });
 
   it.each(["fresh", "completed replay"])(
@@ -985,9 +1033,8 @@ describe("native recruiting role effect delivery", () => {
         source: null,
         changed: false,
       });
-      if (mode === "fresh") {
-        vi.mocked(executeRecruitingRoleTool).mockResolvedValueOnce(answerReceipt);
-      } else {
+      vi.mocked(executeRecruitingRoleTool).mockImplementationOnce(roleReceipt(f, answerReceipt));
+      if (mode !== "fresh") {
         f.effects.push({
           id: "verified-role-effect",
           spaceId: "space-1",
@@ -1016,9 +1063,7 @@ describe("native recruiting role effect delivery", () => {
         vi.mocked(loadRecruitingRunContext).mock.calls.map((call) => call[4].sourceMessageId),
       ).toEqual(["native-role-answer", "native-role-answer"]);
       const roleCalls = vi.mocked(executeRecruitingRoleTool).mock.calls;
-      expect(roleCalls.map((call) => call[2])).toEqual(
-        mode === "fresh" ? [args, { operation: "read" }] : [{ operation: "read" }],
-      );
+      expect(roleCalls.map((call) => call[2])).toEqual([args, { operation: "read" }]);
       if (mode === "fresh") expect(roleCalls[0]![1].sourceMessageId).toBe("vague-trigger");
       expect(roleCalls.at(-1)![1].sourceMessageId).toBe("native-role-answer");
       expect(vi.mocked(executeRecruitingFeedback).mock.calls[0]![1].sourceMessageId).toBe(
@@ -1076,6 +1121,9 @@ describe("native recruiting role effect delivery", () => {
       nextTool: "recruiting_role",
     });
     vi.mocked(loadRecruitingRunContext).mockResolvedValue(adopted);
+    vi.mocked(executeRecruitingRoleTool).mockImplementation(
+      roleReceipt(f, { ...receipt, source: earlierSource }),
+    );
     f.runtimeRun.mockImplementation(async function* (request) {
       await request.claimSteering!([]);
       f.results.push(await request.executeTool!("recruiting_role", args, "older-role-replay"));
@@ -1087,7 +1135,7 @@ describe("native recruiting role effect delivery", () => {
 
     await f.run();
 
-    expect(executeRecruitingRoleTool).not.toHaveBeenCalled();
+    expect(executeRecruitingRoleTool).toHaveBeenCalledOnce();
     expect(vi.mocked(executeRecruitingFeedback).mock.calls[0]![1].sourceMessageId).toBe(
       "human-answer-2",
     );
@@ -1122,11 +1170,12 @@ describe("native recruiting role effect delivery", () => {
       result: delivered,
     });
     vi.mocked(loadRecruitingRunContext).mockResolvedValue(undefined);
+    vi.mocked(executeRecruitingRoleTool).mockImplementation(roleReceipt(f, receipt));
     f.setCalls([{ name: "recruiting_role", args, executionId: "call-after-role-cleared" }]);
 
     await f.run();
 
-    expect(executeRecruitingRoleTool).not.toHaveBeenCalled();
+    expect(executeRecruitingRoleTool).toHaveBeenCalledOnce();
     expect(loadRecruitingRunContext).toHaveBeenCalledOnce();
     expect(f.results[0]).toEqual(
       expect.objectContaining({
@@ -1134,8 +1183,7 @@ describe("native recruiting role effect delivery", () => {
       }),
     );
     expect(f.results[0]).not.toHaveProperty("contextArtifact");
-    expect(f.effects[0]?.result).toEqual(f.results[0]);
-    expect(f.effects[0]?.result).not.toHaveProperty("contextArtifact");
+    expect(f.effects[0]?.result).toEqual(delivered);
   });
 
   it("delivers context from the completed base receipt when another worker wins the effect claim", async () => {
@@ -1147,19 +1195,17 @@ describe("native recruiting role effect delivery", () => {
       Object.assign(effect, { status: "completed", result: receipt });
       return { count: 0 };
     });
-    vi.mocked(executeRecruitingRoleTool).mockResolvedValue(receipt);
+    vi.mocked(executeRecruitingRoleTool).mockImplementation(roleReceipt(f, receipt));
     vi.mocked(loadRecruitingRunContext).mockResolvedValue(adopted);
     f.setCalls([{ name: "recruiting_role", args, executionId: "call-lost-claim" }]);
 
     await f.run();
 
-    expect(executeRecruitingRoleTool).not.toHaveBeenCalled();
+    expect(executeRecruitingRoleTool).toHaveBeenCalledOnce();
     expect(f.results).toEqual([delivered]);
     expect(loadRecruitingRunContext).toHaveBeenCalledOnce();
     expect(f.effects).toHaveLength(1);
-    expect(f.effects[0]).toEqual(
-      expect.objectContaining({ status: "completed", result: delivered }),
-    );
+    expect(f.effects[0]).toEqual(expect.objectContaining({ status: "completed", result: receipt }));
   });
 
   it("injects the bound role and structured memory text exactly once into runtime instructions", async () => {
@@ -1200,7 +1246,7 @@ describe("native recruiting role effect delivery", () => {
     expect(request.instructions).not.toContain("[object Object]");
   });
 
-  it("redacts secrets in the delivered role snapshot and the completed full receipt", async () => {
+  it("redacts delivered role values while preserving the private immutable domain receipt", async () => {
     const secret = 'configured-role-secret-"quoted"\nsecond-line';
     const f = fixture("run-role-secret", [secret]);
     const rawReceipt = {
@@ -1208,7 +1254,7 @@ describe("native recruiting role effect delivery", () => {
       workspace: { ...workspace, role: { ...workspace.role, title: `Role ${secret}` } },
       source: { ...source, quote: `Human quote ${secret}` },
     };
-    vi.mocked(executeRecruitingRoleTool).mockResolvedValue(rawReceipt);
+    vi.mocked(executeRecruitingRoleTool).mockImplementation(roleReceipt(f, rawReceipt));
     vi.mocked(loadRecruitingRunContext).mockResolvedValue(adopted);
     f.setCalls([{ name: "recruiting_role", args, executionId: "call-secret-role" }]);
 
@@ -1220,8 +1266,8 @@ describe("native recruiting role effect delivery", () => {
       source: { ...source, quote: "Human quote [redacted]" },
     };
     expect(f.results).toEqual([redacted]);
-    expect(f.effects[0]?.result).toEqual(redacted);
-    expect(JSON.stringify(f.effects[0]?.result)).not.toContain(JSON.stringify(secret).slice(1, -1));
+    expect(f.effects[0]?.result).toEqual(rawReceipt);
+    expect(JSON.stringify(f.results)).not.toContain(JSON.stringify(secret).slice(1, -1));
   });
 
   it("adopts steering context once on the latest human item while preserving original history text", async () => {
@@ -1335,7 +1381,7 @@ describe("native recruiting role effect delivery", () => {
     };
     f.claimSteering.mockResolvedValue([peer]);
     vi.mocked(loadRecruitingRunContext).mockResolvedValue(adopted);
-    vi.mocked(executeRecruitingRoleTool).mockResolvedValue(receipt);
+    vi.mocked(executeRecruitingRoleTool).mockImplementation(roleReceipt(f, receipt));
     let claimed: Awaited<ReturnType<NonNullable<AgentRunRequest["claimSteering"]>>> = [];
     f.runtimeRun.mockImplementation(async function* (request) {
       claimed = await request.claimSteering!([]);

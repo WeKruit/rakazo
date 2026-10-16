@@ -3797,10 +3797,7 @@ export function createRunExecutor(deps: ExecutorDeps) {
           }
           recruitingSourceMessageId = nextId;
         };
-        const deliverRecruitingRoleResult = async (
-          result: RecruitingRoleToolResult,
-          effectId?: string,
-        ) => {
+        const deliverRecruitingRoleResult = async (result: RecruitingRoleToolResult) => {
           await retainRecruitingSource(result.source);
           if (result.status === "needs_clarification")
             return redactConnectorPayload(result, runSecrets);
@@ -3819,11 +3816,6 @@ export function createRunExecutor(deps: ExecutorDeps) {
             },
             runSecrets,
           );
-          if (
-            effectId &&
-            !(await replaceCompletedExternalEffectResult(deps.prisma, effectId, delivered))
-          )
-            return uncertainEffectResult("recruiting_role");
           return delivered;
         };
         const deliverRecruitingFeedbackResult = async (result: RecruitingFeedbackResult) => {
@@ -4963,6 +4955,49 @@ export function createRunExecutor(deps: ExecutorDeps) {
           const bypassApproval = gateDecision === "allow" && requiresApprovalByDefault;
           let claimedEffect = false;
 
+          const executeRole = () =>
+            executeRecruitingRoleTool(
+              deps.prisma,
+              {
+                actor: researchActor.actor,
+                runId,
+                sourceMessageId: recruitingSourceMessageId,
+                ...(args.operation !== "read" && applied
+                  ? {
+                      mutation: {
+                        threadId: thread.id,
+                        botId: bot.id,
+                        leaseOwner: workerId,
+                        leaseFence: fence,
+                        effectId: applied.effect.id,
+                        effectRequest: applied.effect.request,
+                      },
+                    }
+                  : {}),
+              },
+              args,
+              deps.artifacts ? { artifacts: deps.artifacts, context } : undefined,
+            );
+          const roleError = (error: unknown) => {
+            if (error instanceof IsolationError)
+              return { error: "Recruiting role or source is unavailable" };
+            if (error instanceof RecruitingConflictError)
+              return { error: error.message, code: "CONFLICT" };
+            if (
+              error instanceof RecruitingSourceValidationError ||
+              (error instanceof Error && error.name === "ZodError")
+            )
+              return { error: sanitizeConnectorError(error, runSecrets) };
+            throw error;
+          };
+          const replayRole = async () => {
+            try {
+              return await deliverRecruitingRoleResult(await executeRole());
+            } catch (error) {
+              return roleError(error);
+            }
+          };
+
           const executeAssessment = async () => {
             const result = redactConnectorPayload(
               await executeRecruitingAssessmentTool(
@@ -5066,10 +5101,7 @@ export function createRunExecutor(deps: ExecutorDeps) {
                   typeof retryGate.result === "object" &&
                   "status" in retryGate.result
                 )
-                  return deliverRecruitingRoleResult(
-                    retryGate.result as RecruitingRoleToolResult,
-                    applied!.effect.id,
-                  );
+                  return replayRole();
                 if (
                   (name === "recruiting_feedback" || guardedMemory) &&
                   retryGate.result &&
@@ -5179,10 +5211,7 @@ export function createRunExecutor(deps: ExecutorDeps) {
                 typeof gate.result === "object" &&
                 "status" in gate.result
               ) {
-                return deliverRecruitingRoleResult(
-                  gate.result as RecruitingRoleToolResult,
-                  applied.effect.id,
-                );
+                return replayRole();
               } else if (
                 (name === "recruiting_feedback" || guardedMemory) &&
                 gate.result &&
@@ -5896,36 +5925,14 @@ export function createRunExecutor(deps: ExecutorDeps) {
             }
             let result: RecruitingRoleToolResult;
             try {
-              result = await executeRecruitingRoleTool(
-                deps.prisma,
-                {
-                  actor: {
-                    spaceId: run.spaceId,
-                    userId: run.userId,
-                    email: "",
-                    isDeploymentOwner: false,
-                  },
-                  runId,
-                  sourceMessageId: recruitingSourceMessageId,
-                },
-                args,
-                { artifacts: deps.artifacts, context },
-              );
+              result = await executeRole();
             } catch (error) {
-              if (error instanceof IsolationError)
-                return finish({ error: "Recruiting role or source is unavailable" });
-              if (error instanceof RecruitingConflictError)
-                return finish({ error: error.message, code: "CONFLICT" });
-              if (
-                error instanceof RecruitingSourceValidationError ||
-                (error instanceof Error && error.name === "ZodError")
-              )
-                return finish({ error: sanitizeConnectorError(error, runSecrets) });
-              throw error;
+              return finish(roleError(error));
             }
-            // Save the domain receipt before context materialization: resume must never repeat a role create.
-            if (!(await persistEffectResult(result))) return uncertainEffectResult(name);
-            return deliverRecruitingRoleResult(result, applied?.effect.id);
+            // Native writes complete their immutable domain receipt in the same transaction.
+            if (args.operation === "read" && !(await persistEffectResult(result)))
+              return uncertainEffectResult(name);
+            return deliverRecruitingRoleResult(result);
           }
           if (name === "read_memory") {
             if (args.scope !== "bot" && args.scope !== "user") {

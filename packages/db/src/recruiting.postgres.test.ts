@@ -232,6 +232,383 @@ describePostgres("recruiting domain (PostgreSQL)", () => {
       ...(await assessmentAdmission(input, { runId: run.id, threadId: thread.id })),
     };
   }
+  async function mutateRole(
+    db: PrismaClient,
+    owner: Actor,
+    context: { runId: string; sourceMessageId: string | null },
+    input: recruiting.RecruitingRoleMutationInput,
+    material?: recruiting.RecruitingRoleMaterialContext,
+  ) {
+    const run = await prisma.run.update({
+      where: { id: context.runId },
+      data: {
+        leaseOwner: "native-role-worker",
+        leaseFence: 1,
+        leaseExpiresAt: new Date(Date.now() + 60000),
+      },
+    });
+    const effect = await prisma.externalEffect.create({
+      data: {
+        spaceId,
+        runId: run.id,
+        kind: "recruiting_role",
+        idempotencyKey: `role:${crypto.randomUUID()}`,
+        status: "executing",
+        request: input as Prisma.InputJsonValue,
+      },
+    });
+    return recruiting.executeRecruitingRoleMutation(
+      db,
+      owner,
+      {
+        ...context,
+        threadId: run.threadId,
+        botId: run.botId,
+        leaseOwner: "native-role-worker",
+        leaseFence: 1,
+        effectId: effect.id,
+        effectRequest: input,
+      },
+      input,
+      material,
+    );
+  }
+
+  async function roleMutationFixture(operation: "create" | "revise" = "create") {
+    const f = await assessmentFixture("Create and revise this supplied role");
+    const bytes = Buffer.from(
+      JSON.stringify({ text: "At least seven years of software experience" }),
+    );
+    const hash = createHash("sha256").update(bytes).digest("hex");
+    const readAt = "2026-10-16T00:00:00Z";
+    const material = await recruiting.recordRecruitingWebMaterial(prisma, actor, f.context, {
+      artifact: {
+        name: "native-role-proof.json",
+        mimeType: "application/json",
+        size: bytes.length,
+        hash,
+        storageKey: `native-role-${f.run.id}`,
+        clientNonce: `native-role-${f.run.id}`,
+      },
+      reader: "web_fetch",
+      url: "https://example.test/role",
+      readAt,
+    });
+    const ref: RecruitingSourceRef = {
+      id: "role-material",
+      kind: "original_material",
+      readState: "read",
+      readAt,
+      quote: "At least seven years of software experience",
+      url: "https://example.test/role",
+      anchor: {
+        kind: "artifact",
+        artifact: { artifactId: material.artifact.id, sha256: hash },
+        locator: "text",
+      },
+    };
+    const reader = {
+      artifacts: { get: async () => bytes } as unknown as ArtifactStore,
+      context: {
+        spaceId,
+        userId,
+        botId,
+        runId: f.run.id,
+        operationId: f.run.id,
+        traceId: f.run.id,
+        signal: new AbortController().signal,
+      },
+    };
+    const input = {
+      operation,
+      title: "Atomic native role",
+      sourceRefs: [ref],
+      criteria: [{ ...roleInput().criteria[0]!, sourceRefs: [] }],
+      preferences: [],
+      definitionQuestions: [],
+      intent: { basis: "direct" as const, quote: "Create and revise this supplied role" },
+      ...(operation === "revise" ? { roleId: f.role.role.id, expectedRevision: 1 } : {}),
+    } as recruiting.RecruitingRoleMutationInput;
+    await prisma.externalEffect.update({
+      where: { id: f.context.effectId },
+      data: { kind: "recruiting_role", request: input as Prisma.InputJsonValue },
+    });
+    const context = { ...f.context, sourceMessageId: f.message.id, effectRequest: input };
+    return { ...f, input, context, reader };
+  }
+
+  it.each(["create", "revise"] as const)(
+    "atomically recovers native role %s after commit ACK loss without overriding newer human state",
+    async (operation) => {
+      const f = await roleMutationFixture(operation);
+      const steering = await recruiting.createThreadMessage(prisma, {
+        threadId: f.thread.id,
+        role: "user",
+        blocks: [{ kind: "text", text: f.input.intent.quote }],
+      });
+      await prisma.steeringMessage.create({
+        data: { messageId: steering.id, userId, botId, runId: f.run.id, claimedAt: new Date() },
+      });
+      f.context.sourceMessageId = steering.id;
+      const lostAck = {
+        $transaction: async (callback: (tx: Prisma.TransactionClient) => Promise<unknown>) => {
+          const result = await prisma.$transaction(callback);
+          if (result && typeof result === "object" && "status" in result)
+            throw new Error("simulated role commit ACK loss");
+          return result;
+        },
+      } as unknown as PrismaClient;
+      await expect(
+        recruiting.executeRecruitingRoleMutation(lostAck, actor, f.context, f.input, f.reader),
+      ).rejects.toThrow("commit ACK loss");
+      const effect = await prisma.externalEffect.findUniqueOrThrow({
+        where: { id: f.context.effectId },
+      });
+      expect(effect.status).toBe("completed");
+      const saved = effect.result as unknown as recruiting.RecruitingRoleToolResult;
+      const revisionCount = await prisma.recruitingRoleRevision.count({
+        where: { roleId: saved.workspace!.role.id },
+      });
+      const { sourceThreadId: _sourceThreadId, ...newDefinition } = roleInput(source(steering.id));
+      const humanRevision = await recruiting.reviseRecruitingRole(prisma, actor, {
+        ...newDefinition,
+        roleId: saved.workspace!.role.id,
+        expectedRevision: saved.workspace!.role.revision,
+        title: "New human revision",
+      });
+      const newer = await recruiting.createRecruitingRole(prisma, actor, {
+        ...roleInput(source(f.message.id)),
+        title: "New human choice",
+        sourceThreadId: f.thread.id,
+      });
+      await prisma.run.update({
+        where: { id: f.run.id },
+        data: { status: "completed", leaseOwner: null, leaseExpiresAt: null },
+      });
+      await prisma.steeringMessage.deleteMany({ where: { runId: f.run.id } });
+      const roleCount = await prisma.recruitingRole.count({
+        where: { sourceThreadId: f.thread.id },
+      });
+      const restored = createDb(databaseUrl!);
+      try {
+        expect(
+          await recruiting.executeRecruitingRoleMutation(
+            restored.prisma,
+            actor,
+            f.context,
+            f.input,
+            f.reader,
+          ),
+        ).toEqual(saved);
+        expect(
+          (
+            await recruiting.getRecruitingWorkspace(restored.prisma, actor, {
+              threadId: f.thread.id,
+            })
+          )?.role.id,
+        ).toBe(newer.role.id);
+        expect(
+          await restored.prisma.recruitingRoleRevision.count({
+            where: { roleId: saved.workspace!.role.id },
+          }),
+        ).toBe(revisionCount + 1);
+        expect(
+          (
+            await restored.prisma.recruitingRole.findUniqueOrThrow({
+              where: { id: saved.workspace!.role.id },
+            })
+          ).currentRevisionId,
+        ).toBe(humanRevision.revision.id);
+        expect(
+          await restored.prisma.recruitingRole.count({ where: { sourceThreadId: f.thread.id } }),
+        ).toBe(roleCount);
+        expect(
+          await restored.prisma.event.count({
+            where: {
+              runId: f.run.id,
+              type: "effect.recorded",
+              payload: { path: ["effectId"], equals: f.context.effectId },
+            },
+          }),
+        ).toBe(1);
+        await expect(
+          recruiting.executeRecruitingRoleMutation(restored.prisma, actor, f.context, f.input, {
+            ...f.reader,
+            artifacts: {
+              get: async () => Buffer.from("corrupted original bytes"),
+            } as unknown as ArtifactStore,
+          }),
+        ).rejects.toThrow(IsolationError);
+        expect(
+          (
+            await restored.prisma.externalEffect.findUniqueOrThrow({
+              where: { id: f.context.effectId },
+            })
+          ).result,
+        ).toEqual(saved);
+      } finally {
+        await restored.prisma.$disconnect();
+        await restored.pool.end();
+      }
+    },
+  );
+
+  it.each(["bind", "clear", "inferred"] as const)(
+    "replays a completed native %s without changing a later human binding",
+    async (kind) => {
+      const f = await roleMutationFixture();
+      const input: recruiting.RecruitingRoleMutationInput =
+        kind === "inferred"
+          ? { ...f.input, intent: { ...f.input.intent, basis: "inferred" } }
+          : {
+              operation: "bind",
+              roleId: kind === "clear" ? null : f.role.role.id,
+              intent: f.input.intent,
+            };
+      const context = { ...f.context, effectRequest: input };
+      await prisma.externalEffect.update({
+        where: { id: context.effectId },
+        data: { request: input as Prisma.InputJsonValue },
+      });
+      const saved = await recruiting.executeRecruitingRoleMutation(
+        prisma,
+        actor,
+        context,
+        input,
+        f.reader,
+      );
+      expect(saved).toMatchObject(
+        kind === "inferred"
+          ? { status: "needs_clarification", changed: false }
+          : { status: "saved", changed: kind === "clear" },
+      );
+      const newer = await recruiting.createRecruitingRole(prisma, actor, {
+        ...roleInput(source(f.message.id)),
+        sourceThreadId: f.thread.id,
+        title: "Later human role",
+      });
+      await prisma.run.update({
+        where: { id: f.run.id },
+        data: { status: "completed", leaseOwner: null, leaseExpiresAt: null },
+      });
+      expect(
+        await recruiting.executeRecruitingRoleMutation(prisma, actor, context, input, f.reader),
+      ).toEqual(saved);
+      expect(
+        (await recruiting.getRecruitingWorkspace(prisma, actor, { threadId: f.thread.id }))?.role
+          .id,
+      ).toBe(newer.role.id);
+      expect(
+        (await prisma.externalEffect.findUniqueOrThrow({ where: { id: context.effectId } })).result,
+      ).toEqual(saved);
+      expect(
+        await prisma.event.count({
+          where: {
+            runId: f.run.id,
+            type: "effect.recorded",
+            payload: { path: ["effectId"], equals: context.effectId },
+          },
+        }),
+      ).toBe(1);
+    },
+  );
+
+  it.each(["receipt", "event"] as const)(
+    "rolls back the role domain when native %s persistence fails",
+    async (boundary) => {
+      const f = await roleMutationFixture();
+      const before = await prisma.recruitingRole.count();
+      const failing = {
+        $transaction: (callback: (tx: Prisma.TransactionClient) => Promise<unknown>) =>
+          prisma.$transaction((tx) =>
+            callback(
+              new Proxy(tx, {
+                get(target, key) {
+                  if (key === "externalEffect" && boundary === "receipt")
+                    return { ...target.externalEffect, updateMany: async () => ({ count: 0 }) };
+                  if (key === "event" && boundary === "event")
+                    return {
+                      ...target.event,
+                      create: async () => {
+                        throw new Error("role receipt event failed");
+                      },
+                    };
+                  return Reflect.get(target, key);
+                },
+              }),
+            ),
+          ),
+      } as unknown as PrismaClient;
+      await expect(
+        recruiting.executeRecruitingRoleMutation(failing, actor, f.context, f.input, f.reader),
+      ).rejects.toThrow();
+      expect(await prisma.recruitingRole.count()).toBe(before);
+      expect(
+        (await recruiting.getRecruitingWorkspace(prisma, actor, { threadId: f.thread.id }))?.role
+          .id,
+      ).toBe(f.role.role.id);
+      expect(
+        (await prisma.externalEffect.findUniqueOrThrow({ where: { id: f.context.effectId } }))
+          .status,
+      ).toBe("executing");
+    },
+  );
+
+  it("rejects native role identity, request and lease mismatches and revalidates completed source ACL", async () => {
+    const f = await roleMutationFixture();
+    for (const change of [
+      { effectId: "missing-effect" },
+      { threadId: "other-thread" },
+      { botId: "other-bot" },
+      { leaseOwner: "other-worker" },
+      { leaseFence: 2 },
+      { effectRequest: { ...f.input, title: "Changed request" } },
+    ])
+      await expect(
+        recruiting.executeRecruitingRoleMutation(
+          prisma,
+          actor,
+          { ...f.context, ...change },
+          f.input,
+          f.reader,
+        ),
+      ).rejects.toThrow(IsolationError);
+    await expect(
+      recruiting.executeRecruitingRoleMutation(
+        prisma,
+        { ...actor, userId: otherUserId },
+        f.context,
+        f.input,
+        f.reader,
+      ),
+    ).rejects.toThrow(IsolationError);
+    await prisma.run.update({ where: { id: f.run.id }, data: { leaseExpiresAt: new Date(0) } });
+    await expect(
+      recruiting.executeRecruitingRoleMutation(prisma, actor, f.context, f.input, f.reader),
+    ).rejects.toThrow(IsolationError);
+    await prisma.run.update({
+      where: { id: f.run.id },
+      data: { leaseExpiresAt: new Date(Date.now() + 60000) },
+    });
+    const saved = await recruiting.executeRecruitingRoleMutation(
+      prisma,
+      actor,
+      f.context,
+      f.input,
+      f.reader,
+    );
+    await prisma.message.update({
+      where: { id: f.message.id },
+      data: { blocks: [{ kind: "text", text: "Edited original source" }] },
+    });
+    await expect(
+      recruiting.executeRecruitingRoleMutation(prisma, actor, f.context, f.input, f.reader),
+    ).rejects.toThrow();
+    expect(
+      (await prisma.externalEffect.findUniqueOrThrow({ where: { id: f.context.effectId } })).result,
+    ).toEqual(saved);
+  });
+
   async function questionFixture(candidate = false) {
     const f = await assessmentFixture();
     if (candidate)
@@ -657,7 +1034,7 @@ describePostgres("recruiting domain (PostgreSQL)", () => {
     };
     const nativeContext = { runId: f.run.id, sourceMessageId: f.message.id };
     await expect(
-      recruiting.executeRecruitingRoleMutation(
+      mutateRole(
         prisma,
         actor,
         nativeContext,
@@ -665,13 +1042,7 @@ describePostgres("recruiting domain (PostgreSQL)", () => {
         reader,
       ),
     ).rejects.toMatchObject({ name: "RecruitingSourceValidationError" });
-    const native = await recruiting.executeRecruitingRoleMutation(
-      prisma,
-      actor,
-      nativeContext,
-      nativeInput,
-      reader,
-    );
+    const native = await mutateRole(prisma, actor, nativeContext, nativeInput, reader);
     expect(native.status).toBe("saved");
     expect(native.workspace?.revision.sourceRefs).toEqual(expect.arrayContaining([ref]));
     // Role-level and criterion references share the same exact Artifact read.
@@ -826,13 +1197,7 @@ describePostgres("recruiting domain (PostgreSQL)", () => {
         sourceQueries = [];
         let queries: string[];
         try {
-          const result = await recruiting.executeRecruitingRoleMutation(
-            prisma,
-            actor,
-            context,
-            input(distinct),
-            reader,
-          );
+          const result = await mutateRole(prisma, actor, context, input(distinct), reader);
           expect(result.status).toBe("saved");
           queries = sourceQueries;
         } finally {
@@ -864,13 +1229,7 @@ describePostgres("recruiting domain (PostgreSQL)", () => {
             },
           ],
         };
-        const result = await recruiting.executeRecruitingRoleMutation(
-          prisma,
-          actor,
-          context,
-          mixed,
-          reader,
-        );
+        const result = await mutateRole(prisma, actor, context, mixed, reader);
         expect(result.workspace?.revision.sourceRefs[0]).toEqual(mixed.sourceRefs[0]);
         expect(result.workspace?.revision.sourceRefs[0]?.quote).toBeUndefined();
       }
@@ -912,9 +1271,7 @@ describePostgres("recruiting domain (PostgreSQL)", () => {
             index === 6 ? { ...criterion, sourceRefs: [later] } : criterion,
           ),
         };
-        await expect(
-          recruiting.executeRecruitingRoleMutation(prisma, actor, context, invalid, reader),
-        ).rejects.toThrow(
+        await expect(mutateRole(prisma, actor, context, invalid, reader)).rejects.toThrow(
           boundary === "quote" ? recruiting.RecruitingSourceValidationError : IsolationError,
         );
         expect(await prisma.recruitingRoleRevision.count()).toBe(revisions);
@@ -2888,13 +3245,7 @@ describePostgres("recruiting domain (PostgreSQL)", () => {
     const call = (
       sourceMessageId: string,
       mutation: Exclude<RecruitingRoleToolInput, { operation: "read" }> = input,
-    ) =>
-      recruiting.executeRecruitingRoleMutation(
-        prisma,
-        actor,
-        { ...context, sourceMessageId },
-        mutation,
-      );
+    ) => mutateRole(prisma, actor, { ...context, sourceMessageId }, mutation);
     const created = await call(first.id);
     expect(created.changed).toBe(true);
     expect(created.status).toBe("saved");
@@ -2921,12 +3272,7 @@ describePostgres("recruiting domain (PostgreSQL)", () => {
       call(first.id, { ...input, intent: { ...input.intent, quote: "Invented consent" } }),
     ).rejects.toThrow(IsolationError);
     await expect(
-      recruiting.executeRecruitingRoleMutation(
-        prisma,
-        { ...actor, userId: otherUserId },
-        context,
-        input,
-      ),
+      mutateRole(prisma, { ...actor, userId: otherUserId }, context, input),
     ).rejects.toThrow(IsolationError);
     const unrelated = await makeMessage();
     await expect(call(unrelated.id)).rejects.toThrow(IsolationError);
@@ -2992,7 +3338,7 @@ describePostgres("recruiting domain (PostgreSQL)", () => {
       data: { claimedAt: new Date() },
     });
     await expect(call(first.id)).rejects.toThrow(IsolationError);
-    const revised = await recruiting.executeRecruitingRoleMutation(
+    const revised = await mutateRole(
       prisma,
       actor,
       { ...context, sourceMessageId: newer.id },
@@ -3006,7 +3352,7 @@ describePostgres("recruiting domain (PostgreSQL)", () => {
     );
     expect(revised.workspace?.role.revision).toBe(2);
     // The same current human input can refine its interpretation without a clock barrier.
-    const refined = await recruiting.executeRecruitingRoleMutation(
+    const refined = await mutateRole(
       prisma,
       actor,
       { ...context, sourceMessageId: newer.id },
@@ -3019,7 +3365,7 @@ describePostgres("recruiting domain (PostgreSQL)", () => {
       },
     );
     expect(refined.workspace?.role.revision).toBe(3);
-    const rebind = await recruiting.executeRecruitingRoleMutation(
+    const rebind = await mutateRole(
       prisma,
       actor,
       { ...context, sourceMessageId: newer.id },
@@ -3032,7 +3378,7 @@ describePostgres("recruiting domain (PostgreSQL)", () => {
     expect(rebind.changed).toBe(false);
     await prisma.steeringMessage.deleteMany({ where: { runId: run.id } });
     await expect(
-      recruiting.executeRecruitingRoleMutation(prisma, actor, context, {
+      mutateRole(prisma, actor, context, {
         ...input,
         operation: "revise",
         roleId,
@@ -3141,7 +3487,7 @@ describePostgres("recruiting domain (PostgreSQL)", () => {
         blocks: [{ kind: "text", text: quote }],
       });
       const context = { runId: f.run.id, sourceMessageId: f.original.id };
-      const created = await recruiting.executeRecruitingRoleMutation(prisma, actor, context, {
+      const created = await mutateRole(prisma, actor, context, {
         operation: "create",
         title: "Answered role",
         sourceRefs: [],
@@ -3255,7 +3601,7 @@ describePostgres("recruiting domain (PostgreSQL)", () => {
     expect(
       (await recruiting.readRecruitingFeedbackContext(prisma, actor, input)).source.anchor,
     ).toMatchObject({ messageId: answerMessage.id });
-    const created = await recruiting.executeRecruitingRoleMutation(prisma, actor, input, {
+    const created = await mutateRole(prisma, actor, input, {
       operation: "create",
       title: "Routine answer",
       sourceRefs: [],

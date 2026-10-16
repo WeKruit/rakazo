@@ -747,21 +747,120 @@ export async function authorizeRecruitingMemoryCommit(
   };
 }
 
+/** Runtime-only receipt identity. Direct human API writes keep their own authenticated boundary. */
+export type RecruitingRoleMutationContext = {
+  runId: string;
+  threadId: string;
+  botId: string;
+  sourceMessageId: string | null;
+  leaseOwner: string;
+  leaseFence: number;
+  effectId: string;
+  effectRequest: unknown;
+};
+
 export async function executeRecruitingRoleMutation(
   prisma: PrismaClient,
   actor: Actor,
-  context: { runId: string; sourceMessageId: string | null },
+  context: RecruitingRoleMutationContext,
   untrusted: RecruitingRoleMutationInput,
   material?: RecruitingRoleMaterialContext,
 ): Promise<RecruitingRoleToolResult> {
   const input = RecruitingRoleToolInputSchema.parse(untrusted);
-  if (input.operation === "read") throw new IsolationError();
+  if (
+    input.operation === "read" ||
+    stableJsonValue(input) !==
+      stableJsonValue(RecruitingRoleToolInputSchema.parse(context.effectRequest))
+  )
+    throw new IsolationError();
   const artifacts =
     input.operation === "bind"
       ? new Map<string, Uint8Array>()
       : await loadRoleMaterials(prisma, actor, input, material);
   return prisma.$transaction(async (tx) => {
-    const { run, thread } = await lockLiveRecruitingRun(tx, actor, context.runId);
+    const { run, thread } = await lockLiveRecruitingRun(tx, actor, context.runId, false);
+    if (run.threadId !== context.threadId || run.botId !== context.botId)
+      throw new IsolationError();
+    await tx.$queryRaw(
+      Prisma.sql`SELECT "id" FROM "external_effects" WHERE "id" = ${context.effectId} FOR UPDATE`,
+    );
+    const effect = await tx.externalEffect.findFirst({
+      where: {
+        id: context.effectId,
+        spaceId: actor.spaceId,
+        runId: run.id,
+        kind: "recruiting_role",
+      },
+    });
+    if (!effect || stableJsonValue(effect.request) !== stableJsonValue(context.effectRequest))
+      throw new IsolationError();
+    if (effect.status === "completed") {
+      const saved = effect.result as RecruitingRoleToolResult | null;
+      if (
+        !saved ||
+        !["saved", "needs_clarification"].includes(saved.status) ||
+        typeof saved.changed !== "boolean"
+      )
+        throw new IsolationError();
+      const source = RecruitingSourceRefSchema.parse(saved.source);
+      if (source.anchor.kind !== "message" || source.quote !== input.intent.quote)
+        throw new IsolationError();
+      const human = await tx.message.findFirst({
+        where: { id: source.anchor.messageId, threadId: run.threadId },
+        include: humanMessageInclude,
+      });
+      if (!human || !isNativeHumanMessage(human)) throw new IsolationError();
+      await validateReadSources(tx, actor, [source], artifacts);
+      const workspace = saved.workspace
+        ? {
+            role: RecruitingRoleSchema.parse(saved.workspace.role),
+            revision: RecruitingRoleRevisionSchema.parse(saved.workspace.revision),
+          }
+        : null;
+      if (workspace) {
+        const role = await requireRole(tx, actor, workspace.role.id);
+        const row = await tx.recruitingRoleRevision.findFirst({
+          where: {
+            id: workspace.revision.id,
+            roleId: role.id,
+            revision: workspace.revision.revision,
+          },
+        });
+        if (
+          !row ||
+          workspace.role.spaceId !== role.spaceId ||
+          workspace.role.userId !== role.userId ||
+          workspace.role.sourceThreadId !== role.sourceThreadId ||
+          workspace.role.currentRevisionId !== row.id ||
+          workspace.role.revision !== row.revision ||
+          stableJsonValue(workspace.revision) !==
+            stableJsonValue(
+              RecruitingRoleRevisionSchema.parse({
+                ...row,
+                createdAt: row.createdAt.toISOString(),
+              }),
+            )
+        )
+          throw new IsolationError();
+        if (saved.status === "saved" && input.operation !== "bind")
+          await validateReadSources(tx, actor, definitionSources(workspace.revision), artifacts);
+        else await validateDefinition(tx, actor, workspace.revision);
+      }
+      if (
+        saved.status === "saved" &&
+        (input.operation === "bind"
+          ? (workspace?.role.id ?? null) !== input.roleId
+          : !workspace ||
+            (input.operation === "create"
+              ? workspace.role.revision !== 1 || workspace.role.sourceThreadId !== thread.id
+              : workspace.role.id !== input.roleId ||
+                workspace.role.revision !== input.expectedRevision + 1))
+      )
+        throw new IsolationError();
+      return { status: saved.status, workspace, source, changed: saved.changed };
+    }
+    requireResearchLease(run, context);
+    if (effect.status !== "executing") throw new IsolationError();
     const { source: humanSource, message: source } = await requireCurrentHumanSource(
       tx,
       actor,
@@ -793,59 +892,96 @@ export async function executeRecruitingRoleMutation(
       )
         throw new RecruitingConflictError();
     }
+    let result: RecruitingRoleToolResult;
     if (input.intent.basis === "inferred")
-      return {
+      result = {
         status: "needs_clarification",
         workspace: current,
         source: humanSource,
         changed: false,
       };
-    let workspace: RoleSnapshot | null;
-    if (input.operation === "bind") {
-      workspace = await bindRoleInTransaction(tx, actor, {
-        threadId: run.threadId,
-        roleId: input.roleId,
-      });
-    } else {
-      const definition = {
-        title: input.title,
-        sourceRefs: [...input.sourceRefs.filter((ref) => ref.id !== humanSource.id), humanSource],
-        criteria: input.criteria.map((criterion) => ({
-          ...criterion,
-          sourceRefs: criterion.sourceRefs.length ? criterion.sourceRefs : [humanSource],
-        })),
-        preferences: input.preferences,
-        definitionQuestions: input.definitionQuestions,
+    else {
+      let workspace: RoleSnapshot | null;
+      if (input.operation === "bind") {
+        workspace = await bindRoleInTransaction(tx, actor, {
+          threadId: run.threadId,
+          roleId: input.roleId,
+        });
+      } else {
+        const definition = {
+          title: input.title,
+          sourceRefs: [...input.sourceRefs.filter((ref) => ref.id !== humanSource.id), humanSource],
+          criteria: input.criteria.map((criterion) => ({
+            ...criterion,
+            sourceRefs: criterion.sourceRefs.length ? criterion.sourceRefs : [humanSource],
+          })),
+          preferences: input.preferences,
+          definitionQuestions: input.definitionQuestions,
+        };
+        workspace =
+          input.operation === "create"
+            ? await createRoleInTransaction(
+                tx,
+                actor,
+                CreateRecruitingRoleInput.parse({
+                  ...definition,
+                  expectedRevision: 0,
+                  sourceThreadId: run.threadId,
+                }),
+                artifacts,
+              )
+            : await reviseRoleInTransaction(
+                tx,
+                actor,
+                ReviseRecruitingRoleInput.parse({
+                  ...definition,
+                  roleId: input.roleId,
+                  expectedRevision: input.expectedRevision,
+                }),
+                artifacts,
+              );
+      }
+      result = {
+        status: "saved",
+        workspace,
+        source: humanSource,
+        changed:
+          input.operation !== "bind" || current?.role.id !== (workspace?.role.id ?? undefined),
       };
-      workspace =
-        input.operation === "create"
-          ? await createRoleInTransaction(
-              tx,
-              actor,
-              CreateRecruitingRoleInput.parse({
-                ...definition,
-                expectedRevision: 0,
-                sourceThreadId: run.threadId,
-              }),
-              artifacts,
-            )
-          : await reviseRoleInTransaction(
-              tx,
-              actor,
-              ReviseRecruitingRoleInput.parse({
-                ...definition,
-                roleId: input.roleId,
-                expectedRevision: input.expectedRevision,
-              }),
-              artifacts,
-            );
     }
-    return {
-      status: "saved",
-      workspace,
-      source: humanSource,
-      changed: input.operation !== "bind" || current?.role.id !== (workspace?.role.id ?? undefined),
-    };
+    const completed = await tx.externalEffect.updateMany({
+      where: {
+        id: effect.id,
+        spaceId: actor.spaceId,
+        runId: run.id,
+        status: "executing",
+        run: {
+          status: "running",
+          leaseOwner: context.leaseOwner,
+          leaseFence: context.leaseFence,
+          leaseExpiresAt: { gt: new Date() },
+        },
+      },
+      data: { status: "completed", result: result as unknown as Prisma.InputJsonValue },
+    });
+    if (completed.count !== 1) throw new IsolationError();
+    await appendEventInTransaction(tx, {
+      spaceId: actor.spaceId,
+      threadId: thread.id,
+      botId: run.botId,
+      runId: run.id,
+      type: "effect.recorded",
+      payload: {
+        effectId: effect.id,
+        tool: "recruiting_role",
+        operation: input.operation,
+        status: result.status,
+        changed: result.changed,
+        roleId: result.workspace?.role.id ?? null,
+        roleRevisionId: result.workspace?.revision.id ?? null,
+      },
+    });
+    return result;
   });
 }
 
