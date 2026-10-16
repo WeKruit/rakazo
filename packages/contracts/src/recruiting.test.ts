@@ -75,6 +75,98 @@ const action = {
 };
 
 describe("recruiting contracts", () => {
+  it("accepts closed semantic feedback inputs without model-selected runtime identity", () => {
+    const intent = { basis: "direct", quote: "Always show the complete prompt" };
+    const preference = {
+      target: "preference",
+      scope: "user",
+      path: "preferences.md",
+      expectedRevision: 0,
+      intent,
+      sourceRefs: [],
+    };
+    const scoped = {
+      roleId: role.id,
+      expectedRoleRevision: 1,
+      summary: "This round only",
+      intent,
+      sourceRefs: [source],
+    };
+    const inputs = [
+      { ...preference, operation: "add", content: "  Show the complete prompt.\n" },
+      {
+        ...preference,
+        operation: "replace",
+        anchor: { start: 0, end: 3, quote: "old" },
+        content: "new",
+      },
+      { ...preference, operation: "revoke", anchor: { start: 0, end: 3, quote: "old" } },
+      { ...scoped, target: "role", operation: "revise" },
+      { ...scoped, target: "round", operation: "scope" },
+      {
+        ...scoped,
+        target: "candidate",
+        operation: "fact",
+        candidateKey: "candidate-1",
+        expectedAssessmentVersion: 0,
+      },
+    ];
+    expect(contracts.RecruitingHumanIntentSchema?.safeParse(intent).success).toBe(true);
+    for (const input of inputs) {
+      expect(contracts.RecruitingFeedbackInputSchema?.safeParse(input).success).toBe(true);
+      for (const field of ["actor", "spaceId", "userId", "runId", "threadId", "sourceMessageId"]) {
+        expect(
+          contracts.RecruitingFeedbackInputSchema?.safeParse({ ...input, [field]: "forged" })
+            .success,
+        ).toBe(false);
+      }
+    }
+    expect(contracts.RecruitingPreferenceFeedbackSchema?.parse(inputs[0])).toMatchObject({
+      content: "  Show the complete prompt.\n",
+    });
+  });
+
+  it("requires operation-specific preference targets and valid exact spans", () => {
+    const value = {
+      target: "preference",
+      operation: "replace",
+      scope: "bot",
+      path: "memory.md",
+      expectedRevision: 2,
+      intent: { basis: "direct", quote: "Replace this preference" },
+      sourceRefs: [],
+      anchor: { start: 1, end: 4, quote: "old" },
+      content: "new",
+    };
+    for (const invalid of [
+      { scope: "shared" },
+      { path: " " },
+      { expectedRevision: -1 },
+      { expectedRevision: 1.5 },
+      { intent: { basis: "assistant", quote: "replace" } },
+      { intent: { basis: "direct", quote: " " } },
+      { sourceRefs: undefined },
+      { content: " " },
+      { anchor: undefined },
+      { anchor: { start: -1, end: 4, quote: "old" } },
+      { anchor: { start: 1, end: 1, quote: "old" } },
+      { anchor: { start: 1, end: 4.5, quote: "old" } },
+      { anchor: { start: 1, end: 4, quote: "" } },
+      { operation: "add" },
+      { operation: "revoke" },
+      { target: "role" },
+    ])
+      expect(
+        contracts.RecruitingPreferenceFeedbackSchema?.safeParse({ ...value, ...invalid }).success,
+      ).toBe(false);
+    expect(
+      contracts.RecruitingPreferenceFeedbackSchema?.safeParse({
+        ...value,
+        intent: { basis: "inferred", quote: "Maybe this" },
+      }).success,
+    ).toBe(true);
+  });
+
   it("accepts only the fields for each native role operation", () => {
     const intent = { basis: "direct", quote: "Create a new role" };
     const value = {

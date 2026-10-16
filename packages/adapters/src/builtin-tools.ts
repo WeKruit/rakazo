@@ -2,6 +2,8 @@ import type { ConnectorTool } from "@rakazo/adapter-kit";
 import {
   BotSecretName,
   botSecretDestinationSchema,
+  RecruitingFeedbackInputSchema,
+  RecruitingPreferenceFeedbackSchema,
   RecruitingRoleToolInputSchema,
   SecretAskPurpose,
   SecretHttpRequest,
@@ -520,15 +522,22 @@ export const builtinAgentTools: ConnectorTool[] = [
     inputSchema: z.toJSONSchema(RecruitingRoleToolInputSchema, { io: "input" }),
   },
   {
+    name: "recruiting_feedback",
+    description:
+      "Classify human recruiting feedback as role requirements, this round's recall scope, candidate facts, or reusable preferences. Role, round and candidate feedback records a proposal for its matching tool, never a memory fact or a search. Use direct human wording and its exact quote; inferred or ambiguous intent needs ask_user. Only explicit reusable preferences edit native memory. Read the native document revision first; replace/revoke requires the exact UTF-16 span and quote and preserves all other text. User scope is this user's bots in this Space, not the organization.",
+    inputSchema: z.toJSONSchema(RecruitingFeedbackInputSchema, { io: "input" }),
+  },
+  {
     name: "remember",
     description:
-      "Replace this bot's native memory document. Read it with read_memory first and preserve other facts. Use the loaded expectedRevision, or 0 for a new document.",
+      "Replace this bot's native memory document. Read it with read_memory first and preserve other facts. Use the loaded expectedRevision, or 0 for a new document. Recruiting preferences require recruitingFeedback with an exact edit; role requirements, single-round scope and candidate facts belong in recruiting_feedback.",
     inputSchema: {
       type: "object",
       properties: {
         content: { type: "string" },
         path: { type: "string" },
         expectedRevision: { type: "integer", minimum: 0 },
+        recruitingFeedback: z.toJSONSchema(RecruitingPreferenceFeedbackSchema, { io: "input" }),
       },
       required: ["content", "expectedRevision"],
     },
@@ -536,13 +545,14 @@ export const builtinAgentTools: ConnectorTool[] = [
   {
     name: "save_shared_memory",
     description:
-      "Replace a native memory document shared across this user's bots in this Space. Read it with read_memory first and preserve other facts. Use the loaded expectedRevision, or 0 for a new document.",
+      "Replace a native memory document shared across this user's bots in this Space. Read it with read_memory first and preserve other facts. Use the loaded expectedRevision, or 0 for a new document. Recruiting preferences require recruitingFeedback with an exact edit; other recruiting feedback belongs in recruiting_feedback.",
     inputSchema: {
       type: "object",
       properties: {
         path: { type: "string", description: "Document name, for example MEMORY.md." },
         content: { type: "string", description: "The document's complete new content." },
         expectedRevision: { type: "integer", minimum: 0 },
+        recruitingFeedback: z.toJSONSchema(RecruitingPreferenceFeedbackSchema, { io: "input" }),
       },
       required: ["path", "content", "expectedRevision"],
     },
@@ -710,11 +720,12 @@ export const builtinAgentTools: ConnectorTool[] = [
   {
     name: "save_memory",
     description:
-      "Store a durable fact in this bot's semantic memory (preferences, decisions, recurring context). Use for anything worth recalling in future conversations.",
+      "Store a durable fact in this bot's semantic memory (preferences, decisions, recurring context). Recruiting preferences require recruitingFeedback with a native document revision and exact edit; they are saved only in native memory. Other recruiting feedback belongs in recruiting_feedback.",
     inputSchema: {
       type: "object",
       properties: {
         content: { type: "string" },
+        recruitingFeedback: z.toJSONSchema(RecruitingPreferenceFeedbackSchema, { io: "input" }),
       },
       required: ["content"],
     },

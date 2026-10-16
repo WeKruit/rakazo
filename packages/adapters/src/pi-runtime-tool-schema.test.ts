@@ -6,6 +6,12 @@ import { parseConnectorToolArgs } from "./lazy-tool-catalog.js";
 import { jsonSchemaParameters, parametersFor } from "./pi-runtime.js";
 
 describe("jsonSchemaParameters", () => {
+  it("keeps the recruiting feedback guard in native memory tool parameters", () => {
+    const schema = parametersFor(builtinAgentTools.find((tool) => tool.name === "remember")!);
+    expect(schema.properties).toHaveProperty("recruitingFeedback");
+    expect(schema.required).not.toContain("recruitingFeedback");
+  });
+
   it("preserves recursive recruiting criteria through the native Pi tool schema", () => {
     const tool = builtinAgentTools.find((tool) => tool.name === "recruiting_role")!;
     const parameters = parametersFor(tool);

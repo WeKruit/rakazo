@@ -1,4 +1,6 @@
-import type { AgentRunRequest, MemorySnapshot } from "@rakazo/adapter-kit";
+import type { AgentRunRequest, MemorySnapshot, SemanticMemoryProvider } from "@rakazo/adapter-kit";
+import type { RecruitingFeedbackInput, RecruitingSourceRef } from "@rakazo/contracts";
+import type { ActionApprovalRule } from "@rakazo/core";
 import {
   legacyScopedToolEffectIdempotencyKey,
   toolEffectIdempotencyKey,
@@ -7,13 +9,20 @@ import type { RecruitingRoleToolResult, ThreadEvents } from "@rakazo/db";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import type * as AutoReviewModule from "./auto-review.js";
 import type * as ComputerLifecycleModule from "./computer-lifecycle.js";
-import { createRunExecutor } from "./executor.js";
+import { createRunExecutor, selectBuiltinToolsForRun } from "./executor.js";
+import type { MemoryProviderResolver } from "./memory-provider-factory.js";
 import type { LoadedRecruitingRunContext } from "./recruiting-context.js";
 import { loadRecruitingRunContext } from "./recruiting-context.js";
+import type * as RecruitingFeedbackModule from "./recruiting-feedback.js";
+import { executeRecruitingFeedback } from "./recruiting-feedback.js";
 import { executeRecruitingRoleTool } from "./recruiting-tools.js";
 
 vi.mock("./recruiting-context.js", () => ({ loadRecruitingRunContext: vi.fn() }));
 vi.mock("./recruiting-tools.js", () => ({ executeRecruitingRoleTool: vi.fn() }));
+vi.mock("./recruiting-feedback.js", async (importOriginal) => ({
+  ...(await importOriginal<typeof RecruitingFeedbackModule>()),
+  executeRecruitingFeedback: vi.fn(),
+}));
 
 vi.mock("./computer-lifecycle.js", async (importOriginal) => ({
   ...(await importOriginal<typeof ComputerLifecycleModule>()),
@@ -77,6 +86,23 @@ function fixture(runId = "run-1", secrets: string[] = []) {
   const memoryRead = vi.fn(
     async (_request: { scope: "bot" | "user" }): Promise<MemorySnapshot> => ({ documents: [] }),
   );
+  const semanticSave = vi.fn<SemanticMemoryProvider["save"]>(async () => ({
+    ok: true,
+    value: undefined,
+  }));
+  const semanticMemory: SemanticMemoryProvider = {
+    describe: () => ({
+      id: "test-memory",
+      contractVersion: "1",
+      adapterVersion: "1",
+      capabilities: { recall: true, save: true, purgeHistory: true, sharedScope: true },
+    }),
+    recall: async () => ({ ok: true, value: [] }),
+    save: semanticSave,
+    purgeHistory: async () => ({ ok: true, value: undefined }),
+  };
+  const memoryProviderResolve = vi.fn<MemoryProviderResolver["resolve"]>(async () => null);
+  const disabledBuiltinTools: string[] = [];
   const artifacts = {
     describe: () => ({ capabilities: { stream: false } }),
     put: vi.fn(async () => ({ id: "stored-context", hash: "a".repeat(64) })),
@@ -139,6 +165,7 @@ function fixture(runId = "run-1", secrets: string[] = []) {
         name: "Assistant",
         title: "Assistant",
         description: "Test assistant",
+        disabledBuiltinTools,
         computerId: "computer-1",
         computer: { id: "computer-1", scope: "dedicated" },
       })),
@@ -198,7 +225,7 @@ function fixture(runId = "run-1", secrets: string[] = []) {
         },
       ),
     },
-    actionApprovalRule: { findMany: vi.fn(async () => []) },
+    actionApprovalRule: { findMany: vi.fn(async (): Promise<ActionApprovalRule[]> => []) },
     actionAutoReviewPreference: { findUnique: vi.fn(async () => ({ enabled: false })) },
     externalEffect,
   };
@@ -232,7 +259,7 @@ function fixture(runId = "run-1", secrets: string[] = []) {
       commit: memoryCommit,
       exportMarkdown: async function* () {},
     },
-    memoryProviders: { resolve: async () => null },
+    memoryProviders: { resolve: memoryProviderResolve },
     artifacts,
     events: { append: vi.fn(async () => undefined), pauseRunForInput, finalizeRun, claimSteering },
     jobs: { enqueue: vi.fn(async () => undefined) },
@@ -245,12 +272,17 @@ function fixture(runId = "run-1", secrets: string[] = []) {
     scratchpadRows,
     memoryCommit,
     memoryRead,
+    memoryProviderResolve,
+    semanticMemory,
+    semanticSave,
     artifacts,
     prisma,
     runData: run,
     thread,
     runtimeRun,
     claimSteering,
+    pauseRunForInput,
+    disabledBuiltinTools,
     setCalls(next: ToolCall[]) {
       calls = next;
     },
@@ -1024,5 +1056,429 @@ describe("native recruiting role effect delivery", () => {
         historyText: peer.text,
       }),
     ]);
+  });
+});
+
+describe("native recruiting feedback effect dispatch", () => {
+  const feedback = {
+    target: "preference" as const,
+    operation: "add" as const,
+    scope: "bot" as const,
+    path: "MEMORY.md",
+    expectedRevision: 0,
+    intent: { basis: "direct" as const, quote: "Remember to show the complete prompt" },
+    sourceRefs: [],
+    content: "Show the complete prompt",
+  } satisfies RecruitingFeedbackInput;
+  const source: RecruitingSourceRef = {
+    id: "feedback-source",
+    kind: "original_material",
+    anchor: { kind: "message", messageId: "human-feedback", locator: "text" },
+    readState: "read",
+    readAt: "2026-10-15T00:00:00.000Z",
+    quote: feedback.intent.quote,
+  };
+  const saved = {
+    status: "saved" as const,
+    feedback,
+    source,
+    workspace: null,
+    document: {
+      id: "feedback-document",
+      scope: feedback.scope,
+      path: feedback.path,
+      revision: 1,
+      anchor: { start: 0, end: feedback.content.length, quote: feedback.content },
+    },
+  };
+
+  beforeEach(() => {
+    vi.mocked(executeRecruitingFeedback).mockReset();
+    vi.mocked(executeRecruitingRoleTool).mockReset();
+    vi.mocked(loadRecruitingRunContext).mockReset();
+  });
+
+  it("offers feedback without graphical tools and keeps it private from messaging channels", () => {
+    const options = {
+      graphicalToolsAllowed: false,
+      pageBrowserAllowed: false,
+      groupId: null,
+      trigger: "user",
+      semanticMemoryEnabled: false,
+      messagingChannelRun: false,
+    };
+    for (const semanticMemoryEnabled of [false, true]) {
+      expect(
+        selectBuiltinToolsForRun({ ...options, semanticMemoryEnabled }).map((tool) => tool.name),
+      ).toContain("recruiting_feedback");
+    }
+    expect(
+      selectBuiltinToolsForRun({ ...options, trigger: "messaging", messagingChannelRun: true }).map(
+        (tool) => tool.name,
+      ),
+    ).not.toContain("recruiting_feedback");
+  });
+
+  it("claims feedback before the helper and replays its completed receipt without saving twice", async () => {
+    const f = fixture("run-feedback");
+    f.runData.sourceMessageId = "human-feedback";
+    vi.mocked(executeRecruitingFeedback).mockImplementation(
+      async (deps, trusted, untrusted, context) => {
+        expect(deps.prisma).toBe(f.prisma);
+        expect(deps.memory.commit).toBe(f.memoryCommit);
+        expect(trusted).toEqual({
+          actor: { spaceId: "space-1", userId: "user-1", email: "", isDeploymentOwner: false },
+          runId: "run-feedback",
+          sourceMessageId: "human-feedback",
+        });
+        expect(untrusted).toEqual(feedback);
+        expect(context).toEqual(expect.objectContaining({ runId: "run-feedback", botId: "bot-1" }));
+        expect(f.effects).toEqual([
+          expect.objectContaining({
+            kind: "recruiting_feedback",
+            status: "executing",
+            request: feedback,
+          }),
+        ]);
+        return saved;
+      },
+    );
+    f.setCalls([
+      { name: "recruiting_feedback", args: feedback, executionId: "feedback-before-restart" },
+    ]);
+
+    await f.run();
+    f.setCalls([
+      { name: "recruiting_feedback", args: feedback, executionId: "feedback-after-restart" },
+    ]);
+    await f.run();
+
+    expect(executeRecruitingFeedback).toHaveBeenCalledOnce();
+    expect(f.results).toEqual([saved, saved]);
+    expect(f.effects).toEqual([expect.objectContaining({ status: "completed", result: saved })]);
+    expect(f.memoryCommit).not.toHaveBeenCalled();
+    expect(loadRecruitingRunContext).not.toHaveBeenCalled();
+  });
+
+  it("returns inferred feedback for clarification without claiming a memory save", async () => {
+    const f = fixture("run-inferred-feedback");
+    const inferred = { ...feedback, intent: { ...feedback.intent, basis: "inferred" as const } };
+    const result = {
+      status: "needs_clarification" as const,
+      feedback: inferred,
+      source,
+      workspace: null,
+    };
+    vi.mocked(executeRecruitingFeedback).mockResolvedValue(result);
+    f.setCalls([{ name: "recruiting_feedback", args: inferred, executionId: "feedback-inferred" }]);
+
+    await f.run();
+
+    expect(f.results).toEqual([result]);
+    expect(f.effects[0]?.result).toEqual(result);
+    expect(f.results[0]).not.toHaveProperty("document");
+    expect(f.memoryCommit).not.toHaveBeenCalled();
+    expect(f.semanticSave).not.toHaveBeenCalled();
+  });
+
+  it("leaves the claimed effect uncertain when feedback fails after native commit acknowledgement is lost", async () => {
+    const f = fixture("run-feedback-unknown-commit");
+    vi.mocked(executeRecruitingFeedback).mockRejectedValue(
+      new Error("native commit acknowledgement lost"),
+    );
+    f.setCalls([
+      { name: "recruiting_feedback", args: feedback, executionId: "feedback-unknown-commit" },
+    ]);
+
+    await f.run("native commit acknowledgement lost");
+
+    expect(executeRecruitingFeedback).toHaveBeenCalledOnce();
+    expect(f.results).toEqual([]);
+    expect(f.effects).toEqual([
+      expect.objectContaining({
+        kind: "recruiting_feedback",
+        status: "executing",
+      }),
+    ]);
+    expect(f.effects[0]).not.toHaveProperty("result");
+    expect(f.memoryCommit).not.toHaveBeenCalled();
+    expect(f.semanticSave).not.toHaveBeenCalled();
+  });
+
+  it("returns role feedback as a proposal without applying a role or memory mutation", async () => {
+    const f = fixture("run-role-feedback-proposal");
+    const proposal = {
+      target: "role" as const,
+      operation: "revise" as const,
+      roleId: "role-1",
+      expectedRoleRevision: 1,
+      summary: "Clarify personal geometry implementation",
+      intent: feedback.intent,
+      sourceRefs: [],
+    } satisfies RecruitingFeedbackInput;
+    const result = {
+      status: "proposed" as const,
+      nextTool: "recruiting_role" as const,
+      feedback: proposal,
+      source,
+      workspace: null,
+    };
+    vi.mocked(executeRecruitingFeedback).mockResolvedValue(result);
+    f.setCalls([
+      { name: "recruiting_feedback", args: proposal, executionId: "role-feedback-proposal" },
+    ]);
+
+    await f.run();
+
+    expect(f.results).toEqual([result]);
+    expect(f.effects[0]?.result).toEqual(result);
+    expect(executeRecruitingRoleTool).not.toHaveBeenCalled();
+    expect(loadRecruitingRunContext).not.toHaveBeenCalled();
+    expect(f.memoryCommit).not.toHaveBeenCalled();
+    expect(f.semanticSave).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    { name: "remember", scope: "bot" as const },
+    { name: "save_shared_memory", scope: "user" as const },
+  ])(
+    "routes $name feedback through the helper with the exact native document proposal",
+    async ({ name, scope }) => {
+      const f = fixture(`run-feedback-${name}`);
+      f.runData.sourceMessageId = "human-feedback";
+      f.prisma.actionApprovalRule.findMany.mockResolvedValue([
+        { effect: "always_allow", matchKind: "tool", matchValue: name },
+      ]);
+      const proposal = { ...feedback, scope, expectedRevision: 7 };
+      const result = {
+        ...saved,
+        feedback: proposal,
+        document: { ...saved.document, scope, revision: 8 },
+      };
+      const body = `Existing durable fact\n\n${feedback.content}`;
+      const args = {
+        path: "MEMORY.md",
+        content: body,
+        expectedRevision: 7,
+        recruitingFeedback: proposal,
+      };
+      vi.mocked(executeRecruitingFeedback).mockImplementation(async () => {
+        expect(f.effects).toEqual([
+          expect.objectContaining({ kind: name, status: "executing", request: args }),
+        ]);
+        return result;
+      });
+      f.setCalls([{ name, args, executionId: "feedback-native-document" }]);
+
+      await f.run();
+
+      expect(executeRecruitingFeedback).toHaveBeenCalledWith(
+        expect.objectContaining({
+          prisma: f.prisma,
+          memory: expect.objectContaining({ commit: f.memoryCommit }),
+        }),
+        expect.objectContaining({ runId: f.runData.id, sourceMessageId: "human-feedback" }),
+        proposal,
+        expect.objectContaining({ botId: "bot-1" }),
+        { expectedMemory: { scope, path: "MEMORY.md", expectedRevision: 7, content: body } },
+      );
+      expect(f.results).toEqual([result]);
+      expect(f.memoryCommit).not.toHaveBeenCalled();
+      expect(f.semanticSave).not.toHaveBeenCalled();
+      f.setCalls([{ name, args, executionId: "feedback-native-after-restart" }]);
+      await f.run();
+      expect(executeRecruitingFeedback).toHaveBeenCalledOnce();
+      expect(f.results).toEqual([result, result]);
+    },
+  );
+
+  it.each(["remember", "save_shared_memory", "save_memory"])(
+    "rechecks the current role before %s dispatch after a role tool binds midrun",
+    async (name) => {
+      const f = fixture(`run-feedback-bind-midrun-${name}`);
+      f.prisma.actionApprovalRule.findMany.mockResolvedValue([
+        { effect: "always_allow", matchKind: "tool", matchValue: name },
+      ]);
+      if (name === "save_memory") {
+        f.memoryProviderResolve.mockResolvedValue({
+          provider: f.semanticMemory,
+          defaultScope: "isolated",
+        });
+      }
+      vi.mocked(executeRecruitingRoleTool).mockImplementation(async () => {
+        f.thread.activeRecruitingRoleId = "role-1";
+        return { status: "saved", workspace: null, source: null, changed: true };
+      });
+      f.setCalls([
+        {
+          name: "recruiting_role",
+          args: {
+            operation: "bind",
+            roleId: "role-1",
+            intent: { basis: "direct", quote: "Use this role" },
+          },
+          executionId: "bind-role",
+        },
+        {
+          name,
+          args: {
+            path: "MEMORY.md",
+            content: "Ungrounded recruiting preference",
+            expectedRevision: 0,
+          },
+          executionId: "memory-after-bind",
+        },
+      ]);
+
+      await f.run();
+
+      expect(f.thread.activeRecruitingRoleId).toBe("role-1");
+      expect(f.results[1]).toEqual(expect.objectContaining({ error: expect.any(String) }));
+      expect(f.memoryCommit).not.toHaveBeenCalled();
+      expect(f.semanticSave).not.toHaveBeenCalled();
+    },
+  );
+
+  it("routes save_memory feedback to native memory without also saving to the semantic provider", async () => {
+    const f = fixture("run-feedback-semantic");
+    f.thread.activeRecruitingRoleId = "role-1";
+    f.memoryProviderResolve.mockResolvedValue({
+      provider: f.semanticMemory,
+      defaultScope: "isolated",
+    });
+    const proposal = { ...feedback, expectedRevision: 3 };
+    const result = { ...saved, feedback: proposal, document: { ...saved.document, revision: 4 } };
+    const body = `Existing durable fact\n\n${feedback.content}`;
+    const args = { content: body, recruitingFeedback: proposal };
+    vi.mocked(executeRecruitingFeedback).mockImplementation(async () => {
+      expect(f.effects).toEqual([
+        expect.objectContaining({
+          kind: "save_memory",
+          status: "executing",
+          request: args,
+        }),
+      ]);
+      return result;
+    });
+    f.setCalls([{ name: "save_memory", args, executionId: "semantic-feedback" }]);
+
+    await f.run();
+
+    expect(executeRecruitingFeedback).toHaveBeenCalledWith(
+      expect.anything(),
+      expect.objectContaining({ runId: f.runData.id }),
+      proposal,
+      expect.objectContaining({ botId: "bot-1" }),
+      { expectedMemory: { scope: "bot", path: "MEMORY.md", expectedRevision: 3, content: body } },
+    );
+    expect(f.results).toEqual([result]);
+    expect(f.memoryCommit).not.toHaveBeenCalled();
+    expect(f.semanticSave).not.toHaveBeenCalled();
+  });
+
+  it("keeps unbound save_memory without recruiting feedback on the existing semantic path", async () => {
+    const f = fixture("run-general-semantic");
+    f.memoryProviderResolve.mockResolvedValue({
+      provider: f.semanticMemory,
+      defaultScope: "isolated",
+    });
+    f.setCalls([
+      {
+        name: "save_memory",
+        args: { content: "General durable fact" },
+        executionId: "ordinary-semantic",
+      },
+    ]);
+
+    await f.run();
+
+    expect(f.semanticSave).toHaveBeenCalledWith(
+      {
+        content: "General durable fact",
+        scope: "isolated",
+        botId: "bot-1",
+        source: { kind: "durable" },
+      },
+      expect.objectContaining({ runId: f.runData.id }),
+    );
+    expect(executeRecruitingFeedback).not.toHaveBeenCalled();
+    expect(f.memoryCommit).not.toHaveBeenCalled();
+  });
+
+  it("applies the existing shared-memory approval rule before user-scope feedback", async () => {
+    const f = fixture("run-feedback-approval");
+    const shared = { ...feedback, scope: "user" as const };
+    f.prisma.actionApprovalRule.findMany.mockResolvedValue([
+      { effect: "require_approval", matchKind: "tool", matchValue: "save_shared_memory" },
+    ]);
+    vi.mocked(executeRecruitingFeedback).mockResolvedValue({ ...saved, feedback: shared });
+    f.setCalls([
+      { name: "recruiting_feedback", args: shared, executionId: "shared-feedback-approval" },
+    ]);
+
+    await f.run();
+
+    expect(f.pauseRunForInput).toHaveBeenCalledOnce();
+    expect(executeRecruitingFeedback).not.toHaveBeenCalled();
+    expect(f.memoryCommit).not.toHaveBeenCalled();
+    expect(f.effects).toEqual([
+      expect.objectContaining({ kind: "recruiting_feedback", status: "intended", request: shared }),
+    ]);
+  });
+
+  it("retains the canonical shared-memory connector approval rule for feedback", async () => {
+    const f = fixture("run-feedback-connector-approval");
+    const shared = { ...feedback, scope: "user" as const };
+    f.prisma.actionApprovalRule.findMany.mockResolvedValue([
+      { effect: "require_approval", matchKind: "connector", matchValue: "save" },
+    ]);
+    f.setCalls([
+      { name: "recruiting_feedback", args: shared, executionId: "shared-feedback-connector" },
+    ]);
+    await f.run();
+    expect(f.pauseRunForInput).toHaveBeenCalledOnce();
+    expect(executeRecruitingFeedback).not.toHaveBeenCalled();
+  });
+
+  it("retains feedback's own approval requirement when native bot memory is always allowed", async () => {
+    const f = fixture("run-feedback-own-approval");
+    f.prisma.actionApprovalRule.findMany.mockResolvedValue([
+      { effect: "require_approval", matchKind: "tool", matchValue: "recruiting_feedback" },
+      { effect: "always_allow", matchKind: "tool", matchValue: "remember" },
+    ]);
+    vi.mocked(executeRecruitingFeedback).mockResolvedValue(saved);
+    f.setCalls([
+      { name: "recruiting_feedback", args: feedback, executionId: "feedback-own-approval" },
+    ]);
+
+    await f.run();
+
+    expect(f.pauseRunForInput).toHaveBeenCalledOnce();
+    expect(executeRecruitingFeedback).not.toHaveBeenCalled();
+    expect(f.memoryCommit).not.toHaveBeenCalled();
+    expect(f.effects).toEqual([
+      expect.objectContaining({
+        kind: "recruiting_feedback",
+        status: "intended",
+        request: feedback,
+      }),
+    ]);
+  });
+
+  it("respects disabled shared memory when feedback requests user scope", async () => {
+    const f = fixture("run-feedback-disabled-shared");
+    f.disabledBuiltinTools.push("save_shared_memory");
+    const shared = { ...feedback, scope: "user" as const };
+    vi.mocked(executeRecruitingFeedback).mockResolvedValue({ ...saved, feedback: shared });
+    f.setCalls([
+      { name: "recruiting_feedback", args: shared, executionId: "shared-feedback-disabled" },
+    ]);
+
+    await f.run();
+
+    expect(f.results).toEqual([{ error: "This tool is disabled for this bot." }]);
+    expect(executeRecruitingFeedback).not.toHaveBeenCalled();
+    expect(f.memoryCommit).not.toHaveBeenCalled();
+    expect(f.semanticSave).not.toHaveBeenCalled();
   });
 });

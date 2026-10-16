@@ -1,9 +1,12 @@
 import { randomUUID } from "node:crypto";
+import type { AdapterContext, MemoryCommitRequest } from "@rakazo/adapter-kit";
 import type {
   Actor,
   CreateRecruitingRoleInput as CreateRoleInput,
   RecruitingArtifactRef,
   RecruitingAssessment,
+  RecruitingHumanIntent,
+  RecruitingPreferenceFeedbackInput,
   RecruitingRole,
   RecruitingRoleRevision,
   RecruitingRoleToolInput,
@@ -15,14 +18,18 @@ import {
   CreateRecruitingRoleInput,
   ProductEventSchema,
   RecruitingAssessmentSchema,
+  RecruitingHumanIntentSchema,
+  RecruitingPreferenceFeedbackSchema,
   RecruitingResearchActionSchema,
   RecruitingResearchTaskSchema,
   RecruitingRoleRevisionSchema,
   RecruitingRoleSchema,
   RecruitingRoleToolInputSchema,
+  RecruitingSourceRefSchema,
   ReviseRecruitingRoleInput,
   SaveRecruitingAssessmentInput,
 } from "@rakazo/contracts";
+import { applyRecruitingPreferenceEdit } from "@rakazo/core";
 import type { PrismaClient } from "./client.js";
 import { Prisma } from "./client.js";
 import { appendEventInTransaction } from "./events.js";
@@ -402,6 +409,214 @@ function compareHumanMessages(left: SourceMessage, right: SourceMessage): number
     : left.createdAt.getTime() - right.createdAt.getTime();
 }
 
+async function requireCurrentHumanSource(
+  tx: Tx,
+  actor: Actor,
+  run: Awaited<ReturnType<typeof lockLiveRecruitingRun>>["run"],
+  sourceMessageId: string | null,
+  quote: string,
+) {
+  const { source, steering } = await requireRunSource(tx, actor, run, sourceMessageId);
+  const original =
+    run.sourceMessageId === source.id
+      ? source
+      : await tx.message.findUnique({
+          where: { id: run.sourceMessageId ?? "" },
+          include: humanMessageInclude,
+        });
+  if (
+    !isNativeHumanMessage(source) ||
+    (source.id === run.sourceMessageId &&
+      !["user", "follow_up", "reaction"].includes(run.trigger) &&
+      !steering.some((item) => item.messageId === source.id)) ||
+    (original &&
+      isNativeHumanMessage(original) &&
+      original.threadId === source.threadId &&
+      original.seq > source.seq) ||
+    steering.some((item) => isNativeHumanMessage(item.message) && item.message.seq > source.seq)
+  )
+    throw new IsolationError();
+  const quoteIndex = (source.blocks as { kind: string; text?: string }[]).findIndex(
+    (block) =>
+      block.kind === "text" && typeof block.text === "string" && block.text.includes(quote),
+  );
+  if (quoteIndex < 0) throw new IsolationError();
+  const humanSource: RecruitingSourceRef = {
+    id: `human-message:${source.id}`,
+    kind: "original_material",
+    anchor: { kind: "message", messageId: source.id, locator: `blocks[${quoteIndex}].text` },
+    readState: "read",
+    readAt: new Date().toISOString(),
+    quote,
+  };
+  return { source: humanSource, message: source };
+}
+
+export async function readRecruitingFeedbackContext(
+  prisma: PrismaClient,
+  actor: Actor,
+  input: {
+    runId: string;
+    sourceMessageId: string | null;
+    intent: RecruitingHumanIntent;
+    roleId?: string;
+    expectedRoleRevision?: number;
+    sourceRefs: readonly RecruitingSourceRef[];
+  },
+): Promise<{
+  source: RecruitingSourceRef;
+  workspace: RoleSnapshot | null;
+  threadId: string;
+  botId: string;
+}> {
+  const intent = RecruitingHumanIntentSchema.parse(input.intent);
+  const sourceRefs = RecruitingSourceRefSchema.array().parse(input.sourceRefs);
+  return prisma.$transaction(async (tx) => {
+    const { run, thread } = await lockLiveRecruitingRun(tx, actor, input.runId);
+    const { source } = await requireCurrentHumanSource(
+      tx,
+      actor,
+      run,
+      input.sourceMessageId,
+      intent.quote,
+    );
+    const workspace = thread.activeRecruitingRoleId
+      ? await roleSnapshot(
+          tx,
+          actor,
+          await requireRole(tx, actor, thread.activeRecruitingRoleId, true),
+        )
+      : null;
+    if (input.roleId !== undefined || input.expectedRoleRevision !== undefined) {
+      if (
+        !input.roleId ||
+        input.expectedRoleRevision === undefined ||
+        workspace?.role.id !== input.roleId
+      )
+        throw new IsolationError();
+      if (workspace.role.revision !== input.expectedRoleRevision)
+        throw new RecruitingConflictError();
+    }
+    await validateSources(tx, actor, sourceRefs);
+    return { source, workspace, threadId: run.threadId, botId: run.botId };
+  });
+}
+
+export type RecruitingMemoryAdmission = {
+  source: RecruitingSourceRef;
+  operation: RecruitingPreferenceFeedbackInput["operation"];
+  previousAnchor: { start: number; end: number; quote: string } | null;
+  anchor: { start: number; end: number; quote: string } | null;
+  runId: string;
+  threadId: string;
+  botId: string;
+  previousSourceVerified: boolean;
+};
+
+export async function authorizeRecruitingMemoryCommit(
+  tx: Tx,
+  request: MemoryCommitRequest,
+  context: AdapterContext,
+  existing: { id: string; content: string; revision: number } | null,
+): Promise<RecruitingMemoryAdmission | undefined> {
+  if (!context.runId) {
+    if (request.recruiting) throw new IsolationError();
+    return;
+  }
+  const actor: Actor = {
+    spaceId: context.spaceId,
+    userId: context.userId,
+    email: "",
+    isDeploymentOwner: false,
+  };
+  const { run, thread } = await lockLiveRecruitingRun(tx, actor, context.runId);
+  if (
+    request.sourceRunId !== run.id ||
+    request.sourceThreadId !== run.threadId ||
+    (context.botId !== undefined && context.botId !== run.botId)
+  )
+    throw new IsolationError();
+  if (!thread.activeRecruitingRoleId && !request.recruiting) return;
+  if (!request.recruiting) throw new IsolationError();
+  const feedback = RecruitingPreferenceFeedbackSchema.parse(request.recruiting.feedback);
+  if (
+    feedback.intent.basis !== "direct" ||
+    feedback.scope !== request.scope ||
+    feedback.path !== request.path ||
+    feedback.expectedRevision !== request.expectedRevision ||
+    (feedback.scope === "bot" ? request.botId !== run.botId : request.botId !== undefined)
+  )
+    throw new IsolationError();
+  const { source, message } = await requireCurrentHumanSource(
+    tx,
+    actor,
+    run,
+    request.recruiting.sourceMessageId,
+    feedback.intent.quote,
+  );
+  await validateSources(tx, actor, feedback.sourceRefs);
+  if (thread.activeRecruitingRoleId)
+    await roleSnapshot(
+      tx,
+      actor,
+      await requireRole(tx, actor, thread.activeRecruitingRoleId, true),
+    );
+  const edit = applyRecruitingPreferenceEdit(existing?.content ?? "", feedback);
+  if ((existing?.revision ?? 0) !== feedback.expectedRevision || edit.content !== request.content)
+    throw new RecruitingConflictError();
+  let previousSourceVerified = !existing;
+  if (existing) {
+    const previousRevision = await tx.memoryRevision.findUnique({
+      where: { documentId_revision: { documentId: existing.id, revision: existing.revision } },
+    });
+    const receipt =
+      previousRevision?.sourceRunId && previousRevision.sourceThreadId
+        ? await tx.event.findFirst({
+            where: {
+              spaceId: actor.spaceId,
+              threadId: previousRevision.sourceThreadId,
+              runId: previousRevision.sourceRunId,
+              type: "memory.revised",
+              AND: [
+                { payload: { path: ["kind"], equals: "recruiting_preference" } },
+                { payload: { path: ["documentId"], equals: existing.id } },
+                { payload: { path: ["revision"], equals: existing.revision } },
+                { payload: { path: ["scope"], equals: request.scope } },
+                { payload: { path: ["path"], equals: request.path } },
+              ],
+            },
+          })
+        : null;
+    if (receipt) {
+      const previousSource = RecruitingSourceRefSchema.parse(
+        (receipt.payload as { source?: unknown }).source,
+      );
+      if (previousSource.anchor.kind !== "message") throw new IsolationError();
+      const previousMessage = await tx.message.findUnique({
+        where: { id: previousSource.anchor.messageId },
+        include: humanMessageInclude,
+      });
+      if (previousMessage) {
+        await validateSources(tx, actor, [previousSource]);
+        if (!isNativeHumanMessage(previousMessage)) throw new IsolationError();
+        if (previousMessage.id !== message.id && compareHumanMessages(previousMessage, message) > 0)
+          throw new RecruitingConflictError();
+        previousSourceVerified = true;
+      }
+    }
+  }
+  return {
+    source,
+    operation: feedback.operation,
+    previousAnchor: feedback.operation === "add" ? null : feedback.anchor,
+    anchor: edit.anchor,
+    runId: run.id,
+    threadId: run.threadId,
+    botId: run.botId,
+    previousSourceVerified,
+  };
+}
+
 export async function executeRecruitingRoleMutation(
   prisma: PrismaClient,
   actor: Actor,
@@ -412,41 +627,13 @@ export async function executeRecruitingRoleMutation(
   if (input.operation === "read") throw new IsolationError();
   return prisma.$transaction(async (tx) => {
     const { run, thread } = await lockLiveRecruitingRun(tx, actor, context.runId);
-    const { source, steering } = await requireRunSource(tx, actor, run, context.sourceMessageId);
-    const original =
-      run.sourceMessageId === source.id
-        ? source
-        : await tx.message.findUnique({
-            where: { id: run.sourceMessageId ?? "" },
-            include: humanMessageInclude,
-          });
-    if (
-      !isNativeHumanMessage(source) ||
-      (source.id === run.sourceMessageId &&
-        !["user", "follow_up", "reaction"].includes(run.trigger) &&
-        !steering.some((item) => item.messageId === source.id)) ||
-      (original &&
-        isNativeHumanMessage(original) &&
-        original.threadId === source.threadId &&
-        original.seq > source.seq) ||
-      steering.some((item) => isNativeHumanMessage(item.message) && item.message.seq > source.seq)
-    )
-      throw new IsolationError();
-    const quoteIndex = (source.blocks as { kind: string; text?: string }[]).findIndex(
-      (block) =>
-        block.kind === "text" &&
-        typeof block.text === "string" &&
-        block.text.includes(input.intent.quote),
+    const { source: humanSource, message: source } = await requireCurrentHumanSource(
+      tx,
+      actor,
+      run,
+      context.sourceMessageId,
+      input.intent.quote,
     );
-    if (quoteIndex < 0) throw new IsolationError();
-    const humanSource: RecruitingSourceRef = {
-      id: `human-message:${source.id}`,
-      kind: "original_material",
-      anchor: { kind: "message", messageId: source.id, locator: `blocks[${quoteIndex}].text` },
-      readState: "read",
-      readAt: new Date().toISOString(),
-      quote: input.intent.quote,
-    };
     const current = thread.activeRecruitingRoleId
       ? await roleSnapshot(
           tx,

@@ -1,6 +1,7 @@
 import type {
   CacheCapabilities as ConnectionCacheCapabilities,
   ConnectionCatalogItem,
+  RecruitingPreferenceFeedbackInput,
   SandboxKind,
 } from "@rakazo/contracts";
 
@@ -306,6 +307,11 @@ export interface MemoryCommitRequest {
   expectedRevision: number;
   sourceRunId?: string;
   sourceThreadId?: string;
+  /** Trusted recruiting tool provenance; identities still come from AdapterContext and the live run. */
+  recruiting?: {
+    sourceMessageId: string | null;
+    feedback: RecruitingPreferenceFeedbackInput;
+  };
 }
 
 export interface MemoryRevision {

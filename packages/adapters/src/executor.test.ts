@@ -28,6 +28,31 @@ import { UnavailableModelForAuthError } from "./model-selection.js";
 import { RetiredModelCredentialError, serializeModelSecret } from "./pi-oauth.js";
 
 describe("bot tool permissions", () => {
+  it("offers feedback with native and semantic memory while respecting channel and tool permissions", () => {
+    const options = {
+      graphicalToolsAllowed: false,
+      groupId: null,
+      trigger: "user",
+      semanticMemoryEnabled: false,
+      messagingChannelRun: false,
+    };
+    for (const semanticMemoryEnabled of [false, true]) {
+      expect(
+        selectBuiltinToolsForRun({ ...options, semanticMemoryEnabled }).map((tool) => tool.name),
+      ).toContain("recruiting_feedback");
+    }
+    expect(
+      selectBuiltinToolsForRun({ ...options, disabledBuiltinTools: ["recruiting_feedback"] }).some(
+        (tool) => tool.name === "recruiting_feedback",
+      ),
+    ).toBe(false);
+    expect(
+      selectBuiltinToolsForRun({ ...options, messagingChannelRun: true }).some(
+        (tool) => tool.name === "recruiting_feedback",
+      ),
+    ).toBe(false);
+  });
+
   it("offers native recruiting role state without a computer and respects disabled tools", () => {
     const options = {
       graphicalToolsAllowed: false,

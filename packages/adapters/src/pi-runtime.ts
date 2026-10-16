@@ -1050,6 +1050,9 @@ function toAgentTool(tool: ConnectorTool, host: ToolHost, exposedName: string): 
           content: raw.content,
           path: String(raw.path ?? "MEMORY.md"),
           expectedRevision: raw.expectedRevision,
+          ...(raw.recruitingFeedback === undefined
+            ? {}
+            : { recruitingFeedback: raw.recruitingFeedback }),
         };
       }
       if (tool.name === "request_takeover") {
@@ -1680,6 +1683,14 @@ function builtinParameters(tool: ConnectorTool) {
       content: Type.String(),
       path: Type.Optional(Type.String()),
       expectedRevision: Type.Integer({ minimum: 0 }),
+      recruitingFeedback: Type.Optional(
+        Type.Unsafe(
+          (tool.inputSchema.properties as Record<string, unknown>).recruitingFeedback as Record<
+            string,
+            unknown
+          >,
+        ),
+      ),
     });
   }
   if (tool.name === "shell") {

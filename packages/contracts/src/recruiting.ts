@@ -298,7 +298,71 @@ export const ReviseRecruitingRoleInput = z.strictObject({
 });
 export type ReviseRecruitingRoleInput = z.infer<typeof ReviseRecruitingRoleInput>;
 
-const RoleToolIntent = z.strictObject({ basis: z.enum(["direct", "inferred"]), quote: Text });
+export const RecruitingHumanIntentSchema = z.strictObject({
+  basis: z.enum(["direct", "inferred"]),
+  quote: Text,
+});
+export type RecruitingHumanIntent = z.infer<typeof RecruitingHumanIntentSchema>;
+
+const PreferenceAnchor = z
+  .strictObject({
+    start: z.number().int().nonnegative(),
+    end: z.number().int().positive(),
+    quote: z.string().min(1),
+  })
+  .refine((anchor) => anchor.end > anchor.start, { message: "Anchor end must follow its start" });
+const PreferenceContent = z.string().refine((content) => content.trim().length > 0, {
+  message: "Preference content must not be blank",
+});
+const PreferenceFeedback = {
+  target: z.literal("preference"),
+  scope: z.enum(["bot", "user"]),
+  path: Text,
+  expectedRevision: z.number().int().nonnegative(),
+  intent: RecruitingHumanIntentSchema,
+  sourceRefs: SourceRefs,
+};
+export const RecruitingPreferenceFeedbackSchema = z.discriminatedUnion("operation", [
+  z.strictObject({
+    ...PreferenceFeedback,
+    operation: z.literal("add"),
+    content: PreferenceContent,
+  }),
+  z.strictObject({
+    ...PreferenceFeedback,
+    operation: z.literal("replace"),
+    anchor: PreferenceAnchor,
+    content: PreferenceContent,
+  }),
+  z.strictObject({
+    ...PreferenceFeedback,
+    operation: z.literal("revoke"),
+    anchor: PreferenceAnchor,
+  }),
+]);
+export type RecruitingPreferenceFeedbackInput = z.infer<typeof RecruitingPreferenceFeedbackSchema>;
+
+const ScopedFeedback = {
+  roleId: RecruitingId,
+  expectedRoleRevision: Revision,
+  summary: Text,
+  intent: RecruitingHumanIntentSchema,
+  sourceRefs: SourceRefs,
+};
+export const RecruitingFeedbackInputSchema = z.discriminatedUnion("target", [
+  z.strictObject({ ...ScopedFeedback, target: z.literal("role"), operation: z.literal("revise") }),
+  z.strictObject({ ...ScopedFeedback, target: z.literal("round"), operation: z.literal("scope") }),
+  z.strictObject({
+    ...ScopedFeedback,
+    target: z.literal("candidate"),
+    operation: z.literal("fact"),
+    candidateKey: RecruitingId,
+    expectedAssessmentVersion: z.number().int().nonnegative(),
+  }),
+  RecruitingPreferenceFeedbackSchema,
+]);
+export type RecruitingFeedbackInput = z.infer<typeof RecruitingFeedbackInputSchema>;
+
 const RoleToolDefinition = {
   ...RoleDefinition,
   // Runtime adds the verified human source; supplied JD/material references retain their ACLs.
@@ -306,7 +370,7 @@ const RoleToolDefinition = {
   criteria: z
     .array(RecruitingCriterionSchema.unwrap().extend({ sourceRefs: SourceRefs }))
     .readonly(),
-  intent: RoleToolIntent,
+  intent: RecruitingHumanIntentSchema,
 };
 
 export const RecruitingRoleToolInputSchema = z.discriminatedUnion("operation", [
@@ -327,7 +391,7 @@ export const RecruitingRoleToolInputSchema = z.discriminatedUnion("operation", [
   z.strictObject({
     operation: z.literal("bind"),
     roleId: RecruitingId.nullable(),
-    intent: RoleToolIntent,
+    intent: RecruitingHumanIntentSchema,
   }),
 ]);
 export type RecruitingRoleToolInput = z.infer<typeof RecruitingRoleToolInputSchema>;

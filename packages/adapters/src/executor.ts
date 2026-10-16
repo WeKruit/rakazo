@@ -35,7 +35,12 @@ import {
   routineWakeupJob,
   runContinueJob,
 } from "@rakazo/adapter-kit";
-import type { ComputerCommand, MessageBlock, RunStatus } from "@rakazo/contracts";
+import type {
+  ComputerCommand,
+  MessageBlock,
+  RecruitingPreferenceFeedbackInput,
+  RunStatus,
+} from "@rakazo/contracts";
 import {
   ATTACHMENT_MAX_BYTES,
   BOT_DESCRIPTION_MAX_LENGTH,
@@ -50,6 +55,7 @@ import {
   HistorySearchInputSchema,
   isAttachmentImageMimeType,
   OPENAI_COMPATIBLE_PROVIDER_ID,
+  RecruitingPreferenceFeedbackSchema,
 } from "@rakazo/contracts";
 import type { ActionApprovalRule, ToolCallStreak } from "@rakazo/core";
 import {
@@ -311,6 +317,10 @@ import {
 } from "./plot-tool.js";
 import { actorMayUsePrivateEndpoint } from "./private-endpoint.js";
 import { loadRecruitingRunContext } from "./recruiting-context.js";
+import {
+  executeRecruitingFeedback,
+  RecruitingFeedbackValidationError,
+} from "./recruiting-feedback.js";
 import { executeRecruitingRoleTool } from "./recruiting-tools.js";
 import type { RemoteTransportDependencies } from "./remote-mcp.js";
 import { assertSafeRemoteUrl } from "./remote-mcp.js";
@@ -4343,6 +4353,36 @@ export function createRunExecutor(deps: ExecutorDeps) {
             }
           }
           const viaConnector = !BUILTIN_AGENT_TOOL_NAMES.has(name);
+          const memoryWrite = ["remember", "save_shared_memory", "save_memory"].includes(name);
+          const currentMemoryThread = memoryWrite
+            ? await deps.prisma.thread.findUniqueOrThrow({
+                where: { id: thread.id },
+                select: { activeRecruitingRoleId: true },
+              })
+            : undefined;
+          const guardedMemory =
+            memoryWrite &&
+            (args.recruitingFeedback !== undefined ||
+              Boolean(currentMemoryThread?.activeRecruitingRoleId));
+          let recruitingPreference: RecruitingPreferenceFeedbackInput | undefined;
+          if (guardedMemory || (name === "recruiting_feedback" && args.target === "preference")) {
+            const parsed = RecruitingPreferenceFeedbackSchema.safeParse(
+              name === "recruiting_feedback" ? args : args.recruitingFeedback,
+            );
+            if (!parsed.success)
+              return {
+                error:
+                  "Recruiting memory requires a reusable-preference recruitingFeedback with its loaded document revision and exact edit.",
+              };
+            recruitingPreference = parsed.data;
+          }
+          const policyToolName = recruitingPreference
+            ? recruitingPreference.scope === "user"
+              ? "save_shared_memory"
+              : "remember"
+            : name;
+          if (disabledBuiltinTools.has(policyToolName))
+            return { error: "This tool is disabled for this bot." };
           // Declared effect of the operation this call dispatches (installed API method and
           // flag). Install config is immutable per route resource, so it cannot drift before
           // execute; a catalog call uses the tool it was just resolved to.
@@ -4351,31 +4391,58 @@ export function createRunExecutor(deps: ExecutorDeps) {
             : undefined;
           const requiresUnattendedApproval = unattendedTriggerToolRequiresApproval(
             run.trigger,
-            name,
+            policyToolName,
             viaConnector,
             declaredReadOnly,
           );
           const requiresApprovalByDefault =
             requiresUnattendedApproval ||
-            toolRequiresApproval(name, viaConnector, declaredReadOnly);
+            toolRequiresApproval(policyToolName, viaConnector, declaredReadOnly);
           const requiresMandatoryApproval =
-            requiresUnattendedApproval || toolRequiresExplicitApproval(name);
+            requiresUnattendedApproval || toolRequiresExplicitApproval(policyToolName);
           const connectorKind = connectorKindFromToolName(
             name,
             connectedPlugins.map((plugin) => plugin.provider),
           );
-          const approvalResolved = requiresMandatoryApproval
+          const policyConnectorKind =
+            policyToolName === name
+              ? connectorKind
+              : connectorKindFromToolName(
+                  policyToolName,
+                  connectedPlugins.map((plugin) => plugin.provider),
+                );
+          let approvalResolved = requiresMandatoryApproval
             ? {
                 decision: "ask" as const,
                 source: "default" as const,
                 matchingRules: [],
               }
             : resolveActionApprovalDetail({
-                toolName: name,
-                connectorKind,
+                toolName: policyToolName,
+                connectorKind: policyConnectorKind,
                 readOnly: declaredReadOnly,
                 rules: await loadApprovalRules(),
               });
+          if (!requiresMandatoryApproval && policyToolName !== name) {
+            const actual = resolveActionApprovalDetail({
+              toolName: name,
+              connectorKind,
+              readOnly: declaredReadOnly,
+              rules: await loadApprovalRules(),
+            });
+            const ask = actual.decision === "ask" || approvalResolved.decision === "ask";
+            approvalResolved = {
+              decision: ask ? "ask" : "allow",
+              source: ask
+                ? "require_approval"
+                : actual.source === "always_allow" || approvalResolved.source === "always_allow"
+                  ? "always_allow"
+                  : "default",
+              matchingRules: [
+                ...new Set([...approvalResolved.matchingRules, ...actual.matchingRules]),
+              ],
+            };
+          }
           const autoReviewPref = requiresMandatoryApproval
             ? false
             : await loadAutoReviewPreference();
@@ -5259,6 +5326,93 @@ export function createRunExecutor(deps: ExecutorDeps) {
                 throw error;
               }
             }, finish);
+          }
+          if (name === "recruiting_feedback" || guardedMemory) {
+            if (guardedMemory) {
+              const invalid =
+                name === "save_memory"
+                  ? typeof args.content !== "string"
+                    ? "content must be a string"
+                    : undefined
+                  : ((name === "save_shared_memory" ? sharedMemorySaveError(args) : undefined) ??
+                    nativeMemorySaveError(args));
+              if (invalid) return finish({ error: invalid });
+            }
+            if (applied && !claimedEffect) {
+              const early = await claimOrReturn("intended");
+              if (early !== undefined) return early;
+            }
+            try {
+              const result = await executeRecruitingFeedback(
+                { prisma: deps.prisma, memory: deps.memory },
+                {
+                  actor: {
+                    spaceId: run.spaceId,
+                    userId: run.userId,
+                    email: "",
+                    isDeploymentOwner: false,
+                  },
+                  runId,
+                  sourceMessageId: recruitingSourceMessageId,
+                },
+                guardedMemory ? recruitingPreference : args,
+                context,
+                guardedMemory
+                  ? {
+                      expectedMemory: {
+                        scope:
+                          name === "save_memory"
+                            ? recruitingPreference!.scope
+                            : name === "save_shared_memory"
+                              ? "user"
+                              : "bot",
+                        path:
+                          name === "save_memory"
+                            ? recruitingPreference!.path
+                            : typeof args.path === "string"
+                              ? args.path.trim()
+                              : "MEMORY.md",
+                        expectedRevision:
+                          name === "save_memory"
+                            ? recruitingPreference!.expectedRevision
+                            : (args.expectedRevision as number),
+                        content: args.content as string,
+                      },
+                    }
+                  : undefined,
+              );
+              return finish(redactConnectorPayload(result, runSecrets));
+            } catch (error) {
+              if (error instanceof IsolationError)
+                return finish({ error: "Recruiting feedback or source is unavailable" });
+              if (error instanceof RecruitingConflictError)
+                return finish({ error: error.message, code: "CONFLICT" });
+              if (
+                error instanceof Error &&
+                error.message === MEMORY_REVISION_CONFLICT_ERROR &&
+                recruitingPreference
+              ) {
+                const current = await deps.memory.read(
+                  {
+                    scope: recruitingPreference.scope,
+                    path: recruitingPreference.path,
+                    ...(recruitingPreference.scope === "bot" ? { botId: bot.id } : {}),
+                  },
+                  context,
+                );
+                return finish({
+                  error: error.message,
+                  code: "CONFLICT",
+                  currentRevision: current.documents[0]?.revision ?? 0,
+                });
+              }
+              if (
+                error instanceof RecruitingFeedbackValidationError ||
+                (error instanceof Error && error.name === "ZodError")
+              )
+                return finish({ error: sanitizeConnectorError(error, runSecrets) });
+              throw error;
+            }
           }
           if (name === "recruiting_role") {
             if (!deps.artifacts)
@@ -7702,6 +7856,7 @@ export function selectBuiltinToolsForRun(options: {
         (![
           "remember",
           "recruiting_role",
+          "recruiting_feedback",
           "read_memory",
           "save_shared_memory",
           "save_memory",

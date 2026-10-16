@@ -2,6 +2,83 @@ import type { Verdict } from "@rakazo/contracts";
 import { describe, expect, it } from "vitest";
 import * as core from "./index.js";
 
+const preference = {
+  target: "preference",
+  scope: "user",
+  path: "preferences.md",
+  expectedRevision: 1,
+  intent: { basis: "direct", quote: "Remember this" },
+  sourceRefs: [],
+} as const;
+
+describe("exact recruiting preference edits", () => {
+  it("appends exact new content and returns its resulting UTF-16 anchor", () => {
+    const input = { ...preference, operation: "add" as const, content: "  prompt preference\n" };
+    expect(core.applyRecruitingPreferenceEdit?.("", input)).toEqual({
+      content: input.content,
+      anchor: { start: 0, end: input.content.length, quote: input.content },
+    });
+    expect(core.applyRecruitingPreferenceEdit?.("🙂 previous", input)).toEqual({
+      content: `🙂 previous\n\n${input.content}`,
+      anchor: {
+        start: "🙂 previous\n\n".length,
+        end: "🙂 previous\n\n".length + input.content.length,
+        quote: input.content,
+      },
+    });
+  });
+
+  it("replaces only the selected duplicate span and preserves every surrounding character", () => {
+    const content = "🙂 old\nkeep old\n";
+    const start = content.lastIndexOf("old");
+    const result = core.applyRecruitingPreferenceEdit?.(content, {
+      ...preference,
+      operation: "replace",
+      anchor: { start, end: start + 3, quote: "old" },
+      content: "new🙂",
+    });
+    expect(result).toEqual({
+      content: "🙂 old\nkeep new🙂\n",
+      anchor: { start, end: start + 5, quote: "new🙂" },
+    });
+  });
+
+  it("revokes only the exact span and allows the last preference to become empty", () => {
+    expect(
+      core.applyRecruitingPreferenceEdit?.("keep\nold\nkeep", {
+        ...preference,
+        operation: "revoke",
+        anchor: { start: 5, end: 8, quote: "old" },
+      }),
+    ).toEqual({ content: "keep\n\nkeep", anchor: null });
+    expect(
+      core.applyRecruitingPreferenceEdit?.("🙂", {
+        ...preference,
+        operation: "revoke",
+        anchor: { start: 0, end: 2, quote: "🙂" },
+      }),
+    ).toEqual({ content: "", anchor: null });
+  });
+
+  it("rejects stale, out-of-range and surrogate-splitting anchors without fuzzy matching", () => {
+    for (const anchor of [
+      { start: 0, end: 1, quote: "\ud83d" },
+      { start: 1, end: 2, quote: "\ude42" },
+      { start: -1, end: 2, quote: "🙂" },
+      { start: 0, end: 20, quote: "🙂 old" },
+      { start: 3, end: 6, quote: "new" },
+      { start: 3, end: 3, quote: "old" },
+    ])
+      expect(() =>
+        core.applyRecruitingPreferenceEdit?.("🙂 old", {
+          ...preference,
+          operation: "revoke",
+          anchor,
+        }),
+      ).toThrow();
+  });
+});
+
 const verdicts: Verdict[] = ["met", "unmet", "unknown"];
 const allTable: Verdict[][] = [
   ["met", "unmet", "unknown"],

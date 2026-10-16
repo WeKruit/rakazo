@@ -447,8 +447,23 @@ describe("Pi connector tool dispatch", () => {
     delete process.env.MAX_TOOL_CALLS_PER_TURN;
   });
 
-  it("passes the loaded native memory revision through Pi argument preparation", async () => {
-    const args = { path: "MEMORY.md", content: "Prepared text", expectedRevision: 2 };
+  it("passes native memory revision and recruiting feedback through Pi argument preparation", async () => {
+    const recruitingFeedback = {
+      target: "preference",
+      operation: "add",
+      scope: "bot",
+      path: "MEMORY.md",
+      expectedRevision: 2,
+      intent: { basis: "direct", quote: "Remember to show the complete prompt" },
+      sourceRefs: [],
+      content: "Show the complete prompt",
+    };
+    const args = {
+      path: "MEMORY.md",
+      content: "Prepared text",
+      expectedRevision: 2,
+      recruitingFeedback,
+    };
     fakeAgentState.invoke = { name: "remember", args };
     const executeTool = vi.fn(async () => ({ ok: true, revision: 3 }));
     for await (const _event of new PiAgentRuntime().run(
@@ -468,6 +483,18 @@ describe("Pi connector tool dispatch", () => {
       /* Exhaust the runtime. */
     }
     expect(executeTool.mock.calls[0]?.slice(0, 2)).toEqual(["remember", args]);
+    expect(fakeAgentState.tools.find((tool) => tool.name === "remember")).toEqual(
+      expect.objectContaining({
+        parameters: expect.objectContaining({
+          properties: expect.objectContaining({ recruitingFeedback: expect.anything() }),
+        }),
+      }),
+    );
+    expect(builtinAgentTools.find((tool) => tool.name === "remember")!.inputSchema).toEqual(
+      expect.objectContaining({
+        properties: expect.objectContaining({ recruitingFeedback: expect.anything() }),
+      }),
+    );
   });
 
   it("injects durable steering at Pi's next safe turn boundary", async () => {

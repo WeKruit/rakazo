@@ -855,6 +855,59 @@ describePostgres("recruiting domain (PostgreSQL)", () => {
       await expect(call(first.id)).rejects.toThrow(IsolationError);
     }
   });
+  it("reads feedback only from the current actual human and exact bound role revision", async () => {
+    expect(recruiting.readRecruitingFeedbackContext).toBeTypeOf("function");
+    const current = await recruiting.createRecruitingRole(prisma, actor, roleInput());
+    const task = await prisma.task.create({
+      data: { spaceId, userId, botId, threadId, prompt: "Feedback", status: "running" },
+    });
+    const run = await prisma.run.create({
+      data: {
+        spaceId,
+        userId,
+        botId,
+        threadId,
+        taskId: task.id,
+        sourceMessageId: messageId,
+        status: "running",
+        trigger: "user",
+      },
+    });
+    const input = {
+      runId: run.id,
+      sourceMessageId: messageId,
+      intent: { basis: "direct" as const, quote: "At least seven years" },
+      roleId: current.role.id,
+      expectedRoleRevision: current.role.revision,
+      sourceRefs: [],
+    };
+    const result = await recruiting.readRecruitingFeedbackContext(prisma, actor, input);
+    expect(result.workspace).toEqual(current);
+    expect(result.source.anchor).toMatchObject({ kind: "message", messageId });
+    await expect(
+      recruiting.readRecruitingFeedbackContext(prisma, actor, {
+        ...input,
+        expectedRoleRevision: 2,
+      }),
+    ).rejects.toThrow(recruiting.RecruitingConflictError);
+    await expect(
+      recruiting.readRecruitingFeedbackContext(prisma, actor, {
+        ...input,
+        sourceMessageId: otherMessageId,
+      }),
+    ).rejects.toThrow(IsolationError);
+    await expect(
+      recruiting.readRecruitingFeedbackContext(prisma, actor, {
+        ...input,
+        sourceRefs: [source(otherMessageId)],
+      }),
+    ).rejects.toThrow(IsolationError);
+    await prisma.run.update({ where: { id: run.id }, data: { status: "cancelled" } });
+    await expect(recruiting.readRecruitingFeedbackContext(prisma, actor, input)).rejects.toThrow(
+      IsolationError,
+    );
+  });
+
   it("records one immutable native adoption artifact and event per context nonce", async () => {
     expect(recruiting.recordRecruitingContextAdoption).toBeTypeOf("function");
     const current = await recruiting.createRecruitingRole(prisma, actor, roleInput());
