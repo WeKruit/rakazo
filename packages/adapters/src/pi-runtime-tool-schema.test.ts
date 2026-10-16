@@ -104,6 +104,19 @@ describe("jsonSchemaParameters", () => {
     expect(wire).not.toHaveProperty("oneOf");
   });
 
+  it("explains full reassessment inputs and exact source preservation after validation errors", () => {
+    const tool = builtinAgentTools.find((entry) => entry.name === "recruiting_assess")!;
+    for (const guidance of [
+      "Reassess shape:",
+      "questions:[]",
+      "atomJudgments:[]",
+      "employmentEvaluations:[]",
+      "including quote, selection and readAt",
+      "Correct a deterministic validation rejection",
+    ])
+      expect(tool.description).toContain(guidance);
+  });
+
   it("preserves typed assessment sources, reassessment and original-card questions through the native Pi validator", () => {
     const tool = builtinAgentTools.find((entry) => entry.name === "recruiting_assess")!;
     const parameters = parametersFor(tool);
@@ -146,7 +159,7 @@ describe("jsonSchemaParameters", () => {
       ],
       employmentEvaluations: [],
     };
-    for (const input of [
+    const inputs: ToolCall["arguments"][] = [
       save,
       { operation: "read", candidateKey: "candidate-1" },
       { ...save, operation: "reassess", expectedRevision: 1, atomJudgments: [] },
@@ -163,7 +176,8 @@ describe("jsonSchemaParameters", () => {
         question: "  What did you implement?  ",
         options: ["Code", "Library"],
       },
-    ]) {
+    ];
+    for (const input of inputs) {
       for (const schema of [tool.inputSchema, wire]) {
         expect(parseConnectorToolArgs(schema, input)).toEqual(input);
         expect(() => parseConnectorToolArgs(schema, { ...input, hardGate: "met" })).toThrow();

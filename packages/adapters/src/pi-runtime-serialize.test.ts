@@ -40,6 +40,34 @@ describe("serializeToolResult", () => {
     },
   );
 
+  it.each(["current", "retrieval"] as const)(
+    "returns complete assessment proof beyond 12k with %s",
+    (strategy) => {
+      const quote = "  Exact original material.\r\n".repeat(600);
+      const result = {
+        status: "current",
+        assessment: {
+          sourceRefs: [
+            {
+              id: "original",
+              readState: "read",
+              readAt: "2026-10-16T00:00:00.000Z",
+              quote,
+              selection: { kind: "message_text", blockIndex: 0, start: 0, end: quote.length },
+            },
+          ],
+          judgments: { employment: [] },
+        },
+      };
+      const text = serializeToolResult(result, strategy, "recruiting_assess", {
+        operation: "read",
+        candidateKey: "candidate",
+      });
+      expect(text.length).toBeGreaterThan(12_000);
+      expect(JSON.parse(text)).toEqual(result);
+    },
+  );
+
   it("keeps unrelated MCP results bounded even when they contain a roleContext field", () => {
     const result = { roleContext: "Untrusted provider text.\n".repeat(1000) };
     const text = serializeToolResult(result, "retrieval", "mcp__other__research", {});
