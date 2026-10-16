@@ -1,7 +1,7 @@
 import { createHash } from "node:crypto";
 import type { AdapterContext, ArtifactStore } from "@rakazo/adapter-kit";
 import type { Actor } from "@rakazo/contracts";
-import type { PrismaClient } from "@rakazo/db";
+import type { PrismaClient, ThreadEvents } from "@rakazo/db";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import {
   executeRecruitingAssessmentTool,
@@ -13,6 +13,7 @@ const db = vi.hoisted(() => ({
   assessment: vi.fn(),
   save: vi.fn(),
   material: vi.fn(),
+  question: vi.fn(),
 }));
 vi.mock("@rakazo/db", async (original) => ({
   ...(await original<object>()),
@@ -20,6 +21,7 @@ vi.mock("@rakazo/db", async (original) => ({
   getRecruitingAssessment: db.assessment,
   saveRecruitingAssessment: db.save,
   recordRecruitingWebMaterial: db.material,
+  getRecruitingQuestion: db.question,
 }));
 
 const actor: Actor = {
@@ -123,6 +125,61 @@ describe("native recruiting_assess adapter", () => {
     db.assessment.mockResolvedValue(receipt);
     db.save.mockResolvedValue(receipt);
   });
+
+  it.each(["pending", "answered", "stale"])(
+    "uses the original native question on %s replay",
+    async (state) => {
+      const f = fixture();
+      const ask = {
+        operation: "ask",
+        roleId: "role",
+        roleRevisionId: "revision",
+        target: {
+          kind: "candidate",
+          candidateKey: "candidate",
+          assessmentVersion: 1,
+          criterionIds: ["geometry"],
+        },
+        question: "Did you implement geometry?",
+        options: ["Yes", "No"],
+      };
+      const question = {
+        effectId: "effect",
+        messageId: "original",
+        canAnswer: state === "pending",
+        runStatus: state === "answered" ? "running" : "waiting_input",
+        block: {
+          kind: "ask",
+          status: state === "answered" ? "answered" : "pending",
+          answer: state === "answered" ? "Yes" : undefined,
+        },
+        isCurrent: state !== "stale",
+      };
+      db.question.mockResolvedValue(question);
+      const pauseRunForInput = vi.fn<ThreadEvents["pauseRunForInput"]>(async () => true);
+      const result = await executeRecruitingAssessmentTool(
+        { ...f.deps, events: { pauseRunForInput } },
+        { ...saveTrusted, attemptId: "attempt", save: { ...saveTrusted.save, effectRequest: ask } },
+        ask,
+        context,
+      );
+      expect(pauseRunForInput).toHaveBeenCalledOnce();
+      expect(pauseRunForInput.mock.calls[0]?.[0]).toMatchObject({
+        attemptId: "attempt",
+        runId: "run",
+        offeredActions: [
+          { id: "choice-1", label: "Yes" },
+          { id: "choice-2", label: "No" },
+        ],
+        blocks: [{ kind: "ask", text: ask.question, status: "pending" }],
+        recruitingQuestion: { actor, effectId: "effect", effectRequest: ask },
+      });
+      if (state === "pending")
+        expect(result).toMatchObject({ terminate: true, details: { input: "paused" } });
+      else expect(result).toEqual({ question });
+      expect(db.save).not.toHaveBeenCalled();
+    },
+  );
 
   it("reads the current thread role and exact candidate key without loading artifact bytes", async () => {
     const f = fixture();

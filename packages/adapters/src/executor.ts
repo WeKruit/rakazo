@@ -4874,17 +4874,19 @@ export function createRunExecutor(deps: ExecutorDeps) {
           const bypassApproval = gateDecision === "allow" && requiresApprovalByDefault;
           let claimedEffect = false;
 
-          const executeAssessment = async () =>
-            redactConnectorPayload(
+          const executeAssessment = async () => {
+            const result = redactConnectorPayload(
               await executeRecruitingAssessmentTool(
-                { prisma: deps.prisma, artifacts: deps.artifacts },
+                { prisma: deps.prisma, artifacts: deps.artifacts, events: deps.events },
                 {
                   actor: researchActor.actor,
                   runId,
                   threadId: thread.id,
                   botId: bot.id,
+                  attemptId: attempt.id,
+                  redactText: (text) => redactSecrets(text, runSecrets),
                   save:
-                    args.operation === "save" && applied
+                    args.operation !== "read" && applied
                       ? {
                           leaseOwner: workerId,
                           leaseFence: fence,
@@ -4899,6 +4901,9 @@ export function createRunExecutor(deps: ExecutorDeps) {
               ),
               runSecrets,
             );
+            if (isToolPauseResult(result)) approvalPausePending = true;
+            return result;
+          };
           const assessmentError = (error: unknown) => {
             if (error instanceof IsolationError)
               return { error: "Recruiting assessment or source is unavailable" };
@@ -4954,10 +4959,10 @@ export function createRunExecutor(deps: ExecutorDeps) {
                   name === "recruiting_assess" &&
                   current.status === "completed" &&
                   (args.operation === "read" ||
-                    (args.operation === "save" &&
+                    (args.operation !== "read" &&
                       retryGate.result &&
                       typeof retryGate.result === "object" &&
-                      "assessment" in retryGate.result))
+                      (args.operation === "ask" ? "messageId" : "assessment") in retryGate.result))
                 )
                   return replayAssessment();
                 if (researchAdmission && current.status === "completed")
@@ -5042,10 +5047,10 @@ export function createRunExecutor(deps: ExecutorDeps) {
                 name === "recruiting_assess" &&
                 applied.effect.status === "completed" &&
                 (args.operation === "read" ||
-                  (args.operation === "save" &&
+                  (args.operation !== "read" &&
                     gate.result &&
                     typeof gate.result === "object" &&
-                    "assessment" in gate.result))
+                    (args.operation === "ask" ? "messageId" : "assessment") in gate.result))
               )
                 return replayAssessment();
               if (researchAdmission && applied.effect.status === "completed")
@@ -5780,14 +5785,14 @@ export function createRunExecutor(deps: ExecutorDeps) {
             }
           }
           if (name === "recruiting_assess") {
-            if (args.operation === "save" && applied && !claimedEffect) {
+            if (args.operation !== "read" && applied && !claimedEffect) {
               const early = await claimOrReturn("intended");
               if (early !== undefined) return early;
             }
             try {
               const result = await executeAssessment();
-              // Save and native effect receipt commit together; never overwrite that immutable receipt.
-              return args.operation === "save" ? result : finish(result);
+              // Mutations and their native receipts commit together; do not overwrite a question binding or assessment.
+              return args.operation !== "read" ? result : finish(result);
             } catch (error) {
               return finish(assessmentError(error));
             }

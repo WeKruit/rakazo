@@ -322,14 +322,23 @@ export function approvalPausedToolResult(): ApprovalPausedToolResult {
   };
 }
 
+export function inputPausedToolResult(): ApprovalPausedToolResult {
+  return {
+    kind: "agent_tool_result",
+    content: [{ type: "text", text: "Waiting for your answer on the original question." }],
+    details: { input: "paused" },
+    terminate: true,
+  };
+}
+
 export function isToolPauseResult(result: unknown): result is ApprovalPausedToolResult {
   if (!result || typeof result !== "object") return false;
   const record = result as ApprovalPausedToolResult;
   if (record.kind !== "agent_tool_result") return false;
   const details = record.details;
   if (!details || typeof details !== "object") return false;
-  const pause = details as { approval?: unknown; secret?: unknown };
-  return pause.approval === "paused" || pause.secret === "paused";
+  const pause = details as { approval?: unknown; secret?: unknown; input?: unknown };
+  return pause.approval === "paused" || pause.secret === "paused" || pause.input === "paused";
 }
 
 export function isApprovalPausedResult(result: unknown): result is ApprovalPausedToolResult {

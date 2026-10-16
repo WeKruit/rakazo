@@ -4016,6 +4016,12 @@ export function ShellPage() {
                 botId={inGroup ? undefined : active?.id}
                 refreshSignal={recruitingRefresh}
                 onClose={() => setPanel(null)}
+                onRevealMessage={(target) => {
+                  navigate({
+                    pathname: target.groupId ? `/app/g/${target.groupId}` : `/app/${target.botId}`,
+                    search: `?${new URLSearchParams({ m: target.messageId })}`,
+                  });
+                }}
               />
             ) : null}
             {panel === "create-group" ? (

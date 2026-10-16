@@ -690,8 +690,48 @@ export const SaveRecruitingAssessmentInput = z
   });
 export type SaveRecruitingAssessmentInput = z.infer<typeof SaveRecruitingAssessmentInput>;
 
+/** Full next facts and sources, with only affected semantic inputs supplied again. */
+export const ReassessRecruitingAssessmentInput = SaveRecruitingAssessmentInput.safeExtend({
+  expectedRevision: Revision,
+});
+export type ReassessRecruitingAssessmentInput = z.infer<typeof ReassessRecruitingAssessmentInput>;
+
+export const RecruitingAssessmentAskTargetSchema = z.discriminatedUnion("kind", [
+  z
+    .strictObject({ kind: z.literal("role"), criterionIds: z.array(RecruitingId).readonly() })
+    .readonly(),
+  z
+    .strictObject({
+      kind: z.literal("candidate"),
+      candidateKey: RecruitingId,
+      assessmentVersion: Revision,
+      criterionIds: z.array(RecruitingId).readonly(),
+    })
+    .readonly(),
+]);
+export type RecruitingAssessmentAskTarget = z.infer<typeof RecruitingAssessmentAskTargetSchema>;
+
+export const RecruitingAssessmentAskInputSchema = z.strictObject({
+  operation: z.literal("ask"),
+  roleId: RecruitingId,
+  roleRevisionId: RecruitingId,
+  target: RecruitingAssessmentAskTargetSchema,
+  question: z.string().min(1).max(240).regex(/\S/, "Question must not be blank"),
+  options: z
+    .array(z.string().min(1).max(80).regex(/\S/, "Option must not be blank"))
+    .min(2)
+    .max(4)
+    .refine((options) => new Set(options).size === options.length, {
+      message: "Ask options must be unique",
+    })
+    .readonly(),
+});
+export type RecruitingAssessmentAskInput = z.infer<typeof RecruitingAssessmentAskInputSchema>;
+
 export const RecruitingAssessmentToolInputSchema = z.discriminatedUnion("operation", [
   z.strictObject({ operation: z.literal("read"), candidateKey: RecruitingId }),
   SaveRecruitingAssessmentInput.safeExtend({ operation: z.literal("save") }),
+  ReassessRecruitingAssessmentInput.safeExtend({ operation: z.literal("reassess") }),
+  RecruitingAssessmentAskInputSchema,
 ]);
 export type RecruitingAssessmentToolInput = z.infer<typeof RecruitingAssessmentToolInputSchema>;

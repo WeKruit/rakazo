@@ -11,19 +11,24 @@ import type {
   PrismaClient,
   RecruitingAssessmentArtifactBytes,
   RecruitingAssessmentSaveContext,
+  ThreadEvents,
 } from "@rakazo/db";
 import {
   getRecruitingAssessment,
+  getRecruitingQuestion,
   getRecruitingWorkspace,
   IsolationError,
   recordRecruitingWebMaterial,
   saveRecruitingAssessment,
   scoped,
 } from "@rakazo/db";
+import { inputPausedToolResult } from "./approval-effect.js";
 
 type RecruitingRunContext = { actor: Actor; runId: string; threadId: string; botId: string };
 export type RecruitingAssessmentToolContext = RecruitingRunContext & {
   save?: Omit<RecruitingAssessmentSaveContext, "runId" | "threadId" | "botId">;
+  attemptId?: string;
+  redactText?: (text: string) => string;
 };
 
 async function requireRecruitingRun(
@@ -57,7 +62,11 @@ async function requireRecruitingRun(
 }
 
 export async function executeRecruitingAssessmentTool(
-  deps: { prisma: PrismaClient; artifacts?: ArtifactStore },
+  deps: {
+    prisma: PrismaClient;
+    artifacts?: ArtifactStore;
+    events?: Pick<ThreadEvents, "pauseRunForInput">;
+  },
   trusted: RecruitingAssessmentToolContext,
   untrusted: unknown,
   context: AdapterContext,
@@ -90,7 +99,7 @@ export async function executeRecruitingAssessmentTool(
     : undefined;
   const references = new Map<string, string>();
   if (contextArtifact) references.set(contextArtifact.artifactId, contextArtifact.sha256);
-  for (const source of input.sourceRefs) {
+  for (const source of input.operation === "ask" ? [] : input.sourceRefs) {
     if (source.readState !== "read" || source.anchor.kind !== "artifact") continue;
     const { artifactId, sha256 } = source.anchor.artifact;
     const previous = references.get(artifactId);
@@ -117,6 +126,46 @@ export async function executeRecruitingAssessmentTool(
     bytes.push({ artifactId: row.id, bytes: await deps.artifacts.get(row.storageKey, context) });
   }
   context.signal.throwIfAborted();
+  if (input.operation === "ask") {
+    if (!deps.events || !trusted.attemptId) throw new IsolationError();
+    const actions = input.options.map((label, index) => ({ id: `choice-${index + 1}`, label }));
+    const redact = trusted.redactText ?? ((text: string) => text);
+    const paused = await deps.events.pauseRunForInput({
+      spaceId: actor.spaceId,
+      threadId,
+      botId,
+      runId,
+      attemptId: trusted.attemptId,
+      leaseOwner: save.leaseOwner,
+      leaseFence: save.leaseFence,
+      blocks: [
+        {
+          kind: "ask",
+          text: redact(input.question),
+          status: "pending",
+          actions: actions.map(({ id, label }) => ({ id, label: redact(label) })),
+        },
+      ],
+      offeredActions: actions,
+      recruitingQuestion: {
+        actor,
+        effectId: save.effectId,
+        effectRequest: save.effectRequest,
+        ...(contextArtifact ? { contextArtifact } : {}),
+        artifacts: bytes,
+      },
+    });
+    if (!paused) throw new Error("Could not pause this run for the recruiting question");
+    const question = await getRecruitingQuestion(deps.prisma, actor, {
+      threadId,
+      roleId: input.roleId,
+      effectId: save.effectId,
+    });
+    if (!question) throw new IsolationError();
+    return question.canAnswer && question.runStatus === "waiting_input"
+      ? inputPausedToolResult()
+      : { question };
+  }
   const { operation: _operation, ...assessment } = input;
   return saveRecruitingAssessment(
     deps.prisma,

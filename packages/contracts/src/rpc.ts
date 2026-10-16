@@ -100,8 +100,8 @@ import {
   VoiceInfoSchema,
   VoiceStatusSchema,
 } from "./domain.js";
-import { ComputerCommandSchema, ProductEventSchema } from "./events.js";
-import { Id, IsoDate } from "./ids.js";
+import { AskBlockSchema, ComputerCommandSchema, ProductEventSchema } from "./events.js";
+import { Id, IsoDate, RunStatus } from "./ids.js";
 import {
   IntegrationProviderConfigSchema,
   IntegrationSetupStateSchema,
@@ -109,6 +109,7 @@ import {
 import { MessageReactionSchema } from "./reactions.js";
 import {
   CreateRecruitingRoleInput,
+  RecruitingAssessmentAskTargetSchema,
   RecruitingAssessmentSchema,
   RecruitingId,
   RecruitingResearchActionSchema,
@@ -130,6 +131,24 @@ const recruitingAssessment = z.strictObject({
   assessment: RecruitingAssessmentSchema,
   isCurrent: z.boolean(),
 });
+
+export const RecruitingQuestionSchema = z.strictObject({
+  effectId: RecruitingId,
+  roleId: RecruitingId,
+  roleRevisionId: RecruitingId,
+  target: RecruitingAssessmentAskTargetSchema,
+  threadId: Id,
+  botId: Id,
+  groupId: Id.nullable(),
+  runId: Id,
+  messageId: Id,
+  askIndex: z.number().int().nonnegative(),
+  block: AskBlockSchema,
+  runStatus: RunStatus,
+  isCurrent: z.boolean(),
+  canAnswer: z.boolean(),
+});
+export type RecruitingQuestion = z.infer<typeof RecruitingQuestionSchema>;
 
 const threadTarget = z
   .object({
@@ -490,6 +509,9 @@ export const appContract = {
     heartbeat: oc.input(botId).output(z.object({ ok: z.literal(true) })),
   },
   recruiting: {
+    listQuestions: oc
+      .input(z.strictObject({ threadId: Id, roleId: RecruitingId }))
+      .output(z.strictObject({ questions: z.array(RecruitingQuestionSchema) })),
     createRole: oc.input(CreateRecruitingRoleInput).output(recruitingWorkspace),
     bindRole: oc
       .input(z.strictObject({ threadId: RecruitingId, roleId: RecruitingId.nullable() }))

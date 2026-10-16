@@ -4,6 +4,7 @@ import type {
   CreateRecruitingRoleInput,
   MessageBlock,
   NativeAskAnswerPayload,
+  RecruitingAssessmentAskInput,
   RecruitingAssessmentSourceRef,
   RecruitingRoleToolInput,
   RecruitingSourceRef,
@@ -172,8 +173,10 @@ describePostgres("recruiting domain (PostgreSQL)", () => {
       data: { spaceId, userId, name: "Assessment fixture", members: { create: { botId } } },
     });
     const thread = await prisma.thread.create({ data: { spaceId, userId, groupId: group.id } });
-    const message = await prisma.message.create({
-      data: { threadId: thread.id, seq: 0, role: "user", blocks: [{ kind: "text", text }] },
+    const message = await recruiting.createThreadMessage(prisma, {
+      threadId: thread.id,
+      role: "user",
+      blocks: [{ kind: "text", text }],
     });
     const role = await recruiting.createRecruitingRole(prisma, actor, {
       ...roleInput(source(message.id)),
@@ -226,6 +229,60 @@ describePostgres("recruiting domain (PostgreSQL)", () => {
       input,
       ...(await assessmentAdmission(input, { runId: run.id, threadId: thread.id })),
     };
+  }
+  async function questionFixture(candidate = false) {
+    const f = await assessmentFixture();
+    if (candidate)
+      await recruiting.saveRecruitingAssessment(prisma, actor, f.context, f.input, f.artifacts);
+    const request: RecruitingAssessmentAskInput = {
+      operation: "ask",
+      roleId: f.role.role.id,
+      roleRevisionId: f.role.revision.id,
+      target: candidate
+        ? {
+            kind: "candidate",
+            candidateKey: f.input.candidateKey,
+            assessmentVersion: 1,
+            criterionIds: ["experience"],
+          }
+        : { kind: "role", criterionIds: ["experience"] },
+      question: "  Which evidence should be verified?  ",
+      options: ["Employment history", "Personal code"],
+    };
+    const effect = await prisma.externalEffect.create({
+      data: {
+        spaceId,
+        runId: f.run.id,
+        kind: "recruiting_assess",
+        status: "executing",
+        idempotencyKey: `question:${f.run.id}`,
+        request: request as Prisma.InputJsonValue,
+      },
+    });
+    const attempt = await prisma.attempt.create({
+      data: { runId: f.run.id, fence: 1, status: "running" },
+    });
+    const actions = request.options.map((label, index) => ({ id: `choice-${index + 1}`, label }));
+    const pause: recruiting.PauseRunForInput = {
+      spaceId,
+      threadId: f.thread.id,
+      botId,
+      runId: f.run.id,
+      attemptId: attempt.id,
+      leaseOwner: f.context.leaseOwner,
+      leaseFence: 1,
+      blocks: [{ kind: "ask", text: request.question, actions, status: "pending" }],
+      offeredActions: actions,
+      recruitingQuestion: {
+        actor,
+        effectId: effect.id,
+        effectRequest: request,
+        contextArtifact: f.context.contextArtifact,
+        artifacts: f.artifacts,
+      },
+    };
+    const lookup = { threadId: f.thread.id, roleId: f.role.role.id, effectId: effect.id };
+    return { ...f, request, effect, attempt, pause, lookup };
   }
   beforeAll(async () => {
     const db = createDb(databaseUrl!);
@@ -554,6 +611,558 @@ describePostgres("recruiting domain (PostgreSQL)", () => {
       ),
     ).rejects.toThrow();
   });
+  it("reassesses only explicit changes and commits one immutable version per native effect", async () => {
+    const f = await assessmentFixture();
+    const first = await recruiting.saveRecruitingAssessment(
+      prisma,
+      actor,
+      f.context,
+      f.input,
+      f.artifacts,
+    );
+    const input = { ...f.input, expectedRevision: 1, atomJudgments: [], employmentEvaluations: [] };
+    const admitted = await assessmentAdmission(input, { runId: f.run.id, threadId: f.thread.id });
+    const request = { operation: "reassess", ...input };
+    await prisma.externalEffect.update({
+      where: { id: admitted.context.effectId },
+      data: { request: request as Prisma.InputJsonValue },
+    });
+    const context = { ...admitted.context, effectRequest: request };
+    const second = await recruiting.saveRecruitingAssessment(
+      prisma,
+      actor,
+      context,
+      input,
+      admitted.artifacts,
+    );
+    expect(second.assessment.version).toBe(2);
+    expect(second.assessment.judgments).toEqual(first.assessment.judgments);
+    await prisma.run.update({
+      where: { id: f.run.id },
+      data: { status: "completed", leaseOwner: null, leaseExpiresAt: null },
+    });
+    expect(
+      await recruiting.saveRecruitingAssessment(
+        prisma,
+        actor,
+        { ...context, contextArtifact: undefined },
+        input,
+        [],
+      ),
+    ).toEqual(second);
+    expect(await prisma.recruitingAssessment.count({ where: { roleId: f.role.role.id } })).toBe(2);
+    const stale = await assessmentAdmission(input, { runId: f.run.id, threadId: f.thread.id });
+    await prisma.externalEffect.update({
+      where: { id: stale.context.effectId },
+      data: { request: request as Prisma.InputJsonValue },
+    });
+    await expect(
+      recruiting.saveRecruitingAssessment(
+        prisma,
+        actor,
+        { ...stale.context, effectRequest: request },
+        input,
+        stale.artifacts,
+      ),
+    ).rejects.toThrow(recruiting.RecruitingConflictError);
+    const changed = {
+      ...input,
+      expectedRevision: 2,
+      facts: [{ ...input.facts[0]!, statement: "Changed material interpretation" }],
+    };
+    const rejected = await assessmentAdmission(changed, { runId: f.run.id, threadId: f.thread.id });
+    const changedRequest = { operation: "reassess", ...changed };
+    await prisma.externalEffect.update({
+      where: { id: rejected.context.effectId },
+      data: { request: changedRequest as Prisma.InputJsonValue },
+    });
+    await expect(
+      recruiting.saveRecruitingAssessment(
+        prisma,
+        actor,
+        { ...rejected.context, effectRequest: changedRequest },
+        changed,
+        rejected.artifacts,
+      ),
+    ).rejects.toThrow("explicit atom update");
+    expect(await prisma.recruitingAssessment.count({ where: { roleId: f.role.role.id } })).toBe(2);
+    const current = await recruiting.getRecruitingAssessment(prisma, actor, {
+      roleId: f.role.role.id,
+      candidateKey: input.candidateKey,
+    });
+    expect(current?.assessment.version).toBe(2);
+  });
+  it("pauses with the original native recruiting card, effect and asked event in one transaction", async () => {
+    const f = await questionFixture();
+    expect(await recruiting.pauseRunForInput(prisma, f.pause)).toBe(true);
+    const question = (await recruiting.getRecruitingQuestion(prisma, actor, f.lookup))!;
+    expect(question).toMatchObject({
+      effectId: f.effect.id,
+      messageId: expect.any(String),
+      askIndex: 0,
+      isCurrent: true,
+      canAnswer: true,
+      runStatus: "waiting_input",
+      groupId: f.group.id,
+      block: { kind: "ask", text: f.request.question, status: "pending" },
+    });
+    expect(await prisma.run.findUniqueOrThrow({ where: { id: f.run.id } })).toMatchObject({
+      leaseOwner: null,
+      leaseExpiresAt: null,
+    });
+    expect((await prisma.attempt.findUniqueOrThrow({ where: { id: f.attempt.id } })).status).toBe(
+      "waiting_input",
+    );
+    expect(
+      (await prisma.message.findUniqueOrThrow({ where: { id: question.messageId } })).clientNonce,
+    ).toBe(`recruiting-question:${f.effect.id}`);
+    const effect = await prisma.externalEffect.findUniqueOrThrow({ where: { id: f.effect.id } });
+    const event = await prisma.event.findFirstOrThrow({
+      where: { runId: f.run.id, type: "recruiting.question.asked" },
+    });
+    expect(effect.status).toBe("completed");
+    expect(effect.result).toEqual(event.payload);
+    expect(
+      await recruiting.listRecruitingQuestions(prisma, actor, {
+        threadId: f.thread.id,
+        roleId: f.role.role.id,
+      }),
+    ).toEqual([question]);
+    await expect(
+      recruiting.getRecruitingQuestion(prisma, { ...actor, userId: otherUserId }, f.lookup),
+    ).rejects.toThrow(IsolationError);
+  });
+  it("keeps a removed group bot's original question readable and disables its answer", async () => {
+    const f = await questionFixture();
+    await recruiting.pauseRunForInput(prisma, f.pause);
+    const original = (await recruiting.getRecruitingQuestion(prisma, actor, f.lookup))!;
+    await prisma.chatGroupMember.deleteMany({ where: { groupId: f.group.id, botId } });
+    const question = (await recruiting.getRecruitingQuestion(prisma, actor, f.lookup))!;
+    expect(question).toMatchObject({
+      messageId: original.messageId,
+      block: original.block,
+      isCurrent: true,
+      canAnswer: false,
+      runStatus: "waiting_input",
+    });
+    expect(
+      await recruiting.listRecruitingQuestions(prisma, actor, {
+        threadId: f.thread.id,
+        roleId: f.role.role.id,
+      }),
+    ).toEqual([question]);
+    expect(
+      await recruiting.answerRunInput(prisma, {
+        spaceId,
+        threadId: f.thread.id,
+        runId: f.run.id,
+        messageId: original.messageId,
+        answeredByUserId: userId,
+        answer: "Personal code",
+      }),
+    ).toBe(false);
+    expect((await prisma.run.findUniqueOrThrow({ where: { id: f.run.id } })).status).toBe(
+      "waiting_input",
+    );
+    expect(await prisma.event.count({ where: { runId: f.run.id, type: "thread.choice" } })).toBe(0);
+  });
+  it("retains raw offered options on the native checkpoint while storing only the redacted card", async () => {
+    const f = await questionFixture();
+    const secret = "synthetic-secret-token";
+    const request = {
+      ...f.request,
+      question: `Use ${secret}?`,
+      options: [`Use ${secret}`, "Other material"],
+    };
+    await prisma.externalEffect.update({
+      where: { id: f.effect.id },
+      data: { request: request as Prisma.InputJsonValue },
+    });
+    const actions = request.options.map((label, index) => ({ id: `choice-${index + 1}`, label }));
+    const pause = {
+      ...f.pause,
+      blocks: [
+        {
+          kind: "ask" as const,
+          text: "Use [redacted]?",
+          actions: [{ id: "choice-1", label: "Use [redacted]" }, actions[1]!],
+          status: "pending" as const,
+        },
+      ],
+      offeredActions: actions,
+      recruitingQuestion: { ...f.pause.recruitingQuestion!, effectRequest: request },
+    };
+    expect(await recruiting.pauseRunForInput(prisma, pause)).toBe(true);
+    const question = (await recruiting.getRecruitingQuestion(prisma, actor, f.lookup))!;
+    expect(question.block.text).toBe("Use [redacted]?");
+    const events = await prisma.event.findMany({ where: { runId: f.run.id } });
+    expect(JSON.stringify(events.map((event) => event.payload))).not.toContain(secret);
+    expect(
+      await recruiting.answerRunInput(prisma, {
+        spaceId,
+        threadId: f.thread.id,
+        runId: f.run.id,
+        messageId: question.messageId,
+        answeredByUserId: userId,
+        answer: "choice-1",
+      }),
+    ).toBe(true);
+    expect(await recruiting.getRecruitingQuestion(prisma, actor, f.lookup)).toMatchObject({
+      canAnswer: false,
+      block: { answer: "choice-1", status: "answered" },
+    });
+    expect((await prisma.task.findUniqueOrThrow({ where: { id: f.run.taskId } })).prompt).toContain(
+      secret,
+    );
+  });
+  it.each(["role", "candidate"])(
+    "rejects stale %s recruiting cards through both answer paths",
+    async (target) => {
+      const f = await questionFixture(target === "candidate");
+      await recruiting.pauseRunForInput(prisma, f.pause);
+      const original = (await recruiting.getRecruitingQuestion(prisma, actor, f.lookup))!;
+      if (target === "role") {
+        const { sourceThreadId: _, ...definition } = roleInput(source(f.message.id));
+        await recruiting.reviseRecruitingRole(prisma, actor, {
+          ...definition,
+          roleId: f.role.role.id,
+          expectedRevision: 1,
+        });
+      } else {
+        const run = await prisma.run.create({
+          data: {
+            spaceId,
+            userId,
+            botId,
+            threadId: f.thread.id,
+            taskId: f.run.taskId,
+            status: "running",
+            trigger: "user",
+          },
+        });
+        const input = { ...f.input, expectedRevision: 1 };
+        const admission = await assessmentAdmission(input, {
+          runId: run.id,
+          threadId: f.thread.id,
+        });
+        await recruiting.saveRecruitingAssessment(
+          prisma,
+          actor,
+          admission.context,
+          input,
+          admission.artifacts,
+        );
+      }
+      expect(await recruiting.getRecruitingQuestion(prisma, actor, f.lookup)).toMatchObject({
+        isCurrent: false,
+        canAnswer: false,
+      });
+      expect(
+        await recruiting.answerRunInput(prisma, {
+          spaceId,
+          threadId: f.thread.id,
+          runId: f.run.id,
+          messageId: original.messageId,
+          answeredByUserId: userId,
+          answer: "New answer",
+        }),
+      ).toBe(false);
+      expect(
+        await prisma.$transaction((tx) =>
+          recruiting.answerWaitingRunWithTextInTransaction(tx, {
+            spaceId,
+            threadId: f.thread.id,
+            runId: f.run.id,
+            answeredByUserId: userId,
+            answer: "New answer",
+          }),
+        ),
+      ).toBeNull();
+      expect((await prisma.run.findUniqueOrThrow({ where: { id: f.run.id } })).status).toBe(
+        "waiting_input",
+      );
+      expect(await prisma.event.count({ where: { runId: f.run.id, type: "thread.choice" } })).toBe(
+        0,
+      );
+      expect(
+        (await prisma.message.findUniqueOrThrow({ where: { id: original.messageId } })).blocks,
+      ).toEqual([original.block]);
+    },
+  );
+  it.each(["custom", "choice", "composer"])(
+    "records one native author proof for a recruiting %s answer",
+    async (kind) => {
+      const f = await questionFixture();
+      await recruiting.pauseRunForInput(prisma, f.pause);
+      const question = (await recruiting.getRecruitingQuestion(prisma, actor, f.lookup))!;
+      if (kind === "composer") {
+        const result = await prisma.$transaction(async (tx) => {
+          const message = await recruiting.createThreadMessageInTransaction(tx, {
+            threadId: f.thread.id,
+            role: "user",
+            blocks: [{ kind: "text", text: "Custom material" }],
+          });
+          return recruiting.answerWaitingRunWithTextInTransaction(tx, {
+            spaceId,
+            threadId: f.thread.id,
+            runId: f.run.id,
+            answeredByUserId: userId,
+            answer: "Custom material",
+            answerMessageId: message.id,
+          });
+        });
+        expect(result).not.toBeNull();
+      } else
+        expect(
+          await recruiting.answerRunInput(prisma, {
+            spaceId,
+            threadId: f.thread.id,
+            runId: f.run.id,
+            messageId: question.messageId,
+            answeredByUserId: userId,
+            answer: kind === "choice" ? "choice-2" : "Custom material",
+          }),
+        ).toBe(true);
+      await prisma.run.update({ where: { id: f.run.id }, data: { status: "completed" } });
+      expect(await recruiting.getRecruitingQuestion(prisma, actor, f.lookup)).toMatchObject({
+        runStatus: "completed",
+        canAnswer: false,
+        block: { status: "answered" },
+      });
+      const receipt = await prisma.event.findFirstOrThrow({
+        where: { runId: f.run.id, type: "thread.choice" },
+      });
+      const proof = receipt.payload as NativeAskAnswerPayload;
+      expect(proof).toMatchObject({
+        messageId: question.messageId,
+        askIndex: 0,
+        answeredByUserId: userId,
+      });
+      const human = await prisma.message.findUniqueOrThrow({
+        where: { id: proof.answerMessageId },
+      });
+      expect(human.botId).toBeNull();
+      expect(human.role).toBe("user");
+      expect(human.blocks).toEqual([
+        { kind: "text", text: kind === "choice" ? "Personal code" : "Custom material" },
+      ]);
+      expect(await prisma.event.count({ where: { runId: f.run.id, type: "thread.choice" } })).toBe(
+        1,
+      );
+    },
+  );
+  it("replays a committed question without a lease or another card/pause", async () => {
+    const f = await questionFixture();
+    const lostAck = {
+      $transaction: async (callback: (tx: Prisma.TransactionClient) => Promise<unknown>) => {
+        await prisma.$transaction(callback);
+        throw new Error("lost question acknowledgement");
+      },
+    } as unknown as PrismaClient;
+    await expect(recruiting.pauseRunForInput(lostAck, f.pause)).rejects.toThrow(
+      "lost question acknowledgement",
+    );
+    const original = (await recruiting.getRecruitingQuestion(prisma, actor, f.lookup))!;
+    expect(
+      await recruiting.pauseRunForInput(prisma, {
+        ...f.pause,
+        recruitingQuestion: {
+          ...f.pause.recruitingQuestion!,
+          contextArtifact: undefined,
+          artifacts: [],
+        },
+      }),
+    ).toBe(true);
+    expect(
+      await recruiting.answerRunInput(prisma, {
+        spaceId,
+        threadId: f.thread.id,
+        runId: f.run.id,
+        messageId: original.messageId,
+        answeredByUserId: userId,
+        answer: "Personal code",
+      }),
+    ).toBe(true);
+    await prisma.run.update({
+      where: { id: f.run.id },
+      data: { status: "running", leaseOwner: "new-worker", leaseFence: 2 },
+    });
+    expect(await recruiting.pauseRunForInput(prisma, f.pause)).toBe(true);
+    expect(await prisma.run.findUniqueOrThrow({ where: { id: f.run.id } })).toMatchObject({
+      status: "running",
+      leaseOwner: "new-worker",
+      leaseFence: 2,
+    });
+    expect(
+      await prisma.message.count({
+        where: { threadId: f.thread.id, clientNonce: `recruiting-question:${f.effect.id}` },
+      }),
+    ).toBe(1);
+    expect(
+      await prisma.event.count({ where: { runId: f.run.id, type: "recruiting.question.asked" } }),
+    ).toBe(1);
+  });
+  it.each(["cancelled", "foreign", "deleted", "event", "card", "proof"])(
+    "refuses a recruiting answer after %s changes",
+    async (boundary) => {
+      const f = await questionFixture();
+      await recruiting.pauseRunForInput(prisma, f.pause);
+      const question = (await recruiting.getRecruitingQuestion(prisma, actor, f.lookup))!;
+      if (boundary === "cancelled")
+        await prisma.$transaction((tx) =>
+          recruiting.cancelRunsInTransaction(
+            tx,
+            [{ id: f.run.id, taskId: f.run.taskId }],
+            new Date(),
+          ),
+        );
+      if (boundary === "deleted")
+        await prisma.message.delete({ where: { id: question.messageId } });
+      if (boundary === "event")
+        await prisma.event.deleteMany({
+          where: { runId: f.run.id, type: "recruiting.question.asked" },
+        });
+      if (boundary === "card")
+        await prisma.message.update({
+          where: { id: question.messageId },
+          data: { blocks: [{ ...question.block, text: "Changed question" }] },
+        });
+      if (boundary === "proof")
+        await prisma.event.create({
+          data: {
+            spaceId,
+            threadId: f.thread.id,
+            botId,
+            runId: f.run.id,
+            seq: 100,
+            type: "thread.choice",
+            payload: {
+              messageId: question.messageId,
+              askIndex: 0,
+              answerMessageId: f.message.id,
+              answeredByUserId: userId,
+            },
+          },
+        });
+      expect(
+        await recruiting.answerRunInput(prisma, {
+          spaceId,
+          threadId: f.thread.id,
+          runId: f.run.id,
+          messageId: question.messageId,
+          answeredByUserId: boundary === "foreign" ? otherUserId : userId,
+          answer: "Answer",
+        }),
+      ).toBe(false);
+      expect((await prisma.run.findUniqueOrThrow({ where: { id: f.run.id } })).status).toBe(
+        boundary === "cancelled" ? "cancelled" : "waiting_input",
+      );
+    },
+  );
+  it.each(["lease", "role", "attempt"])(
+    "rolls back a question pause invalidated by %s before clearing the lease",
+    async (boundary) => {
+      const f = await questionFixture();
+      if (boundary === "lease")
+        await prisma.run.update({ where: { id: f.run.id }, data: { leaseExpiresAt: new Date(0) } });
+      if (boundary === "role") {
+        const { sourceThreadId: _, ...definition } = roleInput(source(f.message.id));
+        await recruiting.reviseRecruitingRole(prisma, actor, {
+          ...definition,
+          roleId: f.role.role.id,
+          expectedRevision: 1,
+        });
+      }
+      if (boundary === "attempt")
+        await prisma.attempt.update({ where: { id: f.attempt.id }, data: { status: "failed" } });
+      await expect(recruiting.pauseRunForInput(prisma, f.pause)).rejects.toThrow();
+      expect(await prisma.run.findUniqueOrThrow({ where: { id: f.run.id } })).toMatchObject({
+        status: "running",
+        leaseOwner: f.context.leaseOwner,
+      });
+      expect(
+        await prisma.message.count({
+          where: { clientNonce: `recruiting-question:${f.effect.id}` },
+        }),
+      ).toBe(0);
+      expect(
+        (await prisma.externalEffect.findUniqueOrThrow({ where: { id: f.effect.id } })).status,
+      ).toBe("executing");
+    },
+  );
+  it.each(["pause", "answer"])(
+    "linearizes native recruiting %s against cancellation",
+    async (stage) => {
+      const f = await questionFixture();
+      if (stage === "answer") await recruiting.pauseRunForInput(prisma, f.pause);
+      const question =
+        stage === "answer" ? await recruiting.getRecruitingQuestion(prisma, actor, f.lookup) : null;
+      let release!: () => void;
+      let locked!: () => void;
+      const gate = new Promise<void>((resolve) => {
+        release = resolve;
+      });
+      const lock = new Promise<void>((resolve) => {
+        locked = resolve;
+      });
+      const cancel = prisma.$transaction(async (tx) => {
+        await tx.$queryRaw(
+          PrismaSql.sql`SELECT "id" FROM "threads" WHERE "id" = ${f.thread.id} FOR UPDATE`,
+        );
+        await recruiting.cancelRunsInTransaction(
+          tx,
+          [{ id: f.run.id, taskId: f.run.taskId }],
+          new Date(),
+        );
+        locked();
+        await gate;
+      });
+      await lock;
+      const second = createDb(databaseUrl!);
+      try {
+        const pending =
+          stage === "pause"
+            ? recruiting.pauseRunForInput(second.prisma, f.pause)
+            : recruiting.answerRunInput(second.prisma, {
+                spaceId,
+                threadId: f.thread.id,
+                runId: f.run.id,
+                messageId: question!.messageId,
+                answeredByUserId: userId,
+                answer: "Answer",
+              });
+        const observed = pending.then(
+          (result) => result,
+          () => false,
+        );
+        expect(
+          await Promise.race([
+            observed,
+            new Promise((resolve) => setTimeout(() => resolve("blocked"), 100)),
+          ]),
+        ).toBe("blocked");
+        release();
+        await cancel;
+        expect(await observed).toBe(false);
+        expect((await prisma.run.findUniqueOrThrow({ where: { id: f.run.id } })).status).toBe(
+          "cancelled",
+        );
+        expect(
+          await prisma.event.count({ where: { runId: f.run.id, type: "thread.choice" } }),
+        ).toBe(0);
+        expect(
+          await prisma.event.count({
+            where: { runId: f.run.id, type: "recruiting.question.asked" },
+          }),
+        ).toBe(stage === "answer" ? 1 : 0);
+      } finally {
+        release();
+        await cancel;
+        await second.prisma.$disconnect();
+        await second.pool.end();
+      }
+    },
+  );
   it("persists the server-computed composite gate and non-overlapping employment calculation", async () => {
     const text =
       "I personally implemented 3D coordinate transforms. I was a full-time software engineer from 2018-01-01 to 2026-01-01; this is my complete history through 2026-01-01.";

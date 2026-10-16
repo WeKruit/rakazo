@@ -2870,7 +2870,7 @@ describe("native recruiting assessment effect delivery", () => {
     vi.mocked(loadRecruitingRunContext).mockResolvedValue(adopted);
     vi.mocked(executeRecruitingAssessmentTool).mockImplementation(
       async (deps, trusted, input, context) => {
-        expect(deps).toEqual({ prisma: f.prisma, artifacts: f.artifacts });
+        expect(deps).toEqual(expect.objectContaining({ prisma: f.prisma, artifacts: f.artifacts }));
         expect(input).toEqual(args);
         expect(trusted).toMatchObject({
           runId: "assessment-save",
@@ -2912,6 +2912,55 @@ describe("native recruiting assessment effect delivery", () => {
     expect(f.results[1]).toEqual({ error: "Recruiting assessment or source is unavailable" });
     expect(f.effects[0]?.result).toEqual(saved);
     expect(f.connector.execute).not.toHaveBeenCalled();
+  });
+
+  it("replays a native question receipt to read its actual answer, without overwriting it", async () => {
+    const f = fixture("assessment-question");
+    const request = {
+      operation: "ask",
+      roleId: "role-1",
+      roleRevisionId: "revision-1",
+      target: {
+        kind: "candidate",
+        candidateKey: "candidate-1",
+        assessmentVersion: 1,
+        criterionIds: [],
+      },
+      question: "Which implementation?",
+      options: ["Personal", "Team"],
+    };
+    const binding = {
+      roleId: "role-1",
+      roleRevisionId: "revision-1",
+      target: request.target,
+      effectId: "effect-1",
+      messageId: "original-card",
+      askIndex: 0,
+    };
+    const paused = {
+      kind: "agent_tool_result" as const,
+      content: [],
+      details: { input: "paused" },
+      terminate: true as const,
+    };
+    vi.mocked(executeRecruitingAssessmentTool).mockImplementationOnce(async (_deps, trusted) => {
+      expect(trusted.save?.effectRequest).toEqual(request);
+      expect(trusted.attemptId).toBe("attempt-1");
+      Object.assign(f.effects[0]!, { status: "completed", result: binding });
+      return paused;
+    });
+    f.setCalls([{ name: "recruiting_assess", args: request, executionId: "ask" }]);
+    await f.run();
+    expect(f.effects[0]?.result).toEqual(binding);
+    const answered = {
+      question: { block: { kind: "ask", status: "answered", answer: "Personal" } },
+    };
+    vi.mocked(executeRecruitingAssessmentTool).mockResolvedValueOnce(answered as never);
+    await f.run();
+    expect(executeRecruitingAssessmentTool).toHaveBeenCalledTimes(2);
+    expect(f.results.at(-1)).toEqual(answered);
+    expect(f.effects[0]?.result).toEqual(binding);
+    expect(f.effects).toHaveLength(1);
   });
 
   it("reads without an adopted context and does not dispatch a connector", async () => {

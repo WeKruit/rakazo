@@ -12,6 +12,7 @@ import { Button, Tabs, TabsContent, TabsList, TabsTrigger } from "@rakazo/ui-web
 import { Check, CircleHelp, RefreshCw, X } from "lucide-react";
 import { useEffect, useState } from "react";
 import { ArtifactFileCard } from "../components/ArtifactFileCard";
+import { AskCard } from "../components/AskCard";
 import { Shimmer } from "../components/ai/primitives";
 import { rpc } from "../lib/rpc";
 
@@ -20,11 +21,13 @@ type Props = {
   botId?: string;
   refreshSignal?: number;
   onClose: () => void;
+  onRevealMessage?: (target: { botId?: string; groupId?: string; messageId: string }) => void;
 };
 type Snapshot = {
   workspace: Awaited<ReturnType<typeof rpc.recruiting.getWorkspace>>;
   assessments: Awaited<ReturnType<typeof rpc.recruiting.listAssessments>>;
   research: Awaited<ReturnType<typeof rpc.recruiting.listResearch>>;
+  questions: Awaited<ReturnType<typeof rpc.recruiting.listQuestions>>["questions"];
   documents: MemoryDocument[];
 };
 
@@ -239,7 +242,7 @@ export function RecruitingPanel(props: Props) {
   return <RecruitingWorkspace key={`${props.threadId}:${props.botId ?? "group"}`} {...props} />;
 }
 
-function RecruitingWorkspace({ threadId, botId, refreshSignal, onClose }: Props) {
+function RecruitingWorkspace({ threadId, botId, refreshSignal, onClose, onRevealMessage }: Props) {
   const { t } = useLingui();
   const [snapshot, setSnapshot] = useState<Snapshot | null>(null);
   const [refresh, setRefresh] = useState(0);
@@ -259,13 +262,16 @@ function RecruitingWorkspace({ threadId, botId, refreshSignal, onClose }: Props)
               ? null
               : current,
           );
-          const [assessments, research, documents] = await Promise.all([
+          const [assessments, research, questions, documents] = await Promise.all([
             workspace
               ? rpc.recruiting.listAssessments({ roleId: workspace.role.id })
               : Promise.resolve([]),
             workspace
               ? rpc.recruiting.listResearch({ roleId: workspace.role.id })
               : Promise.resolve({ tasks: [], actions: [] }),
+            workspace
+              ? rpc.recruiting.listQuestions({ threadId, roleId: workspace.role.id })
+              : Promise.resolve({ questions: [] }),
             Promise.all([
               rpc.memory.list({ scope: "user" }),
               ...(botId ? [rpc.memory.list({ scope: "bot", botId })] : []),
@@ -281,7 +287,13 @@ function RecruitingWorkspace({ threadId, botId, refreshSignal, onClose }: Props)
             workspace = verified;
             continue;
           }
-          setSnapshot({ workspace, assessments, research, documents });
+          setSnapshot({
+            workspace,
+            assessments,
+            research,
+            questions: questions.questions,
+            documents,
+          });
           return;
         }
       } catch {
@@ -555,6 +567,46 @@ function RecruitingWorkspace({ threadId, botId, refreshSignal, onClose }: Props)
             )}
           </TabsContent>
           <TabsContent value="missing" className="space-y-5">
+            {snapshot.questions.map((question) => {
+              const target = question.groupId
+                ? { groupId: question.groupId }
+                : { botId: question.botId };
+              return (
+                <div
+                  key={`${question.effectId}:${question.messageId}:${question.askIndex}`}
+                  className="space-y-2 [&>div]:max-w-full"
+                >
+                  <p className="text-xs text-muted-foreground">
+                    {question.target.kind === "candidate" ? (
+                      <>{question.target.candidateKey} · </>
+                    ) : null}
+                    {question.isCurrent ? <Trans>Current</Trans> : <Trans>Outdated</Trans>}
+                  </p>
+                  <AskCard
+                    block={question.block}
+                    canAnswer={question.canAnswer}
+                    onAnswer={async (answer) => {
+                      await rpc.threads.answer({
+                        ...target,
+                        runId: question.runId,
+                        messageId: question.messageId,
+                        answer,
+                      });
+                      setRefresh((value) => value + 1);
+                    }}
+                  />
+                  {onRevealMessage ? (
+                    <Button
+                      variant="ghost"
+                      size="sm"
+                      onClick={() => onRevealMessage({ ...target, messageId: question.messageId })}
+                    >
+                      <Trans>Open original question</Trans>
+                    </Button>
+                  ) : null}
+                </div>
+              );
+            })}
             <div className="space-y-2">
               <h3 className="font-medium">
                 <Trans>Role definition</Trans>

@@ -267,6 +267,7 @@ import {
   getRecruitingAssessment,
   getRecruitingWorkspace,
   listRecruitingAssessments,
+  listRecruitingQuestions,
   listRecruitingResearch,
   reviseRecruitingRole,
 } from "./recruiting.js";
@@ -3203,6 +3204,9 @@ export function createRouter(deps: RouterDeps) {
       }),
     },
     recruiting: {
+      listQuestions: authed.recruiting.listQuestions.handler(({ context, input }) =>
+        listRecruitingQuestions(deps.prisma, context.actor, input),
+      ),
       createRole: authed.recruiting.createRole.handler(({ context, input }) =>
         createRecruitingRole(deps.prisma, context.actor, input),
       ),

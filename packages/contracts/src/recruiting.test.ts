@@ -1112,3 +1112,98 @@ describe("typed recruiting assessment evidence", () => {
       ).toBe(false);
   });
 });
+
+describe("recruiting reassessment and native Ask inputs", () => {
+  const reassess = {
+    roleId: role.id,
+    roleRevisionId: role.currentRevisionId,
+    candidateKey: assessment.candidateKey,
+    expectedRevision: 1,
+    facts: assessment.facts,
+    sourceRefs: assessment.sourceRefs,
+    questions: [],
+    atomJudgments: [],
+    employmentEvaluations: [],
+  };
+  const ask = {
+    operation: "ask",
+    roleId: role.id,
+    roleRevisionId: role.currentRevisionId,
+    target: {
+      kind: "candidate",
+      candidateKey: assessment.candidateKey,
+      assessmentVersion: 1,
+      criterionIds: [criterion.id],
+    },
+    question: "  Which work did you personally implement?\n",
+    options: ["  Implemented it myself", "Used a library  "],
+  };
+
+  it("closes reassessment to a positive prior version and partial agent override sets", () => {
+    expect(contracts.ReassessRecruitingAssessmentInput?.parse(reassess)).toEqual(reassess);
+    expect(
+      contracts.RecruitingAssessmentToolInputSchema.safeParse({
+        operation: "reassess",
+        ...reassess,
+      }).success,
+    ).toBe(true);
+    for (const change of [
+      { expectedRevision: 0 },
+      { expectedRevision: 1.5 },
+      { atomJudgments: undefined },
+      { judgments: assessment.judgments },
+      { hardGate: "met" },
+      { changedFactIds: ["fact-sample"] },
+      { createdByRunId: "forged" },
+    ])
+      expect(
+        contracts.RecruitingAssessmentToolInputSchema.safeParse({
+          operation: "reassess",
+          ...reassess,
+          ...change,
+        }).success,
+      ).toBe(false);
+  });
+
+  it("preserves exact native question and option text for role and candidate targets", () => {
+    expect(contracts.RecruitingAssessmentAskInputSchema?.parse(ask)).toEqual(ask);
+    expect(contracts.RecruitingAssessmentToolInputSchema.parse(ask)).toEqual(ask);
+    const target = { kind: "role", criterionIds: [] };
+    expect(contracts.RecruitingAssessmentAskTargetSchema?.parse(target)).toEqual(target);
+    expect(
+      contracts.RecruitingAssessmentToolInputSchema.safeParse({ ...ask, target }).success,
+    ).toBe(true);
+    expect(
+      contracts.RecruitingAssessmentToolInputSchema.safeParse({
+        ...ask,
+        options: ["a", "b", "c", "d"],
+        question: "q".repeat(240),
+      }).success,
+    ).toBe(true);
+  });
+
+  it("rejects ambiguous, oversized and caller-authored native card/runtime fields", () => {
+    for (const change of [
+      { question: "" },
+      { question: "  " },
+      { question: "q".repeat(241) },
+      { options: ["one"] },
+      { options: ["a", "b", "c", "d", "e"] },
+      { options: ["same", "same"] },
+      { options: ["", "valid"] },
+      { options: ["  ", "valid"] },
+      { options: ["x".repeat(81), "valid"] },
+      { target: { ...ask.target, assessmentVersion: 0 } },
+      { target: { ...ask.target, criterionIds: [""] } },
+      { target: { kind: "role", criterionIds: [], candidateKey: "extra" } },
+      { target: { ...ask.target, atomIds: ["atom-sample"] } },
+      { messageId: "forged" },
+      { sourceThreadId: "forged" },
+      { botId: "forged" },
+      { blockIndex: 0 },
+    ])
+      expect(
+        contracts.RecruitingAssessmentToolInputSchema.safeParse({ ...ask, ...change }).success,
+      ).toBe(false);
+  });
+});

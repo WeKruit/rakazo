@@ -53,3 +53,12 @@ export const listRecruitingResearch = (
   actor: Actor,
   input: Parameters<typeof recruiting.listRecruitingResearch>[2],
 ) => authenticated(() => recruiting.listRecruitingResearch(prisma, actor, input));
+
+export const listRecruitingQuestions = (
+  prisma: PrismaClient,
+  actor: Actor,
+  input: Parameters<typeof recruiting.listRecruitingQuestions>[2],
+) =>
+  authenticated(async () => ({
+    questions: await recruiting.listRecruitingQuestions(prisma, actor, input),
+  }));

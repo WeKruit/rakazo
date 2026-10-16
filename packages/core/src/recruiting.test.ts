@@ -1,7 +1,10 @@
 import type {
+  ReassessRecruitingAssessmentInput,
+  RecruitingAssessment,
   RecruitingCriterion,
   RecruitingCriterionExpression,
   RecruitingEmploymentRule,
+  RecruitingRoleRevision,
   SaveRecruitingAssessmentInput,
   Verdict,
 } from "@rakazo/contracts";
@@ -893,5 +896,229 @@ describe("server-owned recruiting assessment evaluation", () => {
         assessmentDay,
       ),
     ).toThrow();
+  });
+});
+
+function savedAssessment(
+  role: Pick<RecruitingRoleRevision, "criteria" | "definitionQuestions">,
+  input: SaveRecruitingAssessmentInput,
+): RecruitingAssessment {
+  return {
+    roleId: input.roleId,
+    roleRevisionId: input.roleRevisionId,
+    candidateKey: input.candidateKey,
+    version: 1,
+    basedOnVersion: null,
+    createdByRunId: "first-run",
+    createdAt: "2025-01-15T00:00:00.000Z",
+    facts: input.facts,
+    sourceRefs: input.sourceRefs,
+    questions: input.questions,
+    judgments: core.evaluateRecruitingAssessment(role, input, assessmentDay),
+  };
+}
+
+const reassessmentRole = () => ({
+  id: "revision",
+  roleId: "role",
+  definitionQuestions: [],
+  criteria: [
+    criterion("geometry-and-onsite", { kind: "all", items: [atom("geometry"), atom("onsite")] }),
+    criterion("geometry-or-onsite", { kind: "any", items: [atom("geometry"), atom("onsite")] }),
+    criterion("not-geometry", { kind: "not", item: atom("geometry") }, "preferred"),
+  ],
+});
+const reassessmentFixture = () => {
+  const role = reassessmentRole();
+  const sources = [primaryAssessmentSource, { ...primaryAssessmentSource, id: "onsite-source" }];
+  const input = assessmentInput({
+    sourceRefs: sources,
+    facts: [
+      { ...statementFact, id: "geometry-fact" },
+      {
+        ...statementFact,
+        id: "onsite-fact",
+        statement: "Confirmed onsite",
+        sourceRefIds: ["onsite-source"],
+      },
+    ],
+    atomJudgments: [
+      { ...semantic("geometry", "unknown"), factIds: ["geometry-fact"] },
+      { ...semantic("onsite"), factIds: ["onsite-fact"], evidence: ["onsite-source"] },
+    ],
+  });
+  const previous = savedAssessment(role, input);
+  const reassess: ReassessRecruitingAssessmentInput = {
+    ...input,
+    expectedRevision: 1,
+    atomJudgments: [],
+    employmentEvaluations: [],
+  };
+  return { role, input, previous, reassess };
+};
+
+describe("dependency-checked recruiting reassessment", () => {
+  it("reuses unchanged onsite semantics while geometry alone changes derived AND, OR, NOT and the hard gate", () => {
+    const { role, previous, reassess } = reassessmentFixture();
+    const merged = core.mergeRecruitingReassessment?.(role, previous, {
+      ...reassess,
+      facts: reassess.facts.map((fact) =>
+        fact.id === "geometry-fact"
+          ? { ...fact, statement: "Personally implemented coordinate transforms" }
+          : fact,
+      ),
+      atomJudgments: [{ ...semantic("geometry"), factIds: ["geometry-fact"] }],
+    });
+    expect(merged?.atomJudgments.find((judgment) => judgment.atomId === "onsite")).toEqual(
+      previous.judgments.atoms.find((judgment) => judgment.atomId === "onsite"),
+    );
+    expect(previous.judgments.hardGate).toBe("unknown");
+    const next = merged && core.evaluateRecruitingAssessment(role, merged, assessmentDay);
+    expect(next?.criteria.map(({ verdict }) => verdict)).toEqual(["met", "met", "unmet"]);
+    expect(next?.hardGate).toBe("met");
+    expect(previous.facts[0]?.statement).toBe("Original component evidence");
+  });
+
+  it("rejects changed or removed fact and source dependencies without an explicit atom update", () => {
+    const { role, previous, reassess } = reassessmentFixture();
+    for (const change of [
+      {
+        facts: reassess.facts.map((fact) =>
+          fact.id === "geometry-fact" ? { ...fact, statement: "Changed implementation" } : fact,
+        ),
+      },
+      { facts: reassess.facts.filter((fact) => fact.id !== "geometry-fact") },
+      {
+        sourceRefs: reassess.sourceRefs.map((source) =>
+          source.id === "original" ? { ...source, quote: "Changed original quote" } : source,
+        ),
+      },
+      {
+        facts: reassess.facts.map((fact) =>
+          fact.id === "geometry-fact" ? { ...fact, sourceRefIds: ["onsite-source"] } : fact,
+        ),
+        sourceRefs: reassess.sourceRefs.filter((source) => source.id !== "original"),
+      },
+    ])
+      expect(() =>
+        core.mergeRecruitingReassessment?.(role, previous, { ...reassess, ...change }),
+      ).toThrow(core.RecruitingAssessmentValidationError);
+  });
+
+  it("does not assign new statement facts to an atom or reevaluate untouched semantics", () => {
+    const { role, previous, reassess } = reassessmentFixture();
+    const merged = core.mergeRecruitingReassessment?.(role, previous, {
+      ...reassess,
+      facts: [...reassess.facts, { ...statementFact, id: "new-unassigned" }],
+    });
+    expect(merged?.atomJudgments).toEqual(previous.judgments.atoms);
+    expect(
+      merged?.atomJudgments.some((judgment) => judgment.factIds.includes("new-unassigned")),
+    ).toBe(false);
+  });
+
+  it("rejects wrong atom types, unknown dependencies, stale versions and a different role revision with the typed validation error", () => {
+    const { role, previous, reassess } = reassessmentFixture();
+    for (const change of [
+      { atomJudgments: [semantic("not-in-role")] },
+      { atomJudgments: [{ ...semantic("geometry"), factIds: ["unknown"] }] },
+      { atomJudgments: [{ ...semantic("geometry"), evidence: ["unknown"] }] },
+      {
+        employmentEvaluations: [
+          {
+            atomId: "geometry",
+            intervals: [],
+            historyCompletenessFactId: null,
+            evidence: [],
+            missing: [],
+          },
+        ],
+      },
+      { roleRevisionId: "new-revision" },
+      { roleId: "other-role" },
+      { candidateKey: "other-candidate" },
+      { expectedRevision: 2 },
+    ])
+      expect(() =>
+        core.mergeRecruitingReassessment?.(role, previous, { ...reassess, ...change }),
+      ).toThrow(core.RecruitingAssessmentValidationError);
+    expect(() =>
+      core.mergeRecruitingReassessment?.({ ...role, id: "new-revision" }, previous, reassess),
+    ).toThrow(core.RecruitingAssessmentValidationError);
+  });
+
+  it("requires explicit classification of added, changed or removed employment facts for every numeric atom", () => {
+    const fixture = employmentInput(61);
+    const role = {
+      ...fixture.role,
+      id: "revision",
+      roleId: "role",
+      criteria: [
+        ...fixture.role.criteria,
+        criterion("second-numeric", {
+          kind: "atom",
+          id: "second-experience",
+          statement: "Another numeric definition",
+          employmentRule: fixedRule(17),
+        }),
+      ],
+    };
+    const input = {
+      ...fixture.input,
+      employmentEvaluations: [
+        ...fixture.input.employmentEvaluations,
+        { ...fixture.input.employmentEvaluations[0]!, atomId: "second-experience" },
+      ],
+    };
+    const previous = savedAssessment(role, input);
+    const reassess = {
+      ...input,
+      expectedRevision: 1,
+      atomJudgments: [],
+      employmentEvaluations: [],
+    };
+    const untouched = core.mergeRecruitingReassessment?.(role, previous, reassess);
+    expect(untouched?.employmentEvaluations[0]?.intervals).toEqual(
+      previous.judgments.employment[0]?.intervals,
+    );
+    for (const facts of [
+      [...input.facts, employmentFact("job3", 2025, 2025)],
+      input.facts.map((fact) =>
+        fact.id === "job1" ? { ...fact, statement: "Changed job dates or work" } : fact,
+      ),
+      input.facts.filter((fact) => fact.id !== "job1"),
+    ])
+      expect(() =>
+        core.mergeRecruitingReassessment?.(role, previous, {
+          ...reassess,
+          facts,
+          employmentEvaluations: [input.employmentEvaluations[0]!],
+        }),
+      ).toThrow(core.RecruitingAssessmentValidationError);
+    expect(() =>
+      core.mergeRecruitingReassessment(role, previous, {
+        ...reassess,
+        facts: [...input.facts, employmentFact("job3", 2018, 2018)],
+        employmentEvaluations: input.employmentEvaluations,
+      }),
+    ).toThrow("Every employment fact requires an explicit eligibility judgment");
+    const newJob = employmentFact("job3", 2018, 2018);
+    const merged = core.mergeRecruitingReassessment?.(role, previous, {
+      ...reassess,
+      facts: [...input.facts, newJob],
+      employmentEvaluations: input.employmentEvaluations.map((evaluation) => ({
+        ...evaluation,
+        intervals: [
+          ...evaluation.intervals,
+          { factId: newJob.id, qualifyingFullTime: "met", evidence: ["original"], missing: [] },
+        ],
+      })),
+    });
+    expect(
+      merged &&
+        core
+          .evaluateRecruitingAssessment(role, merged, assessmentDay)
+          .employment.map((judgment) => judgment.lowerMonths),
+    ).toEqual([72, 72]);
   });
 });

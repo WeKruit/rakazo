@@ -5,6 +5,7 @@ import { McpTransportSchema } from "./mcp.js";
 import {
   RecruitingActionDeliveryStateSchema,
   RecruitingArtifactRefSchema,
+  RecruitingAssessmentAskTargetSchema,
   RecruitingId,
 } from "./recruiting.js";
 
@@ -59,6 +60,7 @@ export const ProductEventType = z.enum([
   "recruiting.read",
   "recruiting.material.read",
   "recruiting.assessment.saved",
+  "recruiting.question.asked",
   /** Liveness only: never persisted, never applied to a snapshot, always seq 0. */
   "heartbeat",
 ]);
@@ -103,36 +105,38 @@ const ChartBlock = z
 export const SecretAskPurpose = z.enum(["otp", "password", "api_key"]);
 export type SecretAskPurpose = z.infer<typeof SecretAskPurpose>;
 
+export const AskBlockSchema = z.object({
+  kind: z.literal("ask"),
+  text: z.string(),
+  approvalEffectId: Id.optional(),
+  detail: z.string().optional(),
+  input: z.enum(["text", "secret"]).optional(),
+  /** Why the secret is needed; drives field label on the masked card. */
+  purpose: SecretAskPurpose.optional(),
+  // Records what the runtime could produce under either deployment mode, so
+  // an ask persisted before an owner toggles the private-HTTP flag still
+  // validates on replay.
+  credential: botSecretDestinationSchema({ allowPrivateHttpOrigin: true }).optional(),
+  status: z.enum(["pending", "answered"]).optional(),
+  answer: z.string().optional(),
+  actions: z
+    .array(
+      z.object({
+        id: z.string(),
+        label: z.string(),
+        outcome: z.enum(["created", "cancelled"]).optional(),
+      }),
+    )
+    .optional(),
+});
+
 export const MessageBlock = z.discriminatedUnion("kind", [
   z.object({ kind: z.literal("text"), text: z.string() }),
   z.object({
     kind: z.literal("card"),
     lines: z.array(z.object({ k: z.string(), v: z.string() })),
   }),
-  z.object({
-    kind: z.literal("ask"),
-    text: z.string(),
-    approvalEffectId: Id.optional(),
-    detail: z.string().optional(),
-    input: z.enum(["text", "secret"]).optional(),
-    /** Why the secret is needed; drives field label on the masked card. */
-    purpose: SecretAskPurpose.optional(),
-    // Records what the runtime could produce under either deployment mode, so
-    // an ask persisted before an owner toggles the private-HTTP flag still
-    // validates on replay.
-    credential: botSecretDestinationSchema({ allowPrivateHttpOrigin: true }).optional(),
-    status: z.enum(["pending", "answered"]).optional(),
-    answer: z.string().optional(),
-    actions: z
-      .array(
-        z.object({
-          id: z.string(),
-          label: z.string(),
-          outcome: z.enum(["created", "cancelled"]).optional(),
-        }),
-      )
-      .optional(),
-  }),
+  AskBlockSchema,
   z.object({
     kind: z.literal("choice"),
     question: z.string(),
@@ -391,6 +395,16 @@ export type RecruitingAssessmentSavedPayload = z.infer<
   typeof RecruitingAssessmentSavedPayloadSchema
 >;
 
+export const RecruitingQuestionAskedPayloadSchema = z.strictObject({
+  roleId: RecruitingId,
+  roleRevisionId: RecruitingId,
+  target: RecruitingAssessmentAskTargetSchema,
+  effectId: RecruitingId,
+  messageId: Id,
+  askIndex: z.number().int().nonnegative(),
+});
+export type RecruitingQuestionAskedPayload = z.infer<typeof RecruitingQuestionAskedPayloadSchema>;
+
 export const NativeAskAnswerPayloadSchema = z.strictObject({
   messageId: Id,
   askIndex: z.number().int().nonnegative(),
@@ -423,9 +437,11 @@ export const ProductEventSchema = z
               ? RecruitingMaterialReadPayloadSchema
               : event.type === "recruiting.assessment.saved"
                 ? RecruitingAssessmentSavedPayloadSchema
-                : event.type === "thread.choice"
-                  ? NativeAskAnswerPayloadSchema
-                  : null;
+                : event.type === "recruiting.question.asked"
+                  ? RecruitingQuestionAskedPayloadSchema
+                  : event.type === "thread.choice"
+                    ? NativeAskAnswerPayloadSchema
+                    : null;
     if (!schema) return;
     const parsed = schema.safeParse(event.payload);
     if (!parsed.success) {

@@ -25,16 +25,44 @@ describe("recruiting material and assessment events", () => {
     version: 1,
     effectId: "effect-synthetic",
   };
+  const question = {
+    roleId: assessment.roleId,
+    roleRevisionId: assessment.roleRevisionId,
+    effectId: assessment.effectId,
+    target: {
+      kind: "candidate",
+      candidateKey: assessment.candidateKey,
+      assessmentVersion: 1,
+      criterionIds: ["geometry"],
+    },
+    messageId: "native-question",
+    askIndex: 0,
+  };
 
   it.each([
     ["recruiting.material.read", material],
     ["recruiting.assessment.saved", assessment],
+    ["recruiting.question.asked", question],
   ])("accepts a native %s receipt and rejects unstructured content", (type, payload) => {
     expect(ProductEventSchema.safeParse({ ...base, type, payload }).success).toBe(true);
     expect(ProductEventSchema.safeParse({ ...base, type, payload: {} }).success).toBe(false);
     expect(
       ProductEventSchema.safeParse({ ...base, type, payload: { ...payload, rawText: "private" } })
         .success,
+    ).toBe(false);
+  });
+
+  it.each([
+    { ...question, askIndex: -1 },
+    { ...question, messageId: "" },
+    { ...question, target: { ...question.target, assessmentVersion: 0 } },
+  ])("rejects invalid original-question binding", (payload) => {
+    expect(
+      ProductEventSchema.safeParse({
+        ...base,
+        type: "recruiting.question.asked",
+        payload,
+      }).success,
     ).toBe(false);
   });
 

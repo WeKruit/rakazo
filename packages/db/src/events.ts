@@ -25,6 +25,12 @@ import {
   createThreadMessageInTransaction,
   RunHistoryWriteError,
 } from "./messages.js";
+import type { RecruitingQuestionPauseContext } from "./recruiting.js";
+import {
+  authorizeRecruitingQuestionAnswerInTransaction,
+  commitRecruitingQuestionInTransaction,
+  prepareRecruitingQuestionInTransaction,
+} from "./recruiting.js";
 import { withTransactionRetry } from "./transaction-retry.js";
 
 const EVENT_BATCH_SIZE = 200;
@@ -141,6 +147,8 @@ export interface PauseRunForInput {
    * (not in message blocks) so clients still see redacted labels.
    */
   offeredActions?: Array<{ id: string; label: string }>;
+  /** Server-owned native question binding; model tool arguments never supply this context. */
+  recruitingQuestion?: RecruitingQuestionPauseContext;
 }
 
 const CHOICE_ASK_CHECKPOINT_KIND = "choice_ask_v1";
@@ -734,6 +742,16 @@ async function commitAnswerRunInput(
       return null;
   }
 
+  if (
+    !(await authorizeRecruitingQuestionAnswerInTransaction(
+      tx,
+      input,
+      message,
+      parsed.data.indexOf(pendingAsk),
+    ))
+  )
+    return null;
+
   const queued = await tx.run.updateMany({
     where: {
       id: input.runId,
@@ -931,6 +949,10 @@ export async function pauseRunForInput(
     // Thread row first, then run rows — the same order as clearThread and finalizeRun, so a
     // concurrent clear cannot deadlock against this transaction.
     await tx.$queryRaw`SELECT id FROM threads WHERE id = ${input.threadId} FOR UPDATE`;
+    const question = input.recruitingQuestion
+      ? await prepareRecruitingQuestionInTransaction(tx, input)
+      : undefined;
+    if (question?.kind === "completed") return { threadId: input.threadId, seq: question.eventSeq };
     const paused = await tx.run.updateMany({
       where: {
         id: input.runId,
@@ -940,6 +962,7 @@ export async function pauseRunForInput(
         status: "running",
         leaseOwner: input.leaseOwner,
         leaseFence: input.leaseFence,
+        ...(input.recruitingQuestion ? { leaseExpiresAt: { gt: new Date() } } : {}),
       },
       data: {
         status: "waiting_input",
@@ -969,6 +992,9 @@ export async function pauseRunForInput(
       blocks: input.blocks,
       botId: input.botId,
       runId: input.runId,
+      ...(question?.kind === "new"
+        ? { clientNonce: `recruiting-question:${question.effectId}` }
+        : {}),
     });
     await appendEventInTransaction(tx, {
       spaceId: input.spaceId,
@@ -978,7 +1004,7 @@ export async function pauseRunForInput(
       runId: input.runId,
       payload: { messageId: message.id, role: "bot", blocks: input.blocks },
     });
-    const waitingEvent = await appendEventInTransaction(tx, {
+    let waitingEvent = await appendEventInTransaction(tx, {
       spaceId: input.spaceId,
       threadId: input.threadId,
       botId: input.botId,
@@ -986,6 +1012,8 @@ export async function pauseRunForInput(
       runId: input.runId,
       payload: {},
     });
+    if (question?.kind === "new")
+      waitingEvent = await commitRecruitingQuestionInTransaction(tx, input, question, message);
     await tx.event.deleteMany({ where: { runId: input.runId, type: "thread.progress" } });
     return { threadId: waitingEvent.threadId, seq: waitingEvent.seq };
   });

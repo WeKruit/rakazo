@@ -104,7 +104,7 @@ describe("jsonSchemaParameters", () => {
     expect(wire).not.toHaveProperty("oneOf");
   });
 
-  it("preserves typed assessment sources and both operations through the native Pi validator", () => {
+  it("preserves typed assessment sources, reassessment and original-card questions through the native Pi validator", () => {
     const tool = builtinAgentTools.find((entry) => entry.name === "recruiting_assess")!;
     const parameters = parametersFor(tool);
     const wire = JSON.parse(JSON.stringify(parameters));
@@ -146,7 +146,24 @@ describe("jsonSchemaParameters", () => {
       ],
       employmentEvaluations: [],
     };
-    for (const input of [save, { operation: "read", candidateKey: "candidate-1" }]) {
+    for (const input of [
+      save,
+      { operation: "read", candidateKey: "candidate-1" },
+      { ...save, operation: "reassess", expectedRevision: 1, atomJudgments: [] },
+      {
+        operation: "ask",
+        roleId: save.roleId,
+        roleRevisionId: save.roleRevisionId,
+        target: {
+          kind: "candidate",
+          candidateKey: save.candidateKey,
+          assessmentVersion: 1,
+          criterionIds: ["geometry"],
+        },
+        question: "  What did you implement?  ",
+        options: ["Code", "Library"],
+      },
+    ]) {
       for (const schema of [tool.inputSchema, wire]) {
         expect(parseConnectorToolArgs(schema, input)).toEqual(input);
         expect(() => parseConnectorToolArgs(schema, { ...input, hardGate: "met" })).toThrow();

@@ -2,6 +2,7 @@
 import type {
   RecruitingAssessment,
   RecruitingAssessmentSourceRef,
+  RecruitingQuestion,
   RecruitingRole,
   RecruitingRoleRevision,
 } from "@rakazo/contracts";
@@ -16,6 +17,8 @@ const api = vi.hoisted(() => ({
   getWorkspace: vi.fn(),
   listAssessments: vi.fn(),
   listResearch: vi.fn(),
+  listQuestions: vi.fn(),
+  answer: vi.fn(),
   createRole: vi.fn(),
   bindRole: vi.fn(),
   reviseRole: vi.fn(),
@@ -31,6 +34,7 @@ vi.mock("../lib/rpc", () => ({
     recruiting: api,
     memory: api,
     artifacts: api,
+    threads: { answer: api.answer },
     search: { query: api.search },
   },
 }));
@@ -139,6 +143,8 @@ beforeEach(() => {
   vi.stubGlobal("IS_REACT_ACT_ENVIRONMENT", true);
   api.getWorkspace.mockResolvedValue({ role, revision });
   api.listAssessments.mockResolvedValue([assessment]);
+  api.listQuestions.mockResolvedValue({ questions: [] });
+  api.answer.mockResolvedValue({ ok: true });
   api.listResearch.mockResolvedValue({
     tasks: [{ id: "task-1", roleId: role.id, state: "active", providerTaskId: "provider-task-1" }],
     actions: [
@@ -201,6 +207,7 @@ async function mounted(threadId = "thread-1", botId?: string) {
   const container = document.createElement("div");
   document.body.append(container);
   const root = createRoot(container);
+  const reveal = vi.fn();
   const render = async (id: string, refreshSignal = 0) =>
     act(async () =>
       root.render(
@@ -210,6 +217,7 @@ async function mounted(threadId = "thread-1", botId?: string) {
             botId={botId}
             refreshSignal={refreshSignal}
             onClose={() => {}}
+            onRevealMessage={reveal}
           />
         </MemoryRouter>,
       ),
@@ -236,8 +244,159 @@ async function mounted(threadId = "thread-1", botId?: string) {
       details!.dispatchEvent(new Event("toggle"));
     });
   };
-  return { container, render, click, expand };
+  return { container, render, click, expand, reveal };
 }
+
+const nativeQuestion = {
+  effectId: "question-effect",
+  roleId: role.id,
+  roleRevisionId: revision.id,
+  target: {
+    kind: "candidate",
+    candidateKey: "candidate-1",
+    assessmentVersion: 1,
+    criterionIds: ["criterion-1"],
+  },
+  threadId: "origin-thread",
+  botId: "origin-bot",
+  groupId: "origin-group",
+  runId: "origin-run",
+  messageId: "origin-question",
+  askIndex: 0,
+  block: {
+    kind: "ask",
+    text: "Which component did the candidate implement?",
+    status: "pending",
+    actions: [
+      { id: "choice-1", label: "Coordinate transforms" },
+      { id: "choice-2", label: "Need more evidence" },
+    ],
+  },
+  runStatus: "waiting_input",
+  isCurrent: true,
+  canAnswer: true,
+} satisfies RecruitingQuestion;
+
+it("answers the original native group question and reloads its persisted answered state", async () => {
+  api.listQuestions.mockResolvedValue({ questions: [nativeQuestion] });
+  const view = await mounted("thread-1", "current-bot");
+  expect(api.listQuestions).toHaveBeenCalledWith({ threadId: "thread-1", roleId: role.id });
+  await view.click("Missing info");
+  expect(view.container.textContent).toContain(nativeQuestion.block.text);
+  expect(view.container.textContent).toContain("candidate-1");
+  api.listQuestions.mockResolvedValue({
+    questions: [
+      {
+        ...nativeQuestion,
+        block: { ...nativeQuestion.block, status: "answered", answer: "choice-1" },
+        runStatus: "queued",
+        canAnswer: false,
+      },
+    ],
+  });
+  await view.click("Coordinate transforms");
+  expect(api.answer).toHaveBeenCalledExactlyOnceWith({
+    groupId: "origin-group",
+    runId: "origin-run",
+    messageId: "origin-question",
+    answer: "choice-1",
+  });
+  expect(api.listQuestions).toHaveBeenCalledTimes(2);
+  expect(view.container.textContent).toContain("Answered: Coordinate transforms");
+  await view.click("Open original question");
+  expect(view.reveal).toHaveBeenCalledExactlyOnceWith({
+    groupId: "origin-group",
+    messageId: "origin-question",
+  });
+});
+
+it("submits custom input to the native originating bot without creating a new task", async () => {
+  api.listQuestions.mockResolvedValue({ questions: [{ ...nativeQuestion, groupId: null }] });
+  const view = await mounted();
+  await view.click("Missing info");
+  await view.click("Type your answer");
+  const input = view.container.querySelector<HTMLInputElement>('input[aria-label="Answer"]')!;
+  await act(async () => {
+    Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, "value")!.set!.call(
+      input,
+      "  Implemented the geometry library in C++  ",
+    );
+    input.dispatchEvent(new Event("input", { bubbles: true }));
+  });
+  await view.click("Send answer");
+  expect(api.answer).toHaveBeenCalledExactlyOnceWith({
+    botId: "origin-bot",
+    runId: "origin-run",
+    messageId: "origin-question",
+    answer: "Implemented the geometry library in C++",
+  });
+  expect(api.createRole).not.toHaveBeenCalled();
+  expect(api.bindRole).not.toHaveBeenCalled();
+  expect(api.search).not.toHaveBeenCalled();
+});
+
+it("keeps answered native questions visible and leaves stale cancelled cards inactive", async () => {
+  api.listQuestions.mockResolvedValue({
+    questions: [
+      {
+        ...nativeQuestion,
+        isCurrent: false,
+        canAnswer: false,
+        runStatus: "cancelled",
+      },
+      {
+        ...nativeQuestion,
+        effectId: "answered-effect",
+        messageId: "answered-question",
+        block: { ...nativeQuestion.block, status: "answered", answer: "choice-2" },
+        isCurrent: false,
+        canAnswer: false,
+        runStatus: "completed",
+      },
+    ],
+  });
+  const view = await mounted();
+  await view.click("Missing info");
+  expect(view.container.textContent).toContain("No longer active");
+  expect(view.container.textContent).toContain("Answered: Need more evidence");
+  expect(view.container.textContent).toContain("Outdated");
+  expect(
+    [...view.container.querySelectorAll("button")].some(
+      (button) => button.textContent === "Coordinate transforms",
+    ),
+  ).toBe(false);
+  expect(api.answer).not.toHaveBeenCalled();
+});
+
+it("shows native answer failures without marking a question answered", async () => {
+  api.listQuestions.mockResolvedValue({ questions: [nativeQuestion] });
+  api.answer.mockRejectedValueOnce(new Error("This prompt is no longer awaiting an answer"));
+  const view = await mounted();
+  await view.click("Missing info");
+  await view.click("Need more evidence");
+  expect(view.container.textContent).toContain("This prompt is no longer awaiting an answer");
+  expect(view.container.textContent).not.toContain("Answered: Need more evidence");
+  expect(api.listQuestions).toHaveBeenCalledOnce();
+});
+
+it("does not publish questions from a role changed while the read was pending", async () => {
+  let finish!: (value: { questions: (typeof nativeQuestion)[] }) => void;
+  api.listQuestions.mockReturnValueOnce(
+    new Promise((resolve) => {
+      finish = resolve;
+    }),
+  );
+  const view = await mounted();
+  const nextRole = { ...role, id: "role-2", currentRevisionId: "revision-next" };
+  api.getWorkspace.mockResolvedValue({
+    role: nextRole,
+    revision: { ...revision, id: nextRole.currentRevisionId, roleId: nextRole.id },
+  });
+  await act(async () => finish({ questions: [nativeQuestion] }));
+  await view.click("Missing info");
+  expect(view.container.textContent).not.toContain(nativeQuestion.block.text);
+  expect(api.listQuestions).toHaveBeenLastCalledWith({ threadId: "thread-1", roleId: nextRole.id });
+});
 it("reads the native five views and lazily resolves memory history and Artifact references", async () => {
   const view = await mounted();
   expect(view.container.textContent).toContain("Systems engineer");

@@ -5018,3 +5018,7 @@ msgstr "Tu nombre"
 #: src/pages/Welcome.tsx
 msgid "Your team of always-on agents<0/>that you can give real work to."
 msgstr "Tu equipo de agentes siempre activos<0/>a los que puedes dar trabajo real."
+
+#: src/pages/RecruitingPanel.tsx
+msgid "Open original question"
+msgstr "Abrir pregunta original"

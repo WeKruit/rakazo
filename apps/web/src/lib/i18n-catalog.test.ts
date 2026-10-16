@@ -28,6 +28,7 @@ describe("lingui catalogs", () => {
       entry.origin?.some(([path]) => path === "src/pages/RecruitingPanel.tsx"),
     );
     expect(entries.length).toBeGreaterThan(30);
+    expect(entries.some(([, entry]) => entry.message === "Open original question")).toBe(true);
     for (const locale of config.locales) {
       const { messages } = await catalog!.getTranslations(locale, config);
       const compiled = createCompiledCatalog(locale, messages, { namespace: "json", strict: true });

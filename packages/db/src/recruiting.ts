@@ -5,9 +5,11 @@ import type {
   CreateRecruitingRoleInput as CreateRoleInput,
   RecruitingArtifactRef,
   RecruitingAssessment,
+  RecruitingAssessmentAskInput,
   RecruitingAssessmentSourceRef,
   RecruitingHumanIntent,
   RecruitingPreferenceFeedbackInput,
+  RecruitingQuestion,
   RecruitingReadPayload,
   RecruitingResearchAction,
   RecruitingRole,
@@ -22,11 +24,15 @@ import {
   MessageBlock as MessageBlockSchema,
   NativeAskAnswerPayloadSchema,
   ProductEventSchema,
+  ReassessRecruitingAssessmentInput,
   RecruitingArtifactRefSchema,
+  RecruitingAssessmentAskInputSchema,
   RecruitingAssessmentSchema,
   RecruitingHumanIntentSchema,
   RecruitingMaterialReadPayloadSchema,
   RecruitingPreferenceFeedbackSchema,
+  RecruitingQuestionAskedPayloadSchema,
+  RecruitingQuestionSchema,
   RecruitingResearchActionSchema,
   RecruitingResearchTaskSchema,
   RecruitingRoleRevisionSchema,
@@ -36,10 +42,15 @@ import {
   ReviseRecruitingRoleInput,
   SaveRecruitingAssessmentInput,
 } from "@rakazo/contracts";
-import { applyRecruitingPreferenceEdit, evaluateRecruitingAssessment } from "@rakazo/core";
+import {
+  applyRecruitingPreferenceEdit,
+  evaluateRecruitingAssessment,
+  mergeRecruitingReassessment,
+} from "@rakazo/core";
 import { stableJsonValue } from "@rakazo/core/node/approval-effect-key";
 import type { PrismaClient } from "./client.js";
 import { Prisma } from "./client.js";
+import type { AnswerRunInput, PauseRunForInput } from "./events.js";
 import { appendEventInTransaction } from "./events.js";
 import { IsolationError, scoped } from "./scope.js";
 
@@ -345,12 +356,22 @@ async function lockLiveRecruitingRun(tx: Tx, actor: Actor, runId: string, requir
   if ((requireRunning && run.status !== "running") || run.threadId !== lockedThreads[0]!.id)
     throw new IsolationError();
   const thread = await requireThread(tx, actor, run.threadId);
-  if (thread.botId && thread.botId !== run.botId) throw new IsolationError();
+  if (!(await runTargetsRecruitingThread(tx, actor, run, thread))) throw new IsolationError();
+  return { run, thread };
+}
+
+async function runTargetsRecruitingThread(
+  tx: Tx,
+  actor: Actor,
+  run: { botId: string },
+  thread: Awaited<ReturnType<typeof requireThread>>,
+): Promise<boolean> {
+  if (thread.botId && thread.botId !== run.botId) return false;
   if (
     thread.groupId &&
     !(await tx.chatGroupMember.findFirst({ where: { groupId: thread.groupId, botId: run.botId } }))
   )
-    throw new IsolationError();
+    return false;
   if (
     thread.externalConversationId &&
     !(await tx.externalConversation.findFirst({
@@ -362,8 +383,8 @@ async function lockLiveRecruitingRun(tx: Tx, actor: Actor, runId: string, requir
       },
     }))
   )
-    throw new IsolationError();
-  return { run, thread };
+    return false;
+  return true;
 }
 
 const humanMessageInclude = { externalTranscriptFor: { select: { id: true } } } as const;
@@ -979,6 +1000,393 @@ export type RecruitingAssessmentSaveContext = {
   effectRequest: unknown;
 };
 export type RecruitingAssessmentArtifactBytes = { artifactId: string; bytes: Uint8Array };
+export type RecruitingQuestionPauseContext = {
+  actor: Actor;
+  effectId: string;
+  effectRequest: unknown;
+  contextArtifact?: RecruitingArtifactRef;
+  artifacts: readonly RecruitingAssessmentArtifactBytes[];
+};
+type PreparedRecruitingQuestion =
+  | { kind: "completed"; eventSeq: number }
+  | { kind: "new"; request: RecruitingAssessmentAskInput; effectId: string; askIndex: number };
+
+function questionCard(blocks: unknown, askIndex: number) {
+  const parsed = MessageBlockSchema.array().parse(blocks);
+  const block = parsed[askIndex];
+  if (
+    parsed.length !== 1 ||
+    block?.kind !== "ask" ||
+    block.approvalEffectId ||
+    block.credential ||
+    block.input === "secret" ||
+    !block.actions ||
+    new Set(block.actions.map((action) => action.id)).size !== block.actions.length
+  )
+    throw new IsolationError();
+  return block;
+}
+
+async function questionTargetCurrent(
+  tx: Tx,
+  actor: Actor,
+  role: RecruitingRole,
+  request: RecruitingAssessmentAskInput,
+) {
+  if (role.currentRevisionId !== request.roleRevisionId) return false;
+  const definition = (await roleSnapshot(tx, actor, role)).revision;
+  const ids = request.target.criterionIds;
+  if (
+    new Set(ids).size !== ids.length ||
+    ids.some((id) => !definition.criteria.some((criterion) => criterion.id === id))
+  )
+    throw new IsolationError();
+  if (request.target.kind === "role") return true;
+  const row = await tx.recruitingAssessment.findFirst({
+    where: { roleId: role.id, candidateKey: request.target.candidateKey },
+    orderBy: { version: "desc" },
+  });
+  if (
+    !row ||
+    row.version !== request.target.assessmentVersion ||
+    row.roleRevisionId !== request.roleRevisionId
+  )
+    return false;
+  await assessmentSnapshot(tx, actor, role, row);
+  return true;
+}
+
+async function questionInTransaction(
+  tx: Tx,
+  actor: Actor,
+  input: { threadId: string; roleId: string; effectId: string },
+): Promise<RecruitingQuestion | null> {
+  const thread = await requireThread(tx, actor, input.threadId);
+  const role = await requireRole(tx, actor, input.roleId);
+  const event = await tx.event.findFirst({
+    where: {
+      spaceId: actor.spaceId,
+      threadId: thread.id,
+      type: "recruiting.question.asked",
+      AND: [
+        { payload: { path: ["roleId"], equals: role.id } },
+        { payload: { path: ["effectId"], equals: input.effectId } },
+      ],
+    },
+  });
+  if (!event?.runId) return null;
+  const receipt = RecruitingQuestionAskedPayloadSchema.parse(event.payload);
+  const run = await requireRun(tx, actor, event.runId);
+  const status = await tx.run.findUniqueOrThrow({
+    where: { id: run.id },
+    select: { status: true },
+  });
+  const effect = await tx.externalEffect.findFirst({
+    where: {
+      id: receipt.effectId,
+      runId: run.id,
+      spaceId: actor.spaceId,
+      kind: "recruiting_assess",
+      status: "completed",
+    },
+  });
+  if (!effect || stableJsonValue(effect.result) !== stableJsonValue(receipt))
+    throw new IsolationError();
+  const request = RecruitingAssessmentAskInputSchema.parse(effect.request);
+  if (
+    run.threadId !== thread.id ||
+    event.botId !== run.botId ||
+    receipt.roleId !== role.id ||
+    receipt.roleRevisionId !== request.roleRevisionId ||
+    request.roleId !== role.id ||
+    stableJsonValue(request.target) !== stableJsonValue(receipt.target)
+  )
+    throw new IsolationError();
+  const message = await tx.message.findFirst({
+    where: {
+      id: receipt.messageId,
+      threadId: thread.id,
+      runId: run.id,
+      botId: run.botId,
+      role: "bot",
+      clientNonce: `recruiting-question:${effect.id}`,
+    },
+  });
+  if (!message) throw new IsolationError();
+  const block = questionCard(message.blocks, receipt.askIndex);
+  const created = await tx.event.findFirst({
+    where: {
+      spaceId: actor.spaceId,
+      threadId: thread.id,
+      runId: run.id,
+      botId: run.botId,
+      type: "thread.message.created",
+      payload: { path: ["messageId"], equals: message.id },
+    },
+  });
+  const original = created
+    ? questionCard((created.payload as { blocks?: unknown }).blocks, receipt.askIndex)
+    : null;
+  const { status: _status, answer: _answer, ...display } = block;
+  const { status: _originalStatus, answer: _originalAnswer, ...originalDisplay } = original ?? {};
+  if (
+    !original ||
+    original.status === "answered" ||
+    stableJsonValue(display) !== stableJsonValue(originalDisplay)
+  )
+    throw new IsolationError();
+  const proof = await tx.event.findFirst({
+    where: {
+      spaceId: actor.spaceId,
+      threadId: thread.id,
+      botId: run.botId,
+      runId: run.id,
+      type: "thread.choice",
+      AND: [
+        { payload: { path: ["messageId"], equals: message.id } },
+        { payload: { path: ["askIndex"], equals: receipt.askIndex } },
+      ],
+    },
+  });
+  if (block.status === "answered") {
+    const parsed = NativeAskAnswerPayloadSchema.safeParse(proof?.payload);
+    if (!parsed.success || parsed.data.answeredByUserId !== actor.userId)
+      throw new IsolationError();
+    const human = await loadRunHumanSources(tx, actor, run);
+    if (!human.answers.some((answer) => answer.id === parsed.data.answerMessageId))
+      throw new IsolationError();
+  } else if (proof) throw new IsolationError();
+  const isCurrent =
+    thread.activeRecruitingRoleId === role.id &&
+    (await questionTargetCurrent(tx, actor, role, request));
+  return RecruitingQuestionSchema.parse({
+    ...receipt,
+    threadId: thread.id,
+    botId: run.botId,
+    groupId: thread.groupId,
+    runId: run.id,
+    block,
+    runStatus: status.status,
+    isCurrent,
+    canAnswer:
+      isCurrent &&
+      status.status === "waiting_input" &&
+      block.status !== "answered" &&
+      (await runTargetsRecruitingThread(tx, actor, run, thread)),
+  });
+}
+
+export async function getRecruitingQuestion(
+  prisma: PrismaClient,
+  actor: Actor,
+  input: { threadId: string; roleId: string; effectId: string },
+): Promise<RecruitingQuestion | null> {
+  return prisma.$transaction((tx) => questionInTransaction(tx, actor, input), {
+    isolationLevel: Prisma.TransactionIsolationLevel.RepeatableRead,
+  });
+}
+
+export async function listRecruitingQuestions(
+  prisma: PrismaClient,
+  actor: Actor,
+  input: { threadId: string; roleId: string; candidateKey?: string },
+): Promise<RecruitingQuestion[]> {
+  return prisma.$transaction(
+    async (tx) => {
+      await requireThread(tx, actor, input.threadId);
+      await requireRole(tx, actor, input.roleId);
+      const events = await tx.event.findMany({
+        where: {
+          spaceId: actor.spaceId,
+          threadId: input.threadId,
+          type: "recruiting.question.asked",
+          payload: { path: ["roleId"], equals: input.roleId },
+        },
+        orderBy: { seq: "asc" },
+      });
+      const questions: RecruitingQuestion[] = [];
+      // ponytail: one authoritative proof read per question; batch native proof reads if history grows.
+      for (const event of events) {
+        const receipt = RecruitingQuestionAskedPayloadSchema.parse(event.payload);
+        if (
+          input.candidateKey &&
+          receipt.target.kind === "candidate" &&
+          receipt.target.candidateKey !== input.candidateKey
+        )
+          continue;
+        const question = await questionInTransaction(tx, actor, {
+          ...input,
+          effectId: receipt.effectId,
+        });
+        if (question) questions.push(question);
+      }
+      return questions;
+    },
+    { isolationLevel: Prisma.TransactionIsolationLevel.RepeatableRead },
+  );
+}
+
+/** Runs before the native pause clears its lease; completed receipts never create another card. */
+export async function prepareRecruitingQuestionInTransaction(
+  tx: Tx,
+  input: PauseRunForInput,
+): Promise<PreparedRecruitingQuestion> {
+  const trusted = input.recruitingQuestion;
+  if (!trusted || trusted.actor.spaceId !== input.spaceId) throw new IsolationError();
+  const actor = trusted.actor;
+  const request = RecruitingAssessmentAskInputSchema.parse(trusted.effectRequest);
+  const { run, thread } = await lockLiveRecruitingRun(tx, actor, input.runId, false);
+  if (run.threadId !== input.threadId || run.botId !== input.botId) throw new IsolationError();
+  const role = await requireRole(tx, actor, request.roleId, true);
+  await tx.$queryRaw(
+    Prisma.sql`SELECT "id" FROM "external_effects" WHERE "id" = ${trusted.effectId} FOR UPDATE`,
+  );
+  const effect = await tx.externalEffect.findFirst({
+    where: {
+      id: trusted.effectId,
+      spaceId: actor.spaceId,
+      runId: run.id,
+      kind: "recruiting_assess",
+    },
+  });
+  if (!effect || stableJsonValue(effect.request) !== stableJsonValue(trusted.effectRequest))
+    throw new IsolationError();
+  if (effect.status === "completed") {
+    const question = await questionInTransaction(tx, actor, {
+      threadId: thread.id,
+      roleId: role.id,
+      effectId: effect.id,
+    });
+    if (!question) throw new IsolationError();
+    const event = await tx.event.findFirstOrThrow({
+      where: {
+        spaceId: actor.spaceId,
+        threadId: thread.id,
+        type: "recruiting.question.asked",
+        payload: { path: ["effectId"], equals: effect.id },
+      },
+    });
+    return { kind: "completed", eventSeq: event.seq };
+  }
+  requireResearchLease(run, input);
+  if (
+    effect.status !== "executing" ||
+    thread.activeRecruitingRoleId !== role.id ||
+    !(await questionTargetCurrent(tx, actor, role, request))
+  )
+    throw new RecruitingConflictError();
+  const context = {
+    ...input,
+    contextArtifact: trusted.contextArtifact,
+    effectId: effect.id,
+    effectRequest: effect.request,
+  };
+  await requireAssessmentAdoption(
+    tx,
+    actor,
+    context,
+    role,
+    new Map(trusted.artifacts.map(({ artifactId, bytes }) => [artifactId, bytes])),
+  );
+  const card = questionCard(input.blocks, 0);
+  if (
+    card.status === "answered" ||
+    card.actions!.length !== request.options.length ||
+    stableJsonValue(input.offeredActions?.map((action) => action.label)) !==
+      stableJsonValue(request.options) ||
+    stableJsonValue(input.offeredActions?.map((action) => action.id)) !==
+      stableJsonValue(card.actions!.map((action) => action.id))
+  )
+    throw new IsolationError();
+  return { kind: "new", request, effectId: effect.id, askIndex: 0 };
+}
+
+export async function commitRecruitingQuestionInTransaction(
+  tx: Tx,
+  input: PauseRunForInput,
+  prepared: Extract<PreparedRecruitingQuestion, { kind: "new" }>,
+  message: { id: string },
+) {
+  const payload = {
+    roleId: prepared.request.roleId,
+    roleRevisionId: prepared.request.roleRevisionId,
+    target: prepared.request.target,
+    effectId: prepared.effectId,
+    messageId: message.id,
+    askIndex: prepared.askIndex,
+  };
+  const completed = await tx.externalEffect.updateMany({
+    where: {
+      id: prepared.effectId,
+      runId: input.runId,
+      spaceId: input.spaceId,
+      status: "executing",
+    },
+    data: { status: "completed", result: payload },
+  });
+  if (completed.count !== 1) throw new IsolationError();
+  return appendEventInTransaction(tx, {
+    spaceId: input.spaceId,
+    threadId: input.threadId,
+    botId: input.botId,
+    runId: input.runId,
+    type: "recruiting.question.asked",
+    payload,
+  });
+}
+
+/** One guard protects both card clicks and native composer answers. */
+export async function authorizeRecruitingQuestionAnswerInTransaction(
+  tx: Tx,
+  input: AnswerRunInput,
+  message: { clientNonce: string | null },
+  askIndex: number,
+): Promise<boolean> {
+  if (!message.clientNonce?.startsWith("recruiting-question:")) return true;
+  const actor: Actor = {
+    spaceId: input.spaceId,
+    userId: input.answeredByUserId,
+    email: "",
+    isDeploymentOwner: false,
+  };
+  try {
+    const { run, thread } = await lockLiveRecruitingRun(tx, actor, input.runId, false);
+    if (run.status !== "waiting_input" || run.threadId !== input.threadId) return false;
+    const effectId = message.clientNonce.slice("recruiting-question:".length);
+    const event = await tx.event.findFirst({
+      where: {
+        spaceId: actor.spaceId,
+        threadId: thread.id,
+        runId: run.id,
+        type: "recruiting.question.asked",
+        payload: { path: ["effectId"], equals: effectId },
+      },
+    });
+    if (!event) return false;
+    const receipt = RecruitingQuestionAskedPayloadSchema.parse(event.payload);
+    if (
+      thread.activeRecruitingRoleId !== receipt.roleId ||
+      receipt.messageId !== input.messageId ||
+      receipt.askIndex !== askIndex
+    )
+      return false;
+    await requireRole(tx, actor, receipt.roleId, true);
+    const question = await questionInTransaction(tx, actor, {
+      threadId: thread.id,
+      roleId: receipt.roleId,
+      effectId,
+    });
+    return question?.canAnswer === true;
+  } catch (error) {
+    if (
+      error instanceof IsolationError ||
+      error instanceof RecruitingConflictError ||
+      (error instanceof Error && error.name === "ZodError")
+    )
+      return false;
+    throw error;
+  }
+}
 
 function assessmentSelection(text: string, start: number, end: number, quote: string) {
   const splitsSurrogate = (index: number) =>
@@ -1194,11 +1602,16 @@ export async function saveRecruitingAssessment(
   untrusted: SaveAssessmentInput,
   trustedArtifacts: readonly RecruitingAssessmentArtifactBytes[],
 ): Promise<RecruitingAssessmentSnapshot> {
-  const input = SaveRecruitingAssessmentInput.parse(untrusted);
   const request = context.effectRequest as { operation?: unknown } & Record<string, unknown>;
-  if (request?.operation !== "save") throw new IsolationError();
+  if (request?.operation !== "save" && request?.operation !== "reassess")
+    throw new IsolationError();
+  const schema =
+    request.operation === "reassess"
+      ? ReassessRecruitingAssessmentInput
+      : SaveRecruitingAssessmentInput;
+  const input = schema.parse(untrusted);
   const { operation: _operation, ...requestInput } = request;
-  if (stableJsonValue(SaveRecruitingAssessmentInput.parse(requestInput)) !== stableJsonValue(input))
+  if (stableJsonValue(schema.parse(requestInput)) !== stableJsonValue(input))
     throw new IsolationError();
   const artifacts = new Map(trustedArtifacts.map(({ artifactId, bytes }) => [artifactId, bytes]));
   if (artifacts.size !== trustedArtifacts.length) throw new IsolationError();
@@ -1265,12 +1678,20 @@ export async function saveRecruitingAssessment(
     const last = await tx.recruitingAssessment.findFirst({
       where: { roleId: role.id, candidateKey: input.candidateKey },
       orderBy: { version: "desc" },
-      select: { version: true },
     });
     if ((last?.version ?? 0) !== input.expectedRevision) throw new RecruitingConflictError();
-    await validateAssessmentSources(tx, actor, input.sourceRefs, artifacts);
+    if (request.operation === "reassess" && !last) throw new RecruitingConflictError();
+    const content =
+      request.operation === "reassess"
+        ? mergeRecruitingReassessment(
+            definition,
+            (await assessmentSnapshot(tx, actor, role, last!)).assessment,
+            input,
+          )
+        : input;
+    await validateAssessmentSources(tx, actor, content.sourceRefs, artifacts);
     const now = new Date();
-    const judgments = evaluateRecruitingAssessment(definition, input, {
+    const judgments = evaluateRecruitingAssessment(definition, content, {
       precision: "day",
       year: now.getUTCFullYear(),
       month: now.getUTCMonth() + 1,
@@ -1283,10 +1704,10 @@ export async function saveRecruitingAssessment(
         roleRevisionId: input.roleRevisionId,
         version: input.expectedRevision + 1,
         basedOnVersion: input.expectedRevision || null,
-        facts: input.facts as Prisma.InputJsonValue,
+        facts: content.facts as Prisma.InputJsonValue,
         judgments: judgments as Prisma.InputJsonValue,
-        questions: input.questions as Prisma.InputJsonValue,
-        sourceRefs: input.sourceRefs as Prisma.InputJsonValue,
+        questions: content.questions as Prisma.InputJsonValue,
+        sourceRefs: content.sourceRefs as Prisma.InputJsonValue,
         createdByRunId: run.id,
       },
     });

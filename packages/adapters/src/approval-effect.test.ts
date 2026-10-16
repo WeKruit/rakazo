@@ -17,6 +17,7 @@ import {
   claimIntendedEffect,
   completeExternalEffect,
   createApprovedEffectReplayQueue,
+  inputPausedToolResult,
   isApprovalPausedResult,
   isToolPauseResult,
   replaceCompletedExternalEffectResult,
@@ -487,6 +488,12 @@ describe("approved effect resume", () => {
 });
 
 describe("isToolPauseResult", () => {
+  it("pauses for a native question without labelling it an approval", () => {
+    const result = inputPausedToolResult();
+    expect(isToolPauseResult(result)).toBe(true);
+    expect(result).toMatchObject({ terminate: true, details: { input: "paused" } });
+    expect(result.details).not.toHaveProperty("approval");
+  });
   it("detects approval and secret pauses", () => {
     expect(isToolPauseResult(approvalPausedToolResult())).toBe(true);
     expect(

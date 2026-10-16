@@ -1,9 +1,12 @@
 import type {
+  ReassessRecruitingAssessmentInput,
+  RecruitingAssessment,
   RecruitingAssessmentJudgments,
   RecruitingAtomJudgment,
   RecruitingCriterionExpression,
   RecruitingEmploymentDate,
   RecruitingEmploymentDay,
+  RecruitingEmploymentEvaluation,
   RecruitingEmploymentJudgment,
   RecruitingPreferenceFeedbackInput,
   RecruitingRoleRevision,
@@ -11,7 +14,9 @@ import type {
   Verdict,
 } from "@rakazo/contracts";
 import {
+  ReassessRecruitingAssessmentInput as ReassessAssessmentInputSchema,
   RecruitingAssessmentJudgmentsSchema,
+  RecruitingAssessmentSchema,
   RecruitingEmploymentDaySchema,
   SaveRecruitingAssessmentInput as SaveAssessmentInputSchema,
 } from "@rakazo/contracts";
@@ -252,14 +257,18 @@ function completeCalendarMonths(intervals: [number, number][]): number {
   }, 0);
 }
 
-/** The runtime supplies one frozen UTC assessment day; inputs never supply a cutoff or aggregate. */
-export function evaluateRecruitingAssessment(
-  role: Pick<RecruitingRoleRevision, "criteria" | "definitionQuestions">,
-  untrusted: SaveRecruitingAssessmentInput,
-  assessmentDate: RecruitingEmploymentDay,
-): RecruitingAssessmentJudgments {
-  const input = SaveAssessmentInputSchema.parse(untrusted);
-  const trustedDay = RecruitingEmploymentDaySchema.parse(assessmentDate);
+function requireEmploymentClassifications(
+  facts: SaveRecruitingAssessmentInput["facts"],
+  evaluation: RecruitingEmploymentEvaluation,
+): void {
+  const classified = new Set(evaluation.intervals.map((interval) => interval.factId));
+  if (facts.some((fact) => fact.kind === "employment" && !classified.has(fact.id)))
+    throw new RecruitingAssessmentValidationError(
+      "Every employment fact requires an explicit eligibility judgment",
+    );
+}
+
+function recruitingRoleAtoms(role: Pick<RecruitingRoleRevision, "criteria">) {
   const definitions = new Map<string, Extract<RecruitingCriterionExpression, { kind: "atom" }>>();
   const collect = (expression: RecruitingCriterionExpression): string[] => {
     if (expression.kind === "atom") {
@@ -274,6 +283,18 @@ export function evaluateRecruitingAssessment(
   const criterionAtoms = role.criteria.map((criterion) => collect(criterion.expression));
   if (new Set(role.criteria.map((criterion) => criterion.id)).size !== role.criteria.length)
     throw new RecruitingAssessmentValidationError("Criterion IDs must be unique");
+  return { definitions, criterionAtoms };
+}
+
+/** The runtime supplies one frozen UTC assessment day; inputs never supply a cutoff or aggregate. */
+export function evaluateRecruitingAssessment(
+  role: Pick<RecruitingRoleRevision, "criteria" | "definitionQuestions">,
+  untrusted: SaveRecruitingAssessmentInput,
+  assessmentDate: RecruitingEmploymentDay,
+): RecruitingAssessmentJudgments {
+  const input = SaveAssessmentInputSchema.parse(untrusted);
+  const trustedDay = RecruitingEmploymentDaySchema.parse(assessmentDate);
+  const { definitions, criterionAtoms } = recruitingRoleAtoms(role);
   const semantics = new Map(input.atomJudgments.map((judgment) => [judgment.atomId, judgment]));
   const evaluations = new Map(
     input.employmentEvaluations.map((evaluation) => [evaluation.atomId, evaluation]),
@@ -326,11 +347,7 @@ export function evaluateRecruitingAssessment(
       continue;
     }
     const evaluation = evaluations.get(atomId)!;
-    const classified = new Set(evaluation.intervals.map((interval) => interval.factId));
-    if (input.facts.some((fact) => fact.kind === "employment" && !classified.has(fact.id)))
-      throw new RecruitingAssessmentValidationError(
-        "Every employment fact requires an explicit eligibility judgment",
-      );
+    requireEmploymentClassifications(input.facts, evaluation);
     const cutoff = rule.cutoff.kind === "fixed" ? rule.cutoff.date : trustedDay;
     const completeness =
       evaluation.historyCompletenessFactId === null
@@ -411,4 +428,126 @@ export function evaluateRecruitingAssessment(
       };
     }),
   });
+}
+
+/** Reuse semantic inputs only while their exact saved evidence dependencies remain unchanged. */
+export function mergeRecruitingReassessment(
+  role: Pick<RecruitingRoleRevision, "id" | "roleId" | "criteria" | "definitionQuestions">,
+  previousAssessment: RecruitingAssessment,
+  untrusted: ReassessRecruitingAssessmentInput,
+): SaveRecruitingAssessmentInput {
+  const parsed = ReassessAssessmentInputSchema.safeParse(untrusted);
+  const saved = RecruitingAssessmentSchema.safeParse(previousAssessment);
+  if (!parsed.success || !saved.success)
+    throw new RecruitingAssessmentValidationError(
+      "Invalid reassessment facts, sources or judgment dependencies",
+    );
+  const input = parsed.data;
+  const previous = saved.data;
+  if (
+    input.roleId !== role.roleId ||
+    previous.roleId !== role.roleId ||
+    input.roleRevisionId !== role.id ||
+    previous.roleRevisionId !== role.id
+  )
+    throw new RecruitingAssessmentValidationError(
+      "A changed role revision requires a complete assessment",
+    );
+  if (input.candidateKey !== previous.candidateKey || input.expectedRevision !== previous.version)
+    throw new RecruitingAssessmentValidationError(
+      "Reassessment must target the saved candidate and version",
+    );
+  const { definitions } = recruitingRoleAtoms(role);
+  for (const judgment of input.atomJudgments)
+    if (!definitions.has(judgment.atomId) || definitions.get(judgment.atomId)!.employmentRule)
+      throw new RecruitingAssessmentValidationError("Unknown semantic assessment atom ID");
+  for (const evaluation of input.employmentEvaluations)
+    if (!definitions.get(evaluation.atomId)?.employmentRule)
+      throw new RecruitingAssessmentValidationError("Unknown employment assessment atom ID");
+  for (const atom of previous.judgments.atoms)
+    if (!definitions.has(atom.atomId))
+      throw new RecruitingAssessmentValidationError("Saved assessment contains an unknown atom ID");
+  for (const evaluation of previous.judgments.employment)
+    if (!definitions.get(evaluation.atomId)?.employmentRule)
+      throw new RecruitingAssessmentValidationError(
+        "Saved assessment contains an unknown employment atom ID",
+      );
+  const changedIds = <T extends { id: string }>(
+    before: readonly T[],
+    after: readonly T[],
+  ): Set<string> => {
+    const old = new Map(before.map((item) => [item.id, item]));
+    const next = new Map(after.map((item) => [item.id, item]));
+    return new Set(
+      [...old.keys(), ...next.keys()].filter(
+        (id) => JSON.stringify(old.get(id)) !== JSON.stringify(next.get(id)),
+      ),
+    );
+  };
+  const changedFacts = changedIds(previous.facts, input.facts);
+  const changedSources = changedIds(previous.sourceRefs, input.sourceRefs);
+  const previousFacts = new Map(previous.facts.map((fact) => [fact.id, fact]));
+  const dependsOnChange = (factIds: readonly string[], evidence: readonly string[]): boolean =>
+    factIds.some(
+      (id) =>
+        changedFacts.has(id) ||
+        previousFacts.get(id)?.sourceRefIds.some((sourceId) => changedSources.has(sourceId)),
+    ) || evidence.some((id) => changedSources.has(id));
+  const employmentChanged = [...previous.facts, ...input.facts].some(
+    (fact) => fact.kind === "employment" && changedFacts.has(fact.id),
+  );
+  const semanticOverrides = new Map(
+    input.atomJudgments.map((judgment) => [judgment.atomId, judgment]),
+  );
+  const employmentOverrides = new Map(
+    input.employmentEvaluations.map((evaluation) => [evaluation.atomId, evaluation]),
+  );
+  const previousAtoms = new Map(
+    previous.judgments.atoms.map((judgment) => [judgment.atomId, judgment]),
+  );
+  const previousEmployment = new Map(
+    previous.judgments.employment.map((evaluation) => [evaluation.atomId, evaluation]),
+  );
+  const atomJudgments: RecruitingAtomJudgment[] = [];
+  const employmentEvaluations: RecruitingEmploymentEvaluation[] = [];
+  for (const [atomId, definition] of definitions) {
+    if (!definition.employmentRule) {
+      const override = semanticOverrides.get(atomId);
+      const prior = previousAtoms.get(atomId);
+      if (!override && (!prior || dependsOnChange(prior.factIds, prior.evidence)))
+        throw new RecruitingAssessmentValidationError(
+          "Changed semantic dependencies require an explicit atom update",
+        );
+      atomJudgments.push(override ?? prior!);
+      continue;
+    }
+    const override = employmentOverrides.get(atomId);
+    const prior = previousEmployment.get(atomId);
+    if (
+      !override &&
+      (!prior || employmentChanged || dependsOnChange(prior.factIds, prior.evidence))
+    )
+      throw new RecruitingAssessmentValidationError(
+        "Changed employment dependencies require an explicit evaluation update",
+      );
+    const evaluation = override ?? prior!;
+    requireEmploymentClassifications(input.facts, evaluation);
+    employmentEvaluations.push({
+      atomId,
+      intervals: evaluation.intervals,
+      historyCompletenessFactId: evaluation.historyCompletenessFactId,
+      evidence: evaluation.evidence,
+      missing: evaluation.missing,
+    });
+  }
+  const merged = SaveAssessmentInputSchema.safeParse({
+    ...input,
+    atomJudgments,
+    employmentEvaluations,
+  });
+  if (!merged.success)
+    throw new RecruitingAssessmentValidationError(
+      "Merged reassessment contains invalid fact or source dependencies",
+    );
+  return merged.data;
 }
