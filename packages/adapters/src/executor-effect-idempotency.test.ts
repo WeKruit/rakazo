@@ -58,6 +58,7 @@ type ToolCall = {
 function fixture(runId = "run-1", secrets: string[] = []) {
   const effects: Effect[] = [];
   const results: unknown[] = [];
+  const sourceMessages: Array<{ id: string; seq: number }> = [];
   const scratchpadRows: Array<{
     id: string;
     spaceId: string;
@@ -178,7 +179,9 @@ function fixture(runId = "run-1", secrets: string[] = []) {
     },
     thread: { findUniqueOrThrow: vi.fn(async () => thread) },
     message: {
-      findMany: vi.fn(async () => []),
+      findMany: vi.fn(async ({ select }: { select?: Record<string, boolean> } = {}) =>
+        select?.id && select.seq && Object.keys(select).length === 2 ? sourceMessages : [],
+      ),
       findFirst: vi.fn(async () => null),
       findUnique: vi.fn(async () => null),
     },
@@ -269,6 +272,7 @@ function fixture(runId = "run-1", secrets: string[] = []) {
   return {
     effects,
     results,
+    sourceMessages,
     scratchpadRows,
     memoryCommit,
     memoryRead,
@@ -806,6 +810,162 @@ describe("native recruiting role effect delivery", () => {
     );
   });
 
+  it.each(["fresh", "completed replay"])(
+    "uses the verified native role answer for context adoption and subsequent tools on %s",
+    async (mode) => {
+      const f = fixture(`run-verified-role-answer-${mode}`);
+      f.runData.sourceMessageId = "vague-trigger";
+      const answerSource: RecruitingSourceRef = {
+        ...source,
+        anchor: { kind: "message", messageId: "native-role-answer", locator: "text" },
+      };
+      const answerReceipt = { ...receipt, source: answerSource };
+      const followupFeedback = {
+        target: "role" as const,
+        operation: "revise" as const,
+        roleId: workspace.role.id,
+        expectedRoleRevision: 1,
+        summary: "Keep personal geometry implementation explicit",
+        intent: { basis: "direct" as const, quote: source.quote! },
+        sourceRefs: [],
+      } satisfies RecruitingFeedbackInput;
+      vi.mocked(executeRecruitingFeedback).mockReset().mockResolvedValue({
+        status: "proposed",
+        feedback: followupFeedback,
+        source: answerSource,
+        workspace,
+        nextTool: "recruiting_role",
+      });
+      vi.mocked(executeRecruitingRoleTool).mockResolvedValue({
+        status: "current",
+        workspace,
+        source: null,
+        changed: false,
+      });
+      if (mode === "fresh") {
+        vi.mocked(executeRecruitingRoleTool).mockResolvedValueOnce(answerReceipt);
+      } else {
+        f.effects.push({
+          id: "verified-role-effect",
+          spaceId: "space-1",
+          runId: f.runData.id,
+          kind: "recruiting_role",
+          idempotencyKey: toolEffectIdempotencyKey(f.runData.id, "recruiting_role", args),
+          status: "completed",
+          request: args,
+          result: { ...delivered, source: answerSource },
+        });
+      }
+      vi.mocked(loadRecruitingRunContext).mockResolvedValue(adopted);
+      f.setCalls([
+        { name: "recruiting_role", args, executionId: "role-answer-create" },
+        { name: "recruiting_role", args: { operation: "read" }, executionId: "role-answer-read" },
+        {
+          name: "recruiting_feedback",
+          args: followupFeedback,
+          executionId: "role-answer-feedback",
+        },
+      ]);
+
+      await f.run();
+
+      expect(
+        vi.mocked(loadRecruitingRunContext).mock.calls.map((call) => call[4].sourceMessageId),
+      ).toEqual(["native-role-answer", "native-role-answer"]);
+      const roleCalls = vi.mocked(executeRecruitingRoleTool).mock.calls;
+      expect(roleCalls.map((call) => call[2])).toEqual(
+        mode === "fresh" ? [args, { operation: "read" }] : [{ operation: "read" }],
+      );
+      if (mode === "fresh") expect(roleCalls[0]![1].sourceMessageId).toBe("vague-trigger");
+      expect(roleCalls.at(-1)![1].sourceMessageId).toBe("native-role-answer");
+      expect(vi.mocked(executeRecruitingFeedback).mock.calls[0]![1].sourceMessageId).toBe(
+        "native-role-answer",
+      );
+      expect(f.results[0]).toEqual({ ...delivered, source: answerSource });
+      expect(f.memoryCommit).not.toHaveBeenCalled();
+    },
+  );
+
+  it("keeps newer human steering as the source when replaying an older completed role receipt", async () => {
+    const f = fixture("run-role-source-no-regression");
+    f.runData.sourceMessageId = "vague-trigger";
+    f.sourceMessages.push({ id: "human-answer-1", seq: 2 }, { id: "human-answer-2", seq: 3 });
+    const earlierSource: RecruitingSourceRef = {
+      ...source,
+      anchor: { kind: "message", messageId: "human-answer-1", locator: "text" },
+    };
+    const laterSource: RecruitingSourceRef = {
+      ...source,
+      anchor: { kind: "message", messageId: "human-answer-2", locator: "text" },
+    };
+    f.effects.push({
+      id: "older-role-effect",
+      spaceId: "space-1",
+      runId: f.runData.id,
+      kind: "recruiting_role",
+      idempotencyKey: toolEffectIdempotencyKey(f.runData.id, "recruiting_role", args),
+      status: "completed",
+      request: args,
+      result: { ...delivered, source: earlierSource },
+    });
+    f.claimSteering.mockResolvedValue([
+      {
+        id: "newer-human-steering",
+        messageId: "human-answer-2",
+        text: "Keep the newer role criteria",
+        blocks: [{ kind: "text", text: "Keep the newer role criteria" }],
+      },
+    ]);
+    const followupFeedback = {
+      target: "role" as const,
+      operation: "revise" as const,
+      roleId: workspace.role.id,
+      expectedRoleRevision: 1,
+      summary: "Keep the newer role criteria",
+      intent: { basis: "direct" as const, quote: "Keep the newer role criteria" },
+      sourceRefs: [],
+    } satisfies RecruitingFeedbackInput;
+    vi.mocked(executeRecruitingFeedback).mockReset().mockResolvedValue({
+      status: "proposed",
+      feedback: followupFeedback,
+      source: laterSource,
+      workspace,
+      nextTool: "recruiting_role",
+    });
+    vi.mocked(loadRecruitingRunContext).mockResolvedValue(adopted);
+    f.runtimeRun.mockImplementation(async function* (request) {
+      await request.claimSteering!([]);
+      f.results.push(await request.executeTool!("recruiting_role", args, "older-role-replay"));
+      f.results.push(
+        await request.executeTool!("recruiting_feedback", followupFeedback, "newer-feedback"),
+      );
+      yield { type: "done" as const, text: "Done" };
+    });
+
+    await f.run();
+
+    expect(executeRecruitingRoleTool).not.toHaveBeenCalled();
+    expect(vi.mocked(executeRecruitingFeedback).mock.calls[0]![1].sourceMessageId).toBe(
+      "human-answer-2",
+    );
+    expect(f.prisma.message.findMany).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: expect.objectContaining({ threadId: f.runData.threadId }),
+        select: { id: true, seq: true },
+      }),
+    );
+    expect(loadRecruitingRunContext).toHaveBeenCalledWith(
+      expect.anything(),
+      f.runData,
+      { documents: [] },
+      expect.anything(),
+      expect.objectContaining({ reason: "role_tool", sourceMessageId: "human-answer-2" }),
+    );
+    expect(f.results[0]).toEqual({ ...delivered, source: earlierSource });
+    expect(f.effects.filter((effect) => effect.kind === "recruiting_role")).toHaveLength(1);
+    expect(f.memoryCommit).not.toHaveBeenCalled();
+  });
+
   it("drops the stale context artifact when a completed role receipt replays after the role is cleared", async () => {
     const f = fixture("run-cleared-role-replay");
     f.effects.push({
@@ -1159,6 +1319,148 @@ describe("native recruiting feedback effect dispatch", () => {
     expect(f.memoryCommit).not.toHaveBeenCalled();
     expect(loadRecruitingRunContext).not.toHaveBeenCalled();
   });
+
+  it.each(["fresh", "completed replay"])(
+    "uses the verified native feedback answer for subsequent tools on %s",
+    async (mode) => {
+      const f = fixture(`run-verified-feedback-answer-${mode}`);
+      f.runData.sourceMessageId = "vague-trigger";
+      const answerSource: RecruitingSourceRef = {
+        ...source,
+        anchor: { kind: "message", messageId: "native-feedback-answer", locator: "text" },
+      };
+      const answerReceipt = { ...saved, source: answerSource };
+      vi.mocked(executeRecruitingFeedback).mockResolvedValue(answerReceipt);
+      vi.mocked(executeRecruitingRoleTool).mockResolvedValue({
+        status: "current",
+        workspace: null,
+        source: null,
+        changed: false,
+      });
+      if (mode === "completed replay") {
+        f.effects.push({
+          id: "verified-feedback-effect",
+          spaceId: "space-1",
+          runId: f.runData.id,
+          kind: "recruiting_feedback",
+          idempotencyKey: toolEffectIdempotencyKey(f.runData.id, "recruiting_feedback", feedback),
+          status: "completed",
+          request: feedback,
+          result: answerReceipt,
+        });
+      }
+      f.setCalls([
+        { name: "recruiting_feedback", args: feedback, executionId: "verified-answer-feedback" },
+        {
+          name: "recruiting_role",
+          args: { operation: "read" },
+          executionId: "verified-answer-role-read",
+        },
+      ]);
+
+      await f.run();
+
+      expect(executeRecruitingFeedback).toHaveBeenCalledTimes(mode === "fresh" ? 1 : 0);
+      if (mode === "fresh")
+        expect(vi.mocked(executeRecruitingFeedback).mock.calls[0]![1].sourceMessageId).toBe(
+          "vague-trigger",
+        );
+      expect(vi.mocked(executeRecruitingRoleTool).mock.calls[0]![1].sourceMessageId).toBe(
+        "native-feedback-answer",
+      );
+      expect(loadRecruitingRunContext).toHaveBeenCalledWith(
+        expect.anything(),
+        f.runData,
+        { documents: [] },
+        expect.anything(),
+        expect.objectContaining({ reason: "role_tool", sourceMessageId: "native-feedback-answer" }),
+      );
+      expect(f.results[0]).toEqual(answerReceipt);
+      expect(f.effects.filter((effect) => effect.kind === "recruiting_feedback")).toEqual([
+        expect.objectContaining({ status: "completed", result: answerReceipt }),
+      ]);
+      expect(f.memoryCommit).not.toHaveBeenCalled();
+      expect(f.semanticSave).not.toHaveBeenCalled();
+    },
+  );
+
+  it.each([
+    { receiptOrder: "older", receiptSeq: 2, expectedSourceId: "human-answer-2" },
+    { receiptOrder: "newer", receiptSeq: 4, expectedSourceId: "human-answer-1" },
+  ])(
+    "keeps the later source when replaying an $receiptOrder completed feedback receipt after steering",
+    async ({ receiptSeq, expectedSourceId }) => {
+      const f = fixture("run-feedback-source-no-regression");
+      f.runData.sourceMessageId = "vague-trigger";
+      f.sourceMessages.push(
+        { id: "human-answer-1", seq: receiptSeq },
+        { id: "human-answer-2", seq: 3 },
+      );
+      const receiptSource: RecruitingSourceRef = {
+        ...source,
+        anchor: { kind: "message", messageId: "human-answer-1", locator: "text" },
+      };
+      const replayedReceipt = { ...saved, source: receiptSource };
+      f.effects.push({
+        id: "older-feedback-effect",
+        spaceId: "space-1",
+        runId: f.runData.id,
+        kind: "recruiting_feedback",
+        idempotencyKey: toolEffectIdempotencyKey(f.runData.id, "recruiting_feedback", feedback),
+        status: "completed",
+        request: feedback,
+        result: replayedReceipt,
+      });
+      f.claimSteering.mockResolvedValue([
+        {
+          id: "newer-human-steering",
+          messageId: "human-answer-2",
+          text: "Use the latest preference",
+          blocks: [{ kind: "text", text: "Use the latest preference" }],
+        },
+      ]);
+      vi.mocked(executeRecruitingRoleTool).mockResolvedValue({
+        status: "current",
+        workspace: null,
+        source: null,
+        changed: false,
+      });
+      f.runtimeRun.mockImplementation(async function* (request) {
+        await request.claimSteering!([]);
+        f.results.push(
+          await request.executeTool!("recruiting_feedback", feedback, "older-feedback-replay"),
+        );
+        f.results.push(
+          await request.executeTool!("recruiting_role", { operation: "read" }, "newer-role-read"),
+        );
+        yield { type: "done" as const, text: "Done" };
+      });
+
+      await f.run();
+
+      expect(executeRecruitingFeedback).not.toHaveBeenCalled();
+      expect(vi.mocked(executeRecruitingRoleTool).mock.calls[0]![1].sourceMessageId).toBe(
+        expectedSourceId,
+      );
+      expect(f.prisma.message.findMany).toHaveBeenCalledWith(
+        expect.objectContaining({
+          where: expect.objectContaining({ threadId: f.runData.threadId }),
+          select: { id: true, seq: true },
+        }),
+      );
+      expect(loadRecruitingRunContext).toHaveBeenCalledWith(
+        expect.anything(),
+        f.runData,
+        { documents: [] },
+        expect.anything(),
+        expect.objectContaining({ reason: "role_tool", sourceMessageId: expectedSourceId }),
+      );
+      expect(f.results[0]).toEqual(replayedReceipt);
+      expect(f.effects.filter((effect) => effect.kind === "recruiting_feedback")).toHaveLength(1);
+      expect(f.memoryCommit).not.toHaveBeenCalled();
+      expect(f.semanticSave).not.toHaveBeenCalled();
+    },
+  );
 
   it("returns inferred feedback for clarification without claiming a memory save", async () => {
     const f = fixture("run-inferred-feedback");

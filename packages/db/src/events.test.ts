@@ -62,6 +62,231 @@ function event(seq: number) {
   };
 }
 
+function ordinaryAnswerFixture(
+  blocks: MessageBlock[] = [{ kind: "ask", text: "Which city?", status: "pending" }],
+) {
+  const run = {
+    id: "run-1",
+    status: "waiting_input",
+    spaceId: "workspace-1",
+    threadId: "thread-1",
+    botId: "bot-1",
+    userId: "user-1",
+    trigger: "user",
+    checkpoint: null,
+  };
+  const rows: Array<{
+    id: string;
+    threadId: string;
+    role: string;
+    botId: string | null;
+    runId: string;
+    blocks: MessageBlock[];
+    externalTranscriptFor?: object | null;
+  }> = [
+    { id: "ask-card", threadId: "thread-1", role: "bot", botId: "bot-1", runId: "run-1", blocks },
+  ];
+  const tx = {
+    $queryRaw: vi.fn().mockResolvedValue([{ id: "thread-1" }]),
+    run: {
+      findFirst: vi.fn(async () => (run.status === "waiting_input" ? run : null)),
+      findUnique: vi.fn(async () => run),
+      updateMany: vi.fn(async () => {
+        if (run.status !== "waiting_input") return { count: 0 };
+        run.status = "queued";
+        return { count: 1 };
+      }),
+    },
+    message: {
+      findFirst: vi.fn(
+        async ({ where }: { where: { id: string; threadId?: string } }) =>
+          rows.find(
+            (row) => row.id === where.id && (!where.threadId || row.threadId === where.threadId),
+          ) ?? null,
+      ),
+      findMany: vi.fn(async () => rows.filter((row) => row.role === "bot")),
+      create: vi.fn(
+        async ({
+          data,
+        }: {
+          data: {
+            threadId: string;
+            role: string;
+            botId?: string;
+            runId: string;
+            blocks: MessageBlock[];
+          };
+        }) => {
+          const row = { ...data, id: "created-human", botId: data.botId ?? null };
+          rows.push(row);
+          return row;
+        },
+      ),
+      update: vi.fn(
+        async ({ where, data }: { where: { id: string }; data: { blocks: MessageBlock[] } }) =>
+          Object.assign(rows.find((row) => row.id === where.id)!, data),
+      ),
+    },
+    task: { updateMany: vi.fn().mockResolvedValue({ count: 1 }) },
+    thread: { update: vi.fn().mockResolvedValue({ nextMessageSeq: 3, nextEventSeq: 4 }) },
+    event: {
+      create: vi.fn(async ({ data }: { data: Record<string, unknown> }) => ({
+        ...event(3),
+        ...data,
+      })),
+    },
+  };
+  const prisma = {
+    $transaction: vi.fn(async (callback: (client: typeof tx) => unknown) => callback(tx)),
+  } as unknown as PrismaClient;
+  const input = {
+    spaceId: "workspace-1",
+    threadId: "thread-1",
+    runId: "run-1",
+    messageId: "ask-card",
+    answeredByUserId: "user-1",
+    answer: "Paris",
+  };
+  return { tx, prisma, input, rows, run };
+}
+
+describe("ordinary native Ask answer provenance", () => {
+  it("records the visible selected label as a human message and links the exact answered Ask block", async () => {
+    const f = ordinaryAnswerFixture([
+      { kind: "text", text: "Choose a location" },
+      {
+        kind: "ask",
+        text: "Which city?",
+        status: "pending",
+        actions: [
+          { id: "one", label: "Paris" },
+          { id: "two", label: "Berlin" },
+        ],
+      },
+    ]);
+    await expect(answerRunInput(f.prisma, { ...f.input, answer: "one" })).resolves.toBe(true);
+    expect(f.rows.find((row) => row.id === "created-human")).toMatchObject({
+      role: "user",
+      botId: null,
+      runId: "run-1",
+      blocks: [{ kind: "text", text: "Paris" }],
+    });
+    expect(f.tx.event.create).toHaveBeenCalledWith({
+      data: expect.objectContaining({
+        spaceId: "workspace-1",
+        threadId: "thread-1",
+        runId: "run-1",
+        botId: "bot-1",
+        type: "thread.choice",
+        payload: {
+          messageId: "ask-card",
+          askIndex: 1,
+          answerMessageId: "created-human",
+          answeredByUserId: "user-1",
+        },
+      }),
+    });
+    await expect(answerRunInput(f.prisma, f.input)).resolves.toBe(false);
+    expect(f.tx.message.create).toHaveBeenCalledOnce();
+  });
+
+  it("reuses a composer human message without changing its bytes or original run link", async () => {
+    const f = ordinaryAnswerFixture();
+    const answer = {
+      id: "composer-human",
+      threadId: "thread-1",
+      role: "user",
+      botId: null,
+      runId: "primary-run",
+      blocks: [{ kind: "text" as const, text: "  Paris  " }],
+      externalTranscriptFor: null,
+    };
+    f.rows.push(answer);
+    await expect(
+      answerWaitingRunWithTextInTransaction(f.tx as never, {
+        ...f.input,
+        answer: "Paris",
+        answerMessageId: answer.id,
+      }),
+    ).resolves.toBeTruthy();
+    expect(f.tx.message.create).not.toHaveBeenCalled();
+    expect(answer.runId).toBe("primary-run");
+    expect(answer.blocks).toEqual([{ kind: "text", text: "  Paris  " }]);
+    expect(f.tx.event.create).toHaveBeenCalledWith({
+      data: expect.objectContaining({
+        type: "thread.choice",
+        payload: {
+          messageId: "ask-card",
+          askIndex: 0,
+          answerMessageId: answer.id,
+          answeredByUserId: "user-1",
+        },
+      }),
+    });
+  });
+
+  it("preserves a custom answer's raw text in the human message", async () => {
+    const f = ordinaryAnswerFixture();
+    const answer = "  Paris\nwith the local team  ";
+    await expect(answerRunInput(f.prisma, { ...f.input, answer })).resolves.toBe(true);
+    expect(f.rows.find((row) => row.id === "created-human")?.blocks).toEqual([
+      { kind: "text", text: answer },
+    ]);
+  });
+
+  it("creates no answer message or proof when the waiting-run claim loses", async () => {
+    const f = ordinaryAnswerFixture();
+    f.tx.run.updateMany.mockResolvedValueOnce({ count: 0 });
+    await expect(answerRunInput(f.prisma, f.input)).resolves.toBe(false);
+    expect(f.tx.message.create).not.toHaveBeenCalled();
+    expect(f.tx.message.update).not.toHaveBeenCalled();
+    expect(f.tx.event.create).not.toHaveBeenCalled();
+  });
+
+  it.each(["", "missing-message"])(
+    "rejects an unavailable supplied answer message %j",
+    async (answerMessageId) => {
+      const f = ordinaryAnswerFixture();
+      await expect(answerRunInput(f.prisma, { ...f.input, answerMessageId })).resolves.toBe(false);
+      expect(f.tx.run.updateMany).not.toHaveBeenCalled();
+      expect(f.tx.message.create).not.toHaveBeenCalled();
+      expect(f.tx.event.create).not.toHaveBeenCalled();
+    },
+  );
+
+  it.each([
+    { threadId: "foreign-thread" },
+    { role: "bot" },
+    { botId: "peer-bot" },
+    { externalTranscriptFor: { id: "external-message" } },
+    { blocks: [{ kind: "text", text: "Different answer" }] },
+    {
+      blocks: [
+        { kind: "bot_message_received", fromBotId: "peer", fromBotName: "Peer", text: "Paris" },
+      ],
+    },
+  ])("rejects a supplied answer message with invalid native provenance %j", async (invalid) => {
+    const f = ordinaryAnswerFixture();
+    f.rows.push({
+      id: "composer-human",
+      threadId: "thread-1",
+      role: "user",
+      botId: null,
+      runId: "primary-run",
+      blocks: [{ kind: "text", text: "Paris" }],
+      externalTranscriptFor: null,
+      ...invalid,
+    } as (typeof f.rows)[number]);
+    await expect(
+      answerRunInput(f.prisma, { ...f.input, answerMessageId: "composer-human" }),
+    ).resolves.toBe(false);
+    expect(f.tx.run.updateMany).not.toHaveBeenCalled();
+    expect(f.tx.message.create).not.toHaveBeenCalled();
+    expect(f.tx.message.update).not.toHaveBeenCalled();
+    expect(f.tx.event.create).not.toHaveBeenCalled();
+  });
+});
+
 describe("finalizeRun", () => {
   it("stamps the final steps block with wall-clock run duration", () => {
     const blocks = [
@@ -988,6 +1213,7 @@ describe("answerRunInput", () => {
         ),
       },
       message: {
+        create: vi.fn().mockResolvedValue({ id: "human-answer" }),
         findFirst: vi.fn(
           async ({ where }: { where: Record<string, string> }) =>
             messages.find((message) =>
@@ -1003,7 +1229,7 @@ describe("answerRunInput", () => {
         ),
       },
       task: { updateMany: vi.fn().mockResolvedValue({ count: 1 }) },
-      thread: { update: vi.fn().mockResolvedValue({ nextEventSeq: 10 }) },
+      thread: { update: vi.fn().mockResolvedValue({ nextEventSeq: 10, nextMessageSeq: 3 }) },
       event: {
         create: vi.fn(async ({ data }: { data: { seq: number; type: string } }) => ({
           ...event(data.seq),
@@ -1052,7 +1278,8 @@ describe("answerRunInput", () => {
     expect(tx.run.updateMany).toHaveBeenCalledOnce();
     expect(tx.message.update).toHaveBeenCalledOnce();
     expect(tx.task.updateMany).toHaveBeenCalledOnce();
-    expect(tx.event.create).toHaveBeenCalledExactlyOnceWith({
+    expect(tx.event.create).toHaveBeenCalledTimes(3);
+    expect(tx.event.create).toHaveBeenCalledWith({
       data: expect.objectContaining({
         type: "thread.message.updated",
         runId: "run-new",
@@ -1069,6 +1296,7 @@ describe("answerRunInput", () => {
     const tx = {
       $queryRaw: vi.fn().mockResolvedValue([{ id: "thread-1" }]),
       message: {
+        create: vi.fn().mockResolvedValue({ id: "human-answer" }),
         findFirst: vi.fn().mockResolvedValue({
           id: "message-1",
           blocks: [
@@ -1095,7 +1323,7 @@ describe("answerRunInput", () => {
         }),
       },
       task: { updateMany: vi.fn().mockResolvedValue({ count: 1 }) },
-      thread: { update: vi.fn().mockResolvedValue({ nextEventSeq: 10 }) },
+      thread: { update: vi.fn().mockResolvedValue({ nextEventSeq: 10, nextMessageSeq: 3 }) },
       event: {
         create: vi.fn(async ({ data }: { data: { seq: number; type: string } }) => ({
           ...event(data.seq),
@@ -1164,6 +1392,7 @@ describe("answerRunInput", () => {
       const tx = {
         $queryRaw: vi.fn().mockResolvedValue([{ id: "thread-1" }]),
         message: {
+          create: vi.fn().mockResolvedValue({ id: "human-answer" }),
           findFirst: vi.fn().mockResolvedValue({
             id: "message-1",
             blocks: [
@@ -1194,7 +1423,7 @@ describe("answerRunInput", () => {
           }),
         },
         task: { updateMany: vi.fn().mockResolvedValue({ count: 1 }) },
-        thread: { update: vi.fn().mockResolvedValue({ nextEventSeq: 10 }) },
+        thread: { update: vi.fn().mockResolvedValue({ nextEventSeq: 10, nextMessageSeq: 3 }) },
         event: {
           create: vi.fn(async ({ data }: { data: { seq: number; type: string } }) => ({
             ...event(data.seq),
@@ -1290,7 +1519,7 @@ describe("answerRunInput", () => {
       data: expect.objectContaining({
         threadId: "thread-1",
         role: "user",
-        botId: "bot-2",
+        botId: undefined,
         runId: "run-1",
         clientNonce: "call:call-1:answer-1",
         blocks: [{ kind: "text", text: "Toronto" }],
@@ -1359,7 +1588,7 @@ describe("answerRunInput", () => {
           }),
         },
         task: { updateMany: vi.fn().mockResolvedValue({ count: 1 }) },
-        thread: { update: vi.fn().mockResolvedValue({ nextEventSeq: 11 }) },
+        thread: { update: vi.fn().mockResolvedValue({ nextMessageSeq: 3, nextEventSeq: 11 }) },
         event: {
           create: vi.fn(async ({ data }: { data: { seq: number; type: string } }) => ({
             ...event(data.seq),
@@ -1392,6 +1621,15 @@ describe("answerRunInput", () => {
         where: { runs: { some: { id: "run-1" } } },
         data: { prompt: `Selected choice choice-1: use ${secret}` },
       });
+      expect(tx.message.create).toHaveBeenCalledWith({
+        data: expect.objectContaining({
+          role: "user",
+          botId: undefined,
+          runId: "run-1",
+          clientNonce,
+          blocks: [{ kind: "text", text: "use [redacted]" }],
+        }),
+      });
       expect(tx.message.update).toHaveBeenCalledWith({
         where: { id: "message-1" },
         data: {
@@ -1422,6 +1660,7 @@ describe("answerRunInput", () => {
     const tx = {
       $queryRaw: vi.fn().mockResolvedValue([{ id: "thread-1" }]),
       message: {
+        create: vi.fn().mockResolvedValue({ id: "human-answer" }),
         findFirst: vi.fn().mockResolvedValue({
           id: "message-1",
           blocks: [
@@ -1448,7 +1687,7 @@ describe("answerRunInput", () => {
         }),
       },
       task: { updateMany: vi.fn().mockResolvedValue({ count: 1 }) },
-      thread: { update: vi.fn().mockResolvedValue({ nextEventSeq: 12 }) },
+      thread: { update: vi.fn().mockResolvedValue({ nextEventSeq: 12, nextMessageSeq: 3 }) },
       event: {
         create: vi.fn(async ({ data }: { data: { seq: number; type: string } }) => ({
           ...event(data.seq),
@@ -1509,6 +1748,7 @@ describe("answerRunInput", () => {
     const tx = {
       $queryRaw: vi.fn().mockResolvedValue([{ id: "thread-1" }]),
       message: {
+        create: vi.fn().mockResolvedValue({ id: "human-answer" }),
         findFirst: vi.fn().mockResolvedValue({
           id: "message-1",
           blocks: [
@@ -1535,7 +1775,7 @@ describe("answerRunInput", () => {
         }),
       },
       task: { updateMany: vi.fn().mockResolvedValue({ count: 1 }) },
-      thread: { update: vi.fn().mockResolvedValue({ nextEventSeq: 13 }) },
+      thread: { update: vi.fn().mockResolvedValue({ nextEventSeq: 13, nextMessageSeq: 3 }) },
       event: {
         create: vi.fn(async ({ data }: { data: { seq: number; type: string } }) => ({
           ...event(data.seq),
@@ -1592,6 +1832,7 @@ describe("answerWaitingRunWithTextInTransaction", () => {
     const tx = {
       $queryRaw: vi.fn().mockResolvedValue([{ id: "thread-1" }]),
       message: {
+        create: vi.fn().mockResolvedValue({ id: "human-answer" }),
         findMany: vi.fn().mockResolvedValue([
           {
             id: "message-1",
@@ -1610,7 +1851,7 @@ describe("answerWaitingRunWithTextInTransaction", () => {
         findUnique: vi.fn().mockResolvedValue({ status: "queued" }),
       },
       task: { updateMany: vi.fn().mockResolvedValue({ count: 1 }) },
-      thread: { update: vi.fn().mockResolvedValue({ nextEventSeq: 4 }) },
+      thread: { update: vi.fn().mockResolvedValue({ nextEventSeq: 4, nextMessageSeq: 3 }) },
       event: {
         create: vi.fn(async ({ data }: { data: { seq: number; type: string } }) => ({
           ...event(data.seq),
@@ -1750,6 +1991,9 @@ describe("answerRunInput", () => {
       where: { id: "effect-1" },
       data: { status: "approved" },
     });
+    expect(tx.event.create.mock.calls.map(([input]) => input.data.type)).not.toContain(
+      "thread.choice",
+    );
   });
 
   it("approves and upserts always-allow without overwriting the task prompt", async () => {
@@ -2084,6 +2328,9 @@ describe("answerRunInput", () => {
     );
     expect(tx.task.updateMany).not.toHaveBeenCalled();
     expect(JSON.stringify(tx.event.create.mock.calls)).not.toContain("123456");
+    expect(tx.event.create.mock.calls.map(([input]) => input.data.type)).not.toContain(
+      "thread.choice",
+    );
     expect(tx.externalEffect.updateMany).toHaveBeenCalledWith({
       where: {
         runId: "run-1",

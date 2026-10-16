@@ -75,6 +75,46 @@ const action = {
 };
 
 describe("recruiting contracts", () => {
+  it("closes native ordinary Ask answer provenance to the exact card, block and human message", () => {
+    const payload = {
+      messageId: "ask-card",
+      askIndex: 1,
+      answerMessageId: "human-answer",
+      answeredByUserId: "owner",
+    };
+    expect(contracts.NativeAskAnswerPayloadSchema.safeParse(payload).success).toBe(true);
+    for (const invalid of [
+      { ...payload, askIndex: -1 },
+      { ...payload, askIndex: 0.5 },
+      { ...payload, answerMessageId: "" },
+      { ...payload, sourceMessageId: "forged" },
+      {
+        messageId: payload.messageId,
+        answerMessageId: payload.answerMessageId,
+        answeredByUserId: payload.answeredByUserId,
+      },
+    ])
+      expect(contracts.NativeAskAnswerPayloadSchema.safeParse(invalid).success).toBe(false);
+    const envelope = {
+      id: "answer-event",
+      spaceId: "space",
+      threadId: "thread",
+      botId: "bot",
+      runId: "run",
+      type: "thread.choice",
+      seq: 1,
+      createdAt: now,
+      payload,
+    };
+    expect(contracts.ProductEventSchema.safeParse(envelope).success).toBe(true);
+    expect(
+      contracts.ProductEventSchema.safeParse({
+        ...envelope,
+        payload: { ...payload, text: "Untrusted narration" },
+      }).success,
+    ).toBe(false);
+  });
+
   it("accepts closed semantic feedback inputs without model-selected runtime identity", () => {
     const intent = { basis: "direct", quote: "Always show the complete prompt" };
     const preference = {

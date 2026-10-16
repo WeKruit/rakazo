@@ -1034,6 +1034,14 @@ function groupTarget() {
 }
 
 describe("sendThreadMessage", () => {
+  const composerAnswer = {
+    id: "msg-1",
+    threadId: "thread-1",
+    role: "user",
+    botId: null,
+    externalTranscriptFor: null,
+    blocks: [{ kind: "text", text: "Paris" }],
+  };
   it("answers a waiting question with a free-text chat message", async () => {
     const tx = {
       $queryRaw: vi.fn().mockResolvedValue([{ id: "thread-1" }]),
@@ -1060,10 +1068,14 @@ describe("sendThreadMessage", () => {
             blocks: [{ kind: "ask", text: "Which city should I use?", status: "pending" }],
           },
         ]),
-        findFirst: vi.fn().mockResolvedValue({
-          id: "ask-1",
-          blocks: [{ kind: "ask", text: "Which city should I use?", status: "pending" }],
-        }),
+        findFirst: vi.fn(async ({ where }: { where: { id: string } }) =>
+          where.id === composerAnswer.id
+            ? composerAnswer
+            : {
+                id: "ask-1",
+                blocks: [{ kind: "ask", text: "Which city should I use?", status: "pending" }],
+              },
+        ),
         update: vi.fn(),
       },
       run: {
@@ -1159,7 +1171,9 @@ describe("sendThreadMessage", () => {
           createdAt: new Date(),
         }),
         findMany: vi.fn().mockResolvedValue([waitingAsk]),
-        findFirst: vi.fn().mockResolvedValue(waitingAsk),
+        findFirst: vi.fn(async ({ where }: { where: { id: string } }) =>
+          where.id === composerAnswer.id ? composerAnswer : waitingAsk,
+        ),
         update: vi.fn(),
       },
       run: {
@@ -1327,7 +1341,9 @@ describe("sendThreadMessage", () => {
           createdAt: new Date(),
         }),
         findMany: vi.fn().mockResolvedValue([waitingAsk]),
-        findFirst: vi.fn().mockResolvedValue(waitingAsk),
+        findFirst: vi.fn(async ({ where }: { where: { id: string } }) =>
+          where.id === composerAnswer.id ? composerAnswer : waitingAsk,
+        ),
         update: vi.fn(),
       },
       run: {
@@ -1839,7 +1855,9 @@ describe("sendThreadMessage", () => {
           createdAt: new Date(),
         }),
         findMany: vi.fn().mockResolvedValue([waitingAsk]),
-        findFirst: vi.fn().mockResolvedValue(waitingAsk),
+        findFirst: vi.fn(async ({ where }: { where: { id: string } }) =>
+          where.id === composerAnswer.id ? composerAnswer : waitingAsk,
+        ),
         update: vi.fn(),
       },
       run: {
@@ -1900,6 +1918,19 @@ describe("sendThreadMessage", () => {
       }),
     );
     expect(tx.steeringMessage.create).not.toHaveBeenCalled();
+    expect(tx.message.create).toHaveBeenCalledTimes(1);
+    expect(tx.event.create).toHaveBeenCalledWith({
+      data: expect.objectContaining({
+        type: "thread.choice",
+        runId: "run-routine",
+        payload: {
+          messageId: "ask-1",
+          askIndex: 0,
+          answerMessageId: "msg-1",
+          answeredByUserId: "user-1",
+        },
+      }),
+    });
     expect(tx.task.create).not.toHaveBeenCalled();
     expect(tx.run.create).not.toHaveBeenCalled();
     expect(enqueue).toHaveBeenCalledWith(
@@ -1931,7 +1962,9 @@ describe("sendThreadMessage", () => {
           createdAt: new Date(),
         }),
         findMany: vi.fn().mockResolvedValue([waitingAsk]),
-        findFirst: vi.fn().mockResolvedValue(waitingAsk),
+        findFirst: vi.fn(async ({ where }: { where: { id: string } }) =>
+          where.id === composerAnswer.id ? composerAnswer : waitingAsk,
+        ),
         update: vi.fn(),
       },
       run: {
@@ -2005,6 +2038,19 @@ describe("sendThreadMessage", () => {
       }),
     );
     expect(tx.steeringMessage.create).not.toHaveBeenCalled();
+    expect(tx.message.create).toHaveBeenCalledTimes(1);
+    expect(tx.event.create).toHaveBeenCalledWith({
+      data: expect.objectContaining({
+        type: "thread.choice",
+        runId: "run-webhook",
+        payload: {
+          messageId: "ask-1",
+          askIndex: 0,
+          answerMessageId: "msg-1",
+          answeredByUserId: "user-1",
+        },
+      }),
+    });
     expect(tx.task.create).not.toHaveBeenCalled();
     expect(tx.run.create).not.toHaveBeenCalled();
     expect(enqueue).toHaveBeenCalledWith(

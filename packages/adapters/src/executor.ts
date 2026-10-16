@@ -317,6 +317,7 @@ import {
 } from "./plot-tool.js";
 import { actorMayUsePrivateEndpoint } from "./private-endpoint.js";
 import { loadRecruitingRunContext } from "./recruiting-context.js";
+import type { RecruitingFeedbackResult } from "./recruiting-feedback.js";
 import {
   executeRecruitingFeedback,
   RecruitingFeedbackValidationError,
@@ -3669,10 +3670,29 @@ export function createRunExecutor(deps: ExecutorDeps) {
           !messagingChannelRun && thread.activeRecruitingRoleId
             ? await adoptRecruitingContext("run", "instructions")
             : undefined;
+        const retainRecruitingSource = async (source: RecruitingRoleToolResult["source"]) => {
+          if (source?.anchor.kind !== "message") return;
+          const nextId = source.anchor.messageId;
+          if (nextId === recruitingSourceMessageId) return;
+          if (recruitingSourceMessageId && recruitingSourceMessageId !== run.sourceMessageId) {
+            const messages = await deps.prisma.message.findMany({
+              where: {
+                threadId: thread.id,
+                id: { in: [recruitingSourceMessageId, nextId] },
+              },
+              select: { id: true, seq: true },
+            });
+            const current = messages.find((message) => message.id === recruitingSourceMessageId);
+            const next = messages.find((message) => message.id === nextId);
+            if (!current || !next || next.seq <= current.seq) return;
+          }
+          recruitingSourceMessageId = nextId;
+        };
         const deliverRecruitingRoleResult = async (
           result: RecruitingRoleToolResult,
           effectId?: string,
         ) => {
+          await retainRecruitingSource(result.source);
           if (result.status === "needs_clarification")
             return redactConnectorPayload(result, runSecrets);
           const adopted = await adoptRecruitingContext("role_tool", "tool_result");
@@ -3696,6 +3716,10 @@ export function createRunExecutor(deps: ExecutorDeps) {
           )
             return uncertainEffectResult("recruiting_role");
           return delivered;
+        };
+        const deliverRecruitingFeedbackResult = async (result: RecruitingFeedbackResult) => {
+          await retainRecruitingSource(result.source);
+          return redactConnectorPayload(result, runSecrets);
         };
         const semanticMemoryEnabled = Boolean(semanticMemory) && !messagingChannelRun;
         let recalledMemory = "";
@@ -4683,6 +4707,15 @@ export function createRunExecutor(deps: ExecutorDeps) {
                     retryGate.result as RecruitingRoleToolResult,
                     applied!.effect.id,
                   );
+                if (
+                  (name === "recruiting_feedback" || guardedMemory) &&
+                  retryGate.result &&
+                  typeof retryGate.result === "object" &&
+                  "source" in retryGate.result
+                )
+                  return deliverRecruitingFeedbackResult(
+                    retryGate.result as RecruitingFeedbackResult,
+                  );
                 return retryGate.result;
               }
               if (retryGate.action === "uncertain") {
@@ -4766,6 +4799,13 @@ export function createRunExecutor(deps: ExecutorDeps) {
                   gate.result as RecruitingRoleToolResult,
                   applied.effect.id,
                 );
+              } else if (
+                (name === "recruiting_feedback" || guardedMemory) &&
+                gate.result &&
+                typeof gate.result === "object" &&
+                "source" in gate.result
+              ) {
+                return deliverRecruitingFeedbackResult(gate.result as RecruitingFeedbackResult);
               } else {
                 return gate.result;
               }
@@ -5381,7 +5421,7 @@ export function createRunExecutor(deps: ExecutorDeps) {
                     }
                   : undefined,
               );
-              return finish(redactConnectorPayload(result, runSecrets));
+              return finish(await deliverRecruitingFeedbackResult(result));
             } catch (error) {
               if (error instanceof IsolationError)
                 return finish({ error: "Recruiting feedback or source is unavailable" });

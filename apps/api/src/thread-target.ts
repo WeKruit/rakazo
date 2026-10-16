@@ -736,6 +736,7 @@ export async function sendThreadMessage(
                 runId: run.id,
                 answeredByUserId: actor.userId,
                 answer: answerText,
+                answerMessageId: message.id,
               });
               if (!answered) {
                 throw new ORPCError("CONFLICT", {
@@ -910,6 +911,7 @@ export async function sendThreadMessage(
               runId: run.id,
               answeredByUserId: actor.userId,
               answer: answerText,
+              answerMessageId: message.id,
             });
             if (!answered) {
               throw new ORPCError("CONFLICT", {

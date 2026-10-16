@@ -16,6 +16,8 @@ import type {
 } from "@rakazo/contracts";
 import {
   CreateRecruitingRoleInput,
+  MessageBlock as MessageBlockSchema,
+  NativeAskAnswerPayloadSchema,
   ProductEventSchema,
   RecruitingAssessmentSchema,
   RecruitingHumanIntentSchema,
@@ -382,12 +384,15 @@ async function requireRunSource(
   run: { id: string; botId: string; threadId: string; sourceMessageId: string | null },
   sourceMessageId: string | null,
 ) {
-  if (!sourceMessageId) throw new IsolationError();
-  const source = await tx.message.findFirst({
-    where: { id: sourceMessageId, threadId: run.threadId },
-    include: humanMessageInclude,
-  });
-  if (!source) throw new IsolationError();
+  if (sourceMessageId === null && run.sourceMessageId !== null) throw new IsolationError();
+  const source =
+    sourceMessageId === null
+      ? null
+      : await tx.message.findFirst({
+          where: { id: sourceMessageId, threadId: run.threadId },
+          include: humanMessageInclude,
+        });
+  if (sourceMessageId !== null && !source) throw new IsolationError();
   const steering = await tx.steeringMessage.findMany({
     where: {
       runId: run.id,
@@ -398,9 +403,63 @@ async function requireRunSource(
     },
     include: { message: { include: humanMessageInclude } },
   });
-  if (source.id !== run.sourceMessageId && !steering.some((item) => item.messageId === source.id))
+  const receipts = await tx.event.findMany({
+    where: {
+      spaceId: actor.spaceId,
+      threadId: run.threadId,
+      runId: run.id,
+      botId: run.botId,
+      type: "thread.choice",
+    },
+  });
+  const proofs = receipts.flatMap((receipt) => {
+    const parsed = NativeAskAnswerPayloadSchema.safeParse(receipt.payload);
+    return parsed.success && parsed.data.answeredByUserId === actor.userId ? [parsed.data] : [];
+  });
+  const messages = proofs.length
+    ? await tx.message.findMany({
+        where: {
+          threadId: run.threadId,
+          id: { in: proofs.flatMap((proof) => [proof.messageId, proof.answerMessageId]) },
+        },
+        include: humanMessageInclude,
+      })
+    : [];
+  const byId = new Map(messages.map((message) => [message.id, message]));
+  const answers = proofs.flatMap((proof) => {
+    const card = byId.get(proof.messageId);
+    const answer = byId.get(proof.answerMessageId);
+    const blocks = MessageBlockSchema.array().safeParse(card?.blocks);
+    const ask = blocks.success ? blocks.data[proof.askIndex] : undefined;
+    return card?.role === "bot" &&
+      card.runId === run.id &&
+      card.botId === run.botId &&
+      ask?.kind === "ask" &&
+      ask.status === "answered" &&
+      !ask.approvalEffectId &&
+      ask.input !== "secret" &&
+      !ask.credential &&
+      answer &&
+      isNativeHumanMessage(answer) &&
+      answer.seq > card.seq
+      ? [answer]
+      : [];
+  });
+  const hint =
+    source ??
+    answers.reduce<SourceMessage | null>(
+      (latest, answer) => (!latest || answer.seq > latest.seq ? answer : latest),
+      null,
+    );
+  // Admit the supplied runtime hint before resolving a resumed run's newer answer.
+  if (
+    !hint ||
+    (hint.id !== run.sourceMessageId &&
+      !steering.some((item) => item.messageId === hint.id) &&
+      !answers.some((answer) => answer.id === hint.id))
+  )
     throw new IsolationError();
-  return { source, steering };
+  return { source: hint, steering, answers };
 }
 
 function compareHumanMessages(left: SourceMessage, right: SourceMessage): number {
@@ -416,7 +475,16 @@ async function requireCurrentHumanSource(
   sourceMessageId: string | null,
   quote: string,
 ) {
-  const { source, steering } = await requireRunSource(tx, actor, run, sourceMessageId);
+  const {
+    source: hint,
+    steering,
+    answers,
+  } = await requireRunSource(tx, actor, run, sourceMessageId);
+  if (hint.id !== run.sourceMessageId && !isNativeHumanMessage(hint)) throw new IsolationError();
+  const source = answers.reduce(
+    (current, answer) => (answer.seq > current.seq ? answer : current),
+    hint,
+  );
   const original =
     run.sourceMessageId === source.id
       ? source
@@ -428,7 +496,8 @@ async function requireCurrentHumanSource(
     !isNativeHumanMessage(source) ||
     (source.id === run.sourceMessageId &&
       !["user", "follow_up", "reaction"].includes(run.trigger) &&
-      !steering.some((item) => item.messageId === source.id)) ||
+      !steering.some((item) => item.messageId === source.id) &&
+      !answers.some((answer) => answer.id === source.id)) ||
     (original &&
       isNativeHumanMessage(original) &&
       original.threadId === source.threadId &&

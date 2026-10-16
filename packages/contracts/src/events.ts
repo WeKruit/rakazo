@@ -351,6 +351,14 @@ export type RecruitingActionTransitionedPayload = z.infer<
   typeof RecruitingActionTransitionedPayloadSchema
 >;
 
+export const NativeAskAnswerPayloadSchema = z.strictObject({
+  messageId: Id,
+  askIndex: z.number().int().nonnegative(),
+  answerMessageId: Id,
+  answeredByUserId: Id,
+});
+export type NativeAskAnswerPayload = z.infer<typeof NativeAskAnswerPayloadSchema>;
+
 export const ProductEventSchema = z
   .object({
     id: Id,
@@ -369,7 +377,9 @@ export const ProductEventSchema = z
         ? RecruitingContextAdoptedPayloadSchema
         : event.type === "recruiting.action.transitioned"
           ? RecruitingActionTransitionedPayloadSchema
-          : null;
+          : event.type === "thread.choice"
+            ? NativeAskAnswerPayloadSchema
+            : null;
     if (!schema) return;
     const parsed = schema.safeParse(event.payload);
     if (!parsed.success) {

@@ -207,6 +207,8 @@ export interface AnswerRunInput {
   messageId: string;
   answeredByUserId: string;
   answer: string;
+  /** Server-only: an authenticated composer message already created in this transaction. */
+  answerMessageId?: string;
   /** Identifies a spoken answer as part of a live voice call. */
   clientNonce?: string;
   /** Only for a login card; `answer` carries its password. */
@@ -705,6 +707,33 @@ async function commitAnswerRunInput(
     }
   }
 
+  const ordinaryAsk = !approvalAsk && !secretAsk;
+  if (ordinaryAsk && !input.answer.trim()) return null;
+  let answerMessageId = input.answerMessageId;
+  if (answerMessageId !== undefined) {
+    if (!ordinaryAsk) return null;
+    const answerMessage = await tx.message.findFirst({
+      where: { id: answerMessageId, threadId: input.threadId, role: "user", botId: null },
+      include: { externalTranscriptFor: { select: { id: true } } },
+    });
+    const answerBlocks = MessageBlockSchema.array().safeParse(answerMessage?.blocks);
+    if (
+      !answerMessage ||
+      answerMessage.threadId !== input.threadId ||
+      answerMessage.role !== "user" ||
+      answerMessage.botId !== null ||
+      answerMessage.externalTranscriptFor ||
+      !answerBlocks.success ||
+      answerBlocks.data.some((block) => !["text", "file", "image"].includes(block.kind)) ||
+      answerBlocks.data
+        .filter((block) => block.kind === "text")
+        .map((block) => block.text)
+        .join("\n")
+        .trim() !== input.answer.trim()
+    )
+      return null;
+  }
+
   const queued = await tx.run.updateMany({
     where: {
       id: input.runId,
@@ -723,15 +752,20 @@ async function commitAnswerRunInput(
   const callId = callIdFromClientNonce(input.clientNonce);
   const recordsCallUtterance = Boolean(callId && !secretAsk);
 
-  // Give spoken answers the same durable, call-scoped user utterance as other voice turns.
-  // Secret asks stay out of message history; the call UI requires those answers on screen.
-  if (recordsCallUtterance) {
-    const blocks = [{ kind: "text" as const, text: input.answer }];
+  // Ordinary answers are native human messages; spoken approvals keep their existing call transcript.
+  // Secret asks stay out of message history.
+  if (!answerMessageId && (ordinaryAsk || recordsCallUtterance)) {
+    const blocks = [
+      {
+        kind: "text" as const,
+        text: ordinaryAsk ? (selectedChoice?.label ?? input.answer) : input.answer,
+      },
+    ];
     const utterance = await createThreadMessageInTransaction(tx, {
       threadId: input.threadId,
       role: "user",
       blocks,
-      botId: run.botId,
+      botId: ordinaryAsk ? undefined : run.botId,
       runId: input.runId,
       clientNonce: input.clientNonce,
     });
@@ -741,8 +775,9 @@ async function commitAnswerRunInput(
       botId: run.botId,
       type: "thread.message.created",
       runId: input.runId,
-      payload: { messageId: utterance.id, role: "user", blocks, callId },
+      payload: { messageId: utterance.id, role: "user", blocks, ...(callId ? { callId } : {}) },
     });
+    answerMessageId = utterance.id;
   }
 
   if (approvalAsk) {
@@ -829,6 +864,22 @@ async function commitAnswerRunInput(
     runId: input.runId,
     payload: { messageId: message.id, role: "bot", blocks },
   });
+  if (ordinaryAsk) {
+    const proof = await appendEventInTransaction(tx, {
+      spaceId: input.spaceId,
+      threadId: input.threadId,
+      botId: run.botId,
+      runId: input.runId,
+      type: "thread.choice",
+      payload: {
+        messageId: message.id,
+        askIndex: parsed.data.indexOf(pendingAsk),
+        answerMessageId: answerMessageId!,
+        answeredByUserId: input.answeredByUserId,
+      },
+    });
+    return { threadId: proof.threadId, seq: proof.seq };
+  }
   return { threadId: updated.threadId, seq: updated.seq };
 }
 
@@ -860,14 +911,15 @@ export async function answerWaitingRunWithTextInTransaction(
     runId: string;
     answeredByUserId: string;
     answer: string;
+    /** Server-only native composer message, reused across the waiting runs it answers. */
+    answerMessageId?: string;
   },
 ): Promise<{ threadId: string; seq: number } | null> {
-  const answer = input.answer.trim();
-  if (!answer) return null;
+  if (!input.answer.trim()) return null;
   const found = await findPendingAsk(tx, input);
   if (!found) return null;
   if (isApprovalAskBlock(found.pendingAsk) || isSecretAskBlock(found.pendingAsk)) return null;
-  return commitAnswerRunInput(tx, { ...input, messageId: found.messageId, answer });
+  return commitAnswerRunInput(tx, { ...input, messageId: found.messageId });
 }
 
 export async function pauseRunForInput(
