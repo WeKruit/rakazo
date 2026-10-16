@@ -1,6 +1,6 @@
 # Recruiting product implementation — T01–T10
 
-Status: integrated into [PLAN.md](PLAN.md); product implementation is incomplete. T01 code and focused checks are complete but not deployed. T03 has only its empty-body filtering subitem complete in code; the rest of T02–T10 remains incomplete. Existing native features and integration acceptance retain their narrower evidence boundaries.
+Status: integrated into [PLAN.md](PLAN.md); product implementation is incomplete. T01, T02 and the T03 CAS/revocation/history slice are implemented and reviewed in code, but not deployed. Actual context adoption manifests remain in T04; T04–T10 are incomplete. Existing native features and integration acceptance retain their narrower evidence boundaries.
 
 This is the public, de-identified integration of the supplied reverse-engineering plan. The original design, source conversations, examples and screenshots remain in the private design archive. The imported implementation document SHA256 is `733ef30b2937325789e53db46d035fffa15d6fb9779cd887956c9f68129bd80b`.
 
@@ -36,6 +36,8 @@ Provider output is a versioned observation after an action. Unless confirmed by 
 
 Sources point to authorized messages or exact Artifact-version IDs/hashes with locators and read state/time. Distinguish provider_report/original_material/candidate_statement/recruiter_verified. An unread URL has no verified quote. Candidate identity uses a verified canonical profile identifier, otherwise a local unresolved source-row key; names alone do not merge people.
 
+Source access follows enduring native owner/space/chat authorization, rather than a thread's current role selection. Changing roles cannot invalidate an authorized historical source or creator run. New runtime writes still require the selected role, and role revisions/tasks/assessments cannot borrow another role's identity. A run-owned Artifact resolves its actual run thread before checking native bot/group association; selecting an arbitrary thread of the same bot is incorrect.
+
 Criteria are atom/all/any/not, priority hard/preferred. Verdicts are met/unmet/unknown. Hard gates are AND; preferences or provider-qualified labels never compensate for a missing hard requirement. Missing facts and proven noncompliance remain different. Experience counting uses the role's defined employment/date/cutoff rules and interval union, with incomplete history or imprecise boundary months explicitly unresolved.
 
 ## Native memory lifecycle
@@ -51,8 +53,8 @@ Immutable context adoption records contain the actual role/revision, actor/run/t
 | Task | Deliverable and existing implementation boundary | Status |
 | --- | --- | --- |
 | T01 | Shared contracts/core DTOs, three-state truth tables, source/read consistency and closed adoption/action event payloads; no generic MessageBlock extension. | Code complete: 25 focused checks, typechecks and independent spec/quality review pass; not deployed |
-| T02 | Five records and Thread/Run binding in existing Prisma/Postgres; authenticated create/bind/workspace/revise/assessment/research RPCs, immutable revisions, transactional CAS and source ACLs. | Not implemented |
-| T03 | End-to-end native memory CAS, empty-body revocation/filtering and authorized revision history; reuse current store. | Empty-body loader fix: 4 checks pass, not deployed; CAS/history/adoption gaps remain |
+| T02 | Five records and Thread/Run binding in existing Prisma/Postgres; authenticated create/bind/workspace/revise/assessment/research RPCs, immutable revisions, transactional CAS and source ACLs. | Code complete: 8 real Postgres + 5 API/router checks and independent spec/quality review pass; migration only applied to isolated test DB, not deployed |
+| T03 | End-to-end native memory CAS, empty-body revocation/filtering and authorized revision history; reuse current store. | CAS/revocation/history code and independent review pass, not deployed; T04 still owes actual context adoption manifests |
 | T04 | Native recruiting_role/recruiting_feedback tools, semantic intent/source verification, current role adoption across send/steering/handoff/restart; exact context Artifact. | Not implemented |
 | T05 | recruiting_research prepare/start/status/rows/continue through current MCP discovery/effect execution; frozen request, cross-run action identity, real task mapping and uncertain-result recovery on both API and worker. | MCP substrate connected; domain chain not implemented |
 | T06 | Raw material → sourced facts → per-criterion judgment → deterministic hard gate; qualified-month union/precision, source-quote validation and immutable assessment. | Not implemented |
@@ -99,6 +101,10 @@ T10 requires current human-defined role data, actual provider permissions/quota,
 
 Only the main PLAN.md controls P0–P6 completion. Its native, recruiting-domain, integration and live acceptance gates all remain required; a plan document, schema, green unit test or screenshot alone completes none of the end-to-end product gates.
 
-Current integration check: 29 focused checks across T01 and the native memory loader pass; Web typecheck and independent spec/quality review pass. The broader contracts/core regression run had 1,049 pass and 5 skip before the final new-schema URL guard; the final guard was checked by the focused suite and package typechecks. No database migration, provider search or new UI was executed by this code change. Cloud release is held because the current workspace billing summary shows credit adjustments and positive billed usage; additional deployment is not confirmed covered by existing free credit.
+Current integration check: 248 focused checks across 17 files pass, including 22 real isolated Postgres checks with no skips. Two additional targeted native authentication/resource-isolation checks pass; the remaining 23 cases in that filtered suite were deliberately not selected. API/testkit typechecks pass; worker checks also cover adapters/memory/Web/DB. Independent spec and quality reviews pass for T02 and the T03 slice. One new migration was applied only to a fresh local test database; no provider search, production migration, browser/Electron UI acceptance or paid deployment was performed.
+
+The native `read_memory` tool returns complete content and revision, including empty revoked documents. `remember` and `save_shared_memory`, Pi argument translation, scripted writes, imports and Web saves retain the revision used to prepare their content. Conflicts return the live revision without silently upgrading the stale draft. History retains original run/thread references. The existing shared transaction helper now also handles the installed pg adapter's direct serialization/deadlock error shape, bounded to its existing three attempts; application conflicts and unrelated errors are not retried.
+
+Cloud release remains held because the last checked workspace billing summary showed credit adjustments and positive billed usage; additional deployment is not confirmed covered by existing free credit. These code checks do not complete the cloud product or P6 acceptance.
 
 Code commits: T01 `105d8c5`; T03 empty-body subitem `740ca4c`. Neither commit changes the deployed application until a release is performed. The account's two search-confirmation rules and existing recruitment skills were updated separately through native product settings/tools; those configuration changes are already saved.

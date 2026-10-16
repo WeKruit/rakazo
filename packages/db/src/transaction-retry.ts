@@ -2,13 +2,20 @@ const MAX_TRANSACTION_ATTEMPTS = 3;
 const RETRYABLE_DATABASE_CODES = new Set(["40001", "40P01"]);
 
 function isRetryableTransactionConflict(error: unknown): boolean {
-  if (!error || typeof error !== "object" || !("code" in error)) return false;
+  if (!error || typeof error !== "object") return false;
   const prismaError = error as {
     code?: unknown;
+    name?: unknown;
+    cause?: { kind?: unknown; originalCode?: unknown };
     meta?: { driverAdapterError?: { cause?: { originalCode?: unknown } } };
   };
   if (prismaError.code === "P2034") return true;
-  const databaseCode = prismaError.meta?.driverAdapterError?.cause?.originalCode;
+  const databaseCode =
+    prismaError.meta?.driverAdapterError?.cause?.originalCode ??
+    (prismaError.name === "DriverAdapterError" &&
+    prismaError.cause?.kind === "TransactionWriteConflict"
+      ? prismaError.cause.originalCode
+      : undefined);
   return typeof databaseCode === "string" && RETRYABLE_DATABASE_CODES.has(databaseCode);
 }
 

@@ -60,13 +60,10 @@ function fixture({
   builtin = false,
   disabledBuiltinTools = [],
   existingSharedMemory,
-  advanceRevisionAfterRead = false,
 }: {
   builtin?: boolean;
   disabledBuiltinTools?: string[];
   existingSharedMemory?: string;
-  /** Simulates another writer landing between the save's read and its commit. */
-  advanceRevisionAfterRead?: boolean;
   name?: string;
   catalog?: boolean;
   readOnly?: boolean;
@@ -272,10 +269,6 @@ function fixture({
                 },
               ]
             : [];
-        if (advanceRevisionAfterRead && request.path === "MEMORY.md") {
-          sharedMemoryState.content = "Someone else edited";
-          sharedMemoryState.revision += 1;
-        }
         return { documents };
       },
       commit,
@@ -344,7 +337,11 @@ describe("connector read-only metadata and approval enforcement", () => {
   );
 
   it("writes shared memory directly, including when an always-allow rule exists", async () => {
-    const args = { path: " MEMORY.md ", content: "Printing: all print jobs go to Clyde." };
+    const args = {
+      path: " MEMORY.md ",
+      content: "Printing: all print jobs go to Clyde.",
+      expectedRevision: 0,
+    };
     const f = fixture({
       name: "save_shared_memory",
       builtin: true,
@@ -369,13 +366,18 @@ describe("connector read-only metadata and approval enforcement", () => {
     expect(f.results.at(-1)).toEqual({ ok: true, path: "MEMORY.md", revision: 1 });
   });
 
-  it("replaces an existing shared document at the revision it just read", async () => {
+  it("replaces an existing shared document at the caller's loaded revision", async () => {
     const f = fixture({
       name: "save_shared_memory",
       builtin: true,
       existingSharedMemory: "Old rule",
     });
-    f.setCalls([{ args: { path: "MEMORY.md", content: "New rule" }, executionId: "call-1" }]);
+    f.setCalls([
+      {
+        args: { path: "MEMORY.md", content: "New rule", expectedRevision: 1 },
+        executionId: "call-1",
+      },
+    ]);
     await f.run();
     expect(f.pauseRunForInput).not.toHaveBeenCalled();
     expect(f.commit).toHaveBeenCalledWith(
@@ -390,16 +392,56 @@ describe("connector read-only metadata and approval enforcement", () => {
       name: "save_shared_memory",
       builtin: true,
       existingSharedMemory: "Old rule",
-      advanceRevisionAfterRead: true,
     });
-    f.setCalls([{ args: { path: "MEMORY.md", content: "New rule" }, executionId: "call-1" }]);
+    // The caller prepared its text at revision 0, before the existing edit landed.
+    f.setCalls([
+      {
+        args: { path: "MEMORY.md", content: "New rule", expectedRevision: 0 },
+        executionId: "call-1",
+      },
+    ]);
     await f.run();
     expect(f.commit).toHaveBeenCalledWith(
-      expect.objectContaining({ expectedRevision: 1 }),
+      expect.objectContaining({ expectedRevision: 0 }),
       expect.anything(),
     );
-    expect(f.sharedMemoryState.content).toBe("Someone else edited");
-    expect(f.results.at(-1)).toEqual({ error: MEMORY_REVISION_CONFLICT_ERROR });
+    expect(f.sharedMemoryState.content).toBe("Old rule");
+    expect(f.results.at(-1)).toEqual({ error: MEMORY_REVISION_CONFLICT_ERROR, currentRevision: 1 });
+  });
+
+  it.each(["remember", "save_shared_memory"])("requires a loaded revision for %s", async (name) => {
+    const f = fixture({ name, builtin: true });
+    f.setCalls([{ args: { path: "MEMORY.md", content: "New rule" }, executionId: "call-1" }]);
+    await f.run();
+    expect(f.commit).not.toHaveBeenCalled();
+    expect(f.results.at(-1)).toEqual({ error: "expectedRevision must be a nonnegative integer" });
+  });
+
+  it("reads a native document with its current revision before editing", async () => {
+    const f = fixture({ name: "read_memory", builtin: true, existingSharedMemory: "Old rule" });
+    f.setCalls([{ args: { scope: "user", path: "MEMORY.md" }, executionId: "call-1" }]);
+    await f.run();
+    expect(f.commit).not.toHaveBeenCalled();
+    expect(f.results.at(-1)).toEqual({
+      scope: "user",
+      path: "MEMORY.md",
+      content: "Old rule",
+      revision: 1,
+    });
+  });
+
+  it("revokes the last shared preference with an empty-body revision", async () => {
+    const f = fixture({
+      name: "save_shared_memory",
+      builtin: true,
+      existingSharedMemory: "Old rule",
+    });
+    f.setCalls([
+      { args: { path: "MEMORY.md", content: "", expectedRevision: 1 }, executionId: "call-1" },
+    ]);
+    await f.run();
+    expect(f.sharedMemoryState).toEqual({ content: "", revision: 2 });
+    expect(f.results.at(-1)).toEqual({ ok: true, path: "MEMORY.md", revision: 2 });
   });
 
   it("rejects shared memory content over the size limit", async () => {

@@ -378,6 +378,7 @@ vi.mock("./pi-openai-compatible-provider.js", () => ({
   registerOpenAiCompatibleRuntime: (models: unknown) => models,
 }));
 
+import { builtinAgentTools } from "./builtin-tools.js";
 import { toolCompletionAuditPayload } from "./executor.js";
 import {
   MISSING_TOOL_FINAL_RESPONSE_ERROR,
@@ -444,6 +445,29 @@ describe("Pi connector tool dispatch", () => {
       args: { collection: "notes", title: "Result", body: "Done" },
     };
     delete process.env.MAX_TOOL_CALLS_PER_TURN;
+  });
+
+  it("passes the loaded native memory revision through Pi argument preparation", async () => {
+    const args = { path: "MEMORY.md", content: "Prepared text", expectedRevision: 2 };
+    fakeAgentState.invoke = { name: "remember", args };
+    const executeTool = vi.fn(async () => ({ ok: true, revision: 3 }));
+    for await (const _event of new PiAgentRuntime().run(
+      {
+        botId: "b",
+        threadId: "t",
+        runId: "r",
+        prompt: "save",
+        history: [],
+        instructions: "Save memory",
+        tools: [builtinAgentTools.find((tool) => tool.name === "remember")!],
+        model: { provider: "test", id: "dispatch-test-model" },
+        executeTool,
+      },
+      { signal: new AbortController().signal },
+    )) {
+      /* Exhaust the runtime. */
+    }
+    expect(executeTool.mock.calls[0]?.slice(0, 2)).toEqual(["remember", args]);
   });
 
   it("injects durable steering at Pi's next safe turn boundary", async () => {

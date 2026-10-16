@@ -1,0 +1,138 @@
+import { createRouterClient } from "@orpc/server";
+import type { Actor } from "@rakazo/contracts";
+import type * as DbExports from "@rakazo/db";
+import type { PrismaClient } from "@rakazo/db";
+import * as db from "@rakazo/db";
+import { IsolationError, RecruitingConflictError } from "@rakazo/db";
+import { describe, expect, it, vi } from "vitest";
+import * as api from "./recruiting.js";
+import type { RouterDeps } from "./router.js";
+import { createRouter } from "./router.js";
+
+vi.mock("@rakazo/db", async (importOriginal) => {
+  const actual = await importOriginal<typeof DbExports>();
+  return {
+    ...actual,
+    createRecruitingRole: vi.fn(),
+    bindRecruitingRole: vi.fn(),
+    getRecruitingWorkspace: vi.fn(),
+    reviseRecruitingRole: vi.fn(),
+    listRecruitingAssessments: vi.fn(),
+    getRecruitingAssessment: vi.fn(),
+    listRecruitingResearch: vi.fn(),
+  };
+});
+const prisma = {} as PrismaClient;
+const actor: Actor = {
+  userId: "owner",
+  spaceId: "space",
+  email: "owner@example.test",
+  isDeploymentOwner: false,
+};
+
+describe("authenticated recruiting API", () => {
+  it("forwards native RPC inputs and trusted actors to the one shared domain implementation", async () => {
+    for (const [domain, wrapper] of [
+      [db.createRecruitingRole, api.createRecruitingRole],
+      [db.bindRecruitingRole, api.bindRecruitingRole],
+      [db.getRecruitingWorkspace, api.getRecruitingWorkspace],
+      [db.reviseRecruitingRole, api.reviseRecruitingRole],
+      [db.listRecruitingAssessments, api.listRecruitingAssessments],
+      [db.getRecruitingAssessment, api.getRecruitingAssessment],
+      [db.listRecruitingResearch, api.listRecruitingResearch],
+    ] as const) {
+      const output = { synthetic: true };
+      vi.mocked(domain).mockResolvedValueOnce(output as never);
+      const input = { roleId: "role", threadId: "thread" } as never;
+      expect(await wrapper(prisma, actor, input)).toEqual(output);
+      expect(domain).toHaveBeenLastCalledWith(prisma, actor, input);
+    }
+  });
+  it("maps missing scoped resources to a generic not-found response", async () => {
+    vi.mocked(db.getRecruitingWorkspace).mockRejectedValueOnce(
+      new IsolationError("Private title and text"),
+    );
+    await expect(
+      api.getRecruitingWorkspace(prisma, actor, { threadId: "other-thread" }),
+    ).rejects.toMatchObject({ code: "NOT_FOUND", message: "Resource not found" });
+  });
+  it("maps CAS conflicts to CONFLICT and validation failures without echoing input", async () => {
+    vi.mocked(db.reviseRecruitingRole).mockRejectedValueOnce(new RecruitingConflictError());
+    await expect(api.reviseRecruitingRole(prisma, actor, {} as never)).rejects.toMatchObject({
+      code: "CONFLICT",
+    });
+    const error = new Error("Private submitted source");
+    error.name = "ZodError";
+    vi.mocked(db.createRecruitingRole).mockRejectedValueOnce(error);
+    await expect(api.createRecruitingRole(prisma, actor, {} as never)).rejects.toMatchObject({
+      code: "BAD_REQUEST",
+      message: "Invalid recruiting input",
+    });
+  });
+});
+
+describe("native recruiting RPC", () => {
+  it("runs the existing router through shared storage with its authenticated actor", async () => {
+    const client = createRouterClient(createRouter({ prisma } as RouterDeps), {
+      context: { actor },
+    });
+    vi.mocked(db.getRecruitingWorkspace).mockResolvedValueOnce(null);
+    expect(await client.recruiting.getWorkspace({ threadId: "thread" })).toBeNull();
+    expect(db.getRecruitingWorkspace).toHaveBeenLastCalledWith(prisma, actor, {
+      threadId: "thread",
+    });
+    vi.mocked(db.bindRecruitingRole).mockResolvedValueOnce(null);
+    expect(await client.recruiting.bindRole({ threadId: "thread", roleId: null })).toBeNull();
+    expect(db.bindRecruitingRole).toHaveBeenLastCalledWith(prisma, actor, {
+      threadId: "thread",
+      roleId: null,
+    });
+    vi.mocked(db.listRecruitingAssessments).mockResolvedValueOnce([]);
+    expect(await client.recruiting.listAssessments({ roleId: "role" })).toEqual([]);
+    vi.mocked(db.getRecruitingAssessment).mockResolvedValueOnce(null);
+    expect(
+      await client.recruiting.getAssessment({ roleId: "role", candidateKey: "row" }),
+    ).toBeNull();
+    vi.mocked(db.listRecruitingResearch).mockResolvedValueOnce({ tasks: [], actions: [] });
+    expect(await client.recruiting.listResearch({ roleId: "role" })).toEqual({
+      tasks: [],
+      actions: [],
+    });
+  });
+  it("rejects unauthenticated reads and model-supplied identity before storage", async () => {
+    const authenticated = createRouterClient(createRouter({ prisma } as RouterDeps), {
+      context: { actor },
+    });
+    const unauthenticated = createRouterClient(createRouter({ prisma } as RouterDeps), {
+      context: {},
+    });
+    const readsBefore = vi.mocked(db.getRecruitingWorkspace).mock.calls.length;
+    await expect(
+      unauthenticated.recruiting.getWorkspace({ threadId: "thread" }),
+    ).rejects.toMatchObject({ code: "UNAUTHORIZED" });
+    expect(db.getRecruitingWorkspace).toHaveBeenCalledTimes(readsBefore);
+    const writesBefore = vi.mocked(db.createRecruitingRole).mock.calls.length;
+    await expect(
+      authenticated.recruiting.createRole({
+        sourceThreadId: "thread",
+        expectedRevision: 0,
+        title: "Synthetic",
+        criteria: [],
+        preferences: [],
+        definitionQuestions: [],
+        sourceRefs: [
+          {
+            id: "source",
+            kind: "original_material",
+            anchor: { kind: "message", messageId: "message", locator: "text:0" },
+            readState: "unread",
+            readAt: null,
+          },
+        ],
+        userId: "forged",
+        runId: "forged",
+      } as never),
+    ).rejects.toMatchObject({ code: "BAD_REQUEST" });
+    expect(db.createRecruitingRole).toHaveBeenCalledTimes(writesBefore);
+  });
+});

@@ -41,6 +41,7 @@ import type {
   MemoryCapabilities,
   MemoryCommitRequest,
   MemoryExportRequest,
+  MemoryImportFile,
   MemoryReadRequest,
   MemoryRevision,
   MemorySearchRequest,
@@ -217,7 +218,7 @@ export interface MemoryStore {
     context: AdapterContext,
   ): AsyncIterable<PortableFile>;
   importMarkdown(
-    files: AsyncIterable<PortableFile>,
+    files: AsyncIterable<MemoryImportFile>,
     context: AdapterContext,
   ): Promise<MemoryRevision>;
 }

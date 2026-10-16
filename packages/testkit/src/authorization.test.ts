@@ -68,6 +68,21 @@ describeWithDatabase("API authorization and resource isolation", () => {
   });
 
   it("rejects unauthenticated calls to every protected RPC family", async () => {
+    const roleDefinition = {
+      title: "Test role",
+      sourceRefs: [
+        {
+          id: "source",
+          kind: "original_material",
+          anchor: { kind: "message", messageId: "missing-message", locator: "body" },
+          readState: "unread",
+          readAt: null,
+        },
+      ],
+      criteria: [],
+      preferences: [],
+      definitionQuestions: [],
+    };
     const calls = exhaustiveProtectedCalls([
       ["me"],
       ["deployment/get"],
@@ -136,8 +151,19 @@ describeWithDatabase("API authorization and resource isolation", () => {
       ["computer/screenUrl", { botId: "missing-bot" }],
       ["computer/heartbeat", { botId: "missing-bot" }],
       ["memory/list", {}],
-      ["memory/update", { documentId: "missing-memory", content: "Nope" }],
+      ["memory/update", { documentId: "missing-memory", content: "Nope", expectedRevision: 0 }],
+      ["memory/history", { documentId: "missing-memory" }],
       ["memory/exportMarkdown", {}],
+      [
+        "recruiting/createRole",
+        { ...roleDefinition, sourceThreadId: "missing-thread", expectedRevision: 0 },
+      ],
+      ["recruiting/bindRole", { threadId: "missing-thread", roleId: "missing-role" }],
+      ["recruiting/getWorkspace", { threadId: "missing-thread" }],
+      ["recruiting/reviseRole", { ...roleDefinition, roleId: "missing-role", expectedRevision: 1 }],
+      ["recruiting/listAssessments", { roleId: "missing-role" }],
+      ["recruiting/getAssessment", { roleId: "missing-role", candidateKey: "missing-candidate" }],
+      ["recruiting/listResearch", { roleId: "missing-role" }],
       ["routines/list", { botId: "missing-bot" }],
       ["routines/create", routineInput("missing-bot")],
       ["routines/update", { routineId: "missing-routine", name: "Nope" }],
@@ -502,17 +528,19 @@ describeWithDatabase("API authorization and resource isolation", () => {
       ["agentSkills/get", { skillId: ownerAgentSkill.id }],
       ["agentSkills/update", { skillId: ownerAgentSkill.id, description: "Stolen" }],
       ["agentSkills/remove", { skillId: ownerAgentSkill.id }],
-      ["memory/update", { documentId: ownerMemory.id, content: "stolen" }],
+      [
+        "memory/update",
+        { documentId: ownerMemory.id, content: "stolen", expectedRevision: ownerMemory.revision },
+      ],
+      ["memory/history", { documentId: ownerMemory.id }],
       ["connections/complete", { connectionId: ownerConnection.connectionId }],
     ] satisfies Array<[string, unknown]>;
     await Promise.all(
       resourceIdCalls.map(([procedure, input]) => expectDenied(app, intruder, procedure, input)),
     );
 
-    expect(await rpc<unknown[]>(app, intruder, "memory/list", { botId: ownerBot.id })).toEqual([]);
-    expect(await rpc<string>(app, intruder, "memory/exportMarkdown", { botId: ownerBot.id })).toBe(
-      "",
-    );
+    await expectDenied(app, intruder, "memory/list", { botId: ownerBot.id });
+    await expectDenied(app, intruder, "memory/exportMarkdown", { botId: ownerBot.id });
     expect(await rpc<Array<{ id: string }>>(app, intruder, "capabilities/list")).not.toContainEqual(
       expect.objectContaining({ id: ownerCapability.id }),
     );

@@ -295,15 +295,15 @@ export interface MemorySearchResult {
 
 /** A full-document save lost the race to another writer. The caller should read again. */
 export const MEMORY_REVISION_CONFLICT_ERROR =
-  "Shared memory changed since it was read. Read the latest version and save again.";
+  "Memory changed since it was read. Read the latest version and save again.";
 
 export interface MemoryCommitRequest {
   scope: "bot" | "user";
   botId?: string;
   path: string;
   content: string;
-  /** When set, commit fails if the live document revision is no longer this value. */
-  expectedRevision?: number;
+  /** Revision used to prepare this replacement; 0 creates a new document. */
+  expectedRevision: number;
   sourceRunId?: string;
   sourceThreadId?: string;
 }
@@ -313,6 +313,11 @@ export interface MemoryRevision {
   path: string;
   revision: number;
   content: string;
+}
+
+export interface MemoryImportFile extends PortableFile {
+  /** Target document revision used to prepare this import; 0 creates a new document. */
+  expectedRevision: number;
 }
 
 export interface MemoryExportRequest {
@@ -500,7 +505,12 @@ export interface ScriptedTurn {
   ask?: { text: string; detail?: string; actions?: Array<{ id: string; label: string }> };
   takeover?: { reason: string };
   files?: Array<{ path: string; content: string }>;
-  memory?: Array<{ scope: "bot" | "user"; path: string; content: string }>;
+  memory?: Array<{
+    scope: "bot" | "user";
+    path: string;
+    content: string;
+    expectedRevision: number;
+  }>;
   complete?: boolean;
 }
 

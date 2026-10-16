@@ -2,6 +2,7 @@ import type {
   AdapterContext,
   MemoryCommitRequest,
   MemoryExportRequest,
+  MemoryImportFile,
   MemoryReadRequest,
   MemoryRevision,
   MemorySearchRequest,
@@ -70,6 +71,9 @@ export class MarkdownMemoryStore implements MemoryStore {
   }
 
   async commit(request: MemoryCommitRequest, context: AdapterContext): Promise<MemoryRevision> {
+    if (!Number.isSafeInteger(request.expectedRevision) || request.expectedRevision < 0) {
+      throw new Error("expectedRevision must be a nonnegative integer");
+    }
     // A save replaces the current content and appends its history atomically.
     // Conflicts retry the whole transaction so revision numbers use fresh state.
     return withTransactionRetry(() =>
@@ -84,10 +88,8 @@ export class MarkdownMemoryStore implements MemoryStore {
               path: request.path,
             },
           });
-          if (request.expectedRevision !== undefined) {
-            const live = existing?.revision ?? 0;
-            if (live !== request.expectedRevision) throw new Error(MEMORY_REVISION_CONFLICT_ERROR);
-          }
+          const live = existing?.revision ?? 0;
+          if (live !== request.expectedRevision) throw new Error(MEMORY_REVISION_CONFLICT_ERROR);
           const doc = existing
             ? await tx.memoryDocument.update({
                 where: { id: existing.id },
@@ -133,7 +135,7 @@ export class MarkdownMemoryStore implements MemoryStore {
   }
 
   async importMarkdown(
-    files: AsyncIterable<PortableFile>,
+    files: AsyncIterable<MemoryImportFile>,
     context: AdapterContext,
   ): Promise<MemoryRevision> {
     let last: MemoryRevision | undefined;
@@ -143,6 +145,7 @@ export class MarkdownMemoryStore implements MemoryStore {
           scope: "user",
           path: file.path,
           content: new TextDecoder().decode(file.content),
+          expectedRevision: file.expectedRevision,
         },
         context,
       );

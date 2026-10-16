@@ -261,7 +261,7 @@ import {
 } from "./mcp-server-tool.js";
 import { loadAgentMemoryContext } from "./memory-context.js";
 import type { MemoryProviderResolver } from "./memory-provider-factory.js";
-import { selectMemoryTools } from "./memory-tools.js";
+import { nativeMemorySaveError, selectMemoryTools } from "./memory-tools.js";
 import {
   isCatalogModelChoice,
   pinnedModelCredentialError,
@@ -389,6 +389,7 @@ const READ_ONLY_AGENT_TOOLS = new Set([
   "computer_observe",
   "list_files",
   "read_file",
+  "read_memory",
   "read_history",
   "search_history",
   "request_takeover",
@@ -3962,7 +3963,24 @@ export function createRunExecutor(deps: ExecutorDeps) {
         let handedOff = false;
         let progressRedactor = createStreamingRedactor(runSecrets);
         const scripted = deps.runtime.describe().capabilities.scripted;
-        const script = scripted ? inferScript(task.prompt, takeoverResume?.checkpoint) : undefined;
+        const scriptMemory = scripted
+          ? await Promise.all([
+              deps.memory.read({ scope: "bot", botId: bot.id }, context),
+              deps.memory.read({ scope: "user" }, context),
+            ])
+          : undefined;
+        const script = scripted
+          ? inferScript(task.prompt, takeoverResume?.checkpoint, [
+              ...scriptMemory![0].documents.map((document) => ({
+                ...document,
+                scope: "bot" as const,
+              })),
+              ...scriptMemory![1].documents.map((document) => ({
+                ...document,
+                scope: "user" as const,
+              })),
+            ])
+          : undefined;
         const flushProgress = async () => {
           if (scripted || !pendingProgress || isBackgroundRunTrigger(run.trigger)) return;
           await deps.events.append({
@@ -5142,35 +5160,42 @@ export function createRunExecutor(deps: ExecutorDeps) {
               }
             }, finish);
           }
-          if (name === "remember") {
-            await deps.memory.commit(
-              {
-                scope: "bot",
-                botId: bot.id,
-                path: String(args.path ?? "MEMORY.md"),
-                content: String(args.content ?? ""),
-                sourceRunId: runId,
-                sourceThreadId: thread.id,
-              },
+          if (name === "read_memory") {
+            if (args.scope !== "bot" && args.scope !== "user") {
+              return finish({ error: "scope must be bot or user" });
+            }
+            if (typeof args.path !== "string" || !args.path.trim()) {
+              return finish({ error: "path is required" });
+            }
+            const path = args.path.trim();
+            const snapshot = await deps.memory.read(
+              { scope: args.scope, botId: args.scope === "bot" ? bot.id : undefined, path },
               context,
             );
-            return finish({ ok: true });
+            const document = snapshot.documents[0];
+            return finish({
+              scope: args.scope,
+              path,
+              content: document?.content ?? "",
+              revision: document?.revision ?? 0,
+            });
           }
-          if (name === "save_shared_memory") {
-            const invalid = sharedMemorySaveError(args);
+          if (name === "remember" || name === "save_shared_memory") {
+            const shared = name === "save_shared_memory";
+            const invalid =
+              (shared ? sharedMemorySaveError(args) : undefined) ?? nativeMemorySaveError(args);
             if (invalid) return finish({ error: invalid });
-            const path = String(args.path ?? "").trim();
-            // The save replaces the whole document. Pass the revision just read so a
-            // concurrent edit is rejected instead of overwritten.
-            const snapshot = await deps.memory.read({ scope: "user", path }, context);
-            const expectedRevision = snapshot.documents[0]?.revision ?? 0;
+            const path = typeof args.path === "string" ? args.path.trim() : "MEMORY.md";
+            const scope = shared ? "user" : "bot";
+            const botId = shared ? undefined : bot.id;
             try {
               const saved = await deps.memory.commit(
                 {
-                  scope: "user",
+                  scope,
+                  ...(botId ? { botId } : {}),
                   path,
-                  content: String(args.content ?? ""),
-                  expectedRevision,
+                  content: args.content as string,
+                  expectedRevision: args.expectedRevision as number,
                   sourceRunId: runId,
                   sourceThreadId: thread.id,
                 },
@@ -5178,10 +5203,13 @@ export function createRunExecutor(deps: ExecutorDeps) {
               );
               return finish({ ok: true, path: saved.path, revision: saved.revision });
             } catch (error) {
-              const message =
-                error instanceof Error ? error.message : "Could not save shared memory.";
-              if (message === MEMORY_REVISION_CONFLICT_ERROR) return finish({ error: message });
-              throw error;
+              const message = error instanceof Error ? error.message : "Could not save memory";
+              if (message !== MEMORY_REVISION_CONFLICT_ERROR) throw error;
+              const current = await deps.memory.read({ scope, botId, path }, context);
+              return finish({
+                error: message,
+                currentRevision: current.documents[0]?.revision ?? 0,
+              });
             }
           }
           if (name === "web_search") {
@@ -7044,6 +7072,7 @@ export function createRunExecutor(deps: ExecutorDeps) {
                   botId: mem.scope === "bot" ? bot.id : undefined,
                   path: mem.path,
                   content: mem.content,
+                  expectedRevision: mem.expectedRevision,
                   sourceRunId: runId,
                   sourceThreadId: thread.id,
                 },
@@ -7499,6 +7528,7 @@ export function selectBuiltinToolsForRun(options: {
       (!options.messagingChannelRun ||
         (![
           "remember",
+          "read_memory",
           "save_shared_memory",
           "save_memory",
           "recall_memory",

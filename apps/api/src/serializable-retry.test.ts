@@ -37,6 +37,39 @@ describe("withSerializableRetry", () => {
     },
   );
 
+  it.each(["40001", "40P01"] as const)(
+    "retries a direct driver-adapter commit conflict %s",
+    async (originalCode) => {
+      const error = Object.assign(new Error("TransactionWriteConflict"), {
+        name: "DriverAdapterError",
+        cause: { kind: "TransactionWriteConflict", originalCode },
+      });
+      const operation = vi
+        .fn<() => Promise<string>>()
+        .mockRejectedValueOnce(error)
+        .mockResolvedValue("ok");
+      await expect(withSerializableRetry(operation)).resolves.toBe("ok");
+      expect(operation).toHaveBeenCalledTimes(2);
+    },
+  );
+
+  it("does not retry an unrelated error carrying a SQLSTATE", async () => {
+    const error = new Error("external connector failure", { cause: { originalCode: "40001" } });
+    const operation = vi.fn<() => Promise<never>>().mockRejectedValue(error);
+    await expect(withSerializableRetry(operation)).rejects.toBe(error);
+    expect(operation).toHaveBeenCalledOnce();
+  });
+
+  it("preserves the last direct driver conflict after three attempts", async () => {
+    const error = Object.assign(new Error("TransactionWriteConflict"), {
+      name: "DriverAdapterError",
+      cause: { kind: "TransactionWriteConflict", originalCode: "40001" },
+    });
+    const operation = vi.fn<() => Promise<never>>().mockRejectedValue(error);
+    await expect(withSerializableRetry(operation)).rejects.toBe(error);
+    expect(operation).toHaveBeenCalledTimes(3);
+  });
+
   it("rethrows non-serialization errors without retrying", async () => {
     const error = new Error("unrelated failure");
     const operation = vi.fn<() => Promise<never>>().mockRejectedValue(error);

@@ -1,4 +1,5 @@
 import type { AdapterContext, MemoryCommitRequest } from "@rakazo/adapter-kit";
+import { MEMORY_REVISION_CONFLICT_ERROR } from "@rakazo/adapter-kit";
 import { createDb, type PrismaClient } from "@rakazo/db";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { MarkdownMemoryStore } from "./index.js";
@@ -60,11 +61,12 @@ describePostgres("memory commits (PostgreSQL)", () => {
     }
   });
 
-  function request(path: string, content: string): MemoryCommitRequest {
+  function request(path: string, content: string, expectedRevision = 0): MemoryCommitRequest {
     return {
       scope: "user",
       path,
       content,
+      expectedRevision,
       sourceRunId: `run-${content}`,
       sourceThreadId: `thread-${content}`,
     };
@@ -77,16 +79,22 @@ describePostgres("memory commits (PostgreSQL)", () => {
     });
   }
 
-  it.each(["user", "bot"] as const)(
-    "retries overlapping %s saves with fresh revisions and matching history",
-    async (scope) => {
-      const path = `concurrent-${scope}.md`;
-      const write = (content: string): MemoryCommitRequest => ({
-        ...request(path, content),
+  it.each([
+    ["user", false],
+    ["bot", false],
+    ["user", true],
+    ["bot", true],
+  ] as const)(
+    "accepts one overlapping %s replacement and preserves history (existing: %s)",
+    async (scope, existing) => {
+      const path = `concurrent-${scope}-${existing}.md`;
+      const write = (content: string, expectedRevision = 0): MemoryCommitRequest => ({
+        ...request(path, content, expectedRevision),
         scope,
         botId: scope === "bot" ? "memory-commit-bot" : undefined,
       });
-      const initial = await store.commit(write("initial"), context);
+      const initial = existing ? await store.commit(write("initial"), context) : undefined;
+      const preparedRevision = initial?.revision ?? 0;
       let reads = 0;
       let release!: () => void;
       const bothRead = new Promise<void>((resolve) => {
@@ -99,7 +107,7 @@ describePostgres("memory commits (PostgreSQL)", () => {
               async findFirst({ args, query }) {
                 const result = await query(args);
                 reads += 1;
-                // Both first attempts see revision 1 before either can write.
+                // Both first attempts see the same target before either can write.
                 if (reads === 2) release();
                 if (reads <= 2) await bothRead;
                 return result;
@@ -110,21 +118,24 @@ describePostgres("memory commits (PostgreSQL)", () => {
       );
 
       const results = await Promise.allSettled([
-        concurrentStore.commit(write("first"), context),
-        concurrentStore.commit(write("second"), context),
+        concurrentStore.commit(write("first", preparedRevision), context),
+        concurrentStore.commit(write("second", preparedRevision), context),
       ]);
 
-      expect(results.map((result) => result.status)).toEqual(["fulfilled", "fulfilled"]);
+      expect(results.map((result) => result.status).sort()).toEqual(["fulfilled", "rejected"]);
+      expect(results.find((result) => result.status === "rejected")).toMatchObject({
+        reason: { message: MEMORY_REVISION_CONFLICT_ERROR },
+      });
       expect(reads).toBe(3);
       const saved = results.flatMap((result) =>
         result.status === "fulfilled" ? [result.value] : [],
       );
-      expect(saved.map((result) => result.revision).sort()).toEqual([2, 3]);
+      expect(saved.map((result) => result.revision)).toEqual([preparedRevision + 1]);
       const current = await document(path);
-      expect(current.revision).toBe(3);
-      expect(current.content).toBe(saved.find((result) => result.revision === 3)!.content);
-      expect(current.revisions).toHaveLength(3);
-      for (const result of [initial, ...saved]) {
+      expect(current.revision).toBe(preparedRevision + 1);
+      expect(current.content).toBe(saved[0]!.content);
+      expect(current.revisions).toHaveLength(preparedRevision + 1);
+      for (const result of [...(initial ? [initial] : []), ...saved]) {
         expect(
           current.revisions.find((revision) => revision.revision === result.revision),
         ).toMatchObject({
@@ -169,11 +180,11 @@ describePostgres("memory commits (PostgreSQL)", () => {
         }) as PrismaClient,
       );
 
-      await expect(rejectingStore.commit(request(path, "rejected"), context)).rejects.toMatchObject(
-        {
-          code: "P2003",
-        },
-      );
+      await expect(
+        rejectingStore.commit(request(path, "rejected", existing ? 1 : 0), context),
+      ).rejects.toMatchObject({
+        code: "P2003",
+      });
       expect(inserts).toBe(1);
       expect(
         await prisma.memoryDocument.findMany({
@@ -182,7 +193,7 @@ describePostgres("memory commits (PostgreSQL)", () => {
         }),
       ).toEqual(before);
 
-      const retried = await store.commit(request(path, "rejected"), context);
+      const retried = await store.commit(request(path, "rejected", existing ? 1 : 0), context);
       expect(retried.revision).toBe(existing ? 2 : 1);
       const current = await document(path);
       expect(current.revisions).toHaveLength(retried.revision);
@@ -193,8 +204,8 @@ describePostgres("memory commits (PostgreSQL)", () => {
     },
   );
 
-  it("bounds conflict retries, preserves only committed saves, and allows a later retry", async () => {
-    const path = "exhausted.md";
+  it("rechecks the prepared revision after a serialization retry without overwriting the winner", async () => {
+    const path = "serialization-conflict.md";
     await store.commit(request(path, "initial"), context);
     let attempts = 0;
     const conflictingStore = new MarkdownMemoryStore(
@@ -204,8 +215,7 @@ describePostgres("memory commits (PostgreSQL)", () => {
             async findFirst({ args, query }) {
               const result = await query(args);
               attempts += 1;
-              // Invalidate every attempted snapshot with a separate committed save.
-              await store.commit(request(path, `winner-${attempts}`), context);
+              if (attempts === 1) await store.commit(request(path, "winner", 1), context);
               return result;
             },
           },
@@ -213,26 +223,42 @@ describePostgres("memory commits (PostgreSQL)", () => {
       }) as PrismaClient,
     );
 
-    await expect(conflictingStore.commit(request(path, "rejected"), context)).rejects.toMatchObject(
-      {
-        code: "P2034",
-      },
+    await expect(conflictingStore.commit(request(path, "rejected", 1), context)).rejects.toThrow(
+      MEMORY_REVISION_CONFLICT_ERROR,
     );
-    expect(attempts).toBe(3);
+    expect(attempts).toBe(2);
     const current = await document(path);
-    expect(current).toMatchObject({ revision: 4, content: "winner-3" });
+    expect(current).toMatchObject({ revision: 2, content: "winner" });
     expect(current.revisions.map(({ revision, content }) => ({ revision, content }))).toEqual([
       { revision: 1, content: "initial" },
-      { revision: 2, content: "winner-1" },
-      { revision: 3, content: "winner-2" },
-      { revision: 4, content: "winner-3" },
+      { revision: 2, content: "winner" },
     ]);
+  });
 
-    const retried = await store.commit(request(path, "rejected"), context);
-    expect(retried.revision).toBe(5);
-    const afterRetry = await document(path);
-    expect(afterRetry).toMatchObject({ revision: 5, content: "rejected" });
-    expect(afterRetry.revisions).toHaveLength(5);
-    expect(afterRetry.revisions.at(-1)).toMatchObject({ revision: 5, content: "rejected" });
+  it("preserves current content and history when an import targets a stale revision", async () => {
+    const path = "stale-import.md";
+    await store.commit(request(path, "initial"), context);
+    async function* preparedFiles() {
+      yield { path, content: new TextEncoder().encode("stale import"), expectedRevision: 1 };
+    }
+    await store.commit(request(path, "new preference", 1), context);
+    await expect(store.importMarkdown(preparedFiles(), context)).rejects.toThrow(
+      MEMORY_REVISION_CONFLICT_ERROR,
+    );
+    const current = await document(path);
+    expect(current).toMatchObject({ content: "new preference", revision: 2 });
+    expect(current.revisions).toHaveLength(2);
+  });
+
+  it("appends empty-body revocation and retains prior history", async () => {
+    const path = "revoked.md";
+    await store.commit(request(path, "last preference"), context);
+    await store.commit(request(path, "", 1), context);
+    const current = await document(path);
+    expect(current).toMatchObject({ revision: 2, content: "" });
+    expect(current.revisions.map(({ revision, content }) => ({ revision, content }))).toEqual([
+      { revision: 1, content: "last preference" },
+      { revision: 2, content: "" },
+    ]);
   });
 });

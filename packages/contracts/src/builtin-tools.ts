@@ -24,6 +24,7 @@ export const BUILTIN_TOOL_NAMES = [
   "render_plot",
   "add_mcp_server",
   "remember",
+  "read_memory",
   "save_shared_memory",
   "web_search",
   "web_fetch",

@@ -1047,8 +1047,9 @@ function toAgentTool(tool: ConnectorTool, host: ToolHost, exposedName: string): 
       }
       if (tool.name === "remember") {
         return {
-          content: String(raw.content ?? ""),
+          content: raw.content,
           path: String(raw.path ?? "MEMORY.md"),
+          expectedRevision: raw.expectedRevision,
         };
       }
       if (tool.name === "request_takeover") {
@@ -1675,7 +1676,11 @@ function builtinParameters(tool: ConnectorTool) {
     });
   }
   if (tool.name === "remember") {
-    return Type.Object({ content: Type.String(), path: Type.String() });
+    return Type.Object({
+      content: Type.String(),
+      path: Type.Optional(Type.String()),
+      expectedRevision: Type.Integer({ minimum: 0 }),
+    });
   }
   if (tool.name === "shell") {
     return Type.Object({

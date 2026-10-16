@@ -499,28 +499,45 @@ export const builtinAgentTools: ConnectorTool[] = [
     },
   },
   {
+    name: "read_memory",
+    description:
+      "Read a native Markdown memory document and its revision before preparing a full replacement. User scope is shared across this user's bots in this Space.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        scope: { type: "string", enum: ["bot", "user"] },
+        path: { type: "string" },
+      },
+      required: ["scope", "path"],
+    },
+    readOnly: true,
+  },
+  {
     name: "remember",
-    description: "Store a durable fact in this bot's explicit memory.",
+    description:
+      "Replace this bot's native memory document. Read it with read_memory first and preserve other facts. Use the loaded expectedRevision, or 0 for a new document.",
     inputSchema: {
       type: "object",
       properties: {
         content: { type: "string" },
         path: { type: "string" },
+        expectedRevision: { type: "integer", minimum: 0 },
       },
-      required: ["content"],
+      required: ["content", "expectedRevision"],
     },
   },
   {
     name: "save_shared_memory",
     description:
-      "Save a Space shared memory document every bot reads. Replaces the full content, so include everything it should keep.",
+      "Replace a native memory document shared across this user's bots in this Space. Read it with read_memory first and preserve other facts. Use the loaded expectedRevision, or 0 for a new document.",
     inputSchema: {
       type: "object",
       properties: {
         path: { type: "string", description: "Document name, for example MEMORY.md." },
         content: { type: "string", description: "The document's complete new content." },
+        expectedRevision: { type: "integer", minimum: 0 },
       },
-      required: ["path", "content"],
+      required: ["path", "content", "expectedRevision"],
     },
   },
   {

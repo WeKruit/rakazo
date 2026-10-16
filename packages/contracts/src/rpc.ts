@@ -59,6 +59,7 @@ import {
   McpServerConfigInput,
   McpServerSchema,
   MemoryDocumentSchema,
+  MemoryRevisionSchema,
   MemoryScopeSchema,
   MeSchema,
   MessagingAgentConnectionSchema,
@@ -106,11 +107,29 @@ import {
   IntegrationSetupStateSchema,
 } from "./integration-settings.js";
 import { MessageReactionSchema } from "./reactions.js";
+import {
+  CreateRecruitingRoleInput,
+  RecruitingAssessmentSchema,
+  RecruitingId,
+  RecruitingResearchActionSchema,
+  RecruitingResearchTaskSchema,
+  RecruitingRoleRevisionSchema,
+  RecruitingRoleSchema,
+  ReviseRecruitingRoleInput,
+} from "./recruiting.js";
 import { RoutineHistorySchema, RoutineRunCursorSchema, RunsListOutputSchema } from "./runs.js";
 import { SearchQueryOutputSchema } from "./search.js";
 
 const botId = z.object({ botId: Id });
 const groupId = z.object({ groupId: Id });
+const recruitingWorkspace = z.strictObject({
+  role: RecruitingRoleSchema,
+  revision: RecruitingRoleRevisionSchema,
+});
+const recruitingAssessment = z.strictObject({
+  assessment: RecruitingAssessmentSchema,
+  isCurrent: z.boolean(),
+});
 
 const threadTarget = z
   .object({
@@ -470,13 +489,48 @@ export const appContract = {
     screenUrl: oc.input(botId).output(z.object({ url: z.string().nullable() })),
     heartbeat: oc.input(botId).output(z.object({ ok: z.literal(true) })),
   },
+  recruiting: {
+    createRole: oc.input(CreateRecruitingRoleInput).output(recruitingWorkspace),
+    bindRole: oc
+      .input(z.strictObject({ threadId: RecruitingId, roleId: RecruitingId.nullable() }))
+      .output(recruitingWorkspace.nullable()),
+    getWorkspace: oc
+      .input(z.strictObject({ threadId: RecruitingId }))
+      .output(recruitingWorkspace.nullable()),
+    reviseRole: oc.input(ReviseRecruitingRoleInput).output(recruitingWorkspace),
+    listAssessments: oc
+      .input(z.strictObject({ roleId: RecruitingId }))
+      .output(z.array(recruitingAssessment)),
+    getAssessment: oc
+      .input(
+        z.strictObject({
+          roleId: RecruitingId,
+          candidateKey: RecruitingId,
+          version: z.number().int().positive().optional(),
+        }),
+      )
+      .output(recruitingAssessment.nullable()),
+    listResearch: oc.input(z.strictObject({ roleId: RecruitingId })).output(
+      z.strictObject({
+        tasks: z.array(RecruitingResearchTaskSchema),
+        actions: z.array(RecruitingResearchActionSchema),
+      }),
+    ),
+  },
   memory: {
     list: oc
       .input(z.object({ botId: Id.optional(), scope: z.enum(["bot", "user"]).optional() }))
       .output(z.array(MemoryDocumentSchema)),
     update: oc
-      .input(z.object({ documentId: Id, content: z.string() }))
+      .input(
+        z.object({
+          documentId: Id,
+          content: z.string(),
+          expectedRevision: z.number().int().nonnegative(),
+        }),
+      )
       .output(MemoryDocumentSchema),
+    history: oc.input(z.object({ documentId: Id })).output(z.array(MemoryRevisionSchema)),
     exportMarkdown: oc.input(z.object({ botId: Id.optional() })).output(z.string()),
     providerConfig: oc.output(SpaceMemoryConfigSchema.nullable()),
     connectProvider: oc

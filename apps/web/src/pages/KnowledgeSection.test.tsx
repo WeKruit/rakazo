@@ -1,14 +1,18 @@
 // @vitest-environment jsdom
 
-import type { AgentSkillCatalogEntry } from "@rakazo/contracts";
+import type { AgentSkillCatalogEntry, MemoryDocument } from "@rakazo/contracts";
 import type { ComponentProps, ReactNode } from "react";
 import { act } from "react";
 import { createRoot } from "react-dom/client";
 import { expect, it, vi } from "vitest";
 
 const api = vi.hoisted(() => ({ list: vi.fn(), create: vi.fn(), get: vi.fn() }));
+const memory = vi.hoisted(() => ({
+  list: vi.fn(async (): Promise<MemoryDocument[]> => []),
+  update: vi.fn(),
+}));
 vi.mock("../lib/rpc", () => ({
-  rpc: { agentSkills: api, memory: { list: async () => [] } },
+  rpc: { agentSkills: api, memory },
 }));
 vi.mock("../lib/artifact-open", () => ({ downloadArtifactBytes: vi.fn() }));
 vi.mock("@lingui/react/macro", () => {
@@ -31,7 +35,66 @@ vi.mock("@rakazo/ui-web", () => {
   };
 });
 
-import { KnowledgeSection } from "./KnowledgeSection";
+import { KnowledgeSection, SpaceMemorySection } from "./KnowledgeSection";
+
+it("saves the editor's loaded revision and preserves its draft on conflict", async () => {
+  vi.stubGlobal("IS_REACT_ACT_ENVIRONMENT", true);
+  const memoryDocument: MemoryDocument = {
+    id: "memory-1",
+    path: "MEMORY.md",
+    content: "Old fact",
+    revision: 2,
+    scope: "user",
+    botId: null,
+    updatedAt: "2026-10-15T00:00:00Z",
+  };
+  const newer = { ...memoryDocument, content: "Concurrent fact", revision: 3 };
+  memory.list
+    .mockResolvedValueOnce([memoryDocument])
+    .mockResolvedValueOnce([newer])
+    .mockResolvedValueOnce([newer]);
+  memory.update.mockRejectedValueOnce({ code: "CONFLICT", data: { currentRevision: 3 } });
+  const container = document.createElement("div");
+  document.body.append(container);
+  const root = createRoot(container);
+  try {
+    await act(async () => root.render(<SpaceMemorySection />));
+    await act(async () => container.querySelector("button")!.click());
+    const editor = container.querySelector("textarea")!;
+    await act(async () => {
+      Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, "value")!.set!.call(
+        editor,
+        "Prepared fact",
+      );
+      editor.dispatchEvent(new Event("input", { bubbles: true }));
+    });
+    // Export refreshes the list while the draft is still based on revision 2.
+    await act(async () =>
+      [...container.querySelectorAll("button")]
+        .find((button) => button.textContent === "Download as markdown")!
+        .click(),
+    );
+    await act(async () =>
+      [...container.querySelectorAll("button")]
+        .find((button) => button.textContent === "Save")!
+        .click(),
+    );
+    expect(memory.update).toHaveBeenCalledWith({
+      documentId: "memory-1",
+      content: "Prepared fact",
+      expectedRevision: 2,
+    });
+    expect(container.querySelector("textarea")?.value).toBe("Prepared fact");
+    expect(container.textContent).toContain(
+      "Memory changed. Close and reopen it before saving again.",
+    );
+    expect(memory.update).toHaveBeenCalledOnce();
+  } finally {
+    await act(async () => root.unmount());
+    container.remove();
+    vi.unstubAllGlobals();
+  }
+});
 
 it("disables skill rows while a completed save is refreshing the catalog", async () => {
   vi.stubGlobal("IS_REACT_ACT_ENVIRONMENT", true);
