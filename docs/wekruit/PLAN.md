@@ -15,10 +15,10 @@
 | 阶段 | 当前证据 | 退出条件 |
 | --- | --- | --- |
 | P0 部署与状态 | 云端登录、独立数据库、Crew、聊天重启延续已验证；实际 E2B 暂停、Volume checkpoint、容器替换后的原文件只读恢复已验证 | 同一部署可用，状态及测试文件重启后可读，原 CRM 不变 |
-| P1 模型连接 | 官方 Codex OAuth 与真实回复已验证 | 保存连接跨重启继续，明确过期/重连行为 |
+| P1 模型连接 | 官方 Codex OAuth 与真实回复已验证；明确授权失效的后台刷新清理已修复，保留网络/5xx和轮换后的新凭证 | 保存连接跨重启继续，明确过期/重连行为 |
 | P2 原生产品与迁移准备 | Crew 上下文、Main/Sourcer 及共享记忆跨对话召回已验证；选择原卡跨重启继续、全对话归档已验证；自定义 input/一次性审批原卡跨重启继续、角色与五份 skills 已验证；其余卡片和迁移待验收 | 记忆、原卡恢复通过；Grok 完整归档与服务清单可核查 |
 | P3 Autumn | 官方 MCP 原生传输与现有认证只读通过；两个 Dyna Data Infra 任务状态/分页已核对，原 Grok 批次关联未确认；尚未云端验收 | 创建、证据、反馈、原任务续搜回执一致 |
-| P4 现有 CRM | PR #39 已合并，原站点 consent 页面已上线，main CI/RLS 与 Vercel 通过；MCP Function 发布及 OAuth 配置待确认，真实用户验收未完成 | 用户/组织鉴权、获准写入读回及越权拒绝通过 |
+| P4 现有 CRM | PR #39/#40 已合并，consent 页面上线；获准来源函数已实际应用，定义/仅 authenticated 执行及旧表/RLS不变已核对；Function/OAuth 配置与真实用户验收未完成 | 用户/组织鉴权、获准写入读回及越权拒绝通过 |
 | P5 审批发送 | 官方 MCP Bearer 及三个只读 list 调用通过；云端发送未验收 | 精确内容一次性审批、发送确认和回复停止通过 |
 | P6 全链路 | 未验收 | 完成任务 9 的权限、恢复、业务与无重复效果检查 |
 
@@ -33,6 +33,8 @@
 首次加载使用既有 Shimmer 显示 Loading…；路由模块加载复用现有 ShellSkeleton，显示 Opening your Space…。账号/space 改变时直接重建认证路由树，跨标签页原生 session/storage 更新同样隔离；旧异步 bootstrap 不再污染新身份。
 复用现有 Web E2E 验证延迟 snapshot 返回时仍展示该会话记录且不泄露另一个会话。
 状态：已部署并在真实网页验证。首次打开显示 Loading…；已访问对话切回立即显示自己的历史，原生 refresh/SSE 继续更新。组件检查 10 项通过；延迟请求的现有 Web E2E 回归已添加，尚未执行，不作为已通过证据。
+
+首次页面加载还发现更早的两段空白：HTML 的空 root，以及语言包等待时的空 div。`5e90daf` 已将两处改为可见 Loading/既有 Shimmer，8 项针对检查及 Web TypeScript、独立审查通过。云端实际 reload 首屏出现 Loading，随后原 Crew 历史和待答卡恢复；未宣称 JS 禁用或入口模块失败已做恢复。
 
 追加审查已修复账号/space 所有者切换和 MCP 工具权限刷新后控件残留的两个状态边界：相关 6 个 focused 检查先红后绿；多人真实账号/组织权限仍单独验收，组件回归不替代该项。
 
@@ -51,6 +53,8 @@ packages/adapters/src/executor.ts、apps/api/src/router.ts；原生 remember、s
 
 **通过：** 真实工具调用、持久 revision、不同对话的回复对应；共享事实通过共享 scope 读取。
 
+Codex 连接维护另已补齐 detached catalog refresh 的终态失效处理：复用既有精确 credential/secret fence，明确 invalid_grant 才退休连接；网络/5xx及已轮换 secret 保持。新增 4 项与相关 12 项、类型/风格检查及独立审查通过，已部署；没有人为失效真实登录来替代在线验收。
+
 ## 任务 2：选择、自定义 input 与原卡续跑
 
 **复用：** packages/adapters/src/pi-runtime.ts、apps/web/src/components/AskCard.tsx、
@@ -65,6 +69,8 @@ apps/api/src/router.ts、packages/db/src 的现有卡片/任务持久化。
 追加真实边界验收：Main 私聊待答卡经原生 Stop 后显示 No longer active，原 run cancelled、无外部效果；Crew 原卡保持等待。重复回答/失效卡的完整真实验收仍未完成，不因离线检查通过而勾选整项。
 
 `6108bad` 修复并部署了共享执行入口的已复现缺口：重复 run.continue 原先可以领取未回答的 waiting_input。现只有原生回答事务将原 run 变 queued 后才继续；原队列、事务、takeover 和审批规则保持原样。320 项相关检查通过，独立审查通过。云端对 Sourcer 的新待答卡实际重投一次原生继续任务，job 消费后原 run/card/checkpoint/attempt/effect 均未变；再点原卡选项，同一 run completed、只新增一条继续回复。该场景不是重复 HTTP 回答或未知外发结果的完整验收。
+
+双网页并发回答另已实际验证：两个正常登录网页同时点击同一张新 Sourcer 原卡；一端显示原生冲突提示，保存的原 run 仅新增一个恢复 attempt 和一条继续回复，未新增 effect。已答卡在两个网页都收起按钮。取消已通过，完整旧卡跨新 run 和未知外发结果边界仍待验收，不将整项勾选。
 
 **通过：** 按钮选择及自定义答案都走原生 answer 路径，等待卡跨重启继续，无人工改库或伪造卡。
 
@@ -101,7 +107,7 @@ packages/adapters/src/executor.ts、infra/modal/app.py 及原生 sandbox/checkpo
 
 当前导出证据：原生只读接口枚举 11 个可访问 Bot/群聊、11 个 session，7,074 条 transcript entries；
 分页全部完成、无失败，会话文件校验通过。原始归档保留 177 条附件引用（115 条 Bot 附件、62 条用户附件）；其中两份历史 Dyna CSV 已另行下载并验证 SHA/EOF，其余引用没有文件 payload。
-UI 已盘点 9 项已安装插件，8 项显示 Connected，1 项待认证；方法/脚本依赖已按来源核对。两份关键 CSV 已只读下载并校验；其余附件、脚本及真实 provider task/checkpoint 仍待迁入。
+UI 已盘点 9 项已安装插件，8 项显示 Connected，1 项待认证；方法/脚本依赖已按来源核对。两份关键 CSV 已只读下载并校验，并通过原生附件消息归档到 Sourcer，云端原生 Artifact Store 的字节数和 SHA256 与原件一致；不代表最新去重/联系状态，也未认定外部任务关联。其余附件、脚本及真实 provider task/checkpoint 仍待迁入。
 
 **通过：** 所有可访问 session 有完整或明确失败记录；服务清单可追溯到真实配置/调用。
 
@@ -152,7 +158,9 @@ packages/adapters/src/mcp-connector.ts、apps/api/src/integration-catalog.ts 及
 
 当前实现准备：复用现有 CRM 的 HttpOnly SSR 登录、官方 Supabase 用户 OAuth/MCP 和原 RLS；固定只读工具及 crm_review_candidate/get_crm_candidate_review 已经 PR #39 合并至 main，正式站点 consent 页面已上线；main CI verify/RLS 与 Vercel 通过。Supabase 原生编辑器已准备所审阅的八个源/依赖文件，尚未点击 Deploy；OAuth Server 仍关闭，启用和函数发布待具体确认。真实用户授权、写读及越权仍待验收，现有 CRM schema/业务行未改。
 
-只读 catalog 审计另确认现有 candidates/candidate_sources 表已有 authenticated 权限及组织 RLS，可沿固定用户操作复用，不必改 CRM schema；当前 MCP 尚无该创建/来源写入口。来源语义、同 org/candidate 校验和可信原始 artifact 必须对齐，不能借后台 service-only RPC、任意 JSON 或模型自报的 provider receipt 冒充完整接入。
+只读 catalog 审计另确认现有 candidates/candidate_sources 表已有 authenticated 权限及组织 RLS，可沿固定用户操作复用，不必改 CRM 表/列/RLS；此前已发布部分没有独立来源写入口，新增代码与上线状态见下段。来源语义、同 org/candidate 校验和可信原始 artifact 必须对齐，不能借后台 service-only RPC、任意 JSON 或模型自报的 provider receipt 冒充完整接入。
+
+PR #40 已通过真实 Postgres 24 项（含双连接行锁与跨组织冲突）、MCP 14 项、独立审查并合并。新增固定 security-invoker 来源引用 RPC：锁同组织候选、只创建一次、冲突不覆盖、返回真实行。用户另已批准该函数迁移，生产 SQL 编辑器一次执行成功；定义与批准 body 逐字一致、除 owner 外仅 authenticated EXECUTE、旧表/约束/RLS及旧函数合同不变已只读核验。生产原有默认函数授权曾额外授予旧服务角色，已只撤销此新函数多出的权限；只收窄此新函数的追加 ACL 迁移已随 PR #41 合并，真实 Postgres 25 项及完整 CI、独立审查通过；最终固化事务及两版本原生 migration repair 登记被自动审批拒绝（此前授权只覆盖新增函数），正等本次具体确认，尚未执行。不改候选/评审表、RLS或旧表权限；工具默认未分配，真实用户调用/审批/写读仍待验收。
 
 ## 任务 8：Instantly 审批发送与回复停止（P5）
 
