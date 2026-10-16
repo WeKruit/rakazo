@@ -53,9 +53,9 @@ M2/M3/M4 中独立工作可与 M1 并行。每个 worker 明确文件归属，�
 | B04 | 置顶/取消置顶、排序 | 确认当前动作后操作两位 agent，刷新保持顺序/状态 | 先核对/复用原生能力，待逐项验收 |
 | B05 | 删除/归档/恢复 agent | 确认是删除还是归档；验收其历史、任务、权限与恢复行为 | 先核对/复用原生能力，待逐项验收 |
 | B06 | Agent Details 查看实际配置与能力 | 所见 runtime/model/connection与实际原生执行记录相同 | 先核对/复用原生能力，待逐项验收 |
-| B07 | 每 agent 独立选择 runtime | Main/Sourcer不同definition；修改Sourcer不改Main；不迁移正在运行session | 先核对/复用原生能力，待逐项验收 |
+| B07 | 每 agent 独立选择 runtime | Main/Sourcer不同definition；修改Sourcer不改Main；不迁移正在运行session | 已核对原生仅存逐 bot 模型配置，无逐 bot runtime 字段；需要实现后验收 |
 | B08 | 每 agent 独立选择可用 model | 列表来自runtime+connection；实际turn记录选择值；不可用值在边界拒绝 | 线上已验 Sourcer 独立换模型和召回；全部目录待验 |
-| B09 | 每 agent 独立绑定 OAuth / API key connection | 两agent可指向不同connection；撤销一个不借另一个账号续跑 | 先核对/复用原生能力，待逐项验收 |
+| B09 | 每 agent 独立绑定 OAuth / API key connection | 两agent可指向不同connection；撤销一个不借另一个账号续跑 | 已核对现有 credential 按 user/provider 选择，无逐 bot connection ID；需要实现后验收 |
 | B10 | 编辑 instructions / recruiting职责 | 保存不同职责；同一指令分别产生各自角色所需行为，definition revision可查 | 先核对/复用原生能力，待逐项验收 |
 | B11 | 每 agent 启用 skills、tools、memory scopes | 只启用Sourcer的工具/skill；Main不能因共享环境自动获得 | 先核对/复用原生能力，待逐项验收 |
 | B12 | 配置变更在下一任务生效，运行任务保留快照 | pending时改runtime/connection应拒绝或仅改后续配置；原卡仍绑定原owner | 先核对/复用原生能力，待逐项验收 |
@@ -91,14 +91,14 @@ M2/M3/M4 中独立工作可与 M1 并行。每个 worker 明确文件归属，�
 
 | ID | 产品能力 | 退出条件 | 当前状态 |
 | --- | --- | --- | --- |
-| D01 | 创建含agents/humans的group | 创建测试room；回读name/description/member_agent_ids/human_member_user_ids | 先核对/复用原生能力，待逐项验收 |
+| D01 | 创建含agents/humans的group | 创建测试room；回读name/description/member_agent_ids/human_member_user_ids | 原生 owner + bot 成员群聊可复用；human 成员及 group description 尚缺 |
 | D02 | 查看group成员列表 | 打开后显示成员稳定ID/名字/类型，刷新与membership一致 | 先核对/复用原生能力，待逐项验收 |
-| D03 | 编辑group name/description | 管理者改名回读；非管理者拒绝；历史仍同room ID | 先核对/复用原生能力，待逐项验收 |
+| D03 | 编辑group name/description | 管理者改名回读；非管理者拒绝；历史仍同room ID | 原生群名编辑可复用；description 与团队管理权限尚缺 |
 | D04 | 添加agent成员 | 先找真实Add入口；测试加入Sourcer，保存明确 room/member/context 归属，不伪造 runtime session | 先核对/复用原生能力，待逐项验收 |
 | D05 | 移除agent成员 | 移除测试成员；旧卡/消息/API访问拒绝；其他成员不受影响 | 先核对/复用原生能力，待逐项验收 |
-| D06 | 添加/移除human成员 | 确认管理入口后加入/移除测试human；SSE、history、file、response即时撤权 | 先核对/复用原生能力，待逐项验收 |
+| D06 | 添加/移除human成员 | 确认管理入口后加入/移除测试human；SSE、history、file、response即时撤权 | 原生群成员为 bot，尚无 human 成员合同；需要实现及撤权验收 |
 | D07 | 退出/归档/删除group | 确认当前动作和权限；按真实行为验收成员与历史可见性 | 先核对/复用原生能力，待逐项验收 |
-| D08 | human在group中发送普通消息 | 两位测试human消息能互见且author正确；非成员不得读写 | 先核对/复用原生能力，待逐项验收 |
+| D08 | human在group中发送普通消息 | 两位测试human消息能互见且author正确；非成员不得读写 | 原生 owner 聊天可复用；多 human 成员/权限尚缺 |
 | D09 | @指定一个或多个agent | @Sourcer只启动Sourcer；同名/非成员/不可见ID不能误路由 | 线上已验单个 @Sourcer；多目标及负向边界待验 |
 | D10 | 未@的group消息如何调度 | 先只读确认原App规则；复现明确规则，普通消息不唤醒所有agent | 先核对/复用原生能力，待逐项验收 |
 | D11 | 每位 group agent 保有明确独立执行上下文 | 同 room 的 Main/Sourcer 保留正确 bot/run/context/connection 归属；共享群聊与私有记忆区分，该 runtime 有 session 时核对真实标识 | 先核对/复用原生能力，待逐项验收 |
@@ -108,7 +108,7 @@ M2/M3/M4 中独立工作可与 M1 并行。每个 worker 明确文件归属，�
 | D15 | 产品subagent显式inherit配置快照 | inherit后修改父definition，子任务仍使用创建时revision；UI可见来源 | 先核对/复用原生能力，待逐项验收 |
 | D16 | runtime内部subagent配置与状态 | 只暴露native支持字段；原生事件/child task对应；不支持字段在入口拒绝 | 先核对/复用原生能力，待逐项验收 |
 | D17 | 防止自发循环、回声和重复投递 | 重放human/A2A/Slack镜像与agent普通回复；只有显式目标动作唤醒一次 | 先核对/复用原生能力，待逐项验收 |
-| D18 | 并发agent状态、卡片与取消隔离 | 两agent同时pending，交叉答卡拒绝，取消一个不改另一个task | 先核对/复用原生能力，待逐项验收 |
+| D18 | 并发agent状态、卡片与取消隔离 | 两agent同时pending，交叉答卡拒绝，取消一个不改另一个task | 原卡归属已有窄范围验收；现有 group Stop 停整 thread，逐成员取消尚缺 |
 | D19 | 成员权限变化期间的运行任务 | 移除成员后禁止后续读写/答卡；取消操作核对native回执，不虚假completed | 先核对/复用原生能力，待逐项验收 |
 | D20 | 跨runtime混合group与A2A | 一room两agent绑定不同已验runtime；A2A回原任务，不能共享/伪造native session | 先核对/复用原生能力，待逐项验收 |
 
@@ -120,7 +120,7 @@ M2/M3/M4 中独立工作可与 M1 并行。每个 worker 明确文件归属，�
 | E02 | 显示queued/running/waiting/completed/failed/canceled真实状态 | 每状态由native/external回读驱动；accepted不显示completed | 先核对/复用原生能力，待逐项验收 |
 | E03 | 查看父子任务与委派进展 | 从root找到child和回传；失败原因/取消状态不被父任务覆盖 | 先核对/复用原生能力，待逐项验收 |
 | E04 | 继续等待输入的原任务 | 回答原卡继续原turn；外部Autumn澄清继续同task_id | 先核对/复用原生能力，待逐项验收 |
-| E05 | 停止一个/全部实际子任务与后台执行 | 对明确测试树取消，逐个native child/background回读；未停止不标全部结束 | 先核对/复用原生能力，待逐项验收 |
+| E05 | 停止一个/全部实际子任务与后台执行 | 对明确测试树取消，逐个native child/background回读；未停止不标全部结束 | 已核对 group Stop 停整 thread；逐成员/子任务取消控件尚缺 |
 | E06 | 创建schedule routine | 创建测试schedule，保存timezone/trigger/prompt，实际触发产生task/run ID | 先核对/复用原生能力，待逐项验收 |
 | E07 | 编辑routine名称、prompt、trigger/timezone | 修改后回读；下一run记录生效revision，旧run记录不被改写 | 先核对/复用原生能力，待逐项验收 |
 | E08 | 启用/暂停/删除routine | 暂停后不再启动新run；删除/恢复动作先确认；运行中任务状态另核 | 先核对/复用原生能力，待逐项验收 |
@@ -135,10 +135,10 @@ M2/M3/M4 中独立工作可与 M1 并行。每个 worker 明确文件归属，�
 
 | ID | 产品能力 | 退出条件 | 当前状态 |
 | --- | --- | --- | --- |
-| F01 | 完整显示native单选/多选与option值 | 对照native payload与Web/Slack选项顺序/值，回答原request | 单选及原卡重启继续已验；多选/完整 option 值待验 |
-| F02 | 自定义文本输入保持原值 | 输入含空格/中文/换行，native接收内容与用户值完全一致 | 线上已验自定义输入；完整类型待验 |
-| F03 | 多问题/多字段表单与required/schema | 真实已授权elicitation逐字段比对，缺required拒绝，不改field ID | 先核对/复用原生能力，待逐项验收 |
-| F04 | URL/浏览器绑定Secure Form | 由原URL/elicitationId完成原form；native状态确认，秘密值不进日志 | 原生 URL/安全表单仍待逐项验收 |
+| F01 | 完整显示native单选/多选与option值 | 对照native payload与Web/Slack选项顺序/值，回答原request | 单选及原卡重启继续已验；原生 Ask 尚无多选合同 |
+| F02 | 自定义文本输入保持原值 | 输入含空格/中文/换行，native接收内容与用户值完全一致 | 线上已验普通自定义输入；当前原生路径 trim，首尾空白原值保留尚缺 |
+| F03 | 多问题/多字段表单与required/schema | 真实已授权elicitation逐字段比对，缺required拒绝，不改field ID | 原生 Ask 无多字段 schema；MCP 未声明 elicitation，尚需实现与恢复验收 |
+| F04 | URL/浏览器绑定Secure Form | 由原URL/elicitationId完成原form；native状态确认，秘密值不进日志 | 原生 OAuth 不等于 URL elicitation；远端表单原请求桥接尚缺 |
 | F05 | 命令执行一次性approve/deny | 展示完整command/args/cwd；approve/deny精确原request；deny后无执行 | 先核对/复用原生能力，待逐项验收 |
 | F06 | 文件变更/diff一次性approve/deny | 显示完整变更范围；批准后字节匹配，拒绝后无变更 | 先核对/复用原生能力，待逐项验收 |
 | F07 | 外部发送draft原文/目标/thread审批 | 展示原正文/收件人/渠道/thread；批准与拒绝分别核对真实外部状态 | 先核对/复用原生能力，待逐项验收 |
@@ -157,7 +157,7 @@ M2/M3/M4 中独立工作可与 M1 并行。每个 worker 明确文件归属，�
 | --- | --- | --- | --- |
 | G01 | Agent Library列出CSV/XLSX/brief/rules | 分页列出name/type/size/etag；只显示获权agent资产 | 先核对/复用原生能力，待逐项验收 |
 | G02 | 上传文件并供agent读取 | 上传小CSV/XLSX/text，回读字节/hash；agent读取正确版本 | 先核对/复用原生能力，待逐项验收 |
-| G03 | 预览CSV/XLSX/text/PDF/image | 按当前App确认的类型逐个预览；内容/编码/权限正确 | 先核对/复用原生能力，待逐项验收 |
+| G03 | 预览CSV/XLSX/text/PDF/image | 按当前App确认的类型逐个预览；内容/编码/权限正确 | 已有 HTML/Markdown/PDF/image 预览；CSV/XLSX 网格及 Artifact 纯文本预览尚缺 |
 | G04 | 下载原文件/截图 | 下载bytes/hash与原asset一致；不能以链接返回当成功下载 | 先核对/复用原生能力，待逐项验收 |
 | G05 | 删除/替换/重命名Library文件 | 确认动作后更改并回读；旧etag不误读新内容，删除后不再授权访问 | 先核对/复用原生能力，待逐项验收 |
 | G06 | 外部文档/Drive等引用与created_by_bot | 已授权文档列出真实来源；撤销连接后不可借缓存越权拉取 | 先核对/复用原生能力，待逐项验收 |
@@ -178,19 +178,19 @@ M2/M3/M4 中独立工作可与 M1 并行。每个 worker 明确文件归属，�
 | H01 | 查看agent私有memory facts | 写入已授权测试fact后list回读ID/时间/来源/范围 | 先核对/复用原生能力，待逐项验收 |
 | H02 | 写入/更新/删除并recall长期事实 | 写→读→更新→recall新值→删→不再召回，保留版本审计 | 线上已验写入/跨对话召回；新修订/撤销链待验 |
 | H03 | 私有记忆与transcript分开 | 普通临时聊天不自动变永久rule；B不能召回A私有fact | 先核对/复用原生能力，待逐项验收 |
-| H04 | 选择facts显式promote到team | promote前B不可读，后获权可读；created/already共享不重复 | 先核对/复用原生能力，待逐项验收 |
-| H05 | 团队context summary版本/新鲜度 | 事实更新后旧summary显stale；重建后版本/来源可查 | 先核对/复用原生能力，待逐项验收 |
+| H04 | 选择facts显式promote到team | promote前B不可读，后获权可读；created/already共享不重复 | 当前 user scope 只共享同一用户的 bots；跨 human team promote 尚缺 |
+| H05 | 团队context summary版本/新鲜度 | 事实更新后旧summary显stale；重建后版本/来源可查 | 原生聊天压缩可复用；team summary 版本/新鲜度尚缺 |
 | H06 | memory scope、作者、来源与权限撤销 | user/agent/room/task/team逐scope正反向检查；移出team立即不可recall | 先核对/复用原生能力，待逐项验收 |
 | H07 | memory profile/logs导入导出 | 先确认公开可用导出/导入能力与授权；不能从wire伪造全量迁移 | 先核对/复用原生能力，待逐项验收 |
 | H08 | 列出/读取skill详情与来源 | 回读skill名称/版本/hash/source；展示实际加载内容 | 先核对/复用原生能力，待逐项验收 |
 | H09 | 安装/创建/编辑/删除skill | 保存测试skill后runtime实际加载新revision；删除/停用后不加载 | 先核对/复用原生能力，待逐项验收 |
-| H10 | 按agent启停skill与工具依赖 | 仅Sourcer启用；Main不能获得；缺工具授权明确拒绝调用 | 先核对/复用原生能力，待逐项验收 |
+| H10 | 按agent启停skill与工具依赖 | 仅Sourcer启用；Main不能获得；缺工具授权明确拒绝调用 | SKILL.md 为 user/Space 目录，taught skills 为 bot；逐 bot recipe 启停尚缺 |
 | H11 | 查看插件目录、已安装与连接状态 | 分别显示installed/authenticated/enabled；状态由实际回读而非硬编码 | 先核对/复用原生能力，待逐项验收 |
 | H12 | 插件安装/移除与scope | 确认原App动作；在测试plugin作用域安装/移除，不波及其他用户/agent | 先核对/复用原生能力，待逐项验收 |
 | H13 | OAuth连接、回调、失败与撤销 | 使用已授权测试连接核对外部account/scope；revoke后调用拒绝 | 先核对/复用原生能力，待逐项验收 |
 | H14 | API key连接与保护存储 | 只用明确授权连接；key不入DB明文/日志/模型；只展示metadata与引用 | 先核对/复用原生能力，待逐项验收 |
 | H15 | 自定义MCP服务器/工具配置 | 真实支持的已授权server discover→只读call；tools显示与native一致 | 先核对/复用原生能力，待逐项验收 |
-| H16 | 插件工具permissions与原生elicitation | 执行已授权工具，原schema/request回答后同tool续行；撤权拒绝 | 先核对/复用原生能力，待逐项验收 |
+| H16 | 插件工具permissions与原生elicitation | 执行已授权工具，原schema/request回答后同tool续行；撤权拒绝 | MCP 逐 bot 工具白名单/版本校验可复用；elicitation/form 合同尚缺 |
 | H17 | 日历/邮件/Drive/Clay/Instantly/Supabase/GitHub/Origin | 逐个记录实际account/scope，以已授权最小只读动作验；写动作单独授权 | 先核对/复用原生能力，待逐项验收 |
 | H18 | Apollo与Slack当前账号连接 | 按账号实际授权连接 Apollo，核对工具发现/只读调用与撤销；Slack 延期，新增付费停止 | Slack 部分延期；适用网页能力仍须验收 |
 | H19 | runtime认证与工具认证独立 | runtime有效/MCP撤销时普通chat仍可用、tool拒绝；不能其他connection代跑 | 先核对/复用原生能力，待逐项验收 |
@@ -200,7 +200,7 @@ M2/M3/M4 中独立工作可与 M1 并行。每个 worker 明确文件归属，�
 
 | ID | 产品能力 | 退出条件 | 当前状态 |
 | --- | --- | --- | --- |
-| I01 | JD导入、澄清与RoleSpec确认 | 实际JD缺项→澄清→确认，记录规格revision与来源 | 先核对/复用原生能力，待逐项验收 |
+| I01 | JD导入、澄清与RoleSpec确认 | 实际JD缺项→澄清→确认，记录规格revision与来源 | 自然岗位描述创建/绑定 v1 与同群读回已验；JD URL 来源及完整条件澄清仍有缺口 |
 | I02 | 创建Autumn真实search task | 使用已授权连接；真实task_id、status、source回读可核 | 已发布原生 task/action 实现；真实创建待验 |
 | I03 | Autumn澄清继续原task | 原task提出问题→用户回答→continue相同task_id，结果关联一致 | 已发布同 task 续搜实现；真实反馈续搜待验 |
 | I04 | 候选证据卡与来源链接 | 每个关键判断能指原来源/日期；空字段不编造，不把模型生成当搜索 | 已读 provider 原始结果并转述；独立证据判断待做 |
