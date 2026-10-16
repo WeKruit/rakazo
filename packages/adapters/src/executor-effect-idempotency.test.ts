@@ -697,7 +697,7 @@ describe("mutating tool effect idempotency keys", () => {
 
 describe("native recruiting validation feedback", () => {
   it.each([
-    ["recruiting_role", "create", ["expectedRevision", "preferences", "intent"]],
+    ["recruiting_role", "create", ["preferences", "intent"]],
     ["recruiting_research", "prepare", ["expectedRoleRevision", "instructions", "intent"]],
   ] as const)(
     "returns actionable schema fields for %s without dispatch",
@@ -809,7 +809,6 @@ describe("native recruiting role effect delivery", () => {
   };
   const args = {
     operation: "create",
-    expectedRevision: 0,
     title: workspace.role.title,
     sourceRefs: [],
     criteria: workspace.revision.criteria,

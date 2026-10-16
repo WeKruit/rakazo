@@ -115,6 +115,34 @@ describe("native recruiting_role", () => {
     );
   });
 
+  it("creates from semantic input without a model revision while keeping the native provenance guard", async () => {
+    const prisma = {} as PrismaClient;
+    const input = {
+      operation: "create",
+      title: "Example engineer",
+      sourceRefs: [],
+      criteria: [],
+      preferences: [],
+      definitionQuestions: [],
+      intent: { basis: "direct", quote: "Create this role" },
+    };
+    const receipt = { status: "saved", changed: true, workspace, source: { id: "verified-human" } };
+    vi.mocked(executeRecruitingRoleMutation).mockResolvedValue(receipt as never);
+    expect(await executeRecruitingRoleTool(prisma, context, input)).toEqual(receipt);
+    expect(executeRecruitingRoleMutation).toHaveBeenCalledExactlyOnceWith(
+      prisma,
+      actor,
+      { runId: "run", sourceMessageId: "human-message" },
+      input,
+    );
+    for (const expectedRevision of [0, 1]) {
+      await expect(
+        executeRecruitingRoleTool(prisma, context, { ...input, expectedRevision }),
+      ).rejects.toThrow();
+    }
+    expect(executeRecruitingRoleMutation).toHaveBeenCalledOnce();
+  });
+
   it("rejects model-selected identity before dispatch", async () => {
     await expect(
       executeRecruitingRoleTool({} as PrismaClient, context, {

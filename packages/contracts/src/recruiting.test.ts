@@ -330,7 +330,6 @@ describe("recruiting contracts", () => {
     const intent = { basis: "direct", quote: "Create a new role" };
     const value = {
       operation: "create",
-      expectedRevision: 0,
       title: role.title,
       ...definition,
       sourceRefs: [],
@@ -361,6 +360,7 @@ describe("recruiting contracts", () => {
       ).toBe(false);
     }
     for (const input of [
+      { ...value, expectedRevision: 0 },
       { ...value, expectedRevision: 1 },
       { ...value, operation: "revise" },
       { ...value, intent: { basis: "direct", quote: " " } },
@@ -371,6 +371,18 @@ describe("recruiting contracts", () => {
     ]) {
       expect(contracts.RecruitingRoleToolInputSchema.safeParse(input).success).toBe(false);
     }
+    const apiCreate = {
+      ...definition,
+      sourceThreadId: role.sourceThreadId,
+      title: role.title,
+      expectedRevision: 0,
+    };
+    expect(contracts.CreateRecruitingRoleInput.safeParse(apiCreate).success).toBe(true);
+    expect(
+      contracts.CreateRecruitingRoleInput.safeParse({ ...apiCreate, expectedRevision: 1 }).success,
+    ).toBe(false);
+    const quote = "Create this role\n  Preserve the qualification wording.";
+    expect(contracts.RecruitingHumanIntentSchema.parse({ ...intent, quote }).quote).toBe(quote);
   });
 
   it("validates a role and its exact current revision", () => {
@@ -588,7 +600,6 @@ describe("recruiting contracts", () => {
           ...value,
           operation: "create",
           title: role.title,
-          expectedRevision: 0,
           intent: { basis: "direct", quote: "Create this role" },
         },
       },

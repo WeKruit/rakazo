@@ -2387,7 +2387,6 @@ describePostgres("recruiting domain (PostgreSQL)", () => {
     await prisma.message.update({ where: { id: first.id }, data: { runId: run.id } });
     const input = {
       operation: "create" as const,
-      expectedRevision: 0 as const,
       title: "Native role",
       sourceRefs: [],
       criteria: [{ ...roleInput().criteria[0]!, sourceRefs: [] }],
@@ -2653,7 +2652,6 @@ describePostgres("recruiting domain (PostgreSQL)", () => {
       const context = { runId: f.run.id, sourceMessageId: f.original.id };
       const created = await recruiting.executeRecruitingRoleMutation(prisma, actor, context, {
         operation: "create",
-        expectedRevision: 0,
         title: "Answered role",
         sourceRefs: [],
         criteria: [{ ...roleInput().criteria[0]!, sourceRefs: [] }],
@@ -2768,7 +2766,6 @@ describePostgres("recruiting domain (PostgreSQL)", () => {
     ).toMatchObject({ messageId: answerMessage.id });
     const created = await recruiting.executeRecruitingRoleMutation(prisma, actor, input, {
       operation: "create",
-      expectedRevision: 0,
       title: "Routine answer",
       sourceRefs: [],
       criteria: [],

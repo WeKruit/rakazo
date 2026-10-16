@@ -570,7 +570,9 @@ export type ReviseRecruitingRoleInput = z.infer<typeof ReviseRecruitingRoleInput
 
 export const RecruitingHumanIntentSchema = z.strictObject({
   basis: z.enum(["direct", "inferred"]),
-  quote: Text,
+  quote: Text.describe(
+    "One exact contiguous substring from one actual current human text block, preserving whitespace; do not normalize whitespace or join blocks.",
+  ),
 });
 export type RecruitingHumanIntent = z.infer<typeof RecruitingHumanIntentSchema>;
 
@@ -648,7 +650,6 @@ export const RecruitingRoleToolInputSchema = z.discriminatedUnion("operation", [
   z.strictObject({ operation: z.literal("read") }),
   z.strictObject({
     operation: z.literal("create"),
-    expectedRevision: z.literal(0),
     title: Text,
     ...RoleToolDefinition,
   }),

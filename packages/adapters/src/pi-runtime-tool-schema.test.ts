@@ -7,10 +7,23 @@ import { parseConnectorToolArgs } from "./lazy-tool-catalog.js";
 import { jsonSchemaParameters, parametersFor } from "./pi-runtime.js";
 
 describe("jsonSchemaParameters", () => {
+  it.each([
+    "recruiting_role",
+    "recruiting_research",
+    "recruiting_feedback",
+    "remember",
+    "save_shared_memory",
+  ])("preserves exact human quote guidance in the %s model schema", (name) => {
+    const tool = builtinAgentTools.find((entry) => entry.name === name)!;
+    const wire = JSON.parse(JSON.stringify(parametersFor(tool)));
+    expect(JSON.stringify(wire)).toContain(
+      "One exact contiguous substring from one actual current human text block, preserving whitespace; do not normalize whitespace or join blocks.",
+    );
+  });
+
   it("explains operation-specific role inputs without inventing source identifiers", () => {
     const tool = builtinAgentTools.find((entry) => entry.name === "recruiting_role")!;
     for (const field of [
-      "expectedRevision:0",
       "title",
       "sourceRefs:[]",
       "criteria",
@@ -21,6 +34,7 @@ describe("jsonSchemaParameters", () => {
       expect(tool.description).toContain(field);
     expect(tool.description).toContain("runtime attaches the verified current human message");
     expect(tool.description).toContain("Never invent message IDs, artifact IDs or read timestamps");
+    expect(tool.description).not.toContain("expectedRevision:0");
     expect(tool.description).toContain("For JD URLs, call web_fetch before creating the role");
     expect(tool.description).toContain("sourceMaterial");
     expect(tool.description).toContain("before role creation");
@@ -42,13 +56,11 @@ describe("jsonSchemaParameters", () => {
     expect(parsed.success).toBe(false);
     if (parsed.success) throw new Error("Incomplete role creation must not validate");
     expect(parsed.error.issues.map((issue) => issue.path.join("."))).toEqual([
-      "expectedRevision",
       "preferences",
       "intent",
     ]);
     const complete = {
       ...incomplete,
-      expectedRevision: 0,
       preferences: [],
       intent: { basis: "direct", quote: "Create a role for this job description" },
     };
@@ -57,6 +69,18 @@ describe("jsonSchemaParameters", () => {
     expect(
       parseConnectorToolArgs(JSON.parse(JSON.stringify(parametersFor(tool))), complete),
     ).toEqual(complete);
+    expect(
+      RecruitingRoleToolInputSchema.safeParse({ ...complete, expectedRevision: 0 }).success,
+    ).toBe(false);
+    const revise = { ...complete, operation: "revise", roleId: "role", expectedRevision: 2 };
+    expect(parseConnectorToolArgs(tool.inputSchema, revise)).toEqual(revise);
+    expect(() =>
+      parseConnectorToolArgs(tool.inputSchema, {
+        ...complete,
+        operation: "revise",
+        roleId: "role",
+      }),
+    ).toThrow();
     const source = {
       id: "jd-material",
       kind: "original_material",
@@ -247,7 +271,6 @@ describe("jsonSchemaParameters", () => {
     const wire = JSON.parse(JSON.stringify(parameters));
     const input: ToolCall["arguments"] = {
       operation: "create",
-      expectedRevision: 0,
       title: "Synthetic engineer",
       sourceRefs: [],
       criteria: [
