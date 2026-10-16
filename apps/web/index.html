@@ -30,7 +30,15 @@
     </script>
   </head>
   <body>
-    <div id="root"></div>
+    <div id="root">
+      <div
+        role="status"
+        data-rakazo-app-state="module-pending"
+        style="position: fixed; inset: 0; display: grid; place-items: center; background: light-dark(#fafaf8, #0b0c0e); color: CanvasText; font: 14px system-ui, sans-serif"
+      >
+        Loading…
+      </div>
+    </div>
     <script type="module" src="/src/main.tsx"></script>
   </body>
 </html>

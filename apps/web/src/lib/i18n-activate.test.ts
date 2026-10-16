@@ -1,4 +1,8 @@
+// @vitest-environment jsdom
+import { act, createElement, type ReactNode } from "react";
+import { createRoot } from "react-dom/client";
 import { beforeEach, describe, expect, it, vi } from "vitest";
+import { I18nBootstrap } from "../components/I18nBootstrap";
 import {
   activateUiLocale,
   getActiveUiLocale,
@@ -6,10 +10,13 @@ import {
   setCatalogLoadersForTests,
   setUiLocale,
 } from "./i18n";
-import { UI_LOCALE_STORAGE_KEY } from "./ui-locale";
+import { UI_LOCALE_STORAGE_KEY, UI_LOCALES } from "./ui-locale";
 
 vi.mock("./apply-ui-direction", () => ({
   applyUiDirection: vi.fn(),
+}));
+vi.mock("../components/markdown-link-prompt", () => ({
+  MarkdownLinkPrompt: ({ children }: { children: ReactNode }) => children,
 }));
 
 function stubLocaleStorage() {
@@ -37,6 +44,37 @@ describe("activateUiLocale", () => {
     i18n.load("en", {});
     i18n.activate("en");
     vi.unstubAllGlobals();
+  });
+
+  it("keeps a visible status until the delayed language catalog is ready", async () => {
+    vi.stubGlobal("IS_REACT_ACT_ENVIRONMENT", true);
+    stubLocaleStorage().set(UI_LOCALE_STORAGE_KEY, "de");
+    let release!: (catalog: { messages: Record<string, string> }) => void;
+    const pending = new Promise<{ messages: Record<string, string> }>((resolve) => {
+      release = resolve;
+    });
+    setCatalogLoadersForTests(
+      Object.fromEntries(UI_LOCALES.map((locale) => [locale, () => pending])) as NonNullable<
+        Parameters<typeof setCatalogLoadersForTests>[0]
+      >,
+    );
+    const container = document.createElement("div");
+    const root = createRoot(container);
+    try {
+      await act(async () => {
+        root.render(createElement(I18nBootstrap, null, createElement("main", null, "Application")));
+      });
+      expect(container.querySelector('[role="status"]')?.textContent).toContain("Loading");
+      expect(container.querySelector("main")).toBeNull();
+      await act(async () => release({ messages: {} }));
+      expect(container.querySelector('[role="status"]')).toBeNull();
+      expect(container.querySelector("main")?.textContent).toBe("Application");
+    } finally {
+      await act(async () => root.unmount());
+      release({ messages: {} });
+      vi.unstubAllGlobals();
+      setCatalogLoadersForTests(null);
+    }
   });
 
   it("falls back to English when the preferred catalog fails to load", async () => {
