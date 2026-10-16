@@ -1,11 +1,71 @@
 import type { ToolCall } from "@earendil-works/pi-ai";
 import { validateToolArguments } from "@earendil-works/pi-ai";
+import { RecruitingRoleToolInputSchema } from "@rakazo/contracts";
 import { describe, expect, it } from "vitest";
 import { builtinAgentTools } from "./builtin-tools.js";
 import { parseConnectorToolArgs } from "./lazy-tool-catalog.js";
 import { jsonSchemaParameters, parametersFor } from "./pi-runtime.js";
 
 describe("jsonSchemaParameters", () => {
+  it("explains operation-specific role inputs without inventing source identifiers", () => {
+    const tool = builtinAgentTools.find((entry) => entry.name === "recruiting_role")!;
+    for (const field of [
+      "expectedRevision:0",
+      "title",
+      "sourceRefs:[]",
+      "criteria",
+      "preferences:[]",
+      "definitionQuestions:[]",
+      "intent",
+    ])
+      expect(tool.description).toContain(field);
+    expect(tool.description).toContain("runtime attaches the verified current human message");
+    expect(tool.description).toContain("Never invent message IDs, artifact IDs or read timestamps");
+    const incomplete = {
+      operation: "create",
+      title: "Synthetic engineer",
+      sourceRefs: [],
+      criteria: [],
+      definitionQuestions: [],
+    };
+    const parsed = RecruitingRoleToolInputSchema.safeParse(incomplete);
+    expect(parsed.success).toBe(false);
+    if (parsed.success) throw new Error("Incomplete role creation must not validate");
+    expect(parsed.error.issues.map((issue) => issue.path.join("."))).toEqual([
+      "expectedRevision",
+      "preferences",
+      "intent",
+    ]);
+    const complete = {
+      ...incomplete,
+      expectedRevision: 0,
+      preferences: [],
+      intent: { basis: "direct", quote: "Create a role for this job description" },
+    };
+    expect(RecruitingRoleToolInputSchema.parse(complete)).toEqual(complete);
+    expect(parseConnectorToolArgs(tool.inputSchema, complete)).toEqual(complete);
+    expect(
+      parseConnectorToolArgs(JSON.parse(JSON.stringify(parametersFor(tool))), complete),
+    ).toEqual(complete);
+    expect(incomplete.sourceRefs).toEqual([]);
+  });
+
+  it("explains every required preparation field after root union normalization", () => {
+    const tool = builtinAgentTools.find((entry) => entry.name === "recruiting_research")!;
+    for (const field of [
+      "expectedRoleRevision",
+      "clientNonce",
+      "instructions",
+      "output",
+      "recallScope",
+      "intent",
+      "mcpServerId",
+      "taskId",
+    ])
+      expect(tool.description).toContain(field);
+    expect(tool.description).toContain("recallScope:null");
+  });
+
   it("preserves all five closed recruiting research inputs through the installed Pi validator", () => {
     const tool = builtinAgentTools.find((entry) => entry.name === "recruiting_research");
     expect(tool).toBeDefined();

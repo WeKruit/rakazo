@@ -6,6 +6,7 @@ import type {
   SemanticMemoryProvider,
 } from "@rakazo/adapter-kit";
 import type { RecruitingFeedbackInput, RecruitingSourceRef } from "@rakazo/contracts";
+import { RecruitingRoleToolInputSchema } from "@rakazo/contracts";
 import type { ActionApprovalRule } from "@rakazo/core";
 import {
   legacyScopedToolEffectIdempotencyKey,
@@ -672,6 +673,48 @@ describe("mutating tool effect idempotency keys", () => {
     expect(f.effects).toHaveLength(1);
     expect(f.results[0]).toEqual({ ok: true, legacy: true });
   });
+});
+
+describe("native recruiting validation feedback", () => {
+  it.each([
+    ["recruiting_role", "create", ["expectedRevision", "preferences", "intent"]],
+    ["recruiting_research", "prepare", ["expectedRoleRevision", "instructions", "intent"]],
+  ] as const)(
+    "returns actionable schema fields for %s without dispatch",
+    async (name, operation, fields) => {
+      const f = fixture(`invalid-${name}`, ["private-input-value"]);
+      vi.mocked(executeRecruitingRoleTool)
+        .mockReset()
+        .mockImplementation(async (_db, _actor, args) => {
+          RecruitingRoleToolInputSchema.parse(args);
+          throw new Error("Invalid fixture unexpectedly passed validation");
+        });
+      f.setCalls([
+        {
+          name,
+          args: {
+            operation,
+            title: "Synthetic role",
+            sourceRefs: [],
+            criteria: [],
+            definitionQuestions: [],
+            "private-input-value": true,
+          },
+          executionId: "missing-branch-fields",
+        },
+      ]);
+
+      await f.run();
+
+      expect(f.results).toHaveLength(1);
+      const result = f.results[0] as { error: string };
+      for (const field of fields) expect(result.error).toContain(field);
+      expect(result.error).not.toContain("private-input-value");
+      expect(f.connector.execute).not.toHaveBeenCalled();
+      expect(f.pauseRunForInput).not.toHaveBeenCalled();
+      expect(prepareRecruitingResearchTool).not.toHaveBeenCalled();
+    },
+  );
 });
 
 describe("native recruiting role effect delivery", () => {

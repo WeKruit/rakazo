@@ -4219,7 +4219,7 @@ export function createRunExecutor(deps: ExecutorDeps) {
               ? RecruitingResearchToolInputSchema.safeParse(args)
               : undefined;
           if (researchInput && !researchInput.success)
-            return { error: "Invalid recruiting research request" };
+            return { error: sanitizeConnectorError(researchInput.error, runSecrets) };
           const researchActor = {
             actor: {
               spaceId: run.spaceId,
@@ -5703,7 +5703,7 @@ export function createRunExecutor(deps: ExecutorDeps) {
               if (error instanceof RecruitingConflictError)
                 return finish({ error: error.message, code: "CONFLICT" });
               if (error instanceof Error && error.name === "ZodError")
-                return finish({ error: "Invalid recruiting research request" });
+                return finish({ error: sanitizeConnectorError(error, runSecrets) });
               throw error;
             }
           }
@@ -5736,7 +5736,7 @@ export function createRunExecutor(deps: ExecutorDeps) {
               if (error instanceof RecruitingConflictError)
                 return finish({ error: error.message, code: "CONFLICT" });
               if (error instanceof Error && error.name === "ZodError")
-                return finish({ error: "Invalid recruiting role request" });
+                return finish({ error: sanitizeConnectorError(error, runSecrets) });
               throw error;
             }
             // Save the domain receipt before context materialization: resume must never repeat a role create.
