@@ -272,6 +272,7 @@ msgid "Active model"
 msgstr "सक्रिय मॉडल"
 
 #: src/components/computer/TerminalApp.tsx
+#: src/pages/RecruitingPanel.tsx
 #: src/pages/Shell.tsx
 msgid "Activity"
 msgstr "गतिविधि"
@@ -830,6 +831,10 @@ msgstr "रद्द"
 msgid "Cancelled"
 msgstr "रद्द किया गया"
 
+#: src/pages/RecruitingPanel.tsx
+msgid "Candidate facts"
+msgstr ""
+
 #: src/pages/Artifacts.tsx
 msgid "Card view"
 msgstr ""
@@ -1010,6 +1015,7 @@ msgid "Close navigation"
 msgstr "नेविगेशन बंद करें"
 
 #: src/pages/GroupPanel.tsx
+#: src/pages/RecruitingPanel.tsx
 #: src/pages/Shell.tsx
 msgid "Close panel"
 msgstr "पैनल बंद करें"
@@ -1223,6 +1229,10 @@ msgstr "कनेक्शन परीक्षण विफल रहा।"
 #: src/pages/PluginsOverlay.tsx
 msgid "Connection to {0} is still pending. You can close this and check again."
 msgstr "{0} से कनेक्शन अभी लंबित है। आप इसे बंद करके बाद में जांच सकते हैं।"
+
+#: src/pages/RecruitingPanel.tsx
+msgid "Context"
+msgstr ""
 
 #: src/pages/ModelSettingsOverlay.tsx
 #: src/pages/Onboarding.tsx
@@ -1472,6 +1482,10 @@ msgstr ""
 msgid "Could not load credentials."
 msgstr ""
 
+#: src/pages/RecruitingPanel.tsx
+msgid "Could not load history"
+msgstr ""
+
 #: src/components/integrations/IntegrationSetup.tsx
 #: src/pages/PluginsOverlay.tsx
 msgid "Could not load integrations"
@@ -1484,6 +1498,10 @@ msgstr "MCP सर्वर लोड नहीं हो सके"
 #: src/pages/ModelSettingsOverlay.tsx
 msgid "Could not load model settings"
 msgstr "मॉडल सेटिंग्स लोड नहीं हो सकीं"
+
+#: src/pages/RecruitingPanel.tsx
+msgid "Could not load recruiting"
+msgstr ""
 
 #: src/pages/RoutineRunHistory.tsx
 msgid "Could not load run history"
@@ -1797,6 +1815,10 @@ msgstr "Cron"
 msgid "Cron expression"
 msgstr "Cron एक्सप्रेशन"
 
+#: src/pages/RecruitingPanel.tsx
+msgid "Current"
+msgstr ""
+
 #: src/components/AccountAccess.tsx
 #: src/pages/AccountSettingsOverlay.tsx
 msgid "Current password"
@@ -1858,6 +1880,10 @@ msgstr "डिफ़ॉल्ट ({0})"
 #: src/pages/MemorySettingsOverlay.tsx
 msgid "Default scope"
 msgstr "डिफ़ॉल्ट स्कोप"
+
+#: src/pages/RecruitingPanel.tsx
+msgid "Definition questions"
+msgstr ""
 
 #: src/pages/Artifacts.tsx
 #: src/pages/BotContextMenu.tsx
@@ -1944,6 +1970,10 @@ msgstr ""
 
 #: src/components/DesktopUpdates.tsx
 msgid "Desktop update"
+msgstr ""
+
+#: src/pages/RecruitingPanel.tsx
+msgid "Details"
 msgstr ""
 
 #: src/components/integrations/IntegrationSetup.tsx
@@ -2157,6 +2187,10 @@ msgstr "हर महीने"
 msgid "Every week"
 msgstr "हर सप्ताह"
 
+#: src/pages/RecruitingPanel.tsx
+msgid "Evidence"
+msgstr ""
+
 #: src/pages/PluginsOverlay.tsx
 msgid "Executor token"
 msgstr "Executor टोकन"
@@ -2323,6 +2357,10 @@ msgstr ""
 msgid "Group"
 msgstr "समूह"
 
+#: src/pages/RecruitingPanel.tsx
+msgid "Group bot memory is not included"
+msgstr ""
+
 #: src/pages/GroupPanel.tsx
 msgid "Group settings"
 msgstr "समूह सेटिंग्स"
@@ -2345,6 +2383,10 @@ msgstr ""
 
 #: src/lib/call-session.ts
 msgid "Hang up, then enter the code on screen."
+msgstr ""
+
+#: src/pages/RecruitingPanel.tsx
+msgid "Hard criteria"
 msgstr ""
 
 #: src/pages/RoutineEditor.tsx
@@ -2394,6 +2436,10 @@ msgstr "उच्च"
 #. js-lingui-explicit-id
 #: src/lib/model-catalog.ts
 msgid "High"
+msgstr ""
+
+#: src/pages/RecruitingPanel.tsx
+msgid "History"
 msgstr ""
 
 #: src/pages/RoutineSchedule.tsx
@@ -2628,6 +2674,7 @@ msgstr "आवाज़ प्रोवाइडर्स लोड हो र�
 #: src/pages/ModelBackupsSettings.tsx
 #: src/pages/Onboarding.tsx
 #: src/pages/PeerMessagesOverlay.tsx
+#: src/pages/RecruitingPanel.tsx
 #: src/pages/RoutineRunHistory.tsx
 #: src/pages/Shell.tsx
 msgid "Loading…"
@@ -2761,6 +2808,7 @@ msgstr "सदस्य ({GROUP_MEMBER_MIN}–{GROUP_MEMBER_MAX} चुनें
 
 #: src/pages/KnowledgeSection.tsx
 #: src/pages/MemorySettingsOverlay.tsx
+#: src/pages/RecruitingPanel.tsx
 #: src/pages/SettingsOverlay.tsx
 msgid "Memory"
 msgstr "मेमोरी"
@@ -2815,6 +2863,10 @@ msgstr "{peer} को संदेश भेजा"
 msgid "Messaging"
 msgstr ""
 
+#: src/pages/RecruitingPanel.tsx
+msgid "Met"
+msgstr ""
+
 #: src/lib/call-session.ts
 msgid "Microphone failed"
 msgstr "माइक्रोफ़ोन विफल"
@@ -2844,6 +2896,10 @@ msgstr "मिनट"
 #: src/pages/RoutineSchedule.tsx
 msgid "minutes"
 msgstr "मिनट"
+
+#: src/pages/RecruitingPanel.tsx
+msgid "Missing info"
+msgstr ""
 
 #: src/pages/ModelSettingsOverlay.tsx
 #: src/pages/Onboarding.tsx
@@ -3089,10 +3145,18 @@ msgstr "कोई प्रोवाइडर नहीं मिला।"
 msgid "No remote MCP servers found"
 msgstr ""
 
+#: src/pages/RecruitingPanel.tsx
+msgid "No research tasks"
+msgstr ""
+
 #: src/pages/PluginsOverlay.tsx
 #: src/pages/SpaceSearch.tsx
 msgid "No results"
 msgstr "कोई परिणाम नहीं"
+
+#: src/pages/RecruitingPanel.tsx
+msgid "No role linked"
+msgstr ""
 
 #: src/pages/ActivityList.tsx
 msgid "No runs match these filters."
@@ -3100,6 +3164,22 @@ msgstr ""
 
 #: src/pages/RoutineRunHistory.tsx
 msgid "No runs yet"
+msgstr ""
+
+#: src/pages/RecruitingPanel.tsx
+msgid "No saved assessments"
+msgstr ""
+
+#: src/pages/RecruitingPanel.tsx
+msgid "No saved history"
+msgstr ""
+
+#: src/pages/RecruitingPanel.tsx
+msgid "No saved memory in these scopes"
+msgstr ""
+
+#: src/pages/RecruitingPanel.tsx
+msgid "No saved questions"
 msgstr ""
 
 #: src/pages/KnowledgeSection.tsx
@@ -3300,6 +3380,14 @@ msgstr "मूल संदेश उपलब्ध नहीं है"
 msgid "Other model…"
 msgstr "अन्य मॉडल…"
 
+#: src/pages/RecruitingPanel.tsx
+msgid "Outdated"
+msgstr ""
+
+#: src/pages/RecruitingPanel.tsx
+msgid "Output"
+msgstr ""
+
 #: src/pages/Board.tsx
 msgid "Owner"
 msgstr ""
@@ -3387,6 +3475,14 @@ msgstr "प्लगइन"
 msgid "POST to"
 msgstr ""
 
+#: src/pages/RecruitingPanel.tsx
+msgid "Preferences"
+msgstr ""
+
+#: src/pages/RecruitingPanel.tsx
+msgid "Preferred criteria"
+msgstr ""
+
 #. placeholder {0}: props.name
 #: src/components/ArtifactFileCard.tsx
 msgid "Preview {0}"
@@ -3463,6 +3559,10 @@ msgstr ""
 msgid "Recall only"
 msgstr ""
 
+#: src/pages/RecruitingPanel.tsx
+msgid "Receipt"
+msgstr ""
+
 #: src/pages/ActivityList.tsx
 msgid "Recent"
 msgstr "हाल के"
@@ -3532,8 +3632,18 @@ msgstr "काम न कर रहे कंप्यूटर को फिर
 msgid "Recreating the computer"
 msgstr ""
 
+#: src/pages/RecruitingPanel.tsx
+#: src/pages/Shell.tsx
+msgid "Recruiting"
+msgstr ""
+
+#: src/pages/RecruitingPanel.tsx
+msgid "Recruiting views"
+msgstr ""
+
 #: src/App.tsx
 #: src/components/ErrorBoundary.tsx
+#: src/pages/RecruitingPanel.tsx
 #: src/pages/RoutineRunHistory.tsx
 msgid "Refresh"
 msgstr "रीफ़्रेश करें"
@@ -3665,6 +3775,10 @@ msgstr ""
 msgid "Replying to {0}"
 msgstr ""
 
+#: src/pages/RecruitingPanel.tsx
+msgid "Request"
+msgstr ""
+
 #: src/pages/shell/message-cards.tsx
 msgid "Research & writing"
 msgstr ""
@@ -3750,12 +3864,30 @@ msgstr "रिवीज़न {0}"
 msgid "Review provider settings and test again."
 msgstr "प्रोवाइडर सेटिंग्स की समीक्षा करें और फिर से परीक्षण करें।"
 
+#. placeholder {0}: document.revision
+#. placeholder {0}: entry.revision
+#: src/pages/RecruitingPanel.tsx
+msgid "Revision {0}"
+msgstr ""
+
 #: src/pages/MessagingSettingsOverlay.tsx
 msgid "Revoke"
 msgstr ""
 
 #: src/pages/AccountSettingsOverlay.tsx
 msgid "Robot"
+msgstr ""
+
+#: src/pages/RecruitingPanel.tsx
+msgid "Role"
+msgstr ""
+
+#: src/pages/RecruitingPanel.tsx
+msgid "Role definition"
+msgstr ""
+
+#: src/pages/RecruitingPanel.tsx
+msgid "Role sources"
 msgstr ""
 
 #: src/pages/ExternalConversationSettings.tsx
@@ -3777,6 +3909,10 @@ msgstr "रूटीन्स"
 
 #: src/pages/Paywall.tsx
 msgid "Routines that run while you're away"
+msgstr ""
+
+#: src/pages/RecruitingPanel.tsx
+msgid "Run"
 msgstr ""
 
 #: src/pages/RoutineEditor.tsx
@@ -3849,6 +3985,10 @@ msgstr "कार्यक्षेत्र सहेजें और नवी
 #: src/pages/ExternalConversationSettings.tsx
 msgid "Saved"
 msgstr "सहेजा गया"
+
+#: src/pages/RecruitingPanel.tsx
+msgid "Saved facts"
+msgstr ""
 
 #: src/pages/ScratchpadSection.tsx
 msgid "Saved, but list refresh failed"
@@ -4157,6 +4297,14 @@ msgstr ""
 msgid "Something went wrong. Try again."
 msgstr "कुछ गलत हो गया। फिर से कोशिश करें।"
 
+#: src/pages/RecruitingPanel.tsx
+msgid "Source unavailable"
+msgstr ""
+
+#: src/pages/RecruitingPanel.tsx
+msgid "Sources"
+msgstr ""
+
 #: src/pages/ModelBackupsSettings.tsx
 msgid "Space changed. Reopen Models to load its backup list."
 msgstr "स्पेस बदल गया। बैकअप सूची लोड करने के लिए मॉडल फिर खोलें।"
@@ -4461,6 +4609,10 @@ msgstr "यह सब्सक्रिप्शन साइन-इन अभ�
 msgid "This week"
 msgstr ""
 
+#: src/pages/RecruitingPanel.tsx
+msgid "Thread"
+msgstr ""
+
 #: src/pages/RoutineSchedule.tsx
 msgid "Time of day"
 msgstr "दिन का समय"
@@ -4553,12 +4705,20 @@ msgstr ""
 msgid "Uninstall"
 msgstr ""
 
+#: src/pages/RecruitingPanel.tsx
+msgid "Unknown"
+msgstr ""
+
 #: src/pages/shell/bot-panel.tsx
 msgid "Unknown tool"
 msgstr ""
 
 #: src/pages/MessagingSettingsOverlay.tsx
 msgid "Unlink"
+msgstr ""
+
+#: src/pages/RecruitingPanel.tsx
+msgid "Unmet"
 msgstr ""
 
 #: src/components/call/CallCard.tsx
@@ -4674,6 +4834,14 @@ msgstr "यह मॉडल उपयोग करें"
 msgid "Use your own key"
 msgstr "अपनी कुंजी इस्तेमाल करें"
 
+#: src/pages/RecruitingPanel.tsx
+msgid "User and bot memory"
+msgstr ""
+
+#: src/pages/RecruitingPanel.tsx
+msgid "User memory"
+msgstr ""
+
 #: src/components/AskCard.tsx
 #: src/pages/shell/bot-credentials.tsx
 msgid "Username"
@@ -4701,6 +4869,12 @@ msgstr "पुष्टि की जा रही है…"
 
 #: src/pages/Artifacts.tsx
 msgid "Version"
+msgstr ""
+
+#. placeholder {0}: assessment.version
+#. placeholder {0}: workspace.revision.revision
+#: src/pages/RecruitingPanel.tsx
+msgid "Version {0}"
 msgstr ""
 
 #: src/pages/RoutineRunHistory.tsx
