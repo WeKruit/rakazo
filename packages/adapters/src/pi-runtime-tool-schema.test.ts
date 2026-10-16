@@ -45,6 +45,8 @@ describe("jsonSchemaParameters", () => {
       "readAt:sourceMaterial.readAt",
       "url:sourceMaterial.url",
       "Assign stable local criterion, atom and source IDs",
+      "quote:<one exact contiguous excerpt of returned text>",
+      "Never omit words or join separate passages within a quote; cite separate excerpts with separate sourceRefs.",
       "Correct deterministic schema rejections using the actual validator error and read receipt",
     ])
       expect(tool.description).toContain(guidance);

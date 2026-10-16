@@ -19,6 +19,7 @@ import {
   claimRecruitingResearchAction,
   claimRecruitingResearchReadEffect,
   IsolationError,
+  RecruitingSourceValidationError,
   recruitingResearchSnapshot,
 } from "@rakazo/db";
 import { beforeEach, describe, expect, it, vi } from "vitest";
@@ -837,6 +838,32 @@ describe("native recruiting role effect delivery", () => {
     vi.mocked(executeRecruitingRoleTool).mockReset();
     vi.mocked(loadRecruitingRunContext).mockReset();
   });
+
+  it.each(["quote", "scope"])(
+    "settles native role source %s errors without repeating the mutation",
+    async (kind) => {
+      const f = fixture(`role-source-${kind}`);
+      const failure =
+        kind === "quote"
+          ? new RecruitingSourceValidationError("jd", "text")
+          : new IsolationError("Private source details");
+      vi.mocked(executeRecruitingRoleTool).mockRejectedValue(failure);
+      f.setCalls([{ name: "recruiting_role", args, executionId: `source-${kind}` }]);
+      await f.run();
+      const result = {
+        error: kind === "quote" ? failure.message : "Recruiting role or source is unavailable",
+      };
+      expect(f.results).toEqual([result]);
+      expect(f.effects[0]).toMatchObject({ status: "completed", result });
+      expect(JSON.parse(JSON.stringify(f.effects[0]?.result))).toEqual(result);
+      expect(JSON.stringify(result)).not.toContain("Private source details");
+      await f.run();
+      expect(executeRecruitingRoleTool).toHaveBeenCalledOnce();
+      expect(f.effects).toHaveLength(1);
+      expect(f.results).toEqual([result, result]);
+      expect(loadRecruitingRunContext).not.toHaveBeenCalled();
+    },
+  );
 
   it("claims the native effect before creating a role and persists its receipt before context delivery", async () => {
     const f = fixture("run-role");
@@ -3200,23 +3227,25 @@ describe("native recruiting assessment effect delivery", () => {
     expect(f.effects[0]?.result).toEqual(receipt);
   });
 
-  it("settles deterministic assessment validation failures without leaving an executing effect", async () => {
-    const f = fixture("assessment-invalid-semantics");
-    vi.mocked(executeRecruitingAssessmentTool).mockRejectedValue(
-      new RecruitingAssessmentValidationError(
-        "Every role atom requires exactly its semantic or employment input",
-      ),
-    );
-    f.setCalls([{ name: "recruiting_assess", args, executionId: "invalid-semantics" }]);
-    await f.run();
-    expect(f.results).toEqual([
-      { error: "Every role atom requires exactly its semantic or employment input" },
-    ]);
-    expect(f.effects[0]?.status).toBe("completed");
-    await f.run();
-    expect(executeRecruitingAssessmentTool).toHaveBeenCalledOnce();
-    expect(f.effects).toHaveLength(1);
-  });
+  it.each([
+    new RecruitingAssessmentValidationError(
+      "Every role atom requires exactly its semantic or employment input",
+    ),
+    new RecruitingSourceValidationError("jd", "text"),
+  ])(
+    "settles deterministic assessment validation failures without leaving an executing effect: %s",
+    async (failure) => {
+      const f = fixture("assessment-invalid-semantics");
+      vi.mocked(executeRecruitingAssessmentTool).mockRejectedValue(failure);
+      f.setCalls([{ name: "recruiting_assess", args, executionId: "invalid-semantics" }]);
+      await f.run();
+      expect(f.results).toEqual([{ error: failure.message }]);
+      expect(f.effects[0]?.status).toBe("completed");
+      await f.run();
+      expect(executeRecruitingAssessmentTool).toHaveBeenCalledOnce();
+      expect(f.effects).toHaveLength(1);
+    },
+  );
 
   it("retains native web_fetch source receipts before role creation and after binding", async () => {
     const f = fixture("jd-web-source");

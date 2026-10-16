@@ -131,6 +131,7 @@ import {
   loadRunHumanSources,
   parseComputerMode,
   RecruitingConflictError,
+  RecruitingSourceValidationError,
   readHistory,
   recordUsage,
   recruitingResearchSnapshot,
@@ -4999,6 +5000,7 @@ export function createRunExecutor(deps: ExecutorDeps) {
               return { error: error.message, code: "CONFLICT" };
             if (
               error instanceof RecruitingAssessmentValidationError ||
+              error instanceof RecruitingSourceValidationError ||
               (error instanceof Error && error.name === "ZodError")
             )
               return { error: sanitizeConnectorError(error, runSecrets) };
@@ -5914,7 +5916,10 @@ export function createRunExecutor(deps: ExecutorDeps) {
                 return finish({ error: "Recruiting role or source is unavailable" });
               if (error instanceof RecruitingConflictError)
                 return finish({ error: error.message, code: "CONFLICT" });
-              if (error instanceof Error && error.name === "ZodError")
+              if (
+                error instanceof RecruitingSourceValidationError ||
+                (error instanceof Error && error.name === "ZodError")
+              )
                 return finish({ error: sanitizeConnectorError(error, runSecrets) });
               throw error;
             }

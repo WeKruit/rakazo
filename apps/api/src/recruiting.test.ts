@@ -4,7 +4,11 @@ import { RecruitingAssessmentSnapshotSchema } from "@rakazo/contracts";
 import type * as DbExports from "@rakazo/db";
 import type { PrismaClient } from "@rakazo/db";
 import * as db from "@rakazo/db";
-import { IsolationError, RecruitingConflictError } from "@rakazo/db";
+import {
+  IsolationError,
+  RecruitingConflictError,
+  RecruitingSourceValidationError,
+} from "@rakazo/db";
 import { describe, expect, it, vi } from "vitest";
 import * as api from "./recruiting.js";
 import type { RouterDeps } from "./router.js";
@@ -60,6 +64,27 @@ describe("authenticated recruiting API", () => {
     await expect(
       api.getRecruitingWorkspace(prisma, actor, { threadId: "other-thread" }),
     ).rejects.toMatchObject({ code: "NOT_FOUND", message: "Resource not found" });
+  });
+  it("maps authorized quote errors to actionable BAD_REQUEST without exposing material", async () => {
+    const error = new RecruitingSourceValidationError("jd", "text");
+    for (const [domain, wrapper] of [
+      [db.createRecruitingRole, api.createRecruitingRole],
+      [db.reviseRecruitingRole, api.reviseRecruitingRole],
+    ] as const) {
+      vi.mocked(domain).mockRejectedValueOnce(error);
+      const response = await wrapper(prisma, actor, {} as never).catch((error: unknown) => error);
+      expect(response).toMatchObject({ code: "BAD_REQUEST", message: error.message });
+      expect(JSON.parse(JSON.stringify(response))).toMatchObject({
+        code: "BAD_REQUEST",
+        message:
+          'Source "jd" at "text": quote must be exact contiguous text from the original read receipt; copy one unchanged excerpt without omissions or joined passages.',
+      });
+      vi.mocked(domain).mockRejectedValueOnce(new IsolationError("Private source details"));
+      await expect(wrapper(prisma, actor, {} as never)).rejects.toMatchObject({
+        code: "NOT_FOUND",
+        message: "Resource not found",
+      });
+    }
   });
   it("maps CAS conflicts to CONFLICT and validation failures without echoing input", async () => {
     vi.mocked(db.reviseRecruitingRole).mockRejectedValueOnce(new RecruitingConflictError());

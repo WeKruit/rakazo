@@ -530,7 +530,8 @@ describePostgres("recruiting domain (PostgreSQL)", () => {
   });
   it("authenticates role quotes against native web material on both create and revise", async () => {
     const f = await assessmentFixture();
-    const text = "Build geometry systems 👩🏽‍💻 with seven years of experience";
+    const text =
+      "Build geometry systems 👩🏽‍💻. Keep existing sensor tooling. Require seven years of experience.";
     const bytes = Buffer.from(
       JSON.stringify({ text, title: "Role", url: "https://example.test/jd" }),
     );
@@ -603,12 +604,23 @@ describePostgres("recruiting domain (PostgreSQL)", () => {
       };
       const count = await prisma.recruitingRoleRevision.count();
       for (const invalid of [
-        { ...ref, quote: "Invented requirement" },
+        { ...ref, quote: text.replace(" Keep existing sensor tooling.", "") },
         { ...ref, quote: "Role" },
         { ...ref, anchor: { ...ref.anchor, locator: "title" } },
         { ...ref, readAt: "2026-10-17T00:00:00.000Z" },
       ]) {
-        await expect(write(invalid)).rejects.toThrow(IsolationError);
+        if (invalid.quote !== ref.quote) {
+          const error = await write(invalid).catch((error: unknown) => error);
+          expect(error).toMatchObject({
+            name: "RecruitingSourceValidationError",
+            message:
+              'Source "jd" at "text": quote must be exact contiguous text from the original read receipt; copy one unchanged excerpt without omissions or joined passages.',
+          });
+          expect((error as Error).message).not.toContain(invalid.quote);
+          expect((error as Error).message).not.toContain(text);
+        } else {
+          await expect(write(invalid)).rejects.toThrow(IsolationError);
+        }
         expect(await prisma.recruitingRoleRevision.count()).toBe(count);
       }
       await expect(
@@ -642,7 +654,7 @@ describePostgres("recruiting domain (PostgreSQL)", () => {
         { ...nativeInput, sourceRefs: [{ ...ref, quote: "Invented requirement" }] },
         reader,
       ),
-    ).rejects.toThrow(IsolationError);
+    ).rejects.toMatchObject({ name: "RecruitingSourceValidationError" });
     const native = await recruiting.executeRecruitingRoleMutation(
       prisma,
       actor,
@@ -722,9 +734,14 @@ describePostgres("recruiting domain (PostgreSQL)", () => {
       ...roleInput(sourceRef),
       sourceThreadId: f.thread.id,
     });
-    await expect(recruiting.createRecruitingRole(prisma, actor, input(ref))).rejects.toThrow(
-      IsolationError,
-    );
+    const count = await prisma.recruitingRoleRevision.count();
+    await expect(recruiting.createRecruitingRole(prisma, actor, input(ref))).rejects.toMatchObject({
+      name: "RecruitingSourceValidationError",
+      message: expect.stringContaining(
+        `Source ${JSON.stringify(ref.id)} at "blocks[0].text": quote must be exact contiguous text`,
+      ),
+    });
+    expect(await prisma.recruitingRoleRevision.count()).toBe(count);
     await expect(
       recruiting.createRecruitingRole(
         prisma,

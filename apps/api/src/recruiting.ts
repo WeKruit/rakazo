@@ -2,7 +2,11 @@ import { ORPCError } from "@orpc/server";
 import type { Actor } from "@rakazo/contracts";
 import type { PrismaClient, RecruitingRoleMaterialContext } from "@rakazo/db";
 import * as recruiting from "@rakazo/db";
-import { IsolationError, RecruitingConflictError } from "@rakazo/db";
+import {
+  IsolationError,
+  RecruitingConflictError,
+  RecruitingSourceValidationError,
+} from "@rakazo/db";
 
 async function authenticated<T>(operation: () => Promise<T>): Promise<T> {
   try {
@@ -12,6 +16,8 @@ async function authenticated<T>(operation: () => Promise<T>): Promise<T> {
       throw new ORPCError("NOT_FOUND", { message: "Resource not found" });
     if (error instanceof RecruitingConflictError)
       throw new ORPCError("CONFLICT", { message: error.message });
+    if (error instanceof RecruitingSourceValidationError)
+      throw new ORPCError("BAD_REQUEST", { message: error.message });
     if (error instanceof Error && error.name === "ZodError")
       throw new ORPCError("BAD_REQUEST", { message: "Invalid recruiting input" });
     throw error;

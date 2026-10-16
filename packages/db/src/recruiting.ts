@@ -68,6 +68,15 @@ export class RecruitingConflictError extends Error {
   }
 }
 
+export class RecruitingSourceValidationError extends Error {
+  constructor(sourceRefId: string, locator: string) {
+    super(
+      `Source ${JSON.stringify(sourceRefId)} at ${JSON.stringify(locator)}: quote must be exact contiguous text from the original read receipt; copy one unchanged excerpt without omissions or joined passages.`,
+    );
+    this.name = "RecruitingSourceValidationError";
+  }
+}
+
 async function requireThread(tx: Tx, actor: Actor, threadId: string) {
   const thread = scoped(
     actor,
@@ -1490,7 +1499,7 @@ async function validateReadSources(
       if (block?.kind !== "text" || (selection && selection.kind !== "message_text"))
         throw new IsolationError();
       const start = selection?.start ?? block.text.indexOf(source.quote);
-      if (start < 0) throw new IsolationError();
+      if (start < 0) throw new RecruitingSourceValidationError(source.id, source.anchor.locator);
       assessmentSelection(
         block.text,
         start,
@@ -1579,7 +1588,7 @@ async function validateReadSources(
         ? assessmentJsonString(bytes, jsonPath)
         : new TextDecoder("utf-8", { fatal: true }).decode(bytes);
       const start = selection?.start ?? text.indexOf(source.quote);
-      if (start < 0) throw new IsolationError();
+      if (start < 0) throw new RecruitingSourceValidationError(source.id, source.anchor.locator);
       assessmentSelection(text, start, selection?.end ?? start + source.quote.length, source.quote);
     }
   }
