@@ -213,7 +213,12 @@ describe("ordinary native Ask answer provenance", () => {
     expect(answer.runId).toBe("primary-run");
     expect(answer.blocks).toEqual([{ kind: "text", text: "  Paris  " }]);
     expect(f.tx.task.updateMany).toHaveBeenCalledWith(
-      expect.objectContaining({ data: { prompt: "Which city?\nAnswer:   Paris  " } }),
+      expect.objectContaining({
+        data: {
+          prompt:
+            "The user answered the pending question. Continue the existing task from this answer.\nWhich city?\nAnswer:   Paris  ",
+        },
+      }),
     );
     expect(f.tx.event.create).toHaveBeenCalledWith({
       data: expect.objectContaining({
@@ -239,7 +244,11 @@ describe("ordinary native Ask answer provenance", () => {
       { kind: "ask", text: "Which city?", status: "answered", answer },
     ]);
     expect(f.tx.task.updateMany).toHaveBeenCalledWith(
-      expect.objectContaining({ data: { prompt: `Which city?\nAnswer: ${answer}` } }),
+      expect.objectContaining({
+        data: {
+          prompt: `The user answered the pending question. Continue the existing task from this answer.\nWhich city?\nAnswer: ${answer}`,
+        },
+      }),
     );
   });
 
@@ -282,7 +291,7 @@ describe("ordinary native Ask answer provenance", () => {
     expect(f.tx.task.updateMany).toHaveBeenCalledWith(
       expect.objectContaining({
         data: {
-          prompt: `Original instructions\n\nAnswer: first answer  \n \n\nWhich city?\nAnswer: ${answer}`,
+          prompt: `Original instructions\n\nAnswer: first answer  \n \n\nThe user answered the pending question. Continue the existing task from this answer.\nWhich city?\nAnswer: ${answer}`,
         },
       }),
     );
@@ -1430,7 +1439,10 @@ describe("answerRunInput", () => {
     });
     expect(tx.task.updateMany).toHaveBeenCalledWith({
       where: { runs: { some: { id: "run-1" } } },
-      data: { prompt: "Which city?\nAnswer: Selected choice choice-2: Paris" },
+      data: {
+        prompt:
+          "The user answered the pending question. Continue the existing task from this answer.\nWhich city?\nAnswer: Selected choice choice-2: Paris",
+      },
     });
     expect(tx.event.create).toHaveBeenCalledWith(
       expect.objectContaining({
@@ -1507,13 +1519,22 @@ describe("answerRunInput", () => {
       const first = " \r\n  Two people 😀  ";
       const second = "  Italian dishes\n  ";
       const afterFirst = await answerChoice(goal, "Who is eating?", first);
-      expect(afterFirst).toBe(`${goal}\n\nWho is eating?\nAnswer: ${first}`);
+      expect(afterFirst).toBe(
+        `${goal}\n\nThe user answered the pending question. Continue the existing task from this answer.\nWho is eating?\nAnswer: ${first}`,
+      );
       const afterSecond = await answerChoice(afterFirst, "Which cuisine?", second);
       expect(afterSecond).toBe(
-        [goal, `Who is eating?\nAnswer: ${first}`, `Which cuisine?\nAnswer: ${second}`].join(
-          "\n\n",
-        ),
+        [
+          goal,
+          `The user answered the pending question. Continue the existing task from this answer.\nWho is eating?\nAnswer: ${first}`,
+          `The user answered the pending question. Continue the existing task from this answer.\nWhich cuisine?\nAnswer: ${second}`,
+        ].join("\n\n"),
       );
+      expect(
+        afterSecond.split(
+          "The user answered the pending question. Continue the existing task from this answer.",
+        ),
+      ).toHaveLength(3);
       for (const text of [goal, first, second, "Who is eating?", "Which cuisine?"])
         expect(afterSecond.split(text)).toHaveLength(2);
     },
@@ -1596,7 +1617,10 @@ describe("answerRunInput", () => {
     );
     expect(tx.task.updateMany).toHaveBeenCalledWith({
       where: { runs: { some: { id: "run-1" } } },
-      data: { prompt: "Which city?\nAnswer: Toronto" },
+      data: {
+        prompt:
+          "The user answered the pending question. Continue the existing task from this answer.\nWhich city?\nAnswer: Toronto",
+      },
     });
   });
 
@@ -1676,7 +1700,9 @@ describe("answerRunInput", () => {
 
       expect(tx.task.updateMany).toHaveBeenCalledWith({
         where: { runs: { some: { id: "run-1" } } },
-        data: { prompt: `Which token?\nAnswer: Selected choice choice-1: use ${secret}` },
+        data: {
+          prompt: `The user answered the pending question. Continue the existing task from this answer.\nWhich token?\nAnswer: Selected choice choice-1: use ${secret}`,
+        },
       });
       expect(tx.message.create).toHaveBeenCalledWith({
         data: expect.objectContaining({
@@ -1779,7 +1805,10 @@ describe("answerRunInput", () => {
     );
     expect(tx.task.updateMany).toHaveBeenCalledWith({
       where: { runs: { some: { id: "run-1" } } },
-      data: { prompt: "Which city?\nAnswer: Toronto" },
+      data: {
+        prompt:
+          "The user answered the pending question. Continue the existing task from this answer.\nWhich city?\nAnswer: Toronto",
+      },
     });
     expect(tx.message.update).toHaveBeenCalledWith({
       where: { id: "message-1" },
@@ -1862,7 +1891,10 @@ describe("answerRunInput", () => {
 
     expect(tx.task.updateMany).toHaveBeenCalledWith({
       where: { runs: { some: { id: "run-1" } } },
-      data: { prompt: "Which city?\nAnswer: Selected choice choice-2: Seoul" },
+      data: {
+        prompt:
+          "The user answered the pending question. Continue the existing task from this answer.\nWhich city?\nAnswer: Selected choice choice-2: Seoul",
+      },
     });
     expect(tx.message.update).toHaveBeenCalledWith({
       where: { id: "message-1" },
@@ -1928,7 +1960,10 @@ describe("answerWaitingRunWithTextInTransaction", () => {
     ).resolves.toMatchObject({ threadId: "thread-1" });
     expect(tx.task.updateMany).toHaveBeenCalledWith({
       where: { runs: { some: { id: "run-1" } } },
-      data: { prompt: "Which city?\nAnswer: Paris" },
+      data: {
+        prompt:
+          "The user answered the pending question. Continue the existing task from this answer.\nWhich city?\nAnswer: Paris",
+      },
     });
     expect(tx.run.updateMany).toHaveBeenCalledWith(
       expect.objectContaining({

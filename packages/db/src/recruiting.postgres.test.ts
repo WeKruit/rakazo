@@ -1090,7 +1090,7 @@ describePostgres("recruiting domain (PostgreSQL)", () => {
       expect(human.blocks).toEqual([
         { kind: "text", text: kind === "choice" ? "Personal code" : rawAnswer },
       ]);
-      const resumedPrompt = `${originalTask.prompt}\n\n${question.block.text}\nAnswer: ${kind === "choice" ? "Selected choice choice-2: Personal code" : rawAnswer}`;
+      const resumedPrompt = `${originalTask.prompt}\n\nThe user answered the pending question. Continue the existing task from this answer.\n${question.block.text}\nAnswer: ${kind === "choice" ? "Selected choice choice-2: Personal code" : rawAnswer}`;
       expect((await prisma.task.findUniqueOrThrow({ where: { id: f.run.taskId } })).prompt).toBe(
         resumedPrompt,
       );

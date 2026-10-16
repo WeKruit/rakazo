@@ -2928,7 +2928,7 @@ describe("native recruiting assessment effect delivery", () => {
       f.runData.sourceMessageId = original.id;
       f.prisma.task.findUniqueOrThrow.mockResolvedValue({
         id: "task-1",
-        prompt: `${original.blocks[0]!.text}\n\nWhich implementation?\nAnswer: ${answerText}`,
+        prompt: `${original.blocks[0]!.text}\n\nThe user answered the pending question. Continue the existing task from this answer.\nWhich implementation?\nAnswer: ${answerText}`,
       });
       f.prisma.message.findMany.mockResolvedValue([
         answer,

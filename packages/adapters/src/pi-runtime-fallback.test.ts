@@ -292,6 +292,9 @@ it("keeps the original Ask goal in the resumed provider prompt after source dedu
           .map((part) => part.text)
           .join("");
   expect(currentText).toContain(goal);
+  expect(currentText).toContain(
+    "The user answered the pending question. Continue the existing task from this answer.",
+  );
   expect(currentText).toContain(`Answer: ${answer}`);
   expect(JSON.stringify(context.messages).split(goal)).toHaveLength(2);
   expect(JSON.stringify(context.messages)).toContain("Earlier unrelated task");

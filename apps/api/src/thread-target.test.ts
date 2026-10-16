@@ -1129,14 +1129,18 @@ describe("sendThreadMessage", () => {
     });
     expect(tx.task.updateMany).toHaveBeenCalledWith({
       where: { runs: { some: { id: "run-waiting" } } },
-      data: { prompt: `Which city should I use?\nAnswer: ${rawAnswer}` },
+      data: {
+        prompt: `The user answered the pending question. Continue the existing task from this answer.\nWhich city should I use?\nAnswer: ${rawAnswer}`,
+      },
     });
     expect(tx.message.create).toHaveBeenCalledWith({
       data: expect.objectContaining({ blocks: [{ kind: "text", text: rawAnswer }] }),
     });
     expect(tx.task.updateMany).toHaveBeenCalledWith(
       expect.objectContaining({
-        data: { prompt: `Which city should I use?\nAnswer: ${rawAnswer}` },
+        data: {
+          prompt: `The user answered the pending question. Continue the existing task from this answer.\nWhich city should I use?\nAnswer: ${rawAnswer}`,
+        },
       }),
     );
     expect(tx.run.updateMany).toHaveBeenCalledWith(
@@ -1422,7 +1426,9 @@ describe("sendThreadMessage", () => {
     });
     expect(tx.task.updateMany).toHaveBeenCalledWith(
       expect.objectContaining({
-        data: { prompt: `Which city should I use?\nAnswer: ${rawAnswer}` },
+        data: {
+          prompt: `The user answered the pending question. Continue the existing task from this answer.\nWhich city should I use?\nAnswer: ${rawAnswer}`,
+        },
       }),
     );
     expect(tx.run.updateMany).toHaveBeenCalledTimes(2);
@@ -1929,7 +1935,10 @@ describe("sendThreadMessage", () => {
     });
     expect(tx.task.updateMany).toHaveBeenCalledWith({
       where: { runs: { some: { id: "run-routine" } } },
-      data: { prompt: "Which city should I use?\nAnswer: Paris" },
+      data: {
+        prompt:
+          "The user answered the pending question. Continue the existing task from this answer.\nWhich city should I use?\nAnswer: Paris",
+      },
     });
     expect(tx.run.updateMany).toHaveBeenCalledWith(
       expect.objectContaining({
@@ -2049,7 +2058,10 @@ describe("sendThreadMessage", () => {
     });
     expect(tx.task.updateMany).toHaveBeenCalledWith({
       where: { runs: { some: { id: "run-webhook" } } },
-      data: { prompt: "Which city should I use?\nAnswer: Paris" },
+      data: {
+        prompt:
+          "The user answered the pending question. Continue the existing task from this answer.\nWhich city should I use?\nAnswer: Paris",
+      },
     });
     expect(tx.run.updateMany).toHaveBeenCalledWith(
       expect.objectContaining({

@@ -188,7 +188,10 @@ function resumePrompt(
   question: string,
   answer: string,
 ): string {
-  return [run.task?.prompt, `${question}\nAnswer: ${answer}`]
+  return [
+    run.task?.prompt,
+    `The user answered the pending question. Continue the existing task from this answer.\n${question}\nAnswer: ${answer}`,
+  ]
     .filter((part) => part?.trim())
     .join("\n\n");
 }
