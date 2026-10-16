@@ -89,6 +89,7 @@ import {
   ArrowUp,
   Bell,
   Box,
+  BriefcaseBusiness,
   ChevronDown,
   CircleAlert,
   Clock,
@@ -264,6 +265,7 @@ import { ActivityList } from "./ActivityList";
 import type { ContextMenuPosition } from "./BotContextMenu";
 import { CreateGroupForm, GroupSettings, memberName } from "./GroupPanel";
 import { HostComputerPrompt } from "./HostComputerPrompt";
+import { RecruitingPanel } from "./RecruitingPanel";
 import { ResizableSidePanel } from "./ResizableSidePanel";
 import type { RoutineDraftState } from "./RoutineEditor";
 import {
@@ -480,6 +482,7 @@ export function ShellPage() {
   const [attachmentNotice, setAttachmentNotice] = useState<string | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const [panel, setPanelState] = useState<Panel>(null);
+  const [recruitingRefresh, setRecruitingRefresh] = useState(0);
   const [restoredPanelKey, setRestoredPanelKey] = useState<string | null>(null);
   const panelStorageKeyRef = useRef<string | null>(null);
   const observedPanelKey = useRef<string | null>(null);
@@ -847,6 +850,28 @@ export function ShellPage() {
   activeBotId.current = inGroup ? undefined : active?.id;
   const activeGroupId = useRef<string | undefined>(groupId);
   activeGroupId.current = groupId;
+  const invalidateRecruiting = useCallback(
+    (event: ProductEvent) => {
+      const current = snapshotRef.current;
+      if (
+        event.spaceId !== bootstrapMe?.spaceId ||
+        event.threadId !== current?.threadId ||
+        (activeGroupId.current
+          ? current?.groupId !== activeGroupId.current
+          : current?.botId !== activeBotId.current)
+      )
+        return;
+      if (
+        event.type.startsWith("recruiting.") ||
+        event.type === "memory.revised" ||
+        event.type === "agent.tool.completed" ||
+        event.type === "thread.cleared" ||
+        isRunTerminalEvent(event)
+      )
+        setRecruitingRefresh((value) => value + 1);
+    },
+    [bootstrapMe?.spaceId],
+  );
   const screenRequest = useRef(0);
   const contextBot =
     botMenu?.kind === "bot" ? bots.find((bot) => bot.id === botMenu.id) : undefined;
@@ -1409,6 +1434,7 @@ export function ShellPage() {
       applyEvent: (event) =>
         applyThreadEvent(event, commitSnapshot, commitComputer, snapshotRef, computerRef),
       onEvent: (event, initial) => {
+        invalidateRecruiting(event);
         const currentBot = botsRef.current.find((bot) => bot.id === active.id);
         notifyBrowserForEvent(
           event,
@@ -1458,7 +1484,7 @@ export function ShellPage() {
     return () => {
       abort.abort();
     };
-  }, [active?.id, markBotReadIfVisible, notifyBrowserForEvent]);
+  }, [active?.id, markBotReadIfVisible, notifyBrowserForEvent, invalidateRecruiting]);
 
   useEffect(() => {
     if (!groupId || !activeGroup) return;
@@ -1519,6 +1545,7 @@ export function ShellPage() {
           computerRef,
         ),
       onEvent: (event, initial) => {
+        invalidateRecruiting(event);
         const eventBot = botsRef.current.find((bot) => bot.id === event.botId);
         notifyBrowserForEvent(
           event,
@@ -1551,7 +1578,7 @@ export function ShellPage() {
       document.removeEventListener("visibilitychange", markVisibleGroupRead);
       abort.abort();
     };
-  }, [activeGroup?.id, groupId, notifyBrowserForEvent]);
+  }, [activeGroup?.id, groupId, notifyBrowserForEvent, invalidateRecruiting]);
 
   const sidebarGroups = useMemo(() => {
     const sidebarSpaces =
@@ -3665,6 +3692,24 @@ export function ShellPage() {
             </button>
           </div>
           <div className="flex items-center gap-1">
+            {activeSnapshot?.threadId ? (
+              <button
+                type="button"
+                aria-label={t`Recruiting`}
+                title={t`Recruiting`}
+                onClick={() => setPanel(panel === "recruiting" ? null : "recruiting")}
+                aria-pressed={panel === "recruiting"}
+                data-active={panel === "recruiting" ? "" : undefined}
+                className="app-no-drag grid h-[30px] w-[34px] place-items-center rounded-[9px] hover:bg-accent data-active:bg-accent"
+              >
+                <BriefcaseBusiness
+                  size={18}
+                  strokeWidth={1.6}
+                  className="text-foreground/75"
+                  aria-hidden
+                />
+              </button>
+            ) : null}
             {!inGroup && active ? (
               <button
                 type="button"
@@ -3818,7 +3863,8 @@ export function ShellPage() {
             {panel !== "routine" &&
             panel !== "create" &&
             panel !== "create-group" &&
-            panel !== "group-settings" ? (
+            panel !== "group-settings" &&
+            panel !== "recruiting" ? (
               <div className="mb-4 flex items-center justify-between">
                 <span className="text-[13.5px] text-muted-foreground">
                   {panel === "settings" ? (
@@ -3962,6 +4008,15 @@ export function ShellPage() {
                   );
                 })}
               </div>
+            ) : null}
+            {panel === "recruiting" && activeSnapshot?.threadId ? (
+              <RecruitingPanel
+                key={`${bootstrapMe?.spaceId}:${activeSnapshot.threadId}`}
+                threadId={activeSnapshot.threadId}
+                botId={inGroup ? undefined : active?.id}
+                refreshSignal={recruitingRefresh}
+                onClose={() => setPanel(null)}
+              />
             ) : null}
             {panel === "create-group" ? (
               <CreateGroupForm
