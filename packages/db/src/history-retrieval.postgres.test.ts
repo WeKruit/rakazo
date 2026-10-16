@@ -21,21 +21,23 @@ postgres("history retrieval (PostgreSQL)", () => {
   beforeAll(async () => {
     pool = new Pool({ connectionString: process.env.DATABASE_URL, max: 1 });
     prisma = new PrismaClient({ adapter: new PrismaPg(pool, { schema: "pg_temp" }) });
+    // Match native TIMESTAMP(3) storage while exercising a non-UTC session.
+    await pool.query("SET TIME ZONE 'America/Los_Angeles'");
     await pool.query(`
-      CREATE TEMP TABLE bots (id text PRIMARY KEY, "spaceId" text, "userId" text, "archivedAt" timestamptz);
+      CREATE TEMP TABLE bots (id text PRIMARY KEY, "spaceId" text, "userId" text, "archivedAt" timestamp(3));
       CREATE TEMP TABLE threads (id text PRIMARY KEY, "spaceId" text, "userId" text, "botId" text, "groupId" text);
-      CREATE TEMP TABLE chat_groups (id text PRIMARY KEY, "spaceId" text, "userId" text, "archivedAt" timestamptz);
+      CREATE TEMP TABLE chat_groups (id text PRIMARY KEY, "spaceId" text, "userId" text, "archivedAt" timestamp(3));
       CREATE TEMP TABLE chat_group_members ("groupId" text, "botId" text);
       CREATE TEMP TABLE messages (id text PRIMARY KEY, "threadId" text, seq integer, role text, "runId" text,
-        "replyToMessageId" text, "createdAt" timestamptz, blocks jsonb);
+        "replyToMessageId" text, "createdAt" timestamp(3), blocks jsonb);
       CREATE TEMP TABLE runs (id text PRIMARY KEY, "spaceId" text, "userId" text, "threadId" text, "botId" text,
-        "sourceMessageId" text, status text, "createdAt" timestamptz, "completedAt" timestamptz);
+        "sourceMessageId" text, status text, "createdAt" timestamp(3), "completedAt" timestamp(3));
       CREATE TEMP TABLE artifacts (id text PRIMARY KEY, "spaceId" text, "userId" text, "botId" text, "groupId" text,
-        "runId" text, name text, "mimeType" text, size integer, "createdAt" timestamptz);
+        "runId" text, name text, "mimeType" text, size integer, "createdAt" timestamp(3));
       INSERT INTO bots VALUES ('synthetic-bot','synthetic-space','synthetic-user',NULL);
       INSERT INTO threads VALUES ('synthetic-thread','synthetic-space','synthetic-user','synthetic-bot');
       INSERT INTO messages SELECT 'm-' || n, 'synthetic-thread', n, 'user', NULL, NULL,
-        '2026-01-01'::timestamptz + n * interval '1 minute',
+        '2026-01-01'::timestamp(3) + n * interval '1 minute',
         jsonb_build_array(jsonb_build_object('kind','text','text', CASE WHEN n = 100 THEN 'exports use batching' ELSE 'filler exchange ' || n END))
         FROM generate_series(1,10000) n;
       CREATE INDEX synthetic_history_fts ON messages USING GIN (to_tsvector('simple',jsonb_path_query_array(blocks,
@@ -75,7 +77,7 @@ postgres("history retrieval (PostgreSQL)", () => {
   });
   it("keeps query-specific continuation available after a narrower empty query in the 10k corpus", async () => {
     await pool.query(`INSERT INTO messages SELECT 'continuation-' || n, 'synthetic-thread', n, 'user', NULL, NULL,
-      '2026-01-01T00:00:00Z'::timestamptz,
+      '2026-01-01T00:00:00Z'::timestamp(3),
       jsonb_build_array(jsonb_build_object('kind','text','text',CASE WHEN n = 13001
         THEN 'continuation original ORBIT-731' ELSE 'continuation broad topic' END))
       FROM generate_series(13001,13008) n`);
