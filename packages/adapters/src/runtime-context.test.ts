@@ -93,7 +93,7 @@ describe("runtime context policy", () => {
     expect(prepared.messages.at(-1)).toEqual(context.messages.at(-1));
     expect(policy.getDecision()!.estimatedInputTokens).toBeLessThanOrEqual(8192 - 1024);
   });
-  it.each(["skill_read", "read_memory", "recruiting_role"])(
+  it.each(["skill_read", "read_memory", "recruiting_role", "recruiting_research"])(
     "keeps an earlier %s result verbatim while shortening other old tool evidence",
     (toolName) => {
       const { request, context } = fixture(2);
@@ -146,7 +146,7 @@ describe("runtime context policy", () => {
     },
   );
 
-  it.each(["read_memory", "recruiting_role"])(
+  it.each(["read_memory", "recruiting_role", "recruiting_research"])(
     "does not silently shorten required %s data to meet a small context window",
     (toolName) => {
       const { request, context } = fixture(0);
@@ -172,37 +172,105 @@ describe("runtime context policy", () => {
       ).toThrow(ContextBudgetError);
     },
   );
-  it("retains the latest adopted role after later tool and steering exchanges", () => {
-    const { request, context } = fixture(0);
-    const body = JSON.stringify({
-      roleContext: "Current role revision 4",
-      contextArtifact: { artifactId: "context-4" },
-    });
-    context.messages.push(
-      {
-        role: "assistant",
-        content: [{ type: "toolCall", id: "role", name: "recruiting_role", arguments: {} }],
-        timestamp: 101,
-      } as unknown as Message,
-      {
-        role: "toolResult",
-        toolCallId: "role",
-        toolName: "recruiting_role",
-        content: [{ type: "text", text: body }],
-        isError: false,
-        timestamp: 102,
-      } as Message,
-    );
-    for (let i = 0; i < 12; i++)
-      context.messages.push({ role: "user", content: `Steering ${i}`, timestamp: 200 + i });
-    const prepared = createRuntimeContextPolicy({
-      ...request,
-      contextStrategy: "retrieval",
-    }).prepareContext(context, model);
-    expect(
-      prepared.messages.find((item) => item.role === "toolResult" && item.toolCallId === "role"),
-    ).toEqual(context.messages[2]);
-  });
+  it.each(["recruiting_role", "recruiting_research"])(
+    "retains the latest %s adopted role after later tool and steering exchanges",
+    (toolName) => {
+      const { request, context } = fixture(0);
+      const body = JSON.stringify({
+        roleContext: "Current role revision 4",
+        contextArtifact: { artifactId: "context-4" },
+      });
+      context.messages.push(
+        {
+          role: "assistant",
+          content: [{ type: "toolCall", id: "role", name: toolName, arguments: {} }],
+          timestamp: 101,
+        } as unknown as Message,
+        {
+          role: "toolResult",
+          toolCallId: "role",
+          toolName,
+          content: [{ type: "text", text: body }],
+          isError: false,
+          timestamp: 102,
+        } as Message,
+      );
+      for (let i = 0; i < 12; i++)
+        context.messages.push({ role: "user", content: `Steering ${i}`, timestamp: 200 + i });
+      const prepared = createRuntimeContextPolicy({
+        ...request,
+        contextStrategy: "retrieval",
+      }).prepareContext(context, model);
+      expect(
+        prepared.messages.find((item) => item.role === "toolResult" && item.toolCallId === "role"),
+      ).toEqual(context.messages[2]);
+    },
+  );
+
+  it.each([
+    ["recruiting_role", "recruiting_research"],
+    ["recruiting_research", "recruiting_role"],
+  ])(
+    "protects the latest adoption from %s to %s under pressure after cached results and steering",
+    (olderTool, latestTool) => {
+      const { request, context } = fixture(0);
+      const append = (id: string, name: string, body: object) => {
+        context.messages.push(
+          {
+            role: "assistant",
+            content: [{ type: "toolCall", id, name, arguments: {} }],
+            timestamp: 101,
+          } as unknown as Message,
+          {
+            role: "toolResult",
+            toolCallId: id,
+            toolName: name,
+            content: [{ type: "text", text: JSON.stringify(body) }],
+            isError: false,
+            timestamp: 102,
+          } as Message,
+        );
+      };
+      const older = {
+        roleContext: "Superseded role revision 4. ".repeat(600),
+        contextArtifact: { artifactId: "context-4" },
+      };
+      const latest = {
+        roleContext: "Exact current role revision 5. ".repeat(600),
+        contextArtifact: { artifactId: "context-5" },
+      };
+      append("older-role", olderTool, older);
+      append("latest-role", latestTool, latest);
+      append("cached-prepare", "recruiting_research", {
+        status: "prepared",
+        task: { id: "task" },
+        action: { id: "action" },
+      });
+      const unrelated = { roleContext: "Untrusted provider claims. ".repeat(1000) };
+      append("provider", "mcp__other__research", unrelated);
+      for (let i = 0; i < 12; i++)
+        context.messages.push({ role: "user", content: `Later steering ${i}`, timestamp: 200 + i });
+      const prepared = createRuntimeContextPolicy({
+        ...request,
+        contextStrategy: "retrieval",
+      }).prepareContext(context, { ...model, contextWindow: 24_000, maxTokens: 1024 });
+      const latestResult = prepared.messages.find(
+        (message) => message.role === "toolResult" && message.toolCallId === "latest-role",
+      );
+      expect(latestResult).toEqual(context.messages[4]);
+      expect(JSON.stringify(latestResult)).toContain(latest.roleContext);
+      expect(
+        prepared.messages.some(
+          (message) => message.role === "toolResult" && message.toolCallId === "older-role",
+        ),
+      ).toBe(false);
+      const unrelatedResult = prepared.messages.find(
+        (message) => message.role === "toolResult" && message.toolCallId === "provider",
+      );
+      expect(JSON.stringify(unrelatedResult) ?? "").not.toContain(unrelated.roleContext);
+      expect(prepared.messages.at(-1)).toEqual(context.messages.at(-1));
+    },
+  );
   it("leaves the baseline provider payload untouched", () => {
     const { request, context } = fixture();
     const policy = createRuntimeContextPolicy({ ...request, contextStrategy: "current" });

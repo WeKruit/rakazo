@@ -23,6 +23,7 @@ export const VERBATIM_TOOL_RESULTS: ReadonlySet<string> = new Set([
   "skill_read",
   "read_memory",
   "recruiting_role",
+  "recruiting_research",
 ]);
 // History reads are exact evidence and keep their own offset-aware shortening elsewhere.
 const UNSHORTENED_TOOL_RESULTS = new Set([
@@ -347,7 +348,11 @@ export function createRuntimeContextPolicy(
         protectedIndexes.push(messages.indexOf(summary));
       }
       const currentRoleIndex = messages.findLastIndex((message) => {
-        if (message.role !== "toolResult" || message.toolName !== "recruiting_role") return false;
+        if (
+          message.role !== "toolResult" ||
+          !["recruiting_role", "recruiting_research"].includes(message.toolName)
+        )
+          return false;
         try {
           return typeof JSON.parse(text(message))?.roleContext === "string";
         } catch {

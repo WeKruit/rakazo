@@ -27,6 +27,7 @@ export const BUILTIN_TOOL_NAMES = [
   "read_memory",
   "save_shared_memory",
   "recruiting_role",
+  "recruiting_research",
   "recruiting_feedback",
   "web_search",
   "web_fetch",

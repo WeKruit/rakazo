@@ -75,6 +75,103 @@ const action = {
 };
 
 describe("recruiting contracts", () => {
+  const researchRound = {
+    expectedRoleRevision: 1,
+    clientNonce: "round-nonce",
+    instructions: "  Preserve every current qualification.\r\nUse supplied evidence.\n",
+    output: "  Include original source cells and evidence gaps.\n",
+    recallScope: "  This round only: the example region.\r\n",
+    intent: { basis: "direct", quote: "Find candidates for this role" },
+  };
+  const researchInputs = [
+    { ...researchRound, operation: "prepare", mcpServerId: "research-server" },
+    { ...researchRound, operation: "continue", taskId: "local-research-task" },
+    { operation: "start", actionId: "prepared-action" },
+    { operation: "status", taskId: "local-research-task" },
+    { operation: "rows", taskId: "local-research-task", limit: 7, cursor: "  opaque+/=\r\n " },
+  ];
+
+  it.each(researchInputs)(
+    "accepts the closed native research $operation input without changing its bytes",
+    (input) => {
+      expect(contracts.RecruitingResearchToolInputSchema?.parse(input)).toEqual(input);
+      for (const field of [
+        "actor",
+        "ownerId",
+        "spaceId",
+        "userId",
+        "botId",
+        "runId",
+        "threadId",
+        "sourceMessageId",
+        "roleId",
+        "roleRevisionId",
+        "sourceRefs",
+        "effectId",
+        "requestArtifact",
+        "contextArtifact",
+        "receiptArtifact",
+        "outputArtifacts",
+        "providerTaskId",
+        "task_id",
+        "prompt",
+        "message",
+        "arguments",
+      ]) {
+        expect(
+          contracts.RecruitingResearchToolInputSchema?.safeParse({ ...input, [field]: "forged" })
+            .success,
+        ).toBe(false);
+      }
+    },
+  );
+
+  it("rejects invalid research identifiers, revisions and blank round text", () => {
+    const prepare = researchInputs[0]!;
+    for (const invalid of [
+      { mcpServerId: "" },
+      { mcpServerId: "  " },
+      { clientNonce: "" },
+      { clientNonce: "\n" },
+      { expectedRoleRevision: 0 },
+      { expectedRoleRevision: -1 },
+      { expectedRoleRevision: 1.5 },
+      { expectedRoleRevision: "1" },
+      { instructions: " \r\n\t" },
+      { output: "" },
+      { output: " \n" },
+      { recallScope: " \r\n" },
+      { instructions: undefined },
+      { output: undefined },
+      { intent: { basis: "assistant", quote: "search" } },
+      { intent: { basis: "direct", quote: " " } },
+      { intent: { basis: "direct", quote: "search", actor: "forged" } },
+    ]) {
+      expect(
+        contracts.RecruitingResearchToolInputSchema?.safeParse({ ...prepare, ...invalid }).success,
+      ).toBe(false);
+    }
+    expect(
+      contracts.RecruitingResearchToolInputSchema?.parse({ ...prepare, recallScope: null }),
+    ).toEqual({ ...prepare, recallScope: null });
+    for (const input of [
+      { ...researchInputs[1], taskId: " " },
+      { operation: "start", actionId: "" },
+      { operation: "status", taskId: "\n" },
+      { operation: "rows", taskId: "" },
+      { operation: "rows", taskId: "task", limit: 0 },
+      { operation: "rows", taskId: "task", limit: 1.5 },
+      { operation: "rows", taskId: "task", cursor: "" },
+      { ...prepare, taskId: "unexpected-task" },
+      { ...researchInputs[1], mcpServerId: "unexpected-server" },
+      { operation: "start", actionId: "action", ...researchRound },
+      { operation: "status", taskId: "task", limit: 1 },
+      { operation: "rows", taskId: "task", actionId: "action" },
+    ]) {
+      expect(contracts.RecruitingResearchToolInputSchema?.safeParse(input).success).toBe(false);
+    }
+  });
+
   it("closes native ordinary Ask answer provenance to the exact card, block and human message", () => {
     const payload = {
       messageId: "ask-card",

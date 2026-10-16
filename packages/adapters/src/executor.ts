@@ -56,6 +56,7 @@ import {
   isAttachmentImageMimeType,
   OPENAI_COMPATIBLE_PROVIDER_ID,
   RecruitingPreferenceFeedbackSchema,
+  RecruitingResearchToolInputSchema,
 } from "@rakazo/contracts";
 import type { ActionApprovalRule, ToolCallStreak } from "@rakazo/core";
 import {
@@ -114,6 +115,7 @@ import type {
 } from "@rakazo/db";
 import {
   appendEventInTransaction,
+  claimRecruitingResearchAction,
   createSpaceForMember,
   createThreadMessageInTransaction,
   effectiveMemoryScope,
@@ -127,6 +129,7 @@ import {
   RecruitingConflictError,
   readHistory,
   recordUsage,
+  recruitingResearchSnapshot,
   retireModelCredential,
   SpaceLimitError,
   searchHistory,
@@ -322,7 +325,14 @@ import {
   executeRecruitingFeedback,
   RecruitingFeedbackValidationError,
 } from "./recruiting-feedback.js";
-import { executeRecruitingRoleTool } from "./recruiting-tools.js";
+import type { RecruitingResearchCallAdmission } from "./recruiting-tools.js";
+import {
+  admitRecruitingResearchCall,
+  completeRecruitingResearchCall,
+  executeRecruitingRoleTool,
+  prepareRecruitingResearchTool,
+  resolveRecruitingResearchTool,
+} from "./recruiting-tools.js";
 import type { RemoteTransportDependencies } from "./remote-mcp.js";
 import { assertSafeRemoteUrl } from "./remote-mcp.js";
 import { loadReplyContext, messageToAgentHistoryText } from "./reply-context.js";
@@ -3650,6 +3660,7 @@ export function createRunExecutor(deps: ExecutorDeps) {
           reason: string,
           placement: "instructions" | "tool_result" | "steering",
           sourceMessageId = recruitingSourceMessageId,
+          recallScope?: string | null,
         ) => {
           if (!deps.artifacts) throw new Error("Recruiting context requires artifact storage");
           if (reason !== "run") await refreshMemoryContext();
@@ -3662,6 +3673,7 @@ export function createRunExecutor(deps: ExecutorDeps) {
               reason,
               placement,
               sourceMessageId,
+              recallScope,
               redact: (text) => redactSecrets(text, runSecrets),
             },
           );
@@ -3674,17 +3686,20 @@ export function createRunExecutor(deps: ExecutorDeps) {
           if (source?.anchor.kind !== "message") return;
           const nextId = source.anchor.messageId;
           if (nextId === recruitingSourceMessageId) return;
-          if (recruitingSourceMessageId && recruitingSourceMessageId !== run.sourceMessageId) {
+          {
             const messages = await deps.prisma.message.findMany({
               where: {
                 threadId: thread.id,
-                id: { in: [recruitingSourceMessageId, nextId] },
+                id: {
+                  in: [nextId, ...(recruitingSourceMessageId ? [recruitingSourceMessageId] : [])],
+                },
               },
               select: { id: true, seq: true },
             });
             const current = messages.find((message) => message.id === recruitingSourceMessageId);
             const next = messages.find((message) => message.id === nextId);
-            if (!current || !next || next.seq <= current.seq) return;
+            if (!next || (recruitingSourceMessageId && (!current || next.seq <= current.seq)))
+              return;
           }
           recruitingSourceMessageId = nextId;
         };
@@ -4197,12 +4212,91 @@ export function createRunExecutor(deps: ExecutorDeps) {
           if (IMAGE_RETURNING_COMPUTER_TOOLS.has(name) && !acceptsImages) {
             return { error: MODEL_CANNOT_SEE_MESSAGE };
           }
+          const researchInput =
+            name === "recruiting_research"
+              ? RecruitingResearchToolInputSchema.safeParse(args)
+              : undefined;
+          if (researchInput && !researchInput.success)
+            return { error: "Invalid recruiting research request" };
+          const researchActor = {
+            actor: {
+              spaceId: run.spaceId,
+              userId: run.userId,
+              email: "",
+              isDeploymentOwner: false,
+            },
+            runId,
+            sourceMessageId: recruitingSourceMessageId,
+          };
+          const researchDispatchActor = {
+            ...researchActor,
+            leaseOwner: workerId,
+            leaseFence: fence,
+          };
+          let researchSelection:
+            | Awaited<ReturnType<typeof resolveRecruitingResearchTool>>
+            | undefined;
+          let resolvedTool: ConnectorTool | undefined;
           let connectorCall: ConnectorCall = {
             tool: name,
             args,
             executionId,
             route: connectorTools.get(name)?.route,
           };
+          if (
+            researchInput?.success &&
+            !["prepare", "continue"].includes(researchInput.data.operation)
+          ) {
+            if (!deps.artifacts) return { error: "Recruiting research requires artifact storage" };
+            try {
+              const input = researchInput.data;
+              if (input.operation === "prepare" || input.operation === "continue")
+                throw new IsolationError();
+              researchSelection = await resolveRecruitingResearchTool(
+                { prisma: deps.prisma, artifacts: deps.artifacts },
+                researchActor,
+                input,
+                context,
+              );
+              if (researchSelection.recoveryEffectKind) {
+                name = researchSelection.recoveryEffectKind;
+                args = researchSelection.args;
+                connectorCall = { tool: name, args, route: researchSelection.route, executionId };
+              } else {
+                if (!deps.connector?.resolveCall)
+                  throw new Error("Recruiting research requires native MCP");
+                const resolved = await deps.connector.resolveCall(
+                  {
+                    tool: catalogExecuteToolName("mcp"),
+                    route: { connectorId: "mcp", toolName: CATALOG_EXECUTE },
+                    args: {
+                      id: catalogIdForRoute(researchSelection.route),
+                      arguments: researchSelection.args,
+                    },
+                    executionId,
+                  },
+                  context,
+                );
+                const resolvedRoute = resolved?.call.route;
+                if (
+                  !resolved ||
+                  !resolvedRoute?.resourceId ||
+                  !approvalRoutesMatch(
+                    { ...resolvedRoute, resourceId: resolvedRoute.resourceId },
+                    researchSelection.route,
+                  )
+                )
+                  throw new IsolationError();
+                if (BUILTIN_AGENT_TOOL_NAMES.has(resolved.tool.name)) throw new IsolationError();
+                name = resolved.tool.name;
+                args = resolved.call.args;
+                connectorCall = resolved.call;
+                resolvedTool = resolved.tool;
+              }
+            } catch (error) {
+              return { error: sanitizeConnectorError(error, runSecrets) };
+            }
+          }
           const onCatalogExecuteRoute = Boolean(
             connectorCall.route &&
               !connectorCall.route.resourceId &&
@@ -4217,14 +4311,13 @@ export function createRunExecutor(deps: ExecutorDeps) {
           if (approvedReplay.error) return { error: approvedReplay.error };
           if (approvedReplay.args) connectorCall.args = approvedReplay.args;
           let catalogRemapped = false;
-          let resolvedTool: ConnectorTool | undefined;
           if (name.startsWith("cloud_agent_") && !validCloudAgentArgs(name, args)) {
             return {
               error: "Invalid cloud agent arguments. Raw environment variables are not supported.",
             };
           }
           let effectRequest: unknown = args;
-          if (connectorCall.route && deps.connector?.resolveCall) {
+          if (!researchSelection && connectorCall.route && deps.connector?.resolveCall) {
             try {
               const resolved = await deps.connector.resolveCall(connectorCall, context);
               if (resolved) {
@@ -4376,6 +4469,63 @@ export function createRunExecutor(deps: ExecutorDeps) {
               }
             }
           }
+          let researchAdmission: RecruitingResearchCallAdmission | undefined;
+          if (connectorCall.route?.connectorId === "mcp") {
+            try {
+              const liveSchema = (resolvedTool ?? connectorTools.get(name))?.inputSchema;
+              if (liveSchema && !researchSelection?.recoveryEffectKind)
+                assertConnectorToolArgs(liveSchema, args);
+              researchAdmission = await admitRecruitingResearchCall(
+                { prisma: deps.prisma, artifacts: deps.artifacts },
+                researchDispatchActor,
+                { ...connectorCall, tool: name, args },
+                context,
+                {
+                  actionId: researchSelection?.actionId,
+                  taskId: researchSelection?.taskId,
+                  frozenRequest: liveRoute
+                    ? boundDirectApprovalRequest(liveRoute, args, CATALOG_APPROVAL_TOOL)
+                    : effectRequest,
+                },
+              );
+              if (researchSelection && !researchAdmission) throw new IsolationError();
+            } catch (error) {
+              return { error: sanitizeConnectorError(error, runSecrets) };
+            }
+          }
+          const researchMutation =
+            researchAdmission?.kind === "mutation" ? researchAdmission : undefined;
+          if (researchAdmission && disabledBuiltinTools.has("recruiting_research"))
+            return { error: "This tool is disabled for this bot." };
+          const researchResult = async (
+            admission: RecruitingResearchCallAdmission,
+            result: unknown,
+            receipt?: { id: string; request: unknown },
+          ) => {
+            if (!deps.artifacts) throw new Error("Recruiting research requires artifact storage");
+            return redactConnectorPayload(
+              await completeRecruitingResearchCall(
+                { prisma: deps.prisma, artifacts: deps.artifacts },
+                researchActor,
+                admission,
+                result,
+                context,
+                receipt ? { effectId: receipt.id, request: receipt.request } : undefined,
+              ),
+              runSecrets,
+            );
+          };
+          if (researchMutation && researchMutation.status !== "ready") {
+            if (researchMutation.status === "completed")
+              return researchResult(researchMutation, researchMutation.effect?.result);
+            return {
+              status: researchMutation.status,
+              ...recruitingResearchSnapshot(researchMutation.task, researchMutation.action),
+              ownerRunId: researchMutation.ownerRunId,
+              automaticRetry: false,
+            };
+          }
+          if (researchMutation?.effect) effectRequest = researchMutation.effect.request;
           const viaConnector = !BUILTIN_AGENT_TOOL_NAMES.has(name);
           const memoryWrite = ["remember", "save_shared_memory", "save_memory"].includes(name);
           const currentMemoryThread = memoryWrite
@@ -4404,7 +4554,9 @@ export function createRunExecutor(deps: ExecutorDeps) {
             ? recruitingPreference.scope === "user"
               ? "save_shared_memory"
               : "remember"
-            : name;
+            : researchAdmission
+              ? "recruiting_research"
+              : name;
           if (disabledBuiltinTools.has(policyToolName))
             return { error: "This tool is disabled for this bot." };
           // Declared effect of the operation this call dispatches (installed API method and
@@ -4413,15 +4565,22 @@ export function createRunExecutor(deps: ExecutorDeps) {
           const declaredReadOnly = viaConnector
             ? (resolvedTool ?? connectorTools.get(name))?.readOnly
             : undefined;
-          const requiresUnattendedApproval = unattendedTriggerToolRequiresApproval(
-            run.trigger,
-            policyToolName,
-            viaConnector,
-            declaredReadOnly,
-          );
+          const requiresUnattendedApproval =
+            !researchMutation &&
+            unattendedTriggerToolRequiresApproval(
+              run.trigger,
+              researchAdmission?.kind === "read" ? name : policyToolName,
+              viaConnector,
+              declaredReadOnly,
+            );
           const requiresApprovalByDefault =
-            requiresUnattendedApproval ||
-            toolRequiresApproval(policyToolName, viaConnector, declaredReadOnly);
+            !researchMutation &&
+            (requiresUnattendedApproval ||
+              toolRequiresApproval(
+                researchAdmission?.kind === "read" ? name : policyToolName,
+                viaConnector,
+                declaredReadOnly,
+              ));
           const requiresMandatoryApproval =
             requiresUnattendedApproval || toolRequiresExplicitApproval(policyToolName);
           const connectorKind = connectorKindFromToolName(
@@ -4510,21 +4669,24 @@ export function createRunExecutor(deps: ExecutorDeps) {
               ? 0
               : nextMutatingEffectOccurrence(replayEffectToolName, args);
           const effectKey =
-            usesApprovalKey && occurrence === 0
+            researchMutation?.effect?.idempotencyKey ??
+            (usesApprovalKey && occurrence === 0
               ? approvalEffectKey(runId, replayEffectToolName, args)
-              : toolEffectIdempotencyKey(runId, replayEffectToolName, args, occurrence);
+              : toolEffectIdempotencyKey(runId, replayEffectToolName, args, occurrence));
           // Connector read-only hints must not bypass approval, review, or replay decisions.
-          const applied = READ_ONLY_AGENT_TOOLS.has(name)
-            ? undefined
-            : await recordEffect(
-                deps,
-                run,
-                replayEffectToolName,
-                effectKey,
-                effectRequest,
-                executionId,
-                consumedEffectIds,
-              );
+          const applied = researchMutation?.effect
+            ? { duplicate: true, effect: researchMutation.effect }
+            : READ_ONLY_AGENT_TOOLS.has(name)
+              ? undefined
+              : await recordEffect(
+                  deps,
+                  run,
+                  replayEffectToolName,
+                  effectKey,
+                  effectRequest,
+                  executionId,
+                  consumedEffectIds,
+                );
 
           const runAutoReview = async () => {
             if (!injectedReview && !checker) return;
@@ -4687,7 +4849,17 @@ export function createRunExecutor(deps: ExecutorDeps) {
             from: "approved" | "intended",
           ): Promise<unknown | undefined> => {
             const claim = from === "approved" ? claimApprovedEffect : claimIntendedEffect;
-            if (await claim(deps.prisma, applied!.effect.id)) {
+            const claimed = researchMutation
+              ? await claimRecruitingResearchAction(deps.prisma, researchActor.actor, {
+                  runId,
+                  leaseOwner: workerId,
+                  leaseFence: fence,
+                  actionId: researchMutation.action.id,
+                  effectId: applied!.effect.id,
+                  from,
+                })
+              : await claim(deps.prisma, applied!.effect.id);
+            if (claimed) {
               claimedEffect = true;
               return undefined;
             }
@@ -4697,6 +4869,8 @@ export function createRunExecutor(deps: ExecutorDeps) {
             if (current) {
               const retryGate = resolveDuplicateEffectGate(current, name);
               if (retryGate.action === "return") {
+                if (researchAdmission && current.status === "completed")
+                  return researchResult(researchAdmission, current.result, current);
                 if (
                   name === "recruiting_role" &&
                   retryGate.result &&
@@ -4719,9 +4893,15 @@ export function createRunExecutor(deps: ExecutorDeps) {
                 return retryGate.result;
               }
               if (retryGate.action === "uncertain") {
+                if (researchMutation) return { status: "unknown", automaticRetry: false };
                 return settleUncertainEffect(deps.prisma, applied!.effect.id, name);
               }
             }
+            if (researchMutation)
+              return {
+                error: "Research action changed before dispatch; read its saved state.",
+                automaticRetry: false,
+              };
             throw uncertainEffectError(name);
           };
 
@@ -4764,6 +4944,8 @@ export function createRunExecutor(deps: ExecutorDeps) {
           if (applied?.duplicate) {
             const gate = resolveDuplicateEffectGate(applied.effect, name);
             if (gate.action === "return") {
+              if (researchAdmission && applied.effect.status === "completed")
+                return researchResult(researchAdmission, applied.effect.result, applied.effect);
               if (name === "request_secret") {
                 const replacementSecret = await deps.prisma.secret.findFirst({
                   where: {
@@ -4835,6 +5017,7 @@ export function createRunExecutor(deps: ExecutorDeps) {
                 return requestApproval();
               }
             } else if (gate.action === "uncertain") {
+              if (researchMutation) return { status: "unknown", automaticRetry: false };
               return settleUncertainEffect(deps.prisma, applied.effect.id, gate.toolName);
             } else if (gate.action === "execute") {
               const early = await claimOrReturn("approved");
@@ -5451,6 +5634,41 @@ export function createRunExecutor(deps: ExecutorDeps) {
                 (error instanceof Error && error.name === "ZodError")
               )
                 return finish({ error: sanitizeConnectorError(error, runSecrets) });
+              throw error;
+            }
+          }
+          if (name === "recruiting_research") {
+            if (
+              !deps.artifacts ||
+              !researchInput?.success ||
+              (researchInput.data.operation !== "prepare" &&
+                researchInput.data.operation !== "continue")
+            )
+              return finish({
+                error: "Recruiting research requires a valid preparation and artifact storage",
+              });
+            if (applied && !claimedEffect) {
+              const early = await claimOrReturn("intended");
+              if (early !== undefined) return early;
+            }
+            try {
+              const result = await prepareRecruitingResearchTool(
+                { prisma: deps.prisma, artifacts: deps.artifacts },
+                researchActor,
+                researchInput.data,
+                context,
+                (sourceId, recallScope) =>
+                  adoptRecruitingContext("research_prepare", "tool_result", sourceId, recallScope),
+              );
+              if ("roleContext" in result) await retainRecruitingSource(result.source);
+              return finish(redactConnectorPayload(result, runSecrets));
+            } catch (error) {
+              if (error instanceof IsolationError)
+                return finish({ error: "Recruiting research or source is unavailable" });
+              if (error instanceof RecruitingConflictError)
+                return finish({ error: error.message, code: "CONFLICT" });
+              if (error instanceof Error && error.name === "ZodError")
+                return finish({ error: "Invalid recruiting research request" });
               throw error;
             }
           }
@@ -6640,6 +6858,10 @@ export function createRunExecutor(deps: ExecutorDeps) {
             return archived;
           }
           if (deps.connector) {
+            if (researchMutation && !claimedEffect) {
+              const early = await claimOrReturn("intended");
+              if (early !== undefined) return early;
+            }
             let result: unknown = { error: `unknown tool ${name}` };
             for await (const event of deps.connector.execute(
               { ...connectorCall, tool: name, args, executionId: effectKey },
@@ -6672,6 +6894,11 @@ export function createRunExecutor(deps: ExecutorDeps) {
                   });
                 }
               }
+            }
+            if (researchAdmission) {
+              if (!(await persistEffectResult(result))) return uncertainEffectResult(name);
+              if (!applied) throw new Error("Recruiting receipt requires its native effect");
+              return researchResult(researchAdmission, result, applied.effect);
             }
             return finish(result);
           }
@@ -7897,6 +8124,7 @@ export function selectBuiltinToolsForRun(options: {
           "remember",
           "recruiting_role",
           "recruiting_feedback",
+          "recruiting_research",
           "read_memory",
           "save_shared_memory",
           "save_memory",

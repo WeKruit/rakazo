@@ -396,6 +396,33 @@ export const RecruitingRoleToolInputSchema = z.discriminatedUnion("operation", [
 ]);
 export type RecruitingRoleToolInput = z.infer<typeof RecruitingRoleToolInputSchema>;
 
+const ResearchText = z.string().regex(/\S/, "Text must not be blank");
+const ResearchRoundInput = {
+  expectedRoleRevision: Revision,
+  clientNonce: RecruitingId,
+  instructions: ResearchText,
+  output: ResearchText,
+  recallScope: ResearchText.nullable(),
+  intent: RecruitingHumanIntentSchema,
+};
+export const RecruitingResearchToolInputSchema = z.discriminatedUnion("operation", [
+  z.strictObject({
+    ...ResearchRoundInput,
+    operation: z.literal("prepare"),
+    mcpServerId: RecruitingId,
+  }),
+  z.strictObject({ ...ResearchRoundInput, operation: z.literal("continue"), taskId: RecruitingId }),
+  z.strictObject({ operation: z.literal("start"), actionId: RecruitingId }),
+  z.strictObject({ operation: z.literal("status"), taskId: RecruitingId }),
+  z.strictObject({
+    operation: z.literal("rows"),
+    taskId: RecruitingId,
+    limit: z.number().int().positive().optional(),
+    cursor: z.string().min(1).optional(),
+  }),
+]);
+export type RecruitingResearchToolInput = z.infer<typeof RecruitingResearchToolInputSchema>;
+
 export const PrepareRecruitingResearchActionInput = z.strictObject({
   ...ResearchRequest,
   /** Expected role revision; later dispatch checks the current role and adoption atomically. */

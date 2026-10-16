@@ -6,6 +6,44 @@ import { parseConnectorToolArgs } from "./lazy-tool-catalog.js";
 import { jsonSchemaParameters, parametersFor } from "./pi-runtime.js";
 
 describe("jsonSchemaParameters", () => {
+  it("preserves all five closed recruiting research inputs through the installed Pi validator", () => {
+    const tool = builtinAgentTools.find((entry) => entry.name === "recruiting_research");
+    expect(tool).toBeDefined();
+    expect(tool!.readOnly).not.toBe(true);
+    const parameters = parametersFor(tool!);
+    const wire = JSON.parse(JSON.stringify(parameters));
+    const round = {
+      expectedRoleRevision: 1,
+      clientNonce: "round-nonce",
+      instructions: "  Preserve the complete current role.\r\nKeep every hard gate.\n",
+      output: "  Include original evidence columns.\n",
+      recallScope: "  This round only.\r\n",
+      intent: { basis: "direct", quote: "Search for this role" },
+    };
+    const inputs: ToolCall["arguments"][] = [
+      { ...round, operation: "prepare", mcpServerId: "research-server" },
+      { ...round, operation: "continue", taskId: "local-task", recallScope: null },
+      { operation: "start", actionId: "prepared-action" },
+      { operation: "status", taskId: "local-task" },
+      { operation: "rows", taskId: "local-task", limit: 7, cursor: "  opaque+/=\r\n " },
+    ];
+    for (const input of inputs) {
+      expect(parseConnectorToolArgs(tool!.inputSchema, input)).toEqual(input);
+      expect(parseConnectorToolArgs(wire, input)).toEqual(input);
+      expect(
+        validateToolArguments(
+          { name: tool!.name, description: tool!.description, parameters },
+          { type: "toolCall", id: "synthetic-research-call", name: tool!.name, arguments: input },
+        ),
+      ).toEqual(input);
+      expect(() =>
+        parseConnectorToolArgs(tool!.inputSchema, { ...input, sourceMessageId: "forged" }),
+      ).toThrow();
+    }
+    expect(wire.type).toBe("object");
+    expect(wire).not.toHaveProperty("oneOf");
+  });
+
   it("keeps the recruiting feedback guard in native memory tool parameters", () => {
     const schema = parametersFor(builtinAgentTools.find((tool) => tool.name === "remember")!);
     expect(schema.properties).toHaveProperty("recruitingFeedback");

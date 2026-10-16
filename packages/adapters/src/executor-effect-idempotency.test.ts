@@ -1,24 +1,60 @@
-import type { AgentRunRequest, MemorySnapshot, SemanticMemoryProvider } from "@rakazo/adapter-kit";
+import type {
+  AgentRunRequest,
+  ConnectorProvider,
+  ConnectorTool,
+  MemorySnapshot,
+  SemanticMemoryProvider,
+} from "@rakazo/adapter-kit";
 import type { RecruitingFeedbackInput, RecruitingSourceRef } from "@rakazo/contracts";
 import type { ActionApprovalRule } from "@rakazo/core";
 import {
   legacyScopedToolEffectIdempotencyKey,
   toolEffectIdempotencyKey,
 } from "@rakazo/core/node/approval-effect-key";
+import type * as DatabaseModule from "@rakazo/db";
 import type { RecruitingRoleToolResult, ThreadEvents } from "@rakazo/db";
+import {
+  claimRecruitingResearchAction,
+  IsolationError,
+  recruitingResearchSnapshot,
+} from "@rakazo/db";
 import { beforeEach, describe, expect, it, vi } from "vitest";
+import { boundDirectApprovalRequest } from "./approval-effect.js";
 import type * as AutoReviewModule from "./auto-review.js";
+import { runAutoReviewJudge } from "./auto-review.js";
 import type * as ComputerLifecycleModule from "./computer-lifecycle.js";
 import { createRunExecutor, selectBuiltinToolsForRun } from "./executor.js";
+import {
+  CATALOG_EXECUTE,
+  catalogEntries,
+  lazyCatalogTools,
+  resolveCatalogCall,
+} from "./lazy-tool-catalog.js";
 import type { MemoryProviderResolver } from "./memory-provider-factory.js";
 import type { LoadedRecruitingRunContext } from "./recruiting-context.js";
 import { loadRecruitingRunContext } from "./recruiting-context.js";
 import type * as RecruitingFeedbackModule from "./recruiting-feedback.js";
 import { executeRecruitingFeedback } from "./recruiting-feedback.js";
-import { executeRecruitingRoleTool } from "./recruiting-tools.js";
+import {
+  admitRecruitingResearchCall,
+  completeRecruitingResearchCall,
+  executeRecruitingRoleTool,
+  prepareRecruitingResearchTool,
+  resolveRecruitingResearchTool,
+} from "./recruiting-tools.js";
 
 vi.mock("./recruiting-context.js", () => ({ loadRecruitingRunContext: vi.fn() }));
-vi.mock("./recruiting-tools.js", () => ({ executeRecruitingRoleTool: vi.fn() }));
+vi.mock("./recruiting-tools.js", () => ({
+  executeRecruitingRoleTool: vi.fn(),
+  prepareRecruitingResearchTool: vi.fn(),
+  resolveRecruitingResearchTool: vi.fn(),
+  admitRecruitingResearchCall: vi.fn(),
+  completeRecruitingResearchCall: vi.fn(),
+}));
+vi.mock("@rakazo/db", async (importOriginal) => ({
+  ...(await importOriginal<typeof DatabaseModule>()),
+  claimRecruitingResearchAction: vi.fn(),
+}));
 vi.mock("./recruiting-feedback.js", async (importOriginal) => ({
   ...(await importOriginal<typeof RecruitingFeedbackModule>()),
   executeRecruitingFeedback: vi.fn(),
@@ -246,14 +282,15 @@ function fixture(runId = "run-1", secrets: string[] = []) {
     }
     yield { type: "done" as const, text: "Done" };
   });
+  const connector = {
+    discoverTools: vi.fn<ConnectorProvider["discoverTools"]>(async () => []),
+    resolveCall: vi.fn<NonNullable<ConnectorProvider["resolveCall"]>>(async () => undefined),
+    execute: vi.fn<ConnectorProvider["execute"]>(async function* () {}),
+  };
   const executor = createRunExecutor({
     prisma,
     runtime: { describe: () => ({ capabilities: { scripted: false } }), run: runtimeRun },
-    connector: {
-      discoverTools: async () => [],
-      resolveCall: async () => undefined,
-      execute: async function* () {},
-    },
+    connector,
     sandbox: { describe: () => ({ capabilities: { graphical: false } }) },
     memory: {
       describe: () => ({ capabilities: {} }),
@@ -287,6 +324,7 @@ function fixture(runId = "run-1", secrets: string[] = []) {
     claimSteering,
     pauseRunForInput,
     disabledBuiltinTools,
+    connector,
     setCalls(next: ToolCall[]) {
       calls = next;
     },
@@ -815,6 +853,7 @@ describe("native recruiting role effect delivery", () => {
     async (mode) => {
       const f = fixture(`run-verified-role-answer-${mode}`);
       f.runData.sourceMessageId = "vague-trigger";
+      f.sourceMessages.push({ id: "vague-trigger", seq: 1 }, { id: "native-role-answer", seq: 2 });
       const answerSource: RecruitingSourceRef = {
         ...source,
         anchor: { kind: "message", messageId: "native-role-answer", locator: "text" },
@@ -1325,6 +1364,10 @@ describe("native recruiting feedback effect dispatch", () => {
     async (mode) => {
       const f = fixture(`run-verified-feedback-answer-${mode}`);
       f.runData.sourceMessageId = "vague-trigger";
+      f.sourceMessages.push(
+        { id: "vague-trigger", seq: 1 },
+        { id: "native-feedback-answer", seq: 2 },
+      );
       const answerSource: RecruitingSourceRef = {
         ...source,
         anchor: { kind: "message", messageId: "native-feedback-answer", locator: "text" },
@@ -1782,5 +1825,740 @@ describe("native recruiting feedback effect dispatch", () => {
     expect(executeRecruitingFeedback).not.toHaveBeenCalled();
     expect(f.memoryCommit).not.toHaveBeenCalled();
     expect(f.semanticSave).not.toHaveBeenCalled();
+  });
+});
+
+describe("native recruiting research executor integration", () => {
+  const route = {
+    connectorId: "mcp",
+    resourceId: "research-server",
+    resourceRevision: 3,
+    toolName: "research",
+  };
+  const providerArgs = {
+    prompt: "Exact current role, actual native memory and this round's request",
+  };
+  const tool: ConnectorTool = {
+    name: "mcp__synthetic__research",
+    description: "Synthetic research tool",
+    route,
+    inputSchema: {
+      type: "object",
+      properties: { prompt: { type: "string" } },
+      required: ["prompt"],
+      additionalProperties: false,
+    },
+  };
+  const source: RecruitingSourceRef = {
+    id: "verified-research-source",
+    kind: "original_material",
+    anchor: { kind: "message", messageId: "verified-human", locator: "text" },
+    readState: "read",
+    readAt: "2026-10-15T00:00:00.000Z",
+    quote: "Search this round",
+  };
+  const task: Parameters<typeof recruitingResearchSnapshot>[0] = {
+    id: "research-task",
+    roleId: "role-1",
+    mcpServerId: route.resourceId,
+    serverRevision: 3,
+    providerTaskId: null,
+    pendingActionId: "research-action",
+    state: "active",
+    createdByRunId: "origin-run",
+  };
+  const action: Parameters<typeof recruitingResearchSnapshot>[1] = {
+    id: "research-action",
+    taskId: task.id,
+    roleRevisionId: "role-revision-1",
+    runId: "origin-run",
+    sourceMessageId: "verified-human",
+    clientNonce: "research-round",
+    kind: "create",
+    deliveryState: "prepared",
+    observedProviderState: null,
+    requestArtifactId: "research-request-artifact",
+    requestArtifactHash: "b".repeat(64),
+    contextArtifactId: "research-context-artifact",
+    contextArtifactHash: "a".repeat(64),
+    recallScope: null,
+    receiptArtifactId: null,
+    receiptArtifactHash: null,
+    cursor: null,
+    effectId: "research-effect",
+    outputArtifacts: [],
+    usage: null,
+  };
+  const manifest = { operation: "create", route, args: providerArgs, source };
+  const rawResult = {
+    content: [{ type: "text", text: '{"task_id":"provider-task","status":"queued"}' }],
+  };
+  const completed = {
+    status: "accepted",
+    ...recruitingResearchSnapshot(
+      { ...task, providerTaskId: "provider-task" },
+      { ...action, deliveryState: "accepted" },
+    ),
+  };
+  const start = { operation: "start", actionId: action.id };
+
+  beforeEach(() => {
+    vi.mocked(prepareRecruitingResearchTool).mockReset();
+    vi.mocked(resolveRecruitingResearchTool)
+      .mockReset()
+      .mockResolvedValue({
+        route,
+        args: providerArgs,
+        actionId: action.id,
+        taskId: task.id,
+        operation: "create",
+      } as never);
+    vi.mocked(admitRecruitingResearchCall).mockReset();
+    vi.mocked(completeRecruitingResearchCall).mockReset();
+    vi.mocked(claimRecruitingResearchAction).mockReset();
+    vi.mocked(loadRecruitingRunContext).mockReset();
+    vi.mocked(runAutoReviewJudge).mockClear();
+  });
+
+  it("prepares with the trusted source and actual loaded context without dispatch and offers the tool without graphics", async () => {
+    const f = fixture("run-prepare-research");
+    f.runData.sourceMessageId = "human-message";
+    const input = {
+      operation: "prepare" as const,
+      mcpServerId: route.resourceId,
+      expectedRoleRevision: 1,
+      clientNonce: "research-round",
+      instructions: "  Search engineers.\n",
+      output: "Name and original source cells",
+      recallScope: "This round only: example region",
+      intent: { basis: "direct" as const, quote: source.quote! },
+    };
+    const loaded = {
+      text: "Exact role and actual native memory",
+      contextArtifact: { artifactId: "context", sha256: "a".repeat(64) },
+    } as LoadedRecruitingRunContext;
+    vi.mocked(loadRecruitingRunContext).mockResolvedValue(loaded);
+    const prepared = {
+      status: "prepared",
+      ...recruitingResearchSnapshot(task, action),
+      source,
+      request: providerArgs,
+    };
+    vi.mocked(prepareRecruitingResearchTool).mockImplementation(
+      async (deps, trusted, request, context, loadContext) => {
+        expect(deps.prisma).toBe(f.prisma);
+        expect(deps.artifacts).toBe(f.artifacts);
+        expect(trusted).toEqual({
+          actor: { spaceId: "space-1", userId: "user-1", email: "", isDeploymentOwner: false },
+          runId: f.runData.id,
+          sourceMessageId: "human-message",
+        });
+        expect(request).toEqual(input);
+        expect(context).toEqual(expect.objectContaining({ runId: f.runData.id, botId: "bot-1" }));
+        expect(await loadContext("verified-human", input.recallScope)).toBe(loaded);
+        return prepared as never;
+      },
+    );
+    f.setCalls([{ name: "recruiting_research", args: input, executionId: "prepare-round" }]);
+
+    await f.run();
+
+    expect(prepareRecruitingResearchTool).toHaveBeenCalledOnce();
+    expect(f.results).toEqual([prepared]);
+    expect(f.runtimeRun.mock.calls[0]![0].tools.map((entry) => entry.name)).toContain(
+      "recruiting_research",
+    );
+    expect(loadRecruitingRunContext).toHaveBeenCalledWith(
+      expect.anything(),
+      f.runData,
+      { documents: [] },
+      expect.anything(),
+      expect.objectContaining({
+        sourceMessageId: "verified-human",
+        recallScope: input.recallScope,
+      }),
+    );
+    expect(f.connector.execute).not.toHaveBeenCalled();
+    expect(resolveRecruitingResearchTool).not.toHaveBeenCalled();
+    expect(admitRecruitingResearchCall).not.toHaveBeenCalled();
+  });
+
+  it("rejects mismatched raw MCP research in admission before creating an effect or invoking the provider", async () => {
+    const f = fixture("run-raw-research-mismatch");
+    f.connector.discoverTools.mockResolvedValue([tool]);
+    f.connector.resolveCall.mockImplementation(async (call) => ({ call, tool }));
+    vi.mocked(admitRecruitingResearchCall).mockImplementation(async (_deps, trusted, call) => {
+      expect(trusted).toEqual(
+        expect.objectContaining({
+          runId: f.runData.id,
+          leaseOwner: "worker-1",
+          leaseFence: f.runData.leaseFence,
+        }),
+      );
+      expect(call).toEqual(
+        expect.objectContaining({ route, args: { prompt: "Conditions omitted" } }),
+      );
+      expect(f.prisma.externalEffect.create).not.toHaveBeenCalled();
+      expect(f.connector.execute).not.toHaveBeenCalled();
+      throw new IsolationError();
+    });
+    f.setCalls([
+      { name: tool.name, args: { prompt: "Conditions omitted" }, executionId: "raw-mismatch" },
+    ]);
+
+    await f.run();
+
+    expect(admitRecruitingResearchCall).toHaveBeenCalledOnce();
+    expect(f.results[0]).toEqual(expect.objectContaining({ error: expect.any(String) }));
+    expect(f.effects).toEqual([]);
+    expect(f.prisma.externalEffect.create).not.toHaveBeenCalled();
+    expect(f.connector.execute).not.toHaveBeenCalled();
+    expect(claimRecruitingResearchAction).not.toHaveBeenCalled();
+  });
+
+  it("keeps the newer run source after a cached prepare returns an older verified human source", async () => {
+    const f = fixture("run-cached-research-source");
+    f.runData.sourceMessageId = "new-human";
+    f.sourceMessages.push({ id: "old-human", seq: 2 }, { id: "new-human", seq: 3 });
+    vi.mocked(prepareRecruitingResearchTool).mockResolvedValue({
+      status: "prepared",
+      ...recruitingResearchSnapshot(task, action),
+      request: providerArgs,
+      source: { ...source, anchor: { kind: "message", messageId: "old-human", locator: "text" } },
+    } as never);
+    vi.mocked(executeRecruitingRoleTool).mockResolvedValue({
+      status: "current",
+      workspace: null,
+      source: null,
+      changed: false,
+    });
+    f.setCalls([
+      {
+        name: "recruiting_research",
+        args: {
+          operation: "prepare",
+          mcpServerId: route.resourceId,
+          expectedRoleRevision: 1,
+          clientNonce: "cached-round",
+          instructions: "Search engineers",
+          output: "Original source cells",
+          recallScope: null,
+          intent: { basis: "direct", quote: source.quote! },
+        },
+        executionId: "cached-prepare",
+      },
+      {
+        name: "recruiting_role",
+        args: { operation: "read" },
+        executionId: "role-after-cached-prepare",
+      },
+    ]);
+
+    await f.run();
+
+    expect(vi.mocked(executeRecruitingRoleTool).mock.calls.at(-1)![1].sourceMessageId).toBe(
+      "new-human",
+    );
+    expect(f.connector.execute).not.toHaveBeenCalled();
+  });
+
+  it.each(["direct", "catalog"])(
+    "applies canonical research approval to an admitted raw %s call",
+    async (path) => {
+      const f = fixture(`run-raw-research-policy-${path}`);
+      const entries = catalogEntries([tool]);
+      const wrappers = lazyCatalogTools("connectors", "mcp", "MCP", entries);
+      const execute = wrappers.find((entry) => entry.route?.toolName === CATALOG_EXECUTE)!;
+      f.connector.discoverTools.mockResolvedValue(path === "direct" ? [tool] : wrappers);
+      f.connector.resolveCall.mockImplementation(async (call) =>
+        call.route?.toolName === CATALOG_EXECUTE ? resolveCatalogCall(call, entries) : undefined,
+      );
+      f.prisma.actionApprovalRule.findMany.mockResolvedValue([
+        { effect: "require_approval", matchKind: "tool", matchValue: "recruiting_research" },
+      ]);
+      vi.mocked(admitRecruitingResearchCall).mockImplementation(
+        async (_deps, trusted, call, _context, options) => {
+          const effect: Effect = {
+            id: action.effectId!,
+            spaceId: "space-1",
+            runId: trusted.runId,
+            kind: call.tool,
+            idempotencyKey: `recruiting-research:${action.id}`,
+            status: "intended",
+            request: options.frozenRequest,
+          };
+          f.effects.push(effect);
+          return {
+            kind: "mutation",
+            operation: "create",
+            status: "ready",
+            task,
+            action,
+            manifest,
+            effect,
+            ownerRunId: trusted.runId,
+          } as never;
+        },
+      );
+      f.setCalls([
+        {
+          name: path === "direct" ? tool.name : execute.name,
+          args: path === "direct" ? providerArgs : { id: entries[0]!.id, arguments: providerArgs },
+          executionId: "raw-needs-canonical-approval",
+        },
+      ]);
+
+      await f.run();
+
+      expect(f.pauseRunForInput).toHaveBeenCalledOnce();
+      expect(claimRecruitingResearchAction).not.toHaveBeenCalled();
+      expect(f.connector.execute).not.toHaveBeenCalled();
+      expect(f.effects).toEqual([expect.objectContaining({ status: "intended" })]);
+    },
+  );
+
+  it("respects the canonical research disabled flag on an admitted raw MCP call", async () => {
+    const f = fixture("run-raw-research-disabled");
+    f.disabledBuiltinTools.push("recruiting_research");
+    f.connector.discoverTools.mockResolvedValue([tool]);
+    vi.mocked(admitRecruitingResearchCall).mockResolvedValue({
+      kind: "mutation",
+      operation: "create",
+      status: "ready",
+      task,
+      action,
+      manifest,
+      effect: { id: action.effectId!, status: "intended", request: providerArgs },
+      ownerRunId: f.runData.id,
+    } as never);
+    f.setCalls([{ name: tool.name, args: providerArgs, executionId: "disabled-raw-research" }]);
+
+    await f.run();
+
+    expect(f.results).toEqual([{ error: "This tool is disabled for this bot." }]);
+    expect(claimRecruitingResearchAction).not.toHaveBeenCalled();
+    expect(f.connector.execute).not.toHaveBeenCalled();
+  });
+
+  it("replays an approved raw catalog call with the exact saved research arguments and domain claim", async () => {
+    const f = fixture("run-research-approved-catalog");
+    const entries = catalogEntries([tool]);
+    const wrappers = lazyCatalogTools("connectors", "mcp", "MCP", entries);
+    const execute = wrappers.find((entry) => entry.route?.toolName === CATALOG_EXECUTE)!;
+    const frozenRequest = boundDirectApprovalRequest(route, providerArgs, "__rakazoCatalogTool");
+    const effect: Effect = {
+      id: action.effectId!,
+      spaceId: "space-1",
+      runId: f.runData.id,
+      kind: tool.name,
+      idempotencyKey: `recruiting-research:${action.id}`,
+      status: "approved",
+      request: frozenRequest,
+    };
+    f.effects.push(effect);
+    f.connector.discoverTools.mockResolvedValue(wrappers);
+    f.connector.resolveCall.mockImplementation(async (call) =>
+      call.route?.toolName === CATALOG_EXECUTE ? resolveCatalogCall(call, entries) : undefined,
+    );
+    f.prisma.actionApprovalRule.findMany.mockResolvedValue([
+      { effect: "require_approval", matchKind: "tool", matchValue: tool.name },
+    ]);
+    vi.mocked(admitRecruitingResearchCall).mockImplementation(
+      async (_deps, _trusted, call, _context, options) => {
+        expect(call).toEqual(
+          expect.objectContaining({ tool: tool.name, route, args: providerArgs }),
+        );
+        expect(options.frozenRequest).toEqual(frozenRequest);
+        return {
+          kind: "mutation",
+          operation: "create",
+          status: "ready",
+          task,
+          action,
+          manifest,
+          effect,
+          ownerRunId: f.runData.id,
+        } as never;
+      },
+    );
+    vi.mocked(claimRecruitingResearchAction).mockImplementation(async (_db, _actor, input) => {
+      expect(input).toEqual(
+        expect.objectContaining({
+          actionId: action.id,
+          effectId: effect.id,
+          from: "approved",
+          leaseOwner: "worker-1",
+          leaseFence: f.runData.leaseFence,
+        }),
+      );
+      effect.status = "executing";
+      return true;
+    });
+    f.connector.execute.mockImplementation(async function* (call) {
+      expect(call).toEqual(
+        expect.objectContaining({ route, args: providerArgs, executionId: effect.idempotencyKey }),
+      );
+      yield { type: "result", data: rawResult };
+    });
+    vi.mocked(completeRecruitingResearchCall).mockImplementation(
+      async (_deps, _trusted, _admission, result) => {
+        expect(result).toEqual(rawResult);
+        expect(effect).toEqual(expect.objectContaining({ status: "completed", result: rawResult }));
+        return completed as never;
+      },
+    );
+    f.setCalls([
+      {
+        name: execute.name,
+        args: {
+          id: entries[0]!.id,
+          arguments: { prompt: "Reconstructed text must not replace the approved request" },
+        },
+        executionId: "approved-catalog-replay",
+      },
+    ]);
+
+    await f.run();
+
+    expect(f.results).toEqual([completed]);
+    expect(claimRecruitingResearchAction).toHaveBeenCalledOnce();
+    expect(f.connector.execute).toHaveBeenCalledOnce();
+    expect(f.prisma.externalEffect.create).not.toHaveBeenCalled();
+    expect(f.pauseRunForInput).not.toHaveBeenCalled();
+    expect(resolveRecruitingResearchTool).not.toHaveBeenCalled();
+  });
+
+  it("recovers status completion from the saved raw read result after interrupted snapshot mapping", async () => {
+    const f = fixture("run-research-status-recovery");
+    f.prisma.actionAutoReviewPreference.findUnique.mockResolvedValue({ enabled: true });
+    const readRoute = { ...route, toolName: "get_task" };
+    const readArgs = { task_id: "provider-task", wait_seconds: 0 };
+    const readTool: ConnectorTool = {
+      ...tool,
+      name: "mcp__synthetic__get_task",
+      route: readRoute,
+      readOnly: true,
+      inputSchema: {
+        type: "object",
+        properties: { task_id: { type: "string" }, wait_seconds: { type: "integer" } },
+        required: ["task_id", "wait_seconds"],
+        additionalProperties: false,
+      },
+    };
+    const rawRead = {
+      content: [{ type: "text", text: '{"task_id":"provider-task","status":"completed"}' }],
+    };
+    const readCompleted = { ...completed, observation: { done: true }, providerResult: rawRead };
+    f.connector.discoverTools.mockResolvedValue([readTool]);
+    f.connector.resolveCall.mockImplementation(async (call) =>
+      call.route?.toolName === CATALOG_EXECUTE
+        ? resolveCatalogCall(call, catalogEntries([readTool]))
+        : undefined,
+    );
+    vi.mocked(resolveRecruitingResearchTool).mockResolvedValue({
+      route: readRoute,
+      args: readArgs,
+      taskId: task.id,
+      operation: "status",
+    } as never);
+    vi.mocked(admitRecruitingResearchCall).mockImplementation(async (_deps, _trusted, call) => {
+      expect(call).toEqual(expect.objectContaining({ route: readRoute, args: readArgs }));
+      return {
+        kind: "read",
+        operation: "status",
+        saved: { task: { ...task, providerTaskId: "provider-task" }, action },
+        call,
+      } as never;
+    });
+    f.connector.execute.mockImplementation(async function* () {
+      yield { type: "result", data: rawRead };
+    });
+    vi.mocked(completeRecruitingResearchCall)
+      .mockResolvedValue(readCompleted as never)
+      .mockImplementationOnce(async (_deps, _trusted, _admission, result) => {
+        expect(result).toEqual(rawRead);
+        expect(f.effects).toEqual([
+          expect.objectContaining({ status: "completed", result: rawRead }),
+        ]);
+        throw new Error("status snapshot mapping interrupted");
+      });
+    f.setCalls([
+      {
+        name: "recruiting_research",
+        args: { operation: "status", taskId: task.id },
+        executionId: "status-before-interruption",
+      },
+    ]);
+
+    await f.run("status snapshot mapping interrupted");
+
+    expect(f.results).toEqual([]);
+    f.setCalls([
+      {
+        name: "recruiting_research",
+        args: { operation: "status", taskId: task.id },
+        executionId: "status-after-interruption",
+      },
+    ]);
+
+    await f.run();
+
+    expect(f.results).toEqual([readCompleted]);
+    expect(f.effects).toHaveLength(1);
+    expect(f.connector.execute).toHaveBeenCalledOnce();
+    expect(claimRecruitingResearchAction).not.toHaveBeenCalled();
+    expect(runAutoReviewJudge).not.toHaveBeenCalled();
+    expect(completeRecruitingResearchCall).toHaveBeenCalledTimes(2);
+    expect(completeRecruitingResearchCall).toHaveBeenLastCalledWith(
+      expect.anything(),
+      expect.anything(),
+      expect.objectContaining({ kind: "read", operation: "status" }),
+      rawRead,
+      expect.anything(),
+      { effectId: f.effects[0]!.id, request: f.effects[0]!.request },
+    );
+  });
+
+  it("claims the pinned action effect through the domain boundary and saves raw MCP output before completion and cross-run replay", async () => {
+    const f = fixture("run-research-original");
+    const trace: string[] = [];
+    f.connector.discoverTools.mockResolvedValue([tool]);
+    f.connector.resolveCall.mockImplementation(async (call) => {
+      trace.push("resolve");
+      return call.route?.toolName === CATALOG_EXECUTE
+        ? resolveCatalogCall(call, catalogEntries([tool]))
+        : undefined;
+    });
+    vi.mocked(admitRecruitingResearchCall).mockImplementationOnce(
+      async (_deps, trusted, call, _context, options) => {
+        trace.push("admit");
+        expect(f.effects).toEqual([]);
+        const effect: Effect = {
+          id: action.effectId!,
+          spaceId: "space-1",
+          runId: trusted.runId,
+          kind: call.tool,
+          idempotencyKey: `recruiting-research:${action.id}`,
+          status: "intended",
+          request: options.frozenRequest,
+        };
+        f.effects.push(effect);
+        return {
+          kind: "mutation",
+          operation: "create",
+          status: "ready",
+          task,
+          action,
+          manifest,
+          effect,
+          ownerRunId: trusted.runId,
+        } as never;
+      },
+    );
+    vi.mocked(claimRecruitingResearchAction).mockImplementation(async (prisma, actor, input) => {
+      trace.push("claim");
+      expect(prisma).toBe(f.prisma);
+      expect(actor).toEqual({
+        spaceId: "space-1",
+        userId: "user-1",
+        email: "",
+        isDeploymentOwner: false,
+      });
+      expect(input).toEqual({
+        runId: f.runData.id,
+        leaseOwner: "worker-1",
+        leaseFence: f.runData.leaseFence,
+        actionId: action.id,
+        effectId: action.effectId,
+        from: "intended",
+      });
+      expect(f.effects[0]?.status).toBe("intended");
+      f.effects[0]!.status = "executing";
+      return true;
+    });
+    f.connector.execute.mockImplementation(async function* (call) {
+      trace.push("execute");
+      expect(call).toEqual(
+        expect.objectContaining({
+          tool: tool.name,
+          route,
+          args: providerArgs,
+          executionId: `recruiting-research:${action.id}`,
+        }),
+      );
+      expect(f.effects[0]?.status).toBe("executing");
+      expect(f.prisma.externalEffect.updateMany).not.toHaveBeenCalled();
+      yield { type: "result", data: rawResult };
+    });
+    vi.mocked(completeRecruitingResearchCall).mockImplementation(
+      async (_deps, _trusted, admission, result) => {
+        trace.push("complete");
+        expect(admission).toEqual(
+          expect.objectContaining({
+            kind: "mutation",
+            action: expect.objectContaining({ id: action.id }),
+          }),
+        );
+        expect(result).toEqual(rawResult);
+        expect(f.effects[0]).toEqual(
+          expect.objectContaining({ status: "completed", result: rawResult }),
+        );
+        return completed as never;
+      },
+    );
+    f.setCalls([{ name: "recruiting_research", args: start, executionId: "start-research" }]);
+
+    await f.run();
+
+    expect(trace).toEqual(["resolve", "admit", "claim", "execute", "complete"]);
+    expect(f.results).toEqual([completed]);
+    expect(f.prisma.externalEffect.create).not.toHaveBeenCalled();
+    expect(f.effects).toHaveLength(1);
+    const resumed = fixture("run-research-restored");
+    resumed.effects.push(...f.effects);
+    vi.mocked(resolveRecruitingResearchTool).mockResolvedValue({
+      route,
+      args: providerArgs,
+      actionId: action.id,
+      taskId: task.id,
+      operation: "create",
+      recoveryEffectKind: tool.name,
+    } as never);
+    resumed.connector.resolveCall.mockRejectedValue(new Error("MCP discovery unavailable"));
+    vi.mocked(admitRecruitingResearchCall).mockResolvedValue({
+      kind: "mutation",
+      operation: "create",
+      status: "completed",
+      task,
+      action,
+      manifest,
+      effect: f.effects[0],
+      ownerRunId: f.runData.id,
+    } as never);
+    resumed.setCalls([
+      { name: "recruiting_research", args: start, executionId: "resume-research" },
+    ]);
+
+    await resumed.run();
+
+    expect(claimRecruitingResearchAction).toHaveBeenCalledOnce();
+    expect(completeRecruitingResearchCall).toHaveBeenCalledTimes(2);
+    expect(resumed.results).toEqual([completed]);
+    expect(resumed.effects).toHaveLength(1);
+    expect(resumed.connector.execute).not.toHaveBeenCalled();
+    expect(resumed.connector.resolveCall).not.toHaveBeenCalled();
+    expect(resumed.prisma.externalEffect.create).not.toHaveBeenCalled();
+  });
+
+  it("recovers completed admission only and never dispatches or allocates effects for completed, busy or unknown actions", async () => {
+    for (const status of ["completed", "busy", "unknown"] as const) {
+      const f = fixture(`run-research-${status}`);
+      vi.mocked(resolveRecruitingResearchTool).mockResolvedValue({
+        route,
+        args: providerArgs,
+        actionId: action.id,
+        taskId: task.id,
+        operation: "create",
+        recoveryEffectKind: tool.name,
+      } as never);
+      f.connector.resolveCall.mockRejectedValue(new Error("MCP discovery unavailable"));
+      const effect: Effect = {
+        id: action.effectId!,
+        spaceId: "space-1",
+        runId: "origin-run",
+        kind: tool.name,
+        idempotencyKey: `recruiting-research:${action.id}`,
+        request: providerArgs,
+        status:
+          status === "completed" ? "completed" : status === "busy" ? "executing" : "uncertain",
+        ...(status === "completed" ? { result: rawResult } : {}),
+      };
+      f.effects.push(effect);
+      vi.mocked(admitRecruitingResearchCall)
+        .mockReset()
+        .mockResolvedValue({
+          kind: "mutation",
+          operation: "create",
+          status,
+          task,
+          action,
+          manifest,
+          effect,
+          ownerRunId: "origin-run",
+        } as never);
+      vi.mocked(completeRecruitingResearchCall)
+        .mockReset()
+        .mockResolvedValue(completed as never);
+      f.setCalls([{ name: "recruiting_research", args: start, executionId: `research-${status}` }]);
+
+      await f.run();
+
+      expect(admitRecruitingResearchCall).toHaveBeenCalledOnce();
+      expect(f.effects).toHaveLength(1);
+      expect(f.prisma.externalEffect.create).not.toHaveBeenCalled();
+      expect(f.connector.execute).not.toHaveBeenCalled();
+      expect(f.connector.resolveCall).not.toHaveBeenCalled();
+      expect(claimRecruitingResearchAction).not.toHaveBeenCalled();
+      expect(completeRecruitingResearchCall).toHaveBeenCalledTimes(status === "completed" ? 1 : 0);
+      expect(f.results[0]).toEqual(
+        status === "completed" ? completed : expect.objectContaining({ status }),
+      );
+      expect(f.results[0]).not.toHaveProperty("effect");
+      expect(f.results[0]).not.toHaveProperty("manifest");
+      expect(f.results[0]).not.toHaveProperty("action.requestArtifactId");
+    }
+  });
+
+  it("retains an explicit native research approval rule before claiming or dispatching the pinned action", async () => {
+    const f = fixture("run-research-explicit-approval");
+    f.connector.discoverTools.mockResolvedValue([tool]);
+    f.connector.resolveCall.mockImplementation(async (call) =>
+      call.route?.toolName === CATALOG_EXECUTE
+        ? resolveCatalogCall(call, catalogEntries([tool]))
+        : undefined,
+    );
+    f.prisma.actionApprovalRule.findMany.mockResolvedValue([
+      { effect: "require_approval", matchKind: "tool", matchValue: "recruiting_research" },
+    ]);
+    vi.mocked(admitRecruitingResearchCall).mockImplementation(
+      async (_deps, trusted, call, _context, options) => {
+        const effect: Effect = {
+          id: action.effectId!,
+          spaceId: "space-1",
+          runId: trusted.runId,
+          kind: call.tool,
+          idempotencyKey: `recruiting-research:${action.id}`,
+          status: "intended",
+          request: options.frozenRequest,
+        };
+        f.effects.push(effect);
+        return {
+          kind: "mutation",
+          operation: "create",
+          status: "ready",
+          task,
+          action,
+          manifest,
+          effect,
+          ownerRunId: trusted.runId,
+        } as never;
+      },
+    );
+    f.setCalls([
+      { name: "recruiting_research", args: start, executionId: "research-needs-approval" },
+    ]);
+
+    await f.run();
+
+    expect(f.pauseRunForInput).toHaveBeenCalledOnce();
+    expect(claimRecruitingResearchAction).not.toHaveBeenCalled();
+    expect(f.connector.execute).not.toHaveBeenCalled();
+    expect(f.effects).toEqual([
+      expect.objectContaining({
+        idempotencyKey: `recruiting-research:${action.id}`,
+        status: "intended",
+      }),
+    ]);
+    expect(f.prisma.externalEffect.create).not.toHaveBeenCalled();
   });
 });
