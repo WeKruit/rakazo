@@ -116,7 +116,7 @@ function ResearchResults({
       data-research-action={action.id}
     >
       <summary className="cursor-pointer">
-        <Trans>Raw search results</Trans> · {action.kind} ·{" "}
+        <Trans>Raw search results</Trans> · {action.kind} · <Trans>Role</Trans> ·{" "}
         {isCurrent ? <Trans>Current</Trans> : <Trans>Outdated</Trans>}
       </summary>
       {open ? (

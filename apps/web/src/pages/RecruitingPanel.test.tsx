@@ -353,6 +353,9 @@ it("shows unassessed raw provider rows from saved Artifacts without creating an 
   await view.click("Evidence");
   await view.expand("Raw search results");
   await vi.waitFor(() => expect(view.container.textContent).toContain("Synthetic raw candidate"));
+  expect(
+    view.container.querySelector('[data-research-action="raw-action"] > summary')?.textContent,
+  ).toBe("Raw search results · continue · Role · Outdated");
   expect(view.container.textContent).toContain("Unassessed");
   expect(view.container.textContent).toContain("provider_report");
   expect(view.container.textContent).toContain("Strong Match");
