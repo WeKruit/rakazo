@@ -10,6 +10,7 @@ import {
   RecruitingId,
   RecruitingSourceRefSchema,
 } from "@rakazo/contracts";
+import { requireRecruitingBriefConfirmation } from "@rakazo/core";
 import { stableJsonValue } from "@rakazo/core/node/approval-effect-key";
 import { z } from "zod";
 import type { LoadedRecruitingRunContext } from "./recruiting-context.js";
@@ -88,6 +89,7 @@ export function buildRecruitingResearchRequest(input: BuildRequest): {
 } {
   const { context } = input;
   const { role, revision } = context.workspace;
+  requireRecruitingBriefConfirmation(revision);
   if (
     role.currentRevisionId !== revision.id ||
     role.id !== revision.roleId ||

@@ -263,6 +263,7 @@ import {
 } from "./onboarding.js";
 import {
   bindRecruitingRole,
+  confirmRecruitingBrief,
   createRecruitingRole,
   getRecruitingAssessment,
   getRecruitingWorkspace,
@@ -3204,6 +3205,12 @@ export function createRouter(deps: RouterDeps) {
       }),
     },
     recruiting: {
+      confirmBrief: authed.recruiting.confirmBrief.handler(({ context, input }) =>
+        confirmRecruitingBrief(deps.prisma, context.actor, input, {
+          artifacts: deps.artifacts,
+          context: connectionContext(context.actor, randomUUID()),
+        }),
+      ),
       listQuestions: authed.recruiting.listQuestions.handler(({ context, input }) =>
         listRecruitingQuestions(deps.prisma, context.actor, input),
       ),

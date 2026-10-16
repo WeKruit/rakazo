@@ -176,7 +176,54 @@ function validateRoleCriteria(
   }
 }
 
+export const RecruitingBriefDraftSchema = z.strictObject({
+  fields: z.array(
+    z.strictObject({
+      key: Text,
+      value: Text.nullable(),
+      origin: z.enum(["user_instruction", "jd", "hm", "inferred"]),
+      state: z.enum(["known", "missing", "conflict"]),
+      consequential: z.boolean(),
+      sourceRefIds: z.array(RecruitingId),
+    }),
+  ),
+  questions: z.array(
+    z.strictObject({
+      id: RecruitingId,
+      fieldKey: Text,
+      question: Text,
+      answeredBySourceRefId: RecruitingId.nullable(),
+    }),
+  ),
+  rules: z.array(
+    z.strictObject({
+      criterionId: RecruitingId,
+      origin: z.enum(["user_instruction", "jd", "hm", "inferred"]),
+      effect: z.enum(["flag", "reject"]),
+      sourceRefIds: z.array(RecruitingId),
+    }),
+  ),
+});
+export type RecruitingBriefDraft = z.infer<typeof RecruitingBriefDraftSchema>;
+export const RecruitingBriefSchema = RecruitingBriefDraftSchema.extend({
+  confirmation: z
+    .strictObject({
+      revision: Revision,
+      userId: RecruitingId,
+      messageId: RecruitingId,
+      confirmedAt: IsoDate,
+    })
+    .nullable(),
+});
+export type RecruitingBrief = z.infer<typeof RecruitingBriefSchema>;
+export const ConfirmRecruitingBriefInput = z.strictObject({
+  threadId: RecruitingId,
+  roleId: RecruitingId,
+  expectedRevision: Revision,
+});
+
 const RoleDefinition = {
+  brief: RecruitingBriefDraftSchema.nullable().optional(),
   sourceRefs: z.array(RecruitingSourceRefSchema).min(1).readonly(),
   criteria: z.array(RecruitingCriterionSchema).superRefine(validateRoleCriteria).readonly(),
   preferences: z.array(Text).readonly(),
@@ -200,6 +247,7 @@ export const RecruitingRoleRevisionSchema = z
     roleId: RecruitingId,
     revision: Revision,
     ...RoleDefinition,
+    brief: RecruitingBriefSchema.nullable().optional(),
     createdAt: IsoDate,
   })
   .readonly();

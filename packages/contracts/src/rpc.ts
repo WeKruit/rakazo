@@ -108,6 +108,7 @@ import {
 } from "./integration-settings.js";
 import { MessageReactionSchema } from "./reactions.js";
 import {
+  ConfirmRecruitingBriefInput,
   CreateRecruitingRoleInput,
   RecruitingAssessmentAskTargetSchema,
   RecruitingAssessmentSchema,
@@ -539,6 +540,7 @@ export const appContract = {
       .input(z.strictObject({ threadId: RecruitingId }))
       .output(recruitingWorkspace.nullable()),
     reviseRole: oc.input(ReviseRecruitingRoleInput).output(recruitingWorkspace),
+    confirmBrief: oc.input(ConfirmRecruitingBriefInput).output(recruitingWorkspace),
     listAssessments: oc
       .input(z.strictObject({ roleId: RecruitingId }))
       .output(z.array(RecruitingAssessmentSnapshotSchema)),

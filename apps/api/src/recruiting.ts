@@ -1,5 +1,6 @@
 import { ORPCError } from "@orpc/server";
 import type { Actor } from "@rakazo/contracts";
+import { RecruitingPlaybookValidationError } from "@rakazo/core";
 import type { PrismaClient, RecruitingRoleMaterialContext } from "@rakazo/db";
 import * as recruiting from "@rakazo/db";
 import {
@@ -16,6 +17,8 @@ async function authenticated<T>(operation: () => Promise<T>): Promise<T> {
       throw new ORPCError("NOT_FOUND", { message: "Resource not found" });
     if (error instanceof RecruitingConflictError)
       throw new ORPCError("CONFLICT", { message: error.message });
+    if (error instanceof RecruitingPlaybookValidationError)
+      throw new ORPCError("BAD_REQUEST", { message: error.message });
     if (error instanceof RecruitingSourceValidationError)
       throw new ORPCError("BAD_REQUEST", { message: error.message });
     if (error instanceof Error && error.name === "ZodError")
@@ -70,3 +73,10 @@ export const listRecruitingQuestions = (
   authenticated(async () => ({
     questions: await recruiting.listRecruitingQuestions(prisma, actor, input),
   }));
+
+export const confirmRecruitingBrief = (
+  prisma: PrismaClient,
+  actor: Actor,
+  input: Parameters<typeof recruiting.confirmRecruitingBrief>[2],
+  material?: RecruitingRoleMaterialContext,
+) => authenticated(() => recruiting.confirmRecruitingBrief(prisma, actor, input, material));

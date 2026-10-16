@@ -21,6 +21,7 @@ import type {
   SaveRecruitingAssessmentInput as SaveAssessmentInput,
 } from "@rakazo/contracts";
 import {
+  ConfirmRecruitingBriefInput,
   CreateRecruitingRoleInput,
   MessageBlock as MessageBlockSchema,
   NativeAskAnswerPayloadSchema,
@@ -47,6 +48,10 @@ import {
   applyRecruitingPreferenceEdit,
   evaluateRecruitingAssessment,
   mergeRecruitingReassessment,
+  RecruitingPlaybookValidationError,
+  recruitingBriefClarifications,
+  requireRecruitingBriefConfirmation,
+  validateRecruitingBrief,
 } from "@rakazo/core";
 import { stableJsonValue } from "@rakazo/core/node/approval-effect-key";
 import type { PrismaClient } from "./client.js";
@@ -54,7 +59,12 @@ import { Prisma } from "./client.js";
 import type { AnswerRunInput, PauseRunForInput } from "./events.js";
 import { appendEventInTransaction } from "./events.js";
 import type { SourceMessage } from "./messages.js";
-import { humanMessageInclude, isNativeHumanMessage, loadRunHumanSources } from "./messages.js";
+import {
+  createThreadMessageInTransaction,
+  humanMessageInclude,
+  isNativeHumanMessage,
+  loadRunHumanSources,
+} from "./messages.js";
 import { IsolationError, scoped } from "./scope.js";
 
 type Tx = Prisma.TransactionClient;
@@ -289,8 +299,37 @@ async function loadRoleMaterials(
   return bytes;
 }
 
+async function validateBriefAuthorship(tx: Tx, definition: CreateRoleInput | ReviseRoleInput) {
+  if (!definition.brief) return;
+  const sources = new Map(definitionSources(definition).map((source) => [source.id, source]));
+  const attributed = [...definition.brief.fields, ...definition.brief.rules].filter(
+    (item) => item.origin === "user_instruction",
+  );
+  const messageIds = new Set<string>();
+  for (const item of attributed) {
+    for (const id of item.sourceRefIds) {
+      const source = sources.get(id);
+      if (source?.anchor.kind !== "message") throw new IsolationError();
+      messageIds.add(source.anchor.messageId);
+    }
+  }
+  if (!messageIds.size) return;
+  const messages = await tx.message.findMany({
+    where: { id: { in: [...messageIds] } },
+    include: humanMessageInclude,
+  });
+  if (
+    messages.length !== messageIds.size ||
+    messages.some((message) => !isNativeHumanMessage(message))
+  )
+    throw new IsolationError();
+}
+
 function definitionData(input: CreateRoleInput | ReviseRoleInput) {
   return {
+    brief: input.brief
+      ? ({ ...input.brief, confirmation: null } as Prisma.InputJsonValue)
+      : Prisma.DbNull,
     sourceRefs: input.sourceRefs as Prisma.InputJsonValue,
     criteria: input.criteria as Prisma.InputJsonValue,
     preferences: input.preferences as Prisma.InputJsonValue,
@@ -308,6 +347,7 @@ async function roleSnapshot(tx: Tx, actor: Actor, role: RecruitingRole): Promise
     createdAt: row.createdAt.toISOString(),
   });
   await validateDefinition(tx, actor, revision);
+  if (revision.brief) validateRecruitingBrief(revision.brief, revision);
   return { role: RecruitingRoleSchema.parse(role), revision };
 }
 
@@ -329,7 +369,9 @@ async function createRoleInTransaction(
   artifacts: ReadonlyMap<string, Uint8Array>,
 ) {
   await requireThread(tx, actor, input.sourceThreadId);
+  if (input.brief) validateRecruitingBrief(input.brief, input);
   await validateReadSources(tx, actor, definitionSources(input), artifacts);
+  await validateBriefAuthorship(tx, input);
   const role = await tx.recruitingRole.create({
     data: {
       id: randomUUID(),
@@ -408,7 +450,9 @@ async function reviseRoleInTransaction(
 ) {
   const role = await requireRole(tx, actor, input.roleId, true);
   if (role.revision !== input.expectedRevision) throw new RecruitingConflictError();
+  if (input.brief) validateRecruitingBrief(input.brief, input);
   await validateReadSources(tx, actor, definitionSources(input), artifacts);
+  await validateBriefAuthorship(tx, input);
   const revision = await tx.recruitingRoleRevision.create({
     data: { roleId: role.id, revision: role.revision + 1, ...definitionData(input) },
   });
@@ -428,6 +472,93 @@ async function reviseRoleInTransaction(
     title: input.title,
     revision: revision.revision,
     currentRevisionId: revision.id,
+  });
+}
+
+/** Human-only RPC; not exposed as a model tool. CAS, human receipt and revision are atomic. */
+export async function confirmRecruitingBrief(
+  prisma: PrismaClient,
+  actor: Actor,
+  raw: unknown,
+  material?: RecruitingRoleMaterialContext,
+): Promise<RoleSnapshot> {
+  const input = ConfirmRecruitingBriefInput.parse(raw);
+  const loaded = await getRecruitingWorkspace(prisma, actor, { threadId: input.threadId });
+  if (loaded?.role.id !== input.roleId) throw new IsolationError();
+  if (loaded.role.revision !== input.expectedRevision) throw new RecruitingConflictError();
+  const artifacts = await loadRoleMaterials(prisma, actor, loaded.revision, material);
+  return prisma.$transaction(async (tx) => {
+    await tx.$queryRaw(
+      Prisma.sql`SELECT "id" FROM "threads" WHERE "id" = ${input.threadId} AND "spaceId" = ${actor.spaceId} AND "userId" = ${actor.userId} FOR UPDATE`,
+    );
+    const thread = await requireThread(tx, actor, input.threadId);
+    if (thread.activeRecruitingRoleId !== input.roleId) throw new IsolationError();
+    const role = await requireRole(tx, actor, input.roleId, true);
+    if (role.revision !== input.expectedRevision) throw new RecruitingConflictError();
+    const { revision } = await roleSnapshot(tx, actor, role);
+    if (!revision.brief)
+      throw new RecruitingPlaybookValidationError(
+        "Read the original material and prepare a sourced brief first.",
+      );
+    validateRecruitingBrief(revision.brief, revision);
+    await validateReadSources(tx, actor, definitionSources(revision), artifacts);
+    await validateBriefAuthorship(tx, {
+      ...revision,
+      expectedRevision: role.revision,
+      title: role.title,
+    });
+    if (recruitingBriefClarifications(revision.brief).length)
+      throw new RecruitingPlaybookValidationError(
+        "Resolve the material brief questions before confirmation.",
+      );
+    if (
+      revision.criteria.some(
+        (criterion) => criterion.priority === "hard" && criterion.definitionQuestions.length,
+      )
+    )
+      throw new RecruitingPlaybookValidationError(
+        "Resolve the material hard-criterion questions before confirmation.",
+      );
+    if (revision.brief.confirmation?.revision === role.revision) return { role, revision };
+    const nextRevision = role.revision + 1;
+    const message = await createThreadMessageInTransaction(tx, {
+      threadId: thread.id,
+      role: "user",
+      blocks: [{ kind: "text", text: `Confirm recruiting brief revision ${role.revision}.` }],
+    });
+    const brief = {
+      ...revision.brief,
+      confirmation: {
+        revision: nextRevision,
+        userId: actor.userId,
+        messageId: message.id,
+        confirmedAt: new Date().toISOString(),
+      },
+    };
+    const saved = await tx.recruitingRoleRevision.create({
+      data: {
+        roleId: role.id,
+        revision: nextRevision,
+        ...definitionData({ ...revision, expectedRevision: role.revision, title: role.title }),
+        brief: brief as Prisma.InputJsonValue,
+      },
+    });
+    const changed = await tx.recruitingRole.updateMany({
+      where: {
+        id: role.id,
+        spaceId: actor.spaceId,
+        userId: actor.userId,
+        revision: role.revision,
+        currentRevisionId: role.currentRevisionId,
+      },
+      data: { revision: nextRevision, currentRevisionId: saved.id },
+    });
+    if (changed.count !== 1) throw new RecruitingConflictError();
+    return roleSnapshot(tx, actor, {
+      ...role,
+      revision: nextRevision,
+      currentRevisionId: saved.id,
+    });
   });
 }
 
@@ -910,6 +1041,7 @@ export async function executeRecruitingRoleMutation(
       } else {
         const definition = {
           title: input.title,
+          brief: input.brief,
           sourceRefs: [...input.sourceRefs.filter((ref) => ref.id !== humanSource.id), humanSource],
           criteria: input.criteria.map((criterion) => ({
             ...criterion,
@@ -2540,6 +2672,7 @@ export async function prepareRecruitingResearchAction(
       toolName: input.kind === "create" ? "research" : "reply",
     });
     const { run, thread, workspace, server, source } = context;
+    requireRecruitingBriefConfirmation(workspace.revision);
     if (
       !server ||
       server.revision !== input.serverRevision ||
@@ -2694,6 +2827,11 @@ async function researchCanDispatch(
   context: Awaited<ReturnType<typeof researchContextInTransaction>>,
 ) {
   const { run, thread, workspace, task, action, server } = context;
+  try {
+    requireRecruitingBriefConfirmation(workspace.revision);
+  } catch {
+    return false;
+  }
   if (!task || !action || !server) throw new IsolationError();
   if (
     action.deliveryState !== "prepared" ||

@@ -12,7 +12,7 @@ import type {
   RecruitingSourceRef,
   Verdict,
 } from "@rakazo/contracts";
-import { readRecruitingResearchReadArtifact } from "@rakazo/core";
+import { readRecruitingResearchReadArtifact, recruitingBriefClarifications } from "@rakazo/core";
 import {
   Button,
   Card,
@@ -478,6 +478,8 @@ function RecruitingWorkspace({ threadId, botId, refreshSignal, onClose, onReveal
   const [refresh, setRefresh] = useState(0);
   const [loading, setLoading] = useState(true);
   const [failed, setFailed] = useState(false);
+  const [confirming, setConfirming] = useState(false);
+  const [confirmationFailed, setConfirmationFailed] = useState(false);
   const [candidateView, setCandidateView] = useState<"cards" | "table">("cards");
   const [selection, setSelection] = useState<{ roleId: string; candidateKey: string } | null>(null);
   useEffect(() => {
@@ -618,6 +620,75 @@ function RecruitingWorkspace({ threadId, botId, refreshSignal, onClose, onReveal
                     <Trans>Version {workspace.revision.revision}</Trans>
                   </p>
                 </div>
+                {workspace.revision.brief ? (
+                  <div className="space-y-2">
+                    <dl className="space-y-2">
+                      {workspace.revision.brief.fields.map((field) => (
+                        <div key={field.key}>
+                          <dt className="font-medium">{field.key.replaceAll("_", " ")}</dt>
+                          <dd>
+                            {field.value ?? field.state} ·{" "}
+                            {field.origin === "user_instruction" ? (
+                              <Trans>User instruction</Trans>
+                            ) : field.origin === "jd" ? (
+                              <Trans>JD</Trans>
+                            ) : field.origin === "hm" ? (
+                              <Trans>Hiring manager</Trans>
+                            ) : (
+                              <Trans>Assumption</Trans>
+                            )}
+                          </dd>
+                        </div>
+                      ))}
+                    </dl>
+                    {recruitingBriefClarifications(workspace.revision.brief).map((question) => (
+                      <p key={question.fieldKey}>{question.question}</p>
+                    ))}
+                    {workspace.revision.brief.confirmation?.revision ===
+                    workspace.revision.revision ? (
+                      <p>
+                        <Trans>Brief confirmed</Trans>
+                      </p>
+                    ) : (
+                      <Button
+                        disabled={
+                          confirming ||
+                          recruitingBriefClarifications(workspace.revision.brief).length > 0 ||
+                          workspace.revision.criteria.some(
+                            (criterion) =>
+                              criterion.priority === "hard" &&
+                              criterion.definitionQuestions.length > 0,
+                          )
+                        }
+                        onClick={async () => {
+                          setConfirming(true);
+                          setConfirmationFailed(false);
+                          try {
+                            await rpc.recruiting.confirmBrief({
+                              threadId,
+                              roleId: workspace.role.id,
+                              expectedRevision: workspace.revision.revision,
+                            });
+                            setRefresh((value) => value + 1);
+                          } catch {
+                            setConfirmationFailed(true);
+                          } finally {
+                            setConfirming(false);
+                          }
+                        }}
+                      >
+                        <Trans>Confirm brief</Trans>
+                      </Button>
+                    )}
+                    {confirmationFailed ? (
+                      <p role="alert">
+                        <Trans>
+                          Brief changed or could not be confirmed. Refresh and review it.
+                        </Trans>
+                      </p>
+                    ) : null}
+                  </div>
+                ) : null}
                 {(["hard", "preferred"] as const).map((priority) => (
                   <div key={priority} className="space-y-2">
                     <h4 className="font-medium">

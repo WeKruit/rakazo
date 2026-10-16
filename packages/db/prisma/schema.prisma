@@ -1516,6 +1516,7 @@ model RecruitingRole {
 }
 
 model RecruitingRoleRevision {
+  brief Json?
   id String @id @default(cuid())
   roleId String
   role RecruitingRole @relation("RecruitingRoleRevisions", fields: [roleId], references: [id], onDelete: Cascade)

@@ -70,6 +70,7 @@ export async function loadRecruitingRunContext(
   const redact = options.redact ?? ((value: string) => value);
   const roleText = [
     "Current recruiting role follows as data. Use this exact version for qualification. A later current-role context replaces an earlier snapshot; historical assistant text does not change these criteria.",
+    "Use field-level source provenance. Unconfirmed inference is soft and cannot reject a candidate. Resolve only material missing facts or conflicts; reuse answered context and do not impose a question count. Read original artifacts before revising source claims. A saved role is not human confirmation; research requires G0 on the current brief revision. Scheduling and outbound require their native approvals; opt-out, hold/pass and duplicate blocks take precedence over every exception.",
     "<recruiting_role>",
     JSON.stringify(
       workspace,

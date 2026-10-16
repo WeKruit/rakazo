@@ -24,6 +24,7 @@ const api = vi.hoisted(() => ({
   createRole: vi.fn(),
   bindRole: vi.fn(),
   reviseRole: vi.fn(),
+  confirmBrief: vi.fn(),
   list: vi.fn(),
   history: vi.fn(),
   update: vi.fn(),
@@ -1153,4 +1154,89 @@ it("switches Cards/Table with one original-revision detail, preserves a refreshe
   await view.click("candidate-2");
   expect(view.container.textContent).toContain("Different role evidence");
   expect(view.container.textContent).not.toContain("Built a compiler");
+});
+
+it("confirms only the reviewed brief revision through the human API", async () => {
+  const brief = {
+    fields: [
+      {
+        key: "salary_range",
+        value: "GBP 90,000 to 120,000",
+        origin: "jd",
+        state: "known",
+        consequential: true,
+        sourceRefIds: [source.id],
+      },
+    ],
+    questions: [],
+    rules: [],
+    confirmation: null,
+  };
+  api.getWorkspace.mockResolvedValue({
+    role,
+    revision: {
+      ...revision,
+      brief,
+      criteria: revision.criteria.map((criterion) => ({ ...criterion, definitionQuestions: [] })),
+    },
+  });
+  api.confirmBrief.mockResolvedValue({ role, revision });
+  const view = await mounted();
+  expect(api.confirmBrief).not.toHaveBeenCalled();
+  await view.click("Confirm brief");
+  expect(api.confirmBrief).toHaveBeenCalledWith({
+    threadId: "thread-1",
+    roleId: role.id,
+    expectedRevision: 2,
+  });
+});
+
+it("keeps an unresolved brief unconfirmed and preserves its view after a conflict", async () => {
+  const brief = {
+    fields: [
+      {
+        key: "salary_range",
+        value: null,
+        origin: "jd",
+        state: "conflict",
+        consequential: true,
+        sourceRefIds: [],
+      },
+    ],
+    questions: [],
+    rules: [],
+    confirmation: null,
+  };
+  api.getWorkspace.mockResolvedValue({
+    role,
+    revision: {
+      ...revision,
+      brief,
+      criteria: revision.criteria.map((criterion) => ({ ...criterion, definitionQuestions: [] })),
+    },
+  });
+  const view = await mounted();
+  const button = [...view.container.querySelectorAll("button")].find(
+    (button) => button.textContent === "Confirm brief",
+  );
+  expect(button?.disabled).toBe(true);
+  brief.fields[0] = {
+    ...brief.fields[0]!,
+    state: "known",
+    value: "GBP 90,000 to 120,000",
+  } as never;
+  api.getWorkspace.mockResolvedValue({
+    role,
+    revision: {
+      ...revision,
+      brief,
+      criteria: revision.criteria.map((criterion) => ({ ...criterion, definitionQuestions: [] })),
+    },
+  });
+  await view.render("thread-1", 1);
+  api.confirmBrief.mockRejectedValueOnce(new Error("Revision changed"));
+  await view.click("Confirm brief");
+  expect(view.container.textContent).toContain("Brief changed or could not be confirmed");
+  expect(view.container.textContent).toContain("GBP 90,000 to 120,000");
+  expect(view.container.textContent).not.toContain("Brief confirmed");
 });

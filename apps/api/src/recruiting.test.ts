@@ -18,6 +18,7 @@ vi.mock("@rakazo/db", async (importOriginal) => {
   const actual = await importOriginal<typeof DbExports>();
   return {
     ...actual,
+    confirmRecruitingBrief: vi.fn(),
     createRecruitingRole: vi.fn(),
     bindRecruitingRole: vi.fn(),
     getRecruitingWorkspace: vi.fn(),
@@ -299,4 +300,23 @@ describe("native recruiting RPC", () => {
     ).rejects.toMatchObject({ code: "BAD_REQUEST" });
     expect(db.createRecruitingRole).toHaveBeenCalledTimes(writesBefore);
   });
+});
+
+it("uses the existing authenticated wrapper for human confirmation and sanitizes foreign access", async () => {
+  vi.mocked(db.confirmRecruitingBrief).mockRejectedValueOnce(
+    new IsolationError("private source details"),
+  );
+  await expect(
+    api.confirmRecruitingBrief(prisma, actor, {
+      threadId: "thread",
+      roleId: "role",
+      expectedRevision: 1,
+    }),
+  ).rejects.toMatchObject({ code: "NOT_FOUND", message: "Resource not found" });
+  expect(db.confirmRecruitingBrief).toHaveBeenLastCalledWith(
+    prisma,
+    actor,
+    { threadId: "thread", roleId: "role", expectedRevision: 1 },
+    undefined,
+  );
 });
