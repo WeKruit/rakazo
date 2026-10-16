@@ -413,6 +413,13 @@ describePostgres("recruiting domain (PostgreSQL)", () => {
     await prisma.user.deleteMany({ where: { id: { in: [userId, otherUserId] } } });
     await close();
   });
+  it("keeps a native interactive transaction open beyond five seconds", async () => {
+    const rows = await prisma.$transaction(async (tx) => {
+      await tx.$executeRaw`SELECT pg_sleep(5.1)`;
+      return tx.$queryRaw<{ alive: number }[]>`SELECT 1::int AS alive`;
+    });
+    expect(rows).toEqual([{ alive: 1 }]);
+  }, 15_000);
   it("creates an independent identity, revision one and thread binding atomically", async () => {
     expect(recruiting.createRecruitingRole).toBeTypeOf("function");
     const first = await recruiting.createRecruitingRole(prisma, actor, roleInput());
