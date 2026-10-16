@@ -6,22 +6,26 @@ import type {
   RecruitingAssessment,
   RecruitingRole,
   RecruitingRoleRevision,
+  RecruitingRoleToolInput,
   RecruitingSourceRef,
   ReviseRecruitingRoleInput as ReviseRoleInput,
   SaveRecruitingAssessmentInput as SaveAssessmentInput,
 } from "@rakazo/contracts";
 import {
   CreateRecruitingRoleInput,
+  ProductEventSchema,
   RecruitingAssessmentSchema,
   RecruitingResearchActionSchema,
   RecruitingResearchTaskSchema,
   RecruitingRoleRevisionSchema,
   RecruitingRoleSchema,
+  RecruitingRoleToolInputSchema,
   ReviseRecruitingRoleInput,
   SaveRecruitingAssessmentInput,
 } from "@rakazo/contracts";
 import type { PrismaClient } from "./client.js";
 import { Prisma } from "./client.js";
+import { appendEventInTransaction } from "./events.js";
 import { IsolationError, scoped } from "./scope.js";
 
 type Tx = Prisma.TransactionClient;
@@ -197,29 +201,31 @@ export async function createRecruitingRole(
   untrusted: CreateRoleInput,
 ): Promise<RoleSnapshot> {
   const input = CreateRecruitingRoleInput.parse(untrusted);
-  return prisma.$transaction(async (tx) => {
-    await requireThread(tx, actor, input.sourceThreadId);
-    await validateDefinition(tx, actor, input);
-    const role = await tx.recruitingRole.create({
-      data: {
-        id: randomUUID(),
-        spaceId: actor.spaceId,
-        userId: actor.userId,
-        sourceThreadId: input.sourceThreadId,
-        title: input.title,
-        revision: 1,
-        currentRevisionId: randomUUID(),
-      },
-    });
-    await tx.recruitingRoleRevision.create({
-      data: { id: role.currentRevisionId, roleId: role.id, revision: 1, ...definitionData(input) },
-    });
-    await tx.thread.update({
-      where: { id: input.sourceThreadId },
-      data: { activeRecruitingRoleId: role.id },
-    });
-    return roleSnapshot(tx, actor, role);
+  return prisma.$transaction((tx) => createRoleInTransaction(tx, actor, input));
+}
+
+async function createRoleInTransaction(tx: Tx, actor: Actor, input: CreateRoleInput) {
+  await requireThread(tx, actor, input.sourceThreadId);
+  await validateDefinition(tx, actor, input);
+  const role = await tx.recruitingRole.create({
+    data: {
+      id: randomUUID(),
+      spaceId: actor.spaceId,
+      userId: actor.userId,
+      sourceThreadId: input.sourceThreadId,
+      title: input.title,
+      revision: 1,
+      currentRevisionId: randomUUID(),
+    },
   });
+  await tx.recruitingRoleRevision.create({
+    data: { id: role.currentRevisionId, roleId: role.id, revision: 1, ...definitionData(input) },
+  });
+  await tx.thread.update({
+    where: { id: input.sourceThreadId },
+    data: { activeRecruitingRoleId: role.id },
+  });
+  return roleSnapshot(tx, actor, role);
 }
 
 export async function bindRecruitingRole(
@@ -227,15 +233,21 @@ export async function bindRecruitingRole(
   actor: Actor,
   input: { threadId: string; roleId: string | null },
 ): Promise<RoleSnapshot | null> {
-  return prisma.$transaction(async (tx) => {
-    await requireThread(tx, actor, input.threadId);
-    const role = input.roleId ? await requireRole(tx, actor, input.roleId) : null;
-    await tx.thread.update({
-      where: { id: input.threadId },
-      data: { activeRecruitingRoleId: role?.id ?? null },
-    });
-    return role ? roleSnapshot(tx, actor, role) : null;
+  return prisma.$transaction((tx) => bindRoleInTransaction(tx, actor, input));
+}
+
+async function bindRoleInTransaction(
+  tx: Tx,
+  actor: Actor,
+  input: { threadId: string; roleId: string | null },
+) {
+  await requireThread(tx, actor, input.threadId);
+  const role = input.roleId ? await requireRole(tx, actor, input.roleId) : null;
+  await tx.thread.update({
+    where: { id: input.threadId },
+    data: { activeRecruitingRoleId: role?.id ?? null },
   });
+  return role ? roleSnapshot(tx, actor, role) : null;
 }
 
 export async function getRecruitingWorkspace(
@@ -260,30 +272,365 @@ export async function reviseRecruitingRole(
   untrusted: ReviseRoleInput,
 ): Promise<RoleSnapshot> {
   const input = ReviseRecruitingRoleInput.parse(untrusted);
-  return prisma.$transaction(async (tx) => {
-    const role = await requireRole(tx, actor, input.roleId, true);
-    if (role.revision !== input.expectedRevision) throw new RecruitingConflictError();
-    await validateDefinition(tx, actor, input);
-    const revision = await tx.recruitingRoleRevision.create({
-      data: { roleId: role.id, revision: role.revision + 1, ...definitionData(input) },
-    });
-    const changed = await tx.recruitingRole.updateMany({
+  return prisma.$transaction((tx) => reviseRoleInTransaction(tx, actor, input));
+}
+
+async function reviseRoleInTransaction(tx: Tx, actor: Actor, input: ReviseRoleInput) {
+  const role = await requireRole(tx, actor, input.roleId, true);
+  if (role.revision !== input.expectedRevision) throw new RecruitingConflictError();
+  await validateDefinition(tx, actor, input);
+  const revision = await tx.recruitingRoleRevision.create({
+    data: { roleId: role.id, revision: role.revision + 1, ...definitionData(input) },
+  });
+  const changed = await tx.recruitingRole.updateMany({
+    where: {
+      id: role.id,
+      spaceId: actor.spaceId,
+      userId: actor.userId,
+      revision: input.expectedRevision,
+      currentRevisionId: role.currentRevisionId,
+    },
+    data: { title: input.title, revision: revision.revision, currentRevisionId: revision.id },
+  });
+  if (changed.count !== 1) throw new RecruitingConflictError();
+  return roleSnapshot(tx, actor, {
+    ...role,
+    title: input.title,
+    revision: revision.revision,
+    currentRevisionId: revision.id,
+  });
+}
+
+export type RecruitingRoleMutationInput = Exclude<RecruitingRoleToolInput, { operation: "read" }>;
+export type RecruitingRoleToolResult = {
+  status: "current" | "saved" | "needs_clarification";
+  workspace: RoleSnapshot | null;
+  source: RecruitingSourceRef | null;
+  changed: boolean;
+};
+
+async function lockLiveRecruitingRun(tx: Tx, actor: Actor, runId: string) {
+  // Match native send/steering/stop: lock the thread before its run.
+  const lockedThreads = await tx.$queryRaw<{ id: string }[]>(
+    Prisma.sql`SELECT "id" FROM "threads" WHERE "id" = (SELECT "threadId" FROM "runs" WHERE "id" = ${runId} AND "spaceId" = ${actor.spaceId} AND "userId" = ${actor.userId}) AND "spaceId" = ${actor.spaceId} AND "userId" = ${actor.userId} FOR UPDATE`,
+  );
+  if (lockedThreads.length !== 1) throw new IsolationError();
+  await tx.$queryRaw(
+    Prisma.sql`SELECT "id" FROM "runs" WHERE "id" = ${runId} AND "spaceId" = ${actor.spaceId} AND "userId" = ${actor.userId} FOR UPDATE`,
+  );
+  const run = scoped(
+    actor,
+    await tx.run.findFirst({
+      where: { id: runId, spaceId: actor.spaceId, userId: actor.userId },
+      include: { bot: { select: { spaceId: true, userId: true } } },
+    }),
+  );
+  scoped(actor, run.bot);
+  if (run.status !== "running" || run.threadId !== lockedThreads[0]!.id) throw new IsolationError();
+  const thread = await requireThread(tx, actor, run.threadId);
+  if (thread.botId && thread.botId !== run.botId) throw new IsolationError();
+  if (
+    thread.groupId &&
+    !(await tx.chatGroupMember.findFirst({ where: { groupId: thread.groupId, botId: run.botId } }))
+  )
+    throw new IsolationError();
+  if (
+    thread.externalConversationId &&
+    !(await tx.externalConversation.findFirst({
       where: {
-        id: role.id,
+        id: thread.externalConversationId,
+        botId: run.botId,
         spaceId: actor.spaceId,
         userId: actor.userId,
-        revision: input.expectedRevision,
-        currentRevisionId: role.currentRevisionId,
       },
-      data: { title: input.title, revision: revision.revision, currentRevisionId: revision.id },
+    }))
+  )
+    throw new IsolationError();
+  return { run, thread };
+}
+
+const humanMessageInclude = { externalTranscriptFor: { select: { id: true } } } as const;
+type SourceMessage = Prisma.MessageGetPayload<{ include: typeof humanMessageInclude }>;
+
+function isNativeHumanMessage(message: SourceMessage): boolean {
+  return (
+    message.role === "user" &&
+    message.botId === null &&
+    message.externalTranscriptFor === null &&
+    Array.isArray(message.blocks) &&
+    message.blocks.length > 0 &&
+    message.blocks.every(
+      (block) =>
+        block &&
+        typeof block === "object" &&
+        "kind" in block &&
+        ["text", "file", "image"].includes(String(block.kind)),
+    )
+  );
+}
+
+async function requireRunSource(
+  tx: Tx,
+  actor: Actor,
+  run: { id: string; botId: string; threadId: string; sourceMessageId: string | null },
+  sourceMessageId: string | null,
+) {
+  if (!sourceMessageId) throw new IsolationError();
+  const source = await tx.message.findFirst({
+    where: { id: sourceMessageId, threadId: run.threadId },
+    include: humanMessageInclude,
+  });
+  if (!source) throw new IsolationError();
+  const steering = await tx.steeringMessage.findMany({
+    where: {
+      runId: run.id,
+      botId: run.botId,
+      userId: actor.userId,
+      claimedAt: { not: null },
+      message: { threadId: run.threadId },
+    },
+    include: { message: { include: humanMessageInclude } },
+  });
+  if (source.id !== run.sourceMessageId && !steering.some((item) => item.messageId === source.id))
+    throw new IsolationError();
+  return { source, steering };
+}
+
+function compareHumanMessages(left: SourceMessage, right: SourceMessage): number {
+  return left.threadId === right.threadId
+    ? left.seq - right.seq
+    : left.createdAt.getTime() - right.createdAt.getTime();
+}
+
+export async function executeRecruitingRoleMutation(
+  prisma: PrismaClient,
+  actor: Actor,
+  context: { runId: string; sourceMessageId: string | null },
+  untrusted: RecruitingRoleMutationInput,
+): Promise<RecruitingRoleToolResult> {
+  const input = RecruitingRoleToolInputSchema.parse(untrusted);
+  if (input.operation === "read") throw new IsolationError();
+  return prisma.$transaction(async (tx) => {
+    const { run, thread } = await lockLiveRecruitingRun(tx, actor, context.runId);
+    const { source, steering } = await requireRunSource(tx, actor, run, context.sourceMessageId);
+    const original =
+      run.sourceMessageId === source.id
+        ? source
+        : await tx.message.findUnique({
+            where: { id: run.sourceMessageId ?? "" },
+            include: humanMessageInclude,
+          });
+    if (
+      !isNativeHumanMessage(source) ||
+      (source.id === run.sourceMessageId &&
+        !["user", "follow_up", "reaction"].includes(run.trigger) &&
+        !steering.some((item) => item.messageId === source.id)) ||
+      (original &&
+        isNativeHumanMessage(original) &&
+        original.threadId === source.threadId &&
+        original.seq > source.seq) ||
+      steering.some((item) => isNativeHumanMessage(item.message) && item.message.seq > source.seq)
+    )
+      throw new IsolationError();
+    const quoteIndex = (source.blocks as { kind: string; text?: string }[]).findIndex(
+      (block) =>
+        block.kind === "text" &&
+        typeof block.text === "string" &&
+        block.text.includes(input.intent.quote),
+    );
+    if (quoteIndex < 0) throw new IsolationError();
+    const humanSource: RecruitingSourceRef = {
+      id: `human-message:${source.id}`,
+      kind: "original_material",
+      anchor: { kind: "message", messageId: source.id, locator: `blocks[${quoteIndex}].text` },
+      readState: "read",
+      readAt: new Date().toISOString(),
+      quote: input.intent.quote,
+    };
+    const current = thread.activeRecruitingRoleId
+      ? await roleSnapshot(
+          tx,
+          actor,
+          await requireRole(tx, actor, thread.activeRecruitingRoleId, true),
+        )
+      : null;
+    if (input.operation === "revise") {
+      if (current?.role.id !== input.roleId) throw new IsolationError();
+      if (current.role.revision !== input.expectedRevision) throw new RecruitingConflictError();
+      const sourceIds = current.revision.sourceRefs.flatMap((ref) =>
+        ref.anchor.kind === "message" ? [ref.anchor.messageId] : [],
+      );
+      const previous = await tx.message.findMany({
+        where: { id: { in: sourceIds } },
+        include: humanMessageInclude,
+      });
+      if (
+        previous.some(
+          (message) => isNativeHumanMessage(message) && compareHumanMessages(message, source) > 0,
+        )
+      )
+        throw new RecruitingConflictError();
+    }
+    if (input.intent.basis === "inferred")
+      return {
+        status: "needs_clarification",
+        workspace: current,
+        source: humanSource,
+        changed: false,
+      };
+    let workspace: RoleSnapshot | null;
+    if (input.operation === "bind") {
+      workspace = await bindRoleInTransaction(tx, actor, {
+        threadId: run.threadId,
+        roleId: input.roleId,
+      });
+    } else {
+      const definition = {
+        title: input.title,
+        sourceRefs: [...input.sourceRefs.filter((ref) => ref.id !== humanSource.id), humanSource],
+        criteria: input.criteria.map((criterion) => ({
+          ...criterion,
+          sourceRefs: criterion.sourceRefs.length ? criterion.sourceRefs : [humanSource],
+        })),
+        preferences: input.preferences,
+        definitionQuestions: input.definitionQuestions,
+      };
+      workspace =
+        input.operation === "create"
+          ? await createRoleInTransaction(
+              tx,
+              actor,
+              CreateRecruitingRoleInput.parse({
+                ...definition,
+                expectedRevision: 0,
+                sourceThreadId: run.threadId,
+              }),
+            )
+          : await reviseRoleInTransaction(
+              tx,
+              actor,
+              ReviseRecruitingRoleInput.parse({
+                ...definition,
+                roleId: input.roleId,
+                expectedRevision: input.expectedRevision,
+              }),
+            );
+    }
+    return {
+      status: "saved",
+      workspace,
+      source: humanSource,
+      changed: input.operation !== "bind" || current?.role.id !== (workspace?.role.id ?? undefined),
+    };
+  });
+}
+
+export async function recordRecruitingContextAdoption(
+  prisma: PrismaClient,
+  actor: Actor,
+  input: {
+    runId: string;
+    threadId: string;
+    botId: string;
+    roleId: string;
+    roleRevisionId: string;
+    sourceMessageId?: string | null;
+    artifact: {
+      name: string;
+      mimeType: string;
+      size: number;
+      hash: string;
+      storageKey: string;
+      clientNonce: string;
+    };
+  },
+) {
+  return prisma.$transaction(async (tx) => {
+    const { run, thread } = await lockLiveRecruitingRun(tx, actor, input.runId);
+    if (thread.id !== input.threadId || run.botId !== input.botId) throw new IsolationError();
+    if (thread.activeRecruitingRoleId !== input.roleId) throw new RecruitingConflictError();
+    const role = await requireRole(tx, actor, input.roleId, true);
+    if (role.currentRevisionId !== input.roleRevisionId) throw new RecruitingConflictError();
+    // Reading the snapshot validates the exact version and all enduring source ACLs.
+    await roleSnapshot(tx, actor, role);
+    if (input.sourceMessageId) await requireRunSource(tx, actor, run, input.sourceMessageId);
+    const existing = await tx.artifact.findUnique({
+      where: {
+        spaceId_userId_clientNonce: {
+          spaceId: actor.spaceId,
+          userId: actor.userId,
+          clientNonce: input.artifact.clientNonce,
+        },
+      },
     });
-    if (changed.count !== 1) throw new RecruitingConflictError();
-    return roleSnapshot(tx, actor, {
-      ...role,
-      title: input.title,
-      revision: revision.revision,
-      currentRevisionId: revision.id,
+    if (existing) {
+      if (
+        existing.runId !== run.id ||
+        existing.botId !== run.botId ||
+        existing.groupId !== thread.groupId ||
+        existing.name !== input.artifact.name ||
+        existing.mimeType !== input.artifact.mimeType ||
+        existing.version !== 1 ||
+        existing.rootArtifactId !== null
+      )
+        throw new IsolationError();
+      const row = await tx.event.findFirst({
+        where: {
+          spaceId: actor.spaceId,
+          threadId: thread.id,
+          botId: run.botId,
+          runId: run.id,
+          type: "recruiting.context.adopted",
+          payload: { path: ["contextArtifact", "artifactId"], equals: existing.id },
+        },
+      });
+      if (!row) throw new IsolationError();
+      const event = ProductEventSchema.parse({ ...row, createdAt: row.createdAt.toISOString() });
+      const payload = event.payload as {
+        roleId: string;
+        roleRevisionId: string;
+        contextArtifact: RecruitingArtifactRef;
+      };
+      if (
+        payload.roleId !== role.id ||
+        payload.roleRevisionId !== role.currentRevisionId ||
+        payload.contextArtifact.artifactId !== existing.id ||
+        payload.contextArtifact.sha256 !== existing.hash
+      )
+        throw new IsolationError();
+      // The first frozen bytes win; the adapter verifies their hash and semantic context.
+      return { artifact: existing, event, created: false };
+    }
+    const artifact = await tx.artifact.create({
+      data: {
+        ...input.artifact,
+        spaceId: actor.spaceId,
+        userId: actor.userId,
+        botId: run.botId,
+        groupId: thread.groupId,
+        runId: run.id,
+        rootArtifactId: null,
+        version: 1,
+      },
     });
+    const row = await appendEventInTransaction(tx, {
+      spaceId: actor.spaceId,
+      threadId: thread.id,
+      botId: run.botId,
+      runId: run.id,
+      type: "recruiting.context.adopted",
+      payload: {
+        roleId: role.id,
+        roleRevisionId: role.currentRevisionId,
+        contextArtifact: { artifactId: artifact.id, sha256: artifact.hash },
+      },
+    });
+    await tx.run.updateMany({
+      where: { id: run.id, initialRecruitingRoleRevisionId: null },
+      data: { initialRecruitingRoleRevisionId: role.currentRevisionId },
+    });
+    const event = ProductEventSchema.parse({ ...row, createdAt: row.createdAt.toISOString() });
+    return { artifact, event, created: true };
   });
 }
 

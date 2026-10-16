@@ -298,6 +298,40 @@ export const ReviseRecruitingRoleInput = z.strictObject({
 });
 export type ReviseRecruitingRoleInput = z.infer<typeof ReviseRecruitingRoleInput>;
 
+const RoleToolIntent = z.strictObject({ basis: z.enum(["direct", "inferred"]), quote: Text });
+const RoleToolDefinition = {
+  ...RoleDefinition,
+  // Runtime adds the verified human source; supplied JD/material references retain their ACLs.
+  sourceRefs: SourceRefs,
+  criteria: z
+    .array(RecruitingCriterionSchema.unwrap().extend({ sourceRefs: SourceRefs }))
+    .readonly(),
+  intent: RoleToolIntent,
+};
+
+export const RecruitingRoleToolInputSchema = z.discriminatedUnion("operation", [
+  z.strictObject({ operation: z.literal("read") }),
+  z.strictObject({
+    operation: z.literal("create"),
+    expectedRevision: z.literal(0),
+    title: Text,
+    ...RoleToolDefinition,
+  }),
+  z.strictObject({
+    operation: z.literal("revise"),
+    roleId: RecruitingId,
+    expectedRevision: Revision,
+    title: Text,
+    ...RoleToolDefinition,
+  }),
+  z.strictObject({
+    operation: z.literal("bind"),
+    roleId: RecruitingId.nullable(),
+    intent: RoleToolIntent,
+  }),
+]);
+export type RecruitingRoleToolInput = z.infer<typeof RecruitingRoleToolInputSchema>;
+
 export const PrepareRecruitingResearchActionInput = z.strictObject({
   ...ResearchRequest,
   /** Expected role revision; later dispatch checks the current role and adoption atomically. */

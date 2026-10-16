@@ -75,6 +75,53 @@ const action = {
 };
 
 describe("recruiting contracts", () => {
+  it("accepts only the fields for each native role operation", () => {
+    const intent = { basis: "direct", quote: "Create a new role" };
+    const value = {
+      operation: "create",
+      expectedRevision: 0,
+      title: role.title,
+      ...definition,
+      sourceRefs: [],
+      criteria: [{ ...criterion, sourceRefs: [] }],
+      intent,
+    };
+    for (const input of [
+      value,
+      { ...value, operation: "revise", roleId: role.id, expectedRevision: 1 },
+      { operation: "read" },
+      { operation: "bind", roleId: role.id, intent },
+      { operation: "bind", roleId: null, intent: { ...intent, basis: "inferred" } },
+    ]) {
+      expect(contracts.RecruitingRoleToolInputSchema?.safeParse(input).success).toBe(true);
+    }
+    for (const field of [
+      "actor",
+      "ownerId",
+      "spaceId",
+      "userId",
+      "runId",
+      "sourceMessageId",
+      "sourceThreadId",
+      "threadId",
+    ]) {
+      expect(
+        contracts.RecruitingRoleToolInputSchema.safeParse({ ...value, [field]: "forged" }).success,
+      ).toBe(false);
+    }
+    for (const input of [
+      { ...value, expectedRevision: 1 },
+      { ...value, operation: "revise" },
+      { ...value, intent: { basis: "direct", quote: " " } },
+      { ...value, intent: { basis: "assistant", quote: "Create" } },
+      { operation: "read", roleId: role.id },
+      { operation: "bind", roleId: role.id },
+      { operation: "bind", roleId: role.id, intent, threadId: role.sourceThreadId },
+    ]) {
+      expect(contracts.RecruitingRoleToolInputSchema.safeParse(input).success).toBe(false);
+    }
+  });
+
   it("validates a role and its exact current revision", () => {
     expect(contracts.RecruitingRoleSchema?.safeParse(role).success).toBe(true);
     for (const invalid of [

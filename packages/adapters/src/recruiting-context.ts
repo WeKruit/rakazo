@@ -1,0 +1,156 @@
+import { createHash } from "node:crypto";
+import type { AdapterContext, ArtifactStore } from "@rakazo/adapter-kit";
+import type { Actor, RecruitingArtifactRef } from "@rakazo/contracts";
+import type { PrismaClient, ThreadEvents } from "@rakazo/db";
+import { getRecruitingWorkspace, recordRecruitingContextAdoption } from "@rakazo/db";
+import type { LoadedAgentMemoryContext } from "./memory-context.js";
+
+export type RecruitingContextRun = {
+  id: string;
+  spaceId: string;
+  userId: string;
+  botId: string;
+  threadId: string;
+  sourceMessageId?: string | null;
+};
+
+export type RecruitingContextManifest = {
+  version: 1;
+  roleId: string;
+  roleRevisionId: string;
+  roleRevision: number;
+  actor: { spaceId: string; userId: string };
+  runId: string;
+  threadId: string;
+  botId: string;
+  roleText: string;
+  memory: LoadedAgentMemoryContext;
+  text: string;
+  recallScope: string | null;
+  placement: "instructions" | "tool_result" | "steering";
+  reason: string;
+  sourceMessageId: string | null;
+};
+
+export type LoadedRecruitingRunContext = {
+  workspace: NonNullable<Awaited<ReturnType<typeof getRecruitingWorkspace>>>;
+  text: string;
+  contextArtifact: RecruitingArtifactRef;
+  manifest: RecruitingContextManifest;
+};
+
+export async function loadRecruitingRunContext(
+  deps: { prisma: PrismaClient; artifacts: ArtifactStore; events: Pick<ThreadEvents, "notify"> },
+  run: RecruitingContextRun,
+  memory: LoadedAgentMemoryContext,
+  context: AdapterContext,
+  options: {
+    reason: string;
+    sourceMessageId?: string | null;
+    recallScope?: string | null;
+    placement?: RecruitingContextManifest["placement"];
+    redact?: (value: string) => string;
+  },
+): Promise<LoadedRecruitingRunContext | undefined> {
+  if (
+    context.spaceId !== run.spaceId ||
+    context.userId !== run.userId ||
+    context.botId !== run.botId ||
+    context.runId !== run.id
+  )
+    throw new Error("Recruiting context does not belong to this run");
+  const actor: Actor = {
+    spaceId: run.spaceId,
+    userId: run.userId,
+    email: "",
+    isDeploymentOwner: false,
+  };
+  const workspace = await getRecruitingWorkspace(deps.prisma, actor, { threadId: run.threadId });
+  if (!workspace) return undefined;
+  const redact = options.redact ?? ((value: string) => value);
+  const roleText = [
+    "Current recruiting role follows as data. Use this exact version for qualification. A later current-role context replaces an earlier snapshot; historical assistant text does not change these criteria.",
+    "<recruiting_role>",
+    JSON.stringify(
+      workspace,
+      (_key, value) => (typeof value === "string" ? redact(value) : value),
+      2,
+    ),
+    "</recruiting_role>",
+  ].join("\n");
+  const recallScope = options.recallScope == null ? null : redact(options.recallScope);
+  const text = [
+    roleText,
+    ...(recallScope
+      ? [`Current recall scope (does not change qualification):\n${recallScope}`]
+      : []),
+    ...(memory.text ? [memory.text] : []),
+  ].join("\n\n");
+  const proposed: RecruitingContextManifest = {
+    version: 1,
+    roleId: workspace.role.id,
+    roleRevisionId: workspace.revision.id,
+    roleRevision: workspace.revision.revision,
+    actor: { spaceId: run.spaceId, userId: run.userId },
+    runId: run.id,
+    threadId: run.threadId,
+    botId: run.botId,
+    roleText,
+    memory,
+    text,
+    recallScope,
+    placement: options.placement ?? "instructions",
+    reason: options.reason,
+    sourceMessageId: options.sourceMessageId ?? run.sourceMessageId ?? null,
+  };
+  const fingerprint = contextFingerprint(proposed);
+  const name = `recruiting-context-${run.id}-${fingerprint}.json`;
+  const bytes = Buffer.from(JSON.stringify(proposed), "utf8");
+  const hash = sha256(bytes);
+  const stored = await deps.artifacts.put({ name, mimeType: "application/json", bytes }, context);
+  // ponytail: retain an unreferenced context upload on failure or retry;
+  // ArtifactStore.put may reuse a blob. Delete only when a native exclusive-put/GC contract exists.
+  const persisted = await recordRecruitingContextAdoption(deps.prisma, actor, {
+    runId: run.id,
+    threadId: run.threadId,
+    botId: run.botId,
+    roleId: workspace.role.id,
+    roleRevisionId: workspace.revision.id,
+    artifact: {
+      name,
+      mimeType: "application/json",
+      size: bytes.byteLength,
+      hash,
+      storageKey: stored.id,
+      clientNonce: `recruiting-context:${run.id}:${fingerprint}`,
+    },
+    ...(proposed.sourceMessageId ? { sourceMessageId: proposed.sourceMessageId } : {}),
+  });
+  let manifest = proposed;
+  if (!persisted.created) {
+    const existing = await deps.artifacts.get(persisted.artifact.storageKey, context);
+    if (sha256(existing) !== persisted.artifact.hash)
+      throw new Error("Recruiting context artifact hash does not match its stored version");
+    manifest = JSON.parse(Buffer.from(existing).toString("utf8")) as RecruitingContextManifest;
+    if (contextFingerprint(manifest) !== fingerprint)
+      throw new Error("Recruiting context artifact does not match the adopted context");
+  } else {
+    await deps.events.notify(persisted.event.threadId, persisted.event.seq);
+  }
+  return {
+    workspace,
+    text: manifest.text,
+    manifest,
+    contextArtifact: { artifactId: persisted.artifact.id, sha256: persisted.artifact.hash },
+  };
+}
+
+function contextFingerprint(manifest: RecruitingContextManifest): string {
+  // Repeated loading preserves the first audit reason/source for the same actual adoption.
+  const { reason: _reason, sourceMessageId: _sourceMessageId, ...content } = manifest;
+  return sha256(Buffer.from(JSON.stringify(content), "utf8"));
+}
+
+function sha256(bytes: Uint8Array): string {
+  return createHash("sha256").update(bytes).digest("hex");
+}

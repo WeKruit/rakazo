@@ -18,8 +18,12 @@ interface ProjectionEntry {
   catalogIds?: string[];
 }
 const projections = new Map<string, ProjectionEntry[]>();
-/** A skill read is the source text the agent rewrites with skill_update; never shorten it. */
-export const VERBATIM_TOOL_RESULTS: ReadonlySet<string> = new Set(["skill_read"]);
+/** Replacements need complete source text; role state is authoritative, not a summary. */
+export const VERBATIM_TOOL_RESULTS: ReadonlySet<string> = new Set([
+  "skill_read",
+  "read_memory",
+  "recruiting_role",
+]);
 // History reads are exact evidence and keep their own offset-aware shortening elsewhere.
 const UNSHORTENED_TOOL_RESULTS = new Set([
   "read_history",
@@ -342,6 +346,15 @@ export function createRuntimeContextPolicy(
         }
         protectedIndexes.push(messages.indexOf(summary));
       }
+      const currentRoleIndex = messages.findLastIndex((message) => {
+        if (message.role !== "toolResult" || message.toolName !== "recruiting_role") return false;
+        try {
+          return typeof JSON.parse(text(message))?.roleContext === "string";
+        } catch {
+          return false;
+        }
+      });
+      if (currentRoleIndex >= 0) protectedIndexes.push(currentRoleIndex);
       // Completed loop steps remain useful task state even when their verbose
       // evidence is old. Keep the protocol and controls so dropping large bodies
       // does not make the agent restart work it has already completed.
@@ -374,6 +387,7 @@ export function createRuntimeContextPolicy(
         protectedIndexes,
         cacheWarmth: predictedCache,
         recentExchanges: retainShortHistory || standaloneHistoryFallback ? messages.length : 8,
+        verbatimToolResults: VERBATIM_TOOL_RESULTS,
       });
       const shortenedStructuredResults = selected.messages.filter((message) => {
         if (message.role !== "toolResult") return false;

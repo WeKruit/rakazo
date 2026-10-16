@@ -1882,9 +1882,9 @@ export function jsonSchemaParameters(
   schema: Record<string, unknown>,
   options: FieldOptions = {},
 ): ReturnType<typeof Type.Object> {
-  // Keep intersections intact until parametersFor flattens root combinators.
-  // Rebuilding only properties here drops allOf-only fields and their constraints.
-  if (Array.isArray(schema.allOf)) {
+  // Preserve local references and intersections until parametersFor flattens root combinators.
+  // Rebuilding properties loses recursive definitions and allOf-only constraints.
+  if (schema.$defs || Array.isArray(schema.allOf)) {
     return Type.Unsafe({ ...schema, ...options }) as unknown as ReturnType<typeof Type.Object>;
   }
   // Top-level oneOf/anyOf (e.g. request_secret's credential XOR connectionId)

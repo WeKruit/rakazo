@@ -30,6 +30,8 @@ export interface ContextSelectionOptions {
   cacheWarmth?: "likely-warm" | "likely-cold" | "unknown";
   /** Keep tool protocol intact while shortening oversized result bodies. */
   truncateToolResults?: boolean;
+  /** Full replacement inputs and authoritative role state must remain exact. */
+  verbatimToolResults?: ReadonlySet<string>;
 }
 export class ContextBudgetError extends Error {
   constructor(
@@ -379,6 +381,8 @@ export function selectContext<T extends ContextMessage>(
               (part) => part?.type === "toolCall" && part.id === message.toolCallId,
             )
           : undefined;
+        if (options.verbatimToolResults?.has(nativeCall?.name ?? message.toolName ?? ""))
+          return message;
         const text = shortenToolResultText(
           serialized,
           size,

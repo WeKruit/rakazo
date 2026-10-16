@@ -1,9 +1,54 @@
+import type { ToolCall } from "@earendil-works/pi-ai";
+import { validateToolArguments } from "@earendil-works/pi-ai";
 import { describe, expect, it } from "vitest";
 import { builtinAgentTools } from "./builtin-tools.js";
 import { parseConnectorToolArgs } from "./lazy-tool-catalog.js";
 import { jsonSchemaParameters, parametersFor } from "./pi-runtime.js";
 
 describe("jsonSchemaParameters", () => {
+  it("preserves recursive recruiting criteria through the native Pi tool schema", () => {
+    const tool = builtinAgentTools.find((tool) => tool.name === "recruiting_role")!;
+    const parameters = parametersFor(tool);
+    const wire = JSON.parse(JSON.stringify(parameters));
+    const input: ToolCall["arguments"] = {
+      operation: "create",
+      expectedRevision: 0,
+      title: "Synthetic engineer",
+      sourceRefs: [],
+      criteria: [
+        {
+          id: "geometry",
+          priority: "hard",
+          sourceRefs: [],
+          definitionQuestions: [],
+          expression: {
+            kind: "all",
+            items: [
+              { kind: "atom", id: "implementation", statement: "Personal implementation" },
+              {
+                kind: "not",
+                item: { kind: "atom", id: "xml", statement: "Only XML configuration" },
+              },
+            ],
+          },
+        },
+      ],
+      preferences: [],
+      definitionQuestions: [],
+      intent: { basis: "direct", quote: "Require personal implementation" },
+    };
+    expect(parseConnectorToolArgs(tool.inputSchema, input)).toEqual(input);
+    expect(parseConnectorToolArgs(wire, input)).toEqual(input);
+    expect(
+      validateToolArguments(
+        { name: tool.name, description: tool.description, parameters },
+        { type: "toolCall", id: "synthetic-role-call", name: tool.name, arguments: input },
+      ),
+    ).toEqual(input);
+    expect(wire.type).toBe("object");
+    expect(wire).not.toHaveProperty("oneOf");
+  });
+
   it("exposes fields from a locally referenced allOf branch", () => {
     const tool = {
       name: "catalog_search",
