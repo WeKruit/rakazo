@@ -2,6 +2,11 @@ import * as z from "zod";
 import { botSecretDestinationSchema } from "./bot-secrets.js";
 import { Id } from "./ids.js";
 import { McpTransportSchema } from "./mcp.js";
+import {
+  RecruitingActionDeliveryStateSchema,
+  RecruitingArtifactRefSchema,
+  RecruitingId,
+} from "./recruiting.js";
 
 export const ProductEventType = z.enum([
   "thread.message.created",
@@ -49,6 +54,8 @@ export const ProductEventType = z.enum([
   "group.created",
   "group.updated",
   "group.handoff",
+  "recruiting.context.adopted",
+  "recruiting.action.transitioned",
   /** Liveness only: never persisted, never applied to a snapshot, always seq 0. */
   "heartbeat",
 ]);
@@ -327,17 +334,50 @@ export function foldComputerCommands<T extends ComputerCommand>(events: T[]): T[
   return [...byId.values()];
 }
 
-export const ProductEventSchema = z.object({
-  id: Id,
-  spaceId: Id,
-  threadId: Id,
-  botId: Id,
-  seq: z.number().int().nonnegative(),
-  type: ProductEventType,
-  runId: Id.optional(),
-  createdAt: z.string(),
-  payload: z.record(z.string(), z.unknown()),
+export const RecruitingContextAdoptedPayloadSchema = z.strictObject({
+  roleId: RecruitingId,
+  roleRevisionId: RecruitingId,
+  contextArtifact: RecruitingArtifactRefSchema,
 });
+export type RecruitingContextAdoptedPayload = z.infer<typeof RecruitingContextAdoptedPayloadSchema>;
+
+export const RecruitingActionTransitionedPayloadSchema = z.strictObject({
+  taskId: RecruitingId,
+  actionId: RecruitingId,
+  from: RecruitingActionDeliveryStateSchema.nullable(),
+  to: RecruitingActionDeliveryStateSchema,
+});
+export type RecruitingActionTransitionedPayload = z.infer<
+  typeof RecruitingActionTransitionedPayloadSchema
+>;
+
+export const ProductEventSchema = z
+  .object({
+    id: Id,
+    spaceId: Id,
+    threadId: Id,
+    botId: Id,
+    seq: z.number().int().nonnegative(),
+    type: ProductEventType,
+    runId: Id.optional(),
+    createdAt: z.string(),
+    payload: z.record(z.string(), z.unknown()),
+  })
+  .superRefine((event, ctx) => {
+    const schema =
+      event.type === "recruiting.context.adopted"
+        ? RecruitingContextAdoptedPayloadSchema
+        : event.type === "recruiting.action.transitioned"
+          ? RecruitingActionTransitionedPayloadSchema
+          : null;
+    if (!schema) return;
+    const parsed = schema.safeParse(event.payload);
+    if (!parsed.success) {
+      for (const issue of parsed.error.issues) {
+        ctx.addIssue({ ...issue, path: ["payload", ...issue.path] });
+      }
+    }
+  });
 export type ProductEvent = z.infer<typeof ProductEventSchema>;
 
 export const ReplyPreviewSchema = z.object({
