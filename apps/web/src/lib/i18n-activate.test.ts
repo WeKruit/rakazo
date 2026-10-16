@@ -1,5 +1,6 @@
 // @vitest-environment jsdom
-import { act, createElement, type ReactNode } from "react";
+import type { ReactNode } from "react";
+import { act, createElement } from "react";
 import { createRoot } from "react-dom/client";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { I18nBootstrap } from "../components/I18nBootstrap";
