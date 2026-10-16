@@ -1,5 +1,10 @@
 import { randomUUID } from "node:crypto";
-import type { AgentMessage, AgentTool, AgentToolResult } from "@earendil-works/pi-agent-core";
+import type {
+  AgentEvent,
+  AgentMessage,
+  AgentTool,
+  AgentToolResult,
+} from "@earendil-works/pi-agent-core";
 import { Agent } from "@earendil-works/pi-agent-core";
 import type {
   Api,
@@ -255,6 +260,7 @@ export class PiAgentRuntime implements AgentRuntime {
           subagentGate: createGate(MAX_PARALLEL_SUBAGENTS),
           toolCallBudget: trackedBudget,
           toolCallSeq: { value: 0 },
+          dispatchedToolCalls: new Set(),
           abortTurn: () => undefined,
           signal,
           depth: 0,
@@ -463,6 +469,7 @@ export class PiAgentRuntime implements AgentRuntime {
         // it counts as the final reply, including when the completed message omits it.
         let streamedBeforePendingFinal = 0;
         agent.subscribe(async (event) => {
+          auditUndispatchedToolFailure(event, host, tools);
           if (event.type === "message_end") {
             await piSession?.appendMessage(event.message);
           }
@@ -828,6 +835,35 @@ function toAgentTools(toolDefs: readonly ConnectorTool[], host: ToolHost): Agent
   return ordered.map((tool, index) => toAgentTool(tool, host, names[index]!));
 }
 
+function auditUndispatchedToolFailure(
+  event: AgentEvent,
+  host: ToolHost,
+  tools: readonly AgentTool[],
+) {
+  if (event.type !== "tool_execution_end") return;
+  const dispatched = host.dispatchedToolCalls.delete(event.toolCallId);
+  if (!event.isError || dispatched) return;
+  const tool = tools.find((entry) => entry.name === event.toolName);
+  // Pi's validation error appends full arguments for the model. Audit only its
+  // field diagnostics; argument values must not become durable audit payloads.
+  const diagnostic = (event.result as AgentToolResult<unknown>).content
+    .filter((part) => part.type === "text")
+    .map((part) => part.text)
+    .join("\n")
+    .split("\n\nReceived arguments:", 1)[0]!;
+  const completion: AgentToolCompletion = {
+    name: tool?.label ?? "unknown-tool",
+    executionId: JSON.stringify(["pi-tool", host.agentNamespace ?? "main", event.toolCallId]),
+    durationMs: 0,
+    error: tool ? sanitizeError(diagnostic).slice(0, 2_000) : "Tool not found before execution.",
+  };
+  try {
+    void Promise.resolve(host.request.onToolCompleted?.(completion)).catch(() => undefined);
+  } catch {
+    // Audit hooks are best effort and must never change tool behavior.
+  }
+}
+
 /**
  * Normalize connector names only at the boundary where they are exposed to Pi.
  * Connector execution continues to use the original name captured by toAgentTool.
@@ -1160,6 +1196,7 @@ function toAgentTool(tool: ConnectorTool, host: ToolHost, exposedName: string): 
       const startedAt = Date.now();
       let result: unknown;
       let failure: unknown;
+      host.dispatchedToolCalls.add(toolCallId);
       try {
         result = await (async () => {
           if (tool.name === "request_takeover") {
@@ -1385,6 +1422,7 @@ async function executeSubagent(host: ToolHost, executionId: string, args: Record
       : selectedModel.apiKey,
     depth: 1,
     agentNamespace: agentId,
+    dispatchedToolCalls: new Set(),
     pendingShells: [],
   };
   const contextPolicy = createRuntimeContextPolicy(
@@ -1446,6 +1484,7 @@ async function executeSubagent(host: ToolHost, executionId: string, args: Record
         requestModel.cacheCapabilities?.retentionMode,
       ),
   };
+  const nestedTools = toAgentTools(childDefs, nestedHost);
   nested = new Agent({
     finishTurn: async (turn, turnSignal) => {
       await deliverFinishedShells(
@@ -1483,7 +1522,7 @@ async function executeSubagent(host: ToolHost, executionId: string, args: Record
         .join(" "),
       model: subagentModel,
       thinkingLevel: thinkingLevelFor(subagentModel, requestModel.thinkingLevel),
-      tools: toAgentTools(childDefs, nestedHost),
+      tools: nestedTools,
       messages: [],
     },
   });
@@ -1492,6 +1531,7 @@ async function executeSubagent(host: ToolHost, executionId: string, args: Record
   let streamed = "";
   let lastPush = 0;
   nested.subscribe((event) => {
+    auditUndispatchedToolFailure(event, nestedHost, nestedTools);
     if (event.type === "tool_execution_start") {
       if (host.toolCallBudget.exceeded) return;
       const toolName = "toolName" in event && event.toolName ? String(event.toolName) : "a tool";
@@ -2186,6 +2226,7 @@ interface ToolHost {
   toolCallBudget: ToolCallBudget;
   /** Shared fallback uniqueness when the model omits toolCallId (nested hosts reuse this). */
   toolCallSeq: { value: number };
+  dispatchedToolCalls: Set<string>;
   abortTurn(): void;
   signal: AbortSignal;
   depth: number;
