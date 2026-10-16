@@ -748,7 +748,9 @@ describe("server-owned recruiting assessment evaluation", () => {
     expect(result?.hardGate).toBe("met");
     expect(result?.employment).toEqual([]);
     const numeric = employmentInput();
-    expect(() => core.evaluateRecruitingAssessment?.(role, numeric.input, assessmentDay)).toThrow();
+    expect(() => core.evaluateRecruitingAssessment?.(role, numeric.input, assessmentDay)).toThrow(
+      core.RecruitingAssessmentValidationError,
+    );
   });
 
   it("keeps an insufficient lower bound unknown unless sourced completeness covers the effective cutoff", () => {

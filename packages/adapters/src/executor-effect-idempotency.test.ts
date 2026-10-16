@@ -8,6 +8,7 @@ import type {
 import type { RecruitingFeedbackInput, RecruitingSourceRef } from "@rakazo/contracts";
 import { RecruitingRoleToolInputSchema } from "@rakazo/contracts";
 import type { ActionApprovalRule } from "@rakazo/core";
+import { RecruitingAssessmentValidationError } from "@rakazo/core";
 import {
   legacyScopedToolEffectIdempotencyKey,
   toolEffectIdempotencyKey,
@@ -2970,6 +2971,24 @@ describe("native recruiting assessment effect delivery", () => {
     expect(JSON.stringify(f.results)).not.toContain("private-evidence-value");
     expect(JSON.stringify(f.results)).toContain("[redacted]");
     expect(f.effects[0]?.result).toEqual(receipt);
+  });
+
+  it("settles deterministic assessment validation failures without leaving an executing effect", async () => {
+    const f = fixture("assessment-invalid-semantics");
+    vi.mocked(executeRecruitingAssessmentTool).mockRejectedValue(
+      new RecruitingAssessmentValidationError(
+        "Every role atom requires exactly its semantic or employment input",
+      ),
+    );
+    f.setCalls([{ name: "recruiting_assess", args, executionId: "invalid-semantics" }]);
+    await f.run();
+    expect(f.results).toEqual([
+      { error: "Every role atom requires exactly its semantic or employment input" },
+    ]);
+    expect(f.effects[0]?.status).toBe("completed");
+    await f.run();
+    expect(executeRecruitingAssessmentTool).toHaveBeenCalledOnce();
+    expect(f.effects).toHaveLength(1);
   });
 
   it("retains only native web_fetch results under an active recruiting context", async () => {

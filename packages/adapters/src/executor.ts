@@ -89,6 +89,7 @@ import {
   nextFence,
   planActionGate,
   promptInvokesSkill,
+  RecruitingAssessmentValidationError,
   redactSecrets,
   renderBotDirectory,
   resolveActionApprovalDetail,
@@ -4903,7 +4904,10 @@ export function createRunExecutor(deps: ExecutorDeps) {
               return { error: "Recruiting assessment or source is unavailable" };
             if (error instanceof RecruitingConflictError)
               return { error: error.message, code: "CONFLICT" };
-            if (error instanceof Error && error.name === "ZodError")
+            if (
+              error instanceof RecruitingAssessmentValidationError ||
+              (error instanceof Error && error.name === "ZodError")
+            )
               return { error: sanitizeConnectorError(error, runSecrets) };
             throw error;
           };

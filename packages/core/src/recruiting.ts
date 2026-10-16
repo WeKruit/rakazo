@@ -16,6 +16,8 @@ import {
   SaveRecruitingAssessmentInput as SaveAssessmentInputSchema,
 } from "@rakazo/contracts";
 
+export class RecruitingAssessmentValidationError extends Error {}
+
 export function applyRecruitingPreferenceEdit(
   content: string,
   preference: RecruitingPreferenceFeedbackInput,
@@ -128,12 +130,19 @@ export function qualifiedEmploymentMonths(input: {
   intervals: readonly RecruitingEmploymentInterval[];
 }): { lowerMonths: number; upperMonths: number | null; verdict: Verdict } {
   if (input.countingRule !== "complete_calendar_months")
-    throw new Error("An explicit supported employment-month counting rule is required");
+    throw new RecruitingAssessmentValidationError(
+      "An explicit supported employment-month counting rule is required",
+    );
   if (!Number.isSafeInteger(input.minimumMonths) || input.minimumMonths < 0)
-    throw new Error("Minimum employment months must be a nonnegative safe integer");
+    throw new RecruitingAssessmentValidationError(
+      "Minimum employment months must be a nonnegative safe integer",
+    );
   if (typeof input.historyComplete !== "boolean")
-    throw new Error("Employment history completeness must be explicit");
-  if (input.cutoff.precision !== "day") throw new Error("Employment cutoff must be an exact day");
+    throw new RecruitingAssessmentValidationError(
+      "Employment history completeness must be explicit",
+    );
+  if (input.cutoff.precision !== "day")
+    throw new RecruitingAssessmentValidationError("Employment cutoff must be an exact day");
   const cutoff = employmentDateBounds(input.cutoff)[0];
   const guaranteed: [number, number][] = [];
   const possible: [number, number][] = [];
@@ -147,9 +156,11 @@ export function qualifiedEmploymentMonths(input: {
           ? null
           : employmentDateBounds(interval.end);
     if (start && end && interval.end !== "present" && start[0] > end[1])
-      throw new Error("Employment start cannot follow its end");
+      throw new RecruitingAssessmentValidationError("Employment start cannot follow its end");
     if (!["met", "unmet", "unknown"].includes(interval.qualifyingFullTime))
-      throw new Error("Employment eligibility must be a three-state verdict");
+      throw new RecruitingAssessmentValidationError(
+        "Employment eligibility must be a three-state verdict",
+      );
     if (interval.qualifyingFullTime === "unmet") continue;
     const possibleEnd = Math.min(end?.[1] ?? cutoff, cutoff);
     if (!start) {
@@ -196,18 +207,24 @@ function employmentDay(year: number, month: number, day: number): number {
 
 function employmentDateBounds(date: RecruitingEmploymentDate): readonly [number, number] {
   if (!Number.isInteger(date.year) || date.year < 1 || date.year > 9999)
-    throw new Error("Employment year must be an integer from 1 to 9999");
+    throw new RecruitingAssessmentValidationError(
+      "Employment year must be an integer from 1 to 9999",
+    );
   if (date.precision === "year")
     return [employmentDay(date.year, 1, 1), employmentDay(date.year, 12, 31)];
   if (date.precision !== "month" && date.precision !== "day")
-    throw new Error("Employment date precision must be year, month or day");
+    throw new RecruitingAssessmentValidationError(
+      "Employment date precision must be year, month or day",
+    );
   if (!Number.isInteger(date.month) || date.month < 1 || date.month > 12)
-    throw new Error("Employment month must be an integer from 1 to 12");
+    throw new RecruitingAssessmentValidationError(
+      "Employment month must be an integer from 1 to 12",
+    );
   const lastDay = daysInEmploymentMonth(date.year, date.month);
   if (date.precision === "month")
     return [employmentDay(date.year, date.month, 1), employmentDay(date.year, date.month, lastDay)];
   if (!Number.isInteger(date.day) || date.day < 1 || date.day > lastDay)
-    throw new Error("Employment day must be a valid calendar date");
+    throw new RecruitingAssessmentValidationError("Employment day must be a valid calendar date");
   const value = employmentDay(date.year, date.month, date.day);
   return [value, value];
 }
@@ -248,7 +265,7 @@ export function evaluateRecruitingAssessment(
     if (expression.kind === "atom") {
       const existing = definitions.get(expression.id);
       if (existing && JSON.stringify(existing) !== JSON.stringify(expression))
-        throw new Error("An atom ID must have one definition");
+        throw new RecruitingAssessmentValidationError("An atom ID must have one definition");
       definitions.set(expression.id, expression);
       return [expression.id];
     }
@@ -256,20 +273,23 @@ export function evaluateRecruitingAssessment(
   };
   const criterionAtoms = role.criteria.map((criterion) => collect(criterion.expression));
   if (new Set(role.criteria.map((criterion) => criterion.id)).size !== role.criteria.length)
-    throw new Error("Criterion IDs must be unique");
+    throw new RecruitingAssessmentValidationError("Criterion IDs must be unique");
   const semantics = new Map(input.atomJudgments.map((judgment) => [judgment.atomId, judgment]));
   const evaluations = new Map(
     input.employmentEvaluations.map((evaluation) => [evaluation.atomId, evaluation]),
   );
   for (const id of [...semantics.keys(), ...evaluations.keys()])
-    if (!definitions.has(id)) throw new Error("Unknown assessment atom ID");
+    if (!definitions.has(id))
+      throw new RecruitingAssessmentValidationError("Unknown assessment atom ID");
   for (const [id, definition] of definitions) {
     if (
       definition.employmentRule
         ? !evaluations.has(id) || semantics.has(id)
         : !semantics.has(id) || evaluations.has(id)
     )
-      throw new Error("Every role atom requires exactly its semantic or employment input");
+      throw new RecruitingAssessmentValidationError(
+        "Every role atom requires exactly its semantic or employment input",
+      );
   }
   const facts = new Map(input.facts.map((fact) => [fact.id, fact]));
   const sources = new Map(input.sourceRefs.map((source) => [source.id, source]));
@@ -287,9 +307,13 @@ export function evaluateRecruitingAssessment(
   ): void => {
     const connected = new Set(factIds.flatMap((id) => facts.get(id)!.sourceRefIds));
     if (evidence.some((id) => !connected.has(id)))
-      throw new Error("Judgment evidence must support a referenced fact");
+      throw new RecruitingAssessmentValidationError(
+        "Judgment evidence must support a referenced fact",
+      );
     if (verdict !== "unknown" && !factIds.some((id) => hasPrimary(id, evidence)))
-      throw new Error("Met or unmet judgments require primary read evidence supporting a fact");
+      throw new RecruitingAssessmentValidationError(
+        "Met or unmet judgments require primary read evidence supporting a fact",
+      );
   };
   const atoms: RecruitingAtomJudgment[] = [];
   const employment: RecruitingEmploymentJudgment[] = [];
@@ -304,28 +328,36 @@ export function evaluateRecruitingAssessment(
     const evaluation = evaluations.get(atomId)!;
     const classified = new Set(evaluation.intervals.map((interval) => interval.factId));
     if (input.facts.some((fact) => fact.kind === "employment" && !classified.has(fact.id)))
-      throw new Error("Every employment fact requires an explicit eligibility judgment");
+      throw new RecruitingAssessmentValidationError(
+        "Every employment fact requires an explicit eligibility judgment",
+      );
     const cutoff = rule.cutoff.kind === "fixed" ? rule.cutoff.date : trustedDay;
     const completeness =
       evaluation.historyCompletenessFactId === null
         ? null
         : facts.get(evaluation.historyCompletenessFactId)!;
     if (completeness && completeness.kind !== "history_completeness")
-      throw new Error("Employment completeness must reference a history completeness fact");
+      throw new RecruitingAssessmentValidationError(
+        "Employment completeness must reference a history completeness fact",
+      );
     const factIds = [
       ...evaluation.intervals.map((interval) => interval.factId),
       ...(completeness ? [completeness.id] : []),
     ];
     validateEvidence(factIds, evaluation.evidence, "unknown");
     if (completeness && !hasPrimary(completeness.id, evaluation.evidence))
-      throw new Error("Employment history completeness requires primary read evidence");
+      throw new RecruitingAssessmentValidationError(
+        "Employment history completeness requires primary read evidence",
+      );
     const historyComplete =
       completeness?.complete === true &&
       employmentDateBounds(completeness.asOf)[0] >= employmentDateBounds(cutoff)[0];
     const intervals = evaluation.intervals.map((interval) => {
       const fact = facts.get(interval.factId)!;
       if (fact.kind !== "employment")
-        throw new Error("Employment interval must reference an employment fact");
+        throw new RecruitingAssessmentValidationError(
+          "Employment interval must reference an employment fact",
+        );
       validateEvidence([fact.id], interval.evidence, interval.qualifyingFullTime);
       // Unread dates cannot establish either bound, even with a complete-history claim.
       if (!hasPrimary(fact.id, interval.evidence))
