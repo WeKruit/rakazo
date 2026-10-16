@@ -8,6 +8,7 @@ import type {
   RecruitingAssessmentSnapshot,
   RecruitingAssessmentSourceRef,
   RecruitingHumanIntent,
+  RecruitingMaterialReadPayload,
   RecruitingPreferenceFeedbackInput,
   RecruitingQuestion,
   RecruitingReadPayload,
@@ -1470,20 +1471,36 @@ async function validateReadSources(
   artifacts: ReadonlyMap<string, Uint8Array>,
 ) {
   await validateSources(tx, actor, sources);
+  // ponytail: reuse native reads only within this validation call; every reference is checked below.
+  const messages = new Map<string, SourceMessage>();
+  const rows = new Map<string, Prisma.ArtifactGetPayload<Record<string, never>>>();
+  const provenance = new Map<
+    string,
+    {
+      providerArtifact: boolean;
+      readReceipt: Prisma.EventGetPayload<Record<string, never>> | null;
+      payload?: RecruitingMaterialReadPayload;
+    }
+  >();
   const unique = new Map(sources.map((source) => [stableJsonValue(source), source]));
   for (const source of unique.values()) {
     // A role reference without a quote remains a locator; it does not attest to material text.
     if (source.readState === "read" && source.quote === undefined) continue;
     const selection = "selection" in source ? source.selection : undefined;
     if (source.anchor.kind === "message") {
-      await tx.$queryRaw(
-        Prisma.sql`SELECT "id" FROM "messages" WHERE "id" = ${source.anchor.messageId} FOR SHARE`,
-      );
-      const message = await tx.message.findUnique({
-        where: { id: source.anchor.messageId },
-        include: humanMessageInclude,
-      });
-      if (!message) throw new IsolationError();
+      let message = messages.get(source.anchor.messageId);
+      if (!message) {
+        await tx.$queryRaw(
+          Prisma.sql`SELECT "id" FROM "messages" WHERE "id" = ${source.anchor.messageId} FOR SHARE`,
+        );
+        const current = await tx.message.findUnique({
+          where: { id: source.anchor.messageId },
+          include: humanMessageInclude,
+        });
+        if (!current) throw new IsolationError();
+        message = current;
+        messages.set(message.id, message);
+      }
       if (source.readState !== "read" || source.quote === undefined) continue;
       if (!isNativeHumanMessage(message) || source.kind === "provider_report")
         throw new IsolationError();
@@ -1507,62 +1524,71 @@ async function validateReadSources(
         source.quote,
       );
     } else {
-      await tx.$queryRaw(
-        Prisma.sql`SELECT "id" FROM "artifacts" WHERE "id" = ${source.anchor.artifact.artifactId} FOR SHARE`,
-      );
-      const artifact = await tx.artifact.findUniqueOrThrow({
-        where: { id: source.anchor.artifact.artifactId },
-      });
+      let artifact = rows.get(source.anchor.artifact.artifactId);
+      if (!artifact) {
+        await tx.$queryRaw(
+          Prisma.sql`SELECT "id" FROM "artifacts" WHERE "id" = ${source.anchor.artifact.artifactId} FOR SHARE`,
+        );
+        artifact = await tx.artifact.findUniqueOrThrow({
+          where: { id: source.anchor.artifact.artifactId },
+        });
+        rows.set(artifact.id, artifact);
+      }
       if (artifact.hash !== source.anchor.artifact.sha256) throw new IsolationError();
       if (source.readState !== "read" || source.quote === undefined) continue;
-      const providerArtifact = await tx.recruitingResearchAction.findFirst({
-        where: {
-          OR: [
-            { receiptArtifactId: artifact.id, receiptArtifactHash: artifact.hash },
-            {
-              outputArtifacts: {
-                array_contains: [{ artifactId: artifact.id, sha256: artifact.hash }],
+      let proof = provenance.get(artifact.id);
+      if (!proof) {
+        const providerArtifact = await tx.recruitingResearchAction.findFirst({
+          where: {
+            OR: [
+              { receiptArtifactId: artifact.id, receiptArtifactHash: artifact.hash },
+              {
+                outputArtifacts: {
+                  array_contains: [{ artifactId: artifact.id, sha256: artifact.hash }],
+                },
               },
-            },
-          ],
-        },
-        select: { id: true },
-      });
-      const readReceipt = artifact.runId
-        ? await tx.event.findFirst({
-            where: {
-              spaceId: actor.spaceId,
-              runId: artifact.runId,
-              botId: artifact.botId ?? undefined,
-              type: "recruiting.material.read",
-              AND: [
-                { payload: { path: ["reader"], equals: "web_fetch" } },
-                { payload: { path: ["artifact", "artifactId"], equals: artifact.id } },
-                { payload: { path: ["artifact", "sha256"], equals: artifact.hash } },
-              ],
-            },
-          })
-        : null;
+            ],
+          },
+          select: { id: true },
+        });
+        const readReceipt = artifact.runId
+          ? await tx.event.findFirst({
+              where: {
+                spaceId: actor.spaceId,
+                runId: artifact.runId,
+                botId: artifact.botId ?? undefined,
+                type: "recruiting.material.read",
+                AND: [
+                  { payload: { path: ["reader"], equals: "web_fetch" } },
+                  { payload: { path: ["artifact", "artifactId"], equals: artifact.id } },
+                  { payload: { path: ["artifact", "sha256"], equals: artifact.hash } },
+                ],
+              },
+            })
+          : null;
+        proof = { providerArtifact: !!providerArtifact, readReceipt };
+        provenance.set(artifact.id, proof);
+      }
       if (
-        (providerArtifact && source.kind !== "provider_report") ||
-        (!providerArtifact && readReceipt && source.kind !== "original_material") ||
-        (!providerArtifact &&
-          (source.kind === "provider_report" || (artifact.runId !== null && !readReceipt)))
+        (proof.providerArtifact && source.kind !== "provider_report") ||
+        (!proof.providerArtifact && proof.readReceipt && source.kind !== "original_material") ||
+        (!proof.providerArtifact &&
+          (source.kind === "provider_report" || (artifact.runId !== null && !proof.readReceipt)))
       )
         throw new IsolationError();
-      if (readReceipt) {
-        const origin = await requireRun(tx, actor, artifact.runId!);
-        const receipt = ProductEventSchema.parse({
-          ...readReceipt,
-          createdAt: readReceipt.createdAt.toISOString(),
-        });
-        const payload = RecruitingMaterialReadPayloadSchema.parse(receipt.payload);
-        if (
-          origin.threadId !== receipt.threadId ||
-          origin.botId !== artifact.botId ||
-          source.url !== payload.url ||
-          source.readAt !== payload.readAt
-        )
+      if (proof.readReceipt) {
+        if (!proof.payload) {
+          const origin = await requireRun(tx, actor, artifact.runId!);
+          const receipt = ProductEventSchema.parse({
+            ...proof.readReceipt,
+            createdAt: proof.readReceipt.createdAt.toISOString(),
+          });
+          const payload = RecruitingMaterialReadPayloadSchema.parse(receipt.payload);
+          if (origin.threadId !== receipt.threadId || origin.botId !== artifact.botId)
+            throw new IsolationError();
+          proof.payload = payload;
+        }
+        if (source.url !== proof.payload.url || source.readAt !== proof.payload.readAt)
           throw new IsolationError();
       }
       const bytes = artifacts.get(artifact.id);

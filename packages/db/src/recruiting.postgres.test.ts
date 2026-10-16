@@ -31,6 +31,7 @@ describePostgres("recruiting domain (PostgreSQL)", () => {
   const actor: Actor = { userId, spaceId, email: "owner@example.test", isDeploymentOwner: false };
   let prisma: PrismaClient;
   let close: () => Promise<void>;
+  let sourceQueries: string[] | undefined;
   let threadId: string;
   let otherThreadId: string;
   let wrongSpaceThreadId: string;
@@ -288,6 +289,15 @@ describePostgres("recruiting domain (PostgreSQL)", () => {
   beforeAll(async () => {
     const db = createDb(databaseUrl!);
     prisma = db.prisma;
+    db.pool.on("connect", (client) => {
+      const query = client.query.bind(client);
+      client.query = ((...args: unknown[]) => {
+        const statement = args[0] as string | { text?: string };
+        const text = typeof statement === "string" ? statement : statement.text;
+        if (text) sourceQueries?.push(text);
+        return Reflect.apply(query, client, args);
+      }) as typeof client.query;
+    });
     close = async () => {
       await prisma.$disconnect();
       await db.pool.end();
@@ -721,6 +731,198 @@ describePostgres("recruiting domain (PostgreSQL)", () => {
         }),
       ).rejects.toThrow(IsolationError);
       expect(get).not.toHaveBeenCalled();
+    },
+  );
+  it.each(["artifact", "message"])(
+    "reads one native %s once for distinct source excerpts in a mutation",
+    async (kind) => {
+      const f = await assessmentFixture();
+      const excerpts = Array.from(
+        { length: 8 },
+        (_, index) =>
+          `Requirement ${index + 1}: implement and maintain reliable data processing systems with clear ownership.`,
+      );
+      await prisma.message.update({
+        where: { id: f.message.id },
+        data: {
+          blocks: [
+            { kind: "text", text: "Candidate personally implemented geometry transforms" },
+            ...excerpts.map((text) => ({ kind: "text", text })),
+          ],
+        },
+      });
+      const bytes = Buffer.from(
+        JSON.stringify({ text: excerpts.join("\n"), title: "Synthetic role" }),
+      );
+      const sha256 = createHash("sha256").update(bytes).digest("hex");
+      const readAt = "2026-10-16T00:00:00.000Z";
+      const material = await recruiting.recordRecruitingWebMaterial(prisma, actor, f.context, {
+        artifact: {
+          name: "distinct-excerpts.json",
+          mimeType: "application/json",
+          size: bytes.length,
+          hash: sha256,
+          storageKey: `distinct-excerpts-${f.run.id}`,
+          clientNonce: `distinct-excerpts-${f.run.id}`,
+        },
+        reader: "web_fetch",
+        url: "https://example.test/role",
+        readAt,
+      });
+      const reader = {
+        artifacts: { get: async () => bytes } as unknown as ArtifactStore,
+        context: {
+          spaceId,
+          userId,
+          botId,
+          runId: f.run.id,
+          operationId: f.run.id,
+          traceId: f.run.id,
+          signal: new AbortController().signal,
+        },
+      };
+      const ref = (index: number): RecruitingSourceRef => ({
+        id: "jd",
+        kind: "original_material",
+        readState: "read",
+        readAt,
+        url: "https://example.test/role",
+        quote: excerpts[index],
+        anchor:
+          kind === "artifact"
+            ? {
+                kind: "artifact",
+                artifact: { artifactId: material.artifact.id, sha256 },
+                locator: "text",
+              }
+            : { kind: "message", messageId: f.message.id, locator: `blocks[${index + 1}].text` },
+      });
+      const input = (distinct: boolean) => ({
+        operation: "create" as const,
+        title: "Synthetic role",
+        sourceRefs: [ref(0)],
+        criteria: Array.from({ length: 7 }, (_, index) => ({
+          id: `criterion-${index}`,
+          priority: "hard" as const,
+          expression: {
+            kind: "atom" as const,
+            id: `atom-${index}`,
+            statement: `Requirement ${index + 1}`,
+          },
+          sourceRefs: [ref(distinct ? index + 1 : 0)],
+          definitionQuestions: [],
+        })),
+        preferences: [],
+        definitionQuestions: [],
+        intent: {
+          basis: "direct" as const,
+          quote: "Candidate personally implemented geometry transforms",
+        },
+      });
+      const context = { runId: f.run.id, sourceMessageId: f.message.id };
+      const counts: number[] = [];
+      for (const distinct of [false, true]) {
+        await recruiting.bindRecruitingRole(prisma, actor, { threadId: f.thread.id, roleId: null });
+        sourceQueries = [];
+        let queries: string[];
+        try {
+          const result = await recruiting.executeRecruitingRoleMutation(
+            prisma,
+            actor,
+            context,
+            input(distinct),
+            reader,
+          );
+          expect(result.status).toBe("saved");
+          queries = sourceQueries;
+        } finally {
+          sourceQueries = undefined;
+        }
+        counts.push(queries.length);
+        expect(
+          queries.filter(
+            (sql) =>
+              sql.includes(`"${kind === "artifact" ? "artifacts" : "messages"}"`) &&
+              sql.includes("FOR SHARE"),
+          ),
+        ).toHaveLength(1);
+        if (kind === "artifact")
+          expect(
+            queries.filter((sql) => sql.includes('FROM "public"."recruiting_research_actions"')),
+          ).toHaveLength(1);
+      }
+      expect(counts[1]).toBe(counts[0]);
+      for (const state of ["unread", "unavailable", "read-noquote"] as const) {
+        const { quote: _quote, ...reference } = ref(0);
+        const mixed = {
+          ...input(true),
+          sourceRefs: [
+            {
+              ...reference,
+              readState: state === "read-noquote" ? ("read" as const) : state,
+              readAt: state === "unread" ? null : readAt,
+            },
+          ],
+        };
+        const result = await recruiting.executeRecruitingRoleMutation(
+          prisma,
+          actor,
+          context,
+          mixed,
+          reader,
+        );
+        expect(result.workspace?.revision.sourceRefs[0]).toEqual(mixed.sourceRefs[0]);
+        expect(result.workspace?.revision.sourceRefs[0]?.quote).toBeUndefined();
+      }
+      const request = input(true);
+      const revisions = await prisma.recruitingRoleRevision.count();
+      const selected = (await prisma.thread.findUniqueOrThrow({ where: { id: f.thread.id } }))
+        .activeRecruitingRoleId;
+      const boundaries =
+        kind === "artifact"
+          ? (["quote", "readAt", "url", "hash", "kind", "locator"] as const)
+          : (["quote", "kind", "locator"] as const);
+      for (const boundary of boundaries) {
+        let later = ref(7);
+        if (boundary === "quote") later = { ...later, quote: "Invented later excerpt" };
+        if (boundary === "readAt") later = { ...later, readAt: "2026-10-17T00:00:00.000Z" };
+        if (boundary === "url") later = { ...later, url: "https://example.test/other" };
+        if (boundary === "hash")
+          later = {
+            ...later,
+            anchor: {
+              kind: "artifact",
+              artifact: { artifactId: material.artifact.id, sha256: "b".repeat(64) },
+              locator: "text",
+            },
+          };
+        if (boundary === "kind")
+          later = {
+            ...later,
+            kind: kind === "artifact" ? "candidate_statement" : "provider_report",
+          };
+        if (boundary === "locator")
+          later = {
+            ...later,
+            anchor: { ...later.anchor, locator: kind === "artifact" ? "title" : "blocks[99].text" },
+          };
+        const invalid = {
+          ...request,
+          criteria: request.criteria.map((criterion, index) =>
+            index === 6 ? { ...criterion, sourceRefs: [later] } : criterion,
+          ),
+        };
+        await expect(
+          recruiting.executeRecruitingRoleMutation(prisma, actor, context, invalid, reader),
+        ).rejects.toThrow(
+          boundary === "quote" ? recruiting.RecruitingSourceValidationError : IsolationError,
+        );
+        expect(await prisma.recruitingRoleRevision.count()).toBe(revisions);
+        expect(
+          (await prisma.thread.findUniqueOrThrow({ where: { id: f.thread.id } }))
+            .activeRecruitingRoleId,
+        ).toBe(selected);
+      }
     },
   );
   it("checks role message quotes at their actual native text block", async () => {
@@ -1856,7 +2058,10 @@ describePostgres("recruiting domain (PostgreSQL)", () => {
     const quote = "Candidate 😀 implemented transforms";
     const bytes = Buffer.from(
       format === "json"
-        ? JSON.stringify({ rows: [{ detail: quote }], decoy: "Other" })
+        ? JSON.stringify({
+            rows: [{ detail: quote }, { detail: "Another actual field" }],
+            decoy: "Other",
+          })
         : `prefix ${quote}`,
     );
     const materialHash = createHash("sha256").update(bytes).digest("hex");
@@ -1891,7 +2096,13 @@ describePostgres("recruiting domain (PostgreSQL)", () => {
             }
           : { kind: "artifact_text", start: 7, end: 7 + quote.length },
     };
-    const input = { ...f.input, sourceRefs: [src] };
+    const other: RecruitingAssessmentSourceRef = {
+      ...src,
+      id: "other-field",
+      quote: "Another actual field",
+      selection: { kind: "artifact_json_string", path: ["rows", 1, "detail"], start: 0, end: 20 },
+    };
+    const input = { ...f.input, sourceRefs: format === "json" ? [src, other] : [src] };
     const admitted = await assessmentAdmission(input, { runId: f.run.id, threadId: f.thread.id });
     const artifacts = [...admitted.artifacts, { artifactId: material.id, bytes }];
     const saved = await recruiting.saveRecruitingAssessment(
@@ -1901,7 +2112,7 @@ describePostgres("recruiting domain (PostgreSQL)", () => {
       input,
       artifacts,
     );
-    expect(saved.assessment.sourceRefs[0]).toEqual(src);
+    expect(saved.assessment.sourceRefs).toEqual(input.sourceRefs);
     await expect(
       recruiting.saveRecruitingAssessment(
         prisma,
