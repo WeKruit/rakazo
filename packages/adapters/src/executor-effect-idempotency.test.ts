@@ -1242,6 +1242,14 @@ describe("native recruiting role effect delivery", () => {
       ]);
       expect(claimed[0]?.text).toContain('"messageId":"human-first"');
       expect(claimed[1]?.text).toContain('"messageId":"human-latest"');
+      expect(claimed[1]?.text).toContain(
+        JSON.stringify({
+          kind: "message_text",
+          blockIndex: 0,
+          start: 0,
+          end: steering[1]!.text.length,
+        }),
+      );
       expect(claimed[2]?.text).not.toContain("Native message source reference");
       expect(
         claimed
@@ -2830,6 +2838,17 @@ describe("native recruiting assessment effect delivery", () => {
       judgments: { atoms: [], employment: [], criteria: [], hardGate: "unknown" as const },
       createdAt: "2026-10-16T00:00:00.000Z",
     },
+    roleRevision: {
+      id: "revision-1",
+      roleId: "role-1",
+      revision: 1,
+      criteria: [],
+      sourceRefs: [],
+      preferences: [],
+      definitionQuestions: [],
+      createdAt: "2026-10-16T00:00:00.000Z",
+    },
+    sourceMessageTargets: [],
     isCurrent: true,
   };
   const adopted = {
@@ -2858,10 +2877,92 @@ describe("native recruiting assessment effect delivery", () => {
     f.runtimeRun.mockImplementation(async function* (request) {
       expect(request.instructions).toContain('"messageId":"human-evidence-source"');
       expect(request.instructions).toContain('"blockIndex":0');
+      expect(request.instructions).toContain(
+        '"selection":{"kind":"message_text","blockIndex":0,"start":0,"end":21}',
+      );
       expect(request.instructions).not.toContain('"text":"Exact source material"');
       yield { type: "done" as const, text: "Done" };
     });
     await f.run();
+  });
+
+  it("provides exact full-block selections for the current run's native answer on each rebuilt request", async () => {
+    const runId = "resumed-native-answer";
+    const answerText = ` \r\n${"证".repeat(44)}😀 `;
+    expect(answerText).toHaveLength(50);
+    const original = {
+      id: "original-request",
+      threadId: "thread-1",
+      seq: 1,
+      role: "user",
+      botId: null,
+      runId,
+      replyToMessageId: null,
+      createdAt: new Date("2026-10-16T00:00:00.000Z"),
+      blocks: [{ kind: "text", text: "Assess the supplied candidate" }],
+    };
+    const answer = {
+      ...original,
+      id: "native-answer",
+      seq: 3,
+      blocks: [{ kind: "text", text: answerText }],
+    };
+    const card = {
+      ...original,
+      id: "original-card",
+      role: "bot",
+      botId: "bot-1",
+      seq: 2,
+      blocks: [
+        { kind: "ask", text: "Which implementation?", status: "answered", answer: answerText },
+      ],
+    };
+    const older = { ...answer, id: "older-run-user", runId: "older-run" };
+    const botAuthored = { ...answer, id: "bot-authored-user", botId: "peer-bot" };
+    const peer = {
+      ...answer,
+      id: "peer-message",
+      blocks: [{ kind: "bot_message_received", text: "Peer-authored answer" }],
+    };
+    for (let attempt = 0; attempt < 2; attempt++) {
+      const f = fixture(runId);
+      f.runData.sourceMessageId = original.id;
+      f.prisma.task.findUniqueOrThrow.mockResolvedValue({ id: "task-1", prompt: answerText });
+      f.prisma.message.findMany.mockResolvedValue([
+        answer,
+        card,
+        original,
+        older,
+        botAuthored,
+        peer,
+      ]);
+      f.runtimeRun.mockImplementation(async function* (request) {
+        expect(request.sourceMessageId).toBe(original.id);
+        expect(request.prompt).toContain(answerText);
+        expect(request.prompt).not.toContain(original.blocks[0]!.text);
+        const metadata = request
+          .instructions!.split("\n")
+          .filter((line) => line.startsWith("Native message source reference"))
+          .map((line) => JSON.parse(line.slice(line.indexOf("{"))));
+        expect(metadata.map((source) => source.messageId)).toEqual([original.id, answer.id]);
+        expect(metadata[1]).toEqual({
+          messageId: answer.id,
+          readAt: expect.any(String),
+          textBlocks: [
+            {
+              blockIndex: 0,
+              length: 50,
+              selection: { kind: "message_text", blockIndex: 0, start: 0, end: 50 },
+            },
+          ],
+        });
+        expect(request.history.find((message) => message.id === answer.id)?.content).toBe(
+          answerText,
+        );
+        yield { type: "done" as const, text: "Done" };
+      });
+      await f.run();
+    }
   });
 
   it("uses the latest adopted role and atomically saved receipt, then revalidates replay after an ACK loss", async () => {
