@@ -763,7 +763,29 @@ describe("recruiting contracts", () => {
       type: "recruiting.action.transitioned",
       payload: { taskId: action.taskId, actionId: action.id, from: "sending", to: "unknown" },
     };
-    for (const event of [context, transition]) {
+    const readBound = {
+      ...envelope,
+      type: "recruiting.read",
+      payload: {
+        phase: "bound",
+        taskId: action.taskId,
+        actionId: action.id,
+        effectId: "effect-read",
+        toolName: "get_rows",
+      },
+    };
+    const readRecorded = {
+      ...envelope,
+      type: "recruiting.read",
+      payload: {
+        phase: "recorded",
+        taskId: action.taskId,
+        actionId: action.id,
+        effectId: "effect-read",
+        outputArtifact: artifact,
+      },
+    };
+    for (const event of [context, transition, readBound, readRecorded]) {
       expect(contracts.ProductEventSchema.safeParse(event).success).toBe(true);
       expect(
         contracts.ProductEventSchema.safeParse({
@@ -772,6 +794,14 @@ describe("recruiting contracts", () => {
         }).success,
       ).toBe(false);
       expect(contracts.ProductEventSchema.safeParse({ ...event, payload: {} }).success).toBe(false);
+    }
+    for (const payload of [
+      { ...readBound.payload, toolName: "research" },
+      { ...readBound.payload, effectId: " " },
+      { ...readRecorded.payload, outputArtifact: { ...artifact, sha256: "invalid" } },
+      { ...readRecorded.payload, toolName: "get_rows" },
+    ]) {
+      expect(contracts.ProductEventSchema.safeParse({ ...readBound, payload }).success).toBe(false);
     }
     expect(
       contracts.ProductEventSchema.safeParse({

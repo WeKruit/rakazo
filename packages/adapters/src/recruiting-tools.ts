@@ -14,9 +14,11 @@ import type {
 } from "@rakazo/db";
 import {
   admitRecruitingResearchAction,
+  bindRecruitingResearchReadEffect,
   executeRecruitingRoleMutation,
   getRecruitingWorkspace,
   IsolationError,
+  listUnmappedRecruitingResearchReads,
   prepareRecruitingResearchAction,
   RecruitingConflictError,
   readRecruitingResearchContext,
@@ -25,6 +27,7 @@ import {
   recruitingResearchSnapshot,
   scoped,
 } from "@rakazo/db";
+import { boundDirectApprovalDetails, catalogApprovalDetails } from "./approval-effect.js";
 import type { LoadedRecruitingRunContext } from "./recruiting-context.js";
 import type { RecruitingResearchRequest } from "./recruiting-research.js";
 import {
@@ -218,8 +221,9 @@ export async function resolveRecruitingResearchTool(
   if (input.operation === "prepare" || input.operation === "continue") throw new IsolationError();
   const saved = await readRecruitingResearchContext(deps.prisma, trusted.actor, {
     runId: trusted.runId,
+    historical: true,
     ...(input.operation === "start"
-      ? { actionId: input.actionId, historical: true }
+      ? { actionId: input.actionId }
       : {
           taskId: input.taskId,
           toolName: input.operation === "status" ? "get_task" : "get_rows",
@@ -234,6 +238,7 @@ export async function resolveRecruitingResearchTool(
       actionId: input.actionId,
       taskId: saved.task.id,
       operation: manifest.operation,
+      recoveredResult: undefined,
       recoveryEffectKind:
         saved.effect &&
         ["completed", "executing", "uncertain", "denied"].includes(saved.effect.status)
@@ -242,7 +247,7 @@ export async function resolveRecruitingResearchTool(
     };
   }
   if (!saved.task.providerTaskId) throw new RecruitingConflictError();
-  return {
+  const call = {
     route: {
       connectorId: "mcp",
       resourceId: saved.server.id,
@@ -260,6 +265,20 @@ export async function resolveRecruitingResearchTool(
     taskId: saved.task.id,
     operation: input.operation,
   };
+  const recoveredResult = await recoverRecruitingResearchReads(
+    deps,
+    trusted,
+    saved.task.id,
+    call,
+    context,
+  );
+  if (!recoveredResult)
+    await readRecruitingResearchContext(deps.prisma, trusted.actor, {
+      runId: trusted.runId,
+      taskId: saved.task.id,
+      toolName: input.operation === "status" ? "get_task" : "get_rows",
+    });
+  return { ...call, recoveredResult };
 }
 
 type ResearchDispatchActor = ResearchActor & { leaseOwner: string; leaseFence: number };
@@ -273,8 +292,78 @@ type ResearchReadAdmission = {
   operation: "status" | "rows";
   saved: ResearchContext;
   call: ConnectorCall;
+  recoveredResult?: object;
 };
 export type RecruitingResearchCallAdmission = ResearchMutationAdmission | ResearchReadAdmission;
+
+export async function bindRecruitingResearchReadCall(
+  deps: Pick<ResearchDeps, "prisma">,
+  trusted: ResearchDispatchActor,
+  admitted: ResearchReadAdmission,
+  effect: { id: string; request: unknown },
+): Promise<ResearchReadAdmission> {
+  if (!admitted.saved.action) throw new IsolationError();
+  const bound = await bindRecruitingResearchReadEffect(deps.prisma, trusted.actor, {
+    runId: trusted.runId,
+    leaseOwner: trusted.leaseOwner,
+    leaseFence: trusted.leaseFence,
+    actionId: admitted.saved.action.id,
+    effectId: effect.id,
+    request: effect.request as Prisma.InputJsonValue,
+  });
+  const direct = boundDirectApprovalDetails(effect.request, "__rakazoCatalogTool");
+  const catalog = catalogApprovalDetails(effect.request, "__rakazoCatalogTool");
+  const route = direct?.route ?? catalog?.route;
+  const args = direct?.args ?? catalog?.args.arguments;
+  if (!route || !args || typeof args !== "object" || Array.isArray(args))
+    throw new IsolationError();
+  return {
+    ...admitted,
+    saved: bound.saved,
+    operation: route.toolName === "get_task" ? "status" : "rows",
+    call: { ...admitted.call, route, args: args as Record<string, unknown> },
+  };
+}
+
+async function recoverRecruitingResearchReads(
+  deps: ResearchDeps,
+  trusted: ResearchActor,
+  taskId: string,
+  requested: Pick<ConnectorCall, "route" | "args">,
+  context: AdapterContext,
+) {
+  const pending = await listUnmappedRecruitingResearchReads(deps.prisma, trusted.actor, {
+    runId: trusted.runId,
+    taskId,
+  });
+  const receipts = [];
+  for (const read of pending) {
+    const result = await completeRecruitingResearchCall(
+      deps,
+      trusted,
+      {
+        kind: "read",
+        operation: read.toolName === "get_task" ? "status" : "rows",
+        saved: read.saved,
+        call: {
+          tool: read.effect.kind,
+          executionId: read.effect.id,
+          route: read.route,
+          args: read.args,
+        },
+      },
+      read.effect.result,
+      context,
+      { effectId: read.effect.id, request: read.effect.request, historicalBackfill: true },
+    );
+    if (
+      stableJsonValue(read.route) === stableJsonValue(requested.route) &&
+      stableJsonValue(read.args) === stableJsonValue(requested.args)
+    )
+      receipts.push(result);
+  }
+  return receipts.length ? { status: "recovered" as const, receipts } : undefined;
+}
 
 export async function admitRecruitingResearchCall(
   deps: { prisma: PrismaClient; artifacts?: ArtifactStore },
@@ -295,8 +384,10 @@ export async function admitRecruitingResearchCall(
     select: { thread: { select: { activeRecruitingRoleId: true } } },
   });
   if (!run) throw new IsolationError();
-  if (!run.thread.activeRecruitingRoleId && !options.actionId && !options.taskId) return undefined;
-  if (!options.actionId && !options.taskId) {
+  const read = route.toolName === "get_task" || route.toolName === "get_rows";
+  if (!run.thread.activeRecruitingRoleId && !options.actionId && !options.taskId && !read)
+    return undefined;
+  if (!options.actionId && !options.taskId && !read) {
     const linked = await deps.prisma.recruitingResearchTask.findFirst({
       where: {
         mcpServerId: route.resourceId,
@@ -321,39 +412,56 @@ export async function admitRecruitingResearchCall(
         return undefined;
     }
   }
-  if (!deps.artifacts) throw new Error("Recruiting research requires artifact storage");
-  const researchDeps = { prisma: deps.prisma, artifacts: deps.artifacts };
-  if (route.toolName === "get_task" || route.toolName === "get_rows") {
-    const task = options.taskId
+  const task = read
+    ? options.taskId
       ? { id: options.taskId }
       : await deps.prisma.recruitingResearchTask.findFirst({
           where: {
-            roleId: run.thread.activeRecruitingRoleId!,
+            role: { spaceId: trusted.actor.spaceId, userId: trusted.actor.userId },
             mcpServerId: route.resourceId,
             serverRevision: Number(route.resourceRevision),
             providerTaskId: String(call.args.task_id ?? ""),
           },
           select: { id: true },
-        });
-    if (!task) return undefined;
-    const saved = await readRecruitingResearchContext(deps.prisma, trusted.actor, {
+        })
+    : null;
+  if (read && !task) return undefined;
+  if (!deps.artifacts) throw new Error("Recruiting research requires artifact storage");
+  const researchDeps = { prisma: deps.prisma, artifacts: deps.artifacts };
+  if (read && task) {
+    const historical = await readRecruitingResearchContext(deps.prisma, trusted.actor, {
       runId: trusted.runId,
       taskId: task.id,
-      toolName: route.toolName,
+      historical: true,
     });
     if (
-      !saved.action ||
-      !saved.task ||
-      saved.task.providerTaskId !== call.args.task_id ||
-      saved.task.mcpServerId !== route.resourceId ||
-      saved.task.serverRevision !== route.resourceRevision
+      !historical.action ||
+      !historical.task ||
+      historical.task.providerTaskId !== call.args.task_id ||
+      historical.task.mcpServerId !== route.resourceId ||
+      historical.task.serverRevision !== route.resourceRevision
     )
       throw new IsolationError();
+    const recoveredResult = await recoverRecruitingResearchReads(
+      researchDeps,
+      trusted,
+      task.id,
+      call,
+      context,
+    );
+    const saved = recoveredResult
+      ? historical
+      : await readRecruitingResearchContext(deps.prisma, trusted.actor, {
+          runId: trusted.runId,
+          taskId: task.id,
+          toolName: route.toolName as "get_task" | "get_rows",
+        });
     return {
       kind: "read",
       operation: route.toolName === "get_task" ? "status" : "rows",
       saved,
       call,
+      recoveredResult,
     };
   }
   const candidates = options.actionId
@@ -414,8 +522,9 @@ async function uploadResearchReceipt(
   context: AdapterContext,
   value: unknown,
   prefix: string,
+  readEffectId?: string,
 ): Promise<RecruitingResearchArtifactInput> {
-  const bytes = Buffer.from(JSON.stringify(value), "utf8");
+  const bytes = Buffer.from(readEffectId ? stableJsonValue(value) : JSON.stringify(value), "utf8");
   const hash = createHash("sha256").update(bytes).digest("hex");
   const name = `${prefix}-${hash}.json`;
   const stored = await deps.artifacts.put({ name, mimeType: "application/json", bytes }, context);
@@ -427,7 +536,9 @@ async function uploadResearchReceipt(
     size: bytes.byteLength,
     hash,
     storageKey: stored.id,
-    clientNonce: `${prefix}:${context.runId}:${hash}`,
+    clientNonce: readEffectId
+      ? `recruiting-observation:${readEffectId}`
+      : `${prefix}:${context.runId}:${hash}`,
   };
 }
 
@@ -437,8 +548,14 @@ export async function completeRecruitingResearchCall(
   admitted: RecruitingResearchCallAdmission,
   result: unknown,
   context: AdapterContext,
-  receiptIdentity?: { effectId: string; request: unknown },
+  receiptIdentity?: { effectId: string; request: unknown; historicalBackfill?: boolean },
 ) {
+  if (
+    context.runId !== trusted.runId ||
+    context.spaceId !== trusted.actor.spaceId ||
+    context.userId !== trusted.actor.userId
+  )
+    throw new IsolationError();
   const saved = admitted.kind === "read" ? admitted.saved : admitted;
   if (!saved.task || !saved.action) throw new IsolationError();
   const { task, action } = saved;
@@ -477,7 +594,7 @@ export async function completeRecruitingResearchCall(
       actionId: action.id,
       operation: admitted.operation,
       ...(admitted.kind === "read"
-        ? { request: admitted.call.args }
+        ? { effectId: receiptIdentity!.effectId, request: admitted.call.args }
         : {
             requestArtifact: {
               artifactId: action.requestArtifactId,
@@ -488,6 +605,7 @@ export async function completeRecruitingResearchCall(
       observation,
     },
     `recruiting-${admitted.kind === "read" ? "observation" : "receipt"}-${action.id}`,
+    admitted.kind === "read" ? receiptIdentity!.effectId : undefined,
   );
   const taskState =
     observation.observedProviderState === "completed" && observation.done === true
@@ -530,6 +648,7 @@ export async function completeRecruitingResearchCall(
           effectId: receiptIdentity!.effectId,
           request: receiptIdentity!.request as Prisma.InputJsonValue,
           rawResult: raw as Prisma.InputJsonValue,
+          ...(receiptIdentity!.historicalBackfill ? { historicalBackfill: true } : {}),
           toolName: admitted.operation === "status" ? "get_task" : "get_rows",
           outputArtifact: file,
           ...observed,

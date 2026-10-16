@@ -1944,13 +1944,646 @@ describePostgres("recruiting domain (PostgreSQL)", () => {
         runId: f.run.id,
         kind: `mcp_${toolName}`,
         idempotencyKey: `research-read:${actionId}:${label}`,
-        status: "completed",
+        status: "intended",
         request,
-        result: rawResult,
       },
+    });
+    const owner = await prisma.run.findUniqueOrThrow({ where: { id: f.run.id } });
+    await recruiting.bindRecruitingResearchReadEffect(prisma, actor, {
+      runId: owner.id,
+      leaseOwner: owner.leaseOwner!,
+      leaseFence: owner.leaseFence,
+      actionId,
+      effectId: effect.id,
+      request,
+    });
+    await prisma.externalEffect.update({
+      where: { id: effect.id },
+      data: { status: "completed", result: rawResult },
     });
     return { effectId: effect.id, request, rawResult };
   }
+
+  function recordResearchRead(
+    input: recruiting.RecruitingResearchObservationInput,
+    suppliedActor = actor,
+  ) {
+    return recruiting.recordRecruitingResearchObservation(prisma, suppliedActor, {
+      ...input,
+      outputArtifact: {
+        ...input.outputArtifact,
+        clientNonce: `recruiting-observation:${input.effectId}`,
+      },
+    });
+  }
+
+  async function intendedResearchRead(
+    f: Awaited<ReturnType<typeof researchFixture>>,
+    label: string,
+  ) {
+    const request: Prisma.InputJsonValue = [
+      "__rakazoCatalogTool",
+      "direct",
+      {
+        route: {
+          connectorId: "mcp",
+          resourceId: f.server.id,
+          resourceRevision: f.server.revision,
+          toolName: "get_rows",
+        },
+        args: { task_id: "provider-task" },
+      },
+    ];
+    const effect = await prisma.externalEffect.create({
+      data: {
+        spaceId,
+        runId: f.run.id,
+        kind: "mcp_get_rows",
+        idempotencyKey: `bound-read:${f.run.id}:${label}`,
+        status: "intended",
+        request,
+      },
+    });
+    return { effect, request };
+  }
+
+  it("recovers an actually bound completed read from a cancelled run without rewinding current summaries", async () => {
+    expect(recruiting.bindRecruitingResearchReadEffect).toBeTypeOf("function");
+    const { f, prepared } = await mappedResearchFixture();
+    const { effect, request } = await intendedResearchRead(f, "recover");
+    const bound = await recruiting.bindRecruitingResearchReadEffect(prisma, actor, {
+      ...f.lease,
+      actionId: prepared.action.id,
+      effectId: effect.id,
+      request,
+    });
+    expect(bound.binding).toEqual({
+      phase: "bound",
+      taskId: prepared.task.id,
+      actionId: prepared.action.id,
+      effectId: effect.id,
+      toolName: "get_rows",
+    });
+    const rawResult = { rows: [{ value: "old page", source_id: "raw-old" }] };
+    await prisma.externalEffect.update({
+      where: { id: effect.id },
+      data: { status: "completed", result: rawResult },
+    });
+    await prisma.recruitingResearchAction.update({
+      where: { id: prepared.action.id },
+      data: {
+        cursor: "current-cursor",
+        observedProviderState: "completed",
+        usage: [{ scope: "task", unit: "credits", amount: 9 }],
+      },
+    });
+    await prisma.recruitingResearchTask.update({
+      where: { id: prepared.task.id },
+      data: { state: "completed" },
+    });
+    await prisma.run.update({ where: { id: f.run.id }, data: { status: "cancelled" } });
+    const next = await nextResearchRun(f);
+    await recruiting.createRecruitingRole(prisma, actor, {
+      ...roleInput(source(f.original.id)),
+      sourceThreadId: f.thread.id,
+      title: "Switched role",
+    });
+    await prisma.mcpServer.update({
+      where: { id: f.server.id },
+      data: { enabled: false, revision: 2 },
+    });
+    await prisma.botMcpServer.deleteMany({ where: { serverId: f.server.id } });
+    const pending = await recruiting.listUnmappedRecruitingResearchReads(prisma, actor, {
+      runId: next.runId,
+      taskId: prepared.task.id,
+    });
+    expect(pending).toHaveLength(1);
+    expect(pending[0]).toMatchObject({
+      saved: { action: { id: prepared.action.id } },
+      effect: { id: effect.id },
+      toolName: "get_rows",
+      args: { task_id: "provider-task" },
+    });
+    const input = {
+      runId: next.runId,
+      actionId: prepared.action.id,
+      effectId: effect.id,
+      request,
+      rawResult,
+      toolName: "get_rows" as const,
+      historicalBackfill: true,
+      cursor: "old-cursor",
+      taskState: "active" as const,
+      observedProviderState: "queued",
+      usage: [{ scope: "task" as const, unit: "credits", amount: 1 }],
+      outputArtifact: {
+        ...f.metadata("backfilled-read", "e".repeat(64)),
+        clientNonce: `recruiting-observation:${effect.id}`,
+      },
+    };
+    await expect(recordResearchRead({ ...input, historicalBackfill: false })).rejects.toThrow(
+      IsolationError,
+    );
+    await expect(
+      recruiting.listUnmappedRecruitingResearchReads(
+        prisma,
+        { ...actor, userId: otherUserId },
+        {
+          runId: next.runId,
+          taskId: prepared.task.id,
+        },
+      ),
+    ).rejects.toThrow(IsolationError);
+    const recorded = await recordResearchRead(input);
+    expect(recorded.action).toMatchObject({
+      cursor: "current-cursor",
+      observedProviderState: "completed",
+      usage: [{ scope: "task", unit: "credits", amount: 9 }],
+    });
+    expect(recorded.task.state).toBe("completed");
+    expect(
+      await recruiting.listUnmappedRecruitingResearchReads(prisma, actor, {
+        runId: next.runId,
+        taskId: prepared.task.id,
+      }),
+    ).toEqual([]);
+    const replayed = await recordResearchRead({
+      ...input,
+      cursor: "another-old-cursor",
+      usage: [{ scope: "task", unit: "credits", amount: 0 }],
+    });
+    expect(replayed.outputArtifact.id).toBe(recorded.outputArtifact.id);
+    expect(replayed.action).toEqual(recorded.action);
+    expect(
+      (
+        await prisma.event.findFirstOrThrow({
+          where: {
+            type: "recruiting.read",
+            AND: [
+              { payload: { path: ["phase"], equals: "recorded" } },
+              { payload: { path: ["effectId"], equals: effect.id } },
+            ],
+          },
+        })
+      ).runId,
+    ).toBe(next.runId);
+    expect(
+      await prisma.event.count({
+        where: {
+          type: "recruiting.read",
+          AND: [
+            { payload: { path: ["phase"], equals: "recorded" } },
+            { payload: { path: ["effectId"], equals: effect.id } },
+          ],
+        },
+      }),
+    ).toBe(1);
+  });
+
+  it("binds and records one read once across two database connections", async () => {
+    const { f, prepared } = await mappedResearchFixture();
+    const { effect, request } = await intendedResearchRead(f, "concurrent");
+    const second = createDb(databaseUrl!);
+    try {
+      const bind = { ...f.lease, actionId: prepared.action.id, effectId: effect.id, request };
+      const bound = await Promise.all([
+        recruiting.bindRecruitingResearchReadEffect(prisma, actor, bind),
+        recruiting.bindRecruitingResearchReadEffect(second.prisma, actor, bind),
+      ]);
+      expect(bound[0]!.binding).toEqual(bound[1]!.binding);
+      const rawResult = { rows: [{ value: "concurrent page" }] };
+      await prisma.externalEffect.update({
+        where: { id: effect.id },
+        data: { status: "completed", result: rawResult },
+      });
+      const input = {
+        runId: f.run.id,
+        actionId: prepared.action.id,
+        effectId: effect.id,
+        request,
+        rawResult,
+        toolName: "get_rows" as const,
+        outputArtifact: {
+          ...f.metadata("concurrent-read"),
+          clientNonce: `recruiting-observation:${effect.id}`,
+        },
+      };
+      const recorded = await Promise.all([
+        recruiting.recordRecruitingResearchObservation(prisma, actor, input),
+        recruiting.recordRecruitingResearchObservation(second.prisma, actor, input),
+      ]);
+      expect(recorded[0]!.outputArtifact.id).toBe(recorded[1]!.outputArtifact.id);
+      expect(recorded[1]!.action.outputArtifacts).toHaveLength(1);
+      expect(
+        await prisma.event.count({
+          where: { type: "recruiting.read", payload: { path: ["effectId"], equals: effect.id } },
+        }),
+      ).toBe(2);
+      expect(
+        await prisma.artifact.count({ where: { clientNonce: input.outputArtifact.clientNonce } }),
+      ).toBe(1);
+    } finally {
+      await second.prisma.$disconnect();
+      await second.pool.end();
+    }
+  });
+
+  it.each(["intended", "approved", "executing"] as const)(
+    "rechecks the native lease when replaying an already bound %s read",
+    async (status) => {
+      const { f, prepared } = await mappedResearchFixture();
+      const { effect, request } = await intendedResearchRead(f, `stale-${status}`);
+      const input = { ...f.lease, actionId: prepared.action.id, effectId: effect.id, request };
+      await recruiting.bindRecruitingResearchReadEffect(prisma, actor, input);
+      await prisma.externalEffect.update({ where: { id: effect.id }, data: { status } });
+      await prisma.run.update({
+        where: { id: f.run.id },
+        data: { leaseOwner: "replacement-worker", leaseFence: 2 },
+      });
+      await expect(
+        recruiting.bindRecruitingResearchReadEffect(prisma, actor, input),
+      ).rejects.toThrow(IsolationError);
+      if (status !== "executing")
+        await expect(
+          recruiting.claimRecruitingResearchReadEffect(prisma, actor, {
+            ...f.lease,
+            effectId: effect.id,
+            from: status,
+          }),
+        ).rejects.toThrow(IsolationError);
+      expect(
+        (await prisma.externalEffect.findUniqueOrThrow({ where: { id: effect.id } })).status,
+      ).toBe(status);
+    },
+  );
+
+  it.each(["cancel", "expire", "role", "server", "assignment"])(
+    "does not dispatch a previously bound read after its %s boundary changes",
+    async (boundary) => {
+      expect(recruiting.claimRecruitingResearchReadEffect).toBeTypeOf("function");
+      const { f, prepared } = await mappedResearchFixture();
+      const { effect, request } = await intendedResearchRead(f, `claim-${boundary}`);
+      await recruiting.bindRecruitingResearchReadEffect(prisma, actor, {
+        ...f.lease,
+        actionId: prepared.action.id,
+        effectId: effect.id,
+        request,
+      });
+      if (boundary === "cancel")
+        await prisma.run.update({ where: { id: f.run.id }, data: { status: "cancelled" } });
+      if (boundary === "expire")
+        await prisma.run.update({ where: { id: f.run.id }, data: { leaseExpiresAt: new Date(0) } });
+      if (boundary === "role")
+        await recruiting.createRecruitingRole(prisma, actor, {
+          ...roleInput(source(f.original.id)),
+          sourceThreadId: f.thread.id,
+          title: "Switched before read claim",
+        });
+      if (boundary === "server")
+        await prisma.mcpServer.update({ where: { id: f.server.id }, data: { enabled: false } });
+      if (boundary === "assignment")
+        await prisma.botMcpServer.deleteMany({ where: { serverId: f.server.id } });
+      await expect(
+        recruiting.claimRecruitingResearchReadEffect(prisma, actor, {
+          ...f.lease,
+          effectId: effect.id,
+          from: "intended",
+        }),
+      ).rejects.toThrow(IsolationError);
+      expect(
+        (await prisma.externalEffect.findUniqueOrThrow({ where: { id: effect.id } })).status,
+      ).toBe("intended");
+    },
+  );
+
+  it.each(["intended", "approved"] as const)(
+    "claims a native %s read once across two connections",
+    async (from) => {
+      expect(recruiting.claimRecruitingResearchReadEffect).toBeTypeOf("function");
+      const { f, prepared } = await mappedResearchFixture();
+      const { effect, request } = await intendedResearchRead(f, `claim-once-${from}`);
+      await recruiting.bindRecruitingResearchReadEffect(prisma, actor, {
+        ...f.lease,
+        actionId: prepared.action.id,
+        effectId: effect.id,
+        request,
+      });
+      await prisma.externalEffect.update({ where: { id: effect.id }, data: { status: from } });
+      const second = createDb(databaseUrl!);
+      try {
+        const input = { ...f.lease, effectId: effect.id, from };
+        expect(
+          (
+            await Promise.all([
+              recruiting.claimRecruitingResearchReadEffect(prisma, actor, input),
+              recruiting.claimRecruitingResearchReadEffect(second.prisma, actor, input),
+            ])
+          ).sort(),
+        ).toEqual([false, true]);
+        expect(
+          (await prisma.externalEffect.findUniqueOrThrow({ where: { id: effect.id } })).status,
+        ).toBe("executing");
+        expect(
+          (
+            await prisma.recruitingResearchAction.findUniqueOrThrow({
+              where: { id: prepared.action.id },
+            })
+          ).deliveryState,
+        ).toBe("accepted");
+      } finally {
+        await second.prisma.$disconnect();
+        await second.pool.end();
+      }
+    },
+  );
+
+  it("keeps a late live read on its original action without completing a newer continuation", async () => {
+    const { f, prepared: original } = await mappedResearchFixture();
+    const { effect, request } = await intendedResearchRead(f, "late-original-read");
+    await recruiting.bindRecruitingResearchReadEffect(prisma, actor, {
+      ...f.lease,
+      actionId: original.action.id,
+      effectId: effect.id,
+      request,
+    });
+    const continued = await recruiting.prepareRecruitingResearchAction(prisma, actor, {
+      ...f.input,
+      kind: "continue",
+      taskId: original.task.id,
+      clientNonce: `${f.input.clientNonce}-live-next-round`,
+      requestArtifact: f.metadata("live-next-round"),
+    });
+    const admitted = await recruiting.admitRecruitingResearchAction(
+      prisma,
+      actor,
+      researchAdmission(f, continued),
+    );
+    const accepted = { task_id: "provider-task", state: "queued" };
+    await prisma.externalEffect.update({
+      where: { id: admitted.effect!.id },
+      data: { status: "completed", result: accepted },
+    });
+    await recruiting.reconcileRecruitingResearchAction(prisma, actor, {
+      runId: f.run.id,
+      actionId: continued.action.id,
+      effectId: admitted.effect!.id,
+      rawResult: accepted,
+      deliveryState: "accepted",
+      providerTaskId: "provider-task",
+      taskState: "active",
+      cursor: "current-round",
+      receiptArtifact: f.metadata("live-next-receipt"),
+    });
+    const rawResult = { rows: [{ value: "old round completed" }], done: true };
+    await prisma.externalEffect.update({
+      where: { id: effect.id },
+      data: { status: "completed", result: rawResult },
+    });
+    const recorded = await recordResearchRead({
+      runId: f.run.id,
+      actionId: original.action.id,
+      effectId: effect.id,
+      request,
+      rawResult,
+      toolName: "get_rows",
+      taskState: "completed",
+      cursor: "old-round",
+      outputArtifact: f.metadata("late-live-original"),
+    });
+    expect(recorded.task).toMatchObject({ state: "active", pendingActionId: continued.action.id });
+    expect(recorded.action).toMatchObject({ id: original.action.id, cursor: "old-round" });
+    expect(recorded.action.outputArtifacts).toHaveLength(1);
+    expect(
+      await prisma.recruitingResearchAction.findUniqueOrThrow({
+        where: { id: continued.action.id },
+      }),
+    ).toMatchObject({ cursor: "current-round", outputArtifacts: [] });
+  });
+
+  it.each(["lease", "actor", "run", "request", "role", "server", "assignment", "legacy"])(
+    "rejects a fresh read binding with an invalid %s boundary",
+    async (boundary) => {
+      const { f, prepared } = await mappedResearchFixture();
+      const { effect, request } = await intendedResearchRead(f, boundary);
+      const input = { ...f.lease, actionId: prepared.action.id, effectId: effect.id, request };
+      if (boundary === "lease") input.leaseFence += 1;
+      if (boundary === "run") input.runId = wrongRunId;
+      if (boundary === "request") input.request = ["changed"];
+      if (boundary === "role")
+        await recruiting.createRecruitingRole(prisma, actor, {
+          ...roleInput(source(f.original.id)),
+          sourceThreadId: f.thread.id,
+          title: "Changed role",
+        });
+      if (boundary === "server")
+        await prisma.mcpServer.update({ where: { id: f.server.id }, data: { enabled: false } });
+      if (boundary === "assignment")
+        await prisma.botMcpServer.deleteMany({ where: { serverId: f.server.id } });
+      if (boundary === "legacy")
+        await prisma.externalEffect.update({
+          where: { id: effect.id },
+          data: { status: "completed", result: { rows: [] } },
+        });
+      await expect(
+        recruiting.bindRecruitingResearchReadEffect(
+          prisma,
+          boundary === "actor" ? { ...actor, userId: otherUserId } : actor,
+          input,
+        ),
+      ).rejects.toThrow();
+      expect(
+        await prisma.event.count({
+          where: { type: "recruiting.read", payload: { path: ["effectId"], equals: effect.id } },
+        }),
+      ).toBe(0);
+      if (boundary === "legacy") {
+        expect(
+          await recruiting.listUnmappedRecruitingResearchReads(prisma, actor, {
+            runId: f.run.id,
+            taskId: prepared.task.id,
+          }),
+        ).toEqual([]);
+        await expect(
+          recordResearchRead({
+            runId: f.run.id,
+            actionId: prepared.action.id,
+            effectId: effect.id,
+            request,
+            rawResult: { rows: [] },
+            toolName: "get_rows",
+            outputArtifact: f.metadata("legacy-output"),
+          }),
+        ).rejects.toThrow(IsolationError);
+      }
+    },
+  );
+
+  it.each(["artifact-only", "missing-ref", "changed-record", "duplicate-bind", "extra-field"])(
+    "rejects a contradictory read receipt with %s",
+    async (boundary) => {
+      const { f, prepared } = await mappedResearchFixture();
+      const identity = await completedResearchRead(f, prepared.action.id, boundary, "get_rows", {
+        rows: [],
+      });
+      const input = {
+        ...identity,
+        runId: f.run.id,
+        actionId: prepared.action.id,
+        toolName: "get_rows" as const,
+        outputArtifact: {
+          ...f.metadata("receipt-proof"),
+          clientNonce: `recruiting-observation:${identity.effectId}`,
+        },
+      };
+      if (boundary === "artifact-only") {
+        await prisma.artifact.create({
+          data: { ...input.outputArtifact, spaceId, userId, botId, runId: f.run.id, version: 1 },
+        });
+      } else if (boundary === "duplicate-bind" || boundary === "extra-field") {
+        const event = await prisma.event.findFirstOrThrow({
+          where: {
+            type: "recruiting.read",
+            payload: { path: ["effectId"], equals: identity.effectId },
+          },
+        });
+        if (boundary === "extra-field")
+          await prisma.event.update({
+            where: { id: event.id },
+            data: { payload: { ...(event.payload as Prisma.InputJsonObject), invented: true } },
+          });
+        else
+          await recruiting.appendEvent(prisma, {
+            spaceId,
+            threadId: f.thread.id,
+            botId,
+            runId: f.run.id,
+            type: "recruiting.read",
+            payload: event.payload as Prisma.InputJsonObject,
+          });
+      } else {
+        await recordResearchRead(input);
+        if (boundary === "missing-ref")
+          await prisma.recruitingResearchAction.update({
+            where: { id: prepared.action.id },
+            data: { outputArtifacts: [] },
+          });
+        else {
+          const event = await prisma.event.findFirstOrThrow({
+            where: {
+              type: "recruiting.read",
+              AND: [
+                { payload: { path: ["effectId"], equals: identity.effectId } },
+                { payload: { path: ["phase"], equals: "recorded" } },
+              ],
+            },
+          });
+          await prisma.event.update({
+            where: { id: event.id },
+            data: {
+              payload: { ...(event.payload as Prisma.InputJsonObject), taskId: "changed-task" },
+            },
+          });
+        }
+      }
+      await expect(
+        recruiting.listUnmappedRecruitingResearchReads(prisma, actor, {
+          runId: f.run.id,
+          taskId: prepared.task.id,
+        }),
+      ).rejects.toThrow(IsolationError);
+      await expect(recordResearchRead(input)).rejects.toThrow(IsolationError);
+    },
+  );
+
+  it("requires the exact native observation artifact nonce", async () => {
+    const { f, prepared } = await mappedResearchFixture();
+    const identity = await completedResearchRead(f, prepared.action.id, "nonce", "get_rows", {
+      rows: [],
+    });
+    await expect(
+      recruiting.recordRecruitingResearchObservation(prisma, actor, {
+        ...identity,
+        runId: f.run.id,
+        actionId: prepared.action.id,
+        toolName: "get_rows",
+        outputArtifact: f.metadata("invented-receipt-nonce"),
+      }),
+    ).rejects.toThrow(IsolationError);
+  });
+
+  it("retains the first read binding when a continuation becomes the current action", async () => {
+    const { f, prepared: original } = await mappedResearchFixture();
+    const { effect, request } = await intendedResearchRead(f, "first-action");
+    await recruiting.bindRecruitingResearchReadEffect(prisma, actor, {
+      ...f.lease,
+      actionId: original.action.id,
+      effectId: effect.id,
+      request,
+    });
+    const continued = await recruiting.prepareRecruitingResearchAction(prisma, actor, {
+      ...f.input,
+      kind: "continue",
+      taskId: original.task.id,
+      clientNonce: `${f.input.clientNonce}-continue-after-read`,
+      requestArtifact: f.metadata("continue-after-read"),
+    });
+    const replay = await recruiting.bindRecruitingResearchReadEffect(prisma, actor, {
+      ...f.lease,
+      actionId: continued.action.id,
+      effectId: effect.id,
+      request,
+    });
+    expect(replay.binding.actionId).toBe(original.action.id);
+    const rawResult = { rows: [{ value: "first action rows" }] };
+    await prisma.externalEffect.update({
+      where: { id: effect.id },
+      data: { status: "completed", result: rawResult },
+    });
+    const terminalReplay = await recruiting.bindRecruitingResearchReadEffect(prisma, actor, {
+      ...f.lease,
+      actionId: continued.action.id,
+      effectId: effect.id,
+      request,
+    });
+    expect(terminalReplay.saved.action!.id).toBe(original.action.id);
+    const pending = await recruiting.listUnmappedRecruitingResearchReads(prisma, actor, {
+      runId: f.run.id,
+      taskId: original.task.id,
+    });
+    expect(pending[0]!.saved.action!.id).toBe(original.action.id);
+    const recorded = await recordResearchRead({
+      runId: f.run.id,
+      actionId: original.action.id,
+      effectId: effect.id,
+      request,
+      rawResult,
+      toolName: "get_rows",
+      historicalBackfill: true,
+      taskState: "completed",
+      cursor: "old-page",
+      outputArtifact: f.metadata("first-action-page"),
+    });
+    expect(recorded.task).toMatchObject({ state: "active", pendingActionId: continued.action.id });
+    expect(recorded.action.cursor).toBeNull();
+    expect(
+      (
+        await prisma.recruitingResearchAction.findUniqueOrThrow({
+          where: { id: continued.action.id },
+        })
+      ).outputArtifacts,
+    ).toEqual([]);
+    await expect(
+      recordResearchRead({
+        runId: f.run.id,
+        actionId: continued.action.id,
+        effectId: effect.id,
+        request,
+        rawResult,
+        toolName: "get_rows",
+        outputArtifact: f.metadata("wrong-action"),
+      }),
+    ).rejects.toThrow(IsolationError);
+  });
 
   it("persists a completed rows receipt after cancellation and role/provider permission changes", async () => {
     const f = await researchFixture();
@@ -1988,7 +2621,7 @@ describePostgres("recruiting domain (PostgreSQL)", () => {
       data: { enabled: false, revision: 2 },
     });
     await prisma.botMcpServer.deleteMany({ where: { serverId: f.server.id } });
-    const recorded = await recruiting.recordRecruitingResearchObservation(prisma, actor, {
+    const recorded = await recordResearchRead({
       ...read,
       runId: f.run.id,
       actionId: prepared.action.id,
@@ -2066,7 +2699,7 @@ describePostgres("recruiting domain (PostgreSQL)", () => {
       deliveryState: "accepted",
       providerTaskId: "provider-task",
     });
-    const status = await recruiting.recordRecruitingResearchObservation(prisma, actor, {
+    const status = await recordResearchRead({
       ...(await completedResearchRead(f, continued.action.id, "round-b-completed", "get_task", {
         state: "completed",
       })),
@@ -2084,7 +2717,7 @@ describePostgres("recruiting domain (PostgreSQL)", () => {
       toolName: "get_rows",
     });
     expect(selected.action?.id).toBe(continued.action.id);
-    const rows = await recruiting.recordRecruitingResearchObservation(prisma, actor, {
+    const rows = await recordResearchRead({
       ...(await completedResearchRead(f, selected.action!.id, "round-b-rows", "get_rows", {
         rows: [{ value: "round B" }],
       })),
@@ -2295,11 +2928,7 @@ describePostgres("recruiting domain (PostgreSQL)", () => {
       outputArtifact: f.metadata("invalid-output", "e".repeat(64)),
     };
     await expect(
-      recruiting.recordRecruitingResearchObservation(
-        prisma,
-        boundary === "actor" ? { ...actor, userId: otherUserId } : actor,
-        input,
-      ),
+      recordResearchRead(input, boundary === "actor" ? { ...actor, userId: otherUserId } : actor),
     ).rejects.toThrow(IsolationError);
     expect(
       (
@@ -2313,7 +2942,7 @@ describePostgres("recruiting domain (PostgreSQL)", () => {
     ).toBe(0);
   });
 
-  it("accepts a completed native catalog read and reuses identical page content across capture runs", async () => {
+  it("records distinct native catalog and direct reads of identical content across capture runs", async () => {
     const { f, prepared } = await mappedResearchFixture();
     const identity = await completedResearchRead(
       f,
@@ -2341,7 +2970,7 @@ describePostgres("recruiting domain (PostgreSQL)", () => {
       where: { id: identity.effectId },
       data: { request: identity.request },
     });
-    const first = await recruiting.recordRecruitingResearchObservation(prisma, actor, {
+    const first = await recordResearchRead({
       ...identity,
       runId: f.run.id,
       actionId: prepared.action.id,
@@ -2358,7 +2987,7 @@ describePostgres("recruiting domain (PostgreSQL)", () => {
       "get_rows",
       identity.rawResult,
     );
-    const second = await recruiting.recordRecruitingResearchObservation(prisma, actor, {
+    const second = await recordResearchRead({
       ...repeated,
       runId: next.run.id,
       actionId: prepared.action.id,
@@ -2369,8 +2998,8 @@ describePostgres("recruiting domain (PostgreSQL)", () => {
         clientNonce: `page:${next.run.id}:${hash}`,
       },
     });
-    expect(second.outputArtifact.id).toBe(first.outputArtifact.id);
-    expect(second.action.outputArtifacts).toHaveLength(1);
+    expect(second.outputArtifact.id).not.toBe(first.outputArtifact.id);
+    expect(second.action.outputArtifacts).toHaveLength(2);
   });
 
   function researchAdmission(
@@ -2990,13 +3619,13 @@ describePostgres("recruiting domain (PostgreSQL)", () => {
       outputArtifact: f.metadata("rows-one", "b".repeat(64)),
       cursor: "same-cursor",
     };
-    const first = await recruiting.recordRecruitingResearchObservation(prisma, actor, input);
-    const duplicate = await recruiting.recordRecruitingResearchObservation(prisma, actor, {
+    const first = await recordResearchRead(input);
+    const duplicate = await recordResearchRead({
       ...input,
       outputArtifact: { ...f.metadata("rows-duplicate", "b".repeat(64)) },
     });
     expect(duplicate.outputArtifact.id).toBe(first.outputArtifact.id);
-    const changed = await recruiting.recordRecruitingResearchObservation(prisma, actor, {
+    const changed = await recordResearchRead({
       ...input,
       ...(await completedResearchRead(f, prepared.action.id, "rows-changed", "get_rows", {
         rows: [{ value: "changed" }],
@@ -3010,7 +3639,7 @@ describePostgres("recruiting domain (PostgreSQL)", () => {
     expect(changed.action.receiptArtifactId).toBe(mapped.receiptArtifact.id);
     expect(changed.action.effectId).toBe(admitted.effect!.id);
     expect(changed.action.cursor).toBe("same-cursor");
-    const next = await recruiting.recordRecruitingResearchObservation(prisma, actor, {
+    const next = await recordResearchRead({
       ...input,
       ...(await completedResearchRead(f, prepared.action.id, "rows-next", "get_rows", {
         rows: [{ value: "changed" }],
@@ -3021,7 +3650,7 @@ describePostgres("recruiting domain (PostgreSQL)", () => {
     });
     expect(next.action.outputArtifacts).toHaveLength(3);
     expect(next.outputArtifact.id).not.toBe(changed.outputArtifact.id);
-    const completed = await recruiting.recordRecruitingResearchObservation(prisma, actor, {
+    const completed = await recordResearchRead({
       ...(await completedResearchRead(f, prepared.action.id, "status-completed", "get_task", {
         state: "completed",
       })),

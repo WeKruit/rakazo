@@ -116,6 +116,7 @@ import type {
 import {
   appendEventInTransaction,
   claimRecruitingResearchAction,
+  claimRecruitingResearchReadEffect,
   createSpaceForMember,
   createThreadMessageInTransaction,
   effectiveMemoryScope,
@@ -328,6 +329,7 @@ import {
 import type { RecruitingResearchCallAdmission } from "./recruiting-tools.js";
 import {
   admitRecruitingResearchCall,
+  bindRecruitingResearchReadCall,
   completeRecruitingResearchCall,
   executeRecruitingRoleTool,
   prepareRecruitingResearchTool,
@@ -4258,6 +4260,8 @@ export function createRunExecutor(deps: ExecutorDeps) {
                 input,
                 context,
               );
+              if ("recoveredResult" in researchSelection && researchSelection.recoveredResult)
+                return redactConnectorPayload(researchSelection.recoveredResult, runSecrets);
               if (researchSelection.recoveryEffectKind) {
                 name = researchSelection.recoveryEffectKind;
                 args = researchSelection.args;
@@ -4497,10 +4501,12 @@ export function createRunExecutor(deps: ExecutorDeps) {
             researchAdmission?.kind === "mutation" ? researchAdmission : undefined;
           if (researchAdmission && disabledBuiltinTools.has("recruiting_research"))
             return { error: "This tool is disabled for this bot." };
+          if (researchAdmission?.kind === "read" && researchAdmission.recoveredResult)
+            return redactConnectorPayload(researchAdmission.recoveredResult, runSecrets);
           const researchResult = async (
             admission: RecruitingResearchCallAdmission,
             result: unknown,
-            receipt?: { id: string; request: unknown },
+            receipt?: { id: string; request: unknown; historicalBackfill?: boolean },
           ) => {
             if (!deps.artifacts) throw new Error("Recruiting research requires artifact storage");
             return redactConnectorPayload(
@@ -4510,7 +4516,13 @@ export function createRunExecutor(deps: ExecutorDeps) {
                 admission,
                 result,
                 context,
-                receipt ? { effectId: receipt.id, request: receipt.request } : undefined,
+                receipt
+                  ? {
+                      effectId: receipt.id,
+                      request: receipt.request,
+                      historicalBackfill: receipt.historicalBackfill,
+                    }
+                  : undefined,
               ),
               runSecrets,
             );
@@ -4687,6 +4699,15 @@ export function createRunExecutor(deps: ExecutorDeps) {
                   executionId,
                   consumedEffectIds,
                 );
+          if (researchAdmission?.kind === "read") {
+            if (!applied) throw new IsolationError();
+            researchAdmission = await bindRecruitingResearchReadCall(
+              { prisma: deps.prisma },
+              researchDispatchActor,
+              researchAdmission,
+              applied.effect,
+            );
+          }
 
           const runAutoReview = async () => {
             if (!injectedReview && !checker) return;
@@ -4858,7 +4879,15 @@ export function createRunExecutor(deps: ExecutorDeps) {
                   effectId: applied!.effect.id,
                   from,
                 })
-              : await claim(deps.prisma, applied!.effect.id);
+              : researchAdmission?.kind === "read"
+                ? await claimRecruitingResearchReadEffect(deps.prisma, researchActor.actor, {
+                    runId,
+                    leaseOwner: workerId,
+                    leaseFence: fence,
+                    effectId: applied!.effect.id,
+                    from,
+                  })
+                : await claim(deps.prisma, applied!.effect.id);
             if (claimed) {
               claimedEffect = true;
               return undefined;
@@ -4870,7 +4899,10 @@ export function createRunExecutor(deps: ExecutorDeps) {
               const retryGate = resolveDuplicateEffectGate(current, name);
               if (retryGate.action === "return") {
                 if (researchAdmission && current.status === "completed")
-                  return researchResult(researchAdmission, current.result, current);
+                  return researchResult(researchAdmission, current.result, {
+                    ...current,
+                    historicalBackfill: true,
+                  });
                 if (
                   name === "recruiting_role" &&
                   retryGate.result &&
@@ -4945,7 +4977,10 @@ export function createRunExecutor(deps: ExecutorDeps) {
             const gate = resolveDuplicateEffectGate(applied.effect, name);
             if (gate.action === "return") {
               if (researchAdmission && applied.effect.status === "completed")
-                return researchResult(researchAdmission, applied.effect.result, applied.effect);
+                return researchResult(researchAdmission, applied.effect.result, {
+                  ...applied.effect,
+                  historicalBackfill: true,
+                });
               if (name === "request_secret") {
                 const replacementSecret = await deps.prisma.secret.findFirst({
                   where: {
@@ -6858,7 +6893,7 @@ export function createRunExecutor(deps: ExecutorDeps) {
             return archived;
           }
           if (deps.connector) {
-            if (researchMutation && !claimedEffect) {
+            if (researchAdmission && !claimedEffect) {
               const early = await claimOrReturn("intended");
               if (early !== undefined) return early;
             }

@@ -56,6 +56,7 @@ export const ProductEventType = z.enum([
   "group.handoff",
   "recruiting.context.adopted",
   "recruiting.action.transitioned",
+  "recruiting.read",
   /** Liveness only: never persisted, never applied to a snapshot, always seq 0. */
   "heartbeat",
 ]);
@@ -351,6 +352,24 @@ export type RecruitingActionTransitionedPayload = z.infer<
   typeof RecruitingActionTransitionedPayloadSchema
 >;
 
+export const RecruitingReadPayloadSchema = z.discriminatedUnion("phase", [
+  z.strictObject({
+    phase: z.literal("bound"),
+    taskId: RecruitingId,
+    actionId: RecruitingId,
+    effectId: RecruitingId,
+    toolName: z.enum(["get_task", "get_rows"]),
+  }),
+  z.strictObject({
+    phase: z.literal("recorded"),
+    taskId: RecruitingId,
+    actionId: RecruitingId,
+    effectId: RecruitingId,
+    outputArtifact: RecruitingArtifactRefSchema,
+  }),
+]);
+export type RecruitingReadPayload = z.infer<typeof RecruitingReadPayloadSchema>;
+
 export const NativeAskAnswerPayloadSchema = z.strictObject({
   messageId: Id,
   askIndex: z.number().int().nonnegative(),
@@ -377,9 +396,11 @@ export const ProductEventSchema = z
         ? RecruitingContextAdoptedPayloadSchema
         : event.type === "recruiting.action.transitioned"
           ? RecruitingActionTransitionedPayloadSchema
-          : event.type === "thread.choice"
-            ? NativeAskAnswerPayloadSchema
-            : null;
+          : event.type === "recruiting.read"
+            ? RecruitingReadPayloadSchema
+            : event.type === "thread.choice"
+              ? NativeAskAnswerPayloadSchema
+              : null;
     if (!schema) return;
     const parsed = schema.safeParse(event.payload);
     if (!parsed.success) {

@@ -3,9 +3,11 @@ import type * as Database from "@rakazo/db";
 import type { PrismaClient } from "@rakazo/db";
 import {
   admitRecruitingResearchAction,
+  bindRecruitingResearchReadEffect,
   executeRecruitingRoleMutation,
   getRecruitingWorkspace,
   IsolationError,
+  listUnmappedRecruitingResearchReads,
   prepareRecruitingResearchAction,
   readRecruitingResearchContext,
   reconcileRecruitingResearchAction,
@@ -27,6 +29,8 @@ vi.mock("@rakazo/db", async (importOriginal) => ({
   prepareRecruitingResearchAction: vi.fn(),
   recruitingResearchSnapshot: vi.fn(),
   admitRecruitingResearchAction: vi.fn(),
+  bindRecruitingResearchReadEffect: vi.fn(),
+  listUnmappedRecruitingResearchReads: vi.fn(),
   reconcileRecruitingResearchAction: vi.fn(),
   recordRecruitingResearchObservation: vi.fn(),
 }));
@@ -304,6 +308,8 @@ describe("native research preparation", () => {
         }) as never,
     );
     vi.mocked(recordRecruitingResearchObservation).mockResolvedValue({ task, action } as never);
+    vi.mocked(listUnmappedRecruitingResearchReads).mockResolvedValue([]);
+    vi.mocked(bindRecruitingResearchReadEffect).mockResolvedValue({ saved } as never);
     const trusted = {
       actor,
       runId: "run",
@@ -342,6 +348,328 @@ describe("native research preparation", () => {
   }
 
   beforeEach(() => vi.clearAllMocks());
+
+  function pendingRead(f: ReturnType<typeof researchFixture>, cursor = "page-1") {
+    f.task.providerTaskId = "provider-original";
+    const route = {
+      connectorId: "mcp",
+      resourceId: "source",
+      resourceRevision: 2,
+      toolName: "get_rows",
+    };
+    const args = { task_id: "provider-original", cursor, limit: 10 };
+    const request = boundDirectApprovalRequest(route, args, "__rakazoCatalogTool");
+    const effect = {
+      ...f.effect,
+      id: "old-read-effect",
+      runId: "old-run",
+      kind: "mcp__source__get_rows",
+      status: "completed",
+      request,
+      result: { rows: [{ value: "captured page" }], next_cursor: "page-2" },
+    };
+    const read = { saved: f.saved, effect, toolName: "get_rows", route, args };
+    vi.mocked(listUnmappedRecruitingResearchReads).mockResolvedValue([read] as never);
+    return read;
+  }
+
+  it.each(["direct", "catalog"])(
+    "binds a native %s read effect to its original action before approval or dispatch",
+    async (shape) => {
+      expect(tools.bindRecruitingResearchReadCall).toBeTypeOf("function");
+      const f = researchFixture("continue");
+      const read = pendingRead(f);
+      if (shape === "catalog")
+        read.effect.request = [
+          "__rakazoCatalogTool",
+          "connectors_execute_tool",
+          { id: "source:get_rows", arguments: read.args },
+          read.route,
+        ];
+      const original = { ...f.saved, action: { ...f.action, id: "first-bound-action" } };
+      vi.mocked(bindRecruitingResearchReadEffect).mockResolvedValue({
+        saved: original,
+        effect: read.effect,
+      } as never);
+      const admitted = {
+        kind: "read" as const,
+        operation: "rows" as const,
+        saved: f.saved,
+        call: {
+          ...f.call,
+          route: read.route,
+          args: { ...read.args, cursor: "reconstructed-page" },
+        },
+      };
+      const bound = await tools.bindRecruitingResearchReadCall(
+        f.deps,
+        f.trusted,
+        admitted as never,
+        read.effect,
+      );
+      expect(bound.saved.action!.id).toBe("first-bound-action");
+      expect(bound.call.args).toEqual(read.args);
+      expect(bindRecruitingResearchReadEffect).toHaveBeenCalledWith(f.deps.prisma, actor, {
+        runId: "run",
+        leaseOwner: "worker",
+        leaseFence: 4,
+        actionId: "action",
+        effectId: read.effect.id,
+        request: read.effect.request,
+      });
+      expect(f.artifacts.put).not.toHaveBeenCalled();
+    },
+  );
+
+  it("rejects read capture under an adapter context belonging to a different run", async () => {
+    const f = researchFixture("continue");
+    const read = pendingRead(f);
+    await expect(
+      tools.completeRecruitingResearchCall(
+        f.deps,
+        f.trusted,
+        {
+          kind: "read",
+          operation: "rows",
+          saved: f.saved,
+          call: { ...f.call, route: read.route, args: read.args },
+        } as never,
+        read.effect.result,
+        { ...context, runId: "foreign-capture" },
+        {
+          effectId: read.effect.id,
+          request: read.effect.request,
+          historicalBackfill: true,
+        },
+      ),
+    ).rejects.toThrow(IsolationError);
+    expect(f.artifacts.put).not.toHaveBeenCalled();
+    expect(recordRecruitingResearchObservation).not.toHaveBeenCalled();
+  });
+
+  it("writes canonical read bytes tied to one native effect and forwards historical capture", async () => {
+    const f = researchFixture("continue");
+    const read = pendingRead(f);
+    const admitted = {
+      kind: "read" as const,
+      operation: "rows" as const,
+      saved: f.saved,
+      call: { ...f.call, route: read.route, args: read.args },
+    };
+    await tools.completeRecruitingResearchCall(
+      f.deps,
+      f.trusted,
+      admitted as never,
+      { rows: [{ b: 2, a: 1 }], next_cursor: "next" },
+      context,
+      { effectId: read.effect.id, request: read.effect.request, historicalBackfill: true },
+    );
+    await tools.completeRecruitingResearchCall(
+      f.deps,
+      f.trusted,
+      admitted as never,
+      { next_cursor: "next", rows: [{ a: 1, b: 2 }] },
+      context,
+      { effectId: read.effect.id, request: read.effect.request, historicalBackfill: true },
+    );
+    expect(Buffer.from(f.uploads[0]!.bytes).equals(Buffer.from(f.uploads[1]!.bytes))).toBe(true);
+    const snapshot = JSON.parse(Buffer.from(f.uploads[0]!.bytes).toString("utf8"));
+    expect(snapshot.effectId).toBe(read.effect.id);
+    expect(recordRecruitingResearchObservation).toHaveBeenCalledWith(
+      f.deps.prisma,
+      actor,
+      expect.objectContaining({
+        historicalBackfill: true,
+        outputArtifact: expect.objectContaining({
+          clientNonce: `recruiting-observation:${read.effect.id}`,
+        }),
+      }),
+    );
+    await tools.completeRecruitingResearchCall(
+      f.deps,
+      f.trusted,
+      admitted as never,
+      { rows: [{ b: 2, a: 1 }], next_cursor: "next" },
+      context,
+      { effectId: "different-native-read", request: read.effect.request },
+    );
+    expect(Buffer.from(f.uploads[0]!.bytes).equals(Buffer.from(f.uploads[2]!.bytes))).toBe(false);
+  });
+
+  it("recovers a completed read in a new run before live server validation and does not cache mapped reads", async () => {
+    const f = researchFixture("continue");
+    const read = pendingRead(f);
+    f.saved.server.enabled = false;
+    f.saved.server.revision = 99;
+    vi.mocked(readRecruitingResearchContext).mockImplementation(async (_db, _actor, input) => {
+      if (!input.historical) throw new IsolationError();
+      return f.saved as never;
+    });
+    const trusted = { ...f.trusted, runId: "new-run" };
+    const capture = { ...context, runId: "new-run" };
+    const result = await tools.resolveRecruitingResearchTool(
+      f.deps,
+      trusted,
+      { operation: "rows", taskId: "task", cursor: "page-1", limit: 10 },
+      capture,
+    );
+    expect(result.recoveredResult).toMatchObject({
+      status: "recovered",
+      receipts: [
+        {
+          providerResult: read.effect.result,
+        },
+      ],
+    });
+    expect(recordRecruitingResearchObservation).toHaveBeenCalledWith(
+      f.deps.prisma,
+      actor,
+      expect.objectContaining({
+        runId: "new-run",
+        actionId: "action",
+        effectId: read.effect.id,
+        request: read.effect.request,
+        rawResult: read.effect.result,
+        historicalBackfill: true,
+      }),
+    );
+    expect(readRecruitingResearchContext).toHaveBeenCalledTimes(1);
+    expect(f.artifacts.put).toHaveBeenCalledWith(expect.anything(), capture);
+    vi.mocked(listUnmappedRecruitingResearchReads).mockResolvedValue([]);
+    await expect(
+      tools.resolveRecruitingResearchTool(
+        f.deps,
+        trusted,
+        { operation: "rows", taskId: "task", cursor: "page-1", limit: 10 },
+        capture,
+      ),
+    ).rejects.toThrow(IsolationError);
+    expect(recordRecruitingResearchObservation).toHaveBeenCalledTimes(1);
+  });
+
+  it("backfills an unrelated pending page while admitting the requested fresh read", async () => {
+    const f = researchFixture("continue");
+    pendingRead(f, "different-page");
+    const result = await tools.resolveRecruitingResearchTool(
+      f.deps,
+      f.trusted,
+      { operation: "rows", taskId: "task", cursor: "page-1", limit: 10 },
+      context,
+    );
+    expect(result.recoveredResult).toBeUndefined();
+    expect(recordRecruitingResearchObservation).toHaveBeenCalledOnce();
+    expect(readRecruitingResearchContext).toHaveBeenLastCalledWith(
+      f.deps.prisma,
+      actor,
+      expect.objectContaining({ taskId: "task", toolName: "get_rows" }),
+    );
+    expect(vi.mocked(readRecruitingResearchContext).mock.lastCall![2].historical).not.toBe(true);
+  });
+
+  it("backfills a rows receipt without returning it as the requested status result", async () => {
+    const f = researchFixture("continue");
+    pendingRead(f);
+    const result = await tools.resolveRecruitingResearchTool(
+      f.deps,
+      f.trusted,
+      { operation: "status", taskId: "task" },
+      context,
+    );
+    expect(result.recoveredResult).toBeUndefined();
+    expect(result.args).toEqual({ task_id: "provider-original", wait_seconds: 0 });
+    expect(recordRecruitingResearchObservation).toHaveBeenCalledWith(
+      f.deps.prisma,
+      actor,
+      expect.objectContaining({ toolName: "get_rows", historicalBackfill: true }),
+    );
+    expect(readRecruitingResearchContext).toHaveBeenLastCalledWith(
+      f.deps.prisma,
+      actor,
+      expect.objectContaining({ toolName: "get_task" }),
+    );
+  });
+
+  it("returns every exact pending receipt without choosing a latest cross-run observation", async () => {
+    const f = researchFixture("continue");
+    const read = pendingRead(f);
+    const another = {
+      ...read,
+      effect: {
+        ...read.effect,
+        id: "another-read",
+        runId: "another-run",
+        result: { rows: [{ value: "another legitimate capture" }], next_cursor: "page-2" },
+      },
+    };
+    vi.mocked(listUnmappedRecruitingResearchReads).mockResolvedValue([read, another] as never);
+    const result = await tools.resolveRecruitingResearchTool(
+      f.deps,
+      f.trusted,
+      { operation: "rows", taskId: "task", cursor: "page-1", limit: 10 },
+      context,
+    );
+    expect(result.recoveredResult?.receipts.map((receipt) => receipt.providerResult)).toEqual([
+      read.effect.result,
+      another.effect.result,
+    ]);
+    expect(recordRecruitingResearchObservation).toHaveBeenCalledTimes(2);
+  });
+
+  it("recovers raw MCP reads from the historical owned task after its active role changes", async () => {
+    const f = researchFixture("continue");
+    const read = pendingRead(f);
+    f.saved.thread.activeRecruitingRoleId = null;
+    vi.mocked(readRecruitingResearchContext).mockImplementation(async (_db, _actor, input) => {
+      if (!input.historical) throw new IsolationError();
+      return f.saved as never;
+    });
+    const call = { ...f.call, tool: read.effect.kind, route: read.route, args: read.args };
+    const result = await tools.admitRecruitingResearchCall(f.deps, f.trusted, call, context, {
+      frozenRequest: read.effect.request,
+    });
+    expect(result).toMatchObject({
+      kind: "read",
+      recoveredResult: {
+        status: "recovered",
+        receipts: [
+          {
+            providerResult: read.effect.result,
+          },
+        ],
+      },
+    });
+    expect(f.prisma.recruitingResearchTask.findFirst).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: expect.objectContaining({
+          role: { spaceId: "space", userId: "owner" },
+          mcpServerId: "source",
+          serverRevision: 2,
+          providerTaskId: "provider-original",
+        }),
+      }),
+    );
+  });
+
+  it("leaves an unrelated raw MCP read outside the recruiting lifecycle", async () => {
+    const f = researchFixture("continue");
+    f.saved.thread.activeRecruitingRoleId = null;
+    f.prisma.recruitingResearchTask.findFirst.mockResolvedValue(null as never);
+    await expect(
+      tools.admitRecruitingResearchCall(
+        { prisma: f.deps.prisma },
+        f.trusted,
+        {
+          ...f.call,
+          route: { ...f.call.route, toolName: "get_rows" },
+          args: { task_id: "unrelated-native-task" },
+        },
+        context,
+        { frozenRequest: {} },
+      ),
+    ).resolves.toBeUndefined();
+    expect(listUnmappedRecruitingResearchReads).not.toHaveBeenCalled();
+    expect(readRecruitingResearchContext).not.toHaveBeenCalled();
+  });
 
   it("freezes actual prompt bytes and verified human source before preparing without dispatch", async () => {
     vi.mocked(readRecruitingResearchContext).mockResolvedValue({
@@ -916,7 +1244,7 @@ describe("native research preparation", () => {
       expect(vi.mocked(recordRecruitingResearchObservation).mock.lastCall?.[2]).not.toHaveProperty(
         "taskState",
       );
-      expect(JSON.stringify(snapshot)).toContain(JSON.stringify(rows));
+      expect(snapshot.providerResult.structuredContent.rows).toEqual(rows);
       expect(JSON.stringify(snapshot)).toContain("input-cursor");
       expect(snapshot.observation.usage).toEqual([{ scope: "task", unit: "credits", amount: 9 }]);
       if (!receipt)

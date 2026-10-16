@@ -15,6 +15,7 @@ import type * as DatabaseModule from "@rakazo/db";
 import type { RecruitingRoleToolResult, ThreadEvents } from "@rakazo/db";
 import {
   claimRecruitingResearchAction,
+  claimRecruitingResearchReadEffect,
   IsolationError,
   recruitingResearchSnapshot,
 } from "@rakazo/db";
@@ -37,6 +38,7 @@ import type * as RecruitingFeedbackModule from "./recruiting-feedback.js";
 import { executeRecruitingFeedback } from "./recruiting-feedback.js";
 import {
   admitRecruitingResearchCall,
+  bindRecruitingResearchReadCall,
   completeRecruitingResearchCall,
   executeRecruitingRoleTool,
   prepareRecruitingResearchTool,
@@ -49,11 +51,13 @@ vi.mock("./recruiting-tools.js", () => ({
   prepareRecruitingResearchTool: vi.fn(),
   resolveRecruitingResearchTool: vi.fn(),
   admitRecruitingResearchCall: vi.fn(),
+  bindRecruitingResearchReadCall: vi.fn(),
   completeRecruitingResearchCall: vi.fn(),
 }));
 vi.mock("@rakazo/db", async (importOriginal) => ({
   ...(await importOriginal<typeof DatabaseModule>()),
   claimRecruitingResearchAction: vi.fn(),
+  claimRecruitingResearchReadEffect: vi.fn(),
 }));
 vi.mock("./recruiting-feedback.js", async (importOriginal) => ({
   ...(await importOriginal<typeof RecruitingFeedbackModule>()),
@@ -1914,8 +1918,12 @@ describe("native recruiting research executor integration", () => {
         operation: "create",
       } as never);
     vi.mocked(admitRecruitingResearchCall).mockReset();
+    vi.mocked(bindRecruitingResearchReadCall)
+      .mockReset()
+      .mockImplementation(async (_deps, _trusted, admitted) => admitted);
     vi.mocked(completeRecruitingResearchCall).mockReset();
     vi.mocked(claimRecruitingResearchAction).mockReset();
+    vi.mocked(claimRecruitingResearchReadEffect).mockReset();
     vi.mocked(loadRecruitingRunContext).mockReset();
     vi.mocked(runAutoReviewJudge).mockClear();
   });
@@ -2271,8 +2279,22 @@ describe("native recruiting research executor integration", () => {
       } as never;
     });
     f.connector.execute.mockImplementation(async function* () {
+      expect(f.effects[0]!.status).toBe("executing");
       yield { type: "result", data: rawRead };
     });
+    vi.mocked(claimRecruitingResearchReadEffect).mockImplementation(
+      async (_deps, _actor, input) => {
+        expect(input).toMatchObject({
+          runId: f.runData.id,
+          leaseOwner: "worker-1",
+          leaseFence: f.runData.leaseFence,
+          effectId: f.effects[0]!.id,
+          from: "intended",
+        });
+        f.effects[0]!.status = "executing";
+        return true;
+      },
+    );
     vi.mocked(completeRecruitingResearchCall)
       .mockResolvedValue(readCompleted as never)
       .mockImplementationOnce(async (_deps, _trusted, _admission, result) => {
@@ -2315,9 +2337,160 @@ describe("native recruiting research executor integration", () => {
       expect.objectContaining({ kind: "read", operation: "status" }),
       rawRead,
       expect.anything(),
-      { effectId: f.effects[0]!.id, request: f.effects[0]!.request },
+      {
+        effectId: f.effects[0]!.id,
+        request: f.effects[0]!.request,
+        historicalBackfill: true,
+      },
     );
+    expect(bindRecruitingResearchReadCall).toHaveBeenCalledTimes(2);
+    expect(claimRecruitingResearchReadEffect).toHaveBeenCalledOnce();
   });
+
+  it("returns recovered owned read receipts without live resolution or a new effect", async () => {
+    const f = fixture("run-research-new-read-recovery");
+    const recovered = { status: "recovered", receipts: [completed] };
+    vi.mocked(resolveRecruitingResearchTool).mockResolvedValue({
+      route: { ...route, toolName: "get_rows" },
+      args: { task_id: "provider-task" },
+      taskId: task.id,
+      operation: "rows",
+      recoveredResult: recovered,
+    } as never);
+    f.setCalls([
+      {
+        name: "recruiting_research",
+        args: { operation: "rows", taskId: task.id },
+        executionId: "read-recovered-from-old-run",
+      },
+    ]);
+
+    await f.run();
+
+    expect(f.results).toEqual([recovered]);
+    expect(f.connector.resolveCall).not.toHaveBeenCalled();
+    expect(f.connector.execute).not.toHaveBeenCalled();
+    expect(f.effects).toEqual([]);
+    expect(admitRecruitingResearchCall).not.toHaveBeenCalled();
+    expect(bindRecruitingResearchReadCall).not.toHaveBeenCalled();
+  });
+
+  it("binds the exact native read effect before approval and never dispatches on binding failure", async () => {
+    const f = fixture("run-research-read-binding");
+    const readRoute = { ...route, toolName: "get_task" };
+    const args = { task_id: "provider-task", wait_seconds: 0 };
+    const readTool: ConnectorTool = {
+      ...tool,
+      name: "mcp__synthetic__get_task",
+      route: readRoute,
+      readOnly: true,
+      inputSchema: {
+        type: "object",
+        properties: { task_id: { type: "string" }, wait_seconds: { type: "integer" } },
+        required: ["task_id", "wait_seconds"],
+      },
+    };
+    f.connector.discoverTools.mockResolvedValue([readTool]);
+    vi.mocked(admitRecruitingResearchCall).mockImplementation(
+      async (_deps, _trusted, call) =>
+        ({
+          kind: "read",
+          operation: "status",
+          saved: { task: { ...task, providerTaskId: "provider-task" }, action },
+          call,
+        }) as never,
+    );
+    vi.mocked(bindRecruitingResearchReadCall).mockImplementation(
+      async (_deps, trusted, _admitted, effect) => {
+        expect(trusted).toMatchObject({
+          runId: f.runData.id,
+          leaseOwner: "worker-1",
+          leaseFence: f.runData.leaseFence,
+        });
+        expect(f.effects).toEqual([
+          expect.objectContaining({ id: effect.id, status: "intended", request: effect.request }),
+        ]);
+        expect(effect.request).toEqual(
+          boundDirectApprovalRequest(readRoute, args, "__rakazoCatalogTool"),
+        );
+        expect(f.pauseRunForInput).not.toHaveBeenCalled();
+        expect(f.connector.execute).not.toHaveBeenCalled();
+        throw new IsolationError();
+      },
+    );
+    f.setCalls([{ name: readTool.name, args, executionId: "read-with-missing-binding" }]);
+
+    await f.run("Resource not found");
+
+    expect(bindRecruitingResearchReadCall).toHaveBeenCalledOnce();
+    expect(f.connector.execute).not.toHaveBeenCalled();
+    expect(completeRecruitingResearchCall).not.toHaveBeenCalled();
+    expect(f.pauseRunForInput).not.toHaveBeenCalled();
+  });
+
+  it.each(["intended", "approved"] as const)(
+    "rejects a stale read lease at the final %s dispatch boundary",
+    async (from) => {
+      const f = fixture(`run-research-read-stale-${from}`);
+      const readRoute = { ...route, toolName: "get_task" };
+      const args = { task_id: "provider-task", wait_seconds: 0 };
+      const readTool: ConnectorTool = {
+        ...tool,
+        name: "mcp__synthetic__get_task",
+        route: readRoute,
+        readOnly: true,
+        inputSchema: {
+          type: "object",
+          properties: { task_id: { type: "string" }, wait_seconds: { type: "integer" } },
+          required: ["task_id", "wait_seconds"],
+        },
+      };
+      f.connector.discoverTools.mockResolvedValue([readTool]);
+      vi.mocked(admitRecruitingResearchCall).mockImplementation(
+        async (_deps, _trusted, call) =>
+          ({
+            kind: "read",
+            operation: "status",
+            saved: { task: { ...task, providerTaskId: "provider-task" }, action },
+            call,
+          }) as never,
+      );
+      if (from === "approved") {
+        f.effects.push({
+          id: "approved-read",
+          spaceId: "space-1",
+          runId: f.runData.id,
+          kind: readTool.name,
+          idempotencyKey: toolEffectIdempotencyKey(f.runData.id, readTool.name, args),
+          status: "approved",
+          request: boundDirectApprovalRequest(readRoute, args, "__rakazoCatalogTool"),
+        });
+      }
+      vi.mocked(claimRecruitingResearchReadEffect).mockImplementation(
+        async (_deps, _actor, input) => {
+          expect(bindRecruitingResearchReadCall).toHaveBeenCalledOnce();
+          expect(input).toMatchObject({
+            runId: f.runData.id,
+            leaseOwner: "worker-1",
+            leaseFence: f.runData.leaseFence,
+            effectId: f.effects[0]!.id,
+            from,
+          });
+          throw new IsolationError();
+        },
+      );
+      f.setCalls([{ name: readTool.name, args, executionId: "read-after-lease-loss" }]);
+
+      await f.run("Resource not found");
+
+      expect(claimRecruitingResearchReadEffect).toHaveBeenCalledOnce();
+      expect(f.connector.execute).not.toHaveBeenCalled();
+      expect(completeRecruitingResearchCall).not.toHaveBeenCalled();
+      expect(f.pauseRunForInput).not.toHaveBeenCalled();
+      expect(f.effects).toHaveLength(1);
+      expect(f.effects[0]!.status).toBe(from);
+    },
+  );
 
   it("claims the pinned action effect through the domain boundary and saves raw MCP output before completion and cross-run replay", async () => {
     const f = fixture("run-research-original");
