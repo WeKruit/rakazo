@@ -1,5 +1,6 @@
 // @vitest-environment jsdom
 
+import { BOT_DESCRIPTION_MAX_LENGTH, BOT_INSTRUCTIONS_MAX_LENGTH } from "@rakazo/contracts";
 import type { ComponentProps, ReactNode } from "react";
 import { act, createElement, useEffect } from "react";
 import type { Root } from "react-dom/client";
@@ -9,6 +10,8 @@ import BotSettingsScreen from "../app/bot-settings";
 import { MenuPicker } from "../components/menu-picker";
 
 const mocks = vi.hoisted(() => ({
+  rpc: vi.fn(),
+  back: vi.fn(),
   deviceVoices: vi.fn(),
   voiceForBot: vi.fn(),
   setVoiceForBot: vi.fn(),
@@ -20,6 +23,20 @@ const offered = [
   { identifier: "voice-a", name: "Alice", language: "en-US" },
   { identifier: "voice-b", name: "Beth", language: "en-GB" },
 ];
+const fullInstructions = "Follow the complete instructions.\n".repeat(400);
+const bot = {
+  id: "bot-fixture",
+  name: "Fixture",
+  title: "Assistant",
+  description: "Short description",
+  instructions: fullInstructions,
+  color: "blue",
+  computerMode: "team",
+  modelProvider: "fixture",
+  modelId: "model-a",
+  thinkingLevel: null,
+  autoSpeak: false,
+};
 
 function deferredSave() {
   let resolve!: () => void;
@@ -40,17 +57,10 @@ vi.mock("./bot-voices", () => ({
 vi.mock("./device-voice", () => ({ loadDeviceVoiceEnabled: async () => true }));
 vi.mock("./voice", () => ({ stopVoicePlayback: mocks.stopVoicePlayback }));
 vi.mock("expo-speech", () => ({ stop: mocks.stop, speak: mocks.speak }));
-vi.mock("./api", () => ({
-  rpc: async (procedure: string) => {
-    if (procedure === "bots/get")
-      return { id: "bot-fixture", name: "Fixture", title: "", computerMode: "team" };
-    if (procedure === "me") return {};
-    return [];
-  },
-}));
+vi.mock("./api", () => ({ rpc: mocks.rpc }));
 vi.mock("expo-router", () => ({
   Stack: { Screen: () => null },
-  useRouter: () => ({ back: vi.fn() }),
+  useRouter: () => ({ back: mocks.back }),
   useLocalSearchParams: () => ({ botId: "bot-fixture" }),
   useFocusEffect: (effect: () => (() => void) | undefined) => useEffect(effect, [effect]),
 }));
@@ -85,9 +95,44 @@ vi.mock("react-native", () => {
     View: view,
     Text: ({ children, style }: { children?: ReactNode; style: unknown }) =>
       createElement("span", { "data-style": JSON.stringify(style) }, children),
-    TextInput: () => null,
-    Pressable: ({ children, onPress }: { children?: ReactNode; onPress: () => void }) =>
-      createElement("button", { type: "button", onClick: onPress }, children),
+    TextInput: ({
+      value,
+      onChangeText,
+      accessibilityLabel,
+      placeholder,
+      maxLength,
+      multiline,
+    }: {
+      value: string;
+      onChangeText: (value: string) => void;
+      accessibilityLabel?: string;
+      placeholder?: string;
+      maxLength?: number;
+      multiline?: boolean;
+    }) =>
+      createElement("textarea", {
+        value,
+        onChange: () => {},
+        onInput: (event: { currentTarget: HTMLTextAreaElement }) =>
+          onChangeText(event.currentTarget.value),
+        "aria-label": accessibilityLabel ?? placeholder,
+        maxLength,
+        "data-multiline": multiline,
+      }),
+    Pressable: ({
+      children,
+      onPress,
+      accessibilityLabel,
+    }: {
+      children?: ReactNode;
+      onPress: () => void;
+      accessibilityLabel?: string;
+    }) =>
+      createElement(
+        "button",
+        { type: "button", onClick: onPress, "aria-label": accessibilityLabel },
+        children,
+      ),
   };
 });
 vi.mock("./native", () => ({
@@ -98,12 +143,38 @@ vi.mock("./native", () => ({
 }));
 vi.mock("./i18n", () => {
   const t = (text: string, values?: { name: string }) => text.replace("{name}", values?.name ?? "");
-  return { useI18n: () => ({ t }) };
+  return { t, useI18n: () => ({ t }) };
 });
 vi.mock("../components/bot-avatar", () => ({ BotAvatar: () => null }));
 vi.mock("../components/computer-mode-picker", () => ({ ComputerModePicker: () => null }));
-vi.mock("../components/native-action-button", () => ({ NativeActionButton: () => null }));
-vi.mock("../components/native-switch", () => ({ NativeSwitch: () => null }));
+vi.mock("../components/native-action-button", () => ({
+  NativeActionButton: ({
+    label,
+    disabled,
+    onPress,
+  }: {
+    label: string;
+    disabled: boolean;
+    onPress: () => void;
+  }) => createElement("button", { type: "button", disabled, onClick: onPress }, label),
+}));
+vi.mock("../components/native-switch", () => ({
+  NativeSwitch: ({
+    accessibilityLabel,
+    value,
+    onValueChange,
+  }: {
+    accessibilityLabel: string;
+    value: boolean;
+    onValueChange: (value: boolean) => void;
+  }) =>
+    createElement("input", {
+      type: "checkbox",
+      "aria-label": accessibilityLabel,
+      checked: value,
+      onChange: () => onValueChange(!value),
+    }),
+}));
 vi.mock("../components/row-accessories", () => ({ Chevron: () => null }));
 vi.mock("../components/native-symbol", () => ({
   NativeSymbol: ({ ios, android }: { ios: string; android: string }) =>
@@ -140,12 +211,17 @@ vi.mock("@expo/ui/community/menu", () => ({
     ),
 }));
 
-describe("bot settings device voice menu", () => {
+describe("bot settings", () => {
   let root: Root;
   let container: HTMLDivElement;
   beforeEach(() => {
     vi.clearAllMocks();
     vi.stubGlobal("IS_REACT_ACT_ENVIRONMENT", true);
+    mocks.rpc.mockReset().mockImplementation(async (procedure: string) => {
+      if (procedure === "bots/get") return { ...bot };
+      if (procedure === "me") return {};
+      return [];
+    });
     mocks.deviceVoices.mockResolvedValue(offered);
     mocks.voiceForBot.mockResolvedValue("voice-a");
     mocks.setVoiceForBot.mockResolvedValue(undefined);
@@ -159,6 +235,112 @@ describe("bot settings device voice menu", () => {
   });
   const render = async () => act(async () => root.render(<BotSettingsScreen />));
   const menu = () => container.querySelector('[data-menu="Device voice"]');
+  const button = (label: string) =>
+    [...container.querySelectorAll("button")].find((item) => item.textContent === label)!;
+  const field = (label: string) =>
+    container.querySelector<HTMLTextAreaElement>(`textarea[aria-label="${label}"]`)!;
+  const change = async (label: string, value: string) => {
+    await act(async () => {
+      const input = field(label);
+      Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, "value")!.set!.call(
+        input,
+        value,
+      );
+      input.dispatchEvent(new Event("input", { bubbles: true }));
+    });
+  };
+  const updates = () => mocks.rpc.mock.calls.filter(([procedure]) => procedure === "bots/update");
+
+  it("loads the complete instructions behind Advanced with an independent full-length limit", async () => {
+    await render();
+    expect(field("Instructions")).toBeNull();
+    expect(field("What this bot is for").maxLength).toBe(BOT_DESCRIPTION_MAX_LENGTH);
+    await act(async () => button("Advanced").click());
+    expect(fullInstructions.length).toBeGreaterThan(BOT_DESCRIPTION_MAX_LENGTH);
+    expect(field("Instructions")).not.toBeNull();
+    expect(field("Instructions").value).toBe(fullInstructions);
+    expect(field("Instructions").maxLength).toBe(BOT_INSTRUCTIONS_MAX_LENGTH);
+    expect(field("Instructions").dataset.multiline).toBe("true");
+    await act(async () => button("Save").click());
+    expect(updates()).toEqual([]);
+    expect(mocks.back).toHaveBeenCalledOnce();
+  });
+
+  it("saves description changes without overwriting existing instructions", async () => {
+    await render();
+    await change("What this bot is for", "Updated description");
+    await act(async () => button("Save").click());
+    expect(updates()).toEqual([
+      ["bots/update", { botId: bot.id, description: "Updated description" }],
+    ]);
+  });
+
+  it.each([
+    { action: "replaces", instructions: "Revised instruction.\n".repeat(500) },
+    { action: "clears", instructions: "" },
+  ])("$action instructions independently of the description", async ({ instructions }) => {
+    await render();
+    await act(async () => button("Advanced").click());
+    await change("Instructions", instructions);
+    await act(async () => button("Save").click());
+    expect(updates()).toEqual([["bots/update", { botId: bot.id, instructions }]]);
+  });
+
+  it("keeps untouched instructions out of title, model, and voice updates", async () => {
+    await render();
+    await change("Describe what this bot does", "New title");
+    await act(async () => button("Advanced").click());
+    await act(async () =>
+      container.querySelector<HTMLButtonElement>('[data-menu="Model"] button')!.click(),
+    );
+    await act(async () =>
+      container.querySelector<HTMLInputElement>('input[aria-label="Read replies aloud"]')!.click(),
+    );
+    await act(async () => menu()!.querySelectorAll("button")[1]!.click());
+    await act(async () => button("Save").click());
+    expect(updates()).toEqual([
+      [
+        "bots/update",
+        {
+          botId: bot.id,
+          title: "New title",
+          modelProvider: null,
+          modelId: null,
+          thinkingLevel: null,
+          autoSpeak: true,
+        },
+      ],
+    ]);
+    expect(mocks.setVoiceForBot).toHaveBeenCalledWith(bot.id, "voice-b");
+  });
+
+  it("keeps a failed instructions save editable and retries without another concurrent save", async () => {
+    const first = deferredSave();
+    mocks.rpc.mockImplementation(async (procedure: string) => {
+      if (procedure === "bots/get") return { ...bot };
+      if (procedure === "me") return {};
+      if (procedure === "bots/update") return first.promise;
+      return [];
+    });
+    await render();
+    await act(async () => button("Advanced").click());
+    await change("Instructions", "Retry this full instruction");
+    await act(async () => button("Save").click());
+    expect(button("Saving…").disabled).toBe(true);
+    await act(async () => button("Saving…").click());
+    expect(updates()).toHaveLength(1);
+    await act(async () => first.reject(new Error("Save failed")));
+    expect(container.textContent).toContain("Save failed");
+    expect(field("Instructions").value).toBe("Retry this full instruction");
+    expect(mocks.back).not.toHaveBeenCalled();
+    mocks.rpc.mockResolvedValue(undefined);
+    await act(async () => button("Save").click());
+    expect(updates()).toEqual([
+      ["bots/update", { botId: bot.id, instructions: "Retry this full instruction" }],
+      ["bots/update", { botId: bot.id, instructions: "Retry this full instruction" }],
+    ]);
+    expect(mocks.back).toHaveBeenCalledOnce();
+  });
 
   it("marks the current voice, keeps the plain row, and saves before playing a sample", async () => {
     await render();

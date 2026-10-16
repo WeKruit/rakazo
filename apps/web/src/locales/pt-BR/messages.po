@@ -429,6 +429,10 @@ msgstr ""
 msgid "All time"
 msgstr ""
 
+#: src/pages/McpServersOverlay.tsx
+msgid "All tools"
+msgstr ""
+
 #. placeholder {0}: rule.matchValue
 #: src/components/ApprovalRulesSettings.tsx
 msgid "Allow {0} actions without asking"
@@ -463,6 +467,10 @@ msgstr ""
 #: src/components/AskCard.tsx
 msgid "Allowed once"
 msgstr "Permitido uma vez"
+
+#: src/pages/McpServersOverlay.tsx
+msgid "Allowed tools"
+msgstr ""
 
 #: src/pages/Auth.tsx
 msgid "Already have an account?"
@@ -580,6 +588,10 @@ msgid "Ask before {0} connector"
 msgstr "Pergunte antes do conector {0}"
 
 #: src/components/ApprovalRulesSettings.tsx
+msgid "Ask before a specific tool"
+msgstr ""
+
+#: src/components/ApprovalRulesSettings.tsx
 msgid "Ask before email actions"
 msgstr "Perguntar antes das ações de e-mail"
 
@@ -595,8 +607,16 @@ msgstr "Perguntar antes de comprar"
 msgid "Ask before sending external email"
 msgstr "Perguntar antes de enviar e-mail externo"
 
+#: src/components/ApprovalRulesSettings.tsx
+msgid "Ask first"
+msgstr ""
+
 #: src/components/integrations/IntegrationSetup.tsx
 msgid "Ask the server owner to configure this provider."
+msgstr ""
+
+#: src/pages/RecruitingPanel.tsx
+msgid "Assumption"
 msgstr ""
 
 #. placeholder {0}: preset.time
@@ -776,6 +796,14 @@ msgstr ""
 msgid "Brain label"
 msgstr ""
 
+#: src/pages/RecruitingPanel.tsx
+msgid "Brief changed or could not be confirmed. Refresh and review it."
+msgstr ""
+
+#: src/pages/RecruitingPanel.tsx
+msgid "Brief confirmed"
+msgstr ""
+
 #: src/pages/PluginsOverlay.tsx
 msgid "Browse MCP servers"
 msgstr ""
@@ -833,12 +861,20 @@ msgid "Cancelled"
 msgstr "Cancelado"
 
 #: src/pages/RecruitingPanel.tsx
+msgid "Candidate"
+msgstr "Candidato"
+
+#: src/pages/RecruitingPanel.tsx
 msgid "Candidate facts"
 msgstr ""
 
 #: src/pages/Artifacts.tsx
 msgid "Card view"
 msgstr ""
+
+#: src/pages/RecruitingPanel.tsx
+msgid "Cards"
+msgstr "Cartões"
 
 #: src/pages/AccountSettingsOverlay.tsx
 msgid "Change password"
@@ -1130,6 +1166,10 @@ msgstr "Configurado por implantação"
 #: src/pages/McpServersOverlay.tsx
 msgid "Configured servers"
 msgstr "Servidores configurados"
+
+#: src/pages/RecruitingPanel.tsx
+msgid "Confirm brief"
+msgstr ""
 
 #: src/pages/KnowledgeSection.tsx
 #: src/pages/McpServersOverlay.tsx
@@ -1507,6 +1547,10 @@ msgstr ""
 #: src/pages/RoutineRunHistory.tsx
 msgid "Could not load run history"
 msgstr "Não foi possível carregar o histórico de execuções"
+
+#: src/pages/RecruitingPanel.tsx
+msgid "Could not load search results"
+msgstr "Não foi possível carregar os resultados da pesquisa"
 
 #: src/lib/account-security.ts
 #: src/pages/Auth.tsx
@@ -2440,6 +2484,10 @@ msgid "High"
 msgstr ""
 
 #: src/pages/RecruitingPanel.tsx
+msgid "Hiring manager"
+msgstr ""
+
+#: src/pages/RecruitingPanel.tsx
 msgid "History"
 msgstr ""
 
@@ -2512,6 +2560,10 @@ msgstr "Chave de API da instância"
 msgid "Instruction"
 msgstr "Instrução"
 
+#: src/pages/shell/bot-panel.tsx
+msgid "Instructions"
+msgstr ""
+
 #: src/pages/PluginsOverlay.tsx
 msgid "Integration domain"
 msgstr ""
@@ -2550,6 +2602,10 @@ msgstr ""
 #: src/pages/shell/dialogs.tsx
 msgid "Its conversation, files, and routines will be permanently deleted. Bots it created stay in your list."
 msgstr "Suas conversas, arquivos e rotinas serão excluídos permanentemente. Os bots criados ficam na sua lista."
+
+#: src/pages/RecruitingPanel.tsx
+msgid "JD"
+msgstr ""
 
 #: src/pages/Shell.tsx
 msgid "Jump to latest"
@@ -2814,6 +2870,10 @@ msgstr "Membros (escolha {GROUP_MEMBER_MIN}–{GROUP_MEMBER_MAX})"
 msgid "Memory"
 msgstr "Memória"
 
+#: src/pages/KnowledgeSection.tsx
+msgid "Memory changed. Close and reopen it before saving again."
+msgstr ""
+
 #: src/pages/shell/bot-panel.tsx
 msgid "Memory scope"
 msgstr "Escopo de memória"
@@ -2826,6 +2886,7 @@ msgstr ""
 msgid "Mentions only"
 msgstr ""
 
+#: src/pages/RecruitingPanel.tsx
 #: src/pages/Shell.tsx
 msgid "Message"
 msgstr "Mensagem"
@@ -3183,6 +3244,10 @@ msgstr ""
 msgid "No saved questions"
 msgstr ""
 
+#: src/pages/RecruitingPanel.tsx
+msgid "No saved result rows"
+msgstr "Nenhuma linha de resultado salva"
+
 #: src/pages/KnowledgeSection.tsx
 msgid "No skills yet"
 msgstr "Ainda não há habilidades"
@@ -3274,6 +3339,10 @@ msgstr ""
 msgid "on the 1st at {0}"
 msgstr "no dia 1º às {0}"
 
+#: src/pages/McpServersOverlay.tsx
+msgid "One tool per line. Empty means no tools."
+msgstr ""
+
 #: src/pages/Shell.tsx
 msgid "Only empty spaces can be deleted. Delete its bots and groups first."
 msgstr ""
@@ -3316,6 +3385,10 @@ msgstr "Abrir em janela cheia"
 #: src/pages/Shell.tsx
 msgid "Open navigation"
 msgstr "Abrir a navegação"
+
+#: src/pages/RecruitingPanel.tsx
+msgid "Open original question"
+msgstr "Abrir pergunta original"
 
 #: src/components/computer/TerminalApp.tsx
 msgid "Open shell"
@@ -3534,6 +3607,10 @@ msgstr "Na fila"
 #: src/pages/Shell.tsx
 msgid "Quote"
 msgstr ""
+
+#: src/pages/RecruitingPanel.tsx
+msgid "Raw search results"
+msgstr "Resultados brutos da pesquisa"
 
 #: src/pages/Shell.tsx
 msgid "React"
@@ -3954,6 +4031,7 @@ msgstr ""
 #: src/pages/ExternalConversationSettings.tsx
 #: src/pages/GroupPanel.tsx
 #: src/pages/KnowledgeSection.tsx
+#: src/pages/McpServersOverlay.tsx
 #: src/pages/ModelSettingsOverlay.tsx
 #: src/pages/RoutineEditor.tsx
 #: src/pages/shell/bot-panel.tsx
@@ -3986,6 +4064,10 @@ msgstr "Salvar o espaço de trabalho e instalar o software atual."
 #: src/pages/ExternalConversationSettings.tsx
 msgid "Saved"
 msgstr "Salva"
+
+#: src/pages/RecruitingPanel.tsx
+msgid "Saved assessments"
+msgstr "Avaliações salvas"
 
 #: src/pages/RecruitingPanel.tsx
 msgid "Saved facts"
@@ -4443,6 +4525,10 @@ msgstr "Alternando…"
 msgid "System"
 msgstr "Sistema"
 
+#: src/pages/RecruitingPanel.tsx
+msgid "Table"
+msgstr "Tabela"
+
 #: src/pages/Shell.tsx
 msgid "Take control"
 msgstr "Assumir o controle"
@@ -4646,6 +4732,14 @@ msgstr "Para:"
 msgid "Today"
 msgstr "Hoje"
 
+#: src/pages/McpServersOverlay.tsx
+msgid "Tool access"
+msgstr ""
+
+#: src/components/ApprovalRulesSettings.tsx
+msgid "Tool name"
+msgstr ""
+
 #: src/pages/PluginsOverlay.tsx
 msgid "Tool sources"
 msgstr "Fontes de ferramentas"
@@ -4694,6 +4788,10 @@ msgstr ""
 #: src/components/AskCard.tsx
 msgid "Type your answer"
 msgstr "Digite sua resposta"
+
+#: src/pages/RecruitingPanel.tsx
+msgid "Unassessed"
+msgstr "Não avaliado"
 
 #: src/pages/BotContextMenu.tsx
 msgid "Unassigned"
@@ -4838,6 +4936,10 @@ msgstr "Usar sua própria chave"
 
 #: src/pages/RecruitingPanel.tsx
 msgid "User and bot memory"
+msgstr ""
+
+#: src/pages/RecruitingPanel.tsx
+msgid "User instruction"
 msgstr ""
 
 #: src/pages/RecruitingPanel.tsx
@@ -5022,39 +5124,3 @@ msgstr "O seu nome"
 #: src/pages/Welcome.tsx
 msgid "Your team of always-on agents<0/>that you can give real work to."
 msgstr "Sua equipe de agentes sempre ativos<0/>, a quem você pode dar trabalho de verdade."
-
-#: src/pages/RecruitingPanel.tsx
-msgid "Open original question"
-msgstr "Abrir pergunta original"
-
-#: src/pages/RecruitingPanel.tsx
-msgid "Cards"
-msgstr "Cartões"
-
-#: src/pages/RecruitingPanel.tsx
-msgid "Table"
-msgstr "Tabela"
-
-#: src/pages/RecruitingPanel.tsx
-msgid "Candidate"
-msgstr "Candidato"
-
-#: src/pages/RecruitingPanel.tsx
-msgid "Saved assessments"
-msgstr "Avaliações salvas"
-
-#: src/pages/RecruitingPanel.tsx
-msgid "Raw search results"
-msgstr "Resultados brutos da pesquisa"
-
-#: src/pages/RecruitingPanel.tsx
-msgid "Unassessed"
-msgstr "Não avaliado"
-
-#: src/pages/RecruitingPanel.tsx
-msgid "No saved result rows"
-msgstr "Nenhuma linha de resultado salva"
-
-#: src/pages/RecruitingPanel.tsx
-msgid "Could not load search results"
-msgstr "Não foi possível carregar os resultados da pesquisa"

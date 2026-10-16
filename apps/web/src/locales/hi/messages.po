@@ -429,6 +429,10 @@ msgstr ""
 msgid "All time"
 msgstr ""
 
+#: src/pages/McpServersOverlay.tsx
+msgid "All tools"
+msgstr ""
+
 #. placeholder {0}: rule.matchValue
 #: src/components/ApprovalRulesSettings.tsx
 msgid "Allow {0} actions without asking"
@@ -463,6 +467,10 @@ msgstr ""
 #: src/components/AskCard.tsx
 msgid "Allowed once"
 msgstr "एक बार अनुमति दी गई"
+
+#: src/pages/McpServersOverlay.tsx
+msgid "Allowed tools"
+msgstr ""
 
 #: src/pages/Auth.tsx
 msgid "Already have an account?"
@@ -580,6 +588,10 @@ msgid "Ask before {0} connector"
 msgstr "{0} कनेक्टर से पहले पूछें"
 
 #: src/components/ApprovalRulesSettings.tsx
+msgid "Ask before a specific tool"
+msgstr ""
+
+#: src/components/ApprovalRulesSettings.tsx
 msgid "Ask before email actions"
 msgstr "ईमेल कार्रवाइयों से पहले पूछें"
 
@@ -595,8 +607,16 @@ msgstr "खरीद से पहले पूछें"
 msgid "Ask before sending external email"
 msgstr "बाहरी ईमेल भेजने से पहले पूछें"
 
+#: src/components/ApprovalRulesSettings.tsx
+msgid "Ask first"
+msgstr ""
+
 #: src/components/integrations/IntegrationSetup.tsx
 msgid "Ask the server owner to configure this provider."
+msgstr ""
+
+#: src/pages/RecruitingPanel.tsx
+msgid "Assumption"
 msgstr ""
 
 #. placeholder {0}: preset.time
@@ -776,6 +796,14 @@ msgstr ""
 msgid "Brain label"
 msgstr ""
 
+#: src/pages/RecruitingPanel.tsx
+msgid "Brief changed or could not be confirmed. Refresh and review it."
+msgstr ""
+
+#: src/pages/RecruitingPanel.tsx
+msgid "Brief confirmed"
+msgstr ""
+
 #: src/pages/PluginsOverlay.tsx
 msgid "Browse MCP servers"
 msgstr ""
@@ -833,12 +861,20 @@ msgid "Cancelled"
 msgstr "रद्द किया गया"
 
 #: src/pages/RecruitingPanel.tsx
+msgid "Candidate"
+msgstr "उम्मीदवार"
+
+#: src/pages/RecruitingPanel.tsx
 msgid "Candidate facts"
 msgstr ""
 
 #: src/pages/Artifacts.tsx
 msgid "Card view"
 msgstr ""
+
+#: src/pages/RecruitingPanel.tsx
+msgid "Cards"
+msgstr "कार्ड"
 
 #: src/pages/AccountSettingsOverlay.tsx
 msgid "Change password"
@@ -1130,6 +1166,10 @@ msgstr "डिप्लॉयमेंट द्वारा कॉन्फ़�
 #: src/pages/McpServersOverlay.tsx
 msgid "Configured servers"
 msgstr "कॉन्फ़िगर किए गए सर्वर"
+
+#: src/pages/RecruitingPanel.tsx
+msgid "Confirm brief"
+msgstr ""
 
 #: src/pages/KnowledgeSection.tsx
 #: src/pages/McpServersOverlay.tsx
@@ -1507,6 +1547,10 @@ msgstr ""
 #: src/pages/RoutineRunHistory.tsx
 msgid "Could not load run history"
 msgstr "रन का इतिहास लोड नहीं हो सका"
+
+#: src/pages/RecruitingPanel.tsx
+msgid "Could not load search results"
+msgstr "खोज परिणाम लोड नहीं किए जा सके"
 
 #: src/lib/account-security.ts
 #: src/pages/Auth.tsx
@@ -2440,6 +2484,10 @@ msgid "High"
 msgstr ""
 
 #: src/pages/RecruitingPanel.tsx
+msgid "Hiring manager"
+msgstr ""
+
+#: src/pages/RecruitingPanel.tsx
 msgid "History"
 msgstr ""
 
@@ -2512,6 +2560,10 @@ msgstr "इंस्टेंस API कुंजी"
 msgid "Instruction"
 msgstr "निर्देश"
 
+#: src/pages/shell/bot-panel.tsx
+msgid "Instructions"
+msgstr ""
+
 #: src/pages/PluginsOverlay.tsx
 msgid "Integration domain"
 msgstr ""
@@ -2550,6 +2602,10 @@ msgstr ""
 #: src/pages/shell/dialogs.tsx
 msgid "Its conversation, files, and routines will be permanently deleted. Bots it created stay in your list."
 msgstr "इसकी बातचीत, फ़ाइलें और रूटीन स्थायी रूप से डिलीट कर दिए जाएंगे। इसके बनाए बॉट आपकी सूची में बने रहेंगे।"
+
+#: src/pages/RecruitingPanel.tsx
+msgid "JD"
+msgstr ""
 
 #: src/pages/Shell.tsx
 msgid "Jump to latest"
@@ -2814,6 +2870,10 @@ msgstr "सदस्य ({GROUP_MEMBER_MIN}–{GROUP_MEMBER_MAX} चुनें
 msgid "Memory"
 msgstr "मेमोरी"
 
+#: src/pages/KnowledgeSection.tsx
+msgid "Memory changed. Close and reopen it before saving again."
+msgstr ""
+
 #: src/pages/shell/bot-panel.tsx
 msgid "Memory scope"
 msgstr "मेमोरी स्कोप"
@@ -2826,6 +2886,7 @@ msgstr ""
 msgid "Mentions only"
 msgstr ""
 
+#: src/pages/RecruitingPanel.tsx
 #: src/pages/Shell.tsx
 msgid "Message"
 msgstr "संदेश"
@@ -3183,6 +3244,10 @@ msgstr ""
 msgid "No saved questions"
 msgstr ""
 
+#: src/pages/RecruitingPanel.tsx
+msgid "No saved result rows"
+msgstr "कोई सहेजी गई परिणाम पंक्तियाँ नहीं"
+
 #: src/pages/KnowledgeSection.tsx
 msgid "No skills yet"
 msgstr "अभी तक कोई स्किल नहीं"
@@ -3274,6 +3339,10 @@ msgstr ""
 msgid "on the 1st at {0}"
 msgstr "1 तारीख को {0} बजे"
 
+#: src/pages/McpServersOverlay.tsx
+msgid "One tool per line. Empty means no tools."
+msgstr ""
+
 #: src/pages/Shell.tsx
 msgid "Only empty spaces can be deleted. Delete its bots and groups first."
 msgstr ""
@@ -3316,6 +3385,10 @@ msgstr "पूरी विंडो में खोलें"
 #: src/pages/Shell.tsx
 msgid "Open navigation"
 msgstr "नेविगेशन खोलें"
+
+#: src/pages/RecruitingPanel.tsx
+msgid "Open original question"
+msgstr "मूल प्रश्न खोलें"
 
 #: src/components/computer/TerminalApp.tsx
 msgid "Open shell"
@@ -3534,6 +3607,10 @@ msgstr "कतार में"
 #: src/pages/Shell.tsx
 msgid "Quote"
 msgstr ""
+
+#: src/pages/RecruitingPanel.tsx
+msgid "Raw search results"
+msgstr "खोज के मूल परिणाम"
 
 #: src/pages/Shell.tsx
 msgid "React"
@@ -3954,6 +4031,7 @@ msgstr ""
 #: src/pages/ExternalConversationSettings.tsx
 #: src/pages/GroupPanel.tsx
 #: src/pages/KnowledgeSection.tsx
+#: src/pages/McpServersOverlay.tsx
 #: src/pages/ModelSettingsOverlay.tsx
 #: src/pages/RoutineEditor.tsx
 #: src/pages/shell/bot-panel.tsx
@@ -3986,6 +4064,10 @@ msgstr "कार्यक्षेत्र सहेजें और नवी
 #: src/pages/ExternalConversationSettings.tsx
 msgid "Saved"
 msgstr "सहेजा गया"
+
+#: src/pages/RecruitingPanel.tsx
+msgid "Saved assessments"
+msgstr "सहेजे गए मूल्यांकन"
 
 #: src/pages/RecruitingPanel.tsx
 msgid "Saved facts"
@@ -4443,6 +4525,10 @@ msgstr "बदला जा रहा है…"
 msgid "System"
 msgstr "सिस्टम"
 
+#: src/pages/RecruitingPanel.tsx
+msgid "Table"
+msgstr "तालिका"
+
 #: src/pages/Shell.tsx
 msgid "Take control"
 msgstr "नियंत्रण लें"
@@ -4646,6 +4732,14 @@ msgstr "प्रति:"
 msgid "Today"
 msgstr "आज"
 
+#: src/pages/McpServersOverlay.tsx
+msgid "Tool access"
+msgstr ""
+
+#: src/components/ApprovalRulesSettings.tsx
+msgid "Tool name"
+msgstr ""
+
 #: src/pages/PluginsOverlay.tsx
 msgid "Tool sources"
 msgstr "टूल स्रोत"
@@ -4694,6 +4788,10 @@ msgstr ""
 #: src/components/AskCard.tsx
 msgid "Type your answer"
 msgstr "अपना उत्तर लिखें"
+
+#: src/pages/RecruitingPanel.tsx
+msgid "Unassessed"
+msgstr "मूल्यांकन नहीं हुआ"
 
 #: src/pages/BotContextMenu.tsx
 msgid "Unassigned"
@@ -4838,6 +4936,10 @@ msgstr "अपनी कुंजी इस्तेमाल करें"
 
 #: src/pages/RecruitingPanel.tsx
 msgid "User and bot memory"
+msgstr ""
+
+#: src/pages/RecruitingPanel.tsx
+msgid "User instruction"
 msgstr ""
 
 #: src/pages/RecruitingPanel.tsx
@@ -5022,39 +5124,3 @@ msgstr "आपका नाम"
 #: src/pages/Welcome.tsx
 msgid "Your team of always-on agents<0/>that you can give real work to."
 msgstr "हमेशा चालू रहने वाले एजेंटों की आपकी टीम<0/>जिन्हें आप असली काम सौंप सकते हैं।"
-
-#: src/pages/RecruitingPanel.tsx
-msgid "Open original question"
-msgstr "मूल प्रश्न खोलें"
-
-#: src/pages/RecruitingPanel.tsx
-msgid "Cards"
-msgstr "कार्ड"
-
-#: src/pages/RecruitingPanel.tsx
-msgid "Table"
-msgstr "तालिका"
-
-#: src/pages/RecruitingPanel.tsx
-msgid "Candidate"
-msgstr "उम्मीदवार"
-
-#: src/pages/RecruitingPanel.tsx
-msgid "Saved assessments"
-msgstr "सहेजे गए मूल्यांकन"
-
-#: src/pages/RecruitingPanel.tsx
-msgid "Raw search results"
-msgstr "खोज के मूल परिणाम"
-
-#: src/pages/RecruitingPanel.tsx
-msgid "Unassessed"
-msgstr "मूल्यांकन नहीं हुआ"
-
-#: src/pages/RecruitingPanel.tsx
-msgid "No saved result rows"
-msgstr "कोई सहेजी गई परिणाम पंक्तियाँ नहीं"
-
-#: src/pages/RecruitingPanel.tsx
-msgid "Could not load search results"
-msgstr "खोज परिणाम लोड नहीं किए जा सके"

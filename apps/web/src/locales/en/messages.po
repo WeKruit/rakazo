@@ -429,6 +429,10 @@ msgstr "All statuses"
 msgid "All time"
 msgstr "All time"
 
+#: src/pages/McpServersOverlay.tsx
+msgid "All tools"
+msgstr "All tools"
+
 #. placeholder {0}: rule.matchValue
 #: src/components/ApprovalRulesSettings.tsx
 msgid "Allow {0} actions without asking"
@@ -463,6 +467,10 @@ msgstr "Allow writing"
 #: src/components/AskCard.tsx
 msgid "Allowed once"
 msgstr "Allowed once"
+
+#: src/pages/McpServersOverlay.tsx
+msgid "Allowed tools"
+msgstr "Allowed tools"
 
 #: src/pages/Auth.tsx
 msgid "Already have an account?"
@@ -606,6 +614,10 @@ msgstr "Ask first"
 #: src/components/integrations/IntegrationSetup.tsx
 msgid "Ask the server owner to configure this provider."
 msgstr "Ask the server owner to configure this provider."
+
+#: src/pages/RecruitingPanel.tsx
+msgid "Assumption"
+msgstr "Assumption"
 
 #. placeholder {0}: preset.time
 #: src/pages/RoutineSchedule.tsx
@@ -784,6 +796,14 @@ msgstr "Bots with their own computer and browser"
 msgid "Brain label"
 msgstr "Brain label"
 
+#: src/pages/RecruitingPanel.tsx
+msgid "Brief changed or could not be confirmed. Refresh and review it."
+msgstr "Brief changed or could not be confirmed. Refresh and review it."
+
+#: src/pages/RecruitingPanel.tsx
+msgid "Brief confirmed"
+msgstr "Brief confirmed"
+
 #: src/pages/PluginsOverlay.tsx
 msgid "Browse MCP servers"
 msgstr "Browse MCP servers"
@@ -841,12 +861,20 @@ msgid "Cancelled"
 msgstr "Cancelled"
 
 #: src/pages/RecruitingPanel.tsx
+msgid "Candidate"
+msgstr "Candidate"
+
+#: src/pages/RecruitingPanel.tsx
 msgid "Candidate facts"
 msgstr "Candidate facts"
 
 #: src/pages/Artifacts.tsx
 msgid "Card view"
 msgstr "Card view"
+
+#: src/pages/RecruitingPanel.tsx
+msgid "Cards"
+msgstr "Cards"
 
 #: src/pages/AccountSettingsOverlay.tsx
 msgid "Change password"
@@ -1138,6 +1166,10 @@ msgstr "Configured by deployment"
 #: src/pages/McpServersOverlay.tsx
 msgid "Configured servers"
 msgstr "Configured servers"
+
+#: src/pages/RecruitingPanel.tsx
+msgid "Confirm brief"
+msgstr "Confirm brief"
 
 #: src/pages/KnowledgeSection.tsx
 #: src/pages/McpServersOverlay.tsx
@@ -1515,6 +1547,10 @@ msgstr "Could not load recruiting"
 #: src/pages/RoutineRunHistory.tsx
 msgid "Could not load run history"
 msgstr "Could not load run history"
+
+#: src/pages/RecruitingPanel.tsx
+msgid "Could not load search results"
+msgstr "Could not load search results"
 
 #: src/lib/account-security.ts
 #: src/pages/Auth.tsx
@@ -2448,6 +2484,10 @@ msgid "High"
 msgstr "High"
 
 #: src/pages/RecruitingPanel.tsx
+msgid "Hiring manager"
+msgstr "Hiring manager"
+
+#: src/pages/RecruitingPanel.tsx
 msgid "History"
 msgstr "History"
 
@@ -2520,6 +2560,10 @@ msgstr "Instance API key"
 msgid "Instruction"
 msgstr "Instruction"
 
+#: src/pages/shell/bot-panel.tsx
+msgid "Instructions"
+msgstr "Instructions"
+
 #: src/pages/PluginsOverlay.tsx
 msgid "Integration domain"
 msgstr "Integration domain"
@@ -2558,6 +2602,10 @@ msgstr "Isolated preview — no access to your account"
 #: src/pages/shell/dialogs.tsx
 msgid "Its conversation, files, and routines will be permanently deleted. Bots it created stay in your list."
 msgstr "Its conversation, files, and routines will be permanently deleted. Bots it created stay in your list."
+
+#: src/pages/RecruitingPanel.tsx
+msgid "JD"
+msgstr "JD"
 
 #: src/pages/Shell.tsx
 msgid "Jump to latest"
@@ -2822,6 +2870,10 @@ msgstr "Members (pick {GROUP_MEMBER_MIN}–{GROUP_MEMBER_MAX})"
 msgid "Memory"
 msgstr "Memory"
 
+#: src/pages/KnowledgeSection.tsx
+msgid "Memory changed. Close and reopen it before saving again."
+msgstr "Memory changed. Close and reopen it before saving again."
+
 #: src/pages/shell/bot-panel.tsx
 msgid "Memory scope"
 msgstr "Memory scope"
@@ -2834,6 +2886,7 @@ msgstr "Mentions"
 msgid "Mentions only"
 msgstr "Mentions only"
 
+#: src/pages/RecruitingPanel.tsx
 #: src/pages/Shell.tsx
 msgid "Message"
 msgstr "Message"
@@ -3191,6 +3244,10 @@ msgstr "No saved memory in these scopes"
 msgid "No saved questions"
 msgstr "No saved questions"
 
+#: src/pages/RecruitingPanel.tsx
+msgid "No saved result rows"
+msgstr "No saved result rows"
+
 #: src/pages/KnowledgeSection.tsx
 msgid "No skills yet"
 msgstr "No skills yet"
@@ -3282,6 +3339,10 @@ msgstr "On a schedule"
 msgid "on the 1st at {0}"
 msgstr "on the 1st at {0}"
 
+#: src/pages/McpServersOverlay.tsx
+msgid "One tool per line. Empty means no tools."
+msgstr "One tool per line. Empty means no tools."
+
 #: src/pages/Shell.tsx
 msgid "Only empty spaces can be deleted. Delete its bots and groups first."
 msgstr "Only empty spaces can be deleted. Delete its bots and groups first."
@@ -3324,6 +3385,10 @@ msgstr "Open in full window"
 #: src/pages/Shell.tsx
 msgid "Open navigation"
 msgstr "Open navigation"
+
+#: src/pages/RecruitingPanel.tsx
+msgid "Open original question"
+msgstr "Open original question"
 
 #: src/components/computer/TerminalApp.tsx
 msgid "Open shell"
@@ -3542,6 +3607,10 @@ msgstr "Queued"
 #: src/pages/Shell.tsx
 msgid "Quote"
 msgstr "Quote"
+
+#: src/pages/RecruitingPanel.tsx
+msgid "Raw search results"
+msgstr "Raw search results"
 
 #: src/pages/Shell.tsx
 msgid "React"
@@ -3962,6 +4031,7 @@ msgstr "Runs when this bot receives a verified message from this provider."
 #: src/pages/ExternalConversationSettings.tsx
 #: src/pages/GroupPanel.tsx
 #: src/pages/KnowledgeSection.tsx
+#: src/pages/McpServersOverlay.tsx
 #: src/pages/ModelSettingsOverlay.tsx
 #: src/pages/RoutineEditor.tsx
 #: src/pages/shell/bot-panel.tsx
@@ -3994,6 +4064,10 @@ msgstr "Save the workspace and install current software."
 #: src/pages/ExternalConversationSettings.tsx
 msgid "Saved"
 msgstr "Saved"
+
+#: src/pages/RecruitingPanel.tsx
+msgid "Saved assessments"
+msgstr "Saved assessments"
 
 #: src/pages/RecruitingPanel.tsx
 msgid "Saved facts"
@@ -4451,6 +4525,10 @@ msgstr "Switching…"
 msgid "System"
 msgstr "System"
 
+#: src/pages/RecruitingPanel.tsx
+msgid "Table"
+msgstr "Table"
+
 #: src/pages/Shell.tsx
 msgid "Take control"
 msgstr "Take control"
@@ -4654,6 +4732,10 @@ msgstr "To:"
 msgid "Today"
 msgstr "Today"
 
+#: src/pages/McpServersOverlay.tsx
+msgid "Tool access"
+msgstr "Tool access"
+
 #: src/components/ApprovalRulesSettings.tsx
 msgid "Tool name"
 msgstr "Tool name"
@@ -4706,6 +4788,10 @@ msgstr "Type without recording"
 #: src/components/AskCard.tsx
 msgid "Type your answer"
 msgstr "Type your answer"
+
+#: src/pages/RecruitingPanel.tsx
+msgid "Unassessed"
+msgstr "Unassessed"
 
 #: src/pages/BotContextMenu.tsx
 msgid "Unassigned"
@@ -4851,6 +4937,10 @@ msgstr "Use your own key"
 #: src/pages/RecruitingPanel.tsx
 msgid "User and bot memory"
 msgstr "User and bot memory"
+
+#: src/pages/RecruitingPanel.tsx
+msgid "User instruction"
+msgstr "User instruction"
 
 #: src/pages/RecruitingPanel.tsx
 msgid "User memory"
@@ -5034,55 +5124,3 @@ msgstr "Your name"
 #: src/pages/Welcome.tsx
 msgid "Your team of always-on agents<0/>that you can give real work to."
 msgstr "Your team of always-on agents<0/>that you can give real work to."
-
-#: src/pages/McpServersOverlay.tsx
-msgid "All tools"
-msgstr "All tools"
-
-#: src/pages/McpServersOverlay.tsx
-msgid "Allowed tools"
-msgstr "Allowed tools"
-
-#: src/pages/McpServersOverlay.tsx
-msgid "One tool per line. Empty means no tools."
-msgstr "One tool per line. Empty means no tools."
-
-#: src/pages/McpServersOverlay.tsx
-msgid "Tool access"
-msgstr "Tool access"
-
-#: src/pages/RecruitingPanel.tsx
-msgid "Open original question"
-msgstr "Open original question"
-
-#: src/pages/RecruitingPanel.tsx
-msgid "Cards"
-msgstr "Cards"
-
-#: src/pages/RecruitingPanel.tsx
-msgid "Table"
-msgstr "Table"
-
-#: src/pages/RecruitingPanel.tsx
-msgid "Candidate"
-msgstr "Candidate"
-
-#: src/pages/RecruitingPanel.tsx
-msgid "Saved assessments"
-msgstr "Saved assessments"
-
-#: src/pages/RecruitingPanel.tsx
-msgid "Raw search results"
-msgstr "Raw search results"
-
-#: src/pages/RecruitingPanel.tsx
-msgid "Unassessed"
-msgstr "Unassessed"
-
-#: src/pages/RecruitingPanel.tsx
-msgid "No saved result rows"
-msgstr "No saved result rows"
-
-#: src/pages/RecruitingPanel.tsx
-msgid "Could not load search results"
-msgstr "Could not load search results"

@@ -11,6 +11,7 @@ import type {
 } from "@rakazo/contracts";
 import {
   BOT_DESCRIPTION_MAX_LENGTH,
+  BOT_INSTRUCTIONS_MAX_LENGTH,
   BOT_NAME_MAX_LENGTH,
   BOT_TITLE_MAX_LENGTH,
   isBuiltinToolName,
@@ -33,7 +34,6 @@ import {
 import { X } from "lucide-react";
 import { lazy, Suspense, useEffect, useId, useRef, useState } from "react";
 import { ErrorBoundary, SectionLoadFailed } from "../../components/ErrorBoundary";
-import { botProfilePatch } from "../../lib/bot-profile-patch";
 import { thinkingLevelLabel } from "../../lib/model-catalog";
 import { rpc } from "../../lib/rpc";
 import { errorText } from "../../lib/user-error";
@@ -233,11 +233,29 @@ export function BotSettings({
   const [name, setName] = useState(bot.name);
   const [title, setTitle] = useState(bot.title);
   const [description, setDescription] = useState(bot.description);
-  // A roster refresh can skip replacing bots while a reorder is in flight, so
-  // this prop keeps the description from when the panel opened. Later saves
-  // compare against the description last saved here; otherwise a model or
-  // voice change treats that stale text as an edit and overwrites instructions.
+  const [instructions, setInstructions] = useState(bot.instructions);
+  // Roster props can lag behind a save. Compare each draft with its last
+  // accepted value so unrelated settings never resend stale profile text.
   const savedDescriptionRef = useRef(bot.description ?? "");
+  const savedInstructionsRef = useRef(bot.instructions ?? "");
+  const submittedProfileRef = useRef<{ description?: string; instructions?: string }>({});
+  const serverProfileRef = useRef({ description: bot.description, instructions: bot.instructions });
+  useEffect(() => {
+    const previous = serverProfileRef.current;
+    serverProfileRef.current = { description: bot.description, instructions: bot.instructions };
+    if (bot.description !== previous.description) {
+      const baseline = savedDescriptionRef.current.trim();
+      savedDescriptionRef.current = bot.description;
+      if (submittedProfileRef.current.description === undefined)
+        setDescription((draft) => (draft.trim() === baseline ? bot.description : draft));
+    }
+    if (bot.instructions !== previous.instructions) {
+      const baseline = savedInstructionsRef.current.trim();
+      savedInstructionsRef.current = bot.instructions;
+      if (submittedProfileRef.current.instructions === undefined)
+        setInstructions((draft) => (draft.trim() === baseline ? bot.instructions : draft));
+    }
+  }, [bot.description, bot.instructions]);
   const [color, setColor] = useState(bot.color);
   const [notifyOnFinish, setNotifyOnFinish] = useState(bot.notifyOnFinish ?? true);
   const [computerMode, setComputerMode] = useState(bot.computerMode);
@@ -347,6 +365,7 @@ export function BotSettings({
     const nextDescription = (
       patchOverrides?.description !== undefined ? patchOverrides.description : description
     ).trim();
+    const nextInstructions = instructions.trim();
     const nextColor = patchOverrides?.color !== undefined ? patchOverrides.color : color;
     const nextNotify =
       patchOverrides?.notifyOnFinish !== undefined ? patchOverrides.notifyOnFinish : notifyOnFinish;
@@ -354,6 +373,7 @@ export function BotSettings({
     if (nextName) setName(nextName);
     setTitle(nextTitle);
     setDescription(nextDescription);
+    setInstructions(nextInstructions);
 
     try {
       setSaving(true);
@@ -361,10 +381,12 @@ export function BotSettings({
       const patch = {
         name: nextName || bot.name,
         title: nextTitle,
-        // One field feeds both, so it only goes on the wire when it changed: a
-        // model, thinking or voice save must not overwrite longer instructions,
-        // nor fail on a description that is already above its own limit.
-        ...botProfilePatch(savedDescriptionRef.current, nextDescription),
+        ...(nextDescription !== savedDescriptionRef.current.trim()
+          ? { description: nextDescription }
+          : {}),
+        ...(nextInstructions !== savedInstructionsRef.current.trim()
+          ? { instructions: nextInstructions }
+          : {}),
         // Unchanged color stays off the wire so a legacy named value cannot fail a name save.
         ...(nextColor !== bot.color ? { color: nextColor } : {}),
         notifyOnFinish: nextNotify,
@@ -383,6 +405,7 @@ export function BotSettings({
           : {}),
       };
       const requestedTools = patchOverrides?.disabledBuiltinTools;
+      submittedProfileRef.current = patch;
       const baseTools = patchOverrides?.baseDisabledBuiltinTools ?? [];
       // Preserve this edit's additions/removals against any refreshed server list.
       // Retry if a refresh arrives while the request is in flight.
@@ -414,10 +437,12 @@ export function BotSettings({
         persistedDisabledToolsRef.current = nextTools;
         break;
       }
-      savedDescriptionRef.current = nextDescription;
+      if (patch.description !== undefined) savedDescriptionRef.current = nextDescription;
+      if (patch.instructions !== undefined) savedInstructionsRef.current = nextInstructions;
     } catch (err) {
       setError(errorText(err, t`Could not save`));
     } finally {
+      submittedProfileRef.current = {};
       pendingSavesRef.current -= 1;
       if (pendingSavesRef.current === 0) {
         setDisabledBuiltinTools([...persistedDisabledToolsRef.current]);
@@ -554,6 +579,18 @@ export function BotSettings({
             ›
           </span>
         </summary>
+        <label htmlFor={`${ids}-instructions`} className={fieldLabelClass}>
+          <Trans>Instructions</Trans>
+          <Textarea
+            id={`${ids}-instructions`}
+            value={instructions}
+            maxLength={BOT_INSTRUCTIONS_MAX_LENGTH}
+            onChange={(e) => setInstructions(e.target.value)}
+            onBlur={() => void enqueueSave()}
+            rows={8}
+            className="mt-1.5"
+          />
+        </label>
         <ComputerModePicker value={computerMode} onChange={setComputerMode} />
         <ErrorBoundary fallback={<SectionLoadFailed />}>
           <Suspense fallback={null}>

@@ -429,6 +429,10 @@ msgstr ""
 msgid "All time"
 msgstr ""
 
+#: src/pages/McpServersOverlay.tsx
+msgid "All tools"
+msgstr ""
+
 #. placeholder {0}: rule.matchValue
 #: src/components/ApprovalRulesSettings.tsx
 msgid "Allow {0} actions without asking"
@@ -463,6 +467,10 @@ msgstr ""
 #: src/components/AskCard.tsx
 msgid "Allowed once"
 msgstr "한 번 허용됨"
+
+#: src/pages/McpServersOverlay.tsx
+msgid "Allowed tools"
+msgstr ""
 
 #: src/pages/Auth.tsx
 msgid "Already have an account?"
@@ -580,6 +588,10 @@ msgid "Ask before {0} connector"
 msgstr "{0} 커넥터 전에 확인"
 
 #: src/components/ApprovalRulesSettings.tsx
+msgid "Ask before a specific tool"
+msgstr ""
+
+#: src/components/ApprovalRulesSettings.tsx
 msgid "Ask before email actions"
 msgstr "이메일 동작 전에 확인"
 
@@ -595,8 +607,16 @@ msgstr "결제하기 전에 확인"
 msgid "Ask before sending external email"
 msgstr "외부 이메일을 보내기 전에 확인"
 
+#: src/components/ApprovalRulesSettings.tsx
+msgid "Ask first"
+msgstr ""
+
 #: src/components/integrations/IntegrationSetup.tsx
 msgid "Ask the server owner to configure this provider."
+msgstr ""
+
+#: src/pages/RecruitingPanel.tsx
+msgid "Assumption"
 msgstr ""
 
 #. placeholder {0}: preset.time
@@ -776,6 +796,14 @@ msgstr ""
 msgid "Brain label"
 msgstr ""
 
+#: src/pages/RecruitingPanel.tsx
+msgid "Brief changed or could not be confirmed. Refresh and review it."
+msgstr ""
+
+#: src/pages/RecruitingPanel.tsx
+msgid "Brief confirmed"
+msgstr ""
+
 #: src/pages/PluginsOverlay.tsx
 msgid "Browse MCP servers"
 msgstr ""
@@ -833,12 +861,20 @@ msgid "Cancelled"
 msgstr "취소됨"
 
 #: src/pages/RecruitingPanel.tsx
+msgid "Candidate"
+msgstr "후보자"
+
+#: src/pages/RecruitingPanel.tsx
 msgid "Candidate facts"
 msgstr ""
 
 #: src/pages/Artifacts.tsx
 msgid "Card view"
 msgstr ""
+
+#: src/pages/RecruitingPanel.tsx
+msgid "Cards"
+msgstr "카드"
 
 #: src/pages/AccountSettingsOverlay.tsx
 msgid "Change password"
@@ -1130,6 +1166,10 @@ msgstr "서버에서 설정됨"
 #: src/pages/McpServersOverlay.tsx
 msgid "Configured servers"
 msgstr "연결된 서버"
+
+#: src/pages/RecruitingPanel.tsx
+msgid "Confirm brief"
+msgstr ""
 
 #: src/pages/KnowledgeSection.tsx
 #: src/pages/McpServersOverlay.tsx
@@ -1507,6 +1547,10 @@ msgstr ""
 #: src/pages/RoutineRunHistory.tsx
 msgid "Could not load run history"
 msgstr "실행 기록을 불러오지 못했습니다"
+
+#: src/pages/RecruitingPanel.tsx
+msgid "Could not load search results"
+msgstr "검색 결과를 불러올 수 없습니다"
 
 #: src/lib/account-security.ts
 #: src/pages/Auth.tsx
@@ -2440,6 +2484,10 @@ msgid "High"
 msgstr ""
 
 #: src/pages/RecruitingPanel.tsx
+msgid "Hiring manager"
+msgstr ""
+
+#: src/pages/RecruitingPanel.tsx
 msgid "History"
 msgstr ""
 
@@ -2512,6 +2560,10 @@ msgstr "인스턴스 API 키"
 msgid "Instruction"
 msgstr "실행할 내용"
 
+#: src/pages/shell/bot-panel.tsx
+msgid "Instructions"
+msgstr ""
+
 #: src/pages/PluginsOverlay.tsx
 msgid "Integration domain"
 msgstr ""
@@ -2550,6 +2602,10 @@ msgstr ""
 #: src/pages/shell/dialogs.tsx
 msgid "Its conversation, files, and routines will be permanently deleted. Bots it created stay in your list."
 msgstr "대화, 파일, 자동 실행이 영구 삭제됩니다. 이 Bot이 만든 다른 Bot은 목록에 남습니다."
+
+#: src/pages/RecruitingPanel.tsx
+msgid "JD"
+msgstr ""
 
 #: src/pages/Shell.tsx
 msgid "Jump to latest"
@@ -2814,6 +2870,10 @@ msgstr "참여 Bot ({GROUP_MEMBER_MIN}~{GROUP_MEMBER_MAX}개 선택)"
 msgid "Memory"
 msgstr "기억"
 
+#: src/pages/KnowledgeSection.tsx
+msgid "Memory changed. Close and reopen it before saving again."
+msgstr ""
+
 #: src/pages/shell/bot-panel.tsx
 msgid "Memory scope"
 msgstr "기억 사용 범위"
@@ -2826,6 +2886,7 @@ msgstr "멘션"
 msgid "Mentions only"
 msgstr ""
 
+#: src/pages/RecruitingPanel.tsx
 #: src/pages/Shell.tsx
 msgid "Message"
 msgstr "메시지"
@@ -3183,6 +3244,10 @@ msgstr ""
 msgid "No saved questions"
 msgstr ""
 
+#: src/pages/RecruitingPanel.tsx
+msgid "No saved result rows"
+msgstr "저장된 결과 행 없음"
+
 #: src/pages/KnowledgeSection.tsx
 msgid "No skills yet"
 msgstr "아직 스킬이 없습니다"
@@ -3274,6 +3339,10 @@ msgstr "일정에 따라"
 msgid "on the 1st at {0}"
 msgstr "매월 1일 {0}에"
 
+#: src/pages/McpServersOverlay.tsx
+msgid "One tool per line. Empty means no tools."
+msgstr ""
+
 #: src/pages/Shell.tsx
 msgid "Only empty spaces can be deleted. Delete its bots and groups first."
 msgstr ""
@@ -3316,6 +3385,10 @@ msgstr "전체 창으로 열기"
 #: src/pages/Shell.tsx
 msgid "Open navigation"
 msgstr "메뉴 열기"
+
+#: src/pages/RecruitingPanel.tsx
+msgid "Open original question"
+msgstr "원래 질문 열기"
 
 #: src/components/computer/TerminalApp.tsx
 msgid "Open shell"
@@ -3534,6 +3607,10 @@ msgstr "대기 중"
 #: src/pages/Shell.tsx
 msgid "Quote"
 msgstr ""
+
+#: src/pages/RecruitingPanel.tsx
+msgid "Raw search results"
+msgstr "원본 검색 결과"
 
 #: src/pages/Shell.tsx
 msgid "React"
@@ -3954,6 +4031,7 @@ msgstr ""
 #: src/pages/ExternalConversationSettings.tsx
 #: src/pages/GroupPanel.tsx
 #: src/pages/KnowledgeSection.tsx
+#: src/pages/McpServersOverlay.tsx
 #: src/pages/ModelSettingsOverlay.tsx
 #: src/pages/RoutineEditor.tsx
 #: src/pages/shell/bot-panel.tsx
@@ -3986,6 +4064,10 @@ msgstr "작업 공간을 저장하고 최신 소프트웨어를 설치합니다.
 #: src/pages/ExternalConversationSettings.tsx
 msgid "Saved"
 msgstr "저장됨"
+
+#: src/pages/RecruitingPanel.tsx
+msgid "Saved assessments"
+msgstr "저장된 평가"
 
 #: src/pages/RecruitingPanel.tsx
 msgid "Saved facts"
@@ -4443,6 +4525,10 @@ msgstr "전환 중…"
 msgid "System"
 msgstr "시스템"
 
+#: src/pages/RecruitingPanel.tsx
+msgid "Table"
+msgstr "표"
+
 #: src/pages/Shell.tsx
 msgid "Take control"
 msgstr "제어권 가져오기"
@@ -4646,6 +4732,14 @@ msgstr "받는 사람:"
 msgid "Today"
 msgstr "오늘"
 
+#: src/pages/McpServersOverlay.tsx
+msgid "Tool access"
+msgstr ""
+
+#: src/components/ApprovalRulesSettings.tsx
+msgid "Tool name"
+msgstr ""
+
 #: src/pages/PluginsOverlay.tsx
 msgid "Tool sources"
 msgstr "도구 소스"
@@ -4694,6 +4788,10 @@ msgstr ""
 #: src/components/AskCard.tsx
 msgid "Type your answer"
 msgstr "답변을 입력하세요"
+
+#: src/pages/RecruitingPanel.tsx
+msgid "Unassessed"
+msgstr "미평가"
 
 #: src/pages/BotContextMenu.tsx
 msgid "Unassigned"
@@ -4838,6 +4936,10 @@ msgstr "내 키 사용"
 
 #: src/pages/RecruitingPanel.tsx
 msgid "User and bot memory"
+msgstr ""
+
+#: src/pages/RecruitingPanel.tsx
+msgid "User instruction"
 msgstr ""
 
 #: src/pages/RecruitingPanel.tsx
@@ -5022,39 +5124,3 @@ msgstr "이름"
 #: src/pages/Welcome.tsx
 msgid "Your team of always-on agents<0/>that you can give real work to."
 msgstr "언제든 실제 작업을 맡길 수 있는<0/>나만의 Agent 팀"
-
-#: src/pages/RecruitingPanel.tsx
-msgid "Open original question"
-msgstr "원래 질문 열기"
-
-#: src/pages/RecruitingPanel.tsx
-msgid "Cards"
-msgstr "카드"
-
-#: src/pages/RecruitingPanel.tsx
-msgid "Table"
-msgstr "표"
-
-#: src/pages/RecruitingPanel.tsx
-msgid "Candidate"
-msgstr "후보자"
-
-#: src/pages/RecruitingPanel.tsx
-msgid "Saved assessments"
-msgstr "저장된 평가"
-
-#: src/pages/RecruitingPanel.tsx
-msgid "Raw search results"
-msgstr "원본 검색 결과"
-
-#: src/pages/RecruitingPanel.tsx
-msgid "Unassessed"
-msgstr "미평가"
-
-#: src/pages/RecruitingPanel.tsx
-msgid "No saved result rows"
-msgstr "저장된 결과 행 없음"
-
-#: src/pages/RecruitingPanel.tsx
-msgid "Could not load search results"
-msgstr "검색 결과를 불러올 수 없습니다"
