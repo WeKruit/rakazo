@@ -7,6 +7,7 @@
 基于 WeKruit/Rakazo 整套原生前后端，交付可以在网页直接使用的招聘 Agent 产品。
 Main 负责需求、协调和人工审批；Sourcer 负责检索、证据和反馈后的续搜。
 用户在正常聊天和 Crew 中连续工作，切换对话或重启后仍能回到同一任务及原卡继续。
+招聘入口支持直接粘贴 JD 链接、岗位描述或附件；无需先建 CRM 岗位或提供历史 task ID。先核对本轮实际岗位正文，再形成 brief 与首批检索草案；后续反馈沿同一真实 provider task 继续。
 
 先使用现有 Codex subscription OAuth。当前执行器是 Rakazo 原生 Pi，不将它描述为
 Codex CLI 的原生 session。模型连接、逐 bot 配置、memory、skills、tools、MCP、
@@ -57,7 +58,7 @@ subagent 和文件存储沿用 Rakazo 已有边界，后续更换模型或运行
 
 原生 sandbox 文件恢复另已通过：静态 E2B 状态确认 paused，文件 checkpoint 在 Modal Volume 实际可读；替换服务容器后，Sourcer 在原对话仅调用 read_file 返回既存文件内容，原 provider 恢复 running，未重建文件。再次重启没有重放此前已完成的审批效果。
 
-追加已实测取消原卡，以及未答 Sourcer 原卡上的原生继续任务重投：job 被消费后没有新增 attempt 或改变原卡；正常回答后同一 run 仅新增一条继续回复。共享等待 guard 已部署，320 项相关检查通过。来源核对后的 Sourcer 稳定偏好另已实际写入原生 bot memory revision 1。CRM 原站点 consent 页面已随 PR #39 上线，Function/OAuth 新入口仍待具体确认及真实用户验收。
+追加已实测取消原卡，以及未答 Sourcer 原卡上的原生继续任务重投：job 被消费后没有新增 attempt 或改变原卡；正常回答后同一 run 仅新增一条继续回复。共享等待 guard 已部署，320 项相关检查通过。来源核对后的 Sourcer 稳定偏好另已实际写入原生 bot memory revision 1。CRM 原站点 consent 页面随 PR #39 上线；本轮获准发布 Function/OAuth，已完成实际用户身份与组织只读验收。
 
 两份 Dyna 历史 CSV 已通过原生附件归档到 Sourcer，并在云端 Artifact Store 核对 SHA256 与原件一致。文件仍是历史档案，不等于最新名单或已恢复外部 task。CRM 来源引用的 PR #40 已合并且真实 Postgres 检查通过；用户批准的函数迁移已在生产编辑器成功执行，真实用户调用与原卡审批尚未验收。
 
@@ -69,11 +70,17 @@ subagent 和文件存储沿用 Rakazo 已有边界，后续更换模型或运行
 
 Sourcer 独立切换同一 Codex OAuth 下的模型后，真实回复召回原私有记忆，Main 及其他配置不变，随后恢复原模型设置。经审阅的 Dyna 来源资料另通过正常聊天迁入；原生私有来源索引 revision 1 已在原 Crew 跨对话召回，其他九份记忆、旧 Crew 记录及 Main 待答卡不变。此次新增的是来源索引，不是完整历史 JD、原外部任务或最新去重状态的恢复，也没有将两份正文资料冒充已上传文件。
 
-CRM 原生函数编辑器已更新到合并源码，八个文件通过原生 UI 全文读回并逐份核对 SHA256。OAuth Server 仍关闭、函数未发布，现有 CRM Site URL 正确；更新后的发布范围含七读两写，具体配置确认等待回复。草稿准备不等于账号授权或 CRM 业务闭环通过。
+CRM 八文件经原生编辑器全文核对后，获准发布到现有 MCP endpoint；OAuth Server/DCR 已开启，正确 Site URL 不变。只对 mcp 关闭 legacy JWT 平台 gate，官方用户 JWT/RLS 保持；当前 ECC 签名已在原生设置确认，未轮换密钥。发布后的三个匿名 MCP 请求均被应用 401 拒绝，官方资源/授权发现成功。
 
-两个既有 Autumn 任务的 30 行结果已完整只读归档，联系字段未保存，该读取窗口 credits 未变。四行来源资料经具体批准后已发送到原 Crew；Sourcer 实际保存私有来源索引 revision 1，并在同一对话补问后返回四行证据/缺口表，未重新提供候选资料。只有一次 remember 写入，其他十份记忆、原 30 条消息和 Main 待答卡不变。当前 Crew 34 条消息、16 个 run；原 Grok 批次关联、当前业务规则与云端服务连接仍未确认，未续搜、写 CRM 或外联。
+Autumn/Instantly 凭证已在原生加密 SecretStore 保存，只分配明确读工具。原 Crew 的 Sourcer 已真实调用 credits、两个原任务状态及 limit=1 的 campaign 列表；四个 effect 与真实结果已核对。两任务各 15 行，完整 30 行此前已只读归档；四条获准资料已返回来源/证据/缺口表并保存私有来源索引。原 Grok 批次映射仍未确认，没有 research/reply。
 
-**尚未验收**：全部原生卡片边界与多人权限、剩余历史业务状态迁入、招聘服务云端接入与 P3–P6 业务闭环。两个真实 Dyna provider 任务已只读确认，但缺少与旧 Grok 批次的确定映射；CRM 原 OAuth/MCP 及评审写读代码已准备，尚未真实用户验收。远端 MCP 多字段 elicitation 当前缺原生协议桥接及服务端恢复能力，不能用文本卡或重发调用冒充。普通聊天上下文记住信息不算长期记忆证明。
+CRM 用户另在实际 Connect Rakazo 页面批准 OAuth；原 Crew 的 whoami 匹配批准账号，membership 为 WeKruit。四个姓名查询各返回一条，LinkedIn 与获准原资料逐字匹配；source_context 均为招聘来源 Dyna / SWE Data Infra，不是候选当前雇主。两个写工具保持未分配；未写业务行或外发。source_context 不包含 role ID 的真实缺口已复现；PR #42 用七行复用网页既有岗位目录 RPC，已合并 main 964e20c 并发布，Main/Sourcer 各增加这一只读发现工具，不改表/RLS。19 项 MCP 检查及 check/Biome、独立审查、CI verify/RLS 通过。新容器中的真实调用已从组织目录找到唯一岗位并读回，CRM 的 JD 字段为空；同轮 Autumn/Instantly 新只读调用均成功。
+
+此次实际替换服务容器后，3 个服务配置、6 份 bot 工具权限、11 份记忆、42 条消息、20 个 run、22 个 effect 均逐项相同，Main 原待答卡保持等待，旧效果未重放。此项证明配置/凭证引用持久；重启后新的 provider 调用另行验收，不用元数据相同代替重新认证。
+
+用户已提供本轮 Dyna 官方 JD，原 Sourcer 选择卡的自定义输入已实际保存并继续。Main 通过现有 skill_read/update/read 更新同一共享 intake skill，支持 JD 链接/描述直接启动及逐节完整性核对，其他四份 skill 不变。Autumn research/reply 已配置精确 Ask first，仅 Sourcer 获这两项能力；实际研究仍须在原生卡一次性批准。
+
+**尚未验收**：当前岗位规则和原任务选择、反馈后的同 task 续搜、CRM 获准来源/评审写读、真实审批发送与回复停止、云端第二用户/组织权限、外部写入未知结果恢复及任意远端多字段 MCP elicitation。普通选择/input/工具审批已有真实恢复证据；不能据此标记 P3–P6 全链路完成。
 
 ## 完成标准
 
