@@ -618,6 +618,139 @@ describePostgres("recruiting domain (PostgreSQL)", () => {
       ),
     ).rejects.toThrow();
   });
+  it("returns the assessment's original role revision after the current role changes", async () => {
+    const f = await assessmentFixture();
+    await recruiting.saveRecruitingAssessment(prisma, actor, f.context, f.input, f.artifacts);
+    const { sourceThreadId: _, ...definition } = roleInput(source(f.message.id));
+    await recruiting.reviseRecruitingRole(prisma, actor, {
+      ...definition,
+      roleId: f.role.role.id,
+      expectedRevision: 1,
+      criteria: [{ ...definition.criteria[0]!, id: "changed-criterion", priority: "preferred" }],
+    });
+    const input = { roleId: f.role.role.id, candidateKey: f.input.candidateKey };
+    const restored = (await recruiting.getRecruitingAssessment(prisma, actor, input))!;
+    expect(restored.isCurrent).toBe(false);
+    expect(restored).toMatchObject({ roleRevision: f.role.revision });
+    expect(
+      (await recruiting.listRecruitingAssessments(prisma, actor, { roleId: f.role.role.id }))[0],
+    ).toEqual(restored);
+  });
+  it("returns deduplicated real message targets from assessment and original role sources across threads", async () => {
+    const a = await assessmentFixture();
+    const b = await assessmentFixture();
+    const { sourceThreadId: _, ...definition } = roleInput(source(b.message.id));
+    const role = await recruiting.reviseRecruitingRole(prisma, actor, {
+      ...definition,
+      roleId: a.role.role.id,
+      expectedRevision: 1,
+    });
+    const input = {
+      ...a.input,
+      roleRevisionId: role.revision.id,
+      sourceRefs: [...a.input.sourceRefs, assessmentSource()],
+    };
+    const admission = await assessmentAdmission(input, { runId: a.run.id, threadId: a.thread.id });
+    await recruiting.saveRecruitingAssessment(
+      prisma,
+      actor,
+      admission.context,
+      input,
+      admission.artifacts,
+    );
+    const restored = (await recruiting.getRecruitingAssessment(prisma, actor, {
+      roleId: a.role.role.id,
+      candidateKey: input.candidateKey,
+    }))!;
+    expect(restored).toMatchObject({
+      roleRevision: role.revision,
+      sourceMessageTargets: expect.arrayContaining([
+        { messageId: a.message.id, threadId: a.thread.id, target: { groupId: a.group.id } },
+        { messageId: b.message.id, threadId: b.thread.id, target: { groupId: b.group.id } },
+        { messageId, threadId, target: { botId } },
+      ]),
+    });
+    expect(restored.sourceMessageTargets).toHaveLength(3);
+  });
+  it("retains an external conversation source without inventing a native message target", async () => {
+    const f = await assessmentFixture();
+    const conversation = await prisma.externalConversation.create({
+      data: {
+        spaceId,
+        userId,
+        botId,
+        provider: "synthetic",
+        workspaceId: "synthetic",
+        externalKey: `snapshot-${f.run.id}`,
+        conversationId: `snapshot-${f.run.id}`,
+      },
+    });
+    const externalThread = await prisma.thread.create({
+      data: { spaceId, userId, externalConversationId: conversation.id },
+    });
+    const externalMessage = await prisma.message.create({
+      data: {
+        threadId: externalThread.id,
+        seq: 1,
+        role: "user",
+        blocks: [{ kind: "text", text: "Supplied role material" }],
+      },
+    });
+    const externalSource = source(externalMessage.id);
+    const { sourceThreadId: _, ...definition } = roleInput(source(f.message.id));
+    const role = await recruiting.reviseRecruitingRole(prisma, actor, {
+      ...definition,
+      sourceRefs: [...definition.sourceRefs, externalSource],
+      roleId: f.role.role.id,
+      expectedRevision: 1,
+    });
+    const input = { ...f.input, roleRevisionId: role.revision.id };
+    const admission = await assessmentAdmission(input, { runId: f.run.id, threadId: f.thread.id });
+    await recruiting.saveRecruitingAssessment(
+      prisma,
+      actor,
+      admission.context,
+      input,
+      admission.artifacts,
+    );
+    const restored = (await recruiting.getRecruitingAssessment(prisma, actor, {
+      roleId: f.role.role.id,
+      candidateKey: input.candidateKey,
+    }))!;
+    expect(restored.roleRevision.sourceRefs).toContainEqual(externalSource);
+    expect(restored.sourceMessageTargets).toEqual([
+      { messageId: f.message.id, threadId: f.thread.id, target: { groupId: f.group.id } },
+    ]);
+  });
+  it("rejects snapshot reads without exposing original role source targets after access is revoked", async () => {
+    const a = await assessmentFixture();
+    const b = await assessmentFixture();
+    const { sourceThreadId: _, ...definition } = roleInput(source(b.message.id));
+    const role = await recruiting.reviseRecruitingRole(prisma, actor, {
+      ...definition,
+      roleId: a.role.role.id,
+      expectedRevision: 1,
+    });
+    const input = { ...a.input, roleRevisionId: role.revision.id };
+    const admission = await assessmentAdmission(input, { runId: a.run.id, threadId: a.thread.id });
+    await recruiting.saveRecruitingAssessment(
+      prisma,
+      actor,
+      admission.context,
+      input,
+      admission.artifacts,
+    );
+    await prisma.thread.update({ where: { id: b.thread.id }, data: { userId: otherUserId } });
+    await expect(
+      recruiting.getRecruitingAssessment(prisma, actor, {
+        roleId: a.role.role.id,
+        candidateKey: input.candidateKey,
+      }),
+    ).rejects.toThrow(IsolationError);
+    await expect(
+      recruiting.listRecruitingAssessments(prisma, actor, { roleId: a.role.role.id }),
+    ).rejects.toThrow(IsolationError);
+  });
   it("reassesses only explicit changes and commits one immutable version per native effect", async () => {
     const f = await assessmentFixture();
     const first = await recruiting.saveRecruitingAssessment(

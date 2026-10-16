@@ -127,10 +127,29 @@ const recruitingWorkspace = z.strictObject({
   role: RecruitingRoleSchema,
   revision: RecruitingRoleRevisionSchema,
 });
-const recruitingAssessment = z.strictObject({
-  assessment: RecruitingAssessmentSchema,
-  isCurrent: z.boolean(),
-});
+export const RecruitingAssessmentSnapshotSchema = z
+  .strictObject({
+    assessment: RecruitingAssessmentSchema,
+    roleRevision: RecruitingRoleRevisionSchema,
+    isCurrent: z.boolean(),
+    sourceMessageTargets: z.array(
+      z.strictObject({
+        messageId: Id,
+        threadId: Id,
+        target: z.union([z.strictObject({ botId: Id }), z.strictObject({ groupId: Id })]),
+      }),
+    ),
+  })
+  .refine(
+    (snapshot) =>
+      snapshot.roleRevision.id === snapshot.assessment.roleRevisionId &&
+      snapshot.roleRevision.roleId === snapshot.assessment.roleId,
+    {
+      message: "Assessment role revision must match its saved snapshot",
+      path: ["roleRevision"],
+    },
+  );
+export type RecruitingAssessmentSnapshot = z.infer<typeof RecruitingAssessmentSnapshotSchema>;
 
 export const RecruitingQuestionSchema = z.strictObject({
   effectId: RecruitingId,
@@ -522,7 +541,7 @@ export const appContract = {
     reviseRole: oc.input(ReviseRecruitingRoleInput).output(recruitingWorkspace),
     listAssessments: oc
       .input(z.strictObject({ roleId: RecruitingId }))
-      .output(z.array(recruitingAssessment)),
+      .output(z.array(RecruitingAssessmentSnapshotSchema)),
     getAssessment: oc
       .input(
         z.strictObject({
@@ -531,7 +550,7 @@ export const appContract = {
           version: z.number().int().positive().optional(),
         }),
       )
-      .output(recruitingAssessment.nullable()),
+      .output(RecruitingAssessmentSnapshotSchema.nullable()),
     listResearch: oc.input(z.strictObject({ roleId: RecruitingId })).output(
       z.strictObject({
         tasks: z.array(RecruitingResearchTaskSchema),

@@ -4,8 +4,8 @@ import type {
   Actor,
   CreateRecruitingRoleInput as CreateRoleInput,
   RecruitingArtifactRef,
-  RecruitingAssessment,
   RecruitingAssessmentAskInput,
+  RecruitingAssessmentSnapshot,
   RecruitingAssessmentSourceRef,
   RecruitingHumanIntent,
   RecruitingPreferenceFeedbackInput,
@@ -56,7 +56,8 @@ import { IsolationError, scoped } from "./scope.js";
 
 type Tx = Prisma.TransactionClient;
 type RoleSnapshot = { role: RecruitingRole; revision: RecruitingRoleRevision };
-export type RecruitingAssessmentSnapshot = { assessment: RecruitingAssessment; isCurrent: boolean };
+
+export type { RecruitingAssessmentSnapshot } from "@rakazo/contracts";
 
 export class RecruitingConflictError extends Error {
   constructor() {
@@ -175,18 +176,44 @@ async function validateArtifact(tx: Tx, actor: Actor, ref: RecruitingArtifactRef
 }
 
 async function validateSources(tx: Tx, actor: Actor, sources: readonly RecruitingSourceRef[]) {
+  const artifacts = new Set<string>();
+  const messageIds = new Set<string>();
   for (const source of sources) {
     if (source.anchor.kind === "artifact") {
+      const key = `${source.anchor.artifact.artifactId}:${source.anchor.artifact.sha256}`;
+      if (artifacts.has(key)) continue;
       await validateArtifact(tx, actor, source.anchor.artifact);
+      artifacts.add(key);
     } else {
-      const message = await tx.message.findUnique({
-        where: { id: source.anchor.messageId },
-        select: { threadId: true },
-      });
-      if (!message) throw new IsolationError();
-      await requireThread(tx, actor, message.threadId);
+      messageIds.add(source.anchor.messageId);
     }
   }
+  const sourceMessageTargets: RecruitingAssessmentSnapshot["sourceMessageTargets"] = [];
+  if (!messageIds.size) return sourceMessageTargets;
+  const messages = await tx.message.findMany({
+    where: { id: { in: [...messageIds] } },
+    select: { id: true, threadId: true },
+  });
+  if (messages.length !== messageIds.size) throw new IsolationError();
+  const threads = new Map<string, Awaited<ReturnType<typeof requireThread>>>();
+  for (const threadId of new Set(messages.map((message) => message.threadId)))
+    threads.set(threadId, await requireThread(tx, actor, threadId));
+  for (const message of messages) {
+    const thread = threads.get(message.threadId)!;
+    if (thread.groupId)
+      sourceMessageTargets.push({
+        messageId: message.id,
+        threadId: thread.id,
+        target: { groupId: thread.groupId },
+      });
+    else if (thread.botId)
+      sourceMessageTargets.push({
+        messageId: message.id,
+        threadId: thread.id,
+        target: { botId: thread.botId },
+      });
+  }
+  return sourceMessageTargets;
 }
 
 async function validateDefinition(
@@ -194,7 +221,7 @@ async function validateDefinition(
   actor: Actor,
   definition: Pick<RecruitingRoleRevision, "sourceRefs" | "criteria">,
 ) {
-  await validateSources(tx, actor, [
+  return validateSources(tx, actor, [
     ...definition.sourceRefs,
     ...definition.criteria.flatMap((criterion) => criterion.sourceRefs),
   ]);
@@ -938,15 +965,25 @@ async function assessmentSnapshot(
     ...row,
     createdAt: row.createdAt.toISOString(),
   });
-  if (
-    !(await tx.recruitingRoleRevision.findFirst({
-      where: { id: row.roleRevisionId, roleId: role.id },
-    }))
-  )
-    throw new IsolationError();
+  const revision = await tx.recruitingRoleRevision.findFirst({
+    where: { id: row.roleRevisionId, roleId: role.id },
+  });
+  if (!revision) throw new IsolationError();
+  const roleRevision = RecruitingRoleRevisionSchema.parse({
+    ...revision,
+    createdAt: revision.createdAt.toISOString(),
+  });
   await requireRun(tx, actor, row.createdByRunId);
-  await validateSources(tx, actor, assessment.sourceRefs);
-  return { assessment, isCurrent: role.currentRevisionId === assessment.roleRevisionId };
+  const sourceMessageTargets = await validateDefinition(tx, actor, {
+    sourceRefs: [...assessment.sourceRefs, ...roleRevision.sourceRefs],
+    criteria: roleRevision.criteria,
+  });
+  return {
+    assessment,
+    roleRevision,
+    sourceMessageTargets,
+    isCurrent: role.currentRevisionId === assessment.roleRevisionId,
+  };
 }
 
 export async function listRecruitingAssessments(

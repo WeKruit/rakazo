@@ -112,6 +112,7 @@ msgid "{count} days"
 msgstr ""
 
 #: src/lib/billing.ts
+#: src/pages/RecruitingPanel.tsx
 msgid "{count} months"
 msgstr ""
 
@@ -4366,6 +4367,7 @@ msgstr "शुरू हो रहा है…"
 
 #: src/pages/ActivityList.tsx
 #: src/pages/Board.tsx
+#: src/pages/RecruitingPanel.tsx
 msgid "Status"
 msgstr ""
 
@@ -4868,10 +4870,12 @@ msgid "Verifying…"
 msgstr "पुष्टि की जा रही है…"
 
 #: src/pages/Artifacts.tsx
+#: src/pages/RecruitingPanel.tsx
 msgid "Version"
 msgstr ""
 
-#. placeholder {0}: assessment.version
+#. placeholder {0}: item.version
+#. placeholder {0}: selected.roleRevision.revision
 #. placeholder {0}: workspace.revision.revision
 #: src/pages/RecruitingPanel.tsx
 msgid "Version {0}"
@@ -5022,3 +5026,19 @@ msgstr "हमेशा चालू रहने वाले एजेंट�
 #: src/pages/RecruitingPanel.tsx
 msgid "Open original question"
 msgstr "मूल प्रश्न खोलें"
+
+#: src/pages/RecruitingPanel.tsx
+msgid "Cards"
+msgstr "कार्ड"
+
+#: src/pages/RecruitingPanel.tsx
+msgid "Table"
+msgstr "तालिका"
+
+#: src/pages/RecruitingPanel.tsx
+msgid "Candidate"
+msgstr "उम्मीदवार"
+
+#: src/pages/RecruitingPanel.tsx
+msgid "Saved assessments"
+msgstr "सहेजे गए मूल्यांकन"

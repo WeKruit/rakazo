@@ -112,6 +112,7 @@ msgid "{count} days"
 msgstr ""
 
 #: src/lib/billing.ts
+#: src/pages/RecruitingPanel.tsx
 msgid "{count} months"
 msgstr ""
 
@@ -4366,6 +4367,7 @@ msgstr "시작하는 중…"
 
 #: src/pages/ActivityList.tsx
 #: src/pages/Board.tsx
+#: src/pages/RecruitingPanel.tsx
 msgid "Status"
 msgstr ""
 
@@ -4868,10 +4870,12 @@ msgid "Verifying…"
 msgstr "확인 중…"
 
 #: src/pages/Artifacts.tsx
+#: src/pages/RecruitingPanel.tsx
 msgid "Version"
 msgstr ""
 
-#. placeholder {0}: assessment.version
+#. placeholder {0}: item.version
+#. placeholder {0}: selected.roleRevision.revision
 #. placeholder {0}: workspace.revision.revision
 #: src/pages/RecruitingPanel.tsx
 msgid "Version {0}"
@@ -5022,3 +5026,19 @@ msgstr "언제든 실제 작업을 맡길 수 있는<0/>나만의 Agent 팀"
 #: src/pages/RecruitingPanel.tsx
 msgid "Open original question"
 msgstr "원래 질문 열기"
+
+#: src/pages/RecruitingPanel.tsx
+msgid "Cards"
+msgstr "카드"
+
+#: src/pages/RecruitingPanel.tsx
+msgid "Table"
+msgstr "표"
+
+#: src/pages/RecruitingPanel.tsx
+msgid "Candidate"
+msgstr "후보자"
+
+#: src/pages/RecruitingPanel.tsx
+msgid "Saved assessments"
+msgstr "저장된 평가"

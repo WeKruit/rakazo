@@ -1,5 +1,6 @@
 import { createRouterClient } from "@orpc/server";
 import type { Actor } from "@rakazo/contracts";
+import { RecruitingAssessmentSnapshotSchema } from "@rakazo/contracts";
 import type * as DbExports from "@rakazo/db";
 import type { PrismaClient } from "@rakazo/db";
 import * as db from "@rakazo/db";
@@ -98,6 +99,77 @@ describe("native recruiting RPC", () => {
       tasks: [],
       actions: [],
     });
+  });
+  it("returns the original assessment revision and authorized message targets through both RPC reads", async () => {
+    const source = {
+      id: "source",
+      kind: "original_material" as const,
+      anchor: { kind: "message" as const, messageId: "message", locator: "text:0" },
+      readState: "unread" as const,
+      readAt: null,
+    };
+    const snapshot: DbExports.RecruitingAssessmentSnapshot = {
+      assessment: {
+        roleId: "role",
+        roleRevisionId: "original-revision",
+        candidateKey: "row",
+        version: 1,
+        basedOnVersion: null,
+        createdByRunId: "run",
+        createdAt: "2026-10-16T00:00:00.000Z",
+        facts: [],
+        questions: [],
+        sourceRefs: [source],
+        judgments: { atoms: [], employment: [], criteria: [], hardGate: "unknown" },
+      },
+      roleRevision: {
+        id: "original-revision",
+        roleId: "role",
+        revision: 1,
+        sourceRefs: [source],
+        criteria: [],
+        preferences: [],
+        definitionQuestions: [],
+        createdAt: "2026-10-16T00:00:00.000Z",
+      },
+      isCurrent: false,
+      sourceMessageTargets: [
+        { messageId: "message", threadId: "source-thread", target: { groupId: "source-group" } },
+      ],
+    };
+    const client = createRouterClient(createRouter({ prisma } as RouterDeps), {
+      context: { actor },
+    });
+    vi.mocked(db.listRecruitingAssessments).mockResolvedValueOnce([snapshot]);
+    expect(await client.recruiting.listAssessments({ roleId: "role" })).toEqual([snapshot]);
+    vi.mocked(db.getRecruitingAssessment).mockResolvedValueOnce(snapshot);
+    expect(
+      await client.recruiting.getAssessment({ roleId: "role", candidateKey: "row", version: 1 }),
+    ).toEqual(snapshot);
+    expect(
+      RecruitingAssessmentSnapshotSchema.safeParse({
+        ...snapshot,
+        roleRevision: { ...snapshot.roleRevision, id: "current-revision" },
+      }).success,
+    ).toBe(false);
+    expect(
+      RecruitingAssessmentSnapshotSchema.safeParse({
+        ...snapshot,
+        sourceMessageTargets: [
+          {
+            messageId: "message",
+            threadId: "source-thread",
+            target: { botId: "bot", groupId: "group" },
+          },
+        ],
+      }).success,
+    ).toBe(false);
+    vi.mocked(db.getRecruitingAssessment).mockRejectedValueOnce(
+      new IsolationError("Private source-thread and message target"),
+    );
+    await expect(
+      client.recruiting.getAssessment({ roleId: "role", candidateKey: "row" }),
+    ).rejects.toMatchObject({ code: "NOT_FOUND", message: "Resource not found" });
   });
   it("rejects unauthenticated reads and model-supplied identity before storage", async () => {
     const authenticated = createRouterClient(createRouter({ prisma } as RouterDeps), {

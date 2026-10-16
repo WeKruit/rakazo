@@ -112,6 +112,7 @@ msgid "{count} days"
 msgstr ""
 
 #: src/lib/billing.ts
+#: src/pages/RecruitingPanel.tsx
 msgid "{count} months"
 msgstr ""
 
@@ -4366,6 +4367,7 @@ msgstr "Iniciando…"
 
 #: src/pages/ActivityList.tsx
 #: src/pages/Board.tsx
+#: src/pages/RecruitingPanel.tsx
 msgid "Status"
 msgstr ""
 
@@ -4868,10 +4870,12 @@ msgid "Verifying…"
 msgstr "Verificando…"
 
 #: src/pages/Artifacts.tsx
+#: src/pages/RecruitingPanel.tsx
 msgid "Version"
 msgstr ""
 
-#. placeholder {0}: assessment.version
+#. placeholder {0}: item.version
+#. placeholder {0}: selected.roleRevision.revision
 #. placeholder {0}: workspace.revision.revision
 #: src/pages/RecruitingPanel.tsx
 msgid "Version {0}"
@@ -5022,3 +5026,19 @@ msgstr "Sua equipe de agentes sempre ativos<0/>, a quem você pode dar trabalho 
 #: src/pages/RecruitingPanel.tsx
 msgid "Open original question"
 msgstr "Abrir pergunta original"
+
+#: src/pages/RecruitingPanel.tsx
+msgid "Cards"
+msgstr "Cartões"
+
+#: src/pages/RecruitingPanel.tsx
+msgid "Table"
+msgstr "Tabela"
+
+#: src/pages/RecruitingPanel.tsx
+msgid "Candidate"
+msgstr "Candidato"
+
+#: src/pages/RecruitingPanel.tsx
+msgid "Saved assessments"
+msgstr "Avaliações salvas"

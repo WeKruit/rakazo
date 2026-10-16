@@ -112,6 +112,7 @@ msgid "{count} days"
 msgstr ""
 
 #: src/lib/billing.ts
+#: src/pages/RecruitingPanel.tsx
 msgid "{count} months"
 msgstr ""
 
@@ -4366,6 +4367,7 @@ msgstr "Başlatılıyor…"
 
 #: src/pages/ActivityList.tsx
 #: src/pages/Board.tsx
+#: src/pages/RecruitingPanel.tsx
 msgid "Status"
 msgstr ""
 
@@ -4868,10 +4870,12 @@ msgid "Verifying…"
 msgstr "Doğrulanıyor…"
 
 #: src/pages/Artifacts.tsx
+#: src/pages/RecruitingPanel.tsx
 msgid "Version"
 msgstr ""
 
-#. placeholder {0}: assessment.version
+#. placeholder {0}: item.version
+#. placeholder {0}: selected.roleRevision.revision
 #. placeholder {0}: workspace.revision.revision
 #: src/pages/RecruitingPanel.tsx
 msgid "Version {0}"
@@ -5022,3 +5026,19 @@ msgstr "Gerçek işler verebileceğin,<0/>her zaman açık agent takımın."
 #: src/pages/RecruitingPanel.tsx
 msgid "Open original question"
 msgstr "Orijinal soruyu aç"
+
+#: src/pages/RecruitingPanel.tsx
+msgid "Cards"
+msgstr "Kartlar"
+
+#: src/pages/RecruitingPanel.tsx
+msgid "Table"
+msgstr "Tablo"
+
+#: src/pages/RecruitingPanel.tsx
+msgid "Candidate"
+msgstr "Aday"
+
+#: src/pages/RecruitingPanel.tsx
+msgid "Saved assessments"
+msgstr "Kaydedilmiş değerlendirmeler"

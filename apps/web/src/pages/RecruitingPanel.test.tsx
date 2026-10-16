@@ -1,6 +1,7 @@
 // @vitest-environment jsdom
 import type {
   RecruitingAssessment,
+  RecruitingAssessmentSnapshot,
   RecruitingAssessmentSourceRef,
   RecruitingQuestion,
   RecruitingRole,
@@ -137,7 +138,25 @@ const assessment = {
     questions: ["How long?"],
   } satisfies RecruitingAssessment,
   isCurrent: false,
-};
+  roleRevision: {
+    ...revision,
+    id: "revision-1",
+    revision: 1,
+    criteria: [
+      {
+        ...revision.criteria[0]!,
+        expression: { kind: "atom", id: "atom-1", statement: "Original systems requirement" },
+      },
+    ],
+  },
+  sourceMessageTargets: [
+    {
+      messageId: source.anchor.messageId,
+      threadId: "material-thread",
+      target: { groupId: "material-group" },
+    },
+  ],
+} satisfies RecruitingAssessmentSnapshot;
 let cleanup: (() => Promise<void>) | undefined;
 beforeEach(() => {
   vi.stubGlobal("IS_REACT_ACT_ENVIRONMENT", true);
@@ -410,7 +429,7 @@ it("reads the native five views and lazily resolves memory history and Artifact 
   expect(api.get).not.toHaveBeenCalled();
   await view.click("Evidence");
   expect(view.container.textContent).toContain("Outdated");
-  await view.expand("candidate-1");
+  await view.click("candidate-1");
   expect(view.container.textContent).toContain("Unknown");
   expect(view.container.textContent).toContain("Built a compiler");
   await view.click("Missing info");
@@ -506,7 +525,7 @@ it("keeps saved facts and sources inspectable even before a criterion judgment e
   ]);
   const view = await mounted();
   await view.click("Evidence");
-  await view.expand("candidate-1");
+  await view.click("candidate-1");
   expect(view.container.textContent).toContain("Built a compiler");
   expect(view.container.textContent).toContain("Additional material");
 });
@@ -540,8 +559,10 @@ it("never guesses a native message route for material from another chat", async 
   const roleSources = [...view.container.querySelectorAll("details")].find(
     (item) => item.querySelector("summary")?.textContent === "Role sources",
   )!;
-  expect(roleSources.textContent).toContain("Role brief");
-  expect(roleSources.textContent).toContain("message-1");
+  expect(roleSources.textContent).toContain("Message");
+  expect(roleSources.textContent).toContain(source.quote);
+  expect(roleSources.textContent).not.toContain("message-1");
+  expect(roleSources.querySelector("button")).toBeNull();
   expect(roleSources.querySelector('a[href*="?m="]')).toBeNull();
 });
 it("reloads the same thread on native invalidation and rejects its old delayed assessments", async () => {
@@ -710,10 +731,17 @@ it.each([60, null])(
         hardGate: "unknown",
       },
     } satisfies RecruitingAssessment;
-    api.listAssessments.mockResolvedValue([{ assessment: saved, isCurrent: true }]);
+    api.listAssessments.mockResolvedValue([
+      {
+        ...assessment,
+        assessment: saved,
+        isCurrent: true,
+        roleRevision: { ...revision, criteria: [...revision.criteria, preferred] },
+      },
+    ]);
     const view = await mounted();
     await view.click("Evidence");
-    await view.expand("candidate-1");
+    await view.click("candidate-1");
     const gate = [...view.container.querySelectorAll("p")].find(
       (item) => item.textContent === "Hard criteriaUnknown",
     );
@@ -733,3 +761,140 @@ it.each([60, null])(
     expect(view.container.textContent).toContain("Which component?");
   },
 );
+
+it("switches Cards/Table with one original-revision detail, preserves a refreshed candidate and rejects late data from another role", async () => {
+  const additionalSource = {
+    ...assessmentSource,
+    id: "source-2",
+    anchor: { ...source.anchor, messageId: "message-2", locator: "Additional evidence" },
+    quote: "Independent source",
+    selection: { ...assessmentSource.selection, end: "Independent source".length },
+  };
+  const original = {
+    ...assessment,
+    assessment: {
+      ...assessment.assessment,
+      facts: [
+        ...assessment.assessment.facts,
+        {
+          kind: "statement",
+          id: "fact-2",
+          statement: "Maintained a compiler",
+          sourceRefIds: [additionalSource.id],
+        },
+      ],
+      sourceRefs: [...assessment.assessment.sourceRefs, additionalSource],
+      judgments: {
+        ...assessment.assessment.judgments,
+        criteria: [
+          {
+            ...assessment.assessment.judgments.criteria[0]!,
+            factIds: ["fact-1", "fact-2"],
+            evidence: [source.id, additionalSource.id],
+          },
+        ],
+      },
+    },
+    roleRevision: {
+      ...assessment.roleRevision,
+      criteria: [{ ...assessment.roleRevision.criteria[0]!, priority: "hard" as const }],
+    },
+  } satisfies RecruitingAssessmentSnapshot;
+  const second = {
+    ...assessment,
+    assessment: {
+      ...assessment.assessment,
+      candidateKey: "candidate-2",
+      facts: [{ ...assessment.assessment.facts[0]!, statement: "Second candidate evidence" }],
+    },
+    sourceMessageTargets: [
+      {
+        messageId: source.anchor.messageId,
+        threadId: "second-material-thread",
+        target: { botId: "second-material-bot" },
+      },
+    ],
+  };
+  api.listAssessments.mockResolvedValue([original, second]);
+  const view = await mounted();
+  await view.click("Evidence");
+  expect(view.container.querySelector("table")).toBeNull();
+  await view.click("candidate-1");
+  const condition = [...view.container.querySelectorAll("details")].find((element) =>
+    element.querySelector("summary")?.textContent?.includes("Original systems requirement"),
+  );
+  expect(condition).toBeDefined();
+  expect(condition?.querySelector("summary")?.textContent).toContain("Hard criteria");
+  expect([...condition!.querySelectorAll("blockquote")].map((item) => item.textContent)).toEqual([
+    source.quote,
+    additionalSource.quote,
+  ]);
+  expect(condition?.textContent).toContain("Built a compiler");
+  expect(condition?.textContent).toContain("Maintained a compiler");
+  expect(view.container.textContent).not.toContain("revision-1");
+  expect(view.container.textContent).toContain("Role · Version 1");
+  await view.click("Message");
+  expect(view.reveal).toHaveBeenCalledExactlyOnceWith({
+    groupId: "material-group",
+    messageId: source.anchor.messageId,
+  });
+  await view.click("Table");
+  expect(view.container.querySelector("table caption")?.textContent).toBe("Saved assessments");
+  expect(
+    [...view.container.querySelectorAll("th[scope=col]")].map((element) => element.textContent),
+  ).toEqual(["Candidate", "Version", "Status", "Hard criteria"]);
+  expect(view.container.textContent).toContain("Original systems requirement");
+  await view.click("candidate-2");
+  expect(view.container.textContent).toContain("Second candidate evidence");
+  expect(view.container.textContent).not.toContain("Built a compiler");
+  const refreshed = {
+    ...second,
+    assessment: {
+      ...second.assessment,
+      version: 2,
+      basedOnVersion: 1,
+      facts: [{ ...second.assessment.facts[0]!, statement: "Second candidate updated evidence" }],
+    },
+  };
+  api.listAssessments.mockResolvedValue([original, refreshed]);
+  await view.click("Refresh");
+  expect(view.container.querySelector("table")).not.toBeNull();
+  expect(view.container.textContent).toContain("Second candidate updated evidence");
+  await view.click("Cards");
+  expect(view.container.querySelector("table")).toBeNull();
+  expect(view.container.textContent).toContain("Second candidate updated evidence");
+  await view.click("Message");
+  expect(view.reveal).toHaveBeenLastCalledWith({
+    botId: "second-material-bot",
+    messageId: source.anchor.messageId,
+  });
+  let finish!: (value: (typeof assessment)[]) => void;
+  const pending = new Promise<(typeof assessment)[]>((resolve) => {
+    finish = resolve;
+  });
+  api.listAssessments.mockReturnValueOnce(pending);
+  await view.click("Refresh");
+  const nextRole = { ...role, id: "role-next", currentRevisionId: "revision-next" };
+  const nextRevision = { ...revision, id: nextRole.currentRevisionId, roleId: nextRole.id };
+  api.getWorkspace.mockResolvedValue({ role: nextRole, revision: nextRevision });
+  api.listAssessments.mockResolvedValue([
+    {
+      ...second,
+      assessment: {
+        ...second.assessment,
+        roleId: nextRole.id,
+        roleRevisionId: nextRevision.id,
+        facts: [{ ...second.assessment.facts[0]!, statement: "Different role evidence" }],
+      },
+      roleRevision: nextRevision,
+      isCurrent: true,
+    },
+  ]);
+  await view.render("thread-1", 1);
+  await act(async () => finish([original]));
+  expect(view.container.textContent).not.toContain("Second candidate updated evidence");
+  expect(view.container.textContent).not.toContain("Different role evidence");
+  await view.click("candidate-2");
+  expect(view.container.textContent).toContain("Different role evidence");
+  expect(view.container.textContent).not.toContain("Built a compiler");
+});

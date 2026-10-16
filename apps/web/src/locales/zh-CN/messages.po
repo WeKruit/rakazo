@@ -112,6 +112,7 @@ msgid "{count} days"
 msgstr ""
 
 #: src/lib/billing.ts
+#: src/pages/RecruitingPanel.tsx
 msgid "{count} months"
 msgstr ""
 
@@ -4366,6 +4367,7 @@ msgstr "正在开始…"
 
 #: src/pages/ActivityList.tsx
 #: src/pages/Board.tsx
+#: src/pages/RecruitingPanel.tsx
 msgid "Status"
 msgstr ""
 
@@ -4868,10 +4870,12 @@ msgid "Verifying…"
 msgstr "正在校验…"
 
 #: src/pages/Artifacts.tsx
+#: src/pages/RecruitingPanel.tsx
 msgid "Version"
 msgstr ""
 
-#. placeholder {0}: assessment.version
+#. placeholder {0}: item.version
+#. placeholder {0}: selected.roleRevision.revision
 #. placeholder {0}: workspace.revision.revision
 #: src/pages/RecruitingPanel.tsx
 msgid "Version {0}"
@@ -5022,3 +5026,19 @@ msgstr "你的一支随时在线的 Agent 团队<0/>可以交给它们真正的�
 #: src/pages/RecruitingPanel.tsx
 msgid "Open original question"
 msgstr "打开原问题"
+
+#: src/pages/RecruitingPanel.tsx
+msgid "Cards"
+msgstr "卡片"
+
+#: src/pages/RecruitingPanel.tsx
+msgid "Table"
+msgstr "表格"
+
+#: src/pages/RecruitingPanel.tsx
+msgid "Candidate"
+msgstr "候选人"
+
+#: src/pages/RecruitingPanel.tsx
+msgid "Saved assessments"
+msgstr "已保存的评估"

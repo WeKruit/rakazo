@@ -8,7 +8,15 @@ import type {
   RecruitingSourceRef,
   Verdict,
 } from "@rakazo/contracts";
-import { Button, Tabs, TabsContent, TabsList, TabsTrigger } from "@rakazo/ui-web";
+import {
+  Button,
+  Card,
+  CardContent,
+  Tabs,
+  TabsContent,
+  TabsList,
+  TabsTrigger,
+} from "@rakazo/ui-web";
 import { Check, CircleHelp, RefreshCw, X } from "lucide-react";
 import { useEffect, useState } from "react";
 import { ArtifactFileCard } from "../components/ArtifactFileCard";
@@ -98,43 +106,70 @@ function ArtifactReference({
   );
 }
 
-function Sources({ sources }: { sources: readonly RecruitingSourceRef[] }) {
+function Sources({
+  sources,
+  messageTargets,
+  onRevealMessage,
+}: {
+  sources: readonly RecruitingSourceRef[];
+  messageTargets?: Snapshot["assessments"][number]["sourceMessageTargets"];
+  onRevealMessage?: Props["onRevealMessage"];
+}) {
+  const byMessageId = new Map(messageTargets?.map((target) => [target.messageId, target]));
   return (
     <ul className="space-y-2 text-sm">
-      {sources.map((source) => (
-        <li key={source.id} className="space-y-1">
-          <p className="text-xs text-muted-foreground">
-            {source.kind} · {source.readState}
-          </p>
-          {source.anchor.kind === "message" ? (
-            <div>
-              <p>{source.anchor.locator}</p>
-              <p className="break-all text-xs text-muted-foreground">{source.anchor.messageId}</p>
-            </div>
-          ) : (
-            <ArtifactReference
-              reference={source.anchor.artifact}
-              key={`${source.anchor.artifact.artifactId}:${source.anchor.artifact.sha256}`}
-              label={source.anchor.locator}
-            />
-          )}
-          {source.url ? (
-            <a
-              href={source.url}
-              target="_blank"
-              rel="noreferrer"
-              className="block break-all underline underline-offset-4"
-            >
-              {source.url}
-            </a>
-          ) : null}
-          {source.quote ? (
-            <blockquote className="border-s-2 border-border ps-3 whitespace-pre-wrap">
-              {source.quote}
-            </blockquote>
-          ) : null}
-        </li>
-      ))}
+      {sources.map((source) => {
+        const message =
+          source.anchor.kind === "message" ? byMessageId.get(source.anchor.messageId) : undefined;
+        return (
+          <li key={source.id} className="space-y-1">
+            <p className="text-xs text-muted-foreground">
+              {source.kind} · {source.readState}
+            </p>
+            {source.anchor.kind === "message" ? (
+              <div>
+                {onRevealMessage && message ? (
+                  <Button
+                    variant="link"
+                    size="sm"
+                    className="h-auto justify-start whitespace-normal p-0 text-left"
+                    onClick={() =>
+                      onRevealMessage({ ...message.target, messageId: message.messageId })
+                    }
+                  >
+                    <Trans>Message</Trans>
+                  </Button>
+                ) : (
+                  <p>
+                    <Trans>Message</Trans>
+                  </p>
+                )}
+              </div>
+            ) : (
+              <ArtifactReference
+                reference={source.anchor.artifact}
+                key={`${source.anchor.artifact.artifactId}:${source.anchor.artifact.sha256}`}
+                label={source.anchor.locator}
+              />
+            )}
+            {source.url ? (
+              <a
+                href={source.url}
+                target="_blank"
+                rel="noreferrer"
+                className="block break-all underline underline-offset-4"
+              >
+                {source.url}
+              </a>
+            ) : null}
+            {source.quote ? (
+              <blockquote className="border-s-2 border-border ps-3 whitespace-pre-wrap">
+                {source.quote}
+              </blockquote>
+            ) : null}
+          </li>
+        );
+      })}
     </ul>
   );
 }
@@ -248,6 +283,8 @@ function RecruitingWorkspace({ threadId, botId, refreshSignal, onClose, onReveal
   const [refresh, setRefresh] = useState(0);
   const [loading, setLoading] = useState(true);
   const [failed, setFailed] = useState(false);
+  const [candidateView, setCandidateView] = useState<"cards" | "table">("cards");
+  const [selection, setSelection] = useState<{ roleId: string; candidateKey: string } | null>(null);
   useEffect(() => {
     let cancelled = false;
     setLoading(true);
@@ -310,6 +347,15 @@ function RecruitingWorkspace({ threadId, botId, refreshSignal, onClose, onReveal
   const workspace = snapshot?.workspace;
   const criteria = workspace?.revision.criteria ?? [];
   const assessments = snapshot?.assessments ?? [];
+  const selected =
+    selection && selection.roleId === workspace?.role.id
+      ? assessments.find(
+          ({ assessment }) =>
+            assessment.roleId === selection.roleId &&
+            assessment.candidateKey === selection.candidateKey,
+        )
+      : undefined;
+  const assessment = selected?.assessment;
   return (
     <section aria-label={t`Recruiting`} className="space-y-4 text-sm">
       <div className="flex items-center justify-between gap-2">
@@ -447,27 +493,132 @@ function RecruitingWorkspace({ threadId, botId, refreshSignal, onClose, onReveal
               </p>
             )}
           </TabsContent>
-          <TabsContent value="evidence" className="space-y-3">
+          <TabsContent value="evidence" className="space-y-4">
             {!assessments.length ? (
               <p className="text-muted-foreground">
                 <Trans>No saved assessments</Trans>
               </p>
             ) : (
-              assessments.map(({ assessment, isCurrent }) => (
-                <details
-                  key={`${assessment.candidateKey}:${assessment.version}`}
-                  className="border-b border-border pb-3"
-                >
-                  <summary className="cursor-pointer break-words">
-                    {assessment.candidateKey}{" "}
-                    <span className="text-xs text-muted-foreground">
-                      <Trans>Version {assessment.version}</Trans> ·{" "}
-                      {isCurrent ? <Trans>Current</Trans> : <Trans>Outdated</Trans>}
-                    </span>
-                  </summary>
-                  <div className="mt-3 space-y-4">
-                    <p className="break-all text-xs text-muted-foreground">
-                      {assessment.roleRevisionId}
+              <>
+                <fieldset className="flex gap-1" aria-label={t`Saved assessments`}>
+                  <Button
+                    size="sm"
+                    variant={candidateView === "cards" ? "secondary" : "ghost"}
+                    aria-pressed={candidateView === "cards"}
+                    onClick={() => setCandidateView("cards")}
+                  >
+                    <Trans>Cards</Trans>
+                  </Button>
+                  <Button
+                    size="sm"
+                    variant={candidateView === "table" ? "secondary" : "ghost"}
+                    aria-pressed={candidateView === "table"}
+                    onClick={() => setCandidateView("table")}
+                  >
+                    <Trans>Table</Trans>
+                  </Button>
+                </fieldset>
+                {candidateView === "cards" ? (
+                  <ul className="grid gap-2">
+                    {assessments.map(({ assessment: item, isCurrent }) => (
+                      <li key={`${item.roleId}:${item.candidateKey}`}>
+                        <Card
+                          size="sm"
+                          className={
+                            assessment?.candidateKey === item.candidateKey
+                              ? "ring-primary"
+                              : undefined
+                          }
+                        >
+                          <CardContent className="space-y-2">
+                            <Button
+                              variant="link"
+                              className="h-auto justify-start whitespace-normal break-all p-0 text-left"
+                              aria-pressed={assessment?.candidateKey === item.candidateKey}
+                              onClick={() =>
+                                setSelection({
+                                  roleId: item.roleId,
+                                  candidateKey: item.candidateKey,
+                                })
+                              }
+                            >
+                              {item.candidateKey}
+                            </Button>
+                            <p className="text-xs text-muted-foreground">
+                              <Trans>Version {item.version}</Trans> ·{" "}
+                              {isCurrent ? <Trans>Current</Trans> : <Trans>Outdated</Trans>}
+                            </p>
+                            <VerdictLabel verdict={item.judgments.hardGate} />
+                          </CardContent>
+                        </Card>
+                      </li>
+                    ))}
+                  </ul>
+                ) : (
+                  <div className="overflow-x-auto">
+                    <table className="w-full text-left text-sm">
+                      <caption className="sr-only">
+                        <Trans>Saved assessments</Trans>
+                      </caption>
+                      <thead>
+                        <tr className="border-b border-border">
+                          <th scope="col" className="py-2 pe-3 font-medium">
+                            <Trans>Candidate</Trans>
+                          </th>
+                          <th scope="col" className="py-2 pe-3 font-medium">
+                            <Trans>Version</Trans>
+                          </th>
+                          <th scope="col" className="py-2 pe-3 font-medium">
+                            <Trans>Status</Trans>
+                          </th>
+                          <th scope="col" className="py-2 font-medium">
+                            <Trans>Hard criteria</Trans>
+                          </th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {assessments.map(({ assessment: item, isCurrent }) => (
+                          <tr
+                            key={`${item.roleId}:${item.candidateKey}`}
+                            className="border-b border-border"
+                          >
+                            <th scope="row" className="py-2 pe-3 font-medium">
+                              <Button
+                                variant="link"
+                                className="h-auto justify-start whitespace-normal break-all p-0 text-left"
+                                aria-pressed={assessment?.candidateKey === item.candidateKey}
+                                onClick={() =>
+                                  setSelection({
+                                    roleId: item.roleId,
+                                    candidateKey: item.candidateKey,
+                                  })
+                                }
+                              >
+                                {item.candidateKey}
+                              </Button>
+                            </th>
+                            <td className="py-2 pe-3 tabular-nums">{item.version}</td>
+                            <td className="py-2 pe-3 whitespace-nowrap">
+                              {isCurrent ? <Trans>Current</Trans> : <Trans>Outdated</Trans>}
+                            </td>
+                            <td className="py-2">
+                              <VerdictLabel verdict={item.judgments.hardGate} />
+                            </td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                )}
+                {assessment && selected ? (
+                  <section
+                    key={`${assessment.roleId}:${assessment.candidateKey}:${assessment.version}`}
+                    aria-label={assessment.candidateKey}
+                    className="space-y-4 border-t border-border pt-4"
+                  >
+                    <h3 className="break-all font-medium">{assessment.candidateKey}</h3>
+                    <p className="text-xs text-muted-foreground">
+                      <Trans>Role</Trans> · <Trans>Version {selected.roleRevision.revision}</Trans>
                     </p>
                     <p className="flex items-center gap-2">
                       <span>
@@ -494,48 +645,54 @@ function RecruitingWorkspace({ threadId, botId, refreshSignal, onClose, onReveal
                         </div>
                       );
                     })}
-                    {assessment.judgments.criteria.map((judgment) => (
-                      <details key={judgment.criterionId} open className="space-y-2">
-                        <summary className="cursor-pointer">
-                          <span className="me-2">
-                            {isCurrent
-                              ? expressionText(
-                                  criteria.find(
-                                    (criterion) => criterion.id === judgment.criterionId,
-                                  )?.expression ?? {
-                                    kind: "atom",
-                                    id: judgment.criterionId,
-                                    statement: judgment.criterionId,
-                                  },
-                                )
-                              : judgment.criterionId}
-                          </span>
-                          <VerdictLabel verdict={judgment.verdict} />
-                        </summary>
-                        {assessment.facts
-                          .filter((fact) => judgment.factIds.includes(fact.id))
-                          .map((fact) => (
-                            <div key={fact.id} className="space-y-2">
-                              <p>{fact.statement}</p>
-                              <Sources
-                                sources={assessment.sourceRefs.filter((source) =>
-                                  fact.sourceRefIds.includes(source.id),
+                    {assessment.judgments.criteria.map((judgment) => {
+                      const criterion = selected.roleRevision.criteria.find(
+                        (item) => item.id === judgment.criterionId,
+                      );
+                      const facts = assessment.facts.filter((fact) =>
+                        judgment.factIds.includes(fact.id),
+                      );
+                      const sourceIds = new Set([
+                        ...facts.flatMap((fact) => fact.sourceRefIds),
+                        ...judgment.evidence,
+                      ]);
+                      return (
+                        <details key={judgment.criterionId} open className="space-y-2">
+                          <summary className="cursor-pointer">
+                            <span className="me-2">
+                              {criterion
+                                ? expressionText(criterion.expression)
+                                : judgment.criterionId}
+                            </span>
+                            <VerdictLabel verdict={judgment.verdict} />
+                            {criterion ? (
+                              <span className="ms-2 text-xs text-muted-foreground">
+                                {criterion.priority === "hard" ? (
+                                  <Trans>Hard criteria</Trans>
+                                ) : (
+                                  <Trans>Preferred criteria</Trans>
                                 )}
-                              />
-                            </div>
+                              </span>
+                            ) : null}
+                          </summary>
+                          {facts.map((fact) => (
+                            <p key={fact.id}>{fact.statement}</p>
                           ))}
-                        <Sources
-                          sources={assessment.sourceRefs.filter((source) =>
-                            judgment.evidence.includes(source.id),
-                          )}
-                        />
-                        {judgment.missing.map((question) => (
-                          <p key={question} className="text-muted-foreground">
-                            {question}
-                          </p>
-                        ))}
-                      </details>
-                    ))}
+                          <Sources
+                            sources={assessment.sourceRefs.filter((source) =>
+                              sourceIds.has(source.id),
+                            )}
+                            messageTargets={selected.sourceMessageTargets}
+                            onRevealMessage={onRevealMessage}
+                          />
+                          {judgment.missing.map((question) => (
+                            <p key={question} className="text-muted-foreground">
+                              {question}
+                            </p>
+                          ))}
+                        </details>
+                      );
+                    })}
                     <details>
                       <summary className="cursor-pointer text-muted-foreground">
                         <Trans>Saved facts</Trans>
@@ -548,6 +705,8 @@ function RecruitingWorkspace({ threadId, botId, refreshSignal, onClose, onReveal
                               sources={assessment.sourceRefs.filter((source) =>
                                 fact.sourceRefIds.includes(source.id),
                               )}
+                              messageTargets={selected.sourceMessageTargets}
+                              onRevealMessage={onRevealMessage}
                             />
                           </li>
                         ))}
@@ -558,12 +717,16 @@ function RecruitingWorkspace({ threadId, botId, refreshSignal, onClose, onReveal
                         <Trans>Sources</Trans>
                       </summary>
                       <div className="mt-2">
-                        <Sources sources={assessment.sourceRefs} />
+                        <Sources
+                          sources={assessment.sourceRefs}
+                          messageTargets={selected.sourceMessageTargets}
+                          onRevealMessage={onRevealMessage}
+                        />
                       </div>
                     </details>
-                  </div>
-                </details>
-              ))
+                  </section>
+                ) : null}
+              </>
             )}
           </TabsContent>
           <TabsContent value="missing" className="space-y-5">
