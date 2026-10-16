@@ -1,5 +1,6 @@
 import { createHash } from "node:crypto";
 import type { ArtifactStore } from "@rakazo/adapter-kit";
+import { readActorArtifact } from "@rakazo/adapters";
 import type { Actor } from "@rakazo/contracts";
 import { ATTACHMENT_MAX_COUNT } from "@rakazo/contracts";
 import {
@@ -175,15 +176,11 @@ export async function getSpaceArtifactById(
   actor: Actor,
   input: { artifactId: string },
 ) {
-  const row = await deps.prisma.artifact.findFirst({
-    where: {
-      id: input.artifactId,
-      spaceId: actor.spaceId,
-      userId: actor.userId,
-    },
-  });
-  if (!row) throw new IsolationError();
-  return readArtifact(deps.artifacts, actor, row, row.botId ?? row.groupId ?? row.id);
+  const { row, bytes } = await readActorArtifact(deps, actor, input);
+  return {
+    ...createdArtifact(row),
+    contentBase64: Buffer.from(bytes).toString("base64"),
+  };
 }
 
 async function readArtifact(

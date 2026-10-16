@@ -179,6 +179,7 @@ import {
   settleUncertainEffect,
   uncertainEffectResult,
 } from "./approval-effect.js";
+import { artifactReadFromTool } from "./artifact-read.js";
 import {
   autoReviewTimeoutMs,
   deploymentAutoReviewDefault,
@@ -434,6 +435,7 @@ const READ_ONLY_AGENT_TOOLS = new Set([
   "computer_observe",
   "list_files",
   "read_file",
+  "artifact_read",
   "read_memory",
   "read_history",
   "search_history",
@@ -6221,6 +6223,19 @@ export function createRunExecutor(deps: ExecutorDeps) {
               name: args.name ? String(args.name) : undefined,
             });
             return finish(cancelled);
+          }
+          if (name === "artifact_read") {
+            if (!deps.artifacts) return finish({ error: "Artifact storage is unavailable." });
+            return finish(
+              redactConnectorPayload(
+                await artifactReadFromTool(
+                  { prisma: deps.prisma, artifacts: deps.artifacts },
+                  { spaceId: run.spaceId, userId: run.userId },
+                  args,
+                ),
+                runSecrets,
+              ),
+            );
           }
           if (name === "skill_read") {
             return skillReadFromTool(
