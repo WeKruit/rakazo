@@ -1,4 +1,4 @@
-# WeKruit product handoff to Your dot
+# WeKruit product handoff
 
 Updated: 2026-10-16. Start here, then read the linked authoritative plans.
 
@@ -178,19 +178,20 @@ acceptance status. No broad completion claim from a narrow synthetic test.
 
 ## Execution and reporting
 
-The owner requires cloud execution: do not build, test, deploy or run background
-work on the connected Mac. Use Dot's cloud computer and a configured Codex cloud
-environment. The Mac is only the source of this initial handoff, not a worker.
-If cloud repository/deployment access is missing, identify the exact official
-connection or private setup step; do not silently switch to local execution.
-Keep runtime secrets in Modal Secret and the native encrypted SecretStore; GitHub
-contains code/plans only. Verify the actual execution location. Connected-Mac work
-requires the Mac online and the app open; it is not offline cloud execution.
+The owner explicitly returned execution to the local session on 2026-10-16.
+This supersedes the earlier cloud-only requirement. Reuse the existing checkout,
+preserve private work and uncommitted changes, and continue product development
+and isolated nonproduction checks without creating a replacement harness.
+Do not resume Dot orchestration or scheduled continuation. Local execution still
+requires the computer to remain online; it is not offline cloud execution.
 
-At takeover, actually clone/open the branch, read the plans, run one relevant
-offline check and report the commit/test result/location. Validate deployment
-access without printing credentials. Ask for private sign-in only if required.
-Do not report a cloud worker as started solely because a handoff was received.
+This takeover does not authorize automatic PR merging, deployment, production
+migrations or real outbound actions. Keep runtime secrets in their existing
+private configuration, Modal Secret and native encrypted SecretStore; GitHub
+contains code/plans only. Do not export cookies, OAuth credentials or keys.
+Verify the actual execution location and disposable database identity before
+tests. Report the current revision, actual checks and remaining acceptance gaps;
+the latest local PostgreSQL evidence is recorded in PLAN.md.
 
 Own the responsibility through M1–M5. Parallelize independent work with file
 ownership; centralize shared contracts/executor integration and deployment.
