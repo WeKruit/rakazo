@@ -413,6 +413,32 @@ describe("saved artifact context projection", () => {
     expect(projected.hasMore).toBe(true);
     expect(projected.text).not.toContain("Tool result truncated");
   });
+  it("requests a retry instead of returning a non-advancing empty continuation page", () => {
+    const page = {
+      text: "😀".repeat(128),
+      offset: 42,
+      totalLength: 170,
+      offsetUnit: "unicode_code_point",
+    };
+    const emptyPage = {
+      ...page,
+      text: "",
+      contextTruncated: true,
+      endOffset: 42,
+      nextOffset: 42,
+      hasMore: true,
+    };
+    expect(JSON.stringify(page).length).toBeGreaterThan(JSON.stringify(emptyPage).length);
+    const projected = JSON.parse(
+      shortenToolResultText(JSON.stringify(page), JSON.stringify(emptyPage).length, {
+        name: "artifact_read",
+        arguments: { artifactId: "saved-v1", offset: 42 },
+      }),
+    );
+    expect(projected.needsRetry).toBe(true);
+    expect(projected.retry).toEqual({ artifactId: "saved-v1", offset: 42, limit: 1 });
+    expect(projected).not.toHaveProperty("nextOffset");
+  });
   it("requests the same original offset when metadata cannot fit", () => {
     const page = {
       artifact: { id: "saved-v1", description: "large ".repeat(1000) },

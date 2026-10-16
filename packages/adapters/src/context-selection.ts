@@ -217,7 +217,8 @@ function shortenArtifactResult(
       Number(payload.endOffset) < Number(payload.totalLength) ? payload.endOffset : null;
     payload.hasMore = payload.nextOffset !== null;
     const encoded = JSON.stringify(payload);
-    if (encoded.length <= size) return encoded;
+    // A continuation page must consume at least one code point when source text remains.
+    if (encoded.length <= size && (keep > 0 || points.length === 0)) return encoded;
     if (keep === 0)
       return JSON.stringify({
         contextTruncated: true,
