@@ -39,6 +39,15 @@ describe("jsonSchemaParameters", () => {
     expect(tool.description).toContain("sourceMaterial");
     expect(tool.description).toContain("before role creation");
     expect(tool.description).toContain("not complete JD coverage");
+    for (const guidance of [
+      'expression:{kind:"atom",id:',
+      'anchor:{kind:"artifact",artifact:sourceMaterial.artifact,locator:',
+      "readAt:sourceMaterial.readAt",
+      "url:sourceMaterial.url",
+      "Assign stable local criterion, atom and source IDs",
+      "Correct deterministic schema rejections using the actual validator error and read receipt",
+    ])
+      expect(tool.description).toContain(guidance);
     expect(tool.description).toContain(
       "copy unchanged criteria, IDs, sourceRefs, preferences and definitionQuestions",
     );
@@ -115,6 +124,35 @@ describe("jsonSchemaParameters", () => {
         { type: "toolCall", id: "create-jd", name: tool.name, arguments: sourced },
       ),
     ).toEqual(sourced);
+    const { readState: _state, ...withoutState } = source;
+    const { readAt: _time, ...withoutTime } = source;
+    const { locator: _locator, ...withoutLocator } = source.anchor;
+    const invalid = [
+      {
+        ...sourced,
+        criteria: [
+          { ...sourced.criteria[0], expression: { kind: "atom", statement: source.quote } },
+        ],
+      },
+      ...[
+        withoutState,
+        withoutTime,
+        { ...source, anchor: withoutLocator, locator: "text" },
+        { ...source, anchor: { kind: "artifact", ...source.anchor.artifact, locator: "text" } },
+      ].map((badSource) => ({
+        ...sourced,
+        criteria: [{ ...sourced.criteria[0], sourceRefs: [badSource] }],
+      })),
+    ];
+    for (const input of invalid) {
+      expect(RecruitingRoleToolInputSchema.safeParse(input).success).toBe(false);
+      expect(() =>
+        validateToolArguments(
+          { name: tool.name, description: tool.description, parameters: wire },
+          { type: "toolCall", id: "invalid-create-jd", name: tool.name, arguments: input },
+        ),
+      ).toThrow();
+    }
     expect(incomplete.sourceRefs).toEqual([]);
   });
 
