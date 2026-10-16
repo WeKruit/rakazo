@@ -58,6 +58,36 @@ describe("agent memory context", () => {
       loadAgentMemoryContext(storeWith(read), "bot-1", context),
     ).resolves.toBeUndefined();
   });
+
+  it("reloads revoked documents without headings or consuming the context budget", async () => {
+    let botContent = "previously saved fact";
+    let userContent = " \n\t\u3000";
+    const revokedPath = `${"revoked/".repeat(50)}bot.md`;
+    const read = vi.fn(async ({ scope }: { scope: "bot" | "user" }) =>
+      snapshot([
+        scope === "bot"
+          ? document("bot", revokedPath, botContent, 2, "2026-08-15T12:00:00.000Z")
+          : document("user", "user.md", userContent, 1, "2026-08-14T12:00:00.000Z"),
+      ]),
+    );
+    const store = storeWith(read);
+
+    expect(await loadAgentMemoryContext(store, "bot-1", context)).toContain(botContent);
+
+    botContent = "";
+    const nextRun = { ...context, runId: "run-2" };
+    await expect(loadAgentMemoryContext(store, "bot-1", nextRun)).resolves.toBeUndefined();
+
+    userContent = "🙂".repeat(200);
+    const result = await loadAgentMemoryContext(store, "bot-1", nextRun, 300);
+    expect(result).toContain("## user: user.md (revision 1)\n🙂");
+    expect(result).not.toContain(revokedPath);
+    expect(result).not.toContain("previously saved fact");
+    expect(Buffer.byteLength(result ?? "", "utf8")).toBeLessThanOrEqual(300);
+    expect(result).not.toContain("�");
+    expect(result?.endsWith("</durable_memory>")).toBe(true);
+    expect(read).toHaveBeenCalledTimes(6);
+  });
 });
 
 function document(id: string, path: string, content: string, revision: number, updatedAt: string) {

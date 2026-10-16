@@ -19,7 +19,7 @@ export async function loadAgentMemoryContext(
   const documents: ScopedMemoryDocument[] = [
     ...botMemory.documents.map((document) => ({ ...document, scope: "bot" as const })),
     ...userMemory.documents.map((document) => ({ ...document, scope: "user" as const })),
-  ];
+  ].filter((document) => document.content.trim().length > 0);
   if (documents.length === 0) return undefined;
 
   documents.sort(
