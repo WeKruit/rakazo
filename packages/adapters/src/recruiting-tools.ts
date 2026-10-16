@@ -2,6 +2,7 @@ import { createHash } from "node:crypto";
 import type { AdapterContext, ArtifactStore, ConnectorCall } from "@rakazo/adapter-kit";
 import type { Actor, RecruitingResearchToolInput } from "@rakazo/contracts";
 import {
+  RecruitingResearchReadArtifactSchema,
   RecruitingResearchToolInputSchema,
   RecruitingRoleToolInputSchema,
 } from "@rakazo/contracts";
@@ -585,25 +586,26 @@ export async function completeRecruitingResearchCall(
       observation,
       providerResult: raw,
     };
+  const snapshot = {
+    version: 1,
+    taskId: task.id,
+    actionId: action.id,
+    operation: admitted.operation,
+    ...(admitted.kind === "read"
+      ? { effectId: receiptIdentity!.effectId, request: admitted.call.args }
+      : {
+          requestArtifact: {
+            artifactId: action.requestArtifactId,
+            sha256: action.requestArtifactHash,
+          },
+        }),
+    providerResult: raw,
+    observation,
+  };
   const file = await uploadResearchReceipt(
     deps,
     context,
-    {
-      version: 1,
-      taskId: task.id,
-      actionId: action.id,
-      operation: admitted.operation,
-      ...(admitted.kind === "read"
-        ? { effectId: receiptIdentity!.effectId, request: admitted.call.args }
-        : {
-            requestArtifact: {
-              artifactId: action.requestArtifactId,
-              sha256: action.requestArtifactHash,
-            },
-          }),
-      providerResult: raw,
-      observation,
-    },
+    admitted.kind === "read" ? RecruitingResearchReadArtifactSchema.parse(snapshot) : snapshot,
     `recruiting-${admitted.kind === "read" ? "observation" : "receipt"}-${action.id}`,
     admitted.kind === "read" ? receiptIdentity!.effectId : undefined,
   );

@@ -1,4 +1,5 @@
 import type { Actor } from "@rakazo/contracts";
+import { readRecruitingResearchReadArtifact } from "@rakazo/core";
 import type * as Database from "@rakazo/db";
 import type { PrismaClient } from "@rakazo/db";
 import {
@@ -475,6 +476,15 @@ describe("native research preparation", () => {
     expect(Buffer.from(f.uploads[0]!.bytes).equals(Buffer.from(f.uploads[1]!.bytes))).toBe(true);
     const snapshot = JSON.parse(Buffer.from(f.uploads[0]!.bytes).toString("utf8"));
     expect(snapshot.effectId).toBe(read.effect.id);
+    const output = vi.mocked(recordRecruitingResearchObservation).mock.calls[0]![2].outputArtifact;
+    const reference = { artifactId: "retained-read", sha256: output.hash };
+    expect(
+      await readRecruitingResearchReadArtifact(f.uploads[0]!.bytes, {
+        task: f.task,
+        action: { ...f.action, outputArtifacts: [reference] },
+        artifact: reference,
+      }),
+    ).toEqual(snapshot);
     expect(recordRecruitingResearchObservation).toHaveBeenCalledWith(
       f.deps.prisma,
       actor,

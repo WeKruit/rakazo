@@ -1,4 +1,5 @@
 // @vitest-environment jsdom
+import { createHash, webcrypto } from "node:crypto";
 import type {
   RecruitingAssessment,
   RecruitingAssessmentSnapshot,
@@ -60,6 +61,81 @@ vi.mock("../components/ArtifactFileCard", () => ({
 }));
 
 import { RecruitingPanel } from "./RecruitingPanel";
+
+function rawResultsFixture(actionId = "raw-action", name = "Synthetic raw candidate") {
+  const rows = [{ name, label: "Strong Match", _sources: { s1: "https://example.test/profile" } }];
+  const snapshot = {
+    version: 1,
+    taskId: "raw-task",
+    actionId,
+    operation: "rows",
+    effectId: `read-${actionId}`,
+    request: { task_id: "raw-provider-task", cursor: "  real-cursor==  " },
+    providerResult: { rows },
+    observation: {
+      deliveryState: "accepted",
+      providerTaskId: "raw-provider-task",
+      observedProviderState: null,
+      done: null,
+      providerApplicationConfirmed: false,
+      automaticRetry: false,
+      usage: null,
+      rows,
+      nextCursor: null,
+    },
+  };
+  const bytes = Buffer.from(JSON.stringify(snapshot));
+  const reference = {
+    artifactId: `artifact-${actionId}`,
+    sha256: createHash("sha256").update(bytes).digest("hex"),
+  };
+  const task = {
+    id: "raw-task",
+    roleId: "role-1",
+    providerTaskId: "raw-provider-task",
+    state: "completed",
+  };
+  const action = {
+    id: actionId,
+    taskId: task.id,
+    roleRevisionId: "old-revision",
+    kind: "continue",
+    deliveryState: "accepted",
+    observedProviderState: "completed",
+    runId: "original-run",
+    sourceMessageId: "original-message",
+    clientNonce: `nonce-${actionId}`,
+    requestArtifact: { artifactId: `request-${actionId}`, sha256: "b".repeat(64) },
+    contextArtifact: { artifactId: `context-${actionId}`, sha256: "c".repeat(64) },
+    receiptArtifact: null,
+    recallScope: null,
+    cursor: null,
+    effectId: "mutation-effect",
+    usage: null,
+    outputArtifacts: [reference],
+  };
+  const artifact = {
+    id: reference.artifactId,
+    botId: "original-bot",
+    groupId: "original-group",
+    runId: "capture-run",
+    name: "raw-results.json",
+    mimeType: "application/json",
+    size: bytes.length,
+    version: 1,
+    createdAt: "2026-01-01T00:00:00Z",
+    contentBase64: bytes.toString("base64"),
+  };
+  return { snapshot, reference, task, action, artifact };
+}
+
+function nativeOutput(f: ReturnType<typeof rawResultsFixture>, snapshot: unknown, id: string) {
+  const bytes = Buffer.from(JSON.stringify(snapshot));
+  return {
+    reference: { artifactId: id, sha256: createHash("sha256").update(bytes).digest("hex") },
+    artifact: { ...f.artifact, id, size: bytes.length, contentBase64: bytes.toString("base64") },
+  };
+}
 
 const source = {
   id: "source-1",
@@ -160,6 +236,7 @@ const assessment = {
 let cleanup: (() => Promise<void>) | undefined;
 beforeEach(() => {
   vi.stubGlobal("IS_REACT_ACT_ENVIRONMENT", true);
+  vi.stubGlobal("crypto", webcrypto);
   api.getWorkspace.mockResolvedValue({ role, revision });
   api.listAssessments.mockResolvedValue([assessment]);
   api.listQuestions.mockResolvedValue({ questions: [] });
@@ -265,6 +342,181 @@ async function mounted(threadId = "thread-1", botId?: string) {
   };
   return { container, render, click, expand, reveal };
 }
+
+it("shows unassessed raw provider rows from saved Artifacts without creating an assessment or search", async () => {
+  const f = rawResultsFixture();
+  api.listAssessments.mockResolvedValue([]);
+  api.listResearch.mockResolvedValue({ tasks: [f.task], actions: [f.action] });
+  api.getById.mockResolvedValue(f.artifact);
+  const view = await mounted();
+  expect(api.getById).not.toHaveBeenCalled();
+  await view.click("Evidence");
+  await view.expand("Raw search results");
+  await vi.waitFor(() => expect(view.container.textContent).toContain("Synthetic raw candidate"));
+  expect(view.container.textContent).toContain("Unassessed");
+  expect(view.container.textContent).toContain("provider_report");
+  expect(view.container.textContent).toContain("Strong Match");
+  expect(view.container.textContent).toContain("https://example.test/profile");
+  expect(view.container.textContent).toContain("Outdated");
+  expect(api.getById).toHaveBeenCalledExactlyOnceWith({ artifactId: f.reference.artifactId });
+  for (const method of [api.createRole, api.bindRole, api.reviseRole, api.update, api.search])
+    expect(method).not.toHaveBeenCalled();
+});
+
+it("keeps saved assessments visible when no domain research tasks exist", async () => {
+  api.listResearch.mockResolvedValue({ tasks: [], actions: [] });
+  const view = await mounted();
+  await view.click("Evidence");
+  expect(view.container.textContent).toContain("candidate-1");
+  expect(view.container.textContent).not.toContain("Raw search results");
+  expect(api.getById).not.toHaveBeenCalled();
+});
+
+it("does not reload immutable result bytes when refresh returns the same source references", async () => {
+  const f = rawResultsFixture();
+  api.listResearch.mockResolvedValue({ tasks: [f.task], actions: [f.action] });
+  api.getById.mockResolvedValue(f.artifact);
+  const view = await mounted();
+  await view.click("Evidence");
+  await view.expand("Raw search results");
+  await vi.waitFor(() => expect(view.container.textContent).toContain("Synthetic raw candidate"));
+  api.listResearch.mockResolvedValue({
+    tasks: [{ ...f.task }],
+    actions: [{ ...f.action, outputArtifacts: [{ ...f.reference }] }],
+  });
+  await view.click("Refresh");
+  expect(api.listResearch).toHaveBeenCalledTimes(2);
+  expect(view.container.textContent).toContain("Synthetic raw candidate");
+  expect(api.getById).toHaveBeenCalledTimes(1);
+});
+
+it("discards a pending result when refresh replaces that action's output references", async () => {
+  const f = rawResultsFixture();
+  const next = nativeOutput(
+    f,
+    rawResultsFixture(f.action.id, "Current raw snapshot").snapshot,
+    "current-output",
+  );
+  let finish!: (artifact: typeof f.artifact) => void;
+  api.listAssessments.mockResolvedValue([]);
+  api.listResearch.mockResolvedValue({ tasks: [f.task], actions: [f.action] });
+  api.getById.mockImplementation(({ artifactId }) =>
+    artifactId === f.artifact.id
+      ? new Promise((resolve) => {
+          finish = resolve;
+        })
+      : Promise.resolve(next.artifact),
+  );
+  const view = await mounted();
+  await view.click("Evidence");
+  await view.expand("Raw search results");
+  api.listResearch.mockResolvedValue({
+    tasks: [f.task],
+    actions: [{ ...f.action, outputArtifacts: [next.reference] }],
+  });
+  await view.click("Refresh");
+  await vi.waitFor(() => expect(view.container.textContent).toContain("Current raw snapshot"));
+  await act(async () => {
+    finish(f.artifact);
+  });
+  expect(view.container.textContent).not.toContain("Synthetic raw candidate");
+  expect(view.container.textContent).toContain("Current raw snapshot");
+});
+
+it("keeps different rows snapshots at the same cursor while excluding status receipts", async () => {
+  const f = rawResultsFixture();
+  const second = rawResultsFixture(f.action.id, "Changed raw candidate");
+  const changed = nativeOutput(f, { ...second.snapshot, effectId: "second-read" }, "changed-page");
+  const { rows: _, nextCursor: __, ...observation } = f.snapshot.observation;
+  const status = nativeOutput(
+    f,
+    {
+      ...f.snapshot,
+      operation: "status",
+      providerResult: { state: "completed", done: true },
+      observation: { ...observation, observedProviderState: "completed", done: true },
+    },
+    "status-output",
+  );
+  const outputs = [f, changed, status];
+  api.listAssessments.mockResolvedValue([]);
+  api.listResearch.mockResolvedValue({
+    tasks: [f.task],
+    actions: [{ ...f.action, outputArtifacts: outputs.map((output) => output.reference) }],
+  });
+  api.getById.mockImplementation(
+    async ({ artifactId }) => outputs.find((output) => output.artifact.id === artifactId)!.artifact,
+  );
+  const view = await mounted();
+  await view.click("Evidence");
+  await view.expand("Raw search results");
+  await vi.waitFor(() => expect(view.container.textContent).toContain("Changed raw candidate"));
+  expect(
+    view.container.querySelectorAll(
+      'section[aria-label="artifact-raw-action"], section[aria-label="changed-page"]',
+    ),
+  ).toHaveLength(2);
+  expect(view.container.querySelector('section[aria-label="status-output"]')).toBeNull();
+  expect(view.container.textContent).toContain("Synthetic raw candidate");
+  expect(view.container.textContent).toContain("  real-cursor==  ");
+  expect(view.container.textContent).toContain('"nextCursor": null');
+  expect(view.container.textContent).toContain("second-read");
+  expect(view.container.textContent).not.toContain('"effectId": "mutation-effect"');
+});
+
+it.each(["hash", "action", "artifact", "access"])(
+  "does not display raw rows after %s validation fails",
+  async (boundary) => {
+    const f = rawResultsFixture();
+    let artifact = f.artifact;
+    if (boundary === "hash")
+      artifact = { ...artifact, contentBase64: Buffer.from("{}").toString("base64") };
+    if (boundary === "action") {
+      const foreign = nativeOutput(
+        f,
+        { ...f.snapshot, actionId: "foreign-action" },
+        f.reference.artifactId,
+      );
+      f.reference.sha256 = foreign.reference.sha256;
+      artifact = foreign.artifact;
+    }
+    if (boundary === "artifact") artifact = { ...artifact, id: "foreign-artifact" };
+    api.listAssessments.mockResolvedValue([]);
+    api.listResearch.mockResolvedValue({ tasks: [f.task], actions: [f.action] });
+    if (boundary === "access") api.getById.mockRejectedValue(new Error("Private source details"));
+    else api.getById.mockResolvedValue(artifact);
+    const view = await mounted();
+    await view.click("Evidence");
+    await view.expand("Raw search results");
+    await vi.waitFor(() =>
+      expect(view.container.textContent).toContain("Could not load search results"),
+    );
+    expect(view.container.textContent).not.toContain("Synthetic raw candidate");
+    expect(view.container.textContent).not.toContain("Private source details");
+  },
+);
+
+it("discards a late original action Artifact after navigation to another thread", async () => {
+  const f = rawResultsFixture();
+  let finish!: (artifact: typeof f.artifact) => void;
+  api.listAssessments.mockResolvedValue([]);
+  api.listResearch.mockResolvedValue({ tasks: [f.task], actions: [f.action] });
+  api.getById.mockReturnValueOnce(
+    new Promise((resolve) => {
+      finish = resolve;
+    }),
+  );
+  const view = await mounted();
+  await view.click("Evidence");
+  await view.expand("Raw search results");
+  api.getWorkspace.mockResolvedValue(null);
+  await view.render("thread-2");
+  await act(async () => {
+    finish(f.artifact);
+  });
+  expect(view.container.textContent).not.toContain("Synthetic raw candidate");
+  expect(view.container.textContent).not.toContain("Raw search results");
+});
 
 const nativeQuestion = {
   effectId: "question-effect",

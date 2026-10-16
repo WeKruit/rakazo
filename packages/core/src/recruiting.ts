@@ -1,5 +1,6 @@
 import type {
   ReassessRecruitingAssessmentInput,
+  RecruitingArtifactRef,
   RecruitingAssessment,
   RecruitingAssessmentJudgments,
   RecruitingAtomJudgment,
@@ -9,6 +10,8 @@ import type {
   RecruitingEmploymentEvaluation,
   RecruitingEmploymentJudgment,
   RecruitingPreferenceFeedbackInput,
+  RecruitingResearchAction,
+  RecruitingResearchTask,
   RecruitingRoleRevision,
   SaveRecruitingAssessmentInput,
   Verdict,
@@ -18,10 +21,47 @@ import {
   RecruitingAssessmentJudgmentsSchema,
   RecruitingAssessmentSchema,
   RecruitingEmploymentDaySchema,
+  RecruitingResearchReadArtifactSchema,
   SaveRecruitingAssessmentInput as SaveAssessmentInputSchema,
 } from "@rakazo/contracts";
 
 export class RecruitingAssessmentValidationError extends Error {}
+
+/** Read an exact native report snapshot; the caller obtains its references through authorized API reads. */
+export async function readRecruitingResearchReadArtifact(
+  bytes: Uint8Array,
+  expected: {
+    task: Pick<RecruitingResearchTask, "id" | "providerTaskId">;
+    action: Pick<RecruitingResearchAction, "id" | "taskId" | "outputArtifacts">;
+    artifact: RecruitingArtifactRef;
+  },
+) {
+  const { task, action, artifact } = expected;
+  const digest = await globalThis.crypto.subtle.digest("SHA-256", new Uint8Array(bytes));
+  const hash = Array.from(new Uint8Array(digest), (byte) =>
+    byte.toString(16).padStart(2, "0"),
+  ).join("");
+  if (
+    hash !== artifact.sha256 ||
+    action.taskId !== task.id ||
+    !action.outputArtifacts.some(
+      (ref) => ref.artifactId === artifact.artifactId && ref.sha256 === hash,
+    )
+  )
+    throw new Error("Recruiting result snapshot does not match its source");
+  const snapshot = RecruitingResearchReadArtifactSchema.parse(
+    JSON.parse(new TextDecoder("utf-8", { fatal: true }).decode(bytes)),
+  );
+  if (
+    snapshot.taskId !== task.id ||
+    snapshot.actionId !== action.id ||
+    !task.providerTaskId ||
+    snapshot.request.task_id !== task.providerTaskId ||
+    snapshot.observation.providerTaskId !== task.providerTaskId
+  )
+    throw new Error("Recruiting result snapshot does not match its source");
+  return snapshot;
+}
 
 export function applyRecruitingPreferenceEdit(
   content: string,

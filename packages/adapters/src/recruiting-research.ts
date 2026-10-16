@@ -1,5 +1,9 @@
 import { createHash } from "node:crypto";
-import type { RecruitingHumanIntent, RecruitingSourceRef } from "@rakazo/contracts";
+import type {
+  RecruitingHumanIntent,
+  RecruitingResearchObservation,
+  RecruitingSourceRef,
+} from "@rakazo/contracts";
 import {
   RecruitingArtifactRefSchema,
   RecruitingHumanIntentSchema,
@@ -155,22 +159,7 @@ function hash(bytes: Uint8Array): string {
   return createHash("sha256").update(bytes).digest("hex");
 }
 
-export type RecruitingResearchObservation = {
-  deliveryState: "accepted" | "rejected" | "unknown";
-  providerTaskId: string | null;
-  observedProviderState: string | null;
-  done: boolean | null;
-  // ponytail: no inspected response proves application of a local revision;
-  // admit confirmation only when a provider contract identifies that exact revision.
-  providerApplicationConfirmed: false;
-  automaticRetry: false;
-  usage: { scope: "task"; unit: "credits"; amount: number }[] | null;
-  rows?: unknown[];
-  nextCursor?: string | null;
-  outputId?: string | null;
-  refusalCode?: string;
-  retryAfterSeconds?: number;
-};
+export type { RecruitingResearchObservation } from "@rakazo/contracts";
 
 const lifecycle = new Map([
   ["submitted", false],

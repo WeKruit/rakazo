@@ -5070,3 +5070,19 @@ msgstr "Candidate"
 #: src/pages/RecruitingPanel.tsx
 msgid "Saved assessments"
 msgstr "Saved assessments"
+
+#: src/pages/RecruitingPanel.tsx
+msgid "Raw search results"
+msgstr "Raw search results"
+
+#: src/pages/RecruitingPanel.tsx
+msgid "Unassessed"
+msgstr "Unassessed"
+
+#: src/pages/RecruitingPanel.tsx
+msgid "No saved result rows"
+msgstr "No saved result rows"
+
+#: src/pages/RecruitingPanel.tsx
+msgid "Could not load search results"
+msgstr "Could not load search results"

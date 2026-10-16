@@ -5042,3 +5042,19 @@ msgstr "उम्मीदवार"
 #: src/pages/RecruitingPanel.tsx
 msgid "Saved assessments"
 msgstr "सहेजे गए मूल्यांकन"
+
+#: src/pages/RecruitingPanel.tsx
+msgid "Raw search results"
+msgstr "खोज के मूल परिणाम"
+
+#: src/pages/RecruitingPanel.tsx
+msgid "Unassessed"
+msgstr "मूल्यांकन नहीं हुआ"
+
+#: src/pages/RecruitingPanel.tsx
+msgid "No saved result rows"
+msgstr "कोई सहेजी गई परिणाम पंक्तियाँ नहीं"
+
+#: src/pages/RecruitingPanel.tsx
+msgid "Could not load search results"
+msgstr "खोज परिणाम लोड नहीं किए जा सके"

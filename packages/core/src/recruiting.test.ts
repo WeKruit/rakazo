@@ -1,3 +1,4 @@
+import { createHash } from "node:crypto";
 import type {
   ReassessRecruitingAssessmentInput,
   RecruitingAssessment,
@@ -10,6 +11,117 @@ import type {
 } from "@rakazo/contracts";
 import { describe, expect, it } from "vitest";
 import * as core from "./index.js";
+
+describe("native recruiting result snapshot reads", () => {
+  const rows = [
+    {
+      name: { value: "Synthetic person", source_id: "s1" },
+      label: "Strong Match",
+      _sources: { s1: "https://example.test/profile" },
+      missing: null,
+    },
+  ];
+  const snapshot = {
+    version: 1,
+    taskId: "task",
+    actionId: "action",
+    operation: "rows",
+    effectId: "read-effect",
+    request: { task_id: "provider-task", cursor: "  opaque/游标==  ", limit: 10 },
+    providerResult: { rows, next_cursor: null },
+    observation: {
+      deliveryState: "accepted",
+      providerTaskId: "provider-task",
+      observedProviderState: null,
+      done: null,
+      providerApplicationConfirmed: false,
+      automaticRetry: false,
+      usage: null,
+      rows,
+      nextCursor: null,
+      outputId: "real-output",
+    },
+  };
+  function fixture(value: unknown = snapshot) {
+    const bytes = Buffer.from(JSON.stringify(value));
+    const artifact = {
+      artifactId: "rows-artifact",
+      sha256: createHash("sha256").update(bytes).digest("hex"),
+    };
+    return {
+      bytes,
+      expected: {
+        task: { id: "task", providerTaskId: "provider-task" },
+        action: { id: "action", taskId: "task", outputArtifacts: [artifact] },
+        artifact,
+      },
+    };
+  }
+  it("reads exact provider rows and preserves opaque page metadata without making judgments", async () => {
+    expect(core.readRecruitingResearchReadArtifact).toBeTypeOf("function");
+    const f = fixture();
+    const result = await core.readRecruitingResearchReadArtifact(f.bytes, f.expected);
+    expect(result).toEqual(snapshot);
+    expect(result.observation.rows).toEqual(rows);
+    expect(result).not.toHaveProperty("assessment");
+    expect(result).not.toHaveProperty("candidateKey");
+  });
+  it.each([
+    "bytes",
+    "task",
+    "action",
+    "action-task",
+    "provider",
+    "request",
+    "membership",
+    "hash-ref",
+    "utf8",
+  ])("rejects a snapshot with mismatched %s", async (boundary) => {
+    expect(core.readRecruitingResearchReadArtifact).toBeTypeOf("function");
+    const value = structuredClone(snapshot);
+    if (boundary === "task") value.taskId = "foreign-task";
+    if (boundary === "action") value.actionId = "foreign-action";
+    if (boundary === "provider") value.observation.providerTaskId = "foreign-provider";
+    if (boundary === "request") value.request.task_id = "foreign-provider";
+    const f = fixture(value);
+    if (boundary === "action-task") f.expected.action.taskId = "foreign-task";
+    if (boundary === "bytes") f.bytes = Buffer.from("{}");
+    if (boundary === "membership") f.expected.action.outputArtifacts = [];
+    if (boundary === "hash-ref")
+      f.expected.action.outputArtifacts = [{ ...f.expected.artifact, sha256: "a".repeat(64) }];
+    if (boundary === "utf8") {
+      f.bytes = Buffer.from([0xff]);
+      f.expected.artifact.sha256 = createHash("sha256").update(f.bytes).digest("hex");
+    }
+    await expect(core.readRecruitingResearchReadArtifact(f.bytes, f.expected)).rejects.toThrow();
+  });
+  it("keeps status receipts distinct and does not turn absent cursors into end-of-results", async () => {
+    expect(core.readRecruitingResearchReadArtifact).toBeTypeOf("function");
+    const { rows: _, nextCursor: __, outputId: ___, ...observation } = snapshot.observation;
+    const f = fixture({
+      ...snapshot,
+      operation: "status",
+      providerResult: { state: "completed", done: true },
+      observation: { ...observation, observedProviderState: "completed", done: true },
+    });
+    const result = await core.readRecruitingResearchReadArtifact(f.bytes, f.expected);
+    expect(result.operation).toBe("status");
+    expect(result.observation).not.toHaveProperty("rows");
+    expect(result.observation).not.toHaveProperty("nextCursor");
+  });
+  it.each(["missing-rows", "status-rows", "unknown-rows"])(
+    "rejects contradictory %s envelopes",
+    async (boundary) => {
+      const value: Record<string, unknown> = structuredClone(snapshot);
+      const observation = { ...snapshot.observation } as Record<string, unknown>;
+      if (boundary === "missing-rows") delete observation.rows;
+      if (boundary === "status-rows") value.operation = "status";
+      if (boundary === "unknown-rows") observation.deliveryState = "unknown";
+      const f = fixture({ ...value, observation });
+      await expect(core.readRecruitingResearchReadArtifact(f.bytes, f.expected)).rejects.toThrow();
+    },
+  );
+});
 
 const preference = {
   target: "preference",

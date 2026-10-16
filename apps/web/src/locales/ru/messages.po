@@ -5042,3 +5042,19 @@ msgstr "Кандидат"
 #: src/pages/RecruitingPanel.tsx
 msgid "Saved assessments"
 msgstr "Сохранённые оценки"
+
+#: src/pages/RecruitingPanel.tsx
+msgid "Raw search results"
+msgstr "Исходные результаты поиска"
+
+#: src/pages/RecruitingPanel.tsx
+msgid "Unassessed"
+msgstr "Не оценено"
+
+#: src/pages/RecruitingPanel.tsx
+msgid "No saved result rows"
+msgstr "Нет сохранённых строк результатов"
+
+#: src/pages/RecruitingPanel.tsx
+msgid "Could not load search results"
+msgstr "Не удалось загрузить результаты поиска"

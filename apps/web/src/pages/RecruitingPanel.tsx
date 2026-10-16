@@ -1,13 +1,18 @@
 import { Trans, useLingui } from "@lingui/react/macro";
 import type {
   Artifact,
+  ArtifactWithContent,
   MemoryDocument,
   MemoryRevision,
   RecruitingArtifactRef,
   RecruitingCriterionExpression,
+  RecruitingResearchAction,
+  RecruitingResearchReadArtifact,
+  RecruitingResearchTask,
   RecruitingSourceRef,
   Verdict,
 } from "@rakazo/contracts";
+import { readRecruitingResearchReadArtifact } from "@rakazo/core";
 import {
   Button,
   Card,
@@ -18,10 +23,11 @@ import {
   TabsTrigger,
 } from "@rakazo/ui-web";
 import { Check, CircleHelp, RefreshCw, X } from "lucide-react";
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { ArtifactFileCard } from "../components/ArtifactFileCard";
 import { AskCard } from "../components/AskCard";
 import { Shimmer } from "../components/ai/primitives";
+import { decodeArtifactBase64 } from "../lib/artifact-open";
 import { rpc } from "../lib/rpc";
 
 type Props = {
@@ -38,6 +44,195 @@ type Snapshot = {
   questions: Awaited<ReturnType<typeof rpc.recruiting.listQuestions>>["questions"];
   documents: MemoryDocument[];
 };
+
+function ResearchResults({
+  task,
+  action,
+  isCurrent,
+}: {
+  task: RecruitingResearchTask;
+  action: RecruitingResearchAction;
+  isCurrent: boolean;
+}) {
+  const [open, setOpen] = useState(false);
+  const sourceKey = JSON.stringify([
+    task.id,
+    task.roleId,
+    task.providerTaskId,
+    action.id,
+    action.taskId,
+    action.roleRevisionId,
+    action.outputArtifacts,
+  ]);
+  const source = useRef({ task, action });
+  source.current = { task, action };
+  const [state, setState] = useState<{
+    key: string;
+    results?: {
+      artifact: ArtifactWithContent;
+      reference: RecruitingArtifactRef;
+      snapshot: RecruitingResearchReadArtifact;
+    }[];
+    failed?: boolean;
+  } | null>(null);
+  useEffect(() => {
+    if (!open) return;
+    const { task, action } = source.current;
+    let cancelled = false;
+    setState(null);
+    // ponytail: load only an expanded action; batch Artifact reads if saved output history grows.
+    void Promise.all(
+      action.outputArtifacts.map(async (reference) => {
+        const artifact = await rpc.artifacts.getById({ artifactId: reference.artifactId });
+        if (artifact.id !== reference.artifactId) throw new Error("Result Artifact changed");
+        const snapshot = await readRecruitingResearchReadArtifact(
+          decodeArtifactBase64(artifact.contentBase64),
+          { task, action, artifact: reference },
+        );
+        return { artifact, reference, snapshot };
+      }),
+    )
+      .then((results) => {
+        if (!cancelled)
+          setState({
+            key: sourceKey,
+            results: results.filter(
+              ({ snapshot }) =>
+                snapshot.operation === "rows" && snapshot.observation.deliveryState === "accepted",
+            ),
+          });
+      })
+      .catch(() => {
+        if (!cancelled) setState({ key: sourceKey, failed: true });
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [open, sourceKey]);
+  return (
+    <details
+      onToggle={(event) => setOpen(event.currentTarget.open)}
+      className="space-y-3"
+      data-research-action={action.id}
+    >
+      <summary className="cursor-pointer">
+        <Trans>Raw search results</Trans> · {action.kind} ·{" "}
+        {isCurrent ? <Trans>Current</Trans> : <Trans>Outdated</Trans>}
+      </summary>
+      {open ? (
+        !state || state.key !== sourceKey ? (
+          <p role="status">
+            <Trans>Loading…</Trans>
+          </p>
+        ) : state.failed ? (
+          <p role="alert">
+            <Trans>Could not load search results</Trans>
+          </p>
+        ) : !state.results?.length ? (
+          <p className="text-muted-foreground">
+            <Trans>No saved result rows</Trans>
+          </p>
+        ) : (
+          state.results.map(({ artifact, reference, snapshot: result }) => {
+            const rows = result.observation.rows!;
+            const columns = [...new Set(rows.flatMap((row) => Object.keys(row)))];
+            const target = artifact.groupId
+              ? { groupId: artifact.groupId }
+              : artifact.botId
+                ? { botId: artifact.botId }
+                : null;
+            return (
+              <section
+                key={`${reference.artifactId}:${reference.sha256}`}
+                aria-label={reference.artifactId}
+                className="space-y-2 border-s border-border ps-3"
+              >
+                <p className="text-xs text-muted-foreground">
+                  <Trans>Unassessed</Trans> · provider_report
+                </p>
+                <details>
+                  <summary className="cursor-pointer text-xs text-muted-foreground">
+                    <Trans>Details</Trans>
+                  </summary>
+                  <pre className="whitespace-pre-wrap break-words text-xs">
+                    {JSON.stringify(
+                      {
+                        taskId: task.id,
+                        providerTaskId: task.providerTaskId,
+                        actionId: action.id,
+                        roleRevisionId: action.roleRevisionId,
+                        actionRunId: action.runId,
+                        artifact: reference,
+                        capturedByRunId: artifact.runId,
+                        capturedAt: artifact.createdAt,
+                        effectId: result.effectId,
+                        request: result.request,
+                        ...(result.observation.nextCursor === undefined
+                          ? {}
+                          : { nextCursor: result.observation.nextCursor }),
+                        ...(result.observation.outputId === undefined
+                          ? {}
+                          : { outputId: result.observation.outputId }),
+                      },
+                      null,
+                      2,
+                    )}
+                  </pre>
+                </details>
+                {rows.length ? (
+                  <div className="overflow-x-auto">
+                    <table className="w-full text-left text-xs">
+                      <caption className="sr-only">
+                        <Trans>Raw search results</Trans>
+                      </caption>
+                      <thead>
+                        <tr>
+                          {columns.map((column) => (
+                            <th key={column} scope="col" className="py-2 pe-3 font-medium">
+                              {column}
+                            </th>
+                          ))}
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {rows.map((row, index) => (
+                          <tr key={index} className="border-t border-border">
+                            {columns.map((column) => (
+                              <td key={column} className="py-2 pe-3 align-top">
+                                <pre className="whitespace-pre-wrap break-words">
+                                  {Object.hasOwn(row, column)
+                                    ? JSON.stringify(row[column], null, 2)
+                                    : ""}
+                                </pre>
+                              </td>
+                            ))}
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                ) : (
+                  <p className="text-muted-foreground">
+                    <Trans>No saved result rows</Trans>
+                  </p>
+                )}
+                {target ? (
+                  <ArtifactFileCard
+                    target={target}
+                    artifactId={artifact.id}
+                    name={artifact.name}
+                    mimeType={artifact.mimeType}
+                    size={artifact.size}
+                  />
+                ) : null}
+              </section>
+            );
+          })
+        )
+      ) : null}
+    </details>
+  );
+}
 
 function expressionText(expression: RecruitingCriterionExpression): string {
   if (expression.kind === "atom") return expression.statement;
@@ -494,6 +689,18 @@ function RecruitingWorkspace({ threadId, botId, refreshSignal, onClose, onReveal
             )}
           </TabsContent>
           <TabsContent value="evidence" className="space-y-4">
+            {snapshot.research.tasks.flatMap((task) =>
+              snapshot.research.actions
+                .filter((action) => action.taskId === task.id && action.outputArtifacts.length)
+                .map((action) => (
+                  <ResearchResults
+                    key={`${task.roleId}:${action.id}`}
+                    task={task}
+                    action={action}
+                    isCurrent={action.roleRevisionId === workspace?.revision.id}
+                  />
+                )),
+            )}
             {!assessments.length ? (
               <p className="text-muted-foreground">
                 <Trans>No saved assessments</Trans>

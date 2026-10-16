@@ -5042,3 +5042,19 @@ msgstr "候选人"
 #: src/pages/RecruitingPanel.tsx
 msgid "Saved assessments"
 msgstr "已保存的评估"
+
+#: src/pages/RecruitingPanel.tsx
+msgid "Raw search results"
+msgstr "原始搜索结果"
+
+#: src/pages/RecruitingPanel.tsx
+msgid "Unassessed"
+msgstr "未评估"
+
+#: src/pages/RecruitingPanel.tsx
+msgid "No saved result rows"
+msgstr "暂无已保存的结果行"
+
+#: src/pages/RecruitingPanel.tsx
+msgid "Could not load search results"
+msgstr "无法加载搜索结果"

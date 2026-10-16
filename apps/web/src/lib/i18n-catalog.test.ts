@@ -34,6 +34,10 @@ describe("lingui catalogs", () => {
       "Table",
       "Candidate",
       "Saved assessments",
+      "Raw search results",
+      "Unassessed",
+      "No saved result rows",
+      "Could not load search results",
     ])
       expect(
         entries.some(([, entry]) => entry.message === message),

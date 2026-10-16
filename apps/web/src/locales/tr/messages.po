@@ -5042,3 +5042,19 @@ msgstr "Aday"
 #: src/pages/RecruitingPanel.tsx
 msgid "Saved assessments"
 msgstr "Kaydedilmiş değerlendirmeler"
+
+#: src/pages/RecruitingPanel.tsx
+msgid "Raw search results"
+msgstr "Ham arama sonuçları"
+
+#: src/pages/RecruitingPanel.tsx
+msgid "Unassessed"
+msgstr "Değerlendirilmedi"
+
+#: src/pages/RecruitingPanel.tsx
+msgid "No saved result rows"
+msgstr "Kaydedilmiş sonuç satırı yok"
+
+#: src/pages/RecruitingPanel.tsx
+msgid "Could not load search results"
+msgstr "Arama sonuçları yüklenemedi"

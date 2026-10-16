@@ -269,6 +269,58 @@ export const RecruitingResearchActionSchema = z
   .readonly();
 export type RecruitingResearchAction = z.infer<typeof RecruitingResearchActionSchema>;
 
+export const RecruitingResearchObservationSchema = z.strictObject({
+  deliveryState: z.enum(["accepted", "rejected", "unknown"]),
+  providerTaskId: RecruitingId.nullable(),
+  observedProviderState: z.string().nullable(),
+  done: z.boolean().nullable(),
+  // No inspected receipt proves application of an exact local role revision.
+  providerApplicationConfirmed: z.literal(false),
+  automaticRetry: z.literal(false),
+  usage: z
+    .array(
+      z.strictObject({
+        scope: z.literal("task"),
+        unit: z.literal("credits"),
+        amount: z.number().nonnegative(),
+      }),
+    )
+    .nullable(),
+  rows: z.array(z.record(z.string(), z.unknown())).optional(),
+  nextCursor: z.string().nullable().optional(),
+  outputId: z.string().nullable().optional(),
+  refusalCode: z.string().optional(),
+  retryAfterSeconds: z.number().nonnegative().optional(),
+});
+export type RecruitingResearchObservation = z.infer<typeof RecruitingResearchObservationSchema>;
+
+/** Existing immutable native read Artifact bytes, including the original opaque request. */
+export const RecruitingResearchReadArtifactSchema = z
+  .strictObject({
+    version: z.literal(1),
+    taskId: RecruitingId,
+    actionId: RecruitingId,
+    operation: z.enum(["status", "rows"]),
+    effectId: RecruitingId,
+    request: z.record(z.string(), z.unknown()),
+    providerResult: z.unknown(),
+    observation: RecruitingResearchObservationSchema,
+  })
+  .superRefine((snapshot, ctx) => {
+    const { rows, nextCursor, outputId, deliveryState } = snapshot.observation;
+    if (
+      (snapshot.operation === "rows" && deliveryState === "accepted" && rows === undefined) ||
+      ((snapshot.operation !== "rows" || deliveryState !== "accepted") &&
+        (rows !== undefined || nextCursor !== undefined || outputId !== undefined))
+    )
+      ctx.addIssue({
+        code: "custom",
+        path: ["observation", "rows"],
+        message: "Only accepted rows receipts provide result rows",
+      });
+  });
+export type RecruitingResearchReadArtifact = z.infer<typeof RecruitingResearchReadArtifactSchema>;
+
 const SelectionRange = {
   start: z.number().int().nonnegative(),
   end: z.number().int().positive(),
