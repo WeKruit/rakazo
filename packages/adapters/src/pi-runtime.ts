@@ -276,6 +276,7 @@ export class PiAgentRuntime implements AgentRuntime {
           withoutSteeringMessages(request.history, initialSteering),
           request.prompt,
           request.sourceMessageId,
+          model,
         );
         const initialPrompt = initialSteering.length
           ? `${request.prompt}\n\nAdditional user context:\n${initialSteering
@@ -973,7 +974,8 @@ function stableToolNameHash(name: string): string {
 function toHistory(
   history: AgentRunRequest["history"],
   prompt: string,
-  sourceMessageId?: string | null,
+  sourceMessageId: string | null | undefined,
+  model: Model<Api>,
 ) {
   let duplicatePromptIndex = -1;
   for (let index = history.length - 1; index >= 0; index -= 1) {
@@ -993,15 +995,37 @@ function toHistory(
   return prior
     .filter((m) => m.role === "user" || m.role === "assistant")
     .map((m) => {
-      const text = m.role === "assistant" ? `Assistant: ${m.content}` : m.content;
-      const images = m.role === "assistant" ? [] : toPiImages(m.images);
-      return {
-        role: "user" as const,
-        content: images.length ? [{ type: "text" as const, text }, ...images] : text,
+      const metadata = {
         timestamp: Date.now(),
         rakazoHistory: true,
         rakazoMessageId: m.id,
         rakazoCreatedAt: m.createdAt,
+      };
+      if (m.role === "assistant")
+        return {
+          ...metadata,
+          role: "assistant" as const,
+          content: [{ type: "text" as const, text: m.content }],
+          api: model.api,
+          provider: model.provider,
+          model: model.id,
+          usage: {
+            input: 0,
+            output: 0,
+            cacheRead: 0,
+            cacheWrite: 0,
+            totalTokens: 0,
+            cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 },
+          },
+          stopReason: "stop" as const,
+        };
+      const images = toPiImages(m.images);
+      return {
+        ...metadata,
+        role: "user" as const,
+        content: images.length
+          ? [{ type: "text" as const, text: m.content }, ...images]
+          : m.content,
       };
     });
 }

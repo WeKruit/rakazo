@@ -125,8 +125,10 @@ import {
   findModelCredential,
   InvalidSpaceNameError,
   IsolationError,
+  isNativeHumanMessage,
   isTooManyDatabaseConnections,
   loadRunHistoryMessages,
+  loadRunHumanSources,
   parseComputerMode,
   RecruitingConflictError,
   readHistory,
@@ -3287,6 +3289,7 @@ export function createRunExecutor(deps: ExecutorDeps) {
     async continueRun(runId: string, workerId: string) {
       const run = await deps.prisma.run.findUnique({ where: { id: runId } });
       if (!run) return;
+      const previouslyClaimed = run.leaseFence > 0;
       // Only an answer queues a waiting ask; a redelivered wake must leave its card pending.
       if (isTerminal(run.status as RunStatus) || run.status === "waiting_input") return;
       let { resumeCheckpoint, heldForTakeover, resumeHeldLease, takeoverResume } =
@@ -3552,6 +3555,77 @@ export function createRunExecutor(deps: ExecutorDeps) {
         const discoveredPromise = deps.connector
           ? deps.connector.discoverTools(context)
           : Promise.resolve([]);
+        const nativeSources =
+          messagingChannelRun || !previouslyClaimed
+            ? null
+            : await loadRunHumanSources(
+                deps.prisma,
+                { spaceId: run.spaceId, userId: run.userId, email: "", isDeploymentOwner: false },
+                run,
+                { continuationOnly: true },
+              );
+        if (
+          nativeSources?.answeredAsks.length &&
+          (thread.spaceId !== run.spaceId ||
+            thread.userId !== run.userId ||
+            bot.spaceId !== run.spaceId ||
+            bot.userId !== run.userId ||
+            (run.trigger === "user" &&
+              (!nativeSources.originalSource ||
+                !isNativeHumanMessage(nativeSources.originalSource))))
+        )
+          throw new IsolationError();
+        const canonicalHistory: AgentRunRequest["history"] = [];
+        const canonicalMessages = new Map<
+          string,
+          {
+            id: string;
+            role: string;
+            botId: string | null;
+            runId: string | null;
+            blocks: MessageBlock[];
+          }
+        >();
+        const addCanonical = (
+          message: NonNullable<typeof nativeSources>["answeredAsks"][number]["answer"],
+          role: "user" | "assistant",
+        ) => {
+          if (canonicalMessages.has(message.id)) return;
+          const blocks = message.blocks as MessageBlock[];
+          canonicalMessages.set(message.id, { ...message, blocks });
+          canonicalHistory.push({
+            id: message.id,
+            createdAt: message.createdAt.toISOString(),
+            role,
+            requiredForRun: true,
+            content: messageToAgentHistoryText({
+              ...message,
+              blocks:
+                role === "assistant"
+                  ? blocks.map((block) =>
+                      block.kind === "ask"
+                        ? {
+                            kind: "text",
+                            text: [
+                              block.text,
+                              ...(block.actions?.map((action) => `${action.id}: ${action.label}`) ??
+                                []),
+                            ].join("\n"),
+                          }
+                        : block,
+                    )
+                  : blocks,
+            }),
+          });
+        };
+        if (nativeSources?.answeredAsks.length) {
+          if (nativeSources.originalSource && isNativeHumanMessage(nativeSources.originalSource))
+            addCanonical(nativeSources.originalSource, "user");
+          for (const turn of nativeSources.answeredAsks) {
+            addCanonical(turn.card, "assistant");
+            addCanonical(turn.answer, "user");
+          }
+        }
         const threadContext = threadContextForRun(
           run.trigger,
           {
@@ -3559,11 +3633,12 @@ export function createRunExecutor(deps: ExecutorDeps) {
               id: m.id,
               createdAt: m.createdAt?.toISOString(),
               seq: m.seq,
-              role: (m.role === "user" ? "user" : m.role === "system" ? "system" : "assistant") as
-                | "user"
-                | "assistant"
-                | "system",
-              content: messageToAgentHistoryText(m),
+              role: (m.role === "system"
+                ? "system"
+                : m.role === "bot" && m.botId === run.botId
+                  ? "assistant"
+                  : "user") as "user" | "assistant" | "system",
+              content: `${m.role === "bot" && m.botId !== run.botId ? `[bot ${m.botId}] ` : ""}${messageToAgentHistoryText(m)}`,
             })),
             summary: thread.historyCompactionSummary,
             historyCompactedUpToSeq: thread.historyCompactedUpToSeq,
@@ -3575,25 +3650,32 @@ export function createRunExecutor(deps: ExecutorDeps) {
           summary: threadContext.summary,
           historyCompactedUpToSeq: threadContext.historyCompactedUpToSeq,
         });
-        let history = compactedHistory.history.map(({ id, role, content, createdAt }) => ({
-          id,
-          createdAt,
-          role,
-          content,
-        }));
-        const historyMessages = messages.map((message) => ({
+        let history: AgentRunRequest["history"] = compactedHistory.history.map(
+          ({ id, role, content, createdAt }) => ({
+            id,
+            createdAt,
+            role,
+            content,
+          }),
+        );
+        const historyMessages = [
+          ...messages,
+          ...[...canonicalMessages.values()].filter(
+            (message) => !messages.some((recent) => recent.id === message.id),
+          ),
+        ].map((message) => ({
           id: message.id,
           role: message.role,
           botId: message.botId,
           runId: message.runId,
           blocks: message.blocks as MessageBlock[],
         }));
-        const currentTurnMessage = userTurnMessageForRun(
-          run.trigger,
-          runId,
-          historyMessages,
-          run.sourceMessageId,
-        );
+        const currentTurnMessage = nativeSources?.currentAnswer
+          ? {
+              ...nativeSources.currentAnswer,
+              blocks: nativeSources.currentAnswer.blocks as MessageBlock[],
+            }
+          : userTurnMessageForRun(run.trigger, runId, historyMessages, run.sourceMessageId);
         const turnBlocks = currentTurnMessage?.blocks;
         const allowSilentPeerMessage = botMessageAllowsSilence(
           peerMessage?.intent,
@@ -3767,6 +3849,11 @@ export function createRunExecutor(deps: ExecutorDeps) {
             }),
           );
         }
+        if (canonicalHistory.length)
+          history = [
+            ...history.filter((message) => !message.id || !canonicalMessages.has(message.id)),
+            ...canonicalHistory,
+          ];
         const runDeployment = deps.deploymentModelConfigured ? resolveDeploymentModel() : null;
         const runtimeFallback = runtimeFallbackModel(deps.runtime);
         const pinError = run.modelPinned
@@ -5820,6 +5907,7 @@ export function createRunExecutor(deps: ExecutorDeps) {
                   sourceMessageId: recruitingSourceMessageId,
                 },
                 args,
+                { artifacts: deps.artifacts, context },
               );
             } catch (error) {
               if (error instanceof IsolationError)
@@ -7096,7 +7184,15 @@ export function createRunExecutor(deps: ExecutorDeps) {
         const replyContext = await loadReplyContext(deps.prisma, thread.id, run.sourceMessageId);
         const prompt = [
           replyContext,
-          basePrompt,
+          nativeSources?.currentAnswer
+            ? [
+                blocksToAgentHistoryText(turnBlocks ?? []),
+                attachedFilesPrompt,
+                missingImagesInstruction,
+              ]
+                .filter(Boolean)
+                .join("\n\n")
+            : basePrompt,
           takeoverResume?.promptNote,
           approvalContinuation,
           // A hang-up turn is read, not heard: no spoken-reply constraint.
@@ -7107,6 +7203,14 @@ export function createRunExecutor(deps: ExecutorDeps) {
           .filter(Boolean)
           .join("\n\n");
         const historicalContext: AgentRunRequest["history"] = [];
+        // ponytail: complete task state preserves private choice values and invoked skills.
+        // It duplicates linear Q/A history; use structured private input state if that budget becomes limiting.
+        if (nativeSources?.currentAnswer)
+          historicalContext.push({
+            role: "user",
+            content: `Platform task state (data):\n${basePrompt}`,
+            requiredForRun: true,
+          });
         if (compactedHistory.usedLocalSummary && compactedHistory.summary) {
           historicalContext.push({
             role: "user",
@@ -7225,7 +7329,7 @@ export function createRunExecutor(deps: ExecutorDeps) {
               botId: bot.id,
               threadId: thread.id,
               runId,
-              sourceMessageId: run.sourceMessageId,
+              sourceMessageId: nativeSources?.currentAnswer?.id ?? run.sourceMessageId,
               onUsage: async (event) => {
                 await recordUsage(deps.prisma, event, {
                   spaceId: run.spaceId,
@@ -7285,7 +7389,7 @@ export function createRunExecutor(deps: ExecutorDeps) {
                         message.id !== currentTurnMessage?.id &&
                         message.role === "user" &&
                         message.botId === null &&
-                        message.runId === runId &&
+                        (canonicalMessages.has(message.id) || message.runId === runId) &&
                         message.blocks.length > 0 &&
                         message.blocks.every((block) =>
                           ["text", "file", "image"].includes(block.kind),

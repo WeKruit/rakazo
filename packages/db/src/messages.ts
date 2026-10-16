@@ -1,6 +1,132 @@
-import type { MessageBlock } from "@rakazo/contracts";
+import type { Actor, MessageBlock } from "@rakazo/contracts";
+import {
+  MessageBlock as MessageBlockSchema,
+  NativeAskAnswerPayloadSchema,
+} from "@rakazo/contracts";
+import { resolveAskChoice } from "@rakazo/core";
 import type { Prisma, PrismaClient } from "./client.js";
+import { IsolationError } from "./scope.js";
 import { withTransactionRetry } from "./transaction-retry.js";
+
+export const humanMessageInclude = { externalTranscriptFor: { select: { id: true } } } as const;
+export type SourceMessage = Prisma.MessageGetPayload<{ include: typeof humanMessageInclude }>;
+
+export function isNativeHumanMessage(message: SourceMessage): boolean {
+  return (
+    message.role === "user" &&
+    message.botId === null &&
+    message.externalTranscriptFor === null &&
+    Array.isArray(message.blocks) &&
+    message.blocks.length > 0 &&
+    message.blocks.every(
+      (block) =>
+        block &&
+        typeof block === "object" &&
+        "kind" in block &&
+        ["text", "file", "image"].includes(String(block.kind)),
+    )
+  );
+}
+
+/** Native card receipts, rather than text similarity or answer.runId, bind composer fanout answers. */
+export async function loadRunHumanSources(
+  tx: Prisma.TransactionClient,
+  actor: Actor,
+  run: { id: string; botId: string; threadId: string; sourceMessageId?: string | null },
+  options: { continuationOnly?: boolean } = {},
+) {
+  const receipts = await tx.event.findMany({
+    where: {
+      spaceId: actor.spaceId,
+      threadId: run.threadId,
+      runId: run.id,
+      botId: run.botId,
+      type: { in: ["thread.choice", "run.waiting_input", "computer.takeover.requested"] },
+    },
+    orderBy: { seq: "asc" },
+  });
+  const choices = receipts.filter((receipt) => receipt.type === "thread.choice");
+  const latestPause = receipts.findLast((receipt) => receipt.type !== "thread.choice");
+  const latestChoice = choices.at(-1);
+  if (options.continuationOnly && latestChoice && !latestPause) throw new IsolationError();
+  const currentChoice =
+    latestChoice && latestPause && latestChoice.seq > latestPause.seq ? latestChoice : undefined;
+  const proofs = choices.map((receipt) => ({
+    receipt,
+    parsed: NativeAskAnswerPayloadSchema.safeParse(receipt.payload),
+  }));
+  const ids = proofs.flatMap(({ parsed }) =>
+    parsed.success ? [parsed.data.messageId, parsed.data.answerMessageId] : [],
+  );
+  if (choices.length && run.sourceMessageId) ids.push(run.sourceMessageId);
+  const messages = ids.length
+    ? await tx.message.findMany({
+        where: { threadId: run.threadId, id: { in: [...new Set(ids)] } },
+        include: humanMessageInclude,
+      })
+    : [];
+  const byId = new Map(messages.map((message) => [message.id, message]));
+  const answeredAsks = proofs.flatMap(({ receipt, parsed }) => {
+    if (!parsed.success || parsed.data.answeredByUserId !== actor.userId) return [];
+    const proof = parsed.data;
+    const card = byId.get(proof.messageId);
+    const answer = byId.get(proof.answerMessageId);
+    const blocks = MessageBlockSchema.array().safeParse(card?.blocks);
+    const ask = blocks.success ? blocks.data[proof.askIndex] : undefined;
+    if (
+      card?.role !== "bot" ||
+      card.runId !== run.id ||
+      card.botId !== run.botId ||
+      ask?.kind !== "ask" ||
+      ask.status !== "answered" ||
+      ask.approvalEffectId ||
+      ask.input === "secret" ||
+      ask.credential ||
+      !answer ||
+      !isNativeHumanMessage(answer) ||
+      answer.seq <= card.seq
+    )
+      return [];
+    const answerBlocks = MessageBlockSchema.array().safeParse(answer.blocks);
+    const raw = answerBlocks.success
+      ? answerBlocks.data
+          .filter((block) => block.kind === "text")
+          .map((block) => block.text)
+          .join("\n")
+      : "";
+    if (!raw.trim() || !ask.answer) return [];
+    const choice = resolveAskChoice(raw, ask.actions);
+    const recorded = resolveAskChoice(ask.answer, ask.actions);
+    if (choice || recorded ? choice?.id !== recorded?.id : raw !== ask.answer) return [];
+    return [{ card, askIndex: proof.askIndex, answer, receiptSeq: receipt.seq }];
+  });
+  const current =
+    currentChoice && answeredAsks.find((turn) => turn.receiptSeq === currentChoice.seq);
+  if (
+    currentChoice &&
+    (!current || (options.continuationOnly && answeredAsks.length !== choices.length))
+  )
+    throw new IsolationError();
+  const steering = options.continuationOnly
+    ? []
+    : await tx.steeringMessage.findMany({
+        where: {
+          runId: run.id,
+          botId: run.botId,
+          userId: actor.userId,
+          claimedAt: { not: null },
+          message: { threadId: run.threadId },
+        },
+        include: { message: { include: humanMessageInclude } },
+      });
+  return {
+    steering,
+    answers: answeredAsks.map((turn) => turn.answer),
+    answeredAsks,
+    currentAnswer: current?.answer ?? null,
+    originalSource: run.sourceMessageId ? (byId.get(run.sourceMessageId) ?? null) : null,
+  };
+}
 
 /** Group turns use channel inputs and their own outputs, never private thread history. */
 export function loadRunHistoryMessages(

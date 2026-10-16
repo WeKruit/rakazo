@@ -3208,7 +3208,10 @@ export function createRouter(deps: RouterDeps) {
         listRecruitingQuestions(deps.prisma, context.actor, input),
       ),
       createRole: authed.recruiting.createRole.handler(({ context, input }) =>
-        createRecruitingRole(deps.prisma, context.actor, input),
+        createRecruitingRole(deps.prisma, context.actor, input, {
+          artifacts: deps.artifacts,
+          context: connectionContext(context.actor, randomUUID()),
+        }),
       ),
       bindRole: authed.recruiting.bindRole.handler(({ context, input }) =>
         bindRecruitingRole(deps.prisma, context.actor, input),
@@ -3217,7 +3220,10 @@ export function createRouter(deps: RouterDeps) {
         getRecruitingWorkspace(deps.prisma, context.actor, input),
       ),
       reviseRole: authed.recruiting.reviseRole.handler(({ context, input }) =>
-        reviseRecruitingRole(deps.prisma, context.actor, input),
+        reviseRecruitingRole(deps.prisma, context.actor, input, {
+          artifacts: deps.artifacts,
+          context: connectionContext(context.actor, randomUUID()),
+        }),
       ),
       listAssessments: authed.recruiting.listAssessments.handler(({ context, input }) =>
         listRecruitingAssessments(deps.prisma, context.actor, input),

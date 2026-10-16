@@ -461,6 +461,7 @@ export interface AgentRunRequest {
   botId: string;
   threadId: string;
   runId: string;
+  /** Native source represented by the current prompt; run authorization retains its immutable source separately. */
   sourceMessageId?: string | null;
   prompt: string;
   instructions: string;
@@ -469,6 +470,8 @@ export interface AgentRunRequest {
     createdAt?: string;
     role: "user" | "assistant" | "system";
     content: string;
+    /** Proven current-task context must survive history windows and context selection. */
+    requiredForRun?: true;
     /** Images attached to this message, hydrated only for recent user turns. */
     images?: AgentInputImage[];
   }>;

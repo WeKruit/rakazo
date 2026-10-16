@@ -1130,7 +1130,7 @@ describe("sendThreadMessage", () => {
     expect(tx.task.updateMany).toHaveBeenCalledWith({
       where: { runs: { some: { id: "run-waiting" } } },
       data: {
-        prompt: `The user answered the pending question. Continue the existing task from this answer.\nWhich city should I use?\nAnswer: ${rawAnswer}`,
+        prompt: `Which city should I use?\nAnswer: ${rawAnswer}`,
       },
     });
     expect(tx.message.create).toHaveBeenCalledWith({
@@ -1139,7 +1139,7 @@ describe("sendThreadMessage", () => {
     expect(tx.task.updateMany).toHaveBeenCalledWith(
       expect.objectContaining({
         data: {
-          prompt: `The user answered the pending question. Continue the existing task from this answer.\nWhich city should I use?\nAnswer: ${rawAnswer}`,
+          prompt: `Which city should I use?\nAnswer: ${rawAnswer}`,
         },
       }),
     );
@@ -1427,7 +1427,7 @@ describe("sendThreadMessage", () => {
     expect(tx.task.updateMany).toHaveBeenCalledWith(
       expect.objectContaining({
         data: {
-          prompt: `The user answered the pending question. Continue the existing task from this answer.\nWhich city should I use?\nAnswer: ${rawAnswer}`,
+          prompt: `Which city should I use?\nAnswer: ${rawAnswer}`,
         },
       }),
     );
@@ -1936,8 +1936,7 @@ describe("sendThreadMessage", () => {
     expect(tx.task.updateMany).toHaveBeenCalledWith({
       where: { runs: { some: { id: "run-routine" } } },
       data: {
-        prompt:
-          "The user answered the pending question. Continue the existing task from this answer.\nWhich city should I use?\nAnswer: Paris",
+        prompt: "Which city should I use?\nAnswer: Paris",
       },
     });
     expect(tx.run.updateMany).toHaveBeenCalledWith(
@@ -2059,8 +2058,7 @@ describe("sendThreadMessage", () => {
     expect(tx.task.updateMany).toHaveBeenCalledWith({
       where: { runs: { some: { id: "run-webhook" } } },
       data: {
-        prompt:
-          "The user answered the pending question. Continue the existing task from this answer.\nWhich city should I use?\nAnswer: Paris",
+        prompt: "Which city should I use?\nAnswer: Paris",
       },
     });
     expect(tx.run.updateMany).toHaveBeenCalledWith(

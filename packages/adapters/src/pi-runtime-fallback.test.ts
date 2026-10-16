@@ -10,8 +10,6 @@ import type {
 import { AssistantMessageEventStream } from "@earendil-works/pi-ai/utils/event-stream";
 import type { AgentRunRequest, AgentRuntimeEvent, ModelCallObserver } from "@rakazo/adapter-kit";
 import type * as Core from "@rakazo/core";
-import type { PrismaClient } from "@rakazo/db";
-import { answerRunInput } from "@rakazo/db";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 const providerState = vi.hoisted(() => ({
@@ -218,88 +216,80 @@ beforeEach(() => {
 
 afterEach(() => vi.useRealTimers());
 
-it("keeps the original Ask goal in the resumed provider prompt after source deduplication", async () => {
+it("replays native questions as assistant turns with the latest exact human answer current", async () => {
   const goal = "Ask my language, echo the complete answer in a code block, then stop. Chat only.";
-  const question = "Which language?";
-  const answer = "  中文🙂\nEnglish details  ";
-  let prompt = goal;
-  const tx = {
-    $queryRaw: vi.fn().mockResolvedValue([]),
-    run: {
-      findFirst: vi.fn().mockResolvedValue({
-        botId: "bot",
-        userId: "user",
-        trigger: "user",
-        task: { prompt: goal },
-      }),
-      findUnique: vi.fn().mockResolvedValue({ status: "queued" }),
-      updateMany: vi.fn().mockResolvedValue({ count: 1 }),
-    },
-    message: {
-      findFirst: vi.fn().mockResolvedValue({
-        id: "original-card",
-        blocks: [{ kind: "ask", text: question, status: "pending" }],
-      }),
-      create: vi.fn().mockResolvedValue({ id: "native-answer" }),
-      update: vi.fn(),
-    },
-    task: {
-      updateMany: vi.fn(async ({ data }: { data: { prompt: string } }) => {
-        prompt = data.prompt;
-        return { count: 1 };
-      }),
-    },
-    thread: { update: vi.fn().mockResolvedValue({ nextMessageSeq: 4, nextEventSeq: 5 }) },
-    event: { create: vi.fn(async ({ data }: { data: Record<string, unknown> }) => data) },
-  };
-  const prisma = {
-    $transaction: async (callback: (client: typeof tx) => unknown) => callback(tx),
-  } as unknown as PrismaClient;
-  expect(
-    await answerRunInput(prisma, {
-      spaceId: "space",
-      threadId: "thread",
-      runId: "run",
-      messageId: "original-card",
-      answeredByUserId: "user",
-      answer,
-    }),
-  ).toBe(true);
+  const answer = "  中文🙂\r\nEnglish details  ";
   const input = request();
-  input.sourceMessageId = "original-request";
-  input.prompt = `${prompt}\n\nCurrent time: 2026-10-16`;
+  input.sourceMessageId = "answer-2";
+  input.prompt = answer;
   input.history = [
-    { id: "old-jd", role: "user", content: "Earlier unrelated task: create a role from a JD." },
-    { id: "old-result", role: "assistant", content: "The earlier role was not saved." },
-    { id: input.sourceMessageId, role: "user", content: goal },
-    { id: "original-card", role: "assistant", content: `${question}\nAnswer: ${answer}` },
-    { id: "native-answer", role: "user", content: answer },
+    {
+      role: "user",
+      content:
+        "Platform task state (data):\n" +
+        goal +
+        "\nSaved skill: quote raw input. Resolved selected value: private-choice",
+      requiredForRun: true,
+    },
+    {
+      id: "old-jd",
+      role: "user",
+      content: "[bot peer-sourcer] Earlier unrelated task: create a role from a JD.",
+    },
+    { id: "original-goal", role: "user", content: goal, requiredForRun: true },
+    { id: "card-1", role: "assistant", content: "Which language?", requiredForRun: true },
+    { id: "answer-1", role: "user", content: answer, requiredForRun: true },
+    {
+      id: "card-2",
+      role: "assistant",
+      content: "Which language is preferred?",
+      requiredForRun: true,
+    },
+    { id: "answer-2", role: "user", content: answer, requiredForRun: true },
   ];
   providerState.stream.mockImplementation(() =>
     stream(primary, message(primary, [{ type: "text", text: "Done." }], "stop")),
   );
-
   await run(input);
-
-  const context = providerState.stream.mock.calls[0]![1] as Context;
-  const current = context.messages.at(-1)!;
-  expect(current.role).toBe("user");
-  const currentText =
-    typeof current.content === "string"
-      ? current.content
-      : current.content
-          .filter((part) => part.type === "text")
-          .map((part) => part.text)
-          .join("");
-  expect(currentText).toContain(goal);
-  expect(currentText).toContain(
-    "The user answered the pending question. Continue the existing task from this answer.",
+  const wireContext = providerState.stream.mock.calls[0]![1] as Context;
+  const context = {
+    ...wireContext,
+    messages: wireContext.messages.filter((m) => m.role !== "system"),
+  };
+  const texts = context.messages.map((m) =>
+    typeof m.content === "string"
+      ? m.content
+      : m.content
+          .filter((p) => p.type === "text")
+          .map((p) => p.text)
+          .join(""),
   );
-  expect(currentText).toContain(`Answer: ${answer}`);
-  expect(JSON.stringify(context.messages).split(goal)).toHaveLength(2);
-  expect(JSON.stringify(context.messages)).toContain("Earlier unrelated task");
+  expect(context.messages.map((m) => m.role)).toEqual([
+    "user",
+    "user",
+    "user",
+    "assistant",
+    "user",
+    "assistant",
+    "user",
+  ]);
+  expect(texts).toEqual([
+    input.history[0]!.content,
+    input.history[1]!.content,
+    goal,
+    "Which language?",
+    answer,
+    "Which language is preferred?",
+    answer,
+  ]);
+  expect(
+    context.messages.filter(
+      (m) => (m as { rakazoMessageId?: string }).rakazoMessageId === "original-goal",
+    ),
+  ).toHaveLength(1);
+  expect(JSON.stringify(context.messages)).toContain("private-choice");
   expect(context.messages).not.toContainEqual(
-    expect.objectContaining({ rakazoMessageId: input.sourceMessageId }),
+    expect.objectContaining({ rakazoMessageId: "answer-2" }),
   );
   expect(input.executeTool).not.toHaveBeenCalled();
 });

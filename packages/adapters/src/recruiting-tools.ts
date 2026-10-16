@@ -11,6 +11,7 @@ import type {
   Prisma,
   PrismaClient,
   RecruitingResearchArtifactInput,
+  RecruitingRoleMaterialContext,
   RecruitingRoleToolResult,
 } from "@rakazo/db";
 import {
@@ -41,11 +42,18 @@ export async function executeRecruitingRoleTool(
   prisma: PrismaClient,
   context: { actor: Actor; runId: string; sourceMessageId: string | null },
   untrusted: unknown,
+  material?: RecruitingRoleMaterialContext,
 ): Promise<RecruitingRoleToolResult> {
   const input = RecruitingRoleToolInputSchema.parse(untrusted);
   const { actor, runId, sourceMessageId } = context;
   if (input.operation !== "read")
-    return executeRecruitingRoleMutation(prisma, actor, { runId, sourceMessageId }, input);
+    return executeRecruitingRoleMutation(
+      prisma,
+      actor,
+      { runId, sourceMessageId },
+      input,
+      material,
+    );
   const run = scoped(
     actor,
     await prisma.run.findFirst({

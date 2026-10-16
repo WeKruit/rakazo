@@ -1,5 +1,5 @@
 import { createHash, randomUUID } from "node:crypto";
-import type { AdapterContext, MemoryCommitRequest } from "@rakazo/adapter-kit";
+import type { AdapterContext, ArtifactStore, MemoryCommitRequest } from "@rakazo/adapter-kit";
 import type {
   Actor,
   CreateRecruitingRoleInput as CreateRoleInput,
@@ -52,6 +52,8 @@ import type { PrismaClient } from "./client.js";
 import { Prisma } from "./client.js";
 import type { AnswerRunInput, PauseRunForInput } from "./events.js";
 import { appendEventInTransaction } from "./events.js";
+import type { SourceMessage } from "./messages.js";
+import { humanMessageInclude, isNativeHumanMessage, loadRunHumanSources } from "./messages.js";
 import { IsolationError, scoped } from "./scope.js";
 
 type Tx = Prisma.TransactionClient;
@@ -173,6 +175,7 @@ async function validateArtifact(tx: Tx, actor: Actor, ref: RecruitingArtifactRef
   });
   if (!thread) throw new IsolationError();
   await requireThread(tx, actor, thread.id);
+  return artifact;
 }
 
 async function validateSources(tx: Tx, actor: Actor, sources: readonly RecruitingSourceRef[]) {
@@ -216,15 +219,64 @@ async function validateSources(tx: Tx, actor: Actor, sources: readonly Recruitin
   return sourceMessageTargets;
 }
 
+function definitionSources(definition: Pick<RecruitingRoleRevision, "sourceRefs" | "criteria">) {
+  return [
+    ...definition.sourceRefs,
+    ...definition.criteria.flatMap((criterion) => criterion.sourceRefs),
+  ];
+}
+
 async function validateDefinition(
   tx: Tx,
   actor: Actor,
   definition: Pick<RecruitingRoleRevision, "sourceRefs" | "criteria">,
 ) {
-  return validateSources(tx, actor, [
-    ...definition.sourceRefs,
-    ...definition.criteria.flatMap((criterion) => criterion.sourceRefs),
-  ]);
+  return validateSources(tx, actor, definitionSources(definition));
+}
+
+/** Trusted native storage access, separate from the submitted role definition. */
+export type RecruitingRoleMaterialContext = { artifacts: ArtifactStore; context: AdapterContext };
+
+async function loadRoleMaterials(
+  prisma: PrismaClient,
+  actor: Actor,
+  definition: Pick<RecruitingRoleRevision, "sourceRefs" | "criteria">,
+  material?: RecruitingRoleMaterialContext,
+) {
+  const references = new Map<string, RecruitingArtifactRef>();
+  for (const source of definitionSources(definition)) {
+    if (
+      source.readState !== "read" ||
+      source.quote === undefined ||
+      source.anchor.kind !== "artifact"
+    )
+      continue;
+    const ref = source.anchor.artifact;
+    const previous = references.get(ref.artifactId);
+    if (previous && previous.sha256 !== ref.sha256) throw new IsolationError();
+    references.set(ref.artifactId, ref);
+  }
+  const bytes = new Map<string, Uint8Array>();
+  if (!references.size) return bytes;
+  if (
+    !material ||
+    material.context.spaceId !== actor.spaceId ||
+    material.context.userId !== actor.userId
+  )
+    throw new IsolationError();
+  material.context.signal.throwIfAborted();
+  // Authorize each exact native Artifact before store access; revalidate it in the mutation transaction.
+  const rows = await prisma.$transaction(async (tx) => {
+    const rows = [];
+    for (const ref of references.values()) rows.push(await validateArtifact(tx, actor, ref));
+    return rows;
+  });
+  for (const row of rows) {
+    material.context.signal.throwIfAborted();
+    bytes.set(row.id, await material.artifacts.get(row.storageKey, material.context));
+  }
+  material.context.signal.throwIfAborted();
+  return bytes;
 }
 
 function definitionData(input: CreateRoleInput | ReviseRoleInput) {
@@ -253,14 +305,21 @@ export async function createRecruitingRole(
   prisma: PrismaClient,
   actor: Actor,
   untrusted: CreateRoleInput,
+  material?: RecruitingRoleMaterialContext,
 ): Promise<RoleSnapshot> {
   const input = CreateRecruitingRoleInput.parse(untrusted);
-  return prisma.$transaction((tx) => createRoleInTransaction(tx, actor, input));
+  const artifacts = await loadRoleMaterials(prisma, actor, input, material);
+  return prisma.$transaction((tx) => createRoleInTransaction(tx, actor, input, artifacts));
 }
 
-async function createRoleInTransaction(tx: Tx, actor: Actor, input: CreateRoleInput) {
+async function createRoleInTransaction(
+  tx: Tx,
+  actor: Actor,
+  input: CreateRoleInput,
+  artifacts: ReadonlyMap<string, Uint8Array>,
+) {
   await requireThread(tx, actor, input.sourceThreadId);
-  await validateDefinition(tx, actor, input);
+  await validateReadSources(tx, actor, definitionSources(input), artifacts);
   const role = await tx.recruitingRole.create({
     data: {
       id: randomUUID(),
@@ -324,15 +383,22 @@ export async function reviseRecruitingRole(
   prisma: PrismaClient,
   actor: Actor,
   untrusted: ReviseRoleInput,
+  material?: RecruitingRoleMaterialContext,
 ): Promise<RoleSnapshot> {
   const input = ReviseRecruitingRoleInput.parse(untrusted);
-  return prisma.$transaction((tx) => reviseRoleInTransaction(tx, actor, input));
+  const artifacts = await loadRoleMaterials(prisma, actor, input, material);
+  return prisma.$transaction((tx) => reviseRoleInTransaction(tx, actor, input, artifacts));
 }
 
-async function reviseRoleInTransaction(tx: Tx, actor: Actor, input: ReviseRoleInput) {
+async function reviseRoleInTransaction(
+  tx: Tx,
+  actor: Actor,
+  input: ReviseRoleInput,
+  artifacts: ReadonlyMap<string, Uint8Array>,
+) {
   const role = await requireRole(tx, actor, input.roleId, true);
   if (role.revision !== input.expectedRevision) throw new RecruitingConflictError();
-  await validateDefinition(tx, actor, input);
+  await validateReadSources(tx, actor, definitionSources(input), artifacts);
   const revision = await tx.recruitingRoleRevision.create({
     data: { roleId: role.id, revision: role.revision + 1, ...definitionData(input) },
   });
@@ -412,86 +478,6 @@ async function runTargetsRecruitingThread(
   )
     return false;
   return true;
-}
-
-const humanMessageInclude = { externalTranscriptFor: { select: { id: true } } } as const;
-type SourceMessage = Prisma.MessageGetPayload<{ include: typeof humanMessageInclude }>;
-
-function isNativeHumanMessage(message: SourceMessage): boolean {
-  return (
-    message.role === "user" &&
-    message.botId === null &&
-    message.externalTranscriptFor === null &&
-    Array.isArray(message.blocks) &&
-    message.blocks.length > 0 &&
-    message.blocks.every(
-      (block) =>
-        block &&
-        typeof block === "object" &&
-        "kind" in block &&
-        ["text", "file", "image"].includes(String(block.kind)),
-    )
-  );
-}
-
-async function loadRunHumanSources(
-  tx: Tx,
-  actor: Actor,
-  run: { id: string; botId: string; threadId: string },
-) {
-  const steering = await tx.steeringMessage.findMany({
-    where: {
-      runId: run.id,
-      botId: run.botId,
-      userId: actor.userId,
-      claimedAt: { not: null },
-      message: { threadId: run.threadId },
-    },
-    include: { message: { include: humanMessageInclude } },
-  });
-  const receipts = await tx.event.findMany({
-    where: {
-      spaceId: actor.spaceId,
-      threadId: run.threadId,
-      runId: run.id,
-      botId: run.botId,
-      type: "thread.choice",
-    },
-  });
-  const proofs = receipts.flatMap((receipt) => {
-    const parsed = NativeAskAnswerPayloadSchema.safeParse(receipt.payload);
-    return parsed.success && parsed.data.answeredByUserId === actor.userId ? [parsed.data] : [];
-  });
-  const messages = proofs.length
-    ? await tx.message.findMany({
-        where: {
-          threadId: run.threadId,
-          id: { in: proofs.flatMap((proof) => [proof.messageId, proof.answerMessageId]) },
-        },
-        include: humanMessageInclude,
-      })
-    : [];
-  const byId = new Map(messages.map((message) => [message.id, message]));
-  const answers = proofs.flatMap((proof) => {
-    const card = byId.get(proof.messageId);
-    const answer = byId.get(proof.answerMessageId);
-    const blocks = MessageBlockSchema.array().safeParse(card?.blocks);
-    const ask = blocks.success ? blocks.data[proof.askIndex] : undefined;
-    return card?.role === "bot" &&
-      card.runId === run.id &&
-      card.botId === run.botId &&
-      ask?.kind === "ask" &&
-      ask.status === "answered" &&
-      !ask.approvalEffectId &&
-      ask.input !== "secret" &&
-      !ask.credential &&
-      answer &&
-      isNativeHumanMessage(answer) &&
-      answer.seq > card.seq
-      ? [answer]
-      : [];
-  });
-  return { steering, answers };
 }
 
 async function requireRunSource(
@@ -756,9 +742,14 @@ export async function executeRecruitingRoleMutation(
   actor: Actor,
   context: { runId: string; sourceMessageId: string | null },
   untrusted: RecruitingRoleMutationInput,
+  material?: RecruitingRoleMaterialContext,
 ): Promise<RecruitingRoleToolResult> {
   const input = RecruitingRoleToolInputSchema.parse(untrusted);
   if (input.operation === "read") throw new IsolationError();
+  const artifacts =
+    input.operation === "bind"
+      ? new Map<string, Uint8Array>()
+      : await loadRoleMaterials(prisma, actor, input, material);
   return prisma.$transaction(async (tx) => {
     const { run, thread } = await lockLiveRecruitingRun(tx, actor, context.runId);
     const { source: humanSource, message: source } = await requireCurrentHumanSource(
@@ -826,6 +817,7 @@ export async function executeRecruitingRoleMutation(
                 expectedRevision: 0,
                 sourceThreadId: run.threadId,
               }),
+              artifacts,
             )
           : await reviseRoleInTransaction(
               tx,
@@ -835,6 +827,7 @@ export async function executeRecruitingRoleMutation(
                 roleId: input.roleId,
                 expectedRevision: input.expectedRevision,
               }),
+              artifacts,
             );
     }
     return {
@@ -1461,14 +1454,18 @@ function assessmentJsonString(bytes: Uint8Array, path: readonly (string | number
   return value;
 }
 
-async function validateAssessmentSources(
+async function validateReadSources(
   tx: Tx,
   actor: Actor,
-  sources: readonly RecruitingAssessmentSourceRef[],
+  sources: readonly (RecruitingAssessmentSourceRef | RecruitingSourceRef)[],
   artifacts: ReadonlyMap<string, Uint8Array>,
 ) {
   await validateSources(tx, actor, sources);
-  for (const source of sources) {
+  const unique = new Map(sources.map((source) => [stableJsonValue(source), source]));
+  for (const source of unique.values()) {
+    // A role reference without a quote remains a locator; it does not attest to material text.
+    if (source.readState === "read" && source.quote === undefined) continue;
+    const selection = "selection" in source ? source.selection : undefined;
     if (source.anchor.kind === "message") {
       await tx.$queryRaw(
         Prisma.sql`SELECT "id" FROM "messages" WHERE "id" = ${source.anchor.messageId} FOR SHARE`,
@@ -1478,15 +1475,28 @@ async function validateAssessmentSources(
         include: humanMessageInclude,
       });
       if (!message) throw new IsolationError();
-      if (source.readState !== "read") continue;
+      if (source.readState !== "read" || source.quote === undefined) continue;
       if (!isNativeHumanMessage(message) || source.kind === "provider_report")
         throw new IsolationError();
-      const selection = source.selection;
       const blocks = MessageBlockSchema.array().parse(message.blocks);
-      const block = selection?.kind === "message_text" ? blocks[selection.blockIndex] : undefined;
-      if (!selection || block?.kind !== "text" || source.quote === undefined)
+      const locator = /^blocks\[(0|[1-9]\d*)\]\.text$/.exec(source.anchor.locator);
+      const blockIndex =
+        selection?.kind === "message_text"
+          ? selection.blockIndex
+          : locator
+            ? Number(locator[1])
+            : -1;
+      const block = blocks[blockIndex];
+      if (block?.kind !== "text" || (selection && selection.kind !== "message_text"))
         throw new IsolationError();
-      assessmentSelection(block.text, selection.start, selection.end, source.quote);
+      const start = selection?.start ?? block.text.indexOf(source.quote);
+      if (start < 0) throw new IsolationError();
+      assessmentSelection(
+        block.text,
+        start,
+        selection?.end ?? start + source.quote.length,
+        source.quote,
+      );
     } else {
       await tx.$queryRaw(
         Prisma.sql`SELECT "id" FROM "artifacts" WHERE "id" = ${source.anchor.artifact.artifactId} FOR SHARE`,
@@ -1495,7 +1505,7 @@ async function validateAssessmentSources(
         where: { id: source.anchor.artifact.artifactId },
       });
       if (artifact.hash !== source.anchor.artifact.sha256) throw new IsolationError();
-      if (source.readState !== "read") continue;
+      if (source.readState !== "read" || source.quote === undefined) continue;
       const providerArtifact = await tx.recruitingResearchAction.findFirst({
         where: {
           OR: [
@@ -1553,21 +1563,24 @@ async function validateAssessmentSources(
         createHash("sha256").update(bytes).digest("hex") !== artifact.hash
       )
         throw new IsolationError();
-      const selection = source.selection;
-      if (!selection || selection.kind === "message_text" || source.quote === undefined)
+      // ponytail: role references attest only the native text field; other fields need typed selections.
+      if (selection?.kind === "message_text" || (!selection && source.anchor.locator !== "text"))
         throw new IsolationError();
       const json = artifact.mimeType === "application/json" || artifact.mimeType.endsWith("+json");
-      if (
-        selection.kind === "artifact_json_string"
-          ? !json
-          : !artifact.mimeType.startsWith("text/") || json
-      )
+      const jsonPath =
+        selection?.kind === "artifact_json_string"
+          ? selection.path
+          : !selection && json
+            ? ["text"]
+            : undefined;
+      if (jsonPath ? !json : !artifact.mimeType.startsWith("text/") || json)
         throw new IsolationError();
-      const text =
-        selection.kind === "artifact_json_string"
-          ? assessmentJsonString(bytes, selection.path)
-          : new TextDecoder("utf-8", { fatal: true }).decode(bytes);
-      assessmentSelection(text, selection.start, selection.end, source.quote);
+      const text = jsonPath
+        ? assessmentJsonString(bytes, jsonPath)
+        : new TextDecoder("utf-8", { fatal: true }).decode(bytes);
+      const start = selection?.start ?? text.indexOf(source.quote);
+      if (start < 0) throw new IsolationError();
+      assessmentSelection(text, start, selection?.end ?? start + source.quote.length, source.quote);
     }
   }
 }
@@ -1695,7 +1708,7 @@ export async function saveRecruitingAssessment(
       const snapshot = await assessmentSnapshot(tx, actor, role, row);
       if (stableJsonValue(snapshot.assessment) !== stableJsonValue(assessment))
         throw new IsolationError();
-      await validateAssessmentSources(tx, actor, assessment.sourceRefs, artifacts);
+      await validateReadSources(tx, actor, assessment.sourceRefs, artifacts);
       return snapshot;
     }
     requireResearchLease(run, context);
@@ -1726,7 +1739,7 @@ export async function saveRecruitingAssessment(
             input,
           )
         : input;
-    await validateAssessmentSources(tx, actor, content.sourceRefs, artifacts);
+    await validateReadSources(tx, actor, content.sourceRefs, artifacts);
     const now = new Date();
     const judgments = evaluateRecruitingAssessment(definition, content, {
       precision: "day",

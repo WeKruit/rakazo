@@ -106,12 +106,23 @@ describe("native recruiting_role", () => {
     };
     const receipt = { status: "saved", changed: true, workspace, source: { id: "verified-human" } };
     vi.mocked(executeRecruitingRoleMutation).mockResolvedValue(receipt as never);
-    expect(await executeRecruitingRoleTool(prisma, context, input)).toEqual(receipt);
+    const material = {
+      artifacts: { get: vi.fn() },
+      context: {
+        spaceId: actor.spaceId,
+        userId: actor.userId,
+        operationId: "native-role",
+        traceId: "native-role",
+        signal: new AbortController().signal,
+      },
+    } as unknown as Parameters<typeof executeRecruitingRoleTool>[3];
+    expect(await executeRecruitingRoleTool(prisma, context, input, material)).toEqual(receipt);
     expect(executeRecruitingRoleMutation).toHaveBeenCalledWith(
       prisma,
       actor,
       { runId: "run", sourceMessageId: "human-message" },
       input,
+      material,
     );
   });
 
@@ -134,6 +145,7 @@ describe("native recruiting_role", () => {
       actor,
       { runId: "run", sourceMessageId: "human-message" },
       input,
+      undefined,
     );
     for (const expectedRevision of [0, 1]) {
       await expect(

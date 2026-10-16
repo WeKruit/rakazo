@@ -117,6 +117,9 @@ export function createRuntimeContextPolicy(
         (stored.role === "assistant" && content === `Assistant: ${stored.content}`),
     );
   }
+  function requiredForRun(message: Message): boolean {
+    return original(message)?.requiredForRun === true;
+  }
   function navigation(ids: string[]): Message | undefined {
     const stored = ids.map((id) => historyById.get(id));
     if (stored.some((item) => !item)) return;
@@ -158,6 +161,8 @@ export function createRuntimeContextPolicy(
       }
     }
     result.push(...ctx.messages.slice(latestMatchedIndex + 1));
+    if (ctx.messages.some((message) => requiredForRun(message) && !result.includes(message)))
+      return;
     return { messages: result, catalogIds, navigation: catalogMessage };
   }
   return {
@@ -207,6 +212,18 @@ export function createRuntimeContextPolicy(
         }
       }
       if (strategy === "current") {
+        if (ctx.messages.some(requiredForRun))
+          selectContext(ctx.messages, {
+            budget: {
+              contextWindow: request.model.contextWindow ?? model.contextWindow,
+              outputReserve: request.model.maxTokens ?? model.maxTokens,
+              systemPrompt: ctx.systemPrompt ?? "",
+              tools: ctx.tools ?? [],
+              imageTokens: options.imageTokens,
+            },
+            strategy,
+            protectedIndexes: ctx.messages.map((_, index) => index),
+          });
         pending = cacheRequest;
         pendingProjection = {
           scope: projectionScope(model),
@@ -232,7 +249,9 @@ export function createRuntimeContextPolicy(
         currentIndex = messages.findLastIndex((message) => message.role === "user");
       if (currentIndex < 0) currentIndex = 0;
       let protectedIndexes = messages.flatMap((message, index) =>
-        message.role === "system" || (index >= currentIndex && message.role === "user")
+        requiredForRun(message) ||
+        message.role === "system" ||
+        (index >= currentIndex && message.role === "user")
           ? [index]
           : [],
       );
@@ -279,7 +298,7 @@ export function createRuntimeContextPolicy(
         catalogIds = [];
         for (const message of old.slice(-64).reverse()) {
           const stored = original(message);
-          if (!stored?.id) continue;
+          if (!stored?.id || requiredForRun(message)) continue;
           const entry = `[message ${stored.id}${stored.createdAt ? ` at ${stored.createdAt}` : ""}; ${stored.role}] ${snapshot(stored.content)}\n`;
           if (Buffer.byteLength(entry + catalog, "utf8") > maximum) break;
           catalog = entry + catalog;
@@ -288,13 +307,14 @@ export function createRuntimeContextPolicy(
         const recentStart = Math.max(0, historical.length - 8);
         const earlierSystem = historical
           .slice(0, recentStart)
-          .filter((message) => message.role === "system");
+          .filter((message) => message.role === "system" || requiredForRun(message));
         messages = [
           ...earlierSystem,
           ...historical.slice(recentStart),
           ...messages.slice(currentIndex),
         ];
         protectedIndexes = messages.flatMap((message, index) =>
+          requiredForRun(message) ||
           message.role === "system" ||
           (index >= earlierSystem.length + Math.min(8, historical.length) &&
             message.role === "user")

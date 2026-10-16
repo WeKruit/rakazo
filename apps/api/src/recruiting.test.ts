@@ -46,7 +46,11 @@ describe("authenticated recruiting API", () => {
       vi.mocked(domain).mockResolvedValueOnce(output as never);
       const input = { roleId: "role", threadId: "thread" } as never;
       expect(await wrapper(prisma, actor, input)).toEqual(output);
-      expect(domain).toHaveBeenLastCalledWith(prisma, actor, input);
+      expect(domain).toHaveBeenLastCalledWith(
+        ...(domain === db.createRecruitingRole || domain === db.reviseRecruitingRole
+          ? [prisma, actor, input, undefined]
+          : [prisma, actor, input]),
+      );
     }
   });
   it("maps missing scoped resources to a generic not-found response", async () => {
@@ -98,6 +102,69 @@ describe("native recruiting RPC", () => {
     expect(await client.recruiting.listResearch({ roleId: "role" })).toEqual({
       tasks: [],
       actions: [],
+    });
+  });
+  it("supplies native artifact storage and authenticated context for both role writes", async () => {
+    const artifacts = { get: vi.fn() };
+    const client = createRouterClient(
+      createRouter({ prisma, artifacts } as unknown as RouterDeps),
+      { context: { actor } },
+    );
+    const definition = {
+      title: "Example role",
+      sourceRefs: [
+        {
+          id: "source",
+          kind: "original_material" as const,
+          anchor: { kind: "message" as const, messageId: "message", locator: "text:0" },
+          readState: "unread" as const,
+          readAt: null,
+        },
+      ],
+      criteria: [],
+      preferences: [],
+      definitionQuestions: [],
+    };
+    const { title: _, ...revisionDefinition } = definition;
+    const saved = {
+      role: {
+        id: "role",
+        spaceId: actor.spaceId,
+        userId: actor.userId,
+        sourceThreadId: "thread",
+        title: definition.title,
+        revision: 1,
+        currentRevisionId: "revision",
+      },
+      revision: {
+        ...revisionDefinition,
+        id: "revision",
+        roleId: "role",
+        revision: 1,
+        createdAt: "2026-10-16T00:00:00.000Z",
+      },
+    };
+    const input = { ...definition, sourceThreadId: "thread", expectedRevision: 0 as const };
+    vi.mocked(db.createRecruitingRole).mockResolvedValueOnce(saved);
+    await client.recruiting.createRole(input);
+    expect(db.createRecruitingRole).toHaveBeenLastCalledWith(prisma, actor, input, {
+      artifacts,
+      context: expect.objectContaining({
+        spaceId: actor.spaceId,
+        userId: actor.userId,
+        signal: expect.any(AbortSignal),
+      }),
+    });
+    const revision = { ...definition, roleId: "role", expectedRevision: 1 };
+    vi.mocked(db.reviseRecruitingRole).mockResolvedValueOnce(saved);
+    await client.recruiting.reviseRole(revision);
+    expect(db.reviseRecruitingRole).toHaveBeenLastCalledWith(prisma, actor, revision, {
+      artifacts,
+      context: expect.objectContaining({
+        spaceId: actor.spaceId,
+        userId: actor.userId,
+        signal: expect.any(AbortSignal),
+      }),
     });
   });
   it("returns the original assessment revision and authorized message targets through both RPC reads", async () => {

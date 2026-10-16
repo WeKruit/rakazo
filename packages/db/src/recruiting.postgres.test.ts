@@ -1,4 +1,5 @@
 import { createHash } from "node:crypto";
+import type { AdapterContext, ArtifactStore } from "@rakazo/adapter-kit";
 import type {
   Actor,
   CreateRecruitingRoleInput,
@@ -10,7 +11,7 @@ import type {
   RecruitingSourceRef,
   SaveRecruitingAssessmentInput,
 } from "@rakazo/contracts";
-import { afterAll, beforeAll, describe, expect, it } from "vitest";
+import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
 import type { Prisma, PrismaClient } from "./client.js";
 import { createDb, Prisma as PrismaSql } from "./client.js";
 import * as recruiting from "./index.js";
@@ -526,6 +527,221 @@ describePostgres("recruiting domain (PostgreSQL)", () => {
     );
     expect(created.revision.sourceRefs[0]?.anchor.kind).toBe("artifact");
     await recruiting.bindRecruitingRole(prisma, actor, { threadId, roleId: firstRoleId });
+  });
+  it("authenticates role quotes against native web material on both create and revise", async () => {
+    const f = await assessmentFixture();
+    const text = "Build geometry systems 👩🏽‍💻 with seven years of experience";
+    const bytes = Buffer.from(
+      JSON.stringify({ text, title: "Role", url: "https://example.test/jd" }),
+    );
+    const hash = createHash("sha256").update(bytes).digest("hex");
+    const readAt = "2026-10-16T00:00:00.000Z";
+    const material = await recruiting.recordRecruitingWebMaterial(prisma, actor, f.context, {
+      artifact: {
+        name: "role-material.json",
+        mimeType: "application/json",
+        size: bytes.length,
+        hash,
+        storageKey: `role-material-${f.run.id}`,
+        clientNonce: `role-material-${f.run.id}`,
+      },
+      reader: "web_fetch",
+      url: "https://example.test/jd",
+      readAt,
+    });
+    const ref: RecruitingSourceRef = {
+      id: "jd",
+      kind: "original_material",
+      anchor: {
+        kind: "artifact",
+        artifact: { artifactId: material.artifact.id, sha256: hash },
+        locator: "text",
+      },
+      readState: "read",
+      readAt,
+      url: "https://example.test/jd",
+      quote: "geometry systems 👩🏽‍💻",
+    };
+    const get = vi.fn(async () => bytes);
+    const reader = {
+      artifacts: { get } as unknown as ArtifactStore,
+      context: {
+        spaceId,
+        userId,
+        botId,
+        runId: f.run.id,
+        operationId: "role-source-check",
+        traceId: "role-source-check",
+        signal: new AbortController().signal,
+      } satisfies AdapterContext,
+    };
+    for (const operation of ["create", "revise"] as const) {
+      const { sourceThreadId: _, ...definition } = roleInput(ref);
+      const write = (sourceRef: RecruitingSourceRef, trusted = reader) => {
+        const input = {
+          ...definition,
+          sourceRefs: [sourceRef],
+          criteria: [{ ...definition.criteria[0]!, sourceRefs: [sourceRef] }],
+        };
+        return operation === "create"
+          ? recruiting.createRecruitingRole(
+              prisma,
+              actor,
+              { ...input, sourceThreadId: f.thread.id },
+              trusted,
+            )
+          : recruiting.reviseRecruitingRole(
+              prisma,
+              actor,
+              {
+                ...input,
+                roleId: f.role.role.id,
+                expectedRevision: 1,
+              },
+              trusted,
+            );
+      };
+      const count = await prisma.recruitingRoleRevision.count();
+      for (const invalid of [
+        { ...ref, quote: "Invented requirement" },
+        { ...ref, quote: "Role" },
+        { ...ref, anchor: { ...ref.anchor, locator: "title" } },
+        { ...ref, readAt: "2026-10-17T00:00:00.000Z" },
+      ]) {
+        await expect(write(invalid)).rejects.toThrow(IsolationError);
+        expect(await prisma.recruitingRoleRevision.count()).toBe(count);
+      }
+      await expect(
+        write(ref, {
+          ...reader,
+          artifacts: { get: async () => Buffer.from("wrong bytes") } as unknown as ArtifactStore,
+        }),
+      ).rejects.toThrow(IsolationError);
+      const saved = await write(ref);
+      expect(saved.revision.sourceRefs).toEqual([ref]);
+      expect(saved.revision.criteria[0]?.sourceRefs).toEqual([ref]);
+    }
+    await expect(recruiting.createRecruitingRole(prisma, actor, roleInput(ref))).rejects.toThrow(
+      IsolationError,
+    );
+    const { sourceThreadId: _, expectedRevision: _revision, ...definition } = roleInput(ref);
+    const nativeInput = {
+      ...definition,
+      operation: "create" as const,
+      intent: {
+        basis: "direct" as const,
+        quote: "Candidate personally implemented geometry transforms",
+      },
+    };
+    const nativeContext = { runId: f.run.id, sourceMessageId: f.message.id };
+    await expect(
+      recruiting.executeRecruitingRoleMutation(
+        prisma,
+        actor,
+        nativeContext,
+        { ...nativeInput, sourceRefs: [{ ...ref, quote: "Invented requirement" }] },
+        reader,
+      ),
+    ).rejects.toThrow(IsolationError);
+    const native = await recruiting.executeRecruitingRoleMutation(
+      prisma,
+      actor,
+      nativeContext,
+      nativeInput,
+      reader,
+    );
+    expect(native.status).toBe("saved");
+    expect(native.workspace?.revision.sourceRefs).toEqual(expect.arrayContaining([ref]));
+    // Role-level and criterion references share the same exact Artifact read.
+    expect(get).toHaveBeenCalledTimes(12);
+    const count = await prisma.recruitingRoleRevision.count();
+    try {
+      await expect(
+        recruiting.createRecruitingRole(prisma, actor, roleInput(ref), {
+          ...reader,
+          artifacts: {
+            get: async () => {
+              await prisma.artifact.update({
+                where: { id: material.artifact.id },
+                data: { hash: "b".repeat(64) },
+              });
+              return bytes;
+            },
+          } as unknown as ArtifactStore,
+        }),
+      ).rejects.toThrow(IsolationError);
+      expect(await prisma.recruitingRoleRevision.count()).toBe(count);
+    } finally {
+      await prisma.artifact.update({ where: { id: material.artifact.id }, data: { hash } });
+    }
+  });
+  it.each(["foreign", "hash", "bucket"])(
+    "rejects unauthorized role material before loading bytes: %s",
+    async (boundary) => {
+      const ref: RecruitingSourceRef = {
+        ...source(),
+        quote: "At least seven years",
+        anchor: {
+          kind: "artifact",
+          artifact: {
+            artifactId:
+              boundary === "foreign"
+                ? otherArtifactId
+                : boundary === "bucket"
+                  ? wrongChatArtifactId
+                  : artifactId,
+            sha256: boundary === "hash" ? "b".repeat(64) : hash,
+          },
+          locator: "text",
+        },
+      };
+      const get = vi.fn(async () => Buffer.from("At least seven years"));
+      await expect(
+        recruiting.createRecruitingRole(prisma, actor, roleInput(ref), {
+          artifacts: { get } as unknown as ArtifactStore,
+          context: {
+            spaceId,
+            userId,
+            operationId: "role-source-check",
+            traceId: "role-source-check",
+            signal: new AbortController().signal,
+          },
+        }),
+      ).rejects.toThrow(IsolationError);
+      expect(get).not.toHaveBeenCalled();
+    },
+  );
+  it("checks role message quotes at their actual native text block", async () => {
+    const f = await assessmentFixture("At least seven years");
+    const ref: RecruitingSourceRef = {
+      ...source(f.message.id),
+      anchor: { kind: "message", messageId: f.message.id, locator: "blocks[0].text" },
+      quote: "Invented requirement",
+    };
+    const input = (sourceRef: RecruitingSourceRef) => ({
+      ...roleInput(sourceRef),
+      sourceThreadId: f.thread.id,
+    });
+    await expect(recruiting.createRecruitingRole(prisma, actor, input(ref))).rejects.toThrow(
+      IsolationError,
+    );
+    await expect(
+      recruiting.createRecruitingRole(
+        prisma,
+        actor,
+        input({
+          ...ref,
+          quote: "At least seven years",
+          anchor: { ...ref.anchor, locator: "blocks[1].text" },
+        }),
+      ),
+    ).rejects.toThrow(IsolationError);
+    const saved = await recruiting.createRecruitingRole(
+      prisma,
+      actor,
+      input({ ...ref, quote: "At least seven years" }),
+    );
+    expect(saved.revision.sourceRefs[0]?.quote).toBe("At least seven years");
   });
   it("assessment CAS retains full snapshots and computes staleness from the actual role pointer", async () => {
     const role = (await recruiting.getRecruitingWorkspace(prisma, actor, { threadId }))!;
@@ -1090,7 +1306,7 @@ describePostgres("recruiting domain (PostgreSQL)", () => {
       expect(human.blocks).toEqual([
         { kind: "text", text: kind === "choice" ? "Personal code" : rawAnswer },
       ]);
-      const resumedPrompt = `${originalTask.prompt}\n\nThe user answered the pending question. Continue the existing task from this answer.\n${question.block.text}\nAnswer: ${kind === "choice" ? "Selected choice choice-2: Personal code" : rawAnswer}`;
+      const resumedPrompt = `${originalTask.prompt}\n\n${question.block.text}\nAnswer: ${kind === "choice" ? "Selected choice choice-2: Personal code" : rawAnswer}`;
       expect((await prisma.task.findUniqueOrThrow({ where: { id: f.run.taskId } })).prompt).toBe(
         resumedPrompt,
       );
@@ -1120,6 +1336,18 @@ describePostgres("recruiting domain (PostgreSQL)", () => {
         expect(
           (await restored.prisma.task.findUniqueOrThrow({ where: { id: f.run.taskId } })).prompt,
         ).toBe(resumedPrompt);
+        const canonical = await recruiting.loadRunHumanSources(
+          restored.prisma,
+          actor,
+          await restored.prisma.run.findUniqueOrThrow({ where: { id: f.run.id } }),
+          { continuationOnly: true },
+        );
+        expect(canonical.currentAnswer?.id).toBe(human.id);
+        expect(canonical.currentAnswer?.blocks).toEqual(human.blocks);
+        expect(canonical.answeredAsks.map((turn) => [turn.card.id, turn.answer.id])).toEqual([
+          [question.messageId, human.id],
+        ]);
+        expect(canonical.originalSource?.id).toBe(originalRun.sourceMessageId);
       } finally {
         await restored.prisma.$disconnect();
         await restored.pool.end();

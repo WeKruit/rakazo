@@ -132,7 +132,13 @@ function fixture(runId = "run-1", secrets: string[] = []) {
     leaseFence: 0,
     sourceMessageId: null as string | null,
   };
-  const thread = { id: run.threadId, groupId: null, activeRecruitingRoleId: null as string | null };
+  const thread = {
+    id: run.threadId,
+    spaceId: run.spaceId,
+    userId: run.userId,
+    groupId: null,
+    activeRecruitingRoleId: null as string | null,
+  };
   const memoryCommit = vi.fn(async () => ({ path: "MEMORY.md", revision: 1 }));
   const memoryRead = vi.fn(
     async (_request: { scope: "bot" | "user" }): Promise<MemorySnapshot> => ({ documents: [] }),
@@ -202,6 +208,9 @@ function fixture(runId = "run-1", secrets: string[] = []) {
     ),
   };
   const prisma = {
+    event: {
+      findMany: vi.fn(async () => [] as Array<{ seq: number; type: string; payload: unknown }>),
+    },
     run: {
       findUnique: vi.fn(async () => run),
       findUniqueOrThrow: vi.fn(async () => run),
@@ -213,6 +222,8 @@ function fixture(runId = "run-1", secrets: string[] = []) {
     bot: {
       findUniqueOrThrow: vi.fn(async () => ({
         id: run.botId,
+        spaceId: run.spaceId,
+        userId: run.userId,
         name: "Assistant",
         title: "Assistant",
         description: "Test assistant",
@@ -1313,6 +1324,14 @@ describe("native recruiting role effect delivery", () => {
       f.prisma,
       expect.objectContaining({ sourceMessageId: "human-message" }),
       args,
+      {
+        artifacts: f.artifacts,
+        context: expect.objectContaining({
+          spaceId: f.runData.spaceId,
+          userId: f.runData.userId,
+          runId: f.runData.id,
+        }),
+      },
     );
     expect(loadRecruitingRunContext).toHaveBeenCalledWith(
       expect.anything(),
@@ -2869,6 +2888,7 @@ describe("native recruiting assessment effect delivery", () => {
       role: "user",
       runId: null,
       replyToMessageId: null,
+      externalTranscriptFor: null,
       createdAt: new Date("2026-10-16T00:00:00.000Z"),
       blocks: [{ kind: "text", text: "Exact source material" }],
     };
@@ -2897,6 +2917,7 @@ describe("native recruiting assessment effect delivery", () => {
       botId: null,
       runId,
       replyToMessageId: null,
+      externalTranscriptFor: null,
       createdAt: new Date("2026-10-16T00:00:00.000Z"),
       blocks: [{ kind: "text", text: "Assess the supplied candidate" }],
     };
@@ -2917,53 +2938,107 @@ describe("native recruiting assessment effect delivery", () => {
       ],
     };
     const older = { ...answer, id: "older-run-user", runId: "older-run" };
-    const botAuthored = { ...answer, id: "bot-authored-user", botId: "peer-bot" };
+    const botAuthored = {
+      ...answer,
+      id: "bot-authored-user",
+      role: "bot",
+      botId: "peer-bot",
+      blocks: [{ kind: "text", text: "Old JD from Sourcer" }],
+    };
     const peer = {
       ...answer,
       id: "peer-message",
       blocks: [{ kind: "bot_message_received", text: "Peer-authored answer" }],
     };
-    for (let attempt = 0; attempt < 2; attempt++) {
-      const f = fixture(runId);
-      f.runData.sourceMessageId = original.id;
-      f.prisma.task.findUniqueOrThrow.mockResolvedValue({
-        id: "task-1",
-        prompt: `${original.blocks[0]!.text}\n\nThe user answered the pending question. Continue the existing task from this answer.\nWhich implementation?\nAnswer: ${answerText}`,
-      });
-      f.prisma.message.findMany.mockResolvedValue([
-        answer,
-        card,
-        original,
-        older,
-        botAuthored,
-        peer,
-      ]);
-      f.runtimeRun.mockImplementation(async function* (request) {
-        expect(request.sourceMessageId).toBe(original.id);
-        expect(request.prompt).toContain(answerText);
-        expect(request.prompt).toContain(original.blocks[0]!.text);
-        const metadata = request
-          .instructions!.split("\n")
-          .filter((line) => line.startsWith("Native message source reference"))
-          .map((line) => JSON.parse(line.slice(line.indexOf("{"))));
-        expect(metadata.map((source) => source.messageId)).toEqual([original.id, answer.id]);
-        expect(metadata[1]).toEqual({
-          messageId: answer.id,
-          readAt: expect.any(String),
-          textBlocks: [
-            {
-              blockIndex: 0,
-              length: 50,
-              selection: { kind: "message_text", blockIndex: 0, start: 0, end: 50 },
+    for (const laterPause of [undefined, "run.waiting_input", "computer.takeover.requested"]) {
+      for (let attempt = 0; attempt < 2; attempt++) {
+        const f = fixture(runId);
+        f.runData.sourceMessageId = original.id;
+        f.runData.leaseFence = 1;
+        f.prisma.event.findMany.mockResolvedValue([
+          { seq: 1, type: "run.waiting_input", payload: {} },
+          {
+            seq: 2,
+            type: "thread.choice",
+            payload: {
+              messageId: card.id,
+              askIndex: 0,
+              answerMessageId: answer.id,
+              answeredByUserId: "user-1",
             },
-          ],
+          },
+        ]);
+        if (laterPause)
+          f.prisma.event.findMany.mockResolvedValue([
+            ...(await f.prisma.event.findMany()),
+            { seq: 3, type: laterPause, payload: {} },
+          ]);
+        f.prisma.task.findUniqueOrThrow.mockResolvedValue({
+          id: "task-1",
+          prompt: `${original.blocks[0]!.text}\n\nPrior choice\nAnswer: Selected choice choice-1: private-selected-value\n\nWhich implementation?\nAnswer: ${answerText}`,
         });
-        expect(request.history.find((message) => message.id === answer.id)?.content).toBe(
-          answerText,
-        );
-        yield { type: "done" as const, text: "Done" };
-      });
-      await f.run();
+        const sourceRows = [answer, card, original];
+        f.prisma.message.findMany.mockImplementation(async (query) => {
+          const ids = (query as { where?: { id?: { in: string[] } } }).where?.id?.in;
+          return ids
+            ? sourceRows.filter((message) => ids.includes(message.id))
+            : [older, botAuthored, peer];
+        });
+        f.runtimeRun.mockImplementation(async function* (request) {
+          expect(request.sourceMessageId).toBe(laterPause ? original.id : answer.id);
+          expect(request.prompt.startsWith(answerText)).toBe(!laterPause);
+          expect(request.prompt).toContain(answerText);
+          expect(request.prompt.includes(original.blocks[0]!.text)).toBe(Boolean(laterPause));
+          expect(request.history.find((message) => message.id === original.id)).toMatchObject({
+            requiredForRun: true,
+            role: "user",
+            content: original.blocks[0]!.text,
+          });
+          expect(request.history.find((message) => message.id === card.id)).toMatchObject({
+            requiredForRun: true,
+            role: "assistant",
+            content: "Which implementation?",
+          });
+          if (!laterPause) {
+            expect(
+              request.history.find((message) =>
+                message.content.startsWith("Platform task state (data):"),
+              ),
+            ).toMatchObject({
+              requiredForRun: true,
+              content: expect.stringContaining("private-selected-value"),
+            });
+            expect(request.prompt).not.toContain("private-selected-value");
+            expect(request.instructions).not.toContain("private-selected-value");
+          }
+          const metadata = request
+            .instructions!.split("\n")
+            .filter((line) => line.startsWith("Native message source reference"))
+            .map((line) => JSON.parse(line.slice(line.indexOf("{"))));
+          expect(metadata.map((source) => source.messageId)).toEqual(
+            laterPause ? [original.id, answer.id] : [answer.id, original.id],
+          );
+          expect(metadata[laterPause ? 1 : 0]).toEqual({
+            messageId: answer.id,
+            readAt: expect.any(String),
+            textBlocks: [
+              {
+                blockIndex: 0,
+                length: 50,
+                selection: { kind: "message_text", blockIndex: 0, start: 0, end: 50 },
+              },
+            ],
+          });
+          expect(
+            request.history.find((message) => message.id === "bot-authored-user"),
+          ).toMatchObject({ role: "user", content: "[bot peer-bot] Old JD from Sourcer" });
+          expect(request.history.find((message) => message.id === answer.id)?.content).toBe(
+            answerText,
+          );
+          yield { type: "done" as const, text: "Done" };
+        });
+        await f.run();
+      }
     }
   });
 

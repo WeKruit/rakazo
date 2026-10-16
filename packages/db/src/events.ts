@@ -180,18 +180,15 @@ function resumeChoiceLabel(
 }
 
 /**
- * Continue the same task with its goal and earlier answers intact. Thread history
- * may omit the original source message because the active prompt represents it.
+ * Keep authoritative task state, including resolved private choice labels. The
+ * executor separately projects native goals/questions/answers into conversation turns.
  */
 function resumePrompt(
   run: { trigger: string; task?: { prompt: string } | null },
   question: string,
   answer: string,
 ): string {
-  return [
-    run.task?.prompt,
-    `The user answered the pending question. Continue the existing task from this answer.\n${question}\nAnswer: ${answer}`,
-  ]
+  return [run.task?.prompt, `${question}\nAnswer: ${answer}`]
     .filter((part) => part?.trim())
     .join("\n\n");
 }

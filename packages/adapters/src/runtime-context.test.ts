@@ -13,7 +13,7 @@ const model = {
   maxTokens: 4096,
 } as Model<Api>;
 function fixture(count = 30) {
-  const history = Array.from({ length: count }, (_, index) => ({
+  const history: AgentRunRequest["history"] = Array.from({ length: count }, (_, index) => ({
     id: `message-${index}`,
     createdAt: "2026-01-01T00:00:00Z",
     role: "user" as const,
@@ -41,6 +41,36 @@ function fixture(count = 30) {
   return { request, context };
 }
 describe("runtime context policy", () => {
+  it.each(["retrieval", "snapshots", "cache-aware", "current"] as const)(
+    "keeps required native task history exact under %s budget pressure",
+    (strategy) => {
+      const { request, context } = fixture(40);
+      request.contextStrategy = strategy;
+      request.history[0]!.requiredForRun = true;
+      const goal = request.history[0]!.content;
+      const prepared = createRuntimeContextPolicy(request).prepareContext(context, {
+        ...model,
+        contextWindow: strategy === "current" ? 65536 : 4096,
+        maxTokens: 1024,
+      });
+      expect(prepared.messages).toContainEqual(context.messages[0]);
+      expect(JSON.stringify(prepared.messages)).toContain(goal);
+      request.history[0]!.content = "required goal ".repeat(10000);
+      context.messages[0] = {
+        role: "user",
+        content: request.history[0]!.content,
+        timestamp: 0,
+        ...{ rakazoHistory: true, rakazoMessageId: request.history[0]!.id },
+      };
+      expect(() =>
+        createRuntimeContextPolicy(request).prepareContext(context, {
+          ...model,
+          contextWindow: 4096,
+          maxTokens: 1024,
+        }),
+      ).toThrow(ContextBudgetError);
+    },
+  );
   it("matches the qualified explicit strategy when backend history retrieval is usable", () => {
     const { request, context } = fixture();
     request.tools = ["read_history", "search_history"].map((name) => ({

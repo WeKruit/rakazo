@@ -1,6 +1,6 @@
 import { ORPCError } from "@orpc/server";
 import type { Actor } from "@rakazo/contracts";
-import type { PrismaClient } from "@rakazo/db";
+import type { PrismaClient, RecruitingRoleMaterialContext } from "@rakazo/db";
 import * as recruiting from "@rakazo/db";
 import { IsolationError, RecruitingConflictError } from "@rakazo/db";
 
@@ -22,7 +22,8 @@ export const createRecruitingRole = (
   prisma: PrismaClient,
   actor: Actor,
   input: Parameters<typeof recruiting.createRecruitingRole>[2],
-) => authenticated(() => recruiting.createRecruitingRole(prisma, actor, input));
+  material?: RecruitingRoleMaterialContext,
+) => authenticated(() => recruiting.createRecruitingRole(prisma, actor, input, material));
 export const bindRecruitingRole = (
   prisma: PrismaClient,
   actor: Actor,
@@ -37,7 +38,8 @@ export const reviseRecruitingRole = (
   prisma: PrismaClient,
   actor: Actor,
   input: Parameters<typeof recruiting.reviseRecruitingRole>[2],
-) => authenticated(() => recruiting.reviseRecruitingRole(prisma, actor, input));
+  material?: RecruitingRoleMaterialContext,
+) => authenticated(() => recruiting.reviseRecruitingRole(prisma, actor, input, material));
 export const listRecruitingAssessments = (
   prisma: PrismaClient,
   actor: Actor,
