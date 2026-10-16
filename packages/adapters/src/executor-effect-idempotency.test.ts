@@ -3141,24 +3141,50 @@ describe("native recruiting assessment effect delivery", () => {
     expect(f.effects).toHaveLength(1);
   });
 
-  it("retains only native web_fetch results under an active recruiting context", async () => {
-    const f = fixture("assessment-web-source");
+  it("retains native web_fetch source receipts before role creation and after binding", async () => {
+    const f = fixture("jd-web-source");
+    vi.mocked(executeRecruitingRoleTool).mockClear();
     const receipt = {
       artifact: { artifactId: "read-1", sha256: "b".repeat(64) },
-      url: "https://example.org/profile",
+      url: "https://example.org/job",
       readAt: "2026-10-16T00:00:00.000Z",
     };
     vi.mocked(retainRecruitingWebMaterial).mockResolvedValue(receipt);
+    f.web.fetch.mockResolvedValueOnce({
+      url: receipt.url,
+      title: "Job page",
+      text: "Please enable JavaScript",
+      truncated: false,
+    });
     f.setCalls([{ name: "web_fetch", args: { url: receipt.url }, executionId: "before-role" }]);
     await f.run();
-    expect(retainRecruitingWebMaterial).not.toHaveBeenCalled();
+    expect(f.thread.activeRecruitingRoleId).toBeNull();
+    expect(retainRecruitingWebMaterial).toHaveBeenCalledExactlyOnceWith(
+      { prisma: f.prisma, artifacts: f.artifacts },
+      expect.objectContaining({
+        actor: expect.objectContaining({ spaceId: "space-1", userId: "user-1" }),
+        runId: "jd-web-source",
+        threadId: "thread-1",
+        botId: "bot-1",
+        leaseOwner: "worker-1",
+        leaseFence: f.runData.leaseFence,
+      }),
+      await f.web.fetch.mock.results[0]?.value,
+      expect.anything(),
+    );
+    expect(f.results[0]).toMatchObject({
+      text: "Please enable JavaScript",
+      truncated: false,
+      sourceMaterial: receipt,
+    });
+    expect(executeRecruitingRoleTool).not.toHaveBeenCalled();
     f.thread.activeRecruitingRoleId = "role-1";
     vi.mocked(loadRecruitingRunContext).mockResolvedValue(adopted);
     await f.run();
     expect(retainRecruitingWebMaterial).toHaveBeenCalledWith(
       { prisma: f.prisma, artifacts: f.artifacts },
       expect.objectContaining({
-        runId: "assessment-web-source",
+        runId: "jd-web-source",
         leaseOwner: "worker-1",
         leaseFence: f.runData.leaseFence,
       }),
@@ -3168,7 +3194,7 @@ describe("native recruiting assessment effect delivery", () => {
     expect(f.results[1]).toMatchObject({ text: "Public evidence", sourceMaterial: receipt });
     f.web.fetch.mockRejectedValueOnce(new Error("not available"));
     await f.run();
-    expect(retainRecruitingWebMaterial).toHaveBeenCalledTimes(1);
+    expect(retainRecruitingWebMaterial).toHaveBeenCalledTimes(2);
     expect(f.results[2]).toEqual({ error: "not available" });
   });
 
@@ -3176,6 +3202,10 @@ describe("native recruiting assessment effect delivery", () => {
     const f = fixture("assessment-unbind-steering");
     f.thread.activeRecruitingRoleId = "role-1";
     vi.mocked(loadRecruitingRunContext).mockResolvedValue(adopted);
+    vi.mocked(executeRecruitingAssessmentTool).mockImplementation(async (_deps, trusted) => {
+      expect(trusted.save?.contextArtifact).toBeUndefined();
+      throw new IsolationError();
+    });
     f.claimSteering.mockImplementation(async () => {
       f.thread.activeRecruitingRoleId = null;
       return [
@@ -3196,11 +3226,16 @@ describe("native recruiting assessment effect delivery", () => {
           "after-unbind",
         ),
       );
+      f.results.push(await request.executeTool!("recruiting_assess", args, "save-after-unbind"));
       yield { type: "done" as const, text: "Done" };
     });
     await f.run();
-    expect(f.results).toMatchObject([{ text: "Public evidence" }]);
-    expect(retainRecruitingWebMaterial).not.toHaveBeenCalled();
+    expect(f.results).toMatchObject([
+      { text: "Public evidence" },
+      { error: "Recruiting assessment or source is unavailable" },
+    ]);
+    expect(retainRecruitingWebMaterial).toHaveBeenCalledOnce();
+    expect(executeRecruitingAssessmentTool).toHaveBeenCalledOnce();
   });
 
   it("offers assessment without a computer and excludes disabled or messaging bots", () => {

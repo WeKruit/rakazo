@@ -5891,7 +5891,7 @@ export function createRunExecutor(deps: ExecutorDeps) {
           }
           if (name === "web_fetch") {
             const fetched = await webFetchFromTool(web, context, args);
-            if ("error" in fetched || !currentRecruitingContext || !deps.artifacts)
+            if ("error" in fetched || !deps.artifacts)
               return finish(redactConnectorPayload(fetched, runSecrets));
             const result = {
               ...fetched,

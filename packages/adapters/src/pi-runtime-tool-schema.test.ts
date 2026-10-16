@@ -21,6 +21,16 @@ describe("jsonSchemaParameters", () => {
       expect(tool.description).toContain(field);
     expect(tool.description).toContain("runtime attaches the verified current human message");
     expect(tool.description).toContain("Never invent message IDs, artifact IDs or read timestamps");
+    expect(tool.description).toContain("For JD URLs, call web_fetch before creating the role");
+    expect(tool.description).toContain("sourceMaterial");
+    expect(tool.description).toContain("before role creation");
+    expect(tool.description).toContain("not complete JD coverage");
+    expect(tool.description).toContain(
+      "copy unchanged criteria, IDs, sourceRefs, preferences and definitionQuestions",
+    );
+    expect(tool.description).not.toContain(
+      "For the current human JD URL, description or attachment request, send sourceRefs:[]",
+    );
     const incomplete = {
       operation: "create",
       title: "Synthetic engineer",
@@ -47,6 +57,40 @@ describe("jsonSchemaParameters", () => {
     expect(
       parseConnectorToolArgs(JSON.parse(JSON.stringify(parametersFor(tool))), complete),
     ).toEqual(complete);
+    const source = {
+      id: "jd-material",
+      kind: "original_material",
+      anchor: {
+        kind: "artifact",
+        artifact: { artifactId: "read-jd", sha256: "b".repeat(64) },
+        locator: "text",
+      },
+      readState: "read",
+      readAt: "2026-10-16T00:00:00.000Z",
+      url: "https://example.test/job",
+      quote: "Five years of engineering experience",
+    };
+    const sourced = {
+      ...complete,
+      sourceRefs: [source],
+      criteria: [
+        {
+          id: "experience",
+          priority: "hard",
+          expression: { kind: "atom", id: "engineering", statement: source.quote },
+          sourceRefs: [source],
+          definitionQuestions: [],
+        },
+      ],
+    };
+    expect(RecruitingRoleToolInputSchema.parse(sourced)).toEqual(sourced);
+    const wire = JSON.parse(JSON.stringify(parametersFor(tool)));
+    expect(
+      validateToolArguments(
+        { name: tool.name, description: tool.description, parameters: wire },
+        { type: "toolCall", id: "create-jd", name: tool.name, arguments: sourced },
+      ),
+    ).toEqual(sourced);
     expect(incomplete.sourceRefs).toEqual([]);
   });
 
