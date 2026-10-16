@@ -365,7 +365,14 @@ describePostgres("recruiting domain (PostgreSQL)", () => {
         where: { id: f.context.effectId },
       });
       expect(effect.status).toBe("completed");
-      const saved = effect.result as unknown as recruiting.RecruitingRoleToolResult;
+      const result = effect.result as unknown as recruiting.RecruitingRoleToolResult;
+      // Serialize the actual completed receipt in its historical pre-brief JSON format.
+      const { brief: _brief, ...legacyRevision } = result.workspace!.revision;
+      const saved = { ...result, workspace: { ...result.workspace!, revision: legacyRevision } };
+      await prisma.externalEffect.update({
+        where: { id: effect.id },
+        data: { result: saved as unknown as Prisma.InputJsonValue },
+      });
       const revisionCount = await prisma.recruitingRoleRevision.count({
         where: { roleId: saved.workspace!.role.id },
       });
@@ -3391,7 +3398,10 @@ describePostgres("recruiting domain (PostgreSQL)", () => {
     }
   });
 
-  async function nativeAsk(actions?: { id: string; label: string }[]) {
+  async function nativeAsk(
+    actions?: { id: string; label: string }[],
+    text = "Please clarify this role",
+  ) {
     const group = await prisma.chatGroup.create({
       data: { spaceId, userId, name: "Native answers", members: { create: { botId } } },
     });
@@ -3399,7 +3409,7 @@ describePostgres("recruiting domain (PostgreSQL)", () => {
     const original = await recruiting.createThreadMessage(prisma, {
       threadId: thread.id,
       role: "user",
-      blocks: [{ kind: "text", text: "Please clarify this role" }],
+      blocks: [{ kind: "text", text }],
     });
     const task = await prisma.task.create({
       data: { spaceId, userId, botId, threadId: thread.id, prompt: "Clarify", status: "running" },
@@ -4021,8 +4031,9 @@ describePostgres("recruiting domain (PostgreSQL)", () => {
     );
   });
 
-  async function researchFixture() {
-    const f = await nativeAsk();
+  async function researchFixture(confirmed = true) {
+    const salary = "GBP 90,000 to 120,000";
+    const f = await nativeAsk(undefined, `Please clarify this role. Outreach salary: ${salary}.`);
     await prisma.run.update({
       where: { id: f.run.id },
       data: {
@@ -4032,10 +4043,44 @@ describePostgres("recruiting domain (PostgreSQL)", () => {
         leaseExpiresAt: new Date(Date.now() + 60_000),
       },
     });
-    const role = await recruiting.createRecruitingRole(prisma, actor, {
-      ...roleInput(source(f.original.id)),
+    const ref: RecruitingSourceRef = {
+      ...source(f.original.id),
+      anchor: { kind: "message", messageId: f.original.id, locator: "blocks[0].text" },
+      quote: salary,
+    };
+    const definition = {
+      title: "Synthetic research role",
+      sourceRefs: [ref],
+      criteria: [],
+      preferences: [],
+      definitionQuestions: [],
+      brief: {
+        fields: [
+          {
+            key: "salary_range",
+            value: salary,
+            origin: "user_instruction" as const,
+            state: "known" as const,
+            consequential: true,
+            sourceRefIds: [ref.id],
+          },
+        ],
+        questions: [],
+        rules: [],
+      },
+    };
+    const draft = await recruiting.createRecruitingRole(prisma, actor, {
+      ...definition,
+      expectedRevision: 0,
       sourceThreadId: f.thread.id,
     });
+    const role = confirmed
+      ? await recruiting.confirmRecruitingBrief(prisma, actor, {
+          threadId: f.thread.id,
+          roleId: draft.role.id,
+          expectedRevision: draft.role.revision,
+        })
+      : draft;
     const server = await prisma.mcpServer.create({
       data: {
         spaceId,
@@ -4101,8 +4146,30 @@ describePostgres("recruiting domain (PostgreSQL)", () => {
       effectKind: "mcp_research",
     };
     const lease = { runId: f.run.id, leaseOwner: "research-worker", leaseFence: 1 };
-    return { ...f, role, server, metadata, input, lease };
+    return { ...f, role, draft, definition, server, metadata, input, lease };
   }
+
+  it("rejects research preparation for a draft brief without creating a task or action", async () => {
+    const f = await researchFixture(false);
+    await expect(
+      recruiting.prepareRecruitingResearchAction(prisma, actor, f.input),
+    ).rejects.toThrow(/G0/);
+    expect(await prisma.recruitingResearchTask.count({ where: { roleId: f.role.role.id } })).toBe(
+      0,
+    );
+    expect(await prisma.recruitingResearchAction.count({ where: { runId: f.run.id } })).toBe(0);
+  });
+
+  it("rejects stale pre-confirmation research revisions even after the human confirms", async () => {
+    const f = await researchFixture();
+    await expect(
+      recruiting.prepareRecruitingResearchAction(prisma, actor, {
+        ...f.input,
+        expectedRoleRevision: f.draft.role.revision,
+      }),
+    ).rejects.toThrow(recruiting.RecruitingConflictError);
+    expect(await prisma.recruitingResearchAction.count({ where: { runId: f.run.id } })).toBe(0);
+  });
 
   it("prepares one immutable research action and artifacts without reserving an external effect", async () => {
     expect(recruiting.prepareRecruitingResearchAction).toBeTypeOf("function");
@@ -5637,7 +5704,7 @@ describePostgres("recruiting domain (PostgreSQL)", () => {
     if (boundary === "role")
       await recruiting.reviseRecruitingRole(prisma, actor, {
         roleId: f.role.role.id,
-        expectedRevision: 1,
+        expectedRevision: f.role.role.revision,
         title: "Revised role",
         sourceRefs: [source(f.original.id)],
         criteria: [],
@@ -5768,7 +5835,7 @@ describePostgres("recruiting domain (PostgreSQL)", () => {
     const next = await nextResearchRun(f);
     await recruiting.reviseRecruitingRole(prisma, actor, {
       roleId: f.role.role.id,
-      expectedRevision: 1,
+      expectedRevision: f.role.role.revision,
       title: "New requirements",
       sourceRefs: [source(f.original.id)],
       criteria: [],
@@ -5879,7 +5946,7 @@ describePostgres("recruiting domain (PostgreSQL)", () => {
     });
     await recruiting.reviseRecruitingRole(prisma, actor, {
       roleId: f.role.role.id,
-      expectedRevision: 1,
+      expectedRevision: f.role.role.revision,
       title: "Changed before dispatch",
       sourceRefs: [source(f.original.id)],
       criteria: [],
@@ -5924,14 +5991,25 @@ describePostgres("recruiting domain (PostgreSQL)", () => {
           where: { id: admitted.effect!.id },
           data: { status: "approved" },
         });
-      const revised = await recruiting.reviseRecruitingRole(prisma, actor, {
+      const revisedDraft = await recruiting.reviseRecruitingRole(prisma, actor, {
+        ...f.definition,
         roleId: f.role.role.id,
-        expectedRevision: 1,
+        expectedRevision: f.role.role.revision,
         title: "Corrected role",
-        sourceRefs: [source(f.original.id)],
-        criteria: [],
-        preferences: [],
-        definitionQuestions: [],
+      });
+      expect(revisedDraft.revision.brief?.confirmation).toBeNull();
+      await expect(
+        recruiting.prepareRecruitingResearchAction(prisma, actor, {
+          ...f.input,
+          expectedRoleRevision: revisedDraft.role.revision,
+          clientNonce: `${f.input.clientNonce}-draft`,
+          requestArtifact: f.metadata("request-draft"),
+        }),
+      ).rejects.toThrow(/G0/);
+      const revised = await recruiting.confirmRecruitingBrief(prisma, actor, {
+        threadId: f.thread.id,
+        roleId: revisedDraft.role.id,
+        expectedRevision: revisedDraft.role.revision,
       });
       const adopted = await recruiting.recordRecruitingContextAdoption(prisma, actor, {
         runId: f.run.id,
@@ -5944,7 +6022,7 @@ describePostgres("recruiting domain (PostgreSQL)", () => {
       });
       const prepared = await recruiting.prepareRecruitingResearchAction(prisma, actor, {
         ...f.input,
-        expectedRoleRevision: 2,
+        expectedRoleRevision: revised.role.revision,
         clientNonce: `${f.input.clientNonce}-corrected`,
         requestArtifact: f.metadata("request-corrected"),
         contextArtifact: { artifactId: adopted.artifact.id, sha256: adopted.artifact.hash },

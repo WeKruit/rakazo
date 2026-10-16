@@ -964,7 +964,9 @@ export async function executeRecruitingRoleMutation(
           workspace.role.sourceThreadId !== role.sourceThreadId ||
           workspace.role.currentRevisionId !== row.id ||
           workspace.role.revision !== row.revision ||
-          stableJsonValue(workspace.revision) !==
+          // Pre-brief immutable receipts omitted this newly nullable column. Normalize only
+          // that legacy absence for comparison; preserve the saved receipt and all other checks.
+          stableJsonValue({ ...workspace.revision, brief: workspace.revision.brief ?? null }) !==
             stableJsonValue(
               RecruitingRoleRevisionSchema.parse({
                 ...row,
