@@ -10,6 +10,8 @@ import type {
 import { AssistantMessageEventStream } from "@earendil-works/pi-ai/utils/event-stream";
 import type { AgentRunRequest, AgentRuntimeEvent, ModelCallObserver } from "@rakazo/adapter-kit";
 import type * as Core from "@rakazo/core";
+import type { PrismaClient } from "@rakazo/db";
+import { answerRunInput } from "@rakazo/db";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 const providerState = vi.hoisted(() => ({
@@ -215,6 +217,89 @@ beforeEach(() => {
 });
 
 afterEach(() => vi.useRealTimers());
+
+it("keeps the original Ask goal in the resumed provider prompt after source deduplication", async () => {
+  const goal = "Ask my language, echo the complete answer in a code block, then stop. Chat only.";
+  const question = "Which language?";
+  const answer = "  中文🙂\nEnglish details  ";
+  let prompt = goal;
+  const tx = {
+    $queryRaw: vi.fn().mockResolvedValue([]),
+    run: {
+      findFirst: vi.fn().mockResolvedValue({
+        botId: "bot",
+        userId: "user",
+        trigger: "user",
+        task: { prompt: goal },
+      }),
+      findUnique: vi.fn().mockResolvedValue({ status: "queued" }),
+      updateMany: vi.fn().mockResolvedValue({ count: 1 }),
+    },
+    message: {
+      findFirst: vi.fn().mockResolvedValue({
+        id: "original-card",
+        blocks: [{ kind: "ask", text: question, status: "pending" }],
+      }),
+      create: vi.fn().mockResolvedValue({ id: "native-answer" }),
+      update: vi.fn(),
+    },
+    task: {
+      updateMany: vi.fn(async ({ data }: { data: { prompt: string } }) => {
+        prompt = data.prompt;
+        return { count: 1 };
+      }),
+    },
+    thread: { update: vi.fn().mockResolvedValue({ nextMessageSeq: 4, nextEventSeq: 5 }) },
+    event: { create: vi.fn(async ({ data }: { data: Record<string, unknown> }) => data) },
+  };
+  const prisma = {
+    $transaction: async (callback: (client: typeof tx) => unknown) => callback(tx),
+  } as unknown as PrismaClient;
+  expect(
+    await answerRunInput(prisma, {
+      spaceId: "space",
+      threadId: "thread",
+      runId: "run",
+      messageId: "original-card",
+      answeredByUserId: "user",
+      answer,
+    }),
+  ).toBe(true);
+  const input = request();
+  input.sourceMessageId = "original-request";
+  input.prompt = `${prompt}\n\nCurrent time: 2026-10-16`;
+  input.history = [
+    { id: "old-jd", role: "user", content: "Earlier unrelated task: create a role from a JD." },
+    { id: "old-result", role: "assistant", content: "The earlier role was not saved." },
+    { id: input.sourceMessageId, role: "user", content: goal },
+    { id: "original-card", role: "assistant", content: `${question}\nAnswer: ${answer}` },
+    { id: "native-answer", role: "user", content: answer },
+  ];
+  providerState.stream.mockImplementation(() =>
+    stream(primary, message(primary, [{ type: "text", text: "Done." }], "stop")),
+  );
+
+  await run(input);
+
+  const context = providerState.stream.mock.calls[0]![1] as Context;
+  const current = context.messages.at(-1)!;
+  expect(current.role).toBe("user");
+  const currentText =
+    typeof current.content === "string"
+      ? current.content
+      : current.content
+          .filter((part) => part.type === "text")
+          .map((part) => part.text)
+          .join("");
+  expect(currentText).toContain(goal);
+  expect(currentText).toContain(`Answer: ${answer}`);
+  expect(JSON.stringify(context.messages).split(goal)).toHaveLength(2);
+  expect(JSON.stringify(context.messages)).toContain("Earlier unrelated task");
+  expect(context.messages).not.toContainEqual(
+    expect.objectContaining({ rakazoMessageId: input.sourceMessageId }),
+  );
+  expect(input.executeTool).not.toHaveBeenCalled();
+});
 
 describe("Pi pre-dispatch tool audit", () => {
   it("does not persist an undeclared tool name or its error text", async () => {

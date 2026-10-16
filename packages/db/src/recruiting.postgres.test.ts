@@ -1033,6 +1033,8 @@ describePostgres("recruiting domain (PostgreSQL)", () => {
     "records one native author proof for a recruiting %s answer",
     async (kind) => {
       const f = await questionFixture();
+      const originalRun = await prisma.run.findUniqueOrThrow({ where: { id: f.run.id } });
+      const originalTask = await prisma.task.findUniqueOrThrow({ where: { id: f.run.taskId } });
       await recruiting.pauseRunForInput(prisma, f.pause);
       const question = (await recruiting.getRecruitingQuestion(prisma, actor, f.lookup))!;
       const rawAnswer = " \n  Custom material 😀\n  ";
@@ -1088,9 +1090,11 @@ describePostgres("recruiting domain (PostgreSQL)", () => {
       expect(human.blocks).toEqual([
         { kind: "text", text: kind === "choice" ? "Personal code" : rawAnswer },
       ]);
+      const resumedPrompt = `${originalTask.prompt}\n\n${question.block.text}\nAnswer: ${kind === "choice" ? "Selected choice choice-2: Personal code" : rawAnswer}`;
       expect((await prisma.task.findUniqueOrThrow({ where: { id: f.run.taskId } })).prompt).toBe(
-        kind === "choice" ? "Selected choice choice-2: Personal code" : rawAnswer,
+        resumedPrompt,
       );
+      expect(resumedPrompt.split(originalTask.prompt)).toHaveLength(2);
       expect(await prisma.event.count({ where: { runId: f.run.id, type: "thread.choice" } })).toBe(
         1,
       );
@@ -1107,6 +1111,15 @@ describePostgres("recruiting domain (PostgreSQL)", () => {
         expect(
           (await restored.prisma.message.findUniqueOrThrow({ where: { id: human.id } })).blocks,
         ).toEqual(human.blocks);
+        expect(
+          await restored.prisma.run.findUniqueOrThrow({ where: { id: f.run.id } }),
+        ).toMatchObject({
+          taskId: originalRun.taskId,
+          sourceMessageId: originalRun.sourceMessageId,
+        });
+        expect(
+          (await restored.prisma.task.findUniqueOrThrow({ where: { id: f.run.taskId } })).prompt,
+        ).toBe(resumedPrompt);
       } finally {
         await restored.prisma.$disconnect();
         await restored.pool.end();

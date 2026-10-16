@@ -213,7 +213,7 @@ describe("ordinary native Ask answer provenance", () => {
     expect(answer.runId).toBe("primary-run");
     expect(answer.blocks).toEqual([{ kind: "text", text: "  Paris  " }]);
     expect(f.tx.task.updateMany).toHaveBeenCalledWith(
-      expect.objectContaining({ data: { prompt: "  Paris  " } }),
+      expect.objectContaining({ data: { prompt: "Which city?\nAnswer:   Paris  " } }),
     );
     expect(f.tx.event.create).toHaveBeenCalledWith({
       data: expect.objectContaining({
@@ -239,7 +239,7 @@ describe("ordinary native Ask answer provenance", () => {
       { kind: "ask", text: "Which city?", status: "answered", answer },
     ]);
     expect(f.tx.task.updateMany).toHaveBeenCalledWith(
-      expect.objectContaining({ data: { prompt: answer } }),
+      expect.objectContaining({ data: { prompt: `Which city?\nAnswer: ${answer}` } }),
     );
   });
 
@@ -1430,7 +1430,7 @@ describe("answerRunInput", () => {
     });
     expect(tx.task.updateMany).toHaveBeenCalledWith({
       where: { runs: { some: { id: "run-1" } } },
-      data: { prompt: "Selected choice choice-2: Paris" },
+      data: { prompt: "Which city?\nAnswer: Selected choice choice-2: Paris" },
     });
     expect(tx.event.create).toHaveBeenCalledWith(
       expect.objectContaining({
@@ -1440,81 +1440,84 @@ describe("answerRunInput", () => {
     expect(publish).toHaveBeenCalledWith("thread:thread-1", JSON.stringify({ cursor: 9 }));
   });
 
-  it("keeps a routine's instructions and every earlier answer across choice resumes", async () => {
-    // A routine run sees no thread history: its resumed attempt only has the task prompt.
-    const answerChoice = async (prompt: string, question: string, answer: string) => {
-      const tx = {
-        $queryRaw: vi.fn().mockResolvedValue([{ id: "thread-1" }]),
-        message: {
-          create: vi.fn().mockResolvedValue({ id: "human-answer" }),
-          findFirst: vi.fn().mockResolvedValue({
-            id: "message-1",
-            blocks: [
-              {
-                kind: "ask",
-                text: question,
-                status: "pending",
-                actions: [
-                  { id: "choice-1", label: "Two people" },
-                  { id: "choice-2", label: "Italian" },
-                ],
-              },
-            ],
-          }),
-          update: vi.fn().mockResolvedValue({ id: "message-1" }),
-        },
-        run: {
-          findFirst: vi.fn().mockResolvedValue({
-            botId: "bot-2",
-            trigger: "routine",
-            task: { prompt },
-          }),
-          updateMany: vi.fn().mockResolvedValue({ count: 1 }),
-          findUnique: vi.fn().mockResolvedValue({
-            status: "queued",
-            createdAt: new Date("2026-08-16T12:00:00.000Z"),
+  it.each(["routine", "user"])(
+    "keeps one %s goal and each raw answer across two resumes",
+    async (trigger) => {
+      const answerChoice = async (prompt: string, question: string, answer: string) => {
+        const tx = {
+          $queryRaw: vi.fn().mockResolvedValue([{ id: "thread-1" }]),
+          message: {
+            create: vi.fn().mockResolvedValue({ id: "human-answer" }),
+            findFirst: vi.fn().mockResolvedValue({
+              id: "message-1",
+              blocks: [
+                {
+                  kind: "ask",
+                  text: question,
+                  status: "pending",
+                  actions: [
+                    { id: "choice-1", label: "Two people" },
+                    { id: "choice-2", label: "Italian" },
+                  ],
+                },
+              ],
+            }),
+            update: vi.fn().mockResolvedValue({ id: "message-1" }),
+          },
+          run: {
+            findFirst: vi.fn().mockResolvedValue({
+              botId: "bot-2",
+              trigger,
+              task: { prompt },
+            }),
+            updateMany: vi.fn().mockResolvedValue({ count: 1 }),
+            findUnique: vi.fn().mockResolvedValue({
+              status: "queued",
+              createdAt: new Date("2026-08-16T12:00:00.000Z"),
+              threadId: "thread-1",
+            }),
+          },
+          task: { updateMany: vi.fn().mockResolvedValue({ count: 1 }) },
+          thread: { update: vi.fn().mockResolvedValue({ nextEventSeq: 10, nextMessageSeq: 3 }) },
+          event: {
+            create: vi.fn(async ({ data }: { data: { seq: number; type: string } }) => ({
+              ...event(data.seq),
+              type: data.type,
+            })),
+            findFirst: vi.fn().mockResolvedValue(null),
+          },
+        };
+        const prisma = {
+          $transaction: vi.fn(async (callback: (client: typeof tx) => unknown) => callback(tx)),
+        } as unknown as PrismaClient;
+        await expect(
+          answerRunInput(prisma, {
+            spaceId: "workspace-1",
             threadId: "thread-1",
+            runId: "run-1",
+            messageId: "message-1",
+            answeredByUserId: "user-1",
+            answer,
           }),
-        },
-        task: { updateMany: vi.fn().mockResolvedValue({ count: 1 }) },
-        thread: { update: vi.fn().mockResolvedValue({ nextEventSeq: 10, nextMessageSeq: 3 }) },
-        event: {
-          create: vi.fn(async ({ data }: { data: { seq: number; type: string } }) => ({
-            ...event(data.seq),
-            type: data.type,
-          })),
-          findFirst: vi.fn().mockResolvedValue(null),
-        },
+        ).resolves.toBe(true);
+        return (tx.task.updateMany.mock.calls[0]![0] as { data: { prompt: string } }).data.prompt;
       };
-      const prisma = {
-        $transaction: vi.fn(async (callback: (client: typeof tx) => unknown) => callback(tx)),
-      } as unknown as PrismaClient;
-      await expect(
-        answerRunInput(prisma, {
-          spaceId: "workspace-1",
-          threadId: "thread-1",
-          runId: "run-1",
-          messageId: "message-1",
-          answeredByUserId: "user-1",
-          answer,
-        }),
-      ).resolves.toBe(true);
-      return (tx.task.updateMany.mock.calls[0]![0] as { data: { prompt: string } }).data.prompt;
-    };
 
-    const afterFirst = await answerChoice("Plan tonight's dinner.", "Who is eating?", "choice-1");
-    expect(afterFirst).toBe(
-      "Plan tonight's dinner.\n\nWho is eating?\nAnswer: Selected choice choice-1: Two people",
-    );
-    const afterSecond = await answerChoice(afterFirst, "Which cuisine?", "choice-2");
-    expect(afterSecond).toBe(
-      [
-        "Plan tonight's dinner.",
-        "Who is eating?\nAnswer: Selected choice choice-1: Two people",
-        "Which cuisine?\nAnswer: Selected choice choice-2: Italian",
-      ].join("\n\n"),
-    );
-  });
+      const goal = "Plan tonight's dinner, then stop.";
+      const first = " \r\n  Two people 😀  ";
+      const second = "  Italian dishes\n  ";
+      const afterFirst = await answerChoice(goal, "Who is eating?", first);
+      expect(afterFirst).toBe(`${goal}\n\nWho is eating?\nAnswer: ${first}`);
+      const afterSecond = await answerChoice(afterFirst, "Which cuisine?", second);
+      expect(afterSecond).toBe(
+        [goal, `Who is eating?\nAnswer: ${first}`, `Which cuisine?\nAnswer: ${second}`].join(
+          "\n\n",
+        ),
+      );
+      for (const text of [goal, first, second, "Who is eating?", "Which cuisine?"])
+        expect(afterSecond.split(text)).toHaveLength(2);
+    },
+  );
 
   it("records a spoken call answer as a user utterance with the call identity", async () => {
     const fanout = new TestFanout();
@@ -1593,7 +1596,7 @@ describe("answerRunInput", () => {
     );
     expect(tx.task.updateMany).toHaveBeenCalledWith({
       where: { runs: { some: { id: "run-1" } } },
-      data: { prompt: "Toronto" },
+      data: { prompt: "Which city?\nAnswer: Toronto" },
     });
   });
 
@@ -1673,7 +1676,7 @@ describe("answerRunInput", () => {
 
       expect(tx.task.updateMany).toHaveBeenCalledWith({
         where: { runs: { some: { id: "run-1" } } },
-        data: { prompt: `Selected choice choice-1: use ${secret}` },
+        data: { prompt: `Which token?\nAnswer: Selected choice choice-1: use ${secret}` },
       });
       expect(tx.message.create).toHaveBeenCalledWith({
         data: expect.objectContaining({
@@ -1776,7 +1779,7 @@ describe("answerRunInput", () => {
     );
     expect(tx.task.updateMany).toHaveBeenCalledWith({
       where: { runs: { some: { id: "run-1" } } },
-      data: { prompt: "Toronto" },
+      data: { prompt: "Which city?\nAnswer: Toronto" },
     });
     expect(tx.message.update).toHaveBeenCalledWith({
       where: { id: "message-1" },
@@ -1859,7 +1862,7 @@ describe("answerRunInput", () => {
 
     expect(tx.task.updateMany).toHaveBeenCalledWith({
       where: { runs: { some: { id: "run-1" } } },
-      data: { prompt: "Selected choice choice-2: Seoul" },
+      data: { prompt: "Which city?\nAnswer: Selected choice choice-2: Seoul" },
     });
     expect(tx.message.update).toHaveBeenCalledWith({
       where: { id: "message-1" },
@@ -1925,7 +1928,7 @@ describe("answerWaitingRunWithTextInTransaction", () => {
     ).resolves.toMatchObject({ threadId: "thread-1" });
     expect(tx.task.updateMany).toHaveBeenCalledWith({
       where: { runs: { some: { id: "run-1" } } },
-      data: { prompt: "Paris" },
+      data: { prompt: "Which city?\nAnswer: Paris" },
     });
     expect(tx.run.updateMany).toHaveBeenCalledWith(
       expect.objectContaining({

@@ -2926,7 +2926,10 @@ describe("native recruiting assessment effect delivery", () => {
     for (let attempt = 0; attempt < 2; attempt++) {
       const f = fixture(runId);
       f.runData.sourceMessageId = original.id;
-      f.prisma.task.findUniqueOrThrow.mockResolvedValue({ id: "task-1", prompt: answerText });
+      f.prisma.task.findUniqueOrThrow.mockResolvedValue({
+        id: "task-1",
+        prompt: `${original.blocks[0]!.text}\n\nWhich implementation?\nAnswer: ${answerText}`,
+      });
       f.prisma.message.findMany.mockResolvedValue([
         answer,
         card,
@@ -2938,7 +2941,7 @@ describe("native recruiting assessment effect delivery", () => {
       f.runtimeRun.mockImplementation(async function* (request) {
         expect(request.sourceMessageId).toBe(original.id);
         expect(request.prompt).toContain(answerText);
-        expect(request.prompt).not.toContain(original.blocks[0]!.text);
+        expect(request.prompt).toContain(original.blocks[0]!.text);
         const metadata = request
           .instructions!.split("\n")
           .filter((line) => line.startsWith("Native message source reference"))

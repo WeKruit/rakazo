@@ -180,16 +180,14 @@ function resumeChoiceLabel(
 }
 
 /**
- * A conversational run's request and earlier answers stay in thread history, so its resumed
- * attempt gets just the answer. A background run's prompt never reaches the thread, so it keeps
- * its instructions and every earlier answer; otherwise the resumed attempt forgets them.
+ * Continue the same task with its goal and earlier answers intact. Thread history
+ * may omit the original source message because the active prompt represents it.
  */
 function resumePrompt(
   run: { trigger: string; task?: { prompt: string } | null },
   question: string,
   answer: string,
 ): string {
-  if (isConversationalRun(run.trigger)) return answer;
   return [run.task?.prompt, `${question}\nAnswer: ${answer}`]
     .filter((part) => part?.trim())
     .join("\n\n");

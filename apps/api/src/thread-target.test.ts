@@ -1129,13 +1129,15 @@ describe("sendThreadMessage", () => {
     });
     expect(tx.task.updateMany).toHaveBeenCalledWith({
       where: { runs: { some: { id: "run-waiting" } } },
-      data: { prompt: rawAnswer },
+      data: { prompt: `Which city should I use?\nAnswer: ${rawAnswer}` },
     });
     expect(tx.message.create).toHaveBeenCalledWith({
       data: expect.objectContaining({ blocks: [{ kind: "text", text: rawAnswer }] }),
     });
     expect(tx.task.updateMany).toHaveBeenCalledWith(
-      expect.objectContaining({ data: { prompt: rawAnswer } }),
+      expect.objectContaining({
+        data: { prompt: `Which city should I use?\nAnswer: ${rawAnswer}` },
+      }),
     );
     expect(tx.run.updateMany).toHaveBeenCalledWith(
       expect.objectContaining({
@@ -1419,7 +1421,9 @@ describe("sendThreadMessage", () => {
       data: expect.objectContaining({ blocks: [{ kind: "text", text: rawAnswer }] }),
     });
     expect(tx.task.updateMany).toHaveBeenCalledWith(
-      expect.objectContaining({ data: { prompt: rawAnswer } }),
+      expect.objectContaining({
+        data: { prompt: `Which city should I use?\nAnswer: ${rawAnswer}` },
+      }),
     );
     expect(tx.run.updateMany).toHaveBeenCalledTimes(2);
     expect(tx.task.create).not.toHaveBeenCalled();
@@ -1925,7 +1929,7 @@ describe("sendThreadMessage", () => {
     });
     expect(tx.task.updateMany).toHaveBeenCalledWith({
       where: { runs: { some: { id: "run-routine" } } },
-      data: { prompt: "Paris" },
+      data: { prompt: "Which city should I use?\nAnswer: Paris" },
     });
     expect(tx.run.updateMany).toHaveBeenCalledWith(
       expect.objectContaining({
@@ -2045,7 +2049,7 @@ describe("sendThreadMessage", () => {
     });
     expect(tx.task.updateMany).toHaveBeenCalledWith({
       where: { runs: { some: { id: "run-webhook" } } },
-      data: { prompt: "Paris" },
+      data: { prompt: "Which city should I use?\nAnswer: Paris" },
     });
     expect(tx.run.updateMany).toHaveBeenCalledWith(
       expect.objectContaining({
