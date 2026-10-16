@@ -599,7 +599,7 @@ export function buildUserMessageBlocks(
   attachmentBlocks: ReturnType<typeof messageBlockForArtifact>[],
 ) {
   const blocks = [];
-  const caption = text?.trim();
+  const caption = text?.trim() ? text : undefined;
   if (caption) blocks.push({ kind: "text" as const, text: caption });
   blocks.push(...attachmentBlocks);
   return blocks;

@@ -1043,6 +1043,8 @@ describe("sendThreadMessage", () => {
     blocks: [{ kind: "text", text: "Paris" }],
   };
   it("answers a waiting question with a free-text chat message", async () => {
+    const rawAnswer = " \n  Paris evidence 😀\n  ";
+    const rawComposerAnswer = { ...composerAnswer, blocks: [{ kind: "text", text: rawAnswer }] };
     const tx = {
       $queryRaw: vi.fn().mockResolvedValue([{ id: "thread-1" }]),
       thread: {
@@ -1056,7 +1058,7 @@ describe("sendThreadMessage", () => {
           threadId: "thread-1",
           seq: 1,
           role: "user",
-          blocks: [{ kind: "text", text: "Paris" }],
+          blocks: [{ kind: "text", text: rawAnswer }],
           botId: null,
           replyToMessageId: null,
           runId: null,
@@ -1070,7 +1072,7 @@ describe("sendThreadMessage", () => {
         ]),
         findFirst: vi.fn(async ({ where }: { where: { id: string } }) =>
           where.id === composerAnswer.id
-            ? composerAnswer
+            ? rawComposerAnswer
             : {
                 id: "ask-1",
                 blocks: [{ kind: "ask", text: "Which city should I use?", status: "pending" }],
@@ -1115,7 +1117,7 @@ describe("sendThreadMessage", () => {
         actor,
         target,
         {
-          text: "Paris",
+          text: rawAnswer,
           clientNonce: "nonce-ask",
         },
       ),
@@ -1127,8 +1129,14 @@ describe("sendThreadMessage", () => {
     });
     expect(tx.task.updateMany).toHaveBeenCalledWith({
       where: { runs: { some: { id: "run-waiting" } } },
-      data: { prompt: "Paris" },
+      data: { prompt: rawAnswer },
     });
+    expect(tx.message.create).toHaveBeenCalledWith({
+      data: expect.objectContaining({ blocks: [{ kind: "text", text: rawAnswer }] }),
+    });
+    expect(tx.task.updateMany).toHaveBeenCalledWith(
+      expect.objectContaining({ data: { prompt: rawAnswer } }),
+    );
     expect(tx.run.updateMany).toHaveBeenCalledWith(
       expect.objectContaining({
         where: expect.objectContaining({ status: "waiting_input" }),
@@ -1317,6 +1325,8 @@ describe("sendThreadMessage", () => {
   });
 
   it("continues every waiting run for a group bot after free-text answers", async () => {
+    const rawAnswer = " \n  Paris evidence 😀\n  ";
+    const rawComposerAnswer = { ...composerAnswer, blocks: [{ kind: "text", text: rawAnswer }] };
     const waitingAsk = {
       id: "ask-1",
       blocks: [{ kind: "ask", text: "Which city should I use?", status: "pending" }],
@@ -1334,7 +1344,7 @@ describe("sendThreadMessage", () => {
           threadId: "thread-1",
           seq: 1,
           role: "user",
-          blocks: [{ kind: "text", text: "Paris" }],
+          blocks: [{ kind: "text", text: rawAnswer }],
           botId: null,
           replyToMessageId: null,
           runId: null,
@@ -1342,7 +1352,7 @@ describe("sendThreadMessage", () => {
         }),
         findMany: vi.fn().mockResolvedValue([waitingAsk]),
         findFirst: vi.fn(async ({ where }: { where: { id: string } }) =>
-          where.id === composerAnswer.id ? composerAnswer : waitingAsk,
+          where.id === composerAnswer.id ? rawComposerAnswer : waitingAsk,
         ),
         update: vi.fn(),
       },
@@ -1395,7 +1405,7 @@ describe("sendThreadMessage", () => {
         actor,
         target,
         {
-          text: "Paris",
+          text: rawAnswer,
           clientNonce: "nonce-ask-group-multi",
         },
       ),
@@ -1405,6 +1415,12 @@ describe("sendThreadMessage", () => {
       seq: 1,
       runIds: ["run-waiting-1", "run-waiting-2"],
     });
+    expect(tx.message.create).toHaveBeenCalledWith({
+      data: expect.objectContaining({ blocks: [{ kind: "text", text: rawAnswer }] }),
+    });
+    expect(tx.task.updateMany).toHaveBeenCalledWith(
+      expect.objectContaining({ data: { prompt: rawAnswer } }),
+    );
     expect(tx.run.updateMany).toHaveBeenCalledTimes(2);
     expect(tx.task.create).not.toHaveBeenCalled();
     expect(tx.run.create).not.toHaveBeenCalled();

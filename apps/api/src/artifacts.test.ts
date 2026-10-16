@@ -2,7 +2,18 @@ import type { ArtifactStore } from "@rakazo/adapter-kit";
 import type { Actor } from "@rakazo/contracts";
 import type { PrismaClient } from "@rakazo/db";
 import { describe, expect, it, vi } from "vitest";
-import { ArtifactListCursorError, deleteArtifactFamily, listSpaceArtifacts } from "./artifacts.js";
+import {
+  ArtifactListCursorError,
+  buildUserMessageBlocks,
+  deleteArtifactFamily,
+  listSpaceArtifacts,
+} from "./artifacts.js";
+
+it("retains the original nonblank message text instead of a trimmed caption", () => {
+  const raw = " \n  source material 😀\n  ";
+  expect(buildUserMessageBlocks(raw, [])).toEqual([{ kind: "text", text: raw }]);
+  expect(buildUserMessageBlocks(" \n\t ", [])).toEqual([]);
+});
 
 const actor: Actor = {
   userId: "user-1",

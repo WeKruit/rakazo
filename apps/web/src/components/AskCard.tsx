@@ -4,7 +4,7 @@ import { ChatMarkdown } from "@rakazo/chat-ui/web";
 import type { ThreadMessage } from "@rakazo/contracts";
 import { commandVariableName } from "@rakazo/contracts";
 import { isApprovalAskBlock, isSecretAskBlock, selectedAskActionLabel } from "@rakazo/core";
-import { Button, Input } from "@rakazo/ui-web";
+import { Button, Input, Textarea } from "@rakazo/ui-web";
 import { useState } from "react";
 import { errorText } from "../lib/user-error";
 
@@ -74,7 +74,7 @@ export function AskCard({
     if (secretInput ? value.length === 0 : !value.trim()) return;
     const submitUsername = loginInput ? username.trim() : undefined;
     if (loginInput && !submitUsername) return;
-    const submitValue = secretInput ? value : value.trim();
+    const submitValue = value;
     setPendingAction(secretInput ? "submit" : submitValue);
     setError(null);
     if (secretInput) {
@@ -119,7 +119,7 @@ export function AskCard({
         </pre>
       ) : null}
       {block.status === "answered" ? (
-        <div className="mt-3.5 text-[13.5px] font-medium text-success">
+        <div className="mt-3.5 whitespace-pre-wrap text-[13.5px] font-medium text-success">
           {formatAnsweredState(
             block.answer,
             Boolean(approvalActions),
@@ -202,7 +202,7 @@ export function AskCard({
             void submitAnswer(answer);
           }}
         >
-          <Input
+          <Textarea
             aria-label={t`Answer`}
             value={answer}
             onChange={(event) => setAnswer(event.target.value)}

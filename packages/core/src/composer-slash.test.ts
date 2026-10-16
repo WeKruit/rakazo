@@ -8,7 +8,8 @@ import {
 
 describe("serializeComposerPrompt", () => {
   it("returns draft when no skill or mentions", () => {
-    expect(serializeComposerPrompt("  hello", null, [])).toBe("hello");
+    const raw = " \n  hello 😀\n  ";
+    expect(serializeComposerPrompt(raw, null, [])).toBe(raw);
   });
 
   it("prefixes skill slash name alone", () => {
@@ -25,6 +26,13 @@ describe("serializeComposerPrompt", () => {
 
   it("prefixes mentions without a skill", () => {
     expect(serializeComposerPrompt("go", null, [{ name: "everyone" }])).toBe("@everyone go");
+  });
+
+  it("adds control prefixes without normalizing the draft", () => {
+    const raw = " \n  keep indentation\n  ";
+    expect(serializeComposerPrompt(raw, { name: "Daily" }, [{ name: "Chief" }])).toBe(
+      `/Daily\n@Chief ${raw}`,
+    );
   });
 });
 

@@ -723,8 +723,8 @@ export async function sendThreadMessage(
           });
           const waitingRuns = activeRuns.filter((run) => run.status === "waiting_input");
           if (waitingRuns.length && !activeRuns.some(steersUserMessage)) {
-            const answerText = input.text?.trim();
-            if (!answerText) {
+            const answerText = input.text;
+            if (!answerText?.trim()) {
               throw new ORPCError("CONFLICT", {
                 message: "Answer the pending ask first.",
               });
@@ -899,8 +899,8 @@ export async function sendThreadMessage(
         for (const run of activeRuns) {
           if (run.status === "waiting_input") {
             if (conversationalBotIds.has(run.botId)) continue;
-            const answerText = input.text?.trim();
-            if (!answerText) {
+            const answerText = input.text;
+            if (!answerText?.trim()) {
               throw new ORPCError("CONFLICT", {
                 message: "Answer the pending ask first.",
               });

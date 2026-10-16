@@ -205,13 +205,16 @@ describe("ordinary native Ask answer provenance", () => {
     await expect(
       answerWaitingRunWithTextInTransaction(f.tx as never, {
         ...f.input,
-        answer: "Paris",
+        answer: "  Paris  ",
         answerMessageId: answer.id,
       }),
     ).resolves.toBeTruthy();
     expect(f.tx.message.create).not.toHaveBeenCalled();
     expect(answer.runId).toBe("primary-run");
     expect(answer.blocks).toEqual([{ kind: "text", text: "  Paris  " }]);
+    expect(f.tx.task.updateMany).toHaveBeenCalledWith(
+      expect.objectContaining({ data: { prompt: "  Paris  " } }),
+    );
     expect(f.tx.event.create).toHaveBeenCalledWith({
       data: expect.objectContaining({
         type: "thread.choice",
@@ -232,6 +235,57 @@ describe("ordinary native Ask answer provenance", () => {
     expect(f.rows.find((row) => row.id === "created-human")?.blocks).toEqual([
       { kind: "text", text: answer },
     ]);
+    expect(f.rows[0]?.blocks).toEqual([
+      { kind: "ask", text: "Which city?", status: "answered", answer },
+    ]);
+    expect(f.tx.task.updateMany).toHaveBeenCalledWith(
+      expect.objectContaining({ data: { prompt: answer } }),
+    );
+  });
+
+  it("rejects a supplied human message whose whitespace differs from its answer", async () => {
+    const f = ordinaryAnswerFixture();
+    f.rows.push({
+      id: "composer-human",
+      threadId: "thread-1",
+      role: "user",
+      botId: null,
+      runId: "primary-run",
+      blocks: [{ kind: "text", text: "  Paris  " }],
+      externalTranscriptFor: null,
+    });
+    expect(
+      await answerWaitingRunWithTextInTransaction(f.tx as never, {
+        ...f.input,
+        answer: "Paris",
+        answerMessageId: "composer-human",
+      }),
+    ).toBeNull();
+    expect(f.tx.run.updateMany).not.toHaveBeenCalled();
+  });
+
+  it.each([" ", "\n\t"])("rejects an ordinary blank-only answer %j", async (answer) => {
+    const f = ordinaryAnswerFixture();
+    expect(await answerRunInput(f.prisma, { ...f.input, answer })).toBe(false);
+    expect(f.tx.run.updateMany).not.toHaveBeenCalled();
+    expect(f.tx.message.create).not.toHaveBeenCalled();
+  });
+
+  it("preserves earlier raw answers in a background run's resumed prompt", async () => {
+    const f = ordinaryAnswerFixture();
+    Object.assign(f.run, {
+      trigger: "routine",
+      task: { prompt: "Original instructions\n\nAnswer: first answer  \n " },
+    });
+    const answer = " \n  second answer 😀\n ";
+    expect(await answerRunInput(f.prisma, { ...f.input, answer })).toBe(true);
+    expect(f.tx.task.updateMany).toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: {
+          prompt: `Original instructions\n\nAnswer: first answer  \n \n\nWhich city?\nAnswer: ${answer}`,
+        },
+      }),
+    );
   });
 
   it("creates no answer message or proof when the waiting-run claim loses", async () => {

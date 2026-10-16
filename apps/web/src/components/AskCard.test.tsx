@@ -56,12 +56,13 @@ it("submits a custom answer on the original choice card", async () => {
     );
     expect(other).toBeDefined();
     act(() => other!.click());
-    const input = container.querySelector<HTMLInputElement>('input[aria-label="Answer"]');
+    const input = container.querySelector<HTMLTextAreaElement>('textarea[aria-label="Answer"]');
     expect(input).not.toBeNull();
+    const raw = " \n  Robotics evidence first 😀\n  ";
     act(() => {
-      Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, "value")!.set!.call(
+      Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, "value")!.set!.call(
         input,
-        "  Robotics evidence first  ",
+        " \n\t ",
       );
       input!.dispatchEvent(new Event("input", { bubbles: true }));
     });
@@ -70,18 +71,31 @@ it("submits a custom answer on the original choice card", async () => {
         .querySelector("form")!
         .dispatchEvent(new Event("submit", { bubbles: true, cancelable: true }));
     });
-    expect(answer).toHaveBeenCalledExactlyOnceWith("Robotics evidence first", undefined);
+    expect(answer).not.toHaveBeenCalled();
+    act(() => {
+      Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, "value")!.set!.call(
+        input,
+        raw,
+      );
+      input!.dispatchEvent(new Event("input", { bubbles: true }));
+    });
+    await act(async () => {
+      container
+        .querySelector("form")!
+        .dispatchEvent(new Event("submit", { bubbles: true, cancelable: true }));
+    });
+    expect(answer).toHaveBeenCalledExactlyOnceWith(raw, undefined);
 
     act(() =>
       root.render(
         <AskCard
-          block={{ ...block, status: "answered", answer: "Robotics evidence first" }}
+          block={{ ...block, status: "answered", answer: raw }}
           canAnswer={false}
           onAnswer={answer}
         />,
       ),
     );
-    expect(container.textContent).toContain("Answered: Robotics evidence first");
+    expect(container.textContent).toContain(`Answered: ${raw}`);
     expect(container.querySelector("form")).toBeNull();
   } finally {
     act(() => root.unmount());

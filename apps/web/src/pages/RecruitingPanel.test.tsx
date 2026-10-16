@@ -589,11 +589,12 @@ it("submits custom input to the native originating bot without creating a new ta
   const view = await mounted();
   await view.click("Missing info");
   await view.click("Type your answer");
-  const input = view.container.querySelector<HTMLInputElement>('input[aria-label="Answer"]')!;
+  const answer = " \n  Implemented the geometry library in C++ 😀\n  ";
+  const input = view.container.querySelector<HTMLTextAreaElement>('textarea[aria-label="Answer"]')!;
   await act(async () => {
-    Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, "value")!.set!.call(
+    Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, "value")!.set!.call(
       input,
-      "  Implemented the geometry library in C++  ",
+      answer,
     );
     input.dispatchEvent(new Event("input", { bubbles: true }));
   });
@@ -602,7 +603,7 @@ it("submits custom input to the native originating bot without creating a new ta
     botId: "origin-bot",
     runId: "origin-run",
     messageId: "origin-question",
-    answer: "Implemented the geometry library in C++",
+    answer,
   });
   expect(api.createRole).not.toHaveBeenCalled();
   expect(api.bindRole).not.toHaveBeenCalled();

@@ -1035,19 +1035,21 @@ describePostgres("recruiting domain (PostgreSQL)", () => {
       const f = await questionFixture();
       await recruiting.pauseRunForInput(prisma, f.pause);
       const question = (await recruiting.getRecruitingQuestion(prisma, actor, f.lookup))!;
+      const rawAnswer = " \n  Custom material 😀\n  ";
+      const answer = kind === "choice" ? "choice-2" : rawAnswer;
       if (kind === "composer") {
         const result = await prisma.$transaction(async (tx) => {
           const message = await recruiting.createThreadMessageInTransaction(tx, {
             threadId: f.thread.id,
             role: "user",
-            blocks: [{ kind: "text", text: "Custom material" }],
+            blocks: [{ kind: "text", text: rawAnswer }],
           });
           return recruiting.answerWaitingRunWithTextInTransaction(tx, {
             spaceId,
             threadId: f.thread.id,
             runId: f.run.id,
             answeredByUserId: userId,
-            answer: "Custom material",
+            answer,
             answerMessageId: message.id,
           });
         });
@@ -1060,14 +1062,14 @@ describePostgres("recruiting domain (PostgreSQL)", () => {
             runId: f.run.id,
             messageId: question.messageId,
             answeredByUserId: userId,
-            answer: kind === "choice" ? "choice-2" : "Custom material",
+            answer,
           }),
         ).toBe(true);
       await prisma.run.update({ where: { id: f.run.id }, data: { status: "completed" } });
       expect(await recruiting.getRecruitingQuestion(prisma, actor, f.lookup)).toMatchObject({
         runStatus: "completed",
         canAnswer: false,
-        block: { status: "answered" },
+        block: { status: "answered", answer },
       });
       const receipt = await prisma.event.findFirstOrThrow({
         where: { runId: f.run.id, type: "thread.choice" },
@@ -1084,11 +1086,31 @@ describePostgres("recruiting domain (PostgreSQL)", () => {
       expect(human.botId).toBeNull();
       expect(human.role).toBe("user");
       expect(human.blocks).toEqual([
-        { kind: "text", text: kind === "choice" ? "Personal code" : "Custom material" },
+        { kind: "text", text: kind === "choice" ? "Personal code" : rawAnswer },
       ]);
+      expect((await prisma.task.findUniqueOrThrow({ where: { id: f.run.taskId } })).prompt).toBe(
+        kind === "choice" ? "Selected choice choice-2: Personal code" : rawAnswer,
+      );
       expect(await prisma.event.count({ where: { runId: f.run.id, type: "thread.choice" } })).toBe(
         1,
       );
+      const restored = createDb(databaseUrl!);
+      try {
+        expect(
+          await recruiting.getRecruitingQuestion(restored.prisma, actor, f.lookup),
+        ).toMatchObject({
+          messageId: question.messageId,
+          runId: f.run.id,
+          canAnswer: false,
+          block: { status: "answered", answer },
+        });
+        expect(
+          (await restored.prisma.message.findUniqueOrThrow({ where: { id: human.id } })).blocks,
+        ).toEqual(human.blocks);
+      } finally {
+        await restored.prisma.$disconnect();
+        await restored.pool.end();
+      }
     },
   );
   it("replays a committed question without a lease or another card/pause", async () => {

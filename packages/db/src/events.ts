@@ -190,8 +190,8 @@ function resumePrompt(
   answer: string,
 ): string {
   if (isConversationalRun(run.trigger)) return answer;
-  return [run.task?.prompt.trim(), `${question.trim()}\nAnswer: ${answer}`]
-    .filter(Boolean)
+  return [run.task?.prompt, `${question}\nAnswer: ${answer}`]
+    .filter((part) => part?.trim())
     .join("\n\n");
 }
 
@@ -736,8 +736,7 @@ async function commitAnswerRunInput(
       answerBlocks.data
         .filter((block) => block.kind === "text")
         .map((block) => block.text)
-        .join("\n")
-        .trim() !== input.answer.trim()
+        .join("\n") !== input.answer
     )
       return null;
   }
