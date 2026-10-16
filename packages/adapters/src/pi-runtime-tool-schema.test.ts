@@ -104,6 +104,62 @@ describe("jsonSchemaParameters", () => {
     expect(wire).not.toHaveProperty("oneOf");
   });
 
+  it("preserves typed assessment sources and both operations through the native Pi validator", () => {
+    const tool = builtinAgentTools.find((entry) => entry.name === "recruiting_assess")!;
+    const parameters = parametersFor(tool);
+    const wire = JSON.parse(JSON.stringify(parameters));
+    const quote = "  Built geometry transforms.\r\n";
+    const save = {
+      operation: "save",
+      roleId: "role-1",
+      roleRevisionId: "role-revision-1",
+      candidateKey: "candidate-1",
+      expectedRevision: 0,
+      facts: [
+        {
+          id: "fact-1",
+          kind: "statement",
+          statement: "Personally implemented transforms",
+          sourceRefIds: ["source-1"],
+        },
+      ],
+      questions: [],
+      sourceRefs: [
+        {
+          id: "source-1",
+          kind: "original_material",
+          anchor: { kind: "message", messageId: "message-1", locator: "text" },
+          readState: "read",
+          readAt: "2026-10-16T00:00:00.000Z",
+          quote,
+          selection: { kind: "message_text", blockIndex: 0, start: 0, end: quote.length },
+        },
+      ],
+      atomJudgments: [
+        {
+          atomId: "geometry",
+          verdict: "met",
+          factIds: ["fact-1"],
+          evidence: ["source-1"],
+          missing: [],
+        },
+      ],
+      employmentEvaluations: [],
+    };
+    for (const input of [save, { operation: "read", candidateKey: "candidate-1" }]) {
+      for (const schema of [tool.inputSchema, wire]) {
+        expect(parseConnectorToolArgs(schema, input)).toEqual(input);
+        expect(() => parseConnectorToolArgs(schema, { ...input, hardGate: "met" })).toThrow();
+      }
+      expect(
+        validateToolArguments(
+          { name: tool.name, description: tool.description, parameters },
+          { type: "toolCall", id: "assessment-call", name: tool.name, arguments: input },
+        ),
+      ).toEqual(input);
+    }
+  });
+
   it("keeps the recruiting feedback guard in native memory tool parameters", () => {
     const schema = parametersFor(builtinAgentTools.find((tool) => tool.name === "remember")!);
     expect(schema.properties).toHaveProperty("recruitingFeedback");

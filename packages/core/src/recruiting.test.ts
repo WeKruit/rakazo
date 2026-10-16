@@ -1,6 +1,8 @@
 import type {
   RecruitingCriterion,
   RecruitingCriterionExpression,
+  RecruitingEmploymentRule,
+  SaveRecruitingAssessmentInput,
   Verdict,
 } from "@rakazo/contracts";
 import { describe, expect, it } from "vitest";
@@ -506,6 +508,388 @@ describe("qualified full-time employment month bounds", () => {
         minimumMonths: 1,
         intervals: [],
       }),
+    ).toThrow();
+  });
+});
+
+const primaryAssessmentSource = {
+  id: "original",
+  kind: "original_material",
+  anchor: {
+    kind: "artifact",
+    artifact: { artifactId: "original", sha256: "a".repeat(64) },
+    locator: "body",
+  },
+  readState: "read",
+  readAt: "2024-12-31T00:00:00.000Z",
+  quote: "  original evidence\n",
+  selection: { kind: "artifact_text", start: 0, end: 20 },
+} as const;
+const statementFact = {
+  kind: "statement",
+  id: "fact",
+  statement: "Original component evidence",
+  sourceRefIds: ["original"],
+} as const;
+const semantic = (atomId: string, verdict: Verdict = "met") => ({
+  atomId,
+  verdict,
+  factIds: ["fact"],
+  evidence: ["original"],
+  missing: verdict === "unknown" ? ["Confirm the component"] : [],
+});
+const assessmentInput = (
+  changes: Partial<SaveRecruitingAssessmentInput> = {},
+): SaveRecruitingAssessmentInput => ({
+  roleId: "role",
+  candidateKey: "candidate",
+  roleRevisionId: "revision",
+  expectedRevision: 0,
+  facts: [statementFact],
+  sourceRefs: [primaryAssessmentSource],
+  questions: [],
+  atomJudgments: [semantic("a")],
+  employmentEvaluations: [],
+  ...changes,
+});
+const assessmentRole = (
+  criteria: readonly RecruitingCriterion[] = [criterion("c", atom("a"))],
+) => ({ criteria, definitionQuestions: [] });
+const fixedRule = (minimumMonths: number): RecruitingEmploymentRule => ({
+  minimumMonths,
+  countingRule: "complete_calendar_months",
+  qualificationDefinition: "Full-time personally implemented relevant work",
+  cutoff: { kind: "fixed", date: { precision: "day", year: 2024, month: 12, day: 31 } },
+});
+const employmentFact = (id: string, startYear: number, endYear: number) => ({
+  kind: "employment" as const,
+  id,
+  statement: "Worked full time",
+  sourceRefIds: ["original"],
+  employmentType: "full-time",
+  start: { precision: "day" as const, year: startYear, month: 1, day: 1 },
+  end: { precision: "day" as const, year: endYear, month: 12, day: 31 },
+});
+const completenessFact = {
+  kind: "history_completeness",
+  id: "complete",
+  statement: "This is the complete employment history",
+  sourceRefIds: ["original"],
+  complete: true,
+  asOf: { precision: "day", year: 2024, month: 12, day: 31 },
+} as const;
+const employmentInput = (minimumMonths = 60) => ({
+  role: assessmentRole([
+    criterion("years", {
+      kind: "atom",
+      id: "experience",
+      statement: "Enough qualifying experience",
+      employmentRule: fixedRule(minimumMonths),
+    }),
+  ]),
+  input: assessmentInput({
+    facts: [
+      employmentFact("job1", 2020, 2022),
+      employmentFact("job2", 2022, 2024),
+      completenessFact,
+    ],
+    atomJudgments: [],
+    employmentEvaluations: [
+      {
+        atomId: "experience",
+        intervals: ["job1", "job2"].map((factId) => ({
+          factId,
+          qualifyingFullTime: "met",
+          evidence: ["original"],
+          missing: [],
+        })),
+        historyCompletenessFactId: "complete",
+        evidence: ["original"],
+        missing: [],
+      },
+    ],
+  }),
+});
+const assessmentDay = { precision: "day", year: 2025, month: 1, day: 15 } as const;
+
+describe("server-owned recruiting assessment evaluation", () => {
+  it("stores deterministic nested criteria with source and fact dependencies and excludes preferences from the hard gate", () => {
+    const role = assessmentRole([
+      criterion("hard", {
+        kind: "all",
+        items: [atom("a"), { kind: "any", items: [atom("b"), { kind: "not", item: atom("c") }] }],
+      }),
+      criterion("preference", atom("d"), "preferred"),
+    ]);
+    const result = core.evaluateRecruitingAssessment?.(
+      role,
+      assessmentInput({
+        atomJudgments: [
+          semantic("a"),
+          semantic("b", "unknown"),
+          semantic("c", "unmet"),
+          semantic("d", "unmet"),
+        ],
+      }),
+      assessmentDay,
+    );
+    expect(result?.hardGate).toBe("met");
+    expect(result?.criteria).toEqual([
+      {
+        criterionId: "hard",
+        verdict: "met",
+        factIds: ["fact"],
+        evidence: ["original"],
+        missing: ["Confirm the component"],
+      },
+      {
+        criterionId: "preference",
+        verdict: "unmet",
+        factIds: ["fact"],
+        evidence: ["original"],
+        missing: [],
+      },
+    ]);
+    expect(result?.atoms).toHaveLength(4);
+  });
+
+  it("rejects missing, extra, duplicate and dangling atom inputs", () => {
+    for (const change of [
+      { atomJudgments: [] },
+      { atomJudgments: [semantic("other")] },
+      { atomJudgments: [semantic("a"), semantic("a")] },
+      { atomJudgments: [{ ...semantic("a"), factIds: ["missing"] }] },
+      { atomJudgments: [{ ...semantic("a"), evidence: ["missing"] }] },
+      { facts: [statementFact, statementFact] },
+      { sourceRefs: [primaryAssessmentSource, primaryAssessmentSource] },
+    ])
+      expect(() =>
+        core.evaluateRecruitingAssessment?.(
+          assessmentRole(),
+          assessmentInput(change),
+          assessmentDay,
+        ),
+      ).toThrow();
+  });
+
+  it("requires primary read proof connected to facts for met and unmet and retains provider-only facts as unknown gaps", () => {
+    const provider = { ...primaryAssessmentSource, kind: "provider_report" as const };
+    for (const verdict of ["met", "unmet"] as const) {
+      for (const change of [
+        { sourceRefs: [provider], atomJudgments: [semantic("a", verdict)] },
+        { atomJudgments: [{ ...semantic("a", verdict), factIds: [] }] },
+        { atomJudgments: [{ ...semantic("a", verdict), evidence: [] }] },
+      ])
+        expect(() =>
+          core.evaluateRecruitingAssessment?.(
+            assessmentRole(),
+            assessmentInput(change),
+            assessmentDay,
+          ),
+        ).toThrow();
+    }
+    expect(
+      core.evaluateRecruitingAssessment?.(
+        assessmentRole(),
+        assessmentInput({ sourceRefs: [provider], atomJudgments: [semantic("a", "unknown")] }),
+        assessmentDay,
+      )?.hardGate,
+    ).toBe("unknown");
+  });
+
+  it("deduplicates overlapping qualifying intervals and applies only the explicit atom threshold", () => {
+    for (const [minimumMonths, verdict] of [
+      [17, "met"],
+      [60, "met"],
+      [61, "unmet"],
+      [84, "unmet"],
+    ] as const) {
+      const { role, input } = employmentInput(minimumMonths);
+      const result = core.evaluateRecruitingAssessment?.(role, input, assessmentDay);
+      expect(result?.hardGate).toBe(verdict);
+      expect(result?.employment[0]).toMatchObject({
+        lowerMonths: 60,
+        upperMonths: 60,
+        minimumMonths,
+        verdict,
+        cutoff:
+          fixedRule(minimumMonths).cutoff.kind === "fixed"
+            ? { precision: "day", year: 2024, month: 12, day: 31 }
+            : undefined,
+      });
+      expect(result?.atoms[0]).toMatchObject({ atomId: "experience", verdict });
+      expect(result?.employment[0]?.intervals).toEqual(input.employmentEvaluations[0]?.intervals);
+    }
+  });
+
+  it("rejects an omitted known employment interval rather than deriving a false negative from completeness", () => {
+    const { role, input } = employmentInput(61);
+    expect(() =>
+      core.evaluateRecruitingAssessment(
+        role,
+        {
+          ...input,
+          employmentEvaluations: [{ ...input.employmentEvaluations[0]!, intervals: [] }],
+        },
+        assessmentDay,
+      ),
+    ).toThrow("Every employment fact requires an explicit eligibility judgment");
+  });
+
+  it("leaves plain text years atoms semantic without inferring any numeric rule", () => {
+    const role = assessmentRole([
+      criterion("years", {
+        kind: "atom",
+        id: "a",
+        statement: "Requires 7+ years full-time engineering experience",
+      }),
+    ]);
+    const result = core.evaluateRecruitingAssessment?.(role, assessmentInput(), assessmentDay);
+    expect(result?.hardGate).toBe("met");
+    expect(result?.employment).toEqual([]);
+    const numeric = employmentInput();
+    expect(() => core.evaluateRecruitingAssessment?.(role, numeric.input, assessmentDay)).toThrow();
+  });
+
+  it("keeps an insufficient lower bound unknown unless sourced completeness covers the effective cutoff", () => {
+    const { role, input } = employmentInput(61);
+    for (const fact of [
+      undefined,
+      { ...completenessFact, complete: false },
+      { ...completenessFact, asOf: { precision: "day" as const, year: 2023, month: 12, day: 31 } },
+    ]) {
+      const result = core.evaluateRecruitingAssessment?.(
+        role,
+        {
+          ...input,
+          facts: fact ? [...input.facts.slice(0, 2), fact] : input.facts.slice(0, 2),
+          employmentEvaluations: input.employmentEvaluations.map((evaluation) => ({
+            ...evaluation,
+            historyCompletenessFactId: fact ? "complete" : null,
+          })),
+        },
+        assessmentDay,
+      );
+      expect(result?.hardGate).toBe("unknown");
+      expect(result?.employment[0]?.upperMonths).toBeNull();
+      expect(result?.employment[0]?.missing.length).toBeGreaterThan(0);
+    }
+  });
+
+  it("freezes assessment-date rules to the supplied trusted UTC day and retains unknown semantic eligibility", () => {
+    const { input } = employmentInput(61);
+    const role = assessmentRole([
+      criterion("years", {
+        kind: "atom",
+        id: "experience",
+        statement: "Enough work",
+        employmentRule: { ...fixedRule(61), cutoff: { kind: "assessment_date" } },
+      }),
+    ]);
+    const result = core.evaluateRecruitingAssessment?.(
+      role,
+      {
+        ...input,
+        facts: [{ ...employmentFact("job1", 2020, 2022), end: "present" }, completenessFact],
+        employmentEvaluations: [
+          {
+            ...input.employmentEvaluations[0]!,
+            intervals: [
+              {
+                factId: "job1",
+                qualifyingFullTime: "unknown",
+                evidence: ["original"],
+                missing: ["Confirm eligible work"],
+              },
+            ],
+          },
+        ],
+      },
+      assessmentDay,
+    );
+    expect(result?.employment[0]).toMatchObject({
+      cutoff: assessmentDay,
+      lowerMonths: 0,
+      upperMonths: null,
+      verdict: "unknown",
+    });
+    expect(result?.criteria[0]?.missing).toContain("Confirm eligible work");
+  });
+
+  it("cannot derive a finite upper bound from unverified dates when employment eligibility is unknown", () => {
+    const { role, input } = employmentInput(61);
+    const result = core.evaluateRecruitingAssessment(
+      role,
+      {
+        ...input,
+        sourceRefs: [
+          ...input.sourceRefs,
+          {
+            id: "unread",
+            kind: "original_material",
+            anchor: primaryAssessmentSource.anchor,
+            readState: "unread",
+            readAt: null,
+          },
+        ],
+        facts: input.facts.map((fact) =>
+          fact.id === "job2" ? { ...fact, sourceRefIds: ["unread"] } : fact,
+        ),
+        employmentEvaluations: input.employmentEvaluations.map((evaluation) => ({
+          ...evaluation,
+          intervals: evaluation.intervals.map((interval) =>
+            interval.factId === "job2"
+              ? {
+                  ...interval,
+                  qualifyingFullTime: "unknown",
+                  evidence: [],
+                  missing: ["Read original employment dates"],
+                }
+              : interval,
+          ),
+        })),
+      },
+      assessmentDay,
+    );
+    expect(result.hardGate).toBe("unknown");
+    expect(result.employment[0]).toMatchObject({
+      lowerMonths: 36,
+      upperMonths: null,
+      verdict: "unknown",
+    });
+    expect(result.employment[0]?.intervals[1]?.qualifyingFullTime).toBe("unknown");
+    expect(result.criteria[0]?.missing).toContain("Read original employment dates");
+  });
+
+  it("requires employment and completeness references to the correct fact kinds and primary evidence", () => {
+    const { role, input } = employmentInput(61);
+    for (const evaluation of [
+      {
+        ...input.employmentEvaluations[0]!,
+        intervals: [
+          {
+            factId: "complete",
+            qualifyingFullTime: "met" as const,
+            evidence: ["original"],
+            missing: [],
+          },
+        ],
+      },
+      { ...input.employmentEvaluations[0]!, historyCompletenessFactId: "job1" },
+    ])
+      expect(() =>
+        core.evaluateRecruitingAssessment?.(
+          role,
+          { ...input, employmentEvaluations: [evaluation] },
+          assessmentDay,
+        ),
+      ).toThrow();
+    expect(() =>
+      core.evaluateRecruitingAssessment?.(
+        role,
+        { ...input, sourceRefs: [{ ...primaryAssessmentSource, kind: "provider_report" }] },
+        assessmentDay,
+      ),
     ).toThrow();
   });
 });

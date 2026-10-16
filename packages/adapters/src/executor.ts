@@ -320,6 +320,11 @@ import {
   searchChartCatalog,
 } from "./plot-tool.js";
 import { actorMayUsePrivateEndpoint } from "./private-endpoint.js";
+import {
+  executeRecruitingAssessmentTool,
+  retainRecruitingWebMaterial,
+} from "./recruiting-assessment.js";
+import type { LoadedRecruitingRunContext } from "./recruiting-context.js";
 import { loadRecruitingRunContext } from "./recruiting-context.js";
 import type { RecruitingFeedbackResult } from "./recruiting-feedback.js";
 import {
@@ -3647,6 +3652,7 @@ export function createRunExecutor(deps: ExecutorDeps) {
               }),
           recallPromise,
         ]);
+        let currentRecruitingContext: LoadedRecruitingRunContext | undefined;
         let memoryContext = loadedMemoryContext;
         let recruitingSourceMessageId = run.sourceMessageId ?? null;
         const refreshMemoryContext = async () => {
@@ -3666,7 +3672,7 @@ export function createRunExecutor(deps: ExecutorDeps) {
         ) => {
           if (!deps.artifacts) throw new Error("Recruiting context requires artifact storage");
           if (reason !== "run") await refreshMemoryContext();
-          return loadRecruitingRunContext(
+          currentRecruitingContext = await loadRecruitingRunContext(
             { prisma: deps.prisma, artifacts: deps.artifacts, events: deps.events },
             run,
             memoryContext,
@@ -3679,6 +3685,7 @@ export function createRunExecutor(deps: ExecutorDeps) {
               redact: (text) => redactSecrets(text, runSecrets),
             },
           );
+          return currentRecruitingContext;
         };
         const initialRecruitingContext =
           !messagingChannelRun && thread.activeRecruitingRoleId
@@ -4866,6 +4873,47 @@ export function createRunExecutor(deps: ExecutorDeps) {
           const bypassApproval = gateDecision === "allow" && requiresApprovalByDefault;
           let claimedEffect = false;
 
+          const executeAssessment = async () =>
+            redactConnectorPayload(
+              await executeRecruitingAssessmentTool(
+                { prisma: deps.prisma, artifacts: deps.artifacts },
+                {
+                  actor: researchActor.actor,
+                  runId,
+                  threadId: thread.id,
+                  botId: bot.id,
+                  save:
+                    args.operation === "save" && applied
+                      ? {
+                          leaseOwner: workerId,
+                          leaseFence: fence,
+                          contextArtifact: currentRecruitingContext?.contextArtifact,
+                          effectId: applied.effect.id,
+                          effectRequest: applied.effect.request,
+                        }
+                      : undefined,
+                },
+                args,
+                context,
+              ),
+              runSecrets,
+            );
+          const assessmentError = (error: unknown) => {
+            if (error instanceof IsolationError)
+              return { error: "Recruiting assessment or source is unavailable" };
+            if (error instanceof RecruitingConflictError)
+              return { error: error.message, code: "CONFLICT" };
+            if (error instanceof Error && error.name === "ZodError")
+              return { error: sanitizeConnectorError(error, runSecrets) };
+            throw error;
+          };
+          const replayAssessment = async () => {
+            try {
+              return await executeAssessment();
+            } catch (error) {
+              return assessmentError(error);
+            }
+          };
           const claimOrReturn = async (
             from: "approved" | "intended",
           ): Promise<unknown | undefined> => {
@@ -4898,6 +4946,16 @@ export function createRunExecutor(deps: ExecutorDeps) {
             if (current) {
               const retryGate = resolveDuplicateEffectGate(current, name);
               if (retryGate.action === "return") {
+                if (
+                  name === "recruiting_assess" &&
+                  current.status === "completed" &&
+                  (args.operation === "read" ||
+                    (args.operation === "save" &&
+                      retryGate.result &&
+                      typeof retryGate.result === "object" &&
+                      "assessment" in retryGate.result))
+                )
+                  return replayAssessment();
                 if (researchAdmission && current.status === "completed")
                   return researchResult(researchAdmission, current.result, {
                     ...current,
@@ -4976,6 +5034,16 @@ export function createRunExecutor(deps: ExecutorDeps) {
           if (applied?.duplicate) {
             const gate = resolveDuplicateEffectGate(applied.effect, name);
             if (gate.action === "return") {
+              if (
+                name === "recruiting_assess" &&
+                applied.effect.status === "completed" &&
+                (args.operation === "read" ||
+                  (args.operation === "save" &&
+                    gate.result &&
+                    typeof gate.result === "object" &&
+                    "assessment" in gate.result))
+              )
+                return replayAssessment();
               if (researchAdmission && applied.effect.status === "completed")
                 return researchResult(researchAdmission, applied.effect.result, {
                   ...applied.effect,
@@ -5707,6 +5775,19 @@ export function createRunExecutor(deps: ExecutorDeps) {
               throw error;
             }
           }
+          if (name === "recruiting_assess") {
+            if (args.operation === "save" && applied && !claimedEffect) {
+              const early = await claimOrReturn("intended");
+              if (early !== undefined) return early;
+            }
+            try {
+              const result = await executeAssessment();
+              // Save and native effect receipt commit together; never overwrite that immutable receipt.
+              return args.operation === "save" ? result : finish(result);
+            } catch (error) {
+              return finish(assessmentError(error));
+            }
+          }
           if (name === "recruiting_role") {
             if (!deps.artifacts)
               return finish({ error: "Recruiting context requires artifact storage" });
@@ -5799,7 +5880,29 @@ export function createRunExecutor(deps: ExecutorDeps) {
             return finish(await webSearchFromTool(web, context, args));
           }
           if (name === "web_fetch") {
-            return finish(await webFetchFromTool(web, context, args));
+            const fetched = await webFetchFromTool(web, context, args);
+            if ("error" in fetched || !currentRecruitingContext || !deps.artifacts)
+              return finish(redactConnectorPayload(fetched, runSecrets));
+            const result = {
+              ...fetched,
+              url: redactSecrets(fetched.url, runSecrets),
+              title: redactSecrets(fetched.title, runSecrets),
+              text: redactSecrets(fetched.text, runSecrets),
+            };
+            const sourceMaterial = await retainRecruitingWebMaterial(
+              { prisma: deps.prisma, artifacts: deps.artifacts },
+              {
+                actor: researchActor.actor,
+                runId,
+                threadId: thread.id,
+                botId: bot.id,
+                leaseOwner: workerId,
+                leaseFence: fence,
+              },
+              result,
+              context,
+            );
+            return finish({ ...result, ...(sourceMaterial ? { sourceMaterial } : {}) });
           }
           if (PAGE_BROWSER_TOOL_NAMES.has(name)) {
             if (heldForTakeover) {
@@ -7273,8 +7376,10 @@ export function createRunExecutor(deps: ExecutorDeps) {
                           recruitingContextMessage!.messageId,
                         )
                       : undefined;
-                    if (currentThread && !currentThread.activeRecruitingRoleId)
+                    if (currentThread && !currentThread.activeRecruitingRoleId) {
+                      currentRecruitingContext = undefined;
                       await refreshMemoryContext();
+                    }
                     const steeringRoleText =
                       steeringRecruitingContext?.text ??
                       (currentThread
@@ -8158,6 +8263,7 @@ export function selectBuiltinToolsForRun(options: {
         (![
           "remember",
           "recruiting_role",
+          "recruiting_assess",
           "recruiting_feedback",
           "recruiting_research",
           "read_memory",

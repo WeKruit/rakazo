@@ -39,18 +39,40 @@ const assessment = {
   version: 1,
   basedOnVersion: null,
   roleRevisionId: role.currentRevisionId,
-  facts: [{ id: "fact-sample", statement: "Implemented the component", sourceRefIds: [source.id] }],
-  judgments: [
+  facts: [
     {
-      criterionId: "atom-sample",
-      verdict: "met",
-      factIds: ["fact-sample"],
-      evidence: [source.id],
-      missing: [],
+      kind: "statement",
+      id: "fact-sample",
+      statement: "Implemented the component",
+      sourceRefIds: [source.id],
     },
   ],
+  judgments: {
+    atoms: [
+      {
+        atomId: "atom-sample",
+        verdict: "met",
+        factIds: ["fact-sample"],
+        evidence: [source.id],
+        missing: [],
+      },
+    ],
+    employment: [],
+    criteria: [
+      {
+        criterionId: "atom-sample",
+        verdict: "met",
+        factIds: ["fact-sample"],
+        evidence: [source.id],
+        missing: [],
+      },
+    ],
+    hardGate: "met",
+  },
   questions: [],
-  sourceRefs: [source],
+  sourceRefs: [
+    { ...source, selection: { kind: "artifact_text", start: 0, end: source.quote.length } },
+  ],
   createdByRunId: "run-sample",
   createdAt: now,
 };
@@ -526,6 +548,89 @@ describe("recruiting contracts", () => {
     ).toBe(false);
   });
 
+  it("requires repeated atom IDs to keep the complete employment rule across every role entry point", () => {
+    const employmentRule = {
+      minimumMonths: 17,
+      countingRule: "complete_calendar_months",
+      qualificationDefinition: "Full-time personally implemented work",
+      cutoff: { kind: "assessment_date" },
+    };
+    const first = { ...criterion, expression: { ...criterion.expression, employmentRule } };
+    const duplicate = { ...first, id: "criterion-other" };
+    const value = { ...definition, criteria: [first, duplicate] };
+    const inputs = [
+      {
+        schema: contracts.RecruitingRoleRevisionSchema,
+        value: {
+          ...value,
+          id: role.currentRevisionId,
+          roleId: role.id,
+          revision: 1,
+          createdAt: now,
+        },
+      },
+      {
+        schema: contracts.CreateRecruitingRoleInput,
+        value: {
+          ...value,
+          sourceThreadId: role.sourceThreadId,
+          title: role.title,
+          expectedRevision: 0,
+        },
+      },
+      {
+        schema: contracts.ReviseRecruitingRoleInput,
+        value: { ...value, roleId: role.id, title: role.title, expectedRevision: 1 },
+      },
+      {
+        schema: contracts.RecruitingRoleToolInputSchema,
+        value: {
+          ...value,
+          operation: "create",
+          title: role.title,
+          expectedRevision: 0,
+          intent: { basis: "direct", quote: "Create this role" },
+        },
+      },
+      {
+        schema: contracts.RecruitingRoleToolInputSchema,
+        value: {
+          ...value,
+          operation: "revise",
+          roleId: role.id,
+          title: role.title,
+          expectedRevision: 1,
+          intent: { basis: "direct", quote: "Revise this role" },
+        },
+      },
+    ];
+    for (const { schema, value: input } of inputs) {
+      expect(schema.safeParse(input).success).toBe(true);
+      expect(
+        schema.safeParse({ ...input, criteria: [criterion, { ...criterion, id: duplicate.id }] })
+          .success,
+      ).toBe(true);
+      for (const rule of [
+        undefined,
+        { ...employmentRule, minimumMonths: 18 },
+        { ...employmentRule, qualificationDefinition: "A different work definition" },
+        {
+          ...employmentRule,
+          cutoff: { kind: "fixed", date: { precision: "day", year: 2024, month: 12, day: 31 } },
+        },
+      ])
+        expect(
+          schema.safeParse({
+            ...input,
+            criteria: [
+              first,
+              { ...duplicate, expression: { ...duplicate.expression, employmentRule: rule } },
+            ],
+          }).success,
+        ).toBe(false);
+    }
+  });
+
   it("keeps unknown task creation distinct from a known provider task ID", () => {
     const task = {
       id: action.taskId,
@@ -624,7 +729,7 @@ describe("recruiting contracts", () => {
     expect(parsed).toEqual(assessment);
     expect(Object.isFrozen(parsed)).toBe(true);
     expect(Object.isFrozen(parsed.judgments)).toBe(true);
-    expect(Object.isFrozen(parsed.judgments[0])).toBe(true);
+    expect(Object.isFrozen(parsed.judgments.criteria[0])).toBe(true);
     expect(
       contracts.RecruitingAssessmentSchema.safeParse({
         ...assessment,
@@ -637,8 +742,18 @@ describe("recruiting contracts", () => {
       { version: 2, basedOnVersion: 2 },
       { version: 2, basedOnVersion: null },
       { facts: [assessment.facts[0], assessment.facts[0]] },
-      { judgments: [{ ...assessment.judgments[0], factIds: ["missing-fact"] }] },
-      { judgments: [{ ...assessment.judgments[0], evidence: ["missing-source"] }] },
+      {
+        judgments: {
+          ...assessment.judgments,
+          criteria: [{ ...assessment.judgments.criteria[0], factIds: ["missing-fact"] }],
+        },
+      },
+      {
+        judgments: {
+          ...assessment.judgments,
+          criteria: [{ ...assessment.judgments.criteria[0], evidence: ["missing-source"] }],
+        },
+      },
       { sourceRefs: [{ ...source, readState: "unread", readAt: null }] },
     ]) {
       expect(
@@ -651,7 +766,10 @@ describe("recruiting contracts", () => {
     expect(
       contracts.RecruitingAssessmentSchema.safeParse({
         ...assessment,
-        judgments: [{ ...assessment.judgments[0], verdict: "qualified" }],
+        judgments: {
+          ...assessment.judgments,
+          criteria: [{ ...assessment.judgments.criteria[0], verdict: "qualified" }],
+        },
       }).success,
     ).toBe(false);
   });
@@ -661,20 +779,28 @@ describe("recruiting contracts", () => {
     const gap = {
       ...assessment,
       sourceRefs: [{ ...withoutQuote, kind: "provider_report", readState: "unread", readAt: null }],
-      judgments: [
-        {
-          ...assessment.judgments[0],
-          verdict: "unknown",
-          evidence: [],
-          missing: ["Read the original material"],
-        },
-      ],
+      judgments: {
+        atoms: [],
+        employment: [],
+        hardGate: "unknown",
+        criteria: [
+          {
+            ...assessment.judgments.criteria[0],
+            verdict: "unknown",
+            evidence: [],
+            missing: ["Read the original material"],
+          },
+        ],
+      },
     };
     expect(contracts.RecruitingAssessmentSchema.safeParse(gap).success).toBe(true);
     expect(
       contracts.RecruitingAssessmentSchema.safeParse({
         ...gap,
-        judgments: [{ ...gap.judgments[0], evidence: [source.id] }],
+        judgments: {
+          ...gap.judgments,
+          criteria: [{ ...gap.judgments.criteria[0], evidence: [source.id] }],
+        },
       }).success,
     ).toBe(false);
   });
@@ -715,7 +841,8 @@ describe("recruiting contracts", () => {
           expectedRevision: 0,
           roleRevisionId: role.currentRevisionId,
           facts: assessment.facts,
-          judgments: assessment.judgments,
+          atomJudgments: assessment.judgments.atoms,
+          employmentEvaluations: [],
           questions: assessment.questions,
           sourceRefs: assessment.sourceRefs,
         },
@@ -822,5 +949,166 @@ describe("recruiting contracts", () => {
         payload: { text: "existing event" },
       }).success,
     ).toBe(true);
+  });
+});
+
+describe("typed recruiting assessment evidence", () => {
+  const save = {
+    roleId: role.id,
+    candidateKey: assessment.candidateKey,
+    expectedRevision: 0,
+    roleRevisionId: role.currentRevisionId,
+    facts: assessment.facts,
+    atomJudgments: assessment.judgments.atoms,
+    employmentEvaluations: [],
+    questions: [],
+    sourceRefs: assessment.sourceRefs,
+  };
+
+  it("accepts only agent atom inputs and rejects supplied aggregate results", () => {
+    expect(contracts.SaveRecruitingAssessmentInput.safeParse(save).success).toBe(true);
+    expect(
+      contracts.RecruitingAssessmentToolInputSchema?.parse({ operation: "save", ...save }),
+    ).toEqual({ operation: "save", ...save });
+    expect(
+      contracts.RecruitingAssessmentToolInputSchema?.parse({
+        operation: "read",
+        candidateKey: "candidate",
+      }),
+    ).toEqual({ operation: "read", candidateKey: "candidate" });
+    expect(
+      contracts.RecruitingAssessmentToolInputSchema?.safeParse({
+        operation: "read",
+        candidateKey: "candidate",
+        roleId: role.id,
+      }).success,
+    ).toBe(false);
+    for (const aggregate of [
+      { judgments: assessment.judgments },
+      { hardGate: "met" },
+      { criteria: [] },
+    ])
+      expect(
+        contracts.SaveRecruitingAssessmentInput.safeParse({ ...save, ...aggregate }).success,
+      ).toBe(false);
+  });
+
+  it("preserves exact quote bytes and requires an anchor-compatible typed selection", () => {
+    const quote = "  Built it.\r\n";
+    const exact = {
+      ...save.sourceRefs[0],
+      quote,
+      selection: { kind: "artifact_text", start: 2, end: 2 + quote.length },
+    };
+    expect(contracts.RecruitingAssessmentSourceRefSchema?.parse(exact).quote).toBe(quote);
+    for (const selection of [
+      undefined,
+      { kind: "artifact_text", start: 2, end: 2 },
+      { kind: "artifact_text", start: -1, end: 5 },
+      { kind: "message_text", blockIndex: 0, start: 0, end: quote.length },
+      { kind: "artifact_json_string", path: ["rows", -1], start: 0, end: quote.length },
+    ])
+      expect(
+        contracts.RecruitingAssessmentSourceRefSchema?.safeParse({ ...exact, selection }).success,
+      ).toBe(false);
+    expect(
+      contracts.RecruitingAssessmentSourceRefSchema?.safeParse({
+        ...exact,
+        anchor: { kind: "message", messageId: "message", locator: "block 1" },
+        selection: { kind: "message_text", blockIndex: 1, start: 0, end: quote.length },
+      }).success,
+    ).toBe(true);
+    expect(
+      contracts.RecruitingAssessmentSourceRefSchema?.safeParse({
+        ...exact,
+        selection: {
+          kind: "artifact_json_string",
+          path: ["rows", 0, "body"],
+          start: 0,
+          end: quote.length,
+        },
+      }).success,
+    ).toBe(true);
+    for (const readState of ["unread", "unavailable"]) {
+      const gap = { ...source, readState, readAt: readState === "unread" ? null : now };
+      expect(contracts.RecruitingAssessmentSourceRefSchema?.safeParse(gap).success).toBe(false);
+      const { quote: _quote, ...unquoted } = gap;
+      expect(contracts.RecruitingAssessmentSourceRefSchema?.safeParse(unquoted).success).toBe(true);
+      expect(
+        contracts.RecruitingAssessmentSourceRefSchema?.safeParse({
+          ...unquoted,
+          selection: exact.selection,
+        }).success,
+      ).toBe(false);
+    }
+  });
+
+  it("requires typed facts and valid precision-aware dates without inventing month or day", () => {
+    const common = { id: "job", statement: "Worked on the component", sourceRefIds: [source.id] };
+    const employment = {
+      ...common,
+      kind: "employment",
+      start: { precision: "year", year: 2020 },
+      end: "present",
+      employmentType: "full-time",
+    };
+    expect(contracts.RecruitingFactSchema.parse(employment)).toEqual(employment);
+    expect(
+      contracts.RecruitingFactSchema.safeParse({ ...employment, start: null, end: null }).success,
+    ).toBe(true);
+    expect(contracts.RecruitingFactSchema.safeParse(common).success).toBe(false);
+    expect(
+      contracts.RecruitingFactSchema.safeParse({
+        ...employment,
+        start: { precision: "year", year: 2020, month: 1 },
+      }).success,
+    ).toBe(false);
+    for (const date of [
+      { precision: "day", year: 2023, month: 2, day: 29 },
+      { precision: "month", year: 2024, month: 13 },
+      { precision: "year", year: 0 },
+    ])
+      expect(contracts.RecruitingFactSchema.safeParse({ ...employment, start: date }).success).toBe(
+        false,
+      );
+    const completeness = {
+      ...common,
+      kind: "history_completeness",
+      complete: true,
+      asOf: { precision: "day", year: 2024, month: 2, day: 29 },
+    };
+    expect(contracts.RecruitingFactSchema.safeParse(completeness).success).toBe(true);
+    expect(
+      contracts.RecruitingFactSchema.safeParse({
+        ...completeness,
+        asOf: { precision: "month", year: 2024, month: 2 },
+      }).success,
+    ).toBe(false);
+  });
+
+  it("allows an explicit numeric policy only on its exact role atom and keeps plain atoms valid", () => {
+    const employmentRule = {
+      minimumMonths: 17,
+      countingRule: "complete_calendar_months",
+      qualificationDefinition: "Full-time relevant work",
+      cutoff: { kind: "fixed", date: { precision: "day", year: 2024, month: 2, day: 29 } },
+    };
+    const expression = { ...criterion.expression, employmentRule };
+    expect(contracts.RecruitingCriterionExpressionSchema.parse(expression)).toEqual(expression);
+    expect(contracts.RecruitingCriterionExpressionSchema.parse(criterion.expression)).toEqual(
+      criterion.expression,
+    );
+    for (const invalid of [
+      { minimumMonths: undefined },
+      { minimumMonths: 1.5 },
+      { countingRule: undefined },
+      { cutoff: { kind: "fixed", date: { precision: "month", year: 2024, month: 2 } } },
+    ])
+      expect(
+        contracts.RecruitingCriterionExpressionSchema.safeParse({
+          ...expression,
+          employmentRule: { ...employmentRule, ...invalid },
+        }).success,
+      ).toBe(false);
   });
 });

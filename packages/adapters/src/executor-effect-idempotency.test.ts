@@ -33,6 +33,10 @@ import {
   resolveCatalogCall,
 } from "./lazy-tool-catalog.js";
 import type { MemoryProviderResolver } from "./memory-provider-factory.js";
+import {
+  executeRecruitingAssessmentTool,
+  retainRecruitingWebMaterial,
+} from "./recruiting-assessment.js";
 import type { LoadedRecruitingRunContext } from "./recruiting-context.js";
 import { loadRecruitingRunContext } from "./recruiting-context.js";
 import type * as RecruitingFeedbackModule from "./recruiting-feedback.js";
@@ -47,6 +51,10 @@ import {
 } from "./recruiting-tools.js";
 
 vi.mock("./recruiting-context.js", () => ({ loadRecruitingRunContext: vi.fn() }));
+vi.mock("./recruiting-assessment.js", () => ({
+  executeRecruitingAssessmentTool: vi.fn(),
+  retainRecruitingWebMaterial: vi.fn(),
+}));
 vi.mock("./recruiting-tools.js", () => ({
   executeRecruitingRoleTool: vi.fn(),
   prepareRecruitingResearchTool: vi.fn(),
@@ -292,7 +300,17 @@ function fixture(runId = "run-1", secrets: string[] = []) {
     resolveCall: vi.fn<NonNullable<ConnectorProvider["resolveCall"]>>(async () => undefined),
     execute: vi.fn<ConnectorProvider["execute"]>(async function* () {}),
   };
+  const web = {
+    search: vi.fn(async () => []),
+    fetch: vi.fn(async () => ({
+      url: "https://example.org/profile",
+      title: "Public profile",
+      text: "Public evidence",
+      truncated: false,
+    })),
+  };
   const executor = createRunExecutor({
+    web,
     prisma,
     runtime: { describe: () => ({ capabilities: { scripted: false } }), run: runtimeRun },
     connector,
@@ -314,6 +332,7 @@ function fixture(runId = "run-1", secrets: string[] = []) {
   return {
     effects,
     results,
+    web,
     sourceMessages,
     scratchpadRows,
     memoryCommit,
@@ -2776,5 +2795,238 @@ describe("native recruiting research executor integration", () => {
       }),
     ]);
     expect(f.prisma.externalEffect.create).not.toHaveBeenCalled();
+  });
+});
+
+describe("native recruiting assessment effect delivery", () => {
+  const args = {
+    operation: "save",
+    roleId: "role-1",
+    roleRevisionId: "revision-1",
+    candidateKey: "candidate-1",
+    expectedRevision: 0,
+    facts: [],
+    questions: [],
+    sourceRefs: [],
+    atomJudgments: [],
+    employmentEvaluations: [],
+  };
+  const saved = {
+    assessment: {
+      id: "assessment-1",
+      version: 1,
+      basedOnVersion: 0,
+      createdByRunId: "assessment-save",
+      roleId: "role-1",
+      roleRevisionId: "revision-1",
+      candidateKey: "candidate-1",
+      facts: [],
+      sourceRefs: [],
+      questions: [],
+      judgments: { atoms: [], employment: [], criteria: [], hardGate: "unknown" as const },
+      createdAt: "2026-10-16T00:00:00.000Z",
+    },
+    isCurrent: true,
+  };
+  const adopted = {
+    text: "current native role",
+    contextArtifact: { artifactId: "context-1", sha256: "a".repeat(64) },
+  } as LoadedRecruitingRunContext;
+  beforeEach(() => {
+    vi.mocked(executeRecruitingAssessmentTool).mockReset();
+    vi.mocked(retainRecruitingWebMaterial).mockReset();
+    vi.mocked(loadRecruitingRunContext).mockReset();
+  });
+
+  it("uses the latest adopted role and atomically saved receipt, then revalidates replay after an ACK loss", async () => {
+    const f = fixture("assessment-save");
+    f.thread.activeRecruitingRoleId = "role-1";
+    vi.mocked(loadRecruitingRunContext).mockResolvedValue(adopted);
+    vi.mocked(executeRecruitingAssessmentTool).mockImplementation(
+      async (deps, trusted, input, context) => {
+        expect(deps).toEqual({ prisma: f.prisma, artifacts: f.artifacts });
+        expect(input).toEqual(args);
+        expect(trusted).toMatchObject({
+          runId: "assessment-save",
+          threadId: "thread-1",
+          botId: "bot-1",
+          save: {
+            leaseOwner: "worker-1",
+            leaseFence: f.runData.leaseFence,
+            contextArtifact: adopted.contextArtifact,
+            effectId: f.effects[0]?.id,
+            effectRequest: args,
+          },
+        });
+        expect(context.runId).toBe("assessment-save");
+        expect(f.effects[0]?.status).toBe("executing");
+        Object.assign(f.effects[0]!, { status: "completed", result: saved });
+        throw new Error("assessment ACK lost");
+      },
+    );
+    f.setCalls([{ name: "recruiting_assess", args, executionId: "before-ack" }]);
+    await f.run("assessment ACK lost");
+    expect(f.effects).toHaveLength(1);
+    expect(f.results).toEqual([]);
+    // A restarted run may have no current role; the immutable completed receipt still needs ACL validation.
+    f.thread.activeRecruitingRoleId = null;
+    vi.mocked(executeRecruitingAssessmentTool).mockImplementation(async (_deps, trusted) => {
+      expect(trusted.save?.contextArtifact).toBeUndefined();
+      expect(f.effects[0]?.status).toBe("completed");
+      return saved as Awaited<ReturnType<typeof executeRecruitingAssessmentTool>>;
+    });
+    f.setCalls([{ name: "recruiting_assess", args, executionId: "after-ack" }]);
+    await f.run();
+    expect(executeRecruitingAssessmentTool).toHaveBeenCalledTimes(2);
+    expect(f.effects).toHaveLength(1);
+    expect(f.effects[0]?.result).toEqual(saved);
+    expect(f.results).toEqual([saved]);
+    vi.mocked(executeRecruitingAssessmentTool).mockRejectedValue(new IsolationError());
+    await f.run();
+    expect(f.results[1]).toEqual({ error: "Recruiting assessment or source is unavailable" });
+    expect(f.effects[0]?.result).toEqual(saved);
+    expect(f.connector.execute).not.toHaveBeenCalled();
+  });
+
+  it("reads without an adopted context and does not dispatch a connector", async () => {
+    const f = fixture("assessment-read");
+    const read = { operation: "read", candidateKey: "candidate-1" };
+    const result = { status: "current" as const, workspace: null, assessment: saved };
+    vi.mocked(executeRecruitingAssessmentTool).mockResolvedValue(result);
+    f.setCalls([{ name: "recruiting_assess", args: read, executionId: "read" }]);
+    await f.run();
+    expect(f.results).toEqual([result]);
+    expect(executeRecruitingAssessmentTool).toHaveBeenCalledWith(
+      expect.anything(),
+      expect.objectContaining({ save: undefined }),
+      read,
+      expect.anything(),
+    );
+    expect(f.connector.execute).not.toHaveBeenCalled();
+    // A completed generic read effect must not freeze role selection or source access.
+    const updated = { status: "current" as const, workspace: null, assessment: null };
+    vi.mocked(executeRecruitingAssessmentTool).mockResolvedValueOnce(updated);
+    await f.run();
+    expect(executeRecruitingAssessmentTool).toHaveBeenCalledTimes(2);
+    expect(f.results[1]).toEqual(updated);
+    vi.mocked(executeRecruitingAssessmentTool).mockRejectedValueOnce(new IsolationError());
+    await f.run();
+    expect(f.results[2]).toEqual({ error: "Recruiting assessment or source is unavailable" });
+    expect(f.effects).toHaveLength(1);
+  });
+
+  it("redacts delivered evidence on save and completed replay while preserving the immutable receipt", async () => {
+    const f = fixture("assessment-redaction", ["private-evidence-value"]);
+    const source = {
+      id: "source-1",
+      kind: "original_material" as const,
+      anchor: { kind: "message" as const, messageId: "human-1", locator: "text" },
+      readState: "read" as const,
+      readAt: "2026-10-16T00:00:00.000Z",
+      quote: "private-evidence-value",
+      selection: {
+        kind: "message_text" as const,
+        blockIndex: 0,
+        start: 0,
+        end: "private-evidence-value".length,
+      },
+    };
+    const input = { ...args, sourceRefs: [source] };
+    const receipt = { ...saved, assessment: { ...saved.assessment, sourceRefs: [source] } };
+    vi.mocked(executeRecruitingAssessmentTool).mockImplementation(async () => {
+      Object.assign(f.effects[0]!, { status: "completed", result: receipt });
+      return receipt;
+    });
+    f.setCalls([{ name: "recruiting_assess", args: input, executionId: "save" }]);
+    await f.run();
+    await f.run();
+    expect(executeRecruitingAssessmentTool).toHaveBeenCalledTimes(2);
+    expect(f.results).toHaveLength(2);
+    expect(JSON.stringify(f.results)).not.toContain("private-evidence-value");
+    expect(JSON.stringify(f.results)).toContain("[redacted]");
+    expect(f.effects[0]?.result).toEqual(receipt);
+  });
+
+  it("retains only native web_fetch results under an active recruiting context", async () => {
+    const f = fixture("assessment-web-source");
+    const receipt = {
+      artifact: { artifactId: "read-1", sha256: "b".repeat(64) },
+      url: "https://example.org/profile",
+      readAt: "2026-10-16T00:00:00.000Z",
+    };
+    vi.mocked(retainRecruitingWebMaterial).mockResolvedValue(receipt);
+    f.setCalls([{ name: "web_fetch", args: { url: receipt.url }, executionId: "before-role" }]);
+    await f.run();
+    expect(retainRecruitingWebMaterial).not.toHaveBeenCalled();
+    f.thread.activeRecruitingRoleId = "role-1";
+    vi.mocked(loadRecruitingRunContext).mockResolvedValue(adopted);
+    await f.run();
+    expect(retainRecruitingWebMaterial).toHaveBeenCalledWith(
+      { prisma: f.prisma, artifacts: f.artifacts },
+      expect.objectContaining({
+        runId: "assessment-web-source",
+        leaseOwner: "worker-1",
+        leaseFence: f.runData.leaseFence,
+      }),
+      await f.web.fetch.mock.results[1]?.value,
+      expect.anything(),
+    );
+    expect(f.results[1]).toMatchObject({ text: "Public evidence", sourceMaterial: receipt });
+    f.web.fetch.mockRejectedValueOnce(new Error("not available"));
+    await f.run();
+    expect(retainRecruitingWebMaterial).toHaveBeenCalledTimes(1);
+    expect(f.results[2]).toEqual({ error: "not available" });
+  });
+
+  it("clears retained recruiting context when steering removes the selected role", async () => {
+    const f = fixture("assessment-unbind-steering");
+    f.thread.activeRecruitingRoleId = "role-1";
+    vi.mocked(loadRecruitingRunContext).mockResolvedValue(adopted);
+    f.claimSteering.mockImplementation(async () => {
+      f.thread.activeRecruitingRoleId = null;
+      return [
+        {
+          id: "steering-1",
+          messageId: "human-unbind",
+          text: "Unselect this role",
+          blocks: [{ kind: "text", text: "Unselect this role" }],
+        },
+      ];
+    });
+    f.runtimeRun.mockImplementation(async function* (request) {
+      await request.claimSteering!([]);
+      f.results.push(
+        await request.executeTool!(
+          "web_fetch",
+          { url: "https://example.org/profile" },
+          "after-unbind",
+        ),
+      );
+      yield { type: "done" as const, text: "Done" };
+    });
+    await f.run();
+    expect(f.results).toMatchObject([{ text: "Public evidence" }]);
+    expect(retainRecruitingWebMaterial).not.toHaveBeenCalled();
+  });
+
+  it("offers assessment without a computer and excludes disabled or messaging bots", () => {
+    const options = {
+      graphicalToolsAllowed: false,
+      groupId: null,
+      trigger: "user",
+      semanticMemoryEnabled: false,
+      messagingChannelRun: false,
+    };
+    expect(selectBuiltinToolsForRun(options).map((tool) => tool.name)).toContain(
+      "recruiting_assess",
+    );
+    expect(
+      selectBuiltinToolsForRun({ ...options, disabledBuiltinTools: ["recruiting_assess"] }).map(
+        (tool) => tool.name,
+      ),
+    ).not.toContain("recruiting_assess");
+    expect(
+      selectBuiltinToolsForRun({ ...options, messagingChannelRun: true }).map((tool) => tool.name),
+    ).not.toContain("recruiting_assess");
   });
 });

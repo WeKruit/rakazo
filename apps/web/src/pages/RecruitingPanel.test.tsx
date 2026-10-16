@@ -1,5 +1,10 @@
 // @vitest-environment jsdom
-import type { RecruitingRole, RecruitingRoleRevision } from "@rakazo/contracts";
+import type {
+  RecruitingAssessment,
+  RecruitingAssessmentSourceRef,
+  RecruitingRole,
+  RecruitingRoleRevision,
+} from "@rakazo/contracts";
 import type { ReactNode } from "react";
 import { act } from "react";
 import { createRoot } from "react-dom/client";
@@ -86,6 +91,10 @@ const revision: RecruitingRoleRevision = {
   ],
   createdAt: "2026-01-01T00:00:00Z",
 };
+const assessmentSource = {
+  ...source,
+  selection: { kind: "message_text", blockIndex: 0, start: 0, end: source.quote.length },
+} satisfies RecruitingAssessmentSourceRef;
 const assessment = {
   assessment: {
     roleId: role.id,
@@ -95,19 +104,34 @@ const assessment = {
     basedOnVersion: null,
     createdByRunId: "run-1",
     createdAt: "2026-01-01T00:00:00Z",
-    facts: [{ id: "fact-1", statement: "Built a compiler", sourceRefIds: [source.id] }],
-    sourceRefs: [source],
-    judgments: [
-      {
-        criterionId: "criterion-1",
-        verdict: "unknown",
-        factIds: ["fact-1"],
-        evidence: [source.id],
-        missing: ["Which component?"],
-      },
+    facts: [
+      { kind: "statement", id: "fact-1", statement: "Built a compiler", sourceRefIds: [source.id] },
     ],
+    sourceRefs: [assessmentSource],
+    judgments: {
+      atoms: [
+        {
+          atomId: "atom-1",
+          verdict: "unknown",
+          factIds: ["fact-1"],
+          evidence: [source.id],
+          missing: ["Which component?"],
+        },
+      ],
+      employment: [],
+      hardGate: "unknown",
+      criteria: [
+        {
+          criterionId: "criterion-1",
+          verdict: "unknown",
+          factIds: ["fact-1"],
+          evidence: [source.id],
+          missing: ["Which component?"],
+        },
+      ],
+    },
     questions: ["How long?"],
-  },
+  } satisfies RecruitingAssessment,
   isCurrent: false,
 };
 let cleanup: (() => Promise<void>) | undefined;
@@ -303,8 +327,21 @@ it("keeps saved facts and sources inspectable even before a criterion judgment e
       ...assessment,
       assessment: {
         ...assessment.assessment,
-        judgments: [],
-        sourceRefs: [source, { ...source, id: "source-2", quote: "Additional material" }],
+        judgments: { ...assessment.assessment.judgments, atoms: [], criteria: [] },
+        sourceRefs: [
+          assessmentSource,
+          {
+            ...assessmentSource,
+            id: "source-2",
+            quote: "Additional material",
+            selection: {
+              kind: "message_text",
+              blockIndex: 1,
+              start: 0,
+              end: "Additional material".length,
+            },
+          },
+        ],
       },
     },
   ]);
@@ -427,3 +464,113 @@ it("states which memory scopes a group actually queries", async () => {
   expect(view.container.textContent).toContain("No saved memory in these scopes");
   expect(api.list).toHaveBeenCalledExactlyOnceWith({ scope: "user" });
 });
+
+it.each([60, null])(
+  "renders the saved unknown hard gate, preferred verdict and employment upper bound %s without recomputing qualification",
+  async (upperMonths) => {
+    const qualificationDefinition = "Full-time relevant systems work";
+    const preferred = {
+      ...revision.criteria[0]!,
+      id: "preferred-criterion",
+      priority: "preferred" as const,
+      expression: { kind: "atom" as const, id: "preferred-atom", statement: "Compiler experience" },
+      definitionQuestions: [],
+    };
+    api.getWorkspace.mockResolvedValue({
+      role,
+      revision: { ...revision, criteria: [...revision.criteria, preferred] },
+    });
+    const quote = "  Built a compiler.\r\n";
+    const saved = {
+      ...assessment.assessment,
+      roleRevisionId: revision.id,
+      facts: [
+        ...assessment.assessment.facts,
+        {
+          kind: "employment",
+          id: "job-1",
+          statement: "Worked on infrastructure",
+          sourceRefIds: [source.id],
+          employmentType: "full-time",
+          start: { precision: "year", year: 2020 },
+          end: "present",
+        },
+      ],
+      sourceRefs: [
+        {
+          ...assessmentSource,
+          quote,
+          selection: { kind: "message_text", blockIndex: 0, start: 3, end: 3 + quote.length },
+        },
+      ],
+      judgments: {
+        atoms: [
+          ...assessment.assessment.judgments.atoms,
+          {
+            atomId: "preferred-atom",
+            verdict: "met",
+            factIds: ["fact-1"],
+            evidence: [source.id],
+            missing: [],
+          },
+        ],
+        employment: [
+          {
+            atomId: "atom-1",
+            intervals: [
+              {
+                factId: "job-1",
+                qualifyingFullTime: "unknown",
+                evidence: [source.id],
+                missing: ["Confirm full-time work"],
+              },
+            ],
+            historyCompletenessFactId: null,
+            evidence: [source.id],
+            missing: ["Complete the work history"],
+            cutoff: { precision: "day", year: 2026, month: 10, day: 16 },
+            minimumMonths: 84,
+            countingRule: "complete_calendar_months",
+            qualificationDefinition,
+            lowerMonths: 36,
+            upperMonths,
+            verdict: "unknown",
+            factIds: ["job-1"],
+          },
+        ],
+        criteria: [
+          ...assessment.assessment.judgments.criteria,
+          {
+            criterionId: preferred.id,
+            verdict: "met",
+            factIds: ["fact-1"],
+            evidence: [source.id],
+            missing: [],
+          },
+        ],
+        hardGate: "unknown",
+      },
+    } satisfies RecruitingAssessment;
+    api.listAssessments.mockResolvedValue([{ assessment: saved, isCurrent: true }]);
+    const view = await mounted();
+    await view.click("Evidence");
+    await view.expand("candidate-1");
+    const gate = [...view.container.querySelectorAll("p")].find(
+      (item) => item.textContent === "Hard criteriaUnknown",
+    );
+    expect(gate).toBeDefined();
+    const preferredSummary = [...view.container.querySelectorAll("summary")].find((item) =>
+      item.textContent?.includes(preferred.expression.statement),
+    );
+    expect(preferredSummary?.textContent).toContain("Met");
+    expect(view.container.textContent).toContain(`${36}–${upperMonths ?? "?"} months`);
+    expect(view.container.textContent).toContain("≥ 84");
+    expect(view.container.textContent).toContain("2026-10-16");
+    expect(view.container.textContent).toContain(qualificationDefinition);
+    expect(
+      [...view.container.querySelectorAll("blockquote")].some((item) => item.textContent === quote),
+    ).toBe(true);
+    await view.click("Missing info");
+    expect(view.container.textContent).toContain("Which component?");
+  },
+);

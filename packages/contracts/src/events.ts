@@ -1,6 +1,6 @@
 import * as z from "zod";
 import { botSecretDestinationSchema } from "./bot-secrets.js";
-import { Id } from "./ids.js";
+import { Id, IsoDate } from "./ids.js";
 import { McpTransportSchema } from "./mcp.js";
 import {
   RecruitingActionDeliveryStateSchema,
@@ -57,6 +57,8 @@ export const ProductEventType = z.enum([
   "recruiting.context.adopted",
   "recruiting.action.transitioned",
   "recruiting.read",
+  "recruiting.material.read",
+  "recruiting.assessment.saved",
   /** Liveness only: never persisted, never applied to a snapshot, always seq 0. */
   "heartbeat",
 ]);
@@ -370,6 +372,25 @@ export const RecruitingReadPayloadSchema = z.discriminatedUnion("phase", [
 ]);
 export type RecruitingReadPayload = z.infer<typeof RecruitingReadPayloadSchema>;
 
+export const RecruitingMaterialReadPayloadSchema = z.strictObject({
+  reader: z.literal("web_fetch"),
+  artifact: RecruitingArtifactRefSchema,
+  url: z.httpUrl(),
+  readAt: IsoDate,
+});
+export type RecruitingMaterialReadPayload = z.infer<typeof RecruitingMaterialReadPayloadSchema>;
+
+export const RecruitingAssessmentSavedPayloadSchema = z.strictObject({
+  roleId: RecruitingId,
+  roleRevisionId: RecruitingId,
+  candidateKey: RecruitingId,
+  version: z.number().int().positive(),
+  effectId: RecruitingId,
+});
+export type RecruitingAssessmentSavedPayload = z.infer<
+  typeof RecruitingAssessmentSavedPayloadSchema
+>;
+
 export const NativeAskAnswerPayloadSchema = z.strictObject({
   messageId: Id,
   askIndex: z.number().int().nonnegative(),
@@ -398,9 +419,13 @@ export const ProductEventSchema = z
           ? RecruitingActionTransitionedPayloadSchema
           : event.type === "recruiting.read"
             ? RecruitingReadPayloadSchema
-            : event.type === "thread.choice"
-              ? NativeAskAnswerPayloadSchema
-              : null;
+            : event.type === "recruiting.material.read"
+              ? RecruitingMaterialReadPayloadSchema
+              : event.type === "recruiting.assessment.saved"
+                ? RecruitingAssessmentSavedPayloadSchema
+                : event.type === "thread.choice"
+                  ? NativeAskAnswerPayloadSchema
+                  : null;
     if (!schema) return;
     const parsed = schema.safeParse(event.payload);
     if (!parsed.success) {

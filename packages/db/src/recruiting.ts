@@ -1,10 +1,11 @@
-import { randomUUID } from "node:crypto";
+import { createHash, randomUUID } from "node:crypto";
 import type { AdapterContext, MemoryCommitRequest } from "@rakazo/adapter-kit";
 import type {
   Actor,
   CreateRecruitingRoleInput as CreateRoleInput,
   RecruitingArtifactRef,
   RecruitingAssessment,
+  RecruitingAssessmentSourceRef,
   RecruitingHumanIntent,
   RecruitingPreferenceFeedbackInput,
   RecruitingReadPayload,
@@ -24,6 +25,7 @@ import {
   RecruitingArtifactRefSchema,
   RecruitingAssessmentSchema,
   RecruitingHumanIntentSchema,
+  RecruitingMaterialReadPayloadSchema,
   RecruitingPreferenceFeedbackSchema,
   RecruitingResearchActionSchema,
   RecruitingResearchTaskSchema,
@@ -34,7 +36,7 @@ import {
   ReviseRecruitingRoleInput,
   SaveRecruitingAssessmentInput,
 } from "@rakazo/contracts";
-import { applyRecruitingPreferenceEdit } from "@rakazo/core";
+import { applyRecruitingPreferenceEdit, evaluateRecruitingAssessment } from "@rakazo/core";
 import { stableJsonValue } from "@rakazo/core/node/approval-effect-key";
 import type { PrismaClient } from "./client.js";
 import { Prisma } from "./client.js";
@@ -323,7 +325,7 @@ export type RecruitingRoleToolResult = {
   changed: boolean;
 };
 
-async function lockLiveRecruitingRun(tx: Tx, actor: Actor, runId: string) {
+async function lockLiveRecruitingRun(tx: Tx, actor: Actor, runId: string, requireRunning = true) {
   // Match native send/steering/stop: lock the thread before its run.
   const lockedThreads = await tx.$queryRaw<{ id: string }[]>(
     Prisma.sql`SELECT "id" FROM "threads" WHERE "id" = (SELECT "threadId" FROM "runs" WHERE "id" = ${runId} AND "spaceId" = ${actor.spaceId} AND "userId" = ${actor.userId}) AND "spaceId" = ${actor.spaceId} AND "userId" = ${actor.userId} FOR UPDATE`,
@@ -340,7 +342,8 @@ async function lockLiveRecruitingRun(tx: Tx, actor: Actor, runId: string) {
     }),
   );
   scoped(actor, run.bot);
-  if (run.status !== "running" || run.threadId !== lockedThreads[0]!.id) throw new IsolationError();
+  if ((requireRunning && run.status !== "running") || run.threadId !== lockedThreads[0]!.id)
+    throw new IsolationError();
   const thread = await requireThread(tx, actor, run.threadId);
   if (thread.botId && thread.botId !== run.botId) throw new IsolationError();
   if (
@@ -964,21 +967,290 @@ export async function getRecruitingAssessment(
   );
 }
 
-/** Only the authenticated runtime supplies this context; no model input can set the creator. */
+/** Native runtime identity, adopted context and effect receipt; never model tool arguments. */
+export type RecruitingAssessmentSaveContext = {
+  runId: string;
+  threadId: string;
+  botId: string;
+  leaseOwner: string;
+  leaseFence: number;
+  contextArtifact?: RecruitingArtifactRef;
+  effectId: string;
+  effectRequest: unknown;
+};
+export type RecruitingAssessmentArtifactBytes = { artifactId: string; bytes: Uint8Array };
+
+function assessmentSelection(text: string, start: number, end: number, quote: string) {
+  const splitsSurrogate = (index: number) =>
+    index > 0 &&
+    index < text.length &&
+    text.charCodeAt(index - 1) >= 0xd800 &&
+    text.charCodeAt(index - 1) <= 0xdbff &&
+    text.charCodeAt(index) >= 0xdc00 &&
+    text.charCodeAt(index) <= 0xdfff;
+  if (
+    end > text.length ||
+    splitsSurrogate(start) ||
+    splitsSurrogate(end) ||
+    text.slice(start, end) !== quote
+  )
+    throw new IsolationError();
+}
+
+function assessmentJsonString(bytes: Uint8Array, path: readonly (string | number)[]): string {
+  let value: unknown = JSON.parse(new TextDecoder("utf-8", { fatal: true }).decode(bytes));
+  for (const key of path) {
+    if (
+      key === "__proto__" ||
+      key === "prototype" ||
+      key === "constructor" ||
+      value === null ||
+      typeof value !== "object" ||
+      (typeof key === "number" ? !Array.isArray(value) : Array.isArray(value)) ||
+      !Object.hasOwn(value, key)
+    )
+      throw new IsolationError();
+    value = (value as Record<string | number, unknown>)[key];
+  }
+  if (typeof value !== "string") throw new IsolationError();
+  return value;
+}
+
+async function validateAssessmentSources(
+  tx: Tx,
+  actor: Actor,
+  sources: readonly RecruitingAssessmentSourceRef[],
+  artifacts: ReadonlyMap<string, Uint8Array>,
+) {
+  await validateSources(tx, actor, sources);
+  for (const source of sources) {
+    if (source.anchor.kind === "message") {
+      await tx.$queryRaw(
+        Prisma.sql`SELECT "id" FROM "messages" WHERE "id" = ${source.anchor.messageId} FOR SHARE`,
+      );
+      const message = await tx.message.findUnique({
+        where: { id: source.anchor.messageId },
+        include: humanMessageInclude,
+      });
+      if (!message) throw new IsolationError();
+      if (source.readState !== "read") continue;
+      if (!isNativeHumanMessage(message) || source.kind === "provider_report")
+        throw new IsolationError();
+      const selection = source.selection;
+      const blocks = MessageBlockSchema.array().parse(message.blocks);
+      const block = selection?.kind === "message_text" ? blocks[selection.blockIndex] : undefined;
+      if (!selection || block?.kind !== "text" || source.quote === undefined)
+        throw new IsolationError();
+      assessmentSelection(block.text, selection.start, selection.end, source.quote);
+    } else {
+      await tx.$queryRaw(
+        Prisma.sql`SELECT "id" FROM "artifacts" WHERE "id" = ${source.anchor.artifact.artifactId} FOR SHARE`,
+      );
+      const artifact = await tx.artifact.findUniqueOrThrow({
+        where: { id: source.anchor.artifact.artifactId },
+      });
+      if (artifact.hash !== source.anchor.artifact.sha256) throw new IsolationError();
+      if (source.readState !== "read") continue;
+      const providerArtifact = await tx.recruitingResearchAction.findFirst({
+        where: {
+          OR: [
+            { receiptArtifactId: artifact.id, receiptArtifactHash: artifact.hash },
+            {
+              outputArtifacts: {
+                array_contains: [{ artifactId: artifact.id, sha256: artifact.hash }],
+              },
+            },
+          ],
+        },
+        select: { id: true },
+      });
+      const readReceipt = artifact.runId
+        ? await tx.event.findFirst({
+            where: {
+              spaceId: actor.spaceId,
+              runId: artifact.runId,
+              botId: artifact.botId ?? undefined,
+              type: "recruiting.material.read",
+              AND: [
+                { payload: { path: ["reader"], equals: "web_fetch" } },
+                { payload: { path: ["artifact", "artifactId"], equals: artifact.id } },
+                { payload: { path: ["artifact", "sha256"], equals: artifact.hash } },
+              ],
+            },
+          })
+        : null;
+      if (
+        (providerArtifact && source.kind !== "provider_report") ||
+        (!providerArtifact && readReceipt && source.kind !== "original_material") ||
+        (!providerArtifact &&
+          (source.kind === "provider_report" || (artifact.runId !== null && !readReceipt)))
+      )
+        throw new IsolationError();
+      if (readReceipt) {
+        const origin = await requireRun(tx, actor, artifact.runId!);
+        const receipt = ProductEventSchema.parse({
+          ...readReceipt,
+          createdAt: readReceipt.createdAt.toISOString(),
+        });
+        const payload = RecruitingMaterialReadPayloadSchema.parse(receipt.payload);
+        if (
+          origin.threadId !== receipt.threadId ||
+          origin.botId !== artifact.botId ||
+          source.url !== payload.url ||
+          source.readAt !== payload.readAt
+        )
+          throw new IsolationError();
+      }
+      const bytes = artifacts.get(artifact.id);
+      if (
+        !bytes ||
+        bytes.byteLength !== artifact.size ||
+        createHash("sha256").update(bytes).digest("hex") !== artifact.hash
+      )
+        throw new IsolationError();
+      const selection = source.selection;
+      if (!selection || selection.kind === "message_text" || source.quote === undefined)
+        throw new IsolationError();
+      const json = artifact.mimeType === "application/json" || artifact.mimeType.endsWith("+json");
+      if (
+        selection.kind === "artifact_json_string"
+          ? !json
+          : !artifact.mimeType.startsWith("text/") || json
+      )
+        throw new IsolationError();
+      const text =
+        selection.kind === "artifact_json_string"
+          ? assessmentJsonString(bytes, selection.path)
+          : new TextDecoder("utf-8", { fatal: true }).decode(bytes);
+      assessmentSelection(text, selection.start, selection.end, source.quote);
+    }
+  }
+}
+
+async function requireAssessmentAdoption(
+  tx: Tx,
+  actor: Actor,
+  context: RecruitingAssessmentSaveContext,
+  role: RecruitingRole,
+  artifacts: ReadonlyMap<string, Uint8Array>,
+) {
+  if (!context.contextArtifact) throw new IsolationError();
+  const event = await tx.event.findFirst({
+    where: {
+      spaceId: actor.spaceId,
+      threadId: context.threadId,
+      botId: context.botId,
+      runId: context.runId,
+      type: "recruiting.context.adopted",
+    },
+    orderBy: { seq: "desc" },
+  });
+  if (!event) throw new IsolationError();
+  const payload = event.payload as {
+    roleId?: string;
+    roleRevisionId?: string;
+    contextArtifact?: RecruitingArtifactRef;
+  };
+  if (
+    payload.roleId !== role.id ||
+    payload.roleRevisionId !== role.currentRevisionId ||
+    payload.contextArtifact?.artifactId !== context.contextArtifact.artifactId ||
+    payload.contextArtifact?.sha256 !== context.contextArtifact.sha256
+  )
+    throw new RecruitingConflictError();
+  await validateArtifact(tx, actor, context.contextArtifact);
+  const artifact = await tx.artifact.findUniqueOrThrow({
+    where: { id: context.contextArtifact.artifactId },
+  });
+  const bytes = artifacts.get(artifact.id);
+  if (
+    artifact.runId !== context.runId ||
+    artifact.botId !== context.botId ||
+    !bytes ||
+    bytes.byteLength !== artifact.size ||
+    createHash("sha256").update(bytes).digest("hex") !== artifact.hash
+  )
+    throw new IsolationError();
+  const manifest = JSON.parse(new TextDecoder("utf-8", { fatal: true }).decode(bytes));
+  if (
+    manifest.version !== 1 ||
+    manifest.actor?.spaceId !== actor.spaceId ||
+    manifest.actor?.userId !== actor.userId ||
+    manifest.runId !== context.runId ||
+    manifest.threadId !== context.threadId ||
+    manifest.botId !== context.botId ||
+    manifest.roleId !== role.id ||
+    manifest.roleRevisionId !== role.currentRevisionId ||
+    manifest.roleRevision !== role.revision
+  )
+    throw new IsolationError();
+}
+
+/** The immutable snapshot and native effect completion commit together. */
 export async function saveRecruitingAssessment(
   prisma: PrismaClient,
   actor: Actor,
-  context: { runId: string; threadId: string },
+  context: RecruitingAssessmentSaveContext,
   untrusted: SaveAssessmentInput,
+  trustedArtifacts: readonly RecruitingAssessmentArtifactBytes[],
 ): Promise<RecruitingAssessmentSnapshot> {
   const input = SaveRecruitingAssessmentInput.parse(untrusted);
+  const request = context.effectRequest as { operation?: unknown } & Record<string, unknown>;
+  if (request?.operation !== "save") throw new IsolationError();
+  const { operation: _operation, ...requestInput } = request;
+  if (stableJsonValue(SaveRecruitingAssessmentInput.parse(requestInput)) !== stableJsonValue(input))
+    throw new IsolationError();
+  const artifacts = new Map(trustedArtifacts.map(({ artifactId, bytes }) => [artifactId, bytes]));
+  if (artifacts.size !== trustedArtifacts.length) throw new IsolationError();
   return prisma.$transaction(async (tx) => {
+    const { run, thread } = await lockLiveRecruitingRun(tx, actor, context.runId, false);
+    if (run.threadId !== context.threadId || run.botId !== context.botId)
+      throw new IsolationError();
     // ponytail: one role row lock serializes candidate writes; split by candidate only if contention appears.
     const role = await requireRole(tx, actor, input.roleId, true);
-    const run = await requireRun(tx, actor, context.runId);
-    if (run.threadId !== context.threadId) throw new IsolationError();
-    const thread = await requireThread(tx, actor, context.threadId);
-    if (thread.activeRecruitingRoleId !== role.id) throw new IsolationError();
+    await tx.$queryRaw(
+      Prisma.sql`SELECT "id" FROM "external_effects" WHERE "id" = ${context.effectId} FOR UPDATE`,
+    );
+    const effect = await tx.externalEffect.findFirst({
+      where: {
+        id: context.effectId,
+        spaceId: actor.spaceId,
+        runId: run.id,
+        kind: "recruiting_assess",
+      },
+    });
+    if (!effect || stableJsonValue(effect.request) !== stableJsonValue(context.effectRequest))
+      throw new IsolationError();
+    if (effect.status === "completed") {
+      const saved = effect.result as { assessment?: unknown; isCurrent?: unknown } | null;
+      const assessment = RecruitingAssessmentSchema.parse(saved?.assessment);
+      if (
+        assessment.roleId !== role.id ||
+        assessment.roleRevisionId !== input.roleRevisionId ||
+        assessment.candidateKey !== input.candidateKey ||
+        assessment.version !== input.expectedRevision + 1 ||
+        assessment.createdByRunId !== run.id
+      )
+        throw new IsolationError();
+      const row = await tx.recruitingAssessment.findUnique({
+        where: {
+          roleId_candidateKey_version: {
+            roleId: role.id,
+            candidateKey: assessment.candidateKey,
+            version: assessment.version,
+          },
+        },
+      });
+      if (!row) throw new IsolationError();
+      const snapshot = await assessmentSnapshot(tx, actor, role, row);
+      if (stableJsonValue(snapshot.assessment) !== stableJsonValue(assessment))
+        throw new IsolationError();
+      await validateAssessmentSources(tx, actor, assessment.sourceRefs, artifacts);
+      return snapshot;
+    }
+    requireResearchLease(run, context);
+    if (effect.status !== "executing" || thread.activeRecruitingRoleId !== role.id)
+      throw new IsolationError();
     const revision = await tx.recruitingRoleRevision.findFirst({
       where: { id: input.roleRevisionId, roleId: role.id },
     });
@@ -988,19 +1260,22 @@ export async function saveRecruitingAssessment(
       ...revision,
       createdAt: revision.createdAt.toISOString(),
     });
-    const criteria = new Set(definition.criteria.map((criterion) => criterion.id));
-    if (
-      input.judgments.length !== criteria.size ||
-      input.judgments.some((judgment) => !criteria.has(judgment.criterionId))
-    )
-      throw new IsolationError();
+    await validateDefinition(tx, actor, definition);
+    await requireAssessmentAdoption(tx, actor, context, role, artifacts);
     const last = await tx.recruitingAssessment.findFirst({
       where: { roleId: role.id, candidateKey: input.candidateKey },
       orderBy: { version: "desc" },
       select: { version: true },
     });
     if ((last?.version ?? 0) !== input.expectedRevision) throw new RecruitingConflictError();
-    await validateSources(tx, actor, input.sourceRefs);
+    await validateAssessmentSources(tx, actor, input.sourceRefs, artifacts);
+    const now = new Date();
+    const judgments = evaluateRecruitingAssessment(definition, input, {
+      precision: "day",
+      year: now.getUTCFullYear(),
+      month: now.getUTCMonth() + 1,
+      day: now.getUTCDate(),
+    });
     const row = await tx.recruitingAssessment.create({
       data: {
         roleId: role.id,
@@ -1009,13 +1284,43 @@ export async function saveRecruitingAssessment(
         version: input.expectedRevision + 1,
         basedOnVersion: input.expectedRevision || null,
         facts: input.facts as Prisma.InputJsonValue,
-        judgments: input.judgments as Prisma.InputJsonValue,
+        judgments: judgments as Prisma.InputJsonValue,
         questions: input.questions as Prisma.InputJsonValue,
         sourceRefs: input.sourceRefs as Prisma.InputJsonValue,
         createdByRunId: run.id,
       },
     });
-    return assessmentSnapshot(tx, actor, role, row);
+    const snapshot = await assessmentSnapshot(tx, actor, role, row);
+    const completed = await tx.externalEffect.updateMany({
+      where: {
+        id: effect.id,
+        runId: run.id,
+        status: "executing",
+        run: {
+          status: "running",
+          leaseOwner: context.leaseOwner,
+          leaseFence: context.leaseFence,
+          leaseExpiresAt: { gt: new Date() },
+        },
+      },
+      data: { status: "completed", result: snapshot as unknown as Prisma.InputJsonValue },
+    });
+    if (completed.count !== 1) throw new IsolationError();
+    await appendEventInTransaction(tx, {
+      spaceId: actor.spaceId,
+      threadId: thread.id,
+      botId: run.botId,
+      runId: run.id,
+      type: "recruiting.assessment.saved",
+      payload: {
+        roleId: role.id,
+        roleRevisionId: input.roleRevisionId,
+        candidateKey: input.candidateKey,
+        version: row.version,
+        effectId: effect.id,
+      },
+    });
+    return snapshot;
   });
 }
 
@@ -1030,6 +1335,103 @@ export type RecruitingResearchArtifactInput = {
   storageKey: string;
   clientNonce: string;
 };
+
+/** Called only by the successful native reader, before returning source references to the model. */
+export async function recordRecruitingWebMaterial(
+  prisma: PrismaClient,
+  actor: Actor,
+  context: ResearchLease & { threadId: string; botId: string },
+  input: {
+    artifact: RecruitingResearchArtifactInput;
+    reader: "web_fetch";
+    url: string;
+    readAt: string;
+  },
+) {
+  if (
+    input.reader !== "web_fetch" ||
+    !["http:", "https:"].includes(new URL(input.url).protocol) ||
+    !Number.isFinite(Date.parse(input.readAt)) ||
+    input.artifact.mimeType !== "application/json"
+  )
+    throw new IsolationError();
+  return prisma.$transaction(async (tx) => {
+    const { run, thread } = await lockLiveRecruitingRun(tx, actor, context.runId);
+    requireResearchLease(run, context);
+    if (run.threadId !== context.threadId || run.botId !== context.botId)
+      throw new IsolationError();
+    const retained = await tx.artifact.findUnique({
+      where: {
+        spaceId_userId_clientNonce: {
+          spaceId: actor.spaceId,
+          userId: actor.userId,
+          clientNonce: input.artifact.clientNonce,
+        },
+      },
+    });
+    if (
+      retained &&
+      (retained.runId !== run.id ||
+        retained.botId !== run.botId ||
+        retained.groupId !== thread.groupId ||
+        retained.hash !== input.artifact.hash ||
+        retained.size !== input.artifact.size ||
+        retained.name !== input.artifact.name ||
+        retained.mimeType !== input.artifact.mimeType ||
+        retained.version !== 1 ||
+        retained.rootArtifactId !== null)
+    )
+      throw new IsolationError();
+    const artifact =
+      retained ?? (await createResearchArtifact(tx, actor, run, thread, input.artifact));
+    const existing = await tx.event.findFirst({
+      where: {
+        spaceId: actor.spaceId,
+        runId: run.id,
+        threadId: thread.id,
+        botId: run.botId,
+        type: "recruiting.material.read",
+        payload: { path: ["artifact", "artifactId"], equals: artifact.id },
+      },
+    });
+    if (existing) {
+      const event = ProductEventSchema.parse({
+        ...existing,
+        createdAt: existing.createdAt.toISOString(),
+      });
+      const payload = event.payload as {
+        reader: string;
+        artifact: RecruitingArtifactRef;
+        url: string;
+      };
+      if (
+        payload.reader !== input.reader ||
+        payload.artifact.sha256 !== artifact.hash ||
+        payload.url !== input.url
+      )
+        throw new IsolationError();
+      return { artifact, event, created: false };
+    }
+    const row = await appendEventInTransaction(tx, {
+      spaceId: actor.spaceId,
+      threadId: thread.id,
+      botId: run.botId,
+      runId: run.id,
+      type: "recruiting.material.read",
+      payload: {
+        reader: input.reader,
+        artifact: { artifactId: artifact.id, sha256: artifact.hash },
+        url: input.url,
+        readAt: input.readAt,
+      },
+    });
+    return {
+      artifact,
+      event: ProductEventSchema.parse({ ...row, createdAt: row.createdAt.toISOString() }),
+      created: true,
+    };
+  });
+}
 export type RecruitingResearchContextInput = {
   runId: string;
   sourceMessageId?: string | null;

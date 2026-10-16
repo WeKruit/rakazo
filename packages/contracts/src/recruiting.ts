@@ -60,15 +60,69 @@ export type RecruitingSourceRef = z.infer<typeof RecruitingSourceRefSchema>;
 const SourceRefs = z.array(RecruitingSourceRefSchema).readonly();
 const Questions = z.array(Text).readonly();
 
+const EmploymentYear = z.number().int().min(1).max(9999);
+const EmploymentMonth = z.number().int().min(1).max(12);
+export const RecruitingEmploymentDaySchema = z
+  .strictObject({
+    precision: z.literal("day"),
+    year: EmploymentYear,
+    month: EmploymentMonth,
+    day: z.number().int().min(1).max(31),
+  })
+  .refine(
+    (date) => {
+      const calendar = new Date(0);
+      calendar.setUTCFullYear(date.year, date.month - 1, date.day);
+      return calendar.getUTCMonth() === date.month - 1;
+    },
+    { message: "Employment day must be a valid calendar date" },
+  )
+  .readonly();
+export const RecruitingEmploymentDateSchema = z.discriminatedUnion("precision", [
+  z.strictObject({ precision: z.literal("year"), year: EmploymentYear }).readonly(),
+  z
+    .strictObject({ precision: z.literal("month"), year: EmploymentYear, month: EmploymentMonth })
+    .readonly(),
+  RecruitingEmploymentDaySchema,
+]);
+export type RecruitingEmploymentDate = z.infer<typeof RecruitingEmploymentDateSchema>;
+export type RecruitingEmploymentDay = z.infer<typeof RecruitingEmploymentDaySchema>;
+
+export const RecruitingEmploymentRuleSchema = z
+  .strictObject({
+    minimumMonths: z.number().int().nonnegative(),
+    countingRule: z.literal("complete_calendar_months"),
+    qualificationDefinition: Text,
+    cutoff: z.discriminatedUnion("kind", [
+      z.strictObject({ kind: z.literal("fixed"), date: RecruitingEmploymentDaySchema }).readonly(),
+      // The server freezes the UTC calendar day at the start of assessment execution.
+      z.strictObject({ kind: z.literal("assessment_date") }).readonly(),
+    ]),
+  })
+  .readonly();
+export type RecruitingEmploymentRule = z.infer<typeof RecruitingEmploymentRuleSchema>;
+
 export type RecruitingCriterionExpression =
-  | Readonly<{ kind: "atom"; id: string; statement: string }>
+  | Readonly<{
+      kind: "atom";
+      id: string;
+      statement: string;
+      employmentRule?: RecruitingEmploymentRule;
+    }>
   | Readonly<{ kind: "all" | "any"; items: readonly RecruitingCriterionExpression[] }>
   | Readonly<{ kind: "not"; item: RecruitingCriterionExpression }>;
 
 export const RecruitingCriterionExpressionSchema: z.ZodType<RecruitingCriterionExpression> = z.lazy(
   () =>
     z.discriminatedUnion("kind", [
-      z.strictObject({ kind: z.literal("atom"), id: RecruitingId, statement: Text }).readonly(),
+      z
+        .strictObject({
+          kind: z.literal("atom"),
+          id: RecruitingId,
+          statement: Text,
+          employmentRule: RecruitingEmploymentRuleSchema.optional(),
+        })
+        .readonly(),
       z
         .strictObject({
           kind: z.enum(["all", "any"]),
@@ -92,31 +146,39 @@ export const RecruitingCriterionSchema = z
   .readonly();
 export type RecruitingCriterion = z.infer<typeof RecruitingCriterionSchema>;
 
+function validateRoleCriteria(
+  criteria: readonly Pick<RecruitingCriterion, "id" | "expression">[],
+  ctx: z.RefinementCtx,
+): void {
+  if (new Set(criteria.map((criterion) => criterion.id)).size !== criteria.length) {
+    ctx.addIssue({ code: "custom", message: "Criterion IDs must be unique" });
+  }
+  const definitions = new Map<string, string>();
+  const pending = criteria.map((criterion) => criterion.expression);
+  for (let expression = pending.pop(); expression; expression = pending.pop()) {
+    if (expression.kind === "atom") {
+      const previous = definitions.get(expression.id);
+      if (
+        previous !== undefined &&
+        previous !== JSON.stringify([expression.statement, expression.employmentRule ?? null])
+      ) {
+        ctx.addIssue({ code: "custom", message: "An atom ID must have one definition" });
+      }
+      definitions.set(
+        expression.id,
+        JSON.stringify([expression.statement, expression.employmentRule ?? null]),
+      );
+    } else if (expression.kind === "not") {
+      pending.push(expression.item);
+    } else {
+      pending.push(...expression.items);
+    }
+  }
+}
+
 const RoleDefinition = {
   sourceRefs: z.array(RecruitingSourceRefSchema).min(1).readonly(),
-  criteria: z
-    .array(RecruitingCriterionSchema)
-    .superRefine((criteria, ctx) => {
-      if (new Set(criteria.map((criterion) => criterion.id)).size !== criteria.length) {
-        ctx.addIssue({ code: "custom", message: "Criterion IDs must be unique" });
-      }
-      const definitions = new Map<string, string>();
-      const pending = criteria.map((criterion) => criterion.expression);
-      for (let expression = pending.pop(); expression; expression = pending.pop()) {
-        if (expression.kind === "atom") {
-          const previous = definitions.get(expression.id);
-          if (previous !== undefined && previous !== expression.statement) {
-            ctx.addIssue({ code: "custom", message: "An atom ID must have one definition" });
-          }
-          definitions.set(expression.id, expression.statement);
-        } else if (expression.kind === "not") {
-          pending.push(expression.item);
-        } else {
-          pending.push(...expression.items);
-        }
-      }
-    })
-    .readonly(),
+  criteria: z.array(RecruitingCriterionSchema).superRefine(validateRoleCriteria).readonly(),
   preferences: z.array(Text).readonly(),
   definitionQuestions: Questions,
 };
@@ -207,76 +269,232 @@ export const RecruitingResearchActionSchema = z
   .readonly();
 export type RecruitingResearchAction = z.infer<typeof RecruitingResearchActionSchema>;
 
-export const RecruitingFactSchema = z
-  .strictObject({
-    id: RecruitingId,
-    statement: Text,
-    sourceRefIds: z.array(RecruitingId).min(1).readonly(),
+const SelectionRange = {
+  start: z.number().int().nonnegative(),
+  end: z.number().int().positive(),
+};
+export const RecruitingSourceSelectionSchema = z
+  .discriminatedUnion("kind", [
+    z
+      .strictObject({
+        kind: z.literal("message_text"),
+        blockIndex: z.number().int().nonnegative(),
+        ...SelectionRange,
+      })
+      .readonly(),
+    z.strictObject({ kind: z.literal("artifact_text"), ...SelectionRange }).readonly(),
+    z
+      .strictObject({
+        kind: z.literal("artifact_json_string"),
+        path: z.array(z.union([z.string(), z.number().int().nonnegative()])).readonly(),
+        ...SelectionRange,
+      })
+      .readonly(),
+  ])
+  .refine((selection) => selection.end > selection.start, {
+    message: "Selection end must follow its start",
+  });
+export type RecruitingSourceSelection = z.infer<typeof RecruitingSourceSelectionSchema>;
+
+/** Selection offsets are UTF-16 positions in one native text block or exact artifact string. */
+export const RecruitingAssessmentSourceRefSchema = RecruitingSourceRefSchema.unwrap()
+  .safeExtend({
+    quote: z.string().min(1).optional(),
+    selection: RecruitingSourceSelectionSchema.optional(),
+  })
+  .superRefine((source, ctx) => {
+    if (source.readState === "read") {
+      if (source.quote === undefined || source.selection === undefined) {
+        ctx.addIssue({
+          code: "custom",
+          message: "Read assessment evidence requires an exact quote and selection",
+        });
+      } else if (
+        (source.anchor.kind === "message") !==
+        (source.selection.kind === "message_text")
+      ) {
+        ctx.addIssue({
+          code: "custom",
+          path: ["selection"],
+          message: "Selection must match its source anchor",
+        });
+      }
+    } else if (source.quote !== undefined || source.selection !== undefined) {
+      ctx.addIssue({
+        code: "custom",
+        message: "Unread or unavailable evidence cannot provide a quote or selection",
+      });
+    }
   })
   .readonly();
+export type RecruitingAssessmentSourceRef = z.infer<typeof RecruitingAssessmentSourceRefSchema>;
+
+const FactContent = {
+  id: RecruitingId,
+  statement: Text,
+  sourceRefIds: z.array(RecruitingId).min(1).readonly(),
+};
+export const RecruitingFactSchema = z.discriminatedUnion("kind", [
+  z.strictObject({ ...FactContent, kind: z.literal("statement") }).readonly(),
+  z
+    .strictObject({
+      ...FactContent,
+      kind: z.literal("employment"),
+      start: RecruitingEmploymentDateSchema.nullable(),
+      end: z.union([RecruitingEmploymentDateSchema, z.literal("present"), z.null()]),
+      employmentType: Text,
+    })
+    .readonly(),
+  z
+    .strictObject({
+      ...FactContent,
+      kind: z.literal("history_completeness"),
+      complete: z.boolean(),
+      asOf: RecruitingEmploymentDaySchema,
+    })
+    .readonly(),
+]);
 export type RecruitingFact = z.infer<typeof RecruitingFactSchema>;
 
+const JudgmentContent = {
+  verdict: VerdictSchema,
+  factIds: z.array(RecruitingId).readonly(),
+  /** IDs in the assessment's sourceRefs; assistant explanations are not evidence. */
+  evidence: z.array(RecruitingId).readonly(),
+  missing: Questions,
+};
 export const RecruitingJudgmentSchema = z
+  .strictObject({ criterionId: RecruitingId, ...JudgmentContent })
+  .readonly();
+export type RecruitingJudgment = z.infer<typeof RecruitingJudgmentSchema>;
+export const RecruitingAtomJudgmentSchema = z
+  .strictObject({ atomId: RecruitingId, ...JudgmentContent })
+  .readonly();
+export type RecruitingAtomJudgment = z.infer<typeof RecruitingAtomJudgmentSchema>;
+
+export const RecruitingEmploymentEvaluationSchema = z
   .strictObject({
-    criterionId: RecruitingId,
-    verdict: VerdictSchema,
-    factIds: z.array(RecruitingId).readonly(),
-    /** IDs in the assessment's sourceRefs; assistant explanations are not evidence. */
+    atomId: RecruitingId,
+    intervals: z
+      .array(
+        z
+          .strictObject({
+            factId: RecruitingId,
+            qualifyingFullTime: VerdictSchema,
+            evidence: z.array(RecruitingId).readonly(),
+            missing: Questions,
+          })
+          .readonly(),
+      )
+      .readonly(),
+    historyCompletenessFactId: RecruitingId.nullable(),
     evidence: z.array(RecruitingId).readonly(),
     missing: Questions,
   })
   .readonly();
-export type RecruitingJudgment = z.infer<typeof RecruitingJudgmentSchema>;
-
-const AssessmentContent = z
+export type RecruitingEmploymentEvaluation = z.infer<typeof RecruitingEmploymentEvaluationSchema>;
+export const RecruitingEmploymentJudgmentSchema = RecruitingEmploymentEvaluationSchema.unwrap()
+  .extend({
+    cutoff: RecruitingEmploymentDaySchema,
+    minimumMonths: z.number().int().nonnegative(),
+    countingRule: z.literal("complete_calendar_months"),
+    qualificationDefinition: Text,
+    lowerMonths: z.number().int().nonnegative(),
+    upperMonths: z.number().int().nonnegative().nullable(),
+    verdict: VerdictSchema,
+    factIds: z.array(RecruitingId).readonly(),
+  })
+  .readonly();
+export type RecruitingEmploymentJudgment = z.infer<typeof RecruitingEmploymentJudgmentSchema>;
+export const RecruitingAssessmentJudgmentsSchema = z
   .strictObject({
-    roleId: RecruitingId,
-    candidateKey: RecruitingId,
-    roleRevisionId: RecruitingId,
-    facts: z.array(RecruitingFactSchema).readonly(),
-    judgments: z.array(RecruitingJudgmentSchema).readonly(),
-    questions: Questions,
-    sourceRefs: SourceRefs,
+    atoms: z.array(RecruitingAtomJudgmentSchema).readonly(),
+    employment: z.array(RecruitingEmploymentJudgmentSchema).readonly(),
+    criteria: z.array(RecruitingJudgmentSchema).readonly(),
+    hardGate: VerdictSchema,
+  })
+  .readonly();
+export type RecruitingAssessmentJudgments = z.infer<typeof RecruitingAssessmentJudgmentsSchema>;
+
+const AssessmentContent = {
+  roleId: RecruitingId,
+  candidateKey: RecruitingId,
+  roleRevisionId: RecruitingId,
+  facts: z.array(RecruitingFactSchema).readonly(),
+  questions: Questions,
+  sourceRefs: z.array(RecruitingAssessmentSourceRefSchema).readonly(),
+};
+
+function assessmentDependencies(
+  assessment: {
+    facts: readonly RecruitingFact[];
+    sourceRefs: readonly RecruitingAssessmentSourceRef[];
+  },
+  judgments: readonly { factIds: readonly string[]; evidence: readonly string[] }[],
+  ctx: z.RefinementCtx,
+): void {
+  const facts = new Set(assessment.facts.map((fact) => fact.id));
+  const sources = new Map(assessment.sourceRefs.map((source) => [source.id, source]));
+  if (facts.size !== assessment.facts.length || sources.size !== assessment.sourceRefs.length)
+    ctx.addIssue({ code: "custom", message: "Fact and source IDs must be unique" });
+  for (const fact of assessment.facts) {
+    if (
+      new Set(fact.sourceRefIds).size !== fact.sourceRefIds.length ||
+      fact.sourceRefIds.some((id) => !sources.has(id))
+    )
+      ctx.addIssue({
+        code: "custom",
+        path: ["facts"],
+        message: "Unknown or duplicate fact source ID",
+      });
+  }
+  for (const judgment of judgments) {
+    if (
+      new Set(judgment.factIds).size !== judgment.factIds.length ||
+      new Set(judgment.evidence).size !== judgment.evidence.length ||
+      judgment.factIds.some((id) => !facts.has(id)) ||
+      judgment.evidence.some((id) => sources.get(id)?.readState !== "read")
+    )
+      ctx.addIssue({ code: "custom", message: "Unknown, duplicate or unread judgment dependency" });
+  }
+}
+
+export const RecruitingAssessmentSchema = z
+  .strictObject({
+    ...AssessmentContent,
+    judgments: RecruitingAssessmentJudgmentsSchema,
+    version: Revision,
+    basedOnVersion: Revision.nullable(),
+    createdByRunId: RecruitingId,
+    createdAt: IsoDate,
   })
   .superRefine((assessment, ctx) => {
-    const facts = new Set(assessment.facts.map((fact) => fact.id));
-    const sources = new Map(assessment.sourceRefs.map((source) => [source.id, source]));
-    const criteria = new Set(assessment.judgments.map((judgment) => judgment.criterionId));
-    if (
-      facts.size !== assessment.facts.length ||
-      sources.size !== assessment.sourceRefs.length ||
-      criteria.size !== assessment.judgments.length
-    ) {
-      ctx.addIssue({ code: "custom", message: "Fact, source, and judgment IDs must be unique" });
-    }
-    for (const fact of assessment.facts) {
-      if (fact.sourceRefIds.some((id) => !sources.has(id))) {
-        ctx.addIssue({ code: "custom", path: ["facts"], message: "Unknown fact source ID" });
-      }
-    }
-    for (const judgment of assessment.judgments) {
-      if (
-        judgment.factIds.some((id) => !facts.has(id)) ||
-        judgment.evidence.some((id) => sources.get(id)?.readState !== "read")
-      ) {
+    if (assessment.version !== (assessment.basedOnVersion ?? 0) + 1)
+      ctx.addIssue({
+        code: "custom",
+        path: ["basedOnVersion"],
+        message: "An assessment must follow the version it is based on",
+      });
+    assessmentDependencies(
+      assessment,
+      [
+        ...assessment.judgments.atoms,
+        ...assessment.judgments.employment,
+        ...assessment.judgments.criteria,
+      ],
+      ctx,
+    );
+    for (const [field, ids] of [
+      ["atoms", assessment.judgments.atoms.map((judgment) => judgment.atomId)],
+      ["employment", assessment.judgments.employment.map((judgment) => judgment.atomId)],
+      ["criteria", assessment.judgments.criteria.map((judgment) => judgment.criterionId)],
+    ] as const)
+      if (new Set(ids).size !== ids.length)
         ctx.addIssue({
           code: "custom",
-          path: ["judgments"],
-          message: "Unknown fact or unread evidence",
+          path: ["judgments", field],
+          message: "Judgment IDs must be unique",
         });
-      }
-    }
-  });
-
-export const RecruitingAssessmentSchema = AssessmentContent.safeExtend({
-  version: Revision,
-  basedOnVersion: Revision.nullable(),
-  createdByRunId: RecruitingId,
-  createdAt: IsoDate,
-})
-  .refine((assessment) => assessment.version === (assessment.basedOnVersion ?? 0) + 1, {
-    path: ["basedOnVersion"],
-    message: "An assessment must follow the version it is based on",
   })
   .readonly();
 export type RecruitingAssessment = z.infer<typeof RecruitingAssessmentSchema>;
@@ -369,6 +587,7 @@ const RoleToolDefinition = {
   sourceRefs: SourceRefs,
   criteria: z
     .array(RecruitingCriterionSchema.unwrap().extend({ sourceRefs: SourceRefs }))
+    .superRefine(validateRoleCriteria)
     .readonly(),
   intent: RecruitingHumanIntentSchema,
 };
@@ -432,8 +651,47 @@ export type PrepareRecruitingResearchActionInput = z.infer<
   typeof PrepareRecruitingResearchActionInput
 >;
 
-export const SaveRecruitingAssessmentInput = AssessmentContent.safeExtend({
-  /** Expected candidate assessment version; zero creates its first snapshot. */
-  expectedRevision: z.number().int().nonnegative(),
-});
+export const SaveRecruitingAssessmentInput = z
+  .strictObject({
+    ...AssessmentContent,
+    atomJudgments: z.array(RecruitingAtomJudgmentSchema).readonly(),
+    employmentEvaluations: z.array(RecruitingEmploymentEvaluationSchema).readonly(),
+    /** Expected candidate assessment version; zero creates its first snapshot. */
+    expectedRevision: z.number().int().nonnegative(),
+  })
+  .superRefine((assessment, ctx) => {
+    assessmentDependencies(
+      assessment,
+      [
+        ...assessment.atomJudgments,
+        ...assessment.employmentEvaluations.map((evaluation) => ({
+          factIds: [
+            ...evaluation.intervals.map((interval) => interval.factId),
+            ...(evaluation.historyCompletenessFactId === null
+              ? []
+              : [evaluation.historyCompletenessFactId]),
+          ],
+          evidence: evaluation.evidence,
+        })),
+        ...assessment.employmentEvaluations.flatMap((evaluation) =>
+          evaluation.intervals.map((interval) => ({
+            factIds: [interval.factId],
+            evidence: interval.evidence,
+          })),
+        ),
+      ],
+      ctx,
+    );
+    const ids = [...assessment.atomJudgments, ...assessment.employmentEvaluations].map(
+      (judgment) => judgment.atomId,
+    );
+    if (new Set(ids).size !== ids.length)
+      ctx.addIssue({ code: "custom", message: "An atom must have exactly one judgment input" });
+  });
 export type SaveRecruitingAssessmentInput = z.infer<typeof SaveRecruitingAssessmentInput>;
+
+export const RecruitingAssessmentToolInputSchema = z.discriminatedUnion("operation", [
+  z.strictObject({ operation: z.literal("read"), candidateKey: RecruitingId }),
+  SaveRecruitingAssessmentInput.safeExtend({ operation: z.literal("save") }),
+]);
+export type RecruitingAssessmentToolInput = z.infer<typeof RecruitingAssessmentToolInputSchema>;

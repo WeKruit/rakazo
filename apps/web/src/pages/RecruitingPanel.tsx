@@ -457,7 +457,32 @@ function RecruitingWorkspace({ threadId, botId, refreshSignal, onClose }: Props)
                     <p className="break-all text-xs text-muted-foreground">
                       {assessment.roleRevisionId}
                     </p>
-                    {assessment.judgments.map((judgment) => (
+                    <p className="flex items-center gap-2">
+                      <span>
+                        <Trans>Hard criteria</Trans>
+                      </span>
+                      <VerdictLabel verdict={assessment.judgments.hardGate} />
+                    </p>
+                    {assessment.judgments.employment.map((employment) => {
+                      const count =
+                        employment.upperMonths === employment.lowerMonths
+                          ? String(employment.lowerMonths)
+                          : `${employment.lowerMonths}–${employment.upperMonths ?? "?"}`;
+                      const cutoff = `${employment.cutoff.year}-${String(employment.cutoff.month).padStart(2, "0")}-${String(employment.cutoff.day).padStart(2, "0")}`;
+                      return (
+                        <div key={employment.atomId} className="space-y-1">
+                          <p>{employment.qualificationDefinition}</p>
+                          <p className="flex flex-wrap items-center gap-2 text-xs text-muted-foreground">
+                            <span>
+                              <Trans>{count} months</Trans> · ≥ {employment.minimumMonths} ·{" "}
+                              {cutoff}
+                            </span>
+                            <VerdictLabel verdict={employment.verdict} />
+                          </p>
+                        </div>
+                      );
+                    })}
+                    {assessment.judgments.criteria.map((judgment) => (
                       <details key={judgment.criterionId} open className="space-y-2">
                         <summary className="cursor-pointer">
                           <span className="me-2">
@@ -567,7 +592,7 @@ function RecruitingWorkspace({ threadId, botId, refreshSignal, onClose }: Props)
                     </p>
                     {[
                       ...assessment.questions,
-                      ...assessment.judgments.flatMap((judgment) => judgment.missing),
+                      ...assessment.judgments.criteria.flatMap((judgment) => judgment.missing),
                     ].map((question, index) => (
                       <p key={`${index}:${question}`}>{question}</p>
                     ))}

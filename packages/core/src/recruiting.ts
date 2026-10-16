@@ -1,8 +1,19 @@
 import type {
+  RecruitingAssessmentJudgments,
+  RecruitingAtomJudgment,
   RecruitingCriterionExpression,
+  RecruitingEmploymentDate,
+  RecruitingEmploymentDay,
+  RecruitingEmploymentJudgment,
   RecruitingPreferenceFeedbackInput,
   RecruitingRoleRevision,
+  SaveRecruitingAssessmentInput,
   Verdict,
+} from "@rakazo/contracts";
+import {
+  RecruitingAssessmentJudgmentsSchema,
+  RecruitingEmploymentDaySchema,
+  SaveRecruitingAssessmentInput as SaveAssessmentInputSchema,
 } from "@rakazo/contracts";
 
 export function applyRecruitingPreferenceEdit(
@@ -95,10 +106,7 @@ export function evaluateRecruitingCriteria(
   return { criteria, hardGate: hardGate(hardResults) };
 }
 
-export type RecruitingEmploymentDate =
-  | Readonly<{ precision: "year"; year: number }>
-  | Readonly<{ precision: "month"; year: number; month: number }>
-  | Readonly<{ precision: "day"; year: number; month: number; day: number }>;
+export type { RecruitingEmploymentDate } from "@rakazo/contracts";
 
 export type RecruitingEmploymentInterval = Readonly<{
   start: RecruitingEmploymentDate | null;
@@ -225,4 +233,150 @@ function completeCalendarMonths(intervals: [number, number][]): number {
         : 0);
     return months + Math.max(0, lastMonth - firstMonth);
   }, 0);
+}
+
+/** The runtime supplies one frozen UTC assessment day; inputs never supply a cutoff or aggregate. */
+export function evaluateRecruitingAssessment(
+  role: Pick<RecruitingRoleRevision, "criteria" | "definitionQuestions">,
+  untrusted: SaveRecruitingAssessmentInput,
+  assessmentDate: RecruitingEmploymentDay,
+): RecruitingAssessmentJudgments {
+  const input = SaveAssessmentInputSchema.parse(untrusted);
+  const trustedDay = RecruitingEmploymentDaySchema.parse(assessmentDate);
+  const definitions = new Map<string, Extract<RecruitingCriterionExpression, { kind: "atom" }>>();
+  const collect = (expression: RecruitingCriterionExpression): string[] => {
+    if (expression.kind === "atom") {
+      const existing = definitions.get(expression.id);
+      if (existing && JSON.stringify(existing) !== JSON.stringify(expression))
+        throw new Error("An atom ID must have one definition");
+      definitions.set(expression.id, expression);
+      return [expression.id];
+    }
+    return expression.kind === "not" ? collect(expression.item) : expression.items.flatMap(collect);
+  };
+  const criterionAtoms = role.criteria.map((criterion) => collect(criterion.expression));
+  if (new Set(role.criteria.map((criterion) => criterion.id)).size !== role.criteria.length)
+    throw new Error("Criterion IDs must be unique");
+  const semantics = new Map(input.atomJudgments.map((judgment) => [judgment.atomId, judgment]));
+  const evaluations = new Map(
+    input.employmentEvaluations.map((evaluation) => [evaluation.atomId, evaluation]),
+  );
+  for (const id of [...semantics.keys(), ...evaluations.keys()])
+    if (!definitions.has(id)) throw new Error("Unknown assessment atom ID");
+  for (const [id, definition] of definitions) {
+    if (
+      definition.employmentRule
+        ? !evaluations.has(id) || semantics.has(id)
+        : !semantics.has(id) || evaluations.has(id)
+    )
+      throw new Error("Every role atom requires exactly its semantic or employment input");
+  }
+  const facts = new Map(input.facts.map((fact) => [fact.id, fact]));
+  const sources = new Map(input.sourceRefs.map((source) => [source.id, source]));
+  const unique = <T>(items: readonly T[]): T[] => [...new Set(items)];
+  const primary = (id: string): boolean => {
+    const source = sources.get(id);
+    return source?.readState === "read" && source.kind !== "provider_report";
+  };
+  const hasPrimary = (factId: string, evidence: readonly string[]): boolean =>
+    facts.get(factId)!.sourceRefIds.some((id) => evidence.includes(id) && primary(id));
+  const validateEvidence = (
+    factIds: readonly string[],
+    evidence: readonly string[],
+    verdict: Verdict,
+  ): void => {
+    const connected = new Set(factIds.flatMap((id) => facts.get(id)!.sourceRefIds));
+    if (evidence.some((id) => !connected.has(id)))
+      throw new Error("Judgment evidence must support a referenced fact");
+    if (verdict !== "unknown" && !factIds.some((id) => hasPrimary(id, evidence)))
+      throw new Error("Met or unmet judgments require primary read evidence supporting a fact");
+  };
+  const atoms: RecruitingAtomJudgment[] = [];
+  const employment: RecruitingEmploymentJudgment[] = [];
+  for (const [atomId, definition] of definitions) {
+    const rule = definition.employmentRule;
+    if (!rule) {
+      const judgment = semantics.get(atomId)!;
+      validateEvidence(judgment.factIds, judgment.evidence, judgment.verdict);
+      atoms.push(judgment);
+      continue;
+    }
+    const evaluation = evaluations.get(atomId)!;
+    const classified = new Set(evaluation.intervals.map((interval) => interval.factId));
+    if (input.facts.some((fact) => fact.kind === "employment" && !classified.has(fact.id)))
+      throw new Error("Every employment fact requires an explicit eligibility judgment");
+    const cutoff = rule.cutoff.kind === "fixed" ? rule.cutoff.date : trustedDay;
+    const completeness =
+      evaluation.historyCompletenessFactId === null
+        ? null
+        : facts.get(evaluation.historyCompletenessFactId)!;
+    if (completeness && completeness.kind !== "history_completeness")
+      throw new Error("Employment completeness must reference a history completeness fact");
+    const factIds = [
+      ...evaluation.intervals.map((interval) => interval.factId),
+      ...(completeness ? [completeness.id] : []),
+    ];
+    validateEvidence(factIds, evaluation.evidence, "unknown");
+    if (completeness && !hasPrimary(completeness.id, evaluation.evidence))
+      throw new Error("Employment history completeness requires primary read evidence");
+    const historyComplete =
+      completeness?.complete === true &&
+      employmentDateBounds(completeness.asOf)[0] >= employmentDateBounds(cutoff)[0];
+    const intervals = evaluation.intervals.map((interval) => {
+      const fact = facts.get(interval.factId)!;
+      if (fact.kind !== "employment")
+        throw new Error("Employment interval must reference an employment fact");
+      validateEvidence([fact.id], interval.evidence, interval.qualifyingFullTime);
+      // Unread dates cannot establish either bound, even with a complete-history claim.
+      if (!hasPrimary(fact.id, interval.evidence))
+        return { start: null, end: null, qualifyingFullTime: "unknown" as const };
+      return { start: fact.start, end: fact.end, qualifyingFullTime: interval.qualifyingFullTime };
+    });
+    const result = qualifiedEmploymentMonths({ ...rule, cutoff, historyComplete, intervals });
+    const evidence = unique([
+      ...evaluation.evidence,
+      ...evaluation.intervals.flatMap((interval) => interval.evidence),
+    ]);
+    const missing = unique([
+      ...evaluation.missing,
+      ...evaluation.intervals.flatMap((interval) => interval.missing),
+      ...(!historyComplete && result.verdict === "unknown"
+        ? ["Provide complete employment history through the rule cutoff"]
+        : []),
+    ]);
+    employment.push({
+      ...evaluation,
+      ...result,
+      cutoff,
+      minimumMonths: rule.minimumMonths,
+      countingRule: rule.countingRule,
+      qualificationDefinition: rule.qualificationDefinition,
+      factIds,
+      evidence,
+      missing,
+    });
+    atoms.push({ atomId, verdict: result.verdict, factIds, evidence, missing });
+  }
+  const byId = new Map(atoms.map((judgment) => [judgment.atomId, judgment]));
+  const results = evaluateRecruitingCriteria(
+    role,
+    new Map(atoms.map((judgment) => [judgment.atomId, judgment.verdict])),
+  );
+  return RecruitingAssessmentJudgmentsSchema.parse({
+    atoms,
+    employment,
+    hardGate: results.hardGate,
+    criteria: results.criteria.map((result, index) => {
+      const dependencies = unique(criterionAtoms[index]!).map((id) => byId.get(id)!);
+      return {
+        ...result,
+        factIds: unique(dependencies.flatMap((judgment) => judgment.factIds)),
+        evidence: unique(dependencies.flatMap((judgment) => judgment.evidence)),
+        missing: unique([
+          ...role.criteria[index]!.definitionQuestions,
+          ...dependencies.flatMap((judgment) => judgment.missing),
+        ]),
+      };
+    }),
+  });
 }
