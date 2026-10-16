@@ -1225,12 +1225,12 @@ describe("native recruiting role effect delivery", () => {
       expect(claimed).toEqual([
         expect.objectContaining({
           messageId: "human-first",
-          text: steering[0]!.text,
+          text: expect.stringContaining(steering[0]!.text),
           historyText: steering[0]!.text,
         }),
         expect.objectContaining({
           messageId: "human-latest",
-          text: `${steering[1]!.text}\n\n${adopted.text}`,
+          text: expect.stringContaining(`${steering[1]!.text}\n\n${adopted.text}`),
           historyText: steering[1]!.text,
         }),
         expect.objectContaining({
@@ -1239,6 +1239,9 @@ describe("native recruiting role effect delivery", () => {
           historyText: steering[2]!.text,
         }),
       ]);
+      expect(claimed[0]?.text).toContain('"messageId":"human-first"');
+      expect(claimed[1]?.text).toContain('"messageId":"human-latest"');
+      expect(claimed[2]?.text).not.toContain("Native message source reference");
       expect(
         claimed
           .map((item) => item.text)
@@ -2836,6 +2839,28 @@ describe("native recruiting assessment effect delivery", () => {
     vi.mocked(executeRecruitingAssessmentTool).mockReset();
     vi.mocked(retainRecruitingWebMaterial).mockReset();
     vi.mocked(loadRecruitingRunContext).mockReset();
+  });
+
+  it("exposes the actual human message identifier and text block indexes for evidence reads", async () => {
+    const f = fixture("assessment-source-metadata");
+    f.runData.sourceMessageId = "human-evidence-source";
+    const human = {
+      id: "human-evidence-source",
+      seq: 1,
+      role: "user",
+      runId: null,
+      replyToMessageId: null,
+      createdAt: new Date("2026-10-16T00:00:00.000Z"),
+      blocks: [{ kind: "text", text: "Exact source material" }],
+    };
+    f.prisma.message.findMany.mockResolvedValue([human]);
+    f.runtimeRun.mockImplementation(async function* (request) {
+      expect(request.instructions).toContain('"messageId":"human-evidence-source"');
+      expect(request.instructions).toContain('"blockIndex":0');
+      expect(request.instructions).not.toContain('"text":"Exact source material"');
+      yield { type: "done" as const, text: "Done" };
+    });
+    await f.run();
   });
 
   it("uses the latest adopted role and atomically saved receipt, then revalidates replay after an ACK loss", async () => {

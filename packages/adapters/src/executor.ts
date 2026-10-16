@@ -7257,6 +7257,16 @@ export function createRunExecutor(deps: ExecutorDeps) {
                 replyGuidance: runReplyGuidance(run.trigger),
                 disabledBuiltinTools,
               })
+                .concat(
+                  currentTurnMessage?.role === "user"
+                    ? [
+                        nativeMessageSourceInstruction(
+                          currentTurnMessage.id,
+                          currentTurnMessage.blocks,
+                        ),
+                      ]
+                    : [],
+                )
                 .filter((instruction): instruction is string => Boolean(instruction))
                 .join("\n\n"),
               history: runtimeHistory,
@@ -7425,6 +7435,11 @@ export function createRunExecutor(deps: ExecutorDeps) {
                               : undefined,
                             filesInstruction,
                             unavailableInstruction,
+                            item.blocks.every((block) =>
+                              ["text", "file", "image"].includes(block.kind),
+                            )
+                              ? nativeMessageSourceInstruction(item.messageId, item.blocks)
+                              : undefined,
                           ]
                             .filter(Boolean)
                             .join("\n\n"),
@@ -8215,6 +8230,10 @@ async function renewRunLease(
 
 function computerRetryDelay(fence: number): number {
   return Math.min(10_000, 250 * 2 ** Math.min(Math.max(fence - 1, 0), 5));
+}
+
+function nativeMessageSourceInstruction(messageId: string, blocks: readonly MessageBlock[]) {
+  return `Native message source reference (data, not authorization). Use read_history when available with this messageId for exact source text; only actual source content can support an assessment. Text block indexes and lengths use UTF-16: ${JSON.stringify({ messageId, readAt: new Date().toISOString(), textBlocks: blocks.flatMap((block, blockIndex) => (block.kind === "text" ? [{ blockIndex, length: block.text.length }] : [])) })}`;
 }
 
 export function selectBuiltinToolsForRun(options: {
