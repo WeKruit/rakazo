@@ -146,6 +146,39 @@ describe("recruiting run context", () => {
     },
   );
 
+  it.each(["instructions", "tool_result", "steering"] as const)(
+    "keeps business sourcing approvals distinct from intake and authorized continuation in %s context",
+    async (placement) => {
+      const { deps } = fixture();
+      const loaded = await loadRecruitingRunContext(deps, run, { documents: [] }, context, {
+        reason: "feedback",
+        placement,
+      });
+      const text = loaded!.manifest.roleText;
+      expect(text).toContain(
+        "Intake, company/JD research and recovery reads do not require redundant confirmation",
+      );
+      expect(text).toContain("actual human G0 approval and G1 approval of the JD/deck package");
+      expect(text).toContain("the human explicitly deferred S2 after G0");
+      expect(text).toContain("Reconfirm materially revised requirements or JD/deck");
+      expect(text).toContain("already-authorized feedback on the same verified provider task");
+      expect(text).toContain("without demanding technical saved-record confirmation");
+      expect(text).toContain("never recast changed qualification as round-only scope");
+      expect(text).toContain(
+        "G2 approval of the calibration profiles and rule changes is required before scale",
+      );
+      expect(text).toContain("These business approvals apply to native MCP sourcing too");
+      expect(text).toContain(
+        "ordinary continuation does not require saved-workspace research actions",
+      );
+      expect(text).toContain("Scheduling and outbound require their native approvals");
+      expect(text).not.toContain("research requires G0 on the current brief revision");
+      expect(loaded!.text).toContain(text);
+      expect(loaded!.manifest.placement).toBe(placement);
+      expect(loaded!.workspace).toBe(workspace);
+    },
+  );
+
   it("freezes retrieval filters separately from qualification in create and same-task continuation", async () => {
     const source = {
       id: "human-filter",

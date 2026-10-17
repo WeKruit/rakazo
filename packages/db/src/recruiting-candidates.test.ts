@@ -37,6 +37,7 @@ function fixture() {
     spaceId: "space",
     userId: "owner",
     sourceThreadId: "thread",
+    title: "Systems engineer",
     currentRevisionId: "revision",
     revision: 1,
   };
@@ -206,27 +207,46 @@ describe("candidate listing and shortlist boundaries", () => {
   );
   it("makes a human shortlist receipt only for a successful candidate CAS change", async () => {
     const f = fixture();
+    f.candidate.candidateKey = "internal-candidate-key";
+    f.tx.$queryRaw
+      .mockResolvedValueOnce([])
+      .mockResolvedValueOnce([])
+      .mockResolvedValueOnce([
+        {
+          name: "Synthetic Avery",
+          linkedinUrl: "https://www.linkedin.com/in/synthetic-avery",
+          resumeUrl: null,
+        },
+      ]);
     const input = {
       threadId: "thread",
       roleId: "role",
-      candidateKey: "candidate",
+      candidateKey: f.candidate.candidateKey,
       expectedRevision: 0,
       shortlisted: true,
     };
     expect(await recruiting.setRecruitingCandidateShortlist(f.prisma, actor, input)).toEqual({
       roleId: "role",
-      candidateKey: "candidate",
+      candidateKey: f.candidate.candidateKey,
       shortlisted: true,
       revision: 1,
     });
-    expect(createThreadMessageInTransaction).toHaveBeenCalledWith(
-      f.tx,
-      expect.objectContaining({ role: "user", threadId: "thread" }),
-    );
+    expect(createThreadMessageInTransaction).toHaveBeenCalledWith(f.tx, {
+      role: "user",
+      threadId: "thread",
+      blocks: [
+        {
+          kind: "text",
+          text: "Shortlist Synthetic Avery · https://www.linkedin.com/in/synthetic-avery for Systems engineer (requirements version 1).",
+        },
+      ],
+    });
     expect(f.tx.recruitingCandidate.updateMany).toHaveBeenCalledWith({
-      where: { roleId: "role", candidateKey: "candidate", revision: 0 },
+      where: { roleId: "role", candidateKey: f.candidate.candidateKey, revision: 0 },
       data: { shortlisted: true, revision: 1, shortlistMessageId: "human-shortlist-receipt" },
     });
+    const profileQuery = f.tx.$queryRaw.mock.lastCall![0] as { values: unknown[] };
+    expect(profileQuery.values).toEqual(["role", f.candidate.candidateKey]);
   });
   it("rejects stale selection and performs no write for a no-op", async () => {
     const f = fixture();

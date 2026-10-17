@@ -578,7 +578,12 @@ export async function confirmRecruitingBrief(
     const message = await createThreadMessageInTransaction(tx, {
       threadId: thread.id,
       role: "user",
-      blocks: [{ kind: "text", text: `Confirm recruiting brief revision ${role.revision}.` }],
+      blocks: [
+        {
+          kind: "text",
+          text: `Confirm recruiting brief for ${role.title} (requirements version ${role.revision}).`,
+        },
+      ],
     });
     const brief = {
       ...revision.brief,
@@ -614,6 +619,12 @@ export async function confirmRecruitingBrief(
       currentRevisionId: saved.id,
     });
   });
+}
+
+function criterionStatement(expression: RecruitingCriterionExpression): string {
+  if (expression.kind === "atom") return expression.statement;
+  if (expression.kind === "not") return `NOT (${criterionStatement(expression.item)})`;
+  return `(${expression.items.map(criterionStatement).join(expression.kind === "all" ? " AND " : " OR ")})`;
 }
 
 /** Human-only edit of existing criteria; native authorship and the role CAS commit together. */
@@ -696,27 +707,27 @@ export async function editRecruitingCriteria(
       if (originalAtoms.size !== atoms.size)
         throw new RecruitingPlaybookValidationError("Unknown criterion atom.");
       const changedAtoms = edit.atoms.flatMap((atom) => {
+        const original = originalAtoms.get(atom.atomId)!;
         const updated = updatedAtoms.get(atom.atomId)!;
-        return stableJsonValue(originalAtoms.get(atom.atomId)) === stableJsonValue(updated)
+        return stableJsonValue(original) === stableJsonValue(updated)
           ? []
-          : [
-              {
-                atomId: atom.atomId,
-                ...(updated.employmentRule ? { employmentRule: updated.employmentRule } : {}),
-                statement: updated.statement,
-              },
-            ];
+          : [`Requirement: ${original.statement} → ${updated.statement}`];
       });
       return criterion.priority === edit.priority && !changedAtoms.length
         ? []
         : [
             {
               criterion: { ...criterion, priority: edit.priority, expression },
-              edit: {
-                criterionId: criterion.id,
-                ...(criterion.priority !== edit.priority ? { priority: edit.priority } : {}),
-                ...(changedAtoms.length ? { atoms: changedAtoms } : {}),
-              },
+              description: [
+                ...(criterion.priority !== edit.priority
+                  ? [
+                      `Priority: ${criterion.priority === "hard" ? "Required" : "Preferred"} → ${edit.priority === "hard" ? "Required" : "Preferred"}`,
+                    ]
+                  : []),
+                ...(changedAtoms.length
+                  ? changedAtoms
+                  : [`Criterion: ${criterionStatement(expression)}`]),
+              ].join("\n"),
             },
           ];
     });
@@ -739,7 +750,23 @@ export async function editRecruitingCriteria(
     const criteria = revision.criteria.map((criterion) => changed.get(criterion.id) ?? criterion);
     // A shared atom ID must still have one definition across all criteria.
     RecruitingRoleRevisionSchema.parse({ ...revision, criteria });
-    const text = `Edit recruiting criteria revision ${role.revision}:\n${JSON.stringify(changes.map((change) => change.edit))}${filtersChanged ? `\nSearch filters:\n${JSON.stringify(input.searchFilters)}` : ""}`;
+    const text = [
+      `Update recruiting requirements for ${role.title} (requirements version ${role.revision} → ${role.revision + 1}):`,
+      ...changes.map((change) => change.description),
+      ...(filtersChanged
+        ? [
+            ...input.searchFilters!.filter(changedFilter).map((filter) => {
+              const original = filtersById.get(filter.id);
+              return original
+                ? `Change search filter (${original.mode}): ${original.statement} → (${filter.mode}): ${filter.statement}`
+                : `Add search filter (${filter.mode}): ${filter.statement}`;
+            }),
+            ...originalFilters!
+              .filter((filter) => !input.searchFilters!.some((next) => next.id === filter.id))
+              .map((filter) => `Remove search filter (${filter.mode}): ${filter.statement}`),
+          ]
+        : []),
+    ].join("\n");
     const message = await createThreadMessageInTransaction(tx, {
       threadId: thread.id,
       role: "user",
@@ -6370,13 +6397,22 @@ export async function setRecruitingCandidateShortlist(
         shortlisted: candidate.shortlisted,
         revision: candidate.revision,
       };
+    const [profile] = await tx.$queryRaw<
+      Pick<CandidateQueryRow, "name" | "linkedinUrl" | "resumeUrl">[]
+    >(
+      Prisma.sql`${candidateIndexQuery(role.id)} SELECT "name", "linkedinUrl", "resumeUrl" FROM base WHERE "candidateKey" = ${candidate.candidateKey}`,
+    );
+    if (!profile) throw new IsolationError();
+    const identity = [profile.name ?? "Unnamed candidate", profile.linkedinUrl ?? profile.resumeUrl]
+      .filter(Boolean)
+      .join(" · ");
     const message = await createThreadMessageInTransaction(tx, {
       threadId: thread.id,
       role: "user",
       blocks: [
         {
           kind: "text",
-          text: `${input.shortlisted ? "Shortlist" : "Remove from shortlist"} candidate ${candidate.candidateKey} for role ${role.id}, criteria revision ${role.revision}, candidate revision ${candidate.revision}.`,
+          text: `${input.shortlisted ? "Shortlist" : "Remove from shortlist"} ${identity} for ${role.title} (requirements version ${role.revision}).`,
         },
       ],
     });

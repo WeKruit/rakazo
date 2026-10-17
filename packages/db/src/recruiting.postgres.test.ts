@@ -4326,7 +4326,12 @@ describePostgres("recruiting domain (PostgreSQL)", () => {
       threadId: f.thread.id,
       role: "user",
       botId: null,
-      blocks: [{ kind: "text", text: "Confirm recruiting brief revision 1." }],
+      blocks: [
+        {
+          kind: "text",
+          text: `Confirm recruiting brief for ${f.role.role.title} (requirements version 1).`,
+        },
+      ],
     });
     expect(
       await prisma.recruitingRoleRevision.findUniqueOrThrow({

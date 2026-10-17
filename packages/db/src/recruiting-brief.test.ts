@@ -260,7 +260,9 @@ describe("native human criterion editing", () => {
       origin: "user_instruction",
       sourceRefIds: [human.id],
     });
-    expect(human.quote).toContain('"statement":"Search the UK"');
+    expect(human.quote).toContain("Add search filter (include): Search the UK");
+    expect(human.quote).not.toContain("Prefer backend titles");
+    expect(human.quote).not.toContain('"id"');
     expect(f.revisions[0]).toEqual(original);
     const changedFilters = [
       { ...searchFilters[0]!, statement: "Search senior backend titles", mode: "include" },
@@ -281,6 +283,10 @@ describe("native human criterion editing", () => {
       saved.revision.brief?.searchFilters[1],
     );
     expect(changed.revision.criteria).toEqual(original.criteria);
+    expect(changedSource.quote).toContain(
+      "Change search filter (prefer): Prefer backend titles → (include): Search senior backend titles",
+    );
+    expect(changedSource.quote).not.toContain("Search the UK");
     const removed = await recruiting.editRecruitingCriteria(f.prisma, actor, {
       ...f.input,
       expectedRevision: 3,
@@ -289,6 +295,12 @@ describe("native human criterion editing", () => {
     expect(removed.role.revision).toBe(4);
     expect(removed.revision.brief?.searchFilters).toEqual([]);
     expect(removed.revision.criteria).toEqual(original.criteria);
+    expect(removed.revision.sourceRefs.at(-1)!.quote).toContain(
+      "Remove search filter (include): Search senior backend titles",
+    );
+    expect(removed.revision.sourceRefs.at(-1)!.quote).toContain(
+      "Remove search filter (include): Search the UK",
+    );
   });
   it("preserves filter provenance on criteria-only edits and avoids a revision for unchanged filters", async () => {
     const f = criteriaFixture();
@@ -355,8 +367,10 @@ describe("native human criterion editing", () => {
     expect(message.botId).toBeUndefined();
     expect(message.runId).toBeUndefined();
     expect(message.blocks).toEqual([{ kind: "text", text: human.quote }]);
-    expect(human.quote).toContain('"statement":"Personally implemented 3D geometry"');
-    expect(human.quote).toContain('"priority":"preferred"');
+    expect(human.quote).toContain("Example engineer");
+    expect(human.quote).toContain("Implemented geometry → Personally implemented 3D geometry");
+    expect(human.quote).toContain("Priority: Required → Preferred");
+    expect(human.quote).not.toMatch(/criterionId|atomId|"priority"|"statement"/);
     expect(human.quote).not.toContain("Built a web app");
     expect(saved.revision.brief?.rules[0]).toEqual({
       criterionId: "skills",
@@ -573,9 +587,8 @@ describe("native human criterion editing", () => {
       items: [leaf, { kind: "not", item: leaf }],
     });
     const human = saved.revision.sourceRefs.at(-1)!;
-    expect(human.quote).toContain(
-      JSON.stringify({ atomId: "code", employmentRule: updatedRule, statement }),
-    );
+    expect(human.quote).toContain(statement);
+    expect(human.quote).not.toMatch(/atomId|employmentRule|minimumMonths|qualificationDefinition/);
     expect(saved.revision.brief?.fields).toEqual(f.revisions[0]!.brief.fields);
     expect(saved.revision.brief?.confirmation).toBeNull();
   });
@@ -650,7 +663,9 @@ describe("native human criterion editing", () => {
       statement:
         "At least 60 complete calendar months of Full-time personally implemented geometry; cutoff: assessment date (UTC).",
     });
-    expect(saved.revision.sourceRefs.at(-1)!.quote).toContain(JSON.stringify(updated));
+    expect(saved.revision.sourceRefs.at(-1)!.quote).toContain(
+      "At least 60 complete calendar months of Full-time personally implemented geometry; cutoff: assessment date (UTC).",
+    );
   });
 
   it("requires every criterion sharing a typed atom to adopt the same structured rule", async () => {
@@ -713,6 +728,8 @@ describe("native human criterion editing", () => {
       sourceRefIds: [saved.revision.sourceRefs.at(-1)!.id],
     });
     expect(saved.revision.sourceRefs.at(-1)!.quote).not.toContain('"atoms"');
+    expect(saved.revision.sourceRefs.at(-1)!.quote).toContain("Works onsite");
+    expect(saved.revision.sourceRefs.at(-1)!.quote).toContain("Priority: Preferred → Required");
   });
 
   it("rejects a failed final CAS instead of reporting an adopted edit", async () => {
@@ -752,6 +769,18 @@ describe("native human brief confirmation", () => {
       });
       expect(f.revisions[0]!.brief.confirmation).toBeNull();
       expect(saved.role).not.toHaveProperty("crmBindingEffectId");
+      expect(f.tx.message.create).toHaveBeenCalledWith({
+        data: expect.objectContaining({
+          threadId: "thread",
+          role: "user",
+          blocks: [
+            {
+              kind: "text",
+              text: "Confirm recruiting brief for Example engineer (requirements version 1).",
+            },
+          ],
+        }),
+      });
       const repeated = await confirmRecruitingBrief(f.prisma, actor, {
         threadId: "thread",
         roleId: "role",
