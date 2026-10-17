@@ -136,6 +136,22 @@ const recruitingWorkspace = z.strictObject({
   role: RecruitingRoleSchema,
   revision: RecruitingRoleRevisionSchema,
 });
+export const ReadRecruitingSourceInput = z.discriminatedUnion("kind", [
+  z.strictObject({
+    kind: z.literal("role"),
+    threadId: Id,
+    roleRevisionId: RecruitingId,
+    sourceRefId: RecruitingId,
+  }),
+  z.strictObject({
+    kind: z.literal("assessment"),
+    roleId: RecruitingId,
+    candidateKey: RecruitingId,
+    version: z.number().int().positive(),
+    sourceRefId: RecruitingId,
+  }),
+]);
+export type ReadRecruitingSourceInput = z.infer<typeof ReadRecruitingSourceInput>;
 export const RecruitingAssessmentSnapshotSchema = z
   .strictObject({
     assessment: RecruitingAssessmentSchema,
@@ -537,6 +553,13 @@ export const appContract = {
     heartbeat: oc.input(botId).output(z.object({ ok: z.literal(true) })),
   },
   recruiting: {
+    readSource: oc.input(ReadRecruitingSourceInput).output(
+      z.strictObject({
+        text: z.string(),
+        start: z.number().int().nonnegative(),
+        end: z.number().int().positive(),
+      }),
+    ),
     listCandidates: oc.input(ListRecruitingCandidatesInput).output(ListRecruitingCandidatesOutput),
     listCandidateSources: oc
       .input(ListRecruitingCandidateSourcesInput)

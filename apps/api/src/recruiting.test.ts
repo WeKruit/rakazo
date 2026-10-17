@@ -1,4 +1,6 @@
+import { createHash } from "node:crypto";
 import { createRouterClient } from "@orpc/server";
+import type { ArtifactStore } from "@rakazo/adapter-kit";
 import type { Actor } from "@rakazo/contracts";
 import { RecruitingAssessmentSnapshotSchema } from "@rakazo/contracts";
 import type * as DbExports from "@rakazo/db";
@@ -39,6 +41,188 @@ const actor: Actor = {
   email: "owner@example.test",
   isDeploymentOwner: false,
 };
+
+describe("readable recruiting sources", () => {
+  const text = "Original 🧭 candidate evidence\nSecond line";
+  const quote = "🧭 candidate evidence";
+  const bytes = Buffer.from(
+    JSON.stringify({ request: { internalId: "hidden-routing" }, text, nested: { evidence: text } }),
+  );
+  const hash = createHash("sha256").update(bytes).digest("hex");
+  const source = {
+    id: "source",
+    kind: "original_material" as const,
+    anchor: {
+      kind: "artifact" as const,
+      artifact: { artifactId: "material", sha256: hash },
+      locator: "text",
+    },
+    readState: "read" as const,
+    readAt: "2026-09-01T00:00:00.000Z",
+    quote,
+  };
+  const roleInput = {
+    kind: "role" as const,
+    threadId: "thread",
+    roleRevisionId: "revision",
+    sourceRefId: "source",
+  };
+  function fixture() {
+    const get = vi.fn(async () => bytes);
+    const findFirst = vi.fn(async () => ({
+      id: "material",
+      spaceId: actor.spaceId,
+      userId: actor.userId,
+      storageKey: "stored",
+      botId: "bot",
+      mimeType: "application/json",
+      size: bytes.length,
+      hash,
+    }));
+    const deps = {
+      prisma: { artifact: { findFirst } } as unknown as PrismaClient,
+      artifacts: { get } as unknown as ArtifactStore,
+    };
+    vi.mocked(db.getRecruitingWorkspace).mockResolvedValue({
+      revision: { id: "revision", sourceRefs: [source], criteria: [] },
+    } as never);
+    return { deps, get, findFirst };
+  }
+  it("reads only a persisted source string and exact highlight without returning its raw wrapper", async () => {
+    const f = fixture();
+    const value = await api.readRecruitingSource(f.deps, actor, roleInput);
+    expect(value).toEqual({
+      text,
+      start: text.indexOf(quote),
+      end: text.indexOf(quote) + quote.length,
+    });
+    expect(JSON.stringify(value)).not.toMatch(
+      /hidden-routing|contentBase64|artifactId|sha256|storageKey/,
+    );
+    expect(db.getRecruitingWorkspace).toHaveBeenLastCalledWith(f.deps.prisma, actor, {
+      threadId: "thread",
+    });
+    expect(f.findFirst).toHaveBeenCalledWith({
+      where: { id: "material", spaceId: actor.spaceId, userId: actor.userId },
+    });
+  });
+  it("loads the exact stored assessment selection, not a caller-controlled JSON path", async () => {
+    const f = fixture();
+    const start = text.indexOf(quote);
+    vi.mocked(db.getRecruitingAssessment).mockResolvedValue({
+      assessment: {
+        version: 2,
+        sourceRefs: [
+          {
+            ...source,
+            kind: "provider_report",
+            selection: {
+              kind: "artifact_json_string",
+              path: ["nested", "evidence"],
+              start,
+              end: start + quote.length,
+            },
+          },
+        ],
+      },
+    } as never);
+    const input = {
+      kind: "assessment" as const,
+      roleId: "role",
+      candidateKey: "candidate",
+      version: 2,
+      sourceRefId: "source",
+    };
+    expect(await api.readRecruitingSource(f.deps, actor, input)).toEqual({
+      text,
+      start,
+      end: start + quote.length,
+    });
+    expect(db.getRecruitingAssessment).toHaveBeenLastCalledWith(f.deps.prisma, actor, {
+      roleId: "role",
+      candidateKey: "candidate",
+      version: 2,
+    });
+  });
+  it("rejects missing, conflicting, unread or revised stored references before reading bytes", async () => {
+    const f = fixture();
+    for (const revision of [
+      { id: "another-revision", sourceRefs: [source], criteria: [] },
+      { id: "revision", sourceRefs: [], criteria: [] },
+      {
+        id: "revision",
+        sourceRefs: [{ ...source, readState: "unread", quote: undefined }],
+        criteria: [],
+      },
+      {
+        id: "revision",
+        sourceRefs: [source],
+        criteria: [{ sourceRefs: [{ ...source, quote: "Second line" }] }],
+      },
+    ]) {
+      vi.mocked(db.getRecruitingWorkspace).mockResolvedValueOnce({ revision } as never);
+      await expect(api.readRecruitingSource(f.deps, actor, roleInput)).rejects.toMatchObject({
+        code: "NOT_FOUND",
+      });
+    }
+    expect(f.get).not.toHaveBeenCalled();
+  });
+  it("fails closed on changed original bytes or source hashes and sanitizes storage errors", async () => {
+    const f = fixture();
+    f.get.mockResolvedValueOnce(Buffer.from("changed"));
+    await expect(api.readRecruitingSource(f.deps, actor, roleInput)).rejects.toMatchObject({
+      code: "NOT_FOUND",
+      message: "Resource not found",
+    });
+    vi.mocked(db.getRecruitingWorkspace).mockResolvedValueOnce({
+      revision: {
+        id: "revision",
+        sourceRefs: [
+          {
+            ...source,
+            anchor: {
+              ...source.anchor,
+              artifact: { ...source.anchor.artifact, sha256: "0".repeat(64) },
+            },
+          },
+        ],
+        criteria: [],
+      },
+    } as never);
+    await expect(api.readRecruitingSource(f.deps, actor, roleInput)).rejects.toMatchObject({
+      code: "NOT_FOUND",
+    });
+    f.get.mockRejectedValueOnce(new Error("private storage path"));
+    await expect(api.readRecruitingSource(f.deps, actor, roleInput)).rejects.toMatchObject({
+      code: "NOT_FOUND",
+      message: "Resource not found",
+    });
+  });
+
+  it("keeps native RPC authorization and refuses client-provided source extraction fields", async () => {
+    const f = fixture();
+    const client = createRouterClient(createRouter(f.deps as RouterDeps), { context: { actor } });
+    for (const extra of [
+      { path: ["request", "internalId"] },
+      { quote: "hidden-routing" },
+      { artifactId: "other" },
+      { sha256: hash },
+    ])
+      await expect(
+        client.recruiting.readSource({ ...roleInput, ...extra } as never),
+      ).rejects.toMatchObject({ code: "BAD_REQUEST" });
+    const unauthenticated = createRouterClient(createRouter(f.deps as RouterDeps), { context: {} });
+    await expect(unauthenticated.recruiting.readSource(roleInput)).rejects.toMatchObject({
+      code: "UNAUTHORIZED",
+    });
+    vi.mocked(db.getRecruitingWorkspace).mockRejectedValueOnce(new IsolationError("Private role"));
+    await expect(client.recruiting.readSource(roleInput)).rejects.toMatchObject({
+      code: "NOT_FOUND",
+      message: "Resource not found",
+    });
+    expect(f.get).not.toHaveBeenCalled();
+  });
+});
 
 describe("authenticated recruiting API", () => {
   it("forwards native RPC inputs and trusted actors to the one shared domain implementation", async () => {

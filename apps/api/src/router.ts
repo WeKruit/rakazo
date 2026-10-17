@@ -274,6 +274,7 @@ import {
   listRecruitingCandidates,
   listRecruitingQuestions,
   listRecruitingResearch,
+  readRecruitingSource,
   reviseRecruitingRole,
   setRecruitingCandidateShortlist,
 } from "./recruiting.js";
@@ -3210,6 +3211,9 @@ export function createRouter(deps: RouterDeps) {
       }),
     },
     recruiting: {
+      readSource: authed.recruiting.readSource.handler(({ context, input }) =>
+        readRecruitingSource(deps, context.actor, input),
+      ),
       listCandidates: authed.recruiting.listCandidates.handler(({ context, input }) =>
         listRecruitingCandidates(deps.prisma, context.actor, input),
       ),

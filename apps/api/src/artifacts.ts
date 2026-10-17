@@ -131,7 +131,7 @@ function artifactDiagnostics(actor: Actor, input: { includeDiagnostics?: boolean
 }
 
 // Match server-owned provenance on any family member, never a name or upload nonce.
-function internalContextFamily() {
+function internalRecruitingFamily() {
   return Prisma.sql`EXISTS (
     SELECT 1 FROM "artifacts" internal
     WHERE internal."spaceId" = a."spaceId" AND internal."userId" = a."userId"
@@ -140,13 +140,30 @@ function internalContextFamily() {
       AND (
         EXISTS (
           SELECT 1 FROM "events" event
-          WHERE event."runId" = internal."runId" AND event.type = 'recruiting.context.adopted'
+          WHERE event."runId" = internal."runId"
+            AND event.type IN ('recruiting.context.adopted', 'recruiting.material.read', 'recruiting.read', 'recruiting.candidates.saved')
             AND event."spaceId" = internal."spaceId" AND event."botId" = internal."botId"
-            AND event.payload->'contextArtifact'->>'artifactId' = internal.id
-            AND event.payload->'contextArtifact'->>'sha256' = internal.hash
+            AND (
+              (event.type = 'recruiting.context.adopted'
+                AND event.payload->'contextArtifact'->>'artifactId' = internal.id
+                AND event.payload->'contextArtifact'->>'sha256' = internal.hash)
+              OR (event.type = 'recruiting.material.read' AND event.payload->>'reader' = 'web_fetch'
+                AND event.payload->'artifact'->>'artifactId' = internal.id
+                AND event.payload->'artifact'->>'sha256' = internal.hash)
+              OR (event.type IN ('recruiting.read', 'recruiting.candidates.saved')
+                AND (event.type <> 'recruiting.read' OR event.payload->>'phase' = 'recorded')
+                AND event.payload->'outputArtifact'->>'artifactId' = internal.id
+                AND event.payload->'outputArtifact'->>'sha256' = internal.hash)
+            )
         ) OR EXISTS (
           SELECT 1 FROM "recruiting_research_actions" action
-          WHERE action."contextArtifactId" = internal.id
+          WHERE (action."contextArtifactId" = internal.id AND action."contextArtifactHash" = internal.hash)
+            OR (action."requestArtifactId" = internal.id AND action."requestArtifactHash" = internal.hash)
+            OR (action."receiptArtifactId" = internal.id AND action."receiptArtifactHash" = internal.hash)
+            OR action."outputArtifacts" @> jsonb_build_array(jsonb_build_object('artifactId', internal.id, 'sha256', internal.hash))
+        ) OR EXISTS (
+          SELECT 1 FROM "recruiting_candidate_pages" page
+          WHERE page."artifactId" = internal.id AND page."artifactHash" = internal.hash
         )
       )
   )`;
@@ -161,7 +178,7 @@ async function assertArtifactVisible(
   const internal = await prisma.$queryRaw<Array<{ id: string }>>(Prisma.sql`
     SELECT a.id FROM "artifacts" a
     WHERE a.id = ${input.artifactId} AND a."spaceId" = ${actor.spaceId} AND a."userId" = ${actor.userId}
-      AND ${internalContextFamily()}
+      AND ${internalRecruitingFamily()}
     LIMIT 1
   `);
   if (internal.length) throw new IsolationError();
@@ -174,7 +191,7 @@ export async function listOwnedArtifacts(
 ) {
   const visibility = artifactDiagnostics(actor, input)
     ? Prisma.empty
-    : Prisma.sql`AND NOT ${internalContextFamily()}`;
+    : Prisma.sql`AND NOT ${internalRecruitingFamily()}`;
   const rows = await deps.prisma.$queryRaw<Prisma.ArtifactGetPayload<Record<string, never>>[]>(
     Prisma.sql`
       SELECT a.* FROM "artifacts" a
@@ -371,7 +388,7 @@ export async function listSpaceArtifacts(
     .update(JSON.stringify([actor.spaceId, actor.userId, scopeBotId, diagnostics]))
     .digest("hex");
   const botFilter = scopeBotId ? Prisma.sql`AND a."botId" = ${scopeBotId}` : Prisma.empty;
-  const visibility = diagnostics ? Prisma.empty : Prisma.sql`AND NOT ${internalContextFamily()}`;
+  const visibility = diagnostics ? Prisma.empty : Prisma.sql`AND NOT ${internalRecruitingFamily()}`;
 
   let asOf = new Date();
   let cursorFilter = Prisma.empty;

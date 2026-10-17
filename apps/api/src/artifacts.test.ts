@@ -352,6 +352,13 @@ describe("internal recruiting context presentation", () => {
     const sql = queryRaw.mock.calls[0]![0] as { strings: string[] };
     expect(scopedClause(sql)).toContain("recruiting.context.adopted");
     expect(scopedClause(sql)).toContain('"contextArtifactId"');
+    expect(scopedClause(sql)).toContain("recruiting.material.read");
+    expect(scopedClause(sql)).toContain("recruiting.candidates.saved");
+    expect(scopedClause(sql)).toContain("recruiting.read");
+    expect(scopedClause(sql)).toContain('"requestArtifactId"');
+    expect(scopedClause(sql)).toContain('"receiptArtifactId"');
+    expect(scopedClause(sql)).toContain('"outputArtifacts"');
+    expect(scopedClause(sql)).toContain('"recruiting_candidate_pages"');
     expect(scopedClause(sql)).not.toContain("clientNonce");
     expect(scopedClause(sql)).not.toContain("mimeType");
   });

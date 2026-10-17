@@ -8,6 +8,7 @@ import type {
   ListRecruitingCandidatesOutput,
   MemoryDocument,
   MemoryRevision,
+  ReadRecruitingSourceInput,
   RecruitingArtifactRef,
   RecruitingAssessmentSourceRef,
   RecruitingCandidate,
@@ -61,6 +62,9 @@ type Props = {
   showDiagnostics?: boolean;
   onRevealMessage?: (target: { botId?: string; groupId?: string; messageId: string }) => void;
 };
+type SourceReadTarget =
+  | Omit<Extract<ReadRecruitingSourceInput, { kind: "role" }>, "sourceRefId">
+  | Omit<Extract<ReadRecruitingSourceInput, { kind: "assessment" }>, "sourceRefId">;
 type Snapshot = {
   workspace: Awaited<ReturnType<typeof rpc.recruiting.getWorkspace>>;
   assessments: Awaited<ReturnType<typeof rpc.recruiting.listAssessments>>;
@@ -463,7 +467,10 @@ function ResearchResults({
     // ponytail: load only an expanded action; batch Artifact reads if saved output history grows.
     void Promise.all(
       action.outputArtifacts.map(async (reference) => {
-        const artifact = await rpc.artifacts.getById({ artifactId: reference.artifactId });
+        const artifact = await rpc.artifacts.getById({
+          artifactId: reference.artifactId,
+          includeDiagnostics: true,
+        });
         if (artifact.id !== reference.artifactId) throw new Error("Result Artifact changed");
         const snapshot = await readRecruitingResearchReadArtifact(
           decodeArtifactBase64(artifact.contentBase64),
@@ -617,7 +624,7 @@ function ResearchResults({
                 )}
                 {target ? (
                   <ArtifactFileCard
-                    target={target}
+                    target={{ ...target, includeDiagnostics: true }}
                     artifactId={artifact.id}
                     name={artifact.name}
                     mimeType={artifact.mimeType}
@@ -850,17 +857,19 @@ function ArtifactReference({
   label,
   source,
   showDiagnostics = false,
+  sourceRequest,
 }: {
   reference: RecruitingArtifactRef;
   label: string;
   source?: RecruitingSourceRef | RecruitingAssessmentSourceRef;
   showDiagnostics?: boolean;
+  sourceRequest?: ReadRecruitingSourceInput;
 }) {
   const { t } = useLingui();
   const [open, setOpen] = useState(false);
-  const sourceKey = JSON.stringify([reference, source, showDiagnostics]);
-  const currentSource = useRef({ reference, source });
-  currentSource.current = { reference, source };
+  const sourceKey = JSON.stringify([reference, source, showDiagnostics, sourceRequest]);
+  const currentSource = useRef({ reference, source, sourceRequest });
+  currentSource.current = { reference, source, sourceRequest };
   const [state, setState] = useState<{
     key: string;
     artifact?: Artifact;
@@ -871,10 +880,27 @@ function ArtifactReference({
   const current = state?.key === sourceKey ? state : null;
   const artifact = current?.artifact;
   useEffect(() => {
-    if (!open || artifact) return;
-    const { reference, source } = currentSource.current;
+    if (!open || artifact || current?.excerpt) return;
+    const { reference, source, sourceRequest } = currentSource.current;
     let cancelled = false;
     setState(null);
+    if (!showDiagnostics) {
+      if (!sourceRequest) {
+        setState({ key: sourceKey, unavailable: true });
+        return;
+      }
+      void rpc.recruiting.readSource(sourceRequest).then(
+        (excerpt) => {
+          if (!cancelled) setState({ key: sourceKey, excerpt });
+        },
+        () => {
+          if (!cancelled) setState({ key: sourceKey, failed: true });
+        },
+      );
+      return () => {
+        cancelled = true;
+      };
+    }
     void rpc.artifacts
       .getById({ artifactId: reference.artifactId, includeDiagnostics: showDiagnostics })
       .then(async (value) => {
@@ -922,7 +948,7 @@ function ArtifactReference({
     return () => {
       cancelled = true;
     };
-  }, [open, artifact, sourceKey]);
+  }, [open, artifact, sourceKey, current?.excerpt, showDiagnostics]);
   const target = artifact?.groupId
     ? { groupId: artifact.groupId }
     : artifact?.botId
@@ -933,19 +959,24 @@ function ArtifactReference({
       <summary className="cursor-pointer text-muted-foreground">{label}</summary>
       {open ? (
         <div className="mt-2 space-y-1">
-          {artifact && target ? (
-            !showDiagnostics &&
-            source?.kind === "provider_report" &&
-            (artifact.mimeType === "application/json" ||
-              artifact.mimeType.endsWith("+json")) ? null : (
-              <ArtifactFileCard
-                target={{ ...target, includeDiagnostics: showDiagnostics }}
-                artifactId={reference.artifactId}
-                name={showDiagnostics ? artifact.name : label}
-                mimeType={artifact.mimeType}
-                size={artifact.size}
-              />
-            )
+          {!showDiagnostics ? (
+            !current ? (
+              <p role="status">
+                <Trans>Loading…</Trans>
+              </p>
+            ) : current.failed ? (
+              <p role="alert">
+                <Trans>Source unavailable</Trans>
+              </p>
+            ) : null
+          ) : artifact && target ? (
+            <ArtifactFileCard
+              target={{ ...target, includeDiagnostics: true }}
+              artifactId={reference.artifactId}
+              name={artifact.name}
+              mimeType={artifact.mimeType}
+              size={artifact.size}
+            />
           ) : current?.failed || artifact ? (
             <p role="alert">
               <Trans>Source unavailable</Trans>
@@ -997,11 +1028,13 @@ function Sources({
   messageTargets,
   onRevealMessage,
   showDiagnostics = false,
+  sourceTarget,
 }: {
   sources: readonly (RecruitingSourceRef | RecruitingAssessmentSourceRef)[];
   messageTargets?: Snapshot["assessments"][number]["sourceMessageTargets"];
   onRevealMessage?: Props["onRevealMessage"];
   showDiagnostics?: boolean;
+  sourceTarget?: SourceReadTarget;
 }) {
   const { t } = useLingui();
   const byMessageId = new Map(messageTargets?.map((target) => [target.messageId, target]));
@@ -1065,6 +1098,9 @@ function Sources({
                 label={showDiagnostics ? source.anchor.locator : t`Source`}
                 source={source}
                 showDiagnostics={showDiagnostics}
+                sourceRequest={
+                  sourceTarget ? { ...sourceTarget, sourceRefId: source.id } : undefined
+                }
               />
             )}
             {source.url ? (
@@ -2058,6 +2094,11 @@ function RecruitingWorkspace({
                                   <Trans>Sources</Trans>
                                 </summary>
                                 <Sources
+                                  sourceTarget={{
+                                    kind: "role",
+                                    threadId,
+                                    roleRevisionId: workspace.revision.id,
+                                  }}
                                   showDiagnostics={showDiagnostics}
                                   sources={[
                                     ...new Map(
@@ -2143,6 +2184,11 @@ function RecruitingWorkspace({
                             </summary>
                             <div className="mt-2">
                               <Sources
+                                sourceTarget={{
+                                  kind: "role",
+                                  threadId,
+                                  roleRevisionId: workspace.revision.id,
+                                }}
                                 showDiagnostics={showDiagnostics}
                                 sources={criterion.sourceRefs}
                               />
@@ -2218,6 +2264,11 @@ function RecruitingWorkspace({
                                 </summary>
                                 <div className="mt-2">
                                   <Sources
+                                    sourceTarget={{
+                                      kind: "role",
+                                      threadId,
+                                      roleRevisionId: workspace.revision.id,
+                                    }}
                                     showDiagnostics={showDiagnostics}
                                     sources={criterion.sourceRefs}
                                   />
@@ -2262,6 +2313,11 @@ function RecruitingWorkspace({
                   </summary>
                   <div className="mt-2">
                     <Sources
+                      sourceTarget={{
+                        kind: "role",
+                        threadId,
+                        roleRevisionId: workspace.revision.id,
+                      }}
                       sources={workspace.revision.sourceRefs}
                       showDiagnostics={showDiagnostics}
                     />
@@ -2742,6 +2798,12 @@ function RecruitingWorkspace({
                             <p key={fact.id}>{fact.statement}</p>
                           ))}
                           <Sources
+                            sourceTarget={{
+                              kind: "assessment",
+                              roleId: assessment.roleId,
+                              candidateKey: assessment.candidateKey,
+                              version: assessment.version,
+                            }}
                             sources={assessment.sourceRefs.filter((source) =>
                               sourceIds.has(source.id),
                             )}
@@ -2766,6 +2828,12 @@ function RecruitingWorkspace({
                           <li key={fact.id} className="space-y-2">
                             <p>{fact.statement}</p>
                             <Sources
+                              sourceTarget={{
+                                kind: "assessment",
+                                roleId: assessment.roleId,
+                                candidateKey: assessment.candidateKey,
+                                version: assessment.version,
+                              }}
                               sources={assessment.sourceRefs.filter((source) =>
                                 fact.sourceRefIds.includes(source.id),
                               )}
@@ -2783,6 +2851,12 @@ function RecruitingWorkspace({
                       </summary>
                       <div className="mt-2">
                         <Sources
+                          sourceTarget={{
+                            kind: "assessment",
+                            roleId: assessment.roleId,
+                            candidateKey: assessment.candidateKey,
+                            version: assessment.version,
+                          }}
                           showDiagnostics={showDiagnostics}
                           sources={assessment.sourceRefs}
                           messageTargets={selected.sourceMessageTargets}

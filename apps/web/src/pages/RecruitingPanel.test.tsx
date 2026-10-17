@@ -21,6 +21,7 @@ import { readRightPanelState, writeRightPanelState } from "../lib/right-panel-st
 
 const api = vi.hoisted(() => ({
   getWorkspace: vi.fn(),
+  readSource: vi.fn(),
   listAssessments: vi.fn(),
   listCandidates: vi.fn(),
   listCandidateSources: vi.fn(),
@@ -357,6 +358,7 @@ beforeEach(() => {
   vi.stubGlobal("IS_REACT_ACT_ENVIRONMENT", true);
   vi.stubGlobal("crypto", webcrypto);
   api.getWorkspace.mockResolvedValue({ role, revision });
+  api.readSource.mockRejectedValue(new Error("Source unavailable"));
   api.listAssessments.mockResolvedValue([assessment]);
   api.listCandidates.mockImplementation(async ({ roleId }: { roleId: string }) => {
     const assessments = (await api.listAssessments.mock.results.at(-1)?.value) ?? [assessment];
@@ -1095,6 +1097,7 @@ it("renders Dashboard totals for the linked role and actual research delivery st
 
 it("keeps recruiting diagnostics out of product views while opening verified evidence", async () => {
   const material = artifactSourceFixture();
+  api.readSource.mockResolvedValue({ text: "Before\nBuilt a compiler\nAfter", start: 7, end: 23 });
   api.listResearch.mockResolvedValue({
     tasks: [
       {
@@ -1145,14 +1148,64 @@ it("keeps recruiting diagnostics out of product views while opening verified evi
   await view.click("Role");
   expect(api.getById).not.toHaveBeenCalled();
   const evidence = await view.expand("Source", true);
-  await vi.waitFor(() => expect(evidence.querySelector("[data-artifact-id]")).not.toBeNull());
-  expect(api.getById).toHaveBeenCalledExactlyOnceWith({
-    artifactId: material.reference.artifactId,
-    includeDiagnostics: false,
+  await vi.waitFor(() =>
+    expect(evidence.querySelector("mark")?.textContent).toBe(material.source.quote),
+  );
+  expect(api.readSource).toHaveBeenCalledExactlyOnceWith({
+    kind: "role",
+    threadId: "thread-1",
+    roleRevisionId: revision.id,
+    sourceRefId: material.source.id,
   });
+  expect(api.getById).not.toHaveBeenCalled();
+  expect(evidence.querySelector("[data-artifact-id]")).toBeNull();
+  expect(evidence.querySelector('[role="document"]')?.textContent).toBe(
+    "Before\nBuilt a compiler\nAfter",
+  );
   expect(evidence.textContent).not.toContain(material.reference.artifactId);
   expect(evidence.textContent).not.toContain(material.reference.sha256);
   expect(evidence.textContent).not.toContain("SHA-256");
+});
+
+it("reads candidate evidence through its saved assessment version without fetching raw files", async () => {
+  const material = artifactSourceFixture();
+  api.listAssessments.mockResolvedValue([
+    { ...assessment, assessment: { ...assessment.assessment, sourceRefs: [material.source] } },
+  ]);
+  api.readSource.mockResolvedValue({ text: "Before\nBuilt a compiler\nAfter", start: 7, end: 23 });
+  const view = await mounted("thread-1", undefined, false);
+  await view.click("Evidence");
+  await view.click("Unnamed candidate");
+  const evidence = await view.expand("Source", true);
+  await vi.waitFor(() =>
+    expect(evidence.querySelector("mark")?.textContent).toBe(material.source.quote),
+  );
+  expect(api.readSource).toHaveBeenCalledWith({
+    kind: "assessment",
+    roleId: assessment.assessment.roleId,
+    candidateKey: assessment.assessment.candidateKey,
+    version: assessment.assessment.version,
+    sourceRefId: material.source.id,
+  });
+  expect(api.getById).not.toHaveBeenCalled();
+  expect(evidence.querySelector("[data-artifact-id]")).toBeNull();
+});
+
+it("does not fall back to raw file access when a product source cannot be verified", async () => {
+  const material = artifactSourceFixture();
+  api.getWorkspace.mockResolvedValue({
+    role,
+    revision: { ...revision, sourceRefs: [material.source] },
+  });
+  api.readSource.mockRejectedValue(new Error("Source changed"));
+  const view = await mounted("thread-1", undefined, false);
+  await view.click("Role");
+  const evidence = await view.expand("Source", true);
+  await vi.waitFor(() =>
+    expect(evidence.querySelector('[role="alert"]')?.textContent).toBe("Source unavailable"),
+  );
+  expect(api.getById).not.toHaveBeenCalled();
+  expect(evidence.querySelector("[data-artifact-id]")).toBeNull();
 });
 
 it("shows unnamed candidates and real profile links without exposing their storage keys", async () => {
@@ -1219,6 +1272,7 @@ it("keeps exact research evidence readable while its routing snapshot stays diag
   };
   api.getWorkspace.mockResolvedValue({ role, revision: { ...revision, sourceRefs: [report] } });
   api.getById.mockResolvedValue(material.artifact);
+  api.readSource.mockResolvedValue({ text, start: 7, end: 23 });
   const view = await mounted("thread-1", undefined, false);
   const evidence = await view.expand("Source", true);
   await vi.waitFor(() =>
@@ -2752,7 +2806,10 @@ it("shows unassessed raw provider rows from saved Artifacts without creating an 
   expect(view.container.textContent).toContain("Strong Match");
   expect(view.container.textContent).toContain("https://example.test/profile");
   expect(view.container.textContent).toContain("Outdated");
-  expect(api.getById).toHaveBeenCalledExactlyOnceWith({ artifactId: f.reference.artifactId });
+  expect(api.getById).toHaveBeenCalledExactlyOnceWith({
+    artifactId: f.reference.artifactId,
+    includeDiagnostics: true,
+  });
   for (const method of [api.createRole, api.bindRole, api.reviseRole, api.update, api.search])
     expect(method).not.toHaveBeenCalled();
 });
