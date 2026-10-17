@@ -17,7 +17,8 @@ vi.mock("./runtime-context.js", async (importOriginal) => {
   };
 });
 
-vi.mock("@earendil-works/pi-agent-core", () => ({
+vi.mock("@earendil-works/pi-agent-core", async (importOriginal) => ({
+  ...(await importOriginal<Record<string, unknown>>()),
   Agent: class {
     state = { errorMessage: undefined, messages: [] };
     private readonly tools: Array<{

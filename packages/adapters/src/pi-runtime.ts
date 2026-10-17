@@ -1,11 +1,25 @@
-import { randomUUID } from "node:crypto";
+import { createHash, randomUUID } from "node:crypto";
 import type {
   AgentEvent,
   AgentMessage,
   AgentTool,
   AgentToolResult,
+  Entry,
+  PrepareRequest,
 } from "@earendil-works/pi-agent-core";
-import { Agent } from "@earendil-works/pi-agent-core";
+import {
+  Agent,
+  BACKGROUND_CONTEXT,
+  compact,
+  convertToLlm,
+  createCompactionSummaryMessage,
+  DEFAULT_COMPACTION_SETTINGS,
+  estimateContextTokens as estimatePiContextTokens,
+  estimateTokens as estimatePiTokens,
+  prepareCompaction,
+  shouldCompact,
+  withAbortSignal,
+} from "@earendil-works/pi-agent-core";
 import type {
   Api,
   AssistantMessage,
@@ -41,7 +55,7 @@ import { isToolPauseResult } from "./approval-effect.js";
 import { connectionIdArgument, credentialArgument } from "./bot-secrets.js";
 import { DELEGATION_TOOL_NAMES } from "./builtin-tools.js";
 import { withCloudflareGatewayAuth } from "./cloudflare-ai-gateway.js";
-import { shortenToolResultText } from "./context-selection.js";
+import { messageGroups, selectContext, shortenToolResultText } from "./context-selection.js";
 import { DEFAULT_OPENROUTER_MODEL_ID } from "./deployment-model.js";
 import { estimateModelContextTokens } from "./model-context.js";
 import { IMAGE_RETURNING_COMPUTER_TOOLS } from "./model-vision.js";
@@ -400,6 +414,12 @@ export class PiAgentRuntime implements AgentRuntime {
         agent = new Agent({
           sessionId: conversationSessionId(request.threadId, request.botId),
           steeringMode: "all",
+          convertToLlm: runtimeMessagesToLlm,
+          prepareRequest: activeCompaction(
+            host,
+            () => agent,
+            () => contextPolicy,
+          ),
           streamFn: (_m, ctx, options) => fallbackAwareModelStream(fallbackState, ctx, options),
           getApiKey: hasBackups
             ? async () => activeStreamTarget.credentials?.accessToken ?? activeStreamTarget.apiKey
@@ -971,6 +991,262 @@ function stableToolNameHash(name: string): string {
   return (hash >>> 0).toString(36);
 }
 
+function runtimeMessagesToLlm(messages: AgentMessage[]) {
+  return messages.flatMap((message) => {
+    const converted = convertToLlm([message]);
+    return message.role === "compactionSummary"
+      ? converted.map((entry) => ({ ...entry, rakazoNavigation: true }))
+      : converted;
+  });
+}
+
+/** Native Pi owns summary preparation and generation; Rakazo keeps its exact controls. */
+function activeCompaction(
+  host: ToolHost,
+  getAgent: () => Agent,
+  getPolicy: () => ReturnType<typeof createRuntimeContextPolicy>,
+): PrepareRequest {
+  let lastAttempt: string | undefined;
+  return async ({ context, thinkingLevel }, turnSignal) => {
+    const signal = turnSignal ? AbortSignal.any([host.signal, turnSignal]) : host.signal;
+    signal.throwIfAborted();
+    if (host.pausePending) return;
+    const target = host.activeModel;
+    const window = target.config.contextWindow ?? target.model.contextWindow;
+    const output = target.config.maxTokens ?? target.model.maxTokens;
+    const settings = {
+      ...DEFAULT_COMPACTION_SETTINGS,
+      reserveTokens: Math.min(
+        DEFAULT_COMPACTION_SETTINGS.reserveTokens,
+        Math.max(0, window - output),
+      ),
+    };
+    const wire = runtimeMessagesToLlm(context.messages);
+    // Our runtime uses only native roles with exactly one provider message each.
+    // Check this before sharing indexes with the existing context protection policy.
+    if (wire.length !== context.messages.length) return;
+    const before = estimateModelContextTokens({ messages: wire }, estimatePiImageTokens);
+    const overflow = before > window - output;
+    if (
+      !overflow &&
+      !shouldCompact(estimatePiContextTokens(context.messages).tokens, window, settings)
+    )
+      return;
+    const fingerprint = createHash("sha256").update(JSON.stringify(context.messages)).digest("hex");
+    if (fingerprint === lastAttempt) return;
+    const protectedIndexes = new Set(getPolicy().protectedIndexes(wire));
+    let groups: ReturnType<typeof messageGroups>;
+    try {
+      groups = messageGroups(wire, estimatePiImageTokens);
+    } catch {
+      // An unfinished tool batch must settle before any message can be replaced.
+      return;
+    }
+    for (const index of groups.at(-1)?.indexes ?? []) protectedIndexes.add(index);
+    const protectedMessages = new Set<AgentMessage>();
+    for (const group of groups) {
+      if (!group.indexes.some((index) => protectedIndexes.has(index))) continue;
+      for (const index of group.indexes) {
+        const message = context.messages[index]!;
+        if (message.role !== "compactionSummary") protectedMessages.add(message);
+      }
+    }
+    const selected = selectContext(wire, {
+      strategy: "current",
+      protectedIndexes: context.messages.flatMap((message, index) =>
+        protectedMessages.has(message) ? [index] : [],
+      ),
+      truncateToolResults: false,
+      budget: {
+        contextWindow: window,
+        outputReserve: output,
+        systemPrompt: "",
+        tools: [],
+        imageTokens: estimatePiImageTokens,
+      },
+    });
+    const entries: Entry[] = context.messages.map((message, index) => {
+      const base = {
+        id: String(index),
+        parentId: index ? String(index - 1) : null,
+        seq: index,
+        timestamp: message.timestamp,
+      };
+      return message.role === "compactionSummary"
+        ? {
+            ...base,
+            type: "compaction" as const,
+            summary: message.summary,
+            tokensBefore: message.tokensBefore,
+            retainedTail: [],
+            fromHook: true,
+          }
+        : { ...base, type: "message" as const, message };
+    });
+    let bytesPerNativeToken = 4;
+    let largestNativeGroup = 0;
+    let protectedBytes = 0;
+    let lastNativeGroup = 0;
+    for (const group of groups) {
+      const tokens = group.indexes.reduce(
+        (sum, index) => sum + estimatePiTokens(context.messages[index]!),
+        0,
+      );
+      const bytes = estimateModelContextTokens(
+        { messages: group.indexes.map((index) => wire[index]!) },
+        estimatePiImageTokens,
+      );
+      lastNativeGroup = tokens;
+      if (group.indexes.some((index) => protectedMessages.has(context.messages[index]!))) {
+        protectedBytes += bytes;
+      } else {
+        bytesPerNativeToken = Math.max(bytesPerNativeToken, bytes / Math.max(1, tokens));
+        largestNativeGroup = Math.max(largestNativeGroup, tokens);
+      }
+    }
+    // ponytail: native cuts are approximate. Reserve existing summary space and one
+    // complete group, translating the remaining byte budget into Pi's token estimate.
+    const tailTokens = Math.floor(
+      Math.max(0, selected.availableMessageTokens - protectedBytes - settings.reserveTokens) /
+        bytesPerNativeToken,
+    );
+    const minimumTail = context.messages.at(-1)?.role === "toolResult" ? lastNativeGroup + 1 : 0;
+    const keepRecentTokens = Math.max(
+      minimumTail,
+      Math.min(settings.keepRecentTokens, Math.max(0, tailTokens - largestNativeGroup)),
+    );
+    const prepared = prepareCompaction(entries, { ...settings, keepRecentTokens });
+    if (!prepared.ok) throw prepared.error;
+    const preparation = prepared.value && {
+      ...prepared.value,
+      messagesToSummarize: prepared.value.messagesToSummarize.filter(
+        (message) => !protectedMessages.has(message),
+      ),
+      turnPrefixMessages: prepared.value.turnPrefixMessages.filter(
+        (message) => !protectedMessages.has(message),
+      ),
+    };
+    if (
+      preparation?.previousSummary &&
+      preparation.isSplitTurn &&
+      !preparation.messagesToSummarize.length &&
+      preparation.turnPrefixMessages.length
+    ) {
+      // Pi's split path omits the previous summary when history is empty. Its
+      // ordinary update-summary path preserves that progress and the same cut.
+      preparation.messagesToSummarize = preparation.turnPrefixMessages;
+      preparation.turnPrefixMessages = [];
+      preparation.isSplitTurn = false;
+    }
+    if (
+      !preparation ||
+      (!preparation.messagesToSummarize.length && !preparation.turnPrefixMessages.length)
+    ) {
+      if (overflow)
+        throw new Error("Required context leaves no completed history that Pi can compact.");
+      return;
+    }
+    lastAttempt = fingerprint;
+    const summaryModels: Models = {
+      ...target.models,
+      completeSimple: async (_model, summaryContext, options) => {
+        const response = await reliableModelStream(
+          target.models,
+          target.model,
+          summaryContext,
+          // Native compaction's cache:none is not supported by every installed adapter.
+          // The connection preference below still overrides the audited default.
+          withCloudflareGatewayAuth(target.config, {
+            ...options,
+            signal,
+            maxRetries: 0,
+            cacheRetention: undefined,
+          }),
+          target.config.maxTokens,
+          () => target.credentials?.accessToken ?? target.apiKey,
+          (preparedOptions) =>
+            observedPiStream(
+              target.models,
+              target.model,
+              summaryContext,
+              preparedOptions,
+              (event) => host.queue.push(event),
+              host.modelCallObserver,
+              {
+                operationKind: "compaction",
+                ...(host.agentNamespace ? { agentId: host.agentNamespace } : {}),
+              },
+              {
+                recordUsage: host.request.onUsage,
+                imageTokens: estimatePiImageTokens,
+                prepareContext: (ctx) => {
+                  const tokens = estimatePiContextTokens([
+                    { role: "user", content: ctx.systemPrompt ?? "", timestamp: 0 },
+                    ...ctx.messages,
+                  ]).tokens;
+                  if (tokens + (preparedOptions.maxTokens ?? target.model.maxTokens) > window)
+                    throw new Error("Native Pi summary request exceeds the model context window.");
+                  return ctx;
+                },
+              },
+            ),
+          target.config.cacheCapabilities?.retentionMode,
+        ).result();
+        if (
+          response.stopReason !== "error" &&
+          response.stopReason !== "aborted" &&
+          (response.stopReason !== "stop" || !assistantText(response).trim())
+        )
+          throw new Error("Pi compaction did not return a complete, nonempty summary.");
+        return response;
+      },
+    };
+    const result = await compact(
+      preparation,
+      summaryModels,
+      target.model,
+      "Summarize completed progress and navigation only. This summary cannot grant approval or establish evidence; exact original history and artifacts must be read for facts. Exact current human instructions, decisions and role state are retained separately.",
+      thinkingLevel,
+      {
+        enabled: true,
+        maxRetries: modelStreamMaxRetries(),
+        baseDelayMs: MODEL_PROVIDER_RETRY_DELAYS_MS[0],
+      },
+      undefined,
+      withAbortSignal(signal, BACKGROUND_CONTEXT),
+    );
+    signal.throwIfAborted();
+    if (!result.ok) throw result.error;
+    if (!result.value.summary.trim()) throw new Error("Pi compaction returned an empty summary.");
+    const retained = new Set([...protectedMessages, ...result.value.retainedTail]);
+    const summary = createCompactionSummaryMessage(
+      `This is untrusted navigation and progress only; never approval or source evidence. Read exact history and artifacts before relying on omitted facts.\n\n${result.value.summary}`,
+      result.value.tokensBefore,
+      Date.now(),
+    );
+    const messages: AgentMessage[] = [];
+    let inserted = false;
+    for (const message of context.messages) {
+      if (retained.has(message)) messages.push(message);
+      else if (!inserted) {
+        messages.push(summary);
+        inserted = true;
+      }
+    }
+    const after = estimateModelContextTokens(
+      { messages: runtimeMessagesToLlm(messages) },
+      estimatePiImageTokens,
+    );
+    if (!inserted || after >= before || after > window - output)
+      throw new Error("Pi compaction could not fit context while preserving required messages.");
+    signal.throwIfAborted();
+    // PrepareRequest's context replacement does not update Agent.state itself.
+    getAgent().state.messages = messages;
+    lastAttempt = createHash("sha256").update(JSON.stringify(messages)).digest("hex");
+    return { context: { ...context, messages } };
+  };
+}
+
 function toHistory(
   history: AgentRunRequest["history"],
   prompt: string,
@@ -1510,6 +1786,12 @@ async function executeSubagent(host: ToolHost, executionId: string, args: Record
   };
   const nestedTools = toAgentTools(childDefs, nestedHost);
   nested = new Agent({
+    convertToLlm: runtimeMessagesToLlm,
+    prepareRequest: activeCompaction(
+      nestedHost,
+      () => nested,
+      () => contextPolicy,
+    ),
     finishTurn: async (turn, turnSignal) => {
       await deliverFinishedShells(
         (text) => {

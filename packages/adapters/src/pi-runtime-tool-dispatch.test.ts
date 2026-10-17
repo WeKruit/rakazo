@@ -48,7 +48,8 @@ const fakeAgentState = vi.hoisted(() => ({
   toolResult: undefined as unknown,
 }));
 
-vi.mock("@earendil-works/pi-agent-core", () => ({
+vi.mock("@earendil-works/pi-agent-core", async (importOriginal) => ({
+  ...(await importOriginal<Record<string, unknown>>()),
   Agent: class {
     state = {
       errorMessage: undefined as string | undefined,

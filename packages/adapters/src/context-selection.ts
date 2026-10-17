@@ -300,7 +300,7 @@ interface Group {
   tokens: number;
 }
 /** A tool request and all results form an indivisible group. User exchanges may contain several groups. */
-function messageGroups(
+export function messageGroups(
   messages: readonly ContextMessage[],
   imageTokens?: ContextBudget["imageTokens"],
 ): Group[] {

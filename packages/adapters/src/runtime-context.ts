@@ -38,6 +38,7 @@ const messageHash = (message: Message) =>
     .update(JSON.stringify(providerContextPrefix("", [], [message])))
     .digest("hex");
 interface OriginalMetadata {
+  rakazoNavigation?: boolean;
   rakazoHistory?: boolean;
   rakazoMessageId?: string;
   rakazoCreatedAt?: string;
@@ -121,6 +122,46 @@ export function createRuntimeContextPolicy(
   function requiredForRun(message: Message): boolean {
     return original(message)?.requiredForRun === true;
   }
+  function protectedIndexes(messages: Message[], currentIndex?: number): number[] {
+    metadataPresent = messages.some((message) =>
+      Boolean((message as Message & OriginalMetadata).rakazoHistory),
+    );
+    if (currentIndex === undefined) {
+      currentIndex = messages.findIndex(
+        (message) =>
+          message.role === "user" &&
+          !(message as Message & OriginalMetadata).rakazoNavigation &&
+          !original(message),
+      );
+      if (currentIndex < 0)
+        currentIndex = messages.findLastIndex(
+          (message) =>
+            message.role === "user" && !(message as Message & OriginalMetadata).rakazoNavigation,
+        );
+      if (currentIndex < 0) currentIndex = 0;
+    }
+    const indexes = messages.flatMap((message, index) =>
+      requiredForRun(message) ||
+      message.role === "system" ||
+      (index >= currentIndex && message.role === "user")
+        ? [index]
+        : [],
+    );
+    const currentRoleIndex = messages.findLastIndex((message) => {
+      if (
+        message.role !== "toolResult" ||
+        !["recruiting_role", "recruiting_research"].includes(message.toolName)
+      )
+        return false;
+      try {
+        return typeof JSON.parse(text(message))?.roleContext === "string";
+      } catch {
+        return false;
+      }
+    });
+    if (currentRoleIndex >= 0) indexes.push(currentRoleIndex);
+    return indexes;
+  }
   function navigation(ids: string[]): Message | undefined {
     const stored = ids.map((id) => historyById.get(id));
     if (stored.some((item) => !item)) return;
@@ -167,6 +208,7 @@ export function createRuntimeContextPolicy(
     return { messages: result, catalogIds, navigation: catalogMessage };
   }
   return {
+    protectedIndexes,
     prepareContext(ctx: Context, model: Model<Api>): Context {
       const strategy = request.contextStrategy ?? DEFAULT_CONTEXT_STRATEGY;
       const standaloneHistoryFallback =
@@ -244,18 +286,18 @@ export function createRuntimeContextPolicy(
       let messages = projected?.messages ?? [...ctx.messages];
       let currentIndex = messages.findIndex(
         (message) =>
-          message.role === "user" && message !== projected?.navigation && !original(message),
+          message.role === "user" &&
+          message !== projected?.navigation &&
+          !(message as Message & OriginalMetadata).rakazoNavigation &&
+          !original(message),
       );
       if (currentIndex < 0)
-        currentIndex = messages.findLastIndex((message) => message.role === "user");
+        currentIndex = messages.findLastIndex(
+          (message) =>
+            message.role === "user" && !(message as Message & OriginalMetadata).rakazoNavigation,
+        );
       if (currentIndex < 0) currentIndex = 0;
-      let protectedIndexes = messages.flatMap((message, index) =>
-        requiredForRun(message) ||
-        message.role === "system" ||
-        (index >= currentIndex && message.role === "user")
-          ? [index]
-          : [],
-      );
+      let protectedMessageIndexes = protectedIndexes(messages, currentIndex);
       const modelWindow = request.model.contextWindow ?? model.contextWindow;
       const outputReserve = request.model.maxTokens ?? model.maxTokens;
       const fixed =
@@ -314,18 +356,14 @@ export function createRuntimeContextPolicy(
           ...historical.slice(recentStart),
           ...messages.slice(currentIndex),
         ];
-        protectedIndexes = messages.flatMap((message, index) =>
-          requiredForRun(message) ||
-          message.role === "system" ||
-          (index >= earlierSystem.length + Math.min(8, historical.length) &&
-            message.role === "user")
-            ? [index]
-            : [],
+        protectedMessageIndexes = protectedIndexes(
+          messages,
+          earlierSystem.length + Math.min(8, historical.length),
         );
         if (catalog) {
           const catalogMessage = navigation(catalogIds)!;
           // Include the bounded catalog only if required content leaves room for it.
-          const required = protectedIndexes.map((index) => messages[index]!);
+          const required = protectedMessageIndexes.map((index) => messages[index]!);
           const fixed =
             estimateContextTokens(budget.systemPrompt) + estimateContextTokens(budget.tools);
           if (
@@ -337,24 +375,25 @@ export function createRuntimeContextPolicy(
             const insertIndex = messages[0]?.role === "system" ? 1 : 0;
             messages.splice(insertIndex, 0, catalogMessage);
             navigationMessage = catalogMessage;
-            protectedIndexes = [
+            protectedMessageIndexes = [
               insertIndex,
-              ...protectedIndexes.map((index) => index + Number(index >= insertIndex)),
+              ...protectedMessageIndexes.map((index) => index + Number(index >= insertIndex)),
             ];
           }
         }
       }
       const summaries = ctx.messages.filter(
         (message) =>
-          (message as Message & OriginalMetadata).rakazoHistory &&
-          !(message as Message & OriginalMetadata).rakazoMessageId &&
-          (text(message).startsWith("Rakazo-owned compacted context through message sequence ") ||
-            text(message).startsWith(
-              "Memory recalled from earlier conversations that fell outside the visible history.",
-            )),
+          (message as Message & OriginalMetadata).rakazoNavigation ||
+          ((message as Message & OriginalMetadata).rakazoHistory &&
+            !(message as Message & OriginalMetadata).rakazoMessageId &&
+            (text(message).startsWith("Rakazo-owned compacted context through message sequence ") ||
+              text(message).startsWith(
+                "Memory recalled from earlier conversations that fell outside the visible history.",
+              ))),
       );
       for (const summary of summaries) {
-        const required = protectedIndexes.map((index) => messages[index]!);
+        const required = protectedMessageIndexes.map((index) => messages[index]!);
         if (
           fixed +
             estimateContextTokens(required, options.imageTokens) +
@@ -365,23 +404,12 @@ export function createRuntimeContextPolicy(
         if (!messages.includes(summary)) {
           const insertIndex = messages[0]?.role === "system" ? 1 : 0;
           messages.splice(insertIndex, 0, summary);
-          protectedIndexes = protectedIndexes.map((index) => index + Number(index >= insertIndex));
+          protectedMessageIndexes = protectedMessageIndexes.map(
+            (index) => index + Number(index >= insertIndex),
+          );
         }
-        protectedIndexes.push(messages.indexOf(summary));
+        protectedMessageIndexes.push(messages.indexOf(summary));
       }
-      const currentRoleIndex = messages.findLastIndex((message) => {
-        if (
-          message.role !== "toolResult" ||
-          !["recruiting_role", "recruiting_research"].includes(message.toolName)
-        )
-          return false;
-        try {
-          return typeof JSON.parse(text(message))?.roleContext === "string";
-        } catch {
-          return false;
-        }
-      });
-      if (currentRoleIndex >= 0) protectedIndexes.push(currentRoleIndex);
       // Completed loop steps remain useful task state even when their verbose
       // evidence is old. Keep the protocol and controls so dropping large bodies
       // does not make the agent restart work it has already completed.
@@ -411,7 +439,7 @@ export function createRuntimeContextPolicy(
       const selected = selectContext(messages, {
         budget,
         strategy,
-        protectedIndexes,
+        protectedIndexes: protectedMessageIndexes,
         cacheWarmth: predictedCache,
         recentExchanges: retainShortHistory || standaloneHistoryFallback ? messages.length : 8,
         verbatimToolResults: VERBATIM_TOOL_RESULTS,

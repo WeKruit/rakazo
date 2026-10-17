@@ -1,5 +1,6 @@
 import type * as AgentCore from "@earendil-works/pi-agent-core";
 import type { AgentMessage, AgentOptions } from "@earendil-works/pi-agent-core";
+import { createCompactionSummaryMessage } from "@earendil-works/pi-agent-core";
 import type {
   AssistantMessage,
   Context,
@@ -63,6 +64,7 @@ import { IMAGE_RETURNING_COMPUTER_TOOLS } from "./model-vision.js";
 import { isRetryableProviderUnavailable, PiAgentRuntime } from "./pi-runtime.js";
 import { MODEL_STREAM_IDLE_TIMEOUT_MS } from "./pi-runtime-limits.js";
 import { PiJsonlSessionRecorder } from "./pi-session.js";
+import { createRuntimeContextPolicy } from "./runtime-context.js";
 
 const primary = model("provider-a", "primary", 32_768);
 const backupA = model("provider-b", "backup-a", 8_192);
@@ -215,6 +217,636 @@ beforeEach(() => {
 });
 
 afterEach(() => vi.useRealTimers());
+
+function compactionRequest(withHistory = true) {
+  const target = model("provider-a", "large", 128_000);
+  providerState.models.set(
+    `${target.provider}/${target.id}`,
+    target as unknown as Record<string, unknown>,
+  );
+  const input = request();
+  input.model = { provider: target.provider, id: target.id, apiKey: "fake-primary-key" };
+  input.contextStrategy = "current";
+  input.history = withHistory
+    ? Array.from({ length: 18 }, (_, index) => [
+        {
+          id: `old-user-${index}`,
+          role: "user" as const,
+          content: `Earlier request ${index}: ${"u".repeat(1_000)}`,
+        },
+        {
+          id: `old-answer-${index}`,
+          role: "assistant" as const,
+          content: `Earlier result ${index}: ${"a".repeat(10_000)}`,
+        },
+      ]).flat()
+    : [];
+  input.history.push(
+    {
+      id: "canonical-goal",
+      role: "user",
+      content: "Keep the original exact goal.",
+      requiredForRun: true,
+    },
+    {
+      id: "canonical-card",
+      role: "assistant",
+      content: "Choose the exact option.",
+      requiredForRun: true,
+    },
+  );
+  input.prompt = "  Exact answer🙂\r\nContinue my task.  ";
+  input.sourceMessageId = "canonical-answer";
+  input.history.push({
+    id: input.sourceMessageId,
+    role: "user",
+    content: input.prompt,
+    requiredForRun: true,
+  });
+  return { target, input };
+}
+
+it.each(["current", "cache-aware"] as const)(
+  "uses native compaction before the first request and accounts each split summary call with %s",
+  async (strategy) => {
+    const { target, input } = compactionRequest();
+    input.contextStrategy = strategy;
+    const onUsage = vi.fn();
+    input.onUsage = onUsage;
+    const observer: ModelCallObserver = {
+      beforeCall: vi.fn(async () => `reservation-${onUsage.mock.calls.length}`),
+      afterCall: vi.fn(async () => undefined),
+    };
+    providerState.stream.mockImplementation(
+      (_model: Model<"openai-completions">, context: Context) =>
+        stream(
+          target,
+          message(
+            target,
+            [
+              {
+                type: "text",
+                text: context.systemPrompt?.includes("summarization assistant")
+                  ? "Native progress summary."
+                  : "Done.",
+              },
+            ],
+            "stop",
+          ),
+        ),
+    );
+    const events = await run(input, [], new PiAgentRuntime({ modelCallObserver: observer }));
+    const summaries = onUsage.mock.calls.filter(([event]) => event.operationKind === "compaction");
+    expect(summaries).toHaveLength(2);
+    expect(observer.beforeCall).toHaveBeenCalledTimes(3);
+    expect(observer.afterCall).toHaveBeenCalledTimes(3);
+    expect(events.filter((event) => event.type === "usage")).toHaveLength(3);
+    expect(
+      providerState.stream.mock.calls.every((call) => call[2].cacheRetention === "short"),
+    ).toBe(true);
+    const wire = providerState.stream.mock.calls.at(-1)![1] as Context;
+    const serialized = JSON.stringify(wire);
+    expect(serialized).toContain("Native progress summary.");
+    expect(serialized).toContain("untrusted");
+    for (const exact of [
+      "Keep the original exact goal.",
+      "Choose the exact option.",
+      input.prompt,
+    ]) {
+      expect(
+        wire.messages.filter((entry) =>
+          typeof entry.content === "string"
+            ? entry.content === exact
+            : entry.content.some((part) => part.type === "text" && part.text === exact),
+        ),
+      ).toHaveLength(1);
+    }
+    expect(
+      providerState.agent!.state.messages.some((entry) => entry.role === "compactionSummary"),
+    ).toBe(true);
+    expect(input.history[1]!.content).toHaveLength("Earlier result 0: ".length + 10_000);
+    const convertedState = await providerState.agentOptions!.convertToLlm!(
+      providerState.agent!.state.messages,
+    );
+    const protectedIndexes = createRuntimeContextPolicy(input).protectedIndexes(convertedState);
+    expect(
+      protectedIndexes.some(
+        (index) =>
+          "rakazoMessageId" in convertedState[index]! &&
+          String(convertedState[index]!.rakazoMessageId).startsWith("old-user-"),
+      ),
+    ).toBe(false);
+  },
+);
+
+it.each([true, false])(
+  "preserves an explicit connection cache:none during native compaction when supported=%s",
+  async (supported) => {
+    const { target, input } = compactionRequest();
+    if (supported) target.compat = { cacheControlFormat: "anthropic" };
+    input.model.cacheCapabilities = { scope: "connection", retentionMode: "none" };
+    providerState.stream.mockImplementation(() =>
+      stream(target, message(target, [{ type: "text", text: "Native progress summary." }], "stop")),
+    );
+    if (!supported) {
+      await expect(run(input)).rejects.toThrow("Unsupported prompt-cache retention mode");
+      expect(providerState.stream).not.toHaveBeenCalled();
+      return;
+    }
+    await run(input);
+    const summaries = providerState.stream.mock.calls.filter((call) =>
+      (call[1] as Context).systemPrompt?.includes("summarization assistant"),
+    );
+    expect(summaries).toHaveLength(2);
+    expect(summaries.every((call) => call[2].cacheRetention === "none")).toBe(true);
+  },
+);
+
+it("compacts a running native tool loop while preserving exact role state, sibling results and steering", async () => {
+  const { target, input } = compactionRequest(false);
+  input.tools = [
+    {
+      name: "recruiting_role",
+      description: "Adopt exact role",
+      inputSchema: { type: "object", properties: {} },
+      readOnly: true,
+    },
+    {
+      name: "read_file",
+      description: "Read evidence",
+      inputSchema: { type: "object", properties: {} },
+      readOnly: true,
+    },
+  ];
+  let turn = 0;
+  let claimed = false;
+  input.claimSteering = async () => {
+    if (turn < 12 || claimed) return [];
+    claimed = true;
+    return [{ id: "steer", messageId: "steer", text: "Exact human correction: continue B." }];
+  };
+  input.executeTool = vi.fn(async (name, _args, executionId) => ({
+    ...(name === "recruiting_role"
+      ? { roleContext: `EXACT ROLE ${executionId.includes("role-a") ? "A" : "B"}` }
+      : { evidence: "e".repeat(11_500) }),
+  }));
+  providerState.stream.mockImplementation(
+    (_model: Model<"openai-completions">, context: Context) => {
+      if (context.systemPrompt?.includes("summarization assistant"))
+        return stream(
+          target,
+          message(target, [{ type: "text", text: "Completed file review; keep working." }], "stop"),
+        );
+      turn++;
+      const content: AssistantMessage["content"] =
+        turn <= 17
+          ? [
+              { type: "toolCall", id: `file-${turn}`, name: "read_file", arguments: {} },
+              ...(turn === 1 || turn === 8 || turn === 17
+                ? [
+                    {
+                      type: "toolCall" as const,
+                      id: turn === 8 ? "role-b" : `role-a-${turn}`,
+                      name: "recruiting_role",
+                      arguments: {},
+                    },
+                  ]
+                : []),
+            ]
+          : [{ type: "text", text: "Done." }];
+      return stream(target, message(target, content, turn <= 17 ? "toolUse" : "stop"));
+    },
+  );
+  await run(input);
+  const summaries = providerState.stream.mock.calls.filter((call) =>
+    (call[1] as Context).systemPrompt?.includes("summarization assistant"),
+  );
+  expect(summaries.length).toBeGreaterThanOrEqual(2);
+  expect(
+    summaries
+      .slice(1)
+      .some((call) => JSON.stringify(call[1]).includes("Completed file review; keep working.")),
+  ).toBe(true);
+  const wire = providerState.stream.mock.calls.at(-1)![1] as Context;
+  expect(JSON.stringify(wire).includes("Completed file review; keep working.")).toBe(true);
+  expect(JSON.stringify(wire).includes("EXACT ROLE A")).toBe(true);
+  expect(
+    wire.messages.filter(
+      (entry) =>
+        entry.role === "user" &&
+        JSON.stringify(entry.content).includes("Exact human correction: continue B."),
+    ),
+  ).toHaveLength(1);
+  const lastRole = wire.messages.findLast(
+    (entry) => entry.role === "toolResult" && entry.toolName === "recruiting_role",
+  );
+  expect(lastRole?.role === "toolResult" && lastRole.toolCallId).toBe("role-a-17");
+  for (const entry of wire.messages) {
+    if (entry.role !== "assistant") continue;
+    for (const call of entry.content.filter((part) => part.type === "toolCall")) {
+      expect(
+        wire.messages.filter(
+          (result) => result.role === "toolResult" && result.toolCallId === call.id,
+        ),
+      ).toHaveLength(1);
+    }
+  }
+});
+
+it.each(["failure", "empty"])(
+  "preserves original native state when the second split summary has %s",
+  async (failure) => {
+    const { target, input } = compactionRequest();
+    const onUsage = vi.fn();
+    input.onUsage = onUsage;
+    const observer: ModelCallObserver = {
+      beforeCall: vi.fn(async () => "reservation"),
+      afterCall: vi.fn(async () => undefined),
+    };
+    let calls = 0;
+    providerState.stream.mockImplementation(() => {
+      calls++;
+      return stream(
+        target,
+        message(
+          target,
+          [{ type: "text", text: calls === 1 ? "Completed first summary." : "" }],
+          calls === 2 && failure === "failure" ? "error" : "stop",
+          "Invalid summary response",
+        ),
+      );
+    });
+    await expect(
+      run(input, [], new PiAgentRuntime({ modelCallObserver: observer })),
+    ).rejects.toThrow(failure === "failure" ? "Invalid summary response" : "nonempty summary");
+    expect(calls).toBe(2);
+    expect(onUsage).toHaveBeenCalledTimes(2);
+    expect(observer.afterCall).toHaveBeenCalledTimes(2);
+    expect(
+      providerState.agent!.state.messages.some((entry) => entry.role === "compactionSummary"),
+    ).toBe(false);
+    expect(
+      providerState
+        .agent!.state.messages.filter((entry) => "rakazoMessageId" in entry)
+        .map((entry) => (entry as AgentMessage & { rakazoMessageId: string }).rakazoMessageId),
+    ).toContain("old-answer-0");
+  },
+);
+
+it("accounts each native summary retry before the answer without provider-hidden retries", async () => {
+  const { target, input } = compactionRequest();
+  const onUsage = vi.fn();
+  input.onUsage = onUsage;
+  const observer: ModelCallObserver = {
+    beforeCall: vi.fn(async () => "reservation"),
+    afterCall: vi.fn(async () => undefined),
+  };
+  let calls = 0;
+  providerState.stream.mockImplementation(() => {
+    calls++;
+    return stream(
+      target,
+      message(
+        target,
+        [{ type: "text", text: "Native progress summary." }],
+        calls === 1 ? "error" : "stop",
+        calls === 1 ? "503 Service unavailable" : undefined,
+      ),
+    );
+  });
+  await run(input, [], new PiAgentRuntime({ modelCallObserver: observer }));
+  expect(calls).toBe(4);
+  expect(onUsage.mock.calls.filter(([event]) => event.operationKind === "compaction")).toHaveLength(
+    3,
+  );
+  expect(observer.beforeCall).toHaveBeenCalledTimes(4);
+  expect(observer.afterCall).toHaveBeenCalledTimes(4);
+  expect(providerState.stream.mock.calls.every((call) => call[2].maxRetries === 0)).toBe(true);
+});
+
+it("aborts native compaction before committing state and leaves queued steering unconsumed", async () => {
+  const { target, input } = compactionRequest();
+  const controller = new AbortController();
+  const onUsage = vi.fn();
+  input.onUsage = onUsage;
+  const observer: ModelCallObserver = {
+    beforeCall: vi.fn(async () => "reservation"),
+    afterCall: vi.fn(async () => undefined),
+  };
+  providerState.stream.mockImplementation(() => {
+    providerState.agent!.steer({
+      role: "user",
+      content: "Queued exact human steering.",
+      timestamp: 1,
+    });
+    controller.abort();
+    return stream(
+      target,
+      message(target, [{ type: "text", text: "A summary after cancellation." }], "stop"),
+    );
+  });
+  const events: AgentRuntimeEvent[] = [];
+  const collecting = (async () => {
+    for await (const event of new PiAgentRuntime({ modelCallObserver: observer }).run(input, {
+      signal: controller.signal,
+    }))
+      events.push(event);
+  })();
+  await expect(collecting).rejects.toThrow("aborted");
+  expect(providerState.stream).toHaveBeenCalledTimes(1);
+  expect(onUsage).toHaveBeenCalledTimes(1);
+  expect(observer.afterCall).toHaveBeenCalledTimes(1);
+  expect(
+    providerState.agent!.state.messages.some((entry) => entry.role === "compactionSummary"),
+  ).toBe(false);
+  expect(providerState.agent!.peekQueuedMessages()).toEqual([
+    expect.objectContaining({ content: "Queued exact human steering." }),
+  ]);
+  expect(
+    providerState.agent!.state.messages.some(
+      (entry) => "rakazoMessageId" in entry && entry.rakazoMessageId === "old-answer-0",
+    ),
+  ).toBe(true);
+  expect(
+    events.some(
+      (event) => event.type === "text" && event.text.includes("A summary after cancellation."),
+    ),
+  ).toBe(false);
+});
+
+it("uses the same observed native compaction inside a delegated tool loop", async () => {
+  const { target, input } = compactionRequest(false);
+  input.tools = [
+    {
+      name: "run_subagent",
+      description: "Delegate",
+      inputSchema: { type: "object", properties: { task: { type: "string" } } },
+      readOnly: true,
+    },
+    {
+      name: "read_file",
+      description: "Read evidence",
+      inputSchema: { type: "object", properties: {} },
+      readOnly: true,
+    },
+  ];
+  input.executeTool = vi.fn(async () => ({ evidence: "e".repeat(11_500) }));
+  let parentTurns = 0;
+  let childTurns = 0;
+  providerState.stream.mockImplementation(
+    (_model: Model<"openai-completions">, context: Context) => {
+      if (context.systemPrompt?.includes("summarization assistant"))
+        return stream(
+          target,
+          message(target, [{ type: "text", text: "Native delegated progress summary." }], "stop"),
+        );
+      if (JSON.stringify(context.messages[0]?.content).includes("Rakazo subagent")) {
+        childTurns++;
+        return stream(
+          target,
+          message(
+            target,
+            childTurns <= 15
+              ? [{ type: "toolCall", id: `child-${childTurns}`, name: "read_file", arguments: {} }]
+              : [{ type: "text", text: "Child finished." }],
+            childTurns <= 15 ? "toolUse" : "stop",
+          ),
+        );
+      }
+      parentTurns++;
+      return stream(
+        target,
+        message(
+          target,
+          parentTurns === 1
+            ? [
+                {
+                  type: "toolCall",
+                  id: "delegate",
+                  name: "run_subagent",
+                  arguments: { name: "reviewer", task: "Review every file" },
+                },
+              ]
+            : [{ type: "text", text: "Done." }],
+          parentTurns === 1 ? "toolUse" : "stop",
+        ),
+      );
+    },
+  );
+  const observer: ModelCallObserver = {
+    beforeCall: vi.fn(async () => "reservation"),
+    afterCall: vi.fn(async () => undefined),
+  };
+  const events = await run(input, [], new PiAgentRuntime({ modelCallObserver: observer }));
+  expect(events.filter((event) => event.type === "subagent" && event.status === "failed")).toEqual(
+    [],
+  );
+  expect(childTurns).toBe(16);
+  const summaries = events.filter(
+    (event) => event.type === "usage" && event.operationKind === "compaction",
+  );
+  expect(summaries.length).toBeGreaterThan(0);
+  expect(summaries.every((event) => "agentId" in event && typeof event.agentId === "string")).toBe(
+    true,
+  );
+  expect(observer.afterCall).toHaveBeenCalledTimes(providerState.stream.mock.calls.length);
+  expect(
+    providerState.stream.mock.calls.some((call) =>
+      JSON.stringify(call[1]).includes("Native delegated progress summary."),
+    ),
+  ).toBe(true);
+});
+
+it("does not spend a summary call when exact protected controls already exceed the budget", async () => {
+  const { target, input } = compactionRequest();
+  input.prompt = `Current exact human instructions: ${"x".repeat(130_000)}`;
+  providerState.stream.mockImplementation(() =>
+    stream(
+      target,
+      message(target, [{ type: "text", text: "Summary cannot solve oversized controls." }], "stop"),
+    ),
+  );
+  await expect(run(input)).rejects.toThrow("context");
+  expect(providerState.stream).not.toHaveBeenCalled();
+  expect(
+    providerState.agent!.state.messages.some((entry) => entry.role === "compactionSummary"),
+  ).toBe(false);
+});
+
+it("leaves the original state when the native summary cannot reduce context enough", async () => {
+  const { target, input } = compactionRequest();
+  providerState.stream.mockImplementation(() =>
+    stream(target, message(target, [{ type: "text", text: "s".repeat(100_000) }], "stop")),
+  );
+  await expect(run(input)).rejects.toThrow("preserving required messages");
+  expect(providerState.stream).toHaveBeenCalledTimes(2);
+  expect(
+    providerState.agent!.state.messages.some((entry) => entry.role === "compactionSummary"),
+  ).toBe(false);
+  expect(
+    providerState.agent!.state.messages.some(
+      (entry) => "rakazoMessageId" in entry && entry.rakazoMessageId === "old-answer-0",
+    ),
+  ).toBe(true);
+});
+
+it("does not compact an unfinished native tool batch", async () => {
+  const { target, input } = compactionRequest(false);
+  const pending = message(
+    target,
+    [
+      { type: "text", text: "p".repeat(130_000) },
+      { type: "toolCall", id: "unfinished", name: "read_file", arguments: {} },
+    ],
+    "toolUse",
+  );
+  let checking: unknown;
+  providerState.stream.mockImplementation(() => {
+    const context = {
+      messages: [...providerState.agent!.state.messages, pending],
+      tools: providerState.agent!.state.tools,
+    };
+    checking = providerState.agentOptions!.prepareRequest!(
+      { context, model: target, thinkingLevel: "off" },
+      new AbortController().signal,
+    );
+    return stream(target, message(target, [{ type: "text", text: "Done." }], "stop"));
+  });
+  await run(input);
+  expect(await checking).toBeUndefined();
+  expect(providerState.stream).toHaveBeenCalledTimes(1);
+  expect(
+    providerState.agent!.state.messages.some((entry) => entry.role === "compactionSummary"),
+  ).toBe(false);
+});
+
+it("uses native compaction for initial history in a small context window", async () => {
+  const { target, input } = compactionRequest();
+  target.contextWindow = 32_768;
+  input.history = [...input.history.slice(0, 12), ...input.history.slice(-3)];
+  providerState.stream.mockImplementation((_model: Model<"openai-completions">, context: Context) =>
+    stream(
+      target,
+      message(
+        target,
+        [
+          {
+            type: "text",
+            text: context.systemPrompt?.includes("summarization assistant")
+              ? "Native earlier progress."
+              : "Done.",
+          },
+        ],
+        "stop",
+      ),
+    ),
+  );
+  const events = await run(input);
+  expect(events.at(-1)).toEqual({ type: "done", text: "Done." });
+  expect(
+    providerState.agent!.state.messages.some((entry) => entry.role === "compactionSummary"),
+  ).toBe(true);
+});
+
+it("updates the previous native summary when protected history leaves only a split turn prefix", async () => {
+  const { target, input } = compactionRequest(false);
+  target.contextWindow = 8_192;
+  const previous = "PRIOR_COMPLETED_PROGRESS_SENTINEL";
+  const exactRole = JSON.stringify({ roleContext: "Exact current role." });
+  const steering = "Exact current human steering.";
+  const summaryPrompts: string[] = [];
+  let replacement: Awaited<ReturnType<NonNullable<AgentOptions["prepareRequest"]>>>;
+  function batch(
+    id: string,
+    name = "read_file",
+    text = "Earlier completed file review.",
+  ): AgentMessage[] {
+    return [
+      message(target, [{ type: "toolCall", id, name, arguments: {} }], "toolUse"),
+      {
+        role: "toolResult",
+        toolCallId: id,
+        toolName: name,
+        content: [{ type: "text", text }],
+        isError: false,
+        timestamp: 1,
+      },
+    ];
+  }
+  providerState.stream.mockImplementation(
+    (_model: Model<"openai-completions">, context: Context) => {
+      if (context.systemPrompt?.includes("summarization assistant")) {
+        const prompt = JSON.stringify(context);
+        summaryPrompts.push(prompt);
+        return stream(
+          target,
+          message(
+            target,
+            [
+              {
+                type: "text",
+                text: prompt.includes(previous)
+                  ? `${previous}: updated progress.`
+                  : "New progress only.",
+              },
+            ],
+            "stop",
+          ),
+        );
+      }
+      const messages = [
+        ...providerState.agent!.state.messages,
+        createCompactionSummaryMessage(previous, 30_000, 1),
+        ...batch("role", "recruiting_role", exactRole),
+        { role: "user" as const, content: steering, timestamp: 1 },
+        ...Array.from({ length: 4 }, (_, index) => batch(`old-${index}`)).flat(),
+        ...batch("latest"),
+      ];
+      const latestAssistant = messages.at(-2)!;
+      if (latestAssistant.role === "assistant") latestAssistant.usage.totalTokens = 30_000;
+      const waiting = new AssistantMessageEventStream();
+      void Promise.resolve(
+        providerState.agentOptions!.prepareRequest!(
+          {
+            context: { messages, tools: providerState.agent!.state.tools },
+            model: target,
+            thinkingLevel: "off",
+          },
+          new AbortController().signal,
+        ),
+      ).then(
+        (update) => {
+          replacement = update;
+          const done = message(target, [{ type: "text", text: "Done." }], "stop");
+          waiting.push({ type: "done", reason: "stop", message: done });
+          waiting.end(done);
+        },
+        (error) => {
+          const failed = message(target, [], "error", String(error));
+          waiting.push({ type: "error", reason: "error", error: failed });
+          waiting.end(failed);
+        },
+      );
+      return waiting;
+    },
+  );
+  await run(input);
+  expect(summaryPrompts).toHaveLength(1);
+  expect(summaryPrompts[0]!.includes(previous)).toBe(true);
+  expect(summaryPrompts[0]!.includes("Exact current role.")).toBe(false);
+  expect(summaryPrompts[0]!.includes(steering)).toBe(false);
+  const messages = replacement?.context?.messages ?? [];
+  expect(messages.filter((entry) => entry.role === "compactionSummary")).toHaveLength(1);
+  expect(messages.find((entry) => entry.role === "compactionSummary")?.summary).toContain(previous);
+  expect(
+    messages.find((entry) => entry.role === "toolResult" && entry.toolCallId === "role"),
+  ).toMatchObject({
+    content: [{ type: "text", text: exactRole }],
+  });
+  expect(
+    messages.filter((entry) => entry.role === "user" && entry.content === steering),
+  ).toHaveLength(1);
+});
 
 it("replays native questions as assistant turns with the latest exact human answer current", async () => {
   const goal = "Ask my language, echo the complete answer in a code block, then stop. Chat only.";
