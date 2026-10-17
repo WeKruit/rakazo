@@ -4381,6 +4381,10 @@ msgid "Something went wrong. Try again."
 msgstr "문제가 발생했습니다. 다시 시도하세요."
 
 #: src/pages/RecruitingPanel.tsx
+msgid "Source text"
+msgstr ""
+
+#: src/pages/RecruitingPanel.tsx
 msgid "Source unavailable"
 msgstr ""
 

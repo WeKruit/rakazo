@@ -8,6 +8,7 @@ import { useEffect, useState } from "react";
 import { createRoot } from "react-dom/client";
 import { AskCard } from "../../src/components/AskCard";
 import { bootstrapI18n, i18n } from "../../src/lib/i18n";
+import { RecruitingPanel } from "../../src/pages/RecruitingPanel";
 import type { RoutineDraftState } from "../../src/pages/RoutineEditor";
 import { RoutineEditor } from "../../src/pages/RoutineEditor";
 import { SettingsOverlay } from "../../src/pages/SettingsOverlay";
@@ -504,6 +505,114 @@ function SubscriptionShot() {
 
 const view = new URLSearchParams(location.search).get("view") ?? "create";
 
+async function prepareRecruitingSourceShot() {
+  const quote = "Designed coordinate transforms 🧭 in Python.";
+  const text = `Candidate note\n\n${quote}\n\nEmployment type and dates are not provided.\n`;
+  const bytes = new TextEncoder().encode(JSON.stringify({ profile: { summary: text } }));
+  const digest = await crypto.subtle.digest("SHA-256", bytes);
+  const sha256 = Array.from(new Uint8Array(digest), (byte) =>
+    byte.toString(16).padStart(2, "0"),
+  ).join("");
+  const source = {
+    id: "source-demo",
+    kind: "original_material",
+    anchor: {
+      kind: "artifact",
+      artifact: { artifactId: "profile-demo", sha256 },
+      locator: "profile.summary",
+    },
+    readState: "read",
+    readAt: "2026-10-16T00:00:00Z",
+    quote,
+    selection: {
+      kind: "artifact_json_string",
+      path: ["profile", "summary"],
+      start: text.indexOf(quote),
+      end: text.indexOf(quote) + quote.length,
+    },
+  };
+  const role = {
+    id: "role-demo",
+    spaceId: "space-demo",
+    userId: "user-demo",
+    sourceThreadId: "thread-demo",
+    title: "Systems engineer",
+    revision: 1,
+    currentRevisionId: "revision-demo",
+  };
+  const revision = {
+    id: "revision-demo",
+    roleId: role.id,
+    revision: 1,
+    sourceRefs: [],
+    criteria: [
+      {
+        id: "geometry",
+        priority: "hard",
+        expression: {
+          kind: "atom",
+          id: "geometry-atom",
+          statement: "Implement geometric calculations",
+        },
+        sourceRefs: [],
+        definitionQuestions: [],
+      },
+    ],
+    preferences: [],
+    definitionQuestions: [],
+    createdAt: "2026-10-16T00:00:00Z",
+  };
+  const judgment = {
+    verdict: "unknown",
+    factIds: ["fact-demo"],
+    evidence: [source.id],
+    missing: ["Confirm the candidate's own implementation and employment dates."],
+  };
+  demoRpc["recruiting/getWorkspace"] = { role, revision };
+  demoRpc["recruiting/listAssessments"] = [
+    {
+      assessment: {
+        roleId: role.id,
+        roleRevisionId: revision.id,
+        candidateKey: "Synthetic candidate",
+        version: 1,
+        basedOnVersion: null,
+        createdByRunId: "run-demo",
+        createdAt: "2026-10-16T00:00:00Z",
+        facts: [
+          { kind: "statement", id: "fact-demo", statement: quote, sourceRefIds: [source.id] },
+        ],
+        sourceRefs: [source],
+        questions: judgment.missing,
+        judgments: {
+          atoms: [{ atomId: "geometry-atom", ...judgment }],
+          criteria: [{ criterionId: "geometry", ...judgment }],
+          employment: [],
+          hardGate: "unknown",
+        },
+      },
+      isCurrent: true,
+      roleRevision: revision,
+      sourceMessageTargets: [],
+    },
+  ];
+  demoRpc["recruiting/listResearch"] = { tasks: [], actions: [] };
+  demoRpc["recruiting/listQuestions"] = { questions: [] };
+  demoRpc["artifacts/getById"] = {
+    id: "profile-demo",
+    botId: "bot-inbox",
+    groupId: null,
+    runId: null,
+    name: "profile.json",
+    description: null,
+    mimeType: "application/json",
+    size: bytes.length,
+    version: 1,
+    createdAt: "2026-10-16T00:00:00Z",
+    contentBase64: btoa(String.fromCharCode(...bytes)),
+  };
+}
+
 if (view === "subscription") {
   demoRpc.me = subscriptionMe;
   demoRpc["models/list"] = subscriptionCatalog;
@@ -511,22 +620,29 @@ if (view === "subscription") {
   demoRpc["models/backups"] = [];
 }
 
-void bootstrapI18n("en").then(() => {
-  const shot =
-    view === "model" ? (
-      <ModelShot />
-    ) : view === "routine" ? (
-      <RoutineShot />
-    ) : view === "approval" ? (
-      <ApprovalShot />
-    ) : view === "chat" ? (
-      <ChatShot />
-    ) : view === "subscription" ? (
-      <SubscriptionShot />
-    ) : (
-      <CreateShot />
+void (view === "recruiting" ? prepareRecruitingSourceShot() : Promise.resolve())
+  .then(() => bootstrapI18n("en"))
+  .then(() => {
+    const shot =
+      view === "recruiting" ? (
+        <main className="mx-auto max-w-[900px] bg-background p-8 text-foreground">
+          <p className="mb-5 text-xs text-muted-foreground">Synthetic recruiting evidence</p>
+          <RecruitingPanel threadId="thread-demo" botId="bot-inbox" onClose={() => undefined} />
+        </main>
+      ) : view === "model" ? (
+        <ModelShot />
+      ) : view === "routine" ? (
+        <RoutineShot />
+      ) : view === "approval" ? (
+        <ApprovalShot />
+      ) : view === "chat" ? (
+        <ChatShot />
+      ) : view === "subscription" ? (
+        <SubscriptionShot />
+      ) : (
+        <CreateShot />
+      );
+    createRoot(document.getElementById("root")!).render(
+      <I18nProvider i18n={i18n}>{shot}</I18nProvider>,
     );
-  createRoot(document.getElementById("root")!).render(
-    <I18nProvider i18n={i18n}>{shot}</I18nProvider>,
-  );
-});
+  });

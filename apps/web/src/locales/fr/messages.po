@@ -4381,6 +4381,10 @@ msgid "Something went wrong. Try again."
 msgstr "Un problème est survenu. Réessayez."
 
 #: src/pages/RecruitingPanel.tsx
+msgid "Source text"
+msgstr ""
+
+#: src/pages/RecruitingPanel.tsx
 msgid "Source unavailable"
 msgstr ""
 

@@ -27,6 +27,54 @@ import {
 
 export class RecruitingAssessmentValidationError extends Error {}
 
+export async function verifyRecruitingArtifactBytes(bytes: Uint8Array, expectedSha256: string) {
+  const digest = await globalThis.crypto.subtle.digest("SHA-256", new Uint8Array(bytes));
+  const hash = Array.from(new Uint8Array(digest), (byte) =>
+    byte.toString(16).padStart(2, "0"),
+  ).join("");
+  if (hash !== expectedSha256) throw new Error("Recruiting artifact does not match its source");
+}
+
+/** Select an own string field from retained JSON bytes, never object/prototype traversal. */
+export function readRecruitingJsonString(bytes: Uint8Array, path: readonly (string | number)[]) {
+  let value: unknown = JSON.parse(new TextDecoder("utf-8", { fatal: true }).decode(bytes));
+  for (const key of path) {
+    if (
+      key === "__proto__" ||
+      key === "prototype" ||
+      key === "constructor" ||
+      value === null ||
+      typeof value !== "object" ||
+      (typeof key === "number" ? !Array.isArray(value) : Array.isArray(value)) ||
+      !Object.hasOwn(value, key)
+    )
+      throw new Error("Material path does not select a string");
+    value = (value as Record<string | number, unknown>)[key];
+  }
+  if (typeof value !== "string") throw new Error("Material path does not select a string");
+  return value;
+}
+
+/** The same exact UTF-16 selection is used for persistence and source display. */
+export function validateRecruitingTextSelection(
+  text: string,
+  start: number,
+  end: number,
+  quote: string,
+) {
+  if (
+    !Number.isSafeInteger(start) ||
+    !Number.isSafeInteger(end) ||
+    start < 0 ||
+    end <= start ||
+    end > text.length ||
+    splitsSurrogatePair(text, start) ||
+    splitsSurrogatePair(text, end) ||
+    text.slice(start, end) !== quote
+  )
+    throw new Error("Material selection does not match its source");
+}
+
 /** Read an exact native report snapshot; the caller obtains its references through authorized API reads. */
 export async function readRecruitingResearchReadArtifact(
   bytes: Uint8Array,
@@ -37,15 +85,11 @@ export async function readRecruitingResearchReadArtifact(
   },
 ) {
   const { task, action, artifact } = expected;
-  const digest = await globalThis.crypto.subtle.digest("SHA-256", new Uint8Array(bytes));
-  const hash = Array.from(new Uint8Array(digest), (byte) =>
-    byte.toString(16).padStart(2, "0"),
-  ).join("");
+  await verifyRecruitingArtifactBytes(bytes, artifact.sha256);
   if (
-    hash !== artifact.sha256 ||
     action.taskId !== task.id ||
     !action.outputArtifacts.some(
-      (ref) => ref.artifactId === artifact.artifactId && ref.sha256 === hash,
+      (ref) => ref.artifactId === artifact.artifactId && ref.sha256 === artifact.sha256,
     )
   )
     throw new Error("Recruiting result snapshot does not match its source");

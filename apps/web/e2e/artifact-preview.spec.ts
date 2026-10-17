@@ -3,6 +3,20 @@ import { captureScreenshot, completeOnboarding, signup } from "./helpers";
 
 test.describe.configure({ mode: "serial" });
 
+test("recruiting evidence opens retained text at the exact saved selection", async ({
+  page,
+}, testInfo) => {
+  await page.goto("/e2e/fixtures/marketing-shots.html?view=recruiting");
+  await page.getByRole("tab", { name: "Evidence", exact: true }).click();
+  await page.getByRole("button", { name: /^Synthetic candidate/ }).click();
+  await page.getByText("profile.summary", { exact: true }).first().click();
+  const original = page.getByLabel("Source text", { exact: true }).first();
+  await expect(original).toContainText("Candidate note");
+  await expect(original.locator("mark")).toHaveText("Designed coordinate transforms 🧭 in Python.");
+  await expect(original).toContainText("Employment type and dates are not provided.");
+  await captureScreenshot(page, testInfo, "recruiting-original-source-selection");
+});
+
 test("agent-attached files appear as downloadable cards", async ({ page }, testInfo) => {
   const stamp = Date.now();
   await signup(page, `artifact-card-${stamp}@rakazo.test`, "password12", "Artifact Card");

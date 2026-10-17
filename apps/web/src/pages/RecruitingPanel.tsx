@@ -1,10 +1,12 @@
 import { Trans, useLingui } from "@lingui/react/macro";
+import { ORPCError } from "@orpc/client";
 import type {
   Artifact,
   ArtifactWithContent,
   MemoryDocument,
   MemoryRevision,
   RecruitingArtifactRef,
+  RecruitingAssessmentSourceRef,
   RecruitingCriterionExpression,
   RecruitingResearchAction,
   RecruitingResearchReadArtifact,
@@ -12,7 +14,13 @@ import type {
   RecruitingSourceRef,
   Verdict,
 } from "@rakazo/contracts";
-import { readRecruitingResearchReadArtifact, recruitingBriefClarifications } from "@rakazo/core";
+import {
+  readRecruitingJsonString,
+  readRecruitingResearchReadArtifact,
+  recruitingBriefClarifications,
+  validateRecruitingTextSelection,
+  verifyRecruitingArtifactBytes,
+} from "@rakazo/core";
 import {
   Button,
   Card,
@@ -243,29 +251,79 @@ function expressionText(expression: RecruitingCriterionExpression): string {
 function ArtifactReference({
   reference,
   label,
+  source,
 }: {
   reference: RecruitingArtifactRef;
   label: string;
+  source?: RecruitingSourceRef | RecruitingAssessmentSourceRef;
 }) {
+  const { t } = useLingui();
   const [open, setOpen] = useState(false);
-  const [artifact, setArtifact] = useState<Artifact | null>(null);
-  const [failed, setFailed] = useState(false);
+  const sourceKey = JSON.stringify([reference, source]);
+  const currentSource = useRef({ reference, source });
+  currentSource.current = { reference, source };
+  const [state, setState] = useState<{
+    key: string;
+    artifact?: Artifact;
+    excerpt?: { text: string; start: number; end: number };
+    unavailable?: boolean;
+    failed?: boolean;
+  } | null>(null);
+  const current = state?.key === sourceKey ? state : null;
+  const artifact = current?.artifact;
   useEffect(() => {
     if (!open || artifact) return;
+    const { reference, source } = currentSource.current;
     let cancelled = false;
-    setFailed(false);
+    setState(null);
     void rpc.artifacts
       .getById({ artifactId: reference.artifactId })
-      .then((value) => {
-        if (!cancelled) setArtifact(value);
+      .then(async (value) => {
+        if (value.id !== reference.artifactId) throw new Error("Source Artifact changed");
+        const bytes = decodeArtifactBase64(value.contentBase64);
+        if (bytes.byteLength !== value.size) throw new Error("Source Artifact size changed");
+        await verifyRecruitingArtifactBytes(bytes, reference.sha256);
+        let excerpt: { text: string; start: number; end: number } | undefined;
+        let unavailable = false;
+        if (source?.readState === "read" && source.quote) {
+          try {
+            const selection = "selection" in source ? source.selection : undefined;
+            // ponytail: legacy role sources attest only native text; other strings need a typed path.
+            if (
+              source.anchor.kind !== "artifact" ||
+              selection?.kind === "message_text" ||
+              (!selection && source.anchor.locator !== "text")
+            )
+              throw new Error("Source text unavailable");
+            const json = value.mimeType === "application/json" || value.mimeType.endsWith("+json");
+            const path =
+              selection?.kind === "artifact_json_string"
+                ? selection.path
+                : !selection && json
+                  ? ["text"]
+                  : undefined;
+            if (path ? !json : !value.mimeType.startsWith("text/") || json)
+              throw new Error("Source text unavailable");
+            const text = path
+              ? readRecruitingJsonString(bytes, path)
+              : new TextDecoder("utf-8", { fatal: true }).decode(bytes);
+            const start = selection?.start ?? text.indexOf(source.quote);
+            const end = selection?.end ?? start + source.quote.length;
+            validateRecruitingTextSelection(text, start, end, source.quote);
+            excerpt = { text, start, end };
+          } catch {
+            unavailable = true;
+          }
+        }
+        if (!cancelled) setState({ key: sourceKey, artifact: value, excerpt, unavailable });
       })
       .catch(() => {
-        if (!cancelled) setFailed(true);
+        if (!cancelled) setState({ key: sourceKey, failed: true });
       });
     return () => {
       cancelled = true;
     };
-  }, [open, artifact, reference.artifactId]);
+  }, [open, artifact, sourceKey]);
   const target = artifact?.groupId
     ? { groupId: artifact.groupId }
     : artifact?.botId
@@ -284,7 +342,7 @@ function ArtifactReference({
               mimeType={artifact.mimeType}
               size={artifact.size}
             />
-          ) : failed || artifact ? (
+          ) : current?.failed || artifact ? (
             <p role="alert">
               <Trans>Source unavailable</Trans>
             </p>
@@ -293,8 +351,35 @@ function ArtifactReference({
               <Trans>Loading…</Trans>
             </p>
           )}
-          <p className="break-all text-xs text-muted-foreground">{reference.artifactId}</p>
-          <p className="break-all text-xs text-muted-foreground">SHA-256 {reference.sha256}</p>
+          {current?.excerpt ? (
+            <div className="space-y-1">
+              <p className="text-xs text-muted-foreground">
+                <Trans>Source text</Trans>
+              </p>
+              <pre
+                role="document"
+                aria-label={t`Source text`}
+                className="whitespace-pre-wrap break-words text-sm"
+              >
+                {current.excerpt.text.slice(0, current.excerpt.start)}
+                <mark className="bg-accent text-accent-foreground">
+                  {current.excerpt.text.slice(current.excerpt.start, current.excerpt.end)}
+                </mark>
+                {current.excerpt.text.slice(current.excerpt.end)}
+              </pre>
+            </div>
+          ) : current?.unavailable ? (
+            <p role="alert">
+              <Trans>Source unavailable</Trans>
+            </p>
+          ) : null}
+          <details className="text-xs text-muted-foreground">
+            <summary className="cursor-pointer">
+              <Trans>Details</Trans>
+            </summary>
+            <p className="break-all">{reference.artifactId}</p>
+            <p className="break-all">SHA-256 {reference.sha256}</p>
+          </details>
         </div>
       ) : null}
     </details>
@@ -306,7 +391,7 @@ function Sources({
   messageTargets,
   onRevealMessage,
 }: {
-  sources: readonly RecruitingSourceRef[];
+  sources: readonly (RecruitingSourceRef | RecruitingAssessmentSourceRef)[];
   messageTargets?: Snapshot["assessments"][number]["sourceMessageTargets"];
   onRevealMessage?: Props["onRevealMessage"];
 }) {
@@ -345,6 +430,7 @@ function Sources({
                 reference={source.anchor.artifact}
                 key={`${source.anchor.artifact.artifactId}:${source.anchor.artifact.sha256}`}
                 label={source.anchor.locator}
+                source={source}
               />
             )}
             {source.url ? (
@@ -486,9 +572,20 @@ function RecruitingWorkspace({ threadId, botId, refreshSignal, onClose, onReveal
     let cancelled = false;
     setLoading(true);
     setFailed(false);
+    const onReadError = (error: unknown): never => {
+      if (
+        !cancelled &&
+        error instanceof ORPCError &&
+        ["UNAUTHORIZED", "FORBIDDEN", "NOT_FOUND"].includes(error.code)
+      ) {
+        setSnapshot(null);
+        setSelection(null);
+      }
+      throw error;
+    };
     async function load() {
       try {
-        let workspace = await rpc.recruiting.getWorkspace({ threadId });
+        let workspace = await rpc.recruiting.getWorkspace({ threadId }).catch(onReadError);
         while (!cancelled) {
           setSnapshot((current) =>
             current?.workspace?.role.id !== workspace?.role.id ||
@@ -498,21 +595,23 @@ function RecruitingWorkspace({ threadId, botId, refreshSignal, onClose, onReveal
           );
           const [assessments, research, questions, documents] = await Promise.all([
             workspace
-              ? rpc.recruiting.listAssessments({ roleId: workspace.role.id })
+              ? rpc.recruiting.listAssessments({ roleId: workspace.role.id }).catch(onReadError)
               : Promise.resolve([]),
             workspace
-              ? rpc.recruiting.listResearch({ roleId: workspace.role.id })
+              ? rpc.recruiting.listResearch({ roleId: workspace.role.id }).catch(onReadError)
               : Promise.resolve({ tasks: [], actions: [] }),
             workspace
-              ? rpc.recruiting.listQuestions({ threadId, roleId: workspace.role.id })
+              ? rpc.recruiting
+                  .listQuestions({ threadId, roleId: workspace.role.id })
+                  .catch(onReadError)
               : Promise.resolve({ questions: [] }),
             Promise.all([
-              rpc.memory.list({ scope: "user" }),
-              ...(botId ? [rpc.memory.list({ scope: "bot", botId })] : []),
+              rpc.memory.list({ scope: "user" }).catch(onReadError),
+              ...(botId ? [rpc.memory.list({ scope: "bot", botId }).catch(onReadError)] : []),
             ]).then((lists) => lists.flat()),
           ]);
           if (cancelled) return;
-          const verified = await rpc.recruiting.getWorkspace({ threadId });
+          const verified = await rpc.recruiting.getWorkspace({ threadId }).catch(onReadError);
           if (cancelled) return;
           if (
             workspace?.role.id !== verified?.role.id ||
@@ -609,7 +708,7 @@ function RecruitingWorkspace({ threadId, botId, refreshSignal, onClose, onReveal
               <Trans>Activity</Trans>
             </TabsTrigger>
           </TabsList>
-          <TabsContent value="role" className="space-y-5">
+          <TabsContent key={workspace?.role.id} value="role" className="space-y-5">
             {workspace ? (
               <>
                 <div>

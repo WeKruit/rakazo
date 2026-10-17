@@ -1,5 +1,6 @@
 // @vitest-environment jsdom
 import { createHash, webcrypto } from "node:crypto";
+import { ORPCError } from "@orpc/client";
 import type {
   RecruitingAssessment,
   RecruitingAssessmentSnapshot,
@@ -138,6 +139,33 @@ function nativeOutput(f: ReturnType<typeof rawResultsFixture>, snapshot: unknown
   };
 }
 
+function artifactSourceFixture(
+  content: string | Uint8Array = "Before\nBuilt a compiler\nAfter",
+  mimeType = "text/plain",
+  artifactId = "artifact-source",
+) {
+  const bytes = Buffer.from(content);
+  const reference = { artifactId, sha256: createHash("sha256").update(bytes).digest("hex") };
+  return {
+    reference,
+    artifact: {
+      id: artifactId,
+      botId: "material-bot",
+      groupId: null,
+      name: "original-material.txt",
+      mimeType,
+      size: bytes.length,
+      contentBase64: bytes.toString("base64"),
+    },
+    source: {
+      ...source,
+      anchor: { kind: "artifact", artifact: reference, locator: "Source excerpt" },
+      quote: "Built a compiler",
+      selection: { kind: "artifact_text", start: 7, end: 23 },
+    } satisfies RecruitingAssessmentSourceRef,
+  };
+}
+
 const source = {
   id: "source-1",
   kind: "original_material" as const,
@@ -236,6 +264,7 @@ const assessment = {
 } satisfies RecruitingAssessmentSnapshot;
 let cleanup: (() => Promise<void>) | undefined;
 beforeEach(() => {
+  const request = artifactSourceFixture("{}", "application/json", "artifact-request");
   vi.stubGlobal("IS_REACT_ACT_ENVIRONMENT", true);
   vi.stubGlobal("crypto", webcrypto);
   api.getWorkspace.mockResolvedValue({ role, revision });
@@ -253,7 +282,7 @@ beforeEach(() => {
         deliveryState: "accepted",
         observedProviderState: "running",
         recallScope: "Compiler teams",
-        requestArtifact: { artifactId: "artifact-request", sha256: "a".repeat(64) },
+        requestArtifact: request.reference,
         contextArtifact: { artifactId: "artifact-context", sha256: "b".repeat(64) },
         receiptArtifact: null,
         outputArtifacts: [],
@@ -284,13 +313,9 @@ beforeEach(() => {
     },
   ]);
   api.getById.mockResolvedValue({
+    ...request.artifact,
     botId: "source-bot",
-    groupId: null,
-    id: "artifact-request",
     name: "request.json",
-    mimeType: "application/json",
-    size: 23,
-    contentBase64: "",
   });
 });
 afterEach(async () => {
@@ -340,9 +365,384 @@ async function mounted(threadId = "thread-1", botId?: string) {
       details!.open = true;
       details!.dispatchEvent(new Event("toggle"));
     });
+    return details!;
   };
   return { container, render, click, expand, reveal };
 }
+
+it.each(["text/plain", "text/html", "application/json"])(
+  "opens attested legacy %s source text with the exact quote highlighted and reads only",
+  async (mimeType) => {
+    const text = "  Before\r\nBuilt a compiler 😀\n<script>window.bad = true</script>  ";
+    const quote = "Built a compiler 😀";
+    const f = artifactSourceFixture(
+      mimeType === "application/json" ? JSON.stringify({ text }) : text,
+      mimeType,
+    );
+    const { selection: _, ...legacy } = f.source;
+    api.getWorkspace.mockResolvedValue({
+      role,
+      revision: {
+        ...revision,
+        criteria: [],
+        sourceRefs: [{ ...legacy, quote, anchor: { ...legacy.anchor, locator: "text" } }],
+      },
+    });
+    api.getById.mockResolvedValue(f.artifact);
+    const view = await mounted();
+    expect(api.getById).not.toHaveBeenCalled();
+    const details = await view.expand("text");
+    await vi.waitFor(() => expect(details.querySelector("pre mark")?.textContent).toBe(quote));
+    expect(details.querySelector("pre")?.textContent).toBe(text);
+    expect(details.querySelector('pre[role="document"][aria-label="Source text"]')).not.toBeNull();
+    expect(details.querySelector("mark")?.className).toBe("bg-accent text-accent-foreground");
+    const metadata = details.querySelector("details");
+    expect(metadata?.open).toBe(false);
+    expect(metadata?.querySelector("summary")?.textContent).toBe("Details");
+    expect(metadata?.textContent).toContain(f.reference.artifactId);
+    expect(metadata?.textContent).toContain(f.reference.sha256);
+    expect(details.textContent).toContain("Source text");
+    expect(details.querySelector("script")).toBeNull();
+    expect(details.querySelector('[data-artifact-id="artifact-source"]')).not.toBeNull();
+    expect(api.getById).toHaveBeenCalledExactlyOnceWith({ artifactId: f.reference.artifactId });
+    for (const method of [
+      api.createRole,
+      api.bindRole,
+      api.reviseRole,
+      api.update,
+      api.search,
+      api.answer,
+    ])
+      expect(method).not.toHaveBeenCalled();
+    expect(api.get).not.toHaveBeenCalled();
+    expect(view.reveal).not.toHaveBeenCalled();
+    await view.click("Refresh");
+    expect(api.getById).toHaveBeenCalledTimes(1);
+  },
+);
+
+it("projects a nested JSON string at exact UTF-16 offsets without normalizing escaped text", async () => {
+  const quote = 'same\t"quoted"\\path 😀';
+  const text = `  Prefix 😀\r\n${quote}\n${quote} trailing  `;
+  const start = text.lastIndexOf(quote);
+  const f = artifactSourceFixture(JSON.stringify({ rows: [{ detail: text }] }), "application/json");
+  api.listAssessments.mockResolvedValue([
+    {
+      ...assessment,
+      assessment: {
+        ...assessment.assessment,
+        sourceRefs: [
+          {
+            ...f.source,
+            kind: "provider_report",
+            quote,
+            selection: {
+              kind: "artifact_json_string",
+              path: ["rows", 0, "detail"],
+              start,
+              end: start + quote.length,
+            },
+          },
+        ],
+      },
+    },
+  ]);
+  api.getById.mockResolvedValue(f.artifact);
+  const view = await mounted();
+  await view.click("Evidence");
+  await view.click("candidate-1");
+  expect(api.getById).not.toHaveBeenCalled();
+  const details = await view.expand("Source excerpt");
+  await vi.waitFor(() => expect(details.querySelector("mark")?.textContent).toBe(quote));
+  expect(details.querySelector("pre")?.textContent).toBe(text);
+  expect(details.querySelector("mark")?.previousSibling?.textContent).toBe(text.slice(0, start));
+  expect(view.container.textContent).toContain("provider_report · read");
+  expect(view.container.textContent).toContain("Unknown");
+});
+
+it.each(["id", "hash", "size", "access"])(
+  "withholds source files and text when Artifact %s verification fails",
+  async (failure) => {
+    const f = artifactSourceFixture();
+    api.getWorkspace.mockResolvedValue({
+      role,
+      revision: { ...revision, criteria: [], sourceRefs: [f.source] },
+    });
+    if (failure === "access")
+      api.getById.mockRejectedValue(new Error("Private unrelated artifact details"));
+    else
+      api.getById.mockResolvedValue({
+        ...f.artifact,
+        ...(failure === "id" ? { id: "foreign-artifact" } : {}),
+        ...(failure === "hash"
+          ? { contentBase64: Buffer.from("Different source bytes").toString("base64"), size: 22 }
+          : {}),
+        ...(failure === "size" ? { size: f.artifact.size + 1 } : {}),
+      });
+    const view = await mounted();
+    const details = await view.expand("Source excerpt");
+    await vi.waitFor(() => expect(details.textContent).toContain("Source unavailable"));
+    expect(details.querySelector("[data-artifact-id]")).toBeNull();
+    expect(details.querySelector("pre")).toBeNull();
+    expect(details.textContent).not.toContain("Private unrelated artifact details");
+    expect(details.textContent).not.toContain("foreign-artifact");
+  },
+);
+
+it.each(["quote", "range", "surrogate", "path", "utf8", "binary", "legacy locator"])(
+  "keeps the original file available without inventing text for an invalid %s source",
+  async (failure) => {
+    const text = "Before\nBuilt a compiler 😀\nAfter";
+    const f = artifactSourceFixture(
+      failure === "path"
+        ? JSON.stringify({ rows: [{ detail: text }] })
+        : failure === "utf8"
+          ? new Uint8Array([0xc3, 0x28])
+          : text,
+      failure === "path"
+        ? "application/json"
+        : failure === "binary"
+          ? "application/pdf"
+          : "text/plain",
+    );
+    const source: RecruitingAssessmentSourceRef = {
+      ...f.source,
+      ...(failure === "quote" ? { quote: "A different quote" } : {}),
+      ...(failure === "range"
+        ? { selection: { kind: "artifact_text", start: -1, end: text.length } }
+        : {}),
+      ...(failure === "surrogate"
+        ? {
+            quote: "\ude00",
+            selection: {
+              kind: "artifact_text",
+              start: text.indexOf("😀") + 1,
+              end: text.indexOf("😀") + 2,
+            },
+          }
+        : {}),
+      ...(failure === "path"
+        ? {
+            selection: {
+              kind: "artifact_json_string",
+              path: ["rows", "0", "detail"],
+              start: 7,
+              end: 23,
+            },
+          }
+        : {}),
+      ...(failure === "legacy locator" ? { selection: undefined } : {}),
+    };
+    api.getWorkspace.mockResolvedValue({
+      role,
+      revision: { ...revision, criteria: [], sourceRefs: [source] },
+    });
+    api.getById.mockResolvedValue(f.artifact);
+    const view = await mounted();
+    const details = await view.expand("Source excerpt");
+    await vi.waitFor(() => expect(details.textContent).toContain("Source unavailable"));
+    expect(details.querySelector('[data-artifact-id="artifact-source"]')).not.toBeNull();
+    expect(details.querySelector("pre")).toBeNull();
+    expect(details.querySelector("mark")).toBeNull();
+  },
+);
+
+it("replaces the excerpt when selection changes and ignores the late old selection read", async () => {
+  const text = "First excerpt\nSecond excerpt";
+  const f = artifactSourceFixture(text);
+  const first = {
+    ...f.source,
+    quote: "First excerpt",
+    selection: { kind: "artifact_text" as const, start: 0, end: 13 },
+  };
+  const second = {
+    ...f.source,
+    quote: "Second excerpt",
+    selection: { kind: "artifact_text" as const, start: 14, end: text.length },
+  };
+  let finish!: (artifact: typeof f.artifact) => void;
+  api.getWorkspace.mockResolvedValue({
+    role,
+    revision: { ...revision, criteria: [], sourceRefs: [first] },
+  });
+  api.getById
+    .mockReturnValueOnce(
+      new Promise((resolve) => {
+        finish = resolve;
+      }),
+    )
+    .mockResolvedValue(f.artifact);
+  const view = await mounted();
+  await view.expand("Source excerpt");
+  api.getWorkspace.mockResolvedValue({
+    role,
+    revision: { ...revision, criteria: [], sourceRefs: [second] },
+  });
+  await view.click("Refresh");
+  await vi.waitFor(() =>
+    expect(view.container.querySelector("pre mark")?.textContent).toBe("Second excerpt"),
+  );
+  await act(async () => {
+    finish(f.artifact);
+  });
+  expect(view.container.querySelector("pre mark")?.textContent).toBe("Second excerpt");
+});
+
+it("does not carry expanded evidence or a late source response into another thread", async () => {
+  const f = artifactSourceFixture();
+  let finish!: (artifact: typeof f.artifact) => void;
+  api.getWorkspace.mockResolvedValue({
+    role,
+    revision: { ...revision, criteria: [], sourceRefs: [f.source] },
+  });
+  api.getById.mockReturnValueOnce(
+    new Promise((resolve) => {
+      finish = resolve;
+    }),
+  );
+  const view = await mounted();
+  await view.expand("Source excerpt");
+  api.getWorkspace.mockResolvedValue(null);
+  await view.render("thread-2");
+  await act(async () => {
+    finish(f.artifact);
+  });
+  expect(view.container.querySelector("mark")).toBeNull();
+  expect(view.container.textContent).not.toContain("original-material.txt");
+  expect(view.container.textContent).not.toContain("Source excerpt");
+});
+
+it("does not carry expanded evidence or a late source response into another candidate", async () => {
+  const f = artifactSourceFixture();
+  const original = {
+    ...assessment,
+    assessment: { ...assessment.assessment, sourceRefs: [f.source] },
+  };
+  const second = {
+    ...original,
+    assessment: { ...original.assessment, candidateKey: "candidate-2" },
+  };
+  let finish!: (artifact: typeof f.artifact) => void;
+  api.listAssessments.mockResolvedValue([original, second]);
+  api.getById.mockReturnValueOnce(
+    new Promise((resolve) => {
+      finish = resolve;
+    }),
+  );
+  const view = await mounted();
+  await view.click("Evidence");
+  await view.click("candidate-1");
+  await view.expand("Source excerpt");
+  await view.click("candidate-2");
+  await act(async () => {
+    finish(f.artifact);
+  });
+  expect(view.container.querySelector("mark")).toBeNull();
+  expect(view.container.querySelector("[data-artifact-id]")).toBeNull();
+  expect(api.getById).toHaveBeenCalledTimes(1);
+});
+
+it("does not carry expanded evidence into another role with the same source reference", async () => {
+  const f = artifactSourceFixture();
+  const original = { ...revision, criteria: [], sourceRefs: [f.source] };
+  api.getWorkspace.mockResolvedValue({ role, revision: original });
+  api.getById.mockResolvedValue(f.artifact);
+  const view = await mounted();
+  await view.expand("Source excerpt");
+  await vi.waitFor(() =>
+    expect(view.container.querySelector("mark")?.textContent).toBe(f.source.quote),
+  );
+  const nextRole = { ...role, id: "role-next", currentRevisionId: "revision-next" };
+  api.getWorkspace.mockResolvedValue({
+    role: nextRole,
+    revision: { ...original, id: nextRole.currentRevisionId, roleId: nextRole.id },
+  });
+  api.listAssessments.mockResolvedValue([]);
+  api.listResearch.mockResolvedValue({ tasks: [], actions: [] });
+  await view.click("Refresh");
+  expect(view.container.querySelector("mark")).toBeNull();
+  expect(view.container.querySelector("[data-artifact-id]")).toBeNull();
+});
+
+it.each(["thread", "assessment sources", "bot memory"])(
+  "clears previously opened evidence after %s authorization is revoked and reloads without old selection",
+  async (boundary) => {
+    const f = artifactSourceFixture();
+    api.listAssessments.mockResolvedValue([
+      { ...assessment, assessment: { ...assessment.assessment, sourceRefs: [f.source] } },
+    ]);
+    api.getById.mockResolvedValue(f.artifact);
+    const view = await mounted("thread-1", "owner-bot");
+    await view.click("Evidence");
+    await view.click("candidate-1");
+    await view.expand("Source excerpt");
+    await vi.waitFor(() =>
+      expect(view.container.querySelector("mark")?.textContent).toBe(f.source.quote),
+    );
+    if (boundary === "thread")
+      api.getWorkspace.mockRejectedValueOnce(new ORPCError("UNAUTHORIZED"));
+    else if (boundary === "assessment sources")
+      api.listAssessments.mockRejectedValueOnce(new ORPCError("NOT_FOUND"));
+    else
+      api.list
+        .mockImplementationOnce(async () => [])
+        .mockRejectedValueOnce(new ORPCError("FORBIDDEN"));
+    await view.click("Refresh");
+    expect(view.container.textContent).toContain("Could not load recruiting");
+    expect(view.container.textContent).not.toContain("candidate-1");
+    expect(view.container.textContent).not.toContain(f.source.quote);
+    expect(view.container.querySelector("mark")).toBeNull();
+    expect(view.container.querySelector("[data-artifact-id]")).toBeNull();
+    await view.click("Refresh");
+    await view.click("Evidence");
+    expect(view.container.textContent).toContain("candidate-1");
+    expect(view.container.querySelector('section[aria-label="candidate-1"]')).toBeNull();
+    await view.click("candidate-1");
+    await view.expand("Source excerpt");
+    await vi.waitFor(() =>
+      expect(view.container.querySelector("mark")?.textContent).toBe(f.source.quote),
+    );
+    expect(api.getById).toHaveBeenCalledTimes(2);
+  },
+);
+
+it.each(["recruiting reads", "memory reads"])(
+  "clears opened evidence when %s deny access after a sibling already failed offline",
+  async (boundary) => {
+    const f = artifactSourceFixture();
+    api.listAssessments.mockResolvedValue([
+      { ...assessment, assessment: { ...assessment.assessment, sourceRefs: [f.source] } },
+    ]);
+    api.getById.mockResolvedValue(f.artifact);
+    const view = await mounted("thread-1", "owner-bot");
+    await view.click("Evidence");
+    await view.click("candidate-1");
+    await view.expand("Source excerpt");
+    await vi.waitFor(() =>
+      expect(view.container.querySelector("mark")?.textContent).toBe(f.source.quote),
+    );
+    let deny!: (error: ORPCError<"NOT_FOUND", unknown>) => void;
+    const laterDenial = new Promise((_, reject) => {
+      deny = reject;
+    });
+    if (boundary === "recruiting reads") {
+      api.listResearch.mockRejectedValueOnce(new Error("offline"));
+      api.listAssessments.mockReturnValueOnce(laterDenial);
+    } else {
+      api.list.mockRejectedValueOnce(new Error("offline")).mockReturnValueOnce(laterDenial);
+    }
+    await view.click("Refresh");
+    expect(view.container.textContent).toContain("Could not load recruiting");
+    expect(view.container.querySelector("mark")?.textContent).toBe(f.source.quote);
+    await act(async () => {
+      deny(new ORPCError("NOT_FOUND"));
+    });
+    expect(view.container.querySelector("mark")).toBeNull();
+    expect(view.container.querySelector("[data-artifact-id]")).toBeNull();
+    expect(view.container.textContent).not.toContain("candidate-1");
+    expect(view.container.textContent).not.toContain(f.source.quote);
+  },
+);
 
 it("shows unassessed raw provider rows from saved Artifacts without creating an assessment or search", async () => {
   const f = rawResultsFixture();
@@ -861,6 +1261,7 @@ it("rechecks the binding and revision after reading lists before publishing them
   expect(api.listAssessments).toHaveBeenCalledTimes(2);
 });
 it("drops cached Artifact metadata when its exact reference changes", async () => {
+  const next = artifactSourceFixture('{"next":true}', "application/json", "request-2");
   const view = await mounted();
   await view.click("Activity");
   await view.expand("Request");
@@ -871,18 +1272,15 @@ it("drops cached Artifact metadata when its exact reference changes", async () =
     actions: [
       {
         ...research.actions[0],
-        requestArtifact: { artifactId: "request-2", sha256: "c".repeat(64) },
+        requestArtifact: next.reference,
       },
     ],
   });
   api.getById.mockResolvedValue({
-    id: "request-2",
+    ...next.artifact,
     botId: null,
     groupId: "source-group",
     name: "request-2.json",
-    mimeType: "application/json",
-    size: 5,
-    contentBase64: "",
   });
   await view.click("Refresh");
   expect(view.container.textContent).not.toContain("request.json");

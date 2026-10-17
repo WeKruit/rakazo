@@ -58,9 +58,9 @@ M2/M3/M4 中独立工作可与 M1 并行。每个 worker 明确文件归属，�
 | B07 | 每 agent 独立选择 runtime | Main/Sourcer不同definition；修改Sourcer不改Main；不迁移正在运行session | 已核对原生仅存逐 bot 模型配置，无逐 bot runtime 字段；需要实现后验收 |
 | B08 | 每 agent 独立选择可用 model | 列表来自runtime+connection；实际turn记录选择值；不可用值在边界拒绝 | 线上已验 Sourcer 独立换模型和召回；全部目录待验 |
 | B09 | 每 agent 独立绑定 OAuth / API key connection | 两agent可指向不同connection；撤销一个不借另一个账号续跑 | 已核对现有 credential 按 user/provider 选择，无逐 bot connection ID；需要实现后验收 |
-| B10 | 编辑 instructions / recruiting职责 | 保存不同职责；同一指令分别产生各自角色所需行为，definition revision可查 | 先核对/复用原生能力，待逐项验收 |
+| B10 | 编辑 instructions / recruiting职责 | 保存不同职责；同一指令分别产生各自角色所需行为，definition revision可查 | Web/Electron 与手机独立完整 Instructions 编辑已有代码，未部署；职责行为、definition revision 与真实验收仍未完成 |
 | B11 | 每 agent 启用 skills、tools、memory scopes | 只启用Sourcer的工具/skill；Main不能因共享环境自动获得 | 先核对/复用原生能力，待逐项验收 |
-| B12 | 配置变更在下一任务生效，运行任务保留快照 | pending时改runtime/connection应拒绝或仅改后续配置；原卡仍绑定原owner | 先核对/复用原生能力，待逐项验收 |
+| B12 | 配置变更在下一任务生效，运行任务保留快照 | pending时改runtime/connection应拒绝或仅改后续配置；原卡仍绑定原owner | 已核对：续跑重读现行 Bot 指令/模型/skills 等；普通 run 未冻结配置，完整快照未实现。原审批请求/owner 保持绑定；不能把当前 Bot 或可选 Pi recorder 冒充旧任务快照 |
 | B13 | 查看连接错误、能力不可用与恢复 | 断开目标runtime，准确显示该agent失败/不可用；其他agent仍可用 | 先核对/复用原生能力，待逐项验收 |
 | B14 | 语音设置/voice交互 | 确认UI动作与可用runtime；若有再验证录音/播放/配置保存 | 先核对/复用原生能力，待逐项验收 |
 | B15 | 从已有 Agent 模板选择、导入与创建角色 | 保留模板 ID/版本/来源和初始化上下文；创建后原生 bot 配置/技能/记忆分别回读，不把模板存在当作已采用 | Grok recruiting-persona/template-contract；待核对原生复用与验收 |
@@ -231,7 +231,7 @@ M2/M3/M4 中独立工作可与 M1 并行。每个 worker 明确文件归属，�
 | J08 | 已找到名单的批准及缓存同步 | 批准是持久业务动作；刷新/多页后结果一致，不能仅靠本地选中 | JB-FLOW:F07；待核对原生复用与实施/验收 |
 | J09 | 聊天停止/重连与 sourcing pause/resume/close/reopen 独立 | 停止 turn 不等于停止远端搜索；关闭项目可明确选择是否取消 sequence，并显示部分失败数量；恢复原项目不重复创建任务 | JB-FLOW:F08–F10；待核对原生复用与实施/验收 |
 | J10 | 候选人卡片/表格、筛选、分页及列表状态 | 显示真实候选快照；稳定标识、排序/过滤/页码可恢复；无串任务数据 | JB-MATCH:J02–J04；Cards/Table、已评估候选选择/刷新保持已验；原始检索快照读取桥已发布并离线验证，真实领域任务结果仍待验；服务端分页/筛选/排序及持久列表状态未完成 |
-| J11 | 逐条件结果与 profile 证据定位 | 来源片段/引用可打开，未知与不满足分开；分数不代替证据或硬条件 | JB-MATCH:J04–J06；已保存评估的逐项三态、原岗位条件与消息来源导航已验；完整 profile、文本/PDF 精确片段定位待完成 |
+| J11 | 逐条件结果与 profile 证据定位 | 来源片段/引用可打开，未知与不满足分开；分数不代替证据或硬条件 | JB-MATCH:J04–J06；已保存评估的逐项三态、原岗位条件与消息来源导航已验；保存文本/JSON 原文、精确高亮和失权/过期读取清理已有代码与合成界面验证，未部署；完整 profile、PDF 定位及真实材料验收仍待完成 |
 | J12 | 项目 private/shared、协作者和管理权限 | 列表、详情、修改、删除均在服务端鉴权；只读角色不能靠客户端按钮获写权限 | JB-ACL:roles-projects；待核对原生复用与实施/验收 |
 | J13 | 邮箱 owner/shared/public 与实际发送权限 | 连接可见不等于可发送；sender 选择和最终发送一致核验授权 | JB-ACL:mailbox-send-authority；待核对原生复用与实施/验收 |
 | J14 | 组织配额、用量、导出/enrichment 权限与费用边界 | 显示真实账户单位；额度未知/不足不误报成功，不触发新购买；权限不由 analytics 标签决定 | JB-ACL:exports-plan-credits; JB-ACCOUNT:JC01–JC04；待核对原生复用与实施/验收 |

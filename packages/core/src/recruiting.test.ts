@@ -12,6 +12,63 @@ import type {
 import { describe, expect, it } from "vitest";
 import * as core from "./index.js";
 
+describe("shared recruiting material readers", () => {
+  it("verifies the saved bytes rather than trusting a reference or metadata", async () => {
+    expect(core.verifyRecruitingArtifactBytes).toBeTypeOf("function");
+    const bytes = Buffer.from("Original source 游标 🧭\n");
+    const hash = createHash("sha256").update(bytes).digest("hex");
+    await expect(core.verifyRecruitingArtifactBytes(bytes, hash)).resolves.toBeUndefined();
+    await expect(
+      core.verifyRecruitingArtifactBytes(Buffer.from("Changed"), hash),
+    ).rejects.toThrow();
+  });
+
+  it("reads one exact nested JSON string without losing escaped characters or whitespace", () => {
+    expect(core.readRecruitingJsonString).toBeTypeOf("function");
+    const text = '  Built 🧭 systems.\nUses "quoted" field names.  ';
+    const bytes = Buffer.from(JSON.stringify({ people: [{ evidence: text }] }));
+    expect(core.readRecruitingJsonString(bytes, ["people", 0, "evidence"])).toBe(text);
+    expect(core.readRecruitingJsonString(Buffer.from(JSON.stringify(text)), [])).toBe(text);
+  });
+
+  it("rejects missing, inherited, non-string and malformed JSON material paths", () => {
+    expect(core.readRecruitingJsonString).toBeTypeOf("function");
+    const bytes = Buffer.from('{"people":[{"evidence":"Read","count":2}],"__proto__":"forged"}');
+    for (const path of [
+      ["people", 0, "missing"],
+      ["people", "0", "evidence"],
+      ["people", 0, "count"],
+      ["__proto__"],
+      ["constructor"],
+      ["prototype"],
+      ["people", -1],
+      ["people", 0.5],
+    ])
+      expect(() => core.readRecruitingJsonString(bytes, path)).toThrow();
+    expect(() => core.readRecruitingJsonString(Buffer.from([0xff]), [])).toThrow();
+    expect(() => core.readRecruitingJsonString(Buffer.from("{broken"), [])).toThrow();
+  });
+
+  it("preserves exact UTF-16 source selections and rejects invalid ranges", () => {
+    expect(core.validateRecruitingTextSelection).toBeTypeOf("function");
+    const text = "\nA🧭B\n";
+    expect(() => core.validateRecruitingTextSelection(text, 2, 4, "🧭")).not.toThrow();
+    expect(() => core.validateRecruitingTextSelection(text, 0, text.length, text)).not.toThrow();
+    for (const [start, end, quote] of [
+      [2, 3, "\ud83e"],
+      [3, 4, "\udded"],
+      [-1, 1, ""],
+      [1, 1, ""],
+      [4, 2, ""],
+      [0.5, 2, "\nA"],
+      [0, Number.POSITIVE_INFINITY, text],
+      [0, text.length + 1, text],
+      [2, 4, "wrong"],
+    ] as const)
+      expect(() => core.validateRecruitingTextSelection(text, start, end, quote)).toThrow();
+  });
+});
+
 describe("native recruiting result snapshot reads", () => {
   const rows = [
     {

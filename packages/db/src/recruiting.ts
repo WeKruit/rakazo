@@ -49,9 +49,11 @@ import {
   evaluateRecruitingAssessment,
   mergeRecruitingReassessment,
   RecruitingPlaybookValidationError,
+  readRecruitingJsonString,
   recruitingBriefClarifications,
   requireRecruitingBriefConfirmation,
   validateRecruitingBrief,
+  validateRecruitingTextSelection,
 } from "@rakazo/core";
 import { stableJsonValue } from "@rakazo/core/node/approval-effect-key";
 import type { PrismaClient } from "./client.js";
@@ -1699,39 +1701,19 @@ export async function authorizeRecruitingQuestionAnswerInTransaction(
 }
 
 function assessmentSelection(text: string, start: number, end: number, quote: string) {
-  const splitsSurrogate = (index: number) =>
-    index > 0 &&
-    index < text.length &&
-    text.charCodeAt(index - 1) >= 0xd800 &&
-    text.charCodeAt(index - 1) <= 0xdbff &&
-    text.charCodeAt(index) >= 0xdc00 &&
-    text.charCodeAt(index) <= 0xdfff;
-  if (
-    end > text.length ||
-    splitsSurrogate(start) ||
-    splitsSurrogate(end) ||
-    text.slice(start, end) !== quote
-  )
+  try {
+    validateRecruitingTextSelection(text, start, end, quote);
+  } catch {
     throw new IsolationError();
+  }
 }
 
 function assessmentJsonString(bytes: Uint8Array, path: readonly (string | number)[]): string {
-  let value: unknown = JSON.parse(new TextDecoder("utf-8", { fatal: true }).decode(bytes));
-  for (const key of path) {
-    if (
-      key === "__proto__" ||
-      key === "prototype" ||
-      key === "constructor" ||
-      value === null ||
-      typeof value !== "object" ||
-      (typeof key === "number" ? !Array.isArray(value) : Array.isArray(value)) ||
-      !Object.hasOwn(value, key)
-    )
-      throw new IsolationError();
-    value = (value as Record<string | number, unknown>)[key];
+  try {
+    return readRecruitingJsonString(bytes, path);
+  } catch {
+    throw new IsolationError();
   }
-  if (typeof value !== "string") throw new IsolationError();
-  return value;
 }
 
 async function validateReadSources(
