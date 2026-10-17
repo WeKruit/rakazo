@@ -99,6 +99,8 @@ const action = {
 describe("recruiting contracts", () => {
   const researchRound = {
     expectedRoleRevision: 1,
+    purpose: "calibration",
+    approvalEffectId: "documents-approval",
     clientNonce: "round-nonce",
     instructions: "  Preserve every current qualification.\r\nUse supplied evidence.\n",
     output: "  Include original source cells and evidence gaps.\n",
@@ -159,6 +161,10 @@ describe("recruiting contracts", () => {
       { expectedRoleRevision: -1 },
       { expectedRoleRevision: 1.5 },
       { expectedRoleRevision: "1" },
+      { purpose: undefined },
+      { purpose: "guess" },
+      { approvalEffectId: undefined },
+      { approvalEffectId: " " },
       { instructions: " \r\n\t" },
       { output: "" },
       { output: " \n" },
@@ -192,6 +198,42 @@ describe("recruiting contracts", () => {
     ]) {
       expect(contracts.RecruitingResearchToolInputSchema?.safeParse(input).success).toBe(false);
     }
+  });
+
+  it("requires exact stage-specific approval packages without accepting an approval from the model", () => {
+    const documents = {
+      stage: "documents",
+      roleId: role.id,
+      expectedRoleRevision: role.revision,
+      documents: { jdText: artifact, namedPdf: artifact, anonymousPdf: null, deck: null },
+    };
+    const calibration = {
+      stage: "calibration",
+      roleId: role.id,
+      expectedRoleRevision: role.revision,
+      documentsApprovalEffectId: "documents-approval",
+      profiles: Array.from({ length: 10 }, (_, i) => ({
+        candidateKey: `candidate-${i}`,
+        assessmentVersion: 1,
+        linkedinUrl: `https://www.linkedin.com/in/example-${i}`,
+        evidenceUrl: `https://example.com/evidence/${i}`,
+      })),
+      ruleChanges: ["Keep the supplied qualification unchanged."],
+    };
+    const schema = contracts.RecruitingApprovalToolInputSchema;
+    expect(schema.parse(documents)).toEqual(documents);
+    expect(schema.parse(calibration)).toEqual(calibration);
+    for (const input of [documents, calibration]) {
+      for (const field of ["approvedByUserId", "approvedAt", "status", "spaceId", "runId"])
+        expect(schema.safeParse({ ...input, [field]: "forged" }).success).toBe(false);
+      expect(schema.safeParse({ ...input, expectedRoleRevision: 0 }).success).toBe(false);
+    }
+    expect(schema.safeParse({ ...documents, documents: { jdText: artifact } }).success).toBe(false);
+    for (const profiles of [
+      calibration.profiles.slice(1),
+      [...calibration.profiles, calibration.profiles[0]],
+    ])
+      expect(schema.safeParse({ ...calibration, profiles }).success).toBe(false);
   });
 
   it("closes native ordinary Ask answer provenance to the exact card, block and human message", () => {
@@ -839,6 +881,8 @@ describe("recruiting contracts", () => {
           roleRevisionId: role.currentRevisionId,
           clientNonce: action.clientNonce,
           kind: action.kind,
+          purpose: "calibration",
+          approvalEffectId: "documents-approval",
           requestArtifact: artifact,
           contextArtifact: artifact,
           recallScope: action.recallScope,

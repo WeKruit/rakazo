@@ -3,6 +3,7 @@ import {
   ArtifactReadInputSchema,
   BotSecretName,
   botSecretDestinationSchema,
+  RecruitingApprovalToolInputSchema,
   RecruitingAssessmentToolInputSchema,
   RecruitingFeedbackInputSchema,
   RecruitingPreferenceFeedbackSchema,
@@ -540,8 +541,14 @@ export const builtinAgentTools: ConnectorTool[] = [
   {
     name: "recruiting_research",
     description:
-      "Prepare and run recruiting research with the exact current role and native memory. prepare and continue both require operation, expectedRoleRevision, clientNonce, instructions, output, recallScope and intent {basis,quote}; prepare also requires mcpServerId, continue requires the returned local taskId. Explicitly send recallScope:null when there is no round-only scope. instructions and output retain their exact text; recallScope affects only this round's recall and never changes qualification. prepare freezes a new action; continue freezes a follow-up for the same provider task. Both save the full request before dispatch. After a prepared result, call start automatically with its actionId under existing account access, quota and rate limits. start dispatches only the saved owned action. status and rows read the same local taskId; pass returned cursors unchanged. Queued or accepted does not mean completed or applied. If delivery is uncertain, inspect the existing action/task; never resubmit with a new nonce or create a replacement task.",
+      "Prepare and run recruiting research with the exact current role and native memory. prepare and continue both require operation, expectedRoleRevision, purpose, approvalEffectId, clientNonce, instructions, output, recallScope and intent {basis,quote}; prepare also requires mcpServerId, continue requires the returned local taskId. purpose calibration uses the G1 documents approval receipt; purpose scale uses the G2 calibration approval receipt. Each new prepared action explicitly supplies its matching approvalEffectId; continue keeps the same task and phase with that receipt. Request the two playbook approvals with recruiting_request_approval, then proceed within the approved phase. Explicitly send recallScope:null when there is no round-only scope. instructions and output retain their exact text; recallScope affects only this round's recall and never changes qualification. prepare freezes a new action; continue freezes a follow-up for the same provider task. Both save the full request before dispatch. After a prepared result, call start automatically with its actionId under existing account access, quota and rate limits. start dispatches only the saved owned action. status and rows read the same local taskId; pass returned cursors unchanged. Queued or accepted does not mean completed or applied. If delivery is uncertain, inspect the existing action/task; never resubmit with a new nonce or create a replacement task.",
     inputSchema: z.toJSONSchema(RecruitingResearchToolInputSchema, { io: "input" }),
+  },
+  {
+    name: "recruiting_request_approval",
+    description:
+      "Request one-time human confirmation of the exact current package: role documents or the ten-profile calibration and rule changes. Use the current role revision and real artifact, assessment and approval effect references. Save and confirm qualification changes in the role first; this approval records the review and does not edit the role. Never self-approve.",
+    inputSchema: z.toJSONSchema(RecruitingApprovalToolInputSchema, { io: "input" }),
   },
   {
     name: "recruiting_feedback",

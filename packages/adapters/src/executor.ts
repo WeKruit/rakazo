@@ -55,6 +55,7 @@ import {
   HistorySearchInputSchema,
   isAttachmentImageMimeType,
   OPENAI_COMPATIBLE_PROVIDER_ID,
+  RecruitingApprovalToolInputSchema,
   RecruitingPreferenceFeedbackSchema,
   RecruitingResearchToolInputSchema,
 } from "@rakazo/contracts";
@@ -90,6 +91,7 @@ import {
   planActionGate,
   promptInvokesSkill,
   RecruitingAssessmentValidationError,
+  RecruitingPlaybookValidationError,
   redactSecrets,
   renderBotDirectory,
   resolveActionApprovalDetail,
@@ -121,6 +123,7 @@ import {
   createSpaceForMember,
   createThreadMessageInTransaction,
   effectiveMemoryScope,
+  executeRecruitingApproval,
   findDefaultModelCredential,
   findModelCredential,
   InvalidSpaceNameError,
@@ -130,6 +133,7 @@ import {
   loadRunHistoryMessages,
   loadRunHumanSources,
   parseComputerMode,
+  prepareRecruitingApproval,
   RecruitingConflictError,
   RecruitingSourceValidationError,
   readHistory,
@@ -4564,6 +4568,12 @@ export function createRunExecutor(deps: ExecutorDeps) {
               }
             }
           }
+          if (name === "recruiting_request_approval") {
+            const parsed = RecruitingApprovalToolInputSchema.safeParse(args);
+            if (!parsed.success) return { error: sanitizeConnectorError(parsed.error, runSecrets) };
+            args = parsed.data;
+            effectRequest = args;
+          }
           let researchAdmission: RecruitingResearchCallAdmission | undefined;
           if (connectorCall.route?.connectorId === "mcp") {
             try {
@@ -4987,6 +4997,7 @@ export function createRunExecutor(deps: ExecutorDeps) {
               return { error: error.message, code: "CONFLICT" };
             if (
               error instanceof RecruitingSourceValidationError ||
+              error instanceof RecruitingPlaybookValidationError ||
               (error instanceof Error && error.name === "ZodError")
             )
               return { error: sanitizeConnectorError(error, runSecrets) };
@@ -5133,6 +5144,30 @@ export function createRunExecutor(deps: ExecutorDeps) {
               // Another worker owns the run now; exit without leaving a local pause card.
               return pauseForApproval();
             }
+            let files: MessageBlock[] = [];
+            if (name === "recruiting_request_approval") {
+              try {
+                if (!deps.artifacts) throw new IsolationError();
+                ({ files } = await prepareRecruitingApproval(
+                  deps.prisma,
+                  researchActor.actor,
+                  {
+                    runId,
+                    threadId: thread.id,
+                    botId: bot.id,
+                    leaseOwner: workerId,
+                    leaseFence: fence,
+                  },
+                  args,
+                  { artifacts: deps.artifacts, context },
+                ));
+              } catch (error) {
+                const result = roleError(error);
+                return (await completeEffect(deps, applied!.effect.id, "intended", result))
+                  ? result
+                  : uncertainEffectResult(name);
+              }
+            }
             await workspaceCheckpoint.flush();
             const paused = await deps.events.pauseRunForInput({
               spaceId: run.spaceId,
@@ -5143,6 +5178,7 @@ export function createRunExecutor(deps: ExecutorDeps) {
               leaseOwner: workerId,
               leaseFence: fence,
               blocks: [
+                ...files,
                 buildApprovalAskBlock(applied!.effect.id, name, args, runSecrets, {
                   reviewReason,
                 }),
@@ -5916,6 +5952,29 @@ export function createRunExecutor(deps: ExecutorDeps) {
               return args.operation !== "read" ? result : finish(result);
             } catch (error) {
               return finish(assessmentError(error));
+            }
+          }
+          if (name === "recruiting_request_approval") {
+            try {
+              if (!deps.artifacts || !applied || !claimedEffect) throw new IsolationError();
+              // The domain receipt and effect complete together; keep the original human approval time.
+              return await executeRecruitingApproval(
+                deps.prisma,
+                researchActor.actor,
+                {
+                  runId,
+                  threadId: thread.id,
+                  botId: bot.id,
+                  leaseOwner: workerId,
+                  leaseFence: fence,
+                  effectId: applied.effect.id,
+                  effectRequest: applied.effect.request,
+                },
+                args,
+                { artifacts: deps.artifacts, context },
+              );
+            } catch (error) {
+              return finish(roleError(error));
             }
           }
           if (name === "recruiting_role") {
@@ -8439,6 +8498,7 @@ export function selectBuiltinToolsForRun(options: {
         (![
           "remember",
           "recruiting_role",
+          "recruiting_request_approval",
           "recruiting_assess",
           "recruiting_feedback",
           "recruiting_research",

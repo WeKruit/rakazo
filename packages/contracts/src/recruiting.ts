@@ -253,6 +253,43 @@ export const RecruitingRoleRevisionSchema = z
   .readonly();
 export type RecruitingRoleRevision = z.infer<typeof RecruitingRoleRevisionSchema>;
 
+export const RecruitingResearchPurposeSchema = z.enum(["calibration", "scale"]);
+export type RecruitingResearchPurpose = z.infer<typeof RecruitingResearchPurposeSchema>;
+
+const RecruitingApprovalScope = {
+  roleId: RecruitingId,
+  expectedRoleRevision: Revision,
+};
+export const RecruitingApprovalToolInputSchema = z.discriminatedUnion("stage", [
+  z.strictObject({
+    ...RecruitingApprovalScope,
+    stage: z.literal("documents"),
+    documents: z.strictObject({
+      jdText: RecruitingArtifactRefSchema,
+      namedPdf: RecruitingArtifactRefSchema,
+      anonymousPdf: RecruitingArtifactRefSchema.nullable(),
+      deck: RecruitingArtifactRefSchema.nullable(),
+    }),
+  }),
+  z.strictObject({
+    ...RecruitingApprovalScope,
+    stage: z.literal("calibration"),
+    documentsApprovalEffectId: RecruitingId,
+    profiles: z
+      .array(
+        z.strictObject({
+          candidateKey: RecruitingId,
+          assessmentVersion: Revision,
+          linkedinUrl: z.httpUrl().refine((url) => new URL(url).protocol === "https:"),
+          evidenceUrl: z.httpUrl(),
+        }),
+      )
+      .length(10),
+    ruleChanges: z.array(Text).readonly(),
+  }),
+]);
+export type RecruitingApprovalToolInput = z.infer<typeof RecruitingApprovalToolInputSchema>;
+
 export const RecruitingResearchTaskSchema = z.strictObject({
   id: RecruitingId,
   roleId: RecruitingId,
@@ -280,6 +317,9 @@ const ResearchRequest = {
   roleRevisionId: RecruitingId,
   clientNonce: RecruitingId,
   kind: z.enum(["create", "continue"]),
+  /** Null identifies historical actions whose purpose was never recorded. */
+  purpose: RecruitingResearchPurposeSchema.nullable().optional(),
+  approvalEffectId: RecruitingId.nullable().optional(),
   requestArtifact: RecruitingArtifactRefSchema,
   contextArtifact: RecruitingArtifactRefSchema,
   /** A single round's recall instructions do not change role qualification. */
@@ -719,6 +759,8 @@ export type RecruitingRoleToolInput = z.infer<typeof RecruitingRoleToolInputSche
 const ResearchText = z.string().regex(/\S/, "Text must not be blank");
 const ResearchRoundInput = {
   expectedRoleRevision: Revision,
+  purpose: RecruitingResearchPurposeSchema,
+  approvalEffectId: RecruitingId,
   clientNonce: RecruitingId,
   instructions: ResearchText,
   output: ResearchText,
@@ -745,6 +787,8 @@ export type RecruitingResearchToolInput = z.infer<typeof RecruitingResearchToolI
 
 export const PrepareRecruitingResearchActionInput = z.strictObject({
   ...ResearchRequest,
+  purpose: RecruitingResearchPurposeSchema,
+  approvalEffectId: RecruitingId,
   /** Expected role revision; later dispatch checks the current role and adoption atomically. */
   expectedRevision: Revision,
 });

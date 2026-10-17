@@ -3,6 +3,8 @@ import type { AdapterContext, ArtifactStore, MemoryCommitRequest } from "@rakazo
 import type {
   Actor,
   CreateRecruitingRoleInput as CreateRoleInput,
+  MessageBlock,
+  RecruitingApprovalToolInput,
   RecruitingArtifactRef,
   RecruitingAssessmentAskInput,
   RecruitingAssessmentSnapshot,
@@ -13,6 +15,7 @@ import type {
   RecruitingQuestion,
   RecruitingReadPayload,
   RecruitingResearchAction,
+  RecruitingResearchPurpose,
   RecruitingRole,
   RecruitingRoleRevision,
   RecruitingRoleToolInput,
@@ -23,10 +26,12 @@ import type {
 import {
   ConfirmRecruitingBriefInput,
   CreateRecruitingRoleInput,
+  EffectApprovalAnsweredPayloadSchema,
   MessageBlock as MessageBlockSchema,
   NativeAskAnswerPayloadSchema,
   ProductEventSchema,
   ReassessRecruitingAssessmentInput,
+  RecruitingApprovalToolInputSchema,
   RecruitingArtifactRefSchema,
   RecruitingAssessmentAskInputSchema,
   RecruitingAssessmentSchema,
@@ -47,10 +52,12 @@ import {
 import {
   applyRecruitingPreferenceEdit,
   evaluateRecruitingAssessment,
+  extractLinksFromText,
   mergeRecruitingReassessment,
   RecruitingPlaybookValidationError,
   readRecruitingJsonString,
   recruitingBriefClarifications,
+  recruitingCalibrationIdentity,
   requireRecruitingBriefConfirmation,
   validateRecruitingBrief,
   validateRecruitingTextSelection,
@@ -2190,6 +2197,532 @@ export async function recordRecruitingWebMaterial(
     };
   });
 }
+type RecruitingApprovalContext = {
+  runId: string;
+  threadId: string;
+  botId: string;
+  leaseOwner: string;
+  leaseFence: number;
+};
+export type RecruitingApprovalResult = {
+  status: "approved";
+  stage: RecruitingApprovalToolInput["stage"];
+  roleId: string;
+  roleRevisionId: string;
+  approvalEffectId: string;
+  payloadHash: string;
+  approvedByUserId: string;
+  approvedAt: string;
+};
+
+function recruitingApprovalHash(input: unknown) {
+  return createHash("sha256").update(stableJsonValue(input)).digest("hex");
+}
+
+async function approvalWorkspace(
+  tx: Tx,
+  actor: Actor,
+  threadId: string,
+  input: RecruitingApprovalToolInput,
+  current = true,
+  requireSelection = current,
+) {
+  const thread = await requireThread(tx, actor, threadId);
+  const role = await requireRole(tx, actor, input.roleId, true);
+  if (requireSelection && thread.activeRecruitingRoleId !== role.id) throw new IsolationError();
+  if (current && role.revision !== input.expectedRoleRevision) throw new RecruitingConflictError();
+  const row = await tx.recruitingRoleRevision.findFirst({
+    where: { roleId: role.id, revision: input.expectedRoleRevision },
+  });
+  if (!row || (current && row.id !== role.currentRevisionId)) throw new RecruitingConflictError();
+  const revision = RecruitingRoleRevisionSchema.parse({
+    ...row,
+    createdAt: row.createdAt.toISOString(),
+  });
+  await validateDefinition(tx, actor, revision);
+  if (revision.brief) validateRecruitingBrief(revision.brief, revision);
+  requireRecruitingBriefConfirmation(revision);
+  const confirmation = revision.brief!.confirmation!;
+  const human = await tx.message.findUnique({
+    where: { id: confirmation.messageId },
+    include: humanMessageInclude,
+  });
+  if (confirmation.userId !== actor.userId || !human || !isNativeHumanMessage(human))
+    throw new IsolationError();
+  await requireThread(tx, actor, human.threadId);
+  return { role, revision };
+}
+
+async function approvalAnswerProof(
+  tx: Tx,
+  actor: Actor,
+  effect: { id: string; runId: string; request: unknown },
+) {
+  const run = await requireRun(tx, actor, effect.runId);
+  const proof = await tx.event.findFirst({
+    where: {
+      spaceId: actor.spaceId,
+      threadId: run.threadId,
+      botId: run.botId,
+      runId: run.id,
+      type: "effect.approval.answered",
+      payload: { path: ["effectId"], equals: effect.id },
+    },
+  });
+  if (!proof) throw new IsolationError();
+  const answer = EffectApprovalAnsweredPayloadSchema.parse(proof.payload);
+  if (
+    answer.effectId !== effect.id ||
+    answer.answer !== "allow" ||
+    answer.answeredByUserId !== actor.userId ||
+    answer.requestHash !== recruitingApprovalHash(effect.request)
+  )
+    throw new IsolationError();
+  const message = await tx.message.findUnique({ where: { id: answer.messageId } });
+  const blocks = MessageBlockSchema.array().safeParse(message?.blocks);
+  const card = blocks.success ? blocks.data[answer.askIndex] : undefined;
+  if (
+    !message ||
+    message.threadId !== run.threadId ||
+    message.runId !== run.id ||
+    message.botId !== run.botId ||
+    message.role !== "bot" ||
+    card?.kind !== "ask" ||
+    card.approvalEffectId !== effect.id ||
+    card.status !== "answered" ||
+    card.answer !== "allow" ||
+    card.input === "secret" ||
+    card.credential ||
+    !card.actions?.some((action) => action.id === "allow") ||
+    card.actions.some((action) => !["allow", "deny"].includes(action.id))
+  )
+    throw new IsolationError();
+  return { run, proof };
+}
+
+async function completedRecruitingApproval(
+  tx: Tx,
+  actor: Actor,
+  effectId: string,
+  scope: { roleId: string; expectedRoleRevision: number },
+  stage: RecruitingApprovalToolInput["stage"],
+  current = true,
+) {
+  const effect = await tx.externalEffect.findFirst({
+    where: {
+      id: effectId,
+      spaceId: actor.spaceId,
+      kind: "recruiting_request_approval",
+      status: "completed",
+    },
+  });
+  if (effect?.kind !== "recruiting_request_approval" || effect.status !== "completed")
+    throw new IsolationError();
+  const input = RecruitingApprovalToolInputSchema.parse(effect.request);
+  if (
+    input.stage !== stage ||
+    input.roleId !== scope.roleId ||
+    input.expectedRoleRevision !== scope.expectedRoleRevision
+  )
+    throw new RecruitingConflictError();
+  const { run, proof } = await approvalAnswerProof(tx, actor, effect);
+  const workspace = await approvalWorkspace(tx, actor, run.threadId, input, current, false);
+  const expected: RecruitingApprovalResult = {
+    status: "approved",
+    stage: input.stage,
+    roleId: input.roleId,
+    roleRevisionId: workspace.revision.id,
+    approvalEffectId: effect.id,
+    payloadHash: recruitingApprovalHash(input),
+    approvedByUserId: actor.userId,
+    approvedAt: proof.createdAt.toISOString(),
+  };
+  if (stableJsonValue(effect.result) !== stableJsonValue(expected)) throw new IsolationError();
+  const recorded = await tx.event.findFirst({
+    where: {
+      spaceId: actor.spaceId,
+      threadId: run.threadId,
+      botId: run.botId,
+      runId: run.id,
+      type: "effect.recorded",
+      payload: { path: ["effectId"], equals: effect.id },
+    },
+  });
+  if (
+    !recorded ||
+    stableJsonValue(recorded.payload) !==
+      stableJsonValue({
+        effectId: effect.id,
+        tool: "recruiting_request_approval",
+        ...expected,
+      })
+  )
+    throw new IsolationError();
+  const package_ = await recruitingApprovalPackage(tx, actor, input, current);
+  return { input, result: expected, package: package_ };
+}
+
+type RecruitingApprovalPackage = {
+  files: MessageBlock[];
+  documentRefs: RecruitingArtifactRef[];
+  sourceRefs: RecruitingAssessmentSourceRef[];
+};
+
+async function recruitingApprovalPackage(
+  tx: Tx,
+  actor: Actor,
+  input: RecruitingApprovalToolInput,
+  current = true,
+  bytes?: ReadonlyMap<string, Uint8Array>,
+): Promise<RecruitingApprovalPackage> {
+  if (input.stage === "calibration") {
+    const documents = await completedRecruitingApproval(
+      tx,
+      actor,
+      input.documentsApprovalEffectId,
+      input,
+      "documents",
+      current,
+    );
+    const unique = new Set(input.profiles.map((profile) => profile.candidateKey));
+    const identities = input.profiles.map((profile) =>
+      recruitingCalibrationIdentity(profile.linkedinUrl),
+    );
+    if (
+      unique.size !== 10 ||
+      identities.some((identity) => !identity) ||
+      new Set(identities).size !== 10
+    )
+      throw new IsolationError();
+    const sources: RecruitingAssessmentSourceRef[] = [];
+    for (const profile of input.profiles) {
+      const row = await tx.recruitingAssessment.findFirst({
+        where: {
+          roleId: input.roleId,
+          candidateKey: profile.candidateKey,
+          ...(current ? {} : { version: profile.assessmentVersion }),
+        },
+        orderBy: { version: "desc" },
+      });
+      if (
+        !row ||
+        row.version !== profile.assessmentVersion ||
+        row.roleRevisionId !== documents.result.roleRevisionId
+      )
+        throw new RecruitingConflictError();
+      await requireRun(tx, actor, row.createdByRunId);
+      const refs = RecruitingAssessmentSchema.parse({
+        ...row,
+        createdAt: row.createdAt.toISOString(),
+      }).sourceRefs;
+      await validateSources(tx, actor, refs);
+      for (const url of [profile.linkedinUrl, profile.evidenceUrl]) {
+        let observed = false;
+        for (const source of refs.filter((ref) => ref.readState === "read" && ref.url === url)) {
+          if (extractLinksFromText(source.quote ?? "").includes(url)) {
+            observed = true;
+            break;
+          }
+          if (source.anchor.kind !== "artifact") continue;
+          const artifact = await validateArtifact(tx, actor, source.anchor.artifact);
+          if (!artifact.runId) continue;
+          const receipt = await tx.event.findFirst({
+            where: {
+              spaceId: actor.spaceId,
+              runId: artifact.runId,
+              botId: artifact.botId ?? undefined,
+              type: "recruiting.material.read",
+              AND: [
+                { payload: { path: ["reader"], equals: "web_fetch" } },
+                { payload: { path: ["artifact", "artifactId"], equals: artifact.id } },
+                { payload: { path: ["artifact", "sha256"], equals: artifact.hash } },
+                { payload: { path: ["url"], equals: url } },
+              ],
+            },
+          });
+          if (!receipt) continue;
+          const payload = RecruitingMaterialReadPayloadSchema.parse(receipt.payload);
+          const origin = await requireRun(tx, actor, artifact.runId);
+          if (
+            receipt.threadId !== origin.threadId ||
+            origin.botId !== artifact.botId ||
+            payload.url !== url ||
+            payload.readAt !== source.readAt ||
+            payload.artifact.artifactId !== artifact.id ||
+            payload.artifact.sha256 !== artifact.hash
+          )
+            throw new IsolationError();
+          observed = true;
+          break;
+        }
+        if (!observed) throw new IsolationError();
+      }
+      sources.push(...refs);
+    }
+    if (bytes) {
+      await recruitingApprovalPackage(tx, actor, documents.input, current, bytes);
+      await validateReadSources(tx, actor, sources, bytes);
+    }
+    return { ...documents.package, sourceRefs: sources };
+  }
+  const files: MessageBlock[] = [];
+  const documentRefs: RecruitingArtifactRef[] = [];
+  for (const [kind, ref] of Object.entries(input.documents)) {
+    if (!ref) continue;
+    const artifact = await validateArtifact(tx, actor, ref);
+    const json = artifact.mimeType === "application/json" || artifact.mimeType.endsWith("+json");
+    if (
+      kind === "jdText"
+        ? !artifact.mimeType.startsWith("text/") && !json
+        : artifact.mimeType !== "application/pdf"
+    )
+      throw new IsolationError();
+    if (bytes) {
+      const body = bytes.get(artifact.id);
+      if (
+        !body ||
+        body.byteLength !== artifact.size ||
+        createHash("sha256").update(body).digest("hex") !== artifact.hash
+      )
+        throw new IsolationError();
+      if (kind === "jdText") {
+        try {
+          const text = new TextDecoder("utf-8", { fatal: true }).decode(body);
+          if (!text.trim()) throw new IsolationError();
+          if (json && !assessmentJsonString(body, ["text"]).trim()) throw new IsolationError();
+        } catch {
+          throw new IsolationError();
+        }
+      } else if (new TextDecoder().decode(body.subarray(0, 5)) !== "%PDF-")
+        throw new IsolationError();
+    }
+    documentRefs.push(ref);
+    files.push({
+      kind: "file",
+      artifactId: artifact.id,
+      mimeType: artifact.mimeType,
+      name: artifact.name,
+      size: artifact.size,
+    });
+  }
+  return { files, documentRefs, sourceRefs: [] };
+}
+
+async function loadRecruitingApprovalMaterials(
+  prisma: PrismaClient,
+  actor: Actor,
+  trusted: RecruitingApprovalContext,
+  input: RecruitingApprovalToolInput,
+  material: RecruitingRoleMaterialContext | undefined,
+  replay = false,
+) {
+  const package_ = await prisma.$transaction(async (tx) => {
+    const { run } = await lockLiveRecruitingRun(tx, actor, trusted.runId, false);
+    if (run.threadId !== trusted.threadId || run.botId !== trusted.botId)
+      throw new IsolationError();
+    if (!replay) requireResearchLease(run, trusted);
+    await approvalWorkspace(tx, actor, trusted.threadId, input, !replay);
+    return recruitingApprovalPackage(tx, actor, input, !replay);
+  });
+  // Reuse the existing native Artifact authorization/store reader; synthetic locators are never persisted.
+  return loadRoleMaterials(
+    prisma,
+    actor,
+    {
+      criteria: [],
+      sourceRefs: [
+        ...package_.sourceRefs,
+        ...package_.documentRefs.map((ref) => ({
+          id: ref.artifactId,
+          kind: "original_material" as const,
+          anchor: { kind: "artifact" as const, artifact: ref, locator: "approval-package" },
+          readState: "read" as const,
+          readAt: new Date().toISOString(),
+          quote: "approval-package",
+        })),
+      ],
+    },
+    material,
+  );
+}
+
+export async function prepareRecruitingApproval(
+  prisma: PrismaClient,
+  actor: Actor,
+  trusted: RecruitingApprovalContext,
+  untrustedInput: unknown,
+  material?: RecruitingRoleMaterialContext,
+): Promise<{ files: MessageBlock[] }> {
+  const input = RecruitingApprovalToolInputSchema.parse(untrustedInput);
+  const bytes = await loadRecruitingApprovalMaterials(prisma, actor, trusted, input, material);
+  return prisma.$transaction(async (tx) => {
+    const { run } = await lockLiveRecruitingRun(tx, actor, trusted.runId);
+    if (run.threadId !== trusted.threadId || run.botId !== trusted.botId)
+      throw new IsolationError();
+    requireResearchLease(run, trusted);
+    await approvalWorkspace(tx, actor, trusted.threadId, input);
+    const package_ = await recruitingApprovalPackage(tx, actor, input, true, bytes);
+    return { files: package_.files };
+  });
+}
+
+export async function executeRecruitingApproval(
+  prisma: PrismaClient,
+  actor: Actor,
+  trusted: RecruitingApprovalContext & { effectId: string; effectRequest: unknown },
+  untrustedInput: unknown,
+  material?: RecruitingRoleMaterialContext,
+): Promise<RecruitingApprovalResult> {
+  const input = RecruitingApprovalToolInputSchema.parse(untrustedInput);
+  if (stableJsonValue(input) !== stableJsonValue(trusted.effectRequest)) throw new IsolationError();
+  // Read status only to permit immutable completed receipts after the run/role has advanced.
+  const retained = await prisma.$transaction((tx) =>
+    tx.externalEffect.findFirst({
+      where: {
+        id: trusted.effectId,
+        spaceId: actor.spaceId,
+        runId: trusted.runId,
+        kind: "recruiting_request_approval",
+      },
+    }),
+  );
+  const replay = retained?.status === "completed";
+  const bytes = await loadRecruitingApprovalMaterials(
+    prisma,
+    actor,
+    trusted,
+    input,
+    material,
+    replay,
+  );
+  return prisma.$transaction(async (tx) => {
+    const { run } = await lockLiveRecruitingRun(tx, actor, trusted.runId, false);
+    if (run.threadId !== trusted.threadId || run.botId !== trusted.botId)
+      throw new IsolationError();
+    await tx.$queryRaw(
+      Prisma.sql`SELECT "id" FROM "external_effects" WHERE "id" = ${trusted.effectId} FOR UPDATE`,
+    );
+    const effect = await tx.externalEffect.findFirst({
+      where: {
+        id: trusted.effectId,
+        spaceId: actor.spaceId,
+        runId: run.id,
+        kind: "recruiting_request_approval",
+      },
+    });
+    if (
+      effect?.kind !== "recruiting_request_approval" ||
+      effect.runId !== run.id ||
+      stableJsonValue(effect.request) !== stableJsonValue(trusted.effectRequest)
+    )
+      throw new IsolationError();
+    if (effect.status === "completed") {
+      const saved = await completedRecruitingApproval(
+        tx,
+        actor,
+        effect.id,
+        input,
+        input.stage,
+        false,
+      );
+      await recruitingApprovalPackage(tx, actor, input, false, bytes);
+      return saved.result;
+    }
+    requireResearchLease(run, trusted);
+    if (effect.status !== "executing") throw new IsolationError();
+    const workspace = await approvalWorkspace(tx, actor, trusted.threadId, input);
+    const { proof } = await approvalAnswerProof(tx, actor, effect);
+    await recruitingApprovalPackage(tx, actor, input, true, bytes);
+    const result: RecruitingApprovalResult = {
+      status: "approved",
+      stage: input.stage,
+      roleId: input.roleId,
+      roleRevisionId: workspace.revision.id,
+      approvalEffectId: effect.id,
+      payloadHash: recruitingApprovalHash(input),
+      approvedByUserId: actor.userId,
+      approvedAt: proof.createdAt.toISOString(),
+    };
+    const completed = await tx.externalEffect.updateMany({
+      where: {
+        id: effect.id,
+        spaceId: actor.spaceId,
+        runId: run.id,
+        status: "executing",
+        run: {
+          status: "running",
+          leaseOwner: trusted.leaseOwner,
+          leaseFence: trusted.leaseFence,
+          leaseExpiresAt: { gt: new Date() },
+        },
+      },
+      data: { status: "completed", result },
+    });
+    if (completed.count !== 1) throw new IsolationError();
+    await appendEventInTransaction(tx, {
+      spaceId: actor.spaceId,
+      threadId: run.threadId,
+      botId: run.botId,
+      runId: run.id,
+      type: "effect.recorded",
+      payload: { effectId: effect.id, tool: "recruiting_request_approval", ...result },
+    });
+    return result;
+  });
+}
+
+/** Called only for this tool's native card; stale cards can still be denied. */
+export async function authorizeRecruitingApprovalAnswerInTransaction(
+  tx: Tx,
+  input: AnswerRunInput,
+  effectRequest: unknown,
+): Promise<boolean> {
+  if (input.answer !== "allow") return false;
+  const actor: Actor = {
+    spaceId: input.spaceId,
+    userId: input.answeredByUserId,
+    email: "",
+    isDeploymentOwner: false,
+  };
+  try {
+    const request = RecruitingApprovalToolInputSchema.parse(effectRequest);
+    const { run } = await lockLiveRecruitingRun(tx, actor, input.runId, false);
+    if (run.status !== "waiting_input" || run.threadId !== input.threadId) return false;
+    await approvalWorkspace(tx, actor, input.threadId, request);
+    await recruitingApprovalPackage(tx, actor, request);
+    return true;
+  } catch (error) {
+    if (
+      error instanceof IsolationError ||
+      error instanceof RecruitingConflictError ||
+      error instanceof RecruitingPlaybookValidationError ||
+      (error instanceof Error && error.name === "ZodError")
+    )
+      return false;
+    throw error;
+  }
+}
+
+async function requireRecruitingResearchGate(
+  tx: Tx,
+  actor: Actor,
+  input: { purpose?: string | null; approvalEffectId?: string | null },
+  role: RecruitingRole,
+) {
+  if (!input.approvalEffectId || !["calibration", "scale"].includes(input.purpose ?? ""))
+    throw new IsolationError();
+  return completedRecruitingApproval(
+    tx,
+    actor,
+    input.approvalEffectId,
+    {
+      roleId: role.id,
+      expectedRoleRevision: role.revision,
+    },
+    input.purpose === "calibration" ? "documents" : "calibration",
+  );
+}
+
 export type RecruitingResearchContextInput = {
   runId: string;
   sourceMessageId?: string | null;
@@ -2212,6 +2745,8 @@ export function recruitingResearchSnapshot(task: ResearchTaskRow, action: Resear
       roleRevisionId: action.roleRevisionId,
       clientNonce: action.clientNonce,
       kind: action.kind,
+      purpose: action.purpose ?? null,
+      approvalEffectId: action.approvalEffectId ?? null,
       runId: action.runId,
       sourceMessageId: action.sourceMessageId,
       deliveryState: action.deliveryState,
@@ -2639,6 +3174,8 @@ export type RecruitingResearchPreparationInput = {
   serverRevision: number;
   taskId?: string;
   kind: "create" | "continue";
+  purpose: RecruitingResearchPurpose;
+  approvalEffectId: string;
   clientNonce: string;
   recallScope: string | null;
   requestArtifact: RecruitingResearchArtifactInput;
@@ -2657,6 +3194,7 @@ export async function prepareRecruitingResearchAction(
     });
     const { run, thread, workspace, server, source } = context;
     requireRecruitingBriefConfirmation(workspace.revision);
+    await requireRecruitingResearchGate(tx, actor, input, workspace.role);
     if (
       !server ||
       server.revision !== input.serverRevision ||
@@ -2672,6 +3210,8 @@ export async function prepareRecruitingResearchAction(
       const artifact = context.requestArtifact!;
       if (
         action.kind !== input.kind ||
+        action.purpose !== input.purpose ||
+        action.approvalEffectId !== input.approvalEffectId ||
         action.runId !== run.id ||
         action.sourceMessageId !== source.anchor.messageId ||
         action.roleRevisionId !== workspace.revision.id ||
@@ -2766,6 +3306,8 @@ export async function prepareRecruitingResearchAction(
         sourceMessageId: source.anchor.messageId,
         clientNonce: input.clientNonce,
         kind: input.kind,
+        purpose: input.purpose,
+        approvalEffectId: input.approvalEffectId,
         requestArtifactId: requestArtifact.id,
         requestArtifactHash: requestArtifact.hash,
         contextArtifactId: input.contextArtifact.artifactId,
@@ -2817,6 +3359,18 @@ async function researchCanDispatch(
     return false;
   }
   if (!task || !action || !server) throw new IsolationError();
+  try {
+    await requireRecruitingResearchGate(tx, actor, action, workspace.role);
+  } catch (error) {
+    if (
+      error instanceof IsolationError ||
+      error instanceof RecruitingConflictError ||
+      error instanceof RecruitingPlaybookValidationError ||
+      (error instanceof Error && error.name === "ZodError")
+    )
+      return false;
+    throw error;
+  }
   if (
     action.deliveryState !== "prepared" ||
     task.pendingActionId !== action.id ||
@@ -2872,6 +3426,8 @@ async function researchCanDispatch(
 
 export type RecruitingResearchAdmissionInput = ResearchLease & {
   actionId: string;
+  purpose: RecruitingResearchPurpose;
+  approvalEffectId: string;
   requestArtifact: RecruitingArtifactRef;
   contextArtifact: RecruitingArtifactRef;
   frozenRequest: Prisma.InputJsonValue;
@@ -2982,6 +3538,8 @@ export async function admitRecruitingResearchAction(
       action = await transitionResearchAction(tx, actor, run, action, "rejected");
       return result("rejected");
     }
+    if (action.purpose !== input.purpose || action.approvalEffectId !== input.approvalEffectId)
+      throw new IsolationError();
     if (!(await researchCanDispatch(tx, actor, context))) {
       if (action.deliveryState === "prepared")
         action = await transitionResearchAction(tx, actor, run, action, "superseded");

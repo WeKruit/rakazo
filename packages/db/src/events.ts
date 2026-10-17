@@ -29,6 +29,7 @@ import {
 } from "./messages.js";
 import type { RecruitingQuestionPauseContext } from "./recruiting.js";
 import {
+  authorizeRecruitingApprovalAnswerInTransaction,
   authorizeRecruitingQuestionAnswerInTransaction,
   commitRecruitingQuestionInTransaction,
   prepareRecruitingQuestionInTransaction,
@@ -709,6 +710,17 @@ async function commitAnswerRunInput(
       },
     });
     if (!approvalEffect) return null;
+    if (
+      approvalEffect.kind === "recruiting_request_approval" &&
+      (input.answer === "always" ||
+        (input.answer === "allow" &&
+          !(await authorizeRecruitingApprovalAnswerInTransaction(
+            tx,
+            input,
+            approvalEffect.request,
+          ))))
+    )
+      return null;
     if (input.answer === "always") {
       if (run.userId !== input.answeredByUserId) return null;
       approvalUserId = input.answeredByUserId;

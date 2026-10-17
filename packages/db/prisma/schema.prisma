@@ -1568,6 +1568,8 @@ model RecruitingResearchAction {
   sourceMessage Message @relation(fields: [sourceMessageId], references: [id], onDelete: NoAction)
   clientNonce String @unique
   kind String
+  purpose String?
+  approvalEffectId String?
   deliveryState String @default("prepared")
   observedProviderState String?
   requestArtifactId String

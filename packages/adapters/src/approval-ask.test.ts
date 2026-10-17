@@ -1,3 +1,4 @@
+import { RecruitingApprovalToolInputSchema } from "@rakazo/contracts";
 import { describe, expect, it } from "vitest";
 import { buildApprovalAskBlock } from "./approval-ask.js";
 
@@ -88,5 +89,91 @@ describe("buildApprovalAskBlock", () => {
     });
     if (block.kind !== "ask") throw new Error("expected ask block");
     expect(block.detail).toContain("stay separate from other spaces");
+  });
+
+  it("offers only one-time approval or denial of the exact document package", () => {
+    const request = RecruitingApprovalToolInputSchema.parse({
+      stage: "documents",
+      roleId: "role",
+      expectedRoleRevision: 3,
+      documents: {
+        jdText: { artifactId: "jd", sha256: "a".repeat(64) },
+        namedPdf: { artifactId: "named-pdf", sha256: "b".repeat(64) },
+        anonymousPdf: null,
+        deck: null,
+      },
+    });
+    const block = buildApprovalAskBlock(
+      "documents-effect",
+      "recruiting_request_approval",
+      request,
+      [],
+    );
+
+    expect(block).toMatchObject({
+      kind: "ask",
+      approvalEffectId: "documents-effect",
+      text: "Approve role documents?",
+      actions: [
+        { id: "allow", label: "Approve documents" },
+        { id: "deny", label: "Deny" },
+      ],
+      detail: JSON.stringify(request, null, 2),
+    });
+  });
+
+  it("shows all ten calibration profiles and every rule beyond the generic detail limit", () => {
+    const request = RecruitingApprovalToolInputSchema.parse({
+      stage: "calibration",
+      roleId: "role",
+      expectedRoleRevision: 3,
+      documentsApprovalEffectId: "documents-effect",
+      profiles: Array.from({ length: 10 }, (_, index) => ({
+        candidateKey: `candidate-${index}`,
+        assessmentVersion: index + 1,
+        linkedinUrl: `https://www.linkedin.com/in/candidate-${index}`,
+        evidenceUrl: `https://example.test/evidence/${index}?source=${"context".repeat(80)}`,
+      })),
+      ruleChanges: Array.from(
+        { length: 5 },
+        (_, index) => `Rule ${index}: ${"retain exact evidence; ".repeat(30)}token-secret`,
+      ),
+    });
+    if (request.stage !== "calibration") throw new Error("expected calibration request");
+    const block = buildApprovalAskBlock(
+      "calibration-effect",
+      "recruiting_request_approval",
+      request,
+      ["token-secret"],
+    );
+
+    expect(block).toMatchObject({
+      kind: "ask",
+      approvalEffectId: "calibration-effect",
+      text: "Approve 10-profile calibration?",
+      actions: [
+        { id: "allow", label: "Approve calibration" },
+        { id: "deny", label: "Deny" },
+      ],
+    });
+    if (block.kind !== "ask") throw new Error("expected ask block");
+    expect(block.detail?.length).toBeGreaterThan(4_000);
+    expect(block.detail).toBe(
+      JSON.stringify(
+        {
+          ...request,
+          ruleChanges: request.ruleChanges.map((rule) =>
+            rule.replace("token-secret", "[redacted]"),
+          ),
+        },
+        null,
+        2,
+      ),
+    );
+    expect(block.detail).not.toContain("token-secret");
+    for (const profile of request.profiles) expect(block.detail).toContain(profile.candidateKey);
+    for (let index = 0; index < request.ruleChanges.length; index++) {
+      expect(block.detail).toContain(`Rule ${index}:`);
+    }
   });
 });

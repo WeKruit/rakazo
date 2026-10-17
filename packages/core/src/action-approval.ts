@@ -36,7 +36,7 @@ const APPROVAL_REQUIRED_BUILTIN_TOOLS = new Set([
   "cloud_agent_reply",
   "cloud_agent_cancel",
 ]);
-const EXPLICIT_APPROVAL_BUILTIN_TOOLS = new Set(["create_space"]);
+const EXPLICIT_APPROVAL_BUILTIN_TOOLS = new Set(["create_space", "recruiting_request_approval"]);
 
 const UNATTENDED_SAFE_BUILTIN_TOOLS = new Set([
   "browser_snapshot",
@@ -106,7 +106,7 @@ export function toolRequiresApproval(
   return false;
 }
 
-/** Security-boundary changes cannot be auto-reviewed or permanently allowed. */
+/** These actions require a one-time human decision, without auto-review or permanent allowance. */
 export function toolRequiresExplicitApproval(toolName: string): boolean {
   return EXPLICIT_APPROVAL_BUILTIN_TOOLS.has(toolName);
 }

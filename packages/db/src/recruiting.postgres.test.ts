@@ -5,12 +5,14 @@ import type {
   CreateRecruitingRoleInput,
   MessageBlock,
   NativeAskAnswerPayload,
+  RecruitingApprovalToolInput,
   RecruitingAssessmentAskInput,
   RecruitingAssessmentSourceRef,
   RecruitingRoleToolInput,
   RecruitingSourceRef,
   SaveRecruitingAssessmentInput,
 } from "@rakazo/contracts";
+import { stableJsonValue } from "@rakazo/core/node/approval-effect-key";
 import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
 import type { Prisma, PrismaClient } from "./client.js";
 import { createDb, Prisma as PrismaSql } from "./client.js";
@@ -4081,6 +4083,119 @@ describePostgres("recruiting domain (PostgreSQL)", () => {
           expectedRevision: draft.role.revision,
         })
       : draft;
+    let approvalEffectId = `missing-documents-${f.run.id}`;
+    if (confirmed) {
+      // A separate completed gate run keeps research dispatch assertions scoped to the research run.
+      const approvalRun = await prisma.run.create({
+        data: {
+          spaceId,
+          userId,
+          botId,
+          threadId: f.thread.id,
+          taskId: f.run.taskId,
+          status: "running",
+          trigger: "user",
+          leaseOwner: "gate-worker",
+          leaseFence: 1,
+          leaseExpiresAt: new Date(Date.now() + 60_000),
+        },
+      });
+      const bodies = new Map<string, Uint8Array>();
+      const docs = [];
+      for (const [name, text, mimeType] of [
+        ["JD.txt", "Synthetic final job description", "text/plain"],
+        ["JD.pdf", "%PDF-1.7\nsynthetic fixture", "application/pdf"],
+      ] as const) {
+        const bytes = new TextEncoder().encode(text);
+        const row = await prisma.artifact.create({
+          data: {
+            spaceId,
+            userId,
+            botId,
+            groupId: f.thread.groupId,
+            runId: approvalRun.id,
+            name,
+            mimeType,
+            size: bytes.byteLength,
+            hash: createHash("sha256").update(bytes).digest("hex"),
+            storageKey: `gate:${approvalRun.id}:${name}`,
+          },
+        });
+        bodies.set(row.storageKey, bytes);
+        docs.push({ artifactId: row.id, sha256: row.hash });
+      }
+      const request: RecruitingApprovalToolInput = {
+        stage: "documents",
+        roleId: role.role.id,
+        expectedRoleRevision: role.role.revision,
+        documents: { jdText: docs[0]!, namedPdf: docs[1]!, anonymousPdf: null, deck: null },
+      };
+      const effect = await prisma.externalEffect.create({
+        data: {
+          spaceId,
+          runId: approvalRun.id,
+          kind: "recruiting_request_approval",
+          status: "executing",
+          request,
+          idempotencyKey: `gate:${approvalRun.id}`,
+        },
+      });
+      const card = await recruiting.createThreadMessage(prisma, {
+        threadId: f.thread.id,
+        role: "bot",
+        botId,
+        runId: approvalRun.id,
+        blocks: [
+          {
+            kind: "ask",
+            text: "Approve synthetic documents",
+            approvalEffectId: effect.id,
+            status: "answered",
+            answer: "allow",
+            actions: [
+              { id: "allow", label: "Allow once" },
+              { id: "deny", label: "Deny" },
+            ],
+          },
+        ],
+      });
+      await recruiting.appendEvent(prisma, {
+        spaceId,
+        threadId: f.thread.id,
+        botId,
+        runId: approvalRun.id,
+        type: "effect.approval.answered",
+        payload: {
+          effectId: effect.id,
+          messageId: card.id,
+          askIndex: 0,
+          answeredByUserId: userId,
+          answer: "allow",
+          requestHash: createHash("sha256").update(stableJsonValue(request)).digest("hex"),
+        },
+      });
+      const material = {
+        context: { ...actor, signal: new AbortController().signal },
+        artifacts: { get: async (key: string) => bodies.get(key)! },
+      } as unknown as recruiting.RecruitingRoleMaterialContext;
+      const saved = await recruiting.executeRecruitingApproval(
+        prisma,
+        actor,
+        {
+          runId: approvalRun.id,
+          threadId: f.thread.id,
+          botId,
+          leaseOwner: "gate-worker",
+          leaseFence: 1,
+          effectId: effect.id,
+          effectRequest: request,
+        },
+        request,
+        material,
+      );
+      approvalEffectId = saved.approvalEffectId;
+      await prisma.run.update({ where: { id: approvalRun.id }, data: { status: "completed" } });
+    }
     const server = await prisma.mcpServer.create({
       data: {
         spaceId,
@@ -4138,6 +4253,8 @@ describePostgres("recruiting domain (PostgreSQL)", () => {
       mcpServerId: server.id,
       serverRevision: server.revision,
       kind: "create" as const,
+      purpose: "calibration" as const,
+      approvalEffectId,
       clientNonce: `action-${f.run.id}`,
       recallScope: null,
       requestArtifact: metadata("request"),
@@ -5821,6 +5938,8 @@ describePostgres("recruiting domain (PostgreSQL)", () => {
     return {
       ...f.lease,
       actionId: prepared.action.id,
+      purpose: f.input.purpose,
+      approvalEffectId: f.input.approvalEffectId,
       requestArtifact: {
         artifactId: prepared.requestArtifact.id,
         sha256: prepared.requestArtifact.hash,

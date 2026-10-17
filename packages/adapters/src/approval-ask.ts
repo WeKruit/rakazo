@@ -12,6 +12,7 @@ export function buildApprovalAskBlock(
   secrets: string[],
   options?: { reviewReason?: string },
 ): MessageBlock {
+  const recruitingApproval = toolName === "recruiting_request_approval";
   const summary = describeApprovalAction(toolName, args);
   const detail = formatApprovalDetail(
     toolName,
@@ -24,12 +25,17 @@ export function buildApprovalAskBlock(
     approvalEffectId: effectId,
     text: truncate(
       redactSecrets(
-        toolName === "create_space" ? `${summary}?` : `Review before ${summary}`,
+        toolName === "create_space" || recruitingApproval
+          ? `${summary}?`
+          : `Review before ${summary}`,
         secrets,
       ),
       MAX_APPROVAL_SUMMARY_LENGTH,
     ),
-    detail: safeDetail ? truncate(safeDetail, MAX_APPROVAL_DETAIL_LENGTH) : undefined,
+    detail:
+      safeDetail && !recruitingApproval
+        ? truncate(safeDetail, MAX_APPROVAL_DETAIL_LENGTH)
+        : safeDetail,
     status: "pending",
     actions:
       toolName === "create_space"
@@ -37,15 +43,26 @@ export function buildApprovalAskBlock(
             { id: "allow", label: "Create space", outcome: "created" },
             { id: "deny", label: "Cancel", outcome: "cancelled" },
           ]
-        : [
-            { id: "allow", label: "Allow once" },
-            { id: "always", label: "Always allow this tool" },
-            { id: "deny", label: "Deny" },
-          ],
+        : recruitingApproval
+          ? [
+              {
+                id: "allow",
+                label: args.stage === "documents" ? "Approve documents" : "Approve calibration",
+              },
+              { id: "deny", label: "Deny" },
+            ]
+          : [
+              { id: "allow", label: "Allow once" },
+              { id: "always", label: "Always allow this tool" },
+              { id: "deny", label: "Deny" },
+            ],
   };
 }
 
 function describeApprovalAction(toolName: string, args: Record<string, unknown>): string {
+  if (toolName === "recruiting_request_approval") {
+    return args.stage === "documents" ? "Approve role documents" : "Approve 10-profile calibration";
+  }
   if (toolName === "destination.write") {
     const collection = args.collection ? String(args.collection) : "records";
     const title = args.title ? ` "${String(args.title)}"` : "";
@@ -71,6 +88,10 @@ function formatApprovalDetail(
   const lines: string[] = [];
   if (reviewReason?.trim()) {
     lines.push(reviewReason.trim().replace(/\u2014|\u2013/g, "-"));
+  }
+  if (toolName === "recruiting_request_approval") {
+    lines.push(JSON.stringify(args, null, 2));
+    return lines.join("\n");
   }
   if (toolName === "create_space") {
     lines.push(

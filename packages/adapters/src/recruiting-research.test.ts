@@ -86,6 +86,8 @@ const request = {
   context,
   source,
   intent: { basis: "direct" as const, quote: "Search this round" },
+  purpose: "calibration" as const,
+  approvalEffectId: "g1-approval",
   route: {
     connectorId: "mcp" as const,
     resourceId: "server",
@@ -111,6 +113,9 @@ describe("frozen recruiting research requests", () => {
     for (const text of [request.instructions, request.output, request.recallScope])
       expect(loaded.args.prompt).toContain(text);
     expect(loaded).toMatchObject({
+      version: 2,
+      purpose: "calibration",
+      approvalEffectId: "g1-approval",
       roleId: "role",
       roleRevisionId: "role-revision",
       roleRevision: 2,
@@ -118,6 +123,7 @@ describe("frozen recruiting research requests", () => {
       contextArtifact: context.contextArtifact,
     });
     expect(loaded.args.prompt).toContain("do not change qualification");
+    expect(loaded.args.prompt).toContain("Research purpose:\ncalibration");
     expect(loaded.args.prompt).not.toContain("maximum years");
   });
 
@@ -142,8 +148,46 @@ describe("frozen recruiting research requests", () => {
     ).toThrow(/hash/i);
   });
 
+  it.each(["create", "continue"] as const)(
+    "reads immutable v1 %s requests without inferring purpose or approval",
+    (operation) => {
+      const built = buildRecruitingResearchRequest(
+        operation === "create"
+          ? request
+          : {
+              ...request,
+              operation,
+              providerTaskId: "provider-task",
+              route: { ...request.route, toolName: "reply" },
+            },
+      );
+      const legacy = JSON.parse(built.bytes.toString("utf8"));
+      legacy.version = 1;
+      delete legacy.purpose;
+      delete legacy.approvalEffectId;
+      legacy.args[operation === "create" ? "prompt" : "message"] = [
+        contextText,
+        `Research instructions:\n${request.instructions}`,
+        `Requested output:\n${request.output}`,
+        `Recall scope for this round:\n${request.recallScope}`,
+        "The role criteria remain authoritative. Recall scope and output instructions do not change qualification. Preserve missing evidence as unknown; provider labels do not establish qualification.",
+      ].join("\n\n");
+      const bytes = Buffer.from(JSON.stringify(legacy), "utf8");
+      const loaded = readRecruitingResearchRequest(bytes, sha256(bytes));
+      expect(loaded).toEqual(legacy);
+      expect(loaded).not.toHaveProperty("purpose");
+      expect(loaded).not.toHaveProperty("approvalEffectId");
+      expect(bytes.toString("utf8")).toBe(JSON.stringify(legacy));
+    },
+  );
+
   it.each([
     (m: Record<string, unknown>) => ({ ...m, arbitrary: true }),
+    (m: Record<string, unknown>) => ({ ...m, purpose: undefined }),
+    (m: Record<string, unknown>) => ({ ...m, approvalEffectId: undefined }),
+    (m: Record<string, unknown>) => ({ ...m, purpose: "scale" }),
+    (m: Record<string, unknown>) => ({ ...m, approvalEffectId: " " }),
+    (m: Record<string, unknown>) => ({ ...m, version: 1 }),
     (m: Record<string, unknown>) => ({ ...m, args: { prompt: "Conditions omitted" } }),
     (m: Record<string, unknown>) => ({ ...m, route: { ...request.route, toolName: "reply" } }),
     (m: Record<string, unknown>) => ({ ...m, route: { ...request.route, resourceRevision: "3" } }),
@@ -165,6 +209,10 @@ describe("frozen recruiting research requests", () => {
     { instructions: " \n " },
     { output: " " },
     { recallScope: " " },
+    { purpose: undefined },
+    { purpose: "other" },
+    { approvalEffectId: undefined },
+    { approvalEffectId: " " },
     { intent: { basis: "inferred", quote: source.quote! } },
     { source: { ...source, quote: "Another instruction" } },
     { context: { ...context, text: "Truncated role" } },

@@ -3,6 +3,7 @@ import { RecruitingBriefDraftSchema, RecruitingRoleToolInputSchema } from "@raka
 import { describe, expect, it } from "vitest";
 import {
   recruitingBriefClarifications,
+  recruitingCalibrationIdentity,
   recruitingDiscoveryAnswer,
   recruitingOutboundDisposition,
   requireRecruitingBriefConfirmation,
@@ -176,6 +177,20 @@ const profiles = Array.from({ length: 10 }, (_, i) => ({
   evidenceUrl: `https://example.test/evidence/${i}`,
 }));
 describe("deterministic playbook approval gates", () => {
+  it("requires a concrete LinkedIn profile and canonicalizes identity across URL variants", () => {
+    expect(recruitingCalibrationIdentity("https://linkedin.com/in/Example/?trk=test")).toBe(
+      "/in/example",
+    );
+    for (const url of [
+      "https://linkedin.com/in/",
+      "https://linkedin.com/in/%20",
+      "https://linkedin.com/in/example/extra",
+      "https://linkedin.com/in/a%2Fb",
+      "http://linkedin.com/in/example",
+      "https://example.com/in/example",
+    ])
+      expect(recruitingCalibrationIdentity(url)).toBeNull();
+  });
   it.each(gates)("requires an exact current receipt for %s", (gate) => {
     const input = {
       actor: { userId: "human", spaceId: "space" },

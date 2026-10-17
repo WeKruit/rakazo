@@ -15,6 +15,17 @@ import {
 } from "./action-approval.js";
 
 describe("toolRequiresApproval", () => {
+  it("requires explicit human approval of recruiting packages even with an always-allow rule", () => {
+    const toolName = "recruiting_request_approval";
+    const rules: ActionApprovalRule[] = [
+      { effect: "always_allow", matchKind: "tool", matchValue: toolName },
+    ];
+
+    expect(resolveActionApprovalDetail({ toolName, rules }).source).toBe("always_allow");
+    expect(toolRequiresApproval(toolName, false)).toBe(true);
+    expect(toolRequiresExplicitApproval(toolName)).toBe(true);
+  });
+
   it("requires approval for consequential builtins and destination writes", () => {
     expect(toolRequiresApproval("destination.write", false)).toBe(true);
     expect(toolRequiresApproval("destination.write", true)).toBe(true);

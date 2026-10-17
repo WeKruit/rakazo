@@ -7,12 +7,20 @@ import type {
 import { MEMORY_REVISION_CONFLICT_ERROR } from "@rakazo/adapter-kit";
 import type { ActionApprovalRule } from "@rakazo/core";
 import { approvalEffectKey, toolEffectIdempotencyKey } from "@rakazo/core/node/approval-effect-key";
+import type * as DatabaseModule from "@rakazo/db";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { isApprovalPausedResult } from "./approval-effect.js";
 import { MAX_SHARED_MEMORY_CHARS } from "./builtin-tools.js";
 import type * as ComputerLifecycleModule from "./computer-lifecycle.js";
 import { createRunExecutor } from "./executor.js";
 import { catalogEntries, resolveCatalogCall } from "./lazy-tool-catalog.js";
+
+const recruitingApproval = vi.hoisted(() => ({ prepare: vi.fn(), execute: vi.fn() }));
+vi.mock("@rakazo/db", async (importOriginal) => ({
+  ...(await importOriginal<typeof DatabaseModule>()),
+  prepareRecruitingApproval: recruitingApproval.prepare,
+  executeRecruitingApproval: recruitingApproval.execute,
+}));
 
 vi.mock("./computer-lifecycle.js", async (importOriginal) => ({
   ...(await importOriginal<typeof ComputerLifecycleModule>()),
@@ -60,7 +68,9 @@ function fixture({
   builtin = false,
   disabledBuiltinTools = [],
   existingSharedMemory,
+  artifacts = false,
 }: {
+  artifacts?: boolean;
   builtin?: boolean;
   disabledBuiltinTools?: string[];
   existingSharedMemory?: string;
@@ -189,6 +199,7 @@ function fixture({
     },
     thread: { findUniqueOrThrow: vi.fn(async () => ({ id: run.threadId, groupId: null })) },
     message: { findMany: vi.fn(async () => []) },
+    event: { findMany: vi.fn(async () => []) },
     task: { findUniqueOrThrow: vi.fn(async () => ({ id: run.taskId, prompt })) },
     connection: { findMany: vi.fn(async () => []) },
     spaceModelPreference: { findFirst: vi.fn(async () => null) },
@@ -233,6 +244,7 @@ function fixture({
   });
   const executor = createRunExecutor({
     prisma,
+    ...(artifacts ? { artifacts: { get: vi.fn() } } : {}),
     runtime: { describe: () => ({ capabilities: { scripted: false } }), run: runtimeRun },
     connector: {
       discoverTools: async () =>
@@ -313,6 +325,115 @@ describe("disabled builtins", () => {
     expect(f.commit).not.toHaveBeenCalled();
     expect(f.execute).not.toHaveBeenCalled();
     expect(f.effects).toEqual([]);
+  });
+});
+
+describe("native recruiting package approval", () => {
+  const args = {
+    stage: "documents",
+    roleId: "role-example",
+    expectedRoleRevision: 2,
+    documents: {
+      jdText: { artifactId: "jd-text", sha256: "a".repeat(64) },
+      namedPdf: { artifactId: "jd-pdf", sha256: "b".repeat(64) },
+      anonymousPdf: null,
+      deck: null,
+    },
+  };
+  const file = {
+    kind: "file",
+    artifactId: "jd-pdf",
+    mimeType: "application/pdf",
+    name: "JD.pdf",
+    size: 128,
+  };
+  beforeEach(() => {
+    recruitingApproval.prepare.mockReset().mockResolvedValue({ files: [file] });
+    recruitingApproval.execute.mockReset();
+    reviewMock.mockReset();
+  });
+  function approvalFixture() {
+    const f = fixture({
+      name: "recruiting_request_approval",
+      builtin: true,
+      artifacts: true,
+      autoReview: true,
+      rules: [
+        { effect: "always_allow", matchKind: "tool", matchValue: "recruiting_request_approval" },
+      ],
+    });
+    f.setCalls([{ args, executionId: "approval-1" }]);
+    return f;
+  }
+  it("shows verified files and a one-time card despite always-allow and auto review", async () => {
+    const f = approvalFixture();
+    await f.run();
+    expect(recruitingApproval.prepare).toHaveBeenCalledWith(
+      expect.anything(),
+      expect.objectContaining({ spaceId: "space-1", userId: "user-1" }),
+      expect.objectContaining({
+        runId: "run-1",
+        threadId: "thread-1",
+        botId: "bot-1",
+        leaseOwner: "worker-1",
+      }),
+      args,
+      expect.objectContaining({ artifacts: expect.anything() }),
+    );
+    expect(f.pauseRunForInput).toHaveBeenCalledWith(
+      expect.objectContaining({
+        blocks: [
+          file,
+          expect.objectContaining({
+            kind: "ask",
+            approvalEffectId: f.effects[0]!.id,
+            actions: [
+              expect.objectContaining({ id: "allow" }),
+              expect.objectContaining({ id: "deny" }),
+            ],
+          }),
+        ],
+      }),
+    );
+    expect(f.effects[0]!.request).toEqual(args);
+    expect(recruitingApproval.execute).not.toHaveBeenCalled();
+    expect(reviewMock).not.toHaveBeenCalled();
+  });
+  it("rejects an unavailable package without creating a misleading approval card", async () => {
+    const { RecruitingConflictError } = await import("@rakazo/db");
+    const conflict = new RecruitingConflictError();
+    recruitingApproval.prepare.mockRejectedValue(conflict);
+    const f = approvalFixture();
+    await f.run();
+    expect(f.pauseRunForInput).not.toHaveBeenCalled();
+    expect(recruitingApproval.execute).not.toHaveBeenCalled();
+    expect(f.results.at(-1)).toEqual({ error: conflict.message, code: "CONFLICT" });
+  });
+  it("resumes the original approved payload once and retains its immutable receipt", async () => {
+    const f = approvalFixture();
+    await f.run();
+    f.effects[0]!.status = "approved";
+    const result = { status: "approved", stage: "documents", approvalEffectId: f.effects[0]!.id };
+    recruitingApproval.execute.mockImplementation(async () => {
+      Object.assign(f.effects[0]!, { status: "completed", result });
+      return result;
+    });
+    f.setCalls([{ args: { ...args, expectedRoleRevision: 99 }, executionId: "approval-2" }]);
+    await f.run();
+    expect(recruitingApproval.execute).toHaveBeenCalledWith(
+      expect.anything(),
+      expect.anything(),
+      expect.objectContaining({ effectId: f.effects[0]!.id, effectRequest: args }),
+      args,
+      expect.anything(),
+    );
+    expect(f.results.at(-1)).toEqual(result);
+    expect(f.effects).toHaveLength(1);
+    f.setCalls([{ args, executionId: "approval-3" }]);
+    await f.run();
+    expect(recruitingApproval.execute).toHaveBeenCalledOnce();
+    expect(f.pauseRunForInput).toHaveBeenCalledOnce();
+    expect(f.results.at(-1)).toEqual(result);
   });
 });
 

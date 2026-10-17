@@ -204,6 +204,8 @@ describe("native research preparation", () => {
     operation: "prepare" as const,
     mcpServerId: "source",
     expectedRoleRevision: 1,
+    purpose: "calibration" as const,
+    approvalEffectId: "g1-approval",
     clientNonce: "round-1",
     instructions: "  Find engineers.\nKeep the supplied detail.  ",
     output: "Name, profile and per-criterion evidence",
@@ -218,6 +220,7 @@ describe("native research preparation", () => {
     readAt: "2026-01-01T00:00:00.000Z",
     quote: input.intent.quote,
   };
+  const { mcpServerId: _mcpServerId, ...continuationInput } = input;
   const context = {
     spaceId: actor.spaceId,
     userId: actor.userId,
@@ -295,6 +298,8 @@ describe("native research preparation", () => {
       context: loaded,
       source,
       intent: input.intent,
+      purpose: input.purpose,
+      approvalEffectId: input.approvalEffectId,
       route: {
         connectorId: "mcp",
         resourceId: "source",
@@ -329,6 +334,8 @@ describe("native research preparation", () => {
       sourceMessageId: "answer",
       clientNonce: input.clientNonce,
       kind: operation,
+      purpose: input.purpose as "calibration" | "scale" | null,
+      approvalEffectId: input.approvalEffectId as string | null,
       deliveryState: "prepared",
       requestArtifactId: "request-artifact",
       requestArtifactHash: request.sha256,
@@ -838,6 +845,11 @@ describe("native research preparation", () => {
     const manifest = JSON.parse(Buffer.from(bytes!).toString("utf8"));
     expect(manifest.args.prompt).toContain(loaded.text);
     expect(manifest.args.prompt).toContain(input.instructions);
+    expect(manifest).toMatchObject({
+      version: 2,
+      purpose: "calibration",
+      approvalEffectId: "g1-approval",
+    });
     expect(manifest.source.anchor.messageId).toBe("answer");
     expect(loadContext).toHaveBeenCalledWith("answer", null);
     expect(prepareRecruitingResearchAction).toHaveBeenCalledWith(
@@ -845,6 +857,8 @@ describe("native research preparation", () => {
       actor,
       expect.objectContaining({
         sourceMessageId: "answer",
+        purpose: "calibration",
+        approvalEffectId: "g1-approval",
         requestArtifact: expect.objectContaining({
           storageKey: "request-blob",
           hash: expect.stringMatching(/^[a-f0-9]{64}$/),
@@ -911,6 +925,202 @@ describe("native research preparation", () => {
     ).rejects.toThrow();
     expect(f.artifacts.put).not.toHaveBeenCalled();
     expect(prepareRecruitingResearchAction).not.toHaveBeenCalled();
+  });
+
+  it.each([{ purpose: "scale" as const }, { approvalEffectId: "other-approval" }])(
+    "rejects changed phase or approval under a saved nonce %#",
+    async (changed) => {
+      const f = researchFixture();
+      await expect(
+        tools.prepareRecruitingResearchTool(
+          f.deps,
+          f.trusted,
+          { ...input, ...changed },
+          context,
+          vi.fn(),
+        ),
+      ).rejects.toThrow();
+      expect(f.artifacts.put).not.toHaveBeenCalled();
+      expect(prepareRecruitingResearchAction).not.toHaveBeenCalled();
+    },
+  );
+
+  it("prepares an explicitly approved scale action on the same existing provider task", async () => {
+    const f = researchFixture("continue");
+    vi.mocked(readRecruitingResearchContext)
+      .mockResolvedValueOnce({ ...f.saved, action: null } as never)
+      .mockResolvedValueOnce(f.saved as never);
+    vi.mocked(prepareRecruitingResearchAction).mockImplementation(
+      async (_db, _actor, prepared) =>
+        ({ task: f.task, action: { ...f.action, ...prepared, id: "scale-action" } }) as never,
+    );
+    const result = await tools.prepareRecruitingResearchTool(
+      f.deps,
+      f.trusted,
+      {
+        ...continuationInput,
+        operation: "continue",
+        taskId: "task",
+        clientNonce: "scale-round",
+        purpose: "scale",
+        approvalEffectId: "g2-approval",
+      },
+      context,
+      async () => loaded,
+    );
+    expect(prepareRecruitingResearchAction).toHaveBeenCalledWith(
+      f.deps.prisma,
+      actor,
+      expect.objectContaining({
+        kind: "continue",
+        taskId: "task",
+        purpose: "scale",
+        approvalEffectId: "g2-approval",
+      }),
+    );
+    expect(result).toMatchObject({ task: { id: "task" } });
+    const manifest = JSON.parse(Buffer.from(f.uploads[0]!.bytes).toString("utf8"));
+    expect(manifest).toMatchObject({
+      version: 2,
+      operation: "continue",
+      purpose: "scale",
+      approvalEffectId: "g2-approval",
+      args: {
+        task_id: "provider-original",
+        message: expect.stringContaining("Research purpose:\nscale"),
+      },
+    });
+  });
+
+  it.each([
+    { purpose: "scale" as const },
+    { purpose: null },
+    { approvalEffectId: "other-approval" },
+    { approvalEffectId: null },
+  ])("rejects action metadata that differs from verified frozen bytes %#", async (changed) => {
+    const f = researchFixture();
+    Object.assign(f.action, changed);
+    await expect(f.admit()).rejects.toThrow(IsolationError);
+    await expect(
+      tools.resolveRecruitingResearchTool(
+        f.deps,
+        f.trusted,
+        { operation: "start", actionId: "action" },
+        context,
+      ),
+    ).rejects.toThrow(IsolationError);
+    expect(admitRecruitingResearchAction).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    { purpose: "scale" },
+    { approvalEffectId: "other-approval" },
+    { purpose: undefined },
+    { approvalEffectId: undefined },
+  ])("rejects rehashed request metadata that differs from its action %#", async (changed) => {
+    const f = researchFixture();
+    const manifest = { ...f.request.manifest, ...changed };
+    if (changed.purpose === "scale" && "prompt" in manifest.args)
+      manifest.args = {
+        prompt: manifest.args.prompt.replace(
+          "Research purpose:\ncalibration",
+          "Research purpose:\nscale",
+        ),
+      };
+    const bytes = Buffer.from(JSON.stringify(manifest), "utf8");
+    const hash = createHash("sha256").update(bytes).digest("hex");
+    f.blobs.set("request-blob", bytes);
+    f.action.requestArtifactHash = hash;
+    f.saved.requestArtifact.hash = hash;
+    await expect(f.admit()).rejects.toThrow();
+    expect(admitRecruitingResearchAction).not.toHaveBeenCalled();
+    expect(f.artifacts.put).not.toHaveBeenCalled();
+  });
+
+  function useLegacyRequest(f: ReturnType<typeof researchFixture>) {
+    const legacy = JSON.parse(f.request.bytes.toString("utf8"));
+    legacy.version = 1;
+    delete legacy.purpose;
+    delete legacy.approvalEffectId;
+    const key = legacy.operation === "create" ? "prompt" : "message";
+    legacy.args[key] = legacy.args[key].replace("Research purpose:\ncalibration\n\n", "");
+    const bytes = Buffer.from(JSON.stringify(legacy), "utf8");
+    const hash = createHash("sha256").update(bytes).digest("hex");
+    f.blobs.set("request-blob", bytes);
+    f.action.requestArtifactHash = hash;
+    f.saved.requestArtifact.hash = hash;
+    f.action.purpose = null;
+    f.action.approvalEffectId = null;
+    return bytes;
+  }
+
+  it("keeps a legacy task readable but never upgrades its prepared action for dispatch", async () => {
+    const f = researchFixture("continue");
+    const bytes = useLegacyRequest(f);
+    await expect(
+      tools.resolveRecruitingResearchTool(
+        f.deps,
+        f.trusted,
+        { operation: "status", taskId: "task" },
+        context,
+      ),
+    ).resolves.toMatchObject({ args: { task_id: "provider-original" } });
+    await expect(f.admit()).rejects.toThrow();
+    await expect(
+      tools.resolveRecruitingResearchTool(
+        f.deps,
+        f.trusted,
+        { operation: "start", actionId: "action" },
+        context,
+      ),
+    ).rejects.toThrow();
+    await expect(
+      tools.prepareRecruitingResearchTool(
+        f.deps,
+        f.trusted,
+        { ...continuationInput, operation: "continue", taskId: "task" },
+        context,
+        vi.fn(),
+      ),
+    ).rejects.toThrow();
+    expect(f.blobs.get("request-blob")).toEqual(bytes);
+    expect(f.artifacts.put).not.toHaveBeenCalled();
+    expect(prepareRecruitingResearchAction).not.toHaveBeenCalled();
+    expect(admitRecruitingResearchAction).not.toHaveBeenCalled();
+  });
+
+  it("records rows from a legacy task without rewriting or assigning its mutation metadata", async () => {
+    const f = researchFixture("continue");
+    const bytes = useLegacyRequest(f);
+    const call = {
+      ...f.call,
+      tool: "mcp__source__get_rows",
+      route: { ...f.call.route, toolName: "get_rows" },
+      args: { task_id: "provider-original", cursor: "legacy-page" },
+    };
+    const request = boundDirectApprovalRequest(call.route, call.args, "__rakazoCatalogTool");
+    const admission = await tools.admitRecruitingResearchCall(f.deps, f.trusted, call, context, {
+      taskId: "task",
+      frozenRequest: request,
+    });
+    const providerResult = {
+      structuredContent: { rows: [{ value: "original raw report value" }], next_cursor: null },
+    };
+    await tools.completeRecruitingResearchCall(
+      f.deps,
+      f.trusted,
+      admission!,
+      providerResult,
+      context,
+      { effectId: "legacy-read-effect", request },
+    );
+    const snapshot = JSON.parse(Buffer.from(f.uploads[0]!.bytes).toString("utf8"));
+    expect(snapshot.providerResult).toEqual(providerResult);
+    expect(f.action).toMatchObject({ purpose: null, approvalEffectId: null });
+    expect(f.blobs.get("request-blob")).toEqual(bytes);
+    expect(recordRecruitingResearchObservation).toHaveBeenCalledOnce();
+    expect(reconcileRecruitingResearchAction).not.toHaveBeenCalled();
+    expect(admitRecruitingResearchAction).not.toHaveBeenCalled();
   });
 
   it.each(["create", "continue"] as const)(
@@ -1014,6 +1224,8 @@ describe("native research preparation", () => {
         actionId: "action",
         frozenRequest: f.frozenRequest,
         requestArtifact: { artifactId: "request-artifact", sha256: f.request.sha256 },
+        purpose: "calibration",
+        approvalEffectId: "g1-approval",
       }),
     );
   });

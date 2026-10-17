@@ -99,6 +99,9 @@ async function frozenResearchRequest(
     action.requestArtifactHash,
   );
   if (
+    manifest.version !== 2 ||
+    manifest.purpose !== action.purpose ||
+    manifest.approvalEffectId !== action.approvalEffectId ||
     manifest.roleId !== task.roleId ||
     manifest.roleRevisionId !== action.roleRevisionId ||
     manifest.operation !== action.kind ||
@@ -143,6 +146,8 @@ export async function prepareRecruitingResearchTool(
     const manifest = await frozenResearchRequest(deps, cached, context);
     if (
       manifest.instructions !== input.instructions ||
+      manifest.purpose !== input.purpose ||
+      manifest.approvalEffectId !== input.approvalEffectId ||
       manifest.output !== input.output ||
       manifest.recallScope !== input.recallScope ||
       manifest.roleRevision !== input.expectedRoleRevision ||
@@ -181,6 +186,8 @@ export async function prepareRecruitingResearchTool(
     context: adopted,
     source,
     intent: input.intent,
+    purpose: input.purpose,
+    approvalEffectId: input.approvalEffectId,
     route,
     instructions: input.instructions,
     output: input.output,
@@ -202,6 +209,8 @@ export async function prepareRecruitingResearchTool(
     sourceMessageId: source.anchor.messageId,
     intent: input.intent,
     expectedRoleRevision: input.expectedRoleRevision,
+    purpose: input.purpose,
+    approvalEffectId: input.approvalEffectId,
     mcpServerId: server.id,
     serverRevision: server.revision,
     ...(input.operation === "continue" ? { taskId: input.taskId } : {}),
@@ -302,7 +311,7 @@ type ResearchDispatchActor = ResearchActor & { leaseOwner: string; leaseFence: n
 type ResearchMutationAdmission = Awaited<ReturnType<typeof admitRecruitingResearchAction>> & {
   kind: "mutation";
   operation: "create" | "continue";
-  manifest: RecruitingResearchRequest;
+  manifest: Extract<RecruitingResearchRequest, { version: 2 }>;
 };
 type ResearchReadAdmission = {
   kind: "read";
@@ -494,7 +503,10 @@ export async function admitRecruitingResearchCall(
         },
         select: { id: true },
       });
-  const matches: { saved: ResearchContext; manifest: RecruitingResearchRequest }[] = [];
+  const matches: {
+    saved: ResearchContext;
+    manifest: Extract<RecruitingResearchRequest, { version: 2 }>;
+  }[] = [];
   for (const candidate of candidates) {
     const saved = await readRecruitingResearchContext(deps.prisma, trusted.actor, {
       runId: trusted.runId,
@@ -523,6 +535,8 @@ export async function admitRecruitingResearchCall(
     leaseOwner: trusted.leaseOwner,
     leaseFence: trusted.leaseFence,
     actionId: saved.action!.id,
+    purpose: manifest.purpose,
+    approvalEffectId: manifest.approvalEffectId,
     requestArtifact: {
       artifactId: saved.action!.requestArtifactId,
       sha256: saved.action!.requestArtifactHash,

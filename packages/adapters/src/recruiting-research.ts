@@ -2,12 +2,14 @@ import { createHash } from "node:crypto";
 import type {
   RecruitingHumanIntent,
   RecruitingResearchObservation,
+  RecruitingResearchPurpose,
   RecruitingSourceRef,
 } from "@rakazo/contracts";
 import {
   RecruitingArtifactRefSchema,
   RecruitingHumanIntentSchema,
   RecruitingId,
+  RecruitingResearchPurposeSchema,
   RecruitingSourceRefSchema,
 } from "@rakazo/contracts";
 import { requireRecruitingBriefConfirmation } from "@rakazo/core";
@@ -24,7 +26,6 @@ const Route = z.strictObject({
   catalogGroup: Text.optional(),
 });
 const Request = {
-  version: z.literal(1),
   roleId: RecruitingId,
   roleRevisionId: RecruitingId,
   roleRevision: z.number().int().positive(),
@@ -37,15 +38,33 @@ const Request = {
   recallScope: Text.nullable(),
   route: Route,
 };
+const BoundRequest = {
+  ...Request,
+  version: z.literal(2),
+  purpose: RecruitingResearchPurposeSchema,
+  approvalEffectId: RecruitingId,
+};
 export const RecruitingResearchRequestSchema = z
-  .discriminatedUnion("operation", [
+  .union([
     z.strictObject({
       ...Request,
+      version: z.literal(1),
       operation: z.literal("create"),
       args: z.strictObject({ prompt: Text }),
     }),
     z.strictObject({
       ...Request,
+      version: z.literal(1),
+      operation: z.literal("continue"),
+      args: z.strictObject({ task_id: RecruitingId, message: Text }),
+    }),
+    z.strictObject({
+      ...BoundRequest,
+      operation: z.literal("create"),
+      args: z.strictObject({ prompt: Text }),
+    }),
+    z.strictObject({
+      ...BoundRequest,
       operation: z.literal("continue"),
       args: z.strictObject({ task_id: RecruitingId, message: Text }),
     }),
@@ -73,6 +92,8 @@ type BuildRequest = {
   context: LoadedRecruitingRunContext;
   source: RecruitingSourceRef;
   intent: RecruitingHumanIntent;
+  purpose: RecruitingResearchPurpose;
+  approvalEffectId: string;
   route: RecruitingResearchRoute;
   instructions: string;
   output: string;
@@ -107,9 +128,12 @@ export function buildRecruitingResearchRequest(input: BuildRequest): {
     instructions: input.instructions,
     output: input.output,
     recallScope: input.recallScope,
+    purpose: input.purpose,
   });
   const manifest = RecruitingResearchRequestSchema.parse({
-    version: 1,
+    version: 2,
+    purpose: input.purpose,
+    approvalEffectId: input.approvalEffectId,
     operation: input.operation,
     roleId: role.id,
     roleRevisionId: revision.id,
@@ -147,9 +171,11 @@ function researchText(input: {
   instructions: string;
   output: string;
   recallScope: string | null;
+  purpose?: RecruitingResearchPurpose;
 }): string {
   return [
     input.contextText,
+    ...(input.purpose === undefined ? [] : [`Research purpose:\n${input.purpose}`]),
     `Research instructions:\n${input.instructions}`,
     `Requested output:\n${input.output}`,
     ...(input.recallScope === null ? [] : [`Recall scope for this round:\n${input.recallScope}`]),

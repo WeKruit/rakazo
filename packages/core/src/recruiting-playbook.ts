@@ -125,7 +125,7 @@ export type RecruitingGateReceipt = {
   approvedByUserId: string;
   approvedAt: string;
 };
-function calibrationIdentity(link: string): string | null {
+export function recruitingCalibrationIdentity(link: string): string | null {
   try {
     const url = new URL(link);
     if (
@@ -134,7 +134,11 @@ function calibrationIdentity(link: string): string | null {
       !url.pathname.startsWith("/in/")
     )
       return null;
-    return url.pathname.replace(/\/+$/, "").toLowerCase();
+    const segments = url.pathname.replace(/\/$/, "").split("/");
+    if (segments.length !== 3) return null;
+    const profile = decodeURIComponent(segments[2]!);
+    if (!profile.trim() || profile.includes("/")) return null;
+    return `/in/${profile.toLowerCase()}`;
   } catch {
     return null;
   }
@@ -190,11 +194,12 @@ export function requireRecruitingPlaybookGate(input: {
     input.gate === "G2" &&
     (input.calibration?.length !== 10 ||
       new Set(input.calibration.map((profile) => profile.candidateKey)).size !== 10 ||
-      new Set(input.calibration.map((profile) => calibrationIdentity(profile.linkedinUrl))).size !==
-        10 ||
+      new Set(
+        input.calibration.map((profile) => recruitingCalibrationIdentity(profile.linkedinUrl)),
+      ).size !== 10 ||
       input.calibration.some(
         (profile) =>
-          !calibrationIdentity(profile.linkedinUrl) || !evidenceLink(profile.evidenceUrl),
+          !recruitingCalibrationIdentity(profile.linkedinUrl) || !evidenceLink(profile.evidenceUrl),
       ))
   )
     throw new RecruitingPlaybookValidationError(
