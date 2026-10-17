@@ -356,7 +356,10 @@ import {
   retainRecruitingWebMaterial,
 } from "./recruiting-assessment.js";
 import type { LoadedRecruitingRunContext } from "./recruiting-context.js";
-import { loadRecruitingRunContext } from "./recruiting-context.js";
+import {
+  loadRecruitingRunContext,
+  RECRUITING_PRESENTATION_INSTRUCTION,
+} from "./recruiting-context.js";
 import type { RecruitingFeedbackResult } from "./recruiting-feedback.js";
 import {
   executeRecruitingFeedback,
@@ -9564,6 +9567,7 @@ export function userTurnInstructions(parts: {
 }): (string | undefined)[] {
   return [
     parts.botInstructions,
+    RECRUITING_PRESENTATION_INSTRUCTION,
     parts.historyRetrievalEnabled &&
     builtinOffered(parts.disabledBuiltinTools, "search_history") &&
     builtinOffered(parts.disabledBuiltinTools, "read_history")

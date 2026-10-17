@@ -26,6 +26,7 @@ import {
 } from "./executor.js";
 import { UnavailableModelForAuthError } from "./model-selection.js";
 import { RetiredModelCredentialError, serializeModelSecret } from "./pi-oauth.js";
+import { RECRUITING_PRESENTATION_INSTRUCTION } from "./recruiting-context.js";
 
 describe("bot tool permissions", () => {
   it("offers feedback with native and semantic memory while respecting channel and tool permissions", () => {
@@ -1126,8 +1127,12 @@ describe("userTurnInstructions", () => {
       taughtSkillsLine: "Taught skills",
     }).filter(Boolean);
 
+    expect(instructions.join("\n")).toContain(
+      "Internal routing identifiers belong only in tool arguments",
+    );
     expect(instructions).toEqual([
       "Bot instructions",
+      RECRUITING_PRESENTATION_INSTRUCTION,
       computerLine,
       "This entire computer workspace is your private home.",
       "Agent environment",
@@ -1163,6 +1168,7 @@ describe("userTurnInstructions", () => {
 
     expect(instructions).toEqual([
       "Bot instructions",
+      RECRUITING_PRESENTATION_INSTRUCTION,
       computerLine,
       "This entire computer workspace is your private home.",
       ...stableMiddle,
@@ -1191,6 +1197,7 @@ describe("userTurnInstructions", () => {
 
     expect(instructions).toEqual([
       "Bot instructions",
+      RECRUITING_PRESENTATION_INSTRUCTION,
       computerLine,
       "Catalog guidance",
       "This entire computer workspace is your private home.",

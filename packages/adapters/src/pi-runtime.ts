@@ -85,6 +85,7 @@ import {
 import type { PiSessionHandle, PiSessionRecorder } from "./pi-session.js";
 import { PiJsonlSessionRecorder } from "./pi-session.js";
 import { observedPiStream } from "./pi-usage.js";
+import { RECRUITING_PRESENTATION_INSTRUCTION } from "./recruiting-context.js";
 import type { RuntimeContextDecision } from "./runtime-context.js";
 import { createRuntimeContextPolicy, VERBATIM_TOOL_RESULTS } from "./runtime-context.js";
 import type { FinishedShellCommand } from "./shell-command-stream.js";
@@ -1820,6 +1821,7 @@ async function executeSubagent(host: ToolHost, executionId: string, args: Record
     initialState: {
       systemPrompt: [
         `You are a Rakazo subagent named "${name}".`,
+        RECRUITING_PRESENTATION_INSTRUCTION,
         "You run inside the parent bot's turn — you are not a separate bot chat.",
         "Complete the task and return a concise result. Do not spawn bots or further subagents.",
         extra,
