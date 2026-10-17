@@ -936,6 +936,10 @@ msgstr "Candidate CRM"
 msgid "Candidate facts"
 msgstr "Candidate facts"
 
+#: src/pages/Shell.tsx
+msgid "Candidate feedback"
+msgstr "Candidate feedback"
+
 #: src/pages/RecruitingPanel.tsx
 msgid "Candidate question"
 msgstr "Candidate question"
@@ -1053,6 +1057,10 @@ msgstr "Choose a bot…"
 msgid "Choose a new password"
 msgstr "Choose a new password"
 
+#: src/pages/RecruitingPanel.tsx
+msgid "Choose feedback"
+msgstr "Choose feedback"
+
 #: src/pages/shell/avatar-studio-popover.tsx
 msgid "Choose file"
 msgstr "Choose file"
@@ -1095,6 +1103,7 @@ msgstr "Client secret"
 #: src/pages/KnowledgeSection.tsx
 #: src/pages/MessagingSettingsOverlay.tsx
 #: src/pages/PeerMessagesOverlay.tsx
+#: src/pages/RecruitingPanel.tsx
 #: src/pages/RoutineEditor.tsx
 #: src/pages/shell/avatar-studio-popover.tsx
 #: src/pages/WindowChrome.tsx
@@ -1462,6 +1471,10 @@ msgstr "Could not complete OAuth"
 #: src/components/DesktopUpdates.tsx
 msgid "Could not complete the update. Try again."
 msgstr "Could not complete the update. Try again."
+
+#: src/pages/RecruitingPanel.tsx
+msgid "Could not confirm feedback. Try again."
+msgstr "Could not confirm feedback. Try again."
 
 #: src/components/integrations/IntegrationSetup.tsx
 #: src/pages/PluginsOverlay.tsx
@@ -2473,6 +2486,14 @@ msgstr "Failed."
 msgid "Failure handling"
 msgstr "Failure handling"
 
+#: src/pages/RecruitingPanel.tsx
+msgid "Feedback"
+msgstr "Feedback"
+
+#: src/pages/RecruitingPanel.tsx
+msgid "Feedback sent"
+msgstr "Feedback sent"
+
 #: src/components/computer/FilesApp.tsx
 msgid "File is too large to upload."
 msgstr "File is too large to upload."
@@ -2575,6 +2596,15 @@ msgstr "Getting ready"
 #: src/pages/RoutineEditor.tsx
 msgid "Git event"
 msgstr "Git event"
+
+#: src/pages/RecruitingPanel.tsx
+msgid "Give feedback"
+msgstr "Give feedback"
+
+#: src/pages/RecruitingPanel.tsx
+#: src/pages/Shell.tsx
+msgid "Good example"
+msgstr "Good example"
 
 #: src/pages/MessagingSettingsOverlay.tsx
 #: src/pages/Shell.tsx
@@ -3543,6 +3573,11 @@ msgid "NOT"
 msgstr "NOT"
 
 #: src/pages/RecruitingPanel.tsx
+#: src/pages/Shell.tsx
+msgid "Not a fit"
+msgstr "Not a fit"
+
+#: src/pages/RecruitingPanel.tsx
 msgid "Not accepted"
 msgstr "Not accepted"
 
@@ -3947,6 +3982,10 @@ msgstr "Reactions"
 msgid "Read replies aloud"
 msgstr "Read replies aloud"
 
+#: src/pages/RecruitingPanel.tsx
+msgid "Reason"
+msgstr "Reason"
+
 #: src/pages/ModelSettingsOverlay.tsx
 #: src/pages/Onboarding.tsx
 msgid "Reasoning effort"
@@ -4345,6 +4384,11 @@ msgstr "Role revision"
 msgid "Role sources"
 msgstr "Role sources"
 
+#. placeholder {0}: candidate.roleVersion
+#: src/pages/Shell.tsx
+msgid "Role version: {0}"
+msgstr "Role version: {0}"
+
 #. placeholder {0}: candidate.roleTitle
 #: src/pages/Shell.tsx
 msgid "Role: {0}"
@@ -4625,6 +4669,10 @@ msgstr "Send answer"
 msgid "Send deletion code"
 msgstr "Send deletion code"
 
+#: src/pages/RecruitingPanel.tsx
+msgid "Send feedback"
+msgstr "Send feedback"
+
 #: src/pages/Auth.tsx
 msgid "Send reset link"
 msgstr "Send reset link"
@@ -4634,6 +4682,7 @@ msgid "Send with Enter"
 msgstr "Send with Enter"
 
 #: src/components/AskCard.tsx
+#: src/pages/RecruitingPanel.tsx
 msgid "Sending…"
 msgstr "Sending…"
 
@@ -4797,6 +4846,11 @@ msgstr "Skill {0}"
 msgid "Skip"
 msgstr "Skip"
 
+#: src/pages/RecruitingPanel.tsx
+#: src/pages/Shell.tsx
+msgid "Skip for now"
+msgstr "Skip for now"
+
 #: src/lib/localized-provider-hint.ts
 msgid "Skip or deploy key"
 msgstr "Skip or deploy key"
@@ -4820,6 +4874,7 @@ msgstr "Software update"
 
 #: src/App.tsx
 #: src/lib/user-error.ts
+#: src/pages/Shell.tsx
 msgid "Something went wrong. Try again."
 msgstr "Something went wrong. Try again."
 
@@ -4949,8 +5004,8 @@ msgid "Stream replies"
 msgstr "Stream replies"
 
 #: src/pages/Shell.tsx
-msgid "subagent"
-msgstr "subagent"
+#~ msgid "subagent"
+#~ msgstr "subagent"
 
 #: src/pages/ModelSettingsOverlay.tsx
 #: src/pages/Onboarding.tsx
@@ -5573,6 +5628,7 @@ msgstr "Won't do"
 
 #: src/lib/roster-status.ts
 #: src/pages/Auth.tsx
+#: src/pages/Shell.tsx
 msgid "Working…"
 msgstr "Working…"
 

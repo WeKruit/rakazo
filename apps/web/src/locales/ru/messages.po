@@ -936,6 +936,10 @@ msgstr ""
 msgid "Candidate facts"
 msgstr ""
 
+#: src/pages/Shell.tsx
+msgid "Candidate feedback"
+msgstr ""
+
 #: src/pages/RecruitingPanel.tsx
 msgid "Candidate question"
 msgstr ""
@@ -1053,6 +1057,10 @@ msgstr "Выбрать бота…"
 msgid "Choose a new password"
 msgstr "Выберите новый пароль"
 
+#: src/pages/RecruitingPanel.tsx
+msgid "Choose feedback"
+msgstr ""
+
 #: src/pages/shell/avatar-studio-popover.tsx
 msgid "Choose file"
 msgstr "Выбрать файл"
@@ -1095,6 +1103,7 @@ msgstr "Секрет клиента"
 #: src/pages/KnowledgeSection.tsx
 #: src/pages/MessagingSettingsOverlay.tsx
 #: src/pages/PeerMessagesOverlay.tsx
+#: src/pages/RecruitingPanel.tsx
 #: src/pages/RoutineEditor.tsx
 #: src/pages/shell/avatar-studio-popover.tsx
 #: src/pages/WindowChrome.tsx
@@ -1462,6 +1471,10 @@ msgstr "Не удалось завершить OAuth"
 #: src/components/DesktopUpdates.tsx
 msgid "Could not complete the update. Try again."
 msgstr "Не удалось завершить обновление. Попробуйте снова."
+
+#: src/pages/RecruitingPanel.tsx
+msgid "Could not confirm feedback. Try again."
+msgstr ""
 
 #: src/components/integrations/IntegrationSetup.tsx
 #: src/pages/PluginsOverlay.tsx
@@ -2473,6 +2486,14 @@ msgstr "Неуспешный."
 msgid "Failure handling"
 msgstr "Обработка сбоев"
 
+#: src/pages/RecruitingPanel.tsx
+msgid "Feedback"
+msgstr ""
+
+#: src/pages/RecruitingPanel.tsx
+msgid "Feedback sent"
+msgstr ""
+
 #: src/components/computer/FilesApp.tsx
 msgid "File is too large to upload."
 msgstr ""
@@ -2575,6 +2596,15 @@ msgstr "Подготовка"
 #: src/pages/RoutineEditor.tsx
 msgid "Git event"
 msgstr "Git-событие"
+
+#: src/pages/RecruitingPanel.tsx
+msgid "Give feedback"
+msgstr ""
+
+#: src/pages/RecruitingPanel.tsx
+#: src/pages/Shell.tsx
+msgid "Good example"
+msgstr ""
 
 #: src/pages/MessagingSettingsOverlay.tsx
 #: src/pages/Shell.tsx
@@ -3543,6 +3573,11 @@ msgid "NOT"
 msgstr ""
 
 #: src/pages/RecruitingPanel.tsx
+#: src/pages/Shell.tsx
+msgid "Not a fit"
+msgstr ""
+
+#: src/pages/RecruitingPanel.tsx
 msgid "Not accepted"
 msgstr ""
 
@@ -3947,6 +3982,10 @@ msgstr ""
 msgid "Read replies aloud"
 msgstr "Читать ответы вслух"
 
+#: src/pages/RecruitingPanel.tsx
+msgid "Reason"
+msgstr ""
+
 #: src/pages/ModelSettingsOverlay.tsx
 #: src/pages/Onboarding.tsx
 msgid "Reasoning effort"
@@ -4345,6 +4384,11 @@ msgstr ""
 msgid "Role sources"
 msgstr ""
 
+#. placeholder {0}: candidate.roleVersion
+#: src/pages/Shell.tsx
+msgid "Role version: {0}"
+msgstr ""
+
 #. placeholder {0}: candidate.roleTitle
 #: src/pages/Shell.tsx
 msgid "Role: {0}"
@@ -4625,6 +4669,10 @@ msgstr "Отправить ответ"
 msgid "Send deletion code"
 msgstr "Отправить код удаления"
 
+#: src/pages/RecruitingPanel.tsx
+msgid "Send feedback"
+msgstr ""
+
 #: src/pages/Auth.tsx
 msgid "Send reset link"
 msgstr "Отправить ссылку для сброса"
@@ -4634,6 +4682,7 @@ msgid "Send with Enter"
 msgstr "Отправлять по Enter"
 
 #: src/components/AskCard.tsx
+#: src/pages/RecruitingPanel.tsx
 msgid "Sending…"
 msgstr "Отправка…"
 
@@ -4797,6 +4846,11 @@ msgstr "Навык {0}"
 msgid "Skip"
 msgstr "Пропустить"
 
+#: src/pages/RecruitingPanel.tsx
+#: src/pages/Shell.tsx
+msgid "Skip for now"
+msgstr ""
+
 #: src/lib/localized-provider-hint.ts
 msgid "Skip or deploy key"
 msgstr "Пропустить или добавить ключ"
@@ -4820,6 +4874,7 @@ msgstr "Обновление программного обеспечения"
 
 #: src/App.tsx
 #: src/lib/user-error.ts
+#: src/pages/Shell.tsx
 msgid "Something went wrong. Try again."
 msgstr "Что-то пошло не так. Попробуйте ещё раз."
 
@@ -4949,8 +5004,8 @@ msgid "Stream replies"
 msgstr "Потоковые ответы"
 
 #: src/pages/Shell.tsx
-msgid "subagent"
-msgstr "субагент"
+#~ msgid "subagent"
+#~ msgstr "субагент"
 
 #: src/pages/ModelSettingsOverlay.tsx
 #: src/pages/Onboarding.tsx
@@ -5573,6 +5628,7 @@ msgstr ""
 
 #: src/lib/roster-status.ts
 #: src/pages/Auth.tsx
+#: src/pages/Shell.tsx
 msgid "Working…"
 msgstr "Выполняется…"
 

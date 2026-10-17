@@ -936,6 +936,10 @@ msgstr ""
 msgid "Candidate facts"
 msgstr ""
 
+#: src/pages/Shell.tsx
+msgid "Candidate feedback"
+msgstr ""
+
 #: src/pages/RecruitingPanel.tsx
 msgid "Candidate question"
 msgstr ""
@@ -1053,6 +1057,10 @@ msgstr "选择 Bot…"
 msgid "Choose a new password"
 msgstr "设置新密码"
 
+#: src/pages/RecruitingPanel.tsx
+msgid "Choose feedback"
+msgstr ""
+
 #: src/pages/shell/avatar-studio-popover.tsx
 msgid "Choose file"
 msgstr "选择文件"
@@ -1095,6 +1103,7 @@ msgstr ""
 #: src/pages/KnowledgeSection.tsx
 #: src/pages/MessagingSettingsOverlay.tsx
 #: src/pages/PeerMessagesOverlay.tsx
+#: src/pages/RecruitingPanel.tsx
 #: src/pages/RoutineEditor.tsx
 #: src/pages/shell/avatar-studio-popover.tsx
 #: src/pages/WindowChrome.tsx
@@ -1461,6 +1470,10 @@ msgstr "无法完成 OAuth"
 
 #: src/components/DesktopUpdates.tsx
 msgid "Could not complete the update. Try again."
+msgstr ""
+
+#: src/pages/RecruitingPanel.tsx
+msgid "Could not confirm feedback. Try again."
 msgstr ""
 
 #: src/components/integrations/IntegrationSetup.tsx
@@ -2473,6 +2486,14 @@ msgstr "失败。"
 msgid "Failure handling"
 msgstr "失败处理"
 
+#: src/pages/RecruitingPanel.tsx
+msgid "Feedback"
+msgstr ""
+
+#: src/pages/RecruitingPanel.tsx
+msgid "Feedback sent"
+msgstr ""
+
 #: src/components/computer/FilesApp.tsx
 msgid "File is too large to upload."
 msgstr ""
@@ -2575,6 +2596,15 @@ msgstr ""
 #: src/pages/RoutineEditor.tsx
 msgid "Git event"
 msgstr "Git 事件"
+
+#: src/pages/RecruitingPanel.tsx
+msgid "Give feedback"
+msgstr ""
+
+#: src/pages/RecruitingPanel.tsx
+#: src/pages/Shell.tsx
+msgid "Good example"
+msgstr ""
 
 #: src/pages/MessagingSettingsOverlay.tsx
 #: src/pages/Shell.tsx
@@ -3543,6 +3573,11 @@ msgid "NOT"
 msgstr ""
 
 #: src/pages/RecruitingPanel.tsx
+#: src/pages/Shell.tsx
+msgid "Not a fit"
+msgstr ""
+
+#: src/pages/RecruitingPanel.tsx
 msgid "Not accepted"
 msgstr ""
 
@@ -3947,6 +3982,10 @@ msgstr "表情回应"
 msgid "Read replies aloud"
 msgstr "朗读回复"
 
+#: src/pages/RecruitingPanel.tsx
+msgid "Reason"
+msgstr ""
+
 #: src/pages/ModelSettingsOverlay.tsx
 #: src/pages/Onboarding.tsx
 msgid "Reasoning effort"
@@ -4345,6 +4384,11 @@ msgstr ""
 msgid "Role sources"
 msgstr ""
 
+#. placeholder {0}: candidate.roleVersion
+#: src/pages/Shell.tsx
+msgid "Role version: {0}"
+msgstr ""
+
 #. placeholder {0}: candidate.roleTitle
 #: src/pages/Shell.tsx
 msgid "Role: {0}"
@@ -4625,6 +4669,10 @@ msgstr "发送回答"
 msgid "Send deletion code"
 msgstr "发送删除验证码"
 
+#: src/pages/RecruitingPanel.tsx
+msgid "Send feedback"
+msgstr ""
+
 #: src/pages/Auth.tsx
 msgid "Send reset link"
 msgstr "发送重置链接"
@@ -4634,6 +4682,7 @@ msgid "Send with Enter"
 msgstr "按 Enter 发送"
 
 #: src/components/AskCard.tsx
+#: src/pages/RecruitingPanel.tsx
 msgid "Sending…"
 msgstr "正在发送…"
 
@@ -4797,6 +4846,11 @@ msgstr "技能 {0}"
 msgid "Skip"
 msgstr "跳过"
 
+#: src/pages/RecruitingPanel.tsx
+#: src/pages/Shell.tsx
+msgid "Skip for now"
+msgstr ""
+
 #: src/lib/localized-provider-hint.ts
 msgid "Skip or deploy key"
 msgstr "跳过或使用部署密钥"
@@ -4820,6 +4874,7 @@ msgstr "软件更新"
 
 #: src/App.tsx
 #: src/lib/user-error.ts
+#: src/pages/Shell.tsx
 msgid "Something went wrong. Try again."
 msgstr "出了点问题。请重试。"
 
@@ -4949,8 +5004,8 @@ msgid "Stream replies"
 msgstr "流式回复"
 
 #: src/pages/Shell.tsx
-msgid "subagent"
-msgstr "子 Agent"
+#~ msgid "subagent"
+#~ msgstr "子 Agent"
 
 #: src/pages/ModelSettingsOverlay.tsx
 #: src/pages/Onboarding.tsx
@@ -5573,6 +5628,7 @@ msgstr ""
 
 #: src/lib/roster-status.ts
 #: src/pages/Auth.tsx
+#: src/pages/Shell.tsx
 msgid "Working…"
 msgstr "处理中…"
 
