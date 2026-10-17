@@ -6339,7 +6339,7 @@ export const Composer = memo(function Composer({
             autoComplete="off"
             dir="auto"
             rows={1}
-            className="rk-scroll max-h-25 min-h-[24px] min-w-[8rem] flex-1 resize-none overflow-y-auto bg-transparent py-0.5 text-[15.5px] leading-6 text-foreground outline-none placeholder:text-muted-foreground disabled:opacity-40"
+            className="rk-scroll max-h-25 min-h-[24px] min-w-[8rem] flex-1 resize-none overflow-y-auto bg-transparent py-0.5 text-base leading-6 text-foreground outline-none placeholder:text-muted-foreground disabled:opacity-40"
           />
         </div>
         <div
@@ -6797,7 +6797,7 @@ const MessageView = memo(function MessageView({
         <div className="flex w-fit max-w-full justify-start [@media(hover:none)]:w-full">
           <div
             data-testid="message-bot-bubble"
-            className="max-w-full space-y-2.5 rounded-[20px] bg-muted px-[18px] py-3 text-[15.5px] leading-[1.5] text-foreground/90"
+            className="max-w-full space-y-2.5 rounded-[20px] bg-muted px-[18px] py-3 text-base leading-relaxed text-foreground"
             dir="auto"
           >
             {visibleNarrationBlocks.map((block, i) => {
@@ -7076,7 +7076,7 @@ const MessageView = memo(function MessageView({
               <div
                 data-testid="message-user-bubble"
                 data-quote-message-id={quoteMessageId}
-                className="max-w-full whitespace-pre-wrap wrap-anywhere rounded-[20px] bg-chat-user px-[18px] py-3 text-[15.5px] leading-[1.45] text-chat-user-foreground"
+                className="max-w-full whitespace-pre-wrap wrap-anywhere rounded-[20px] bg-chat-user px-[18px] py-3 text-base leading-relaxed text-chat-user-foreground"
                 dir="auto"
               >
                 <LinkifiedText>{block.text}</LinkifiedText>
@@ -7092,7 +7092,7 @@ const MessageView = memo(function MessageView({
             >
               <div
                 data-testid="message-bot-bubble"
-                className="max-w-full rounded-[20px] bg-muted px-[18px] py-3 text-[15.5px] leading-[1.5] text-foreground/90"
+                className="max-w-full rounded-[20px] bg-muted px-[18px] py-3 text-base leading-relaxed text-foreground"
                 dir="auto"
               >
                 <div data-quote-message-id={quoteMessageId}>
