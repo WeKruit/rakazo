@@ -138,7 +138,7 @@ export function AskCard({
             <Button
               key={action.id}
               variant={approvalActions && action.id === "allow" ? "default" : "outline"}
-              className="h-auto w-full justify-start whitespace-normal px-3.5 py-3 text-start font-normal"
+              className="h-auto w-full justify-start whitespace-normal px-3.5 py-3 text-start text-base font-normal"
               disabled={submitting}
               onClick={() => void submitAnswer(action.id)}
             >
@@ -200,6 +200,7 @@ export function AskCard({
         >
           <Textarea
             aria-label={t`Answer`}
+            className="text-base leading-relaxed md:text-base"
             value={answer}
             disabled={submitting}
             onChange={(event) => setAnswer(event.target.value)}

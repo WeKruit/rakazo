@@ -12,6 +12,7 @@ import { canReactToThreadMessage, MESSAGE_REACTIONS } from "@rakazo/contracts";
 import type { SlashActionId, ThreadItem } from "@rakazo/core";
 import {
   abortableDelay,
+  answerableAskMessageIds,
   appendNewerThreadPage,
   attachmentsForThread,
   buildComposerMentionOptions,
@@ -24,7 +25,6 @@ import {
   isPeerReceiptBlocks,
   isRunTerminalEvent,
   isSecretAskBlock,
-  latestAnswerableAskMessageId,
   leaveThreadWindow,
   openThreadWindow,
   plainTextFromMarkdown,
@@ -1896,7 +1896,7 @@ function Thread({ sessionEpoch }: { sessionEpoch: number }) {
     );
   }
 
-  const answerableAskMessageId = latestAnswerableAskMessageId(snap);
+  const answerableAskIds = answerableAskMessageIds(snap);
   const runError =
     snap?.run?.status === "failed" && snap.run.error ? t("Something went wrong. Try again.") : null;
   const separatorIds = useMemo(() => timeSeparatorIds(visibleMessages), [visibleMessages]);
@@ -2114,7 +2114,7 @@ function Thread({ sessionEpoch }: { sessionEpoch: number }) {
           members={snap?.members}
           readOnly={readOnly}
           onCall={onCall}
-          canAnswer={!readOnly && message.id === answerableAskMessageId}
+          canAnswer={!readOnly && answerableAskIds.includes(message.id)}
           highlighted={highlightedMessageId === message.id}
           separator={separatorIds.has(message.id)}
           replyAuthor={replyAuthor}
@@ -2146,7 +2146,7 @@ function Thread({ sessionEpoch }: { sessionEpoch: number }) {
       rowActions,
       readOnly,
       onCall,
-      answerableAskMessageId,
+      answerableAskIds,
       highlightedMessageId,
       separatorIds,
       windowWidth,
@@ -3515,6 +3515,7 @@ const MessageBubble = memo(function MessageBubble({
           ) : canAnswer && onAnswer ? (
             <AskActions
               actions={askBlock.actions}
+              allowCustomAnswer={!isApprovalAskBlock(askBlock) && !isSecretAskBlock(askBlock)}
               accessibilityActions={actionProps.accessibilityActions}
               onAccessibilityAction={actionProps.onAccessibilityAction}
               onAnswer={(answer) => onAnswer(message, answer)}

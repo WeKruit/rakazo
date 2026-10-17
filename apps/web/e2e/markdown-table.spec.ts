@@ -28,6 +28,13 @@ test("markdown tables render as an interactive card", async ({ page }, testInfo)
   await expect(card.getByRole("button", { name: "Copy rows" })).toBeVisible();
   await expect(card.getByRole("button", { name: "Download CSV" })).toBeVisible();
   await expect(card.getByRole("button", { name: "Expand table" })).toBeVisible();
+  const bodyFont = await page.locator("body").evaluate((element) => ({
+    family: getComputedStyle(element).fontFamily,
+    size: getComputedStyle(element).fontSize,
+  }));
+  const inlineCell = card.locator("tbody td").nth(1);
+  await expect(inlineCell).toHaveCSS("font-family", bodyFont.family);
+  await expect(inlineCell).toHaveCSS("font-size", bodyFont.size);
 
   const toolbar = card.locator(":scope > .rk-table-head");
   const headers = card.locator("thead");
@@ -87,6 +94,9 @@ test("markdown tables render as an interactive card", async ({ page }, testInfo)
   await card.getByRole("button", { name: "Expand table" }).click();
   const dialog = page.getByRole("dialog", { name: "Table" });
   await expect(dialog.locator("tbody tr")).toHaveCount(10);
+  const dialogCell = dialog.locator("tbody td").nth(1);
+  await expect(dialogCell).toHaveCSS("font-family", bodyFont.family);
+  await expect(dialogCell).toHaveCSS("font-size", bodyFont.size);
   // Focus moves to the close control, and cells keep their card styling even
   // though the Base UI dialog portal sits outside .rk-chat-markdown.
   await expect(dialog.getByRole("button", { name: "Close table" })).toBeFocused();

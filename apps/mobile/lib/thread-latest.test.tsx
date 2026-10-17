@@ -3,14 +3,17 @@
 import { readFileSync } from "node:fs";
 import type { ThreadScrollState } from "@rakazo/core";
 import {
+  answerableAskMessageIds,
   appendNewerThreadPage,
   leaveThreadWindow,
   openThreadWindow,
   reconcileThreadScrollState,
 } from "@rakazo/core";
-import { act, useRef, useState } from "react";
+import React, { act, useCallback, useRef, useState } from "react";
 import { createRoot } from "react-dom/client";
+import ts from "typescript";
 import { describe, expect, it, vi } from "vitest";
+import type { MobileMessage, MobileSnapshot } from "./api";
 import { ThreadJumpAnchor } from "./thread-jump";
 import { ThreadScrollBehavior } from "./thread-scroll";
 
@@ -98,4 +101,82 @@ describe("mobile jump to latest", () => {
       }
     },
   );
+});
+
+it("keeps each waiting agent's original question enabled in a mobile group", () => {
+  const snapshot: MobileSnapshot = {
+    threadId: "group-thread",
+    cursor: 10,
+    olderCursor: null,
+    activeRuns: [
+      { id: "main", status: "waiting_input" },
+      { id: "sourcer", status: "waiting_input" },
+      { id: "busy", status: "running" },
+    ],
+    messages: [
+      { id: "main-old", runId: "main" },
+      { id: "main-ask", runId: "main" },
+      { id: "sourcer-ask", runId: "sourcer" },
+      { id: "busy-ask", runId: "busy" },
+    ].map((message) => ({
+      ...message,
+      role: "bot",
+      blocks: [{ kind: "ask", text: "Which priority?", status: "pending" }],
+    })),
+  };
+  const selection = source.match(/^ {2}const answerableAsk\w+ = .*;/m)![0];
+  const rows = source.slice(
+    source.indexOf("  const renderMessageRow = useCallback("),
+    source.indexOf("  const renderItem = useCallback("),
+  );
+  const compiled = ts.transpileModule(`${selection}\n${rows}\nreturn renderMessageRow;`, {
+    compilerOptions: { jsx: ts.JsxEmit.React, target: ts.ScriptTarget.ES2022 },
+  }).outputText;
+  function Probe({ readOnly = false }: { readOnly?: boolean }) {
+    const scope = {
+      React,
+      useCallback,
+      answerableAskMessageIds,
+      snap: snapshot,
+      readOnly,
+      messagesById: new Map(),
+      memberName: () => undefined,
+      mentionBots: [],
+      displayName: "Main",
+      reactionView: { reactions: new Map() },
+      inGroup: true,
+      botId: undefined,
+      groupId: "group-1",
+      currentBot: null,
+      currentBotStatus: "idle",
+      rowActions: {},
+      onCall: false,
+      highlightedMessageId: null,
+      separatorIds: new Set(),
+      windowWidth: 393,
+      t: (text: string) => text,
+      locale: "en",
+      MessageRow: ({ message, canAnswer }: { message: MobileMessage; canAnswer: boolean }) => (
+        <button type="button" data-message={message.id} disabled={!canAnswer} />
+      ),
+    };
+    const renderRow = new Function(...Object.keys(scope), compiled)(...Object.values(scope));
+    return snapshot.messages.map((message) => renderRow(message));
+  }
+  vi.stubGlobal("IS_REACT_ACT_ENVIRONMENT", true);
+  const container = document.createElement("div");
+  const root = createRoot(container);
+  try {
+    act(() => root.render(<Probe />));
+    expect(
+      [...container.querySelectorAll<HTMLButtonElement>("button:enabled")].map(
+        (button) => button.dataset.message,
+      ),
+    ).toEqual(["main-ask", "sourcer-ask"]);
+    act(() => root.render(<Probe readOnly />));
+    expect(container.querySelector("button:enabled")).toBeNull();
+  } finally {
+    act(() => root.unmount());
+    vi.unstubAllGlobals();
+  }
 });

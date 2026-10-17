@@ -7059,7 +7059,7 @@ const MessageView = memo(function MessageView({
                     animation: running ? "rkPulse 1.2s ease-in-out infinite" : undefined,
                   }}
                 >
-                  {running ? <Trans>subagent</Trans> : block.status}
+                  {running ? <Trans>Working…</Trans> : block.status}
                 </span>
               </div>
               {showToolActivity ? (
@@ -7225,7 +7225,7 @@ const MessageView = memo(function MessageView({
                 {block.lines.map((line) => (
                   <div key={line.k} className="flex items-baseline gap-2.5 text-[15px]">
                     <span className="text-success">✓</span>
-                    <span className="font-semibold text-white">{line.k}</span>
+                    <span className="font-semibold text-foreground">{line.k}</span>
                     <span className="text-muted-foreground">→</span>
                     <span>{line.v}</span>
                   </div>
