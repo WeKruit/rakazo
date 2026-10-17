@@ -12,6 +12,90 @@
 
 Execution priority: feature implementation and direct product validation come first. Do not wait for CodeQL/CI after each push or treat those waits as a product milestone. Keep focused checks and preserve the full live acceptance requirements; merge, deployment, production migration and paid-resource authorization remain separate.
 
+### 产品、数据与 UI 总览（当前执行入口）
+
+**最终产品是一个可直接操作的招聘工作台和协作 Agent，包含持久数据、可追溯执行和完整界面。** P0–P6 是 M1 业务闭环；Juicebox/Metix 工作台、Grok Bot 式 Agent 产品、现有工作迁入和整品验收仍分别属于 M2–M5，181 项适用动作的范围不变。
+
+下面按产品能力区分代码、发布和真实验收。历史记录里的通过只覆盖当次边界，不累加成完成率；不使用一个没有验收分母的总百分比。
+
+| 能力 | 现在已成立 | 真正还缺什么 |
+| --- | --- | --- |
+| 登录、Codex OAuth、Main/Sourcer 与 Crew | 既有云端页面有正常登录、连续聊天和委派的窄范围证据 | 多用户/human 群成员、全部权限和任务树验收 |
+| 原生记忆、选择、自定义 input、审批及恢复 | 部分原卡在真实容器替换后继续；记忆有写入/跨对话召回证明 | 所有卡型、多用户、未知外部写入、完整生命周期验收 |
+| 岗位、来源和评估 | 版本化岗位、已保存评估、三态、Cards/Table 和部分原消息定位已发布 | 完整真实 profile/JD/PDF、全部输入类型、真实候选语义验收 |
+| 原件读取、来源高亮、brief 与 G1/G2 | 新原件查看器、brief 确认与 G1/G2 执行连接已有工作分支代码；最近已提交 `dfd85463` | 尚未部署；不能当当前网页已有功能或真实业务通过 |
+| 人工编辑岗位条件 | 本轮并行实现 Role 面板编辑及同事务人类来源/CAS；尚未提交验收 | 年限等计算条件必须编辑真实结构化规则并同步可读描述；条件增删/逻辑组重构、独立召回 filters 和全流程验收仍在 J06 |
+| Autumn | 已接只读服务；原生 task/action/请求/回执及同 task 续搜有代码 | 新真实搜索→证据→反馈→原 task 续搜的整条业务链未通过 |
+| CRM | 用户 OAuth、组织身份和只读发现已接；已有来源/评审写工具 | 新人导入、身份/岗位关联、实际写读、可信发送镜像；发送前上下文读取本轮实现中 |
+| Instantly | 已接只读服务 | 真实精确审批发送、发送确认、回复停止；当前 REST 和既有 MCP 合同须分别核验 |
+| 候选人完整工作台/Dashboard | 现有面板只读展示已保存评估和原始结果文件 | 未评估候选索引、岗位总览、批次/名单、服务端分页/筛选/排序、外联/面试看板和真实统计尚未完成 |
+| 执行过程展示 | 原生 `ToolActivityDisclosure`、事件和 Activity 视图可复用 | 完整招聘步骤、委派树、任务/结果/证据/反馈的关联展示与实时/重载验收 |
+| Agent 可替换底座与插件 | Pi、逐 bot 模型和原生 memory/skills/MCP/文件/routines 可复用 | 每 bot runtime/明确 connection、运行配置冻结、human 群成员等 M3 实际缺口未完成 |
+
+#### 一条完整业务流，以及候选人什么时候落库
+
+```mermaid
+flowchart TD
+  JD[JD 链接 / 描述 / 附件] --> Role[岗位及条件版本 / 关键澄清 / 人类确认]
+  Role --> Search[Main 委派 Sourcer / 原生 search task 与 action]
+  Search --> Raw[保存 provider 原始结果及回执 Artifact]
+  Raw --> Index[候选索引 + 本轮结果关联：待补]
+  Index --> Evidence[读取材料 / 版本化 met-unmet-unknown 评估]
+  Evidence --> UI[候选卡片与表格 / 详情 / 证据 / 执行过程]
+  UI --> Feedback[持久化人工反馈 / shortlist / 条件或偏好修订]
+  Feedback --> Continue[沿原 provider task 新建续搜 action]
+  Continue --> Raw
+  UI --> CRM[核验身份后同步既有 CRM：来源 / 评审 / 岗位关联]
+  CRM --> Draft[准确候选 / sender / thread / 正文与文件的草稿]
+  Draft --> Approval[原生一次性审批 / 发送前重新检查]
+  Approval --> Receipt[Provider 发送及真实回执]
+  Receipt --> Stop[收到回复 / opt-out 后停止后续外联]
+```
+
+“找到候选人”就要保留原始结果和结果关联，不等评估完成才在产品里出现。**当前实现尚未做到完整结果索引**：原始页保存在 Artifact，已评估者在 `recruiting_assessments`；不能把这个现状描述成所有候选人已经进入 CRM 或可按字段筛选的人才库。provider 报告总数、实际拉取并保存的行数、本地去重人数分别展示；不能把第一页或未读 cursor 后的结果当作完整名单。
+
+#### 数据存储：现有记录与需要补齐的应用记录
+
+继续同一 Supabase 项目里的独立 `rakazo` 应用数据库及原有 CRM 数据库；文件使用现有 ArtifactStore/Modal Volume。不另建人员主库、记忆服务或 Agent harness。
+
+| 数据 | 现有落点 / 关联 | 要补齐的产品行为 |
+| --- | --- | --- |
+| 岗位/JD/条件 | `recruiting_roles` + 不可变 `recruiting_role_revisions`；原件为 Artifact | 原文、hard/preferred、AND/OR/NOT、来源与版本差异可读/可改；计算条件同时保存真实规则，不能只改展示文字；修订使旧判断过期、旧批准不适用于新版 |
+| 搜索/续搜 | `recruiting_research_tasks` / `recruiting_research_actions`；provider task ID、角色版本、请求/上下文/回执文件引用 | 每轮明确 action，继续同一 task；已排队、已完成、结果未知分开，不把 turn 停止当 provider 停止 |
+| 原始结果/材料 | `artifacts` 保存元数据、hash、版本、权限；真实字节在 ArtifactStore | 保留原始字段和分页/时间，不用模型总结覆盖原件 |
+| 候选身份与岗位名单 | **待补岗位候选索引**，沿用现有 `candidateKey` 关联评估；CRM `candidates` 仍是已接入人员的主记录 | 保存可靠 provider 身份或已核验 LinkedIn、展示字段、首次/最近发现、真实 CRM 引用；未知身份保留独立来源键，不按姓名自动合并 |
+| 每轮找到哪些人 | **待补 action→候选结果关联索引**，绑定原始 Artifact/页/行 | 同一人重复出现不重复建人；每轮名单、原始来源、排序/页码可追溯，前端不必下载全部历史 JSON 来分页 |
+| 资格评估 | `recruiting_assessments` 的 `(roleId,candidateKey,version)`；绑定岗位版本、facts/judgments/sourceRefs | 逐项 met/unmet/unknown、缺口、计算依据、历史版本；旧岗位评估显示过期 |
+| 人工选择与反馈 | 原生人类消息/事件保留来源；**名单索引需补 shortlist/评审状态及对应版本/事件** | 临时 UI 选中不当作持久 shortlist；接受/拒绝/跳过与资格三态、CRM pipeline stage 分开 |
+| CRM | 既有 `candidates` / `candidate_sources` / `candidate_pipeline` / audit | 新人导入、同源身份去重和岗位关联走明确用户/组织权限；来源保存成功不等于新人已创建或已归岗位 |
+| 外联草稿/回执 | 原生 `external_effects` 的精确 request/result、审批事件及必要的原始回执 Artifact | 批准前没有发送；未知结果不重发。既有 CRM pending 队列不是草稿，也不能当已发日志；真实镜像才进 `instantly_emails` |
+| 记忆/技能/连接 | 原生 memory documents/revisions、skills、加密 connections | 招聘记录不塞进长期记忆代替业务表；可复用偏好有 scope/版本/来源，插件可以替换但产品任务关联保持 |
+
+岗位候选索引和每轮关联索引是待实现的数据索引职责，不是已经存在的表或已应用的迁移。具体字段沿当前 contracts/Prisma/API 最小实现，不建立重复的 CRM 人员库。去重使用同组织/客户及可靠身份，不自动套用旧脚本目录、CSV 或未经批准的跨客户冷却规则。
+
+#### 前端必须交付的页面和交互
+
+| 页面/区域 | 用户看到与能做的事 | 数据要求 |
+| --- | --- | --- |
+| Dashboard / 岗位总览 | 当前岗位、运行/等待/失败任务、待确认卡、候选数/待评审数、外联进展、最近活动 | 从持久记录/真实回执聚合；原始行数、去重人数、已评估、shortlist 和已发送分开计数，不造百分比 |
+| 岗位工作台 | JD/条件、Candidates、搜索轮次/名单、外联、面试、Activity；同页可开 Crew chat | 当前 role/version/task 范围明确，切岗位不串候选、草稿、composer 或迟到响应 |
+| 候选表格/卡片 | 姓名、职位/公司、地点、LinkedIn、匹配三态、缺口、人类评审/shortlist、CRM/外联状态、来源轮次；筛选/排序/分页/批量选择 | 未读取字段显示缺失；稳定 ID、服务器分页、持久 shortlist；不继续以技术 candidateKey 充当完整候选 profile |
+| 候选详情 | 职业/简历、逐条件证据、unknown 缺口、原文/PDF/高亮定位、评估/反馈历史、所属岗位、CRM 与邮件时间线 | 始终回到具体保存版本与真实来源；profile/JD 往返保留各自阅读位置 |
+| Crew / 执行过程 | Main/Sourcer 对话、@、委派、当前步骤、工具活动、任务/批次结果和下一步；原卡选择/input/审批 | 使用同一原生 thread/run/card；刷新或重启不新造任务；错误、未知、等待不能标成功 |
+| Memory / Agent / 服务设置 | 实际采用的偏好及版本、每 bot 模型/连接/skills/tools/MCP、可用服务与权限 | 当前已配置、已连接、实际业务已通过分别显示；秘密不进 UI/日志 |
+
+“思考链路”在产品里交付为**可核验的执行过程和判断依据**：需求版本 → 委派 → 实际工具/请求 → 原 task/轮次 → 原始结果 → 已读证据 → 判断/缺口 → 用户反馈 → 后续采用 → 审批/回执。每步可定位原消息、run/action、文件或 effect。仅在 provider 实际返回并允许展示时显示其活动/推理摘要，不请求、推测或伪造隐藏思考；已有 ToolActivityDisclosure 复用到这条链，不能拿转圈动画或 bot 自述当执行成功。
+
+#### 接下来的交付批次
+
+1. **当前并行批次**：人工条件编辑（原面板 + 真实人类来源/CAS，计算条件使用结构化规则编辑）；CRM 发送前上下文/抑制读取（复用用户 OAuth/RLS）。完成代码与对应检查，不等 CI。候选角色兴趣使用现有 per-role RPC，不伪造 pipeline 的全局 interest 字段。
+2. **候选数据与工作台**：补所有已找到候选的索引/轮次关联，接真实 name/profile 字段，交付服务端分页/筛选/排序、持久 shortlist 和 Dashboard 真实聚合。复用现有 Cards/Table/五视图，保留未评估者。
+3. **反馈与 CRM**：从真实候选反馈到版本化规则、同 provider task 续搜，再完成已存在候选的来源/评审写读，以及新人导入/身份去重/岗位关联；写失败不能显示已同步。
+4. **外联闭环**：G3/G4 精确内容/名单/设置审批；发送前读取真实 hold/pass/suppression/重复及邮件状态，保存 provider 回执，回复/opt-out 停止。优先原生 provider stop，不额外搭 outbox/poll 引擎；附件能力以实际合同为准。
+5. **其余 M3/M4 与 M5**：每 bot runtime/connection/config snapshot、人类群成员、插件/文件/服务迁入等按 181 项并行补齐；最后逐项做多用户、跨对话、原卡等待时重启、未知结果恢复和整品验收。
+
+每个批次都交付可测试页面/真实状态、代码 revision 和有边界的截图/回执。发布另行确认；生产迁移、工具分配扩大、定时续跑和真实外发不因计划写完而自动获准。完整闭环未通过前，M1/P6 不完成；全部适用动作未验收前，总 Goal 不完成。
+
 ### Native document and calibration approvals (not deployed)
 
 The next feature slice connects native human approvals to research dispatch. `recruiting_request_approval` uses the existing effect, file blocks and approval card for either an exact role document package (G1) or ten saved, sourced assessment versions plus rule changes (G2). The human can approve once or deny; an always-allow rule or model review cannot supply this business decision. The full redacted request remains available in the native card. The result preserves the original human approval event time, and its immutable receipt commits with the effect.

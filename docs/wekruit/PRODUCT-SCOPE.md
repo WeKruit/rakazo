@@ -4,6 +4,8 @@
 
 本表原 A–I 139 个动作 ID 与补充动作合计 181 项，是当前完整范围的权威矩阵。M1–M5 均未完成。最新发布与逐项实证以 [PLAN.md](PLAN.md) 和本表末尾为准；历史失败和未收尾回执保留，不用工程检查替代真实验收。
 
+产品主线、候选落库、Dashboard/工作台/执行过程及当前交付顺序统一见 [PLAN.md](PLAN.md) 开头“产品、数据与 UI 总览”。当前原始结果文件和已保存评估不等于完整候选索引或已入 CRM；完整姓名/profile 表格、未评估候选、服务端列表能力、持久 shortlist 和 Dashboard 聚合仍是明确缺口。
+
 ## 交付里程碑
 
 | 里程碑 | 产品交付 | 完成依据 |
@@ -202,7 +204,7 @@ M2/M3/M4 中独立工作可与 M1 并行。每个 worker 明确文件归属，�
 
 | ID | 产品能力 | 退出条件 | 当前状态 |
 | --- | --- | --- | --- |
-| I01 | JD导入、澄清与RoleSpec确认 | 实际JD缺项→澄清→确认，记录规格revision与来源 | 描述创建/绑定 v1 与读回已验；真实官方 JD 正文已读并留存原生 Artifact，岗位保存仍失败，完整入口/条件澄清未验 |
+| I01 | JD导入、澄清与RoleSpec确认 | 实际JD缺项→澄清→确认，记录规格revision与来源 | 描述及官方 JD 的岗位 v1 保存/绑定/读回已有窄范围实测；完整抽取、来源语义、关键澄清与确认仍待真实验收，旧失败保留为历史 |
 | I02 | 创建Autumn真实search task | 使用已授权连接；真实task_id、status、source回读可核 | 已发布原生 task/action 实现；真实创建待验 |
 | I03 | Autumn澄清继续原task | 原task提出问题→用户回答→continue相同task_id，结果关联一致 | 已发布同 task 续搜实现；真实反馈续搜待验 |
 | I04 | 候选证据卡与来源链接 | 每个关键判断能指原来源/日期；空字段不编造，不把模型生成当搜索 | 已发布逐项三态/精确来源和不可变评估；合成材料保存、读回与局部重评窄路径已验，真实候选及完整材料验收待完成 |
@@ -226,7 +228,7 @@ M2/M3/M4 中独立工作可与 M1 并行。每个 worker 明确文件归属，�
 | J03 | 单选/多选/Other/跳过与自定义输入 | 答案绑定原问题；提交失败仍可重试；确认后可从持久记录回读 | JB-FLOW:F02；待核对原生复用与实施/验收 |
 | J04 | 工具进展及类型化结果卡 | 准备、执行、结果、错误与实际状态一致；显示原工具产物而非伪造文本 | JB-FLOW:F03；待核对原生复用与实施/验收 |
 | J05 | 小批样本校准：接受/拒绝/跳过及原因 | 逐候选、原批次、岗位版本、用户及真实提交关联；跳过/未评审独立于资格 unknown；下一轮采用反馈可核查 | JB-FLOW:F04; JB-MATCH:J07；待核对原生复用与实施/验收 |
-| J06 | 手动编辑条件及 filters | 先保存成功并更新版本，再让 agent 使用；失败/冲突不显示已采用 | JB-FLOW:F05；已有版本/CAS/API与原生输入组件可复用，Role 编辑还缺人类修订消息同事务保存边界；结构化 filters 独立缺失，不塞入资格或偏好。均未实现/验收 |
+| J06 | 手动编辑条件及 filters | 先保存成功并更新版本，再让 agent 使用；失败/冲突不显示已采用 | JB-FLOW:F05；本轮正在原 Role 面板实现 atom/priority 编辑及同事务人类来源、CAS 和版本更新，未发布验收；条件增删/逻辑组重构与独立召回 filters 仍待补齐，不塞入资格或偏好 |
 | J07 | 开始 sourcing 前保存 shortlist-only / sequence 外联设置 | shortlist-only 不入列或发送；sequence 设置版本、账号权限及实际模式一致，未授权不发送 | JB-FLOW:F06；待核对原生复用与实施/验收 |
 | J08 | 已找到名单的批准及缓存同步 | 批准是持久业务动作；刷新/多页后结果一致，不能仅靠本地选中 | JB-FLOW:F07；待核对原生复用与实施/验收 |
 | J09 | 聊天停止/重连与 sourcing pause/resume/close/reopen 独立 | 停止 turn 不等于停止远端搜索；关闭项目可明确选择是否取消 sequence，并显示部分失败数量；恢复原项目不重复创建任务 | JB-FLOW:F08–F10；待核对原生复用与实施/验收 |
@@ -238,7 +240,7 @@ M2/M3/M4 中独立工作可与 M1 并行。每个 worker 明确文件归属，�
 | J15 | 组织级 agent 自动化与 MCP 控制 | 管理员策略真实限制 agent/tools/自动操作；个人连接不能绕过组织政策 | JB-ACL:organization-agent-controls,organization-mcp-connectors；待核对原生复用与实施/验收 |
 | J16 | Company / User Knowledge Vault 两类描述编辑器 | 分别读取、编辑、保存并刷新读回；账号/公司 scope 与来源明确，不冒充逐项事实 CRUD | JB-WEB:W03；待核对原生复用与实施/验收 |
 | J17 | Memory 参与、采用的 learnings 与反馈 | 显示实际被注入/采用的记忆版本及影响；普通反馈未持久时不显示已学习，撤销后新 run 不再采用 | JB-WEB:W04；Grok memory-write-injection；待实施/验收 |
-| J18 | 可展示的 Thinking/活动摘要流 | 仅渲染 provider 实际提供并允许展示的活动或摘要；流式开始/增量/结束与实际 run 对应，不请求或伪造隐藏推理 | JB-WEB:W01；MX-WEB:W02；Grok activity；待核对原生复用与验收 |
+| J18 | 可展示的 Thinking/活动摘要流 | 仅渲染 provider 实际提供并允许展示的活动或摘要；流式开始/增量/结束与实际 run 对应，不请求或伪造隐藏推理 | JB-WEB:W01；MX-WEB:W02；Grok activity；已核对原生 ToolActivityDisclosure/steps、事件和招聘 Activity 可复用；完整步骤/委派/task/action/证据/反馈关联展示、provider 可见摘要及真实链路验收未完成 |
 | J19 | Shortlist / unshortlist 单人及批次反馈 | 对稳定候选/项目保存真实可逆选择，刷新后保持；不隐式导出、enrich、入 sequence 或发送 | JB-FLOW:F03,F07；待核对原生复用与实施/验收 |
 | J20 | 单人/批量候选导出与费用预览 | 明确字段/范围及已有费用单位；实际授权后导出正确名单字节，取消无导出或消耗，结果未知不盲重试 | JB-FLOW:F03；JB-ACL:exports-plan-credits；待实施/验收 |
 | J21 | 直接传入候选 profile / LinkedIn URL 并分析 | 读取指定真实 profile，保留候选身份与来源/时间；未读内容标未知，不将链接存在当能力证据 | JB-FLOW:F03 fetchProfiles/findProfilesByLinkedIns/profileAnalyzer；待实施/验收 |
