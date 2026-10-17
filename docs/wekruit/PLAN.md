@@ -12,7 +12,15 @@ Supabase 独立数据库、原生 memory provider、Modal Volume 和 E2B 沿用�
 
 ## 当前发布与缺口（2026-10-17）
 
-**最新线上为 v66 / `8675395a`。** 已保存研究报告接入既有候选来源和评估 Source，未评估者也能读本人报告、缺口与来源链接。沿用原生/历史来源、actor、实际字节/hash、行号和精确引文校验；不返回周围请求或其他人的行，也不把 provider 的 tier/规则标记当作资格结论。缺失值和原生 absence-only 说明保留；无法读取时明确显示不可用。只补原接口返回与展示，没有新 endpoint、表、迁移、搜索或判断引擎。
+**最新线上为 v68 / `7f770e12`（反馈主体 `62d3ad15`）。** 候选 Dialog 现在可展开 Give feedback，明确选择 Good example / Not a fit / Skip for now 并输入原因，前两种必须有非空原因。复用原生 `threads.followUp` 保存人类原文并交给当前对话的 Agent；有待答卡时排入 steering，不把候选反馈当作该卡答案。未确认结果保留草稿和原 nonce，成功后清空本次输入；编辑、切换和迟到回执保持当前范围。群 follow-up 在同一原生所属群锁内检查 nonce，避免并发重放只一条保存却返回失败。没有新 endpoint、表、schema、规则引擎或工具权限。
+
+198 项界面、188 项 API/router/target 聚焦检查及相关类型/格式检查分批通过，独立 SPEC/QUALITY 通过；API 并发检查使用模拟事务，不冒充真实 PostgreSQL 并发验收。第一版网页新按钮显示了翻译编号，验收失败保留；随后按原生 Lingui 提取更新十份语言目录，12 条反馈文案的实际编译读取检查通过。修正版正常网页确认选择/原因均为 16px、正负示例须填原因；真实候选只查看表单，没有提交判断。
+
+已有虚构候选在正常网页实际提交 Skip for now 和多行含 emoji 的英文备注，Main 在原 Crew 回复，原生 follow-up 执行 completed。真实数据库核对原文空格/换行/emoji、所属线程、唯一 Message/Event、原生 task/run 和一条回复；仅新增一个 run、两条消息及对应线程序号，14 组业务/配置等快照不变，全部旧记录保持。27 份运行源码/语言目录与归档一致，health/ready/Web 为 200、ready 非 degraded。两次发布前后 17 组数据均保持；反馈完成后另一次实际容器替换保留 17 组快照和反馈回执，没有重放，最后为 107 runs、267 messages、280 effects、109 migrations。27 张原生历史问题/审批块逐字保持；正常网页刷新恢复反馈及 Main 回复，再回原 Intake 保留四选项、空白 Answer/聊天草稿和 30 人名单。候选、岗位、记忆与外部操作未改变，无新研究、外联、迁移、资源或权限。
+
+这次证明反馈作为原生消息保存、交付和恢复，不等于逐人接受/拒绝的持久评审账本、G2 校准通过、条件已采用或同 Autumn task 的候选续搜。真实十人校准及完整业务链继续作为首要缺口。现有 Main/Sourcer 指令与五份 skills 已读回核对，已经包含反馈分类、保持未知和沿原研究继续的指导，本批没有重复加 prompt。
+
+**v66 历史发布 / `8675395a`。** 已保存研究报告接入既有候选来源和评估 Source，未评估者也能读本人报告、缺口与来源链接。沿用原生/历史来源、actor、实际字节/hash、行号和精确引文校验；不返回周围请求或其他人的行，也不把 provider 的 tier/规则标记当作资格结论。缺失值和原生 absence-only 说明保留；无法读取时明确显示不可用。只补原接口返回与展示，没有新 endpoint、表、迁移、搜索或判断引擎。
 
 最终 API/adapter 聚焦 137 项、界面 139 项及相关类型/格式检查通过，独立 SPEC/QUALITY 复核通过；较早包含 contracts 的检查批次与这些重叠，不相加。标准 JSON AST 库复用已锁定版本，支持原保存格式中的不完整数组引文，稀疏同职位、跨人、跨行、改值和错误请求路径均拒绝。云端 16 份源码 hash 与发布归档一致；health/ready/Web 全部 200、非 degraded，初始冷启动未就绪单独保留。真实只读 API 验证一位已评估者的两份来源、一位未评估者的一份来源，每份 24 字段，原评估引文准确回到其保存报告，错误 actor 拒绝。正常网页实际打开这两种报告，正文 16px/26px，原评估仍为 Unknown，未评估状态保持；Close 返回原候选，原问题输入与聊天草稿仍空。截图私有保存。容器替换及网页读取后，17 组数据逐项相同：106 runs、280 effects、265 messages、109 migrations、30 人/45 条来源及全部岗位/记忆/配置/原卡保持，无新增研究或业务写入。
 
@@ -25,6 +33,20 @@ Supabase 独立数据库、原生 memory provider、Modal Volume 和 E2B 沿用�
 v65 当时报告正文仍为缺口，已由上方 v66 补齐；不以报告展示通过代替新候选校准、反馈续搜或完整业务验收。
 
 Execution priority: filter playbook and sourcing (S1–S5) come first; reply and follow-up work is deferred. Feature implementation and direct product validation come before CI waits. Do not wait for CodeQL/CI after each push. The owner authorized an incremental spending cap of US$150; track usage against the private authorization baseline and retain existing resources. The latest instruction authorizes continuing feature fixes, deployment and testing on the existing resources without repeated confirmation. PR merge, unapproved production migrations, access expansion and real outbound remain separate. A pending business question does not block independent product work, and broad execution access does not supply its answer.
+
+**Playbook 按角色的实际缺口。** 线上仅有 Main、Sourcer 两位 bot 和五份共享 skills；职责指导存在不等于整个阶段已验收。当前 harness 为 Rakazo 原生 Pi，Codex OAuth 提供模型连接，不冒称 Codex CLI 的原生 session。
+
+| 角色 | 已有基础 | 尚未完成的业务结果 |
+|---|---|---|
+| Main / Boss | 连续聊天、Crew、委派、原生问题/审批、记忆 | 全部专员交接、升级处理、hold/pass 与完整业务验收 |
+| Sourcer（S1–S5） | JD 阅读、来源化条件、Autumn、候选/去重/来源、证据及未知项 | 新十人校准、逐人反馈采用、原研究续搜及新结果保存；具名/匿名 JD PDF 与 deck 流程 |
+| Data enrichment（S6） | 已有凭证及部分服务连接检查 | 可用专员、waterfall、缓存、验证邮箱及交接 |
+| Instantly（S7–S10） | 只读连接、部分草稿/审批基础 | Campaign、导入/发送、回复分类、退订和筛查闭环；当前后置 |
+| Workable（S11） | 职责规划 | 专员、ATS/客户提交、审批与回执 |
+| Scheduling（S12–S13） | 职责规划及可复用连接器 | 专员、约面/改期审批、冲突及面试后交接 |
+| Executive assistant | 职责规划 | 专员、日程冲突、面试 briefing 和提醒 |
+
+LinkedIn 专员为可选项，尚未启用。已有结果导入和保存报告不等于新十人校准。网页已有候选 Cards/Table、未评估者、来源/报告、服务端查询、shortlist 和原生 Activity；仍缺持久逐人评审/撤销、整批校准确认、反馈采用与下一轮的连贯展示、完整履历/简历阅读、项目/岗位总览、招聘漏斗及外联/面试视图。每 bot 完整 runtime/技能隔离、通用审批扁平明细、全部附件/卡片与多用户仍须分别完成或验收。以上是完整产品差距，不把当前 S1–S5 优先级当作删除其余角色的授权。
 
 **v64 历史发布 / `5e5394d1`。** 首次自然聊天读取旧附件时，Agent 只查一次历史便误报当前没有附件、要求重传；该 run 为 completed，但用户目标未完成，失败对话保留。共享消息来源说明现在明确：files 只属于该条消息，空列表不是整个对话没有上传；引用早前附件时，应先沿可用 scoped history 定位原件。仅改已有指令及回归，没有新工具、查询、权限或 schema。105 项 executor 聚焦检查、adapters 类型/格式与独立复核通过，和上一批重叠，不累加。回归通过实际 executor→history handler 取回先前 run 的两份文件引用，不声称模拟 runtime 能证明模型遵从。七份云端源码 hash、API health/ready、Web 已核对，ready 非 degraded；初始冷启动另行保留。实际替换后 17 组数据逐项相同，包括 105 个 run、280 个 effect、263 条消息及 109 份迁移；首次未完成对话、全部业务/配置和原 Main 待答卡均保持。
 
