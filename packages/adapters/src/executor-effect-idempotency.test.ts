@@ -223,10 +223,12 @@ function fixture(
     ),
   };
   const prisma = {
+    $queryRaw: vi.fn(async () => [] as Array<Record<string, unknown>>),
     event: {
       findMany: vi.fn(async () => [] as Array<{ seq: number; type: string; payload: unknown }>),
     },
     run: {
+      findMany: vi.fn(async () => []),
       findUnique: vi.fn(async () => run),
       findUniqueOrThrow: vi.fn(async () => run),
       updateMany: vi.fn(async ({ data }: { data: Record<string, unknown> }) => {
@@ -3790,6 +3792,95 @@ describe("native recruiting assessment effect delivery", () => {
       await f.run();
     },
   );
+
+  it("keeps an empty latest-message file list distinct from prior uploads reachable through scoped history", async () => {
+    const f = fixture("read-prior-files", [], { attachmentStore: false });
+    const original = {
+      id: "earlier-upload-message",
+      seq: 1,
+      role: "user",
+      botId: null,
+      runId: "earlier-upload-run",
+      replyToMessageId: null,
+      externalTranscriptFor: null,
+      createdAt: new Date("2026-10-16T00:00:00.000Z"),
+      blocks: [
+        { kind: "text", text: "Dyna source files" },
+        {
+          kind: "file",
+          artifactId: "original-dyna-first",
+          name: "dyna-first.csv",
+          mimeType: "text/csv",
+          size: 42,
+        },
+        {
+          kind: "file",
+          artifactId: "original-dyna-second",
+          name: "dyna-second.csv",
+          mimeType: "text/csv",
+          size: 84,
+        },
+      ],
+    };
+    const current = {
+      ...original,
+      id: "latest-text-only-request",
+      seq: 2,
+      runId: f.runData.id,
+      blocks: [{ kind: "text", text: "Read the two Dyna CSV files I attached here." }],
+    };
+    f.runData.sourceMessageId = current.id;
+    f.prisma.message.findMany.mockResolvedValue([current, original]);
+    f.prisma.$queryRaw.mockResolvedValue([original]);
+    f.runtimeRun.mockImplementation(async function* (request) {
+      const sourceLine = request
+        .instructions!.split("\n")
+        .find((line) => line.startsWith("Native message source reference"))!;
+      expect(JSON.parse(sourceLine.slice(sourceLine.indexOf("{")))).toMatchObject({
+        messageId: current.id,
+        files: [],
+      });
+      expect(sourceLine).toContain(
+        "attachments on this message only, not a conversation inventory",
+      );
+      expect(sourceLine).toContain(
+        "An empty files list does not establish that earlier messages have no uploads",
+      );
+      expect(sourceLine).toContain(
+        "locate the saved originals through available scoped history before asking for reattachment",
+      );
+      expect(request.history.find((message) => message.id === original.id)?.content).toContain(
+        "dyna-first.csv",
+      );
+      expect(request.history.find((message) => message.id === original.id)?.content).toContain(
+        "dyna-second.csv",
+      );
+      const tools = request.tools.map((tool) => tool.name);
+      expect(tools).toEqual(
+        expect.arrayContaining(["search_history", "read_history", "artifact_read"]),
+      );
+      const prior = await request.executeTool!(
+        "read_history",
+        { messageId: original.id },
+        "locate-original-files",
+      );
+      expect(prior).toMatchObject({
+        untrusted: true,
+        messages: [
+          {
+            messageId: original.id,
+            files: [
+              { blockIndex: 1, artifactId: "original-dyna-first" },
+              { blockIndex: 2, artifactId: "original-dyna-second" },
+            ],
+          },
+        ],
+      });
+      expect(f.prisma.$queryRaw).toHaveBeenCalledTimes(2);
+      yield { type: "done" as const, text: "Done" };
+    });
+    await f.run();
+  });
 
   it("provides exact full-block selections for the current run's native answer on each rebuilt request", async () => {
     const runId = "resumed-native-answer";
