@@ -17,6 +17,8 @@ Schema 只服务确有需要的返回、保存、身份去重、任务引用和�
 
 2026-10-17：Main/Sourcer 指令与现有 intake/sourcing/evidence 三份 skill 已通过原生网页保存、重载并由数据库读回核对。获准源码 `7288eab3` 已部署为 Modal v39，原有五份应用迁移保持、无新增迁移；API health/ready 通过。已有岗位群的 Main/Sourcer 原生交接、公开公司/JD 研究、原卡自定义输入跨重启后续接同一个 Autumn task 已实测，返回 27 行。候选搜索/校准、原生结果到 Dashboard 的自动关联、完整引文读取及 P6 仍未通过，不能把这次技术链路证明扩大为招聘闭环完成。
 
+后续同群的原生原件重读已完成：Sourcer 读取当前 skill、岗位和保存的完整 JD，返回全部职责、要求、加分与缺口；独立 ArtifactStore hash/长度核验通过，18 条表格/引用块引文逐字匹配保存版本。没有新研究、网页替代抓取或岗位/记忆/skill/CRM 修改。这项证据补齐本轮 JD 阅读与输出，27 行 Autumn 报告的全量语义、候选业务及 P6 仍未通过。候选结果到既有索引/Dashboard 的可选原生保存接线已推送 `368a0146`，441 项聚焦离线检查通过；新版本及单份应用迁移仍等待独立发布批准，当前线上仍是 v39。
+
 先使用现有 Codex subscription OAuth。当前执行器是 Rakazo 原生 Pi，不将它描述为
 Codex CLI 的原生 session。模型连接、逐 bot 配置、memory、skills、tools、MCP、
 subagent 和文件存储沿用 Rakazo 已有边界，后续更换模型或运行服务不重建产品。
