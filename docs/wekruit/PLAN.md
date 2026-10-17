@@ -14,17 +14,23 @@ Supabase 独立数据库、原生 memory provider、Modal Volume 和 E2B 沿用�
 
 Execution priority: filter playbook and sourcing (S1–S5) come first; reply and follow-up work is deferred. Feature implementation and direct product validation come before CI waits. Do not wait for CodeQL/CI after each push. The owner authorized an incremental spending cap of US$150; track usage against the private authorization baseline and retain existing resources. The latest instruction authorizes continuing feature fixes, deployment and testing on the existing resources without repeated confirmation. PR merge, unapproved production migrations, access expansion and real outbound remain separate. A pending business question does not block independent product work, and broad execution access does not supply its answer.
 
-**最新线上为 v50 / `a2a86fc2`。** 26 份运行源码与发布归档 hash 一致；API health/ready、Web 均为 200，ready 非 degraded。实际替换容器后，两位 bot、五份 skills、11 份记忆、94 个 run、242 个 effect、232 条消息、109 份迁移、三份候选来源页、30 人、45 条来源及岗位 v3 逐项相同，没有重放。真实应用库只读检查通过 14 项：普通列表隐藏 42 份内部上下文文件；管理员同样必须显式开启诊断才能列出、读取原件/版本；伪造开关和跨模式/actor 游标被拒绝。原 JD、候选证据和 Agent 内部原文读取保持可用。没有新表、迁移、权限、资源、订阅或外联。
+**最新线上为 v51 / `d60250fb`。** 27 份运行源码与发布归档 hash 一致；API health/ready、Web 均为 200，ready 非 degraded。服务端在原边界中继续按可信事件及已有 action/page 引用识别整个机器文件族：普通文件库仅两份用户 CSV，55 份内部上下文、材料包装与候选回执仅在 owner 显式诊断时可见。真实应用库 24 项只读检查通过，覆盖普通/伪造开关的列表及直接读取拒绝、诊断原件与版本、游标隔离、原生 Agent 读取保留，以及精确岗位来源的业务文本与错误版本/来源/actor 拒绝。正常招聘页面复用已保存的 role/assessment 来源、真实字节/hash 和原 UTF-16 校验，只返回原文字符串及高亮位置；客户端不能指定任意路径、引文或原始文件，失败不回退 raw 读取。真实网页已展开原 JD 并高亮 5+ 年要求；来源正文使用可读 sans 字体，文件库只显示两份 CSV。历史评估版本路径有离线覆盖，线上仍无评估记录，不能声称真实评估验收。
 
-上下文文件按后台采用事件和真实关联识别整个文件族，列表/直接读取/版本/下载/删除共用边界，不依赖文件名或上传 nonce。网页沿用现有 owner 诊断偏好，切换模式重新加载列表和预览。候选/JD 的完整字节证据读取仍是已有授权功能；本批不声称任意证据的服务端机密隔离，也不机械改写历史或任意模型自由文本。普通产品视图、真实用户鉴权和这次只读函数检查的证明范围分开。
+本次替换容器前后，两位 bot、五份 skills、11 份记忆、95 个 run、242 个 effect、234 条消息、109 份迁移、三份候选来源页、30 人、45 条来源、岗位 v3 及 thread 状态逐项相同。新一轮正常 @Main 的真实技术口径问题卡连同选项/输入框恢复；提交“暂不确认、保持条件、不开始搜索”后，同一原生 run/触发消息继续到下一张地点问题卡，第一张精确标记 answered，第二张 pending。岗位完整内容保持，新增加的唯一回执为原生本地提问；没有新 Autumn research/reply、CRM、enrichment 或外联。下一项真实筛选决定留给用户，不代答。旧取消卡未复活。
+
+本批 API/核心/原生读取 105 项、网页 114 项及相关类型/格式检查分别通过；最后来源排版 108 项及工具说明 5 项另行通过，批次重叠不相加。独立静态复核无阻塞发现；真实服务函数/数据库与 owner 正常网页已验，不等于完整第二用户登录链。没有新增迁移、表、权限、依赖、资源、订阅或 harness；不等待 CI。缓存收益、实际长群自动摘要、新十人校准、同 task 候选反馈及 P6/M1–M5 仍待验收。自由文本与保存原文不被机械重写，不能把产品投影与 raw API 边界扩大成任意模型文本脱敏保证。
+
+**v50 历史发布 / `a2a86fc2`。** 26 份运行源码与发布归档 hash 一致；API health/ready、Web 均为 200，ready 非 degraded。实际替换容器后，两位 bot、五份 skills、11 份记忆、94 个 run、242 个 effect、232 条消息、109 份迁移、三份候选来源页、30 人、45 条来源及岗位 v3 逐项相同，没有重放。真实应用库只读检查通过 14 项：普通列表隐藏 42 份内部上下文文件；管理员同样必须显式开启诊断才能列出、读取原件/版本；伪造开关和跨模式/actor 游标被拒绝。原 JD、候选证据和 Agent 内部原文读取保持可用。没有新表、迁移、权限、资源、订阅或外联。
+
+v50 的上下文文件按后台采用事件和真实关联识别整个文件族，列表/直接读取/版本/下载/删除共用边界，不依赖文件名或上传 nonce。网页沿用现有 owner 诊断偏好，切换模式重新加载列表和预览。候选/JD 的完整字节证据读取仍是已有授权功能；本批不声称任意证据的服务端机密隔离，也不机械改写历史或任意模型自由文本。普通产品视图、真实用户鉴权和这次只读函数检查的证明范围分开。
 
 **原生草稿准备已跑通，业务搜索尚未验收。** v49 / `19b6bd71` 移除反馈强制旧 research helper 的提示，并说明现有 revise 的未确认草稿保存方式，没有新操作或 schema。Sourcer 独立使用同一 Codex 连接下的现有较强模型，在原群通过普通聊天保存并重读岗位 v3：11 条条件、2 条偏好、原定义问题和全部原有来源保持，confirmation 仍为空，30 人仍未评估。首次混合来源归因被拒绝，Agent 自行更正后才成功；v50 把这类已验证的参数错误改成可纠正提示，缺失/跨账号/hash 错误及 bot 冒充真人仍拒绝。
 
-**原卡当前状态：** 下述 v44–v48 恢复记录保留为当时的证明。本轮操作误触原生 Stop，原 Main 未答卡已取消；没有提交答案或外部效果，不改库复活。经验口径仍未确认，不能再把该卡描述为当前等待。
+**旧卡当前状态：** 新一轮 Main 卡的实际恢复及续接见 v51；下述 v44–v48 的旧卡恢复记录保留为当时的证明。本轮操作误触原生 Stop，原 Main 未答卡已取消；没有提交答案或外部效果，不改库复活。经验口径仍未确认，不能再把该卡描述为当前等待。
 
 **效率：** 此次实际有 54 次原文读取，37 次在成功保存后；事件没有分页参数，不能断言同页重复。原生用量记录有缓存读取，但未建立优化命中率或速度收益。现有 sourcing skill 仅追加同版本原文复用指导：保留原文时复用准确引用，保存后核对一次当前岗位，只补读缺句；版本变化或准确证据不可见时仍重读。网页重开及真实库已确认精确保存，其他四份 skills、bot 和岗位不变。没有新增缓存服务或改变全局 context budget。当前群未达原生 100 条门槛，线上自动摘要触发仍待验。
 
-本批 API/原生读取 23 项、DB/来源/核心 116 项、网页 118 项及相应类型/格式检查分别通过，范围有重叠，不相加；14 项真实库只读检查另计。新十人校准、候选反馈及同 task 续搜、完整去重和后续 CRM/外联仍待验收，P6/M1–M5 未完成。
+此前 v50 批次 API/原生读取 23 项、DB/来源/核心 116 项、网页 118 项及相应类型/格式检查分别通过，范围有重叠，不相加；14 项真实库只读检查另计。新十人校准、候选反馈及同 task 续搜、完整去重和后续 CRM/外联仍待验收，P6/M1–M5 未完成。
 
 **v48 历史发布 / `83850ebe`。** 17 份变更源码与发布归档 hash 一致；API health/ready、Web 均为 200，ready 非 degraded。受控替换后，两位 bot、五份 skills、11 份记忆、91 个 run、234 个 effect、225 条消息、109 份迁移、三份候选来源页、30 人及 45 条来源记录逐项相同，没有评估或重放。真实只读补卡查询再次通过。原网页首次重载直接恢复来源统计和候选列表，原 Main 待答输入、两张已答 Sourcer 卡及继续回复均保留；原内部交接正文未渲染，实际完成态字体仍为 Geist 16px/26px。最新截图与原始验证记录保存于私有验收目录。以下保留 v45 / `e4ac9bdf` 的修正证据： 事务等待与完成态/输入框排版修正已发布，14 份变更源码与提交一致；API/Web 均为 200。第一次重新打开工作台直接读取 30 人/45 条来源，没有手动刷新；正文实际为 Geist 16px、26px 行距。以下保留 v44 / `385e4487` 的交互发布证据： 本批 13 份变更源码 hash 与提交一致，API health/ready 为 200 且非 degraded。实际替换容器后，既有两位 bot、五份 skills、11 份记忆、90 个 run、234 个 effect、219 条原消息、109 份迁移及候选/来源逐项相同；Main/Sourcer 的产品沟通配置也与网页保存版本一致。前一版本 v43 / `68b21b35`： 已保存候选的原生搜索历史直接从来源页展示，不制造旧 action；真实读取为三份来源页、45 行、两个研究上下文，归并 30 人且全部未评估。原生 `artifact_read` 可按 JSON 字段分页读取已保存完整证据；真实候选长引文经十页 Unicode 连续读取重建，完整性和跨 actor 拒绝通过。Sourcer 在原群自然续聊后给出准确证据与缺口，未发新搜索或外联。受控容器替换保留配置、原消息、记忆、候选、回执和旧待答卡。
 
