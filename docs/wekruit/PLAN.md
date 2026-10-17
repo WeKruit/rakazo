@@ -1,27 +1,51 @@
 # WeKruit Recruiting Implementation Plan
 
-> **For agentic workers:** Use superpowers:executing-plans to execute this plan inline, task by task. Independent work may run in parallel under the user's explicit authorization; keep file ownership separate and centralize deployment/acceptance.
+> **For agentic workers:** Follow [AGENTS.md — WeKruit design principles](../../AGENTS.md#wekruit-design-principles). This plan defines product outcomes and records evidence; it does not authorize another harness or a fixed recruiting workflow. Reuse native capability first and change only a demonstrated integration gap.
 
 **Goal:** 在现有 Rakazo 网页交付 Main/Sourcer 原生协作、可恢复交互与记忆，迁入现有招聘工作，完成 [GOAL.md](GOAL.md) 的 P0–P6 基础闭环与 [PRODUCT-SCOPE.md](PRODUCT-SCOPE.md) 的 Juicebox / Metix / Grok Bot 完整产品范围。
 
-**Architecture:** 沿用 Rakazo Web → authenticated API → Postgres/worker → Pi → native tools/connectors → persisted result → Web。Supabase 独立数据库保存状态，原生 memory provider 保存记忆，Modal Volume 保存文件/检查点，E2B 提供原生执行环境。集成进入已有边界，不另建 harness。
+**Architecture:** 用户聊天/反馈 → Rakazo 原生 Main ↔ Sourcer ↔ Autumn Agent（已有 MCP/API）→ 结果/证据 → 用户反馈 → 同一个 Autumn task 继续。Main/Sourcer 通过 prompt、skills 和 playbook 自主协作；Rakazo/Pi 提供现成 harness、群聊、委派、会话、记忆和交互。网页、数据库和 Dashboard 保存并呈现真实输出，不接管 Agent 的推理和招聘步骤。
+
+Supabase 独立数据库、原生 memory provider、Modal Volume 和 E2B 沿用现有职责。Schema 仅服务实际返回/持久化/展示；不新增规则语言、固定问卷、筛选引擎、第二层编排器或逐搜索审批。每 bot 的模型/连接及 memory/skills/MCP 替换先用原生设置。历史实现清单不能成为继续扩建自定义领域层的依据，也不授权盲删既有工作。
 
 **Tech Stack:** Rakazo/TypeScript、Pi、官方 Codex OAuth、Supabase Postgres、Graphile、Modal、E2B。
 
-## 当前发布与缺口（2026-10-16）
+## 当前发布与缺口（2026-10-17）
 
 Execution priority: filter playbook and sourcing (S1–S5) come first; reply and follow-up work is deferred. Feature implementation and direct product validation come before CI waits. Do not wait for CodeQL/CI after each push. The owner authorized an incremental spending cap of US$150; track usage against the private authorization baseline and retain existing resources. Merge, deployment, production migration, access expansion and outbound authorization remain separate.
 
-### 当前首要增量：搜索过滤与找人（未发布）
+已获准的源码 `1c6506a0467223e2185c639e1b09ebe0693c85d0` 已部署为 Modal v38。独立 `rakazo` 库的五份应用迁移（brief、搜索审批、候选/轮次索引、CRM 回执关联、回复关联）已应用，checksum 与发布清单一致。实际容器源码及 API health/ready 通过；现有 bot 配置、五份 skills、原生记忆与受保护历史的前后核对一致。旧 CRM 数据库、工具权限和外联未改。此状态取代下面历史批次的“尚未发布/迁移未执行”，不取代真实业务验收。
+
+### 当前首要能力：playbook 驱动的自主找人（业务验收未通过）
 
 **实现路径按用户最新澄清收敛：Autumn MCP + prompt + 现有 playbook。** Main/Sourcer 从普通 JD/聊天整理要求，经已存在的 MCP research/reply 执行检索和原 task 续搜；本方只复用原生岗位/请求/结果/来源/反馈持久化及展示。不给用户增加必填 schema，不新建查询、排序或筛选引擎，不继续扩展结构化过滤编辑器。已实现的过滤字段仅作可选产品状态和展示，不替代 Autumn 的实际搜索。
+
+#### 当前执行方案：调用已有研究 Agent
+
+Autumn 本身是云端研究 Agent，负责规划、搜索、交叉核验和带来源的结果；不是待本方重建的候选数据库。Rakazo Main/Sourcer 是它的招聘协作层：理解用户、采用 playbook、委派、审阅证据、整合反馈。现有模型、群聊、memory、skills、MCP、原生问答和 ArtifactStore 继续复用。
+
+官方依据：[Task model](https://www.autumn.ai/docs/concepts/tasks)、[Hosted MCP](https://www.autumn.ai/docs/mcp-server)、[Autumn Skill](https://www.autumn.ai/docs/skill)、[Human in the loop](https://www.autumn.ai/docs/guides/human-in-the-loop)。原生 Crew 中的既有 Sourcer 另已回复其实际做法，私有取证保留；回复属于该 Agent 的自述，不能代替本产品端到端验收。
+
+1. **先采用现有能力和提示词。** 新读 Main/Sourcer instructions、共享 sourcing skill 和 Autumn 官方 skill；只调整分工和 playbook 指导。复用现有 `research`、`get_task`、`get_rows`、`reply`、`credits`。停下结构化过滤编辑器及新的领域 schema 工作，待产品实际返回/存储需要时再做最小补充；现有未发布代码保留，不作为此 Agent 路径的启动条件。
+2. **JD → 自主准备 → 十人校准。** Main/Sourcer 读取 JD、用户说明和已知偏好，区分原文事实、人工要求与推断，只问改变决策的缺项。按 playbook 保留 G0/G1 的实际确认点；已有完整材料不重复问。将当轮要求、数量、排除项和证据要求写成清晰 prompt，调用 Autumn，等待并读取完整分页。Autumn 输出列只定义返回形状，不承载自建招聘规则语言。
+3. **结果 → 证据审阅 → 反馈 → 同 task 迭代。** Sourcer 根据实际返回的来源检查质量，保留 unknown 和未评估者，解释匹配及缺口；不重做 Autumn 的搜索流程。把人类反馈连同对应候选和原要求整理成明确 follow-up，用 `reply(task_id, message)` 继续原 task。官方文档支持修正、缩小范围、补列和更多结果沿同 task 迭代；旧 Agent 经常另开 task 的习惯不成为产品规则。校准未通过继续调整，G2 通过后才放量。
+4. **原生上下文和网页接通。** 先用原生历史、scratchpad、memory/skills 和文件保留 task ID、反馈与原始结果引用；展示候选表/卡、证据、缺口和真实工具活动。数据库仅补确有缺口的结果、身份去重与轮次引用。刷新/重启恢复先读已有 task，不重发 research。权限、抑制名单、准确去重、预算/限流及外发审批保持代码边界。
+5. **首轮真实验收。** 普通 JD 聊天 → Main 委派 Sourcer → Autumn 校准十人 → 网页反馈 → 原 Autumn task 调整结果；再验原生选择/自定义输入、Autumn 实际出现的 `input-required` 及重启恢复。MCP `research` 文档只列 `prompt`，不可假称支持 `clarify` 参数；若验收必须显式开启澄清，只在现有连接适配处使用官方 Task API。当前还没有该整条通过证据。
+
+S1–S5 作为当前主线；S2 材料准备和确认继续按 playbook，不能为方便而默默跳过。S6 以后通过现有 Agent/MCP 委派接续，回复、跟进和实际外发后置。普通搜索/续搜在既有授权、额度和限流内自主执行，不逐次弹审批；实质规则冲突、校准放量、超预算和外部发送仍按对应边界处理。
+
+**2026-10-17 原生配置采用已完成：**新读并备份后，沿现有网页保存 Main/Sourcer 英文指令及 intake/sourcing/evidence 三份共享 skill。复用原五份技能，不新建技能或 schema；另两份 skill 内容保持不变。独立 SPEC/QUALITY 审阅后补齐“拒绝校准时，在同 task 请求排除已见人的新十人”及 G0 与 S2 延后的关系。原生解析/编辑器长度检查通过；网页重载及独立 `rakazo` 数据库只读核验表明五份内容逐字保存，Autumn allowlist 和禁用工具未改变。
+
+Main/Sourcer 随后各完成一次实际回复，均读取两份当前 skill，说明 Autumn 分工、同 task 反馈及六人达标时如实报告缺四人；Sourcer 另做一次原生只读 task_catalog 发现。两次 run 各一次 attempt，无外部 effect，未调用 Autumn、CRM 或外联。这仅证明配置采用和回复，不证明真实搜索/候选落库/同 task 续搜。发布已按上方事实完成，但 Agent 的真实业务路径尚未通过。
+
+下面保留既有增量的实现/验证事实，不能据此恢复其旧优先级或继续扩建 schema/领域工具。已有 research admission/准备层是否阻碍原生 Agent 自主调用仍待实测；若有阻碍，先说明具体调用链，只修该缺口，不再叠加包装。
 
 - 复用现有 brief JSON、不可变岗位版本、原生人类来源、CAS 和 Role 编辑/API；新增 `searchFilters`，每项有稳定 ID、statement、include/exclude/prefer、origin 和 sourceRefIds。无额外过滤显式为 `[]`，不是资格条件或 provider 资格结论。推断只能 prefer；未读、缺来源或冒用人类身份的过滤不接受。
 - 人工可以增删/修改/清空过滤；省略不改，空数组清空。未改的条件和来源保留；修改产生同一岗位的新版本和真实人类消息、清除旧 G0，无变化不写新版本。缺失 location 也进入现有关键澄清，已有来源的 unrestricted 不重复问。
 - 原生运行上下文和冻结检索请求包含当前过滤，与 hard/preferred 判断及单轮召回范围分开；反馈后的 continue 沿保存的 provider task，历史请求不改写。Autumn 当前使用 prompt 而非结构化 filter API，因此传入过滤不等于已证明 provider 应用过滤。所有发现和 unknown 仍保留。
 - 现有 Role 组件、来源阅读器和 Cards/Table 复用，无新路由/依赖/harness/数据库迁移。独立 SPEC/QUALITY 审查已完成；修正了合成截图中 Artifact 来源冒标 user_instruction 的问题。
 - 本批九个聚焦文件 **494 项离线检查通过**，contracts/core/DB/adapters/API/worker/Web 七包类型检查通过。共享层独立检查 310 项、adapter 独立检查 153 项、面板独立检查 101 项与总批次有重叠，不相加。翻译提取/编译通过。Chrome 手动验证原组件的过滤显示、编辑启用 Save、取消、已存原文高亮和未评估名单；材料/RPC 明确为 Synthetic。现有浏览器用例新增两张过滤截图，未运行 Playwright/CI，无 CI 截图链接。PostgreSQL fixture 仅更新，没有运行或启动本地数据库。
-- 尚缺：发布后真实 Supabase 保存/冲突/重启；原生 Main/Sourcer 指令与 intake/sourcing/evidence skills 采用（目前仅有针对已捕获版本的私有差异提案，应用前须新读）；反馈与明确原 task 的绑定；完整跨角色/客户历史去重；G1 十人校准/G2 后原 task 续搜与真实 Autumn 过滤质量。不能据此标记 S1–S5、P6 或 M1–M5 完成。
+- 尚缺：发布后真实岗位/候选保存、冲突与重启；岗位绑定时 Agent 自主使用既有 research admission/准备接口与 Autumn MCP 的全链路；真实反馈与原 task 续搜；完整跨角色/客户历史去重；G1/G2 与实际搜索质量。原生指令/三份 skill 已按上方采用，旧领域工具提案不再作为未完成配置或新一轮扩展依据。不能据此标记 S1–S5、P6 或 M1–M5 完成。
 - 未完成的回复修订改动单独保存在本地 WIP 分支，不进入本批找人发布；此前原生回复关联代码保留，不声明 G4 通过。
 
 ### 产品、数据与 UI 总览（当前执行入口）
@@ -35,12 +59,12 @@ Execution priority: filter playbook and sourcing (S1–S5) come first; reply and
 | 登录、Codex OAuth、Main/Sourcer 与 Crew | 既有云端页面有正常登录、连续聊天和委派的窄范围证据 | 多用户/human 群成员、全部权限和任务树验收 |
 | 原生记忆、选择、自定义 input、审批及恢复 | 部分原卡在真实容器替换后继续；记忆有写入/跨对话召回证明 | 所有卡型、多用户、未知外部写入、完整生命周期验收 |
 | 岗位、来源和评估 | 版本化岗位、已保存评估、三态、Cards/Table 和部分原消息定位已发布 | 完整真实 profile/JD/PDF、全部输入类型、真实候选语义验收 |
-| 原件读取、来源高亮、brief 与 G1/G2 | 新原件查看器、brief 确认与 G1/G2 执行连接已有工作分支代码；最近已提交 `dfd85463` | 尚未部署；不能当当前网页已有功能或真实业务通过 |
-| 人工编辑岗位条件 | 原 Role 面板的语义条件、结构化年限规则及 hard/preferred 编辑已有代码；新增独立召回 filters 的增删改/来源与版本/CAS，未发布 | 资格条件增删/逻辑组重构、真实检索应用及全流程验收仍在 J06 |
-| Autumn | 已接只读服务；原生 task/action/请求/回执及同 task 续搜有代码 | 新真实搜索→证据→反馈→原 task 续搜的整条业务链未通过 |
-| CRM | 用户 OAuth、组织身份和只读发现已接；[CRM PR #44](https://github.com/WeKruit/headhunter-agent/pull/44) 已补同组织身份去重、候选/来源/多岗位原子导入；Rakazo 已接精确目标确认、来源行/原生导入 effect 关联及回执状态展示，未发布 | 新迁移及 MCP/Web 发布、真实目标绑定/导入写读/并发/RLS、可信发送镜像；抑制规则迁移尚未执行 |
-| Instantly | 已接只读服务；分支已补一次性审批、候选/岗位/来源绑定、跨 run 的原邮件轮次去重、精确回复回执及实时 CRM/邮件预检，未发布 | 完整旧 hold 来源、Gmail 与 provider 历史覆盖、草稿修订、真实发送/回复停止；现有 MCP 尚不能声明完整历史覆盖 |
-| 候选人完整工作台/Dashboard | 工作分支已接候选索引、轮次/原始行关联、服务端分页/筛选/排序、持久 shortlist 及岗位 Dashboard；合成材料的实际界面已验证 | 新迁移及网页尚未发布，真实搜索落库/恢复未验；跨岗位/客户 CRM 去重、批次/名单、外联/面试看板仍缺 |
+| 原件读取、来源高亮、brief 与 G1/G2 | 原件查看器、brief 确认与 G1/G2 执行连接随 `1c6506a0` 发布 | 真实 Agent 自主调用、原材料语义及完整业务未通过 |
+| 人工编辑岗位条件 | 现有 Role 面板条件及可选 filters 已随 `1c6506a0` 发布 | 真实检索采用未验收；不继续扩建结构化编辑器或让其阻塞普通聊天 |
+| Autumn | 已有原生连接，Sourcer 已分配 research/reply 和读工具；Main/Sourcer 的 MCP+playbook 指令及三份共享 skill 已保存并实际读取采用；任务/回执及同 task 续搜有代码 | 岗位绑定后的原生准备/校验、真实搜索→候选证据→反馈→原 task 续搜的整条业务链未通过 |
+| CRM | 用户 OAuth、组织身份和只读发现已接；[CRM PR #44](https://github.com/WeKruit/headhunter-agent/pull/44) 有导入代码；Rakazo 侧目标/来源/effect 关联及状态展示已随 `1c6506a0` 发布 | CRM 另库迁移及 MCP/Web 发布、真实目标绑定/导入写读/并发/RLS、可信发送镜像仍缺 |
+| Instantly | 已接只读服务；原生精确草稿/审批/回复关联及实时预检代码已随 `1c6506a0` 发布 | 完整旧 hold 来源、Gmail 与 provider 历史覆盖、草稿修订、真实发送/回复停止未通过；回复跟进后置 |
+| 候选人完整工作台/Dashboard | 候选/轮次索引、分页/筛选/排序、shortlist 及 Dashboard 代码与应用迁移已发布；合成材料的组件界面已验证 | 真实搜索落库/恢复未验；跨岗位/客户 CRM 去重、批次/名单、外联/面试看板仍缺 |
 | 执行过程展示 | 原生 `ToolActivityDisclosure`、事件和 Activity 视图可复用 | 完整招聘步骤、委派树、任务/结果/证据/反馈的关联展示与实时/重载验收 |
 | Agent 可替换底座与插件 | Pi、逐 bot 模型和原生 memory/skills/MCP/文件/routines 可复用 | 每 bot runtime/明确 connection、运行配置冻结、human 群成员等 M3 实际缺口未完成 |
 
@@ -51,7 +75,7 @@ flowchart TD
   JD[JD 链接 / 描述 / 附件] --> Role[岗位及条件版本 / 关键澄清 / 人类确认]
   Role --> Search[Main 委派 Sourcer / 原生 search task 与 action]
   Search --> Raw[保存 provider 原始结果及回执 Artifact]
-  Raw --> Index[候选索引 + 本轮结果关联：代码已接，待发布验收]
+  Raw --> Index[候选索引 + 本轮结果关联：已发布，真实业务待验收]
   Index --> Evidence[读取材料 / 版本化 met-unmet-unknown 评估]
   Evidence --> UI[候选卡片与表格 / 详情 / 证据 / 执行过程]
   UI --> Feedback[持久化人工反馈 / shortlist / 条件或偏好修订]
@@ -64,7 +88,7 @@ flowchart TD
   Receipt --> Stop[收到回复 / opt-out 后停止后续外联]
 ```
 
-“找到候选人”就要保留原始结果和结果关联，不等评估完成才在产品里出现。**工作分支已接上结果索引，线上仍是旧版本**：原始页继续保存在 Artifact；新的候选/页/行索引在原生读取回执的同一事务写入，评估独立保存在 `recruiting_assessments`。这不是所有人已经进入 CRM 的证明。provider 报告总数、实际拉取并保存的行数、本地去重人数分别展示；不能把第一页或未读 cursor 后的结果当作完整名单。
+“找到候选人”就要保留原始结果和结果关联，不等评估完成才在产品里出现。**结果索引与应用迁移已上线，但真实搜索写入仍待验收**：原始页继续保存在 Artifact；候选/页/行索引在原生读取回执的同一事务写入，评估独立保存在 `recruiting_assessments`。这不是所有人已经进入 CRM 的证明。provider 报告总数、实际拉取并保存的行数、本地去重人数分别展示；不能把第一页或未读 cursor 后的结果当作完整名单。
 
 #### 数据存储：现有记录与需要补齐的应用记录
 
@@ -137,8 +161,8 @@ Chrome 实际打开现有组件 fixture，验证 Table 中三条候选（含两�
 
 #### 接下来的交付批次
 
-1. **搜索过滤与需求确认**：先发布验收原面板过滤/资格条件编辑、来源、关键澄清和 G0；原生指令/skills 采用同一领域记录，不以旧 CSV/脚本替代业务真值。
-2. **真实找人与候选工作台**：G1 → 十人校准 → 全部结果落库/身份去重/轮次关联 → 候选证据及 unknown → 人工反馈 → 当前规则确认/G2 → 原 task 续搜。复用现有 Cards/Table/五视图和 Dashboard，保留未评估者。
+1. **原生多 Agent → Autumn 的实际调用**：现有 instructions/skills 已采用，不再为了准备而新增 schema。以普通 JD 聊天验证 Main→Sourcer→Autumn、必要澄清、十人校准与反馈后同 task 续搜。遇到自定义层阻碍时先解释实际缺口，以最小接线改动解决；不另搭流程。
+2. **真实找人与候选工作台**：按 playbook 保留材料和校准确认，读取全部结果并展示来源、未评估者及 unknown；最小补齐存储/身份去重/轮次引用后验证刷新和重启。复用现有 Cards/Table 与 Dashboard，不把 Agent 决策重写成筛选引擎。
 3. **CRM**：找人主线后完成已有候选的来源/评审写读、新人导入/身份去重/岗位关联；写失败不能显示已同步。保留现有代码，不先扩大 CRM 发布范围。
 4. **外联闭环（后置）**：G3/G4 精确内容/名单/设置审批；发送前真实 hold/pass/suppression/重复及邮件状态，provider 回执、回复/opt-out 停止；回复修订/跟进在找人主线后恢复。复用原生 provider，不另建引擎。
 5. **其余 M3/M4 与 M5**：每 bot runtime/connection/config snapshot、人类群成员、插件/文件/服务迁入等按 181 项并行补齐；最后逐项做多用户、跨对话、原卡等待时重启、未知结果恢复和整品验收。

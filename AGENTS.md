@@ -1,5 +1,22 @@
 # AGENTS.md
 
+## WeKruit design principles
+
+Build a recruiting multi-agent product by composing Rakazo's existing harness and Autumn's existing research agent. These principles govern implementation choices in the WeKruit plans; historical task lists and existing custom code are not authorization to expand another agent platform.
+
+1. **Reuse the harness.** Rakazo's frontend/backend and native Pi runtime own crew chat, delegation, sessions/history, memory, skills, MCP, questions, approvals, files and recovery. Trace and use the existing capability before changing it. Do not build a second harness, orchestrator, provider router or parallel interaction layer.
+2. **Treat Autumn as an agent.** Autumn plans searches, researches people, checks sources and returns results. Sourcer calls it through the existing MCP/API connection with a useful prompt; do not rebuild its search, ranking or research engine locally.
+3. **Compose agents, not a fixed recruiting pipeline.** Main understands the user and coordinates; Sourcer applies the playbook, delegates research to Autumn, reviews returned evidence and incorporates feedback. Use native group chat, delegation and handoffs. Additional specialists must serve a real product need and reuse these same mechanisms.
+4. **Put recruiting behavior in instructions and skills.** Stable responsibilities belong in bot instructions; playbook guidance belongs in existing skills. Agents decide relevant next steps from context. Do not translate the playbook into a custom rules engine, business DSL, fixed questionnaire or mandatory series of domain-tool calls. Preserve actual human decisions and approval requirements.
+5. **Keep the product layer small.** Build the requested chat, evidence/results, feedback and Dashboard using existing components. Persistence serves actual results, source references, identity/deduplication and task/session links. Define an output schema only when an actual return/storage/display need requires it; a schema must not become the agent's reasoning engine or require users to fill technical fields.
+6. **Preserve autonomous continuity.** Feedback becomes a clear follow-up on the same Autumn task. Keep the original native thread, session and question/approval card through answers and recovery. Ordinary searches and continuations use existing authorization, quota and rate limits without per-call approval. Ask only for material missing/conflicting information and genuine human decisions; keep external-send, access and budget boundaries enforced.
+7. **Replace providers through existing boundaries.** Use native per-bot model/connection and memory/skills/MCP settings for supported substitutions. Do not create a new framework merely to promise future runtime or plugin interchangeability.
+8. **Prove the user workflow.** Verify normal chat → native Main/Sourcer collaboration → Autumn results/evidence → user feedback → same-task continuation. Explain any demonstrated native gap before making the smallest integration change. Offline checks, schemas, agent explanations and synthetic screenshots alone do not establish this workflow. Preserve existing work and records; do not expand or blindly remove custom layers simply because they exist.
+
+The current priority is playbook-driven sourcing and filtering. The wider product scope remains, but it does not require custom infrastructure for every listed feature.
+
+## Repository conventions
+
 - This is a public repository: assume all tracked content and diffs are public. Never commit secrets, `.env` files, private URLs, personal/customer data, or real production data; use fake placeholders. Review `git status` and the staged diff before committing, and never force-add ignored files. If private data appears, stop and alert the maintainer.
 - Rakazo is one product across web, Electron desktop, and Expo mobile; Electron hosts the web UI. Put shared behavior, contracts, API logic, and reusable UI in packages. Keep only genuinely native navigation, storage, permissions, and interactions platform-specific. Core workflows must cover every applicable surface or degrade safely for an explicit reason.
 - No hosted vendor is required to run the core product. Keep LLMs, sandboxes, memory, voice, integrations, and future external services optional and behind provider-neutral interfaces. Vendor SDKs, configuration, and translation belong only in adapters and composition roots. New providers must reuse shared contracts and deterministic offline conformance tests.
