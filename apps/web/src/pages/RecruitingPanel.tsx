@@ -994,7 +994,7 @@ function ArtifactReference({
               <pre
                 role="document"
                 aria-label={t`Source text`}
-                className="whitespace-pre-wrap break-words text-sm"
+                className="whitespace-pre-wrap break-words font-sans text-sm leading-relaxed"
               >
                 {current.excerpt.text.slice(0, current.excerpt.start)}
                 <mark className="bg-accent text-accent-foreground">
