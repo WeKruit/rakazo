@@ -14,7 +14,9 @@ Supabase 独立数据库、原生 memory provider、Modal Volume 和 E2B 沿用�
 
 Execution priority: filter playbook and sourcing (S1–S5) come first; reply and follow-up work is deferred. Feature implementation and direct product validation come before CI waits. Do not wait for CodeQL/CI after each push. The owner authorized an incremental spending cap of US$150; track usage against the private authorization baseline and retain existing resources. Merge, deployment, production migration, access expansion and outbound authorization remain separate.
 
-当前获准发布的源码 `7288eab37c4cafe8eb1168285dd947494767e5d0` 已部署为 Modal v39。上一版本的五份应用迁移（brief、搜索审批、候选/轮次索引、CRM 回执关联、回复关联）仍在独立 `rakazo` 库中，本次未新增迁移。实际容器的变更源码 hash 与发布版本一致，API health/ready 通过且非 degraded；前后核对保留两位 bot 配置、五份 skills、11 份记忆、78 个受保护 run、171 个 effect 及原消息/迁移账本。旧 CRM 数据库、工具权限和外联未改。此状态取代下面历史批次的“尚未发布/迁移未执行”，不取代真实业务验收。
+当前候选保存版本 `368a0146` 已部署为 Modal v40，随后原生目录接线修复 `05bf2cde` 部署为 v41，最终回执派生连接修复 `50043a27` 部署为 v42。只在独立 `rakazo` 库应用获准的单份 `20261018000000_native_recruiting_candidate_sources`，账本共 109 份；taskId/actionId 同时可空的约束已实查。两次真实容器替换的前后比对通过，现有配置、记忆、原消息/run/effect 和待答卡保留。API health/ready 通过且非 degraded，变更源码 hash 与发布版本一致；没有新表、权限、资源、订阅或外联。
+
+下面保留 v39 发布的历史基线：获准源码 `7288eab37c4cafe8eb1168285dd947494767e5d0` 已部署为 Modal v39。上一版本的五份应用迁移（brief、搜索审批、候选/轮次索引、CRM 回执关联、回复关联）仍在独立 `rakazo` 库中，本次未新增迁移。实际容器的变更源码 hash 与发布版本一致，API health/ready 通过且非 degraded；前后核对保留两位 bot 配置、五份 skills、11 份记忆、78 个受保护 run、171 个 effect 及原消息/迁移账本。旧 CRM 数据库、工具权限和外联未改。此状态取代下面历史批次的“尚未发布/迁移未执行”，不取代真实业务验收。
 
 ### 当前首要能力：playbook 驱动的自主找人（业务验收未通过）
 
@@ -50,12 +52,17 @@ Main/Sourcer 随后各完成一次实际回复，均读取两份当前 skill，�
 
 **仍缺的产品接线：**普通原生 MCP 返回保存在原生工具回执/对话中；本批没有把新任务自动登记到依赖领域 action 的岗位候选索引。因此不能声称任意原生搜索已自动进入 Dashboard。在已验的 Main/Sourcer→Autumn→同 task 反馈技术链上继续候选业务验收，再依据真实候选返回补最小结果关联；本次 27 行是岗位/公司证据，不是候选名单，不应索引成人员。不得以恢复强制领域步骤来解决展示问题。
 
-**当前最小接线（代码完成，未发布）：**复用已有 `recruiting_research` 的可选 `save_results`，把本 run 中同 MCP/task/cursor 的真实候选页保存到现有 ArtifactStore 与候选索引。它只保存已经返回的结果，不准备、批准或触发搜索；普通 MCP 仍直接运行。Agent 明确选择候选结果，服务端核验原生完成回执、岗位版本、归属和文件 hash；公司/JD 表不能冒充人员。未评估及缺字段的候选保留，LinkedIn 身份沿用现有去重逻辑。原候选来源允许没有自定义 task/action，用真实 effect 和 artifact 引用连接 Dashboard；不造领域任务或第二套表。
+**当前最小接线（已发布 v40/v41）：**复用已有 `recruiting_research` 的可选 `save_results`，把本 run 中同 MCP/task/cursor 的真实候选页保存到现有 ArtifactStore 与候选索引。它只保存已经返回的结果，不准备、批准或触发搜索；普通 MCP 仍直接运行。Agent 明确选择候选结果，服务端核验原生完成回执、岗位版本、归属和文件 hash；公司/JD 表不能冒充人员。未评估及缺字段的候选保留，LinkedIn 身份沿用现有去重逻辑。原候选来源允许没有自定义 task/action，用真实 effect 和 artifact 引用连接 Dashboard；不造领域任务或第二套表。
 
 - [x] 在现有 contracts、候选和工具测试中先复现原生候选保存缺口。
 - [x] 复用现有候选写入、来源核验、CRM 身份边界和 UI；保存与原生完成回执同事务提交，重复执行不重复落库。原生 provider_report 来源不会冒标原件；旧 action 来源仍严格核验。
 - [x] 八个聚焦文件 441 项离线检查通过，DB/adapters/API/Web 类型检查及格式检查通过。新增原生保存/来源和中断恢复检查先失败后通过；持久化部分是 mock，不是实际 PostgreSQL 事务或迁移验收。独立审查发现并修复本地保存被通用 uncertain 分支拦住的问题；只有此本地事务可在当前 lease/fence 下恢复，外部调用不自动重放。
-- [ ] 另行批准发布及 `20261018000000_native_recruiting_candidate_sources` 后，再做真实候选页面、反馈、刷新/重启验收。迁移只把既有候选页的 taskId/actionId 两列改为同时可空，不新建表。普通候选列表、未评估计数和每人来源使用已有页面；顶层原生搜索轮次历史尚未接入旧领域 action 列表。不得把离线检查或公司证据算作业务验收。
+- [x] 获准版本和单份迁移已实际发布并核对。Sourcer 在原群经原生 MCP 读取两份已有候选结果，实际保存 30 行/30 个 LinkedIn 身份，全部未评估；Evidence 真实展示 Cards/Table、缺失简历及每人来源，Dashboard 显示真实聚合。两份原始输出均通过 actor-scoped 原生读取，字节、hash、长度与完整 provider 回执相符，各 15 行。真实容器替换后，候选/来源/评估与已有消息、配置、记忆、run/effect 完全一致，没有重放。
+- [x] 首次自然请求暴露连接标识不可发现和上下文缩短误读。复用 task_catalog 的已授权工具列表返回非凭证 resourceId，并说明既有 lazy catalog 工具 ID；保存说明明确直接读取服务端完整回执，不重构模型截断片段。7 项聚焦检查及类型/格式检查、独立审阅通过；新增目录检查先失败后通过。
+- [x] v41 真实重试仍在内部连接 ID 上停止，没有保存或假报成功。最终修复 `50043a27` 已随 v42 发布：save_results 从本 run 最新的同 task/cursor 完成回执取得连接；显式传入连接时仍严格匹配，actor、岗位采用、lease 和原件完整性不变。315 项聚焦检查、DB/adapters 类型及格式、独立审阅通过；缺内部 ID 的保存回归先失败后通过。
+- [x] v42 原群真实重试不传连接 ID，一次完整 get_rows 后两次保存均成功，返回同一来源 effect/Artifact；仅产生一次候选保存事件。再次观察的 15 行只增加一份来源页，累计 45 条来源记录归并为 30 人，全部未评估、无 shortlist；没有 research/reply、CRM 或外联。Agent 原件摘录明确区分 JD 内容与候选证据，没有把前者冒作人员证明。
+- [x] 新保存后的受控容器替换也已核对：候选、45 条来源记录、三份来源页、原生保存回执、全部原消息/run/effect、配置/记忆、迁移账本与待答卡逐项相同，未重放。三份原件均经原生 actor 授权读取，字节/hash/长度与对应完整 provider 回执一致；API ready 非 degraded。网页重载后可见 30 人且全部未评估，同一人保留两次发现来源。
+- [ ] 顶层原生搜索轮次仍未接入旧 action 列表，候选证据的友好逐项呈现仍需补齐；这次历史结果入库不证明新候选检索、校准或反馈续搜，更不证明 P6。
 
 下面保留既有增量的实现/验证事实，不能据此恢复其旧优先级或继续扩建 schema/领域工具。已有 research admission/准备层是否阻碍原生 Agent 自主调用仍待实测；若有阻碍，先说明具体调用链，只修该缺口，不再叠加包装。
 
@@ -85,7 +92,7 @@ Main/Sourcer 随后各完成一次实际回复，均读取两份当前 skill，�
 | Autumn | 原生连接及 MCP+playbook 配置已采用；v39 实测 Main/Sourcer 群内交接、公开岗位研究、原卡自定义答案跨重启后进入同 task 反馈，返回 27 行 | 完整引文读取的上下文压缩缺口、候选搜索→全部证据→反馈→同 task 续搜及 Dashboard 自动关联仍未通过 |
 | CRM | 用户 OAuth、组织身份和只读发现已接；[CRM PR #44](https://github.com/WeKruit/headhunter-agent/pull/44) 有导入代码；Rakazo 侧目标/来源/effect 关联及状态展示已随 `1c6506a0` 发布 | CRM 另库迁移及 MCP/Web 发布、真实目标绑定/导入写读/并发/RLS、可信发送镜像仍缺 |
 | Instantly | 已接只读服务；原生精确草稿/审批/回复关联及实时预检代码已随 `1c6506a0` 发布 | 完整旧 hold 来源、Gmail 与 provider 历史覆盖、草稿修订、真实发送/回复停止未通过；回复跟进后置 |
-| 候选人完整工作台/Dashboard | 候选/轮次索引、分页/筛选/排序、shortlist 及 Dashboard 代码与应用迁移已发布；合成材料的组件界面已验证 | 真实搜索落库/恢复未验；跨岗位/客户 CRM 去重、批次/名单、外联/面试看板仍缺 |
+| 候选人完整工作台/Dashboard | 候选/轮次索引、分页/筛选/排序、shortlist 及 Dashboard 代码与应用迁移已发布；合成材料的组件界面已验证 | 已有真实候选结果落库/未评估展示及容器恢复已验；新搜索/反馈续搜、顶层原生轮次、跨岗位/客户 CRM 去重及外联/面试看板仍缺 |
 | 执行过程展示 | 原生 `ToolActivityDisclosure`、事件和 Activity 视图可复用 | 完整招聘步骤、委派树、任务/结果/证据/反馈的关联展示与实时/重载验收 |
 | Agent 可替换底座与插件 | Pi、逐 bot 模型和原生 memory/skills/MCP/文件/routines 可复用 | 每 bot runtime/明确 connection、运行配置冻结、human 群成员等 M3 实际缺口未完成 |
 
