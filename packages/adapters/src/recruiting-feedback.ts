@@ -27,7 +27,7 @@ export type RecruitingFeedbackResult = {
   | { status: "needs_clarification" }
   | {
       status: "proposed";
-      nextTool: "recruiting_role" | "recruiting_research" | "recruiting_assess";
+      nextTool?: "recruiting_role" | "recruiting_assess";
     }
   | {
       status: "saved";
@@ -84,16 +84,12 @@ export async function executeRecruitingFeedback(
     throw new RecruitingFeedbackValidationError("Recruiting feedback does not belong to this run");
   const result = { feedback, source, workspace };
   if (feedback.intent.basis === "inferred") return { ...result, status: "needs_clarification" };
+  if (feedback.target === "round") return { ...result, status: "proposed" };
   if (feedback.target !== "preference")
     return {
       ...result,
       status: "proposed",
-      nextTool:
-        feedback.target === "role"
-          ? "recruiting_role"
-          : feedback.target === "round"
-            ? "recruiting_research"
-            : "recruiting_assess",
+      nextTool: feedback.target === "role" ? "recruiting_role" : "recruiting_assess",
     };
   const expected = options?.expectedMemory;
   if (

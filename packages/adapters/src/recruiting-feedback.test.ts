@@ -152,7 +152,6 @@ describe("recruiting feedback", () => {
 
   it.each([
     ["role", "revise", "recruiting_role"],
-    ["round", "scope", "recruiting_research"],
     ["candidate", "fact", "recruiting_assess"],
   ] as const)("keeps %s feedback as a scoped proposal", async (target, operation, nextTool) => {
     const f = fixture();
@@ -179,6 +178,46 @@ describe("recruiting feedback", () => {
       actor,
       expect.objectContaining({ roleId: "role", expectedRoleRevision: 1 }),
     );
+    expect(f.read).not.toHaveBeenCalled();
+    expect(f.commit).not.toHaveBeenCalled();
+  });
+
+  it("keeps round feedback a proposal without forcing a saved-workspace research action", async () => {
+    const f = fixture();
+    const roundIntent = {
+      basis: "direct",
+      quote: "Prioritize infrastructure evidence in this search.",
+    } as const;
+    const humanSource = { ...source, quote: roundIntent.quote };
+    db.readContext.mockResolvedValueOnce({
+      source: humanSource,
+      workspace,
+      threadId: "actual-run-thread",
+      botId: "bot",
+    });
+    const input = {
+      target: "round",
+      operation: "scope",
+      roleId: "role",
+      expectedRoleRevision: 1,
+      summary: roundIntent.quote,
+      intent: roundIntent,
+      sourceRefs: [],
+    };
+    expect(await executeRecruitingFeedback(f.deps, trusted, input, context)).toEqual({
+      status: "proposed",
+      feedback: input,
+      source: humanSource,
+      workspace,
+    });
+    expect(db.readContext).toHaveBeenCalledWith(f.deps.prisma, actor, {
+      runId: trusted.runId,
+      sourceMessageId: trusted.sourceMessageId,
+      intent: roundIntent,
+      sourceRefs: [],
+      roleId: "role",
+      expectedRoleRevision: 1,
+    });
     expect(f.read).not.toHaveBeenCalled();
     expect(f.commit).not.toHaveBeenCalled();
   });
