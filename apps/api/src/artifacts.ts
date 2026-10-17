@@ -1,5 +1,6 @@
 import { createHash } from "node:crypto";
 import type { ArtifactStore } from "@rakazo/adapter-kit";
+import { readActorArtifact } from "@rakazo/adapters";
 import type { Actor } from "@rakazo/contracts";
 import { ATTACHMENT_MAX_COUNT } from "@rakazo/contracts";
 import {
@@ -125,13 +126,89 @@ function createdArtifact(row: Prisma.ArtifactGetPayload<Record<string, never>>) 
   };
 }
 
+function artifactDiagnostics(actor: Actor, input: { includeDiagnostics?: boolean }) {
+  return actor.isDeploymentOwner && input.includeDiagnostics === true;
+}
+
+// Match server-owned provenance on any family member, never a name or upload nonce.
+function internalRecruitingFamily() {
+  return Prisma.sql`EXISTS (
+    SELECT 1 FROM "artifacts" internal
+    WHERE internal."spaceId" = a."spaceId" AND internal."userId" = a."userId"
+      AND (internal.id = COALESCE(a."rootArtifactId", a.id)
+        OR internal."rootArtifactId" = COALESCE(a."rootArtifactId", a.id))
+      AND (
+        EXISTS (
+          SELECT 1 FROM "events" event
+          WHERE event."runId" = internal."runId"
+            AND event.type IN ('recruiting.context.adopted', 'recruiting.material.read', 'recruiting.read', 'recruiting.candidates.saved')
+            AND event."spaceId" = internal."spaceId" AND event."botId" = internal."botId"
+            AND (
+              (event.type = 'recruiting.context.adopted'
+                AND event.payload->'contextArtifact'->>'artifactId' = internal.id
+                AND event.payload->'contextArtifact'->>'sha256' = internal.hash)
+              OR (event.type = 'recruiting.material.read' AND event.payload->>'reader' = 'web_fetch'
+                AND event.payload->'artifact'->>'artifactId' = internal.id
+                AND event.payload->'artifact'->>'sha256' = internal.hash)
+              OR (event.type IN ('recruiting.read', 'recruiting.candidates.saved')
+                AND (event.type <> 'recruiting.read' OR event.payload->>'phase' = 'recorded')
+                AND event.payload->'outputArtifact'->>'artifactId' = internal.id
+                AND event.payload->'outputArtifact'->>'sha256' = internal.hash)
+            )
+        ) OR EXISTS (
+          SELECT 1 FROM "recruiting_research_actions" action
+          WHERE (action."contextArtifactId" = internal.id AND action."contextArtifactHash" = internal.hash)
+            OR (action."requestArtifactId" = internal.id AND action."requestArtifactHash" = internal.hash)
+            OR (action."receiptArtifactId" = internal.id AND action."receiptArtifactHash" = internal.hash)
+            OR action."outputArtifacts" @> jsonb_build_array(jsonb_build_object('artifactId', internal.id, 'sha256', internal.hash))
+        ) OR EXISTS (
+          SELECT 1 FROM "recruiting_candidate_pages" page
+          WHERE page."artifactId" = internal.id AND page."artifactHash" = internal.hash
+        )
+      )
+  )`;
+}
+
+async function assertArtifactVisible(
+  prisma: Pick<PrismaClient, "$queryRaw">,
+  actor: Actor,
+  input: { artifactId: string; includeDiagnostics?: boolean },
+) {
+  if (artifactDiagnostics(actor, input)) return;
+  const internal = await prisma.$queryRaw<Array<{ id: string }>>(Prisma.sql`
+    SELECT a.id FROM "artifacts" a
+    WHERE a.id = ${input.artifactId} AND a."spaceId" = ${actor.spaceId} AND a."userId" = ${actor.userId}
+      AND ${internalRecruitingFamily()}
+    LIMIT 1
+  `);
+  if (internal.length) throw new IsolationError();
+}
+
+export async function listOwnedArtifacts(
+  deps: { prisma: Pick<PrismaClient, "$queryRaw"> },
+  actor: Actor,
+  input: { botId: string; includeDiagnostics?: boolean },
+) {
+  const visibility = artifactDiagnostics(actor, input)
+    ? Prisma.empty
+    : Prisma.sql`AND NOT ${internalRecruitingFamily()}`;
+  const rows = await deps.prisma.$queryRaw<Prisma.ArtifactGetPayload<Record<string, never>>[]>(
+    Prisma.sql`
+      SELECT a.* FROM "artifacts" a
+      WHERE a."botId" = ${input.botId} AND a."groupId" IS NULL
+        AND a."spaceId" = ${actor.spaceId} AND a."userId" = ${actor.userId} ${visibility}
+    `,
+  );
+  return rows.map(createdArtifact);
+}
+
 export async function getOwnedArtifact(
   deps: {
     prisma: PrismaClient;
     artifacts: ArtifactStore;
   },
   actor: Actor,
-  input: { botId: string; artifactId: string },
+  input: { botId: string; artifactId: string; includeDiagnostics?: boolean },
 ) {
   const row = await deps.prisma.artifact.findFirst({
     where: {
@@ -143,6 +220,7 @@ export async function getOwnedArtifact(
     },
   });
   if (!row) throw new IsolationError();
+  await assertArtifactVisible(deps.prisma, actor, input);
   return readArtifact(deps.artifacts, actor, row, input.botId);
 }
 
@@ -152,7 +230,12 @@ export async function getSpaceArtifact(
     artifacts: ArtifactStore;
   },
   actor: Actor,
-  input: { artifactId: string; groupId: string; contextBotId: string },
+  input: {
+    artifactId: string;
+    groupId: string;
+    contextBotId: string;
+    includeDiagnostics?: boolean;
+  },
 ) {
   const row = await deps.prisma.artifact.findFirst({
     where: {
@@ -163,6 +246,7 @@ export async function getSpaceArtifact(
     },
   });
   if (!row) throw new IsolationError();
+  await assertArtifactVisible(deps.prisma, actor, input);
   return readArtifact(deps.artifacts, actor, row, input.contextBotId);
 }
 
@@ -173,17 +257,14 @@ export async function getSpaceArtifactById(
     artifacts: ArtifactStore;
   },
   actor: Actor,
-  input: { artifactId: string },
+  input: { artifactId: string; includeDiagnostics?: boolean },
 ) {
-  const row = await deps.prisma.artifact.findFirst({
-    where: {
-      id: input.artifactId,
-      spaceId: actor.spaceId,
-      userId: actor.userId,
-    },
-  });
-  if (!row) throw new IsolationError();
-  return readArtifact(deps.artifacts, actor, row, row.botId ?? row.groupId ?? row.id);
+  await assertArtifactVisible(deps.prisma, actor, input);
+  const { row, bytes } = await readActorArtifact(deps, actor, input);
+  return {
+    ...createdArtifact(row),
+    contentBase64: Buffer.from(bytes).toString("base64"),
+  };
 }
 
 async function readArtifact(
@@ -248,12 +329,12 @@ export class ArtifactListCursorError extends Error {
 type ArtifactListCursor = {
   createdAt: string;
   id: string;
-  botId: string | null;
+  scope: string;
   // Freezes the version set for this page sequence.
   asOf: string;
 };
 
-const ARTIFACT_LIST_CURSOR_PREFIX = "v1.";
+const ARTIFACT_LIST_CURSOR_PREFIX = "v2.";
 
 function encodeArtifactListCursor(cursor: ArtifactListCursor): string {
   return (
@@ -277,48 +358,53 @@ function decodeArtifactListCursor(value: string): ArtifactListCursor {
     typeof record.createdAt !== "string" ||
     typeof record.id !== "string" ||
     !record.id ||
-    typeof record.asOf !== "string"
+    typeof record.asOf !== "string" ||
+    typeof record.scope !== "string"
   ) {
     throw new ArtifactListCursorError();
   }
-  const botId = cursorBotId(record.botId);
   const createdAt = new Date(record.createdAt);
   const asOf = new Date(record.asOf);
   if (Number.isNaN(createdAt.getTime()) || Number.isNaN(asOf.getTime())) {
     throw new ArtifactListCursorError();
   }
-  return { createdAt: createdAt.toISOString(), id: record.id, botId, asOf: asOf.toISOString() };
-}
-
-function cursorBotId(value: unknown): string | null {
-  if (value === null || typeof value === "string") return value;
-  throw new ArtifactListCursorError();
+  return {
+    createdAt: createdAt.toISOString(),
+    id: record.id,
+    scope: record.scope,
+    asOf: asOf.toISOString(),
+  };
 }
 
 export async function listSpaceArtifacts(
   deps: { prisma: Pick<PrismaClient, "artifact" | "$queryRaw"> },
   actor: Actor,
-  input: { botId?: string; cursor?: string; limit?: number },
+  input: { botId?: string; cursor?: string; limit?: number; includeDiagnostics?: boolean },
 ) {
   const take = Math.min(Math.max(input.limit ?? 30, 1), 60);
   const scopeBotId = input.botId ?? null;
-  const botFilter = scopeBotId ? Prisma.sql`AND "botId" = ${scopeBotId}` : Prisma.empty;
+  const diagnostics = artifactDiagnostics(actor, input);
+  const scope = createHash("sha256")
+    .update(JSON.stringify([actor.spaceId, actor.userId, scopeBotId, diagnostics]))
+    .digest("hex");
+  const botFilter = scopeBotId ? Prisma.sql`AND a."botId" = ${scopeBotId}` : Prisma.empty;
+  const visibility = diagnostics ? Prisma.empty : Prisma.sql`AND NOT ${internalRecruitingFamily()}`;
 
   let asOf = new Date();
   let cursorFilter = Prisma.empty;
   if (input.cursor) {
     // Position is stored on the cursor so a deleted row cannot replay the first page.
     const cursor = decodeArtifactListCursor(input.cursor);
-    if (cursor.botId !== scopeBotId) throw new ArtifactListCursorError();
+    if (cursor.scope !== scope) throw new ArtifactListCursorError();
     asOf = new Date(cursor.asOf);
     cursorFilter = Prisma.sql`AND (latest."createdAt", latest.id) < (${new Date(cursor.createdAt)}, ${cursor.id})`;
   }
 
   const rows = await deps.prisma.$queryRaw<ListSpaceRow[]>(Prisma.sql`
     WITH scoped AS (
-      SELECT * FROM "artifacts"
-      WHERE "spaceId" = ${actor.spaceId} AND "userId" = ${actor.userId} ${botFilter}
-        AND "createdAt" <= ${asOf}
+      SELECT a.* FROM "artifacts" a
+      WHERE a."spaceId" = ${actor.spaceId} AND a."userId" = ${actor.userId} ${botFilter}
+        AND a."createdAt" <= ${asOf} ${visibility}
     ),
     latest AS (
       SELECT DISTINCT ON (COALESCE("rootArtifactId", id))
@@ -366,7 +452,7 @@ export async function listSpaceArtifacts(
         ? encodeArtifactListCursor({
             createdAt: last.createdAt.toISOString(),
             id: last.id,
-            botId: scopeBotId,
+            scope,
             asOf: asOf.toISOString(),
           })
         : null,
@@ -374,15 +460,16 @@ export async function listSpaceArtifacts(
 }
 
 export async function listArtifactVersions(
-  deps: { prisma: Pick<PrismaClient, "artifact"> },
+  deps: { prisma: Pick<PrismaClient, "artifact" | "$queryRaw"> },
   actor: Actor,
-  input: { familyId: string },
+  input: { familyId: string; includeDiagnostics?: boolean },
 ) {
   const anchor = await deps.prisma.artifact.findFirst({
     where: { id: input.familyId, spaceId: actor.spaceId, userId: actor.userId },
     select: { id: true, rootArtifactId: true },
   });
   if (!anchor) throw new IsolationError();
+  await assertArtifactVisible(deps.prisma, actor, { ...input, artifactId: input.familyId });
   const rootId = anchor.rootArtifactId ?? anchor.id;
   const rows = await deps.prisma.artifact.findMany({
     where: {
@@ -413,6 +500,7 @@ export async function deleteArtifactFamily(
     select: { id: true, rootArtifactId: true, botId: true },
   });
   if (!anchor) throw new IsolationError();
+  await assertArtifactVisible(deps.prisma, actor, { artifactId: input.familyId });
   const rootId = anchor.rootArtifactId ?? anchor.id;
 
   for (;;) {
@@ -599,7 +687,7 @@ export function buildUserMessageBlocks(
   attachmentBlocks: ReturnType<typeof messageBlockForArtifact>[],
 ) {
   const blocks = [];
-  const caption = text?.trim();
+  const caption = text?.trim() ? text : undefined;
   if (caption) blocks.push({ kind: "text" as const, text: caption });
   blocks.push(...attachmentBlocks);
   return blocks;

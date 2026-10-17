@@ -125,12 +125,13 @@ function FilePreview({
   >({ status: "loading" });
   const targetBotId = "botId" in target ? target.botId : undefined;
   const targetGroupId = "groupId" in target ? target.groupId : undefined;
+  const includeDiagnostics = target.includeDiagnostics;
 
   useEffect(() => {
     let cancelled = false;
     const artifactTarget: ArtifactTarget =
       targetBotId !== undefined ? { botId: targetBotId } : { groupId: targetGroupId! };
-    void fetchArtifactBytes(artifactTarget, artifactId)
+    void fetchArtifactBytes({ ...artifactTarget, includeDiagnostics }, artifactId)
       .then((bytes) => {
         if (cancelled) return;
         if (!TEXT_MIME_TYPES.has(mimeType)) {
@@ -154,7 +155,7 @@ function FilePreview({
     return () => {
       cancelled = true;
     };
-  }, [artifactId, targetBotId, targetGroupId, mimeType, t]);
+  }, [artifactId, targetBotId, targetGroupId, includeDiagnostics, mimeType, t]);
 
   return (
     <>

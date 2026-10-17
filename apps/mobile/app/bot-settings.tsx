@@ -2,9 +2,9 @@ import type { ComputerMode, ThinkingLevel } from "@rakazo/contracts";
 import {
   BOT_COLORS,
   BOT_DESCRIPTION_MAX_LENGTH,
+  BOT_INSTRUCTIONS_MAX_LENGTH,
   BOT_NAME_MAX_LENGTH,
   BOT_TITLE_MAX_LENGTH,
-  normalizeCreateBotProfile,
 } from "@rakazo/contracts";
 import {
   connectedModelChoices,
@@ -37,6 +37,7 @@ import { stopVoicePlayback } from "../lib/voice";
 
 type BotSettingsRecord = MobileBot & {
   description?: string;
+  instructions?: string;
 };
 
 export default function BotSettingsScreen() {
@@ -48,6 +49,7 @@ export default function BotSettingsScreen() {
   const [name, setName] = useState("");
   const [title, setTitle] = useState("");
   const [description, setDescription] = useState("");
+  const [instructions, setInstructions] = useState("");
   const [color, setColor] = useState<string>(BOT_COLORS[0]);
   const [computerMode, setComputerMode] = useState<ComputerMode>("team");
   const [advancedOpen, setAdvancedOpen] = useState(false);
@@ -76,6 +78,7 @@ export default function BotSettingsScreen() {
         setName(next.name);
         setTitle(next.title);
         setDescription(next.description ?? "");
+        setInstructions(next.instructions ?? "");
         setColor(next.color);
         setComputerMode(next.computerMode);
         setModelKey(
@@ -272,7 +275,11 @@ export default function BotSettingsScreen() {
     setPending(true);
     setError(null);
     try {
-      const profile = normalizeCreateBotProfile({ name, title, description });
+      const profile = {
+        name: name.trim(),
+        title: title.trim(),
+        description: description.trim(),
+      };
       const selected = selectedModel;
       const input: {
         botId: string;
@@ -290,9 +297,8 @@ export default function BotSettingsScreen() {
       if (profile.title !== bot.title) input.title = profile.title;
       if (profile.description !== (bot.description ?? "")) {
         input.description = profile.description;
-        // Keep instructions in sync with description (same as web BotSettings).
-        input.instructions = profile.instructions;
       }
+      if (instructions !== (bot.instructions ?? "")) input.instructions = instructions;
       if (color !== bot.color) input.color = color;
       const modelChanged =
         (selected?.provider ?? null) !== (bot.modelProvider ?? null) ||
@@ -510,6 +516,25 @@ export default function BotSettingsScreen() {
         </Pressable>
         {advancedOpen ? (
           <View>
+            <Text style={{ color: tokens.mutedForeground, marginTop: 16, fontSize: 14 }}>
+              {t("Instructions")}
+            </Text>
+            <TextInput
+              accessibilityLabel={t("Instructions")}
+              value={instructions}
+              maxLength={BOT_INSTRUCTIONS_MAX_LENGTH}
+              onChangeText={setInstructions}
+              multiline
+              style={{
+                marginTop: 8,
+                backgroundColor: native.fill,
+                borderRadius: 11,
+                padding: 16,
+                color: tokens.foreground,
+                minHeight: 120,
+                textAlignVertical: "top",
+              }}
+            />
             <View
               style={{
                 marginTop: 8,

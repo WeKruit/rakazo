@@ -1,5 +1,5 @@
 import { createServer } from "node:http";
-import { Sandbox, SandboxNotFoundError, TimeoutError } from "@e2b/desktop";
+import { CommandExitError, Sandbox, SandboxNotFoundError, TimeoutError } from "@e2b/desktop";
 import { describe, expect, it, vi } from "vitest";
 import { shouldSkipPortableWorkspaceFile } from "./computer-workspace.js";
 import type { E2BSandboxSdk } from "./e2b-sandbox.js";
@@ -15,6 +15,54 @@ const context = {
 };
 
 describe("E2B computer backend", () => {
+  it("reports SDK nonzero command output with its real exit code", async () => {
+    const failure = new CommandExitError({
+      exitCode: 7,
+      stdout: "partial result\n",
+      stderr: "failed\n",
+    });
+    const provider = new E2BSandboxProvider("test-key", {
+      connect: vi.fn(async () => ({
+        sandboxId: "existing",
+        commands: { run: vi.fn().mockRejectedValue(failure) },
+      })),
+    } as unknown as E2BSandboxSdk);
+    const events = [];
+    for await (const event of provider.execute(
+      { id: "existing", providerRef: "existing", kind: "e2b", botId: "bot" },
+      { argv: ["false"] },
+      context,
+    ))
+      events.push(event);
+    expect(events).toEqual([
+      { type: "stdout", data: "partial result\n" },
+      { type: "stderr", data: "failed\n" },
+      { type: "exit", code: 7 },
+    ]);
+  });
+
+  it("still throws unknown execution errors even when they carry a result property", async () => {
+    const failure = Object.assign(new Error("transport unavailable"), {
+      result: { exitCode: 0, stdout: "", stderr: "" },
+    });
+    const provider = new E2BSandboxProvider("test-key", {
+      connect: vi.fn(async () => ({
+        sandboxId: "existing",
+        commands: { run: vi.fn().mockRejectedValue(failure) },
+      })),
+    } as unknown as E2BSandboxSdk);
+    const drain = async () => {
+      for await (const _event of provider.execute(
+        { id: "existing", providerRef: "existing", kind: "e2b", botId: "bot" },
+        { argv: ["true"] },
+        context,
+      )) {
+        // Drain the public process-event contract.
+      }
+    };
+    await expect(drain()).rejects.toBe(failure);
+  });
+
   it("removes inherited variables after the command environment overlay", async () => {
     const run = vi.fn(async () => ({ stdout: "", stderr: "", exitCode: 0 }));
     const provider = new E2BSandboxProvider("test-key", {

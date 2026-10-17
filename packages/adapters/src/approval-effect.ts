@@ -1,4 +1,6 @@
 import type { AgentToolExecutionResult } from "@rakazo/adapter-kit";
+import type { BoundApprovalRoute } from "@rakazo/core";
+import { boundDirectApprovalDetails, catalogApprovalDetails } from "@rakazo/core";
 
 export type ApprovalPausedToolResult = AgentToolExecutionResult & { terminate: true };
 
@@ -75,111 +77,6 @@ export function approvedReplayArgs(
     throw new TypeError("Approved tool request is not a JSON object");
   }
   return approvedRequest as Record<string, unknown>;
-}
-
-export const DIRECT_APPROVAL_TAG = "direct";
-
-export type BoundApprovalRoute = {
-  connectorId: string;
-  resourceId: string;
-  toolName: string;
-  resourceRevision?: string | number;
-};
-
-export function catalogApprovalRequest(
-  toolName: string,
-  args: Record<string, unknown>,
-  marker: string,
-  route?: BoundApprovalRoute,
-): unknown[] {
-  return route ? [marker, toolName, args, route] : [marker, toolName, args];
-}
-
-export function catalogApprovalDetails(
-  request: unknown,
-  marker: string,
-): { toolName: string; args: Record<string, unknown>; route?: BoundApprovalRoute } | undefined {
-  if (
-    !Array.isArray(request) ||
-    (request.length !== 3 && request.length !== 4) ||
-    request[0] !== marker ||
-    typeof request[1] !== "string" ||
-    !request[1].endsWith("_execute_tool") ||
-    !request[2] ||
-    typeof request[2] !== "object" ||
-    Array.isArray(request[2])
-  ) {
-    return undefined;
-  }
-  if (request.length === 3) {
-    return { toolName: request[1], args: request[2] as Record<string, unknown> };
-  }
-  const route = request[3];
-  if (
-    !route ||
-    typeof route !== "object" ||
-    Array.isArray(route) ||
-    typeof (route as BoundApprovalRoute).connectorId !== "string" ||
-    typeof (route as BoundApprovalRoute).resourceId !== "string" ||
-    typeof (route as BoundApprovalRoute).toolName !== "string" ||
-    ((route as BoundApprovalRoute).resourceRevision !== undefined &&
-      typeof (route as BoundApprovalRoute).resourceRevision !== "string" &&
-      typeof (route as BoundApprovalRoute).resourceRevision !== "number")
-  ) {
-    return undefined;
-  }
-  return {
-    toolName: request[1],
-    args: request[2] as Record<string, unknown>,
-    route: route as BoundApprovalRoute,
-  };
-}
-
-export function boundDirectApprovalRequest(
-  route: BoundApprovalRoute,
-  args: Record<string, unknown>,
-  marker: string,
-): unknown[] {
-  return [marker, DIRECT_APPROVAL_TAG, { route, args }];
-}
-
-export function boundDirectApprovalDetails(
-  request: unknown,
-  marker: string,
-): { route: BoundApprovalRoute; args: Record<string, unknown> } | undefined {
-  if (
-    !Array.isArray(request) ||
-    request.length !== 3 ||
-    request[0] !== marker ||
-    request[1] !== DIRECT_APPROVAL_TAG ||
-    !request[2] ||
-    typeof request[2] !== "object" ||
-    Array.isArray(request[2])
-  ) {
-    return undefined;
-  }
-  const payload = request[2] as { route?: unknown; args?: unknown };
-  const route = payload.route;
-  if (
-    !route ||
-    typeof route !== "object" ||
-    Array.isArray(route) ||
-    typeof (route as BoundApprovalRoute).connectorId !== "string" ||
-    typeof (route as BoundApprovalRoute).resourceId !== "string" ||
-    typeof (route as BoundApprovalRoute).toolName !== "string" ||
-    ((route as BoundApprovalRoute).resourceRevision !== undefined &&
-      typeof (route as BoundApprovalRoute).resourceRevision !== "string" &&
-      typeof (route as BoundApprovalRoute).resourceRevision !== "number") ||
-    !payload.args ||
-    typeof payload.args !== "object" ||
-    Array.isArray(payload.args)
-  ) {
-    return undefined;
-  }
-  return {
-    route: route as BoundApprovalRoute,
-    args: payload.args as Record<string, unknown>,
-  };
 }
 
 export function approvalRoutesMatch(
@@ -322,14 +219,23 @@ export function approvalPausedToolResult(): ApprovalPausedToolResult {
   };
 }
 
+export function inputPausedToolResult(): ApprovalPausedToolResult {
+  return {
+    kind: "agent_tool_result",
+    content: [{ type: "text", text: "Waiting for your answer on the original question." }],
+    details: { input: "paused" },
+    terminate: true,
+  };
+}
+
 export function isToolPauseResult(result: unknown): result is ApprovalPausedToolResult {
   if (!result || typeof result !== "object") return false;
   const record = result as ApprovalPausedToolResult;
   if (record.kind !== "agent_tool_result") return false;
   const details = record.details;
   if (!details || typeof details !== "object") return false;
-  const pause = details as { approval?: unknown; secret?: unknown };
-  return pause.approval === "paused" || pause.secret === "paused";
+  const pause = details as { approval?: unknown; secret?: unknown; input?: unknown };
+  return pause.approval === "paused" || pause.secret === "paused" || pause.input === "paused";
 }
 
 export function isApprovalPausedResult(result: unknown): result is ApprovalPausedToolResult {
@@ -382,11 +288,11 @@ export function resolveDuplicateEffectGate(
   return { action: "uncertain", toolName };
 }
 
-export type UncertainEffectResult = { error: string; uncertain: true };
+export type UncertainEffectResult = { error: string; uncertain: true; providerResult?: unknown };
 
 export function uncertainEffectResult(toolName: string): UncertainEffectResult {
   return {
-    error: `The earlier ${toolName} execution was interrupted, so its outcome is unknown. It was not replayed to avoid a duplicate side effect. Verify the destination before proposing another action.`,
+    error: `The ${toolName} outcome could not be verified. It was not replayed to avoid a duplicate side effect. Verify the destination before proposing another action.`,
     uncertain: true,
   };
 }
@@ -396,7 +302,7 @@ export async function settleUncertainEffect(
     externalEffect: {
       updateMany: (args: {
         where: { id: string; status: string };
-        data: { status: string; result: UncertainEffectResult };
+        data: { status: string; result: never };
       }) => Promise<{ count: number }>;
       findUnique: (args: {
         where: { id: string };
@@ -405,11 +311,12 @@ export async function settleUncertainEffect(
   },
   effectId: string,
   toolName: string,
+  evidence?: { providerResult: unknown },
 ): Promise<unknown> {
-  const result = uncertainEffectResult(toolName);
+  const result = { ...uncertainEffectResult(toolName), ...evidence };
   const settled = await store.externalEffect.updateMany({
     where: { id: effectId, status: "executing" },
-    data: { status: "uncertain", result },
+    data: { status: "uncertain", result: result as never },
   });
   if (settled.count === 1) return result;
 

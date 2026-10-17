@@ -1,6 +1,7 @@
 // @vitest-environment jsdom
 
 import type { Bot } from "@rakazo/contracts";
+import { BOT_DESCRIPTION_MAX_LENGTH, BOT_INSTRUCTIONS_MAX_LENGTH } from "@rakazo/contracts";
 import type { ComponentProps, ReactNode } from "react";
 import { act } from "react";
 import type { Root } from "react-dom/client";
@@ -67,7 +68,7 @@ vi.mock("../KnowledgeSection", () => ({ KnowledgeSection: () => null }));
 import { rpc } from "../../lib/rpc";
 import { BotSettings } from "./bot-panel";
 
-const longInstructions = "I".repeat(4_000);
+const longInstructions = "I".repeat(BOT_DESCRIPTION_MAX_LENGTH + 3_500);
 
 function bot(description = "Billing"): Bot {
   return {
@@ -108,14 +109,15 @@ function bot(description = "Billing"): Bot {
 let container: HTMLDivElement;
 let root: Root;
 const onSave = vi.fn(
-  async (_patch: Parameters<ComponentProps<typeof BotSettings>["onSave"]>[0]) => undefined,
+  async (_patch: Parameters<ComponentProps<typeof BotSettings>["onSave"]>[0]): Promise<void> =>
+    undefined,
 );
 
-async function render(description = "Billing") {
+async function render(description = "Billing", instructions = longInstructions) {
   await act(async () => {
     root.render(
       <BotSettings
-        bot={bot(description)}
+        bot={{ ...bot(description), instructions }}
         memoryProviderConfigured={false}
         onSkillsChange={() => undefined}
         onSave={onSave}
@@ -127,8 +129,14 @@ async function render(description = "Billing") {
 }
 
 function descriptionField(): HTMLTextAreaElement {
-  const textarea = container.querySelector("textarea");
+  const textarea = container.querySelector<HTMLTextAreaElement>('textarea[id$="-description"]');
   if (!textarea) throw new Error("Missing description field");
+  return textarea;
+}
+
+function instructionsField(): HTMLTextAreaElement {
+  const textarea = container.querySelector<HTMLTextAreaElement>('textarea[id$="-instructions"]');
+  if (!textarea) throw new Error("Missing instructions field");
   return textarea;
 }
 
@@ -141,7 +149,10 @@ function saveButton(): HTMLButtonElement {
 }
 
 async function setDescription(value: string) {
-  const textarea = descriptionField();
+  await setText(descriptionField(), value);
+}
+
+async function setText(textarea: HTMLTextAreaElement, value: string) {
   await act(async () => {
     Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, "value")?.set?.call(
       textarea,
@@ -233,8 +244,8 @@ describe("BotSettings description saves", () => {
     await clickSave();
     expect(onSave.mock.calls[0]?.[0]).toMatchObject({
       description: "Invoices",
-      instructions: "Invoices",
     });
+    expect(onSave.mock.calls[0]?.[0]).not.toHaveProperty("instructions");
 
     // The parent still passes the description from when the panel opened.
     await render();
@@ -253,8 +264,8 @@ describe("BotSettings description saves", () => {
     await clickSave();
     expect(onSave.mock.calls[1]?.[0]).toMatchObject({
       description: "Billing",
-      instructions: "Billing",
     });
+    expect(onSave.mock.calls[1]?.[0]).not.toHaveProperty("instructions");
   });
 
   it("keeps the previous description as the baseline when a save fails", async () => {
@@ -265,7 +276,127 @@ describe("BotSettings description saves", () => {
     await clickSave();
     expect(onSave.mock.calls[1]?.[0]).toMatchObject({
       description: "Invoices",
-      instructions: "Invoices",
     });
+    expect(onSave.mock.calls[1]?.[0]).not.toHaveProperty("instructions");
+  });
+});
+
+describe("BotSettings instructions", () => {
+  it("loads the full instructions in a separately labelled Advanced field", async () => {
+    await render();
+    const field = instructionsField();
+    expect(field.value).toBe(longInstructions);
+    expect(field.maxLength).toBe(BOT_INSTRUCTIONS_MAX_LENGTH);
+    expect(field.labels?.[0]?.firstChild?.textContent).toBe("Instructions");
+    expect(field.closest("details")?.dataset.testid).toBe("bot-settings-advanced");
+    expect(descriptionField().value).toBe("Billing");
+    expect(descriptionField().maxLength).toBe(BOT_DESCRIPTION_MAX_LENGTH);
+  });
+
+  it("saves only the edited instructions without truncating to the description limit", async () => {
+    await render();
+    const next = `${longInstructions}\nAsk only about missing hiring constraints.`;
+    await setText(instructionsField(), next);
+    await clickSave();
+    expect(onSave.mock.calls[0]?.[0]).toHaveProperty("instructions", next);
+    expect(onSave.mock.calls[0]?.[0]).not.toHaveProperty("description");
+
+    await render();
+    await clickSave();
+    expect(onSave.mock.calls[1]?.[0]).not.toHaveProperty("instructions");
+    expect(instructionsField().value).toBe(next);
+
+    await setText(instructionsField(), longInstructions);
+    await clickSave();
+    expect(onSave.mock.calls[2]?.[0]).toHaveProperty("instructions", longInstructions);
+  });
+
+  it("can clear instructions without clearing the description", async () => {
+    await render();
+    await setText(instructionsField(), "");
+    await clickSave();
+    expect(onSave.mock.calls[0]?.[0]).toHaveProperty("instructions", "");
+    expect(onSave.mock.calls[0]?.[0]).not.toHaveProperty("description");
+    expect(descriptionField().value).toBe("Billing");
+  });
+
+  it("refreshes clean profile fields after another client updates the same bot", async () => {
+    await render();
+    await render("Updated by another client", "New server instructions");
+    expect(descriptionField().value).toBe("Updated by another client");
+    expect(instructionsField().value).toBe("New server instructions");
+    await clickSave();
+    expect(onSave.mock.calls[0]?.[0]).not.toHaveProperty("description");
+    expect(onSave.mock.calls[0]?.[0]).not.toHaveProperty("instructions");
+  });
+
+  it("preserves an unsaved instructions draft during a server refresh", async () => {
+    await render();
+    await setText(instructionsField(), "My unsaved instructions");
+    await render("Updated description", "Instructions from another client");
+    expect(descriptionField().value).toBe("Updated description");
+    expect(instructionsField().value).toBe("My unsaved instructions");
+    await clickSave();
+    expect(onSave.mock.calls[0]?.[0]).toHaveProperty("instructions", "My unsaved instructions");
+    expect(onSave.mock.calls[0]?.[0]).not.toHaveProperty("description");
+  });
+
+  it("does not resend a server refresh received during an unrelated pending save", async () => {
+    let finish!: () => void;
+    onSave.mockImplementationOnce(
+      () =>
+        new Promise<void>((resolve) => {
+          finish = resolve;
+        }),
+    );
+    await render();
+    await clickSave();
+    await render("Refreshed description", "Refreshed instructions");
+    await act(async () => finish());
+    await clickSave();
+    expect(onSave.mock.calls[1]?.[0]).not.toHaveProperty("description");
+    expect(onSave.mock.calls[1]?.[0]).not.toHaveProperty("instructions");
+  });
+
+  it.each(["description", "instructions"] as const)(
+    "keeps a newer %s revert when the pending save refreshes the bot",
+    async (fieldName) => {
+      let finish!: () => void;
+      onSave.mockImplementationOnce(
+        () =>
+          new Promise<void>((resolve) => {
+            finish = resolve;
+          }),
+      );
+      await render();
+      const field = fieldName === "description" ? descriptionField() : instructionsField();
+      const original = field.value;
+      await setText(field, "Pending edit");
+      await clickSave();
+      await setText(field, original);
+      await render(
+        fieldName === "description" ? "Pending edit" : "Billing",
+        fieldName === "instructions" ? "Pending edit" : longInstructions,
+      );
+      expect(field.value).toBe(original);
+      await act(async () => finish());
+      await clickSave();
+      expect(onSave.mock.calls[1]?.[0]).toHaveProperty(fieldName, original);
+    },
+  );
+
+  it("retains the instructions draft and retries after a failed save", async () => {
+    onSave.mockRejectedValueOnce(new Error("offline"));
+    await render();
+    await setText(instructionsField(), "Keep candidate claims tied to source evidence.");
+    await clickSave();
+    expect(container.textContent).toContain("offline");
+    expect(instructionsField().value).toBe("Keep candidate claims tied to source evidence.");
+    await clickSave();
+    expect(onSave.mock.calls[1]?.[0]).toHaveProperty(
+      "instructions",
+      "Keep candidate claims tied to source evidence.",
+    );
+    expect(onSave.mock.calls[1]?.[0]).not.toHaveProperty("description");
   });
 });

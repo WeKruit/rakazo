@@ -2,6 +2,10 @@ import { describe, expect, it } from "vitest";
 import {
   type ActionApprovalRule,
   applyJudgeDecision,
+  boundDirectApprovalDetails,
+  boundDirectApprovalRequest,
+  catalogApprovalDetails,
+  catalogApprovalRequest,
   connectorKindFromToolName,
   connectorToolRequiresApproval,
   isApprovalAskBlock,
@@ -15,6 +19,64 @@ import {
 } from "./action-approval.js";
 
 describe("toolRequiresApproval", () => {
+  it("requires hard human approval only for the native CRM bind policy alias", () => {
+    expect(toolRequiresExplicitApproval("recruiting_crm_bind")).toBe(true);
+    expect(toolRequiresApproval("recruiting_crm_bind", false)).toBe(true);
+    expect(toolRequiresExplicitApproval("recruiting_crm_target")).toBe(false);
+    expect(toolRequiresApproval("recruiting_crm_target", false)).toBe(false);
+  });
+
+  it("requires one-time CRM import approval from the resolved MCP operation", () => {
+    expect(
+      toolRequiresExplicitApproval("renamed_import", {
+        connectorId: "mcp",
+        toolName: "crm_import_candidate",
+      }),
+    ).toBe(true);
+    expect(toolRequiresExplicitApproval("mcp__crm__crm_import_candidate")).toBe(false);
+    expect(
+      toolRequiresExplicitApproval("renamed_import", {
+        connectorId: "demo",
+        toolName: "crm_import_candidate",
+      }),
+    ).toBe(false);
+    expect(
+      toolRequiresExplicitApproval("renamed_read", {
+        connectorId: "mcp",
+        toolName: "list_crm_candidates",
+      }),
+    ).toBe(false);
+  });
+
+  it.each([
+    "reply_to_email",
+    "create_lead",
+    "add_leads_to_campaign_or_list_bulk",
+    "activate_campaign",
+  ])("requires a one-time human decision for the resolved outbound operation %s", (toolName) => {
+    expect(toolRequiresExplicitApproval("renamed_action", { connectorId: "mcp", toolName })).toBe(
+      true,
+    );
+    expect(toolRequiresExplicitApproval(`mcp__example__${toolName}`)).toBe(false);
+    expect(toolRequiresExplicitApproval("renamed_action", { connectorId: "demo", toolName })).toBe(
+      false,
+    );
+    expect(
+      toolRequiresExplicitApproval("renamed_read", { connectorId: "mcp", toolName: "list_emails" }),
+    ).toBe(false);
+  });
+
+  it("requires explicit human approval of recruiting packages even with an always-allow rule", () => {
+    const toolName = "recruiting_request_approval";
+    const rules: ActionApprovalRule[] = [
+      { effect: "always_allow", matchKind: "tool", matchValue: toolName },
+    ];
+
+    expect(resolveActionApprovalDetail({ toolName, rules }).source).toBe("always_allow");
+    expect(toolRequiresApproval(toolName, false)).toBe(true);
+    expect(toolRequiresExplicitApproval(toolName)).toBe(true);
+  });
+
   it("requires approval for consequential builtins and destination writes", () => {
     expect(toolRequiresApproval("destination.write", false)).toBe(true);
     expect(toolRequiresApproval("destination.write", true)).toBe(true);
@@ -372,5 +434,39 @@ describe("applyJudgeDecision", () => {
   it("fails closed on consequential checker errors and open on exempt", () => {
     expect(applyJudgeDecision({ decision: "error", consequential: true })).toBe("ask");
     expect(applyJudgeDecision({ decision: "error", consequential: false })).toBe("allow");
+  });
+});
+
+describe("native bound approval envelopes", () => {
+  it("preserves exact direct and catalog routes and arguments", () => {
+    const route = {
+      connectorId: "mcp",
+      resourceId: "server",
+      resourceRevision: 2,
+      toolName: "get_crm_role",
+    };
+    const args = { p_org: "exact organization", p_role: "exact role" };
+    const marker = "__rakazoCatalogTool";
+    expect(
+      boundDirectApprovalDetails(boundDirectApprovalRequest(route, args, marker), marker),
+    ).toEqual({ route, args });
+    const wrapperArgs = { id: "server:get_crm_role", arguments: args };
+    expect(
+      catalogApprovalDetails(
+        catalogApprovalRequest("connectors_execute_tool", wrapperArgs, marker, route),
+        marker,
+      ),
+    ).toEqual({ toolName: "connectors_execute_tool", args: wrapperArgs, route });
+  });
+
+  it("keeps legacy catalog parsing separate from bound direct envelopes", () => {
+    const marker = "__rakazoCatalogTool";
+    expect(
+      catalogApprovalDetails(catalogApprovalRequest("mcp_execute_tool", {}, marker), marker),
+    ).toEqual({ toolName: "mcp_execute_tool", args: {} });
+    expect(
+      boundDirectApprovalDetails([marker, "direct", { route: [], args: {} }], marker),
+    ).toBeUndefined();
+    expect(catalogApprovalDetails([marker, "other", {}], marker)).toBeUndefined();
   });
 });

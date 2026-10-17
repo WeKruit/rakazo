@@ -413,7 +413,12 @@ describe("secrets model-visibility conformance", () => {
         {
           tool: "mcp__demo__echo",
           args: {},
-          route: { connectorId: "mcp", resourceId: "server-1", toolName: "echo" },
+          route: {
+            connectorId: "mcp",
+            resourceId: "server-1",
+            resourceRevision: assignment.server.revision,
+            toolName: "echo",
+          },
         } as never,
         context,
       )) {

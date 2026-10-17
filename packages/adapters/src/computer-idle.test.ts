@@ -1,5 +1,6 @@
 import { spawn } from "node:child_process";
 import { existsSync, mkdirSync, rmSync, symlinkSync } from "node:fs";
+import { CommandExitError } from "@e2b/desktop";
 import type { AgentHomeStore, JobPublisher, SandboxProvider } from "@rakazo/adapter-kit";
 import type { PrismaClient, ThreadEvents } from "@rakazo/db";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
@@ -14,7 +15,8 @@ import {
   scheduleComputerSleep,
   sleepComputerIfIdle,
 } from "./computer-idle.js";
-import { e2bCreateOptions } from "./e2b-sandbox.js";
+import type { E2BSandboxSdk } from "./e2b-sandbox.js";
+import { E2BSandboxProvider, e2bCreateOptions } from "./e2b-sandbox.js";
 
 describe("sandbox idle", () => {
   beforeEach(() => {
@@ -95,6 +97,36 @@ describe("sandbox idle", () => {
     expect(harness.sandbox.stop).not.toHaveBeenCalled();
     expect(harness.sandbox.keepAlive).toHaveBeenCalledOnce();
     expect(harness.jobs.enqueue).toHaveBeenCalledOnce();
+  });
+
+  it("suspends after the E2B SDK reports the idle probe's expected exit code one", async () => {
+    const harness = idleHarness();
+    const run = vi
+      .fn()
+      .mockRejectedValue(
+        new CommandExitError({ exitCode: 1, stdout: "rakazo-background-idle\n", stderr: "" }),
+      );
+    const provider = new E2BSandboxProvider("test-key", {
+      connect: vi.fn(async () => ({ sandboxId: "computer", commands: { run } })),
+    } as unknown as E2BSandboxSdk);
+
+    await sleepComputerIfIdle(
+      {
+        ...harness.deps,
+        sandbox: {
+          ...harness.sandbox,
+          execute: provider.execute.bind(provider),
+        } as unknown as SandboxProvider,
+      },
+      harness.computer.id,
+    );
+
+    expect(run).toHaveBeenCalledTimes(2);
+    expect(harness.home.commit).toHaveBeenCalledOnce();
+    expect(harness.sandbox.stop).toHaveBeenCalledOnce();
+    expect(harness.sandbox.keepAlive).not.toHaveBeenCalled();
+    expect(harness.jobs.enqueue).not.toHaveBeenCalled();
+    expect(harness.computer.state).toBe("suspended");
   });
 
   it("probes background work with the database computer id, not providerRef", async () => {

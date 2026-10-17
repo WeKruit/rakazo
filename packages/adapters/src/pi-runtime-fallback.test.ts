@@ -58,6 +58,7 @@ vi.mock("./pi-openai-compatible-provider.js", () => ({
   registerOpenAiCompatibleRuntime: (models: unknown) => models,
 }));
 
+import { toolCompletionAuditPayload } from "./executor.js";
 import { IMAGE_RETURNING_COMPUTER_TOOLS } from "./model-vision.js";
 import { isRetryableProviderUnavailable, PiAgentRuntime } from "./pi-runtime.js";
 import { MODEL_STREAM_IDLE_TIMEOUT_MS } from "./pi-runtime-limits.js";
@@ -214,6 +215,325 @@ beforeEach(() => {
 });
 
 afterEach(() => vi.useRealTimers());
+
+it("replays native questions as assistant turns with the latest exact human answer current", async () => {
+  const goal = "Ask my language, echo the complete answer in a code block, then stop. Chat only.";
+  const answer = "  中文🙂\r\nEnglish details  ";
+  const input = request();
+  input.sourceMessageId = "answer-2";
+  input.prompt = answer;
+  input.history = [
+    {
+      role: "user",
+      content:
+        "Platform task state (data):\n" +
+        goal +
+        "\nSaved skill: quote raw input. Resolved selected value: private-choice",
+      requiredForRun: true,
+    },
+    {
+      id: "old-jd",
+      role: "user",
+      content: "[bot peer-sourcer] Earlier unrelated task: create a role from a JD.",
+    },
+    { id: "original-goal", role: "user", content: goal, requiredForRun: true },
+    { id: "card-1", role: "assistant", content: "Which language?", requiredForRun: true },
+    { id: "answer-1", role: "user", content: answer, requiredForRun: true },
+    {
+      id: "card-2",
+      role: "assistant",
+      content: "Which language is preferred?",
+      requiredForRun: true,
+    },
+    { id: "answer-2", role: "user", content: answer, requiredForRun: true },
+  ];
+  providerState.stream.mockImplementation(() =>
+    stream(primary, message(primary, [{ type: "text", text: "Done." }], "stop")),
+  );
+  await run(input);
+  const wireContext = providerState.stream.mock.calls[0]![1] as Context;
+  const context = {
+    ...wireContext,
+    messages: wireContext.messages.filter((m) => m.role !== "system"),
+  };
+  const texts = context.messages.map((m) =>
+    typeof m.content === "string"
+      ? m.content
+      : m.content
+          .filter((p) => p.type === "text")
+          .map((p) => p.text)
+          .join(""),
+  );
+  expect(context.messages.map((m) => m.role)).toEqual([
+    "user",
+    "user",
+    "user",
+    "assistant",
+    "user",
+    "assistant",
+    "user",
+  ]);
+  expect(texts).toEqual([
+    input.history[0]!.content,
+    input.history[1]!.content,
+    goal,
+    "Which language?",
+    answer,
+    "Which language is preferred?",
+    answer,
+  ]);
+  expect(
+    context.messages.filter(
+      (m) => (m as { rakazoMessageId?: string }).rakazoMessageId === "original-goal",
+    ),
+  ).toHaveLength(1);
+  expect(JSON.stringify(context.messages)).toContain("private-choice");
+  expect(context.messages).not.toContainEqual(
+    expect.objectContaining({ rakazoMessageId: "answer-2" }),
+  );
+  expect(input.executeTool).not.toHaveBeenCalled();
+});
+
+describe("Pi pre-dispatch tool audit", () => {
+  it("does not persist an undeclared tool name or its error text", async () => {
+    const input = request();
+    const audits: Record<string, unknown>[] = [];
+    input.onToolCompleted = (completion) => {
+      audits.push(toolCompletionAuditPayload(completion));
+    };
+    const unknownName = "private-unknown-name-canary";
+    providerState.stream
+      .mockImplementationOnce(() =>
+        stream(
+          primary,
+          message(
+            primary,
+            [{ type: "toolCall", id: "unknown", name: unknownName, arguments: {} }],
+            "toolUse",
+          ),
+        ),
+      )
+      .mockImplementation(() =>
+        stream(primary, message(primary, [{ type: "text", text: "Done." }], "stop")),
+      );
+
+    await run(input);
+
+    expect(input.executeTool).not.toHaveBeenCalled();
+    expect(audits).toEqual([
+      expect.objectContaining({
+        name: "unknown-tool",
+        outcome: "error",
+        error: "Tool not found before execution.",
+      }),
+    ]);
+    expect(JSON.stringify(audits)).not.toContain(unknownName);
+    const nextContext = providerState.stream.mock.calls[1]?.[1] as Context;
+    expect(JSON.stringify(nextContext.messages)).toContain(`Tool ${unknownName} not found`);
+  });
+
+  it("audits rejected fields without argument values and leaves the model error intact", async () => {
+    const input = request();
+    input.tools = [
+      {
+        name: "source.lookup",
+        description: "Read a source.",
+        readOnly: true,
+        inputSchema: {
+          type: "object",
+          properties: {
+            operation: { const: "read" },
+            sourceRefs: {
+              type: "array",
+              items: {
+                type: "object",
+                properties: { artifactId: { type: "string" } },
+                required: ["artifactId"],
+              },
+            },
+          },
+          required: ["operation", "sourceRefs"],
+        },
+      },
+    ];
+    const args = {
+      operation: "private-invalid-enum-value",
+      sourceRefs: [{ artifact_id: "fake-artifact", quote: "private quote ".repeat(300) }],
+    };
+    const audits: Record<string, unknown>[] = [];
+    const onToolCompleted = vi.fn((completion) => {
+      audits.push(toolCompletionAuditPayload(completion));
+    });
+    input.onToolCompleted = onToolCompleted;
+    providerState.stream
+      .mockImplementationOnce(() =>
+        stream(
+          primary,
+          message(
+            primary,
+            [
+              {
+                type: "toolCall",
+                id: "rejected",
+                name: "source_lookup",
+                arguments: args,
+              },
+            ],
+            "toolUse",
+          ),
+        ),
+      )
+      .mockImplementation(() =>
+        stream(primary, message(primary, [{ type: "text", text: "Done." }], "stop")),
+      );
+
+    const events = await run(input);
+
+    expect(input.executeTool).not.toHaveBeenCalled();
+    expect(events.filter((event) => event.type === "tool")).toEqual([]);
+    expect(onToolCompleted).toHaveBeenCalledOnce();
+    expect(audits[0]).toMatchObject({
+      name: "source.lookup",
+      executionId: JSON.stringify(["pi-tool", "main", "rejected"]),
+      outcome: "error",
+    });
+    const error = String(audits[0]?.error);
+    expect(error).toContain("sourceRefs.0.artifactId");
+    expect(error).toContain("operation: must be equal to constant");
+    expect(error).not.toContain("Received arguments");
+    expect(error).not.toContain(args.operation);
+    expect(error).not.toContain("private quote");
+    expect(error.length).toBeLessThanOrEqual(2_000);
+    const nextContext = providerState.stream.mock.calls[1]?.[1] as Context;
+    const rejection = nextContext.messages.find((entry) => entry.role === "toolResult");
+    expect(JSON.stringify(rejection)).toContain(args.operation);
+    expect(JSON.stringify(rejection)).toContain("private quote");
+    expect(events.at(-1)).toEqual({ type: "done", text: "Done." });
+  });
+
+  it.each([false, true])("keeps one existing host audit with host failure=%s", async (failed) => {
+    const input = request();
+    const audits: Record<string, unknown>[] = [];
+    input.onToolCompleted = (completion) => {
+      audits.push(toolCompletionAuditPayload(completion));
+    };
+    if (failed)
+      input.executeTool = vi.fn(async () => {
+        throw new Error("host rejected the write");
+      });
+    providerState.stream
+      .mockImplementationOnce(() =>
+        stream(
+          primary,
+          message(
+            primary,
+            [
+              {
+                type: "toolCall",
+                id: "valid",
+                name: "write_effect",
+                arguments: { value: "ready" },
+              },
+            ],
+            "toolUse",
+          ),
+        ),
+      )
+      .mockImplementation(() =>
+        stream(primary, message(primary, [{ type: "text", text: "Done." }], "stop")),
+      );
+
+    await run(input);
+
+    expect(input.executeTool).toHaveBeenCalledOnce();
+    expect(audits).toHaveLength(1);
+    expect(audits[0]).toMatchObject({
+      name: "write_effect",
+      outcome: failed ? "error" : "succeeded",
+    });
+    if (failed) expect(audits[0]?.error).toBe("host rejected the write");
+  });
+
+  it("audits a helper rejection separately when parent and helper reuse a call ID", async () => {
+    const input = request();
+    input.tools = [
+      ...input.tools,
+      {
+        name: "run_subagent",
+        description: "Run a helper.",
+        readOnly: true,
+        inputSchema: {
+          type: "object",
+          properties: { name: { type: "string" }, task: { type: "string" } },
+          required: ["name", "task"],
+        },
+      },
+    ];
+    const audits: Record<string, unknown>[] = [];
+    input.onToolCompleted = (completion) => {
+      audits.push(toolCompletionAuditPayload(completion));
+    };
+    providerState.stream
+      .mockImplementationOnce(() =>
+        stream(
+          primary,
+          message(
+            primary,
+            [
+              {
+                type: "toolCall",
+                id: "same-call",
+                name: "run_subagent",
+                arguments: { name: "helper", task: "Check the source." },
+              },
+            ],
+            "toolUse",
+          ),
+        ),
+      )
+      .mockImplementationOnce(() =>
+        stream(
+          primary,
+          message(
+            primary,
+            [
+              {
+                type: "toolCall",
+                id: "same-call",
+                name: "write_effect",
+                arguments: {},
+              },
+            ],
+            "toolUse",
+          ),
+        ),
+      )
+      .mockImplementation(() =>
+        stream(primary, message(primary, [{ type: "text", text: "Done." }], "stop")),
+      );
+
+    await run(input);
+
+    expect(input.executeTool).not.toHaveBeenCalled();
+    expect(audits).toHaveLength(2);
+    const parentId = JSON.stringify(["pi-tool", "main", "same-call"]);
+    expect(audits).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          name: "run_subagent",
+          executionId: parentId,
+          outcome: "succeeded",
+        }),
+        expect.objectContaining({
+          name: "write_effect",
+          executionId: JSON.stringify(["pi-tool", parentId, "same-call"]),
+          outcome: "error",
+          error: expect.stringContaining("value"),
+        }),
+      ]),
+    );
+  });
+});
 
 describe("Pi runtime transient model retries", () => {
   it.each([

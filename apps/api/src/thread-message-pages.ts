@@ -1,11 +1,13 @@
 import type { MessageBlock, ThreadMessage, ThreadMessagePage } from "@rakazo/contracts";
 import { MessageBlock as MessageBlockSchema } from "@rakazo/contracts";
 import {
+  answerableAskMessageIds,
   BACKGROUND_RUN_TRIGGERS,
   callIdFromClientNonce,
   isBackgroundInputBlock,
   isBackgroundRunTrigger,
   isPeerReceiptBlocks,
+  mergeMessagesById,
 } from "@rakazo/core";
 import { messageReplyPreview } from "@rakazo/core/message-quote";
 import type { Prisma, PrismaClient } from "@rakazo/db";
@@ -18,6 +20,53 @@ const replySelection = {
   botId: true,
   blocks: true,
 } as const;
+
+/** Waiting cards remain accessible independently of the ordinary history page. */
+export async function includeWaitingAskMessages(
+  prisma: MessageDb,
+  page: ThreadMessagePage,
+  runs: readonly Pick<
+    Prisma.RunGetPayload<Record<string, never>>,
+    "id" | "botId" | "spaceId" | "userId" | "status"
+  >[],
+): Promise<ThreadMessagePage> {
+  const loaded = new Set(answerableAskMessageIds({ messages: page.messages, activeRuns: runs }));
+  const missing = runs.filter(
+    (run) =>
+      run.status === "waiting_input" &&
+      !page.messages.some((message) => message.runId === run.id && loaded.has(message.id)),
+  );
+  if (!missing.length) return page;
+  const pending = (
+    await Promise.all(
+      missing.map(async (run) => {
+        const where: Prisma.MessageWhereInput = {
+          threadId: page.threadId,
+          runId: run.id,
+          botId: run.botId,
+          role: "bot",
+          thread: { id: page.threadId, spaceId: run.spaceId, userId: run.userId },
+          blocks: { array_contains: [{ kind: "ask" }] },
+        };
+        const rows = await prisma.message.findMany({
+          where,
+          orderBy: { seq: "desc" },
+          // Native answer lookup inspects the last 50 messages of a paused run.
+          take: 50,
+          include: { replyTo: { select: replySelection } },
+        });
+        const messages = rows.reverse().map(toThreadMessage);
+        const ids = new Set(answerableAskMessageIds({ messages, activeRuns: [run] }));
+        return messages.filter((message) => ids.has(message.id));
+      }),
+    )
+  ).flat();
+  if (!pending.length) return page;
+  return {
+    ...page,
+    messages: mergeMessagesById(page.messages, pending).sort((left, right) => left.seq - right.seq),
+  };
+}
 
 export async function loadMessagePage(
   prisma: MessageDb,

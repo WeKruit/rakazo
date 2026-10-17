@@ -9,6 +9,7 @@ export const BUILTIN_TOOL_NAMES = [
   "browser_act",
   "list_files",
   "read_file",
+  "artifact_read",
   "write_file",
   "attach_file",
   "shell",
@@ -24,7 +25,15 @@ export const BUILTIN_TOOL_NAMES = [
   "render_plot",
   "add_mcp_server",
   "remember",
+  "read_memory",
   "save_shared_memory",
+  "recruiting_role",
+  "recruiting_assess",
+  "recruiting_research",
+  "recruiting_crm_target",
+  "recruiting_crm_import",
+  "recruiting_reply",
+  "recruiting_feedback",
   "web_search",
   "web_fetch",
   "cloud_agent_launch",
@@ -101,3 +110,17 @@ export const DisabledBuiltinToolsSchema = z
     });
   })
   .transform((names) => [...new Set(names)]);
+
+export const ArtifactJsonStringPathSchema = z
+  .array(z.union([z.string(), z.number().int().nonnegative()]))
+  .readonly();
+
+/** Read one persisted version or exact JSON string; offsets count Unicode code points. */
+export const ArtifactReadInputSchema = z
+  .object({
+    artifactId: z.string().min(1),
+    jsonPath: ArtifactJsonStringPathSchema.optional(),
+    offset: z.number().int().min(0).default(0),
+    limit: z.number().int().min(1).max(16000).default(8000),
+  })
+  .strict();

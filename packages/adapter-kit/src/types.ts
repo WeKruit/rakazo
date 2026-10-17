@@ -1,6 +1,7 @@
 import type {
   CacheCapabilities as ConnectionCacheCapabilities,
   ConnectionCatalogItem,
+  RecruitingPreferenceFeedbackInput,
   SandboxKind,
 } from "@rakazo/contracts";
 
@@ -255,7 +256,13 @@ export interface ConnectorCall {
 export type ConnectorEvent =
   | { type: "log"; message: string }
   | { type: "result"; data: unknown }
-  | { type: "error"; message: string; logIds?: string[] };
+  | {
+      type: "error";
+      message: string;
+      logIds?: string[];
+      /** The provider call was invoked; its side effect may have occurred despite the error. */
+      outcome?: "uncertain";
+    };
 
 export interface ConnectorCapabilities {
   discover: boolean;
@@ -295,17 +302,22 @@ export interface MemorySearchResult {
 
 /** A full-document save lost the race to another writer. The caller should read again. */
 export const MEMORY_REVISION_CONFLICT_ERROR =
-  "Shared memory changed since it was read. Read the latest version and save again.";
+  "Memory changed since it was read. Read the latest version and save again.";
 
 export interface MemoryCommitRequest {
   scope: "bot" | "user";
   botId?: string;
   path: string;
   content: string;
-  /** When set, commit fails if the live document revision is no longer this value. */
-  expectedRevision?: number;
+  /** Revision used to prepare this replacement; 0 creates a new document. */
+  expectedRevision: number;
   sourceRunId?: string;
   sourceThreadId?: string;
+  /** Trusted recruiting tool provenance; identities still come from AdapterContext and the live run. */
+  recruiting?: {
+    sourceMessageId: string | null;
+    feedback: RecruitingPreferenceFeedbackInput;
+  };
 }
 
 export interface MemoryRevision {
@@ -313,6 +325,11 @@ export interface MemoryRevision {
   path: string;
   revision: number;
   content: string;
+}
+
+export interface MemoryImportFile extends PortableFile {
+  /** Target document revision used to prepare this import; 0 creates a new document. */
+  expectedRevision: number;
 }
 
 export interface MemoryExportRequest {
@@ -450,6 +467,7 @@ export interface AgentRunRequest {
   botId: string;
   threadId: string;
   runId: string;
+  /** Native source represented by the current prompt; run authorization retains its immutable source separately. */
   sourceMessageId?: string | null;
   prompt: string;
   instructions: string;
@@ -458,6 +476,8 @@ export interface AgentRunRequest {
     createdAt?: string;
     role: "user" | "assistant" | "system";
     content: string;
+    /** Proven current-task context must survive history windows and context selection. */
+    requiredForRun?: true;
     /** Images attached to this message, hydrated only for recent user turns. */
     images?: AgentInputImage[];
   }>;
@@ -500,7 +520,12 @@ export interface ScriptedTurn {
   ask?: { text: string; detail?: string; actions?: Array<{ id: string; label: string }> };
   takeover?: { reason: string };
   files?: Array<{ path: string; content: string }>;
-  memory?: Array<{ scope: "bot" | "user"; path: string; content: string }>;
+  memory?: Array<{
+    scope: "bot" | "user";
+    path: string;
+    content: string;
+    expectedRevision: number;
+  }>;
   complete?: boolean;
 }
 
@@ -631,7 +656,7 @@ export interface BackgroundJobPayloads {
   "computer.update": { updateId: string };
   "computer.control-expire": { computerId: string; leaseId: string };
   "skill.teaching-expire": { skillId: string };
-  "history.compact": { threadId: string };
+  "history.compact": { threadId: string; sourceRunId?: string };
   "messaging.deliver": { runId?: string };
   /** Reconcile durable remote-agent intent; scope is loaded from the database. */
   "cloud_agent.poll": { agentId: string };

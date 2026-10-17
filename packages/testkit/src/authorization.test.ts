@@ -1,10 +1,16 @@
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
-import { ComposioEmulator, ExpoPushProvider, loadPushToken } from "@rakazo/adapters";
+import {
+  ComposioEmulator,
+  ExpoPushProvider,
+  LocalArtifactStore,
+  loadPushToken,
+} from "@rakazo/adapters";
 import type { appContract, Space, SpaceNavigation } from "@rakazo/contracts";
 import {
   claimEmptySpaceDeletionForMember,
+  createThreadMessage,
   deleteEmptySpaceForMember,
   pushSessionExpiresAt,
   releaseSpaceDeletionClaim,
@@ -62,6 +68,21 @@ describeWithDatabase("API authorization and resource isolation", () => {
   });
 
   it("rejects unauthenticated calls to every protected RPC family", async () => {
+    const roleDefinition = {
+      title: "Test role",
+      sourceRefs: [
+        {
+          id: "source",
+          kind: "original_material",
+          anchor: { kind: "message", messageId: "missing-message", locator: "body" },
+          readState: "unread",
+          readAt: null,
+        },
+      ],
+      criteria: [],
+      preferences: [],
+      definitionQuestions: [],
+    };
     const calls = exhaustiveProtectedCalls([
       ["me"],
       ["deployment/get"],
@@ -130,8 +151,19 @@ describeWithDatabase("API authorization and resource isolation", () => {
       ["computer/screenUrl", { botId: "missing-bot" }],
       ["computer/heartbeat", { botId: "missing-bot" }],
       ["memory/list", {}],
-      ["memory/update", { documentId: "missing-memory", content: "Nope" }],
+      ["memory/update", { documentId: "missing-memory", content: "Nope", expectedRevision: 0 }],
+      ["memory/history", { documentId: "missing-memory" }],
       ["memory/exportMarkdown", {}],
+      [
+        "recruiting/createRole",
+        { ...roleDefinition, sourceThreadId: "missing-thread", expectedRevision: 0 },
+      ],
+      ["recruiting/bindRole", { threadId: "missing-thread", roleId: "missing-role" }],
+      ["recruiting/getWorkspace", { threadId: "missing-thread" }],
+      ["recruiting/reviseRole", { ...roleDefinition, roleId: "missing-role", expectedRevision: 1 }],
+      ["recruiting/listAssessments", { roleId: "missing-role" }],
+      ["recruiting/getAssessment", { roleId: "missing-role", candidateKey: "missing-candidate" }],
+      ["recruiting/listResearch", { roleId: "missing-role" }],
       ["routines/list", { botId: "missing-bot" }],
       ["routines/create", routineInput("missing-bot")],
       ["routines/update", { routineId: "missing-routine", name: "Nope" }],
@@ -267,17 +299,11 @@ describeWithDatabase("API authorization and resource isolation", () => {
         content: "owner-only-memory",
       },
     });
-    const ownerArtifact = await handles.prisma.artifact.create({
-      data: {
-        spaceId: ownerActor.spaceId,
-        userId: ownerActor.userId,
-        botId: ownerBot.id,
-        name: "owner-secret.txt",
-        mimeType: "text/plain",
-        size: 17,
-        hash: "sha256:not-a-real-hash",
-        storageKey: "test/owner-secret.txt",
-      },
+    const ownerArtifact = await rpc<{ id: string }>(app, owner, "artifacts/create", {
+      botId: ownerBot.id,
+      name: "owner-secret.txt",
+      mimeType: "text/plain",
+      contentBase64: Buffer.from("owner-only-fixture").toString("base64"),
     });
     const ownerThread = await handles.prisma.thread.findUniqueOrThrow({
       where: { botId: ownerBot.id },
@@ -303,6 +329,55 @@ describeWithDatabase("API authorization and resource isolation", () => {
         trigger: "user",
       },
     });
+    const ownerEffect = await handles.prisma.externalEffect.create({
+      data: {
+        spaceId: ownerActor.spaceId,
+        runId: ownerRun.id,
+        kind: "destination.write",
+        idempotencyKey: `owner-approval-${stamp}`,
+        status: "intended",
+        request: { collection: "notes", title: "Owner fixture", body: "private" },
+      },
+    });
+    const ownerAsk = await createThreadMessage(handles.prisma, {
+      threadId: ownerThread.id,
+      botId: ownerBot.id,
+      runId: ownerRun.id,
+      role: "bot",
+      blocks: [
+        {
+          kind: "ask",
+          text: "Allow this fixture write?",
+          approvalEffectId: ownerEffect.id,
+          status: "pending",
+          actions: [
+            { id: "allow", label: "Allow once" },
+            { id: "always", label: "Always allow" },
+            { id: "deny", label: "Deny" },
+          ],
+        },
+      ],
+    });
+    const pendingBefore = {
+      run: ownerRun,
+      card: ownerAsk,
+      effect: ownerEffect,
+      eventCount: await handles.prisma.event.count({ where: { threadId: ownerThread.id } }),
+    };
+    expect(
+      (
+        await rpc<{ messages: Array<{ id: string }> }>(app, owner, "threads/get", {
+          botId: ownerBot.id,
+        })
+      ).messages,
+    ).toContainEqual(expect.objectContaining({ id: ownerAsk.id }));
+    expect(
+      await rpc(app, owner, "artifacts/getById", { artifactId: ownerArtifact.id }),
+    ).toMatchObject({
+      id: ownerArtifact.id,
+      contentBase64: Buffer.from("owner-only-fixture").toString("base64"),
+    });
+    const artifactReads = vi.spyOn(LocalArtifactStore.prototype, "get");
 
     const botIdCalls: Array<[string, unknown]> = [
       ["bots/get", { botId: ownerBot.id }],
@@ -318,15 +393,6 @@ describeWithDatabase("API authorization and resource isolation", () => {
       ["threads/stop", { botId: ownerBot.id }],
       ["threads/clear", { botId: ownerBot.id }],
       ["threads/followUp", { botId: ownerBot.id, text: "intruder follow-up" }],
-      [
-        "threads/answer",
-        {
-          botId: ownerBot.id,
-          runId: ownerRun.id,
-          messageId: "missing-message",
-          answer: "intruder answer",
-        },
-      ],
       ["threads/markRead", { botId: ownerBot.id }],
       ["threads/markUnread", { botId: ownerBot.id }],
       ["computer/status", { botId: ownerBot.id }],
@@ -362,6 +428,15 @@ describeWithDatabase("API authorization and resource isolation", () => {
     await Promise.all(
       botIdCalls.map(([procedure, input]) => expectDenied(app, intruder, procedure, input)),
     );
+    // IsolationError stays opaque (500); the original card/effect must also remain unchanged.
+    await expect(
+      raw(app, intruder, "threads/answer", {
+        botId: ownerBot.id,
+        runId: ownerRun.id,
+        messageId: ownerAsk.id,
+        answer: "always",
+      }),
+    ).resolves.toMatchObject({ status: 500 });
 
     const ownerBot2 = await rpc<Bot>(app, owner, "bots/create", botInput("Owner Bot Two"));
     const ownerGroup = await rpc<{ id: string }>(app, owner, "groups/create", {
@@ -384,14 +459,54 @@ describeWithDatabase("API authorization and resource isolation", () => {
     await Promise.all(
       groupCalls.map(([procedure, input]) => expectDenied(app, intruder, procedure, input)),
     );
+    await expect(
+      raw(app, intruder, "artifacts/getById", { artifactId: ownerArtifact.id }),
+    ).resolves.toMatchObject({ status: 500 });
+    await expect(
+      raw(app, intruder, "artifacts/get", {
+        botId: intruderBot.id,
+        artifactId: ownerArtifact.id,
+      }),
+    ).resolves.toMatchObject({ status: 500 });
+    await expect(
+      raw(app, owner, "artifacts/get", {
+        groupId: ownerGroup.id,
+        artifactId: ownerArtifact.id,
+      }),
+    ).resolves.toMatchObject({ status: 500 });
+    expect(artifactReads).not.toHaveBeenCalled();
+    artifactReads.mockRestore();
 
     // A caller cannot pair their own bot with another workspace's run ID.
-    await expectDenied(app, intruder, "threads/answer", {
-      botId: intruderBot.id,
-      runId: ownerRun.id,
-      messageId: "missing-message",
-      answer: "mixed-resource attack",
-    });
+    await expect(
+      raw(app, intruder, "threads/answer", {
+        botId: intruderBot.id,
+        runId: ownerRun.id,
+        messageId: ownerAsk.id,
+        answer: "allow",
+      }),
+    ).resolves.toMatchObject({ status: 409 });
+    await expect(
+      raw(app, owner, "threads/answer", {
+        botId: ownerBot2.id,
+        runId: ownerRun.id,
+        messageId: ownerAsk.id,
+        answer: "allow",
+      }),
+    ).resolves.toMatchObject({ status: 409 });
+    expect({
+      run: await handles.prisma.run.findUniqueOrThrow({ where: { id: ownerRun.id } }),
+      card: await handles.prisma.message.findUniqueOrThrow({ where: { id: ownerAsk.id } }),
+      effect: await handles.prisma.externalEffect.findUniqueOrThrow({
+        where: { id: ownerEffect.id },
+      }),
+      eventCount: await handles.prisma.event.count({ where: { threadId: ownerThread.id } }),
+    }).toEqual(pendingBefore);
+    expect(
+      await handles.prisma.actionApprovalRule.count({
+        where: { createdByUserId: ownerActor.userId },
+      }),
+    ).toBe(0);
 
     const resourceIdCalls = [
       ["routines/update", { routineId: ownerRoutine.id, name: "Stolen Routine" }],
@@ -413,17 +528,19 @@ describeWithDatabase("API authorization and resource isolation", () => {
       ["agentSkills/get", { skillId: ownerAgentSkill.id }],
       ["agentSkills/update", { skillId: ownerAgentSkill.id, description: "Stolen" }],
       ["agentSkills/remove", { skillId: ownerAgentSkill.id }],
-      ["memory/update", { documentId: ownerMemory.id, content: "stolen" }],
+      [
+        "memory/update",
+        { documentId: ownerMemory.id, content: "stolen", expectedRevision: ownerMemory.revision },
+      ],
+      ["memory/history", { documentId: ownerMemory.id }],
       ["connections/complete", { connectionId: ownerConnection.connectionId }],
     ] satisfies Array<[string, unknown]>;
     await Promise.all(
       resourceIdCalls.map(([procedure, input]) => expectDenied(app, intruder, procedure, input)),
     );
 
-    expect(await rpc<unknown[]>(app, intruder, "memory/list", { botId: ownerBot.id })).toEqual([]);
-    expect(await rpc<string>(app, intruder, "memory/exportMarkdown", { botId: ownerBot.id })).toBe(
-      "",
-    );
+    await expectDenied(app, intruder, "memory/list", { botId: ownerBot.id });
+    await expectDenied(app, intruder, "memory/exportMarkdown", { botId: ownerBot.id });
     expect(await rpc<Array<{ id: string }>>(app, intruder, "capabilities/list")).not.toContainEqual(
       expect.objectContaining({ id: ownerCapability.id }),
     );
@@ -784,6 +901,125 @@ describeWithDatabase("API authorization and resource isolation", () => {
     const supportMe = await rpc<Actor>(app, cookie, "me", {}, support.id);
     expect(supportMe.spaceId).toBe(support.id);
     const supportBot = await rpc<Bot>(app, cookie, "bots/create", botInput("Support"), support.id);
+    const originalThread = await handles.prisma.thread.findUniqueOrThrow({
+      where: { botId: originalBot.id },
+    });
+    const originalTask = await handles.prisma.task.create({
+      data: {
+        spaceId: original.spaceId,
+        userId: original.userId,
+        botId: originalBot.id,
+        threadId: originalThread.id,
+        prompt: "Original space fixture",
+        status: "waiting_input",
+      },
+    });
+    const originalRun = await handles.prisma.run.create({
+      data: {
+        spaceId: original.spaceId,
+        userId: original.userId,
+        botId: originalBot.id,
+        threadId: originalThread.id,
+        taskId: originalTask.id,
+        status: "waiting_input",
+        trigger: "user",
+      },
+    });
+    const originalAsk = await createThreadMessage(handles.prisma, {
+      threadId: originalThread.id,
+      botId: originalBot.id,
+      runId: originalRun.id,
+      role: "bot",
+      blocks: [{ kind: "ask", text: "Original space input?", status: "pending" }],
+    });
+    const originalMemory = await handles.prisma.memoryDocument.create({
+      data: {
+        spaceId: original.spaceId,
+        userId: original.userId,
+        botId: originalBot.id,
+        scope: "bot",
+        path: "SPACE.md",
+        content: "original-space-fixture",
+      },
+    });
+    const originalArtifact = await rpc<{ id: string }>(app, cookie, "artifacts/create", {
+      botId: originalBot.id,
+      name: "space-fixture.txt",
+      mimeType: "text/plain",
+      contentBase64: Buffer.from("original-space-fixture").toString("base64"),
+    });
+    const originalEventCount = await handles.prisma.event.count({
+      where: { threadId: originalThread.id },
+    });
+    expect(
+      await rpc(app, cookie, "artifacts/getById", { artifactId: originalArtifact.id }),
+    ).toMatchObject({
+      id: originalArtifact.id,
+      contentBase64: Buffer.from("original-space-fixture").toString("base64"),
+    });
+    expect(await rpc(app, cookie, "memory/list", { botId: originalBot.id })).toContainEqual(
+      expect.objectContaining({ id: originalMemory.id, content: "original-space-fixture" }),
+    );
+    const artifactReads = vi.spyOn(LocalArtifactStore.prototype, "get");
+    await expect(
+      raw(
+        app,
+        cookie,
+        "threads/answer",
+        {
+          botId: originalBot.id,
+          runId: originalRun.id,
+          messageId: originalAsk.id,
+          answer: "Wrong space answer",
+        },
+        support.id,
+      ),
+    ).resolves.toMatchObject({ status: 500 });
+    await expect(
+      raw(
+        app,
+        cookie,
+        "threads/answer",
+        {
+          botId: supportBot.id,
+          runId: originalRun.id,
+          messageId: originalAsk.id,
+          answer: "Mixed space answer",
+        },
+        support.id,
+      ),
+    ).resolves.toMatchObject({ status: 409 });
+    expect(await rpc(app, cookie, "memory/list", { botId: originalBot.id }, support.id)).toEqual(
+      [],
+    );
+    await expect(
+      raw(app, cookie, "artifacts/getById", { artifactId: originalArtifact.id }, support.id),
+    ).resolves.toMatchObject({ status: 500 });
+    await expect(
+      raw(
+        app,
+        cookie,
+        "artifacts/get",
+        { botId: supportBot.id, artifactId: originalArtifact.id },
+        support.id,
+      ),
+    ).resolves.toMatchObject({ status: 500 });
+    expect(artifactReads).not.toHaveBeenCalled();
+    artifactReads.mockRestore();
+    expect(await handles.prisma.run.findUniqueOrThrow({ where: { id: originalRun.id } })).toEqual(
+      originalRun,
+    );
+    expect(
+      await handles.prisma.message.findUniqueOrThrow({ where: { id: originalAsk.id } }),
+    ).toEqual(originalAsk);
+    expect(
+      await handles.prisma.memoryDocument.findUniqueOrThrow({
+        where: { id: originalMemory.id },
+      }),
+    ).toEqual(originalMemory);
+    expect(await handles.prisma.event.count({ where: { threadId: originalThread.id } })).toBe(
+      originalEventCount,
+    );
 
     expect(await rpc<Array<{ id: string }>>(app, cookie, "bots/list")).toEqual([
       expect.objectContaining({ id: originalBot.id }),

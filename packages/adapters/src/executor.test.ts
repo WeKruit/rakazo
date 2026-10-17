@@ -28,6 +28,56 @@ import { UnavailableModelForAuthError } from "./model-selection.js";
 import { RetiredModelCredentialError, serializeModelSecret } from "./pi-oauth.js";
 
 describe("bot tool permissions", () => {
+  it("offers feedback with native and semantic memory while respecting channel and tool permissions", () => {
+    const options = {
+      graphicalToolsAllowed: false,
+      groupId: null,
+      trigger: "user",
+      semanticMemoryEnabled: false,
+      messagingChannelRun: false,
+    };
+    for (const semanticMemoryEnabled of [false, true]) {
+      expect(
+        selectBuiltinToolsForRun({ ...options, semanticMemoryEnabled }).map((tool) => tool.name),
+      ).toContain("recruiting_feedback");
+    }
+    expect(
+      selectBuiltinToolsForRun({ ...options, disabledBuiltinTools: ["recruiting_feedback"] }).some(
+        (tool) => tool.name === "recruiting_feedback",
+      ),
+    ).toBe(false);
+    expect(
+      selectBuiltinToolsForRun({ ...options, messagingChannelRun: true }).some(
+        (tool) => tool.name === "recruiting_feedback",
+      ),
+    ).toBe(false);
+  });
+
+  it("offers native recruiting role state without a computer and respects disabled tools", () => {
+    const options = {
+      graphicalToolsAllowed: false,
+      groupId: null,
+      trigger: "user",
+      semanticMemoryEnabled: false,
+      messagingChannelRun: false,
+    };
+    const tool = selectBuiltinToolsForRun(options).find((tool) => tool.name === "recruiting_role");
+    const schema = tool?.inputSchema as {
+      oneOf: Array<{ properties: { operation: { const: string } } }>;
+    };
+    expect(schema.oneOf.map((option) => option.properties.operation.const)).toEqual([
+      "read",
+      "create",
+      "revise",
+      "bind",
+    ]);
+    expect(
+      selectBuiltinToolsForRun({ ...options, disabledBuiltinTools: ["recruiting_role"] }).some(
+        (tool) => tool.name === "recruiting_role",
+      ),
+    ).toBe(false);
+  });
+
   it("never lets self-edit change disabled tools alongside an allowed field", () => {
     expect(parseUpdateBotPatch({ name: "Scout", disabledBuiltinTools: [] }, "Bot")).toEqual({
       patch: { name: "Scout" },
@@ -1041,6 +1091,26 @@ describe("userTurnInstructions", () => {
     replyGuidance,
   };
 
+  it("injects authoritative role context separately from truncatable memory", () => {
+    const roleContext = `Role revision 3\n${"current hard criterion\n".repeat(2000)}`;
+    const instructions = userTurnInstructions({
+      ...base,
+      groupContext: undefined,
+      messagingContext: undefined,
+      redactedRecruitingContext: roleContext,
+      redactedMemoryContext: "Old memory context",
+      redactedScratchpadContext: undefined,
+      hasHistoricalContext: false,
+      agentEnvironmentInstruction: undefined,
+      botDirectory: undefined,
+      pluginLine: undefined,
+      agentSkillsLine: undefined,
+      taughtSkillsLine: undefined,
+    });
+    expect(instructions.filter((value) => value === roleContext)).toHaveLength(1);
+    expect(instructions).not.toContain("Old memory context");
+  });
+
   it("places stable guidance before volatile context when every optional context is present", () => {
     const instructions = userTurnInstructions({
       ...base,
@@ -1406,6 +1476,42 @@ describe("persistentComputerInstruction", () => {
 });
 
 describe("createRunExecutor", () => {
+  it("does not claim an unanswered run when a continue job is delivered again", async () => {
+    const run = { status: "waiting_input", checkpoint: null, leaseFence: 0 };
+    const updateMany = vi.fn().mockRejectedValue(new Error("Unanswered run reached lease claim"));
+    const createAttempt = vi.fn();
+    const runtime = { run: vi.fn() };
+    const home = { checkout: vi.fn() };
+    const prisma = {
+      attempt: { create: createAttempt },
+      run: {
+        findUnique: vi.fn(async () => run),
+        updateMany,
+      },
+    } as unknown as PrismaClient;
+    const executor = createRunExecutor({
+      prisma,
+      runtime,
+      home,
+    } as unknown as Parameters<typeof createRunExecutor>[0]);
+
+    await expect(executor.continueRun("run-1", "worker-1")).resolves.toBeUndefined();
+    expect(updateMany).not.toHaveBeenCalled();
+    expect(createAttempt).not.toHaveBeenCalled();
+    expect(runtime.run).not.toHaveBeenCalled();
+    expect(home.checkout).not.toHaveBeenCalled();
+
+    // The answer transaction makes this same run queued before publishing its continuation.
+    run.status = "queued";
+    updateMany.mockResolvedValue({ count: 0 });
+    await executor.continueRun("run-1", "worker-1");
+    expect(updateMany).toHaveBeenCalledExactlyOnceWith(
+      expect.objectContaining({
+        where: expect.objectContaining({ id: "run-1", status: "queued" }),
+      }),
+    );
+  });
+
   it("excludes private summaries and memory tools from group messaging runs", () => {
     const messages = [{ role: "user", content: "Group request" }];
     expect(

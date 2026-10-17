@@ -222,6 +222,8 @@ describe("formatRecalledMemory", () => {
 });
 
 type HarnessMessage = {
+  id?: string;
+  botId?: string | null;
   seq: number;
   role: string;
   blocks: MessageBlock[];
@@ -229,6 +231,9 @@ type HarnessMessage = {
 
 function compactionHarness(
   options: {
+    group?: boolean;
+    validOrigin?: boolean;
+    currentMember?: boolean;
     deploymentModelKey?: string;
     deploymentModelConfigured?: boolean;
     settings?: { defaultModelProvider: string | null; defaultModelId: string | null } | null;
@@ -258,11 +263,12 @@ function compactionHarness(
     }));
   const thread = {
     id: "thread-1",
-    botId: "bot-1",
+    botId: options.group ? null : "bot-1",
+    groupId: options.group ? "group-1" : null,
     spaceId: "workspace-1",
     userId: "user-1",
     nextEventSeq: 0,
-    nextMessageSeq: options.nextMessageSeq ?? messages.length,
+    nextMessageSeq: options.nextMessageSeq ?? messages.length + (options.group ? 50 : 0),
     historyCompactedUpToSeq: options.historyCompactedUpToSeq ?? (null as number | null),
     historyCompactionSummary: options.historyCompactionSummary ?? (null as string | null),
     historyCompactionGeneration: options.historyCompactionGeneration ?? 0,
@@ -276,6 +282,16 @@ function compactionHarness(
           }
       : options.memoryConfig;
   const prisma = {
+    run: {
+      findFirst: vi.fn(async () =>
+        options.validOrigin === false
+          ? null
+          : { id: "origin-run", botId: "bot-1", sourceMessageId: "current-source" },
+      ),
+    },
+    chatGroup: {
+      findFirst: vi.fn(async () => (options.currentMember === false ? null : { id: "group-1" })),
+    },
     thread: {
       findUniqueOrThrow: vi.fn(async () => thread),
       updateMany: vi.fn(
@@ -377,7 +393,11 @@ function compactionHarness(
     deploymentModelKey: options.deploymentModelKey,
     deploymentModelConfigured:
       options.deploymentModelConfigured ?? options.deploymentModelKey !== undefined,
-    ...(options.resolveModel ? { resolveModel: options.resolveModel } : {}),
+    ...(options.resolveModel
+      ? { resolveModel: options.resolveModel }
+      : options.group
+        ? { resolveModel: async () => ({ provider: "openai-codex", id: "owner-model" }) }
+        : {}),
   };
   return {
     thread,
@@ -473,6 +493,158 @@ describe("recordHistoryCompactAttemptsExhausted", () => {
 });
 
 describe("compactHistory", () => {
+  it("compacts an owned group with its actual origin bot without exporting room memory", async () => {
+    const resolveModel = vi.fn(async () => ({ provider: "openai-codex", id: "owner-model" }));
+    const harness = compactionHarness({ group: true, resolveModel });
+
+    await compactHistory(harness.deps, "thread-1", "origin-run");
+
+    expect(resolveModel).toHaveBeenCalledWith({
+      userId: "user-1",
+      spaceId: "workspace-1",
+      botId: "bot-1",
+    });
+    expect(harness.runtime.run).toHaveBeenCalledOnce();
+    expect(harness.runtime.run.mock.calls[0]![0]).toMatchObject({
+      botId: "bot-1",
+      tools: [],
+      usageOperationKind: "compaction",
+    });
+    expect(harness.thread.historyCompactionSummary).toBe("Summary of 50 messages.");
+    expect(harness.thread.historyCompactedUpToSeq).toBe(49);
+    expect(harness.prisma.run.findFirst).toHaveBeenCalledWith({
+      where: {
+        id: "origin-run",
+        threadId: "thread-1",
+        userId: "user-1",
+        spaceId: "workspace-1",
+        status: "completed",
+      },
+      select: { id: true, botId: true, sourceMessageId: true },
+    });
+    expect(harness.prisma.chatGroup.findFirst).toHaveBeenCalledWith({
+      where: {
+        id: "group-1",
+        userId: "user-1",
+        spaceId: "workspace-1",
+        archivedAt: null,
+        members: {
+          some: {
+            botId: "bot-1",
+            bot: { userId: "user-1", spaceId: "workspace-1", archivedAt: null },
+          },
+        },
+      },
+      select: { id: true },
+    });
+    expect(harness.memoryProviders.resolve).not.toHaveBeenCalled();
+    expect(harness.saveMemory).not.toHaveBeenCalled();
+    expect(harness.purgeHistory).not.toHaveBeenCalled();
+  });
+
+  it.each([{ validOrigin: false }, { currentMember: false }])(
+    "does not summarize a group for an invalid origin or removed member: %j",
+    async (options) => {
+      const resolveModel = vi.fn(async () => ({ provider: "openai-codex", id: "owner-model" }));
+      const harness = compactionHarness({ group: true, resolveModel, ...options });
+      await compactHistory(harness.deps, "thread-1", "foreign-or-removed-run");
+      expect(harness.runtime.run).not.toHaveBeenCalled();
+      expect(resolveModel).not.toHaveBeenCalled();
+      expect(harness.prisma.thread.updateMany).not.toHaveBeenCalled();
+    },
+  );
+
+  it("does not compact a group without a trusted origin run", async () => {
+    const harness = compactionHarness({ group: true, deploymentModelKey: "owner-key" });
+    await compactHistory(harness.deps, "thread-1");
+    expect(harness.runtime.run).not.toHaveBeenCalled();
+    expect(harness.prisma.thread.updateMany).not.toHaveBeenCalled();
+  });
+
+  it("stops the compacted prefix before a pending native card", async () => {
+    const harness = compactionHarness({ group: true, deploymentModelKey: "owner-key" });
+    harness.messages[2]!.blocks = [
+      {
+        kind: "ask",
+        text: "Keep this exact approval",
+        status: "pending",
+        actions: [{ id: "allow", label: "Allow once" }],
+      },
+    ];
+    await compactHistory(harness.deps, "thread-1", "origin-run");
+    expect(harness.runtime.run).toHaveBeenCalledOnce();
+    expect(harness.runtime.run.mock.calls[0]![0].prompt).not.toContain("Keep this exact approval");
+    expect(harness.thread.historyCompactedUpToSeq).toBe(1);
+    expect(harness.messages[2]!.blocks[0]).toMatchObject({
+      status: "pending",
+      text: "Keep this exact approval",
+    });
+  });
+
+  it("keeps original Artifact and speaker references in the group summary input", async () => {
+    const harness = compactionHarness({ group: true });
+    harness.messages[0] = {
+      id: "source-message",
+      seq: 0,
+      botId: "bot-2",
+      role: "bot",
+      blocks: [
+        {
+          kind: "file",
+          artifactId: "original-artifact",
+          name: "source.pdf",
+          mimeType: "application/pdf",
+          size: 20,
+        },
+      ],
+    };
+    await compactHistory(harness.deps, "thread-1", "origin-run");
+    const prompt = harness.runtime.run.mock.calls[0]![0].prompt;
+    expect(prompt).toContain("source-message");
+    expect(prompt).toContain("bot-2");
+    expect(prompt).toContain("original-artifact");
+  });
+
+  it("does not move a legacy cursor backwards when a pending card prevents a complete bootstrap", async () => {
+    const harness = compactionHarness({
+      group: true,
+      nextMessageSeq: 150,
+      historyCompactedUpToSeq: 49,
+      historyCompactionGeneration: 0,
+    });
+    harness.messages[2]!.blocks = [{ kind: "ask", text: "Pending", status: "pending" }];
+    await compactHistory(harness.deps, "thread-1", "origin-run");
+    expect(harness.runtime.run).not.toHaveBeenCalled();
+    expect(harness.thread.historyCompactedUpToSeq).toBe(49);
+  });
+
+  it("does not summarize a short group or its protected originating source", async () => {
+    const short = compactionHarness({ group: true, nextMessageSeq: 99 });
+    await compactHistory(short.deps, "thread-1", "origin-run");
+    expect(short.runtime.run).not.toHaveBeenCalled();
+    const current = compactionHarness({ group: true });
+    current.messages[0]!.id = "current-source";
+    await compactHistory(current.deps, "thread-1", "origin-run");
+    expect(current.runtime.run).not.toHaveBeenCalled();
+    expect(current.prisma.thread.updateMany).not.toHaveBeenCalled();
+  });
+
+  it("applies the same origin and pending-source safeguards to new automatic DM summaries", async () => {
+    const resolveModel = vi.fn(async () => ({ provider: "openai-codex", id: "owner-model" }));
+    const valid = compactionHarness({ nextMessageSeq: 100, resolveModel });
+    await compactHistory(valid.deps, "thread-1", "origin-run");
+    expect(valid.runtime.run).toHaveBeenCalledOnce();
+    expect(valid.thread.historyCompactedUpToSeq).toBe(49);
+    const pending = compactionHarness({ nextMessageSeq: 100, resolveModel });
+    pending.messages[0]!.blocks = [{ kind: "ask", text: "Original approval", status: "pending" }];
+    await compactHistory(pending.deps, "thread-1", "origin-run");
+    expect(pending.runtime.run).not.toHaveBeenCalled();
+    expect(pending.prisma.thread.updateMany).not.toHaveBeenCalled();
+    const foreign = compactionHarness({ nextMessageSeq: 100, resolveModel, validOrigin: false });
+    await compactHistory(foreign.deps, "thread-1", "foreign-origin");
+    expect(foreign.runtime.run).not.toHaveBeenCalled();
+  });
+
   it("summarizes the next batch, saves it through the provider, and advances the cursor", async () => {
     const harness = compactionHarness({ deploymentModelKey: "openrouter-key" });
 

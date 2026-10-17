@@ -8,6 +8,7 @@ const APPROVAL_EXEMPT_TOOLS = new Set([
   "browser_act",
   "list_files",
   "read_file",
+  "artifact_read",
   "read_history",
   "search_history",
   "write_file",
@@ -35,7 +36,20 @@ const APPROVAL_REQUIRED_BUILTIN_TOOLS = new Set([
   "cloud_agent_reply",
   "cloud_agent_cancel",
 ]);
-const EXPLICIT_APPROVAL_BUILTIN_TOOLS = new Set(["create_space"]);
+const EXPLICIT_APPROVAL_BUILTIN_TOOLS = new Set([
+  "create_space",
+  "recruiting_request_approval",
+  "recruiting_crm_bind",
+]);
+// Lead enrollment may start an already-active campaign; it needs the same
+// one-time human decision as a direct reply or campaign activation.
+const EXPLICIT_APPROVAL_MCP_OPERATIONS = new Set([
+  "crm_import_candidate",
+  "reply_to_email",
+  "create_lead",
+  "add_leads_to_campaign_or_list_bulk",
+  "activate_campaign",
+]);
 
 const UNATTENDED_SAFE_BUILTIN_TOOLS = new Set([
   "browser_snapshot",
@@ -44,7 +58,9 @@ const UNATTENDED_SAFE_BUILTIN_TOOLS = new Set([
   "list_files",
   "list_secrets",
   "read_file",
+  "artifact_read",
   "recall_memory",
+  "read_memory",
   "request_takeover",
   "run_subagent",
   "task_catalog",
@@ -103,9 +119,15 @@ export function toolRequiresApproval(
   return false;
 }
 
-/** Security-boundary changes cannot be auto-reviewed or permanently allowed. */
-export function toolRequiresExplicitApproval(toolName: string): boolean {
-  return EXPLICIT_APPROVAL_BUILTIN_TOOLS.has(toolName);
+/** These actions require a one-time human decision, without auto-review or permanent allowance. */
+export function toolRequiresExplicitApproval(
+  toolName: string,
+  route?: { connectorId: string; toolName: string },
+): boolean {
+  return (
+    EXPLICIT_APPROVAL_BUILTIN_TOOLS.has(toolName) ||
+    (route?.connectorId === "mcp" && EXPLICIT_APPROVAL_MCP_OPERATIONS.has(route.toolName))
+  );
 }
 
 /** External webhook runs may inspect state unattended, but side effects always need the owner. */
@@ -268,4 +290,109 @@ export function isApprovalAskBlock(block: {
     actionIds.has("deny") &&
     [...actionIds].every((id) => id === "allow" || id === "always" || id === "deny")
   );
+}
+
+export const DIRECT_APPROVAL_TAG = "direct";
+
+export type BoundApprovalRoute = {
+  connectorId: string;
+  resourceId: string;
+  toolName: string;
+  resourceRevision?: string | number;
+};
+
+export function catalogApprovalRequest(
+  toolName: string,
+  args: Record<string, unknown>,
+  marker: string,
+  route?: BoundApprovalRoute,
+): unknown[] {
+  return route ? [marker, toolName, args, route] : [marker, toolName, args];
+}
+
+export function catalogApprovalDetails(
+  request: unknown,
+  marker: string,
+): { toolName: string; args: Record<string, unknown>; route?: BoundApprovalRoute } | undefined {
+  if (
+    !Array.isArray(request) ||
+    (request.length !== 3 && request.length !== 4) ||
+    request[0] !== marker ||
+    typeof request[1] !== "string" ||
+    !request[1].endsWith("_execute_tool") ||
+    !request[2] ||
+    typeof request[2] !== "object" ||
+    Array.isArray(request[2])
+  ) {
+    return undefined;
+  }
+  if (request.length === 3) {
+    return { toolName: request[1], args: request[2] as Record<string, unknown> };
+  }
+  const route = request[3];
+  if (
+    !route ||
+    typeof route !== "object" ||
+    Array.isArray(route) ||
+    typeof (route as BoundApprovalRoute).connectorId !== "string" ||
+    typeof (route as BoundApprovalRoute).resourceId !== "string" ||
+    typeof (route as BoundApprovalRoute).toolName !== "string" ||
+    ((route as BoundApprovalRoute).resourceRevision !== undefined &&
+      typeof (route as BoundApprovalRoute).resourceRevision !== "string" &&
+      typeof (route as BoundApprovalRoute).resourceRevision !== "number")
+  ) {
+    return undefined;
+  }
+  return {
+    toolName: request[1],
+    args: request[2] as Record<string, unknown>,
+    route: route as BoundApprovalRoute,
+  };
+}
+
+export function boundDirectApprovalRequest(
+  route: BoundApprovalRoute,
+  args: Record<string, unknown>,
+  marker: string,
+): unknown[] {
+  return [marker, DIRECT_APPROVAL_TAG, { route, args }];
+}
+
+export function boundDirectApprovalDetails(
+  request: unknown,
+  marker: string,
+): { route: BoundApprovalRoute; args: Record<string, unknown> } | undefined {
+  if (
+    !Array.isArray(request) ||
+    request.length !== 3 ||
+    request[0] !== marker ||
+    request[1] !== DIRECT_APPROVAL_TAG ||
+    !request[2] ||
+    typeof request[2] !== "object" ||
+    Array.isArray(request[2])
+  ) {
+    return undefined;
+  }
+  const payload = request[2] as { route?: unknown; args?: unknown };
+  const route = payload.route;
+  if (
+    !route ||
+    typeof route !== "object" ||
+    Array.isArray(route) ||
+    typeof (route as BoundApprovalRoute).connectorId !== "string" ||
+    typeof (route as BoundApprovalRoute).resourceId !== "string" ||
+    typeof (route as BoundApprovalRoute).toolName !== "string" ||
+    ((route as BoundApprovalRoute).resourceRevision !== undefined &&
+      typeof (route as BoundApprovalRoute).resourceRevision !== "string" &&
+      typeof (route as BoundApprovalRoute).resourceRevision !== "number") ||
+    !payload.args ||
+    typeof payload.args !== "object" ||
+    Array.isArray(payload.args)
+  ) {
+    return undefined;
+  }
+  return {
+    route: route as BoundApprovalRoute,
+    args: payload.args as Record<string, unknown>,
+  };
 }

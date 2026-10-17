@@ -1,5 +1,7 @@
 import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
+import { createCompiledCatalog, getCatalogs } from "@lingui/cli/api";
+import { getConfig } from "@lingui/conf";
 import { i18n } from "@lingui/core";
 import { beforeEach, describe, expect, it } from "vitest";
 import de from "../../scripts/translations-de.json";
@@ -14,6 +16,49 @@ describe("lingui catalogs", () => {
   beforeEach(() => {
     i18n.load("en", {});
     i18n.activate("en");
+  });
+
+  it("compiles Recruiting messages for production without source-message descriptors", async () => {
+    const config = getConfig({
+      configPath: fileURLToPath(new URL("../../lingui.config.ts", import.meta.url)),
+    });
+    const [catalog] = await getCatalogs(config);
+    const source = await catalog!.read("en");
+    const entries = Object.entries(source ?? {}).filter(([, entry]) =>
+      entry.origin?.some(([path]) => path === "src/pages/RecruitingPanel.tsx"),
+    );
+    expect(entries.length).toBeGreaterThan(30);
+    for (const message of [
+      "Open original question",
+      "Cards",
+      "Table",
+      "Candidate",
+      "Saved assessments",
+      "Raw search results",
+      "Unassessed",
+      "No saved result rows",
+      "Could not load search results",
+    ])
+      expect(
+        entries.some(([, entry]) => entry.message === message),
+        message,
+      ).toBe(true);
+    for (const locale of config.locales) {
+      const { messages } = await catalog!.getTranslations(locale, config);
+      const compiled = createCompiledCatalog(locale, messages, { namespace: "json", strict: true });
+      expect(compiled.errors).toEqual([]);
+      i18n.load(locale, JSON.parse(compiled.source).messages);
+      i18n.activate(locale);
+      expect(i18n._({ id: "bn0SqF" }), locale).toBe("Recruiting");
+      for (const [id, entry] of entries) {
+        const rendered = i18n._({ id, values: { 0: 2, count: 2 } });
+        expect(rendered, `${locale} ${id}`).not.toBe(id);
+        if (locale === "en")
+          expect(rendered, id).toBe(
+            entry.message?.replaceAll("{0}", "2").replaceAll("{count}", "2"),
+          );
+      }
+    }
   });
 
   it("falls back to the English source message when a translation is missing", () => {

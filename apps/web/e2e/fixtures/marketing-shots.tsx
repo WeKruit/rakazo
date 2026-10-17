@@ -1,6 +1,6 @@
 import { I18nProvider } from "@lingui/react";
 import { ChatMarkdown } from "@rakazo/chat-ui/web";
-import type { Bot, Me, ModelCatalogEntry } from "@rakazo/contracts";
+import type { Bot, Me, ModelCatalogEntry, RecruitingCandidate } from "@rakazo/contracts";
 import { defaultCronPreset } from "@rakazo/core";
 import { BotAvatar, Button } from "@rakazo/ui-web";
 import { ArrowUp, Bell, LayoutGrid, Monitor, PanelLeftClose, Plus, Search } from "lucide-react";
@@ -8,6 +8,7 @@ import { useEffect, useState } from "react";
 import { createRoot } from "react-dom/client";
 import { AskCard } from "../../src/components/AskCard";
 import { bootstrapI18n, i18n } from "../../src/lib/i18n";
+import { RecruitingPanel } from "../../src/pages/RecruitingPanel";
 import type { RoutineDraftState } from "../../src/pages/RoutineEditor";
 import { RoutineEditor } from "../../src/pages/RoutineEditor";
 import { SettingsOverlay } from "../../src/pages/SettingsOverlay";
@@ -54,7 +55,13 @@ window.fetch = async (input, init) => {
   const url = input instanceof Request ? input.url : String(input);
   if (url.includes("/rpc/")) {
     const path = new URL(url, location.origin).pathname.replace(/^\/rpc\//, "");
-    const body = path in demoRpc ? demoRpc[path] : [];
+    const response = path in demoRpc ? demoRpc[path] : [];
+    const request = input instanceof Request ? input : new Request(url, init);
+    const encoded = (await request
+      .clone()
+      .json()
+      .catch(() => ({}))) as { json?: Record<string, unknown> };
+    const body = typeof response === "function" ? await response(encoded.json ?? {}) : response;
     return new Response(JSON.stringify({ json: body }), {
       status: 200,
       headers: { "content-type": "application/json" },
@@ -191,21 +198,37 @@ function RoutineShot() {
   );
 }
 
-function ApprovalShot() {
+function ApprovalShot({ recruiting = false }: { recruiting?: boolean }) {
   return (
     <main data-ready="true" className="mx-auto max-w-[760px] bg-background p-8 text-foreground">
+      {recruiting && (
+        <p className="mb-5 text-xs text-muted-foreground">Synthetic recruiting draft</p>
+      )}
       <AskCard
         canAnswer
         onAnswer={async () => undefined}
         block={{
           kind: "ask",
           approvalEffectId: "effect-demo",
-          text: "Review before sending a reply from the demo inbox.",
-          detail: "To: ada@example.test\nSubject: Re: Invoice 1042\n\nThanks, I will take a look.",
+          text: recruiting
+            ? "Review before reply_to_email → candidate@example.test"
+            : "Review before sending a reply from the demo inbox.",
+          detail: recruiting
+            ? [
+                "Approve this draft content only. Sending still requires complete current pre-send checks.",
+                "eaccount: recruiter@example.test",
+                "to: candidate@example.test",
+                "subject: Re: Example role",
+                "body_text: Thanks for your interest. May we discuss the role?",
+                "role: Example role",
+                "candidateId: candidate-demo",
+                'checksRemaining: ["Legacy hold/pass records","Gmail history"]',
+              ].join("\n")
+            : "To: ada@example.test\nSubject: Re: Invoice 1042\n\nThanks, I will take a look.",
           status: "pending",
           actions: [
             { id: "allow", label: "Allow once" },
-            { id: "always", label: "Always allow this tool" },
+            ...(recruiting ? [] : [{ id: "always", label: "Always allow this tool" }]),
             { id: "deny", label: "Deny" },
           ],
         }}
@@ -504,6 +527,415 @@ function SubscriptionShot() {
 
 const view = new URLSearchParams(location.search).get("view") ?? "create";
 
+async function prepareRecruitingSourceShot() {
+  const quote = "Designed coordinate transforms 🧭 in Python.";
+  const text = `Candidate note\n\n${quote}\n\nEmployment type and dates are not provided.\n`;
+  const filterText = "Include Bay Area. Exclude staffing agencies. Prefer small teams.";
+  const bytes = new TextEncoder().encode(
+    JSON.stringify({ profile: { summary: text }, brief: { search: filterText } }),
+  );
+  const digest = await crypto.subtle.digest("SHA-256", bytes);
+  const sha256 = Array.from(new Uint8Array(digest), (byte) =>
+    byte.toString(16).padStart(2, "0"),
+  ).join("");
+  const source = {
+    id: "source-demo",
+    kind: "original_material",
+    anchor: {
+      kind: "artifact",
+      artifact: { artifactId: "profile-demo", sha256 },
+      locator: "profile.summary",
+    },
+    readState: "read",
+    readAt: "2026-10-16T00:00:00Z",
+    quote,
+    selection: {
+      kind: "artifact_json_string",
+      path: ["profile", "summary"],
+      start: text.indexOf(quote),
+      end: text.indexOf(quote) + quote.length,
+    },
+  };
+  const role = {
+    id: "role-demo",
+    spaceId: "space-demo",
+    userId: "user-demo",
+    sourceThreadId: "thread-demo",
+    title: "Systems engineer",
+    revision: 1,
+    currentRevisionId: "revision-demo",
+  };
+  const filterSource = {
+    ...source,
+    id: "filter-source-demo",
+    anchor: { ...source.anchor, locator: "brief.search" },
+    quote: filterText,
+    selection: {
+      kind: "artifact_json_string",
+      path: ["brief", "search"],
+      start: 0,
+      end: filterText.length,
+    },
+  };
+  const revision = {
+    id: "revision-demo",
+    roleId: role.id,
+    revision: 1,
+    sourceRefs: [source, filterSource],
+    brief: {
+      fields: [],
+      questions: [],
+      rules: [
+        { criterionId: "geometry", origin: "jd", effect: "reject", sourceRefIds: [source.id] },
+      ],
+      searchFilters: [
+        {
+          id: "bay-area",
+          statement: "Bay Area",
+          mode: "include",
+          origin: "jd",
+          sourceRefIds: [filterSource.id],
+        },
+        {
+          id: "agency",
+          statement: "Staffing agencies",
+          mode: "exclude",
+          origin: "jd",
+          sourceRefIds: [filterSource.id],
+        },
+        {
+          id: "team-size",
+          statement: "Small teams",
+          mode: "prefer",
+          origin: "jd",
+          sourceRefIds: [filterSource.id],
+        },
+      ],
+      confirmation: null,
+    },
+    criteria: [
+      {
+        id: "geometry",
+        priority: "hard",
+        expression: {
+          kind: "atom",
+          id: "geometry-atom",
+          statement: "Implement geometric calculations",
+        },
+        sourceRefs: [],
+        definitionQuestions: [],
+      },
+    ],
+    preferences: [],
+    definitionQuestions: [],
+    createdAt: "2026-10-16T00:00:00Z",
+  };
+  const judgment = {
+    verdict: "unknown",
+    factIds: ["fact-demo"],
+    evidence: [source.id],
+    missing: ["Confirm the candidate's own implementation and employment dates."],
+  };
+  demoRpc["recruiting/getWorkspace"] = { role, revision };
+  demoRpc["recruiting/listAssessments"] = [
+    {
+      assessment: {
+        roleId: role.id,
+        roleRevisionId: revision.id,
+        candidateKey: "Synthetic candidate",
+        version: 1,
+        basedOnVersion: null,
+        createdByRunId: "run-demo",
+        createdAt: "2026-10-16T00:00:00Z",
+        facts: [
+          { kind: "statement", id: "fact-demo", statement: quote, sourceRefIds: [source.id] },
+        ],
+        sourceRefs: [source],
+        questions: judgment.missing,
+        judgments: {
+          atoms: [{ atomId: "geometry-atom", ...judgment }],
+          criteria: [{ criterionId: "geometry", ...judgment }],
+          employment: [],
+          hardGate: "unknown",
+        },
+      },
+      isCurrent: true,
+      roleRevision: revision,
+      sourceMessageTargets: [],
+    },
+  ];
+  const assessment = (
+    demoRpc["recruiting/listAssessments"] as { assessment: { createdAt: string } }[]
+  )[0]!;
+  const crmTarget = {
+    mcpServerId: "synthetic-crm-server",
+    serverRevision: 1,
+    organizationId: "00000000-0000-4000-8000-000000000001",
+    crmRoleId: "00000000-0000-4000-8000-000000000002",
+    crmClientId: "00000000-0000-4000-8000-000000000003",
+    clientLabel: "Example Robotics",
+    roleLabel: "Systems engineer",
+  };
+  const candidates: RecruitingCandidate[] = [
+    {
+      roleId: role.id,
+      candidateKey: "Synthetic candidate",
+      name: "Synthetic candidate",
+      title: "Systems Engineer",
+      company: "Example Robotics",
+      location: "Example City",
+      linkedinUrl: "https://www.linkedin.com/in/synthetic-candidate",
+      resumeUrl: null,
+      evidenceUrls: ["https://example.test/engineering"],
+      issues: [],
+      shortlisted: false,
+      revision: 0,
+      discoveryCount: 2,
+      firstDiscoveredAt: "2026-10-16T00:00:00Z",
+      lastDiscoveredAt: "2026-10-16T00:00:00Z",
+      latestAssessment: {
+        version: 1,
+        roleRevisionId: revision.id,
+        createdAt: assessment.assessment.createdAt,
+        isCurrent: true,
+        hardGate: "unknown",
+      },
+      crm: {
+        effectId: "synthetic-crm-import-1",
+        bindingEffectId: "synthetic-crm-binding",
+        sourceEffectId: "demo-read",
+        rowIndex: 0,
+        target: crmTarget,
+        status: "synced",
+        receipt: {
+          candidate_id: "10000000-0000-4000-8000-000000000001",
+          source_id: "10000000-0000-4000-8000-000000000002",
+          membership_id: "10000000-0000-4000-8000-000000000003",
+          organization_id: crmTarget.organizationId,
+          role_spec_id: crmTarget.crmRoleId,
+          linkedin_identity: "/in/synthetic-candidate",
+          source_file: "artifact:result-demo:row:0",
+        },
+      },
+    },
+    {
+      roleId: role.id,
+      candidateKey: "linkedin:/in/synthetic-unassessed",
+      name: "Synthetic unassessed",
+      title: "Data Engineer",
+      company: "Example Systems",
+      location: "Example City",
+      linkedinUrl: "https://www.linkedin.com/in/synthetic-unassessed",
+      resumeUrl: null,
+      evidenceUrls: null,
+      issues: [],
+      shortlisted: false,
+      revision: 0,
+      discoveryCount: 1,
+      firstDiscoveredAt: "2026-10-16T00:00:00Z",
+      lastDiscoveredAt: "2026-10-16T00:00:00Z",
+      latestAssessment: null,
+      crm: {
+        effectId: "synthetic-crm-import-2",
+        bindingEffectId: "synthetic-crm-binding",
+        sourceEffectId: "demo-read",
+        rowIndex: 2,
+        target: crmTarget,
+        status: "unknown",
+        receipt: null,
+      },
+    },
+    {
+      roleId: role.id,
+      candidateKey: "row:demo-read:3",
+      name: "Synthetic unresolved",
+      title: null,
+      company: null,
+      location: null,
+      linkedinUrl: null,
+      resumeUrl: null,
+      evidenceUrls: null,
+      issues: ["missing_field:linkedin_url"],
+      shortlisted: false,
+      revision: 0,
+      discoveryCount: 1,
+      firstDiscoveredAt: "2026-10-16T00:00:00Z",
+      lastDiscoveredAt: "2026-10-16T00:00:00Z",
+      latestAssessment: null,
+      crm: null,
+    },
+  ];
+  demoRpc["recruiting/listCandidates"] = (args: Record<string, unknown>) => {
+    const query = typeof args.query === "string" ? args.query.toLowerCase() : "";
+    const filtered = candidates.filter(
+      (candidate) =>
+        (!query ||
+          [candidate.name, candidate.title, candidate.company, candidate.location].some((value) =>
+            value?.toLowerCase().includes(query),
+          )) &&
+        (args.shortlisted === undefined || candidate.shortlisted === args.shortlisted) &&
+        (!args.assessmentState ||
+          (args.assessmentState === "unassessed"
+            ? !candidate.latestAssessment
+            : args.assessmentState === "current"
+              ? candidate.latestAssessment?.isCurrent
+              : candidate.latestAssessment && !candidate.latestAssessment.isCurrent)) &&
+        (!args.verdict || candidate.latestAssessment?.hardGate === args.verdict),
+    );
+    const offset = typeof args.cursor === "string" ? Number(args.cursor) : 0;
+    const page = filtered.slice(offset, offset + 2);
+    return {
+      roleId: role.id,
+      roleRevisionId: revision.id,
+      crmTarget: { bindingEffectId: "synthetic-crm-binding", target: crmTarget },
+      items: page,
+      total: filtered.length,
+      nextCursor: offset + page.length < filtered.length ? String(offset + page.length) : null,
+      counts: {
+        sourceRows: 4,
+        candidates: 3,
+        identifiedCandidates: 2,
+        unassessed: 2,
+        assessed: 1,
+        shortlisted: candidates.filter((candidate) => candidate.shortlisted).length,
+      },
+    };
+  };
+  demoRpc["recruiting/getAssessment"] = () => assessment;
+  demoRpc["recruiting/setCandidateShortlist"] = (args: Record<string, unknown>) => {
+    const candidate = candidates.find((candidate) => candidate.candidateKey === args.candidateKey)!;
+    candidate.shortlisted = args.shortlisted === true;
+    candidate.revision++;
+    return {
+      roleId: role.id,
+      candidateKey: candidate.candidateKey,
+      shortlisted: candidate.shortlisted,
+      revision: candidate.revision,
+    };
+  };
+  const rawRows = [candidates[0]!, candidates[0]!, candidates[1]!, candidates[2]!].map(
+    (candidate) => ({
+      name: { value: candidate.name, source_id: "s1" },
+      linkedin_url: { value: candidate.linkedinUrl, source_id: "s1" },
+      current_title: { value: candidate.title, source_id: "s1" },
+      current_company: { value: candidate.company, source_id: "s1" },
+      location: { value: candidate.location, source_id: "s1" },
+      resume_url: { value: candidate.resumeUrl, source_id: null },
+      evidence_urls: { value: candidate.evidenceUrls, source_id: "s1" },
+      _sources: { s1: "https://example.test/engineering" },
+    }),
+  );
+  const rawSnapshot = {
+    version: 1,
+    taskId: "task-demo",
+    actionId: "action-demo",
+    operation: "rows",
+    effectId: "demo-read",
+    request: { task_id: "provider-task-demo" },
+    providerResult: { rows: rawRows },
+    observation: {
+      deliveryState: "accepted",
+      providerTaskId: "provider-task-demo",
+      observedProviderState: null,
+      done: null,
+      providerApplicationConfirmed: false,
+      automaticRetry: false,
+      usage: null,
+      rows: rawRows,
+      nextCursor: null,
+      outputId: "output-demo",
+    },
+  };
+  const rawBytes = new TextEncoder().encode(JSON.stringify(rawSnapshot));
+  const rawHash = Array.from(
+    new Uint8Array(await crypto.subtle.digest("SHA-256", rawBytes)),
+    (byte) => byte.toString(16).padStart(2, "0"),
+  ).join("");
+  const rawRef = { artifactId: "result-demo", sha256: rawHash };
+  demoRpc["recruiting/listResearch"] = {
+    observations: [],
+    tasks: [
+      {
+        id: "task-demo",
+        roleId: role.id,
+        mcpServerId: "server-demo",
+        serverRevision: 1,
+        providerTaskId: "provider-task-demo",
+        pendingActionId: "action-demo",
+        state: "completed",
+        createdByRunId: "run-demo",
+      },
+    ],
+    actions: [
+      {
+        id: "action-demo",
+        taskId: "task-demo",
+        roleRevisionId: revision.id,
+        clientNonce: "nonce-demo",
+        kind: "create",
+        runId: "run-demo",
+        sourceMessageId: "source-message-demo",
+        requestArtifact: { artifactId: "request-demo", sha256: "a".repeat(64) },
+        contextArtifact: { artifactId: "context-demo", sha256: "b".repeat(64) },
+        recallScope: null,
+        deliveryState: "accepted",
+        observedProviderState: "completed",
+        receiptArtifact: null,
+        outputArtifacts: [rawRef],
+        cursor: null,
+        effectId: "effect-demo",
+        usage: null,
+      },
+    ],
+  };
+  demoRpc["recruiting/listCandidateSources"] = (args: Record<string, unknown>) => {
+    const index = candidates.findIndex((candidate) => candidate.candidateKey === args.candidateKey);
+    const rowIndexes = index === 0 ? [0, 1] : [index + 1];
+    return {
+      roleId: role.id,
+      candidateKey: args.candidateKey,
+      total: rowIndexes.length,
+      nextCursor: null,
+      items: rowIndexes.map((rowIndex) => ({
+        taskId: "task-demo",
+        actionId: "action-demo",
+        roleRevisionId: revision.id,
+        effectId: "demo-read",
+        rowIndex,
+        crmImports: candidates[index]?.crm?.rowIndex === rowIndex ? [candidates[index]!.crm] : [],
+        artifactRef: rawRef,
+        requestCursor: null,
+        outputId: "output-demo",
+        observedAt: "2026-10-16T00:00:00Z",
+      })),
+    };
+  };
+  demoRpc["recruiting/listQuestions"] = { questions: [] };
+  const profileArtifact = {
+    id: "profile-demo",
+    botId: "bot-inbox",
+    groupId: null,
+    runId: null,
+    name: "profile.json",
+    description: null,
+    mimeType: "application/json",
+    size: bytes.length,
+    version: 1,
+    createdAt: "2026-10-16T00:00:00Z",
+    contentBase64: btoa(String.fromCharCode(...bytes)),
+  };
+  demoRpc["artifacts/getById"] = (args: Record<string, unknown>) =>
+    args.artifactId === rawRef.artifactId
+      ? {
+          ...profileArtifact,
+          id: rawRef.artifactId,
+          name: "search-results.json",
+          size: rawBytes.length,
+          contentBase64: btoa(String.fromCharCode(...rawBytes)),
+        }
+      : profileArtifact;
+}
+
 if (view === "subscription") {
   demoRpc.me = subscriptionMe;
   demoRpc["models/list"] = subscriptionCatalog;
@@ -511,22 +943,29 @@ if (view === "subscription") {
   demoRpc["models/backups"] = [];
 }
 
-void bootstrapI18n("en").then(() => {
-  const shot =
-    view === "model" ? (
-      <ModelShot />
-    ) : view === "routine" ? (
-      <RoutineShot />
-    ) : view === "approval" ? (
-      <ApprovalShot />
-    ) : view === "chat" ? (
-      <ChatShot />
-    ) : view === "subscription" ? (
-      <SubscriptionShot />
-    ) : (
-      <CreateShot />
+void (view === "recruiting" ? prepareRecruitingSourceShot() : Promise.resolve())
+  .then(() => bootstrapI18n("en"))
+  .then(() => {
+    const shot =
+      view === "recruiting" ? (
+        <main className="mx-auto max-w-[900px] bg-background p-8 text-foreground">
+          <p className="mb-5 text-xs text-muted-foreground">Synthetic recruiting evidence</p>
+          <RecruitingPanel threadId="thread-demo" botId="bot-inbox" onClose={() => undefined} />
+        </main>
+      ) : view === "model" ? (
+        <ModelShot />
+      ) : view === "routine" ? (
+        <RoutineShot />
+      ) : view === "approval" || view === "recruiting-reply" ? (
+        <ApprovalShot recruiting={view === "recruiting-reply"} />
+      ) : view === "chat" ? (
+        <ChatShot />
+      ) : view === "subscription" ? (
+        <SubscriptionShot />
+      ) : (
+        <CreateShot />
+      );
+    createRoot(document.getElementById("root")!).render(
+      <I18nProvider i18n={i18n}>{shot}</I18nProvider>,
     );
-  createRoot(document.getElementById("root")!).render(
-    <I18nProvider i18n={i18n}>{shot}</I18nProvider>,
-  );
-});
+  });

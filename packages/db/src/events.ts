@@ -1,3 +1,4 @@
+import { createHash } from "node:crypto";
 import type { RealtimeFanout } from "@rakazo/adapter-kit";
 import type { BotSecretDestination, MessageBlock, ProductEvent } from "@rakazo/contracts";
 import {
@@ -15,6 +16,7 @@ import {
   resolveAskChoice,
   sanitizeJsonValue,
 } from "@rakazo/core";
+import { stableJsonValue } from "@rakazo/core/node/approval-effect-key";
 import { getLogger } from "@rakazo/logging";
 import { cancelRunsInTransaction } from "./cancel-runs.js";
 import type { Prisma, PrismaClient } from "./client.js";
@@ -25,6 +27,13 @@ import {
   createThreadMessageInTransaction,
   RunHistoryWriteError,
 } from "./messages.js";
+import type { RecruitingQuestionPauseContext } from "./recruiting.js";
+import {
+  authorizeRecruitingApprovalAnswerInTransaction,
+  authorizeRecruitingQuestionAnswerInTransaction,
+  commitRecruitingQuestionInTransaction,
+  prepareRecruitingQuestionInTransaction,
+} from "./recruiting.js";
 import { withTransactionRetry } from "./transaction-retry.js";
 
 const EVENT_BATCH_SIZE = 200;
@@ -141,6 +150,8 @@ export interface PauseRunForInput {
    * (not in message blocks) so clients still see redacted labels.
    */
   offeredActions?: Array<{ id: string; label: string }>;
+  /** Server-owned native question binding; model tool arguments never supply this context. */
+  recruitingQuestion?: RecruitingQuestionPauseContext;
 }
 
 const CHOICE_ASK_CHECKPOINT_KIND = "choice_ask_v1";
@@ -172,18 +183,16 @@ function resumeChoiceLabel(
 }
 
 /**
- * A conversational run's request and earlier answers stay in thread history, so its resumed
- * attempt gets just the answer. A background run's prompt never reaches the thread, so it keeps
- * its instructions and every earlier answer; otherwise the resumed attempt forgets them.
+ * Keep authoritative task state, including resolved private choice labels. The
+ * executor separately projects native goals/questions/answers into conversation turns.
  */
 function resumePrompt(
   run: { trigger: string; task?: { prompt: string } | null },
   question: string,
   answer: string,
 ): string {
-  if (isConversationalRun(run.trigger)) return answer;
-  return [run.task?.prompt.trim(), `${question.trim()}\nAnswer: ${answer}`]
-    .filter(Boolean)
+  return [run.task?.prompt, `${question}\nAnswer: ${answer}`]
+    .filter((part) => part?.trim())
     .join("\n\n");
 }
 
@@ -207,6 +216,8 @@ export interface AnswerRunInput {
   messageId: string;
   answeredByUserId: string;
   answer: string;
+  /** Server-only: an authenticated composer message already created in this transaction. */
+  answerMessageId?: string;
   /** Identifies a spoken answer as part of a live voice call. */
   clientNonce?: string;
   /** Only for a login card; `answer` carries its password. */
@@ -685,7 +696,7 @@ async function commitAnswerRunInput(
     ? LoginSecretValue.safeParse({ username: input.username!.trim(), password: input.answer })
     : undefined;
   if (login && !login.success) return null;
-  let approvalEffect: { id: string; kind: string } | null = null;
+  let approvalEffect: { id: string; kind: string; request: Prisma.JsonValue } | null = null;
   let approvalUserId: string | null = null;
 
   if (approvalAsk) {
@@ -699,11 +710,58 @@ async function commitAnswerRunInput(
       },
     });
     if (!approvalEffect) return null;
+    if (
+      approvalEffect.kind === "recruiting_request_approval" &&
+      (input.answer === "always" ||
+        (input.answer === "allow" &&
+          !(await authorizeRecruitingApprovalAnswerInTransaction(
+            tx,
+            input,
+            approvalEffect.request,
+          ))))
+    )
+      return null;
     if (input.answer === "always") {
       if (run.userId !== input.answeredByUserId) return null;
       approvalUserId = input.answeredByUserId;
     }
   }
+
+  const ordinaryAsk = !approvalAsk && !secretAsk;
+  if (ordinaryAsk && !input.answer.trim()) return null;
+  let answerMessageId = input.answerMessageId;
+  if (answerMessageId !== undefined) {
+    if (!ordinaryAsk) return null;
+    const answerMessage = await tx.message.findFirst({
+      where: { id: answerMessageId, threadId: input.threadId, role: "user", botId: null },
+      include: { externalTranscriptFor: { select: { id: true } } },
+    });
+    const answerBlocks = MessageBlockSchema.array().safeParse(answerMessage?.blocks);
+    if (
+      !answerMessage ||
+      answerMessage.threadId !== input.threadId ||
+      answerMessage.role !== "user" ||
+      answerMessage.botId !== null ||
+      answerMessage.externalTranscriptFor ||
+      !answerBlocks.success ||
+      answerBlocks.data.some((block) => !["text", "file", "image"].includes(block.kind)) ||
+      answerBlocks.data
+        .filter((block) => block.kind === "text")
+        .map((block) => block.text)
+        .join("\n") !== input.answer
+    )
+      return null;
+  }
+
+  if (
+    !(await authorizeRecruitingQuestionAnswerInTransaction(
+      tx,
+      input,
+      message,
+      parsed.data.indexOf(pendingAsk),
+    ))
+  )
+    return null;
 
   const queued = await tx.run.updateMany({
     where: {
@@ -723,15 +781,20 @@ async function commitAnswerRunInput(
   const callId = callIdFromClientNonce(input.clientNonce);
   const recordsCallUtterance = Boolean(callId && !secretAsk);
 
-  // Give spoken answers the same durable, call-scoped user utterance as other voice turns.
-  // Secret asks stay out of message history; the call UI requires those answers on screen.
-  if (recordsCallUtterance) {
-    const blocks = [{ kind: "text" as const, text: input.answer }];
+  // Ordinary answers are native human messages; spoken approvals keep their existing call transcript.
+  // Secret asks stay out of message history.
+  if (!answerMessageId && (ordinaryAsk || recordsCallUtterance)) {
+    const blocks = [
+      {
+        kind: "text" as const,
+        text: ordinaryAsk ? (selectedChoice?.label ?? input.answer) : input.answer,
+      },
+    ];
     const utterance = await createThreadMessageInTransaction(tx, {
       threadId: input.threadId,
       role: "user",
       blocks,
-      botId: run.botId,
+      botId: ordinaryAsk ? undefined : run.botId,
       runId: input.runId,
       clientNonce: input.clientNonce,
     });
@@ -741,8 +804,9 @@ async function commitAnswerRunInput(
       botId: run.botId,
       type: "thread.message.created",
       runId: input.runId,
-      payload: { messageId: utterance.id, role: "user", blocks, callId },
+      payload: { messageId: utterance.id, role: "user", blocks, ...(callId ? { callId } : {}) },
     });
+    answerMessageId = utterance.id;
   }
 
   if (approvalAsk) {
@@ -829,6 +893,42 @@ async function commitAnswerRunInput(
     runId: input.runId,
     payload: { messageId: message.id, role: "bot", blocks },
   });
+  if (ordinaryAsk) {
+    const proof = await appendEventInTransaction(tx, {
+      spaceId: input.spaceId,
+      threadId: input.threadId,
+      botId: run.botId,
+      runId: input.runId,
+      type: "thread.choice",
+      payload: {
+        messageId: message.id,
+        askIndex: parsed.data.indexOf(pendingAsk),
+        answerMessageId: answerMessageId!,
+        answeredByUserId: input.answeredByUserId,
+      },
+    });
+    return { threadId: proof.threadId, seq: proof.seq };
+  }
+  if (approvalAsk) {
+    const proof = await appendEventInTransaction(tx, {
+      spaceId: input.spaceId,
+      threadId: input.threadId,
+      botId: run.botId,
+      runId: input.runId,
+      type: "effect.approval.answered",
+      payload: {
+        effectId: approvalEffect!.id,
+        messageId: message.id,
+        askIndex: parsed.data.indexOf(pendingAsk),
+        answeredByUserId: input.answeredByUserId,
+        answer: input.answer,
+        requestHash: createHash("sha256")
+          .update(stableJsonValue(approvalEffect!.request))
+          .digest("hex"),
+      },
+    });
+    return { threadId: proof.threadId, seq: proof.seq };
+  }
   return { threadId: updated.threadId, seq: updated.seq };
 }
 
@@ -860,14 +960,15 @@ export async function answerWaitingRunWithTextInTransaction(
     runId: string;
     answeredByUserId: string;
     answer: string;
+    /** Server-only native composer message, reused across the waiting runs it answers. */
+    answerMessageId?: string;
   },
 ): Promise<{ threadId: string; seq: number } | null> {
-  const answer = input.answer.trim();
-  if (!answer) return null;
+  if (!input.answer.trim()) return null;
   const found = await findPendingAsk(tx, input);
   if (!found) return null;
   if (isApprovalAskBlock(found.pendingAsk) || isSecretAskBlock(found.pendingAsk)) return null;
-  return commitAnswerRunInput(tx, { ...input, messageId: found.messageId, answer });
+  return commitAnswerRunInput(tx, { ...input, messageId: found.messageId });
 }
 
 export async function pauseRunForInput(
@@ -879,6 +980,10 @@ export async function pauseRunForInput(
     // Thread row first, then run rows — the same order as clearThread and finalizeRun, so a
     // concurrent clear cannot deadlock against this transaction.
     await tx.$queryRaw`SELECT id FROM threads WHERE id = ${input.threadId} FOR UPDATE`;
+    const question = input.recruitingQuestion
+      ? await prepareRecruitingQuestionInTransaction(tx, input)
+      : undefined;
+    if (question?.kind === "completed") return { threadId: input.threadId, seq: question.eventSeq };
     const paused = await tx.run.updateMany({
       where: {
         id: input.runId,
@@ -888,6 +993,7 @@ export async function pauseRunForInput(
         status: "running",
         leaseOwner: input.leaseOwner,
         leaseFence: input.leaseFence,
+        ...(input.recruitingQuestion ? { leaseExpiresAt: { gt: new Date() } } : {}),
       },
       data: {
         status: "waiting_input",
@@ -917,6 +1023,9 @@ export async function pauseRunForInput(
       blocks: input.blocks,
       botId: input.botId,
       runId: input.runId,
+      ...(question?.kind === "new"
+        ? { clientNonce: `recruiting-question:${question.effectId}` }
+        : {}),
     });
     await appendEventInTransaction(tx, {
       spaceId: input.spaceId,
@@ -926,7 +1035,7 @@ export async function pauseRunForInput(
       runId: input.runId,
       payload: { messageId: message.id, role: "bot", blocks: input.blocks },
     });
-    const waitingEvent = await appendEventInTransaction(tx, {
+    let waitingEvent = await appendEventInTransaction(tx, {
       spaceId: input.spaceId,
       threadId: input.threadId,
       botId: input.botId,
@@ -934,6 +1043,8 @@ export async function pauseRunForInput(
       runId: input.runId,
       payload: {},
     });
+    if (question?.kind === "new")
+      waitingEvent = await commitRecruitingQuestionInTransaction(tx, input, question, message);
     await tx.event.deleteMany({ where: { runId: input.runId, type: "thread.progress" } });
     return { threadId: waitingEvent.threadId, seq: waitingEvent.seq };
   });

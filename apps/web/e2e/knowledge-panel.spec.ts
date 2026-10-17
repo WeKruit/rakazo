@@ -64,7 +64,11 @@ test("memory and skills are readable and editable in the app", async ({ page }, 
   // Export must fetch fresh content and exclude the bot's private document.
   const sharedDocument = sharedDocuments.find((doc) => doc.path === "MEMORY.md")!;
   const latestMarker = `Latest shared memory ${stamp}`;
-  await rpc(page, "memory/update", { documentId: sharedDocument.id, content: latestMarker });
+  await rpc(page, "memory/update", {
+    documentId: sharedDocument.id,
+    content: latestMarker,
+    expectedRevision: sharedDocument.revision,
+  });
   const downloadPromise = page.waitForEvent("download");
   await spaceDocs.getByRole("button", { name: "Download as markdown" }).click();
   const download = await downloadPromise;

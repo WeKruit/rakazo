@@ -226,6 +226,7 @@ import {
   getSpaceArtifact,
   getSpaceArtifactById,
   listArtifactVersions,
+  listOwnedArtifacts,
   listSpaceArtifacts,
 } from "./artifacts.js";
 import type { BillingService } from "./billing.js";
@@ -249,12 +250,34 @@ import {
   updateMemoryProviderDefaultScope,
 } from "./memory-provider-config.js";
 import {
+  memoryDocumentWhere,
+  memoryHistory,
+  requireMemoryBot,
+  updateMemoryDocument,
+} from "./memory-revisions.js";
+import {
   chooseFocus,
   dismissFocus,
   markAppConnected,
   promptFocus,
   startOnboarding,
 } from "./onboarding.js";
+import {
+  bindRecruitingRole,
+  confirmRecruitingBrief,
+  createRecruitingRole,
+  editRecruitingCriteria,
+  getRecruitingAssessment,
+  getRecruitingWorkspace,
+  listRecruitingAssessments,
+  listRecruitingCandidateSources,
+  listRecruitingCandidates,
+  listRecruitingQuestions,
+  listRecruitingResearch,
+  readRecruitingSource,
+  reviseRecruitingRole,
+  setRecruitingCandidateShortlist,
+} from "./recruiting.js";
 import { listRoutineRuns } from "./routine-runs.js";
 import { listSpaceRuns } from "./runs.js";
 import { addScreenProxyCapability } from "./screen-proxy.js";
@@ -3187,12 +3210,68 @@ export function createRouter(deps: RouterDeps) {
         return { ok: true as const };
       }),
     },
+    recruiting: {
+      readSource: authed.recruiting.readSource.handler(({ context, input }) =>
+        readRecruitingSource(deps, context.actor, input),
+      ),
+      listCandidates: authed.recruiting.listCandidates.handler(({ context, input }) =>
+        listRecruitingCandidates(deps.prisma, context.actor, input),
+      ),
+      listCandidateSources: authed.recruiting.listCandidateSources.handler(({ context, input }) =>
+        listRecruitingCandidateSources(deps.prisma, context.actor, input),
+      ),
+      setCandidateShortlist: authed.recruiting.setCandidateShortlist.handler(({ context, input }) =>
+        setRecruitingCandidateShortlist(deps.prisma, context.actor, input),
+      ),
+      editCriteria: authed.recruiting.editCriteria.handler(({ context, input }) =>
+        editRecruitingCriteria(deps.prisma, context.actor, input, {
+          artifacts: deps.artifacts,
+          context: connectionContext(context.actor, randomUUID()),
+        }),
+      ),
+      confirmBrief: authed.recruiting.confirmBrief.handler(({ context, input }) =>
+        confirmRecruitingBrief(deps.prisma, context.actor, input, {
+          artifacts: deps.artifacts,
+          context: connectionContext(context.actor, randomUUID()),
+        }),
+      ),
+      listQuestions: authed.recruiting.listQuestions.handler(({ context, input }) =>
+        listRecruitingQuestions(deps.prisma, context.actor, input),
+      ),
+      createRole: authed.recruiting.createRole.handler(({ context, input }) =>
+        createRecruitingRole(deps.prisma, context.actor, input, {
+          artifacts: deps.artifacts,
+          context: connectionContext(context.actor, randomUUID()),
+        }),
+      ),
+      bindRole: authed.recruiting.bindRole.handler(({ context, input }) =>
+        bindRecruitingRole(deps.prisma, context.actor, input),
+      ),
+      getWorkspace: authed.recruiting.getWorkspace.handler(({ context, input }) =>
+        getRecruitingWorkspace(deps.prisma, context.actor, input),
+      ),
+      reviseRole: authed.recruiting.reviseRole.handler(({ context, input }) =>
+        reviseRecruitingRole(deps.prisma, context.actor, input, {
+          artifacts: deps.artifacts,
+          context: connectionContext(context.actor, randomUUID()),
+        }),
+      ),
+      listAssessments: authed.recruiting.listAssessments.handler(({ context, input }) =>
+        listRecruitingAssessments(deps.prisma, context.actor, input),
+      ),
+      getAssessment: authed.recruiting.getAssessment.handler(({ context, input }) =>
+        getRecruitingAssessment(deps.prisma, context.actor, input),
+      ),
+      listResearch: authed.recruiting.listResearch.handler(({ context, input }) =>
+        listRecruitingResearch(deps.prisma, context.actor, input),
+      ),
+    },
     memory: {
       list: authed.memory.list.handler(async ({ context, input }) => {
+        await requireMemoryBot(deps.prisma, context.actor, input.botId);
         const docs = await deps.prisma.memoryDocument.findMany({
           where: {
-            spaceId: context.actor.spaceId,
-            userId: context.actor.userId,
+            ...memoryDocumentWhere(context.actor),
             ...(input.botId ? { botId: input.botId } : {}),
             ...(input.scope ? { scope: input.scope } : {}),
           },
@@ -3207,45 +3286,17 @@ export function createRouter(deps: RouterDeps) {
           updatedAt: doc.updatedAt.toISOString(),
         }));
       }),
-      update: authed.memory.update.handler(async ({ context, input }) => {
-        const doc = await deps.prisma.memoryDocument.findFirst({
-          where: {
-            id: input.documentId,
-            spaceId: context.actor.spaceId,
-            userId: context.actor.userId,
-          },
-        });
-        if (!doc) throw new IsolationError();
-        const updated = await deps.memory.commit(
-          {
-            scope: doc.scope as "bot" | "user",
-            botId: doc.botId ?? undefined,
-            path: doc.path,
-            content: input.content,
-          },
-          {
-            operationId: "mem",
-            traceId: "mem",
-            spaceId: context.actor.spaceId,
-            userId: context.actor.userId,
-            signal: new AbortController().signal,
-          },
-        );
-        return {
-          id: updated.id,
-          scope: doc.scope as "bot" | "user",
-          botId: doc.botId,
-          path: updated.path,
-          content: updated.content,
-          revision: updated.revision,
-          updatedAt: new Date().toISOString(),
-        };
-      }),
+      update: authed.memory.update.handler(({ context, input }) =>
+        updateMemoryDocument(deps, context.actor, input),
+      ),
+      history: authed.memory.history.handler(({ context, input }) =>
+        memoryHistory(deps.prisma, context.actor, input.documentId),
+      ),
       exportMarkdown: authed.memory.exportMarkdown.handler(async ({ context, input }) => {
+        await requireMemoryBot(deps.prisma, context.actor, input.botId);
         const docs = await deps.prisma.memoryDocument.findMany({
           where: {
-            spaceId: context.actor.spaceId,
-            userId: context.actor.userId,
+            ...memoryDocumentWhere(context.actor),
             ...(input.botId ? { botId: input.botId } : {}),
           },
         });
@@ -5813,26 +5864,7 @@ export function createRouter(deps: RouterDeps) {
     artifacts: {
       list: authed.artifacts.list.handler(async ({ context, input }) => {
         await repos.getBot(context.actor, input.botId);
-        const rows = await deps.prisma.artifact.findMany({
-          where: {
-            botId: input.botId,
-            groupId: null,
-            spaceId: context.actor.spaceId,
-            userId: context.actor.userId,
-          },
-        });
-        return rows.map((row) => ({
-          id: row.id,
-          botId: row.botId,
-          groupId: row.groupId,
-          runId: row.runId,
-          name: row.name,
-          description: row.description,
-          mimeType: row.mimeType,
-          size: row.size,
-          version: row.version,
-          createdAt: row.createdAt.toISOString(),
-        }));
+        return listOwnedArtifacts(deps, context.actor, input);
       }),
       listSpace: authed.artifacts.listSpace.handler(async ({ context, input }) => {
         if (input.botId) await repos.getBot(context.actor, input.botId);
@@ -5871,6 +5903,7 @@ export function createRouter(deps: RouterDeps) {
             artifactId: input.artifactId,
             groupId: input.groupId,
             contextBotId,
+            includeDiagnostics: input.includeDiagnostics,
           });
         }
         await repos.getBot(context.actor, input.botId!);
@@ -5878,6 +5911,7 @@ export function createRouter(deps: RouterDeps) {
           return await getOwnedArtifact(deps, context.actor, {
             botId: input.botId!,
             artifactId: input.artifactId,
+            includeDiagnostics: input.includeDiagnostics,
           });
         } catch (error) {
           if (error instanceof IsolationError) throw error;

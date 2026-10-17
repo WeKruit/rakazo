@@ -16,6 +16,12 @@ export function subscribeTicketBoardEnabled(listener: () => void) {
 }
 
 let primedBootstrap: { botId?: string; promise: Promise<AppBootstrap> } | null = null;
+let bootstrapGeneration = 0;
+
+export function invalidateInitialBootstrap() {
+  primedBootstrap = null;
+  bootstrapGeneration += 1;
+}
 
 const initialTarget = initialBootstrapTarget(
   window.location.pathname,
@@ -43,11 +49,14 @@ export function takeInitialBootstrap(botId?: string) {
 }
 
 function requestBootstrap(botId?: string) {
+  const generation = bootstrapGeneration;
   markOnce("rk:renderer:bootstrap-request-start");
   return rpc.bootstrap(botId ? { botId } : {}).then((bootstrap) => {
     markOnce("rk:renderer:bootstrap-response");
-    ticketBoardEnabled = bootstrap.me.ticketBoardEnabled;
-    for (const listener of capabilityListeners) listener();
+    if (generation === bootstrapGeneration) {
+      ticketBoardEnabled = bootstrap.me.ticketBoardEnabled;
+      for (const listener of capabilityListeners) listener();
+    }
     return bootstrap;
   });
 }

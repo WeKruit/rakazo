@@ -2,7 +2,7 @@ import type { PrismaClient } from "@rakazo/db";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { createRunExecutor } from "./executor.js";
 import { modelCredentialAuthKindsForSpace } from "./model-selection.js";
-import { serializeModelSecret } from "./pi-oauth.js";
+import { refreshExpiredModelCredential, serializeModelSecret } from "./pi-oauth.js";
 
 const SCOPE = { userId: "user-1", spaceId: "ws-1" };
 const PROVIDER = "openai-codex";
@@ -166,6 +166,53 @@ describe("OAuth credential retirement on terminal refresh rejection", () => {
   afterEach(() => {
     vi.unstubAllGlobals();
   });
+
+  it.each([
+    { failure: "terminal invalid_grant", status: 400, retired: true, rotated: false },
+    { failure: "5xx quoting invalid_grant", status: 502, retired: false, rotated: false },
+    { failure: "network error", status: null, retired: false, rotated: false },
+    { failure: "stale invalid_grant after rotation", status: 400, retired: false, rotated: true },
+  ])(
+    "retires only dead detached catalog credentials: $failure",
+    async ({ status, retired, rotated }) => {
+      const fetchMock = vi.fn(async () => {
+        if (status === null) throw new Error("fetch failed");
+        return new Response(JSON.stringify({ error: "invalid_grant" }), { status });
+      });
+      vi.stubGlobal("fetch", fetchMock);
+      const { prisma, state } = oauthPrisma();
+      const load = vi.fn(async () => expiredOAuthPlaintext());
+      if (rotated) {
+        load
+          .mockResolvedValueOnce(expiredOAuthPlaintext())
+          .mockResolvedValue(rotatedOAuthPlaintext());
+      }
+      const secretStore = { load, put: vi.fn() };
+
+      await expect(
+        refreshExpiredModelCredential(prisma, secretStore, SCOPE, "secret-codex", PROVIDER),
+      ).rejects.toThrow();
+
+      expect(fetchMock).toHaveBeenCalledTimes(1);
+      expect(secretStore.put).not.toHaveBeenCalled();
+      expect(state.credentials).toHaveLength(retired ? 0 : 1);
+      expect(state.preferences).toHaveLength(retired ? 0 : 1);
+      expect(state.secrets).toHaveLength(retired ? 0 : 1);
+      const auth = await modelCredentialAuthKindsForSpace(
+        prisma,
+        { load: vi.fn(async () => (rotated ? rotatedOAuthPlaintext() : expiredOAuthPlaintext())) },
+        SCOPE,
+      );
+      expect(auth.byProvider[PROVIDER]).toBe(retired ? undefined : "oauth");
+      if (status === 400) {
+        expect(prisma.userModelCredential.findFirst).toHaveBeenCalledWith({
+          where: { userId: SCOPE.userId, provider: PROVIDER, secretId: "secret-codex" },
+          select: { id: true },
+        });
+      }
+      if (rotated) expect(load).toHaveBeenCalledTimes(2);
+    },
+  );
 
   it("deletes the credential and leaves the provider disconnected after invalid_grant", async () => {
     // The real pi codex refresh posts to the token endpoint; a 400 body with a

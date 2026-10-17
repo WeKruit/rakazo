@@ -1,8 +1,25 @@
+import { createHash } from "node:crypto";
 import type { ArtifactStore } from "@rakazo/adapter-kit";
 import type { Actor } from "@rakazo/contracts";
 import type { PrismaClient } from "@rakazo/db";
 import { describe, expect, it, vi } from "vitest";
-import { ArtifactListCursorError, deleteArtifactFamily, listSpaceArtifacts } from "./artifacts.js";
+import {
+  ArtifactListCursorError,
+  buildUserMessageBlocks,
+  deleteArtifactFamily,
+  getOwnedArtifact,
+  getSpaceArtifact,
+  getSpaceArtifactById,
+  listArtifactVersions,
+  listOwnedArtifacts,
+  listSpaceArtifacts,
+} from "./artifacts.js";
+
+it("retains the original nonblank message text instead of a trimmed caption", () => {
+  const raw = " \n  source material 😀\n  ";
+  expect(buildUserMessageBlocks(raw, [])).toEqual([{ kind: "text", text: raw }]);
+  expect(buildUserMessageBlocks(" \n\t ", [])).toEqual([]);
+});
 
 const actor: Actor = {
   userId: "user-1",
@@ -29,11 +46,13 @@ function listRow(id: string, familyId: string, createdAt = "2026-09-01T00:00:00.
 }
 
 function cursor(input: { createdAt: string; id: string; botId: string | null; asOf?: string }) {
-  return `v1.${Buffer.from(
+  return `v2.${Buffer.from(
     JSON.stringify({
       createdAt: input.createdAt,
       id: input.id,
-      botId: input.botId,
+      scope: createHash("sha256")
+        .update(JSON.stringify([actor.spaceId, actor.userId, input.botId, false]))
+        .digest("hex"),
       asOf: input.asOf ?? "2026-09-20T00:00:00.000Z",
     }),
     "utf8",
@@ -234,6 +253,153 @@ describe("listSpaceArtifacts", () => {
   });
 });
 
+describe("internal recruiting context presentation", () => {
+  function fixture(internal = true) {
+    const bytes = Buffer.from("internal context");
+    const row = {
+      ...listRow("context", "context"),
+      spaceId: actor.spaceId,
+      userId: actor.userId,
+      storageKey: "saved-context",
+      rootArtifactId: null,
+      hash: createHash("sha256").update(bytes).digest("hex"),
+      size: bytes.length,
+    };
+    const get = vi.fn(async () => bytes);
+    const remove = vi.fn();
+    const prisma = {
+      artifact: {
+        findFirst: vi.fn(async ({ where }) =>
+          where.userId === row.userId && where.spaceId === row.spaceId ? row : null,
+        ),
+        findMany: vi.fn(async () => []),
+      },
+      $queryRaw: vi.fn(async () => (internal ? [{ id: row.id }] : [])),
+    } as unknown as PrismaClient;
+    return {
+      row,
+      get,
+      remove,
+      deps: { prisma, artifacts: { get, remove } as unknown as ArtifactStore },
+    };
+  }
+  it("denies direct context reads, versions and removal before returning hidden bytes", async () => {
+    const f = fixture();
+    for (const request of [
+      () => getOwnedArtifact(f.deps, actor, { botId: "bot-1", artifactId: "context" }),
+      () =>
+        getSpaceArtifact(f.deps, actor, {
+          groupId: "group-1",
+          contextBotId: "bot-1",
+          artifactId: "context",
+        }),
+      () => getSpaceArtifactById(f.deps, actor, { artifactId: "context" }),
+      () => listArtifactVersions(f.deps, actor, { familyId: "context" }),
+      () =>
+        deleteArtifactFamily(
+          f.deps,
+          { ...actor, isDeploymentOwner: true },
+          { familyId: "context" },
+        ),
+    ])
+      await expect(request()).rejects.toThrow("Resource not found");
+    expect(f.get).not.toHaveBeenCalled();
+    expect(f.remove).not.toHaveBeenCalled();
+  });
+  it("requires both explicit diagnostics and the deployment owner while preserving document reads", async () => {
+    const f = fixture();
+    await expect(
+      getSpaceArtifactById(f.deps, actor, { artifactId: "context", includeDiagnostics: true }),
+    ).rejects.toThrow();
+    await expect(
+      getSpaceArtifactById(
+        f.deps,
+        { ...actor, isDeploymentOwner: true },
+        { artifactId: "context" },
+      ),
+    ).rejects.toThrow();
+    const owner = { ...actor, isDeploymentOwner: true };
+    expect(
+      await getSpaceArtifactById(f.deps, owner, {
+        artifactId: "context",
+        includeDiagnostics: true,
+      }),
+    ).toMatchObject({ id: "context" });
+    f.get.mockClear();
+    await expect(
+      getSpaceArtifactById(
+        f.deps,
+        { ...owner, userId: "other-owner" },
+        { artifactId: "context", includeDiagnostics: true },
+      ),
+    ).rejects.toThrow();
+    expect(f.get).not.toHaveBeenCalled();
+    const document = fixture(false);
+    expect(
+      await getSpaceArtifactById(document.deps, actor, { artifactId: "context" }),
+    ).toMatchObject({ id: "context" });
+  });
+  it("filters context families before pagination and rejects diagnostic cursors in ordinary mode", async () => {
+    const queryRaw = vi.fn().mockResolvedValue([listRow("a", "a"), listRow("b", "b")]);
+    const deps = { prisma: { artifact: {}, $queryRaw: queryRaw } as unknown as PrismaClient };
+    const owner = { ...actor, isDeploymentOwner: true };
+    const page = await listSpaceArtifacts(deps, owner, { limit: 1, includeDiagnostics: true });
+    await expect(
+      listSpaceArtifacts(deps, owner, { limit: 1, cursor: page.nextCursor! }),
+    ).rejects.toThrow(ArtifactListCursorError);
+    queryRaw.mockClear();
+    await listSpaceArtifacts(deps, actor, { includeDiagnostics: true });
+    const sql = queryRaw.mock.calls[0]![0] as { strings: string[] };
+    expect(scopedClause(sql)).toContain("recruiting.context.adopted");
+    expect(scopedClause(sql)).toContain('"contextArtifactId"');
+    expect(scopedClause(sql)).toContain("recruiting.material.read");
+    expect(scopedClause(sql)).toContain("recruiting.candidates.saved");
+    expect(scopedClause(sql)).toContain("recruiting.read");
+    expect(scopedClause(sql)).toContain('"requestArtifactId"');
+    expect(scopedClause(sql)).toContain('"receiptArtifactId"');
+    expect(scopedClause(sql)).toContain('"outputArtifacts"');
+    expect(scopedClause(sql)).toContain('"recruiting_candidate_pages"');
+    expect(scopedClause(sql)).not.toContain("clientNonce");
+    expect(scopedClause(sql)).not.toContain("mimeType");
+  });
+
+  it("applies the same family visibility to bot lists and binds cursors to the actor and space", async () => {
+    const queryRaw = vi.fn().mockResolvedValue([listRow("a", "a"), listRow("b", "b")]);
+    const deps = { prisma: { artifact: {}, $queryRaw: queryRaw } as unknown as PrismaClient };
+    const page = await listSpaceArtifacts(deps, actor, { limit: 1 });
+    for (const other of [
+      { ...actor, userId: "other" },
+      { ...actor, spaceId: "other" },
+    ]) {
+      await expect(
+        listSpaceArtifacts(deps, other, { cursor: page.nextCursor! }),
+      ).rejects.toBeInstanceOf(ArtifactListCursorError);
+    }
+    queryRaw.mockClear();
+    await listOwnedArtifacts(deps, actor, { botId: "bot-1", includeDiagnostics: true });
+    const query = queryRaw.mock.calls[0]![0] as { strings: string[]; values: unknown[] };
+    expect(statement(query)).toContain("recruiting.context.adopted");
+    expect(statement(query)).toContain(
+      'internal."rootArtifactId" = COALESCE(a."rootArtifactId", a.id)',
+    );
+    expect(statement(query)).toContain('event."runId" = internal."runId"');
+    expect(statement(query)).toContain(
+      "event.payload->'contextArtifact'->>'sha256' = internal.hash",
+    );
+    expect(query.values).toEqual(["bot-1", actor.spaceId, actor.userId]);
+    queryRaw.mockClear();
+    await listOwnedArtifacts(
+      deps,
+      { ...actor, isDeploymentOwner: true },
+      {
+        botId: "bot-1",
+        includeDiagnostics: true,
+      },
+    );
+    expect(statement(queryRaw.mock.calls[0]![0])).not.toContain("recruiting.context.adopted");
+  });
+});
+
 describe("deleteArtifactFamily", () => {
   function familyClient(listings: Array<Array<{ id: string; storageKey: string; botId: string }>>) {
     const calls: string[] = [];
@@ -252,6 +418,7 @@ describe("deleteArtifactFamily", () => {
           calls.push(`delete:${where.id}`);
         }),
       },
+      $queryRaw: vi.fn(async () => []),
       $transaction: vi.fn(async (run: (tx: unknown) => Promise<void>) => {
         await run({
           $queryRaw: vi.fn(async () => [{ id: "root" }]),

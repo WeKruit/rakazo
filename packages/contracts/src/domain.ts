@@ -8,7 +8,7 @@ import {
   isCloudflareAiGatewayProvider,
 } from "./cloudflare-ai-gateway.js";
 import { ThreadMessageSchema } from "./events.js";
-import { Id, MemoryScope, RunStatus, SandboxKind } from "./ids.js";
+import { Id, IsoDate, MemoryScope, RunStatus, SandboxKind } from "./ids.js";
 import { McpHeadersSchema, McpRemoteEndpointSchema, McpTransportSchema } from "./mcp.js";
 import { RunTriggerSchema } from "./runs.js";
 
@@ -622,6 +622,17 @@ export const MemoryDocumentSchema = z.object({
   updatedAt: z.string(),
 });
 export type MemoryDocument = z.infer<typeof MemoryDocumentSchema>;
+
+export const MemoryRevisionSchema = z.object({
+  id: Id,
+  documentId: Id,
+  revision: z.number().int().positive(),
+  content: z.string(),
+  sourceRunId: Id.nullable(),
+  sourceThreadId: Id.nullable(),
+  createdAt: IsoDate,
+});
+export type MemoryRevision = z.infer<typeof MemoryRevisionSchema>;
 
 export const ConnectionSchema = z.object({
   id: Id,

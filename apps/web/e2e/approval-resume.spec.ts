@@ -3,7 +3,7 @@ import { captureScreenshot, completeOnboarding, signup } from "./helpers";
 
 test.describe.configure({ mode: "serial" });
 
-test("approval input resumes durable work", async ({ page }, testInfo) => {
+test("question input resumes durable work", async ({ page }, testInfo) => {
   const stamp = Date.now();
   await signup(page, `approval-${stamp}@rakazo.test`, "password12", "Approval");
   await completeOnboarding(page);
@@ -15,11 +15,10 @@ test("approval input resumes durable work", async ({ page }, testInfo) => {
   const prompt = page.locator("p").filter({ hasText: /^Which city should I use\?$/ });
   await expect(prompt).toBeVisible({ timeout: 30_000 });
   await expect(page.getByText("Reply with one city name.", { exact: true })).toBeVisible();
-  await expect(page.getByRole("button", { name: "Send it" })).toBeVisible();
-  await expect(page.getByRole("button", { name: "Edit first" })).toBeVisible();
+  await expect(page.getByRole("textbox", { name: "Answer" })).toBeVisible();
+  await expect(page.getByRole("button", { name: "Send answer" })).toBeDisabled();
   await captureScreenshot(page, testInfo, "20-approval-input-request");
 
-  await page.getByRole("button", { name: "Edit first" }).click();
   const answer = page.getByRole("textbox", { name: "Answer" });
   await answer.fill("ask me which city to use again");
   await expect(page.getByRole("button", { name: "Send answer" })).toBeEnabled();
@@ -30,10 +29,9 @@ test("approval input resumes durable work", async ({ page }, testInfo) => {
   await expect(
     page.getByText("Answered: ask me which city to use again", { exact: true }),
   ).toBeVisible();
-  await expect(page.getByRole("button", { name: "Send it" })).toHaveCount(1);
+  await expect(page.getByRole("textbox", { name: "Answer" })).toHaveCount(1);
   await captureScreenshot(page, testInfo, "22-second-approval-prompt");
 
-  await page.getByRole("button", { name: "Edit first" }).click();
   await answer.fill("Paris");
   await captureScreenshot(page, testInfo, "23-second-approval-answer");
   await page.getByRole("button", { name: "Send answer" }).click();
@@ -58,6 +56,6 @@ test("approval input resumes durable work", async ({ page }, testInfo) => {
   await expect(prompt).toHaveCount(3, { timeout: 30_000 });
   await page.getByRole("button", { name: "Stop" }).click();
   await expect(page.getByText("No longer active", { exact: true })).toBeVisible();
-  await expect(page.getByRole("button", { name: "Send it" })).toHaveCount(0);
+  await expect(page.getByRole("textbox", { name: "Answer" })).toHaveCount(0);
   await captureScreenshot(page, testInfo, "25-stopped-approval-prompt");
 });

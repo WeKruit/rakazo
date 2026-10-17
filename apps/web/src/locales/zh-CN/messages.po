@@ -49,6 +49,11 @@ msgstr "{0}（超过 10 MiB）"
 msgid "{0} {unitLabel}"
 msgstr "{0} {unitLabel}"
 
+#. placeholder {0}: candidatePage.total
+#: src/pages/RecruitingPanel.tsx
+msgid "{0} candidates"
+msgstr ""
+
 #. placeholder {0}: block.name
 #: src/pages/shell/message-cards.tsx
 msgid "{0} connection"
@@ -85,6 +90,16 @@ msgstr ""
 msgid "{0} runs · {1} tokens"
 msgstr "{0} 次运行 · {1} tokens"
 
+#. placeholder {0}: candidate.discoveryCount
+#: src/pages/RecruitingPanel.tsx
+msgid "{0} saved discoveries"
+msgstr ""
+
+#. placeholder {0}: observation.rowCount
+#: src/pages/RecruitingPanel.tsx
+msgid "{0} saved source rows"
+msgstr ""
+
 #. placeholder {0}: bot.name
 #: src/pages/ExternalConversationSettings.tsx
 msgid "{0} will still respond to direct mentions."
@@ -112,6 +127,7 @@ msgid "{count} days"
 msgstr ""
 
 #: src/lib/billing.ts
+#: src/pages/RecruitingPanel.tsx
 msgid "{count} months"
 msgstr ""
 
@@ -272,6 +288,7 @@ msgid "Active model"
 msgstr "当前模型"
 
 #: src/components/computer/TerminalApp.tsx
+#: src/pages/RecruitingPanel.tsx
 #: src/pages/Shell.tsx
 msgid "Activity"
 msgstr "动态"
@@ -329,6 +346,10 @@ msgstr ""
 #: src/pages/PluginsOverlay.tsx
 msgid "Add Executor"
 msgstr "添加 Executor"
+
+#: src/pages/RecruitingPanel.tsx
+msgid "Add filter"
+msgstr ""
 
 #: src/pages/PluginsOverlay.tsx
 msgid "Add GraphQL"
@@ -411,6 +432,10 @@ msgstr "Agent 连接"
 msgid "Agents:"
 msgstr "Agent："
 
+#: src/pages/RecruitingPanel.tsx
+msgid "All assessments"
+msgstr ""
+
 #: src/pages/Artifacts.tsx
 msgid "All bots"
 msgstr ""
@@ -419,12 +444,24 @@ msgstr ""
 msgid "All providers"
 msgstr ""
 
+#: src/pages/RecruitingPanel.tsx
+msgid "All rounds"
+msgstr ""
+
 #: src/pages/ActivityList.tsx
 msgid "All statuses"
 msgstr ""
 
 #: src/pages/Artifacts.tsx
 msgid "All time"
+msgstr ""
+
+#: src/pages/McpServersOverlay.tsx
+msgid "All tools"
+msgstr ""
+
+#: src/pages/RecruitingPanel.tsx
+msgid "All verdicts"
 msgstr ""
 
 #. placeholder {0}: rule.matchValue
@@ -462,6 +499,10 @@ msgstr ""
 msgid "Allowed once"
 msgstr "已允许一次"
 
+#: src/pages/McpServersOverlay.tsx
+msgid "Allowed tools"
+msgstr ""
+
 #: src/pages/Auth.tsx
 msgid "Already have an account?"
 msgstr "已有账户？"
@@ -481,6 +522,10 @@ msgstr "始终允许"
 #: src/lib/model-connection-preflight.ts
 msgid "An API key is stored for this provider, not a subscription sign-in."
 msgstr "此提供方存储的是 API 密钥，不是订阅登录。"
+
+#: src/pages/RecruitingPanel.tsx
+msgid "AND"
+msgstr ""
 
 #: src/components/AskCard.tsx
 msgid "Answer"
@@ -537,6 +582,10 @@ msgstr "批准"
 msgid "Approve this server to let your agent use its tools."
 msgstr "批准此服务器后，Agent 才能使用它的工具。"
 
+#: src/pages/RecruitingPanel.tsx
+msgid "Approved"
+msgstr ""
+
 #: src/pages/BotContextMenu.tsx
 msgid "Archive"
 msgstr "归档"
@@ -578,6 +627,10 @@ msgid "Ask before {0} connector"
 msgstr "{0} 连接器前询问"
 
 #: src/components/ApprovalRulesSettings.tsx
+msgid "Ask before a specific tool"
+msgstr ""
+
+#: src/components/ApprovalRulesSettings.tsx
 msgid "Ask before email actions"
 msgstr "邮件操作前询问"
 
@@ -593,8 +646,36 @@ msgstr "购买前询问"
 msgid "Ask before sending external email"
 msgstr "发送外部邮件前询问"
 
+#: src/components/ApprovalRulesSettings.tsx
+msgid "Ask first"
+msgstr ""
+
 #: src/components/integrations/IntegrationSetup.tsx
 msgid "Ask the server owner to configure this provider."
+msgstr ""
+
+#: src/pages/RecruitingPanel.tsx
+msgid "Assessed"
+msgstr ""
+
+#: src/pages/RecruitingPanel.tsx
+msgid "Assessment"
+msgstr ""
+
+#: src/pages/RecruitingPanel.tsx
+msgid "Assessment date"
+msgstr ""
+
+#: src/pages/RecruitingPanel.tsx
+msgid "Assessment state"
+msgstr ""
+
+#: src/pages/RecruitingPanel.tsx
+msgid "Assessment unavailable"
+msgstr ""
+
+#: src/pages/RecruitingPanel.tsx
+msgid "Assumption"
 msgstr ""
 
 #. placeholder {0}: preset.time
@@ -774,6 +855,14 @@ msgstr ""
 msgid "Brain label"
 msgstr ""
 
+#: src/pages/RecruitingPanel.tsx
+msgid "Brief changed or could not be confirmed. Refresh and review it."
+msgstr ""
+
+#: src/pages/RecruitingPanel.tsx
+msgid "Brief confirmed"
+msgstr ""
+
 #: src/pages/PluginsOverlay.tsx
 msgid "Browse MCP servers"
 msgstr ""
@@ -800,6 +889,7 @@ msgstr "无法连接服务器。"
 #: src/pages/ModelSettingsOverlay.tsx
 #: src/pages/Onboarding.tsx
 #: src/pages/PluginsOverlay.tsx
+#: src/pages/RecruitingPanel.tsx
 #: src/pages/shell/bot-credentials.tsx
 #: src/pages/shell/dialogs.tsx
 msgid "Cancel"
@@ -830,13 +920,53 @@ msgstr "已取消"
 msgid "Cancelled"
 msgstr "已取消"
 
+#: src/pages/RecruitingPanel.tsx
+msgid "Candidate"
+msgstr "候选人"
+
+#: src/pages/RecruitingPanel.tsx
+msgid "Candidate assessment"
+msgstr ""
+
+#: src/pages/RecruitingPanel.tsx
+msgid "Candidate CRM"
+msgstr ""
+
+#: src/pages/RecruitingPanel.tsx
+msgid "Candidate facts"
+msgstr ""
+
+#: src/pages/RecruitingPanel.tsx
+msgid "Candidate question"
+msgstr ""
+
+#: src/pages/RecruitingPanel.tsx
+msgid "Candidate sort"
+msgstr ""
+
+#: src/pages/RecruitingPanel.tsx
+msgid "Candidate statement"
+msgstr ""
+
+#: src/pages/RecruitingPanel.tsx
+msgid "Candidates"
+msgstr ""
+
 #: src/pages/Artifacts.tsx
 msgid "Card view"
 msgstr ""
 
+#: src/pages/RecruitingPanel.tsx
+msgid "Cards"
+msgstr "卡片"
+
 #: src/pages/AccountSettingsOverlay.tsx
 msgid "Change password"
 msgstr "修改密码"
+
+#: src/pages/RecruitingPanel.tsx
+msgid "Changes could not be saved."
+msgstr ""
 
 #: src/pages/AccountSettingsOverlay.tsx
 msgid "Changing…"
@@ -1010,6 +1140,7 @@ msgid "Close navigation"
 msgstr "关闭导航"
 
 #: src/pages/GroupPanel.tsx
+#: src/pages/RecruitingPanel.tsx
 #: src/pages/Shell.tsx
 msgid "Close panel"
 msgstr "关闭面板"
@@ -1074,6 +1205,10 @@ msgstr ""
 msgid "Compact"
 msgstr ""
 
+#: src/pages/RecruitingPanel.tsx
+msgid "Company"
+msgstr ""
+
 #: src/pages/ScratchpadSection.tsx
 msgid "Complete"
 msgstr "完成"
@@ -1123,6 +1258,10 @@ msgstr "由部署配置"
 #: src/pages/McpServersOverlay.tsx
 msgid "Configured servers"
 msgstr "已配置的服务器"
+
+#: src/pages/RecruitingPanel.tsx
+msgid "Confirm brief"
+msgstr ""
 
 #: src/pages/KnowledgeSection.tsx
 #: src/pages/McpServersOverlay.tsx
@@ -1223,6 +1362,10 @@ msgstr "连接测试失败。"
 #: src/pages/PluginsOverlay.tsx
 msgid "Connection to {0} is still pending. You can close this and check again."
 msgstr "与 {0} 的连接仍在等待。可以关闭此窗口稍后再看。"
+
+#: src/pages/RecruitingPanel.tsx
+msgid "Context"
+msgstr ""
 
 #: src/pages/ModelSettingsOverlay.tsx
 #: src/pages/Onboarding.tsx
@@ -1452,6 +1595,10 @@ msgstr "无法加载审批规则"
 msgid "Could not load artifacts."
 msgstr ""
 
+#: src/pages/RecruitingPanel.tsx
+msgid "Could not load assessment"
+msgstr ""
+
 #: src/pages/ModelBackupsSettings.tsx
 msgid "Could not load backup models"
 msgstr "无法加载备用模型。"
@@ -1464,12 +1611,24 @@ msgstr ""
 msgid "Could not load bots. Reload to try again."
 msgstr ""
 
+#: src/pages/RecruitingPanel.tsx
+msgid "Could not load candidate sources"
+msgstr ""
+
+#: src/pages/RecruitingPanel.tsx
+msgid "Could not load candidates"
+msgstr ""
+
 #: src/components/computer/TerminalApp.tsx
 msgid "Could not load commands"
 msgstr ""
 
 #: src/pages/shell/bot-credentials.tsx
 msgid "Could not load credentials."
+msgstr ""
+
+#: src/pages/RecruitingPanel.tsx
+msgid "Could not load history"
 msgstr ""
 
 #: src/components/integrations/IntegrationSetup.tsx
@@ -1485,9 +1644,17 @@ msgstr "无法加载 MCP 服务器"
 msgid "Could not load model settings"
 msgstr "无法加载模型设置"
 
+#: src/pages/RecruitingPanel.tsx
+msgid "Could not load recruiting"
+msgstr ""
+
 #: src/pages/RoutineRunHistory.tsx
 msgid "Could not load run history"
 msgstr "无法加载运行历史记录"
+
+#: src/pages/RecruitingPanel.tsx
+msgid "Could not load search results"
+msgstr "无法加载搜索结果"
 
 #: src/lib/account-security.ts
 #: src/pages/Auth.tsx
@@ -1624,6 +1791,10 @@ msgstr "无法保存例行任务"
 msgid "Could not save rule"
 msgstr "无法保存规则"
 
+#: src/pages/RecruitingPanel.tsx
+msgid "Could not save shortlist"
+msgstr ""
+
 #: src/pages/KnowledgeSection.tsx
 msgid "Could not save skill"
 msgstr "无法保存技能"
@@ -1716,6 +1887,10 @@ msgstr "无法更新头像"
 msgid "Couldn't update messaging settings"
 msgstr "无法更新消息设置"
 
+#: src/pages/RecruitingPanel.tsx
+msgid "Count through"
+msgstr ""
+
 #: src/pages/Board.tsx
 #: src/pages/Shell.tsx
 #: src/pages/shell/bot-panel.tsx
@@ -1789,6 +1964,23 @@ msgstr ""
 msgid "Credentials are encrypted and never sent to the model."
 msgstr "凭据已加密，不会发送给模型。"
 
+#: src/pages/RecruitingPanel.tsx
+msgid "Criterion"
+msgstr ""
+
+#. placeholder {0}: index + 1
+#: src/pages/RecruitingPanel.tsx
+msgid "Criterion {0}"
+msgstr ""
+
+#: src/pages/RecruitingPanel.tsx
+msgid "CRM"
+msgstr ""
+
+#: src/pages/RecruitingPanel.tsx
+msgid "CRM receipt"
+msgstr ""
+
 #: src/pages/RoutineSchedule.tsx
 msgid "Cron"
 msgstr "Cron"
@@ -1796,6 +1988,10 @@ msgstr "Cron"
 #: src/pages/RoutineSchedule.tsx
 msgid "Cron expression"
 msgstr "Cron 表达式"
+
+#: src/pages/RecruitingPanel.tsx
+msgid "Current"
+msgstr ""
 
 #: src/components/AccountAccess.tsx
 #: src/pages/AccountSettingsOverlay.tsx
@@ -1814,9 +2010,17 @@ msgstr "客户支持"
 msgid "Customize bot avatar"
 msgstr "自定义机器人头像"
 
+#: src/pages/RecruitingPanel.tsx
+msgid "Cutoff date"
+msgstr ""
+
 #: src/pages/AccountSettingsOverlay.tsx
 msgid "Dark"
 msgstr "深色"
+
+#: src/pages/RecruitingPanel.tsx
+msgid "Dashboard"
+msgstr ""
 
 #: src/lib/billing.ts
 #: src/pages/RoutineSchedule.tsx
@@ -1858,6 +2062,10 @@ msgstr "默认（{0}）"
 #: src/pages/MemorySettingsOverlay.tsx
 msgid "Default scope"
 msgstr "默认范围"
+
+#: src/pages/RecruitingPanel.tsx
+msgid "Definition questions"
+msgstr ""
 
 #: src/pages/Artifacts.tsx
 #: src/pages/BotContextMenu.tsx
@@ -1918,6 +2126,7 @@ msgid "Deletion code"
 msgstr "删除验证码"
 
 #: src/components/AskCard.tsx
+#: src/pages/RecruitingPanel.tsx
 msgid "Denied"
 msgstr "已拒绝"
 
@@ -1944,6 +2153,14 @@ msgstr ""
 
 #: src/components/DesktopUpdates.tsx
 msgid "Desktop update"
+msgstr ""
+
+#: src/pages/RecruitingPanel.tsx
+msgid "Details"
+msgstr ""
+
+#: src/pages/AccountSettingsOverlay.tsx
+msgid "Developer diagnostics"
 msgstr ""
 
 #: src/components/integrations/IntegrationSetup.tsx
@@ -1975,6 +2192,14 @@ msgstr ""
 #: src/pages/VoiceSettingsOverlay.tsx
 msgid "Disconnecting…"
 msgstr "正在断开…"
+
+#: src/pages/RecruitingPanel.tsx
+msgid "Discoveries"
+msgstr ""
+
+#: src/pages/RecruitingPanel.tsx
+msgid "Discovery details"
+msgstr ""
 
 #: src/components/ComputerUpdateProgress.tsx
 #: src/components/teach/TeachComputerOverlay.tsx
@@ -2060,13 +2285,21 @@ msgstr "复制"
 msgid "e.g. Hivenet Agent, Presales, Timesheets bot"
 msgstr "例如 Hivenet Agent、Presales、工时表机器人"
 
+#: src/pages/RecruitingPanel.tsx
+msgid "Edit criteria"
+msgstr ""
+
 #: src/components/AskCard.tsx
-msgid "Edit first"
-msgstr "先编辑"
+#~ msgid "Edit first"
+#~ msgstr "先编辑"
 
 #: src/pages/BotContextMenu.tsx
 msgid "Edit Profile"
 msgstr "编辑资料"
+
+#: src/pages/RecruitingPanel.tsx
+msgid "Edit search filters"
+msgstr ""
 
 #: src/pages/Auth.tsx
 msgid "Email"
@@ -2079,6 +2312,10 @@ msgstr "该邮箱不允许注册"
 #: src/lib/user-error.ts
 msgid "Email verification required"
 msgstr "需要验证邮箱"
+
+#: src/pages/RecruitingPanel.tsx
+msgid "Employment rule"
+msgstr ""
 
 #: src/pages/BillingSettingsPanel.tsx
 msgid "Ends {day}"
@@ -2156,6 +2393,14 @@ msgstr "每月"
 #: src/pages/RoutineSchedule.tsx
 msgid "Every week"
 msgstr "每周"
+
+#: src/pages/RecruitingPanel.tsx
+msgid "Evidence"
+msgstr ""
+
+#: src/pages/RecruitingPanel.tsx
+msgid "Exclude"
+msgstr ""
 
 #: src/pages/PluginsOverlay.tsx
 msgid "Executor token"
@@ -2268,6 +2513,10 @@ msgstr "已完成。"
 msgid "Finishing MCP connection…"
 msgstr "正在完成 MCP 连接…"
 
+#: src/pages/RecruitingPanel.tsx
+msgid "Fixed date"
+msgstr ""
+
 #: src/components/ApprovalRulesSettings.tsx
 msgid "Flag unexpected actions"
 msgstr "标记异常操作"
@@ -2323,6 +2572,10 @@ msgstr "Git 事件"
 msgid "Group"
 msgstr "群组"
 
+#: src/pages/RecruitingPanel.tsx
+msgid "Group bot memory is not included"
+msgstr ""
+
 #: src/pages/GroupPanel.tsx
 msgid "Group settings"
 msgstr "群组设置"
@@ -2333,6 +2586,10 @@ msgstr ""
 
 #: src/pages/shell/dialogs.tsx
 msgid "Groups"
+msgstr ""
+
+#: src/pages/RecruitingPanel.tsx
+msgid "Guide retrieval; qualification criteria stay unchanged."
 msgstr ""
 
 #: src/components/call/CallCard.tsx
@@ -2346,6 +2603,18 @@ msgstr "请先挂断，然后输入屏幕上的代码。"
 #: src/lib/call-session.ts
 msgid "Hang up, then enter the code on screen."
 msgstr "请挂断，然后输入屏幕上的代码。"
+
+#: src/pages/RecruitingPanel.tsx
+msgid "Hard"
+msgstr ""
+
+#: src/pages/RecruitingPanel.tsx
+msgid "Hard criteria"
+msgstr ""
+
+#: src/pages/RecruitingPanel.tsx
+msgid "Hard criteria filter"
+msgstr ""
 
 #: src/pages/RoutineEditor.tsx
 msgid "header"
@@ -2396,6 +2665,14 @@ msgstr "高"
 msgid "High"
 msgstr ""
 
+#: src/pages/RecruitingPanel.tsx
+msgid "Hiring manager"
+msgstr ""
+
+#: src/pages/RecruitingPanel.tsx
+msgid "History"
+msgstr ""
+
 #: src/pages/RoutineSchedule.tsx
 msgid "hour"
 msgstr "小时"
@@ -2416,6 +2693,10 @@ msgstr "如何检查"
 #: src/pages/Shell.tsx
 msgid "I’m done"
 msgstr "我做完了"
+
+#: src/pages/RecruitingPanel.tsx
+msgid "Identified profiles"
+msgstr ""
 
 #: src/pages/VoiceSettingsOverlay.tsx
 msgid "If you heard that, voice is ready."
@@ -2449,6 +2730,10 @@ msgstr ""
 msgid "Inbox & email"
 msgstr "收件箱和邮件"
 
+#: src/pages/RecruitingPanel.tsx
+msgid "Include"
+msgstr ""
+
 #: src/pages/shell/bot-panel.tsx
 msgid "Inherit default"
 msgstr "沿用默认"
@@ -2464,6 +2749,10 @@ msgstr "实例 API 密钥"
 #: src/pages/RoutineEditor.tsx
 msgid "Instruction"
 msgstr "指令"
+
+#: src/pages/shell/bot-panel.tsx
+msgid "Instructions"
+msgstr ""
 
 #: src/pages/PluginsOverlay.tsx
 msgid "Integration domain"
@@ -2503,6 +2792,10 @@ msgstr ""
 #: src/pages/shell/dialogs.tsx
 msgid "Its conversation, files, and routines will be permanently deleted. Bots it created stay in your list."
 msgstr "它的对话、文件和例行任务将被永久删除。它创建的 Bot 仍留在列表中。"
+
+#: src/pages/RecruitingPanel.tsx
+msgid "JD"
+msgstr ""
 
 #: src/pages/Shell.tsx
 msgid "Jump to latest"
@@ -2561,6 +2854,14 @@ msgstr "关联聊天应用"
 msgid "Link SSO"
 msgstr "关联 SSO"
 
+#: src/pages/RecruitingPanel.tsx
+msgid "LinkedIn"
+msgstr ""
+
+#: src/pages/RecruitingPanel.tsx
+msgid "LinkedIn missing"
+msgstr ""
+
 #: src/pages/Artifacts.tsx
 msgid "List view"
 msgstr ""
@@ -2578,6 +2879,7 @@ msgid "Load earlier messages"
 msgstr "加载更早的消息"
 
 #: src/pages/Artifacts.tsx
+#: src/pages/RecruitingPanel.tsx
 msgid "Load more"
 msgstr ""
 
@@ -2628,6 +2930,7 @@ msgstr "正在加载语音提供方…"
 #: src/pages/ModelBackupsSettings.tsx
 #: src/pages/Onboarding.tsx
 #: src/pages/PeerMessagesOverlay.tsx
+#: src/pages/RecruitingPanel.tsx
 #: src/pages/RoutineRunHistory.tsx
 #: src/pages/Shell.tsx
 msgid "Loading…"
@@ -2643,6 +2946,10 @@ msgstr "本地访问权限允许 Bot 无需询问就执行命令。请勿在共�
 
 #: src/pages/LocalSettings.tsx
 msgid "Local Server Settings"
+msgstr ""
+
+#: src/pages/RecruitingPanel.tsx
+msgid "Location"
 msgstr ""
 
 #: src/pages/Paywall.tsx
@@ -2761,9 +3068,14 @@ msgstr "成员（选择 {GROUP_MEMBER_MIN}–{GROUP_MEMBER_MAX} 个）"
 
 #: src/pages/KnowledgeSection.tsx
 #: src/pages/MemorySettingsOverlay.tsx
+#: src/pages/RecruitingPanel.tsx
 #: src/pages/SettingsOverlay.tsx
 msgid "Memory"
 msgstr "记忆"
+
+#: src/pages/KnowledgeSection.tsx
+msgid "Memory changed. Close and reopen it before saving again."
+msgstr ""
 
 #: src/pages/shell/bot-panel.tsx
 msgid "Memory scope"
@@ -2777,6 +3089,7 @@ msgstr "提及"
 msgid "Mentions only"
 msgstr ""
 
+#: src/pages/RecruitingPanel.tsx
 #: src/pages/Shell.tsx
 msgid "Message"
 msgstr "消息"
@@ -2815,6 +3128,10 @@ msgstr "已发给 {peer}"
 msgid "Messaging"
 msgstr "消息"
 
+#: src/pages/RecruitingPanel.tsx
+msgid "Met"
+msgstr ""
+
 #: src/lib/call-session.ts
 msgid "Microphone failed"
 msgstr "麦克风失败"
@@ -2837,6 +3154,15 @@ msgstr "最小化"
 msgid "Minimize bots"
 msgstr ""
 
+#. placeholder {0}: rule.minimumMonths
+#: src/pages/RecruitingPanel.tsx
+msgid "Minimum {0} complete calendar months"
+msgstr ""
+
+#: src/pages/RecruitingPanel.tsx
+msgid "Minimum complete calendar months"
+msgstr ""
+
 #: src/pages/RoutineSchedule.tsx
 msgid "minute"
 msgstr "分钟"
@@ -2844,6 +3170,10 @@ msgstr "分钟"
 #: src/pages/RoutineSchedule.tsx
 msgid "minutes"
 msgstr "分钟"
+
+#: src/pages/RecruitingPanel.tsx
+msgid "Missing info"
+msgstr ""
 
 #: src/pages/ModelSettingsOverlay.tsx
 #: src/pages/Onboarding.tsx
@@ -2908,6 +3238,10 @@ msgstr ""
 msgid "More computer actions"
 msgstr ""
 
+#: src/pages/RecruitingPanel.tsx
+msgid "More sources"
+msgstr ""
+
 #: src/pages/ModelBackupsSettings.tsx
 msgid "Move {full} down"
 msgstr "将 {full} 下移"
@@ -2931,12 +3265,17 @@ msgstr "静音"
 #: src/components/teach/SkillDraftCard.tsx
 #: src/pages/Auth.tsx
 #: src/pages/GroupPanel.tsx
+#: src/pages/RecruitingPanel.tsx
 #: src/pages/RoutineEditor.tsx
 #: src/pages/shell/bot-credentials.tsx
 #: src/pages/shell/bot-panel.tsx
 #: src/pages/shell/dialogs.tsx
 msgid "Name"
 msgstr "名称"
+
+#: src/pages/RecruitingPanel.tsx
+msgid "Name missing"
+msgstr ""
 
 #: src/pages/shell/bot-panel.tsx
 msgid "Name this bot"
@@ -2984,6 +3323,10 @@ msgstr "新的待办"
 msgid "New password"
 msgstr "新密码"
 
+#: src/pages/RecruitingPanel.tsx
+msgid "New search"
+msgstr ""
+
 #: src/pages/BotContextMenu.tsx
 #: src/pages/shell/dialogs.tsx
 msgid "New section"
@@ -2999,6 +3342,10 @@ msgstr "新建工作区"
 
 #: src/pages/Board.tsx
 msgid "New ticket"
+msgstr ""
+
+#: src/pages/RecruitingPanel.tsx
+msgid "No additional search filters"
 msgstr ""
 
 #: src/pages/MessagingSettingsOverlay.tsx
@@ -3040,6 +3387,10 @@ msgstr "还没有关联聊天应用。"
 #: src/pages/shell/bot-credentials.tsx
 msgid "No credentials saved for this bot."
 msgstr ""
+
+#: src/pages/RecruitingPanel.tsx
+#~ msgid "No CRM receipt"
+#~ msgstr ""
 
 #: src/pages/MessagingSettingsOverlay.tsx
 msgid "No group chats yet."
@@ -3089,10 +3440,22 @@ msgstr "未找到提供方。"
 msgid "No remote MCP servers found"
 msgstr ""
 
+#: src/pages/RecruitingPanel.tsx
+msgid "No research activity"
+msgstr ""
+
+#: src/pages/RecruitingPanel.tsx
+#~ msgid "No research tasks"
+#~ msgstr ""
+
 #: src/pages/PluginsOverlay.tsx
 #: src/pages/SpaceSearch.tsx
 msgid "No results"
 msgstr "无结果"
+
+#: src/pages/RecruitingPanel.tsx
+msgid "No role linked"
+msgstr ""
 
 #: src/pages/ActivityList.tsx
 msgid "No runs match these filters."
@@ -3101,6 +3464,38 @@ msgstr ""
 #: src/pages/RoutineRunHistory.tsx
 msgid "No runs yet"
 msgstr "还没有运行记录"
+
+#: src/pages/RecruitingPanel.tsx
+msgid "No saved assessments"
+msgstr ""
+
+#: src/pages/RecruitingPanel.tsx
+msgid "No saved candidates"
+msgstr ""
+
+#: src/pages/RecruitingPanel.tsx
+msgid "No saved discovery sources"
+msgstr ""
+
+#: src/pages/RecruitingPanel.tsx
+msgid "No saved history"
+msgstr ""
+
+#: src/pages/RecruitingPanel.tsx
+msgid "No saved memory in these scopes"
+msgstr ""
+
+#: src/pages/RecruitingPanel.tsx
+msgid "No saved questions"
+msgstr ""
+
+#: src/pages/RecruitingPanel.tsx
+msgid "No saved research"
+msgstr ""
+
+#: src/pages/RecruitingPanel.tsx
+msgid "No saved result rows"
+msgstr "暂无已保存的结果行"
 
 #: src/pages/KnowledgeSection.tsx
 msgid "No skills yet"
@@ -3130,6 +3525,14 @@ msgstr "暂无"
 msgid "Normal"
 msgstr ""
 
+#: src/pages/RecruitingPanel.tsx
+msgid "NOT"
+msgstr ""
+
+#: src/pages/RecruitingPanel.tsx
+msgid "Not accepted"
+msgstr ""
+
 #: src/pages/ModelBackupsSettings.tsx
 msgid "Not connected"
 msgstr "未连接"
@@ -3141,6 +3544,10 @@ msgstr "不在插件目录中"
 #: src/pages/shell/message-cards.tsx
 msgid "Not now"
 msgstr "暂不"
+
+#: src/pages/RecruitingPanel.tsx
+msgid "Not reviewed"
+msgstr ""
 
 #: src/components/ComputerUpdateProgress.tsx
 msgid "Nothing is still running"
@@ -3193,6 +3600,10 @@ msgstr "按计划"
 msgid "on the 1st at {0}"
 msgstr "每月 1 日 {0}"
 
+#: src/pages/McpServersOverlay.tsx
+msgid "One tool per line. Empty means no tools."
+msgstr ""
+
 #: src/pages/Shell.tsx
 msgid "Only empty spaces can be deleted. Delete its bots and groups first."
 msgstr ""
@@ -3236,6 +3647,10 @@ msgstr "在完整窗口中打开"
 msgid "Open navigation"
 msgstr "打开导航"
 
+#: src/pages/RecruitingPanel.tsx
+msgid "Open original question"
+msgstr "打开原问题"
+
 #: src/components/computer/TerminalApp.tsx
 msgid "Open shell"
 msgstr "打开 Shell"
@@ -3275,6 +3690,10 @@ msgstr "可选"
 msgid "Optional header value"
 msgstr "可选请求头值"
 
+#: src/pages/RecruitingPanel.tsx
+msgid "OR"
+msgstr ""
+
 #: src/pages/ModelSettingsOverlay.tsx
 msgid "Or connect an API key"
 msgstr "或连接 API 密钥"
@@ -3295,10 +3714,26 @@ msgstr "组织 API 密钥"
 msgid "Original message unavailable"
 msgstr "原消息不可用"
 
+#: src/pages/RecruitingPanel.tsx
+msgid "Original source"
+msgstr ""
+
 #: src/pages/ModelSettingsOverlay.tsx
 #: src/pages/Onboarding.tsx
 msgid "Other model…"
 msgstr "其他模型…"
+
+#: src/pages/RecruitingPanel.tsx
+msgid "Outcome unknown"
+msgstr ""
+
+#: src/pages/RecruitingPanel.tsx
+msgid "Outdated"
+msgstr ""
+
+#: src/pages/RecruitingPanel.tsx
+msgid "Output"
+msgstr ""
 
 #: src/pages/Board.tsx
 msgid "Owner"
@@ -3358,6 +3793,10 @@ msgstr "请粘贴你的 API 密钥，然后重新测试。"
 msgid "Paused"
 msgstr "已暂停"
 
+#: src/pages/RecruitingPanel.tsx
+msgid "Pending approval"
+msgstr ""
+
 #: src/pages/Shell.tsx
 #: src/pages/shell/chat-context.tsx
 msgid "Photo"
@@ -3387,6 +3826,26 @@ msgstr "插件"
 msgid "POST to"
 msgstr "POST 到"
 
+#: src/pages/RecruitingPanel.tsx
+msgid "Prefer"
+msgstr ""
+
+#: src/pages/RecruitingPanel.tsx
+msgid "Preferences"
+msgstr ""
+
+#: src/pages/RecruitingPanel.tsx
+msgid "Preferred"
+msgstr ""
+
+#: src/pages/RecruitingPanel.tsx
+msgid "Preferred criteria"
+msgstr ""
+
+#: src/pages/RecruitingPanel.tsx
+msgid "Prepared"
+msgstr ""
+
 #. placeholder {0}: props.name
 #: src/components/ArtifactFileCard.tsx
 msgid "Preview {0}"
@@ -3397,6 +3856,7 @@ msgid "Preview isn't available for this file type — download it to view it."
 msgstr ""
 
 #: src/pages/Board.tsx
+#: src/pages/RecruitingPanel.tsx
 msgid "Priority"
 msgstr ""
 
@@ -3406,6 +3866,14 @@ msgstr "私有"
 
 #: src/pages/shell/dialogs.tsx
 msgid "Private workspace with its own bots and groups."
+msgstr ""
+
+#: src/pages/RecruitingPanel.tsx
+msgid "Profile"
+msgstr ""
+
+#: src/pages/RecruitingPanel.tsx
+msgid "Profile details"
 msgstr ""
 
 #: src/components/integrations/IntegrationSetup.tsx
@@ -3421,6 +3889,10 @@ msgstr ""
 msgid "Provider"
 msgstr "提供方"
 
+#: src/pages/RecruitingPanel.tsx
+msgid "Provider task"
+msgstr ""
+
 #: src/pages/ModelSettingsOverlay.tsx
 #: src/pages/VoiceSettingsOverlay.tsx
 msgid "Providers"
@@ -3430,12 +3902,24 @@ msgstr "提供方"
 msgid "Pull request"
 msgstr "拉取请求"
 
+#: src/pages/RecruitingPanel.tsx
+msgid "Qualifying work"
+msgstr ""
+
 #: src/pages/ActivityList.tsx
 msgid "Queued"
 msgstr "排队中"
 
 #: src/pages/Shell.tsx
 msgid "Quote"
+msgstr ""
+
+#: src/pages/RecruitingPanel.tsx
+msgid "Raw search results"
+msgstr "原始搜索结果"
+
+#: src/pages/RecruitingPanel.tsx
+msgid "Raw value"
 msgstr ""
 
 #: src/pages/Shell.tsx
@@ -3463,9 +3947,17 @@ msgstr ""
 msgid "Recall only"
 msgstr ""
 
+#: src/pages/RecruitingPanel.tsx
+msgid "Receipt"
+msgstr ""
+
 #: src/pages/ActivityList.tsx
 msgid "Recent"
 msgstr "最近"
+
+#: src/pages/RecruitingPanel.tsx
+msgid "Recently discovered"
+msgstr ""
 
 #: src/pages/McpServersOverlay.tsx
 msgid "Reconnect OAuth"
@@ -3532,8 +4024,22 @@ msgstr "重建无法正常工作的电脑。"
 msgid "Recreating the computer"
 msgstr ""
 
+#: src/pages/RecruitingPanel.tsx
+msgid "Recruiter verified"
+msgstr ""
+
+#: src/pages/RecruitingPanel.tsx
+#: src/pages/Shell.tsx
+msgid "Recruiting"
+msgstr ""
+
+#: src/pages/RecruitingPanel.tsx
+msgid "Recruiting views"
+msgstr ""
+
 #: src/App.tsx
 #: src/components/ErrorBoundary.tsx
+#: src/pages/RecruitingPanel.tsx
 #: src/pages/RoutineRunHistory.tsx
 msgid "Refresh"
 msgstr "刷新"
@@ -3581,6 +4087,10 @@ msgstr "移除 {full}"
 
 #: src/pages/shell/bot-credentials.tsx
 msgid "Remove {secretName}? This bot will no longer be able to use it."
+msgstr ""
+
+#: src/pages/RecruitingPanel.tsx
+msgid "Remove filter"
 msgstr ""
 
 #: src/pages/RoutineEditor.tsx
@@ -3652,6 +4162,10 @@ msgstr "替换密钥"
 msgid "Replace value"
 msgstr ""
 
+#: src/pages/RecruitingPanel.tsx
+msgid "Replaced"
+msgstr ""
+
 #: src/pages/Shell.tsx
 msgid "Reply"
 msgstr "回复"
@@ -3665,9 +4179,29 @@ msgstr ""
 msgid "Replying to {0}"
 msgstr ""
 
+#: src/pages/RecruitingPanel.tsx
+msgid "Request"
+msgstr ""
+
 #: src/pages/shell/message-cards.tsx
 msgid "Research & writing"
 msgstr "调研和写作"
+
+#: src/pages/RecruitingPanel.tsx
+msgid "Research findings"
+msgstr ""
+
+#: src/pages/RecruitingPanel.tsx
+msgid "Research history"
+msgstr ""
+
+#: src/pages/RecruitingPanel.tsx
+msgid "Research round"
+msgstr ""
+
+#: src/pages/RecruitingPanel.tsx
+#~ msgid "Research rounds"
+#~ msgstr ""
 
 #: src/components/ComputerMaintenanceActions.tsx
 #: src/pages/shell/avatar-studio-popover.tsx
@@ -3722,6 +4256,18 @@ msgstr "还原上次保存的工作区。电脑上未保存的工作会丢失。
 msgid "Restoring your workspace"
 msgstr ""
 
+#: src/pages/RecruitingPanel.tsx
+msgid "Results saved"
+msgstr ""
+
+#: src/pages/RecruitingPanel.tsx
+msgid "Resume"
+msgstr ""
+
+#: src/pages/RecruitingPanel.tsx
+msgid "Resume missing"
+msgstr ""
+
 #: src/components/AccountAccess.tsx
 #: src/pages/Auth.tsx
 #: src/pages/ModelBackupsSettings.tsx
@@ -3750,6 +4296,16 @@ msgstr "版本 {0}"
 msgid "Review provider settings and test again."
 msgstr "请检查提供方设置并重新测试。"
 
+#: src/pages/RecruitingPanel.tsx
+msgid "Reviewed"
+msgstr ""
+
+#. placeholder {0}: document.revision
+#. placeholder {0}: entry.revision
+#: src/pages/RecruitingPanel.tsx
+msgid "Revision {0}"
+msgstr ""
+
 #: src/pages/MessagingSettingsOverlay.tsx
 msgid "Revoke"
 msgstr "撤销"
@@ -3757,6 +4313,22 @@ msgstr "撤销"
 #: src/pages/AccountSettingsOverlay.tsx
 msgid "Robot"
 msgstr "机器人"
+
+#: src/pages/RecruitingPanel.tsx
+msgid "Role"
+msgstr ""
+
+#: src/pages/RecruitingPanel.tsx
+msgid "Role definition"
+msgstr ""
+
+#: src/pages/RecruitingPanel.tsx
+msgid "Role revision"
+msgstr ""
+
+#: src/pages/RecruitingPanel.tsx
+msgid "Role sources"
+msgstr ""
 
 #: src/pages/ExternalConversationSettings.tsx
 msgid "Room guidance"
@@ -3777,6 +4349,10 @@ msgstr "例行任务"
 
 #: src/pages/Paywall.tsx
 msgid "Routines that run while you're away"
+msgstr ""
+
+#: src/pages/RecruitingPanel.tsx
+msgid "Run"
 msgstr ""
 
 #: src/pages/RoutineEditor.tsx
@@ -3817,7 +4393,9 @@ msgstr ""
 #: src/pages/ExternalConversationSettings.tsx
 #: src/pages/GroupPanel.tsx
 #: src/pages/KnowledgeSection.tsx
+#: src/pages/McpServersOverlay.tsx
 #: src/pages/ModelSettingsOverlay.tsx
+#: src/pages/RecruitingPanel.tsx
 #: src/pages/RoutineEditor.tsx
 #: src/pages/shell/bot-panel.tsx
 #: src/pages/shell/dialogs.tsx
@@ -3849,6 +4427,34 @@ msgstr "保存工作区并安装最新软件。"
 #: src/pages/ExternalConversationSettings.tsx
 msgid "Saved"
 msgstr "已保存"
+
+#: src/pages/RecruitingPanel.tsx
+msgid "Saved candidate sources"
+msgstr ""
+
+#: src/pages/RecruitingPanel.tsx
+msgid "Saved candidate totals"
+msgstr ""
+
+#: src/pages/RecruitingPanel.tsx
+msgid "Saved candidates"
+msgstr ""
+
+#: src/pages/RecruitingPanel.tsx
+msgid "Saved facts"
+msgstr ""
+
+#: src/pages/RecruitingPanel.tsx
+msgid "Saved research results"
+msgstr ""
+
+#: src/pages/RecruitingPanel.tsx
+msgid "Saved results"
+msgstr ""
+
+#: src/pages/RecruitingPanel.tsx
+msgid "Saved source rows"
+msgstr ""
 
 #: src/pages/ScratchpadSection.tsx
 msgid "Saved, but list refresh failed"
@@ -3893,6 +4499,11 @@ msgstr "回答是或否，或一句话说明。"
 msgid "Search"
 msgstr "搜索"
 
+#. placeholder {0}: index + 1
+#: src/pages/RecruitingPanel.tsx
+msgid "Search {0}"
+msgstr ""
+
 #: src/pages/ActivityList.tsx
 msgid "Search activity"
 msgstr ""
@@ -3914,6 +4525,31 @@ msgstr ""
 msgid "Search by domain"
 msgstr ""
 
+#: src/pages/RecruitingPanel.tsx
+msgid "Search candidates"
+msgstr ""
+
+#: src/pages/RecruitingPanel.tsx
+msgid "Search filter"
+msgstr ""
+
+#. placeholder {0}: index + 1
+#: src/pages/RecruitingPanel.tsx
+msgid "Search filter {0}"
+msgstr ""
+
+#: src/pages/RecruitingPanel.tsx
+msgid "Search filter mode"
+msgstr ""
+
+#: src/pages/RecruitingPanel.tsx
+msgid "Search filters"
+msgstr ""
+
+#: src/pages/RecruitingPanel.tsx
+msgid "Search follow-up"
+msgstr ""
+
 #: src/components/integrations/IntegrationSetup.tsx
 msgid "Search integrations.sh"
 msgstr ""
@@ -3928,6 +4564,11 @@ msgstr "搜索提供方"
 
 #: src/pages/ActivityList.tsx
 msgid "Search runs"
+msgstr ""
+
+#. placeholder {0}: index + 1
+#: src/pages/RecruitingPanel.tsx
+msgid "Search update {0}"
 msgstr ""
 
 #. placeholder {0}: filters.query.trim()
@@ -3965,8 +4606,8 @@ msgid "Send deletion code"
 msgstr "发送删除验证码"
 
 #: src/components/AskCard.tsx
-msgid "Send it"
-msgstr "发送"
+#~ msgid "Send it"
+#~ msgstr "发送"
 
 #: src/pages/Auth.tsx
 msgid "Send reset link"
@@ -4050,6 +4691,19 @@ msgstr "共享技能"
 msgid "Shell"
 msgstr "Shell"
 
+#: src/pages/RecruitingPanel.tsx
+msgid "Shortlist"
+msgstr ""
+
+#. placeholder {0}: candidate.name ?? (showDiagnostics ? candidate.candidateKey : t`Unnamed candidate`)
+#: src/pages/RecruitingPanel.tsx
+msgid "Shortlist {0}"
+msgstr ""
+
+#: src/pages/RecruitingPanel.tsx
+msgid "Shortlisted only"
+msgstr ""
+
 #: src/pages/Shell.tsx
 msgid "Show bots"
 msgstr ""
@@ -4075,8 +4729,8 @@ msgid "Show settings"
 msgstr "显示设置"
 
 #: src/pages/AccountSettingsOverlay.tsx
-msgid "Show tool activity"
-msgstr ""
+#~ msgid "Show tool activity"
+#~ msgstr ""
 
 #: src/components/call/VoiceChatCard.tsx
 msgid "Show transcript"
@@ -4157,6 +4811,26 @@ msgstr "软件更新"
 msgid "Something went wrong. Try again."
 msgstr "出了点问题。请重试。"
 
+#: src/pages/RecruitingPanel.tsx
+msgid "Source"
+msgstr ""
+
+#: src/pages/RecruitingPanel.tsx
+msgid "Source Artifact"
+msgstr ""
+
+#: src/pages/RecruitingPanel.tsx
+msgid "Source text"
+msgstr ""
+
+#: src/pages/RecruitingPanel.tsx
+msgid "Source unavailable"
+msgstr ""
+
+#: src/pages/RecruitingPanel.tsx
+msgid "Sources"
+msgstr ""
+
 #: src/pages/ModelBackupsSettings.tsx
 msgid "Space changed. Reopen Models to load its backup list."
 msgstr "空间已更改。重新打开“模型”以加载备用列表。"
@@ -4216,6 +4890,10 @@ msgstr "正在开始"
 msgid "Starting…"
 msgstr "正在开始…"
 
+#: src/pages/RecruitingPanel.tsx
+msgid "Statement"
+msgstr ""
+
 #: src/pages/ActivityList.tsx
 #: src/pages/Board.tsx
 msgid "Status"
@@ -4236,6 +4914,10 @@ msgstr "停止朗读"
 #: src/components/teach/TeachRecordingChrome.tsx
 msgid "Stop teaching"
 msgstr "停止示范"
+
+#: src/pages/RecruitingPanel.tsx
+msgid "Stopped"
+msgstr ""
 
 #. js-lingui-explicit-id
 #: src/lib/browser-notifications.ts
@@ -4263,6 +4945,14 @@ msgstr "子 Agent"
 msgid "Submit"
 msgstr "提交"
 
+#: src/pages/RecruitingPanel.tsx
+msgid "Submitted"
+msgstr ""
+
+#: src/pages/RecruitingPanel.tsx
+msgid "Submitting"
+msgstr ""
+
 #: src/pages/Paywall.tsx
 msgid "Subscribe"
 msgstr ""
@@ -4289,9 +4979,25 @@ msgstr ""
 msgid "Switching…"
 msgstr "正在切换…"
 
+#: src/pages/RecruitingPanel.tsx
+msgid "Sync not confirmed"
+msgstr ""
+
+#: src/pages/RecruitingPanel.tsx
+msgid "Synced"
+msgstr ""
+
+#: src/pages/RecruitingPanel.tsx
+msgid "Syncing"
+msgstr ""
+
 #: src/pages/AccountSettingsOverlay.tsx
 msgid "System"
 msgstr "系统"
+
+#: src/pages/RecruitingPanel.tsx
+msgid "Table"
+msgstr "表格"
 
 #: src/pages/Shell.tsx
 msgid "Take control"
@@ -4461,11 +5167,16 @@ msgstr "此订阅登录在 Rakazo 中尚不可用。请使用部署凭据或选�
 msgid "This week"
 msgstr ""
 
+#: src/pages/RecruitingPanel.tsx
+msgid "Thread"
+msgstr ""
+
 #: src/pages/RoutineSchedule.tsx
 msgid "Time of day"
 msgstr "时间"
 
 #: src/pages/Board.tsx
+#: src/pages/RecruitingPanel.tsx
 #: src/pages/shell/bot-panel.tsx
 msgid "Title"
 msgstr "标题"
@@ -4491,6 +5202,14 @@ msgstr "至:"
 #: src/pages/shell/chat-context.tsx
 msgid "Today"
 msgstr "今天"
+
+#: src/pages/McpServersOverlay.tsx
+msgid "Tool access"
+msgstr ""
+
+#: src/components/ApprovalRulesSettings.tsx
+msgid "Tool name"
+msgstr ""
 
 #: src/pages/PluginsOverlay.tsx
 msgid "Tool sources"
@@ -4541,16 +5260,25 @@ msgstr ""
 msgid "Type your answer"
 msgstr "输入你的回答"
 
+#: src/pages/RecruitingPanel.tsx
+msgid "Unassessed"
+msgstr "未评估"
+
 #: src/pages/BotContextMenu.tsx
 msgid "Unassigned"
 msgstr "未分配"
 
 #: src/components/SoftwareUpdateSection.tsx
+#: src/pages/RecruitingPanel.tsx
 msgid "Unavailable"
 msgstr "不可用"
 
 #: src/pages/PluginsOverlay.tsx
 msgid "Uninstall"
+msgstr ""
+
+#: src/pages/RecruitingPanel.tsx
+msgid "Unknown"
 msgstr ""
 
 #: src/pages/shell/bot-panel.tsx
@@ -4561,9 +5289,17 @@ msgstr ""
 msgid "Unlink"
 msgstr "取消关联"
 
+#: src/pages/RecruitingPanel.tsx
+msgid "Unmet"
+msgstr ""
+
 #: src/components/call/CallCard.tsx
 msgid "Unmute"
 msgstr "取消静音"
+
+#: src/pages/RecruitingPanel.tsx
+msgid "Unnamed candidate"
+msgstr ""
 
 #: src/pages/BotContextMenu.tsx
 msgid "Unpin"
@@ -4674,6 +5410,18 @@ msgstr "使用此模型"
 msgid "Use your own key"
 msgstr "使用自己的密钥"
 
+#: src/pages/RecruitingPanel.tsx
+msgid "User and bot memory"
+msgstr ""
+
+#: src/pages/RecruitingPanel.tsx
+msgid "User instruction"
+msgstr ""
+
+#: src/pages/RecruitingPanel.tsx
+msgid "User memory"
+msgstr ""
+
 #: src/components/AskCard.tsx
 #: src/pages/shell/bot-credentials.tsx
 msgid "Username"
@@ -4701,6 +5449,13 @@ msgstr "正在校验…"
 
 #: src/pages/Artifacts.tsx
 msgid "Version"
+msgstr ""
+
+#. placeholder {0}: assessment.version
+#. placeholder {0}: selected.roleRevision.revision
+#. placeholder {0}: workspace.revision.revision
+#: src/pages/RecruitingPanel.tsx
+msgid "Version {0}"
 msgstr ""
 
 #: src/pages/RoutineRunHistory.tsx

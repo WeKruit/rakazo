@@ -30,6 +30,8 @@ export interface ContextSelectionOptions {
   cacheWarmth?: "likely-warm" | "likely-cold" | "unknown";
   /** Keep tool protocol intact while shortening oversized result bodies. */
   truncateToolResults?: boolean;
+  /** Full replacement inputs and authoritative role state must remain exact. */
+  verbatimToolResults?: ReadonlySet<string>;
 }
 export class ContextBudgetError extends Error {
   constructor(
@@ -183,6 +185,55 @@ function shortenHistoryResult(
   }
   return encoded;
 }
+/** A shortened artifact page remains a contiguous prefix with truthful code-point offsets. */
+function shortenArtifactResult(
+  source: string,
+  size: number,
+  tool: { name?: string; arguments?: unknown },
+) {
+  if (tool.name !== "artifact_read") return;
+  let payload: Record<string, unknown>;
+  try {
+    payload = JSON.parse(source);
+  } catch {
+    return;
+  }
+  if (
+    !payload ||
+    typeof payload !== "object" ||
+    typeof payload.text !== "string" ||
+    payload.offsetUnit !== "unicode_code_point" ||
+    !Number.isSafeInteger(payload.offset) ||
+    !Number.isSafeInteger(payload.totalLength)
+  )
+    return;
+  const points = Array.from(payload.text);
+  payload.contextTruncated = true;
+  let keep = points.length;
+  while (true) {
+    payload.text = points.slice(0, keep).join("");
+    payload.endOffset = Number(payload.offset) + keep;
+    payload.nextOffset =
+      Number(payload.endOffset) < Number(payload.totalLength) ? payload.endOffset : null;
+    payload.hasMore = payload.nextOffset !== null;
+    const encoded = JSON.stringify(payload);
+    // A continuation page must consume at least one code point when source text remains.
+    if (encoded.length <= size && (keep > 0 || points.length === 0)) return encoded;
+    if (keep === 0)
+      return JSON.stringify({
+        contextTruncated: true,
+        needsRetry: true,
+        error:
+          "Artifact metadata does not fit. Retry the same offset with limit 1; no text was consumed.",
+        retry: {
+          ...(tool.arguments && typeof tool.arguments === "object" ? tool.arguments : {}),
+          limit: 1,
+        },
+      });
+    keep = Math.floor(keep / 2);
+  }
+}
+
 /** Keep control fields and JSON shape while marking omitted long evidence strings. */
 function shortenStructuredResult(source: string, size: number): string | undefined {
   let payload: unknown;
@@ -238,6 +289,7 @@ export function shortenToolResultText(
   tool: { name?: string; arguments?: unknown } = {},
 ): string {
   return (
+    shortenArtifactResult(source, size, tool) ??
     shortenHistoryResult(source, size, tool) ??
     shortenStructuredResult(source, size) ??
     `${source.slice(0, Math.floor(size / 2))}\n[Tool result truncated to fit context; inspect original evidence before claiming omitted details.]\n${source.slice(-Math.floor(size / 2))}`
@@ -379,6 +431,8 @@ export function selectContext<T extends ContextMessage>(
               (part) => part?.type === "toolCall" && part.id === message.toolCallId,
             )
           : undefined;
+        if (options.verbatimToolResults?.has(nativeCall?.name ?? message.toolName ?? ""))
+          return message;
         const text = shortenToolResultText(
           serialized,
           size,

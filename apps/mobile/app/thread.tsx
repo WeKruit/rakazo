@@ -3917,7 +3917,7 @@ function AskBlock({
   async function submit() {
     if (submitting) return;
     if (incomplete) return;
-    const submitValue = secretInput ? answer : answer.trim();
+    const submitValue = answer;
     const submitUsername = loginInput ? username.trim() : undefined;
     setSubmitting(true);
     setError(null);
@@ -3990,11 +3990,12 @@ function AskBlock({
             placeholder={secretInput ? secretLabel : t("Type your answer")}
             placeholderTextColor={tokens.mutedForeground}
             secureTextEntry={secretInput}
+            multiline={!secretInput}
             autoComplete="off"
             autoCorrect={secretInput ? false : undefined}
             autoCapitalize={secretInput ? "none" : "sentences"}
             editable={!submitting}
-            onSubmitEditing={() => void submit()}
+            onSubmitEditing={secretInput ? () => void submit() : undefined}
             style={[askInputStyles.field, { borderColor: tokens.border, color: tokens.foreground }]}
           />
           <NativeActionButton

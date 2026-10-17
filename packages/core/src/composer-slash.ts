@@ -12,10 +12,10 @@ export function serializeComposerPrompt(
   skill: { name: string } | null,
   mentions: Array<{ name: string }>,
 ): string {
-  const body = draft.replace(/^\s+/, "");
+  const body = draft;
   const mentionPrefix = mentions.map((member) => `@${member.name}`).join(" ");
   const afterSkill = [mentionPrefix, body].filter((part) => part.trim().length > 0).join(" ");
-  if (!skill) return afterSkill.trimEnd();
+  if (!skill) return afterSkill;
   return afterSkill.trim().length > 0 ? `/${skill.name}\n${afterSkill}` : `/${skill.name}`;
 }
 

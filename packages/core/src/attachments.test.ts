@@ -41,6 +41,12 @@ describe("attachment helpers", () => {
   });
 
   it("builds prompt text and history summaries", () => {
+    const raw = " \n  exact source 😀\n  ";
+    expect(promptTextForAttachments(raw, [])).toBe(raw);
+    expect(
+      promptTextForAttachments(raw, [{ name: "notes.pdf", mimeType: "application/pdf", size: 42 }]),
+    ).toBe(`${raw}\n\nUser attached file "notes.pdf" (application/pdf, 42 bytes).`);
+    expect(promptTextForAttachments(" \n\t ", [])).toBe("See attached files.");
     const prompt = promptTextForAttachments("caption", [
       { name: "notes.pdf", mimeType: "application/pdf", size: 42 },
       { name: "bundle.zip", mimeType: "application/zip", size: 80 },

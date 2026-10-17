@@ -1,0 +1,63 @@
+import {
+  DisabledBuiltinToolsSchema,
+  disabledBuiltinToolSet,
+  RecruitingApprovalToolInputSchema,
+  RecruitingCrmImportInputSchema,
+  RecruitingCrmTargetToolInputSchema,
+  RecruitingReplyInputSchema,
+} from "@rakazo/contracts";
+import { describe, expect, it } from "vitest";
+import { z } from "zod";
+import { builtinAgentTools } from "./builtin-tools.js";
+
+describe("native recruiting approval tool", () => {
+  it("uses the shared CRM contracts and honors native tool disable settings", () => {
+    const contracts = [
+      ["recruiting_crm_target", RecruitingCrmTargetToolInputSchema],
+      ["recruiting_crm_import", RecruitingCrmImportInputSchema],
+      ["recruiting_reply", RecruitingReplyInputSchema],
+    ] as const;
+    const names = contracts.map(([name]) => name);
+    expect(DisabledBuiltinToolsSchema.parse(names)).toEqual(names);
+    expect([...disabledBuiltinToolSet(names)]).toEqual(names);
+    for (const [name, schema] of contracts) {
+      const tool = builtinAgentTools.find((entry) => entry.name === name);
+      expect(tool?.inputSchema).toEqual(z.toJSONSchema(schema, { io: "input" }));
+      expect(tool?.readOnly).not.toBe(true);
+    }
+  });
+
+  it("exposes the shared strict staged request as a one-time human approval", () => {
+    const tool = builtinAgentTools.find((entry) => entry.name === "recruiting_request_approval");
+
+    expect(tool).toBeDefined();
+    expect(tool?.inputSchema).toEqual(
+      z.toJSONSchema(RecruitingApprovalToolInputSchema, { io: "input" }),
+    );
+    expect(tool?.readOnly).not.toBe(true);
+    expect(tool?.description).toMatch(/one-time human confirmation/i);
+    expect(tool?.description).toMatch(/exact current package/i);
+    expect(tool?.description).toMatch(/never self-approve/i);
+  });
+
+  it("binds research to the matching playbook gate and keeps continuations in their phase", () => {
+    const tool = builtinAgentTools.find((entry) => entry.name === "recruiting_research");
+
+    expect(tool?.description).toContain("purpose, approvalEffectId");
+    expect(tool?.description).toContain("calibration uses the G1 documents approval receipt");
+    expect(tool?.description).toContain("scale uses the G2 calibration approval receipt");
+    expect(tool?.description).toContain("continue keeps the same task and phase");
+  });
+  it("reuses indexed native row identities when assessing research results", () => {
+    const tool = builtinAgentTools.find((entry) => entry.name === "recruiting_assess");
+    expect(tool?.description).toContain("reuse the exact candidateKey");
+    expect(tool?.description).toContain("candidateRows entry for that rowIndex");
+  });
+  it("offers optional native result saving without making it a search prerequisite", () => {
+    const tool = builtinAgentTools.find((entry) => entry.name === "recruiting_research");
+    expect(tool?.description).toContain("save_results");
+    expect(tool?.description).toContain("same run");
+    expect(tool?.description).toContain("not a prerequisite");
+    expect(tool?.description).toContain("linkedin_url");
+  });
+});

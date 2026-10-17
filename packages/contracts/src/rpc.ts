@@ -59,6 +59,7 @@ import {
   McpServerConfigInput,
   McpServerSchema,
   MemoryDocumentSchema,
+  MemoryRevisionSchema,
   MemoryScopeSchema,
   MeSchema,
   MessagingAgentConnectionSchema,
@@ -99,18 +100,99 @@ import {
   VoiceInfoSchema,
   VoiceStatusSchema,
 } from "./domain.js";
-import { ComputerCommandSchema, ProductEventSchema } from "./events.js";
-import { Id, IsoDate } from "./ids.js";
+import { AskBlockSchema, ComputerCommandSchema, ProductEventSchema } from "./events.js";
+import { Id, IsoDate, RunStatus } from "./ids.js";
 import {
   IntegrationProviderConfigSchema,
   IntegrationSetupStateSchema,
 } from "./integration-settings.js";
 import { MessageReactionSchema } from "./reactions.js";
+import {
+  ConfirmRecruitingBriefInput,
+  CreateRecruitingRoleInput,
+  EditRecruitingCriteriaInput,
+  ListRecruitingCandidateSourcesInput,
+  ListRecruitingCandidateSourcesOutput,
+  ListRecruitingCandidatesInput,
+  ListRecruitingCandidatesOutput,
+  RecruitingAssessmentAskTargetSchema,
+  RecruitingAssessmentSchema,
+  RecruitingId,
+  RecruitingResearchActionSchema,
+  RecruitingResearchSavedObservationSchema,
+  RecruitingResearchTaskSchema,
+  RecruitingRoleRevisionSchema,
+  RecruitingRoleSchema,
+  ReviseRecruitingRoleInput,
+  SetRecruitingCandidateShortlistInput,
+  SetRecruitingCandidateShortlistOutput,
+} from "./recruiting.js";
 import { RoutineHistorySchema, RoutineRunCursorSchema, RunsListOutputSchema } from "./runs.js";
 import { SearchQueryOutputSchema } from "./search.js";
 
 const botId = z.object({ botId: Id });
 const groupId = z.object({ groupId: Id });
+const recruitingWorkspace = z.strictObject({
+  role: RecruitingRoleSchema,
+  revision: RecruitingRoleRevisionSchema,
+});
+export const ReadRecruitingSourceInput = z.discriminatedUnion("kind", [
+  z.strictObject({
+    kind: z.literal("role"),
+    threadId: Id,
+    roleRevisionId: RecruitingId,
+    sourceRefId: RecruitingId,
+  }),
+  z.strictObject({
+    kind: z.literal("assessment"),
+    roleId: RecruitingId,
+    candidateKey: RecruitingId,
+    version: z.number().int().positive(),
+    sourceRefId: RecruitingId,
+  }),
+]);
+export type ReadRecruitingSourceInput = z.infer<typeof ReadRecruitingSourceInput>;
+export const RecruitingAssessmentSnapshotSchema = z
+  .strictObject({
+    assessment: RecruitingAssessmentSchema,
+    roleRevision: RecruitingRoleRevisionSchema,
+    isCurrent: z.boolean(),
+    sourceMessageTargets: z.array(
+      z.strictObject({
+        messageId: Id,
+        threadId: Id,
+        target: z.union([z.strictObject({ botId: Id }), z.strictObject({ groupId: Id })]),
+      }),
+    ),
+  })
+  .refine(
+    (snapshot) =>
+      snapshot.roleRevision.id === snapshot.assessment.roleRevisionId &&
+      snapshot.roleRevision.roleId === snapshot.assessment.roleId,
+    {
+      message: "Assessment role revision must match its saved snapshot",
+      path: ["roleRevision"],
+    },
+  );
+export type RecruitingAssessmentSnapshot = z.infer<typeof RecruitingAssessmentSnapshotSchema>;
+
+export const RecruitingQuestionSchema = z.strictObject({
+  effectId: RecruitingId,
+  roleId: RecruitingId,
+  roleRevisionId: RecruitingId,
+  target: RecruitingAssessmentAskTargetSchema,
+  threadId: Id,
+  botId: Id,
+  groupId: Id.nullable(),
+  runId: Id,
+  messageId: Id,
+  askIndex: z.number().int().nonnegative(),
+  block: AskBlockSchema,
+  runStatus: RunStatus,
+  isCurrent: z.boolean(),
+  canAnswer: z.boolean(),
+});
+export type RecruitingQuestion = z.infer<typeof RecruitingQuestionSchema>;
 
 const threadTarget = z
   .object({
@@ -470,13 +552,68 @@ export const appContract = {
     screenUrl: oc.input(botId).output(z.object({ url: z.string().nullable() })),
     heartbeat: oc.input(botId).output(z.object({ ok: z.literal(true) })),
   },
+  recruiting: {
+    readSource: oc.input(ReadRecruitingSourceInput).output(
+      z.strictObject({
+        text: z.string(),
+        start: z.number().int().nonnegative(),
+        end: z.number().int().positive(),
+      }),
+    ),
+    listCandidates: oc.input(ListRecruitingCandidatesInput).output(ListRecruitingCandidatesOutput),
+    listCandidateSources: oc
+      .input(ListRecruitingCandidateSourcesInput)
+      .output(ListRecruitingCandidateSourcesOutput),
+    setCandidateShortlist: oc
+      .input(SetRecruitingCandidateShortlistInput)
+      .output(SetRecruitingCandidateShortlistOutput),
+    listQuestions: oc
+      .input(z.strictObject({ threadId: Id, roleId: RecruitingId }))
+      .output(z.strictObject({ questions: z.array(RecruitingQuestionSchema) })),
+    createRole: oc.input(CreateRecruitingRoleInput).output(recruitingWorkspace),
+    bindRole: oc
+      .input(z.strictObject({ threadId: RecruitingId, roleId: RecruitingId.nullable() }))
+      .output(recruitingWorkspace.nullable()),
+    getWorkspace: oc
+      .input(z.strictObject({ threadId: RecruitingId }))
+      .output(recruitingWorkspace.nullable()),
+    reviseRole: oc.input(ReviseRecruitingRoleInput).output(recruitingWorkspace),
+    confirmBrief: oc.input(ConfirmRecruitingBriefInput).output(recruitingWorkspace),
+    editCriteria: oc.input(EditRecruitingCriteriaInput).output(recruitingWorkspace),
+    listAssessments: oc
+      .input(z.strictObject({ roleId: RecruitingId }))
+      .output(z.array(RecruitingAssessmentSnapshotSchema)),
+    getAssessment: oc
+      .input(
+        z.strictObject({
+          roleId: RecruitingId,
+          candidateKey: RecruitingId,
+          version: z.number().int().positive().optional(),
+        }),
+      )
+      .output(RecruitingAssessmentSnapshotSchema.nullable()),
+    listResearch: oc.input(z.strictObject({ roleId: RecruitingId })).output(
+      z.strictObject({
+        tasks: z.array(RecruitingResearchTaskSchema),
+        actions: z.array(RecruitingResearchActionSchema),
+        observations: z.array(RecruitingResearchSavedObservationSchema),
+      }),
+    ),
+  },
   memory: {
     list: oc
       .input(z.object({ botId: Id.optional(), scope: z.enum(["bot", "user"]).optional() }))
       .output(z.array(MemoryDocumentSchema)),
     update: oc
-      .input(z.object({ documentId: Id, content: z.string() }))
+      .input(
+        z.object({
+          documentId: Id,
+          content: z.string(),
+          expectedRevision: z.number().int().nonnegative(),
+        }),
+      )
       .output(MemoryDocumentSchema),
+    history: oc.input(z.object({ documentId: Id })).output(z.array(MemoryRevisionSchema)),
     exportMarkdown: oc.input(z.object({ botId: Id.optional() })).output(z.string()),
     providerConfig: oc.output(SpaceMemoryConfigSchema.nullable()),
     connectProvider: oc
@@ -830,13 +967,16 @@ export const appContract = {
     set: oc.input(z.object({ enabled: z.boolean() })).output(ActionAutoReviewSettingsSchema),
   },
   artifacts: {
-    list: oc.input(botId).output(z.array(ArtifactSchema)),
+    list: oc
+      .input(botId.extend({ includeDiagnostics: z.boolean().optional() }))
+      .output(z.array(ArtifactSchema)),
     listSpace: oc
       .input(
         z.object({
           botId: Id.optional(),
           cursor: z.string().optional(),
           limit: z.number().int().min(1).max(60).optional(),
+          includeDiagnostics: z.boolean().optional(),
         }),
       )
       .output(
@@ -845,7 +985,9 @@ export const appContract = {
           nextCursor: z.string().nullable(),
         }),
       ),
-    listVersions: oc.input(z.object({ familyId: Id })).output(z.array(ArtifactVersionSchema)),
+    listVersions: oc
+      .input(z.object({ familyId: Id, includeDiagnostics: z.boolean().optional() }))
+      .output(z.array(ArtifactVersionSchema)),
     create: oc
       .input(
         threadTarget.and(
@@ -860,8 +1002,14 @@ export const appContract = {
         ),
       )
       .output(ArtifactSchema),
-    get: oc.input(threadTarget.and(z.object({ artifactId: Id }))).output(ArtifactWithContentSchema),
-    getById: oc.input(z.object({ artifactId: Id })).output(ArtifactWithContentSchema),
+    get: oc
+      .input(
+        threadTarget.and(z.object({ artifactId: Id, includeDiagnostics: z.boolean().optional() })),
+      )
+      .output(ArtifactWithContentSchema),
+    getById: oc
+      .input(z.object({ artifactId: Id, includeDiagnostics: z.boolean().optional() }))
+      .output(ArtifactWithContentSchema),
     remove: oc.input(z.object({ artifactId: Id })).output(z.object({ ok: z.literal(true) })),
   },
   usage: {

@@ -55,4 +55,22 @@ describe("right panel preferences", () => {
     writeRightPanelState(key, "create-group");
     expect(readRightPanelState(key)).toEqual({ panel: "computer" });
   });
+  it("restores recruiting only for its target and discards unrelated stored data", () => {
+    const entries = new Map<string, string>();
+    vi.stubGlobal("localStorage", {
+      getItem: (key: string) => entries.get(key) ?? null,
+      setItem: (key: string, value: string) => entries.set(key, value),
+    });
+    const botKey = rightPanelStorageKey("user", "space", "bot", "bot");
+    const groupKey = rightPanelStorageKey("user", "space", "group", "group");
+    writeRightPanelState(botKey, "recruiting", "unrelated-routine");
+    expect(readRightPanelState(botKey)).toEqual({ panel: "recruiting" });
+    expect(readRightPanelState(groupKey)).toEqual({ panel: null });
+    expect(entries.get(botKey)).toBe('{"panel":"recruiting"}');
+    entries.set(
+      botKey,
+      JSON.stringify({ panel: "recruiting", candidate: "private", authorized: true }),
+    );
+    expect(readRightPanelState(botKey)).toEqual({ panel: "recruiting" });
+  });
 });

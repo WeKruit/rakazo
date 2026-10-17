@@ -100,11 +100,12 @@ describe("createBackgroundJobHandlers", () => {
         resolveModel,
       },
       "thread-1",
+      undefined,
     );
   });
 
   it.each([undefined, "retrieval", "snapshots", "cache-aware"] as const)(
-    "does not spend on a queued legacy compaction after switching to %s",
+    "dispatches automatic summary work without changing the %s context strategy",
     async (contextStrategy) => {
       vi.mocked(compactHistory).mockClear();
       const runtime = { run: vi.fn() } as unknown as AgentRuntime;
@@ -126,8 +127,16 @@ describe("createBackgroundJobHandlers", () => {
         memoryProviders: { resolve: vi.fn(async () => null) },
       });
 
-      await handlers["history.compact"]({ threadId: "thread-fixture" });
+      await handlers["history.compact"]({ threadId: "thread-fixture", sourceRunId: "origin-run" });
 
+      expect(compactHistory).toHaveBeenCalledWith(
+        expect.any(Object),
+        "thread-fixture",
+        "origin-run",
+      );
+      expect(runtime.run).not.toHaveBeenCalled();
+      vi.mocked(compactHistory).mockClear();
+      await handlers["history.compact"]({ threadId: "legacy-thread-without-origin" });
       expect(compactHistory).not.toHaveBeenCalled();
       expect(runtime.run).not.toHaveBeenCalled();
     },

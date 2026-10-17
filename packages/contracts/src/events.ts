@@ -1,7 +1,14 @@
 import * as z from "zod";
 import { botSecretDestinationSchema } from "./bot-secrets.js";
-import { Id } from "./ids.js";
+import { Id, IsoDate } from "./ids.js";
 import { McpTransportSchema } from "./mcp.js";
+import {
+  RECRUITING_CANDIDATE_OUTPUT_SCHEMA,
+  RecruitingActionDeliveryStateSchema,
+  RecruitingArtifactRefSchema,
+  RecruitingAssessmentAskTargetSchema,
+  RecruitingId,
+} from "./recruiting.js";
 
 export const ProductEventType = z.enum([
   "thread.message.created",
@@ -38,6 +45,7 @@ export const ProductEventType = z.enum([
   "skill.draft.created",
   "skill.saved",
   "effect.recorded",
+  "effect.approval.answered",
   "agent.tool.called",
   "agent.tool.completed",
   "effect.reconciled",
@@ -49,6 +57,13 @@ export const ProductEventType = z.enum([
   "group.created",
   "group.updated",
   "group.handoff",
+  "recruiting.context.adopted",
+  "recruiting.action.transitioned",
+  "recruiting.read",
+  "recruiting.candidates.saved",
+  "recruiting.material.read",
+  "recruiting.assessment.saved",
+  "recruiting.question.asked",
   /** Liveness only: never persisted, never applied to a snapshot, always seq 0. */
   "heartbeat",
 ]);
@@ -93,36 +108,38 @@ const ChartBlock = z
 export const SecretAskPurpose = z.enum(["otp", "password", "api_key"]);
 export type SecretAskPurpose = z.infer<typeof SecretAskPurpose>;
 
+export const AskBlockSchema = z.object({
+  kind: z.literal("ask"),
+  text: z.string(),
+  approvalEffectId: Id.optional(),
+  detail: z.string().optional(),
+  input: z.enum(["text", "secret"]).optional(),
+  /** Why the secret is needed; drives field label on the masked card. */
+  purpose: SecretAskPurpose.optional(),
+  // Records what the runtime could produce under either deployment mode, so
+  // an ask persisted before an owner toggles the private-HTTP flag still
+  // validates on replay.
+  credential: botSecretDestinationSchema({ allowPrivateHttpOrigin: true }).optional(),
+  status: z.enum(["pending", "answered"]).optional(),
+  answer: z.string().optional(),
+  actions: z
+    .array(
+      z.object({
+        id: z.string(),
+        label: z.string(),
+        outcome: z.enum(["created", "cancelled"]).optional(),
+      }),
+    )
+    .optional(),
+});
+
 export const MessageBlock = z.discriminatedUnion("kind", [
   z.object({ kind: z.literal("text"), text: z.string() }),
   z.object({
     kind: z.literal("card"),
     lines: z.array(z.object({ k: z.string(), v: z.string() })),
   }),
-  z.object({
-    kind: z.literal("ask"),
-    text: z.string(),
-    approvalEffectId: Id.optional(),
-    detail: z.string().optional(),
-    input: z.enum(["text", "secret"]).optional(),
-    /** Why the secret is needed; drives field label on the masked card. */
-    purpose: SecretAskPurpose.optional(),
-    // Records what the runtime could produce under either deployment mode, so
-    // an ask persisted before an owner toggles the private-HTTP flag still
-    // validates on replay.
-    credential: botSecretDestinationSchema({ allowPrivateHttpOrigin: true }).optional(),
-    status: z.enum(["pending", "answered"]).optional(),
-    answer: z.string().optional(),
-    actions: z
-      .array(
-        z.object({
-          id: z.string(),
-          label: z.string(),
-          outcome: z.enum(["created", "cancelled"]).optional(),
-        }),
-      )
-      .optional(),
-  }),
+  AskBlockSchema,
   z.object({
     kind: z.literal("choice"),
     question: z.string(),
@@ -327,17 +344,144 @@ export function foldComputerCommands<T extends ComputerCommand>(events: T[]): T[
   return [...byId.values()];
 }
 
-export const ProductEventSchema = z.object({
-  id: Id,
-  spaceId: Id,
-  threadId: Id,
-  botId: Id,
-  seq: z.number().int().nonnegative(),
-  type: ProductEventType,
-  runId: Id.optional(),
-  createdAt: z.string(),
-  payload: z.record(z.string(), z.unknown()),
+export const RecruitingContextAdoptedPayloadSchema = z.strictObject({
+  roleId: RecruitingId,
+  roleRevisionId: RecruitingId,
+  contextArtifact: RecruitingArtifactRefSchema,
 });
+export type RecruitingContextAdoptedPayload = z.infer<typeof RecruitingContextAdoptedPayloadSchema>;
+
+export const RecruitingActionTransitionedPayloadSchema = z.strictObject({
+  taskId: RecruitingId,
+  actionId: RecruitingId,
+  from: RecruitingActionDeliveryStateSchema.nullable(),
+  to: RecruitingActionDeliveryStateSchema,
+});
+export type RecruitingActionTransitionedPayload = z.infer<
+  typeof RecruitingActionTransitionedPayloadSchema
+>;
+
+export const RecruitingReadPayloadSchema = z.discriminatedUnion("phase", [
+  z.strictObject({
+    phase: z.literal("bound"),
+    taskId: RecruitingId,
+    actionId: RecruitingId,
+    effectId: RecruitingId,
+    toolName: z.enum(["get_task", "get_rows"]),
+  }),
+  z.strictObject({
+    phase: z.literal("recorded"),
+    taskId: RecruitingId,
+    actionId: RecruitingId,
+    effectId: RecruitingId,
+    outputArtifact: RecruitingArtifactRefSchema,
+  }),
+]);
+export type RecruitingReadPayload = z.infer<typeof RecruitingReadPayloadSchema>;
+
+export const RecruitingCandidatesSavedPayloadSchema = z.strictObject({
+  roleId: RecruitingId,
+  roleRevisionId: RecruitingId,
+  effectId: RecruitingId,
+  mcpServerId: RecruitingId,
+  serverRevision: z.number().int().positive(),
+  providerTaskId: RecruitingId,
+  requestCursor: z.string().nullable(),
+  outputArtifact: RecruitingArtifactRefSchema,
+  candidateOutputSchema: z.literal(RECRUITING_CANDIDATE_OUTPUT_SCHEMA),
+});
+export type RecruitingCandidatesSavedPayload = z.infer<
+  typeof RecruitingCandidatesSavedPayloadSchema
+>;
+
+export const RecruitingMaterialReadPayloadSchema = z.strictObject({
+  reader: z.literal("web_fetch"),
+  artifact: RecruitingArtifactRefSchema,
+  url: z.httpUrl(),
+  readAt: IsoDate,
+});
+export type RecruitingMaterialReadPayload = z.infer<typeof RecruitingMaterialReadPayloadSchema>;
+
+export const RecruitingAssessmentSavedPayloadSchema = z.strictObject({
+  roleId: RecruitingId,
+  roleRevisionId: RecruitingId,
+  candidateKey: RecruitingId,
+  version: z.number().int().positive(),
+  effectId: RecruitingId,
+});
+export type RecruitingAssessmentSavedPayload = z.infer<
+  typeof RecruitingAssessmentSavedPayloadSchema
+>;
+
+export const RecruitingQuestionAskedPayloadSchema = z.strictObject({
+  roleId: RecruitingId,
+  roleRevisionId: RecruitingId,
+  target: RecruitingAssessmentAskTargetSchema,
+  effectId: RecruitingId,
+  messageId: Id,
+  askIndex: z.number().int().nonnegative(),
+});
+export type RecruitingQuestionAskedPayload = z.infer<typeof RecruitingQuestionAskedPayloadSchema>;
+
+export const NativeAskAnswerPayloadSchema = z.strictObject({
+  messageId: Id,
+  askIndex: z.number().int().nonnegative(),
+  answerMessageId: Id,
+  answeredByUserId: Id,
+});
+export type NativeAskAnswerPayload = z.infer<typeof NativeAskAnswerPayloadSchema>;
+
+export const EffectApprovalAnsweredPayloadSchema = z.strictObject({
+  effectId: Id,
+  messageId: Id,
+  askIndex: z.number().int().nonnegative(),
+  answeredByUserId: Id,
+  answer: z.enum(["allow", "always", "deny"]),
+  requestHash: z.string().regex(/^[a-f0-9]{64}$/),
+});
+export type EffectApprovalAnsweredPayload = z.infer<typeof EffectApprovalAnsweredPayloadSchema>;
+
+export const ProductEventSchema = z
+  .object({
+    id: Id,
+    spaceId: Id,
+    threadId: Id,
+    botId: Id,
+    seq: z.number().int().nonnegative(),
+    type: ProductEventType,
+    runId: Id.optional(),
+    createdAt: z.string(),
+    payload: z.record(z.string(), z.unknown()),
+  })
+  .superRefine((event, ctx) => {
+    const schema =
+      event.type === "recruiting.context.adopted"
+        ? RecruitingContextAdoptedPayloadSchema
+        : event.type === "recruiting.action.transitioned"
+          ? RecruitingActionTransitionedPayloadSchema
+          : event.type === "recruiting.read"
+            ? RecruitingReadPayloadSchema
+            : event.type === "recruiting.candidates.saved"
+              ? RecruitingCandidatesSavedPayloadSchema
+              : event.type === "recruiting.material.read"
+                ? RecruitingMaterialReadPayloadSchema
+                : event.type === "recruiting.assessment.saved"
+                  ? RecruitingAssessmentSavedPayloadSchema
+                  : event.type === "recruiting.question.asked"
+                    ? RecruitingQuestionAskedPayloadSchema
+                    : event.type === "thread.choice"
+                      ? NativeAskAnswerPayloadSchema
+                      : event.type === "effect.approval.answered"
+                        ? EffectApprovalAnsweredPayloadSchema
+                        : null;
+    if (!schema) return;
+    const parsed = schema.safeParse(event.payload);
+    if (!parsed.success) {
+      for (const issue of parsed.error.issues) {
+        ctx.addIssue({ ...issue, path: ["payload", ...issue.path] });
+      }
+    }
+  });
 export type ProductEvent = z.infer<typeof ProductEventSchema>;
 
 export const ReplyPreviewSchema = z.object({

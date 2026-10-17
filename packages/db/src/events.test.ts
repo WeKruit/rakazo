@@ -1,5 +1,8 @@
+import { createHash } from "node:crypto";
 import type { RealtimeFanout } from "@rakazo/adapter-kit";
-import { encodeLoginSecret } from "@rakazo/contracts";
+import type { MessageBlock } from "@rakazo/contracts";
+import { encodeLoginSecret, ProductEventSchema } from "@rakazo/contracts";
+import { stableJsonValue } from "@rakazo/core/node/approval-effect-key";
 import { describe, expect, it, vi } from "vitest";
 import type { PrismaClient } from "./client.js";
 import {
@@ -60,6 +63,559 @@ function event(seq: number) {
     createdAt: new Date("2026-08-15T12:00:00.000Z"),
   };
 }
+
+function ordinaryAnswerFixture(
+  blocks: MessageBlock[] = [{ kind: "ask", text: "Which city?", status: "pending" }],
+) {
+  const run = {
+    id: "run-1",
+    status: "waiting_input",
+    spaceId: "workspace-1",
+    threadId: "thread-1",
+    botId: "bot-1",
+    userId: "user-1",
+    trigger: "user",
+    checkpoint: null,
+  };
+  const rows: Array<{
+    id: string;
+    threadId: string;
+    role: string;
+    botId: string | null;
+    runId: string;
+    blocks: MessageBlock[];
+    externalTranscriptFor?: object | null;
+  }> = [
+    { id: "ask-card", threadId: "thread-1", role: "bot", botId: "bot-1", runId: "run-1", blocks },
+  ];
+  const tx = {
+    $queryRaw: vi.fn().mockResolvedValue([{ id: "thread-1" }]),
+    run: {
+      findFirst: vi.fn(async () => (run.status === "waiting_input" ? run : null)),
+      findUnique: vi.fn(async () => run),
+      updateMany: vi.fn(async () => {
+        if (run.status !== "waiting_input") return { count: 0 };
+        run.status = "queued";
+        return { count: 1 };
+      }),
+    },
+    message: {
+      findFirst: vi.fn(
+        async ({ where }: { where: { id: string; threadId?: string } }) =>
+          rows.find(
+            (row) => row.id === where.id && (!where.threadId || row.threadId === where.threadId),
+          ) ?? null,
+      ),
+      findMany: vi.fn(async () => rows.filter((row) => row.role === "bot")),
+      create: vi.fn(
+        async ({
+          data,
+        }: {
+          data: {
+            threadId: string;
+            role: string;
+            botId?: string;
+            runId: string;
+            blocks: MessageBlock[];
+          };
+        }) => {
+          const row = { ...data, id: "created-human", botId: data.botId ?? null };
+          rows.push(row);
+          return row;
+        },
+      ),
+      update: vi.fn(
+        async ({ where, data }: { where: { id: string }; data: { blocks: MessageBlock[] } }) =>
+          Object.assign(rows.find((row) => row.id === where.id)!, data),
+      ),
+    },
+    task: { updateMany: vi.fn().mockResolvedValue({ count: 1 }) },
+    thread: { update: vi.fn().mockResolvedValue({ nextMessageSeq: 3, nextEventSeq: 4 }) },
+    event: {
+      create: vi.fn(async ({ data }: { data: Record<string, unknown> }) => ({
+        ...event(3),
+        ...data,
+      })),
+    },
+  };
+  const prisma = {
+    $transaction: vi.fn(async (callback: (client: typeof tx) => unknown) => callback(tx)),
+  } as unknown as PrismaClient;
+  const input = {
+    spaceId: "workspace-1",
+    threadId: "thread-1",
+    runId: "run-1",
+    messageId: "ask-card",
+    answeredByUserId: "user-1",
+    answer: "Paris",
+  };
+  return { tx, prisma, input, rows, run };
+}
+
+const persistedApprovalRequest = [
+  "__rakazoCatalogTool",
+  "direct",
+  {
+    route: {
+      toolName: "destination.write",
+      resourceRevision: 2,
+      resourceId: "server-synthetic",
+      connectorId: "mcp",
+    },
+    args: {
+      text: "synthetic-private-request",
+      rows: [{ value: null, id: "row-synthetic" }],
+    },
+  },
+];
+
+function approvalAnswerFixture(request: unknown = persistedApprovalRequest) {
+  const f = ordinaryAnswerFixture([
+    { kind: "text", text: "Review this action" },
+    {
+      kind: "ask",
+      approvalEffectId: "effect-1",
+      text: "Write [redacted] to destination?",
+      status: "pending",
+      actions: [
+        { id: "allow", label: "Allow once" },
+        { id: "always", label: "Always allow" },
+        { id: "deny", label: "Deny" },
+      ],
+    },
+  ]);
+  const effect = {
+    id: "effect-1",
+    spaceId: f.input.spaceId,
+    runId: f.input.runId,
+    status: "intended",
+    kind: "destination.write",
+    request,
+  };
+  let seq = 10;
+  f.tx.thread.update.mockImplementation(async () => ({
+    nextEventSeq: ++seq,
+    nextMessageSeq: 3,
+  }));
+  const tx = {
+    ...f.tx,
+    externalEffect: {
+      findFirst: vi.fn(async ({ where }: { where: Record<string, string> }) =>
+        Object.entries(where).every(([key, value]) => effect[key as keyof typeof effect] === value)
+          ? effect
+          : null,
+      ),
+      update: vi.fn(async ({ data }: { data: { status: string } }) => Object.assign(effect, data)),
+    },
+    actionApprovalRule: { upsert: vi.fn().mockResolvedValue({ id: "rule-synthetic" }) },
+  };
+  const prisma = {
+    $transaction: vi.fn(async (callback: (client: typeof tx) => unknown) => callback(tx)),
+  } as unknown as PrismaClient;
+  const fanout = new TestFanout();
+  const publish = vi.spyOn(fanout, "publish");
+  return { ...f, tx, prisma, effect, fanout, publish };
+}
+
+describe("native approval answer provenance", () => {
+  it("never stores an always-allow rule for recruiting gate approvals", async () => {
+    const f = approvalAnswerFixture();
+    f.effect.kind = "recruiting_request_approval";
+    await expect(answerRunInput(f.prisma, { ...f.input, answer: "always" })).resolves.toBe(false);
+    expect(f.tx.externalEffect.update).not.toHaveBeenCalled();
+    expect(f.tx.actionApprovalRule.upsert).not.toHaveBeenCalled();
+  });
+
+  it("rejects an invalid recruiting allow but leaves stale cards usable for deny", async () => {
+    const f = approvalAnswerFixture({ stage: "documents", roleId: "missing-role" });
+    f.effect.kind = "recruiting_request_approval";
+    await expect(answerRunInput(f.prisma, { ...f.input, answer: "allow" })).resolves.toBe(false);
+    expect(f.tx.externalEffect.update).not.toHaveBeenCalled();
+    await expect(answerRunInput(f.prisma, { ...f.input, answer: "deny" })).resolves.toBe(true);
+    expect(f.effect.status).toBe("denied");
+  });
+
+  it.each(["allow", "always", "deny"])(
+    "records one exact %s decision with the authenticated approver and canonical persisted request hash",
+    async (answer) => {
+      const f = approvalAnswerFixture();
+      const answeredByUserId = answer === "always" ? f.run.userId : "teammate-approver";
+      const input = { ...f.input, answer, answeredByUserId };
+      await expect(answerRunInput(f.prisma, input, f.fanout)).resolves.toBe(true);
+      const proofs = f.tx.event.create.mock.calls
+        .map(([{ data }]) => data)
+        .filter((data) => data.type === "effect.approval.answered");
+      expect(proofs).toEqual([
+        {
+          spaceId: f.input.spaceId,
+          threadId: f.input.threadId,
+          botId: f.run.botId,
+          runId: f.input.runId,
+          seq: 11,
+          type: "effect.approval.answered",
+          payload: {
+            effectId: f.effect.id,
+            messageId: f.input.messageId,
+            askIndex: 1,
+            answeredByUserId,
+            answer,
+            requestHash: createHash("sha256")
+              .update(stableJsonValue(persistedApprovalRequest))
+              .digest("hex"),
+          },
+        },
+      ]);
+      expect(
+        ProductEventSchema.safeParse({
+          ...event(11),
+          ...proofs[0],
+          createdAt: event(11).createdAt.toISOString(),
+        }).success,
+      ).toBe(true);
+      expect(f.effect.status).toBe(answer === "deny" ? "denied" : "approved");
+      expect(f.tx.message.create).not.toHaveBeenCalled();
+      expect(f.tx.task.updateMany).not.toHaveBeenCalled();
+      expect(f.tx.event.create.mock.calls.map(([{ data }]) => data.type)).toEqual([
+        "thread.message.updated",
+        "effect.approval.answered",
+      ]);
+      expect(JSON.stringify(proofs)).not.toContain("synthetic-private-request");
+      expect(f.publish).toHaveBeenCalledExactlyOnceWith("thread:thread-1", '{"cursor":11}');
+      await expect(answerRunInput(f.prisma, input, f.fanout)).resolves.toBe(false);
+      expect(f.tx.event.create).toHaveBeenCalledTimes(2);
+      expect(f.publish).toHaveBeenCalledTimes(1);
+    },
+  );
+
+  it("hashes persisted plain JSON canonically rather than the redacted card or property order", async () => {
+    const request = { z: [2, { b: false, a: null }], a: "synthetic-private-request" };
+    const canonical = '{"a":"synthetic-private-request","z":[2,{"a":null,"b":false}]}';
+    const f = approvalAnswerFixture(request);
+    await expect(answerRunInput(f.prisma, { ...f.input, answer: "allow" })).resolves.toBe(true);
+    expect(f.tx.event.create).toHaveBeenCalledWith({
+      data: expect.objectContaining({
+        type: "effect.approval.answered",
+        payload: expect.objectContaining({
+          requestHash: createHash("sha256").update(canonical).digest("hex"),
+        }),
+      }),
+    });
+    expect(createHash("sha256").update(JSON.stringify(request)).digest("hex")).not.toBe(
+      createHash("sha256").update(canonical).digest("hex"),
+    );
+  });
+
+  it.each([
+    ["id", "different-effect"],
+    ["spaceId", "different-space"],
+    ["runId", "different-run"],
+    ["status", "approved"],
+  ])("writes no proof when the persisted effect has a mismatched %s", async (key, value) => {
+    const f = approvalAnswerFixture();
+    Object.assign(f.effect, { [key]: value });
+    await expect(answerRunInput(f.prisma, { ...f.input, answer: "allow" }, f.fanout)).resolves.toBe(
+      false,
+    );
+    expect(f.tx.externalEffect.findFirst).toHaveBeenCalledWith({
+      where: { id: "effect-1", spaceId: f.input.spaceId, runId: f.input.runId, status: "intended" },
+    });
+    expect(f.tx.run.updateMany).not.toHaveBeenCalled();
+    expect(f.tx.event.create).not.toHaveBeenCalled();
+    expect(f.publish).not.toHaveBeenCalled();
+  });
+
+  it("writes no proof for an absent effect", async () => {
+    const f = approvalAnswerFixture();
+    f.tx.externalEffect.findFirst.mockResolvedValue(null);
+    await expect(answerRunInput(f.prisma, { ...f.input, answer: "allow" }, f.fanout)).resolves.toBe(
+      false,
+    );
+    expect(f.tx.event.create).not.toHaveBeenCalled();
+    expect(f.publish).not.toHaveBeenCalled();
+  });
+
+  it("writes no proof for an unoffered answer", async () => {
+    const f = approvalAnswerFixture();
+    await expect(
+      answerRunInput(f.prisma, { ...f.input, answer: "accept" }, f.fanout),
+    ).resolves.toBe(false);
+    expect(f.tx.externalEffect.findFirst).not.toHaveBeenCalled();
+    expect(f.tx.event.create).not.toHaveBeenCalled();
+    expect(f.publish).not.toHaveBeenCalled();
+  });
+
+  it("writes no proof when a teammate tries to always-allow for the run owner", async () => {
+    const f = approvalAnswerFixture();
+    await expect(
+      answerRunInput(
+        f.prisma,
+        { ...f.input, answer: "always", answeredByUserId: "teammate-approver" },
+        f.fanout,
+      ),
+    ).resolves.toBe(false);
+    expect(f.tx.run.updateMany).not.toHaveBeenCalled();
+    expect(f.tx.actionApprovalRule.upsert).not.toHaveBeenCalled();
+    expect(f.tx.event.create).not.toHaveBeenCalled();
+    expect(f.publish).not.toHaveBeenCalled();
+  });
+
+  it("writes no proof when the waiting-run claim is lost", async () => {
+    const f = approvalAnswerFixture();
+    f.tx.run.updateMany.mockResolvedValue({ count: 0 });
+    await expect(answerRunInput(f.prisma, { ...f.input, answer: "allow" }, f.fanout)).resolves.toBe(
+      false,
+    );
+    expect(f.tx.externalEffect.update).not.toHaveBeenCalled();
+    expect(f.tx.message.update).not.toHaveBeenCalled();
+    expect(f.tx.event.create).not.toHaveBeenCalled();
+    expect(f.publish).not.toHaveBeenCalled();
+  });
+
+  it("rejects the answer call and publishes nothing when appending its proof fails", async () => {
+    const f = approvalAnswerFixture();
+    f.tx.event.create.mockImplementation(async ({ data }) => {
+      if (data.type === "effect.approval.answered") throw new Error("proof append failed");
+      return { ...event(10), ...data };
+    });
+    await expect(
+      answerRunInput(f.prisma, { ...f.input, answer: "allow" }, f.fanout),
+    ).rejects.toThrow("proof append failed");
+    expect(f.tx.event.create).toHaveBeenCalledTimes(2);
+    expect(f.publish).not.toHaveBeenCalled();
+  });
+
+  it("validates an exact approval proof payload without raw requests or application timestamps", () => {
+    const payload = {
+      effectId: "effect-1",
+      messageId: "ask-card",
+      askIndex: 1,
+      answeredByUserId: "teammate-approver",
+      answer: "allow",
+      requestHash: "a".repeat(64),
+    };
+    const proof = {
+      ...event(11),
+      runId: "run-1",
+      createdAt: event(11).createdAt.toISOString(),
+      type: "effect.approval.answered",
+      payload,
+    };
+    expect(ProductEventSchema.safeParse(proof).success).toBe(true);
+    for (const invalid of [
+      {},
+      { ...payload, effectId: "" },
+      { ...payload, messageId: "" },
+      { ...payload, askIndex: -1 },
+      { ...payload, askIndex: 0.5 },
+      { ...payload, answeredByUserId: "" },
+      { ...payload, answer: "unoffered" },
+      { ...payload, requestHash: "wrong" },
+      { ...payload, request: persistedApprovalRequest },
+      { ...payload, approvedAt: proof.createdAt },
+    ]) {
+      expect(ProductEventSchema.safeParse({ ...proof, payload: invalid }).success).toBe(false);
+    }
+  });
+});
+
+describe("ordinary native Ask answer provenance", () => {
+  it("records the visible selected label as a human message and links the exact answered Ask block", async () => {
+    const f = ordinaryAnswerFixture([
+      { kind: "text", text: "Choose a location" },
+      {
+        kind: "ask",
+        text: "Which city?",
+        status: "pending",
+        actions: [
+          { id: "one", label: "Paris" },
+          { id: "two", label: "Berlin" },
+        ],
+      },
+    ]);
+    await expect(answerRunInput(f.prisma, { ...f.input, answer: "one" })).resolves.toBe(true);
+    expect(f.rows.find((row) => row.id === "created-human")).toMatchObject({
+      role: "user",
+      botId: null,
+      runId: "run-1",
+      blocks: [{ kind: "text", text: "Paris" }],
+    });
+    expect(f.tx.event.create).toHaveBeenCalledWith({
+      data: expect.objectContaining({
+        spaceId: "workspace-1",
+        threadId: "thread-1",
+        runId: "run-1",
+        botId: "bot-1",
+        type: "thread.choice",
+        payload: {
+          messageId: "ask-card",
+          askIndex: 1,
+          answerMessageId: "created-human",
+          answeredByUserId: "user-1",
+        },
+      }),
+    });
+    await expect(answerRunInput(f.prisma, f.input)).resolves.toBe(false);
+    expect(f.tx.message.create).toHaveBeenCalledOnce();
+  });
+
+  it("reuses a composer human message without changing its bytes or original run link", async () => {
+    const f = ordinaryAnswerFixture();
+    const answer = {
+      id: "composer-human",
+      threadId: "thread-1",
+      role: "user",
+      botId: null,
+      runId: "primary-run",
+      blocks: [{ kind: "text" as const, text: "  Paris  " }],
+      externalTranscriptFor: null,
+    };
+    f.rows.push(answer);
+    await expect(
+      answerWaitingRunWithTextInTransaction(f.tx as never, {
+        ...f.input,
+        answer: "  Paris  ",
+        answerMessageId: answer.id,
+      }),
+    ).resolves.toBeTruthy();
+    expect(f.tx.message.create).not.toHaveBeenCalled();
+    expect(answer.runId).toBe("primary-run");
+    expect(answer.blocks).toEqual([{ kind: "text", text: "  Paris  " }]);
+    expect(f.tx.task.updateMany).toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: {
+          prompt: "Which city?\nAnswer:   Paris  ",
+        },
+      }),
+    );
+    expect(f.tx.event.create).toHaveBeenCalledWith({
+      data: expect.objectContaining({
+        type: "thread.choice",
+        payload: {
+          messageId: "ask-card",
+          askIndex: 0,
+          answerMessageId: answer.id,
+          answeredByUserId: "user-1",
+        },
+      }),
+    });
+  });
+
+  it("preserves a custom answer's raw text in the human message", async () => {
+    const f = ordinaryAnswerFixture();
+    const answer = "  Paris\nwith the local team  ";
+    await expect(answerRunInput(f.prisma, { ...f.input, answer })).resolves.toBe(true);
+    expect(f.rows.find((row) => row.id === "created-human")?.blocks).toEqual([
+      { kind: "text", text: answer },
+    ]);
+    expect(f.rows[0]?.blocks).toEqual([
+      { kind: "ask", text: "Which city?", status: "answered", answer },
+    ]);
+    expect(f.tx.task.updateMany).toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: {
+          prompt: `Which city?\nAnswer: ${answer}`,
+        },
+      }),
+    );
+  });
+
+  it("rejects a supplied human message whose whitespace differs from its answer", async () => {
+    const f = ordinaryAnswerFixture();
+    f.rows.push({
+      id: "composer-human",
+      threadId: "thread-1",
+      role: "user",
+      botId: null,
+      runId: "primary-run",
+      blocks: [{ kind: "text", text: "  Paris  " }],
+      externalTranscriptFor: null,
+    });
+    expect(
+      await answerWaitingRunWithTextInTransaction(f.tx as never, {
+        ...f.input,
+        answer: "Paris",
+        answerMessageId: "composer-human",
+      }),
+    ).toBeNull();
+    expect(f.tx.run.updateMany).not.toHaveBeenCalled();
+  });
+
+  it.each([" ", "\n\t"])("rejects an ordinary blank-only answer %j", async (answer) => {
+    const f = ordinaryAnswerFixture();
+    expect(await answerRunInput(f.prisma, { ...f.input, answer })).toBe(false);
+    expect(f.tx.run.updateMany).not.toHaveBeenCalled();
+    expect(f.tx.message.create).not.toHaveBeenCalled();
+  });
+
+  it("preserves earlier raw answers in a background run's resumed prompt", async () => {
+    const f = ordinaryAnswerFixture();
+    Object.assign(f.run, {
+      trigger: "routine",
+      task: { prompt: "Original instructions\n\nAnswer: first answer  \n " },
+    });
+    const answer = " \n  second answer 😀\n ";
+    expect(await answerRunInput(f.prisma, { ...f.input, answer })).toBe(true);
+    expect(f.tx.task.updateMany).toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: {
+          prompt: `Original instructions\n\nAnswer: first answer  \n \n\nWhich city?\nAnswer: ${answer}`,
+        },
+      }),
+    );
+  });
+
+  it("creates no answer message or proof when the waiting-run claim loses", async () => {
+    const f = ordinaryAnswerFixture();
+    f.tx.run.updateMany.mockResolvedValueOnce({ count: 0 });
+    await expect(answerRunInput(f.prisma, f.input)).resolves.toBe(false);
+    expect(f.tx.message.create).not.toHaveBeenCalled();
+    expect(f.tx.message.update).not.toHaveBeenCalled();
+    expect(f.tx.event.create).not.toHaveBeenCalled();
+  });
+
+  it.each(["", "missing-message"])(
+    "rejects an unavailable supplied answer message %j",
+    async (answerMessageId) => {
+      const f = ordinaryAnswerFixture();
+      await expect(answerRunInput(f.prisma, { ...f.input, answerMessageId })).resolves.toBe(false);
+      expect(f.tx.run.updateMany).not.toHaveBeenCalled();
+      expect(f.tx.message.create).not.toHaveBeenCalled();
+      expect(f.tx.event.create).not.toHaveBeenCalled();
+    },
+  );
+
+  it.each([
+    { threadId: "foreign-thread" },
+    { role: "bot" },
+    { botId: "peer-bot" },
+    { externalTranscriptFor: { id: "external-message" } },
+    { blocks: [{ kind: "text", text: "Different answer" }] },
+    {
+      blocks: [
+        { kind: "bot_message_received", fromBotId: "peer", fromBotName: "Peer", text: "Paris" },
+      ],
+    },
+  ])("rejects a supplied answer message with invalid native provenance %j", async (invalid) => {
+    const f = ordinaryAnswerFixture();
+    f.rows.push({
+      id: "composer-human",
+      threadId: "thread-1",
+      role: "user",
+      botId: null,
+      runId: "primary-run",
+      blocks: [{ kind: "text", text: "Paris" }],
+      externalTranscriptFor: null,
+      ...invalid,
+    } as (typeof f.rows)[number]);
+    await expect(
+      answerRunInput(f.prisma, { ...f.input, answerMessageId: "composer-human" }),
+    ).resolves.toBe(false);
+    expect(f.tx.run.updateMany).not.toHaveBeenCalled();
+    expect(f.tx.message.create).not.toHaveBeenCalled();
+    expect(f.tx.message.update).not.toHaveBeenCalled();
+    expect(f.tx.event.create).not.toHaveBeenCalled();
+  });
+});
 
 describe("finalizeRun", () => {
   it("stamps the final steps block with wall-clock run duration", () => {
@@ -943,6 +1499,126 @@ describe("pauseRunForTakeover", () => {
 });
 
 describe("answerRunInput", () => {
+  it("keeps a cancelled run's pending card from answering a new run and rejects repeat answers", async () => {
+    const fanout = new TestFanout();
+    const publish = vi.spyOn(fanout, "publish");
+    const runs = [
+      { id: "run-old", status: "cancelled" },
+      { id: "run-new", status: "waiting_input" },
+    ].map((run) => ({
+      ...run,
+      spaceId: "workspace-1",
+      threadId: "thread-1",
+      botId: "bot-1",
+      userId: "user-1",
+    }));
+    const messages = runs.map((run) => ({
+      id: run.id === "run-old" ? "message-old" : "message-new",
+      runId: run.id,
+      threadId: "thread-1",
+      role: "bot",
+      blocks: [{ kind: "ask", text: "Which city?", status: "pending" }] as MessageBlock[],
+    }));
+    const tx = {
+      $queryRaw: vi.fn().mockResolvedValue([{ id: "thread-1" }]),
+      run: {
+        findFirst: vi.fn(
+          async ({ where }: { where: Record<string, string> }) =>
+            runs.find((run) =>
+              Object.entries(where).every(([key, value]) => Reflect.get(run, key) === value),
+            ) ?? null,
+        ),
+        findUnique: vi.fn(async ({ where }: { where: { id: string } }) =>
+          runs.find((run) => run.id === where.id),
+        ),
+        updateMany: vi.fn(
+          async ({ where, data }: { where: Record<string, string>; data: { status: string } }) => {
+            const run = runs.find((row) =>
+              Object.entries(where).every(([key, value]) => Reflect.get(row, key) === value),
+            );
+            if (!run) return { count: 0 };
+            Object.assign(run, data);
+            return { count: 1 };
+          },
+        ),
+      },
+      message: {
+        create: vi.fn().mockResolvedValue({ id: "human-answer" }),
+        findFirst: vi.fn(
+          async ({ where }: { where: Record<string, string> }) =>
+            messages.find((message) =>
+              Object.entries(where).every(([key, value]) => Reflect.get(message, key) === value),
+            ) ?? null,
+        ),
+        update: vi.fn(
+          async ({ where, data }: { where: { id: string }; data: { blocks: MessageBlock[] } }) => {
+            const message = messages.find((row) => row.id === where.id)!;
+            Object.assign(message, data);
+            return message;
+          },
+        ),
+      },
+      task: { updateMany: vi.fn().mockResolvedValue({ count: 1 }) },
+      thread: { update: vi.fn().mockResolvedValue({ nextEventSeq: 10, nextMessageSeq: 3 }) },
+      event: {
+        create: vi.fn(async ({ data }: { data: { seq: number; type: string } }) => ({
+          ...event(data.seq),
+          ...data,
+        })),
+      },
+    };
+    const prisma = {
+      $transaction: vi.fn(async (callback: (client: typeof tx) => unknown) => callback(tx)),
+    } as unknown as PrismaClient;
+    const input = {
+      spaceId: "workspace-1",
+      threadId: "thread-1",
+      runId: "run-old",
+      messageId: "message-old",
+      answeredByUserId: "user-1",
+      answer: "Paris",
+    };
+
+    await expect(answerRunInput(prisma, input, fanout)).resolves.toBe(false);
+    await expect(answerRunInput(prisma, { ...input, runId: "run-new" }, fanout)).resolves.toBe(
+      false,
+    );
+    expect(runs.map((run) => run.status)).toEqual(["cancelled", "waiting_input"]);
+    expect(messages.map((message) => message.blocks[0])).toEqual([
+      { kind: "ask", text: "Which city?", status: "pending" },
+      { kind: "ask", text: "Which city?", status: "pending" },
+    ]);
+    expect(tx.run.updateMany).not.toHaveBeenCalled();
+    expect(tx.message.update).not.toHaveBeenCalled();
+    expect(tx.task.updateMany).not.toHaveBeenCalled();
+    expect(tx.event.create).not.toHaveBeenCalled();
+    expect(publish).not.toHaveBeenCalled();
+
+    const current = { ...input, runId: "run-new", messageId: "message-new" };
+    await expect(answerRunInput(prisma, current, fanout)).resolves.toBe(true);
+    await expect(answerRunInput(prisma, current, fanout)).resolves.toBe(false);
+    expect(runs.map((run) => run.status)).toEqual(["cancelled", "queued"]);
+    expect(messages[0]!.blocks[0]).toEqual({ kind: "ask", text: "Which city?", status: "pending" });
+    expect(messages[1]!.blocks[0]).toEqual({
+      kind: "ask",
+      text: "Which city?",
+      status: "answered",
+      answer: "Paris",
+    });
+    expect(tx.run.updateMany).toHaveBeenCalledOnce();
+    expect(tx.message.update).toHaveBeenCalledOnce();
+    expect(tx.task.updateMany).toHaveBeenCalledOnce();
+    expect(tx.event.create).toHaveBeenCalledTimes(3);
+    expect(tx.event.create).toHaveBeenCalledWith({
+      data: expect.objectContaining({
+        type: "thread.message.updated",
+        runId: "run-new",
+        payload: expect.objectContaining({ messageId: "message-new" }),
+      }),
+    });
+    expect(publish).toHaveBeenCalledOnce();
+  });
+
   it("answers only the selected pending prompt and publishes its update", async () => {
     const fanout = new TestFanout();
     const publish = vi.spyOn(fanout, "publish");
@@ -950,6 +1626,7 @@ describe("answerRunInput", () => {
     const tx = {
       $queryRaw: vi.fn().mockResolvedValue([{ id: "thread-1" }]),
       message: {
+        create: vi.fn().mockResolvedValue({ id: "human-answer" }),
         findFirst: vi.fn().mockResolvedValue({
           id: "message-1",
           blocks: [
@@ -976,7 +1653,7 @@ describe("answerRunInput", () => {
         }),
       },
       task: { updateMany: vi.fn().mockResolvedValue({ count: 1 }) },
-      thread: { update: vi.fn().mockResolvedValue({ nextEventSeq: 10 }) },
+      thread: { update: vi.fn().mockResolvedValue({ nextEventSeq: 10, nextMessageSeq: 3 }) },
       event: {
         create: vi.fn(async ({ data }: { data: { seq: number; type: string } }) => ({
           ...event(data.seq),
@@ -1029,7 +1706,9 @@ describe("answerRunInput", () => {
     });
     expect(tx.task.updateMany).toHaveBeenCalledWith({
       where: { runs: { some: { id: "run-1" } } },
-      data: { prompt: "Selected choice choice-2: Paris" },
+      data: {
+        prompt: "Which city?\nAnswer: Selected choice choice-2: Paris",
+      },
     });
     expect(tx.event.create).toHaveBeenCalledWith(
       expect.objectContaining({
@@ -1039,80 +1718,84 @@ describe("answerRunInput", () => {
     expect(publish).toHaveBeenCalledWith("thread:thread-1", JSON.stringify({ cursor: 9 }));
   });
 
-  it("keeps a routine's instructions and every earlier answer across choice resumes", async () => {
-    // A routine run sees no thread history: its resumed attempt only has the task prompt.
-    const answerChoice = async (prompt: string, question: string, answer: string) => {
-      const tx = {
-        $queryRaw: vi.fn().mockResolvedValue([{ id: "thread-1" }]),
-        message: {
-          findFirst: vi.fn().mockResolvedValue({
-            id: "message-1",
-            blocks: [
-              {
-                kind: "ask",
-                text: question,
-                status: "pending",
-                actions: [
-                  { id: "choice-1", label: "Two people" },
-                  { id: "choice-2", label: "Italian" },
-                ],
-              },
-            ],
-          }),
-          update: vi.fn().mockResolvedValue({ id: "message-1" }),
-        },
-        run: {
-          findFirst: vi.fn().mockResolvedValue({
-            botId: "bot-2",
-            trigger: "routine",
-            task: { prompt },
-          }),
-          updateMany: vi.fn().mockResolvedValue({ count: 1 }),
-          findUnique: vi.fn().mockResolvedValue({
-            status: "queued",
-            createdAt: new Date("2026-08-16T12:00:00.000Z"),
+  it.each(["routine", "user"])(
+    "keeps one %s goal and each raw answer across two resumes",
+    async (trigger) => {
+      const answerChoice = async (prompt: string, question: string, answer: string) => {
+        const tx = {
+          $queryRaw: vi.fn().mockResolvedValue([{ id: "thread-1" }]),
+          message: {
+            create: vi.fn().mockResolvedValue({ id: "human-answer" }),
+            findFirst: vi.fn().mockResolvedValue({
+              id: "message-1",
+              blocks: [
+                {
+                  kind: "ask",
+                  text: question,
+                  status: "pending",
+                  actions: [
+                    { id: "choice-1", label: "Two people" },
+                    { id: "choice-2", label: "Italian" },
+                  ],
+                },
+              ],
+            }),
+            update: vi.fn().mockResolvedValue({ id: "message-1" }),
+          },
+          run: {
+            findFirst: vi.fn().mockResolvedValue({
+              botId: "bot-2",
+              trigger,
+              task: { prompt },
+            }),
+            updateMany: vi.fn().mockResolvedValue({ count: 1 }),
+            findUnique: vi.fn().mockResolvedValue({
+              status: "queued",
+              createdAt: new Date("2026-08-16T12:00:00.000Z"),
+              threadId: "thread-1",
+            }),
+          },
+          task: { updateMany: vi.fn().mockResolvedValue({ count: 1 }) },
+          thread: { update: vi.fn().mockResolvedValue({ nextEventSeq: 10, nextMessageSeq: 3 }) },
+          event: {
+            create: vi.fn(async ({ data }: { data: { seq: number; type: string } }) => ({
+              ...event(data.seq),
+              type: data.type,
+            })),
+            findFirst: vi.fn().mockResolvedValue(null),
+          },
+        };
+        const prisma = {
+          $transaction: vi.fn(async (callback: (client: typeof tx) => unknown) => callback(tx)),
+        } as unknown as PrismaClient;
+        await expect(
+          answerRunInput(prisma, {
+            spaceId: "workspace-1",
             threadId: "thread-1",
+            runId: "run-1",
+            messageId: "message-1",
+            answeredByUserId: "user-1",
+            answer,
           }),
-        },
-        task: { updateMany: vi.fn().mockResolvedValue({ count: 1 }) },
-        thread: { update: vi.fn().mockResolvedValue({ nextEventSeq: 10 }) },
-        event: {
-          create: vi.fn(async ({ data }: { data: { seq: number; type: string } }) => ({
-            ...event(data.seq),
-            type: data.type,
-          })),
-          findFirst: vi.fn().mockResolvedValue(null),
-        },
+        ).resolves.toBe(true);
+        return (tx.task.updateMany.mock.calls[0]![0] as { data: { prompt: string } }).data.prompt;
       };
-      const prisma = {
-        $transaction: vi.fn(async (callback: (client: typeof tx) => unknown) => callback(tx)),
-      } as unknown as PrismaClient;
-      await expect(
-        answerRunInput(prisma, {
-          spaceId: "workspace-1",
-          threadId: "thread-1",
-          runId: "run-1",
-          messageId: "message-1",
-          answeredByUserId: "user-1",
-          answer,
-        }),
-      ).resolves.toBe(true);
-      return (tx.task.updateMany.mock.calls[0]![0] as { data: { prompt: string } }).data.prompt;
-    };
 
-    const afterFirst = await answerChoice("Plan tonight's dinner.", "Who is eating?", "choice-1");
-    expect(afterFirst).toBe(
-      "Plan tonight's dinner.\n\nWho is eating?\nAnswer: Selected choice choice-1: Two people",
-    );
-    const afterSecond = await answerChoice(afterFirst, "Which cuisine?", "choice-2");
-    expect(afterSecond).toBe(
-      [
-        "Plan tonight's dinner.",
-        "Who is eating?\nAnswer: Selected choice choice-1: Two people",
-        "Which cuisine?\nAnswer: Selected choice choice-2: Italian",
-      ].join("\n\n"),
-    );
-  });
+      const goal = "Plan tonight's dinner, then stop.";
+      const first = " \r\n  Two people 😀  ";
+      const second = "  Italian dishes\n  ";
+      const afterFirst = await answerChoice(goal, "Who is eating?", first);
+      expect(afterFirst).toBe(`${goal}\n\nWho is eating?\nAnswer: ${first}`);
+      const afterSecond = await answerChoice(afterFirst, "Which cuisine?", second);
+      expect(afterSecond).toBe(
+        [goal, `Who is eating?\nAnswer: ${first}`, `Which cuisine?\nAnswer: ${second}`].join(
+          "\n\n",
+        ),
+      );
+      for (const text of [goal, first, second, "Who is eating?", "Which cuisine?"])
+        expect(afterSecond.split(text)).toHaveLength(2);
+    },
+  );
 
   it("records a spoken call answer as a user utterance with the call identity", async () => {
     const fanout = new TestFanout();
@@ -1171,7 +1854,7 @@ describe("answerRunInput", () => {
       data: expect.objectContaining({
         threadId: "thread-1",
         role: "user",
-        botId: "bot-2",
+        botId: undefined,
         runId: "run-1",
         clientNonce: "call:call-1:answer-1",
         blocks: [{ kind: "text", text: "Toronto" }],
@@ -1191,7 +1874,9 @@ describe("answerRunInput", () => {
     );
     expect(tx.task.updateMany).toHaveBeenCalledWith({
       where: { runs: { some: { id: "run-1" } } },
-      data: { prompt: "Toronto" },
+      data: {
+        prompt: "Which city?\nAnswer: Toronto",
+      },
     });
   });
 
@@ -1240,7 +1925,7 @@ describe("answerRunInput", () => {
           }),
         },
         task: { updateMany: vi.fn().mockResolvedValue({ count: 1 }) },
-        thread: { update: vi.fn().mockResolvedValue({ nextEventSeq: 11 }) },
+        thread: { update: vi.fn().mockResolvedValue({ nextMessageSeq: 3, nextEventSeq: 11 }) },
         event: {
           create: vi.fn(async ({ data }: { data: { seq: number; type: string } }) => ({
             ...event(data.seq),
@@ -1271,7 +1956,18 @@ describe("answerRunInput", () => {
 
       expect(tx.task.updateMany).toHaveBeenCalledWith({
         where: { runs: { some: { id: "run-1" } } },
-        data: { prompt: `Selected choice choice-1: use ${secret}` },
+        data: {
+          prompt: `Which token?\nAnswer: Selected choice choice-1: use ${secret}`,
+        },
+      });
+      expect(tx.message.create).toHaveBeenCalledWith({
+        data: expect.objectContaining({
+          role: "user",
+          botId: undefined,
+          runId: "run-1",
+          clientNonce,
+          blocks: [{ kind: "text", text: "use [redacted]" }],
+        }),
       });
       expect(tx.message.update).toHaveBeenCalledWith({
         where: { id: "message-1" },
@@ -1303,6 +1999,7 @@ describe("answerRunInput", () => {
     const tx = {
       $queryRaw: vi.fn().mockResolvedValue([{ id: "thread-1" }]),
       message: {
+        create: vi.fn().mockResolvedValue({ id: "human-answer" }),
         findFirst: vi.fn().mockResolvedValue({
           id: "message-1",
           blocks: [
@@ -1329,7 +2026,7 @@ describe("answerRunInput", () => {
         }),
       },
       task: { updateMany: vi.fn().mockResolvedValue({ count: 1 }) },
-      thread: { update: vi.fn().mockResolvedValue({ nextEventSeq: 12 }) },
+      thread: { update: vi.fn().mockResolvedValue({ nextEventSeq: 12, nextMessageSeq: 3 }) },
       event: {
         create: vi.fn(async ({ data }: { data: { seq: number; type: string } }) => ({
           ...event(data.seq),
@@ -1364,7 +2061,9 @@ describe("answerRunInput", () => {
     );
     expect(tx.task.updateMany).toHaveBeenCalledWith({
       where: { runs: { some: { id: "run-1" } } },
-      data: { prompt: "Toronto" },
+      data: {
+        prompt: "Which city?\nAnswer: Toronto",
+      },
     });
     expect(tx.message.update).toHaveBeenCalledWith({
       where: { id: "message-1" },
@@ -1390,6 +2089,7 @@ describe("answerRunInput", () => {
     const tx = {
       $queryRaw: vi.fn().mockResolvedValue([{ id: "thread-1" }]),
       message: {
+        create: vi.fn().mockResolvedValue({ id: "human-answer" }),
         findFirst: vi.fn().mockResolvedValue({
           id: "message-1",
           blocks: [
@@ -1416,7 +2116,7 @@ describe("answerRunInput", () => {
         }),
       },
       task: { updateMany: vi.fn().mockResolvedValue({ count: 1 }) },
-      thread: { update: vi.fn().mockResolvedValue({ nextEventSeq: 13 }) },
+      thread: { update: vi.fn().mockResolvedValue({ nextEventSeq: 13, nextMessageSeq: 3 }) },
       event: {
         create: vi.fn(async ({ data }: { data: { seq: number; type: string } }) => ({
           ...event(data.seq),
@@ -1446,7 +2146,9 @@ describe("answerRunInput", () => {
 
     expect(tx.task.updateMany).toHaveBeenCalledWith({
       where: { runs: { some: { id: "run-1" } } },
-      data: { prompt: "Selected choice choice-2: Seoul" },
+      data: {
+        prompt: "Which city?\nAnswer: Selected choice choice-2: Seoul",
+      },
     });
     expect(tx.message.update).toHaveBeenCalledWith({
       where: { id: "message-1" },
@@ -1473,6 +2175,7 @@ describe("answerWaitingRunWithTextInTransaction", () => {
     const tx = {
       $queryRaw: vi.fn().mockResolvedValue([{ id: "thread-1" }]),
       message: {
+        create: vi.fn().mockResolvedValue({ id: "human-answer" }),
         findMany: vi.fn().mockResolvedValue([
           {
             id: "message-1",
@@ -1491,7 +2194,7 @@ describe("answerWaitingRunWithTextInTransaction", () => {
         findUnique: vi.fn().mockResolvedValue({ status: "queued" }),
       },
       task: { updateMany: vi.fn().mockResolvedValue({ count: 1 }) },
-      thread: { update: vi.fn().mockResolvedValue({ nextEventSeq: 4 }) },
+      thread: { update: vi.fn().mockResolvedValue({ nextEventSeq: 4, nextMessageSeq: 3 }) },
       event: {
         create: vi.fn(async ({ data }: { data: { seq: number; type: string } }) => ({
           ...event(data.seq),
@@ -1511,7 +2214,9 @@ describe("answerWaitingRunWithTextInTransaction", () => {
     ).resolves.toMatchObject({ threadId: "thread-1" });
     expect(tx.task.updateMany).toHaveBeenCalledWith({
       where: { runs: { some: { id: "run-1" } } },
-      data: { prompt: "Paris" },
+      data: {
+        prompt: "Which city?\nAnswer: Paris",
+      },
     });
     expect(tx.run.updateMany).toHaveBeenCalledWith(
       expect.objectContaining({
@@ -1588,7 +2293,11 @@ describe("answerRunInput", () => {
       },
       task: { updateMany: vi.fn() },
       externalEffect: {
-        findFirst: vi.fn().mockResolvedValue({ id: "effect-1", status: "intended" }),
+        findFirst: vi.fn().mockResolvedValue({
+          id: "effect-1",
+          status: "intended",
+          request: persistedApprovalRequest,
+        }),
         update: vi.fn().mockResolvedValue({ id: "effect-1" }),
       },
       thread: { update: vi.fn().mockResolvedValue({ nextEventSeq: 10 }) },
@@ -1631,6 +2340,9 @@ describe("answerRunInput", () => {
       where: { id: "effect-1" },
       data: { status: "approved" },
     });
+    expect(tx.event.create.mock.calls.map(([input]) => input.data.type)).not.toContain(
+      "thread.choice",
+    );
   });
 
   it("approves and upserts always-allow without overwriting the task prompt", async () => {
@@ -1663,9 +2375,12 @@ describe("answerRunInput", () => {
       },
       task: { updateMany: vi.fn() },
       externalEffect: {
-        findFirst: vi
-          .fn()
-          .mockResolvedValue({ id: "effect-1", status: "intended", kind: "destination.write" }),
+        findFirst: vi.fn().mockResolvedValue({
+          id: "effect-1",
+          status: "intended",
+          kind: "destination.write",
+          request: persistedApprovalRequest,
+        }),
         update: vi.fn().mockResolvedValue({ id: "effect-1" }),
       },
       actionApprovalRule: {
@@ -1751,9 +2466,12 @@ describe("answerRunInput", () => {
         updateMany: vi.fn(),
       },
       externalEffect: {
-        findFirst: vi
-          .fn()
-          .mockResolvedValue({ id: "effect-1", status: "intended", kind: "destination.write" }),
+        findFirst: vi.fn().mockResolvedValue({
+          id: "effect-1",
+          status: "intended",
+          kind: "destination.write",
+          request: persistedApprovalRequest,
+        }),
       },
       actionApprovalRule: { upsert: vi.fn() },
     };
@@ -1965,6 +2683,9 @@ describe("answerRunInput", () => {
     );
     expect(tx.task.updateMany).not.toHaveBeenCalled();
     expect(JSON.stringify(tx.event.create.mock.calls)).not.toContain("123456");
+    expect(tx.event.create.mock.calls.map(([input]) => input.data.type)).not.toContain(
+      "thread.choice",
+    );
     expect(tx.externalEffect.updateMany).toHaveBeenCalledWith({
       where: {
         runId: "run-1",

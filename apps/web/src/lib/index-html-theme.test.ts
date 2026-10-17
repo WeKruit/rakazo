@@ -16,4 +16,10 @@ describe("index.html theme bootstrap", () => {
       `theme === "light" ? "${lightTokens.background.toLowerCase()}" : "${darkTokens.background.toLowerCase()}"`,
     );
   });
+
+  it("shows a loading status before the application module runs", () => {
+    const root = html.match(/<div id="root">([\s\S]*?)<\/div>/)?.[1] ?? "";
+    expect(root).toContain('role="status"');
+    expect(root).toContain("Loading");
+  });
 });

@@ -3,6 +3,101 @@ import { captureScreenshot, completeOnboarding, signup } from "./helpers";
 
 test.describe.configure({ mode: "serial" });
 
+test("recruiting search filters remain separate from qualification and retain their source", async ({
+  page,
+}, testInfo) => {
+  await page.goto("/e2e/fixtures/marketing-shots.html?view=recruiting");
+  await expect(page.getByText("Synthetic recruiting evidence", { exact: true })).toBeVisible();
+  const filters = page.getByRole("region", { name: "Search filters", exact: true });
+  await expect(filters.getByText("Include · Bay Area", { exact: true })).toBeVisible();
+  await expect(filters.getByText("Exclude · Staffing agencies", { exact: true })).toBeVisible();
+  await expect(filters.getByText("Prefer · Small teams", { exact: true })).toBeVisible();
+  await expect(page.getByText("Hard criteria", { exact: true })).toBeVisible();
+  await filters.getByText("Sources", { exact: true }).first().click();
+  await filters.getByText("brief.search", { exact: true }).first().click();
+  await expect(filters.locator("mark").first()).toHaveText(
+    "Include Bay Area. Exclude staffing agencies. Prefer small teams.",
+  );
+  await captureScreenshot(page, testInfo, "recruiting-search-filters-sourced");
+  await filters.getByRole("button", { name: "Edit search filters", exact: true }).click();
+  await filters
+    .getByRole("textbox", { name: "Search filter", exact: true })
+    .first()
+    .fill("United States");
+  await filters
+    .getByRole("combobox", { name: "Search filter mode", exact: true })
+    .first()
+    .selectOption("prefer");
+  await captureScreenshot(page, testInfo, "recruiting-search-filters-edit");
+  await page.getByRole("button", { name: "Cancel", exact: true }).click();
+  await expect(filters.getByText("Include · Bay Area", { exact: true })).toBeVisible();
+});
+
+test("a recruiting reply draft shows its exact scope and one-time approval", async ({
+  page,
+}, testInfo) => {
+  await page.goto("/e2e/fixtures/marketing-shots.html?view=recruiting-reply");
+  await expect(page.getByText("Synthetic recruiting draft", { exact: true })).toBeVisible();
+  await expect(page.getByRole("button", { name: "Allow once", exact: true })).toBeVisible();
+  await expect(page.getByRole("button", { name: "Deny", exact: true })).toBeVisible();
+  await expect(page.getByRole("button", { name: "Always allow this tool" })).toHaveCount(0);
+  await expect(page.getByText("Approve this draft content only.", { exact: false })).toBeVisible();
+  await expect(page.getByText("checksRemaining:", { exact: false })).toBeVisible();
+  await captureScreenshot(page, testInfo, "recruiting-reply-draft");
+});
+
+test("recruiting dashboard includes unassessed saved candidates and their source rounds", async ({
+  page,
+}, testInfo) => {
+  await page.goto("/e2e/fixtures/marketing-shots.html?view=recruiting");
+  await page.getByRole("tab", { name: "Dashboard", exact: true }).click();
+  await expect(page.getByRole("heading", { name: "Research history", exact: true })).toBeVisible();
+  const totals = page.getByLabel("Saved candidate totals", { exact: true });
+  await expect(
+    totals.getByText("Saved source rows", { exact: true }).locator("..").locator("dd"),
+  ).toHaveText("4");
+  await expect(
+    totals.getByText("Candidates", { exact: true }).locator("..").locator("dd"),
+  ).toHaveText("3");
+  await expect(
+    totals.getByText("Unassessed", { exact: true }).locator("..").locator("dd"),
+  ).toHaveText("2");
+  await captureScreenshot(page, testInfo, "recruiting-candidate-dashboard");
+  await page.getByRole("tab", { name: "Evidence", exact: true }).click();
+  await page.getByRole("button", { name: "Table", exact: true }).click();
+  await expect(page.getByRole("columnheader", { name: "CRM", exact: true })).toBeVisible();
+  await expect(page.getByRole("cell", { name: "Synced", exact: true })).toBeVisible();
+  await expect(page.getByRole("cell", { name: "Outcome unknown", exact: true })).toBeVisible();
+  await page.getByRole("button", { name: "Load more", exact: true }).click();
+  await expect(page.getByRole("cell", { name: "No CRM receipt", exact: true })).toBeVisible();
+  await captureScreenshot(page, testInfo, "recruiting-candidate-crm-status");
+  await page.getByRole("button", { name: "Cards", exact: true }).click();
+  await page
+    .getByRole("combobox", { name: "Assessment state", exact: true })
+    .selectOption("unassessed");
+  await expect(page.getByRole("button", { name: /^Synthetic unassessed/ })).toBeVisible();
+  await expect(page.getByRole("button", { name: /^Synthetic candidate/ })).toHaveCount(0);
+  await page.getByRole("button", { name: /^Synthetic unassessed/ }).click();
+  await expect(page.getByLabel("Saved candidate sources", { exact: true })).toContainText(
+    "provider_report",
+  );
+  await captureScreenshot(page, testInfo, "recruiting-unassessed-candidate-source");
+});
+
+test("recruiting evidence opens retained text at the exact saved selection", async ({
+  page,
+}, testInfo) => {
+  await page.goto("/e2e/fixtures/marketing-shots.html?view=recruiting");
+  await page.getByRole("tab", { name: "Evidence", exact: true }).click();
+  await page.getByRole("button", { name: /^Synthetic candidate/ }).click();
+  await page.getByText("profile.summary", { exact: true }).first().click();
+  const original = page.getByLabel("Source text", { exact: true }).first();
+  await expect(original).toContainText("Candidate note");
+  await expect(original.locator("mark")).toHaveText("Designed coordinate transforms 🧭 in Python.");
+  await expect(original).toContainText("Employment type and dates are not provided.");
+  await captureScreenshot(page, testInfo, "recruiting-original-source-selection");
+});
+
 test("agent-attached files appear as downloadable cards", async ({ page }, testInfo) => {
   const stamp = Date.now();
   await signup(page, `artifact-card-${stamp}@rakazo.test`, "password12", "Artifact Card");

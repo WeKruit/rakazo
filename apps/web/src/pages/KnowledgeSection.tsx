@@ -89,6 +89,7 @@ function MemoryDocumentList({
   const [docs, setDocs] = useState<MemoryDocument[]>([]);
   const [openId, setOpenId] = useState<string | null>(null);
   const [draft, setDraft] = useState("");
+  const [loadedRevision, setLoadedRevision] = useState(0);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const generation = useRef(0);
@@ -118,6 +119,7 @@ function MemoryDocumentList({
   function openDoc(doc: MemoryDocument) {
     setOpenId(doc.id);
     setDraft(doc.content);
+    setLoadedRevision(doc.revision);
     setError(null);
   }
 
@@ -126,11 +128,24 @@ function MemoryDocumentList({
     setBusy(true);
     setError(null);
     try {
-      const updated = await rpc.memory.update({ documentId: doc.id, content: draft });
+      const updated = await rpc.memory.update({
+        documentId: doc.id,
+        content: draft,
+        expectedRevision: loadedRevision,
+      });
       setDocs((current) => current.map((entry) => (entry.id === updated.id ? updated : entry)));
       setOpenId(null);
-    } catch {
-      setError(t`Could not save`);
+    } catch (error) {
+      const conflict =
+        error !== null && typeof error === "object" && "code" in error && error.code === "CONFLICT";
+      setError(
+        conflict ? t`Memory changed. Close and reopen it before saving again.` : t`Could not save`,
+      );
+      if (conflict) {
+        // Keep the prepared draft and its revision until the user explicitly reopens.
+        const fresh = await loadRef.current().catch(() => null);
+        if (fresh) setDocs(fresh);
+      }
     } finally {
       setBusy(false);
     }

@@ -4,7 +4,7 @@ import { ChatMarkdown } from "@rakazo/chat-ui/web";
 import type { ThreadMessage } from "@rakazo/contracts";
 import { commandVariableName } from "@rakazo/contracts";
 import { isApprovalAskBlock, isSecretAskBlock, selectedAskActionLabel } from "@rakazo/core";
-import { Button, Input } from "@rakazo/ui-web";
+import { Button, Input, Textarea } from "@rakazo/ui-web";
 import { useState } from "react";
 import { errorText } from "../lib/user-error";
 
@@ -57,7 +57,6 @@ export function AskCard({
   onAnswer: (text: string, username?: string) => Promise<void>;
 }) {
   const { t } = useLingui();
-  const [editing, setEditing] = useState(false);
   const [answer, setAnswer] = useState("");
   const [username, setUsername] = useState("");
   const [pendingAction, setPendingAction] = useState<string | null>(null);
@@ -74,7 +73,7 @@ export function AskCard({
     if (secretInput ? value.length === 0 : !value.trim()) return;
     const submitUsername = loginInput ? username.trim() : undefined;
     if (loginInput && !submitUsername) return;
-    const submitValue = secretInput ? value : value.trim();
+    const submitValue = value;
     setPendingAction(secretInput ? "submit" : submitValue);
     setError(null);
     if (secretInput) {
@@ -96,11 +95,12 @@ export function AskCard({
   }
 
   return (
-    <div
+    <fieldset
       data-testid={secretInput ? "secret-ask-card" : undefined}
-      className="max-w-[74%] rounded-2xl border border-border bg-card px-5 py-4"
+      aria-label={block.text}
+      className="min-w-0 w-full max-w-2xl rounded-2xl border border-border bg-card px-5 py-4"
     >
-      <div className="text-[15.5px] leading-[1.5] text-foreground">
+      <div className="text-base leading-relaxed text-foreground">
         <ChatMarkdown>{block.text}</ChatMarkdown>
       </div>
       {secretInput && block.credential ? (
@@ -114,12 +114,12 @@ export function AskCard({
         </div>
       ) : null}
       {block.detail && !secretInput ? (
-        <pre className="mt-3 max-h-72 overflow-auto whitespace-pre-wrap break-words rounded-xl bg-muted px-3.5 py-3 font-mono text-[12.5px] leading-[1.7] text-muted-foreground">
+        <pre className="mt-3 max-h-72 overflow-auto whitespace-pre-wrap break-words rounded-xl bg-muted px-3.5 py-3 font-sans text-sm leading-relaxed text-foreground">
           {block.detail}
         </pre>
       ) : null}
       {block.status === "answered" ? (
-        <div className="mt-3.5 text-[13.5px] font-medium text-success">
+        <div className="mt-3.5 whitespace-pre-wrap text-[13.5px] font-medium text-success">
           {formatAnsweredState(
             block.answer,
             Boolean(approvalActions),
@@ -189,7 +189,8 @@ export function AskCard({
             {submitting ? <Trans>Saving…</Trans> : <Trans>Save</Trans>}
           </Button>
         </form>
-      ) : editing ? (
+      ) : null}
+      {block.status !== "answered" && canAnswer && !secretInput && !approvalActions ? (
         <form
           className="mt-3.5 flex flex-col gap-2"
           onSubmit={(event) => {
@@ -197,39 +198,19 @@ export function AskCard({
             void submitAnswer(answer);
           }}
         >
-          <Input
+          <Textarea
             aria-label={t`Answer`}
             value={answer}
+            disabled={submitting}
             onChange={(event) => setAnswer(event.target.value)}
             placeholder={t`Type your answer`}
           />
-          <div className="flex gap-2">
-            <Button type="submit" disabled={!answer.trim() || submitting}>
-              {submitting ? <Trans>Sending…</Trans> : <Trans>Send answer</Trans>}
-            </Button>
-            <Button
-              variant="outline"
-              disabled={submitting}
-              onClick={() => {
-                setAnswer("");
-                setEditing(false);
-              }}
-            >
-              <Trans>Cancel</Trans>
-            </Button>
-          </div>
+          <Button type="submit" className="self-start" disabled={!answer.trim() || submitting}>
+            {submitting ? <Trans>Sending…</Trans> : <Trans>Send answer</Trans>}
+          </Button>
         </form>
-      ) : (
-        <div className="mt-3.5 flex gap-2">
-          <Button disabled={submitting} onClick={() => void submitAnswer("approved")}>
-            {submitting ? <Trans>Sending…</Trans> : <Trans>Send it</Trans>}
-          </Button>
-          <Button variant="outline" disabled={submitting} onClick={() => setEditing(true)}>
-            <Trans>Edit first</Trans>
-          </Button>
-        </div>
-      )}
+      ) : null}
       {error ? <p className="mt-3 text-[13px] text-destructive">{error}</p> : null}
-    </div>
+    </fieldset>
   );
 }

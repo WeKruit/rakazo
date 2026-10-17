@@ -1,12 +1,11 @@
 import type { ConnectorTool } from "@rakazo/adapter-kit";
+import { boundDirectApprovalRequest, catalogApprovalRequest } from "@rakazo/core";
 import { approvalEffectKey } from "@rakazo/core/node/approval-effect-key";
 import { describe, expect, it } from "vitest";
 import {
   approvalReplayResourceError,
   approvedCatalogReplay,
   approvedReplayArgs,
-  boundDirectApprovalRequest,
-  catalogApprovalRequest,
   createApprovedEffectReplayQueue,
 } from "./approval-effect.js";
 import {

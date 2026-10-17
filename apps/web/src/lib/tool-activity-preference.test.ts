@@ -5,6 +5,7 @@ import {
   persistToolActivityPreference,
   resolveToolActivityPreference,
   TOOL_ACTIVITY_STORAGE_KEY,
+  toolActivityEnabled,
 } from "./tool-activity-preference";
 
 describe("tool activity preference", () => {
@@ -57,5 +58,12 @@ describe("tool activity preference", () => {
 
   it("stays disabled until a saved choice turns it on", () => {
     expect(getToolActivityEnabled()).toBe(false);
+  });
+
+  it("shows diagnostics only for a deployment owner who opts in", () => {
+    expect(toolActivityEnabled("on", false)).toBe(false);
+    expect(toolActivityEnabled("on")).toBe(false);
+    expect(toolActivityEnabled("off", true)).toBe(false);
+    expect(toolActivityEnabled("on", true)).toBe(true);
   });
 });

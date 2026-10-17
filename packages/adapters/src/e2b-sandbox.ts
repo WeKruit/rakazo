@@ -1,4 +1,5 @@
-import { type CommandResult, Sandbox, TimeoutError } from "@e2b/desktop";
+import type { CommandResult } from "@e2b/desktop";
+import { CommandExitError, Sandbox, TimeoutError } from "@e2b/desktop";
 import type {
   AdapterContext,
   CommandRequest,
@@ -203,16 +204,14 @@ export class E2BSandboxProvider implements SandboxProvider {
     const desktop = await this.box(computer);
     const cmd = sandboxCommandArgv(request).map(shellQuote).join(" ");
     const timeoutMs = boundedSandboxCommandTimeoutMs(request.timeoutMs);
+    let result: CommandResult;
     try {
-      const result = await desktop.commands.run(cmd, {
+      result = await desktop.commands.run(cmd, {
         cwd: e2bCwd(request.cwd),
         envs: request.env,
         signal: context.signal,
         timeoutMs,
       });
-      if (result.stdout) yield { type: "stdout", data: result.stdout };
-      if (result.stderr) yield { type: "stderr", data: result.stderr };
-      yield { type: "exit", code: result.exitCode ?? 0 };
     } catch (error) {
       if (error instanceof TimeoutError) {
         yield {
@@ -222,8 +221,12 @@ export class E2BSandboxProvider implements SandboxProvider {
         yield { type: "exit", code: 124 };
         return;
       }
-      throw error;
+      if (!(error instanceof CommandExitError)) throw error;
+      result = error;
     }
+    if (result.stdout) yield { type: "stdout", data: result.stdout };
+    if (result.stderr) yield { type: "stderr", data: result.stderr };
+    yield { type: "exit", code: result.exitCode ?? 0 };
   }
 
   async connectScreen(

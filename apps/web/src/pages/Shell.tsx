@@ -35,6 +35,7 @@ import {
 } from "@rakazo/contracts";
 import type { ComposerMention, SlashActionId } from "@rakazo/core";
 import {
+  answerableAskMessageIds,
   attachmentsForThread,
   buildComposerMentionOptions,
   clampMentionHighlightIndex,
@@ -46,7 +47,6 @@ import {
   isPeerReceiptBlocks,
   isRunTerminalEvent,
   isToolActivityBlock,
-  latestAnswerableAskMessageId,
   mentionChipKey,
   nestRosterByParent,
   plainTextFromMarkdown,
@@ -89,6 +89,7 @@ import {
   ArrowUp,
   Bell,
   Box,
+  BriefcaseBusiness,
   ChevronDown,
   CircleAlert,
   Clock,
@@ -138,6 +139,7 @@ import { useNavigate, useParams, useSearchParams } from "react-router-dom";
 import { ArtifactFileCard } from "../components/ArtifactFileCard";
 import { AskCard } from "../components/AskCard";
 import { ActiveBotGlyph, CollaborationMarker } from "../components/ai/CollaborationMarker";
+import { Shimmer } from "../components/ai/primitives";
 import { CloudAgentCard } from "../components/CloudAgentCard";
 import { ComputerMaintenanceActions } from "../components/ComputerMaintenanceActions";
 import {
@@ -263,6 +265,7 @@ import { ActivityList } from "./ActivityList";
 import type { ContextMenuPosition } from "./BotContextMenu";
 import { CreateGroupForm, GroupSettings, memberName } from "./GroupPanel";
 import { HostComputerPrompt } from "./HostComputerPrompt";
+import { RecruitingPanel } from "./RecruitingPanel";
 import { ResizableSidePanel } from "./ResizableSidePanel";
 import type { RoutineDraftState } from "./RoutineEditor";
 import {
@@ -335,7 +338,8 @@ type PendingBrowserNotification = {
 const ATTACHMENT_ACCEPT = [...ATTACHMENT_ALLOWED_MIME_TYPES, ".zip"].join(",");
 /** Identity colour for bots the roster no longer knows about. */
 const FALLBACK_BOT_COLOR = "#85858A";
-const THREAD_SNAPSHOT_TIMEOUT_MS = 2_000;
+// Allow the API's 15s transaction and 5s pool wait when Postgres is remote.
+const THREAD_SNAPSHOT_TIMEOUT_MS = 30_000;
 /** Bound Settings leave so a hung voice status refresh cannot block dismissal. */
 const VOICE_STATUS_REFRESH_TIMEOUT_MS = 10_000;
 const MOBILE_SIDEBAR_SWIPE_EDGE_PX = 32;
@@ -454,11 +458,6 @@ export function ShellPage() {
   );
   const streamResponsesRef = useRef(streamResponses);
   streamResponsesRef.current = streamResponses;
-  const showToolActivity = useSyncExternalStore(
-    subscribeToolActivity,
-    getToolActivityEnabled,
-    () => true,
-  );
   const botsSidebarDensity = useSyncExternalStore(
     subscribeBotsSidebarDensity,
     getBotsSidebarDensity,
@@ -478,6 +477,7 @@ export function ShellPage() {
   const [attachmentNotice, setAttachmentNotice] = useState<string | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const [panel, setPanelState] = useState<Panel>(null);
+  const [recruitingRefresh, setRecruitingRefresh] = useState(0);
   const [restoredPanelKey, setRestoredPanelKey] = useState<string | null>(null);
   const panelStorageKeyRef = useRef<string | null>(null);
   const observedPanelKey = useRef<string | null>(null);
@@ -522,6 +522,9 @@ export function ShellPage() {
   const computerRef = useRef<ComputerStatus | null>(null);
   const threadRefreshEpoch = useRef(0);
   const groupRefreshEpoch = useRef(0);
+  // ponytail: keep at most 20 threads in this authenticated shell; switching
+  // account/space reloads it. Native refresh/SSE remains authoritative.
+  const threadSnapshotCache = useRef(new Map<string, ThreadSnapshot>());
   const botsRefreshEpoch = useRef(0);
   const botsRefreshApplied = useRef(0);
   const archivedBotsRefreshEpoch = useRef(0);
@@ -556,6 +559,13 @@ export function ShellPage() {
   }
 
   function commitSnapshot(next: ThreadSnapshot | null) {
+    if (next) {
+      const key = next.groupId ? `group:${next.groupId}` : `bot:${next.botId}`;
+      const cache = threadSnapshotCache.current;
+      cache.delete(key);
+      cache.set(key, next);
+      if (cache.size > 20) cache.delete(cache.keys().next().value!);
+    }
     snapshotRef.current = next;
     setSnapshot(withLiveStreamingProgress(next, streamResponsesRef.current));
   }
@@ -676,6 +686,11 @@ export function ShellPage() {
   const [loadingOlder, setLoadingOlder] = useState(false);
   const [initialBotsLoaded, setInitialBotsLoaded] = useState(false);
   const [bootstrapMe, setBootstrapMe] = useState<Me | null>();
+  const showToolActivity = useSyncExternalStore(
+    subscribeToolActivity,
+    () => getToolActivityEnabled(bootstrapMe?.isDeploymentOwner === true),
+    () => false,
+  );
   const [keepComputerRecovery, setKeepComputerRecovery] = useState(false);
   const recoveryHoldTimer = useRef<number | undefined>(undefined);
   const showComputerRecoveryHint =
@@ -835,6 +850,28 @@ export function ShellPage() {
   activeBotId.current = inGroup ? undefined : active?.id;
   const activeGroupId = useRef<string | undefined>(groupId);
   activeGroupId.current = groupId;
+  const invalidateRecruiting = useCallback(
+    (event: ProductEvent) => {
+      const current = snapshotRef.current;
+      if (
+        event.spaceId !== bootstrapMe?.spaceId ||
+        event.threadId !== current?.threadId ||
+        (activeGroupId.current
+          ? current?.groupId !== activeGroupId.current
+          : current?.botId !== activeBotId.current)
+      )
+        return;
+      if (
+        event.type.startsWith("recruiting.") ||
+        event.type === "memory.revised" ||
+        event.type === "agent.tool.completed" ||
+        event.type === "thread.cleared" ||
+        isRunTerminalEvent(event)
+      )
+        setRecruitingRefresh((value) => value + 1);
+    },
+    [bootstrapMe?.spaceId],
+  );
   const screenRequest = useRef(0);
   const contextBot =
     botMenu?.kind === "bot" ? bots.find((bot) => bot.id === botMenu.id) : undefined;
@@ -1397,6 +1434,7 @@ export function ShellPage() {
       applyEvent: (event) =>
         applyThreadEvent(event, commitSnapshot, commitComputer, snapshotRef, computerRef),
       onEvent: (event, initial) => {
+        invalidateRecruiting(event);
         const currentBot = botsRef.current.find((bot) => bot.id === active.id);
         notifyBrowserForEvent(
           event,
@@ -1446,7 +1484,7 @@ export function ShellPage() {
     return () => {
       abort.abort();
     };
-  }, [active?.id, markBotReadIfVisible, notifyBrowserForEvent]);
+  }, [active?.id, markBotReadIfVisible, notifyBrowserForEvent, invalidateRecruiting]);
 
   useEffect(() => {
     if (!groupId || !activeGroup) return;
@@ -1507,6 +1545,7 @@ export function ShellPage() {
           computerRef,
         ),
       onEvent: (event, initial) => {
+        invalidateRecruiting(event);
         const eventBot = botsRef.current.find((bot) => bot.id === event.botId);
         notifyBrowserForEvent(
           event,
@@ -1539,7 +1578,7 @@ export function ShellPage() {
       document.removeEventListener("visibilitychange", markVisibleGroupRead);
       abort.abort();
     };
-  }, [activeGroup?.id, groupId, notifyBrowserForEvent]);
+  }, [activeGroup?.id, groupId, notifyBrowserForEvent, invalidateRecruiting]);
 
   const sidebarGroups = useMemo(() => {
     const sidebarSpaces =
@@ -1793,13 +1832,16 @@ export function ShellPage() {
       });
     }
   }, [active?.id, groupId, inGroup, routines, routinesBotId, searchParams, setSearchParams]);
-  const activeSnapshot = inGroup
-    ? snapshot?.groupId === groupId
-      ? snapshot
-      : null
-    : snapshot?.botId === active?.id
-      ? snapshot
-      : null;
+  const activeSnapshot =
+    (inGroup
+      ? snapshot?.groupId === groupId
+        ? snapshot
+        : null
+      : snapshot?.botId === active?.id
+        ? snapshot
+        : null) ??
+    threadSnapshotCache.current.get(inGroup ? `group:${groupId}` : `bot:${active?.id}`) ??
+    null;
   // Keep the armed reply even when its parent leaves the loaded page: the
   // server resolves a paged-out target and degrades a deleted one to a plain
   // reply instead of failing the send.
@@ -1810,7 +1852,7 @@ export function ShellPage() {
     setReplyQuote(null);
   }, []);
   const currentRuns = activeThreadRuns(activeSnapshot);
-  const answerableAskMessageId = latestAnswerableAskMessageId(activeSnapshot);
+  const answerableAskIds = answerableAskMessageIds(activeSnapshot);
   const workingRuns = currentRuns.filter((run) =>
     ["running", "queued", "leased"].includes(run.status),
   );
@@ -1980,21 +2022,28 @@ export function ShellPage() {
   useLayoutEffect(() => {
     const pin = pinnedAroundRef.current;
     if (inGroup) {
-      if (!groupId || !snapshot || snapshot.groupId !== groupId) return;
-      if (initiallyScrolledThread.current === snapshot.threadId) return;
-      if (expandedHistoryThread.current === snapshot.threadId) return;
+      if (!groupId || !activeSnapshot || activeSnapshot.groupId !== groupId) return;
+      if (initiallyScrolledThread.current === activeSnapshot.threadId) return;
+      if (expandedHistoryThread.current === activeSnapshot.threadId) return;
       if (pin?.groupId === groupId) return;
     } else {
-      if (!active || !snapshot || snapshot.botId !== active.id) return;
-      if (initiallyScrolledThread.current === snapshot.threadId) return;
-      if (expandedHistoryThread.current === snapshot.threadId) return;
+      if (!active || !activeSnapshot || activeSnapshot.botId !== active.id) return;
+      if (initiallyScrolledThread.current === activeSnapshot.threadId) return;
+      if (expandedHistoryThread.current === activeSnapshot.threadId) return;
       if (pin?.botId === active.id) return;
     }
     const element = messageScroll.current;
     if (!element) return;
     element.scrollTop = element.scrollHeight;
-    initiallyScrolledThread.current = snapshot.threadId;
-  }, [active, groupId, inGroup, snapshot?.botId, snapshot?.groupId, snapshot?.threadId]);
+    initiallyScrolledThread.current = activeSnapshot.threadId;
+  }, [
+    active,
+    groupId,
+    inGroup,
+    activeSnapshot?.botId,
+    activeSnapshot?.groupId,
+    activeSnapshot?.threadId,
+  ]);
 
   const openBot = useCallback((id: string) => navigate(`/app/${id}`), [navigate]);
   const loadOlder = useCallback(() => loadOlderMessagesRef.current(), []);
@@ -3643,6 +3692,24 @@ export function ShellPage() {
             </button>
           </div>
           <div className="flex items-center gap-1">
+            {activeSnapshot?.threadId ? (
+              <button
+                type="button"
+                aria-label={t`Recruiting`}
+                title={t`Recruiting`}
+                onClick={() => setPanel(panel === "recruiting" ? null : "recruiting")}
+                aria-pressed={panel === "recruiting"}
+                data-active={panel === "recruiting" ? "" : undefined}
+                className="app-no-drag grid h-[30px] w-[34px] place-items-center rounded-[9px] hover:bg-accent data-active:bg-accent"
+              >
+                <BriefcaseBusiness
+                  size={18}
+                  strokeWidth={1.6}
+                  className="text-foreground/75"
+                  aria-hidden
+                />
+              </button>
+            ) : null}
             {!inGroup && active ? (
               <button
                 type="button"
@@ -3670,6 +3737,12 @@ export function ShellPage() {
               <Trans>Create new Bot</Trans>
             </Button>
           </div>
+        ) : !activeSnapshot ? (
+          <div role="status" className="grid flex-1 place-items-center text-muted-foreground">
+            <Shimmer>
+              <Trans>Loading…</Trans>
+            </Shimmer>
+          </div>
         ) : (
           <Transcript
             key={activeSnapshot?.threadId}
@@ -3681,7 +3754,7 @@ export function ShellPage() {
             showToolActivity={showToolActivity}
             olderCursor={activeSnapshot?.olderCursor ?? null}
             loadingOlder={loadingOlder}
-            answerableAskMessageId={answerableAskMessageId}
+            answerableAskMessageIds={answerableAskIds}
             running={transcriptRunning}
             workingBots={workingBots}
             onLoadOlder={loadOlder}
@@ -3790,7 +3863,8 @@ export function ShellPage() {
             {panel !== "routine" &&
             panel !== "create" &&
             panel !== "create-group" &&
-            panel !== "group-settings" ? (
+            panel !== "group-settings" &&
+            panel !== "recruiting" ? (
               <div className="mb-4 flex items-center justify-between">
                 <span className="text-[13.5px] text-muted-foreground">
                   {panel === "settings" ? (
@@ -3934,6 +4008,22 @@ export function ShellPage() {
                   );
                 })}
               </div>
+            ) : null}
+            {panel === "recruiting" && activeSnapshot?.threadId ? (
+              <RecruitingPanel
+                key={`${bootstrapMe?.spaceId}:${activeSnapshot.threadId}`}
+                threadId={activeSnapshot.threadId}
+                botId={inGroup ? undefined : active?.id}
+                refreshSignal={recruitingRefresh}
+                showDiagnostics={showToolActivity}
+                onClose={() => setPanel(null)}
+                onRevealMessage={(target) => {
+                  navigate({
+                    pathname: target.groupId ? `/app/g/${target.groupId}` : `/app/${target.botId}`,
+                    search: `?${new URLSearchParams({ m: target.messageId })}`,
+                  });
+                }}
+              />
             ) : null}
             {panel === "create-group" ? (
               <CreateGroupForm
@@ -4836,7 +4926,7 @@ const Transcript = memo(function Transcript({
   showToolActivity,
   olderCursor,
   loadingOlder,
-  answerableAskMessageId,
+  answerableAskMessageIds,
   running,
   workingBots,
   onLoadOlder,
@@ -4865,7 +4955,7 @@ const Transcript = memo(function Transcript({
   showToolActivity: boolean;
   olderCursor: number | null;
   loadingOlder: boolean;
-  answerableAskMessageId: string | null;
+  answerableAskMessageIds: string[];
   running: boolean;
   workingBots: GroupAvatarMember[];
   onLoadOlder: () => void | Promise<void>;
@@ -4897,7 +4987,15 @@ const Transcript = memo(function Transcript({
     () => new Map(messages.map((message) => [message.id, message])),
     [messages],
   );
-  const reactionView = useMemo(() => projectMessageReactions(messages), [messages]);
+  // Keep the original waiting cards at hand after later group replies; render each card once.
+  const reactionView = useMemo(
+    () =>
+      projectMessageReactions([
+        ...messages.filter((message) => !answerableAskMessageIds.includes(message.id)),
+        ...messages.filter((message) => answerableAskMessageIds.includes(message.id)),
+      ]),
+    [messages, answerableAskMessageIds],
+  );
   const separatorIds = timeSeparatorIds(
     reactionView.visibleMessages.filter((message) =>
       messageHasVisibleBlocks(message.blocks, showToolActivity),
@@ -5207,7 +5305,7 @@ const Transcript = memo(function Transcript({
                     <MessageView
                       artifactTarget={artifactTarget}
                       message={message}
-                      canAnswer={message.id === answerableAskMessageId}
+                      canAnswer={answerableAskMessageIds.includes(message.id)}
                       onOpenBot={onOpenBot}
                       onOpenPeerMessages={onOpenPeerMessages}
                       onAnswer={onAnswer}
@@ -6241,7 +6339,7 @@ export const Composer = memo(function Composer({
             autoComplete="off"
             dir="auto"
             rows={1}
-            className="rk-scroll max-h-25 min-h-[24px] min-w-[8rem] flex-1 resize-none overflow-y-auto bg-transparent py-0.5 text-[15.5px] leading-6 text-foreground outline-none placeholder:text-muted-foreground disabled:opacity-40"
+            className="rk-scroll max-h-25 min-h-[24px] min-w-[8rem] flex-1 resize-none overflow-y-auto bg-transparent py-0.5 text-base leading-6 text-foreground outline-none placeholder:text-muted-foreground disabled:opacity-40"
           />
         </div>
         <div
@@ -6699,7 +6797,7 @@ const MessageView = memo(function MessageView({
         <div className="flex w-fit max-w-full justify-start [@media(hover:none)]:w-full">
           <div
             data-testid="message-bot-bubble"
-            className="max-w-full space-y-2.5 rounded-[20px] bg-muted px-[18px] py-3 text-[15.5px] leading-[1.5] text-foreground/90"
+            className="max-w-full space-y-2.5 rounded-[20px] bg-muted px-[18px] py-3 text-base leading-relaxed text-foreground"
             dir="auto"
           >
             {visibleNarrationBlocks.map((block, i) => {
@@ -6773,7 +6871,7 @@ const MessageView = memo(function MessageView({
               <span>
                 ↪ {to} ← {from}
               </span>
-              <span>{block.text}</span>
+              {showToolActivity ? <span>{block.text}</span> : null}
             </div>
           );
         }
@@ -6825,7 +6923,7 @@ const MessageView = memo(function MessageView({
             >
               <div
                 data-testid="message-bot-bubble"
-                className="max-w-full rounded-[20px] bg-muted px-[18px] py-3 text-[15.5px] leading-[1.5] text-foreground/90"
+                className="max-w-full rounded-[20px] bg-muted px-[18px] py-3 text-base leading-relaxed text-foreground"
                 dir="auto"
               >
                 <ChatMarkdown streaming>{block.text}</ChatMarkdown>
@@ -6978,7 +7076,7 @@ const MessageView = memo(function MessageView({
               <div
                 data-testid="message-user-bubble"
                 data-quote-message-id={quoteMessageId}
-                className="max-w-full whitespace-pre-wrap wrap-anywhere rounded-[20px] bg-chat-user px-[18px] py-3 text-[15.5px] leading-[1.45] text-chat-user-foreground"
+                className="max-w-full whitespace-pre-wrap wrap-anywhere rounded-[20px] bg-chat-user px-[18px] py-3 text-base leading-relaxed text-chat-user-foreground"
                 dir="auto"
               >
                 <LinkifiedText>{block.text}</LinkifiedText>
@@ -6994,7 +7092,7 @@ const MessageView = memo(function MessageView({
             >
               <div
                 data-testid="message-bot-bubble"
-                className="max-w-full rounded-[20px] bg-muted px-[18px] py-3 text-[15.5px] leading-[1.5] text-foreground/90"
+                className="max-w-full rounded-[20px] bg-muted px-[18px] py-3 text-base leading-relaxed text-foreground"
                 dir="auto"
               >
                 <div data-quote-message-id={quoteMessageId}>

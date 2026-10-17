@@ -100,9 +100,8 @@ export function createBackgroundJobHandlers(deps: {
       );
     },
     "history.compact": async (payload) => {
-      // Retrieval policies use stored context without paid message-count compaction.
-      // Skip legacy backlog work after a policy change.
-      if (deps.executor.contextStrategy && deps.executor.contextStrategy !== "current") return;
+      // New automatic summaries carry a validated origin; do not revive unattributed legacy work.
+      if (!payload.sourceRunId && deps.executor.contextStrategy !== "current") return;
       await compactHistory(
         {
           prisma: deps.prisma,
@@ -114,6 +113,7 @@ export function createBackgroundJobHandlers(deps: {
           ...(deps.executor.resolveModel ? { resolveModel: deps.executor.resolveModel } : {}),
         },
         payload.threadId,
+        payload.sourceRunId,
       );
     },
   };

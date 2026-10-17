@@ -5,6 +5,7 @@ import {
   estimateContextTokens,
   providerContextPrefix,
   selectContext,
+  shortenToolResultText,
 } from "./context-selection.js";
 
 const budget = {
@@ -380,5 +381,87 @@ describe("cache request metadata", () => {
     expect(tracker.record(request)).toEqual({ observedReuse: null });
     expect(tracker.record(request, 0)).toEqual({ observedReuse: false });
     expect(tracker.record(request, 1)).toEqual({ observedReuse: true });
+  });
+});
+
+describe("saved artifact context projection", () => {
+  it("keeps contiguous Unicode text and truthful continuation offsets after shortening", () => {
+    const original = "😀English original material\n".repeat(1000);
+    const page = {
+      artifact: { id: "saved-v1", hash: "a".repeat(64), size: Buffer.byteLength(original) },
+      jsonPath: ["providerResult", "structuredContent", "rows", 0, "evidence", "value"],
+      text: original,
+      offset: 10,
+      endOffset: 10 + Array.from(original).length,
+      totalLength: 10 + Array.from(original).length,
+      offsetUnit: "unicode_code_point",
+      nextOffset: null,
+      hasMore: false,
+    };
+    const projected = JSON.parse(
+      shortenToolResultText(JSON.stringify(page), 1100, {
+        name: "artifact_read",
+        arguments: { artifactId: "saved-v1", offset: 10 },
+      }),
+    );
+    expect(projected.contextTruncated).toBe(true);
+    expect(projected.artifact).toEqual(page.artifact);
+    expect(projected.jsonPath).toEqual(page.jsonPath);
+    expect(projected.text).toBe(
+      Array.from(original).slice(0, Array.from(projected.text).length).join(""),
+    );
+    expect(projected.endOffset).toBe(10 + Array.from(projected.text).length);
+    expect(projected.nextOffset).toBe(projected.endOffset);
+    expect(projected.hasMore).toBe(true);
+    expect(projected.text).not.toContain("Tool result truncated");
+  });
+  it("requests a retry instead of returning a non-advancing empty continuation page", () => {
+    const page = {
+      text: "😀".repeat(128),
+      offset: 42,
+      totalLength: 170,
+      offsetUnit: "unicode_code_point",
+    };
+    const emptyPage = {
+      ...page,
+      text: "",
+      contextTruncated: true,
+      endOffset: 42,
+      nextOffset: 42,
+      hasMore: true,
+    };
+    expect(JSON.stringify(page).length).toBeGreaterThan(JSON.stringify(emptyPage).length);
+    const projected = JSON.parse(
+      shortenToolResultText(JSON.stringify(page), JSON.stringify(emptyPage).length, {
+        name: "artifact_read",
+        arguments: { artifactId: "saved-v1", offset: 42 },
+      }),
+    );
+    expect(projected.needsRetry).toBe(true);
+    expect(projected.retry).toEqual({ artifactId: "saved-v1", offset: 42, limit: 1 });
+    expect(projected).not.toHaveProperty("nextOffset");
+  });
+  it("requests the same original offset when metadata cannot fit", () => {
+    const page = {
+      artifact: { id: "saved-v1", description: "large ".repeat(1000) },
+      text: "😀",
+      offset: 42,
+      totalLength: 43,
+      offsetUnit: "unicode_code_point",
+    };
+    const projected = JSON.parse(
+      shortenToolResultText(JSON.stringify(page), 100, {
+        name: "artifact_read",
+        arguments: { artifactId: "saved-v1", offset: 42, jsonPath: ["evidence"] },
+      }),
+    );
+    expect(projected.needsRetry).toBe(true);
+    expect(projected.retry).toEqual({
+      artifactId: "saved-v1",
+      offset: 42,
+      jsonPath: ["evidence"],
+      limit: 1,
+    });
+    expect(projected).not.toHaveProperty("nextOffset");
   });
 });

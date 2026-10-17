@@ -1,5 +1,10 @@
 import { randomUUID } from "node:crypto";
-import type { AgentMessage, AgentTool, AgentToolResult } from "@earendil-works/pi-agent-core";
+import type {
+  AgentEvent,
+  AgentMessage,
+  AgentTool,
+  AgentToolResult,
+} from "@earendil-works/pi-agent-core";
 import { Agent } from "@earendil-works/pi-agent-core";
 import type {
   Api,
@@ -255,6 +260,7 @@ export class PiAgentRuntime implements AgentRuntime {
           subagentGate: createGate(MAX_PARALLEL_SUBAGENTS),
           toolCallBudget: trackedBudget,
           toolCallSeq: { value: 0 },
+          dispatchedToolCalls: new Set(),
           abortTurn: () => undefined,
           signal,
           depth: 0,
@@ -270,6 +276,7 @@ export class PiAgentRuntime implements AgentRuntime {
           withoutSteeringMessages(request.history, initialSteering),
           request.prompt,
           request.sourceMessageId,
+          model,
         );
         const initialPrompt = initialSteering.length
           ? `${request.prompt}\n\nAdditional user context:\n${initialSteering
@@ -463,6 +470,7 @@ export class PiAgentRuntime implements AgentRuntime {
         // it counts as the final reply, including when the completed message omits it.
         let streamedBeforePendingFinal = 0;
         agent.subscribe(async (event) => {
+          auditUndispatchedToolFailure(event, host, tools);
           if (event.type === "message_end") {
             await piSession?.appendMessage(event.message);
           }
@@ -828,6 +836,35 @@ function toAgentTools(toolDefs: readonly ConnectorTool[], host: ToolHost): Agent
   return ordered.map((tool, index) => toAgentTool(tool, host, names[index]!));
 }
 
+function auditUndispatchedToolFailure(
+  event: AgentEvent,
+  host: ToolHost,
+  tools: readonly AgentTool[],
+) {
+  if (event.type !== "tool_execution_end") return;
+  const dispatched = host.dispatchedToolCalls.delete(event.toolCallId);
+  if (!event.isError || dispatched) return;
+  const tool = tools.find((entry) => entry.name === event.toolName);
+  // Pi's validation error appends full arguments for the model. Audit only its
+  // field diagnostics; argument values must not become durable audit payloads.
+  const diagnostic = (event.result as AgentToolResult<unknown>).content
+    .filter((part) => part.type === "text")
+    .map((part) => part.text)
+    .join("\n")
+    .split("\n\nReceived arguments:", 1)[0]!;
+  const completion: AgentToolCompletion = {
+    name: tool?.label ?? "unknown-tool",
+    executionId: JSON.stringify(["pi-tool", host.agentNamespace ?? "main", event.toolCallId]),
+    durationMs: 0,
+    error: tool ? sanitizeError(diagnostic).slice(0, 2_000) : "Tool not found before execution.",
+  };
+  try {
+    void Promise.resolve(host.request.onToolCompleted?.(completion)).catch(() => undefined);
+  } catch {
+    // Audit hooks are best effort and must never change tool behavior.
+  }
+}
+
 /**
  * Normalize connector names only at the boundary where they are exposed to Pi.
  * Connector execution continues to use the original name captured by toAgentTool.
@@ -937,7 +974,8 @@ function stableToolNameHash(name: string): string {
 function toHistory(
   history: AgentRunRequest["history"],
   prompt: string,
-  sourceMessageId?: string | null,
+  sourceMessageId: string | null | undefined,
+  model: Model<Api>,
 ) {
   let duplicatePromptIndex = -1;
   for (let index = history.length - 1; index >= 0; index -= 1) {
@@ -957,15 +995,37 @@ function toHistory(
   return prior
     .filter((m) => m.role === "user" || m.role === "assistant")
     .map((m) => {
-      const text = m.role === "assistant" ? `Assistant: ${m.content}` : m.content;
-      const images = m.role === "assistant" ? [] : toPiImages(m.images);
-      return {
-        role: "user" as const,
-        content: images.length ? [{ type: "text" as const, text }, ...images] : text,
+      const metadata = {
         timestamp: Date.now(),
         rakazoHistory: true,
         rakazoMessageId: m.id,
         rakazoCreatedAt: m.createdAt,
+      };
+      if (m.role === "assistant")
+        return {
+          ...metadata,
+          role: "assistant" as const,
+          content: [{ type: "text" as const, text: m.content }],
+          api: model.api,
+          provider: model.provider,
+          model: model.id,
+          usage: {
+            input: 0,
+            output: 0,
+            cacheRead: 0,
+            cacheWrite: 0,
+            totalTokens: 0,
+            cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 },
+          },
+          stopReason: "stop" as const,
+        };
+      const images = toPiImages(m.images);
+      return {
+        ...metadata,
+        role: "user" as const,
+        content: images.length
+          ? [{ type: "text" as const, text: m.content }, ...images]
+          : m.content,
       };
     });
 }
@@ -1047,8 +1107,12 @@ function toAgentTool(tool: ConnectorTool, host: ToolHost, exposedName: string): 
       }
       if (tool.name === "remember") {
         return {
-          content: String(raw.content ?? ""),
+          content: raw.content,
           path: String(raw.path ?? "MEMORY.md"),
+          expectedRevision: raw.expectedRevision,
+          ...(raw.recruitingFeedback === undefined
+            ? {}
+            : { recruitingFeedback: raw.recruitingFeedback }),
         };
       }
       if (tool.name === "request_takeover") {
@@ -1156,6 +1220,7 @@ function toAgentTool(tool: ConnectorTool, host: ToolHost, exposedName: string): 
       const startedAt = Date.now();
       let result: unknown;
       let failure: unknown;
+      host.dispatchedToolCalls.add(toolCallId);
       try {
         result = await (async () => {
           if (tool.name === "request_takeover") {
@@ -1381,6 +1446,7 @@ async function executeSubagent(host: ToolHost, executionId: string, args: Record
       : selectedModel.apiKey,
     depth: 1,
     agentNamespace: agentId,
+    dispatchedToolCalls: new Set(),
     pendingShells: [],
   };
   const contextPolicy = createRuntimeContextPolicy(
@@ -1442,6 +1508,7 @@ async function executeSubagent(host: ToolHost, executionId: string, args: Record
         requestModel.cacheCapabilities?.retentionMode,
       ),
   };
+  const nestedTools = toAgentTools(childDefs, nestedHost);
   nested = new Agent({
     finishTurn: async (turn, turnSignal) => {
       await deliverFinishedShells(
@@ -1479,7 +1546,7 @@ async function executeSubagent(host: ToolHost, executionId: string, args: Record
         .join(" "),
       model: subagentModel,
       thinkingLevel: thinkingLevelFor(subagentModel, requestModel.thinkingLevel),
-      tools: toAgentTools(childDefs, nestedHost),
+      tools: nestedTools,
       messages: [],
     },
   });
@@ -1488,6 +1555,7 @@ async function executeSubagent(host: ToolHost, executionId: string, args: Record
   let streamed = "";
   let lastPush = 0;
   nested.subscribe((event) => {
+    auditUndispatchedToolFailure(event, nestedHost, nestedTools);
     if (event.type === "tool_execution_start") {
       if (host.toolCallBudget.exceeded) return;
       const toolName = "toolName" in event && event.toolName ? String(event.toolName) : "a tool";
@@ -1675,7 +1743,19 @@ function builtinParameters(tool: ConnectorTool) {
     });
   }
   if (tool.name === "remember") {
-    return Type.Object({ content: Type.String(), path: Type.String() });
+    return Type.Object({
+      content: Type.String(),
+      path: Type.Optional(Type.String()),
+      expectedRevision: Type.Integer({ minimum: 0 }),
+      recruitingFeedback: Type.Optional(
+        Type.Unsafe(
+          (tool.inputSchema.properties as Record<string, unknown>).recruitingFeedback as Record<
+            string,
+            unknown
+          >,
+        ),
+      ),
+    });
   }
   if (tool.name === "shell") {
     return Type.Object({
@@ -1877,9 +1957,9 @@ export function jsonSchemaParameters(
   schema: Record<string, unknown>,
   options: FieldOptions = {},
 ): ReturnType<typeof Type.Object> {
-  // Keep intersections intact until parametersFor flattens root combinators.
-  // Rebuilding only properties here drops allOf-only fields and their constraints.
-  if (Array.isArray(schema.allOf)) {
+  // Preserve local references and intersections until parametersFor flattens root combinators.
+  // Rebuilding properties loses recursive definitions and allOf-only constraints.
+  if (schema.$defs || Array.isArray(schema.allOf)) {
     return Type.Unsafe({ ...schema, ...options }) as unknown as ReturnType<typeof Type.Object>;
   }
   // Top-level oneOf/anyOf (e.g. request_secret's credential XOR connectionId)
@@ -2170,6 +2250,7 @@ interface ToolHost {
   toolCallBudget: ToolCallBudget;
   /** Shared fallback uniqueness when the model omits toolCallId (nested hosts reuse this). */
   toolCallSeq: { value: number };
+  dispatchedToolCalls: Set<string>;
   abortTurn(): void;
   signal: AbortSignal;
   depth: number;

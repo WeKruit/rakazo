@@ -9,20 +9,27 @@ type AskSnapshot = {
 };
 
 export function latestAnswerableAskMessageId(snapshot: AskSnapshot | null): string | null {
-  if (!snapshot) return null;
+  return answerableAskMessageIds(snapshot).at(-1) ?? null;
+}
+
+/** Each waiting run retains its own original answer card, including in multi-agent groups. */
+export function answerableAskMessageIds(snapshot: AskSnapshot | null): string[] {
+  if (!snapshot) return [];
   const waitingRunIds = new Set(
     (snapshot.activeRuns ?? (snapshot.run ? [snapshot.run] : []))
       .filter((run) => run.status === "waiting_input")
       .map((run) => run.id),
   );
+  const ids: string[] = [];
   for (let index = snapshot.messages.length - 1; index >= 0; index -= 1) {
     const message = snapshot.messages[index];
     if (!message?.runId || !waitingRunIds.has(message.runId)) continue;
     if (message.blocks.some((block) => block.kind === "ask" && block.status !== "answered")) {
-      return message.id;
+      ids.unshift(message.id);
+      waitingRunIds.delete(message.runId);
     }
   }
-  return null;
+  return ids;
 }
 
 export function selectedAskActionLabel(

@@ -1,5 +1,15 @@
 import { describe, expect, it } from "vitest";
-import { describeToolActivity } from "./pi-runtime.js";
+import { builtinAgentTools } from "./builtin-tools.js";
+import { describeToolActivity, parametersFor } from "./pi-runtime.js";
+
+it("requires a nonnegative native memory revision in Pi's tool schema", () => {
+  const schema = parametersFor(builtinAgentTools.find((tool) => tool.name === "remember")!);
+  expect(schema.required).toContain("expectedRevision");
+  expect(schema.properties).toHaveProperty(
+    "expectedRevision",
+    expect.objectContaining({ type: "integer", minimum: 0 }),
+  );
+});
 
 describe("describeToolActivity", () => {
   it("summarizes builtin tools with their most informative argument", () => {

@@ -1,6 +1,7 @@
 import type { PrismaClient } from "@rakazo/db";
 import { describe, expect, it, vi } from "vitest";
 import {
+  includeWaitingAskMessages,
   isBackgroundRun,
   isPeerRun,
   loadAllMessages,
@@ -10,6 +11,39 @@ import {
 } from "./thread-message-pages.js";
 
 describe("thread message pages", () => {
+  it("keeps the base page and cursor unchanged when its waiting card is already loaded", async () => {
+    const page = {
+      threadId: "thread-1",
+      olderCursor: 101,
+      messages: [
+        {
+          id: "original-card",
+          threadId: "thread-1",
+          seq: 150,
+          role: "bot" as const,
+          runId: "run-1",
+          botId: "bot-1",
+          blocks: [{ kind: "ask" as const, text: "Original question", status: "pending" as const }],
+          createdAt: new Date(0).toISOString(),
+        },
+      ],
+    };
+    const findMany = vi.fn();
+    const prisma = { message: { findMany } } as unknown as PrismaClient;
+    const result = await includeWaitingAskMessages(prisma, page, [
+      {
+        id: "run-1",
+        botId: "bot-1",
+        spaceId: "space-1",
+        userId: "user-1",
+        status: "waiting_input",
+      },
+    ]);
+    expect(result).toBe(page);
+    expect(result.messages).toHaveLength(1);
+    expect(findMany).not.toHaveBeenCalled();
+  });
+
   it("caches peer-run classification for live events", async () => {
     const findUnique = vi.fn(async () => ({ trigger: "bot_message" }));
     const prisma = { run: { findUnique } } as unknown as PrismaClient;

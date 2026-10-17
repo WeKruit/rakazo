@@ -214,6 +214,18 @@ describe("scoped mobile outbox", () => {
       request.mock.calls.filter(([proc]) => proc === "threads/send").map(([, body]) => body.text),
     ).toEqual(["First", "Second"]);
   });
+  it("preserves a multiline composer body through the mobile outbox and native send", async () => {
+    const text = " \n  Native answer 😀\n  ";
+    const attempt = feedback.sendAttempt(payload(text));
+    expect(attempt.payload.displayText).toBe(text);
+    await act(async () => {
+      await feedback.send(attempt);
+    });
+    expect(request.mock.calls.find(([proc]) => proc === "threads/send")?.[1]).toMatchObject({
+      botId: "bot-1",
+      text,
+    });
+  });
   it("drops late failures and further uploads after a session wipe", async () => {
     let finish!: (value: { id: string }) => void;
     request.mockImplementation(

@@ -107,6 +107,14 @@ test("bot creation, editing, and deletion persist", async ({ page }, testInfo) =
   await expect(settings.getByRole("button", { name: "Update computer" })).toHaveCount(0);
   await captureScreenshot(page, testInfo, "27a-settings-panel");
   await settings.getByText("Advanced", { exact: true }).click();
+  const instructionsInput = settings.getByRole("textbox", { name: "Instructions", exact: true });
+  const instructions = "Cite source evidence. Ask only about missing hiring constraints.";
+  await expect(instructionsInput).toBeVisible();
+  await instructionsInput.fill(instructions);
+  await page.getByRole("button", { name: "Save", exact: true }).click();
+  await expect.poll(async () => instructionsInput.inputValue()).toBe(instructions);
+  await instructionsInput.scrollIntoViewIfNeeded();
+  await captureScreenshot(page, testInfo, "27d-bot-instructions");
   const disabledTools = settings.getByLabel("Disabled tools");
   await expect(disabledTools).toBeVisible();
   await disabledTools.fill("not_a_tool");
@@ -155,6 +163,8 @@ test("bot creation, editing, and deletion persist", async ({ page }, testInfo) =
   await expect(nameInput).toHaveValue("Atlas");
   await expect(titleInput).toHaveValue("Research lead");
   await expect(descriptionInput).toHaveValue("Builds durable, source-backed research briefs.");
+  await settings.getByText("Advanced", { exact: true }).click();
+  await expect(instructionsInput).toHaveValue(instructions);
   await captureScreenshot(page, testInfo, "29-reloaded-bot-profile");
 
   // Wrap in the narrow dialog without pushing Delete below the Playwright viewport.

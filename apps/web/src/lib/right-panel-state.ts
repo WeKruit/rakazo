@@ -5,11 +5,19 @@ export type Panel =
   | "create"
   | "create-group"
   | "group-settings"
+  | "recruiting"
   | null;
 export type RightPanelState = { panel: Panel; routineId?: string };
 
 /** Panels that are safe to remember across reloads. Create flows stay ephemeral. */
-const durablePanels: readonly Panel[] = ["computer", "settings", "routine", "group-settings", null];
+const durablePanels: readonly Panel[] = [
+  "computer",
+  "settings",
+  "routine",
+  "group-settings",
+  "recruiting",
+  null,
+];
 
 export function rightPanelStorageKey(
   userId: string,

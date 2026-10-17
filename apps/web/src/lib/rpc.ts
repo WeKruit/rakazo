@@ -18,6 +18,14 @@ export function selectedSpaceId(): string | null {
   }
 }
 
+export function subscribeSpaceSelection(listener: () => void) {
+  const onStorage = (event: StorageEvent) => {
+    if (event.key === null || event.key === SPACE_STORAGE_KEY) listener();
+  };
+  window.addEventListener("storage", onStorage);
+  return () => window.removeEventListener("storage", onStorage);
+}
+
 export function selectSpace(id: string): boolean {
   try {
     window.localStorage.setItem(SPACE_STORAGE_KEY, id);

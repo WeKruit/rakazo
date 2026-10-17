@@ -19,6 +19,28 @@ const ctx: AdapterContext = {
 };
 
 const publicResolver = async () => [{ address: "203.0.113.10", family: 4 as const }];
+const jobPosting = {
+  "@context": "https://schema.org",
+  "@type": "JobPosting",
+  title: "Example infrastructure engineer",
+  description:
+    "<h2>The Role</h2><p>Build data systems &amp; geometry tools.</p><h2>What You’ll Bring</h2><ul><li>5+ years of software experience.</li><li>Python required; React/TypeScript is a major plus.</li></ul><h2>Bonus Points</h2><p>Robotics experience.</p>",
+  directApply: true,
+  identifier: { "@type": "PropertyValue", name: "Example", value: "example-job" },
+  datePosted: "2026-10-01",
+  hiringOrganization: { "@type": "Organization", name: "Example" },
+  jobLocation: {
+    "@type": "Place",
+    address: { "@type": "PostalAddress", addressLocality: "Example City" },
+  },
+  employmentType: "FULL_TIME",
+  baseSalary: { "@type": "MonetaryAmount", currency: "USD", value: 100000 },
+};
+const jobHtml = (
+  data: unknown,
+  body = "<noscript>Enable JavaScript to view this page.</noscript>",
+) =>
+  `<html><head><title>Job landing</title><script type="application/ld+json">${JSON.stringify(data).replaceAll("<", "\\u003c")}</script></head><body>${body}</body></html>`;
 
 describe("web provider factory", () => {
   it("defaults to keyless-http", () => {
@@ -77,6 +99,122 @@ describe("keyless HTTP web provider", () => {
     );
     expect(extracted.title).toBe("Plain");
     expect(extracted.text).toContain("just text here");
+  });
+
+  it("reads a unique standard JobPosting description and preserves its actual metadata", async () => {
+    const fetchMock: typeof fetch = async () => new Response(jobHtml(jobPosting), { status: 200 });
+    const provider = new KeylessHttpWebProvider({
+      fetch: fetchMock,
+      resolveHostname: publicResolver,
+    });
+    const result = await provider.fetch({ url: "https://example.test/job", maxChars: 8000 }, ctx);
+    expect(result).toMatchObject({
+      url: "https://example.test/job",
+      title: jobPosting.title,
+      truncated: false,
+    });
+    expect(result.text).toContain("The Role\nBuild data systems & geometry tools.");
+    expect(result.text).toContain("5+ years of software experience.");
+    expect(result.text).toContain("Python required; React/TypeScript is a major plus.");
+    expect(result.text).toContain("Bonus Points\nRobotics experience.");
+    const { description: _description, ...metadata } = jobPosting;
+    expect(result.text).toContain(JSON.stringify(metadata, null, 2));
+    expect(result.text).not.toContain("Enable JavaScript");
+  });
+
+  it.each([
+    ["array", [jobPosting]],
+    [
+      "graph",
+      {
+        "@context": "https://schema.org",
+        "@graph": [
+          { "@type": "Organization", name: "Example" },
+          { ...jobPosting, "@context": undefined, "@type": ["Thing", "JobPosting"] },
+        ],
+      },
+    ],
+    [
+      "fully qualified type",
+      { ...jobPosting, "@context": undefined, "@type": "https://schema.org/JobPosting" },
+    ],
+    ["matching relative URL", { ...jobPosting, url: "/job?source=example" }],
+  ])("reads the standard %s shape without executing scripts", (_shape, data) => {
+    const html = jobHtml(data).replace(
+      "<head>",
+      '<head><script type="application/ld+json">{broken</script>',
+    );
+    const extracted = extractReadableText(html, "https://example.test/job?source=example");
+    expect(extracted.title).toBe(jobPosting.title);
+    expect(extracted.text).toContain("5+ years of software experience.");
+  });
+
+  it("parses description HTML without running or retaining script content", () => {
+    const extracted = extractReadableText(
+      jobHtml({
+        ...jobPosting,
+        description: `${jobPosting.description}<script>document.body.textContent = "must not execute"</script><style>body { display: none; }</style>`,
+      }),
+      "https://example.test/job",
+    );
+    expect(extracted.text).toContain("React/TypeScript is a major plus.");
+    expect(extracted.text).not.toContain("must not execute");
+    expect(extracted.text).not.toContain("display: none");
+  });
+
+  it.each([
+    ["multiple postings", [jobPosting, { ...jobPosting, title: "Another job" }]],
+    ["a different URL", { ...jobPosting, url: "https://example.test/another-job" }],
+    ["a different query", { ...jobPosting, url: "https://example.test/job?other=job" }],
+    ["an invalid URL", { ...jobPosting, url: "http://[" }],
+    ["another vocabulary", { ...jobPosting, "@context": "https://example.test/vocabulary" }],
+  ])("leaves %s on the existing HTML path", (_reason, data) => {
+    const extracted = extractReadableText(jobHtml(data), "https://example.test/job");
+    expect(extracted.title).toBe("Job landing");
+    expect(extracted.text).toContain("Enable JavaScript");
+    expect(extracted.text).not.toContain("5+ years");
+  });
+
+  it("reads a unique matching JobPosting even when a div shell looks readable", () => {
+    const extracted = extractReadableText(
+      jobHtml(jobPosting, "<div>Enable JavaScript to view this page.</div>"),
+      "https://example.test/job",
+    );
+    expect(extracted.title).toBe(jobPosting.title);
+    expect(extracted.text).toContain("5+ years of software experience.");
+    expect(extracted.text).not.toContain("Enable JavaScript");
+  });
+
+  it("prefers a matching structured job description and metadata over generic page text", () => {
+    const article = `<article><h1>Visible article</h1><p>${"Actual page text. ".repeat(100)}</p></article>`;
+    const extracted = extractReadableText(jobHtml(jobPosting, article), "https://example.test/job");
+    expect(extracted.title).toBe(jobPosting.title);
+    expect(extracted.text).toContain("5+ years of software experience.");
+    expect(extracted.text).toContain('"addressLocality": "Example City"');
+    expect(extracted.text).not.toContain("Actual page text.");
+  });
+
+  it.each([
+    ["ordinary articles", { "@context": "https://schema.org", "@type": "Article" }],
+    ["an unmatched job URL", { ...jobPosting, url: "https://example.test/another-job" }],
+  ])("keeps the existing Readability path for %s", (_reason, data) => {
+    const article = `<article><h1>Visible article</h1><p>${"Actual page text. ".repeat(100)}</p></article>`;
+    const extracted = extractReadableText(jobHtml(data, article), "https://example.test/job");
+    expect(extracted.text).toContain("Actual page text.");
+    expect(extracted.text).not.toContain("5+ years");
+  });
+
+  it("applies the existing fetch truncation to structured job text", async () => {
+    const provider = new KeylessHttpWebProvider({
+      fetch: async () => new Response(jobHtml(jobPosting), { status: 200 }),
+      resolveHostname: publicResolver,
+    });
+    const result = await provider.fetch({ url: "https://example.test/job", maxChars: 100 }, ctx);
+    expect(result.title).toBe(jobPosting.title);
+    expect(result.truncated).toBe(true);
+    expect(result.text).toHaveLength(100 + "\n\n[Content truncated]".length);
+    expect(result.text).toContain("The Role");
+    expect(result.text).toMatch(/\[Content truncated\]$/);
   });
 
   it("parses HTML search results with a cap", () => {

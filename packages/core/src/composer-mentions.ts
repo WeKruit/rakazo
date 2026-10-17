@@ -45,16 +45,13 @@ export function mentionChipKey(mention: Pick<ComposerMention, "kind" | "id">): s
 
 export function stripMentionToken(text: string, mentionName: string): string {
   const normalized = mentionName.trim();
-  if (!normalized) return text.trim();
+  if (!normalized) return text;
   const pattern = new RegExp(
-    `(^|[^\\p{L}\\p{N}_-])@${escapeRegExp(normalized)}(?![\\p{L}\\p{N}_-])`,
+    `(?<![\\p{L}\\p{N}_-])@${escapeRegExp(normalized)}(?![\\p{L}\\p{N}_-])[ \\t]?`,
     "giu",
   );
-  return text
-    .replace(pattern, (_match, prefix: string) => prefix ?? "")
-    .replace(/[^\S\n]+/g, " ")
-    .replace(/[^\S\n]*\n/g, "\n")
-    .trim();
+  // Remove the control token and its one separator, preserving the draft around it.
+  return text.replace(pattern, "");
 }
 
 export function stripMentionKinds(
@@ -68,7 +65,7 @@ export function stripMentionKinds(
       result = stripMentionToken(result, mention.name);
     }
   }
-  return result.trim();
+  return result;
 }
 
 export function partitionComposerMentions(mentions: readonly ComposerMention[]) {
@@ -132,9 +129,8 @@ export function needsAuthConnectorNames(mentions: readonly ComposerMention[]): s
 
 export function appendConnectorIntent(text: string, names: readonly string[]): string {
   const line = connectorIntentLine(names);
-  if (!line) return text.trim();
-  const trimmed = text.trim();
-  return trimmed ? `${trimmed}\n\n${line}` : line;
+  if (!line) return text;
+  return text.trim() ? `${text}\n\n${line}` : line;
 }
 
 export function routineScheduleSubtitle(crons: readonly string[], botName?: string): string {
@@ -247,17 +243,13 @@ export function resolveComposerSendPlan(input: {
 } {
   const parts = partitionComposerMentions(input.mentions);
   const mentionedGroup = parts.groups[0];
-  let trimmed = stripMentionKinds(input.text.trim(), input.mentions, [
-    "group",
-    "routine",
-    "connector",
-  ]);
+  let trimmed = stripMentionKinds(input.text, input.mentions, ["group", "routine", "connector"]);
   trimmed = appendConnectorIntent(trimmed, needsAuthConnectorNames(input.mentions));
-  if (!trimmed && parts.connectors.length) {
+  if (!trimmed.trim() && parts.connectors.length) {
     trimmed = parts.connectors.map((mention) => `@${mention.name}`).join(" ");
   }
   const routineIds = [...new Set(parts.routines.map((routine) => routine.id))];
-  const shouldSend = Boolean(trimmed) || input.hasAttachments;
+  const shouldSend = Boolean(trimmed.trim()) || input.hasAttachments;
   const shouldOpenGroup = Boolean(mentionedGroup);
   const shouldRunRoutines = routineIds.length > 0;
   return {

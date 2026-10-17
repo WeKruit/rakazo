@@ -91,7 +91,7 @@ export function promptTextForAttachments(
   text: string | undefined,
   artifacts: Array<{ name: string; mimeType: string; size: number }>,
 ): string {
-  const caption = text?.trim() ?? "";
+  const caption = text?.trim() ? text : "";
   const notes = artifacts
     .filter((artifact) => !isAttachmentImageMimeType(artifact.mimeType))
     .map(

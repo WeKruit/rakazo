@@ -1,9 +1,28 @@
 import { describe, expect, it } from "vitest";
 import {
+  answerableAskMessageIds,
   latestAnswerableAskMessageId,
   resolveAskChoice,
   selectedAskActionLabel,
 } from "./answerable-ask.js";
+
+it("keeps each waiting agent's latest question answerable in a group", () => {
+  expect(
+    answerableAskMessageIds({
+      activeRuns: [
+        { id: "main", status: "waiting_input" },
+        { id: "sourcer", status: "waiting_input" },
+        { id: "busy", status: "running" },
+      ],
+      messages: [
+        { id: "main-old", runId: "main", blocks: [{ kind: "ask", status: "pending" }] },
+        { id: "main-ask", runId: "main", blocks: [{ kind: "ask", status: "pending" }] },
+        { id: "sourcer-ask", runId: "sourcer", blocks: [{ kind: "ask", status: "pending" }] },
+        { id: "busy-ask", runId: "busy", blocks: [{ kind: "ask", status: "pending" }] },
+      ],
+    }),
+  ).toEqual(["main-ask", "sourcer-ask"]);
+});
 
 describe("latestAnswerableAskMessageId", () => {
   it("finds a waiting prompt even when a newer group run is active", () => {
