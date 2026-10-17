@@ -97,6 +97,55 @@ const action = {
 };
 
 describe("recruiting contracts", () => {
+  it("requires an explicit sourcing filter list and admits only neutral human filter edits", () => {
+    const brief = { fields: [], questions: [], rules: [], searchFilters: [] };
+    expect(contracts.RecruitingBriefDraftSchema.parse(brief)).toEqual(brief);
+    const { searchFilters: _filters, ...missing } = brief;
+    expect(contracts.RecruitingBriefDraftSchema.safeParse(missing).success).toBe(false);
+    const filter = {
+      id: "region",
+      statement: "Search the UK",
+      mode: "include",
+      origin: "jd",
+      sourceRefIds: [source.id],
+    };
+    expect(
+      contracts.RecruitingBriefDraftSchema.parse({ ...brief, searchFilters: [filter] })
+        .searchFilters,
+    ).toEqual([filter]);
+    const edit = {
+      threadId: "thread",
+      roleId: "role",
+      expectedRevision: 1,
+      criteria: [
+        {
+          criterionId: "criterion",
+          priority: "hard",
+          atoms: [{ atomId: "atom", statement: "Same qualification" }],
+        },
+      ],
+      searchFilters: [{ id: filter.id, statement: filter.statement, mode: filter.mode }],
+    };
+    expect(contracts.EditRecruitingCriteriaInput.parse(edit)).toEqual(edit);
+    expect(contracts.EditRecruitingCriteriaInput.parse({ ...edit, criteria: [] }).criteria).toEqual(
+      [],
+    );
+    expect(
+      contracts.EditRecruitingCriteriaInput.parse({ ...edit, searchFilters: [] }).searchFilters,
+    ).toEqual([]);
+    for (const filters of [
+      [edit.searchFilters[0], edit.searchFilters[0]],
+      [{ ...edit.searchFilters[0], id: " " }],
+      [{ ...edit.searchFilters[0], statement: " " }],
+      [{ ...edit.searchFilters[0], mode: "hard" }],
+      [{ ...edit.searchFilters[0], origin: "jd" }],
+      [{ ...edit.searchFilters[0], sourceRefIds: [source.id] }],
+    ])
+      expect(
+        contracts.EditRecruitingCriteriaInput.safeParse({ ...edit, searchFilters: filters })
+          .success,
+      ).toBe(false);
+  });
   it("accepts only human criterion text and priority edits with unique IDs", () => {
     const input = {
       threadId: "thread",

@@ -342,6 +342,10 @@ msgstr "Add credential"
 msgid "Add Executor"
 msgstr "Add Executor"
 
+#: src/pages/RecruitingPanel.tsx
+msgid "Add filter"
+msgstr "Add filter"
+
 #: src/pages/PluginsOverlay.tsx
 msgid "Add GraphQL"
 msgstr "Add GraphQL"
@@ -942,6 +946,10 @@ msgstr "Cards"
 #: src/pages/AccountSettingsOverlay.tsx
 msgid "Change password"
 msgstr "Change password"
+
+#: src/pages/RecruitingPanel.tsx
+msgid "Changes could not be saved."
+msgstr "Changes could not be saved."
 
 #: src/pages/AccountSettingsOverlay.tsx
 msgid "Changing…"
@@ -1939,10 +1947,6 @@ msgstr "Credentials"
 msgid "Credentials are encrypted and never sent to the model."
 msgstr "Credentials are encrypted and never sent to the model."
 
-#: src/pages/RecruitingPanel.tsx
-msgid "Criteria changed or could not be saved."
-msgstr "Criteria changed or could not be saved."
-
 #. placeholder {0}: index + 1
 #: src/pages/RecruitingPanel.tsx
 msgid "Criterion {0}"
@@ -2268,6 +2272,10 @@ msgstr "Edit first"
 msgid "Edit Profile"
 msgstr "Edit Profile"
 
+#: src/pages/RecruitingPanel.tsx
+msgid "Edit search filters"
+msgstr "Edit search filters"
+
 #: src/pages/Auth.tsx
 msgid "Email"
 msgstr "Email"
@@ -2364,6 +2372,10 @@ msgstr "Every week"
 #: src/pages/RecruitingPanel.tsx
 msgid "Evidence"
 msgstr "Evidence"
+
+#: src/pages/RecruitingPanel.tsx
+msgid "Exclude"
+msgstr "Exclude"
 
 #: src/pages/PluginsOverlay.tsx
 msgid "Executor token"
@@ -2551,6 +2563,10 @@ msgstr "Group updates"
 msgid "Groups"
 msgstr "Groups"
 
+#: src/pages/RecruitingPanel.tsx
+msgid "Guide retrieval; qualification criteria stay unchanged."
+msgstr "Guide retrieval; qualification criteria stay unchanged."
+
 #: src/components/call/CallCard.tsx
 msgid "Hang up"
 msgstr "Hang up"
@@ -2688,6 +2704,10 @@ msgstr "Inactive"
 #: src/pages/shell/message-cards.tsx
 msgid "Inbox & email"
 msgstr "Inbox & email"
+
+#: src/pages/RecruitingPanel.tsx
+msgid "Include"
+msgstr "Include"
 
 #: src/pages/shell/bot-panel.tsx
 msgid "Inherit default"
@@ -3295,6 +3315,10 @@ msgstr "New space"
 msgid "New ticket"
 msgstr "New ticket"
 
+#: src/pages/RecruitingPanel.tsx
+msgid "No additional search filters"
+msgstr "No additional search filters"
+
 #: src/pages/MessagingSettingsOverlay.tsx
 msgid "No agent connections yet."
 msgstr "No agent connections yet."
@@ -3758,6 +3782,10 @@ msgid "POST to"
 msgstr "POST to"
 
 #: src/pages/RecruitingPanel.tsx
+msgid "Prefer"
+msgstr "Prefer"
+
+#: src/pages/RecruitingPanel.tsx
 msgid "Preferences"
 msgstr "Preferences"
 
@@ -4003,6 +4031,10 @@ msgstr "Remove {full}"
 #: src/pages/shell/bot-credentials.tsx
 msgid "Remove {secretName}? This bot will no longer be able to use it."
 msgstr "Remove {secretName}? This bot will no longer be able to use it."
+
+#: src/pages/RecruitingPanel.tsx
+msgid "Remove filter"
+msgstr "Remove filter"
 
 #: src/pages/RoutineEditor.tsx
 msgid "Remove Git event"
@@ -4402,6 +4434,23 @@ msgstr "Search by domain"
 #: src/pages/RecruitingPanel.tsx
 msgid "Search candidates"
 msgstr "Search candidates"
+
+#: src/pages/RecruitingPanel.tsx
+msgid "Search filter"
+msgstr "Search filter"
+
+#. placeholder {0}: index + 1
+#: src/pages/RecruitingPanel.tsx
+msgid "Search filter {0}"
+msgstr "Search filter {0}"
+
+#: src/pages/RecruitingPanel.tsx
+msgid "Search filter mode"
+msgstr "Search filter mode"
+
+#: src/pages/RecruitingPanel.tsx
+msgid "Search filters"
+msgstr "Search filters"
 
 #: src/components/integrations/IntegrationSetup.tsx
 msgid "Search integrations.sh"

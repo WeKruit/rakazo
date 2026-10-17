@@ -342,9 +342,11 @@ async function loadRoleMaterials(
 async function validateBriefAuthorship(tx: Tx, definition: CreateRoleInput | ReviseRoleInput) {
   if (!definition.brief) return;
   const sources = new Map(definitionSources(definition).map((source) => [source.id, source]));
-  const attributed = [...definition.brief.fields, ...definition.brief.rules].filter(
-    (item) => item.origin === "user_instruction",
-  );
+  const attributed = [
+    ...definition.brief.fields,
+    ...definition.brief.rules,
+    ...definition.brief.searchFilters,
+  ].filter((item) => item.origin === "user_instruction");
   const messageIds = new Set<string>();
   for (const item of attributed) {
     for (const id of item.sourceRefIds) {
@@ -710,12 +712,26 @@ export async function editRecruitingCriteria(
             },
           ];
     });
-    if (!changes.length) return roleSnapshot(tx, actor, role);
+    if (input.searchFilters && !revision.brief)
+      throw new RecruitingPlaybookValidationError(
+        "Prepare a sourced brief before editing search filters.",
+      );
+    const originalFilters = revision.brief?.searchFilters;
+    const filtersById = new Map(originalFilters?.map((filter) => [filter.id, filter]));
+    const changedFilter = (filter: NonNullable<typeof input.searchFilters>[number]) => {
+      const original = filtersById.get(filter.id);
+      return !original || original.statement !== filter.statement || original.mode !== filter.mode;
+    };
+    const filtersChanged =
+      input.searchFilters !== undefined &&
+      (input.searchFilters.length !== originalFilters?.length ||
+        input.searchFilters.some(changedFilter));
+    if (!changes.length && !filtersChanged) return roleSnapshot(tx, actor, role);
     const changed = new Map(changes.map((change) => [change.criterion.id, change.criterion]));
     const criteria = revision.criteria.map((criterion) => changed.get(criterion.id) ?? criterion);
     // A shared atom ID must still have one definition across all criteria.
     RecruitingRoleRevisionSchema.parse({ ...revision, criteria });
-    const text = `Edit recruiting criteria revision ${role.revision}:\n${JSON.stringify(changes.map((change) => change.edit))}`;
+    const text = `Edit recruiting criteria revision ${role.revision}:\n${JSON.stringify(changes.map((change) => change.edit))}${filtersChanged ? `\nSearch filters:\n${JSON.stringify(input.searchFilters)}` : ""}`;
     const message = await createThreadMessageInTransaction(tx, {
       threadId: thread.id,
       role: "user",
@@ -746,6 +762,17 @@ export async function editRecruitingCriteria(
         brief: revision.brief
           ? {
               ...revision.brief,
+              searchFilters: filtersChanged
+                ? input.searchFilters!.map((filter) =>
+                    changedFilter(filter)
+                      ? {
+                          ...filter,
+                          origin: "user_instruction" as const,
+                          sourceRefIds: [source.id],
+                        }
+                      : filtersById.get(filter.id)!,
+                  )
+                : revision.brief.searchFilters,
               rules: revision.brief.rules.map((rule) =>
                 changed.has(rule.criterionId)
                   ? {

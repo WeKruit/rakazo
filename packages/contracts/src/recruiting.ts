@@ -177,12 +177,26 @@ function validateRoleCriteria(
   }
 }
 
+const BriefOrigin = z.enum(["user_instruction", "jd", "hm", "inferred"]);
+const SearchFilterEdit = z.strictObject({
+  id: RecruitingId,
+  statement: Text,
+  mode: z.enum(["include", "exclude", "prefer"]),
+});
+const SearchFilters = z
+  .array(SearchFilterEdit.extend({ origin: BriefOrigin, sourceRefIds: z.array(RecruitingId) }))
+  .refine(
+    (filters) => new Set(filters.map((filter) => filter.id)).size === filters.length,
+    "Search filter IDs must be unique",
+  );
+
 export const RecruitingBriefDraftSchema = z.strictObject({
+  searchFilters: SearchFilters,
   fields: z.array(
     z.strictObject({
       key: Text,
       value: Text.nullable(),
-      origin: z.enum(["user_instruction", "jd", "hm", "inferred"]),
+      origin: BriefOrigin,
       state: z.enum(["known", "missing", "conflict"]),
       consequential: z.boolean(),
       sourceRefIds: z.array(RecruitingId),
@@ -199,7 +213,7 @@ export const RecruitingBriefDraftSchema = z.strictObject({
   rules: z.array(
     z.strictObject({
       criterionId: RecruitingId,
-      origin: z.enum(["user_instruction", "jd", "hm", "inferred"]),
+      origin: BriefOrigin,
       effect: z.enum(["flag", "reject"]),
       sourceRefIds: z.array(RecruitingId),
     }),
@@ -223,39 +237,54 @@ export const ConfirmRecruitingBriefInput = z.strictObject({
   expectedRevision: Revision,
 });
 
-export const EditRecruitingCriteriaInput = z.strictObject({
-  threadId: RecruitingId,
-  roleId: RecruitingId,
-  expectedRevision: Revision,
-  criteria: z
-    .array(
-      z.strictObject({
-        criterionId: RecruitingId,
-        priority: z.enum(["hard", "preferred"]),
-        atoms: z
-          .array(
-            z.union([
-              z.strictObject({ atomId: RecruitingId, statement: Text }),
-              z.strictObject({
-                atomId: RecruitingId,
-                employmentRule: RecruitingEmploymentRuleSchema,
-              }),
-            ]),
-          )
-          .min(1)
-          .refine(
-            (atoms) => new Set(atoms.map((atom) => atom.atomId)).size === atoms.length,
-            "Atom IDs must be unique",
-          ),
-      }),
-    )
-    .min(1)
-    .refine(
-      (criteria) =>
-        new Set(criteria.map((criterion) => criterion.criterionId)).size === criteria.length,
-      "Criterion IDs must be unique",
-    ),
-});
+export const EditRecruitingCriteriaInput = z
+  .strictObject({
+    threadId: RecruitingId,
+    roleId: RecruitingId,
+    expectedRevision: Revision,
+    searchFilters: z
+      .array(SearchFilterEdit)
+      .refine(
+        (filters) => new Set(filters.map((filter) => filter.id)).size === filters.length,
+        "Search filter IDs must be unique",
+      )
+      .optional(),
+    criteria: z
+      .array(
+        z.strictObject({
+          criterionId: RecruitingId,
+          priority: z.enum(["hard", "preferred"]),
+          atoms: z
+            .array(
+              z.union([
+                z.strictObject({ atomId: RecruitingId, statement: Text }),
+                z.strictObject({
+                  atomId: RecruitingId,
+                  employmentRule: RecruitingEmploymentRuleSchema,
+                }),
+              ]),
+            )
+            .min(1)
+            .refine(
+              (atoms) => new Set(atoms.map((atom) => atom.atomId)).size === atoms.length,
+              "Atom IDs must be unique",
+            ),
+        }),
+      )
+      .refine(
+        (criteria) =>
+          new Set(criteria.map((criterion) => criterion.criterionId)).size === criteria.length,
+        "Criterion IDs must be unique",
+      ),
+  })
+  .superRefine((input, ctx) => {
+    if (!input.criteria.length && input.searchFilters === undefined)
+      ctx.addIssue({
+        code: "custom",
+        path: ["criteria"],
+        message: "Provide criteria or search filter edits",
+      });
+  });
 export type EditRecruitingCriteriaInput = z.infer<typeof EditRecruitingCriteriaInput>;
 
 const RoleDefinition = {

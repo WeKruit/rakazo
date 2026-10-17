@@ -4036,7 +4036,10 @@ describePostgres("recruiting domain (PostgreSQL)", () => {
 
   async function researchFixture(confirmed = true, includeCriterion = false) {
     const salary = "GBP 90,000 to 120,000";
-    const f = await nativeAsk(undefined, `Please clarify this role. Outreach salary: ${salary}.`);
+    const f = await nativeAsk(
+      undefined,
+      `Please clarify this role. Outreach salary: ${salary}. Location: unrestricted.`,
+    );
     await prisma.run.update({
       where: { id: f.run.id },
       data: {
@@ -4051,9 +4054,10 @@ describePostgres("recruiting domain (PostgreSQL)", () => {
       anchor: { kind: "message", messageId: f.original.id, locator: "blocks[0].text" },
       quote: salary,
     };
+    const locationRef = { ...ref, id: "location", quote: "Location: unrestricted." };
     const definition = {
       title: "Synthetic research role",
-      sourceRefs: [ref],
+      sourceRefs: [ref, locationRef],
       criteria: includeCriterion
         ? [
             {
@@ -4068,6 +4072,7 @@ describePostgres("recruiting domain (PostgreSQL)", () => {
       preferences: [],
       definitionQuestions: [],
       brief: {
+        searchFilters: [],
         fields: [
           {
             key: "salary_range",
@@ -4076,6 +4081,14 @@ describePostgres("recruiting domain (PostgreSQL)", () => {
             state: "known" as const,
             consequential: true,
             sourceRefIds: [ref.id],
+          },
+          {
+            key: "location",
+            value: "Unrestricted",
+            origin: "user_instruction" as const,
+            state: "known" as const,
+            consequential: true,
+            sourceRefIds: [locationRef.id],
           },
         ],
         questions: [],

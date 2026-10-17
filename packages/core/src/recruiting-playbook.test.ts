@@ -56,11 +56,66 @@ function brief(): RecruitingBriefDraft {
         sourceRefIds: ["jd"],
       },
     ],
+    searchFilters: [],
     questions: [],
     rules: [{ criterionId: "experience", origin: "jd", effect: "reject", sourceRefIds: ["jd"] }],
   };
 }
 describe("sourced recruiting intake", () => {
+  it("requires material location clarification even when the extractor omitted the field", () => {
+    const draft = brief();
+    draft.fields = draft.fields.filter((field) => field.key !== "location");
+    expect(recruitingBriefClarifications(draft).map((question) => question.fieldKey)).toEqual([
+      "location",
+    ]);
+  });
+  it("accepts sourced unrestricted location without inventing a retrieval restriction", () => {
+    const draft = brief();
+    draft.fields[1]!.value = "Unrestricted";
+    expect(recruitingBriefClarifications(draft)).toEqual([]);
+  });
+  it("keeps sourced retrieval filters separate from qualification and rejects invented or hard inferred filters", () => {
+    const draft = brief();
+    const originalCriteria = structuredClone(role.criteria);
+    const filter = {
+      id: "region",
+      statement: "Search the UK",
+      mode: "include" as const,
+      origin: "jd" as const,
+      sourceRefIds: ["jd"],
+    };
+    draft.searchFilters = [filter];
+    expect(() => validateRecruitingBrief(draft, role)).not.toThrow();
+    expect(role.criteria).toEqual(originalCriteria);
+    for (const filters of [
+      [filter, filter],
+      [{ ...filter, sourceRefIds: [] }],
+      [{ ...filter, sourceRefIds: ["invented"] }],
+      [{ ...filter, origin: "inferred" as const }],
+      [{ ...filter, origin: "inferred" as const, mode: "exclude" as const }],
+    ])
+      expect(() => validateRecruitingBrief({ ...draft, searchFilters: filters }, role)).toThrow();
+    expect(() =>
+      validateRecruitingBrief(
+        {
+          ...draft,
+          searchFilters: [{ ...filter, mode: "prefer", origin: "inferred", sourceRefIds: [] }],
+        },
+        role,
+      ),
+    ).not.toThrow();
+    expect(() =>
+      validateRecruitingBrief(
+        {
+          ...draft,
+          searchFilters: [
+            { ...filter, mode: "prefer", origin: "inferred", sourceRefIds: ["invented"] },
+          ],
+        },
+        role,
+      ),
+    ).toThrow(/source/);
+  });
   it("accepts a complete English JD without mandatory or redundant questions", () => {
     const draft = brief();
     expect(() => validateRecruitingBrief(draft, role)).not.toThrow();

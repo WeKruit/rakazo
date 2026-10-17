@@ -30,17 +30,24 @@ export function validateRecruitingBrief(
   };
   if (
     new Set(brief.fields.map((field) => field.key)).size !== brief.fields.length ||
+    new Set(brief.searchFilters.map((filter) => filter.id)).size !== brief.searchFilters.length ||
     new Set(brief.rules.map((rule) => rule.criterionId)).size !== brief.rules.length ||
     new Set(brief.questions.map((question) => question.id)).size !== brief.questions.length
   )
     throw new RecruitingPlaybookValidationError(
-      "Brief field, question and rule IDs must be unique.",
+      "Brief field, filter, question and rule IDs must be unique.",
     );
   for (const field of brief.fields) {
     if (field.state === "known" && field.value === null)
       throw new RecruitingPlaybookValidationError("Known brief facts require a value.");
     if (field.sourceRefIds.length || (field.origin !== "inferred" && field.state === "known"))
       requireSources(field.sourceRefIds);
+  }
+  for (const filter of brief.searchFilters) {
+    if (filter.sourceRefIds.length || filter.origin !== "inferred")
+      requireSources(filter.sourceRefIds);
+    if (filter.origin === "inferred" && filter.mode !== "prefer")
+      throw new RecruitingPlaybookValidationError("Inferred search filters must remain preferred.");
   }
   for (const question of brief.questions) {
     if (!brief.fields.some((field) => field.key === question.fieldKey))
@@ -99,6 +106,11 @@ export function recruitingBriefClarifications(brief: RecruitingBriefDraft) {
         question: "What salary range may be stated in outreach?",
       });
   }
+  if (!brief.fields.some((field) => field.key === "location"))
+    questions.push({
+      fieldKey: "location",
+      question: "What location or remote work scope applies?",
+    });
   return questions;
 }
 

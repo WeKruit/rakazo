@@ -3,6 +3,36 @@ import { captureScreenshot, completeOnboarding, signup } from "./helpers";
 
 test.describe.configure({ mode: "serial" });
 
+test("recruiting search filters remain separate from qualification and retain their source", async ({
+  page,
+}, testInfo) => {
+  await page.goto("/e2e/fixtures/marketing-shots.html?view=recruiting");
+  await expect(page.getByText("Synthetic recruiting evidence", { exact: true })).toBeVisible();
+  const filters = page.getByRole("region", { name: "Search filters", exact: true });
+  await expect(filters.getByText("Include · Bay Area", { exact: true })).toBeVisible();
+  await expect(filters.getByText("Exclude · Staffing agencies", { exact: true })).toBeVisible();
+  await expect(filters.getByText("Prefer · Small teams", { exact: true })).toBeVisible();
+  await expect(page.getByText("Hard criteria", { exact: true })).toBeVisible();
+  await filters.getByText("Sources", { exact: true }).first().click();
+  await filters.getByText("brief.search", { exact: true }).first().click();
+  await expect(filters.locator("mark").first()).toHaveText(
+    "Include Bay Area. Exclude staffing agencies. Prefer small teams.",
+  );
+  await captureScreenshot(page, testInfo, "recruiting-search-filters-sourced");
+  await filters.getByRole("button", { name: "Edit search filters", exact: true }).click();
+  await filters
+    .getByRole("textbox", { name: "Search filter", exact: true })
+    .first()
+    .fill("United States");
+  await filters
+    .getByRole("combobox", { name: "Search filter mode", exact: true })
+    .first()
+    .selectOption("prefer");
+  await captureScreenshot(page, testInfo, "recruiting-search-filters-edit");
+  await page.getByRole("button", { name: "Cancel", exact: true }).click();
+  await expect(filters.getByText("Include · Bay Area", { exact: true })).toBeVisible();
+});
+
 test("a recruiting reply draft shows its exact scope and one-time approval", async ({
   page,
 }, testInfo) => {

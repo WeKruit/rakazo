@@ -530,7 +530,10 @@ const view = new URLSearchParams(location.search).get("view") ?? "create";
 async function prepareRecruitingSourceShot() {
   const quote = "Designed coordinate transforms 🧭 in Python.";
   const text = `Candidate note\n\n${quote}\n\nEmployment type and dates are not provided.\n`;
-  const bytes = new TextEncoder().encode(JSON.stringify({ profile: { summary: text } }));
+  const filterText = "Include Bay Area. Exclude staffing agencies. Prefer small teams.";
+  const bytes = new TextEncoder().encode(
+    JSON.stringify({ profile: { summary: text }, brief: { search: filterText } }),
+  );
   const digest = await crypto.subtle.digest("SHA-256", bytes);
   const sha256 = Array.from(new Uint8Array(digest), (byte) =>
     byte.toString(16).padStart(2, "0"),
@@ -562,11 +565,54 @@ async function prepareRecruitingSourceShot() {
     revision: 1,
     currentRevisionId: "revision-demo",
   };
+  const filterSource = {
+    ...source,
+    id: "filter-source-demo",
+    anchor: { ...source.anchor, locator: "brief.search" },
+    quote: filterText,
+    selection: {
+      kind: "artifact_json_string",
+      path: ["brief", "search"],
+      start: 0,
+      end: filterText.length,
+    },
+  };
   const revision = {
     id: "revision-demo",
     roleId: role.id,
     revision: 1,
-    sourceRefs: [],
+    sourceRefs: [source, filterSource],
+    brief: {
+      fields: [],
+      questions: [],
+      rules: [
+        { criterionId: "geometry", origin: "jd", effect: "reject", sourceRefIds: [source.id] },
+      ],
+      searchFilters: [
+        {
+          id: "bay-area",
+          statement: "Bay Area",
+          mode: "include",
+          origin: "jd",
+          sourceRefIds: [filterSource.id],
+        },
+        {
+          id: "agency",
+          statement: "Staffing agencies",
+          mode: "exclude",
+          origin: "jd",
+          sourceRefIds: [filterSource.id],
+        },
+        {
+          id: "team-size",
+          statement: "Small teams",
+          mode: "prefer",
+          origin: "jd",
+          sourceRefIds: [filterSource.id],
+        },
+      ],
+      confirmation: null,
+    },
     criteria: [
       {
         id: "geometry",

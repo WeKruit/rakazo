@@ -603,7 +603,16 @@ type CriteriaEdit = {
   roleId: string;
   revision: RecruitingRoleRevision;
   criteria: EditRecruitingCriteriaInput["criteria"];
+  searchFilters: NonNullable<EditRecruitingCriteriaInput["searchFilters"]>;
 };
+
+function searchFilterDraft(revision: RecruitingRoleRevision): CriteriaEdit["searchFilters"] {
+  return (revision.brief?.searchFilters ?? []).map(({ id, statement, mode }) => ({
+    id,
+    statement,
+    mode,
+  }));
+}
 
 function employmentDateValue(date: RecruitingEmploymentDay): string {
   return RecruitingEmploymentDaySchema.safeParse(date).success
@@ -1452,8 +1461,17 @@ function RecruitingWorkspace({ threadId, botId, refreshSignal, onClose, onReveal
     })) ?? [];
   const originalCriteria = criteriaEdit ? criteriaDraft(criteriaEdit.revision) : [];
   const criteriaChanges = normalizedCriteria.filter(
-    (criterion, index) => JSON.stringify(criterion) !== JSON.stringify(originalCriteria[index]),
+    (criterion, index) =>
+      JSON.stringify(criteriaEdit?.criteria[index]) !== JSON.stringify(originalCriteria[index]) &&
+      JSON.stringify(criterion) !== JSON.stringify(originalCriteria[index]),
   );
+  const searchFiltersChanged = Boolean(
+    criteriaEdit &&
+      JSON.stringify(criteriaEdit.searchFilters) !==
+        JSON.stringify(searchFilterDraft(criteriaEdit.revision)),
+  );
+  const invalidSearchFilters =
+    criteriaEdit?.searchFilters.some((filter) => !filter.statement.trim()) ?? false;
   const invalidCriteria = normalizedCriteria.some((criterion) =>
     criterion.atoms.some((atom) =>
       "employmentRule" in atom
@@ -1462,7 +1480,14 @@ function RecruitingWorkspace({ threadId, botId, refreshSignal, onClose, onReveal
     ),
   );
   async function saveCriteria() {
-    if (!criteriaEdit || savingCriteria || invalidCriteria || !criteriaChanges.length) return;
+    if (
+      !criteriaEdit ||
+      savingCriteria ||
+      invalidCriteria ||
+      invalidSearchFilters ||
+      (!criteriaChanges.length && !searchFiltersChanged)
+    )
+      return;
     const submitted = criteriaEdit;
     const generation = editScope.current.generation;
     const isCurrent = () =>
@@ -1476,7 +1501,8 @@ function RecruitingWorkspace({ threadId, botId, refreshSignal, onClose, onReveal
         threadId,
         roleId: submitted.roleId,
         expectedRevision: submitted.revision.revision,
-        criteria: criteriaChanges,
+        criteria: criteriaChanges.length ? criteriaChanges : originalCriteria,
+        ...(searchFiltersChanged ? { searchFilters: submitted.searchFilters } : {}),
       });
       if (!isCurrent()) return;
       setCriteriaEdit((current) =>
@@ -1625,6 +1651,7 @@ function RecruitingWorkspace({ threadId, botId, refreshSignal, onClose, onReveal
                           roleId: workspace.role.id,
                           revision: workspace.revision,
                           criteria: criteriaDraft(workspace.revision),
+                          searchFilters: searchFilterDraft(workspace.revision),
                         });
                       }}
                     >
@@ -1701,6 +1728,183 @@ function RecruitingWorkspace({ threadId, botId, refreshSignal, onClose, onReveal
                     ) : null}
                   </div>
                 ) : null}
+                {workspace.revision.brief ? (
+                  <section aria-label={t`Search filters`} className="space-y-3">
+                    <div className="flex items-center justify-between gap-2">
+                      <h4 className="font-medium">
+                        <Trans>Search filters</Trans>
+                      </h4>
+                      {!criteriaEdit ? (
+                        <Button
+                          size="sm"
+                          variant="outline"
+                          onClick={() => {
+                            setCriteriaFailed(false);
+                            setCriteriaEdit({
+                              roleId: workspace.role.id,
+                              revision: workspace.revision,
+                              criteria: criteriaDraft(workspace.revision),
+                              searchFilters: searchFilterDraft(workspace.revision),
+                            });
+                          }}
+                        >
+                          <Trans>Edit search filters</Trans>
+                        </Button>
+                      ) : null}
+                    </div>
+                    <p className="text-xs text-muted-foreground">
+                      <Trans>Guide retrieval; qualification criteria stay unchanged.</Trans>
+                    </p>
+                    {criteriaEdit?.roleId === workspace.role.id ? (
+                      <>
+                        {criteriaEdit.searchFilters.map((filter, index) => (
+                          <fieldset key={filter.id} className="space-y-2">
+                            <legend className="sr-only">
+                              <Trans>Search filter {index + 1}</Trans>
+                            </legend>
+                            <div className="flex items-start gap-2">
+                              <NativeSelect
+                                aria-label={t`Search filter mode`}
+                                size="sm"
+                                value={filter.mode}
+                                onChange={(event) => {
+                                  const mode = event.target.value as typeof filter.mode;
+                                  setCriteriaEdit((current) =>
+                                    current
+                                      ? {
+                                          ...current,
+                                          searchFilters: current.searchFilters.map((item) =>
+                                            item.id === filter.id ? { ...item, mode } : item,
+                                          ),
+                                        }
+                                      : null,
+                                  );
+                                }}
+                              >
+                                <NativeSelectOption value="include">
+                                  <Trans>Include</Trans>
+                                </NativeSelectOption>
+                                <NativeSelectOption value="exclude">
+                                  <Trans>Exclude</Trans>
+                                </NativeSelectOption>
+                                <NativeSelectOption value="prefer">
+                                  <Trans>Prefer</Trans>
+                                </NativeSelectOption>
+                              </NativeSelect>
+                              <Button
+                                size="sm"
+                                variant="ghost"
+                                aria-label={t`Remove filter`}
+                                onClick={() =>
+                                  setCriteriaEdit((current) =>
+                                    current
+                                      ? {
+                                          ...current,
+                                          searchFilters: current.searchFilters.filter(
+                                            (item) => item.id !== filter.id,
+                                          ),
+                                        }
+                                      : null,
+                                  )
+                                }
+                              >
+                                <X size={14} aria-hidden />
+                              </Button>
+                            </div>
+                            <Textarea
+                              aria-label={t`Search filter`}
+                              value={filter.statement}
+                              aria-invalid={!filter.statement.trim()}
+                              onChange={(event) => {
+                                const statement = event.target.value;
+                                setCriteriaEdit((current) =>
+                                  current
+                                    ? {
+                                        ...current,
+                                        searchFilters: current.searchFilters.map((item) =>
+                                          item.id === filter.id ? { ...item, statement } : item,
+                                        ),
+                                      }
+                                    : null,
+                                );
+                              }}
+                            />
+                          </fieldset>
+                        ))}
+                        <Button
+                          size="sm"
+                          variant="outline"
+                          onClick={() =>
+                            setCriteriaEdit((current) =>
+                              current
+                                ? {
+                                    ...current,
+                                    searchFilters: [
+                                      ...current.searchFilters,
+                                      { id: crypto.randomUUID(), statement: "", mode: "include" },
+                                    ],
+                                  }
+                                : null,
+                            )
+                          }
+                        >
+                          <Trans>Add filter</Trans>
+                        </Button>
+                      </>
+                    ) : workspace.revision.brief.searchFilters.length ? (
+                      <ul className="space-y-3">
+                        {workspace.revision.brief.searchFilters.map((filter) => (
+                          <li key={filter.id} className="space-y-1">
+                            <p>
+                              {filter.mode === "include" ? (
+                                <Trans>Include</Trans>
+                              ) : filter.mode === "exclude" ? (
+                                <Trans>Exclude</Trans>
+                              ) : (
+                                <Trans>Prefer</Trans>
+                              )}{" "}
+                              · {filter.statement}
+                            </p>
+                            <p className="text-xs text-muted-foreground">
+                              {filter.origin === "user_instruction" ? (
+                                <Trans>User instruction</Trans>
+                              ) : filter.origin === "jd" ? (
+                                <Trans>JD</Trans>
+                              ) : filter.origin === "hm" ? (
+                                <Trans>Hiring manager</Trans>
+                              ) : (
+                                <Trans>Assumption</Trans>
+                              )}
+                            </p>
+                            {filter.sourceRefIds.length ? (
+                              <details>
+                                <summary className="cursor-pointer text-xs text-muted-foreground">
+                                  <Trans>Sources</Trans>
+                                </summary>
+                                <Sources
+                                  sources={[
+                                    ...new Map(
+                                      [
+                                        ...workspace.revision.sourceRefs,
+                                        ...workspace.revision.criteria.flatMap(
+                                          (criterion) => criterion.sourceRefs,
+                                        ),
+                                      ].map((ref) => [ref.id, ref]),
+                                    ).values(),
+                                  ].filter((ref) => filter.sourceRefIds.includes(ref.id))}
+                                />
+                              </details>
+                            ) : null}
+                          </li>
+                        ))}
+                      </ul>
+                    ) : (
+                      <p className="text-muted-foreground">
+                        <Trans>No additional search filters</Trans>
+                      </p>
+                    )}
+                  </section>
+                ) : null}
                 {criteriaEdit?.roleId === workspace.role.id ? (
                   <div className="space-y-4">
                     {criteriaEdit.revision.criteria.map((criterion, index) => {
@@ -1775,7 +1979,12 @@ function RecruitingWorkspace({ threadId, botId, refreshSignal, onClose, onReveal
                     <div className="flex gap-2">
                       <Button
                         size="sm"
-                        disabled={savingCriteria || invalidCriteria || !criteriaChanges.length}
+                        disabled={
+                          savingCriteria ||
+                          invalidCriteria ||
+                          invalidSearchFilters ||
+                          (!criteriaChanges.length && !searchFiltersChanged)
+                        }
                         aria-busy={savingCriteria}
                         onClick={() => void saveCriteria()}
                       >
@@ -1795,7 +2004,7 @@ function RecruitingWorkspace({ threadId, botId, refreshSignal, onClose, onReveal
                     </div>
                     {criteriaFailed ? (
                       <p role="alert" className="text-destructive">
-                        <Trans>Criteria changed or could not be saved.</Trans>
+                        <Trans>Changes could not be saved.</Trans>
                       </p>
                     ) : null}
                   </div>

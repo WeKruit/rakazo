@@ -1656,6 +1656,292 @@ it("does not save unchanged or blank criteria and Cancel discards the draft", as
   expect(view.container.textContent).toContain("Build systems");
 });
 
+function searchFilterWorkspace() {
+  const filterSource = {
+    ...source,
+    id: "filter-source",
+    quote: "Include Bay Area. Exclude staffing agencies.",
+    url: "https://example.test/jd",
+  };
+  return {
+    role,
+    revision: {
+      ...revision,
+      sourceRefs: [...revision.sourceRefs, filterSource],
+      brief: {
+        fields: [],
+        questions: [],
+        rules: [
+          {
+            criterionId: "criterion-1",
+            origin: "jd" as const,
+            effect: "reject" as const,
+            sourceRefIds: [source.id],
+          },
+        ],
+        searchFilters: [
+          {
+            id: "region",
+            statement: "Bay Area",
+            mode: "include" as const,
+            origin: "jd" as const,
+            sourceRefIds: [filterSource.id],
+          },
+          {
+            id: "agency",
+            statement: "Staffing agencies",
+            mode: "exclude" as const,
+            origin: "user_instruction" as const,
+            sourceRefIds: [filterSource.id],
+          },
+          {
+            id: "startup",
+            statement: "Small teams",
+            mode: "prefer" as const,
+            origin: "inferred" as const,
+            sourceRefIds: [],
+          },
+        ],
+        confirmation: null,
+      },
+    },
+  };
+}
+
+async function changeSearchFilter(container: HTMLElement, value: string, index = 0) {
+  const input = container.querySelectorAll<HTMLTextAreaElement>(
+    'textarea[aria-label="Search filter"]',
+  )[index]!;
+  expect(input).toBeDefined();
+  await act(async () => {
+    Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, "value")!.set!.call(
+      input,
+      value,
+    );
+    input.dispatchEvent(new Event("input", { bubbles: true }));
+  });
+}
+
+it("shows sourced retrieval filters separately from hard and preferred qualification", async () => {
+  api.getWorkspace.mockResolvedValue(searchFilterWorkspace());
+  const view = await mounted();
+  const filters = view.container.querySelector('[aria-label="Search filters"]')!;
+  expect(filters).not.toBeNull();
+  expect(filters.textContent).toContain("Include");
+  expect(filters.textContent).toContain("Bay Area");
+  expect(filters.textContent).toContain("Exclude");
+  expect(filters.textContent).toContain("Staffing agencies");
+  expect(filters.textContent).toContain("Prefer");
+  expect(filters.textContent).toContain("Assumption");
+  expect(filters.textContent).not.toContain("Build systems");
+  expect(view.container.textContent).toContain("Hard criteria");
+  expect(
+    filters.querySelector<HTMLAnchorElement>('a[href="https://example.test/jd"]'),
+  ).not.toBeNull();
+  await view.click("Edit search filters");
+  expect(view.container.querySelectorAll('textarea[aria-label="Search filter"]')).toHaveLength(3);
+  await view.click("Cancel");
+  expect(api.editCriteria).not.toHaveBeenCalled();
+});
+
+it("saves filter changes with the loaded version and unchanged complete qualification", async () => {
+  const initial = searchFilterWorkspace();
+  initial.revision.criteria = [
+    {
+      ...revision.criteria[0]!,
+      expression: { kind: "atom", id: "atom-1", statement: "  Build systems  " },
+    },
+  ];
+  api.getWorkspace.mockResolvedValue(initial);
+  api.editCriteria.mockResolvedValue(initial);
+  const view = await mounted();
+  await view.click("Edit search filters");
+  await changeSearchFilter(view.container, "United States");
+  const select = view.container.querySelector<HTMLSelectElement>(
+    'select[aria-label="Search filter mode"]',
+  )!;
+  await act(async () => {
+    select.value = "prefer";
+    select.dispatchEvent(new Event("change", { bubbles: true }));
+  });
+  await view.click("Save");
+  expect(api.editCriteria).toHaveBeenCalledExactlyOnceWith({
+    threadId: "thread-1",
+    roleId: role.id,
+    expectedRevision: 2,
+    criteria: [
+      {
+        criterionId: "criterion-1",
+        priority: "hard",
+        atoms: [{ atomId: "atom-1", statement: "  Build systems  " }],
+      },
+    ],
+    searchFilters: [
+      { id: "region", statement: "United States", mode: "prefer" },
+      { id: "agency", statement: "Staffing agencies", mode: "exclude" },
+      { id: "startup", statement: "Small teams", mode: "prefer" },
+    ],
+  });
+});
+
+it("adds and removes filters, rejects blank statements, and can save no additional filters", async () => {
+  const initial = searchFilterWorkspace();
+  api.getWorkspace.mockResolvedValue(initial);
+  api.editCriteria.mockResolvedValue(initial);
+  const view = await mounted();
+  await view.click("Edit search filters");
+  await view.click("Add filter");
+  await view.click("Save");
+  expect(api.editCriteria).not.toHaveBeenCalled();
+  await changeSearchFilter(view.container, "Public robotics projects", 3);
+  await view.click("Save");
+  expect(api.editCriteria.mock.calls[0]?.[0].searchFilters.at(-1)).toEqual({
+    id: expect.any(String),
+    statement: "Public robotics projects",
+    mode: "include",
+  });
+  await view.click("Edit search filters");
+  while (view.container.querySelector('textarea[aria-label="Search filter"]'))
+    await view.click("Remove filter");
+  await view.click("Save");
+  expect(api.editCriteria.mock.calls.at(-1)?.[0].searchFilters).toEqual([]);
+});
+
+it("retains failed filter edits across refresh without silently adopting a newer version", async () => {
+  const initial = searchFilterWorkspace();
+  api.getWorkspace.mockResolvedValue(initial);
+  api.editCriteria.mockRejectedValue(new ORPCError("CONFLICT"));
+  const view = await mounted();
+  await view.click("Edit search filters");
+  await changeSearchFilter(view.container, "Keep this filter draft");
+  await view.click("Save");
+  api.getWorkspace.mockResolvedValue({
+    ...initial,
+    revision: { ...initial.revision, revision: 3, id: "revision-3" },
+  });
+  await view.click("Refresh");
+  expect(
+    view.container.querySelector<HTMLTextAreaElement>('textarea[aria-label="Search filter"]')
+      ?.value,
+  ).toBe("Keep this filter draft");
+  await view.click("Save");
+  expect(api.editCriteria.mock.calls.at(-1)?.[0].expectedRevision).toBe(2);
+  expect(view.container.querySelector('[role="alert"]')?.textContent).toContain(
+    "could not be saved",
+  );
+});
+
+it("keeps newer filter edits during save and advances only to the returned revision", async () => {
+  const initial = searchFilterWorkspace();
+  api.getWorkspace.mockResolvedValue(initial);
+  let finish!: (value: typeof initial) => void;
+  api.editCriteria.mockReturnValueOnce(
+    new Promise((resolve) => {
+      finish = resolve;
+    }),
+  );
+  const view = await mounted();
+  await view.click("Edit search filters");
+  await changeSearchFilter(view.container, "Submitted filter");
+  await view.click("Save");
+  await changeSearchFilter(view.container, "Newer filter draft");
+  const saved = {
+    ...initial,
+    revision: {
+      ...initial.revision,
+      id: "revision-3",
+      revision: 3,
+      brief: {
+        ...initial.revision.brief,
+        searchFilters: initial.revision.brief.searchFilters.map((item, index) =>
+          index ? item : { ...item, statement: "Submitted filter" },
+        ),
+      },
+    },
+  };
+  api.getWorkspace.mockResolvedValue(saved);
+  await act(async () => finish(saved));
+  expect(
+    view.container.querySelector<HTMLTextAreaElement>('textarea[aria-label="Search filter"]')
+      ?.value,
+  ).toBe("Newer filter draft");
+  api.editCriteria.mockResolvedValue(saved);
+  await view.click("Save");
+  expect(api.editCriteria.mock.calls.at(-1)?.[0]).toMatchObject({
+    expectedRevision: 3,
+    searchFilters: [
+      { id: "region", statement: "Newer filter draft", mode: "include" },
+      { id: "agency" },
+      { id: "startup" },
+    ],
+  });
+});
+
+it("edits search filters without introducing a qualification prerequisite", async () => {
+  const initial = searchFilterWorkspace();
+  api.getWorkspace.mockResolvedValue({
+    ...initial,
+    revision: { ...initial.revision, criteria: [] },
+  });
+  api.editCriteria.mockResolvedValue(initial);
+  const view = await mounted();
+  await view.click("Edit search filters");
+  await changeSearchFilter(view.container, "United States");
+  await view.click("Save");
+  expect(api.editCriteria.mock.calls[0]?.[0]).toMatchObject({
+    criteria: [],
+    searchFilters: [
+      { id: "region", statement: "United States", mode: "include" },
+      { id: "agency" },
+      { id: "startup" },
+    ],
+  });
+});
+
+it.each(["success", "failure"])(
+  "ignores a late filter save after switching thread (%s)",
+  async (outcome) => {
+    const initial = searchFilterWorkspace();
+    api.getWorkspace.mockResolvedValue(initial);
+    let finish!: (value: typeof initial) => void;
+    let fail!: (reason: Error) => void;
+    api.editCriteria.mockReturnValueOnce(
+      new Promise((resolve, reject) => {
+        finish = resolve;
+        fail = reject;
+      }),
+    );
+    const view = await mounted();
+    await view.click("Edit search filters");
+    await changeSearchFilter(view.container, "Previous role filter");
+    await view.click("Save");
+    const next = {
+      role: {
+        ...initial.role,
+        id: "next-role",
+        currentRevisionId: "next-revision",
+        title: "Other role",
+      },
+      revision: { ...initial.revision, id: "next-revision", roleId: "next-role" },
+    };
+    api.getWorkspace.mockResolvedValue(next);
+    await view.render("next-thread", 1);
+    expect(view.container.querySelector('textarea[aria-label="Search filter"]')).toBeNull();
+    await view.click("Edit search filters");
+    await changeSearchFilter(view.container, "Next role filter");
+    const reads = api.getWorkspace.mock.calls.length;
+    await act(async () =>
+      outcome === "success" ? finish(initial) : fail(new Error("Old save failed")),
+    );
+    expect(api.getWorkspace).toHaveBeenCalledTimes(reads);
+    expect(
+      view.container.querySelector<HTMLTextAreaElement>('textarea[aria-label="Search filter"]')
+        ?.value,
+    ).toBe("Next role filter");
+    expect(view.container.querySelector('[role="alert"]')).toBeNull();
+  },
+);
+
 it("edits one shared atom definition across repeated leaves and criteria", async () => {
   const shared = revision.criteria[0]!;
   api.getWorkspace.mockResolvedValue({
@@ -1804,6 +2090,7 @@ it("refreshes brief confirmation and saved assessments after editing criteria", 
     fields: [],
     questions: [],
     rules: [],
+    searchFilters: [],
     confirmation: {
       revision: 2,
       userId: "user-1",
@@ -3038,6 +3325,14 @@ it("confirms only the reviewed brief revision through the human API", async () =
   const brief = {
     fields: [
       {
+        key: "location",
+        value: "Remote in the United Kingdom",
+        origin: "jd",
+        state: "known",
+        consequential: true,
+        sourceRefIds: [source.id],
+      },
+      {
         key: "salary_range",
         value: "GBP 90,000 to 120,000",
         origin: "jd",
@@ -3048,6 +3343,7 @@ it("confirms only the reviewed brief revision through the human API", async () =
     ],
     questions: [],
     rules: [],
+    searchFilters: [],
     confirmation: null,
   };
   api.getWorkspace.mockResolvedValue({
@@ -3080,9 +3376,18 @@ it("keeps an unresolved brief unconfirmed and preserves its view after a conflic
         consequential: true,
         sourceRefIds: [],
       },
+      {
+        key: "location",
+        value: "Remote in the United Kingdom",
+        origin: "jd",
+        state: "known",
+        consequential: true,
+        sourceRefIds: [source.id],
+      },
     ],
     questions: [],
     rules: [],
+    searchFilters: [],
     confirmation: null,
   };
   api.getWorkspace.mockResolvedValue({

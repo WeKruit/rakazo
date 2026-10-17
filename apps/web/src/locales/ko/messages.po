@@ -342,6 +342,10 @@ msgstr ""
 msgid "Add Executor"
 msgstr "Executor 추가"
 
+#: src/pages/RecruitingPanel.tsx
+msgid "Add filter"
+msgstr ""
+
 #: src/pages/PluginsOverlay.tsx
 msgid "Add GraphQL"
 msgstr "GraphQL 추가"
@@ -942,6 +946,10 @@ msgstr "카드"
 #: src/pages/AccountSettingsOverlay.tsx
 msgid "Change password"
 msgstr "비밀번호 변경"
+
+#: src/pages/RecruitingPanel.tsx
+msgid "Changes could not be saved."
+msgstr ""
 
 #: src/pages/AccountSettingsOverlay.tsx
 msgid "Changing…"
@@ -1939,10 +1947,6 @@ msgstr ""
 msgid "Credentials are encrypted and never sent to the model."
 msgstr "인증 정보는 암호화되며 모델에 전송되지 않습니다."
 
-#: src/pages/RecruitingPanel.tsx
-msgid "Criteria changed or could not be saved."
-msgstr ""
-
 #. placeholder {0}: index + 1
 #: src/pages/RecruitingPanel.tsx
 msgid "Criterion {0}"
@@ -2268,6 +2272,10 @@ msgstr "수정 후 보내기"
 msgid "Edit Profile"
 msgstr "Bot 정보 수정"
 
+#: src/pages/RecruitingPanel.tsx
+msgid "Edit search filters"
+msgstr ""
+
 #: src/pages/Auth.tsx
 msgid "Email"
 msgstr "이메일"
@@ -2363,6 +2371,10 @@ msgstr "매주"
 
 #: src/pages/RecruitingPanel.tsx
 msgid "Evidence"
+msgstr ""
+
+#: src/pages/RecruitingPanel.tsx
+msgid "Exclude"
 msgstr ""
 
 #: src/pages/PluginsOverlay.tsx
@@ -2551,6 +2563,10 @@ msgstr ""
 msgid "Groups"
 msgstr ""
 
+#: src/pages/RecruitingPanel.tsx
+msgid "Guide retrieval; qualification criteria stay unchanged."
+msgstr ""
+
 #: src/components/call/CallCard.tsx
 msgid "Hang up"
 msgstr "통화 종료"
@@ -2687,6 +2703,10 @@ msgstr ""
 
 #: src/pages/shell/message-cards.tsx
 msgid "Inbox & email"
+msgstr ""
+
+#: src/pages/RecruitingPanel.tsx
+msgid "Include"
 msgstr ""
 
 #: src/pages/shell/bot-panel.tsx
@@ -3295,6 +3315,10 @@ msgstr "새 스페이스"
 msgid "New ticket"
 msgstr ""
 
+#: src/pages/RecruitingPanel.tsx
+msgid "No additional search filters"
+msgstr ""
+
 #: src/pages/MessagingSettingsOverlay.tsx
 msgid "No agent connections yet."
 msgstr "아직 Agent 연결이 없습니다."
@@ -3758,6 +3782,10 @@ msgid "POST to"
 msgstr "POST 대상"
 
 #: src/pages/RecruitingPanel.tsx
+msgid "Prefer"
+msgstr ""
+
+#: src/pages/RecruitingPanel.tsx
 msgid "Preferences"
 msgstr ""
 
@@ -4002,6 +4030,10 @@ msgstr "{full} 삭제"
 
 #: src/pages/shell/bot-credentials.tsx
 msgid "Remove {secretName}? This bot will no longer be able to use it."
+msgstr ""
+
+#: src/pages/RecruitingPanel.tsx
+msgid "Remove filter"
 msgstr ""
 
 #: src/pages/RoutineEditor.tsx
@@ -4401,6 +4433,23 @@ msgstr ""
 
 #: src/pages/RecruitingPanel.tsx
 msgid "Search candidates"
+msgstr ""
+
+#: src/pages/RecruitingPanel.tsx
+msgid "Search filter"
+msgstr ""
+
+#. placeholder {0}: index + 1
+#: src/pages/RecruitingPanel.tsx
+msgid "Search filter {0}"
+msgstr ""
+
+#: src/pages/RecruitingPanel.tsx
+msgid "Search filter mode"
+msgstr ""
+
+#: src/pages/RecruitingPanel.tsx
+msgid "Search filters"
 msgstr ""
 
 #: src/components/integrations/IntegrationSetup.tsx

@@ -3,6 +3,7 @@ import type { AdapterContext, ArtifactStore } from "@rakazo/adapter-kit";
 import type { PrismaClient } from "@rakazo/db";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { loadRecruitingRunContext } from "./recruiting-context.js";
+import { buildRecruitingResearchRequest } from "./recruiting-research.js";
 
 const db = vi.hoisted(() => ({ workspace: vi.fn(), adopt: vi.fn() }));
 vi.mock("@rakazo/db", async (original) => ({
@@ -96,6 +97,120 @@ describe("recruiting run context", () => {
   beforeEach(() => {
     vi.clearAllMocks();
     db.workspace.mockResolvedValue(workspace);
+  });
+
+  it("freezes retrieval filters separately from qualification in create and same-task continuation", async () => {
+    const source = {
+      id: "human-filter",
+      kind: "original_material" as const,
+      anchor: { kind: "message" as const, messageId: "human", locator: "blocks[0].text" },
+      readState: "read" as const,
+      readAt: "2026-10-16T00:00:00Z",
+      quote: "Search this role",
+    };
+    const brief = {
+      searchFilters: [
+        {
+          id: "agencies",
+          statement: "Exclude staffing agencies from retrieval",
+          mode: "exclude" as const,
+          origin: "user_instruction" as const,
+          sourceRefIds: [source.id],
+        },
+      ],
+      fields: ["salary_range", "location"].map((key) => ({
+        key,
+        value: key === "location" ? "Unrestricted" : "GBP 90,000 to 120,000",
+        state: "known" as const,
+        origin: "user_instruction" as const,
+        consequential: true,
+        sourceRefIds: [source.id],
+      })),
+      rules: [
+        {
+          criterionId: "years",
+          origin: "user_instruction" as const,
+          effect: "reject" as const,
+          sourceRefIds: [source.id],
+        },
+      ],
+      questions: [],
+      confirmation: {
+        revision: 1,
+        userId: "owner",
+        messageId: "confirmation",
+        confirmedAt: "2026-10-16T00:00:00Z",
+      },
+    };
+    const current = {
+      ...workspace,
+      revision: { ...workspace.revision, brief, sourceRefs: [source] },
+    };
+    db.workspace.mockResolvedValue(current);
+    const { deps } = fixture();
+    const first = await loadRecruitingRunContext(deps, run, { documents: [] }, context, {
+      reason: "search",
+    });
+    const input = {
+      source,
+      intent: { basis: "direct" as const, quote: source.quote },
+      purpose: "calibration" as const,
+      approvalEffectId: "documents-approved",
+      route: {
+        connectorId: "mcp" as const,
+        resourceId: "sourcing",
+        resourceRevision: 1,
+        toolName: "research" as const,
+      },
+      instructions: "Find profiles with source evidence for every criterion.",
+      output: "Return all found profiles, including missing evidence.",
+      recallScope: null,
+    };
+    const created = buildRecruitingResearchRequest({
+      ...input,
+      context: first!,
+      operation: "create",
+    });
+    expect(created.manifest.args).toHaveProperty(
+      "prompt",
+      expect.stringContaining("Search filters control retrieval only"),
+    );
+    expect(JSON.stringify(created.manifest.args)).toContain(
+      "Exclude staffing agencies from retrieval",
+    );
+    expect(JSON.stringify(created.manifest.args)).toContain("Seven years; secret-value");
+    const next = {
+      role: { ...current.role, revision: 2, currentRevisionId: "revision-2" },
+      revision: {
+        ...current.revision,
+        id: "revision-2",
+        revision: 2,
+        brief: {
+          ...brief,
+          searchFilters: [],
+          confirmation: { ...brief.confirmation, revision: 2 },
+        },
+      },
+    };
+    db.workspace.mockResolvedValue(next);
+    const refreshed = await loadRecruitingRunContext(deps, run, { documents: [] }, context, {
+      reason: "filter edit",
+    });
+    const continued = buildRecruitingResearchRequest({
+      ...input,
+      context: refreshed!,
+      operation: "continue",
+      providerTaskId: "existing-provider-task",
+      route: { ...input.route, toolName: "reply" },
+    });
+    expect(continued.manifest.args).toHaveProperty("task_id", "existing-provider-task");
+    expect(JSON.stringify(continued.manifest.args)).not.toContain(
+      "Exclude staffing agencies from retrieval",
+    );
+    expect(JSON.stringify(continued.manifest.args)).toContain("Seven years; secret-value");
+    expect(continued.sha256).not.toBe(created.sha256);
+    expect(refreshed!.contextArtifact.artifactId).not.toBe(first!.contextArtifact.artifactId);
+    expect(current.revision.brief.searchFilters).toHaveLength(1);
   });
 
   it("does not publish an adoption when the authorized thread has no role", async () => {

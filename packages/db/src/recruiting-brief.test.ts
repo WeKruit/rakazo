@@ -38,7 +38,7 @@ function fixture(crmBindingEffectId: string | null = null) {
     anchor: { kind: "message", messageId: "jd-message", locator: "blocks[0].text" },
     readState: "read",
     readAt: "2026-10-16T18:00:00Z",
-    quote: "GBP 90,000 to 120,000",
+    quote: "GBP 90,000 to 120,000. Location unrestricted.",
   };
   const revisions = [
     {
@@ -60,7 +60,16 @@ function fixture(crmBindingEffectId: string | null = null) {
             consequential: true,
             sourceRefIds: ["jd"],
           },
+          {
+            key: "location",
+            value: "Unrestricted",
+            state: "known",
+            origin: "jd",
+            consequential: true,
+            sourceRefIds: ["jd"],
+          },
         ],
+        searchFilters: [] as RecruitingBrief["searchFilters"],
         questions: [],
         rules: [] as RecruitingBrief["rules"],
         confirmation: null as RecruitingBrief["confirmation"],
@@ -83,7 +92,7 @@ function fixture(crmBindingEffectId: string | null = null) {
             role: "user",
             botId: null,
             externalTranscriptFor: null,
-            blocks: [{ kind: "text", text: "GBP 90,000 to 120,000" }],
+            blocks: [{ kind: "text", text: "GBP 90,000 to 120,000. Location unrestricted." }],
           },
       ),
       findMany: vi.fn(async ({ where }: { where: { id: { in: string[] } } }) =>
@@ -91,7 +100,9 @@ function fixture(crmBindingEffectId: string | null = null) {
       ),
       create: vi.fn(async ({ data }) => {
         const message = {
-          id: "human-confirmation",
+          id: humanMessages.size
+            ? `human-confirmation-${humanMessages.size + 1}`
+            : "human-confirmation",
           externalTranscriptFor: null,
           ...data,
           botId: data.botId ?? null,
@@ -116,7 +127,7 @@ function fixture(crmBindingEffectId: string | null = null) {
         ),
       ),
       create: vi.fn(async ({ data }) => {
-        const revision = { id: "revision-2", createdAt: new Date(), ...data };
+        const revision = { id: `revision-${data.revision}`, createdAt: new Date(), ...data };
         revisions.push(revision);
         return revision;
       }),
@@ -191,6 +202,119 @@ function criteriaFixture(crmBindingEffectId: string | null = null) {
 }
 
 describe("native human criterion editing", () => {
+  it("allows a filter-only human revision when qualification has no criteria", async () => {
+    const f = fixture();
+    const saved = await recruiting.editRecruitingCriteria(f.prisma, actor, {
+      threadId: "thread",
+      roleId: "role",
+      expectedRevision: 1,
+      criteria: [],
+      searchFilters: [{ id: "titles", statement: "Prefer backend titles", mode: "prefer" }],
+    });
+    expect(saved.revision.criteria).toEqual([]);
+    expect(saved.revision.brief?.searchFilters).toMatchObject([
+      { id: "titles", mode: "prefer", origin: "user_instruction" },
+    ]);
+    expect(saved.role.revision).toBe(2);
+  });
+  it("saves filter-only add/edit/remove through the existing native human revision while preserving qualification", async () => {
+    const f = criteriaFixture();
+    f.input.criteria[0]!.priority = "hard" as never;
+    f.input.criteria[0]!.atoms[0]!.statement = "Implemented geometry";
+    const original = structuredClone(f.revisions[0]!);
+    original.brief.searchFilters = [
+      {
+        id: "existing",
+        statement: "Prefer backend titles",
+        mode: "prefer",
+        origin: "jd",
+        sourceRefIds: ["jd"],
+      },
+    ];
+    f.revisions[0]!.brief.searchFilters = original.brief.searchFilters;
+    const searchFilters = [
+      { id: "existing", statement: "Prefer backend titles", mode: "prefer" },
+      { id: "region", statement: "Search the UK", mode: "include" },
+    ];
+    const saved = await recruiting.editRecruitingCriteria(f.prisma, actor, {
+      ...f.input,
+      searchFilters,
+    });
+    expect(saved.role.revision).toBe(2);
+    expect(saved.revision.criteria).toEqual(original.criteria);
+    expect(saved.revision.brief?.confirmation).toBeNull();
+    expect(saved.revision.brief?.searchFilters[0]).toEqual(original.brief.searchFilters[0]);
+    const human = saved.revision.sourceRefs.at(-1)!;
+    expect(saved.revision.brief?.searchFilters[1]).toEqual({
+      ...searchFilters[1],
+      origin: "user_instruction",
+      sourceRefIds: [human.id],
+    });
+    expect(human.quote).toContain('"statement":"Search the UK"');
+    expect(f.revisions[0]).toEqual(original);
+    const changedFilters = [
+      { ...searchFilters[0]!, statement: "Search senior backend titles", mode: "include" },
+      searchFilters[1]!,
+    ];
+    const changed = await recruiting.editRecruitingCriteria(f.prisma, actor, {
+      ...f.input,
+      expectedRevision: 2,
+      searchFilters: changedFilters,
+    });
+    const changedSource = changed.revision.sourceRefs.at(-1)!;
+    expect(changed.revision.brief?.searchFilters[0]).toEqual({
+      ...changedFilters[0],
+      origin: "user_instruction",
+      sourceRefIds: [changedSource.id],
+    });
+    expect(changed.revision.brief?.searchFilters[1]).toEqual(
+      saved.revision.brief?.searchFilters[1],
+    );
+    expect(changed.revision.criteria).toEqual(original.criteria);
+    const removed = await recruiting.editRecruitingCriteria(f.prisma, actor, {
+      ...f.input,
+      expectedRevision: 3,
+      searchFilters: [],
+    });
+    expect(removed.role.revision).toBe(4);
+    expect(removed.revision.brief?.searchFilters).toEqual([]);
+    expect(removed.revision.criteria).toEqual(original.criteria);
+  });
+  it("preserves filter provenance on criteria-only edits and avoids a revision for unchanged filters", async () => {
+    const f = criteriaFixture();
+    const filters: RecruitingBrief["searchFilters"] = [
+      {
+        id: "region",
+        statement: "Search the UK",
+        mode: "include",
+        origin: "jd",
+        sourceRefIds: ["jd"],
+      },
+    ];
+    f.revisions[0]!.brief.searchFilters = filters;
+    const edited = await recruiting.editRecruitingCriteria(f.prisma, actor, f.input);
+    expect(edited.revision.brief?.searchFilters).toEqual(filters);
+    const unchanged = await recruiting.editRecruitingCriteria(f.prisma, actor, {
+      ...f.input,
+      expectedRevision: 2,
+      searchFilters: filters.map(({ origin: _origin, sourceRefIds: _refs, ...filter }) => filter),
+    });
+    expect(unchanged.role.revision).toBe(2);
+    expect(f.tx.message.create).toHaveBeenCalledOnce();
+  });
+  it("rejects stale filter edits without changing the saved filters", async () => {
+    const f = criteriaFixture();
+    const original = structuredClone(f.revisions[0]);
+    await expect(
+      recruiting.editRecruitingCriteria(f.prisma, actor, {
+        ...f.input,
+        expectedRevision: 99,
+        searchFilters: [],
+      }),
+    ).rejects.toThrow();
+    expect(f.revisions[0]).toEqual(original);
+    expect(f.tx.message.create).not.toHaveBeenCalled();
+  });
   it("preserves the expression, immutable original and other fields while sourcing exact meaningful edits to one human message", async () => {
     const f = criteriaFixture();
     const original = structuredClone(f.revisions[0]!);
@@ -696,7 +820,7 @@ it("accepts actual native human provenance for a user instruction", async () => 
     role: "user",
     botId: null,
     externalTranscriptFor: null,
-    blocks: [{ kind: "text", text: "GBP 90,000 to 120,000" }],
+    blocks: [{ kind: "text", text: "GBP 90,000 to 120,000. Location unrestricted." }],
   };
   f.tx.message.findMany.mockResolvedValue([native]);
   const saved = await confirmRecruitingBrief(f.prisma, actor, {
@@ -717,7 +841,7 @@ it("rejects bot-authored evidence mislabeled as a user instruction", async () =>
     role: "bot",
     botId: "bot",
     externalTranscriptFor: null,
-    blocks: [{ kind: "text", text: "GBP 90,000 to 120,000" }],
+    blocks: [{ kind: "text", text: "GBP 90,000 to 120,000. Location unrestricted." }],
   };
   f.tx.message.findMany.mockResolvedValue([bot]);
   await expect(

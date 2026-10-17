@@ -10,7 +10,17 @@
 
 ## 当前发布与缺口（2026-10-16）
 
-Execution priority: feature implementation and direct product validation come first. Do not wait for CodeQL/CI after each push or treat those waits as a product milestone. Keep focused checks and preserve the full live acceptance requirements; merge, deployment, production migration and paid-resource authorization remain separate.
+Execution priority: filter playbook and sourcing (S1–S5) come first; reply and follow-up work is deferred. Feature implementation and direct product validation come before CI waits. Do not wait for CodeQL/CI after each push. The owner authorized an incremental spending cap of US$150; track usage against the private authorization baseline and retain existing resources. Merge, deployment, production migration, access expansion and outbound authorization remain separate.
+
+### 当前首要增量：搜索过滤与找人（未发布）
+
+- 复用现有 brief JSON、不可变岗位版本、原生人类来源、CAS 和 Role 编辑/API；新增 `searchFilters`，每项有稳定 ID、statement、include/exclude/prefer、origin 和 sourceRefIds。无额外过滤显式为 `[]`，不是资格条件或 provider 资格结论。推断只能 prefer；未读、缺来源或冒用人类身份的过滤不接受。
+- 人工可以增删/修改/清空过滤；省略不改，空数组清空。未改的条件和来源保留；修改产生同一岗位的新版本和真实人类消息、清除旧 G0，无变化不写新版本。缺失 location 也进入现有关键澄清，已有来源的 unrestricted 不重复问。
+- 原生运行上下文和冻结检索请求包含当前过滤，与 hard/preferred 判断及单轮召回范围分开；反馈后的 continue 沿保存的 provider task，历史请求不改写。Autumn 当前使用 prompt 而非结构化 filter API，因此传入过滤不等于已证明 provider 应用过滤。所有发现和 unknown 仍保留。
+- 现有 Role 组件、来源阅读器和 Cards/Table 复用，无新路由/依赖/harness/数据库迁移。独立 SPEC/QUALITY 审查已完成；修正了合成截图中 Artifact 来源冒标 user_instruction 的问题。
+- 本批九个聚焦文件 **494 项离线检查通过**，contracts/core/DB/adapters/API/worker/Web 七包类型检查通过。共享层独立检查 310 项、adapter 独立检查 153 项、面板独立检查 101 项与总批次有重叠，不相加。翻译提取/编译通过。Chrome 手动验证原组件的过滤显示、编辑启用 Save、取消、已存原文高亮和未评估名单；材料/RPC 明确为 Synthetic。现有浏览器用例新增两张过滤截图，未运行 Playwright/CI，无 CI 截图链接。PostgreSQL fixture 仅更新，没有运行或启动本地数据库。
+- 尚缺：发布后真实 Supabase 保存/冲突/重启；原生 Main/Sourcer 指令与 intake/sourcing/evidence skills 采用（目前仅有针对已捕获版本的私有差异提案，应用前须新读）；反馈与明确原 task 的绑定；完整跨角色/客户历史去重；G1 十人校准/G2 后原 task 续搜与真实 Autumn 过滤质量。不能据此标记 S1–S5、P6 或 M1–M5 完成。
+- 未完成的回复修订改动单独保存在本地 WIP 分支，不进入本批找人发布；此前原生回复关联代码保留，不声明 G4 通过。
 
 ### 产品、数据与 UI 总览（当前执行入口）
 
@@ -24,7 +34,7 @@ Execution priority: feature implementation and direct product validation come fi
 | 原生记忆、选择、自定义 input、审批及恢复 | 部分原卡在真实容器替换后继续；记忆有写入/跨对话召回证明 | 所有卡型、多用户、未知外部写入、完整生命周期验收 |
 | 岗位、来源和评估 | 版本化岗位、已保存评估、三态、Cards/Table 和部分原消息定位已发布 | 完整真实 profile/JD/PDF、全部输入类型、真实候选语义验收 |
 | 原件读取、来源高亮、brief 与 G1/G2 | 新原件查看器、brief 确认与 G1/G2 执行连接已有工作分支代码；最近已提交 `dfd85463` | 尚未部署；不能当当前网页已有功能或真实业务通过 |
-| 人工编辑岗位条件 | 原 Role 面板的语义条件、结构化年限规则及 hard/preferred 编辑已有代码，同事务保存真实人类来源和版本/CAS；未发布 | 条件增删/逻辑组重构、独立召回 filters 和全流程验收仍在 J06 |
+| 人工编辑岗位条件 | 原 Role 面板的语义条件、结构化年限规则及 hard/preferred 编辑已有代码；新增独立召回 filters 的增删改/来源与版本/CAS，未发布 | 资格条件增删/逻辑组重构、真实检索应用及全流程验收仍在 J06 |
 | Autumn | 已接只读服务；原生 task/action/请求/回执及同 task 续搜有代码 | 新真实搜索→证据→反馈→原 task 续搜的整条业务链未通过 |
 | CRM | 用户 OAuth、组织身份和只读发现已接；[CRM PR #44](https://github.com/WeKruit/headhunter-agent/pull/44) 已补同组织身份去重、候选/来源/多岗位原子导入；Rakazo 已接精确目标确认、来源行/原生导入 effect 关联及回执状态展示，未发布 | 新迁移及 MCP/Web 发布、真实目标绑定/导入写读/并发/RLS、可信发送镜像；抑制规则迁移尚未执行 |
 | Instantly | 已接只读服务；分支已补一次性审批、候选/岗位/来源绑定、跨 run 的原邮件轮次去重、精确回复回执及实时 CRM/邮件预检，未发布 | 完整旧 hold 来源、Gmail 与 provider 历史覆盖、草稿修订、真实发送/回复停止；现有 MCP 尚不能声明完整历史覆盖 |
@@ -125,10 +135,10 @@ Chrome 实际打开现有组件 fixture，验证 Table 中三条候选（含两�
 
 #### 接下来的交付批次
 
-1. **首批代码已实现、待发布验收**：人工条件编辑（原面板 + 真实人类来源/CAS，计算条件使用结构化规则编辑）；CRM 发送前上下文/抑制读取（复用用户 OAuth/RLS）。候选角色兴趣使用现有 per-role RPC，不伪造 pipeline 的全局 interest 字段。
-2. **候选数据与工作台**：补所有已找到候选的索引/轮次关联，接真实 name/profile 字段，交付服务端分页/筛选/排序、持久 shortlist 和 Dashboard 真实聚合。复用现有 Cards/Table/五视图，保留未评估者。
-3. **反馈与 CRM**：从真实候选反馈到版本化规则、同 provider task 续搜，再完成已存在候选的来源/评审写读，以及新人导入/身份去重/岗位关联；写失败不能显示已同步。
-4. **外联闭环**：G3/G4 精确内容/名单/设置审批；发送前读取真实 hold/pass/suppression/重复及邮件状态，保存 provider 回执，回复/opt-out 停止。优先原生 provider stop，不额外搭 outbox/poll 引擎；附件能力以实际合同为准。
+1. **搜索过滤与需求确认**：先发布验收原面板过滤/资格条件编辑、来源、关键澄清和 G0；原生指令/skills 采用同一领域记录，不以旧 CSV/脚本替代业务真值。
+2. **真实找人与候选工作台**：G1 → 十人校准 → 全部结果落库/身份去重/轮次关联 → 候选证据及 unknown → 人工反馈 → 当前规则确认/G2 → 原 task 续搜。复用现有 Cards/Table/五视图和 Dashboard，保留未评估者。
+3. **CRM**：找人主线后完成已有候选的来源/评审写读、新人导入/身份去重/岗位关联；写失败不能显示已同步。保留现有代码，不先扩大 CRM 发布范围。
+4. **外联闭环（后置）**：G3/G4 精确内容/名单/设置审批；发送前真实 hold/pass/suppression/重复及邮件状态，provider 回执、回复/opt-out 停止；回复修订/跟进在找人主线后恢复。复用原生 provider，不另建引擎。
 5. **其余 M3/M4 与 M5**：每 bot runtime/connection/config snapshot、人类群成员、插件/文件/服务迁入等按 181 项并行补齐；最后逐项做多用户、跨对话、原卡等待时重启、未知结果恢复和整品验收。
 
 每个批次都交付可测试页面/真实状态、代码 revision 和有边界的截图/回执。发布另行确认；生产迁移、工具分配扩大、定时续跑和真实外发不因计划写完而自动获准。完整闭环未通过前，M1/P6 不完成；全部适用动作未验收前，总 Goal 不完成。
@@ -287,7 +297,7 @@ P0–P6 保留为 M1，不能再作为最终停止条件。完整动作与验收
 
 已纳入另一 session 的 [T01–T10 招聘产品计划](RECRUITING-DOMAIN-PLAN.md)。原 P0–P6 继续作为 M1 闭环框架；完整 Goal 以 M1–M5 和 181 项动作验收为准，新计划自己的六个阶段不覆盖或重新编号本文件的阶段。当前先补产品真值与交互，不继续执行此前的 Dyna 搜人示范。
 
-搜索/续搜按已授权账号能力、现有额度和 provider rate limit 执行，不逐次弹人工审批。原生审批仍用于外发等确需人类决定的副作用；需要新增付费就停。当前真实 JD 样例采用用户确认的 5+，所有年限/月份门槛由当前岗位版本提供，导入计划的 7+/84 月不是全局规则。
+搜索/续搜按已授权账号能力、现有额度和 provider rate limit 执行，不逐次弹人工审批；本轮增量开销遵守 US$150 上限及上述独立授权边界。原生审批仍用于外发等确需人类决定的副作用。当前真实 JD 样例采用用户确认的 5+，所有年限/月份门槛由当前岗位版本提供，导入计划的 7+/84 月不是全局规则。
 
 | 新任务 | 纳入原阶段 | 当前状态 |
 | --- | --- | --- |

@@ -1034,7 +1034,16 @@ async function replyFixture() {
           consequential: true,
           sourceRefIds: ["human"],
         },
+        {
+          key: "location",
+          value: "Unrestricted",
+          state: "known",
+          origin: "user_instruction",
+          consequential: true,
+          sourceRefIds: ["human"],
+        },
       ],
+      searchFilters: [],
       questions: [],
       rules: [],
       confirmation: {

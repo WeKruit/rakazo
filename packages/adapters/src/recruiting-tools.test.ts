@@ -254,10 +254,19 @@ describe("native research preparation", () => {
         definitionQuestions: [],
         createdAt: "2026-10-16T18:00:00Z",
         brief: {
+          searchFilters: [],
           fields: [
             {
               key: "salary_range",
               value: "GBP 90,000 to 120,000",
+              origin: "user_instruction",
+              state: "known",
+              consequential: true,
+              sourceRefIds: ["human"],
+            },
+            {
+              key: "location",
+              value: "Unrestricted",
               origin: "user_instruction",
               state: "known",
               consequential: true,
