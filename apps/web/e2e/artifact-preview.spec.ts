@@ -51,6 +51,7 @@ test("recruiting dashboard includes unassessed saved candidates and their source
 }, testInfo) => {
   await page.goto("/e2e/fixtures/marketing-shots.html?view=recruiting");
   await page.getByRole("tab", { name: "Dashboard", exact: true }).click();
+  await expect(page.getByRole("heading", { name: "Research history", exact: true })).toBeVisible();
   const totals = page.getByLabel("Saved candidate totals", { exact: true });
   await expect(
     totals.getByText("Saved source rows", { exact: true }).locator("..").locator("dd"),

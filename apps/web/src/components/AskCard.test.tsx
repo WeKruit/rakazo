@@ -51,13 +51,10 @@ it("submits a custom answer on the original choice card", async () => {
   };
   try {
     act(() => root.render(<AskCard block={block} canAnswer onAnswer={answer} />));
-    const other = [...container.querySelectorAll("button")].find(
-      (button) => button.textContent === "Type your answer",
-    );
-    expect(other).toBeDefined();
-    act(() => other!.click());
     const input = container.querySelector<HTMLTextAreaElement>('textarea[aria-label="Answer"]');
     expect(input).not.toBeNull();
+    expect(container.textContent).toContain("Evidence");
+    expect(container.textContent).toContain("Location");
     const raw = " \n  Robotics evidence first 😀\n  ";
     act(() => {
       Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, "value")!.set!.call(
@@ -129,6 +126,8 @@ it("keeps approval cards restricted to their native decisions", () => {
       "Deny",
     ]);
     expect(container.querySelector("input")).toBeNull();
+    expect(container.querySelector("textarea")).toBeNull();
+    expect(container.querySelector("form")).toBeNull();
   } finally {
     act(() => root.unmount());
   }

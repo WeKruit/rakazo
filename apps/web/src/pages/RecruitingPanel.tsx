@@ -58,6 +58,7 @@ type Props = {
   botId?: string;
   refreshSignal?: number;
   onClose: () => void;
+  showDiagnostics?: boolean;
   onRevealMessage?: (target: { botId?: string; groupId?: string; messageId: string }) => void;
 };
 type Snapshot = {
@@ -92,7 +93,13 @@ function CandidateCounts({ counts }: { counts: ListRecruitingCandidatesOutput["c
   );
 }
 
-function CandidateProfile({ candidate }: { candidate: RecruitingCandidate }) {
+function CandidateProfile({
+  candidate,
+  showDiagnostics = false,
+}: {
+  candidate: RecruitingCandidate;
+  showDiagnostics?: boolean;
+}) {
   return (
     <div className="space-y-1 text-xs">
       {!candidate.name ? (
@@ -125,10 +132,10 @@ function CandidateProfile({ candidate }: { candidate: RecruitingCandidate }) {
           <summary className="cursor-pointer text-muted-foreground">
             <Trans>Profile details</Trans>
           </summary>
-          {candidate.discoveryCount ? <p>provider_report</p> : null}
-          {candidate.issues.map((issue) => (
-            <p key={issue}>{issue}</p>
-          ))}
+          {candidate.discoveryCount ? (
+            <p>{showDiagnostics ? "provider_report" : <Trans>Research findings</Trans>}</p>
+          ) : null}
+          {showDiagnostics ? candidate.issues.map((issue) => <p key={issue}>{issue}</p>) : null}
           {candidate.evidenceUrls?.map((url) => (
             <a
               key={url}
@@ -137,7 +144,7 @@ function CandidateProfile({ candidate }: { candidate: RecruitingCandidate }) {
               target="_blank"
               rel="noreferrer"
             >
-              {url}
+              {showDiagnostics ? url : new URL(url).hostname}
             </a>
           ))}
         </details>
@@ -163,8 +170,30 @@ function CandidateAssessment({ candidate }: { candidate: RecruitingCandidate }) 
   );
 }
 
+function ResearchActionStatus({ action }: { action: RecruitingResearchAction }) {
+  return (
+    <>
+      {action.kind === "create" ? <Trans>New search</Trans> : <Trans>Search follow-up</Trans>}
+      {" · "}
+      {action.deliveryState === "prepared" ? (
+        <Trans>Prepared</Trans>
+      ) : action.deliveryState === "sending" ? (
+        <Trans>Submitting</Trans>
+      ) : action.deliveryState === "accepted" ? (
+        <Trans>Submitted</Trans>
+      ) : action.deliveryState === "rejected" ? (
+        <Trans>Not accepted</Trans>
+      ) : action.deliveryState === "superseded" ? (
+        <Trans>Replaced</Trans>
+      ) : (
+        <Trans>Outcome unknown</Trans>
+      )}
+    </>
+  );
+}
+
 function CrmStatus({ sync }: { sync: RecruitingCrmCandidateSync | null }) {
-  if (!sync) return <Trans>No CRM receipt</Trans>;
+  if (!sync) return <Trans>Sync not confirmed</Trans>;
   switch (sync.status) {
     case "pending":
       return <Trans>Pending approval</Trans>;
@@ -186,9 +215,11 @@ function CrmStatus({ sync }: { sync: RecruitingCrmCandidateSync | null }) {
 function CrmDetails({
   sync,
   target,
+  showDiagnostics = false,
 }: {
   sync: RecruitingCrmCandidateSync | null;
   target: RecruitingCrmTarget;
+  showDiagnostics?: boolean;
 }) {
   return (
     <div className="space-y-1 text-xs">
@@ -198,7 +229,7 @@ function CrmDetails({
       <p>
         <Trans>CRM</Trans> · <CrmStatus sync={sync} />
       </p>
-      {sync?.status === "synced" && sync.receipt ? (
+      {showDiagnostics && sync?.status === "synced" && sync.receipt ? (
         <details>
           <summary className="cursor-pointer text-muted-foreground">
             <Trans>CRM receipt</Trans>
@@ -218,12 +249,14 @@ function CandidateSources({
   refreshSignal,
   roleRevisionId,
   onAccessError,
+  showDiagnostics = false,
 }: {
   candidate: RecruitingCandidate;
   research: Snapshot["research"];
   refreshSignal: ListRecruitingCandidatesOutput | null;
   roleRevisionId: string;
   onAccessError: (error: unknown) => void;
+  showDiagnostics?: boolean;
 }) {
   const { t } = useLingui();
   const [page, setPage] = useState<Awaited<
@@ -322,21 +355,53 @@ function CandidateSources({
             className="space-y-2 border-s border-border ps-3"
           >
             <p className="text-xs text-muted-foreground">
-              provider_report{action ? ` · ${action.kind}` : ""} · {source.observedAt}
+              {showDiagnostics ? (
+                <>
+                  provider_report{action ? ` · ${action.kind}` : ""} · {source.observedAt}
+                </>
+              ) : (
+                <>
+                  <Trans>Research findings</Trans>
+                  {" · "}
+                  <time dateTime={source.observedAt}>
+                    {new Date(source.observedAt).toLocaleString(undefined, {
+                      timeZone: "America/Los_Angeles",
+                      timeZoneName: "short",
+                    })}
+                  </time>
+                </>
+              )}
             </p>
-            <details>
-              <summary className="cursor-pointer text-xs text-muted-foreground">
-                <Trans>Discovery details</Trans>
-              </summary>
-              <pre className="whitespace-pre-wrap break-words text-xs">
-                {JSON.stringify(discovery, null, 2)}
-              </pre>
-              {crmImports.map((sync) => (
+            {showDiagnostics ? (
+              <details>
+                <summary className="cursor-pointer text-xs text-muted-foreground">
+                  <Trans>Discovery details</Trans>
+                </summary>
+                <pre className="whitespace-pre-wrap break-words text-xs">
+                  {JSON.stringify(discovery, null, 2)}
+                </pre>
+                {crmImports.map((sync) => (
+                  <CrmDetails
+                    key={sync.effectId}
+                    sync={sync}
+                    target={sync.target}
+                    showDiagnostics={showDiagnostics}
+                  />
+                ))}
+              </details>
+            ) : (
+              crmImports.map((sync) => (
                 <CrmDetails key={sync.effectId} sync={sync} target={sync.target} />
-              ))}
-            </details>
-            <ArtifactReference reference={source.artifactRef} label={t`Source Artifact`} />
-            {task && action ? (
+              ))
+            )}
+            {showDiagnostics ? (
+              <ArtifactReference
+                reference={source.artifactRef}
+                label={t`Source Artifact`}
+                showDiagnostics
+              />
+            ) : null}
+            {showDiagnostics && task && action ? (
               <ResearchResults
                 task={task}
                 action={{ ...action, outputArtifacts: [source.artifactRef] }}
@@ -784,10 +849,12 @@ function ArtifactReference({
   reference,
   label,
   source,
+  showDiagnostics = false,
 }: {
   reference: RecruitingArtifactRef;
   label: string;
   source?: RecruitingSourceRef | RecruitingAssessmentSourceRef;
+  showDiagnostics?: boolean;
 }) {
   const { t } = useLingui();
   const [open, setOpen] = useState(false);
@@ -867,13 +934,18 @@ function ArtifactReference({
       {open ? (
         <div className="mt-2 space-y-1">
           {artifact && target ? (
-            <ArtifactFileCard
-              target={target}
-              artifactId={reference.artifactId}
-              name={artifact.name}
-              mimeType={artifact.mimeType}
-              size={artifact.size}
-            />
+            !showDiagnostics &&
+            source?.kind === "provider_report" &&
+            (artifact.mimeType === "application/json" ||
+              artifact.mimeType.endsWith("+json")) ? null : (
+              <ArtifactFileCard
+                target={target}
+                artifactId={reference.artifactId}
+                name={showDiagnostics ? artifact.name : label}
+                mimeType={artifact.mimeType}
+                size={artifact.size}
+              />
+            )
           ) : current?.failed || artifact ? (
             <p role="alert">
               <Trans>Source unavailable</Trans>
@@ -905,13 +977,15 @@ function ArtifactReference({
               <Trans>Source unavailable</Trans>
             </p>
           ) : null}
-          <details className="text-xs text-muted-foreground">
-            <summary className="cursor-pointer">
-              <Trans>Details</Trans>
-            </summary>
-            <p className="break-all">{reference.artifactId}</p>
-            <p className="break-all">SHA-256 {reference.sha256}</p>
-          </details>
+          {showDiagnostics ? (
+            <details className="text-xs text-muted-foreground">
+              <summary className="cursor-pointer">
+                <Trans>Details</Trans>
+              </summary>
+              <p className="break-all">{reference.artifactId}</p>
+              <p className="break-all">SHA-256 {reference.sha256}</p>
+            </details>
+          ) : null}
         </div>
       ) : null}
     </details>
@@ -922,11 +996,14 @@ function Sources({
   sources,
   messageTargets,
   onRevealMessage,
+  showDiagnostics = false,
 }: {
   sources: readonly (RecruitingSourceRef | RecruitingAssessmentSourceRef)[];
   messageTargets?: Snapshot["assessments"][number]["sourceMessageTargets"];
   onRevealMessage?: Props["onRevealMessage"];
+  showDiagnostics?: boolean;
 }) {
+  const { t } = useLingui();
   const byMessageId = new Map(messageTargets?.map((target) => [target.messageId, target]));
   return (
     <ul className="space-y-2 text-sm">
@@ -936,7 +1013,31 @@ function Sources({
         return (
           <li key={source.id} className="space-y-1">
             <p className="text-xs text-muted-foreground">
-              {source.kind} · {source.readState}
+              {showDiagnostics ? (
+                <>
+                  {source.kind} · {source.readState}
+                </>
+              ) : (
+                <>
+                  {source.kind === "provider_report" ? (
+                    <Trans>Research findings</Trans>
+                  ) : source.kind === "original_material" ? (
+                    <Trans>Original source</Trans>
+                  ) : source.kind === "candidate_statement" ? (
+                    <Trans>Candidate statement</Trans>
+                  ) : (
+                    <Trans>Recruiter verified</Trans>
+                  )}
+                  {" · "}
+                  {source.readState === "read" ? (
+                    <Trans>Reviewed</Trans>
+                  ) : source.readState === "unread" ? (
+                    <Trans>Not reviewed</Trans>
+                  ) : (
+                    <Trans>Unavailable</Trans>
+                  )}
+                </>
+              )}
             </p>
             {source.anchor.kind === "message" ? (
               <div>
@@ -961,8 +1062,9 @@ function Sources({
               <ArtifactReference
                 reference={source.anchor.artifact}
                 key={`${source.anchor.artifact.artifactId}:${source.anchor.artifact.sha256}`}
-                label={source.anchor.locator}
+                label={showDiagnostics ? source.anchor.locator : t`Source`}
                 source={source}
+                showDiagnostics={showDiagnostics}
               />
             )}
             {source.url ? (
@@ -972,7 +1074,7 @@ function Sources({
                 rel="noreferrer"
                 className="block break-all underline underline-offset-4"
               >
-                {source.url}
+                {showDiagnostics ? source.url : new URL(source.url).hostname}
               </a>
             ) : null}
             {source.quote ? (
@@ -987,7 +1089,13 @@ function Sources({
   );
 }
 
-function MemoryDocumentView({ document }: { document: MemoryDocument }) {
+function MemoryDocumentView({
+  document,
+  showDiagnostics = false,
+}: {
+  document: MemoryDocument;
+  showDiagnostics?: boolean;
+}) {
   const [showHistory, setShowHistory] = useState(false);
   const [history, setHistory] = useState<MemoryRevision[] | null>(null);
   const [failed, setFailed] = useState(false);
@@ -1047,12 +1155,12 @@ function MemoryDocumentView({ document }: { document: MemoryDocument }) {
                     <Trans>Revision {entry.revision}</Trans> · {entry.createdAt}
                   </p>
                   <p className="whitespace-pre-wrap break-words">{entry.content}</p>
-                  {entry.sourceThreadId ? (
+                  {showDiagnostics && entry.sourceThreadId ? (
                     <p className="break-all text-xs text-muted-foreground">
                       <Trans>Thread</Trans> · {entry.sourceThreadId}
                     </p>
                   ) : null}
-                  {entry.sourceRunId ? (
+                  {showDiagnostics && entry.sourceRunId ? (
                     <p className="break-all text-xs text-muted-foreground">
                       <Trans>Run</Trans> · {entry.sourceRunId}
                     </p>
@@ -1090,7 +1198,14 @@ export function RecruitingPanel(props: Props) {
   return <RecruitingWorkspace key={`${props.threadId}:${props.botId ?? "group"}`} {...props} />;
 }
 
-function RecruitingWorkspace({ threadId, botId, refreshSignal, onClose, onRevealMessage }: Props) {
+function RecruitingWorkspace({
+  threadId,
+  botId,
+  refreshSignal,
+  onClose,
+  onRevealMessage,
+  showDiagnostics = false,
+}: Props) {
   const { t } = useLingui();
   const shortlistFilterId = useId();
   const [snapshot, setSnapshot] = useState<Snapshot | null>(null);
@@ -1595,33 +1710,44 @@ function RecruitingWorkspace({ threadId, botId, refreshSignal, onClose, onReveal
                 <Trans>No saved research</Trans>
               </p>
             ) : (
-              snapshot.research.tasks.map((task) => (
+              snapshot.research.tasks.map((task, index) => (
                 <div key={task.id} className="space-y-2 border-s border-border ps-3">
                   <p>
-                    {task.id} · {task.state}
+                    {showDiagnostics ? task.id : <Trans>Search {index + 1}</Trans>} · {task.state}
                   </p>
                   {snapshot.research.actions
                     .filter((action) => action.taskId === task.id)
                     .map((action) => (
                       <div key={action.id} className="space-y-1">
                         <p>
-                          {action.kind} · {action.deliveryState}
-                          {action.observedProviderState ? ` · ${action.observedProviderState}` : ""}
+                          {showDiagnostics ? (
+                            <>
+                              {action.kind} · {action.deliveryState}
+                              {action.observedProviderState
+                                ? ` · ${action.observedProviderState}`
+                                : ""}
+                            </>
+                          ) : (
+                            <ResearchActionStatus action={action} />
+                          )}
                         </p>
-                        <details>
-                          <summary className="cursor-pointer text-muted-foreground">
-                            <Trans>Details</Trans>
-                          </summary>
-                          <p className="break-all text-xs">
-                            {action.id} · {action.roleRevisionId}
-                          </p>
-                          {action.receiptArtifact ? (
-                            <ArtifactReference
-                              reference={action.receiptArtifact}
-                              label={t`Receipt`}
-                            />
-                          ) : null}
-                        </details>
+                        {showDiagnostics ? (
+                          <details>
+                            <summary className="cursor-pointer text-muted-foreground">
+                              <Trans>Details</Trans>
+                            </summary>
+                            <p className="break-all text-xs">
+                              {action.id} · {action.roleRevisionId}
+                            </p>
+                            {action.receiptArtifact ? (
+                              <ArtifactReference
+                                reference={action.receiptArtifact}
+                                label={t`Receipt`}
+                                showDiagnostics
+                              />
+                            ) : null}
+                          </details>
+                        ) : null}
                       </div>
                     ))}
                 </div>
@@ -1645,29 +1771,34 @@ function RecruitingWorkspace({ threadId, botId, refreshSignal, onClose, onReveal
                         })}
                       </time>
                     </p>
-                    <ArtifactReference
-                      reference={observation.artifactRef}
-                      label={t`Source Artifact`}
-                    />
-                    <details>
-                      <summary className="cursor-pointer text-muted-foreground">
-                        <Trans>Details</Trans>
-                      </summary>
-                      <dl className="break-all text-xs">
-                        <dt>
-                          <Trans>Provider task</Trans>
-                        </dt>
-                        <dd>{observation.providerTaskId}</dd>
-                        <dt>
-                          <Trans>Run</Trans>
-                        </dt>
-                        <dd>{observation.runId}</dd>
-                        <dt>
-                          <Trans>Role revision</Trans>
-                        </dt>
-                        <dd>{observation.roleRevisionId}</dd>
-                      </dl>
-                    </details>
+                    {showDiagnostics ? (
+                      <ArtifactReference
+                        reference={observation.artifactRef}
+                        label={t`Source Artifact`}
+                        showDiagnostics
+                      />
+                    ) : null}
+                    {showDiagnostics ? (
+                      <details>
+                        <summary className="cursor-pointer text-muted-foreground">
+                          <Trans>Details</Trans>
+                        </summary>
+                        <dl className="break-all text-xs">
+                          <dt>
+                            <Trans>Provider task</Trans>
+                          </dt>
+                          <dd>{observation.providerTaskId}</dd>
+                          <dt>
+                            <Trans>Run</Trans>
+                          </dt>
+                          <dd>{observation.runId}</dd>
+                          <dt>
+                            <Trans>Role revision</Trans>
+                          </dt>
+                          <dd>{observation.roleRevisionId}</dd>
+                        </dl>
+                      </details>
+                    ) : null}
                   </li>
                 ))}
               </ul>
@@ -1927,6 +2058,7 @@ function RecruitingWorkspace({ threadId, botId, refreshSignal, onClose, onReveal
                                   <Trans>Sources</Trans>
                                 </summary>
                                 <Sources
+                                  showDiagnostics={showDiagnostics}
                                   sources={[
                                     ...new Map(
                                       [
@@ -2010,7 +2142,10 @@ function RecruitingWorkspace({ threadId, botId, refreshSignal, onClose, onReveal
                               <Trans>Sources</Trans>
                             </summary>
                             <div className="mt-2">
-                              <Sources sources={criterion.sourceRefs} />
+                              <Sources
+                                showDiagnostics={showDiagnostics}
+                                sources={criterion.sourceRefs}
+                              />
                             </div>
                           </details>
                           {criterion.definitionQuestions.map((question) => (
@@ -2082,7 +2217,10 @@ function RecruitingWorkspace({ threadId, botId, refreshSignal, onClose, onReveal
                                   <Trans>Sources</Trans>
                                 </summary>
                                 <div className="mt-2">
-                                  <Sources sources={criterion.sourceRefs} />
+                                  <Sources
+                                    showDiagnostics={showDiagnostics}
+                                    sources={criterion.sourceRefs}
+                                  />
                                 </div>
                               </details>
                               {criterion.definitionQuestions.map((question) => (
@@ -2123,7 +2261,10 @@ function RecruitingWorkspace({ threadId, botId, refreshSignal, onClose, onReveal
                     <Trans>Role sources</Trans>
                   </summary>
                   <div className="mt-2">
-                    <Sources sources={workspace.revision.sourceRefs} />
+                    <Sources
+                      sources={workspace.revision.sourceRefs}
+                      showDiagnostics={showDiagnostics}
+                    />
                   </div>
                 </details>
               </>
@@ -2136,18 +2277,22 @@ function RecruitingWorkspace({ threadId, botId, refreshSignal, onClose, onReveal
           <TabsContent value="evidence" className="space-y-4">
             {workspace ? (
               <>
-                {snapshot.research.tasks.flatMap((task) =>
-                  snapshot.research.actions
-                    .filter((action) => action.taskId === task.id && action.outputArtifacts.length)
-                    .map((action) => (
-                      <ResearchResults
-                        key={`${task.roleId}:${action.id}`}
-                        task={task}
-                        action={action}
-                        isCurrent={action.roleRevisionId === workspace?.revision.id}
-                      />
-                    )),
-                )}
+                {showDiagnostics
+                  ? snapshot.research.tasks.flatMap((task) =>
+                      snapshot.research.actions
+                        .filter(
+                          (action) => action.taskId === task.id && action.outputArtifacts.length,
+                        )
+                        .map((action) => (
+                          <ResearchResults
+                            key={`${task.roleId}:${action.id}`}
+                            task={task}
+                            action={action}
+                            isCurrent={action.roleRevisionId === workspace?.revision.id}
+                          />
+                        )),
+                    )
+                  : null}
                 <div className="flex flex-wrap gap-2">
                   <Input
                     aria-label={t`Search candidates`}
@@ -2243,9 +2388,15 @@ function RecruitingWorkspace({ threadId, botId, refreshSignal, onClose, onReveal
                     <NativeSelectOption value="all">
                       <Trans>All rounds</Trans>
                     </NativeSelectOption>
-                    {snapshot.research.actions.map((action) => (
+                    {snapshot.research.actions.map((action, index) => (
                       <NativeSelectOption key={action.id} value={action.id}>
-                        {action.kind} · {action.id}
+                        {showDiagnostics ? (
+                          <>
+                            {action.kind} · {action.id}
+                          </>
+                        ) : (
+                          <Trans>Search update {index + 1}</Trans>
+                        )}
                       </NativeSelectOption>
                     ))}
                   </NativeSelect>
@@ -2328,10 +2479,13 @@ function RecruitingWorkspace({ threadId, botId, refreshSignal, onClose, onReveal
                                     }
                                     onClick={() => setSelection(candidate)}
                                   >
-                                    {candidate.name ?? candidate.candidateKey}
+                                    {candidate.name ??
+                                      (showDiagnostics
+                                        ? candidate.candidateKey
+                                        : t`Unnamed candidate`)}
                                   </Button>
                                   <Checkbox
-                                    aria-label={t`Shortlist ${candidate.name ?? candidate.candidateKey}`}
+                                    aria-label={t`Shortlist ${candidate.name ?? (showDiagnostics ? candidate.candidateKey : t`Unnamed candidate`)}`}
                                     checked={candidate.shortlisted}
                                     disabled={shortlistPending !== null}
                                     onCheckedChange={(checked) =>
@@ -2352,7 +2506,10 @@ function RecruitingWorkspace({ threadId, botId, refreshSignal, onClose, onReveal
                                 {candidate.location ? (
                                   <p className="text-muted-foreground">{candidate.location}</p>
                                 ) : null}
-                                <CandidateProfile candidate={candidate} />
+                                <CandidateProfile
+                                  candidate={candidate}
+                                  showDiagnostics={showDiagnostics}
+                                />
                                 <CandidateAssessment candidate={candidate} />
                                 {showCrm ? (
                                   <p className="text-xs text-muted-foreground">
@@ -2410,7 +2567,10 @@ function RecruitingWorkspace({ threadId, botId, refreshSignal, onClose, onReveal
                                     }
                                     onClick={() => setSelection(candidate)}
                                   >
-                                    {candidate.name ?? candidate.candidateKey}
+                                    {candidate.name ??
+                                      (showDiagnostics
+                                        ? candidate.candidateKey
+                                        : t`Unnamed candidate`)}
                                   </Button>
                                 </th>
                                 <td className="py-2 pe-3">{workspace?.role.title}</td>
@@ -2418,7 +2578,10 @@ function RecruitingWorkspace({ threadId, botId, refreshSignal, onClose, onReveal
                                 <td className="py-2 pe-3">{candidate.company ?? "—"}</td>
                                 <td className="py-2 pe-3">{candidate.location ?? "—"}</td>
                                 <td className="py-2 pe-3">
-                                  <CandidateProfile candidate={candidate} />
+                                  <CandidateProfile
+                                    candidate={candidate}
+                                    showDiagnostics={showDiagnostics}
+                                  />
                                 </td>
                                 <td className="py-2 pe-3">
                                   <CandidateAssessment candidate={candidate} />
@@ -2433,7 +2596,7 @@ function RecruitingWorkspace({ threadId, botId, refreshSignal, onClose, onReveal
                                 </td>
                                 <td className="py-2">
                                   <Checkbox
-                                    aria-label={t`Shortlist ${candidate.name ?? candidate.candidateKey}`}
+                                    aria-label={t`Shortlist ${candidate.name ?? (showDiagnostics ? candidate.candidateKey : t`Unnamed candidate`)}`}
                                     checked={candidate.shortlisted}
                                     disabled={shortlistPending !== null}
                                     onCheckedChange={(checked) =>
@@ -2466,11 +2629,18 @@ function RecruitingWorkspace({ threadId, botId, refreshSignal, onClose, onReveal
                 ) : null}
                 {selection && selection.roleId === roleId ? (
                   <div className="space-y-3 border-t border-border pt-4">
-                    <h3 className="font-medium">{selection.name ?? selection.candidateKey}</h3>
-                    <CandidateProfile candidate={selection} />
+                    <h3 className="font-medium">
+                      {selection.name ??
+                        (showDiagnostics ? selection.candidateKey : t`Unnamed candidate`)}
+                    </h3>
+                    <CandidateProfile candidate={selection} showDiagnostics={showDiagnostics} />
                     {selectedCrmTarget ? (
                       <section aria-label={t`Candidate CRM`}>
-                        <CrmDetails sync={selectedCrm} target={selectedCrmTarget} />
+                        <CrmDetails
+                          sync={selectedCrm}
+                          target={selectedCrmTarget}
+                          showDiagnostics={showDiagnostics}
+                        />
                       </section>
                     ) : null}
                     {!selection.latestAssessment ? (
@@ -2497,16 +2667,21 @@ function RecruitingWorkspace({ threadId, botId, refreshSignal, onClose, onReveal
                       refreshSignal={candidatePage}
                       roleRevisionId={workspace!.revision.id}
                       onAccessError={denyAccess}
+                      showDiagnostics={showDiagnostics}
                     />
                   </div>
                 ) : null}
                 {assessment && selected ? (
                   <section
                     key={`${assessment.roleId}:${assessment.candidateKey}:${assessment.version}`}
-                    aria-label={assessment.candidateKey}
+                    aria-label={showDiagnostics ? assessment.candidateKey : t`Candidate assessment`}
                     className="space-y-4 border-t border-border pt-4"
                   >
-                    <h3 className="break-all font-medium">{assessment.candidateKey}</h3>
+                    <h3 className="font-medium">
+                      {showDiagnostics
+                        ? assessment.candidateKey
+                        : (selection?.name ?? t`Unnamed candidate`)}
+                    </h3>
                     <p className="text-xs text-muted-foreground">
                       <Trans>Role</Trans> · <Trans>Version {selected.roleRevision.revision}</Trans>
                     </p>
@@ -2550,9 +2725,7 @@ function RecruitingWorkspace({ threadId, botId, refreshSignal, onClose, onReveal
                         <details key={judgment.criterionId} open className="space-y-2">
                           <summary className="cursor-pointer">
                             <span className="me-2">
-                              {criterion
-                                ? expressionText(criterion.expression)
-                                : judgment.criterionId}
+                              {criterion ? expressionText(criterion.expression) : t`Criterion`}
                             </span>
                             <VerdictLabel verdict={judgment.verdict} />
                             {criterion ? (
@@ -2574,6 +2747,7 @@ function RecruitingWorkspace({ threadId, botId, refreshSignal, onClose, onReveal
                             )}
                             messageTargets={selected.sourceMessageTargets}
                             onRevealMessage={onRevealMessage}
+                            showDiagnostics={showDiagnostics}
                           />
                           {judgment.missing.map((question) => (
                             <p key={question} className="text-muted-foreground">
@@ -2597,6 +2771,7 @@ function RecruitingWorkspace({ threadId, botId, refreshSignal, onClose, onReveal
                               )}
                               messageTargets={selected.sourceMessageTargets}
                               onRevealMessage={onRevealMessage}
+                              showDiagnostics={showDiagnostics}
                             />
                           </li>
                         ))}
@@ -2608,6 +2783,7 @@ function RecruitingWorkspace({ threadId, botId, refreshSignal, onClose, onReveal
                       </summary>
                       <div className="mt-2">
                         <Sources
+                          showDiagnostics={showDiagnostics}
                           sources={assessment.sourceRefs}
                           messageTargets={selected.sourceMessageTargets}
                           onRevealMessage={onRevealMessage}
@@ -2625,6 +2801,8 @@ function RecruitingWorkspace({ threadId, botId, refreshSignal, onClose, onReveal
           </TabsContent>
           <TabsContent value="missing" className="space-y-5">
             {snapshot.questions.map((question) => {
+              const candidateKey =
+                question.target.kind === "candidate" ? question.target.candidateKey : null;
               const target = question.groupId
                 ? { groupId: question.groupId }
                 : { botId: question.botId };
@@ -2635,7 +2813,14 @@ function RecruitingWorkspace({ threadId, botId, refreshSignal, onClose, onReveal
                 >
                   <p className="text-xs text-muted-foreground">
                     {question.target.kind === "candidate" ? (
-                      <>{question.target.candidateKey} · </>
+                      <>
+                        {showDiagnostics
+                          ? question.target.candidateKey
+                          : (candidatePage?.items.find(
+                              (candidate) => candidate.candidateKey === candidateKey,
+                            )?.name ?? t`Candidate question`)}{" "}
+                        ·{" "}
+                      </>
                     ) : null}
                     {question.isCurrent ? <Trans>Current</Trans> : <Trans>Outdated</Trans>}
                   </p>
@@ -2696,8 +2881,12 @@ function RecruitingWorkspace({ threadId, botId, refreshSignal, onClose, onReveal
                     className="space-y-1"
                   >
                     <p className="text-xs text-muted-foreground">
-                      {assessment.candidateKey} ·{" "}
-                      {isCurrent ? <Trans>Current</Trans> : <Trans>Outdated</Trans>}
+                      {showDiagnostics
+                        ? assessment.candidateKey
+                        : (candidatePage?.items.find(
+                            (candidate) => candidate.candidateKey === assessment.candidateKey,
+                          )?.name ?? t`Unnamed candidate`)}{" "}
+                      · {isCurrent ? <Trans>Current</Trans> : <Trans>Outdated</Trans>}
                     </p>
                     {[
                       ...assessment.questions,
@@ -2728,6 +2917,7 @@ function RecruitingWorkspace({ threadId, botId, refreshSignal, onClose, onReveal
                 <MemoryDocumentView
                   key={`${document.id}:${document.revision}`}
                   document={document}
+                  showDiagnostics={showDiagnostics}
                 />
               ))
             )}
@@ -2735,15 +2925,22 @@ function RecruitingWorkspace({ threadId, botId, refreshSignal, onClose, onReveal
           <TabsContent value="activity" className="space-y-5">
             {!snapshot.research.tasks.length ? (
               <p className="text-muted-foreground">
-                <Trans>No research tasks</Trans>
+                {snapshot.research.observations.length ? (
+                  <Trans>Results saved</Trans>
+                ) : (
+                  <Trans>No research activity</Trans>
+                )}
               </p>
             ) : (
-              snapshot.research.tasks.map((task) => (
+              snapshot.research.tasks.map((task, index) => (
                 <div key={task.id} className="space-y-3">
                   <div>
-                    <h3 className="break-all font-medium">{task.id}</h3>
+                    <h3 className="font-medium">
+                      {showDiagnostics ? task.id : <Trans>Search {index + 1}</Trans>}
+                    </h3>
                     <p className="text-xs text-muted-foreground">
-                      {task.state} {task.providerTaskId ? `· ${task.providerTaskId}` : ""}
+                      {task.state}{" "}
+                      {showDiagnostics && task.providerTaskId ? `· ${task.providerTaskId}` : ""}
                     </p>
                   </div>
                   {snapshot.research.actions
@@ -2751,52 +2948,72 @@ function RecruitingWorkspace({ threadId, botId, refreshSignal, onClose, onReveal
                     .map((action) => (
                       <div key={action.id} className="space-y-2 border-s border-border ps-3">
                         <p>
-                          {action.kind} · {action.deliveryState}
-                          {action.observedProviderState ? ` · ${action.observedProviderState}` : ""}
+                          {showDiagnostics ? (
+                            <>
+                              {action.kind} · {action.deliveryState}
+                              {action.observedProviderState
+                                ? ` · ${action.observedProviderState}`
+                                : ""}
+                            </>
+                          ) : (
+                            <ResearchActionStatus action={action} />
+                          )}
                         </p>
-                        <details>
-                          <summary className="cursor-pointer text-xs text-muted-foreground">
-                            <Trans>Details</Trans>
-                          </summary>
-                          <div className="space-y-1 break-all text-xs text-muted-foreground">
-                            <p>{action.id}</p>
-                            <p>{action.roleRevisionId}</p>
-                            <p>{action.runId}</p>
-                            <p>{action.sourceMessageId}</p>
-                            {action.usage?.map((usage, index) => (
-                              <p key={`${index}:${usage.unit}`}>
-                                {usage.scope} · {usage.amount} {usage.unit}
-                              </p>
-                            ))}
-                          </div>
-                        </details>
+                        {showDiagnostics ? (
+                          <details>
+                            <summary className="cursor-pointer text-xs text-muted-foreground">
+                              <Trans>Details</Trans>
+                            </summary>
+                            <div className="space-y-1 break-all text-xs text-muted-foreground">
+                              <p>{action.id}</p>
+                              <p>{action.roleRevisionId}</p>
+                              <p>{action.runId}</p>
+                              <p>{action.sourceMessageId}</p>
+                              {action.usage?.map((usage, index) => (
+                                <p key={`${index}:${usage.unit}`}>
+                                  {usage.scope} · {usage.amount} {usage.unit}
+                                </p>
+                              ))}
+                            </div>
+                          </details>
+                        ) : null}
                         {action.recallScope ? (
                           <p className="whitespace-pre-wrap">{action.recallScope}</p>
                         ) : null}
-                        <ArtifactReference
-                          key={`request:${action.requestArtifact.artifactId}:${action.requestArtifact.sha256}`}
-                          reference={action.requestArtifact}
-                          label={t`Request`}
-                        />
-                        <ArtifactReference
-                          key={`context:${action.contextArtifact.artifactId}:${action.contextArtifact.sha256}`}
-                          reference={action.contextArtifact}
-                          label={t`Context`}
-                        />
-                        {action.receiptArtifact ? (
+                        {showDiagnostics ? (
                           <ArtifactReference
+                            showDiagnostics
+                            key={`request:${action.requestArtifact.artifactId}:${action.requestArtifact.sha256}`}
+                            reference={action.requestArtifact}
+                            label={t`Request`}
+                          />
+                        ) : null}
+                        {showDiagnostics ? (
+                          <ArtifactReference
+                            showDiagnostics
+                            key={`context:${action.contextArtifact.artifactId}:${action.contextArtifact.sha256}`}
+                            reference={action.contextArtifact}
+                            label={t`Context`}
+                          />
+                        ) : null}
+                        {showDiagnostics && action.receiptArtifact ? (
+                          <ArtifactReference
+                            showDiagnostics
                             key={`receipt:${action.receiptArtifact.artifactId}:${action.receiptArtifact.sha256}`}
                             reference={action.receiptArtifact}
                             label={t`Receipt`}
                           />
                         ) : null}
-                        {action.outputArtifacts.map((reference) => (
-                          <ArtifactReference
-                            key={`${reference.artifactId}:${reference.sha256}`}
-                            reference={reference}
-                            label={t`Output`}
-                          />
-                        ))}
+                        {showDiagnostics
+                          ? action.outputArtifacts.map((reference) => (
+                              <ArtifactReference
+                                showDiagnostics
+                                key={`${reference.artifactId}:${reference.sha256}`}
+                                reference={reference}
+                                label={t`Output`}
+                              />
+                            ))
+                          : null}
                       </div>
                     ))}
                 </div>

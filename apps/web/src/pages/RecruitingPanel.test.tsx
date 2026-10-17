@@ -456,7 +456,8 @@ afterEach(async () => {
   vi.unstubAllGlobals();
   localStorage.clear();
 });
-async function mounted(threadId = "thread-1", botId?: string) {
+// Existing receipt/recovery cases explicitly exercise developer diagnostics; product mode is tested below.
+async function mounted(threadId = "thread-1", botId?: string, showDiagnostics = true) {
   const container = document.createElement("div");
   document.body.append(container);
   const root = createRoot(container);
@@ -468,6 +469,7 @@ async function mounted(threadId = "thread-1", botId?: string) {
           <RecruitingPanel
             threadId={id}
             botId={botId}
+            showDiagnostics={showDiagnostics}
             refreshSignal={refreshSignal}
             onClose={() => {}}
             onRevealMessage={reveal}
@@ -487,9 +489,11 @@ async function mounted(threadId = "thread-1", botId?: string) {
     expect(button, name).toBeDefined();
     await act(async () => button!.click());
   };
-  const expand = async (name: string) => {
+  const expand = async (name: string, exact = false) => {
     const details = [...container.querySelectorAll("details")].find((item) =>
-      item.querySelector("summary")?.textContent?.includes(name),
+      exact
+        ? item.querySelector("summary")?.textContent === name
+        : item.querySelector("summary")?.textContent?.includes(name),
     );
     expect(details, name).toBeDefined();
     await act(async () => {
@@ -600,7 +604,7 @@ it("shows CRM states in Cards and Table only when a target or import exists", as
     "Outcome unknown",
     "Denied",
     "Stopped",
-    "No CRM receipt",
+    "Sync not confirmed",
   ]) {
     expect(view.container.querySelector("tbody")?.textContent).toContain(label);
   }
@@ -613,7 +617,7 @@ it("shows CRM states in Cards and Table only when a target or import exists", as
     "Outcome unknown",
     "Denied",
     "Stopped",
-    "No CRM receipt",
+    "Sync not confirmed",
   ]) {
     expect(view.container.querySelector("ul")?.textContent).toContain(label);
   }
@@ -699,7 +703,7 @@ it("keeps a historical CRM receipt on its exact source with its original target 
   await view.click("Evidence");
   await view.click("raw-person");
   expect(view.container.querySelector('[aria-label="Candidate CRM"]')?.textContent).toContain(
-    "No CRM receipt",
+    "Sync not confirmed",
   );
   const details = await view.expand("Discovery details");
   expect(details.textContent).toContain("Previous client · Previous role");
@@ -1081,6 +1085,143 @@ it("renders Dashboard totals for the linked role and actual research delivery st
   expect(view.container.textContent).toContain("task-1 · active");
   expect(view.container.textContent).toContain("create · accepted · running");
   expect(api.setCandidateShortlist).not.toHaveBeenCalled();
+});
+
+it("keeps recruiting diagnostics out of product views while opening verified evidence", async () => {
+  const material = artifactSourceFixture();
+  api.listResearch.mockResolvedValue({
+    tasks: [
+      {
+        id: "internal-search-task",
+        roleId: role.id,
+        state: "active",
+        providerTaskId: "provider-task-secret",
+      },
+    ],
+    actions: [],
+    observations: [
+      {
+        effectId: "internal-effect",
+        providerTaskId: "provider-task-secret",
+        roleRevisionId: "internal-role-revision",
+        runId: "internal-run",
+        rowCount: 15,
+        observedAt: "2026-10-16T00:00:00.000Z",
+        requestCursor: "opaque-cursor",
+        artifactRef: material.reference,
+      },
+    ],
+  });
+  api.getById.mockResolvedValue(material.artifact);
+  api.getWorkspace.mockResolvedValue({
+    role,
+    revision: { ...revision, sourceRefs: [material.source] },
+  });
+  const view = await mounted("thread-1", undefined, false);
+  for (const tab of ["Dashboard", "Activity"]) {
+    await view.click(tab);
+    for (const diagnostic of [
+      "internal-search-task",
+      "provider-task-secret",
+      "internal-effect",
+      "internal-role-revision",
+      "internal-run",
+      "opaque-cursor",
+      "SHA-256",
+    ])
+      expect(view.container.textContent).not.toContain(diagnostic);
+  }
+  const savedResearch = await api.listResearch.mock.results[0]!.value;
+  api.listResearch.mockResolvedValue({ ...savedResearch, tasks: [] });
+  await view.click("Refresh");
+  expect(view.container.textContent).toContain("Results saved");
+  expect(view.container.textContent).not.toContain("No research tasks");
+  await view.click("Role");
+  expect(api.getById).not.toHaveBeenCalled();
+  const evidence = await view.expand("Source", true);
+  await vi.waitFor(() => expect(evidence.querySelector("[data-artifact-id]")).not.toBeNull());
+  expect(api.getById).toHaveBeenCalledExactlyOnceWith({
+    artifactId: material.reference.artifactId,
+  });
+  expect(evidence.textContent).not.toContain(material.reference.artifactId);
+  expect(evidence.textContent).not.toContain(material.reference.sha256);
+  expect(evidence.textContent).not.toContain("SHA-256");
+});
+
+it("shows unnamed candidates and real profile links without exposing their storage keys", async () => {
+  const candidate = {
+    ...candidateFixture("internal-candidate-key", false),
+    name: null,
+    linkedinUrl: "https://www.linkedin.com/in/example-profile",
+  };
+  api.listCandidates.mockResolvedValue(candidatePage([candidate]));
+  api.listCandidateSources.mockResolvedValue({
+    roleId: role.id,
+    candidateKey: candidate.candidateKey,
+    total: 1,
+    nextCursor: null,
+    items: [
+      {
+        taskId: null,
+        actionId: null,
+        roleRevisionId: revision.id,
+        effectId: "internal-source-effect",
+        rowIndex: 0,
+        artifactRef: { artifactId: "internal-native-snapshot", sha256: "a".repeat(64) },
+        requestCursor: null,
+        outputId: null,
+        observedAt: "2026-01-01T00:00:00Z",
+        crmImports: [],
+      },
+    ],
+  });
+  const view = await mounted("thread-1", undefined, false);
+  await view.click("Evidence");
+  await view.click("Unnamed candidate");
+  expect(view.container.querySelector(`a[href="${candidate.linkedinUrl}"]`)).not.toBeNull();
+  expect(view.container.textContent).toContain("Research findings");
+  for (const key of [
+    candidate.candidateKey,
+    "internal-source-effect",
+    "internal-native-snapshot",
+    "provider_report",
+    "missing_name",
+    "Discovery details",
+    "Raw search results",
+  ])
+    expect(view.container.textContent).not.toContain(key);
+  expect(api.listCandidateSources).toHaveBeenCalledWith(
+    expect.objectContaining({ candidateKey: candidate.candidateKey }),
+  );
+  expect(api.getById).not.toHaveBeenCalled();
+});
+
+it("keeps exact research evidence readable while its routing snapshot stays diagnostic-only", async () => {
+  const text = "Before\nBuilt a compiler\nAfter";
+  const material = artifactSourceFixture(
+    JSON.stringify({
+      request: { task_id: "internal-provider-task" },
+      candidate: { evidence: text },
+    }),
+    "application/json",
+  );
+  const report = {
+    ...material.source,
+    kind: "provider_report",
+    selection: { kind: "artifact_json_string", path: ["candidate", "evidence"], start: 7, end: 23 },
+  };
+  api.getWorkspace.mockResolvedValue({ role, revision: { ...revision, sourceRefs: [report] } });
+  api.getById.mockResolvedValue(material.artifact);
+  const view = await mounted("thread-1", undefined, false);
+  const evidence = await view.expand("Source", true);
+  await vi.waitFor(() =>
+    expect(evidence.querySelector("mark")?.textContent).toBe("Built a compiler"),
+  );
+  expect(evidence.querySelector('[role="document"]')?.textContent).toBe(text);
+  expect(evidence.querySelector("[data-artifact-id]")).toBeNull();
+  expect(view.container.textContent).not.toContain("internal-provider-task");
+  expect(view.container.textContent).not.toContain(material.reference.artifactId);
+  expect(view.container.textContent).not.toContain(material.reference.sha256);
 });
 
 it("renders native saved research history without inventing new search rounds", async () => {
@@ -2831,7 +2972,6 @@ it("submits custom input to the native originating bot without creating a new ta
   api.listQuestions.mockResolvedValue({ questions: [{ ...nativeQuestion, groupId: null }] });
   const view = await mounted();
   await view.click("Missing info");
-  await view.click("Type your answer");
   const answer = " \n  Implemented the geometry library in C++ 😀\n  ";
   const input = view.container.querySelector<HTMLTextAreaElement>('textarea[aria-label="Answer"]')!;
   await act(async () => {

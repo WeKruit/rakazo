@@ -61,6 +61,19 @@ describe("tool card render decisions", () => {
     expect(renderableMessageBlocks(blocks, false)).toEqual([textBlock, narration]);
   });
 
+  it("keeps native approval cards visible when diagnostics are hidden", () => {
+    const approval: MessageBlock = {
+      kind: "ask",
+      text: "Send the displayed draft to the selected recipient?",
+      detail: "Recipient and message body remain visible.",
+      approvalEffectId: "approval-effect",
+      status: "pending",
+      actions: [{ id: "allow", label: "Allow once" }],
+    };
+    expect(renderableMessageBlocks([stepsBlock, approval], false)).toEqual([approval]);
+    expect(messageHasVisibleBlocks([approval], false)).toBe(true);
+  });
+
   it("never surfaces a progress block marked as activity", () => {
     expect(messageHasVisibleBlocks([liveActivity], true)).toBe(false);
     expect(messageHasVisibleBlocks([liveActivity], false)).toBe(false);

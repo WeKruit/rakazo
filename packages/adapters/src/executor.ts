@@ -5801,6 +5801,18 @@ export function createRunExecutor(deps: ExecutorDeps) {
               }
             }
             await workspaceCheckpoint.flush();
+            const approvalBlock = buildApprovalAskBlock(
+              applied!.effect.id,
+              name,
+              approvalArgs,
+              runSecrets,
+              {
+                reviewReason: replySelection
+                  ? "Approve this draft content only. Sending still requires complete current pre-send checks."
+                  : reviewReason,
+                oneTimeOnly: requiresExplicitApproval,
+              },
+            );
             const paused = await deps.events.pauseRunForInput({
               spaceId: run.spaceId,
               threadId: run.threadId,
@@ -5809,15 +5821,7 @@ export function createRunExecutor(deps: ExecutorDeps) {
               attemptId: attempt.id,
               leaseOwner: workerId,
               leaseFence: fence,
-              blocks: [
-                ...files,
-                buildApprovalAskBlock(applied!.effect.id, name, approvalArgs, runSecrets, {
-                  reviewReason: replySelection
-                    ? "Approve this draft content only. Sending still requires complete current pre-send checks."
-                    : reviewReason,
-                  oneTimeOnly: requiresExplicitApproval,
-                }),
-              ],
+              blocks: [...files, approvalBlock],
             });
             // pauseRunForInput returning false after a successful renew means the run row no
             // longer matches this worker. Exiting via pauseForApproval() would leave the run
@@ -5828,7 +5832,7 @@ export function createRunExecutor(deps: ExecutorDeps) {
             await notifyRun(deps, run, {
               kind: "help",
               title: `${bot.name} needs approval`,
-              body: `Review before ${name}`,
+              body: approvalBlock.text,
               botId: bot.id,
               threadId: thread.id,
             });
@@ -8898,7 +8902,6 @@ export function createRunExecutor(deps: ExecutorDeps) {
               },
             });
             if (
-              contextStrategy === "current" &&
               shouldEnqueueCompaction(
                 updatedThread.nextMessageSeq,
                 updatedThread.historyCompactedUpToSeq,
@@ -8906,7 +8909,10 @@ export function createRunExecutor(deps: ExecutorDeps) {
                 COMPACTION_BATCH_SIZE,
               )
             ) {
-              await deps.jobs.enqueue(historyCompactJob(thread.id));
+              await deps.jobs.enqueue({
+                ...historyCompactJob(thread.id, run.id),
+                keepExisting: true,
+              });
             }
           } catch (error) {
             getLogger().error("history.compact enqueue failed", error);

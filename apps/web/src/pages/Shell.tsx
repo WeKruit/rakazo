@@ -35,6 +35,7 @@ import {
 } from "@rakazo/contracts";
 import type { ComposerMention, SlashActionId } from "@rakazo/core";
 import {
+  answerableAskMessageIds,
   attachmentsForThread,
   buildComposerMentionOptions,
   clampMentionHighlightIndex,
@@ -46,7 +47,6 @@ import {
   isPeerReceiptBlocks,
   isRunTerminalEvent,
   isToolActivityBlock,
-  latestAnswerableAskMessageId,
   mentionChipKey,
   nestRosterByParent,
   plainTextFromMarkdown,
@@ -458,11 +458,6 @@ export function ShellPage() {
   );
   const streamResponsesRef = useRef(streamResponses);
   streamResponsesRef.current = streamResponses;
-  const showToolActivity = useSyncExternalStore(
-    subscribeToolActivity,
-    getToolActivityEnabled,
-    () => true,
-  );
   const botsSidebarDensity = useSyncExternalStore(
     subscribeBotsSidebarDensity,
     getBotsSidebarDensity,
@@ -691,6 +686,11 @@ export function ShellPage() {
   const [loadingOlder, setLoadingOlder] = useState(false);
   const [initialBotsLoaded, setInitialBotsLoaded] = useState(false);
   const [bootstrapMe, setBootstrapMe] = useState<Me | null>();
+  const showToolActivity = useSyncExternalStore(
+    subscribeToolActivity,
+    () => getToolActivityEnabled(bootstrapMe?.isDeploymentOwner === true),
+    () => false,
+  );
   const [keepComputerRecovery, setKeepComputerRecovery] = useState(false);
   const recoveryHoldTimer = useRef<number | undefined>(undefined);
   const showComputerRecoveryHint =
@@ -1852,7 +1852,7 @@ export function ShellPage() {
     setReplyQuote(null);
   }, []);
   const currentRuns = activeThreadRuns(activeSnapshot);
-  const answerableAskMessageId = latestAnswerableAskMessageId(activeSnapshot);
+  const answerableAskIds = answerableAskMessageIds(activeSnapshot);
   const workingRuns = currentRuns.filter((run) =>
     ["running", "queued", "leased"].includes(run.status),
   );
@@ -3754,7 +3754,7 @@ export function ShellPage() {
             showToolActivity={showToolActivity}
             olderCursor={activeSnapshot?.olderCursor ?? null}
             loadingOlder={loadingOlder}
-            answerableAskMessageId={answerableAskMessageId}
+            answerableAskMessageIds={answerableAskIds}
             running={transcriptRunning}
             workingBots={workingBots}
             onLoadOlder={loadOlder}
@@ -4015,6 +4015,7 @@ export function ShellPage() {
                 threadId={activeSnapshot.threadId}
                 botId={inGroup ? undefined : active?.id}
                 refreshSignal={recruitingRefresh}
+                showDiagnostics={showToolActivity}
                 onClose={() => setPanel(null)}
                 onRevealMessage={(target) => {
                   navigate({
@@ -4925,7 +4926,7 @@ const Transcript = memo(function Transcript({
   showToolActivity,
   olderCursor,
   loadingOlder,
-  answerableAskMessageId,
+  answerableAskMessageIds,
   running,
   workingBots,
   onLoadOlder,
@@ -4954,7 +4955,7 @@ const Transcript = memo(function Transcript({
   showToolActivity: boolean;
   olderCursor: number | null;
   loadingOlder: boolean;
-  answerableAskMessageId: string | null;
+  answerableAskMessageIds: string[];
   running: boolean;
   workingBots: GroupAvatarMember[];
   onLoadOlder: () => void | Promise<void>;
@@ -4986,7 +4987,15 @@ const Transcript = memo(function Transcript({
     () => new Map(messages.map((message) => [message.id, message])),
     [messages],
   );
-  const reactionView = useMemo(() => projectMessageReactions(messages), [messages]);
+  // Keep the original waiting cards at hand after later group replies; render each card once.
+  const reactionView = useMemo(
+    () =>
+      projectMessageReactions([
+        ...messages.filter((message) => !answerableAskMessageIds.includes(message.id)),
+        ...messages.filter((message) => answerableAskMessageIds.includes(message.id)),
+      ]),
+    [messages, answerableAskMessageIds],
+  );
   const separatorIds = timeSeparatorIds(
     reactionView.visibleMessages.filter((message) =>
       messageHasVisibleBlocks(message.blocks, showToolActivity),
@@ -5296,7 +5305,7 @@ const Transcript = memo(function Transcript({
                     <MessageView
                       artifactTarget={artifactTarget}
                       message={message}
-                      canAnswer={message.id === answerableAskMessageId}
+                      canAnswer={answerableAskMessageIds.includes(message.id)}
                       onOpenBot={onOpenBot}
                       onOpenPeerMessages={onOpenPeerMessages}
                       onAnswer={onAnswer}
@@ -6914,7 +6923,7 @@ const MessageView = memo(function MessageView({
             >
               <div
                 data-testid="message-bot-bubble"
-                className="max-w-full rounded-[20px] bg-muted px-[18px] py-3 text-[15.5px] leading-[1.5] text-foreground/90"
+                className="max-w-full rounded-[20px] bg-muted px-[18px] py-3 text-base leading-relaxed text-foreground"
                 dir="auto"
               >
                 <ChatMarkdown streaming>{block.text}</ChatMarkdown>

@@ -83,6 +83,19 @@ describe("background job contracts", () => {
 });
 
 describe("historyCompactJob", () => {
+  it("retains the actual originating run through dispatch", async () => {
+    const target = handlers();
+    const job = historyCompactJob("thread-1", "origin-run");
+    expect(job).toMatchObject({
+      payload: { threadId: "thread-1", sourceRunId: "origin-run" },
+    });
+    await dispatchBackgroundJob(target, job.name, job.payload);
+    expect(target["history.compact"]).toHaveBeenCalledWith({
+      threadId: "thread-1",
+      sourceRunId: "origin-run",
+    });
+  });
+
   it("builds a job with a replace key scoped to the thread", () => {
     expect(historyCompactJob("thread-1")).toEqual({
       name: "history.compact",

@@ -139,8 +139,17 @@ describe("buildApprovalAskBlock", () => {
         { id: "allow", label: "Approve documents" },
         { id: "deny", label: "Deny" },
       ],
-      detail: JSON.stringify(request, null, 2),
+      detail: [
+        "Role version: 3",
+        "Job description: attached",
+        "Named JD PDF: attached",
+        "Anonymous JD PDF: not provided",
+        "Deck: not provided",
+      ].join("\n"),
     });
+    if (block.kind !== "ask") throw new Error("expected ask block");
+    for (const value of [request.roleId, "named-pdf", "a".repeat(64), "b".repeat(64)])
+      expect(block.detail).not.toContain(value);
   });
 
   it("shows all ten calibration profiles and every rule beyond the generic detail limit", () => {
@@ -179,22 +188,16 @@ describe("buildApprovalAskBlock", () => {
     });
     if (block.kind !== "ask") throw new Error("expected ask block");
     expect(block.detail?.length).toBeGreaterThan(4_000);
-    expect(block.detail).toBe(
-      JSON.stringify(
-        {
-          ...request,
-          ruleChanges: request.ruleChanges.map((rule) =>
-            rule.replace("token-secret", "[redacted]"),
-          ),
-        },
-        null,
-        2,
-      ),
-    );
+    expect(block.detail).toContain("Role version: 3");
     expect(block.detail).not.toContain("token-secret");
-    for (const profile of request.profiles) expect(block.detail).toContain(profile.candidateKey);
-    for (let index = 0; index < request.ruleChanges.length; index++) {
-      expect(block.detail).toContain(`Rule ${index}:`);
+    expect(block.detail).not.toContain("documents-effect");
+    expect(block.detail).not.toContain("candidateKey");
+    for (const profile of request.profiles) {
+      expect(block.detail).toContain(profile.linkedinUrl);
+      expect(block.detail).toContain(profile.evidenceUrl);
+      expect(block.detail).toContain(`Assessment version: ${profile.assessmentVersion}`);
     }
+    for (const rule of request.ruleChanges)
+      expect(block.detail).toContain(rule.replace("token-secret", "[redacted]"));
   });
 });

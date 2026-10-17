@@ -1,4 +1,5 @@
 import type { MessageBlock } from "@rakazo/contracts";
+import { RecruitingApprovalToolInputSchema } from "@rakazo/contracts";
 import { redactSecrets } from "@rakazo/core";
 import { redactToolArgsForReview } from "./auto-review.js";
 
@@ -11,7 +12,7 @@ export function buildApprovalAskBlock(
   args: Record<string, unknown>,
   secrets: string[],
   options?: { reviewReason?: string; oneTimeOnly?: boolean },
-): MessageBlock {
+): Extract<MessageBlock, { kind: "ask" }> {
   const recruitingApproval = toolName === "recruiting_request_approval";
   const summary = describeApprovalAction(toolName, args);
   const detail = formatApprovalDetail(
@@ -90,7 +91,27 @@ function formatApprovalDetail(
     lines.push(reviewReason.trim().replace(/\u2014|\u2013/g, "-"));
   }
   if (toolName === "recruiting_request_approval") {
-    lines.push(JSON.stringify(args, null, 2));
+    const request = RecruitingApprovalToolInputSchema.parse(args);
+    lines.push(`Role version: ${request.expectedRoleRevision}`);
+    if (request.stage === "documents") {
+      lines.push(
+        "Job description: attached",
+        "Named JD PDF: attached",
+        `Anonymous JD PDF: ${request.documents.anonymousPdf ? "attached" : "not provided"}`,
+        `Deck: ${request.documents.deck ? "attached" : "not provided"}`,
+      );
+    } else {
+      for (const [index, profile] of request.profiles.entries())
+        lines.push(
+          `${index + 1}. ${profile.linkedinUrl}`,
+          `Evidence: ${profile.evidenceUrl}`,
+          `Assessment version: ${profile.assessmentVersion}`,
+        );
+      lines.push(
+        request.ruleChanges.length ? "Rule changes:" : "Rule changes: none",
+        ...request.ruleChanges,
+      );
+    }
     return lines.join("\n");
   }
   if (toolName === "create_space") {

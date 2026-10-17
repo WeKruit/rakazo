@@ -853,6 +853,7 @@ async function prepareRecruitingSourceShot() {
   ).join("");
   const rawRef = { artifactId: "result-demo", sha256: rawHash };
   demoRpc["recruiting/listResearch"] = {
+    observations: [],
     tasks: [
       {
         id: "task-demo",

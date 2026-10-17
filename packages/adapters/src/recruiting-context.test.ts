@@ -253,6 +253,7 @@ describe("recruiting run context", () => {
     expect(result!.workspace).toEqual(workspace);
     expect(result!.text).toContain("Seven years; [redacted]");
     expect(result!.text).toContain("Bay Area first");
+    expect(result!.text).toContain("Internal routing identifiers belong only in tool arguments");
     expect(result!.text).toContain(memory.text);
     expect(result!.text).not.toContain("secret-value");
     const stored = bytes.get("blob-1")!;

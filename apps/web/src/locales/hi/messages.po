@@ -925,6 +925,10 @@ msgid "Candidate"
 msgstr "उम्मीदवार"
 
 #: src/pages/RecruitingPanel.tsx
+msgid "Candidate assessment"
+msgstr ""
+
+#: src/pages/RecruitingPanel.tsx
 msgid "Candidate CRM"
 msgstr ""
 
@@ -933,7 +937,15 @@ msgid "Candidate facts"
 msgstr ""
 
 #: src/pages/RecruitingPanel.tsx
+msgid "Candidate question"
+msgstr ""
+
+#: src/pages/RecruitingPanel.tsx
 msgid "Candidate sort"
+msgstr ""
+
+#: src/pages/RecruitingPanel.tsx
+msgid "Candidate statement"
 msgstr ""
 
 #: src/pages/RecruitingPanel.tsx
@@ -1952,6 +1964,10 @@ msgstr ""
 msgid "Credentials are encrypted and never sent to the model."
 msgstr "क्रेडेंशियल एन्क्रिप्टेड होते हैं और मॉडल को कभी नहीं भेजे जाते।"
 
+#: src/pages/RecruitingPanel.tsx
+msgid "Criterion"
+msgstr ""
+
 #. placeholder {0}: index + 1
 #: src/pages/RecruitingPanel.tsx
 msgid "Criterion {0}"
@@ -2143,6 +2159,10 @@ msgstr ""
 msgid "Details"
 msgstr ""
 
+#: src/pages/AccountSettingsOverlay.tsx
+msgid "Developer diagnostics"
+msgstr ""
+
 #: src/components/integrations/IntegrationSetup.tsx
 msgid "Direct MCP"
 msgstr ""
@@ -2270,8 +2290,8 @@ msgid "Edit criteria"
 msgstr ""
 
 #: src/components/AskCard.tsx
-msgid "Edit first"
-msgstr "पहले संपादित करें"
+#~ msgid "Edit first"
+#~ msgstr "पहले संपादित करें"
 
 #: src/pages/BotContextMenu.tsx
 msgid "Edit Profile"
@@ -3303,6 +3323,10 @@ msgstr "नया खुला-कार्य आइटम"
 msgid "New password"
 msgstr "नया पासवर्ड"
 
+#: src/pages/RecruitingPanel.tsx
+msgid "New search"
+msgstr ""
+
 #: src/pages/BotContextMenu.tsx
 #: src/pages/shell/dialogs.tsx
 msgid "New section"
@@ -3365,8 +3389,8 @@ msgid "No credentials saved for this bot."
 msgstr ""
 
 #: src/pages/RecruitingPanel.tsx
-msgid "No CRM receipt"
-msgstr ""
+#~ msgid "No CRM receipt"
+#~ msgstr ""
 
 #: src/pages/MessagingSettingsOverlay.tsx
 msgid "No group chats yet."
@@ -3417,8 +3441,12 @@ msgid "No remote MCP servers found"
 msgstr ""
 
 #: src/pages/RecruitingPanel.tsx
-msgid "No research tasks"
+msgid "No research activity"
 msgstr ""
+
+#: src/pages/RecruitingPanel.tsx
+#~ msgid "No research tasks"
+#~ msgstr ""
 
 #: src/pages/PluginsOverlay.tsx
 #: src/pages/SpaceSearch.tsx
@@ -3501,6 +3529,10 @@ msgstr ""
 msgid "NOT"
 msgstr ""
 
+#: src/pages/RecruitingPanel.tsx
+msgid "Not accepted"
+msgstr ""
+
 #: src/pages/ModelBackupsSettings.tsx
 msgid "Not connected"
 msgstr "कनेक्ट नहीं है"
@@ -3512,6 +3544,10 @@ msgstr ""
 #: src/pages/shell/message-cards.tsx
 msgid "Not now"
 msgstr "अभी नहीं"
+
+#: src/pages/RecruitingPanel.tsx
+msgid "Not reviewed"
+msgstr ""
 
 #: src/components/ComputerUpdateProgress.tsx
 msgid "Nothing is still running"
@@ -3678,6 +3714,10 @@ msgstr "संगठन API कुंजी"
 msgid "Original message unavailable"
 msgstr "मूल संदेश उपलब्ध नहीं है"
 
+#: src/pages/RecruitingPanel.tsx
+msgid "Original source"
+msgstr ""
+
 #: src/pages/ModelSettingsOverlay.tsx
 #: src/pages/Onboarding.tsx
 msgid "Other model…"
@@ -3800,6 +3840,10 @@ msgstr ""
 
 #: src/pages/RecruitingPanel.tsx
 msgid "Preferred criteria"
+msgstr ""
+
+#: src/pages/RecruitingPanel.tsx
+msgid "Prepared"
 msgstr ""
 
 #. placeholder {0}: props.name
@@ -3981,6 +4025,10 @@ msgid "Recreating the computer"
 msgstr ""
 
 #: src/pages/RecruitingPanel.tsx
+msgid "Recruiter verified"
+msgstr ""
+
+#: src/pages/RecruitingPanel.tsx
 #: src/pages/Shell.tsx
 msgid "Recruiting"
 msgstr ""
@@ -4114,6 +4162,10 @@ msgstr "कुंजी बदलें"
 msgid "Replace value"
 msgstr ""
 
+#: src/pages/RecruitingPanel.tsx
+msgid "Replaced"
+msgstr ""
+
 #: src/pages/Shell.tsx
 msgid "Reply"
 msgstr "उत्तर दें"
@@ -4133,6 +4185,10 @@ msgstr ""
 
 #: src/pages/shell/message-cards.tsx
 msgid "Research & writing"
+msgstr ""
+
+#: src/pages/RecruitingPanel.tsx
+msgid "Research findings"
 msgstr ""
 
 #: src/pages/RecruitingPanel.tsx
@@ -4201,6 +4257,10 @@ msgid "Restoring your workspace"
 msgstr ""
 
 #: src/pages/RecruitingPanel.tsx
+msgid "Results saved"
+msgstr ""
+
+#: src/pages/RecruitingPanel.tsx
 msgid "Resume"
 msgstr ""
 
@@ -4235,6 +4295,10 @@ msgstr "रिवीज़न {0}"
 #: src/lib/model-connection-preflight.ts
 msgid "Review provider settings and test again."
 msgstr "प्रोवाइडर सेटिंग्स की समीक्षा करें और फिर से परीक्षण करें।"
+
+#: src/pages/RecruitingPanel.tsx
+msgid "Reviewed"
+msgstr ""
 
 #. placeholder {0}: document.revision
 #. placeholder {0}: entry.revision
@@ -4435,6 +4499,11 @@ msgstr "हां या ना कहें, या एक वाक्य म�
 msgid "Search"
 msgstr "खोजें"
 
+#. placeholder {0}: index + 1
+#: src/pages/RecruitingPanel.tsx
+msgid "Search {0}"
+msgstr ""
+
 #: src/pages/ActivityList.tsx
 msgid "Search activity"
 msgstr ""
@@ -4477,6 +4546,10 @@ msgstr ""
 msgid "Search filters"
 msgstr ""
 
+#: src/pages/RecruitingPanel.tsx
+msgid "Search follow-up"
+msgstr ""
+
 #: src/components/integrations/IntegrationSetup.tsx
 msgid "Search integrations.sh"
 msgstr ""
@@ -4491,6 +4564,11 @@ msgstr "प्रोवाइडर्स खोजें"
 
 #: src/pages/ActivityList.tsx
 msgid "Search runs"
+msgstr ""
+
+#. placeholder {0}: index + 1
+#: src/pages/RecruitingPanel.tsx
+msgid "Search update {0}"
 msgstr ""
 
 #. placeholder {0}: filters.query.trim()
@@ -4528,8 +4606,8 @@ msgid "Send deletion code"
 msgstr "हटाने का कोड भेजें"
 
 #: src/components/AskCard.tsx
-msgid "Send it"
-msgstr "इसे भेजें"
+#~ msgid "Send it"
+#~ msgstr "इसे भेजें"
 
 #: src/pages/Auth.tsx
 msgid "Send reset link"
@@ -4617,7 +4695,7 @@ msgstr "शेल"
 msgid "Shortlist"
 msgstr ""
 
-#. placeholder {0}: candidate.name ?? candidate.candidateKey
+#. placeholder {0}: candidate.name ?? (showDiagnostics ? candidate.candidateKey : t`Unnamed candidate`)
 #: src/pages/RecruitingPanel.tsx
 msgid "Shortlist {0}"
 msgstr ""
@@ -4651,8 +4729,8 @@ msgid "Show settings"
 msgstr "सेटिंग्स दिखाएं"
 
 #: src/pages/AccountSettingsOverlay.tsx
-msgid "Show tool activity"
-msgstr ""
+#~ msgid "Show tool activity"
+#~ msgstr ""
 
 #: src/components/call/VoiceChatCard.tsx
 msgid "Show transcript"
@@ -4732,6 +4810,10 @@ msgstr ""
 #: src/lib/user-error.ts
 msgid "Something went wrong. Try again."
 msgstr "कुछ गलत हो गया। फिर से कोशिश करें।"
+
+#: src/pages/RecruitingPanel.tsx
+msgid "Source"
+msgstr ""
 
 #: src/pages/RecruitingPanel.tsx
 msgid "Source Artifact"
@@ -4863,6 +4945,14 @@ msgstr "सबएजेंट"
 msgid "Submit"
 msgstr "सबमिट करें"
 
+#: src/pages/RecruitingPanel.tsx
+msgid "Submitted"
+msgstr ""
+
+#: src/pages/RecruitingPanel.tsx
+msgid "Submitting"
+msgstr ""
+
 #: src/pages/Paywall.tsx
 msgid "Subscribe"
 msgstr ""
@@ -4888,6 +4978,10 @@ msgstr ""
 #: src/pages/ModelSettingsOverlay.tsx
 msgid "Switching…"
 msgstr "बदला जा रहा है…"
+
+#: src/pages/RecruitingPanel.tsx
+msgid "Sync not confirmed"
+msgstr ""
 
 #: src/pages/RecruitingPanel.tsx
 msgid "Synced"
@@ -5175,6 +5269,7 @@ msgid "Unassigned"
 msgstr "असाइन नहीं किया गया"
 
 #: src/components/SoftwareUpdateSection.tsx
+#: src/pages/RecruitingPanel.tsx
 msgid "Unavailable"
 msgstr ""
 
@@ -5201,6 +5296,10 @@ msgstr ""
 #: src/components/call/CallCard.tsx
 msgid "Unmute"
 msgstr "अनम्यूट करें"
+
+#: src/pages/RecruitingPanel.tsx
+msgid "Unnamed candidate"
+msgstr ""
 
 #: src/pages/BotContextMenu.tsx
 msgid "Unpin"
