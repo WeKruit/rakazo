@@ -14,7 +14,21 @@ Supabase 独立数据库、原生 memory provider、Modal Volume 和 E2B 沿用�
 
 Execution priority: filter playbook and sourcing (S1–S5) come first; reply and follow-up work is deferred. Feature implementation and direct product validation come before CI waits. Do not wait for CodeQL/CI after each push. The owner authorized an incremental spending cap of US$150; track usage against the private authorization baseline and retain existing resources. The latest instruction authorizes continuing feature fixes, deployment and testing on the existing resources without repeated confirmation. PR merge, unapproved production migrations, access expansion and real outbound remain separate. A pending business question does not block independent product work, and broad execution access does not supply its answer.
 
-**最新线上为 v51 / `d60250fb`。** 27 份运行源码与发布归档 hash 一致；API health/ready、Web 均为 200，ready 非 degraded。服务端在原边界中继续按可信事件及已有 action/page 引用识别整个机器文件族：普通文件库仅两份用户 CSV，55 份内部上下文、材料包装与候选回执仅在 owner 显式诊断时可见。真实应用库 24 项只读检查通过，覆盖普通/伪造开关的列表及直接读取拒绝、诊断原件与版本、游标隔离、原生 Agent 读取保留，以及精确岗位来源的业务文本与错误版本/来源/actor 拒绝。正常招聘页面复用已保存的 role/assessment 来源、真实字节/hash 和原 UTF-16 校验，只返回原文字符串及高亮位置；客户端不能指定任意路径、引文或原始文件，失败不回退 raw 读取。真实网页已展开原 JD 并高亮 5+ 年要求；来源正文使用可读 sans 字体，文件库只显示两份 CSV。历史评估版本路径有离线覆盖，线上仍无评估记录，不能声称真实评估验收。
+**最新线上为 v56 / `f2fcb7d9`。** 22 份运行源码与发布归档 hash 一致；API health/ready 与 Web 均为 200，ready 非 degraded。实际替换容器前后，两位 bot、五份 skills、11 份记忆、101 个 run、279 个 effect、249 条消息、109 份迁移、三份来源页、30 人、45 条来源、已有一份评估、岗位 v3 与 thread 状态逐项相同。未新增迁移、表、权限、依赖、资源、订阅或外联；PR 保持 Draft、未合并。此处源码版本与后续仅文档提交的分支 HEAD 分开记录。
+
+候选现在可从选中详情点击 “Discuss candidate”，把业务引用带入原生草稿，保留已有文字、附件、mentions、skills 和回复；不自动发送。延迟滚动会避让后续编辑、blur/refocus、键盘或指针输入。Agent 通过现有当前岗位候选索引按姓名/职业链接读取、分页及查看保存来源，不再向用户索取内部键。真实应用库的 17 项只读检查核对身份、两份原来源、完整原件及隔离；这不是第二用户 HTTP 登录验收。面板只对持久业务更新刷新，不在每个 catalog/来源读取时重载；事实和缺口直接显示，原始引文复用已有 Source 展开与精确核验，不重复铺满每个条件。
+
+真实评估核对发现：一份评估已持久保存，但原 run 随后因上下文超限失败；后续两条停止/收尾回复错误地声称未保存。数据库、完成回执与候选详情确认保存事实，历史回复不被改写；不能把这轮称为完整评估成功。新版本补上运行中自动压缩：复用安装的 Pi 原生准备、总结和消息转换，主 Agent/helper 均在每次模型请求前检查。保留精确用户指令、原卡、岗位采用和完整工具组；成功、非空、缩小且适配预算后才原子替换。此前摘要进度、失败/取消及分段调用费用均有回归检查。继续使用同一已连接模型、原生重试/用量归属与连接指定缓存设置，不增加模型、缓存服务或 harness。后续真实触发记录见本节 v56 验收；其他长期路径及收益仍待单独验收。
+
+招聘表达规则已移到稳定指令前缀，无岗位的新聊天也适用；原生 helper 仅收到同一固定规则，不复制父级私有指令/岗位/记忆。新的岗位/工具/steering 快照不再重复此规则，旧原件与审批回执保持。普通聊天不显示 helper 的内部任务正文；Web 仅 owner 显式诊断可看，mobile 保留名字、进度和结果。普通结构化视图与 raw 读取边界继续生效；历史原文、引文及任意模型自由文本不被机械改写，不能宣称绝对文本脱敏。
+
+v54 的普通保存评估读取实际完成两次只读工具后压缩失败。失败与两次总结调用的用量保留，不能当作长任务成功。根因是压力测量重复计算工具正文与 details；v56 仅让压缩触发、保留组预算及最终适配使用已有 provider 投影，不改变预留、上下文窗口、原卡保护或调用权限。重复总结更新保留上一次进度；实际 provider 已适配时不多做总结。普通 Web 错误沿用已有本地化失败提示，原始运行错误仅 owner 显式诊断可见；mobile 使用同一已有失败文案，保存的原错误不改写。
+
+验证分批记录：原生压缩首批 24 文件 451 项检查，缓存设置修正后该原生文件 100 项；表达规则五文件 226 项，既有 effect 幂等测试 mock 更新后 102 项；网页两文件 154 项。provider 投影修正后 24 文件 454 项、独立聚焦 169 项通过，相关类型/格式及独立 SPEC/QUALITY 通过。这些批次重叠，不累计。真实用量已观察到缓存读取；没有建立前后可比的命中率、延迟或节省比例。
+
+**v56 正常网页读取与压缩续接已通过一次真实验收。** 从选中候选点击 Discuss candidate，在原群正常 @Sourcer 读取已有评估；实际只调用目录发现、候选读取与评估读取，随后同一连接完成两段原生压缩并返回最终回复，run 为 completed。回复准确确认已保存评估的版本/时间，报告职业背景与证据缺口，所有未验证条件保持 unknown；没有内部 task/artifact/shard 编号或工具参数。主对话与原 Main 选择/输入卡同时可见；现有 Geist 字体保持，原文在 Source 按需展开。此次新增一条用户消息、一条最终回复和一个原生评估读取回执；既有 run/message/effect、岗位 v3、候选/来源/评估、bot/skill/memory 逐项不变，没有新搜索、外部服务或外联。原错误及此前误报保留历史。本次证明长上下文下压缩后的一次只读续聊，不代表新十人校准、反馈沿同 Autumn task 续搜、所有长期分支、多用户/全部卡片或 P6/M1–M5 已通过。
+
+**v51 历史发布 / `d60250fb`。** 27 份运行源码与发布归档 hash 一致；API health/ready、Web 均为 200，ready 非 degraded。服务端在原边界中继续按可信事件及已有 action/page 引用识别整个机器文件族：普通文件库仅两份用户 CSV，55 份内部上下文、材料包装与候选回执仅在 owner 显式诊断时可见。真实应用库 24 项只读检查通过，覆盖普通/伪造开关的列表及直接读取拒绝、诊断原件与版本、游标隔离、原生 Agent 读取保留，以及精确岗位来源的业务文本与错误版本/来源/actor 拒绝。正常招聘页面复用已保存的 role/assessment 来源、真实字节/hash 和原 UTF-16 校验，只返回原文字符串及高亮位置；客户端不能指定任意路径、引文或原始文件，失败不回退 raw 读取。真实网页已展开原 JD 并高亮 5+ 年要求；来源正文使用可读 sans 字体，文件库只显示两份 CSV。历史评估版本路径有离线覆盖，线上仍无评估记录，不能声称真实评估验收。
 
 本次替换容器前后，两位 bot、五份 skills、11 份记忆、95 个 run、242 个 effect、234 条消息、109 份迁移、三份候选来源页、30 人、45 条来源、岗位 v3 及 thread 状态逐项相同。新一轮正常 @Main 的真实技术口径问题卡连同选项/输入框恢复；提交“暂不确认、保持条件、不开始搜索”后，同一原生 run/触发消息继续到下一张地点问题卡，第一张精确标记 answered，第二张 pending。岗位完整内容保持，新增加的唯一回执为原生本地提问；没有新 Autumn research/reply、CRM、enrichment 或外联。下一项真实筛选决定留给用户，不代答。旧取消卡未复活。
 
