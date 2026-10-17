@@ -57,6 +57,11 @@ describe("task catalog", () => {
           { name: "task_catalog", description: "Catalog", readOnly: true },
           { name: "task_catalog", description: "Duplicate", readOnly: true },
           { name: "GITHUB_LIST_RELEASES", description: "List releases", readOnly: true },
+          {
+            name: "mcp__people__get_rows",
+            description: "Read existing rows",
+            route: { connectorId: "mcp", resourceId: "server-1", toolName: "get_rows" },
+          },
         ],
       },
     );
@@ -98,6 +103,12 @@ describe("task catalog", () => {
     expect(result.tools).toEqual([
       { name: "task_catalog", description: "Catalog", readOnly: true },
       { name: "GITHUB_LIST_RELEASES", description: "List releases", readOnly: true },
+      {
+        name: "mcp__people__get_rows",
+        description: "Read existing rows",
+        readOnly: false,
+        resourceId: "server-1",
+      },
     ]);
     expect(result.guidance).toBe(TASK_CATALOG_GUIDANCE);
   });

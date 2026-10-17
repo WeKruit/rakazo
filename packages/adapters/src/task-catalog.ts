@@ -13,7 +13,7 @@ type TaskCatalogInput = {
   botId: string;
   userId: string;
   threadId?: string;
-  tools: readonly Pick<ConnectorTool, "name" | "description" | "readOnly">[];
+  tools: readonly Pick<ConnectorTool, "name" | "description" | "readOnly" | "route">[];
 };
 
 /**
@@ -65,6 +65,7 @@ export async function taskCatalogFromTool(deps: TaskCatalogToolDeps, input: Task
         name: tool.name,
         description: tool.description,
         readOnly: tool.readOnly ?? false,
+        ...(tool.route?.resourceId ? { resourceId: tool.route.resourceId } : {}),
       },
     ];
   });
