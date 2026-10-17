@@ -134,6 +134,8 @@ T04 后续代码已补四类反馈及原生偏好添加/精确修改/撤销，�
 
 真实 Autumn 搜索 → 全部候选/证据 → 人工反馈 → 原 task 续搜仍未整条验收；已有领域准备/校验层是否妨碍自然 Agent 调用需要实测，不能以新增包装解决。CRM 另库发布/导入、完整邮件历史与 hold、草稿修订及精确外联也未通过。回复修订 WIP 保留在独立本地分支。部署成功不等于 Agent 业务或 P6 完成；当前优先级仍是找人，回复跟进后置。
 
+后续工作分支已删除普通 MCP `research/reply` 的隐式领域 action 前置要求，继续使用 Rakazo 原生权限/审批/effect；159 项聚焦离线检查与 adapters 类型检查通过，尚未发布。Sourcer 的真实 Autumn credits 读取，以及 Main 原生委派→Sourcer 读取→Main 原对话接收的三个 completed run 已核对原生 effect、工具事件和截图。原生新任务与岗位 Dashboard 的结果关联、真实搜索及反馈续搜仍缺；不能以这次简化或连接成功标记业务闭环通过。
+
 以下为此前发布与验收的历史记录，旧版本号及“未发布”不代表当前线上版本；当前状态以上面两段及 PLAN.md 为准。
 
 Your dot 接手从 [DOT-HANDOFF.md](DOT-HANDOFF.md) 开始，继续全部 M1–M5/181 项，不能把交接或 P6 当作总 Goal 完成。最新来源诊断：原文件 `truncated:false` 与模型结果 `contextTruncated:true` 可以同时成立；已通过源码和保留材料的离线重放确认 retrieval 缩短机制，但当时实际模型投影未保存。v2 保存仍只证明持久修订，未证明重读原材料及条件判断。先复用现有授权/存储补通用只读 Artifact 原件读取。

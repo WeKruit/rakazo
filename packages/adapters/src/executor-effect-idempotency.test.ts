@@ -45,6 +45,7 @@ import type { LoadedRecruitingRunContext } from "./recruiting-context.js";
 import { loadRecruitingRunContext } from "./recruiting-context.js";
 import type * as RecruitingFeedbackModule from "./recruiting-feedback.js";
 import { executeRecruitingFeedback } from "./recruiting-feedback.js";
+import type * as RecruitingToolsModule from "./recruiting-tools.js";
 import {
   admitRecruitingResearchCall,
   bindRecruitingResearchReadCall,
@@ -2364,6 +2365,56 @@ describe("native recruiting research executor integration", () => {
     expect(f.prisma.externalEffect.create).not.toHaveBeenCalled();
     expect(f.connector.execute).not.toHaveBeenCalled();
     expect(claimRecruitingResearchAction).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    ["direct", "always_allow"],
+    ["catalog", "always_allow"],
+    ["direct", "require_approval"],
+    ["catalog", "require_approval"],
+  ] as const)("keeps native %s research on its own %s policy and effect", async (path, policy) => {
+    const actual = await vi.importActual<typeof RecruitingToolsModule>("./recruiting-tools.js");
+    vi.mocked(admitRecruitingResearchCall).mockImplementation(actual.admitRecruitingResearchCall);
+    const f = fixture(`native-research-${path}-${policy}`);
+    const entries = catalogEntries([tool]);
+    const wrappers = lazyCatalogTools("connectors", "mcp", "MCP", entries);
+    const execute = wrappers.find((entry) => entry.route?.toolName === CATALOG_EXECUTE)!;
+    f.connector.discoverTools.mockResolvedValue(path === "direct" ? [tool] : wrappers);
+    f.connector.resolveCall.mockImplementation(async (call) =>
+      call.route?.toolName === CATALOG_EXECUTE ? resolveCatalogCall(call, entries) : undefined,
+    );
+    f.prisma.actionApprovalRule.findMany.mockResolvedValue([
+      { effect: policy, matchKind: "tool", matchValue: tool.name },
+    ]);
+    f.setCalls([
+      {
+        name: path === "direct" ? tool.name : execute.name,
+        args: path === "direct" ? providerArgs : { id: entries[0]!.id, arguments: providerArgs },
+        executionId: "native-research",
+      },
+    ]);
+
+    await f.run();
+
+    expect(prepareRecruitingResearchTool).not.toHaveBeenCalled();
+    expect(claimRecruitingResearchAction).not.toHaveBeenCalled();
+    expect(f.effects).toHaveLength(1);
+    if (policy === "require_approval") {
+      expect(f.pauseRunForInput).toHaveBeenCalledOnce();
+      expect(f.connector.execute).not.toHaveBeenCalled();
+      expect(f.effects[0]?.status).toBe("intended");
+    } else {
+      expect(f.pauseRunForInput).not.toHaveBeenCalled();
+      expect(f.connector.execute).toHaveBeenCalledOnce();
+      expect(f.connector.execute.mock.calls[0]![0]).toMatchObject({
+        route,
+        args: providerArgs,
+      });
+      expect(f.effects[0]?.status).toBe("completed");
+      await f.run();
+      expect(f.connector.execute).toHaveBeenCalledOnce();
+      expect(f.effects).toHaveLength(1);
+    }
   });
 
   it("keeps the newer run source after a cached prepare returns an older verified human source", async () => {

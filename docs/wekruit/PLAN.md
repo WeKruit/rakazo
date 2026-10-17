@@ -38,6 +38,12 @@ S1–S5 作为当前主线；S2 材料准备和确认继续按 playbook，不能
 
 Main/Sourcer 随后各完成一次实际回复，均读取两份当前 skill，说明 Autumn 分工、同 task 反馈及六人达标时如实报告缺四人；Sourcer 另做一次原生只读 task_catalog 发现。两次 run 各一次 attempt，无外部 effect，未调用 Autumn、CRM 或外联。这仅证明配置采用和回复，不证明真实搜索/候选落库/同 task 续搜。发布已按上方事实完成，但 Agent 的真实业务路径尚未通过。
 
+**2026-10-17 原生 MCP 路径收敛（代码待发布）：**实际调用链确认，旧自定义 admission 会因对话已选岗位而拦截普通 Autumn `research/reply`，要求模型先准备领域 action。现已删除这种隐式接管与 provider hostname 特判；普通调用沿 Rakazo 原生 MCP 的工具权限、精确请求、审批、effect 和恢复执行。显式引用的既有领域 action 仍验证原请求；历史记录和已关联结果的只读恢复不改写。现有工具说明也明确普通对话直接使用 MCP，领域 action helper 不是前置条件。不新增 schema、依赖、工具或编排器。159 项聚焦离线检查、adapters 类型检查和四文件格式检查通过，覆盖原生 direct/catalog 的审批规则、重复完成回放、显式 action 的参数/归属边界及已关联结果恢复；不等于生产搜索验收。原生网页还已由 Sourcer 实际完成一次 Autumn credits 读取，原生 completed effect 与工具事件已核对；没有发起 research/reply。
+
+原生多 Agent 的只读组合另已实际验收：Main 使用 message_bot 委派 Sourcer，Sourcer 调用已连接的 Autumn credits，返回触发 Main 在原对话报告结果；三个 run 和两个 effect 均 completed，原生事件及截图已核对。此检查沿用已发布的原生 harness，没有新建测试前端、群组、模型或连接；不包含找人/续搜/CRM/外联。两次额度快照的差值不能归因于本次调用的实际费用。
+
+**仍缺的产品接线：**普通原生 MCP 返回保存在原生工具回执/对话中；本批没有把新任务自动登记到依赖领域 action 的岗位候选索引。因此不能声称任意原生搜索已自动进入 Dashboard。后续先验证真实 Main/Sourcer→Autumn→同 task 反馈，再依据实际返回补最小结果关联；不以恢复强制领域步骤来解决展示问题。
+
 下面保留既有增量的实现/验证事实，不能据此恢复其旧优先级或继续扩建 schema/领域工具。已有 research admission/准备层是否阻碍原生 Agent 自主调用仍待实测；若有阻碍，先说明具体调用链，只修该缺口，不再叠加包装。
 
 - 复用现有 brief JSON、不可变岗位版本、原生人类来源、CAS 和 Role 编辑/API；新增 `searchFilters`，每项有稳定 ID、statement、include/exclude/prefer、origin 和 sourceRefIds。无额外过滤显式为 `[]`，不是资格条件或 provider 资格结论。推断只能 prefer；未读、缺来源或冒用人类身份的过滤不接受。

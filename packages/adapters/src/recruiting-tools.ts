@@ -414,39 +414,15 @@ export async function admitRecruitingResearchCall(
     !["research", "reply", "get_task", "get_rows"].includes(route.toolName)
   )
     return undefined;
+  const read = route.toolName === "get_task" || route.toolName === "get_rows";
+  // Native MCP mutations use the harness's own permissions, effects and recovery.
+  // Domain admission applies only to explicitly selected recruiting actions.
+  if (!read && !options.actionId && !options.taskId) return undefined;
   const run = await deps.prisma.run.findFirst({
     where: { id: trusted.runId, spaceId: trusted.actor.spaceId, userId: trusted.actor.userId },
     select: { thread: { select: { activeRecruitingRoleId: true } } },
   });
   if (!run) throw new IsolationError();
-  const read = route.toolName === "get_task" || route.toolName === "get_rows";
-  if (!run.thread.activeRecruitingRoleId && !options.actionId && !options.taskId && !read)
-    return undefined;
-  if (!options.actionId && !options.taskId && !read) {
-    const linked = await deps.prisma.recruitingResearchTask.findFirst({
-      where: {
-        mcpServerId: route.resourceId,
-        role: { spaceId: trusted.actor.spaceId, userId: trusted.actor.userId },
-      },
-      select: { id: true },
-    });
-    if (!linked) {
-      const server = await deps.prisma.mcpServer.findFirst({
-        where: {
-          id: route.resourceId,
-          spaceId: trusted.actor.spaceId,
-          userId: trusted.actor.userId,
-        },
-        select: { endpoint: true },
-      });
-      const endpoint = server?.endpoint ? URL.parse(server.endpoint) : null;
-      if (
-        endpoint?.origin !== "https://api.autumn.ai" ||
-        !["/mcp", "/mcp/"].includes(endpoint.pathname)
-      )
-        return undefined;
-    }
-  }
   const task = read
     ? options.taskId
       ? { id: options.taskId }
@@ -499,46 +475,20 @@ export async function admitRecruitingResearchCall(
       recoveredResult,
     };
   }
-  const candidates = options.actionId
-    ? [{ id: options.actionId }]
-    : await deps.prisma.recruitingResearchAction.findMany({
-        where: {
-          kind: route.toolName === "research" ? "create" : "continue",
-          task: { roleId: run.thread.activeRecruitingRoleId!, mcpServerId: route.resourceId },
-          OR: [
-            { pendingFor: { isNot: null } },
-            { effect: { request: { equals: options.frozenRequest as Prisma.InputJsonValue } } },
-          ],
-        },
-        select: { id: true },
-      });
-  const matches: {
-    saved: ResearchContext;
-    manifest: Extract<RecruitingResearchRequest, { version: 3 }>;
-  }[] = [];
-  for (const candidate of candidates) {
-    const saved = await readRecruitingResearchContext(deps.prisma, trusted.actor, {
-      runId: trusted.runId,
-      actionId: candidate.id,
-      historical: true,
-    });
-    const manifest = await frozenResearchRequest(researchDeps, saved, context);
-    if (
-      manifest.route.resourceId === route.resourceId &&
-      manifest.route.resourceRevision === route.resourceRevision &&
-      manifest.route.toolName === route.toolName &&
-      stableJsonValue(manifest.args) === stableJsonValue(call.args)
-    )
-      matches.push({ saved, manifest });
-  }
-  const pending = matches.filter(({ saved }) => saved.task?.pendingActionId === saved.action?.id);
-  const selected =
-    pending.length === 1 ? pending[0] : matches.length === 1 ? matches[0] : undefined;
-  if (!selected?.saved.action || !selected.saved.task)
-    throw new Error(
-      "Use recruiting_research to prepare this exact request, then start its actionId.",
-    );
-  const { saved, manifest } = selected;
+  if (!options.actionId) throw new IsolationError();
+  const saved = await readRecruitingResearchContext(deps.prisma, trusted.actor, {
+    runId: trusted.runId,
+    actionId: options.actionId,
+    historical: true,
+  });
+  const manifest = await frozenResearchRequest(researchDeps, saved, context);
+  if (
+    manifest.route.resourceId !== route.resourceId ||
+    manifest.route.resourceRevision !== route.resourceRevision ||
+    manifest.route.toolName !== route.toolName ||
+    stableJsonValue(manifest.args) !== stableJsonValue(call.args)
+  )
+    throw new IsolationError();
   const admitted = await admitRecruitingResearchAction(deps.prisma, trusted.actor, {
     runId: trusted.runId,
     leaseOwner: trusted.leaseOwner,

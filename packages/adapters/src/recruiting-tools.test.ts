@@ -1320,7 +1320,29 @@ describe("native research preparation", () => {
     },
   );
 
-  it("rejects a raw MCP mutation that omits frozen conditions before DB effect admission", async () => {
+  it.each([
+    ["create", "role"],
+    ["create", null],
+    ["continue", "role"],
+    ["continue", null],
+  ] as const)(
+    "keeps native %s under MCP execution when the selected role is %s",
+    async (operation, roleId) => {
+      const f = researchFixture(operation);
+      f.saved.thread.activeRecruitingRoleId = roleId;
+      await expect(
+        tools.admitRecruitingResearchCall(f.deps, f.trusted, f.call, context, {
+          frozenRequest: f.frozenRequest,
+        }),
+      ).resolves.toBeUndefined();
+      expect(f.prisma.run.findFirst).not.toHaveBeenCalled();
+      expect(readRecruitingResearchContext).not.toHaveBeenCalled();
+      expect(admitRecruitingResearchAction).not.toHaveBeenCalled();
+      expect(f.artifacts.put).not.toHaveBeenCalled();
+    },
+  );
+
+  it("rejects an explicit action whose MCP arguments omit its frozen conditions", async () => {
     const f = researchFixture();
     await expect(
       tools.admitRecruitingResearchCall(
@@ -1328,7 +1350,7 @@ describe("native research preparation", () => {
         f.trusted,
         { ...f.call, args: { prompt: "Find anyone" } },
         context,
-        { frozenRequest: { prompt: "Find anyone" } },
+        { actionId: "action", frozenRequest: { prompt: "Find anyone" } },
       ),
     ).rejects.toThrow();
     expect(admitRecruitingResearchAction).not.toHaveBeenCalled();
@@ -1350,67 +1372,18 @@ describe("native research preparation", () => {
     expect(admitRecruitingResearchAction).not.toHaveBeenCalled();
   });
 
-  it.each(["https://api.autumn.ai/mcp", "https://api.autumn.ai/mcp/"])(
-    "guards a raw canonical research call before any task exists at %s",
-    async (endpoint) => {
-      const f = researchFixture();
-      f.prisma.mcpServer.findFirst.mockResolvedValue({ endpoint });
-      f.prisma.recruitingResearchTask.findFirst.mockResolvedValue(null);
-      f.prisma.recruitingResearchAction.findMany.mockResolvedValue([]);
-
-      await expect(
-        tools.admitRecruitingResearchCall(f.deps, f.trusted, f.call, context, {
-          frozenRequest: f.frozenRequest,
-        }),
-      ).rejects.toThrow(/prepare this exact request/);
-
-      expect(f.prisma.mcpServer.findFirst).toHaveBeenCalledWith({
-        where: { id: "source", spaceId: actor.spaceId, userId: actor.userId },
-        select: { endpoint: true },
-      });
-      expect(admitRecruitingResearchAction).not.toHaveBeenCalled();
-      expect(f.artifacts.put).not.toHaveBeenCalled();
-    },
-  );
-
-  it.each([
-    "https://other.example.test/mcp",
-    "https://api.autumn.ai/mcp-other",
-    "http://api.autumn.ai/mcp",
-  ])("leaves an unrelated raw reply at %s untouched without an owned task", async (endpoint) => {
-    const f = researchFixture("continue");
-    f.prisma.mcpServer.findFirst.mockResolvedValue({ endpoint });
-    f.prisma.recruitingResearchTask.findFirst.mockResolvedValue(null);
-
-    await expect(
-      tools.admitRecruitingResearchCall(f.deps, f.trusted, f.call, context, {
-        frozenRequest: f.frozenRequest,
-      }),
-    ).resolves.toBeUndefined();
-
-    expect(f.prisma.mcpServer.findFirst).toHaveBeenCalledOnce();
-    expect(readRecruitingResearchContext).not.toHaveBeenCalled();
-    expect(admitRecruitingResearchAction).not.toHaveBeenCalled();
-    expect(f.artifacts.get).not.toHaveBeenCalled();
-  });
-
-  it("guards raw replies when an owned task links the noncanonical MCP resource", async () => {
+  it("validates an explicitly selected reply independently of the MCP hostname", async () => {
     const f = researchFixture("continue");
     f.prisma.mcpServer.findFirst.mockResolvedValue({ endpoint: "https://other.example.test/mcp" });
 
     await expect(
       tools.admitRecruitingResearchCall(f.deps, f.trusted, f.call, context, {
+        actionId: "action",
         frozenRequest: f.frozenRequest,
       }),
     ).resolves.toMatchObject({ kind: "mutation", operation: "continue", status: "ready" });
 
-    expect(f.prisma.recruitingResearchTask.findFirst).toHaveBeenCalledWith({
-      where: {
-        mcpServerId: "source",
-        role: { spaceId: actor.spaceId, userId: actor.userId },
-      },
-      select: { id: true },
-    });
+    expect(f.prisma.mcpServer.findFirst).not.toHaveBeenCalled();
     expect(admitRecruitingResearchAction).toHaveBeenCalledOnce();
   });
 
