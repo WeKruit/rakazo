@@ -634,8 +634,14 @@ describe("native saved-candidate CRM workflow", () => {
   });
 });
 
-describe("native CRM import approval", () => {
-  it("retains uncertainty for a known import even when its server advertises it as read-only", async () => {
+describe.each([
+  "crm_import_candidate",
+  "reply_to_email",
+  "create_lead",
+  "add_leads_to_campaign_or_list_bulk",
+  "activate_campaign",
+])("native one-time MCP mutation approval: %s", (operation) => {
+  it("retains uncertainty for a known mutation even when its server advertises it as read-only", async () => {
     const f = fixture({
       name: "renamed_import",
       readOnly: true,
@@ -644,7 +650,7 @@ describe("native CRM import approval", () => {
         connectorId: "mcp",
         resourceId: "resource-1",
         resourceRevision: 1,
-        toolName: "crm_import_candidate",
+        toolName: operation,
       },
     });
     await f.run();
@@ -659,7 +665,7 @@ describe("native CRM import approval", () => {
   });
 
   for (const catalog of [false, true]) {
-    it(`requires one exact human approval for ${catalog ? "catalog" : "direct"} CRM imports despite permanent allowance`, async () => {
+    it(`requires one exact human approval for ${catalog ? "catalog" : "direct"} mutations despite permanent allowance`, async () => {
       reviewMock
         .mockReset()
         .mockResolvedValue({ decision: "allow", reason: "pass", model: "test" });
@@ -672,7 +678,7 @@ describe("native CRM import approval", () => {
           connectorId: "mcp",
           resourceId: "resource-1",
           resourceRevision: 1,
-          toolName: "crm_import_candidate",
+          toolName: operation,
         },
         rules: [{ effect: "always_allow", matchKind: "tool", matchValue: "renamed_import" }],
       });
@@ -700,6 +706,68 @@ describe("native CRM import approval", () => {
       expect(f.execute.mock.calls[0]?.[0].args).toEqual({ id: "item-1" });
     });
   }
+});
+
+describe.each([false, true])("native outbound draft approval, catalog=%s", (catalog) => {
+  it("shows the complete draft and restores its exact account, recipient and body after approval", async () => {
+    const args = {
+      reply_to_uuid: "10000000-0000-4000-8000-000000000001",
+      eaccount: "recruiter@example.test",
+      to: "candidate@example.test",
+      subject: "Re: Example role",
+      body_text: `${"Public synthetic draft with Unicode 🧭.\n".repeat(160)}END_OF_DRAFT`,
+      skip_validation: false,
+    };
+    const f = fixture({
+      name: "renamed_reply",
+      catalog,
+      readOnly: true,
+      autoReview: true,
+      inputSchema: { type: "object" },
+      route: {
+        connectorId: "mcp",
+        resourceId: "resource-1",
+        resourceRevision: 1,
+        toolName: "reply_to_email",
+      },
+      rules: [{ effect: "always_allow", matchKind: "tool", matchValue: "renamed_reply" }],
+    });
+    f.setCalls([{ args, executionId: "prepare-draft" }]);
+    await f.run();
+    expect(f.execute).not.toHaveBeenCalled();
+    expect(f.pauseRunForInput).toHaveBeenCalledWith(
+      expect.objectContaining({
+        blocks: [
+          expect.objectContaining({
+            detail: expect.stringContaining(args.body_text),
+            actions: [
+              { id: "allow", label: "Allow once" },
+              { id: "deny", label: "Deny" },
+            ],
+          }),
+        ],
+      }),
+    );
+    f.effects[0]!.status = "approved";
+    f.setCalls([
+      {
+        args: {
+          ...args,
+          eaccount: "changed-sender@example.test",
+          to: "changed@example.test",
+          reply_to_uuid: "10000000-0000-4000-8000-000000000002",
+          subject: "Changed subject",
+          body_text: "Changed reconstruction",
+          skip_validation: true,
+        },
+        executionId: "resume-approved-draft",
+      },
+    ]);
+    await f.run();
+    expect(f.execute).toHaveBeenCalledOnce();
+    expect(f.execute.mock.calls[0]?.[0].args).toEqual(args);
+    expect(f.effects).toHaveLength(1);
+  });
 });
 
 describe("native recruiting package approval", () => {

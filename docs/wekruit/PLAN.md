@@ -209,7 +209,7 @@ The complete user-supplied v1.0 (2026-10-16 PT) supersedes v0.2 for product beha
 | S12–S13 scheduling, prebrief, outcomes | M1 P5/P6; M3 native cards/files; M4 calendar/mail; M5 recovery/permissions. Scheduling always needs exact approval, including under CRM-note/policy exceptions. | Named JD/deck/resume package, thread/calendar reads, HM confirmation, one-shot booking and prebrief; no booking/link/invite sent here. Proposed reminder timing remains unapproved. |
 | CRM, audit, ownership, surfaces and recovery throughout | M1 T09; M2 workspace; M3 agent/group/memory/plugin boundaries; M4 migration; M5 all 181 applicable-action acceptance. | Full actor/organization/mobile/read-only/recovery and external uncertain-write checks. Historical pending cards/effects remain unchanged. |
 
-G0 is integrated into native research preparation and dispatch. G1–G4 exact-receipt and outbound-blocking primitives have deterministic offline tests, but their native approval-storage adapters and complete connector-dispatch integration are still open; this is not a claim that all outbound routes enforce the new playbook. The brief schema migration is authored only and has not been applied to production. Real PostgreSQL atomicity/concurrency and live UI acceptance remain unverified in this batch. New human-facing copy is limited to brief fields/provenance, confirmation and a conflict error shown only when relevant.
+G0 is integrated into native research preparation and dispatch. G1/G2 now have native persisted package approvals and human-answer proof; research preparation, admission and dispatch claim consume them. G3/G4 business packages, live pre-send checks and complete connector-dispatch integration remain open; the pure policy tests do not establish production outbound enforcement. The brief schema migration is authored only and has not been applied to production. Real PostgreSQL atomicity/concurrency and live UI acceptance remain unverified in this batch. New human-facing copy is limited to brief fields/provenance, confirmation and a conflict error shown only when relevant.
 
 First-batch verification: the eight targeted English test files have 233 passing checks after resolving the observed failures, including intake policy, mocked confirmation persistence, native API/panel, research adoption, context projection and eval registration. DB/adapters/API/Web/contracts/core/testkit type checks passed. Existing unrelated passing suites are not rerun for activity. No production mutation, deployment, authentication setup, credential read, scheduler change or external message was performed. Mocked transaction checks do not establish real PostgreSQL concurrency/recovery, and eval registration/grader checks are not model trials or sourcing-quality results.
 
@@ -580,6 +580,12 @@ PR #40 已通过真实 Postgres 24 项（含双连接行锁与跨组织冲突）
 **通过：** 一次精确批准对应一次确认发送；重复点击、重试、重启及已确认回复不引发第二次外发。
 
 现有 CRM 的 post-message RPC 会立即插入 pending 发送队列，不是未批准草稿，不在本轮调用。先复用 Rakazo 原生持久化 tool approval 保存精确 Instantly 参数；不得同时把同一消息加入 CRM pending 造成双发。现有 CRM 还缺只记录已发 provider receipt 的用户入口，业务验收需单独对齐这一边界。
+
+首个外联策略增量已在原生边界接入：实际解析到 MCP `reply_to_email`、`create_lead`、`add_leads_to_campaign_or_list_bulk`、`activate_campaign` 时，永久允许或自动审查不能绕过一次性真人审批。单个 lead 导入也可能进入已激活活动，因此同样需要确认。按真实 route 操作名判断，不按暴露别名/描述或正则判断；现有 MCP/SecretStore、审批卡、冻结参数和未知结果恢复继续复用。读取、非 MCP 路由及其他通用审批策略保持原样，没有另建队列或开新工具权限。
+
+该增量只补强制真人确认，不等于 G3/G4 业务准入。后续仍须把已确认岗位/候选/来源、准确 sender/recipient/provider thread、文案/设置/名单包和真实 CRM/provider 发送前读回连接起来；不能接受模型提供的 suppressed/checksComplete 布尔值，不能将 MCP HTTP 200 当投递完成。名单批量 skip 参数不是请求幂等；provider 原生 stop_on_reply 与独立的手动回复是不同操作，均需实际验收。历史工具目录是合同线索，不代替当前 server revision 的合法参数及业务回执核验。
+
+此策略在原生 executor 的直接与 catalog 路径先复现 16 个失败，再通过修复后的 150 项聚焦离线检查（四文件）；core/adapters 类型及格式检查、独立 SPEC/QUALITY 审查通过。覆盖永久允许/自动审查/错误只读注记、一次性动作、完整超过 4,000 字符的 Unicode 草稿、改写 sender/recipient/body 重构后的原参数执行，以及响应丢失后沿原 effect 记录未知而不重发。与上一批 563 项有重叠，不相加。新策略不改写历史卡片、既有工具分配或连接，不发送测试邮件、不激活活动、不部署。
 
 ## 任务 9：P6 全链路验收与交付
 

@@ -48,6 +48,24 @@ describe("toolRequiresApproval", () => {
     ).toBe(false);
   });
 
+  it.each([
+    "reply_to_email",
+    "create_lead",
+    "add_leads_to_campaign_or_list_bulk",
+    "activate_campaign",
+  ])("requires a one-time human decision for the resolved outbound operation %s", (toolName) => {
+    expect(toolRequiresExplicitApproval("renamed_action", { connectorId: "mcp", toolName })).toBe(
+      true,
+    );
+    expect(toolRequiresExplicitApproval(`mcp__example__${toolName}`)).toBe(false);
+    expect(toolRequiresExplicitApproval("renamed_action", { connectorId: "demo", toolName })).toBe(
+      false,
+    );
+    expect(
+      toolRequiresExplicitApproval("renamed_read", { connectorId: "mcp", toolName: "list_emails" }),
+    ).toBe(false);
+  });
+
   it("requires explicit human approval of recruiting packages even with an always-allow rule", () => {
     const toolName = "recruiting_request_approval";
     const rules: ActionApprovalRule[] = [

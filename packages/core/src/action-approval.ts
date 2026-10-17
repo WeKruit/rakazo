@@ -41,6 +41,15 @@ const EXPLICIT_APPROVAL_BUILTIN_TOOLS = new Set([
   "recruiting_request_approval",
   "recruiting_crm_bind",
 ]);
+// Lead enrollment may start an already-active campaign; it needs the same
+// one-time human decision as a direct reply or campaign activation.
+const EXPLICIT_APPROVAL_MCP_OPERATIONS = new Set([
+  "crm_import_candidate",
+  "reply_to_email",
+  "create_lead",
+  "add_leads_to_campaign_or_list_bulk",
+  "activate_campaign",
+]);
 
 const UNATTENDED_SAFE_BUILTIN_TOOLS = new Set([
   "browser_snapshot",
@@ -117,7 +126,7 @@ export function toolRequiresExplicitApproval(
 ): boolean {
   return (
     EXPLICIT_APPROVAL_BUILTIN_TOOLS.has(toolName) ||
-    (route?.connectorId === "mcp" && route.toolName === "crm_import_candidate")
+    (route?.connectorId === "mcp" && EXPLICIT_APPROVAL_MCP_OPERATIONS.has(route.toolName))
   );
 }
 
