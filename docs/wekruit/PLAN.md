@@ -14,7 +14,17 @@ Supabase 独立数据库、原生 memory provider、Modal Volume 和 E2B 沿用�
 
 Execution priority: filter playbook and sourcing (S1–S5) come first; reply and follow-up work is deferred. Feature implementation and direct product validation come before CI waits. Do not wait for CodeQL/CI after each push. The owner authorized an incremental spending cap of US$150; track usage against the private authorization baseline and retain existing resources. The latest instruction authorizes continuing feature fixes, deployment and testing on the existing resources without repeated confirmation. PR merge, unapproved production migrations, access expansion and real outbound remain separate. A pending business question does not block independent product work, and broad execution access does not supply its answer.
 
-**最新线上为 v57 / `6729d821`。** 三份本批变更生产源码与发布归档 hash 一致；API health/ready 与 Web 均为 200，ready 非 degraded。实际替换容器前后，两位 bot、五份 skills、11 份记忆、102 个 run、280 个 effect、251 条消息、109 份迁移、三份来源页、30 人、45 条来源、已有一份评估、岗位 v3 与 thread 状态逐项相同。未新增迁移、表、权限、依赖、资源、订阅或外联；PR 保持 Draft、未合并。此处源码版本与后续仅文档提交的分支 HEAD 分开记录。
+**最新线上为 v58 / `92581bf1`。** 本批六份生产源码与独立发布归档 hash 一致，API health/ready 与 Web 均为 200、ready 非 degraded。实际容器替换前后，103 个 run、280 个 effect、253 条消息、两位 bot、五份 skills、11 份记忆、109 份迁移、岗位 v3、30 人/45 条来源、一份评估及所有 thread 状态逐项相同。无新迁移、权限、依赖、服务或订阅；PR 仍为 Draft、未合并。
+
+**招聘对话与问题输入。** 复用稳定招聘表达指令，文字对话中的实际业务问题使用已有原生卡和直接输入，不向用户索取技术引用，也不重复已答或待答问题；语音原约束保持。原有 owner 显式诊断边界继续覆盖工具名、请求和结构化内部引用，原文/引文及历史自由文本不被机械改写，不声称任意模型文字绝对脱敏。移动端修复选择卡没有自定义输入、多个等待成员只能回答最后一张卡的实际缺口，复用共享可答卡选择器、原回答回调及原生控件；审批和 secret 卡仍不能当普通自由文本提交。Web 问题选项/输入统一为 16px；共享 Markdown 表移除等宽和双重缩小，正文与展开表实际均为 Geist 16px。原生协作仅显示业务进展，结果卡使用语义主题色。
+
+正常网页 @Sourcer 已重新完成选择 → 下一张问题 → 自定义多行/中英文/emoji 回答 → 原 run completed；两张原卡均 answered、自定义文本逐字保留，仅新增一个 run 和六条消息，没有外部 effect、研究或业务写入。Main 的原待答卡同时可用且保持未答，旧 run/message/effect、岗位、候选/来源/评估及配置/记忆保持；页面刷新后已答卡、最终回复、Main 输入与 30 人名单实际恢复。截图和逐项原生记录私有保存。
+
+验证分批保留、不相加：问答/路由六文件 120 项、指令/上下文三文件 123 项、展示与诊断四文件 36 项、Markdown 两套 70 项通过，相关 Web/adapters/chat-ui 类型、格式与 Web 生产构建通过，独立 SPEC/QUALITY 通过。既有表格 E2E 增加正文/展开字体断言，未运行完整数据库浏览器套件；上述实际网页另行验证。完整移动构建及真机验收仍缺，本地 Expo 依赖不完整，不扩大为移动端已发布。
+
+自动长上下文压缩与缓存继续复用现有 Pi，无新增实现：Main/helper 在请求前接入原生压缩，线程摘要持久保存，暂停恢复从产品历史重建；稳定 session/cache key 和协议能力约束保持。六文件 293 项聚焦检查通过，已有真实运行观察到缓存读取；未量化延迟/费用收益，不把过程内 KV 状态冒充跨重启持久缓存。完整找人/校准/反馈续搜及 P6/M1–M5 继续待验。
+
+**v57 历史发布 / `6729d821`。** 三份本批变更生产源码与发布归档 hash 一致；API health/ready 与 Web 均为 200，ready 非 degraded。实际替换容器前后，两位 bot、五份 skills、11 份记忆、102 个 run、280 个 effect、251 条消息、109 份迁移、三份来源页、30 人、45 条来源、已有一份评估、岗位 v3 与 thread 状态逐项相同。未新增迁移、表、权限、依赖、资源、订阅或外联；PR 保持 Draft、未合并。此处源码版本与后续仅文档提交的分支 HEAD 分开记录。
 
 **原生保存结果可直接筛选。** 现有 Evidence 筛选器此前仅列出自定义 research actions，普通 MCP 保存的来源没有选项；本批复用已有来源 effect/page 和 occurrence 关联，增加可选读取过滤，不制造本地 task/action 或新表。前端以现有 Saved results 文案和带时区的实际保存时间显示每份来源，内部键不作为标签；切换保存来源、既有 action 或全部时保持其他筛选，并保留原分页/迟到响应/岗位切换守卫。过滤人数与分页属于选定结果，全岗位总数和跨来源发现次数保持原含义。
 
@@ -123,6 +133,8 @@ Main/Sourcer 随后各完成一次实际回复，均读取两份当前 skill，�
 - 未完成的回复修订改动单独保存在本地 WIP 分支，不进入本批找人发布；此前原生回复关联代码保留，不声明 G4 通过。
 
 **后续原件重读已实测：**在同一原群正常续聊，Sourcer 的新 run 完成 `skill_read`、岗位只读读取与 `artifact_read` 三项工具，自行沿岗位保存的原件给出六项职责、五项要求、四项 Bonus 及单列 React/TypeScript 加分，并正确区分“上下文缩短”与“原件缺失”。通过既有 actor 授权与 ArtifactStore 独立重读该原件，hash/字节完整性通过，正文 4,993 字符、`truncated:false`；报告全部 18 条表格/引用块原文逐字存在于该保存版本。原生完成事件、结果和展开表截图已私有保存。本轮没有 research/reply、重新抓网页、改岗位/记忆/skill 或业务外发；只使用现有原生能力。这证明本轮完整 JD 阅读与输出，不扩大为 27 行 Autumn 报告、候选校准、持久 brief 或 Dashboard 验收。
+
+**正常 JD 链接 → 可审阅 brief 已有一次真实网页验收。** 沿既有原生网页 @Sourcer，一次正常网页读取后完成回复，覆盖职责、明确要求、加分、地点/雇佣/薪酬及真正缺失的口径。独立通过 actor 授权与 ArtifactStore 重读保存原件，hash/字节核验通过；正文 4,993 字符、未截断，和同一原生读取器的独立结果一致。回复保留 5+ 年，区分 Kubernetes 职责与明确资格、加分与自动淘汰规则，不输出内部编号或工具参数。此轮仅新增一个 completed run 和两条消息；全部旧消息/run/effect、岗位、候选/来源/评估、bot/skill/memory 与 Main 待答问题保持，没有研究或外联。该次实际用量另有缓存读取，但不据此计算命中率或节省比例。此前 JD 网页壳/截断历史保留；现有通用 JobPosting 读取已经覆盖该链接，不新建站点解析器。粘贴描述、PDF 等附件及完整新岗位确认/搜索仍待分别验收。
 
 ### 产品、数据与 UI 总览（当前执行入口）
 
@@ -616,7 +628,8 @@ Dyna 岗位资料另已实际迁入 Sourcer 正常聊天：只提供经审阅的
 
 当前入口：用户直接发送 JD URL、粘贴描述或上传材料，不先要求填写 CRM 表单或旧 task ID。对本轮新 JD 建立明确来源/版本的 brief，按产品授权、现有额度和限流创建真实 task；后续反馈只回该 task，旧 Grok 批次映射未知不用于臆造新任务关系。沿已有原生能力做真实产品验收，T01–T08 不作为普通 MCP 调用的必经步骤。
 
-- [ ] 正常聊天输入 JD 链接／描述后，实际读取完整职责、必备资格、加分和地点，生成可审阅 brief；缺少段落写未核全，不声称原文未规定。
+- [x] 正常聊天输入官方 JD 链接，实际读取完整职责、必备资格、加分和地点，返回可审阅 brief；原生保存原文与最终回复分别核验，不冒充已保存新岗位或已开始找人。
+- [ ] 粘贴描述及附件分别完成同等来源/完整性/brief 验收；缺少段落写未核全，不声称原文未规定。PDF 已能上传，但关闭电脑工具且没有获准的文档读取连接时，当前原生文本读取与引文核验不支持 PDF；不能绕开禁用工具或把上传成功当正文已读。
 - [ ] 核对创建、查询、反馈/继续接口及费用，确认既有账户授权覆盖实际检索，否则停在待授权步骤。
 - [ ] 约定招聘需求后创建一个外部任务，保存外部 ID 与用户/组织/bot/thread 的对应关系。
 - [ ] 在原 thread 展示真实候选来源与证据，区分事实、推断、缺口及模型评分。
