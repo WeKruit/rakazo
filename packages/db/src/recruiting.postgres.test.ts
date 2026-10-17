@@ -4033,7 +4033,7 @@ describePostgres("recruiting domain (PostgreSQL)", () => {
     );
   });
 
-  async function researchFixture(confirmed = true) {
+  async function researchFixture(confirmed = true, includeCriterion = false) {
     const salary = "GBP 90,000 to 120,000";
     const f = await nativeAsk(undefined, `Please clarify this role. Outreach salary: ${salary}.`);
     await prisma.run.update({
@@ -4053,7 +4053,17 @@ describePostgres("recruiting domain (PostgreSQL)", () => {
     const definition = {
       title: "Synthetic research role",
       sourceRefs: [ref],
-      criteria: [],
+      criteria: includeCriterion
+        ? [
+            {
+              id: "compensation",
+              priority: "hard" as const,
+              expression: { kind: "atom" as const, id: "salary", statement: salary },
+              sourceRefs: [ref],
+              definitionQuestions: [],
+            },
+          ]
+        : [],
       preferences: [],
       definitionQuestions: [],
       brief: {
@@ -4068,7 +4078,16 @@ describePostgres("recruiting domain (PostgreSQL)", () => {
           },
         ],
         questions: [],
-        rules: [],
+        rules: includeCriterion
+          ? [
+              {
+                criterionId: "compensation",
+                origin: "jd" as const,
+                effect: "reject" as const,
+                sourceRefIds: [ref.id],
+              },
+            ]
+          : [],
       },
     };
     const draft = await recruiting.createRecruitingRole(prisma, actor, {
@@ -4311,6 +4330,215 @@ describePostgres("recruiting domain (PostgreSQL)", () => {
       2,
     );
   });
+
+  it("atomically saves a human criterion edit, invalidates confirmation and preserves old assessment versions", async () => {
+    const f = await researchFixture(true, true);
+    const original = await prisma.recruitingRoleRevision.findUniqueOrThrow({
+      where: { id: f.role.revision.id },
+    });
+    const before = await prisma.message.count({ where: { threadId: f.thread.id } });
+    const assessment = await prisma.recruitingAssessment.create({
+      data: {
+        roleId: f.role.role.id,
+        roleRevisionId: f.role.revision.id,
+        candidateKey: "synthetic-row",
+        version: 1,
+        facts: [],
+        sourceRefs: [],
+        questions: [],
+        createdByRunId: f.run.id,
+        judgments: { atoms: [], employment: [], criteria: [], hardGate: "unknown" },
+      },
+    });
+    const input = {
+      threadId: f.thread.id,
+      roleId: f.role.role.id,
+      expectedRevision: f.role.role.revision,
+      criteria: [
+        {
+          criterionId: "compensation",
+          priority: "preferred" as const,
+          atoms: [{ atomId: "salary", statement: "GBP 100,000 to 120,000" }],
+        },
+      ],
+    };
+    const saved = await recruiting.editRecruitingCriteria(prisma, actor, input);
+    expect(saved.role.revision).toBe(f.role.role.revision + 1);
+    expect(saved.revision.brief?.confirmation).toBeNull();
+    const human = saved.revision.sourceRefs.at(-1)!;
+    expect(human.kind).toBe("recruiter_verified");
+    expect(human.anchor.kind).toBe("message");
+    const receipt = await prisma.message.findUniqueOrThrow({
+      where: { id: human.anchor.kind === "message" ? human.anchor.messageId : "invalid" },
+    });
+    expect(receipt).toMatchObject({
+      role: "user",
+      botId: null,
+      runId: null,
+      threadId: f.thread.id,
+      blocks: [{ kind: "text", text: human.quote }],
+    });
+    expect(saved.revision.brief?.rules[0]).toEqual({
+      criterionId: "compensation",
+      origin: "user_instruction",
+      effect: "flag",
+      sourceRefIds: [human.id],
+    });
+    expect(
+      await prisma.recruitingRoleRevision.findUniqueOrThrow({ where: { id: f.role.revision.id } }),
+    ).toEqual(original);
+    const historical = await recruiting.getRecruitingAssessment(prisma, actor, {
+      roleId: f.role.role.id,
+      candidateKey: assessment.candidateKey,
+    });
+    expect(historical?.isCurrent).toBe(false);
+    expect(historical?.roleRevision.id).toBe(f.role.revision.id);
+    expect(
+      await prisma.recruitingAssessment.findUniqueOrThrow({
+        where: {
+          roleId_candidateKey_version: {
+            roleId: assessment.roleId,
+            candidateKey: assessment.candidateKey,
+            version: 1,
+          },
+        },
+      }),
+    ).toEqual(assessment);
+    expect(
+      await recruiting.editRecruitingCriteria(prisma, actor, {
+        ...input,
+        expectedRevision: saved.role.revision,
+      }),
+    ).toEqual(saved);
+    expect(await prisma.message.count({ where: { threadId: f.thread.id } })).toBe(before + 1);
+  });
+
+  it("commits only one concurrent human criterion edit across two connections", async () => {
+    const f = await researchFixture(false, true);
+    const before = await prisma.message.count({ where: { threadId: f.thread.id } });
+    const second = createDb(databaseUrl!);
+    try {
+      const input = {
+        threadId: f.thread.id,
+        roleId: f.role.role.id,
+        expectedRevision: f.role.role.revision,
+        criteria: [
+          {
+            criterionId: "compensation",
+            priority: "preferred" as const,
+            atoms: [{ atomId: "salary", statement: "GBP 100,000 to 120,000" }],
+          },
+        ],
+      };
+      const results = await Promise.allSettled([
+        recruiting.editRecruitingCriteria(prisma, actor, input),
+        recruiting.editRecruitingCriteria(second.prisma, actor, input),
+      ]);
+      expect(results.filter((result) => result.status === "fulfilled")).toHaveLength(1);
+      const rejected = results.find((result) => result.status === "rejected");
+      expect(rejected?.status === "rejected" && rejected.reason).toBeInstanceOf(
+        recruiting.RecruitingConflictError,
+      );
+      expect(await prisma.message.count({ where: { threadId: f.thread.id } })).toBe(before + 1);
+      expect(await prisma.recruitingRoleRevision.count({ where: { roleId: f.role.role.id } })).toBe(
+        2,
+      );
+    } finally {
+      await second.prisma.$disconnect();
+      await second.pool.end();
+    }
+  });
+
+  it("rolls back the human criterion message, sequence, revision and role pointer after the actual CAS write", async () => {
+    const f = await researchFixture(false, true);
+    const beforeThread = await prisma.thread.findUniqueOrThrow({ where: { id: f.thread.id } });
+    const beforeRole = await prisma.recruitingRole.findUniqueOrThrow({
+      where: { id: f.role.role.id },
+    });
+    const beforeMessages = await prisma.message.count({ where: { threadId: f.thread.id } });
+    const failure = new Error("Injected failure after actual edited role pointer update");
+    const failing = prisma.$extends({
+      query: {
+        recruitingRole: {
+          async updateMany({ args, query }) {
+            await query(args);
+            throw failure;
+          },
+        },
+      },
+    });
+    await expect(
+      recruiting.editRecruitingCriteria(failing as unknown as PrismaClient, actor, {
+        threadId: f.thread.id,
+        roleId: f.role.role.id,
+        expectedRevision: f.role.role.revision,
+        criteria: [
+          {
+            criterionId: "compensation",
+            priority: "preferred",
+            atoms: [{ atomId: "salary", statement: "GBP 100,000 to 120,000" }],
+          },
+        ],
+      }),
+    ).rejects.toThrow(failure);
+    expect(await prisma.thread.findUniqueOrThrow({ where: { id: f.thread.id } })).toEqual(
+      beforeThread,
+    );
+    expect(
+      await prisma.recruitingRole.findUniqueOrThrow({ where: { id: f.role.role.id } }),
+    ).toEqual(beforeRole);
+    expect(await prisma.message.count({ where: { threadId: f.thread.id } })).toBe(beforeMessages);
+    expect(await prisma.recruitingRoleRevision.count({ where: { roleId: f.role.role.id } })).toBe(
+      1,
+    );
+  });
+
+  it.each(["foreign owner", "foreign space", "unbound", "changed source"] as const)(
+    "rejects a human criterion edit with %s without persisted writes",
+    async (mode) => {
+      const f = await researchFixture(false, true);
+      const before = await prisma.message.count({ where: { threadId: f.thread.id } });
+      const beforeRole = await prisma.recruitingRole.findUniqueOrThrow({
+        where: { id: f.role.role.id },
+      });
+      if (mode === "unbound")
+        await prisma.thread.update({
+          where: { id: f.thread.id },
+          data: { activeRecruitingRoleId: null },
+        });
+      if (mode === "changed source")
+        await prisma.message.update({
+          where: { id: f.original.id },
+          data: { blocks: [{ kind: "text", text: "Changed original material" }] },
+        });
+      const requester = {
+        ...actor,
+        ...(mode === "foreign owner" ? { userId: otherUserId } : {}),
+        ...(mode === "foreign space" ? { spaceId: otherSpaceId } : {}),
+      };
+      await expect(
+        recruiting.editRecruitingCriteria(prisma, requester, {
+          threadId: f.thread.id,
+          roleId: f.role.role.id,
+          expectedRevision: f.role.role.revision,
+          criteria: [
+            {
+              criterionId: "compensation",
+              priority: "preferred",
+              atoms: [{ atomId: "salary", statement: "GBP 100,000 to 120,000" }],
+            },
+          ],
+        }),
+      ).rejects.toThrow();
+      expect(await prisma.message.count({ where: { threadId: f.thread.id } })).toBe(before);
+      expect(
+        await prisma.recruitingRole.findUniqueOrThrow({ where: { id: f.role.role.id } }),
+      ).toEqual(beforeRole);
+      expect(await prisma.recruitingRoleRevision.count({ where: { roleId: f.role.role.id } })).toBe(
+        1,
+      );
+    },
+  );
 
   it("accepts one brief confirmation across two real database connections", async () => {
     const f = await researchFixture(false);

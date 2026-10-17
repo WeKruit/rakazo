@@ -19,6 +19,7 @@ vi.mock("@rakazo/db", async (importOriginal) => {
   return {
     ...actual,
     confirmRecruitingBrief: vi.fn(),
+    editRecruitingCriteria: vi.fn(),
     createRecruitingRole: vi.fn(),
     bindRecruitingRole: vi.fn(),
     getRecruitingWorkspace: vi.fn(),
@@ -319,4 +320,92 @@ it("uses the existing authenticated wrapper for human confirmation and sanitizes
     { threadId: "thread", roleId: "role", expectedRevision: 1 },
     undefined,
   );
+});
+
+it("uses trusted RPC identity and artifact context for closed human criterion edits", async () => {
+  const artifacts = { get: vi.fn() };
+  const client = createRouterClient(createRouter({ prisma, artifacts } as unknown as RouterDeps), {
+    context: { actor },
+  });
+  const input = {
+    threadId: "thread",
+    roleId: "role",
+    expectedRevision: 1,
+    criteria: [
+      {
+        criterionId: "criterion",
+        priority: "hard" as const,
+        atoms: [{ atomId: "atom", statement: "Edited statement" }],
+      },
+    ],
+  };
+  vi.mocked(db.editRecruitingCriteria).mockRejectedValueOnce(
+    new IsolationError("Private source details"),
+  );
+  await expect(client.recruiting.editCriteria(input)).rejects.toMatchObject({
+    code: "NOT_FOUND",
+    message: "Resource not found",
+  });
+  expect(db.editRecruitingCriteria).toHaveBeenLastCalledWith(prisma, actor, input, {
+    artifacts,
+    context: expect.objectContaining({
+      spaceId: actor.spaceId,
+      userId: actor.userId,
+      signal: expect.any(AbortSignal),
+    }),
+  });
+  const typedAtom = {
+    atomId: "atom",
+    employmentRule: {
+      minimumMonths: 84,
+      countingRule: "complete_calendar_months" as const,
+      qualificationDefinition: "Full-time geometry implementation",
+      cutoff: { kind: "assessment_date" as const },
+    },
+  };
+  const typedInput = { ...input, criteria: [{ ...input.criteria[0]!, atoms: [typedAtom] }] };
+  vi.mocked(db.editRecruitingCriteria).mockRejectedValueOnce(new RecruitingConflictError());
+  await expect(client.recruiting.editCriteria(typedInput)).rejects.toMatchObject({
+    code: "CONFLICT",
+  });
+  expect(db.editRecruitingCriteria).toHaveBeenLastCalledWith(
+    prisma,
+    actor,
+    typedInput,
+    expect.objectContaining({ artifacts }),
+  );
+  const writesBefore = vi.mocked(db.editRecruitingCriteria).mock.calls.length;
+  for (const extra of [
+    { actor: { userId: "foreign" } },
+    { sourceRefs: [] },
+    { confirmation: {} },
+    { expression: {} },
+  ])
+    await expect(
+      client.recruiting.editCriteria({ ...input, ...extra } as never),
+    ).rejects.toMatchObject({ code: "BAD_REQUEST" });
+  for (const atom of [
+    { ...typedAtom, statement: "7+ years" },
+    { atomId: "atom" },
+    { ...typedAtom, employmentRule: { ...typedAtom.employmentRule, minimumMonths: 1.5 } },
+    { ...typedAtom, employmentRule: { ...typedAtom.employmentRule, cutoff: { kind: "fixed" } } },
+  ])
+    await expect(
+      client.recruiting.editCriteria({
+        ...input,
+        criteria: [{ ...input.criteria[0], atoms: [atom] }],
+      } as never),
+    ).rejects.toMatchObject({ code: "BAD_REQUEST" });
+  expect(db.editRecruitingCriteria).toHaveBeenCalledTimes(writesBefore);
+});
+
+it("retains the existing safe mappings for criterion conflict, source and input failures", async () => {
+  for (const [error, code] of [
+    [new RecruitingConflictError(), "CONFLICT"],
+    [new RecruitingSourceValidationError("source", "text"), "BAD_REQUEST"],
+    [Object.assign(new Error("Private input"), { name: "ZodError" }), "BAD_REQUEST"],
+  ] as const) {
+    vi.mocked(db.editRecruitingCriteria).mockRejectedValueOnce(error);
+    await expect(api.editRecruitingCriteria(prisma, actor, {})).rejects.toMatchObject({ code });
+  }
 });

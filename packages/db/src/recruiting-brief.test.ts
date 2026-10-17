@@ -1,5 +1,6 @@
 import { createHash } from "node:crypto";
-import type { Actor } from "@rakazo/contracts";
+import type { Actor, RecruitingBrief, RecruitingCriterion } from "@rakazo/contracts";
+import { qualifiedEmploymentMonths } from "@rakazo/core";
 import { stableJsonValue } from "@rakazo/core/node/approval-effect-key";
 import { describe, expect, it, vi } from "vitest";
 import type { Prisma, PrismaClient } from "./client.js";
@@ -44,7 +45,7 @@ function fixture() {
       roleId: "role",
       revision: 1,
       sourceRefs: [source],
-      criteria: [],
+      criteria: [] as RecruitingCriterion[],
       preferences: [],
       definitionQuestions: [],
       createdAt: new Date(0),
@@ -60,11 +61,12 @@ function fixture() {
           },
         ],
         questions: [],
-        rules: [],
-        confirmation: null,
+        rules: [] as RecruitingBrief["rules"],
+        confirmation: null as RecruitingBrief["confirmation"],
       },
     },
   ];
+  const humanMessages = new Map<string, Record<string, unknown>>();
   const tx = {
     $queryRaw: vi.fn(async () => []),
     thread: {
@@ -73,17 +75,29 @@ function fixture() {
     },
     bot: { findFirst: vi.fn(async () => actor) },
     message: {
-      findUnique: vi.fn(async () => ({
-        id: "jd-message",
-        role: "user",
-        botId: null,
-        externalTranscriptFor: null,
-        blocks: [{ kind: "text", text: "GBP 90,000 to 120,000" }],
-      })),
-      findMany: vi.fn(async ({ where }: { where: { id: { in: string[] } } }) =>
-        where.id.in.map((id) => ({ id, threadId: "thread" })),
+      findUnique: vi.fn(
+        async ({ where }) =>
+          humanMessages.get(where.id) ?? {
+            id: "jd-message",
+            role: "user",
+            botId: null,
+            externalTranscriptFor: null,
+            blocks: [{ kind: "text", text: "GBP 90,000 to 120,000" }],
+          },
       ),
-      create: vi.fn(async ({ data }) => ({ id: "human-confirmation", ...data })),
+      findMany: vi.fn(async ({ where }: { where: { id: { in: string[] } } }) =>
+        where.id.in.map((id) => humanMessages.get(id) ?? { id, threadId: "thread" }),
+      ),
+      create: vi.fn(async ({ data }) => {
+        const message = {
+          id: "human-confirmation",
+          externalTranscriptFor: null,
+          ...data,
+          botId: data.botId ?? null,
+        };
+        humanMessages.set(message.id, message);
+        return message;
+      }),
     },
     recruitingRole: {
       findFirst: vi.fn(async () => role),
@@ -112,6 +126,475 @@ function fixture() {
   } as unknown as PrismaClient;
   return { prisma, tx, thread, revisions };
 }
+
+function criteriaFixture() {
+  const f = fixture();
+  const original = f.revisions[0]!;
+  original.criteria = [
+    {
+      id: "skills",
+      priority: "hard",
+      sourceRefs: original.sourceRefs as RecruitingCriterion["sourceRefs"],
+      definitionQuestions: ["Keep this unresolved question"],
+      expression: {
+        kind: "all",
+        items: [
+          { kind: "atom", id: "code", statement: "Implemented geometry" },
+          {
+            kind: "any",
+            items: [
+              { kind: "atom", id: "web", statement: "Built a web app" },
+              { kind: "not", item: { kind: "atom", id: "ui", statement: "Only configured a UI" } },
+            ],
+          },
+        ],
+      },
+    },
+    {
+      id: "location",
+      priority: "preferred",
+      sourceRefs: original.sourceRefs as RecruitingCriterion["sourceRefs"],
+      definitionQuestions: [],
+      expression: { kind: "atom", id: "onsite", statement: "Works onsite" },
+    },
+  ];
+  original.brief.rules = original.criteria.map((criterion) => ({
+    criterionId: criterion.id,
+    origin: "jd",
+    effect: criterion.priority === "hard" ? "reject" : "flag",
+    sourceRefIds: ["jd"],
+  }));
+  original.brief.confirmation = {
+    revision: 1,
+    userId: actor.userId,
+    messageId: "confirmation",
+    confirmedAt: new Date(0).toISOString(),
+  };
+  const input = {
+    threadId: "thread",
+    roleId: "role",
+    expectedRevision: 1,
+    criteria: [
+      {
+        criterionId: "skills",
+        priority: "preferred" as const,
+        atoms: [
+          { atomId: "code", statement: "Personally implemented 3D geometry" },
+          { atomId: "web", statement: "Built a web app" },
+          { atomId: "ui", statement: "Only configured a UI" },
+        ],
+      },
+    ],
+  };
+  return { ...f, input };
+}
+
+describe("native human criterion editing", () => {
+  it("preserves the expression, immutable original and other fields while sourcing exact meaningful edits to one human message", async () => {
+    const f = criteriaFixture();
+    const original = structuredClone(f.revisions[0]!);
+    const saved = await recruiting.editRecruitingCriteria(f.prisma, actor, f.input);
+    expect(saved.role.revision).toBe(2);
+    expect(f.revisions[0]).toEqual(original);
+    expect(saved.revision.criteria[1]).toEqual(original.criteria[1]);
+    expect(saved.revision.criteria[0]!.expression).toEqual({
+      ...original.criteria[0]!.expression,
+      items: [
+        { kind: "atom", id: "code", statement: "Personally implemented 3D geometry" },
+        (original.criteria[0]!.expression as { kind: "all"; items: unknown[] }).items[1],
+      ],
+    });
+    const human = saved.revision.sourceRefs.at(-1)!;
+    expect(human).toMatchObject({
+      kind: "recruiter_verified",
+      anchor: { kind: "message", messageId: "human-confirmation", locator: "blocks[0].text" },
+      readState: "read",
+    });
+    expect(saved.revision.sourceRefs.slice(0, -1)).toEqual(original.sourceRefs);
+    expect(saved.revision.criteria[0]!.sourceRefs).toEqual([
+      ...original.criteria[0]!.sourceRefs,
+      human,
+    ]);
+    const message = f.tx.message.create.mock.calls[0]![0].data;
+    expect(message).toMatchObject({ threadId: "thread", role: "user" });
+    expect(message.botId).toBeUndefined();
+    expect(message.runId).toBeUndefined();
+    expect(message.blocks).toEqual([{ kind: "text", text: human.quote }]);
+    expect(human.quote).toContain('"statement":"Personally implemented 3D geometry"');
+    expect(human.quote).toContain('"priority":"preferred"');
+    expect(human.quote).not.toContain("Built a web app");
+    expect(saved.revision.brief?.rules[0]).toEqual({
+      criterionId: "skills",
+      origin: "user_instruction",
+      effect: "flag",
+      sourceRefIds: [human.id],
+    });
+    expect(saved.revision.brief?.rules[1]).toEqual(original.brief.rules[1]);
+    expect(saved.revision.brief?.confirmation).toBeNull();
+    expect(saved.revision.brief?.fields).toEqual(original.brief.fields);
+    expect(saved.revision.brief?.questions).toEqual(original.brief.questions);
+    expect(saved.revision.criteria[0]!.definitionQuestions).toEqual(
+      original.criteria[0]!.definitionQuestions,
+    );
+    expect(saved.revision.preferences).toEqual(original.preferences);
+    expect(saved.revision.definitionQuestions).toEqual(original.definitionQuestions);
+    expect(f.tx.message.create).toHaveBeenCalledOnce();
+  });
+
+  it("returns an unchanged current snapshot for a true no-op without message or revision writes", async () => {
+    const f = criteriaFixture();
+    f.input.criteria[0]!.priority = "hard" as never;
+    f.input.criteria[0]!.atoms[0]!.statement = "Implemented geometry";
+    f.input.criteria[0]!.atoms.reverse();
+    const saved = await recruiting.editRecruitingCriteria(f.prisma, actor, f.input);
+    expect(saved.role.revision).toBe(1);
+    expect(saved.revision.brief?.confirmation?.revision).toBe(1);
+    expect(f.tx.message.create).not.toHaveBeenCalled();
+    expect(f.tx.recruitingRoleRevision.create).not.toHaveBeenCalled();
+    expect(f.tx.recruitingRole.updateMany).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    "unknown-criterion",
+    "unknown-atom",
+    "missing-atom",
+    "extra-atom",
+    "duplicate-criterion",
+    "duplicate-atom",
+    "blank",
+    "priority",
+  ])("rejects %s before any writes", async (mode) => {
+    const f = criteriaFixture();
+    const edit = f.input.criteria[0]!;
+    if (mode === "unknown-criterion") edit.criterionId = "unknown";
+    if (mode === "unknown-atom") edit.atoms[0]!.atomId = "unknown";
+    if (mode === "missing-atom") edit.atoms.pop();
+    if (mode === "extra-atom") edit.atoms.push({ atomId: "extra", statement: "Extra" });
+    if (mode === "duplicate-criterion") f.input.criteria.push(edit);
+    if (mode === "duplicate-atom") edit.atoms[1]!.atomId = edit.atoms[0]!.atomId;
+    if (mode === "blank") edit.atoms[0]!.statement = "   ";
+    if (mode === "priority") edit.priority = "optional" as never;
+    await expect(recruiting.editRecruitingCriteria(f.prisma, actor, f.input)).rejects.toThrow();
+    expect(f.tx.message.create).not.toHaveBeenCalled();
+    expect(f.tx.recruitingRoleRevision.create).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    "foreign-owner",
+    "foreign-space",
+    "unbound",
+    "stale",
+    "raced-revision",
+    "raced-binding",
+  ])("rejects %s without a human message", async (mode) => {
+    const f = criteriaFixture();
+    if (mode === "foreign-owner") f.thread.userId = "foreign";
+    if (mode === "foreign-space") f.thread.spaceId = "foreign";
+    if (mode === "unbound") f.thread.activeRecruitingRoleId = "foreign";
+    if (mode === "stale") f.input.expectedRevision = 2;
+    if (mode === "raced-revision") {
+      const role = await f.tx.recruitingRole.findFirst();
+      f.tx.recruitingRole.findFirst
+        .mockResolvedValueOnce(role)
+        .mockResolvedValue({ ...role, revision: 2 });
+    }
+    if (mode === "raced-binding")
+      f.tx.thread.findFirst
+        .mockImplementationOnce(async () => f.thread)
+        .mockImplementationOnce(async () => f.thread)
+        .mockImplementationOnce(async () => f.thread)
+        .mockImplementation(async () => ({ ...f.thread, activeRecruitingRoleId: "foreign" }));
+    await expect(recruiting.editRecruitingCriteria(f.prisma, actor, f.input)).rejects.toThrow();
+    expect(f.tx.message.create).not.toHaveBeenCalled();
+  });
+
+  it("rechecks original source quotes rather than trusting the retained snapshot", async () => {
+    const f = criteriaFixture();
+    f.tx.message.findUnique.mockResolvedValue({
+      id: "jd-message",
+      role: "user",
+      botId: null,
+      externalTranscriptFor: null,
+      blocks: [{ kind: "text", text: "Changed original source" }],
+    });
+    await expect(recruiting.editRecruitingCriteria(f.prisma, actor, f.input)).rejects.toThrow(
+      /quote/,
+    );
+    expect(f.tx.recruitingRoleRevision.create).not.toHaveBeenCalled();
+  });
+
+  it("preserves unchanged typed rules and repeated references during a priority edit", async () => {
+    const f = criteriaFixture();
+    const employmentRule = {
+      minimumMonths: 60,
+      countingRule: "complete_calendar_months" as const,
+      qualificationDefinition: "Full-time geometry engineering",
+      cutoff: { kind: "assessment_date" as const },
+    };
+    const leaf = {
+      kind: "atom" as const,
+      id: "code",
+      statement: "Implemented geometry",
+      employmentRule,
+    };
+    f.revisions[0]!.criteria[0] = {
+      ...f.revisions[0]!.criteria[0]!,
+      expression: { kind: "any", items: [leaf, { kind: "not", item: leaf }] },
+    };
+    const saved = await recruiting.editRecruitingCriteria(f.prisma, actor, {
+      ...f.input,
+      criteria: [{ ...f.input.criteria[0]!, atoms: [{ atomId: "code", employmentRule }] }],
+    });
+    expect(saved.revision.criteria[0]!.expression).toEqual({
+      kind: "any",
+      items: [leaf, { kind: "not", item: leaf }],
+    });
+    expect(f.revisions[0]!.criteria[0]!.expression).toEqual({
+      kind: "any",
+      items: [leaf, { kind: "not", item: leaf }],
+    });
+  });
+
+  it("rejects a text-only five-to-seven-year edit that would leave the evaluator at 60 months", async () => {
+    const f = criteriaFixture();
+    f.revisions[0]!.criteria[0] = {
+      ...f.revisions[0]!.criteria[0]!,
+      expression: {
+        kind: "atom",
+        id: "code",
+        statement: "5+ years",
+        employmentRule: {
+          minimumMonths: 60,
+          countingRule: "complete_calendar_months",
+          qualificationDefinition: "Full-time geometry engineering",
+          cutoff: { kind: "assessment_date" },
+        },
+      },
+    };
+    f.input.criteria[0]!.atoms = [{ atomId: "code", statement: "7+ years" }];
+    await expect(recruiting.editRecruitingCriteria(f.prisma, actor, f.input)).rejects.toThrow(
+      /structured employment rule/,
+    );
+    expect(f.tx.message.create).not.toHaveBeenCalled();
+    expect(f.tx.recruitingRoleRevision.create).not.toHaveBeenCalled();
+  });
+
+  it("changes the authoritative threshold from 60 to 84 months and records the same coherent rule and description", async () => {
+    const f = criteriaFixture();
+    const cutoff = { precision: "day" as const, year: 2026, month: 1, day: 1 };
+    const employmentRule = {
+      minimumMonths: 60,
+      countingRule: "complete_calendar_months" as const,
+      qualificationDefinition: "Full-time geometry engineering",
+      cutoff: { kind: "fixed" as const, date: cutoff },
+    };
+    const leaf = { kind: "atom" as const, id: "code", statement: "5+ years", employmentRule };
+    f.revisions[0]!.criteria[0] = {
+      ...f.revisions[0]!.criteria[0]!,
+      expression: { kind: "any", items: [leaf, { kind: "not", item: leaf }] },
+    };
+    const evaluate = (minimumMonths: number) =>
+      qualifiedEmploymentMonths({
+        ...employmentRule,
+        minimumMonths,
+        cutoff,
+        historyComplete: true,
+        intervals: [
+          {
+            start: { precision: "day", year: 2020, month: 1, day: 1 },
+            end: { precision: "day", year: 2025, month: 12, day: 31 },
+            qualifyingFullTime: "met",
+          },
+        ],
+      });
+    expect(evaluate(60)).toMatchObject({ verdict: "met", lowerMonths: 72 });
+    const updatedRule = { ...employmentRule, minimumMonths: 84 };
+    const saved = await recruiting.editRecruitingCriteria(f.prisma, actor, {
+      ...f.input,
+      criteria: [
+        { ...f.input.criteria[0]!, atoms: [{ atomId: "code", employmentRule: updatedRule }] },
+      ],
+    });
+    const statement =
+      "At least 84 complete calendar months of Full-time geometry engineering; cutoff: 2026-01-01 (UTC).";
+    const expectedLeaf = { ...leaf, statement, employmentRule: updatedRule };
+    expect(saved.revision.criteria[0]!.expression).toEqual({
+      kind: "any",
+      items: [expectedLeaf, { kind: "not", item: expectedLeaf }],
+    });
+    const actual = saved.revision.criteria[0]!.expression;
+    if (actual.kind !== "any" || actual.items[0]!.kind !== "atom")
+      throw new Error("Expected employment atom");
+    expect(evaluate(actual.items[0]!.employmentRule!.minimumMonths)).toMatchObject({
+      verdict: "unmet",
+      upperMonths: 72,
+    });
+    expect(f.revisions[0]!.criteria[0]!.expression).toEqual({
+      kind: "any",
+      items: [leaf, { kind: "not", item: leaf }],
+    });
+    const human = saved.revision.sourceRefs.at(-1)!;
+    expect(human.quote).toContain(
+      JSON.stringify({ atomId: "code", employmentRule: updatedRule, statement }),
+    );
+    expect(saved.revision.brief?.fields).toEqual(f.revisions[0]!.brief.fields);
+    expect(saved.revision.brief?.confirmation).toBeNull();
+  });
+
+  it("rejects adding a typed rule to an existing semantic atom", async () => {
+    const f = criteriaFixture();
+    const atoms = [
+      {
+        atomId: "code",
+        employmentRule: {
+          minimumMonths: 84,
+          countingRule: "complete_calendar_months",
+          qualificationDefinition: "Full-time engineering",
+          cutoff: { kind: "assessment_date" },
+        },
+      },
+      ...f.input.criteria[0]!.atoms.slice(1),
+    ];
+    await expect(
+      recruiting.editRecruitingCriteria(f.prisma, actor, {
+        ...f.input,
+        criteria: [{ ...f.input.criteria[0]!, atoms }],
+      }),
+    ).rejects.toThrow(/atom kind/);
+    expect(f.tx.message.create).not.toHaveBeenCalled();
+  });
+
+  it("treats an unchanged structured rule as a no-op and generates changed qualification and assessment cutoff coherently", async () => {
+    const f = criteriaFixture();
+    const rule = {
+      minimumMonths: 60,
+      countingRule: "complete_calendar_months" as const,
+      qualificationDefinition: "Full-time geometry implementation",
+      cutoff: {
+        kind: "fixed" as const,
+        date: { precision: "day" as const, year: 2025, month: 12, day: 31 },
+      },
+    };
+    const leaf = {
+      kind: "atom" as const,
+      id: "code",
+      statement: "5+ years of personal geometry implementation",
+      employmentRule: rule,
+    };
+    f.revisions[0]!.criteria[0] = { ...f.revisions[0]!.criteria[0]!, expression: leaf };
+    const input = {
+      ...f.input,
+      criteria: [
+        {
+          criterionId: "skills",
+          priority: "hard" as const,
+          atoms: [{ atomId: "code", employmentRule: rule }],
+        },
+      ],
+    };
+    const unchanged = await recruiting.editRecruitingCriteria(f.prisma, actor, input);
+    expect(unchanged.role.revision).toBe(1);
+    expect(unchanged.revision.criteria[0]!.expression).toEqual(leaf);
+    expect(f.tx.message.create).not.toHaveBeenCalled();
+    const updated = {
+      ...rule,
+      qualificationDefinition: "Full-time personally implemented geometry",
+      cutoff: { kind: "assessment_date" as const },
+    };
+    const saved = await recruiting.editRecruitingCriteria(f.prisma, actor, {
+      ...input,
+      criteria: [{ ...input.criteria[0], atoms: [{ atomId: "code", employmentRule: updated }] }],
+    });
+    expect(saved.revision.criteria[0]!.expression).toEqual({
+      ...leaf,
+      employmentRule: updated,
+      statement:
+        "At least 60 complete calendar months of Full-time personally implemented geometry; cutoff: assessment date (UTC).",
+    });
+    expect(saved.revision.sourceRefs.at(-1)!.quote).toContain(JSON.stringify(updated));
+  });
+
+  it("requires every criterion sharing a typed atom to adopt the same structured rule", async () => {
+    const f = criteriaFixture();
+    const rule = {
+      minimumMonths: 60,
+      countingRule: "complete_calendar_months" as const,
+      qualificationDefinition: "Full-time engineering",
+      cutoff: { kind: "assessment_date" as const },
+    };
+    const leaf = { kind: "atom" as const, id: "code", statement: "5+ years", employmentRule: rule };
+    f.revisions[0]!.criteria = f.revisions[0]!.criteria.map((criterion) => ({
+      ...criterion,
+      expression: leaf,
+    }));
+    const atoms = [{ atomId: "code", employmentRule: { ...rule, minimumMonths: 84 } }];
+    const input = {
+      ...f.input,
+      criteria: [{ criterionId: "skills", priority: "hard" as const, atoms }],
+    };
+    await expect(recruiting.editRecruitingCriteria(f.prisma, actor, input)).rejects.toThrow(
+      /one definition/,
+    );
+    expect(f.tx.message.create).not.toHaveBeenCalled();
+    const saved = await recruiting.editRecruitingCriteria(f.prisma, actor, {
+      ...input,
+      criteria: [...input.criteria, { criterionId: "location", priority: "preferred", atoms }],
+    });
+    expect(saved.revision.criteria[0]!.expression).toEqual(saved.revision.criteria[1]!.expression);
+    expect(f.tx.message.create).toHaveBeenCalledOnce();
+  });
+
+  it("rejects an inconsistent shared atom definition without silently changing another criterion", async () => {
+    const f = criteriaFixture();
+    f.revisions[0]!.criteria[1] = {
+      ...f.revisions[0]!.criteria[1]!,
+      expression: { kind: "atom", id: "code", statement: "Implemented geometry" },
+    };
+    await expect(recruiting.editRecruitingCriteria(f.prisma, actor, f.input)).rejects.toThrow(
+      /one definition/,
+    );
+    expect(f.tx.message.create).not.toHaveBeenCalled();
+    expect(f.tx.recruitingRoleRevision.create).not.toHaveBeenCalled();
+  });
+
+  it("uses a human reject rule for a priority-only promotion", async () => {
+    const f = criteriaFixture();
+    f.input.criteria = [
+      {
+        criterionId: "location",
+        priority: "hard" as never,
+        atoms: [{ atomId: "onsite", statement: "Works onsite" }],
+      },
+    ];
+    const saved = await recruiting.editRecruitingCriteria(f.prisma, actor, f.input);
+    expect(saved.revision.brief?.rules[1]).toEqual({
+      criterionId: "location",
+      origin: "user_instruction",
+      effect: "reject",
+      sourceRefIds: [saved.revision.sourceRefs.at(-1)!.id],
+    });
+    expect(saved.revision.sourceRefs.at(-1)!.quote).not.toContain('"atoms"');
+  });
+
+  it("rejects a failed final CAS instead of reporting an adopted edit", async () => {
+    const f = criteriaFixture();
+    f.tx.recruitingRole.updateMany.mockResolvedValue({ count: 0 });
+    await expect(recruiting.editRecruitingCriteria(f.prisma, actor, f.input)).rejects.toThrow(
+      recruiting.RecruitingConflictError,
+    );
+    expect(f.tx.recruitingRole.updateMany).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: {
+          id: "role",
+          spaceId: actor.spaceId,
+          userId: actor.userId,
+          revision: 1,
+          currentRevisionId: "revision-1",
+        },
+      }),
+    );
+  });
+});
 describe("native human brief confirmation", () => {
   it("stores the authenticated human message and a new immutable confirmed revision in one transaction", async () => {
     const f = fixture();
@@ -290,12 +773,9 @@ function approvalFixture() {
       findUnique: vi.fn(
         async ({ where }) =>
           cards.get(where.id) ?? {
+            ...(await f.tx.message.findUnique({ where })),
             id: where.id,
             threadId: "thread",
-            role: "user",
-            botId: null,
-            externalTranscriptFor: null,
-            blocks: [{ kind: "text", text: "GBP 90,000 to 120,000" }],
           },
       ),
     },
@@ -871,6 +1351,53 @@ async function gatedResearchFixture() {
 }
 
 describe("research stage gate enforcement", () => {
+  it.each(["admission", "claim"])(
+    "supersedes a pending old-version search after a human edit before %s",
+    async (stage) => {
+      const f = await gatedResearchFixture();
+      const seed = criteriaFixture();
+      f.revisions[0]!.criteria = seed.revisions[0]!.criteria;
+      f.revisions[0]!.brief.rules = seed.revisions[0]!.brief.rules;
+      const prepared = await recruiting.prepareRecruitingResearchAction(f.prisma, actor, f.input);
+      const admission = {
+        ...f.trusted,
+        actionId: prepared.action.id,
+        purpose: f.input.purpose,
+        approvalEffectId: f.input.approvalEffectId,
+        requestArtifact: {
+          artifactId: prepared.requestArtifact.id,
+          sha256: prepared.requestArtifact.hash,
+        },
+        contextArtifact: f.input.contextArtifact,
+        frozenRequest: { tool: "research" },
+        effectKind: "mcp_research",
+      };
+      const admitted =
+        stage === "claim"
+          ? await recruiting.admitRecruitingResearchAction(f.prisma, actor, admission)
+          : null;
+      await recruiting.editRecruitingCriteria(f.prisma, actor, seed.input);
+      if (admitted) {
+        expect(
+          await recruiting.claimRecruitingResearchAction(f.prisma, actor, {
+            ...f.trusted,
+            actionId: prepared.action.id,
+            effectId: admitted.effect!.id,
+            from: "intended",
+          }),
+        ).toBe(false);
+        expect(f.effects.get(admitted.effect!.id)!.status).toBe("intended");
+      } else {
+        expect(
+          (await recruiting.admitRecruitingResearchAction(f.prisma, actor, admission)).status,
+        ).toBe("superseded");
+        expect(f.tx.externalEffect.create).not.toHaveBeenCalled();
+      }
+      expect(f.getAction().roleRevisionId).toBe("revision-1");
+      expect(f.getAction().deliveryState).toBe("superseded");
+      expect(f.run.status).toBe("running");
+    },
+  );
   it.each(["missing-proof", "documents-for-scale", "legacy-purpose"])(
     "rejects %s before research action writes",
     async (mode) => {

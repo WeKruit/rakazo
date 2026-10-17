@@ -222,6 +222,41 @@ export const ConfirmRecruitingBriefInput = z.strictObject({
   expectedRevision: Revision,
 });
 
+export const EditRecruitingCriteriaInput = z.strictObject({
+  threadId: RecruitingId,
+  roleId: RecruitingId,
+  expectedRevision: Revision,
+  criteria: z
+    .array(
+      z.strictObject({
+        criterionId: RecruitingId,
+        priority: z.enum(["hard", "preferred"]),
+        atoms: z
+          .array(
+            z.union([
+              z.strictObject({ atomId: RecruitingId, statement: Text }),
+              z.strictObject({
+                atomId: RecruitingId,
+                employmentRule: RecruitingEmploymentRuleSchema,
+              }),
+            ]),
+          )
+          .min(1)
+          .refine(
+            (atoms) => new Set(atoms.map((atom) => atom.atomId)).size === atoms.length,
+            "Atom IDs must be unique",
+          ),
+      }),
+    )
+    .min(1)
+    .refine(
+      (criteria) =>
+        new Set(criteria.map((criterion) => criterion.criterionId)).size === criteria.length,
+      "Criterion IDs must be unique",
+    ),
+});
+export type EditRecruitingCriteriaInput = z.infer<typeof EditRecruitingCriteriaInput>;
+
 const RoleDefinition = {
   brief: RecruitingBriefDraftSchema.nullable().optional(),
   sourceRefs: z.array(RecruitingSourceRefSchema).min(1).readonly(),

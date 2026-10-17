@@ -492,6 +492,10 @@ msgstr "हमेशा अनुमत"
 msgid "An API key is stored for this provider, not a subscription sign-in."
 msgstr "इस प्रोवाइडर के लिए API कुंजी संग्रहीत है, सब्सक्रिप्शन साइन-इन नहीं।"
 
+#: src/pages/RecruitingPanel.tsx
+msgid "AND"
+msgstr ""
+
 #: src/components/AskCard.tsx
 msgid "Answer"
 msgstr "उत्तर"
@@ -613,6 +617,10 @@ msgstr ""
 
 #: src/components/integrations/IntegrationSetup.tsx
 msgid "Ask the server owner to configure this provider."
+msgstr ""
+
+#: src/pages/RecruitingPanel.tsx
+msgid "Assessment date"
 msgstr ""
 
 #: src/pages/RecruitingPanel.tsx
@@ -830,6 +838,7 @@ msgstr "सर्वर तक नहीं पहुंचा जा सका�
 #: src/pages/ModelSettingsOverlay.tsx
 #: src/pages/Onboarding.tsx
 #: src/pages/PluginsOverlay.tsx
+#: src/pages/RecruitingPanel.tsx
 #: src/pages/shell/bot-credentials.tsx
 #: src/pages/shell/dialogs.tsx
 msgid "Cancel"
@@ -1779,6 +1788,10 @@ msgstr ""
 msgid "Couldn't update messaging settings"
 msgstr ""
 
+#: src/pages/RecruitingPanel.tsx
+msgid "Count through"
+msgstr ""
+
 #: src/pages/Board.tsx
 #: src/pages/Shell.tsx
 #: src/pages/shell/bot-panel.tsx
@@ -1852,6 +1865,15 @@ msgstr ""
 msgid "Credentials are encrypted and never sent to the model."
 msgstr "क्रेडेंशियल एन्क्रिप्टेड होते हैं और मॉडल को कभी नहीं भेजे जाते।"
 
+#: src/pages/RecruitingPanel.tsx
+msgid "Criteria changed or could not be saved."
+msgstr ""
+
+#. placeholder {0}: index + 1
+#: src/pages/RecruitingPanel.tsx
+msgid "Criterion {0}"
+msgstr ""
+
 #: src/pages/RoutineSchedule.tsx
 msgid "Cron"
 msgstr "Cron"
@@ -1880,6 +1902,10 @@ msgstr ""
 #: src/pages/shell/avatar-studio-popover.tsx
 msgid "Customize bot avatar"
 msgstr "बॉट अवतार अनुकूलित करें"
+
+#: src/pages/RecruitingPanel.tsx
+msgid "Cutoff date"
+msgstr ""
 
 #: src/pages/AccountSettingsOverlay.tsx
 msgid "Dark"
@@ -2135,6 +2161,10 @@ msgstr "डुप्लिकेट"
 msgid "e.g. Hivenet Agent, Presales, Timesheets bot"
 msgstr "उदा. Hivenet Agent, Presales, टाइमशीट बॉट"
 
+#: src/pages/RecruitingPanel.tsx
+msgid "Edit criteria"
+msgstr ""
+
 #: src/components/AskCard.tsx
 msgid "Edit first"
 msgstr "पहले संपादित करें"
@@ -2154,6 +2184,10 @@ msgstr "इस ईमेल को पंजीकरण की अनुमत�
 #: src/lib/user-error.ts
 msgid "Email verification required"
 msgstr "ईमेल सत्यापन आवश्यक है"
+
+#: src/pages/RecruitingPanel.tsx
+msgid "Employment rule"
+msgstr ""
 
 #: src/pages/BillingSettingsPanel.tsx
 msgid "Ends {day}"
@@ -2347,6 +2381,10 @@ msgstr "पूरा हुआ।"
 msgid "Finishing MCP connection…"
 msgstr "MCP कनेक्शन पूरा हो रहा है…"
 
+#: src/pages/RecruitingPanel.tsx
+msgid "Fixed date"
+msgstr ""
+
 #: src/components/ApprovalRulesSettings.tsx
 msgid "Flag unexpected actions"
 msgstr ""
@@ -2428,6 +2466,10 @@ msgstr ""
 
 #: src/lib/call-session.ts
 msgid "Hang up, then enter the code on screen."
+msgstr ""
+
+#: src/pages/RecruitingPanel.tsx
+msgid "Hard"
 msgstr ""
 
 #: src/pages/RecruitingPanel.tsx
@@ -2951,6 +2993,15 @@ msgstr "छोटा करें"
 msgid "Minimize bots"
 msgstr ""
 
+#. placeholder {0}: rule.minimumMonths
+#: src/pages/RecruitingPanel.tsx
+msgid "Minimum {0} complete calendar months"
+msgstr ""
+
+#: src/pages/RecruitingPanel.tsx
+msgid "Minimum complete calendar months"
+msgstr ""
+
 #: src/pages/RoutineSchedule.tsx
 msgid "minute"
 msgstr "मिनट"
@@ -3276,6 +3327,10 @@ msgstr "अभी तक कोई नहीं"
 msgid "Normal"
 msgstr ""
 
+#: src/pages/RecruitingPanel.tsx
+msgid "NOT"
+msgstr ""
+
 #: src/pages/ModelBackupsSettings.tsx
 msgid "Not connected"
 msgstr "कनेक्ट नहीं है"
@@ -3429,6 +3484,10 @@ msgstr "वैकल्पिक"
 msgid "Optional header value"
 msgstr "वैकल्पिक हेडर मान"
 
+#: src/pages/RecruitingPanel.tsx
+msgid "OR"
+msgstr ""
+
 #: src/pages/ModelSettingsOverlay.tsx
 msgid "Or connect an API key"
 msgstr "या एक API कुंजी कनेक्ट करें"
@@ -3554,6 +3613,10 @@ msgid "Preferences"
 msgstr ""
 
 #: src/pages/RecruitingPanel.tsx
+msgid "Preferred"
+msgstr ""
+
+#: src/pages/RecruitingPanel.tsx
 msgid "Preferred criteria"
 msgstr ""
 
@@ -3567,6 +3630,7 @@ msgid "Preview isn't available for this file type — download it to view it."
 msgstr ""
 
 #: src/pages/Board.tsx
+#: src/pages/RecruitingPanel.tsx
 msgid "Priority"
 msgstr ""
 
@@ -3599,6 +3663,10 @@ msgstr "प्रोवाइडर्स"
 #: src/components/CloudAgentCard.tsx
 msgid "Pull request"
 msgstr "पुल अनुरोध"
+
+#: src/pages/RecruitingPanel.tsx
+msgid "Qualifying work"
+msgstr ""
 
 #: src/pages/ActivityList.tsx
 msgid "Queued"
@@ -4033,6 +4101,7 @@ msgstr ""
 #: src/pages/KnowledgeSection.tsx
 #: src/pages/McpServersOverlay.tsx
 #: src/pages/ModelSettingsOverlay.tsx
+#: src/pages/RecruitingPanel.tsx
 #: src/pages/RoutineEditor.tsx
 #: src/pages/shell/bot-panel.tsx
 #: src/pages/shell/dialogs.tsx
@@ -4450,6 +4519,10 @@ msgstr "शुरू हो रहा है"
 #: src/pages/Onboarding.tsx
 msgid "Starting…"
 msgstr "शुरू हो रहा है…"
+
+#: src/pages/RecruitingPanel.tsx
+msgid "Statement"
+msgstr ""
 
 #: src/pages/ActivityList.tsx
 #: src/pages/Board.tsx

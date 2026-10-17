@@ -265,6 +265,7 @@ import {
   bindRecruitingRole,
   confirmRecruitingBrief,
   createRecruitingRole,
+  editRecruitingCriteria,
   getRecruitingAssessment,
   getRecruitingWorkspace,
   listRecruitingAssessments,
@@ -3205,6 +3206,12 @@ export function createRouter(deps: RouterDeps) {
       }),
     },
     recruiting: {
+      editCriteria: authed.recruiting.editCriteria.handler(({ context, input }) =>
+        editRecruitingCriteria(deps.prisma, context.actor, input, {
+          artifacts: deps.artifacts,
+          context: connectionContext(context.actor, randomUUID()),
+        }),
+      ),
       confirmBrief: authed.recruiting.confirmBrief.handler(({ context, input }) =>
         confirmRecruitingBrief(deps.prisma, context.actor, input, {
           artifacts: deps.artifacts,

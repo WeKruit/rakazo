@@ -492,6 +492,10 @@ msgstr "항상 허용됨"
 msgid "An API key is stored for this provider, not a subscription sign-in."
 msgstr "이 서비스에는 구독 로그인이 아니라 API 키가 저장되어 있습니다."
 
+#: src/pages/RecruitingPanel.tsx
+msgid "AND"
+msgstr ""
+
 #: src/components/AskCard.tsx
 msgid "Answer"
 msgstr "답변"
@@ -613,6 +617,10 @@ msgstr ""
 
 #: src/components/integrations/IntegrationSetup.tsx
 msgid "Ask the server owner to configure this provider."
+msgstr ""
+
+#: src/pages/RecruitingPanel.tsx
+msgid "Assessment date"
 msgstr ""
 
 #: src/pages/RecruitingPanel.tsx
@@ -830,6 +838,7 @@ msgstr "서버에 연결할 수 없습니다."
 #: src/pages/ModelSettingsOverlay.tsx
 #: src/pages/Onboarding.tsx
 #: src/pages/PluginsOverlay.tsx
+#: src/pages/RecruitingPanel.tsx
 #: src/pages/shell/bot-credentials.tsx
 #: src/pages/shell/dialogs.tsx
 msgid "Cancel"
@@ -1779,6 +1788,10 @@ msgstr "아바타를 업데이트할 수 없습니다"
 msgid "Couldn't update messaging settings"
 msgstr "메시징 설정을 업데이트할 수 없습니다"
 
+#: src/pages/RecruitingPanel.tsx
+msgid "Count through"
+msgstr ""
+
 #: src/pages/Board.tsx
 #: src/pages/Shell.tsx
 #: src/pages/shell/bot-panel.tsx
@@ -1852,6 +1865,15 @@ msgstr ""
 msgid "Credentials are encrypted and never sent to the model."
 msgstr "인증 정보는 암호화되며 모델에 전송되지 않습니다."
 
+#: src/pages/RecruitingPanel.tsx
+msgid "Criteria changed or could not be saved."
+msgstr ""
+
+#. placeholder {0}: index + 1
+#: src/pages/RecruitingPanel.tsx
+msgid "Criterion {0}"
+msgstr ""
+
 #: src/pages/RoutineSchedule.tsx
 msgid "Cron"
 msgstr "Cron"
@@ -1880,6 +1902,10 @@ msgstr "고객 지원"
 #: src/pages/shell/avatar-studio-popover.tsx
 msgid "Customize bot avatar"
 msgstr "봇 아바타 맞춤설정"
+
+#: src/pages/RecruitingPanel.tsx
+msgid "Cutoff date"
+msgstr ""
 
 #: src/pages/AccountSettingsOverlay.tsx
 msgid "Dark"
@@ -2135,6 +2161,10 @@ msgstr "복제"
 msgid "e.g. Hivenet Agent, Presales, Timesheets bot"
 msgstr "예: Hivenet Agent, Presales, 근무표 봇"
 
+#: src/pages/RecruitingPanel.tsx
+msgid "Edit criteria"
+msgstr ""
+
 #: src/components/AskCard.tsx
 msgid "Edit first"
 msgstr "수정 후 보내기"
@@ -2154,6 +2184,10 @@ msgstr "이 이메일은 가입이 허용되지 않습니다"
 #: src/lib/user-error.ts
 msgid "Email verification required"
 msgstr "이메일 인증이 필요합니다"
+
+#: src/pages/RecruitingPanel.tsx
+msgid "Employment rule"
+msgstr ""
 
 #: src/pages/BillingSettingsPanel.tsx
 msgid "Ends {day}"
@@ -2347,6 +2381,10 @@ msgstr "완료되었습니다."
 msgid "Finishing MCP connection…"
 msgstr "MCP 연결을 마무리하는 중…"
 
+#: src/pages/RecruitingPanel.tsx
+msgid "Fixed date"
+msgstr ""
+
 #: src/components/ApprovalRulesSettings.tsx
 msgid "Flag unexpected actions"
 msgstr "예상하지 못한 작업 표시"
@@ -2429,6 +2467,10 @@ msgstr "먼저 전화를 끊은 다음 화면에 표시된 코드를 입력하�
 #: src/lib/call-session.ts
 msgid "Hang up, then enter the code on screen."
 msgstr "전화를 끊은 다음 화면에 표시된 코드를 입력하세요."
+
+#: src/pages/RecruitingPanel.tsx
+msgid "Hard"
+msgstr ""
 
 #: src/pages/RecruitingPanel.tsx
 msgid "Hard criteria"
@@ -2951,6 +2993,15 @@ msgstr "최소화"
 msgid "Minimize bots"
 msgstr ""
 
+#. placeholder {0}: rule.minimumMonths
+#: src/pages/RecruitingPanel.tsx
+msgid "Minimum {0} complete calendar months"
+msgstr ""
+
+#: src/pages/RecruitingPanel.tsx
+msgid "Minimum complete calendar months"
+msgstr ""
+
 #: src/pages/RoutineSchedule.tsx
 msgid "minute"
 msgstr "분"
@@ -3276,6 +3327,10 @@ msgstr "아직 없음"
 msgid "Normal"
 msgstr ""
 
+#: src/pages/RecruitingPanel.tsx
+msgid "NOT"
+msgstr ""
+
 #: src/pages/ModelBackupsSettings.tsx
 msgid "Not connected"
 msgstr "연결되지 않음"
@@ -3429,6 +3484,10 @@ msgstr "선택 사항"
 msgid "Optional header value"
 msgstr "선택 사항인 헤더 값"
 
+#: src/pages/RecruitingPanel.tsx
+msgid "OR"
+msgstr ""
+
 #: src/pages/ModelSettingsOverlay.tsx
 msgid "Or connect an API key"
 msgstr "또는 API 키 연결"
@@ -3554,6 +3613,10 @@ msgid "Preferences"
 msgstr ""
 
 #: src/pages/RecruitingPanel.tsx
+msgid "Preferred"
+msgstr ""
+
+#: src/pages/RecruitingPanel.tsx
 msgid "Preferred criteria"
 msgstr ""
 
@@ -3567,6 +3630,7 @@ msgid "Preview isn't available for this file type — download it to view it."
 msgstr ""
 
 #: src/pages/Board.tsx
+#: src/pages/RecruitingPanel.tsx
 msgid "Priority"
 msgstr ""
 
@@ -3599,6 +3663,10 @@ msgstr "서비스"
 #: src/components/CloudAgentCard.tsx
 msgid "Pull request"
 msgstr "풀 리퀘스트"
+
+#: src/pages/RecruitingPanel.tsx
+msgid "Qualifying work"
+msgstr ""
 
 #: src/pages/ActivityList.tsx
 msgid "Queued"
@@ -4033,6 +4101,7 @@ msgstr ""
 #: src/pages/KnowledgeSection.tsx
 #: src/pages/McpServersOverlay.tsx
 #: src/pages/ModelSettingsOverlay.tsx
+#: src/pages/RecruitingPanel.tsx
 #: src/pages/RoutineEditor.tsx
 #: src/pages/shell/bot-panel.tsx
 #: src/pages/shell/dialogs.tsx
@@ -4450,6 +4519,10 @@ msgstr "시작 중"
 #: src/pages/Onboarding.tsx
 msgid "Starting…"
 msgstr "시작하는 중…"
+
+#: src/pages/RecruitingPanel.tsx
+msgid "Statement"
+msgstr ""
 
 #: src/pages/ActivityList.tsx
 #: src/pages/Board.tsx

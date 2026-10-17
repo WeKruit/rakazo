@@ -5,6 +5,7 @@ import type {
   RecruitingAssessment,
   RecruitingAssessmentSnapshot,
   RecruitingAssessmentSourceRef,
+  RecruitingEmploymentRule,
   RecruitingQuestion,
   RecruitingRole,
   RecruitingRoleRevision,
@@ -26,6 +27,7 @@ const api = vi.hoisted(() => ({
   bindRole: vi.fn(),
   reviseRole: vi.fn(),
   confirmBrief: vi.fn(),
+  editCriteria: vi.fn(),
   list: vi.fn(),
   history: vi.fn(),
   update: vi.fn(),
@@ -369,6 +371,564 @@ async function mounted(threadId = "thread-1", botId?: string) {
   };
   return { container, render, click, expand, reveal };
 }
+
+async function changeStatement(container: HTMLElement, statement: string, index = 0) {
+  const input = container.querySelectorAll<HTMLTextAreaElement>('textarea[aria-label="Statement"]')[
+    index
+  ]!;
+  expect(input).toBeDefined();
+  await act(async () => {
+    Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, "value")!.set!.call(
+      input,
+      statement,
+    );
+    input.dispatchEvent(new Event("input", { bubbles: true }));
+  });
+}
+
+async function changeInput(container: HTMLElement, name: string, value: string) {
+  const input = container.querySelector<HTMLInputElement>(`input[aria-label="${name}"]`)!;
+  expect(input, name).not.toBeNull();
+  await act(async () => {
+    Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, "value")!.set!.call(input, value);
+    input.dispatchEvent(new Event("input", { bubbles: true }));
+  });
+}
+
+const employmentRule: RecruitingEmploymentRule = {
+  minimumMonths: 60,
+  countingRule: "complete_calendar_months",
+  qualificationDefinition: "Full-time systems work",
+  cutoff: { kind: "assessment_date" },
+};
+
+function typedCriteria(rule = employmentRule) {
+  return {
+    role,
+    revision: {
+      ...revision,
+      criteria: [
+        {
+          ...revision.criteria[0]!,
+          expression: {
+            kind: "atom" as const,
+            id: "atom-1",
+            statement: "Five years of systems work",
+            employmentRule: rule,
+          },
+        },
+      ],
+    },
+  };
+}
+
+it("edits the executed employment rule from 60 to 84 months with an exact fixed cutoff", async () => {
+  api.getWorkspace.mockResolvedValue(typedCriteria());
+  const view = await mounted();
+  expect(view.container.textContent).toContain("Minimum 60 complete calendar months");
+  await view.click("Edit criteria");
+  expect(
+    view.container.querySelector<HTMLInputElement>(
+      'input[aria-label="Minimum complete calendar months"]',
+    )?.value,
+  ).toBe("60");
+  expect(view.container.querySelector('textarea[aria-label="Statement"]')).toBeNull();
+  expect(
+    view.container.querySelector<HTMLTextAreaElement>('textarea[aria-label="Qualifying work"]')
+      ?.value,
+  ).toBe("Full-time systems work");
+  await view.click("Save");
+  expect(api.editCriteria).not.toHaveBeenCalled();
+  await changeInput(view.container, "Minimum complete calendar months", "84");
+  const cutoff = view.container.querySelector<HTMLSelectElement>(
+    'select[aria-label="Count through"]',
+  )!;
+  await act(async () => {
+    cutoff.value = "fixed";
+    cutoff.dispatchEvent(new Event("change", { bubbles: true }));
+  });
+  await view.click("Save");
+  expect(api.editCriteria).not.toHaveBeenCalled();
+  await changeInput(view.container, "Cutoff date", "2026-10-16");
+  const rule = {
+    ...employmentRule,
+    minimumMonths: 84,
+    cutoff: {
+      kind: "fixed" as const,
+      date: { precision: "day" as const, year: 2026, month: 10, day: 16 },
+    },
+  };
+  const typed = typedCriteria(rule);
+  const saved = {
+    role: { ...role, revision: 3, currentRevisionId: "revision-3" },
+    revision: {
+      ...typed.revision,
+      id: "revision-3",
+      revision: 3,
+      criteria: [
+        {
+          ...typed.revision.criteria[0]!,
+          expression: {
+            ...typed.revision.criteria[0]!.expression,
+            statement:
+              "At least 84 complete calendar months of Full-time systems work; cutoff: 2026-10-16 (UTC).",
+          },
+        },
+      ],
+    },
+  };
+  api.editCriteria.mockResolvedValue(saved);
+  api.getWorkspace.mockResolvedValue(saved);
+  await view.click("Save");
+  expect(api.editCriteria).toHaveBeenCalledExactlyOnceWith({
+    threadId: "thread-1",
+    roleId: role.id,
+    expectedRevision: 2,
+    criteria: [
+      {
+        criterionId: "criterion-1",
+        priority: "hard",
+        atoms: [{ atomId: "atom-1", employmentRule: rule }],
+      },
+    ],
+  });
+  expect(view.container.textContent).toContain("Minimum 84 complete calendar months");
+  expect(view.container.textContent).toContain("2026-10-16");
+  expect(view.container.textContent).not.toContain("Five years of systems work");
+});
+
+it("validates employment months and qualification, and can use the assessment date", async () => {
+  api.getWorkspace.mockResolvedValue(
+    typedCriteria({
+      ...employmentRule,
+      cutoff: { kind: "fixed", date: { precision: "day", year: 2026, month: 10, day: 16 } },
+    }),
+  );
+  const view = await mounted();
+  await view.click("Edit criteria");
+  for (const value of ["", "-1", "1.5"]) {
+    await changeInput(view.container, "Minimum complete calendar months", value);
+    await view.click("Save");
+    expect(api.editCriteria).not.toHaveBeenCalled();
+  }
+  await changeInput(view.container, "Minimum complete calendar months", "84");
+  const definition = view.container.querySelector<HTMLTextAreaElement>(
+    'textarea[aria-label="Qualifying work"]',
+  )!;
+  const changeDefinition = async (value: string) =>
+    act(async () => {
+      Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, "value")!.set!.call(
+        definition,
+        value,
+      );
+      definition.dispatchEvent(new Event("input", { bubbles: true }));
+    });
+  await changeDefinition("  ");
+  await view.click("Save");
+  expect(api.editCriteria).not.toHaveBeenCalled();
+  await changeDefinition("  Full-time compiler work  ");
+  const cutoff = view.container.querySelector<HTMLSelectElement>(
+    'select[aria-label="Count through"]',
+  )!;
+  await act(async () => {
+    cutoff.value = "assessment_date";
+    cutoff.dispatchEvent(new Event("change", { bubbles: true }));
+  });
+  expect(view.container.querySelector('input[aria-label="Cutoff date"]')).toBeNull();
+  api.editCriteria.mockRejectedValue(new Error("offline"));
+  await view.click("Save");
+  expect(api.editCriteria).toHaveBeenCalledExactlyOnceWith({
+    threadId: "thread-1",
+    roleId: role.id,
+    expectedRevision: 2,
+    criteria: [
+      {
+        criterionId: "criterion-1",
+        priority: "hard",
+        atoms: [
+          {
+            atomId: "atom-1",
+            employmentRule: {
+              ...employmentRule,
+              minimumMonths: 84,
+              qualificationDefinition: "Full-time compiler work",
+            },
+          },
+        ],
+      },
+    ],
+  });
+  expect(
+    view.container.querySelector<HTMLInputElement>(
+      'input[aria-label="Minimum complete calendar months"]',
+    )?.value,
+  ).toBe("84");
+  expect(definition.value).toBe("  Full-time compiler work  ");
+});
+
+it("keeps shared typed rules and newer month edits while a save is pending", async () => {
+  const initial = typedCriteria();
+  const shared = initial.revision.criteria[0]!;
+  const criteria = [shared, { ...shared, id: "criterion-2", priority: "preferred" as const }];
+  api.getWorkspace.mockResolvedValue({ ...initial, revision: { ...initial.revision, criteria } });
+  let finish!: (value: unknown) => void;
+  api.editCriteria.mockReturnValueOnce(
+    new Promise((resolve) => {
+      finish = resolve;
+    }),
+  );
+  const view = await mounted();
+  await view.click("Edit criteria");
+  await changeInput(view.container, "Minimum complete calendar months", "84");
+  const monthValues = () =>
+    [
+      ...view.container.querySelectorAll<HTMLInputElement>(
+        'input[aria-label="Minimum complete calendar months"]',
+      ),
+    ].map((input) => input.value);
+  expect(monthValues()).toEqual(["84", "84"]);
+  await view.click("Save");
+  await changeInput(view.container, "Minimum complete calendar months", "96");
+  const saved = {
+    role: { ...role, revision: 3, currentRevisionId: "revision-3" },
+    revision: {
+      ...initial.revision,
+      id: "revision-3",
+      revision: 3,
+      criteria: criteria.map((criterion) => ({
+        ...criterion,
+        expression: {
+          ...criterion.expression,
+          statement:
+            "At least 84 complete calendar months of Full-time systems work; cutoff: assessment date (UTC).",
+          employmentRule: { ...employmentRule, minimumMonths: 84 },
+        },
+      })),
+    },
+  };
+  api.getWorkspace.mockResolvedValue(saved);
+  await act(async () => finish(saved));
+  expect(monthValues()).toEqual(["96", "96"]);
+  api.editCriteria.mockRejectedValueOnce(new Error("offline"));
+  await view.click("Save");
+  expect(api.editCriteria).toHaveBeenLastCalledWith({
+    threadId: "thread-1",
+    roleId: role.id,
+    expectedRevision: 3,
+    criteria: criteria.map((criterion) => ({
+      criterionId: criterion.id,
+      priority: criterion.priority,
+      atoms: [{ atomId: "atom-1", employmentRule: { ...employmentRule, minimumMonths: 96 } }],
+    })),
+  });
+  expect(monthValues()).toEqual(["96", "96"]);
+});
+
+function savedCriteria(statement = "Build reliable systems") {
+  return {
+    role: { ...role, revision: 3, currentRevisionId: "revision-3" },
+    revision: {
+      ...revision,
+      id: "revision-3",
+      revision: 3,
+      criteria: [
+        {
+          ...revision.criteria[0]!,
+          expression: { kind: "atom" as const, id: "atom-1", statement },
+        },
+      ],
+    },
+  };
+}
+
+it("edits exact existing atoms and priority while preserving compound groups", async () => {
+  const compound = {
+    ...revision.criteria[0]!,
+    expression: {
+      kind: "all",
+      items: [
+        { kind: "atom", id: "atom-1", statement: "Build systems" },
+        {
+          kind: "any",
+          items: [
+            { kind: "atom", id: "atom-2", statement: "Use compilers" },
+            { kind: "not", item: { kind: "atom", id: "atom-3", statement: "Only manage teams" } },
+          ],
+        },
+      ],
+    },
+  } satisfies RecruitingRoleRevision["criteria"][number];
+  const unchanged = {
+    ...revision.criteria[0]!,
+    id: "criterion-2",
+    priority: "preferred" as const,
+    expression: { kind: "atom" as const, id: "atom-4", statement: "Write documentation" },
+  };
+  api.getWorkspace.mockResolvedValue({
+    role,
+    revision: { ...revision, criteria: [compound, unchanged] },
+  });
+  const saved = savedCriteria();
+  const next = {
+    ...saved,
+    revision: {
+      ...saved.revision,
+      criteria: [
+        {
+          ...compound,
+          priority: "preferred" as const,
+          expression: {
+            ...compound.expression,
+            items: [
+              { kind: "atom" as const, id: "atom-1", statement: "Build reliable systems" },
+              compound.expression.items[1]!,
+            ],
+          },
+        },
+        unchanged,
+      ],
+    },
+  };
+  api.editCriteria.mockResolvedValue(next);
+  const view = await mounted();
+  await view.click("Edit criteria");
+  expect(
+    [...view.container.querySelectorAll("fieldset legend")].map((item) => item.textContent),
+  ).toEqual(expect.arrayContaining(["AND", "OR", "NOT"]));
+  const groups = [...view.container.querySelectorAll("fieldset")].filter(
+    (item) => item.querySelector(":scope > legend")?.textContent === "AND",
+  );
+  expect(groups[0]?.querySelectorAll("textarea")).toHaveLength(3);
+  await changeStatement(view.container, "  Build reliable systems  ");
+  const priority = view.container.querySelector<HTMLSelectElement>(
+    'select[aria-label="Priority"]',
+  )!;
+  await act(async () => {
+    priority.value = "preferred";
+    priority.dispatchEvent(new Event("change", { bubbles: true }));
+  });
+  api.getWorkspace.mockResolvedValue(next);
+  await view.click("Save");
+  expect(api.editCriteria).toHaveBeenCalledExactlyOnceWith({
+    threadId: "thread-1",
+    roleId: role.id,
+    expectedRevision: 2,
+    criteria: [
+      {
+        criterionId: "criterion-1",
+        priority: "preferred",
+        atoms: [
+          { atomId: "atom-1", statement: "Build reliable systems" },
+          { atomId: "atom-2", statement: "Use compilers" },
+          { atomId: "atom-3", statement: "Only manage teams" },
+        ],
+      },
+    ],
+  });
+  expect(view.container.textContent).toContain(
+    "(Build reliable systems AND (Use compilers OR NOT (Only manage teams)))",
+  );
+});
+
+it("does not save unchanged or blank criteria and Cancel discards the draft", async () => {
+  const view = await mounted();
+  await view.click("Edit criteria");
+  await view.click("Save");
+  expect(api.editCriteria).not.toHaveBeenCalled();
+  await changeStatement(view.container, "  Build systems  ");
+  await view.click("Save");
+  expect(api.editCriteria).not.toHaveBeenCalled();
+  await changeStatement(view.container, "  ");
+  await view.click("Save");
+  expect(api.editCriteria).not.toHaveBeenCalled();
+  await view.click("Cancel");
+  expect(view.container.querySelector("textarea")).toBeNull();
+  expect(view.container.textContent).toContain("Build systems");
+});
+
+it("edits one shared atom definition across repeated leaves and criteria", async () => {
+  const shared = revision.criteria[0]!;
+  api.getWorkspace.mockResolvedValue({
+    role,
+    revision: {
+      ...revision,
+      criteria: [
+        { ...shared, expression: { kind: "any", items: [shared.expression, shared.expression] } },
+        { ...shared, id: "criterion-2", priority: "preferred" },
+      ],
+    },
+  });
+  const view = await mounted();
+  await view.click("Edit criteria");
+  await changeStatement(view.container, "Build shared systems");
+  expect([...view.container.querySelectorAll("textarea")].map((item) => item.value)).toEqual([
+    "Build shared systems",
+    "Build shared systems",
+    "Build shared systems",
+  ]);
+  api.editCriteria.mockResolvedValue(savedCriteria());
+  await view.click("Save");
+  expect(api.editCriteria).toHaveBeenCalledExactlyOnceWith({
+    threadId: "thread-1",
+    roleId: role.id,
+    expectedRevision: 2,
+    criteria: [
+      {
+        criterionId: "criterion-1",
+        priority: "hard",
+        atoms: [{ atomId: "atom-1", statement: "Build shared systems" }],
+      },
+      {
+        criterionId: "criterion-2",
+        priority: "preferred",
+        atoms: [{ atomId: "atom-1", statement: "Build shared systems" }],
+      },
+    ],
+  });
+});
+
+it.each([new Error("offline"), new ORPCError("CONFLICT")])(
+  "keeps edited criteria after a save failure %s and same-role refresh",
+  async (error) => {
+    api.editCriteria.mockRejectedValue(error);
+    const view = await mounted();
+    await view.click("Edit criteria");
+    await changeStatement(view.container, "Keep this draft");
+    await view.click("Save");
+    expect(view.container.querySelector<HTMLTextAreaElement>("textarea")?.value).toBe(
+      "Keep this draft",
+    );
+    expect(view.container.querySelector('[role="alert"]')?.textContent).toContain(
+      "could not be saved",
+    );
+    api.getWorkspace.mockResolvedValue(savedCriteria("Server edited systems"));
+    await view.click("Refresh");
+    expect(view.container.querySelector<HTMLTextAreaElement>("textarea")?.value).toBe(
+      "Keep this draft",
+    );
+    await view.click("Cancel");
+    expect(view.container.textContent).toContain("Server edited systems");
+    expect(view.container.querySelector('[role="alert"]')).toBeNull();
+  },
+);
+
+it("keeps newer edits made while saving and saves them against the returned revision", async () => {
+  let finish!: (value: ReturnType<typeof savedCriteria>) => void;
+  api.editCriteria.mockReturnValueOnce(
+    new Promise((resolve) => {
+      finish = resolve;
+    }),
+  );
+  const view = await mounted();
+  await view.click("Edit criteria");
+  await changeStatement(view.container, "Build reliable systems");
+  await view.click("Save");
+  await changeStatement(view.container, "Build observable systems");
+  const saved = savedCriteria();
+  api.getWorkspace.mockResolvedValue(saved);
+  await act(async () => finish(saved));
+  expect(view.container.querySelector<HTMLTextAreaElement>("textarea")?.value).toBe(
+    "Build observable systems",
+  );
+  api.editCriteria.mockResolvedValue(saved);
+  await view.click("Save");
+  expect(api.editCriteria).toHaveBeenLastCalledWith({
+    threadId: "thread-1",
+    roleId: role.id,
+    expectedRevision: 3,
+    criteria: [
+      {
+        criterionId: "criterion-1",
+        priority: "hard",
+        atoms: [{ atomId: "atom-1", statement: "Build observable systems" }],
+      },
+    ],
+  });
+});
+
+it.each([
+  ["role", "success"],
+  ["role", "failure"],
+  ["thread", "success"],
+  ["thread", "failure"],
+])("discards a late criteria save after switching %s (%s)", async (scope, outcome) => {
+  let finish!: (value: ReturnType<typeof savedCriteria>) => void;
+  let fail!: (reason: Error) => void;
+  api.editCriteria.mockReturnValueOnce(
+    new Promise((resolve, reject) => {
+      finish = resolve;
+      fail = reject;
+    }),
+  );
+  const view = await mounted();
+  await view.click("Edit criteria");
+  await changeStatement(view.container, "Old role draft");
+  await view.click("Save");
+  const next = {
+    role: {
+      ...role,
+      id: "role-next",
+      title: "Compiler engineer",
+      currentRevisionId: "revision-next",
+    },
+    revision: { ...revision, roleId: "role-next", id: "revision-next" },
+  };
+  api.getWorkspace.mockResolvedValue(next);
+  await view.render(scope === "thread" ? "thread-next" : "thread-1", 1);
+  expect(view.container.querySelector("textarea")).toBeNull();
+  await view.click("Edit criteria");
+  await changeStatement(view.container, "Next role draft");
+  const reads = api.getWorkspace.mock.calls.length;
+  await act(async () =>
+    outcome === "success" ? finish(savedCriteria()) : fail(new Error("Old save failed")),
+  );
+  expect(api.getWorkspace).toHaveBeenCalledTimes(reads);
+  expect(view.container.querySelector<HTMLTextAreaElement>("textarea")?.value).toBe(
+    "Next role draft",
+  );
+  expect(view.container.querySelector('[role="alert"]')).toBeNull();
+});
+
+it("refreshes brief confirmation and saved assessments after editing criteria", async () => {
+  const brief = {
+    fields: [],
+    questions: [],
+    rules: [],
+    confirmation: {
+      revision: 2,
+      userId: "user-1",
+      messageId: "confirmation-message",
+      confirmedAt: "2026-01-01T00:00:00Z",
+    },
+  };
+  api.getWorkspace.mockResolvedValue({ role, revision: { ...revision, brief } });
+  api.listAssessments.mockResolvedValue([
+    {
+      ...assessment,
+      isCurrent: true,
+      roleRevision: revision,
+      assessment: { ...assessment.assessment, roleRevisionId: revision.id },
+    },
+  ]);
+  const view = await mounted();
+  expect(view.container.textContent).toContain("Brief confirmed");
+  await view.click("Edit criteria");
+  await changeStatement(view.container, "Build reliable systems");
+  const saved = savedCriteria();
+  const next = {
+    ...saved,
+    revision: { ...saved.revision, brief: { ...brief, confirmation: null } },
+  };
+  api.editCriteria.mockResolvedValue(next);
+  api.getWorkspace.mockResolvedValue(next);
+  api.listAssessments.mockResolvedValue([{ ...assessment, isCurrent: false }]);
+  await view.click("Save");
+  expect(view.container.querySelector("textarea")).toBeNull();
+  expect(view.container.textContent).toContain("Build reliable systems");
+  expect(view.container.textContent).not.toContain("Brief confirmed");
+  await view.click("Evidence");
+  expect(view.container.textContent).toContain("Outdated");
+});
 
 it.each(["text/plain", "text/html", "application/json"])(
   "opens attested legacy %s source text with the exact quote highlighted and reads only",

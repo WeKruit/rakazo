@@ -492,6 +492,10 @@ msgstr "Siempre permitido"
 msgid "An API key is stored for this provider, not a subscription sign-in."
 msgstr "Hay una clave de API guardada para este proveedor, no un inicio de sesión por suscripción."
 
+#: src/pages/RecruitingPanel.tsx
+msgid "AND"
+msgstr ""
+
 #: src/components/AskCard.tsx
 msgid "Answer"
 msgstr "Responder"
@@ -613,6 +617,10 @@ msgstr ""
 
 #: src/components/integrations/IntegrationSetup.tsx
 msgid "Ask the server owner to configure this provider."
+msgstr ""
+
+#: src/pages/RecruitingPanel.tsx
+msgid "Assessment date"
 msgstr ""
 
 #: src/pages/RecruitingPanel.tsx
@@ -830,6 +838,7 @@ msgstr "No se puede alcanzar el servidor."
 #: src/pages/ModelSettingsOverlay.tsx
 #: src/pages/Onboarding.tsx
 #: src/pages/PluginsOverlay.tsx
+#: src/pages/RecruitingPanel.tsx
 #: src/pages/shell/bot-credentials.tsx
 #: src/pages/shell/dialogs.tsx
 msgid "Cancel"
@@ -1779,6 +1788,10 @@ msgstr "No se pudieron actualizar los avatares"
 msgid "Couldn't update messaging settings"
 msgstr "No se pudo actualizar la configuración de mensajería"
 
+#: src/pages/RecruitingPanel.tsx
+msgid "Count through"
+msgstr ""
+
 #: src/pages/Board.tsx
 #: src/pages/Shell.tsx
 #: src/pages/shell/bot-panel.tsx
@@ -1852,6 +1865,15 @@ msgstr ""
 msgid "Credentials are encrypted and never sent to the model."
 msgstr "Las credenciales se cifran y nunca se envían al modelo."
 
+#: src/pages/RecruitingPanel.tsx
+msgid "Criteria changed or could not be saved."
+msgstr ""
+
+#. placeholder {0}: index + 1
+#: src/pages/RecruitingPanel.tsx
+msgid "Criterion {0}"
+msgstr ""
+
 #: src/pages/RoutineSchedule.tsx
 msgid "Cron"
 msgstr "Cron"
@@ -1880,6 +1902,10 @@ msgstr "Atención al cliente"
 #: src/pages/shell/avatar-studio-popover.tsx
 msgid "Customize bot avatar"
 msgstr "Personalizar avatar del bot"
+
+#: src/pages/RecruitingPanel.tsx
+msgid "Cutoff date"
+msgstr ""
 
 #: src/pages/AccountSettingsOverlay.tsx
 msgid "Dark"
@@ -2135,6 +2161,10 @@ msgstr "Duplicar"
 msgid "e.g. Hivenet Agent, Presales, Timesheets bot"
 msgstr "p. ej. Hivenet Agent, Presales, bot de hojas de horas"
 
+#: src/pages/RecruitingPanel.tsx
+msgid "Edit criteria"
+msgstr ""
+
 #: src/components/AskCard.tsx
 msgid "Edit first"
 msgstr "Editar primero"
@@ -2154,6 +2184,10 @@ msgstr "Este correo no está autorizado para registrarse"
 #: src/lib/user-error.ts
 msgid "Email verification required"
 msgstr "Se requiere verificar el correo"
+
+#: src/pages/RecruitingPanel.tsx
+msgid "Employment rule"
+msgstr ""
 
 #: src/pages/BillingSettingsPanel.tsx
 msgid "Ends {day}"
@@ -2347,6 +2381,10 @@ msgstr "Terminado."
 msgid "Finishing MCP connection…"
 msgstr "Finalizando conexión MCP…"
 
+#: src/pages/RecruitingPanel.tsx
+msgid "Fixed date"
+msgstr ""
+
 #: src/components/ApprovalRulesSettings.tsx
 msgid "Flag unexpected actions"
 msgstr "Marcar acciones inesperadas"
@@ -2429,6 +2467,10 @@ msgstr "Cuelga primero y luego ingresa el código en pantalla."
 #: src/lib/call-session.ts
 msgid "Hang up, then enter the code on screen."
 msgstr "Cuelga y luego ingresa el código en pantalla."
+
+#: src/pages/RecruitingPanel.tsx
+msgid "Hard"
+msgstr ""
 
 #: src/pages/RecruitingPanel.tsx
 msgid "Hard criteria"
@@ -2951,6 +2993,15 @@ msgstr "Minimizar"
 msgid "Minimize bots"
 msgstr ""
 
+#. placeholder {0}: rule.minimumMonths
+#: src/pages/RecruitingPanel.tsx
+msgid "Minimum {0} complete calendar months"
+msgstr ""
+
+#: src/pages/RecruitingPanel.tsx
+msgid "Minimum complete calendar months"
+msgstr ""
+
 #: src/pages/RoutineSchedule.tsx
 msgid "minute"
 msgstr "minuto"
@@ -3276,6 +3327,10 @@ msgstr "Ninguno aún"
 msgid "Normal"
 msgstr ""
 
+#: src/pages/RecruitingPanel.tsx
+msgid "NOT"
+msgstr ""
+
 #: src/pages/ModelBackupsSettings.tsx
 msgid "Not connected"
 msgstr "No conectado"
@@ -3429,6 +3484,10 @@ msgstr "Opcional"
 msgid "Optional header value"
 msgstr "Valor de encabezado opcional"
 
+#: src/pages/RecruitingPanel.tsx
+msgid "OR"
+msgstr ""
+
 #: src/pages/ModelSettingsOverlay.tsx
 msgid "Or connect an API key"
 msgstr "O conecta una clave de API"
@@ -3554,6 +3613,10 @@ msgid "Preferences"
 msgstr ""
 
 #: src/pages/RecruitingPanel.tsx
+msgid "Preferred"
+msgstr ""
+
+#: src/pages/RecruitingPanel.tsx
 msgid "Preferred criteria"
 msgstr ""
 
@@ -3567,6 +3630,7 @@ msgid "Preview isn't available for this file type — download it to view it."
 msgstr ""
 
 #: src/pages/Board.tsx
+#: src/pages/RecruitingPanel.tsx
 msgid "Priority"
 msgstr ""
 
@@ -3599,6 +3663,10 @@ msgstr "Proveedores"
 #: src/components/CloudAgentCard.tsx
 msgid "Pull request"
 msgstr "Solicitud de incorporación"
+
+#: src/pages/RecruitingPanel.tsx
+msgid "Qualifying work"
+msgstr ""
 
 #: src/pages/ActivityList.tsx
 msgid "Queued"
@@ -4033,6 +4101,7 @@ msgstr ""
 #: src/pages/KnowledgeSection.tsx
 #: src/pages/McpServersOverlay.tsx
 #: src/pages/ModelSettingsOverlay.tsx
+#: src/pages/RecruitingPanel.tsx
 #: src/pages/RoutineEditor.tsx
 #: src/pages/shell/bot-panel.tsx
 #: src/pages/shell/dialogs.tsx
@@ -4450,6 +4519,10 @@ msgstr "Iniciando"
 #: src/pages/Onboarding.tsx
 msgid "Starting…"
 msgstr "Iniciando…"
+
+#: src/pages/RecruitingPanel.tsx
+msgid "Statement"
+msgstr ""
 
 #: src/pages/ActivityList.tsx
 #: src/pages/Board.tsx

@@ -97,6 +97,86 @@ const action = {
 };
 
 describe("recruiting contracts", () => {
+  it("accepts only human criterion text and priority edits with unique IDs", () => {
+    const input = {
+      threadId: "thread",
+      roleId: "role",
+      expectedRevision: 1,
+      criteria: [
+        {
+          criterionId: "criterion",
+          priority: "hard",
+          atoms: [{ atomId: "atom", statement: "New statement" }],
+        },
+      ],
+    };
+    expect(contracts.EditRecruitingCriteriaInput.parse(input)).toEqual(input);
+    const typedAtom = {
+      atomId: "atom",
+      employmentRule: {
+        minimumMonths: 84,
+        countingRule: "complete_calendar_months",
+        qualificationDefinition: "Full-time personal geometry implementation",
+        cutoff: { kind: "assessment_date" },
+      },
+    };
+    const typed = { ...input, criteria: [{ ...input.criteria[0], atoms: [typedAtom] }] };
+    expect(contracts.EditRecruitingCriteriaInput.parse(typed)).toEqual(typed);
+    for (const atom of [
+      { ...typedAtom, statement: "5+ years" },
+      { atomId: "atom" },
+      { ...typedAtom, employmentRule: { ...typedAtom.employmentRule, minimumMonths: -1 } },
+      {
+        ...typedAtom,
+        employmentRule: { ...typedAtom.employmentRule, qualificationDefinition: " " },
+      },
+      {
+        ...typedAtom,
+        employmentRule: { ...typedAtom.employmentRule, countingRule: "sum_all_jobs" },
+      },
+      {
+        ...typedAtom,
+        employmentRule: {
+          ...typedAtom.employmentRule,
+          cutoff: { kind: "fixed", date: { precision: "day", year: 2026, month: 2, day: 30 } },
+        },
+      },
+    ])
+      expect(
+        contracts.EditRecruitingCriteriaInput.safeParse({
+          ...input,
+          criteria: [{ ...input.criteria[0], atoms: [atom] }],
+        }).success,
+      ).toBe(false);
+    for (const extra of ["actor", "sourceRefs", "confirmation", "expression"]) {
+      expect(
+        contracts.EditRecruitingCriteriaInput.safeParse({ ...input, [extra]: {} }).success,
+      ).toBe(false);
+      expect(
+        contracts.EditRecruitingCriteriaInput.safeParse({
+          ...input,
+          criteria: [{ ...input.criteria[0], [extra]: {} }],
+        }).success,
+      ).toBe(false);
+    }
+    for (const criteria of [
+      [],
+      [input.criteria[0], input.criteria[0]],
+      [{ ...input.criteria[0], priority: "optional" }],
+      [{ ...input.criteria[0], atoms: [] }],
+      [{ ...input.criteria[0], atoms: [input.criteria[0]!.atoms[0], input.criteria[0]!.atoms[0]] }],
+      [{ ...input.criteria[0], atoms: [{ atomId: "atom", statement: "  " }] }],
+      [
+        {
+          ...input.criteria[0],
+          atoms: [{ atomId: "atom", statement: "Text", employmentRule: {} }],
+        },
+      ],
+    ])
+      expect(contracts.EditRecruitingCriteriaInput.safeParse({ ...input, criteria }).success).toBe(
+        false,
+      );
+  });
   const researchRound = {
     expectedRoleRevision: 1,
     purpose: "calibration",

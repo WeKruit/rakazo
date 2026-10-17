@@ -3,17 +3,22 @@ import { ORPCError } from "@orpc/client";
 import type {
   Artifact,
   ArtifactWithContent,
+  EditRecruitingCriteriaInput,
   MemoryDocument,
   MemoryRevision,
   RecruitingArtifactRef,
   RecruitingAssessmentSourceRef,
   RecruitingCriterionExpression,
+  RecruitingEmploymentDay,
+  RecruitingEmploymentRule,
   RecruitingResearchAction,
   RecruitingResearchReadArtifact,
   RecruitingResearchTask,
+  RecruitingRoleRevision,
   RecruitingSourceRef,
   Verdict,
 } from "@rakazo/contracts";
+import { RecruitingEmploymentDaySchema, RecruitingEmploymentRuleSchema } from "@rakazo/contracts";
 import {
   readRecruitingJsonString,
   readRecruitingResearchReadArtifact,
@@ -25,13 +30,17 @@ import {
   Button,
   Card,
   CardContent,
+  Input,
+  NativeSelect,
+  NativeSelectOption,
   Tabs,
   TabsContent,
   TabsList,
   TabsTrigger,
+  Textarea,
 } from "@rakazo/ui-web";
 import { Check, CircleHelp, RefreshCw, X } from "lucide-react";
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useId, useRef, useState } from "react";
 import { ArtifactFileCard } from "../components/ArtifactFileCard";
 import { AskCard } from "../components/AskCard";
 import { Shimmer } from "../components/ai/primitives";
@@ -246,6 +255,203 @@ function expressionText(expression: RecruitingCriterionExpression): string {
   if (expression.kind === "atom") return expression.statement;
   if (expression.kind === "not") return `NOT (${expressionText(expression.item)})`;
   return `(${expression.items.map(expressionText).join(expression.kind === "all" ? " AND " : " OR ")})`;
+}
+
+function expressionAtoms(
+  expression: RecruitingCriterionExpression,
+): EditRecruitingCriteriaInput["criteria"][number]["atoms"] {
+  if (expression.kind === "atom")
+    return [
+      expression.employmentRule
+        ? { atomId: expression.id, employmentRule: expression.employmentRule }
+        : { atomId: expression.id, statement: expression.statement },
+    ];
+  if (expression.kind === "not") return expressionAtoms(expression.item);
+  return [
+    ...new Map(
+      expression.items.flatMap(expressionAtoms).map((atom) => [atom.atomId, atom]),
+    ).values(),
+  ];
+}
+
+function criteriaDraft(revision: RecruitingRoleRevision): EditRecruitingCriteriaInput["criteria"] {
+  return revision.criteria.map((criterion) => ({
+    criterionId: criterion.id,
+    priority: criterion.priority,
+    atoms: expressionAtoms(criterion.expression),
+  }));
+}
+
+type CriteriaEdit = {
+  roleId: string;
+  revision: RecruitingRoleRevision;
+  criteria: EditRecruitingCriteriaInput["criteria"];
+};
+
+function employmentDateValue(date: RecruitingEmploymentDay): string {
+  return RecruitingEmploymentDaySchema.safeParse(date).success
+    ? `${String(date.year).padStart(4, "0")}-${String(date.month).padStart(2, "0")}-${String(date.day).padStart(2, "0")}`
+    : "";
+}
+
+function EmploymentRuleSummary({ rule }: { rule: RecruitingEmploymentRule }) {
+  return (
+    <div className="space-y-1 text-xs text-muted-foreground">
+      <p>
+        <Trans>Minimum {rule.minimumMonths} complete calendar months</Trans> ·{" "}
+        {rule.qualificationDefinition}
+      </p>
+      <p>
+        <Trans>Count through</Trans> ·{" "}
+        {rule.cutoff.kind === "fixed" ? (
+          employmentDateValue(rule.cutoff.date)
+        ) : (
+          <Trans>Assessment date</Trans>
+        )}
+      </p>
+    </div>
+  );
+}
+
+function CriteriaExpressionFields({
+  expression,
+  atoms,
+  onChange,
+}: {
+  expression: RecruitingCriterionExpression;
+  atoms: EditRecruitingCriteriaInput["criteria"][number]["atoms"];
+  onChange: (atom: EditRecruitingCriteriaInput["criteria"][number]["atoms"][number]) => void;
+}) {
+  const { t } = useLingui();
+  const fieldId = useId();
+  if (expression.kind === "atom") {
+    const atom = atoms.find((atom) => atom.atomId === expression.id)!;
+    if ("employmentRule" in atom) {
+      const rule = atom.employmentRule;
+      return (
+        <fieldset className="space-y-2">
+          <legend className="text-xs text-muted-foreground">
+            <Trans>Employment rule</Trans>
+          </legend>
+          <label htmlFor={`${fieldId}-months`} className="block space-y-1">
+            <span>
+              <Trans>Minimum complete calendar months</Trans>
+            </span>
+            <Input
+              id={`${fieldId}-months`}
+              type="number"
+              min={0}
+              step={1}
+              aria-invalid={!Number.isSafeInteger(rule.minimumMonths) || rule.minimumMonths < 0}
+              aria-label={t`Minimum complete calendar months`}
+              value={Number.isNaN(rule.minimumMonths) ? "" : rule.minimumMonths}
+              onChange={(event) =>
+                onChange({
+                  ...atom,
+                  employmentRule: { ...rule, minimumMonths: event.target.valueAsNumber },
+                })
+              }
+            />
+          </label>
+          <label htmlFor={`${fieldId}-qualification`} className="block space-y-1">
+            <span>
+              <Trans>Qualifying work</Trans>
+            </span>
+            <Textarea
+              id={`${fieldId}-qualification`}
+              aria-label={t`Qualifying work`}
+              value={rule.qualificationDefinition}
+              aria-invalid={!rule.qualificationDefinition.trim()}
+              onChange={(event) =>
+                onChange({
+                  ...atom,
+                  employmentRule: { ...rule, qualificationDefinition: event.target.value },
+                })
+              }
+            />
+          </label>
+          <label htmlFor={`${fieldId}-cutoff`} className="block space-y-1">
+            <span>
+              <Trans>Count through</Trans>
+            </span>
+            <NativeSelect
+              id={`${fieldId}-cutoff`}
+              aria-label={t`Count through`}
+              value={rule.cutoff.kind}
+              onChange={(event) =>
+                onChange({
+                  ...atom,
+                  employmentRule: {
+                    ...rule,
+                    cutoff:
+                      event.target.value === "assessment_date"
+                        ? { kind: "assessment_date" }
+                        : { kind: "fixed", date: { precision: "day", year: 0, month: 0, day: 0 } },
+                  },
+                })
+              }
+            >
+              <NativeSelectOption value="assessment_date">
+                <Trans>Assessment date</Trans>
+              </NativeSelectOption>
+              <NativeSelectOption value="fixed">
+                <Trans>Fixed date</Trans>
+              </NativeSelectOption>
+            </NativeSelect>
+          </label>
+          {rule.cutoff.kind === "fixed" ? (
+            <label htmlFor={`${fieldId}-date`} className="block space-y-1">
+              <span>
+                <Trans>Cutoff date</Trans>
+              </span>
+              <Input
+                id={`${fieldId}-date`}
+                type="date"
+                aria-label={t`Cutoff date`}
+                value={employmentDateValue(rule.cutoff.date)}
+                aria-invalid={!employmentDateValue(rule.cutoff.date)}
+                onChange={(event) => {
+                  const [year = 0, month = 0, day = 0] = event.target.value.split("-").map(Number);
+                  onChange({
+                    ...atom,
+                    employmentRule: {
+                      ...rule,
+                      cutoff: { kind: "fixed", date: { precision: "day", year, month, day } },
+                    },
+                  });
+                }}
+              />
+            </label>
+          ) : null}
+        </fieldset>
+      );
+    }
+    const statement = atom.statement;
+    return (
+      <Textarea
+        aria-label={t`Statement`}
+        value={statement}
+        aria-invalid={!statement.trim()}
+        onChange={(event) => onChange({ ...atom, statement: event.target.value })}
+      />
+    );
+  }
+  return (
+    <fieldset className="space-y-2 border-s border-border ps-3">
+      <legend className="text-xs text-muted-foreground">
+        {expression.kind === "all" ? (
+          <Trans>AND</Trans>
+        ) : expression.kind === "any" ? (
+          <Trans>OR</Trans>
+        ) : (
+          <Trans>NOT</Trans>
+        )}
+      </legend>
+      {(expression.kind === "not" ? [expression.item] : expression.items).map((item, index) => (
+        <CriteriaExpressionFields key={index} expression={item} atoms={atoms} onChange={onChange} />
+      ))}
+    </fieldset>
+  );
 }
 
 function ArtifactReference({
@@ -568,10 +774,29 @@ function RecruitingWorkspace({ threadId, botId, refreshSignal, onClose, onReveal
   const [confirmationFailed, setConfirmationFailed] = useState(false);
   const [candidateView, setCandidateView] = useState<"cards" | "table">("cards");
   const [selection, setSelection] = useState<{ roleId: string; candidateKey: string } | null>(null);
+  const [criteriaEdit, setCriteriaEdit] = useState<CriteriaEdit | null>(null);
+  const [savingCriteria, setSavingCriteria] = useState(false);
+  const [criteriaFailed, setCriteriaFailed] = useState(false);
+  const editScope = useRef({ active: true, roleId: null as string | null, generation: 0 });
+  useEffect(() => {
+    editScope.current.active = true;
+    return () => {
+      editScope.current.active = false;
+      editScope.current.generation++;
+    };
+  }, []);
   useEffect(() => {
     let cancelled = false;
     setLoading(true);
     setFailed(false);
+    const updateEditScope = (roleId: string | null) => {
+      if (editScope.current.roleId === roleId) return;
+      editScope.current.roleId = roleId;
+      editScope.current.generation++;
+      setCriteriaEdit(null);
+      setSavingCriteria(false);
+      setCriteriaFailed(false);
+    };
     const onReadError = (error: unknown): never => {
       if (
         !cancelled &&
@@ -580,6 +805,7 @@ function RecruitingWorkspace({ threadId, botId, refreshSignal, onClose, onReveal
       ) {
         setSnapshot(null);
         setSelection(null);
+        updateEditScope(null);
       }
       throw error;
     };
@@ -587,6 +813,7 @@ function RecruitingWorkspace({ threadId, botId, refreshSignal, onClose, onReveal
       try {
         let workspace = await rpc.recruiting.getWorkspace({ threadId }).catch(onReadError);
         while (!cancelled) {
+          updateEditScope(workspace?.role.id ?? null);
           setSnapshot((current) =>
             current?.workspace?.role.id !== workspace?.role.id ||
             current?.workspace?.revision.id !== workspace?.revision.id
@@ -652,6 +879,60 @@ function RecruitingWorkspace({ threadId, botId, refreshSignal, onClose, onReveal
         )
       : undefined;
   const assessment = selected?.assessment;
+  const normalizedCriteria =
+    criteriaEdit?.criteria.map((criterion) => ({
+      ...criterion,
+      atoms: criterion.atoms.map((atom) =>
+        "employmentRule" in atom
+          ? {
+              ...atom,
+              employmentRule: {
+                ...atom.employmentRule,
+                qualificationDefinition: atom.employmentRule.qualificationDefinition.trim(),
+              },
+            }
+          : { ...atom, statement: atom.statement.trim() },
+      ),
+    })) ?? [];
+  const originalCriteria = criteriaEdit ? criteriaDraft(criteriaEdit.revision) : [];
+  const criteriaChanges = normalizedCriteria.filter(
+    (criterion, index) => JSON.stringify(criterion) !== JSON.stringify(originalCriteria[index]),
+  );
+  const invalidCriteria = normalizedCriteria.some((criterion) =>
+    criterion.atoms.some((atom) =>
+      "employmentRule" in atom
+        ? !RecruitingEmploymentRuleSchema.safeParse(atom.employmentRule).success
+        : !atom.statement,
+    ),
+  );
+  async function saveCriteria() {
+    if (!criteriaEdit || savingCriteria || invalidCriteria || !criteriaChanges.length) return;
+    const submitted = criteriaEdit;
+    const generation = editScope.current.generation;
+    const isCurrent = () =>
+      editScope.current.active &&
+      editScope.current.generation === generation &&
+      editScope.current.roleId === submitted.roleId;
+    setSavingCriteria(true);
+    setCriteriaFailed(false);
+    try {
+      const saved = await rpc.recruiting.editCriteria({
+        threadId,
+        roleId: submitted.roleId,
+        expectedRevision: submitted.revision.revision,
+        criteria: criteriaChanges,
+      });
+      if (!isCurrent()) return;
+      setCriteriaEdit((current) =>
+        current === submitted ? null : current ? { ...current, revision: saved.revision } : null,
+      );
+      setRefresh((value) => value + 1);
+    } catch {
+      if (isCurrent()) setCriteriaFailed(true);
+    } finally {
+      if (isCurrent()) setSavingCriteria(false);
+    }
+  }
   return (
     <section aria-label={t`Recruiting`} className="space-y-4 text-sm">
       <div className="flex items-center justify-between gap-2">
@@ -711,13 +992,31 @@ function RecruitingWorkspace({ threadId, botId, refreshSignal, onClose, onReveal
           <TabsContent key={workspace?.role.id} value="role" className="space-y-5">
             {workspace ? (
               <>
-                <div>
-                  <h3 className="font-medium" dir="auto">
-                    {workspace.role.title}
-                  </h3>
-                  <p className="text-xs text-muted-foreground">
-                    <Trans>Version {workspace.revision.revision}</Trans>
-                  </p>
+                <div className="flex items-start justify-between gap-2">
+                  <div>
+                    <h3 className="font-medium" dir="auto">
+                      {workspace.role.title}
+                    </h3>
+                    <p className="text-xs text-muted-foreground">
+                      <Trans>Version {workspace.revision.revision}</Trans>
+                    </p>
+                  </div>
+                  {!criteriaEdit && criteria.length ? (
+                    <Button
+                      size="sm"
+                      variant="outline"
+                      onClick={() => {
+                        setCriteriaFailed(false);
+                        setCriteriaEdit({
+                          roleId: workspace.role.id,
+                          revision: workspace.revision,
+                          criteria: criteriaDraft(workspace.revision),
+                        });
+                      }}
+                    >
+                      <Trans>Edit criteria</Trans>
+                    </Button>
+                  ) : null}
                 </div>
                 {workspace.revision.brief ? (
                   <div className="space-y-2">
@@ -788,39 +1087,147 @@ function RecruitingWorkspace({ threadId, botId, refreshSignal, onClose, onReveal
                     ) : null}
                   </div>
                 ) : null}
-                {(["hard", "preferred"] as const).map((priority) => (
-                  <div key={priority} className="space-y-2">
-                    <h4 className="font-medium">
-                      {priority === "hard" ? (
-                        <Trans>Hard criteria</Trans>
-                      ) : (
-                        <Trans>Preferred criteria</Trans>
-                      )}
-                    </h4>
-                    <ul className="space-y-3">
-                      {criteria
-                        .filter((criterion) => criterion.priority === priority)
-                        .map((criterion) => (
-                          <li key={criterion.id} className="space-y-2">
-                            <p>{expressionText(criterion.expression)}</p>
-                            <details>
-                              <summary className="cursor-pointer text-xs text-muted-foreground">
-                                <Trans>Sources</Trans>
-                              </summary>
-                              <div className="mt-2">
-                                <Sources sources={criterion.sourceRefs} />
-                              </div>
-                            </details>
-                            {criterion.definitionQuestions.map((question) => (
-                              <p key={question} className="text-muted-foreground">
-                                {question}
-                              </p>
-                            ))}
-                          </li>
-                        ))}
-                    </ul>
+                {criteriaEdit?.roleId === workspace.role.id ? (
+                  <div className="space-y-4">
+                    {criteriaEdit.revision.criteria.map((criterion, index) => {
+                      const draft = criteriaEdit.criteria[index]!;
+                      return (
+                        <fieldset key={criterion.id} className="space-y-2">
+                          <legend className="sr-only">
+                            <Trans>Criterion {index + 1}</Trans>
+                          </legend>
+                          <NativeSelect
+                            aria-label={t`Priority`}
+                            size="sm"
+                            value={draft.priority}
+                            onChange={(event) => {
+                              const priority = event.target.value === "hard" ? "hard" : "preferred";
+                              setCriteriaEdit((current) =>
+                                current
+                                  ? {
+                                      ...current,
+                                      criteria: current.criteria.map((item) =>
+                                        item.criterionId === criterion.id
+                                          ? { ...item, priority }
+                                          : item,
+                                      ),
+                                    }
+                                  : null,
+                              );
+                            }}
+                          >
+                            <NativeSelectOption value="hard">
+                              <Trans>Hard</Trans>
+                            </NativeSelectOption>
+                            <NativeSelectOption value="preferred">
+                              <Trans>Preferred</Trans>
+                            </NativeSelectOption>
+                          </NativeSelect>
+                          <CriteriaExpressionFields
+                            expression={criterion.expression}
+                            atoms={draft.atoms}
+                            onChange={(changedAtom) => {
+                              setCriteriaEdit((current) =>
+                                current
+                                  ? {
+                                      ...current,
+                                      criteria: current.criteria.map((item) => ({
+                                        ...item,
+                                        atoms: item.atoms.map((atom) =>
+                                          atom.atomId === changedAtom.atomId ? changedAtom : atom,
+                                        ),
+                                      })),
+                                    }
+                                  : null,
+                              );
+                            }}
+                          />
+                          <details>
+                            <summary className="cursor-pointer text-xs text-muted-foreground">
+                              <Trans>Sources</Trans>
+                            </summary>
+                            <div className="mt-2">
+                              <Sources sources={criterion.sourceRefs} />
+                            </div>
+                          </details>
+                          {criterion.definitionQuestions.map((question) => (
+                            <p key={question} className="text-muted-foreground">
+                              {question}
+                            </p>
+                          ))}
+                        </fieldset>
+                      );
+                    })}
+                    <div className="flex gap-2">
+                      <Button
+                        size="sm"
+                        disabled={savingCriteria || invalidCriteria || !criteriaChanges.length}
+                        aria-busy={savingCriteria}
+                        onClick={() => void saveCriteria()}
+                      >
+                        <Trans>Save</Trans>
+                      </Button>
+                      <Button
+                        size="sm"
+                        variant="ghost"
+                        disabled={savingCriteria}
+                        onClick={() => {
+                          setCriteriaEdit(null);
+                          setCriteriaFailed(false);
+                        }}
+                      >
+                        <Trans>Cancel</Trans>
+                      </Button>
+                    </div>
+                    {criteriaFailed ? (
+                      <p role="alert" className="text-destructive">
+                        <Trans>Criteria changed or could not be saved.</Trans>
+                      </p>
+                    ) : null}
                   </div>
-                ))}
+                ) : (
+                  (["hard", "preferred"] as const).map((priority) => (
+                    <div key={priority} className="space-y-2">
+                      <h4 className="font-medium">
+                        {priority === "hard" ? (
+                          <Trans>Hard criteria</Trans>
+                        ) : (
+                          <Trans>Preferred criteria</Trans>
+                        )}
+                      </h4>
+                      <ul className="space-y-3">
+                        {criteria
+                          .filter((criterion) => criterion.priority === priority)
+                          .map((criterion) => (
+                            <li key={criterion.id} className="space-y-2">
+                              <p>{expressionText(criterion.expression)}</p>
+                              {expressionAtoms(criterion.expression).map((atom) =>
+                                "employmentRule" in atom ? (
+                                  <EmploymentRuleSummary
+                                    key={atom.atomId}
+                                    rule={atom.employmentRule}
+                                  />
+                                ) : null,
+                              )}
+                              <details>
+                                <summary className="cursor-pointer text-xs text-muted-foreground">
+                                  <Trans>Sources</Trans>
+                                </summary>
+                                <div className="mt-2">
+                                  <Sources sources={criterion.sourceRefs} />
+                                </div>
+                              </details>
+                              {criterion.definitionQuestions.map((question) => (
+                                <p key={question} className="text-muted-foreground">
+                                  {question}
+                                </p>
+                              ))}
+                            </li>
+                          ))}
+                      </ul>
+                    </div>
+                  ))
+                )}
                 {workspace.revision.preferences.length ? (
                   <div className="space-y-2">
                     <h4 className="font-medium">

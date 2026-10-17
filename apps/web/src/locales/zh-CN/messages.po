@@ -492,6 +492,10 @@ msgstr "始终允许"
 msgid "An API key is stored for this provider, not a subscription sign-in."
 msgstr "此提供方存储的是 API 密钥，不是订阅登录。"
 
+#: src/pages/RecruitingPanel.tsx
+msgid "AND"
+msgstr ""
+
 #: src/components/AskCard.tsx
 msgid "Answer"
 msgstr "回答"
@@ -613,6 +617,10 @@ msgstr ""
 
 #: src/components/integrations/IntegrationSetup.tsx
 msgid "Ask the server owner to configure this provider."
+msgstr ""
+
+#: src/pages/RecruitingPanel.tsx
+msgid "Assessment date"
 msgstr ""
 
 #: src/pages/RecruitingPanel.tsx
@@ -830,6 +838,7 @@ msgstr "无法连接服务器。"
 #: src/pages/ModelSettingsOverlay.tsx
 #: src/pages/Onboarding.tsx
 #: src/pages/PluginsOverlay.tsx
+#: src/pages/RecruitingPanel.tsx
 #: src/pages/shell/bot-credentials.tsx
 #: src/pages/shell/dialogs.tsx
 msgid "Cancel"
@@ -1779,6 +1788,10 @@ msgstr "无法更新头像"
 msgid "Couldn't update messaging settings"
 msgstr "无法更新消息设置"
 
+#: src/pages/RecruitingPanel.tsx
+msgid "Count through"
+msgstr ""
+
 #: src/pages/Board.tsx
 #: src/pages/Shell.tsx
 #: src/pages/shell/bot-panel.tsx
@@ -1852,6 +1865,15 @@ msgstr ""
 msgid "Credentials are encrypted and never sent to the model."
 msgstr "凭据已加密，不会发送给模型。"
 
+#: src/pages/RecruitingPanel.tsx
+msgid "Criteria changed or could not be saved."
+msgstr ""
+
+#. placeholder {0}: index + 1
+#: src/pages/RecruitingPanel.tsx
+msgid "Criterion {0}"
+msgstr ""
+
 #: src/pages/RoutineSchedule.tsx
 msgid "Cron"
 msgstr "Cron"
@@ -1880,6 +1902,10 @@ msgstr "客户支持"
 #: src/pages/shell/avatar-studio-popover.tsx
 msgid "Customize bot avatar"
 msgstr "自定义机器人头像"
+
+#: src/pages/RecruitingPanel.tsx
+msgid "Cutoff date"
+msgstr ""
 
 #: src/pages/AccountSettingsOverlay.tsx
 msgid "Dark"
@@ -2135,6 +2161,10 @@ msgstr "复制"
 msgid "e.g. Hivenet Agent, Presales, Timesheets bot"
 msgstr "例如 Hivenet Agent、Presales、工时表机器人"
 
+#: src/pages/RecruitingPanel.tsx
+msgid "Edit criteria"
+msgstr ""
+
 #: src/components/AskCard.tsx
 msgid "Edit first"
 msgstr "先编辑"
@@ -2154,6 +2184,10 @@ msgstr "该邮箱不允许注册"
 #: src/lib/user-error.ts
 msgid "Email verification required"
 msgstr "需要验证邮箱"
+
+#: src/pages/RecruitingPanel.tsx
+msgid "Employment rule"
+msgstr ""
 
 #: src/pages/BillingSettingsPanel.tsx
 msgid "Ends {day}"
@@ -2347,6 +2381,10 @@ msgstr "已完成。"
 msgid "Finishing MCP connection…"
 msgstr "正在完成 MCP 连接…"
 
+#: src/pages/RecruitingPanel.tsx
+msgid "Fixed date"
+msgstr ""
+
 #: src/components/ApprovalRulesSettings.tsx
 msgid "Flag unexpected actions"
 msgstr "标记异常操作"
@@ -2429,6 +2467,10 @@ msgstr "请先挂断，然后输入屏幕上的代码。"
 #: src/lib/call-session.ts
 msgid "Hang up, then enter the code on screen."
 msgstr "请挂断，然后输入屏幕上的代码。"
+
+#: src/pages/RecruitingPanel.tsx
+msgid "Hard"
+msgstr ""
 
 #: src/pages/RecruitingPanel.tsx
 msgid "Hard criteria"
@@ -2951,6 +2993,15 @@ msgstr "最小化"
 msgid "Minimize bots"
 msgstr ""
 
+#. placeholder {0}: rule.minimumMonths
+#: src/pages/RecruitingPanel.tsx
+msgid "Minimum {0} complete calendar months"
+msgstr ""
+
+#: src/pages/RecruitingPanel.tsx
+msgid "Minimum complete calendar months"
+msgstr ""
+
 #: src/pages/RoutineSchedule.tsx
 msgid "minute"
 msgstr "分钟"
@@ -3276,6 +3327,10 @@ msgstr "暂无"
 msgid "Normal"
 msgstr ""
 
+#: src/pages/RecruitingPanel.tsx
+msgid "NOT"
+msgstr ""
+
 #: src/pages/ModelBackupsSettings.tsx
 msgid "Not connected"
 msgstr "未连接"
@@ -3429,6 +3484,10 @@ msgstr "可选"
 msgid "Optional header value"
 msgstr "可选请求头值"
 
+#: src/pages/RecruitingPanel.tsx
+msgid "OR"
+msgstr ""
+
 #: src/pages/ModelSettingsOverlay.tsx
 msgid "Or connect an API key"
 msgstr "或连接 API 密钥"
@@ -3554,6 +3613,10 @@ msgid "Preferences"
 msgstr ""
 
 #: src/pages/RecruitingPanel.tsx
+msgid "Preferred"
+msgstr ""
+
+#: src/pages/RecruitingPanel.tsx
 msgid "Preferred criteria"
 msgstr ""
 
@@ -3567,6 +3630,7 @@ msgid "Preview isn't available for this file type — download it to view it."
 msgstr ""
 
 #: src/pages/Board.tsx
+#: src/pages/RecruitingPanel.tsx
 msgid "Priority"
 msgstr ""
 
@@ -3599,6 +3663,10 @@ msgstr "提供方"
 #: src/components/CloudAgentCard.tsx
 msgid "Pull request"
 msgstr "拉取请求"
+
+#: src/pages/RecruitingPanel.tsx
+msgid "Qualifying work"
+msgstr ""
 
 #: src/pages/ActivityList.tsx
 msgid "Queued"
@@ -4033,6 +4101,7 @@ msgstr ""
 #: src/pages/KnowledgeSection.tsx
 #: src/pages/McpServersOverlay.tsx
 #: src/pages/ModelSettingsOverlay.tsx
+#: src/pages/RecruitingPanel.tsx
 #: src/pages/RoutineEditor.tsx
 #: src/pages/shell/bot-panel.tsx
 #: src/pages/shell/dialogs.tsx
@@ -4450,6 +4519,10 @@ msgstr "正在开始"
 #: src/pages/Onboarding.tsx
 msgid "Starting…"
 msgstr "正在开始…"
+
+#: src/pages/RecruitingPanel.tsx
+msgid "Statement"
+msgstr ""
 
 #: src/pages/ActivityList.tsx
 #: src/pages/Board.tsx

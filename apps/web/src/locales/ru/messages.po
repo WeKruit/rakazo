@@ -492,6 +492,10 @@ msgstr "Всегда разрешено"
 msgid "An API key is stored for this provider, not a subscription sign-in."
 msgstr "Для этого поставщика сохранен API-ключ, а не вход по подписке."
 
+#: src/pages/RecruitingPanel.tsx
+msgid "AND"
+msgstr ""
+
 #: src/components/AskCard.tsx
 msgid "Answer"
 msgstr "Ответ"
@@ -614,6 +618,10 @@ msgstr ""
 #: src/components/integrations/IntegrationSetup.tsx
 msgid "Ask the server owner to configure this provider."
 msgstr "Попросите владельца сервера настроить этого провайдера."
+
+#: src/pages/RecruitingPanel.tsx
+msgid "Assessment date"
+msgstr ""
 
 #: src/pages/RecruitingPanel.tsx
 msgid "Assumption"
@@ -830,6 +838,7 @@ msgstr "Не удаётся связаться с сервером."
 #: src/pages/ModelSettingsOverlay.tsx
 #: src/pages/Onboarding.tsx
 #: src/pages/PluginsOverlay.tsx
+#: src/pages/RecruitingPanel.tsx
 #: src/pages/shell/bot-credentials.tsx
 #: src/pages/shell/dialogs.tsx
 msgid "Cancel"
@@ -1779,6 +1788,10 @@ msgstr "Не удалось обновить аватары"
 msgid "Couldn't update messaging settings"
 msgstr "Не удалось обновить настройки обмена сообщениями."
 
+#: src/pages/RecruitingPanel.tsx
+msgid "Count through"
+msgstr ""
+
 #: src/pages/Board.tsx
 #: src/pages/Shell.tsx
 #: src/pages/shell/bot-panel.tsx
@@ -1852,6 +1865,15 @@ msgstr ""
 msgid "Credentials are encrypted and never sent to the model."
 msgstr "Учётные данные зашифрованы и никогда не передаются модели."
 
+#: src/pages/RecruitingPanel.tsx
+msgid "Criteria changed or could not be saved."
+msgstr ""
+
+#. placeholder {0}: index + 1
+#: src/pages/RecruitingPanel.tsx
+msgid "Criterion {0}"
+msgstr ""
+
 #: src/pages/RoutineSchedule.tsx
 msgid "Cron"
 msgstr "Крон"
@@ -1880,6 +1902,10 @@ msgstr "Поддержка клиентов"
 #: src/pages/shell/avatar-studio-popover.tsx
 msgid "Customize bot avatar"
 msgstr "Настроить аватар бота"
+
+#: src/pages/RecruitingPanel.tsx
+msgid "Cutoff date"
+msgstr ""
 
 #: src/pages/AccountSettingsOverlay.tsx
 msgid "Dark"
@@ -2135,6 +2161,10 @@ msgstr "Дублировать"
 msgid "e.g. Hivenet Agent, Presales, Timesheets bot"
 msgstr "напр. Hivenet Agent, Presales, бот табелей"
 
+#: src/pages/RecruitingPanel.tsx
+msgid "Edit criteria"
+msgstr ""
+
 #: src/components/AskCard.tsx
 msgid "Edit first"
 msgstr "Сначала отредактируйте"
@@ -2154,6 +2184,10 @@ msgstr "Регистрация с этим адресом электронной
 #: src/lib/user-error.ts
 msgid "Email verification required"
 msgstr "Требуется подтверждение электронной почты"
+
+#: src/pages/RecruitingPanel.tsx
+msgid "Employment rule"
+msgstr ""
 
 #: src/pages/BillingSettingsPanel.tsx
 msgid "Ends {day}"
@@ -2347,6 +2381,10 @@ msgstr "Завершено."
 msgid "Finishing MCP connection…"
 msgstr "Завершение подключения MCP…"
 
+#: src/pages/RecruitingPanel.tsx
+msgid "Fixed date"
+msgstr ""
+
 #: src/components/ApprovalRulesSettings.tsx
 msgid "Flag unexpected actions"
 msgstr "Пометить неожиданные действия"
@@ -2429,6 +2467,10 @@ msgstr "Сначала повесьте трубку, затем введите 
 #: src/lib/call-session.ts
 msgid "Hang up, then enter the code on screen."
 msgstr "Повесьте трубку, затем введите код на экране."
+
+#: src/pages/RecruitingPanel.tsx
+msgid "Hard"
+msgstr ""
 
 #: src/pages/RecruitingPanel.tsx
 msgid "Hard criteria"
@@ -2951,6 +2993,15 @@ msgstr "Свернуть"
 msgid "Minimize bots"
 msgstr "Свернуть ботов"
 
+#. placeholder {0}: rule.minimumMonths
+#: src/pages/RecruitingPanel.tsx
+msgid "Minimum {0} complete calendar months"
+msgstr ""
+
+#: src/pages/RecruitingPanel.tsx
+msgid "Minimum complete calendar months"
+msgstr ""
+
 #: src/pages/RoutineSchedule.tsx
 msgid "minute"
 msgstr "минута"
@@ -3276,6 +3327,10 @@ msgstr "Пока нет"
 msgid "Normal"
 msgstr ""
 
+#: src/pages/RecruitingPanel.tsx
+msgid "NOT"
+msgstr ""
+
 #: src/pages/ModelBackupsSettings.tsx
 msgid "Not connected"
 msgstr "Не подключена"
@@ -3429,6 +3484,10 @@ msgstr "Необязательно"
 msgid "Optional header value"
 msgstr "Необязательное значение заголовка"
 
+#: src/pages/RecruitingPanel.tsx
+msgid "OR"
+msgstr ""
+
 #: src/pages/ModelSettingsOverlay.tsx
 msgid "Or connect an API key"
 msgstr "Или подключить API-ключ"
@@ -3554,6 +3613,10 @@ msgid "Preferences"
 msgstr ""
 
 #: src/pages/RecruitingPanel.tsx
+msgid "Preferred"
+msgstr ""
+
+#: src/pages/RecruitingPanel.tsx
 msgid "Preferred criteria"
 msgstr ""
 
@@ -3567,6 +3630,7 @@ msgid "Preview isn't available for this file type — download it to view it."
 msgstr ""
 
 #: src/pages/Board.tsx
+#: src/pages/RecruitingPanel.tsx
 msgid "Priority"
 msgstr ""
 
@@ -3599,6 +3663,10 @@ msgstr "Провайдеры"
 #: src/components/CloudAgentCard.tsx
 msgid "Pull request"
 msgstr "Запрос на слияние"
+
+#: src/pages/RecruitingPanel.tsx
+msgid "Qualifying work"
+msgstr ""
 
 #: src/pages/ActivityList.tsx
 msgid "Queued"
@@ -4033,6 +4101,7 @@ msgstr "Запускается, когда этот бот получает пр
 #: src/pages/KnowledgeSection.tsx
 #: src/pages/McpServersOverlay.tsx
 #: src/pages/ModelSettingsOverlay.tsx
+#: src/pages/RecruitingPanel.tsx
 #: src/pages/RoutineEditor.tsx
 #: src/pages/shell/bot-panel.tsx
 #: src/pages/shell/dialogs.tsx
@@ -4450,6 +4519,10 @@ msgstr "Запуск"
 #: src/pages/Onboarding.tsx
 msgid "Starting…"
 msgstr "Запуск…"
+
+#: src/pages/RecruitingPanel.tsx
+msgid "Statement"
+msgstr ""
 
 #: src/pages/ActivityList.tsx
 #: src/pages/Board.tsx

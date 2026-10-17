@@ -80,3 +80,10 @@ export const confirmRecruitingBrief = (
   input: Parameters<typeof recruiting.confirmRecruitingBrief>[2],
   material?: RecruitingRoleMaterialContext,
 ) => authenticated(() => recruiting.confirmRecruitingBrief(prisma, actor, input, material));
+
+export const editRecruitingCriteria = (
+  prisma: PrismaClient,
+  actor: Actor,
+  input: Parameters<typeof recruiting.editRecruitingCriteria>[2],
+  material?: RecruitingRoleMaterialContext,
+) => authenticated(() => recruiting.editRecruitingCriteria(prisma, actor, input, material));

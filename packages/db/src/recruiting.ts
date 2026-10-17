@@ -9,6 +9,7 @@ import type {
   RecruitingAssessmentAskInput,
   RecruitingAssessmentSnapshot,
   RecruitingAssessmentSourceRef,
+  RecruitingCriterionExpression,
   RecruitingHumanIntent,
   RecruitingMaterialReadPayload,
   RecruitingPreferenceFeedbackInput,
@@ -26,6 +27,7 @@ import type {
 import {
   ConfirmRecruitingBriefInput,
   CreateRecruitingRoleInput,
+  EditRecruitingCriteriaInput,
   EffectApprovalAnsweredPayloadSchema,
   MessageBlock as MessageBlockSchema,
   NativeAskAnswerPayloadSchema,
@@ -568,6 +570,165 @@ export async function confirmRecruitingBrief(
       revision: nextRevision,
       currentRevisionId: saved.id,
     });
+  });
+}
+
+/** Human-only edit of existing criteria; native authorship and the role CAS commit together. */
+export async function editRecruitingCriteria(
+  prisma: PrismaClient,
+  actor: Actor,
+  raw: unknown,
+  material?: RecruitingRoleMaterialContext,
+): Promise<RoleSnapshot> {
+  const input = EditRecruitingCriteriaInput.parse(raw);
+  const loaded = await getRecruitingWorkspace(prisma, actor, { threadId: input.threadId });
+  if (loaded?.role.id !== input.roleId) throw new IsolationError();
+  if (loaded.role.revision !== input.expectedRevision) throw new RecruitingConflictError();
+  const artifacts = await loadRoleMaterials(prisma, actor, loaded.revision, material);
+  return prisma.$transaction(async (tx) => {
+    await tx.$queryRaw(
+      Prisma.sql`SELECT "id" FROM "threads" WHERE "id" = ${input.threadId} AND "spaceId" = ${actor.spaceId} AND "userId" = ${actor.userId} FOR UPDATE`,
+    );
+    const thread = await requireThread(tx, actor, input.threadId);
+    if (thread.activeRecruitingRoleId !== input.roleId) throw new IsolationError();
+    const role = await requireRole(tx, actor, input.roleId, true);
+    if (role.revision !== input.expectedRevision) throw new RecruitingConflictError();
+    const { revision } = await roleSnapshot(tx, actor, role);
+    const changes = input.criteria.flatMap((edit) => {
+      const criterion = revision.criteria.find((item) => item.id === edit.criterionId);
+      if (!criterion) throw new RecruitingPlaybookValidationError("Unknown criterion.");
+      const atoms = new Map(edit.atoms.map((atom) => [atom.atomId, atom]));
+      const originalAtoms = new Map<
+        string,
+        Extract<RecruitingCriterionExpression, { kind: "atom" }>
+      >();
+      const updatedAtoms = new Map<
+        string,
+        Extract<RecruitingCriterionExpression, { kind: "atom" }>
+      >();
+      const update = (expression: RecruitingCriterionExpression): RecruitingCriterionExpression => {
+        if (expression.kind === "atom") {
+          originalAtoms.set(expression.id, expression);
+          const atom = atoms.get(expression.id);
+          if (!atom)
+            throw new RecruitingPlaybookValidationError("Include every existing criterion atom.");
+          let updated = expression;
+          if (expression.employmentRule) {
+            if (!("employmentRule" in atom))
+              throw new RecruitingPlaybookValidationError(
+                "Edit the structured employment rule for this atom.",
+              );
+            if (
+              stableJsonValue(expression.employmentRule) !== stableJsonValue(atom.employmentRule)
+            ) {
+              const rule = atom.employmentRule;
+              const cutoff =
+                rule.cutoff.kind === "assessment_date"
+                  ? "assessment date"
+                  : [
+                      String(rule.cutoff.date.year).padStart(4, "0"),
+                      String(rule.cutoff.date.month).padStart(2, "0"),
+                      String(rule.cutoff.date.day).padStart(2, "0"),
+                    ].join("-");
+              updated = {
+                ...expression,
+                employmentRule: rule,
+                statement: `At least ${rule.minimumMonths} complete calendar months of ${rule.qualificationDefinition}; cutoff: ${cutoff} (UTC).`,
+              };
+            }
+          } else {
+            if ("employmentRule" in atom)
+              throw new RecruitingPlaybookValidationError("Cannot change an existing atom kind.");
+            if (expression.statement !== atom.statement)
+              updated = { ...expression, statement: atom.statement };
+          }
+          updatedAtoms.set(expression.id, updated);
+          return updated;
+        }
+        return expression.kind === "not"
+          ? { ...expression, item: update(expression.item) }
+          : { ...expression, items: expression.items.map(update) };
+      };
+      const expression = update(criterion.expression);
+      if (originalAtoms.size !== atoms.size)
+        throw new RecruitingPlaybookValidationError("Unknown criterion atom.");
+      const changedAtoms = edit.atoms.flatMap((atom) => {
+        const updated = updatedAtoms.get(atom.atomId)!;
+        return stableJsonValue(originalAtoms.get(atom.atomId)) === stableJsonValue(updated)
+          ? []
+          : [
+              {
+                atomId: atom.atomId,
+                ...(updated.employmentRule ? { employmentRule: updated.employmentRule } : {}),
+                statement: updated.statement,
+              },
+            ];
+      });
+      return criterion.priority === edit.priority && !changedAtoms.length
+        ? []
+        : [
+            {
+              criterion: { ...criterion, priority: edit.priority, expression },
+              edit: {
+                criterionId: criterion.id,
+                ...(criterion.priority !== edit.priority ? { priority: edit.priority } : {}),
+                ...(changedAtoms.length ? { atoms: changedAtoms } : {}),
+              },
+            },
+          ];
+    });
+    if (!changes.length) return { role: RecruitingRoleSchema.parse(role), revision };
+    const changed = new Map(changes.map((change) => [change.criterion.id, change.criterion]));
+    const criteria = revision.criteria.map((criterion) => changed.get(criterion.id) ?? criterion);
+    // A shared atom ID must still have one definition across all criteria.
+    RecruitingRoleRevisionSchema.parse({ ...revision, criteria });
+    const text = `Edit recruiting criteria revision ${role.revision}:\n${JSON.stringify(changes.map((change) => change.edit))}`;
+    const message = await createThreadMessageInTransaction(tx, {
+      threadId: thread.id,
+      role: "user",
+      blocks: [{ kind: "text", text }],
+    });
+    const source: RecruitingSourceRef = {
+      id: randomUUID(),
+      kind: "recruiter_verified",
+      anchor: { kind: "message", messageId: message.id, locator: "blocks[0].text" },
+      readState: "read",
+      readAt: new Date().toISOString(),
+      quote: text,
+    };
+    return reviseRoleInTransaction(
+      tx,
+      actor,
+      {
+        ...revision,
+        roleId: role.id,
+        expectedRevision: role.revision,
+        title: role.title,
+        sourceRefs: [...revision.sourceRefs, source],
+        criteria: criteria.map((criterion) =>
+          changed.has(criterion.id)
+            ? { ...criterion, sourceRefs: [...criterion.sourceRefs, source] }
+            : criterion,
+        ),
+        brief: revision.brief
+          ? {
+              ...revision.brief,
+              rules: revision.brief.rules.map((rule) =>
+                changed.has(rule.criterionId)
+                  ? {
+                      ...rule,
+                      origin: "user_instruction",
+                      effect:
+                        changed.get(rule.criterionId)!.priority === "hard" ? "reject" : "flag",
+                      sourceRefIds: [source.id],
+                    }
+                  : rule,
+              ),
+            }
+          : revision.brief,
+      },
+      artifacts,
+    );
   });
 }
 
