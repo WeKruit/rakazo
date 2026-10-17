@@ -56,7 +56,10 @@ import {
   saveNativeRecruitingCandidateResults,
 } from "./recruiting-tools.js";
 
-vi.mock("./recruiting-context.js", () => ({ loadRecruitingRunContext: vi.fn() }));
+vi.mock("./recruiting-context.js", async (importOriginal) => ({
+  ...(await importOriginal<Record<string, unknown>>()),
+  loadRecruitingRunContext: vi.fn(),
+}));
 vi.mock("./recruiting-assessment.js", () => ({
   executeRecruitingAssessmentTool: vi.fn(),
   retainRecruitingWebMaterial: vi.fn(),
