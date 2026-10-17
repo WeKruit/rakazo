@@ -14,7 +14,17 @@ Supabase 独立数据库、原生 memory provider、Modal Volume 和 E2B 沿用�
 
 Execution priority: filter playbook and sourcing (S1–S5) come first; reply and follow-up work is deferred. Feature implementation and direct product validation come before CI waits. Do not wait for CodeQL/CI after each push. The owner authorized an incremental spending cap of US$150; track usage against the private authorization baseline and retain existing resources. The latest instruction authorizes continuing feature fixes, deployment and testing on the existing resources without repeated confirmation. PR merge, unapproved production migrations, access expansion and real outbound remain separate. A pending business question does not block independent product work, and broad execution access does not supply its answer.
 
-**最新线上为 v62 / `3af3129e`。** 本批仅修正新生成的通用审批标题，复用既有可读名称格式化；格式化前先遮盖已知敏感值，原目的地、正文、review reason、actions 和审批归属保持。两项标题回归及一项遮盖顺序回归先失败，随后 21 项聚焦检查、adapters 类型/格式及独立复核通过。云端四份源码 hash 与发布归档相同，API health/ready、Web 均为 200、ready 非 degraded；实际容器内六项无副作用 helper 检查通过，不将它描述为新审批卡的网页点击验收。实际替换后 17 组数据逐项相同，包括 104 个 run、280 个 effect、261 条消息、109 份迁移及全部真实/合成业务和配置。最终网页刷新恢复原 Main 四选项、空白 Answer 与 30 人名单；截图私有保存。分支后续仅文档提交不等于新的线上版本。
+**最新线上为 v64 / `5e5394d1`。** 首次自然聊天读取旧附件时，Agent 只查一次历史便误报当前没有附件、要求重传；该 run 为 completed，但用户目标未完成，失败对话保留。共享消息来源说明现在明确：files 只属于该条消息，空列表不是整个对话没有上传；引用早前附件时，应先沿可用 scoped history 定位原件。仅改已有指令及回归，没有新工具、查询、权限或 schema。105 项 executor 聚焦检查、adapters 类型/格式与独立复核通过，和上一批重叠，不累加。回归通过实际 executor→history handler 取回先前 run 的两份文件引用，不声称模拟 runtime 能证明模型遵从。七份云端源码 hash、API health/ready、Web 已核对，ready 非 degraded；初始冷启动另行保留。实际替换后 17 组数据逐项相同，包括 105 个 run、280 个 effect、263 条消息及 109 份迁移；首次未完成对话、全部业务/配置和原 Main 待答卡均保持。
+
+**v64 正常旧附件读取已通过一次真实网页验收。** 未提供文件或历史内部编号、未重传，使用与首次相同的自然请求。Sourcer 实际完成两次 scoped history 搜索、一次历史读取和两次原文件读取，原生 run completed，五次工具均成功；正常回复只使用命名文件和列名，网页刷新后原回复及列名仍恢复。两份文件的 5/10 个列名与独立授权读取的原件一致，后者同时通过字节/hash 和错误 actor 拒绝验证。此次仅增加一个 run、两条消息及本 DM 的消息序号；全部旧 run/message 原样保留，14 组业务/权限/配置/记忆/effect 数据逐项相同，effect 仍为 280。没有新研究、Autumn 调用、电脑/命令、候选评估、CRM 或外联。它证明本轮旧 CSV 阅读及对话续接，不是 PDF 新上传、全部图片/文件类型、最新全量去重或完整招聘闭环验收。
+
+**v63 历史发布 / `5d9b8391`。** 当前上传、原生回答/恢复、steering 和已有 scoped history 现在保留原文件的最小读取引用；复用既有 actor/hash 检查与文件读取，不从文件名或聊天文字猜测身份。内部只保留 blockIndex/artifactId，名称、类型、长度和正文由原生读取器返回，普通历史展示不变。三份生产文件的小改动没有增加 schema、权限、查询、分页协议或上下文预算；文件块之外的既有图片行为保持，未声称 OCR。134 项聚焦离线检查、三个包类型/格式与独立复核通过；这些使用模拟原生边界，不冒充网页验收。长 Unicode/转义文件名回归保持完整引用；旧 artifact 列表自身超预算的边界另行保留。
+
+云端七份源码 hash 与独立归档一致，API health/ready、Web 均为 200、ready 非 degraded；初始冷启动未就绪也另行记录。替换前后 17 组数据逐项相同：104 个 run、280 个 effect、261 条消息、109 份迁移、岗位/候选/来源/评估、全部 bot/skills/memory 及 thread 保持。真实应用库沿原上传消息读取及搜索得到相同引用，原文件字节/hash 和错误 actor 拒绝均通过；原网页刷新恢复 Main 四选项、空白直接输入及 30 人名单。正常聊天读取原附件的模型验收另行记录，不把只读函数验收扩大为新 PDF 上传/持久引文或完整招聘业务完成。
+
+**现有 sourcing skill 已接到原生结果保存操作。** 只修改原有共享 skill 的一段指导，要求真正候选 get_rows 页沿同一完成回执使用已上线可选 save_results，保存完整结果及未评估者，保留返回的人选与原件引用供后续证据审阅；公司/JD 表不能冒作候选。正常 owner 网页保存后重新打开，全文与准备内容相同；独立读回只该 skill 内容/更新时间改变，其余四份 skill 和两位 bot 配置不变。没有新搜索、工作流、审批或工具权限。指导保存本身不证明 Agent 已自主完成搜索→保存→反馈续搜。
+
+**v62 历史发布 / `3af3129e`。** 本批仅修正新生成的通用审批标题，复用既有可读名称格式化；格式化前先遮盖已知敏感值，原目的地、正文、review reason、actions 和审批归属保持。两项标题回归及一项遮盖顺序回归先失败，随后 21 项聚焦检查、adapters 类型/格式及独立复核通过。云端四份源码 hash 与发布归档相同，API health/ready、Web 均为 200、ready 非 degraded；实际容器内六项无副作用 helper 检查通过，不将它描述为新审批卡的网页点击验收。实际替换后 17 组数据逐项相同，包括 104 个 run、280 个 effect、261 条消息、109 份迁移及全部真实/合成业务和配置。最终网页刷新恢复原 Main 四选项、空白 Answer 与 30 人名单；截图私有保存。分支后续仅文档提交不等于新的线上版本。
 
 **v61 历史发布 / `6a465663`。** 三份本批生产源码与独立发布归档 hash 一致，API health/ready 与 Web 均为 200、ready 非 degraded。实际容器替换前后，17 组数据逐项保持，包括 104 个 run、280 个 effect、260 条消息、109 份迁移、30 位真实候选/45 条来源、一份评估，以及预存合成人选的 shortlist=true、revision=1。
 
