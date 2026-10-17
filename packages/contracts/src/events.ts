@@ -44,6 +44,7 @@ export const ProductEventType = z.enum([
   "skill.draft.created",
   "skill.saved",
   "effect.recorded",
+  "effect.approval.answered",
   "agent.tool.called",
   "agent.tool.completed",
   "effect.reconciled",
@@ -413,6 +414,16 @@ export const NativeAskAnswerPayloadSchema = z.strictObject({
 });
 export type NativeAskAnswerPayload = z.infer<typeof NativeAskAnswerPayloadSchema>;
 
+export const EffectApprovalAnsweredPayloadSchema = z.strictObject({
+  effectId: Id,
+  messageId: Id,
+  askIndex: z.number().int().nonnegative(),
+  answeredByUserId: Id,
+  answer: z.enum(["allow", "always", "deny"]),
+  requestHash: z.string().regex(/^[a-f0-9]{64}$/),
+});
+export type EffectApprovalAnsweredPayload = z.infer<typeof EffectApprovalAnsweredPayloadSchema>;
+
 export const ProductEventSchema = z
   .object({
     id: Id,
@@ -441,7 +452,9 @@ export const ProductEventSchema = z
                   ? RecruitingQuestionAskedPayloadSchema
                   : event.type === "thread.choice"
                     ? NativeAskAnswerPayloadSchema
-                    : null;
+                    : event.type === "effect.approval.answered"
+                      ? EffectApprovalAnsweredPayloadSchema
+                      : null;
     if (!schema) return;
     const parsed = schema.safeParse(event.payload);
     if (!parsed.success) {

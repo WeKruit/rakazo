@@ -1,3 +1,4 @@
+import { createHash } from "node:crypto";
 import type { RealtimeFanout } from "@rakazo/adapter-kit";
 import type { BotSecretDestination, MessageBlock, ProductEvent } from "@rakazo/contracts";
 import {
@@ -15,6 +16,7 @@ import {
   resolveAskChoice,
   sanitizeJsonValue,
 } from "@rakazo/core";
+import { stableJsonValue } from "@rakazo/core/node/approval-effect-key";
 import { getLogger } from "@rakazo/logging";
 import { cancelRunsInTransaction } from "./cancel-runs.js";
 import type { Prisma, PrismaClient } from "./client.js";
@@ -693,7 +695,7 @@ async function commitAnswerRunInput(
     ? LoginSecretValue.safeParse({ username: input.username!.trim(), password: input.answer })
     : undefined;
   if (login && !login.success) return null;
-  let approvalEffect: { id: string; kind: string } | null = null;
+  let approvalEffect: { id: string; kind: string; request: Prisma.JsonValue } | null = null;
   let approvalUserId: string | null = null;
 
   if (approvalAsk) {
@@ -891,6 +893,26 @@ async function commitAnswerRunInput(
         askIndex: parsed.data.indexOf(pendingAsk),
         answerMessageId: answerMessageId!,
         answeredByUserId: input.answeredByUserId,
+      },
+    });
+    return { threadId: proof.threadId, seq: proof.seq };
+  }
+  if (approvalAsk) {
+    const proof = await appendEventInTransaction(tx, {
+      spaceId: input.spaceId,
+      threadId: input.threadId,
+      botId: run.botId,
+      runId: input.runId,
+      type: "effect.approval.answered",
+      payload: {
+        effectId: approvalEffect!.id,
+        messageId: message.id,
+        askIndex: parsed.data.indexOf(pendingAsk),
+        answeredByUserId: input.answeredByUserId,
+        answer: input.answer,
+        requestHash: createHash("sha256")
+          .update(stableJsonValue(approvalEffect!.request))
+          .digest("hex"),
       },
     });
     return { threadId: proof.threadId, seq: proof.seq };

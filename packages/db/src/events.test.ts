@@ -1,6 +1,8 @@
+import { createHash } from "node:crypto";
 import type { RealtimeFanout } from "@rakazo/adapter-kit";
 import type { MessageBlock } from "@rakazo/contracts";
-import { encodeLoginSecret } from "@rakazo/contracts";
+import { encodeLoginSecret, ProductEventSchema } from "@rakazo/contracts";
+import { stableJsonValue } from "@rakazo/core/node/approval-effect-key";
 import { describe, expect, it, vi } from "vitest";
 import type { PrismaClient } from "./client.js";
 import {
@@ -149,6 +151,255 @@ function ordinaryAnswerFixture(
   };
   return { tx, prisma, input, rows, run };
 }
+
+const persistedApprovalRequest = [
+  "__rakazoCatalogTool",
+  "direct",
+  {
+    route: {
+      toolName: "destination.write",
+      resourceRevision: 2,
+      resourceId: "server-synthetic",
+      connectorId: "mcp",
+    },
+    args: {
+      text: "synthetic-private-request",
+      rows: [{ value: null, id: "row-synthetic" }],
+    },
+  },
+];
+
+function approvalAnswerFixture(request: unknown = persistedApprovalRequest) {
+  const f = ordinaryAnswerFixture([
+    { kind: "text", text: "Review this action" },
+    {
+      kind: "ask",
+      approvalEffectId: "effect-1",
+      text: "Write [redacted] to destination?",
+      status: "pending",
+      actions: [
+        { id: "allow", label: "Allow once" },
+        { id: "always", label: "Always allow" },
+        { id: "deny", label: "Deny" },
+      ],
+    },
+  ]);
+  const effect = {
+    id: "effect-1",
+    spaceId: f.input.spaceId,
+    runId: f.input.runId,
+    status: "intended",
+    kind: "destination.write",
+    request,
+  };
+  let seq = 10;
+  f.tx.thread.update.mockImplementation(async () => ({
+    nextEventSeq: ++seq,
+    nextMessageSeq: 3,
+  }));
+  const tx = {
+    ...f.tx,
+    externalEffect: {
+      findFirst: vi.fn(async ({ where }: { where: Record<string, string> }) =>
+        Object.entries(where).every(([key, value]) => effect[key as keyof typeof effect] === value)
+          ? effect
+          : null,
+      ),
+      update: vi.fn(async ({ data }: { data: { status: string } }) => Object.assign(effect, data)),
+    },
+    actionApprovalRule: { upsert: vi.fn().mockResolvedValue({ id: "rule-synthetic" }) },
+  };
+  const prisma = {
+    $transaction: vi.fn(async (callback: (client: typeof tx) => unknown) => callback(tx)),
+  } as unknown as PrismaClient;
+  const fanout = new TestFanout();
+  const publish = vi.spyOn(fanout, "publish");
+  return { ...f, tx, prisma, effect, fanout, publish };
+}
+
+describe("native approval answer provenance", () => {
+  it.each(["allow", "always", "deny"])(
+    "records one exact %s decision with the authenticated approver and canonical persisted request hash",
+    async (answer) => {
+      const f = approvalAnswerFixture();
+      const answeredByUserId = answer === "always" ? f.run.userId : "teammate-approver";
+      const input = { ...f.input, answer, answeredByUserId };
+      await expect(answerRunInput(f.prisma, input, f.fanout)).resolves.toBe(true);
+      const proofs = f.tx.event.create.mock.calls
+        .map(([{ data }]) => data)
+        .filter((data) => data.type === "effect.approval.answered");
+      expect(proofs).toEqual([
+        {
+          spaceId: f.input.spaceId,
+          threadId: f.input.threadId,
+          botId: f.run.botId,
+          runId: f.input.runId,
+          seq: 11,
+          type: "effect.approval.answered",
+          payload: {
+            effectId: f.effect.id,
+            messageId: f.input.messageId,
+            askIndex: 1,
+            answeredByUserId,
+            answer,
+            requestHash: createHash("sha256")
+              .update(stableJsonValue(persistedApprovalRequest))
+              .digest("hex"),
+          },
+        },
+      ]);
+      expect(
+        ProductEventSchema.safeParse({
+          ...event(11),
+          ...proofs[0],
+          createdAt: event(11).createdAt.toISOString(),
+        }).success,
+      ).toBe(true);
+      expect(f.effect.status).toBe(answer === "deny" ? "denied" : "approved");
+      expect(f.tx.message.create).not.toHaveBeenCalled();
+      expect(f.tx.task.updateMany).not.toHaveBeenCalled();
+      expect(f.tx.event.create.mock.calls.map(([{ data }]) => data.type)).toEqual([
+        "thread.message.updated",
+        "effect.approval.answered",
+      ]);
+      expect(JSON.stringify(proofs)).not.toContain("synthetic-private-request");
+      expect(f.publish).toHaveBeenCalledExactlyOnceWith("thread:thread-1", '{"cursor":11}');
+      await expect(answerRunInput(f.prisma, input, f.fanout)).resolves.toBe(false);
+      expect(f.tx.event.create).toHaveBeenCalledTimes(2);
+      expect(f.publish).toHaveBeenCalledTimes(1);
+    },
+  );
+
+  it("hashes persisted plain JSON canonically rather than the redacted card or property order", async () => {
+    const request = { z: [2, { b: false, a: null }], a: "synthetic-private-request" };
+    const canonical = '{"a":"synthetic-private-request","z":[2,{"a":null,"b":false}]}';
+    const f = approvalAnswerFixture(request);
+    await expect(answerRunInput(f.prisma, { ...f.input, answer: "allow" })).resolves.toBe(true);
+    expect(f.tx.event.create).toHaveBeenCalledWith({
+      data: expect.objectContaining({
+        type: "effect.approval.answered",
+        payload: expect.objectContaining({
+          requestHash: createHash("sha256").update(canonical).digest("hex"),
+        }),
+      }),
+    });
+    expect(createHash("sha256").update(JSON.stringify(request)).digest("hex")).not.toBe(
+      createHash("sha256").update(canonical).digest("hex"),
+    );
+  });
+
+  it.each([
+    ["id", "different-effect"],
+    ["spaceId", "different-space"],
+    ["runId", "different-run"],
+    ["status", "approved"],
+  ])("writes no proof when the persisted effect has a mismatched %s", async (key, value) => {
+    const f = approvalAnswerFixture();
+    Object.assign(f.effect, { [key]: value });
+    await expect(answerRunInput(f.prisma, { ...f.input, answer: "allow" }, f.fanout)).resolves.toBe(
+      false,
+    );
+    expect(f.tx.externalEffect.findFirst).toHaveBeenCalledWith({
+      where: { id: "effect-1", spaceId: f.input.spaceId, runId: f.input.runId, status: "intended" },
+    });
+    expect(f.tx.run.updateMany).not.toHaveBeenCalled();
+    expect(f.tx.event.create).not.toHaveBeenCalled();
+    expect(f.publish).not.toHaveBeenCalled();
+  });
+
+  it("writes no proof for an absent effect", async () => {
+    const f = approvalAnswerFixture();
+    f.tx.externalEffect.findFirst.mockResolvedValue(null);
+    await expect(answerRunInput(f.prisma, { ...f.input, answer: "allow" }, f.fanout)).resolves.toBe(
+      false,
+    );
+    expect(f.tx.event.create).not.toHaveBeenCalled();
+    expect(f.publish).not.toHaveBeenCalled();
+  });
+
+  it("writes no proof for an unoffered answer", async () => {
+    const f = approvalAnswerFixture();
+    await expect(
+      answerRunInput(f.prisma, { ...f.input, answer: "accept" }, f.fanout),
+    ).resolves.toBe(false);
+    expect(f.tx.externalEffect.findFirst).not.toHaveBeenCalled();
+    expect(f.tx.event.create).not.toHaveBeenCalled();
+    expect(f.publish).not.toHaveBeenCalled();
+  });
+
+  it("writes no proof when a teammate tries to always-allow for the run owner", async () => {
+    const f = approvalAnswerFixture();
+    await expect(
+      answerRunInput(
+        f.prisma,
+        { ...f.input, answer: "always", answeredByUserId: "teammate-approver" },
+        f.fanout,
+      ),
+    ).resolves.toBe(false);
+    expect(f.tx.run.updateMany).not.toHaveBeenCalled();
+    expect(f.tx.actionApprovalRule.upsert).not.toHaveBeenCalled();
+    expect(f.tx.event.create).not.toHaveBeenCalled();
+    expect(f.publish).not.toHaveBeenCalled();
+  });
+
+  it("writes no proof when the waiting-run claim is lost", async () => {
+    const f = approvalAnswerFixture();
+    f.tx.run.updateMany.mockResolvedValue({ count: 0 });
+    await expect(answerRunInput(f.prisma, { ...f.input, answer: "allow" }, f.fanout)).resolves.toBe(
+      false,
+    );
+    expect(f.tx.externalEffect.update).not.toHaveBeenCalled();
+    expect(f.tx.message.update).not.toHaveBeenCalled();
+    expect(f.tx.event.create).not.toHaveBeenCalled();
+    expect(f.publish).not.toHaveBeenCalled();
+  });
+
+  it("rejects the answer call and publishes nothing when appending its proof fails", async () => {
+    const f = approvalAnswerFixture();
+    f.tx.event.create.mockImplementation(async ({ data }) => {
+      if (data.type === "effect.approval.answered") throw new Error("proof append failed");
+      return { ...event(10), ...data };
+    });
+    await expect(
+      answerRunInput(f.prisma, { ...f.input, answer: "allow" }, f.fanout),
+    ).rejects.toThrow("proof append failed");
+    expect(f.tx.event.create).toHaveBeenCalledTimes(2);
+    expect(f.publish).not.toHaveBeenCalled();
+  });
+
+  it("validates an exact approval proof payload without raw requests or application timestamps", () => {
+    const payload = {
+      effectId: "effect-1",
+      messageId: "ask-card",
+      askIndex: 1,
+      answeredByUserId: "teammate-approver",
+      answer: "allow",
+      requestHash: "a".repeat(64),
+    };
+    const proof = {
+      ...event(11),
+      runId: "run-1",
+      createdAt: event(11).createdAt.toISOString(),
+      type: "effect.approval.answered",
+      payload,
+    };
+    expect(ProductEventSchema.safeParse(proof).success).toBe(true);
+    for (const invalid of [
+      {},
+      { ...payload, effectId: "" },
+      { ...payload, messageId: "" },
+      { ...payload, askIndex: -1 },
+      { ...payload, askIndex: 0.5 },
+      { ...payload, answeredByUserId: "" },
+      { ...payload, answer: "unoffered" },
+      { ...payload, requestHash: "wrong" },
+      { ...payload, request: persistedApprovalRequest },
+      { ...payload, approvedAt: proof.createdAt },
+    ]) {
+      expect(ProductEventSchema.safeParse({ ...proof, payload: invalid }).success).toBe(false);
+    }
+  });
+});
 
 describe("ordinary native Ask answer provenance", () => {
   it("records the visible selected label as a human message and links the exact answered Ask block", async () => {
@@ -2025,7 +2276,11 @@ describe("answerRunInput", () => {
       },
       task: { updateMany: vi.fn() },
       externalEffect: {
-        findFirst: vi.fn().mockResolvedValue({ id: "effect-1", status: "intended" }),
+        findFirst: vi.fn().mockResolvedValue({
+          id: "effect-1",
+          status: "intended",
+          request: persistedApprovalRequest,
+        }),
         update: vi.fn().mockResolvedValue({ id: "effect-1" }),
       },
       thread: { update: vi.fn().mockResolvedValue({ nextEventSeq: 10 }) },
@@ -2103,9 +2358,12 @@ describe("answerRunInput", () => {
       },
       task: { updateMany: vi.fn() },
       externalEffect: {
-        findFirst: vi
-          .fn()
-          .mockResolvedValue({ id: "effect-1", status: "intended", kind: "destination.write" }),
+        findFirst: vi.fn().mockResolvedValue({
+          id: "effect-1",
+          status: "intended",
+          kind: "destination.write",
+          request: persistedApprovalRequest,
+        }),
         update: vi.fn().mockResolvedValue({ id: "effect-1" }),
       },
       actionApprovalRule: {
@@ -2191,9 +2449,12 @@ describe("answerRunInput", () => {
         updateMany: vi.fn(),
       },
       externalEffect: {
-        findFirst: vi
-          .fn()
-          .mockResolvedValue({ id: "effect-1", status: "intended", kind: "destination.write" }),
+        findFirst: vi.fn().mockResolvedValue({
+          id: "effect-1",
+          status: "intended",
+          kind: "destination.write",
+          request: persistedApprovalRequest,
+        }),
       },
       actionApprovalRule: { upsert: vi.fn() },
     };
