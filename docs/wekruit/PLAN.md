@@ -14,7 +14,11 @@ Supabase 独立数据库、原生 memory provider、Modal Volume 和 E2B 沿用�
 
 Execution priority: filter playbook and sourcing (S1–S5) come first; reply and follow-up work is deferred. Feature implementation and direct product validation come before CI waits. Do not wait for CodeQL/CI after each push. The owner authorized an incremental spending cap of US$150; track usage against the private authorization baseline and retain existing resources. The latest instruction authorizes continuing feature fixes, deployment and testing on the existing resources without repeated confirmation. PR merge, unapproved production migrations, access expansion and real outbound remain separate. A pending business question does not block independent product work, and broad execution access does not supply its answer.
 
-**最新线上为 v56 / `f2fcb7d9`。** 22 份运行源码与发布归档 hash 一致；API health/ready 与 Web 均为 200，ready 非 degraded。实际替换容器前后，两位 bot、五份 skills、11 份记忆、101 个 run、279 个 effect、249 条消息、109 份迁移、三份来源页、30 人、45 条来源、已有一份评估、岗位 v3 与 thread 状态逐项相同。未新增迁移、表、权限、依赖、资源、订阅或外联；PR 保持 Draft、未合并。此处源码版本与后续仅文档提交的分支 HEAD 分开记录。
+**最新线上为 v57 / `6729d821`。** 三份本批变更生产源码与发布归档 hash 一致；API health/ready 与 Web 均为 200，ready 非 degraded。实际替换容器前后，两位 bot、五份 skills、11 份记忆、102 个 run、280 个 effect、251 条消息、109 份迁移、三份来源页、30 人、45 条来源、已有一份评估、岗位 v3 与 thread 状态逐项相同。未新增迁移、表、权限、依赖、资源、订阅或外联；PR 保持 Draft、未合并。此处源码版本与后续仅文档提交的分支 HEAD 分开记录。
+
+**原生保存结果可直接筛选。** 现有 Evidence 筛选器此前仅列出自定义 research actions，普通 MCP 保存的来源没有选项；本批复用已有来源 effect/page 和 occurrence 关联，增加可选读取过滤，不制造本地 task/action 或新表。前端以现有 Saved results 文案和带时区的实际保存时间显示每份来源，内部键不作为标签；切换保存来源、既有 action 或全部时保持其他筛选，并保留原分页/迟到响应/岗位切换守卫。过滤人数与分页属于选定结果，全岗位总数和跨来源发现次数保持原含义。
+
+真实独立应用库的 27 项只读检查通过：三份已保存来源各含 15 人，逐份三页无重复，游标不能跨来源或变成未筛选读取；未知来源为空、错误 actor 拒绝，清除过滤回到 30 人/45 条来源，29 人未评估、已有一份评估。原生网页实际逐份选择，核对不同来源名单切换；All rounds 恢复两组共 30 人，原 Main 选择/输入卡保持未答。169 项 contracts/DB/API 聚焦离线检查、115 项 Panel 检查、相关类型/格式、国际化和 Web 构建及独立 SPEC/QUALITY 通过，批次不相加。新增到既有 PostgreSQL 集成文件的写入 fixture 未运行；真实库证明是授权读取函数的只读验收，不冒充完整集成套件或第二用户登录。未发新搜索、改评估或外联；新十人校准、人工反馈后沿同 Autumn task 续搜及 P6/M1–M5 仍未完成。
 
 候选现在可从选中详情点击 “Discuss candidate”，把业务引用带入原生草稿，保留已有文字、附件、mentions、skills 和回复；不自动发送。延迟滚动会避让后续编辑、blur/refocus、键盘或指针输入。Agent 通过现有当前岗位候选索引按姓名/职业链接读取、分页及查看保存来源，不再向用户索取内部键。真实应用库的 17 项只读检查核对身份、两份原来源、完整原件及隔离；这不是第二用户 HTTP 登录验收。面板只对持久业务更新刷新，不在每个 catalog/来源读取时重载；事实和缺口直接显示，原始引文复用已有 Source 展开与精确核验，不重复铺满每个条件。
 
@@ -406,7 +410,7 @@ P0–P6 保留为 M1，不能再作为最终停止条件。完整动作与验收
 | T05 Autumn 业务 action/恢复 | P3/P6 | 五个原生操作、冻结请求/回执、跨 run action 与同 task 续搜代码已随 `6554c46` 发布；原读回执跨新 run 自动补齐与原 effect 的 lease/权限校验已在 `2cfb909` 实现及审查；云端业务恢复仍待验收 |
 | T06 证据与资格判断 | P3/P6 | 已贯通 typed facts/精确来源、原生评估工具、不可变持久评估及网页三态/年限展示；普通聊天保存、读回、重启保留及合成材料局部重评 v3 已验；完整材料提取、真实数值门槛及真实招聘材料重评仍待验收 |
 | T07 补问/局部重评 | P2/P3/P6 | 已复用原生问答卡、effect、作者链和五视图接入岗位/候选版本绑定与局部重评；代码检查及独立审查通过，已发布 `6db30b2`；原卡跨实际容器替换恢复及面板选择续跑已验；普通聊天继续完成局部重评 v2；新 run 的连续两张原卡/选择/自定义输入跨实际重启直接保存 v3 已验，岗位定义补问仍待验 |
-| T08 五视图/手机原卡 | P2/P6 | 五视图、原卡消息导航/面板回答已发布；当前增加已保存候选 Cards/Table、原岗位版本详情及消息证据导航并实际验收；完整 profile/材料定位、编辑、手机及全部交互仍待完成 |
+| T08 五视图/手机原卡 | P2/P6 | 网页五视图、原卡回答/导航、候选 Cards/Table、原岗位版本与证据来源已验；v57 补齐原生保存结果过滤，真实名单切换、分页及清除后全量恢复已验。完整 profile/材料定位、编辑、手机及全部交互仍待完成 |
 | T09 隔离/恢复全链路 | P6 | 现有窄范围回归保留，新增领域链未验收 |
 | T10 真实样本报告 | P3/P6 | 产品接通后再验收，不现在运行样例搜索 |
 
@@ -475,7 +479,7 @@ T07 本批复用原生 Ask、ExternalEffect、message/event 和现有 Recruiting
 | P0 部署与状态 | 云端登录、独立数据库、Crew、聊天重启延续已验证；实际 E2B 暂停、Volume checkpoint、容器替换后的原文件只读恢复已验证 | 同一部署可用，状态及测试文件重启后可读，原 CRM 不变 |
 | P1 模型连接 | 官方 Codex OAuth 与真实回复已验证；Sourcer 独立换模型后召回原记忆并恢复原设置；明确授权失效的后台刷新清理已修复 | 保存连接跨重启继续，明确过期/重连行为 |
 | P2 原生产品与迁移准备 | Crew 上下文、Main/Sourcer 及共享记忆跨对话召回已验证；选择原卡跨重启继续、全对话归档已验证；自定义 input/一次性审批原卡跨重启继续、角色与五份 skills 已验证；其余卡片和迁移待验收 | 记忆、原卡恢复通过；Grok 完整归档与服务清单可核查 |
-| P3 Autumn | 官方 MCP 已完整读回两个 Dyna 任务共 30 行；获准四行已在原 Crew 生成来源/证据/缺口表并保存私有来源索引 revision 1；云端原生只读调用已验收；原批次关联及实际续搜未验收 | 创建、证据、反馈、原任务续搜回执一致 |
+| P3 Autumn | 普通 MCP 公司/JD 研究与原卡跨重启后回同一 task 已验；真实候选保存、三份来源共 45 行归并 30 人、原生来源过滤/分页及一份保存评估读取后实际压缩续聊已验；新十人校准、完整候选核验及人工反馈后原 task 续搜仍未验收 | 创建、证据、反馈、原任务续搜回执一致 |
 | P4 现有 CRM | PR #39–#42 已合并，consent 页面上线；获准来源函数、ACL及迁移账本已核对；MCP 已发布，用户 OAuth/组织身份与四人 LinkedIn 精确匹配已验收；业务写读及越权仍待验收 | 用户/组织鉴权、获准写入读回及越权拒绝通过 |
 | P5 审批发送 | 官方 MCP Bearer 已配置；Sourcer 云端真实只读列表调用通过；发送和回复停止未验收 | 精确内容一次性审批、发送确认和回复停止通过 |
 | P6 全链路 | 完整链路未验收；云端匿名拒绝 10/10、独立真实 Postgres 的原生认证 API 25/25 通过；线上第二用户及业务链仍未验收 | 完成任务 9 的权限、恢复、业务与无重复效果检查 |
