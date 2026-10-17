@@ -3,6 +3,19 @@ import { captureScreenshot, completeOnboarding, signup } from "./helpers";
 
 test.describe.configure({ mode: "serial" });
 
+test("a recruiting reply draft shows its exact scope and one-time approval", async ({
+  page,
+}, testInfo) => {
+  await page.goto("/e2e/fixtures/marketing-shots.html?view=recruiting-reply");
+  await expect(page.getByText("Synthetic recruiting draft", { exact: true })).toBeVisible();
+  await expect(page.getByRole("button", { name: "Allow once", exact: true })).toBeVisible();
+  await expect(page.getByRole("button", { name: "Deny", exact: true })).toBeVisible();
+  await expect(page.getByRole("button", { name: "Always allow this tool" })).toHaveCount(0);
+  await expect(page.getByText("Approve this draft content only.", { exact: false })).toBeVisible();
+  await expect(page.getByText("checksRemaining:", { exact: false })).toBeVisible();
+  await captureScreenshot(page, testInfo, "recruiting-reply-draft");
+});
+
 test("recruiting dashboard includes unassessed saved candidates and their source rounds", async ({
   page,
 }, testInfo) => {

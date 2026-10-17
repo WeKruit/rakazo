@@ -18,6 +18,7 @@ import { catalogEntries, resolveCatalogCall } from "./lazy-tool-catalog.js";
 
 const recruitingApproval = vi.hoisted(() => ({ prepare: vi.fn(), execute: vi.fn() }));
 const replyProof = vi.hoisted(() => vi.fn());
+const recruitingReply = vi.hoisted(() => ({ resolve: vi.fn(), admit: vi.fn(), claim: vi.fn() }));
 const recruitingCrm = vi.hoisted(() => ({
   read: vi.fn(),
   prepare: vi.fn(),
@@ -28,6 +29,7 @@ const recruitingCrm = vi.hoisted(() => ({
 }));
 beforeEach(() => {
   for (const mock of Object.values(recruitingCrm)) mock.mockReset();
+  for (const mock of Object.values(recruitingReply)) mock.mockReset();
   replyProof.mockReset().mockImplementation(async () => ({
     effectId: "native-email-read",
     result: { structuredContent: replyAnchor },
@@ -44,6 +46,9 @@ vi.mock("@rakazo/db", async (importOriginal) => ({
   admitRecruitingCrmImport: recruitingCrm.admit,
   claimRecruitingCrmImport: recruitingCrm.claim,
   readNativeReplyEmailProof: replyProof,
+  resolveRecruitingReply: recruitingReply.resolve,
+  admitRecruitingReply: recruitingReply.admit,
+  claimRecruitingReply: recruitingReply.claim,
 }));
 
 vi.mock("./computer-lifecycle.js", async (importOriginal) => ({
@@ -121,7 +126,13 @@ function fixture({
   inputSchema,
   connectorResult,
   replyServerEndpoint = "https://mcp.instantly.ai/mcp",
+  providerToolName,
+  extraTools = [],
+  connectorResults = {},
 }: {
+  providerToolName?: string;
+  extraTools?: ConnectorTool[];
+  connectorResults?: Record<string, unknown>;
   replyServerEndpoint?: string;
   connectorResult?: unknown;
   inputSchema?: ConnectorTool["inputSchema"];
@@ -145,7 +156,7 @@ function fixture({
   const connectorId = route?.connectorId ?? "demo";
   const catalogName = catalogExecuteToolName(connectorId);
   const tool: ConnectorTool = {
-    name,
+    name: providerToolName ?? name,
     description: "Read an item",
     readOnly,
     inputSchema: inputSchema ?? {
@@ -155,6 +166,7 @@ function fixture({
     },
     route: route ?? { connectorId, resourceId: "resource-1", toolName: name },
   };
+  const providerTools = [tool, ...extraTools];
   const effects: Effect[] = [];
   const results: unknown[] = [];
   const sharedMemoryState = {
@@ -291,7 +303,11 @@ function fixture({
       yield { type: "error" as const, message: "Response lost", outcome: "uncertain" as const };
       return;
     }
-    yield { type: "result" as const, data: connectorResult ?? { item: call.args.id } };
+    yield {
+      type: "result" as const,
+      data: connectorResults[call.route?.toolName ?? call.tool] ??
+        connectorResult ?? { item: call.args.id },
+    };
   });
   let calls: { name?: string; args: Record<string, unknown>; executionId: string }[] = [
     { args: { id: "item-1" }, executionId: "call-1" },
@@ -317,7 +333,9 @@ function fixture({
     connector: {
       discoverTools: async () =>
         builtin
-          ? []
+          ? providerToolName
+            ? providerTools
+            : []
           : catalog
             ? [
                 {
@@ -330,7 +348,7 @@ function fixture({
             : [tool],
       resolveCall: async (call: ConnectorCall) =>
         catalog || call.route?.toolName === "__catalog_execute"
-          ? resolveCatalogCall(call, catalogEntries([tool]))
+          ? resolveCatalogCall(call, catalogEntries(providerTools))
           : undefined,
       execute,
     },
@@ -822,6 +840,45 @@ describe.each([false, true])("native outbound draft approval, catalog=%s", (cata
     expect(f.results.at(-1)).toMatchObject({ dispatched: false });
   });
 
+  it("uses the current recruiting role when a role was selected after the attempt began", async () => {
+    const f = replyFixture();
+    f.prisma.thread.findUniqueOrThrow
+      .mockResolvedValueOnce({ id: "thread-1", groupId: null })
+      .mockResolvedValue({
+        id: "thread-1",
+        groupId: null,
+        activeRecruitingRoleId: "selected-role",
+      } as never);
+    await f.run();
+    expect(f.results.at(-1)).toMatchObject({
+      error: expect.stringContaining("recruiting_reply"),
+      dispatched: false,
+    });
+    expect(f.pauseRunForInput).not.toHaveBeenCalled();
+    expect(f.execute).not.toHaveBeenCalled();
+  });
+
+  it("rechecks a newly selected recruiting role at the final raw-reply claim", async () => {
+    const f = replyFixture({ structuredContent: sentEmail });
+    await f.run();
+    f.effects[0]!.status = "approved";
+    replyProof.mockImplementationOnce(async () => {
+      f.prisma.thread.findUniqueOrThrow.mockResolvedValue({
+        id: "thread-1",
+        groupId: null,
+        activeRecruitingRoleId: "selected-role",
+      } as never);
+      return { effectId: "native-email-read", result: { structuredContent: replyAnchor } };
+    });
+    await f.run();
+    expect(f.results.at(-1)).toMatchObject({
+      error: expect.stringContaining("recruiting_reply"),
+      dispatched: false,
+    });
+    expect(f.execute).not.toHaveBeenCalled();
+    expect(f.effects[0]!.status).toBe("approved");
+  });
+
   it("keeps the original approved request through source failure and repair within the same attempt", async () => {
     const f = replyFixture({ structuredContent: sentEmail });
     await f.run();
@@ -994,6 +1051,348 @@ describe.each([false, true])("native outbound draft approval, catalog=%s", (cata
     await f.run();
     expect(f.execute).toHaveBeenCalledOnce();
     expect(f.execute.mock.calls[0]?.[0].args).toEqual(args);
+    expect(f.effects).toHaveLength(1);
+  });
+});
+
+describe("candidate-linked native reply", () => {
+  const target = {
+    mcpServerId: "crm-server",
+    serverRevision: 1,
+    organizationId: "40000000-0000-4000-8000-000000000001",
+    crmRoleId: "50000000-0000-4000-8000-000000000001",
+    crmClientId: "60000000-0000-4000-8000-000000000001",
+    clientLabel: "Example Client",
+    roleLabel: "Example role",
+  };
+  const receipt = {
+    candidate_id: "70000000-0000-4000-8000-000000000001",
+    source_id: "80000000-0000-4000-8000-000000000001",
+    membership_id: "90000000-0000-4000-8000-000000000001",
+    organization_id: target.organizationId,
+    role_spec_id: target.crmRoleId,
+    linkedin_identity: "/in/example-candidate",
+    source_file: "synthetic-source",
+  };
+  const input = {
+    roleId: "native-role",
+    expectedRoleRevision: 1,
+    crmImportEffectId: "crm-import",
+    mcpServerId: "resource-1",
+    serverRevision: 1,
+    replyToEmailId: replyArgs.reply_to_uuid,
+    subject: replyArgs.subject,
+    body: { text: replyArgs.body_text },
+  };
+  const { subject: _subject, body: _body, ...references } = input;
+  const crmResult = {
+    structuredContent: {
+      data: {
+        candidate: {
+          id: receipt.candidate_id,
+          organization_id: target.organizationId,
+          email: replyArgs.to,
+          linkedin_url: "https://www.linkedin.com/in/example-candidate",
+          linkedin_identity: receipt.linkedin_identity,
+          status: "replied",
+        },
+        pipeline: {
+          candidate_id: receipt.candidate_id,
+          organization_id: target.organizationId,
+          role_spec_id: target.crmRoleId,
+          stage: "Interested",
+          reviewed: true,
+          review_result: "approved",
+          campaign_id: null,
+          last_reply_at: null,
+          last_email_id: null,
+          updated_at: "2026-10-16T00:00:00Z",
+        },
+        roleInterests: [
+          {
+            role_key: "Example role (Example Client)",
+            client_label: "Example Client",
+            role_label: "Example role",
+            interest: "interested",
+            source: "manual",
+          },
+        ],
+        canWrite: true,
+        suppressed: false,
+      },
+    },
+  };
+  const route = {
+    connectorId: "mcp",
+    resourceId: "resource-1",
+    resourceRevision: 1,
+    toolName: "reply_to_email",
+  };
+  function linkedFixture(
+    fullHistory = true,
+    options: { disabledBuiltinTools?: string[]; replyServerEndpoint?: string } = {},
+  ) {
+    const f = fixture({
+      name: "recruiting_reply",
+      builtin: true,
+      providerToolName: "mcp__mail__reply_to_email",
+      ...options,
+      route,
+      inputSchema: { type: "object" },
+      extraTools: [
+        {
+          name: "mcp__crm__context",
+          description: "Read",
+          inputSchema: { type: "object" },
+          readOnly: true,
+          route: {
+            connectorId: "mcp",
+            resourceId: "crm-server",
+            resourceRevision: 1,
+            toolName: "get_crm_candidate_outreach_context",
+          },
+        },
+        ...["get_email", "list_emails"].map((toolName) => ({
+          name: `mcp__mail__${toolName}`,
+          description: "Read",
+          inputSchema: {
+            type: "object",
+            ...(toolName === "list_emails" && fullHistory
+              ? {
+                  properties: {
+                    mode: { type: "string", enum: ["emode_all"] },
+                    latest_of_thread: { type: "boolean" },
+                    preview_only: { type: "boolean" },
+                    eaccount: { type: "string" },
+                    limit: { type: "number" },
+                    starting_after: { type: "string" },
+                  },
+                }
+              : {}),
+          },
+          readOnly: true,
+          route: { ...route, toolName },
+        })),
+      ],
+      connectorResults: {
+        get_crm_candidate_outreach_context: crmResult,
+        get_email: { structuredContent: replyAnchor },
+        list_emails: { structuredContent: { items: [replyAnchor] } },
+      },
+    });
+    const selection = {
+      input: references,
+      target,
+      crmImportReceipt: receipt,
+      role: { id: input.roleId, title: "Example role", revision: 1 },
+      roleRevision: { id: "role-revision" },
+      route,
+      emailProof: { effectId: "native-email-read", result: { structuredContent: replyAnchor } },
+      crmProof: { effectId: "native-crm-read", result: crmResult },
+    };
+    recruitingReply.resolve.mockImplementation(async () => ({
+      ...selection,
+      effect: f.effects.find((effect) => effect.id === "candidate-reply"),
+    }));
+    recruitingReply.admit.mockImplementation(async (_prisma, _actor, _trusted, _input, native) => {
+      let effect = f.effects.find((effect) => effect.id === "candidate-reply");
+      if (!effect) {
+        effect = {
+          id: "candidate-reply",
+          runId: "run-1",
+          kind: native.effectKind,
+          request: native.effectRequest,
+          idempotencyKey: "reply-round",
+          status: "intended",
+        };
+        f.effects.push(effect);
+      }
+      return { status: "ready", effect };
+    });
+    f.setCalls([{ name: "recruiting_reply", args: input, executionId: "draft" }]);
+    return Object.assign(f, { selection });
+  }
+  it("saves the exact candidate/source reply on its native one-time card", async () => {
+    const f = linkedFixture();
+    await f.run();
+    expect(recruitingReply.resolve).toHaveBeenCalledWith(
+      f.prisma,
+      expect.anything(),
+      expect.anything(),
+      references,
+    );
+    expect(recruitingReply.admit).toHaveBeenCalledWith(
+      f.prisma,
+      expect.anything(),
+      expect.anything(),
+      references,
+      expect.objectContaining({
+        emailReadEffectId: "native-email-read",
+        crmContextReadEffectId: "native-crm-read",
+        identity: expect.objectContaining({
+          crmCandidateId: receipt.candidate_id,
+          anchorId: input.replyToEmailId,
+        }),
+      }),
+    );
+    expect(f.pauseRunForInput).toHaveBeenCalledWith(
+      expect.objectContaining({
+        blocks: [
+          expect.objectContaining({
+            approvalEffectId: "candidate-reply",
+            detail: expect.stringContaining(replyArgs.body_text),
+            actions: [
+              { id: "allow", label: "Allow once" },
+              { id: "deny", label: "Deny" },
+            ],
+          }),
+        ],
+      }),
+    );
+    expect(f.execute).not.toHaveBeenCalled();
+  });
+  it("performs and saves fresh native reads after approval but does not bypass missing source coverage", async () => {
+    const f = linkedFixture();
+    await f.run();
+    f.effects[0]!.status = "approved";
+    f.setCalls([
+      {
+        name: "mcp__mail__reply_to_email",
+        args: { ...replyArgs, to: "changed@example.test", body_text: "Changed" },
+        executionId: "approved",
+      },
+    ]);
+    await f.run({ allowFailure: true });
+    expect(f.execute.mock.calls.map(([call]) => call.route?.toolName)).toEqual([
+      "get_crm_candidate_outreach_context",
+      "get_email",
+      "list_emails",
+    ]);
+    expect(recruitingReply.claim).not.toHaveBeenCalled();
+    expect(f.effects.find((effect) => effect.id === "candidate-reply")?.status).toBe("approved");
+    expect(f.results.at(-1)).toMatchObject({
+      status: "incomplete",
+      dispatched: false,
+      gaps: ["legacy_hold_sources", "gmail_history"],
+    });
+    expect(f.effects.filter((effect) => effect.status === "completed")).toHaveLength(3);
+  });
+  it("records a new preflight observation instead of replaying an older identical read", async () => {
+    const f = linkedFixture();
+    await f.run();
+    f.effects[0]!.status = "approved";
+    const stale = {
+      id: "old-email-read",
+      runId: "run-1",
+      kind: "get_email",
+      idempotencyKey: "old-read",
+      status: "completed",
+      request: [
+        "__rakazoCatalogTool",
+        "direct",
+        {
+          route: { ...route, toolName: "get_email" },
+          args: { id: input.replyToEmailId },
+        },
+      ],
+      result: { structuredContent: { ...replyAnchor, subject: "Older observation" } },
+    };
+    f.effects.push(stale);
+    await f.run({ allowFailure: true });
+    const fresh = f.effects.filter(
+      (effect) => effect.kind === "get_email" && effect.id !== stale.id,
+    );
+    expect(fresh).toHaveLength(1);
+    expect(fresh[0]).toMatchObject({
+      status: "completed",
+      result: { structuredContent: replyAnchor },
+    });
+    expect(stale.result.structuredContent.subject).toBe("Older observation");
+    expect(f.results.at(-1)).toMatchObject({
+      readEffectIds: expect.arrayContaining([fresh[0]!.id]),
+      dispatched: false,
+    });
+  });
+  it("does not present a sendable draft for a suppressed candidate", async () => {
+    const f = linkedFixture();
+    f.selection.crmProof.result = {
+      structuredContent: { data: { ...crmResult.structuredContent.data, suppressed: true } },
+    };
+    await f.run();
+    expect(f.results.at(-1)).toMatchObject({
+      status: "blocked",
+      reasons: ["crm_suppressed"],
+      dispatched: false,
+    });
+    expect(recruitingReply.admit).not.toHaveBeenCalled();
+    expect(f.pauseRunForInput).not.toHaveBeenCalled();
+  });
+  it("rejects incomplete provider history capabilities before dispatching unsupported list arguments", async () => {
+    const f = linkedFixture(false);
+    await f.run();
+    f.effects[0]!.status = "approved";
+    await f.run({ allowFailure: true });
+    expect(f.execute.mock.calls.map(([call]) => call.route?.toolName)).toEqual([
+      "get_crm_candidate_outreach_context",
+      "get_email",
+    ]);
+    expect(f.results.at(-1)).toMatchObject({
+      status: "incomplete",
+      reasons: ["provider_history_scope_unknown"],
+      dispatched: false,
+    });
+    expect(recruitingReply.claim).not.toHaveBeenCalled();
+  });
+  it("keeps the preflight at the final claim even when approval arrives after the attempt snapshot", async () => {
+    const f = linkedFixture();
+    await f.run();
+    f.effects[0]!.status = "approved";
+    f.prisma.externalEffect.findMany.mockImplementation(async ({ where } = {}) =>
+      where?.status === "approved" ? [] : f.effects,
+    );
+    await f.run();
+    expect(f.results.at(-1)).toMatchObject({ status: "incomplete", dispatched: false });
+    expect(recruitingReply.claim).not.toHaveBeenCalled();
+    expect(f.execute.mock.calls.some(([call]) => call.route?.toolName === "reply_to_email")).toBe(
+      false,
+    );
+  });
+  it("returns the original terminal effect without new reads or send attempts", async () => {
+    const f = linkedFixture();
+    await f.run();
+    f.effects[0]!.status = "completed";
+    f.effects[0]!.result = {
+      status: "sent_recorded",
+      receipt: { emailId: "saved-provider-email" },
+    };
+    await f.run();
+    expect(f.results.at(-1)).toEqual(f.effects[0]!.result);
+    expect(f.execute).not.toHaveBeenCalled();
+    expect(recruitingReply.admit).toHaveBeenCalledOnce();
+  });
+  it("rejects a linked reply on another provider before admitting a draft", async () => {
+    const f = linkedFixture(true, { replyServerEndpoint: "https://mail.example.test/mcp" });
+    await f.run();
+    expect(f.results.at(-1)).toMatchObject({ error: expect.any(String), dispatched: false });
+    expect(recruitingReply.admit).not.toHaveBeenCalled();
+    expect(f.pauseRunForInput).not.toHaveBeenCalled();
+    expect(f.execute).not.toHaveBeenCalled();
+  });
+  it("rejects disabled linked approval replay before any remote reads", async () => {
+    const f = linkedFixture(true, { disabledBuiltinTools: ["recruiting_reply"] });
+    f.effects.push({
+      id: "candidate-reply",
+      runId: "run-1",
+      kind: "mcp__mail__reply_to_email",
+      request: ["__rakazoCatalogTool", "direct", { route, args: replyArgs }],
+      idempotencyKey: "reply-round",
+      status: "approved",
+    });
+    f.setCalls([{ name: "mcp__mail__reply_to_email", args: replyArgs, executionId: "disabled" }]);
+    await f.run({ allowFailure: true });
+    expect(f.results.at(-1)).toEqual({ error: "This tool is disabled for this bot." });
+    expect(f.execute).not.toHaveBeenCalled();
+    expect(recruitingReply.admit).not.toHaveBeenCalled();
     expect(f.effects).toHaveLength(1);
   });
 });

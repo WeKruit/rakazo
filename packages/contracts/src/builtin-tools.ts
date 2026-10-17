@@ -32,6 +32,7 @@ export const BUILTIN_TOOL_NAMES = [
   "recruiting_research",
   "recruiting_crm_target",
   "recruiting_crm_import",
+  "recruiting_reply",
   "recruiting_feedback",
   "web_search",
   "web_fetch",

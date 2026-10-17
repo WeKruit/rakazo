@@ -198,21 +198,37 @@ function RoutineShot() {
   );
 }
 
-function ApprovalShot() {
+function ApprovalShot({ recruiting = false }: { recruiting?: boolean }) {
   return (
     <main data-ready="true" className="mx-auto max-w-[760px] bg-background p-8 text-foreground">
+      {recruiting && (
+        <p className="mb-5 text-xs text-muted-foreground">Synthetic recruiting draft</p>
+      )}
       <AskCard
         canAnswer
         onAnswer={async () => undefined}
         block={{
           kind: "ask",
           approvalEffectId: "effect-demo",
-          text: "Review before sending a reply from the demo inbox.",
-          detail: "To: ada@example.test\nSubject: Re: Invoice 1042\n\nThanks, I will take a look.",
+          text: recruiting
+            ? "Review before reply_to_email → candidate@example.test"
+            : "Review before sending a reply from the demo inbox.",
+          detail: recruiting
+            ? [
+                "Approve this draft content only. Sending still requires complete current pre-send checks.",
+                "eaccount: recruiter@example.test",
+                "to: candidate@example.test",
+                "subject: Re: Example role",
+                "body_text: Thanks for your interest. May we discuss the role?",
+                "role: Example role",
+                "candidateId: candidate-demo",
+                'checksRemaining: ["Legacy hold/pass records","Gmail history"]',
+              ].join("\n")
+            : "To: ada@example.test\nSubject: Re: Invoice 1042\n\nThanks, I will take a look.",
           status: "pending",
           actions: [
             { id: "allow", label: "Allow once" },
-            { id: "always", label: "Always allow this tool" },
+            ...(recruiting ? [] : [{ id: "always", label: "Always allow this tool" }]),
             { id: "deny", label: "Deny" },
           ],
         }}
@@ -893,8 +909,8 @@ void (view === "recruiting" ? prepareRecruitingSourceShot() : Promise.resolve())
         <ModelShot />
       ) : view === "routine" ? (
         <RoutineShot />
-      ) : view === "approval" ? (
-        <ApprovalShot />
+      ) : view === "approval" || view === "recruiting-reply" ? (
+        <ApprovalShot recruiting={view === "recruiting-reply"} />
       ) : view === "chat" ? (
         <ChatShot />
       ) : view === "subscription" ? (

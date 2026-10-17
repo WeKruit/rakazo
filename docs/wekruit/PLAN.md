@@ -27,7 +27,7 @@ Execution priority: feature implementation and direct product validation come fi
 | 人工编辑岗位条件 | 原 Role 面板的语义条件、结构化年限规则及 hard/preferred 编辑已有代码，同事务保存真实人类来源和版本/CAS；未发布 | 条件增删/逻辑组重构、独立召回 filters 和全流程验收仍在 J06 |
 | Autumn | 已接只读服务；原生 task/action/请求/回执及同 task 续搜有代码 | 新真实搜索→证据→反馈→原 task 续搜的整条业务链未通过 |
 | CRM | 用户 OAuth、组织身份和只读发现已接；[CRM PR #44](https://github.com/WeKruit/headhunter-agent/pull/44) 已补同组织身份去重、候选/来源/多岗位原子导入；Rakazo 已接精确目标确认、来源行/原生导入 effect 关联及回执状态展示，未发布 | 新迁移及 MCP/Web 发布、真实目标绑定/导入写读/并发/RLS、可信发送镜像；抑制规则迁移尚未执行 |
-| Instantly | 已接只读服务；分支已补一次性审批、原邮件读取证据及严格回复回执，未发布 | 岗位/候选/来源关联、最新抑制和历史检查、真实发送/回复停止；当前 REST 和既有 MCP 合同须分别核验 |
+| Instantly | 已接只读服务；分支已补一次性审批、候选/岗位/来源绑定、跨 run 的原邮件轮次去重、精确回复回执及实时 CRM/邮件预检，未发布 | 完整旧 hold 来源、Gmail 与 provider 历史覆盖、草稿修订、真实发送/回复停止；现有 MCP 尚不能声明完整历史覆盖 |
 | 候选人完整工作台/Dashboard | 工作分支已接候选索引、轮次/原始行关联、服务端分页/筛选/排序、持久 shortlist 及岗位 Dashboard；合成材料的实际界面已验证 | 新迁移及网页尚未发布，真实搜索落库/恢复未验；跨岗位/客户 CRM 去重、批次/名单、外联/面试看板仍缺 |
 | 执行过程展示 | 原生 `ToolActivityDisclosure`、事件和 Activity 视图可复用 | 完整招聘步骤、委派树、任务/结果/证据/反馈的关联展示与实时/重载验收 |
 | Agent 可替换底座与插件 | Pi、逐 bot 模型和原生 memory/skills/MCP/文件/routines 可复用 | 每 bot runtime/明确 connection、运行配置冻结、human 群成员等 M3 实际缺口未完成 |
@@ -594,6 +594,20 @@ PR #40 已通过真实 Postgres 24 项（含双连接行锁与跨组织冲突）
 这仍不是完整 G4：候选/岗位/搜索来源的外联绑定、CRM 与全部旧 hold/pass/suppression 来源采用、发送前最新完整历史/回复核验、跨 run 去重/并发声明、停止跟进及真实发送镜像尚未接完。新代码没有开放写工具、修改原待答卡、执行生产迁移、部署或外发；没有新增付费调用。当前原生 UI 复查仍为明确标注 Synthetic 的现有 fixture，能显示三条候选（两条未评估）及不同 CRM 回执状态，不证明业务写入。生产发布和真实验收继续单独处理，P6/M1–M5 均未完成。
 
 此批最终九个相关文件通过 465 项离线检查，adapters/DB 类型、改动代码格式及独立 SPEC/QUALITY 审查通过。覆盖直接/catalog 恢复、同 attempt 证据修复、单次 retained snapshot、不同供应商同名工具、CR/LF、长正文及多格式/全部收件人匹配、未知原始回执保留和缓存不重发；与此前批次有重叠，不累计。没有运行真实 PostgreSQL、在线 MCP 邮件结果核验或完整业务发送验收。
+
+### Candidate-linked native reply drafts and current checks (not deployed)
+
+`recruiting_reply` now accepts the current role version, a verified CRM import effect, an assigned mail connection/version, an inbound email reference and draft content. Sender, recipient, provider workspace/thread and candidate identity come from retained native CRM/email reads and the actual CRM import receipt. Model-supplied contacts or check-complete flags cannot replace them. The existing once-only native card preserves the original provider payload on resume. A thin relation references that effect, role revision, import and both source reads; it does not create another draft store, person record, queue or harness.
+
+Deduplication uses the provider workspace, account, thread and original inbound anchor across runs, roles and connection aliases. Another owner cannot take over a pending effect; terminal or uncertain results are read without resending. A cancelled owner's pending effect remains stopped for another run; the cancelled owner itself fails the existing lease boundary. No run is reopened or approval transferred.
+
+Before consuming an approved request and at the final claim boundary, the adapter performs actual current CRM, inbound-email and paginated account-history reads using the assigned MCP routes. Each new observation is stored as a fresh native completed read effect, never replaced with an earlier identical read's result. Suppression, hold/pass/decline, source mismatch, a newer inbound or a matching prior reply block dispatch. Pagination must exhaust; empty cursor-bearing pages continue, repeated/conflicting messages and incomplete controls remain unknown. The adapter never sends unsupported list arguments or silently switches to REST. Current-thread role selection is reread before raw reply admission and claim; disabling the linked workflow stops approved replay before remote reads.
+
+This slice **does not clear full G4**. Legacy tracker/context hold records and Gmail history remain mandatory missing sources. The current native MCP cannot prove the full history modes required by this preflight. Approval therefore approves draft content only; incomplete coverage preserves the approved effect and prevents dispatch. No new service permission, source migration, write-tool assignment, provider send or schedule is enabled. Contact acquisition, draft editing/replacement, campaign G3 packages, authoritative reply-stop adoption, CRM sent-receipt mirroring and live acceptance remain open.
+
+The additive `20261017210000_recruiting_reply` migration is authored, not applied. The release candidate now has five unapplied application migrations: brief, action approval, candidate index, CRM link and reply link. CRM PR #44 separately adds the database-owned LinkedIn identity to its fixed authenticated context tool; no JavaScript Unicode identity folding or RLS bypass is used. Production schema/MCP release and tool assignment still require separate approval.
+
+Verification: 396 focused offline checks across eight files and contracts/DB/adapters/Web type checks pass. The CRM MCP file passes 34 offline Deno checks. Independent specification and quality reviews pass. No PostgreSQL runtime/concurrency check, real provider result, live model, restart or full business acceptance was run for this slice. A visibly synthetic existing AskCard fixture shows the exact scope and once-only actions; its browser screenshot is rendering evidence only. The existing web screenshot test was extended but not run as a database-backed browser suite. No CI wait, new dependency, paid resource, Docker, local PostgreSQL, production migration, deployment or outbound action was performed.
 
 ## 任务 9：P6 全链路验收与交付
 

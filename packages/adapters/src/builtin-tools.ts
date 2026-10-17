@@ -9,6 +9,7 @@ import {
   RecruitingCrmTargetToolInputSchema,
   RecruitingFeedbackInputSchema,
   RecruitingPreferenceFeedbackSchema,
+  RecruitingReplyInputSchema,
   RecruitingResearchToolInputSchema,
   RecruitingRoleToolInputSchema,
   SecretAskPurpose,
@@ -557,6 +558,12 @@ export const builtinAgentTools: ConnectorTool[] = [
     description:
       "Import one exact saved candidate discovery to the role's human-confirmed CRM target. Supply roleId, candidateKey, bindingEffectId, sourceEffectId and rowIndex from native candidate/source records. The backend derives professional facts and provenance; never reconstruct names, contact details or source paths. This opens the native once-only CRM write approval and continues its original effect after the answer. Reuse that source reference for inspection/replay, never replace an unknown outcome with a new source or effect. Missing name or LinkedIn remains unresolved. This saves supplied facts and role membership, not qualification, campaign activation or outbound email.",
     inputSchema: z.toJSONSchema(RecruitingCrmImportInputSchema, { io: "input" }),
+  },
+  {
+    name: "recruiting_reply",
+    description:
+      "Prepare an exact candidate reply for the selected current recruiting role. Supply roleId, expectedRoleRevision, the successful crmImportEffectId for the saved discovery, the assigned mail mcpServerId/serverRevision and original replyToEmailId, subject and body {text,html} (at least one format). Optional cc/bcc preserve explicit addresses. First read that original inbound email and the exact CRM candidate outreach context. The backend derives the actual sender and recipient from verified records; never provide substitute contact identities or self-reported check booleans. It saves one immutable native draft for this inbound round and keeps its candidate, source, CRM and email links. Read failures, missing contacts, suppression, hold/pass, newer replies, duplicates or incomplete source coverage keep the draft unsent. A ready draft requires its original one-time human approval and a fresh preflight before dispatch. Never replace or rephrase an unknown outcome to resend.",
+    inputSchema: z.toJSONSchema(RecruitingReplyInputSchema, { io: "input" }),
   },
   {
     name: "recruiting_request_approval",

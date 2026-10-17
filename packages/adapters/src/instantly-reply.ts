@@ -29,6 +29,8 @@ function sameAddresses(
   return left !== null && right !== null && left.join("\n") === right.join("\n");
 }
 
+export { sameAddresses as sameInstantlyAddresses };
+
 const AddressList = z.string().refine((value) => addresses(value) !== null);
 
 // The existing MCP reply tool uses flat body fields, not the REST body envelope.

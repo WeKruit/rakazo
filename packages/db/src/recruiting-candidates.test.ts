@@ -618,7 +618,7 @@ function crmFixture() {
       ),
     },
     botMcpServer: {
-      findFirst: vi.fn(async () => ({
+      findFirst: vi.fn(async (_query: { where: { serverId: string } }) => ({
         allowAllTools: false,
         allowedTools: ["get_crm_role", "crm_import_candidate"],
       })),
@@ -986,6 +986,547 @@ describe("native reply email proof", () => {
       recruiting.readNativeReplyEmailProof(f.prisma, actor, f.trusted, invalid as never),
     ).rejects.toThrow(IsolationError);
   });
+});
+
+async function replyFixture() {
+  const f = crmFixture();
+  const imported = (await recruiting.resolveRecruitingCrmImport(
+    f.prisma,
+    actor,
+    f.trusted,
+    f.input,
+  ))!;
+  const admission = await recruiting.admitRecruitingCrmImport(f.prisma, actor, f.trusted, f.input, {
+    effectKind: "crm-import",
+    effectRequest: boundDirectApprovalRequest(imported.route, imported.args, "__rakazoCatalogTool"),
+  });
+  const receipt = {
+    candidate_id: "40000000-0000-4000-8000-000000000004",
+    source_id: "50000000-0000-4000-8000-000000000005",
+    membership_id: "60000000-0000-4000-8000-000000000006",
+    organization_id: f.target.organizationId,
+    role_spec_id: f.target.crmRoleId,
+    linkedin_identity: "/in/example",
+    source_file: imported.args.p_source_file,
+  };
+  const importEffect = f.effects.get(admission.effect.id)!;
+  Object.assign(importEffect, {
+    status: "completed",
+    result: { structuredContent: { data: receipt } },
+  });
+  const revision = await f.tx.recruitingRoleRevision.findFirst();
+  Object.assign(revision, {
+    sourceRefs: [
+      {
+        ...revision.sourceRefs[0],
+        readState: "read",
+        readAt: "2026-10-16T00:00:00Z",
+        quote: "Search examples",
+      },
+    ],
+    brief: {
+      fields: [
+        {
+          key: "salary_range",
+          value: "USD 100000 to 150000",
+          state: "known",
+          origin: "user_instruction",
+          consequential: true,
+          sourceRefIds: ["human"],
+        },
+      ],
+      questions: [],
+      rules: [],
+      confirmation: {
+        revision: 1,
+        userId: actor.userId,
+        messageId: "human",
+        confirmedAt: "2026-10-16T00:00:00Z",
+      },
+    },
+  });
+  const mailRoute = {
+    connectorId: "mcp",
+    resourceId: "mail-server",
+    resourceRevision: 1,
+    toolName: "reply_to_email",
+  };
+  const identity = {
+    providerWorkspaceId: "workspace",
+    account: "owner@example.test",
+    threadId: "provider-thread",
+    anchorId: "inbound-email",
+    crmCandidateId: receipt.candidate_id,
+  };
+  const email = {
+    ...f.binding,
+    id: "email-read",
+    kind: "get_email",
+    request: boundDirectApprovalRequest(
+      { ...mailRoute, toolName: "get_email" },
+      { id: identity.anchorId },
+      "__rakazoCatalogTool",
+    ),
+    result: { structuredContent: { id: identity.anchorId } } as unknown,
+  };
+  const crm = {
+    ...email,
+    id: "crm-context-read",
+    request: boundDirectApprovalRequest(
+      {
+        connectorId: "mcp",
+        resourceId: "crm-server",
+        resourceRevision: 2,
+        toolName: "get_crm_candidate_outreach_context",
+      },
+      { p_org: receipt.organization_id, p_candidate: receipt.candidate_id },
+      "__rakazoCatalogTool",
+    ),
+    result: { structuredContent: { data: { candidate: { id: receipt.candidate_id } } } } as unknown,
+  };
+  f.effects.set(email.id, email);
+  f.effects.set(crm.id, crm);
+  const replyLinks: Array<{
+    effectId: string;
+    roleRevisionId: string;
+    crmImportEffectId: string;
+    emailReadEffectId: string;
+    crmContextReadEffectId: string;
+  }> = [];
+  const tx = {
+    ...f.tx,
+    recruitingReply: {
+      findUnique: vi.fn(async ({ where }) => {
+        const link = replyLinks.find((item) => item.effectId === where.effectId);
+        return link
+          ? { ...link, effect: f.effects.get(link.effectId), roleRevision: revision }
+          : null;
+      }),
+      findMany: vi.fn(async ({ where }) =>
+        replyLinks
+          .filter(
+            (link) =>
+              !where.crmImportEffectId || link.crmImportEffectId === where.crmImportEffectId,
+          )
+          .map((link) => ({
+            ...link,
+            effect: f.effects.get(link.effectId),
+            roleRevision: revision,
+          })),
+      ),
+      create: vi.fn(async ({ data }) => {
+        replyLinks.push(data);
+        return data;
+      }),
+    },
+  };
+  f.tx.mcpServer.findFirst.mockImplementation(async ({ where }) => ({
+    ...actor,
+    id: where.id,
+    enabled: true,
+    revision: where.id === "crm-server" ? 2 : 1,
+    endpoint: "https://mcp.instantly.ai/mcp",
+  }));
+  f.tx.botMcpServer.findFirst.mockImplementation(async ({ where }) => ({
+    allowAllTools: false,
+    allowedTools:
+      where.serverId === "crm-server"
+        ? ["get_crm_candidate_outreach_context"]
+        : ["get_email", "list_emails", "reply_to_email"],
+  }));
+  const prisma = { $transaction: vi.fn(async (fn) => fn(tx)) } as unknown as PrismaClient;
+  const input = {
+    roleId: "role",
+    expectedRoleRevision: 1,
+    crmImportEffectId: importEffect.id,
+    mcpServerId: "mail-server",
+    serverRevision: 1,
+    replyToEmailId: identity.anchorId,
+  };
+  const native = {
+    effectKind: "mcp__mail__reply_to_email",
+    effectRequest: boundDirectApprovalRequest(
+      mailRoute,
+      {
+        reply_to_uuid: identity.anchorId,
+        eaccount: identity.account,
+        to: "candidate@example.test",
+        subject: "Exact subject",
+        body_text: "Exact body",
+        skip_validation: false,
+      },
+      "__rakazoCatalogTool",
+    ),
+    identity,
+    emailReadEffectId: email.id,
+    crmContextReadEffectId: crm.id,
+  };
+  return {
+    ...f,
+    prisma,
+    tx,
+    input,
+    native,
+    revision,
+    receipt,
+    importEffect,
+    email,
+    crm,
+    replyLinks,
+  };
+}
+
+describe("durable recruiting reply linkage", () => {
+  it("resolves actual CRM/source records and opaque native read receipts with read-only CRM permissions", async () => {
+    expect(recruiting.resolveRecruitingReply).toBeTypeOf("function");
+    const f = await replyFixture();
+    const resolved = await recruiting.resolveRecruitingReply(f.prisma, actor, f.trusted, f.input);
+    expect(resolved).toMatchObject({
+      input: f.input,
+      target: f.target,
+      crmImportReceipt: f.receipt,
+      emailProof: { effectId: f.email.id, result: f.email.result },
+      crmProof: { effectId: f.crm.id, result: f.crm.result },
+      role: { id: "role", revision: 1 },
+    });
+    expect(resolved?.effect).toBeUndefined();
+  });
+  it.each([
+    "role",
+    "revision",
+    "binding",
+    "receipt",
+    "source",
+    "mail-assignment",
+    "crm-assignment",
+    "mail-revision",
+    "lease",
+    "email-proof",
+    "crm-proof",
+    "brief",
+  ])("rejects the invalid %s context before admission", async (boundary) => {
+    const f = await replyFixture();
+    if (boundary === "role")
+      f.tx.thread.findFirst.mockResolvedValue({
+        ...actor,
+        id: "thread",
+        botId: "bot",
+        activeRecruitingRoleId: "other",
+      });
+    if (boundary === "revision") f.input.expectedRoleRevision += 1;
+    if (boundary === "binding") f.role.crmBindingEffectId = "other";
+    if (boundary === "receipt") f.importEffect.result = { success: true };
+    if (boundary === "source") f.occurrence.name = null;
+    if (boundary === "mail-assignment" || boundary === "crm-assignment")
+      f.tx.botMcpServer.findFirst.mockImplementation(async ({ where }) => ({
+        allowAllTools: false,
+        allowedTools:
+          where.serverId === (boundary === "mail-assignment" ? "mail-server" : "crm-server")
+            ? []
+            : ["get_email", "list_emails", "reply_to_email", "get_crm_candidate_outreach_context"],
+      }));
+    if (boundary === "mail-revision") f.input.serverRevision = 2;
+    if (boundary === "lease") f.trusted.leaseFence += 1;
+    if (boundary === "email-proof") f.email.status = "uncertain";
+    if (boundary === "crm-proof") f.crm.status = "executing";
+    if (boundary === "brief") Object.assign(f.revision, { brief: null });
+    await expect(
+      recruiting.resolveRecruitingReply(f.prisma, actor, f.trusted, f.input),
+    ).rejects.toThrow();
+    expect(f.tx.recruitingReply.create).not.toHaveBeenCalled();
+  });
+  it("leaves provider endpoint translation to the adapter while validating owned assignments", async () => {
+    const f = await replyFixture();
+    f.tx.mcpServer.findFirst.mockImplementation(async ({ where }) => ({
+      ...actor,
+      id: where.id,
+      enabled: true,
+      revision: where.id === "crm-server" ? 2 : 1,
+      endpoint: "https://other.example.test/mcp",
+    }));
+    const resolved = await recruiting.resolveRecruitingReply(f.prisma, actor, f.trusted, f.input);
+    expect(resolved?.route).toEqual({
+      connectorId: "mcp",
+      resourceId: "mail-server",
+      resourceRevision: 1,
+      toolName: "reply_to_email",
+    });
+    expect(f.tx.recruitingReply.create).not.toHaveBeenCalled();
+  });
+  it("reserves one native effect and thin link, restores original scope, and claims only the human-approved original request", async () => {
+    expect(recruiting.admitRecruitingReply).toBeTypeOf("function");
+    const f = await replyFixture();
+    const first = await recruiting.admitRecruitingReply(
+      f.prisma,
+      actor,
+      f.trusted,
+      f.input,
+      f.native,
+    );
+    const second = await recruiting.admitRecruitingReply(
+      f.prisma,
+      actor,
+      f.trusted,
+      f.input,
+      f.native,
+    );
+    expect(first.status).toBe("ready");
+    expect(second.effect.id).toBe(first.effect.id);
+    expect(f.replyLinks).toEqual([
+      {
+        effectId: first.effect.id,
+        roleRevisionId: "revision",
+        crmImportEffectId: f.importEffect.id,
+        emailReadEffectId: f.email.id,
+        crmContextReadEffectId: f.crm.id,
+      },
+    ]);
+    const effect = f.effects.get(first.effect.id)!;
+    const claim = { ...f.native, effectId: effect.id, from: "approved" as const };
+    await expect(
+      recruiting.claimRecruitingReply(f.prisma, actor, f.trusted, f.input, claim),
+    ).resolves.toBe(false);
+    effect.status = "approved";
+    await expect(
+      recruiting.claimRecruitingReply(f.prisma, actor, f.trusted, f.input, claim),
+    ).rejects.toThrow(IsolationError);
+    f.approvals.add(effect.id);
+    expect(
+      (
+        await recruiting.resolveRecruitingReply(
+          f.prisma,
+          actor,
+          { ...f.trusted, approvedEffectId: effect.id },
+          { ...f.input, roleId: "changed", expectedRoleRevision: 99 },
+        )
+      )?.input,
+    ).toEqual(f.input);
+    await expect(
+      recruiting.claimRecruitingReply(f.prisma, actor, f.trusted, f.input, claim),
+    ).resolves.toBe(true);
+    expect(effect.status).toBe("executing");
+    await expect(
+      recruiting.claimRecruitingReply(f.prisma, actor, f.trusted, f.input, claim),
+    ).resolves.toBe(false);
+  });
+  it.each([
+    "email-proof",
+    "crm-proof",
+    "candidate-identity",
+    "anchor-identity",
+    "route",
+    "noncanonical",
+  ])("rejects inconsistent frozen %s before creating a reply", async (boundary) => {
+    const f = await replyFixture();
+    const native: recruiting.RecruitingReplyNative = {
+      ...f.native,
+      identity: { ...f.native.identity },
+    };
+    if (boundary === "email-proof") native.emailReadEffectId = "other";
+    if (boundary === "crm-proof") native.crmContextReadEffectId = "other";
+    if (boundary === "candidate-identity") native.identity.crmCandidateId = "other";
+    if (boundary === "anchor-identity") native.identity.anchorId = "other";
+    if (boundary === "route")
+      native.effectRequest = boundDirectApprovalRequest(
+        {
+          connectorId: "mcp",
+          resourceId: "other",
+          resourceRevision: 1,
+          toolName: "reply_to_email",
+        },
+        {},
+        "__rakazoCatalogTool",
+      );
+    if (boundary === "noncanonical") native.effectRequest = { body: "model reconstruction" };
+    await expect(
+      recruiting.admitRecruitingReply(f.prisma, actor, f.trusted, f.input, native),
+    ).rejects.toThrow();
+    expect(f.replyLinks).toHaveLength(0);
+  });
+  it("keeps the first draft immutable and rejects stale binding or proof changes at claim", async () => {
+    const f = await replyFixture();
+    const admitted = await recruiting.admitRecruitingReply(
+      f.prisma,
+      actor,
+      f.trusted,
+      f.input,
+      f.native,
+    );
+    const effect = f.effects.get(admitted.effect.id)!;
+    effect.status = "approved";
+    f.approvals.add(effect.id);
+    await expect(
+      recruiting.admitRecruitingReply(f.prisma, actor, f.trusted, f.input, {
+        ...f.native,
+        effectRequest: boundDirectApprovalRequest(
+          {
+            connectorId: "mcp",
+            resourceId: "mail-server",
+            resourceRevision: 1,
+            toolName: "reply_to_email",
+          },
+          { changed: true },
+          "__rakazoCatalogTool",
+        ),
+      }),
+    ).rejects.toThrow(recruiting.RecruitingConflictError);
+    await expect(
+      recruiting.claimRecruitingReply(f.prisma, actor, f.trusted, f.input, {
+        ...f.native,
+        emailReadEffectId: "other",
+        effectId: effect.id,
+        from: "approved",
+      }),
+    ).rejects.toThrow(IsolationError);
+    f.role.crmBindingEffectId = null;
+    await expect(
+      recruiting.claimRecruitingReply(f.prisma, actor, f.trusted, f.input, {
+        ...f.native,
+        effectId: effect.id,
+        from: "approved",
+      }),
+    ).rejects.toThrow();
+    expect(effect.status).toBe("approved");
+  });
+  it("rejects inconsistent stored role linkage rather than reusing a pending action", async () => {
+    const f = await replyFixture();
+    await recruiting.admitRecruitingReply(f.prisma, actor, f.trusted, f.input, f.native);
+    f.replyLinks[0]!.roleRevisionId = "other-revision";
+    await expect(
+      recruiting.admitRecruitingReply(f.prisma, actor, f.trusted, f.input, f.native),
+    ).rejects.toThrow(recruiting.RecruitingConflictError);
+  });
+  it("uses frozen retained proof IDs when later preflight reads exist", async () => {
+    const f = await replyFixture();
+    const admission = await recruiting.admitRecruitingReply(
+      f.prisma,
+      actor,
+      f.trusted,
+      f.input,
+      f.native,
+    );
+    const effect = f.effects.get(admission.effect.id)!;
+    effect.status = "approved";
+    f.approvals.add(effect.id);
+    f.effects.set("later-email", {
+      ...f.email,
+      id: "later-email",
+      status: "uncertain",
+      createdAt: new Date(f.email.createdAt.getTime() + 1),
+    });
+    f.effects.set("later-crm", {
+      ...f.crm,
+      id: "later-crm",
+      status: "completed",
+      createdAt: new Date(f.crm.createdAt.getTime() + 1),
+    });
+    const resolved = await recruiting.resolveRecruitingReply(f.prisma, actor, f.trusted, f.input);
+    expect(resolved?.emailProof.effectId).toBe(f.email.id);
+    expect(resolved?.crmProof.effectId).toBe(f.crm.id);
+    await expect(
+      recruiting.claimRecruitingReply(f.prisma, actor, f.trusted, f.input, {
+        ...f.native,
+        effectId: effect.id,
+        from: "approved",
+      }),
+    ).resolves.toBe(true);
+  });
+  it("contends on one provider round even when another CRM identity maps to its email", async () => {
+    const first = await replyFixture();
+    const existing = await recruiting.admitRecruitingReply(
+      first.prisma,
+      actor,
+      first.trusted,
+      first.input,
+      first.native,
+    );
+    const second = await replyFixture();
+    second.receipt.candidate_id = "70000000-0000-4000-8000-000000000007";
+    second.native.identity.crmCandidateId = second.receipt.candidate_id;
+    second.crm.request = boundDirectApprovalRequest(
+      {
+        connectorId: "mcp",
+        resourceId: "crm-server",
+        resourceRevision: 2,
+        toolName: "get_crm_candidate_outreach_context",
+      },
+      { p_org: second.receipt.organization_id, p_candidate: second.receipt.candidate_id },
+      "__rakazoCatalogTool",
+    );
+    second.crm.result = {
+      structuredContent: { data: { candidate: { id: second.receipt.candidate_id } } },
+    };
+    const next = {
+      ...second.run,
+      id: "next-run",
+      status: "running",
+      leaseExpiresAt: new Date(Date.now() + 60_000),
+    };
+    second.runs.set(next.id, next);
+    const email = { ...second.email, id: "next-email", runId: next.id };
+    const crm = { ...second.crm, id: "next-crm", runId: next.id };
+    second.effects.set(email.id, email);
+    second.effects.set(crm.id, crm);
+    second.effects.set(existing.effect.id, existing.effect as never);
+    const stored = {
+      ...first.replyLinks[0]!,
+      effect: existing.effect,
+      roleRevision: first.revision,
+    };
+    second.tx.recruitingReply.findUnique.mockResolvedValue(stored);
+    const result = await recruiting.admitRecruitingReply(
+      second.prisma,
+      actor,
+      { ...second.trusted, runId: next.id },
+      second.input,
+      { ...second.native, emailReadEffectId: email.id, crmContextReadEffectId: crm.id },
+    );
+    expect(result).toMatchObject({ status: "busy", effect: { id: existing.effect.id } });
+    expect(second.replyLinks).toHaveLength(0);
+  });
+  it.each([
+    ["intended", "running", "busy"],
+    ["approved", "completed", "stopped"],
+    ["executing", "running", "busy"],
+    ["executing", "failed", "unknown"],
+    ["uncertain", "failed", "unknown"],
+    ["completed", "completed", "completed"],
+    ["denied", "cancelled", "denied"],
+  ])(
+    "retains %s effect owned by a %s run as %s without transfer or another effect",
+    async (status, ownerStatus, expected) => {
+      const f = await replyFixture();
+      const admitted = await recruiting.admitRecruitingReply(
+        f.prisma,
+        actor,
+        f.trusted,
+        f.input,
+        f.native,
+      );
+      const effect = f.effects.get(admitted.effect.id)!;
+      Object.assign(effect, { status, result: { outcome: "retained-provider-result" } });
+      f.run.status = ownerStatus;
+      const next = {
+        ...f.run,
+        id: "next-run",
+        status: "running",
+        leaseExpiresAt: new Date(Date.now() + 60_000),
+      };
+      f.runs.set(next.id, next);
+      const got = await recruiting.admitRecruitingReply(
+        f.prisma,
+        actor,
+        { ...f.trusted, runId: next.id },
+        f.input,
+        f.native,
+      );
+      expect(got.status).toBe(expected);
+      expect(got.effect.id).toBe(effect.id);
+      expect(got.effect.result).toEqual(effect.result);
+      expect(effect.runId).toBe("run");
+      expect(f.replyLinks).toHaveLength(1);
+    },
+  );
 });
 
 describe("native CRM binding and source import", () => {

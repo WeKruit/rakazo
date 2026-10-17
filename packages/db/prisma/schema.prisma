@@ -754,6 +754,9 @@ model CloudAgent {
 }
 
 model ExternalEffect {
+  recruitingReply RecruitingReply? @relation("RecruitingReplyEffect")
+  recruitingReplyEmailProofs RecruitingReply[] @relation("RecruitingReplyEmailProof")
+  recruitingReplyCrmProofs RecruitingReply[] @relation("RecruitingReplyCrmProof")
   recruitingCrmRole RecruitingRole? @relation("RecruitingCrmBinding")
   recruitingCrmImport RecruitingCrmImport? @relation("RecruitingCrmImportEffect")
   recruitingCrmBoundImports RecruitingCrmImport[] @relation("RecruitingCrmImportBinding")
@@ -1526,6 +1529,7 @@ model RecruitingRole {
 }
 
 model RecruitingRoleRevision {
+  replies RecruitingReply[]
   brief Json?
   id String @id @default(cuid())
   roleId String
@@ -1693,6 +1697,7 @@ model RecruitingCandidateOccurrence {
 }
 
 model RecruitingCrmImport {
+  replies RecruitingReply[]
   effectId String @id
   effect ExternalEffect @relation("RecruitingCrmImportEffect", fields: [effectId], references: [id], onDelete: Cascade)
   bindingEffectId String
@@ -1703,4 +1708,22 @@ model RecruitingCrmImport {
 
   @@unique([bindingEffectId, pageId, rowIndex])
   @@map("recruiting_crm_imports")
+}
+
+/// Recruiting scope only; approval, execution state and provider result remain on ExternalEffect.
+model RecruitingReply {
+  effectId String @id
+  effect ExternalEffect @relation("RecruitingReplyEffect", fields: [effectId], references: [id], onDelete: Cascade)
+  roleRevisionId String
+  roleRevision RecruitingRoleRevision @relation(fields: [roleRevisionId], references: [id], onDelete: NoAction)
+  crmImportEffectId String
+  crmImport RecruitingCrmImport @relation(fields: [crmImportEffectId], references: [effectId], onDelete: NoAction)
+  emailReadEffectId String
+  emailReadEffect ExternalEffect @relation("RecruitingReplyEmailProof", fields: [emailReadEffectId], references: [id], onDelete: NoAction)
+  crmContextReadEffectId String
+  crmContextReadEffect ExternalEffect @relation("RecruitingReplyCrmProof", fields: [crmContextReadEffectId], references: [id], onDelete: NoAction)
+
+  @@index([crmImportEffectId])
+  @@index([roleRevisionId])
+  @@map("recruiting_replies")
 }

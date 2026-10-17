@@ -22,6 +22,7 @@ import type {
   RecruitingPreferenceFeedbackInput,
   RecruitingQuestion,
   RecruitingReadPayload,
+  RecruitingReplyTarget,
   RecruitingResearchAction,
   RecruitingResearchPurpose,
   RecruitingRole,
@@ -60,6 +61,7 @@ import {
   RecruitingPreferenceFeedbackSchema,
   RecruitingQuestionAskedPayloadSchema,
   RecruitingQuestionSchema,
+  RecruitingReplyTargetSchema,
   RecruitingResearchActionSchema,
   RecruitingResearchTaskSchema,
   RecruitingRoleRevisionSchema,
@@ -2420,7 +2422,7 @@ async function approvalWorkspace(
   tx: Tx,
   actor: Actor,
   threadId: string,
-  input: RecruitingApprovalToolInput,
+  input: Pick<RecruitingApprovalToolInput, "roleId" | "expectedRoleRevision">,
   current = true,
   requireSelection = current,
 ) {
@@ -4833,6 +4835,49 @@ async function currentCrmServer(
     throw new IsolationError();
 }
 
+async function nativeMcpReadProof(
+  tx: Tx,
+  actor: Actor,
+  runId: string,
+  route: { connectorId: string; resourceId: string; resourceRevision: number; toolName: string },
+  args: Record<string, unknown>,
+) {
+  // ponytail: compare this run's native envelopes in O(n); index by route if long runs require it.
+  const effects = await tx.externalEffect.findMany({
+    where: { spaceId: actor.spaceId, runId },
+    orderBy: [{ createdAt: "desc" }, { id: "desc" }],
+  });
+  for (const effect of effects) {
+    if (effect.spaceId !== actor.spaceId || effect.runId !== runId) throw new IsolationError();
+    const marker = "__rakazoCatalogTool";
+    const direct = boundDirectApprovalDetails(effect.request, marker);
+    const catalog = catalogApprovalDetails(effect.request, marker);
+    const expected = direct
+      ? boundDirectApprovalRequest(route, args, marker)
+      : catalog && ["connectors_execute_tool", "mcp_execute_tool"].includes(catalog.toolName)
+        ? catalogApprovalRequest(
+            catalog.toolName,
+            { id: `${route.resourceId}:${encodeURIComponent(route.toolName)}`, arguments: args },
+            marker,
+            route,
+          )
+        : null;
+    if (!expected || stableJsonValue(effect.request) !== stableJsonValue(expected)) continue;
+    const result = effect.result;
+    if (
+      effect.status !== "completed" ||
+      !result ||
+      typeof result !== "object" ||
+      Array.isArray(result) ||
+      (result.isError !== undefined && result.isError !== false) ||
+      result.error !== undefined
+    )
+      return null;
+    return { effectId: effect.id, result };
+  }
+  return null;
+}
+
 /** Retained native source identity only: this grants neither freshness nor send approval. */
 export async function readNativeReplyEmailProof(
   prisma: PrismaClient,
@@ -4893,41 +4938,7 @@ export async function readNativeReplyEmailProof(
       resourceRevision: route.resourceRevision,
       toolName: "get_email",
     };
-    const args = { id: input.replyToEmailId };
-    // ponytail: compare this run's native envelopes in O(n); index by route if long runs require it.
-    const effects = await tx.externalEffect.findMany({
-      where: { spaceId: actor.spaceId, runId: run.id },
-      orderBy: [{ createdAt: "desc" }, { id: "desc" }],
-    });
-    for (const effect of effects) {
-      if (effect.spaceId !== actor.spaceId || effect.runId !== run.id) throw new IsolationError();
-      const marker = "__rakazoCatalogTool";
-      const direct = boundDirectApprovalDetails(effect.request, marker);
-      const catalog = catalogApprovalDetails(effect.request, marker);
-      const expected = direct
-        ? boundDirectApprovalRequest(readRoute, args, marker)
-        : catalog && ["connectors_execute_tool", "mcp_execute_tool"].includes(catalog.toolName)
-          ? catalogApprovalRequest(
-              catalog.toolName,
-              { id: `${route.resourceId}:get_email`, arguments: args },
-              marker,
-              readRoute,
-            )
-          : null;
-      if (!expected || stableJsonValue(effect.request) !== stableJsonValue(expected)) continue;
-      const result = effect.result;
-      if (
-        effect.status !== "completed" ||
-        !result ||
-        typeof result !== "object" ||
-        Array.isArray(result) ||
-        (result.isError !== undefined && result.isError !== false) ||
-        result.error !== undefined
-      )
-        return null;
-      return { effectId: effect.id, result };
-    }
-    return null;
+    return nativeMcpReadProof(tx, actor, run.id, readRoute, { id: input.replyToEmailId });
   });
 }
 
@@ -5325,6 +5336,474 @@ export async function claimRecruitingCrmImport(
         runId: trusted.runId,
         status: native.from,
         request: { equals: effect.request as Prisma.InputJsonValue },
+      },
+      data: { status: "executing" },
+    });
+    return changed.count === 1;
+  });
+}
+
+type ReplyLink = Prisma.RecruitingReplyGetPayload<{
+  include: { effect: true; roleRevision: true };
+}>;
+
+function replyNativeCall(request: unknown, operation: string) {
+  const direct = boundDirectApprovalDetails(request, "__rakazoCatalogTool");
+  const catalog = catalogApprovalDetails(request, "__rakazoCatalogTool");
+  const saved = direct?.route ?? catalog?.route;
+  const args = direct?.args ?? catalog?.args.arguments;
+  if (
+    saved?.connectorId !== "mcp" ||
+    saved.toolName !== operation ||
+    !saved.resourceId.trim() ||
+    typeof saved.resourceRevision !== "number" ||
+    !Number.isSafeInteger(saved.resourceRevision) ||
+    saved.resourceRevision < 1 ||
+    !args ||
+    typeof args !== "object" ||
+    Array.isArray(args) ||
+    (catalog && !["connectors_execute_tool", "mcp_execute_tool"].includes(catalog.toolName))
+  )
+    throw new IsolationError();
+  const route = {
+    connectorId: "mcp" as const,
+    resourceId: saved.resourceId,
+    resourceRevision: saved.resourceRevision,
+    toolName: operation,
+  };
+  assertCrmImportRequest(request, route, args as Record<string, unknown>);
+  return { route, args: args as Record<string, unknown> };
+}
+
+async function replyLinkTarget(tx: Tx, actor: Actor, link: ReplyLink) {
+  const owner = await requireRun(tx, actor, link.effect.runId);
+  if (link.effect.spaceId !== actor.spaceId) throw new IsolationError();
+  const email = await tx.externalEffect.findFirst({
+    where: { id: link.emailReadEffectId, spaceId: actor.spaceId, runId: owner.id },
+  });
+  if (!email || email.spaceId !== actor.spaceId || email.runId !== owner.id)
+    throw new IsolationError();
+  const call = replyNativeCall(email.request, "get_email");
+  if (Object.keys(call.args).length !== 1 || typeof call.args.id !== "string")
+    throw new IsolationError();
+  const input = RecruitingReplyTargetSchema.parse({
+    roleId: link.roleRevision.roleId,
+    expectedRoleRevision: link.roleRevision.revision,
+    crmImportEffectId: link.crmImportEffectId,
+    mcpServerId: call.route.resourceId,
+    serverRevision: call.route.resourceRevision,
+    replyToEmailId: call.args.id,
+  });
+  const reply = replyNativeCall(link.effect.request, "reply_to_email");
+  if (
+    stableJsonValue(reply.route) !== stableJsonValue({ ...call.route, toolName: "reply_to_email" })
+  )
+    throw new IsolationError();
+  return input;
+}
+
+async function requireReplyAssignment(
+  tx: Tx,
+  actor: Actor,
+  run: { botId: string },
+  serverId: string,
+  revision: number,
+  tools: readonly string[],
+) {
+  const server = await tx.mcpServer.findFirst({
+    where: { id: serverId, spaceId: actor.spaceId, userId: actor.userId, enabled: true },
+  });
+  const assignment = await tx.botMcpServer.findFirst({
+    where: { serverId, botId: run.botId, spaceId: actor.spaceId, userId: actor.userId },
+  });
+  const allowed = assignment?.allowedTools;
+  if (
+    !server?.enabled ||
+    server.id !== serverId ||
+    server.spaceId !== actor.spaceId ||
+    server.userId !== actor.userId ||
+    server.revision !== revision ||
+    !assignment ||
+    (!assignment.allowAllTools &&
+      (!Array.isArray(allowed) || !tools.every((tool) => allowed.includes(tool))))
+  )
+    throw new IsolationError();
+}
+
+async function retainedReplyProof(
+  tx: Tx,
+  actor: Actor,
+  runId: string,
+  effectId: string,
+  route: { connectorId: string; resourceId: string; resourceRevision: number; toolName: string },
+  args: Record<string, unknown>,
+) {
+  const effect = await tx.externalEffect.findFirst({
+    where: { id: effectId, spaceId: actor.spaceId, runId, status: "completed" },
+  });
+  if (
+    !effect ||
+    effect.spaceId !== actor.spaceId ||
+    effect.runId !== runId ||
+    effect.status !== "completed"
+  )
+    throw new IsolationError();
+  await requireRun(tx, actor, effect.runId);
+  replyNativeCall(effect.request, route.toolName);
+  assertCrmImportRequest(effect.request, route, args);
+  const result = effect.result;
+  if (
+    !result ||
+    typeof result !== "object" ||
+    Array.isArray(result) ||
+    (result.isError !== undefined && result.isError !== false) ||
+    result.error !== undefined
+  )
+    throw new IsolationError();
+  return { effectId: effect.id, result };
+}
+
+async function replyContext(
+  tx: Tx,
+  actor: Actor,
+  trusted: ResearchLease & { approvedEffectId?: string },
+  raw: RecruitingReplyTarget | null,
+) {
+  const { run } = await lockLiveRecruitingRun(tx, actor, trusted.runId, false);
+  let input = raw;
+  let link: ReplyLink | null = null;
+  if (trusted.approvedEffectId) {
+    link = await tx.recruitingReply.findUnique({
+      where: { effectId: trusted.approvedEffectId },
+      include: { effect: true, roleRevision: true },
+    });
+    if (link) {
+      if (link.effect.runId !== run.id || link.effect.status !== "approved")
+        throw new IsolationError();
+      await approvalAnswerProof(tx, actor, link.effect);
+      input = await replyLinkTarget(tx, actor, link);
+    }
+  }
+  if (input === null) return null;
+  input = RecruitingReplyTargetSchema.parse(input);
+  const role = await requireRole(tx, actor, input.roleId, true);
+  if (!link) {
+    // ponytail: scan this import's reply links; add an anchor index if long-lived imports require it.
+    const links = await tx.recruitingReply.findMany({
+      where: { crmImportEffectId: input.crmImportEffectId },
+      include: { effect: true, roleRevision: true },
+    });
+    for (const candidate of links) {
+      const saved = await replyLinkTarget(tx, actor, candidate);
+      if (
+        saved.roleId === input.roleId &&
+        saved.mcpServerId === input.mcpServerId &&
+        saved.replyToEmailId === input.replyToEmailId
+      ) {
+        if (link) throw new IsolationError();
+        link = candidate;
+        input = saved;
+      }
+    }
+  }
+  const imported = await tx.recruitingCrmImport.findUnique({
+    where: { effectId: input.crmImportEffectId },
+    include: { effect: true, occurrence: true },
+  });
+  if (!imported || imported.occurrence.roleId !== input.roleId) throw new IsolationError();
+  const importInput = {
+    roleId: input.roleId,
+    candidateKey: imported.occurrence.candidateKey,
+    bindingEffectId: imported.bindingEffectId,
+    sourceEffectId: imported.pageId,
+    rowIndex: imported.rowIndex,
+  };
+  const bound = await crmBindingReceipt(tx, actor, input.roleId, imported.bindingEffectId);
+  const source = await crmImportSource(tx, actor, importInput);
+  await requireRun(tx, actor, imported.effect.runId);
+  if (
+    imported.effect.spaceId !== actor.spaceId ||
+    imported.effect.idempotencyKey !== crmImportKey(importInput)
+  )
+    throw new IsolationError();
+  const importArgs = crmImportArgs(bound.target, source);
+  const crmImportReceipt = parseRecruitingCrmImportReceipt(
+    imported.effect,
+    bound.target,
+    importArgs,
+  );
+  if (!crmImportReceipt) throw new IsolationError();
+  const effect = link?.effect;
+  const current =
+    !effect || (effect.runId === run.id && ["intended", "approved"].includes(effect.status));
+  const workspace = await approvalWorkspace(tx, actor, run.threadId, input, current, current);
+  if (current) {
+    requireResearchLease(run, trusted);
+    if (role.crmBindingEffectId !== imported.bindingEffectId) throw new RecruitingConflictError();
+    await requireReplyAssignment(
+      tx,
+      actor,
+      run,
+      bound.target.mcpServerId,
+      bound.target.serverRevision,
+      ["get_crm_candidate_outreach_context"],
+    );
+    await requireReplyAssignment(tx, actor, run, input.mcpServerId, input.serverRevision, [
+      "get_email",
+      "list_emails",
+      "reply_to_email",
+    ]);
+  }
+  const route = {
+    connectorId: "mcp" as const,
+    resourceId: input.mcpServerId,
+    resourceRevision: input.serverRevision,
+    toolName: "reply_to_email" as const,
+  };
+  const emailRoute = { ...route, toolName: "get_email" };
+  const crmRoute = {
+    connectorId: "mcp",
+    resourceId: bound.target.mcpServerId,
+    resourceRevision: bound.target.serverRevision,
+    toolName: "get_crm_candidate_outreach_context",
+  };
+  const crmArgs = {
+    p_org: crmImportReceipt.organization_id,
+    p_candidate: crmImportReceipt.candidate_id,
+  };
+  const emailProof = link
+    ? await retainedReplyProof(tx, actor, link.effect.runId, link.emailReadEffectId, emailRoute, {
+        id: input.replyToEmailId,
+      })
+    : await nativeMcpReadProof(tx, actor, run.id, emailRoute, { id: input.replyToEmailId });
+  const crmProof = link
+    ? await retainedReplyProof(
+        tx,
+        actor,
+        link.effect.runId,
+        link.crmContextReadEffectId,
+        crmRoute,
+        crmArgs,
+      )
+    : await nativeMcpReadProof(tx, actor, run.id, crmRoute, crmArgs);
+  if (!emailProof || !crmProof) throw new IsolationError();
+  return {
+    input,
+    target: bound.target,
+    crmImportReceipt,
+    role: workspace.role,
+    roleRevision: workspace.revision,
+    route,
+    emailProof,
+    crmProof,
+    effect,
+    link,
+    run,
+  };
+}
+
+export async function resolveRecruitingReply(
+  prisma: PrismaClient,
+  actor: Actor,
+  trusted: ResearchLease & { approvedEffectId?: string },
+  input: RecruitingReplyTarget | null,
+) {
+  return prisma.$transaction(async (tx) => {
+    const resolved = await replyContext(tx, actor, trusted, input);
+    if (!resolved) return null;
+    const { run: _run, link: _link, ...result } = resolved;
+    return result;
+  });
+}
+
+export type RecruitingReplyNative = {
+  effectKind: string;
+  effectRequest: unknown;
+  identity: {
+    providerWorkspaceId: string;
+    account: string;
+    threadId: string;
+    anchorId: string;
+    crmCandidateId: string;
+  };
+  emailReadEffectId: string;
+  crmContextReadEffectId: string;
+};
+
+function replyKey(identity: RecruitingReplyNative["identity"]) {
+  if (
+    !identity ||
+    [
+      identity.providerWorkspaceId,
+      identity.account,
+      identity.threadId,
+      identity.anchorId,
+      identity.crmCandidateId,
+    ].some((value) => typeof value !== "string" || !value.trim() || /[\r\n\0]/.test(value))
+  )
+    throw new IsolationError();
+  const at = identity.account.lastIndexOf("@");
+  const account =
+    at < 0
+      ? identity.account
+      : identity.account.slice(0, at + 1) + identity.account.slice(at + 1).toLowerCase();
+  return `recruiting-reply:${stableJsonValue([identity.providerWorkspaceId, account, identity.threadId, identity.anchorId])}`;
+}
+
+function assertReplyNative(
+  resolved: NonNullable<Awaited<ReturnType<typeof replyContext>>>,
+  native: RecruitingReplyNative,
+) {
+  if (
+    !native.effectKind.trim() ||
+    native.emailReadEffectId !== resolved.emailProof.effectId ||
+    native.crmContextReadEffectId !== resolved.crmProof.effectId ||
+    native.identity.crmCandidateId !== resolved.crmImportReceipt.candidate_id ||
+    native.identity.anchorId !== resolved.input.replyToEmailId
+  )
+    throw new IsolationError();
+  const call = replyNativeCall(native.effectRequest, "reply_to_email");
+  if (stableJsonValue(call.route) !== stableJsonValue(resolved.route)) throw new IsolationError();
+}
+
+/** One immutable native draft per provider inbound round; this does not authorize a send. */
+export async function admitRecruitingReply(
+  prisma: PrismaClient,
+  actor: Actor,
+  trusted: ResearchLease,
+  input: RecruitingReplyTarget,
+  native: RecruitingReplyNative,
+) {
+  const key = replyKey(native.identity);
+  return prisma.$transaction(async (tx) => {
+    const resolved = await replyContext(tx, actor, trusted, input);
+    if (!resolved) throw new IsolationError();
+    assertReplyNative(resolved, native);
+    // Reuse native per-key transaction locks so different roles cannot race the global effect key.
+    await tx.$queryRaw(
+      Prisma.sql`SELECT pg_advisory_xact_lock(hashtextextended(${key}, 0))::text AS "lock"`,
+    );
+    let effect = await tx.externalEffect.findUnique({ where: { idempotencyKey: key } });
+    const existed = !!effect;
+    if (!effect) {
+      if (resolved.effect) throw new IsolationError();
+      effect = await tx.externalEffect.create({
+        data: {
+          spaceId: actor.spaceId,
+          runId: trusted.runId,
+          kind: native.effectKind,
+          idempotencyKey: key,
+          status: "intended",
+          request: native.effectRequest as Prisma.InputJsonValue,
+        },
+      });
+      await tx.recruitingReply.create({
+        data: {
+          effectId: effect.id,
+          roleRevisionId: resolved.roleRevision.id,
+          crmImportEffectId: resolved.input.crmImportEffectId,
+          emailReadEffectId: resolved.emailProof.effectId,
+          crmContextReadEffectId: resolved.crmProof.effectId,
+        },
+      });
+    } else {
+      if (effect.spaceId !== actor.spaceId) throw new IsolationError();
+      await requireRun(tx, actor, effect.runId);
+      const link = await tx.recruitingReply.findUnique({
+        where: { effectId: effect.id },
+        include: { effect: true, roleRevision: true },
+      });
+      if (!link) throw new IsolationError();
+      await replyLinkTarget(tx, actor, link);
+    }
+    if (effect.status === "completed") return { status: "completed" as const, effect };
+    if (effect.status === "denied") return { status: "denied" as const, effect };
+    if (effect.status === "uncertain") return { status: "unknown" as const, effect };
+    const owner = await tx.run.findUniqueOrThrow({ where: { id: effect.runId } });
+    const live =
+      ["queued", "leased", "waiting_input", "waiting_takeover"].includes(owner.status) ||
+      (owner.status === "running" &&
+        owner.leaseExpiresAt &&
+        owner.leaseExpiresAt.getTime() > Date.now());
+    if (effect.runId !== trusted.runId && live) return { status: "busy" as const, effect };
+    if (effect.status === "executing") return { status: "unknown" as const, effect };
+    if (
+      effect.runId !== trusted.runId ||
+      ["cancelled", "failed", "completed"].includes(owner.status)
+    )
+      return { status: "stopped" as const, effect };
+    if (!["intended", "approved"].includes(effect.status)) throw new IsolationError();
+    if (
+      existed &&
+      (!resolved.link ||
+        resolved.link.effectId !== effect.id ||
+        resolved.link.roleRevisionId !== resolved.roleRevision.id ||
+        resolved.link.crmImportEffectId !== resolved.input.crmImportEffectId ||
+        resolved.link.emailReadEffectId !== native.emailReadEffectId ||
+        resolved.link.crmContextReadEffectId !== native.crmContextReadEffectId)
+    )
+      throw new RecruitingConflictError();
+    if (
+      effect.kind !== native.effectKind ||
+      stableJsonValue(effect.request) !== stableJsonValue(native.effectRequest)
+    )
+      throw new RecruitingConflictError();
+    return { status: "ready" as const, effect };
+  });
+}
+
+export async function claimRecruitingReply(
+  prisma: PrismaClient,
+  actor: Actor,
+  trusted: ResearchLease,
+  input: RecruitingReplyTarget,
+  native: RecruitingReplyNative & { effectId: string; from: "approved" },
+) {
+  const key = replyKey(native.identity);
+  return prisma.$transaction(async (tx) => {
+    const resolved = await replyContext(tx, actor, trusted, input);
+    if (!resolved?.effect || !resolved.link) throw new IsolationError();
+    requireResearchLease(resolved.run, trusted);
+    await tx.$queryRaw(
+      Prisma.sql`SELECT "id" FROM "external_effects" WHERE "id" = ${native.effectId} FOR UPDATE`,
+    );
+    const effect = await tx.externalEffect.findFirst({
+      where: { id: native.effectId, spaceId: actor.spaceId, runId: trusted.runId },
+    });
+    if (
+      !effect ||
+      effect.id !== resolved.effect.id ||
+      effect.runId !== trusted.runId ||
+      effect.spaceId !== actor.spaceId ||
+      effect.idempotencyKey !== key ||
+      effect.kind !== native.effectKind ||
+      stableJsonValue(effect.request) !== stableJsonValue(native.effectRequest)
+    )
+      throw new IsolationError();
+    if (native.from !== "approved") throw new IsolationError();
+    if (effect.status !== "approved") return false;
+    assertReplyNative(resolved, native);
+    if (
+      resolved.link.roleRevisionId !== resolved.roleRevision.id ||
+      resolved.link.crmImportEffectId !== resolved.input.crmImportEffectId ||
+      resolved.link.emailReadEffectId !== native.emailReadEffectId ||
+      resolved.link.crmContextReadEffectId !== native.crmContextReadEffectId
+    )
+      throw new IsolationError();
+    await approvalAnswerProof(tx, actor, effect);
+    const changed = await tx.externalEffect.updateMany({
+      where: {
+        id: effect.id,
+        spaceId: actor.spaceId,
+        runId: trusted.runId,
+        status: "approved",
+        request: { equals: effect.request as Prisma.InputJsonValue },
+        run: {
+          status: "running",
+          leaseOwner: trusted.leaseOwner,
+          leaseFence: trusted.leaseFence,
+          leaseExpiresAt: { gt: new Date() },
+        },
       },
       data: { status: "executing" },
     });

@@ -59,6 +59,7 @@ import {
   RecruitingCrmImportInputSchema,
   RecruitingCrmTargetToolInputSchema,
   RecruitingPreferenceFeedbackSchema,
+  RecruitingReplyInputSchema,
   RecruitingResearchToolInputSchema,
 } from "@rakazo/contracts";
 import type { ActionApprovalRule, ToolCallStreak } from "@rakazo/core";
@@ -124,8 +125,10 @@ import type {
 } from "@rakazo/db";
 import {
   admitRecruitingCrmImport,
+  admitRecruitingReply,
   appendEventInTransaction,
   claimRecruitingCrmImport,
+  claimRecruitingReply,
   claimRecruitingResearchAction,
   claimRecruitingResearchReadEffect,
   createSpaceForMember,
@@ -152,6 +155,7 @@ import {
   recordUsage,
   recruitingResearchSnapshot,
   resolveRecruitingCrmImport,
+  resolveRecruitingReply,
   retireModelCredential,
   SpaceLimitError,
   searchHistory,
@@ -357,6 +361,7 @@ import {
   executeRecruitingFeedback,
   RecruitingFeedbackValidationError,
 } from "./recruiting-feedback.js";
+import { prepareRecruitingReply, runRecruitingReplyPreflight } from "./recruiting-reply.js";
 import { mcpObject } from "./recruiting-research.js";
 import type { RecruitingResearchCallAdmission } from "./recruiting-tools.js";
 import {
@@ -4361,6 +4366,35 @@ export function createRunExecutor(deps: ExecutorDeps) {
           let crmImportSelection:
             | NonNullable<Awaited<ReturnType<typeof resolveRecruitingCrmImport>>>
             | undefined;
+          let replySelection:
+            | NonNullable<Awaited<ReturnType<typeof resolveRecruitingReply>>>
+            | undefined;
+          const replySelectionData = () => {
+            if (!replySelection) throw new IsolationError();
+            return {
+              target: replySelection.target,
+              receipt: replySelection.crmImportReceipt,
+              emailProof: replySelection.emailProof.result,
+              crmProof: replySelection.crmProof.result,
+            };
+          };
+          const replyContent = () => {
+            const saved = readInstantlyReplyRequest(args);
+            if (!saved) throw new IsolationError();
+            return {
+              subject: saved.subject,
+              body: {
+                ...(saved.body_text === undefined ? {} : { text: saved.body_text }),
+                ...(saved.body_html === undefined ? {} : { html: saved.body_html }),
+              },
+              ...(saved.cc_address_email_list === undefined
+                ? {}
+                : { cc: saved.cc_address_email_list }),
+              ...(saved.bcc_address_email_list === undefined
+                ? {}
+                : { bcc: saved.bcc_address_email_list }),
+            };
+          };
           let researchSelection:
             | Awaited<ReturnType<typeof resolveRecruitingResearchTool>>
             | undefined;
@@ -4371,6 +4405,80 @@ export function createRunExecutor(deps: ExecutorDeps) {
             executionId,
             route: connectorTools.get(name)?.route,
           };
+          if (name === "recruiting_reply") {
+            const parsed = RecruitingReplyInputSchema.safeParse(args);
+            if (!parsed.success) return { error: sanitizeConnectorError(parsed.error, runSecrets) };
+            try {
+              const { subject, body, cc, bcc, ...target } = parsed.data;
+              const selected = await resolveRecruitingReply(
+                deps.prisma,
+                researchActor.actor,
+                crmContext,
+                target,
+              );
+              if (!selected) throw new IsolationError();
+              replySelection = selected;
+              if (
+                selected.effect &&
+                ["completed", "denied", "uncertain"].includes(selected.effect.status)
+              ) {
+                const gate = resolveDuplicateEffectGate(selected.effect, selected.effect.kind);
+                if (gate.action !== "return") throw new IsolationError();
+                return gate.result;
+              }
+              let content = {
+                subject,
+                body,
+                ...(cc === undefined ? {} : { cc }),
+                ...(bcc === undefined ? {} : { bcc }),
+              };
+              if (selected.effect) {
+                const bound = boundDirectApprovalDetails(
+                  selected.effect.request,
+                  CATALOG_APPROVAL_TOOL,
+                );
+                const catalog = catalogApprovalDetails(
+                  selected.effect.request,
+                  CATALOG_APPROVAL_TOOL,
+                );
+                args = bound?.args ?? (catalog && catalogApprovalInnerArgs(catalog)) ?? {};
+                content = replyContent();
+              }
+              const prepared = prepareRecruitingReply(replySelectionData(), content);
+              if (prepared.status !== "ready") return { ...prepared, dispatched: false };
+              args = prepared.request;
+              if (selected.effect) {
+                name = selected.effect.kind;
+                connectorCall = { tool: name, args, route: selected.route, executionId };
+              } else {
+                if (!deps.connector?.resolveCall) throw new IsolationError();
+                const resolved = await deps.connector.resolveCall(
+                  {
+                    tool: catalogExecuteToolName("mcp"),
+                    route: { connectorId: "mcp", toolName: CATALOG_EXECUTE },
+                    args: { id: catalogIdForRoute(selected.route), arguments: args },
+                    executionId,
+                  },
+                  context,
+                );
+                if (
+                  !resolved?.call.route?.resourceId ||
+                  !approvalRoutesMatch(
+                    { ...resolved.call.route, resourceId: resolved.call.route.resourceId },
+                    selected.route,
+                  ) ||
+                  BUILTIN_AGENT_TOOL_NAMES.has(resolved.tool.name)
+                )
+                  throw new IsolationError();
+                name = resolved.tool.name;
+                args = resolved.call.args;
+                connectorCall = resolved.call;
+                resolvedTool = resolved.tool;
+              }
+            } catch (error) {
+              return { error: sanitizeConnectorError(error, runSecrets), dispatched: false };
+            }
+          }
           if (name === "recruiting_crm_import") {
             const parsed = RecruitingCrmImportInputSchema.safeParse(args);
             if (!parsed.success) return { error: sanitizeConnectorError(parsed.error, runSecrets) };
@@ -4596,9 +4704,60 @@ export function createRunExecutor(deps: ExecutorDeps) {
             (replyEndpoint.pathname === "/mcp" || replyEndpoint.pathname.startsWith("/mcp/"))
               ? possibleReplyRoute
               : undefined;
+          if (replyRoute && !replySelection && crmContext.approvedEffectId) {
+            try {
+              replySelection =
+                (await resolveRecruitingReply(
+                  deps.prisma,
+                  researchActor.actor,
+                  crmContext,
+                  null,
+                )) ?? undefined;
+            } catch (error) {
+              return { error: sanitizeConnectorError(error, runSecrets), dispatched: false };
+            }
+          }
+          if (replySelection && disabledBuiltinTools.has("recruiting_reply"))
+            return { error: "This tool is disabled for this bot." };
+          if (replySelection && !replyRoute)
+            return {
+              error: "This reply connection does not support the required provider contract.",
+              dispatched: false,
+            };
+          const unlinkedReplyError = async () => {
+            if (!replyRoute || replySelection) return;
+            const current = await deps.prisma.thread.findUniqueOrThrow({
+              where: { id: thread.id },
+              select: { activeRecruitingRoleId: true },
+            });
+            if (current.activeRecruitingRoleId)
+              return {
+                error:
+                  "Use recruiting_reply to bind this reply to the saved candidate and current role.",
+                dispatched: false,
+              };
+          };
+          const unlinked = await unlinkedReplyError();
+          if (unlinked) return unlinked;
+          const preparedReply = () => {
+            const prepared = prepareRecruitingReply(replySelectionData(), replyContent());
+            if (
+              prepared.status !== "ready" ||
+              stableJsonValue(prepared.request) !== stableJsonValue(args)
+            )
+              throw new Error("The saved candidate reply does not match its source evidence.");
+            return prepared;
+          };
           let replyEvidence: { effectId: string; anchor: InstantlyEmail } | undefined;
           const readReplyEvidence = async () => {
             if (!replyRoute) return;
+            if (replySelection) {
+              preparedReply();
+              const anchor = readInstantlyEmail(mcpObject(replySelection.emailProof.result));
+              if (!anchor) throw new IsolationError();
+              replyEvidence = { effectId: replySelection.emailProof.effectId, anchor };
+              return;
+            }
             const request = readInstantlyReplyRequest(args);
             if (
               !request ||
@@ -4641,6 +4800,66 @@ export function createRunExecutor(deps: ExecutorDeps) {
             error: sanitizeConnectorError(error, runSecrets),
             dispatched: false,
           });
+          let replyPreflight: Awaited<ReturnType<typeof runRecruitingReplyPreflight>> | undefined;
+          const replyReadEffectIds: string[] = [];
+          const preflightReply = async () => {
+            if (!replySelection) return;
+            if (!deps.connector) throw new IsolationError();
+            const check =
+              replyPreflight ??
+              (await runRecruitingReplyPreflight({
+                connector: deps.connector,
+                context,
+                crmRoute: {
+                  connectorId: "mcp",
+                  resourceId: replySelection.target.mcpServerId,
+                  resourceRevision: replySelection.target.serverRevision,
+                  toolName: "get_crm_candidate_outreach_context",
+                },
+                mailRoute: replySelection.route,
+                selection: replySelectionData(),
+                content: replyContent(),
+              }));
+            for (const [index, read] of (replyPreflight ? [] : check.reads).entries()) {
+              const request = boundDirectApprovalRequest(
+                read.route,
+                { ...read.args },
+                CATALOG_APPROVAL_TOOL,
+              );
+              const key = toolEffectIdempotencyKey(
+                runId,
+                `reply-preflight:${attempt.id}:${executionId}`,
+                { request },
+                index,
+              );
+              // Fresh reads are actual new observations; mutation replay must not substitute an old result.
+              const recorded = await deps.prisma.externalEffect.create({
+                data: {
+                  spaceId: run.spaceId,
+                  runId,
+                  kind: read.route.toolName,
+                  idempotencyKey: key,
+                  status: "completed",
+                  request: request as Prisma.InputJsonValue,
+                  result: read.result as Prisma.InputJsonValue,
+                },
+              });
+              consumedEffectIds.add(recorded.id);
+              replyReadEffectIds.push(recorded.id);
+            }
+            replyPreflight = check;
+            // Current connector evidence never substitutes for the remaining playbook sources.
+            if (check.status !== "clear" || check.gaps.length)
+              return {
+                status: check.status === "blocked" ? "blocked" : "incomplete",
+                scope: check.scope,
+                reasons: check.reasons,
+                gaps: check.gaps,
+                readEffectIds: replyReadEffectIds,
+                dispatched: false,
+                automaticRetry: false,
+              };
+          };
 
           const nextBound = boundDirectApprovalDetails(nextApprovedRequest, CATALOG_APPROVAL_TOOL);
           const nextCatalog = catalogApprovalDetails(nextApprovedRequest, CATALOG_APPROVAL_TOOL);
@@ -4724,6 +4943,8 @@ export function createRunExecutor(deps: ExecutorDeps) {
           if (nextApprovedTool) {
             try {
               await readReplyEvidence();
+              const preflight = await preflightReply();
+              if (preflight) return preflight;
             } catch (error) {
               return replyProofError(error);
             }
@@ -4742,6 +4963,41 @@ export function createRunExecutor(deps: ExecutorDeps) {
             effectRequest = args;
           }
           let crmImportAdmission: Awaited<ReturnType<typeof admitRecruitingCrmImport>> | undefined;
+          let replyAdmission: Awaited<ReturnType<typeof admitRecruitingReply>> | undefined;
+          if (replySelection) {
+            try {
+              const prepared = preparedReply();
+              replyAdmission = await admitRecruitingReply(
+                deps.prisma,
+                researchActor.actor,
+                crmContext,
+                replySelection.input,
+                {
+                  effectKind: replySelection.effect?.kind ?? name,
+                  effectRequest: replySelection.effect?.request ?? effectRequest,
+                  identity: prepared.identity,
+                  emailReadEffectId: replySelection.emailProof.effectId,
+                  crmContextReadEffectId: replySelection.crmProof.effectId,
+                },
+              );
+              if (replyAdmission.status !== "ready") {
+                if (replyAdmission.status === "unknown")
+                  return settleUncertainEffect(deps.prisma, replyAdmission.effect.id, name);
+                if (["completed", "denied"].includes(replyAdmission.status)) {
+                  const gate = resolveDuplicateEffectGate(replyAdmission.effect, name);
+                  if (gate.action !== "return") throw new IsolationError();
+                  return gate.result;
+                }
+                return {
+                  status: replyAdmission.status,
+                  effectId: replyAdmission.effect.id,
+                  automaticRetry: false,
+                };
+              }
+            } catch (error) {
+              return replyProofError(error);
+            }
+          }
           if (
             !crmImportSelection &&
             crmContext.approvedEffectId &&
@@ -5056,13 +5312,15 @@ export function createRunExecutor(deps: ExecutorDeps) {
               ? 0
               : nextMutatingEffectOccurrence(replayEffectToolName, args);
           const effectKey =
+            replyAdmission?.effect.idempotencyKey ??
             crmImportAdmission?.effect.idempotencyKey ??
             researchMutation?.effect?.idempotencyKey ??
             (usesApprovalKey && occurrence === 0
               ? approvalEffectKey(runId, replayEffectToolName, args)
               : toolEffectIdempotencyKey(runId, replayEffectToolName, args, occurrence));
           // Connector read-only hints must not bypass approval, review, or replay decisions.
-          const domainEffect = crmImportAdmission?.effect ?? researchMutation?.effect;
+          const domainEffect =
+            replyAdmission?.effect ?? crmImportAdmission?.effect ?? researchMutation?.effect;
           const applied = domainEffect
             ? { duplicate: true, effect: domainEffect }
             : READ_ONLY_AGENT_TOOLS.has(name)
@@ -5340,7 +5598,11 @@ export function createRunExecutor(deps: ExecutorDeps) {
             from: "approved" | "intended",
           ): Promise<unknown | undefined> => {
             try {
+              const unlinked = await unlinkedReplyError();
+              if (unlinked) return unlinked;
               if (!replyEvidence) await readReplyEvidence();
+              const preflight = await preflightReply();
+              if (preflight) return preflight;
             } catch (error) {
               return replyProofError(error);
             }
@@ -5348,39 +5610,59 @@ export function createRunExecutor(deps: ExecutorDeps) {
             let claimed: boolean;
             try {
               claimed =
-                crmImportAdmission && crmImportSelection
-                  ? await claimRecruitingCrmImport(
+                replyAdmission && replySelection
+                  ? await claimRecruitingReply(
                       deps.prisma,
                       researchActor.actor,
                       crmContext,
-                      crmImportSelection.input,
+                      replySelection.input,
                       {
                         effectId: applied!.effect.id,
                         effectKind: applied!.effect.kind,
                         effectRequest: applied!.effect.request,
-                        from,
+                        from: "approved",
+                        identity: preparedReply().identity,
+                        emailReadEffectId: replySelection.emailProof.effectId,
+                        crmContextReadEffectId: replySelection.crmProof.effectId,
                       },
                     )
-                  : researchMutation
-                    ? await claimRecruitingResearchAction(deps.prisma, researchActor.actor, {
-                        runId,
-                        leaseOwner: workerId,
-                        leaseFence: fence,
-                        actionId: researchMutation.action.id,
-                        effectId: applied!.effect.id,
-                        from,
-                      })
-                    : researchAdmission?.kind === "read"
-                      ? await claimRecruitingResearchReadEffect(deps.prisma, researchActor.actor, {
+                  : crmImportAdmission && crmImportSelection
+                    ? await claimRecruitingCrmImport(
+                        deps.prisma,
+                        researchActor.actor,
+                        crmContext,
+                        crmImportSelection.input,
+                        {
+                          effectId: applied!.effect.id,
+                          effectKind: applied!.effect.kind,
+                          effectRequest: applied!.effect.request,
+                          from,
+                        },
+                      )
+                    : researchMutation
+                      ? await claimRecruitingResearchAction(deps.prisma, researchActor.actor, {
                           runId,
                           leaseOwner: workerId,
                           leaseFence: fence,
+                          actionId: researchMutation.action.id,
                           effectId: applied!.effect.id,
                           from,
                         })
-                      : await claim(deps.prisma, applied!.effect.id);
+                      : researchAdmission?.kind === "read"
+                        ? await claimRecruitingResearchReadEffect(
+                            deps.prisma,
+                            researchActor.actor,
+                            {
+                              runId,
+                              leaseOwner: workerId,
+                              leaseFence: fence,
+                              effectId: applied!.effect.id,
+                              from,
+                            },
+                          )
+                        : await claim(deps.prisma, applied!.effect.id);
             } catch (error) {
-              if (crmImportAdmission) return roleError(error);
+              if (crmImportAdmission || replyAdmission) return roleError(error);
               throw error;
             }
             if (claimed) {
@@ -5446,6 +5728,13 @@ export function createRunExecutor(deps: ExecutorDeps) {
             }
             let files: MessageBlock[] = [];
             let approvalArgs = args;
+            if (replySelection)
+              approvalArgs = {
+                ...args,
+                role: replySelection.role.title,
+                candidateId: replySelection.crmImportReceipt.candidate_id,
+                checksRemaining: ["Legacy hold/pass records", "Gmail history"],
+              };
             try {
               await readReplyEvidence();
             } catch (error) {
@@ -5505,7 +5794,9 @@ export function createRunExecutor(deps: ExecutorDeps) {
               blocks: [
                 ...files,
                 buildApprovalAskBlock(applied!.effect.id, name, approvalArgs, runSecrets, {
-                  reviewReason,
+                  reviewReason: replySelection
+                    ? "Approve this draft content only. Sending still requires complete current pre-send checks."
+                    : reviewReason,
                   oneTimeOnly: requiresExplicitApproval,
                 }),
               ],
