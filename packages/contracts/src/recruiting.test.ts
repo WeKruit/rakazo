@@ -108,6 +108,11 @@ describe("recruiting contracts", () => {
       ...input,
       cursor: null,
     });
+    const { mcpServerId: _, ...withoutInternalId } = input;
+    expect(contracts.RecruitingResearchToolInputSchema.parse(withoutInternalId)).toEqual({
+      ...withoutInternalId,
+      cursor: null,
+    });
     for (const cursor of [null, "  opaque+/=\r\n "]) {
       expect(contracts.RecruitingResearchToolInputSchema.parse({ ...input, cursor })).toEqual({
         ...input,

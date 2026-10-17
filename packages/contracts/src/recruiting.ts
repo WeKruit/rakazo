@@ -864,7 +864,7 @@ export const RecruitingResearchToolInputSchema = z.discriminatedUnion("operation
   z.strictObject({
     operation: z.literal("save_results"),
     expectedRoleRevision: Revision,
-    mcpServerId: RecruitingId,
+    mcpServerId: RecruitingId.optional(),
     providerTaskId: RecruitingId,
     cursor: z.string().min(1).nullable().default(null),
   }),

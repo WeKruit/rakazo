@@ -4763,7 +4763,7 @@ async function nativeCandidatePage(
       throw error;
     }
     if (
-      call.route.resourceId !== input.mcpServerId ||
+      (input.mcpServerId !== undefined && call.route.resourceId !== input.mcpServerId) ||
       call.args.task_id !== input.providerTaskId ||
       (call.args.cursor ?? null) !== input.cursor
     )

@@ -2227,6 +2227,27 @@ describe("native candidate source provenance", () => {
 });
 
 describe("native candidate results without domain actions", () => {
+  it("derives the connection from the completed native receipt when saving without an internal ID", async () => {
+    const f = nativeCandidateFixture();
+    const { mcpServerId: _, ...input } = f.input;
+    Object.assign(f.saveEffect, { request: input });
+    const result = await recruiting.saveNativeRecruitingCandidatePage(
+      f.prisma,
+      actor,
+      { ...f.trusted, effectRequest: input },
+      input,
+      { sourceEffectId: "read", rows: [f.row], outputArtifact: f.file },
+    );
+    expect(result).toMatchObject({ status: "saved", sourceEffectId: "read" });
+    expect(appendEventInTransaction).toHaveBeenCalledWith(
+      f.tx,
+      expect.objectContaining({
+        type: "recruiting.candidates.saved",
+        payload: expect.objectContaining({ mcpServerId: "server" }),
+      }),
+    );
+  });
+
   it("selects only an owned completed get_rows page on the exact native task and cursor", async () => {
     const f = nativeCandidateFixture();
     const result = await recruiting.readNativeRecruitingCandidatePage(
