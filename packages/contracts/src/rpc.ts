@@ -117,6 +117,7 @@ import {
   ListRecruitingCandidatesOutput,
   RecruitingAssessmentAskTargetSchema,
   RecruitingAssessmentSchema,
+  RecruitingCandidateReportSchema,
   RecruitingId,
   RecruitingResearchActionSchema,
   RecruitingResearchSavedObservationSchema,
@@ -554,11 +555,15 @@ export const appContract = {
   },
   recruiting: {
     readSource: oc.input(ReadRecruitingSourceInput).output(
-      z.strictObject({
-        text: z.string(),
-        start: z.number().int().nonnegative(),
-        end: z.number().int().positive(),
-      }),
+      z.discriminatedUnion("kind", [
+        z.strictObject({
+          kind: z.literal("text"),
+          text: z.string(),
+          start: z.number().int().nonnegative(),
+          end: z.number().int().positive(),
+        }),
+        z.strictObject({ kind: z.literal("report"), report: RecruitingCandidateReportSchema }),
+      ]),
     ),
     listCandidates: oc.input(ListRecruitingCandidatesInput).output(ListRecruitingCandidatesOutput),
     listCandidateSources: oc

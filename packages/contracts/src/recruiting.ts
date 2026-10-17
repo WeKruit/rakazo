@@ -1085,9 +1085,25 @@ export const RecruitingCandidatesToolInputSchema = z.discriminatedUnion("operati
 ]);
 export type RecruitingCandidatesToolInput = z.infer<typeof RecruitingCandidatesToolInputSchema>;
 
+/** Recruiter-readable projection of one exact retained provider row, never qualification. */
+export const RecruitingCandidateReportSchema = z.strictObject({
+  fields: z.array(
+    z.strictObject({
+      label: Text,
+      value: z.string().nullable(),
+      evidence: z.string().optional(),
+      reasoning: z.string().optional(),
+      sourceUrls: z.array(z.httpUrl()),
+    }),
+  ),
+  sourceUrls: z.array(z.httpUrl()),
+});
+export type RecruitingCandidateReport = z.infer<typeof RecruitingCandidateReportSchema>;
+
 export const RecruitingCandidateSourceSchema = z
   .strictObject({
     crmImports: z.array(RecruitingCrmCandidateSyncSchema),
+    report: RecruitingCandidateReportSchema.optional(),
     taskId: RecruitingId.nullable(),
     actionId: RecruitingId.nullable(),
     roleRevisionId: RecruitingId,

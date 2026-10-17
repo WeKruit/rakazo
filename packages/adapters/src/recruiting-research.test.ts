@@ -5,6 +5,7 @@ import type { LoadedRecruitingRunContext } from "./recruiting-context.js";
 import {
   buildRecruitingResearchRequest,
   classifyRecruitingResearchResult,
+  projectRecruitingCandidateReport,
   readRecruitingResearchRequest,
 } from "./recruiting-research.js";
 
@@ -581,4 +582,102 @@ it("uses only the native redacted context projection when freezing a confirmed b
   const built = buildRecruitingResearchRequest({ ...request, context: updated });
   expect(built.bytes.toString()).not.toContain("PRIVATE-REDACTION-CANARY");
   expect(built.manifest.contextText).toBe(context.text);
+});
+
+describe("retained candidate report projection", () => {
+  it("keeps supplied values, unknowns and report notes while resolving only real source links", () => {
+    expect(
+      projectRecruitingCandidateReport({
+        name: { value: "Synthetic Person", source_id: "profile" },
+        years_swe_approx: { value: 6 },
+        geometry: {
+          value: null,
+          absent: true,
+          evidence: "No implementation supplied",
+          reasoning: "Needs a code sample",
+          source_id: "missing",
+        },
+        interests: { value: ["systems", true, 2, null] },
+        sources: {
+          value: [
+            "https://example.test/project",
+            "javascript:alert(1)",
+            "https://user:pass@example.test/private",
+          ],
+        },
+        _sources: {
+          profile: "https://example.test/profile",
+          missing: "source-without-a-link",
+          unused: "https://example.test/unused",
+        },
+        _internal: "hidden",
+        task_id: { value: "private-task" },
+        artifactId: "private-artifact",
+        shard_ids: ["private-shard"],
+        request: { value: "private-request" },
+        toolName: "private-tool",
+        tool_name: "private-tool",
+        connectorId: "private-connector",
+        resourceId: "private-resource",
+        resourceRevision: 8,
+        catalogGroup: "private-catalog",
+        clientNonce: "private-nonce",
+        arbitrary: { nested: { value: "not report text" } },
+      }),
+    ).toEqual({
+      fields: [
+        { label: "Name", value: "Synthetic Person", sourceUrls: ["https://example.test/profile"] },
+        { label: "Years swe approx", value: "6", sourceUrls: [] },
+        {
+          label: "Geometry",
+          value: null,
+          evidence: "No implementation supplied",
+          reasoning: "Needs a code sample",
+          sourceUrls: [],
+        },
+        { label: "Interests", value: "systems\ntrue\n2\nnull", sourceUrls: [] },
+        {
+          label: "Sources",
+          value:
+            "https://example.test/project\njavascript:alert(1)\nhttps://user:pass@example.test/private",
+          sourceUrls: ["https://example.test/project"],
+        },
+      ],
+      sourceUrls: ["https://example.test/profile", "https://example.test/project"],
+    });
+  });
+  it("preserves a supplied absence-only flag and its report explanation", () => {
+    expect(
+      projectRecruitingCandidateReport({
+        robotics_multimodal: {
+          absent: true,
+          reasoning: "No supporting robotics evidence was supplied",
+        },
+        code_sample: { absent: false, evidence: "A repository link was supplied" },
+        arbitrary: { nested: true, reasoning: "Not a scalar report cell" },
+      }),
+    ).toEqual({
+      fields: [
+        {
+          label: "Robotics multimodal absent",
+          value: "true",
+          reasoning: "No supporting robotics evidence was supplied",
+          sourceUrls: [],
+        },
+        {
+          label: "Code sample absent",
+          value: "false",
+          evidence: "A repository link was supplied",
+          sourceUrls: [],
+        },
+      ],
+      sourceUrls: [],
+    });
+  });
+  it.each([null, "malformed", [], { arbitrary: { nested: true } }])(
+    "does not invent an empty report for %j",
+    (row) => {
+      expect(() => projectRecruitingCandidateReport(row)).toThrow();
+    },
+  );
 });

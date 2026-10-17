@@ -12,6 +12,7 @@ import type {
   RecruitingArtifactRef,
   RecruitingAssessmentSourceRef,
   RecruitingCandidate,
+  RecruitingCandidateReport,
   RecruitingCriterionExpression,
   RecruitingCrmCandidateSync,
   RecruitingCrmTarget,
@@ -75,6 +76,7 @@ type Props = {
 type SourceReadTarget =
   | Omit<Extract<ReadRecruitingSourceInput, { kind: "role" }>, "sourceRefId">
   | Omit<Extract<ReadRecruitingSourceInput, { kind: "assessment" }>, "sourceRefId">;
+type SourceContent = Awaited<ReturnType<typeof rpc.recruiting.readSource>>;
 type Snapshot = {
   workspace: Awaited<ReturnType<typeof rpc.recruiting.getWorkspace>>;
   assessments: Awaited<ReturnType<typeof rpc.recruiting.listAssessments>>;
@@ -257,6 +259,54 @@ function CrmDetails({
   );
 }
 
+function CandidateReport({ report }: { report: RecruitingCandidateReport }) {
+  const fieldUrls = new Set(report.fields.flatMap((field) => field.sourceUrls));
+  return (
+    <div className="space-y-3 break-words font-sans text-base leading-relaxed">
+      <dl className="space-y-3">
+        {report.fields.map((field, index) => (
+          <div key={index}>
+            <dt className="font-medium">{field.label}</dt>
+            <dd className="space-y-1">
+              <p className="whitespace-pre-wrap">{field.value ?? <Trans>Unknown</Trans>}</p>
+              {field.evidence ? (
+                <p className="whitespace-pre-wrap text-muted-foreground">{field.evidence}</p>
+              ) : null}
+              {field.reasoning ? (
+                <p className="whitespace-pre-wrap text-muted-foreground">{field.reasoning}</p>
+              ) : null}
+              {field.sourceUrls.map((url) => (
+                <a
+                  key={url}
+                  className="block break-all underline"
+                  href={url}
+                  target="_blank"
+                  rel="noreferrer"
+                >
+                  {new URL(url).hostname}
+                </a>
+              ))}
+            </dd>
+          </div>
+        ))}
+      </dl>
+      {report.sourceUrls
+        .filter((url) => !fieldUrls.has(url))
+        .map((url) => (
+          <a
+            key={url}
+            className="block break-all underline"
+            href={url}
+            target="_blank"
+            rel="noreferrer"
+          >
+            {new URL(url).hostname}
+          </a>
+        ))}
+    </div>
+  );
+}
+
 function CandidateSources({
   candidate,
   research,
@@ -357,7 +407,7 @@ function CandidateSources({
           <Trans>No saved discovery sources</Trans>
         </p>
       ) : null}
-      {page?.items.map((source) => {
+      {page?.items.map((source, index) => {
         const { crmImports, ...discovery } = source;
         const task = research.tasks.find((item) => item.id === source.taskId);
         const action = research.actions.find(
@@ -368,13 +418,13 @@ function CandidateSources({
             key={`${source.artifactRef.artifactId}:${source.rowIndex}:${source.effectId}`}
             className="space-y-2 border-s border-border ps-3"
           >
-            <p className="text-xs text-muted-foreground">
-              {showDiagnostics ? (
-                <>
-                  provider_report{action ? ` · ${action.kind}` : ""} · {source.observedAt}
-                </>
-              ) : (
-                <>
+            {showDiagnostics ? (
+              <p className="text-xs text-muted-foreground">
+                provider_report{action ? ` · ${action.kind}` : ""} · {source.observedAt}
+              </p>
+            ) : (
+              <details open={index === 0} className="space-y-2">
+                <summary className="cursor-pointer text-xs text-muted-foreground">
                   <Trans>Research findings</Trans>
                   {" · "}
                   <time dateTime={source.observedAt}>
@@ -383,9 +433,16 @@ function CandidateSources({
                       timeZoneName: "short",
                     })}
                   </time>
-                </>
-              )}
-            </p>
+                </summary>
+                {source.report ? (
+                  <CandidateReport report={source.report} />
+                ) : (
+                  <p className="text-muted-foreground">
+                    <Trans>Source unavailable</Trans>
+                  </p>
+                )}
+              </details>
+            )}
             {showDiagnostics ? (
               <details>
                 <summary className="cursor-pointer text-xs text-muted-foreground">
@@ -883,7 +940,7 @@ function ArtifactReference({
   const [state, setState] = useState<{
     key: string;
     artifact?: Artifact;
-    excerpt?: { text: string; start: number; end: number };
+    excerpt?: SourceContent;
     unavailable?: boolean;
     failed?: boolean;
   } | null>(null);
@@ -918,7 +975,7 @@ function ArtifactReference({
         const bytes = decodeArtifactBase64(value.contentBase64);
         if (bytes.byteLength !== value.size) throw new Error("Source Artifact size changed");
         await verifyRecruitingArtifactBytes(bytes, reference.sha256);
-        let excerpt: { text: string; start: number; end: number } | undefined;
+        let excerpt: Extract<SourceContent, { kind: "text" }> | undefined;
         let unavailable = false;
         if (source?.readState === "read" && source.quote) {
           try {
@@ -945,7 +1002,7 @@ function ArtifactReference({
             const start = selection?.start ?? text.indexOf(source.quote);
             const end = selection?.end ?? start + source.quote.length;
             validateRecruitingTextSelection(text, start, end, source.quote);
-            excerpt = { text, start, end };
+            excerpt = { kind: "text", text, start, end };
           } catch {
             unavailable = true;
           }
@@ -996,7 +1053,9 @@ function ArtifactReference({
               <Trans>Loading…</Trans>
             </p>
           )}
-          {current?.excerpt ? (
+          {current?.excerpt?.kind === "report" ? (
+            <CandidateReport report={current.excerpt.report} />
+          ) : current?.excerpt?.kind === "text" ? (
             <div className="space-y-1">
               <p className="text-xs text-muted-foreground">
                 <Trans>Source text</Trans>

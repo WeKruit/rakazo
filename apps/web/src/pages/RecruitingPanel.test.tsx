@@ -1504,7 +1504,12 @@ it("keeps recruiting diagnostics out of product views while opening verified evi
   api.list.mockImplementation(async ({ scope }: { scope: string }) =>
     scope === "bot" ? [botMemory] : [],
   );
-  api.readSource.mockResolvedValue({ text: "Before\nBuilt a compiler\nAfter", start: 7, end: 23 });
+  api.readSource.mockResolvedValue({
+    kind: "text",
+    text: "Before\nBuilt a compiler\nAfter",
+    start: 7,
+    end: 23,
+  });
   api.listResearch.mockResolvedValue({
     tasks: [
       {
@@ -1589,7 +1594,12 @@ it("reads candidate evidence through its saved assessment version without fetchi
   api.listAssessments.mockResolvedValue([
     { ...assessment, assessment: { ...assessment.assessment, sourceRefs: [material.source] } },
   ]);
-  api.readSource.mockResolvedValue({ text: "Before\nBuilt a compiler\nAfter", start: 7, end: 23 });
+  api.readSource.mockResolvedValue({
+    kind: "text",
+    text: "Before\nBuilt a compiler\nAfter",
+    start: 7,
+    end: 23,
+  });
   const view = await mounted("thread-1", undefined, false);
   await view.click("Evidence");
   await view.click("Unnamed candidate");
@@ -1659,6 +1669,10 @@ it("shows unnamed candidates and real profile links without exposing their stora
   await view.click("Unnamed candidate");
   expect(view.container.querySelector(`a[href="${candidate.linkedinUrl}"]`)).not.toBeNull();
   expect(view.container.textContent).toContain("Research findings");
+  expect(view.container.querySelector('[role="dialog"]')?.textContent).toContain(
+    "Source unavailable",
+  );
+  expect(view.container.querySelector('[role="dialog"] pre')).toBeNull();
   for (const key of [
     candidate.candidateKey,
     "internal-source-effect",
@@ -1674,6 +1688,381 @@ it("shows unnamed candidates and real profile links without exposing their stora
   );
   expect(api.getById).not.toHaveBeenCalled();
 });
+
+it("shows retained research fields and gaps for an unassessed candidate without qualification badges", async () => {
+  const candidate = { ...candidateFixture("internal-person", false), name: "Synthetic Engineer" };
+  api.listCandidates.mockResolvedValue(candidatePage([candidate]));
+  api.listCandidateSources.mockResolvedValue({
+    roleId: role.id,
+    candidateKey: candidate.candidateKey,
+    total: 1,
+    nextCursor: null,
+    items: [
+      {
+        taskId: "internal-task",
+        actionId: "internal-action",
+        roleRevisionId: revision.id,
+        effectId: "internal-effect",
+        rowIndex: 4,
+        artifactRef: { artifactId: "internal-artifact", sha256: "a".repeat(64) },
+        requestCursor: null,
+        outputId: "internal-output",
+        observedAt: "2026-01-01T00:00:00Z",
+        crmImports: [crmSync("synced")],
+        report: {
+          fields: [
+            {
+              label: "Geometry work",
+              value: "  Built a mesh compiler.\nMaintained geometry tools.  ",
+              evidence: "Provider cites a project description.",
+              reasoning: "Provider reports relevant geometry work; dates are unconfirmed.",
+              sourceUrls: ["https://projects.example.test/mesh"],
+            },
+            {
+              label: "Full-time years",
+              value: null,
+              evidence: "Employment dates were not supplied.",
+              sourceUrls: [],
+            },
+            { label: "Provider tier", value: "Tier 1", sourceUrls: [] },
+            { label: "Provider rule", value: "true", sourceUrls: [] },
+          ],
+          sourceUrls: [
+            "https://projects.example.test/mesh",
+            "https://profile.example.test/engineer",
+          ],
+        },
+      },
+    ],
+  });
+  const view = await mounted("thread-1", undefined, false);
+  await view.click("Evidence");
+  await view.click(candidate.name);
+  const dialog = view.container.querySelector('[role="dialog"]')!;
+  const sources = dialog.querySelector('[aria-label="Saved candidate sources"]')!;
+  const report = sources.querySelector("dl")!;
+  expect(report).not.toBeNull();
+  expect([...report.querySelectorAll("dt")].map((item) => item.textContent)).toEqual([
+    "Geometry work",
+    "Full-time years",
+    "Provider tier",
+    "Provider rule",
+  ]);
+  expect(report.querySelector("dd > p")?.textContent).toBe(
+    "  Built a mesh compiler.\nMaintained geometry tools.  ",
+  );
+  expect(report.querySelectorAll("dd")[1]?.querySelector("p")?.textContent).toBe("Unknown");
+  expect(report.textContent).toContain("Provider cites a project description.");
+  expect(report.textContent).toContain(
+    "Provider reports relevant geometry work; dates are unconfirmed.",
+  );
+  expect(report.textContent).toContain("Employment dates were not supplied.");
+  expect(report.textContent).toContain("Tier 1");
+  expect(report.textContent).toContain("true");
+  for (const url of [
+    "https://projects.example.test/mesh",
+    "https://profile.example.test/engineer",
+  ]) {
+    expect(sources.querySelectorAll(`a[href="${url}"]`)).toHaveLength(1);
+    const link = sources.querySelector<HTMLAnchorElement>(`a[href="${url}"]`)!;
+    expect(link).not.toBeNull();
+    expect(link.target).toBe("_blank");
+    expect(link.rel).toContain("noreferrer");
+  }
+  expect(sources.querySelector("time")?.dateTime).toBe("2026-01-01T00:00:00Z");
+  expect(sources.textContent).toContain("Example Robotics · Geometry engineer");
+  expect(sources.textContent).toContain("CRM · Synced");
+  expect(dialog.textContent).toContain("Unassessed");
+  for (const hidden of [
+    "internal-person",
+    "internal-task",
+    "internal-action",
+    "internal-effect",
+    "internal-artifact",
+    "internal-output",
+    "provider_report",
+    "Hard criteria",
+    "Not met",
+    '{"fields"',
+  ])
+    expect(dialog.textContent).not.toContain(hidden);
+  expect(sources.querySelector("pre, mark, [role=status]")).toBeNull();
+  expect(api.getAssessment).not.toHaveBeenCalled();
+  expect(api.getById).not.toHaveBeenCalled();
+  expect(api.readSource).not.toHaveBeenCalled();
+});
+
+it("opens retained candidate report fields through the native saved assessment source", async () => {
+  const material = artifactSourceFixture(
+    '{"task_id":"internal-task","rows":[]}',
+    "application/json",
+  );
+  const reportSource = { ...material.source, kind: "provider_report" };
+  api.listAssessments.mockResolvedValue([
+    { ...assessment, assessment: { ...assessment.assessment, sourceRefs: [reportSource] } },
+  ]);
+  api.readSource.mockResolvedValue({
+    kind: "report",
+    report: {
+      fields: [
+        {
+          label: "Geometry work",
+          value: "Built a mesh compiler",
+          evidence: "Provider cites project documentation.",
+          reasoning: "Full-time duration is unconfirmed.",
+          sourceUrls: ["https://projects.example.test/mesh"],
+        },
+        { label: "Full-time years", value: null, sourceUrls: [] },
+      ],
+      sourceUrls: ["https://profile.example.test/engineer"],
+    },
+  });
+  const view = await mounted("thread-1", undefined, false);
+  await view.click("Evidence");
+  await view.click("Unnamed candidate");
+  expect(api.readSource).not.toHaveBeenCalled();
+  const evidence = await view.expand("Source", true);
+  await vi.waitFor(() =>
+    expect(evidence.querySelector("dl dt")?.textContent).toBe("Geometry work"),
+  );
+  expect(evidence.textContent).toContain("Built a mesh compiler");
+  expect(evidence.textContent).toContain("Unknown");
+  expect(evidence.textContent).toContain("Provider cites project documentation.");
+  expect(evidence.textContent).toContain("Full-time duration is unconfirmed.");
+  expect(evidence.querySelector('a[href="https://projects.example.test/mesh"]')).not.toBeNull();
+  expect(evidence.querySelector('a[href="https://profile.example.test/engineer"]')).not.toBeNull();
+  expect(evidence.querySelector("pre, mark, [data-artifact-id]")).toBeNull();
+  for (const hidden of [
+    "internal-task",
+    material.reference.artifactId,
+    material.reference.sha256,
+    "Source text",
+  ])
+    expect(evidence.textContent).not.toContain(hidden);
+  expect(api.readSource).toHaveBeenCalledExactlyOnceWith({
+    kind: "assessment",
+    roleId: assessment.assessment.roleId,
+    candidateKey: assessment.assessment.candidateKey,
+    version: assessment.assessment.version,
+    sourceRefId: reportSource.id,
+  });
+  expect(api.getById).not.toHaveBeenCalled();
+});
+
+it("keeps repeated retained reports in native source disclosures with their saved dates", async () => {
+  const candidate = { ...candidateFixture("repeated-person", false), name: "Synthetic Engineer" };
+  api.listCandidates.mockResolvedValue(candidatePage([candidate]));
+  api.listCandidateSources.mockResolvedValue({
+    roleId: role.id,
+    candidateKey: candidate.candidateKey,
+    total: 3,
+    nextCursor: "more-sources",
+    items: [0, 1].map((index) => ({
+      taskId: null,
+      actionId: null,
+      roleRevisionId: revision.id,
+      effectId: `internal-read-${index}`,
+      rowIndex: 0,
+      artifactRef: { artifactId: `internal-artifact-${index}`, sha256: "a".repeat(64) },
+      requestCursor: null,
+      outputId: null,
+      observedAt: `2026-01-0${index + 1}T00:00:00Z`,
+      crmImports: [],
+      report: {
+        fields: [{ label: "Geometry work", value: "Built a mesh compiler", sourceUrls: [] }],
+        sourceUrls: [],
+      },
+    })),
+  });
+  const view = await mounted("thread-1", undefined, false);
+  await view.click("Evidence");
+  await view.click(candidate.name);
+  const sources = view.container.querySelector('[aria-label="Saved candidate sources"]')!;
+  const disclosures = [...sources.querySelectorAll("details")];
+  expect(disclosures).toHaveLength(2);
+  expect(disclosures.map((item) => item.open)).toEqual([true, false]);
+  expect(
+    disclosures.map((item) => item.querySelector("summary time")?.getAttribute("datetime")),
+  ).toEqual(["2026-01-01T00:00:00Z", "2026-01-02T00:00:00Z"]);
+  expect(
+    disclosures.every((item) => item.querySelector("dl dt")?.textContent === "Geometry work"),
+  ).toBe(true);
+  expect(sources.textContent).toContain("More sources");
+  expect(sources.textContent).not.toContain("Latest");
+  expect(api.getById).not.toHaveBeenCalled();
+});
+
+it.each(["source", "revision", "role", "thread", "denial"])(
+  "discards a late retained report after a product %s change",
+  async (boundary) => {
+    const material = artifactSourceFixture();
+    const originalRevision = { ...revision, criteria: [], sourceRefs: [material.source] };
+    api.getWorkspace.mockResolvedValue({ role, revision: originalRevision });
+    const lateReport = {
+      kind: "report",
+      report: {
+        fields: [{ label: "Geometry work", value: "Late retained report", sourceUrls: [] }],
+        sourceUrls: [],
+      },
+    };
+    let finish!: (value: typeof lateReport) => void;
+    api.readSource
+      .mockReturnValueOnce(
+        new Promise((resolve) => {
+          finish = resolve;
+        }),
+      )
+      .mockResolvedValue({
+        ...lateReport,
+        report: {
+          ...lateReport.report,
+          fields: [{ ...lateReport.report.fields[0], value: "Current retained report" }],
+        },
+      });
+    const view = await mounted("thread-1", undefined, false);
+    await view.expand("Source", true);
+    if (boundary === "thread") {
+      api.getWorkspace.mockResolvedValue(null);
+      await view.render("thread-2");
+    } else if (boundary === "denial") {
+      api.getWorkspace.mockRejectedValueOnce(new ORPCError("FORBIDDEN"));
+      await view.click("Refresh");
+      expect(view.container.textContent).toContain("Could not load recruiting");
+    } else {
+      const nextRole = boundary === "role" ? { ...role, id: "next-role" } : role;
+      const nextRevision = {
+        ...originalRevision,
+        roleId: nextRole.id,
+        id: boundary === "source" ? revision.id : "next-revision",
+        sourceRefs: [
+          boundary === "source" ? { ...material.source, id: "next-source" } : material.source,
+        ],
+      };
+      api.getWorkspace.mockResolvedValue({ role: nextRole, revision: nextRevision });
+      await view.click("Refresh");
+      await view.expand("Source", true);
+      await vi.waitFor(() =>
+        expect(view.container.textContent).toContain("Current retained report"),
+      );
+    }
+    await act(async () => finish(lateReport));
+    expect(view.container.textContent).not.toContain("Late retained report");
+    expect(api.getById).not.toHaveBeenCalled();
+  },
+);
+
+it("discards a late retained assessment report when selecting another candidate", async () => {
+  const material = artifactSourceFixture();
+  const first = {
+    ...assessment,
+    assessment: { ...assessment.assessment, sourceRefs: [material.source] },
+  };
+  const second = { ...first, assessment: { ...first.assessment, candidateKey: "candidate-2" } };
+  api.listAssessments.mockResolvedValue([first, second]);
+  api.listCandidates.mockResolvedValue(
+    candidatePage([
+      { ...candidateFixture(), name: "First engineer" },
+      { ...candidateFixture("candidate-2"), name: "Second engineer" },
+    ]),
+  );
+  let finish!: (value: unknown) => void;
+  api.readSource.mockReturnValueOnce(
+    new Promise((resolve) => {
+      finish = resolve;
+    }),
+  );
+  const view = await mounted("thread-1", undefined, false);
+  await view.click("Evidence");
+  await view.click("First engineer");
+  await view.expand("Source", true);
+  await view.click("Close");
+  await view.click("Second engineer");
+  await act(async () =>
+    finish({
+      kind: "report",
+      report: {
+        fields: [
+          { label: "Geometry work", value: "First candidate retained report", sourceUrls: [] },
+        ],
+        sourceUrls: [],
+      },
+    }),
+  );
+  expect(view.container.querySelector('[role="dialog"]')?.textContent).toContain("Second engineer");
+  expect(view.container.textContent).not.toContain("First candidate retained report");
+  expect(api.getById).not.toHaveBeenCalled();
+});
+
+it.each(["candidate", "role", "denial"])(
+  "discards a late unassessed source report after a %s change",
+  async (boundary) => {
+    const first = { ...candidateFixture("first-person", false), name: "First engineer" };
+    const second = { ...candidateFixture("second-person", false), name: "Second engineer" };
+    api.listCandidates.mockResolvedValue(candidatePage([first, second]));
+    let finish!: (value: unknown) => void;
+    api.listCandidateSources.mockReturnValueOnce(
+      new Promise((resolve) => {
+        finish = resolve;
+      }),
+    );
+    const view = await mounted("thread-1", undefined, false);
+    await view.click("Evidence");
+    await view.click(first.name);
+    if (boundary === "candidate") {
+      await view.click("Close");
+      await view.click(second.name);
+    } else if (boundary === "role") {
+      const nextRole = { ...role, id: "next-role", currentRevisionId: "next-revision" };
+      api.getWorkspace.mockResolvedValue({
+        role: nextRole,
+        revision: { ...revision, id: nextRole.currentRevisionId, roleId: nextRole.id },
+      });
+      api.listCandidates.mockResolvedValue({
+        ...candidatePage([{ ...second, roleId: nextRole.id }]),
+        roleId: nextRole.id,
+        roleRevisionId: nextRole.currentRevisionId,
+      });
+      await view.click("Refresh");
+    } else {
+      api.listResearch.mockRejectedValueOnce(new ORPCError("FORBIDDEN"));
+      await view.click("Refresh");
+      expect(view.container.textContent).toContain("Could not load recruiting");
+    }
+    await act(async () =>
+      finish({
+        roleId: role.id,
+        candidateKey: first.candidateKey,
+        total: 1,
+        nextCursor: null,
+        items: [
+          {
+            taskId: null,
+            actionId: null,
+            roleRevisionId: revision.id,
+            effectId: "first-read",
+            rowIndex: 0,
+            artifactRef: { artifactId: "first-artifact", sha256: "a".repeat(64) },
+            requestCursor: null,
+            outputId: null,
+            observedAt: "2026-01-01T00:00:00Z",
+            crmImports: [],
+            report: {
+              fields: [
+                { label: "Geometry work", value: "Late unassessed source report", sourceUrls: [] },
+              ],
+              sourceUrls: [],
+            },
+          },
+        ],
+      }),
+    );
+    expect(view.container.textContent).not.toContain("Late unassessed source report");
+    if (boundary === "candidate")
+      expect(view.container.querySelector('[role="dialog"]')?.textContent).toContain(second.name);
+    else expect(view.container.querySelector('[role="dialog"]')).toBeNull();
+    expect(api.getById).not.toHaveBeenCalled();
+  },
+);
 
 it("keeps exact research evidence readable while its routing snapshot stays diagnostic-only", async () => {
   const text = "Before\nBuilt a compiler\nAfter";
@@ -1691,7 +2080,7 @@ it("keeps exact research evidence readable while its routing snapshot stays diag
   };
   api.getWorkspace.mockResolvedValue({ role, revision: { ...revision, sourceRefs: [report] } });
   api.getById.mockResolvedValue(material.artifact);
-  api.readSource.mockResolvedValue({ text, start: 7, end: 23 });
+  api.readSource.mockResolvedValue({ kind: "text", text, start: 7, end: 23 });
   const view = await mounted("thread-1", undefined, false);
   const evidence = await view.expand("Source", true);
   await vi.waitFor(() =>

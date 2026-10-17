@@ -3218,7 +3218,7 @@ export function createRouter(deps: RouterDeps) {
         listRecruitingCandidates(deps.prisma, context.actor, input),
       ),
       listCandidateSources: authed.recruiting.listCandidateSources.handler(({ context, input }) =>
-        listRecruitingCandidateSources(deps.prisma, context.actor, input),
+        listRecruitingCandidateSources(deps, context.actor, input),
       ),
       setCandidateShortlist: authed.recruiting.setCandidateShortlist.handler(({ context, input }) =>
         setRecruitingCandidateShortlist(deps.prisma, context.actor, input),

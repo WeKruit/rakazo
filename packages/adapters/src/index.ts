@@ -105,6 +105,11 @@ export * from "./pipedream-connector.js";
 export * from "./private-endpoint.js";
 export * from "./railway-sandbox.js";
 export * from "./realtime.js";
+export {
+  classifyRecruitingResearchResult,
+  isRecruitingCandidateReportField,
+  projectRecruitingCandidateReport,
+} from "./recruiting-research.js";
 export * from "./release-watch.js";
 export * from "./remote-mcp.js";
 export * from "./run-secret.js";
