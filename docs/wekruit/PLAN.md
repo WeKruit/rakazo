@@ -14,7 +14,13 @@ Supabase 独立数据库、原生 memory provider、Modal Volume 和 E2B 沿用�
 
 Execution priority: filter playbook and sourcing (S1–S5) come first; reply and follow-up work is deferred. Feature implementation and direct product validation come before CI waits. Do not wait for CodeQL/CI after each push. The owner authorized an incremental spending cap of US$150; track usage against the private authorization baseline and retain existing resources. The latest instruction authorizes continuing feature fixes, deployment and testing on the existing resources without repeated confirmation. PR merge, unapproved production migrations, access expansion and real outbound remain separate. A pending business question does not block independent product work, and broad execution access does not supply its answer.
 
-**最新线上为 v58 / `92581bf1`。** 本批六份生产源码与独立发布归档 hash 一致，API health/ready 与 Web 均为 200、ready 非 degraded。实际容器替换前后，103 个 run、280 个 effect、253 条消息、两位 bot、五份 skills、11 份记忆、109 份迁移、岗位 v3、30 人/45 条来源、一份评估及所有 thread 状态逐项相同。无新迁移、权限、依赖、服务或订阅；PR 仍为 Draft、未合并。
+**最新线上为 v59 / `6bd28e48`。** 本批八份运行源码与独立发布归档 hash 一致，API health/ready 与 Web 均为 200、ready 非 degraded。实际容器替换前后，104 个 run、280 个 effect、259 条消息、两位 bot、五份 skills、11 份记忆、109 份迁移、岗位 v3、30 人/45 条来源、一份评估及所有 thread 状态逐项相同。无新迁移、权限、服务或订阅；PR 仍为 Draft、未合并。
+
+**上传 PDF 的原生文字读取已补齐，网页全链路仍待验收。** 现有上传只保存二进制，原生文件读取、持久引文校验与业务来源查看此前均不能读取 PDF 正文。本批让三处共用一个固定、限时、限量的 Poppler 文字转换器，后端镜像安装系统转换器；沿用原文件、actor 授权、字节/hash、来源分类、读取回执及 UTF-16 引文，不建立提取结果库或新 schema，不授予 Agent 电脑/命令工具。验证调用内只按已核验 hash 复用文字；不支持 OCR、需要密码的文件或直接读取远端 PDF URL，失败不伪造正文。实际云端转换器已完整读取一份两页合成岗位材料；原生数据库写入、网页上传后模型阅读及持久来源回看尚未验收，不能用云端转换成功代替。Chrome 上传验证因扩展未允许本地文件访问而停止，未上传文件、未发新任务；网页仍保留正常问答与 30 人名单。
+
+PDF 增量五文件 151 项聚焦检查通过；二进制旧实现下的读取回归确实失败，helper 另实际调用安装的转换器读取完整两页。DB/API 检查明确使用模拟存储/数据库/转换器，不是 PostgreSQL 写入验收；较广 246 项招聘检查与其重叠，不相加。相关类型、格式、Web 构建及独立 SPEC/QUALITY 通过；云端八份源码、转换器、健康检查与重启数据保持另行核验。
+
+**v58 历史发布 / `92581bf1`。** 六份生产源码与独立发布归档 hash、健康检查通过；该次替换前后 103 个 run、280 个 effect、253 条消息及当时全部业务/配置逐项保持。以下招聘表达、问答及排版验收由此版本完成，v59 保留这些能力。
 
 **招聘对话与问题输入。** 复用稳定招聘表达指令，文字对话中的实际业务问题使用已有原生卡和直接输入，不向用户索取技术引用，也不重复已答或待答问题；语音原约束保持。原有 owner 显式诊断边界继续覆盖工具名、请求和结构化内部引用，原文/引文及历史自由文本不被机械改写，不声称任意模型文字绝对脱敏。移动端修复选择卡没有自定义输入、多个等待成员只能回答最后一张卡的实际缺口，复用共享可答卡选择器、原回答回调及原生控件；审批和 secret 卡仍不能当普通自由文本提交。Web 问题选项/输入统一为 16px；共享 Markdown 表移除等宽和双重缩小，正文与展开表实际均为 Geist 16px。原生协作仅显示业务进展，结果卡使用语义主题色。
 
@@ -629,7 +635,7 @@ Dyna 岗位资料另已实际迁入 Sourcer 正常聊天：只提供经审阅的
 当前入口：用户直接发送 JD URL、粘贴描述或上传材料，不先要求填写 CRM 表单或旧 task ID。对本轮新 JD 建立明确来源/版本的 brief，按产品授权、现有额度和限流创建真实 task；后续反馈只回该 task，旧 Grok 批次映射未知不用于臆造新任务关系。沿已有原生能力做真实产品验收，T01–T08 不作为普通 MCP 调用的必经步骤。
 
 - [x] 正常聊天输入官方 JD 链接，实际读取完整职责、必备资格、加分和地点，返回可审阅 brief；原生保存原文与最终回复分别核验，不冒充已保存新岗位或已开始找人。
-- [ ] 粘贴描述及附件分别完成同等来源/完整性/brief 验收；缺少段落写未核全，不声称原文未规定。PDF 已能上传，但关闭电脑工具且没有获准的文档读取连接时，当前原生文本读取与引文核验不支持 PDF；不能绕开禁用工具或把上传成功当正文已读。
+- [ ] 粘贴描述及附件分别完成同等来源/完整性/brief 验收；缺少段落写未核全，不声称原文未规定。v59 已让原生文件读取、引文校验和来源查看共用内嵌 PDF 文字提取，云端两页合成材料读取通过；实际网页上传、模型阅读及持久来源验收仍待做。OCR、需要密码的 PDF 和远端 PDF URL 不在这次支持范围；不绕开禁用工具或把上传成功当正文已读。
 - [ ] 核对创建、查询、反馈/继续接口及费用，确认既有账户授权覆盖实际检索，否则停在待授权步骤。
 - [ ] 约定招聘需求后创建一个外部任务，保存外部 ID 与用户/组织/bot/thread 的对应关系。
 - [ ] 在原 thread 展示真实候选来源与证据，区分事实、推断、缺口及模型评分。
