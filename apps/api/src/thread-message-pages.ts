@@ -40,20 +40,16 @@ export async function includeWaitingAskMessages(
   const pending = (
     await Promise.all(
       missing.map(async (run) => {
+        const where: Prisma.MessageWhereInput = {
+          threadId: page.threadId,
+          runId: run.id,
+          botId: run.botId,
+          role: "bot",
+          thread: { id: page.threadId, spaceId: run.spaceId, userId: run.userId },
+          blocks: { array_contains: [{ kind: "ask" }] },
+        };
         const rows = await prisma.message.findMany({
-          where: {
-            threadId: page.threadId,
-            runId: run.id,
-            botId: run.botId,
-            role: "bot",
-            run: {
-              threadId: page.threadId,
-              spaceId: run.spaceId,
-              userId: run.userId,
-              status: "waiting_input",
-            },
-            blocks: { array_contains: [{ kind: "ask" }] },
-          },
+          where,
           orderBy: { seq: "desc" },
           // Native answer lookup inspects the last 50 messages of a paused run.
           take: 50,

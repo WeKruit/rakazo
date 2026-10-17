@@ -294,11 +294,10 @@ describe("threadSnapshot", () => {
               runId: item.id,
               botId: item.botId,
               role: "bot",
-              run: {
-                threadId: "thread-1",
+              thread: {
+                id: "thread-1",
                 userId: "user-1",
                 spaceId: "space-1",
-                status: "waiting_input",
               },
             }),
           }),
