@@ -14,7 +14,7 @@ Supabase 独立数据库、原生 memory provider、Modal Volume 和 E2B 沿用�
 
 Execution priority: filter playbook and sourcing (S1–S5) come first; reply and follow-up work is deferred. Feature implementation and direct product validation come before CI waits. Do not wait for CodeQL/CI after each push. The owner authorized an incremental spending cap of US$150; track usage against the private authorization baseline and retain existing resources. Merge, deployment, production migration, access expansion and outbound authorization remain separate.
 
-已获准的源码 `1c6506a0467223e2185c639e1b09ebe0693c85d0` 已部署为 Modal v38。独立 `rakazo` 库的五份应用迁移（brief、搜索审批、候选/轮次索引、CRM 回执关联、回复关联）已应用，checksum 与发布清单一致。实际容器源码及 API health/ready 通过；现有 bot 配置、五份 skills、原生记忆与受保护历史的前后核对一致。旧 CRM 数据库、工具权限和外联未改。此状态取代下面历史批次的“尚未发布/迁移未执行”，不取代真实业务验收。
+当前获准发布的源码 `7288eab37c4cafe8eb1168285dd947494767e5d0` 已部署为 Modal v39。上一版本的五份应用迁移（brief、搜索审批、候选/轮次索引、CRM 回执关联、回复关联）仍在独立 `rakazo` 库中，本次未新增迁移。实际容器的变更源码 hash 与发布版本一致，API health/ready 通过且非 degraded；前后核对保留两位 bot 配置、五份 skills、11 份记忆、78 个受保护 run、171 个 effect 及原消息/迁移账本。旧 CRM 数据库、工具权限和外联未改。此状态取代下面历史批次的“尚未发布/迁移未执行”，不取代真实业务验收。
 
 ### 当前首要能力：playbook 驱动的自主找人（业务验收未通过）
 
@@ -38,11 +38,17 @@ S1–S5 作为当前主线；S2 材料准备和确认继续按 playbook，不能
 
 Main/Sourcer 随后各完成一次实际回复，均读取两份当前 skill，说明 Autumn 分工、同 task 反馈及六人达标时如实报告缺四人；Sourcer 另做一次原生只读 task_catalog 发现。两次 run 各一次 attempt，无外部 effect，未调用 Autumn、CRM 或外联。这仅证明配置采用和回复，不证明真实搜索/候选落库/同 task 续搜。发布已按上方事实完成，但 Agent 的真实业务路径尚未通过。
 
-**2026-10-17 原生 MCP 路径收敛（代码待发布）：**实际调用链确认，旧自定义 admission 会因对话已选岗位而拦截普通 Autumn `research/reply`，要求模型先准备领域 action。现已删除这种隐式接管与 provider hostname 特判；普通调用沿 Rakazo 原生 MCP 的工具权限、精确请求、审批、effect 和恢复执行。显式引用的既有领域 action 仍验证原请求；历史记录和已关联结果的只读恢复不改写。现有工具说明也明确普通对话直接使用 MCP，领域 action helper 不是前置条件。不新增 schema、依赖、工具或编排器。159 项聚焦离线检查、adapters 类型检查和四文件格式检查通过，覆盖原生 direct/catalog 的审批规则、重复完成回放、显式 action 的参数/归属边界及已关联结果恢复；不等于生产搜索验收。原生网页还已由 Sourcer 实际完成一次 Autumn credits 读取，原生 completed effect 与工具事件已核对；没有发起 research/reply。
+**2026-10-17 原生 MCP 路径收敛（已发布 v39）：**实际调用链确认，旧自定义 admission 会因对话已选岗位而拦截普通 Autumn `research/reply`，要求模型先准备领域 action。现已删除这种隐式接管与 provider hostname 特判；普通调用沿 Rakazo 原生 MCP 的工具权限、精确请求、审批、effect 和恢复执行。显式引用的既有领域 action 仍验证原请求；历史记录和已关联结果的只读恢复不改写。现有工具说明也明确普通对话直接使用 MCP，领域 action helper 不是前置条件。不新增 schema、依赖、工具或编排器。159 项聚焦离线检查、adapters 类型检查和四文件格式检查通过，覆盖原生 direct/catalog 的审批规则、重复完成回放、显式 action 的参数/归属边界及已关联结果恢复；不等于生产搜索验收。原生网页还已由 Sourcer 实际完成一次 Autumn credits 读取，原生 completed effect 与工具事件已核对；该次只读检查没有发起 research/reply。
 
 原生多 Agent 的只读组合另已实际验收：Main 使用 message_bot 委派 Sourcer，Sourcer 调用已连接的 Autumn credits，返回触发 Main 在原对话报告结果；三个 run 和两个 effect 均 completed，原生事件及截图已核对。此检查沿用已发布的原生 harness，没有新建测试前端、群组、模型或连接；不包含找人/续搜/CRM/外联。两次额度快照的差值不能归因于本次调用的实际费用。
 
-**仍缺的产品接线：**普通原生 MCP 返回保存在原生工具回执/对话中；本批没有把新任务自动登记到依赖领域 action 的岗位候选索引。因此不能声称任意原生搜索已自动进入 Dashboard。后续先验证真实 Main/Sourcer→Autumn→同 task 反馈，再依据实际返回补最小结果关联；不以恢复强制领域步骤来解决展示问题。
+原生 General → Advanced → Show tool activity 已在验收浏览器启用；重载后仍可展开已完成调用的原生步骤。复用现有显示设置，没有新增执行过程组件，也没有改变其他用户的默认设置。它展示实际工具活动，不代表完整任务树或隐藏思考链路。
+
+**v39 真实原生任务验收：**在已有、绑定岗位的 Intake 群中，Main 原生 handoff 给 Sourcer；Sourcer 经连接的 MCP 新建一次公开公司/JD 研究并读取结果。在网页原生选择卡提交自定义报告偏好；待答期间替换服务容器，卡片、原 run、消息、effect、记忆及配置逐项保持。回答返回同一原卡/run，完整答案进入同一个 Autumn task 的唯一 `reply`；实际回执为 accepted，随后任务 completed/complete，返回 27 行。三个相关 run 均 completed，原生网页显示可分页、展开和查看来源的 27 行表格；没有另建研究任务、候选搜索、CRM 或外联。私有原始回执、前后快照和网页截图已保存。这证明原生 Agent 组合与同 task 交互恢复，不证明候选校准、Dashboard 自动索引或 P6。
+
+**本次同时发现的真实阅读缺口：**原始 `get_rows` 回执保存了完整引文，但最终报告把部分文字说成 provider 截断。实际共享上下文逻辑会缩短旧工具结果，不能把模型当前未见当成源数据缺失。随后同一 task 的原生单行回读已返回完整职责引文及来源；没有再调用 research/reply。现有 sourcing skill 只追加一段小页/原件读取指导，原生保存并读回，除段落分隔/末尾换行外旧正文一致，其余四份 skills、bot 指令及禁用工具配置保持。没有新增代码、schema、工具或全局 context budget；这是一项现成 Agent 方法的采用。27 行全量语义审阅及新任务自动采用仍须验证，单条回读不代替全部证据验收。
+
+**仍缺的产品接线：**普通原生 MCP 返回保存在原生工具回执/对话中；本批没有把新任务自动登记到依赖领域 action 的岗位候选索引。因此不能声称任意原生搜索已自动进入 Dashboard。在已验的 Main/Sourcer→Autumn→同 task 反馈技术链上继续候选业务验收，再依据真实候选返回补最小结果关联；本次 27 行是岗位/公司证据，不是候选名单，不应索引成人员。不得以恢复强制领域步骤来解决展示问题。
 
 下面保留既有增量的实现/验证事实，不能据此恢复其旧优先级或继续扩建 schema/领域工具。已有 research admission/准备层是否阻碍原生 Agent 自主调用仍待实测；若有阻碍，先说明具体调用链，只修该缺口，不再叠加包装。
 
@@ -67,7 +73,7 @@ Main/Sourcer 随后各完成一次实际回复，均读取两份当前 skill，�
 | 岗位、来源和评估 | 版本化岗位、已保存评估、三态、Cards/Table 和部分原消息定位已发布 | 完整真实 profile/JD/PDF、全部输入类型、真实候选语义验收 |
 | 原件读取、来源高亮、brief 与 G1/G2 | 原件查看器、brief 确认与 G1/G2 执行连接随 `1c6506a0` 发布 | 真实 Agent 自主调用、原材料语义及完整业务未通过 |
 | 人工编辑岗位条件 | 现有 Role 面板条件及可选 filters 已随 `1c6506a0` 发布 | 真实检索采用未验收；不继续扩建结构化编辑器或让其阻塞普通聊天 |
-| Autumn | 已有原生连接，Sourcer 已分配 research/reply 和读工具；Main/Sourcer 的 MCP+playbook 指令及三份共享 skill 已保存并实际读取采用；任务/回执及同 task 续搜有代码 | 岗位绑定后的原生准备/校验、真实搜索→候选证据→反馈→原 task 续搜的整条业务链未通过 |
+| Autumn | 原生连接及 MCP+playbook 配置已采用；v39 实测 Main/Sourcer 群内交接、公开岗位研究、原卡自定义答案跨重启后进入同 task 反馈，返回 27 行 | 完整引文读取的上下文压缩缺口、候选搜索→全部证据→反馈→同 task 续搜及 Dashboard 自动关联仍未通过 |
 | CRM | 用户 OAuth、组织身份和只读发现已接；[CRM PR #44](https://github.com/WeKruit/headhunter-agent/pull/44) 有导入代码；Rakazo 侧目标/来源/effect 关联及状态展示已随 `1c6506a0` 发布 | CRM 另库迁移及 MCP/Web 发布、真实目标绑定/导入写读/并发/RLS、可信发送镜像仍缺 |
 | Instantly | 已接只读服务；原生精确草稿/审批/回复关联及实时预检代码已随 `1c6506a0` 发布 | 完整旧 hold 来源、Gmail 与 provider 历史覆盖、草稿修订、真实发送/回复停止未通过；回复跟进后置 |
 | 候选人完整工作台/Dashboard | 候选/轮次索引、分页/筛选/排序、shortlist 及 Dashboard 代码与应用迁移已发布；合成材料的组件界面已验证 | 真实搜索落库/恢复未验；跨岗位/客户 CRM 去重、批次/名单、外联/面试看板仍缺 |
@@ -79,13 +85,13 @@ Main/Sourcer 随后各完成一次实际回复，均读取两份当前 skill，�
 ```mermaid
 flowchart TD
   JD[JD 链接 / 描述 / 附件] --> Role[岗位及条件版本 / 关键澄清 / 人类确认]
-  Role --> Search[Main 委派 Sourcer / 原生 search task 与 action]
+  Role --> Search[Main/Sourcer 原生协作 → Autumn MCP / prompt]
   Search --> Raw[保存 provider 原始结果及回执 Artifact]
   Raw --> Index[候选索引 + 本轮结果关联：已发布，真实业务待验收]
   Index --> Evidence[读取材料 / 版本化 met-unmet-unknown 评估]
   Evidence --> UI[候选卡片与表格 / 详情 / 证据 / 执行过程]
   UI --> Feedback[持久化人工反馈 / shortlist / 条件或偏好修订]
-  Feedback --> Continue[沿原 provider task 新建续搜 action]
+  Feedback --> Continue[向同一个 Autumn task 提交反馈]
   Continue --> Raw
   UI --> CRM[核验身份后同步既有 CRM：来源 / 评审 / 岗位关联]
   CRM --> Draft[准确候选 / sender / thread / 正文与文件的草稿]

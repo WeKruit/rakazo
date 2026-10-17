@@ -15,7 +15,7 @@ Main 理解用户、保持上下文并协调；Sourcer 根据 playbook 编写研
 
 Schema 只服务确有需要的返回、保存、身份去重、任务引用和界面展示，不承载另一套招聘推理系统，也不要求用户手填技术字段。[T01–T10](RECRUITING-DOMAIN-PLAN.md) 的产品结果仍需交付，但其中既有结构和实现清单不能作为继续扩建领域 schema、规则引擎或固定问卷的依据。先验证原生能力，仅补实际阻塞用户流程的最小缺口。
 
-2026-10-17：Main/Sourcer 指令与现有 intake/sourcing/evidence 三份 skill 已通过原生网页保存、重载并由数据库读回核对；两位 Agent 也实际读取当前 skills 并完成分工/反馈/校准缺口的回复。获准发布的 `1c6506a0` 已部署为 Modal v38，五份独立应用迁移已应用并核对；原生配置、记忆和受保护历史保留，API health/ready 通过。这些事实不证明实际 Autumn 搜索、同 task 反馈续搜或 P6 已通过；已有自定义调用层是否阻碍该 Agent 路径仍需真实验证，不能声明实现已完全符合原则。
+2026-10-17：Main/Sourcer 指令与现有 intake/sourcing/evidence 三份 skill 已通过原生网页保存、重载并由数据库读回核对。获准源码 `7288eab3` 已部署为 Modal v39，原有五份应用迁移保持、无新增迁移；API health/ready 通过。已有岗位群的 Main/Sourcer 原生交接、公开公司/JD 研究、原卡自定义输入跨重启后续接同一个 Autumn task 已实测，返回 27 行。候选搜索/校准、原生结果到 Dashboard 的自动关联、完整引文读取及 P6 仍未通过，不能把这次技术链路证明扩大为招聘闭环完成。
 
 先使用现有 Codex subscription OAuth。当前执行器是 Rakazo 原生 Pi，不将它描述为
 Codex CLI 的原生 session。模型连接、逐 bot 配置、memory、skills、tools、MCP、
@@ -130,11 +130,11 @@ T04 后续代码已补四类反馈及原生偏好添加/精确修改/撤销，�
 
 ## 最新发布状态（2026-10-17）
 
-当前线上源码为 `1c6506a0467223e2185c639e1b09ebe0693c85d0`，Modal v38。五份应用迁移（brief、搜索审批、候选/轮次索引、CRM 回执关联、回复关联）均已在独立 `rakazo` 库应用并核对 checksum；实际容器源码校验、API health/ready、原配置/记忆/受保护历史的前后核对通过。Main/Sourcer 指令与现有三份 skill 已实际保存并读取采用。未修改旧 CRM 数据库、扩大工具权限或执行真实外联。
+当前线上源码为 `7288eab37c4cafe8eb1168285dd947494767e5d0`，Modal v39。上一版本的五份应用迁移（brief、搜索审批、候选/轮次索引、CRM 回执关联、回复关联）仍在独立 `rakazo` 库中，本次无新增迁移；实际容器变更源码 hash 与发布版本相同，API health/ready 非 degraded，原配置、五份 skills、11 份记忆、78 个受保护 run、171 个 effect、消息和迁移账本的前后核对通过。Main/Sourcer 指令与现有三份 skill 已实际保存并读取采用。未修改旧 CRM 数据库、扩大工具权限或执行真实外联。
 
-真实 Autumn 搜索 → 全部候选/证据 → 人工反馈 → 原 task 续搜仍未整条验收；已有领域准备/校验层是否妨碍自然 Agent 调用需要实测，不能以新增包装解决。CRM 另库发布/导入、完整邮件历史与 hold、草稿修订及精确外联也未通过。回复修订 WIP 保留在独立本地分支。部署成功不等于 Agent 业务或 P6 完成；当前优先级仍是找人，回复跟进后置。
+候选搜索 → 全部候选/证据 → 人工反馈 → 原 task 续搜仍未整条验收；普通原生 MCP 路径已实测，不恢复领域准备步骤作为聊天前置条件。CRM 另库发布/导入、完整邮件历史与 hold、草稿修订及精确外联也未通过。回复修订 WIP 保留在独立本地分支。部署成功不等于 Agent 业务或 P6 完成；当前优先级仍是找人，回复跟进后置。
 
-后续工作分支已删除普通 MCP `research/reply` 的隐式领域 action 前置要求，继续使用 Rakazo 原生权限/审批/effect；159 项聚焦离线检查与 adapters 类型检查通过，尚未发布。Sourcer 的真实 Autumn credits 读取，以及 Main 原生委派→Sourcer 读取→Main 原对话接收的三个 completed run 已核对原生 effect、工具事件和截图。原生新任务与岗位 Dashboard 的结果关联、真实搜索及反馈续搜仍缺；不能以这次简化或连接成功标记业务闭环通过。
+v39 已删除普通 MCP `research/reply` 的隐式领域 action 前置要求，继续使用 Rakazo 原生权限/审批/effect；159 项聚焦离线检查与 adapters 类型检查通过。除原生只读委派外，本次已在绑定岗位的原群实测 Main→Sourcer handoff、一次公开公司/JD `research`、原生选择卡与自定义输入跨容器替换恢复、唯一 `reply` 包含完整答案并返回同一个 Autumn task；实际 completed/complete 后返回 27 行，原生网页表格可分页/展开/查看来源。原件回执保存了完整引文，但模型上下文缩短旧工具结果后，报告误称部分原文缺失；随后原生单行回读已正确返回完整职责引文及来源，现有 sourcing skill 只追加一段读取指导并读回核对，其余四份 skill 和 bot 指令/禁用工具保持。全量证据语义及新任务自动采用仍未通过。原生工具活动已在验收浏览器通过既有设置启用并重载验证。原生任务到岗位 Dashboard 的自动关联、候选搜索校准及完整业务仍缺；不能以这次原生链路证明标记 P6 完成。
 
 以下为此前发布与验收的历史记录，旧版本号及“未发布”不代表当前线上版本；当前状态以上面两段及 PLAN.md 为准。
 
