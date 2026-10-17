@@ -12,6 +12,19 @@ const row = (seq: number, text = "Use batch exports") => ({
   runId: null,
   replyToMessageId: null,
 });
+const pdfRow = (seq: number, name = `${"证".repeat(251)}.pdf`) => ({
+  ...row(seq, "Read supplied PDFs"),
+  blocks: [
+    { kind: "text", text: "Read supplied PDFs" },
+    ...Array.from({ length: 4 }, (_, index) => ({
+      kind: "file",
+      artifactId: `original-artifact-${seq}-${index}`,
+      name,
+      mimeType: "application/pdf",
+      size: 42,
+    })),
+  ],
+});
 function db() {
   const mock = {
     $queryRaw: vi.fn(),
@@ -142,6 +155,108 @@ describe("local history retrieval", () => {
     expect(sql(mock).sql).toContain('t."userId" =');
     expect(sql(mock).sql).toContain('t."botId" =');
   });
+  it("retains exact uploaded-file references from scoped messages without a run or artifact query", async () => {
+    const { mock, prisma } = db();
+    const upload = {
+      ...row(1, "Read the supplied PDF"),
+      blocks: [
+        { kind: "image", artifactId: "photo", name: "photo.png", mimeType: "image/png" },
+        { kind: "text", text: "Read the supplied PDF" },
+        {
+          kind: "file",
+          artifactId: "original-pdf",
+          name: "attachments/other-id.pdf",
+          mimeType: "application/pdf",
+          size: 42,
+        },
+      ],
+    };
+    mock.$queryRaw.mockResolvedValue([upload]);
+    const result = await readHistory(prisma, scope, { messageId: upload.id });
+    const files = [
+      {
+        blockIndex: 2,
+        artifactId: "original-pdf",
+      },
+    ];
+    expect(result.messages[0]).toMatchObject({ runId: null, text: "Read the supplied PDF", files });
+    expect(result.runs).toEqual([]);
+    expect(mock.$queryRaw).toHaveBeenCalledTimes(2);
+    expect(mock.run.findMany).toHaveBeenCalledOnce();
+    expect(mock.artifact.findMany).not.toHaveBeenCalled();
+    const search = await searchHistory(prisma, scope, { query: "supplied" });
+    expect(search.messages[0]).toMatchObject({ files });
+    expect(mock.$queryRaw).toHaveBeenCalledTimes(3);
+    expect(mock.artifact.findMany).not.toHaveBeenCalled();
+  });
+  it.each([`${"证".repeat(251)}.pdf`, "\u0001".repeat(255)])(
+    "keeps all long-name upload references within existing search/read byte bounds (%#)",
+    async (name) => {
+      const { mock, prisma } = db();
+      const originals = Array.from({ length: 5 }, (_, index) => pdfRow(index + 1, name));
+      mock.$queryRaw.mockResolvedValueOnce([...originals].reverse());
+      const search = await searchHistory(prisma, scope, { query: "supplied" });
+      mock.$queryRaw.mockResolvedValueOnce([originals[2]!]).mockResolvedValueOnce(originals);
+      const read = await readHistory(prisma, scope, { messageId: originals[2]!.id });
+      for (const page of [search, read]) {
+        expect(Buffer.byteLength(JSON.stringify(page))).toBeLessThanOrEqual(10000);
+        expect(page.messages).toHaveLength(5);
+        for (const message of page.messages)
+          expect(message.files).toEqual(
+            Array.from({ length: 4 }, (_, index) => ({
+              blockIndex: index + 1,
+              artifactId: `original-artifact-${message.seq}-${index}`,
+            })),
+          );
+      }
+      expect(search.nextBeforeSeq).toBeNull();
+      expect(read.olderMessageId).toBe(originals[0]!.id);
+      expect(read.newerMessageId).toBe(originals[4]!.id);
+      expect(read.snapshots.map((snapshot) => snapshot.anchorMessageId)).toEqual(
+        originals.map((message) => message.id),
+      );
+      expect(mock.$queryRaw).toHaveBeenCalledTimes(3);
+      expect(mock.artifact.findMany).not.toHaveBeenCalled();
+    },
+  );
+  it.each([`${"证".repeat(251)}.pdf`, "\u0001".repeat(255)])(
+    "keeps mixed linked streams and exact upload IDs within the original byte bound (%#)",
+    async (name) => {
+      const { mock, prisma } = db();
+      const anchor = pdfRow(1, name);
+      const outcome = { ...pdfRow(10, name), role: "bot", runId: "run-0" };
+      const runs = Array.from({ length: 5 }, (_, index) => ({
+        id: `run-${index}`,
+        sourceMessageId: anchor.id,
+        status: "running",
+        createdAt: anchor.createdAt,
+        completedAt: null,
+      }));
+      mock.run.findMany.mockResolvedValue(runs);
+      mock.artifact.findMany.mockResolvedValue([
+        { id: "linked-artifact", runId: runs[0]!.id, name, mimeType: "application/pdf", size: 42 },
+      ]);
+      mock.$queryRaw
+        .mockResolvedValueOnce([anchor])
+        .mockResolvedValueOnce([anchor])
+        .mockResolvedValueOnce([outcome]);
+      const result = await readHistory(prisma, scope, { messageId: anchor.id });
+      expect(Buffer.byteLength(JSON.stringify(result))).toBeLessThanOrEqual(10000);
+      expect(result.runs).toHaveLength(5);
+      expect(result.messages[0]!.files).toHaveLength(4);
+      expect(result.runs[0]!.outcomes[0]).toMatchObject({
+        messageId: outcome.id,
+        files: Array.from({ length: 4 }, (_, index) => ({
+          blockIndex: index + 1,
+          artifactId: `original-artifact-10-${index}`,
+        })),
+      });
+      expect(result.runs[0]!.artifacts[0]).toMatchObject({ id: "linked-artifact", name });
+      expect(mock.$queryRaw).toHaveBeenCalledTimes(3);
+      expect(mock.run.findMany).toHaveBeenCalledOnce();
+      expect(mock.artifact.findMany).toHaveBeenCalledOnce();
+    },
+  );
   it("reuses originals without inference and invalidates snapshots when content changes", async () => {
     const { mock, prisma } = db();
     mock.$queryRaw.mockResolvedValueOnce([row(1)]).mockResolvedValueOnce([row(1)]);

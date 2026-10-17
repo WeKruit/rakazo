@@ -1,5 +1,6 @@
 import { createHash } from "node:crypto";
 import type { HistoryReadInput, HistorySearchInput, MessageBlock } from "@rakazo/contracts";
+import { messageFileReferences } from "@rakazo/core";
 import type { PrismaClient } from "./client.js";
 import { Prisma } from "./client.js";
 
@@ -130,6 +131,7 @@ function reference(row: HistoryRow, query = "", maxLength = 800, textOffset = 0)
     createdAt: row.createdAt.toISOString(),
     runId: row.runId,
     replyToMessageId: row.replyToMessageId,
+    files: messageFileReferences(row.blocks),
     text: text.slice(textOffset, textOffset + maxLength),
     textOffset,
     nextTextOffset: textOffset + maxLength < text.length ? textOffset + maxLength : null,
