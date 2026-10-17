@@ -16,7 +16,7 @@ export function mergeThreadHistory<
   if (!previous || previous.threadId !== recent.threadId || !preserveLoadedHistory) return recent;
   return {
     ...recent,
-    messages: mergeMessagePages(previous.messages, recent.messages),
+    messages: mergeMessagePages(previous.messages, recent.messages, recent.olderCursor),
     olderCursor: previous.olderCursor,
   };
 }
@@ -30,7 +30,7 @@ export function prependThreadHistoryPage<
   }
   return {
     ...previous,
-    messages: mergeMessagesById(page.messages, previous.messages),
+    messages: mergeMessagesBySeq(page.messages, previous.messages),
     olderCursor: page.olderCursor,
   };
 }
@@ -225,21 +225,19 @@ function mergeMessagesBySeq<T extends MessageIdentity>(
 export function mergeMessagePages<T extends MessageIdentity>(
   previous: readonly T[],
   recent: readonly T[],
+  coveredFromSeq: number | null,
 ): T[] {
-  const firstRecentSeq = recent.reduce<number | null>((first, message) => {
-    if (!isDurableMessage(message) || typeof message.seq !== "number") return first;
-    return Math.min(first ?? message.seq, message.seq);
-  }, null);
+  // An older waiting card is not coverage of the gap before the ordinary page cursor.
   const retained =
-    firstRecentSeq === null
+    coveredFromSeq === null
       ? []
       : previous.filter(
           (message) =>
             isDurableMessage(message) &&
             typeof message.seq === "number" &&
-            message.seq < firstRecentSeq,
+            message.seq < coveredFromSeq,
         );
-  return mergeMessagesById(retained, recent);
+  return mergeMessagesBySeq(retained, recent);
 }
 
 export function mergeMessagesById<T extends { id: string }>(

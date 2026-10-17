@@ -44,7 +44,7 @@ import {
 } from "./artifacts.js";
 import { resolveBusyBotName, toComputerStatus } from "./computer-status.js";
 import { withSerializableRetry } from "./serializable-retry.js";
-import { loadMessagePage } from "./thread-message-pages.js";
+import { includeWaitingAskMessages, loadMessagePage } from "./thread-message-pages.js";
 
 export type ThreadTarget =
   | {
@@ -424,7 +424,16 @@ export async function threadSnapshot(
                   orderBy: { seq: "asc" },
                 })
               : [];
-          return { messagePage, last, run: currentRun, liveEvents };
+          return {
+            messagePage: await includeWaitingAskMessages(
+              tx,
+              messagePage,
+              currentRun ? [currentRun] : [],
+            ),
+            last,
+            run: currentRun,
+            liveEvents,
+          };
         },
         { timeout: 15_000, maxWait: 5_000 },
       ),
@@ -494,7 +503,7 @@ export async function threadSnapshot(
             })
           : [];
       return {
-        messagePage,
+        messagePage: await includeWaitingAskMessages(tx, messagePage, activeRuns),
         last,
         activeRuns,
         terminalRun: pickLatestTerminalRun(recentTerminals),

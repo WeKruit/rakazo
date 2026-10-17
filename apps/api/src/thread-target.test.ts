@@ -171,6 +171,141 @@ describe("reaction messages", () => {
 });
 
 describe("threadSnapshot", () => {
+  it.each(["group", "bot"] as const)(
+    "restores the original waiting %s cards beyond the latest page without moving its cursor",
+    async (kind) => {
+      const run = (id: string, botId: string) => ({
+        id,
+        botId,
+        threadId: "thread-1",
+        spaceId: "space-1",
+        userId: "user-1",
+        taskId: `task-${id}`,
+        status: "waiting_input",
+        trigger: "user",
+        routineId: null,
+        modelProvider: null,
+        modelId: null,
+        error: null,
+        startedAt: null,
+        completedAt: null,
+        createdAt: new Date(0),
+      });
+      const runs = [run("main", "bot-1"), ...(kind === "group" ? [run("sourcer", "bot-2")] : [])];
+      const row = (id: string, seq: number, runId: string | null, blocks: MessageBlock[]) => ({
+        id,
+        seq,
+        threadId: "thread-1",
+        runId,
+        role: runId ? "bot" : "user",
+        botId: runs.find((item) => item.id === runId)?.botId ?? null,
+        blocks,
+        replyToMessageId: null,
+        replyQuote: null,
+        createdAt: new Date(seq * 1000),
+      });
+      const cards = runs.map((item, index) =>
+        row(`ask-${item.id}`, index + 3, item.id, [
+          {
+            kind: "ask",
+            text: `Original ${item.id} question`,
+            status: "pending",
+            ...(item.id === "sourcer"
+              ? {
+                  approvalEffectId: "original-effect",
+                  actions: [
+                    { id: "allow", label: "Allow once" },
+                    { id: "deny", label: "Deny" },
+                  ],
+                }
+              : {}),
+          },
+        ]),
+      );
+      const rows = [
+        row("older-main-card", 1, "main", [{ kind: "ask", text: "Older", status: "pending" }]),
+        ...cards,
+        ...Array.from({ length: 101 }, (_, index) =>
+          row(`later-${index}`, index + 100, null, [{ kind: "text", text: "Later reply" }]),
+        ),
+      ];
+      const findManyMessages = vi.fn(
+        async ({
+          where,
+          take,
+        }: {
+          where: { threadId: string; runId?: string; role?: string };
+          take: number;
+        }) =>
+          rows
+            .filter(
+              (item) =>
+                item.threadId === where.threadId &&
+                (!where.runId || item.runId === where.runId) &&
+                (!where.role || item.role === where.role),
+            )
+            .sort((left, right) => right.seq - left.seq)
+            .slice(0, take),
+      );
+      const tx = {
+        $queryRaw: vi.fn().mockResolvedValue([{ id: "thread-1" }]),
+        message: { findMany: findManyMessages },
+        event: {
+          findFirst: vi.fn().mockResolvedValue({ seq: 300 }),
+          findMany: vi.fn().mockResolvedValue([]),
+        },
+        run: { findFirst: botRunFindFirst(runs), findMany: groupRunFindMany({ active: runs }) },
+      };
+      const prisma = {
+        $transaction: vi.fn(async (callback: (client: typeof tx) => unknown) => callback(tx)),
+      } as unknown as PrismaClient;
+      const target =
+        kind === "group"
+          ? groupTarget()
+          : ({
+              kind: "bot",
+              botId: "bot-1",
+              threadId: "thread-1",
+              bot: { computer: null },
+            } as ThreadTarget);
+      const snapshot = await threadSnapshot({ prisma }, target);
+
+      expect(snapshot.olderCursor).toBe(101);
+      expect(snapshot.cursor).toBe(300);
+      expect(snapshot.messages).toHaveLength(100 + cards.length);
+      expect(new Set(snapshot.messages.map((item) => item.id)).size).toBe(snapshot.messages.length);
+      expect(snapshot.messages.slice(0, cards.length)).toEqual(
+        cards.map((card) =>
+          expect.objectContaining({
+            id: card.id,
+            seq: card.seq,
+            runId: card.runId,
+            botId: card.botId,
+            blocks: card.blocks,
+          }),
+        ),
+      );
+      expect(snapshot.messages.some((item) => item.id === "older-main-card")).toBe(false);
+      for (const item of runs)
+        expect(findManyMessages).toHaveBeenCalledWith(
+          expect.objectContaining({
+            where: expect.objectContaining({
+              threadId: "thread-1",
+              runId: item.id,
+              botId: item.botId,
+              role: "bot",
+              run: {
+                threadId: "thread-1",
+                userId: "user-1",
+                spaceId: "space-1",
+                status: "waiting_input",
+              },
+            }),
+          }),
+        );
+    },
+  );
+
   it("reloads tool-only live messages for an active run", async () => {
     const run = {
       id: "run-1",
