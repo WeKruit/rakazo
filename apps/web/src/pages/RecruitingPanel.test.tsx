@@ -1215,6 +1215,8 @@ it("reads candidate evidence through its saved assessment version without fetchi
   const view = await mounted("thread-1", undefined, false);
   await view.click("Evidence");
   await view.click("Unnamed candidate");
+  expect(view.container.querySelector("blockquote")).toBeNull();
+  expect(api.readSource).not.toHaveBeenCalled();
   const evidence = await view.expand("Source", true);
   await vi.waitFor(() =>
     expect(evidence.querySelector("mark")?.textContent).toBe(material.source.quote),

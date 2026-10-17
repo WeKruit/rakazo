@@ -415,6 +415,30 @@ function readCollapsedRosterParents(userId: string | null | undefined): Set<stri
   return readCollapsedIdSet(collapsedRosterParentsStorageKey(userId));
 }
 
+export function eventChangesRecruitingPanel(
+  event: Pick<ProductEvent, "type" | "payload">,
+): boolean {
+  if (event.type === "effect.recorded")
+    return (
+      (event.payload.tool === "recruiting_role" &&
+        event.payload.status === "saved" &&
+        event.payload.changed === true) ||
+      (event.payload.tool === "recruiting_crm_target" && event.payload.status === "connected")
+    );
+  // ponytail: arbitrary MCP aliases refresh at run termination;
+  // immediate updates need a persisted native recruiting receipt.
+  if (event.type === "agent.tool.completed")
+    return (
+      event.payload.name === "recruiting_crm_import" || event.payload.name === "recruiting_reply"
+    );
+  return (
+    event.type.startsWith("recruiting.") ||
+    event.type === "memory.revised" ||
+    event.type === "thread.cleared" ||
+    isRunTerminalEvent(event)
+  );
+}
+
 export function ShellPage() {
   const { t } = useLingui();
   const { botId, groupId } = useParams();
@@ -864,14 +888,7 @@ export function ShellPage() {
           : current?.botId !== activeBotId.current)
       )
         return;
-      if (
-        event.type.startsWith("recruiting.") ||
-        event.type === "memory.revised" ||
-        event.type === "agent.tool.completed" ||
-        event.type === "thread.cleared" ||
-        isRunTerminalEvent(event)
-      )
-        setRecruitingRefresh((value) => value + 1);
+      if (eventChangesRecruitingPanel(event)) setRecruitingRefresh((value) => value + 1);
     },
     [bootstrapMe?.spaceId],
   );
@@ -5782,15 +5799,33 @@ export const Composer = memo(function Composer({
   useImperativeHandle(ref, () => {
     const handle: ComposerHandle = {
       insertContext: ({ draftKey: target, text }) => {
-        if (
-          contextHandle.current !== handle ||
-          target !== draftKey ||
-          !textareaRef.current ||
-          !text.trim()
-        )
+        const textarea = textareaRef.current;
+        if (contextHandle.current !== handle || target !== draftKey || !textarea || !text.trim())
           return;
-        updateDraft(`${draft}${draft ? "\n\n" : ""}${text}`);
+        const next = `${draft}${draft ? "\n\n" : ""}${text}`;
+        updateDraft(next);
+        const revision = editRevision.current;
         focusComposer();
+        let interrupted = false;
+        const interrupt = () => {
+          interrupted = true;
+        };
+        const interactions = ["blur", "pointerdown", "keydown"] as const;
+        for (const event of interactions)
+          textarea.addEventListener(event, interrupt, { once: true });
+        window.requestAnimationFrame(() => {
+          for (const event of interactions) textarea.removeEventListener(event, interrupt);
+          if (
+            interrupted ||
+            textareaRef.current !== textarea ||
+            textarea.value !== next ||
+            document.activeElement !== textarea ||
+            editRevision.current !== revision
+          )
+            return;
+          textarea.setSelectionRange(next.length, next.length);
+          textarea.scrollTop = textarea.scrollHeight;
+        });
       },
     };
     contextHandle.current = handle;

@@ -1119,7 +1119,7 @@ function Sources({
                 {showDiagnostics ? source.url : new URL(source.url).hostname}
               </a>
             ) : null}
-            {source.quote ? (
+            {source.quote && (showDiagnostics || source.anchor.kind === "message") ? (
               <blockquote className="border-s-2 border-border ps-3 whitespace-pre-wrap">
                 {source.quote}
               </blockquote>

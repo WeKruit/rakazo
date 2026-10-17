@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 
-import type { AgentSkillCatalogEntry, ThreadMessage } from "@rakazo/contracts";
+import type { AgentSkillCatalogEntry, ProductEvent, ThreadMessage } from "@rakazo/contracts";
 import type { ComposerMention } from "@rakazo/core";
 import type { ComponentProps, ReactNode } from "react";
 import { act, createRef } from "react";
@@ -15,7 +15,7 @@ vi.mock("@lingui/react/macro", () => {
 });
 
 import type { ComposerHandle } from "./Shell";
-import { Composer, candidateReferenceText } from "./Shell";
+import { Composer, candidateReferenceText, eventChangesRecruitingPanel } from "./Shell";
 
 let root: Root | null = null;
 let container: HTMLDivElement | null = null;
@@ -27,6 +27,7 @@ afterEach(() => {
   root = null;
   container = null;
   localStorage.clear();
+  vi.restoreAllMocks();
 });
 
 const bob: ComposerMention = { kind: "bot", id: "bot-2", name: "Bob" };
@@ -152,6 +153,76 @@ it("leaves missing candidate identity explicit in the reference", () => {
     "Candidate reference\n> Name: Name missing\n> Role: Systems engineer\n" +
       "> LinkedIn: LinkedIn missing\n> Resume: Resume missing\n\n",
   );
+});
+
+it("refreshes persisted recruiting changes while ignoring ongoing catalog and source reads", () => {
+  const refreshes: string[] = [];
+  const receive = (label: string, type: ProductEvent["type"], payload = {}) => {
+    if (eventChangesRecruitingPanel({ type, payload })) refreshes.push(label);
+  };
+  receive("Catalog read", "agent.tool.completed", { name: "mcp_list_tools", outcome: "succeeded" });
+  receive("Source read", "agent.tool.completed", { name: "web_fetch", outcome: "succeeded" });
+  receive("History read", "agent.tool.completed", {
+    name: "read_chat_history",
+    outcome: "succeeded",
+  });
+  receive("Role read", "agent.tool.completed", { name: "recruiting_role", outcome: "succeeded" });
+  receive("Unchanged role", "effect.recorded", {
+    tool: "recruiting_role",
+    operation: "bind",
+    status: "saved",
+    changed: false,
+  });
+  receive("Clarification", "effect.recorded", {
+    tool: "recruiting_role",
+    operation: "revise",
+    status: "needs_clarification",
+    changed: false,
+  });
+  receive("Role cleared", "effect.recorded", {
+    tool: "recruiting_role",
+    operation: "bind",
+    status: "saved",
+    changed: true,
+    roleId: null,
+  });
+  receive("CRM connected", "effect.recorded", {
+    tool: "recruiting_crm_target",
+    status: "connected",
+  });
+  receive("CRM lookup", "agent.tool.completed", {
+    name: "recruiting_crm_target",
+    outcome: "succeeded",
+  });
+  receive("CRM import pending", "agent.tool.completed", {
+    name: "recruiting_crm_import",
+    outcome: "paused",
+  });
+  receive("CRM import receipt", "agent.tool.completed", {
+    name: "recruiting_crm_import",
+    outcome: "succeeded",
+  });
+  receive("Reply outcome", "agent.tool.completed", { name: "recruiting_reply", outcome: "error" });
+  receive("Connector log", "effect.recorded", { tool: "mcp_execute_tool", logId: "log-1" });
+  receive("Candidates saved", "recruiting.candidates.saved");
+  receive("Preference saved", "memory.revised");
+  receive("Thread cleared", "thread.cleared");
+  receive("Run complete", "run.completed");
+  receive("Run failed", "run.failed");
+  receive("Run cancelled", "run.cancelled");
+  expect(refreshes).toEqual([
+    "Role cleared",
+    "CRM connected",
+    "CRM import pending",
+    "CRM import receipt",
+    "Reply outcome",
+    "Candidates saved",
+    "Preference saved",
+    "Thread cleared",
+    "Run complete",
+    "Run failed",
+    "Run cancelled",
+  ]);
 });
 
 describe("Composer", () => {
@@ -323,6 +394,73 @@ describe("Composer", () => {
     expect(onRemoveAttachment).not.toHaveBeenCalled();
     expect(onSend).not.toHaveBeenCalled();
   });
+
+  it("reveals appended context at the draft tail after the next layout frame", () => {
+    const ref = createRef<ComposerHandle>();
+    const textarea = renderComposer(vi.fn(), { ref });
+    type(textarea, "Earlier instructions");
+    const frames: FrameRequestCallback[] = [];
+    vi.spyOn(window, "requestAnimationFrame").mockImplementation((callback) =>
+      frames.push(callback),
+    );
+    Object.defineProperty(textarea, "scrollHeight", { configurable: true, value: 900 });
+    textarea.scrollTop = 12;
+    act(() => ref.current?.insertContext({ draftKey: "bot:bot-1", text: "Candidate reference" }));
+    textarea.setSelectionRange(2, 2);
+    expect(textarea.scrollTop).toBe(12);
+    expect(frames).toHaveLength(1);
+    act(() => frames[0]!(0));
+    expect(textarea.selectionStart).toBe(textarea.value.length);
+    expect(textarea.selectionEnd).toBe(textarea.value.length);
+    expect(textarea.scrollTop).toBe(900);
+    expect(document.activeElement).toBe(textarea);
+  });
+
+  it.each(["edited", "blurred", "refocused", "clicked", "navigated", "remounted"])(
+    "does not reveal context after the draft was %s before its deferred frame",
+    (change) => {
+      const ref = createRef<ComposerHandle>();
+      const textarea = renderComposer(vi.fn(), { ref });
+      const frames: FrameRequestCallback[] = [];
+      vi.spyOn(window, "requestAnimationFrame").mockImplementation((callback) =>
+        frames.push(callback),
+      );
+      act(() => ref.current?.insertContext({ draftKey: "bot:bot-1", text: "Candidate reference" }));
+      expect(frames).toHaveLength(1);
+      if (change === "edited") {
+        type(textarea, "New feedback");
+        type(textarea, "Candidate reference");
+      } else if (change === "blurred") {
+        textarea.blur();
+      } else if (change === "refocused") {
+        textarea.blur();
+        textarea.focus();
+      } else if (change === "clicked") {
+        textarea.dispatchEvent(new Event("pointerdown", { bubbles: true }));
+      } else if (change === "navigated") {
+        act(() =>
+          textarea.dispatchEvent(new KeyboardEvent("keydown", { key: "ArrowLeft", bubbles: true })),
+        );
+      } else {
+        act(() =>
+          root?.render(
+            <Composer {...composerProps} key="another-account" draftKey="bot:another" />,
+          ),
+        );
+      }
+      const current = container!.querySelector("textarea")!;
+      if (change === "remounted") type(current, "Other thread feedback");
+      current.setSelectionRange(2, 2);
+      current.scrollTop = 12;
+      Object.defineProperty(current, "scrollHeight", { configurable: true, value: 900 });
+      const activeElement = document.activeElement;
+      act(() => frames[0]!(0));
+      expect(current.selectionStart).toBe(2);
+      expect(current.selectionEnd).toBe(2);
+      expect(current.scrollTop).toBe(12);
+      expect(document.activeElement).toBe(activeElement);
+    },
+  );
 
   it("rejects context for another draft and an outdated handle", () => {
     const ref = createRef<ComposerHandle>();
