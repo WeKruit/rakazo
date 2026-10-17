@@ -6213,6 +6213,7 @@ export async function listRecruitingCandidates(
         verdict: input.verdict ?? null,
         shortlisted: input.shortlisted ?? null,
         actionId: input.actionId ?? null,
+        sourceEffectId: input.sourceEffectId ?? null,
       });
       const cursor = readCandidateCursor(input.cursor, scope);
       const clauses = [Prisma.sql`true`];
@@ -6232,6 +6233,10 @@ export async function listRecruitingCandidates(
       if (input.actionId)
         clauses.push(
           Prisma.sql`EXISTS (SELECT 1 FROM "recruiting_candidate_occurrences" o JOIN "recruiting_candidate_pages" p ON p."effectId" = o."pageId" WHERE o."roleId" = b."roleId" AND o."candidateKey" = b."candidateKey" AND p."actionId" = ${input.actionId})`,
+        );
+      if (input.sourceEffectId)
+        clauses.push(
+          Prisma.sql`EXISTS (SELECT 1 FROM "recruiting_candidate_occurrences" o JOIN "recruiting_candidate_pages" p ON p."effectId" = o."pageId" WHERE o."roleId" = b."roleId" AND o."candidateKey" = b."candidateKey" AND p."effectId" = ${input.sourceEffectId})`,
         );
       const filtered = Prisma.sql`${candidateIndexQuery(role.id)}, filtered AS (SELECT b.* FROM base b WHERE ${Prisma.join(clauses, " AND ")})`;
       const totals = await tx.$queryRaw<

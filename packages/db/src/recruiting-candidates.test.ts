@@ -70,7 +70,10 @@ describe("candidate listing and shortlist boundaries", () => {
     const f = fixture();
     f.tx.recruitingRole.findFirst.mockResolvedValueOnce(null as never);
     await expect(
-      recruiting.listRecruitingCandidates(f.prisma, actor, { roleId: "foreign" }),
+      recruiting.listRecruitingCandidates(f.prisma, actor, {
+        roleId: "foreign",
+        sourceEffectId: "native-read",
+      }),
     ).rejects.toThrow(IsolationError);
     expect(f.tx.$queryRaw).not.toHaveBeenCalled();
   });
@@ -117,6 +120,7 @@ describe("candidate listing and shortlist boundaries", () => {
         limit: 1,
         sort: "name",
         query: search,
+        sourceEffectId: "native-read",
       });
       expect(page.total).toBe(19);
       expect(page.counts).toEqual({
@@ -140,15 +144,64 @@ describe("candidate listing and shortlist boundaries", () => {
       expect(query.values).toContain(search);
       expect(query.sql).toContain('b."name"');
       expect(query.sql).toContain('b."linkedinUrl"');
-      await expect(
-        recruiting.listRecruitingCandidates(f.prisma, actor, {
-          roleId: "role",
-          limit: 1,
-          sort: "name",
-          query: "Different",
-          cursor: page.nextCursor!,
-        }),
-      ).rejects.toThrow(recruiting.RecruitingConflictError);
+      for (const [statement] of f.tx.$queryRaw.mock.calls) {
+        const sql = statement as { sql: string; values: unknown[] };
+        expect(sql.sql).toContain(
+          'WHERE o."roleId" = b."roleId" AND o."candidateKey" = b."candidateKey" AND p."effectId" = ?',
+        );
+        expect(sql.values).toContain("native-read");
+        expect(sql.sql).not.toContain('p."actionId" =');
+      }
+      const totals = f.tx.$queryRaw.mock.calls[0]![0] as { sql: string };
+      expect(totals.sql).toContain('(SELECT count(*) FROM filtered) AS "total"');
+      expect(totals.sql).toContain('AS "shortlisted" FROM base');
+      for (const changed of [
+        { query: "Different" },
+        { sourceEffectId: "other-read" },
+        { sourceEffectId: undefined },
+        { actionId: "action" },
+      ])
+        await expect(
+          recruiting.listRecruitingCandidates(f.prisma, actor, {
+            roleId: "role",
+            limit: 1,
+            sort: "name",
+            query: search,
+            sourceEffectId: "native-read",
+            cursor: page.nextCursor!,
+            ...changed,
+          }),
+        ).rejects.toThrow(recruiting.RecruitingConflictError);
+      expect(f.tx.$queryRaw).toHaveBeenCalledTimes(2);
+    },
+  );
+  it.each([{ actionId: "action" }, { actionId: "action", sourceEffectId: "native-read" }])(
+    "intersects source and action membership without changing the action predicate: %j",
+    async (filters) => {
+      const f = fixture();
+      f.tx.$queryRaw.mockResolvedValueOnce([
+        {
+          total: 0n,
+          sourceRows: 3n,
+          candidates: 2n,
+          identifiedCandidates: 2n,
+          unassessed: 2n,
+          assessed: 0n,
+          shortlisted: 0n,
+        },
+      ]);
+      await recruiting.listRecruitingCandidates(f.prisma, actor, { roleId: "role", ...filters });
+      for (const [statement] of f.tx.$queryRaw.mock.calls) {
+        const query = statement as { sql: string; values: unknown[] };
+        expect(query.sql).toContain(
+          'WHERE o."roleId" = b."roleId" AND o."candidateKey" = b."candidateKey" AND p."actionId" = ?',
+        );
+        expect(query.values).toContain("action");
+        if (filters.sourceEffectId) {
+          expect(query.sql).toContain(") AND EXISTS (");
+          expect(query.values).toContain(filters.sourceEffectId);
+        }
+      }
     },
   );
   it("makes a human shortlist receipt only for a successful candidate CAS change", async () => {

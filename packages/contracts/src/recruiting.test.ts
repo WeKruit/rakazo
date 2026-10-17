@@ -1503,9 +1503,15 @@ describe("candidate index contracts", () => {
         roleId: "role",
         limit: 25,
         assessmentState: "unassessed",
+        sourceEffectId: "native-read",
+        actionId: "action",
         sort: "name",
       }),
-    ).toMatchObject({ limit: 25 });
+    ).toMatchObject({ limit: 25, sourceEffectId: "native-read", actionId: "action" });
+    expect(
+      contracts.ListRecruitingCandidatesInput.safeParse({ roleId: "role", sourceEffectId: " " })
+        .success,
+    ).toBe(false);
     expect(
       contracts.ListRecruitingCandidatesInput.safeParse({ roleId: "role", sort: "raw SQL" })
         .success,

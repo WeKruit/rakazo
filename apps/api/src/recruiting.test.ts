@@ -333,12 +333,18 @@ describe("native recruiting RPC", () => {
     };
     vi.mocked(db.listRecruitingCandidates).mockResolvedValueOnce(candidatePage);
     expect(
-      await client.recruiting.listCandidates({ roleId: "role", query: "Engineer", limit: 20 }),
+      await client.recruiting.listCandidates({
+        roleId: "role",
+        query: "Engineer",
+        limit: 20,
+        sourceEffectId: "native-read",
+      }),
     ).toEqual(candidatePage);
     expect(db.listRecruitingCandidates).toHaveBeenLastCalledWith(prisma, actor, {
       roleId: "role",
       query: "Engineer",
       limit: 20,
+      sourceEffectId: "native-read",
     });
     const sources = {
       roleId: "role",

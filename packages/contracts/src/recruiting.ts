@@ -1003,6 +1003,7 @@ export const ListRecruitingCandidatesInput = z.strictObject({
   verdict: VerdictSchema.optional(),
   shortlisted: z.boolean().optional(),
   actionId: RecruitingId.optional(),
+  sourceEffectId: RecruitingId.optional(),
   sort: z.enum(["name", "recent"]).optional(),
 });
 export type ListRecruitingCandidatesInput = z.infer<typeof ListRecruitingCandidatesInput>;

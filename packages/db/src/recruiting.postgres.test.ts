@@ -7696,6 +7696,94 @@ describePostgres("recruiting domain (PostgreSQL)", () => {
     ).toEqual(old);
   });
 
+  it("filters saved native pages with overlapping identities without narrowing role counts", async () => {
+    const { f, prepared } = await mappedResearchFixture();
+    const pages = [];
+    for (const [label, name] of [
+      ["native-first", "Alpha"],
+      ["native-second", "Beta"],
+    ] as const) {
+      const page = await recordCandidatePage(f, prepared, label, [
+        canonicalCandidateRow("Shared", "https://www.linkedin.com/in/shared"),
+        canonicalCandidateRow(name, `https://www.linkedin.com/in/${name.toLowerCase()}`),
+      ]);
+      pages.push(
+        await prisma.recruitingCandidatePage.update({
+          where: { effectId: page.input.effectId },
+          data: { taskId: null, actionId: null },
+        }),
+      );
+    }
+    await recordCandidatePage(f, prepared, "action-page", [
+      canonicalCandidateRow("Shared", "https://www.linkedin.com/in/shared"),
+    ]);
+    const input = {
+      roleId: f.role.role.id,
+      sourceEffectId: pages[0]!.effectId,
+      sort: "name" as const,
+      limit: 1,
+    };
+    const first = await recruiting.listRecruitingCandidates(prisma, actor, input);
+    expect(first.total).toBe(2);
+    expect(first.items.map((item) => item.candidateKey)).toEqual(["linkedin:/in/alpha"]);
+    expect(first.counts).toEqual({
+      sourceRows: 5,
+      candidates: 3,
+      identifiedCandidates: 3,
+      unassessed: 3,
+      assessed: 0,
+      shortlisted: 0,
+    });
+    expect(first.nextCursor).not.toBeNull();
+    const next = await recruiting.listRecruitingCandidates(prisma, actor, {
+      ...input,
+      cursor: first.nextCursor!,
+    });
+    expect(next.items[0]).toMatchObject({ candidateKey: "linkedin:/in/shared", discoveryCount: 3 });
+    expect(next.nextCursor).toBeNull();
+    expect(next.total).toBe(first.total);
+    expect(next.counts).toEqual(first.counts);
+    const second = await recruiting.listRecruitingCandidates(prisma, actor, {
+      ...input,
+      sourceEffectId: pages[1]!.effectId,
+      limit: 100,
+    });
+    expect(second.items.map((item) => item.candidateKey)).toEqual([
+      "linkedin:/in/beta",
+      "linkedin:/in/shared",
+    ]);
+    for (const sourceEffectId of [pages[1]!.effectId, undefined])
+      await expect(
+        recruiting.listRecruitingCandidates(prisma, actor, {
+          ...input,
+          sourceEffectId,
+          cursor: first.nextCursor!,
+        }),
+      ).rejects.toThrow(recruiting.RecruitingConflictError);
+    const action = await recruiting.listRecruitingCandidates(prisma, actor, {
+      roleId: input.roleId,
+      actionId: prepared.action.id,
+    });
+    const intersection = await recruiting.listRecruitingCandidates(prisma, actor, {
+      ...input,
+      actionId: prepared.action.id,
+    });
+    expect(action.total).toBe(1);
+    expect(intersection.items.map((item) => item.candidateKey)).toEqual(["linkedin:/in/shared"]);
+    expect(intersection.total).toBe(action.total);
+    const other = await mappedResearchFixture();
+    await recordCandidatePage(other.f, other.prepared, "other-role-page", [
+      canonicalCandidateRow("Shared", "https://www.linkedin.com/in/shared"),
+    ]);
+    const foreign = await recruiting.listRecruitingCandidates(prisma, actor, {
+      roleId: other.f.role.role.id,
+      sourceEffectId: input.sourceEffectId,
+    });
+    expect(foreign.total).toBe(0);
+    expect(foreign.items).toEqual([]);
+    expect(foreign.counts).toMatchObject({ sourceRows: 1, candidates: 1 });
+  });
+
   it("keeps cross-action occurrences for one profile while role identities stay isolated", async () => {
     const { f, prepared } = await mappedResearchFixture();
     await recordCandidatePage(f, prepared, "cross-action-first", [
