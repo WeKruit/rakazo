@@ -97,6 +97,7 @@ import {
   validateRecruitingTextSelection,
 } from "@rakazo/core";
 import { stableJsonValue } from "@rakazo/core/node/approval-effect-key";
+import { extractPdfText } from "@rakazo/core/node/pdf-text";
 import type { PrismaClient } from "./client.js";
 import { Prisma } from "./client.js";
 import type { AnswerRunInput, PauseRunForInput } from "./events.js";
@@ -1961,6 +1962,7 @@ async function validateReadSources(
   // ponytail: reuse native reads only within this validation call; every reference is checked below.
   const messages = new Map<string, SourceMessage>();
   const rows = new Map<string, Prisma.ArtifactGetPayload<Record<string, never>>>();
+  const pdfTexts = new Map<string, string>();
   const provenance = new Map<
     string,
     {
@@ -2096,21 +2098,31 @@ async function validateReadSources(
         createHash("sha256").update(bytes).digest("hex") !== artifact.hash
       )
         throw new IsolationError();
-      // ponytail: role references attest only the native text field; other fields need typed selections.
+      // ponytail: role references attest only extracted text; other fields need typed selections.
       if (selection?.kind === "message_text" || (!selection && source.anchor.locator !== "text"))
         throw new IsolationError();
       const json = artifact.mimeType === "application/json" || artifact.mimeType.endsWith("+json");
+      const pdf = artifact.mimeType === "application/pdf";
       const jsonPath =
         selection?.kind === "artifact_json_string"
           ? selection.path
           : !selection && json
             ? ["text"]
             : undefined;
-      if (jsonPath ? !json : !artifact.mimeType.startsWith("text/") || json)
+      if (jsonPath ? !json : (!artifact.mimeType.startsWith("text/") && !pdf) || json)
         throw new IsolationError();
+      if (pdf && !pdfTexts.has(artifact.hash)) {
+        try {
+          pdfTexts.set(artifact.hash, await extractPdfText(bytes));
+        } catch {
+          throw new IsolationError();
+        }
+      }
       const text = jsonPath
         ? assessmentJsonString(bytes, jsonPath)
-        : new TextDecoder("utf-8", { fatal: true }).decode(bytes);
+        : pdf
+          ? pdfTexts.get(artifact.hash)!
+          : new TextDecoder("utf-8", { fatal: true }).decode(bytes);
       const start = selection?.start ?? text.indexOf(source.quote);
       if (start < 0) throw new RecruitingSourceValidationError(source.id, source.anchor.locator);
       assessmentSelection(text, start, selection?.end ?? start + source.quote.length, source.quote);

@@ -3,6 +3,7 @@ import { createRouterClient } from "@orpc/server";
 import type { ArtifactStore } from "@rakazo/adapter-kit";
 import type { Actor } from "@rakazo/contracts";
 import { RecruitingAssessmentSnapshotSchema } from "@rakazo/contracts";
+import { extractPdfText } from "@rakazo/core/node/pdf-text";
 import type * as DbExports from "@rakazo/db";
 import type { PrismaClient } from "@rakazo/db";
 import * as db from "@rakazo/db";
@@ -11,11 +12,12 @@ import {
   RecruitingConflictError,
   RecruitingSourceValidationError,
 } from "@rakazo/db";
-import { describe, expect, it, vi } from "vitest";
+import { beforeEach, describe, expect, it, vi } from "vitest";
 import * as api from "./recruiting.js";
 import type { RouterDeps } from "./router.js";
 import { createRouter } from "./router.js";
 
+vi.mock("@rakazo/core/node/pdf-text", () => ({ extractPdfText: vi.fn() }));
 vi.mock("@rakazo/db", async (importOriginal) => {
   const actual = await importOriginal<typeof DbExports>();
   return {
@@ -67,26 +69,31 @@ describe("readable recruiting sources", () => {
     roleRevisionId: "revision",
     sourceRefId: "source",
   };
-  function fixture() {
-    const get = vi.fn(async () => bytes);
+  function fixture(content = bytes, mimeType = "application/json") {
+    const contentHash = createHash("sha256").update(content).digest("hex");
+    const savedSource = {
+      ...source,
+      anchor: { ...source.anchor, artifact: { artifactId: "material", sha256: contentHash } },
+    };
+    const get = vi.fn(async () => content);
     const findFirst = vi.fn(async () => ({
       id: "material",
       spaceId: actor.spaceId,
       userId: actor.userId,
       storageKey: "stored",
       botId: "bot",
-      mimeType: "application/json",
-      size: bytes.length,
-      hash,
+      mimeType,
+      size: content.length,
+      hash: contentHash,
     }));
     const deps = {
       prisma: { artifact: { findFirst } } as unknown as PrismaClient,
       artifacts: { get } as unknown as ArtifactStore,
     };
     vi.mocked(db.getRecruitingWorkspace).mockResolvedValue({
-      revision: { id: "revision", sourceRefs: [source], criteria: [] },
+      revision: { id: "revision", sourceRefs: [savedSource], criteria: [] },
     } as never);
-    return { deps, get, findFirst };
+    return { deps, get, findFirst, source: savedSource };
   }
   it("reads only a persisted source string and exact highlight without returning its raw wrapper", async () => {
     const f = fixture();
@@ -221,6 +228,102 @@ describe("readable recruiting sources", () => {
       message: "Resource not found",
     });
     expect(f.get).not.toHaveBeenCalled();
+  });
+
+  describe("original PDF evidence (mocked storage and processor)", () => {
+    const pdf = Buffer.from("%PDF-1.7\nsynthetic original bytes");
+    beforeEach(() => vi.mocked(extractPdfText).mockReset().mockResolvedValue(text));
+
+    it("reads a saved role quote and assessment UTF-16 selection from the same extracted text", async () => {
+      const f = fixture(pdf, "application/pdf");
+      const start = text.indexOf(quote);
+      const expected = { text, start, end: start + quote.length };
+      expect(await api.readRecruitingSource(f.deps, actor, roleInput)).toEqual(expected);
+      vi.mocked(db.getRecruitingAssessment).mockResolvedValue({
+        assessment: {
+          version: 2,
+          sourceRefs: [
+            {
+              ...f.source,
+              selection: { kind: "artifact_text", start, end: start + quote.length },
+            },
+          ],
+        },
+      } as never);
+      expect(
+        await api.readRecruitingSource(f.deps, actor, {
+          kind: "assessment",
+          roleId: "role",
+          candidateKey: "candidate",
+          version: 2,
+          sourceRefId: "source",
+        }),
+      ).toEqual(expected);
+      expect(extractPdfText).toHaveBeenCalledTimes(2);
+      expect(extractPdfText).toHaveBeenLastCalledWith(pdf);
+    });
+
+    it.each(["foreign", "hash", "bytes", "json-selection", "message-selection"])(
+      "rejects %s before invoking the PDF processor",
+      async (boundary) => {
+        const f = fixture(pdf, "application/pdf");
+        if (boundary === "foreign") f.findFirst.mockResolvedValueOnce(null as never);
+        if (boundary === "bytes") f.get.mockResolvedValueOnce(Buffer.from("changed"));
+        const saved = {
+          ...f.source,
+          ...(boundary === "hash"
+            ? { anchor: { ...f.source.anchor, artifact: { artifactId: "material", sha256: hash } } }
+            : {}),
+          ...(boundary === "json-selection"
+            ? { selection: { kind: "artifact_json_string", path: ["text"], start: 0, end: 1 } }
+            : {}),
+          ...(boundary === "message-selection"
+            ? { selection: { kind: "message_text", blockIndex: 0, start: 0, end: 1 } }
+            : {}),
+        };
+        vi.mocked(db.getRecruitingWorkspace).mockResolvedValue({
+          revision: { id: "revision", sourceRefs: [saved], criteria: [] },
+        } as never);
+        await expect(api.readRecruitingSource(f.deps, actor, roleInput)).rejects.toMatchObject({
+          code: "NOT_FOUND",
+          message: "Resource not found",
+        });
+        expect(extractPdfText).not.toHaveBeenCalled();
+        if (boundary === "foreign") expect(f.get).not.toHaveBeenCalled();
+      },
+    );
+
+    it.each(["quote", "offset", "processor"])(
+      "fails closed on a PDF %s error without returning raw bytes or processor details",
+      async (boundary) => {
+        const f = fixture(pdf, "application/pdf");
+        const start = text.indexOf(quote);
+        vi.mocked(db.getRecruitingWorkspace).mockResolvedValue({
+          revision: {
+            id: "revision",
+            sourceRefs: [
+              {
+                ...f.source,
+                quote: boundary === "quote" ? "Invented evidence" : quote,
+                selection: {
+                  kind: "artifact_text",
+                  start: boundary === "offset" ? start + 1 : start,
+                  end: start + quote.length,
+                },
+              },
+            ],
+            criteria: [],
+          },
+        } as never);
+        if (boundary === "processor")
+          vi.mocked(extractPdfText).mockRejectedValueOnce(new Error("private processor path"));
+        await expect(api.readRecruitingSource(f.deps, actor, roleInput)).rejects.toMatchObject({
+          code: "NOT_FOUND",
+          message: "Resource not found",
+        });
+        expect(extractPdfText).toHaveBeenCalledOnce();
+      },
+    );
   });
 });
 

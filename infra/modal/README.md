@@ -15,6 +15,10 @@ provides account access and billing; unrelated applications are not modified.
   Upstream migrations expect `public`; do not run them over an existing CRM.
 - The image installs the public CA provided by Supabase's database settings and
   supplies it to Node. TLS verification stays enabled; no host trust settings change.
+- The API/worker image includes Poppler for native PDF text reading and citation
+  verification. It reads verified PDF bytes with fixed arguments; it does not
+  enable agent shell/computer tools or OCR. Other host installations need
+  `pdftotext` on the backend PATH to read PDF text.
 - On Modal's IPv4 network, use Supabase's free Session pooler, with the qualified
   role name and the dedicated database. Verify `current_database()` and `LISTEN`
   before migrating; transaction pooling does not preserve the worker's sessions.

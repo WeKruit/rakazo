@@ -1,14 +1,22 @@
 import { createHash } from "node:crypto";
-import type { Actor, RecruitingBrief, RecruitingCriterion } from "@rakazo/contracts";
+import type {
+  Actor,
+  RecruitingAssessmentSourceRef,
+  RecruitingBrief,
+  RecruitingCriterion,
+} from "@rakazo/contracts";
 import { ReviseRecruitingRoleInput } from "@rakazo/contracts";
 import { qualifiedEmploymentMonths, RecruitingPlaybookValidationError } from "@rakazo/core";
 import { stableJsonValue } from "@rakazo/core/node/approval-effect-key";
-import { describe, expect, it, vi } from "vitest";
+import { extractPdfText } from "@rakazo/core/node/pdf-text";
+import { beforeEach, describe, expect, it, vi } from "vitest";
 import type { Prisma, PrismaClient } from "./client.js";
 import type { RecruitingRoleMaterialContext } from "./recruiting.js";
 import * as recruiting from "./recruiting.js";
 import { confirmRecruitingBrief } from "./recruiting.js";
 import { IsolationError } from "./scope.js";
+
+vi.mock("@rakazo/core/node/pdf-text", () => ({ extractPdfText: vi.fn() }));
 
 const actor: Actor = {
   spaceId: "space",
@@ -1111,6 +1119,169 @@ function approvalFixture() {
     approve,
   };
 }
+
+describe("original PDF source validation (mocked DB, storage and processor)", () => {
+  const text = "Original 🧭 candidate evidence\nSecond evidence line\f";
+  const quote = "🧭 candidate evidence";
+  beforeEach(() => vi.mocked(extractPdfText).mockReset().mockResolvedValue(text));
+
+  function pdfFixture() {
+    const f = approvalFixture();
+    const artifact = f.artifacts[1]!;
+    const provider = vi.fn(async () => null as { id: string } | null);
+    Object.assign(f.tx, { recruitingResearchAction: { findFirst: provider } });
+    const source = {
+      id: "pdf-evidence",
+      kind: "original_material" as const,
+      anchor: {
+        kind: "artifact" as const,
+        artifact: { artifactId: artifact.id, sha256: artifact.hash },
+        locator: "text",
+      },
+      readState: "read" as const,
+      readAt: "2026-10-16T18:00:00Z",
+      quote,
+    };
+    const input = ReviseRecruitingRoleInput.parse({
+      roleId: "role",
+      expectedRevision: 1,
+      title: "Example engineer",
+      sourceRefs: [source, { ...source, id: "second-quote", quote: "Second evidence line" }],
+      criteria: [],
+      preferences: [],
+      definitionQuestions: [],
+      brief: { fields: [], searchFilters: [], rules: [], questions: [] },
+    });
+    return { ...f, artifact, source, input, provider };
+  }
+
+  it("persists exact role quotes from one extraction per PDF within each validation call", async () => {
+    const f = pdfFixture();
+    const saved = await recruiting.reviseRecruitingRole(f.prisma, actor, f.input, f.material);
+    expect(saved.revision.sourceRefs).toEqual(f.input.sourceRefs);
+    expect(extractPdfText).toHaveBeenCalledOnce();
+    expect(extractPdfText).toHaveBeenCalledWith(f.bytes.get("pdf"));
+    await recruiting.reviseRecruitingRole(
+      f.prisma,
+      actor,
+      { ...f.input, expectedRevision: 2 },
+      f.material,
+    );
+    expect(extractPdfText).toHaveBeenCalledTimes(2);
+  });
+
+  it.each([
+    "foreign",
+    "hash",
+    "bytes",
+    "provider-label",
+    "provider-origin",
+    "unreceipted",
+    "locator",
+  ])("rejects PDF %s before processing and writing a revision", async (boundary) => {
+    const f = pdfFixture();
+    let source = f.source;
+    if (boundary === "foreign") f.artifact.userId = "another-human";
+    if (boundary === "hash")
+      source = {
+        ...source,
+        anchor: { ...source.anchor, artifact: { artifactId: "pdf", sha256: "0".repeat(64) } },
+      };
+    if (boundary === "bytes") f.bytes.set("pdf", new TextEncoder().encode("changed"));
+    if (boundary === "provider-label") source = { ...source, kind: "provider_report" as never };
+    if (boundary === "provider-origin") f.provider.mockResolvedValue({ id: "provider" });
+    if (boundary === "unreceipted") f.artifact.runId = "run";
+    if (boundary === "locator")
+      source = { ...source, anchor: { ...source.anchor, locator: "page:1" } };
+    await expect(
+      recruiting.reviseRecruitingRole(
+        f.prisma,
+        actor,
+        { ...f.input, sourceRefs: [source] },
+        f.material,
+      ),
+    ).rejects.toThrow(IsolationError);
+    expect(extractPdfText).not.toHaveBeenCalled();
+    expect(f.tx.recruitingRoleRevision.create).not.toHaveBeenCalled();
+  });
+
+  it.each(["quote", "processor"])("fails closed on PDF %s errors", async (boundary) => {
+    const f = pdfFixture();
+    if (boundary === "processor")
+      vi.mocked(extractPdfText).mockRejectedValueOnce(new Error("private processor path"));
+    const error = await recruiting
+      .reviseRecruitingRole(
+        f.prisma,
+        actor,
+        {
+          ...f.input,
+          sourceRefs: [{ ...f.source, quote: boundary === "quote" ? "Invented evidence" : quote }],
+        },
+        f.material,
+      )
+      .catch((error: unknown) => error);
+    expect(error).toBeInstanceOf(
+      boundary === "quote" ? recruiting.RecruitingSourceValidationError : IsolationError,
+    );
+    expect((error as Error).message).not.toMatch(/private processor path|%PDF|Invented evidence/);
+    expect(extractPdfText).toHaveBeenCalledOnce();
+    expect(f.tx.recruitingRoleRevision.create).not.toHaveBeenCalled();
+  });
+
+  it.each(["exact", "json-selection", "offset", "quote"])(
+    "revalidates saved assessment PDF evidence with %s UTF-16 selections",
+    async (boundary) => {
+      const f = await calibrationFixture();
+      const artifact = f.artifacts[1]!;
+      Object.assign(f.tx, { recruitingResearchAction: { findFirst: vi.fn(async () => null) } });
+      const start = text.indexOf(quote);
+      const source: RecruitingAssessmentSourceRef = {
+        id: "pdf-evidence",
+        kind: "original_material",
+        anchor: {
+          kind: "artifact",
+          artifact: { artifactId: artifact.id, sha256: artifact.hash },
+          locator: "text",
+        },
+        readState: "read",
+        readAt: "2026-10-16T18:00:00Z",
+        quote: boundary === "quote" ? "Invented evidence" : quote,
+        selection:
+          boundary === "json-selection"
+            ? { kind: "artifact_json_string", path: ["text"], start, end: start + quote.length }
+            : {
+                kind: "artifact_text",
+                start: boundary === "offset" ? start + 1 : start,
+                end: start + quote.length,
+              },
+      };
+      for (const assessment of f.assessments)
+        assessment.sourceRefs.push(
+          source as never,
+          {
+            ...source,
+            id: "second-pdf-evidence",
+            quote: "Second evidence line",
+            selection: {
+              kind: "artifact_text",
+              start: text.indexOf("Second evidence line"),
+              end: text.indexOf("Second evidence line") + "Second evidence line".length,
+            },
+          } as never,
+        );
+      const prepared = recruiting.prepareRecruitingApproval(
+        f.prisma,
+        actor,
+        f.trusted,
+        f.input,
+        f.material,
+      );
+      if (boundary === "exact") await expect(prepared).resolves.toHaveProperty("files");
+      else await expect(prepared).rejects.toThrow(IsolationError);
+      expect(extractPdfText).toHaveBeenCalledTimes(boundary === "json-selection" ? 0 : 1);
+    },
+  );
+});
 
 describe("native recruiting stage approvals", () => {
   it("preflights real authorized files without writes and rejects changed bytes", async () => {

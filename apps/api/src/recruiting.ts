@@ -13,6 +13,7 @@ import {
   readRecruitingJsonString,
   validateRecruitingTextSelection,
 } from "@rakazo/core";
+import { extractPdfText } from "@rakazo/core/node/pdf-text";
 import type { PrismaClient, RecruitingRoleMaterialContext } from "@rakazo/db";
 import * as recruiting from "@rakazo/db";
 import {
@@ -80,20 +81,24 @@ export const readRecruitingSource = (
       });
       if (row.hash !== source.anchor.artifact.sha256) throw new IsolationError();
       const selection = "selection" in source ? source.selection : undefined;
-      // ponytail: role sources attest only native text; other strings require the stored typed path.
+      // ponytail: role sources attest only extracted text; other strings require the stored typed path.
       if (selection?.kind === "message_text" || (!selection && source.anchor.locator !== "text"))
         throw new IsolationError();
       const json = row.mimeType === "application/json" || row.mimeType.endsWith("+json");
+      const pdf = row.mimeType === "application/pdf";
       const path =
         selection?.kind === "artifact_json_string"
           ? selection.path
           : !selection && json
             ? ["text"]
             : undefined;
-      if (path ? !json : !row.mimeType.startsWith("text/") || json) throw new IsolationError();
+      if (path ? !json : (!row.mimeType.startsWith("text/") && !pdf) || json)
+        throw new IsolationError();
       const text = path
         ? readRecruitingJsonString(bytes, path)
-        : new TextDecoder("utf-8", { fatal: true }).decode(bytes);
+        : pdf
+          ? await extractPdfText(bytes)
+          : new TextDecoder("utf-8", { fatal: true }).decode(bytes);
       const start = selection?.start ?? text.indexOf(source.quote);
       const end = selection?.end ?? start + source.quote.length;
       validateRecruitingTextSelection(text, start, end, source.quote);

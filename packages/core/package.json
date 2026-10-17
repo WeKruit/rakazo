@@ -39,6 +39,11 @@
       "development": "./src/node/desktop-runtime.ts",
       "default": "./src/node/desktop-runtime.ts"
     },
+    "./node/pdf-text": {
+      "types": "./src/node/pdf-text.ts",
+      "development": "./src/node/pdf-text.ts",
+      "default": "./src/node/pdf-text.ts"
+    },
     "./node/screen-capability": {
       "types": "./src/node/screen-capability.ts",
       "development": "./src/node/screen-capability.ts",

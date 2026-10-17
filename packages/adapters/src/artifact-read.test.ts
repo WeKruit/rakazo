@@ -4,13 +4,15 @@ import { tmpdir } from "node:os";
 import path from "node:path";
 import type { ArtifactStore } from "@rakazo/adapter-kit";
 import { toolRequiresApproval, unattendedTriggerToolRequiresApproval } from "@rakazo/core";
+import * as pdfText from "@rakazo/core/node/pdf-text";
 import type { PrismaClient } from "@rakazo/db";
-import { describe, expect, it, vi } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { artifactReadFromTool } from "./artifact-read.js";
 import { LocalArtifactStore } from "./artifacts.js";
 import { selectBuiltinToolsForRun } from "./executor.js";
 
 const actor = { spaceId: "space", userId: "owner" };
+afterEach(() => vi.restoreAllMocks());
 function fixture(text = "\uFEFF中文😀\r\nend 🧑‍💻") {
   const bytes = Buffer.from(text);
   const row = {
@@ -41,6 +43,51 @@ function fixture(text = "\uFEFF中文😀\r\nend 🧑‍💻") {
   return { deps, row, get, findFirst };
 }
 describe("native saved artifact reading", () => {
+  it("pages extracted PDF text while retaining its original identity and checking access before extraction", async () => {
+    const original = "First page: Python evidence.\nSecond page: geometry 😀.\n";
+    const extract = vi.spyOn(pdfText, "extractPdfText").mockResolvedValue(original);
+    const f = fixture("%PDF-1.4\nsynthetic converter input");
+    f.row.mimeType = "application/pdf";
+    expect(
+      await artifactReadFromTool(f.deps, { ...actor, userId: "foreign" }, { artifactId: f.row.id }),
+    ).toHaveProperty("error");
+    const hash = f.row.hash;
+    f.row.hash = "bad";
+    expect(await artifactReadFromTool(f.deps, actor, { artifactId: f.row.id })).toHaveProperty(
+      "error",
+    );
+    expect(extract).not.toHaveBeenCalled();
+    f.row.hash = hash;
+    let offset: number | null = 0;
+    let combined = "";
+    while (offset !== null) {
+      const result = await artifactReadFromTool(f.deps, actor, {
+        artifactId: f.row.id,
+        offset,
+        limit: 7,
+      });
+      expect(result).toMatchObject({
+        artifact: { id: f.row.id, hash, mimeType: "application/pdf", size: f.row.size },
+        totalLength: Array.from(original).length,
+        offsetUnit: "unicode_code_point",
+      });
+      if (!("text" in result)) throw new Error("PDF text unavailable");
+      combined += result.text;
+      offset = result.nextOffset ?? null;
+    }
+    expect(combined).toBe(original);
+    expect(extract).toHaveBeenCalledWith(Buffer.from("%PDF-1.4\nsynthetic converter input"));
+    extract.mockClear();
+    expect(
+      await artifactReadFromTool(f.deps, actor, { artifactId: f.row.id, jsonPath: ["text"] }),
+    ).toHaveProperty("error");
+    expect(extract).not.toHaveBeenCalled();
+    extract.mockRejectedValueOnce(new Error("/private/path secret-value"));
+    const failed = await artifactReadFromTool(f.deps, actor, { artifactId: f.row.id });
+    expect(failed).toHaveProperty("error", "PDF text could not be read or verified.");
+    expect(failed).not.toHaveProperty("text");
+    expect(JSON.stringify(failed)).not.toContain("secret-value");
+  });
   it("reads one exact candidate evidence string instead of preceding JD text", async () => {
     const evidence = '  Built "platforms" 😀\r\nwith distributed systems.\n';
     const f = fixture(

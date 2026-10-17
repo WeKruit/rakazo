@@ -148,6 +148,11 @@ pnpm sandbox:build
 pnpm dev
 ```
 
+Native PDF text reading requires Poppler's `pdftotext` on the API/worker PATH
+(`brew install poppler` on macOS, `apt-get install poppler-utils` on Debian/Ubuntu).
+The packaged backend images include it. This reads embedded text and verifies
+citations against the original PDF; scanned pages require a separate OCR capability.
+
 Postgres stays network-internal in the default Compose file (same as published images). The
 `postgres-host` overlay publishes loopback `127.0.0.1:5433` for host-side `pnpm` and DB tools.
 If that port is occupied, change `POSTGRES_HOST_PORT` and the port in `DATABASE_URL` in `.env`.

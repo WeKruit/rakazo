@@ -25,7 +25,7 @@ files = modal.Volume.from_name(VOLUME_NAME, create_if_missing=True)
 config = modal.Secret.from_name(SECRET_NAME)
 image = (
     modal.Image.from_registry("node:24.22.0-bookworm-slim", add_python="3.11")
-    .apt_install("ca-certificates", "git", "openssl")
+    .apt_install("ca-certificates", "git", "openssl", "poppler-utils")
     .run_commands("corepack enable", "corepack prepare pnpm@9.15.0 --activate")
     .add_local_dir(
         ROOT,
