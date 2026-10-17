@@ -7,9 +7,10 @@ import { MemoryRouter } from "react-router-dom";
 import { expect, it, vi } from "vitest";
 
 const api = vi.hoisted(() => ({ listSpace: vi.fn() }));
+const bootstrap = vi.hoisted(() => ({ take: vi.fn() }));
 vi.mock("../lib/rpc", () => ({ rpc: { artifacts: api } }));
 vi.mock("../lib/bootstrap", () => ({
-  takeInitialBootstrap: vi.fn().mockResolvedValue({ bots: [] }),
+  takeInitialBootstrap: bootstrap.take.mockResolvedValue({ bots: [] }),
 }));
 vi.mock("../lib/artifact-open", () => ({
   decodeArtifactBase64: vi.fn(),
@@ -43,6 +44,7 @@ vi.mock("@rakazo/ui-web", () => {
   };
 });
 
+import { setToolActivityPreference } from "../lib/tool-activity-preference";
 import { ArtifactsPage } from "./Artifacts";
 
 function artifact(name: string, id: string, createdAt = new Date().toISOString()) {
@@ -185,6 +187,54 @@ it("still offers Load more when filters match nothing on the loaded page", async
     });
   } finally {
     await page.cleanup();
+    vi.unstubAllGlobals();
+  }
+});
+
+it("requests diagnostic files only after the deployment owner opts in", async () => {
+  vi.stubGlobal("IS_REACT_ACT_ENVIRONMENT", true);
+  bootstrap.take.mockResolvedValue({ bots: [], me: { isDeploymentOwner: true } });
+  api.listSpace.mockClear().mockResolvedValue({ items: [], nextCursor: null });
+  setToolActivityPreference("off");
+  const page = await renderArtifacts();
+  try {
+    expect(api.listSpace).toHaveBeenLastCalledWith(
+      expect.objectContaining({ includeDiagnostics: false }),
+    );
+    await act(async () => {
+      setToolActivityPreference("on");
+    });
+    expect(api.listSpace).toHaveBeenLastCalledWith(
+      expect.objectContaining({ includeDiagnostics: true }),
+    );
+    await act(async () => {
+      setToolActivityPreference("off");
+    });
+    expect(api.listSpace).toHaveBeenLastCalledWith(
+      expect.objectContaining({ includeDiagnostics: false }),
+    );
+  } finally {
+    await page.cleanup();
+    setToolActivityPreference("off");
+    bootstrap.take.mockResolvedValue({ bots: [] });
+    vi.unstubAllGlobals();
+  }
+});
+
+it("keeps diagnostic file requests off for other users with a saved opt-in", async () => {
+  vi.stubGlobal("IS_REACT_ACT_ENVIRONMENT", true);
+  bootstrap.take.mockResolvedValue({ bots: [], me: { isDeploymentOwner: false } });
+  api.listSpace.mockClear().mockResolvedValue({ items: [], nextCursor: null });
+  setToolActivityPreference("on");
+  const page = await renderArtifacts();
+  try {
+    expect(api.listSpace).toHaveBeenLastCalledWith(
+      expect.objectContaining({ includeDiagnostics: false }),
+    );
+  } finally {
+    await page.cleanup();
+    setToolActivityPreference("off");
+    bootstrap.take.mockResolvedValue({ bots: [] });
     vi.unstubAllGlobals();
   }
 });

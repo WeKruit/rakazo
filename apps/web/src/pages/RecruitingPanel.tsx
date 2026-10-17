@@ -858,7 +858,7 @@ function ArtifactReference({
 }) {
   const { t } = useLingui();
   const [open, setOpen] = useState(false);
-  const sourceKey = JSON.stringify([reference, source]);
+  const sourceKey = JSON.stringify([reference, source, showDiagnostics]);
   const currentSource = useRef({ reference, source });
   currentSource.current = { reference, source };
   const [state, setState] = useState<{
@@ -876,7 +876,7 @@ function ArtifactReference({
     let cancelled = false;
     setState(null);
     void rpc.artifacts
-      .getById({ artifactId: reference.artifactId })
+      .getById({ artifactId: reference.artifactId, includeDiagnostics: showDiagnostics })
       .then(async (value) => {
         if (value.id !== reference.artifactId) throw new Error("Source Artifact changed");
         const bytes = decodeArtifactBase64(value.contentBase64);
@@ -939,7 +939,7 @@ function ArtifactReference({
             (artifact.mimeType === "application/json" ||
               artifact.mimeType.endsWith("+json")) ? null : (
               <ArtifactFileCard
-                target={target}
+                target={{ ...target, includeDiagnostics: showDiagnostics }}
                 artifactId={reference.artifactId}
                 name={showDiagnostics ? artifact.name : label}
                 mimeType={artifact.mimeType}

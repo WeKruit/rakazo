@@ -1,12 +1,14 @@
 import { createHash } from "node:crypto";
 import type { Actor, RecruitingBrief, RecruitingCriterion } from "@rakazo/contracts";
-import { qualifiedEmploymentMonths } from "@rakazo/core";
+import { ReviseRecruitingRoleInput } from "@rakazo/contracts";
+import { qualifiedEmploymentMonths, RecruitingPlaybookValidationError } from "@rakazo/core";
 import { stableJsonValue } from "@rakazo/core/node/approval-effect-key";
 import { describe, expect, it, vi } from "vitest";
 import type { Prisma, PrismaClient } from "./client.js";
 import type { RecruitingRoleMaterialContext } from "./recruiting.js";
 import * as recruiting from "./recruiting.js";
 import { confirmRecruitingBrief } from "./recruiting.js";
+import { IsolationError } from "./scope.js";
 
 const actor: Actor = {
   spaceId: "space",
@@ -832,6 +834,78 @@ it("accepts actual native human provenance for a user instruction", async () => 
   expect(f.tx.message.create).toHaveBeenCalledOnce();
 });
 
+it("explains mixed JD attribution without accepting it as a human instruction", async () => {
+  const f = approvalFixture();
+  Object.assign(f.tx, { recruitingResearchAction: { findFirst: vi.fn(async () => null) } });
+  const original = f.revisions[0]!;
+  const artifact = f.artifacts[0]!;
+  const { confirmation: _confirmation, ...brief } = original.brief;
+  const input = ReviseRecruitingRoleInput.parse({
+    roleId: "role",
+    expectedRevision: 1,
+    title: "Example engineer",
+    criteria: original.criteria,
+    preferences: original.preferences,
+    definitionQuestions: original.definitionQuestions,
+    sourceRefs: [
+      ...original.sourceRefs,
+      {
+        id: "jd-document",
+        kind: "original_material" as const,
+        anchor: {
+          kind: "artifact" as const,
+          artifact: { artifactId: artifact.id, sha256: artifact.hash },
+          locator: "text",
+        },
+        readState: "read" as const,
+        readAt: "2026-10-16T18:00:00Z",
+        quote: "Final engineer job description",
+      },
+    ],
+    brief: {
+      ...brief,
+      fields: brief.fields.map((field, index) =>
+        index === 0
+          ? { ...field, origin: "user_instruction" as const, sourceRefIds: ["jd", "jd-document"] }
+          : field,
+      ),
+    },
+  });
+  const rejected = recruiting.reviseRecruitingRole(f.prisma, actor, input, f.material);
+  await expect(rejected).rejects.toThrow(RecruitingPlaybookValidationError);
+  await expect(rejected).rejects.toThrow(
+    "User-instruction facts require human-message sources; keep JD evidence separately attributed.",
+  );
+  expect(f.tx.recruitingRoleRevision.create).not.toHaveBeenCalled();
+
+  artifact.userId = "another-human";
+  await expect(recruiting.reviseRecruitingRole(f.prisma, actor, input, f.material)).rejects.toThrow(
+    IsolationError,
+  );
+  artifact.userId = actor.userId;
+  const hash = artifact.hash;
+  artifact.hash = "0".repeat(64);
+  await expect(recruiting.reviseRecruitingRole(f.prisma, actor, input, f.material)).rejects.toThrow(
+    IsolationError,
+  );
+  artifact.hash = hash;
+
+  input.brief!.fields[0]!.sourceRefIds = ["jd"];
+  f.tx.message.findMany.mockResolvedValue([
+    {
+      id: "jd-message",
+      threadId: "thread",
+      role: "user",
+      botId: null,
+      externalTranscriptFor: null,
+      blocks: [{ kind: "text", text: original.sourceRefs[0]!.quote }],
+    },
+  ]);
+  const saved = await recruiting.reviseRecruitingRole(f.prisma, actor, input, f.material);
+  expect(saved.revision.brief?.fields[0]?.sourceRefIds).toEqual(["jd"]);
+  expect(saved.role.revision).toBe(2);
+});
+
 it("rejects bot-authored evidence mislabeled as a user instruction", async () => {
   const f = fixture();
   f.revisions[0]!.brief.fields[0]!.origin = "user_instruction";
@@ -850,7 +924,7 @@ it("rejects bot-authored evidence mislabeled as a user instruction", async () =>
       roleId: "role",
       expectedRevision: 1,
     }),
-  ).rejects.toThrow();
+  ).rejects.toThrow(IsolationError);
   expect(f.tx.message.create).not.toHaveBeenCalled();
 });
 

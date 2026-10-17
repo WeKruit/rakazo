@@ -354,7 +354,11 @@ async function validateBriefAuthorship(tx: Tx, definition: CreateRoleInput | Rev
   for (const item of attributed) {
     for (const id of item.sourceRefIds) {
       const source = sources.get(id);
-      if (source?.anchor.kind !== "message") throw new IsolationError();
+      if (!source) throw new IsolationError();
+      if (source.anchor.kind !== "message")
+        throw new RecruitingPlaybookValidationError(
+          "User-instruction facts require human-message sources; keep JD evidence separately attributed.",
+        );
       messageIds.add(source.anchor.messageId);
     }
   }

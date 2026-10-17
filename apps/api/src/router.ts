@@ -226,6 +226,7 @@ import {
   getSpaceArtifact,
   getSpaceArtifactById,
   listArtifactVersions,
+  listOwnedArtifacts,
   listSpaceArtifacts,
 } from "./artifacts.js";
 import type { BillingService } from "./billing.js";
@@ -5859,26 +5860,7 @@ export function createRouter(deps: RouterDeps) {
     artifacts: {
       list: authed.artifacts.list.handler(async ({ context, input }) => {
         await repos.getBot(context.actor, input.botId);
-        const rows = await deps.prisma.artifact.findMany({
-          where: {
-            botId: input.botId,
-            groupId: null,
-            spaceId: context.actor.spaceId,
-            userId: context.actor.userId,
-          },
-        });
-        return rows.map((row) => ({
-          id: row.id,
-          botId: row.botId,
-          groupId: row.groupId,
-          runId: row.runId,
-          name: row.name,
-          description: row.description,
-          mimeType: row.mimeType,
-          size: row.size,
-          version: row.version,
-          createdAt: row.createdAt.toISOString(),
-        }));
+        return listOwnedArtifacts(deps, context.actor, input);
       }),
       listSpace: authed.artifacts.listSpace.handler(async ({ context, input }) => {
         if (input.botId) await repos.getBot(context.actor, input.botId);
@@ -5917,6 +5899,7 @@ export function createRouter(deps: RouterDeps) {
             artifactId: input.artifactId,
             groupId: input.groupId,
             contextBotId,
+            includeDiagnostics: input.includeDiagnostics,
           });
         }
         await repos.getBot(context.actor, input.botId!);
@@ -5924,6 +5907,7 @@ export function createRouter(deps: RouterDeps) {
           return await getOwnedArtifact(deps, context.actor, {
             botId: input.botId!,
             artifactId: input.artifactId,
+            includeDiagnostics: input.includeDiagnostics,
           });
         } catch (error) {
           if (error instanceof IsolationError) throw error;

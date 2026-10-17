@@ -964,7 +964,10 @@ it("shows saved source rounds with their exact original revision and Artifact", 
   expect(sources.textContent).toContain("output-1");
   expect(sources.textContent).toContain("provider_report");
   await view.expand("Source Artifact");
-  expect(api.getById).toHaveBeenCalledWith({ artifactId: f.reference.artifactId });
+  expect(api.getById).toHaveBeenCalledWith({
+    artifactId: f.reference.artifactId,
+    includeDiagnostics: true,
+  });
   expect(
     view.container.querySelector(`[data-artifact-id="${f.reference.artifactId}"]`),
   ).not.toBeNull();
@@ -1002,7 +1005,10 @@ it("shows a native candidate source Artifact without an empty custom-action head
   expect(sources.querySelector("p")?.textContent).toBe("provider_report · 2026-01-01T00:00:00Z");
   expect(sources.textContent).toContain("native-read-effect");
   await view.expand("Source Artifact");
-  expect(api.getById).toHaveBeenCalledWith({ artifactId: f.reference.artifactId });
+  expect(api.getById).toHaveBeenCalledWith({
+    artifactId: f.reference.artifactId,
+    includeDiagnostics: true,
+  });
   expect(sources.querySelector(`[data-artifact-id="${f.reference.artifactId}"]`)).not.toBeNull();
 });
 
@@ -1142,6 +1148,7 @@ it("keeps recruiting diagnostics out of product views while opening verified evi
   await vi.waitFor(() => expect(evidence.querySelector("[data-artifact-id]")).not.toBeNull());
   expect(api.getById).toHaveBeenCalledExactlyOnceWith({
     artifactId: material.reference.artifactId,
+    includeDiagnostics: false,
   });
   expect(evidence.textContent).not.toContain(material.reference.artifactId);
   expect(evidence.textContent).not.toContain(material.reference.sha256);
@@ -2384,7 +2391,10 @@ it.each(["text/plain", "text/html", "application/json"])(
     expect(details.textContent).toContain("Source text");
     expect(details.querySelector("script")).toBeNull();
     expect(details.querySelector('[data-artifact-id="artifact-source"]')).not.toBeNull();
-    expect(api.getById).toHaveBeenCalledExactlyOnceWith({ artifactId: f.reference.artifactId });
+    expect(api.getById).toHaveBeenCalledExactlyOnceWith({
+      artifactId: f.reference.artifactId,
+      includeDiagnostics: true,
+    });
     for (const method of [
       api.createRole,
       api.bindRole,
@@ -3082,7 +3092,10 @@ it("reads the native five views and lazily resolves memory history and Artifact 
   await view.click("Activity");
   expect(view.container.textContent).toContain("Compiler teams");
   await view.expand("Request");
-  expect(api.getById).toHaveBeenCalledWith({ artifactId: "artifact-request" });
+  expect(api.getById).toHaveBeenCalledWith({
+    artifactId: "artifact-request",
+    includeDiagnostics: true,
+  });
   expect(
     view.container
       .querySelector('[data-artifact-id="artifact-request"]')
@@ -3267,7 +3280,10 @@ it("drops cached Artifact metadata when its exact reference changes", async () =
   await view.click("Refresh");
   expect(view.container.textContent).not.toContain("request.json");
   await view.expand("Request");
-  expect(api.getById).toHaveBeenCalledWith({ artifactId: "request-2" });
+  expect(api.getById).toHaveBeenCalledWith({
+    artifactId: "request-2",
+    includeDiagnostics: true,
+  });
   expect(
     view.container.querySelector('[data-artifact-id="request-2"]')?.getAttribute("data-group-id"),
   ).toBe("source-group");

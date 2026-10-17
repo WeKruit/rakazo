@@ -1,6 +1,8 @@
 import { rpc } from "./rpc";
 
-export type ArtifactTarget = { botId: string } | { groupId: string };
+export type ArtifactTarget = ({ botId: string } | { groupId: string }) & {
+  includeDiagnostics?: boolean;
+};
 
 export function decodeArtifactBase64(contentBase64: string): Uint8Array {
   const binary = atob(contentBase64);

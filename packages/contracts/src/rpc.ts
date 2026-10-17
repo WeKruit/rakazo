@@ -944,13 +944,16 @@ export const appContract = {
     set: oc.input(z.object({ enabled: z.boolean() })).output(ActionAutoReviewSettingsSchema),
   },
   artifacts: {
-    list: oc.input(botId).output(z.array(ArtifactSchema)),
+    list: oc
+      .input(botId.extend({ includeDiagnostics: z.boolean().optional() }))
+      .output(z.array(ArtifactSchema)),
     listSpace: oc
       .input(
         z.object({
           botId: Id.optional(),
           cursor: z.string().optional(),
           limit: z.number().int().min(1).max(60).optional(),
+          includeDiagnostics: z.boolean().optional(),
         }),
       )
       .output(
@@ -959,7 +962,9 @@ export const appContract = {
           nextCursor: z.string().nullable(),
         }),
       ),
-    listVersions: oc.input(z.object({ familyId: Id })).output(z.array(ArtifactVersionSchema)),
+    listVersions: oc
+      .input(z.object({ familyId: Id, includeDiagnostics: z.boolean().optional() }))
+      .output(z.array(ArtifactVersionSchema)),
     create: oc
       .input(
         threadTarget.and(
@@ -974,8 +979,14 @@ export const appContract = {
         ),
       )
       .output(ArtifactSchema),
-    get: oc.input(threadTarget.and(z.object({ artifactId: Id }))).output(ArtifactWithContentSchema),
-    getById: oc.input(z.object({ artifactId: Id })).output(ArtifactWithContentSchema),
+    get: oc
+      .input(
+        threadTarget.and(z.object({ artifactId: Id, includeDiagnostics: z.boolean().optional() })),
+      )
+      .output(ArtifactWithContentSchema),
+    getById: oc
+      .input(z.object({ artifactId: Id, includeDiagnostics: z.boolean().optional() }))
+      .output(ArtifactWithContentSchema),
     remove: oc.input(z.object({ artifactId: Id })).output(z.object({ ok: z.literal(true) })),
   },
   usage: {

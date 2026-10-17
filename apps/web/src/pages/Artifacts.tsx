@@ -30,7 +30,7 @@ import {
   Search,
   Trash2,
 } from "lucide-react";
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState, useSyncExternalStore } from "react";
 import { Link, useNavigate, useParams } from "react-router-dom";
 import { PdfViewer } from "../components/PdfViewer";
 import { SandboxedHtmlViewer } from "../components/SandboxedHtmlViewer";
@@ -39,6 +39,7 @@ import { takeInitialBootstrap } from "../lib/bootstrap";
 import { desktopBridge } from "../lib/desktop";
 import { formatRelativeTime } from "../lib/relative-time";
 import { rpc } from "../lib/rpc";
+import { getToolActivityEnabled, subscribeToolActivity } from "../lib/tool-activity-preference";
 import { useObjectUrl } from "../lib/use-object-url";
 import { errorText } from "../lib/user-error";
 import { WindowChrome } from "./WindowChrome";
@@ -84,6 +85,12 @@ export function ArtifactsPage() {
   const navigate = useNavigate();
   const { t } = useLingui();
   const [bots, setBots] = useState<Bot[]>([]);
+  const [isDeploymentOwner, setIsDeploymentOwner] = useState(false);
+  const includeDiagnostics = useSyncExternalStore(
+    subscribeToolActivity,
+    () => getToolActivityEnabled(isDeploymentOwner),
+    () => false,
+  );
   const [items, setItems] = useState<ArtifactSummary[] | null>(null);
   const [loadError, setLoadError] = useState<string | null>(null);
   const [nextCursor, setNextCursor] = useState<string | null>(null);
@@ -101,7 +108,10 @@ export function ArtifactsPage() {
   const [deleteError, setDeleteError] = useState<string | null>(null);
 
   useEffect(() => {
-    void takeInitialBootstrap().then((bootstrap) => setBots(bootstrap.bots));
+    void takeInitialBootstrap().then((bootstrap) => {
+      setBots(bootstrap.bots);
+      setIsDeploymentOwner(bootstrap.me?.isDeploymentOwner === true);
+    });
   }, []);
 
   useEffect(() => {
@@ -113,7 +123,7 @@ export function ArtifactsPage() {
     setLoadError(null);
     setNextCursor(null);
     void rpc.artifacts
-      .listSpace({ botId: activeBotId ?? undefined, limit: LIST_PAGE_SIZE })
+      .listSpace({ botId: activeBotId ?? undefined, limit: LIST_PAGE_SIZE, includeDiagnostics })
       .then((page) => {
         if (cancelled) return;
         setItems(page.items);
@@ -127,7 +137,7 @@ export function ArtifactsPage() {
     return () => {
       cancelled = true;
     };
-  }, [activeBotId, t]);
+  }, [activeBotId, includeDiagnostics, t]);
 
   async function loadMore() {
     if (!nextCursor || loadingMoreRef.current) return;
@@ -140,6 +150,7 @@ export function ArtifactsPage() {
         botId: activeBotId ?? undefined,
         cursor: nextCursor,
         limit: LIST_PAGE_SIZE,
+        includeDiagnostics,
       });
       if (listingChanged()) return;
       setItems((current) => (current ?? []).concat(page.items));
@@ -323,8 +334,9 @@ export function ArtifactsPage() {
               />
             ) : null}
             <PreviewPane
-              key={artifactId}
+              key={`${artifactId}:${includeDiagnostics}`}
               artifactId={artifactId}
+              includeDiagnostics={includeDiagnostics}
               maximized={maximized}
               onToggleMaximize={() => setMaximized((value) => !value)}
             />
@@ -801,10 +813,12 @@ function mimeLabel(mimeType: string): string {
 
 function PreviewPane({
   artifactId,
+  includeDiagnostics,
   maximized,
   onToggleMaximize,
 }: {
   artifactId: string;
+  includeDiagnostics: boolean;
   maximized: boolean;
   onToggleMaximize: () => void;
 }) {
@@ -822,7 +836,7 @@ function PreviewPane({
     setVersions(null);
     setSelectedVersionId(null);
     void rpc.artifacts
-      .listVersions({ familyId: artifactId })
+      .listVersions({ familyId: artifactId, includeDiagnostics })
       .then((list) => {
         if (cancelled) return;
         setVersions(list);
@@ -834,14 +848,14 @@ function PreviewPane({
     return () => {
       cancelled = true;
     };
-  }, [artifactId]);
+  }, [artifactId, includeDiagnostics]);
 
   useEffect(() => {
     if (!selectedVersionId) return;
     let cancelled = false;
     setState({ status: "loading" });
     void rpc.artifacts
-      .getById({ artifactId: selectedVersionId })
+      .getById({ artifactId: selectedVersionId, includeDiagnostics })
       .then((artifact) => {
         if (!cancelled) {
           setState({
@@ -862,7 +876,7 @@ function PreviewPane({
     return () => {
       cancelled = true;
     };
-  }, [selectedVersionId, t]);
+  }, [selectedVersionId, includeDiagnostics, t]);
 
   return (
     <div className="flex min-w-0 flex-1 flex-col">
