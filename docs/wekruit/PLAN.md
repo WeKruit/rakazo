@@ -14,7 +14,9 @@ Supabase 独立数据库、原生 memory provider、Modal Volume 和 E2B 沿用�
 
 Execution priority: filter playbook and sourcing (S1–S5) come first; reply and follow-up work is deferred. Feature implementation and direct product validation come before CI waits. Do not wait for CodeQL/CI after each push. The owner authorized an incremental spending cap of US$150; track usage against the private authorization baseline and retain existing resources. The latest instruction authorizes continuing feature fixes, deployment and testing on the existing resources without repeated confirmation. PR merge, unapproved production migrations, access expansion and real outbound remain separate. A pending business question does not block independent product work, and broad execution access does not supply its answer.
 
-**最新线上为 v61 / `6a465663`。** 三份本批生产源码与独立发布归档 hash 一致，API health/ready 与 Web 均为 200、ready 非 degraded。实际容器替换前后，17 组数据逐项保持，包括 104 个 run、280 个 effect、260 条消息、109 份迁移、30 位真实候选/45 条来源、一份评估，以及预存合成人选的 shortlist=true、revision=1。
+**最新线上为 v62 / `3af3129e`。** 本批仅修正新生成的通用审批标题，复用既有可读名称格式化；格式化前先遮盖已知敏感值，原目的地、正文、review reason、actions 和审批归属保持。两项标题回归及一项遮盖顺序回归先失败，随后 21 项聚焦检查、adapters 类型/格式及独立复核通过。云端四份源码 hash 与发布归档相同，API health/ready、Web 均为 200、ready 非 degraded；实际容器内六项无副作用 helper 检查通过，不将它描述为新审批卡的网页点击验收。实际替换后 17 组数据逐项相同，包括 104 个 run、280 个 effect、261 条消息、109 份迁移及全部真实/合成业务和配置。最终网页刷新恢复原 Main 四选项、空白 Answer 与 30 人名单；截图私有保存。分支后续仅文档提交不等于新的线上版本。
+
+**v61 历史发布 / `6a465663`。** 三份本批生产源码与独立发布归档 hash 一致，API health/ready 与 Web 均为 200、ready 非 degraded。实际容器替换前后，17 组数据逐项保持，包括 104 个 run、280 个 effect、260 条消息、109 份迁移、30 位真实候选/45 条来源、一份评估，以及预存合成人选的 shortlist=true、revision=1。
 
 **原生问题证明批量核验。** v61 在 list/get/recovery/answer 四条既有路径复用同一原生问题证明校验器，批量读取原有证明，不改权限或卡片语义；四张历史卡在替换前后深度相等。旧查询实际执行 75 次 DB 操作、17,334ms 后事务过期；新批量查询实际 15 次、4,788ms 成功。另一次初始冷连接在准入阶段失败，0 次 DB 操作、5,961ms，独立保留，不归为查询成功或承诺通用延迟。没有提高 timeout、改变连接池/重试策略或新增 schema；六套 320 项聚焦检查、相关类型/格式与独立审查通过，和历史批次不累计。
 
@@ -22,7 +24,7 @@ Execution priority: filter playbook and sourcing (S1–S5) come first; reply and
 
 v60 正常网页仅将预先存在、明确标为虚构的未命名人选加入 shortlist；v61 容器替换保留该状态后，正常网页已将同一虚构人选移出。独立 DB 读回确认 shortlist=false、revision=2，新增人类消息业务可读，精确私有转换元组一致。刷新实际恢复两条业务回执和未选中的候选；最终 17 组快照核对全部既有 259 条消息原样保留，仅增加这两条人类回执、该虚构人选状态版本及原群消息序号，其余业务、执行、配置和记忆不变。真实 Main 原卡仍显示四个选项与空白 Answer，30 人/45 条来源、29 人未评估与一份评估恢复。没有新搜索、真实候选业务写入、外联或迁移；完整找人/校准/反馈续搜、P6 和 M1–M5 仍未完成。
 
-**仍有通用审批显示边界。** 现有 typed 招聘审批使用业务摘要；原生通用审批的旧保存标题/扁平 detail 仍可能含工具名和内部引用，不能把工具活动诊断开关描述为已覆盖任意审批或自由文本。真实目标、正文和授权范围必须保留，不能正则删除历史明细或用提示词声称绝对保护。新生成的通用审批标题已复用既有可读名称格式化，保留服务/操作与精确目的地，20 项聚焦检查及 adapters 类型/格式通过；尚未发布此标题增量。它不改变 detail、review reason、actions、effect 或权限，也不把历史审批授权展示标为完成。
+**仍有通用审批显示边界。** 现有 typed 招聘审批使用业务摘要；原生通用审批的旧保存标题/扁平 detail 仍可能含工具名和内部引用，不能把工具活动诊断开关描述为已覆盖任意审批或自由文本。真实目标、正文和授权范围必须保留，不能正则删除历史明细或用提示词声称绝对保护。新生成的通用审批标题已复用既有可读名称格式化，保留服务/操作与精确目的地，21 项聚焦检查及 adapters 类型/格式通过，已随 v62 发布。它不改变 detail、review reason、actions、effect 或权限，也不把历史审批授权展示标为完成。
 
 **v59 历史发布 / `6bd28e48`。** 本批八份运行源码与独立发布归档 hash 一致，API health/ready 与 Web 均为 200、ready 非 degraded。实际容器替换前后，104 个 run、280 个 effect、259 条消息、两位 bot、五份 skills、11 份记忆、109 份迁移、岗位 v3、30 人/45 条来源、一份评估及所有 thread 状态逐项相同。无新迁移、权限、服务或订阅；PR 仍为 Draft、未合并。
 
