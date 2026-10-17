@@ -862,6 +862,13 @@ const ResearchRoundInput = {
 };
 export const RecruitingResearchToolInputSchema = z.discriminatedUnion("operation", [
   z.strictObject({
+    operation: z.literal("save_results"),
+    expectedRoleRevision: Revision,
+    mcpServerId: RecruitingId,
+    providerTaskId: RecruitingId,
+    cursor: z.string().min(1).nullable().default(null),
+  }),
+  z.strictObject({
     ...ResearchRoundInput,
     operation: z.literal("prepare"),
     mcpServerId: RecruitingId,
@@ -1054,18 +1061,22 @@ export const ListRecruitingCandidateSourcesInput = z.strictObject({
 export type ListRecruitingCandidateSourcesInput = z.infer<
   typeof ListRecruitingCandidateSourcesInput
 >;
-export const RecruitingCandidateSourceSchema = z.strictObject({
-  crmImports: z.array(RecruitingCrmCandidateSyncSchema),
-  taskId: RecruitingId,
-  actionId: RecruitingId,
-  roleRevisionId: RecruitingId,
-  effectId: RecruitingId,
-  rowIndex: z.number().int().nonnegative(),
-  artifactRef: RecruitingArtifactRefSchema,
-  requestCursor: z.string().nullable(),
-  outputId: z.string().nullable(),
-  observedAt: IsoDate,
-});
+export const RecruitingCandidateSourceSchema = z
+  .strictObject({
+    crmImports: z.array(RecruitingCrmCandidateSyncSchema),
+    taskId: RecruitingId.nullable(),
+    actionId: RecruitingId.nullable(),
+    roleRevisionId: RecruitingId,
+    effectId: RecruitingId,
+    rowIndex: z.number().int().nonnegative(),
+    artifactRef: RecruitingArtifactRefSchema,
+    requestCursor: z.string().nullable(),
+    outputId: z.string().nullable(),
+    observedAt: IsoDate,
+  })
+  .refine((source) => (source.taskId === null) === (source.actionId === null), {
+    message: "Task and action references must be present or null together",
+  });
 export type RecruitingCandidateSource = z.infer<typeof RecruitingCandidateSourceSchema>;
 export const ListRecruitingCandidateSourcesOutput = z.strictObject({
   roleId: RecruitingId,

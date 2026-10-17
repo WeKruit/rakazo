@@ -10,10 +10,12 @@ import {
   IsolationError,
   listUnmappedRecruitingResearchReads,
   prepareRecruitingResearchAction,
+  readNativeRecruitingCandidatePage,
   readRecruitingResearchContext,
   reconcileRecruitingResearchAction,
   recordRecruitingResearchObservation,
   recruitingResearchSnapshot,
+  saveNativeRecruitingCandidatePage,
   saveRecruitingAssessment,
 } from "@rakazo/db";
 import { beforeEach, describe, expect, it, vi } from "vitest";
@@ -37,6 +39,8 @@ vi.mock("@rakazo/db", async (importOriginal) => ({
   reconcileRecruitingResearchAction: vi.fn(),
   recordRecruitingResearchObservation: vi.fn(),
   saveRecruitingAssessment: vi.fn(),
+  readNativeRecruitingCandidatePage: vi.fn(),
+  saveNativeRecruitingCandidatePage: vi.fn(),
 }));
 
 const actor: Actor = {
@@ -55,6 +59,102 @@ const mutation = {
   effectRequest: {},
 };
 const workspace = { role: { id: "role" }, revision: { id: "revision" } };
+
+describe("optional native candidate output saving", () => {
+  beforeEach(() => vi.clearAllMocks());
+  const input = {
+    operation: "save_results" as const,
+    expectedRoleRevision: 1,
+    mcpServerId: "server",
+    providerTaskId: "provider-task",
+    cursor: null,
+  };
+  const adapterContext = {
+    spaceId: actor.spaceId,
+    userId: actor.userId,
+    runId: "run",
+    operationId: "save",
+    traceId: "save",
+    signal: new AbortController().signal,
+  };
+  const trusted = {
+    ...context,
+    leaseOwner: "worker",
+    leaseFence: 1,
+    effectId: "save",
+    effectRequest: input,
+  };
+  function capture(raw: unknown) {
+    return {
+      effect: { id: "read", result: raw },
+      snapshot: { request: ["original-read"], providerResult: raw },
+    };
+  }
+  it("saves the actual native page bytes and all candidate rows through existing storage", async () => {
+    const rows = [{ name: "Example", linkedin_url: "https://linkedin.com/in/example" }, null];
+    const read = capture({ structuredContent: { rows, next_cursor: "opaque-next" } });
+    vi.mocked(readNativeRecruitingCandidatePage).mockResolvedValue(read as never);
+    const receipt = { status: "saved", sourceEffectId: "read" };
+    vi.mocked(saveNativeRecruitingCandidatePage).mockResolvedValue(receipt as never);
+    const put = vi.fn(async (_file: unknown) => ({ id: "retained-blob" }));
+    const prisma = {} as PrismaClient;
+    expect(
+      await tools.saveNativeRecruitingCandidateResults(
+        { prisma, artifacts: { put } } as never,
+        trusted,
+        input,
+        adapterContext,
+      ),
+    ).toEqual(receipt);
+    expect(put).toHaveBeenCalledOnce();
+    const uploaded = put.mock.calls[0]![0] as { bytes: Uint8Array };
+    expect(JSON.parse(Buffer.from(uploaded.bytes).toString())).toEqual(read.snapshot);
+    expect(saveNativeRecruitingCandidatePage).toHaveBeenCalledWith(
+      prisma,
+      actor,
+      trusted,
+      input,
+      expect.objectContaining({
+        sourceEffectId: "read",
+        rows,
+        outputArtifact: expect.objectContaining({ clientNonce: "recruiting-observation:read" }),
+      }),
+    );
+  });
+  it.each([
+    {
+      structuredContent: {
+        rows: [{ fact: "Company evidence", source_url: "https://example.test" }],
+      },
+    },
+    { content: [{ type: "text", text: "Unstructured results" }] },
+    { isError: true, structuredContent: { rows: [{ name: "Example", linkedin_url: null }] } },
+  ])("does not relabel company/JD or invalid tool results as candidate pages", async (raw) => {
+    vi.mocked(readNativeRecruitingCandidatePage).mockResolvedValue(capture(raw) as never);
+    const put = vi.fn();
+    await expect(
+      tools.saveNativeRecruitingCandidateResults(
+        { prisma: {}, artifacts: { put } } as never,
+        trusted,
+        input,
+        adapterContext,
+      ),
+    ).rejects.toThrow(/candidate/i);
+    expect(put).not.toHaveBeenCalled();
+    expect(saveNativeRecruitingCandidatePage).not.toHaveBeenCalled();
+  });
+  it("rejects a foreign adapter context before reading retained provider data", async () => {
+    await expect(
+      tools.saveNativeRecruitingCandidateResults(
+        { prisma: {}, artifacts: {} } as never,
+        trusted,
+        input,
+        { ...adapterContext, userId: "other" },
+      ),
+    ).rejects.toThrow(IsolationError);
+    expect(readNativeRecruitingCandidatePage).not.toHaveBeenCalled();
+  });
+});
 
 describe("native recruiting_role", () => {
   beforeEach(() => vi.clearAllMocks());

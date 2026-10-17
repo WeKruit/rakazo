@@ -1652,10 +1652,10 @@ model RecruitingCandidatePage {
   effect ExternalEffect @relation(fields: [effectId], references: [id], onDelete: Cascade)
   roleId String
   role RecruitingRole @relation(fields: [roleId], references: [id], onDelete: Cascade)
-  taskId String
-  task RecruitingResearchTask @relation(fields: [taskId], references: [id], onDelete: Cascade)
-  actionId String
-  action RecruitingResearchAction @relation(fields: [actionId], references: [id], onDelete: Cascade)
+  taskId String?
+  task RecruitingResearchTask? @relation(fields: [taskId], references: [id], onDelete: Cascade)
+  actionId String?
+  action RecruitingResearchAction? @relation(fields: [actionId], references: [id], onDelete: Cascade)
   roleRevisionId String
   roleRevision RecruitingRoleRevision @relation(fields: [roleRevisionId], references: [id], onDelete: NoAction)
   artifactId String

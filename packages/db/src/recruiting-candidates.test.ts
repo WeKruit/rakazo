@@ -8,6 +8,7 @@ import {
 import { stableJsonValue } from "@rakazo/core/node/approval-effect-key";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import type { PrismaClient } from "./client.js";
+import { appendEventInTransaction } from "./events.js";
 import { createThreadMessageInTransaction } from "./messages.js";
 import * as recruiting from "./recruiting.js";
 import { IsolationError } from "./scope.js";
@@ -2038,5 +2039,317 @@ describe("native observation indexing", () => {
     ).rejects.toThrow(IsolationError);
     expect(f.tx.recruitingCandidatePage.create).not.toHaveBeenCalled();
     expect(f.tx.artifact.create).not.toHaveBeenCalled();
+  });
+});
+
+function nativeCandidateFixture() {
+  const row = {
+    name: "Example",
+    linkedin_url: "https://www.linkedin.com/in/example",
+    current_title: "Engineer",
+    current_company: "Example Company",
+    location: null,
+    resume_url: null,
+    evidence_urls: [],
+  };
+  const f = observationFixture([row, { ...row }, null]);
+  Object.assign(f.run, {
+    status: "running",
+    leaseOwner: "worker",
+    leaseFence: 1,
+    leaseExpiresAt: new Date(Date.now() + 60_000),
+  });
+  const input = {
+    operation: "save_results" as const,
+    expectedRoleRevision: 1,
+    mcpServerId: "server",
+    providerTaskId: "provider-task",
+    cursor: null,
+  };
+  const saveEffect = {
+    ...f.effect,
+    id: "save",
+    kind: "recruiting_research",
+    status: "executing",
+    request: input,
+    result: null,
+  };
+  const pages = new Map<string, unknown>();
+  const snapshot = { request: f.effect.request, providerResult: f.effect.result };
+  const bytes = Buffer.from(stableJsonValue(snapshot));
+  const file = {
+    name: "native-candidates.json",
+    mimeType: "application/json",
+    size: bytes.length,
+    hash: createHash("sha256").update(bytes).digest("hex"),
+    storageKey: "native-source",
+    clientNonce: "recruiting-observation:read",
+  };
+  const tx = {
+    ...f.tx,
+    $queryRaw: vi.fn(async () => [{ id: "thread" }]),
+    externalEffect: {
+      findMany: vi.fn(async () => [f.effect]),
+      findFirst: vi.fn(async ({ where }) => (where.id === "save" ? saveEffect : f.effect)),
+      updateMany: vi.fn(async ({ data }) => {
+        Object.assign(saveEffect, data);
+        return { count: 1 };
+      }),
+    },
+    event: {
+      findMany: vi.fn(async () => []),
+      findFirst: vi.fn(async () => ({
+        id: "adoption",
+        seq: 1,
+        spaceId: actor.spaceId,
+        threadId: "thread",
+        botId: "bot",
+        runId: "run",
+        type: "recruiting.context.adopted",
+        payload: {
+          roleId: "role",
+          roleRevisionId: "revision",
+          contextArtifact: { artifactId: "context", sha256: f.hash },
+        },
+        createdAt: f.now,
+      })),
+    },
+    recruitingCandidatePage: {
+      findUnique: vi.fn(async ({ where }) => pages.get(where.effectId) ?? null),
+      create: vi.fn(async ({ data }) => {
+        pages.set(data.effectId, data);
+        return data;
+      }),
+    },
+  };
+  const prisma = { $transaction: vi.fn(async (fn) => fn(tx)) } as unknown as PrismaClient;
+  const trusted = {
+    runId: "run",
+    leaseOwner: "worker",
+    leaseFence: 1,
+    effectId: "save",
+    effectRequest: input,
+  };
+  return { ...f, tx, prisma, input, trusted, saveEffect, file, row, snapshot };
+}
+
+async function nativeSourceFixture() {
+  const f = crmFixture();
+  const read = f.effects.get("read")!;
+  const bytes = Buffer.from(
+    stableJsonValue({ request: read.request, providerResult: read.result }),
+  );
+  const artifact = await f.tx.artifact.findUnique();
+  Object.assign(artifact, {
+    hash: createHash("sha256").update(bytes).digest("hex"),
+    size: bytes.length,
+  });
+  Object.assign(f.page, { taskId: null, actionId: null, artifactHash: artifact.hash });
+  const event = {
+    id: "native-saved",
+    seq: 3,
+    spaceId: actor.spaceId,
+    threadId: "thread",
+    runId: "run",
+    botId: "bot",
+    type: "recruiting.candidates.saved",
+    createdAt: new Date(),
+    payload: {
+      roleId: "role",
+      roleRevisionId: "revision",
+      effectId: "read",
+      mcpServerId: "server",
+      serverRevision: 1,
+      providerTaskId: "provider-task",
+      requestCursor: null,
+      outputArtifact: { artifactId: artifact.id, sha256: artifact.hash },
+      candidateOutputSchema: "candidate_output_v1",
+    },
+  };
+  f.tx.event.findMany.mockResolvedValue([event] as never);
+  return { ...f, artifact, event, read };
+}
+
+describe("native candidate source provenance", () => {
+  it("serves the native artifact and keeps unassessed sources readable after a role revision", async () => {
+    const f = await nativeSourceFixture();
+    f.role.currentRevisionId = "later-revision";
+    f.role.revision = 2;
+    const sources = await recruiting.listRecruitingCandidateSources(f.prisma, actor, {
+      roleId: "role",
+      candidateKey: f.occurrence.candidateKey,
+    });
+    expect(sources.items[0]).toMatchObject({
+      taskId: null,
+      actionId: null,
+      effectId: "read",
+      roleRevisionId: "revision",
+      artifactRef: { artifactId: f.artifact.id, sha256: f.artifact.hash },
+    });
+    expect(f.tx.recruitingResearchAction.findFirst).not.toHaveBeenCalled();
+  });
+  it.each(["artifact-hash", "event-role", "event-owner", "route", "schema", "missing-event"])(
+    "rejects a native source with invalid %s",
+    async (boundary) => {
+      const f = await nativeSourceFixture();
+      if (boundary === "artifact-hash") f.artifact.hash = "f".repeat(64);
+      if (boundary === "event-role") f.event.payload.roleId = "other-role";
+      if (boundary === "event-owner") f.event.runId = "other-run";
+      if (boundary === "route") f.event.payload.providerTaskId = "other-task";
+      if (boundary === "schema") f.event.payload.candidateOutputSchema = "unknown";
+      if (boundary === "missing-event") f.tx.event.findMany.mockResolvedValue([]);
+      await expect(
+        recruiting.listRecruitingCandidateSources(f.prisma, actor, {
+          roleId: "role",
+          candidateKey: f.occurrence.candidateKey,
+        }),
+      ).rejects.toThrow();
+    },
+  );
+  it("keeps the existing CRM identity and target guards for a native discovery", async () => {
+    const f = await nativeSourceFixture();
+    const prepared = await recruiting.resolveRecruitingCrmImport(
+      f.prisma,
+      actor,
+      f.trusted,
+      f.input,
+    );
+    expect(prepared?.args).toMatchObject({
+      p_name: "Example",
+      p_linkedin_url: f.occurrence.linkedinUrl,
+    });
+    expect(f.tx.externalEffect.create).not.toHaveBeenCalled();
+    f.occurrence.name = null;
+    await expect(
+      recruiting.resolveRecruitingCrmImport(f.prisma, actor, f.trusted, f.input),
+    ).rejects.toThrow();
+  });
+});
+
+describe("native candidate results without domain actions", () => {
+  it("selects only an owned completed get_rows page on the exact native task and cursor", async () => {
+    const f = nativeCandidateFixture();
+    const result = await recruiting.readNativeRecruitingCandidatePage(
+      f.prisma,
+      actor,
+      "run",
+      f.input,
+    );
+    expect(result.effect.id).toBe("read");
+    expect(result.snapshot).toEqual(f.snapshot);
+    expect(f.tx.recruitingResearchAction.findFirst).not.toHaveBeenCalled();
+    expect(f.tx.recruitingResearchTask.findUnique).not.toHaveBeenCalled();
+    expect(f.tx.event.findFirst).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: expect.objectContaining({ createdAt: { lte: f.effect.createdAt } }),
+      }),
+    );
+    for (const input of [
+      { ...f.input, providerTaskId: "other-task" },
+      { ...f.input, mcpServerId: "other-server" },
+      { ...f.input, cursor: "another-page" },
+    ]) {
+      await expect(
+        recruiting.readNativeRecruitingCandidatePage(f.prisma, actor, "run", input),
+      ).rejects.toThrow();
+    }
+  });
+
+  it("indexes native candidates and completes its save receipt atomically without fake tasks", async () => {
+    const f = nativeCandidateFixture();
+    const result = await recruiting.saveNativeRecruitingCandidatePage(
+      f.prisma,
+      actor,
+      f.trusted,
+      f.input,
+      { sourceEffectId: "read", rows: [f.row, { ...f.row }, null], outputArtifact: f.file },
+    );
+    expect(result).toMatchObject({
+      status: "saved",
+      roleId: "role",
+      roleRevisionId: "revision",
+      sourceEffectId: "read",
+      candidateRows: [
+        { rowIndex: 0, candidateKey: "linkedin:/in/example" },
+        { rowIndex: 1, candidateKey: "linkedin:/in/example" },
+        { rowIndex: 2, candidateKey: "source-row:read:2" },
+      ],
+    });
+    expect(f.tx.recruitingCandidatePage.create).toHaveBeenCalledWith({
+      data: expect.objectContaining({
+        taskId: null,
+        actionId: null,
+        roleId: "role",
+        effectId: "read",
+        rowCount: 3,
+        observedAt: f.effect.updatedAt,
+        artifactHash: f.file.hash,
+      }),
+    });
+    expect(f.tx.recruitingCandidate.createMany).toHaveBeenCalledWith({
+      data: [
+        { roleId: "role", candidateKey: "linkedin:/in/example" },
+        { roleId: "role", candidateKey: "source-row:read:2" },
+      ],
+      skipDuplicates: true,
+    });
+    expect(f.saveEffect).toMatchObject({ status: "completed", result });
+    expect(appendEventInTransaction).toHaveBeenCalledWith(
+      f.tx,
+      expect.objectContaining({
+        type: "recruiting.candidates.saved",
+        payload: expect.objectContaining({
+          candidateOutputSchema: "candidate_output_v1",
+          providerTaskId: "provider-task",
+          outputArtifact: { artifactId: "observation-artifact", sha256: f.file.hash },
+        }),
+      }),
+    );
+    expect(f.tx.recruitingResearchAction.update).not.toHaveBeenCalled();
+  });
+
+  it.each(["foreign-run", "wrong-hash", "expired-lease", "stale-role", "changed-receipt"])(
+    "rejects %s without candidate writes",
+    async (failure) => {
+      const f = nativeCandidateFixture();
+      if (failure === "foreign-run") f.effect.runId = "other-run";
+      if (failure === "wrong-hash") f.file.hash = "f".repeat(64);
+      if (failure === "expired-lease") Object.assign(f.run, { leaseExpiresAt: new Date(0) });
+      if (failure === "stale-role") f.input.expectedRoleRevision = 2;
+      if (failure === "changed-receipt")
+        f.saveEffect.request = { ...f.input, providerTaskId: "other" };
+      await expect(
+        recruiting.saveNativeRecruitingCandidatePage(f.prisma, actor, f.trusted, f.input, {
+          sourceEffectId: "read",
+          rows: [f.row],
+          outputArtifact: f.file,
+        }),
+      ).rejects.toThrow();
+      expect(f.tx.recruitingCandidatePage.create).not.toHaveBeenCalled();
+      expect(f.tx.externalEffect.updateMany).not.toHaveBeenCalled();
+    },
+  );
+
+  it("replays a completed save after a role revision without recreating projections", async () => {
+    const f = nativeCandidateFixture();
+    const saved = {
+      status: "saved",
+      roleId: "role",
+      roleRevisionId: "revision",
+      sourceEffectId: "read",
+      outputArtifact: { artifactId: "observation-artifact", sha256: f.file.hash },
+      candidateRows: [{ rowIndex: 0, candidateKey: "linkedin:/in/example" }],
+    };
+    Object.assign(f.saveEffect, { status: "completed", result: saved });
+    f.input.expectedRoleRevision = 1;
+    f.tx.recruitingRole.findFirst.mockResolvedValue({ ...f.role, revision: 2 } as never);
+    expect(
+      await recruiting.saveNativeRecruitingCandidatePage(f.prisma, actor, f.trusted, f.input, {
+        sourceEffectId: "read",
+        rows: [f.row],
+        outputArtifact: f.file,
+      }),
+    ).toEqual(saved);
+    expect(f.tx.recruitingCandidatePage.create).not.toHaveBeenCalled();
   });
 });

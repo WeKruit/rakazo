@@ -322,7 +322,7 @@ function CandidateSources({
             className="space-y-2 border-s border-border ps-3"
           >
             <p className="text-xs text-muted-foreground">
-              provider_report · {action?.kind ?? source.actionId} · {source.observedAt}
+              provider_report{action ? ` · ${action.kind}` : ""} · {source.observedAt}
             </p>
             <details>
               <summary className="cursor-pointer text-xs text-muted-foreground">

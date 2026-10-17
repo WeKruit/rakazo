@@ -53,6 +53,7 @@ import {
   executeRecruitingRoleTool,
   prepareRecruitingResearchTool,
   resolveRecruitingResearchTool,
+  saveNativeRecruitingCandidateResults,
 } from "./recruiting-tools.js";
 
 vi.mock("./recruiting-context.js", () => ({ loadRecruitingRunContext: vi.fn() }));
@@ -60,13 +61,15 @@ vi.mock("./recruiting-assessment.js", () => ({
   executeRecruitingAssessmentTool: vi.fn(),
   retainRecruitingWebMaterial: vi.fn(),
 }));
-vi.mock("./recruiting-tools.js", () => ({
+vi.mock("./recruiting-tools.js", async (importOriginal) => ({
+  ...(await importOriginal<typeof RecruitingToolsModule>()),
   executeRecruitingRoleTool: vi.fn(),
   prepareRecruitingResearchTool: vi.fn(),
   resolveRecruitingResearchTool: vi.fn(),
   admitRecruitingResearchCall: vi.fn(),
   bindRecruitingResearchReadCall: vi.fn(),
   completeRecruitingResearchCall: vi.fn(),
+  saveNativeRecruitingCandidateResults: vi.fn(),
 }));
 vi.mock("@rakazo/db", async (importOriginal) => ({
   ...(await importOriginal<typeof DatabaseModule>()),
@@ -2332,6 +2335,70 @@ describe("native recruiting research executor integration", () => {
     expect(f.connector.execute).not.toHaveBeenCalled();
     expect(resolveRecruitingResearchTool).not.toHaveBeenCalled();
     expect(admitRecruitingResearchCall).not.toHaveBeenCalled();
+  });
+
+  it("saves a native candidate page locally and replays its original receipt without dispatch", async () => {
+    const f = fixture("native-candidate-save");
+    const input = {
+      operation: "save_results",
+      expectedRoleRevision: 1,
+      mcpServerId: "research-server",
+      providerTaskId: "native-task",
+      cursor: "original-cursor",
+    };
+    const saved = {
+      status: "saved",
+      sourceEffectId: "native-read",
+      candidateRows: [{ rowIndex: 0, candidateKey: "linkedin:/in/example" }],
+    };
+    vi.mocked(saveNativeRecruitingCandidateResults)
+      .mockReset()
+      .mockImplementation(async (deps, trusted, request) => {
+        expect(deps).toEqual({ prisma: f.prisma, artifacts: f.artifacts });
+        expect(request).toEqual(input);
+        const effect = f.effects.find((item) => item.id === trusted.effectId)!;
+        expect(effect.status).toBe("executing");
+        Object.assign(effect, { status: "completed", result: saved });
+        return saved;
+      });
+    f.setCalls([{ name: "recruiting_research", args: input, executionId: "save-page" }]);
+    await f.run();
+    await f.run();
+    expect(f.results).toEqual([saved, saved]);
+    expect(saveNativeRecruitingCandidateResults).toHaveBeenCalledOnce();
+    expect(resolveRecruitingResearchTool).not.toHaveBeenCalled();
+    expect(prepareRecruitingResearchTool).not.toHaveBeenCalled();
+    expect(f.connector.execute).not.toHaveBeenCalled();
+    expect(f.effects).toHaveLength(1);
+  });
+
+  it("recovers an executing local candidate save after interruption before commit", async () => {
+    const f = fixture("interrupted-native-candidate-save");
+    const input = {
+      operation: "save_results",
+      expectedRoleRevision: 1,
+      mcpServerId: "research-server",
+      providerTaskId: "native-task",
+      cursor: null,
+    };
+    const saved = { status: "saved", sourceEffectId: "native-read", candidateRows: [] };
+    vi.mocked(saveNativeRecruitingCandidateResults)
+      .mockReset()
+      .mockRejectedValueOnce(new Error("Candidate save interrupted"))
+      .mockImplementation(async (_deps, trusted) => {
+        const effect = f.effects.find((item) => item.id === trusted.effectId)!;
+        Object.assign(effect, { status: "completed", result: saved });
+        return saved;
+      });
+    f.setCalls([{ name: "recruiting_research", args: input, executionId: "save-page" }]);
+    await f.run("Candidate save interrupted");
+    expect(f.effects[0]?.status).toBe("executing");
+    await f.run();
+    expect(saveNativeRecruitingCandidateResults).toHaveBeenCalledTimes(2);
+    expect(f.results.at(-1)).toEqual(saved);
+    expect(f.effects).toHaveLength(1);
+    expect(f.effects[0]?.status).toBe("completed");
+    expect(f.connector.execute).not.toHaveBeenCalled();
   });
 
   it("rejects mismatched raw MCP research in admission before creating an effect or invoking the provider", async () => {

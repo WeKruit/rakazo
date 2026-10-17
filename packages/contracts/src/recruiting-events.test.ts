@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { ProductEventSchema } from "./events.js";
+import { RECRUITING_CANDIDATE_OUTPUT_SCHEMA } from "./recruiting.js";
 
 const base = {
   id: "event-synthetic",
@@ -12,6 +13,51 @@ const base = {
 };
 
 describe("recruiting material and assessment events", () => {
+  const candidates = {
+    roleId: "role-synthetic",
+    roleRevisionId: "revision-synthetic",
+    effectId: "native-read-effect",
+    mcpServerId: "server-synthetic",
+    serverRevision: 1,
+    providerTaskId: "provider-task-synthetic",
+    requestCursor: "  opaque+/=  ",
+    outputArtifact: { artifactId: "candidate-artifact", sha256: "b".repeat(64) },
+    candidateOutputSchema: RECRUITING_CANDIDATE_OUTPUT_SCHEMA,
+  };
+
+  it("records native candidate result provenance without a custom action", () => {
+    for (const requestCursor of [null, candidates.requestCursor]) {
+      const event = {
+        ...base,
+        type: "recruiting.candidates.saved",
+        payload: { ...candidates, requestCursor },
+      };
+      expect(ProductEventSchema.parse(event)).toEqual(event);
+    }
+    for (const invalid of [
+      { roleId: " " },
+      { roleRevisionId: "" },
+      { effectId: "" },
+      { mcpServerId: " " },
+      { serverRevision: 0 },
+      { serverRevision: 1.5 },
+      { providerTaskId: " " },
+      { requestCursor: undefined },
+      { outputArtifact: { ...candidates.outputArtifact, sha256: "invalid" } },
+      { candidateOutputSchema: "unknown" },
+      { actionId: "custom-action" },
+      { rawText: "private" },
+    ]) {
+      expect(
+        ProductEventSchema.safeParse({
+          ...base,
+          type: "recruiting.candidates.saved",
+          payload: { ...candidates, ...invalid },
+        }).success,
+      ).toBe(false);
+    }
+  });
+
   const material = {
     reader: "web_fetch",
     artifact: { artifactId: "material-synthetic", sha256: "a".repeat(64) },

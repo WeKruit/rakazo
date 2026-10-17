@@ -965,6 +965,42 @@ it("shows saved source rounds with their exact original revision and Artifact", 
   ).not.toBeNull();
 });
 
+it("shows a native candidate source Artifact without an empty custom-action heading", async () => {
+  const f = rawResultsFixture();
+  api.listCandidates.mockResolvedValue(candidatePage([candidateFixture("native-person", false)]));
+  api.listResearch.mockResolvedValue({ tasks: [], actions: [] });
+  api.listCandidateSources.mockResolvedValue({
+    roleId: role.id,
+    candidateKey: "native-person",
+    total: 1,
+    nextCursor: null,
+    items: [
+      {
+        taskId: null,
+        actionId: null,
+        roleRevisionId: revision.id,
+        effectId: "native-read-effect",
+        rowIndex: 0,
+        crmImports: [],
+        artifactRef: f.reference,
+        requestCursor: null,
+        outputId: null,
+        observedAt: "2026-01-01T00:00:00Z",
+      },
+    ],
+  });
+  api.getById.mockResolvedValue(f.artifact);
+  const view = await mounted();
+  await view.click("Evidence");
+  await view.click("native-person");
+  const sources = view.container.querySelector('[aria-label="Saved candidate sources"]')!;
+  expect(sources.querySelector("p")?.textContent).toBe("provider_report · 2026-01-01T00:00:00Z");
+  expect(sources.textContent).toContain("native-read-effect");
+  await view.expand("Source Artifact");
+  expect(api.getById).toHaveBeenCalledWith({ artifactId: f.reference.artifactId });
+  expect(sources.querySelector(`[data-artifact-id="${f.reference.artifactId}"]`)).not.toBeNull();
+});
+
 it("persists shortlist with the candidate revision and leaves conflicts visibly unsaved", async () => {
   api.listCandidates.mockResolvedValue(candidatePage([candidateFixture("candidate-1", false)]));
   let finish!: (value: unknown) => void;

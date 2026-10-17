@@ -53,4 +53,11 @@ describe("native recruiting approval tool", () => {
     expect(tool?.description).toContain("reuse the exact candidateKey");
     expect(tool?.description).toContain("candidateRows entry for that rowIndex");
   });
+  it("offers optional native result saving without making it a search prerequisite", () => {
+    const tool = builtinAgentTools.find((entry) => entry.name === "recruiting_research");
+    expect(tool?.description).toContain("save_results");
+    expect(tool?.description).toContain("same run");
+    expect(tool?.description).toContain("not a prerequisite");
+    expect(tool?.description).toContain("linkedin_url");
+  });
 });

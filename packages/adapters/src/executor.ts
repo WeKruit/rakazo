@@ -370,7 +370,9 @@ import {
   completeRecruitingResearchCall,
   executeRecruitingRoleTool,
   prepareRecruitingResearchTool,
+  RecruitingCandidateOutputError,
   resolveRecruitingResearchTool,
+  saveNativeRecruitingCandidateResults,
 } from "./recruiting-tools.js";
 import type { RemoteTransportDependencies } from "./remote-mcp.js";
 import { assertSafeRemoteUrl } from "./remote-mcp.js";
@@ -4528,12 +4530,16 @@ export function createRunExecutor(deps: ExecutorDeps) {
           }
           if (
             researchInput?.success &&
-            !["prepare", "continue"].includes(researchInput.data.operation)
+            !["prepare", "continue", "save_results"].includes(researchInput.data.operation)
           ) {
             if (!deps.artifacts) return { error: "Recruiting research requires artifact storage" };
             try {
               const input = researchInput.data;
-              if (input.operation === "prepare" || input.operation === "continue")
+              if (
+                input.operation === "prepare" ||
+                input.operation === "continue" ||
+                input.operation === "save_results"
+              )
                 throw new IsolationError();
               researchSelection = await resolveRecruitingResearchTool(
                 { prisma: deps.prisma, artifacts: deps.artifacts },
@@ -5709,6 +5715,18 @@ export function createRunExecutor(deps: ExecutorDeps) {
                 return retryGate.result;
               }
               if (retryGate.action === "uncertain") {
+                if (
+                  name === "recruiting_research" &&
+                  researchInput?.success &&
+                  researchInput.data.operation === "save_results" &&
+                  current.status === "executing"
+                ) {
+                  if (!(await renewRunLease(deps, runId, workerId, fence)))
+                    return pauseForApproval();
+                  // Local projection and receipt commit atomically; no provider call is replayed.
+                  claimedEffect = true;
+                  return undefined;
+                }
                 if (researchMutation) return { status: "unknown", automaticRetry: false };
                 return settleUncertainEffect(deps.prisma, applied!.effect.id, name);
               }
@@ -5903,8 +5921,18 @@ export function createRunExecutor(deps: ExecutorDeps) {
                 return requestApproval();
               }
             } else if (gate.action === "uncertain") {
-              if (researchMutation) return { status: "unknown", automaticRetry: false };
-              return settleUncertainEffect(deps.prisma, applied.effect.id, gate.toolName);
+              if (
+                name === "recruiting_research" &&
+                researchInput?.success &&
+                researchInput.data.operation === "save_results" &&
+                applied.effect.status === "executing"
+              ) {
+                const early = await claimOrReturn("intended");
+                if (early !== undefined) return early;
+              } else {
+                if (researchMutation) return { status: "unknown", automaticRetry: false };
+                return settleUncertainEffect(deps.prisma, applied.effect.id, gate.toolName);
+              }
             } else if (gate.action === "execute") {
               const early = await claimOrReturn("approved");
               if (early !== undefined) return early;
@@ -6528,7 +6556,8 @@ export function createRunExecutor(deps: ExecutorDeps) {
               !deps.artifacts ||
               !researchInput?.success ||
               (researchInput.data.operation !== "prepare" &&
-                researchInput.data.operation !== "continue")
+                researchInput.data.operation !== "continue" &&
+                researchInput.data.operation !== "save_results")
             )
               return finish({
                 error: "Recruiting research requires a valid preparation and artifact storage",
@@ -6538,6 +6567,22 @@ export function createRunExecutor(deps: ExecutorDeps) {
               if (early !== undefined) return early;
             }
             try {
+              if (researchInput.data.operation === "save_results") {
+                if (!applied || !claimedEffect) throw new IsolationError();
+                // The local projection and this native effect complete in one transaction.
+                return await saveNativeRecruitingCandidateResults(
+                  { prisma: deps.prisma, artifacts: deps.artifacts },
+                  {
+                    ...researchActor,
+                    leaseOwner: workerId,
+                    leaseFence: fence,
+                    effectId: applied.effect.id,
+                    effectRequest: applied.effect.request,
+                  },
+                  researchInput.data,
+                  context,
+                );
+              }
               const result = await prepareRecruitingResearchTool(
                 { prisma: deps.prisma, artifacts: deps.artifacts },
                 researchActor,
@@ -6549,6 +6594,8 @@ export function createRunExecutor(deps: ExecutorDeps) {
               if ("roleContext" in result) await retainRecruitingSource(result.source);
               return finish(redactConnectorPayload(result, runSecrets));
             } catch (error) {
+              if (error instanceof RecruitingCandidateOutputError)
+                return finish({ error: error.message });
               if (error instanceof IsolationError)
                 return finish({ error: "Recruiting research or source is unavailable" });
               if (error instanceof RecruitingConflictError)

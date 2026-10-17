@@ -50,6 +50,13 @@ Main/Sourcer 随后各完成一次实际回复，均读取两份当前 skill，�
 
 **仍缺的产品接线：**普通原生 MCP 返回保存在原生工具回执/对话中；本批没有把新任务自动登记到依赖领域 action 的岗位候选索引。因此不能声称任意原生搜索已自动进入 Dashboard。在已验的 Main/Sourcer→Autumn→同 task 反馈技术链上继续候选业务验收，再依据真实候选返回补最小结果关联；本次 27 行是岗位/公司证据，不是候选名单，不应索引成人员。不得以恢复强制领域步骤来解决展示问题。
 
+**当前最小接线（代码完成，未发布）：**复用已有 `recruiting_research` 的可选 `save_results`，把本 run 中同 MCP/task/cursor 的真实候选页保存到现有 ArtifactStore 与候选索引。它只保存已经返回的结果，不准备、批准或触发搜索；普通 MCP 仍直接运行。Agent 明确选择候选结果，服务端核验原生完成回执、岗位版本、归属和文件 hash；公司/JD 表不能冒充人员。未评估及缺字段的候选保留，LinkedIn 身份沿用现有去重逻辑。原候选来源允许没有自定义 task/action，用真实 effect 和 artifact 引用连接 Dashboard；不造领域任务或第二套表。
+
+- [x] 在现有 contracts、候选和工具测试中先复现原生候选保存缺口。
+- [x] 复用现有候选写入、来源核验、CRM 身份边界和 UI；保存与原生完成回执同事务提交，重复执行不重复落库。原生 provider_report 来源不会冒标原件；旧 action 来源仍严格核验。
+- [x] 八个聚焦文件 441 项离线检查通过，DB/adapters/API/Web 类型检查及格式检查通过。新增原生保存/来源和中断恢复检查先失败后通过；持久化部分是 mock，不是实际 PostgreSQL 事务或迁移验收。独立审查发现并修复本地保存被通用 uncertain 分支拦住的问题；只有此本地事务可在当前 lease/fence 下恢复，外部调用不自动重放。
+- [ ] 另行批准发布及 `20261018000000_native_recruiting_candidate_sources` 后，再做真实候选页面、反馈、刷新/重启验收。迁移只把既有候选页的 taskId/actionId 两列改为同时可空，不新建表。普通候选列表、未评估计数和每人来源使用已有页面；顶层原生搜索轮次历史尚未接入旧领域 action 列表。不得把离线检查或公司证据算作业务验收。
+
 下面保留既有增量的实现/验证事实，不能据此恢复其旧优先级或继续扩建 schema/领域工具。已有 research admission/准备层是否阻碍原生 Agent 自主调用仍待实测；若有阻碍，先说明具体调用链，只修该缺口，不再叠加包装。
 
 - 复用现有 brief JSON、不可变岗位版本、原生人类来源、CAS 和 Role 编辑/API；新增 `searchFilters`，每项有稳定 ID、statement、include/exclude/prefer、origin 和 sourceRefIds。无额外过滤显式为 `[]`，不是资格条件或 provider 资格结论。推断只能 prefer；未读、缺来源或冒用人类身份的过滤不接受。

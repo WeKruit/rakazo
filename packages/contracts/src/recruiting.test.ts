@@ -97,6 +97,72 @@ const action = {
 };
 
 describe("recruiting contracts", () => {
+  it("accepts a post-result native candidate save without a custom research action", () => {
+    const input = {
+      operation: "save_results",
+      expectedRoleRevision: 1,
+      mcpServerId: "research-server",
+      providerTaskId: "provider-task",
+    };
+    expect(contracts.RecruitingResearchToolInputSchema.parse(input)).toEqual({
+      ...input,
+      cursor: null,
+    });
+    for (const cursor of [null, "  opaque+/=\r\n "]) {
+      expect(contracts.RecruitingResearchToolInputSchema.parse({ ...input, cursor })).toEqual({
+        ...input,
+        cursor,
+      });
+    }
+    for (const invalid of [
+      { expectedRoleRevision: 0 },
+      { expectedRoleRevision: 1.5 },
+      { mcpServerId: " " },
+      { providerTaskId: "" },
+      { providerTaskId: " " },
+      { roleId: "forged-role" },
+      { actionId: "custom-action" },
+      { sourceEffectId: "forged-effect" },
+      { cursor: "" },
+    ]) {
+      expect(
+        contracts.RecruitingResearchToolInputSchema.safeParse({ ...input, ...invalid }).success,
+      ).toBe(false);
+    }
+  });
+
+  it("requires candidate source task/action references to be present or null together", () => {
+    const source = {
+      crmImports: [],
+      taskId: null,
+      actionId: null,
+      roleRevisionId: role.currentRevisionId,
+      effectId: "native-read-effect",
+      rowIndex: 0,
+      artifactRef: artifact,
+      requestCursor: null,
+      outputId: null,
+      observedAt: now,
+    };
+    expect(contracts.RecruitingCandidateSourceSchema.parse(source)).toEqual(source);
+    expect(
+      contracts.RecruitingCandidateSourceSchema.parse({
+        ...source,
+        taskId: action.taskId,
+        actionId: action.id,
+      }),
+    ).toEqual({ ...source, taskId: action.taskId, actionId: action.id });
+    for (const references of [
+      { taskId: action.taskId, actionId: null },
+      { taskId: null, actionId: action.id },
+      { taskId: undefined, actionId: undefined },
+    ]) {
+      expect(
+        contracts.RecruitingCandidateSourceSchema.safeParse({ ...source, ...references }).success,
+      ).toBe(false);
+    }
+  });
+
   it("requires an explicit sourcing filter list and admits only neutral human filter edits", () => {
     const brief = { fields: [], questions: [], rules: [], searchFilters: [] };
     expect(contracts.RecruitingBriefDraftSchema.parse(brief)).toEqual(brief);

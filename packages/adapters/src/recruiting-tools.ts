@@ -26,10 +26,12 @@ import {
   listUnmappedRecruitingResearchReads,
   prepareRecruitingResearchAction,
   RecruitingConflictError,
+  readNativeRecruitingCandidatePage,
   readRecruitingResearchContext,
   reconcileRecruitingResearchAction,
   recordRecruitingResearchObservation,
   recruitingResearchSnapshot,
+  saveNativeRecruitingCandidatePage,
   scoped,
 } from "@rakazo/db";
 
@@ -248,7 +250,8 @@ export async function resolveRecruitingResearchTool(
   context: AdapterContext,
 ) {
   const input = RecruitingResearchToolInputSchema.parse(untrusted);
-  if (input.operation === "prepare" || input.operation === "continue") throw new IsolationError();
+  if (input.operation !== "start" && input.operation !== "status" && input.operation !== "rows")
+    throw new IsolationError();
   const saved = await readRecruitingResearchContext(deps.prisma, trusted.actor, {
     runId: trusted.runId,
     historical: true,
@@ -530,6 +533,66 @@ async function uploadResearchReceipt(
       ? `recruiting-observation:${readEffectId}`
       : `${prefix}:${context.runId}:${hash}`,
   };
+}
+
+export class RecruitingCandidateOutputError extends Error {}
+
+/** Optional local projection after native MCP; it does not prepare or dispatch research. */
+export async function saveNativeRecruitingCandidateResults(
+  deps: ResearchDeps,
+  trusted: ResearchActor & {
+    leaseOwner: string;
+    leaseFence: number;
+    effectId: string;
+    effectRequest: unknown;
+  },
+  input: Extract<RecruitingResearchToolInput, { operation: "save_results" }>,
+  context: AdapterContext,
+) {
+  if (
+    context.runId !== trusted.runId ||
+    context.spaceId !== trusted.actor.spaceId ||
+    context.userId !== trusted.actor.userId
+  )
+    throw new IsolationError();
+  const source = await readNativeRecruitingCandidatePage(
+    deps.prisma,
+    trusted.actor,
+    trusted.runId,
+    input,
+  );
+  const observation = classifyRecruitingResearchResult(source.effect.result, {
+    operation: "rows",
+    providerTaskId: input.providerTaskId,
+  });
+  if (
+    observation.rows === undefined ||
+    (observation.rows.length > 0 &&
+      !observation.rows.some(
+        (row) =>
+          row !== null &&
+          typeof row === "object" &&
+          !Array.isArray(row) &&
+          Object.hasOwn(row, "name") &&
+          Object.hasOwn(row, "linkedin_url"),
+      ))
+  )
+    throw new RecruitingCandidateOutputError(
+      "Candidate results need name and linkedin_url columns. Company/JD evidence and unstructured results are not candidate pages. Preserve missing values as null; reread an existing candidate page rather than starting new research.",
+    );
+  const outputArtifact = await uploadResearchReceipt(
+    deps,
+    context,
+    source.snapshot,
+    "recruiting-candidates",
+    source.effect.id,
+  );
+  return saveNativeRecruitingCandidatePage(deps.prisma, trusted.actor, trusted, input, {
+    sourceEffectId: source.effect.id,
+    rows: observation.rows,
+    outputId: observation.outputId,
+    outputArtifact,
+  });
 }
 
 export async function completeRecruitingResearchCall(
