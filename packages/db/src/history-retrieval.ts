@@ -166,13 +166,26 @@ export async function searchHistory(
     input.beforeSeq ?? Number.POSITIVE_INFINITY,
     scope.searchBeforeSeq ?? Number.POSITIVE_INFINITY,
   );
+  const searchScope = Prisma.sql`${visible(scope)}
+    ${before ? Prisma.sql`AND m."createdAt" < ${before}` : Prisma.empty}
+    ${after ? Prisma.sql`AND m."createdAt" >= ${after}` : Prisma.empty}
+    ${Number.isFinite(beforeSeq) ? Prisma.sql`AND m.seq < ${beforeSeq}` : Prisma.empty}`;
+  // ponytail: filename matching scans scoped message blocks; add a filename index if scale requires it.
+  // Separate ID branches preserve the conversational GIN expression; IN deduplicates exact messages.
   const rows = await prisma.$queryRaw<HistoryRow[]>(Prisma.sql`
     SELECT ${columns} FROM messages m JOIN threads t ON t.id = m."threadId"
-    WHERE ${visible(scope)}
-      AND to_tsvector('simple', ${searchableText}) @@ plainto_tsquery('simple', ${query})
-      ${before ? Prisma.sql`AND m."createdAt" < ${before}` : Prisma.empty}
-      ${after ? Prisma.sql`AND m."createdAt" >= ${after}` : Prisma.empty}
-      ${Number.isFinite(beforeSeq) ? Prisma.sql`AND m.seq < ${beforeSeq}` : Prisma.empty}
+    WHERE m.id IN (
+      SELECT m.id FROM messages m JOIN threads t ON t.id = m."threadId"
+      WHERE ${searchScope}
+        AND to_tsvector('simple', ${searchableText}) @@ plainto_tsquery('simple', ${query})
+      UNION ALL
+      SELECT m.id FROM messages m JOIN threads t ON t.id = m."threadId"
+      WHERE ${searchScope}
+        AND m.blocks @> '[{"kind":"file"}]'::jsonb
+        AND to_tsvector('simple', ${searchableText} || jsonb_path_query_array(m.blocks,
+          '$[*] ? (@.kind == "file").name')::text || regexp_replace(jsonb_path_query_array(m.blocks,
+          '$[*] ? (@.kind == "file").name')::text, '[[:punct:]]+', ' ', 'g')) @@ plainto_tsquery('simple', ${query})
+    )
     ORDER BY m.seq DESC LIMIT ${limit + 1}
   `);
   const page = rows.slice(0, limit);

@@ -53,6 +53,90 @@ describe("local history retrieval", () => {
       expect.arrayContaining(["space", "user", "bot", "thread", "exports", 20, 3]),
     );
   });
+  it("searches raw and separator-normalized upload names through the same scoped query", async () => {
+    const { mock, prisma } = db();
+    const query = "ledger-canary.csv";
+    const upload = {
+      ...row(5),
+      blocks: [
+        {
+          kind: "file",
+          artifactId: "original-upload",
+          name: query,
+          mimeType: "text/csv",
+          size: 42,
+        },
+      ],
+    };
+    mock.$queryRaw.mockResolvedValue([upload, row(4), row(3)]);
+    const result = await searchHistory(
+      prisma,
+      { ...scope, channelId: "channel", searchBeforeSeq: 50 },
+      {
+        query,
+        beforeSeq: 9999,
+        limit: 2,
+        after: "2026-01-01T00:00:00Z",
+        before: "2026-01-02T00:00:00Z",
+      },
+    );
+    const statement = sql(mock);
+    const branches = statement.sql.split("UNION ALL");
+    expect(branches).toHaveLength(2);
+    for (const branch of branches) {
+      expect(branch).toContain('SELECT m.id FROM messages m JOIN threads t ON t.id = m."threadId"');
+      for (const predicate of [
+        "t.id = ?",
+        't."spaceId" = ?',
+        't."userId" = ?',
+        't."botId" = ?',
+        'source.id = r."sourceMessageId"',
+        'm."createdAt" < ?',
+        'm."createdAt" >= ?',
+        "m.seq < ?",
+      ])
+        expect(branch).toContain(predicate);
+    }
+    expect(branches[0]).toContain('(@.kind == "subagent").result\')::text) @@');
+    expect(branches[0]).not.toContain('(@.kind == "file")');
+    const filenameNames =
+      "jsonb_path_query_array(m.blocks, '$[*] ? (@.kind == \"file\").name')::text";
+    expect(branches[1]!.replace(/\s+/g, " ")).toContain(
+      `${filenameNames} || regexp_replace(${filenameNames}, '[[:punct:]]+', ' ', 'g')`,
+    );
+    expect(statement.sql).toContain("WHERE m.id IN (");
+    expect(statement.sql.match(/ORDER BY m.seq DESC LIMIT/g)).toHaveLength(1);
+    const branchValues = statement.values.slice(0, -1);
+    const firstValues = branchValues.slice(0, branchValues.length / 2);
+    expect(firstValues).toEqual(branchValues.slice(branchValues.length / 2));
+    expect(firstValues).toEqual(
+      expect.arrayContaining([
+        "space",
+        "user",
+        "thread",
+        "bot",
+        JSON.stringify([{ kind: "channel_message", channelId: "channel" }]),
+        new Date("2026-01-01T00:00:00Z"),
+        new Date("2026-01-02T00:00:00Z"),
+        query,
+        50,
+      ]),
+    );
+    expect(statement.values).not.toContain(9999);
+    expect(statement.sql).not.toContain(query);
+    expect(result.messages[0]).toMatchObject({
+      text: "",
+      files: [{ blockIndex: 0, artifactId: "original-upload" }],
+    });
+    expect(result).toMatchObject({
+      untrusted: true,
+      nextBeforeSeq: 4,
+      nextSearch: { query, beforeSeq: 4, limit: 2 },
+    });
+    expect(Buffer.byteLength(JSON.stringify(result))).toBeLessThanOrEqual(10000);
+    expect(mock.$queryRaw).toHaveBeenCalledOnce();
+    expect(mock.artifact.findMany).not.toHaveBeenCalled();
+  });
   it("keeps an unfinished broad query actionable after an exhausted narrower query", async () => {
     const { mock, prisma } = db();
     mock.$queryRaw

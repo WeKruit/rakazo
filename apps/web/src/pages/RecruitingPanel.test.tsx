@@ -475,14 +475,14 @@ async function mounted(threadId = "thread-1", botId?: string, showDiagnostics = 
   const root = createRoot(container);
   const reveal = vi.fn();
   const discuss = vi.fn();
-  const render = async (id: string, refreshSignal = 0) =>
+  const render = async (id: string, refreshSignal = 0, diagnostics = showDiagnostics) =>
     act(async () =>
       root.render(
         <MemoryRouter>
           <RecruitingPanel
             threadId={id}
             botId={botId}
-            showDiagnostics={showDiagnostics}
+            showDiagnostics={diagnostics}
             refreshSignal={refreshSignal}
             onClose={() => {}}
             onRevealMessage={reveal}
@@ -497,14 +497,14 @@ async function mounted(threadId = "thread-1", botId?: string, showDiagnostics = 
   };
   await render(threadId);
   const click = async (name: string) => {
-    const button = [...container.querySelectorAll<HTMLElement>('button,[role="checkbox"]')].find(
-      (item) => item.textContent === name || item.getAttribute("aria-label") === name,
-    );
+    const button = [
+      ...document.body.querySelectorAll<HTMLElement>('button,[role="checkbox"]'),
+    ].find((item) => item.textContent === name || item.getAttribute("aria-label") === name);
     expect(button, name).toBeDefined();
     await act(async () => button!.click());
   };
   const expand = async (name: string, exact = false) => {
-    const details = [...container.querySelectorAll("details")].find((item) =>
+    const details = [...document.body.querySelectorAll("details")].find((item) =>
       exact
         ? item.querySelector("summary")?.textContent === name
         : item.querySelector("summary")?.textContent?.includes(name),
@@ -516,7 +516,7 @@ async function mounted(threadId = "thread-1", botId?: string, showDiagnostics = 
     });
     return details!;
   };
-  return { container, render, click, expand, reveal, discuss };
+  return { container: document.body, render, click, expand, reveal, discuss };
 }
 
 async function changeStatement(container: HTMLElement, statement: string, index = 0) {
@@ -550,6 +550,221 @@ async function changeSelect(container: HTMLElement, name: string, value: string)
     select.dispatchEvent(new Event("change", { bubbles: true }));
   });
 }
+
+it.each(["Cards", "Table"])(
+  "opens candidate evidence from %s without moving the list and returns focus on Escape and Close",
+  async (viewName) => {
+    const candidates = Array.from({ length: 30 }, (_, index) => ({
+      ...candidateFixture(`person-${index}`, false),
+      name: `Synthetic person ${index}`,
+    }));
+    api.listCandidates.mockResolvedValue(candidatePage(candidates));
+    const view = await mounted("thread-1", undefined, false);
+    await view.click("Evidence");
+    await view.click(viewName);
+    await changeInput(view.container, "Search candidates", "Synthetic");
+    await changeSelect(view.container, "Candidate sort", "recent");
+    const list = view.container.querySelector(viewName === "Cards" ? "ul" : "table")!;
+    const panel = view.container.querySelector<HTMLElement>('section[aria-label="Recruiting"]')!;
+    panel.scrollTop = 480;
+    const trigger = [...list.querySelectorAll<HTMLButtonElement>("button")].find(
+      (button) => button.textContent === candidates[14]!.name,
+    )!;
+    trigger.focus();
+    await view.click(candidates[14]!.name);
+    let dialog = view.container.querySelector<HTMLElement>('[role="dialog"]');
+    expect(dialog).not.toBeNull();
+    expect(document.getElementById(dialog!.getAttribute("aria-labelledby")!)?.textContent).toBe(
+      candidates[14]!.name,
+    );
+    expect(dialog!.textContent).toContain("Unassessed");
+    expect(dialog!.textContent).toContain("Saved candidate sources");
+    expect(dialog!.textContent).not.toContain("Unknown");
+    expect(view.container.querySelector(viewName === "Cards" ? "ul" : "table")).toBe(list);
+    expect(panel.scrollTop).toBe(480);
+    expect(
+      view.container.querySelector<HTMLInputElement>('[aria-label="Search candidates"]')?.value,
+    ).toBe("Synthetic");
+    expect(api.getAssessment).not.toHaveBeenCalled();
+    expect(api.listCandidateSources).toHaveBeenCalledTimes(1);
+    const close = dialog!.querySelector<HTMLButtonElement>('button[aria-label="Close"]')!;
+    await vi.waitFor(() => expect(document.activeElement).toBe(close));
+    await act(async () => {
+      close.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", bubbles: true }));
+    });
+    await vi.waitFor(() => expect(view.container.querySelector('[role="dialog"]')).toBeNull());
+    await vi.waitFor(() => expect(document.activeElement).toBe(trigger));
+    await view.click(candidates[14]!.name);
+    dialog = view.container.querySelector<HTMLElement>('[role="dialog"]');
+    expect(dialog).not.toBeNull();
+    await view.click("Close");
+    await vi.waitFor(() => expect(view.container.querySelector('[role="dialog"]')).toBeNull());
+    await vi.waitFor(() => expect(document.activeElement).toBe(trigger));
+    expect(panel.scrollTop).toBe(480);
+    expect(api.setCandidateShortlist).not.toHaveBeenCalled();
+  },
+);
+
+it("does not reopen candidate evidence or steal focus when closed reads and refreshes finish", async () => {
+  let finish!: (value: typeof assessment) => void;
+  api.getAssessment.mockReturnValueOnce(
+    new Promise((resolve) => {
+      finish = resolve;
+    }),
+  );
+  const view = await mounted();
+  await view.click("Evidence");
+  const trigger = [...view.container.querySelectorAll<HTMLButtonElement>("button")].find(
+    (button) => button.textContent === "candidate-1",
+  )!;
+  trigger.focus();
+  await view.click("candidate-1");
+  expect(view.container.querySelector('[role="dialog"]')?.textContent).toContain("Loading…");
+  await view.click("Close");
+  await vi.waitFor(() => expect(document.activeElement).toBe(trigger));
+  const panelClose = view.container.querySelector<HTMLButtonElement>('[aria-label="Close panel"]')!;
+  panelClose.focus();
+  await act(async () => finish(assessment));
+  expect(document.activeElement).toBe(panelClose);
+  await view.render("thread-1", 1);
+  expect(view.container.querySelector('[role="dialog"]')).toBeNull();
+  expect(document.activeElement).toBe(panelClose);
+  expect(view.container.textContent).not.toContain("Built a compiler");
+});
+
+it("updates an open candidate dialog across role revisions without refocusing and returns to its refreshed trigger", async () => {
+  const view = await mounted();
+  await view.click("Evidence");
+  await view.click("candidate-1");
+  const dialog = view.container.querySelector('[role="dialog"]')!;
+  const close = dialog.querySelector<HTMLButtonElement>('[aria-label="Close"]')!;
+  await vi.waitFor(() => expect(document.activeElement).toBe(close));
+  api.getWorkspace.mockResolvedValue({
+    role: { ...role, currentRevisionId: "revision-3", revision: 3 },
+    revision: { ...revision, id: "revision-3", revision: 3 },
+  });
+  await view.render("thread-1", 1);
+  expect(view.container.querySelector('[role="dialog"]')).toBe(dialog);
+  expect(document.activeElement).toBe(close);
+  expect(dialog.textContent).toContain("Built a compiler");
+  const trigger = [...view.container.querySelectorAll<HTMLButtonElement>("button")].find(
+    (button) => button.textContent === "candidate-1",
+  )!;
+  await view.click("Close");
+  await vi.waitFor(() => expect(document.activeElement).toBe(trigger));
+});
+
+it.each(["Discuss candidate", "Message"])(
+  "finishes closing before %s transfers focus to the native chat",
+  async (action) => {
+    const view = await mounted();
+    const composer = document.createElement("textarea");
+    view.container.append(composer);
+    try {
+      const callback = action === "Discuss candidate" ? view.discuss : view.reveal;
+      const dialogAtHandoff = vi.fn();
+      callback.mockImplementation(() => {
+        dialogAtHandoff(view.container.querySelector('[role="dialog"]'));
+        composer.focus();
+      });
+      await view.click("Evidence");
+      await view.click("candidate-1");
+      await view.click(action);
+      await vi.waitFor(() => expect(callback).toHaveBeenCalledTimes(1));
+      expect(dialogAtHandoff).toHaveBeenCalledWith(null);
+      expect(document.activeElement).toBe(composer);
+    } finally {
+      composer.remove();
+    }
+  },
+);
+
+it.each(["role change", "access denial", "thread change"])(
+  "discards a pending native chat handoff when %s occurs during dialog close",
+  async (change) => {
+    const view = await mounted();
+    await view.click("Evidence");
+    await view.click("candidate-1");
+    const dialog = view.container.querySelector('[role="dialog"]')!;
+    let finishClose!: () => void;
+    const finished = new Promise<void>((resolve) => {
+      finishClose = resolve;
+    });
+    const getAnimations = vi.fn(() => [{ finished }]);
+    Object.defineProperty(dialog, "getAnimations", { value: getAnimations });
+    await view.click("Discuss candidate");
+    await vi.waitFor(() => expect(getAnimations).toHaveBeenCalled());
+    expect(view.discuss).not.toHaveBeenCalled();
+    if (change === "access denial") {
+      api.getWorkspace.mockRejectedValueOnce(new ORPCError("FORBIDDEN"));
+    } else if (change === "role change") {
+      const nextRole = { ...role, id: "role-next", currentRevisionId: "revision-next" };
+      api.getWorkspace.mockResolvedValue({
+        role: nextRole,
+        revision: { ...revision, id: nextRole.currentRevisionId, roleId: nextRole.id },
+      });
+    }
+    await view.render(change === "thread change" ? "thread-next" : "thread-1", 1);
+    await act(async () => finishClose());
+    expect(view.discuss).not.toHaveBeenCalled();
+    expect(view.container.querySelector('[role="dialog"]')).toBeNull();
+  },
+);
+
+it("switches candidate evidence without publishing a delayed previous assessment", async () => {
+  const second = {
+    ...assessment,
+    assessment: {
+      ...assessment.assessment,
+      candidateKey: "candidate-2",
+      facts: [{ ...assessment.assessment.facts[0]!, statement: "Second candidate evidence" }],
+    },
+  };
+  api.listAssessments.mockResolvedValue([assessment, second]);
+  let finish!: (value: typeof assessment) => void;
+  api.getAssessment.mockReturnValueOnce(
+    new Promise((resolve) => {
+      finish = resolve;
+    }),
+  );
+  const view = await mounted();
+  await view.click("Evidence");
+  await view.click("candidate-1");
+  await view.click("Close");
+  await view.click("candidate-2");
+  await act(async () => finish(assessment));
+  const dialog = view.container.querySelector('[role="dialog"]')!;
+  expect(dialog.textContent).toContain("Second candidate evidence");
+  expect(dialog.textContent).not.toContain("Built a compiler");
+  expect(api.listCandidateSources).toHaveBeenCalledTimes(2);
+  expect(api.setCandidateShortlist).not.toHaveBeenCalled();
+});
+
+it.each(["role change", "access denial"])(
+  "dismisses candidate evidence after %s and never restores it on refresh",
+  async (change) => {
+    const view = await mounted();
+    await view.click("Evidence");
+    await view.click("candidate-1");
+    expect(view.container.querySelector('[role="dialog"]')?.textContent).toContain(
+      "Built a compiler",
+    );
+    if (change === "access denial") {
+      api.getWorkspace.mockRejectedValueOnce(new ORPCError("FORBIDDEN"));
+    } else {
+      const nextRole = { ...role, id: "role-next", currentRevisionId: "revision-next" };
+      api.getWorkspace.mockResolvedValue({
+        role: nextRole,
+        revision: { ...revision, id: nextRole.currentRevisionId, roleId: nextRole.id },
+      });
+    }
+    await view.render("thread-1", 1);
+    expect(view.container.querySelector('[role="dialog"]')).toBeNull();
+    expect(view.container.textContent).not.toContain("Built a compiler");
+    await view.render("thread-1", 2);
+    expect(view.container.querySelector('[role="dialog"]')).toBeNull();
+  },
+);
 
 it("shows saved unassessed profiles and authoritative totals in Cards and Table", async () => {
   api.listCandidates.mockResolvedValue(
@@ -603,7 +818,12 @@ it.each([
     await view.click(viewName);
     expect(view.container.textContent).not.toContain("Discuss candidate");
     await view.click(candidate.name ?? "Unnamed candidate");
+    if (identified)
+      expect(view.container.querySelector('[role="dialog"]')?.textContent).toContain(
+        `${candidate.title} · ${candidate.company}`,
+      );
     await view.click("Discuss candidate");
+    expect(view.container.querySelector('[role="dialog"]')).toBeNull();
     expect(view.discuss).toHaveBeenCalledExactlyOnceWith({
       threadId: "thread-1",
       roleTitle: role.title,
@@ -902,7 +1122,7 @@ it("omits stale current CRM details for an excluded selection while refreshing i
   await view.click("Refresh");
   expect(view.container.querySelector('[aria-label="Candidate CRM"]')).toBeNull();
   expect(
-    [...view.container.querySelectorAll("h3")].some(
+    [...view.container.querySelectorAll('[data-slot="dialog-title"]')].some(
       (item) => item.textContent === pending.candidateKey,
     ),
   ).toBe(true);
@@ -1272,6 +1492,18 @@ it("renders Dashboard totals for the linked role and actual research delivery st
 
 it("keeps recruiting diagnostics out of product views while opening verified evidence", async () => {
   const material = artifactSourceFixture();
+  const botMemory = {
+    id: "internal-memory-document",
+    scope: "bot",
+    botId: "internal-memory-bot",
+    path: "preferences.md",
+    content: "Remote teams",
+    revision: 3,
+    updatedAt: "2026-01-01",
+  };
+  api.list.mockImplementation(async ({ scope }: { scope: string }) =>
+    scope === "bot" ? [botMemory] : [],
+  );
   api.readSource.mockResolvedValue({ text: "Before\nBuilt a compiler\nAfter", start: 7, end: 23 });
   api.listResearch.mockResolvedValue({
     tasks: [
@@ -1301,7 +1533,7 @@ it("keeps recruiting diagnostics out of product views while opening verified evi
     role,
     revision: { ...revision, sourceRefs: [material.source] },
   });
-  const view = await mounted("thread-1", undefined, false);
+  const view = await mounted("thread-1", botMemory.botId, false);
   for (const tab of ["Dashboard", "Activity"]) {
     await view.click(tab);
     for (const diagnostic of [
@@ -1340,6 +1572,16 @@ it("keeps recruiting diagnostics out of product views while opening verified evi
   expect(evidence.textContent).not.toContain(material.reference.artifactId);
   expect(evidence.textContent).not.toContain(material.reference.sha256);
   expect(evidence.textContent).not.toContain("SHA-256");
+  await view.click("Memory");
+  const memory = await view.expand(botMemory.path);
+  await view.click("History");
+  expect(memory.textContent).toContain(botMemory.content);
+  expect(memory.textContent).toContain("Earlier preference");
+  for (const diagnostic of [botMemory.botId, "thread-1", "run-1"])
+    expect(memory.textContent).not.toContain(diagnostic);
+  await view.render("thread-1", 0, true);
+  for (const diagnostic of [botMemory.botId, "thread-1", "run-1"])
+    expect(memory.textContent).toContain(diagnostic);
 });
 
 it("reads candidate evidence through its saved assessment version without fetching raw files", async () => {
@@ -3738,6 +3980,7 @@ it("switches Cards/Table with one original-revision detail, preserves a refreshe
     groupId: "material-group",
     messageId: source.anchor.messageId,
   });
+  expect(view.container.querySelector('[role="dialog"]')).toBeNull();
   await view.click("Table");
   expect(view.container.querySelector("table caption")?.textContent).toBe("Saved candidates");
   expect(
@@ -3753,7 +3996,9 @@ it("switches Cards/Table with one original-revision detail, preserves a refreshe
     "Discoveries",
     "Shortlist",
   ]);
+  await view.click("candidate-1");
   expect(view.container.textContent).toContain("Original systems requirement");
+  await view.click("Close");
   await view.click("candidate-2");
   expect(view.container.textContent).toContain("Second candidate evidence");
   expect(view.container.textContent).not.toContain("Built a compiler");
@@ -3770,14 +4015,18 @@ it("switches Cards/Table with one original-revision detail, preserves a refreshe
   await view.click("Refresh");
   expect(view.container.querySelector("table")).not.toBeNull();
   expect(view.container.textContent).toContain("Second candidate updated evidence");
+  await view.click("Close");
   await view.click("Cards");
   expect(view.container.querySelector("table")).toBeNull();
+  expect(view.container.querySelector('[role="dialog"]')).toBeNull();
+  await view.click("candidate-2");
   expect(view.container.textContent).toContain("Second candidate updated evidence");
   await view.click("Message");
   expect(view.reveal).toHaveBeenLastCalledWith({
     botId: "second-material-bot",
     messageId: source.anchor.messageId,
   });
+  expect(view.container.querySelector('[role="dialog"]')).toBeNull();
   let finish!: (value: (typeof assessment)[]) => void;
   const pending = new Promise<(typeof assessment)[]>((resolve) => {
     finish = resolve;
