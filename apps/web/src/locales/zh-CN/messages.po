@@ -4653,6 +4653,10 @@ msgstr "选择 Bot"
 msgid "Select a connected model"
 msgstr "选择已连接的模型"
 
+#: src/pages/RecruitingPanel.tsx
+msgid "Selected recipient unavailable"
+msgstr ""
+
 #: src/pages/Shell.tsx
 msgid "Send"
 msgstr "发送"
@@ -4676,6 +4680,10 @@ msgstr ""
 #: src/pages/Auth.tsx
 msgid "Send reset link"
 msgstr "发送重置链接"
+
+#: src/pages/RecruitingPanel.tsx
+msgid "Send to"
+msgstr ""
 
 #: src/pages/AccountSettingsOverlay.tsx
 msgid "Send with Enter"

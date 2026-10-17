@@ -1867,9 +1867,16 @@ export function ShellPage() {
     () => createRef<ComposerHandle>(),
     [userId, bootstrapMe?.spaceId, composerDraftKey, activeSnapshot?.threadId],
   );
-  const discussionScope = useRef({ composerRef, panel, active: true });
+  const candidateFeedbackRecipients = inGroup
+    ? (activeSnapshot?.members ?? activeGroup?.members ?? []).map((member) => ({
+        id: member.botId,
+        name: member.name,
+      }))
+    : undefined;
+  const discussionScope = useRef({ composerRef, panel, active: true, candidateFeedbackRecipients });
   discussionScope.current.composerRef = composerRef;
   discussionScope.current.panel = panel;
+  discussionScope.current.candidateFeedbackRecipients = candidateFeedbackRecipients;
   useEffect(() => {
     discussionScope.current.active = true;
     return () => {
@@ -1901,6 +1908,14 @@ export function ShellPage() {
     clientNonce: string,
   ): Promise<boolean> {
     if (!candidateScopeCurrent(candidate)) return false;
+    if (feedback.recipientBotId && !inGroup) return false;
+    if (
+      inGroup &&
+      !discussionScope.current.candidateFeedbackRecipients?.some(
+        (member) => member.id === feedback.recipientBotId,
+      )
+    )
+      return false;
     const choice =
       feedback.choice === "good_example"
         ? t`Good example`
@@ -1909,7 +1924,9 @@ export function ShellPage() {
           : t`Skip for now`;
     const text = `${candidateReferenceText(candidate)}${t`Candidate feedback`}: ${choice}\n\n${feedback.reason}`;
     const receipt = await rpc.threads.followUp({
-      ...(inGroup ? { groupId: groupId! } : { botId: active!.id }),
+      ...(inGroup
+        ? { groupId: groupId!, mentions: [feedback.recipientBotId!] }
+        : { botId: active!.id }),
       text,
       clientNonce,
     });
@@ -4102,6 +4119,7 @@ export function ShellPage() {
                 onClose={() => setPanel(null)}
                 onDiscussCandidate={discussCandidate}
                 onCandidateFeedback={feedbackCandidate}
+                candidateFeedbackRecipients={candidateFeedbackRecipients}
                 onRevealMessage={(target) => {
                   navigate({
                     pathname: target.groupId ? `/app/g/${target.groupId}` : `/app/${target.botId}`,

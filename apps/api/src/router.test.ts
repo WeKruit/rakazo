@@ -3644,14 +3644,25 @@ describe("threads.followUp", () => {
   const text = "  Continue on the same research task.\n";
   const clientNonce = "feedback:one-request";
 
-  function fixture({ active = false, ownedAtLock = true, replay = false } = {}) {
+  function fixture({
+    active = false,
+    activeBotIds = active ? ["bot-1"] : [],
+    memberBotIds = ["bot-1", "bot-2"],
+    ownedAtLock = true,
+    replay = false,
+  } = {}) {
     let message: { id: string } | null = replay ? { id: "message-1" } : null;
     let lockTail = Promise.resolve();
     const waitingRun = { id: "run-1", status: "waiting_input" };
     const tx = {
       thread: { update: vi.fn().mockResolvedValue({ nextMessageSeq: 2, nextEventSeq: 2 }) },
       chatGroup: {
-        findFirst: vi.fn().mockResolvedValue({ members: [{ botId: "bot-1" }] }),
+        findFirst: vi.fn().mockResolvedValue({
+          members: memberBotIds.map((botId) => ({
+            botId,
+            bot: { id: botId, name: botId === "bot-1" ? "Main" : "Sourcer" },
+          })),
+        }),
         update: vi.fn().mockResolvedValue({}),
       },
       message: {
@@ -3669,11 +3680,21 @@ describe("threads.followUp", () => {
         }),
         update: vi.fn().mockResolvedValue({}),
       },
-      task: { create: vi.fn().mockResolvedValue({ id: "task-1" }) },
+      task: {
+        create: vi.fn(async ({ data }: { data: { botId: string } }) => ({
+          id: data.botId === "bot-1" ? "task-1" : "task-2",
+        })),
+      },
       run: {
-        findFirst: vi.fn().mockResolvedValue(active ? waitingRun : null),
+        findFirst: vi.fn(async ({ where }: { where: { botId: string } }) =>
+          activeBotIds.includes(where.botId)
+            ? { ...waitingRun, id: where.botId === "bot-1" ? "run-1" : "run-2" }
+            : null,
+        ),
         findUnique: vi.fn().mockResolvedValue(active ? waitingRun : { status: "queued" }),
-        create: vi.fn().mockResolvedValue({ id: "run-1" }),
+        create: vi.fn(async ({ data }: { data: { botId: string } }) => ({
+          id: data.botId === "bot-1" ? "run-1" : "run-2",
+        })),
         update: vi.fn(),
       },
       steeringMessage: { create: vi.fn().mockResolvedValue({}) },
@@ -3684,6 +3705,10 @@ describe("threads.followUp", () => {
       return ownedAtLock ? [{ id: "group-1" }] : [];
     });
     const prisma = {
+      bot: {
+        findFirst: vi.fn().mockResolvedValue({ id: "bot-1", thread: { id: "thread-1" } }),
+      },
+      taughtSkill: { findFirst: vi.fn().mockResolvedValue(null) },
       chatGroup: {
         findFirst: vi.fn().mockResolvedValue({
           id: "group-1",
@@ -3716,10 +3741,11 @@ describe("threads.followUp", () => {
     };
     const notify = vi.fn().mockResolvedValue(undefined);
     const enqueue = vi.fn().mockResolvedValue(undefined);
+    const sendUserMessage = vi.fn().mockResolvedValue({ taskId: "task-1", runId: "run-1" });
     const handler = new RPCHandler(
       createRouter({
         prisma,
-        events: { notify },
+        events: { notify, sendUserMessage },
         jobs: { enqueue },
         env: { sandboxProvider: "fake" },
       } as unknown as RouterDeps),
@@ -3736,17 +3762,194 @@ describe("threads.followUp", () => {
       lockGroup,
       notify,
       enqueue,
-      call: () =>
+      sendUserMessage,
+      call: (input: Record<string, unknown> = {}) =>
         handler.handle(
           new Request("http://127.0.0.1/rpc/threads/followUp", {
             method: "POST",
             headers: { "content-type": "application/json" },
-            body: JSON.stringify({ json: { groupId: "group-1", text, clientNonce } }),
+            body: JSON.stringify({
+              json: {
+                ...(input.botId ? {} : { groupId: "group-1" }),
+                text,
+                clientNonce,
+                ...input,
+              },
+            }),
           }),
           { prefix: "/rpc", context: { actor } },
         ),
     };
   }
+
+  it("routes explicit feedback to idle Sourcer while Main keeps its pending ask", async () => {
+    const { call, tx, waitingRun, enqueue } = fixture({ active: true });
+    const { response } = await call({ mentions: ["bot-2"] });
+
+    expect(response.status).toBe(200);
+    expect(tx.run.create).toHaveBeenCalledExactlyOnceWith({
+      data: expect.objectContaining({
+        botId: "bot-2",
+        trigger: "follow_up",
+        sourceMessageId: "message-1",
+      }),
+      select: { id: true },
+    });
+    expect(tx.steeringMessage.create).not.toHaveBeenCalled();
+    expect(tx.message.findMany).not.toHaveBeenCalled();
+    expect(tx.run.update).not.toHaveBeenCalled();
+    expect(waitingRun.status).toBe("waiting_input");
+    expect(enqueue).toHaveBeenCalledExactlyOnceWith(
+      expect.objectContaining({ payload: { runId: "run-2" } }),
+    );
+  });
+
+  it("creates one human message and event for two explicit recipients and enqueues both", async () => {
+    const { call, tx, enqueue } = fixture();
+    const { response } = await call({ mentions: ["bot-2", "bot-1", "bot-2"] });
+
+    expect(response.status).toBe(200);
+    expect(tx.message.create).toHaveBeenCalledOnce();
+    expect(tx.message.update).toHaveBeenCalledExactlyOnceWith({
+      where: { id: "message-1" },
+      data: { runId: "run-2" },
+    });
+    expect(tx.task.create.mock.calls.map(([{ data }]) => data.botId)).toEqual(["bot-2", "bot-1"]);
+    expect(tx.run.create.mock.calls.map(([{ data }]) => data.botId)).toEqual(["bot-2", "bot-1"]);
+    expect(tx.event.create).toHaveBeenCalledExactlyOnceWith({
+      data: expect.objectContaining({
+        botId: "bot-2",
+        runId: "run-2",
+        payload: {
+          messageId: "message-1",
+          role: "user",
+          blocks: [{ kind: "text", text }],
+          runIds: ["run-2", "run-1"],
+        },
+      }),
+    });
+    expect(enqueue.mock.calls.map(([job]) => job.payload.runId)).toEqual(["run-2", "run-1"]);
+  });
+
+  it.each(["foreign-bot", "bot-2"])(
+    "rejects unavailable explicit recipient %s before writing",
+    async (botId) => {
+      const { call, tx, notify, enqueue } = fixture({ memberBotIds: ["bot-1"] });
+      const { response } = await call({ mentions: ["bot-1", botId] });
+
+      expect(response.status).toBeGreaterThanOrEqual(400);
+      expect(tx.message.create).not.toHaveBeenCalled();
+      expect(tx.event.create).not.toHaveBeenCalled();
+      expect(tx.task.create).not.toHaveBeenCalled();
+      expect(tx.run.create).not.toHaveBeenCalled();
+      expect(tx.steeringMessage.create).not.toHaveBeenCalled();
+      expect(notify).not.toHaveBeenCalled();
+      expect(enqueue).not.toHaveBeenCalled();
+    },
+  );
+
+  it("accepts concurrent duplicate explicit fanout only once", async () => {
+    const { call, tx, notify, enqueue } = fixture();
+    const results = await Promise.all([
+      call({ mentions: ["bot-1", "bot-2"] }),
+      call({ mentions: ["bot-1", "bot-2"] }),
+    ]);
+
+    expect(results.map(({ response }) => response.status)).toEqual([200, 200]);
+    expect(tx.message.create).toHaveBeenCalledOnce();
+    expect(tx.event.create).toHaveBeenCalledOnce();
+    expect(tx.run.create).toHaveBeenCalledTimes(2);
+    expect(notify).toHaveBeenCalledOnce();
+    expect(enqueue).toHaveBeenCalledTimes(2);
+  });
+
+  it("binds a shared follow-up to the selected waiting and idle bots and only enqueues the new run", async () => {
+    const { call, tx, enqueue } = fixture({ active: true });
+    const { response } = await call({ mentions: ["bot-1", "bot-2"] });
+
+    expect(response.status).toBe(200);
+    expect(tx.message.create).toHaveBeenCalledOnce();
+    expect(tx.steeringMessage.create).toHaveBeenCalledExactlyOnceWith({
+      data: { messageId: "message-1", botId: "bot-1", userId: "user-1", runId: "run-1" },
+    });
+    expect(tx.run.create.mock.calls.map(([{ data }]) => data.botId)).toEqual(["bot-2"]);
+    expect(tx.event.create.mock.calls[0]![0].data.payload).toEqual({
+      messageId: "message-1",
+      role: "user",
+      blocks: [{ kind: "text", text }],
+      runIds: ["run-1", "run-2"],
+    });
+    expect(enqueue).toHaveBeenCalledExactlyOnceWith(
+      expect.objectContaining({ payload: { runId: "run-2" } }),
+    );
+  });
+
+  it("steers only the selected waiting bot without answering any pending card", async () => {
+    const { call, tx, waitingRun, enqueue } = fixture({ activeBotIds: ["bot-1", "bot-2"] });
+    const { response } = await call({ mentions: ["bot-2"] });
+
+    expect(response.status).toBe(200);
+    expect(tx.steeringMessage.create).toHaveBeenCalledExactlyOnceWith({
+      data: { messageId: "message-1", botId: "bot-2", userId: "user-1", runId: "run-2" },
+    });
+    expect(tx.run.create).not.toHaveBeenCalled();
+    expect(tx.message.findMany).not.toHaveBeenCalled();
+    expect(tx.run.update).not.toHaveBeenCalled();
+    expect(waitingRun.status).toBe("waiting_input");
+    expect(enqueue).not.toHaveBeenCalled();
+  });
+
+  it("does not interpret candidate text as a recipient mention", async () => {
+    const { call, tx } = fixture();
+    const { response } = await call({
+      text: "Candidate's evidence mentions @Sourcer and @everyone.",
+    });
+
+    expect(response.status).toBe(200);
+    expect(tx.run.create.mock.calls.map(([{ data }]) => data.botId)).toEqual(["bot-1"]);
+  });
+
+  it.each([{ mentions: undefined }, { mentions: [] }])(
+    "keeps direct bot follow-ups unchanged with mentions $mentions",
+    async ({ mentions }) => {
+      const { call, sendUserMessage, enqueue, tx } = fixture();
+      const { response } = await call({ botId: "bot-1", mentions });
+
+      expect(response.status).toBe(200);
+      expect(sendUserMessage).toHaveBeenCalledExactlyOnceWith({
+        spaceId: "space-1",
+        threadId: "thread-1",
+        botId: "bot-1",
+        userId: "user-1",
+        blocks: [{ kind: "text", text }],
+        prompt: text,
+        trigger: "follow_up",
+        clientNonce,
+      });
+      expect(enqueue).toHaveBeenCalledOnce();
+      expect(tx.message.create).not.toHaveBeenCalled();
+    },
+  );
+
+  it("rejects explicit recipients in a direct bot follow-up before writing", async () => {
+    const { call, sendUserMessage, enqueue } = fixture();
+    const { response } = await call({ botId: "bot-1", mentions: ["bot-2"] });
+
+    expect(response.status).toBe(400);
+    expect(sendUserMessage).not.toHaveBeenCalled();
+    expect(enqueue).not.toHaveBeenCalled();
+  });
+
+  it.each([{ mentions: [""] }, { mentions: Array.from({ length: 65 }, () => "bot-2") }])(
+    "rejects an invalid explicit recipient list before writing: $mentions",
+    async ({ mentions }) => {
+      const { call, tx } = fixture();
+      const { response } = await call({ mentions });
+
+      expect(response.status).toBe(400);
+      expect(tx.message.create).not.toHaveBeenCalled();
+    },
+  );
 
   it.each([false, true])(
     "accepts concurrent duplicate group follow-ups once with an active run: %s",
@@ -3773,7 +3976,12 @@ describe("threads.followUp", () => {
         data: expect.objectContaining({
           type: "thread.message.created",
           runId: "run-1",
-          payload: { messageId: "message-1", role: "user", blocks: [{ kind: "text", text }] },
+          payload: {
+            messageId: "message-1",
+            role: "user",
+            blocks: [{ kind: "text", text }],
+            runIds: ["run-1"],
+          },
         }),
       });
       expect(tx.task.create).toHaveBeenCalledTimes(active ? 0 : 1);

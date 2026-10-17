@@ -4653,6 +4653,10 @@ msgstr "Выберите бота"
 msgid "Select a connected model"
 msgstr "Выберите подключённую модель"
 
+#: src/pages/RecruitingPanel.tsx
+msgid "Selected recipient unavailable"
+msgstr ""
+
 #: src/pages/Shell.tsx
 msgid "Send"
 msgstr "Отправить"
@@ -4676,6 +4680,10 @@ msgstr ""
 #: src/pages/Auth.tsx
 msgid "Send reset link"
 msgstr "Отправить ссылку для сброса"
+
+#: src/pages/RecruitingPanel.tsx
+msgid "Send to"
+msgstr ""
 
 #: src/pages/AccountSettingsOverlay.tsx
 msgid "Send with Enter"

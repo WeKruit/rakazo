@@ -461,6 +461,7 @@ export const appContract = {
       .input(
         threadTarget.safeExtend({
           text: z.string().min(1),
+          mentions: z.array(Id).max(64).optional(),
           /** Carries the call id, so a turn taken mid-run stays in the call's card. */
           clientNonce: z.string().min(1).max(200).optional(),
         }),

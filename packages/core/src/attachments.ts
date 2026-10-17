@@ -217,7 +217,7 @@ export function attachmentsForBot<T extends { botId: string }>(
 export function userTurnMessageForRun<
   T extends { id?: string; role: string; runId?: string | null; blocks: MessageBlock[] },
 >(trigger: string, runId: string, messages: T[], sourceMessageId?: string | null): T | undefined {
-  if (trigger !== "user") return undefined;
+  if (trigger !== "user" && trigger !== "follow_up") return undefined;
   return messages.find(
     (message) =>
       message.role === "user" &&

@@ -123,35 +123,47 @@ describe("attachment helpers", () => {
     expect(attachmentExtensionForMimeType("application/zip")).toBe(".zip");
   });
 
-  it("scopes current-turn images to user-triggered runs", () => {
-    const messages = [
-      {
-        id: "message-old",
-        role: "user",
-        runId: "run-old",
-        blocks: [
-          {
-            kind: "image" as const,
-            artifactId: "art_1",
-            mimeType: "image/png",
-            name: "old.png",
-          },
-        ],
-      },
-      {
-        id: "message-new",
-        role: "user",
-        runId: "run-new",
-        blocks: [{ kind: "text" as const, text: "routine time" }],
-      },
-    ];
-    expect(userTurnMessageForRun("routine", "run-new", messages)).toBeUndefined();
-    expect(userTurnMessageForRun("user", "run-old", messages)).toEqual(messages[0]);
-    expect(userTurnMessageForRun("user", "run-new", messages)).toEqual(messages[1]);
-    expect(userTurnMessageForRun("user", "run-fanout", messages, "message-old")).toEqual(
-      messages[0],
-    );
-  });
+  it.each(["user", "follow_up"])(
+    "scopes current-turn sources for native %s messages",
+    (trigger) => {
+      const messages = [
+        {
+          id: "message-old",
+          role: "user",
+          runId: "run-old",
+          blocks: [
+            {
+              kind: "image" as const,
+              artifactId: "art_1",
+              mimeType: "image/png",
+              name: "old.png",
+            },
+          ],
+        },
+        {
+          id: "message-new",
+          role: "user",
+          runId: "run-new",
+          blocks: [{ kind: "text" as const, text: "routine time" }],
+        },
+      ];
+      expect(userTurnMessageForRun("routine", "run-new", messages)).toBeUndefined();
+      expect(userTurnMessageForRun(trigger, "run-old", messages)).toEqual(messages[0]);
+      expect(userTurnMessageForRun(trigger, "run-new", messages)).toEqual(messages[1]);
+      expect(userTurnMessageForRun(trigger, "run-fanout", messages, "message-old")).toEqual(
+        messages[0],
+      );
+      expect(userTurnMessageForRun(trigger, "run-new", messages, "missing")).toBeUndefined();
+      expect(
+        userTurnMessageForRun(
+          trigger,
+          "run-new",
+          [{ ...messages[1]!, role: "bot" }],
+          "message-new",
+        ),
+      ).toBeUndefined();
+    },
+  );
 
   it("selects pending attachments only for their originating bot", () => {
     const attachments = [

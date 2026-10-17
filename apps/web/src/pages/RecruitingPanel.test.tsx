@@ -12,7 +12,7 @@ import type {
   RecruitingRole,
   RecruitingRoleRevision,
 } from "@rakazo/contracts";
-import type { ReactNode } from "react";
+import type { ComponentProps, ReactNode } from "react";
 import { act } from "react";
 import { createRoot } from "react-dom/client";
 import { MemoryRouter } from "react-router-dom";
@@ -469,14 +469,24 @@ afterEach(async () => {
   localStorage.clear();
 });
 // Existing receipt/recovery cases explicitly exercise developer diagnostics; product mode is tested below.
-async function mounted(threadId = "thread-1", botId?: string, showDiagnostics = true) {
+async function mounted(
+  threadId = "thread-1",
+  botId?: string,
+  showDiagnostics = true,
+  recipients?: ComponentProps<typeof RecruitingPanel>["candidateFeedbackRecipients"],
+) {
   const container = document.createElement("div");
   document.body.append(container);
   const root = createRoot(container);
   const reveal = vi.fn();
   const discuss = vi.fn();
   const feedback = vi.fn().mockResolvedValue(true);
-  const render = async (id: string, refreshSignal = 0, diagnostics = showDiagnostics) =>
+  const render = async (
+    id: string,
+    refreshSignal = 0,
+    diagnostics = showDiagnostics,
+    feedbackRecipients = recipients,
+  ) =>
     act(async () =>
       root.render(
         <MemoryRouter>
@@ -489,6 +499,7 @@ async function mounted(threadId = "thread-1", botId?: string, showDiagnostics = 
             onRevealMessage={reveal}
             onDiscussCandidate={discuss}
             onCandidateFeedback={feedback}
+            candidateFeedbackRecipients={feedbackRecipients}
           />
         </MemoryRouter>,
       ),
@@ -564,6 +575,141 @@ async function changeFeedbackReason(container: HTMLElement, value: string) {
     input.dispatchEvent(new Event("input", { bubbles: true }));
   });
 }
+
+const feedbackRecipients = [
+  { id: "coordinator", name: "Coordinator" },
+  { id: "researcher", name: "Research specialist" },
+];
+
+it("shows group feedback recipients with the first member selected and captures the intended recipient across an uncertain retry", async () => {
+  const view = await mounted("thread-1", undefined, false, feedbackRecipients);
+  view.feedback
+    .mockRejectedValueOnce(new Error("Outcome unknown"))
+    .mockRejectedValueOnce(new Error("Still unknown"));
+  await view.click("Evidence");
+  await view.click("Unnamed candidate");
+  await view.click("Give feedback");
+  const recipient = view.container.querySelector<HTMLSelectElement>(
+    'select[aria-label="Send to"]',
+  )!;
+  expect(recipient).not.toBeNull();
+  expect(recipient.value).toBe("coordinator");
+  expect(recipient.selectedOptions[0]!.textContent).toBe("Coordinator");
+  await changeSelect(view.container, "Send to", "researcher");
+  await changeSelect(view.container, "Feedback", "good_example");
+  await changeFeedbackReason(view.container, "  Exact authored reason\n  ");
+  await view.click("Send feedback");
+  expect(view.feedback.mock.calls[0]![1]).toEqual({
+    choice: "good_example",
+    reason: "  Exact authored reason\n  ",
+    recipientBotId: "researcher",
+  });
+  await view.render("thread-1", 0, false, [...feedbackRecipients].reverse());
+  await view.click("Send feedback");
+  expect(view.feedback.mock.calls[1]).toEqual(view.feedback.mock.calls[0]);
+  await changeSelect(view.container, "Send to", "coordinator");
+  await view.click("Send feedback");
+  expect(view.feedback.mock.calls[2]![1]).toEqual({
+    choice: "good_example",
+    reason: "  Exact authored reason\n  ",
+    recipientBotId: "coordinator",
+  });
+  expect(view.feedback.mock.calls[2]![2]).not.toBe(view.feedback.mock.calls[1]![2]);
+});
+
+it("uses a new nonce after changing the feedback recipient and ignores an earlier recipient's late acceptance", async () => {
+  const view = await mounted("thread-1", undefined, false, feedbackRecipients);
+  let finish!: (accepted: boolean) => void;
+  view.feedback.mockImplementationOnce(
+    () =>
+      new Promise<boolean>((resolve) => {
+        finish = resolve;
+      }),
+  );
+  await view.click("Evidence");
+  await view.click("Unnamed candidate");
+  await view.click("Give feedback");
+  await changeSelect(view.container, "Feedback", "skip");
+  await view.click("Send feedback");
+  await changeSelect(view.container, "Send to", "researcher");
+  await act(async () => finish(true));
+  expect(view.container.querySelector('[role="dialog"]')!.textContent).not.toContain(
+    "Feedback sent",
+  );
+  expect(
+    view.container.querySelector<HTMLSelectElement>('select[aria-label="Feedback"]')!.value,
+  ).toBe("skip");
+  await view.click("Send feedback");
+  expect(view.feedback.mock.calls[1]![1]).toEqual({
+    choice: "skip",
+    reason: "",
+    recipientBotId: "researcher",
+  });
+  expect(view.feedback.mock.calls[1]![2]).not.toBe(view.feedback.mock.calls[0]![2]);
+});
+
+it("keeps a removed feedback recipient unavailable instead of silently sending to another member", async () => {
+  const view = await mounted("thread-1", undefined, false, feedbackRecipients);
+  let finish!: (accepted: boolean) => void;
+  view.feedback.mockImplementationOnce(
+    () =>
+      new Promise<boolean>((resolve) => {
+        finish = resolve;
+      }),
+  );
+  await view.click("Evidence");
+  await view.click("Unnamed candidate");
+  await view.click("Give feedback");
+  await changeSelect(view.container, "Send to", "researcher");
+  await changeSelect(view.container, "Feedback", "not_fit");
+  await changeFeedbackReason(view.container, "Keep this draft");
+  await view.click("Send feedback");
+  await view.render("thread-1", 0, false, [
+    feedbackRecipients[0]!,
+    { id: "other", name: "Other specialist" },
+  ]);
+  await act(async () => finish(true));
+  const recipient = view.container.querySelector<HTMLSelectElement>(
+    'select[aria-label="Send to"]',
+  )!;
+  expect(recipient.value).toBe("researcher");
+  expect(view.container.querySelector('[role="dialog"]')!.textContent).toContain(
+    "Selected recipient unavailable",
+  );
+  expect(view.container.querySelector('[role="dialog"]')!.textContent).not.toContain(
+    "Feedback sent",
+  );
+  expect(
+    view.container.querySelector<HTMLTextAreaElement>('textarea[aria-label="Reason"]')!.value,
+  ).toBe("Keep this draft");
+  await view.click("Send feedback");
+  expect(view.feedback).toHaveBeenCalledTimes(1);
+  await changeSelect(view.container, "Send to", "other");
+  await view.click("Send feedback");
+  expect(view.feedback.mock.calls[1]![1]).toEqual({
+    choice: "not_fit",
+    reason: "Keep this draft",
+    recipientBotId: "other",
+  });
+});
+
+it.each([undefined, [feedbackRecipients[0]!]])(
+  "does not add a recipient selector when no group choice is needed (%j)",
+  async (recipients) => {
+    const view = await mounted("thread-1", recipients ? undefined : "bot-1", false, recipients);
+    await view.click("Evidence");
+    await view.click("Unnamed candidate");
+    await view.click("Give feedback");
+    expect(view.container.querySelector('select[aria-label="Send to"]')).toBeNull();
+    await changeSelect(view.container, "Feedback", "skip");
+    await view.click("Send feedback");
+    expect(view.feedback.mock.calls[0]![1]).toEqual({
+      choice: "skip",
+      reason: "",
+      ...(recipients ? { recipientBotId: "coordinator" } : {}),
+    });
+  },
+);
 
 it("requires an explicit feedback choice and preserves the authored reason without changing qualification or shortlist", async () => {
   const candidate = { ...candidateFixture(), name: "Synthetic Avery" };

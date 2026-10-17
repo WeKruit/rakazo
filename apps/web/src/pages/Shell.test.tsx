@@ -210,6 +210,10 @@ async function renderFeedbackShell(kind: "bot" | "group" = "bot") {
     autoSpeak: false,
     voiceId: null,
   };
+  const members = [
+    { botId: "bot-1", name: "Main", color: "ink", status: "waiting_input" },
+    { botId: "bot-2", name: "Sourcer", color: "ink", status: "idle" },
+  ];
   const group = {
     id: "group-1",
     spaceId: "space-1",
@@ -217,7 +221,7 @@ async function renderFeedbackShell(kind: "bot" | "group" = "bot") {
     pinned: false,
     sectionId: null,
     archivedAt: null,
-    members: [],
+    members,
     threadId: "thread-1",
     preview: "",
     unread: false,
@@ -242,7 +246,7 @@ async function renderFeedbackShell(kind: "bot" | "group" = "bot") {
   const thread = {
     threadId: "thread-1",
     ...(kind === "group"
-      ? { groupId: group.id, groupName: group.name, members: [] }
+      ? { groupId: group.id, groupName: group.name, members }
       : { botId: bot.id }),
     cursor: 1,
     messages: [pending],
@@ -376,10 +380,10 @@ async function renderFeedbackShell(kind: "bot" | "group" = "bot") {
   await click("Evidence");
   await click(candidate.name);
   await click("Give feedback");
-  const choose = async (choice: string) =>
+  const choose = async (choice: string, label = "Feedback") =>
     act(async () => {
       const select = document.body.querySelector<HTMLSelectElement>(
-        'select[aria-label="Feedback"]',
+        `select[aria-label="${label}"]`,
       )!;
       select.value = choice;
       select.dispatchEvent(new Event("change", { bubbles: true }));
@@ -393,6 +397,7 @@ async function renderFeedbackShell(kind: "bot" | "group" = "bot") {
     render,
     pending,
     candidate,
+    members,
     getProps: () => props!,
     navigate: async (to: string) => act(async () => navigate(to)),
   };
@@ -402,6 +407,19 @@ it.each(["bot", "group"] as const)(
   "sends authored candidate feedback through native followUp in a %s while leaving the pending Main card and composer attachments untouched",
   async (kind) => {
     const view = await renderFeedbackShell(kind);
+    if (kind === "group") {
+      expect(view.getProps().candidateFeedbackRecipients).toEqual([
+        { id: "bot-1", name: "Main" },
+        { id: "bot-2", name: "Sourcer" },
+      ]);
+      expect(
+        document.body.querySelector<HTMLSelectElement>('select[aria-label="Send to"]')!.value,
+      ).toBe("bot-1");
+      await view.choose("bot-2", "Send to");
+    } else {
+      expect(view.getProps().candidateFeedbackRecipients).toBeUndefined();
+      expect(document.body.querySelector('select[aria-label="Send to"]')).toBeNull();
+    }
     // Ordinary composer state must never join a candidate feedback submission.
     pickAttachment();
     await view.choose("not_fit");
@@ -409,7 +427,7 @@ it.each(["bot", "group"] as const)(
     view.reason(reason);
     await view.click("Send feedback");
     expect(shellApi.followUp).toHaveBeenCalledExactlyOnceWith({
-      ...(kind === "group" ? { groupId: "group-1" } : { botId: "bot-1" }),
+      ...(kind === "group" ? { groupId: "group-1", mentions: ["bot-2"] } : { botId: "bot-1" }),
       text: `Candidate reference\n> Name: Synthetic Avery\n> Keep original evidence\n> Role: Systems engineer\n> Role version: 2\n> Title: Engineer\n> Company: Example Tools\n> LinkedIn: https://example.test/avery\n> Resume: Resume missing\n\nCandidate feedback: Not a fit\n\n${reason}`,
       clientNonce: expect.any(String),
     });
@@ -425,26 +443,34 @@ it.each(["bot", "group"] as const)(
   },
 );
 
-it("retains authored feedback after an uncertain native RPC outcome and retries with the same nonce", async () => {
-  const view = await renderFeedbackShell();
-  shellApi.followUp.mockRejectedValueOnce(new Error("Disconnected after dispatch"));
-  await view.choose("good_example");
-  view.reason("  Original reason\n  ");
-  await view.click("Send feedback");
-  expect(document.body.textContent).not.toContain("Feedback sent");
-  expect(
-    document.body.querySelector<HTMLTextAreaElement>('textarea[aria-label="Reason"]')!.value,
-  ).toBe("  Original reason\n  ");
-  await view.click("Send feedback");
-  expect(shellApi.followUp).toHaveBeenCalledTimes(2);
-  expect(shellApi.followUp.mock.calls[1]).toEqual(shellApi.followUp.mock.calls[0]);
-  expect(document.body.textContent).toContain("Feedback sent");
-});
+it.each(["bot", "group"] as const)(
+  "retains authored feedback in a %s after an uncertain native RPC outcome and retries with the same nonce and recipient",
+  async (kind) => {
+    const view = await renderFeedbackShell(kind);
+    if (kind === "group") await view.choose("bot-2", "Send to");
+    shellApi.followUp.mockRejectedValueOnce(new Error("Disconnected after dispatch"));
+    await view.choose("good_example");
+    view.reason("  Original reason\n  ");
+    await view.click("Send feedback");
+    expect(document.body.textContent).not.toContain("Feedback sent");
+    expect(
+      document.body.querySelector<HTMLTextAreaElement>('textarea[aria-label="Reason"]')!.value,
+    ).toBe("  Original reason\n  ");
+    await view.click("Send feedback");
+    expect(shellApi.followUp).toHaveBeenCalledTimes(2);
+    expect(shellApi.followUp.mock.calls[1]).toEqual(shellApi.followUp.mock.calls[0]);
+    expect(document.body.textContent).toContain("Feedback sent");
+  },
+);
 
-it.each(["user", "space", "thread", "panel", "unmount"])(
-  "rejects an old candidate feedback callback after its %s scope changes",
-  async (change) => {
-    const view = await renderFeedbackShell();
+it.each(
+  (["bot", "group"] as const).flatMap((kind) =>
+    ["user", "space", "thread", "panel", "unmount"].map((change) => ({ kind, change })),
+  ),
+)(
+  "rejects an old candidate feedback callback in a $kind after its $change scope changes",
+  async ({ kind, change }) => {
+    const view = await renderFeedbackShell(kind);
     const send = view.getProps().onCandidateFeedback!;
     const candidate = { ...view.candidate, threadId: "thread-1", roleTitle: "Systems engineer" };
     if (change === "user") {
@@ -464,12 +490,48 @@ it.each(["user", "space", "thread", "panel", "unmount"])(
     }
     let accepted: boolean | undefined;
     await act(async () => {
-      accepted = await send(candidate, { choice: "skip", reason: "" }, "unchanged-nonce");
+      accepted = await send(
+        candidate,
+        { choice: "skip", reason: "", ...(kind === "group" ? { recipientBotId: "bot-2" } : {}) },
+        "unchanged-nonce",
+      );
     });
     expect(accepted).toBe(false);
     expect(shellApi.followUp).not.toHaveBeenCalled();
   },
 );
+
+it("rejects invalid and removed feedback recipients at the Shell boundary without rerouting", async () => {
+  const view = await renderFeedbackShell("group");
+  const send = view.getProps().onCandidateFeedback!;
+  const candidate = { ...view.candidate, threadId: "thread-1", roleTitle: "Systems engineer" };
+  expect(
+    await send(
+      candidate,
+      { choice: "skip", reason: "", recipientBotId: "outsider" },
+      "invalid-target",
+    ),
+  ).toBe(false);
+  await view.choose("bot-2", "Send to");
+  await view.choose("skip");
+  view.members.splice(1, 1, {
+    botId: "bot-3",
+    name: "Other specialist",
+    color: "ink",
+    status: "idle",
+  });
+  await view.render();
+  expect(document.body.textContent).toContain("Selected recipient unavailable");
+  await view.click("Send feedback");
+  expect(
+    await send(
+      candidate,
+      { choice: "skip", reason: "", recipientBotId: "bot-2" },
+      "removed-target",
+    ),
+  ).toBe(false);
+  expect(shellApi.followUp).not.toHaveBeenCalled();
+});
 
 it("quotes every candidate reference line without exposing internal identifiers", () => {
   const text = candidateReferenceText({

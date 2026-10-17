@@ -67,6 +67,7 @@ export type CandidateDiscussionContext = Pick<
 export type CandidateFeedback = {
   choice: "good_example" | "not_fit" | "skip";
   reason: string;
+  recipientBotId?: string;
 };
 
 type Props = {
@@ -77,6 +78,7 @@ type Props = {
   showDiagnostics?: boolean;
   onRevealMessage?: (target: { botId?: string; groupId?: string; messageId: string }) => void;
   onDiscussCandidate?: (candidate: CandidateDiscussionContext) => void;
+  candidateFeedbackRecipients?: { id: string; name: string }[];
   onCandidateFeedback?: (
     candidate: CandidateDiscussionContext,
     feedback: CandidateFeedback,
@@ -97,10 +99,12 @@ type Snapshot = {
 
 function CandidateFeedbackForm({
   candidate,
+  recipients,
   onSend,
   onAccessError,
 }: {
   candidate: CandidateDiscussionContext;
+  recipients: Props["candidateFeedbackRecipients"];
   onSend: NonNullable<Props["onCandidateFeedback"]>;
   onAccessError: (error: unknown) => void;
 }) {
@@ -108,6 +112,7 @@ function CandidateFeedbackForm({
   const [open, setOpen] = useState(false);
   const [choice, setChoice] = useState<CandidateFeedback["choice"] | "">("");
   const [reason, setReason] = useState("");
+  const [recipientBotId, setRecipientBotId] = useState(recipients?.[0]?.id);
   const [pending, setPending] = useState(false);
   const [failed, setFailed] = useState(false);
   const [sent, setSent] = useState(false);
@@ -115,6 +120,14 @@ function CandidateFeedbackForm({
   const attempt = useRef<
     (CandidateFeedback & { candidate: CandidateDiscussionContext; clientNonce: string }) | null
   >(null);
+  const recipientUnavailable =
+    recipients !== undefined && !recipients.some((member) => member.id === recipientBotId);
+  useEffect(() => {
+    if (!recipientUnavailable) return;
+    scope.current.generation++;
+    setSent(false);
+    setFailed(false);
+  }, [recipientUnavailable]);
   useEffect(() => {
     scope.current.active = true;
     return () => {
@@ -128,21 +141,34 @@ function CandidateFeedbackForm({
     setFailed(false);
   }
   async function submit() {
-    if (scope.current.busy || !choice || (choice !== "skip" && !reason.trim())) return;
+    if (
+      scope.current.busy ||
+      recipientUnavailable ||
+      !choice ||
+      (choice !== "skip" && !reason.trim())
+    )
+      return;
     const generation = scope.current.generation;
-    if (attempt.current?.choice !== choice || attempt.current.reason !== reason)
-      attempt.current = { candidate, choice, reason, clientNonce: crypto.randomUUID() };
+    if (
+      attempt.current?.choice !== choice ||
+      attempt.current.reason !== reason ||
+      attempt.current.recipientBotId !== recipientBotId
+    )
+      attempt.current = {
+        candidate,
+        choice,
+        reason,
+        ...(recipientBotId ? { recipientBotId } : {}),
+        clientNonce: crypto.randomUUID(),
+      };
     const submission = attempt.current;
     scope.current.busy = true;
     setPending(true);
     setFailed(false);
     setSent(false);
     try {
-      const accepted = await onSend(
-        submission.candidate,
-        { choice, reason },
-        submission.clientNonce,
-      );
+      const { candidate: originalCandidate, clientNonce, ...feedback } = submission;
+      const accepted = await onSend(originalCandidate, feedback, clientNonce);
       if (!scope.current.active) return;
       if (accepted) attempt.current = null;
       if (scope.current.generation !== generation) return;
@@ -173,6 +199,34 @@ function CandidateFeedbackForm({
             void submit();
           }}
         >
+          {recipients && recipients.length > 1 ? (
+            <NativeSelect
+              className="[&_select]:text-base"
+              aria-label={t`Send to`}
+              aria-invalid={recipientUnavailable || undefined}
+              required
+              value={recipientBotId ?? ""}
+              onChange={(event) => {
+                edited();
+                setRecipientBotId(event.target.value);
+              }}
+            >
+              {recipientUnavailable ? (
+                <NativeSelectOption value={recipientBotId ?? ""} disabled>
+                  <Trans>Selected recipient unavailable</Trans>
+                </NativeSelectOption>
+              ) : null}
+              {recipients.map((member) => (
+                <NativeSelectOption key={member.id} value={member.id}>
+                  {member.name}
+                </NativeSelectOption>
+              ))}
+            </NativeSelect>
+          ) : recipientUnavailable ? (
+            <p role="alert">
+              <Trans>Selected recipient unavailable</Trans>
+            </p>
+          ) : null}
           <NativeSelect
             className="[&_select]:text-base"
             aria-label={t`Feedback`}
@@ -210,7 +264,9 @@ function CandidateFeedbackForm({
           <Button
             size="sm"
             type="submit"
-            disabled={pending || !choice || (choice !== "skip" && !reason.trim())}
+            disabled={
+              pending || recipientUnavailable || !choice || (choice !== "skip" && !reason.trim())
+            }
           >
             {pending ? <Trans>Sending…</Trans> : <Trans>Send feedback</Trans>}
           </Button>
@@ -1458,6 +1514,7 @@ function RecruitingWorkspace({
   onRevealMessage,
   onDiscussCandidate,
   onCandidateFeedback,
+  candidateFeedbackRecipients,
   showDiagnostics = false,
 }: Props) {
   const { t } = useLingui();
@@ -3266,6 +3323,7 @@ function RecruitingWorkspace({
                     resumeUrl: selection.resumeUrl,
                   }}
                   onSend={onCandidateFeedback}
+                  recipients={candidateFeedbackRecipients}
                   onAccessError={denyAccess}
                 />
               ) : null}

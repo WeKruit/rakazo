@@ -159,6 +159,7 @@ import {
   hasMixedOneShotSchedule,
   isOneShotRoutineCrons,
   nextCronDateAcrossStrict,
+  resolveGroupTargetBotIds,
 } from "@rakazo/core";
 import type { BoardEvents, Board as BoardRow, PrismaClient, ThreadEvents } from "@rakazo/db";
 import {
@@ -2270,6 +2271,9 @@ export function createRouter(deps: RouterDeps) {
       followUp: authed.threads.followUp.handler(async ({ context, input }) => {
         const target = await resolveThreadTarget(deps.prisma, context.actor, input);
         if (target.kind === "bot") {
+          if (input.mentions?.length) {
+            throw new ORPCError("BAD_REQUEST", { message: "Recipients require a group chat." });
+          }
           await assertTeachingSendAllowed(deps.prisma, context.actor.spaceId, target.botId);
           const sent = await deps.events.sendUserMessage({
             spaceId: context.actor.spaceId,
@@ -2301,13 +2305,36 @@ export function createRouter(deps: RouterDeps) {
           const group = await tx.chatGroup.findFirst({
             where: {
               id: target.groupId,
+              spaceId: context.actor.spaceId,
+              userId: context.actor.userId,
               archivedAt: null,
               thread: { id: target.threadId },
             },
-            include: { members: { orderBy: [{ createdAt: "asc" }, { botId: "asc" }] } },
+            include: {
+              members: {
+                where: {
+                  bot: {
+                    spaceId: context.actor.spaceId,
+                    userId: context.actor.userId,
+                    archivedAt: null,
+                  },
+                },
+                include: { bot: { select: { id: true, name: true } } },
+                orderBy: [{ createdAt: "asc" }, { botId: "asc" }],
+              },
+            },
           });
-          const botId = group?.members[0]?.botId;
-          if (!botId) throw new IsolationError();
+          if (!group?.members.length) throw new IsolationError();
+          const members = group.members.map((member) => member.bot);
+          if (input.mentions?.some((botId) => !members.some((member) => member.id === botId))) {
+            throw new IsolationError();
+          }
+          const botIds = resolveGroupTargetBotIds({
+            // ponytail: only explicit recipient choices route follow-ups; evidence text stays intact.
+            text: "",
+            members,
+            explicitMentions: input.mentions,
+          });
           const blocks = [{ kind: "text" as const, text: input.text }];
           const message = await createThreadMessageInTransaction(tx, {
             threadId: target.threadId,
@@ -2315,68 +2342,78 @@ export function createRouter(deps: RouterDeps) {
             blocks,
             clientNonce: input.clientNonce,
           });
-          const active = await tx.run.findFirst({
-            where: {
-              threadId: target.threadId,
-              botId,
-              status: { in: [...ACTIVE_RUN_STATUSES] },
-            },
-            select: { id: true },
-          });
-          let run: { id: string } | null = null;
-          if (!active) {
-            const task = await tx.task.create({
-              data: {
-                spaceId: context.actor.spaceId,
-                botId,
+          const runIds: string[] = [];
+          const createdRunIds: string[] = [];
+          for (const botId of botIds) {
+            const active = await tx.run.findFirst({
+              where: {
                 threadId: target.threadId,
-                userId: context.actor.userId,
-                prompt: input.text,
-                status: "queued",
-              },
-            });
-            run = await tx.run.create({
-              data: {
-                spaceId: context.actor.spaceId,
                 botId,
-                threadId: target.threadId,
-                taskId: task.id,
-                userId: context.actor.userId,
-                status: "queued",
-                trigger: "follow_up",
-                sourceMessageId: message.id,
+                status: { in: [...ACTIVE_RUN_STATUSES] },
               },
               select: { id: true },
             });
-            await tx.message.update({ where: { id: message.id }, data: { runId: run.id } });
-          } else {
-            await tx.steeringMessage.create({
-              data: {
-                messageId: message.id,
-                botId,
-                userId: context.actor.userId,
-                runId: active.id,
-              },
-            });
-            await tx.message.update({ where: { id: message.id }, data: { runId: active.id } });
+            if (active) {
+              await tx.steeringMessage.create({
+                data: {
+                  messageId: message.id,
+                  botId,
+                  userId: context.actor.userId,
+                  runId: active.id,
+                },
+              });
+              runIds.push(active.id);
+            } else {
+              const task = await tx.task.create({
+                data: {
+                  spaceId: context.actor.spaceId,
+                  botId,
+                  threadId: target.threadId,
+                  userId: context.actor.userId,
+                  prompt: input.text,
+                  status: "queued",
+                },
+              });
+              const run = await tx.run.create({
+                data: {
+                  spaceId: context.actor.spaceId,
+                  botId,
+                  threadId: target.threadId,
+                  taskId: task.id,
+                  userId: context.actor.userId,
+                  status: "queued",
+                  trigger: "follow_up",
+                  sourceMessageId: message.id,
+                },
+                select: { id: true },
+              });
+              runIds.push(run.id);
+              createdRunIds.push(run.id);
+            }
           }
+          await tx.message.update({ where: { id: message.id }, data: { runId: runIds[0] } });
           const event = await appendEventInTransaction(tx, {
             spaceId: context.actor.spaceId,
             threadId: target.threadId,
-            botId,
+            botId: botIds[0]!,
             type: "thread.message.created",
-            runId: run?.id ?? active?.id,
-            payload: { messageId: message.id, role: "user", blocks },
+            runId: runIds[0],
+            payload: {
+              messageId: message.id,
+              role: "user",
+              blocks,
+              runIds,
+            },
           });
           await touchGroupUpdatedAt(tx, target.groupId);
-          return { runId: run?.id, eventSeq: event.seq };
+          return { runIds: createdRunIds, eventSeq: event.seq };
         });
         if (committed) {
           await deps.events.notify(target.threadId, committed.eventSeq).catch((error) => {
             getLogger().error("group follow-up realtime notification", error);
           });
-          if (committed.runId) {
-            await deps.jobs.enqueue(runContinueJob(committed.runId)).catch((error) => {
+          for (const runId of committed.runIds) {
+            await deps.jobs.enqueue(runContinueJob(runId)).catch((error) => {
               getLogger().error("group follow-up enqueue", error);
             });
           }

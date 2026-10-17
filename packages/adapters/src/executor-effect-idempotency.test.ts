@@ -3673,31 +3673,35 @@ describe("native recruiting assessment effect delivery", () => {
     vi.mocked(loadRecruitingRunContext).mockReset();
   });
 
-  it("exposes the actual human message identifier and text block indexes for evidence reads", async () => {
-    const f = fixture("assessment-source-metadata");
-    f.runData.sourceMessageId = "human-evidence-source";
-    const human = {
-      id: "human-evidence-source",
-      seq: 1,
-      role: "user",
-      runId: null,
-      replyToMessageId: null,
-      externalTranscriptFor: null,
-      createdAt: new Date("2026-10-16T00:00:00.000Z"),
-      blocks: [{ kind: "text", text: "Exact source material" }],
-    };
-    f.prisma.message.findMany.mockResolvedValue([human]);
-    f.runtimeRun.mockImplementation(async function* (request) {
-      expect(request.instructions).toContain('"messageId":"human-evidence-source"');
-      expect(request.instructions).toContain('"blockIndex":0');
-      expect(request.instructions).toContain(
-        '"selection":{"kind":"message_text","blockIndex":0,"start":0,"end":21}',
-      );
-      expect(request.instructions).not.toContain('"text":"Exact source material"');
-      yield { type: "done" as const, text: "Done" };
-    });
-    await f.run();
-  });
+  it.each(["user", "follow_up"])(
+    "exposes actual human source metadata for %s evidence reads",
+    async (trigger) => {
+      const f = fixture("assessment-source-metadata");
+      f.runData.trigger = trigger;
+      f.runData.sourceMessageId = "human-evidence-source";
+      const human = {
+        id: "human-evidence-source",
+        seq: 1,
+        role: "user",
+        runId: null,
+        replyToMessageId: null,
+        externalTranscriptFor: null,
+        createdAt: new Date("2026-10-16T00:00:00.000Z"),
+        blocks: [{ kind: "text", text: "Exact source material" }],
+      };
+      f.prisma.message.findMany.mockResolvedValue([human]);
+      f.runtimeRun.mockImplementation(async function* (request) {
+        expect(request.instructions).toContain('"messageId":"human-evidence-source"');
+        expect(request.instructions).toContain('"blockIndex":0');
+        expect(request.instructions).toContain(
+          '"selection":{"kind":"message_text","blockIndex":0,"start":0,"end":21}',
+        );
+        expect(request.instructions).not.toContain('"text":"Exact source material"');
+        yield { type: "done" as const, text: "Done" };
+      });
+      await f.run();
+    },
+  );
 
   it.each([false, true])(
     "exposes original file references with computer tools disabled (mixed blocks: %s)",

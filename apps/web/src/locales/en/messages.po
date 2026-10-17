@@ -4653,6 +4653,10 @@ msgstr "Select a bot"
 msgid "Select a connected model"
 msgstr "Select a connected model"
 
+#: src/pages/RecruitingPanel.tsx
+msgid "Selected recipient unavailable"
+msgstr "Selected recipient unavailable"
+
 #: src/pages/Shell.tsx
 msgid "Send"
 msgstr "Send"
@@ -4676,6 +4680,10 @@ msgstr "Send feedback"
 #: src/pages/Auth.tsx
 msgid "Send reset link"
 msgstr "Send reset link"
+
+#: src/pages/RecruitingPanel.tsx
+msgid "Send to"
+msgstr "Send to"
 
 #: src/pages/AccountSettingsOverlay.tsx
 msgid "Send with Enter"
