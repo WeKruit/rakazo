@@ -12,9 +12,15 @@ Supabase 独立数据库、原生 memory provider、Modal Volume 和 E2B 沿用�
 
 ## 当前发布与缺口（2026-10-17）
 
+**最新线上为 v65 / `41cff7f2`。** Cards/Table 点击姓名直接打开同一个原生候选 Dialog，复用已有资料、来源与评估。Close/Escape 返回原姓名；Discuss/Message 关闭后再交给原生聊天，角色变化、权限拒绝和离开对话会丢弃未完成交接。正文实测 Geist 16px/26px；记忆中的 bot 内部编号只在显式诊断显示。127 项界面检查、16 项历史检索检查、Web/DB 类型及格式检查通过，独立界面复核通过。
+
+旧文件可按完整名称或分隔词检索，不再依赖附言。原正文 GIN 表达式、授权范围、时间/服务端截止、顺序、去重和游标保持；文件名支路目前扫描授权范围内文件，不承诺任意规模的延迟或模糊匹配。现有 Supabase 只读事务实际执行 14 个 CTE 合成查询，并按分隔词找回真实旧上传的两份文件引用；查询计划保留原索引，没有写测试行或启动本地数据库。八份云端源码、health/ready/Web 与实际替换后的 17 组快照均核对通过；初始冷启动另行保留。106 个 run、280 个 effect、265 条消息、109 份迁移、30 人/45 条来源及原 Main 待答卡保持。正常网页已打开现有评估与缺口、从 Table 打开未评估者，Close/Escape 回到原姓名；Discuss 将同一人选上下文放回已聚焦的输入框，没有发送，验收草稿已清空。
+
+**下一项：候选报告正文的产品呈现。** 未评估者目前只有资料/来源时间；已评估 Source 展开仍为 JSON 形式的原报告及选中引文。沿既有 listCandidateSources、effect/hash/rowIndex、ArtifactStore 和 provider-result 解析边界投影本人报告，覆盖原生与历史两种保存格式；保留 provider-report/Unassessed，不提升为原始证明或资格结论。不新增 endpoint、数据库表、招聘判断引擎或原件权限。通用审批扁平明细隔离、真实候选校准/反馈续搜及完整 P6/M1–M5 仍未完成。
+
 Execution priority: filter playbook and sourcing (S1–S5) come first; reply and follow-up work is deferred. Feature implementation and direct product validation come before CI waits. Do not wait for CodeQL/CI after each push. The owner authorized an incremental spending cap of US$150; track usage against the private authorization baseline and retain existing resources. The latest instruction authorizes continuing feature fixes, deployment and testing on the existing resources without repeated confirmation. PR merge, unapproved production migrations, access expansion and real outbound remain separate. A pending business question does not block independent product work, and broad execution access does not supply its answer.
 
-**最新线上为 v64 / `5e5394d1`。** 首次自然聊天读取旧附件时，Agent 只查一次历史便误报当前没有附件、要求重传；该 run 为 completed，但用户目标未完成，失败对话保留。共享消息来源说明现在明确：files 只属于该条消息，空列表不是整个对话没有上传；引用早前附件时，应先沿可用 scoped history 定位原件。仅改已有指令及回归，没有新工具、查询、权限或 schema。105 项 executor 聚焦检查、adapters 类型/格式与独立复核通过，和上一批重叠，不累加。回归通过实际 executor→history handler 取回先前 run 的两份文件引用，不声称模拟 runtime 能证明模型遵从。七份云端源码 hash、API health/ready、Web 已核对，ready 非 degraded；初始冷启动另行保留。实际替换后 17 组数据逐项相同，包括 105 个 run、280 个 effect、263 条消息及 109 份迁移；首次未完成对话、全部业务/配置和原 Main 待答卡均保持。
+**v64 历史发布 / `5e5394d1`。** 首次自然聊天读取旧附件时，Agent 只查一次历史便误报当前没有附件、要求重传；该 run 为 completed，但用户目标未完成，失败对话保留。共享消息来源说明现在明确：files 只属于该条消息，空列表不是整个对话没有上传；引用早前附件时，应先沿可用 scoped history 定位原件。仅改已有指令及回归，没有新工具、查询、权限或 schema。105 项 executor 聚焦检查、adapters 类型/格式与独立复核通过，和上一批重叠，不累加。回归通过实际 executor→history handler 取回先前 run 的两份文件引用，不声称模拟 runtime 能证明模型遵从。七份云端源码 hash、API health/ready、Web 已核对，ready 非 degraded；初始冷启动另行保留。实际替换后 17 组数据逐项相同，包括 105 个 run、280 个 effect、263 条消息及 109 份迁移；首次未完成对话、全部业务/配置和原 Main 待答卡均保持。
 
 **v64 正常旧附件读取已通过一次真实网页验收。** 未提供文件或历史内部编号、未重传，使用与首次相同的自然请求。Sourcer 实际完成两次 scoped history 搜索、一次历史读取和两次原文件读取，原生 run completed，五次工具均成功；正常回复只使用命名文件和列名，网页刷新后原回复及列名仍恢复。两份文件的 5/10 个列名与独立授权读取的原件一致，后者同时通过字节/hash 和错误 actor 拒绝验证。此次仅增加一个 run、两条消息及本 DM 的消息序号；全部旧 run/message 原样保留，14 组业务/权限/配置/记忆/effect 数据逐项相同，effect 仍为 280。没有新研究、Autumn 调用、电脑/命令、候选评估、CRM 或外联。它证明本轮旧 CSV 阅读及对话续接，不是 PDF 新上传、全部图片/文件类型、最新全量去重或完整招聘闭环验收。
 
