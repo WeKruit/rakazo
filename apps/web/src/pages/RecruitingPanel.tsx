@@ -2440,19 +2440,27 @@ function RecruitingWorkspace({
                   </NativeSelect>
                   <NativeSelect
                     aria-label={t`Research round`}
-                    value={candidateFilters.actionId ?? "all"}
-                    onChange={(event) =>
+                    value={
+                      candidateFilters.sourceEffectId
+                        ? `source:${candidateFilters.sourceEffectId}`
+                        : candidateFilters.actionId
+                          ? `action:${candidateFilters.actionId}`
+                          : "all"
+                    }
+                    onChange={(event) => {
+                      const value = event.target.value;
                       setCandidateFilters((current) => ({
                         ...current,
-                        actionId: event.target.value === "all" ? undefined : event.target.value,
-                      }))
-                    }
+                        actionId: value.startsWith("action:") ? value.slice(7) : undefined,
+                        sourceEffectId: value.startsWith("source:") ? value.slice(7) : undefined,
+                      }));
+                    }}
                   >
                     <NativeSelectOption value="all">
                       <Trans>All rounds</Trans>
                     </NativeSelectOption>
                     {snapshot.research.actions.map((action, index) => (
-                      <NativeSelectOption key={action.id} value={action.id}>
+                      <NativeSelectOption key={`action:${action.id}`} value={`action:${action.id}`}>
                         {showDiagnostics ? (
                           <>
                             {action.kind} · {action.id}
@@ -2460,6 +2468,19 @@ function RecruitingWorkspace({
                         ) : (
                           <Trans>Search update {index + 1}</Trans>
                         )}
+                      </NativeSelectOption>
+                    ))}
+                    {snapshot.research.observations.map((observation) => (
+                      <NativeSelectOption
+                        key={`source:${observation.effectId}`}
+                        value={`source:${observation.effectId}`}
+                      >
+                        <Trans>Saved results</Trans>
+                        {" · "}
+                        {new Date(observation.observedAt).toLocaleString(undefined, {
+                          timeZone: "America/Los_Angeles",
+                          timeZoneName: "short",
+                        })}
                       </NativeSelectOption>
                     ))}
                   </NativeSelect>

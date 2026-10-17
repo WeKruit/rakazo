@@ -213,6 +213,16 @@ const revision: RecruitingRoleRevision = {
   ],
   createdAt: "2026-01-01T00:00:00Z",
 };
+const savedObservation = {
+  effectId: "native-read-1",
+  providerTaskId: "native-provider-task",
+  roleRevisionId: revision.id,
+  runId: "native-run",
+  rowCount: 15,
+  observedAt: "2026-10-16T00:00:00.000Z",
+  requestCursor: null,
+  artifactRef: { artifactId: "native-results", sha256: "a".repeat(64) },
+};
 const assessmentSource = {
   ...source,
   selection: { kind: "message_text", blockIndex: 0, start: 0, end: source.quote.length },
@@ -967,6 +977,132 @@ it("requests server pages and filters while keeping selected evidence outside th
   expect(view.container.textContent).toContain("Built a compiler");
 });
 
+it("filters saved result pages alongside search updates and preserves the other candidate filters", async () => {
+  const f = rawResultsFixture("action-1");
+  const observations = [
+    savedObservation,
+    { ...savedObservation, effectId: "native-read-2", observedAt: "2026-10-16T01:00:00.000Z" },
+  ];
+  api.listResearch.mockResolvedValue({ tasks: [f.task], actions: [f.action], observations });
+  api.listCandidates.mockResolvedValue({ ...candidatePage(), nextCursor: "page-2" });
+  const view = await mounted("thread-1", undefined, false);
+  await view.click("Evidence");
+  const select = view.container.querySelector<HTMLSelectElement>(
+    'select[aria-label="Research round"]',
+  )!;
+  expect([...select.options].map((option) => option.textContent)).toEqual([
+    "All rounds",
+    "Search update 1",
+    ...observations.map(
+      (item) =>
+        `Saved results · ${new Date(item.observedAt).toLocaleString(undefined, {
+          timeZone: "America/Los_Angeles",
+          timeZoneName: "short",
+        })}`,
+    ),
+  ]);
+  const savedOptions = [...select.options].filter((option) =>
+    option.textContent?.startsWith("Saved results"),
+  );
+  expect(savedOptions).toHaveLength(2);
+  expect(new Set(savedOptions.map((option) => option.value)).size).toBe(2);
+  expect(savedOptions[0]!.textContent).toContain("PDT");
+  for (const id of [savedObservation.effectId, savedObservation.providerTaskId, f.action.id])
+    expect(select.textContent).not.toContain(id);
+
+  await changeInput(view.container, "Search candidates", "Synthetic");
+  await changeSelect(view.container, "Assessment state", "unassessed");
+  await changeSelect(view.container, "Hard criteria filter", "unknown");
+  await changeSelect(view.container, "Candidate sort", "recent");
+  const filters = {
+    roleId: role.id,
+    limit: 30,
+    query: "Synthetic",
+    assessmentState: "unassessed",
+    verdict: "unknown",
+    sort: "recent",
+  };
+  await changeSelect(view.container, "Research round", `action:${f.action.id}`);
+  expect(api.listCandidates).toHaveBeenLastCalledWith({
+    ...filters,
+    actionId: f.action.id,
+    sourceEffectId: undefined,
+  });
+  await changeSelect(view.container, "Research round", savedOptions[0]!.value);
+  expect(api.listCandidates).toHaveBeenLastCalledWith({
+    ...filters,
+    actionId: undefined,
+    sourceEffectId: savedObservation.effectId,
+  });
+  await view.click("Load more");
+  expect(api.listCandidates).toHaveBeenLastCalledWith({
+    ...filters,
+    actionId: undefined,
+    sourceEffectId: savedObservation.effectId,
+    cursor: "page-2",
+  });
+  await changeSelect(view.container, "Research round", `action:${f.action.id}`);
+  expect(api.listCandidates).toHaveBeenLastCalledWith({
+    ...filters,
+    actionId: f.action.id,
+    sourceEffectId: undefined,
+  });
+  await changeSelect(view.container, "Research round", savedOptions[1]!.value);
+  await changeSelect(view.container, "Research round", "all");
+  expect(api.listCandidates).toHaveBeenLastCalledWith({
+    ...filters,
+    actionId: undefined,
+    sourceEffectId: undefined,
+  });
+  expect(select.value).toBe("all");
+  expect(api.setCandidateShortlist).not.toHaveBeenCalled();
+  expect(api.getById).not.toHaveBeenCalled();
+});
+
+it("ignores late saved-result pages while retaining the original candidate discussion context", async () => {
+  const f = rawResultsFixture("source:native-read-1");
+  api.listResearch.mockResolvedValue({
+    tasks: [f.task],
+    actions: [f.action],
+    observations: [savedObservation],
+  });
+  const candidate = { ...candidateFixture(), name: "Synthetic Avery" };
+  api.listCandidates.mockResolvedValue({ ...candidatePage([candidate]), nextCursor: "page-2" });
+  const view = await mounted("thread-1", undefined, false);
+  await view.click("Evidence");
+  await changeSelect(view.container, "Research round", `source:${savedObservation.effectId}`);
+  await view.click(candidate.name);
+  let finish!: (value: unknown) => void;
+  api.listCandidates.mockReturnValueOnce(
+    new Promise((resolve) => {
+      finish = resolve;
+    }),
+  );
+  await view.click("Load more");
+  await changeSelect(view.container, "Research round", `action:${f.action.id}`);
+  expect(api.listCandidates).toHaveBeenLastCalledWith({
+    roleId: role.id,
+    limit: 30,
+    sort: "name",
+    actionId: f.action.id,
+    sourceEffectId: undefined,
+  });
+  await act(async () =>
+    finish(candidatePage([{ ...candidateFixture("late-person", false), name: "Late candidate" }])),
+  );
+  expect(view.container.textContent).not.toContain("Late candidate");
+  await view.click("Discuss candidate");
+  expect(view.discuss).toHaveBeenCalledExactlyOnceWith({
+    threadId: "thread-1",
+    roleTitle: role.title,
+    name: candidate.name,
+    title: candidate.title,
+    company: candidate.company,
+    linkedinUrl: candidate.linkedinUrl,
+    resumeUrl: candidate.resumeUrl,
+  });
+});
+
 it("shows saved source rounds with their exact original revision and Artifact", async () => {
   const f = rawResultsFixture();
   api.listCandidates.mockResolvedValue(candidatePage([candidateFixture("raw-person", false)]));
@@ -1607,28 +1743,41 @@ it("rechecks the workspace when the candidate index belongs to a newer role revi
   expect(api.listCandidates).toHaveBeenCalledTimes(2);
 });
 
-it("clears the previous role's round filter when the thread binds another role", async () => {
-  const view = await mounted();
-  await view.click("Evidence");
-  await changeSelect(view.container, "Research round", "action-1");
-  expect(api.listCandidates).toHaveBeenLastCalledWith(
-    expect.objectContaining({ actionId: "action-1" }),
-  );
-  const next = {
-    role: { ...role, id: "role-next", currentRevisionId: "revision-next" },
-    revision: { ...revision, roleId: "role-next", id: "revision-next" },
-  };
-  api.getWorkspace.mockResolvedValue(next);
-  await view.render("thread-1", 1);
-  expect(api.listCandidates.mock.lastCall?.[0]).toEqual({
-    roleId: "role-next",
-    sort: "name",
-    limit: 30,
-  });
-  expect(
-    view.container.querySelector('select[aria-label="Research round"]')?.getAttribute("value"),
-  ).not.toBe("action-1");
-});
+it.each(["action:action-1", "source:native-read-1"])(
+  "clears the previous role's %s result filter when the thread binds another role",
+  async (filter) => {
+    const f = rawResultsFixture("action-1");
+    api.listResearch.mockResolvedValue({
+      tasks: [f.task],
+      actions: [f.action],
+      observations: [savedObservation],
+    });
+    const view = await mounted();
+    await view.click("Evidence");
+    await changeSelect(view.container, "Research round", filter);
+    expect(api.listCandidates).toHaveBeenLastCalledWith(
+      expect.objectContaining(
+        filter === "action:action-1"
+          ? { actionId: f.action.id }
+          : { sourceEffectId: savedObservation.effectId },
+      ),
+    );
+    const next = {
+      role: { ...role, id: "role-next", currentRevisionId: "revision-next" },
+      revision: { ...revision, roleId: "role-next", id: "revision-next" },
+    };
+    api.getWorkspace.mockResolvedValue(next);
+    await view.render("thread-1", 1);
+    expect(api.listCandidates.mock.lastCall?.[0]).toEqual({
+      roleId: "role-next",
+      sort: "name",
+      limit: 30,
+    });
+    expect(
+      view.container.querySelector<HTMLSelectElement>('select[aria-label="Research round"]')?.value,
+    ).toBe("all");
+  },
+);
 
 const employmentRule: RecruitingEmploymentRule = {
   minimumMonths: 60,
