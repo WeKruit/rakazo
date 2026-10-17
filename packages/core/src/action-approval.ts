@@ -52,6 +52,7 @@ const EXPLICIT_APPROVAL_MCP_OPERATIONS = new Set([
 ]);
 
 const UNATTENDED_SAFE_BUILTIN_TOOLS = new Set([
+  "recruiting_candidates",
   "browser_snapshot",
   "cloud_agent_status",
   "computer_observe",

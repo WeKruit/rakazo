@@ -54,6 +54,11 @@ import { Shimmer } from "../components/ai/primitives";
 import { decodeArtifactBase64 } from "../lib/artifact-open";
 import { rpc } from "../lib/rpc";
 
+export type CandidateDiscussionContext = Pick<
+  RecruitingCandidate,
+  "name" | "title" | "company" | "linkedinUrl" | "resumeUrl"
+> & { threadId: string; roleTitle: string };
+
 type Props = {
   threadId: string;
   botId?: string;
@@ -61,6 +66,7 @@ type Props = {
   onClose: () => void;
   showDiagnostics?: boolean;
   onRevealMessage?: (target: { botId?: string; groupId?: string; messageId: string }) => void;
+  onDiscussCandidate?: (candidate: CandidateDiscussionContext) => void;
 };
 type SourceReadTarget =
   | Omit<Extract<ReadRecruitingSourceInput, { kind: "role" }>, "sourceRefId">
@@ -1240,6 +1246,7 @@ function RecruitingWorkspace({
   refreshSignal,
   onClose,
   onRevealMessage,
+  onDiscussCandidate,
   showDiagnostics = false,
 }: Props) {
   const { t } = useLingui();
@@ -2690,6 +2697,25 @@ function RecruitingWorkspace({
                         (showDiagnostics ? selection.candidateKey : t`Unnamed candidate`)}
                     </h3>
                     <CandidateProfile candidate={selection} showDiagnostics={showDiagnostics} />
+                    {onDiscussCandidate && workspace ? (
+                      <Button
+                        size="sm"
+                        variant="outline"
+                        onClick={() =>
+                          onDiscussCandidate({
+                            threadId,
+                            roleTitle: workspace.role.title,
+                            name: selection.name,
+                            title: selection.title,
+                            company: selection.company,
+                            linkedinUrl: selection.linkedinUrl,
+                            resumeUrl: selection.resumeUrl,
+                          })
+                        }
+                      >
+                        <Trans>Discuss candidate</Trans>
+                      </Button>
+                    ) : null}
                     {selectedCrmTarget ? (
                       <section aria-label={t`Candidate CRM`}>
                         <CrmDetails

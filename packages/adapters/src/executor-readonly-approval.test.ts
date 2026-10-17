@@ -13,9 +13,15 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import { catalogExecuteToolName, isApprovalPausedResult } from "./approval-effect.js";
 import { MAX_SHARED_MEMORY_CHARS } from "./builtin-tools.js";
 import type * as ComputerLifecycleModule from "./computer-lifecycle.js";
-import { createRunExecutor } from "./executor.js";
+import { createRunExecutor, selectBuiltinToolsForRun } from "./executor.js";
 import { catalogEntries, resolveCatalogCall } from "./lazy-tool-catalog.js";
+import type * as RecruitingAssessmentModule from "./recruiting-assessment.js";
 
+const candidateReads = vi.hoisted(() => vi.fn());
+vi.mock("./recruiting-assessment.js", async (original) => ({
+  ...(await original<typeof RecruitingAssessmentModule>()),
+  executeRecruitingCandidatesTool: candidateReads,
+}));
 const recruitingApproval = vi.hoisted(() => ({ prepare: vi.fn(), execute: vi.fn() }));
 const replyProof = vi.hoisted(() => vi.fn());
 const recruitingReply = vi.hoisted(() => ({ resolve: vi.fn(), admit: vi.fn(), claim: vi.fn() }));
@@ -416,6 +422,81 @@ describe("disabled builtins", () => {
     expect(f.results).toEqual([{ error: "This tool is disabled for this bot." }]);
     expect(f.commit).not.toHaveBeenCalled();
     expect(f.execute).not.toHaveBeenCalled();
+    expect(f.effects).toEqual([]);
+  });
+});
+
+describe("native saved candidate reads", () => {
+  beforeEach(() => candidateReads.mockReset());
+
+  it.each(["user", "webhook"])(
+    "dispatches %s reads without approval, effects or connectors",
+    async (trigger) => {
+      const f = fixture({
+        name: "recruiting_candidates",
+        builtin: true,
+        autoReview: true,
+        trigger,
+      });
+      const page = {
+        roleId: "role",
+        items: [{ candidateKey: "candidate" }],
+        nextCursor: "next",
+        total: 8,
+      };
+      candidateReads.mockResolvedValue(page);
+      const args = { operation: "list", query: "Example Candidate", limit: 2 };
+      f.setCalls([
+        { args, executionId: "first" },
+        { args, executionId: "second" },
+        {
+          args: { operation: "sources", candidateKey: "candidate", limit: 1 },
+          executionId: "source",
+        },
+      ]);
+      await f.run();
+      expect(candidateReads).toHaveBeenCalledTimes(3);
+      expect(candidateReads).toHaveBeenCalledWith(
+        { prisma: f.prisma },
+        expect.objectContaining({
+          actor: expect.objectContaining({ spaceId: "space-1", userId: "user-1" }),
+          runId: "run-1",
+          threadId: "thread-1",
+          botId: "bot-1",
+        }),
+        args,
+        expect.objectContaining({ runId: "run-1", botId: "bot-1" }),
+      );
+      expect(f.results).toEqual([page, page, page]);
+      expect(f.effects).toEqual([]);
+      expect(f.pauseRunForInput).not.toHaveBeenCalled();
+      expect(f.execute).not.toHaveBeenCalled();
+      expect(reviewMock).not.toHaveBeenCalled();
+    },
+  );
+
+  it("honors native tool availability and disable settings", async () => {
+    const options = {
+      graphicalToolsAllowed: false,
+      groupId: null,
+      trigger: "user",
+      semanticMemoryEnabled: false,
+      messagingChannelRun: false,
+    };
+    expect(selectBuiltinToolsForRun(options).map((tool) => tool.name)).toContain(
+      "recruiting_candidates",
+    );
+    expect(
+      selectBuiltinToolsForRun({ ...options, messagingChannelRun: true }).map((tool) => tool.name),
+    ).not.toContain("recruiting_candidates");
+    const f = fixture({
+      name: "recruiting_candidates",
+      builtin: true,
+      disabledBuiltinTools: ["recruiting_candidates"],
+    });
+    await f.run();
+    expect(f.results).toEqual([{ error: "This tool is disabled for this bot." }]);
+    expect(candidateReads).not.toHaveBeenCalled();
     expect(f.effects).toEqual([]);
   });
 });

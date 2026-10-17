@@ -1019,6 +1019,8 @@ describe("native recruiting role effect delivery", () => {
     roleContext: adopted.text,
     contextArtifact: adopted.contextArtifact,
   };
+  const unchangedContextNotice =
+    "<recruiting_role>\nCurrent recruiting role and memory exactly match the run instructions. This context supersedes earlier role and memory snapshots.\n</recruiting_role>";
 
   beforeEach(() => {
     vi.mocked(executeRecruitingRoleTool).mockReset();
@@ -1090,6 +1092,7 @@ describe("native recruiting role effect delivery", () => {
             reason: "role_tool",
             placement: "tool_result",
             sourceMessageId: "human-message",
+            trustedWorkspace: undefined,
           }),
         );
         expect(f.effects[0]).toEqual(
@@ -1237,6 +1240,9 @@ describe("native recruiting role effect delivery", () => {
       expect(
         vi.mocked(loadRecruitingRunContext).mock.calls.map((call) => call[4].sourceMessageId),
       ).toEqual(["native-role-answer", "native-role-answer"]);
+      expect(
+        vi.mocked(loadRecruitingRunContext).mock.calls.map((call) => call[4].trustedWorkspace),
+      ).toEqual([undefined, workspace]);
       const roleCalls = vi.mocked(executeRecruitingRoleTool).mock.calls;
       expect(roleCalls.map((call) => call[2])).toEqual([args, { operation: "read" }]);
       if (mode === "fresh") expect(roleCalls[0]![1].sourceMessageId).toBe("vague-trigger");
@@ -1334,6 +1340,7 @@ describe("native recruiting role effect delivery", () => {
 
   it("drops the stale context artifact when a completed role receipt replays after the role is cleared", async () => {
     const f = fixture("run-cleared-role-replay");
+    f.thread.activeRecruitingRoleId = workspace.role.id;
     f.effects.push({
       id: "completed-role-effect",
       spaceId: "space-1",
@@ -1344,14 +1351,16 @@ describe("native recruiting role effect delivery", () => {
       request: args,
       result: delivered,
     });
-    vi.mocked(loadRecruitingRunContext).mockResolvedValue(undefined);
+    vi.mocked(loadRecruitingRunContext).mockResolvedValueOnce(adopted).mockResolvedValue(undefined);
     vi.mocked(executeRecruitingRoleTool).mockImplementation(roleReceipt(f, receipt));
     f.setCalls([{ name: "recruiting_role", args, executionId: "call-after-role-cleared" }]);
 
     await f.run();
 
     expect(executeRecruitingRoleTool).toHaveBeenCalledOnce();
-    expect(loadRecruitingRunContext).toHaveBeenCalledOnce();
+    expect(loadRecruitingRunContext).toHaveBeenCalledTimes(2);
+    expect(f.runtimeRun.mock.calls[0]![0].instructions).toContain(adopted.text);
+    expect(vi.mocked(loadRecruitingRunContext).mock.calls[1]![4].trustedWorkspace).toBeUndefined();
     expect(f.results[0]).toEqual(
       expect.objectContaining({
         roleContext: expect.stringContaining("No recruiting role is selected"),
@@ -1420,6 +1429,72 @@ describe("native recruiting role effect delivery", () => {
     expect(request.instructions).toContain("Must personally implement geometry calculations");
     expect(request.instructions).not.toContain("[object Object]");
   });
+
+  it.each(["fresh", "completed replay"])(
+    "references the unchanged initial context without repeating its text on %s",
+    async (mode) => {
+      const f = fixture(`run-unchanged-role-${mode}`);
+      f.thread.activeRecruitingRoleId = workspace.role.id;
+      if (mode === "completed replay") {
+        f.effects.push({
+          id: "unchanged-role-effect",
+          spaceId: "space-1",
+          runId: f.runData.id,
+          kind: "recruiting_role",
+          idempotencyKey: toolEffectIdempotencyKey(f.runData.id, "recruiting_role", args),
+          status: "completed",
+          request: args,
+          result: delivered,
+        });
+      }
+      vi.mocked(loadRecruitingRunContext).mockResolvedValue(adopted);
+      vi.mocked(executeRecruitingRoleTool).mockImplementation(roleReceipt(f, receipt));
+      f.setCalls([{ name: "recruiting_role", args, executionId: "unchanged-role" }]);
+
+      await f.run();
+
+      expect(f.runtimeRun.mock.calls[0]![0].instructions?.split(adopted.text)).toHaveLength(2);
+      expect(f.results).toEqual([
+        {
+          ...receipt,
+          roleContext: unchangedContextNotice,
+          contextArtifact: adopted.contextArtifact,
+        },
+      ]);
+      expect(f.effects).toHaveLength(1);
+      expect(f.effects[0]?.result).toEqual(mode === "fresh" ? receipt : delivered);
+    },
+  );
+
+  it.each(["role", "memory", "recall"])(
+    "delivers the complete context when %s text changes after the initial instructions",
+    async (kind) => {
+      const f = fixture(`run-changed-context-${kind}`);
+      f.thread.activeRecruitingRoleId = workspace.role.id;
+      const changed = {
+        ...adopted,
+        text: `${adopted.text}\n\nUpdated ${kind} context`,
+        contextArtifact: { artifactId: `updated-${kind}`, sha256: "b".repeat(64) },
+      };
+      vi.mocked(loadRecruitingRunContext).mockResolvedValueOnce(adopted).mockResolvedValue(changed);
+      vi.mocked(executeRecruitingRoleTool).mockResolvedValue({ ...receipt, changed: false });
+      f.setCalls([
+        { name: "recruiting_role", args: { operation: "read" }, executionId: "changed-role" },
+        { name: "recruiting_role", args: { operation: "read" }, executionId: "same-changed-role" },
+      ]);
+
+      await f.run();
+
+      expect(f.results).toEqual(
+        Array(2).fill({
+          ...receipt,
+          changed: false,
+          roleContext: changed.text,
+          contextArtifact: changed.contextArtifact,
+        }),
+      );
+    },
+  );
 
   it("redacts delivered role values while preserving the private immutable domain receipt", async () => {
     const secret = 'configured-role-secret-"quoted"\nsecond-line';
@@ -1537,7 +1612,7 @@ describe("native recruiting role effect delivery", () => {
     );
   });
 
-  it("delivers role context on nonhuman steering without replacing the trusted human source", async () => {
+  it("references unchanged context on nonhuman steering without replacing the trusted human source", async () => {
     const f = fixture("run-peer-only-steering");
     f.thread.activeRecruitingRoleId = workspace.role.id;
     f.runData.sourceMessageId = "human-message";
@@ -1595,10 +1670,64 @@ describe("native recruiting role effect delivery", () => {
     expect(claimed).toEqual([
       expect.objectContaining({
         messageId: peer.messageId,
-        text: `${peer.text}\n\n${adopted.text}`,
+        text: `${peer.text}\n\n${unchangedContextNotice}`,
         historyText: peer.text,
       }),
     ]);
+    expect(f.runtimeRun.mock.calls[0]![0].instructions?.split(adopted.text)).toHaveLength(2);
+    expect(f.results).toEqual([{ ...delivered, roleContext: unchangedContextNotice }]);
+  });
+
+  it("delivers changed steering context before explicitly restoring and clearing the initial context", async () => {
+    const f = fixture("run-steering-context-transitions");
+    f.thread.activeRecruitingRoleId = workspace.role.id;
+    const changed = { ...adopted, text: `${adopted.text}\n\nUpdated durable preference` };
+    const steering = [
+      "Apply the new preference",
+      "Use the original preference",
+      "Clear the role",
+    ].map((text, index) => ({
+      id: `steering-${index}`,
+      messageId: `human-${index}`,
+      text,
+      blocks: [{ kind: "text" as const, text }],
+    }));
+    f.claimSteering
+      .mockResolvedValueOnce([steering[0]!])
+      .mockResolvedValueOnce([steering[1]!])
+      .mockImplementationOnce(async () => {
+        f.thread.activeRecruitingRoleId = null;
+        return [steering[2]!];
+      });
+    vi.mocked(loadRecruitingRunContext)
+      .mockResolvedValueOnce(adopted)
+      .mockResolvedValueOnce(changed)
+      .mockResolvedValueOnce(adopted);
+    const claimed: Awaited<ReturnType<NonNullable<AgentRunRequest["claimSteering"]>>> = [];
+    f.runtimeRun.mockImplementation(async function* (request) {
+      for (let index = 0; index < steering.length; index++) {
+        claimed.push(...(await request.claimSteering!(claimed.map((item) => item.id))));
+      }
+      yield { type: "done" as const, text: "Done" };
+    });
+
+    await f.run();
+
+    expect(f.runtimeRun.mock.calls[0]![0].instructions?.split(adopted.text)).toHaveLength(2);
+    expect(claimed[0]?.text).toContain(changed.text);
+    expect(claimed[1]?.text).toContain(unchangedContextNotice);
+    expect(claimed[1]?.text).not.toContain(adopted.text);
+    expect(claimed[2]?.text).toContain("No recruiting role is selected");
+    expect(claimed[2]?.text).not.toContain(unchangedContextNotice);
+    for (const [index, item] of claimed.entries()) {
+      expect(item).toMatchObject({
+        messageId: steering[index]!.messageId,
+        historyText: steering[index]!.text,
+        images: undefined,
+      });
+      expect(item.text).toContain(steering[index]!.text);
+      expect(item.text).toContain(`"messageId":"${steering[index]!.messageId}"`);
+    }
   });
 });
 

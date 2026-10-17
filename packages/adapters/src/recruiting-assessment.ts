@@ -4,6 +4,7 @@ import type { Actor } from "@rakazo/contracts";
 import {
   RecruitingArtifactRefSchema,
   RecruitingAssessmentToolInputSchema,
+  RecruitingCandidatesToolInputSchema,
   RecruitingMaterialReadPayloadSchema,
 } from "@rakazo/contracts";
 import { stableJsonValue } from "@rakazo/core/node/approval-effect-key";
@@ -18,6 +19,8 @@ import {
   getRecruitingQuestion,
   getRecruitingWorkspace,
   IsolationError,
+  listRecruitingCandidateSources,
+  listRecruitingCandidates,
   recordRecruitingWebMaterial,
   saveRecruitingAssessment,
   scoped,
@@ -59,6 +62,32 @@ async function requireRecruitingRun(
   );
   scoped(trusted.actor, run.bot);
   if (run.threadId !== trusted.threadId || run.botId !== trusted.botId) throw new IsolationError();
+}
+
+export async function executeRecruitingCandidatesTool(
+  deps: { prisma: PrismaClient },
+  trusted: RecruitingRunContext,
+  untrusted: unknown,
+  context: AdapterContext,
+) {
+  const input = RecruitingCandidatesToolInputSchema.parse(untrusted);
+  await requireRecruitingRun(deps.prisma, trusted, context);
+  const workspace = await getRecruitingWorkspace(deps.prisma, trusted.actor, {
+    threadId: trusted.threadId,
+  });
+  if (!workspace) return { status: "no_current_role" as const };
+  if (input.operation === "list") {
+    const { operation: _operation, ...query } = input;
+    return listRecruitingCandidates(deps.prisma, trusted.actor, {
+      roleId: workspace.role.id,
+      ...query,
+    });
+  }
+  const { operation: _operation, ...query } = input;
+  return listRecruitingCandidateSources(deps.prisma, trusted.actor, {
+    roleId: workspace.role.id,
+    ...query,
+  });
 }
 
 export async function executeRecruitingAssessmentTool(

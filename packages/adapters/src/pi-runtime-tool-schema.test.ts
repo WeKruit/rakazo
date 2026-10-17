@@ -1,12 +1,54 @@
 import type { ToolCall } from "@earendil-works/pi-ai";
 import { validateToolArguments } from "@earendil-works/pi-ai";
-import { RecruitingRoleToolInputSchema } from "@rakazo/contracts";
+import {
+  RecruitingCandidatesToolInputSchema,
+  RecruitingRoleToolInputSchema,
+} from "@rakazo/contracts";
 import { describe, expect, it } from "vitest";
 import { builtinAgentTools } from "./builtin-tools.js";
 import { parseConnectorToolArgs } from "./lazy-tool-catalog.js";
 import { jsonSchemaParameters, parametersFor } from "./pi-runtime.js";
 
 describe("jsonSchemaParameters", () => {
+  it("preserves candidate list/source pagination and rejects model-selected scope", () => {
+    const tool = builtinAgentTools.find((entry) => entry.name === "recruiting_candidates")!;
+    expect(tool).toBeDefined();
+    const parameters = parametersFor(tool);
+    const wire = JSON.parse(JSON.stringify(parameters));
+    const inputs: ToolCall["arguments"][] = [
+      { operation: "list" },
+      { operation: "list", query: "Example Candidate", cursor: "opaque+/=", limit: 100 },
+      { operation: "sources", candidateKey: "candidate", cursor: "unchanged", limit: 1 },
+    ];
+    for (const input of inputs) {
+      expect(RecruitingCandidatesToolInputSchema.parse(input)).toEqual(input);
+      expect(parseConnectorToolArgs(wire, input)).toEqual(input);
+      expect(
+        validateToolArguments(
+          { name: tool.name, description: tool.description, parameters },
+          { type: "toolCall", id: "synthetic-candidate-read", name: tool.name, arguments: input },
+        ),
+      ).toEqual(input);
+      for (const override of [
+        { actor: { userId: "foreign" } },
+        { roleId: "foreign" },
+        { spaceId: "foreign" },
+        { threadId: "foreign" },
+      ])
+        expect(() => parseConnectorToolArgs(wire, { ...input, ...override })).toThrow();
+    }
+    for (const input of [
+      { operation: "list", limit: 0 },
+      { operation: "list", limit: 101 },
+      { operation: "list", query: "x".repeat(241) },
+      { operation: "sources" },
+      { operation: "sources", candidateKey: "candidate", query: "Example" },
+    ]) {
+      expect(() => parseConnectorToolArgs(tool.inputSchema, input)).toThrow();
+      expect(() => RecruitingCandidatesToolInputSchema.parse(input)).toThrow();
+    }
+  });
+
   it.each([
     "recruiting_role",
     "recruiting_research",
@@ -182,6 +224,8 @@ describe("jsonSchemaParameters", () => {
     const wire = JSON.parse(JSON.stringify(parameters));
     const round = {
       expectedRoleRevision: 1,
+      purpose: "calibration",
+      approvalEffectId: "documents-approval",
       clientNonce: "round-nonce",
       instructions: "  Preserve the complete current role.\r\nKeep every hard gate.\n",
       output: "  Include original evidence columns.\n",

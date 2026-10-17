@@ -2,6 +2,7 @@ import {
   DisabledBuiltinToolsSchema,
   disabledBuiltinToolSet,
   RecruitingApprovalToolInputSchema,
+  RecruitingCandidatesToolInputSchema,
   RecruitingCrmImportInputSchema,
   RecruitingCrmTargetToolInputSchema,
   RecruitingReplyInputSchema,
@@ -11,6 +12,20 @@ import { z } from "zod";
 import { builtinAgentTools } from "./builtin-tools.js";
 
 describe("native recruiting approval tool", () => {
+  it("offers scoped saved candidate reads as a disableable read-only tool", () => {
+    const tool = builtinAgentTools.find((entry) => entry.name === "recruiting_candidates");
+    expect(tool).toBeDefined();
+    expect(tool?.readOnly).toBe(true);
+    expect(tool?.inputSchema).toEqual(
+      z.toJSONSchema(RecruitingCandidatesToolInputSchema, { io: "input" }),
+    );
+    expect(DisabledBuiltinToolsSchema.parse(["recruiting_candidates"])).toEqual([
+      "recruiting_candidates",
+    ]);
+    expect(tool?.description).toContain("artifact_read");
+    expect(tool?.description).toContain("never choose the first match");
+  });
+
   it("uses the shared CRM contracts and honors native tool disable settings", () => {
     const contracts = [
       ["recruiting_crm_target", RecruitingCrmTargetToolInputSchema],

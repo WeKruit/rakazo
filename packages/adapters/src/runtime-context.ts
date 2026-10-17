@@ -25,6 +25,7 @@ export const VERBATIM_TOOL_RESULTS: ReadonlySet<string> = new Set([
   "recruiting_role",
   "recruiting_research",
   "recruiting_assess",
+  "recruiting_candidates",
 ]);
 // History reads are exact evidence and keep their own offset-aware shortening elsewhere.
 const UNSHORTENED_TOOL_RESULTS = new Set([

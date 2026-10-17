@@ -120,14 +120,16 @@ import {
   Trash2,
   X,
 } from "lucide-react";
-import type { ClipboardEvent, DragEvent, MutableRefObject, RefObject } from "react";
+import type { ClipboardEvent, DragEvent, MutableRefObject, Ref, RefObject } from "react";
 import {
+  createRef,
   Fragment,
   memo,
   Suspense,
   useCallback,
   useEffect,
   useId,
+  useImperativeHandle,
   useLayoutEffect,
   useMemo,
   useRef,
@@ -265,6 +267,7 @@ import { ActivityList } from "./ActivityList";
 import type { ContextMenuPosition } from "./BotContextMenu";
 import { CreateGroupForm, GroupSettings, memberName } from "./GroupPanel";
 import { HostComputerPrompt } from "./HostComputerPrompt";
+import type { CandidateDiscussionContext } from "./RecruitingPanel";
 import { RecruitingPanel } from "./RecruitingPanel";
 import { ResizableSidePanel } from "./ResizableSidePanel";
 import type { RoutineDraftState } from "./RoutineEditor";
@@ -1842,6 +1845,28 @@ export function ShellPage() {
         : null) ??
     threadSnapshotCache.current.get(inGroup ? `group:${groupId}` : `bot:${active?.id}`) ??
     null;
+  const composerDraftKey = inGroup ? `group:${groupId}` : `bot:${active?.id}`;
+  const composerRef = useMemo(
+    () => createRef<ComposerHandle>(),
+    [userId, bootstrapMe?.spaceId, composerDraftKey, activeSnapshot?.threadId],
+  );
+  const discussionScope = useRef({ composerRef, panel });
+  discussionScope.current = { composerRef, panel };
+  function discussCandidate(candidate: CandidateDiscussionContext) {
+    if (
+      !userId ||
+      !bootstrapMe?.spaceId ||
+      discussionScope.current.composerRef !== composerRef ||
+      discussionScope.current.panel !== "recruiting" ||
+      (selectedSpaceId() ?? bootstrapMe.spaceId) !== bootstrapMe.spaceId ||
+      candidate.threadId !== activeSnapshot?.threadId
+    )
+      return;
+    composerRef.current?.insertContext({
+      draftKey: composerDraftKey,
+      text: candidateReferenceText(candidate),
+    });
+  }
   // Keep the armed reply even when its parent leaves the loaded page: the
   // server resolves a paged-out target and degrades a deleted one to a plain
   // reply instead of failing the send.
@@ -3791,8 +3816,9 @@ export function ShellPage() {
         ) : null}
         {active || activeGroup ? (
           <Composer
-            key={inGroup ? `group:${groupId}` : `bot:${active?.id}`}
-            draftKey={inGroup ? `group:${groupId}` : `bot:${active?.id}`}
+            key={`${userId}:${bootstrapMe?.spaceId}:${composerDraftKey}`}
+            ref={composerRef}
+            draftKey={composerDraftKey}
             enterToSend={enterToSend}
             activeName={inGroup ? (activeGroup?.name ?? activeSnapshot?.groupName) : active?.name}
             running={composerRunning}
@@ -4011,12 +4037,13 @@ export function ShellPage() {
             ) : null}
             {panel === "recruiting" && activeSnapshot?.threadId ? (
               <RecruitingPanel
-                key={`${bootstrapMe?.spaceId}:${activeSnapshot.threadId}`}
+                key={`${userId}:${bootstrapMe?.spaceId}:${activeSnapshot.threadId}`}
                 threadId={activeSnapshot.threadId}
                 botId={inGroup ? undefined : active?.id}
                 refreshSignal={recruitingRefresh}
                 showDiagnostics={showToolActivity}
                 onClose={() => setPanel(null)}
+                onDiscussCandidate={discussCandidate}
                 onRevealMessage={(target) => {
                   navigate({
                     pathname: target.groupId ? `/app/g/${target.groupId}` : `/app/${target.botId}`,
@@ -5502,7 +5529,24 @@ const QuoteSelectionButton = memo(function QuoteSelectionButton({
   );
 });
 
+export function candidateReferenceText(candidate: CandidateDiscussionContext): string {
+  const reference = [
+    t`Name: ${candidate.name ?? t`Name missing`}`,
+    t`Role: ${candidate.roleTitle}`,
+    ...(candidate.title ? [t`Title: ${candidate.title}`] : []),
+    ...(candidate.company ? [t`Company: ${candidate.company}`] : []),
+    t`LinkedIn: ${candidate.linkedinUrl ?? t`LinkedIn missing`}`,
+    t`Resume: ${candidate.resumeUrl ?? t`Resume missing`}`,
+  ].join("\n");
+  return `${t`Candidate reference`}\n${reference.replace(/(^|\r\n|[\r\n\u2028\u2029])/g, "$1> ")}\n\n`;
+}
+
+export type ComposerHandle = {
+  insertContext: (context: { draftKey: string; text: string }) => void;
+};
+
 export const Composer = memo(function Composer({
+  ref,
   artifactTarget,
   activeName,
   running,
@@ -5532,6 +5576,7 @@ export const Composer = memo(function Composer({
   draftKey,
   enterToSend,
 }: {
+  ref?: Ref<ComposerHandle>;
   activeName?: string;
   running: boolean;
   disabled?: boolean;
@@ -5732,6 +5777,25 @@ export const Composer = memo(function Composer({
   function focusComposer() {
     textareaRef.current?.focus();
   }
+
+  const contextHandle = useRef<ComposerHandle | null>(null);
+  useImperativeHandle(ref, () => {
+    const handle: ComposerHandle = {
+      insertContext: ({ draftKey: target, text }) => {
+        if (
+          contextHandle.current !== handle ||
+          target !== draftKey ||
+          !textareaRef.current ||
+          !text.trim()
+        )
+          return;
+        updateDraft(`${draft}${draft ? "\n\n" : ""}${text}`);
+        focusComposer();
+      },
+    };
+    contextHandle.current = handle;
+    return handle;
+  });
 
   function insertMention(mention: ComposerMention) {
     markEdited();

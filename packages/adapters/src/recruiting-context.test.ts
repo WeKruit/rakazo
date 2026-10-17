@@ -2,8 +2,10 @@ import { createHash } from "node:crypto";
 import type { AdapterContext, ArtifactStore } from "@rakazo/adapter-kit";
 import type { PrismaClient } from "@rakazo/db";
 import { beforeEach, describe, expect, it, vi } from "vitest";
+import type { LoadedRecruitingRunContext } from "./recruiting-context.js";
 import { loadRecruitingRunContext } from "./recruiting-context.js";
 import { buildRecruitingResearchRequest } from "./recruiting-research.js";
+import { executeRecruitingRoleTool } from "./recruiting-tools.js";
 
 const db = vi.hoisted(() => ({ workspace: vi.fn(), adopt: vi.fn() }));
 vi.mock("@rakazo/db", async (original) => ({
@@ -52,7 +54,7 @@ const workspace = {
       },
     ],
   },
-};
+} satisfies LoadedRecruitingRunContext["workspace"];
 
 function fixture() {
   const bytes = new Map<string, Uint8Array>();
@@ -98,6 +100,51 @@ describe("recruiting run context", () => {
     vi.clearAllMocks();
     db.workspace.mockResolvedValue(workspace);
   });
+
+  it.each([
+    ["present", workspace, 1],
+    ["absent", null, 2],
+  ] as const)(
+    "keeps adoption validation for a %s native role workspace",
+    async (_label, native, reads) => {
+      db.workspace.mockResolvedValueOnce(native);
+      const { deps } = fixture();
+      deps.prisma = {
+        run: { findFirst: vi.fn().mockResolvedValue({ ...run, bot: run }) },
+      } as unknown as PrismaClient;
+      const result = await executeRecruitingRoleTool(
+        deps.prisma,
+        {
+          actor: { spaceId: run.spaceId, userId: run.userId, email: "", isDeploymentOwner: false },
+          runId: run.id,
+          sourceMessageId: null,
+        },
+        { operation: "read" },
+      );
+      const adopted = await loadRecruitingRunContext(deps, run, { documents: [] }, context, {
+        reason: "role_tool",
+        placement: "tool_result",
+        trustedWorkspace: result.workspace ?? undefined,
+      });
+
+      expect(result.workspace).toBe(native);
+      expect(db.workspace).toHaveBeenCalledTimes(reads);
+      expect(adopted!.workspace).toBe(workspace);
+      expect(db.adopt).toHaveBeenCalledExactlyOnceWith(
+        deps.prisma,
+        { spaceId: run.spaceId, userId: run.userId, email: "", isDeploymentOwner: false },
+        expect.objectContaining({
+          runId: run.id,
+          threadId: run.threadId,
+          botId: run.botId,
+          roleId: workspace.role.id,
+          roleRevisionId: workspace.revision.id,
+        }),
+      );
+      expect(adopted!.manifest.placement).toBe("tool_result");
+      expect(deps.events.notify).toHaveBeenCalledOnce();
+    },
+  );
 
   it("freezes retrieval filters separately from qualification in create and same-task continuation", async () => {
     const source = {
@@ -331,18 +378,22 @@ describe("recruiting run context", () => {
     expect(deps.events.notify).toHaveBeenCalledTimes(1);
   });
 
-  it("does not publish or delete possibly shared bytes when the current role changes before adoption", async () => {
+  it.each([false, true])("rejects a stale revision with workspace reuse %s", async (reuse) => {
     const { deps, artifacts, bytes } = fixture();
     db.adopt.mockRejectedValue(new Error("Recruiting revision changed"));
     await expect(
-      loadRecruitingRunContext(deps, run, { documents: [] }, context, { reason: "run" }),
+      loadRecruitingRunContext(deps, run, { documents: [] }, context, {
+        reason: reuse ? "role_tool" : "run",
+        ...(reuse ? { trustedWorkspace: workspace } : {}),
+      }),
     ).rejects.toThrow("Recruiting revision changed");
+    expect(db.adopt).toHaveBeenCalledOnce();
     expect(artifacts.remove).not.toHaveBeenCalled();
     expect(bytes.size).toBe(1);
     expect(deps.events.notify).not.toHaveBeenCalled();
   });
 
-  it("rejects an adapter context for a different actor before reading or storing", async () => {
+  it.each([false, true])("rejects a different actor with workspace reuse %s", async (reuse) => {
     const { deps, artifacts } = fixture();
     await expect(
       loadRecruitingRunContext(
@@ -350,11 +401,12 @@ describe("recruiting run context", () => {
         run,
         { documents: [] },
         { ...context, userId: "other" },
-        { reason: "run" },
+        { reason: "run", ...(reuse ? { trustedWorkspace: workspace } : {}) },
       ),
     ).rejects.toThrow();
     expect(db.workspace).not.toHaveBeenCalled();
     expect(artifacts.put).not.toHaveBeenCalled();
+    expect(db.adopt).not.toHaveBeenCalled();
   });
 
   it("records the actual injection channel as part of adoption identity", async () => {
@@ -370,6 +422,7 @@ describe("recruiting run context", () => {
     expect(steering!.manifest.placement).toBe("steering");
     expect(steering!.contextArtifact.artifactId).not.toBe(instructions!.contextArtifact.artifactId);
     expect(saved.size).toBe(2);
+    expect(db.workspace).toHaveBeenCalledTimes(2);
   });
 
   it("verifies immutable stored bytes before returning a resumed manifest", async () => {

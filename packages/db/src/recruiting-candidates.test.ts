@@ -74,77 +74,83 @@ describe("candidate listing and shortlist boundaries", () => {
     ).rejects.toThrow(IsolationError);
     expect(f.tx.$queryRaw).not.toHaveBeenCalled();
   });
-  it("uses server counts and bounded SQL pagination, with cursors bound to filters", async () => {
-    const f = fixture();
-    const row = (key: string) => ({
-      roleId: "role",
-      candidateKey: key,
-      name: key,
-      title: null,
-      company: null,
-      location: null,
-      linkedinUrl: null,
-      resumeUrl: null,
-      evidenceUrls: null,
-      issues: [],
-      shortlisted: false,
-      revision: 0,
-      discoveryCount: 1,
-      firstDiscoveredAt: "2026-10-16T00:00:00.000Z",
-      lastDiscoveredAt: "2026-10-16T00:00:00.000Z",
-      assessmentVersion: null,
-      assessmentRoleRevisionId: null,
-      assessmentCreatedAt: null,
-      hardGate: null,
-      sortValue: key,
-    });
-    f.tx.$queryRaw.mockResolvedValueOnce([
-      {
-        total: 19n,
-        sourceRows: 30n,
-        candidates: 20n,
-        identifiedCandidates: 4n,
-        unassessed: 19n,
-        assessed: 1n,
-        shortlisted: 2n,
-      },
-    ]);
-    f.tx.$queryRaw.mockResolvedValueOnce([row("a"), row("b")]);
-    const page = await recruiting.listRecruitingCandidates(f.prisma, actor, {
-      roleId: "role",
-      limit: 1,
-      sort: "name",
-      query: "Engineer",
-    });
-    expect(page.total).toBe(19);
-    expect(page.counts).toEqual({
-      sourceRows: 30,
-      candidates: 20,
-      identifiedCandidates: 4,
-      unassessed: 19,
-      assessed: 1,
-      shortlisted: 2,
-    });
-    expect(page.items.map((item) => item.candidateKey)).toEqual(["a"]);
-    expect(page.crmTarget).toBeNull();
-    expect(page.items[0]?.crm).toBeNull();
-    const query = f.tx.$queryRaw.mock.lastCall?.[0] as unknown as {
-      sql: string;
-      values: unknown[];
-    };
-    expect(query.sql).toContain("LIMIT");
-    expect(query.values).toContain(2);
-    expect(query.sql).not.toContain("Engineer");
-    await expect(
-      recruiting.listRecruitingCandidates(f.prisma, actor, {
+  it.each(["Engineer", "Example Candidate", "https://www.linkedin.com/in/example-candidate"])(
+    "uses scoped server counts and bounded SQL pagination for %s, with cursors bound to filters",
+    async (search) => {
+      const f = fixture();
+      const row = (key: string) => ({
+        roleId: "role",
+        candidateKey: key,
+        name: key,
+        title: null,
+        company: null,
+        location: null,
+        linkedinUrl: null,
+        resumeUrl: null,
+        evidenceUrls: null,
+        issues: [],
+        shortlisted: false,
+        revision: 0,
+        discoveryCount: 1,
+        firstDiscoveredAt: "2026-10-16T00:00:00.000Z",
+        lastDiscoveredAt: "2026-10-16T00:00:00.000Z",
+        assessmentVersion: null,
+        assessmentRoleRevisionId: null,
+        assessmentCreatedAt: null,
+        hardGate: null,
+        sortValue: key,
+      });
+      f.tx.$queryRaw.mockResolvedValueOnce([
+        {
+          total: 19n,
+          sourceRows: 30n,
+          candidates: 20n,
+          identifiedCandidates: 4n,
+          unassessed: 19n,
+          assessed: 1n,
+          shortlisted: 2n,
+        },
+      ]);
+      f.tx.$queryRaw.mockResolvedValueOnce([row("a"), row("b")]);
+      const page = await recruiting.listRecruitingCandidates(f.prisma, actor, {
         roleId: "role",
         limit: 1,
         sort: "name",
-        query: "Different",
-        cursor: page.nextCursor!,
-      }),
-    ).rejects.toThrow(recruiting.RecruitingConflictError);
-  });
+        query: search,
+      });
+      expect(page.total).toBe(19);
+      expect(page.counts).toEqual({
+        sourceRows: 30,
+        candidates: 20,
+        identifiedCandidates: 4,
+        unassessed: 19,
+        assessed: 1,
+        shortlisted: 2,
+      });
+      expect(page.items.map((item) => item.candidateKey)).toEqual(["a"]);
+      expect(page.crmTarget).toBeNull();
+      expect(page.items[0]?.crm).toBeNull();
+      const query = f.tx.$queryRaw.mock.lastCall?.[0] as unknown as {
+        sql: string;
+        values: unknown[];
+      };
+      expect(query.sql).toContain("LIMIT");
+      expect(query.values).toContain(2);
+      expect(query.sql).not.toContain(search);
+      expect(query.values).toContain(search);
+      expect(query.sql).toContain('b."name"');
+      expect(query.sql).toContain('b."linkedinUrl"');
+      await expect(
+        recruiting.listRecruitingCandidates(f.prisma, actor, {
+          roleId: "role",
+          limit: 1,
+          sort: "name",
+          query: "Different",
+          cursor: page.nextCursor!,
+        }),
+      ).rejects.toThrow(recruiting.RecruitingConflictError);
+    },
+  );
   it("makes a human shortlist receipt only for a successful candidate CAS change", async () => {
     const f = fixture();
     const input = {

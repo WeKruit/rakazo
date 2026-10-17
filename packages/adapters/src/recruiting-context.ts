@@ -50,6 +50,7 @@ export async function loadRecruitingRunContext(
     recallScope?: string | null;
     placement?: RecruitingContextManifest["placement"];
     redact?: (value: string) => string;
+    trustedWorkspace?: LoadedRecruitingRunContext["workspace"];
   },
 ): Promise<LoadedRecruitingRunContext | undefined> {
   if (
@@ -65,7 +66,10 @@ export async function loadRecruitingRunContext(
     email: "",
     isDeploymentOwner: false,
   };
-  const workspace = await getRecruitingWorkspace(deps.prisma, actor, { threadId: run.threadId });
+  // ponytail: reuse the native role read only; locked adoption below still checks current state.
+  const workspace =
+    options.trustedWorkspace ??
+    (await getRecruitingWorkspace(deps.prisma, actor, { threadId: run.threadId }));
   if (!workspace) return undefined;
   const redact = options.redact ?? ((value: string) => value);
   const roleText = [

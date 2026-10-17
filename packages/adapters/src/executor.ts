@@ -352,6 +352,7 @@ import {
 import { actorMayUsePrivateEndpoint } from "./private-endpoint.js";
 import {
   executeRecruitingAssessmentTool,
+  executeRecruitingCandidatesTool,
   retainRecruitingWebMaterial,
 } from "./recruiting-assessment.js";
 import type { LoadedRecruitingRunContext } from "./recruiting-context.js";
@@ -461,6 +462,7 @@ const NO_RECRUITING_ROLE_CONTEXT =
   "No recruiting role is selected. Earlier role snapshots do not apply. Use recruiting_role to create or explicitly select a role before recruiting work.";
 
 const READ_ONLY_AGENT_TOOLS = new Set([
+  "recruiting_candidates",
   "computer_observe",
   "list_files",
   "read_file",
@@ -3785,6 +3787,7 @@ export function createRunExecutor(deps: ExecutorDeps) {
           placement: "instructions" | "tool_result" | "steering",
           sourceMessageId = recruitingSourceMessageId,
           recallScope?: string | null,
+          trustedWorkspace?: LoadedRecruitingRunContext["workspace"],
         ) => {
           if (!deps.artifacts) throw new Error("Recruiting context requires artifact storage");
           if (reason !== "run") await refreshMemoryContext();
@@ -3798,6 +3801,7 @@ export function createRunExecutor(deps: ExecutorDeps) {
               placement,
               sourceMessageId,
               recallScope,
+              trustedWorkspace,
               redact: (text) => redactSecrets(text, runSecrets),
             },
           );
@@ -3807,6 +3811,9 @@ export function createRunExecutor(deps: ExecutorDeps) {
           !messagingChannelRun && thread.activeRecruitingRoleId
             ? await adoptRecruitingContext("run", "instructions")
             : undefined;
+        // ponytail: only reference context already present in the immutable run instructions.
+        const unchangedRecruitingContextText =
+          "<recruiting_role>\nCurrent recruiting role and memory exactly match the run instructions. This context supersedes earlier role and memory snapshots.\n</recruiting_role>";
         const retainRecruitingSource = async (source: RecruitingRoleToolResult["source"]) => {
           if (source?.anchor.kind !== "message") return;
           const nextId = source.anchor.messageId;
@@ -3828,11 +3835,20 @@ export function createRunExecutor(deps: ExecutorDeps) {
           }
           recruitingSourceMessageId = nextId;
         };
-        const deliverRecruitingRoleResult = async (result: RecruitingRoleToolResult) => {
+        const deliverRecruitingRoleResult = async (
+          result: RecruitingRoleToolResult,
+          reuseReadWorkspace: boolean,
+        ) => {
           await retainRecruitingSource(result.source);
           if (result.status === "needs_clarification")
             return redactConnectorPayload(result, runSecrets);
-          const adopted = await adoptRecruitingContext("role_tool", "tool_result");
+          const adopted = await adoptRecruitingContext(
+            "role_tool",
+            "tool_result",
+            undefined,
+            undefined,
+            reuseReadWorkspace ? (result.workspace ?? undefined) : undefined,
+          );
           const { status, workspace, source, changed } = result;
           const delivered = redactConnectorPayload(
             {
@@ -3841,8 +3857,10 @@ export function createRunExecutor(deps: ExecutorDeps) {
               source,
               changed,
               roleContext:
-                adopted?.text ??
-                [NO_RECRUITING_ROLE_CONTEXT, memoryContext.text].filter(Boolean).join("\n\n"),
+                adopted && adopted.text === initialRecruitingContext?.text
+                  ? unchangedRecruitingContextText
+                  : (adopted?.text ??
+                    [NO_RECRUITING_ROLE_CONTEXT, memoryContext.text].filter(Boolean).join("\n\n")),
               ...(adopted ? { contextArtifact: adopted.contextArtifact } : {}),
             },
             runSecrets,
@@ -5544,7 +5562,10 @@ export function createRunExecutor(deps: ExecutorDeps) {
           };
           const replayRole = async () => {
             try {
-              return await deliverRecruitingRoleResult(await executeRole());
+              return await deliverRecruitingRoleResult(
+                await executeRole(),
+                args.operation === "read",
+              );
             } catch (error) {
               return roleError(error);
             }
@@ -6609,6 +6630,23 @@ export function createRunExecutor(deps: ExecutorDeps) {
               throw error;
             }
           }
+          if (name === "recruiting_candidates") {
+            try {
+              return finish(
+                redactConnectorPayload(
+                  await executeRecruitingCandidatesTool(
+                    { prisma: deps.prisma },
+                    { actor: researchActor.actor, runId, threadId: thread.id, botId: bot.id },
+                    args,
+                    context,
+                  ),
+                  runSecrets,
+                ),
+              );
+            } catch (error) {
+              return finish(roleError(error));
+            }
+          }
           if (name === "recruiting_assess") {
             if (args.operation !== "read" && applied && !claimedEffect) {
               const early = await claimOrReturn("intended");
@@ -6686,7 +6724,7 @@ export function createRunExecutor(deps: ExecutorDeps) {
             // Native writes complete their immutable domain receipt in the same transaction.
             if (args.operation === "read" && !(await persistEffectResult(result)))
               return uncertainEffectResult(name);
-            return deliverRecruitingRoleResult(result);
+            return deliverRecruitingRoleResult(result, args.operation === "read");
           }
           if (name === "read_memory") {
             if (args.scope !== "bot" && args.scope !== "user") {
@@ -8343,12 +8381,15 @@ export function createRunExecutor(deps: ExecutorDeps) {
                       await refreshMemoryContext();
                     }
                     const steeringRoleText =
-                      steeringRecruitingContext?.text ??
-                      (currentThread
-                        ? [NO_RECRUITING_ROLE_CONTEXT, memoryContext.text]
-                            .filter(Boolean)
-                            .join("\n\n")
-                        : undefined);
+                      steeringRecruitingContext &&
+                      steeringRecruitingContext.text === initialRecruitingContext?.text
+                        ? unchangedRecruitingContextText
+                        : (steeringRecruitingContext?.text ??
+                          (currentThread
+                            ? [NO_RECRUITING_ROLE_CONTEXT, memoryContext.text]
+                                .filter(Boolean)
+                                .join("\n\n")
+                            : undefined));
                     return Promise.all(
                       steering.map(async (item) => {
                         const { images, files, unavailableInstruction } =
@@ -9238,6 +9279,7 @@ export function selectBuiltinToolsForRun(options: {
           "recruiting_role",
           "recruiting_request_approval",
           "recruiting_assess",
+          "recruiting_candidates",
           "recruiting_feedback",
           "recruiting_research",
           "recruiting_crm_target",

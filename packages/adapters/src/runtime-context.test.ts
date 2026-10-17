@@ -129,6 +129,7 @@ describe("runtime context policy", () => {
     "recruiting_role",
     "recruiting_research",
     "recruiting_assess",
+    "recruiting_candidates",
   ])("keeps an earlier %s result verbatim while shortening other old tool evidence", (toolName) => {
     const { request, context } = fixture(2);
     const call = (id: string, name: string) =>
@@ -241,32 +242,35 @@ describe("runtime context policy", () => {
     },
   );
 
-  it.each(["read_memory", "recruiting_role", "recruiting_research", "recruiting_assess"])(
-    "does not silently shorten required %s data to meet a small context window",
-    (toolName) => {
-      const { request, context } = fixture(0);
-      const body = JSON.stringify({ roleContext: "exact saved context ".repeat(2000) });
-      context.messages.push(
-        {
-          role: "assistant",
-          content: [{ type: "toolCall", id: "read", name: toolName, arguments: {} }],
-          timestamp: 101,
-        } as unknown as Message,
-        {
-          role: "toolResult",
-          toolCallId: "read",
-          toolName,
-          content: [{ type: "text", text: body }],
-          isError: false,
-          timestamp: 102,
-        } as Message,
-      );
-      const policy = createRuntimeContextPolicy({ ...request, contextStrategy: "retrieval" });
-      expect(() =>
-        policy.prepareContext(context, { ...model, contextWindow: 8192, maxTokens: 1024 }),
-      ).toThrow(ContextBudgetError);
-    },
-  );
+  it.each([
+    "read_memory",
+    "recruiting_role",
+    "recruiting_research",
+    "recruiting_assess",
+    "recruiting_candidates",
+  ])("does not silently shorten required %s data to meet a small context window", (toolName) => {
+    const { request, context } = fixture(0);
+    const body = JSON.stringify({ roleContext: "exact saved context ".repeat(2000) });
+    context.messages.push(
+      {
+        role: "assistant",
+        content: [{ type: "toolCall", id: "read", name: toolName, arguments: {} }],
+        timestamp: 101,
+      } as unknown as Message,
+      {
+        role: "toolResult",
+        toolCallId: "read",
+        toolName,
+        content: [{ type: "text", text: body }],
+        isError: false,
+        timestamp: 102,
+      } as Message,
+    );
+    const policy = createRuntimeContextPolicy({ ...request, contextStrategy: "retrieval" });
+    expect(() =>
+      policy.prepareContext(context, { ...model, contextWindow: 8192, maxTokens: 1024 }),
+    ).toThrow(ContextBudgetError);
+  });
   it.each(["recruiting_role", "recruiting_research"])(
     "retains the latest %s adopted role after later tool and steering exchanges",
     (toolName) => {

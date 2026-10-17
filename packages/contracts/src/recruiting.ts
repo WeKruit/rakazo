@@ -1074,6 +1074,16 @@ export const ListRecruitingCandidateSourcesInput = z.strictObject({
 export type ListRecruitingCandidateSourcesInput = z.infer<
   typeof ListRecruitingCandidateSourcesInput
 >;
+export const RecruitingCandidatesToolInputSchema = z.discriminatedUnion("operation", [
+  ListRecruitingCandidatesInput.pick({ query: true, cursor: true, limit: true }).extend({
+    operation: z.literal("list"),
+  }),
+  ListRecruitingCandidateSourcesInput.omit({ roleId: true }).extend({
+    operation: z.literal("sources"),
+  }),
+]);
+export type RecruitingCandidatesToolInput = z.infer<typeof RecruitingCandidatesToolInputSchema>;
+
 export const RecruitingCandidateSourceSchema = z
   .strictObject({
     crmImports: z.array(RecruitingCrmCandidateSyncSchema),

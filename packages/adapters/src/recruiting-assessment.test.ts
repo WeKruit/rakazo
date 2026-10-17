@@ -5,6 +5,7 @@ import type { PrismaClient, ThreadEvents } from "@rakazo/db";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import {
   executeRecruitingAssessmentTool,
+  executeRecruitingCandidatesTool,
   retainRecruitingWebMaterial,
 } from "./recruiting-assessment.js";
 
@@ -14,6 +15,8 @@ const db = vi.hoisted(() => ({
   save: vi.fn(),
   material: vi.fn(),
   question: vi.fn(),
+  candidates: vi.fn(),
+  sources: vi.fn(),
 }));
 vi.mock("@rakazo/db", async (original) => ({
   ...(await original<object>()),
@@ -22,6 +25,8 @@ vi.mock("@rakazo/db", async (original) => ({
   saveRecruitingAssessment: db.save,
   recordRecruitingWebMaterial: db.material,
   getRecruitingQuestion: db.question,
+  listRecruitingCandidates: db.candidates,
+  listRecruitingCandidateSources: db.sources,
 }));
 
 const actor: Actor = {
@@ -510,6 +515,176 @@ describe("native recruiting_assess adapter", () => {
       failure,
     );
   });
+});
+
+describe("native saved candidate reads", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    db.workspace.mockResolvedValue(workspace);
+  });
+
+  it.each(["Example Candidate", "https://www.linkedin.com/in/example-candidate"])(
+    "passes %s to the existing current-role list without choosing a match or changing totals",
+    async (query) => {
+      const f = fixture();
+      const page = {
+        roleId: "role",
+        items: [
+          { candidateKey: "candidate-one", name: "Example Candidate" },
+          { candidateKey: "candidate-two", name: "Example Candidate" },
+        ],
+        total: 7,
+        nextCursor: "next-page",
+      };
+      db.candidates.mockResolvedValue(page);
+      const result = await executeRecruitingCandidatesTool(
+        { prisma: f.deps.prisma },
+        trusted,
+        { operation: "list", query, limit: 2, cursor: "opaque+/=" },
+        context,
+      );
+      expect(result).toBe(page);
+      expect(db.workspace).toHaveBeenCalledWith(f.deps.prisma, actor, { threadId: "thread" });
+      expect(db.candidates).toHaveBeenCalledWith(f.deps.prisma, actor, {
+        roleId: "role",
+        query,
+        limit: 2,
+        cursor: "opaque+/=",
+      });
+      expect(db.sources).not.toHaveBeenCalled();
+      expect(f.findArtifacts).not.toHaveBeenCalled();
+      expect(f.get).not.toHaveBeenCalled();
+      expect(f.put).not.toHaveBeenCalled();
+      expect(db.save).not.toHaveBeenCalled();
+      expect(db.material).not.toHaveBeenCalled();
+    },
+  );
+
+  it("returns the existing source page with exact artifact references without reading bytes", async () => {
+    const f = fixture();
+    const page = {
+      roleId: "role",
+      candidateKey: "candidate-one",
+      total: 3,
+      nextCursor: "next-source",
+      items: [
+        { rowIndex: 4, artifactRef: { artifactId: "original-page", sha256: "d".repeat(64) } },
+      ],
+    };
+    db.sources.mockResolvedValue(page);
+    expect(
+      await executeRecruitingCandidatesTool(
+        f.deps,
+        trusted,
+        {
+          operation: "sources",
+          candidateKey: "candidate-one",
+          cursor: "original-cursor",
+          limit: 1,
+        },
+        context,
+      ),
+    ).toBe(page);
+    expect(db.sources).toHaveBeenCalledWith(f.deps.prisma, actor, {
+      roleId: "role",
+      candidateKey: "candidate-one",
+      cursor: "original-cursor",
+      limit: 1,
+    });
+    expect(db.candidates).not.toHaveBeenCalled();
+    expect(f.get).not.toHaveBeenCalled();
+    expect(db.save).not.toHaveBeenCalled();
+  });
+
+  it.each(["list", "sources"])(
+    "reports no current role for %s without inventing a page",
+    async (operation) => {
+      const f = fixture();
+      db.workspace.mockResolvedValue(null);
+      expect(
+        await executeRecruitingCandidatesTool(
+          f.deps,
+          trusted,
+          operation === "list" ? { operation } : { operation, candidateKey: "candidate-one" },
+          context,
+        ),
+      ).toEqual({ status: "no_current_role" });
+      expect(db.candidates).not.toHaveBeenCalled();
+      expect(db.sources).not.toHaveBeenCalled();
+    },
+  );
+
+  it.each([
+    { context: { userId: "foreign" } },
+    { context: { spaceId: "foreign" } },
+    { context: { runId: "foreign" } },
+    { context: { botId: "foreign" } },
+    { run: { userId: "foreign" } },
+    { run: { spaceId: "foreign" } },
+    { run: { threadId: "foreign" } },
+    { run: { botId: "foreign" } },
+    { run: { bot: { spaceId: "space", userId: "foreign" } } },
+  ])("denies foreign run context before listing: %j", async (changed) => {
+    const f = fixture();
+    Object.assign(f.run, changed.run);
+    await expect(
+      executeRecruitingCandidatesTool(
+        f.deps,
+        trusted,
+        { operation: "list" },
+        {
+          ...context,
+          ...changed.context,
+        },
+      ),
+    ).rejects.toThrow("Resource not found");
+    expect(db.workspace).not.toHaveBeenCalled();
+    expect(db.candidates).not.toHaveBeenCalled();
+    expect(db.sources).not.toHaveBeenCalled();
+  });
+
+  it("preserves current-role and candidate ownership denials from the existing readers", async () => {
+    const f = fixture();
+    db.workspace.mockRejectedValueOnce(new Error("current role denied"));
+    await expect(
+      executeRecruitingCandidatesTool(f.deps, trusted, { operation: "list" }, context),
+    ).rejects.toThrow("current role denied");
+    expect(db.candidates).not.toHaveBeenCalled();
+    db.sources.mockRejectedValueOnce(new Error("candidate denied"));
+    await expect(
+      executeRecruitingCandidatesTool(
+        f.deps,
+        trusted,
+        {
+          operation: "sources",
+          candidateKey: "foreign",
+        },
+        context,
+      ),
+    ).rejects.toThrow("candidate denied");
+    expect(f.get).not.toHaveBeenCalled();
+  });
+
+  it.each([{ roleId: "foreign" }, { actor: { userId: "foreign" } }, { shortlisted: true }])(
+    "rejects model scope or mutation fields before any read: %j",
+    async (extra) => {
+      const f = fixture();
+      await expect(
+        executeRecruitingCandidatesTool(
+          f.deps,
+          trusted,
+          {
+            operation: "list",
+            ...extra,
+          },
+          context,
+        ),
+      ).rejects.toThrow();
+      expect(f.findRun).not.toHaveBeenCalled();
+      expect(db.workspace).not.toHaveBeenCalled();
+      expect(db.candidates).not.toHaveBeenCalled();
+    },
+  );
 });
 
 const readerTrusted = { ...trusted, leaseOwner: "worker", leaseFence: 3 };

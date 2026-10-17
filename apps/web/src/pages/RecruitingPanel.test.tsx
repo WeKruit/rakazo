@@ -464,6 +464,7 @@ async function mounted(threadId = "thread-1", botId?: string, showDiagnostics = 
   document.body.append(container);
   const root = createRoot(container);
   const reveal = vi.fn();
+  const discuss = vi.fn();
   const render = async (id: string, refreshSignal = 0) =>
     act(async () =>
       root.render(
@@ -475,6 +476,7 @@ async function mounted(threadId = "thread-1", botId?: string, showDiagnostics = 
             refreshSignal={refreshSignal}
             onClose={() => {}}
             onRevealMessage={reveal}
+            onDiscussCandidate={discuss}
           />
         </MemoryRouter>,
       ),
@@ -504,7 +506,7 @@ async function mounted(threadId = "thread-1", botId?: string, showDiagnostics = 
     });
     return details!;
   };
-  return { container, render, click, expand, reveal };
+  return { container, render, click, expand, reveal, discuss };
 }
 
 async function changeStatement(container: HTMLElement, statement: string, index = 0) {
@@ -568,6 +570,43 @@ it("shows saved unassessed profiles and authoritative totals in Cards and Table"
   expect(view.container.querySelector("tbody")?.textContent).toContain("Example Tools");
   expect(api.setCandidateShortlist).not.toHaveBeenCalled();
 });
+
+it.each([
+  { viewName: "Cards", identified: true },
+  { viewName: "Table", identified: true },
+  { viewName: "Cards", identified: false },
+  { viewName: "Table", identified: false },
+])(
+  "discusses the selected persisted candidate from $viewName (identified: $identified)",
+  async ({ viewName, identified }) => {
+    const candidate = {
+      ...candidateFixture("internal-candidate-key", false),
+      name: identified ? "Synthetic Avery" : null,
+      title: identified ? "Compiler engineer" : null,
+      company: identified ? "Example Tools" : null,
+      linkedinUrl: identified ? "https://example.test/avery" : null,
+      resumeUrl: identified ? "https://example.test/resume.pdf" : null,
+    };
+    api.listCandidates.mockResolvedValue(candidatePage([candidate]));
+    const view = await mounted("thread-1", undefined, false);
+    await view.click("Evidence");
+    await view.click(viewName);
+    expect(view.container.textContent).not.toContain("Discuss candidate");
+    await view.click(candidate.name ?? "Unnamed candidate");
+    await view.click("Discuss candidate");
+    expect(view.discuss).toHaveBeenCalledExactlyOnceWith({
+      threadId: "thread-1",
+      roleTitle: role.title,
+      name: candidate.name,
+      title: candidate.title,
+      company: candidate.company,
+      linkedinUrl: candidate.linkedinUrl,
+      resumeUrl: candidate.resumeUrl,
+    });
+    expect(view.container.textContent).not.toContain(candidate.candidateKey);
+    expect(api.setCandidateShortlist).not.toHaveBeenCalled();
+  },
+);
 
 it("shows CRM states in Cards and Table only when a target or import exists", async () => {
   const view = await mounted();

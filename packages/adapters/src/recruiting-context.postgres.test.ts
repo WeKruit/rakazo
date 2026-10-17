@@ -312,7 +312,10 @@ describePostgres("native recruiting context adoption (PostgreSQL)", () => {
           await prisma.run.update({ where: { id: f.run.id }, data: { status: "cancelled" } });
       });
       await expect(
-        loadRecruitingRunContext(f.deps, f.run, { documents: [] }, f.context, { reason: "run" }),
+        loadRecruitingRunContext(f.deps, f.run, { documents: [] }, f.context, {
+          reason: "role_tool",
+          trustedWorkspace: f.workspace,
+        }),
       ).rejects.toThrow();
       expect(await prisma.artifact.count({ where: { runId: f.run.id } })).toBe(0);
       expect(
@@ -346,7 +349,8 @@ describePostgres("native recruiting context adoption (PostgreSQL)", () => {
           { documents: [] },
           { ...f.context, runId: run.id, botId: run.botId },
           {
-            reason: "run",
+            reason: "role_tool",
+            trustedWorkspace: f.workspace,
             ...(mismatch === "source" ? { sourceMessageId: other.run.sourceMessageId } : {}),
           },
         ),
@@ -381,7 +385,10 @@ describePostgres("native recruiting context adoption (PostgreSQL)", () => {
       data: { botId: null, externalConversationId: conversation.id },
     });
     await expect(
-      loadRecruitingRunContext(f.deps, f.run, { documents: [] }, f.context, { reason: "run" }),
+      loadRecruitingRunContext(f.deps, f.run, { documents: [] }, f.context, {
+        reason: "role_tool",
+        trustedWorkspace: f.workspace,
+      }),
     ).rejects.toThrow("Resource not found");
     expect(await prisma.artifact.count({ where: { runId: f.run.id } })).toBe(0);
     expect(
