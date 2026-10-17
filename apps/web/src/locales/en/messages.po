@@ -940,6 +940,10 @@ msgstr "Candidate facts"
 msgid "Candidate question"
 msgstr "Candidate question"
 
+#: src/pages/Shell.tsx
+msgid "Candidate reference"
+msgstr "Candidate reference"
+
 #: src/pages/RecruitingPanel.tsx
 msgid "Candidate sort"
 msgstr "Candidate sort"
@@ -1208,6 +1212,11 @@ msgstr "Compact"
 #: src/pages/RecruitingPanel.tsx
 msgid "Company"
 msgstr "Company"
+
+#. placeholder {0}: candidate.company
+#: src/pages/Shell.tsx
+msgid "Company: {0}"
+msgstr "Company: {0}"
 
 #: src/pages/ScratchpadSection.tsx
 msgid "Complete"
@@ -2201,6 +2210,10 @@ msgstr "Discoveries"
 msgid "Discovery details"
 msgstr "Discovery details"
 
+#: src/pages/RecruitingPanel.tsx
+msgid "Discuss candidate"
+msgstr "Discuss candidate"
+
 #: src/components/ComputerUpdateProgress.tsx
 #: src/components/teach/TeachComputerOverlay.tsx
 #: src/pages/shell/message-cards.tsx
@@ -2288,10 +2301,6 @@ msgstr "e.g. Hivenet Agent, Presales, Timesheets bot"
 #: src/pages/RecruitingPanel.tsx
 msgid "Edit criteria"
 msgstr "Edit criteria"
-
-#: src/components/AskCard.tsx
-#~ msgid "Edit first"
-#~ msgstr "Edit first"
 
 #: src/pages/BotContextMenu.tsx
 msgid "Edit Profile"
@@ -2859,8 +2868,14 @@ msgid "LinkedIn"
 msgstr "LinkedIn"
 
 #: src/pages/RecruitingPanel.tsx
+#: src/pages/Shell.tsx
 msgid "LinkedIn missing"
 msgstr "LinkedIn missing"
+
+#. placeholder {0}: candidate.linkedinUrl ?? t`LinkedIn missing`
+#: src/pages/Shell.tsx
+msgid "LinkedIn: {0}"
+msgstr "LinkedIn: {0}"
 
 #: src/pages/Artifacts.tsx
 msgid "List view"
@@ -3274,6 +3289,7 @@ msgid "Name"
 msgstr "Name"
 
 #: src/pages/RecruitingPanel.tsx
+#: src/pages/Shell.tsx
 msgid "Name missing"
 msgstr "Name missing"
 
@@ -3288,6 +3304,11 @@ msgstr "Name this group"
 #: src/pages/RoutineEditor.tsx
 msgid "Name this routine"
 msgstr "Name this routine"
+
+#. placeholder {0}: candidate.name ?? t`Name missing`
+#: src/pages/Shell.tsx
+msgid "Name: {0}"
+msgstr "Name: {0}"
 
 #: src/lib/roster-status.ts
 msgid "Needs an answer"
@@ -3388,10 +3409,6 @@ msgstr "No chat apps linked yet."
 msgid "No credentials saved for this bot."
 msgstr "No credentials saved for this bot."
 
-#: src/pages/RecruitingPanel.tsx
-#~ msgid "No CRM receipt"
-#~ msgstr "No CRM receipt"
-
 #: src/pages/MessagingSettingsOverlay.tsx
 msgid "No group chats yet."
 msgstr "No group chats yet."
@@ -3443,10 +3460,6 @@ msgstr "No remote MCP servers found"
 #: src/pages/RecruitingPanel.tsx
 msgid "No research activity"
 msgstr "No research activity"
-
-#: src/pages/RecruitingPanel.tsx
-#~ msgid "No research tasks"
-#~ msgstr "No research tasks"
 
 #: src/pages/PluginsOverlay.tsx
 #: src/pages/SpaceSearch.tsx
@@ -4199,10 +4212,6 @@ msgstr "Research history"
 msgid "Research round"
 msgstr "Research round"
 
-#: src/pages/RecruitingPanel.tsx
-#~ msgid "Research rounds"
-#~ msgstr "Research rounds"
-
 #: src/components/ComputerMaintenanceActions.tsx
 #: src/pages/shell/avatar-studio-popover.tsx
 msgid "Reset"
@@ -4265,8 +4274,14 @@ msgid "Resume"
 msgstr "Resume"
 
 #: src/pages/RecruitingPanel.tsx
+#: src/pages/Shell.tsx
 msgid "Resume missing"
 msgstr "Resume missing"
+
+#. placeholder {0}: candidate.resumeUrl ?? t`Resume missing`
+#: src/pages/Shell.tsx
+msgid "Resume: {0}"
+msgstr "Resume: {0}"
 
 #: src/components/AccountAccess.tsx
 #: src/pages/Auth.tsx
@@ -4329,6 +4344,11 @@ msgstr "Role revision"
 #: src/pages/RecruitingPanel.tsx
 msgid "Role sources"
 msgstr "Role sources"
+
+#. placeholder {0}: candidate.roleTitle
+#: src/pages/Shell.tsx
+msgid "Role: {0}"
+msgstr "Role: {0}"
 
 #: src/pages/ExternalConversationSettings.tsx
 msgid "Room guidance"
@@ -4605,10 +4625,6 @@ msgstr "Send answer"
 msgid "Send deletion code"
 msgstr "Send deletion code"
 
-#: src/components/AskCard.tsx
-#~ msgid "Send it"
-#~ msgstr "Send it"
-
 #: src/pages/Auth.tsx
 msgid "Send reset link"
 msgstr "Send reset link"
@@ -4727,10 +4743,6 @@ msgstr "Show password"
 #: src/pages/Shell.tsx
 msgid "Show settings"
 msgstr "Show settings"
-
-#: src/pages/AccountSettingsOverlay.tsx
-#~ msgid "Show tool activity"
-#~ msgstr "Show tool activity"
 
 #: src/components/call/VoiceChatCard.tsx
 msgid "Show transcript"
@@ -5180,6 +5192,11 @@ msgstr "Time of day"
 #: src/pages/shell/bot-panel.tsx
 msgid "Title"
 msgstr "Title"
+
+#. placeholder {0}: candidate.title
+#: src/pages/Shell.tsx
+msgid "Title: {0}"
+msgstr "Title: {0}"
 
 #: src/pages/ActivityList.tsx
 msgid "To"

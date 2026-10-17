@@ -940,6 +940,10 @@ msgstr ""
 msgid "Candidate question"
 msgstr ""
 
+#: src/pages/Shell.tsx
+msgid "Candidate reference"
+msgstr ""
+
 #: src/pages/RecruitingPanel.tsx
 msgid "Candidate sort"
 msgstr ""
@@ -1207,6 +1211,11 @@ msgstr ""
 
 #: src/pages/RecruitingPanel.tsx
 msgid "Company"
+msgstr ""
+
+#. placeholder {0}: candidate.company
+#: src/pages/Shell.tsx
+msgid "Company: {0}"
 msgstr ""
 
 #: src/pages/ScratchpadSection.tsx
@@ -2201,6 +2210,10 @@ msgstr ""
 msgid "Discovery details"
 msgstr ""
 
+#: src/pages/RecruitingPanel.tsx
+msgid "Discuss candidate"
+msgstr ""
+
 #: src/components/ComputerUpdateProgress.tsx
 #: src/components/teach/TeachComputerOverlay.tsx
 #: src/pages/shell/message-cards.tsx
@@ -2288,10 +2301,6 @@ msgstr "örn. Hivenet Agent, Presales, puantaj botu"
 #: src/pages/RecruitingPanel.tsx
 msgid "Edit criteria"
 msgstr ""
-
-#: src/components/AskCard.tsx
-#~ msgid "Edit first"
-#~ msgstr "Önce düzenle"
 
 #: src/pages/BotContextMenu.tsx
 msgid "Edit Profile"
@@ -2859,7 +2868,13 @@ msgid "LinkedIn"
 msgstr ""
 
 #: src/pages/RecruitingPanel.tsx
+#: src/pages/Shell.tsx
 msgid "LinkedIn missing"
+msgstr ""
+
+#. placeholder {0}: candidate.linkedinUrl ?? t`LinkedIn missing`
+#: src/pages/Shell.tsx
+msgid "LinkedIn: {0}"
 msgstr ""
 
 #: src/pages/Artifacts.tsx
@@ -3274,6 +3289,7 @@ msgid "Name"
 msgstr "Ad"
 
 #: src/pages/RecruitingPanel.tsx
+#: src/pages/Shell.tsx
 msgid "Name missing"
 msgstr ""
 
@@ -3287,6 +3303,11 @@ msgstr "Gruba bir ad ver"
 
 #: src/pages/RoutineEditor.tsx
 msgid "Name this routine"
+msgstr ""
+
+#. placeholder {0}: candidate.name ?? t`Name missing`
+#: src/pages/Shell.tsx
+msgid "Name: {0}"
 msgstr ""
 
 #: src/lib/roster-status.ts
@@ -3388,10 +3409,6 @@ msgstr ""
 msgid "No credentials saved for this bot."
 msgstr ""
 
-#: src/pages/RecruitingPanel.tsx
-#~ msgid "No CRM receipt"
-#~ msgstr ""
-
 #: src/pages/MessagingSettingsOverlay.tsx
 msgid "No group chats yet."
 msgstr ""
@@ -3443,10 +3460,6 @@ msgstr ""
 #: src/pages/RecruitingPanel.tsx
 msgid "No research activity"
 msgstr ""
-
-#: src/pages/RecruitingPanel.tsx
-#~ msgid "No research tasks"
-#~ msgstr ""
 
 #: src/pages/PluginsOverlay.tsx
 #: src/pages/SpaceSearch.tsx
@@ -4199,10 +4212,6 @@ msgstr ""
 msgid "Research round"
 msgstr ""
 
-#: src/pages/RecruitingPanel.tsx
-#~ msgid "Research rounds"
-#~ msgstr ""
-
 #: src/components/ComputerMaintenanceActions.tsx
 #: src/pages/shell/avatar-studio-popover.tsx
 msgid "Reset"
@@ -4265,7 +4274,13 @@ msgid "Resume"
 msgstr ""
 
 #: src/pages/RecruitingPanel.tsx
+#: src/pages/Shell.tsx
 msgid "Resume missing"
+msgstr ""
+
+#. placeholder {0}: candidate.resumeUrl ?? t`Resume missing`
+#: src/pages/Shell.tsx
+msgid "Resume: {0}"
 msgstr ""
 
 #: src/components/AccountAccess.tsx
@@ -4328,6 +4343,11 @@ msgstr ""
 
 #: src/pages/RecruitingPanel.tsx
 msgid "Role sources"
+msgstr ""
+
+#. placeholder {0}: candidate.roleTitle
+#: src/pages/Shell.tsx
+msgid "Role: {0}"
 msgstr ""
 
 #: src/pages/ExternalConversationSettings.tsx
@@ -4605,10 +4625,6 @@ msgstr "Yanıtı gönder"
 msgid "Send deletion code"
 msgstr "Silme kodu gönder"
 
-#: src/components/AskCard.tsx
-#~ msgid "Send it"
-#~ msgstr "Gönder"
-
 #: src/pages/Auth.tsx
 msgid "Send reset link"
 msgstr "Sıfırlama bağlantısı gönder"
@@ -4727,10 +4743,6 @@ msgstr ""
 #: src/pages/Shell.tsx
 msgid "Show settings"
 msgstr "Ayarları göster"
-
-#: src/pages/AccountSettingsOverlay.tsx
-#~ msgid "Show tool activity"
-#~ msgstr ""
 
 #: src/components/call/VoiceChatCard.tsx
 msgid "Show transcript"
@@ -5180,6 +5192,11 @@ msgstr "Günün saati"
 #: src/pages/shell/bot-panel.tsx
 msgid "Title"
 msgstr "Başlık"
+
+#. placeholder {0}: candidate.title
+#: src/pages/Shell.tsx
+msgid "Title: {0}"
+msgstr ""
 
 #: src/pages/ActivityList.tsx
 msgid "To"
