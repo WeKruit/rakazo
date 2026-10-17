@@ -10,6 +10,8 @@
 
 ## 当前发布与缺口（2026-10-16）
 
+Execution priority: feature implementation and direct product validation come first. Do not wait for CodeQL/CI after each push or treat those waits as a product milestone. Keep focused checks and preserve the full live acceptance requirements; merge, deployment, production migration and paid-resource authorization remain separate.
+
 ### Local takeover and real PostgreSQL acceptance (not deployed)
 
 The owner explicitly returned execution to the existing local session. The earlier cloud-only execution requirement no longer applies; reuse the current checkout and preserve private configuration and work. This does not authorize deployment, production migrations, outbound actions or scheduled continuation. M1–M5 and all 181 applicable actions remain the finish line.
