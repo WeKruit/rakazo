@@ -14,6 +14,8 @@ Execution priority: filter playbook and sourcing (S1–S5) come first; reply and
 
 ### 当前首要增量：搜索过滤与找人（未发布）
 
+**实现路径按用户最新澄清收敛：Autumn MCP + prompt + 现有 playbook。** Main/Sourcer 从普通 JD/聊天整理要求，经已存在的 MCP research/reply 执行检索和原 task 续搜；本方只复用原生岗位/请求/结果/来源/反馈持久化及展示。不给用户增加必填 schema，不新建查询、排序或筛选引擎，不继续扩展结构化过滤编辑器。已实现的过滤字段仅作可选产品状态和展示，不替代 Autumn 的实际搜索。
+
 - 复用现有 brief JSON、不可变岗位版本、原生人类来源、CAS 和 Role 编辑/API；新增 `searchFilters`，每项有稳定 ID、statement、include/exclude/prefer、origin 和 sourceRefIds。无额外过滤显式为 `[]`，不是资格条件或 provider 资格结论。推断只能 prefer；未读、缺来源或冒用人类身份的过滤不接受。
 - 人工可以增删/修改/清空过滤；省略不改，空数组清空。未改的条件和来源保留；修改产生同一岗位的新版本和真实人类消息、清除旧 G0，无变化不写新版本。缺失 location 也进入现有关键澄清，已有来源的 unrestricted 不重复问。
 - 原生运行上下文和冻结检索请求包含当前过滤，与 hard/preferred 判断及单轮召回范围分开；反馈后的 continue 沿保存的 provider task，历史请求不改写。Autumn 当前使用 prompt 而非结构化 filter API，因此传入过滤不等于已证明 provider 应用过滤。所有发现和 unknown 仍保留。
