@@ -1,9 +1,9 @@
+import { catalogApprovalRequest } from "@rakazo/core";
 import { approvalEffectKey } from "@rakazo/core/node/approval-effect-key";
 import { describe, expect, it, vi } from "vitest";
 import {
   approvedCatalogReplay,
   approvedReplayArgs,
-  catalogApprovalRequest,
   createApprovedEffectReplayQueue,
 } from "./approval-effect.js";
 import {

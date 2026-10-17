@@ -12,6 +12,7 @@ import type {
   RecruitingSourceRef,
   SaveRecruitingAssessmentInput,
 } from "@rakazo/contracts";
+import { boundDirectApprovalRequest } from "@rakazo/core";
 import { stableJsonValue } from "@rakazo/core/node/approval-effect-key";
 import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
 import type { Prisma, PrismaClient } from "./client.js";
@@ -7084,6 +7085,291 @@ describePostgres("recruiting domain (PostgreSQL)", () => {
     const saved = await recordResearchRead(input);
     return { saved, input };
   }
+
+  async function approveCrmEffect(
+    f: Awaited<ReturnType<typeof researchFixture>>,
+    effect: { id: string; request: unknown },
+  ) {
+    const card = await recruiting.createThreadMessage(prisma, {
+      threadId: f.thread.id,
+      runId: f.run.id,
+      botId,
+      role: "bot",
+      blocks: [
+        {
+          kind: "ask",
+          text: "Approve this exact CRM action",
+          approvalEffectId: effect.id,
+          status: "answered",
+          answer: "allow",
+          actions: [
+            { id: "allow", label: "Allow once" },
+            { id: "deny", label: "Deny" },
+          ],
+        },
+      ],
+    });
+    await recruiting.appendEvent(prisma, {
+      spaceId,
+      threadId: f.thread.id,
+      botId,
+      runId: f.run.id,
+      type: "effect.approval.answered",
+      payload: {
+        effectId: effect.id,
+        messageId: card.id,
+        askIndex: 0,
+        answeredByUserId: userId,
+        answer: "allow",
+        requestHash: createHash("sha256").update(stableJsonValue(effect.request)).digest("hex"),
+      },
+    });
+  }
+
+  async function crmCandidateFixture() {
+    const { f, prepared } = await mappedResearchFixture();
+    const page = await recordCandidatePage(f, prepared, "crm-candidate", [
+      canonicalCandidateRow("Example", "https://www.linkedin.com/in/example"),
+    ]);
+    const server = await prisma.mcpServer.create({
+      data: {
+        spaceId,
+        userId,
+        slug: `crm-${f.run.id}`,
+        name: "Synthetic CRM",
+        transport: "http",
+        assignments: {
+          create: {
+            spaceId,
+            userId,
+            botId,
+            allowAllTools: false,
+            allowedTools: ["get_crm_role", "crm_import_candidate"],
+          },
+        },
+      },
+    });
+    const target = {
+      mcpServerId: server.id,
+      serverRevision: server.revision,
+      organizationId: "10000000-0000-4000-8000-000000000001",
+      crmRoleId: "20000000-0000-4000-8000-000000000002",
+      crmClientId: "30000000-0000-4000-8000-000000000003",
+      clientLabel: "Synthetic Client",
+      roleLabel: "Engineer",
+    };
+    const read = await prisma.externalEffect.create({
+      data: {
+        spaceId,
+        runId: f.run.id,
+        kind: "mcp__crm__get_crm_role",
+        idempotencyKey: `crm-read:${f.run.id}`,
+        status: "completed",
+        request: boundDirectApprovalRequest(
+          {
+            connectorId: "mcp",
+            resourceId: server.id,
+            resourceRevision: server.revision,
+            toolName: "get_crm_role",
+          },
+          { p_org: target.organizationId, p_role: target.crmRoleId },
+          "__rakazoCatalogTool",
+        ) as Prisma.InputJsonValue,
+        result: {
+          structuredContent: {
+            data: {
+              role_spec_id: target.crmRoleId,
+              client_id: target.crmClientId,
+              client_label: target.clientLabel,
+              role_label: target.roleLabel,
+            },
+          },
+        },
+      },
+    });
+    const bindInput = {
+      operation: "bind" as const,
+      roleId: f.role.role.id,
+      expectedRoleRevision: f.role.role.revision,
+      expectedBindingEffectId: null,
+      crmRoleReadEffectId: read.id,
+    };
+    const effect = await prisma.externalEffect.create({
+      data: {
+        spaceId,
+        runId: f.run.id,
+        kind: "recruiting_crm_target",
+        idempotencyKey: `crm-bind:${f.run.id}`,
+        status: "executing",
+        request: bindInput,
+      },
+    });
+    await approveCrmEffect(f, effect);
+    const trusted = { ...f.lease, threadId: f.thread.id, botId };
+    const saved = await recruiting.executeRecruitingCrmBinding(
+      prisma,
+      actor,
+      { ...trusted, effectId: effect.id, effectRequest: bindInput },
+      bindInput,
+    );
+    const input = {
+      roleId: f.role.role.id,
+      candidateKey: "linkedin:/in/example",
+      bindingEffectId: effect.id,
+      sourceEffectId: page.input.effectId,
+      rowIndex: 0,
+    };
+    const resolved = (await recruiting.resolveRecruitingCrmImport(prisma, actor, trusted, input))!;
+    const native = {
+      effectKind: "mcp__crm__crm_import_candidate",
+      effectRequest: boundDirectApprovalRequest(
+        resolved.route,
+        resolved.args,
+        "__rakazoCatalogTool",
+      ),
+    };
+    return { f, page, server, target, trusted, saved, input, native, resolved };
+  }
+
+  it("reserves a CRM source import once and rechecks native human approval and current binding at dispatch", async () => {
+    const f = await crmCandidateFixture();
+    expect(
+      (await recruiting.getRecruitingWorkspace(prisma, actor, { threadId: f.f.thread.id }))?.role,
+    ).not.toHaveProperty("crmBindingEffectId");
+    const [first, second] = await Promise.all([
+      recruiting.admitRecruitingCrmImport(prisma, actor, f.trusted, f.input, f.native),
+      recruiting.admitRecruitingCrmImport(prisma, actor, f.trusted, f.input, f.native),
+    ]);
+    expect(first.effect.id).toBe(second.effect.id);
+    expect(
+      await prisma.recruitingCrmImport.count({
+        where: {
+          bindingEffectId: f.input.bindingEffectId,
+          pageId: f.input.sourceEffectId,
+          rowIndex: 0,
+        },
+      }),
+    ).toBe(1);
+    await expect(
+      recruiting.claimRecruitingCrmImport(prisma, actor, f.trusted, f.input, {
+        ...f.native,
+        effectId: first.effect.id,
+        from: "intended",
+      }),
+    ).rejects.toThrow(IsolationError);
+    await prisma.externalEffect.update({
+      where: { id: first.effect.id },
+      data: { status: "approved" },
+    });
+    await approveCrmEffect(f.f, first.effect);
+    const canonical = await recruiting.resolveRecruitingCrmImport(
+      prisma,
+      actor,
+      { ...f.trusted, approvedEffectId: first.effect.id },
+      { ...f.input, candidateKey: "model-retargeted", rowIndex: 99 },
+    );
+    expect(canonical?.input).toEqual(f.input);
+    await prisma.recruitingRole.update({
+      where: { id: f.input.roleId },
+      data: { crmBindingEffectId: null },
+    });
+    await expect(
+      recruiting.claimRecruitingCrmImport(prisma, actor, f.trusted, f.input, {
+        ...f.native,
+        effectId: first.effect.id,
+        from: "approved",
+      }),
+    ).rejects.toThrow(recruiting.RecruitingConflictError);
+    await prisma.recruitingRole.update({
+      where: { id: f.input.roleId },
+      data: { crmBindingEffectId: f.input.bindingEffectId },
+    });
+    expect(
+      await recruiting.claimRecruitingCrmImport(prisma, actor, f.trusted, f.input, {
+        ...f.native,
+        effectId: first.effect.id,
+        from: "approved",
+      }),
+    ).toBe(true);
+  });
+
+  it("rolls back native import allocation if its immutable source link cannot be written", async () => {
+    const f = await crmCandidateFixture();
+    const before = await prisma.externalEffect.count({ where: { runId: f.f.run.id } });
+    const failure = new Error("Injected CRM source-link failure");
+    const failing = prisma.$extends({
+      query: {
+        recruitingCrmImport: {
+          async create({ args, query }) {
+            await query(args);
+            throw failure;
+          },
+        },
+      },
+    });
+    await expect(
+      recruiting.admitRecruitingCrmImport(
+        failing as unknown as PrismaClient,
+        actor,
+        f.trusted,
+        f.input,
+        f.native,
+      ),
+    ).rejects.toThrow(failure);
+    expect(await prisma.externalEffect.count({ where: { runId: f.f.run.id } })).toBe(before);
+    expect(
+      await prisma.recruitingCrmImport.count({ where: { pageId: f.input.sourceEffectId } }),
+    ).toBe(0);
+  });
+
+  it("keeps historical CRM receipt membership visible after the current target is cleared", async () => {
+    const f = await crmCandidateFixture();
+    const admitted = await recruiting.admitRecruitingCrmImport(
+      prisma,
+      actor,
+      f.trusted,
+      f.input,
+      f.native,
+    );
+    await prisma.externalEffect.update({
+      where: { id: admitted.effect.id },
+      data: {
+        status: "completed",
+        result: {
+          structuredContent: {
+            data: {
+              candidate_id: "40000000-0000-4000-8000-000000000004",
+              source_id: "50000000-0000-4000-8000-000000000005",
+              membership_id: "60000000-0000-4000-8000-000000000006",
+              organization_id: f.target.organizationId,
+              role_spec_id: f.target.crmRoleId,
+              linkedin_identity: "/in/example",
+              source_file: f.resolved.args.p_source_file,
+            },
+          },
+        },
+      },
+    });
+    await prisma.recruitingRole.update({
+      where: { id: f.input.roleId },
+      data: { crmBindingEffectId: null },
+    });
+    await prisma.mcpServer.update({ where: { id: f.server.id }, data: { enabled: false } });
+    const candidates = await recruiting.listRecruitingCandidates(prisma, actor, {
+      roleId: f.input.roleId,
+    });
+    expect(candidates.crmTarget).toBeNull();
+    expect(candidates.items[0]?.crm).toBeNull();
+    const sources = await recruiting.listRecruitingCandidateSources(prisma, actor, {
+      roleId: f.input.roleId,
+      candidateKey: f.input.candidateKey,
+    });
+    expect(sources.items[0]?.crmImports[0]).toMatchObject({
+      status: "synced",
+      target: f.target,
+      receipt: { source_file: f.resolved.args.p_source_file },
+    });
+  });
 
   it("indexes every raw row, deduplicates only canonical profiles and pages using real totals", async () => {
     const { f, prepared } = await mappedResearchFixture();

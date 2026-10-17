@@ -1,5 +1,5 @@
 import type { Actor } from "@rakazo/contracts";
-import { readRecruitingResearchReadArtifact } from "@rakazo/core";
+import { boundDirectApprovalRequest, readRecruitingResearchReadArtifact } from "@rakazo/core";
 import type * as Database from "@rakazo/db";
 import type { PrismaClient } from "@rakazo/db";
 import {
@@ -17,7 +17,7 @@ import {
   saveRecruitingAssessment,
 } from "@rakazo/db";
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import { boundDirectApprovalRequest } from "./approval-effect.js";
+
 import { executeRecruitingAssessmentTool } from "./recruiting-assessment.js";
 import type { LoadedRecruitingRunContext } from "./recruiting-context.js";
 import { buildRecruitingResearchRequest } from "./recruiting-research.js";

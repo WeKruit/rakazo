@@ -1,9 +1,30 @@
-import { RecruitingApprovalToolInputSchema } from "@rakazo/contracts";
+import {
+  DisabledBuiltinToolsSchema,
+  disabledBuiltinToolSet,
+  RecruitingApprovalToolInputSchema,
+  RecruitingCrmImportInputSchema,
+  RecruitingCrmTargetToolInputSchema,
+} from "@rakazo/contracts";
 import { describe, expect, it } from "vitest";
 import { z } from "zod";
 import { builtinAgentTools } from "./builtin-tools.js";
 
 describe("native recruiting approval tool", () => {
+  it("uses the shared CRM contracts and honors native tool disable settings", () => {
+    const contracts = [
+      ["recruiting_crm_target", RecruitingCrmTargetToolInputSchema],
+      ["recruiting_crm_import", RecruitingCrmImportInputSchema],
+    ] as const;
+    const names = contracts.map(([name]) => name);
+    expect(DisabledBuiltinToolsSchema.parse(names)).toEqual(names);
+    expect([...disabledBuiltinToolSet(names)]).toEqual(names);
+    for (const [name, schema] of contracts) {
+      const tool = builtinAgentTools.find((entry) => entry.name === name);
+      expect(tool?.inputSchema).toEqual(z.toJSONSchema(schema, { io: "input" }));
+      expect(tool?.readOnly).not.toBe(true);
+    }
+  });
+
   it("exposes the shared strict staged request as a one-time human approval", () => {
     const tool = builtinAgentTools.find((entry) => entry.name === "recruiting_request_approval");
 

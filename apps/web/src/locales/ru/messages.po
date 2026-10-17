@@ -573,6 +573,10 @@ msgstr "Утвердить"
 msgid "Approve this server to let your agent use its tools."
 msgstr "Одобрите этот сервер, чтобы ваш агент мог использовать его инструменты."
 
+#: src/pages/RecruitingPanel.tsx
+msgid "Approved"
+msgstr ""
+
 #: src/pages/BotContextMenu.tsx
 msgid "Archive"
 msgstr "Архивировать"
@@ -910,6 +914,10 @@ msgstr "Отменено"
 #: src/pages/RecruitingPanel.tsx
 msgid "Candidate"
 msgstr "Кандидат"
+
+#: src/pages/RecruitingPanel.tsx
+msgid "Candidate CRM"
+msgstr ""
 
 #: src/pages/RecruitingPanel.tsx
 msgid "Candidate facts"
@@ -1940,6 +1948,14 @@ msgstr ""
 msgid "Criterion {0}"
 msgstr ""
 
+#: src/pages/RecruitingPanel.tsx
+msgid "CRM"
+msgstr ""
+
+#: src/pages/RecruitingPanel.tsx
+msgid "CRM receipt"
+msgstr ""
+
 #: src/pages/RoutineSchedule.tsx
 msgid "Cron"
 msgstr "Крон"
@@ -2085,6 +2101,7 @@ msgid "Deletion code"
 msgstr "Код удаления"
 
 #: src/components/AskCard.tsx
+#: src/pages/RecruitingPanel.tsx
 msgid "Denied"
 msgstr "Отклонено"
 
@@ -3318,6 +3335,10 @@ msgstr "Приложения для чата пока не связаны."
 msgid "No credentials saved for this bot."
 msgstr ""
 
+#: src/pages/RecruitingPanel.tsx
+msgid "No CRM receipt"
+msgstr ""
+
 #: src/pages/MessagingSettingsOverlay.tsx
 msgid "No group chats yet."
 msgstr "Групповых чатов пока нет."
@@ -3634,6 +3655,10 @@ msgid "Other model…"
 msgstr "Другая модель…"
 
 #: src/pages/RecruitingPanel.tsx
+msgid "Outcome unknown"
+msgstr ""
+
+#: src/pages/RecruitingPanel.tsx
 msgid "Outdated"
 msgstr ""
 
@@ -3698,6 +3723,10 @@ msgstr "Вставьте API-ключ и повторите тест."
 #: src/pages/RoutineEditor.tsx
 msgid "Paused"
 msgstr "Приостановлено"
+
+#: src/pages/RecruitingPanel.tsx
+msgid "Pending approval"
+msgstr ""
 
 #: src/pages/Shell.tsx
 #: src/pages/shell/chat-context.tsx
@@ -4730,6 +4759,10 @@ msgstr "Остановить озвучивание"
 msgid "Stop teaching"
 msgstr "Остановить обучение"
 
+#: src/pages/RecruitingPanel.tsx
+msgid "Stopped"
+msgstr ""
+
 #. js-lingui-explicit-id
 #: src/lib/browser-notifications.ts
 msgid "Stopped."
@@ -4781,6 +4814,14 @@ msgstr "Сменить бота"
 #: src/pages/ModelSettingsOverlay.tsx
 msgid "Switching…"
 msgstr "Переключение…"
+
+#: src/pages/RecruitingPanel.tsx
+msgid "Synced"
+msgstr ""
+
+#: src/pages/RecruitingPanel.tsx
+msgid "Syncing"
+msgstr ""
 
 #: src/pages/AccountSettingsOverlay.tsx
 msgid "System"

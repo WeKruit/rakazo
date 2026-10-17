@@ -12,6 +12,8 @@ import type {
   RecruitingAssessmentSourceRef,
   RecruitingCandidate,
   RecruitingCriterionExpression,
+  RecruitingCrmCandidateSync,
+  RecruitingCrmTarget,
   RecruitingEmploymentDay,
   RecruitingEmploymentRule,
   RecruitingResearchAction,
@@ -161,14 +163,65 @@ function CandidateAssessment({ candidate }: { candidate: RecruitingCandidate }) 
   );
 }
 
+function CrmStatus({ sync }: { sync: RecruitingCrmCandidateSync | null }) {
+  if (!sync) return <Trans>No CRM receipt</Trans>;
+  switch (sync.status) {
+    case "pending":
+      return <Trans>Pending approval</Trans>;
+    case "approved":
+      return <Trans>Approved</Trans>;
+    case "syncing":
+      return <Trans>Syncing</Trans>;
+    case "synced":
+      return sync.receipt ? <Trans>Synced</Trans> : <Trans>Outcome unknown</Trans>;
+    case "unknown":
+      return <Trans>Outcome unknown</Trans>;
+    case "denied":
+      return <Trans>Denied</Trans>;
+    case "stopped":
+      return <Trans>Stopped</Trans>;
+  }
+}
+
+function CrmDetails({
+  sync,
+  target,
+}: {
+  sync: RecruitingCrmCandidateSync | null;
+  target: RecruitingCrmTarget;
+}) {
+  return (
+    <div className="space-y-1 text-xs">
+      <p className="text-muted-foreground">
+        {target.clientLabel} · {target.roleLabel}
+      </p>
+      <p>
+        <Trans>CRM</Trans> · <CrmStatus sync={sync} />
+      </p>
+      {sync?.status === "synced" && sync.receipt ? (
+        <details>
+          <summary className="cursor-pointer text-muted-foreground">
+            <Trans>CRM receipt</Trans>
+          </summary>
+          <pre className="whitespace-pre-wrap break-words">
+            {JSON.stringify(sync.receipt, null, 2)}
+          </pre>
+        </details>
+      ) : null}
+    </div>
+  );
+}
+
 function CandidateSources({
   candidate,
   research,
+  refreshSignal,
   roleRevisionId,
   onAccessError,
 }: {
   candidate: RecruitingCandidate;
   research: Snapshot["research"];
+  refreshSignal: ListRecruitingCandidatesOutput | null;
   roleRevisionId: string;
   onAccessError: (error: unknown) => void;
 }) {
@@ -178,9 +231,14 @@ function CandidateSources({
   > | null>(null);
   const [loading, setLoading] = useState(true);
   const [failed, setFailed] = useState(false);
-  const scope = useRef({ active: true, busy: false });
+  const scope = useRef({ active: true, busy: false, generation: 0 });
   useEffect(() => {
-    scope.current.active = true;
+    scope.current.active = refreshSignal !== null;
+    scope.current.busy = false;
+    const generation = ++scope.current.generation;
+    setLoading(refreshSignal !== null);
+    setFailed(false);
+    if (!refreshSignal) return;
     void rpc.recruiting
       .listCandidateSources({
         roleId: candidate.roleId,
@@ -188,23 +246,24 @@ function CandidateSources({
         limit: 20,
       })
       .then((value) => {
-        if (scope.current.active) setPage(value);
+        if (scope.current.active && generation === scope.current.generation) setPage(value);
       })
       .catch((error: unknown) => {
-        if (scope.current.active) {
+        if (scope.current.active && generation === scope.current.generation) {
           onAccessError(error);
           setFailed(true);
         }
       })
       .finally(() => {
-        if (scope.current.active) setLoading(false);
+        if (scope.current.active && generation === scope.current.generation) setLoading(false);
       });
     return () => {
       scope.current.active = false;
     };
-  }, [candidate.roleId, candidate.candidateKey, onAccessError]);
+  }, [candidate.roleId, candidate.candidateKey, refreshSignal, onAccessError]);
   async function more() {
-    if (!page?.nextCursor || scope.current.busy) return;
+    if (!page?.nextCursor || !scope.current.active || scope.current.busy) return;
+    const generation = scope.current.generation;
     scope.current.busy = true;
     setLoading(true);
     setFailed(false);
@@ -215,17 +274,17 @@ function CandidateSources({
         limit: 20,
         cursor: page.nextCursor,
       });
-      if (scope.current.active)
+      if (scope.current.active && generation === scope.current.generation)
         setPage((current) =>
           current ? { ...value, items: current.items.concat(value.items) } : value,
         );
     } catch (error) {
-      if (scope.current.active) {
+      if (scope.current.active && generation === scope.current.generation) {
         onAccessError(error);
         setFailed(true);
       }
     } finally {
-      if (scope.current.active) {
+      if (scope.current.active && generation === scope.current.generation) {
         scope.current.busy = false;
         setLoading(false);
       }
@@ -252,6 +311,7 @@ function CandidateSources({
         </p>
       ) : null}
       {page?.items.map((source) => {
+        const { crmImports, ...discovery } = source;
         const task = research.tasks.find((item) => item.id === source.taskId);
         const action = research.actions.find(
           (item) => item.id === source.actionId && item.taskId === source.taskId,
@@ -269,8 +329,11 @@ function CandidateSources({
                 <Trans>Discovery details</Trans>
               </summary>
               <pre className="whitespace-pre-wrap break-words text-xs">
-                {JSON.stringify(source, null, 2)}
+                {JSON.stringify(discovery, null, 2)}
               </pre>
+              {crmImports.map((sync) => (
+                <CrmDetails key={sync.effectId} sync={sync} target={sync.target} />
+              ))}
             </details>
             <ArtifactReference reference={source.artifactRef} label={t`Source Artifact`} />
             {task && action ? (
@@ -284,7 +347,12 @@ function CandidateSources({
         );
       })}
       {page?.nextCursor ? (
-        <Button size="sm" variant="outline" disabled={loading} onClick={() => void more()}>
+        <Button
+          size="sm"
+          variant="outline"
+          disabled={loading || !refreshSignal}
+          onClick={() => void more()}
+        >
           <Trans>More sources</Trans>
         </Button>
       ) : null}
@@ -1168,6 +1236,16 @@ function RecruitingWorkspace({ threadId, botId, refreshSignal, onClose, onReveal
   const assessment = selected?.assessment;
   const roleId = workspace?.role.id;
   const roleRevisionId = workspace?.revision.id;
+  const showCrm = Boolean(
+    candidatePage?.crmTarget || candidatePage?.items.some((item) => item.crm),
+  );
+  const selectedPageCandidate = candidatePage?.items.find(
+    (item) => item.candidateKey === selection?.candidateKey,
+  );
+  const selectedCrm = selectedPageCandidate?.crm ?? null;
+  const selectedCrmTarget = selectedPageCandidate
+    ? (selectedCrm?.target ?? candidatePage?.crmTarget?.target)
+    : undefined;
   const candidateQuery = useRef({ filters: candidateFilters, roleRevisionId });
   candidateQuery.current = { filters: candidateFilters, roleRevisionId };
   useEffect(() => {
@@ -1251,7 +1329,12 @@ function RecruitingWorkspace({ threadId, botId, refreshSignal, onClose, onReveal
         cursor: candidatePage.nextCursor,
       });
       if (generation !== candidateGeneration.current || epoch !== readEpoch.current) return;
-      if (page.roleId !== roleId || page.roleRevisionId !== roleRevisionId) {
+      if (
+        page.roleId !== roleId ||
+        page.roleRevisionId !== roleRevisionId ||
+        page.crmTarget?.bindingEffectId !== candidatePage.crmTarget?.bindingEffectId
+      ) {
+        setCandidatePage(null);
         setRefresh((value) => value + 1);
         return;
       }
@@ -1959,6 +2042,12 @@ function RecruitingWorkspace({ threadId, botId, refreshSignal, onClose, onReveal
                     <p className="text-xs text-muted-foreground">
                       <Trans>{candidatePage.total} candidates</Trans>
                     </p>
+                    {candidatePage.crmTarget ? (
+                      <p className="text-xs text-muted-foreground">
+                        <Trans>CRM</Trans> · {candidatePage.crmTarget.target.clientLabel} ·{" "}
+                        {candidatePage.crmTarget.target.roleLabel}
+                      </p>
+                    ) : null}
                     {!candidatePage.items.length ? (
                       <p className="text-muted-foreground">
                         <Trans>No saved candidates</Trans>
@@ -2011,6 +2100,11 @@ function RecruitingWorkspace({ threadId, botId, refreshSignal, onClose, onReveal
                                 ) : null}
                                 <CandidateProfile candidate={candidate} />
                                 <CandidateAssessment candidate={candidate} />
+                                {showCrm ? (
+                                  <p className="text-xs text-muted-foreground">
+                                    <Trans>CRM</Trans> · <CrmStatus sync={candidate.crm} />
+                                  </p>
+                                ) : null}
                                 <p className="text-xs text-muted-foreground">
                                   <Trans>{candidate.discoveryCount} saved discoveries</Trans>
                                 </p>
@@ -2040,6 +2134,7 @@ function RecruitingWorkspace({ threadId, botId, refreshSignal, onClose, onReveal
                                 t`Location`,
                                 t`Profile`,
                                 t`Assessment`,
+                                ...(showCrm ? [t`CRM`] : []),
                                 t`Discoveries`,
                                 t`Shortlist`,
                               ].map((label) => (
@@ -2074,6 +2169,11 @@ function RecruitingWorkspace({ threadId, botId, refreshSignal, onClose, onReveal
                                 <td className="py-2 pe-3">
                                   <CandidateAssessment candidate={candidate} />
                                 </td>
+                                {showCrm ? (
+                                  <td className="py-2 pe-3 text-xs">
+                                    <CrmStatus sync={candidate.crm} />
+                                  </td>
+                                ) : null}
                                 <td className="py-2 pe-3 tabular-nums">
                                   {candidate.discoveryCount}
                                 </td>
@@ -2114,6 +2214,11 @@ function RecruitingWorkspace({ threadId, botId, refreshSignal, onClose, onReveal
                   <div className="space-y-3 border-t border-border pt-4">
                     <h3 className="font-medium">{selection.name ?? selection.candidateKey}</h3>
                     <CandidateProfile candidate={selection} />
+                    {selectedCrmTarget ? (
+                      <section aria-label={t`Candidate CRM`}>
+                        <CrmDetails sync={selectedCrm} target={selectedCrmTarget} />
+                      </section>
+                    ) : null}
                     {!selection.latestAssessment ? (
                       <p>
                         <Trans>Unassessed</Trans>
@@ -2132,9 +2237,10 @@ function RecruitingWorkspace({ threadId, botId, refreshSignal, onClose, onReveal
                       </p>
                     ) : null}
                     <CandidateSources
-                      key={`${selection.roleId}:${selection.candidateKey}:${selection.discoveryCount}`}
+                      key={`${selection.roleId}:${selection.candidateKey}`}
                       candidate={selection}
                       research={snapshot.research}
+                      refreshSignal={candidatePage}
                       roleRevisionId={workspace!.revision.id}
                       onAccessError={denyAccess}
                     />

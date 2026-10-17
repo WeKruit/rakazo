@@ -573,6 +573,10 @@ msgstr "승인"
 msgid "Approve this server to let your agent use its tools."
 msgstr "이 서버를 승인하면 Bot이 제공되는 도구를 사용할 수 있습니다."
 
+#: src/pages/RecruitingPanel.tsx
+msgid "Approved"
+msgstr ""
+
 #: src/pages/BotContextMenu.tsx
 msgid "Archive"
 msgstr "보관"
@@ -910,6 +914,10 @@ msgstr "취소됨"
 #: src/pages/RecruitingPanel.tsx
 msgid "Candidate"
 msgstr "후보자"
+
+#: src/pages/RecruitingPanel.tsx
+msgid "Candidate CRM"
+msgstr ""
 
 #: src/pages/RecruitingPanel.tsx
 msgid "Candidate facts"
@@ -1940,6 +1948,14 @@ msgstr ""
 msgid "Criterion {0}"
 msgstr ""
 
+#: src/pages/RecruitingPanel.tsx
+msgid "CRM"
+msgstr ""
+
+#: src/pages/RecruitingPanel.tsx
+msgid "CRM receipt"
+msgstr ""
+
 #: src/pages/RoutineSchedule.tsx
 msgid "Cron"
 msgstr "Cron"
@@ -2085,6 +2101,7 @@ msgid "Deletion code"
 msgstr "삭제 코드"
 
 #: src/components/AskCard.tsx
+#: src/pages/RecruitingPanel.tsx
 msgid "Denied"
 msgstr "거부됨"
 
@@ -3318,6 +3335,10 @@ msgstr "아직 연결된 채팅 앱이 없습니다."
 msgid "No credentials saved for this bot."
 msgstr ""
 
+#: src/pages/RecruitingPanel.tsx
+msgid "No CRM receipt"
+msgstr ""
+
 #: src/pages/MessagingSettingsOverlay.tsx
 msgid "No group chats yet."
 msgstr "아직 그룹 채팅이 없습니다."
@@ -3634,6 +3655,10 @@ msgid "Other model…"
 msgstr "다른 모델 직접 입력…"
 
 #: src/pages/RecruitingPanel.tsx
+msgid "Outcome unknown"
+msgstr ""
+
+#: src/pages/RecruitingPanel.tsx
 msgid "Outdated"
 msgstr ""
 
@@ -3698,6 +3723,10 @@ msgstr "API 키를 붙여넣은 뒤 다시 테스트하세요."
 #: src/pages/RoutineEditor.tsx
 msgid "Paused"
 msgstr "일시 중지됨"
+
+#: src/pages/RecruitingPanel.tsx
+msgid "Pending approval"
+msgstr ""
 
 #: src/pages/Shell.tsx
 #: src/pages/shell/chat-context.tsx
@@ -4730,6 +4759,10 @@ msgstr "읽기 중지"
 msgid "Stop teaching"
 msgstr "가르치기 종료"
 
+#: src/pages/RecruitingPanel.tsx
+msgid "Stopped"
+msgstr ""
+
 #. js-lingui-explicit-id
 #: src/lib/browser-notifications.ts
 msgid "Stopped."
@@ -4781,6 +4814,14 @@ msgstr ""
 #: src/pages/ModelSettingsOverlay.tsx
 msgid "Switching…"
 msgstr "전환 중…"
+
+#: src/pages/RecruitingPanel.tsx
+msgid "Synced"
+msgstr ""
+
+#: src/pages/RecruitingPanel.tsx
+msgid "Syncing"
+msgstr ""
 
 #: src/pages/AccountSettingsOverlay.tsx
 msgid "System"

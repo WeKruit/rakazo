@@ -7,6 +7,7 @@ import {
   RecruitingResearchToolInputSchema,
   RecruitingRoleToolInputSchema,
 } from "@rakazo/contracts";
+import { boundDirectApprovalDetails, catalogApprovalDetails } from "@rakazo/core";
 import { stableJsonValue } from "@rakazo/core/node/approval-effect-key";
 import type {
   Prisma,
@@ -31,7 +32,7 @@ import {
   recruitingResearchSnapshot,
   scoped,
 } from "@rakazo/db";
-import { boundDirectApprovalDetails, catalogApprovalDetails } from "./approval-effect.js";
+
 import type { LoadedRecruitingRunContext } from "./recruiting-context.js";
 import type { RecruitingResearchRequest } from "./recruiting-research.js";
 import {

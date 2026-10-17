@@ -5,6 +5,8 @@ import type {
   RecruitingAssessment,
   RecruitingAssessmentSnapshot,
   RecruitingAssessmentSourceRef,
+  RecruitingCrmCandidateSync,
+  RecruitingCrmTarget,
   RecruitingEmploymentRule,
   RecruitingQuestion,
   RecruitingRole,
@@ -272,10 +274,42 @@ const assessment = {
   ],
 } satisfies RecruitingAssessmentSnapshot;
 let cleanup: (() => Promise<void>) | undefined;
+const crmTarget: RecruitingCrmTarget = {
+  mcpServerId: "crm-server",
+  serverRevision: 1,
+  organizationId: "00000000-0000-4000-8000-000000000001",
+  crmRoleId: "00000000-0000-4000-8000-000000000002",
+  crmClientId: "00000000-0000-4000-8000-000000000003",
+  clientLabel: "Example Robotics",
+  roleLabel: "Geometry engineer",
+};
+function crmSync(status: RecruitingCrmCandidateSync["status"]): RecruitingCrmCandidateSync {
+  return {
+    effectId: `crm-${status}`,
+    bindingEffectId: "crm-binding",
+    sourceEffectId: "read-effect",
+    rowIndex: 0,
+    target: crmTarget,
+    status,
+    receipt:
+      status === "synced"
+        ? {
+            candidate_id: "10000000-0000-4000-8000-000000000001",
+            source_id: "10000000-0000-4000-8000-000000000002",
+            membership_id: "10000000-0000-4000-8000-000000000003",
+            organization_id: crmTarget.organizationId,
+            role_spec_id: crmTarget.crmRoleId,
+            linkedin_identity: "/in/synthetic-candidate",
+            source_file: "artifact:synthetic:row:0",
+          }
+        : null,
+  };
+}
 function candidatePage(items = [candidateFixture()]) {
   return {
     roleId: role.id,
     roleRevisionId: revision.id,
+    crmTarget: null as { bindingEffectId: string; target: RecruitingCrmTarget } | null,
     items,
     nextCursor: null as string | null,
     total: items.length,
@@ -315,6 +349,7 @@ function candidateFixture(candidateKey = "candidate-1", assessed = true) {
           hardGate: "unknown" as const,
         }
       : null,
+    crm: null as RecruitingCrmCandidateSync | null,
   };
 }
 beforeEach(() => {
@@ -527,6 +562,334 @@ it("shows saved unassessed profiles and authoritative totals in Cards and Table"
   expect(api.setCandidateShortlist).not.toHaveBeenCalled();
 });
 
+it("shows CRM states in Cards and Table only when a target or import exists", async () => {
+  const view = await mounted();
+  await view.click("Evidence");
+  expect(view.container.textContent).not.toContain("CRM");
+  await view.click("Table");
+  expect(
+    [...view.container.querySelectorAll("th")].some((item) => item.textContent === "CRM"),
+  ).toBe(false);
+  const statuses = [
+    "pending",
+    "approved",
+    "syncing",
+    "synced",
+    "unknown",
+    "denied",
+    "stopped",
+  ] as const;
+  api.listCandidates.mockResolvedValue({
+    ...candidatePage([
+      ...statuses.map((status) => ({ ...candidateFixture(status, false), crm: crmSync(status) })),
+      candidateFixture("no-receipt", false),
+    ]),
+    crmTarget: { bindingEffectId: "crm-binding", target: crmTarget },
+  });
+  await view.click("Refresh");
+  expect(view.container.textContent).toContain("Example Robotics · Geometry engineer");
+  expect(
+    [...view.container.querySelectorAll("th")].some((item) => item.textContent === "CRM"),
+  ).toBe(true);
+  for (const label of [
+    "Pending approval",
+    "Approved",
+    "Syncing",
+    "Synced",
+    "Outcome unknown",
+    "Denied",
+    "Stopped",
+    "No CRM receipt",
+  ]) {
+    expect(view.container.querySelector("tbody")?.textContent).toContain(label);
+  }
+  await view.click("Cards");
+  for (const label of [
+    "Pending approval",
+    "Approved",
+    "Syncing",
+    "Synced",
+    "Outcome unknown",
+    "Denied",
+    "Stopped",
+    "No CRM receipt",
+  ]) {
+    expect(view.container.querySelector("ul")?.textContent).toContain(label);
+  }
+  await view.click("Dashboard");
+  expect(
+    view.container.querySelector('[aria-label="Saved candidate totals"]')?.textContent,
+  ).not.toContain("CRM");
+  expect(view.container.querySelector(`a[href*="${crmTarget.organizationId}"]`)).toBeNull();
+});
+
+it("shows only the selected candidate's verified CRM receipt and never infers success from a status", async () => {
+  const synced = { ...candidateFixture("synced-person", false), crm: crmSync("synced") };
+  api.listCandidates.mockResolvedValue(
+    candidatePage([
+      synced,
+      { ...candidateFixture("unknown-person", false), crm: crmSync("unknown") },
+      {
+        ...candidateFixture("unverified-person", false),
+        crm: { ...crmSync("synced"), receipt: null },
+      },
+    ]),
+  );
+  const view = await mounted();
+  await view.click("Evidence");
+  await view.click("synced-person");
+  const receipt = await view.expand("CRM receipt");
+  expect(receipt.textContent).toContain(synced.crm.receipt!.candidate_id);
+  expect(receipt.textContent).toContain(synced.crm.receipt!.source_file);
+  expect(view.container.querySelector('[aria-label="Candidate CRM"]')?.textContent).toContain(
+    "Example Robotics · Geometry engineer",
+  );
+  await view.click("unknown-person");
+  expect(view.container.querySelector('[aria-label="Candidate CRM"]')?.textContent).toContain(
+    "Outcome unknown",
+  );
+  expect(view.container.textContent).not.toContain(synced.crm.receipt!.candidate_id);
+  await view.click("unverified-person");
+  expect(view.container.querySelector('[aria-label="Candidate CRM"]')?.textContent).not.toContain(
+    "Synced",
+  );
+  expect(
+    [...view.container.querySelectorAll("summary")].some(
+      (item) => item.textContent === "CRM receipt",
+    ),
+  ).toBe(false);
+});
+
+it("keeps a historical CRM receipt on its exact source with its original target after rebinding", async () => {
+  const historical = {
+    ...crmSync("synced"),
+    target: { ...crmTarget, clientLabel: "Previous client", roleLabel: "Previous role" },
+  };
+  const f = rawResultsFixture();
+  api.listCandidates.mockResolvedValue({
+    ...candidatePage([candidateFixture("raw-person", false)]),
+    crmTarget: {
+      bindingEffectId: "new-binding",
+      target: { ...crmTarget, clientLabel: "Current client" },
+    },
+  });
+  api.listResearch.mockResolvedValue({ tasks: [f.task], actions: [f.action] });
+  api.listCandidateSources.mockResolvedValue({
+    roleId: role.id,
+    candidateKey: "raw-person",
+    total: 1,
+    nextCursor: null,
+    items: [
+      {
+        taskId: f.task.id,
+        actionId: f.action.id,
+        roleRevisionId: "old-revision",
+        effectId: historical.sourceEffectId,
+        rowIndex: historical.rowIndex,
+        artifactRef: f.reference,
+        requestCursor: null,
+        outputId: "output-1",
+        observedAt: "2026-01-01T00:00:00Z",
+        crmImports: [historical],
+      },
+    ],
+  });
+  const view = await mounted();
+  await view.click("Evidence");
+  await view.click("raw-person");
+  expect(view.container.querySelector('[aria-label="Candidate CRM"]')?.textContent).toContain(
+    "No CRM receipt",
+  );
+  const details = await view.expand("Discovery details");
+  expect(details.textContent).toContain("Previous client · Previous role");
+  expect(details.textContent).not.toContain("Current client");
+  expect(details.querySelector("details")?.textContent).toContain(
+    historical.receipt!.membership_id,
+  );
+});
+
+it("clears the selected CRM receipt when a new binding replaces a filtered-out candidate", async () => {
+  const synced = { ...candidateFixture("synced-person", false), crm: crmSync("synced") };
+  api.listCandidates.mockResolvedValue({
+    ...candidatePage([synced]),
+    crmTarget: { bindingEffectId: "crm-binding", target: crmTarget },
+  });
+  const view = await mounted();
+  await view.click("Evidence");
+  await view.click("synced-person");
+  expect((await view.expand("CRM receipt")).textContent).toContain(
+    synced.crm.receipt!.candidate_id,
+  );
+  api.listCandidates.mockResolvedValue({
+    ...candidatePage([candidateFixture("another-person", false)]),
+    crmTarget: {
+      bindingEffectId: "new-binding",
+      target: { ...crmTarget, clientLabel: "New client" },
+    },
+  });
+  await changeInput(view.container, "Search candidates", "another");
+  expect(view.container.querySelector('[aria-label="Candidate CRM"]')).toBeNull();
+  expect(view.container.textContent).not.toContain(synced.crm.receipt!.candidate_id);
+});
+
+it("refreshes CRM source receipts without new discoveries and ignores a late older refresh", async () => {
+  const f = rawResultsFixture();
+  const pending = { ...crmSync("pending"), effectId: "crm-import" };
+  const synced = { ...crmSync("synced"), effectId: pending.effectId };
+  const sourcePage = {
+    roleId: role.id,
+    candidateKey: "raw-person",
+    total: 1,
+    nextCursor: null,
+    items: [
+      {
+        taskId: f.task.id,
+        actionId: f.action.id,
+        roleRevisionId: revision.id,
+        effectId: pending.sourceEffectId,
+        rowIndex: pending.rowIndex,
+        artifactRef: f.reference,
+        requestCursor: null,
+        outputId: "output-1",
+        observedAt: "2026-01-01T00:00:00Z",
+        crmImports: [pending],
+      },
+    ],
+  };
+  api.listCandidates.mockResolvedValue(
+    candidatePage([{ ...candidateFixture("raw-person", false), crm: pending }]),
+  );
+  api.listResearch.mockResolvedValue({ tasks: [f.task], actions: [f.action] });
+  api.listCandidateSources.mockResolvedValueOnce(sourcePage);
+  const view = await mounted();
+  await view.click("Evidence");
+  await view.click("raw-person");
+  const details = await view.expand("Discovery details");
+  expect(details.textContent).toContain("Pending approval");
+  let finishOlder!: (value: unknown) => void;
+  api.listCandidateSources.mockReturnValueOnce(
+    new Promise((resolve) => {
+      finishOlder = resolve;
+    }),
+  );
+  api.listCandidates.mockResolvedValue(
+    candidatePage([{ ...candidateFixture("raw-person", false), crm: synced }]),
+  );
+  await view.click("Refresh");
+  expect(api.listCandidateSources).toHaveBeenCalledTimes(2);
+  expect(details.textContent).toContain("Pending approval");
+  expect(details.textContent).not.toContain(synced.receipt!.candidate_id);
+  api.listCandidateSources.mockResolvedValueOnce({
+    ...sourcePage,
+    items: [{ ...sourcePage.items[0]!, crmImports: [synced] }],
+  });
+  await view.click("Refresh");
+  expect(api.listCandidateSources).toHaveBeenCalledTimes(3);
+  expect(details.isConnected).toBe(true);
+  expect(details.open).toBe(true);
+  expect(details.textContent).toContain("Synced");
+  expect(details.textContent).toContain(synced.receipt!.candidate_id);
+  await act(async () => finishOlder(sourcePage));
+  expect(details.textContent).toContain(synced.receipt!.membership_id);
+  expect(details.textContent).not.toContain("Pending approval");
+});
+
+it("omits stale current CRM details for an excluded selection while refreshing its source history", async () => {
+  const f = rawResultsFixture();
+  const pending = { ...candidateFixture("pending-person", false), crm: crmSync("pending") };
+  const synced = { ...pending, crm: { ...crmSync("synced"), effectId: pending.crm.effectId } };
+  const target = { bindingEffectId: "crm-binding", target: crmTarget };
+  const filtered = {
+    ...candidatePage([candidateFixture("another-person", false)]),
+    crmTarget: target,
+  };
+  api.listCandidates
+    .mockResolvedValueOnce({ ...candidatePage([pending]), crmTarget: target })
+    .mockResolvedValue(filtered);
+  const sources = {
+    roleId: role.id,
+    candidateKey: pending.candidateKey,
+    total: 1,
+    nextCursor: null,
+    items: [
+      {
+        taskId: f.task.id,
+        actionId: f.action.id,
+        roleRevisionId: revision.id,
+        effectId: pending.crm.sourceEffectId,
+        rowIndex: pending.crm.rowIndex,
+        artifactRef: f.reference,
+        requestCursor: null,
+        outputId: "output-1",
+        observedAt: "2026-01-01T00:00:00Z",
+        crmImports: [pending.crm],
+      },
+    ],
+  };
+  let finishOlder!: (value: unknown) => void;
+  const freshSources = { ...sources, items: [{ ...sources.items[0]!, crmImports: [synced.crm] }] };
+  api.listCandidateSources
+    .mockResolvedValueOnce(sources)
+    .mockReturnValueOnce(
+      new Promise((resolve) => {
+        finishOlder = resolve;
+      }),
+    )
+    .mockResolvedValue(freshSources);
+  api.listResearch.mockResolvedValue({ tasks: [f.task], actions: [f.action] });
+  const view = await mounted();
+  await view.click("Evidence");
+  await view.click(pending.candidateKey);
+  const details = await view.expand("Discovery details");
+  await changeInput(view.container, "Search candidates", "another");
+  expect(view.container.querySelector('[aria-label="Candidate CRM"]')).toBeNull();
+  await view.click("Refresh");
+  expect(view.container.querySelector('[aria-label="Candidate CRM"]')).toBeNull();
+  expect(
+    [...view.container.querySelectorAll("h3")].some(
+      (item) => item.textContent === pending.candidateKey,
+    ),
+  ).toBe(true);
+  expect(details.isConnected && details.open).toBe(true);
+  expect(details.textContent).toContain(synced.crm.receipt!.membership_id);
+  await act(async () => finishOlder(sources));
+  expect(details.textContent).not.toContain("Pending approval");
+  expect(view.container.querySelector('[aria-label="Candidate CRM"]')).toBeNull();
+  api.listCandidates.mockResolvedValue({ ...candidatePage([synced]), crmTarget: target });
+  await changeInput(view.container, "Search candidates", "");
+  const current = view.container.querySelector('[aria-label="Candidate CRM"]')!;
+  expect(current.textContent).toContain(synced.crm.receipt!.candidate_id);
+  expect(current.textContent).not.toContain("Pending approval");
+  expect(api.listCandidates).not.toHaveBeenCalledWith(
+    expect.objectContaining({ query: pending.candidateKey }),
+  );
+});
+
+it("reloads candidate pages when the CRM binding changes during pagination", async () => {
+  const synced = { ...candidateFixture("synced-person", false), crm: crmSync("synced") };
+  api.listCandidates
+    .mockResolvedValueOnce({
+      ...candidatePage([synced]),
+      nextCursor: "next-page",
+      crmTarget: { bindingEffectId: "crm-binding", target: crmTarget },
+    })
+    .mockResolvedValue({
+      ...candidatePage([candidateFixture("new-person", false)]),
+      crmTarget: {
+        bindingEffectId: "new-binding",
+        target: { ...crmTarget, clientLabel: "New client" },
+      },
+    });
+  const view = await mounted();
+  await view.click("Evidence");
+  await view.click("synced-person");
+  await view.expand("CRM receipt");
+  await view.click("Load more");
+  expect(api.listCandidates.mock.lastCall?.[0].cursor).toBeUndefined();
+  expect(view.container.querySelector("ul")?.textContent).not.toContain("synced-person");
+  expect(view.container.textContent).not.toContain(synced.crm.receipt!.candidate_id);
+});
+
 it("requests server pages and filters while keeping selected evidence outside the visible page", async () => {
   api.listCandidates
     .mockResolvedValueOnce({ ...candidatePage(), nextCursor: "page-2", total: 12 })
@@ -574,6 +937,7 @@ it("shows saved source rounds with their exact original revision and Artifact", 
         roleRevisionId: "old-revision",
         effectId: "read-effect",
         rowIndex: 0,
+        crmImports: [],
         artifactRef: f.reference,
         requestCursor: "  real-cursor==  ",
         outputId: "output-1",
@@ -726,10 +1090,17 @@ it("ignores a late candidate page and denial from the old thread", async () => {
     roleRevisionId: "rev-2",
   });
   await view.render("thread-2");
-  await act(async () => finish(candidatePage()));
+  await act(async () =>
+    finish({
+      ...candidatePage([{ ...candidateFixture(), crm: crmSync("synced") }]),
+      crmTarget: { bindingEffectId: "crm-binding", target: crmTarget },
+    }),
+  );
   await view.click("Evidence");
   expect(view.container.textContent).toContain("new-person");
   expect(view.container.textContent).not.toContain("candidate-1");
+  expect(view.container.textContent).not.toContain("Geometry engineer");
+  expect(view.container.textContent).not.toContain(crmSync("synced").receipt!.candidate_id);
   api.listCandidates.mockReturnValueOnce(
     new Promise((_resolve, reject) => {
       deny = reject;

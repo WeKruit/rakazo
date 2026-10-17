@@ -573,6 +573,10 @@ msgstr "Genehmigen"
 msgid "Approve this server to let your agent use its tools."
 msgstr "Genehmige diesen Server, damit dein Agent seine Tools verwenden kann."
 
+#: src/pages/RecruitingPanel.tsx
+msgid "Approved"
+msgstr ""
+
 #: src/pages/BotContextMenu.tsx
 msgid "Archive"
 msgstr "Archivieren"
@@ -910,6 +914,10 @@ msgstr "Abgebrochen"
 #: src/pages/RecruitingPanel.tsx
 msgid "Candidate"
 msgstr "Kandidat"
+
+#: src/pages/RecruitingPanel.tsx
+msgid "Candidate CRM"
+msgstr ""
 
 #: src/pages/RecruitingPanel.tsx
 msgid "Candidate facts"
@@ -1940,6 +1948,14 @@ msgstr ""
 msgid "Criterion {0}"
 msgstr ""
 
+#: src/pages/RecruitingPanel.tsx
+msgid "CRM"
+msgstr ""
+
+#: src/pages/RecruitingPanel.tsx
+msgid "CRM receipt"
+msgstr ""
+
 #: src/pages/RoutineSchedule.tsx
 msgid "Cron"
 msgstr "Cron"
@@ -2085,6 +2101,7 @@ msgid "Deletion code"
 msgstr "Löschcode"
 
 #: src/components/AskCard.tsx
+#: src/pages/RecruitingPanel.tsx
 msgid "Denied"
 msgstr "Abgelehnt"
 
@@ -3318,6 +3335,10 @@ msgstr ""
 msgid "No credentials saved for this bot."
 msgstr ""
 
+#: src/pages/RecruitingPanel.tsx
+msgid "No CRM receipt"
+msgstr ""
+
 #: src/pages/MessagingSettingsOverlay.tsx
 msgid "No group chats yet."
 msgstr ""
@@ -3634,6 +3655,10 @@ msgid "Other model…"
 msgstr "Anderes Modell…"
 
 #: src/pages/RecruitingPanel.tsx
+msgid "Outcome unknown"
+msgstr ""
+
+#: src/pages/RecruitingPanel.tsx
 msgid "Outdated"
 msgstr ""
 
@@ -3697,6 +3722,10 @@ msgstr "Füge deinen API-Schlüssel ein und teste erneut."
 
 #: src/pages/RoutineEditor.tsx
 msgid "Paused"
+msgstr ""
+
+#: src/pages/RecruitingPanel.tsx
+msgid "Pending approval"
 msgstr ""
 
 #: src/pages/Shell.tsx
@@ -4730,6 +4759,10 @@ msgstr "Vorlesen stoppen"
 msgid "Stop teaching"
 msgstr "Anlernen beenden"
 
+#: src/pages/RecruitingPanel.tsx
+msgid "Stopped"
+msgstr ""
+
 #. js-lingui-explicit-id
 #: src/lib/browser-notifications.ts
 msgid "Stopped."
@@ -4781,6 +4814,14 @@ msgstr ""
 #: src/pages/ModelSettingsOverlay.tsx
 msgid "Switching…"
 msgstr "Wird gewechselt…"
+
+#: src/pages/RecruitingPanel.tsx
+msgid "Synced"
+msgstr ""
+
+#: src/pages/RecruitingPanel.tsx
+msgid "Syncing"
+msgstr ""
 
 #: src/pages/AccountSettingsOverlay.tsx
 msgid "System"

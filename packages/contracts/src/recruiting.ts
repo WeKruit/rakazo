@@ -1,5 +1,6 @@
 import * as z from "zod";
 import { Id, IsoDate } from "./ids.js";
+import { RecruitingCrmCandidateSyncSchema, RecruitingCrmTargetSchema } from "./recruiting-crm.js";
 
 export const RecruitingId = Id.refine((value) => value.trim().length > 0, "ID must not be blank");
 const Text = z.string().trim().min(1);
@@ -957,6 +958,7 @@ export const ListRecruitingCandidatesInput = z.strictObject({
 });
 export type ListRecruitingCandidatesInput = z.infer<typeof ListRecruitingCandidatesInput>;
 export const RecruitingCandidateSchema = z.strictObject({
+  crm: RecruitingCrmCandidateSyncSchema.nullable(),
   roleId: RecruitingId,
   candidateKey: RecruitingId,
   ...RecruitingCandidateProfileSchema.shape,
@@ -977,6 +979,9 @@ export const RecruitingCandidateSchema = z.strictObject({
 });
 export type RecruitingCandidate = z.infer<typeof RecruitingCandidateSchema>;
 export const ListRecruitingCandidatesOutput = z.strictObject({
+  crmTarget: z
+    .strictObject({ bindingEffectId: RecruitingId, target: RecruitingCrmTargetSchema })
+    .nullable(),
   roleId: RecruitingId,
   roleRevisionId: RecruitingId,
   items: z.array(RecruitingCandidateSchema),
@@ -1021,6 +1026,7 @@ export type ListRecruitingCandidateSourcesInput = z.infer<
   typeof ListRecruitingCandidateSourcesInput
 >;
 export const RecruitingCandidateSourceSchema = z.strictObject({
+  crmImports: z.array(RecruitingCrmCandidateSyncSchema),
   taskId: RecruitingId,
   actionId: RecruitingId,
   roleRevisionId: RecruitingId,

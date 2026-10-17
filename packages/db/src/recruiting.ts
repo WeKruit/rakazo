@@ -14,6 +14,9 @@ import type {
   RecruitingAssessmentSnapshot,
   RecruitingAssessmentSourceRef,
   RecruitingCriterionExpression,
+  RecruitingCrmCandidateSync,
+  RecruitingCrmImportInput,
+  RecruitingCrmTarget,
   RecruitingHumanIntent,
   RecruitingMaterialReadPayload,
   RecruitingPreferenceFeedbackInput,
@@ -49,6 +52,9 @@ import {
   RecruitingAssessmentAskInputSchema,
   RecruitingAssessmentSchema,
   RecruitingCandidateOutputSchemaId,
+  RecruitingCrmBindingInputSchema,
+  RecruitingCrmImportArgsSchema,
+  RecruitingCrmImportInputSchema,
   RecruitingHumanIntentSchema,
   RecruitingMaterialReadPayloadSchema,
   RecruitingPreferenceFeedbackSchema,
@@ -66,10 +72,17 @@ import {
 } from "@rakazo/contracts";
 import {
   applyRecruitingPreferenceEdit,
+  boundDirectApprovalDetails,
+  boundDirectApprovalRequest,
+  catalogApprovalDetails,
+  catalogApprovalRequest,
+  deriveRecruitingCrmImportStatus,
   evaluateRecruitingAssessment,
   extractLinksFromText,
+  extractRecruitingCrmTarget,
   mergeRecruitingReassessment,
   normalizeRecruitingCandidateRow,
+  parseRecruitingCrmImportReceipt,
   RecruitingPlaybookValidationError,
   readRecruitingJsonString,
   recruitingBriefClarifications,
@@ -373,7 +386,10 @@ async function roleSnapshot(tx: Tx, actor: Actor, role: RecruitingRole): Promise
   });
   await validateDefinition(tx, actor, revision);
   if (revision.brief) validateRecruitingBrief(revision.brief, revision);
-  return { role: RecruitingRoleSchema.parse(role), revision };
+  const { crmBindingEffectId: _crm, ...publicRole } = role as RecruitingRole & {
+    crmBindingEffectId?: string | null;
+  };
+  return { role: RecruitingRoleSchema.parse(publicRole), revision };
 }
 
 export async function createRecruitingRole(
@@ -520,7 +536,8 @@ export async function confirmRecruitingBrief(
     if (thread.activeRecruitingRoleId !== input.roleId) throw new IsolationError();
     const role = await requireRole(tx, actor, input.roleId, true);
     if (role.revision !== input.expectedRevision) throw new RecruitingConflictError();
-    const { revision } = await roleSnapshot(tx, actor, role);
+    const workspace = await roleSnapshot(tx, actor, role);
+    const { revision } = workspace;
     if (!revision.brief)
       throw new RecruitingPlaybookValidationError(
         "Read the original material and prepare a sourced brief first.",
@@ -544,7 +561,7 @@ export async function confirmRecruitingBrief(
       throw new RecruitingPlaybookValidationError(
         "Resolve the material hard-criterion questions before confirmation.",
       );
-    if (revision.brief.confirmation?.revision === role.revision) return { role, revision };
+    if (revision.brief.confirmation?.revision === role.revision) return workspace;
     const nextRevision = role.revision + 1;
     const message = await createThreadMessageInTransaction(tx, {
       threadId: thread.id,
@@ -691,7 +708,7 @@ export async function editRecruitingCriteria(
             },
           ];
     });
-    if (!changes.length) return { role: RecruitingRoleSchema.parse(role), revision };
+    if (!changes.length) return roleSnapshot(tx, actor, role);
     const changed = new Map(changes.map((change) => [change.criterion.id, change.criterion]));
     const criteria = revision.criteria.map((criterion) => changed.get(criterion.id) ?? criterion);
     // A shared atom ID must still have one definition across all criteria.
@@ -4750,6 +4767,523 @@ type CandidateQueryRow = {
   sortValue: string;
 };
 
+async function crmReadTarget(
+  tx: Tx,
+  actor: Actor,
+  run: { threadId: string; botId: string },
+  effectId: string,
+) {
+  const effect = await tx.externalEffect.findFirst({
+    where: { id: effectId, spaceId: actor.spaceId, status: "completed" },
+  });
+  if (!effect) throw new IsolationError();
+  const owner = await requireRun(tx, actor, effect.runId);
+  const target = extractRecruitingCrmTarget(effect);
+  if (!target || owner.threadId !== run.threadId || owner.botId !== run.botId)
+    throw new IsolationError();
+  return target;
+}
+
+async function crmBindingReceipt(tx: Tx, actor: Actor, roleId: string, effectId: string) {
+  const effect = await tx.externalEffect.findFirst({
+    where: {
+      id: effectId,
+      spaceId: actor.spaceId,
+      status: "completed",
+      kind: "recruiting_crm_target",
+    },
+  });
+  if (effect?.kind !== "recruiting_crm_target" || effect.status !== "completed")
+    throw new IsolationError();
+  const parsed = RecruitingCrmBindingInputSchema.safeParse(effect.request);
+  if (!parsed.success || parsed.data.roleId !== roleId) throw new IsolationError();
+  const { run } = await approvalAnswerProof(tx, actor, effect);
+  const target = await crmReadTarget(tx, actor, run, parsed.data.crmRoleReadEffectId);
+  const result = { status: "connected" as const, roleId, bindingEffectId: effect.id, target };
+  if (stableJsonValue(effect.result) !== stableJsonValue(result)) throw new IsolationError();
+  return result;
+}
+
+async function currentCrmServer(
+  tx: Tx,
+  actor: Actor,
+  run: { botId: string },
+  target: RecruitingCrmTarget,
+) {
+  const server = await tx.mcpServer.findFirst({
+    where: { id: target.mcpServerId, spaceId: actor.spaceId, userId: actor.userId, enabled: true },
+  });
+  const assignment = await tx.botMcpServer.findFirst({
+    where: {
+      botId: run.botId,
+      serverId: target.mcpServerId,
+      spaceId: actor.spaceId,
+      userId: actor.userId,
+    },
+  });
+  const allowed = assignment?.allowedTools;
+  if (
+    !server?.enabled ||
+    server.revision !== target.serverRevision ||
+    !assignment ||
+    (!assignment.allowAllTools &&
+      (!Array.isArray(allowed) ||
+        !["get_crm_role", "crm_import_candidate"].every((tool) => allowed.includes(tool))))
+  )
+    throw new IsolationError();
+}
+
+export async function getRecruitingCrmTarget(
+  prisma: PrismaClient,
+  actor: Actor,
+  input: { runId: string; roleId: string },
+) {
+  return prisma.$transaction(async (tx) => {
+    const run = await requireRun(tx, actor, input.runId);
+    const thread = await requireThread(tx, actor, run.threadId);
+    const role = await requireRole(tx, actor, input.roleId);
+    if (thread.activeRecruitingRoleId !== role.id) throw new IsolationError();
+    const bound = role.crmBindingEffectId
+      ? await crmBindingReceipt(tx, actor, role.id, role.crmBindingEffectId)
+      : null;
+    return {
+      roleId: role.id,
+      bindingEffectId: bound?.bindingEffectId ?? null,
+      target: bound?.target ?? null,
+    };
+  });
+}
+
+async function prepareCrmBinding(
+  tx: Tx,
+  actor: Actor,
+  trusted: RecruitingApprovalContext,
+  input: ReturnType<typeof RecruitingCrmBindingInputSchema.parse>,
+) {
+  const { run, thread } = await lockLiveRecruitingRun(tx, actor, trusted.runId);
+  requireResearchLease(run, trusted);
+  if (run.threadId !== trusted.threadId || run.botId !== trusted.botId) throw new IsolationError();
+  const role = await requireRole(tx, actor, input.roleId, true);
+  if (thread.activeRecruitingRoleId !== role.id) throw new IsolationError();
+  if (
+    role.revision !== input.expectedRoleRevision ||
+    (role.crmBindingEffectId ?? null) !== input.expectedBindingEffectId
+  )
+    throw new RecruitingConflictError();
+  const target = await crmReadTarget(tx, actor, run, input.crmRoleReadEffectId);
+  await currentCrmServer(tx, actor, run, target);
+  return { target, roleTitle: role.title, role, run };
+}
+
+export async function prepareRecruitingCrmBinding(
+  prisma: PrismaClient,
+  actor: Actor,
+  trusted: RecruitingApprovalContext,
+  raw: unknown,
+) {
+  const input = RecruitingCrmBindingInputSchema.parse(raw);
+  return prisma.$transaction(async (tx) => {
+    const { target, roleTitle } = await prepareCrmBinding(tx, actor, trusted, input);
+    return { target, roleTitle };
+  });
+}
+
+export async function executeRecruitingCrmBinding(
+  prisma: PrismaClient,
+  actor: Actor,
+  trusted: RecruitingApprovalContext & { effectId: string; effectRequest: unknown },
+  raw: unknown,
+) {
+  const input = RecruitingCrmBindingInputSchema.parse(raw);
+  if (stableJsonValue(input) !== stableJsonValue(trusted.effectRequest)) throw new IsolationError();
+  return prisma.$transaction(async (tx) => {
+    const { run } = await lockLiveRecruitingRun(tx, actor, trusted.runId, false);
+    if (run.threadId !== trusted.threadId || run.botId !== trusted.botId)
+      throw new IsolationError();
+    const role = await requireRole(tx, actor, input.roleId, true);
+    await tx.$queryRaw(
+      Prisma.sql`SELECT "id" FROM "external_effects" WHERE "id" = ${trusted.effectId} FOR UPDATE`,
+    );
+    const effect = await tx.externalEffect.findFirst({
+      where: {
+        id: trusted.effectId,
+        spaceId: actor.spaceId,
+        runId: run.id,
+        kind: "recruiting_crm_target",
+      },
+    });
+    if (
+      effect?.kind !== "recruiting_crm_target" ||
+      effect.runId !== run.id ||
+      stableJsonValue(effect.request) !== stableJsonValue(input)
+    )
+      throw new IsolationError();
+    if (effect.status === "completed") return crmBindingReceipt(tx, actor, role.id, effect.id);
+    if (effect.status !== "executing") throw new IsolationError();
+    const { target } = await prepareCrmBinding(tx, actor, trusted, input);
+    await approvalAnswerProof(tx, actor, effect);
+    const changed = await tx.recruitingRole.updateMany({
+      where: {
+        id: role.id,
+        spaceId: actor.spaceId,
+        userId: actor.userId,
+        revision: input.expectedRoleRevision,
+        currentRevisionId: role.currentRevisionId,
+        crmBindingEffectId: input.expectedBindingEffectId,
+      },
+      data: { crmBindingEffectId: effect.id },
+    });
+    if (changed.count !== 1) throw new RecruitingConflictError();
+    const result = {
+      status: "connected" as const,
+      roleId: role.id,
+      bindingEffectId: effect.id,
+      target,
+    };
+    const completed = await tx.externalEffect.updateMany({
+      where: { id: effect.id, spaceId: actor.spaceId, runId: run.id, status: "executing" },
+      data: { status: "completed", result },
+    });
+    if (completed.count !== 1) throw new IsolationError();
+    await appendEventInTransaction(tx, {
+      spaceId: actor.spaceId,
+      threadId: run.threadId,
+      botId: run.botId,
+      runId: run.id,
+      type: "effect.recorded",
+      payload: { effectId: effect.id, tool: "recruiting_crm_target", ...result },
+    });
+    return result;
+  });
+}
+
+async function crmImportSource(tx: Tx, actor: Actor, input: RecruitingCrmImportInput) {
+  const occurrence = await tx.recruitingCandidateOccurrence.findUnique({
+    where: { pageId_rowIndex: { pageId: input.sourceEffectId, rowIndex: input.rowIndex } },
+    include: { page: true },
+  });
+  if (
+    !occurrence ||
+    occurrence.roleId !== input.roleId ||
+    occurrence.candidateKey !== input.candidateKey
+  )
+    throw new IsolationError();
+  const { page } = occurrence;
+  const effect = await tx.externalEffect.findFirst({
+    where: { id: page.effectId, spaceId: actor.spaceId, status: "completed" },
+  });
+  if (effect?.status !== "completed") throw new IsolationError();
+  const read = await researchReadBinding(tx, actor, effect);
+  if (
+    read?.toolName !== "get_rows" ||
+    read.binding.taskId !== page.taskId ||
+    read.binding.actionId !== page.actionId ||
+    read.saved.task?.roleId !== input.roleId ||
+    read.saved.action?.roleRevisionId !== page.roleRevisionId ||
+    read.saved.action.candidateOutputSchema !== RECRUITING_CANDIDATE_OUTPUT_SCHEMA ||
+    page.rowCount === null ||
+    input.rowIndex >= page.rowCount
+  )
+    throw new IsolationError();
+  const artifact = await recordedResearchReadArtifact(tx, actor, read);
+  if (!artifact || artifact.id !== page.artifactId || artifact.hash !== page.artifactHash)
+    throw new IsolationError();
+  const identity = occurrence.linkedinUrl
+    ? recruitingCalibrationIdentity(occurrence.linkedinUrl)
+    : null;
+  if (!identity || occurrence.candidateKey !== `linkedin:${identity}` || !occurrence.name?.trim())
+    throw new IsolationError();
+  return occurrence;
+}
+
+function crmImportArgs(
+  target: RecruitingCrmTarget,
+  source: Prisma.RecruitingCandidateOccurrenceGetPayload<{ include: { page: true } }>,
+) {
+  return RecruitingCrmImportArgsSchema.parse({
+    p_org: target.organizationId,
+    p_role: target.crmRoleId,
+    p_name: source.name,
+    p_linkedin_url: source.linkedinUrl,
+    p_source_file: `rakazo:artifact:${source.page.artifactId}:sha256:${source.page.artifactHash}:row:${source.rowIndex}`,
+    ...(source.title ? { p_title: source.title } : {}),
+    ...(source.company ? { p_company: source.company } : {}),
+    ...(source.location ? { p_location: source.location } : {}),
+  });
+}
+
+function assertCrmImportRequest(
+  request: unknown,
+  route: { connectorId: string; resourceId: string; resourceRevision: number; toolName: string },
+  args: Record<string, unknown>,
+) {
+  const direct = boundDirectApprovalDetails(request, "__rakazoCatalogTool");
+  const catalog = catalogApprovalDetails(request, "__rakazoCatalogTool");
+  const expected = direct
+    ? boundDirectApprovalRequest(route, args, "__rakazoCatalogTool")
+    : catalog
+      ? catalogApprovalRequest(
+          catalog.toolName,
+          { id: `${route.resourceId}:${encodeURIComponent(route.toolName)}`, arguments: args },
+          "__rakazoCatalogTool",
+          route,
+        )
+      : null;
+  if (!expected || stableJsonValue(request) !== stableJsonValue(expected))
+    throw new IsolationError();
+}
+
+function crmImportKey(input: RecruitingCrmImportInput) {
+  return `recruiting-crm-import:${stableJsonValue([input.bindingEffectId, input.sourceEffectId, input.rowIndex])}`;
+}
+
+async function crmImportContext(
+  tx: Tx,
+  actor: Actor,
+  trusted: ResearchLease & { approvedEffectId?: string },
+  raw: RecruitingCrmImportInput | null,
+) {
+  const { run, thread } = await lockLiveRecruitingRun(tx, actor, trusted.runId, false);
+  let input = raw;
+  if (trusted.approvedEffectId) {
+    const approvedLink = await tx.recruitingCrmImport.findUnique({
+      where: { effectId: trusted.approvedEffectId },
+      include: { occurrence: true },
+    });
+    if (approvedLink) {
+      const approved = await tx.externalEffect.findFirst({
+        where: {
+          id: trusted.approvedEffectId,
+          spaceId: actor.spaceId,
+          runId: run.id,
+          status: "approved",
+        },
+      });
+      if (approved?.status !== "approved" || approved.runId !== run.id) throw new IsolationError();
+      await approvalAnswerProof(tx, actor, approved);
+      input = {
+        roleId: approvedLink.occurrence.roleId,
+        candidateKey: approvedLink.occurrence.candidateKey,
+        bindingEffectId: approvedLink.bindingEffectId,
+        sourceEffectId: approvedLink.pageId,
+        rowIndex: approvedLink.rowIndex,
+      };
+    }
+  }
+  if (input === null) return null;
+  input = RecruitingCrmImportInputSchema.parse(input);
+  const role = await requireRole(tx, actor, input.roleId, true);
+  const binding = await crmBindingReceipt(tx, actor, role.id, input.bindingEffectId);
+  const source = await crmImportSource(tx, actor, input);
+  const args = crmImportArgs(binding.target, source);
+  const route = {
+    connectorId: "mcp",
+    resourceId: binding.target.mcpServerId,
+    resourceRevision: binding.target.serverRevision,
+    toolName: "crm_import_candidate",
+  };
+  const link = await tx.recruitingCrmImport.findUnique({
+    where: {
+      bindingEffectId_pageId_rowIndex: {
+        bindingEffectId: input.bindingEffectId,
+        pageId: input.sourceEffectId,
+        rowIndex: input.rowIndex,
+      },
+    },
+    include: { effect: true },
+  });
+  const effect = link?.effect;
+  if (effect) {
+    await requireRun(tx, actor, effect.runId);
+    if (effect.spaceId !== actor.spaceId || effect.idempotencyKey !== crmImportKey(input))
+      throw new IsolationError();
+    assertCrmImportRequest(effect.request, route, args);
+  }
+  if (!effect || (effect.runId === run.id && ["intended", "approved"].includes(effect.status))) {
+    requireResearchLease(run, trusted);
+    if (
+      thread.activeRecruitingRoleId !== role.id ||
+      role.crmBindingEffectId !== input.bindingEffectId
+    )
+      throw new RecruitingConflictError();
+    await currentCrmServer(tx, actor, run, binding.target);
+  } else if (effect.status === "executing") requireResearchLease(run, trusted);
+  return { input, target: binding.target, args, route, effect, run };
+}
+
+export async function resolveRecruitingCrmImport(
+  prisma: PrismaClient,
+  actor: Actor,
+  trusted: ResearchLease & { approvedEffectId?: string },
+  input: RecruitingCrmImportInput | null,
+) {
+  return prisma.$transaction(async (tx) => {
+    const resolved = await crmImportContext(tx, actor, trusted, input);
+    if (!resolved) return null;
+    const { run: _run, ...result } = resolved;
+    return result;
+  });
+}
+
+export async function admitRecruitingCrmImport(
+  prisma: PrismaClient,
+  actor: Actor,
+  trusted: ResearchLease,
+  input: RecruitingCrmImportInput,
+  native: { effectKind: string; effectRequest: unknown },
+) {
+  return prisma.$transaction(async (tx) => {
+    const resolved = await crmImportContext(tx, actor, trusted, input);
+    if (!resolved) throw new IsolationError();
+    let { effect } = resolved;
+    if (!effect) {
+      if (!native.effectKind) throw new IsolationError();
+      assertCrmImportRequest(native.effectRequest, resolved.route, resolved.args);
+      if (await tx.externalEffect.findUnique({ where: { idempotencyKey: crmImportKey(input) } }))
+        throw new IsolationError();
+      effect = await tx.externalEffect.create({
+        data: {
+          spaceId: actor.spaceId,
+          runId: trusted.runId,
+          kind: native.effectKind,
+          idempotencyKey: crmImportKey(input),
+          status: "intended",
+          request: native.effectRequest as Prisma.InputJsonValue,
+        },
+      });
+      await tx.recruitingCrmImport.create({
+        data: {
+          effectId: effect.id,
+          bindingEffectId: input.bindingEffectId,
+          pageId: input.sourceEffectId,
+          rowIndex: input.rowIndex,
+        },
+      });
+    }
+    if (effect.status === "completed") return { status: "completed" as const, effect };
+    if (effect.status === "denied") return { status: "denied" as const, effect };
+    if (effect.status === "uncertain") return { status: "unknown" as const, effect };
+    const owner = await tx.run.findUniqueOrThrow({ where: { id: effect.runId } });
+    const live =
+      ["queued", "leased", "waiting_input"].includes(owner.status) ||
+      (owner.status === "running" &&
+        owner.leaseExpiresAt &&
+        owner.leaseExpiresAt.getTime() > Date.now());
+    if (effect.runId !== trusted.runId && live) return { status: "busy" as const, effect };
+    if (effect.status === "executing") return { status: "unknown" as const, effect };
+    if (
+      effect.runId !== trusted.runId ||
+      ["cancelled", "failed", "completed"].includes(owner.status)
+    )
+      return { status: "stopped" as const, effect };
+    if (
+      !["intended", "approved"].includes(effect.status) ||
+      effect.kind !== native.effectKind ||
+      stableJsonValue(effect.request) !== stableJsonValue(native.effectRequest)
+    )
+      throw new IsolationError();
+    return { status: "ready" as const, effect };
+  });
+}
+
+export async function claimRecruitingCrmImport(
+  prisma: PrismaClient,
+  actor: Actor,
+  trusted: ResearchLease,
+  input: RecruitingCrmImportInput,
+  native: {
+    effectId: string;
+    effectKind: string;
+    effectRequest: unknown;
+    from: "approved" | "intended";
+  },
+) {
+  return prisma.$transaction(async (tx) => {
+    const resolved = await crmImportContext(tx, actor, trusted, input);
+    if (!resolved?.effect) throw new IsolationError();
+    requireResearchLease(resolved.run, trusted);
+    await tx.$queryRaw(
+      Prisma.sql`SELECT "id" FROM "external_effects" WHERE "id" = ${native.effectId} FOR UPDATE`,
+    );
+    const effect = await tx.externalEffect.findFirst({
+      where: { id: native.effectId, spaceId: actor.spaceId, runId: trusted.runId },
+    });
+    if (
+      !effect ||
+      effect.id !== resolved.effect.id ||
+      effect.kind !== native.effectKind ||
+      effect.runId !== trusted.runId ||
+      stableJsonValue(effect.request) !== stableJsonValue(native.effectRequest)
+    )
+      throw new IsolationError();
+    if (effect.status !== native.from || !["approved", "intended"].includes(native.from))
+      return false;
+    assertCrmImportRequest(effect.request, resolved.route, resolved.args);
+    await approvalAnswerProof(tx, actor, effect);
+    const changed = await tx.externalEffect.updateMany({
+      where: {
+        id: effect.id,
+        spaceId: actor.spaceId,
+        runId: trusted.runId,
+        status: native.from,
+        request: { equals: effect.request as Prisma.InputJsonValue },
+      },
+      data: { status: "executing" },
+    });
+    return changed.count === 1;
+  });
+}
+
+async function crmSourceSync(
+  tx: Tx,
+  actor: Actor,
+  link: Prisma.RecruitingCrmImportGetPayload<{ include: { effect: true; occurrence: true } }>,
+): Promise<RecruitingCrmCandidateSync> {
+  const input = {
+    roleId: link.occurrence.roleId,
+    candidateKey: link.occurrence.candidateKey,
+    bindingEffectId: link.bindingEffectId,
+    sourceEffectId: link.pageId,
+    rowIndex: link.rowIndex,
+  };
+  const bound = await crmBindingReceipt(tx, actor, input.roleId, input.bindingEffectId);
+  const source = await crmImportSource(tx, actor, input);
+  const args = crmImportArgs(bound.target, source);
+  const owner = await requireRun(tx, actor, link.effect.runId);
+  const ownerState = await tx.run.findUniqueOrThrow({ where: { id: owner.id } });
+  if (link.effect.spaceId !== actor.spaceId || link.effect.idempotencyKey !== crmImportKey(input))
+    throw new IsolationError();
+  assertCrmImportRequest(
+    link.effect.request,
+    {
+      connectorId: "mcp",
+      resourceId: bound.target.mcpServerId,
+      resourceRevision: bound.target.serverRevision,
+      toolName: "crm_import_candidate",
+    },
+    args,
+  );
+  const receipt = parseRecruitingCrmImportReceipt(link.effect, bound.target, args);
+  const status = deriveRecruitingCrmImportStatus(
+    { ...link.effect, ownerRunStatus: ownerState.status },
+    bound.target,
+    args,
+  );
+  return {
+    effectId: link.effect.id,
+    bindingEffectId: link.bindingEffectId,
+    sourceEffectId: link.pageId,
+    rowIndex: link.rowIndex,
+    target: bound.target,
+    status:
+      status === "syncing" &&
+      (!ownerState.leaseExpiresAt || ownerState.leaseExpiresAt.getTime() <= Date.now())
+        ? "unknown"
+        : status,
+    receipt,
+  };
+}
+
 export async function listRecruitingCandidates(
   prisma: PrismaClient,
   actor: Actor,
@@ -4824,7 +5358,28 @@ export async function listRecruitingCandidates(
       const selected = rows.slice(0, limit);
       const last = selected.at(-1);
       const { total, ...counts } = totals[0]!;
+      const bound = role.crmBindingEffectId
+        ? await crmBindingReceipt(tx, actor, role.id, role.crmBindingEffectId)
+        : null;
+      const syncs = new Map<string, RecruitingCrmCandidateSync>();
+      if (bound && selected.length) {
+        const imports = await tx.recruitingCrmImport.findMany({
+          where: {
+            bindingEffectId: bound.bindingEffectId,
+            occurrence: {
+              roleId: role.id,
+              candidateKey: { in: selected.map((row) => row.candidateKey) },
+            },
+          },
+          include: { effect: true, occurrence: true },
+          orderBy: [{ effect: { createdAt: "desc" } }, { effectId: "desc" }],
+        });
+        for (const link of imports)
+          if (!syncs.has(link.occurrence.candidateKey))
+            syncs.set(link.occurrence.candidateKey, await crmSourceSync(tx, actor, link));
+      }
       return ListRecruitingCandidatesOutput.parse({
+        crmTarget: bound ? { bindingEffectId: bound.bindingEffectId, target: bound.target } : null,
         roleId: role.id,
         roleRevisionId: role.currentRevisionId,
         items: selected.map(
@@ -4837,6 +5392,7 @@ export async function listRecruitingCandidates(
             ...profile
           }) => ({
             ...profile,
+            crm: syncs.get(profile.candidateKey) ?? null,
             latestAssessment:
               assessmentVersion === null
                 ? null
@@ -4986,10 +5542,22 @@ export async function listRecruitingCandidateSources(
         checked.add(page.effectId);
       }
       const last = selected.at(-1);
+      const syncs = new Map<string, RecruitingCrmCandidateSync[]>();
+      for (const row of selected) {
+        const imports = await tx.recruitingCrmImport.findMany({
+          where: { pageId: row.pageId, rowIndex: row.rowIndex },
+          include: { effect: true, occurrence: true },
+          orderBy: [{ effect: { createdAt: "asc" } }, { effectId: "asc" }],
+        });
+        const states = [];
+        for (const link of imports) states.push(await crmSourceSync(tx, actor, link));
+        syncs.set(`${row.pageId}:${row.rowIndex}`, states);
+      }
       return ListRecruitingCandidateSourcesOutput.parse({
         roleId: role.id,
         candidateKey: candidate.candidateKey,
         items: selected.map(({ page, rowIndex }) => ({
+          crmImports: syncs.get(`${page.effectId}:${rowIndex}`)!,
           taskId: page.taskId,
           actionId: page.actionId,
           roleRevisionId: page.roleRevisionId,

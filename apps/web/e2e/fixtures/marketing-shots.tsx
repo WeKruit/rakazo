@@ -605,6 +605,15 @@ async function prepareRecruitingSourceShot() {
   const assessment = (
     demoRpc["recruiting/listAssessments"] as { assessment: { createdAt: string } }[]
   )[0]!;
+  const crmTarget = {
+    mcpServerId: "synthetic-crm-server",
+    serverRevision: 1,
+    organizationId: "00000000-0000-4000-8000-000000000001",
+    crmRoleId: "00000000-0000-4000-8000-000000000002",
+    crmClientId: "00000000-0000-4000-8000-000000000003",
+    clientLabel: "Example Robotics",
+    roleLabel: "Systems engineer",
+  };
   const candidates: RecruitingCandidate[] = [
     {
       roleId: role.id,
@@ -629,6 +638,23 @@ async function prepareRecruitingSourceShot() {
         isCurrent: true,
         hardGate: "unknown",
       },
+      crm: {
+        effectId: "synthetic-crm-import-1",
+        bindingEffectId: "synthetic-crm-binding",
+        sourceEffectId: "demo-read",
+        rowIndex: 0,
+        target: crmTarget,
+        status: "synced",
+        receipt: {
+          candidate_id: "10000000-0000-4000-8000-000000000001",
+          source_id: "10000000-0000-4000-8000-000000000002",
+          membership_id: "10000000-0000-4000-8000-000000000003",
+          organization_id: crmTarget.organizationId,
+          role_spec_id: crmTarget.crmRoleId,
+          linkedin_identity: "/in/synthetic-candidate",
+          source_file: "artifact:result-demo:row:0",
+        },
+      },
     },
     {
       roleId: role.id,
@@ -647,6 +673,15 @@ async function prepareRecruitingSourceShot() {
       firstDiscoveredAt: "2026-10-16T00:00:00Z",
       lastDiscoveredAt: "2026-10-16T00:00:00Z",
       latestAssessment: null,
+      crm: {
+        effectId: "synthetic-crm-import-2",
+        bindingEffectId: "synthetic-crm-binding",
+        sourceEffectId: "demo-read",
+        rowIndex: 2,
+        target: crmTarget,
+        status: "unknown",
+        receipt: null,
+      },
     },
     {
       roleId: role.id,
@@ -665,6 +700,7 @@ async function prepareRecruitingSourceShot() {
       firstDiscoveredAt: "2026-10-16T00:00:00Z",
       lastDiscoveredAt: "2026-10-16T00:00:00Z",
       latestAssessment: null,
+      crm: null,
     },
   ];
   demoRpc["recruiting/listCandidates"] = (args: Record<string, unknown>) => {
@@ -689,6 +725,7 @@ async function prepareRecruitingSourceShot() {
     return {
       roleId: role.id,
       roleRevisionId: revision.id,
+      crmTarget: { bindingEffectId: "synthetic-crm-binding", target: crmTarget },
       items: page,
       total: filtered.length,
       nextCursor: offset + page.length < filtered.length ? String(offset + page.length) : null,
@@ -802,6 +839,7 @@ async function prepareRecruitingSourceShot() {
         roleRevisionId: revision.id,
         effectId: "demo-read",
         rowIndex,
+        crmImports: candidates[index]?.crm?.rowIndex === rowIndex ? [candidates[index]!.crm] : [],
         artifactRef: rawRef,
         requestCursor: null,
         outputId: "output-demo",

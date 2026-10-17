@@ -56,6 +56,8 @@ import {
   isAttachmentImageMimeType,
   OPENAI_COMPATIBLE_PROVIDER_ID,
   RecruitingApprovalToolInputSchema,
+  RecruitingCrmImportInputSchema,
+  RecruitingCrmTargetToolInputSchema,
   RecruitingPreferenceFeedbackSchema,
   RecruitingResearchToolInputSchema,
 } from "@rakazo/contracts";
@@ -67,8 +69,12 @@ import {
   assertTransition,
   blocksToAgentHistoryText,
   botMessageAllowsSilence,
+  boundDirectApprovalDetails,
+  boundDirectApprovalRequest,
   CALL_CLIENT_NONCE_PREFIX,
   callIdFromClientNonce,
+  catalogApprovalDetails,
+  catalogApprovalRequest,
   connectorKindFromToolName,
   containsSecret,
   createStreamingRedactor,
@@ -117,15 +123,19 @@ import type {
   ThreadEvents,
 } from "@rakazo/db";
 import {
+  admitRecruitingCrmImport,
   appendEventInTransaction,
+  claimRecruitingCrmImport,
   claimRecruitingResearchAction,
   claimRecruitingResearchReadEffect,
   createSpaceForMember,
   createThreadMessageInTransaction,
   effectiveMemoryScope,
   executeRecruitingApproval,
+  executeRecruitingCrmBinding,
   findDefaultModelCredential,
   findModelCredential,
+  getRecruitingCrmTarget,
   InvalidSpaceNameError,
   IsolationError,
   isNativeHumanMessage,
@@ -134,11 +144,13 @@ import {
   loadRunHumanSources,
   parseComputerMode,
   prepareRecruitingApproval,
+  prepareRecruitingCrmBinding,
   RecruitingConflictError,
   RecruitingSourceValidationError,
   readHistory,
   recordUsage,
   recruitingResearchSnapshot,
+  resolveRecruitingCrmImport,
   retireModelCredential,
   SpaceLimitError,
   searchHistory,
@@ -164,13 +176,9 @@ import {
   approvalRoutesMatch,
   approvedCatalogReplay,
   approvedReplayArgs,
-  boundDirectApprovalDetails,
-  boundDirectApprovalRequest,
   catalogApprovalConnectorId,
-  catalogApprovalDetails,
   catalogApprovalInnerArgs,
   catalogApprovalMatchesLiveRoute,
-  catalogApprovalRequest,
   catalogExecuteToolName,
   catalogIdForRoute,
   claimApprovedEffect,
@@ -4103,7 +4111,7 @@ export function createRunExecutor(deps: ExecutorDeps) {
         const approvedEffects = await deps.prisma.externalEffect.findMany({
           where: { runId, status: "approved" },
           orderBy: APPROVED_EFFECT_REPLAY_ORDER,
-          select: { kind: true, request: true },
+          select: { id: true, kind: true, request: true },
         });
         const approvedEffectReplays = createApprovedEffectReplayQueue(approvedEffects);
         const baseComputerInstruction = persistentComputerInstruction({
@@ -4331,6 +4339,19 @@ export function createRunExecutor(deps: ExecutorDeps) {
             leaseOwner: workerId,
             leaseFence: fence,
           };
+          const crmContext = {
+            runId,
+            threadId: thread.id,
+            botId: bot.id,
+            leaseOwner: workerId,
+            leaseFence: fence,
+            approvedEffectId: approvedEffects.find(
+              (effect) => effect.request === approvedEffectReplays.nextRequest(),
+            )?.id,
+          };
+          let crmImportSelection:
+            | NonNullable<Awaited<ReturnType<typeof resolveRecruitingCrmImport>>>
+            | undefined;
           let researchSelection:
             | Awaited<ReturnType<typeof resolveRecruitingResearchTool>>
             | undefined;
@@ -4341,6 +4362,53 @@ export function createRunExecutor(deps: ExecutorDeps) {
             executionId,
             route: connectorTools.get(name)?.route,
           };
+          if (name === "recruiting_crm_import") {
+            const parsed = RecruitingCrmImportInputSchema.safeParse(args);
+            if (!parsed.success) return { error: sanitizeConnectorError(parsed.error, runSecrets) };
+            try {
+              const selection = await resolveRecruitingCrmImport(
+                deps.prisma,
+                researchActor.actor,
+                crmContext,
+                parsed.data,
+              );
+              if (!selection) throw new IsolationError();
+              crmImportSelection = selection;
+              if (selection.effect) {
+                name = selection.effect.kind;
+                args = selection.args;
+                connectorCall = { tool: name, args, route: selection.route, executionId };
+              } else {
+                if (!deps.connector?.resolveCall) throw new IsolationError();
+                const resolved = await deps.connector.resolveCall(
+                  {
+                    tool: catalogExecuteToolName("mcp"),
+                    route: { connectorId: "mcp", toolName: CATALOG_EXECUTE },
+                    args: { id: catalogIdForRoute(selection.route), arguments: selection.args },
+                    executionId,
+                  },
+                  context,
+                );
+                const route = resolved?.call.route;
+                if (
+                  !resolved ||
+                  !route?.resourceId ||
+                  !approvalRoutesMatch(
+                    { ...route, resourceId: route.resourceId },
+                    selection.route,
+                  ) ||
+                  BUILTIN_AGENT_TOOL_NAMES.has(resolved.tool.name)
+                )
+                  throw new IsolationError();
+                name = resolved.tool.name;
+                args = resolved.call.args;
+                connectorCall = resolved.call;
+                resolvedTool = resolved.tool;
+              }
+            } catch (error) {
+              return { error: sanitizeConnectorError(error, runSecrets) };
+            }
+          }
           if (
             researchInput?.success &&
             !["prepare", "continue"].includes(researchInput.data.operation)
@@ -4417,7 +4485,12 @@ export function createRunExecutor(deps: ExecutorDeps) {
             };
           }
           let effectRequest: unknown = args;
-          if (!researchSelection && connectorCall.route && deps.connector?.resolveCall) {
+          if (
+            !researchSelection &&
+            !crmImportSelection &&
+            connectorCall.route &&
+            deps.connector?.resolveCall
+          ) {
             try {
               const resolved = await deps.connector.resolveCall(connectorCall, context);
               if (resolved) {
@@ -4575,8 +4648,68 @@ export function createRunExecutor(deps: ExecutorDeps) {
             args = parsed.data;
             effectRequest = args;
           }
+          if (name === "recruiting_crm_target") {
+            const parsed = RecruitingCrmTargetToolInputSchema.safeParse(args);
+            if (!parsed.success) return { error: sanitizeConnectorError(parsed.error, runSecrets) };
+            args = parsed.data;
+            effectRequest = args;
+          }
+          let crmImportAdmission: Awaited<ReturnType<typeof admitRecruitingCrmImport>> | undefined;
+          if (
+            !crmImportSelection &&
+            crmContext.approvedEffectId &&
+            connectorCall.route?.connectorId === "mcp" &&
+            connectorCall.route.toolName === "crm_import_candidate"
+          ) {
+            try {
+              crmImportSelection =
+                (await resolveRecruitingCrmImport(
+                  deps.prisma,
+                  researchActor.actor,
+                  crmContext,
+                  null,
+                )) ?? undefined;
+            } catch (error) {
+              return { error: sanitizeConnectorError(error, runSecrets) };
+            }
+          }
+          if (crmImportSelection) {
+            if (disabledBuiltinTools.has("recruiting_crm_import"))
+              return { error: "This tool is disabled for this bot." };
+            try {
+              // Domain replay keeps its verified immutable envelope even if discovery
+              // now exposes the same MCP operation through a different catalog shape.
+              const saved = crmImportSelection.effect;
+              crmImportAdmission = await admitRecruitingCrmImport(
+                deps.prisma,
+                researchActor.actor,
+                crmContext,
+                crmImportSelection.input,
+                {
+                  effectKind: saved?.kind ?? name,
+                  effectRequest: saved?.request ?? effectRequest,
+                },
+              );
+              if (crmImportAdmission.status !== "ready") {
+                if (crmImportAdmission.status === "unknown")
+                  return settleUncertainEffect(deps.prisma, crmImportAdmission.effect.id, name);
+                if (["completed", "denied"].includes(crmImportAdmission.status)) {
+                  const gate = resolveDuplicateEffectGate(crmImportAdmission.effect, name);
+                  if (gate.action !== "return") throw new IsolationError();
+                  return gate.result;
+                }
+                return {
+                  status: crmImportAdmission.status,
+                  effectId: crmImportAdmission.effect.id,
+                  automaticRetry: false,
+                };
+              }
+            } catch (error) {
+              return { error: sanitizeConnectorError(error, runSecrets) };
+            }
+          }
           let researchAdmission: RecruitingResearchCallAdmission | undefined;
-          if (connectorCall.route?.connectorId === "mcp") {
+          if (connectorCall.route?.connectorId === "mcp" && !crmImportSelection) {
             try {
               const liveSchema = (resolvedTool ?? connectorTools.get(name))?.inputSchema;
               if (liveSchema && !researchSelection?.recoveryEffectKind)
@@ -4708,13 +4841,16 @@ export function createRunExecutor(deps: ExecutorDeps) {
               };
             recruitingPreference = parsed.data;
           }
-          const policyToolName = recruitingPreference
-            ? recruitingPreference.scope === "user"
-              ? "save_shared_memory"
-              : "remember"
-            : researchAdmission
-              ? "recruiting_research"
-              : name;
+          const policyToolName =
+            name === "recruiting_crm_target" && args.operation === "bind"
+              ? "recruiting_crm_bind"
+              : recruitingPreference
+                ? recruitingPreference.scope === "user"
+                  ? "save_shared_memory"
+                  : "remember"
+                : researchAdmission
+                  ? "recruiting_research"
+                  : name;
           if (disabledBuiltinTools.has(policyToolName))
             return { error: "This tool is disabled for this bot." };
           const requiresExplicitApproval = toolRequiresExplicitApproval(
@@ -4833,13 +4969,15 @@ export function createRunExecutor(deps: ExecutorDeps) {
               ? 0
               : nextMutatingEffectOccurrence(replayEffectToolName, args);
           const effectKey =
+            crmImportAdmission?.effect.idempotencyKey ??
             researchMutation?.effect?.idempotencyKey ??
             (usesApprovalKey && occurrence === 0
               ? approvalEffectKey(runId, replayEffectToolName, args)
               : toolEffectIdempotencyKey(runId, replayEffectToolName, args, occurrence));
           // Connector read-only hints must not bypass approval, review, or replay decisions.
-          const applied = researchMutation?.effect
-            ? { duplicate: true, effect: researchMutation.effect }
+          const domainEffect = crmImportAdmission?.effect ?? researchMutation?.effect;
+          const applied = domainEffect
+            ? { duplicate: true, effect: domainEffect }
             : READ_ONLY_AGENT_TOOLS.has(name)
               ? undefined
               : await recordEffect(
@@ -5116,24 +5254,44 @@ export function createRunExecutor(deps: ExecutorDeps) {
             from: "approved" | "intended",
           ): Promise<unknown | undefined> => {
             const claim = from === "approved" ? claimApprovedEffect : claimIntendedEffect;
-            const claimed = researchMutation
-              ? await claimRecruitingResearchAction(deps.prisma, researchActor.actor, {
-                  runId,
-                  leaseOwner: workerId,
-                  leaseFence: fence,
-                  actionId: researchMutation.action.id,
-                  effectId: applied!.effect.id,
-                  from,
-                })
-              : researchAdmission?.kind === "read"
-                ? await claimRecruitingResearchReadEffect(deps.prisma, researchActor.actor, {
-                    runId,
-                    leaseOwner: workerId,
-                    leaseFence: fence,
-                    effectId: applied!.effect.id,
-                    from,
-                  })
-                : await claim(deps.prisma, applied!.effect.id);
+            let claimed: boolean;
+            try {
+              claimed =
+                crmImportAdmission && crmImportSelection
+                  ? await claimRecruitingCrmImport(
+                      deps.prisma,
+                      researchActor.actor,
+                      crmContext,
+                      crmImportSelection.input,
+                      {
+                        effectId: applied!.effect.id,
+                        effectKind: applied!.effect.kind,
+                        effectRequest: applied!.effect.request,
+                        from,
+                      },
+                    )
+                  : researchMutation
+                    ? await claimRecruitingResearchAction(deps.prisma, researchActor.actor, {
+                        runId,
+                        leaseOwner: workerId,
+                        leaseFence: fence,
+                        actionId: researchMutation.action.id,
+                        effectId: applied!.effect.id,
+                        from,
+                      })
+                    : researchAdmission?.kind === "read"
+                      ? await claimRecruitingResearchReadEffect(deps.prisma, researchActor.actor, {
+                          runId,
+                          leaseOwner: workerId,
+                          leaseFence: fence,
+                          effectId: applied!.effect.id,
+                          from,
+                        })
+                      : await claim(deps.prisma, applied!.effect.id);
+            } catch (error) {
+              if (crmImportAdmission) return roleError(error);
+              throw error;
+            }
             if (claimed) {
               claimedEffect = true;
               return undefined;
@@ -5196,6 +5354,23 @@ export function createRunExecutor(deps: ExecutorDeps) {
               return pauseForApproval();
             }
             let files: MessageBlock[] = [];
+            let approvalArgs = args;
+            if (name === "recruiting_crm_target" && args.operation === "bind") {
+              try {
+                const prepared = await prepareRecruitingCrmBinding(
+                  deps.prisma,
+                  researchActor.actor,
+                  crmContext,
+                  args,
+                );
+                approvalArgs = { ...args, roleTitle: prepared.roleTitle, target: prepared.target };
+              } catch (error) {
+                const result = roleError(error);
+                return (await completeEffect(deps, applied!.effect.id, "intended", result))
+                  ? result
+                  : uncertainEffectResult(name);
+              }
+            }
             if (name === "recruiting_request_approval") {
               try {
                 if (!deps.artifacts) throw new IsolationError();
@@ -5230,7 +5405,7 @@ export function createRunExecutor(deps: ExecutorDeps) {
               leaseFence: fence,
               blocks: [
                 ...files,
-                buildApprovalAskBlock(applied!.effect.id, name, args, runSecrets, {
+                buildApprovalAskBlock(applied!.effect.id, name, approvalArgs, runSecrets, {
                   reviewReason,
                   oneTimeOnly: requiresExplicitApproval,
                 }),
@@ -6024,6 +6199,31 @@ export function createRunExecutor(deps: ExecutorDeps) {
                 },
                 args,
                 { artifacts: deps.artifacts, context },
+              );
+            } catch (error) {
+              return finish(roleError(error));
+            }
+          }
+          if (name === "recruiting_crm_target") {
+            try {
+              const input = RecruitingCrmTargetToolInputSchema.parse(args);
+              if (input.operation === "read")
+                return finish(
+                  await getRecruitingCrmTarget(deps.prisma, researchActor.actor, {
+                    runId,
+                    roleId: input.roleId,
+                  }),
+                );
+              if (!applied || !claimedEffect) throw new IsolationError();
+              return await executeRecruitingCrmBinding(
+                deps.prisma,
+                researchActor.actor,
+                {
+                  ...crmContext,
+                  effectId: applied.effect.id,
+                  effectRequest: applied.effect.request,
+                },
+                input,
               );
             } catch (error) {
               return finish(roleError(error));
@@ -8572,6 +8772,8 @@ export function selectBuiltinToolsForRun(options: {
           "recruiting_assess",
           "recruiting_feedback",
           "recruiting_research",
+          "recruiting_crm_target",
+          "recruiting_crm_import",
           "read_memory",
           "save_shared_memory",
           "save_memory",

@@ -41,6 +41,7 @@ export * from "./model-probe.js";
 export * from "./model-providers.js";
 export * from "./recruiting.js";
 export * from "./recruiting-candidates.js";
+export * from "./recruiting-crm.js";
 export * from "./recruiting-playbook.js";
 export * from "./remote-images.js";
 export * from "./response-bytes.js";

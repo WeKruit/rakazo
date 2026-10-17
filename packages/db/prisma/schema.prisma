@@ -754,6 +754,9 @@ model CloudAgent {
 }
 
 model ExternalEffect {
+  recruitingCrmRole RecruitingRole? @relation("RecruitingCrmBinding")
+  recruitingCrmImport RecruitingCrmImport? @relation("RecruitingCrmImportEffect")
+  recruitingCrmBoundImports RecruitingCrmImport[] @relation("RecruitingCrmImportBinding")
   recruitingCandidatePage RecruitingCandidatePage?
   recruitingActions RecruitingResearchAction[]
   id             String   @id @default(cuid())
@@ -1498,6 +1501,8 @@ model TicketComment {
 
 
 model RecruitingRole {
+  crmBindingEffectId String? @unique
+  crmBindingEffect ExternalEffect? @relation("RecruitingCrmBinding", fields: [crmBindingEffectId], references: [id], onDelete: NoAction)
   id String @id @default(cuid())
   spaceId String
   space Space @relation(fields: [spaceId], references: [id], onDelete: Cascade)
@@ -1666,6 +1671,7 @@ model RecruitingCandidatePage {
 
 /// Projection only. Exact provider row bytes remain in the referenced native ArtifactStore receipt.
 model RecruitingCandidateOccurrence {
+  crmImports RecruitingCrmImport[]
   pageId String
   page RecruitingCandidatePage @relation(fields: [pageId], references: [effectId], onDelete: Cascade)
   rowIndex Int
@@ -1684,4 +1690,17 @@ model RecruitingCandidateOccurrence {
   @@id([pageId, rowIndex])
   @@index([roleId, candidateKey])
   @@map("recruiting_candidate_occurrences")
+}
+
+model RecruitingCrmImport {
+  effectId String @id
+  effect ExternalEffect @relation("RecruitingCrmImportEffect", fields: [effectId], references: [id], onDelete: Cascade)
+  bindingEffectId String
+  bindingEffect ExternalEffect @relation("RecruitingCrmImportBinding", fields: [bindingEffectId], references: [id], onDelete: NoAction)
+  pageId String
+  rowIndex Int
+  occurrence RecruitingCandidateOccurrence @relation(fields: [pageId, rowIndex], references: [pageId, rowIndex], onDelete: Cascade)
+
+  @@unique([bindingEffectId, pageId, rowIndex])
+  @@map("recruiting_crm_imports")
 }

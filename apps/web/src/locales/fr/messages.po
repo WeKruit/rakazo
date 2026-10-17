@@ -573,6 +573,10 @@ msgstr "Approuver"
 msgid "Approve this server to let your agent use its tools."
 msgstr "Approuvez ce serveur pour permettre à votre agent d'utiliser ses outils."
 
+#: src/pages/RecruitingPanel.tsx
+msgid "Approved"
+msgstr ""
+
 #: src/pages/BotContextMenu.tsx
 msgid "Archive"
 msgstr "Archiver"
@@ -910,6 +914,10 @@ msgstr "Annulé"
 #: src/pages/RecruitingPanel.tsx
 msgid "Candidate"
 msgstr "Candidat"
+
+#: src/pages/RecruitingPanel.tsx
+msgid "Candidate CRM"
+msgstr ""
 
 #: src/pages/RecruitingPanel.tsx
 msgid "Candidate facts"
@@ -1940,6 +1948,14 @@ msgstr ""
 msgid "Criterion {0}"
 msgstr ""
 
+#: src/pages/RecruitingPanel.tsx
+msgid "CRM"
+msgstr ""
+
+#: src/pages/RecruitingPanel.tsx
+msgid "CRM receipt"
+msgstr ""
+
 #: src/pages/RoutineSchedule.tsx
 msgid "Cron"
 msgstr "Cron"
@@ -2085,6 +2101,7 @@ msgid "Deletion code"
 msgstr "Code de suppression"
 
 #: src/components/AskCard.tsx
+#: src/pages/RecruitingPanel.tsx
 msgid "Denied"
 msgstr "Refusé"
 
@@ -3318,6 +3335,10 @@ msgstr "Aucune application de discussion connectée pour le moment."
 msgid "No credentials saved for this bot."
 msgstr ""
 
+#: src/pages/RecruitingPanel.tsx
+msgid "No CRM receipt"
+msgstr ""
+
 #: src/pages/MessagingSettingsOverlay.tsx
 msgid "No group chats yet."
 msgstr "Aucune conversation de groupe pour le moment."
@@ -3634,6 +3655,10 @@ msgid "Other model…"
 msgstr "Autre modèle…"
 
 #: src/pages/RecruitingPanel.tsx
+msgid "Outcome unknown"
+msgstr ""
+
+#: src/pages/RecruitingPanel.tsx
 msgid "Outdated"
 msgstr ""
 
@@ -3698,6 +3723,10 @@ msgstr "Collez votre clé API, puis testez à nouveau."
 #: src/pages/RoutineEditor.tsx
 msgid "Paused"
 msgstr "En pause"
+
+#: src/pages/RecruitingPanel.tsx
+msgid "Pending approval"
+msgstr ""
 
 #: src/pages/Shell.tsx
 #: src/pages/shell/chat-context.tsx
@@ -4730,6 +4759,10 @@ msgstr "Arrêter la lecture"
 msgid "Stop teaching"
 msgstr "Arrêter l'enseignement"
 
+#: src/pages/RecruitingPanel.tsx
+msgid "Stopped"
+msgstr ""
+
 #. js-lingui-explicit-id
 #: src/lib/browser-notifications.ts
 msgid "Stopped."
@@ -4781,6 +4814,14 @@ msgstr "Changer de bot"
 #: src/pages/ModelSettingsOverlay.tsx
 msgid "Switching…"
 msgstr "Basculement en cours…"
+
+#: src/pages/RecruitingPanel.tsx
+msgid "Synced"
+msgstr ""
+
+#: src/pages/RecruitingPanel.tsx
+msgid "Syncing"
+msgstr ""
 
 #: src/pages/AccountSettingsOverlay.tsx
 msgid "System"

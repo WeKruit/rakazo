@@ -20,6 +20,14 @@ test("recruiting dashboard includes unassessed saved candidates and their source
   ).toHaveText("2");
   await captureScreenshot(page, testInfo, "recruiting-candidate-dashboard");
   await page.getByRole("tab", { name: "Evidence", exact: true }).click();
+  await page.getByRole("button", { name: "Table", exact: true }).click();
+  await expect(page.getByRole("columnheader", { name: "CRM", exact: true })).toBeVisible();
+  await expect(page.getByRole("cell", { name: "Synced", exact: true })).toBeVisible();
+  await expect(page.getByRole("cell", { name: "Outcome unknown", exact: true })).toBeVisible();
+  await page.getByRole("button", { name: "Load more", exact: true }).click();
+  await expect(page.getByRole("cell", { name: "No CRM receipt", exact: true })).toBeVisible();
+  await captureScreenshot(page, testInfo, "recruiting-candidate-crm-status");
+  await page.getByRole("button", { name: "Cards", exact: true }).click();
   await page
     .getByRole("combobox", { name: "Assessment state", exact: true })
     .selectOption("unassessed");

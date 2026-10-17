@@ -14,7 +14,7 @@ const actor: Actor = {
   email: "human@example.test",
   isDeploymentOwner: false,
 };
-function fixture() {
+function fixture(crmBindingEffectId: string | null = null) {
   const thread = {
     id: "thread",
     spaceId: "space",
@@ -30,6 +30,7 @@ function fixture() {
     title: "Example engineer",
     revision: 1,
     currentRevisionId: "revision-1",
+    crmBindingEffectId,
   };
   const source = {
     id: "jd",
@@ -127,8 +128,8 @@ function fixture() {
   return { prisma, tx, thread, revisions };
 }
 
-function criteriaFixture() {
-  const f = fixture();
+function criteriaFixture(crmBindingEffectId: string | null = null) {
+  const f = fixture(crmBindingEffectId);
   const original = f.revisions[0]!;
   original.criteria = [
     {
@@ -241,18 +242,22 @@ describe("native human criterion editing", () => {
     expect(f.tx.message.create).toHaveBeenCalledOnce();
   });
 
-  it("returns an unchanged current snapshot for a true no-op without message or revision writes", async () => {
-    const f = criteriaFixture();
-    f.input.criteria[0]!.priority = "hard" as never;
-    f.input.criteria[0]!.atoms[0]!.statement = "Implemented geometry";
-    f.input.criteria[0]!.atoms.reverse();
-    const saved = await recruiting.editRecruitingCriteria(f.prisma, actor, f.input);
-    expect(saved.role.revision).toBe(1);
-    expect(saved.revision.brief?.confirmation?.revision).toBe(1);
-    expect(f.tx.message.create).not.toHaveBeenCalled();
-    expect(f.tx.recruitingRoleRevision.create).not.toHaveBeenCalled();
-    expect(f.tx.recruitingRole.updateMany).not.toHaveBeenCalled();
-  });
+  it.each([null, "binding-effect"])(
+    "returns a public unchanged snapshot for a true no-op with CRM binding %s without writes",
+    async (crmBindingEffectId) => {
+      const f = criteriaFixture(crmBindingEffectId);
+      f.input.criteria[0]!.priority = "hard" as never;
+      f.input.criteria[0]!.atoms[0]!.statement = "Implemented geometry";
+      f.input.criteria[0]!.atoms.reverse();
+      const saved = await recruiting.editRecruitingCriteria(f.prisma, actor, f.input);
+      expect(saved.role.revision).toBe(1);
+      expect(saved.role).not.toHaveProperty("crmBindingEffectId");
+      expect(saved.revision.brief?.confirmation?.revision).toBe(1);
+      expect(f.tx.message.create).not.toHaveBeenCalled();
+      expect(f.tx.recruitingRoleRevision.create).not.toHaveBeenCalled();
+      expect(f.tx.recruitingRole.updateMany).not.toHaveBeenCalled();
+    },
+  );
 
   it.each([
     "unknown-criterion",
@@ -596,23 +601,36 @@ describe("native human criterion editing", () => {
   });
 });
 describe("native human brief confirmation", () => {
-  it("stores the authenticated human message and a new immutable confirmed revision in one transaction", async () => {
-    const f = fixture();
-    const saved = await confirmRecruitingBrief(f.prisma, actor, {
-      threadId: "thread",
-      roleId: "role",
-      expectedRevision: 1,
-    });
-    expect(saved.revision.revision).toBe(2);
-    expect(saved.revision.brief?.confirmation).toMatchObject({
-      revision: 2,
-      userId: actor.userId,
-      messageId: "human-confirmation",
-    });
-    expect(f.revisions[0]!.brief.confirmation).toBeNull();
-    expect(f.tx.message.create).toHaveBeenCalledOnce();
-    expect(f.prisma.$transaction).toHaveBeenCalledTimes(2);
-  });
+  it.each([null, "binding-effect"])(
+    "stores human confirmation once and repeats a public snapshot with CRM binding %s",
+    async (crmBindingEffectId) => {
+      const f = fixture(crmBindingEffectId);
+      const saved = await confirmRecruitingBrief(f.prisma, actor, {
+        threadId: "thread",
+        roleId: "role",
+        expectedRevision: 1,
+      });
+      expect(saved.revision.revision).toBe(2);
+      expect(saved.revision.brief?.confirmation).toMatchObject({
+        revision: 2,
+        userId: actor.userId,
+        messageId: "human-confirmation",
+      });
+      expect(f.revisions[0]!.brief.confirmation).toBeNull();
+      expect(saved.role).not.toHaveProperty("crmBindingEffectId");
+      const repeated = await confirmRecruitingBrief(f.prisma, actor, {
+        threadId: "thread",
+        roleId: "role",
+        expectedRevision: 2,
+      });
+      expect(repeated.role).not.toHaveProperty("crmBindingEffectId");
+      expect(repeated).toEqual(saved);
+      expect(f.tx.message.create).toHaveBeenCalledOnce();
+      expect(f.tx.recruitingRoleRevision.create).toHaveBeenCalledOnce();
+      expect(f.tx.recruitingRole.updateMany).toHaveBeenCalledOnce();
+      expect(f.prisma.$transaction).toHaveBeenCalledTimes(4);
+    },
+  );
   it("rejects stale, foreign and unbound requests before writing a human message", async () => {
     for (const mode of ["stale", "foreign", "unbound"]) {
       const f = fixture();

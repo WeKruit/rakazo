@@ -573,6 +573,10 @@ msgstr "Approve"
 msgid "Approve this server to let your agent use its tools."
 msgstr "Approve this server to let your agent use its tools."
 
+#: src/pages/RecruitingPanel.tsx
+msgid "Approved"
+msgstr "Approved"
+
 #: src/pages/BotContextMenu.tsx
 msgid "Archive"
 msgstr "Archive"
@@ -910,6 +914,10 @@ msgstr "Cancelled"
 #: src/pages/RecruitingPanel.tsx
 msgid "Candidate"
 msgstr "Candidate"
+
+#: src/pages/RecruitingPanel.tsx
+msgid "Candidate CRM"
+msgstr "Candidate CRM"
 
 #: src/pages/RecruitingPanel.tsx
 msgid "Candidate facts"
@@ -1940,6 +1948,14 @@ msgstr "Criteria changed or could not be saved."
 msgid "Criterion {0}"
 msgstr "Criterion {0}"
 
+#: src/pages/RecruitingPanel.tsx
+msgid "CRM"
+msgstr "CRM"
+
+#: src/pages/RecruitingPanel.tsx
+msgid "CRM receipt"
+msgstr "CRM receipt"
+
 #: src/pages/RoutineSchedule.tsx
 msgid "Cron"
 msgstr "Cron"
@@ -2085,6 +2101,7 @@ msgid "Deletion code"
 msgstr "Deletion code"
 
 #: src/components/AskCard.tsx
+#: src/pages/RecruitingPanel.tsx
 msgid "Denied"
 msgstr "Denied"
 
@@ -3318,6 +3335,10 @@ msgstr "No chat apps linked yet."
 msgid "No credentials saved for this bot."
 msgstr "No credentials saved for this bot."
 
+#: src/pages/RecruitingPanel.tsx
+msgid "No CRM receipt"
+msgstr "No CRM receipt"
+
 #: src/pages/MessagingSettingsOverlay.tsx
 msgid "No group chats yet."
 msgstr "No group chats yet."
@@ -3634,6 +3655,10 @@ msgid "Other model…"
 msgstr "Other model…"
 
 #: src/pages/RecruitingPanel.tsx
+msgid "Outcome unknown"
+msgstr "Outcome unknown"
+
+#: src/pages/RecruitingPanel.tsx
 msgid "Outdated"
 msgstr "Outdated"
 
@@ -3698,6 +3723,10 @@ msgstr "Paste your API key, then test again."
 #: src/pages/RoutineEditor.tsx
 msgid "Paused"
 msgstr "Paused"
+
+#: src/pages/RecruitingPanel.tsx
+msgid "Pending approval"
+msgstr "Pending approval"
 
 #: src/pages/Shell.tsx
 #: src/pages/shell/chat-context.tsx
@@ -4730,6 +4759,10 @@ msgstr "Stop speaking"
 msgid "Stop teaching"
 msgstr "Stop teaching"
 
+#: src/pages/RecruitingPanel.tsx
+msgid "Stopped"
+msgstr "Stopped"
+
 #. js-lingui-explicit-id
 #: src/lib/browser-notifications.ts
 msgid "Stopped."
@@ -4781,6 +4814,14 @@ msgstr "Switch bot"
 #: src/pages/ModelSettingsOverlay.tsx
 msgid "Switching…"
 msgstr "Switching…"
+
+#: src/pages/RecruitingPanel.tsx
+msgid "Synced"
+msgstr "Synced"
+
+#: src/pages/RecruitingPanel.tsx
+msgid "Syncing"
+msgstr "Syncing"
 
 #: src/pages/AccountSettingsOverlay.tsx
 msgid "System"

@@ -8,7 +8,7 @@ import type {
 import type { RecruitingFeedbackInput, RecruitingSourceRef } from "@rakazo/contracts";
 import { RecruitingRoleToolInputSchema } from "@rakazo/contracts";
 import type { ActionApprovalRule } from "@rakazo/core";
-import { RecruitingAssessmentValidationError } from "@rakazo/core";
+import { boundDirectApprovalRequest, RecruitingAssessmentValidationError } from "@rakazo/core";
 import {
   legacyScopedToolEffectIdempotencyKey,
   toolEffectIdempotencyKey,
@@ -24,7 +24,7 @@ import {
   settleUncertainRecruitingResearchAction,
 } from "@rakazo/db";
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import { boundDirectApprovalRequest } from "./approval-effect.js";
+
 import type * as AutoReviewModule from "./auto-review.js";
 import { runAutoReviewJudge } from "./auto-review.js";
 import type * as ComputerLifecycleModule from "./computer-lifecycle.js";

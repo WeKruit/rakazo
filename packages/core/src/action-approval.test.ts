@@ -2,6 +2,10 @@ import { describe, expect, it } from "vitest";
 import {
   type ActionApprovalRule,
   applyJudgeDecision,
+  boundDirectApprovalDetails,
+  boundDirectApprovalRequest,
+  catalogApprovalDetails,
+  catalogApprovalRequest,
   connectorKindFromToolName,
   connectorToolRequiresApproval,
   isApprovalAskBlock,
@@ -15,6 +19,13 @@ import {
 } from "./action-approval.js";
 
 describe("toolRequiresApproval", () => {
+  it("requires hard human approval only for the native CRM bind policy alias", () => {
+    expect(toolRequiresExplicitApproval("recruiting_crm_bind")).toBe(true);
+    expect(toolRequiresApproval("recruiting_crm_bind", false)).toBe(true);
+    expect(toolRequiresExplicitApproval("recruiting_crm_target")).toBe(false);
+    expect(toolRequiresApproval("recruiting_crm_target", false)).toBe(false);
+  });
+
   it("requires one-time CRM import approval from the resolved MCP operation", () => {
     expect(
       toolRequiresExplicitApproval("renamed_import", {
@@ -405,5 +416,39 @@ describe("applyJudgeDecision", () => {
   it("fails closed on consequential checker errors and open on exempt", () => {
     expect(applyJudgeDecision({ decision: "error", consequential: true })).toBe("ask");
     expect(applyJudgeDecision({ decision: "error", consequential: false })).toBe("allow");
+  });
+});
+
+describe("native bound approval envelopes", () => {
+  it("preserves exact direct and catalog routes and arguments", () => {
+    const route = {
+      connectorId: "mcp",
+      resourceId: "server",
+      resourceRevision: 2,
+      toolName: "get_crm_role",
+    };
+    const args = { p_org: "exact organization", p_role: "exact role" };
+    const marker = "__rakazoCatalogTool";
+    expect(
+      boundDirectApprovalDetails(boundDirectApprovalRequest(route, args, marker), marker),
+    ).toEqual({ route, args });
+    const wrapperArgs = { id: "server:get_crm_role", arguments: args };
+    expect(
+      catalogApprovalDetails(
+        catalogApprovalRequest("connectors_execute_tool", wrapperArgs, marker, route),
+        marker,
+      ),
+    ).toEqual({ toolName: "connectors_execute_tool", args: wrapperArgs, route });
+  });
+
+  it("keeps legacy catalog parsing separate from bound direct envelopes", () => {
+    const marker = "__rakazoCatalogTool";
+    expect(
+      catalogApprovalDetails(catalogApprovalRequest("mcp_execute_tool", {}, marker), marker),
+    ).toEqual({ toolName: "mcp_execute_tool", args: {} });
+    expect(
+      boundDirectApprovalDetails([marker, "direct", { route: [], args: {} }], marker),
+    ).toBeUndefined();
+    expect(catalogApprovalDetails([marker, "other", {}], marker)).toBeUndefined();
   });
 });

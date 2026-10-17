@@ -8,6 +8,7 @@ import { MEMORY_REVISION_CONFLICT_ERROR } from "@rakazo/adapter-kit";
 import type { ActionApprovalRule } from "@rakazo/core";
 import { approvalEffectKey, toolEffectIdempotencyKey } from "@rakazo/core/node/approval-effect-key";
 import type * as DatabaseModule from "@rakazo/db";
+import { RecruitingConflictError } from "@rakazo/db";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { catalogExecuteToolName, isApprovalPausedResult } from "./approval-effect.js";
 import { MAX_SHARED_MEMORY_CHARS } from "./builtin-tools.js";
@@ -16,10 +17,27 @@ import { createRunExecutor } from "./executor.js";
 import { catalogEntries, resolveCatalogCall } from "./lazy-tool-catalog.js";
 
 const recruitingApproval = vi.hoisted(() => ({ prepare: vi.fn(), execute: vi.fn() }));
+const recruitingCrm = vi.hoisted(() => ({
+  read: vi.fn(),
+  prepare: vi.fn(),
+  bind: vi.fn(),
+  resolve: vi.fn(),
+  admit: vi.fn(),
+  claim: vi.fn(),
+}));
+beforeEach(() => {
+  for (const mock of Object.values(recruitingCrm)) mock.mockReset();
+});
 vi.mock("@rakazo/db", async (importOriginal) => ({
   ...(await importOriginal<typeof DatabaseModule>()),
   prepareRecruitingApproval: recruitingApproval.prepare,
   executeRecruitingApproval: recruitingApproval.execute,
+  getRecruitingCrmTarget: recruitingCrm.read,
+  prepareRecruitingCrmBinding: recruitingCrm.prepare,
+  executeRecruitingCrmBinding: recruitingCrm.bind,
+  resolveRecruitingCrmImport: recruitingCrm.resolve,
+  admitRecruitingCrmImport: recruitingCrm.admit,
+  claimRecruitingCrmImport: recruitingCrm.claim,
 }));
 
 vi.mock("./computer-lifecycle.js", async (importOriginal) => ({
@@ -71,7 +89,9 @@ function fixture({
   artifacts = false,
   route,
   transportUncertain = false,
+  inputSchema,
 }: {
+  inputSchema?: ConnectorTool["inputSchema"];
   transportUncertain?: boolean;
   route?: ConnectorTool["route"];
   artifacts?: boolean;
@@ -95,7 +115,7 @@ function fixture({
     name,
     description: "Read an item",
     readOnly,
-    inputSchema: {
+    inputSchema: inputSchema ?? {
       type: "object",
       properties: { id: { type: "string" } },
       required: ["id"],
@@ -237,14 +257,16 @@ function fixture({
     }
     yield { type: "result" as const, data: { item: call.args.id } };
   });
-  let calls: { args: Record<string, unknown>; executionId: string }[] = [
+  let calls: { name?: string; args: Record<string, unknown>; executionId: string }[] = [
     { args: { id: "item-1" }, executionId: "call-1" },
   ];
   const runtimeRun = vi.fn(async function* (request: AgentRunRequest) {
     for (const call of calls) {
       const result = await request.executeTool!(
-        catalog ? catalogName : name,
-        catalog ? { id: catalogEntries([tool])[0]?.id, arguments: call.args } : call.args,
+        call.name ?? (catalog ? catalogName : name),
+        !call.name && catalog
+          ? { id: catalogEntries([tool])[0]?.id, arguments: call.args }
+          : call.args,
         call.executionId,
       );
       results.push(result);
@@ -271,7 +293,9 @@ function fixture({
               ]
             : [tool],
       resolveCall: async (call: ConnectorCall) =>
-        catalog ? resolveCatalogCall(call, catalogEntries([tool])) : undefined,
+        catalog || call.route?.toolName === "__catalog_execute"
+          ? resolveCatalogCall(call, catalogEntries([tool]))
+          : undefined,
       execute,
     },
     sandbox: { describe: () => ({ capabilities: { graphical: false } }) },
@@ -303,6 +327,7 @@ function fixture({
     shutdownSignal,
   } as unknown as Parameters<typeof createRunExecutor>[0]);
   return {
+    prisma,
     effects,
     results,
     execute,
@@ -335,6 +360,277 @@ describe("disabled builtins", () => {
     expect(f.commit).not.toHaveBeenCalled();
     expect(f.execute).not.toHaveBeenCalled();
     expect(f.effects).toEqual([]);
+  });
+});
+
+describe("native saved-candidate CRM workflow", () => {
+  const target = {
+    mcpServerId: "resource-1",
+    serverRevision: 1,
+    organizationId: "10000000-0000-4000-8000-000000000001",
+    crmRoleId: "20000000-0000-4000-8000-000000000001",
+    crmClientId: "30000000-0000-4000-8000-000000000001",
+    clientLabel: "Example Robotics",
+    roleLabel: "Data Engineer",
+  };
+  const binding = {
+    operation: "bind",
+    roleId: "native-role",
+    expectedRoleRevision: 1,
+    expectedBindingEffectId: null,
+    crmRoleReadEffectId: "crm-role-read",
+  };
+  const source = {
+    roleId: "native-role",
+    candidateKey: "profile-example",
+    bindingEffectId: "binding-effect",
+    sourceEffectId: "source-page",
+    rowIndex: 0,
+  };
+  const route = {
+    connectorId: "mcp",
+    resourceId: target.mcpServerId,
+    resourceRevision: target.serverRevision,
+    toolName: "crm_import_candidate",
+  };
+  const args = {
+    p_org: target.organizationId,
+    p_role: target.crmRoleId,
+    p_name: "Example Candidate",
+    p_linkedin_url: "https://www.linkedin.com/in/example-candidate",
+    p_source_file: "rakazo:artifact:source-file:sha256:fixture:row:0",
+  };
+
+  beforeEach(() => {
+    recruitingCrm.prepare.mockResolvedValue({ target, roleTitle: "Native data role" });
+    recruitingCrm.bind.mockResolvedValue({
+      status: "connected",
+      roleId: binding.roleId,
+      bindingEffectId: "effect-1",
+      target,
+    });
+  });
+
+  it("confirms a real CRM target once and replays the original binding on its card", async () => {
+    const f = fixture({
+      name: "recruiting_crm_target",
+      builtin: true,
+      autoReview: true,
+      rules: [{ effect: "always_allow", matchKind: "tool", matchValue: "recruiting_crm_target" }],
+    });
+    f.setCalls([{ args: binding, executionId: "bind-target" }]);
+    await f.run();
+    expect(recruitingCrm.prepare).toHaveBeenCalledOnce();
+    expect(recruitingCrm.bind).not.toHaveBeenCalled();
+    expect(f.execute).not.toHaveBeenCalled();
+    expect(f.pauseRunForInput).toHaveBeenCalledWith(
+      expect.objectContaining({
+        blocks: [
+          expect.objectContaining({
+            detail: expect.stringContaining(target.clientLabel),
+            actions: [
+              { id: "allow", label: "Allow once" },
+              { id: "deny", label: "Deny" },
+            ],
+          }),
+        ],
+      }),
+    );
+    f.effects[0]!.status = "approved";
+    f.setCalls([
+      {
+        args: { ...binding, crmRoleReadEffectId: "changed-after-approval" },
+        executionId: "replay",
+      },
+    ]);
+    await f.run();
+    expect(recruitingCrm.bind).toHaveBeenCalledWith(
+      f.prisma,
+      expect.objectContaining({ spaceId: "space-1", userId: "user-1" }),
+      expect.objectContaining({ effectId: f.effects[0]!.id, effectRequest: binding }),
+      binding,
+    );
+    expect(f.execute).not.toHaveBeenCalled();
+  });
+
+  it("reads the selected CRM target without another approval or provider call", async () => {
+    const result = { roleId: source.roleId, bindingEffectId: source.bindingEffectId, target };
+    recruitingCrm.read.mockResolvedValue(result);
+    const f = fixture({ name: "recruiting_crm_target", builtin: true, autoReview: true });
+    f.setCalls([
+      { args: { operation: "read", roleId: source.roleId }, executionId: "read-target" },
+    ]);
+    await f.run();
+    expect(recruitingCrm.read).toHaveBeenCalledWith(
+      f.prisma,
+      expect.objectContaining({ spaceId: "space-1", userId: "user-1" }),
+      { runId: "run-1", roleId: source.roleId },
+    );
+    expect(f.results).toEqual([result]);
+    expect(f.pauseRunForInput).not.toHaveBeenCalled();
+    expect(f.execute).not.toHaveBeenCalled();
+  });
+
+  it.each([false, true])(
+    "binds an exact saved occurrence before asking and claims it on catalog=%s replay",
+    async (catalog) => {
+      const f = fixture({
+        name: "renamed_import",
+        catalog,
+        route,
+        readOnly: true,
+        inputSchema: { type: "object" },
+      });
+      recruitingCrm.resolve.mockImplementation(async () => ({
+        input: source,
+        target,
+        route,
+        args,
+        effect: f.effects[0],
+      }));
+      recruitingCrm.admit.mockImplementation(async (_prisma, _actor, _trusted, input, call) => {
+        expect(input).toEqual(source);
+        let effect = f.effects[0];
+        if (!effect) {
+          effect = {
+            id: "import-effect",
+            kind: call.effectKind,
+            idempotencyKey: "native-source-import",
+            status: "intended",
+            request: call.effectRequest,
+            runId: "run-1",
+          };
+          f.effects.push(effect);
+        }
+        expect(call.effectKind).toBe(effect.kind);
+        expect(call.effectRequest).toEqual(effect.request);
+        return { status: effect.status === "completed" ? "completed" : "ready", effect };
+      });
+      recruitingCrm.claim.mockImplementation(async (_prisma, _actor, _trusted, input, call) => {
+        expect(input).toEqual(source);
+        expect(call).toMatchObject({ effectId: "import-effect", from: "approved" });
+        f.effects[0]!.status = "executing";
+        return true;
+      });
+      f.setCalls([{ name: "recruiting_crm_import", args: source, executionId: "import-source" }]);
+      await f.run();
+      expect(recruitingCrm.admit).toHaveBeenCalledOnce();
+      expect(f.pauseRunForInput).toHaveBeenCalledOnce();
+      expect(recruitingCrm.claim).not.toHaveBeenCalled();
+      expect(f.execute).not.toHaveBeenCalled();
+
+      f.effects[0]!.status = "approved";
+      f.setCalls([
+        {
+          name: catalog ? catalogExecuteToolName("mcp") : "renamed_import",
+          args: catalog
+            ? { id: "resource-1:crm_import_candidate", arguments: { p_name: "Changed by model" } }
+            : { p_name: "Changed by model" },
+          executionId: "direct-replay",
+        },
+      ]);
+      await f.run();
+      expect(recruitingCrm.resolve).toHaveBeenLastCalledWith(
+        f.prisma,
+        expect.objectContaining({ spaceId: "space-1", userId: "user-1" }),
+        expect.objectContaining({ runId: "run-1", approvedEffectId: "import-effect" }),
+        null,
+      );
+      expect(recruitingCrm.claim).toHaveBeenCalledOnce();
+      expect(f.execute).toHaveBeenCalledOnce();
+      expect(f.execute.mock.calls[0]?.[0].args).toEqual(args);
+      expect(f.effects).toHaveLength(1);
+      const saved = f.effects[0]!.result;
+      recruitingCrm.resolve.mockResolvedValue({
+        input: source,
+        target,
+        route,
+        args,
+        effect: f.effects[0],
+      });
+      f.setCalls([{ name: "recruiting_crm_import", args: source, executionId: "inspect-saved" }]);
+      await f.run();
+      expect(f.results.at(-1)).toEqual(saved);
+      expect(f.execute).toHaveBeenCalledOnce();
+      expect(f.effects).toHaveLength(1);
+    },
+  );
+
+  it("honors disabled native imports when their approved effect resumes through direct MCP", async () => {
+    const f = fixture({
+      name: "renamed_import",
+      route,
+      inputSchema: { type: "object" },
+      disabledBuiltinTools: ["recruiting_crm_import"],
+    });
+    const effect = {
+      id: "disabled-import",
+      kind: "renamed_import",
+      idempotencyKey: "disabled-source",
+      status: "approved",
+      request: ["__rakazoCatalogTool", "direct", { route, args }],
+      runId: "run-1",
+    };
+    f.effects.push(effect);
+    recruitingCrm.resolve.mockResolvedValue({ input: source, target, route, args, effect });
+    f.setCalls([{ name: "renamed_import", args, executionId: "disabled-resume" }]);
+    await f.run();
+    expect(f.results[0]).toEqual({ error: "This tool is disabled for this bot." });
+    expect(recruitingCrm.admit).not.toHaveBeenCalled();
+    expect(recruitingCrm.claim).not.toHaveBeenCalled();
+    expect(f.execute).not.toHaveBeenCalled();
+    expect(effect.status).toBe("approved");
+  });
+
+  it.each(["busy", "stopped", "unknown"] as const)(
+    "does not dispatch a saved import with %s admission",
+    async (status) => {
+      const f = fixture({ name: "renamed_import", route, inputSchema: { type: "object" } });
+      const effect = {
+        id: "existing-import",
+        kind: "renamed_import",
+        idempotencyKey: "saved-crm-source",
+        status: status === "stopped" ? "approved" : "executing",
+        request: ["__rakazoCatalogTool", "direct", { route, args }],
+        runId: "run-1",
+      };
+      f.effects.push(effect);
+      recruitingCrm.resolve.mockResolvedValue({ input: source, target, route, args, effect });
+      recruitingCrm.admit.mockResolvedValue({ status, effect });
+      f.setCalls([{ name: "recruiting_crm_import", args: source, executionId: "inspect-import" }]);
+      await f.run();
+      expect(recruitingCrm.claim).not.toHaveBeenCalled();
+      expect(f.execute).not.toHaveBeenCalled();
+      expect(f.pauseRunForInput).not.toHaveBeenCalled();
+      expect(f.effects).toHaveLength(1);
+      if (status === "unknown") {
+        expect(effect.status).toBe("uncertain");
+        expect(f.results[0]).toMatchObject({ uncertain: true });
+      } else {
+        expect(f.results[0]).toMatchObject({ status, automaticRetry: false });
+      }
+    },
+  );
+
+  it("blocks an approved import whose domain claim rejects a changed binding", async () => {
+    const f = fixture({ name: "renamed_import", route, inputSchema: { type: "object" } });
+    const effect = {
+      id: "stale-approved-import",
+      kind: "renamed_import",
+      idempotencyKey: "stale-crm-source",
+      status: "approved",
+      request: ["__rakazoCatalogTool", "direct", { route, args }],
+      runId: "run-1",
+    };
+    f.effects.push(effect);
+    recruitingCrm.resolve.mockResolvedValue({ input: source, target, route, args, effect });
+    recruitingCrm.admit.mockResolvedValue({ status: "ready", effect });
+    recruitingCrm.claim.mockRejectedValue(new RecruitingConflictError());
+    f.setCalls([{ name: "recruiting_crm_import", args: source, executionId: "stale-claim" }]);
+    await f.run();
+    expect(f.results[0]).toMatchObject({ code: "CONFLICT" });
+    expect(f.execute).not.toHaveBeenCalled();
+    expect(effect.status).toBe("approved");
   });
 });
 
