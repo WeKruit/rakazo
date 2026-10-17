@@ -2,6 +2,7 @@ import { createHash } from "node:crypto";
 import type { AdapterContext, ArtifactStore, ConnectorCall } from "@rakazo/adapter-kit";
 import type { Actor, RecruitingResearchToolInput } from "@rakazo/contracts";
 import {
+  RECRUITING_CANDIDATE_OUTPUT_SCHEMA,
   RecruitingResearchReadArtifactSchema,
   RecruitingResearchToolInputSchema,
   RecruitingRoleToolInputSchema,
@@ -99,7 +100,8 @@ async function frozenResearchRequest(
     action.requestArtifactHash,
   );
   if (
-    manifest.version !== 2 ||
+    manifest.version !== 3 ||
+    manifest.candidateOutputSchema !== action.candidateOutputSchema ||
     manifest.purpose !== action.purpose ||
     manifest.approvalEffectId !== action.approvalEffectId ||
     manifest.roleId !== task.roleId ||
@@ -217,6 +219,7 @@ export async function prepareRecruitingResearchTool(
     kind: request.manifest.operation,
     clientNonce: input.clientNonce,
     recallScope: input.recallScope,
+    candidateOutputSchema: RECRUITING_CANDIDATE_OUTPUT_SCHEMA,
     requestArtifact: {
       name,
       mimeType: "application/json",
@@ -311,7 +314,7 @@ type ResearchDispatchActor = ResearchActor & { leaseOwner: string; leaseFence: n
 type ResearchMutationAdmission = Awaited<ReturnType<typeof admitRecruitingResearchAction>> & {
   kind: "mutation";
   operation: "create" | "continue";
-  manifest: Extract<RecruitingResearchRequest, { version: 2 }>;
+  manifest: Extract<RecruitingResearchRequest, { version: 3 }>;
 };
 type ResearchReadAdmission = {
   kind: "read";
@@ -380,7 +383,12 @@ async function recoverRecruitingResearchReads(
       },
       read.effect.result,
       context,
-      { effectId: read.effect.id, request: read.effect.request, historicalBackfill: true },
+      {
+        effectId: read.effect.id,
+        request: read.effect.request,
+        historicalBackfill: true,
+        ...("outputArtifact" in read ? { outputArtifact: read.outputArtifact } : {}),
+      },
     );
     if (
       stableJsonValue(read.route) === stableJsonValue(requested.route) &&
@@ -505,7 +513,7 @@ export async function admitRecruitingResearchCall(
       });
   const matches: {
     saved: ResearchContext;
-    manifest: Extract<RecruitingResearchRequest, { version: 2 }>;
+    manifest: Extract<RecruitingResearchRequest, { version: 3 }>;
   }[] = [];
   for (const candidate of candidates) {
     const saved = await readRecruitingResearchContext(deps.prisma, trusted.actor, {
@@ -579,7 +587,12 @@ export async function completeRecruitingResearchCall(
   admitted: RecruitingResearchCallAdmission,
   result: unknown,
   context: AdapterContext,
-  receiptIdentity?: { effectId: string; request: unknown; historicalBackfill?: boolean },
+  receiptIdentity?: {
+    effectId: string;
+    request: unknown;
+    historicalBackfill?: boolean;
+    outputArtifact?: RecruitingResearchArtifactInput;
+  },
 ) {
   if (
     context.runId !== trusted.runId ||
@@ -632,13 +645,15 @@ export async function completeRecruitingResearchCall(
     providerResult: raw,
     observation,
   };
-  const file = await uploadResearchReceipt(
-    deps,
-    context,
-    admitted.kind === "read" ? RecruitingResearchReadArtifactSchema.parse(snapshot) : snapshot,
-    `recruiting-${admitted.kind === "read" ? "observation" : "receipt"}-${action.id}`,
-    admitted.kind === "read" ? receiptIdentity!.effectId : undefined,
-  );
+  const file =
+    receiptIdentity?.outputArtifact ??
+    (await uploadResearchReceipt(
+      deps,
+      context,
+      admitted.kind === "read" ? RecruitingResearchReadArtifactSchema.parse(snapshot) : snapshot,
+      `recruiting-${admitted.kind === "read" ? "observation" : "receipt"}-${action.id}`,
+      admitted.kind === "read" ? receiptIdentity!.effectId : undefined,
+    ));
   const taskState =
     observation.observedProviderState === "completed" && observation.done === true
       ? ("completed" as const)
@@ -683,12 +698,17 @@ export async function completeRecruitingResearchCall(
           ...(receiptIdentity!.historicalBackfill ? { historicalBackfill: true } : {}),
           toolName: admitted.operation === "status" ? "get_task" : "get_rows",
           outputArtifact: file,
+          ...(observation.rows === undefined ? {} : { rows: observation.rows }),
+          ...(observation.outputId === undefined ? {} : { outputId: observation.outputId }),
           ...observed,
           ...(observation.nextCursor === undefined ? {} : { cursor: observation.nextCursor }),
         });
   return {
     status: observation.deliveryState,
     ...recruitingResearchSnapshot(persisted.task, persisted.action),
+    ...(admitted.kind === "read" && "candidateRows" in persisted
+      ? { candidateRows: persisted.candidateRows }
+      : {}),
     observation,
     providerResult: raw,
   };

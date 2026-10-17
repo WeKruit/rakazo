@@ -4,10 +4,13 @@ import type {
   Artifact,
   ArtifactWithContent,
   EditRecruitingCriteriaInput,
+  ListRecruitingCandidatesInput,
+  ListRecruitingCandidatesOutput,
   MemoryDocument,
   MemoryRevision,
   RecruitingArtifactRef,
   RecruitingAssessmentSourceRef,
+  RecruitingCandidate,
   RecruitingCriterionExpression,
   RecruitingEmploymentDay,
   RecruitingEmploymentRule,
@@ -30,6 +33,7 @@ import {
   Button,
   Card,
   CardContent,
+  Checkbox,
   Input,
   NativeSelect,
   NativeSelectOption,
@@ -40,7 +44,7 @@ import {
   Textarea,
 } from "@rakazo/ui-web";
 import { Check, CircleHelp, RefreshCw, X } from "lucide-react";
-import { useEffect, useId, useRef, useState } from "react";
+import { useCallback, useEffect, useId, useRef, useState } from "react";
 import { ArtifactFileCard } from "../components/ArtifactFileCard";
 import { AskCard } from "../components/AskCard";
 import { Shimmer } from "../components/ai/primitives";
@@ -61,6 +65,232 @@ type Snapshot = {
   questions: Awaited<ReturnType<typeof rpc.recruiting.listQuestions>>["questions"];
   documents: MemoryDocument[];
 };
+
+function CandidateCounts({ counts }: { counts: ListRecruitingCandidatesOutput["counts"] }) {
+  const { t } = useLingui();
+  return (
+    <dl
+      className="grid grid-cols-2 gap-x-4 gap-y-3 sm:grid-cols-3"
+      aria-label={t`Saved candidate totals`}
+    >
+      {[
+        [<Trans key="source">Saved source rows</Trans>, counts.sourceRows],
+        [<Trans key="candidates">Candidates</Trans>, counts.candidates],
+        [<Trans key="identified">Identified profiles</Trans>, counts.identifiedCandidates],
+        [<Trans key="unassessed">Unassessed</Trans>, counts.unassessed],
+        [<Trans key="assessed">Assessed</Trans>, counts.assessed],
+        [<Trans key="shortlist">Shortlist</Trans>, counts.shortlisted],
+      ].map(([label, value], index) => (
+        <div key={index}>
+          <dt className="text-xs text-muted-foreground">{label}</dt>
+          <dd className="text-lg font-medium tabular-nums">{value}</dd>
+        </div>
+      ))}
+    </dl>
+  );
+}
+
+function CandidateProfile({ candidate }: { candidate: RecruitingCandidate }) {
+  return (
+    <div className="space-y-1 text-xs">
+      {!candidate.name ? (
+        <p className="text-muted-foreground">
+          <Trans>Name missing</Trans>
+        </p>
+      ) : null}
+      <div className="flex flex-wrap gap-x-3 gap-y-1">
+        {candidate.linkedinUrl ? (
+          <a className="underline" href={candidate.linkedinUrl} target="_blank" rel="noreferrer">
+            <Trans>LinkedIn</Trans>
+          </a>
+        ) : (
+          <span className="text-muted-foreground">
+            <Trans>LinkedIn missing</Trans>
+          </span>
+        )}
+        {candidate.resumeUrl ? (
+          <a className="underline" href={candidate.resumeUrl} target="_blank" rel="noreferrer">
+            <Trans>Resume</Trans>
+          </a>
+        ) : (
+          <span className="text-muted-foreground">
+            <Trans>Resume missing</Trans>
+          </span>
+        )}
+      </div>
+      {candidate.discoveryCount || candidate.issues.length || candidate.evidenceUrls?.length ? (
+        <details>
+          <summary className="cursor-pointer text-muted-foreground">
+            <Trans>Profile details</Trans>
+          </summary>
+          {candidate.discoveryCount ? <p>provider_report</p> : null}
+          {candidate.issues.map((issue) => (
+            <p key={issue}>{issue}</p>
+          ))}
+          {candidate.evidenceUrls?.map((url) => (
+            <a
+              key={url}
+              className="block break-all underline"
+              href={url}
+              target="_blank"
+              rel="noreferrer"
+            >
+              {url}
+            </a>
+          ))}
+        </details>
+      ) : null}
+    </div>
+  );
+}
+
+function CandidateAssessment({ candidate }: { candidate: RecruitingCandidate }) {
+  const assessment = candidate.latestAssessment;
+  return assessment ? (
+    <div className="flex flex-wrap items-center gap-2 text-xs">
+      <span className="text-muted-foreground">
+        <Trans>Version {assessment.version}</Trans> ·{" "}
+        {assessment.isCurrent ? <Trans>Current</Trans> : <Trans>Outdated</Trans>}
+      </span>
+      <VerdictLabel verdict={assessment.hardGate} />
+    </div>
+  ) : (
+    <p className="text-xs text-muted-foreground">
+      <Trans>Unassessed</Trans>
+    </p>
+  );
+}
+
+function CandidateSources({
+  candidate,
+  research,
+  roleRevisionId,
+  onAccessError,
+}: {
+  candidate: RecruitingCandidate;
+  research: Snapshot["research"];
+  roleRevisionId: string;
+  onAccessError: (error: unknown) => void;
+}) {
+  const { t } = useLingui();
+  const [page, setPage] = useState<Awaited<
+    ReturnType<typeof rpc.recruiting.listCandidateSources>
+  > | null>(null);
+  const [loading, setLoading] = useState(true);
+  const [failed, setFailed] = useState(false);
+  const scope = useRef({ active: true, busy: false });
+  useEffect(() => {
+    scope.current.active = true;
+    void rpc.recruiting
+      .listCandidateSources({
+        roleId: candidate.roleId,
+        candidateKey: candidate.candidateKey,
+        limit: 20,
+      })
+      .then((value) => {
+        if (scope.current.active) setPage(value);
+      })
+      .catch((error: unknown) => {
+        if (scope.current.active) {
+          onAccessError(error);
+          setFailed(true);
+        }
+      })
+      .finally(() => {
+        if (scope.current.active) setLoading(false);
+      });
+    return () => {
+      scope.current.active = false;
+    };
+  }, [candidate.roleId, candidate.candidateKey, onAccessError]);
+  async function more() {
+    if (!page?.nextCursor || scope.current.busy) return;
+    scope.current.busy = true;
+    setLoading(true);
+    setFailed(false);
+    try {
+      const value = await rpc.recruiting.listCandidateSources({
+        roleId: candidate.roleId,
+        candidateKey: candidate.candidateKey,
+        limit: 20,
+        cursor: page.nextCursor,
+      });
+      if (scope.current.active)
+        setPage((current) =>
+          current ? { ...value, items: current.items.concat(value.items) } : value,
+        );
+    } catch (error) {
+      if (scope.current.active) {
+        onAccessError(error);
+        setFailed(true);
+      }
+    } finally {
+      if (scope.current.active) {
+        scope.current.busy = false;
+        setLoading(false);
+      }
+    }
+  }
+  return (
+    <section aria-label={t`Saved candidate sources`} className="space-y-3">
+      <h4 className="font-medium">
+        <Trans>Saved candidate sources</Trans>
+      </h4>
+      {failed ? (
+        <p role="alert">
+          <Trans>Could not load candidate sources</Trans>
+        </p>
+      ) : null}
+      {loading ? (
+        <p role="status">
+          <Trans>Loading…</Trans>
+        </p>
+      ) : null}
+      {page && !page.items.length ? (
+        <p className="text-muted-foreground">
+          <Trans>No saved discovery sources</Trans>
+        </p>
+      ) : null}
+      {page?.items.map((source) => {
+        const task = research.tasks.find((item) => item.id === source.taskId);
+        const action = research.actions.find(
+          (item) => item.id === source.actionId && item.taskId === source.taskId,
+        );
+        return (
+          <div
+            key={`${source.artifactRef.artifactId}:${source.rowIndex}:${source.effectId}`}
+            className="space-y-2 border-s border-border ps-3"
+          >
+            <p className="text-xs text-muted-foreground">
+              provider_report · {action?.kind ?? source.actionId} · {source.observedAt}
+            </p>
+            <details>
+              <summary className="cursor-pointer text-xs text-muted-foreground">
+                <Trans>Discovery details</Trans>
+              </summary>
+              <pre className="whitespace-pre-wrap break-words text-xs">
+                {JSON.stringify(source, null, 2)}
+              </pre>
+            </details>
+            <ArtifactReference reference={source.artifactRef} label={t`Source Artifact`} />
+            {task && action ? (
+              <ResearchResults
+                task={task}
+                action={{ ...action, outputArtifacts: [source.artifactRef] }}
+                isCurrent={source.roleRevisionId === roleRevisionId}
+              />
+            ) : null}
+          </div>
+        );
+      })}
+      {page?.nextCursor ? (
+        <Button size="sm" variant="outline" disabled={loading} onClick={() => void more()}>
+          <Trans>More sources</Trans>
+        </Button>
+      ) : null}
+    </section>
+  );
+}
 
 function ResearchResults({
   task,
@@ -152,7 +382,12 @@ function ResearchResults({
         ) : (
           state.results.map(({ artifact, reference, snapshot: result }) => {
             const rows = result.observation.rows!;
-            const columns = [...new Set(rows.flatMap((row) => Object.keys(row)))];
+            const records = rows.map((row) =>
+              row !== null && typeof row === "object" && !Array.isArray(row)
+                ? (row as Record<string, unknown>)
+                : null,
+            );
+            const columns = [...new Set(records.flatMap((row) => (row ? Object.keys(row) : [])))];
             const target = artifact.groupId
               ? { groupId: artifact.groupId }
               : artifact.botId
@@ -204,25 +439,39 @@ function ResearchResults({
                       </caption>
                       <thead>
                         <tr>
-                          {columns.map((column) => (
-                            <th key={column} scope="col" className="py-2 pe-3 font-medium">
-                              {column}
+                          {columns.length ? (
+                            columns.map((column) => (
+                              <th key={column} scope="col" className="py-2 pe-3 font-medium">
+                                {column}
+                              </th>
+                            ))
+                          ) : (
+                            <th scope="col" className="py-2 pe-3 font-medium">
+                              <Trans>Raw value</Trans>
                             </th>
-                          ))}
+                          )}
                         </tr>
                       </thead>
                       <tbody>
                         {rows.map((row, index) => (
                           <tr key={index} className="border-t border-border">
-                            {columns.map((column) => (
-                              <td key={column} className="py-2 pe-3 align-top">
+                            {records[index] && columns.length ? (
+                              columns.map((column) => (
+                                <td key={column} className="py-2 pe-3 align-top">
+                                  <pre className="whitespace-pre-wrap break-words">
+                                    {Object.hasOwn(records[index]!, column)
+                                      ? JSON.stringify(records[index]![column], null, 2)
+                                      : ""}
+                                  </pre>
+                                </td>
+                              ))
+                            ) : (
+                              <td colSpan={columns.length || 1} className="py-2 pe-3 align-top">
                                 <pre className="whitespace-pre-wrap break-words">
-                                  {Object.hasOwn(row, column)
-                                    ? JSON.stringify(row[column], null, 2)
-                                    : ""}
+                                  {JSON.stringify(row, null, 2)}
                                 </pre>
                               </td>
-                            ))}
+                            )}
                           </tr>
                         ))}
                       </tbody>
@@ -766,6 +1015,7 @@ export function RecruitingPanel(props: Props) {
 
 function RecruitingWorkspace({ threadId, botId, refreshSignal, onClose, onRevealMessage }: Props) {
   const { t } = useLingui();
+  const shortlistFilterId = useId();
   const [snapshot, setSnapshot] = useState<Snapshot | null>(null);
   const [refresh, setRefresh] = useState(0);
   const [loading, setLoading] = useState(true);
@@ -773,7 +1023,43 @@ function RecruitingWorkspace({ threadId, botId, refreshSignal, onClose, onReveal
   const [confirming, setConfirming] = useState(false);
   const [confirmationFailed, setConfirmationFailed] = useState(false);
   const [candidateView, setCandidateView] = useState<"cards" | "table">("cards");
-  const [selection, setSelection] = useState<{ roleId: string; candidateKey: string } | null>(null);
+  const [selection, setSelection] = useState<RecruitingCandidate | null>(null);
+  const [candidatePage, setCandidatePage] = useState<ListRecruitingCandidatesOutput | null>(null);
+  const [candidateFilters, setCandidateFilters] = useState<
+    Omit<ListRecruitingCandidatesInput, "roleId" | "cursor" | "limit">
+  >({ sort: "name" });
+  const [candidateLoading, setCandidateLoading] = useState(false);
+  const [candidateFailed, setCandidateFailed] = useState(false);
+  const [shortlistPending, setShortlistPending] = useState<string | null>(null);
+  const [shortlistFailed, setShortlistFailed] = useState<string | null>(null);
+  const shortlistMutation = useRef<object | null>(null);
+  const [selectedEvidence, setSelectedEvidence] = useState<{
+    key: string;
+    value: Awaited<ReturnType<typeof rpc.recruiting.getAssessment>>;
+  } | null>(null);
+  const [evidenceFailed, setEvidenceFailed] = useState(false);
+  const candidateGeneration = useRef(0);
+  const loadingMore = useRef(false);
+  const readEpoch = useRef(0);
+  const denyAccess = useCallback((error: unknown) => {
+    if (
+      !(error instanceof ORPCError) ||
+      !["UNAUTHORIZED", "FORBIDDEN", "NOT_FOUND"].includes(error.code)
+    )
+      return;
+    readEpoch.current++;
+    candidateGeneration.current++;
+    setSnapshot(null);
+    setCandidatePage(null);
+    setSelection(null);
+    setSelectedEvidence(null);
+    setCriteriaEdit(null);
+    shortlistMutation.current = null;
+    setShortlistPending(null);
+    setFailed(true);
+    editScope.current.roleId = null;
+    editScope.current.generation++;
+  }, []);
   const [criteriaEdit, setCriteriaEdit] = useState<CriteriaEdit | null>(null);
   const [savingCriteria, setSavingCriteria] = useState(false);
   const [criteriaFailed, setCriteriaFailed] = useState(false);
@@ -787,6 +1073,7 @@ function RecruitingWorkspace({ threadId, botId, refreshSignal, onClose, onReveal
   }, []);
   useEffect(() => {
     let cancelled = false;
+    const epoch = readEpoch.current;
     setLoading(true);
     setFailed(false);
     const updateEditScope = (roleId: string | null) => {
@@ -796,17 +1083,16 @@ function RecruitingWorkspace({ threadId, botId, refreshSignal, onClose, onReveal
       setCriteriaEdit(null);
       setSavingCriteria(false);
       setCriteriaFailed(false);
+      setCandidateFilters({ sort: "name" });
+      setCandidatePage(null);
+      setSelection(null);
+      setSelectedEvidence(null);
+      shortlistMutation.current = null;
+      setShortlistPending(null);
+      setShortlistFailed(null);
     };
     const onReadError = (error: unknown): never => {
-      if (
-        !cancelled &&
-        error instanceof ORPCError &&
-        ["UNAUTHORIZED", "FORBIDDEN", "NOT_FOUND"].includes(error.code)
-      ) {
-        setSnapshot(null);
-        setSelection(null);
-        updateEditScope(null);
-      }
+      if (!cancelled && epoch === readEpoch.current) denyAccess(error);
       throw error;
     };
     async function load() {
@@ -837,9 +1123,9 @@ function RecruitingWorkspace({ threadId, botId, refreshSignal, onClose, onReveal
               ...(botId ? [rpc.memory.list({ scope: "bot", botId }).catch(onReadError)] : []),
             ]).then((lists) => lists.flat()),
           ]);
-          if (cancelled) return;
+          if (cancelled || epoch !== readEpoch.current) return;
           const verified = await rpc.recruiting.getWorkspace({ threadId }).catch(onReadError);
-          if (cancelled) return;
+          if (cancelled || epoch !== readEpoch.current) return;
           if (
             workspace?.role.id !== verified?.role.id ||
             workspace?.revision.id !== verified?.revision.id
@@ -866,19 +1152,206 @@ function RecruitingWorkspace({ threadId, botId, refreshSignal, onClose, onReveal
     return () => {
       cancelled = true;
     };
-  }, [threadId, botId, refresh, refreshSignal]);
+  }, [threadId, botId, refresh, refreshSignal, denyAccess]);
   const workspace = snapshot?.workspace;
   const criteria = workspace?.revision.criteria ?? [];
   const assessments = snapshot?.assessments ?? [];
-  const selected =
+  const selectedKey =
     selection && selection.roleId === workspace?.role.id
-      ? assessments.find(
-          ({ assessment }) =>
-            assessment.roleId === selection.roleId &&
-            assessment.candidateKey === selection.candidateKey,
-        )
-      : undefined;
+      ? JSON.stringify([
+          selection.roleId,
+          selection.candidateKey,
+          selection.latestAssessment?.version,
+        ])
+      : null;
+  const selected = selectedEvidence?.key === selectedKey ? selectedEvidence.value : null;
   const assessment = selected?.assessment;
+  const roleId = workspace?.role.id;
+  const roleRevisionId = workspace?.revision.id;
+  const candidateQuery = useRef({ filters: candidateFilters, roleRevisionId });
+  candidateQuery.current = { filters: candidateFilters, roleRevisionId };
+  useEffect(() => {
+    let cancelled = false;
+    const generation = ++candidateGeneration.current;
+    const epoch = readEpoch.current;
+    loadingMore.current = false;
+    setCandidateLoading(!!roleId);
+    setCandidateFailed(false);
+    setCandidatePage(null);
+    if (!roleId) return;
+    void rpc.recruiting
+      .listCandidates({ roleId, limit: 30, ...candidateFilters })
+      .then((page) => {
+        if (cancelled || generation !== candidateGeneration.current || epoch !== readEpoch.current)
+          return;
+        if (page.roleId !== roleId || page.roleRevisionId !== roleRevisionId) {
+          setRefresh((value) => value + 1);
+          return;
+        }
+        setCandidatePage(page);
+        setSelection((current) =>
+          current?.roleId === roleId
+            ? (page.items.find((item) => item.candidateKey === current.candidateKey) ?? current)
+            : null,
+        );
+      })
+      .catch((error: unknown) => {
+        if (cancelled || generation !== candidateGeneration.current || epoch !== readEpoch.current)
+          return;
+        denyAccess(error);
+        if (generation === candidateGeneration.current && epoch === readEpoch.current)
+          setCandidateFailed(true);
+      })
+      .finally(() => {
+        if (!cancelled && generation === candidateGeneration.current && epoch === readEpoch.current)
+          setCandidateLoading(false);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [roleId, roleRevisionId, candidateFilters, snapshot, denyAccess]);
+  useEffect(() => {
+    let cancelled = false;
+    const epoch = readEpoch.current;
+    setSelectedEvidence(null);
+    setEvidenceFailed(false);
+    if (!selection || !selectedKey || !selection.latestAssessment) return;
+    void rpc.recruiting
+      .getAssessment({
+        roleId: selection.roleId,
+        candidateKey: selection.candidateKey,
+        version: selection.latestAssessment.version,
+      })
+      .then((value) => {
+        if (!cancelled && epoch === readEpoch.current)
+          setSelectedEvidence({ key: selectedKey, value });
+      })
+      .catch((error: unknown) => {
+        if (!cancelled && epoch === readEpoch.current) {
+          denyAccess(error);
+          setEvidenceFailed(true);
+        }
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [selectedKey, snapshot, denyAccess]);
+  async function loadMoreCandidates() {
+    if (!candidatePage?.nextCursor || !roleId || loadingMore.current) return;
+    const generation = candidateGeneration.current;
+    const epoch = readEpoch.current;
+    loadingMore.current = true;
+    setCandidateLoading(true);
+    setCandidateFailed(false);
+    try {
+      const page = await rpc.recruiting.listCandidates({
+        roleId,
+        limit: 30,
+        ...candidateFilters,
+        cursor: candidatePage.nextCursor,
+      });
+      if (generation !== candidateGeneration.current || epoch !== readEpoch.current) return;
+      if (page.roleId !== roleId || page.roleRevisionId !== roleRevisionId) {
+        setRefresh((value) => value + 1);
+        return;
+      }
+      setCandidatePage((current) =>
+        current ? { ...page, items: current.items.concat(page.items) } : page,
+      );
+    } catch (error) {
+      if (generation === candidateGeneration.current && epoch === readEpoch.current) {
+        denyAccess(error);
+        setCandidateFailed(true);
+      }
+    } finally {
+      if (generation === candidateGeneration.current && epoch === readEpoch.current) {
+        loadingMore.current = false;
+        setCandidateLoading(false);
+      }
+    }
+  }
+  async function setShortlist(candidate: RecruitingCandidate, shortlisted: boolean) {
+    if (shortlistMutation.current) return;
+    const mutation = {};
+    shortlistMutation.current = mutation;
+    const roleGeneration = editScope.current.generation;
+    const epoch = readEpoch.current;
+    const isCurrent = () =>
+      shortlistMutation.current === mutation &&
+      editScope.current.active &&
+      editScope.current.generation === roleGeneration &&
+      editScope.current.roleId === candidate.roleId &&
+      epoch === readEpoch.current;
+    setShortlistPending(candidate.candidateKey);
+    setShortlistFailed(null);
+    try {
+      const saved = await rpc.recruiting.setCandidateShortlist({
+        threadId,
+        roleId: candidate.roleId,
+        candidateKey: candidate.candidateKey,
+        expectedRevision: candidate.revision,
+        shortlisted,
+      });
+      if (!isCurrent()) return;
+      if (
+        saved.roleId !== candidate.roleId ||
+        saved.candidateKey !== candidate.candidateKey ||
+        saved.shortlisted !== shortlisted
+      )
+        throw new Error("Shortlist receipt does not match the submitted candidate");
+      setCandidatePage((current) =>
+        current
+          ? {
+              ...current,
+              items: current.items.map((item) =>
+                item.candidateKey === saved.candidateKey ? { ...item, ...saved } : item,
+              ),
+            }
+          : current,
+      );
+      setSelection((current) =>
+        current?.candidateKey === saved.candidateKey ? { ...current, ...saved } : current,
+      );
+      // Counts and active filters are authoritative after the saved human change.
+      const generation = ++candidateGeneration.current;
+      const query = candidateQuery.current;
+      loadingMore.current = false;
+      setCandidateLoading(true);
+      try {
+        const page = await rpc.recruiting.listCandidates({
+          roleId: candidate.roleId,
+          limit: 30,
+          ...query.filters,
+        });
+        if (isCurrent() && generation === candidateGeneration.current) {
+          if (page.roleId !== candidate.roleId || page.roleRevisionId !== query.roleRevisionId)
+            setRefresh((value) => value + 1);
+          else {
+            setCandidatePage(page);
+            setCandidateFailed(false);
+          }
+        }
+      } catch (error) {
+        if (isCurrent()) {
+          denyAccess(error);
+          if (epoch === readEpoch.current && generation === candidateGeneration.current)
+            setCandidateFailed(true);
+        }
+      } finally {
+        if (isCurrent() && generation === candidateGeneration.current) setCandidateLoading(false);
+      }
+    } catch (error) {
+      if (isCurrent()) {
+        denyAccess(error);
+        setShortlistFailed(candidate.candidateKey);
+      }
+    } finally {
+      if (isCurrent()) {
+        shortlistMutation.current = null;
+        setShortlistPending(null);
+      }
+    }
+  }
   const normalizedCriteria =
     criteriaEdit?.criteria.map((criterion) => ({
       ...criterion,
@@ -976,6 +1449,9 @@ function RecruitingWorkspace({ threadId, botId, refreshSignal, onClose, onReveal
             <TabsTrigger value="role">
               <Trans>Role</Trans>
             </TabsTrigger>
+            <TabsTrigger value="dashboard">
+              <Trans>Dashboard</Trans>
+            </TabsTrigger>
             <TabsTrigger value="evidence">
               <Trans>Evidence</Trans>
             </TabsTrigger>
@@ -989,9 +1465,64 @@ function RecruitingWorkspace({ threadId, botId, refreshSignal, onClose, onReveal
               <Trans>Activity</Trans>
             </TabsTrigger>
           </TabsList>
+          <TabsContent value="dashboard" className="space-y-4">
+            {workspace ? <h3 className="font-medium">{workspace.role.title}</h3> : null}
+            {candidateFailed ? (
+              <p role="alert">
+                <Trans>Could not load candidates</Trans>
+              </p>
+            ) : candidatePage ? (
+              <CandidateCounts counts={candidatePage.counts} />
+            ) : candidateLoading ? (
+              <p role="status">
+                <Trans>Loading…</Trans>
+              </p>
+            ) : null}
+            <h3 className="font-medium">
+              <Trans>Research rounds</Trans>
+            </h3>
+            {!snapshot.research.tasks.length ? (
+              <p className="text-muted-foreground">
+                <Trans>No saved research</Trans>
+              </p>
+            ) : (
+              snapshot.research.tasks.map((task) => (
+                <div key={task.id} className="space-y-2 border-s border-border ps-3">
+                  <p>
+                    {task.id} · {task.state}
+                  </p>
+                  {snapshot.research.actions
+                    .filter((action) => action.taskId === task.id)
+                    .map((action) => (
+                      <div key={action.id} className="space-y-1">
+                        <p>
+                          {action.kind} · {action.deliveryState}
+                          {action.observedProviderState ? ` · ${action.observedProviderState}` : ""}
+                        </p>
+                        <details>
+                          <summary className="cursor-pointer text-muted-foreground">
+                            <Trans>Details</Trans>
+                          </summary>
+                          <p className="break-all text-xs">
+                            {action.id} · {action.roleRevisionId}
+                          </p>
+                          {action.receiptArtifact ? (
+                            <ArtifactReference
+                              reference={action.receiptArtifact}
+                              label={t`Receipt`}
+                            />
+                          ) : null}
+                        </details>
+                      </div>
+                    ))}
+                </div>
+              ))
+            )}
+          </TabsContent>
           <TabsContent key={workspace?.role.id} value="role" className="space-y-5">
             {workspace ? (
               <>
+                {candidatePage ? <CandidateCounts counts={candidatePage.counts} /> : null}
                 <div className="flex items-start justify-between gap-2">
                   <div>
                     <h3 className="font-medium" dir="auto">
@@ -1266,25 +1797,136 @@ function RecruitingWorkspace({ threadId, botId, refreshSignal, onClose, onReveal
             )}
           </TabsContent>
           <TabsContent value="evidence" className="space-y-4">
-            {snapshot.research.tasks.flatMap((task) =>
-              snapshot.research.actions
-                .filter((action) => action.taskId === task.id && action.outputArtifacts.length)
-                .map((action) => (
-                  <ResearchResults
-                    key={`${task.roleId}:${action.id}`}
-                    task={task}
-                    action={action}
-                    isCurrent={action.roleRevisionId === workspace?.revision.id}
-                  />
-                )),
-            )}
-            {!assessments.length ? (
-              <p className="text-muted-foreground">
-                <Trans>No saved assessments</Trans>
-              </p>
-            ) : (
+            {workspace ? (
               <>
-                <fieldset className="flex gap-1" aria-label={t`Saved assessments`}>
+                {snapshot.research.tasks.flatMap((task) =>
+                  snapshot.research.actions
+                    .filter((action) => action.taskId === task.id && action.outputArtifacts.length)
+                    .map((action) => (
+                      <ResearchResults
+                        key={`${task.roleId}:${action.id}`}
+                        task={task}
+                        action={action}
+                        isCurrent={action.roleRevisionId === workspace?.revision.id}
+                      />
+                    )),
+                )}
+                <div className="flex flex-wrap gap-2">
+                  <Input
+                    aria-label={t`Search candidates`}
+                    placeholder={t`Search candidates`}
+                    value={candidateFilters.query ?? ""}
+                    onChange={(event) =>
+                      setCandidateFilters((current) => ({
+                        ...current,
+                        query: event.target.value || undefined,
+                      }))
+                    }
+                  />
+                  <NativeSelect
+                    aria-label={t`Assessment state`}
+                    value={candidateFilters.assessmentState ?? "all"}
+                    onChange={(event) =>
+                      setCandidateFilters((current) => ({
+                        ...current,
+                        assessmentState:
+                          event.target.value === "all"
+                            ? undefined
+                            : (event.target
+                                .value as ListRecruitingCandidatesInput["assessmentState"]),
+                      }))
+                    }
+                  >
+                    <NativeSelectOption value="all">
+                      <Trans>All assessments</Trans>
+                    </NativeSelectOption>
+                    <NativeSelectOption value="unassessed">
+                      <Trans>Unassessed</Trans>
+                    </NativeSelectOption>
+                    <NativeSelectOption value="current">
+                      <Trans>Current</Trans>
+                    </NativeSelectOption>
+                    <NativeSelectOption value="outdated">
+                      <Trans>Outdated</Trans>
+                    </NativeSelectOption>
+                  </NativeSelect>
+                  <NativeSelect
+                    aria-label={t`Hard criteria filter`}
+                    value={candidateFilters.verdict ?? "all"}
+                    onChange={(event) =>
+                      setCandidateFilters((current) => ({
+                        ...current,
+                        verdict:
+                          event.target.value === "all"
+                            ? undefined
+                            : (event.target.value as Verdict),
+                      }))
+                    }
+                  >
+                    <NativeSelectOption value="all">
+                      <Trans>All verdicts</Trans>
+                    </NativeSelectOption>
+                    <NativeSelectOption value="met">
+                      <Trans>Met</Trans>
+                    </NativeSelectOption>
+                    <NativeSelectOption value="unmet">
+                      <Trans>Unmet</Trans>
+                    </NativeSelectOption>
+                    <NativeSelectOption value="unknown">
+                      <Trans>Unknown</Trans>
+                    </NativeSelectOption>
+                  </NativeSelect>
+                  <NativeSelect
+                    aria-label={t`Candidate sort`}
+                    value={candidateFilters.sort ?? "name"}
+                    onChange={(event) =>
+                      setCandidateFilters((current) => ({
+                        ...current,
+                        sort: event.target.value as "name" | "recent",
+                      }))
+                    }
+                  >
+                    <NativeSelectOption value="name">
+                      <Trans>Name</Trans>
+                    </NativeSelectOption>
+                    <NativeSelectOption value="recent">
+                      <Trans>Recently discovered</Trans>
+                    </NativeSelectOption>
+                  </NativeSelect>
+                  <NativeSelect
+                    aria-label={t`Research round`}
+                    value={candidateFilters.actionId ?? "all"}
+                    onChange={(event) =>
+                      setCandidateFilters((current) => ({
+                        ...current,
+                        actionId: event.target.value === "all" ? undefined : event.target.value,
+                      }))
+                    }
+                  >
+                    <NativeSelectOption value="all">
+                      <Trans>All rounds</Trans>
+                    </NativeSelectOption>
+                    {snapshot.research.actions.map((action) => (
+                      <NativeSelectOption key={action.id} value={action.id}>
+                        {action.kind} · {action.id}
+                      </NativeSelectOption>
+                    ))}
+                  </NativeSelect>
+                  <label htmlFor={shortlistFilterId} className="flex items-center gap-2">
+                    <Checkbox
+                      id={shortlistFilterId}
+                      checked={candidateFilters.shortlisted === true}
+                      onCheckedChange={(checked) =>
+                        setCandidateFilters((current) => ({
+                          ...current,
+                          shortlisted: checked ? true : undefined,
+                        }))
+                      }
+                    />
+                    <Trans>Shortlisted only</Trans>
+                  </label>
+                </div>
+                <fieldset className="flex gap-1" aria-label={t`Saved candidates`}>
                   <Button
                     size="sm"
                     variant={candidateView === "cards" ? "secondary" : "ghost"}
@@ -1302,98 +1944,202 @@ function RecruitingWorkspace({ threadId, botId, refreshSignal, onClose, onReveal
                     <Trans>Table</Trans>
                   </Button>
                 </fieldset>
-                {candidateView === "cards" ? (
-                  <ul className="grid gap-2">
-                    {assessments.map(({ assessment: item, isCurrent }) => (
-                      <li key={`${item.roleId}:${item.candidateKey}`}>
-                        <Card
-                          size="sm"
-                          className={
-                            assessment?.candidateKey === item.candidateKey
-                              ? "ring-primary"
-                              : undefined
-                          }
-                        >
-                          <CardContent className="space-y-2">
-                            <Button
-                              variant="link"
-                              className="h-auto justify-start whitespace-normal break-all p-0 text-left"
-                              aria-pressed={assessment?.candidateKey === item.candidateKey}
-                              onClick={() =>
-                                setSelection({
-                                  roleId: item.roleId,
-                                  candidateKey: item.candidateKey,
-                                })
+                {candidateFailed ? (
+                  <p role="alert" className="text-destructive">
+                    <Trans>Could not load candidates</Trans>
+                  </p>
+                ) : null}
+                {candidateLoading ? (
+                  <p role="status">
+                    <Trans>Loading…</Trans>
+                  </p>
+                ) : null}
+                {candidatePage ? (
+                  <>
+                    <p className="text-xs text-muted-foreground">
+                      <Trans>{candidatePage.total} candidates</Trans>
+                    </p>
+                    {!candidatePage.items.length ? (
+                      <p className="text-muted-foreground">
+                        <Trans>No saved candidates</Trans>
+                      </p>
+                    ) : candidateView === "cards" ? (
+                      <ul className="grid gap-2">
+                        {candidatePage.items.map((candidate) => (
+                          <li key={candidate.candidateKey}>
+                            <Card
+                              size="sm"
+                              className={
+                                selection?.candidateKey === candidate.candidateKey
+                                  ? "ring-primary"
+                                  : undefined
                               }
                             >
-                              {item.candidateKey}
-                            </Button>
-                            <p className="text-xs text-muted-foreground">
-                              <Trans>Version {item.version}</Trans> ·{" "}
-                              {isCurrent ? <Trans>Current</Trans> : <Trans>Outdated</Trans>}
-                            </p>
-                            <VerdictLabel verdict={item.judgments.hardGate} />
-                          </CardContent>
-                        </Card>
-                      </li>
-                    ))}
-                  </ul>
-                ) : (
-                  <div className="overflow-x-auto">
-                    <table className="w-full text-left text-sm">
-                      <caption className="sr-only">
-                        <Trans>Saved assessments</Trans>
-                      </caption>
-                      <thead>
-                        <tr className="border-b border-border">
-                          <th scope="col" className="py-2 pe-3 font-medium">
-                            <Trans>Candidate</Trans>
-                          </th>
-                          <th scope="col" className="py-2 pe-3 font-medium">
-                            <Trans>Version</Trans>
-                          </th>
-                          <th scope="col" className="py-2 pe-3 font-medium">
-                            <Trans>Status</Trans>
-                          </th>
-                          <th scope="col" className="py-2 font-medium">
-                            <Trans>Hard criteria</Trans>
-                          </th>
-                        </tr>
-                      </thead>
-                      <tbody>
-                        {assessments.map(({ assessment: item, isCurrent }) => (
-                          <tr
-                            key={`${item.roleId}:${item.candidateKey}`}
-                            className="border-b border-border"
-                          >
-                            <th scope="row" className="py-2 pe-3 font-medium">
-                              <Button
-                                variant="link"
-                                className="h-auto justify-start whitespace-normal break-all p-0 text-left"
-                                aria-pressed={assessment?.candidateKey === item.candidateKey}
-                                onClick={() =>
-                                  setSelection({
-                                    roleId: item.roleId,
-                                    candidateKey: item.candidateKey,
-                                  })
-                                }
-                              >
-                                {item.candidateKey}
-                              </Button>
-                            </th>
-                            <td className="py-2 pe-3 tabular-nums">{item.version}</td>
-                            <td className="py-2 pe-3 whitespace-nowrap">
-                              {isCurrent ? <Trans>Current</Trans> : <Trans>Outdated</Trans>}
-                            </td>
-                            <td className="py-2">
-                              <VerdictLabel verdict={item.judgments.hardGate} />
-                            </td>
-                          </tr>
+                              <CardContent className="space-y-2">
+                                <div className="flex items-start justify-between gap-2">
+                                  <Button
+                                    variant="link"
+                                    className="h-auto justify-start whitespace-normal break-all p-0 text-left"
+                                    aria-pressed={
+                                      selection?.candidateKey === candidate.candidateKey
+                                    }
+                                    onClick={() => setSelection(candidate)}
+                                  >
+                                    {candidate.name ?? candidate.candidateKey}
+                                  </Button>
+                                  <Checkbox
+                                    aria-label={t`Shortlist ${candidate.name ?? candidate.candidateKey}`}
+                                    checked={candidate.shortlisted}
+                                    disabled={shortlistPending !== null}
+                                    onCheckedChange={(checked) =>
+                                      void setShortlist(candidate, !!checked)
+                                    }
+                                  />
+                                </div>
+                                <p className="text-xs text-muted-foreground">
+                                  {workspace?.role.title}
+                                </p>
+                                {candidate.title || candidate.company ? (
+                                  <p>
+                                    {[candidate.title, candidate.company]
+                                      .filter(Boolean)
+                                      .join(" · ")}
+                                  </p>
+                                ) : null}
+                                {candidate.location ? (
+                                  <p className="text-muted-foreground">{candidate.location}</p>
+                                ) : null}
+                                <CandidateProfile candidate={candidate} />
+                                <CandidateAssessment candidate={candidate} />
+                                <p className="text-xs text-muted-foreground">
+                                  <Trans>{candidate.discoveryCount} saved discoveries</Trans>
+                                </p>
+                                {shortlistFailed === candidate.candidateKey ? (
+                                  <p role="alert" className="text-destructive">
+                                    <Trans>Could not save shortlist</Trans>
+                                  </p>
+                                ) : null}
+                              </CardContent>
+                            </Card>
+                          </li>
                         ))}
-                      </tbody>
-                    </table>
+                      </ul>
+                    ) : (
+                      <div className="overflow-x-auto">
+                        <table className="w-full text-left text-sm">
+                          <caption className="sr-only">
+                            <Trans>Saved candidates</Trans>
+                          </caption>
+                          <thead>
+                            <tr className="border-b border-border">
+                              {[
+                                t`Candidate`,
+                                t`Role`,
+                                t`Title`,
+                                t`Company`,
+                                t`Location`,
+                                t`Profile`,
+                                t`Assessment`,
+                                t`Discoveries`,
+                                t`Shortlist`,
+                              ].map((label) => (
+                                <th key={label} scope="col" className="py-2 pe-3 font-medium">
+                                  {label}
+                                </th>
+                              ))}
+                            </tr>
+                          </thead>
+                          <tbody>
+                            {candidatePage.items.map((candidate) => (
+                              <tr key={candidate.candidateKey} className="border-b border-border">
+                                <th scope="row" className="min-w-32 py-2 pe-3">
+                                  <Button
+                                    variant="link"
+                                    className="h-auto justify-start whitespace-normal p-0 text-left"
+                                    aria-pressed={
+                                      selection?.candidateKey === candidate.candidateKey
+                                    }
+                                    onClick={() => setSelection(candidate)}
+                                  >
+                                    {candidate.name ?? candidate.candidateKey}
+                                  </Button>
+                                </th>
+                                <td className="py-2 pe-3">{workspace?.role.title}</td>
+                                <td className="py-2 pe-3">{candidate.title ?? "—"}</td>
+                                <td className="py-2 pe-3">{candidate.company ?? "—"}</td>
+                                <td className="py-2 pe-3">{candidate.location ?? "—"}</td>
+                                <td className="py-2 pe-3">
+                                  <CandidateProfile candidate={candidate} />
+                                </td>
+                                <td className="py-2 pe-3">
+                                  <CandidateAssessment candidate={candidate} />
+                                </td>
+                                <td className="py-2 pe-3 tabular-nums">
+                                  {candidate.discoveryCount}
+                                </td>
+                                <td className="py-2">
+                                  <Checkbox
+                                    aria-label={t`Shortlist ${candidate.name ?? candidate.candidateKey}`}
+                                    checked={candidate.shortlisted}
+                                    disabled={shortlistPending !== null}
+                                    onCheckedChange={(checked) =>
+                                      void setShortlist(candidate, !!checked)
+                                    }
+                                  />
+                                  {shortlistFailed === candidate.candidateKey ? (
+                                    <p role="alert">
+                                      <Trans>Could not save shortlist</Trans>
+                                    </p>
+                                  ) : null}
+                                </td>
+                              </tr>
+                            ))}
+                          </tbody>
+                        </table>
+                      </div>
+                    )}
+                    {candidatePage.nextCursor ? (
+                      <Button
+                        size="sm"
+                        variant="outline"
+                        disabled={candidateLoading}
+                        onClick={() => void loadMoreCandidates()}
+                      >
+                        <Trans>Load more</Trans>
+                      </Button>
+                    ) : null}
+                  </>
+                ) : null}
+                {selection && selection.roleId === roleId ? (
+                  <div className="space-y-3 border-t border-border pt-4">
+                    <h3 className="font-medium">{selection.name ?? selection.candidateKey}</h3>
+                    <CandidateProfile candidate={selection} />
+                    {!selection.latestAssessment ? (
+                      <p>
+                        <Trans>Unassessed</Trans>
+                      </p>
+                    ) : evidenceFailed ? (
+                      <p role="alert">
+                        <Trans>Could not load assessment</Trans>
+                      </p>
+                    ) : !selectedEvidence ? (
+                      <p role="status">
+                        <Trans>Loading…</Trans>
+                      </p>
+                    ) : !selected ? (
+                      <p role="alert">
+                        <Trans>Assessment unavailable</Trans>
+                      </p>
+                    ) : null}
+                    <CandidateSources
+                      key={`${selection.roleId}:${selection.candidateKey}:${selection.discoveryCount}`}
+                      candidate={selection}
+                      research={snapshot.research}
+                      roleRevisionId={workspace!.revision.id}
+                      onAccessError={denyAccess}
+                    />
                   </div>
-                )}
+                ) : null}
                 {assessment && selected ? (
                   <section
                     key={`${assessment.roleId}:${assessment.candidateKey}:${assessment.version}`}
@@ -1511,6 +2257,10 @@ function RecruitingWorkspace({ threadId, botId, refreshSignal, onClose, onReveal
                   </section>
                 ) : null}
               </>
+            ) : (
+              <p className="text-muted-foreground">
+                <Trans>No role linked</Trans>
+              </p>
             )}
           </TabsContent>
           <TabsContent value="missing" className="space-y-5">

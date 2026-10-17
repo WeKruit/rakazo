@@ -14,9 +14,11 @@ import {
   reconcileRecruitingResearchAction,
   recordRecruitingResearchObservation,
   recruitingResearchSnapshot,
+  saveRecruitingAssessment,
 } from "@rakazo/db";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { boundDirectApprovalRequest } from "./approval-effect.js";
+import { executeRecruitingAssessmentTool } from "./recruiting-assessment.js";
 import type { LoadedRecruitingRunContext } from "./recruiting-context.js";
 import { buildRecruitingResearchRequest } from "./recruiting-research.js";
 import * as tools from "./recruiting-tools.js";
@@ -34,6 +36,7 @@ vi.mock("@rakazo/db", async (importOriginal) => ({
   listUnmappedRecruitingResearchReads: vi.fn(),
   reconcileRecruitingResearchAction: vi.fn(),
   recordRecruitingResearchObservation: vi.fn(),
+  saveRecruitingAssessment: vi.fn(),
 }));
 
 const actor: Actor = {
@@ -335,6 +338,7 @@ describe("native research preparation", () => {
       clientNonce: input.clientNonce,
       kind: operation,
       purpose: input.purpose as "calibration" | "scale" | null,
+      candidateOutputSchema: "candidate_output_v1" as string | null,
       approvalEffectId: input.approvalEffectId as string | null,
       deliveryState: "prepared",
       requestArtifactId: "request-artifact",
@@ -683,6 +687,41 @@ describe("native research preparation", () => {
     expect(recordRecruitingResearchObservation).toHaveBeenCalledTimes(1);
   });
 
+  it("reuses original recorded receipt metadata while indexing its native result", async () => {
+    const f = researchFixture("continue");
+    const read = pendingRead(f);
+    const rows = [{ name: { value: "Example", source_id: "source" } }, null];
+    read.effect.result = { structuredContent: { rows, output_id: "original-output" } } as never;
+    const outputArtifact = {
+      name: "original-receipt.json",
+      mimeType: "application/json",
+      size: 100,
+      hash: "a".repeat(64),
+      storageKey: "original-blob",
+      clientNonce: `recruiting-observation:${read.effect.id}`,
+    };
+    vi.mocked(listUnmappedRecruitingResearchReads).mockResolvedValue([
+      { ...read, outputArtifact },
+    ] as never);
+    await tools.resolveRecruitingResearchTool(
+      f.deps,
+      f.trusted,
+      { operation: "rows", taskId: "task", cursor: "page-1", limit: 10 },
+      context,
+    );
+    expect(recordRecruitingResearchObservation).toHaveBeenCalledWith(
+      f.deps.prisma,
+      actor,
+      expect.objectContaining({
+        rows,
+        outputId: "original-output",
+        outputArtifact,
+        historicalBackfill: true,
+      }),
+    );
+    expect(f.artifacts.put).not.toHaveBeenCalled();
+  });
+
   it("backfills an unrelated pending page while admitting the requested fresh read", async () => {
     const f = researchFixture("continue");
     pendingRead(f, "different-page");
@@ -846,7 +885,7 @@ describe("native research preparation", () => {
     expect(manifest.args.prompt).toContain(loaded.text);
     expect(manifest.args.prompt).toContain(input.instructions);
     expect(manifest).toMatchObject({
-      version: 2,
+      version: 3,
       purpose: "calibration",
       approvalEffectId: "g1-approval",
     });
@@ -981,7 +1020,7 @@ describe("native research preparation", () => {
     expect(result).toMatchObject({ task: { id: "task" } });
     const manifest = JSON.parse(Buffer.from(f.uploads[0]!.bytes).toString("utf8"));
     expect(manifest).toMatchObject({
-      version: 2,
+      version: 3,
       operation: "continue",
       purpose: "scale",
       approvalEffectId: "g2-approval",
@@ -1042,8 +1081,11 @@ describe("native research preparation", () => {
     legacy.version = 1;
     delete legacy.purpose;
     delete legacy.approvalEffectId;
+    delete legacy.candidateOutputSchema;
     const key = legacy.operation === "create" ? "prompt" : "message";
-    legacy.args[key] = legacy.args[key].replace("Research purpose:\ncalibration\n\n", "");
+    legacy.args[key] = legacy.args[key]
+      .replace("Research purpose:\ncalibration\n\n", "")
+      .split("\n\nCanonical candidate output schema:")[0];
     const bytes = Buffer.from(JSON.stringify(legacy), "utf8");
     const hash = createHash("sha256").update(bytes).digest("hex");
     f.blobs.set("request-blob", bytes);
@@ -1051,6 +1093,7 @@ describe("native research preparation", () => {
     f.saved.requestArtifact.hash = hash;
     f.action.purpose = null;
     f.action.approvalEffectId = null;
+    f.action.candidateOutputSchema = null;
     return bytes;
   }
 
@@ -1558,7 +1601,13 @@ describe("native research preparation", () => {
       };
       f.prisma.externalEffect.findFirst.mockResolvedValue(readEffect);
       f.prisma.externalEffect.findUnique.mockResolvedValue(readEffect);
-      await tools.completeRecruitingResearchCall(
+      const candidateRows = [{ rowIndex: 0, candidateKey: "source-row:read-effect:0" }];
+      vi.mocked(recordRecruitingResearchObservation).mockResolvedValue({
+        task: f.task,
+        action: f.action,
+        candidateRows,
+      } as never);
+      const pageReceipt = await tools.completeRecruitingResearchCall(
         f.deps,
         f.trusted,
         admission!,
@@ -1566,6 +1615,61 @@ describe("native research preparation", () => {
         context,
         { effectId: readEffect.id, request: readEffect.request },
       );
+      expect(pageReceipt).toHaveProperty("candidateRows", candidateRows);
+      const readRows = "candidateRows" in pageReceipt ? pageReceipt.candidateRows : undefined;
+      if (!readRows?.[0]) throw new Error("Missing indexed candidate row reference");
+      const assessment = {
+        operation: "save",
+        roleId: "role",
+        roleRevisionId: "revision",
+        candidateKey: readRows[0].candidateKey,
+        expectedRevision: 0,
+        facts: [],
+        questions: [],
+        sourceRefs: [],
+        atomJudgments: [],
+        employmentEvaluations: [],
+      };
+      vi.mocked(saveRecruitingAssessment).mockResolvedValue({
+        assessment: { candidateKey: assessment.candidateKey, version: 1 },
+      } as never);
+      const assessmentDb = {
+        run: {
+          findFirst: vi.fn(async () => ({
+            ...actor,
+            id: "run",
+            threadId: "thread",
+            botId: "bot",
+            bot: actor,
+          })),
+        },
+        artifact: { findMany: vi.fn(async () => []) },
+      } as unknown as PrismaClient;
+      await executeRecruitingAssessmentTool(
+        { prisma: assessmentDb, artifacts: f.deps.artifacts },
+        {
+          actor,
+          runId: "run",
+          threadId: "thread",
+          botId: "bot",
+          save: {
+            leaseOwner: "worker",
+            leaseFence: 1,
+            effectId: "assessment-effect",
+            effectRequest: assessment,
+          },
+        },
+        assessment,
+        context,
+      );
+      expect(saveRecruitingAssessment).toHaveBeenCalledWith(
+        assessmentDb,
+        actor,
+        expect.anything(),
+        expect.objectContaining({ candidateKey: candidateRows[0]!.candidateKey }),
+        [],
+      );
+
       expect(recordRecruitingResearchObservation).toHaveBeenCalledWith(
         f.deps.prisma,
         actor,
@@ -1575,6 +1679,7 @@ describe("native research preparation", () => {
           request: readEffect.request,
           rawResult: providerResult,
           toolName: "get_rows",
+          rows,
           cursor: "next-cursor",
           outputArtifact: expect.objectContaining({
             hash: expect.stringMatching(/^[a-f0-9]{64}$/),

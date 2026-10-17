@@ -28,7 +28,7 @@ Execution priority: feature implementation and direct product validation come fi
 | Autumn | 已接只读服务；原生 task/action/请求/回执及同 task 续搜有代码 | 新真实搜索→证据→反馈→原 task 续搜的整条业务链未通过 |
 | CRM | 用户 OAuth、组织身份和只读发现已接；已有来源/评审写工具；发送前上下文读取已提交 [CRM PR #44](https://github.com/WeKruit/headhunter-agent/pull/44)，未发布 | 新人导入、身份/岗位关联、实际写读、可信发送镜像；PR 中抑制规则迁移尚未执行 |
 | Instantly | 已接只读服务 | 真实精确审批发送、发送确认、回复停止；当前 REST 和既有 MCP 合同须分别核验 |
-| 候选人完整工作台/Dashboard | 现有面板只读展示已保存评估和原始结果文件 | 未评估候选索引、岗位总览、批次/名单、服务端分页/筛选/排序、外联/面试看板和真实统计尚未完成 |
+| 候选人完整工作台/Dashboard | 工作分支已接候选索引、轮次/原始行关联、服务端分页/筛选/排序、持久 shortlist 及岗位 Dashboard；合成材料的实际界面已验证 | 新迁移及网页尚未发布，真实搜索落库/恢复未验；跨岗位/客户 CRM 去重、批次/名单、外联/面试看板仍缺 |
 | 执行过程展示 | 原生 `ToolActivityDisclosure`、事件和 Activity 视图可复用 | 完整招聘步骤、委派树、任务/结果/证据/反馈的关联展示与实时/重载验收 |
 | Agent 可替换底座与插件 | Pi、逐 bot 模型和原生 memory/skills/MCP/文件/routines 可复用 | 每 bot runtime/明确 connection、运行配置冻结、human 群成员等 M3 实际缺口未完成 |
 
@@ -39,7 +39,7 @@ flowchart TD
   JD[JD 链接 / 描述 / 附件] --> Role[岗位及条件版本 / 关键澄清 / 人类确认]
   Role --> Search[Main 委派 Sourcer / 原生 search task 与 action]
   Search --> Raw[保存 provider 原始结果及回执 Artifact]
-  Raw --> Index[候选索引 + 本轮结果关联：待补]
+  Raw --> Index[候选索引 + 本轮结果关联：代码已接，待发布验收]
   Index --> Evidence[读取材料 / 版本化 met-unmet-unknown 评估]
   Evidence --> UI[候选卡片与表格 / 详情 / 证据 / 执行过程]
   UI --> Feedback[持久化人工反馈 / shortlist / 条件或偏好修订]
@@ -52,7 +52,7 @@ flowchart TD
   Receipt --> Stop[收到回复 / opt-out 后停止后续外联]
 ```
 
-“找到候选人”就要保留原始结果和结果关联，不等评估完成才在产品里出现。**当前实现尚未做到完整结果索引**：原始页保存在 Artifact，已评估者在 `recruiting_assessments`；不能把这个现状描述成所有候选人已经进入 CRM 或可按字段筛选的人才库。provider 报告总数、实际拉取并保存的行数、本地去重人数分别展示；不能把第一页或未读 cursor 后的结果当作完整名单。
+“找到候选人”就要保留原始结果和结果关联，不等评估完成才在产品里出现。**工作分支已接上结果索引，线上仍是旧版本**：原始页继续保存在 Artifact；新的候选/页/行索引在原生读取回执的同一事务写入，评估独立保存在 `recruiting_assessments`。这不是所有人已经进入 CRM 的证明。provider 报告总数、实际拉取并保存的行数、本地去重人数分别展示；不能把第一页或未读 cursor 后的结果当作完整名单。
 
 #### 数据存储：现有记录与需要补齐的应用记录
 
@@ -63,15 +63,29 @@ flowchart TD
 | 岗位/JD/条件 | `recruiting_roles` + 不可变 `recruiting_role_revisions`；原件为 Artifact | 原文、hard/preferred、AND/OR/NOT、来源与版本差异可读/可改；计算条件同时保存真实规则，不能只改展示文字；修订使旧判断过期、旧批准不适用于新版 |
 | 搜索/续搜 | `recruiting_research_tasks` / `recruiting_research_actions`；provider task ID、角色版本、请求/上下文/回执文件引用 | 每轮明确 action，继续同一 task；已排队、已完成、结果未知分开，不把 turn 停止当 provider 停止 |
 | 原始结果/材料 | `artifacts` 保存元数据、hash、版本、权限；真实字节在 ArtifactStore | 保留原始字段和分页/时间，不用模型总结覆盖原件 |
-| 候选身份与岗位名单 | **待补岗位候选索引**，沿用现有 `candidateKey` 关联评估；CRM `candidates` 仍是已接入人员的主记录 | 保存可靠 provider 身份或已核验 LinkedIn、展示字段、首次/最近发现、真实 CRM 引用；未知身份保留独立来源键，不按姓名自动合并 |
-| 每轮找到哪些人 | **待补 action→候选结果关联索引**，绑定原始 Artifact/页/行 | 同一人重复出现不重复建人；每轮名单、原始来源、排序/页码可追溯，前端不必下载全部历史 JSON 来分页 |
+| 候选身份与岗位名单 | 新 `recruiting_candidates` 岗位索引，沿用 `candidateKey` 关联评估；迁移未执行；CRM `candidates` 仍是已接入人员的主记录 | 同一岗位按明确的 LinkedIn profile 去重；未知身份保留独立来源行键，不按姓名自动合并；CRM 引用及跨岗位/客户去重待补 |
+| 每轮找到哪些人 | 新 `recruiting_candidate_pages` / `recruiting_candidate_occurrences` 绑定 task/action/effect/岗位版本/Artifact/页/行；迁移未执行 | 重复页回放不重复索引；每次发现保留来源，最新 profile 按原生完成时间选取，历史回填不能覆盖较新观察 |
 | 资格评估 | `recruiting_assessments` 的 `(roleId,candidateKey,version)`；绑定岗位版本、facts/judgments/sourceRefs | 逐项 met/unmet/unknown、缺口、计算依据、历史版本；旧岗位评估显示过期 |
-| 人工选择与反馈 | 原生人类消息/事件保留来源；**名单索引需补 shortlist/评审状态及对应版本/事件** | 临时 UI 选中不当作持久 shortlist；接受/拒绝/跳过与资格三态、CRM pipeline stage 分开 |
+| 人工选择与反馈 | 原生人类消息/事件保留来源；新名单索引的 shortlist 用 CAS 与人类消息同事务保存，尚未上线 | 临时 UI 选中不当作持久 shortlist；接受/拒绝/跳过与资格三态、CRM pipeline stage 分开 |
 | CRM | 既有 `candidates` / `candidate_sources` / `candidate_pipeline` / audit | 新人导入、同源身份去重和岗位关联走明确用户/组织权限；来源保存成功不等于新人已创建或已归岗位 |
 | 外联草稿/回执 | 原生 `external_effects` 的精确 request/result、审批事件及必要的原始回执 Artifact | 批准前没有发送；未知结果不重发。既有 CRM pending 队列不是草稿，也不能当已发日志；真实镜像才进 `instantly_emails` |
 | 记忆/技能/连接 | 原生 memory documents/revisions、skills、加密 connections | 招聘记录不塞进长期记忆代替业务表；可复用偏好有 scope/版本/来源，插件可以替换但产品任务关联保持 |
 
-岗位候选索引和每轮关联索引是待实现的数据索引职责，不是已经存在的表或已应用的迁移。具体字段沿当前 contracts/Prisma/API 最小实现，不建立重复的 CRM 人员库。去重使用同组织/客户及可靠身份，不自动套用旧脚本目录、CSV 或未经批准的跨客户冷却规则。
+岗位候选索引和每轮关联索引已有 contracts/Prisma/API 实现和未应用迁移，不建立重复的 CRM 人员主库。当前仅实现同一岗位的可靠身份去重，不能冒称组织/客户级 CRM 去重完成；不自动套用旧脚本目录、CSV 或未经批准的跨客户冷却规则。
+
+#### 当前增量：统一 candidate schema 与候选工作台（代码已接，未发布）
+
+用户提供的完整 v1.0 playbook 本轮已重新读完并核验原件；494 行、SHA256 `f86d7ba1343f7d04c7687bb7843d5fbfc300d4607bfae6df035b876423cef8b4`。产品范围仍覆盖完整 playbook，不以候选目录这一个增量替代 M1–M5。
+
+- **产品定义输出**：`candidate_output_v1` 固定 `name`、`linkedin_url`、`current_title`、`current_company`、`location`、`resume_url`、`evidence_urls`；每字段允许 null，岗位专属证据可附加。新冻结请求 v3 自动加入同一 JSON schema，不让用户手写字段映射。历史请求不被改写或假装采用新 schema。
+- **保存原件再索引**：保留 provider 原始字节、来源 cell 与 `_sources`；按明确字段逐项校验，坏字段/行保留问题并可见。未知形状的读取与真实空页分开。native effect + 行号保证同页恢复幂等，历史回填不推进 cursor/用量/任务状态。
+- **Agent 与页面共用身份**：原生读取返回已持久化的 `rowIndex → candidateKey`，后续评估复用该键。每条发现可回到 task/action、岗位版本、effect、原始 Artifact/hash、cursor、行号；无身份的人仍独立可见。未评估与 unknown 资格分开。
+- **已有面板直接接 API**：Dashboard 的原始行数/候选/已识别/未评估/已评估/shortlist 分开；Cards/Table 支持服务端检索、评估/三态/轮次筛选、排序和分页。shortlist 保存原生人类回执，切筛选不会丢失已确认结果。详情沿原件 hash 校验与原文高亮，Activity 显示持久任务/轮次，不虚构隐藏思考。
+- **已验证的边界**：后端 12 个聚焦文件 454 项离线检查通过；另一次 core/实际 Web 组件联合运行 97 项通过（批次有重叠，不累加）。contracts/core/DB/adapters/API/Web 类型检查与改动格式通过；独立审查指出的未知页误计空页、shortlist 生命周期、缓存 Dashboard 错误及过期读取拒绝均已修复。八项真实 PostgreSQL 回归已写，未执行。Chrome 手动检查确认实际组件的 Dashboard、所有记录、未评估筛选、分页、shortlist 和原始来源。所用材料/RPC 是明确标注的合成 fixture，不是云端数据库或真实招聘验收。
+- **浏览器检查限制**：现有 Playwright 用例已补截图，但本机缺少其指定 Chromium revision，未进入页面执行；没有安装浏览器、启动本地 Postgres/Docker 或用 skipped 冒充通过。
+- **发布前事实**：只读核验独立 Supabase 数据库的现有迁移账本，待应用恰为 `20261016200000_recruiting_brief`、`20261017000000_recruiting_action_approval`、`20261017120000_recruiting_candidate_index`。没有写库、修改旧 CRM 或部署；必须在获准发布后做真实新结果写入/重复读取/刷新与重启恢复验收。
+
+**下一项业务优先**：完成现有 CRM 的明确人员身份与多岗位关联导入，再对接精确外联草稿、原生审批、实际 provider receipt 与回复停止。当前来源保存入口不等于新人导入；旧 pipeline 只容纳一个岗位，不能覆盖它来伪造多岗位关联。真实写入与外联闭环未通过，P6 保持未完成。
 
 #### 前端必须交付的页面和交互
 

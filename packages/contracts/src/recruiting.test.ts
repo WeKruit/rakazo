@@ -1342,3 +1342,75 @@ describe("recruiting reassessment and native Ask inputs", () => {
       ).toBe(false);
   });
 });
+
+describe("candidate index contracts", () => {
+  it("defines one complete canonical candidate display schema", () => {
+    expect(contracts.RecruitingCandidateOutputSchemaId.parse("candidate_output_v1")).toBe(
+      "candidate_output_v1",
+    );
+    const row = {
+      name: null,
+      linkedin_url: null,
+      current_title: null,
+      current_company: null,
+      location: null,
+      resume_url: null,
+      evidence_urls: null,
+      role_signal: "opaque",
+    };
+    expect(contracts.RecruitingCandidateOutputRowSchema.parse(row)).toEqual(row);
+    expect(contracts.RECRUITING_CANDIDATE_OUTPUT_JSON_SCHEMA.properties).toHaveProperty(
+      "linkedin_url",
+    );
+    expect(contracts.RecruitingCandidateOutputSchemaId.safeParse("inferred_columns").success).toBe(
+      false,
+    );
+    const unknown = {
+      name: null,
+      title: null,
+      company: null,
+      location: null,
+      linkedinUrl: null,
+      resumeUrl: null,
+      evidenceUrls: null,
+      issues: ["historical_schema_unknown"],
+    };
+    expect(contracts.RecruitingCandidateProfileSchema.parse(unknown)).toEqual(unknown);
+  });
+  it("validates paginated candidates and independent shortlist intent", () => {
+    expect(
+      contracts.ListRecruitingCandidatesInput.parse({
+        roleId: "role",
+        limit: 25,
+        assessmentState: "unassessed",
+        sort: "name",
+      }),
+    ).toMatchObject({ limit: 25 });
+    expect(
+      contracts.ListRecruitingCandidatesInput.safeParse({ roleId: "role", sort: "raw SQL" })
+        .success,
+    ).toBe(false);
+    expect(
+      contracts.ListRecruitingCandidatesInput.safeParse({ roleId: "role", limit: 501 }).success,
+    ).toBe(false);
+    expect(
+      contracts.SetRecruitingCandidateShortlistInput.parse({
+        threadId: "thread",
+        roleId: "role",
+        candidateKey: "key",
+        expectedRevision: 0,
+        shortlisted: true,
+      }),
+    ).toMatchObject({ expectedRevision: 0 });
+    expect(
+      contracts.SetRecruitingCandidateShortlistInput.safeParse({
+        threadId: "thread",
+        roleId: "role",
+        candidateKey: "key",
+        expectedRevision: 0,
+        shortlisted: true,
+        verdict: "met",
+      }).success,
+    ).toBe(false);
+  });
+});

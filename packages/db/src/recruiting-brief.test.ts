@@ -1325,6 +1325,7 @@ async function gatedResearchFixture() {
     serverRevision: 1,
     kind: "create" as const,
     purpose: "calibration" as const,
+    candidateOutputSchema: "candidate_output_v1" as const,
     approvalEffectId: "g1",
     clientNonce: "research-action",
     recallScope: null,

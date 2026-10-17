@@ -27,6 +27,9 @@ vi.mock("@rakazo/db", async (importOriginal) => {
     listRecruitingAssessments: vi.fn(),
     getRecruitingAssessment: vi.fn(),
     listRecruitingResearch: vi.fn(),
+    listRecruitingCandidates: vi.fn(),
+    listRecruitingCandidateSources: vi.fn(),
+    setRecruitingCandidateShortlist: vi.fn(),
   };
 });
 const prisma = {} as PrismaClient;
@@ -47,6 +50,9 @@ describe("authenticated recruiting API", () => {
       [db.listRecruitingAssessments, api.listRecruitingAssessments],
       [db.getRecruitingAssessment, api.getRecruitingAssessment],
       [db.listRecruitingResearch, api.listRecruitingResearch],
+      [db.listRecruitingCandidates, api.listRecruitingCandidates],
+      [db.listRecruitingCandidateSources, api.listRecruitingCandidateSources],
+      [db.setRecruitingCandidateShortlist, api.setRecruitingCandidateShortlist],
     ] as const) {
       const output = { synthetic: true };
       vi.mocked(domain).mockResolvedValueOnce(output as never);
@@ -125,6 +131,52 @@ describe("native recruiting RPC", () => {
     expect(
       await client.recruiting.getAssessment({ roleId: "role", candidateKey: "row" }),
     ).toBeNull();
+    const candidatePage = {
+      roleId: "role",
+      roleRevisionId: "revision",
+      items: [],
+      nextCursor: null,
+      total: 10,
+      counts: {
+        sourceRows: 15,
+        candidates: 10,
+        identifiedCandidates: 6,
+        unassessed: 10,
+        assessed: 0,
+        shortlisted: 0,
+      },
+    };
+    vi.mocked(db.listRecruitingCandidates).mockResolvedValueOnce(candidatePage);
+    expect(
+      await client.recruiting.listCandidates({ roleId: "role", query: "Engineer", limit: 20 }),
+    ).toEqual(candidatePage);
+    expect(db.listRecruitingCandidates).toHaveBeenLastCalledWith(prisma, actor, {
+      roleId: "role",
+      query: "Engineer",
+      limit: 20,
+    });
+    const sources = {
+      roleId: "role",
+      candidateKey: "candidate",
+      items: [],
+      nextCursor: null,
+      total: 0,
+    };
+    vi.mocked(db.listRecruitingCandidateSources).mockResolvedValueOnce(sources);
+    expect(
+      await client.recruiting.listCandidateSources({ roleId: "role", candidateKey: "candidate" }),
+    ).toEqual(sources);
+    const shortlist = { roleId: "role", candidateKey: "candidate", shortlisted: true, revision: 1 };
+    vi.mocked(db.setRecruitingCandidateShortlist).mockResolvedValueOnce(shortlist);
+    expect(
+      await client.recruiting.setCandidateShortlist({
+        threadId: "thread",
+        roleId: "role",
+        candidateKey: "candidate",
+        expectedRevision: 0,
+        shortlisted: true,
+      }),
+    ).toEqual(shortlist);
     vi.mocked(db.listRecruitingResearch).mockResolvedValueOnce({ tasks: [], actions: [] });
     expect(await client.recruiting.listResearch({ roleId: "role" })).toEqual({
       tasks: [],

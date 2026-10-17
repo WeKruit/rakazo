@@ -111,6 +111,10 @@ import {
   ConfirmRecruitingBriefInput,
   CreateRecruitingRoleInput,
   EditRecruitingCriteriaInput,
+  ListRecruitingCandidateSourcesInput,
+  ListRecruitingCandidateSourcesOutput,
+  ListRecruitingCandidatesInput,
+  ListRecruitingCandidatesOutput,
   RecruitingAssessmentAskTargetSchema,
   RecruitingAssessmentSchema,
   RecruitingId,
@@ -119,6 +123,8 @@ import {
   RecruitingRoleRevisionSchema,
   RecruitingRoleSchema,
   ReviseRecruitingRoleInput,
+  SetRecruitingCandidateShortlistInput,
+  SetRecruitingCandidateShortlistOutput,
 } from "./recruiting.js";
 import { RoutineHistorySchema, RoutineRunCursorSchema, RunsListOutputSchema } from "./runs.js";
 import { SearchQueryOutputSchema } from "./search.js";
@@ -530,6 +536,13 @@ export const appContract = {
     heartbeat: oc.input(botId).output(z.object({ ok: z.literal(true) })),
   },
   recruiting: {
+    listCandidates: oc.input(ListRecruitingCandidatesInput).output(ListRecruitingCandidatesOutput),
+    listCandidateSources: oc
+      .input(ListRecruitingCandidateSourcesInput)
+      .output(ListRecruitingCandidateSourcesOutput),
+    setCandidateShortlist: oc
+      .input(SetRecruitingCandidateShortlistInput)
+      .output(SetRecruitingCandidateShortlistOutput),
     listQuestions: oc
       .input(z.strictObject({ threadId: Id, roleId: RecruitingId }))
       .output(z.strictObject({ questions: z.array(RecruitingQuestionSchema) })),

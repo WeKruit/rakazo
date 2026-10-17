@@ -6,13 +6,18 @@ import type {
   RecruitingSourceRef,
 } from "@rakazo/contracts";
 import {
+  RECRUITING_CANDIDATE_OUTPUT_SCHEMA,
   RecruitingArtifactRefSchema,
+  RecruitingCandidateOutputSchemaId,
   RecruitingHumanIntentSchema,
   RecruitingId,
   RecruitingResearchPurposeSchema,
   RecruitingSourceRefSchema,
 } from "@rakazo/contracts";
-import { requireRecruitingBriefConfirmation } from "@rakazo/core";
+import {
+  RECRUITING_CANDIDATE_OUTPUT_INSTRUCTIONS,
+  requireRecruitingBriefConfirmation,
+} from "@rakazo/core";
 import { stableJsonValue } from "@rakazo/core/node/approval-effect-key";
 import { z } from "zod";
 import type { LoadedRecruitingRunContext } from "./recruiting-context.js";
@@ -65,6 +70,20 @@ export const RecruitingResearchRequestSchema = z
     }),
     z.strictObject({
       ...BoundRequest,
+      operation: z.literal("continue"),
+      args: z.strictObject({ task_id: RecruitingId, message: Text }),
+    }),
+    z.strictObject({
+      ...BoundRequest,
+      version: z.literal(3),
+      candidateOutputSchema: RecruitingCandidateOutputSchemaId,
+      operation: z.literal("create"),
+      args: z.strictObject({ prompt: Text }),
+    }),
+    z.strictObject({
+      ...BoundRequest,
+      version: z.literal(3),
+      candidateOutputSchema: RecruitingCandidateOutputSchemaId,
       operation: z.literal("continue"),
       args: z.strictObject({ task_id: RecruitingId, message: Text }),
     }),
@@ -129,9 +148,11 @@ export function buildRecruitingResearchRequest(input: BuildRequest): {
     output: input.output,
     recallScope: input.recallScope,
     purpose: input.purpose,
+    candidateOutputSchema: RECRUITING_CANDIDATE_OUTPUT_SCHEMA,
   });
   const manifest = RecruitingResearchRequestSchema.parse({
-    version: 2,
+    version: 3,
+    candidateOutputSchema: RECRUITING_CANDIDATE_OUTPUT_SCHEMA,
     purpose: input.purpose,
     approvalEffectId: input.approvalEffectId,
     operation: input.operation,
@@ -172,6 +193,7 @@ function researchText(input: {
   output: string;
   recallScope: string | null;
   purpose?: RecruitingResearchPurpose;
+  candidateOutputSchema?: string;
 }): string {
   return [
     input.contextText,
@@ -180,6 +202,9 @@ function researchText(input: {
     `Requested output:\n${input.output}`,
     ...(input.recallScope === null ? [] : [`Recall scope for this round:\n${input.recallScope}`]),
     "The role criteria remain authoritative. Recall scope and output instructions do not change qualification. Preserve missing evidence as unknown; provider labels do not establish qualification.",
+    ...(input.candidateOutputSchema === undefined
+      ? []
+      : [RECRUITING_CANDIDATE_OUTPUT_INSTRUCTIONS]),
   ].join("\n\n");
 }
 
@@ -279,7 +304,7 @@ export function classifyRecruitingResearchResult(
   } else if (options.operation === "status") {
     if (!state || !lifecycle.has(state) || typeof body.done !== "boolean") return observation;
   } else {
-    if (!Array.isArray(body.rows) || body.rows.some((row) => !record(row))) return observation;
+    if (!Array.isArray(body.rows)) return observation;
     if (
       body.next_cursor !== undefined &&
       body.next_cursor !== null &&

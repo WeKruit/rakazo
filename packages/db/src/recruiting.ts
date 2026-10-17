@@ -2,6 +2,10 @@ import { createHash, randomUUID } from "node:crypto";
 import type { AdapterContext, ArtifactStore, MemoryCommitRequest } from "@rakazo/adapter-kit";
 import type {
   Actor,
+  ListRecruitingCandidateSourcesInput as CandidateSourcesInput,
+  ListRecruitingCandidateSourcesOutput as CandidateSourcesOutput,
+  ListRecruitingCandidatesInput as CandidatesInput,
+  ListRecruitingCandidatesOutput as CandidatesOutput,
   CreateRecruitingRoleInput as CreateRoleInput,
   MessageBlock,
   RecruitingApprovalToolInput,
@@ -23,20 +27,28 @@ import type {
   RecruitingSourceRef,
   ReviseRecruitingRoleInput as ReviseRoleInput,
   SaveRecruitingAssessmentInput as SaveAssessmentInput,
+  SetRecruitingCandidateShortlistInput as ShortlistInput,
+  SetRecruitingCandidateShortlistOutput as ShortlistOutput,
 } from "@rakazo/contracts";
 import {
   ConfirmRecruitingBriefInput,
   CreateRecruitingRoleInput,
   EditRecruitingCriteriaInput,
   EffectApprovalAnsweredPayloadSchema,
+  ListRecruitingCandidateSourcesInput,
+  ListRecruitingCandidateSourcesOutput,
+  ListRecruitingCandidatesInput,
+  ListRecruitingCandidatesOutput,
   MessageBlock as MessageBlockSchema,
   NativeAskAnswerPayloadSchema,
   ProductEventSchema,
+  RECRUITING_CANDIDATE_OUTPUT_SCHEMA,
   ReassessRecruitingAssessmentInput,
   RecruitingApprovalToolInputSchema,
   RecruitingArtifactRefSchema,
   RecruitingAssessmentAskInputSchema,
   RecruitingAssessmentSchema,
+  RecruitingCandidateOutputSchemaId,
   RecruitingHumanIntentSchema,
   RecruitingMaterialReadPayloadSchema,
   RecruitingPreferenceFeedbackSchema,
@@ -50,12 +62,14 @@ import {
   RecruitingSourceRefSchema,
   ReviseRecruitingRoleInput,
   SaveRecruitingAssessmentInput,
+  SetRecruitingCandidateShortlistInput,
 } from "@rakazo/contracts";
 import {
   applyRecruitingPreferenceEdit,
   evaluateRecruitingAssessment,
   extractLinksFromText,
   mergeRecruitingReassessment,
+  normalizeRecruitingCandidateRow,
   RecruitingPlaybookValidationError,
   readRecruitingJsonString,
   recruitingBriefClarifications,
@@ -2216,6 +2230,11 @@ export async function saveRecruitingAssessment(
         createdByRunId: run.id,
       },
     });
+    await tx.recruitingCandidate.upsert({
+      where: { roleId_candidateKey: { roleId: role.id, candidateKey: input.candidateKey } },
+      create: { roleId: role.id, candidateKey: input.candidateKey },
+      update: {},
+    });
     const snapshot = await assessmentSnapshot(tx, actor, role, row);
     const completed = await tx.externalEffect.updateMany({
       where: {
@@ -2907,6 +2926,7 @@ export function recruitingResearchSnapshot(task: ResearchTaskRow, action: Resear
       clientNonce: action.clientNonce,
       kind: action.kind,
       purpose: action.purpose ?? null,
+      candidateOutputSchema: action.candidateOutputSchema ?? null,
       approvalEffectId: action.approvalEffectId ?? null,
       runId: action.runId,
       sourceMessageId: action.sourceMessageId,
@@ -3340,6 +3360,7 @@ export type RecruitingResearchPreparationInput = {
   clientNonce: string;
   recallScope: string | null;
   requestArtifact: RecruitingResearchArtifactInput;
+  candidateOutputSchema: typeof RECRUITING_CANDIDATE_OUTPUT_SCHEMA;
   contextArtifact: RecruitingArtifactRef;
 };
 
@@ -3348,6 +3369,9 @@ export async function prepareRecruitingResearchAction(
   actor: Actor,
   input: RecruitingResearchPreparationInput,
 ) {
+  const candidateOutputSchema = RecruitingCandidateOutputSchemaId.parse(
+    input.candidateOutputSchema,
+  );
   return prisma.$transaction(async (tx) => {
     const context = await researchContextInTransaction(tx, actor, {
       ...input,
@@ -3372,6 +3396,7 @@ export async function prepareRecruitingResearchAction(
       if (
         action.kind !== input.kind ||
         action.purpose !== input.purpose ||
+        action.candidateOutputSchema !== candidateOutputSchema ||
         action.approvalEffectId !== input.approvalEffectId ||
         action.runId !== run.id ||
         action.sourceMessageId !== source.anchor.messageId ||
@@ -3468,6 +3493,7 @@ export async function prepareRecruitingResearchAction(
         clientNonce: input.clientNonce,
         kind: input.kind,
         purpose: input.purpose,
+        candidateOutputSchema,
         approvalEffectId: input.approvalEffectId,
         requestArtifactId: requestArtifact.id,
         requestArtifactHash: requestArtifact.hash,
@@ -3994,6 +4020,9 @@ export type RecruitingResearchObservationInput = {
   usage?: RecruitingResearchAction["usage"];
   cursor?: string | null;
   historicalBackfill?: boolean;
+  /** Classified by the native adapter from the exact effect result; raw bytes stay in ArtifactStore. */
+  rows?: readonly unknown[];
+  outputId?: string | null;
 };
 
 type ResearchReadBinding = Extract<RecruitingReadPayload, { phase: "bound" }>;
@@ -4283,8 +4312,25 @@ export async function listUnmappedRecruitingResearchReads(
       const read = await researchReadBinding(tx, actor, effect);
       if (!read || read.binding.taskId !== task.id) throw new IsolationError();
       if (effect.status !== "completed") continue;
-      if (!(await recordedResearchReadArtifact(tx, actor, read)))
+      const recorded = await recordedResearchReadArtifact(tx, actor, read);
+      const indexed =
+        read.toolName === "get_rows"
+          ? await tx.recruitingCandidatePage.findUnique({ where: { effectId: effect.id } })
+          : true;
+      if (!recorded || !indexed)
         pending.push({
+          ...(recorded
+            ? {
+                outputArtifact: {
+                  name: recorded.name,
+                  mimeType: recorded.mimeType,
+                  size: recorded.size,
+                  hash: recorded.hash,
+                  storageKey: recorded.storageKey,
+                  clientNonce: `recruiting-observation:${effect.id}`,
+                },
+              }
+            : {}),
           saved: read.saved,
           effect,
           toolName: read.toolName,
@@ -4337,7 +4383,16 @@ export async function recordRecruitingResearchObservation(
     const recorded = await recordedResearchReadArtifact(tx, actor, read);
     if (recorded) {
       if (recorded.hash !== input.outputArtifact.hash) throw new RecruitingConflictError();
-      return { task, action, outputArtifact: recorded };
+      const candidateRows = await indexRecruitingCandidateRows(
+        tx,
+        action,
+        task,
+        effect,
+        recorded,
+        read.args,
+        input,
+      );
+      return { task, action, outputArtifact: recorded, candidateRows };
     }
     const outputArtifact = await createResearchArtifact(
       tx,
@@ -4345,6 +4400,15 @@ export async function recordRecruitingResearchObservation(
       run,
       thread,
       input.outputArtifact,
+    );
+    const candidateRows = await indexRecruitingCandidateRows(
+      tx,
+      action,
+      task,
+      effect,
+      outputArtifact,
+      read.args,
+      input,
     );
     const outputArtifacts = [
       ...RecruitingArtifactRefSchema.array().parse(action.outputArtifacts),
@@ -4397,7 +4461,7 @@ export async function recordRecruitingResearchObservation(
     });
     researchReadPayload(event);
     recruitingResearchSnapshot(changedTask, updated);
-    return { task: changedTask, action: updated, outputArtifact };
+    return { task: changedTask, action: updated, outputArtifact, candidateRows };
   });
 }
 
@@ -4457,6 +4521,411 @@ export async function listRecruitingResearch(
         }
       }
       return { tasks, actions };
+    },
+    { isolationLevel: Prisma.TransactionIsolationLevel.RepeatableRead },
+  );
+}
+
+async function indexRecruitingCandidateRows(
+  tx: Tx,
+  action: ResearchActionRow,
+  task: ResearchTaskRow,
+  effect: ResearchEffectRow,
+  artifact: { id: string; hash: string },
+  request: Prisma.InputJsonObject,
+  input: RecruitingResearchObservationInput,
+) {
+  if (input.toolName !== "get_rows") return [];
+  if (await tx.recruitingCandidatePage.findUnique({ where: { effectId: effect.id } }))
+    return tx.recruitingCandidateOccurrence.findMany({
+      where: { pageId: effect.id },
+      orderBy: { rowIndex: "asc" },
+      select: { rowIndex: true, candidateKey: true },
+    });
+  const rows = (input.rows ?? []).map((row, rowIndex) => {
+    const { candidateIdentity, ...profile } = normalizeRecruitingCandidateRow(row, {
+      schemaKnown: action.candidateOutputSchema === RECRUITING_CANDIDATE_OUTPUT_SCHEMA,
+    });
+    return {
+      pageId: effect.id,
+      rowIndex,
+      roleId: task.roleId,
+      candidateKey: candidateIdentity
+        ? `linkedin:${candidateIdentity}`
+        : `source-row:${effect.id}:${rowIndex}`,
+      ...profile,
+      evidenceUrls: profile.evidenceUrls === null ? Prisma.DbNull : [...profile.evidenceUrls],
+      issues: [...profile.issues],
+    };
+  });
+  await tx.recruitingCandidatePage.create({
+    data: {
+      effectId: effect.id,
+      roleId: task.roleId,
+      taskId: task.id,
+      actionId: action.id,
+      roleRevisionId: action.roleRevisionId,
+      artifactId: artifact.id,
+      artifactHash: artifact.hash,
+      requestCursor: typeof request.cursor === "string" ? request.cursor : null,
+      outputId: input.outputId ?? null,
+      // Native completion time orders historical recovery independently of indexing time.
+      observedAt: effect.updatedAt,
+      rowCount: input.rows === undefined ? null : rows.length,
+    },
+  });
+  if (!rows.length) return [];
+  await tx.recruitingCandidate.createMany({
+    data: [...new Set(rows.map((row) => row.candidateKey))].map((candidateKey) => ({
+      roleId: task.roleId,
+      candidateKey,
+    })),
+    skipDuplicates: true,
+  });
+  await tx.recruitingCandidateOccurrence.createMany({ data: rows });
+  return rows.map(({ rowIndex, candidateKey }) => ({ rowIndex, candidateKey }));
+}
+
+type CandidateCursor = { scope: string; value: string; key: string };
+function candidateCursorScope(value: unknown): string {
+  return createHash("sha256").update(stableJsonValue(value)).digest("hex");
+}
+function readCandidateCursor(cursor: string | undefined, scope: string): CandidateCursor | null {
+  if (cursor === undefined) return null;
+  try {
+    if (cursor.length > 4096 || !/^[a-zA-Z0-9_-]+$/.test(cursor)) throw new Error();
+    const value = JSON.parse(Buffer.from(cursor, "base64url").toString("utf8"));
+    if (
+      value.version !== 1 ||
+      value.scope !== scope ||
+      typeof value.value !== "string" ||
+      typeof value.key !== "string" ||
+      !value.key
+    )
+      throw new Error();
+    return value;
+  } catch {
+    throw new RecruitingConflictError();
+  }
+}
+function writeCandidateCursor(scope: string, value: string, key: string): string {
+  return Buffer.from(JSON.stringify({ version: 1, scope, value, key })).toString("base64url");
+}
+
+/** Latest source projection is selected by native read completion, never by backfill arrival. */
+function candidateIndexQuery(roleId: string) {
+  return Prisma.sql`WITH base AS (
+    SELECT c."roleId", c."candidateKey", c."shortlisted", c."revision",
+      p."name", p."title", p."company", p."location", p."linkedinUrl", p."resumeUrl", p."evidenceUrls",
+      COALESCE(p."issues", '[]'::jsonb) AS "issues",
+      d."discoveryCount",
+      to_char(d."firstDiscoveredAt", 'YYYY-MM-DD"T"HH24:MI:SS.MS"Z"') AS "firstDiscoveredAt",
+      to_char(d."lastDiscoveredAt", 'YYYY-MM-DD"T"HH24:MI:SS.MS"Z"') AS "lastDiscoveredAt",
+      a."version" AS "assessmentVersion", a."roleRevisionId" AS "assessmentRoleRevisionId",
+      to_char(a."createdAt", 'YYYY-MM-DD"T"HH24:MI:SS.MS"Z"') AS "assessmentCreatedAt",
+      a."judgments"->>'hardGate' AS "hardGate"
+    FROM "recruiting_candidates" c
+    LEFT JOIN LATERAL (
+      SELECT o.* FROM "recruiting_candidate_occurrences" o
+      JOIN "recruiting_candidate_pages" page ON page."effectId" = o."pageId"
+      WHERE o."roleId" = c."roleId" AND o."candidateKey" = c."candidateKey"
+      ORDER BY page."observedAt" DESC, page."effectId" COLLATE "C" DESC, o."rowIndex" DESC LIMIT 1
+    ) p ON true
+    LEFT JOIN LATERAL (
+      SELECT count(*)::int AS "discoveryCount", min(page."observedAt") AS "firstDiscoveredAt",
+        max(page."observedAt") AS "lastDiscoveredAt"
+      FROM "recruiting_candidate_occurrences" o
+      JOIN "recruiting_candidate_pages" page ON page."effectId" = o."pageId"
+      WHERE o."roleId" = c."roleId" AND o."candidateKey" = c."candidateKey"
+    ) d ON true
+    LEFT JOIN LATERAL (
+      SELECT "version", "roleRevisionId", "createdAt", "judgments" FROM "recruiting_assessments" a
+      WHERE a."roleId" = c."roleId" AND a."candidateKey" = c."candidateKey"
+      ORDER BY "version" DESC LIMIT 1
+    ) a ON true
+    WHERE c."roleId" = ${roleId}
+  )`;
+}
+
+type CandidateQueryRow = {
+  roleId: string;
+  candidateKey: string;
+  name: string | null;
+  title: string | null;
+  company: string | null;
+  location: string | null;
+  linkedinUrl: string | null;
+  resumeUrl: string | null;
+  evidenceUrls: unknown;
+  issues: unknown;
+  shortlisted: boolean;
+  revision: number;
+  discoveryCount: number;
+  firstDiscoveredAt: string | null;
+  lastDiscoveredAt: string | null;
+  assessmentVersion: number | null;
+  assessmentRoleRevisionId: string | null;
+  assessmentCreatedAt: string | null;
+  hardGate: string | null;
+  sortValue: string;
+};
+
+export async function listRecruitingCandidates(
+  prisma: PrismaClient,
+  actor: Actor,
+  raw: CandidatesInput,
+): Promise<CandidatesOutput> {
+  const input = ListRecruitingCandidatesInput.parse(raw);
+  return prisma.$transaction(
+    async (tx) => {
+      const role = await requireRole(tx, actor, input.roleId);
+      const sort = input.sort ?? "recent";
+      const limit = input.limit ?? 25;
+      const scope = candidateCursorScope({
+        roleId: role.id,
+        roleRevisionId: role.currentRevisionId,
+        sort,
+        query: input.query ?? "",
+        assessmentState: input.assessmentState ?? null,
+        verdict: input.verdict ?? null,
+        shortlisted: input.shortlisted ?? null,
+        actionId: input.actionId ?? null,
+      });
+      const cursor = readCandidateCursor(input.cursor, scope);
+      const clauses = [Prisma.sql`true`];
+      if (input.query)
+        clauses.push(
+          Prisma.sql`strpos(lower(concat_ws(' ', b."name", b."title", b."company", b."location", b."linkedinUrl", b."candidateKey")), lower(${input.query})) > 0`,
+        );
+      if (input.assessmentState === "unassessed")
+        clauses.push(Prisma.sql`b."assessmentVersion" IS NULL`);
+      if (input.assessmentState === "current")
+        clauses.push(Prisma.sql`b."assessmentRoleRevisionId" = ${role.currentRevisionId}`);
+      if (input.assessmentState === "outdated")
+        clauses.push(Prisma.sql`b."assessmentRoleRevisionId" <> ${role.currentRevisionId}`);
+      if (input.verdict) clauses.push(Prisma.sql`b."hardGate" = ${input.verdict}`);
+      if (input.shortlisted !== undefined)
+        clauses.push(Prisma.sql`b."shortlisted" = ${input.shortlisted}`);
+      if (input.actionId)
+        clauses.push(
+          Prisma.sql`EXISTS (SELECT 1 FROM "recruiting_candidate_occurrences" o JOIN "recruiting_candidate_pages" p ON p."effectId" = o."pageId" WHERE o."roleId" = b."roleId" AND o."candidateKey" = b."candidateKey" AND p."actionId" = ${input.actionId})`,
+        );
+      const filtered = Prisma.sql`${candidateIndexQuery(role.id)}, filtered AS (SELECT b.* FROM base b WHERE ${Prisma.join(clauses, " AND ")})`;
+      const totals = await tx.$queryRaw<
+        Array<{
+          total: bigint;
+          sourceRows: bigint;
+          candidates: bigint;
+          identifiedCandidates: bigint;
+          unassessed: bigint;
+          assessed: bigint;
+          shortlisted: bigint;
+        }>
+      >(Prisma.sql`${filtered} SELECT (SELECT count(*) FROM filtered) AS "total",
+      COALESCE(sum("discoveryCount"), 0)::bigint AS "sourceRows", count(*) AS "candidates",
+      count(*) FILTER (WHERE "linkedinUrl" IS NOT NULL) AS "identifiedCandidates",
+      count(*) FILTER (WHERE "assessmentVersion" IS NULL) AS "unassessed",
+      count(*) FILTER (WHERE "assessmentVersion" IS NOT NULL) AS "assessed",
+      count(*) FILTER (WHERE "shortlisted") AS "shortlisted" FROM base`);
+      const sortValue =
+        sort === "name"
+          ? Prisma.sql`lower(COALESCE(NULLIF("name", ''), "candidateKey")) COLLATE "C"`
+          : Prisma.sql`COALESCE("lastDiscoveredAt", '') COLLATE "C"`;
+      const direction = sort === "name" ? Prisma.sql`ASC` : Prisma.sql`DESC`;
+      const after = cursor
+        ? sort === "name"
+          ? Prisma.sql`("sortValue" > ${cursor.value} COLLATE "C" OR ("sortValue" = ${cursor.value} COLLATE "C" AND "candidateKey" > ${cursor.key} COLLATE "C"))`
+          : Prisma.sql`("sortValue" < ${cursor.value} COLLATE "C" OR ("sortValue" = ${cursor.value} COLLATE "C" AND "candidateKey" > ${cursor.key} COLLATE "C"))`
+        : Prisma.sql`true`;
+      const rows = await tx.$queryRaw<CandidateQueryRow[]>(Prisma.sql`${filtered}, ordered AS (
+      SELECT *, ${sortValue} AS "sortValue" FROM filtered
+    ) SELECT * FROM ordered WHERE ${after}
+      ORDER BY "sortValue" ${direction}, "candidateKey" COLLATE "C" ASC LIMIT ${limit + 1}`);
+      const selected = rows.slice(0, limit);
+      const last = selected.at(-1);
+      const { total, ...counts } = totals[0]!;
+      return ListRecruitingCandidatesOutput.parse({
+        roleId: role.id,
+        roleRevisionId: role.currentRevisionId,
+        items: selected.map(
+          ({
+            assessmentVersion,
+            assessmentRoleRevisionId,
+            assessmentCreatedAt,
+            hardGate,
+            sortValue: _sort,
+            ...profile
+          }) => ({
+            ...profile,
+            latestAssessment:
+              assessmentVersion === null
+                ? null
+                : {
+                    version: assessmentVersion,
+                    roleRevisionId: assessmentRoleRevisionId,
+                    createdAt: assessmentCreatedAt,
+                    isCurrent: assessmentRoleRevisionId === role.currentRevisionId,
+                    hardGate,
+                  },
+          }),
+        ),
+        nextCursor:
+          rows.length > limit && last
+            ? writeCandidateCursor(scope, last.sortValue, last.candidateKey)
+            : null,
+        total: Number(total),
+        counts: Object.fromEntries(
+          Object.entries(counts).map(([key, value]) => [key, Number(value)]),
+        ),
+      });
+    },
+    { isolationLevel: Prisma.TransactionIsolationLevel.RepeatableRead },
+  );
+}
+
+export async function setRecruitingCandidateShortlist(
+  prisma: PrismaClient,
+  actor: Actor,
+  raw: ShortlistInput,
+): Promise<ShortlistOutput> {
+  const input = SetRecruitingCandidateShortlistInput.parse(raw);
+  return prisma.$transaction(async (tx) => {
+    await tx.$queryRaw(
+      Prisma.sql`SELECT "id" FROM "threads" WHERE "id" = ${input.threadId} AND "spaceId" = ${actor.spaceId} AND "userId" = ${actor.userId} FOR UPDATE`,
+    );
+    const thread = await requireThread(tx, actor, input.threadId);
+    if (thread.activeRecruitingRoleId !== input.roleId) throw new IsolationError();
+    const role = await requireRole(tx, actor, input.roleId, true);
+    const candidate = await tx.recruitingCandidate.findUnique({
+      where: { roleId_candidateKey: { roleId: role.id, candidateKey: input.candidateKey } },
+    });
+    if (!candidate) throw new IsolationError();
+    if (candidate.revision !== input.expectedRevision) throw new RecruitingConflictError();
+    if (candidate.shortlisted === input.shortlisted)
+      return {
+        roleId: role.id,
+        candidateKey: candidate.candidateKey,
+        shortlisted: candidate.shortlisted,
+        revision: candidate.revision,
+      };
+    const message = await createThreadMessageInTransaction(tx, {
+      threadId: thread.id,
+      role: "user",
+      blocks: [
+        {
+          kind: "text",
+          text: `${input.shortlisted ? "Shortlist" : "Remove from shortlist"} candidate ${candidate.candidateKey} for role ${role.id}, criteria revision ${role.revision}, candidate revision ${candidate.revision}.`,
+        },
+      ],
+    });
+    const changed = await tx.recruitingCandidate.updateMany({
+      where: {
+        roleId: role.id,
+        candidateKey: candidate.candidateKey,
+        revision: input.expectedRevision,
+      },
+      data: {
+        shortlisted: input.shortlisted,
+        revision: candidate.revision + 1,
+        shortlistMessageId: message.id,
+      },
+    });
+    if (changed.count !== 1) throw new RecruitingConflictError();
+    return {
+      roleId: role.id,
+      candidateKey: candidate.candidateKey,
+      shortlisted: input.shortlisted,
+      revision: candidate.revision + 1,
+    };
+  });
+}
+
+export async function listRecruitingCandidateSources(
+  prisma: PrismaClient,
+  actor: Actor,
+  raw: CandidateSourcesInput,
+): Promise<CandidateSourcesOutput> {
+  const input = ListRecruitingCandidateSourcesInput.parse(raw);
+  return prisma.$transaction(
+    async (tx) => {
+      const role = await requireRole(tx, actor, input.roleId);
+      const candidate = await tx.recruitingCandidate.findUnique({
+        where: { roleId_candidateKey: { roleId: role.id, candidateKey: input.candidateKey } },
+      });
+      if (!candidate) throw new IsolationError();
+      const scope = candidateCursorScope({
+        roleId: role.id,
+        candidateKey: candidate.candidateKey,
+        kind: "sources",
+      });
+      const cursor = readCandidateCursor(input.cursor, scope);
+      const limit = input.limit ?? 25;
+      if (cursor) {
+        const rowIndex = Number(cursor.value);
+        if (!Number.isSafeInteger(rowIndex) || rowIndex < 0) throw new RecruitingConflictError();
+        const anchor = await tx.recruitingCandidateOccurrence.findUnique({
+          where: { pageId_rowIndex: { pageId: cursor.key, rowIndex } },
+        });
+        if (anchor?.roleId !== role.id || anchor.candidateKey !== candidate.candidateKey)
+          throw new RecruitingConflictError();
+      }
+      const where = { roleId: role.id, candidateKey: candidate.candidateKey };
+      const total = await tx.recruitingCandidateOccurrence.count({ where });
+      const rows = await tx.recruitingCandidateOccurrence.findMany({
+        where,
+        orderBy: [{ pageId: "asc" }, { rowIndex: "asc" }],
+        ...(cursor
+          ? {
+              cursor: { pageId_rowIndex: { pageId: cursor.key, rowIndex: Number(cursor.value) } },
+              skip: 1,
+            }
+          : {}),
+        take: limit + 1,
+        include: { page: true },
+      });
+      const selected = rows.slice(0, limit);
+      const checked = new Set<string>();
+      for (const { page } of selected) {
+        if (checked.has(page.effectId)) continue;
+        const effect = await tx.externalEffect.findFirst({
+          where: { id: page.effectId, spaceId: actor.spaceId, status: "completed" },
+        });
+        if (!effect) throw new IsolationError();
+        const read = await researchReadBinding(tx, actor, effect);
+        if (
+          read?.toolName !== "get_rows" ||
+          read.binding.taskId !== page.taskId ||
+          read.binding.actionId !== page.actionId ||
+          read.saved.task?.roleId !== role.id ||
+          read.saved.action?.roleRevisionId !== page.roleRevisionId
+        )
+          throw new IsolationError();
+        const artifact = await recordedResearchReadArtifact(tx, actor, read);
+        if (!artifact || artifact.id !== page.artifactId || artifact.hash !== page.artifactHash)
+          throw new IsolationError();
+        checked.add(page.effectId);
+      }
+      const last = selected.at(-1);
+      return ListRecruitingCandidateSourcesOutput.parse({
+        roleId: role.id,
+        candidateKey: candidate.candidateKey,
+        items: selected.map(({ page, rowIndex }) => ({
+          taskId: page.taskId,
+          actionId: page.actionId,
+          roleRevisionId: page.roleRevisionId,
+          effectId: page.effectId,
+          rowIndex,
+          artifactRef: { artifactId: page.artifactId, sha256: page.artifactHash },
+          requestCursor: page.requestCursor,
+          outputId: page.outputId,
+          observedAt: page.observedAt.toISOString(),
+        })),
+        nextCursor:
+          rows.length > limit && last
+            ? writeCandidateCursor(scope, String(last.rowIndex), last.pageId)
+            : null,
+        total,
+      });
     },
     { isolationLevel: Prisma.TransactionIsolationLevel.RepeatableRead },
   );

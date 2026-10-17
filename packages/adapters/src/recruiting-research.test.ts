@@ -113,7 +113,8 @@ describe("frozen recruiting research requests", () => {
     for (const text of [request.instructions, request.output, request.recallScope])
       expect(loaded.args.prompt).toContain(text);
     expect(loaded).toMatchObject({
-      version: 2,
+      version: 3,
+      candidateOutputSchema: "candidate_output_v1",
       purpose: "calibration",
       approvalEffectId: "g1-approval",
       roleId: "role",
@@ -124,7 +125,20 @@ describe("frozen recruiting research requests", () => {
     });
     expect(loaded.args.prompt).toContain("do not change qualification");
     expect(loaded.args.prompt).toContain("Research purpose:\ncalibration");
+    expect(loaded.args.prompt).toContain("linkedin_url");
+    expect(loaded.args.prompt).toContain("evidence_urls");
     expect(loaded.args.prompt).not.toContain("maximum years");
+  });
+
+  it("reads immutable v2 requests without inventing a candidate output schema", () => {
+    const built = buildRecruitingResearchRequest(request);
+    const legacy = JSON.parse(built.bytes.toString("utf8"));
+    legacy.version = 2;
+    delete legacy.candidateOutputSchema;
+    legacy.args.prompt = legacy.args.prompt.split("\n\nCanonical candidate output schema:")[0];
+    const bytes = Buffer.from(JSON.stringify(legacy));
+    expect(readRecruitingResearchRequest(bytes, sha256(bytes))).toEqual(legacy);
+    expect(legacy).not.toHaveProperty("candidateOutputSchema");
   });
 
   it("continues only the stored provider task with the complete frozen message", () => {
@@ -165,6 +179,7 @@ describe("frozen recruiting research requests", () => {
       legacy.version = 1;
       delete legacy.purpose;
       delete legacy.approvalEffectId;
+      delete legacy.candidateOutputSchema;
       legacy.args[operation === "create" ? "prompt" : "message"] = [
         contextText,
         `Research instructions:\n${request.instructions}`,
@@ -349,6 +364,16 @@ describe("recruiting MCP result observations", () => {
         classifyRecruitingResearchResult(mcp(body), { operation: "status", providerTaskId: "task" })
           .deliveryState,
       ).toBe("unknown");
+  });
+
+  it("retains malformed rows alongside valid candidates for explicit unresolved indexing", () => {
+    const rows = [{ name: { value: "Example", source_id: "source" } }, null, "malformed"];
+    expect(
+      classifyRecruitingResearchResult(mcp({ rows }), {
+        operation: "rows",
+        providerTaskId: "task",
+      }),
+    ).toMatchObject({ deliveryState: "accepted", rows });
   });
 
   it("preserves changing raw cells, sources, opaque cursors and real output IDs", () => {

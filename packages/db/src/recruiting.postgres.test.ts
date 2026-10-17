@@ -4273,6 +4273,7 @@ describePostgres("recruiting domain (PostgreSQL)", () => {
       serverRevision: server.revision,
       kind: "create" as const,
       purpose: "calibration" as const,
+      candidateOutputSchema: "candidate_output_v1" as const,
       approvalEffectId,
       clientNonce: `action-${f.run.id}`,
       recallScope: null,
@@ -5081,6 +5082,7 @@ describePostgres("recruiting domain (PostgreSQL)", () => {
     label: string,
     toolName: "get_task" | "get_rows",
     rawResult: Prisma.InputJsonValue,
+    cursor?: string,
   ) {
     const request: Prisma.InputJsonValue = [
       "__rakazoCatalogTool",
@@ -5092,7 +5094,7 @@ describePostgres("recruiting domain (PostgreSQL)", () => {
           resourceRevision: f.server.revision,
           toolName,
         },
-        args: { task_id: "provider-task" },
+        args: { task_id: "provider-task", ...(cursor === undefined ? {} : { cursor }) },
       },
     ];
     const effect = await prisma.externalEffect.create({
@@ -6839,5 +6841,527 @@ describePostgres("recruiting domain (PostgreSQL)", () => {
     });
     expect(historical.action?.id).toBe(prepared.action.id);
     expect(historical.action?.receiptArtifactId).toBe(mapped.receiptArtifact.id);
+  });
+
+  const canonicalCandidateRow = (
+    name: string,
+    linkedinUrl: string | null,
+    company = "Example Company",
+  ) => ({
+    name: { value: name, source_id: "person" },
+    linkedin_url: { value: linkedinUrl, source_id: "person" },
+    current_title: { value: "Engineer", source_id: "person" },
+    current_company: { value: company, source_id: "person" },
+    location: { value: "London", source_id: "person" },
+    resume_url: { value: null, source_id: "person" },
+    evidence_urls: { value: ["https://example.test/project"], source_id: "person" },
+    _sources: { person: "https://example.test/original" },
+  });
+  async function recordCandidatePage(
+    f: Awaited<ReturnType<typeof researchFixture>>,
+    prepared: Awaited<ReturnType<typeof recruiting.prepareRecruitingResearchAction>>,
+    label: string,
+    rows: Prisma.InputJsonValue[],
+    options: { historicalBackfill?: boolean; observedAt?: Date; cursor?: string } = {},
+  ) {
+    const rawResult = {
+      structuredContent: { rows, output_id: `output-${label}`, next_cursor: `next-${label}` },
+    };
+    const identity = await completedResearchRead(
+      f,
+      prepared.action.id,
+      label,
+      "get_rows",
+      rawResult,
+      options.cursor,
+    );
+    if (options.observedAt)
+      await prisma.externalEffect.update({
+        where: { id: identity.effectId },
+        data: { updatedAt: options.observedAt },
+      });
+    const input = {
+      ...identity,
+      runId: f.run.id,
+      actionId: prepared.action.id,
+      toolName: "get_rows" as const,
+      rows,
+      outputId: `output-${label}`,
+      cursor: `next-${label}`,
+      historicalBackfill: options.historicalBackfill,
+      outputArtifact: {
+        ...f.metadata(label),
+        clientNonce: `recruiting-observation:${identity.effectId}`,
+      },
+    };
+    const saved = await recordResearchRead(input);
+    return { saved, input };
+  }
+
+  it("indexes every raw row, deduplicates only canonical profiles and pages using real totals", async () => {
+    const { f, prepared } = await mappedResearchFixture();
+    const first = await recordCandidatePage(
+      f,
+      prepared,
+      "candidate-first",
+      [
+        canonicalCandidateRow("Example", "https://linkedin.com/in/Example?trk=source"),
+        canonicalCandidateRow("Repeated", "https://www.linkedin.com/in/EXAMPLE/"),
+        null as unknown as Prisma.InputJsonValue,
+        {
+          Name: "Unmapped name",
+          _sources: { profile: "https://www.linkedin.com/in/NotAnIdentity" },
+        },
+      ],
+      { observedAt: new Date("2026-10-16T00:00:00Z"), cursor: "exact-input-cursor" },
+    );
+    await recordCandidatePage(
+      f,
+      prepared,
+      "candidate-next",
+      [
+        canonicalCandidateRow(
+          "Example newest",
+          "https://www.linkedin.com/in/example",
+          "New Company",
+        ),
+        canonicalCandidateRow("Other", "https://www.linkedin.com/in/other"),
+      ],
+      { observedAt: new Date("2026-10-16T01:00:00Z") },
+    );
+    const page = await recruiting.listRecruitingCandidates(prisma, actor, {
+      roleId: f.role.role.id,
+      limit: 2,
+      sort: "name",
+    });
+    expect(page.total).toBe(4);
+    expect(page.items).toHaveLength(2);
+    expect(page.counts).toEqual({
+      sourceRows: 6,
+      candidates: 4,
+      identifiedCandidates: 2,
+      unassessed: 4,
+      assessed: 0,
+      shortlisted: 0,
+    });
+    const next = await recruiting.listRecruitingCandidates(prisma, actor, {
+      roleId: f.role.role.id,
+      limit: 2,
+      sort: "name",
+      cursor: page.nextCursor!,
+    });
+    expect(new Set([...page.items, ...next.items].map((item) => item.candidateKey)).size).toBe(4);
+    expect(next.nextCursor).toBeNull();
+    const filtered = await recruiting.listRecruitingCandidates(prisma, actor, {
+      roleId: f.role.role.id,
+      query: "new company",
+      assessmentState: "unassessed",
+    });
+    expect(filtered.total).toBe(1);
+    expect(filtered.items[0]).toMatchObject({
+      candidateKey: "linkedin:/in/example",
+      name: "Example newest",
+      company: "New Company",
+      discoveryCount: 3,
+      latestAssessment: null,
+    });
+    const sources = await recruiting.listRecruitingCandidateSources(prisma, actor, {
+      roleId: f.role.role.id,
+      candidateKey: "linkedin:/in/example",
+      limit: 1,
+    });
+    expect(sources.total).toBe(3);
+    expect(sources.items[0]).toMatchObject({
+      taskId: prepared.task.id,
+      actionId: prepared.action.id,
+      roleRevisionId: prepared.action.roleRevisionId,
+      effectId: first.input.effectId,
+      rowIndex: 0,
+      artifactRef: {
+        artifactId: first.saved.outputArtifact.id,
+        sha256: first.saved.outputArtifact.hash,
+      },
+      requestCursor: "exact-input-cursor",
+      outputId: "output-candidate-first",
+    });
+    expect(sources.nextCursor).not.toBeNull();
+    await expect(
+      recruiting.listRecruitingCandidateSources(
+        prisma,
+        { ...actor, userId: otherUserId },
+        { roleId: f.role.role.id, candidateKey: "linkedin:/in/example" },
+      ),
+    ).rejects.toThrow(IsolationError);
+    await recordResearchRead(first.input);
+    expect(
+      await prisma.recruitingCandidateOccurrence.count({ where: { roleId: f.role.role.id } }),
+    ).toBe(6);
+    const unresolved = [...page.items, ...next.items].filter((item) => item.linkedinUrl === null);
+    expect(unresolved).toHaveLength(2);
+    expect(unresolved.every((item) => item.name === null && item.issues.length > 0)).toBe(true);
+  });
+
+  it("recovers already recorded native pages without moving the current cursor or overwriting newer profiles", async () => {
+    const { f, prepared } = await mappedResearchFixture();
+    const old = await recordCandidatePage(
+      f,
+      prepared,
+      "candidate-old",
+      [canonicalCandidateRow("Old name", "https://www.linkedin.com/in/example")],
+      { observedAt: new Date("2026-10-16T00:00:00Z") },
+    );
+    await recordCandidatePage(
+      f,
+      prepared,
+      "candidate-current",
+      [canonicalCandidateRow("Current name", "https://www.linkedin.com/in/EXAMPLE?trk=new")],
+      { observedAt: new Date("2026-10-16T02:00:00Z") },
+    );
+    await prisma.recruitingCandidatePage.delete({ where: { effectId: old.input.effectId } });
+    const before = await prisma.recruitingResearchAction.findUniqueOrThrow({
+      where: { id: prepared.action.id },
+    });
+    const pending = await recruiting.listUnmappedRecruitingResearchReads(prisma, actor, {
+      runId: f.run.id,
+      taskId: prepared.task.id,
+    });
+    expect(pending).toHaveLength(1);
+    expect(pending[0]?.outputArtifact?.hash).toBe(old.saved.outputArtifact.hash);
+    await recordResearchRead({
+      ...old.input,
+      historicalBackfill: true,
+      cursor: "old-cursor",
+      observedProviderState: "queued",
+      usage: [{ scope: "task", unit: "credits", amount: 0 }],
+    });
+    expect(
+      await prisma.recruitingResearchAction.findUniqueOrThrow({
+        where: { id: prepared.action.id },
+      }),
+    ).toEqual(before);
+    const list = await recruiting.listRecruitingCandidates(prisma, actor, {
+      roleId: f.role.role.id,
+    });
+    expect(list.items[0]).toMatchObject({ name: "Current name", discoveryCount: 2 });
+    expect(
+      await recruiting.listUnmappedRecruitingResearchReads(prisma, actor, {
+        runId: f.run.id,
+        taskId: prepared.task.id,
+      }),
+    ).toEqual([]);
+  });
+
+  it("rolls back candidate rows, page, artifact and native observation together after a write failure", async () => {
+    const { f, prepared } = await mappedResearchFixture();
+    const rows = [
+      canonicalCandidateRow("Rollback example", "https://www.linkedin.com/in/rollback"),
+    ];
+    const rawResult = { structuredContent: { rows } };
+    const identity = await completedResearchRead(
+      f,
+      prepared.action.id,
+      "candidate-rollback",
+      "get_rows",
+      rawResult,
+    );
+    const failure = new Error("Injected failure after candidate occurrences");
+    const failing = prisma.$extends({
+      query: {
+        recruitingCandidateOccurrence: {
+          async createMany({ args, query }) {
+            await query(args);
+            throw failure;
+          },
+        },
+      },
+    });
+    await expect(
+      recruiting.recordRecruitingResearchObservation(failing as unknown as PrismaClient, actor, {
+        ...identity,
+        runId: f.run.id,
+        actionId: prepared.action.id,
+        toolName: "get_rows",
+        rows,
+        outputArtifact: {
+          ...f.metadata("rollback"),
+          clientNonce: `recruiting-observation:${identity.effectId}`,
+        },
+      }),
+    ).rejects.toThrow(failure);
+    expect(await prisma.recruitingCandidatePage.count({ where: { roleId: f.role.role.id } })).toBe(
+      0,
+    );
+    expect(await prisma.recruitingCandidate.count({ where: { roleId: f.role.role.id } })).toBe(0);
+    expect(
+      await prisma.artifact.count({
+        where: { clientNonce: `recruiting-observation:${identity.effectId}` },
+      }),
+    ).toBe(0);
+    expect(
+      (
+        await prisma.recruitingResearchAction.findUniqueOrThrow({
+          where: { id: prepared.action.id },
+        })
+      ).outputArtifacts,
+    ).toEqual([]);
+    expect(
+      await prisma.event.count({
+        where: {
+          type: "recruiting.read",
+          AND: [
+            { payload: { path: ["phase"], equals: "recorded" } },
+            { payload: { path: ["effectId"], equals: identity.effectId } },
+          ],
+        },
+      }),
+    ).toBe(0);
+  });
+
+  it("keeps historical schemas unresolved and marks zero-row native pages without sentinel candidates", async () => {
+    const { f, prepared } = await mappedResearchFixture();
+    await prisma.recruitingResearchAction.update({
+      where: { id: prepared.action.id },
+      data: { candidateOutputSchema: null },
+    });
+    await recordCandidatePage(f, prepared, "historical-candidate", [
+      canonicalCandidateRow(
+        "Never infer historical columns",
+        "https://www.linkedin.com/in/historical",
+      ),
+    ]);
+    const empty = await recordCandidatePage(f, prepared, "empty-candidate-page", []);
+    const list = await recruiting.listRecruitingCandidates(prisma, actor, {
+      roleId: f.role.role.id,
+    });
+    expect(list.total).toBe(1);
+    expect(list.counts).toMatchObject({ sourceRows: 1, identifiedCandidates: 0, unassessed: 1 });
+    expect(list.items[0]).toMatchObject({
+      name: null,
+      linkedinUrl: null,
+      issues: ["historical_schema_unknown"],
+    });
+    expect(
+      await prisma.recruitingCandidatePage.findUniqueOrThrow({
+        where: { effectId: empty.input.effectId },
+      }),
+    ).toMatchObject({ rowCount: 0 });
+  });
+
+  it("lists newly assessed candidates independently of discovery and separates shortlist CAS from qualification", async () => {
+    const f = await assessmentFixture();
+    await recruiting.saveRecruitingAssessment(prisma, actor, f.context, f.input, f.artifacts);
+    const page = await recruiting.listRecruitingCandidates(prisma, actor, {
+      roleId: f.role.role.id,
+      assessmentState: "current",
+      verdict: "met",
+    });
+    expect(page.total).toBe(1);
+    expect(page.items[0]).toMatchObject({
+      candidateKey: f.input.candidateKey,
+      discoveryCount: 0,
+      revision: 0,
+      latestAssessment: { isCurrent: true, hardGate: "met", version: 1 },
+    });
+    const input = {
+      threadId: f.thread.id,
+      roleId: f.role.role.id,
+      candidateKey: f.input.candidateKey,
+      expectedRevision: 0,
+      shortlisted: true,
+    };
+    expect(await recruiting.setRecruitingCandidateShortlist(prisma, actor, input)).toMatchObject({
+      shortlisted: true,
+      revision: 1,
+    });
+    const receipts = await prisma.message.count({ where: { threadId: f.thread.id } });
+    expect(
+      await recruiting.setRecruitingCandidateShortlist(prisma, actor, {
+        ...input,
+        expectedRevision: 1,
+      }),
+    ).toMatchObject({ revision: 1 });
+    expect(await prisma.message.count({ where: { threadId: f.thread.id } })).toBe(receipts);
+    await expect(recruiting.setRecruitingCandidateShortlist(prisma, actor, input)).rejects.toThrow(
+      recruiting.RecruitingConflictError,
+    );
+    const old = await prisma.recruitingAssessment.findFirstOrThrow({
+      where: { roleId: f.role.role.id, candidateKey: f.input.candidateKey },
+    });
+    await recruiting.reviseRecruitingRole(prisma, actor, {
+      sourceRefs: f.role.revision.sourceRefs,
+      criteria: f.role.revision.criteria,
+      preferences: [],
+      definitionQuestions: [],
+      roleId: f.role.role.id,
+      expectedRevision: f.role.role.revision,
+      title: "Updated assessment role",
+    });
+    const stale = await recruiting.listRecruitingCandidates(prisma, actor, {
+      roleId: f.role.role.id,
+      assessmentState: "outdated",
+      shortlisted: true,
+    });
+    expect(stale.items[0]?.latestAssessment?.isCurrent).toBe(false);
+    expect(stale.total).toBe(1);
+    expect(
+      await prisma.recruitingAssessment.findFirstOrThrow({
+        where: { roleId: f.role.role.id, candidateKey: f.input.candidateKey },
+      }),
+    ).toEqual(old);
+  });
+
+  it("keeps cross-action occurrences for one profile while role identities stay isolated", async () => {
+    const { f, prepared } = await mappedResearchFixture();
+    await recordCandidatePage(f, prepared, "cross-action-first", [
+      canonicalCandidateRow("First round", "https://www.linkedin.com/in/example"),
+    ]);
+    const human = await recruiting.createThreadMessage(prisma, {
+      threadId: f.thread.id,
+      role: "user",
+      blocks: [{ kind: "text", text: "Continue the supplied search" }],
+    });
+    await prisma.steeringMessage.create({
+      data: { messageId: human.id, userId, botId, runId: f.run.id, claimedAt: new Date() },
+    });
+    const continued = await recruiting.prepareRecruitingResearchAction(prisma, actor, {
+      ...f.input,
+      sourceMessageId: human.id,
+      intent: { basis: "direct", quote: "Continue the supplied search" },
+      kind: "continue",
+      taskId: prepared.task.id,
+      clientNonce: `${f.input.clientNonce}-candidate-next`,
+      requestArtifact: f.metadata("candidate-next-request"),
+    });
+    const admitted = await recruiting.admitRecruitingResearchAction(
+      prisma,
+      actor,
+      researchAdmission(f, continued),
+    );
+    const rawResult = { task_id: "provider-task", status: "accepted" };
+    await prisma.externalEffect.update({
+      where: { id: admitted.effect!.id },
+      data: { status: "completed", result: rawResult },
+    });
+    await recruiting.reconcileRecruitingResearchAction(prisma, actor, {
+      runId: f.run.id,
+      actionId: continued.action.id,
+      effectId: admitted.effect!.id,
+      rawResult,
+      deliveryState: "accepted",
+      providerTaskId: "provider-task",
+      receiptArtifact: f.metadata("candidate-next-receipt"),
+    });
+    await recordCandidatePage(f, continued, "cross-action-second", [
+      canonicalCandidateRow("Second round", "https://linkedin.com/in/EXAMPLE/?trk=other"),
+    ]);
+    const all = await recruiting.listRecruitingCandidates(prisma, actor, {
+      roleId: f.role.role.id,
+    });
+    expect(all.counts).toMatchObject({ sourceRows: 2, candidates: 1 });
+    const round = await recruiting.listRecruitingCandidates(prisma, actor, {
+      roleId: f.role.role.id,
+      actionId: continued.action.id,
+    });
+    expect(round.total).toBe(1);
+    expect(round.items[0]?.discoveryCount).toBe(2);
+    const occurrences = await recruiting.listRecruitingCandidateSources(prisma, actor, {
+      roleId: f.role.role.id,
+      candidateKey: "linkedin:/in/example",
+    });
+    expect(new Set(occurrences.items.map((item) => item.actionId))).toEqual(
+      new Set([prepared.action.id, continued.action.id]),
+    );
+    const other = await mappedResearchFixture();
+    await recordCandidatePage(other.f, other.prepared, "cross-role", [
+      canonicalCandidateRow("Separate role", "https://www.linkedin.com/in/example"),
+    ]);
+    expect(
+      (await recruiting.listRecruitingCandidates(prisma, actor, { roleId: f.role.role.id }))
+        .items[0]?.discoveryCount,
+    ).toBe(2);
+    expect(
+      (await recruiting.listRecruitingCandidates(prisma, actor, { roleId: other.f.role.role.id }))
+        .items[0]?.discoveryCount,
+    ).toBe(1);
+  });
+
+  it("preserves raw-only native reads without reporting a genuine empty candidate page or retrying recovery", async () => {
+    const { f, prepared } = await mappedResearchFixture();
+    const rawResult = {
+      content: [{ type: "text", text: "No structured candidate rows supplied" }],
+    };
+    const identity = await completedResearchRead(
+      f,
+      prepared.action.id,
+      "raw-only-page",
+      "get_rows",
+      rawResult,
+    );
+    await recordResearchRead({
+      ...identity,
+      runId: f.run.id,
+      actionId: prepared.action.id,
+      toolName: "get_rows",
+      outputArtifact: f.metadata("raw-only-page"),
+    });
+    expect(
+      await prisma.recruitingCandidatePage.findUniqueOrThrow({
+        where: { effectId: identity.effectId },
+      }),
+    ).toMatchObject({ rowCount: null });
+    expect(await prisma.recruitingCandidate.count({ where: { roleId: f.role.role.id } })).toBe(0);
+    expect(
+      await recruiting.listUnmappedRecruitingResearchReads(prisma, actor, {
+        runId: f.run.id,
+        taskId: prepared.task.id,
+      }),
+    ).toEqual([]);
+    const empty = await recordCandidatePage(f, prepared, "accepted-empty-page", []);
+    expect(
+      await prisma.recruitingCandidatePage.findUniqueOrThrow({
+        where: { effectId: empty.input.effectId },
+      }),
+    ).toMatchObject({ rowCount: 0 });
+  });
+
+  it("joins an assessment saved with the native research row reference to the same discovered candidate", async () => {
+    const { f, prepared } = await mappedResearchFixture();
+    const page = await recordCandidatePage(f, prepared, "assessment-join", [
+      canonicalCandidateRow("Unresolved person", null),
+    ]);
+    const reference = page.saved.candidateRows[0]!;
+    expect(reference).toMatchObject({
+      rowIndex: 0,
+      candidateKey: `source-row:${page.input.effectId}:0`,
+    });
+    const input = {
+      ...assessmentInput(f.role.role.id, f.role.revision.id, reference.candidateKey),
+      sourceRefs: [],
+      questions: [],
+      atomJudgments: [],
+    };
+    const admission = await assessmentAdmission(input, { runId: f.run.id, threadId: f.thread.id });
+    await recruiting.saveRecruitingAssessment(
+      prisma,
+      actor,
+      admission.context,
+      input,
+      admission.artifacts,
+    );
+    const listed = await recruiting.listRecruitingCandidates(prisma, actor, {
+      roleId: f.role.role.id,
+    });
+    expect(listed.counts).toMatchObject({
+      candidates: 1,
+      sourceRows: 1,
+      assessed: 1,
+      unassessed: 0,
+    });
+    expect(listed.items).toHaveLength(1);
+    expect(listed.items[0]).toMatchObject({
+      candidateKey: reference.candidateKey,
+      discoveryCount: 1,
+      latestAssessment: { version: 1, isCurrent: true },
+    });
   });
 });

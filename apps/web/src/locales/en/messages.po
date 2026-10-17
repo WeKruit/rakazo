@@ -49,6 +49,11 @@ msgstr "{0} (over 10 MiB)"
 msgid "{0} {unitLabel}"
 msgstr "{0} {unitLabel}"
 
+#. placeholder {0}: candidatePage.total
+#: src/pages/RecruitingPanel.tsx
+msgid "{0} candidates"
+msgstr "{0} candidates"
+
 #. placeholder {0}: block.name
 #: src/pages/shell/message-cards.tsx
 msgid "{0} connection"
@@ -84,6 +89,11 @@ msgstr "{0} rollup hours"
 #: src/pages/AccountSettingsOverlay.tsx
 msgid "{0} runs · {1} tokens"
 msgstr "{0} runs · {1} tokens"
+
+#. placeholder {0}: candidate.discoveryCount
+#: src/pages/RecruitingPanel.tsx
+msgid "{0} saved discoveries"
+msgstr "{0} saved discoveries"
 
 #. placeholder {0}: bot.name
 #: src/pages/ExternalConversationSettings.tsx
@@ -413,6 +423,10 @@ msgstr "Agent connections"
 msgid "Agents:"
 msgstr "Agents:"
 
+#: src/pages/RecruitingPanel.tsx
+msgid "All assessments"
+msgstr "All assessments"
+
 #: src/pages/Artifacts.tsx
 msgid "All bots"
 msgstr "All bots"
@@ -420,6 +434,10 @@ msgstr "All bots"
 #: src/pages/ModelSettingsOverlay.tsx
 msgid "All providers"
 msgstr "All providers"
+
+#: src/pages/RecruitingPanel.tsx
+msgid "All rounds"
+msgstr "All rounds"
 
 #: src/pages/ActivityList.tsx
 msgid "All statuses"
@@ -432,6 +450,10 @@ msgstr "All time"
 #: src/pages/McpServersOverlay.tsx
 msgid "All tools"
 msgstr "All tools"
+
+#: src/pages/RecruitingPanel.tsx
+msgid "All verdicts"
+msgstr "All verdicts"
 
 #. placeholder {0}: rule.matchValue
 #: src/components/ApprovalRulesSettings.tsx
@@ -620,8 +642,24 @@ msgid "Ask the server owner to configure this provider."
 msgstr "Ask the server owner to configure this provider."
 
 #: src/pages/RecruitingPanel.tsx
+msgid "Assessed"
+msgstr "Assessed"
+
+#: src/pages/RecruitingPanel.tsx
+msgid "Assessment"
+msgstr "Assessment"
+
+#: src/pages/RecruitingPanel.tsx
 msgid "Assessment date"
 msgstr "Assessment date"
+
+#: src/pages/RecruitingPanel.tsx
+msgid "Assessment state"
+msgstr "Assessment state"
+
+#: src/pages/RecruitingPanel.tsx
+msgid "Assessment unavailable"
+msgstr "Assessment unavailable"
 
 #: src/pages/RecruitingPanel.tsx
 msgid "Assumption"
@@ -877,6 +915,14 @@ msgstr "Candidate"
 msgid "Candidate facts"
 msgstr "Candidate facts"
 
+#: src/pages/RecruitingPanel.tsx
+msgid "Candidate sort"
+msgstr "Candidate sort"
+
+#: src/pages/RecruitingPanel.tsx
+msgid "Candidates"
+msgstr "Candidates"
+
 #: src/pages/Artifacts.tsx
 msgid "Card view"
 msgstr "Card view"
@@ -1125,6 +1171,10 @@ msgstr "Comment"
 #: src/pages/AccountSettingsOverlay.tsx
 msgid "Compact"
 msgstr "Compact"
+
+#: src/pages/RecruitingPanel.tsx
+msgid "Company"
+msgstr "Company"
 
 #: src/pages/ScratchpadSection.tsx
 msgid "Complete"
@@ -1512,6 +1562,10 @@ msgstr "Could not load approval rules"
 msgid "Could not load artifacts."
 msgstr "Could not load artifacts."
 
+#: src/pages/RecruitingPanel.tsx
+msgid "Could not load assessment"
+msgstr "Could not load assessment"
+
 #: src/pages/ModelBackupsSettings.tsx
 msgid "Could not load backup models"
 msgstr "Could not load backup models"
@@ -1523,6 +1577,14 @@ msgstr "Could not load billing"
 #: src/pages/IntegrationSetup.tsx
 msgid "Could not load bots. Reload to try again."
 msgstr "Could not load bots. Reload to try again."
+
+#: src/pages/RecruitingPanel.tsx
+msgid "Could not load candidate sources"
+msgstr "Could not load candidate sources"
+
+#: src/pages/RecruitingPanel.tsx
+msgid "Could not load candidates"
+msgstr "Could not load candidates"
 
 #: src/components/computer/TerminalApp.tsx
 msgid "Could not load commands"
@@ -1695,6 +1757,10 @@ msgstr "Could not save routine"
 #: src/components/ApprovalRulesSettings.tsx
 msgid "Could not save rule"
 msgstr "Could not save rule"
+
+#: src/pages/RecruitingPanel.tsx
+msgid "Could not save shortlist"
+msgstr "Could not save shortlist"
 
 #: src/pages/KnowledgeSection.tsx
 msgid "Could not save skill"
@@ -1911,6 +1977,10 @@ msgstr "Cutoff date"
 msgid "Dark"
 msgstr "Dark"
 
+#: src/pages/RecruitingPanel.tsx
+msgid "Dashboard"
+msgstr "Dashboard"
+
 #: src/lib/billing.ts
 #: src/pages/RoutineSchedule.tsx
 msgid "day"
@@ -2076,6 +2146,14 @@ msgstr "Disconnected {0}."
 #: src/pages/VoiceSettingsOverlay.tsx
 msgid "Disconnecting…"
 msgstr "Disconnecting…"
+
+#: src/pages/RecruitingPanel.tsx
+msgid "Discoveries"
+msgstr "Discoveries"
+
+#: src/pages/RecruitingPanel.tsx
+msgid "Discovery details"
+msgstr "Discovery details"
 
 #: src/components/ComputerUpdateProgress.tsx
 #: src/components/teach/TeachComputerOverlay.tsx
@@ -2476,6 +2554,10 @@ msgstr "Hard"
 msgid "Hard criteria"
 msgstr "Hard criteria"
 
+#: src/pages/RecruitingPanel.tsx
+msgid "Hard criteria filter"
+msgstr "Hard criteria filter"
+
 #: src/pages/RoutineEditor.tsx
 msgid "header"
 msgstr "header"
@@ -2553,6 +2635,10 @@ msgstr "How to check"
 #: src/pages/Shell.tsx
 msgid "I’m done"
 msgstr "I’m done"
+
+#: src/pages/RecruitingPanel.tsx
+msgid "Identified profiles"
+msgstr "Identified profiles"
 
 #: src/pages/VoiceSettingsOverlay.tsx
 msgid "If you heard that, voice is ready."
@@ -2706,6 +2792,14 @@ msgstr "Link a chat app"
 msgid "Link SSO"
 msgstr "Link SSO"
 
+#: src/pages/RecruitingPanel.tsx
+msgid "LinkedIn"
+msgstr "LinkedIn"
+
+#: src/pages/RecruitingPanel.tsx
+msgid "LinkedIn missing"
+msgstr "LinkedIn missing"
+
 #: src/pages/Artifacts.tsx
 msgid "List view"
 msgstr "List view"
@@ -2723,6 +2817,7 @@ msgid "Load earlier messages"
 msgstr "Load earlier messages"
 
 #: src/pages/Artifacts.tsx
+#: src/pages/RecruitingPanel.tsx
 msgid "Load more"
 msgstr "Load more"
 
@@ -2790,6 +2885,10 @@ msgstr "Local access lets bots run commands without asking. Avoid it on shared o
 #: src/pages/LocalSettings.tsx
 msgid "Local Server Settings"
 msgstr "Local Server Settings"
+
+#: src/pages/RecruitingPanel.tsx
+msgid "Location"
+msgstr "Location"
 
 #: src/pages/Paywall.tsx
 #: src/pages/Shell.tsx
@@ -3077,6 +3176,10 @@ msgstr "More"
 msgid "More computer actions"
 msgstr "More computer actions"
 
+#: src/pages/RecruitingPanel.tsx
+msgid "More sources"
+msgstr "More sources"
+
 #: src/pages/ModelBackupsSettings.tsx
 msgid "Move {full} down"
 msgstr "Move {full} down"
@@ -3100,12 +3203,17 @@ msgstr "Mute"
 #: src/components/teach/SkillDraftCard.tsx
 #: src/pages/Auth.tsx
 #: src/pages/GroupPanel.tsx
+#: src/pages/RecruitingPanel.tsx
 #: src/pages/RoutineEditor.tsx
 #: src/pages/shell/bot-credentials.tsx
 #: src/pages/shell/bot-panel.tsx
 #: src/pages/shell/dialogs.tsx
 msgid "Name"
 msgstr "Name"
+
+#: src/pages/RecruitingPanel.tsx
+msgid "Name missing"
+msgstr "Name missing"
 
 #: src/pages/shell/bot-panel.tsx
 msgid "Name this bot"
@@ -3284,6 +3392,14 @@ msgid "No saved assessments"
 msgstr "No saved assessments"
 
 #: src/pages/RecruitingPanel.tsx
+msgid "No saved candidates"
+msgstr "No saved candidates"
+
+#: src/pages/RecruitingPanel.tsx
+msgid "No saved discovery sources"
+msgstr "No saved discovery sources"
+
+#: src/pages/RecruitingPanel.tsx
 msgid "No saved history"
 msgstr "No saved history"
 
@@ -3294,6 +3410,10 @@ msgstr "No saved memory in these scopes"
 #: src/pages/RecruitingPanel.tsx
 msgid "No saved questions"
 msgstr "No saved questions"
+
+#: src/pages/RecruitingPanel.tsx
+msgid "No saved research"
+msgstr "No saved research"
 
 #: src/pages/RecruitingPanel.tsx
 msgid "No saved result rows"
@@ -3642,6 +3762,14 @@ msgstr "Private"
 msgid "Private workspace with its own bots and groups."
 msgstr "Private workspace with its own bots and groups."
 
+#: src/pages/RecruitingPanel.tsx
+msgid "Profile"
+msgstr "Profile"
+
+#: src/pages/RecruitingPanel.tsx
+msgid "Profile details"
+msgstr "Profile details"
+
 #: src/components/integrations/IntegrationSetup.tsx
 msgid "Project ID"
 msgstr "Project ID"
@@ -3680,6 +3808,10 @@ msgstr "Quote"
 msgid "Raw search results"
 msgstr "Raw search results"
 
+#: src/pages/RecruitingPanel.tsx
+msgid "Raw value"
+msgstr "Raw value"
+
 #: src/pages/Shell.tsx
 msgid "React"
 msgstr "React"
@@ -3712,6 +3844,10 @@ msgstr "Receipt"
 #: src/pages/ActivityList.tsx
 msgid "Recent"
 msgstr "Recent"
+
+#: src/pages/RecruitingPanel.tsx
+msgid "Recently discovered"
+msgstr "Recently discovered"
 
 #: src/pages/McpServersOverlay.tsx
 msgid "Reconnect OAuth"
@@ -3929,6 +4065,14 @@ msgstr "Request"
 msgid "Research & writing"
 msgstr "Research & writing"
 
+#: src/pages/RecruitingPanel.tsx
+msgid "Research round"
+msgstr "Research round"
+
+#: src/pages/RecruitingPanel.tsx
+msgid "Research rounds"
+msgstr "Research rounds"
+
 #: src/components/ComputerMaintenanceActions.tsx
 #: src/pages/shell/avatar-studio-popover.tsx
 msgid "Reset"
@@ -3981,6 +4125,14 @@ msgstr "Restore the last saved workspace. Unsaved work on the computer is lost."
 #: src/components/ComputerUpdateProgress.tsx
 msgid "Restoring your workspace"
 msgstr "Restoring your workspace"
+
+#: src/pages/RecruitingPanel.tsx
+msgid "Resume"
+msgstr "Resume"
+
+#: src/pages/RecruitingPanel.tsx
+msgid "Resume missing"
+msgstr "Resume missing"
 
 #: src/components/AccountAccess.tsx
 #: src/pages/Auth.tsx
@@ -4135,12 +4287,24 @@ msgid "Saved"
 msgstr "Saved"
 
 #: src/pages/RecruitingPanel.tsx
-msgid "Saved assessments"
-msgstr "Saved assessments"
+msgid "Saved candidate sources"
+msgstr "Saved candidate sources"
+
+#: src/pages/RecruitingPanel.tsx
+msgid "Saved candidate totals"
+msgstr "Saved candidate totals"
+
+#: src/pages/RecruitingPanel.tsx
+msgid "Saved candidates"
+msgstr "Saved candidates"
 
 #: src/pages/RecruitingPanel.tsx
 msgid "Saved facts"
 msgstr "Saved facts"
+
+#: src/pages/RecruitingPanel.tsx
+msgid "Saved source rows"
+msgstr "Saved source rows"
 
 #: src/pages/ScratchpadSection.tsx
 msgid "Saved, but list refresh failed"
@@ -4205,6 +4369,10 @@ msgstr "Search bots and switch conversations"
 #: src/pages/PluginsOverlay.tsx
 msgid "Search by domain"
 msgstr "Search by domain"
+
+#: src/pages/RecruitingPanel.tsx
+msgid "Search candidates"
+msgstr "Search candidates"
 
 #: src/components/integrations/IntegrationSetup.tsx
 msgid "Search integrations.sh"
@@ -4342,6 +4510,19 @@ msgstr "Shared skills"
 msgid "Shell"
 msgstr "Shell"
 
+#: src/pages/RecruitingPanel.tsx
+msgid "Shortlist"
+msgstr "Shortlist"
+
+#. placeholder {0}: candidate.name ?? candidate.candidateKey
+#: src/pages/RecruitingPanel.tsx
+msgid "Shortlist {0}"
+msgstr "Shortlist {0}"
+
+#: src/pages/RecruitingPanel.tsx
+msgid "Shortlisted only"
+msgstr "Shortlisted only"
+
 #: src/pages/Shell.tsx
 msgid "Show bots"
 msgstr "Show bots"
@@ -4450,6 +4631,10 @@ msgid "Something went wrong. Try again."
 msgstr "Something went wrong. Try again."
 
 #: src/pages/RecruitingPanel.tsx
+msgid "Source Artifact"
+msgstr "Source Artifact"
+
+#: src/pages/RecruitingPanel.tsx
 msgid "Source text"
 msgstr "Source text"
 
@@ -4526,7 +4711,6 @@ msgstr "Statement"
 
 #: src/pages/ActivityList.tsx
 #: src/pages/Board.tsx
-#: src/pages/RecruitingPanel.tsx
 msgid "Status"
 msgstr "Status"
 
@@ -4783,6 +4967,7 @@ msgid "Time of day"
 msgstr "Time of day"
 
 #: src/pages/Board.tsx
+#: src/pages/RecruitingPanel.tsx
 #: src/pages/shell/bot-panel.tsx
 msgid "Title"
 msgstr "Title"
@@ -5049,11 +5234,10 @@ msgid "Verifying…"
 msgstr "Verifying…"
 
 #: src/pages/Artifacts.tsx
-#: src/pages/RecruitingPanel.tsx
 msgid "Version"
 msgstr "Version"
 
-#. placeholder {0}: item.version
+#. placeholder {0}: assessment.version
 #. placeholder {0}: selected.roleRevision.revision
 #. placeholder {0}: workspace.revision.revision
 #: src/pages/RecruitingPanel.tsx

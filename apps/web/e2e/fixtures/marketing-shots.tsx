@@ -1,6 +1,6 @@
 import { I18nProvider } from "@lingui/react";
 import { ChatMarkdown } from "@rakazo/chat-ui/web";
-import type { Bot, Me, ModelCatalogEntry } from "@rakazo/contracts";
+import type { Bot, Me, ModelCatalogEntry, RecruitingCandidate } from "@rakazo/contracts";
 import { defaultCronPreset } from "@rakazo/core";
 import { BotAvatar, Button } from "@rakazo/ui-web";
 import { ArrowUp, Bell, LayoutGrid, Monitor, PanelLeftClose, Plus, Search } from "lucide-react";
@@ -55,7 +55,13 @@ window.fetch = async (input, init) => {
   const url = input instanceof Request ? input.url : String(input);
   if (url.includes("/rpc/")) {
     const path = new URL(url, location.origin).pathname.replace(/^\/rpc\//, "");
-    const body = path in demoRpc ? demoRpc[path] : [];
+    const response = path in demoRpc ? demoRpc[path] : [];
+    const request = input instanceof Request ? input : new Request(url, init);
+    const encoded = (await request
+      .clone()
+      .json()
+      .catch(() => ({}))) as { json?: Record<string, unknown> };
+    const body = typeof response === "function" ? await response(encoded.json ?? {}) : response;
     return new Response(JSON.stringify({ json: body }), {
       status: 200,
       headers: { "content-type": "application/json" },
@@ -596,9 +602,215 @@ async function prepareRecruitingSourceShot() {
       sourceMessageTargets: [],
     },
   ];
-  demoRpc["recruiting/listResearch"] = { tasks: [], actions: [] };
+  const assessment = (
+    demoRpc["recruiting/listAssessments"] as { assessment: { createdAt: string } }[]
+  )[0]!;
+  const candidates: RecruitingCandidate[] = [
+    {
+      roleId: role.id,
+      candidateKey: "Synthetic candidate",
+      name: "Synthetic candidate",
+      title: "Systems Engineer",
+      company: "Example Robotics",
+      location: "Example City",
+      linkedinUrl: "https://www.linkedin.com/in/synthetic-candidate",
+      resumeUrl: null,
+      evidenceUrls: ["https://example.test/engineering"],
+      issues: [],
+      shortlisted: false,
+      revision: 0,
+      discoveryCount: 2,
+      firstDiscoveredAt: "2026-10-16T00:00:00Z",
+      lastDiscoveredAt: "2026-10-16T00:00:00Z",
+      latestAssessment: {
+        version: 1,
+        roleRevisionId: revision.id,
+        createdAt: assessment.assessment.createdAt,
+        isCurrent: true,
+        hardGate: "unknown",
+      },
+    },
+    {
+      roleId: role.id,
+      candidateKey: "linkedin:/in/synthetic-unassessed",
+      name: "Synthetic unassessed",
+      title: "Data Engineer",
+      company: "Example Systems",
+      location: "Example City",
+      linkedinUrl: "https://www.linkedin.com/in/synthetic-unassessed",
+      resumeUrl: null,
+      evidenceUrls: null,
+      issues: [],
+      shortlisted: false,
+      revision: 0,
+      discoveryCount: 1,
+      firstDiscoveredAt: "2026-10-16T00:00:00Z",
+      lastDiscoveredAt: "2026-10-16T00:00:00Z",
+      latestAssessment: null,
+    },
+    {
+      roleId: role.id,
+      candidateKey: "row:demo-read:3",
+      name: "Synthetic unresolved",
+      title: null,
+      company: null,
+      location: null,
+      linkedinUrl: null,
+      resumeUrl: null,
+      evidenceUrls: null,
+      issues: ["missing_field:linkedin_url"],
+      shortlisted: false,
+      revision: 0,
+      discoveryCount: 1,
+      firstDiscoveredAt: "2026-10-16T00:00:00Z",
+      lastDiscoveredAt: "2026-10-16T00:00:00Z",
+      latestAssessment: null,
+    },
+  ];
+  demoRpc["recruiting/listCandidates"] = (args: Record<string, unknown>) => {
+    const query = typeof args.query === "string" ? args.query.toLowerCase() : "";
+    const filtered = candidates.filter(
+      (candidate) =>
+        (!query ||
+          [candidate.name, candidate.title, candidate.company, candidate.location].some((value) =>
+            value?.toLowerCase().includes(query),
+          )) &&
+        (args.shortlisted === undefined || candidate.shortlisted === args.shortlisted) &&
+        (!args.assessmentState ||
+          (args.assessmentState === "unassessed"
+            ? !candidate.latestAssessment
+            : args.assessmentState === "current"
+              ? candidate.latestAssessment?.isCurrent
+              : candidate.latestAssessment && !candidate.latestAssessment.isCurrent)) &&
+        (!args.verdict || candidate.latestAssessment?.hardGate === args.verdict),
+    );
+    const offset = typeof args.cursor === "string" ? Number(args.cursor) : 0;
+    const page = filtered.slice(offset, offset + 2);
+    return {
+      roleId: role.id,
+      roleRevisionId: revision.id,
+      items: page,
+      total: filtered.length,
+      nextCursor: offset + page.length < filtered.length ? String(offset + page.length) : null,
+      counts: {
+        sourceRows: 4,
+        candidates: 3,
+        identifiedCandidates: 2,
+        unassessed: 2,
+        assessed: 1,
+        shortlisted: candidates.filter((candidate) => candidate.shortlisted).length,
+      },
+    };
+  };
+  demoRpc["recruiting/getAssessment"] = () => assessment;
+  demoRpc["recruiting/setCandidateShortlist"] = (args: Record<string, unknown>) => {
+    const candidate = candidates.find((candidate) => candidate.candidateKey === args.candidateKey)!;
+    candidate.shortlisted = args.shortlisted === true;
+    candidate.revision++;
+    return {
+      roleId: role.id,
+      candidateKey: candidate.candidateKey,
+      shortlisted: candidate.shortlisted,
+      revision: candidate.revision,
+    };
+  };
+  const rawRows = [candidates[0]!, candidates[0]!, candidates[1]!, candidates[2]!].map(
+    (candidate) => ({
+      name: { value: candidate.name, source_id: "s1" },
+      linkedin_url: { value: candidate.linkedinUrl, source_id: "s1" },
+      current_title: { value: candidate.title, source_id: "s1" },
+      current_company: { value: candidate.company, source_id: "s1" },
+      location: { value: candidate.location, source_id: "s1" },
+      resume_url: { value: candidate.resumeUrl, source_id: null },
+      evidence_urls: { value: candidate.evidenceUrls, source_id: "s1" },
+      _sources: { s1: "https://example.test/engineering" },
+    }),
+  );
+  const rawSnapshot = {
+    version: 1,
+    taskId: "task-demo",
+    actionId: "action-demo",
+    operation: "rows",
+    effectId: "demo-read",
+    request: { task_id: "provider-task-demo" },
+    providerResult: { rows: rawRows },
+    observation: {
+      deliveryState: "accepted",
+      providerTaskId: "provider-task-demo",
+      observedProviderState: null,
+      done: null,
+      providerApplicationConfirmed: false,
+      automaticRetry: false,
+      usage: null,
+      rows: rawRows,
+      nextCursor: null,
+      outputId: "output-demo",
+    },
+  };
+  const rawBytes = new TextEncoder().encode(JSON.stringify(rawSnapshot));
+  const rawHash = Array.from(
+    new Uint8Array(await crypto.subtle.digest("SHA-256", rawBytes)),
+    (byte) => byte.toString(16).padStart(2, "0"),
+  ).join("");
+  const rawRef = { artifactId: "result-demo", sha256: rawHash };
+  demoRpc["recruiting/listResearch"] = {
+    tasks: [
+      {
+        id: "task-demo",
+        roleId: role.id,
+        mcpServerId: "server-demo",
+        serverRevision: 1,
+        providerTaskId: "provider-task-demo",
+        pendingActionId: "action-demo",
+        state: "completed",
+        createdByRunId: "run-demo",
+      },
+    ],
+    actions: [
+      {
+        id: "action-demo",
+        taskId: "task-demo",
+        roleRevisionId: revision.id,
+        clientNonce: "nonce-demo",
+        kind: "create",
+        runId: "run-demo",
+        sourceMessageId: "source-message-demo",
+        requestArtifact: { artifactId: "request-demo", sha256: "a".repeat(64) },
+        contextArtifact: { artifactId: "context-demo", sha256: "b".repeat(64) },
+        recallScope: null,
+        deliveryState: "accepted",
+        observedProviderState: "completed",
+        receiptArtifact: null,
+        outputArtifacts: [rawRef],
+        cursor: null,
+        effectId: "effect-demo",
+        usage: null,
+      },
+    ],
+  };
+  demoRpc["recruiting/listCandidateSources"] = (args: Record<string, unknown>) => {
+    const index = candidates.findIndex((candidate) => candidate.candidateKey === args.candidateKey);
+    const rowIndexes = index === 0 ? [0, 1] : [index + 1];
+    return {
+      roleId: role.id,
+      candidateKey: args.candidateKey,
+      total: rowIndexes.length,
+      nextCursor: null,
+      items: rowIndexes.map((rowIndex) => ({
+        taskId: "task-demo",
+        actionId: "action-demo",
+        roleRevisionId: revision.id,
+        effectId: "demo-read",
+        rowIndex,
+        artifactRef: rawRef,
+        requestCursor: null,
+        outputId: "output-demo",
+        observedAt: "2026-10-16T00:00:00Z",
+      })),
+    };
+  };
   demoRpc["recruiting/listQuestions"] = { questions: [] };
-  demoRpc["artifacts/getById"] = {
+  const profileArtifact = {
     id: "profile-demo",
     botId: "bot-inbox",
     groupId: null,
@@ -611,6 +823,16 @@ async function prepareRecruitingSourceShot() {
     createdAt: "2026-10-16T00:00:00Z",
     contentBase64: btoa(String.fromCharCode(...bytes)),
   };
+  demoRpc["artifacts/getById"] = (args: Record<string, unknown>) =>
+    args.artifactId === rawRef.artifactId
+      ? {
+          ...profileArtifact,
+          id: rawRef.artifactId,
+          name: "search-results.json",
+          size: rawBytes.length,
+          contentBase64: btoa(String.fromCharCode(...rawBytes)),
+        }
+      : profileArtifact;
 }
 
 if (view === "subscription") {

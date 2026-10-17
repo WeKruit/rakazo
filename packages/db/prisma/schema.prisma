@@ -552,6 +552,7 @@ model Thread {
 }
 
 model Message {
+  recruitingShortlists RecruitingCandidate[] @relation("RecruitingCandidateShortlist")
   recruitingActions RecruitingResearchAction[]
   id               String    @id @default(cuid())
   threadId         String
@@ -753,6 +754,7 @@ model CloudAgent {
 }
 
 model ExternalEffect {
+  recruitingCandidatePage RecruitingCandidatePage?
   recruitingActions RecruitingResearchAction[]
   id             String   @id @default(cuid())
   spaceId        String
@@ -1039,6 +1041,7 @@ model ComputerExecutionLease {
 }
 
 model Artifact {
+  recruitingCandidatePages RecruitingCandidatePage[]
   recruitingRequests RecruitingResearchAction[] @relation("RecruitingRequest")
   recruitingContexts RecruitingResearchAction[] @relation("RecruitingContext")
   recruitingReceipts RecruitingResearchAction[] @relation("RecruitingReceipt")
@@ -1508,6 +1511,8 @@ model RecruitingRole {
   currentRevision RecruitingRoleRevision @relation("CurrentRecruitingRevision", fields: [currentRevisionId], references: [id], onDelete: NoAction)
   revisions RecruitingRoleRevision[] @relation("RecruitingRoleRevisions")
   activeThreads Thread[] @relation("ActiveRecruitingRole")
+  candidates RecruitingCandidate[]
+  sourcePages RecruitingCandidatePage[]
   researchTasks RecruitingResearchTask[]
   assessments RecruitingAssessment[]
 
@@ -1529,6 +1534,7 @@ model RecruitingRoleRevision {
   currentFor RecruitingRole? @relation("CurrentRecruitingRevision")
   initialRuns Run[]
   actions RecruitingResearchAction[]
+  candidatePages RecruitingCandidatePage[]
   assessments RecruitingAssessment[]
 
   @@unique([roleId, revision])
@@ -1549,6 +1555,7 @@ model RecruitingResearchTask {
   createdByRunId String
   createdByRun Run @relation(fields: [createdByRunId], references: [id], onDelete: Cascade)
   actions RecruitingResearchAction[] @relation("RecruitingTaskActions")
+  candidatePages RecruitingCandidatePage[]
 
   @@unique([mcpServerId, serverRevision, providerTaskId])
   @@index([roleId])
@@ -1569,6 +1576,8 @@ model RecruitingResearchAction {
   clientNonce String @unique
   kind String
   purpose String?
+  candidateOutputSchema String?
+  candidatePages RecruitingCandidatePage[]
   approvalEffectId String?
   deliveryState String @default("prepared")
   observedProviderState String?
@@ -1610,4 +1619,69 @@ model RecruitingAssessment {
 
   @@id([roleId, candidateKey, version])
   @@map("recruiting_assessments")
+}
+
+
+/// A role-local identity and independent human selection. Profiles live on immutable source rows.
+model RecruitingCandidate {
+  roleId String
+  role RecruitingRole @relation(fields: [roleId], references: [id], onDelete: Cascade)
+  candidateKey String
+  shortlisted Boolean @default(false)
+  revision Int @default(0)
+  shortlistMessageId String?
+  shortlistMessage Message? @relation("RecruitingCandidateShortlist", fields: [shortlistMessageId], references: [id], onDelete: NoAction)
+  occurrences RecruitingCandidateOccurrence[]
+
+  @@id([roleId, candidateKey])
+  @@map("recruiting_candidates")
+}
+
+/// One native get_rows effect, including genuine zero-row pages; never a synthetic sentinel row.
+model RecruitingCandidatePage {
+  effectId String @id
+  effect ExternalEffect @relation(fields: [effectId], references: [id], onDelete: Cascade)
+  roleId String
+  role RecruitingRole @relation(fields: [roleId], references: [id], onDelete: Cascade)
+  taskId String
+  task RecruitingResearchTask @relation(fields: [taskId], references: [id], onDelete: Cascade)
+  actionId String
+  action RecruitingResearchAction @relation(fields: [actionId], references: [id], onDelete: Cascade)
+  roleRevisionId String
+  roleRevision RecruitingRoleRevision @relation(fields: [roleRevisionId], references: [id], onDelete: NoAction)
+  artifactId String
+  artifact Artifact @relation(fields: [artifactId], references: [id], onDelete: NoAction)
+  artifactHash String
+  requestCursor String?
+  outputId String?
+  observedAt DateTime
+  /// Null means the native receipt did not establish an accepted row array.
+  rowCount Int?
+  occurrences RecruitingCandidateOccurrence[]
+
+  @@index([roleId, observedAt, effectId])
+  @@index([actionId])
+  @@map("recruiting_candidate_pages")
+}
+
+/// Projection only. Exact provider row bytes remain in the referenced native ArtifactStore receipt.
+model RecruitingCandidateOccurrence {
+  pageId String
+  page RecruitingCandidatePage @relation(fields: [pageId], references: [effectId], onDelete: Cascade)
+  rowIndex Int
+  roleId String
+  candidateKey String
+  candidate RecruitingCandidate @relation(fields: [roleId, candidateKey], references: [roleId, candidateKey], onDelete: Cascade)
+  name String?
+  title String?
+  company String?
+  location String?
+  linkedinUrl String?
+  resumeUrl String?
+  evidenceUrls Json?
+  issues Json
+
+  @@id([pageId, rowIndex])
+  @@index([roleId, candidateKey])
+  @@map("recruiting_candidate_occurrences")
 }

@@ -269,9 +269,12 @@ import {
   getRecruitingAssessment,
   getRecruitingWorkspace,
   listRecruitingAssessments,
+  listRecruitingCandidateSources,
+  listRecruitingCandidates,
   listRecruitingQuestions,
   listRecruitingResearch,
   reviseRecruitingRole,
+  setRecruitingCandidateShortlist,
 } from "./recruiting.js";
 import { listRoutineRuns } from "./routine-runs.js";
 import { listSpaceRuns } from "./runs.js";
@@ -3206,6 +3209,15 @@ export function createRouter(deps: RouterDeps) {
       }),
     },
     recruiting: {
+      listCandidates: authed.recruiting.listCandidates.handler(({ context, input }) =>
+        listRecruitingCandidates(deps.prisma, context.actor, input),
+      ),
+      listCandidateSources: authed.recruiting.listCandidateSources.handler(({ context, input }) =>
+        listRecruitingCandidateSources(deps.prisma, context.actor, input),
+      ),
+      setCandidateShortlist: authed.recruiting.setCandidateShortlist.handler(({ context, input }) =>
+        setRecruitingCandidateShortlist(deps.prisma, context.actor, input),
+      ),
       editCriteria: authed.recruiting.editCriteria.handler(({ context, input }) =>
         editRecruitingCriteria(deps.prisma, context.actor, input, {
           artifacts: deps.artifacts,

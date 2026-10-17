@@ -3,6 +3,35 @@ import { captureScreenshot, completeOnboarding, signup } from "./helpers";
 
 test.describe.configure({ mode: "serial" });
 
+test("recruiting dashboard includes unassessed saved candidates and their source rounds", async ({
+  page,
+}, testInfo) => {
+  await page.goto("/e2e/fixtures/marketing-shots.html?view=recruiting");
+  await page.getByRole("tab", { name: "Dashboard", exact: true }).click();
+  const totals = page.getByLabel("Saved candidate totals", { exact: true });
+  await expect(
+    totals.getByText("Saved source rows", { exact: true }).locator("..").locator("dd"),
+  ).toHaveText("4");
+  await expect(
+    totals.getByText("Candidates", { exact: true }).locator("..").locator("dd"),
+  ).toHaveText("3");
+  await expect(
+    totals.getByText("Unassessed", { exact: true }).locator("..").locator("dd"),
+  ).toHaveText("2");
+  await captureScreenshot(page, testInfo, "recruiting-candidate-dashboard");
+  await page.getByRole("tab", { name: "Evidence", exact: true }).click();
+  await page
+    .getByRole("combobox", { name: "Assessment state", exact: true })
+    .selectOption("unassessed");
+  await expect(page.getByRole("button", { name: /^Synthetic unassessed/ })).toBeVisible();
+  await expect(page.getByRole("button", { name: /^Synthetic candidate/ })).toHaveCount(0);
+  await page.getByRole("button", { name: /^Synthetic unassessed/ }).click();
+  await expect(page.getByLabel("Saved candidate sources", { exact: true })).toContainText(
+    "provider_report",
+  );
+  await captureScreenshot(page, testInfo, "recruiting-unassessed-candidate-source");
+});
+
 test("recruiting evidence opens retained text at the exact saved selection", async ({
   page,
 }, testInfo) => {

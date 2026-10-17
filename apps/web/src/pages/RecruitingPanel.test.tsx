@@ -20,6 +20,10 @@ import { readRightPanelState, writeRightPanelState } from "../lib/right-panel-st
 const api = vi.hoisted(() => ({
   getWorkspace: vi.fn(),
   listAssessments: vi.fn(),
+  listCandidates: vi.fn(),
+  listCandidateSources: vi.fn(),
+  setCandidateShortlist: vi.fn(),
+  getAssessment: vi.fn(),
   listResearch: vi.fn(),
   listQuestions: vi.fn(),
   answer: vi.fn(),
@@ -46,7 +50,10 @@ vi.mock("../lib/rpc", () => ({
 }));
 vi.mock("@lingui/react/macro", () => ({
   Trans: ({ children }: { children: ReactNode }) => children,
-  useLingui: () => ({ t: (parts: TemplateStringsArray) => parts.join("") }),
+  useLingui: () => ({
+    t: (parts: TemplateStringsArray, ...values: unknown[]) =>
+      parts.reduce((text, part, index) => text + part + (values[index] ?? ""), ""),
+  }),
 }));
 vi.mock("../components/ArtifactFileCard", () => ({
   ArtifactFileCard: ({
@@ -265,12 +272,98 @@ const assessment = {
   ],
 } satisfies RecruitingAssessmentSnapshot;
 let cleanup: (() => Promise<void>) | undefined;
+function candidatePage(items = [candidateFixture()]) {
+  return {
+    roleId: role.id,
+    roleRevisionId: revision.id,
+    items,
+    nextCursor: null as string | null,
+    total: items.length,
+    counts: {
+      sourceRows: 19,
+      candidates: 12,
+      identifiedCandidates: 10,
+      unassessed: 9,
+      assessed: 3,
+      shortlisted: 2,
+    },
+  };
+}
+function candidateFixture(candidateKey = "candidate-1", assessed = true) {
+  return {
+    roleId: role.id,
+    candidateKey,
+    name: null as string | null,
+    title: null as string | null,
+    company: null as string | null,
+    location: null as string | null,
+    linkedinUrl: null as string | null,
+    resumeUrl: null as string | null,
+    evidenceUrls: null as string[] | null,
+    issues: [] as string[],
+    shortlisted: false,
+    revision: 0,
+    discoveryCount: 2,
+    firstDiscoveredAt: "2026-01-01T00:00:00Z",
+    lastDiscoveredAt: "2026-01-02T00:00:00Z",
+    latestAssessment: assessed
+      ? {
+          version: 1,
+          roleRevisionId: "revision-1",
+          createdAt: "2026-01-01T00:00:00Z",
+          isCurrent: false,
+          hardGate: "unknown" as const,
+        }
+      : null,
+  };
+}
 beforeEach(() => {
   const request = artifactSourceFixture("{}", "application/json", "artifact-request");
   vi.stubGlobal("IS_REACT_ACT_ENVIRONMENT", true);
   vi.stubGlobal("crypto", webcrypto);
   api.getWorkspace.mockResolvedValue({ role, revision });
   api.listAssessments.mockResolvedValue([assessment]);
+  api.listCandidates.mockImplementation(async ({ roleId }: { roleId: string }) => {
+    const assessments = (await api.listAssessments.mock.results.at(-1)?.value) ?? [assessment];
+    const workspace = await api.getWorkspace.mock.results.at(-1)?.value;
+    return {
+      ...candidatePage(
+        assessments
+          .filter((item: RecruitingAssessmentSnapshot) => item.assessment.roleId === roleId)
+          .map((item: RecruitingAssessmentSnapshot) => ({
+            ...candidateFixture(item.assessment.candidateKey),
+            roleId: item.assessment.roleId,
+            latestAssessment: {
+              version: item.assessment.version,
+              roleRevisionId: item.assessment.roleRevisionId,
+              createdAt: item.assessment.createdAt,
+              isCurrent: item.isCurrent,
+              hardGate: item.assessment.judgments.hardGate,
+            },
+          })),
+      ),
+      roleId,
+      roleRevisionId: workspace?.revision.id ?? revision.id,
+    };
+  });
+  api.getAssessment.mockImplementation(
+    async ({ roleId, candidateKey }: { roleId: string; candidateKey: string }) => {
+      const assessments = (await api.listAssessments.mock.results.at(-1)?.value) ?? [assessment];
+      return (
+        assessments.find(
+          (item: RecruitingAssessmentSnapshot) =>
+            item.assessment.roleId === roleId && item.assessment.candidateKey === candidateKey,
+        ) ?? null
+      );
+    },
+  );
+  api.listCandidateSources.mockResolvedValue({
+    roleId: role.id,
+    candidateKey: "candidate-1",
+    items: [],
+    nextCursor: null,
+    total: 0,
+  });
   api.listQuestions.mockResolvedValue({ questions: [] });
   api.answer.mockResolvedValue({ ok: true });
   api.listResearch.mockResolvedValue({
@@ -352,7 +445,7 @@ async function mounted(threadId = "thread-1", botId?: string) {
   };
   await render(threadId);
   const click = async (name: string) => {
-    const button = [...container.querySelectorAll("button")].find(
+    const button = [...container.querySelectorAll<HTMLElement>('button,[role="checkbox"]')].find(
       (item) => item.textContent === name || item.getAttribute("aria-label") === name,
     );
     expect(button, name).toBeDefined();
@@ -394,6 +487,452 @@ async function changeInput(container: HTMLElement, name: string, value: string) 
     input.dispatchEvent(new Event("input", { bubbles: true }));
   });
 }
+
+async function changeSelect(container: HTMLElement, name: string, value: string) {
+  const select = container.querySelector<HTMLSelectElement>(`select[aria-label="${name}"]`)!;
+  expect(select, name).not.toBeNull();
+  await act(async () => {
+    select.value = value;
+    select.dispatchEvent(new Event("change", { bubbles: true }));
+  });
+}
+
+it("shows saved unassessed profiles and authoritative totals in Cards and Table", async () => {
+  api.listCandidates.mockResolvedValue(
+    candidatePage([
+      {
+        ...candidateFixture("raw-person", false),
+        name: "Synthetic Avery",
+        title: "Systems engineer",
+        company: "Example Tools",
+        location: "Remote",
+        linkedinUrl: "https://example.test/avery",
+      },
+    ]),
+  );
+  const view = await mounted();
+  expect(view.container.textContent).toContain("19");
+  expect(view.container.textContent).toContain("12");
+  await view.click("Evidence");
+  expect(view.container.textContent).toContain("Synthetic Avery");
+  expect(view.container.textContent).toContain("Example Tools");
+  expect(view.container.textContent).toContain("Remote");
+  expect(view.container.textContent).toContain("Unassessed");
+  expect(view.container.querySelector("li")?.textContent).not.toContain("Unknown");
+  expect(view.container.querySelector('a[href="https://example.test/avery"]')).not.toBeNull();
+  await view.click("Table");
+  expect(view.container.querySelector("tbody")?.textContent).toContain("Synthetic Avery");
+  expect(view.container.querySelector("tbody")?.textContent).toContain("Systems engineer");
+  expect(view.container.querySelector("tbody")?.textContent).toContain("Example Tools");
+  expect(api.setCandidateShortlist).not.toHaveBeenCalled();
+});
+
+it("requests server pages and filters while keeping selected evidence outside the visible page", async () => {
+  api.listCandidates
+    .mockResolvedValueOnce({ ...candidatePage(), nextCursor: "page-2", total: 12 })
+    .mockResolvedValue(candidatePage([candidateFixture("candidate-2", false)]));
+  const view = await mounted();
+  await view.click("Evidence");
+  await view.click("candidate-1");
+  expect(api.getAssessment).toHaveBeenCalledExactlyOnceWith({
+    roleId: role.id,
+    candidateKey: "candidate-1",
+    version: 1,
+  });
+  expect(view.container.textContent).toContain("Original systems requirement");
+  await view.click("Load more");
+  expect(api.listCandidates).toHaveBeenLastCalledWith(
+    expect.objectContaining({ roleId: role.id, cursor: "page-2" }),
+  );
+  await changeInput(view.container, "Search candidates", "Synthetic");
+  expect(api.listCandidates).toHaveBeenLastCalledWith(
+    expect.objectContaining({ query: "Synthetic" }),
+  );
+  expect(api.listCandidates.mock.lastCall?.[0].cursor).toBeUndefined();
+  expect(view.container.textContent).toContain("Original systems requirement");
+  await changeSelect(view.container, "Assessment state", "unassessed");
+  await changeSelect(view.container, "Candidate sort", "recent");
+  expect(api.listCandidates).toHaveBeenLastCalledWith(
+    expect.objectContaining({ query: "Synthetic", assessmentState: "unassessed", sort: "recent" }),
+  );
+  expect(view.container.textContent).toContain("Built a compiler");
+});
+
+it("shows saved source rounds with their exact original revision and Artifact", async () => {
+  const f = rawResultsFixture();
+  api.listCandidates.mockResolvedValue(candidatePage([candidateFixture("raw-person", false)]));
+  api.listResearch.mockResolvedValue({ tasks: [f.task], actions: [f.action] });
+  api.listCandidateSources.mockResolvedValue({
+    roleId: role.id,
+    candidateKey: "raw-person",
+    total: 1,
+    nextCursor: null,
+    items: [
+      {
+        taskId: f.task.id,
+        actionId: f.action.id,
+        roleRevisionId: "old-revision",
+        effectId: "read-effect",
+        rowIndex: 0,
+        artifactRef: f.reference,
+        requestCursor: "  real-cursor==  ",
+        outputId: "output-1",
+        observedAt: "2026-01-01T00:00:00Z",
+      },
+    ],
+  });
+  api.getById.mockResolvedValue(f.artifact);
+  const view = await mounted();
+  await view.click("Evidence");
+  await view.click("raw-person");
+  expect(api.getAssessment).not.toHaveBeenCalled();
+  expect(api.listCandidateSources).toHaveBeenCalledWith(
+    expect.objectContaining({ roleId: role.id, candidateKey: "raw-person" }),
+  );
+  const sources = view.container.querySelector('[aria-label="Saved candidate sources"]')!;
+  expect(sources.textContent).toContain("old-revision");
+  expect(sources.textContent).toContain("read-effect");
+  expect(sources.textContent).toContain("output-1");
+  expect(sources.textContent).toContain("provider_report");
+  await view.expand("Source Artifact");
+  expect(api.getById).toHaveBeenCalledWith({ artifactId: f.reference.artifactId });
+  expect(
+    view.container.querySelector(`[data-artifact-id="${f.reference.artifactId}"]`),
+  ).not.toBeNull();
+});
+
+it("persists shortlist with the candidate revision and leaves conflicts visibly unsaved", async () => {
+  api.listCandidates.mockResolvedValue(candidatePage([candidateFixture("candidate-1", false)]));
+  let finish!: (value: unknown) => void;
+  api.setCandidateShortlist.mockReturnValueOnce(
+    new Promise((resolve) => {
+      finish = resolve;
+    }),
+  );
+  const view = await mounted();
+  await view.click("Evidence");
+  await view.click("Shortlist candidate-1");
+  expect(api.setCandidateShortlist).toHaveBeenCalledExactlyOnceWith({
+    threadId: "thread-1",
+    roleId: role.id,
+    candidateKey: "candidate-1",
+    expectedRevision: 0,
+    shortlisted: true,
+  });
+  expect(
+    view.container
+      .querySelector('[aria-label="Shortlist candidate-1"]')
+      ?.getAttribute("aria-checked"),
+  ).toBe("false");
+  api.listCandidates.mockResolvedValue(
+    candidatePage([{ ...candidateFixture("candidate-1", false), shortlisted: true, revision: 1 }]),
+  );
+  await act(async () =>
+    finish({ roleId: role.id, candidateKey: "candidate-1", shortlisted: true, revision: 1 }),
+  );
+  expect(
+    view.container
+      .querySelector('[aria-label="Shortlist candidate-1"]')
+      ?.getAttribute("aria-checked"),
+  ).toBe("true");
+  api.setCandidateShortlist.mockRejectedValueOnce(new ORPCError("CONFLICT"));
+  await view.click("Shortlist candidate-1");
+  expect(api.setCandidateShortlist).toHaveBeenLastCalledWith(
+    expect.objectContaining({ expectedRevision: 1, shortlisted: false }),
+  );
+  expect(view.container.textContent).toContain("Could not save shortlist");
+  expect(
+    view.container
+      .querySelector('[aria-label="Shortlist candidate-1"]')
+      ?.getAttribute("aria-checked"),
+  ).toBe("true");
+});
+
+it("distinguishes candidate index failures from an empty result and clears denied cached data", async () => {
+  api.listCandidates.mockRejectedValueOnce(new Error("offline"));
+  const view = await mounted();
+  await view.click("Evidence");
+  expect(view.container.textContent).toContain("Could not load candidates");
+  expect(view.container.textContent).not.toContain("No saved candidates");
+  api.listCandidates.mockResolvedValue(candidatePage());
+  await view.click("Refresh");
+  expect(view.container.textContent).toContain("candidate-1");
+  api.getAssessment.mockRejectedValueOnce(new ORPCError("FORBIDDEN"));
+  await view.click("candidate-1");
+  expect(view.container.textContent).not.toContain("candidate-1");
+  expect(view.container.textContent).not.toContain(role.title);
+  expect(view.container.querySelector('[role="alert"]')).not.toBeNull();
+});
+
+it("renders Dashboard totals for the linked role and actual research delivery states", async () => {
+  const view = await mounted();
+  await view.click("Dashboard");
+  expect(view.container.textContent).toContain(role.title);
+  const totals = view.container.querySelector('dl[aria-label="Saved candidate totals"]')!;
+  expect([...totals.querySelectorAll("dd")].map((item) => item.textContent)).toEqual([
+    "19",
+    "12",
+    "10",
+    "9",
+    "3",
+    "2",
+  ]);
+  expect(view.container.textContent).toContain("task-1 · active");
+  expect(view.container.textContent).toContain("create · accepted · running");
+  expect(api.setCandidateShortlist).not.toHaveBeenCalled();
+});
+
+it("retains missing identity and exposes saved profile issues without inventing profile facts", async () => {
+  api.listCandidates.mockResolvedValue(
+    candidatePage([
+      {
+        ...candidateFixture("saved-row-4", false),
+        issues: ["missing_name"],
+        evidenceUrls: ["https://example.test/evidence"],
+        resumeUrl: "https://example.test/resume.pdf",
+      },
+    ]),
+  );
+  const view = await mounted();
+  await view.click("Evidence");
+  const card = view.container.querySelector("li")!;
+  expect(card.textContent).toContain("Name missing");
+  expect(card.textContent).toContain("saved-row-4");
+  expect(card.textContent).toContain("LinkedIn missing");
+  expect(card.textContent).toContain("provider_report");
+  expect(card.textContent).toContain("missing_name");
+  expect(card.querySelector('a[href="https://example.test/resume.pdf"]')).not.toBeNull();
+  expect(card.querySelector('a[href="https://example.test/evidence"]')).not.toBeNull();
+});
+
+it("ignores a late candidate page and denial from the old thread", async () => {
+  let finish!: (value: unknown) => void;
+  let deny!: (reason: unknown) => void;
+  api.listCandidates.mockReturnValueOnce(
+    new Promise((resolve, reject) => {
+      finish = resolve;
+      deny = reject;
+    }),
+  );
+  const view = await mounted();
+  const next = {
+    role: { ...role, id: "role-2", title: "Synthetic Designer", currentRevisionId: "rev-2" },
+    revision: { ...revision, roleId: "role-2", id: "rev-2" },
+  };
+  api.getWorkspace.mockResolvedValue(next);
+  api.listCandidates.mockResolvedValue({
+    ...candidatePage([{ ...candidateFixture("new-person", false), roleId: "role-2" }]),
+    roleId: "role-2",
+    roleRevisionId: "rev-2",
+  });
+  await view.render("thread-2");
+  await act(async () => finish(candidatePage()));
+  await view.click("Evidence");
+  expect(view.container.textContent).toContain("new-person");
+  expect(view.container.textContent).not.toContain("candidate-1");
+  api.listCandidates.mockReturnValueOnce(
+    new Promise((_resolve, reject) => {
+      deny = reject;
+    }),
+  );
+  await view.click("Refresh");
+  api.getWorkspace.mockResolvedValue({ role, revision });
+  api.listCandidates.mockResolvedValue(candidatePage());
+  await view.render("thread-3");
+  await act(async () => deny(new ORPCError("FORBIDDEN")));
+  await view.click("Evidence");
+  expect(view.container.textContent).toContain("candidate-1");
+  expect(view.container.querySelector('[role="alert"]')).toBeNull();
+});
+
+it("keeps a confirmed shortlist receipt when refreshing the candidate counts fails", async () => {
+  api.listCandidates
+    .mockResolvedValueOnce(candidatePage([candidateFixture("candidate-1", false)]))
+    .mockRejectedValue(new Error("offline"));
+  api.setCandidateShortlist.mockResolvedValue({
+    roleId: role.id,
+    candidateKey: "candidate-1",
+    shortlisted: true,
+    revision: 1,
+  });
+  const view = await mounted();
+  await view.click("Evidence");
+  await view.click("Shortlist candidate-1");
+  expect(
+    view.container
+      .querySelector('[aria-label="Shortlist candidate-1"]')
+      ?.getAttribute("aria-checked"),
+  ).toBe("true");
+  expect(view.container.textContent).toContain("Could not load candidates");
+  expect(view.container.textContent).not.toContain("Could not save shortlist");
+  await view.click("Dashboard");
+  expect(view.container.textContent).toContain("Could not load candidates");
+  expect(view.container.querySelector('[aria-label="Saved candidate totals"]')).toBeNull();
+});
+
+it("keeps a pending shortlist and its receipt across candidate filter changes", async () => {
+  const candidate = candidateFixture("candidate-1", false);
+  api.listCandidates.mockResolvedValue(candidatePage([candidate]));
+  let finish!: (value: unknown) => void;
+  api.setCandidateShortlist.mockReturnValueOnce(
+    new Promise((resolve) => {
+      finish = resolve;
+    }),
+  );
+  const view = await mounted();
+  await view.click("Evidence");
+  await view.click("Shortlist candidate-1");
+  await changeInput(view.container, "Search candidates", "candidate");
+  const checkbox = () =>
+    view.container.querySelector<HTMLButtonElement>('[aria-label="Shortlist candidate-1"]')!;
+  expect(checkbox().getAttribute("aria-disabled")).toBe("true");
+  expect(api.setCandidateShortlist).toHaveBeenCalledTimes(1);
+  const saved = { ...candidate, shortlisted: true, revision: 1 };
+  api.listCandidates.mockResolvedValue(candidatePage([saved]));
+  await act(async () =>
+    finish({
+      roleId: role.id,
+      candidateKey: candidate.candidateKey,
+      shortlisted: true,
+      revision: 1,
+    }),
+  );
+  expect(checkbox().getAttribute("aria-checked")).toBe("true");
+  expect(checkbox().getAttribute("aria-disabled")).not.toBe("true");
+  expect(api.listCandidates).toHaveBeenLastCalledWith(
+    expect.objectContaining({ query: "candidate" }),
+  );
+});
+
+it("ignores a superseded candidate read denial after a fresh shortlist receipt and read", async () => {
+  const candidate = candidateFixture("candidate-1", false);
+  api.listCandidates.mockResolvedValue(candidatePage([candidate]));
+  let finish!: (value: unknown) => void;
+  api.setCandidateShortlist.mockReturnValueOnce(
+    new Promise((resolve) => {
+      finish = resolve;
+    }),
+  );
+  const view = await mounted();
+  await view.click("Evidence");
+  await view.click("Shortlist candidate-1");
+  let deny!: (error: unknown) => void;
+  api.listCandidates.mockReturnValueOnce(
+    new Promise((_, reject) => {
+      deny = reject;
+    }),
+  );
+  await changeInput(view.container, "Search candidates", "candidate");
+  api.listCandidates.mockResolvedValue(
+    candidatePage([{ ...candidate, shortlisted: true, revision: 1 }]),
+  );
+  await act(async () =>
+    finish({
+      roleId: role.id,
+      candidateKey: candidate.candidateKey,
+      shortlisted: true,
+      revision: 1,
+    }),
+  );
+  await act(async () => deny(new ORPCError("FORBIDDEN")));
+  expect(
+    view.container
+      .querySelector('[aria-label="Shortlist candidate-1"]')
+      ?.getAttribute("aria-checked"),
+  ).toBe("true");
+  expect(view.container.textContent).not.toContain("Could not load recruiting workspace");
+});
+
+it("preserves null and primitive provider rows in the exact raw Artifact viewer", async () => {
+  const f = rawResultsFixture();
+  const snapshot = {
+    ...f.snapshot,
+    observation: {
+      ...f.snapshot.observation,
+      rows: [null, 42, "unstructured", ["raw"], { name: "Synthetic Person" }],
+    },
+  };
+  const saved = nativeOutput(f, snapshot, f.reference.artifactId);
+  api.listResearch.mockResolvedValue({
+    tasks: [f.task],
+    actions: [{ ...f.action, outputArtifacts: [saved.reference] }],
+  });
+  api.getById.mockResolvedValue(saved.artifact);
+  const view = await mounted();
+  await view.click("Evidence");
+  const results = await view.expand("Raw search results");
+  await vi.waitFor(() => expect(results.textContent).toContain('"unstructured"'));
+  expect(results.textContent).toContain("null");
+  expect(results.textContent).toContain("42");
+  expect(results.textContent).toContain('"raw"');
+  expect(results.textContent).toContain("Synthetic Person");
+});
+
+it("refreshes saved sources when new discoveries arrive and ignores the replaced source denial", async () => {
+  api.listCandidates.mockResolvedValue(candidatePage([candidateFixture("raw-person", false)]));
+  let deny!: (error: unknown) => void;
+  api.listCandidateSources.mockReturnValueOnce(
+    new Promise((_resolve, reject) => {
+      deny = reject;
+    }),
+  );
+  const view = await mounted();
+  await view.click("Evidence");
+  await view.click("raw-person");
+  api.listCandidates.mockResolvedValue(
+    candidatePage([{ ...candidateFixture("raw-person", false), discoveryCount: 3 }]),
+  );
+  api.listCandidateSources.mockResolvedValue({
+    roleId: role.id,
+    candidateKey: "raw-person",
+    items: [],
+    total: 0,
+    nextCursor: null,
+  });
+  await view.click("Refresh");
+  expect(api.listCandidateSources).toHaveBeenCalledTimes(2);
+  await act(async () => deny(new ORPCError("FORBIDDEN")));
+  expect(view.container.textContent).toContain("raw-person");
+  expect(view.container.querySelector('[role="alert"]')).toBeNull();
+});
+
+it("rechecks the workspace when the candidate index belongs to a newer role revision", async () => {
+  const next = {
+    role: { ...role, revision: 3, currentRevisionId: "revision-3" },
+    revision: { ...revision, id: "revision-3", revision: 3 },
+  };
+  api.getWorkspace
+    .mockResolvedValueOnce({ role, revision })
+    .mockResolvedValueOnce({ role, revision })
+    .mockResolvedValue(next);
+  api.listCandidates.mockResolvedValue({ ...candidatePage(), roleRevisionId: "revision-3" });
+  const view = await mounted();
+  expect(view.container.textContent).toContain("Version 3");
+  expect(api.listCandidates).toHaveBeenCalledTimes(2);
+});
+
+it("clears the previous role's round filter when the thread binds another role", async () => {
+  const view = await mounted();
+  await view.click("Evidence");
+  await changeSelect(view.container, "Research round", "action-1");
+  expect(api.listCandidates).toHaveBeenLastCalledWith(
+    expect.objectContaining({ actionId: "action-1" }),
+  );
+  const next = {
+    role: { ...role, id: "role-next", currentRevisionId: "revision-next" },
+    revision: { ...revision, roleId: "role-next", id: "revision-next" },
+  };
+  api.getWorkspace.mockResolvedValue(next);
+  await view.render("thread-1", 1);
+  expect(api.listCandidates.mock.lastCall?.[0]).toEqual({
+    roleId: "role-next",
+    sort: "name",
+    limit: 30,
+  });
+  expect(
+    view.container.querySelector('select[aria-label="Research round"]')?.getAttribute("value"),
+  ).not.toBe("action-1");
+});
 
 const employmentRule: RecruitingEmploymentRule = {
   minimumMonths: 60,
@@ -1713,7 +2252,7 @@ it("distinguishes empty saved assessments from a successful candidate search", a
   api.listAssessments.mockResolvedValue([]);
   const view = await mounted();
   await view.click("Evidence");
-  expect(view.container.textContent).toContain("No saved assessments");
+  expect(view.container.textContent).toContain("No saved candidates");
   expect(api.search).not.toHaveBeenCalled();
 });
 it("keeps saved facts and sources inspectable even before a criterion judgment exists", async () => {
@@ -1759,7 +2298,7 @@ it("discards late evidence reads from a previously selected thread", async () =>
   await act(async () => finish([assessment]));
   expect(view.container.textContent).toContain("No role linked");
   await view.click("Evidence");
-  expect(view.container.textContent).toContain("No saved assessments");
+  expect(view.container.textContent).toContain("No role linked");
   expect(view.container.textContent).not.toContain("candidate-1");
 });
 it("preserves saved evidence when a later research read fails", async () => {
@@ -1817,7 +2356,7 @@ it("rechecks the binding and revision after reading lists before publishing them
   const view = await mounted();
   expect(view.container.textContent).toContain("Version 3");
   await view.click("Evidence");
-  expect(view.container.textContent).toContain("No saved assessments");
+  expect(view.container.textContent).toContain("No saved candidates");
   expect(api.listAssessments).toHaveBeenCalledTimes(2);
 });
 it("drops cached Artifact metadata when its exact reference changes", async () => {
@@ -2054,10 +2593,20 @@ it("switches Cards/Table with one original-revision detail, preserves a refreshe
     messageId: source.anchor.messageId,
   });
   await view.click("Table");
-  expect(view.container.querySelector("table caption")?.textContent).toBe("Saved assessments");
+  expect(view.container.querySelector("table caption")?.textContent).toBe("Saved candidates");
   expect(
     [...view.container.querySelectorAll("th[scope=col]")].map((element) => element.textContent),
-  ).toEqual(["Candidate", "Version", "Status", "Hard criteria"]);
+  ).toEqual([
+    "Candidate",
+    "Role",
+    "Title",
+    "Company",
+    "Location",
+    "Profile",
+    "Assessment",
+    "Discoveries",
+    "Shortlist",
+  ]);
   expect(view.container.textContent).toContain("Original systems requirement");
   await view.click("candidate-2");
   expect(view.container.textContent).toContain("Second candidate evidence");

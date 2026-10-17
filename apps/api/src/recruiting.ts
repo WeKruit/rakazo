@@ -87,3 +87,19 @@ export const editRecruitingCriteria = (
   input: Parameters<typeof recruiting.editRecruitingCriteria>[2],
   material?: RecruitingRoleMaterialContext,
 ) => authenticated(() => recruiting.editRecruitingCriteria(prisma, actor, input, material));
+
+export const listRecruitingCandidates = (
+  prisma: PrismaClient,
+  actor: Actor,
+  input: Parameters<typeof recruiting.listRecruitingCandidates>[2],
+) => authenticated(() => recruiting.listRecruitingCandidates(prisma, actor, input));
+export const listRecruitingCandidateSources = (
+  prisma: PrismaClient,
+  actor: Actor,
+  input: Parameters<typeof recruiting.listRecruitingCandidateSources>[2],
+) => authenticated(() => recruiting.listRecruitingCandidateSources(prisma, actor, input));
+export const setRecruitingCandidateShortlist = (
+  prisma: PrismaClient,
+  actor: Actor,
+  input: Parameters<typeof recruiting.setRecruitingCandidateShortlist>[2],
+) => authenticated(() => recruiting.setRecruitingCandidateShortlist(prisma, actor, input));

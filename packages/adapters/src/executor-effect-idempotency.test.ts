@@ -2045,6 +2045,7 @@ describe("native recruiting research executor integration", () => {
     clientNonce: "research-round",
     kind: "create",
     purpose: "calibration",
+    candidateOutputSchema: "candidate_output_v1",
     approvalEffectId: "documents-approval",
     deliveryState: "prepared",
     observedProviderState: null,

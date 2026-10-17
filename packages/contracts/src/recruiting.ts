@@ -347,6 +347,33 @@ export const RecruitingActionDeliveryStateSchema = z.enum([
 ]);
 export type RecruitingActionDeliveryState = z.infer<typeof RecruitingActionDeliveryStateSchema>;
 
+export const RECRUITING_CANDIDATE_OUTPUT_SCHEMA = "candidate_output_v1" as const;
+export const RecruitingCandidateOutputRowSchema = z.looseObject({
+  name: z.string().nullable(),
+  linkedin_url: z.string().nullable(),
+  current_title: z.string().nullable(),
+  current_company: z.string().nullable(),
+  location: z.string().nullable(),
+  resume_url: z.string().nullable(),
+  evidence_urls: z.array(z.string()).readonly().nullable(),
+});
+export type RecruitingCandidateOutputRow = z.infer<typeof RecruitingCandidateOutputRowSchema>;
+export const RECRUITING_CANDIDATE_OUTPUT_JSON_SCHEMA = z.toJSONSchema(
+  RecruitingCandidateOutputRowSchema,
+);
+export const RecruitingCandidateOutputSchemaId = z.literal(RECRUITING_CANDIDATE_OUTPUT_SCHEMA);
+export const RecruitingCandidateProfileSchema = z.strictObject({
+  name: z.string().nullable(),
+  title: z.string().nullable(),
+  company: z.string().nullable(),
+  location: z.string().nullable(),
+  linkedinUrl: z.httpUrl().nullable(),
+  resumeUrl: z.httpUrl().nullable(),
+  evidenceUrls: z.array(z.httpUrl()).readonly().nullable(),
+  issues: z.array(z.string()).readonly(),
+});
+export type RecruitingCandidateProfile = z.infer<typeof RecruitingCandidateProfileSchema>;
+
 const ResearchRequest = {
   taskId: RecruitingId,
   roleRevisionId: RecruitingId,
@@ -357,6 +384,7 @@ const ResearchRequest = {
   approvalEffectId: RecruitingId.nullable().optional(),
   requestArtifact: RecruitingArtifactRefSchema,
   contextArtifact: RecruitingArtifactRefSchema,
+  candidateOutputSchema: RecruitingCandidateOutputSchemaId.nullable().optional(),
   /** A single round's recall instructions do not change role qualification. */
   recallScope: Text.nullable(),
 };
@@ -409,7 +437,7 @@ export const RecruitingResearchObservationSchema = z.strictObject({
       }),
     )
     .nullable(),
-  rows: z.array(z.record(z.string(), z.unknown())).optional(),
+  rows: z.array(z.unknown()).optional(),
   nextCursor: z.string().nullable().optional(),
   outputId: z.string().nullable().optional(),
   refusalCode: z.string().optional(),
@@ -915,3 +943,102 @@ export const RecruitingAssessmentToolInputSchema = z.discriminatedUnion("operati
   RecruitingAssessmentAskInputSchema,
 ]);
 export type RecruitingAssessmentToolInput = z.infer<typeof RecruitingAssessmentToolInputSchema>;
+
+export const ListRecruitingCandidatesInput = z.strictObject({
+  roleId: RecruitingId,
+  cursor: Text.optional(),
+  limit: z.number().int().min(1).max(100).optional(),
+  query: z.string().max(240).optional(),
+  assessmentState: z.enum(["unassessed", "current", "outdated"]).optional(),
+  verdict: VerdictSchema.optional(),
+  shortlisted: z.boolean().optional(),
+  actionId: RecruitingId.optional(),
+  sort: z.enum(["name", "recent"]).optional(),
+});
+export type ListRecruitingCandidatesInput = z.infer<typeof ListRecruitingCandidatesInput>;
+export const RecruitingCandidateSchema = z.strictObject({
+  roleId: RecruitingId,
+  candidateKey: RecruitingId,
+  ...RecruitingCandidateProfileSchema.shape,
+  shortlisted: z.boolean(),
+  revision: z.number().int().nonnegative(),
+  discoveryCount: z.number().int().nonnegative(),
+  firstDiscoveredAt: IsoDate.nullable(),
+  lastDiscoveredAt: IsoDate.nullable(),
+  latestAssessment: z
+    .strictObject({
+      version: Revision,
+      roleRevisionId: RecruitingId,
+      createdAt: IsoDate,
+      isCurrent: z.boolean(),
+      hardGate: VerdictSchema,
+    })
+    .nullable(),
+});
+export type RecruitingCandidate = z.infer<typeof RecruitingCandidateSchema>;
+export const ListRecruitingCandidatesOutput = z.strictObject({
+  roleId: RecruitingId,
+  roleRevisionId: RecruitingId,
+  items: z.array(RecruitingCandidateSchema),
+  nextCursor: Text.nullable(),
+  total: z.number().int().nonnegative(),
+  counts: z.strictObject({
+    sourceRows: z.number().int().nonnegative(),
+    candidates: z.number().int().nonnegative(),
+    identifiedCandidates: z.number().int().nonnegative(),
+    unassessed: z.number().int().nonnegative(),
+    assessed: z.number().int().nonnegative(),
+    shortlisted: z.number().int().nonnegative(),
+  }),
+});
+export type ListRecruitingCandidatesOutput = z.infer<typeof ListRecruitingCandidatesOutput>;
+export const SetRecruitingCandidateShortlistInput = z.strictObject({
+  threadId: RecruitingId,
+  roleId: RecruitingId,
+  candidateKey: RecruitingId,
+  expectedRevision: z.number().int().nonnegative(),
+  shortlisted: z.boolean(),
+});
+export type SetRecruitingCandidateShortlistInput = z.infer<
+  typeof SetRecruitingCandidateShortlistInput
+>;
+export const SetRecruitingCandidateShortlistOutput = z.strictObject({
+  roleId: RecruitingId,
+  candidateKey: RecruitingId,
+  shortlisted: z.boolean(),
+  revision: z.number().int().nonnegative(),
+});
+export type SetRecruitingCandidateShortlistOutput = z.infer<
+  typeof SetRecruitingCandidateShortlistOutput
+>;
+export const ListRecruitingCandidateSourcesInput = z.strictObject({
+  roleId: RecruitingId,
+  candidateKey: RecruitingId,
+  cursor: Text.optional(),
+  limit: z.number().int().min(1).max(100).optional(),
+});
+export type ListRecruitingCandidateSourcesInput = z.infer<
+  typeof ListRecruitingCandidateSourcesInput
+>;
+export const RecruitingCandidateSourceSchema = z.strictObject({
+  taskId: RecruitingId,
+  actionId: RecruitingId,
+  roleRevisionId: RecruitingId,
+  effectId: RecruitingId,
+  rowIndex: z.number().int().nonnegative(),
+  artifactRef: RecruitingArtifactRefSchema,
+  requestCursor: z.string().nullable(),
+  outputId: z.string().nullable(),
+  observedAt: IsoDate,
+});
+export type RecruitingCandidateSource = z.infer<typeof RecruitingCandidateSourceSchema>;
+export const ListRecruitingCandidateSourcesOutput = z.strictObject({
+  roleId: RecruitingId,
+  candidateKey: RecruitingId,
+  items: z.array(RecruitingCandidateSourceSchema),
+  nextCursor: Text.nullable(),
+  total: z.number().int().nonnegative(),
+});
+export type ListRecruitingCandidateSourcesOutput = z.infer<
+  typeof ListRecruitingCandidateSourcesOutput
+>;
