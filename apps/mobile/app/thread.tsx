@@ -3308,11 +3308,6 @@ const MessageBubble = memo(function MessageBubble({
                   : special.status}
           </Text>
         </View>
-        {special.task ? (
-          <Text style={{ color: tokens.mutedForeground, marginTop: 8, fontSize: 13.5 }}>
-            {special.task}
-          </Text>
-        ) : null}
         {special.result || special.progress ? (
           <View style={{ marginTop: 8 }}>
             <ChatMarkdown palette={tokens} colorScheme={colorScheme} streaming={running}>

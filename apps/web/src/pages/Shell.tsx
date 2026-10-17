@@ -7057,7 +7057,9 @@ const MessageView = memo(function MessageView({
                   {running ? <Trans>subagent</Trans> : block.status}
                 </span>
               </div>
-              <div className="mt-2 text-[13.5px] text-muted-foreground">{block.task}</div>
+              {showToolActivity ? (
+                <div className="mt-2 text-[13.5px] text-muted-foreground">{block.task}</div>
+              ) : null}
               {block.progress || block.result ? (
                 <div className="mt-2.5 text-[14.5px] leading-[1.5] text-foreground/75">
                   <ChatMarkdown streaming={running}>
