@@ -1,6 +1,6 @@
 import type * as AgentCore from "@earendil-works/pi-agent-core";
 import type { AgentMessage, AgentOptions } from "@earendil-works/pi-agent-core";
-import { createCompactionSummaryMessage } from "@earendil-works/pi-agent-core";
+import { convertToLlm, createCompactionSummaryMessage } from "@earendil-works/pi-agent-core";
 import type {
   AssistantMessage,
   Context,
@@ -59,7 +59,9 @@ vi.mock("./pi-openai-compatible-provider.js", () => ({
   registerOpenAiCompatibleRuntime: (models: unknown) => models,
 }));
 
+import { selectContext } from "./context-selection.js";
 import { toolCompletionAuditPayload } from "./executor.js";
+import { estimateModelContextTokens } from "./model-context.js";
 import { IMAGE_RETURNING_COMPUTER_TOOLS } from "./model-vision.js";
 import { isRetryableProviderUnavailable, PiAgentRuntime } from "./pi-runtime.js";
 import { MODEL_STREAM_IDLE_TIMEOUT_MS } from "./pi-runtime-limits.js";
@@ -379,6 +381,7 @@ it("compacts a running native tool loop while preserving exact role state, sibli
     },
   ];
   let turn = 0;
+  let projectedPressureCalls = 0;
   let claimed = false;
   input.claimSteering = async () => {
     if (turn < 12 || claimed) return [];
@@ -392,11 +395,27 @@ it("compacts a running native tool loop while preserving exact role state, sibli
   }));
   providerState.stream.mockImplementation(
     (_model: Model<"openai-completions">, context: Context) => {
-      if (context.systemPrompt?.includes("summarization assistant"))
+      if (context.systemPrompt?.includes("summarization assistant")) {
+        const original = convertToLlm(providerState.agent!.state.messages);
+        expect(() =>
+          selectContext(original, {
+            strategy: "current",
+            protectedIndexes: original.map((_, index) => index),
+            truncateToolResults: false,
+            budget: {
+              contextWindow: target.contextWindow,
+              outputReserve: target.maxTokens,
+              systemPrompt: "",
+              tools: [],
+            },
+          }),
+        ).toThrow("Required context exceeds the model context budget");
+        projectedPressureCalls++;
         return stream(
           target,
           message(target, [{ type: "text", text: "Completed file review; keep working." }], "stop"),
         );
+      }
       turn++;
       const content: AssistantMessage["content"] =
         turn <= 17
@@ -422,6 +441,7 @@ it("compacts a running native tool loop while preserving exact role state, sibli
     (call[1] as Context).systemPrompt?.includes("summarization assistant"),
   );
   expect(summaries.length).toBeGreaterThanOrEqual(2);
+  expect(projectedPressureCalls).toBe(summaries.length);
   expect(
     summaries
       .slice(1)
@@ -746,6 +766,78 @@ it("uses native compaction for initial history in a small context window", async
   expect(
     providerState.agent!.state.messages.some((entry) => entry.role === "compactionSummary"),
   ).toBe(true);
+});
+
+it("keeps a single saved-assessment read running when only duplicate tool bookkeeping exceeds the window", async () => {
+  const { target, input } = compactionRequest(false);
+  input.instructions = `Existing exact instructions: ${"s".repeat(55_000)}`;
+  input.history.unshift(
+    { id: "earlier-user", role: "user", content: `Earlier request: ${"u".repeat(1_000)}` },
+    { id: "earlier-answer", role: "assistant", content: `Earlier answer: ${"a".repeat(1_000)}` },
+  );
+  input.tools = [
+    {
+      name: "recruiting_candidates",
+      description: "Read saved assessment",
+      inputSchema: { type: "object", properties: {} },
+      readOnly: true,
+    },
+  ];
+  const assessment = {
+    candidateKey: "saved-candidate",
+    assessment: "e".repeat(40_000),
+    sourceArtifactId: "saved-source",
+  };
+  input.executeTool = vi.fn(async () => assessment);
+  let turns = 0;
+  let summaries = 0;
+  providerState.stream.mockImplementation(
+    (_model: Model<"openai-completions">, context: Context) => {
+      if (context.systemPrompt?.includes("summarization assistant")) {
+        summaries++;
+        return stream(
+          target,
+          message(target, [{ type: "text", text: "Earlier progress." }], "stop"),
+        );
+      }
+      turns++;
+      return stream(
+        target,
+        message(
+          target,
+          turns === 1
+            ? [{ type: "toolCall", id: "read-saved", name: "recruiting_candidates", arguments: {} }]
+            : [{ type: "text", text: "Saved assessment summarized." }],
+          turns === 1 ? "toolUse" : "stop",
+        ),
+      );
+    },
+  );
+  const events = await run(input);
+  expect(events.at(-1)).toEqual({ type: "done", text: "Saved assessment summarized." });
+  expect(input.executeTool).toHaveBeenCalledTimes(1);
+  expect(summaries).toBe(0);
+  const final = providerState.stream.mock.calls.at(-1)![1] as Context;
+  const available = target.contextWindow - target.maxTokens;
+  expect(estimateModelContextTokens(final)).toBeGreaterThan(available);
+  expect(
+    selectContext(final.messages, {
+      strategy: "current",
+      protectedIndexes: final.messages.map((_, index) => index),
+      truncateToolResults: false,
+      budget: {
+        contextWindow: target.contextWindow,
+        outputReserve: target.maxTokens,
+        systemPrompt: "",
+        tools: [],
+      },
+    }).estimatedInputTokens,
+  ).toBeLessThan(available);
+  expect(
+    final.messages.find(
+      (entry) => entry.role === "toolResult" && entry.toolCallId === "read-saved",
+    ),
+  ).toMatchObject({ content: [{ type: "text", text: JSON.stringify(assessment) }] });
 });
 
 it("updates the previous native summary when protected history leaves only a split turn prefix", async () => {

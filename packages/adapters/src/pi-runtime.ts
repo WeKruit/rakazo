@@ -55,7 +55,13 @@ import { isToolPauseResult } from "./approval-effect.js";
 import { connectionIdArgument, credentialArgument } from "./bot-secrets.js";
 import { DELEGATION_TOOL_NAMES } from "./builtin-tools.js";
 import { withCloudflareGatewayAuth } from "./cloudflare-ai-gateway.js";
-import { messageGroups, selectContext, shortenToolResultText } from "./context-selection.js";
+import {
+  estimateContextTokens,
+  messageGroups,
+  providerContextPrefix,
+  selectContext,
+  shortenToolResultText,
+} from "./context-selection.js";
 import { DEFAULT_OPENROUTER_MODEL_ID } from "./deployment-model.js";
 import { estimateModelContextTokens } from "./model-context.js";
 import { IMAGE_RETURNING_COMPUTER_TOOLS } from "./model-vision.js";
@@ -1026,7 +1032,9 @@ function activeCompaction(
     // Our runtime uses only native roles with exactly one provider message each.
     // Check this before sharing indexes with the existing context protection policy.
     if (wire.length !== context.messages.length) return;
-    const before = estimateModelContextTokens({ messages: wire }, estimatePiImageTokens);
+    // Match provider selection: tool details and runtime metadata are not prompt content.
+    const before =
+      estimateContextTokens(providerContextPrefix("", [], wire), estimatePiImageTokens) + 240;
     const overflow = before > window - output;
     if (
       !overflow &&
@@ -1093,10 +1101,15 @@ function activeCompaction(
         (sum, index) => sum + estimatePiTokens(context.messages[index]!),
         0,
       );
-      const bytes = estimateModelContextTokens(
-        { messages: group.indexes.map((index) => wire[index]!) },
-        estimatePiImageTokens,
-      );
+      const bytes =
+        estimateContextTokens(
+          providerContextPrefix(
+            "",
+            [],
+            group.indexes.map((index) => wire[index]!),
+          ),
+          estimatePiImageTokens,
+        ) + 240;
       lastNativeGroup = tokens;
       if (group.indexes.some((index) => protectedMessages.has(context.messages[index]!))) {
         protectedBytes += bytes;
@@ -1234,10 +1247,11 @@ function activeCompaction(
         inserted = true;
       }
     }
-    const after = estimateModelContextTokens(
-      { messages: runtimeMessagesToLlm(messages) },
-      estimatePiImageTokens,
-    );
+    const after =
+      estimateContextTokens(
+        providerContextPrefix("", [], runtimeMessagesToLlm(messages)),
+        estimatePiImageTokens,
+      ) + 240;
     if (!inserted || after >= before || after > window - output)
       throw new Error("Pi compaction could not fit context while preserving required messages.");
     signal.throwIfAborted();
