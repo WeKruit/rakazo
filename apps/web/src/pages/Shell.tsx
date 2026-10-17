@@ -6871,7 +6871,7 @@ const MessageView = memo(function MessageView({
               <span>
                 ↪ {to} ← {from}
               </span>
-              <span>{block.text}</span>
+              {showToolActivity ? <span>{block.text}</span> : null}
             </div>
           );
         }
