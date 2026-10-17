@@ -53,6 +53,8 @@ function mcpFetch(
     headers?: Record<string, string>[];
     tools?: Array<{ name: string; description?: string; inputSchema: Record<string, unknown> }>;
     calls?: string[];
+    callError?: Error;
+    callResult?: Record<string, unknown>;
   },
   expectedUrl = "https://mcp.example.test/mcp",
 ) {
@@ -91,10 +93,11 @@ function mcpFetch(
     }
     if (message.method === "tools/call") {
       if (message.params?.name) state.calls?.push(message.params.name);
+      if (state.callError) throw state.callError;
       return Response.json({
         jsonrpc: "2.0",
         id: message.id,
-        result: { content: [{ type: "text", text: "ok" }] },
+        result: state.callResult ?? { content: [{ type: "text", text: "ok" }] },
       });
     }
     return new Response(null, { status: 202 });
@@ -102,6 +105,128 @@ function mcpFetch(
 }
 
 describe("MCP connector session cache", () => {
+  it.each(["direct", "catalog"])(
+    "marks a thrown %s tool call uncertain and preserves returned provider errors",
+    async (path) => {
+      const state = {
+        failNext: false,
+        initializations: 0,
+        calls: [] as string[],
+        callError: new Error("response timed out: fixture-token") as Error | undefined,
+        callResult: {
+          isError: true,
+          content: [{ type: "text", text: "provider rejected fixture-token" }],
+        },
+        tools: [{ name: "echo", inputSchema: { type: "object" } }],
+      };
+      vi.stubGlobal("fetch", mcpFetch(state));
+      const connector = new McpConnector(
+        {
+          botMcpServer: {
+            findMany: vi
+              .fn()
+              .mockResolvedValue([{ ...ASSIGNMENT, server: { ...SERVER, secretId: "secret-1" } }]),
+            findFirst: vi.fn().mockResolvedValue({
+              ...ASSIGNMENT,
+              server: { ...SERVER, secretId: "secret-1" },
+            }),
+          },
+          secret: {
+            findFirst: vi.fn().mockResolvedValue({ id: "secret-1", ciphertext: "encrypted" }),
+          },
+        } as never,
+        { load: async () => JSON.stringify({ secret: "fixture-token" }) } as never,
+        { network: TEST_NETWORK },
+      );
+      const context = {
+        spaceId: "w1",
+        userId: "u1",
+        botId: "bot-1",
+        signal: new AbortController().signal,
+      } as never;
+      const tool = (await connector.discoverTools(context))[0]!;
+      const call = {
+        tool: path === "direct" ? tool.name : "connectors_execute_tool",
+        args: path === "direct" ? {} : { id: "server-1:echo", arguments: {} },
+        route:
+          path === "direct" ? tool.route : { connectorId: "mcp", toolName: "__catalog_execute" },
+        executionId: "transport-test",
+      };
+      try {
+        const failed = [];
+        for await (const event of connector.execute(call, context)) failed.push(event);
+        expect(failed).toEqual([
+          { type: "error", message: expect.any(String), outcome: "uncertain" },
+        ]);
+        expect(JSON.stringify(failed)).not.toContain("fixture-token");
+        expect(state.calls).toEqual(["echo"]);
+
+        state.callError = undefined;
+        const returned = [];
+        for await (const event of connector.execute(call, context)) returned.push(event);
+        expect(returned).toMatchObject([{ type: "result", data: { isError: true } }]);
+        expect(JSON.stringify(returned)).not.toContain("fixture-token");
+      } finally {
+        await connector.close();
+      }
+    },
+  );
+
+  it.each(["assignment", "authorization", "session", "cancellation"])(
+    "keeps a pre-dispatch %s failure an ordinary error",
+    async (failure) => {
+      const state = { failNext: failure === "session", initializations: 0, calls: [] as string[] };
+      vi.stubGlobal("fetch", mcpFetch(state));
+      const connector = new McpConnector(
+        {
+          botMcpServer: {
+            findMany: vi.fn().mockResolvedValue([ASSIGNMENT]),
+            findFirst:
+              failure === "authorization"
+                ? vi.fn().mockRejectedValue(new Error("lookup failed: Bearer fixture-token"))
+                : vi.fn().mockResolvedValue(failure === "assignment" ? null : ASSIGNMENT),
+          },
+        } as never,
+        {} as never,
+        { network: TEST_NETWORK },
+      );
+      const controller = new AbortController();
+      const context = {
+        spaceId: "w1",
+        userId: "u1",
+        botId: "bot-1",
+        signal: controller.signal,
+      } as never;
+      try {
+        if (failure === "cancellation") {
+          await connector.discoverTools(context);
+          controller.abort();
+        }
+        const events = [];
+        for await (const event of connector.execute(
+          {
+            tool: "mcp__demo__echo",
+            args: {},
+            route: {
+              connectorId: "mcp",
+              resourceId: SERVER.id,
+              resourceRevision: SERVER.revision,
+              toolName: "echo",
+            },
+            executionId: "before-dispatch",
+          },
+          context,
+        ))
+          events.push(event);
+        expect(events).toEqual([{ type: "error", message: expect.any(String) }]);
+        expect(JSON.stringify(events)).not.toContain("fixture-token");
+        expect(state.calls).toEqual([]);
+      } finally {
+        await connector.close();
+      }
+    },
+  );
+
   it("keeps sessions across unchanged TTL reads and reconnects on observed rotation", async () => {
     vi.useFakeTimers();
     const fake = infisicalFake();

@@ -9,7 +9,7 @@ import type { ActionApprovalRule } from "@rakazo/core";
 import { approvalEffectKey, toolEffectIdempotencyKey } from "@rakazo/core/node/approval-effect-key";
 import type * as DatabaseModule from "@rakazo/db";
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import { isApprovalPausedResult } from "./approval-effect.js";
+import { catalogExecuteToolName, isApprovalPausedResult } from "./approval-effect.js";
 import { MAX_SHARED_MEMORY_CHARS } from "./builtin-tools.js";
 import type * as ComputerLifecycleModule from "./computer-lifecycle.js";
 import { createRunExecutor } from "./executor.js";
@@ -69,7 +69,11 @@ function fixture({
   disabledBuiltinTools = [],
   existingSharedMemory,
   artifacts = false,
+  route,
+  transportUncertain = false,
 }: {
+  transportUncertain?: boolean;
+  route?: ConnectorTool["route"];
   artifacts?: boolean;
   builtin?: boolean;
   disabledBuiltinTools?: string[];
@@ -85,6 +89,8 @@ function fixture({
   bot?: { name: string; title: string; description: string };
   shutdownSignal?: AbortSignal;
 } = {}) {
+  const connectorId = route?.connectorId ?? "demo";
+  const catalogName = catalogExecuteToolName(connectorId);
   const tool: ConnectorTool = {
     name,
     description: "Read an item",
@@ -94,7 +100,7 @@ function fixture({
       properties: { id: { type: "string" } },
       required: ["id"],
     },
-    route: { connectorId: "demo", resourceId: "resource-1", toolName: name },
+    route: route ?? { connectorId, resourceId: "resource-1", toolName: name },
   };
   const effects: Effect[] = [];
   const results: unknown[] = [];
@@ -225,6 +231,10 @@ function fixture({
   });
   const finalizeRun = vi.fn(async () => ({ continuationRunId: null }));
   const execute = vi.fn(async function* (call: ConnectorCall) {
+    if (transportUncertain) {
+      yield { type: "error" as const, message: "Response lost", outcome: "uncertain" as const };
+      return;
+    }
     yield { type: "result" as const, data: { item: call.args.id } };
   });
   let calls: { args: Record<string, unknown>; executionId: string }[] = [
@@ -233,8 +243,8 @@ function fixture({
   const runtimeRun = vi.fn(async function* (request: AgentRunRequest) {
     for (const call of calls) {
       const result = await request.executeTool!(
-        catalog ? "demo_execute_tool" : name,
-        catalog ? { id: `resource-1:${name}`, arguments: call.args } : call.args,
+        catalog ? catalogName : name,
+        catalog ? { id: catalogEntries([tool])[0]?.id, arguments: call.args } : call.args,
         call.executionId,
       );
       results.push(result);
@@ -253,10 +263,10 @@ function fixture({
           : catalog
             ? [
                 {
-                  name: "demo_execute_tool",
+                  name: catalogName,
                   description: "Execute a catalog tool",
                   inputSchema: { type: "object" },
-                  route: { connectorId: "demo", toolName: "__catalog_execute" },
+                  route: { connectorId, toolName: "__catalog_execute" },
                 },
               ]
             : [tool],
@@ -326,6 +336,74 @@ describe("disabled builtins", () => {
     expect(f.execute).not.toHaveBeenCalled();
     expect(f.effects).toEqual([]);
   });
+});
+
+describe("native CRM import approval", () => {
+  it("retains uncertainty for a known import even when its server advertises it as read-only", async () => {
+    const f = fixture({
+      name: "renamed_import",
+      readOnly: true,
+      transportUncertain: true,
+      route: {
+        connectorId: "mcp",
+        resourceId: "resource-1",
+        resourceRevision: 1,
+        toolName: "crm_import_candidate",
+      },
+    });
+    await f.run();
+    expect(f.execute).not.toHaveBeenCalled();
+    f.effects[0]!.status = "approved";
+    await f.run();
+    expect(f.effects[0]).toMatchObject({ status: "uncertain", result: { uncertain: true } });
+    const result = f.effects[0]!.result;
+    await f.run();
+    expect(f.execute).toHaveBeenCalledOnce();
+    expect(f.results.at(-1)).toEqual(result);
+  });
+
+  for (const catalog of [false, true]) {
+    it(`requires one exact human approval for ${catalog ? "catalog" : "direct"} CRM imports despite permanent allowance`, async () => {
+      reviewMock
+        .mockReset()
+        .mockResolvedValue({ decision: "allow", reason: "pass", model: "test" });
+      const f = fixture({
+        name: "renamed_import",
+        catalog,
+        readOnly: true,
+        autoReview: true,
+        route: {
+          connectorId: "mcp",
+          resourceId: "resource-1",
+          resourceRevision: 1,
+          toolName: "crm_import_candidate",
+        },
+        rules: [{ effect: "always_allow", matchKind: "tool", matchValue: "renamed_import" }],
+      });
+      await f.run();
+      expect(f.effects).toHaveLength(1);
+      expect(f.effects[0]?.status).toBe("intended");
+      expect(f.execute).not.toHaveBeenCalled();
+      expect(reviewMock).not.toHaveBeenCalled();
+      expect(f.pauseRunForInput).toHaveBeenCalledWith(
+        expect.objectContaining({
+          blocks: [
+            expect.objectContaining({
+              actions: [
+                { id: "allow", label: "Allow once" },
+                { id: "deny", label: "Deny" },
+              ],
+            }),
+          ],
+        }),
+      );
+      f.effects[0]!.status = "approved";
+      f.setCalls([{ args: { id: "changed-after-approval" }, executionId: "replay" }]);
+      await f.run();
+      expect(f.execute).toHaveBeenCalledOnce();
+      expect(f.execute.mock.calls[0]?.[0].args).toEqual({ id: "item-1" });
+    });
+  }
 });
 
 describe("native recruiting package approval", () => {

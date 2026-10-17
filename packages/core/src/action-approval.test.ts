@@ -15,6 +15,28 @@ import {
 } from "./action-approval.js";
 
 describe("toolRequiresApproval", () => {
+  it("requires one-time CRM import approval from the resolved MCP operation", () => {
+    expect(
+      toolRequiresExplicitApproval("renamed_import", {
+        connectorId: "mcp",
+        toolName: "crm_import_candidate",
+      }),
+    ).toBe(true);
+    expect(toolRequiresExplicitApproval("mcp__crm__crm_import_candidate")).toBe(false);
+    expect(
+      toolRequiresExplicitApproval("renamed_import", {
+        connectorId: "demo",
+        toolName: "crm_import_candidate",
+      }),
+    ).toBe(false);
+    expect(
+      toolRequiresExplicitApproval("renamed_read", {
+        connectorId: "mcp",
+        toolName: "list_crm_candidates",
+      }),
+    ).toBe(false);
+  });
+
   it("requires explicit human approval of recruiting packages even with an always-allow rule", () => {
     const toolName = "recruiting_request_approval";
     const rules: ActionApprovalRule[] = [

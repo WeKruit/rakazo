@@ -264,39 +264,43 @@ export class McpConnector implements ConnectorProvider {
       yield { type: "error", message: "MCP tools require a bot context" };
       return;
     }
-    const assignment = await this.prisma.botMcpServer.findFirst({
-      where: {
-        botId: context.botId,
-        serverId: call.route.resourceId,
-        spaceId: context.spaceId,
-        userId: context.userId,
-        server: { enabled: true },
-      },
-      include: { server: true },
-    });
-    if (
-      !assignment ||
-      (!assignment.allowAllTools &&
-        !(assignment.allowedTools as unknown[]).includes(call.route.toolName))
-    ) {
-      yield { type: "error", message: "MCP tool is not assigned to this bot" };
-      return;
-    }
-    if (call.route.resourceRevision !== assignment.server.revision) {
-      yield {
-        type: "error",
-        message: "MCP server changed; rediscover the tool before trying again",
-      };
-      return;
-    }
     // Capture material before callTool so a concurrent eviction/replace cannot
     // drop this call's OAuth secrets from model-visible redaction. Recompute via
     // oauthMaterialSecrets(material) so in-place token refresh stays covered.
     let material: OAuthMaterial | undefined;
-    const sessionKey = this.sessionKey(assignment.server, context);
+    let callStarted = false;
+    let sessionKey: string | undefined;
     try {
+      const assignment = await this.prisma.botMcpServer.findFirst({
+        where: {
+          botId: context.botId,
+          serverId: call.route.resourceId,
+          spaceId: context.spaceId,
+          userId: context.userId,
+          server: { enabled: true },
+        },
+        include: { server: true },
+      });
+      if (
+        !assignment ||
+        (!assignment.allowAllTools &&
+          !(assignment.allowedTools as unknown[]).includes(call.route.toolName))
+      ) {
+        yield { type: "error", message: "MCP tool is not assigned to this bot" };
+        return;
+      }
+      if (call.route.resourceRevision !== assignment.server.revision) {
+        yield {
+          type: "error",
+          message: "MCP server changed; rediscover the tool before trying again",
+        };
+        return;
+      }
+      sessionKey = this.sessionKey(assignment.server, context);
       const session = await this.sessionFor(assignment.server, context);
       material = this.sessions.get(sessionKey)?.material;
+      context.signal.throwIfAborted();
+      callStarted = true;
       const result = await session.callTool(call.route.toolName, call.args, {
         signal: context.signal,
       });
@@ -305,8 +309,12 @@ export class McpConnector implements ConnectorProvider {
     } catch (error) {
       // A thrown call means the transport or auth broke; drop the session so the next call reconnects.
       const secrets = material ? oauthMaterialSecrets(material) : [];
-      await this.evict(sessionKey);
-      yield { type: "error", message: sanitizeConnectorError(error, secrets) };
+      if (sessionKey) await this.evict(sessionKey);
+      yield {
+        type: "error",
+        message: sanitizeConnectorError(error, secrets),
+        ...(callStarted ? { outcome: "uncertain" as const } : {}),
+      };
     }
   }
 

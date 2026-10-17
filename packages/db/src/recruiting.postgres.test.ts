@@ -6495,6 +6495,193 @@ describePostgres("recruiting domain (PostgreSQL)", () => {
     }
   });
 
+  it.each(["executing", "uncertain"])(
+    "atomically settles an %s research effect and exposes durable unknown delivery without a provider receipt",
+    async (status) => {
+      const f = await researchFixture();
+      const prepared = await recruiting.prepareRecruitingResearchAction(prisma, actor, f.input);
+      const admitted = await recruiting.admitRecruitingResearchAction(
+        prisma,
+        actor,
+        researchAdmission(f, prepared),
+      );
+      await recruiting.claimRecruitingResearchAction(prisma, actor, {
+        ...f.lease,
+        actionId: prepared.action.id,
+        effectId: admitted.effect!.id,
+        from: "intended",
+      });
+      const result = { error: "Provider response interrupted", uncertain: true as const };
+      if (status === "uncertain")
+        await prisma.externalEffect.update({
+          where: { id: admitted.effect!.id },
+          data: { status, result },
+        });
+      const input = {
+        ...f.lease,
+        taskId: prepared.task.id,
+        actionId: prepared.action.id,
+        effectId: admitted.effect!.id,
+        effectKind: admitted.effect!.kind,
+        effectRequest: admitted.effect!.request!,
+        result,
+      };
+      const artifacts = await prisma.artifact.count({ where: { runId: f.run.id } });
+      await recruiting.settleUncertainRecruitingResearchAction(prisma, actor, input);
+      await recruiting.settleUncertainRecruitingResearchAction(prisma, actor, input);
+      expect(
+        await prisma.externalEffect.findUniqueOrThrow({ where: { id: input.effectId } }),
+      ).toMatchObject({ status: "uncertain", request: admitted.effect!.request, result });
+      const listed = await recruiting.listRecruitingResearch(prisma, actor, {
+        roleId: f.role.role.id,
+      });
+      expect(listed.tasks).toContainEqual(
+        expect.objectContaining({
+          id: input.taskId,
+          state: "unknown",
+          pendingActionId: input.actionId,
+        }),
+      );
+      expect(listed.actions).toContainEqual(
+        expect.objectContaining({
+          id: input.actionId,
+          deliveryState: "unknown",
+          receiptArtifact: null,
+        }),
+      );
+      expect(await prisma.artifact.count({ where: { runId: f.run.id } })).toBe(artifacts);
+      expect(
+        await prisma.event.count({
+          where: {
+            runId: f.run.id,
+            type: "recruiting.action.transitioned",
+            payload: { path: ["to"], equals: "unknown" },
+          },
+        }),
+      ).toBe(1);
+      expect(
+        (
+          await recruiting.admitRecruitingResearchAction(
+            prisma,
+            actor,
+            researchAdmission(f, prepared),
+          )
+        ).status,
+      ).toBe("unknown");
+      expect(
+        await recruiting.claimRecruitingResearchAction(prisma, actor, {
+          ...f.lease,
+          actionId: input.actionId,
+          effectId: input.effectId,
+          from: "intended",
+        }),
+      ).toBe(false);
+    },
+  );
+
+  it("settles a dispatched research outcome after Stop without reopening the cancelled run or task", async () => {
+    const f = await researchFixture();
+    const prepared = await recruiting.prepareRecruitingResearchAction(prisma, actor, f.input);
+    const admitted = await recruiting.admitRecruitingResearchAction(
+      prisma,
+      actor,
+      researchAdmission(f, prepared),
+    );
+    await recruiting.claimRecruitingResearchAction(prisma, actor, {
+      ...f.lease,
+      actionId: prepared.action.id,
+      effectId: admitted.effect!.id,
+      from: "intended",
+    });
+    await prisma.$transaction((tx) =>
+      recruiting.cancelRunsInTransaction(tx, [{ id: f.run.id, taskId: f.run.taskId }], new Date()),
+    );
+    const stopped = await prisma.run.findUniqueOrThrow({ where: { id: f.run.id } });
+    expect(stopped).toMatchObject({
+      status: "cancelled",
+      leaseOwner: null,
+      leaseExpiresAt: null,
+      leaseFence: f.lease.leaseFence,
+    });
+    await recruiting.settleUncertainRecruitingResearchAction(prisma, actor, {
+      ...f.lease,
+      taskId: prepared.task.id,
+      actionId: prepared.action.id,
+      effectId: admitted.effect!.id,
+      effectKind: admitted.effect!.kind,
+      effectRequest: admitted.effect!.request!,
+      result: { error: "Aborted after dispatch", uncertain: true },
+    });
+    expect(await prisma.run.findUniqueOrThrow({ where: { id: f.run.id } })).toEqual(stopped);
+    expect(await prisma.task.findUniqueOrThrow({ where: { id: f.run.taskId } })).toMatchObject({
+      status: "cancelled",
+    });
+    expect(
+      await prisma.externalEffect.findUniqueOrThrow({ where: { id: admitted.effect!.id } }),
+    ).toMatchObject({ status: "uncertain" });
+    expect(
+      await prisma.recruitingResearchAction.findUniqueOrThrow({
+        where: { id: prepared.action.id },
+      }),
+    ).toMatchObject({ deliveryState: "unknown", receiptArtifactId: null });
+    expect(
+      await prisma.recruitingResearchTask.findUniqueOrThrow({ where: { id: prepared.task.id } }),
+    ).toMatchObject({ state: "unknown", pendingActionId: prepared.action.id });
+  });
+
+  it("rolls back native uncertainty with the domain transition if the task update fails", async () => {
+    const f = await researchFixture();
+    const prepared = await recruiting.prepareRecruitingResearchAction(prisma, actor, f.input);
+    const admitted = await recruiting.admitRecruitingResearchAction(
+      prisma,
+      actor,
+      researchAdmission(f, prepared),
+    );
+    await recruiting.claimRecruitingResearchAction(prisma, actor, {
+      ...f.lease,
+      actionId: prepared.action.id,
+      effectId: admitted.effect!.id,
+      from: "intended",
+    });
+    const failure = new Error("Injected research task update failure");
+    const failing = prisma.$extends({
+      query: {
+        recruitingResearchTask: {
+          async update({ args, query }) {
+            await query(args);
+            throw failure;
+          },
+        },
+      },
+    });
+    await expect(
+      recruiting.settleUncertainRecruitingResearchAction(
+        failing as unknown as PrismaClient,
+        actor,
+        {
+          ...f.lease,
+          taskId: prepared.task.id,
+          actionId: prepared.action.id,
+          effectId: admitted.effect!.id,
+          effectKind: admitted.effect!.kind,
+          effectRequest: admitted.effect!.request!,
+          result: { error: "Provider response interrupted", uncertain: true },
+        },
+      ),
+    ).rejects.toThrow(failure);
+    expect(
+      await prisma.externalEffect.findUniqueOrThrow({ where: { id: admitted.effect!.id } }),
+    ).toMatchObject({ status: "executing" });
+    expect(
+      await prisma.recruitingResearchAction.findUniqueOrThrow({
+        where: { id: prepared.action.id },
+      }),
+    ).toMatchObject({ deliveryState: "sending", receiptArtifactId: null });
+    expect(
+      await prisma.recruitingResearchTask.findUniqueOrThrow({ where: { id: prepared.task.id } }),
+    ).toMatchObject({ state: "active", pendingActionId: prepared.action.id });
+  });
+
   it("rechecks the role at the final native claim and leaves an obsolete approved effect unsent", async () => {
     const f = await researchFixture();
     const prepared = await recruiting.prepareRecruitingResearchAction(prisma, actor, f.input);
@@ -7364,4 +7551,400 @@ describePostgres("recruiting domain (PostgreSQL)", () => {
       latestAssessment: { version: 1, isCurrent: true },
     });
   });
+});
+
+describe("research uncertainty settlement (offline)", () => {
+  function fixture() {
+    const actor: Actor = {
+      spaceId: "space",
+      userId: "owner",
+      email: "owner@example.test",
+      isDeploymentOwner: false,
+    };
+    const run = {
+      ...actor,
+      id: "run",
+      threadId: "thread",
+      botId: "bot",
+      bot: actor,
+      taskId: "runtime-task",
+      status: "running",
+      leaseOwner: "worker" as string | null,
+      leaseFence: 1,
+      leaseExpiresAt: new Date(Date.now() + 60_000) as Date | null,
+    };
+    const thread = {
+      ...actor,
+      id: "thread",
+      botId: "bot",
+      groupId: null,
+      externalConversationId: null,
+      activeRecruitingRoleId: "role",
+      nextEventSeq: 1,
+    };
+    const role = {
+      spaceId: actor.spaceId,
+      userId: actor.userId,
+      id: "role",
+      sourceThreadId: "thread",
+      title: "Engineer",
+      revision: 1,
+      currentRevisionId: "revision",
+    };
+    const revision = {
+      id: "revision",
+      roleId: "role",
+      revision: 1,
+      createdAt: new Date(),
+      brief: null,
+      sourceRefs: [
+        {
+          id: "source",
+          kind: "original_material",
+          anchor: { kind: "message", messageId: "message", locator: "text" },
+          readState: "read",
+          readAt: new Date().toISOString(),
+        },
+      ],
+      criteria: [],
+      preferences: [],
+      definitionQuestions: [],
+    };
+    const task = {
+      id: "task",
+      roleId: "role",
+      mcpServerId: "server",
+      serverRevision: 1,
+      providerTaskId: null,
+      pendingActionId: "action",
+      state: "active",
+      createdByRunId: "run",
+    };
+    const hash = "a".repeat(64);
+    const action = {
+      id: "action",
+      taskId: "task",
+      roleRevisionId: "revision",
+      runId: "run",
+      sourceMessageId: "message",
+      clientNonce: "round",
+      kind: "create",
+      purpose: "calibration",
+      candidateOutputSchema: "candidate_output_v1",
+      approvalEffectId: "approval",
+      deliveryState: "sending",
+      observedProviderState: null,
+      requestArtifactId: "request",
+      requestArtifactHash: hash,
+      contextArtifactId: "context",
+      contextArtifactHash: hash,
+      recallScope: null,
+      receiptArtifactId: null,
+      receiptArtifactHash: null,
+      outputArtifacts: [],
+      cursor: "previous-cursor",
+      effectId: "effect",
+      usage: null,
+    };
+    const effect = {
+      id: "effect",
+      spaceId: actor.spaceId,
+      runId: run.id,
+      kind: "mcp_research",
+      idempotencyKey: "recruiting-research:action",
+      request: { prompt: "Frozen request" },
+      status: "executing",
+      result: null as unknown,
+    };
+    const runtimeTask = { id: run.taskId, status: "running" };
+    const tx = {
+      $queryRaw: vi.fn(async () => [{ id: "thread" }]),
+      run: {
+        findFirst: vi.fn(async () => run),
+        findUnique: vi.fn(async () => run),
+        findUniqueOrThrow: vi.fn(async (_input: { where: { id: string } }) => run),
+        updateMany: vi.fn(async ({ data }) => {
+          Object.assign(run, data);
+          return { count: 1 };
+        }),
+      },
+      attempt: { updateMany: vi.fn(async () => ({ count: 1 })) },
+      task: {
+        updateMany: vi.fn(async ({ data }) => {
+          Object.assign(runtimeTask, data);
+          return { count: 1 };
+        }),
+      },
+      thread: {
+        findFirst: vi.fn(async () => thread),
+        update: vi.fn(async () => ({ nextEventSeq: ++thread.nextEventSeq })),
+      },
+      bot: { findFirst: vi.fn(async () => actor) },
+      recruitingRole: { findFirst: vi.fn(async () => role) },
+      recruitingRoleRevision: { findFirst: vi.fn(async () => revision) },
+      recruitingResearchTask: {
+        findUnique: vi.fn(async () => ({ ...task })),
+        findUniqueOrThrow: vi.fn(async () => ({ ...task })),
+        update: vi.fn(async ({ data }) => Object.assign(task, data)),
+      },
+      recruitingResearchAction: {
+        findFirst: vi.fn(async ({ where }) =>
+          where.effectId
+            ? null
+            : { ...action, run: { threadId: "thread" }, effect: { status: effect.status } },
+        ),
+        findUniqueOrThrow: vi.fn(async () => ({ ...action })),
+        update: vi.fn(async ({ data }) => Object.assign(action, data)),
+      },
+      mcpServer: {
+        findFirst: vi.fn(async () => ({
+          ...actor,
+          id: "server",
+          enabled: true,
+          revision: 1,
+          slug: "demo",
+        })),
+      },
+      message: {
+        findMany: vi.fn(async () => [{ id: "message", threadId: "thread" }]),
+        findUnique: vi.fn(async () => ({
+          id: "message",
+          threadId: "thread",
+          role: "user",
+          botId: null,
+          externalTranscriptFor: null,
+          blocks: [{ kind: "text", text: "Search this round" }],
+        })),
+      },
+      artifact: {
+        findFirst: vi.fn(async ({ where }) => ({
+          ...actor,
+          id: where.id,
+          hash,
+          botId: "bot",
+          groupId: null,
+          runId: "run",
+        })),
+        findUniqueOrThrow: vi.fn(async ({ where }) => ({ id: where.id, hash })),
+      },
+      externalEffect: {
+        findFirst: vi.fn(async () => ({ ...effect })),
+        findUniqueOrThrow: vi.fn(async () => ({ ...effect })),
+        updateMany: vi.fn(async ({ where, data }) => {
+          if (effect.status !== where.status) return { count: 0 };
+          Object.assign(effect, data);
+          return { count: 1 };
+        }),
+      },
+      event: {
+        create: vi.fn(async ({ data }) => ({ id: "event", ...data, createdAt: new Date() })),
+      },
+    };
+    const prisma = {
+      $transaction: vi.fn(async (callback) => callback(tx)),
+    } as unknown as PrismaClient;
+    const input = {
+      runId: run.id,
+      leaseOwner: run.leaseOwner!,
+      leaseFence: run.leaseFence,
+      taskId: task.id,
+      actionId: action.id,
+      effectId: effect.id,
+      effectKind: effect.kind,
+      effectRequest: effect.request,
+      result: { error: "Outcome unknown", uncertain: true as const },
+    };
+    return { prisma, tx, actor, run, runtimeTask, thread, role, task, action, effect, input };
+  }
+
+  it.each(["executing", "uncertain"])(
+    "settles %s native state and only current sending domain state",
+    async (status) => {
+      expect(recruiting.settleUncertainRecruitingResearchAction).toBeTypeOf("function");
+      const f = fixture();
+      f.effect.status = status;
+      f.effect.result = status === "uncertain" ? f.input.result : null;
+      const before = structuredClone({ action: f.action, task: f.task });
+      const result = await recruiting.settleUncertainRecruitingResearchAction(
+        f.prisma,
+        f.actor,
+        f.input,
+      );
+      expect(result.effect).toMatchObject({
+        status: "uncertain",
+        result: f.input.result,
+        request: f.input.effectRequest,
+      });
+      expect(f.action).toEqual({ ...before.action, deliveryState: "unknown" });
+      expect(f.task).toEqual({ ...before.task, state: "unknown" });
+      await recruiting.settleUncertainRecruitingResearchAction(f.prisma, f.actor, f.input);
+      expect(f.tx.event.create).toHaveBeenCalledOnce();
+    },
+  );
+
+  it.each([
+    "selected-role",
+    "revision",
+    "pending-action",
+    "completed",
+    "closed",
+    "accepted-action",
+  ])("settles native uncertainty while preserving obsolete %s domain state", async (boundary) => {
+    const f = fixture();
+    if (boundary === "selected-role") f.thread.activeRecruitingRoleId = "new-role";
+    if (boundary === "revision") f.action.roleRevisionId = "previous-revision";
+    if (boundary === "pending-action") f.task.pendingActionId = "new-action";
+    if (boundary === "completed" || boundary === "closed") f.task.state = boundary;
+    if (boundary === "accepted-action") f.action.deliveryState = "accepted";
+    const before = structuredClone({ action: f.action, task: f.task });
+    await recruiting.settleUncertainRecruitingResearchAction(f.prisma, f.actor, f.input);
+    expect(f.effect.status).toBe("uncertain");
+    expect({ action: f.action, task: f.task }).toEqual(before);
+    expect(f.tx.event.create).not.toHaveBeenCalled();
+  });
+
+  it.each(["actor", "lease-owner", "lease-fence", "expired", "effect", "request", "kind", "task"])(
+    "rejects an invalid %s boundary before changing native or domain state",
+    async (boundary) => {
+      const f = fixture();
+      if (boundary === "actor") f.actor.userId = "foreign";
+      if (boundary === "lease-owner") f.input.leaseOwner = "stale";
+      if (boundary === "lease-fence") f.input.leaseFence += 1;
+      if (boundary === "expired") f.run.leaseExpiresAt = new Date(0);
+      if (boundary === "effect") f.input.effectId = "other-effect";
+      if (boundary === "request") f.input.effectRequest = { prompt: "Changed request" };
+      if (boundary === "kind") f.input.effectKind = "get_rows";
+      if (boundary === "task") f.input.taskId = "other-task";
+      await expect(
+        recruiting.settleUncertainRecruitingResearchAction(f.prisma, f.actor, f.input),
+      ).rejects.toThrow(IsolationError);
+      expect(f.effect.status).toBe("executing");
+      expect(f.action.deliveryState).toBe("sending");
+      expect(f.task.state).toBe("active");
+    },
+  );
+
+  it("settles the same-fence cancelled effect owner after actual Stop without reopening it", async () => {
+    const f = fixture();
+    await recruiting.cancelRunsInTransaction(
+      f.tx as never,
+      [{ id: f.run.id, taskId: f.run.taskId }],
+      new Date(),
+    );
+    const stoppedRun = structuredClone(f.run);
+    expect(stoppedRun).toMatchObject({
+      status: "cancelled",
+      leaseOwner: null,
+      leaseExpiresAt: null,
+      leaseFence: f.input.leaseFence,
+    });
+    await recruiting.settleUncertainRecruitingResearchAction(f.prisma, f.actor, f.input);
+    expect(f.effect.status).toBe("uncertain");
+    expect(f.action.deliveryState).toBe("unknown");
+    expect(f.task.state).toBe("unknown");
+    expect(f.run).toEqual(stoppedRun);
+    expect(f.runtimeTask.status).toBe("cancelled");
+    expect(f.tx.event.create).toHaveBeenCalledOnce();
+  });
+
+  it.each(["older-fence", "newer-fence", "foreign-owner"])(
+    "rejects cancelled %s settlement without changing outcome state",
+    async (boundary) => {
+      const f = fixture();
+      await recruiting.cancelRunsInTransaction(
+        f.tx as never,
+        [{ id: f.run.id, taskId: f.run.taskId }],
+        new Date(),
+      );
+      if (boundary === "older-fence") f.input.leaseFence -= 1;
+      if (boundary === "newer-fence") f.input.leaseFence += 1;
+      if (boundary === "foreign-owner") f.effect.runId = "other-run";
+      await expect(
+        recruiting.settleUncertainRecruitingResearchAction(f.prisma, f.actor, f.input),
+      ).rejects.toThrow(IsolationError);
+      expect(f.effect.status).toBe("executing");
+      expect(f.action.deliveryState).toBe("sending");
+      expect(f.task.state).toBe("active");
+      expect(f.tx.event.create).not.toHaveBeenCalled();
+    },
+  );
+
+  it.each(["completed", "closed", "newer-action"])(
+    "keeps %s research state intact when settling a cancelled owner",
+    async (boundary) => {
+      const f = fixture();
+      await recruiting.cancelRunsInTransaction(
+        f.tx as never,
+        [{ id: f.run.id, taskId: f.run.taskId }],
+        new Date(),
+      );
+      if (boundary === "newer-action") f.task.pendingActionId = "newer-action";
+      else f.task.state = boundary;
+      const before = structuredClone({ action: f.action, task: f.task });
+      await recruiting.settleUncertainRecruitingResearchAction(f.prisma, f.actor, f.input);
+      expect(f.effect.status).toBe("uncertain");
+      expect({ action: f.action, task: f.task }).toEqual(before);
+      expect(f.run.status).toBe("cancelled");
+      expect(f.tx.event.create).not.toHaveBeenCalled();
+    },
+  );
+
+  it("preserves the original uncertain result while repairing sending domain state", async () => {
+    const f = fixture();
+    f.effect.status = "uncertain";
+    const original = { error: "Original interruption", uncertain: true };
+    f.effect.result = original;
+    const result = await recruiting.settleUncertainRecruitingResearchAction(
+      f.prisma,
+      f.actor,
+      f.input,
+    );
+    expect(result.effect.result).toEqual(original);
+    expect(f.effect.result).toEqual(original);
+    expect(f.action.deliveryState).toBe("unknown");
+  });
+
+  it.each(["running", "failed"])(
+    "checks a different %s effect owner's lease before recovery settlement",
+    async (status) => {
+      const f = fixture();
+      f.effect.runId = "dispatch-owner";
+      f.tx.run.findUniqueOrThrow.mockImplementation(async ({ where }) =>
+        where.id === "dispatch-owner" ? { ...f.run, id: "dispatch-owner", status } : f.run,
+      );
+      const pending = recruiting.settleUncertainRecruitingResearchAction(
+        f.prisma,
+        f.actor,
+        f.input,
+      );
+      if (status === "running") {
+        await expect(pending).rejects.toThrow(IsolationError);
+        expect(f.effect.status).toBe("executing");
+      } else {
+        await pending;
+        expect(f.effect.status).toBe("uncertain");
+        expect(f.action.deliveryState).toBe("unknown");
+      }
+    },
+  );
+
+  it.each(["completed", "denied"])(
+    "returns authoritative %s native state without downgrading domain state",
+    async (status) => {
+      const f = fixture();
+      f.effect.status = status;
+      f.effect.result = { provider: "authoritative" };
+      const before = structuredClone({ action: f.action, task: f.task, effect: f.effect });
+      const result = await recruiting.settleUncertainRecruitingResearchAction(
+        f.prisma,
+        f.actor,
+        f.input,
+      );
+      expect(result.effect).toEqual(before.effect);
+      expect({ action: f.action, task: f.task }).toEqual({
+        action: before.action,
+        task: before.task,
+      });
+    },
+  );
 });

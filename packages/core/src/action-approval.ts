@@ -107,8 +107,14 @@ export function toolRequiresApproval(
 }
 
 /** These actions require a one-time human decision, without auto-review or permanent allowance. */
-export function toolRequiresExplicitApproval(toolName: string): boolean {
-  return EXPLICIT_APPROVAL_BUILTIN_TOOLS.has(toolName);
+export function toolRequiresExplicitApproval(
+  toolName: string,
+  route?: { connectorId: string; toolName: string },
+): boolean {
+  return (
+    EXPLICIT_APPROVAL_BUILTIN_TOOLS.has(toolName) ||
+    (route?.connectorId === "mcp" && route.toolName === "crm_import_candidate")
+  );
 }
 
 /** External webhook runs may inspect state unattended, but side effects always need the owner. */

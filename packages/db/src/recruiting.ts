@@ -3329,6 +3329,7 @@ async function transitionResearchAction(
   run: { id: string; threadId: string; botId: string },
   action: ResearchActionRow,
   to: RecruitingResearchAction["deliveryState"],
+  allowCancelledRun = false,
 ) {
   const changed = await tx.recruitingResearchAction.update({
     where: { id: action.id },
@@ -3341,6 +3342,7 @@ async function transitionResearchAction(
       botId: run.botId,
       runId: run.id,
       type: "recruiting.action.transitioned",
+      ...(allowCancelledRun ? { allowCancelledRun: true } : {}),
       payload: { taskId: action.taskId, actionId: action.id, from: action.deliveryState, to },
     });
   return changed;
@@ -3814,6 +3816,84 @@ export async function claimRecruitingResearchAction(
     if (claimed.count !== 1) return false;
     await transitionResearchAction(tx, actor, context.run, action, "sending");
     return true;
+  });
+}
+
+export async function settleUncertainRecruitingResearchAction(
+  prisma: PrismaClient,
+  actor: Actor,
+  input: ResearchLease & {
+    taskId: string;
+    actionId: string;
+    effectId: string;
+    effectKind: string;
+    effectRequest: Prisma.InputJsonValue;
+    result: { error: string; uncertain: true };
+  },
+) {
+  return prisma.$transaction(async (tx) => {
+    await lockResearchDispatchThreads(tx, actor, input);
+    const { run } = await lockLiveRecruitingRun(tx, actor, input.runId, false);
+    const context = await researchContextInTransaction(tx, actor, {
+      runId: input.runId,
+      taskId: input.taskId,
+      actionId: input.actionId,
+      historical: true,
+    });
+    const cancelled = run.status === "cancelled";
+    if (cancelled) {
+      if (run.leaseFence !== input.leaseFence) throw new IsolationError();
+    } else requireResearchLease(run, input);
+    let { task, action } = context;
+    if (!task || !action || !context.effect || context.effect.id !== input.effectId)
+      throw new IsolationError();
+    await tx.$queryRaw(
+      Prisma.sql`SELECT "id" FROM "external_effects" WHERE "id" = ${input.effectId} FOR UPDATE`,
+    );
+    let effect = await tx.externalEffect.findUniqueOrThrow({ where: { id: input.effectId } });
+    if (
+      effect.spaceId !== actor.spaceId ||
+      effect.id !== action.effectId ||
+      effect.kind !== input.effectKind ||
+      (cancelled && effect.runId !== run.id) ||
+      effect.idempotencyKey !== `recruiting-research:${action.id}` ||
+      stableJsonValue(effect.request) !== stableJsonValue(input.effectRequest)
+    )
+      throw new IsolationError();
+    if (effect.status === "executing") {
+      if (effect.runId !== context.run.id) {
+        const owner = await tx.run.findUniqueOrThrow({ where: { id: effect.runId } });
+        if (
+          ["queued", "leased", "waiting_input"].includes(owner.status) ||
+          (owner.status === "running" &&
+            owner.leaseExpiresAt &&
+            owner.leaseExpiresAt.getTime() > Date.now())
+        )
+          throw new IsolationError();
+      }
+      await tx.externalEffect.updateMany({
+        where: { id: effect.id, status: "executing" },
+        data: { status: "uncertain", result: input.result },
+      });
+      effect = await tx.externalEffect.findUniqueOrThrow({ where: { id: effect.id } });
+    }
+    if (!["completed", "denied", "uncertain"].includes(effect.status)) throw new IsolationError();
+    if (
+      effect.status === "uncertain" &&
+      context.thread.activeRecruitingRoleId === task.roleId &&
+      context.workspace.revision.id === action.roleRevisionId &&
+      task.pendingActionId === action.id &&
+      action.deliveryState === "sending" &&
+      ["active", "unknown"].includes(task.state) &&
+      !action.receiptArtifactId
+    ) {
+      action = await transitionResearchAction(tx, actor, run, action, "unknown", cancelled);
+      task = await tx.recruitingResearchTask.update({
+        where: { id: task.id },
+        data: { state: "unknown" },
+      });
+    }
+    return { effect, task, action };
   });
 }
 

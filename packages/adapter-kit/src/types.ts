@@ -256,7 +256,13 @@ export interface ConnectorCall {
 export type ConnectorEvent =
   | { type: "log"; message: string }
   | { type: "result"; data: unknown }
-  | { type: "error"; message: string; logIds?: string[] };
+  | {
+      type: "error";
+      message: string;
+      logIds?: string[];
+      /** The provider call was invoked; its side effect may have occurred despite the error. */
+      outcome?: "uncertain";
+    };
 
 export interface ConnectorCapabilities {
   discover: boolean;

@@ -10,7 +10,7 @@ export function buildApprovalAskBlock(
   toolName: string,
   args: Record<string, unknown>,
   secrets: string[],
-  options?: { reviewReason?: string },
+  options?: { reviewReason?: string; oneTimeOnly?: boolean },
 ): MessageBlock {
   const recruitingApproval = toolName === "recruiting_request_approval";
   const summary = describeApprovalAction(toolName, args);
@@ -33,7 +33,7 @@ export function buildApprovalAskBlock(
       MAX_APPROVAL_SUMMARY_LENGTH,
     ),
     detail:
-      safeDetail && !recruitingApproval
+      safeDetail && !recruitingApproval && !options?.oneTimeOnly
         ? truncate(safeDetail, MAX_APPROVAL_DETAIL_LENGTH)
         : safeDetail,
     status: "pending",
@@ -53,7 +53,7 @@ export function buildApprovalAskBlock(
             ]
           : [
               { id: "allow", label: "Allow once" },
-              { id: "always", label: "Always allow this tool" },
+              ...(options?.oneTimeOnly ? [] : [{ id: "always", label: "Always allow this tool" }]),
               { id: "deny", label: "Deny" },
             ],
   };

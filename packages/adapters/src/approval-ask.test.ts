@@ -3,6 +3,27 @@ import { describe, expect, it } from "vitest";
 import { buildApprovalAskBlock } from "./approval-ask.js";
 
 describe("buildApprovalAskBlock", () => {
+  it("keeps an exact one-time import request visible without permanent permission", () => {
+    const source = `artifact-row:${"x".repeat(5000)}`;
+    const block = buildApprovalAskBlock(
+      "effect-import",
+      "renamed_import",
+      { p_name: "Synthetic candidate", p_source_file: source },
+      [],
+      { oneTimeOnly: true },
+    );
+    expect(block).toMatchObject({
+      kind: "ask",
+      approvalEffectId: "effect-import",
+      actions: [
+        { id: "allow", label: "Allow once" },
+        { id: "deny", label: "Deny" },
+      ],
+    });
+    if (block.kind !== "ask") throw new Error("Expected approval");
+    expect(block.detail).toContain(source);
+  });
+
   it("binds the approval to its effect and redacts secrets", () => {
     const block = buildApprovalAskBlock(
       "effect-1",

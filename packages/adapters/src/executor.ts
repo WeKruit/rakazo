@@ -142,6 +142,7 @@ import {
   retireModelCredential,
   SpaceLimitError,
   searchHistory,
+  settleUncertainRecruitingResearchAction,
 } from "@rakazo/db";
 import { getLogger } from "@rakazo/logging";
 import { parse as parseShellCommand } from "shell-quote";
@@ -4600,6 +4601,25 @@ export function createRunExecutor(deps: ExecutorDeps) {
           }
           const researchMutation =
             researchAdmission?.kind === "mutation" ? researchAdmission : undefined;
+          const settleResearchUncertainty = async () => {
+            if (!researchMutation?.effect) throw new IsolationError();
+            const settled = await settleUncertainRecruitingResearchAction(
+              deps.prisma,
+              researchActor.actor,
+              {
+                ...researchDispatchActor,
+                taskId: researchMutation.task.id,
+                actionId: researchMutation.action.id,
+                effectId: researchMutation.effect.id,
+                effectKind: researchMutation.effect.kind,
+                effectRequest: researchMutation.effect.request as Prisma.InputJsonValue,
+                result: uncertainEffectResult(name),
+              },
+            );
+            const gate = resolveDuplicateEffectGate(settled.effect, name);
+            if (gate.action !== "return") throw new IsolationError();
+            return { ...settled, result: gate.result };
+          };
           if (researchAdmission && disabledBuiltinTools.has("recruiting_research"))
             return { error: "This tool is disabled for this bot." };
           if (researchAdmission?.kind === "read" && researchAdmission.recoveredResult)
@@ -4631,6 +4651,31 @@ export function createRunExecutor(deps: ExecutorDeps) {
           if (researchMutation && researchMutation.status !== "ready") {
             if (researchMutation.status === "completed")
               return researchResult(researchMutation, researchMutation.effect?.result);
+            if (
+              researchMutation.status === "unknown" &&
+              researchMutation.effect &&
+              ["executing", "uncertain"].includes(researchMutation.effect.status)
+            ) {
+              const settled = await settleResearchUncertainty();
+              if (settled.effect.status === "completed")
+                return researchResult(
+                  {
+                    ...researchMutation,
+                    task: settled.task,
+                    action: settled.action,
+                    effect: settled.effect,
+                  },
+                  settled.effect.result,
+                  settled.effect,
+                );
+              if (settled.effect.status === "denied") return settled.result;
+              return {
+                status: "unknown",
+                ...recruitingResearchSnapshot(settled.task, settled.action),
+                ownerRunId: settled.effect.runId,
+                automaticRetry: false,
+              };
+            }
             return {
               status: researchMutation.status,
               ...recruitingResearchSnapshot(researchMutation.task, researchMutation.action),
@@ -4672,11 +4717,18 @@ export function createRunExecutor(deps: ExecutorDeps) {
               : name;
           if (disabledBuiltinTools.has(policyToolName))
             return { error: "This tool is disabled for this bot." };
+          const requiresExplicitApproval = toolRequiresExplicitApproval(
+            policyToolName,
+            connectorCall.route,
+          );
           // Declared effect of the operation this call dispatches (installed API method and
           // flag). Install config is immutable per route resource, so it cannot drift before
-          // execute; a catalog call uses the tool it was just resolved to.
+          // execute; a catalog call uses the tool it was just resolved to. Known one-time
+          // mutations stay writes even when remote metadata advertises them as reads.
           const declaredReadOnly = viaConnector
-            ? (resolvedTool ?? connectorTools.get(name))?.readOnly
+            ? requiresExplicitApproval
+              ? false
+              : (resolvedTool ?? connectorTools.get(name))?.readOnly
             : undefined;
           const requiresUnattendedApproval =
             !researchMutation &&
@@ -4694,8 +4746,7 @@ export function createRunExecutor(deps: ExecutorDeps) {
                 viaConnector,
                 declaredReadOnly,
               ));
-          const requiresMandatoryApproval =
-            requiresUnattendedApproval || toolRequiresExplicitApproval(policyToolName);
+          const requiresMandatoryApproval = requiresUnattendedApproval || requiresExplicitApproval;
           const connectorKind = connectorKindFromToolName(
             name,
             connectedPlugins.map((plugin) => plugin.provider),
@@ -5181,6 +5232,7 @@ export function createRunExecutor(deps: ExecutorDeps) {
                 ...files,
                 buildApprovalAskBlock(applied!.effect.id, name, args, runSecrets, {
                   reviewReason,
+                  oneTimeOnly: requiresExplicitApproval,
                 }),
               ],
             });
@@ -7180,7 +7232,7 @@ export function createRunExecutor(deps: ExecutorDeps) {
             return archived;
           }
           if (deps.connector) {
-            if (researchAdmission && !claimedEffect) {
+            if (applied && !claimedEffect && (researchAdmission || declaredReadOnly !== true)) {
               const early = await claimOrReturn("intended");
               if (early !== undefined) return early;
             }
@@ -7214,6 +7266,24 @@ export function createRunExecutor(deps: ExecutorDeps) {
                     type: "effect.recorded",
                     payload: { tool: name, logId },
                   });
+                }
+                if (event.outcome === "uncertain" && declaredReadOnly !== true && applied) {
+                  if (researchMutation) {
+                    const settled = await settleResearchUncertainty();
+                    if (settled.effect.status === "completed")
+                      return researchResult(
+                        {
+                          ...researchMutation,
+                          task: settled.task,
+                          action: settled.action,
+                          effect: settled.effect,
+                        },
+                        settled.effect.result,
+                        settled.effect,
+                      );
+                    return settled.result;
+                  }
+                  return settleUncertainEffect(deps.prisma, applied.effect.id, name);
                 }
               }
             }

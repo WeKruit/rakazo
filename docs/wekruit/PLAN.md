@@ -26,7 +26,7 @@ Execution priority: feature implementation and direct product validation come fi
 | 原件读取、来源高亮、brief 与 G1/G2 | 新原件查看器、brief 确认与 G1/G2 执行连接已有工作分支代码；最近已提交 `dfd85463` | 尚未部署；不能当当前网页已有功能或真实业务通过 |
 | 人工编辑岗位条件 | 原 Role 面板的语义条件、结构化年限规则及 hard/preferred 编辑已有代码，同事务保存真实人类来源和版本/CAS；未发布 | 条件增删/逻辑组重构、独立召回 filters 和全流程验收仍在 J06 |
 | Autumn | 已接只读服务；原生 task/action/请求/回执及同 task 续搜有代码 | 新真实搜索→证据→反馈→原 task 续搜的整条业务链未通过 |
-| CRM | 用户 OAuth、组织身份和只读发现已接；已有来源/评审写工具；发送前上下文读取已提交 [CRM PR #44](https://github.com/WeKruit/headhunter-agent/pull/44)，未发布 | 新人导入、身份/岗位关联、实际写读、可信发送镜像；PR 中抑制规则迁移尚未执行 |
+| CRM | 用户 OAuth、组织身份和只读发现已接；[CRM PR #44](https://github.com/WeKruit/headhunter-agent/pull/44) 已补同组织身份去重、候选/来源/多岗位原子导入、正式岗位读取和前端展示，未发布 | 新迁移及 MCP/Web 发布、实际写读/并发/RLS、可信发送镜像；抑制规则迁移尚未执行 |
 | Instantly | 已接只读服务 | 真实精确审批发送、发送确认、回复停止；当前 REST 和既有 MCP 合同须分别核验 |
 | 候选人完整工作台/Dashboard | 工作分支已接候选索引、轮次/原始行关联、服务端分页/筛选/排序、持久 shortlist 及岗位 Dashboard；合成材料的实际界面已验证 | 新迁移及网页尚未发布，真实搜索落库/恢复未验；跨岗位/客户 CRM 去重、批次/名单、外联/面试看板仍缺 |
 | 执行过程展示 | 原生 `ToolActivityDisclosure`、事件和 Activity 视图可复用 | 完整招聘步骤、委派树、任务/结果/证据/反馈的关联展示与实时/重载验收 |
@@ -63,11 +63,11 @@ flowchart TD
 | 岗位/JD/条件 | `recruiting_roles` + 不可变 `recruiting_role_revisions`；原件为 Artifact | 原文、hard/preferred、AND/OR/NOT、来源与版本差异可读/可改；计算条件同时保存真实规则，不能只改展示文字；修订使旧判断过期、旧批准不适用于新版 |
 | 搜索/续搜 | `recruiting_research_tasks` / `recruiting_research_actions`；provider task ID、角色版本、请求/上下文/回执文件引用 | 每轮明确 action，继续同一 task；已排队、已完成、结果未知分开，不把 turn 停止当 provider 停止 |
 | 原始结果/材料 | `artifacts` 保存元数据、hash、版本、权限；真实字节在 ArtifactStore | 保留原始字段和分页/时间，不用模型总结覆盖原件 |
-| 候选身份与岗位名单 | 新 `recruiting_candidates` 岗位索引，沿用 `candidateKey` 关联评估；迁移未执行；CRM `candidates` 仍是已接入人员的主记录 | 同一岗位按明确的 LinkedIn profile 去重；未知身份保留独立来源行键，不按姓名自动合并；CRM 引用及跨岗位/客户去重待补 |
+| 候选身份与岗位名单 | 新 `recruiting_candidates` 岗位索引，沿用 `candidateKey` 关联评估；迁移未执行；CRM `candidates` 仍是已接入人员的主记录 | 同一岗位按明确 LinkedIn profile 去重；未知身份保留独立来源行键。CRM 同组织身份唯一索引及正式多岗位关联已有代码，尚未验收；应用索引与 CRM 回执关联仍待补 |
 | 每轮找到哪些人 | 新 `recruiting_candidate_pages` / `recruiting_candidate_occurrences` 绑定 task/action/effect/岗位版本/Artifact/页/行；迁移未执行 | 重复页回放不重复索引；每次发现保留来源，最新 profile 按原生完成时间选取，历史回填不能覆盖较新观察 |
 | 资格评估 | `recruiting_assessments` 的 `(roleId,candidateKey,version)`；绑定岗位版本、facts/judgments/sourceRefs | 逐项 met/unmet/unknown、缺口、计算依据、历史版本；旧岗位评估显示过期 |
 | 人工选择与反馈 | 原生人类消息/事件保留来源；新名单索引的 shortlist 用 CAS 与人类消息同事务保存，尚未上线 | 临时 UI 选中不当作持久 shortlist；接受/拒绝/跳过与资格三态、CRM pipeline stage 分开 |
-| CRM | 既有 `candidates` / `candidate_sources` / `candidate_pipeline` / audit | 新人导入、同源身份去重和岗位关联走明确用户/组织权限；来源保存成功不等于新人已创建或已归岗位 |
+| CRM | 既有 `candidates` / `candidate_sources` / `candidate_pipeline` / audit；新增 `candidate_role_memberships` 迁移未执行 | 导入通过用户 OAuth/RLS，在同事务保存身份、来源和正式岗位关联；保留旧 pipeline/评审。返回真实三类行 ID 后才可显示成功；应用索引引用仍待连接 |
 | 外联草稿/回执 | 原生 `external_effects` 的精确 request/result、审批事件及必要的原始回执 Artifact | 批准前没有发送；未知结果不重发。既有 CRM pending 队列不是草稿，也不能当已发日志；真实镜像才进 `instantly_emails` |
 | 记忆/技能/连接 | 原生 memory documents/revisions、skills、加密 connections | 招聘记录不塞进长期记忆代替业务表；可复用偏好有 scope/版本/来源，插件可以替换但产品任务关联保持 |
 
@@ -85,7 +85,16 @@ flowchart TD
 - **浏览器检查限制**：现有 Playwright 用例已补截图，但本机缺少其指定 Chromium revision，未进入页面执行；没有安装浏览器、启动本地 Postgres/Docker 或用 skipped 冒充通过。
 - **发布前事实**：只读核验独立 Supabase 数据库的现有迁移账本，待应用恰为 `20261016200000_recruiting_brief`、`20261017000000_recruiting_action_approval`、`20261017120000_recruiting_candidate_index`。没有写库、修改旧 CRM 或部署；必须在获准发布后做真实新结果写入/重复读取/刷新与重启恢复验收。
 
-**下一项业务优先**：完成现有 CRM 的明确人员身份与多岗位关联导入，再对接精确外联草稿、原生审批、实际 provider receipt 与回复停止。当前来源保存入口不等于新人导入；旧 pipeline 只容纳一个岗位，不能覆盖它来伪造多岗位关联。真实写入与外联闭环未通过，P6 保持未完成。
+#### 当前增量：CRM 导入与原生写入恢复（未发布）
+
+- CRM 新增单一 security-invoker 导入 RPC，原子保存候选、来源和正式多岗位关联。组织内身份唯一约束覆盖并发及其他写入入口；身份不明、无效或既有重复资料不能静默合并。相同候选的精确来源重放只保留一条，新轮次来源另存。旧 pipeline、profile、stage 和评审不覆盖。CRM 读取及列表/树同时采用正式关联，候选详情仅在有关联时显示 `Roles`。
+- Rakazo 根据实际 MCP route 的 `crm_import_candidate` 操作要求原生一次性人类审批。永久允许、自动审查和错误的只读注记均不能绕过。原卡显示完整脱敏参数，回答后执行已保存原参数；搜索仍按既有 full access、额度和限流策略执行。
+- MCP 区分调用前拒绝和调用后响应丢失。后者保留原生 uncertain，不能当已完成或盲目重发。检索写入另原子修正当前 task/action 的 unknown 展示，不伪造 provider receipt，不改终态、较新轮次或旧历史记录。精确回执并发到达时复用真实完成结果。
+- CRM 已与最新 main 的 canonical campaign/role 映射整合，使用同一岗位组合唯一键；没有重复建立岗位键或改写上游 campaign 函数。生产只读元数据确认该键及新关联表尚不存在，导入迁移因此仅在缺少时创建这个相同键，不依赖上游业务数据修复。迁移账本读取被权限拒绝，不能声称已核验 CRM 全部迁移。部署必须分别确认范围，不能把所有 pending migration 一键应用。
+- 当前证据是离线原生执行器、MCP、严格 DTO/真实 Supabase 客户端边界和组件检查，以及静态独立审查。真实 PostgreSQL/RLS/并发用例已写但未执行；没有生产写入、MCP 工具分配扩大、部署或外发。合成工作台截图不证明这些新增 CRM 能力已在线。
+- 最终原生审批/连接/恢复组合检查为 315 项通过、234 项 PostgreSQL 明确跳过；CRM MCP/auth 33 项和 Web 27 项分别通过，不累加成整品验收。实际 Stop 后的同 fence/同 effect-owner 仅允许记录未知结果，不重新打开 cancelled run/task，旧 fence、其他 owner 及终态/较新领域记录保持拒绝或原状。相关类型、格式及独立 SPEC/QUALITY 审查通过。
+
+**下一项业务优先**：完成应用候选索引与真实 CRM 导入回执关联，再对接精确外联草稿、原生审批、实际 provider receipt 与回复停止。G3 是 Instantly 名单导入/活动启用，不是 CRM 事实落库；不能用 G3 的十人校准要求阻止未评估候选保存。真实写入与外联闭环未通过，P6 保持未完成。
 
 #### 前端必须交付的页面和交互
 
