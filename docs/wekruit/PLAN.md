@@ -12,7 +12,15 @@ Supabase 独立数据库、原生 memory provider、Modal Volume 和 E2B 沿用�
 
 ## 当前发布与缺口（2026-10-17）
 
-**最新线上为 v68 / `7f770e12`（反馈主体 `62d3ad15`）。** 候选 Dialog 现在可展开 Give feedback，明确选择 Good example / Not a fit / Skip for now 并输入原因，前两种必须有非空原因。复用原生 `threads.followUp` 保存人类原文并交给当前对话的 Agent；有待答卡时排入 steering，不把候选反馈当作该卡答案。未确认结果保留草稿和原 nonce，成功后清空本次输入；编辑、切换和迟到回执保持当前范围。群 follow-up 在同一原生所属群锁内检查 nonce，避免并发重放只一条保存却返回失败。没有新 endpoint、表、schema、规则引擎或工具权限。
+**最新线上为 v69 / `538a56b3`。** 候选反馈可在原生 Dialog 选择当前群内接收 Agent，默认保持首位成员；私聊沿原路径。显式接收者在原所属群锁内重新核对，未知/移除的成员拒绝，不从候选证据或正文中的 @ 文本推断接收者。一次人类消息/事件交付到选中成员的原生执行或 steering；重试保留原候选、原文、接收者与 nonce，不消费任何待答卡。共享消息读取现在也给人类 follow-up 提供原始来源引用，Bot handoff 仍不冒充人类授权。没有新 endpoint、表、迁移、依赖或第二套 harness。
+
+本批五个文件的 472 项聚焦检查、Core/Contracts/Adapters/API/Web 类型与十个文件格式检查通过，独立 SPEC/QUALITY 通过。本机原生 Lingui 提取/编译读取已验证十份语言目录的 14 条反馈文案。云端 27 份源码/语言目录 hash 与归档一致，health/ready/Web 为 200、ready 非 degraded；首次冷启动未就绪单独保留。正常网页向预存虚构候选提交一条明确发给 Sourcer 的本轮反馈，同时 Main 保持新建的纯展示待答卡。Sourcer 实际调用既有反馈工具，保存 proposed/round/scope，准确引用原人类消息并在原群回复。独立数据库核对唯一消息/事件/task/run、一次 completed 内部反馈效果及回复；没有研究/续搜、候选判断、岗位/记忆/权限变化或外联。13 组业务/配置快照和所有旧执行/消息/效果保持，原有 27 张卡逐字不变。
+
+实际容器替换保留全部 17 组完成后快照、同一反馈提议/原文回执和 28 张问题块，未重复执行；当时为 109 runs、271 messages、281 effects、109 migrations。网页重新打开已恢复 Sourcer 回复与 Main 的同一待答卡。反馈分类是本轮提议，不是新条件已采用、持久评审结论、G2 通过或同 Autumn task 候选续搜。真实十人校准、反馈采用、新结果完整保存及完整 P6/M1–M5 均未完成。
+
+随后在恢复后的同一 Main 测试卡点击原选项，原卡保存该选择、同一 run completed 并正常回复；只新增两条消息，最终为 109 runs、273 messages、281 effects、109 migrations。原有 27 张卡、全部旧消息/执行/效果及 13 组业务/配置数据保持；Main 测试卡已收尾，真实岗位地点卡未回答。该群原生后台摘要游标和摘要 hash 另有更新，旧消息仍保留，未将摘要语义或全部长任务恢复标为通过。
+
+**v68 历史发布 / `7f770e12`（反馈主体 `62d3ad15`）。** 候选 Dialog 现在可展开 Give feedback，明确选择 Good example / Not a fit / Skip for now 并输入原因，前两种必须有非空原因。复用原生 `threads.followUp` 保存人类原文并交给当前对话的 Agent；有待答卡时排入 steering，不把候选反馈当作该卡答案。未确认结果保留草稿和原 nonce，成功后清空本次输入；编辑、切换和迟到回执保持当前范围。群 follow-up 在同一原生所属群锁内检查 nonce，避免并发重放只一条保存却返回失败。没有新 endpoint、表、schema、规则引擎或工具权限。
 
 198 项界面、188 项 API/router/target 聚焦检查及相关类型/格式检查分批通过，独立 SPEC/QUALITY 通过；API 并发检查使用模拟事务，不冒充真实 PostgreSQL 并发验收。第一版网页新按钮显示了翻译编号，验收失败保留；随后按原生 Lingui 提取更新十份语言目录，12 条反馈文案的实际编译读取检查通过。修正版正常网页确认选择/原因均为 16px、正负示例须填原因；真实候选只查看表单，没有提交判断。
 
