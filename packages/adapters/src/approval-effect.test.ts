@@ -392,6 +392,29 @@ describe("completeExternalEffect", () => {
 });
 
 describe("approved effect resume", () => {
+  it("retains raw provider evidence only when settling an executing effect", async () => {
+    const providerResult = { structuredContent: { success: true } };
+    const store = {
+      externalEffect: {
+        updateMany: vi.fn(async () => ({ count: 1 })),
+        findUnique: vi.fn(),
+      },
+    };
+    await expect(
+      settleUncertainEffect(store, "effect-1", "reply", { providerResult }),
+    ).resolves.toMatchObject({ uncertain: true, providerResult });
+    expect(store.externalEffect.updateMany).toHaveBeenCalledWith({
+      where: { id: "effect-1", status: "executing" },
+      data: { status: "uncertain", result: expect.objectContaining({ providerResult }) },
+    });
+    const saved = { status: "sent_recorded" };
+    store.externalEffect.updateMany.mockResolvedValue({ count: 0 });
+    store.externalEffect.findUnique.mockResolvedValue({ status: "completed", result: saved });
+    await expect(
+      settleUncertainEffect(store, "effect-1", "reply", { providerResult }),
+    ).resolves.toEqual(saved);
+  });
+
   function createApprovedEffectStore(
     initialStatus: "approved" | "executing" | "completed" = "approved",
   ) {

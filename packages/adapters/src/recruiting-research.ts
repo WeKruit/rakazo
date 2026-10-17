@@ -344,7 +344,7 @@ function nonblank(value: unknown): value is string {
   return typeof value === "string" && value.trim().length > 0;
 }
 
-function mcpObject(raw: unknown): Record<string, unknown> | undefined {
+export function mcpObject(raw: unknown): Record<string, unknown> | undefined {
   const envelope = record(raw);
   if (!envelope) return undefined;
   const bodies: Record<string, unknown>[] = [];

@@ -1,6 +1,10 @@
 import { createHash } from "node:crypto";
 import type { Actor } from "@rakazo/contracts";
-import { boundDirectApprovalRequest, normalizeRecruitingCandidateRow } from "@rakazo/core";
+import {
+  boundDirectApprovalRequest,
+  catalogApprovalRequest,
+  normalizeRecruitingCandidateRow,
+} from "@rakazo/core";
 import { stableJsonValue } from "@rakazo/core/node/approval-effect-key";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import type { PrismaClient } from "./client.js";
@@ -620,6 +624,18 @@ function crmFixture() {
       })),
     },
     externalEffect: {
+      findMany: vi.fn(async ({ where }) =>
+        [...effects.values()]
+          .filter(
+            (effect) =>
+              effect.spaceId === where.spaceId &&
+              effect.runId === where.runId &&
+              (!where.status || effect.status === where.status),
+          )
+          .sort(
+            (a, b) => b.createdAt.getTime() - a.createdAt.getTime() || b.id.localeCompare(a.id),
+          ),
+      ),
       findFirst: vi.fn(async ({ where }) => {
         const effect = effects.get(where.id);
         return effect &&
@@ -754,6 +770,223 @@ function crmFixture() {
     runs,
   };
 }
+
+describe("native reply email proof", () => {
+  const route = {
+    connectorId: "mcp" as const,
+    resourceId: "mail-server",
+    resourceRevision: 1,
+    toolName: "reply_to_email" as const,
+  };
+  const input = { route, replyToEmailId: "inbound-email" };
+  const readRoute = { ...route, toolName: "get_email" };
+  const proofRequest = boundDirectApprovalRequest(
+    readRoute,
+    { id: input.replyToEmailId },
+    "__rakazoCatalogTool",
+  );
+  function proofFixture() {
+    const f = crmFixture();
+    f.tx.mcpServer.findFirst.mockResolvedValue({
+      ...actor,
+      id: "mail-server",
+      revision: 1,
+      enabled: true,
+    });
+    f.tx.botMcpServer.findFirst.mockResolvedValue({
+      allowAllTools: false,
+      allowedTools: ["get_email", "reply_to_email"],
+    });
+    const effect = {
+      ...f.binding,
+      id: "email-read",
+      kind: "mcp__mail__get_email",
+      request: proofRequest as unknown,
+      result: { content: [{ type: "text", text: '{"id":"inbound-email"}' }] } as unknown,
+    };
+    f.effects.set(effect.id, effect);
+    return { ...f, effect };
+  }
+  it("reads the exact canonical direct native receipt without provider parsing or mutation", async () => {
+    expect(recruiting.readNativeReplyEmailProof).toBeTypeOf("function");
+    const f = proofFixture();
+    await expect(
+      recruiting.readNativeReplyEmailProof(f.prisma, actor, f.trusted, input),
+    ).resolves.toEqual({ effectId: f.effect.id, result: f.effect.result });
+    expect(f.tx.externalEffect.findMany).toHaveBeenCalledWith({
+      where: { spaceId: actor.spaceId, runId: "run" },
+      orderBy: [{ createdAt: "desc" }, { id: "desc" }],
+    });
+    expect(f.tx.externalEffect.create).not.toHaveBeenCalled();
+    expect(f.tx.externalEffect.updateMany).not.toHaveBeenCalled();
+  });
+  it.each(["connectors_execute_tool", "mcp_execute_tool"])(
+    "accepts canonical %s receipts and chooses the deterministic newest proof",
+    async (tool) => {
+      const f = proofFixture();
+      const latest = {
+        ...f.effect,
+        id: "z-email-read",
+        request: catalogApprovalRequest(
+          tool,
+          { id: "mail-server:get_email", arguments: { id: input.replyToEmailId } },
+          "__rakazoCatalogTool",
+          readRoute,
+        ),
+        result: { isError: false, content: [] },
+      };
+      f.effects.set(latest.id, latest);
+      await expect(
+        recruiting.readNativeReplyEmailProof(f.prisma, actor, f.trusted, input),
+      ).resolves.toEqual({ effectId: latest.id, result: latest.result });
+    },
+  );
+  it.each(
+    [
+      { id: input.replyToEmailId },
+      [
+        "__rakazoCatalogTool",
+        "mcp_execute_tool",
+        { id: "mail-server:get_email", arguments: { id: input.replyToEmailId } },
+      ],
+      boundDirectApprovalRequest(
+        { ...readRoute, resourceRevision: "1" },
+        { id: input.replyToEmailId },
+        "__rakazoCatalogTool",
+      ),
+      boundDirectApprovalRequest(
+        readRoute,
+        { id: input.replyToEmailId, modelResult: {} },
+        "__rakazoCatalogTool",
+      ),
+      catalogApprovalRequest(
+        "other_execute_tool",
+        { id: "mail-server:get_email", arguments: { id: input.replyToEmailId } },
+        "__rakazoCatalogTool",
+        readRoute,
+      ),
+      catalogApprovalRequest(
+        "mcp_execute_tool",
+        { id: "different-server:get_email", arguments: { id: input.replyToEmailId } },
+        "__rakazoCatalogTool",
+        readRoute,
+      ),
+      [
+        "__rakazoCatalogTool",
+        "direct",
+        { route: readRoute, args: { id: input.replyToEmailId }, extra: true },
+      ],
+    ].map((request) => ({ request })),
+  )("does not admit noncanonical or unbound proof $request", async ({ request }) => {
+    const f = proofFixture();
+    f.effect.request = request;
+    await expect(
+      recruiting.readNativeReplyEmailProof(f.prisma, actor, f.trusted, input),
+    ).resolves.toBeNull();
+  });
+  it.each(["failed", "executing", "uncertain"])(
+    "does not use an earlier success after the latest exact read is %s",
+    async (status) => {
+      const f = proofFixture();
+      f.effects.set("newest", {
+        ...f.effect,
+        id: "newest",
+        createdAt: new Date(f.effect.createdAt.getTime() + 1),
+        status: status === "failed" ? "completed" : status,
+        result: { isError: true, content: [] },
+      });
+      await expect(
+        recruiting.readNativeReplyEmailProof(f.prisma, actor, f.trusted, input),
+      ).resolves.toBeNull();
+    },
+  );
+  it.each(["missing", "other-email", "executing", "no-result"])(
+    "returns no proof for %s",
+    async (boundary) => {
+      const f = proofFixture();
+      if (boundary === "missing") f.effects.delete(f.effect.id);
+      if (boundary === "other-email")
+        f.effect.request = boundDirectApprovalRequest(
+          readRoute,
+          { id: "another-email" },
+          "__rakazoCatalogTool",
+        );
+      if (boundary === "executing") f.effect.status = "executing";
+      if (boundary === "no-result") f.effect.result = null;
+      await expect(
+        recruiting.readNativeReplyEmailProof(f.prisma, actor, f.trusted, input),
+      ).resolves.toBeNull();
+    },
+  );
+  it.each([
+    "lease",
+    "expired",
+    "stopped",
+    "foreign-actor",
+    "foreign-run",
+    "foreign-thread",
+    "foreign-bot",
+    "disabled-server",
+    "server-revision",
+    "assignment",
+  ])("rejects the %s boundary before reading a proof", async (boundary) => {
+    const f = proofFixture();
+    if (boundary === "lease") f.trusted.leaseFence += 1;
+    if (boundary === "expired") Object.assign(f.run, { leaseExpiresAt: new Date(0) });
+    if (boundary === "stopped") f.run.status = "cancelled";
+    if (boundary === "foreign-run") f.run.userId = "other";
+    if (boundary === "foreign-thread")
+      f.tx.thread.findFirst.mockResolvedValue({
+        ...actor,
+        userId: "other",
+        id: "thread",
+        botId: "bot",
+        activeRecruitingRoleId: "role",
+      });
+    if (boundary === "foreign-bot")
+      f.tx.bot.findFirst.mockResolvedValue({ ...actor, userId: "other" });
+    if (boundary === "disabled-server")
+      f.tx.mcpServer.findFirst.mockResolvedValue({
+        ...actor,
+        id: "mail-server",
+        revision: 1,
+        enabled: false,
+      });
+    if (boundary === "server-revision")
+      f.tx.mcpServer.findFirst.mockResolvedValue({
+        ...actor,
+        id: "mail-server",
+        revision: 2,
+        enabled: true,
+      });
+    if (boundary === "assignment")
+      f.tx.botMcpServer.findFirst.mockResolvedValue({
+        allowAllTools: false,
+        allowedTools: ["get_email"],
+      });
+    await expect(
+      recruiting.readNativeReplyEmailProof(
+        f.prisma,
+        boundary === "foreign-actor" ? { ...actor, spaceId: "other" } : actor,
+        f.trusted,
+        input,
+      ),
+    ).rejects.toThrow(IsolationError);
+    expect(f.tx.externalEffect.findMany).not.toHaveBeenCalled();
+  });
+  it.each([
+    { ...input, route: { ...route, connectorId: "foreign" } },
+    { ...input, route: { ...route, resourceId: " " } },
+    { ...input, route: { ...route, resourceRevision: 0 } },
+    { ...input, route: { ...route, toolName: "get_email" } },
+    { ...input, replyToEmailId: " " },
+  ])("rejects invalid input %j", async (invalid) => {
+    const f = proofFixture();
+    await expect(
+      recruiting.readNativeReplyEmailProof(f.prisma, actor, f.trusted, invalid as never),
+    ).rejects.toThrow(IsolationError);
+  });
+});
 
 describe("native CRM binding and source import", () => {
   it("binds only from a retained role read and native human approval, then replays the immutable receipt", async () => {

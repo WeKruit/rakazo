@@ -288,11 +288,11 @@ export function resolveDuplicateEffectGate(
   return { action: "uncertain", toolName };
 }
 
-export type UncertainEffectResult = { error: string; uncertain: true };
+export type UncertainEffectResult = { error: string; uncertain: true; providerResult?: unknown };
 
 export function uncertainEffectResult(toolName: string): UncertainEffectResult {
   return {
-    error: `The earlier ${toolName} execution was interrupted, so its outcome is unknown. It was not replayed to avoid a duplicate side effect. Verify the destination before proposing another action.`,
+    error: `The ${toolName} outcome could not be verified. It was not replayed to avoid a duplicate side effect. Verify the destination before proposing another action.`,
     uncertain: true,
   };
 }
@@ -302,7 +302,7 @@ export async function settleUncertainEffect(
     externalEffect: {
       updateMany: (args: {
         where: { id: string; status: string };
-        data: { status: string; result: UncertainEffectResult };
+        data: { status: string; result: never };
       }) => Promise<{ count: number }>;
       findUnique: (args: {
         where: { id: string };
@@ -311,11 +311,12 @@ export async function settleUncertainEffect(
   },
   effectId: string,
   toolName: string,
+  evidence?: { providerResult: unknown },
 ): Promise<unknown> {
-  const result = uncertainEffectResult(toolName);
+  const result = { ...uncertainEffectResult(toolName), ...evidence };
   const settled = await store.externalEffect.updateMany({
     where: { id: effectId, status: "executing" },
-    data: { status: "uncertain", result },
+    data: { status: "uncertain", result: result as never },
   });
   if (settled.count === 1) return result;
 

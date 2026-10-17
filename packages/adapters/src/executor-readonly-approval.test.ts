@@ -17,6 +17,7 @@ import { createRunExecutor } from "./executor.js";
 import { catalogEntries, resolveCatalogCall } from "./lazy-tool-catalog.js";
 
 const recruitingApproval = vi.hoisted(() => ({ prepare: vi.fn(), execute: vi.fn() }));
+const replyProof = vi.hoisted(() => vi.fn());
 const recruitingCrm = vi.hoisted(() => ({
   read: vi.fn(),
   prepare: vi.fn(),
@@ -27,6 +28,10 @@ const recruitingCrm = vi.hoisted(() => ({
 }));
 beforeEach(() => {
   for (const mock of Object.values(recruitingCrm)) mock.mockReset();
+  replyProof.mockReset().mockImplementation(async () => ({
+    effectId: "native-email-read",
+    result: { structuredContent: replyAnchor },
+  }));
 });
 vi.mock("@rakazo/db", async (importOriginal) => ({
   ...(await importOriginal<typeof DatabaseModule>()),
@@ -38,6 +43,7 @@ vi.mock("@rakazo/db", async (importOriginal) => ({
   resolveRecruitingCrmImport: recruitingCrm.resolve,
   admitRecruitingCrmImport: recruitingCrm.admit,
   claimRecruitingCrmImport: recruitingCrm.claim,
+  readNativeReplyEmailProof: replyProof,
 }));
 
 vi.mock("./computer-lifecycle.js", async (importOriginal) => ({
@@ -68,6 +74,29 @@ type Effect = {
   runId?: string;
 };
 
+const replyArgs = {
+  reply_to_uuid: "10000000-0000-4000-8000-000000000001",
+  eaccount: "recruiter@example.test",
+  to: "candidate@example.test",
+  subject: "Re: Example role",
+  body_text: "Public synthetic draft.",
+  skip_validation: false,
+};
+const replyAnchor = {
+  id: replyArgs.reply_to_uuid,
+  organization_id: "20000000-0000-4000-8000-000000000001",
+  thread_id: "30000000-0000-4000-8000-000000000001",
+  timestamp_created: "2026-10-16T00:00:00.000Z",
+  timestamp_email: "2026-10-16T00:00:00.000Z",
+  message_id: "original@example.test",
+  eaccount: replyArgs.eaccount,
+  from_address_email: replyArgs.to,
+  to_address_email_list: replyArgs.eaccount,
+  subject: "Example role",
+  body: { text: "Public original question." },
+  ue_type: 2,
+};
+
 function fixture({
   name = "demo_get_item",
   catalog = false,
@@ -90,7 +119,11 @@ function fixture({
   route,
   transportUncertain = false,
   inputSchema,
+  connectorResult,
+  replyServerEndpoint = "https://mcp.instantly.ai/mcp",
 }: {
+  replyServerEndpoint?: string;
+  connectorResult?: unknown;
   inputSchema?: ConnectorTool["inputSchema"];
   transportUncertain?: boolean;
   route?: ConnectorTool["route"];
@@ -228,6 +261,9 @@ function fixture({
     event: { findMany: vi.fn(async () => []) },
     task: { findUniqueOrThrow: vi.fn(async () => ({ id: run.taskId, prompt })) },
     connection: { findMany: vi.fn(async () => []) },
+    mcpServer: {
+      findFirst: vi.fn(async () => ({ endpoint: replyServerEndpoint, enabled: true, revision: 1 })),
+    },
     spaceModelPreference: { findFirst: vi.fn(async () => null) },
     userModelCredential: { findFirst: vi.fn(async () => null) },
     deploymentSettings: {
@@ -255,7 +291,7 @@ function fixture({
       yield { type: "error" as const, message: "Response lost", outcome: "uncertain" as const };
       return;
     }
-    yield { type: "result" as const, data: { item: call.args.id } };
+    yield { type: "result" as const, data: connectorResult ?? { item: call.args.id } };
   });
   let calls: { name?: string; args: Record<string, unknown>; executionId: string }[] = [
     { args: { id: "item-1" }, executionId: "call-1" },
@@ -337,12 +373,15 @@ function fixture({
     setCalls(next: typeof calls) {
       calls = next;
     },
-    async run() {
+    async run({ allowFailure = false } = {}) {
       run.status = "queued";
       await executor.continueRun(run.id, "worker-1");
       expect(runtimeRun).toHaveBeenCalled();
       expect(prisma.attempt.update).not.toHaveBeenCalled();
-      expect(finalizeRun).not.toHaveBeenCalledWith(expect.objectContaining({ outcome: "failed" }));
+      if (!allowFailure)
+        expect(finalizeRun).not.toHaveBeenCalledWith(
+          expect.objectContaining({ outcome: "failed" }),
+        );
     },
   };
 }
@@ -652,7 +691,9 @@ describe.each([
         resourceRevision: 1,
         toolName: operation,
       },
+      ...(operation === "reply_to_email" ? { inputSchema: { type: "object" } } : {}),
     });
+    if (operation === "reply_to_email") f.setCalls([{ args: replyArgs, executionId: "reply" }]);
     await f.run();
     expect(f.execute).not.toHaveBeenCalled();
     f.effects[0]!.status = "approved";
@@ -681,7 +722,9 @@ describe.each([
           toolName: operation,
         },
         rules: [{ effect: "always_allow", matchKind: "tool", matchValue: "renamed_import" }],
+        ...(operation === "reply_to_email" ? { inputSchema: { type: "object" } } : {}),
       });
+      if (operation === "reply_to_email") f.setCalls([{ args: replyArgs, executionId: "reply" }]);
       await f.run();
       expect(f.effects).toHaveLength(1);
       expect(f.effects[0]?.status).toBe("intended");
@@ -703,12 +746,197 @@ describe.each([
       f.setCalls([{ args: { id: "changed-after-approval" }, executionId: "replay" }]);
       await f.run();
       expect(f.execute).toHaveBeenCalledOnce();
-      expect(f.execute.mock.calls[0]?.[0].args).toEqual({ id: "item-1" });
+      expect(f.execute.mock.calls[0]?.[0].args).toEqual(
+        operation === "reply_to_email" ? replyArgs : { id: "item-1" },
+      );
     });
   }
 });
 
 describe.each([false, true])("native outbound draft approval, catalog=%s", (catalog) => {
+  function replyFixture(connectorResult?: unknown) {
+    const f = fixture({
+      name: "renamed_reply",
+      catalog,
+      readOnly: true,
+      inputSchema: { type: "object" },
+      connectorResult,
+      route: {
+        connectorId: "mcp",
+        resourceId: "resource-1",
+        resourceRevision: 1,
+        toolName: "reply_to_email",
+      },
+    });
+    f.setCalls([{ args: replyArgs, executionId: "reply" }]);
+    return f;
+  }
+  const sentEmail = {
+    ...replyAnchor,
+    id: "10000000-0000-4000-8000-000000000002",
+    message_id: "sent@example.test",
+    from_address_email: replyArgs.eaccount,
+    to_address_email_list: replyArgs.to,
+    subject: replyArgs.subject,
+    body: { text: replyArgs.body_text },
+    ue_type: 3,
+  };
+
+  it.each([
+    null,
+    { effectId: "read", result: { structuredContent: { ...replyAnchor, ue_type: 3 } } },
+    {
+      effectId: "read",
+      result: { structuredContent: { ...replyAnchor, from_address_email: "other@example.test" } },
+    },
+    { effectId: "read", result: { isError: true, structuredContent: replyAnchor } },
+  ])("requires a verified original inbound read before showing a card: %s", async (proof) => {
+    replyProof.mockResolvedValue(proof);
+    const f = replyFixture();
+    await f.run();
+    expect(f.pauseRunForInput).not.toHaveBeenCalled();
+    expect(f.execute).not.toHaveBeenCalled();
+    expect(f.results.at(-1)).toMatchObject({ error: expect.any(String), dispatched: false });
+  });
+
+  it("rejects implicit recipients and disabled provider validation before approval", async () => {
+    const { to: _to, ...implicitRecipient } = replyArgs;
+    for (const args of [implicitRecipient, { ...replyArgs, skip_validation: true }]) {
+      const f = replyFixture();
+      f.setCalls([{ args, executionId: "invalid-reply" }]);
+      await f.run();
+      expect(f.pauseRunForInput).not.toHaveBeenCalled();
+      expect(f.execute).not.toHaveBeenCalled();
+      expect(f.results.at(-1)).toMatchObject({ dispatched: false });
+    }
+  });
+
+  it("rechecks source ownership before claiming an approved effect", async () => {
+    const f = replyFixture();
+    await f.run();
+    f.effects[0]!.status = "approved";
+    replyProof.mockResolvedValue(null);
+    await f.run({ allowFailure: true });
+    expect(f.execute).not.toHaveBeenCalled();
+    expect(f.effects[0]!.status).toBe("approved");
+    expect(f.results.at(-1)).toMatchObject({ dispatched: false });
+  });
+
+  it("keeps the original approved request through source failure and repair within the same attempt", async () => {
+    const f = replyFixture({ structuredContent: sentEmail });
+    await f.run();
+    f.effects[0]!.status = "approved";
+    replyProof.mockResolvedValueOnce(null);
+    f.setCalls([
+      {
+        args: { ...replyArgs, body_text: "Changed first reconstruction" },
+        executionId: "missing-proof",
+      },
+      {
+        args: {
+          ...replyArgs,
+          to: "other@example.test",
+          body_text: "Changed second reconstruction",
+        },
+        executionId: "repaired-proof",
+      },
+    ]);
+    await f.run();
+    expect(f.results.at(-2)).toMatchObject({ dispatched: false });
+    expect(f.execute).toHaveBeenCalledOnce();
+    expect(f.execute.mock.calls[0]?.[0].args).toEqual(replyArgs);
+    expect(f.effects).toHaveLength(1);
+    expect(f.effects[0]!.status).toBe("completed");
+  });
+
+  it("leaves another MCP provider's same-name reply contract intact", async () => {
+    const f = fixture({
+      name: "another_reply",
+      catalog,
+      readOnly: false,
+      replyServerEndpoint: "https://mail.example.test/mcp",
+      route: {
+        connectorId: "mcp",
+        resourceId: "resource-1",
+        resourceRevision: 1,
+        toolName: "reply_to_email",
+      },
+    });
+    await f.run();
+    f.effects[0]!.status = "approved";
+    await f.run();
+    expect(f.execute).toHaveBeenCalledOnce();
+    expect(f.execute.mock.calls[0]?.[0].args).toEqual({ id: "item-1" });
+    expect(f.results.at(-1)).toEqual({ item: "item-1" });
+    expect(replyProof).not.toHaveBeenCalled();
+  });
+
+  it("uses one retained proof snapshot before consuming the approved request", async () => {
+    const f = replyFixture({ structuredContent: sentEmail });
+    await f.run();
+    f.effects[0]!.status = "approved";
+    replyProof.mockClear();
+    replyProof
+      .mockResolvedValueOnce({
+        effectId: "native-email-read",
+        result: { structuredContent: replyAnchor },
+      })
+      .mockResolvedValueOnce(null);
+    await f.run();
+    expect(replyProof).toHaveBeenCalledOnce();
+    expect(f.execute).toHaveBeenCalledOnce();
+    expect(f.effects[0]!.status).toBe("completed");
+    await f.run();
+    expect(replyProof).toHaveBeenCalledOnce();
+    expect(f.execute).toHaveBeenCalledOnce();
+  });
+
+  it.each([
+    [3, "sent_recorded"],
+    [4, "scheduled"],
+  ] as const)("records only the correlated provider outcome %s", async (ue_type, status) => {
+    const providerResult = { structuredContent: { ...sentEmail, ue_type } };
+    const f = replyFixture(providerResult);
+    await f.run();
+    f.effects[0]!.status = "approved";
+    await f.run();
+    expect(f.results.at(-1)).toMatchObject({
+      status,
+      sourceReadEffectId: "native-email-read",
+      receipt: { emailId: sentEmail.id, replyToEmailId: replyArgs.reply_to_uuid },
+      providerResult,
+    });
+    expect(f.effects[0]!.status).toBe("completed");
+    const saved = f.effects[0]!.result;
+    replyProof.mockResolvedValue(null);
+    await f.run();
+    expect(f.execute).toHaveBeenCalledOnce();
+    expect(f.results.at(-1)).toEqual(saved);
+  });
+
+  it.each([
+    { structuredContent: { success: true } },
+    { structuredContent: { ...sentEmail, thread_id: "30000000-0000-4000-8000-000000000002" } },
+    { isError: true, structuredContent: sentEmail },
+  ])(
+    "retains an unverifiable provider response as uncertain without resend: %s",
+    async (providerResult) => {
+      const f = replyFixture(providerResult);
+      await f.run();
+      f.effects[0]!.status = "approved";
+      await f.run();
+      expect(f.effects[0]).toMatchObject({
+        status: "uncertain",
+        result: { uncertain: true, providerResult },
+      });
+      const saved = f.effects[0]!.result;
+      replyProof.mockResolvedValue(null);
+      await f.run();
+      expect(f.execute).toHaveBeenCalledOnce();
+      expect(f.results.at(-1)).toEqual(saved);
+    },
+  );
+
   it("shows the complete draft and restores its exact account, recipient and body after approval", async () => {
     const args = {
       reply_to_uuid: "10000000-0000-4000-8000-000000000001",

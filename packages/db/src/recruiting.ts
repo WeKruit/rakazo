@@ -4833,6 +4833,104 @@ async function currentCrmServer(
     throw new IsolationError();
 }
 
+/** Retained native source identity only: this grants neither freshness nor send approval. */
+export async function readNativeReplyEmailProof(
+  prisma: PrismaClient,
+  actor: Actor,
+  trusted: ResearchLease,
+  input: {
+    route: {
+      connectorId: "mcp";
+      resourceId: string;
+      resourceRevision: number;
+      toolName: "reply_to_email";
+    };
+    replyToEmailId: string;
+  },
+) {
+  const route = input?.route;
+  if (
+    route?.connectorId !== "mcp" ||
+    route.toolName !== "reply_to_email" ||
+    typeof route.resourceId !== "string" ||
+    !route.resourceId.trim() ||
+    !Number.isSafeInteger(route.resourceRevision) ||
+    route.resourceRevision < 1 ||
+    typeof input.replyToEmailId !== "string" ||
+    !input.replyToEmailId.trim()
+  )
+    throw new IsolationError();
+  return prisma.$transaction(async (tx) => {
+    const { run } = await lockLiveRecruitingRun(tx, actor, trusted.runId);
+    requireResearchLease(run, trusted);
+    const server = await tx.mcpServer.findFirst({
+      where: { id: route.resourceId, spaceId: actor.spaceId, userId: actor.userId, enabled: true },
+    });
+    const assignment = await tx.botMcpServer.findFirst({
+      where: {
+        serverId: route.resourceId,
+        botId: run.botId,
+        spaceId: actor.spaceId,
+        userId: actor.userId,
+      },
+    });
+    const allowed = assignment?.allowedTools;
+    if (
+      !server?.enabled ||
+      server.id !== route.resourceId ||
+      server.spaceId !== actor.spaceId ||
+      server.userId !== actor.userId ||
+      server.revision !== route.resourceRevision ||
+      !assignment ||
+      (!assignment.allowAllTools &&
+        (!Array.isArray(allowed) ||
+          !["get_email", "reply_to_email"].every((tool) => allowed.includes(tool))))
+    )
+      throw new IsolationError();
+    const readRoute = {
+      connectorId: "mcp",
+      resourceId: route.resourceId,
+      resourceRevision: route.resourceRevision,
+      toolName: "get_email",
+    };
+    const args = { id: input.replyToEmailId };
+    // ponytail: compare this run's native envelopes in O(n); index by route if long runs require it.
+    const effects = await tx.externalEffect.findMany({
+      where: { spaceId: actor.spaceId, runId: run.id },
+      orderBy: [{ createdAt: "desc" }, { id: "desc" }],
+    });
+    for (const effect of effects) {
+      if (effect.spaceId !== actor.spaceId || effect.runId !== run.id) throw new IsolationError();
+      const marker = "__rakazoCatalogTool";
+      const direct = boundDirectApprovalDetails(effect.request, marker);
+      const catalog = catalogApprovalDetails(effect.request, marker);
+      const expected = direct
+        ? boundDirectApprovalRequest(readRoute, args, marker)
+        : catalog && ["connectors_execute_tool", "mcp_execute_tool"].includes(catalog.toolName)
+          ? catalogApprovalRequest(
+              catalog.toolName,
+              { id: `${route.resourceId}:get_email`, arguments: args },
+              marker,
+              readRoute,
+            )
+          : null;
+      if (!expected || stableJsonValue(effect.request) !== stableJsonValue(expected)) continue;
+      const result = effect.result;
+      if (
+        effect.status !== "completed" ||
+        !result ||
+        typeof result !== "object" ||
+        Array.isArray(result) ||
+        (result.isError !== undefined && result.isError !== false) ||
+        result.error !== undefined
+      )
+        return null;
+      return { effectId: effect.id, result };
+    }
+    return null;
+  });
+}
+
 export async function getRecruitingCrmTarget(
   prisma: PrismaClient,
   actor: Actor,

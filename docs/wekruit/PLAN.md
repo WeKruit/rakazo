@@ -27,7 +27,7 @@ Execution priority: feature implementation and direct product validation come fi
 | 人工编辑岗位条件 | 原 Role 面板的语义条件、结构化年限规则及 hard/preferred 编辑已有代码，同事务保存真实人类来源和版本/CAS；未发布 | 条件增删/逻辑组重构、独立召回 filters 和全流程验收仍在 J06 |
 | Autumn | 已接只读服务；原生 task/action/请求/回执及同 task 续搜有代码 | 新真实搜索→证据→反馈→原 task 续搜的整条业务链未通过 |
 | CRM | 用户 OAuth、组织身份和只读发现已接；[CRM PR #44](https://github.com/WeKruit/headhunter-agent/pull/44) 已补同组织身份去重、候选/来源/多岗位原子导入；Rakazo 已接精确目标确认、来源行/原生导入 effect 关联及回执状态展示，未发布 | 新迁移及 MCP/Web 发布、真实目标绑定/导入写读/并发/RLS、可信发送镜像；抑制规则迁移尚未执行 |
-| Instantly | 已接只读服务 | 真实精确审批发送、发送确认、回复停止；当前 REST 和既有 MCP 合同须分别核验 |
+| Instantly | 已接只读服务；分支已补一次性审批、原邮件读取证据及严格回复回执，未发布 | 岗位/候选/来源关联、最新抑制和历史检查、真实发送/回复停止；当前 REST 和既有 MCP 合同须分别核验 |
 | 候选人完整工作台/Dashboard | 工作分支已接候选索引、轮次/原始行关联、服务端分页/筛选/排序、持久 shortlist 及岗位 Dashboard；合成材料的实际界面已验证 | 新迁移及网页尚未发布，真实搜索落库/恢复未验；跨岗位/客户 CRM 去重、批次/名单、外联/面试看板仍缺 |
 | 执行过程展示 | 原生 `ToolActivityDisclosure`、事件和 Activity 视图可复用 | 完整招聘步骤、委派树、任务/结果/证据/反馈的关联展示与实时/重载验收 |
 | Agent 可替换底座与插件 | Pi、逐 bot 模型和原生 memory/skills/MCP/文件/routines 可复用 | 每 bot runtime/明确 connection、运行配置冻结、human 群成员等 M3 实际缺口未完成 |
@@ -586,6 +586,14 @@ PR #40 已通过真实 Postgres 24 项（含双连接行锁与跨组织冲突）
 该增量只补强制真人确认，不等于 G3/G4 业务准入。后续仍须把已确认岗位/候选/来源、准确 sender/recipient/provider thread、文案/设置/名单包和真实 CRM/provider 发送前读回连接起来；不能接受模型提供的 suppressed/checksComplete 布尔值，不能将 MCP HTTP 200 当投递完成。名单批量 skip 参数不是请求幂等；provider 原生 stop_on_reply 与独立的手动回复是不同操作，均需实际验收。历史工具目录是合同线索，不代替当前 server revision 的合法参数及业务回执核验。
 
 此策略在原生 executor 的直接与 catalog 路径先复现 16 个失败，再通过修复后的 150 项聚焦离线检查（四文件）；core/adapters 类型及格式检查、独立 SPEC/QUALITY 审查通过。覆盖永久允许/自动审查/错误只读注记、一次性动作、完整超过 4,000 字符的 Unicode 草稿、改写 sender/recipient/body 重构后的原参数执行，以及响应丢失后沿原 effect 记录未知而不重发。与上一批 563 项有重叠，不相加。新策略不改写历史卡片、既有工具分配或连接，不发送测试邮件、不激活活动、不部署。
+
+后续回复增量复用该 executor、原生 effect 和 MCP 连接，未新增数据库表、队列、依赖或 harness。Instantly 专用合同只用于 actor 所属、当前版本的官方 MCP endpoint；其他服务的同名工具保留原合同。发卡前和恢复批准前，读取同一 run 保存的精确 `get_email` 证据，核对当前连接/工具分配/租约、原入站邮件、账户和实际收件地址。只保留最新精确读取；失败或未知读取不会退回较早成功结果。正文、HTML、CC/BCC 保留原值；显式 `to` 和 `skip_validation:false` 必须存在。此证据是原件身份，不是实时抑制/回复历史证明。
+
+恢复先取得原批准参数并核验，再消耗原 FIFO；同次调用复用一个已验证的 retained snapshot。证据缺失时不派发，同 attempt 修复后仍沿原 effect/原参数继续。实际回复调用的规范 Email 结果必须同时匹配账户、workspace/thread、全部收件人、主题及每种已提供正文，才记录 `sent_recorded` 或 `scheduled`；这不是 Delivered。无法核对的返回保存原 provider result 并转原生 uncertain，不重发；已完成/未知的重复恢复直接读原结果，不新增证据要求或覆盖回执。
+
+这仍不是完整 G4：候选/岗位/搜索来源的外联绑定、CRM 与全部旧 hold/pass/suppression 来源采用、发送前最新完整历史/回复核验、跨 run 去重/并发声明、停止跟进及真实发送镜像尚未接完。新代码没有开放写工具、修改原待答卡、执行生产迁移、部署或外发；没有新增付费调用。当前原生 UI 复查仍为明确标注 Synthetic 的现有 fixture，能显示三条候选（两条未评估）及不同 CRM 回执状态，不证明业务写入。生产发布和真实验收继续单独处理，P6/M1–M5 均未完成。
+
+此批最终九个相关文件通过 465 项离线检查，adapters/DB 类型、改动代码格式及独立 SPEC/QUALITY 审查通过。覆盖直接/catalog 恢复、同 attempt 证据修复、单次 retained snapshot、不同供应商同名工具、CR/LF、长正文及多格式/全部收件人匹配、未知原始回执保留和缓存不重发；与此前批次有重叠，不累计。没有运行真实 PostgreSQL、在线 MCP 邮件结果核验或完整业务发送验收。
 
 ## 任务 9：P6 全链路验收与交付
 

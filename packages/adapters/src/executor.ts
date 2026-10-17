@@ -148,6 +148,7 @@ import {
   RecruitingConflictError,
   RecruitingSourceValidationError,
   readHistory,
+  readNativeReplyEmailProof,
   recordUsage,
   recruitingResearchSnapshot,
   resolveRecruitingCrmImport,
@@ -285,6 +286,13 @@ import {
   selectCompactedHistory,
   shouldEnqueueCompaction,
 } from "./history-compaction.js";
+import type { InstantlyEmail } from "./instantly-reply.js";
+import {
+  classifyInstantlyReplyReceipt,
+  instantReplyAnchorMatches,
+  readInstantlyEmail,
+  readInstantlyReplyRequest,
+} from "./instantly-reply.js";
 import {
   assertConnectorToolArgs,
   CATALOG_EXECUTE,
@@ -349,6 +357,7 @@ import {
   executeRecruitingFeedback,
   RecruitingFeedbackValidationError,
 } from "./recruiting-feedback.js";
+import { mcpObject } from "./recruiting-research.js";
 import type { RecruitingResearchCallAdmission } from "./recruiting-tools.js";
 import {
   admitRecruitingResearchCall,
@@ -4563,6 +4572,76 @@ export function createRunExecutor(deps: ExecutorDeps) {
                   toolName: connectorCall.route.toolName,
                 }
               : undefined;
+          const possibleReplyRoute =
+            liveRoute?.connectorId === "mcp" && liveRoute.toolName === "reply_to_email"
+              ? liveRoute
+              : undefined;
+          const replyServer = possibleReplyRoute
+            ? await deps.prisma.mcpServer.findFirst({
+                where: {
+                  id: possibleReplyRoute.resourceId,
+                  spaceId: run.spaceId,
+                  userId: run.userId,
+                },
+                select: { endpoint: true, enabled: true, revision: true },
+              })
+            : null;
+          const replyEndpoint = replyServer?.endpoint ? URL.parse(replyServer.endpoint) : null;
+          // Scope the vendor payload contract to its configured official MCP endpoint, never a tool alias.
+          // https://help.instantly.ai/en/articles/12980002-instantly-mcp-model-context-protocol
+          const replyRoute =
+            replyServer?.enabled &&
+            replyServer.revision === possibleReplyRoute?.resourceRevision &&
+            replyEndpoint?.origin === "https://mcp.instantly.ai" &&
+            (replyEndpoint.pathname === "/mcp" || replyEndpoint.pathname.startsWith("/mcp/"))
+              ? possibleReplyRoute
+              : undefined;
+          let replyEvidence: { effectId: string; anchor: InstantlyEmail } | undefined;
+          const readReplyEvidence = async () => {
+            if (!replyRoute) return;
+            const request = readInstantlyReplyRequest(args);
+            if (
+              !request ||
+              !replyRoute.resourceId ||
+              typeof replyRoute.resourceRevision !== "number" ||
+              !Number.isInteger(replyRoute.resourceRevision)
+            )
+              throw new Error(
+                "Reply requires an explicit account, recipient, original email, subject, body and skip_validation:false.",
+              );
+            const proof = await readNativeReplyEmailProof(
+              deps.prisma,
+              researchActor.actor,
+              crmContext,
+              {
+                route: {
+                  connectorId: "mcp",
+                  resourceId: replyRoute.resourceId,
+                  resourceRevision: replyRoute.resourceRevision,
+                  toolName: "reply_to_email",
+                },
+                replyToEmailId: request.reply_to_uuid,
+              },
+            );
+            const anchor = readInstantlyEmail(mcpObject(proof?.result));
+            if (
+              !proof ||
+              !anchor ||
+              (proof.result.isError !== undefined && proof.result.isError !== false) ||
+              "error" in proof.result ||
+              !instantReplyAnchorMatches(request, anchor)
+            )
+              throw new Error(
+                "Read the original inbound email with get_email in this task before proposing this reply. Its account and recipient must match.",
+              );
+            // Retained source provenance, not a fresh suppression or conversation-history check.
+            replyEvidence = { effectId: proof.effectId, anchor };
+          };
+          const replyProofError = (error: unknown) => ({
+            error: sanitizeConnectorError(error, runSecrets),
+            dispatched: false,
+          });
+
           const nextBound = boundDirectApprovalDetails(nextApprovedRequest, CATALOG_APPROVAL_TOOL);
           const nextCatalog = catalogApprovalDetails(nextApprovedRequest, CATALOG_APPROVAL_TOOL);
           // After collision uniquify, the live tool name may differ from the stored effect
@@ -4610,7 +4689,7 @@ export function createRunExecutor(deps: ExecutorDeps) {
               CATALOG_APPROVAL_TOOL,
             );
             if (resourceError) return { error: resourceError };
-            const approvedRequest = approvedEffectReplays.take(nextApprovedTool)!;
+            const approvedRequest = nextApprovedRequest;
             const approvedCatalog = catalogApprovalDetails(approvedRequest, CATALOG_APPROVAL_TOOL);
             if (approvedCatalog && !catalogRemapped) {
               // Shrink-to-direct: restore approved inner arguments, not the wrapper envelope.
@@ -4641,6 +4720,14 @@ export function createRunExecutor(deps: ExecutorDeps) {
                 }
               }
             }
+          }
+          if (nextApprovedTool) {
+            try {
+              await readReplyEvidence();
+            } catch (error) {
+              return replyProofError(error);
+            }
+            approvedEffectReplays.take(nextApprovedTool);
           }
           if (name === "recruiting_request_approval") {
             const parsed = RecruitingApprovalToolInputSchema.safeParse(args);
@@ -5155,7 +5242,6 @@ export function createRunExecutor(deps: ExecutorDeps) {
           const needsApproval = gateDecision === "ask";
           const bypassApproval = gateDecision === "allow" && requiresApprovalByDefault;
           let claimedEffect = false;
-
           const executeRole = () =>
             executeRecruitingRoleTool(
               deps.prisma,
@@ -5253,6 +5339,11 @@ export function createRunExecutor(deps: ExecutorDeps) {
           const claimOrReturn = async (
             from: "approved" | "intended",
           ): Promise<unknown | undefined> => {
+            try {
+              if (!replyEvidence) await readReplyEvidence();
+            } catch (error) {
+              return replyProofError(error);
+            }
             const claim = from === "approved" ? claimApprovedEffect : claimIntendedEffect;
             let claimed: boolean;
             try {
@@ -5355,6 +5446,14 @@ export function createRunExecutor(deps: ExecutorDeps) {
             }
             let files: MessageBlock[] = [];
             let approvalArgs = args;
+            try {
+              await readReplyEvidence();
+            } catch (error) {
+              const result = replyProofError(error);
+              return (await completeEffect(deps, applied!.effect.id, "intended", result))
+                ? result
+                : uncertainEffectResult(name);
+            }
             if (name === "recruiting_crm_target" && args.operation === "bind") {
               try {
                 const prepared = await prepareRecruitingCrmBinding(
@@ -7491,6 +7590,31 @@ export function createRunExecutor(deps: ExecutorDeps) {
               if (!(await persistEffectResult(result))) return uncertainEffectResult(name);
               if (!applied) throw new Error("Recruiting receipt requires its native effect");
               return researchResult(researchAdmission, result, applied.effect);
+            }
+            if (replyRoute) {
+              if (!applied || !claimedEffect || !replyEvidence) throw new IsolationError();
+              const envelope =
+                result !== null && typeof result === "object" && !Array.isArray(result)
+                  ? (result as Record<string, unknown>)
+                  : undefined;
+              const outcome = classifyInstantlyReplyReceipt(
+                args,
+                replyEvidence.anchor,
+                envelope &&
+                  !("error" in envelope) &&
+                  (envelope.isError === undefined || envelope.isError === false)
+                  ? mcpObject(envelope)
+                  : undefined,
+              );
+              if (outcome.status === "unknown")
+                return settleUncertainEffect(deps.prisma, applied.effect.id, name, {
+                  providerResult: result,
+                });
+              return finish({
+                ...outcome,
+                sourceReadEffectId: replyEvidence.effectId,
+                providerResult: result,
+              });
             }
             return finish(result);
           }
