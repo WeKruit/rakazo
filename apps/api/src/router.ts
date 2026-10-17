@@ -2289,6 +2289,7 @@ export function createRouter(deps: RouterDeps) {
           return { ok: true as const };
         }
         const committed = await deps.prisma.$transaction(async (tx) => {
+          await lockOwnedGroup(tx, context.actor, target.groupId);
           if (input.clientNonce) {
             const existing = await tx.message.findUnique({
               where: {
@@ -2297,7 +2298,6 @@ export function createRouter(deps: RouterDeps) {
             });
             if (existing) return null;
           }
-          await lockOwnedGroup(tx, context.actor, target.groupId);
           const group = await tx.chatGroup.findFirst({
             where: {
               id: target.groupId,

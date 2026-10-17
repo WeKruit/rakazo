@@ -3640,6 +3640,169 @@ describe("routines.update", () => {
   });
 });
 
+describe("threads.followUp", () => {
+  const text = "  Continue on the same research task.\n";
+  const clientNonce = "feedback:one-request";
+
+  function fixture({ active = false, ownedAtLock = true, replay = false } = {}) {
+    let message: { id: string } | null = replay ? { id: "message-1" } : null;
+    let lockTail = Promise.resolve();
+    const waitingRun = { id: "run-1", status: "waiting_input" };
+    const tx = {
+      thread: { update: vi.fn().mockResolvedValue({ nextMessageSeq: 2, nextEventSeq: 2 }) },
+      chatGroup: {
+        findFirst: vi.fn().mockResolvedValue({ members: [{ botId: "bot-1" }] }),
+        update: vi.fn().mockResolvedValue({}),
+      },
+      message: {
+        findUnique: vi.fn(async () => message),
+        findMany: vi.fn().mockResolvedValue([
+          {
+            id: "question-1",
+            blocks: [{ kind: "ask", text: "Which city should I use?", status: "pending" }],
+          },
+        ]),
+        create: vi.fn(async () => {
+          if (message) throw Object.assign(new Error("duplicate nonce"), { code: "P2002" });
+          message = { id: "message-1" };
+          return message;
+        }),
+        update: vi.fn().mockResolvedValue({}),
+      },
+      task: { create: vi.fn().mockResolvedValue({ id: "task-1" }) },
+      run: {
+        findFirst: vi.fn().mockResolvedValue(active ? waitingRun : null),
+        findUnique: vi.fn().mockResolvedValue(active ? waitingRun : { status: "queued" }),
+        create: vi.fn().mockResolvedValue({ id: "run-1" }),
+        update: vi.fn(),
+      },
+      steeringMessage: { create: vi.fn().mockResolvedValue({}) },
+      event: { create: vi.fn().mockResolvedValue({ seq: 1 }) },
+    };
+    const lockGroup = vi.fn(async (...args: unknown[]) => {
+      expect(args.slice(1)).toEqual(["group-1", "space-1", "user-1"]);
+      return ownedAtLock ? [{ id: "group-1" }] : [];
+    });
+    const prisma = {
+      chatGroup: {
+        findFirst: vi.fn().mockResolvedValue({
+          id: "group-1",
+          name: "Crew",
+          thread: { id: "thread-1" },
+          members: ["bot-1", "bot-2"].map((id) => ({
+            bot: { id, name: id, color: "blue", runs: [] },
+          })),
+        }),
+      },
+      $transaction: vi.fn(async (callback: (client: unknown) => Promise<unknown>) => {
+        let releaseLock = () => {};
+        try {
+          return await callback({
+            ...tx,
+            $queryRaw: async (...args: unknown[]) => {
+              // Model the row lock, not the whole transaction: pre-lock reads can race.
+              const previous = lockTail;
+              lockTail = new Promise<void>((resolve) => {
+                releaseLock = resolve;
+              });
+              await previous;
+              return lockGroup(...args);
+            },
+          });
+        } finally {
+          releaseLock();
+        }
+      }),
+    };
+    const notify = vi.fn().mockResolvedValue(undefined);
+    const enqueue = vi.fn().mockResolvedValue(undefined);
+    const handler = new RPCHandler(
+      createRouter({
+        prisma,
+        events: { notify },
+        jobs: { enqueue },
+        env: { sandboxProvider: "fake" },
+      } as unknown as RouterDeps),
+    );
+    const actor = {
+      spaceId: "space-1",
+      userId: "user-1",
+      email: "user@rakazo.test",
+      isDeploymentOwner: true,
+    } satisfies Actor;
+    return {
+      tx,
+      waitingRun,
+      lockGroup,
+      notify,
+      enqueue,
+      call: () =>
+        handler.handle(
+          new Request("http://127.0.0.1/rpc/threads/followUp", {
+            method: "POST",
+            headers: { "content-type": "application/json" },
+            body: JSON.stringify({ json: { groupId: "group-1", text, clientNonce } }),
+          }),
+          { prefix: "/rpc", context: { actor } },
+        ),
+    };
+  }
+
+  it.each([false, true])(
+    "accepts concurrent duplicate group follow-ups once with an active run: %s",
+    async (active) => {
+      const { call, tx, waitingRun, lockGroup, notify, enqueue } = fixture({ active });
+      const results = await Promise.all([call(), call()]);
+      expect(results.map(({ response }) => response.status)).toEqual([200, 200]);
+      for (const { response } of results) {
+        await expect(response.json()).resolves.toEqual({ json: { ok: true } });
+      }
+      expect(lockGroup).toHaveBeenCalledTimes(2);
+      expect(tx.message.create).toHaveBeenCalledExactlyOnceWith({
+        data: expect.objectContaining({
+          role: "user",
+          blocks: [{ kind: "text", text }],
+          clientNonce,
+        }),
+      });
+      expect(tx.message.update).toHaveBeenCalledExactlyOnceWith({
+        where: { id: "message-1" },
+        data: { runId: "run-1" },
+      });
+      expect(tx.event.create).toHaveBeenCalledExactlyOnceWith({
+        data: expect.objectContaining({
+          type: "thread.message.created",
+          runId: "run-1",
+          payload: { messageId: "message-1", role: "user", blocks: [{ kind: "text", text }] },
+        }),
+      });
+      expect(tx.task.create).toHaveBeenCalledTimes(active ? 0 : 1);
+      expect(tx.run.create).toHaveBeenCalledTimes(active ? 0 : 1);
+      expect(tx.steeringMessage.create).toHaveBeenCalledTimes(active ? 1 : 0);
+      expect(tx.message.findMany).not.toHaveBeenCalled();
+      expect(tx.run.update).not.toHaveBeenCalled();
+      expect(waitingRun.status).toBe("waiting_input");
+      expect(notify).toHaveBeenCalledExactlyOnceWith("thread-1", 1);
+      expect(enqueue).toHaveBeenCalledTimes(active ? 0 : 1);
+    },
+  );
+
+  it("rechecks group ownership before accepting a replay after access is revoked", async () => {
+    const { call, tx, lockGroup, notify, enqueue } = fixture({ ownedAtLock: false, replay: true });
+    const { response } = await call();
+    expect(response.status).toBe(500);
+    expect(lockGroup).toHaveBeenCalledOnce();
+    expect(tx.message.findUnique).not.toHaveBeenCalled();
+    expect(tx.message.create).not.toHaveBeenCalled();
+    expect(tx.event.create).not.toHaveBeenCalled();
+    expect(tx.task.create).not.toHaveBeenCalled();
+    expect(tx.run.create).not.toHaveBeenCalled();
+    expect(tx.steeringMessage.create).not.toHaveBeenCalled();
+    expect(notify).not.toHaveBeenCalled();
+    expect(enqueue).not.toHaveBeenCalled();
+  });
+});
+
 describe("threads.endCall", () => {
   function fixture(duplicateMarker?: boolean, userSpoke = true) {
     const created: { blocks?: unknown; clientNonce?: string }[] = [];

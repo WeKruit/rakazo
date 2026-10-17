@@ -475,6 +475,7 @@ async function mounted(threadId = "thread-1", botId?: string, showDiagnostics = 
   const root = createRoot(container);
   const reveal = vi.fn();
   const discuss = vi.fn();
+  const feedback = vi.fn().mockResolvedValue(true);
   const render = async (id: string, refreshSignal = 0, diagnostics = showDiagnostics) =>
     act(async () =>
       root.render(
@@ -487,6 +488,7 @@ async function mounted(threadId = "thread-1", botId?: string, showDiagnostics = 
             onClose={() => {}}
             onRevealMessage={reveal}
             onDiscussCandidate={discuss}
+            onCandidateFeedback={feedback}
           />
         </MemoryRouter>,
       ),
@@ -516,7 +518,7 @@ async function mounted(threadId = "thread-1", botId?: string, showDiagnostics = 
     });
     return details!;
   };
-  return { container: document.body, render, click, expand, reveal, discuss };
+  return { container: document.body, render, click, expand, reveal, discuss, feedback };
 }
 
 async function changeStatement(container: HTMLElement, statement: string, index = 0) {
@@ -550,6 +552,193 @@ async function changeSelect(container: HTMLElement, name: string, value: string)
     select.dispatchEvent(new Event("change", { bubbles: true }));
   });
 }
+
+async function changeFeedbackReason(container: HTMLElement, value: string) {
+  const input = container.querySelector<HTMLTextAreaElement>('textarea[aria-label="Reason"]')!;
+  expect(input).not.toBeNull();
+  await act(async () => {
+    Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, "value")!.set!.call(
+      input,
+      value,
+    );
+    input.dispatchEvent(new Event("input", { bubbles: true }));
+  });
+}
+
+it("requires an explicit feedback choice and preserves the authored reason without changing qualification or shortlist", async () => {
+  const candidate = { ...candidateFixture(), name: "Synthetic Avery" };
+  api.listCandidates.mockResolvedValue(candidatePage([candidate]));
+  const view = await mounted("thread-1", undefined, false);
+  await view.click("Evidence");
+  await view.click(candidate.name);
+  expect(view.container.querySelector('textarea[aria-label="Reason"]')).toBeNull();
+  await view.click("Give feedback");
+  const send = () =>
+    [...view.container.querySelectorAll<HTMLButtonElement>("button")].find(
+      (button) => button.textContent === "Send feedback",
+    )!;
+  expect(send().disabled).toBe(true);
+  await changeSelect(view.container, "Feedback", "good_example");
+  await changeFeedbackReason(view.container, "  ");
+  expect(send().disabled).toBe(true);
+  const reason = "  Built the whole compiler.\nKeep this exact wording.  ";
+  await changeFeedbackReason(view.container, reason);
+  await view.click("Send feedback");
+  expect(view.feedback).toHaveBeenCalledExactlyOnceWith(
+    {
+      threadId: "thread-1",
+      roleTitle: role.title,
+      roleVersion: revision.revision,
+      name: candidate.name,
+      title: null,
+      company: null,
+      linkedinUrl: null,
+      resumeUrl: null,
+    },
+    { choice: "good_example", reason },
+    expect.any(String),
+  );
+  expect(
+    view.container.querySelector<HTMLTextAreaElement>('textarea[aria-label="Reason"]')!.value,
+  ).toBe("");
+  expect(view.container.querySelector('[role="dialog"]')!.textContent).toContain("Feedback sent");
+  expect(view.container.querySelector('[role="dialog"]')!.textContent).toContain(
+    "Hard criteriaUnknown",
+  );
+  expect(api.setCandidateShortlist).not.toHaveBeenCalled();
+  expect(api.editCriteria).not.toHaveBeenCalled();
+  expect(api.reviseRole).not.toHaveBeenCalled();
+  expect(api.update).not.toHaveBeenCalled();
+});
+
+it("allows skipping without a reason and retains the same nonce and unchanged draft after an unknown outcome", async () => {
+  const view = await mounted();
+  view.feedback.mockRejectedValueOnce(new Error("Connection lost")).mockResolvedValueOnce(true);
+  await view.click("Evidence");
+  await view.click("candidate-1");
+  await view.click("Give feedback");
+  await changeSelect(view.container, "Feedback", "skip");
+  await view.click("Send feedback");
+  expect(view.container.querySelector('[role="dialog"]')!.textContent).not.toContain(
+    "Feedback sent",
+  );
+  expect(
+    view.container.querySelector<HTMLSelectElement>('select[aria-label="Feedback"]')!.value,
+  ).toBe("skip");
+  await view.click("Send feedback");
+  expect(view.feedback).toHaveBeenCalledTimes(2);
+  expect(view.feedback.mock.calls[1]).toEqual(view.feedback.mock.calls[0]);
+  expect(view.feedback.mock.calls[0]![1]).toEqual({ choice: "skip", reason: "" });
+  expect(view.container.querySelector('[role="dialog"]')!.textContent).toContain("Feedback sent");
+});
+
+it("prevents duplicate submissions and keeps newer edits when the earlier feedback is accepted", async () => {
+  let finish!: (accepted: boolean) => void;
+  const view = await mounted();
+  view.feedback.mockImplementationOnce(
+    () =>
+      new Promise<boolean>((resolve) => {
+        finish = resolve;
+      }),
+  );
+  await view.click("Evidence");
+  await view.click("candidate-1");
+  await view.click("Give feedback");
+  await changeSelect(view.container, "Feedback", "not_fit");
+  await changeFeedbackReason(view.container, "First reason");
+  await view.click("Send feedback");
+  await view.click("Sending…");
+  expect(view.feedback).toHaveBeenCalledTimes(1);
+  await changeFeedbackReason(view.container, "New reason");
+  await act(async () => finish(true));
+  expect(
+    view.container.querySelector<HTMLTextAreaElement>('textarea[aria-label="Reason"]')!.value,
+  ).toBe("New reason");
+  expect(view.container.querySelector('[role="dialog"]')!.textContent).not.toContain(
+    "Feedback sent",
+  );
+  await changeFeedbackReason(view.container, "First reason");
+  await view.click("Send feedback");
+  expect(view.feedback.mock.calls[1]![2]).not.toBe(view.feedback.mock.calls[0]![2]);
+});
+
+it("retries the original candidate reference when saved profile fields refresh after an uncertain outcome", async () => {
+  const candidate = { ...candidateFixture("stable-candidate", false), name: "Original candidate" };
+  api.listCandidates.mockResolvedValue(candidatePage([candidate]));
+  const view = await mounted();
+  view.feedback.mockRejectedValueOnce(new Error("Outcome unknown"));
+  await view.click("Evidence");
+  await view.click(candidate.name);
+  await view.click("Give feedback");
+  await changeSelect(view.container, "Feedback", "good_example");
+  await changeFeedbackReason(view.container, "Original reason");
+  await view.click("Send feedback");
+  api.listCandidates.mockResolvedValue(
+    candidatePage([{ ...candidate, name: "Refreshed candidate" }]),
+  );
+  await view.render("thread-1", 1);
+  await view.click("Send feedback");
+  expect(view.feedback.mock.calls[1]).toEqual(view.feedback.mock.calls[0]);
+});
+
+it.each(["candidate", "role", "role version", "thread", "access denial"])(
+  "discards feedback and late acceptance after changing %s",
+  async (change) => {
+    const first = { ...candidateFixture("first", false), name: "First candidate" };
+    const second = { ...candidateFixture("second", false), name: "Second candidate" };
+    api.listCandidates.mockImplementation(async () => {
+      const workspace = await api.getWorkspace.mock.results.at(-1)?.value;
+      return {
+        ...candidatePage([first, second]),
+        roleId: workspace.role.id,
+        roleRevisionId: workspace.revision.id,
+      };
+    });
+    const view = await mounted();
+    let finish!: (accepted: boolean) => void;
+    view.feedback.mockImplementationOnce(
+      () =>
+        new Promise<boolean>((resolve) => {
+          finish = resolve;
+        }),
+    );
+    await view.click("Evidence");
+    await view.click(first.name);
+    await view.click("Give feedback");
+    await changeSelect(view.container, "Feedback", "not_fit");
+    await changeFeedbackReason(view.container, "Private first draft");
+    await view.click("Send feedback");
+    if (change === "candidate") {
+      await view.click("Close");
+      await view.click(second.name);
+    } else {
+      if (change === "access denial")
+        api.getWorkspace.mockRejectedValueOnce(new ORPCError("FORBIDDEN"));
+      if (change === "role" || change === "role version") {
+        const nextRole = change === "role" ? { ...role, id: "next-role" } : role;
+        api.getWorkspace.mockResolvedValue({
+          role: nextRole,
+          revision: { ...revision, id: "next-revision", roleId: nextRole.id, revision: 3 },
+        });
+      }
+      await view.render(change === "thread" ? "next-thread" : "thread-1", 1);
+    }
+    await act(async () => finish(true));
+    expect(view.container.textContent).not.toContain("Private first draft");
+    expect(view.container.querySelector('[role="dialog"]')?.textContent ?? "").not.toContain(
+      "Feedback sent",
+    );
+    if (change === "candidate" || change === "role version") {
+      await view.click("Give feedback");
+      expect(
+        view.container.querySelector<HTMLTextAreaElement>('textarea[aria-label="Reason"]')!.value,
+      ).toBe("");
+      expect(
+        view.container.querySelector<HTMLSelectElement>('select[aria-label="Feedback"]')!.value,
+      ).toBe("");
+    }
+  },
+);
 
 it.each(["Cards", "Table"])(
   "opens candidate evidence from %s without moving the list and returns focus on Escape and Close",

@@ -267,7 +267,7 @@ import { ActivityList } from "./ActivityList";
 import type { ContextMenuPosition } from "./BotContextMenu";
 import { CreateGroupForm, GroupSettings, memberName } from "./GroupPanel";
 import { HostComputerPrompt } from "./HostComputerPrompt";
-import type { CandidateDiscussionContext } from "./RecruitingPanel";
+import type { CandidateDiscussionContext, CandidateFeedback } from "./RecruitingPanel";
 import { RecruitingPanel } from "./RecruitingPanel";
 import { ResizableSidePanel } from "./ResizableSidePanel";
 import type { RoutineDraftState } from "./RoutineEditor";
@@ -1867,22 +1867,57 @@ export function ShellPage() {
     () => createRef<ComposerHandle>(),
     [userId, bootstrapMe?.spaceId, composerDraftKey, activeSnapshot?.threadId],
   );
-  const discussionScope = useRef({ composerRef, panel });
-  discussionScope.current = { composerRef, panel };
+  const discussionScope = useRef({ composerRef, panel, active: true });
+  discussionScope.current.composerRef = composerRef;
+  discussionScope.current.panel = panel;
+  useEffect(() => {
+    discussionScope.current.active = true;
+    return () => {
+      discussionScope.current.active = false;
+    };
+  }, []);
+  function candidateScopeCurrent(candidate: CandidateDiscussionContext) {
+    return Boolean(
+      userId &&
+        bootstrapMe?.spaceId &&
+        discussionScope.current.active &&
+        discussionScope.current.composerRef === composerRef &&
+        discussionScope.current.panel === "recruiting" &&
+        (selectedSpaceId() ?? bootstrapMe.spaceId) === bootstrapMe.spaceId &&
+        candidate.threadId === activeSnapshot?.threadId &&
+        (inGroup ? activeGroupId.current === groupId : activeBotId.current === active?.id),
+    );
+  }
   function discussCandidate(candidate: CandidateDiscussionContext) {
-    if (
-      !userId ||
-      !bootstrapMe?.spaceId ||
-      discussionScope.current.composerRef !== composerRef ||
-      discussionScope.current.panel !== "recruiting" ||
-      (selectedSpaceId() ?? bootstrapMe.spaceId) !== bootstrapMe.spaceId ||
-      candidate.threadId !== activeSnapshot?.threadId
-    )
-      return;
+    if (!candidateScopeCurrent(candidate)) return;
     composerRef.current?.insertContext({
       draftKey: composerDraftKey,
       text: candidateReferenceText(candidate),
     });
+  }
+  async function feedbackCandidate(
+    candidate: CandidateDiscussionContext,
+    feedback: CandidateFeedback,
+    clientNonce: string,
+  ): Promise<boolean> {
+    if (!candidateScopeCurrent(candidate)) return false;
+    const choice =
+      feedback.choice === "good_example"
+        ? t`Good example`
+        : feedback.choice === "not_fit"
+          ? t`Not a fit`
+          : t`Skip for now`;
+    const text = `${candidateReferenceText(candidate)}${t`Candidate feedback`}: ${choice}\n\n${feedback.reason}`;
+    const receipt = await rpc.threads.followUp({
+      ...(inGroup ? { groupId: groupId! } : { botId: active!.id }),
+      text,
+      clientNonce,
+    });
+    if (candidateScopeCurrent(candidate)) {
+      if (inGroup) void refreshGroupThreadRef.current(groupId!).catch(() => undefined);
+      else void refreshThreadRef.current(active!.id).catch(() => undefined);
+    }
+    return receipt.ok;
   }
   // Keep the armed reply even when its parent leaves the loaded page: the
   // server resolves a paged-out target and degrades a deleted one to a plain
@@ -4066,6 +4101,7 @@ export function ShellPage() {
                 showDiagnostics={showToolActivity}
                 onClose={() => setPanel(null)}
                 onDiscussCandidate={discussCandidate}
+                onCandidateFeedback={feedbackCandidate}
                 onRevealMessage={(target) => {
                   navigate({
                     pathname: target.groupId ? `/app/g/${target.groupId}` : `/app/${target.botId}`,
@@ -5555,6 +5591,7 @@ export function candidateReferenceText(candidate: CandidateDiscussionContext): s
   const reference = [
     t`Name: ${candidate.name ?? t`Name missing`}`,
     t`Role: ${candidate.roleTitle}`,
+    ...(candidate.roleVersion === undefined ? [] : [t`Role version: ${candidate.roleVersion}`]),
     ...(candidate.title ? [t`Title: ${candidate.title}`] : []),
     ...(candidate.company ? [t`Company: ${candidate.company}`] : []),
     t`LinkedIn: ${candidate.linkedinUrl ?? t`LinkedIn missing`}`,

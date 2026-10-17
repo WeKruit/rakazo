@@ -6,6 +6,8 @@ import type { ComponentProps, ReactNode } from "react";
 import { act, createRef } from "react";
 import type { Root } from "react-dom/client";
 import { createRoot } from "react-dom/client";
+import type { NavigateFunction } from "react-router-dom";
+import { MemoryRouter, Route, Routes, useNavigate } from "react-router-dom";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 vi.mock("@lingui/react/macro", () => {
@@ -14,8 +16,62 @@ vi.mock("@lingui/react/macro", () => {
   return { useLingui: () => ({ t }), Trans: ({ children }: { children: ReactNode }) => children };
 });
 
+const shellApi = vi.hoisted(() => ({
+  session: {
+    data: { user: { id: "user-1", name: "Synthetic recruiter", email: "user@example.test" } },
+  },
+  bootstrap: vi.fn(),
+  get: vi.fn(),
+  followUp: vi.fn(),
+  send: vi.fn(),
+  answer: vi.fn(),
+  createArtifact: vi.fn(),
+  testRun: vi.fn(),
+  listSpaces: vi.fn(),
+  recruiting: {
+    getWorkspace: vi.fn(),
+    listAssessments: vi.fn(),
+    listCandidates: vi.fn(),
+    listCandidateSources: vi.fn(),
+    listResearch: vi.fn(),
+    listQuestions: vi.fn(),
+    setCandidateShortlist: vi.fn(),
+  },
+}));
+vi.mock("../lib/auth", () => ({ authClient: { useSession: () => shellApi.session } }));
+vi.mock("../lib/rpc", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("../lib/rpc")>()),
+  rpc: {
+    bootstrap: shellApi.bootstrap,
+    threads: {
+      get: shellApi.get,
+      followUp: shellApi.followUp,
+      send: shellApi.send,
+      answer: shellApi.answer,
+      subscribe: vi.fn().mockRejectedValue(new Error("Offline test")),
+      head: vi.fn().mockResolvedValue(null),
+      markRead: vi.fn().mockResolvedValue({ ok: true }),
+    },
+    artifacts: { create: shellApi.createArtifact },
+    routines: { list: vi.fn().mockResolvedValue([]), testRun: shellApi.testRun },
+    skills: { list: vi.fn().mockResolvedValue([]) },
+    spaces: { list: shellApi.listSpaces },
+    memory: {
+      list: vi.fn().mockResolvedValue([]),
+      providerConfig: vi.fn().mockResolvedValue(null),
+    },
+    agentSkills: { list: vi.fn().mockResolvedValue([]) },
+    voice: { status: vi.fn().mockResolvedValue(null) },
+    messaging: { status: vi.fn().mockResolvedValue({ enabled: false, providers: [] }) },
+    usage: { summary: vi.fn().mockResolvedValue({ inputTokens: 0, outputTokens: 0, runs: 0 }) },
+    connections: { list: vi.fn().mockResolvedValue([]), catalog: vi.fn().mockResolvedValue([]) },
+    recruiting: shellApi.recruiting,
+  },
+}));
+
+import * as RecruitingPanelModule from "./RecruitingPanel";
 import type { ComposerHandle } from "./Shell";
-import { Composer, candidateReferenceText, eventChangesRecruitingPanel } from "./Shell";
+import { Composer, candidateReferenceText, eventChangesRecruitingPanel, ShellPage } from "./Shell";
 
 let root: Root | null = null;
 let container: HTMLDivElement | null = null;
@@ -28,6 +84,7 @@ afterEach(() => {
   container = null;
   localStorage.clear();
   vi.restoreAllMocks();
+  vi.clearAllMocks();
 });
 
 const bob: ComposerMention = { kind: "bot", id: "bot-2", name: "Bob" };
@@ -116,6 +173,303 @@ function pressEnter(textarea: HTMLTextAreaElement) {
     textarea.dispatchEvent(new KeyboardEvent("keydown", { key: "Enter", bubbles: true }));
   });
 }
+
+async function renderFeedbackShell(kind: "bot" | "group" = "bot") {
+  (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
+  globalThis.ResizeObserver ??= class {
+    observe() {}
+    unobserve() {}
+    disconnect() {}
+  };
+  Element.prototype.scrollTo ??= () => {};
+  Element.prototype.scrollIntoView ??= () => {};
+  window.matchMedia ??= () =>
+    ({
+      matches: true,
+      addEventListener() {},
+      removeEventListener() {},
+    }) as unknown as MediaQueryList;
+  const bot = {
+    id: "bot-1",
+    spaceId: "space-1",
+    name: "Main",
+    title: "Recruiter",
+    color: "ink",
+    description: "",
+    instructions: "",
+    pinned: false,
+    sectionId: null,
+    archivedAt: null,
+    unread: false,
+    parentBotId: null,
+    threadId: "thread-1",
+    preview: "",
+    status: "waiting_input",
+    notifyOnFinish: false,
+    computerMode: "team",
+    autoSpeak: false,
+    voiceId: null,
+  };
+  const group = {
+    id: "group-1",
+    spaceId: "space-1",
+    name: "Recruiting crew",
+    pinned: false,
+    sectionId: null,
+    archivedAt: null,
+    members: [],
+    threadId: "thread-1",
+    preview: "",
+    unread: false,
+  };
+  const pending: ThreadMessage = {
+    id: "pending-main",
+    threadId: "thread-1",
+    seq: 1,
+    role: "bot",
+    botId: bot.id,
+    runId: "run-main",
+    createdAt: "2026-01-01T00:00:00Z",
+    blocks: [
+      {
+        kind: "ask",
+        text: "Choose the role location",
+        status: "pending",
+        actions: [{ id: "remote", label: "Remote" }],
+      },
+    ],
+  };
+  const thread = {
+    threadId: "thread-1",
+    ...(kind === "group"
+      ? { groupId: group.id, groupName: group.name, members: [] }
+      : { botId: bot.id }),
+    cursor: 1,
+    messages: [pending],
+    olderCursor: null,
+    run: {
+      id: "run-main",
+      botId: bot.id,
+      threadId: "thread-1",
+      taskId: "task-main",
+      status: "waiting_input",
+      trigger: "user",
+      routineId: null,
+      error: null,
+    },
+  };
+  const bots = [bot, { ...bot, id: "bot-2", name: "Sourcer", threadId: "thread-2" }];
+  const navigation = {
+    spaces: [{ id: "space-1", name: "Recruiting", hasContent: true }],
+    current: { bots, botSections: [], groups: [group] },
+  };
+  shellApi.session = {
+    data: { user: { id: "user-1", name: "Synthetic recruiter", email: "user@example.test" } },
+  };
+  shellApi.bootstrap.mockResolvedValue({
+    me: { spaceId: "space-1", isDeploymentOwner: false },
+    bots,
+    botSections: [],
+    groups: [group],
+    spaces: navigation.spaces,
+    archivedBots: [],
+    archivedGroups: [],
+    thread,
+    routines: [],
+  });
+  shellApi.get.mockImplementation(async ({ botId }: { botId?: string }) =>
+    botId === "bot-2"
+      ? { ...thread, botId, threadId: "thread-2", messages: [], run: null }
+      : thread,
+  );
+  shellApi.listSpaces.mockResolvedValue(navigation);
+  shellApi.followUp.mockResolvedValue({ ok: true });
+  const candidate = {
+    roleId: "internal-role",
+    candidateKey: "internal-candidate",
+    name: "Synthetic Avery\nKeep original evidence",
+    title: "Engineer",
+    company: "Example Tools",
+    location: null,
+    linkedinUrl: "https://example.test/avery",
+    resumeUrl: null,
+    evidenceUrls: [],
+    issues: [],
+    shortlisted: false,
+    revision: 0,
+    discoveryCount: 1,
+    latestAssessment: null,
+  };
+  shellApi.recruiting.getWorkspace.mockResolvedValue({
+    role: { id: "internal-role", title: "Systems engineer" },
+    revision: {
+      id: "internal-revision",
+      revision: 2,
+      criteria: [],
+      preferences: [],
+      sourceRefs: [],
+      definitionQuestions: [],
+    },
+  });
+  shellApi.recruiting.listAssessments.mockResolvedValue([]);
+  shellApi.recruiting.listCandidates.mockResolvedValue({
+    roleId: "internal-role",
+    roleRevisionId: "internal-revision",
+    items: [candidate],
+    crmTarget: null,
+    nextCursor: null,
+    total: 1,
+    counts: {
+      sourceRows: 1,
+      candidates: 1,
+      identifiedCandidates: 1,
+      unassessed: 1,
+      assessed: 0,
+      shortlisted: 0,
+    },
+  });
+  shellApi.recruiting.listCandidateSources.mockResolvedValue({
+    roleId: "internal-role",
+    candidateKey: candidate.candidateKey,
+    items: [],
+    nextCursor: null,
+    total: 0,
+  });
+  shellApi.recruiting.listResearch.mockResolvedValue({ tasks: [], actions: [], observations: [] });
+  shellApi.recruiting.listQuestions.mockResolvedValue({ questions: [] });
+  let props: ComponentProps<typeof RecruitingPanelModule.RecruitingPanel> | undefined;
+  const OriginalPanel = RecruitingPanelModule.RecruitingPanel;
+  vi.spyOn(RecruitingPanelModule, "RecruitingPanel").mockImplementation((nextProps) => {
+    props = nextProps;
+    return OriginalPanel(nextProps);
+  });
+  container = document.createElement("div");
+  document.body.append(container);
+  root = createRoot(container);
+  let navigate!: NavigateFunction;
+  function ShellRoutes() {
+    navigate = useNavigate();
+    return (
+      <Routes>
+        <Route path="/app/g/:groupId" element={<ShellPage />} />
+        <Route path="/app/:botId" element={<ShellPage />} />
+      </Routes>
+    );
+  }
+  const render = () =>
+    act(async () =>
+      root!.render(
+        <MemoryRouter initialEntries={[kind === "group" ? "/app/g/group-1" : "/app/bot-1"]}>
+          <ShellRoutes />
+        </MemoryRouter>,
+      ),
+    );
+  await render();
+  const click = async (name: string) => {
+    const button = [...document.body.querySelectorAll<HTMLButtonElement>("button")].find(
+      (item) => item.textContent === name || item.getAttribute("aria-label") === name,
+    )!;
+    expect(button, name).toBeDefined();
+    await act(async () => button.click());
+  };
+  await click("Recruiting");
+  await click("Evidence");
+  await click(candidate.name);
+  await click("Give feedback");
+  const choose = async (choice: string) =>
+    act(async () => {
+      const select = document.body.querySelector<HTMLSelectElement>(
+        'select[aria-label="Feedback"]',
+      )!;
+      select.value = choice;
+      select.dispatchEvent(new Event("change", { bubbles: true }));
+    });
+  const reason = (value: string) =>
+    type(document.body.querySelector<HTMLTextAreaElement>('textarea[aria-label="Reason"]')!, value);
+  return {
+    click,
+    choose,
+    reason,
+    render,
+    pending,
+    candidate,
+    getProps: () => props!,
+    navigate: async (to: string) => act(async () => navigate(to)),
+  };
+}
+
+it.each(["bot", "group"] as const)(
+  "sends authored candidate feedback through native followUp in a %s while leaving the pending Main card and composer attachments untouched",
+  async (kind) => {
+    const view = await renderFeedbackShell(kind);
+    // Ordinary composer state must never join a candidate feedback submission.
+    pickAttachment();
+    await view.choose("not_fit");
+    const reason = "  No systems ownership.\n@Main /summarize is my literal reason.  ";
+    view.reason(reason);
+    await view.click("Send feedback");
+    expect(shellApi.followUp).toHaveBeenCalledExactlyOnceWith({
+      ...(kind === "group" ? { groupId: "group-1" } : { botId: "bot-1" }),
+      text: `Candidate reference\n> Name: Synthetic Avery\n> Keep original evidence\n> Role: Systems engineer\n> Role version: 2\n> Title: Engineer\n> Company: Example Tools\n> LinkedIn: https://example.test/avery\n> Resume: Resume missing\n\nCandidate feedback: Not a fit\n\n${reason}`,
+      clientNonce: expect.any(String),
+    });
+    expect(shellApi.send).not.toHaveBeenCalled();
+    expect(shellApi.answer).not.toHaveBeenCalled();
+    expect(shellApi.createArtifact).not.toHaveBeenCalled();
+    expect(shellApi.testRun).not.toHaveBeenCalled();
+    expect(shellApi.recruiting.setCandidateShortlist).not.toHaveBeenCalled();
+    expect(document.body.textContent).toContain("Feedback sent");
+    expect(document.body.textContent).toContain("notes.txt");
+    expect(view.pending.blocks[0]).toMatchObject({ status: "pending" });
+    expect(document.body.textContent).toContain("Choose the role location");
+  },
+);
+
+it("retains authored feedback after an uncertain native RPC outcome and retries with the same nonce", async () => {
+  const view = await renderFeedbackShell();
+  shellApi.followUp.mockRejectedValueOnce(new Error("Disconnected after dispatch"));
+  await view.choose("good_example");
+  view.reason("  Original reason\n  ");
+  await view.click("Send feedback");
+  expect(document.body.textContent).not.toContain("Feedback sent");
+  expect(
+    document.body.querySelector<HTMLTextAreaElement>('textarea[aria-label="Reason"]')!.value,
+  ).toBe("  Original reason\n  ");
+  await view.click("Send feedback");
+  expect(shellApi.followUp).toHaveBeenCalledTimes(2);
+  expect(shellApi.followUp.mock.calls[1]).toEqual(shellApi.followUp.mock.calls[0]);
+  expect(document.body.textContent).toContain("Feedback sent");
+});
+
+it.each(["user", "space", "thread", "panel", "unmount"])(
+  "rejects an old candidate feedback callback after its %s scope changes",
+  async (change) => {
+    const view = await renderFeedbackShell();
+    const send = view.getProps().onCandidateFeedback!;
+    const candidate = { ...view.candidate, threadId: "thread-1", roleTitle: "Systems engineer" };
+    if (change === "user") {
+      shellApi.session = {
+        data: { user: { id: "other-user", name: "Other recruiter", email: "other@example.test" } },
+      };
+      await view.render();
+    } else if (change === "space") {
+      localStorage.setItem("rakazo:space-id", "other-space");
+    } else if (change === "thread") {
+      await view.navigate("/app/bot-2");
+    } else if (change === "panel") {
+      await view.click("Close panel");
+    } else {
+      await act(async () => root!.unmount());
+      root = null;
+    }
+    let accepted: boolean | undefined;
+    await act(async () => {
+      accepted = await send(candidate, { choice: "skip", reason: "" }, "unchanged-nonce");
+    });
+    expect(accepted).toBe(false);
+    expect(shellApi.followUp).not.toHaveBeenCalled();
+  },
+);
 
 it("quotes every candidate reference line without exposing internal identifiers", () => {
   const text = candidateReferenceText({

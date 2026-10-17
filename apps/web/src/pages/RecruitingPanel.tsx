@@ -62,7 +62,12 @@ import { rpc } from "../lib/rpc";
 export type CandidateDiscussionContext = Pick<
   RecruitingCandidate,
   "name" | "title" | "company" | "linkedinUrl" | "resumeUrl"
-> & { threadId: string; roleTitle: string };
+> & { threadId: string; roleTitle: string; roleVersion?: number };
+
+export type CandidateFeedback = {
+  choice: "good_example" | "not_fit" | "skip";
+  reason: string;
+};
 
 type Props = {
   threadId: string;
@@ -72,6 +77,11 @@ type Props = {
   showDiagnostics?: boolean;
   onRevealMessage?: (target: { botId?: string; groupId?: string; messageId: string }) => void;
   onDiscussCandidate?: (candidate: CandidateDiscussionContext) => void;
+  onCandidateFeedback?: (
+    candidate: CandidateDiscussionContext,
+    feedback: CandidateFeedback,
+    clientNonce: string,
+  ) => Promise<boolean>;
 };
 type SourceReadTarget =
   | Omit<Extract<ReadRecruitingSourceInput, { kind: "role" }>, "sourceRefId">
@@ -84,6 +94,141 @@ type Snapshot = {
   questions: Awaited<ReturnType<typeof rpc.recruiting.listQuestions>>["questions"];
   documents: MemoryDocument[];
 };
+
+function CandidateFeedbackForm({
+  candidate,
+  onSend,
+  onAccessError,
+}: {
+  candidate: CandidateDiscussionContext;
+  onSend: NonNullable<Props["onCandidateFeedback"]>;
+  onAccessError: (error: unknown) => void;
+}) {
+  const { t } = useLingui();
+  const [open, setOpen] = useState(false);
+  const [choice, setChoice] = useState<CandidateFeedback["choice"] | "">("");
+  const [reason, setReason] = useState("");
+  const [pending, setPending] = useState(false);
+  const [failed, setFailed] = useState(false);
+  const [sent, setSent] = useState(false);
+  const scope = useRef({ active: true, busy: false, generation: 0 });
+  const attempt = useRef<
+    (CandidateFeedback & { candidate: CandidateDiscussionContext; clientNonce: string }) | null
+  >(null);
+  useEffect(() => {
+    scope.current.active = true;
+    return () => {
+      scope.current.active = false;
+      scope.current.generation++;
+    };
+  }, []);
+  function edited() {
+    scope.current.generation++;
+    setSent(false);
+    setFailed(false);
+  }
+  async function submit() {
+    if (scope.current.busy || !choice || (choice !== "skip" && !reason.trim())) return;
+    const generation = scope.current.generation;
+    if (attempt.current?.choice !== choice || attempt.current.reason !== reason)
+      attempt.current = { candidate, choice, reason, clientNonce: crypto.randomUUID() };
+    const submission = attempt.current;
+    scope.current.busy = true;
+    setPending(true);
+    setFailed(false);
+    setSent(false);
+    try {
+      const accepted = await onSend(
+        submission.candidate,
+        { choice, reason },
+        submission.clientNonce,
+      );
+      if (!scope.current.active) return;
+      if (accepted) attempt.current = null;
+      if (scope.current.generation !== generation) return;
+      if (accepted) {
+        setChoice("");
+        setReason("");
+        setSent(true);
+      } else setFailed(true);
+    } catch (error) {
+      if (!scope.current.active) return;
+      onAccessError(error);
+      if (scope.current.generation === generation) setFailed(true);
+    } finally {
+      scope.current.busy = false;
+      if (scope.current.active) setPending(false);
+    }
+  }
+  return (
+    <div className="space-y-2">
+      <Button size="sm" variant="outline" aria-expanded={open} onClick={() => setOpen(!open)}>
+        <Trans>Give feedback</Trans>
+      </Button>
+      {open ? (
+        <form
+          className="space-y-2"
+          onSubmit={(event) => {
+            event.preventDefault();
+            void submit();
+          }}
+        >
+          <NativeSelect
+            className="[&_select]:text-base"
+            aria-label={t`Feedback`}
+            required
+            value={choice}
+            onChange={(event) => {
+              edited();
+              setChoice(event.target.value as CandidateFeedback["choice"] | "");
+            }}
+          >
+            <NativeSelectOption value="">
+              <Trans>Choose feedback</Trans>
+            </NativeSelectOption>
+            <NativeSelectOption value="good_example">
+              <Trans>Good example</Trans>
+            </NativeSelectOption>
+            <NativeSelectOption value="not_fit">
+              <Trans>Not a fit</Trans>
+            </NativeSelectOption>
+            <NativeSelectOption value="skip">
+              <Trans>Skip for now</Trans>
+            </NativeSelectOption>
+          </NativeSelect>
+          <Textarea
+            className="text-base md:text-base"
+            aria-label={t`Reason`}
+            placeholder={t`Reason`}
+            required={choice === "good_example" || choice === "not_fit"}
+            value={reason}
+            onChange={(event) => {
+              edited();
+              setReason(event.target.value);
+            }}
+          />
+          <Button
+            size="sm"
+            type="submit"
+            disabled={pending || !choice || (choice !== "skip" && !reason.trim())}
+          >
+            {pending ? <Trans>Sending…</Trans> : <Trans>Send feedback</Trans>}
+          </Button>
+          {failed ? (
+            <p role="alert">
+              <Trans>Could not confirm feedback. Try again.</Trans>
+            </p>
+          ) : null}
+        </form>
+      ) : null}
+      {sent ? (
+        <p role="status" className="text-sm text-muted-foreground">
+          <Trans>Feedback sent</Trans>
+        </p>
+      ) : null}
+    </div>
+  );
+}
 
 function CandidateCounts({ counts }: { counts: ListRecruitingCandidatesOutput["counts"] }) {
   const { t } = useLingui();
@@ -1312,6 +1457,7 @@ function RecruitingWorkspace({
   onClose,
   onRevealMessage,
   onDiscussCandidate,
+  onCandidateFeedback,
   showDiagnostics = false,
 }: Props) {
   const { t } = useLingui();
@@ -3105,6 +3251,23 @@ function RecruitingWorkspace({
                 >
                   <Trans>Discuss candidate</Trans>
                 </Button>
+              ) : null}
+              {onCandidateFeedback && workspace && candidateDetailOpen ? (
+                <CandidateFeedbackForm
+                  key={`${threadId}:${workspace.role.id}:${workspace.revision.id}:${selection.candidateKey}`}
+                  candidate={{
+                    threadId,
+                    roleTitle: workspace.role.title,
+                    roleVersion: workspace.revision.revision,
+                    name: selection.name,
+                    title: selection.title,
+                    company: selection.company,
+                    linkedinUrl: selection.linkedinUrl,
+                    resumeUrl: selection.resumeUrl,
+                  }}
+                  onSend={onCandidateFeedback}
+                  onAccessError={denyAccess}
+                />
               ) : null}
               {selectedCrmTarget ? (
                 <section aria-label={t`Candidate CRM`}>
