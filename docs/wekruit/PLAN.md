@@ -12,11 +12,17 @@ Supabase 独立数据库、原生 memory provider、Modal Volume 和 E2B 沿用�
 
 ## 当前发布与缺口（2026-10-17）
 
-**最新线上为 v65 / `41cff7f2`。** Cards/Table 点击姓名直接打开同一个原生候选 Dialog，复用已有资料、来源与评估。Close/Escape 返回原姓名；Discuss/Message 关闭后再交给原生聊天，角色变化、权限拒绝和离开对话会丢弃未完成交接。正文实测 Geist 16px/26px；记忆中的 bot 内部编号只在显式诊断显示。127 项界面检查、16 项历史检索检查、Web/DB 类型及格式检查通过，独立界面复核通过。
+**最新线上为 v66 / `8675395a`。** 已保存研究报告接入既有候选来源和评估 Source，未评估者也能读本人报告、缺口与来源链接。沿用原生/历史来源、actor、实际字节/hash、行号和精确引文校验；不返回周围请求或其他人的行，也不把 provider 的 tier/规则标记当作资格结论。缺失值和原生 absence-only 说明保留；无法读取时明确显示不可用。只补原接口返回与展示，没有新 endpoint、表、迁移、搜索或判断引擎。
+
+最终 API/adapter 聚焦 137 项、界面 139 项及相关类型/格式检查通过，独立 SPEC/QUALITY 复核通过；较早包含 contracts 的检查批次与这些重叠，不相加。标准 JSON AST 库复用已锁定版本，支持原保存格式中的不完整数组引文，稀疏同职位、跨人、跨行、改值和错误请求路径均拒绝。云端 16 份源码 hash 与发布归档一致；health/ready/Web 全部 200、非 degraded，初始冷启动未就绪单独保留。真实只读 API 验证一位已评估者的两份来源、一位未评估者的一份来源，每份 24 字段，原评估引文准确回到其保存报告，错误 actor 拒绝。正常网页实际打开这两种报告，正文 16px/26px，原评估仍为 Unknown，未评估状态保持；Close 返回原候选，原问题输入与聊天草稿仍空。截图私有保存。容器替换及网页读取后，17 组数据逐项相同：106 runs、280 effects、265 messages、109 migrations、30 人/45 条来源及全部岗位/记忆/配置/原卡保持，无新增研究或业务写入。
+
+**下一优先：真实候选业务验收。** 当前已保存结果可查看，但新十人校准 → 用户反馈 → 原 Autumn task 继续 → 新结果完整保存尚未整条通过。原岗位仍有真实待答决定，不能代答或把普通执行授权当作业务确认。通用审批扁平明细、全部附件/卡片、多用户及完整 P6/M1–M5 也仍待验。
+
+**v65 历史发布 / `41cff7f2`。** Cards/Table 点击姓名直接打开同一个原生候选 Dialog，复用已有资料、来源与评估。Close/Escape 返回原姓名；Discuss/Message 关闭后再交给原生聊天，角色变化、权限拒绝和离开对话会丢弃未完成交接。正文实测 Geist 16px/26px；记忆中的 bot 内部编号只在显式诊断显示。127 项界面检查、16 项历史检索检查、Web/DB 类型及格式检查通过，独立界面复核通过。
 
 旧文件可按完整名称或分隔词检索，不再依赖附言。原正文 GIN 表达式、授权范围、时间/服务端截止、顺序、去重和游标保持；文件名支路目前扫描授权范围内文件，不承诺任意规模的延迟或模糊匹配。现有 Supabase 只读事务实际执行 14 个 CTE 合成查询，并按分隔词找回真实旧上传的两份文件引用；查询计划保留原索引，没有写测试行或启动本地数据库。八份云端源码、health/ready/Web 与实际替换后的 17 组快照均核对通过；初始冷启动另行保留。106 个 run、280 个 effect、265 条消息、109 份迁移、30 人/45 条来源及原 Main 待答卡保持。正常网页已打开现有评估与缺口、从 Table 打开未评估者，Close/Escape 回到原姓名；Discuss 将同一人选上下文放回已聚焦的输入框，没有发送，验收草稿已清空。
 
-**下一项：候选报告正文的产品呈现。** 未评估者目前只有资料/来源时间；已评估 Source 展开仍为 JSON 形式的原报告及选中引文。沿既有 listCandidateSources、effect/hash/rowIndex、ArtifactStore 和 provider-result 解析边界投影本人报告，覆盖原生与历史两种保存格式；保留 provider-report/Unassessed，不提升为原始证明或资格结论。不新增 endpoint、数据库表、招聘判断引擎或原件权限。通用审批扁平明细隔离、真实候选校准/反馈续搜及完整 P6/M1–M5 仍未完成。
+v65 当时报告正文仍为缺口，已由上方 v66 补齐；不以报告展示通过代替新候选校准、反馈续搜或完整业务验收。
 
 Execution priority: filter playbook and sourcing (S1–S5) come first; reply and follow-up work is deferred. Feature implementation and direct product validation come before CI waits. Do not wait for CodeQL/CI after each push. The owner authorized an incremental spending cap of US$150; track usage against the private authorization baseline and retain existing resources. The latest instruction authorizes continuing feature fixes, deployment and testing on the existing resources without repeated confirmation. PR merge, unapproved production migrations, access expansion and real outbound remain separate. A pending business question does not block independent product work, and broad execution access does not supply its answer.
 
