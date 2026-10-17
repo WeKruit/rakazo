@@ -111,10 +111,15 @@ export const DisabledBuiltinToolsSchema = z
   })
   .transform((names) => [...new Set(names)]);
 
-/** Read one persisted version; offsets and limits count Unicode code points. */
+export const ArtifactJsonStringPathSchema = z
+  .array(z.union([z.string(), z.number().int().nonnegative()]))
+  .readonly();
+
+/** Read one persisted version or exact JSON string; offsets count Unicode code points. */
 export const ArtifactReadInputSchema = z
   .object({
     artifactId: z.string().min(1),
+    jsonPath: ArtifactJsonStringPathSchema.optional(),
     offset: z.number().int().min(0).default(0),
     limit: z.number().int().min(1).max(16000).default(8000),
   })

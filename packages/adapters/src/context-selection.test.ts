@@ -389,6 +389,7 @@ describe("saved artifact context projection", () => {
     const original = "😀English original material\n".repeat(1000);
     const page = {
       artifact: { id: "saved-v1", hash: "a".repeat(64), size: Buffer.byteLength(original) },
+      jsonPath: ["providerResult", "structuredContent", "rows", 0, "evidence", "value"],
       text: original,
       offset: 10,
       endOffset: 10 + Array.from(original).length,
@@ -405,6 +406,7 @@ describe("saved artifact context projection", () => {
     );
     expect(projected.contextTruncated).toBe(true);
     expect(projected.artifact).toEqual(page.artifact);
+    expect(projected.jsonPath).toEqual(page.jsonPath);
     expect(projected.text).toBe(
       Array.from(original).slice(0, Array.from(projected.text).length).join(""),
     );
@@ -450,11 +452,16 @@ describe("saved artifact context projection", () => {
     const projected = JSON.parse(
       shortenToolResultText(JSON.stringify(page), 100, {
         name: "artifact_read",
-        arguments: { artifactId: "saved-v1", offset: 42 },
+        arguments: { artifactId: "saved-v1", offset: 42, jsonPath: ["evidence"] },
       }),
     );
     expect(projected.needsRetry).toBe(true);
-    expect(projected.retry).toEqual({ artifactId: "saved-v1", offset: 42, limit: 1 });
+    expect(projected.retry).toEqual({
+      artifactId: "saved-v1",
+      offset: 42,
+      jsonPath: ["evidence"],
+      limit: 1,
+    });
     expect(projected).not.toHaveProperty("nextOffset");
   });
 });

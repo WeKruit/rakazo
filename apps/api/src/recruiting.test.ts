@@ -134,6 +134,7 @@ describe("native recruiting RPC", () => {
     const candidatePage = {
       roleId: "role",
       roleRevisionId: "revision",
+      crmTarget: null,
       items: [],
       nextCursor: null,
       total: 10,
@@ -177,10 +178,15 @@ describe("native recruiting RPC", () => {
         shortlisted: true,
       }),
     ).toEqual(shortlist);
-    vi.mocked(db.listRecruitingResearch).mockResolvedValueOnce({ tasks: [], actions: [] });
+    vi.mocked(db.listRecruitingResearch).mockResolvedValueOnce({
+      tasks: [],
+      actions: [],
+      observations: [],
+    });
     expect(await client.recruiting.listResearch({ roleId: "role" })).toEqual({
       tasks: [],
       actions: [],
+      observations: [],
     });
   });
   it("supplies native artifact storage and authenticated context for both role writes", async () => {

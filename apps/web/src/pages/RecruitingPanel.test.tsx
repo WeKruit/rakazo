@@ -402,6 +402,7 @@ beforeEach(() => {
   api.listQuestions.mockResolvedValue({ questions: [] });
   api.answer.mockResolvedValue({ ok: true });
   api.listResearch.mockResolvedValue({
+    observations: [],
     tasks: [{ id: "task-1", roleId: role.id, state: "active", providerTaskId: "provider-task-1" }],
     actions: [
       {
@@ -673,7 +674,7 @@ it("keeps a historical CRM receipt on its exact source with its original target 
       target: { ...crmTarget, clientLabel: "Current client" },
     },
   });
-  api.listResearch.mockResolvedValue({ tasks: [f.task], actions: [f.action] });
+  api.listResearch.mockResolvedValue({ tasks: [f.task], actions: [f.action], observations: [] });
   api.listCandidateSources.mockResolvedValue({
     roleId: role.id,
     candidateKey: "raw-person",
@@ -759,7 +760,7 @@ it("refreshes CRM source receipts without new discoveries and ignores a late old
   api.listCandidates.mockResolvedValue(
     candidatePage([{ ...candidateFixture("raw-person", false), crm: pending }]),
   );
-  api.listResearch.mockResolvedValue({ tasks: [f.task], actions: [f.action] });
+  api.listResearch.mockResolvedValue({ tasks: [f.task], actions: [f.action], observations: [] });
   api.listCandidateSources.mockResolvedValueOnce(sourcePage);
   const view = await mounted();
   await view.click("Evidence");
@@ -836,7 +837,7 @@ it("omits stale current CRM details for an excluded selection while refreshing i
       }),
     )
     .mockResolvedValue(freshSources);
-  api.listResearch.mockResolvedValue({ tasks: [f.task], actions: [f.action] });
+  api.listResearch.mockResolvedValue({ tasks: [f.task], actions: [f.action], observations: [] });
   const view = await mounted();
   await view.click("Evidence");
   await view.click(pending.candidateKey);
@@ -924,7 +925,7 @@ it("requests server pages and filters while keeping selected evidence outside th
 it("shows saved source rounds with their exact original revision and Artifact", async () => {
   const f = rawResultsFixture();
   api.listCandidates.mockResolvedValue(candidatePage([candidateFixture("raw-person", false)]));
-  api.listResearch.mockResolvedValue({ tasks: [f.task], actions: [f.action] });
+  api.listResearch.mockResolvedValue({ tasks: [f.task], actions: [f.action], observations: [] });
   api.listCandidateSources.mockResolvedValue({
     roleId: role.id,
     candidateKey: "raw-person",
@@ -968,7 +969,7 @@ it("shows saved source rounds with their exact original revision and Artifact", 
 it("shows a native candidate source Artifact without an empty custom-action heading", async () => {
   const f = rawResultsFixture();
   api.listCandidates.mockResolvedValue(candidatePage([candidateFixture("native-person", false)]));
-  api.listResearch.mockResolvedValue({ tasks: [], actions: [] });
+  api.listResearch.mockResolvedValue({ tasks: [], actions: [], observations: [] });
   api.listCandidateSources.mockResolvedValue({
     roleId: role.id,
     candidateKey: "native-person",
@@ -1080,6 +1081,50 @@ it("renders Dashboard totals for the linked role and actual research delivery st
   expect(view.container.textContent).toContain("task-1 · active");
   expect(view.container.textContent).toContain("create · accepted · running");
   expect(api.setCandidateShortlist).not.toHaveBeenCalled();
+});
+
+it("renders native saved research history without inventing new search rounds", async () => {
+  const observations = ["read-1", "read-2", "read-3"].map((effectId, index) => ({
+    effectId,
+    providerTaskId: index === 1 ? "provider-b" : "provider-a",
+    roleRevisionId: revision.id,
+    runId: `run-${effectId}`,
+    rowCount: 15,
+    observedAt: `2026-10-16T0${index}:00:00.000Z`,
+    requestCursor: null,
+    artifactRef: { artifactId: `artifact-${effectId}`, sha256: "a".repeat(64) },
+  }));
+  api.listResearch.mockResolvedValue({ tasks: [], actions: [], observations });
+  api.listCandidates.mockResolvedValue({
+    ...candidatePage(),
+    counts: {
+      sourceRows: 45,
+      candidates: 30,
+      identifiedCandidates: 30,
+      unassessed: 30,
+      assessed: 0,
+      shortlisted: 0,
+    },
+  });
+  const view = await mounted();
+  await view.click("Dashboard");
+  expect(view.container.textContent).not.toContain("No saved research");
+  const history = view.container.querySelector('[aria-label="Saved research results"]')!;
+  expect(history).not.toBeNull();
+  expect(history.querySelectorAll("li")).toHaveLength(3);
+  expect(history.querySelector("time")?.textContent).toContain("PDT");
+  expect([...history.querySelectorAll("time")].map((item) => item.dateTime)).toEqual(
+    observations.map((item) => item.observedAt),
+  );
+  expect(history.textContent?.match(/15 saved source rows/g)).toHaveLength(3);
+  expect(history.textContent?.match(/provider-a/g)).toHaveLength(2);
+  expect(history.textContent?.match(/provider-b/g)).toHaveLength(1);
+  expect(api.listResearch).toHaveBeenCalledWith({ roleId: role.id });
+  expect(api.getById).not.toHaveBeenCalled();
+  const sourceLinks = [...history.querySelectorAll("summary")].filter(
+    (summary) => summary.textContent === "Source Artifact",
+  );
+  expect(sourceLinks).toHaveLength(3);
 });
 
 it("retains missing identity and exposes saved profile issues without inventing profile facts", async () => {
@@ -1261,6 +1306,7 @@ it("preserves null and primitive provider rows in the exact raw Artifact viewer"
   };
   const saved = nativeOutput(f, snapshot, f.reference.artifactId);
   api.listResearch.mockResolvedValue({
+    observations: [],
     tasks: [f.task],
     actions: [{ ...f.action, outputArtifacts: [saved.reference] }],
   });
@@ -2451,7 +2497,7 @@ it("does not carry expanded evidence into another role with the same source refe
     revision: { ...original, id: nextRole.currentRevisionId, roleId: nextRole.id },
   });
   api.listAssessments.mockResolvedValue([]);
-  api.listResearch.mockResolvedValue({ tasks: [], actions: [] });
+  api.listResearch.mockResolvedValue({ tasks: [], actions: [], observations: [] });
   await view.click("Refresh");
   expect(view.container.querySelector("mark")).toBeNull();
   expect(view.container.querySelector("[data-artifact-id]")).toBeNull();
@@ -2540,7 +2586,7 @@ it.each(["recruiting reads", "memory reads"])(
 it("shows unassessed raw provider rows from saved Artifacts without creating an assessment or search", async () => {
   const f = rawResultsFixture();
   api.listAssessments.mockResolvedValue([]);
-  api.listResearch.mockResolvedValue({ tasks: [f.task], actions: [f.action] });
+  api.listResearch.mockResolvedValue({ tasks: [f.task], actions: [f.action], observations: [] });
   api.getById.mockResolvedValue(f.artifact);
   const view = await mounted();
   expect(api.getById).not.toHaveBeenCalled();
@@ -2561,7 +2607,7 @@ it("shows unassessed raw provider rows from saved Artifacts without creating an 
 });
 
 it("keeps saved assessments visible when no domain research tasks exist", async () => {
-  api.listResearch.mockResolvedValue({ tasks: [], actions: [] });
+  api.listResearch.mockResolvedValue({ tasks: [], actions: [], observations: [] });
   const view = await mounted();
   await view.click("Evidence");
   expect(view.container.textContent).toContain("candidate-1");
@@ -2571,13 +2617,14 @@ it("keeps saved assessments visible when no domain research tasks exist", async 
 
 it("does not reload immutable result bytes when refresh returns the same source references", async () => {
   const f = rawResultsFixture();
-  api.listResearch.mockResolvedValue({ tasks: [f.task], actions: [f.action] });
+  api.listResearch.mockResolvedValue({ tasks: [f.task], actions: [f.action], observations: [] });
   api.getById.mockResolvedValue(f.artifact);
   const view = await mounted();
   await view.click("Evidence");
   await view.expand("Raw search results");
   await vi.waitFor(() => expect(view.container.textContent).toContain("Synthetic raw candidate"));
   api.listResearch.mockResolvedValue({
+    observations: [],
     tasks: [{ ...f.task }],
     actions: [{ ...f.action, outputArtifacts: [{ ...f.reference }] }],
   });
@@ -2596,7 +2643,7 @@ it("discards a pending result when refresh replaces that action's output referen
   );
   let finish!: (artifact: typeof f.artifact) => void;
   api.listAssessments.mockResolvedValue([]);
-  api.listResearch.mockResolvedValue({ tasks: [f.task], actions: [f.action] });
+  api.listResearch.mockResolvedValue({ tasks: [f.task], actions: [f.action], observations: [] });
   api.getById.mockImplementation(({ artifactId }) =>
     artifactId === f.artifact.id
       ? new Promise((resolve) => {
@@ -2608,6 +2655,7 @@ it("discards a pending result when refresh replaces that action's output referen
   await view.click("Evidence");
   await view.expand("Raw search results");
   api.listResearch.mockResolvedValue({
+    observations: [],
     tasks: [f.task],
     actions: [{ ...f.action, outputArtifacts: [next.reference] }],
   });
@@ -2638,6 +2686,7 @@ it("keeps different rows snapshots at the same cursor while excluding status rec
   const outputs = [f, changed, status];
   api.listAssessments.mockResolvedValue([]);
   api.listResearch.mockResolvedValue({
+    observations: [],
     tasks: [f.task],
     actions: [{ ...f.action, outputArtifacts: outputs.map((output) => output.reference) }],
   });
@@ -2679,7 +2728,7 @@ it.each(["hash", "action", "artifact", "access"])(
     }
     if (boundary === "artifact") artifact = { ...artifact, id: "foreign-artifact" };
     api.listAssessments.mockResolvedValue([]);
-    api.listResearch.mockResolvedValue({ tasks: [f.task], actions: [f.action] });
+    api.listResearch.mockResolvedValue({ tasks: [f.task], actions: [f.action], observations: [] });
     if (boundary === "access") api.getById.mockRejectedValue(new Error("Private source details"));
     else api.getById.mockResolvedValue(artifact);
     const view = await mounted();
@@ -2697,7 +2746,7 @@ it("discards a late original action Artifact after navigation to another thread"
   const f = rawResultsFixture();
   let finish!: (artifact: typeof f.artifact) => void;
   api.listAssessments.mockResolvedValue([]);
-  api.listResearch.mockResolvedValue({ tasks: [f.task], actions: [f.action] });
+  api.listResearch.mockResolvedValue({ tasks: [f.task], actions: [f.action], observations: [] });
   api.getById.mockReturnValueOnce(
     new Promise((resolve) => {
       finish = resolve;

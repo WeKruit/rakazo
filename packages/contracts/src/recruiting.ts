@@ -1,4 +1,5 @@
 import * as z from "zod";
+import { ArtifactJsonStringPathSchema } from "./builtin-tools.js";
 import { Id, IsoDate } from "./ids.js";
 import { RecruitingCrmCandidateSyncSchema, RecruitingCrmTargetSchema } from "./recruiting-crm.js";
 
@@ -450,6 +451,18 @@ export const RecruitingResearchActionSchema = z
   .readonly();
 export type RecruitingResearchAction = z.infer<typeof RecruitingResearchActionSchema>;
 
+/** One saved native read, not a new search or a provider task state. */
+export const RecruitingResearchSavedObservationSchema = z.strictObject({
+  effectId: RecruitingId,
+  providerTaskId: RecruitingId,
+  roleRevisionId: RecruitingId,
+  runId: RecruitingId,
+  rowCount: z.number().int().nonnegative().nullable(),
+  observedAt: IsoDate,
+  requestCursor: z.string().nullable(),
+  artifactRef: RecruitingArtifactRefSchema,
+});
+
 export const RecruitingResearchObservationSchema = z.strictObject({
   deliveryState: z.enum(["accepted", "rejected", "unknown"]),
   providerTaskId: RecruitingId.nullable(),
@@ -519,7 +532,7 @@ export const RecruitingSourceSelectionSchema = z
     z
       .strictObject({
         kind: z.literal("artifact_json_string"),
-        path: z.array(z.union([z.string(), z.number().int().nonnegative()])).readonly(),
+        path: ArtifactJsonStringPathSchema,
         ...SelectionRange,
       })
       .readonly(),

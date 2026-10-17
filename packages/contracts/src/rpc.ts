@@ -119,6 +119,7 @@ import {
   RecruitingAssessmentSchema,
   RecruitingId,
   RecruitingResearchActionSchema,
+  RecruitingResearchSavedObservationSchema,
   RecruitingResearchTaskSchema,
   RecruitingRoleRevisionSchema,
   RecruitingRoleSchema,
@@ -572,6 +573,7 @@ export const appContract = {
       z.strictObject({
         tasks: z.array(RecruitingResearchTaskSchema),
         actions: z.array(RecruitingResearchActionSchema),
+        observations: z.array(RecruitingResearchSavedObservationSchema),
       }),
     ),
   },

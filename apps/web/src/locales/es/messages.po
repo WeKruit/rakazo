@@ -95,6 +95,11 @@ msgstr "{0} ejecuciones · {1} tokens"
 msgid "{0} saved discoveries"
 msgstr ""
 
+#. placeholder {0}: observation.rowCount
+#: src/pages/RecruitingPanel.tsx
+msgid "{0} saved source rows"
+msgstr ""
+
 #. placeholder {0}: bot.name
 #: src/pages/ExternalConversationSettings.tsx
 msgid "{0} will still respond to direct mentions."
@@ -3840,6 +3845,10 @@ msgstr ""
 msgid "Provider"
 msgstr "Proveedor"
 
+#: src/pages/RecruitingPanel.tsx
+msgid "Provider task"
+msgstr ""
+
 #: src/pages/ModelSettingsOverlay.tsx
 #: src/pages/VoiceSettingsOverlay.tsx
 msgid "Providers"
@@ -4127,12 +4136,16 @@ msgid "Research & writing"
 msgstr ""
 
 #: src/pages/RecruitingPanel.tsx
+msgid "Research history"
+msgstr ""
+
+#: src/pages/RecruitingPanel.tsx
 msgid "Research round"
 msgstr ""
 
 #: src/pages/RecruitingPanel.tsx
-msgid "Research rounds"
-msgstr ""
+#~ msgid "Research rounds"
+#~ msgstr ""
 
 #: src/components/ComputerMaintenanceActions.tsx
 #: src/pages/shell/avatar-studio-popover.tsx
@@ -4243,6 +4256,10 @@ msgstr ""
 
 #: src/pages/RecruitingPanel.tsx
 msgid "Role definition"
+msgstr ""
+
+#: src/pages/RecruitingPanel.tsx
+msgid "Role revision"
 msgstr ""
 
 #: src/pages/RecruitingPanel.tsx
@@ -4361,6 +4378,14 @@ msgstr ""
 
 #: src/pages/RecruitingPanel.tsx
 msgid "Saved facts"
+msgstr ""
+
+#: src/pages/RecruitingPanel.tsx
+msgid "Saved research results"
+msgstr ""
+
+#: src/pages/RecruitingPanel.tsx
+msgid "Saved results"
 msgstr ""
 
 #: src/pages/RecruitingPanel.tsx

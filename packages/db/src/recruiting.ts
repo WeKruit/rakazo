@@ -64,6 +64,7 @@ import {
   RecruitingQuestionSchema,
   RecruitingReplyTargetSchema,
   RecruitingResearchActionSchema,
+  RecruitingResearchSavedObservationSchema,
   RecruitingResearchTaskSchema,
   RecruitingResearchToolInputSchema,
   RecruitingRoleRevisionSchema,
@@ -4661,7 +4662,29 @@ export async function listRecruitingResearch(
           actions.push(dto);
         }
       }
-      return { tasks, actions };
+      const pages = await tx.recruitingCandidatePage.findMany({
+        where: { roleId: role.id, taskId: null, actionId: null },
+        orderBy: [{ observedAt: "asc" }, { effectId: "asc" }],
+        include: { effect: { select: { runId: true, request: true } } },
+      });
+      const observations = [];
+      for (const page of pages) {
+        await candidatePageArtifact(tx, actor, page);
+        const call = researchReadRequest(page.effect.request, undefined, "get_rows");
+        observations.push(
+          RecruitingResearchSavedObservationSchema.parse({
+            effectId: page.effectId,
+            providerTaskId: call.args.task_id,
+            roleRevisionId: page.roleRevisionId,
+            runId: page.effect.runId,
+            rowCount: page.rowCount,
+            observedAt: page.observedAt.toISOString(),
+            requestCursor: page.requestCursor,
+            artifactRef: { artifactId: page.artifactId, sha256: page.artifactHash },
+          }),
+        );
+      }
+      return { tasks, actions, observations };
     },
     { isolationLevel: Prisma.TransactionIsolationLevel.RepeatableRead },
   );

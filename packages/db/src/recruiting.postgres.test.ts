@@ -3019,7 +3019,7 @@ describePostgres("recruiting domain (PostgreSQL)", () => {
     await prisma.recruitingResearchTask.delete({ where: { id: task.id } });
     await prisma.mcpServer.delete({ where: { id: server.id } });
     expect(await recruiting.listRecruitingResearch(prisma, actor, { roleId: firstRoleId })).toEqual(
-      { tasks: [], actions: [] },
+      { tasks: [], actions: [], observations: [] },
     );
   });
   it("retains authorized historical sources and creator runs after a secondary thread changes role", async () => {

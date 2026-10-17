@@ -2,6 +2,7 @@ import { createHash } from "node:crypto";
 import type { ArtifactStore } from "@rakazo/adapter-kit";
 import type { Actor } from "@rakazo/contracts";
 import { ArtifactReadInputSchema } from "@rakazo/contracts";
+import { readRecruitingJsonString } from "@rakazo/core";
 import type { PrismaClient } from "@rakazo/db";
 import { IsolationError } from "@rakazo/db";
 
@@ -36,7 +37,7 @@ export async function artifactReadFromTool(
 ) {
   const parsed = ArtifactReadInputSchema.safeParse(raw);
   if (!parsed.success) return { error: "Invalid artifact_read arguments." };
-  const { artifactId, offset, limit } = parsed.data;
+  const { artifactId, jsonPath, offset, limit } = parsed.data;
   let saved: Awaited<ReturnType<typeof readActorArtifact>>;
   try {
     saved = await readActorArtifact(deps, actor, { artifactId });
@@ -69,10 +70,20 @@ export async function artifactReadFromTool(
   )
     return { artifact: metadata, error: "This artifact format does not support text reading." };
   let text: string;
-  try {
-    text = new TextDecoder("utf-8", { fatal: true, ignoreBOM: true }).decode(bytes);
-  } catch {
-    return { artifact: metadata, error: "This artifact is not valid UTF-8 text." };
+  if (jsonPath !== undefined) {
+    if (mime !== "application/json")
+      return { artifact: metadata, error: "JSON string selection requires a JSON artifact." };
+    try {
+      text = readRecruitingJsonString(bytes, jsonPath);
+    } catch {
+      return { artifact: metadata, error: "Artifact path does not select a valid JSON string." };
+    }
+  } else {
+    try {
+      text = new TextDecoder("utf-8", { fatal: true, ignoreBOM: true }).decode(bytes);
+    } catch {
+      return { artifact: metadata, error: "This artifact is not valid UTF-8 text." };
+    }
   }
   // Code-point offsets never split surrogate pairs; concatenated pages preserve exact text.
   const points = Array.from(text);
@@ -80,6 +91,7 @@ export async function artifactReadFromTool(
   const end = Math.min(offset + limit, points.length);
   return {
     artifact: metadata,
+    ...(jsonPath === undefined ? {} : { jsonPath }),
     text: points.slice(offset, end).join(""),
     offset,
     endOffset: end,

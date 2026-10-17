@@ -12,7 +12,7 @@ Supabase 独立数据库、原生 memory provider、Modal Volume 和 E2B 沿用�
 
 ## 当前发布与缺口（2026-10-17）
 
-Execution priority: filter playbook and sourcing (S1–S5) come first; reply and follow-up work is deferred. Feature implementation and direct product validation come before CI waits. Do not wait for CodeQL/CI after each push. The owner authorized an incremental spending cap of US$150; track usage against the private authorization baseline and retain existing resources. Merge, deployment, production migration, access expansion and outbound authorization remain separate.
+Execution priority: filter playbook and sourcing (S1–S5) come first; reply and follow-up work is deferred. Feature implementation and direct product validation come before CI waits. Do not wait for CodeQL/CI after each push. The owner authorized an incremental spending cap of US$150; track usage against the private authorization baseline and retain existing resources. The latest instruction authorizes continuing feature fixes, deployment and testing on the existing resources without repeated confirmation. PR merge, unapproved production migrations, access expansion and real outbound remain separate. A pending business question does not block independent product work, and broad execution access does not supply its answer.
 
 当前候选保存版本 `368a0146` 已部署为 Modal v40，随后原生目录接线修复 `05bf2cde` 部署为 v41，最终回执派生连接修复 `50043a27` 部署为 v42。只在独立 `rakazo` 库应用获准的单份 `20261018000000_native_recruiting_candidate_sources`，账本共 109 份；taskId/actionId 同时可空的约束已实查。两次真实容器替换的前后比对通过，现有配置、记忆、原消息/run/effect 和待答卡保留。API health/ready 通过且非 degraded，变更源码 hash 与发布版本一致；没有新表、权限、资源、订阅或外联。
 
@@ -50,7 +50,7 @@ Main/Sourcer 随后各完成一次实际回复，均读取两份当前 skill，�
 
 **本次同时发现的真实阅读缺口：**原始 `get_rows` 回执保存了完整引文，但最终报告把部分文字说成 provider 截断。实际共享上下文逻辑会缩短旧工具结果，不能把模型当前未见当成源数据缺失。随后同一 task 的原生单行回读已返回完整职责引文及来源；没有再调用 research/reply。现有 sourcing skill 只追加一段小页/原件读取指导，原生保存并读回，除段落分隔/末尾换行外旧正文一致，其余四份 skills、bot 指令及禁用工具配置保持。没有新增代码、schema、工具或全局 context budget；这是一项现成 Agent 方法的采用。27 行全量语义审阅及新任务自动采用仍须验证，单条回读不代替全部证据验收。
 
-**仍缺的产品接线：**普通原生 MCP 返回保存在原生工具回执/对话中；本批没有把新任务自动登记到依赖领域 action 的岗位候选索引。因此不能声称任意原生搜索已自动进入 Dashboard。在已验的 Main/Sourcer→Autumn→同 task 反馈技术链上继续候选业务验收，再依据真实候选返回补最小结果关联；本次 27 行是岗位/公司证据，不是候选名单，不应索引成人员。不得以恢复强制领域步骤来解决展示问题。
+**原生结果接线边界：**普通 MCP 返回保存在原生工具回执/对话中；下方 v42 已验证可选保存把真实候选结果关联到岗位索引，不依赖领域 action。新搜索的自主采用、反馈及顶层原生任务历史仍待验，不能声称任意原生结果已自动完成整条链。本次 27 行是岗位/公司证据，不是候选名单，不应索引成人员。不得以恢复强制领域步骤来解决展示问题。
 
 **当前最小接线（已发布 v40/v41）：**复用已有 `recruiting_research` 的可选 `save_results`，把本 run 中同 MCP/task/cursor 的真实候选页保存到现有 ArtifactStore 与候选索引。它只保存已经返回的结果，不准备、批准或触发搜索；普通 MCP 仍直接运行。Agent 明确选择候选结果，服务端核验原生完成回执、岗位版本、归属和文件 hash；公司/JD 表不能冒充人员。未评估及缺字段的候选保留，LinkedIn 身份沿用现有去重逻辑。原候选来源允许没有自定义 task/action，用真实 effect 和 artifact 引用连接 Dashboard；不造领域任务或第二套表。
 
@@ -64,7 +64,7 @@ Main/Sourcer 随后各完成一次实际回复，均读取两份当前 skill，�
 - [x] 新保存后的受控容器替换也已核对：候选、45 条来源记录、三份来源页、原生保存回执、全部原消息/run/effect、配置/记忆、迁移账本与待答卡逐项相同，未重放。三份原件均经原生 actor 授权读取，字节/hash/长度与对应完整 provider 回执一致；API ready 非 degraded。网页重载后可见 30 人且全部未评估，同一人保留两次发现来源。
 - [ ] 顶层原生搜索轮次仍未接入旧 action 列表，候选证据的友好逐项呈现仍需补齐；这次历史结果入库不证明新候选检索、校准或反馈续搜，更不证明 P6。
 
-下面保留既有增量的实现/验证事实，不能据此恢复其旧优先级或继续扩建 schema/领域工具。已有 research admission/准备层是否阻碍原生 Agent 自主调用仍待实测；若有阻碍，先说明具体调用链，只修该缺口，不再叠加包装。
+下面保留既有增量的实现/验证事实，不能据此恢复其旧优先级或继续扩建 schema/领域工具。普通 MCP 的隐式 research admission 已随 v39 删除并有原生技术链验收；显式选用的旧 action 路径仍保留其原请求校验，不是普通聊天的前置条件。
 
 - 复用现有 brief JSON、不可变岗位版本、原生人类来源、CAS 和 Role 编辑/API；新增 `searchFilters`，每项有稳定 ID、statement、include/exclude/prefer、origin 和 sourceRefIds。无额外过滤显式为 `[]`，不是资格条件或 provider 资格结论。推断只能 prefer；未读、缺来源或冒用人类身份的过滤不接受。
 - 人工可以增删/修改/清空过滤；省略不改，空数组清空。未改的条件和来源保留；修改产生同一岗位的新版本和真实人类消息、清除旧 G0，无变化不写新版本。缺失 location 也进入现有关键澄清，已有来源的 unrestricted 不重复问。
@@ -125,10 +125,10 @@ flowchart TD
 | 数据 | 现有落点 / 关联 | 要补齐的产品行为 |
 | --- | --- | --- |
 | 岗位/JD/条件 | `recruiting_roles` + 不可变 `recruiting_role_revisions`；原件为 Artifact | 原文、hard/preferred、AND/OR/NOT、来源与版本差异可读/可改；计算条件同时保存真实规则，不能只改展示文字；修订使旧判断过期、旧批准不适用于新版 |
-| 搜索/续搜 | `recruiting_research_tasks` / `recruiting_research_actions`；provider task ID、角色版本、请求/上下文/回执文件引用 | 每轮明确 action，继续同一 task；已排队、已完成、结果未知分开，不把 turn 停止当 provider 停止 |
+| 搜索/续搜 | 原生 MCP effect / provider task ID、请求与回执；显式 saved action 使用既有 tasks/actions | 反馈继续同一 provider task；直接 MCP 不要求领域 action。已排队、已完成、结果未知分开，不把 turn 停止当 provider 停止 |
 | 原始结果/材料 | `artifacts` 保存元数据、hash、版本、权限；真实字节在 ArtifactStore | 保留原始字段和分页/时间，不用模型总结覆盖原件 |
 | 候选身份与岗位名单 | 新 `recruiting_candidates` 岗位索引，沿用 `candidateKey` 关联评估；迁移未执行；CRM `candidates` 仍是已接入人员的主记录 | 同一岗位按明确 LinkedIn profile 去重；未知身份保留独立来源行键。CRM 同组织身份唯一索引及正式多岗位关联已有代码，尚未验收；应用索引现以来源/effect 引用关联 CRM 回执，未发布验收 |
-| 每轮找到哪些人 | 新 `recruiting_candidate_pages` / `recruiting_candidate_occurrences` 绑定 task/action/effect/岗位版本/Artifact/页/行；迁移未执行 | 重复页回放不重复索引；每次发现保留来源，最新 profile 按原生完成时间选取，历史回填不能覆盖较新观察 |
+| 每轮找到哪些人 | 已发布 `recruiting_candidate_pages` / `recruiting_candidate_occurrences`，保留 effect/岗位版本/Artifact/页/行；原生 MCP 页的 task/action 同时为空 | 重复保存回放不新增来源页；再次读取保留新观察。顶层历史须显示真实 provider task 与来源，不伪造新搜索或领域 action |
 | 资格评估 | `recruiting_assessments` 的 `(roleId,candidateKey,version)`；绑定岗位版本、facts/judgments/sourceRefs | 逐项 met/unmet/unknown、缺口、计算依据、历史版本；旧岗位评估显示过期 |
 | 人工选择与反馈 | 原生人类消息/事件保留来源；新名单索引的 shortlist 用 CAS 与人类消息同事务保存，尚未上线 | 临时 UI 选中不当作持久 shortlist；接受/拒绝/跳过与资格三态、CRM pipeline stage 分开 |
 | CRM | 既有 `candidates` / `candidate_sources` / `candidate_pipeline` / audit；新增 `candidate_role_memberships` 迁移未执行；应用侧 `recruiting_crm_imports` 仅关联绑定 effect、导入 effect 和来源行 | 导入通过用户 OAuth/RLS，在同事务保存身份、来源和正式岗位关联；保留旧 pipeline/评审。严格回执中的组织、岗位、来源与冻结请求一致才显示成功；不复制 CRM 人员和回执到另一套表 |

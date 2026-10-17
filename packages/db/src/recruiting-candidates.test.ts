@@ -2171,6 +2171,49 @@ async function nativeSourceFixture() {
 }
 
 describe("native candidate source provenance", () => {
+  it("lists native saved research history without creating domain tasks", async () => {
+    const f = await nativeSourceFixture();
+    const tx = {
+      ...f.tx,
+      recruitingResearchTask: { findMany: vi.fn(async () => []) },
+      recruitingCandidatePage: {
+        ...f.tx.recruitingCandidatePage,
+        findMany: vi.fn(async () => [{ ...f.page, effect: f.read }]),
+      },
+    };
+    const prisma = { $transaction: vi.fn(async (fn) => fn(tx)) } as unknown as PrismaClient;
+    const result = await recruiting.listRecruitingResearch(prisma, actor, { roleId: "role" });
+    expect(result).toEqual({
+      tasks: [],
+      actions: [],
+      observations: [
+        {
+          effectId: "read",
+          providerTaskId: "provider-task",
+          roleRevisionId: "revision",
+          runId: "run",
+          rowCount: 1,
+          observedAt: f.page.observedAt.toISOString(),
+          requestCursor: null,
+          artifactRef: { artifactId: f.artifact.id, sha256: f.artifact.hash },
+        },
+      ],
+    });
+    expect(tx.recruitingCandidatePage.findMany).toHaveBeenCalledWith({
+      where: { roleId: "role", taskId: null, actionId: null },
+      orderBy: [{ observedAt: "asc" }, { effectId: "asc" }],
+      include: { effect: { select: { runId: true, request: true } } },
+    });
+    f.artifact.hash = "f".repeat(64);
+    await expect(
+      recruiting.listRecruitingResearch(prisma, actor, { roleId: "role" }),
+    ).rejects.toThrow(IsolationError);
+    tx.recruitingCandidatePage.findMany.mockClear();
+    await expect(
+      recruiting.listRecruitingResearch(prisma, { ...actor, userId: "other" }, { roleId: "role" }),
+    ).rejects.toThrow(IsolationError);
+    expect(tx.recruitingCandidatePage.findMany).not.toHaveBeenCalled();
+  });
   it("serves the native artifact and keeps unassessed sources readable after a role revision", async () => {
     const f = await nativeSourceFixture();
     f.role.currentRevisionId = "later-revision";

@@ -41,13 +41,87 @@ function fixture(text = "\uFEFF中文😀\r\nend 🧑‍💻") {
   return { deps, row, get, findFirst };
 }
 describe("native saved artifact reading", () => {
+  it("reads one exact candidate evidence string instead of preceding JD text", async () => {
+    const evidence = '  Built "platforms" 😀\r\nwith distributed systems.\n';
+    const f = fixture(
+      JSON.stringify({
+        providerResult: {
+          content: [{ text: "Job description, not candidate evidence." }],
+          structuredContent: { rows: [{ infra_evidence: { value: evidence } }] },
+        },
+      }),
+    );
+    f.row.mimeType = "application/json; charset=utf-8";
+    const jsonPath = ["providerResult", "structuredContent", "rows", 0, "infra_evidence", "value"];
+    let offset: number | null = 0;
+    let combined = "";
+    while (offset !== null) {
+      const result = await artifactReadFromTool(f.deps, actor, {
+        artifactId: f.row.id,
+        jsonPath,
+        offset,
+        limit: 3,
+      });
+      expect(result).toMatchObject({
+        artifact: { id: f.row.id, hash: f.row.hash, size: f.row.size },
+        jsonPath,
+        offset,
+        totalLength: Array.from(evidence).length,
+        offsetUnit: "unicode_code_point",
+      });
+      if (!("text" in result)) throw new Error("missing selected text");
+      combined += result.text;
+      offset = result.nextOffset ?? null;
+    }
+    expect(combined).toBe(evidence);
+  });
+  it("selects a root JSON string and rejects invalid, missing or non-string fields", async () => {
+    const f = fixture(JSON.stringify("Root 😀 evidence"));
+    f.row.mimeType = "application/json";
+    expect(
+      await artifactReadFromTool(f.deps, actor, { artifactId: f.row.id, jsonPath: [] }),
+    ).toMatchObject({ text: "Root 😀 evidence", jsonPath: [] });
+    const nested = fixture('{"rows":[{"text":"evidence","count":1}],"constructor":"private"}');
+    nested.row.mimeType = "application/json";
+    for (const jsonPath of [
+      ["missing"],
+      ["rows", 0],
+      ["rows", 0, "count"],
+      ["rows", "0", "text"],
+      ["rows", -1, "text"],
+      ["rows", 0.5, "text"],
+      ["constructor"],
+      ["__proto__"],
+      ["rows", 0, "prototype"],
+    ]) {
+      const result = await artifactReadFromTool(nested.deps, actor, {
+        artifactId: nested.row.id,
+        jsonPath,
+      });
+      expect(result).toHaveProperty("error");
+      expect(result).not.toHaveProperty("text");
+      expect(JSON.stringify(result)).not.toContain("private");
+    }
+    for (const source of ["not JSON", '{"text":"evidence"}']) {
+      const invalid = fixture(source);
+      invalid.row.mimeType = source === "not JSON" ? "application/json" : "text/plain";
+      expect(
+        await artifactReadFromTool(invalid.deps, actor, {
+          artifactId: invalid.row.id,
+          jsonPath: ["text"],
+        }),
+      ).toHaveProperty("error");
+    }
+  });
   it("authorizes both actor dimensions before touching blob storage", async () => {
     const f = fixture();
     for (const denied of [
       { ...actor, userId: "foreign" },
       { ...actor, spaceId: "foreign" },
     ])
-      expect(await artifactReadFromTool(f.deps, denied, { artifactId: "saved-v1" })).toEqual({
+      expect(
+        await artifactReadFromTool(f.deps, denied, { artifactId: "saved-v1", jsonPath: ["text"] }),
+      ).toEqual({
         error: "Artifact is unavailable.",
       });
     expect(f.get).not.toHaveBeenCalled();

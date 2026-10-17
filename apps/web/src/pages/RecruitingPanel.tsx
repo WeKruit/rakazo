@@ -1189,7 +1189,7 @@ function RecruitingWorkspace({ threadId, botId, refreshSignal, onClose, onReveal
               : Promise.resolve([]),
             workspace
               ? rpc.recruiting.listResearch({ roleId: workspace.role.id }).catch(onReadError)
-              : Promise.resolve({ tasks: [], actions: [] }),
+              : Promise.resolve({ tasks: [], actions: [], observations: [] }),
             workspace
               ? rpc.recruiting
                   .listQuestions({ threadId, roleId: workspace.role.id })
@@ -1588,9 +1588,9 @@ function RecruitingWorkspace({ threadId, botId, refreshSignal, onClose, onReveal
               </p>
             ) : null}
             <h3 className="font-medium">
-              <Trans>Research rounds</Trans>
+              <Trans>Research history</Trans>
             </h3>
-            {!snapshot.research.tasks.length ? (
+            {!snapshot.research.tasks.length && !snapshot.research.observations.length ? (
               <p className="text-muted-foreground">
                 <Trans>No saved research</Trans>
               </p>
@@ -1627,6 +1627,51 @@ function RecruitingWorkspace({ threadId, botId, refreshSignal, onClose, onReveal
                 </div>
               ))
             )}
+            {snapshot.research.observations.length ? (
+              <ul aria-label={t`Saved research results`} className="space-y-3">
+                {snapshot.research.observations.map((observation) => (
+                  <li key={observation.effectId} className="space-y-1 border-s border-border ps-3">
+                    <p>
+                      {observation.rowCount === null ? (
+                        <Trans>Saved results</Trans>
+                      ) : (
+                        <Trans>{observation.rowCount} saved source rows</Trans>
+                      )}
+                      {" · "}
+                      <time dateTime={observation.observedAt}>
+                        {new Date(observation.observedAt).toLocaleString(undefined, {
+                          timeZone: "America/Los_Angeles",
+                          timeZoneName: "short",
+                        })}
+                      </time>
+                    </p>
+                    <ArtifactReference
+                      reference={observation.artifactRef}
+                      label={t`Source Artifact`}
+                    />
+                    <details>
+                      <summary className="cursor-pointer text-muted-foreground">
+                        <Trans>Details</Trans>
+                      </summary>
+                      <dl className="break-all text-xs">
+                        <dt>
+                          <Trans>Provider task</Trans>
+                        </dt>
+                        <dd>{observation.providerTaskId}</dd>
+                        <dt>
+                          <Trans>Run</Trans>
+                        </dt>
+                        <dd>{observation.runId}</dd>
+                        <dt>
+                          <Trans>Role revision</Trans>
+                        </dt>
+                        <dd>{observation.roleRevisionId}</dd>
+                      </dl>
+                    </details>
+                  </li>
+                ))}
+              </ul>
+            ) : null}
           </TabsContent>
           <TabsContent key={workspace?.role.id} value="role" className="space-y-5">
             {workspace ? (
