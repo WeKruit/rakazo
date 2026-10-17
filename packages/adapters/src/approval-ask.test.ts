@@ -3,6 +3,46 @@ import { describe, expect, it } from "vitest";
 import { buildApprovalAskBlock } from "./approval-ask.js";
 
 describe("buildApprovalAskBlock", () => {
+  it.each([
+    ["mcp__autumn__research", "Autumn: Research"],
+    ["gmail_send_email", "Gmail send email"],
+  ])("names %s readably while preserving the exact consent and destination", (tool, label) => {
+    const args = {
+      to: "Exact Recipient <recipient+review@example.test>",
+      subject: "Candidate review",
+      body: "Original scope\nKeep this exact text 😀.",
+      token: "token-secret",
+    };
+    const block = buildApprovalAskBlock("original-effect", tool, args, ["token-secret"], {
+      reviewReason: "Review this exact destination and content.",
+    });
+    expect(block.text).toBe(`Review before ${label} → ${args.to}`);
+    expect(block.detail).toBe(
+      `Review this exact destination and content.\nto: ${args.to}\nsubject: ${args.subject}\nbody: ${args.body}\ntoken: [redacted]`,
+    );
+    expect(block.approvalEffectId).toBe("original-effect");
+    expect(block.actions).toEqual([
+      { id: "allow", label: "Allow once" },
+      { id: "always", label: "Always allow this tool" },
+      { id: "deny", label: "Deny" },
+    ]);
+    expect(args.token).toBe("token-secret");
+  });
+
+  it("redacts known secrets before changing the tool name's case and underscores", () => {
+    const block = buildApprovalAskBlock(
+      "synthetic-effect",
+      "mcp__demo__send_TOKEN_SECRET",
+      { to: "recipient@example.test" },
+      ["TOKEN_SECRET"],
+    );
+    expect(block.text).toBe("Review before Demo: Send [redacted] → recipient@example.test");
+    expect(block.detail).toBe("to: recipient@example.test");
+    expect(JSON.stringify(block)).not.toMatch(/TOKEN_SECRET|token secret/);
+    expect(block.approvalEffectId).toBe("synthetic-effect");
+    expect(block.actions?.map((action) => action.id)).toEqual(["allow", "always", "deny"]);
+  });
+
   it("keeps an exact one-time import request visible without permanent permission", () => {
     const source = `artifact-row:${"x".repeat(5000)}`;
     const block = buildApprovalAskBlock(

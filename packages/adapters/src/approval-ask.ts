@@ -1,6 +1,6 @@
 import type { MessageBlock } from "@rakazo/contracts";
 import { RecruitingApprovalToolInputSchema } from "@rakazo/contracts";
-import { redactSecrets } from "@rakazo/core";
+import { humanizeToolName, redactSecrets } from "@rakazo/core";
 import { redactToolArgsForReview } from "./auto-review.js";
 
 const MAX_APPROVAL_SUMMARY_LENGTH = 500;
@@ -14,7 +14,7 @@ export function buildApprovalAskBlock(
   options?: { reviewReason?: string; oneTimeOnly?: boolean },
 ): Extract<MessageBlock, { kind: "ask" }> {
   const recruitingApproval = toolName === "recruiting_request_approval";
-  const summary = describeApprovalAction(toolName, args);
+  const summary = describeApprovalAction(toolName, args, redactSecrets(toolName, secrets));
   const detail = formatApprovalDetail(
     toolName,
     redactToolArgsForReview(args, secrets),
@@ -60,7 +60,11 @@ export function buildApprovalAskBlock(
   };
 }
 
-function describeApprovalAction(toolName: string, args: Record<string, unknown>): string {
+function describeApprovalAction(
+  toolName: string,
+  args: Record<string, unknown>,
+  displayToolName: string,
+): string {
   if (toolName === "recruiting_request_approval") {
     return args.stage === "documents" ? "Approve role documents" : "Approve 10-profile calibration";
   }
@@ -71,14 +75,20 @@ function describeApprovalAction(toolName: string, args: Record<string, unknown>)
   }
   if (toolName === "delete_bot" || toolName === "archive_bot") {
     const name = args.confirm_name ?? args.confirmName;
-    return name ? `${toolName.replace("_", " ")} (${String(name)})` : toolName.replace("_", " ");
+    return name
+      ? `${displayToolName.replace("_", " ")} (${String(name)})`
+      : displayToolName.replace("_", " ");
   }
   if (toolName === "create_space") {
     const name = args.name ? String(args.name) : "Untitled";
     return `Create space “${name}”`;
   }
+  const mcp = displayToolName.match(/^mcp__(.+?)__(.+)$/);
+  const action = mcp
+    ? `${humanizeToolName(mcp[1]!)}: ${humanizeToolName(mcp[2]!)}`
+    : humanizeToolName(displayToolName);
   const target = pickScopeLabel(args);
-  return target ? `${toolName} → ${target}` : toolName;
+  return target ? `${action} → ${target}` : action;
 }
 
 function formatApprovalDetail(
