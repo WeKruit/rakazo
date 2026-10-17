@@ -6,6 +6,7 @@ import {
   createThreadMessageInTransaction,
   loadRunHumanSources,
   RunHistoryWriteError,
+  validateRunHumanSourceRows,
 } from "./messages.js";
 
 function humanSources() {
@@ -78,6 +79,19 @@ function humanSources() {
 }
 
 describe("native ordinary Ask continuation", () => {
+  it("validates preloaded native rows identically without querying storage", async () => {
+    const f = humanSources();
+    const preloaded = validateRunHumanSourceRows(
+      f.actor,
+      f.run,
+      f.events as never,
+      f.rows as never,
+    );
+    expect(f.tx.event.findMany).not.toHaveBeenCalled();
+    expect(f.tx.message.findMany).not.toHaveBeenCalled();
+    const { steering: _steering, ...loaded } = await f.load();
+    expect(preloaded).toEqual(loaded);
+  });
   it("loads original goal and ordered cards outside recent history, including shared-run composer answers", async () => {
     const f = humanSources();
     const result = await f.load();
@@ -181,6 +195,9 @@ describe("native ordinary Ask continuation", () => {
       if (boundary === "blank") f.rows[4]!.blocks = [{ kind: "text", text: " \n " }];
       if (boundary === "mismatch") f.rows[4]!.blocks = [{ kind: "text", text: "edited answer" }];
       await expect(f.load()).rejects.toThrow("Resource not found");
+      expect(() =>
+        validateRunHumanSourceRows(f.actor, f.run, f.events as never, f.rows as never),
+      ).toThrow("Resource not found");
     },
   );
 });

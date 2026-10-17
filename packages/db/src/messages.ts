@@ -28,23 +28,17 @@ export function isNativeHumanMessage(message: SourceMessage): boolean {
   );
 }
 
-/** Native card receipts, rather than text similarity or answer.runId, bind composer fanout answers. */
-export async function loadRunHumanSources(
-  tx: Prisma.TransactionClient,
+/** Validate the same native answer chain for single-run and batched snapshot reads. */
+export function validateRunHumanSourceRows(
   actor: Actor,
   run: { id: string; botId: string; threadId: string; sourceMessageId?: string | null },
+  receipts: readonly Pick<
+    Prisma.EventGetPayload<Record<string, never>>,
+    "seq" | "type" | "payload"
+  >[],
+  messages: readonly SourceMessage[],
   options: { continuationOnly?: boolean } = {},
 ) {
-  const receipts = await tx.event.findMany({
-    where: {
-      spaceId: actor.spaceId,
-      threadId: run.threadId,
-      runId: run.id,
-      botId: run.botId,
-      type: { in: ["thread.choice", "run.waiting_input", "computer.takeover.requested"] },
-    },
-    orderBy: { seq: "asc" },
-  });
   const choices = receipts.filter((receipt) => receipt.type === "thread.choice");
   const latestPause = receipts.findLast((receipt) => receipt.type !== "thread.choice");
   const latestChoice = choices.at(-1);
@@ -55,16 +49,6 @@ export async function loadRunHumanSources(
     receipt,
     parsed: NativeAskAnswerPayloadSchema.safeParse(receipt.payload),
   }));
-  const ids = proofs.flatMap(({ parsed }) =>
-    parsed.success ? [parsed.data.messageId, parsed.data.answerMessageId] : [],
-  );
-  if (choices.length && run.sourceMessageId) ids.push(run.sourceMessageId);
-  const messages = ids.length
-    ? await tx.message.findMany({
-        where: { threadId: run.threadId, id: { in: [...new Set(ids)] } },
-        include: humanMessageInclude,
-      })
-    : [];
   const byId = new Map(messages.map((message) => [message.id, message]));
   const answeredAsks = proofs.flatMap(({ receipt, parsed }) => {
     if (!parsed.success || parsed.data.answeredByUserId !== actor.userId) return [];
@@ -107,6 +91,46 @@ export async function loadRunHumanSources(
     (!current || (options.continuationOnly && answeredAsks.length !== choices.length))
   )
     throw new IsolationError();
+  return {
+    answers: answeredAsks.map((turn) => turn.answer),
+    answeredAsks,
+    currentAnswer: current?.answer ?? null,
+    originalSource: run.sourceMessageId ? (byId.get(run.sourceMessageId) ?? null) : null,
+  };
+}
+
+/** Native card receipts, rather than text similarity or answer.runId, bind composer fanout answers. */
+export async function loadRunHumanSources(
+  tx: Prisma.TransactionClient,
+  actor: Actor,
+  run: { id: string; botId: string; threadId: string; sourceMessageId?: string | null },
+  options: { continuationOnly?: boolean } = {},
+) {
+  const receipts = await tx.event.findMany({
+    where: {
+      spaceId: actor.spaceId,
+      threadId: run.threadId,
+      runId: run.id,
+      botId: run.botId,
+      type: { in: ["thread.choice", "run.waiting_input", "computer.takeover.requested"] },
+    },
+    orderBy: { seq: "asc" },
+  });
+  const choices = receipts.filter((receipt) => receipt.type === "thread.choice");
+  if (options.continuationOnly && choices.length && choices.length === receipts.length)
+    throw new IsolationError();
+  const ids = choices.flatMap((receipt) => {
+    const parsed = NativeAskAnswerPayloadSchema.safeParse(receipt.payload);
+    return parsed.success ? [parsed.data.messageId, parsed.data.answerMessageId] : [];
+  });
+  if (choices.length && run.sourceMessageId) ids.push(run.sourceMessageId);
+  const messages = ids.length
+    ? await tx.message.findMany({
+        where: { threadId: run.threadId, id: { in: [...new Set(ids)] } },
+        include: humanMessageInclude,
+      })
+    : [];
+  const sources = validateRunHumanSourceRows(actor, run, receipts, messages, options);
   const steering = options.continuationOnly
     ? []
     : await tx.steeringMessage.findMany({
@@ -121,10 +145,7 @@ export async function loadRunHumanSources(
       });
   return {
     steering,
-    answers: answeredAsks.map((turn) => turn.answer),
-    answeredAsks,
-    currentAnswer: current?.answer ?? null,
-    originalSource: run.sourceMessageId ? (byId.get(run.sourceMessageId) ?? null) : null,
+    ...sources,
   };
 }
 

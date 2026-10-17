@@ -234,6 +234,7 @@ describe("candidate listing and shortlist boundaries", () => {
     expect(createThreadMessageInTransaction).toHaveBeenCalledWith(f.tx, {
       role: "user",
       threadId: "thread",
+      clientNonce: 'recruiting-shortlist:["role","revision","internal-candidate-key",0,true]',
       blocks: [
         {
           kind: "text",

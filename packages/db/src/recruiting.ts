@@ -108,6 +108,7 @@ import {
   humanMessageInclude,
   isNativeHumanMessage,
   loadRunHumanSources,
+  validateRunHumanSourceRows,
 } from "./messages.js";
 import { IsolationError, scoped } from "./scope.js";
 
@@ -1602,33 +1603,316 @@ function questionCard(blocks: unknown, askIndex: number) {
   return block;
 }
 
+async function currentQuestionTargets(
+  tx: Tx,
+  actor: Actor,
+  role: RecruitingRole,
+  requests: readonly RecruitingAssessmentAskInput[],
+) {
+  const current = new Set<RecruitingAssessmentAskInput>();
+  const matching = requests.filter((request) => role.currentRevisionId === request.roleRevisionId);
+  if (!matching.length) return current;
+  const definition = (await roleSnapshot(tx, actor, role)).revision;
+  const candidates = matching.flatMap((request) =>
+    request.target.kind === "candidate" ? [request.target.candidateKey] : [],
+  );
+  const rows = candidates.length
+    ? await tx.recruitingAssessment.findMany({
+        where: { roleId: role.id, candidateKey: { in: [...new Set(candidates)] } },
+        distinct: ["candidateKey"],
+        orderBy: [{ candidateKey: "asc" }, { version: "desc" }],
+      })
+    : [];
+  const byCandidate = new Map(rows.map((row) => [row.candidateKey, row]));
+  const verified = new Set<string>();
+  const origins = new Set<string>();
+  const sources: RecruitingAssessmentSourceRef[] = [];
+  for (const request of matching) {
+    const ids = request.target.criterionIds;
+    if (
+      new Set(ids).size !== ids.length ||
+      ids.some((id) => !definition.criteria.some((criterion) => criterion.id === id))
+    )
+      throw new IsolationError();
+    if (request.target.kind === "candidate") {
+      const row = byCandidate.get(request.target.candidateKey);
+      if (
+        !row ||
+        row.version !== request.target.assessmentVersion ||
+        row.roleRevisionId !== request.roleRevisionId
+      )
+        continue;
+      if (!verified.has(row.candidateKey)) {
+        const assessment = RecruitingAssessmentSchema.parse({
+          ...row,
+          createdAt: row.createdAt.toISOString(),
+        });
+        if (!origins.has(row.createdByRunId)) {
+          await requireRun(tx, actor, row.createdByRunId);
+          origins.add(row.createdByRunId);
+        }
+        sources.push(...assessment.sourceRefs);
+        verified.add(row.candidateKey);
+      }
+    }
+    current.add(request);
+  }
+  // The shared current revision and its sources were authorized above; check assessment sources once.
+  await validateSources(tx, actor, sources);
+  return current;
+}
+
 async function questionTargetCurrent(
   tx: Tx,
   actor: Actor,
   role: RecruitingRole,
   request: RecruitingAssessmentAskInput,
 ) {
-  if (role.currentRevisionId !== request.roleRevisionId) return false;
-  const definition = (await roleSnapshot(tx, actor, role)).revision;
-  const ids = request.target.criterionIds;
-  if (
-    new Set(ids).size !== ids.length ||
-    ids.some((id) => !definition.criteria.some((criterion) => criterion.id === id))
-  )
-    throw new IsolationError();
-  if (request.target.kind === "role") return true;
-  const row = await tx.recruitingAssessment.findFirst({
-    where: { roleId: role.id, candidateKey: request.target.candidateKey },
-    orderBy: { version: "desc" },
+  return (await currentQuestionTargets(tx, actor, role, [request])).has(request);
+}
+
+async function questionsInTransaction(
+  tx: Tx,
+  actor: Actor,
+  input: { threadId: string; roleId: string; effectId?: string; candidateKey?: string },
+): Promise<RecruitingQuestion[]> {
+  const thread = await requireThread(tx, actor, input.threadId);
+  const role = await requireRole(tx, actor, input.roleId);
+  const events = await tx.event.findMany({
+    where: {
+      spaceId: actor.spaceId,
+      threadId: thread.id,
+      type: "recruiting.question.asked",
+      AND: [
+        { payload: { path: ["roleId"], equals: role.id } },
+        ...(input.effectId !== undefined
+          ? [{ payload: { path: ["effectId"], equals: input.effectId } }]
+          : []),
+      ],
+    },
+    orderBy: { seq: "asc" },
   });
-  if (
-    !row ||
-    row.version !== request.target.assessmentVersion ||
-    row.roleRevisionId !== request.roleRevisionId
-  )
-    return false;
-  await assessmentSnapshot(tx, actor, role, row);
-  return true;
+  const asked = events.flatMap((event) => {
+    const receipt = RecruitingQuestionAskedPayloadSchema.parse(event.payload);
+    if (
+      !event.runId ||
+      (input.candidateKey &&
+        receipt.target.kind === "candidate" &&
+        receipt.target.candidateKey !== input.candidateKey)
+    )
+      return [];
+    return [{ event, receipt }];
+  });
+  if (!asked.length) return [];
+  // ponytail: batch native proof rows inside this snapshot; never retain authorization across reads.
+  const runIds = [...new Set(asked.map(({ event }) => event.runId!))];
+  const runs = await tx.run.findMany({
+    where: { id: { in: runIds }, spaceId: actor.spaceId, userId: actor.userId },
+    select: {
+      id: true,
+      spaceId: true,
+      userId: true,
+      threadId: true,
+      botId: true,
+      status: true,
+      bot: { select: { spaceId: true, userId: true } },
+    },
+  });
+  const byRun = new Map(runs.map((run) => [run.id, run]));
+  for (const id of runIds) {
+    const run = scoped(actor, byRun.get(id) ?? null);
+    scoped(actor, run.bot);
+    if (run.threadId !== thread.id) throw new IsolationError();
+  }
+  const botIds = [...new Set(runs.map((run) => run.botId))];
+  const effects = await tx.externalEffect.findMany({
+    where: {
+      id: { in: asked.map(({ receipt }) => receipt.effectId) },
+      spaceId: actor.spaceId,
+      runId: { in: runIds },
+      kind: "recruiting_assess",
+      status: "completed",
+    },
+  });
+  const byEffect = new Map(effects.map((effect) => [effect.id, effect]));
+  const proofRows = await tx.event.findMany({
+    where: {
+      spaceId: actor.spaceId,
+      threadId: thread.id,
+      runId: { in: runIds },
+      botId: { in: botIds },
+      OR: [
+        { type: { in: ["thread.choice", "run.waiting_input", "computer.takeover.requested"] } },
+        {
+          type: "thread.message.created",
+          OR: asked.map(({ receipt }) => ({
+            payload: { path: ["messageId"], equals: receipt.messageId },
+          })),
+        },
+      ],
+    },
+    orderBy: { seq: "asc" },
+  });
+  const created = new Map<string, (typeof proofRows)[number]>();
+  const choices = new Map<string, (typeof proofRows)[number]>();
+  const receiptsByRun = new Map<string, typeof proofRows>();
+  const messageIds = new Set(asked.map(({ receipt }) => receipt.messageId));
+  const messageIdsByRun = new Map(runIds.map((id) => [id, new Set<string>()]));
+  for (const event of proofRows) {
+    const run = byRun.get(event.runId!);
+    if (!run || event.botId !== run.botId) continue;
+    const payload = event.payload as { messageId?: string; askIndex?: number } | null;
+    if (event.type === "thread.message.created") {
+      if (typeof payload?.messageId === "string") {
+        const key = stableJsonValue([run.id, payload.messageId]);
+        if (!created.has(key)) created.set(key, event);
+      }
+      continue;
+    }
+    const receipts = receiptsByRun.get(run.id) ?? [];
+    receipts.push(event);
+    receiptsByRun.set(run.id, receipts);
+    if (event.type === "thread.choice") {
+      if (typeof payload?.messageId === "string" && typeof payload.askIndex === "number") {
+        const key = stableJsonValue([run.id, payload.messageId, payload.askIndex]);
+        if (!choices.has(key)) choices.set(key, event);
+      }
+      const parsed = NativeAskAnswerPayloadSchema.safeParse(payload);
+      if (parsed.success) {
+        messageIds.add(parsed.data.messageId);
+        messageIds.add(parsed.data.answerMessageId);
+        messageIdsByRun.get(run.id)!.add(parsed.data.messageId).add(parsed.data.answerMessageId);
+      }
+    }
+  }
+  const messages = await tx.message.findMany({
+    where: { threadId: thread.id, id: { in: [...messageIds] } },
+    include: humanMessageInclude,
+  });
+  const byMessage = new Map(messages.map((message) => [message.id, message]));
+  const answersByRun = new Map<string, Set<string>>();
+  const questions = asked.map(({ event, receipt }) => {
+    const run = byRun.get(event.runId!)!;
+    const effect = byEffect.get(receipt.effectId);
+    if (
+      !effect ||
+      effect.runId !== run.id ||
+      stableJsonValue(effect.result) !== stableJsonValue(receipt)
+    )
+      throw new IsolationError();
+    const request = RecruitingAssessmentAskInputSchema.parse(effect.request);
+    if (
+      event.botId !== run.botId ||
+      receipt.roleId !== role.id ||
+      receipt.roleRevisionId !== request.roleRevisionId ||
+      request.roleId !== role.id ||
+      stableJsonValue(request.target) !== stableJsonValue(receipt.target)
+    )
+      throw new IsolationError();
+    const message = byMessage.get(receipt.messageId);
+    if (
+      !message ||
+      message.runId !== run.id ||
+      message.botId !== run.botId ||
+      message.role !== "bot" ||
+      message.clientNonce !== `recruiting-question:${effect.id}`
+    )
+      throw new IsolationError();
+    const block = questionCard(message.blocks, receipt.askIndex);
+    const originalEvent = created.get(stableJsonValue([run.id, message.id]));
+    const original = originalEvent
+      ? questionCard((originalEvent.payload as { blocks?: unknown }).blocks, receipt.askIndex)
+      : null;
+    const { status: _status, answer: _answer, ...display } = block;
+    const { status: _originalStatus, answer: _originalAnswer, ...originalDisplay } = original ?? {};
+    if (
+      !original ||
+      original.status === "answered" ||
+      stableJsonValue(display) !== stableJsonValue(originalDisplay)
+    )
+      throw new IsolationError();
+    const proof = choices.get(stableJsonValue([run.id, message.id, receipt.askIndex]));
+    if (block.status === "answered") {
+      const parsed = NativeAskAnswerPayloadSchema.safeParse(proof?.payload);
+      if (!parsed.success || parsed.data.answeredByUserId !== actor.userId)
+        throw new IsolationError();
+      let answers = answersByRun.get(run.id);
+      if (!answers) {
+        const human = validateRunHumanSourceRows(
+          actor,
+          run,
+          receiptsByRun.get(run.id) ?? [],
+          [...messageIdsByRun.get(run.id)!].flatMap((id) => {
+            const message = byMessage.get(id);
+            return message ? [message] : [];
+          }),
+        );
+        answers = new Set(human.answers.map((answer) => answer.id));
+        answersByRun.set(run.id, answers);
+      }
+      if (!answers.has(parsed.data.answerMessageId)) throw new IsolationError();
+    } else if (proof) throw new IsolationError();
+    return { receipt, run, request, block };
+  });
+  const current =
+    thread.activeRecruitingRoleId === role.id
+      ? await currentQuestionTargets(
+          tx,
+          actor,
+          role,
+          questions.map(({ request }) => request),
+        )
+      : new Set<RecruitingAssessmentAskInput>();
+  const pendingBotIds = [
+    ...new Set(
+      questions
+        .filter(
+          ({ request, run, block }) =>
+            current.has(request) && run.status === "waiting_input" && block.status !== "answered",
+        )
+        .map(({ run }) => run.botId),
+    ),
+  ];
+  const members =
+    thread.groupId && pendingBotIds.length
+      ? await tx.chatGroupMember.findMany({
+          where: { groupId: thread.groupId, botId: { in: pendingBotIds } },
+          select: { botId: true },
+        })
+      : [];
+  const conversations =
+    thread.externalConversationId && pendingBotIds.length
+      ? await tx.externalConversation.findMany({
+          where: {
+            id: thread.externalConversationId,
+            spaceId: actor.spaceId,
+            userId: actor.userId,
+            botId: { in: pendingBotIds },
+          },
+          select: { botId: true },
+        })
+      : [];
+  const memberBots = new Set(members.map((member) => member.botId));
+  const conversationBots = new Set(conversations.map((conversation) => conversation.botId));
+  return questions.map(({ receipt, run, request, block }) =>
+    RecruitingQuestionSchema.parse({
+      ...receipt,
+      threadId: thread.id,
+      botId: run.botId,
+      groupId: thread.groupId,
+      runId: run.id,
+      block,
+      runStatus: run.status,
+      isCurrent: current.has(request),
+      canAnswer:
+        current.has(request) &&
+        run.status === "waiting_input" &&
+        block.status !== "answered" &&
+        (!thread.botId || thread.botId === run.botId) &&
+        (!thread.groupId || memberBots.has(run.botId)) &&
+        (!thread.externalConversationId || conversationBots.has(run.botId)),
+    }),
+  );
 }
 
 async function questionInTransaction(
@@ -1636,119 +1920,7 @@ async function questionInTransaction(
   actor: Actor,
   input: { threadId: string; roleId: string; effectId: string },
 ): Promise<RecruitingQuestion | null> {
-  const thread = await requireThread(tx, actor, input.threadId);
-  const role = await requireRole(tx, actor, input.roleId);
-  const event = await tx.event.findFirst({
-    where: {
-      spaceId: actor.spaceId,
-      threadId: thread.id,
-      type: "recruiting.question.asked",
-      AND: [
-        { payload: { path: ["roleId"], equals: role.id } },
-        { payload: { path: ["effectId"], equals: input.effectId } },
-      ],
-    },
-  });
-  if (!event?.runId) return null;
-  const receipt = RecruitingQuestionAskedPayloadSchema.parse(event.payload);
-  const run = await requireRun(tx, actor, event.runId);
-  const status = await tx.run.findUniqueOrThrow({
-    where: { id: run.id },
-    select: { status: true },
-  });
-  const effect = await tx.externalEffect.findFirst({
-    where: {
-      id: receipt.effectId,
-      runId: run.id,
-      spaceId: actor.spaceId,
-      kind: "recruiting_assess",
-      status: "completed",
-    },
-  });
-  if (!effect || stableJsonValue(effect.result) !== stableJsonValue(receipt))
-    throw new IsolationError();
-  const request = RecruitingAssessmentAskInputSchema.parse(effect.request);
-  if (
-    run.threadId !== thread.id ||
-    event.botId !== run.botId ||
-    receipt.roleId !== role.id ||
-    receipt.roleRevisionId !== request.roleRevisionId ||
-    request.roleId !== role.id ||
-    stableJsonValue(request.target) !== stableJsonValue(receipt.target)
-  )
-    throw new IsolationError();
-  const message = await tx.message.findFirst({
-    where: {
-      id: receipt.messageId,
-      threadId: thread.id,
-      runId: run.id,
-      botId: run.botId,
-      role: "bot",
-      clientNonce: `recruiting-question:${effect.id}`,
-    },
-  });
-  if (!message) throw new IsolationError();
-  const block = questionCard(message.blocks, receipt.askIndex);
-  const created = await tx.event.findFirst({
-    where: {
-      spaceId: actor.spaceId,
-      threadId: thread.id,
-      runId: run.id,
-      botId: run.botId,
-      type: "thread.message.created",
-      payload: { path: ["messageId"], equals: message.id },
-    },
-  });
-  const original = created
-    ? questionCard((created.payload as { blocks?: unknown }).blocks, receipt.askIndex)
-    : null;
-  const { status: _status, answer: _answer, ...display } = block;
-  const { status: _originalStatus, answer: _originalAnswer, ...originalDisplay } = original ?? {};
-  if (
-    !original ||
-    original.status === "answered" ||
-    stableJsonValue(display) !== stableJsonValue(originalDisplay)
-  )
-    throw new IsolationError();
-  const proof = await tx.event.findFirst({
-    where: {
-      spaceId: actor.spaceId,
-      threadId: thread.id,
-      botId: run.botId,
-      runId: run.id,
-      type: "thread.choice",
-      AND: [
-        { payload: { path: ["messageId"], equals: message.id } },
-        { payload: { path: ["askIndex"], equals: receipt.askIndex } },
-      ],
-    },
-  });
-  if (block.status === "answered") {
-    const parsed = NativeAskAnswerPayloadSchema.safeParse(proof?.payload);
-    if (!parsed.success || parsed.data.answeredByUserId !== actor.userId)
-      throw new IsolationError();
-    const human = await loadRunHumanSources(tx, actor, run);
-    if (!human.answers.some((answer) => answer.id === parsed.data.answerMessageId))
-      throw new IsolationError();
-  } else if (proof) throw new IsolationError();
-  const isCurrent =
-    thread.activeRecruitingRoleId === role.id &&
-    (await questionTargetCurrent(tx, actor, role, request));
-  return RecruitingQuestionSchema.parse({
-    ...receipt,
-    threadId: thread.id,
-    botId: run.botId,
-    groupId: thread.groupId,
-    runId: run.id,
-    block,
-    runStatus: status.status,
-    isCurrent,
-    canAnswer:
-      isCurrent &&
-      status.status === "waiting_input" &&
-      block.status !== "answered" &&
-      (await runTargetsRecruitingThread(tx, actor, run, thread)),
-  });
+  return (await questionsInTransaction(tx, actor, input))[0] ?? null;
 }
 
 export async function getRecruitingQuestion(
@@ -1766,39 +1938,9 @@ export async function listRecruitingQuestions(
   actor: Actor,
   input: { threadId: string; roleId: string; candidateKey?: string },
 ): Promise<RecruitingQuestion[]> {
-  return prisma.$transaction(
-    async (tx) => {
-      await requireThread(tx, actor, input.threadId);
-      await requireRole(tx, actor, input.roleId);
-      const events = await tx.event.findMany({
-        where: {
-          spaceId: actor.spaceId,
-          threadId: input.threadId,
-          type: "recruiting.question.asked",
-          payload: { path: ["roleId"], equals: input.roleId },
-        },
-        orderBy: { seq: "asc" },
-      });
-      const questions: RecruitingQuestion[] = [];
-      // ponytail: one authoritative proof read per question; batch native proof reads if history grows.
-      for (const event of events) {
-        const receipt = RecruitingQuestionAskedPayloadSchema.parse(event.payload);
-        if (
-          input.candidateKey &&
-          receipt.target.kind === "candidate" &&
-          receipt.target.candidateKey !== input.candidateKey
-        )
-          continue;
-        const question = await questionInTransaction(tx, actor, {
-          ...input,
-          effectId: receipt.effectId,
-        });
-        if (question) questions.push(question);
-      }
-      return questions;
-    },
-    { isolationLevel: Prisma.TransactionIsolationLevel.RepeatableRead },
-  );
+  return prisma.$transaction((tx) => questionsInTransaction(tx, actor, input), {
+    isolationLevel: Prisma.TransactionIsolationLevel.RepeatableRead,
+  });
 }
 
 /** Runs before the native pause clears its lease; completed receipts never create another card. */
@@ -6409,6 +6551,7 @@ export async function setRecruitingCandidateShortlist(
     const message = await createThreadMessageInTransaction(tx, {
       threadId: thread.id,
       role: "user",
+      clientNonce: `recruiting-shortlist:${JSON.stringify([role.id, role.currentRevisionId, candidate.candidateKey, candidate.revision, input.shortlisted])}`,
       blocks: [
         {
           kind: "text",
