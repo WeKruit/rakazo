@@ -45,7 +45,7 @@ describe("bounded context selection", () => {
       role: "assistant",
       content: [{ type: "toolCall", id: "call", name: "upload", arguments: args }],
     };
-    expect(estimateContextTokens(assistant, 100)).toBeGreaterThan(10000);
+    expect(estimateContextTokens(assistant, 100)).toBeGreaterThan(2500);
   });
   it("shortens every result in an indirectly protected tool group and rejects duplicate results", () => {
     const call = {
@@ -152,15 +152,15 @@ describe("bounded context selection", () => {
     expect(JSON.stringify(selected.messages[2]!.content)).toContain("Tool result truncated");
   });
   it("shortens history JSON evidence while preserving exact original offsets and pagination", () => {
-    const original = 'Quoted "value" and newline\n'.repeat(500);
+    const original = 'Quoted "value" and newline\n'.repeat(1000);
     const payload = {
       untrusted: true,
       messages: [
         {
           messageId: "anchor",
-          text: original.slice(250, 5000),
+          text: original.slice(250, 20000),
           textOffset: 250,
-          nextTextOffset: 5000,
+          nextTextOffset: 20000,
           truncated: true,
         },
       ],
@@ -227,7 +227,7 @@ describe("bounded context selection", () => {
               type: "text",
               text: JSON.stringify({
                 untrusted: true,
-                messages: Array.from({ length: 100 }, (_, index) => ({
+                messages: Array.from({ length: 400 }, (_, index) => ({
                   messageId: `anchor-${index}`,
                   text: "x",
                   textOffset: 0,

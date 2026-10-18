@@ -41,6 +41,59 @@ function fixture(count = 30) {
   return { request, context };
 }
 describe("runtime context policy", () => {
+  it.each([272_000, 4096])(
+    "retains a saved page after save_results only while its token budget fits (%s)",
+    (contextWindow) => {
+      const { request, context } = fixture(0);
+      const rows = Array.from({ length: 5 }, (_, rowIndex) => ({
+        rowIndex,
+        evidence: "Exact evidence🙂\r\n".repeat(150),
+      }));
+      const page = JSON.stringify({
+        content: [{ type: "text", text: JSON.stringify(rows) }],
+        structuredContent: { rows },
+      });
+      const call = (id: string, name: string) =>
+        ({
+          role: "assistant",
+          content: [{ type: "toolCall", id, name, arguments: {} }],
+          timestamp: 101,
+        }) as unknown as Message;
+      const result = (id: string, toolName: string, text: string) =>
+        ({
+          role: "toolResult",
+          toolCallId: id,
+          toolName,
+          content: [{ type: "text", text }],
+          timestamp: 102,
+        }) as Message;
+      context.messages.push(
+        call("rows", "get_rows"),
+        result("rows", "get_rows", page),
+        call("save", "recruiting_research"),
+        result(
+          "save",
+          "recruiting_research",
+          JSON.stringify({
+            status: "saved",
+            candidateRows: rows.map(({ rowIndex }) => ({ rowIndex })),
+            outputArtifact: { artifactId: "source", sha256: "a".repeat(64) },
+          }),
+        ),
+      );
+      const prepared = createRuntimeContextPolicy({
+        ...request,
+        contextStrategy: "retrieval",
+      }).prepareContext(context, { ...model, contextWindow, maxTokens: 1024 });
+      const source = prepared.messages.find(
+        (entry) => entry.role === "toolResult" && entry.toolCallId === "rows",
+      );
+      if (contextWindow === 272_000) expect(source).toEqual(context.messages[2]);
+      else expect(source).toBeUndefined();
+      expect(prepared.messages.at(-1)).toEqual(context.messages.at(-1));
+    },
+  );
+
   it.each(["retrieval", "snapshots", "cache-aware", "current"] as const)(
     "keeps required native task history exact under %s budget pressure",
     (strategy) => {
@@ -130,7 +183,7 @@ describe("runtime context policy", () => {
     "recruiting_research",
     "recruiting_assess",
     "recruiting_candidates",
-  ])("keeps an earlier %s result verbatim while shortening other old tool evidence", (toolName) => {
+  ])("keeps earlier %s and other tool evidence verbatim while the budget fits", (toolName) => {
     const { request, context } = fixture(2);
     const call = (id: string, name: string) =>
       ({
@@ -176,7 +229,7 @@ describe("runtime context policy", () => {
     };
     expect(skill.length).toBeGreaterThan(2500);
     expect(body("read")).toBe(skill);
-    expect(body("shell-1")).toContain("[Tool result truncated to fit context");
+    expect(body("shell-1")).toBe(shellOutput);
     expect(body("shell-2")).toBe(shellOutput);
   });
 
@@ -378,7 +431,7 @@ describe("runtime context policy", () => {
   it.each(["retrieval", "snapshots"] as const)(
     "keeps Pi transcript instructions and tools through %s history selection",
     (strategy) => {
-      const { request, context } = fixture(100);
+      const { request, context } = fixture(140);
       const system = {
         role: "system",
         content: request.instructions,
@@ -469,10 +522,10 @@ describe("runtime context policy", () => {
   it("creates navigation snapshots from originals with IDs and dates without inference", () => {
     const { request, context } = fixture();
     const policy = createRuntimeContextPolicy({ ...request, contextStrategy: "snapshots" });
-    const prepared = policy.prepareContext(context, model);
+    const prepared = policy.prepareContext(context, { ...model, contextWindow: 16384 });
     const first = prepared.messages[0]!.content;
     expect(first).toContain("Historical navigation snapshots");
-    expect(first).toContain("message message-10 at 2026-01-01T00:00:00Z");
+    expect(first).toContain("message message-21 at 2026-01-01T00:00:00Z");
     expect(first).toContain("read_history");
     expect(prepared.messages.at(-1)).toEqual(context.messages.at(-1));
     expect(policy.getDecision()!.estimatedInputTokens).toBeLessThan(32768);
@@ -480,7 +533,7 @@ describe("runtime context policy", () => {
   it("uses fake-clock warmth from matching model requests, expiry only selects existing snapshots", () => {
     let now = 0;
     const tracker = new ContextCacheTracker(() => now);
-    const { request, context } = fixture(30);
+    const { request, context } = fixture(150);
     request.model.cacheCapabilities = { scope: "account", retentionMs: 300000, minimumTokens: 1 };
     const baseline = createRuntimeContextPolicy(
       { ...request, contextStrategy: "current" },

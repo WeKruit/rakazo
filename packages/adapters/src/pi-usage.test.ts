@@ -300,7 +300,8 @@ describe("Pi usage accounting", () => {
     expect(beforeCall.mock.calls[0]?.[0]).toMatchObject({
       inputTokensEstimate: expect.any(Number),
     });
-    expect(beforeCall.mock.calls[0]?.[0]?.inputTokensEstimate).toBeGreaterThan(10000);
+    expect(beforeCall.mock.calls[0]?.[0]?.inputTokensEstimate).toBeGreaterThan(2500);
+    expect(beforeCall.mock.calls[0]?.[0]?.inputTokensEstimate).toBeLessThan(3000);
     expect(onUsage).toHaveBeenCalledOnce();
     expect((await stream.result()).stopReason).toBe("stop");
   });

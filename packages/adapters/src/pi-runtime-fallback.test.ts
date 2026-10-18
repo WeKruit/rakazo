@@ -243,7 +243,7 @@ function compactionRequest(withHistory = true) {
         {
           id: `old-answer-${index}`,
           role: "assistant" as const,
-          content: `Earlier result ${index}: ${"a".repeat(10_000)}`,
+          content: `Earlier result ${index}: ${"a".repeat(26_000)}`,
         },
       ]).flat()
     : [];
@@ -330,7 +330,7 @@ it.each(["current", "cache-aware"] as const)(
     expect(
       providerState.agent!.state.messages.some((entry) => entry.role === "compactionSummary"),
     ).toBe(true);
-    expect(input.history[1]!.content).toHaveLength("Earlier result 0: ".length + 10_000);
+    expect(input.history[1]!.content).toHaveLength("Earlier result 0: ".length + 26_000);
     const convertedState = await providerState.agentOptions!.convertToLlm!(
       providerState.agent!.state.messages,
     );
@@ -370,6 +370,7 @@ it.each([true, false])(
 
 it("compacts a running native tool loop while preserving exact role state, sibling results and steering", async () => {
   const { target, input } = compactionRequest(false);
+  target.contextWindow = 32_768;
   input.tools = [
     {
       name: "recruiting_role",
@@ -401,19 +402,9 @@ it("compacts a running native tool loop while preserving exact role state, sibli
     (_model: Model<"openai-completions">, context: Context) => {
       if (context.systemPrompt?.includes("summarization assistant")) {
         const original = convertToLlm(providerState.agent!.state.messages);
-        expect(() =>
-          selectContext(original, {
-            strategy: "current",
-            protectedIndexes: original.map((_, index) => index),
-            truncateToolResults: false,
-            budget: {
-              contextWindow: target.contextWindow,
-              outputReserve: target.maxTokens,
-              systemPrompt: "",
-              tools: [],
-            },
-          }),
-        ).toThrow("Required context exceeds the model context budget");
+        expect(estimateModelContextTokens({ messages: original })).toBeGreaterThan(
+          target.contextWindow - 16_384,
+        );
         projectedPressureCalls++;
         return stream(
           target,
@@ -437,7 +428,11 @@ it("compacts a running native tool loop while preserving exact role state, sibli
                 : []),
             ]
           : [{ type: "text", text: "Done." }];
-      return stream(target, message(target, content, turn <= 17 ? "toolUse" : "stop"));
+      const next = message(target, content, turn <= 17 ? "toolUse" : "stop");
+      next.usage.totalTokens = estimateContextTokens(
+        providerContextPrefix(context.systemPrompt ?? "", context.tools ?? [], context.messages),
+      );
+      return stream(target, next);
     },
   );
   await run(input);
@@ -600,6 +595,7 @@ it("aborts native compaction before committing state and leaves queued steering 
 
 it("uses the same observed native compaction inside a delegated tool loop", async () => {
   const { target, input } = compactionRequest(false);
+  target.contextWindow = 32_768;
   input.tools = [
     {
       name: "run_subagent",
@@ -626,16 +622,17 @@ it("uses the same observed native compaction inside a delegated tool loop", asyn
         );
       if (JSON.stringify(context.messages[0]?.content).includes("Rakazo subagent")) {
         childTurns++;
-        return stream(
+        const next = message(
           target,
-          message(
-            target,
-            childTurns <= 15
-              ? [{ type: "toolCall", id: `child-${childTurns}`, name: "read_file", arguments: {} }]
-              : [{ type: "text", text: "Child finished." }],
-            childTurns <= 15 ? "toolUse" : "stop",
-          ),
+          childTurns <= 15
+            ? [{ type: "toolCall", id: `child-${childTurns}`, name: "read_file", arguments: {} }]
+            : [{ type: "text", text: "Child finished." }],
+          childTurns <= 15 ? "toolUse" : "stop",
         );
+        next.usage.totalTokens = estimateContextTokens(
+          providerContextPrefix(context.systemPrompt ?? "", context.tools ?? [], context.messages),
+        );
+        return stream(target, next);
       }
       parentTurns++;
       return stream(
@@ -683,7 +680,7 @@ it("uses the same observed native compaction inside a delegated tool loop", asyn
 
 it("does not spend a summary call when exact protected controls already exceed the budget", async () => {
   const { target, input } = compactionRequest();
-  input.prompt = `Current exact human instructions: ${"x".repeat(130_000)}`;
+  input.prompt = `Current exact human instructions: ${"x".repeat(520_000)}`;
   providerState.stream.mockImplementation(() =>
     stream(
       target,
@@ -699,8 +696,9 @@ it("does not spend a summary call when exact protected controls already exceed t
 
 it("leaves the original state when the native summary cannot reduce context enough", async () => {
   const { target, input } = compactionRequest();
+  input.history.unshift({ id: "earlier-context", role: "user", content: "x".repeat(40_000) });
   providerState.stream.mockImplementation(() =>
-    stream(target, message(target, [{ type: "text", text: "s".repeat(100_000) }], "stop")),
+    stream(target, message(target, [{ type: "text", text: "s".repeat(480_000) }], "stop")),
   );
   await expect(run(input)).rejects.toThrow("preserving required messages");
   expect(providerState.stream).toHaveBeenCalledTimes(2);
@@ -714,12 +712,130 @@ it("leaves the original state when the native summary cannot reduce context enou
   ).toBe(true);
 });
 
+it("keeps fitting native receipts without compaction when serialized bytes exceed the token window", async () => {
+  const { target, input } = compactionRequest(false);
+  target.contextWindow = 272_000;
+  target.maxTokens = 32_768;
+  input.instructions = `Exact instructions: ${"i".repeat(140_000)}`;
+  input.history.unshift(
+    ...Array.from({ length: 10 }, (_, index) => [
+      { id: `old-request-${index}`, role: "user" as const, content: "Earlier completed work." },
+      { id: `old-result-${index}`, role: "assistant" as const, content: "e".repeat(12_000) },
+    ]).flat(),
+  );
+  const receipt = {
+    rows: Array.from({ length: 5 }, (_, rowIndex) => ({
+      rowIndex,
+      evidence: "evidence🙂\r\n".repeat(100),
+    })),
+  };
+  input.tools = [
+    { name: "get_rows", description: "Read saved rows", inputSchema: { type: "object" } },
+  ];
+  input.executeTool = vi.fn(async () => receipt);
+  let answers = 0;
+  let summaries = 0;
+  providerState.stream.mockImplementation(
+    (_model: Model<"openai-completions">, context: Context) => {
+      if (context.systemPrompt?.includes("summarization assistant")) {
+        summaries++;
+        return stream(
+          target,
+          message(target, [{ type: "text", text: "Earlier completed work." }], "stop"),
+        );
+      }
+      const next = message(
+        target,
+        ++answers === 1
+          ? [{ type: "toolCall", id: "rows", name: "get_rows", arguments: {} }]
+          : [{ type: "text", text: "Done." }],
+        answers === 1 ? "toolUse" : "stop",
+      );
+      next.usage = {
+        ...next.usage,
+        input: 28_000,
+        output: 400,
+        cacheRead: 16_000,
+        totalTokens: 44_400,
+      };
+      return stream(target, next);
+    },
+  );
+  expect((await run(input)).at(-1)).toEqual({ type: "done", text: "Done." });
+  expect(summaries).toBe(0);
+  expect(input.executeTool).toHaveBeenCalledOnce();
+  const wire = providerState.stream.mock.calls.at(-1)![1] as Context;
+  expect(
+    wire.messages.find((entry) => entry.role === "toolResult" && entry.toolCallId === "rows"),
+  ).toMatchObject({ content: [{ type: "text", text: JSON.stringify(receipt) }] });
+  expect(
+    wire.messages.filter(
+      (entry) => entry.role === "user" && JSON.stringify(entry.content).includes("Exact answer🙂"),
+    ),
+  ).toHaveLength(1);
+  expect(
+    providerState.agent!.state.messages.some((entry) => entry.role === "compactionSummary"),
+  ).toBe(false);
+});
+
+it("counts initial system/tools and invalidates measured usage after a newer native summary", () => {
+  const context: Context = {
+    systemPrompt: "i".repeat(8_000),
+    tools: [{ name: "read", description: "d".repeat(8_000), parameters: { type: "object" } }],
+    messages: [{ role: "user", content: "Exact request🙂\r\n", timestamp: 1 }],
+  };
+  const first = estimateModelContextTokens(context);
+  expect(first).toBeGreaterThan(4_000);
+  expect(first).toBeLessThan(5_000);
+  const used = message(
+    primary,
+    [{ type: "toolCall", id: "read", name: "read", arguments: {} }],
+    "toolUse",
+  );
+  used.timestamp = 2;
+  used.usage = {
+    ...used.usage,
+    input: 28_000,
+    output: 400,
+    cacheRead: 16_000,
+    totalTokens: 44_400,
+  };
+  context.messages.push(used, {
+    role: "toolResult",
+    toolCallId: "read",
+    toolName: "read",
+    content: [{ type: "text", text: "Exact evidence🙂\r\n" }],
+    isError: false,
+    timestamp: 3,
+  });
+  expect(estimateModelContextTokens(context)).toBeGreaterThan(44_400);
+  context.messages.splice(
+    1,
+    0,
+    ...convertToLlm([createCompactionSummaryMessage("Earlier progress only.", 44_400, 4)]),
+  );
+  expect(estimateModelContextTokens(context)).toBeGreaterThan(first);
+  expect(estimateModelContextTokens(context)).toBeLessThan(5_000);
+  const fresh = message(primary, [{ type: "text", text: "New answer." }], "stop");
+  fresh.timestamp = 5;
+  fresh.usage.totalTokens = 2_000;
+  context.messages.push(fresh);
+  expect(estimateModelContextTokens(context)).toBeGreaterThan(2_000);
+  expect(estimateModelContextTokens(context)).toBeLessThan(3_000);
+});
+
 it("keeps fitting exact context when a native progress summary would exceed its remaining budget", async () => {
   const { target, input } = compactionRequest(false);
   input.instructions = `Exact run instructions: ${"i".repeat(90_000)}`;
   input.history.unshift(
-    { id: "old-request", role: "user", content: "Earlier status request." },
-    { id: "old-progress", role: "assistant", content: "Earlier completed status check." },
+    ...Array.from({ length: 10 }, (_, index) => [
+      { id: `old-request-${index}`, role: "user" as const, content: "Earlier status request." },
+      {
+        id: `old-progress-${index}`,
+        role: "assistant" as const,
+        content: "Earlier status. ".repeat(500),
+      },
+    ]).flat(),
   );
   input.tools = [
     { name: "recruiting_role", inputSchema: { type: "object" }, description: "Read role" },
@@ -737,7 +853,7 @@ it("keeps fitting exact context when a native progress summary would exceed its 
         summaries++;
         return stream(
           target,
-          message(target, [{ type: "text", text: "s".repeat(12_000) }], "stop"),
+          message(target, [{ type: "text", text: "s".repeat(500_000) }], "stop"),
         );
       }
       turns++;
@@ -753,7 +869,7 @@ it("keeps fitting exact context when a native progress summary would exceed its 
     },
   );
   expect((await run(input)).at(-1)).toEqual({ type: "done", text: "Done." });
-  expect(summaries).toBe(1);
+  expect(summaries).toBe(2);
   const original = convertToLlm(providerState.agent!.state.messages);
   expect(estimateContextTokens(providerContextPrefix("", [], original)) + 240).toBeLessThan(
     target.contextWindow - target.maxTokens,
@@ -810,7 +926,7 @@ it("does not compact an unfinished native tool batch", async () => {
 it("uses native compaction for initial history in a small context window", async () => {
   const { target, input } = compactionRequest();
   target.contextWindow = 32_768;
-  input.history = [...input.history.slice(0, 12), ...input.history.slice(-3)];
+  input.history = [...input.history.slice(0, 8), ...input.history.slice(-3)];
   providerState.stream.mockImplementation((_model: Model<"openai-completions">, context: Context) =>
     stream(
       target,
@@ -835,7 +951,7 @@ it("uses native compaction for initial history in a small context window", async
   ).toBe(true);
 });
 
-it("keeps a single saved-assessment read running when only duplicate tool bookkeeping exceeds the window", async () => {
+it("excludes duplicate tool bookkeeping from the native prompt budget for a saved read", async () => {
   const { target, input } = compactionRequest(false);
   input.instructions = `Existing exact instructions: ${"s".repeat(55_000)}`;
   input.history.unshift(
@@ -886,7 +1002,7 @@ it("keeps a single saved-assessment read running when only duplicate tool bookke
   expect(summaries).toBe(0);
   const final = providerState.stream.mock.calls.at(-1)![1] as Context;
   const available = target.contextWindow - target.maxTokens;
-  expect(estimateModelContextTokens(final)).toBeGreaterThan(available);
+  expect(estimateModelContextTokens(final)).toBeLessThan(available);
   expect(
     selectContext(final.messages, {
       strategy: "current",
@@ -953,10 +1069,12 @@ it("updates the previous native summary when protected history leaves only a spl
           ),
         );
       }
+      const role = batch("role", "recruiting_role", exactRole);
+      if (role[0]?.role === "assistant") role[0].usage.totalTokens = 30_000;
       const messages = [
         ...providerState.agent!.state.messages,
+        ...role,
         createCompactionSummaryMessage(previous, 30_000, 1),
-        ...batch("role", "recruiting_role", exactRole),
         { role: "user" as const, content: steering, timestamp: 1 },
         ...Array.from({ length: 4 }, (_, index) => batch(`old-${index}`)).flat(),
         ...batch("latest"),
@@ -973,23 +1091,32 @@ it("updates the previous native summary when protected history leaves only a spl
           },
           new AbortController().signal,
         ),
-      ).then(
-        (update) => {
+      )
+        .then(async (update) => {
           replacement = update;
+          expect(
+            estimateModelContextTokens({ messages: convertToLlm(update?.context?.messages ?? []) }),
+          ).toBeLessThan(target.contextWindow - target.maxTokens);
+          const retry = await providerState.agentOptions!.prepareRequest!(
+            { context: update!.context!, model: target, thinkingLevel: "off" },
+            new AbortController().signal,
+          );
+          expect(retry).toBeUndefined();
+          expect(summaryPrompts).toHaveLength(1);
           const done = message(target, [{ type: "text", text: "Done." }], "stop");
           waiting.push({ type: "done", reason: "stop", message: done });
           waiting.end(done);
-        },
-        (error) => {
+        })
+        .catch((error) => {
           const failed = message(target, [], "error", String(error));
           waiting.push({ type: "error", reason: "error", error: failed });
           waiting.end(failed);
-        },
-      );
+        });
       return waiting;
     },
   );
-  await run(input);
+  const events = await run(input);
+  expect(events.at(-1)).toEqual({ type: "done", text: "Done." });
   expect(summaryPrompts).toHaveLength(1);
   expect(summaryPrompts[0]!.includes(previous)).toBe(true);
   expect(summaryPrompts[0]!.includes("Exact current role.")).toBe(false);
@@ -2455,7 +2582,7 @@ describe("Pi runtime ordered model fallback", () => {
       { provider: backupA.provider, id: backupA.id, apiKey: "small...key" },
       { provider: backupB.provider, id: backupB.id, apiKey: "fitti...key" },
     ]);
-    input.prompt = "x".repeat(8_000);
+    input.prompt = "x".repeat(20_000);
     providerState.stream.mockImplementation((target: Model<"openai-completions">) =>
       target.provider === primary.provider
         ? stream(target, message(target, [], "error", "429 rate_limit_error"))

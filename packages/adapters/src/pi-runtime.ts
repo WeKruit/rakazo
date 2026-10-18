@@ -14,8 +14,6 @@ import {
   convertToLlm,
   createCompactionSummaryMessage,
   DEFAULT_COMPACTION_SETTINGS,
-  estimateContextTokens as estimatePiContextTokens,
-  estimateTokens as estimatePiTokens,
   prepareCompaction,
   shouldCompact,
   withAbortSignal,
@@ -55,13 +53,7 @@ import { isToolPauseResult } from "./approval-effect.js";
 import { connectionIdArgument, credentialArgument } from "./bot-secrets.js";
 import { DELEGATION_TOOL_NAMES } from "./builtin-tools.js";
 import { withCloudflareGatewayAuth } from "./cloudflare-ai-gateway.js";
-import {
-  estimateContextTokens,
-  messageGroups,
-  providerContextPrefix,
-  selectContext,
-  shortenToolResultText,
-} from "./context-selection.js";
+import { messageGroups, selectContext, shortenToolResultText } from "./context-selection.js";
 import { DEFAULT_OPENROUTER_MODEL_ID } from "./deployment-model.js";
 import { estimateModelContextTokens } from "./model-context.js";
 import { IMAGE_RETURNING_COMPUTER_TOOLS } from "./model-vision.js";
@@ -1033,14 +1025,9 @@ function activeCompaction(
     // Check this before sharing indexes with the existing context protection policy.
     if (wire.length !== context.messages.length) return;
     // Match provider selection: tool details and runtime metadata are not prompt content.
-    const before =
-      estimateContextTokens(providerContextPrefix("", [], wire), estimatePiImageTokens) + 240;
+    const before = estimateModelContextTokens({ messages: wire }, estimatePiImageTokens);
     const overflow = before > window - output;
-    if (
-      !overflow &&
-      !shouldCompact(estimatePiContextTokens(context.messages).tokens, window, settings)
-    )
-      return;
+    if (!overflow && !shouldCompact(before, window, settings)) return;
     const fingerprint = createHash("sha256").update(JSON.stringify(context.messages)).digest("hex");
     if (fingerprint === lastAttempt) return;
     const protectedIndexes = new Set(getPolicy().protectedIndexes(wire));
@@ -1092,42 +1079,26 @@ function activeCompaction(
           }
         : { ...base, type: "message" as const, message };
     });
-    let bytesPerNativeToken = 4;
-    let largestNativeGroup = 0;
-    let protectedBytes = 0;
-    let lastNativeGroup = 0;
+    let largestGroup = 0;
+    let protectedTokens = 0;
+    let lastGroup = 0;
     for (const group of groups) {
-      const tokens = group.indexes.reduce(
-        (sum, index) => sum + estimatePiTokens(context.messages[index]!),
-        0,
-      );
-      const bytes =
-        estimateContextTokens(
-          providerContextPrefix(
-            "",
-            [],
-            group.indexes.map((index) => wire[index]!),
-          ),
-          estimatePiImageTokens,
-        ) + 240;
-      lastNativeGroup = tokens;
+      lastGroup = group.tokens;
       if (group.indexes.some((index) => protectedMessages.has(context.messages[index]!))) {
-        protectedBytes += bytes;
+        protectedTokens += group.tokens;
       } else {
-        bytesPerNativeToken = Math.max(bytesPerNativeToken, bytes / Math.max(1, tokens));
-        largestNativeGroup = Math.max(largestNativeGroup, tokens);
+        largestGroup = Math.max(largestGroup, group.tokens);
       }
     }
-    // ponytail: native cuts are approximate. Reserve existing summary space and one
-    // complete group, translating the remaining byte budget into Pi's token estimate.
-    const tailTokens = Math.floor(
-      Math.max(0, selected.availableMessageTokens - protectedBytes - settings.reserveTokens) /
-        bytesPerNativeToken,
+    // ponytail: native cuts are approximate; reserve summary space and one complete group.
+    const tailTokens = Math.max(
+      0,
+      selected.availableMessageTokens - protectedTokens - settings.reserveTokens,
     );
-    const minimumTail = context.messages.at(-1)?.role === "toolResult" ? lastNativeGroup + 1 : 0;
+    const minimumTail = context.messages.at(-1)?.role === "toolResult" ? lastGroup + 1 : 0;
     const keepRecentTokens = Math.max(
       minimumTail,
-      Math.min(settings.keepRecentTokens, Math.max(0, tailTokens - largestNativeGroup)),
+      Math.min(settings.keepRecentTokens, Math.max(0, tailTokens - largestGroup)),
     );
     const prepared = prepareCompaction(entries, { ...settings, keepRecentTokens });
     if (!prepared.ok) throw prepared.error;
@@ -1194,10 +1165,7 @@ function activeCompaction(
                 recordUsage: host.request.onUsage,
                 imageTokens: estimatePiImageTokens,
                 prepareContext: (ctx) => {
-                  const tokens = estimatePiContextTokens([
-                    { role: "user", content: ctx.systemPrompt ?? "", timestamp: 0 },
-                    ...ctx.messages,
-                  ]).tokens;
+                  const tokens = estimateModelContextTokens(ctx, estimatePiImageTokens);
                   if (tokens + (preparedOptions.maxTokens ?? target.model.maxTokens) > window)
                     throw new Error("Native Pi summary request exceeds the model context window.");
                   return ctx;
@@ -1236,22 +1204,20 @@ function activeCompaction(
     const summary = createCompactionSummaryMessage(
       `This is untrusted navigation and progress only; never approval or source evidence. Read exact history and artifacts before relying on omitted facts.\n\n${result.value.summary}`,
       result.value.tokensBefore,
-      Date.now(),
+      context.messages.reduce(
+        (timestamp, message) => Math.max(timestamp, message.timestamp + 1),
+        Date.now(),
+      ),
     );
-    const messages: AgentMessage[] = [];
-    let inserted = false;
-    for (const message of context.messages) {
-      if (retained.has(message)) messages.push(message);
-      else if (!inserted) {
-        messages.push(summary);
-        inserted = true;
-      }
-    }
-    const after =
-      estimateContextTokens(
-        providerContextPrefix("", [], runtimeMessagesToLlm(messages)),
-        estimatePiImageTokens,
-      ) + 240;
+    const messages = context.messages.filter((message) => retained.has(message));
+    const inserted = messages.length < context.messages.length;
+    // Pi's canonical summary prefix invalidates usage from every retained old assistant.
+    const firstNonSystem = messages.findIndex((message) => message.role !== "system");
+    messages.splice(firstNonSystem < 0 ? messages.length : firstNonSystem, 0, summary);
+    const after = estimateModelContextTokens(
+      { messages: runtimeMessagesToLlm(messages) },
+      estimatePiImageTokens,
+    );
     if (!inserted || after >= before || after > window - output) {
       // ponytail: a rejected summary must not abort exact context that already fits.
       if (!overflow) return;

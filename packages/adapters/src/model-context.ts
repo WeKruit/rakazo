@@ -1,16 +1,30 @@
-import type { Context } from "@earendil-works/pi-ai";
+import type { Context, ImageContent } from "@earendil-works/pi-ai";
+import {
+  estimateContextTokens,
+  estimateTextAndImageContentTokens,
+} from "@earendil-works/pi-ai/utils/estimate";
+import { normalizeContext } from "@earendil-works/pi-ai/utils/transcript";
 import type { ContextBudget } from "./context-selection.js";
-import { estimateContextTokens } from "./context-selection.js";
+import { imageBlocks } from "./context-selection.js";
 
 /**
- * Conservative fallback for an unknown tokenizer: one token per UTF-8 byte,
- * including tool schemas and message framing. When an adapter supplies a
- * dimension-based image planning estimate, use it for actual image blocks only.
- * Unknown images keep the byte fallback.
+ * Native Pi usage plus trailing estimates, including initial system/tool declarations.
+ * Only images after that usage need the adapter's dimension estimate or byte bound.
  */
 export function estimateModelContextTokens(
   context: Context,
   imageTokens?: ContextBudget["imageTokens"],
 ): number {
-  return estimateContextTokens(context, imageTokens) + 240;
+  const transcript = normalizeContext(context);
+  const estimate = estimateContextTokens(transcript);
+  let tokens = estimate.tokens;
+  for (const image of imageBlocks(transcript.messages.slice((estimate.lastUsageIndex ?? -1) + 1))) {
+    const planned = typeof imageTokens === "number" ? imageTokens : imageTokens?.(image);
+    tokens +=
+      (planned !== undefined && Number.isFinite(planned) && planned > 0
+        ? planned
+        : Buffer.byteLength(JSON.stringify(image), "utf8")) -
+      estimateTextAndImageContentTokens([image as ImageContent]);
+  }
+  return tokens + 240;
 }

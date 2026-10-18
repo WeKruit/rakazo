@@ -8,7 +8,6 @@ import {
   estimateContextTokens,
   providerContextPrefix,
   selectContext,
-  shortenToolResultText,
 } from "./context-selection.js";
 
 const accountSalt = randomBytes(32);
@@ -26,12 +25,6 @@ export const VERBATIM_TOOL_RESULTS: ReadonlySet<string> = new Set([
   "recruiting_research",
   "recruiting_assess",
   "recruiting_candidates",
-]);
-// History reads are exact evidence and keep their own offset-aware shortening elsewhere.
-const UNSHORTENED_TOOL_RESULTS = new Set([
-  "read_history",
-  "search_history",
-  ...VERBATIM_TOOL_RESULTS,
 ]);
 const messageHash = (message: Message) =>
   createHash("sha256")
@@ -410,32 +403,6 @@ export function createRuntimeContextPolicy(
         }
         protectedMessageIndexes.push(messages.indexOf(summary));
       }
-      // Completed loop steps remain useful task state even when their verbose
-      // evidence is old. Keep the protocol and controls so dropping large bodies
-      // does not make the agent restart work it has already completed.
-      const latestToolCall = messages.findLastIndex(
-        (message) =>
-          message.role === "assistant" && message.content.some((part) => part.type === "toolCall"),
-      );
-      messages = messages.map((message, index) => {
-        if (
-          message.role !== "toolResult" ||
-          index >= latestToolCall ||
-          (message.toolName !== undefined && UNSHORTENED_TOOL_RESULTS.has(message.toolName))
-        )
-          return message;
-        const source = text(message);
-        if (source.length <= 1024) return message;
-        const shortened = shortenToolResultText(source, 1024, { name: message.toolName });
-        if (shortened.length >= source.length) return message;
-        return {
-          ...message,
-          content: [
-            { type: "text" as const, text: shortened },
-            ...message.content.filter((part) => part.type === "image"),
-          ],
-        };
-      });
       const selected = selectContext(messages, {
         budget,
         strategy,

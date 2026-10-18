@@ -1,4 +1,10 @@
 import { createHash } from "node:crypto";
+import type { ImageContent, Message } from "@earendil-works/pi-ai";
+import {
+  estimateMessageTokens,
+  estimateTextAndImageContentTokens,
+  estimateTextTokens,
+} from "@earendil-works/pi-ai/utils/estimate";
 import type { AgentContextStrategy, CacheCapabilities } from "@rakazo/adapter-kit";
 
 export type ContextStrategy = AgentContextStrategy;
@@ -42,7 +48,7 @@ export class ContextBudgetError extends Error {
     this.name = "ContextBudgetError";
   }
 }
-function imageBlocks(value: unknown): object[] {
+export function imageBlocks(value: unknown): object[] {
   const found: object[] = [];
   const visitMessage = (message: unknown) => {
     if (!message || typeof message !== "object") return;
@@ -74,8 +80,8 @@ function imageBlocks(value: unknown): object[] {
   } else visitMessage(value);
   return found;
 }
-/** Conservative byte bound plus framing, not a tokenizer. Only actual user/tool
- * image blocks receive an adapter estimate; image-shaped tool arguments remain text.
+/** Pi's character estimate plus framing. Actual images retain the adapter's
+ * dimension estimate or byte bound; image-shaped tool arguments remain text.
  */
 export function estimateContextTokens(
   value: unknown,
@@ -83,20 +89,32 @@ export function estimateContextTokens(
 ): number {
   const images = new Set<object>();
   let imageTotal = 0;
-  if (imageTokens !== undefined) {
-    for (const image of imageBlocks(value)) {
-      const estimate = typeof imageTokens === "number" ? imageTokens : imageTokens(image);
-      if (estimate !== undefined && Number.isFinite(estimate) && estimate > 0) {
-        images.add(image);
-        imageTotal += estimate;
-      }
-    }
+  for (const image of imageBlocks(value)) {
+    const estimate = typeof imageTokens === "number" ? imageTokens : imageTokens?.(image);
+    images.add(image);
+    imageTotal +=
+      estimate !== undefined && Number.isFinite(estimate) && estimate > 0
+        ? estimate
+        : Buffer.byteLength(JSON.stringify(image), "utf8");
+  }
+  if (
+    value &&
+    typeof value === "object" &&
+    "role" in value &&
+    ["system", "user", "assistant", "toolResult"].includes(String(value.role))
+  ) {
+    return (
+      estimateMessageTokens(value as Message) +
+      imageTotal -
+      estimateTextAndImageContentTokens([...images] as ImageContent[]) +
+      16
+    );
   }
   const serialized =
     JSON.stringify(value, (_key, item: unknown) =>
       item && typeof item === "object" && images.has(item) ? { type: "image" } : item,
     ) ?? "";
-  return Buffer.byteLength(serialized, "utf8") + imageTotal + 16;
+  return estimateTextTokens(serialized) + imageTotal + 16;
 }
 function fixedTokens(budget: ContextBudget): number {
   for (const value of [
@@ -373,7 +391,7 @@ export function selectContext<T extends ContextMessage>(
   droppedMessages: number;
   truncatedToolResults: number;
   availableMessageTokens: number;
-  estimation: "utf8-byte-bound";
+  estimation: "pi-character-estimate";
 } {
   const fixed = fixedTokens(options.budget);
   const available = Math.floor(options.budget.contextWindow - options.budget.outputReserve - fixed);
@@ -479,7 +497,7 @@ export function selectContext<T extends ContextMessage>(
     droppedMessages: messages.length - selectedIndexes.size,
     truncatedToolResults: 0,
     availableMessageTokens: available,
-    estimation: "utf8-byte-bound" as const,
+    estimation: "pi-character-estimate" as const,
   };
 }
 

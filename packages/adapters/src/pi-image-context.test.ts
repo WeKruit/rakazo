@@ -173,7 +173,7 @@ describe("Pi image context planning", () => {
       role: "assistant",
       content: [{ type: "toolCall", id: "call", name: "upload", arguments: malformed }],
     };
-    expect(estimateContextTokens(call, estimatePiImageTokens)).toBeGreaterThan(300_000);
+    expect(estimateContextTokens(call, estimatePiImageTokens)).toBeGreaterThan(75_000);
   });
 
   it("makes implausibly large declared dimensions exceed any configured context window", async () => {
