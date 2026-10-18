@@ -3977,6 +3977,114 @@ describe("clearThread", () => {
 });
 
 describe("appendEvent", () => {
+  function appendFixture() {
+    let nextEventSeq = 0;
+    const tx = {
+      thread: { update: vi.fn(async () => ({ nextEventSeq: ++nextEventSeq })) },
+      event: {
+        create: vi.fn(async ({ data }: { data: Record<string, unknown> & { seq: number } }) => ({
+          ...event(data.seq),
+          ...data,
+        })),
+      },
+    };
+    const transaction = vi.fn(async (callback: (client: typeof tx) => Promise<unknown>) =>
+      callback(tx),
+    );
+    return { tx, transaction, prisma: { $transaction: transaction } as unknown as PrismaClient };
+  }
+
+  const progress = {
+    spaceId: "workspace-1",
+    threadId: "thread-1",
+    botId: "bot-1",
+    type: "thread.progress" as const,
+    payload: {},
+  };
+
+  it("admits only one transaction for twelve concurrent appends in one client and thread", async () => {
+    const f = appendFixture();
+    const fanout = new TestFanout();
+    const publish = vi.spyOn(fanout, "publish");
+    let release!: () => void;
+    const blocked = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    let active = 0;
+    let maximum = 0;
+    f.transaction.mockImplementation(async (callback) => {
+      active += 1;
+      maximum = Math.max(maximum, active);
+      try {
+        await blocked;
+        return await callback(f.tx);
+      } finally {
+        active -= 1;
+      }
+    });
+    const writes = Array.from({ length: 12 }, (_, index) =>
+      appendEvent(f.prisma, { ...progress, payload: { index } }, fanout),
+    );
+    try {
+      await Promise.resolve();
+      expect(f.transaction).toHaveBeenCalledTimes(1);
+    } finally {
+      release();
+      await Promise.all(writes);
+    }
+    expect(maximum).toBe(1);
+    expect((await Promise.all(writes)).map((item) => item.payload)).toEqual(
+      Array.from({ length: 12 }, (_, index) => ({ index })),
+    );
+    expect(publish.mock.calls).toEqual(
+      Array.from({ length: 12 }, (_, cursor) => ["thread:thread-1", JSON.stringify({ cursor })]),
+    );
+  });
+
+  it("lets queued and later appends continue after a transaction rejects", async () => {
+    const f = appendFixture();
+    const failure = new Error("Transaction rejected");
+    f.transaction.mockRejectedValueOnce(failure);
+    const first = expect(appendEvent(f.prisma, progress)).rejects.toBe(failure);
+    const second = appendEvent(f.prisma, progress);
+    await first;
+    await expect(second).resolves.toMatchObject({ seq: 0 });
+    await expect(appendEvent(f.prisma, progress)).resolves.toMatchObject({ seq: 1 });
+    expect(f.transaction).toHaveBeenCalledTimes(3);
+  });
+
+  it("keeps other threads and clients moving while one thread transaction is blocked", async () => {
+    const first = appendFixture();
+    const otherClient = appendFixture();
+    let release!: () => void;
+    const blocked = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    first.transaction.mockImplementationOnce(async (callback) => {
+      await blocked;
+      return callback(first.tx);
+    });
+    let firstFinished = false;
+    const pending = appendEvent(first.prisma, progress).then(() => {
+      firstFinished = true;
+    });
+    const independent = Promise.all([
+      appendEvent(first.prisma, { ...progress, threadId: "other-thread" }),
+      appendEvent(otherClient.prisma, progress),
+    ]);
+    let independentFinished = false;
+    void independent.then(() => {
+      independentFinished = true;
+    });
+    try {
+      await vi.waitFor(() => expect(independentFinished).toBe(true));
+      expect(firstFinished).toBe(false);
+    } finally {
+      release();
+      await Promise.all([pending, independent]);
+    }
+  });
+
   it("does not persist output from a cancelled run after history was cleared", async () => {
     const fanout = new TestFanout();
     const publish = vi.spyOn(fanout, "publish");

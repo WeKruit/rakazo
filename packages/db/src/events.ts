@@ -41,6 +41,8 @@ import { withTransactionRetry } from "./transaction-retry.js";
 const EVENT_BATCH_SIZE = 200;
 const PUSH_CATCH_UP_MS = 30_000;
 const POLL_ONLY_CATCH_UP_MS = 400;
+// ponytail: process-local per-client/thread backpressure; DB row locks remain the cross-process authority.
+const appendTails = new WeakMap<PrismaClient, Map<string, Promise<void>>>();
 
 export interface AppendEventInput {
   spaceId: string;
@@ -1376,13 +1378,31 @@ export async function appendEvent(
   input: AppendEventInput,
   realtime?: RealtimeFanout,
 ): Promise<ProductEvent> {
-  // Concurrent writers in one thread (group members, bot messages) can deadlock on the thread row.
-  const event = await withTransactionRetry(() =>
-    prisma.$transaction((tx: Prisma.TransactionClient) => appendEventInTransaction(tx, input)),
+  let tails = appendTails.get(prisma);
+  if (!tails) {
+    tails = new Map();
+    appendTails.set(prisma, tails);
+  }
+  const pending = (tails.get(input.threadId) ?? Promise.resolve()).then(async () => {
+    // Cross-process writers can still deadlock on the thread row.
+    const event = await withTransactionRetry(() =>
+      prisma.$transaction((tx: Prisma.TransactionClient) => appendEventInTransaction(tx, input)),
+    );
+    const productEvent = mapProductEvent(event);
+    await notifyRealtime(realtime, event.threadId, event.seq);
+    return productEvent;
+  });
+  const tail = pending.then(
+    () => undefined,
+    () => undefined,
   );
-  const productEvent = mapProductEvent(event);
-  await notifyRealtime(realtime, event.threadId, event.seq);
-  return productEvent;
+  tails.set(input.threadId, tail);
+  try {
+    return await pending;
+  } finally {
+    if (tails.get(input.threadId) === tail) tails.delete(input.threadId);
+    if (tails.size === 0) appendTails.delete(prisma);
+  }
 }
 
 export async function finalizeRun(

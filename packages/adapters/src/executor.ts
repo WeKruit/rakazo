@@ -2872,7 +2872,7 @@ export async function appendToolCompletionAudit(
   } catch (error) {
     // Audit persistence must not change the tool result or strand the run.
     getLogger().warn("agent tool completion audit append failed", {
-      error: sanitizeConnectorError(error, secrets),
+      detail: sanitizeConnectorError(error, secrets),
       tool: redactSecrets(completion.name, secrets),
       executionId: redactSecrets(completion.executionId, secrets),
     });
