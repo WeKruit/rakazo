@@ -3,6 +3,91 @@ import { describe, expect, it } from "vitest";
 import { buildApprovalAskBlock } from "./approval-ask.js";
 
 describe("buildApprovalAskBlock", () => {
+  it.each(["recruiting_feedback", "remember", "save_memory", "save_shared_memory"])(
+    "shows the exact recruiting preference and scope for %s without internal routing fields",
+    (tool) => {
+      const content = `Keep facts, inference and missing evidence separate.\n${"Exact preference. ".repeat(260)}token-secret`;
+      const preference = {
+        target: "preference",
+        operation: "add",
+        scope: tool === "remember" ? "bot" : "user",
+        path: "recruiting/preferences.md",
+        expectedRevision: 7,
+        content,
+        intent: { basis: "direct", quote: "Remember this preference." },
+        sourceRefs: [
+          {
+            id: "source-reference",
+            kind: "recruiter_verified",
+            anchor: { kind: "message", messageId: "source-message", locator: "text:0" },
+            readState: "read",
+            readAt: "2026-01-01T00:00:00.000Z",
+          },
+        ],
+      };
+      const args =
+        tool === "recruiting_feedback"
+          ? preference
+          : {
+              path: preference.path,
+              expectedRevision: preference.expectedRevision,
+              content: `Other existing preferences.\n\n${content}`,
+              recruitingFeedback: preference,
+            };
+      const block = buildApprovalAskBlock("original-effect", tool, args, ["token-secret"], {
+        oneTimeOnly: tool === "recruiting_feedback",
+      });
+
+      expect(block.text).toBe("Review before saving a recruiting preference");
+      expect(block.detail).toBe(
+        `Applies to: ${preference.scope === "user" ? "your bots in this space" : "this bot"}\n\nPreference:\n${content.replace("token-secret", "[redacted]")}`,
+      );
+      expect(block.approvalEffectId).toBe("original-effect");
+      expect(block.actions).toEqual([
+        { id: "allow", label: "Allow once" },
+        ...(tool === "recruiting_feedback"
+          ? []
+          : [{ id: "always", label: "Always allow this tool" }]),
+        { id: "deny", label: "Deny" },
+      ]);
+      expect(block.detail).not.toMatch(
+        /source-message|preferences\.md|expectedRevision|sourceRefs|basis/,
+      );
+      expect(preference.content).toBe(content);
+    },
+  );
+
+  it.each(["replace", "revoke"] as const)(
+    "shows the exact preference being changed for %s",
+    (operation) => {
+      const block = buildApprovalAskBlock(
+        "preference-effect",
+        "recruiting_feedback",
+        {
+          target: "preference",
+          operation,
+          scope: "bot",
+          path: "preferences.md",
+          expectedRevision: 2,
+          anchor: { start: 11, end: 35, quote: "Keep this exact wording. " },
+          ...(operation === "replace" ? { content: "Use the replacement\nexactly. 😀" } : {}),
+          intent: { basis: "direct", quote: "Change my preference." },
+          sourceRefs: [],
+        },
+        [],
+      );
+
+      expect(block.text).toBe(
+        `Review before ${operation === "replace" ? "updating" : "removing"} a recruiting preference`,
+      );
+      expect(block.detail).toBe(
+        `Applies to: this bot\n\nCurrent preference:\nKeep this exact wording. ${operation === "replace" ? "\n\nNew preference:\nUse the replacement\nexactly. 😀" : ""}`,
+      );
+      expect(block.approvalEffectId).toBe("preference-effect");
+      expect(block.actions?.map((action) => action.id)).toEqual(["allow", "always", "deny"]);
+    },
+  );
+
   it.each([
     ["mcp__autumn__research", "Autumn: Research"],
     ["gmail_send_email", "Gmail send email"],

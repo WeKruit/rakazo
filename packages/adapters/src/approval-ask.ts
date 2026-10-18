@@ -1,5 +1,8 @@
-import type { MessageBlock } from "@rakazo/contracts";
-import { RecruitingApprovalToolInputSchema } from "@rakazo/contracts";
+import type { MessageBlock, RecruitingPreferenceFeedbackInput } from "@rakazo/contracts";
+import {
+  RecruitingApprovalToolInputSchema,
+  RecruitingPreferenceFeedbackSchema,
+} from "@rakazo/contracts";
 import { humanizeToolName, redactSecrets } from "@rakazo/core";
 import { redactToolArgsForReview } from "./auto-review.js";
 
@@ -14,11 +17,22 @@ export function buildApprovalAskBlock(
   options?: { reviewReason?: string; oneTimeOnly?: boolean },
 ): Extract<MessageBlock, { kind: "ask" }> {
   const recruitingApproval = toolName === "recruiting_request_approval";
-  const summary = describeApprovalAction(toolName, args, redactSecrets(toolName, secrets));
+  const parsedPreference = RecruitingPreferenceFeedbackSchema.safeParse(
+    toolName === "recruiting_feedback"
+      ? args
+      : ["remember", "save_memory", "save_shared_memory"].includes(toolName)
+        ? args.recruitingFeedback
+        : undefined,
+  );
+  const preference = parsedPreference.success ? parsedPreference.data : undefined;
+  const summary = preference
+    ? `${{ add: "saving", replace: "updating", revoke: "removing" }[preference.operation]} a recruiting preference`
+    : describeApprovalAction(toolName, args, redactSecrets(toolName, secrets));
   const detail = formatApprovalDetail(
     toolName,
     redactToolArgsForReview(args, secrets),
     options?.reviewReason,
+    preference,
   );
   const safeDetail = detail ? redactSecrets(detail, secrets) : undefined;
   return {
@@ -34,7 +48,7 @@ export function buildApprovalAskBlock(
       MAX_APPROVAL_SUMMARY_LENGTH,
     ),
     detail:
-      safeDetail && !recruitingApproval && !options?.oneTimeOnly
+      safeDetail && !recruitingApproval && !preference && !options?.oneTimeOnly
         ? truncate(safeDetail, MAX_APPROVAL_DETAIL_LENGTH)
         : safeDetail,
     status: "pending",
@@ -95,10 +109,23 @@ function formatApprovalDetail(
   toolName: string,
   args: Record<string, unknown>,
   reviewReason?: string,
+  preference?: RecruitingPreferenceFeedbackInput,
 ): string | undefined {
   const lines: string[] = [];
   if (reviewReason?.trim()) {
     lines.push(reviewReason.trim().replace(/\u2014|\u2013/g, "-"));
+  }
+  if (preference) {
+    lines.push(
+      `Applies to: ${preference.scope === "user" ? "your bots in this space" : "this bot"}`,
+    );
+    if (preference.operation !== "add")
+      lines.push(`Current preference:\n${preference.anchor.quote}`);
+    if (preference.operation !== "revoke")
+      lines.push(
+        `${preference.operation === "replace" ? "New preference" : "Preference"}:\n${preference.content}`,
+      );
+    return lines.join("\n\n");
   }
   if (toolName === "recruiting_request_approval") {
     const request = RecruitingApprovalToolInputSchema.parse(args);

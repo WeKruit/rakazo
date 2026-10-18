@@ -941,6 +941,7 @@ async function requireCurrentHumanSource(
   >,
   sourceMessageId: string | null,
   quote: string,
+  allowOriginalIntent = false,
   ancestors = new Set<string>(),
 ): Promise<{ source: RecruitingSourceRef; message: SourceMessage }> {
   if (ancestors.has(run.id)) throw new IsolationError();
@@ -951,14 +952,17 @@ async function requireCurrentHumanSource(
     answers,
   } = await requireRunSource(tx, actor, run, sourceMessageId);
   if (hint.id !== run.sourceMessageId && !isNativeHumanMessage(hint)) throw new IsolationError();
-  const source = answers.reduce(
+  const latest = answers.reduce(
     (current, answer) => (answer.seq > current.seq ? answer : current),
     hint,
   );
-  if (!isNativeHumanMessage(source)) {
-    const { sender } = await requireResearchHandoff(tx, actor, run, source, true);
+  if (!isNativeHumanMessage(latest)) {
+    const { sender } = await requireResearchHandoff(tx, actor, run, latest, true);
     const inherited = await loadRunHumanSources(tx, actor, sender);
-    const latest = [...inherited.answers, ...inherited.steering.map((item) => item.message)]
+    const inheritedLatest = [
+      ...inherited.answers,
+      ...inherited.steering.map((item) => item.message),
+    ]
       .filter(isNativeHumanMessage)
       .reduce<SourceMessage | null>(
         (current, message) => (!current || message.seq > current.seq ? message : current),
@@ -968,21 +972,33 @@ async function requireCurrentHumanSource(
       tx,
       actor,
       sender,
-      latest?.id ?? sender.sourceMessageId,
+      inheritedLatest?.id ?? sender.sourceMessageId,
       quote,
+      allowOriginalIntent,
       ancestors,
     );
-    if (human.message.threadId !== source.threadId || human.message.seq >= source.seq)
+    if (human.message.threadId !== latest.threadId || human.message.seq >= latest.seq)
       throw new IsolationError();
     return human;
   }
   const original =
-    run.sourceMessageId === source.id
-      ? source
+    run.sourceMessageId === latest.id
+      ? latest
       : await tx.message.findUnique({
           where: { id: run.sourceMessageId ?? "" },
           include: humanMessageInclude,
         });
+  if (allowOriginalIntent && original && answers.some((answer) => answer.seq <= original.seq))
+    throw new IsolationError();
+  const source =
+    allowOriginalIntent &&
+    original?.threadId === run.threadId &&
+    isNativeHumanMessage(original) &&
+    (original.blocks as { kind: string; text?: string }[]).some(
+      (block) => block.kind === "text" && block.text?.includes(quote),
+    )
+      ? original
+      : latest;
   if (
     !isNativeHumanMessage(source) ||
     (source.id === run.sourceMessageId &&
@@ -991,8 +1007,8 @@ async function requireCurrentHumanSource(
       !answers.some((answer) => answer.id === source.id)) ||
     (original &&
       isNativeHumanMessage(original) &&
-      original.threadId === source.threadId &&
-      original.seq > source.seq) ||
+      original.threadId === latest.threadId &&
+      original.seq > latest.seq) ||
     steering.some((item) => isNativeHumanMessage(item.message) && item.message.seq > source.seq)
   )
     throw new IsolationError();
@@ -1606,6 +1622,7 @@ export async function executeRecruitingRoleMutation(
       run,
       context.sourceMessageId,
       input.intent.quote,
+      input.operation === "create",
     );
     const current = thread.activeRecruitingRoleId
       ? await roleSnapshot(
