@@ -21,6 +21,7 @@ import { afterEach, beforeEach, expect, it, vi } from "vitest";
 import { readRightPanelState, writeRightPanelState } from "../lib/right-panel-state";
 
 const api = vi.hoisted(() => ({
+  session: { data: { user: { id: "actor-1" } } },
   getWorkspace: vi.fn(),
   readSource: vi.fn(),
   listAssessments: vi.fn(),
@@ -43,6 +44,7 @@ const api = vi.hoisted(() => ({
   getById: vi.fn(),
   search: vi.fn(),
 }));
+vi.mock("../lib/auth", () => ({ authClient: { useSession: () => api.session } }));
 vi.mock("../lib/rpc", () => ({
   rpc: {
     recruiting: api,
@@ -366,6 +368,7 @@ function candidateFixture(candidateKey = "candidate-1", assessed = true) {
   };
 }
 beforeEach(() => {
+  api.session.data.user.id = "actor-1";
   const request = artifactSourceFixture("{}", "application/json", "artifact-request");
   vi.stubGlobal("IS_REACT_ACT_ENVIRONMENT", true);
   vi.stubGlobal("crypto", webcrypto);
@@ -1504,6 +1507,186 @@ it("reloads candidate pages when the CRM binding changes during pagination", asy
   expect(api.listCandidates.mock.lastCall?.[0].cursor).toBeUndefined();
   expect(view.container.querySelector("ul")?.textContent).not.toContain("synced-person");
   expect(view.container.textContent).not.toContain(synced.crm.receipt!.candidate_id);
+});
+
+it("restores the recruiting list and selected candidate from fresh pages after closing and reopening", async () => {
+  const first = { ...candidateFixture("first-person", false), name: "Synthetic first" };
+  let second = { ...candidateFixture("second-person", false), name: "Synthetic second" };
+  api.listCandidates.mockImplementation(async ({ cursor }) => ({
+    ...candidatePage([cursor ? second : first]),
+    nextCursor: cursor ? null : "page-2",
+  }));
+  api.listResearch.mockResolvedValue({ tasks: [], actions: [], observations: [savedObservation] });
+  const view = await mounted("thread-1", undefined, false);
+  await view.click("Evidence");
+  await view.click("Table");
+  await changeInput(view.container, "Search candidates", "Synthetic");
+  await changeSelect(view.container, "Internal assessment", "unassessed");
+  await changeSelect(view.container, "Internal verdict", "unknown");
+  await changeSelect(view.container, "Candidate sort", "recent");
+  await changeSelect(view.container, "Research round", `source:${savedObservation.effectId}`);
+  await act(async () => {
+    [...view.container.querySelectorAll("label")]
+      .find((label) => label.textContent === "Shortlisted only")!
+      .click();
+  });
+  await view.click("Load more");
+  await view.click(second.name);
+  await cleanup?.();
+  second = { ...second, name: "Synthetic refreshed second" };
+  api.listCandidates.mockClear();
+  const reopened = await mounted("thread-1", undefined, false);
+  expect(reopened.container.querySelector('[role="tab"][aria-selected="true"]')?.textContent).toBe(
+    "Evidence",
+  );
+  expect(reopened.container.querySelector("table")?.textContent).toContain(first.name);
+  expect(reopened.container.querySelector("table")?.textContent).toContain(second.name);
+  expect(reopened.container.querySelector('[role="dialog"]')?.textContent).toContain(second.name);
+  expect(reopened.container.querySelector('[role="dialog"]')?.textContent).not.toContain(
+    "Synthetic second",
+  );
+  expect(api.listCandidates).toHaveBeenNthCalledWith(1, {
+    roleId: role.id,
+    limit: 30,
+    query: "Synthetic",
+    assessmentState: "unassessed",
+    verdict: "unknown",
+    sort: "recent",
+    sourceEffectId: savedObservation.effectId,
+    shortlisted: true,
+  });
+  expect(api.listCandidates).toHaveBeenNthCalledWith(
+    2,
+    expect.objectContaining({ cursor: "page-2" }),
+  );
+  expect(reopened.container.querySelector('select[aria-label="Research round"]')).toHaveProperty(
+    "value",
+    `source:${savedObservation.effectId}`,
+  );
+  expect(reopened.container.querySelector('input[aria-label="Search candidates"]')).toHaveProperty(
+    "value",
+    "Synthetic",
+  );
+  expect(
+    [...Array(localStorage.length)]
+      .map((_, index) => localStorage.getItem(localStorage.key(index)!))
+      .join(""),
+  ).not.toContain("Synthetic second");
+  expect(api.setCandidateShortlist).not.toHaveBeenCalled();
+  expect(api.search).not.toHaveBeenCalled();
+});
+
+it("restores an excluded selected candidate through the existing saved-candidate read", async () => {
+  const selected = { ...candidateFixture("chosen-person", false), name: "Synthetic chosen" };
+  const other = { ...candidateFixture("other-person", false), name: "Synthetic other" };
+  api.listCandidates.mockImplementation(async ({ query }) =>
+    candidatePage(query === "Other" ? [other] : [selected]),
+  );
+  const view = await mounted("thread-1", undefined, false);
+  await view.click("Evidence");
+  await view.click(selected.name);
+  await changeInput(view.container, "Search candidates", "Other");
+  expect(view.container.querySelector('[role="dialog"]')?.textContent).toContain(selected.name);
+  await cleanup?.();
+  const reopened = await mounted("thread-1", undefined, false);
+  expect(reopened.container.querySelector("ul")?.textContent).toContain(other.name);
+  expect(reopened.container.querySelector("ul")?.textContent).not.toContain(selected.name);
+  expect(reopened.container.querySelector('[role="dialog"]')?.textContent).toContain(selected.name);
+  expect(api.listCandidates).toHaveBeenLastCalledWith({
+    roleId: role.id,
+    query: selected.candidateKey,
+    limit: 30,
+  });
+});
+
+it("ignores a late restored page after filters change and keeps the new depth on reopen", async () => {
+  const first = { ...candidateFixture("first-person", false), name: "Synthetic first" };
+  const second = { ...candidateFixture("second-person", false), name: "Synthetic second" };
+  const fresh = { ...candidateFixture("fresh-person", false), name: "Synthetic fresh" };
+  let hold = false;
+  let finish!: (page: ReturnType<typeof candidatePage>) => void;
+  api.listCandidates.mockImplementation(({ cursor, sort }) => {
+    if (sort === "recent") return Promise.resolve(candidatePage([fresh]));
+    if (cursor && hold)
+      return new Promise((resolve) => {
+        finish = resolve;
+      });
+    return Promise.resolve({
+      ...candidatePage([cursor ? second : first]),
+      nextCursor: cursor ? null : "page-2",
+    });
+  });
+  const view = await mounted("thread-1", undefined, false);
+  await view.click("Evidence");
+  await view.click("Load more");
+  await cleanup?.();
+  hold = true;
+  const reopened = await mounted("thread-1", undefined, false);
+  expect(finish).toBeDefined();
+  await changeSelect(reopened.container, "Candidate sort", "recent");
+  await act(async () => finish(candidatePage([second])));
+  expect(reopened.container.querySelector("ul")?.textContent).toContain(fresh.name);
+  expect(reopened.container.textContent).not.toContain(second.name);
+  await cleanup?.();
+  api.listCandidates.mockClear();
+  const again = await mounted("thread-1", undefined, false);
+  expect(again.container.querySelector("ul")?.textContent).toContain(fresh.name);
+  expect(api.listCandidates).toHaveBeenCalledExactlyOnceWith({
+    roleId: role.id,
+    limit: 30,
+    sort: "recent",
+  });
+});
+
+it("isolates saved recruiting list preferences by actor, thread and actual role", async () => {
+  const original = { role, revision };
+  const other = {
+    role: { ...role, id: "role-other", currentRevisionId: "revision-other" },
+    revision: { ...revision, id: "revision-other", roleId: "role-other" },
+  };
+  const view = await mounted();
+  await view.click("Evidence");
+  await view.click("Table");
+  await changeInput(view.container, "Search candidates", "Original scope");
+  await view.click("candidate-1");
+  api.getWorkspace.mockResolvedValue(other);
+  await view.render("thread-1", 1);
+  await view.click("Evidence");
+  expect(view.container.querySelector('input[aria-label="Search candidates"]')).toHaveProperty(
+    "value",
+    "",
+  );
+  expect(view.container.querySelector("table")).toBeNull();
+  expect(view.container.querySelector('[role="dialog"]')).toBeNull();
+  api.getWorkspace.mockResolvedValue(original);
+  await view.render("thread-1", 2);
+  expect(view.container.querySelector("table")).not.toBeNull();
+  expect(view.container.querySelector('input[aria-label="Search candidates"]')).toHaveProperty(
+    "value",
+    "Original scope",
+  );
+  await view.render("thread-other");
+  await view.click("Evidence");
+  expect(view.container.querySelector('input[aria-label="Search candidates"]')).toHaveProperty(
+    "value",
+    "",
+  );
+  api.session.data.user.id = "actor-other";
+  await view.render("thread-1");
+  await view.click("Evidence");
+  expect(view.container.querySelector('input[aria-label="Search candidates"]')).toHaveProperty(
+    "value",
+    "",
+  );
+  expect(view.container.querySelector("table")).toBeNull();
+  expect(view.container.querySelector('[role="dialog"]')).toBeNull();
+  api.session.data.user.id = "actor-1";
+  await view.render("thread-1");
+  expect(view.container.querySelector("table")).not.toBeNull();
+  expect(view.container.querySelector('input[aria-label="Search candidates"]')).toHaveProperty(
+    "value",
+    "Original scope",
+  );
 });
 
 it("requests server pages and filters while keeping selected evidence outside the visible page", async () => {

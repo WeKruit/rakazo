@@ -57,6 +57,13 @@ import { ArtifactFileCard } from "../components/ArtifactFileCard";
 import { AskCard } from "../components/AskCard";
 import { Shimmer } from "../components/ai/primitives";
 import { decodeArtifactBase64 } from "../lib/artifact-open";
+import { authClient } from "../lib/auth";
+import type { RecruitingPanelState } from "../lib/right-panel-state";
+import {
+  readRecruitingPanelState,
+  rightPanelStorageKey,
+  writeRecruitingPanelState,
+} from "../lib/right-panel-state";
 import { rpc } from "../lib/rpc";
 
 export type CandidateDiscussionContext = Pick<
@@ -1550,10 +1557,18 @@ function VerdictLabel({ verdict }: { verdict: Verdict }) {
 
 // Reset all fetched records when navigation changes the source thread, even before its reads finish.
 export function RecruitingPanel(props: Props) {
-  return <RecruitingWorkspace key={`${props.threadId}:${props.botId ?? "group"}`} {...props} />;
+  const userId = authClient.useSession().data?.user.id;
+  return (
+    <RecruitingWorkspace
+      key={`${userId}:${props.threadId}:${props.botId ?? "group"}`}
+      {...props}
+      userId={userId}
+    />
+  );
 }
 
 function RecruitingWorkspace({
+  userId,
   threadId,
   botId,
   refreshSignal,
@@ -1563,7 +1578,7 @@ function RecruitingWorkspace({
   onCandidateFeedback,
   candidateFeedbackRecipients,
   showDiagnostics = false,
-}: Props) {
+}: Props & { userId?: string }) {
   const { t } = useLingui();
   const shortlistFilterId = useId();
   const [snapshot, setSnapshot] = useState<Snapshot | null>(null);
@@ -1572,16 +1587,26 @@ function RecruitingWorkspace({
   const [failed, setFailed] = useState(false);
   const [confirming, setConfirming] = useState(false);
   const [confirmationFailed, setConfirmationFailed] = useState(false);
-  const [candidateView, setCandidateView] = useState<"cards" | "table">("cards");
+  const [candidateList, setCandidateList] = useState(() => readRecruitingPanelState(null));
+  const [candidateStorageKey, setCandidateStorageKey] = useState<string | null>(null);
+  const {
+    candidateView,
+    filters: candidateFilters,
+    detailOpen: candidateDetailOpen,
+  } = candidateList;
   const [selection, setSelection] = useState<RecruitingCandidate | null>(null);
-  const [candidateDetailOpen, setCandidateDetailOpen] = useState(false);
   const candidateTrigger = useRef<HTMLButtonElement>(null);
   const candidateClose = useRef<HTMLButtonElement>(null);
   const candidateHandoff = useRef<(() => void) | null>(null);
   const [candidatePage, setCandidatePage] = useState<ListRecruitingCandidatesOutput | null>(null);
-  const [candidateFilters, setCandidateFilters] = useState<
-    Omit<ListRecruitingCandidatesInput, "roleId" | "cursor" | "limit">
-  >({ sort: "name" });
+  function setCandidateFilters(
+    update: (current: RecruitingPanelState["filters"]) => RecruitingPanelState["filters"],
+  ) {
+    setCandidateList((current) => ({ ...current, filters: update(current.filters), pageCount: 1 }));
+  }
+  function setCandidateDetailOpen(detailOpen: boolean) {
+    setCandidateList((current) => ({ ...current, detailOpen }));
+  }
   const [candidateLoading, setCandidateLoading] = useState(false);
   const [candidateFailed, setCandidateFailed] = useState(false);
   const [shortlistPending, setShortlistPending] = useState<string | null>(null);
@@ -1611,7 +1636,7 @@ function RecruitingWorkspace({
     setSnapshot(null);
     setCandidatePage(null);
     setSelection(null);
-    setCandidateDetailOpen(false);
+    setCandidateList((current) => ({ ...current, selectedCandidateKey: null, detailOpen: false }));
     candidateHandoff.current = null;
     setSelectedEvidence(null);
     setCriteriaEdit(null);
@@ -1638,17 +1663,25 @@ function RecruitingWorkspace({
     const epoch = readEpoch.current;
     setLoading(true);
     setFailed(false);
-    const updateEditScope = (roleId: string | null) => {
+    const updateEditScope = (workspace: Snapshot["workspace"]) => {
+      const roleId = workspace?.role.id ?? null;
       if (editScope.current.roleId === roleId) return;
+      const changingRole = editScope.current.roleId !== null;
       editScope.current.roleId = roleId;
       editScope.current.generation++;
+      candidateGeneration.current++;
       setCriteriaEdit(null);
       setSavingCriteria(false);
       setCriteriaFailed(false);
-      setCandidateFilters({ sort: "name" });
+      const key =
+        userId && workspace
+          ? `${rightPanelStorageKey(userId, workspace.role.spaceId, botId ? "bot" : "group", threadId)}:recruiting:${roleId}`
+          : null;
+      setCandidateStorageKey(key);
+      const saved = readRecruitingPanelState(key);
+      setCandidateList((current) => ({ ...saved, tab: changingRole ? current.tab : saved.tab }));
       setCandidatePage(null);
       setSelection(null);
-      setCandidateDetailOpen(false);
       candidateHandoff.current = null;
       setSelectedEvidence(null);
       shortlistMutation.current = null;
@@ -1663,7 +1696,7 @@ function RecruitingWorkspace({
       try {
         let workspace = await rpc.recruiting.getWorkspace({ threadId }).catch(onReadError);
         while (!cancelled) {
-          updateEditScope(workspace?.role.id ?? null);
+          updateEditScope(workspace);
           setSnapshot((current) =>
             current?.workspace?.role.id !== workspace?.role.id ||
             current?.workspace?.revision.id !== workspace?.revision.id
@@ -1716,7 +1749,7 @@ function RecruitingWorkspace({
     return () => {
       cancelled = true;
     };
-  }, [threadId, botId, refresh, refreshSignal, denyAccess]);
+  }, [userId, threadId, botId, refresh, refreshSignal, denyAccess]);
   const workspace = snapshot?.workspace;
   const criteria = workspace?.revision.criteria ?? [];
   const brief = workspace?.revision.brief;
@@ -1767,6 +1800,9 @@ function RecruitingWorkspace({
   const assessment = selected?.assessment;
   const roleId = workspace?.role.id;
   const roleRevisionId = workspace?.revision.id;
+  useEffect(() => {
+    if (candidateStorageKey) writeRecruitingPanelState(candidateStorageKey, candidateList);
+  }, [candidateStorageKey, candidateList]);
   const showCrm = Boolean(
     candidatePage?.crmTarget || candidatePage?.items.some((item) => item.crm),
   );
@@ -1777,33 +1813,77 @@ function RecruitingWorkspace({
   const selectedCrmTarget = selectedPageCandidate
     ? (selectedCrm?.target ?? candidatePage?.crmTarget?.target)
     : undefined;
-  const candidateQuery = useRef({ filters: candidateFilters, roleRevisionId });
-  candidateQuery.current = { filters: candidateFilters, roleRevisionId };
+  const candidateQuery = useRef({ ...candidateList, roleRevisionId, selection });
+  candidateQuery.current = { ...candidateList, roleRevisionId, selection };
   useEffect(() => {
     let cancelled = false;
     const generation = ++candidateGeneration.current;
     const epoch = readEpoch.current;
+    const isCurrent = () =>
+      !cancelled && generation === candidateGeneration.current && epoch === readEpoch.current;
     loadingMore.current = false;
     setCandidateLoading(!!roleId);
     setCandidateFailed(false);
     setCandidatePage(null);
     if (!roleId) return;
-    void rpc.recruiting
-      .listCandidates({ roleId, limit: 30, ...candidateFilters })
-      .then((page) => {
-        if (cancelled || generation !== candidateGeneration.current || epoch !== readEpoch.current)
-          return;
-        if (page.roleId !== roleId || page.roleRevisionId !== roleRevisionId) {
+    const query = candidateQuery.current;
+    void (async () => {
+      let page = await rpc.recruiting.listCandidates({ roleId, limit: 30, ...candidateFilters });
+      if (!isCurrent()) return;
+      if (page.roleId !== roleId || page.roleRevisionId !== roleRevisionId) {
+        setRefresh((value) => value + 1);
+        return;
+      }
+      let pageCount = 1;
+      // ponytail: replay only the saved page depth with fresh cursors; never cache candidate records.
+      for (let index = 1; index < query.pageCount && page.nextCursor; index++) {
+        if (!isCurrent()) return;
+        const next = await rpc.recruiting.listCandidates({
+          roleId,
+          limit: 30,
+          ...candidateFilters,
+          cursor: page.nextCursor,
+        });
+        if (!isCurrent()) return;
+        if (
+          next.roleId !== roleId ||
+          next.roleRevisionId !== roleRevisionId ||
+          next.crmTarget?.bindingEffectId !== page.crmTarget?.bindingEffectId
+        ) {
           setRefresh((value) => value + 1);
           return;
         }
-        setCandidatePage(page);
-        setSelection((current) =>
-          current?.roleId === roleId
-            ? (page.items.find((item) => item.candidateKey === current.candidateKey) ?? current)
-            : null,
-        );
-      })
+        page = { ...next, items: page.items.concat(next.items) };
+        pageCount++;
+      }
+      setCandidatePage(page);
+      setCandidateList((current) => ({ ...current, pageCount }));
+      const selectedCandidateKey = candidateQuery.current.selectedCandidateKey;
+      let restored = page.items.find((item) => item.candidateKey === selectedCandidateKey);
+      if (!restored && selectedCandidateKey && !candidateQuery.current.selection) {
+        let cursor: string | undefined;
+        do {
+          const selectedPage = await rpc.recruiting.listCandidates({
+            roleId,
+            limit: 30,
+            query: selectedCandidateKey,
+            ...(cursor ? { cursor } : {}),
+          });
+          if (!isCurrent()) return;
+          if (selectedPage.roleId !== roleId || selectedPage.roleRevisionId !== roleRevisionId) {
+            setRefresh((value) => value + 1);
+            return;
+          }
+          restored = selectedPage.items.find((item) => item.candidateKey === selectedCandidateKey);
+          cursor = selectedPage.nextCursor ?? undefined;
+        } while (!restored && cursor);
+      }
+      setSelection((current) =>
+        current?.roleId === roleId
+          ? (page.items.find((item) => item.candidateKey === current.candidateKey) ?? current)
+          : (restored ?? null),
+      );
+    })()
       .catch((error: unknown) => {
         if (cancelled || generation !== candidateGeneration.current || epoch !== readEpoch.current)
           return;
@@ -1849,7 +1929,11 @@ function RecruitingWorkspace({
     candidateHandoff.current = null;
     candidateTrigger.current = trigger;
     setSelection(candidate);
-    setCandidateDetailOpen(true);
+    setCandidateList((current) => ({
+      ...current,
+      selectedCandidateKey: candidate.candidateKey,
+      detailOpen: true,
+    }));
   }
   const revealCandidateMessage: Props["onRevealMessage"] = onRevealMessage
     ? (target) => {
@@ -1884,6 +1968,7 @@ function RecruitingWorkspace({
       setCandidatePage((current) =>
         current ? { ...page, items: current.items.concat(page.items) } : page,
       );
+      setCandidateList((current) => ({ ...current, pageCount: current.pageCount + 1 }));
     } catch (error) {
       if (generation === candidateGeneration.current && epoch === readEpoch.current) {
         denyAccess(error);
@@ -1954,6 +2039,7 @@ function RecruitingWorkspace({
             setRefresh((value) => value + 1);
           else {
             setCandidatePage(page);
+            setCandidateList((current) => ({ ...current, pageCount: 1 }));
             setCandidateFailed(false);
           }
         }
@@ -2083,7 +2169,13 @@ function RecruitingWorkspace({
         </div>
       ) : null}
       {snapshot ? (
-        <Tabs defaultValue="role" className="gap-4">
+        <Tabs
+          value={candidateList.tab}
+          onValueChange={(tab) =>
+            setCandidateList((current) => ({ ...current, tab: tab as RecruitingPanelState["tab"] }))
+          }
+          className="gap-4"
+        >
           <TabsList
             variant="line"
             aria-label={t`Recruiting views`}
@@ -2915,7 +3007,9 @@ function RecruitingWorkspace({
                     size="sm"
                     variant={candidateView === "cards" ? "secondary" : "ghost"}
                     aria-pressed={candidateView === "cards"}
-                    onClick={() => setCandidateView("cards")}
+                    onClick={() =>
+                      setCandidateList((current) => ({ ...current, candidateView: "cards" }))
+                    }
                   >
                     <Trans>Cards</Trans>
                   </Button>
@@ -2923,7 +3017,9 @@ function RecruitingWorkspace({
                     size="sm"
                     variant={candidateView === "table" ? "secondary" : "ghost"}
                     aria-pressed={candidateView === "table"}
-                    onClick={() => setCandidateView("table")}
+                    onClick={() =>
+                      setCandidateList((current) => ({ ...current, candidateView: "table" }))
+                    }
                   >
                     <Trans>Table</Trans>
                   </Button>
