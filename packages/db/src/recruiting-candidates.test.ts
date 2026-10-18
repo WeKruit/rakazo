@@ -2248,10 +2248,113 @@ async function nativeSourceFixture() {
     },
   };
   f.tx.event.findMany.mockResolvedValue([event] as never);
-  return { ...f, artifact, event, read };
+  const thread = { ...(await f.tx.thread.findFirst()), bot: { ...actor } };
+  const findEffects = f.tx.externalEffect.findMany.getMockImplementation()!;
+  f.tx.externalEffect.findMany.mockImplementation(async (query) =>
+    "include" in query
+      ? ([
+          {
+            ...read,
+            run: { ...f.run, thread },
+            recruitingCandidatePage: { artifact },
+          },
+        ] as never)
+      : findEffects(query),
+  );
+  return { ...f, artifact, event, read, thread };
 }
 
 describe("native candidate source provenance", () => {
+  it("validates every native page in one snapshot proof batch, including duplicate-event rejection", async () => {
+    const f = await nativeSourceFixture();
+    const thread = await f.tx.thread.findFirst();
+    const pages = Array.from({ length: 13 }, (_, index) => {
+      const id = `read-${index}`;
+      const request = structuredClone(f.read.request) as unknown[];
+      (request[2] as { args: { cursor?: string } }).args.cursor = `cursor-${index}`;
+      const effect = { ...f.read, id, request };
+      const bytes = Buffer.from(stableJsonValue({ request, providerResult: effect.result }));
+      const artifact = {
+        ...f.artifact,
+        id: `artifact-${index}`,
+        clientNonce: `recruiting-observation:${id}`,
+        size: bytes.length,
+        hash: createHash("sha256").update(bytes).digest("hex"),
+      };
+      return {
+        ...f.page,
+        effectId: id,
+        requestCursor: `cursor-${index}`,
+        artifactId: artifact.id,
+        artifactHash: artifact.hash,
+        artifact,
+        effect,
+      };
+    });
+    const events = pages.map((page, index) => ({
+      ...f.event,
+      id: `event-${index}`,
+      payload: {
+        ...f.event.payload,
+        effectId: page.effectId,
+        requestCursor: page.requestCursor,
+        outputArtifact: { artifactId: page.artifactId, sha256: page.artifactHash },
+      },
+    }));
+    f.tx.externalEffect.findMany.mockImplementation(
+      async () =>
+        pages.map((page) => ({
+          ...page.effect,
+          run: { ...f.run, thread: { ...thread, bot: actor } },
+          recruitingCandidatePage: { artifact: page.artifact },
+        })) as never,
+    );
+    f.tx.event.findMany.mockImplementation(async (...args: unknown[]) => {
+      const where = (args[0] as { where: { payload?: { equals: string } } }).where;
+      return (
+        where.payload
+          ? events.filter((event) => event.payload.effectId === where.payload!.equals)
+          : events
+      ) as never;
+    });
+    f.tx.externalEffect.findFirst.mockImplementation(
+      async ({ where }) =>
+        (pages.find((page) => page.effectId === where.id)?.effect ?? null) as never,
+    );
+    f.tx.artifact.findUnique.mockImplementation(async (...args: unknown[]) => {
+      const { where } = args[0] as { where: { id: string } };
+      return (pages.find((page) => page.artifactId === where.id)?.artifact ?? null) as never;
+    });
+    const tx = {
+      ...f.tx,
+      recruitingResearchTask: { findMany: vi.fn(async () => []) },
+      recruitingCandidatePage: { findMany: vi.fn(async () => pages) },
+    };
+    const prisma = { $transaction: vi.fn(async (fn) => fn(tx)) } as unknown as PrismaClient;
+    f.tx.thread.findFirst.mockClear();
+    const result = await recruiting.listRecruitingResearch(prisma, actor, { roleId: "role" });
+    expect(result.observations.map((page) => page.effectId)).toEqual(
+      pages.map((page) => page.effectId),
+    );
+    expect(f.tx.externalEffect.findMany).toHaveBeenCalledTimes(1);
+    expect(f.tx.event.findMany).toHaveBeenCalledExactlyOnceWith({
+      where: {
+        spaceId: actor.spaceId,
+        type: "recruiting.candidates.saved",
+        OR: pages.map((page) => ({ payload: { path: ["effectId"], equals: page.effectId } })),
+      },
+    });
+    expect(f.tx.run.findFirst).not.toHaveBeenCalled();
+    expect(f.tx.thread.findFirst).toHaveBeenCalledTimes(1);
+    expect(prisma.$transaction).toHaveBeenCalledWith(expect.any(Function), {
+      isolationLevel: "RepeatableRead",
+    });
+    events.push({ ...events.at(-1)!, id: "duplicate-other-thread", threadId: "other-thread" });
+    await expect(
+      recruiting.listRecruitingResearch(prisma, actor, { roleId: "role" }),
+    ).rejects.toThrow(IsolationError);
+  });
+
   it("lists native saved research history without creating domain tasks", async () => {
     const f = await nativeSourceFixture();
     const tx = {
@@ -2419,21 +2522,42 @@ describe("native candidate source provenance", () => {
   );
   it.each([
     "artifact-hash",
+    "artifact-size",
+    "artifact-id",
+    "run-owner",
+    "run-empty-owner",
+    "run-bot-owner",
+    "thread-owner",
+    "thread-empty-owner",
+    "thread-bot-owner",
+    "thread-bot-empty-owner",
     "source-role",
     "event-role",
     "event-owner",
     "route",
     "schema",
     "missing-event",
+    "duplicate-event",
   ])("rejects a native source with invalid %s", async (boundary) => {
     const f = await nativeSourceFixture();
     if (boundary === "artifact-hash") f.artifact.hash = "f".repeat(64);
+    if (boundary === "artifact-size") Object.assign(f.artifact, { size: 0 });
+    if (boundary === "artifact-id") f.artifact.id = "other-artifact";
+    if (boundary === "run-owner") f.run.userId = "other";
+    if (boundary === "run-empty-owner") f.run.userId = "";
+    if (boundary === "run-bot-owner") f.run.bot = { ...actor, userId: "other" };
+    if (boundary === "thread-owner") f.thread.userId = "other";
+    if (boundary === "thread-empty-owner") f.thread.userId = "";
+    if (boundary === "thread-bot-owner") f.thread.bot.userId = "other";
+    if (boundary === "thread-bot-empty-owner") f.thread.bot.userId = "";
     if (boundary === "source-role") f.page.roleId = "other-role";
     if (boundary === "event-role") f.event.payload.roleId = "other-role";
     if (boundary === "event-owner") f.event.runId = "other-run";
     if (boundary === "route") f.event.payload.providerTaskId = "other-task";
     if (boundary === "schema") f.event.payload.candidateOutputSchema = "unknown";
     if (boundary === "missing-event") f.tx.event.findMany.mockResolvedValue([]);
+    if (boundary === "duplicate-event")
+      f.tx.event.findMany.mockResolvedValue([f.event, { ...f.event, id: "duplicate" }] as never);
     await expect(
       recruiting.listRecruitingCandidateSources(f.prisma, actor, {
         roleId: "role",
@@ -2441,6 +2565,33 @@ describe("native candidate source provenance", () => {
       }),
     ).rejects.toThrow();
   });
+  it.each(["group", "external-conversation", "external-bot"])(
+    "preserves scoped native %s thread parents",
+    async (boundary) => {
+      const f = await nativeSourceFixture();
+      f.role.crmBindingEffectId = null;
+      const parent = { ...actor };
+      const bot = { ...actor };
+      Object.assign(f.thread, {
+        botId: null,
+        groupId: boundary === "group" ? "group" : null,
+        group: parent,
+        externalConversationId: boundary === "group" ? null : "conversation",
+        externalConversation: { ...parent, bot },
+      });
+      const input = { roleId: "role", candidateKey: f.occurrence.candidateKey };
+      expect(
+        (await recruiting.listRecruitingCandidateSources(f.prisma, actor, input)).items,
+      ).toHaveLength(1);
+      if (boundary === "group") parent.userId = "other";
+      if (boundary === "external-conversation")
+        Object.assign(f.thread, { externalConversation: { ...parent, userId: "other", bot } });
+      if (boundary === "external-bot") bot.userId = "other";
+      await expect(
+        recruiting.listRecruitingCandidateSources(f.prisma, actor, input),
+      ).rejects.toThrow(IsolationError);
+    },
+  );
   it("keeps the existing CRM identity and target guards for a native discovery", async () => {
     const f = await nativeSourceFixture();
     const prepared = await recruiting.resolveRecruitingCrmImport(

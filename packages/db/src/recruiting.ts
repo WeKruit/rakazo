@@ -4852,9 +4852,9 @@ export async function listRecruitingResearch(
         orderBy: [{ observedAt: "asc" }, { effectId: "asc" }],
         include: { effect: { select: { runId: true, request: true } } },
       });
+      await candidatePageArtifacts(tx, actor, pages);
       const observations = [];
       for (const page of pages) {
-        await candidatePageArtifact(tx, actor, page);
         const call = researchReadRequest(page.effect.request, undefined, "get_rows");
         observations.push(
           RecruitingResearchSavedObservationSchema.parse({
@@ -5145,6 +5145,10 @@ async function candidatePageArtifact(
   page: Prisma.RecruitingCandidatePageGetPayload<Record<string, never>>,
   canonical = false,
 ) {
+  if (page.taskId === null && page.actionId === null) {
+    const artifacts = await candidatePageArtifacts(tx, actor, [page], canonical);
+    return artifacts.get(page.effectId)!;
+  }
   const effect = await tx.externalEffect.findFirst({
     where: {
       id: page.effectId,
@@ -5153,66 +5157,150 @@ async function candidatePageArtifact(
     },
   });
   if (effect?.status !== "completed") throw new IsolationError();
-  if (page.taskId !== null || page.actionId !== null) {
-    const read = await researchReadBinding(tx, actor, effect);
-    if (
-      read?.toolName !== "get_rows" ||
-      read.binding.taskId !== page.taskId ||
-      read.binding.actionId !== page.actionId ||
-      read.saved.task?.roleId !== page.roleId ||
-      read.saved.action?.roleRevisionId !== page.roleRevisionId ||
-      (canonical && read.saved.action.candidateOutputSchema !== RECRUITING_CANDIDATE_OUTPUT_SCHEMA)
-    )
-      throw new IsolationError();
-    const artifact = await recordedResearchReadArtifact(tx, actor, read);
-    if (!artifact || artifact.id !== page.artifactId || artifact.hash !== page.artifactHash)
-      throw new IsolationError();
-    return artifact;
-  }
-  const run = await requireRun(tx, actor, effect.runId);
-  const call = researchReadRequest(effect.request, undefined, "get_rows");
-  const events = await tx.event.findMany({
-    where: {
-      spaceId: actor.spaceId,
-      type: "recruiting.candidates.saved",
-      payload: { path: ["effectId"], equals: effect.id },
-    },
-  });
-  if (events.length !== 1) throw new IsolationError();
-  const event = events[0]!;
-  const payload = ProductEventSchema.parse({
-    ...event,
-    createdAt: event.createdAt.toISOString(),
-  }).payload;
-  const artifact = await tx.artifact.findUnique({ where: { id: page.artifactId } });
-  const bytes = Buffer.from(
-    stableJsonValue({ request: effect.request, providerResult: effect.result }),
-  );
+  const read = await researchReadBinding(tx, actor, effect);
   if (
-    !artifact ||
-    artifact.spaceId !== actor.spaceId ||
-    artifact.userId !== actor.userId ||
-    artifact.runId !== run.id ||
-    artifact.botId !== run.botId ||
-    artifact.clientNonce !== `recruiting-observation:${effect.id}` ||
-    artifact.hash !== page.artifactHash ||
-    artifact.size !== bytes.length ||
-    artifact.hash !== createHash("sha256").update(bytes).digest("hex") ||
-    event.runId !== run.id ||
-    event.threadId !== run.threadId ||
-    event.botId !== run.botId ||
-    payload.roleId !== page.roleId ||
-    payload.roleRevisionId !== page.roleRevisionId ||
-    payload.mcpServerId !== call.route.resourceId ||
-    payload.serverRevision !== call.route.resourceRevision ||
-    payload.providerTaskId !== call.args.task_id ||
-    payload.requestCursor !== (call.args.cursor ?? null) ||
-    page.requestCursor !== payload.requestCursor ||
-    stableJsonValue(payload.outputArtifact) !==
-      stableJsonValue({ artifactId: artifact.id, sha256: artifact.hash })
+    read?.toolName !== "get_rows" ||
+    read.binding.taskId !== page.taskId ||
+    read.binding.actionId !== page.actionId ||
+    read.saved.task?.roleId !== page.roleId ||
+    read.saved.action?.roleRevisionId !== page.roleRevisionId ||
+    (canonical && read.saved.action.candidateOutputSchema !== RECRUITING_CANDIDATE_OUTPUT_SCHEMA)
   )
     throw new IsolationError();
+  const artifact = await recordedResearchReadArtifact(tx, actor, read);
+  if (!artifact || artifact.id !== page.artifactId || artifact.hash !== page.artifactHash)
+    throw new IsolationError();
   return artifact;
+}
+
+async function candidatePageArtifacts(
+  tx: Tx,
+  actor: Actor,
+  pages: Prisma.RecruitingCandidatePageGetPayload<Record<string, never>>[],
+  canonical = false,
+): Promise<Map<string, Prisma.ArtifactGetPayload<Record<string, never>>>> {
+  const nativeIds = pages
+    .filter((page) => page.taskId === null && page.actionId === null)
+    .map((page) => page.effectId);
+  // ponytail: batch proof metadata within this transaction snapshot; never cache authorization.
+  const effects = nativeIds.length
+    ? await tx.externalEffect.findMany({
+        where: { id: { in: nativeIds }, spaceId: actor.spaceId, status: "completed" },
+        include: {
+          run: {
+            select: {
+              id: true,
+              spaceId: true,
+              userId: true,
+              threadId: true,
+              botId: true,
+              bot: { select: { spaceId: true, userId: true } },
+              thread: {
+                select: {
+                  spaceId: true,
+                  userId: true,
+                  botId: true,
+                  groupId: true,
+                  externalConversationId: true,
+                  bot: { select: { spaceId: true, userId: true } },
+                  group: { select: { spaceId: true, userId: true } },
+                  externalConversation: {
+                    select: {
+                      spaceId: true,
+                      userId: true,
+                      bot: { select: { spaceId: true, userId: true } },
+                    },
+                  },
+                },
+              },
+            },
+          },
+          recruitingCandidatePage: { select: { artifact: true } },
+        },
+      })
+    : [];
+  const byEffect = new Map(effects.map((effect) => [effect.id, effect]));
+  const events = nativeIds.length
+    ? await tx.event.findMany({
+        where: {
+          spaceId: actor.spaceId,
+          type: "recruiting.candidates.saved",
+          OR: nativeIds.map((id) => ({ payload: { path: ["effectId"], equals: id } })),
+        },
+      })
+    : [];
+  const byEvent = new Map<string, typeof events>();
+  for (const event of events) {
+    const id = (event.payload as { effectId: string }).effectId;
+    const saved = byEvent.get(id) ?? [];
+    saved.push(event);
+    byEvent.set(id, saved);
+  }
+  const artifacts = new Map<string, Prisma.ArtifactGetPayload<Record<string, never>>>();
+  for (const page of pages) {
+    if (page.taskId !== null || page.actionId !== null) {
+      artifacts.set(page.effectId, await candidatePageArtifact(tx, actor, page, canonical));
+      continue;
+    }
+    const effect = byEffect.get(page.effectId);
+    if (effect?.status !== "completed") throw new IsolationError();
+    const run = scoped(actor, effect.run);
+    scoped(actor, run.bot);
+    const thread = scoped(actor, run.thread);
+    let parent: Pick<Actor, "spaceId" | "userId">;
+    if (thread.botId) parent = scoped(actor, thread.bot);
+    else if (thread.groupId) parent = scoped(actor, thread.group);
+    else if (thread.externalConversationId) {
+      const conversation = scoped(actor, thread.externalConversation);
+      scoped(actor, conversation.bot);
+      parent = conversation;
+    } else throw new IsolationError();
+    if (
+      run.userId !== actor.userId ||
+      thread.userId !== actor.userId ||
+      parent.userId !== actor.userId
+    )
+      throw new IsolationError();
+    const call = researchReadRequest(effect.request, undefined, "get_rows");
+    const saved = byEvent.get(effect.id) ?? [];
+    if (saved.length !== 1) throw new IsolationError();
+    const event = saved[0]!;
+    const payload = ProductEventSchema.parse({
+      ...event,
+      createdAt: event.createdAt.toISOString(),
+    }).payload;
+    const artifact = effect.recruitingCandidatePage?.artifact;
+    const bytes = Buffer.from(
+      stableJsonValue({ request: effect.request, providerResult: effect.result }),
+    );
+    if (
+      !artifact ||
+      artifact.id !== page.artifactId ||
+      artifact.spaceId !== actor.spaceId ||
+      artifact.userId !== actor.userId ||
+      artifact.runId !== run.id ||
+      artifact.botId !== run.botId ||
+      artifact.clientNonce !== `recruiting-observation:${effect.id}` ||
+      artifact.hash !== page.artifactHash ||
+      artifact.size !== bytes.length ||
+      artifact.hash !== createHash("sha256").update(bytes).digest("hex") ||
+      event.runId !== run.id ||
+      event.threadId !== run.threadId ||
+      event.botId !== run.botId ||
+      payload.roleId !== page.roleId ||
+      payload.roleRevisionId !== page.roleRevisionId ||
+      payload.mcpServerId !== call.route.resourceId ||
+      payload.serverRevision !== call.route.resourceRevision ||
+      payload.providerTaskId !== call.args.task_id ||
+      payload.requestCursor !== (call.args.cursor ?? null) ||
+      page.requestCursor !== payload.requestCursor ||
+      stableJsonValue(payload.outputArtifact) !==
+        stableJsonValue({ artifactId: artifact.id, sha256: artifact.hash })
+    )
+      throw new IsolationError();
+    artifacts.set(page.effectId, artifact);
+  }
+  return artifacts;
 }
 
 type CandidateCursor = { scope: string; value: string; key: string };
@@ -6489,8 +6577,8 @@ export async function listRecruitingCandidates(
       if (pages.size !== pageIds.length) throw new IsolationError();
       for (const page of pages.values()) {
         if (page.roleId !== role.id) throw new IsolationError();
-        await candidatePageArtifact(tx, actor, page);
       }
+      await candidatePageArtifacts(tx, actor, [...pages.values()]);
       const last = selected.at(-1);
       const { total, ...counts } = totals[0]!;
       const bound = role.crmBindingEffectId
@@ -6672,13 +6760,12 @@ export async function listRecruitingCandidateSources(
         include: { page: { include: { effect: { select: { request: true } } } } },
       });
       const selected = rows.slice(0, limit);
-      const checked = new Set<string>();
+      const pages = new Map<string, (typeof selected)[number]["page"]>();
       for (const { page } of selected) {
-        if (checked.has(page.effectId)) continue;
         if (page.roleId !== role.id) throw new IsolationError();
-        await candidatePageArtifact(tx, actor, page);
-        checked.add(page.effectId);
+        pages.set(page.effectId, page);
       }
+      await candidatePageArtifacts(tx, actor, [...pages.values()]);
       const last = selected.at(-1);
       const syncs = new Map<string, RecruitingCrmCandidateSync[]>();
       for (const row of selected) {
