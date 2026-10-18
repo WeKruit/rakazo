@@ -2790,6 +2790,27 @@ describe("mobile thread event reduction", () => {
     ).toBe("Slack · Alex: Hello from the group");
   });
 
+  it.each(["running", "completed", "failed"] as const)(
+    "keeps internal subagent details out of mobile previews when %s",
+    (status) => {
+      expect(
+        blockText(
+          mobileMessage("subagent-1", [
+            {
+              kind: "subagent",
+              agentId: "temporary-agent",
+              name: "Saved CRM records",
+              status,
+              task: "Internal role/source records",
+              progress: "using mcp__crm__list_candidates",
+              result: "Internal receipt artifact-123",
+            },
+          ]),
+        ),
+      ).toBe(`Saved CRM records: ${status}`);
+    },
+  );
+
   it("deduplicates durable messages and replaces matching transient subagent state", () => {
     const initial = snapshot([
       mobileMessage("message-1", [{ kind: "text", text: "old" }]),

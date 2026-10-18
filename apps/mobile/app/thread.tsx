@@ -3309,13 +3309,6 @@ const MessageBubble = memo(function MessageBubble({
                   : special.status}
           </Text>
         </View>
-        {special.result || special.progress ? (
-          <View style={{ marginTop: 8 }}>
-            <ChatMarkdown palette={tokens} colorScheme={colorScheme} streaming={running}>
-              {special.result || special.progress || ""}
-            </ChatMarkdown>
-          </View>
-        ) : null}
       </Pressable>
     );
   }

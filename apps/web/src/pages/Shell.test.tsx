@@ -178,6 +178,7 @@ function pressEnter(textarea: HTMLTextAreaElement) {
 async function renderFeedbackShell(
   kind: "bot" | "group" = "bot",
   runStatuses?: readonly ("queued" | "leased" | "running")[],
+  options: { messages?: ThreadMessage[]; isDeploymentOwner?: boolean } = {},
 ) {
   (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
   globalThis.ResizeObserver ??= class {
@@ -253,7 +254,7 @@ async function renderFeedbackShell(
       ? { groupId: group.id, groupName: group.name, members }
       : { botId: bot.id }),
     cursor: 1,
-    messages: [pending],
+    messages: [pending, ...(options.messages ?? [])],
     olderCursor: null,
     run: {
       id: "run-main",
@@ -286,7 +287,7 @@ async function renderFeedbackShell(
     data: { user: { id: "user-1", name: "Synthetic recruiter", email: "user@example.test" } },
   };
   shellApi.bootstrap.mockResolvedValue({
-    me: { spaceId: "space-1", isDeploymentOwner: false },
+    me: { spaceId: "space-1", isDeploymentOwner: options.isDeploymentOwner ?? false },
     bots,
     botSections: [],
     groups: [group],
@@ -418,6 +419,74 @@ async function renderFeedbackShell(
     navigate: async (to: string) => act(async () => navigate(to)),
   };
 }
+
+it.each([
+  { owner: false, diagnostics: "off", visible: false },
+  { owner: false, diagnostics: "on", visible: false },
+  { owner: true, diagnostics: "off", visible: false },
+  { owner: true, diagnostics: "on", visible: true },
+])(
+  "keeps subagent internals in explicit owner diagnostics: owner=$owner, diagnostics=$diagnostics",
+  async ({ owner, diagnostics, visible }) => {
+    localStorage.setItem("rakazo.showToolActivity", diagnostics);
+    const internals = {
+      task: "Read internal role/source records",
+      progress: "using mcp__crm__list_candidates",
+      result: "Internal receipt artifact-123",
+    };
+    await renderFeedbackShell("group", undefined, {
+      isDeploymentOwner: owner,
+      messages: [
+        {
+          id: "native-subagent",
+          threadId: "thread-1",
+          seq: 2,
+          role: "bot",
+          botId: "bot-1",
+          createdAt: "2026-01-01T00:01:00Z",
+          blocks: [
+            {
+              kind: "subagent",
+              agentId: "temporary-agent",
+              name: "Saved CRM records",
+              status: "completed",
+              ...internals,
+            },
+            { kind: "text", text: "The saved candidate review is ready." },
+          ],
+        },
+        {
+          id: "native-subagent-progress",
+          threadId: "thread-1",
+          seq: 3,
+          role: "bot",
+          botId: "bot-1",
+          createdAt: "2026-01-01T00:02:00Z",
+          blocks: [
+            {
+              kind: "subagent",
+              agentId: "temporary-agent-live",
+              name: "Remaining CRM records",
+              status: "running",
+              task: internals.task,
+              progress: internals.progress,
+            },
+          ],
+        },
+      ],
+    });
+    const transcript = document.querySelector('[data-testid="transcript"]')!;
+    expect(transcript.textContent).toContain("Saved CRM records");
+    expect(transcript.textContent).toContain("completed");
+    expect(transcript.textContent).toContain("Remaining CRM records");
+    expect(transcript.textContent).toContain("Working…");
+    expect(transcript.textContent).toContain("The saved candidate review is ready.");
+    expect(transcript.textContent).toContain("Choose the role location");
+    for (const text of Object.values(internals)) {
+      expect(transcript.textContent?.includes(text)).toBe(visible);
+    }
+  },
+);
 
 it.each([
   { statuses: ["queued"], label: "Main · Waiting in line…" },

@@ -206,9 +206,10 @@ export function speechFromBlocks(blocks: MessageBlock[]): string {
         return `${block.title}: ${block.status}${block.prUrl ? ` ${block.prUrl}` : ""}`;
       if (block.kind === "computer") return block.text;
       if (block.kind === "subagent") {
-        if (block.status === "running") return `${block.name} is working on ${block.task}`;
-        if (block.status === "failed") return `${block.name} failed`;
-        return block.result || `${block.name} finished`;
+        const name = block.name || "Subagent";
+        if (block.status === "running") return `${name} is working`;
+        if (block.status === "failed") return `${name} failed`;
+        return `${name} finished`;
       }
       if (block.kind === "card") {
         return block.lines.map((line) => `${line.k}: ${line.v}`).join(". ");

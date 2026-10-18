@@ -2946,7 +2946,7 @@ export function ShellPage() {
     <div
       data-testid="shell-root"
       data-ready={shellReady}
-      className="relative flex h-full min-w-0 overflow-hidden bg-background text-foreground/90"
+      className="relative flex h-full min-w-0 overflow-clip bg-background text-foreground/90"
       onTouchStartCapture={(event) => {
         if (
           mobileSidebarOpen ||
@@ -7177,7 +7177,7 @@ const MessageView = memo(function MessageView({
               {showToolActivity ? (
                 <div className="mt-2 text-[13.5px] text-muted-foreground">{block.task}</div>
               ) : null}
-              {block.progress || block.result ? (
+              {showToolActivity && (block.progress || block.result) ? (
                 <div className="mt-2.5 text-[14.5px] leading-[1.5] text-foreground/75">
                   <ChatMarkdown streaming={running}>
                     {block.result || block.progress || ""}

@@ -1120,7 +1120,7 @@ export function blockText(message: MobileMessage) {
       if (block.kind === "cloud_agent")
         return `${block.title}: ${block.status}${block.prUrl ? ` ${block.prUrl}` : ""}`;
       if (block.kind === "subagent") {
-        return `${block.name ?? "subagent"}: ${block.result || block.progress || block.task || ""}`;
+        return `${block.name ?? "subagent"}: ${block.status}`;
       }
       if (block.kind === "child_bot") {
         return `${block.status === "archived" ? "Archived" : block.status === "deleted" ? "Deleted" : "Bot"} ${block.name ?? ""}`;
