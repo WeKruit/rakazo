@@ -20,6 +20,7 @@ import { authClient } from "./lib/auth";
 import {
   getTicketBoardEnabled,
   invalidateInitialBootstrap,
+  retainInitialBootstrapForIdentity,
   subscribeTicketBoardEnabled,
 } from "./lib/bootstrap";
 import { markAfterPaint, markOnce } from "./lib/performance";
@@ -102,12 +103,24 @@ function SessionApp() {
   );
   const session = authClient.useSession();
   const spaceId = useSyncExternalStore(subscribeSpaceSelection, selectedSpaceId, () => null);
-  const identity = JSON.stringify([session.data?.user.id ?? null, spaceId]);
-  const previousIdentity = useRef(identity);
-  if (previousIdentity.current !== identity) {
-    previousIdentity.current = identity;
+  const userId = session.data?.user.id ?? null;
+  const identity = JSON.stringify([userId, spaceId]);
+  const previousIdentity = useRef({ userId, spaceId });
+  const initialSessionResolved = useRef(false);
+  if (previousIdentity.current.userId !== userId || previousIdentity.current.spaceId !== spaceId) {
+    const firstAuthentication =
+      !initialSessionResolved.current &&
+      previousIdentity.current.userId === null &&
+      userId !== null &&
+      previousIdentity.current.spaceId === spaceId;
+    previousIdentity.current = { userId, spaceId };
     // Retire the prior identity's preload before a new route can consume it.
-    invalidateInitialBootstrap();
+    if (!firstAuthentication) invalidateInitialBootstrap();
+  }
+  if (!initialSessionResolved.current && (userId !== null || !session.isPending)) {
+    initialSessionResolved.current = true;
+    if (userId !== null) retainInitialBootstrapForIdentity(userId, spaceId);
+    else invalidateInitialBootstrap();
   }
   const gate = sessionGate(session);
   const [holdingUnreachable, setHoldingUnreachable] = useState(false);

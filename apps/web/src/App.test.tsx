@@ -8,14 +8,20 @@ import { expect, it, vi } from "vitest";
 import type * as BootstrapApi from "./lib/bootstrap";
 import type * as RpcApi from "./lib/rpc";
 
-const capability = vi.hoisted(() => ({
-  enabled: false,
-  boardLoaded: vi.fn(),
-  userId: "user-1",
-  resetBootstrap: vi.fn(),
-  bootstrap: vi.fn(),
-  shellOwners: [] as Array<{ current: string; owner: string }>,
-}));
+const capability = vi.hoisted(() => {
+  window.history.replaceState({}, "", "/app/g/group-a");
+  return {
+    enabled: false,
+    boardLoaded: vi.fn(),
+    userId: "user-1" as string | null,
+    sessionPending: false,
+    resetBootstrap: vi.fn(),
+    bootstrap: vi.fn(async () => ({
+      me: { userId: "user-a", spaceId: "space-a", ticketBoardEnabled: false },
+    })),
+    shellOwners: [] as Array<{ current: string; owner: string }>,
+  };
+});
 vi.mock("@lingui/react/macro", () => ({
   Trans: ({ children }: { children: ReactNode }) => children,
   useLingui: () => ({ t: (parts: TemplateStringsArray) => parts.join("") }),
@@ -35,8 +41,8 @@ vi.mock("./lib/bootstrap", async (importOriginal) => {
 vi.mock("./lib/auth", () => ({
   authClient: {
     useSession: () => ({
-      isPending: false,
-      data: { user: { id: capability.userId } },
+      isPending: capability.sessionPending,
+      data: capability.userId ? { user: { id: capability.userId } } : null,
       refetch: vi.fn(),
     }),
   },
@@ -64,6 +70,37 @@ vi.mock("./pages/Shell", () => ({
 vi.mock("./pages/Board", () => {
   capability.boardLoaded();
   return { BoardPage: () => <div>Board page</div> };
+});
+
+it("uses the existing cold preload once when the first session resolves", async () => {
+  vi.stubGlobal("IS_REACT_ACT_ENVIRONMENT", true);
+  capability.userId = null;
+  capability.sessionPending = true;
+  capability.resetBootstrap.mockClear();
+  window.localStorage.setItem("rakazo:space-id", "space-a");
+  const container = document.createElement("div");
+  const root = createRoot(container);
+  const render = () => (
+    <MemoryRouter initialEntries={["/app/g/group-a"]}>
+      <App />
+    </MemoryRouter>
+  );
+  try {
+    await act(async () => root.render(render()));
+    capability.userId = "user-a";
+    capability.sessionPending = false;
+    await act(async () => root.render(render()));
+    const bootstrap = await vi.importActual<typeof BootstrapApi>("./lib/bootstrap");
+    expect((await bootstrap.takeInitialBootstrap()).me.userId).toBe("user-a");
+    expect(capability.bootstrap).toHaveBeenCalledOnce();
+    expect(capability.resetBootstrap).not.toHaveBeenCalled();
+  } finally {
+    await act(async () => root.unmount());
+    window.localStorage.clear();
+    capability.userId = "user-1";
+    capability.sessionPending = false;
+    vi.unstubAllGlobals();
+  }
 });
 
 it("recreates authenticated state during render when the account or selected space changes", async () => {
