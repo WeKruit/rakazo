@@ -205,6 +205,8 @@ export function mountGithubWebhookRoute(
       },
       select: {
         id: true,
+        userId: true,
+        threadId: true,
         name: true,
         prompt: true,
         modelProvider: true,
@@ -212,7 +214,6 @@ export function mountGithubWebhookRoute(
         thinkingLevel: true,
       },
       orderBy: { updatedAt: "desc" },
-      take: 5,
     });
     if (githubRoutines.length === 0) {
       return c.json({ ok: true, ignored: true });

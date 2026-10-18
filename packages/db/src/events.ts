@@ -34,6 +34,7 @@ import {
   commitRecruitingQuestionInTransaction,
   prepareRecruitingQuestionInTransaction,
 } from "./recruiting.js";
+import { IsolationError } from "./scope.js";
 import { withTransactionRetry } from "./transaction-retry.js";
 
 const EVENT_BATCH_SIZE = 200;
@@ -238,7 +239,14 @@ export interface SendUserMessageInput {
   createRun?: boolean;
   /** When true, start a new run even if the bot is already busy (team-chat delivery). */
   allowParallelRun?: boolean;
-  /** Model every routine in an inbound delivery agreed on. */
+  /** Server-only: recheck and claim this saved event routine in the message transaction. */
+  routineEvent?: {
+    routineId: string;
+    source: "webhook" | "github" | "messaging";
+    provider?: string;
+    webhookSecretId?: string;
+  };
+  /** Model pinned by a native inbound sender. */
   modelPin?: {
     modelProvider: string;
     modelId: string;
@@ -251,6 +259,8 @@ export interface SendUserMessageResult {
   seq: number;
   taskId: string | null;
   runId: string | null;
+  /** An event routine's durable receipt already existed; do not enqueue it again. */
+  replayed?: true;
 }
 
 export interface RunSecretWriter {
@@ -384,27 +394,42 @@ export async function sendUserMessage(
   input: SendUserMessageInput,
   realtime?: RealtimeFanout,
 ): Promise<SendUserMessageResult> {
-  const replay = async (): Promise<SendUserMessageResult | null> => {
+  const replay = async (
+    db: Pick<PrismaClient, "message" | "run"> = prisma,
+  ): Promise<SendUserMessageResult | null> => {
     if (!input.clientNonce) return null;
-    const message = await prisma.message.findUnique({
-      where: {
-        threadId_clientNonce: {
-          threadId: input.threadId,
-          clientNonce: input.clientNonce,
-        },
-      },
-      include: { sourceRuns: { orderBy: { createdAt: "asc" }, take: 1 } },
-    });
+    const include = { sourceRuns: { orderBy: { createdAt: "asc" as const }, take: 1 } };
+    const message = input.routineEvent
+      ? await db.message.findFirst({
+          where: {
+            clientNonce: input.clientNonce,
+            sourceRuns: {
+              some: {
+                routineId: input.routineEvent.routineId,
+                spaceId: input.spaceId,
+                botId: input.botId,
+                userId: input.userId,
+              },
+            },
+          },
+          include,
+        })
+      : await db.message.findUnique({
+          where: {
+            threadId_clientNonce: { threadId: input.threadId, clientNonce: input.clientNonce },
+          },
+          include,
+        });
     if (!message) return null;
     const created = message.sourceRuns[0];
     const run =
-      created ??
-      (message.runId ? await prisma.run.findUnique({ where: { id: message.runId } }) : null);
+      created ?? (message.runId ? await db.run.findUnique({ where: { id: message.runId } }) : null);
     return {
       messageId: message.id,
       seq: message.seq,
       taskId: created?.taskId ?? null,
       runId: run?.id ?? null,
+      ...(input.routineEvent ? { replayed: true as const } : {}),
     };
   };
   const existing = await replay();
@@ -412,6 +437,90 @@ export async function sendUserMessage(
 
   const commit = () =>
     prisma.$transaction(async (tx: Prisma.TransactionClient) => {
+      let modelPin = input.modelPin;
+      if (input.routineEvent) {
+        const routineEvent = input.routineEvent;
+        if (
+          input.trigger !== "webhook" ||
+          input.createRun === false ||
+          (routineEvent.source === "messaging"
+            ? !routineEvent.provider
+            : !routineEvent.webhookSecretId)
+        )
+          throw new IsolationError();
+        // Group edits lock the group before its thread; keep membership valid through admission.
+        await tx.$queryRaw`SELECT id FROM chat_groups WHERE id = (SELECT "groupId" FROM threads WHERE id = ${input.threadId}) FOR UPDATE`;
+        await tx.$queryRaw`SELECT id FROM threads WHERE id = ${input.threadId} FOR UPDATE`;
+        const thread = await tx.thread.findFirst({
+          where: {
+            id: input.threadId,
+            spaceId: input.spaceId,
+            userId: input.userId,
+            OR: [
+              { botId: input.botId },
+              { group: { archivedAt: null, members: { some: { botId: input.botId } } } },
+              {
+                externalConversation: {
+                  botId: input.botId,
+                  spaceId: input.spaceId,
+                  userId: input.userId,
+                },
+              },
+            ],
+          },
+          select: { id: true },
+        });
+        if (!thread) throw new IsolationError();
+        // Serialize nonce admission across saved-room changes as well as same-thread retries.
+        await tx.$queryRaw`SELECT id FROM routines WHERE id = ${routineEvent.routineId} FOR UPDATE`;
+        const winner = await replay(tx);
+        if (winner) return { replay: winner } as const;
+        const admitted = await tx.routine.updateMany({
+          where: {
+            id: routineEvent.routineId,
+            spaceId: input.spaceId,
+            botId: input.botId,
+            userId: input.userId,
+            active: true,
+            bot: {
+              archivedAt: null,
+              spaceId: input.spaceId,
+              userId: input.userId,
+              ...(routineEvent.source === "messaging"
+                ? {}
+                : { webhookSecretId: routineEvent.webhookSecretId }),
+            },
+            OR: [
+              { threadId: input.threadId },
+              {
+                threadId: null,
+                ...(routineEvent.source === "messaging"
+                  ? {}
+                  : { bot: { thread: { id: input.threadId } } }),
+              },
+            ],
+            ...(routineEvent.source === "messaging"
+              ? { messageProvider: routineEvent.provider }
+              : routineEvent.source === "github"
+                ? { githubEnabled: true }
+                : { webhookEnabled: true }),
+          },
+          data: { lastRunAt: new Date() },
+        });
+        if (admitted.count !== 1) throw new IsolationError();
+        const routine = await tx.routine.findUniqueOrThrow({
+          where: { id: routineEvent.routineId },
+          select: { modelProvider: true, modelId: true, thinkingLevel: true },
+        });
+        modelPin =
+          routine.modelProvider && routine.modelId
+            ? {
+                modelProvider: routine.modelProvider,
+                modelId: routine.modelId,
+                thinkingLevel: routine.thinkingLevel,
+              }
+            : undefined;
+      }
       // Message first: its thread-row lock serializes the whole send against clearThread, so a
       // concurrent clear either sees the committed run and cancels it, or strictly precedes this
       // transaction. Created in separate transactions, the run could land inside the clear's
@@ -428,7 +537,7 @@ export async function sendUserMessage(
       // second run would overlap it on a dedicated computer. Pending steering waits for the
       // continuation that starts when the intro finishes.
       const activeRuns =
-        createRun && !input.allowParallelRun
+        createRun && !input.allowParallelRun && !input.routineEvent
           ? await tx.run.findMany({
               where: {
                 threadId: input.threadId,
@@ -467,11 +576,12 @@ export async function sendUserMessage(
             trigger: input.trigger,
             clientNonce: input.clientNonce ? `send:${message.id}` : undefined,
             sourceMessageId: message.id,
-            ...(input.modelPin
+            routineId: input.routineEvent?.routineId,
+            ...(modelPin
               ? {
-                  modelProvider: input.modelPin.modelProvider,
-                  modelId: input.modelPin.modelId,
-                  thinkingLevel: input.modelPin.thinkingLevel,
+                  modelProvider: modelPin.modelProvider,
+                  modelId: modelPin.modelId,
+                  thinkingLevel: modelPin.thinkingLevel,
                   modelPinned: true,
                 }
               : {}),
@@ -523,7 +633,7 @@ export async function sendUserMessage(
     if (winner) return { replay: winner } as const;
     throw error;
   });
-  if ("replay" in committed) return committed.replay;
+  if (committed.replay) return committed.replay;
   await notifyRealtime(realtime, input.threadId, committed.event.seq).catch((error) => {
     // The event is durable; subscribers recover it from their persisted cursor.
     getLogger().error("user message realtime notification", error);

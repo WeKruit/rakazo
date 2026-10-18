@@ -18,7 +18,13 @@ import {
   TEAM_CHAT_STARTUP_SHUTDOWN_MS,
   TEAMCHAT_AGENT_OWNERSHIP_REASON,
 } from "./team-chat-startup.js";
-import { inboundDeliveryClientNonce, messagingWakeIdempotencyKey } from "./webhook-inbound.js";
+import type { InboundTarget } from "./webhook-inbound.js";
+import {
+  deliverWebhookEvent,
+  inboundDeliveryClientNonce,
+  loadMessageRoutineDelivery,
+  messagingWakeIdempotencyKey,
+} from "./webhook-inbound.js";
 
 const DEFAULT_RECONCILE_INTERVAL_MS = 1_000;
 const DEFAULT_AMBIENT_DEBOUNCE_MS = 15_000;
@@ -498,8 +504,9 @@ export class TeamChatBridge {
 
   /**
    * Promote expired deferred leases. If wakeMessageRoutines already persisted a
-   * routine run (crash before resolveDeferredMessage), mark the row ignored so
-   * recovery cannot also start a TeamChat agent run for the same provider event.
+   * source receipt (crash before resolveDeferredMessage), finish its original
+   * routine admissions before marking the row ignored. Partial delivery never
+   * starts a TeamChat agent run for the same provider event.
    * Expired routing ownership is cleared (not promoted) so a later reconcile can
    * take over; live wakes re-hold the heartbeat after renewal loss. Ambient judge
    * reasons are not ownership and may promote.
@@ -520,28 +527,28 @@ export class TeamChatBridge {
         providerEventId: true,
         engagementReason: true,
         nextAttemptAt: true,
+        attempts: true,
         externalConversation: { select: { thread: { select: { id: true } } } },
       },
       orderBy: { createdAt: "asc" },
       take: BATCH_SIZE,
     });
     for (const message of expired) {
+      if (
+        this.inFlightRoutineWakes.has(message.id) &&
+        isRoutingOwnershipReason(message.engagementReason)
+      )
+        continue;
       const threadId = message.externalConversation.thread?.id;
       const woken = threadId
-        ? await this.deps.prisma.message.findUnique({
-            where: {
-              threadId_clientNonce: {
-                threadId,
-                clientNonce: inboundDeliveryClientNonce(
-                  "messaging",
-                  target.id,
-                  messagingWakeIdempotencyKey(this.deps.providerId, message.providerEventId),
-                ),
-              },
+        ? await this.recoverRoutineWake({ bot: target, threadId }, message.providerEventId).catch(
+            async (error) => {
+              await this.retry({ ...message, status: "deferred" }, error);
+              return null;
             },
-            select: { id: true },
-          })
-        : null;
+          )
+        : false;
+      if (woken === null) continue;
       if (woken) {
         await this.deps.prisma.externalMessage.updateMany({
           where: { id: message.id, status: "deferred", nextAttemptAt: { lte: now } },
@@ -761,18 +768,41 @@ export class TeamChatBridge {
   private async evaluateAmbient(now: Date): Promise<void> {
     const target = this.target;
     if (!target) return;
-    const observed = await this.deps.prisma.externalMessage.findMany({
+    const pending = await this.deps.prisma.externalMessage.findMany({
       where: {
         status: "observed",
+        OR: [{ nextAttemptAt: null }, { nextAttemptAt: { lte: now } }],
         externalConversation: {
           provider: this.deps.providerId,
           botId: target.id,
         },
       },
-      include: { externalConversation: true },
+      include: { externalConversation: { include: { thread: { select: { id: true } } } } },
       orderBy: { createdAt: "asc" },
       take: AMBIENT_BATCH_SIZE,
     });
+    const observed: typeof pending = [];
+    for (const message of pending) {
+      const threadId = message.externalConversation.thread?.id;
+      const woken = threadId
+        ? await this.recoverRoutineWake({ bot: target, threadId }, message.providerEventId).catch(
+            async (error) => {
+              await this.retry(message, error);
+              return null;
+            },
+          )
+        : false;
+      if (woken === false) observed.push(message);
+      else if (woken)
+        await this.deps.prisma.externalMessage.updateMany({
+          where: { id: message.id, status: "observed" },
+          data: {
+            status: "ignored",
+            engagementReason: "message_routine_wake",
+            nextAttemptAt: null,
+          },
+        });
+    }
     if (!observed.length) return;
     const policy = await this.deps.prisma.bot.findFirst({
       where: { id: target.id, archivedAt: null },
@@ -939,6 +969,42 @@ export class TeamChatBridge {
     return messages.filter((message) => dueSenders.has(message.senderId));
   }
 
+  private async recoverRoutineWake(target: InboundTarget, eventId: string): Promise<boolean> {
+    const idempotencyKey = messagingWakeIdempotencyKey(this.deps.providerId, eventId);
+    const key = inboundDeliveryClientNonce("messaging", target.bot.id, idempotencyKey);
+    const delivery = await loadMessageRoutineDelivery(this.deps.prisma, target, key);
+    if (!delivery) return false;
+    const routines = await this.deps.prisma.routine.findMany({
+      where: {
+        id: { in: delivery.routineIds },
+        botId: target.bot.id,
+        spaceId: target.bot.spaceId,
+        userId: target.bot.userId,
+        active: true,
+        messageProvider: delivery.provider,
+      },
+      select: {
+        id: true,
+        userId: true,
+        threadId: true,
+        name: true,
+        prompt: true,
+        modelProvider: true,
+        modelId: true,
+        thinkingLevel: true,
+      },
+      orderBy: { updatedAt: "desc" },
+    });
+    await deliverWebhookEvent(this.deps, target, {
+      prompt: delivery.prompt,
+      routines,
+      source: "messaging",
+      provider: delivery.provider,
+      idempotencyKey,
+    });
+    return true;
+  }
+
   private async queue(message: {
     id: string;
     providerEventId: string;
@@ -961,21 +1027,18 @@ export class TeamChatBridge {
     if (isRoutingOwnershipReason(message.engagementReason)) {
       return;
     }
-    const wakeNonce = inboundDeliveryClientNonce(
-      "messaging",
-      message.externalConversation.botId,
-      messagingWakeIdempotencyKey(this.deps.providerId, message.providerEventId),
-    );
     const findWake = () =>
-      this.deps.prisma.message.findUnique({
-        where: {
-          threadId_clientNonce: {
-            threadId: thread.id,
-            clientNonce: wakeNonce,
+      this.recoverRoutineWake(
+        {
+          bot: {
+            id: message.externalConversation.botId,
+            spaceId: message.externalConversation.spaceId,
+            userId: message.externalConversation.userId,
           },
+          threadId: thread.id,
         },
-        select: { id: true },
-      });
+        message.providerEventId,
+      );
     const abandonForRoutine = async (status: "received" | "queueing") => {
       await this.deps.prisma.externalMessage.updateMany({
         where: {

@@ -21,6 +21,7 @@ import {
   sendUserMessage,
 } from "./events.js";
 import { RunHistoryWriteError } from "./messages.js";
+import { IsolationError } from "./scope.js";
 
 class TestFanout implements RealtimeFanout {
   subscriber: ((payload: string) => void) | undefined;
@@ -2907,6 +2908,226 @@ describe("answerRunInput", () => {
 });
 
 describe("sendUserMessage", () => {
+  function routineDeliveryFixture(admitted = true) {
+    const tx = {
+      $queryRaw: vi.fn(),
+      thread: {
+        findFirst: vi.fn().mockResolvedValue({ id: "crew-1" }),
+        update: vi.fn().mockResolvedValue({ nextMessageSeq: 5, nextEventSeq: 9 }),
+      },
+      routine: {
+        updateMany: vi.fn().mockResolvedValue({ count: admitted ? 1 : 0 }),
+        findUniqueOrThrow: vi.fn().mockResolvedValue({
+          modelProvider: "openai-compatible",
+          modelId: "saved-model",
+          thinkingLevel: "high",
+        }),
+      },
+      message: {
+        create: vi.fn().mockResolvedValue({ id: "message-1", seq: 4 }),
+        update: vi.fn(),
+        findFirst: vi.fn().mockResolvedValue(null),
+      },
+      task: { create: vi.fn().mockResolvedValue({ id: "task-1" }) },
+      run: {
+        create: vi.fn().mockResolvedValue({ id: "run-1" }),
+        findMany: vi.fn().mockResolvedValue([{ id: "chat-run", trigger: "user" }]),
+        findUnique: vi.fn().mockResolvedValue({ status: "queued" }),
+      },
+      steeringMessage: { create: vi.fn() },
+      event: { create: vi.fn().mockResolvedValue(event(8)) },
+    };
+    const prisma = {
+      message: {
+        findUnique: vi.fn().mockResolvedValue(null),
+        findFirst: vi.fn().mockResolvedValue(null),
+      },
+      $transaction: vi.fn(async (callback: (client: typeof tx) => unknown) => callback(tx)),
+    };
+    const input = {
+      spaceId: "workspace-1",
+      threadId: "crew-1",
+      botId: "bot-1",
+      userId: "owner-1",
+      blocks: [{ kind: "text" as const, text: "Review the event" }],
+      prompt: "Review the event",
+      trigger: "webhook" as const,
+      clientNonce: "webhook:bot-1:event-1:routine:routine-1",
+      routineEvent: {
+        routineId: "routine-1",
+        source: "webhook" as const,
+        webhookSecretId: "secret-1",
+      },
+    };
+    return { tx, prisma, input };
+  }
+
+  it("atomically admits an event routine and attributes a distinct run even while chat is busy", async () => {
+    const { tx, prisma, input } = routineDeliveryFixture();
+    await sendUserMessage(prisma as unknown as PrismaClient, {
+      ...input,
+      modelPin: { modelProvider: "stale-provider", modelId: "stale-model", thinkingLevel: "low" },
+    });
+    expect(tx.routine.updateMany).toHaveBeenCalledWith({
+      where: expect.objectContaining({
+        id: "routine-1",
+        spaceId: "workspace-1",
+        botId: "bot-1",
+        userId: "owner-1",
+        active: true,
+        webhookEnabled: true,
+        bot: expect.objectContaining({ archivedAt: null, webhookSecretId: "secret-1" }),
+        OR: [{ threadId: "crew-1" }, { threadId: null, bot: { thread: { id: "crew-1" } } }],
+      }),
+      data: { lastRunAt: expect.any(Date) },
+    });
+    expect(tx.run.create).toHaveBeenCalledWith({
+      data: expect.objectContaining({
+        routineId: "routine-1",
+        userId: "owner-1",
+        threadId: "crew-1",
+        trigger: "webhook",
+        modelProvider: "openai-compatible",
+        modelId: "saved-model",
+        thinkingLevel: "high",
+        modelPinned: true,
+      }),
+    });
+    expect(tx.steeringMessage.create).not.toHaveBeenCalled();
+    expect(tx.thread.findFirst).toHaveBeenCalledWith({
+      where: {
+        id: "crew-1",
+        spaceId: "workspace-1",
+        userId: "owner-1",
+        OR: [
+          { botId: "bot-1" },
+          { group: { archivedAt: null, members: { some: { botId: "bot-1" } } } },
+          { externalConversation: { botId: "bot-1", spaceId: "workspace-1", userId: "owner-1" } },
+        ],
+      },
+      select: { id: true },
+    });
+  });
+
+  it.each(["github", "messaging"] as const)(
+    "rechecks the exact %s source at durable admission",
+    async (source) => {
+      const { tx, prisma, input } = routineDeliveryFixture();
+      await sendUserMessage(prisma as unknown as PrismaClient, {
+        ...input,
+        routineEvent: { ...input.routineEvent, source, provider: "slack" },
+      });
+      const where = tx.routine.updateMany.mock.calls[0]?.[0].where;
+      expect(where).toMatchObject(
+        source === "github" ? { githubEnabled: true } : { messageProvider: "slack" },
+      );
+      if (source === "messaging") expect(where.bot).not.toHaveProperty("webhookSecretId");
+      else expect(where.bot).toHaveProperty("webhookSecretId", "secret-1");
+    },
+  );
+
+  it("keeps a message routine in its owned native external conversation", async () => {
+    const { tx, prisma, input } = routineDeliveryFixture();
+    tx.thread.findFirst.mockImplementation(
+      async ({
+        where,
+      }: {
+        where: {
+          OR: Array<{ externalConversation?: { botId: string; spaceId: string; userId: string } }>;
+        };
+      }) =>
+        where.OR.some(
+          (target) =>
+            target.externalConversation?.botId === input.botId &&
+            target.externalConversation.spaceId === input.spaceId &&
+            target.externalConversation.userId === input.userId,
+        )
+          ? { id: input.threadId }
+          : null,
+    );
+    await sendUserMessage(prisma as unknown as PrismaClient, {
+      ...input,
+      routineEvent: { routineId: "routine-1", source: "messaging", provider: "slack" },
+    });
+    expect(tx.run.create).toHaveBeenCalledWith({
+      data: expect.objectContaining({ threadId: input.threadId, routineId: "routine-1" }),
+    });
+    expect(tx.routine.updateMany).toHaveBeenCalledWith({
+      where: expect.objectContaining({ OR: [{ threadId: input.threadId }, { threadId: null }] }),
+      data: { lastRunAt: expect.any(Date) },
+    });
+  });
+
+  it("rejects a paused, revoked or changed event routine before writing history", async () => {
+    const { tx, prisma, input } = routineDeliveryFixture(false);
+    await expect(sendUserMessage(prisma as unknown as PrismaClient, input)).rejects.toBeInstanceOf(
+      IsolationError,
+    );
+    expect(tx.message.create).not.toHaveBeenCalled();
+    expect(tx.run.create).not.toHaveBeenCalled();
+    expect(tx.event.create).not.toHaveBeenCalled();
+  });
+
+  it("rejects a stale saved room instead of redirecting to the bot's room", async () => {
+    const { tx, prisma, input } = routineDeliveryFixture();
+    tx.thread.findFirst.mockResolvedValue(null);
+    await expect(sendUserMessage(prisma as unknown as PrismaClient, input)).rejects.toBeInstanceOf(
+      IsolationError,
+    );
+    expect(tx.message.create).not.toHaveBeenCalled();
+    expect(tx.routine.updateMany).not.toHaveBeenCalled();
+  });
+
+  it("replays the persisted event receipt without advancing lastRunAt or creating another run", async () => {
+    const { tx, prisma, input } = routineDeliveryFixture();
+    prisma.message.findFirst.mockResolvedValue({
+      id: "message-1",
+      seq: 4,
+      threadId: "old-crew",
+      sourceRuns: [{ id: "run-1", taskId: "task-1" }],
+    });
+    await expect(sendUserMessage(prisma as unknown as PrismaClient, input)).resolves.toEqual({
+      messageId: "message-1",
+      seq: 4,
+      taskId: "task-1",
+      runId: "run-1",
+      replayed: true,
+    });
+    expect(prisma.$transaction).not.toHaveBeenCalled();
+    expect(prisma.message.findFirst).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: {
+          clientNonce: input.clientNonce,
+          sourceRuns: {
+            some: {
+              routineId: "routine-1",
+              spaceId: "workspace-1",
+              botId: "bot-1",
+              userId: "owner-1",
+            },
+          },
+        },
+      }),
+    );
+    expect(tx.routine.updateMany).not.toHaveBeenCalled();
+  });
+
+  it("rechecks a raced receipt under the routine lock before updating lastRunAt", async () => {
+    const { tx, prisma, input } = routineDeliveryFixture();
+    tx.message.findFirst.mockResolvedValue({
+      id: "old-message",
+      seq: 2,
+      sourceRuns: [{ id: "old-run", taskId: "old-task" }],
+    });
+    await expect(sendUserMessage(prisma as unknown as PrismaClient, input)).resolves.toMatchObject({
+      messageId: "old-message",
+      runId: "old-run",
+      replayed: true,
+    });
+    expect(tx.routine.updateMany).not.toHaveBeenCalled();
+    expect(tx.message.create).not.toHaveBeenCalled();
+  });
+
   it("creates the message, run, and event in one transaction and publishes once", async () => {
     const fanout = new TestFanout();
     const publish = vi.spyOn(fanout, "publish");

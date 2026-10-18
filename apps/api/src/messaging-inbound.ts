@@ -11,6 +11,7 @@ import type {
   ThreadEvents,
 } from "@rakazo/db";
 import {
+  appendEventInTransaction,
   createThreadMessage,
   normalizeMessagingLinkCode,
   redeemMessagingLinkCode,
@@ -24,7 +25,9 @@ import {
 import {
   deliverWebhookEvent,
   formatUntrustedDeliveryPayload,
+  inboundDeliveryClientNonce,
   inboundEventName,
+  loadMessageRoutineDelivery,
   messagingWakeIdempotencyKey,
 } from "./webhook-inbound.js";
 
@@ -184,15 +187,30 @@ export async function wakeMessageRoutines(
     externalMessageId?: string;
   },
 ): Promise<boolean> {
+  const nativeTarget = {
+    bot: { id: target.botId, spaceId: target.spaceId, userId: target.userId },
+    threadId: target.threadId,
+  };
+  const idempotencyKey = messagingWakeIdempotencyKey(
+    options?.deliveryProvider ?? event.provider,
+    event.handle,
+  );
+  const key = inboundDeliveryClientNonce("messaging", target.botId, idempotencyKey);
+  const saved = options?.externalMessageId
+    ? await loadMessageRoutineDelivery(deps.prisma, nativeTarget, key)
+    : null;
   const routines = await deps.prisma.routine.findMany({
     where: {
       botId: target.botId,
       spaceId: target.spaceId,
       active: true,
-      messageProvider: event.provider,
+      messageProvider: saved?.provider ?? event.provider,
+      ...(saved ? { id: { in: saved.routineIds } } : {}),
     },
     select: {
       id: true,
+      userId: true,
+      threadId: true,
       name: true,
       prompt: true,
       modelProvider: true,
@@ -201,32 +219,7 @@ export async function wakeMessageRoutines(
     },
     orderBy: { updatedAt: "desc" },
   });
-  if (routines.length === 0) return false;
-
-  if (options?.externalMessageId) {
-    // CAS: only deliver when agent ownership has not claimed the row. Holding
-    // message_routine_routing blocks TeamChat queue() from creating a parallel run.
-    const reserved = await deps.prisma.externalMessage.updateMany({
-      where: {
-        id: options.externalMessageId,
-        status: { in: ["deferred", "received", "observed"] },
-        OR: [
-          { engagementReason: null },
-          {
-            engagementReason: {
-              in: [MESSAGE_ROUTING_REASON, MESSAGE_ROUTING_REARMED_REASON],
-            },
-          },
-        ],
-      },
-      data: {
-        engagementReason: MESSAGE_ROUTING_REASON,
-        // Outlive a dead heartbeat so reconcile cannot promote to agent mid-wake.
-        nextAttemptAt: new Date(Date.now() + MESSAGE_ROUTING_RESERVATION_MS),
-      },
-    });
-    if (reserved.count !== 1) return false;
-  }
+  if (routines.length === 0 && !saved) return false;
 
   const provider = inboundEventName(event.provider);
   const prompt = formatUntrustedDeliveryPayload(`[Messaging Event: ${provider}]`, {
@@ -239,24 +232,58 @@ export async function wakeMessageRoutines(
     content: event.content,
     mediaUrl: event.mediaUrl,
   });
-  await deliverWebhookEvent(
-    { events: deps.events, jobs: deps.jobs },
-    {
-      bot: { id: target.botId, spaceId: target.spaceId, userId: target.userId },
-      threadId: target.threadId,
-    },
-    {
-      prompt,
-      routines,
-      source: "messaging",
-      idempotencyKey: messagingWakeIdempotencyKey(
-        options?.deliveryProvider ?? event.provider,
-        event.handle,
-      ),
-      // TeamChat channel wakes may share a live thread with an active chat run.
-      allowParallelRun: true,
-    },
-  );
+  let delivery = saved ?? {
+    key,
+    provider: event.provider,
+    prompt,
+    routineIds: routines.map((routine) => routine.id),
+  };
+  if (options?.externalMessageId) {
+    const externalMessageId = options.externalMessageId;
+    const reserved = await deps.prisma.$transaction(async (tx) => {
+      const claimed = await tx.externalMessage.updateMany({
+        where: {
+          id: externalMessageId,
+          externalConversation: {
+            botId: target.botId,
+            spaceId: target.spaceId,
+            userId: target.userId,
+            thread: { id: target.threadId },
+            provider: options.deliveryProvider ?? event.provider,
+          },
+          status: { in: ["deferred", "received", "observed"] },
+          OR: [
+            { engagementReason: null },
+            { engagementReason: { in: [MESSAGE_ROUTING_REASON, MESSAGE_ROUTING_REARMED_REASON] } },
+          ],
+        },
+        data: {
+          engagementReason: MESSAGE_ROUTING_REASON,
+          nextAttemptAt: new Date(Date.now() + MESSAGE_ROUTING_RESERVATION_MS),
+        },
+      });
+      if (claimed.count !== 1) return null;
+      const original = await loadMessageRoutineDelivery(tx, nativeTarget, key);
+      if (original) return original;
+      await appendEventInTransaction(tx, {
+        spaceId: target.spaceId,
+        threadId: target.threadId,
+        botId: target.botId,
+        type: "thread.meta",
+        payload: { routineDelivery: delivery },
+      });
+      return delivery;
+    });
+    if (!reserved) return false;
+    delivery = reserved;
+  }
+  await deliverWebhookEvent({ events: deps.events, jobs: deps.jobs }, nativeTarget, {
+    prompt: delivery.prompt,
+    routines: routines.filter((routine) => delivery.routineIds.includes(routine.id)),
+    source: "messaging",
+    provider: delivery.provider,
+    idempotencyKey,
+  });
   return true;
 }
 
