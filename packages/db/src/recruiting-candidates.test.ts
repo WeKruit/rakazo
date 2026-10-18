@@ -177,6 +177,32 @@ describe("candidate listing and shortlist boundaries", () => {
       expect(f.tx.$queryRaw).toHaveBeenCalledTimes(2);
     },
   );
+  it("uses original ranks only inside an explicitly selected immutable result page", async () => {
+    const f = fixture();
+    f.tx.$queryRaw
+      .mockResolvedValueOnce([
+        {
+          total: 0n,
+          sourceRows: 0n,
+          candidates: 0n,
+          identifiedCandidates: 0n,
+          unassessed: 0n,
+          assessed: 0n,
+          shortlisted: 0n,
+        },
+      ])
+      .mockResolvedValueOnce([]);
+    await recruiting.listRecruitingCandidates(f.prisma, actor, {
+      roleId: "role",
+      sort: "rank",
+      sourceEffectId: "selected-result",
+    });
+    const query = f.tx.$queryRaw.mock.lastCall![0] as { sql: string; values: unknown[] };
+    expect(query.sql).toContain("CASE WHEN returned.value ? 'updated_rank'");
+    expect(query.sql).toContain("ELSE returned.value -> 'rank' END");
+    expect(query.sql).toContain('AND page."effectId" =');
+    expect(query.values.filter((value) => value === "selected-result")).toHaveLength(2);
+  });
   it.each(["rank", "tier"] as const)(
     "paginates native %s values numerically with unknowns last and scoped cursors",
     async (sort) => {
@@ -231,6 +257,7 @@ describe("candidate listing and shortlist boundaries", () => {
         'ORDER BY "matchValue" ASC NULLS LAST, "candidateKey" COLLATE "C" ASC',
       );
       expect(firstQuery.values).toContain(sort === "rank" ? "updated_rank" : "match_tier");
+      expect(firstQuery.sql).not.toContain("ELSE returned.value -> 'rank' END");
       expect(firstQuery.sql).toContain('SELECT match."pageId"');
       const decoded = JSON.parse(Buffer.from(first.nextCursor!, "base64url").toString("utf8"));
       for (const value of [
@@ -2357,19 +2384,23 @@ async function nativeSourceFixture() {
   };
   f.tx.event.findMany.mockResolvedValue([event] as never);
   const thread = { ...(await f.tx.thread.findFirst()), bot: { ...actor } };
-  const findEffects = f.tx.externalEffect.findMany.getMockImplementation()!;
-  f.tx.externalEffect.findMany.mockImplementation(async (query) =>
-    "include" in query
-      ? ([
-          {
-            ...read,
-            run: { ...f.run, thread },
-            recruitingCandidatePage: { artifact },
-          },
-        ] as never)
-      : findEffects(query),
+  const nativeProofs = vi.fn(async () => [
+    {
+      ...artifact,
+      effectId: read.id,
+      effectStatus: read.status,
+      effectRequest: read.request,
+      effectResult: read.result,
+      effectRun: { ...f.run, thread },
+    },
+  ]);
+  const queryRaw = f.tx.$queryRaw.getMockImplementation()!;
+  f.tx.$queryRaw.mockImplementation(async (...args: unknown[]) =>
+    (args[0] as { sql: string }).sql.includes('FROM "external_effects" e')
+      ? ((await nativeProofs()) as never)
+      : queryRaw(),
   );
-  return { ...f, artifact, event, read, thread };
+  return { ...f, artifact, event, read, thread, nativeProofs };
 }
 
 describe("native candidate source provenance", () => {
@@ -2411,9 +2442,23 @@ describe("native candidate source provenance", () => {
       const historicalRun = { ...f.run, thread: f.thread };
       if (boundary === "historical-owner") historicalRun.userId = "other";
       if (boundary === "historical-hash") f.artifact.hash = "f".repeat(64);
-      f.tx.externalEffect.findMany.mockResolvedValue([
-        { ...f.read, run: historicalRun, recruitingCandidatePage: { artifact: f.artifact } },
-        { ...read, run: { ...f.run, thread: f.thread }, recruitingCandidatePage: { artifact } },
+      f.nativeProofs.mockResolvedValue([
+        {
+          ...f.artifact,
+          effectId: f.read.id,
+          effectStatus: f.read.status,
+          effectRequest: f.read.request,
+          effectResult: f.read.result,
+          effectRun: historicalRun,
+        },
+        {
+          ...artifact,
+          effectId: read.id,
+          effectStatus: read.status,
+          effectRequest: read.request,
+          effectResult: read.result,
+          effectRun: { ...f.run, thread: f.thread },
+        },
       ] as never);
       f.tx.event.findMany.mockResolvedValue([
         f.event,
@@ -2444,7 +2489,12 @@ describe("native candidate source provenance", () => {
         hardGate: null,
         sortValue: "example",
       };
-      f.tx.$queryRaw.mockResolvedValue([row] as never);
+      const queryRaw = f.tx.$queryRaw.getMockImplementation()!;
+      f.tx.$queryRaw.mockImplementation(async (...args: unknown[]) =>
+        (args[0] as { sql: string }).sql.includes('FROM "external_effects" e')
+          ? Reflect.apply(queryRaw, undefined, args)
+          : ([row] as never),
+      );
       if (operation === "list")
         f.tx.$queryRaw.mockResolvedValueOnce([
           {
@@ -2484,10 +2534,59 @@ describe("native candidate source provenance", () => {
         where: { roleId: "role", effectId: { in: [page.effectId, f.page.effectId] } },
         include: { effect: { select: { request: true } } },
       });
-      expect(f.tx.externalEffect.findMany).toHaveBeenCalledTimes(1);
+      expect(f.nativeProofs).toHaveBeenCalledTimes(1);
       expect(f.tx.event.findMany).toHaveBeenCalledTimes(1);
     },
   );
+
+  it("reads native source proof in one joined request without ORM relation fanout", async () => {
+    const f = await nativeSourceFixture();
+    const queryRaw = vi.fn(async (_query: unknown) => [
+      {
+        ...f.artifact,
+        effectId: f.read.id,
+        effectStatus: f.read.status,
+        effectRequest: f.read.request,
+        effectResult: f.read.result,
+        effectRun: { ...f.run, thread: f.thread },
+      },
+    ]);
+    const tx = {
+      ...f.tx,
+      $queryRaw: queryRaw,
+      recruitingResearchTask: { findMany: vi.fn(async () => []) },
+      recruitingCandidatePage: {
+        findMany: vi.fn(async () => [{ ...f.page, effect: f.read }]),
+      },
+    };
+    const prisma = { $transaction: vi.fn(async (fn) => fn(tx)) } as unknown as PrismaClient;
+    expect(
+      (await recruiting.listRecruitingResearch(prisma, actor, { roleId: "role" })).observations,
+    ).toHaveLength(1);
+    expect(f.tx.externalEffect.findMany).not.toHaveBeenCalled();
+    expect(queryRaw).toHaveBeenCalledOnce();
+    const statement = queryRaw.mock.calls[0]![0] as unknown as {
+      sql: string;
+      values: unknown[];
+    };
+    for (const table of [
+      "external_effects",
+      "runs",
+      "bots",
+      "threads",
+      "chat_groups",
+      "external_conversations",
+      "recruiting_candidate_pages",
+      "artifacts",
+    ])
+      expect(statement.sql).toContain(`"${table}"`);
+    expect(statement.sql).toContain('e."result"');
+    expect(statement.values).toEqual([f.read.id, actor.spaceId]);
+    f.read.result = { changed: true } as never;
+    await expect(
+      recruiting.listRecruitingResearch(prisma, actor, { roleId: "role" }),
+    ).rejects.toThrow(IsolationError);
+  });
 
   it("validates every native page in one snapshot proof batch, including duplicate-event rejection", async () => {
     const f = await nativeSourceFixture();
@@ -2525,12 +2624,15 @@ describe("native candidate source provenance", () => {
         outputArtifact: { artifactId: page.artifactId, sha256: page.artifactHash },
       },
     }));
-    f.tx.externalEffect.findMany.mockImplementation(
+    f.nativeProofs.mockImplementation(
       async () =>
         pages.map((page) => ({
-          ...page.effect,
-          run: { ...f.run, thread: { ...thread, bot: actor } },
-          recruitingCandidatePage: { artifact: page.artifact },
+          ...page.artifact,
+          effectId: page.effectId,
+          effectStatus: page.effect.status,
+          effectRequest: page.effect.request,
+          effectResult: page.effect.result,
+          effectRun: { ...f.run, thread: { ...thread, bot: actor } },
         })) as never,
     );
     f.tx.event.findMany.mockImplementation(async (...args: unknown[]) => {
@@ -2560,7 +2662,7 @@ describe("native candidate source provenance", () => {
     expect(result.observations.map((page) => page.effectId)).toEqual(
       pages.map((page) => page.effectId),
     );
-    expect(f.tx.externalEffect.findMany).toHaveBeenCalledTimes(1);
+    expect(f.nativeProofs).toHaveBeenCalledTimes(1);
     expect(f.tx.event.findMany).toHaveBeenCalledExactlyOnceWith({
       where: {
         spaceId: actor.spaceId,
@@ -2714,7 +2816,7 @@ describe("native candidate source provenance", () => {
         where: { roleId: "role", effectId: { in: [pageId] } },
         include: { effect: { select: { request: true } } },
       });
-      const [statement] = f.tx.$queryRaw.mock.lastCall as unknown as [{ sql: string }];
+      const [statement] = f.tx.$queryRaw.mock.calls[1] as unknown as [{ sql: string }];
       expect(statement.sql).toContain(
         'p."pageId" AS "sourcePageId", p."rowIndex" AS "sourceRowIndex"',
       );

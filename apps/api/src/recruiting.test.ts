@@ -362,10 +362,14 @@ describe("authenticated recruiting API", () => {
       [db.listRecruitingCandidates, api.listRecruitingCandidates],
       [db.setRecruitingCandidateShortlist, api.setRecruitingCandidateShortlist],
     ] as const) {
-      const output = { synthetic: true };
+      const output = {
+        synthetic: true,
+        ...(domain === db.listRecruitingCandidates ? { items: [] } : {}),
+      };
       vi.mocked(domain).mockResolvedValueOnce(output as never);
       const input = { roleId: "role", threadId: "thread" } as never;
-      expect(await wrapper(prisma, actor, input)).toEqual(output);
+      const deps = domain === db.listRecruitingCandidates ? { prisma, artifacts: {} } : prisma;
+      expect(await wrapper(deps as never, actor, input)).toEqual(output);
       expect(domain).toHaveBeenLastCalledWith(
         ...(domain === db.createRecruitingRole || domain === db.reviseRecruitingRole
           ? [prisma, actor, input, undefined]

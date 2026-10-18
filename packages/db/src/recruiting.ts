@@ -935,10 +935,16 @@ function compareHumanMessages(left: SourceMessage, right: SourceMessage): number
 async function requireCurrentHumanSource(
   tx: Tx,
   actor: Actor,
-  run: Awaited<ReturnType<typeof lockLiveRecruitingRun>>["run"],
+  run: Pick<
+    Awaited<ReturnType<typeof lockLiveRecruitingRun>>["run"],
+    "id" | "botId" | "threadId" | "sourceMessageId" | "trigger"
+  >,
   sourceMessageId: string | null,
   quote: string,
-) {
+  ancestors = new Set<string>(),
+): Promise<{ source: RecruitingSourceRef; message: SourceMessage }> {
+  if (ancestors.has(run.id)) throw new IsolationError();
+  ancestors.add(run.id);
   const {
     source: hint,
     steering,
@@ -949,6 +955,27 @@ async function requireCurrentHumanSource(
     (current, answer) => (answer.seq > current.seq ? answer : current),
     hint,
   );
+  if (!isNativeHumanMessage(source)) {
+    const { sender } = await requireResearchHandoff(tx, actor, run, source, true);
+    const inherited = await loadRunHumanSources(tx, actor, sender);
+    const latest = [...inherited.answers, ...inherited.steering.map((item) => item.message)]
+      .filter(isNativeHumanMessage)
+      .reduce<SourceMessage | null>(
+        (current, message) => (!current || message.seq > current.seq ? message : current),
+        null,
+      );
+    const human = await requireCurrentHumanSource(
+      tx,
+      actor,
+      sender,
+      latest?.id ?? sender.sourceMessageId,
+      quote,
+      ancestors,
+    );
+    if (human.message.threadId !== source.threadId || human.message.seq >= source.seq)
+      throw new IsolationError();
+    return human;
+  }
   const original =
     run.sourceMessageId === source.id
       ? source
@@ -3599,7 +3626,7 @@ async function requireResearchHandoff(
         throw new IsolationError();
     }
   }
-  return block;
+  return { ...block, sender };
 }
 
 async function requireResearchSource(
@@ -5495,43 +5522,78 @@ async function candidatePageArtifacts(
   const nativeIds = pages
     .filter((page) => page.taskId === null && page.actionId === null)
     .map((page) => page.effectId);
-  // ponytail: batch proof metadata within this transaction snapshot; never cache authorization.
-  const effects = nativeIds.length
-    ? await tx.externalEffect.findMany({
-        where: { id: { in: nativeIds }, spaceId: actor.spaceId, status: "completed" },
-        include: {
-          run: {
-            select: {
-              id: true,
-              spaceId: true,
-              userId: true,
-              threadId: true,
-              botId: true,
-              bot: { select: { spaceId: true, userId: true } },
-              thread: {
-                select: {
-                  spaceId: true,
-                  userId: true,
-                  botId: true,
-                  groupId: true,
-                  externalConversationId: true,
-                  bot: { select: { spaceId: true, userId: true } },
-                  group: { select: { spaceId: true, userId: true } },
-                  externalConversation: {
-                    select: {
-                      spaceId: true,
-                      userId: true,
-                      bot: { select: { spaceId: true, userId: true } },
-                    },
-                  },
-                },
-              },
-            },
-          },
-          recruitingCandidatePage: { select: { artifact: true } },
-        },
-      })
+  type Owner = Pick<Actor, "spaceId" | "userId">;
+  type ProofRow = Prisma.ArtifactGetPayload<Record<string, never>> & {
+    effectId: string;
+    effectStatus: string;
+    effectRequest: Prisma.JsonValue;
+    effectResult: Prisma.JsonValue;
+    effectRun: Owner & {
+      id: string;
+      threadId: string;
+      botId: string;
+      bot: Owner;
+      thread: Owner & {
+        botId: string | null;
+        groupId: string | null;
+        externalConversationId: string | null;
+        bot: Owner;
+        group: Owner;
+        externalConversation: Owner & { bot: Owner };
+      };
+    };
+  };
+  // ponytail: join proof metadata once; ORM includes add serial round trips to the same snapshot.
+  const proofs = nativeIds.length
+    ? await tx.$queryRaw<ProofRow[]>(Prisma.sql`
+        SELECT e."id" AS "effectId", e."status" AS "effectStatus",
+          e."request" AS "effectRequest", e."result" AS "effectResult",
+          jsonb_build_object(
+            'id', r."id", 'spaceId', r."spaceId", 'userId', r."userId",
+            'threadId', r."threadId", 'botId', r."botId",
+            'bot', jsonb_build_object('spaceId', rb."spaceId", 'userId', rb."userId"),
+            'thread', jsonb_build_object(
+              'spaceId', t."spaceId", 'userId', t."userId", 'botId', t."botId",
+              'groupId', t."groupId", 'externalConversationId', t."externalConversationId",
+              'bot', jsonb_build_object('spaceId', tb."spaceId", 'userId', tb."userId"),
+              'group', jsonb_build_object('spaceId', g."spaceId", 'userId', g."userId"),
+              'externalConversation', jsonb_build_object(
+                'spaceId', c."spaceId", 'userId', c."userId",
+                'bot', jsonb_build_object('spaceId', cb."spaceId", 'userId', cb."userId")
+              )
+            )
+          ) AS "effectRun", a.*
+        FROM "external_effects" e
+        LEFT JOIN "runs" r ON r."id" = e."runId"
+        LEFT JOIN "bots" rb ON rb."id" = r."botId"
+        LEFT JOIN "threads" t ON t."id" = r."threadId"
+        LEFT JOIN "bots" tb ON tb."id" = t."botId"
+        LEFT JOIN "chat_groups" g ON g."id" = t."groupId"
+        LEFT JOIN "external_conversations" c ON c."id" = t."externalConversationId"
+        LEFT JOIN "bots" cb ON cb."id" = c."botId"
+        LEFT JOIN "recruiting_candidate_pages" p ON p."effectId" = e."id"
+        LEFT JOIN "artifacts" a ON a."id" = p."artifactId"
+        WHERE e."id" IN (${Prisma.join(nativeIds)})
+          AND e."spaceId" = ${actor.spaceId} AND e."status" = 'completed'
+      `)
     : [];
+  const effects = proofs.map(
+    ({
+      effectId: id,
+      effectStatus: status,
+      effectRequest: request,
+      effectResult: result,
+      effectRun: run,
+      ...artifact
+    }) => ({
+      id,
+      status,
+      request,
+      result,
+      run,
+      recruitingCandidatePage: artifact.id ? { artifact } : null,
+    }),
+  );
   const byEffect = new Map(effects.map((effect) => [effect.id, effect]));
   const events = nativeIds.length
     ? await tx.event.findMany({
@@ -5643,10 +5705,16 @@ function writeCandidateCursor(scope: string, value: string, key: string): string
 }
 
 /** Latest source projection is selected by native read completion, never by backfill arrival. */
-function candidateIndexQuery(roleId: string, sort?: CandidatesInput["sort"]) {
+function candidateIndexQuery(
+  roleId: string,
+  sort?: CandidatesInput["sort"],
+  sourceEffectId?: string,
+) {
   // ponytail: parse each saved page once; persist match fields only if large pools outgrow this projection.
   const matchSort = sort === "rank" || sort === "tier";
   const matchField = sort === "rank" ? "updated_rank" : "match_tier";
+  // ponytail: original ranks are comparable only within this exact saved result, never across pages.
+  const pageRank = sort === "rank" && sourceEffectId !== undefined;
   const matchValue =
     sort === "rank"
       ? Prisma.sql`CASE WHEN jsonb_typeof(match."value") = 'number' THEN
@@ -5668,7 +5736,12 @@ function candidateIndexQuery(roleId: string, sort?: CandidatesInput["sort"]) {
     matchSort
       ? Prisma.sql`match_rows AS MATERIALIZED (
     SELECT page."effectId" AS "pageId", page."observedAt", (returned.ordinality - 1)::int AS "rowIndex",
-      returned.value -> ${matchField} AS cell
+      ${
+        pageRank
+          ? Prisma.sql`CASE WHEN returned.value ? 'updated_rank'
+        THEN returned.value -> 'updated_rank' ELSE returned.value -> 'rank' END`
+          : Prisma.sql`returned.value -> ${matchField}`
+      } AS cell
     FROM "recruiting_candidate_pages" page
     JOIN "external_effects" effect ON effect."id" = page."effectId"
     CROSS JOIN LATERAL (
@@ -5681,7 +5754,12 @@ function candidateIndexQuery(roleId: string, sort?: CandidatesInput["sort"]) {
     ) envelope
     CROSS JOIN LATERAL jsonb_array_elements(CASE WHEN jsonb_typeof(envelope.body->'rows') = 'array'
       THEN envelope.body->'rows' ELSE '[]'::jsonb END) WITH ORDINALITY returned(value, ordinality)
-    WHERE page."roleId" = ${roleId} AND returned.value ? ${matchField}
+    WHERE page."roleId" = ${roleId} AND ${
+      pageRank
+        ? Prisma.sql`page."effectId" = ${sourceEffectId}
+      AND (returned.value ? 'updated_rank' OR returned.value ? 'rank')`
+        : Prisma.sql`returned.value ? ${matchField}`
+    }
   ),`
       : Prisma.empty
   } base AS (
@@ -6962,7 +7040,7 @@ export async function listRecruitingCandidates(
         clauses.push(
           Prisma.sql`EXISTS (SELECT 1 FROM "recruiting_candidate_occurrences" o JOIN "recruiting_candidate_pages" p ON p."effectId" = o."pageId" WHERE o."roleId" = b."roleId" AND o."candidateKey" = b."candidateKey" AND p."effectId" = ${input.sourceEffectId})`,
         );
-      const filtered = Prisma.sql`${candidateIndexQuery(role.id, sort)}, filtered AS (SELECT b.* FROM base b WHERE ${Prisma.join(clauses, " AND ")})`;
+      const filtered = Prisma.sql`${candidateIndexQuery(role.id, sort, input.sourceEffectId)}, filtered AS (SELECT b.* FROM base b WHERE ${Prisma.join(clauses, " AND ")})`;
       const totals = await tx.$queryRaw<
         Array<{
           total: bigint;

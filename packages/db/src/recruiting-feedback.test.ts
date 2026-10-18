@@ -41,6 +41,7 @@ function fixture() {
     seq: 1,
     blocks: [{ kind: "text", text: quote }] as unknown[],
     clientNonce: null as string | null,
+    runId: null as string | null,
     createdAt: new Date(),
   };
   const input = {
@@ -55,7 +56,7 @@ function fixture() {
   const tx = {
     $queryRaw: vi.fn(async () => [{ id: "thread" }]),
     run: {
-      findFirst: vi.fn(async () => ({
+      findFirst: vi.fn(async (_query: unknown) => ({
         ...actor,
         id: "run",
         botId: "bot",
@@ -104,7 +105,7 @@ function fixture() {
       findMany: vi.fn(async (_query: unknown) => [source]),
     },
     event: { findMany: vi.fn(async () => []) },
-    steeringMessage: { findMany: vi.fn(async () => []) },
+    steeringMessage: { findMany: vi.fn(async (_query: unknown) => [] as unknown[]) },
     recruitingCandidate: {
       findUnique: vi.fn(async () => ({ roleId: "role", candidateKey: "avery" })),
       findMany: vi.fn(async () => [{ candidateKey: "avery" }]),
@@ -125,7 +126,220 @@ function fixture() {
   return { prisma, tx, input, source };
 }
 
+function handoffFixture() {
+  const f = fixture();
+  const handoff = {
+    ...f.source,
+    id: "handoff",
+    seq: 2,
+    role: "bot",
+    botId: "sender-bot",
+    runId: "sender-run",
+    clientNonce: "group-handoff:sender-run",
+    blocks: [
+      {
+        kind: "handoff",
+        fromBotId: "sender-bot",
+        toBotId: "bot",
+        text: "Relay the latest human candidate feedback",
+        hop: 1,
+      },
+    ],
+  };
+  const run = {
+    ...actor,
+    id: "run",
+    botId: "bot",
+    bot: actor,
+    threadId: "thread",
+    sourceMessageId: handoff.id,
+    trigger: "follow_up",
+    status: "running",
+  };
+  const sender = {
+    ...run,
+    id: "sender-run",
+    botId: "sender-bot",
+    sourceMessageId: f.source.id,
+    trigger: "user",
+    status: "completed",
+  };
+  f.tx.run.findFirst.mockImplementation(async (query) =>
+    (query as { where: { id: string } }).where.id === sender.id ? sender : run,
+  );
+  f.tx.message.findFirst.mockImplementation(
+    async ({ where }) => (where.id === handoff.id ? handoff : f.source) as never,
+  );
+  f.tx.thread.findFirst.mockResolvedValue({
+    ...actor,
+    id: "thread",
+    groupId: "group",
+    activeRecruitingRoleId: "role",
+  } as never);
+  const event = {
+    payload: {
+      messageId: handoff.id,
+      fromBotId: sender.botId,
+      toBotId: run.botId,
+      text: handoff.blocks[0]!.text,
+    },
+  };
+  const eventRead = vi.fn(async () => event);
+  const membershipCount = vi.fn(async () => 2);
+  Object.assign(f.tx.event, { findFirst: eventRead });
+  Object.assign(f.tx, {
+    chatGroup: { findFirst: vi.fn(async () => ({ ...actor, id: "group" })) },
+    chatGroupMember: { findFirst: vi.fn(async () => ({})), count: membershipCount },
+  });
+  return {
+    ...f,
+    handoff,
+    run,
+    sender,
+    eventRead,
+    membershipCount,
+    input: { ...f.input, sourceMessageId: handoff.id },
+  };
+}
+
 describe("native recruiting feedback records", () => {
+  it("records a selected subset from the original human source across a proven native handoff", async () => {
+    const f = handoffFixture();
+    const quote =
+      "Use Example Avery as a positive example, Example Blair is not a fit, and inspect Example Casey only.";
+    f.source.blocks = [{ kind: "text", text: quote }];
+    f.tx.recruitingCandidateOccurrence.findMany.mockResolvedValueOnce([
+      { candidateKey: "avery", name: "Example Avery", linkedinUrl: null, resumeUrl: null },
+      { candidateKey: "blair", name: "Example Blair", linkedinUrl: null, resumeUrl: null },
+      { candidateKey: "casey", name: "Example Casey", linkedinUrl: null, resumeUrl: null },
+    ]);
+    const result = await readRecruitingFeedbackContext(f.prisma, actor, {
+      ...f.input,
+      intent: { basis: "direct", quote },
+      candidateKeys: ["avery", "blair", "casey"],
+    });
+    expect(result.source).toMatchObject({
+      id: "human-message:human",
+      quote,
+      anchor: { messageId: f.source.id },
+    });
+    expect(result.source.id).not.toContain("handoff");
+  });
+  it.each(["event", "cancelled", "membership", "order", "bot-quote"] as const)(
+    "rejects invalid native feedback handoff %s",
+    async (boundary) => {
+      const f = handoffFixture();
+      if (boundary === "event") f.eventRead.mockResolvedValueOnce(null as never);
+      if (boundary === "cancelled") f.sender.status = "cancelled";
+      if (boundary === "membership") f.membershipCount.mockResolvedValueOnce(1);
+      if (boundary === "order") f.source.seq = f.handoff.seq + 1;
+      await expect(
+        readRecruitingFeedbackContext(
+          f.prisma,
+          actor,
+          boundary === "bot-quote"
+            ? { ...f.input, intent: { basis: "direct", quote: f.handoff.blocks[0]!.text } }
+            : f.input,
+        ),
+      ).rejects.toThrow(IsolationError);
+    },
+  );
+  it("rejects newer claimed human input after a native handoff", async () => {
+    const f = handoffFixture();
+    const newer = {
+      ...f.source,
+      id: "newer-human",
+      seq: f.handoff.seq + 1,
+      blocks: [{ kind: "text", text: "Hold this search" }],
+    };
+    f.tx.steeringMessage.findMany.mockImplementation(async (query) =>
+      (query as { where: { runId: string } }).where.runId === f.run.id
+        ? [{ messageId: newer.id, message: newer }]
+        : [],
+    );
+    await expect(readRecruitingFeedbackContext(f.prisma, actor, f.input)).rejects.toThrow(
+      IsolationError,
+    );
+  });
+  it("uses the sender's latest claimed human input before handoff without reviving an earlier quote", async () => {
+    const f = handoffFixture();
+    f.handoff.seq = 3;
+    const newer = {
+      ...f.source,
+      id: "newer-human",
+      seq: 2,
+      blocks: [{ kind: "text", text: "Refine this search direction only" }],
+    };
+    f.tx.steeringMessage.findMany.mockImplementation(async (query) =>
+      (query as { where: { runId: string } }).where.runId === f.sender.id
+        ? [{ messageId: newer.id, message: newer }]
+        : [],
+    );
+    f.tx.message.findFirst.mockImplementation(
+      async ({ where }) =>
+        (where.id === f.handoff.id ? f.handoff : where.id === newer.id ? newer : f.source) as never,
+    );
+    Object.assign(f.tx.message, { findUnique: vi.fn(async () => f.source) });
+    const result = await readRecruitingFeedbackContext(f.prisma, actor, {
+      ...f.input,
+      candidateKeys: undefined,
+      intent: { basis: "direct", quote: newer.blocks[0]!.text },
+    });
+    expect(result.source.anchor).toMatchObject({ messageId: newer.id });
+    await expect(readRecruitingFeedbackContext(f.prisma, actor, f.input)).rejects.toThrow(
+      IsolationError,
+    );
+  });
+  it("rejects a cyclic native handoff chain", async () => {
+    const f = handoffFixture();
+    const second = {
+      ...f.handoff,
+      id: "cycle-handoff",
+      seq: 3,
+      botId: f.run.botId,
+      runId: f.run.id,
+      clientNonce: `group-handoff:${f.run.id}`,
+      blocks: [
+        {
+          kind: "handoff",
+          fromBotId: f.run.botId,
+          toBotId: f.sender.botId,
+          text: "Forward the human feedback",
+          hop: 2,
+        },
+      ],
+    };
+    f.sender.sourceMessageId = second.id;
+    f.sender.trigger = "follow_up";
+    f.tx.message.findFirst.mockImplementation(
+      async ({ where }) =>
+        (where.id === f.handoff.id
+          ? f.handoff
+          : where.id === second.id
+            ? second
+            : f.source) as never,
+    );
+    f.eventRead.mockImplementation(async () => ({
+      payload: {
+        messageId: second.id,
+        fromBotId: f.run.botId,
+        toBotId: f.sender.botId,
+        text: second.blocks[0]!.text,
+      },
+    }));
+    f.eventRead.mockResolvedValueOnce({
+      payload: {
+        messageId: f.handoff.id,
+        fromBotId: f.sender.botId,
+        toBotId: f.run.botId,
+        text: f.handoff.blocks[0]!.text,
+      },
+    });
+    await expect(readRecruitingFeedbackContext(f.prisma, actor, f.input)).rejects.toThrow(
+      IsolationError,
+    );
+    expect(f.eventRead).toHaveBeenCalledTimes(2);
+  });
   it("reads authored form feedback without any model classification or provider call", async () => {
     const f = fixture();
     f.source.blocks = [{ kind: "text", text: quote, recruitingFeedback: selection }];
