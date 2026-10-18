@@ -421,6 +421,10 @@ msgid "Advanced..."
 msgstr "Расширенные..."
 
 #: src/pages/Shell.tsx
+msgid "Agent"
+msgstr ""
+
+#: src/pages/Shell.tsx
 msgid "Agent computer"
 msgstr "Компьютер агента"
 
@@ -1596,6 +1600,10 @@ msgstr "Не удалось загрузить {name}. Попробуйте ещ
 msgid "Could not download file"
 msgstr ""
 
+#: src/pages/Shell.tsx
+msgid "Could not export conversation"
+msgstr ""
+
 #: src/pages/PluginsOverlay.tsx
 msgid "Could not install connector"
 msgstr "Не удалось установить коннектор"
@@ -2441,6 +2449,10 @@ msgstr "Развернуть {0}"
 #: src/pages/shell/bot-panel.tsx
 msgid "Export"
 msgstr "Экспорт"
+
+#: src/pages/Shell.tsx
+msgid "Export conversation"
+msgstr ""
 
 #: src/components/teach/TeachComputerOverlay.tsx
 msgid "Export this week's list from the CRM and drop it in the shared folder"

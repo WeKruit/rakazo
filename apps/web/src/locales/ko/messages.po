@@ -421,6 +421,10 @@ msgid "Advanced..."
 msgstr "고급..."
 
 #: src/pages/Shell.tsx
+msgid "Agent"
+msgstr ""
+
+#: src/pages/Shell.tsx
 msgid "Agent computer"
 msgstr "Agent 컴퓨터"
 
@@ -1596,6 +1600,10 @@ msgstr "{name}을 다운로드하지 못했습니다. 다시 시도해 주세요
 msgid "Could not download file"
 msgstr ""
 
+#: src/pages/Shell.tsx
+msgid "Could not export conversation"
+msgstr ""
+
 #: src/pages/PluginsOverlay.tsx
 msgid "Could not install connector"
 msgstr "도구 연결을 추가하지 못했습니다."
@@ -2441,6 +2449,10 @@ msgstr "{0} 펼치기"
 #: src/pages/shell/bot-panel.tsx
 msgid "Export"
 msgstr "내보내기"
+
+#: src/pages/Shell.tsx
+msgid "Export conversation"
+msgstr ""
 
 #: src/components/teach/TeachComputerOverlay.tsx
 msgid "Export this week's list from the CRM and drop it in the shared folder"
