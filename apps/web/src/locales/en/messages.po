@@ -733,6 +733,10 @@ msgstr "Automated senders"
 msgid "Automated senders will appear after they post here."
 msgstr "Automated senders will appear after they post here."
 
+#: src/pages/RecruitingPanel.tsx
+msgid "Autumn rank"
+msgstr "Autumn rank"
+
 #: src/pages/RoutineEditor.tsx
 msgid "Available after the routine is saved"
 msgstr "Available after the routine is saved"
@@ -1662,6 +1666,10 @@ msgid "Could not load credentials."
 msgstr "Could not load credentials."
 
 #: src/pages/RecruitingPanel.tsx
+msgid "Could not load feedback"
+msgstr "Could not load feedback"
+
+#: src/pages/RecruitingPanel.tsx
 msgid "Could not load history"
 msgstr "Could not load history"
 
@@ -2503,6 +2511,10 @@ msgid "Feedback"
 msgstr "Feedback"
 
 #: src/pages/RecruitingPanel.tsx
+msgid "Feedback history"
+msgstr "Feedback history"
+
+#: src/pages/RecruitingPanel.tsx
 msgid "Feedback sent"
 msgstr "Feedback sent"
 
@@ -3093,6 +3105,10 @@ msgstr "Mark as Read"
 msgid "Mark as Unread"
 msgstr "Mark as Unread"
 
+#: src/pages/RecruitingPanel.tsx
+msgid "Match tier"
+msgstr "Match tier"
+
 #: src/pages/ModelSettingsOverlay.tsx
 #: src/pages/Onboarding.tsx
 msgid "Max"
@@ -3311,6 +3327,7 @@ msgstr "month"
 msgid "Monthly"
 msgstr "Monthly"
 
+#: src/pages/RecruitingPanel.tsx
 #: src/pages/Shell.tsx
 msgid "More"
 msgstr "More"
@@ -4373,6 +4390,7 @@ msgstr "Resume: {0}"
 #: src/components/AccountAccess.tsx
 #: src/pages/Auth.tsx
 #: src/pages/ModelBackupsSettings.tsx
+#: src/pages/RecruitingPanel.tsx
 msgid "Retry"
 msgstr "Retry"
 
@@ -4436,6 +4454,11 @@ msgstr "Role revision"
 #: src/pages/RecruitingPanel.tsx
 msgid "Role sources"
 msgstr "Role sources"
+
+#. placeholder {0}: record.feedback.expectedRoleRevision
+#: src/pages/RecruitingPanel.tsx
+msgid "Role version {0}"
+msgstr "Role version {0}"
 
 #. placeholder {0}: candidate.roleVersion
 #: src/pages/Shell.tsx
