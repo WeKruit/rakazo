@@ -5,6 +5,8 @@ import {
 } from "@rakazo/contracts";
 import { humanizeToolName, redactSecrets } from "@rakazo/core";
 import { redactToolArgsForReview } from "./auto-review.js";
+import { sharedMemorySaveError } from "./builtin-tools.js";
+import { nativeMemorySaveError } from "./memory-tools.js";
 
 const MAX_APPROVAL_SUMMARY_LENGTH = 500;
 const MAX_APPROVAL_DETAIL_LENGTH = 4_000;
@@ -25,14 +27,22 @@ export function buildApprovalAskBlock(
         : undefined,
   );
   const preference = parsedPreference.success ? parsedPreference.data : undefined;
+  const nativeMemory =
+    args.recruitingFeedback === undefined &&
+    ["remember", "save_shared_memory"].includes(toolName) &&
+    !nativeMemorySaveError(args) &&
+    (toolName !== "save_shared_memory" || !sharedMemorySaveError(args));
   const summary = preference
     ? `${{ add: "saving", replace: "updating", revoke: "removing" }[preference.operation]} a recruiting preference`
-    : describeApprovalAction(toolName, args, redactSecrets(toolName, secrets));
+    : nativeMemory
+      ? `saving ${toolName === "save_shared_memory" ? "shared" : "private"} memory`
+      : describeApprovalAction(toolName, args, redactSecrets(toolName, secrets));
   const detail = formatApprovalDetail(
     toolName,
     redactToolArgsForReview(args, secrets),
     options?.reviewReason,
     preference,
+    nativeMemory,
   );
   const safeDetail = detail ? redactSecrets(detail, secrets) : undefined;
   return {
@@ -48,7 +58,7 @@ export function buildApprovalAskBlock(
       MAX_APPROVAL_SUMMARY_LENGTH,
     ),
     detail:
-      safeDetail && !recruitingApproval && !preference && !options?.oneTimeOnly
+      safeDetail && !recruitingApproval && !preference && !nativeMemory && !options?.oneTimeOnly
         ? truncate(safeDetail, MAX_APPROVAL_DETAIL_LENGTH)
         : safeDetail,
     status: "pending",
@@ -110,6 +120,7 @@ function formatApprovalDetail(
   args: Record<string, unknown>,
   reviewReason?: string,
   preference?: RecruitingPreferenceFeedbackInput,
+  nativeMemory = false,
 ): string | undefined {
   const lines: string[] = [];
   if (reviewReason?.trim()) {
@@ -125,6 +136,14 @@ function formatApprovalDetail(
       lines.push(
         `${preference.operation === "replace" ? "New preference" : "Preference"}:\n${preference.content}`,
       );
+    return lines.join("\n\n");
+  }
+  if (nativeMemory) {
+    lines.push(
+      `Memory note: ${typeof args.path === "string" ? args.path.trim() : "MEMORY.md"}`,
+      `Applies to: ${toolName === "save_shared_memory" ? "your bots in this space" : "this bot"}`,
+      `Content:\n${args.content}`,
+    );
     return lines.join("\n\n");
   }
   if (toolName === "recruiting_request_approval") {

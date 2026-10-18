@@ -162,6 +162,15 @@ describe("jsonSchemaParameters", () => {
     };
     expect(RecruitingRoleToolInputSchema.parse(sourced)).toEqual(sourced);
     const wire = JSON.parse(JSON.stringify(parametersFor(tool)));
+    for (const guidance of [
+      "One local ID identifies one exact full reference across the role and all criteria",
+      "Full source reference objects, never source ID strings",
+      "Known non-inferred fields require sourceRefIds",
+      "user_instruction must cite the actual human-message reference",
+      "One rule for every criterion",
+    ])
+      expect(JSON.stringify(wire)).toContain(guidance);
+    expect(tool.description).toContain("Different quotes require different source IDs");
     expect(
       validateToolArguments(
         { name: tool.name, description: tool.description, parameters: wire },
@@ -179,6 +188,7 @@ describe("jsonSchemaParameters", () => {
         ],
       },
       ...[
+        source.id,
         withoutState,
         withoutTime,
         { ...source, anchor: withoutLocator, locator: "text" },

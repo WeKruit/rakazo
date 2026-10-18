@@ -22,7 +22,9 @@ export type RecruitingArtifactRef = z.infer<typeof RecruitingArtifactRefSchema>;
 /** ACLs and the authenticity of the locator/quote are checked by the reading handler. */
 export const RecruitingSourceRefSchema = z
   .strictObject({
-    id: RecruitingId,
+    id: RecruitingId.describe(
+      "One local ID identifies one exact full reference across the role and all criteria. Reuse it only with the unchanged full object; different quotes require different IDs, even from the same artifact.",
+    ),
     kind: z.enum([
       "provider_report",
       "original_material",
@@ -59,7 +61,12 @@ export const RecruitingSourceRefSchema = z
   })
   .readonly();
 export type RecruitingSourceRef = z.infer<typeof RecruitingSourceRefSchema>;
-const SourceRefs = z.array(RecruitingSourceRefSchema).readonly();
+const SourceRefs = z
+  .array(RecruitingSourceRefSchema)
+  .readonly()
+  .describe(
+    "Full source reference objects, never source ID strings. Copy native anchors and read metadata exactly.",
+  );
 const Questions = z.array(Text).readonly();
 
 const EmploymentYear = z.number().int().min(1).max(9999);
@@ -200,7 +207,11 @@ export const RecruitingBriefDraftSchema = z.strictObject({
       origin: BriefOrigin,
       state: z.enum(["known", "missing", "conflict"]),
       consequential: z.boolean(),
-      sourceRefIds: z.array(RecruitingId),
+      sourceRefIds: z
+        .array(RecruitingId)
+        .describe(
+          "Known non-inferred fields require sourceRefIds naming exact read references with quotes. user_instruction must cite the actual human-message reference, using native current-turn messageId, readAt and text-block metadata; assign its local source ID before creating the role.",
+        ),
     }),
   ),
   questions: z.array(
@@ -211,14 +222,18 @@ export const RecruitingBriefDraftSchema = z.strictObject({
       answeredBySourceRefId: RecruitingId.nullable(),
     }),
   ),
-  rules: z.array(
-    z.strictObject({
-      criterionId: RecruitingId,
-      origin: BriefOrigin,
-      effect: z.enum(["flag", "reject"]),
-      sourceRefIds: z.array(RecruitingId),
-    }),
-  ),
+  rules: z
+    .array(
+      z.strictObject({
+        criterionId: RecruitingId,
+        origin: BriefOrigin,
+        effect: z.enum(["flag", "reject"]),
+        sourceRefIds: z.array(RecruitingId),
+      }),
+    )
+    .describe(
+      "One rule for every criterion, using its exact criterionId, origin, effect and sourceRefIds. An empty rules array is valid only when criteria is empty; inferred rules are flag-only and require a preferred criterion.",
+    ),
 });
 export type RecruitingBriefDraft = z.infer<typeof RecruitingBriefDraftSchema>;
 export const RecruitingBriefSchema = RecruitingBriefDraftSchema.extend({

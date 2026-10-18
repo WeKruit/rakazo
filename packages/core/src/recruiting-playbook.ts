@@ -7,25 +7,28 @@ export function validateRecruitingBrief(
   brief: RecruitingBriefDraft,
   role: Pick<RecruitingRoleRevision, "criteria" | "sourceRefs">,
 ): void {
-  const sources = new Map(role.sourceRefs.map((source) => [source.id, source]));
-  for (const source of [
-    ...role.sourceRefs,
-    ...role.criteria.flatMap((criterion) => criterion.sourceRefs),
-  ]) {
-    const previous = sources.get(source.id);
-    if (previous && JSON.stringify(previous) !== JSON.stringify(source))
+  const sources = new Map<string, (typeof role.sourceRefs)[number]>();
+  for (const [location, references] of [
+    ["sourceRefs", role.sourceRefs],
+    ...role.criteria.map(
+      (criterion, index) => [`criteria[${index}].sourceRefs`, criterion.sourceRefs] as const,
+    ),
+  ] as const)
+    for (const [index, source] of references.entries()) {
+      const previous = sources.get(source.id);
+      if (previous && JSON.stringify(previous) !== JSON.stringify(source))
+        throw new RecruitingPlaybookValidationError(
+          `${location}[${index}]: source ID ${JSON.stringify(source.id)} already identifies a different reference. Reuse the full unchanged reference, or use a distinct source ID for a different quote and update its sourceRefIds.`,
+        );
+      sources.set(source.id, source);
+    }
+  const requireSources = (ids: readonly string[], location: string) => {
+    const invalid = ids.find(
+      (id) => sources.get(id)?.readState !== "read" || !sources.get(id)?.quote,
+    );
+    if (!ids.length || invalid !== undefined)
       throw new RecruitingPlaybookValidationError(
-        "A brief source ID must identify one exact reference.",
-      );
-    sources.set(source.id, source);
-  }
-  const requireSources = (ids: readonly string[]) => {
-    if (
-      !ids.length ||
-      ids.some((id) => sources.get(id)?.readState !== "read" || !sources.get(id)?.quote)
-    )
-      throw new RecruitingPlaybookValidationError(
-        "Brief facts require exact, read source references.",
+        `${location}: ${!ids.length ? "add at least one source ID" : `source ID ${JSON.stringify(invalid)} is missing, unread or has no quote`}. Cite a full read source reference with an exact quote; user_instruction must cite the actual human-message reference.`,
       );
   };
   if (
@@ -37,28 +40,33 @@ export function validateRecruitingBrief(
     throw new RecruitingPlaybookValidationError(
       "Brief field, filter, question and rule IDs must be unique.",
     );
-  for (const field of brief.fields) {
+  for (const [index, field] of brief.fields.entries()) {
     if (field.state === "known" && field.value === null)
       throw new RecruitingPlaybookValidationError("Known brief facts require a value.");
     if (field.sourceRefIds.length || (field.origin !== "inferred" && field.state === "known"))
-      requireSources(field.sourceRefIds);
+      requireSources(field.sourceRefIds, `brief.fields[${index}].sourceRefIds`);
   }
-  for (const filter of brief.searchFilters) {
+  for (const [index, filter] of brief.searchFilters.entries()) {
     if (filter.sourceRefIds.length || filter.origin !== "inferred")
-      requireSources(filter.sourceRefIds);
+      requireSources(filter.sourceRefIds, `brief.searchFilters[${index}].sourceRefIds`);
     if (filter.origin === "inferred" && filter.mode !== "prefer")
       throw new RecruitingPlaybookValidationError("Inferred search filters must remain preferred.");
   }
-  for (const question of brief.questions) {
+  for (const [index, question] of brief.questions.entries()) {
     if (!brief.fields.some((field) => field.key === question.fieldKey))
       throw new RecruitingPlaybookValidationError("Brief question must target an existing field.");
-    if (question.answeredBySourceRefId) requireSources([question.answeredBySourceRefId]);
+    if (question.answeredBySourceRefId)
+      requireSources(
+        [question.answeredBySourceRefId],
+        `brief.questions[${index}].answeredBySourceRefId`,
+      );
   }
-  for (const rule of brief.rules) {
+  for (const [index, rule] of brief.rules.entries()) {
     const criterion = role.criteria.find((item) => item.id === rule.criterionId);
     if (!criterion)
       throw new RecruitingPlaybookValidationError("Brief rule must target an existing criterion.");
-    if (rule.sourceRefIds.length || rule.origin !== "inferred") requireSources(rule.sourceRefIds);
+    if (rule.sourceRefIds.length || rule.origin !== "inferred")
+      requireSources(rule.sourceRefIds, `brief.rules[${index}].sourceRefIds`);
     if (rule.origin === "inferred" && rule.effect !== "flag")
       throw new RecruitingPlaybookValidationError("Inferred rules must remain flag-only.");
     if ((rule.origin === "inferred" || rule.effect === "flag") && criterion.priority === "hard")
@@ -66,13 +74,12 @@ export function validateRecruitingBrief(
         "Inferred or flag-only rules cannot reject candidates.",
       );
   }
-  if (
-    role.criteria.some(
-      (criterion) => !brief.rules.some((rule) => rule.criterionId === criterion.id),
-    )
-  )
+  const missingRule = role.criteria.find(
+    (criterion) => !brief.rules.some((rule) => rule.criterionId === criterion.id),
+  );
+  if (missingRule)
     throw new RecruitingPlaybookValidationError(
-      "Every brief criterion requires field-level provenance.",
+      `brief.rules: missing criterionId ${JSON.stringify(missingRule.id)}. Add its rule with origin, effect and sourceRefIds; every criterion needs a corresponding rule.`,
     );
 }
 

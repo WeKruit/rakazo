@@ -1,5 +1,9 @@
 import type { RecruitingBriefDraft } from "@rakazo/contracts";
-import { RecruitingBriefDraftSchema, RecruitingRoleToolInputSchema } from "@rakazo/contracts";
+import {
+  RecruitingBriefDraftSchema,
+  RecruitingRoleToolInputSchema,
+  RecruitingSourceRefSchema,
+} from "@rakazo/contracts";
 import { describe, expect, it } from "vitest";
 import {
   recruitingBriefClarifications,
@@ -62,6 +66,60 @@ function brief(): RecruitingBriefDraft {
   };
 }
 describe("sourced recruiting intake", () => {
+  it("reuses an identical full reference and identifies conflicting source IDs across the definition", () => {
+    const copied = RecruitingSourceRefSchema.parse(
+      Object.fromEntries(Object.entries(source).reverse()),
+    );
+    const reused = { ...role, criteria: [{ ...criteria[0]!, sourceRefs: [copied] }] };
+    expect(() => validateRecruitingBrief(brief(), reused)).not.toThrow();
+    for (const [location, definition] of [
+      [
+        "sourceRefs[1]",
+        { ...role, sourceRefs: [source, { ...copied, quote: "Remote within the UK." }] },
+      ],
+      [
+        "criteria[0].sourceRefs[0]",
+        {
+          ...role,
+          criteria: [
+            { ...criteria[0]!, sourceRefs: [{ ...copied, quote: "Remote within the UK." }] },
+          ],
+        },
+      ],
+    ] as const) {
+      expect(() => validateRecruitingBrief(brief(), definition)).toThrow(
+        `${location}: source ID "jd" already identifies a different reference. Reuse the full unchanged reference, or use a distinct source ID for a different quote and update its sourceRefIds.`,
+      );
+    }
+    expect(reused.criteria[0]!.sourceRefs[0]).toEqual(source);
+  });
+  it("identifies a known human field without its actual source and accepts the cited reference", () => {
+    const draft = brief();
+    draft.fields[0] = { ...draft.fields[0]!, origin: "user_instruction", sourceRefIds: [] };
+    expect(() => validateRecruitingBrief(draft, role)).toThrow(
+      "brief.fields[0].sourceRefIds: add at least one source ID. Cite a full read source reference with an exact quote; user_instruction must cite the actual human-message reference.",
+    );
+    const answer = {
+      ...source,
+      id: "salary-answer",
+      anchor: { ...source.anchor, messageId: "human-answer" },
+      quote: "Use GBP 90,000 to 120,000.",
+    };
+    draft.fields[0]!.sourceRefIds = [answer.id];
+    expect(() =>
+      validateRecruitingBrief(draft, { ...role, sourceRefs: [source, answer] }),
+    ).not.toThrow();
+  });
+  it("identifies the criterion missing a brief rule without creating one", () => {
+    const draft = brief();
+    draft.rules = [];
+    expect(() => validateRecruitingBrief(draft, role)).toThrow(
+      'brief.rules: missing criterionId "experience". Add its rule with origin, effect and sourceRefIds; every criterion needs a corresponding rule.',
+    );
+    expect(draft.rules).toEqual([]);
+    draft.rules = brief().rules;
+    expect(() => validateRecruitingBrief(draft, role)).not.toThrow();
+  });
   it("requires material location clarification even when the extractor omitted the field", () => {
     const draft = brief();
     draft.fields = draft.fields.filter((field) => field.key !== "location");

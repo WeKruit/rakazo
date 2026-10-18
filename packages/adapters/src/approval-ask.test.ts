@@ -198,23 +198,63 @@ describe("buildApprovalAskBlock", () => {
     expect(block.detail).toContain("to: person@example.test");
   });
 
-  it("shows the actual arguments for native memory and nested MCP actions without exposing credentials", () => {
+  it.each(["remember", "save_shared_memory"])(
+    "shows the complete native memory document and actual scope for %s",
+    (tool) => {
+      const shared = tool === "save_shared_memory";
+      const content = `${shared ? "x".repeat(3_950) : "Exact memory 😀.\n".repeat(350)}\nComplete ending 😀 token-secret`;
+      const args = {
+        path: " notes/working-preferences.md ",
+        content,
+        expectedRevision: 1,
+        context: { task: "unrelated-metadata", apiKey: "private-key" },
+      };
+      const block = buildApprovalAskBlock("effect-memory", tool, args, ["token-secret"], {
+        reviewReason: "Review this complete replacement.",
+        oneTimeOnly: shared,
+      });
+
+      expect(block.text).toBe(`Review before saving ${shared ? "shared" : "private"} memory`);
+      expect(block.detail).toBe(
+        `Review this complete replacement.\n\nMemory note: notes/working-preferences.md\n\nApplies to: ${shared ? "your bots in this space" : "this bot"}\n\nContent:\n${content.replace("token-secret", "[redacted]")}`,
+      );
+      expect(block.detail!.length).toBeGreaterThan(4_000);
+      expect(block.detail).not.toMatch(
+        /expectedRevision|unrelated-metadata|private-key|token-secret/,
+      );
+      expect(block.approvalEffectId).toBe("effect-memory");
+      expect(block.status).toBe("pending");
+      expect(block.actions).toEqual([
+        { id: "allow", label: "Allow once" },
+        ...(shared ? [] : [{ id: "always", label: "Always allow this tool" }]),
+        { id: "deny", label: "Deny" },
+      ]);
+      expect(args.content).toBe(content);
+      expect(args.context.apiKey).toBe("private-key");
+    },
+  );
+
+  it("shows the native default document for a private memory write", () => {
     const block = buildApprovalAskBlock(
       "effect-memory",
-      "save_shared_memory",
-      {
-        path: "recruiting/review-guidelines.md",
-        content: "Separate facts, inference and missing evidence.",
-        context: { task: "existing-task", apiKey: "private-key" },
-      },
+      "remember",
+      { content: "Keep my working note.", expectedRevision: 0 },
       [],
     );
-    if (block.kind !== "ask") throw new Error("expected ask block");
-    expect(block.detail).toContain("path: recruiting/review-guidelines.md");
-    expect(block.detail).toContain("content: Separate facts, inference and missing evidence.");
-    expect(block.detail).toContain('"task": "existing-task"');
-    expect(block.detail).toContain("[redacted]");
-    expect(JSON.stringify(block)).not.toContain("private-key");
+    expect(block.detail).toBe(
+      "Memory note: MEMORY.md\n\nApplies to: this bot\n\nContent:\nKeep my working note.",
+    );
+  });
+
+  it.each([
+    ["remember", { path: "", content: "Keep this.", expectedRevision: 0 }],
+    ["remember", { path: "note.md", content: "Keep this." }],
+    ["save_shared_memory", { path: "note.md", content: "x".repeat(4_001), expectedRevision: 0 }],
+    ["save_memory", { content: "A semantic fact." }],
+  ])("keeps generic details for unrecognized or invalid %s arguments", (tool, args) => {
+    const block = buildApprovalAskBlock("effect-memory", tool, args, []);
+    expect(block.detail).not.toContain("Memory note:");
+    expect(block.detail).toContain("content:");
   });
 
   it("uses a one-time create or cancel choice for a new security boundary", () => {
