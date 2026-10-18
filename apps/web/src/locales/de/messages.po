@@ -440,6 +440,10 @@ msgstr ""
 msgid "All bots"
 msgstr ""
 
+#: src/pages/RecruitingPanel.tsx
+msgid "All of"
+msgstr ""
+
 #: src/pages/ModelSettingsOverlay.tsx
 msgid "All providers"
 msgstr ""
@@ -548,6 +552,10 @@ msgstr "Beantwortet: {answer}"
 msgid "Any model, with your own key"
 msgstr ""
 
+#: src/pages/RecruitingPanel.tsx
+msgid "Any of"
+msgstr ""
+
 #: src/components/SoftwareUpdateSection.tsx
 msgid "API is back, but the update did not finish. Check the host logs."
 msgstr ""
@@ -609,6 +617,10 @@ msgstr "Argumente"
 #: src/pages/Artifacts.tsx
 #: src/pages/Shell.tsx
 msgid "Artifacts"
+msgstr ""
+
+#: src/pages/RecruitingPanel.tsx
+msgid "Ask an agent to clarify in chat."
 msgstr ""
 
 #. placeholder {0}: rule.matchValue
@@ -1294,6 +1306,10 @@ msgstr "Passwort bestätigen"
 #: src/lib/model-connection-preflight.ts
 msgid "Confirm the URL is reachable from this browser session, then test again."
 msgstr "Prüfe, ob die URL aus dieser Browsersitzung erreichbar ist, und teste erneut."
+
+#: src/pages/RecruitingPanel.tsx
+msgid "Conflicting information"
+msgstr ""
 
 #: src/components/integrations/IntegrationSetup.tsx
 #: src/pages/memory-providers/SerenitySettingsForm.tsx
@@ -2084,10 +2100,6 @@ msgstr "Standard ({0})"
 #: src/pages/MemorySettingsOverlay.tsx
 msgid "Default scope"
 msgstr "Standardbereich"
-
-#: src/pages/RecruitingPanel.tsx
-msgid "Definition questions"
-msgstr ""
 
 #: src/pages/Artifacts.tsx
 #: src/pages/BotContextMenu.tsx
@@ -3303,6 +3315,10 @@ msgstr "Verschiebe sie in deine geteilten Erinnerungen."
 msgid "Move to"
 msgstr "Verschieben nach"
 
+#: src/pages/RecruitingPanel.tsx
+msgid "Must not"
+msgstr ""
+
 #: src/components/call/CallCard.tsx
 msgid "Mute"
 msgstr "Stummschalten"
@@ -4376,6 +4392,11 @@ msgstr ""
 msgid "Role definition"
 msgstr ""
 
+#. placeholder {0}: unphrasedBriefFields.length
+#: src/pages/RecruitingPanel.tsx
+msgid "Role details needing clarification: {0}"
+msgstr ""
+
 #: src/pages/RecruitingPanel.tsx
 msgid "Role revision"
 msgstr ""
@@ -5011,10 +5032,6 @@ msgstr "Sicher gespeichert. Hier nie angezeigt."
 msgid "Stream replies"
 msgstr "Antworten streamen"
 
-#: src/pages/Shell.tsx
-#~ msgid "subagent"
-#~ msgstr "Subagent"
-
 #: src/pages/ModelSettingsOverlay.tsx
 #: src/pages/Onboarding.tsx
 msgid "Submit"
@@ -5598,9 +5615,17 @@ msgstr "Was soll mit seinen Erinnerungen geschehen?"
 msgid "What do you want me on first?"
 msgstr ""
 
+#: src/pages/RecruitingPanel.tsx
+msgid "What location or remote work scope applies?"
+msgstr ""
+
 #: src/components/teach/TeachComputerOverlay.tsx
 msgid "What result will you demonstrate?"
 msgstr "Welches Ergebnis wirst du vorführen?"
+
+#: src/pages/RecruitingPanel.tsx
+msgid "What salary range may be stated in outreach?"
+msgstr ""
 
 #: src/pages/RoutineEditor.tsx
 msgid "What should this routine do each time it runs?"

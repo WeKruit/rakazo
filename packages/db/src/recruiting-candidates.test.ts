@@ -567,6 +567,7 @@ function crmFixture() {
   const role = { ...f.role, title: "Native role", crmBindingEffectId: binding.id as string | null };
   const page = {
     effectId: "read",
+    effect: f.effect,
     roleId: "role",
     taskId: "task",
     actionId: "action",
@@ -2303,6 +2304,7 @@ describe("native candidate source provenance", () => {
       candidateKey: f.occurrence.candidateKey,
     });
     expect(sources.items[0]).toMatchObject({
+      providerTaskId: "provider-task",
       taskId: null,
       actionId: null,
       effectId: "read",
@@ -2311,24 +2313,59 @@ describe("native candidate source provenance", () => {
     });
     expect(f.tx.recruitingResearchAction.findFirst).not.toHaveBeenCalled();
   });
-  it.each(["artifact-hash", "event-role", "event-owner", "route", "schema", "missing-event"])(
-    "rejects a native source with invalid %s",
-    async (boundary) => {
+  it("keeps the exact provider task separate from historical custom task/action links", async () => {
+    const f = crmFixture();
+    const sources = await recruiting.listRecruitingCandidateSources(f.prisma, actor, {
+      roleId: "role",
+      candidateKey: f.occurrence.candidateKey,
+    });
+    expect(sources.items[0]).toMatchObject({
+      providerTaskId: "provider-task",
+      taskId: "task",
+      actionId: "action",
+    });
+  });
+  it.each([{ userId: "other" }, { spaceId: "other" }])(
+    "rejects an actor mismatch before reading source metadata: %j",
+    async (mismatch) => {
       const f = await nativeSourceFixture();
-      if (boundary === "artifact-hash") f.artifact.hash = "f".repeat(64);
-      if (boundary === "event-role") f.event.payload.roleId = "other-role";
-      if (boundary === "event-owner") f.event.runId = "other-run";
-      if (boundary === "route") f.event.payload.providerTaskId = "other-task";
-      if (boundary === "schema") f.event.payload.candidateOutputSchema = "unknown";
-      if (boundary === "missing-event") f.tx.event.findMany.mockResolvedValue([]);
       await expect(
-        recruiting.listRecruitingCandidateSources(f.prisma, actor, {
-          roleId: "role",
-          candidateKey: f.occurrence.candidateKey,
-        }),
-      ).rejects.toThrow();
+        recruiting.listRecruitingCandidateSources(
+          f.prisma,
+          { ...actor, ...mismatch },
+          {
+            roleId: "role",
+            candidateKey: f.occurrence.candidateKey,
+          },
+        ),
+      ).rejects.toThrow(IsolationError);
+      expect(f.tx.recruitingCandidateOccurrence.findMany).not.toHaveBeenCalled();
     },
   );
+  it.each([
+    "artifact-hash",
+    "source-role",
+    "event-role",
+    "event-owner",
+    "route",
+    "schema",
+    "missing-event",
+  ])("rejects a native source with invalid %s", async (boundary) => {
+    const f = await nativeSourceFixture();
+    if (boundary === "artifact-hash") f.artifact.hash = "f".repeat(64);
+    if (boundary === "source-role") f.page.roleId = "other-role";
+    if (boundary === "event-role") f.event.payload.roleId = "other-role";
+    if (boundary === "event-owner") f.event.runId = "other-run";
+    if (boundary === "route") f.event.payload.providerTaskId = "other-task";
+    if (boundary === "schema") f.event.payload.candidateOutputSchema = "unknown";
+    if (boundary === "missing-event") f.tx.event.findMany.mockResolvedValue([]);
+    await expect(
+      recruiting.listRecruitingCandidateSources(f.prisma, actor, {
+        roleId: "role",
+        candidateKey: f.occurrence.candidateKey,
+      }),
+    ).rejects.toThrow();
+  });
   it("keeps the existing CRM identity and target guards for a native discovery", async () => {
     const f = await nativeSourceFixture();
     const prepared = await recruiting.resolveRecruitingCrmImport(

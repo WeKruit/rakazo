@@ -3612,7 +3612,21 @@ export function createRouter(deps: RouterDeps) {
         if (!routine) throw new IsolationError();
         const bot = await repos.getBot(context.actor, routine.botId);
         if (!bot.thread) throw new IsolationError();
-        const threadId = bot.thread.id;
+        const targetThread = routine.threadId
+          ? await deps.prisma.thread.findFirst({
+              where: {
+                id: routine.threadId,
+                spaceId: context.actor.spaceId,
+                OR: [
+                  { botId: bot.id },
+                  { group: { archivedAt: null, members: { some: { botId: bot.id } } } },
+                ],
+              },
+              select: { id: true, groupId: true },
+            })
+          : bot.thread;
+        if (!targetThread) throw new ORPCError("NOT_FOUND");
+        const threadId = targetThread.id;
         const nonce = input.clientNonce ? `routine-test:${input.clientNonce}` : undefined;
         if (nonce) {
           const existing = await deps.prisma.run.findFirst({
@@ -3627,6 +3641,21 @@ export function createRouter(deps: RouterDeps) {
         try {
           // Task + run must commit together so a nonce collision cannot leave an orphan queued Task.
           run = await deps.prisma.$transaction(async (tx) => {
+            if (targetThread.groupId) {
+              await lockOwnedGroup(tx, context.actor, targetThread.groupId);
+              const group = await tx.chatGroup.findFirst({
+                where: {
+                  id: targetThread.groupId,
+                  spaceId: context.actor.spaceId,
+                  userId: context.actor.userId,
+                  archivedAt: null,
+                  thread: { id: threadId },
+                  members: { some: { botId: bot.id, bot: { archivedAt: null } } },
+                },
+                select: { id: true },
+              });
+              if (!group) throw new IsolationError();
+            }
             if (nonce) {
               const existing = await tx.run.findFirst({
                 where: { threadId, clientNonce: nonce },

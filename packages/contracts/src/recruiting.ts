@@ -1104,6 +1104,7 @@ export const RecruitingCandidateSourceSchema = z
   .strictObject({
     crmImports: z.array(RecruitingCrmCandidateSyncSchema),
     report: RecruitingCandidateReportSchema.optional(),
+    providerTaskId: RecruitingId,
     taskId: RecruitingId.nullable(),
     actionId: RecruitingId.nullable(),
     roleRevisionId: RecruitingId,

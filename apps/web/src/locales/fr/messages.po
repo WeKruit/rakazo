@@ -440,6 +440,10 @@ msgstr ""
 msgid "All bots"
 msgstr "Tous les bots"
 
+#: src/pages/RecruitingPanel.tsx
+msgid "All of"
+msgstr ""
+
 #: src/pages/ModelSettingsOverlay.tsx
 msgid "All providers"
 msgstr ""
@@ -548,6 +552,10 @@ msgstr "Répondu : {answer}"
 msgid "Any model, with your own key"
 msgstr ""
 
+#: src/pages/RecruitingPanel.tsx
+msgid "Any of"
+msgstr ""
+
 #: src/components/SoftwareUpdateSection.tsx
 msgid "API is back, but the update did not finish. Check the host logs."
 msgstr "L'API est de retour, mais la mise à jour n'est pas terminée. Vérifiez les journaux de l'hôte."
@@ -610,6 +618,10 @@ msgstr "Arguments"
 #: src/pages/Shell.tsx
 msgid "Artifacts"
 msgstr "Artefacts"
+
+#: src/pages/RecruitingPanel.tsx
+msgid "Ask an agent to clarify in chat."
+msgstr ""
 
 #. placeholder {0}: rule.matchValue
 #: src/components/ApprovalRulesSettings.tsx
@@ -1294,6 +1306,10 @@ msgstr "Confirmer le mot de passe"
 #: src/lib/model-connection-preflight.ts
 msgid "Confirm the URL is reachable from this browser session, then test again."
 msgstr "Confirmez que l'URL est accessible depuis cette session du navigateur, puis testez à nouveau."
+
+#: src/pages/RecruitingPanel.tsx
+msgid "Conflicting information"
+msgstr ""
 
 #: src/components/integrations/IntegrationSetup.tsx
 #: src/pages/memory-providers/SerenitySettingsForm.tsx
@@ -2084,10 +2100,6 @@ msgstr "Par défaut ({0})"
 #: src/pages/MemorySettingsOverlay.tsx
 msgid "Default scope"
 msgstr "Portée par défaut"
-
-#: src/pages/RecruitingPanel.tsx
-msgid "Definition questions"
-msgstr ""
 
 #: src/pages/Artifacts.tsx
 #: src/pages/BotContextMenu.tsx
@@ -3303,6 +3315,10 @@ msgstr "Déplacez-les dans votre mémoire partagée."
 msgid "Move to"
 msgstr "Déplacer vers"
 
+#: src/pages/RecruitingPanel.tsx
+msgid "Must not"
+msgstr ""
+
 #: src/components/call/CallCard.tsx
 msgid "Mute"
 msgstr "Couper le micro"
@@ -4376,6 +4392,11 @@ msgstr ""
 msgid "Role definition"
 msgstr ""
 
+#. placeholder {0}: unphrasedBriefFields.length
+#: src/pages/RecruitingPanel.tsx
+msgid "Role details needing clarification: {0}"
+msgstr ""
+
 #: src/pages/RecruitingPanel.tsx
 msgid "Role revision"
 msgstr ""
@@ -5011,10 +5032,6 @@ msgstr "Stocké en toute sécurité. Jamais affiché ici."
 msgid "Stream replies"
 msgstr "Diffuser les réponses"
 
-#: src/pages/Shell.tsx
-#~ msgid "subagent"
-#~ msgstr "sous-agent"
-
 #: src/pages/ModelSettingsOverlay.tsx
 #: src/pages/Onboarding.tsx
 msgid "Submit"
@@ -5598,9 +5615,17 @@ msgstr "Qu'en est-il de ses mémoires ?"
 msgid "What do you want me on first?"
 msgstr "Que voulez-vous que je fasse en premier ?"
 
+#: src/pages/RecruitingPanel.tsx
+msgid "What location or remote work scope applies?"
+msgstr ""
+
 #: src/components/teach/TeachComputerOverlay.tsx
 msgid "What result will you demonstrate?"
 msgstr "Quel résultat allez-vous démontrer ?"
+
+#: src/pages/RecruitingPanel.tsx
+msgid "What salary range may be stated in outreach?"
+msgstr ""
 
 #: src/pages/RoutineEditor.tsx
 msgid "What should this routine do each time it runs?"

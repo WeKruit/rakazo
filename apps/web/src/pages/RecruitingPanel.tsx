@@ -908,10 +908,29 @@ function ResearchResults({
   );
 }
 
-function expressionText(expression: RecruitingCriterionExpression): string {
-  if (expression.kind === "atom") return expression.statement;
-  if (expression.kind === "not") return `NOT (${expressionText(expression.item)})`;
-  return `(${expression.items.map(expressionText).join(expression.kind === "all" ? " AND " : " OR ")})`;
+function CriteriaExpression({ expression }: { expression: RecruitingCriterionExpression }) {
+  if (expression.kind === "atom")
+    return <p className="whitespace-pre-wrap">{expression.statement}</p>;
+  return (
+    <div className="space-y-1">
+      <p className="text-xs text-muted-foreground">
+        {expression.kind === "all" ? (
+          <Trans>All of</Trans>
+        ) : expression.kind === "any" ? (
+          <Trans>Any of</Trans>
+        ) : (
+          <Trans>Must not</Trans>
+        )}
+      </p>
+      <ul className="space-y-2 border-s border-border ps-3">
+        {(expression.kind === "not" ? [expression.item] : expression.items).map((item, index) => (
+          <li key={index}>
+            <CriteriaExpression expression={item} />
+          </li>
+        ))}
+      </ul>
+    </div>
+  );
 }
 
 function expressionAtoms(
@@ -1667,6 +1686,41 @@ function RecruitingWorkspace({
   }, [threadId, botId, refresh, refreshSignal, denyAccess]);
   const workspace = snapshot?.workspace;
   const criteria = workspace?.revision.criteria ?? [];
+  const brief = workspace?.revision.brief;
+  const briefClarifications = brief ? recruitingBriefClarifications(brief) : [];
+  const unphrasedBriefFields = (brief?.fields ?? []).filter(
+    (field) =>
+      briefClarifications.some(({ fieldKey }) => fieldKey === field.key) &&
+      field.key !== "salary_range" &&
+      field.key !== "location" &&
+      !brief?.questions.some(
+        (question) => question.fieldKey === field.key && !question.answeredBySourceRefId,
+      ),
+  );
+  const roleQuestions = [
+    ...new Set([
+      ...briefClarifications.flatMap(({ fieldKey, question }) => {
+        const saved = brief?.questions.find(
+          (item) => item.fieldKey === fieldKey && !item.answeredBySourceRefId,
+        );
+        if (saved) return [saved.question];
+        if (fieldKey === "salary_range") return [t`What salary range may be stated in outreach?`];
+        if (fieldKey === "location") return [t`What location or remote work scope applies?`];
+        // ponytail: arbitrary keys have no display label; only saved prose identifies the question.
+        return showDiagnostics ? [question] : [];
+      }),
+      ...(workspace?.revision.definitionQuestions ?? []),
+      ...criteria.flatMap((criterion) => criterion.definitionQuestions),
+    ]),
+  ];
+  const roleSources = [
+    ...new Map(
+      [
+        ...(workspace?.revision.sourceRefs ?? []),
+        ...criteria.flatMap((criterion) => criterion.sourceRefs),
+      ].map((source) => [source.id, source]),
+    ).values(),
+  ];
   const assessments = snapshot?.assessments ?? [];
   const selectedKey =
     selection && selection.roleId === workspace?.role.id
@@ -2169,28 +2223,79 @@ function RecruitingWorkspace({
                 </div>
                 {workspace.revision.brief ? (
                   <div className="space-y-2">
-                    <dl className="space-y-2">
-                      {workspace.revision.brief.fields.map((field) => (
-                        <div key={field.key}>
-                          <dt className="font-medium">{field.key.replaceAll("_", " ")}</dt>
-                          <dd>
-                            {field.value ?? field.state} ·{" "}
-                            {field.origin === "user_instruction" ? (
-                              <Trans>User instruction</Trans>
-                            ) : field.origin === "jd" ? (
-                              <Trans>JD</Trans>
-                            ) : field.origin === "hm" ? (
-                              <Trans>Hiring manager</Trans>
-                            ) : (
-                              <Trans>Assumption</Trans>
-                            )}
-                          </dd>
-                        </div>
-                      ))}
-                    </dl>
-                    {recruitingBriefClarifications(workspace.revision.brief).map((question) => (
-                      <p key={question.fieldKey}>{question.question}</p>
-                    ))}
+                    <ul className="space-y-3 text-base leading-relaxed">
+                      {workspace.revision.brief.fields
+                        .filter((field) => field.value !== null)
+                        .map((field) => (
+                          <li key={field.key} className="space-y-1">
+                            <p className="whitespace-pre-wrap">{field.value}</p>
+                            {field.state !== "known" ? (
+                              <p className="text-xs text-muted-foreground">
+                                {field.state === "conflict" ? (
+                                  <Trans>Conflicting information</Trans>
+                                ) : (
+                                  <Trans>Unknown</Trans>
+                                )}
+                              </p>
+                            ) : null}
+                            {field.origin === "inferred" ? (
+                              <p className="text-xs text-muted-foreground">
+                                <Trans>Assumption</Trans>
+                              </p>
+                            ) : null}
+                            <details>
+                              <summary className="cursor-pointer text-xs text-muted-foreground">
+                                <Trans>Sources</Trans>
+                              </summary>
+                              <div className="mt-2 space-y-2 text-sm">
+                                {showDiagnostics ? <p>{field.key}</p> : null}
+                                <p>
+                                  {field.origin === "user_instruction" ? (
+                                    <Trans>User instruction</Trans>
+                                  ) : field.origin === "jd" ? (
+                                    <Trans>JD</Trans>
+                                  ) : field.origin === "hm" ? (
+                                    <Trans>Hiring manager</Trans>
+                                  ) : (
+                                    <Trans>Assumption</Trans>
+                                  )}
+                                </p>
+                                <Sources
+                                  sourceTarget={{
+                                    kind: "role",
+                                    threadId,
+                                    roleRevisionId: workspace.revision.id,
+                                  }}
+                                  showDiagnostics={showDiagnostics}
+                                  sources={roleSources.filter((source) =>
+                                    field.sourceRefIds.includes(source.id),
+                                  )}
+                                />
+                              </div>
+                            </details>
+                          </li>
+                        ))}
+                    </ul>
+                    {showDiagnostics &&
+                    workspace.revision.brief.fields.some((field) => field.value === null) ? (
+                      <details>
+                        <summary className="cursor-pointer text-xs text-muted-foreground">
+                          <Trans>Details</Trans>
+                        </summary>
+                        <dl>
+                          {workspace.revision.brief.fields
+                            .filter((field) => field.value === null)
+                            .map((field) => (
+                              <div key={field.key}>
+                                <dt>{field.key}</dt>
+                                <dd>
+                                  {field.state} · {field.origin}
+                                </dd>
+                              </div>
+                            ))}
+                        </dl>
+                      </details>
+                    ) : null}
                     {workspace.revision.brief.confirmation?.revision ===
                     workspace.revision.revision ? (
                       <p>
@@ -2200,7 +2305,7 @@ function RecruitingWorkspace({
                       <Button
                         disabled={
                           confirming ||
-                          recruitingBriefClarifications(workspace.revision.brief).length > 0 ||
+                          briefClarifications.length > 0 ||
                           workspace.revision.criteria.some(
                             (criterion) =>
                               criterion.priority === "hard" &&
@@ -2545,7 +2650,7 @@ function RecruitingWorkspace({
                           .filter((criterion) => criterion.priority === priority)
                           .map((criterion) => (
                             <li key={criterion.id} className="space-y-2">
-                              <p>{expressionText(criterion.expression)}</p>
+                              <CriteriaExpression expression={criterion.expression} />
                               {expressionAtoms(criterion.expression).map((atom) =>
                                 "employmentRule" in atom ? (
                                   <EmploymentRuleSummary
@@ -2570,11 +2675,6 @@ function RecruitingWorkspace({
                                   />
                                 </div>
                               </details>
-                              {criterion.definitionQuestions.map((question) => (
-                                <p key={question} className="text-muted-foreground">
-                                  {question}
-                                </p>
-                              ))}
                             </li>
                           ))}
                       </ul>
@@ -2591,16 +2691,6 @@ function RecruitingWorkspace({
                         <li key={preference}>{preference}</li>
                       ))}
                     </ul>
-                  </div>
-                ) : null}
-                {workspace.revision.definitionQuestions.length ? (
-                  <div className="space-y-2">
-                    <h4 className="font-medium">
-                      <Trans>Definition questions</Trans>
-                    </h4>
-                    {workspace.revision.definitionQuestions.map((question) => (
-                      <p key={question}>{question}</p>
-                    ))}
                   </div>
                 ) : null}
                 <details>
@@ -3077,14 +3167,58 @@ function RecruitingWorkspace({
               <h3 className="font-medium">
                 <Trans>Role definition</Trans>
               </h3>
-              {[
-                ...(workspace?.revision.definitionQuestions ?? []),
-                ...criteria.flatMap((criterion) => criterion.definitionQuestions),
-              ].map((question, index) => (
+              {roleQuestions.map((question, index) => (
                 <p key={`${index}:${question}`}>{question}</p>
               ))}
-              {!workspace?.revision.definitionQuestions.length &&
-              !criteria.some((criterion) => criterion.definitionQuestions.length) ? (
+              {unphrasedBriefFields.length && workspace ? (
+                <>
+                  <p role="status">
+                    <Trans>Role details needing clarification: {unphrasedBriefFields.length}</Trans>
+                  </p>
+                  <ul className="space-y-3">
+                    {unphrasedBriefFields.map((field) => (
+                      <li key={field.key} className="space-y-1">
+                        <p>
+                          {field.state === "conflict" ? (
+                            <Trans>Conflicting information</Trans>
+                          ) : field.state === "missing" ? (
+                            <Trans>Missing info</Trans>
+                          ) : (
+                            <Trans>Assumption</Trans>
+                          )}
+                        </p>
+                        {field.value !== null ? (
+                          <p className="whitespace-pre-wrap">{field.value}</p>
+                        ) : null}
+                        {field.sourceRefIds.length ? (
+                          <details>
+                            <summary className="cursor-pointer text-xs text-muted-foreground">
+                              <Trans>Sources</Trans>
+                            </summary>
+                            <div className="mt-2">
+                              <Sources
+                                sourceTarget={{
+                                  kind: "role",
+                                  threadId,
+                                  roleRevisionId: workspace.revision.id,
+                                }}
+                                showDiagnostics={showDiagnostics}
+                                sources={roleSources.filter((source) =>
+                                  field.sourceRefIds.includes(source.id),
+                                )}
+                              />
+                            </div>
+                          </details>
+                        ) : null}
+                      </li>
+                    ))}
+                  </ul>
+                  <p className="text-muted-foreground">
+                    <Trans>Ask an agent to clarify in chat.</Trans>
+                  </p>
+                </>
+              ) : null}
+              {!roleQuestions.length && !unphrasedBriefFields.length ? (
                 <p className="text-muted-foreground">
                   <Trans>No saved questions</Trans>
                 </p>
@@ -3417,7 +3551,9 @@ function RecruitingWorkspace({
                   <details key={judgment.criterionId} open className="space-y-2">
                     <summary className="cursor-pointer">
                       <span className="me-2">
-                        {criterion ? expressionText(criterion.expression) : t`Criterion`}
+                        {criterion?.expression.kind === "atom"
+                          ? criterion.expression.statement
+                          : t`Criterion`}
                       </span>
                       <VerdictLabel verdict={judgment.verdict} />
                       {criterion ? (
@@ -3430,6 +3566,9 @@ function RecruitingWorkspace({
                         </span>
                       ) : null}
                     </summary>
+                    {criterion && criterion.expression.kind !== "atom" ? (
+                      <CriteriaExpression expression={criterion.expression} />
+                    ) : null}
                     {facts.map((fact) => (
                       <p key={fact.id}>{fact.statement}</p>
                     ))}

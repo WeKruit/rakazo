@@ -1292,6 +1292,7 @@ it("keeps a historical CRM receipt on its exact source with its original target 
     nextCursor: null,
     items: [
       {
+        providerTaskId: f.task.providerTaskId,
         taskId: f.task.id,
         actionId: f.action.id,
         roleRevisionId: "old-revision",
@@ -1358,6 +1359,7 @@ it("refreshes CRM source receipts without new discoveries and ignores a late old
         actionId: f.action.id,
         roleRevisionId: revision.id,
         effectId: pending.sourceEffectId,
+        providerTaskId: f.task.providerTaskId,
         rowIndex: pending.rowIndex,
         artifactRef: f.reference,
         requestCursor: null,
@@ -1428,6 +1430,7 @@ it("omits stale current CRM details for an excluded selection while refreshing i
         actionId: f.action.id,
         roleRevisionId: revision.id,
         effectId: pending.crm.sourceEffectId,
+        providerTaskId: f.task.providerTaskId,
         rowIndex: pending.crm.rowIndex,
         artifactRef: f.reference,
         requestCursor: null,
@@ -1673,6 +1676,7 @@ it("shows saved source rounds with their exact original revision and Artifact", 
         actionId: f.action.id,
         roleRevisionId: "old-revision",
         effectId: "read-effect",
+        providerTaskId: f.task.providerTaskId,
         rowIndex: 0,
         crmImports: [],
         artifactRef: f.reference,
@@ -1716,6 +1720,7 @@ it("shows a native candidate source Artifact without an empty custom-action head
     nextCursor: null,
     items: [
       {
+        providerTaskId: f.task.providerTaskId,
         taskId: null,
         actionId: null,
         roleRevisionId: revision.id,
@@ -1986,6 +1991,7 @@ it("shows unnamed candidates and real profile links without exposing their stora
     nextCursor: null,
     items: [
       {
+        providerTaskId: "provider-task",
         taskId: null,
         actionId: null,
         roleRevisionId: revision.id,
@@ -2038,6 +2044,7 @@ it("shows retained research fields and gaps for an unassessed candidate without 
         actionId: "internal-action",
         roleRevisionId: revision.id,
         effectId: "internal-effect",
+        providerTaskId: "internal-provider-task",
         rowIndex: 4,
         artifactRef: { artifactId: "internal-artifact", sha256: "a".repeat(64) },
         requestCursor: null,
@@ -2193,6 +2200,7 @@ it("keeps repeated retained reports in native source disclosures with their save
     total: 3,
     nextCursor: "more-sources",
     items: [0, 1].map((index) => ({
+      providerTaskId: "provider-task",
       taskId: null,
       actionId: null,
       roleRevisionId: revision.id,
@@ -2371,6 +2379,7 @@ it.each(["candidate", "role", "denial"])(
         nextCursor: null,
         items: [
           {
+            providerTaskId: "provider-task",
             taskId: null,
             actionId: null,
             roleRevisionId: revision.id,
@@ -3076,7 +3085,7 @@ it("edits exact existing atoms and priority while preserving compound groups", a
     ],
   });
   expect(view.container.textContent).toContain(
-    "(Build reliable systems AND (Use compilers OR NOT (Only manage teams)))",
+    "All ofBuild reliable systemsAny ofUse compilersMust notOnly manage teams",
   );
 });
 
@@ -4780,6 +4789,238 @@ it("switches Cards/Table with one original-revision detail, preserves a refreshe
   await view.click("candidate-2");
   expect(view.container.textContent).toContain("Different role evidence");
   expect(view.container.textContent).not.toContain("Built a compiler");
+});
+
+it("shows exact brief prose and sourced details while collecting unresolved questions in Missing info", async () => {
+  const brief = {
+    fields: [
+      {
+        key: "python_stack",
+        value: "  Hands-on Python work\nwith production services.  ",
+        origin: "jd" as const,
+        state: "known" as const,
+        consequential: true,
+        sourceRefIds: [source.id],
+      },
+      {
+        key: "ideal_background",
+        value: "Research and platform teams both mentioned.",
+        origin: "inferred" as const,
+        state: "conflict" as const,
+        consequential: true,
+        sourceRefIds: [],
+      },
+      {
+        key: "sourcing_quantity_scope",
+        value: null,
+        origin: "user_instruction" as const,
+        state: "missing" as const,
+        consequential: true,
+        sourceRefIds: [],
+      },
+    ],
+    questions: [
+      {
+        id: "background-question",
+        fieldKey: "ideal_background",
+        question: "Which background should guide this search?",
+        answeredBySourceRefId: null,
+      },
+      {
+        id: "quantity-question",
+        fieldKey: "sourcing_quantity_scope",
+        question: "How many candidates should we review?",
+        answeredBySourceRefId: null,
+      },
+    ],
+    rules: [],
+    searchFilters: [],
+    confirmation: null,
+  };
+  api.getWorkspace.mockResolvedValue({
+    role,
+    revision: {
+      ...revision,
+      brief,
+      definitionQuestions: [brief.questions[0]!.question],
+      criteria: revision.criteria.map((criterion) => ({
+        ...criterion,
+        definitionQuestions: [brief.questions[0]!.question],
+      })),
+    },
+  });
+  const view = await mounted("thread-1", undefined, false);
+  expect(view.container.textContent).not.toContain("python stack");
+  expect(view.container.textContent).not.toContain("ideal background");
+  expect(view.container.textContent).not.toContain("sourcing quantity scope");
+  const prose = [...view.container.querySelectorAll("p")].find(
+    (item) => item.textContent === brief.fields[0]!.value,
+  );
+  expect(prose).toBeDefined();
+  expect(prose?.className).toContain("whitespace-pre-wrap");
+  expect(prose?.closest("li")?.querySelector("summary")?.textContent).toBe("Sources");
+  expect(prose?.closest("li")?.textContent).toContain(source.quote);
+  expect(view.container.textContent).toContain("Conflicting information");
+  expect(view.container.textContent).toContain("Assumption");
+  expect(view.container.textContent).not.toContain(brief.questions[0]!.question);
+  expect(view.container.textContent).not.toContain(brief.questions[1]!.question);
+  expect(
+    [...view.container.querySelectorAll("button")].find(
+      (button) => button.textContent === "Confirm brief",
+    )?.disabled,
+  ).toBe(true);
+  await view.click("Missing info");
+  const definition = [...view.container.querySelectorAll("h3")].find(
+    (item) => item.textContent === "Role definition",
+  )!.parentElement!;
+  expect([...definition.querySelectorAll("p")].map((item) => item.textContent)).toEqual([
+    "What salary range may be stated in outreach?",
+    brief.questions[0]!.question,
+    brief.questions[1]!.question,
+    "What location or remote work scope applies?",
+  ]);
+  await view.click("Role");
+  await view.render("thread-1", 0, true);
+  expect(view.container.textContent).toContain("python_stack");
+  expect(view.container.textContent).toContain("sourcing_quantity_scope");
+  expect(api.confirmBrief).not.toHaveBeenCalled();
+});
+
+it.each(["missing", "conflict", "known"] as const)(
+  "keeps an unphrased consequential %s field visible as unresolved without exposing its key",
+  async (state) => {
+    const key = "private_arbitrary_field_key";
+    const value = state === "known" ? "Exact tentative scope" : null;
+    api.getWorkspace.mockResolvedValue({
+      role,
+      revision: {
+        ...revision,
+        definitionQuestions: [],
+        criteria: revision.criteria.map((criterion) => ({
+          ...criterion,
+          definitionQuestions: [],
+        })),
+        brief: {
+          fields: [
+            {
+              key: "location",
+              value: "Remote",
+              origin: "jd",
+              state: "known",
+              consequential: true,
+              sourceRefIds: [source.id],
+            },
+            {
+              key: "salary_range",
+              value: "GBP 90,000 to 120,000",
+              origin: "jd",
+              state: "known",
+              consequential: true,
+              sourceRefIds: [source.id],
+            },
+            {
+              key,
+              value,
+              state,
+              origin: state === "known" ? "inferred" : "jd",
+              consequential: true,
+              sourceRefIds: [source.id],
+            },
+          ],
+          questions: [],
+          rules: [],
+          searchFilters: [],
+          confirmation: null,
+        },
+      },
+    });
+    const view = await mounted("thread-1", undefined, false);
+    expect(
+      [...view.container.querySelectorAll("button")].find(
+        (button) => button.textContent === "Confirm brief",
+      )?.disabled,
+    ).toBe(true);
+    await view.click("Missing info");
+    const definition = [...view.container.querySelectorAll("h3")].find(
+      (item) => item.textContent === "Role definition",
+    )!.parentElement!;
+    expect(definition.querySelector('[role="status"]')?.textContent).toBe(
+      "Role details needing clarification: 1",
+    );
+    expect(definition.textContent).toContain("Ask an agent to clarify in chat.");
+    expect(definition.textContent).toContain(
+      state === "conflict"
+        ? "Conflicting information"
+        : state === "missing"
+          ? "Missing info"
+          : "Assumption",
+    );
+    if (value) expect(definition.textContent).toContain(value);
+    expect(definition.textContent).toContain(source.quote);
+    expect(definition.textContent).not.toContain("No saved questions");
+    expect(definition.textContent).not.toContain(key);
+    expect(definition.textContent).not.toContain(key.replaceAll("_", " "));
+    expect(api.confirmBrief).not.toHaveBeenCalled();
+  },
+);
+
+it("renders saved compound requirements with the same nested groups in Role and assessment", async () => {
+  const expression = {
+    kind: "all" as const,
+    items: [
+      { kind: "atom" as const, id: "atom-1", statement: "Build systems" },
+      {
+        kind: "any" as const,
+        items: [
+          { kind: "atom" as const, id: "atom-2", statement: "Use compilers" },
+          {
+            kind: "not" as const,
+            item: { kind: "atom" as const, id: "atom-3", statement: "Only manage teams" },
+          },
+        ],
+      },
+    ],
+  };
+  api.getWorkspace.mockResolvedValue({
+    role,
+    revision: {
+      ...revision,
+      criteria: [{ ...revision.criteria[0]!, expression }],
+    },
+  });
+  api.listAssessments.mockResolvedValue([
+    {
+      ...assessment,
+      roleRevision: {
+        ...assessment.roleRevision,
+        criteria: [{ ...assessment.roleRevision.criteria[0]!, expression }],
+      },
+    },
+  ]);
+  const view = await mounted();
+  function check(container: Element) {
+    const groups = [...container.querySelectorAll("ul")].filter((list) =>
+      ["All of", "Any of", "Must not"].includes(list.previousElementSibling?.textContent ?? ""),
+    );
+    expect(groups).toHaveLength(3);
+    expect(groups[0]!.previousElementSibling?.textContent).toBe("All of");
+    expect(groups[1]!.previousElementSibling?.textContent).toBe("Any of");
+    expect(groups[2]!.previousElementSibling?.textContent).toBe("Must not");
+    expect(groups[0]!.children).toHaveLength(2);
+    expect(groups[1]!.children).toHaveLength(2);
+    expect(groups[2]!.children).toHaveLength(1);
+    expect(groups[0]!.children[1]!.contains(groups[1]!)).toBe(true);
+    expect(groups[1]!.children[1]!.contains(groups[2]!)).toBe(true);
+    expect(groups[2]!.textContent).toBe("Only manage teams");
+    expect(container.textContent).not.toContain(" AND ");
+    expect(container.textContent).not.toContain(" OR ");
+    expect(container.textContent).not.toContain("NOT (");
+  }
+  check(view.container);
+  await view.click("Evidence");
+  await view.click("candidate-1");
+  check(view.container.querySelector('[role="dialog"]')!);
+  expect(api.editCriteria).not.toHaveBeenCalled();
 });
 
 it("confirms only the reviewed brief revision through the human API", async () => {

@@ -139,6 +139,7 @@ describe("recruiting contracts", () => {
   it("requires candidate source task/action references to be present or null together", () => {
     const source = {
       crmImports: [],
+      providerTaskId: "provider-task",
       taskId: null,
       actionId: null,
       roleRevisionId: role.currentRevisionId,
@@ -158,6 +159,9 @@ describe("recruiting contracts", () => {
       }),
     ).toEqual({ ...source, taskId: action.taskId, actionId: action.id });
     for (const references of [
+      { providerTaskId: undefined },
+      { providerTaskId: null },
+      { providerTaskId: " " },
       { taskId: action.taskId, actionId: null },
       { taskId: null, actionId: action.id },
       { taskId: undefined, actionId: undefined },

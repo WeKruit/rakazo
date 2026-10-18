@@ -440,6 +440,10 @@ msgstr "All assessments"
 msgid "All bots"
 msgstr "All bots"
 
+#: src/pages/RecruitingPanel.tsx
+msgid "All of"
+msgstr "All of"
+
 #: src/pages/ModelSettingsOverlay.tsx
 msgid "All providers"
 msgstr "All providers"
@@ -548,6 +552,10 @@ msgstr "Answered: {answer}"
 msgid "Any model, with your own key"
 msgstr "Any model, with your own key"
 
+#: src/pages/RecruitingPanel.tsx
+msgid "Any of"
+msgstr "Any of"
+
 #: src/components/SoftwareUpdateSection.tsx
 msgid "API is back, but the update did not finish. Check the host logs."
 msgstr "API is back, but the update did not finish. Check the host logs."
@@ -610,6 +618,10 @@ msgstr "Arguments"
 #: src/pages/Shell.tsx
 msgid "Artifacts"
 msgstr "Artifacts"
+
+#: src/pages/RecruitingPanel.tsx
+msgid "Ask an agent to clarify in chat."
+msgstr "Ask an agent to clarify in chat."
 
 #. placeholder {0}: rule.matchValue
 #: src/components/ApprovalRulesSettings.tsx
@@ -1294,6 +1306,10 @@ msgstr "Confirm password"
 #: src/lib/model-connection-preflight.ts
 msgid "Confirm the URL is reachable from this browser session, then test again."
 msgstr "Confirm the URL is reachable from this browser session, then test again."
+
+#: src/pages/RecruitingPanel.tsx
+msgid "Conflicting information"
+msgstr "Conflicting information"
 
 #: src/components/integrations/IntegrationSetup.tsx
 #: src/pages/memory-providers/SerenitySettingsForm.tsx
@@ -2084,10 +2100,6 @@ msgstr "Default ({0})"
 #: src/pages/MemorySettingsOverlay.tsx
 msgid "Default scope"
 msgstr "Default scope"
-
-#: src/pages/RecruitingPanel.tsx
-msgid "Definition questions"
-msgstr "Definition questions"
 
 #: src/pages/Artifacts.tsx
 #: src/pages/BotContextMenu.tsx
@@ -3303,6 +3315,10 @@ msgstr "Move them to your shared memory."
 msgid "Move to"
 msgstr "Move to"
 
+#: src/pages/RecruitingPanel.tsx
+msgid "Must not"
+msgstr "Must not"
+
 #: src/components/call/CallCard.tsx
 msgid "Mute"
 msgstr "Mute"
@@ -4376,6 +4392,11 @@ msgstr "Role"
 msgid "Role definition"
 msgstr "Role definition"
 
+#. placeholder {0}: unphrasedBriefFields.length
+#: src/pages/RecruitingPanel.tsx
+msgid "Role details needing clarification: {0}"
+msgstr "Role details needing clarification: {0}"
+
 #: src/pages/RecruitingPanel.tsx
 msgid "Role revision"
 msgstr "Role revision"
@@ -5011,10 +5032,6 @@ msgstr "Stored securely. Never shown here."
 msgid "Stream replies"
 msgstr "Stream replies"
 
-#: src/pages/Shell.tsx
-#~ msgid "subagent"
-#~ msgstr "subagent"
-
 #: src/pages/ModelSettingsOverlay.tsx
 #: src/pages/Onboarding.tsx
 msgid "Submit"
@@ -5598,9 +5615,17 @@ msgstr "What about its memories?"
 msgid "What do you want me on first?"
 msgstr "What do you want me on first?"
 
+#: src/pages/RecruitingPanel.tsx
+msgid "What location or remote work scope applies?"
+msgstr "What location or remote work scope applies?"
+
 #: src/components/teach/TeachComputerOverlay.tsx
 msgid "What result will you demonstrate?"
 msgstr "What result will you demonstrate?"
+
+#: src/pages/RecruitingPanel.tsx
+msgid "What salary range may be stated in outreach?"
+msgstr "What salary range may be stated in outreach?"
 
 #: src/pages/RoutineEditor.tsx
 msgid "What should this routine do each time it runs?"

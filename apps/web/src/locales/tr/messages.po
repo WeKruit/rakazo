@@ -440,6 +440,10 @@ msgstr ""
 msgid "All bots"
 msgstr ""
 
+#: src/pages/RecruitingPanel.tsx
+msgid "All of"
+msgstr ""
+
 #: src/pages/ModelSettingsOverlay.tsx
 msgid "All providers"
 msgstr ""
@@ -548,6 +552,10 @@ msgstr "Yanıtlandı: {answer}"
 msgid "Any model, with your own key"
 msgstr ""
 
+#: src/pages/RecruitingPanel.tsx
+msgid "Any of"
+msgstr ""
+
 #: src/components/SoftwareUpdateSection.tsx
 msgid "API is back, but the update did not finish. Check the host logs."
 msgstr ""
@@ -609,6 +617,10 @@ msgstr "Argümanlar"
 #: src/pages/Artifacts.tsx
 #: src/pages/Shell.tsx
 msgid "Artifacts"
+msgstr ""
+
+#: src/pages/RecruitingPanel.tsx
+msgid "Ask an agent to clarify in chat."
 msgstr ""
 
 #. placeholder {0}: rule.matchValue
@@ -1294,6 +1306,10 @@ msgstr "Parolayı doğrulayın"
 #: src/lib/model-connection-preflight.ts
 msgid "Confirm the URL is reachable from this browser session, then test again."
 msgstr "URL'nin bu tarayıcı oturumundan erişilebilir olduğunu doğrula, sonra yeniden test et."
+
+#: src/pages/RecruitingPanel.tsx
+msgid "Conflicting information"
+msgstr ""
 
 #: src/components/integrations/IntegrationSetup.tsx
 #: src/pages/memory-providers/SerenitySettingsForm.tsx
@@ -2084,10 +2100,6 @@ msgstr "Varsayılan ({0})"
 #: src/pages/MemorySettingsOverlay.tsx
 msgid "Default scope"
 msgstr "Varsayılan kapsam"
-
-#: src/pages/RecruitingPanel.tsx
-msgid "Definition questions"
-msgstr ""
 
 #: src/pages/Artifacts.tsx
 #: src/pages/BotContextMenu.tsx
@@ -3303,6 +3315,10 @@ msgstr "Bunları ortak hafızana taşı."
 msgid "Move to"
 msgstr "Taşı"
 
+#: src/pages/RecruitingPanel.tsx
+msgid "Must not"
+msgstr ""
+
 #: src/components/call/CallCard.tsx
 msgid "Mute"
 msgstr "Sesi kapat"
@@ -4376,6 +4392,11 @@ msgstr ""
 msgid "Role definition"
 msgstr ""
 
+#. placeholder {0}: unphrasedBriefFields.length
+#: src/pages/RecruitingPanel.tsx
+msgid "Role details needing clarification: {0}"
+msgstr ""
+
 #: src/pages/RecruitingPanel.tsx
 msgid "Role revision"
 msgstr ""
@@ -5011,10 +5032,6 @@ msgstr "Güvenle saklanır. Burada gösterilmez."
 msgid "Stream replies"
 msgstr "Yanıtları akışla göster"
 
-#: src/pages/Shell.tsx
-#~ msgid "subagent"
-#~ msgstr "alt ajan"
-
 #: src/pages/ModelSettingsOverlay.tsx
 #: src/pages/Onboarding.tsx
 msgid "Submit"
@@ -5598,9 +5615,17 @@ msgstr "Hafızası ne olsun?"
 msgid "What do you want me on first?"
 msgstr ""
 
+#: src/pages/RecruitingPanel.tsx
+msgid "What location or remote work scope applies?"
+msgstr ""
+
 #: src/components/teach/TeachComputerOverlay.tsx
 msgid "What result will you demonstrate?"
 msgstr "Hangi sonucu göstereceksin?"
+
+#: src/pages/RecruitingPanel.tsx
+msgid "What salary range may be stated in outreach?"
+msgstr ""
 
 #: src/pages/RoutineEditor.tsx
 msgid "What should this routine do each time it runs?"

@@ -824,6 +824,7 @@ describe("retained candidate report API", () => {
     const artifactRef = { artifactId: "report-artifact", sha256 };
     const occurrence = {
       crmImports: [],
+      providerTaskId: "provider-task",
       taskId: legacy ? "task" : null,
       actionId: legacy ? "action" : null,
       roleRevisionId: "old-revision",

@@ -1,7 +1,11 @@
+import { createRouterClient } from "@orpc/server";
 import type { Actor } from "@rakazo/contracts";
 import { RoutineHistorySchema } from "@rakazo/contracts";
 import type { PrismaClient } from "@rakazo/db";
+import { IsolationError } from "@rakazo/db";
 import { describe, expect, it, vi } from "vitest";
+import type { RouterDeps } from "./router.js";
+import { createRouter } from "./router.js";
 import { listRoutineRuns } from "./routine-runs.js";
 
 const actor: Actor = {
@@ -156,5 +160,162 @@ describe("routine history", () => {
       groupId: "group-1",
       messageId: "group-reply",
     });
+  });
+});
+
+function testRunFixture(threadId: string | null, destinationExists = true) {
+  const runs: Array<{ id: string; spaceId: string; threadId: string; clientNonce?: string }> = [];
+  const tasks: Array<{ id: string; threadId: string }> = [];
+  const groupId = threadId && threadId !== "bot-thread" ? "group-1" : null;
+  const routine = { id: "routine-1", botId: "bot-1", threadId, prompt: "Review the role" };
+  const prisma = {
+    routine: {
+      findFirst: vi.fn(async () => routine),
+      findUnique: vi.fn(async () => ({ modelProvider: null, modelId: null, thinkingLevel: null })),
+    },
+    bot: { findFirst: vi.fn(async () => ({ id: "bot-1", thread: { id: "bot-thread" } })) },
+    thread: {
+      findFirst: vi.fn(async () => (destinationExists ? { id: threadId, groupId } : null)),
+    },
+    chatGroup: { findFirst: vi.fn(async () => ({ id: groupId })) },
+    $queryRaw: vi.fn(async () => [{ id: groupId }]),
+    agentSkill: { findMany: vi.fn(async () => []) },
+    task: {
+      create: vi.fn(async ({ data }: { data: { threadId: string } }) => {
+        const task = { id: `task-${tasks.length + 1}`, ...data };
+        tasks.push(task);
+        return task;
+      }),
+    },
+    run: {
+      findFirst: vi.fn(async ({ where }: { where: { threadId: string; clientNonce: string } }) =>
+        runs.find(
+          (run) => run.threadId === where.threadId && run.clientNonce === where.clientNonce,
+        ),
+      ),
+      create: vi.fn(
+        async ({ data }: { data: { spaceId: string; threadId: string; clientNonce?: string } }) => {
+          if (
+            data.clientNonce &&
+            runs.some((run) => run.spaceId === data.spaceId && run.clientNonce === data.clientNonce)
+          )
+            throw Object.assign(new Error("Run nonce already exists"), { code: "P2002" });
+          const run = { ...data, id: `run-${runs.length + 1}` };
+          runs.push(run);
+          return run;
+        },
+      ),
+    },
+    $transaction: vi.fn(),
+  };
+  prisma.$transaction.mockImplementation(async (fn: (tx: typeof prisma) => unknown) => {
+    const runCount = runs.length;
+    const taskCount = tasks.length;
+    try {
+      return await fn(prisma);
+    } catch (error) {
+      runs.splice(runCount);
+      tasks.splice(taskCount);
+      throw error;
+    }
+  });
+  const jobs = { enqueue: vi.fn(async () => undefined) };
+  const client = createRouterClient(createRouter({ prisma, jobs } as unknown as RouterDeps), {
+    context: { actor },
+  });
+  return { client, prisma, jobs, runs, tasks };
+}
+
+describe("routine test run destination", () => {
+  it.each([null, "bot-thread", "group-thread"])(
+    "preserves the saved destination %s",
+    async (saved) => {
+      const { client, prisma } = testRunFixture(saved);
+      await client.routines.testRun({ routineId: "routine-1" });
+      const threadId = saved ?? "bot-thread";
+      expect(prisma.task.create).toHaveBeenCalledWith(
+        expect.objectContaining({ data: expect.objectContaining({ threadId }) }),
+      );
+      expect(prisma.run.create).toHaveBeenCalledWith(
+        expect.objectContaining({ data: expect.objectContaining({ threadId, botId: "bot-1" }) }),
+      );
+      if (saved) {
+        expect(prisma.thread.findFirst).toHaveBeenCalledWith({
+          where: {
+            id: saved,
+            spaceId: actor.spaceId,
+            OR: [
+              { botId: "bot-1" },
+              { group: { archivedAt: null, members: { some: { botId: "bot-1" } } } },
+            ],
+          },
+          select: { id: true, groupId: true },
+        });
+      } else {
+        expect(prisma.thread.findFirst).not.toHaveBeenCalled();
+      }
+    },
+  );
+
+  it("refuses a missing, foreign, archived or no-longer-member destination before writing", async () => {
+    const { client, prisma, jobs } = testRunFixture("unavailable-group-thread", false);
+    await expect(client.routines.testRun({ routineId: "routine-1" })).rejects.toMatchObject({
+      code: "NOT_FOUND",
+    });
+    expect(prisma.task.create).not.toHaveBeenCalled();
+    expect(prisma.run.create).not.toHaveBeenCalled();
+    expect(jobs.enqueue).not.toHaveBeenCalled();
+  });
+
+  it.each(["archive", "membership removal"])("rechecks the Crew after concurrent %s", async () => {
+    const { client, prisma, jobs } = testRunFixture("group-thread");
+    prisma.chatGroup.findFirst.mockResolvedValue(null as never);
+    await expect(client.routines.testRun({ routineId: "routine-1" })).rejects.toBeInstanceOf(
+      IsolationError,
+    );
+    expect(prisma.$queryRaw).toHaveBeenCalled();
+    expect(prisma.chatGroup.findFirst).toHaveBeenCalledWith({
+      where: {
+        id: "group-1",
+        spaceId: actor.spaceId,
+        userId: actor.userId,
+        archivedAt: null,
+        thread: { id: "group-thread" },
+        members: { some: { botId: "bot-1", bot: { archivedAt: null } } },
+      },
+      select: { id: true },
+    });
+    expect(prisma.$queryRaw.mock.invocationCallOrder[0]).toBeLessThan(
+      prisma.chatGroup.findFirst.mock.invocationCallOrder[0]!,
+    );
+    expect(prisma.task.create).not.toHaveBeenCalled();
+    expect(prisma.run.create).not.toHaveBeenCalled();
+    expect(jobs.enqueue).not.toHaveBeenCalled();
+  });
+
+  it("replays the same group nonce without creating another task or run", async () => {
+    const { client, prisma } = testRunFixture("group-thread");
+    const first = await client.routines.testRun({ routineId: "routine-1", clientNonce: "same" });
+    const replay = await client.routines.testRun({ routineId: "routine-1", clientNonce: "same" });
+    expect(replay).toEqual(first);
+    expect(prisma.task.create).toHaveBeenCalledTimes(1);
+    expect(prisma.run.create).toHaveBeenCalledTimes(1);
+  });
+
+  it("rejects a different-thread nonce collision and rolls back the queued task", async () => {
+    const { client, jobs, runs, tasks } = testRunFixture("group-thread");
+    const existing = {
+      id: "other-run",
+      spaceId: actor.spaceId,
+      threadId: "bot-thread",
+      clientNonce: "routine-test:same",
+    };
+    runs.push(existing);
+    await expect(
+      client.routines.testRun({ routineId: "routine-1", clientNonce: "same" }),
+    ).rejects.toMatchObject({ code: "P2002" });
+    expect(runs).toEqual([existing]);
+    expect(tasks).toEqual([]);
+    expect(jobs.enqueue).not.toHaveBeenCalled();
   });
 });

@@ -440,6 +440,10 @@ msgstr ""
 msgid "All bots"
 msgstr ""
 
+#: src/pages/RecruitingPanel.tsx
+msgid "All of"
+msgstr "全部满足"
+
 #: src/pages/ModelSettingsOverlay.tsx
 msgid "All providers"
 msgstr ""
@@ -548,6 +552,10 @@ msgstr "已回答：{answer}"
 msgid "Any model, with your own key"
 msgstr ""
 
+#: src/pages/RecruitingPanel.tsx
+msgid "Any of"
+msgstr "满足任一项"
+
 #: src/components/SoftwareUpdateSection.tsx
 msgid "API is back, but the update did not finish. Check the host logs."
 msgstr "API 已恢复，但更新未完成。请查看宿主日志。"
@@ -610,6 +618,10 @@ msgstr "参数"
 #: src/pages/Shell.tsx
 msgid "Artifacts"
 msgstr ""
+
+#: src/pages/RecruitingPanel.tsx
+msgid "Ask an agent to clarify in chat."
+msgstr "在对话中请 Agent 澄清。"
 
 #. placeholder {0}: rule.matchValue
 #: src/components/ApprovalRulesSettings.tsx
@@ -1294,6 +1306,10 @@ msgstr "确认密码"
 #: src/lib/model-connection-preflight.ts
 msgid "Confirm the URL is reachable from this browser session, then test again."
 msgstr "请确认此浏览器会话可以访问该 URL，然后重新测试。"
+
+#: src/pages/RecruitingPanel.tsx
+msgid "Conflicting information"
+msgstr "信息存在冲突"
 
 #: src/components/integrations/IntegrationSetup.tsx
 #: src/pages/memory-providers/SerenitySettingsForm.tsx
@@ -2084,10 +2100,6 @@ msgstr "默认（{0}）"
 #: src/pages/MemorySettingsOverlay.tsx
 msgid "Default scope"
 msgstr "默认范围"
-
-#: src/pages/RecruitingPanel.tsx
-msgid "Definition questions"
-msgstr ""
 
 #: src/pages/Artifacts.tsx
 #: src/pages/BotContextMenu.tsx
@@ -3303,6 +3315,10 @@ msgstr "把它们移到共享记忆。"
 msgid "Move to"
 msgstr "移动到"
 
+#: src/pages/RecruitingPanel.tsx
+msgid "Must not"
+msgstr "不得满足"
+
 #: src/components/call/CallCard.tsx
 msgid "Mute"
 msgstr "静音"
@@ -4376,6 +4392,11 @@ msgstr ""
 msgid "Role definition"
 msgstr ""
 
+#. placeholder {0}: unphrasedBriefFields.length
+#: src/pages/RecruitingPanel.tsx
+msgid "Role details needing clarification: {0}"
+msgstr "仍需澄清的岗位信息：{0} 项"
+
 #: src/pages/RecruitingPanel.tsx
 msgid "Role revision"
 msgstr ""
@@ -5011,10 +5032,6 @@ msgstr "已安全存储。不会显示在这里。"
 msgid "Stream replies"
 msgstr "流式回复"
 
-#: src/pages/Shell.tsx
-#~ msgid "subagent"
-#~ msgstr "子 Agent"
-
 #: src/pages/ModelSettingsOverlay.tsx
 #: src/pages/Onboarding.tsx
 msgid "Submit"
@@ -5598,9 +5615,17 @@ msgstr "它的记忆怎么处理？"
 msgid "What do you want me on first?"
 msgstr "你想让我先做什么？"
 
+#: src/pages/RecruitingPanel.tsx
+msgid "What location or remote work scope applies?"
+msgstr "工作地点和远程办公范围是什么？"
+
 #: src/components/teach/TeachComputerOverlay.tsx
 msgid "What result will you demonstrate?"
 msgstr "你要示范什么结果？"
+
+#: src/pages/RecruitingPanel.tsx
+msgid "What salary range may be stated in outreach?"
+msgstr "联系候选人时可以说明什么薪资范围？"
 
 #: src/pages/RoutineEditor.tsx
 msgid "What should this routine do each time it runs?"

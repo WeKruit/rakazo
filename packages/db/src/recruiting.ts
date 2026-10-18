@@ -6622,7 +6622,7 @@ export async function listRecruitingCandidateSources(
             }
           : {}),
         take: limit + 1,
-        include: { page: true },
+        include: { page: { include: { effect: { select: { request: true } } } } },
       });
       const selected = rows.slice(0, limit);
       const checked = new Set<string>();
@@ -6649,6 +6649,8 @@ export async function listRecruitingCandidateSources(
         candidateKey: candidate.candidateKey,
         items: selected.map(({ page, rowIndex }) => ({
           crmImports: syncs.get(`${page.effectId}:${rowIndex}`)!,
+          providerTaskId: researchReadRequest(page.effect.request, undefined, "get_rows").args
+            .task_id,
           taskId: page.taskId,
           actionId: page.actionId,
           roleRevisionId: page.roleRevisionId,

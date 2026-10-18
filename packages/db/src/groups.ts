@@ -545,6 +545,9 @@ export function createGroupRepos(prisma: PrismaClient) {
         });
         const contextBotId = group?.members[0]?.botId;
         if (!contextBotId) throw new IsolationError();
+        await tx.routine.deleteMany({
+          where: { spaceId: actor.spaceId, userId: actor.userId, thread: { groupId } },
+        });
         await tx.chatGroup.delete({ where: { id: groupId } });
         return {
           contextBotId,
