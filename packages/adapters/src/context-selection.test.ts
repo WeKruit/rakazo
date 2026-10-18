@@ -320,6 +320,27 @@ describe("bounded context selection", () => {
     });
     expect(decoded.diagnostic).toContain("Tool result truncated");
   });
+
+  it.each([undefined, false, true])(
+    "omits oversized metadata without losing error status %s",
+    (isError) => {
+      const payload = {
+        ...(isError === undefined ? {} : { isError }),
+        rows: Array.from({ length: 100 }, (_, index) => ({ id: `row-${index}` })),
+        nextCursor: "exact-cursor",
+      };
+      const original = JSON.stringify(payload);
+      const projected = shortenToolResultText(original, 128);
+      expect(projected.length).toBeLessThanOrEqual(128);
+      expect(JSON.parse(projected)).toEqual({
+        contextTruncated: true,
+        needsRetry: true,
+        ...(isError === undefined ? {} : { isError }),
+        error: "Read less at the same offset/cursor; never repeat writes.",
+      });
+      expect(JSON.stringify(payload)).toBe(original);
+    },
+  );
   it("fails explicitly if mandatory content cannot fit rather than silently losing the request", () => {
     expect(() =>
       selectContext([user("large ".repeat(2000))], { budget, strategy: "retrieval" }),

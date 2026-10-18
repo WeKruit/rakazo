@@ -45,7 +45,6 @@ import type {
   ConnectorTool,
   ModelCallObserver,
 } from "@rakazo/adapter-kit";
-import { DEFAULT_CONTEXT_STRATEGY } from "@rakazo/adapter-kit";
 import { usableModelId } from "@rakazo/contracts";
 import { abortableDelay } from "@rakazo/core";
 import { getLogger } from "@rakazo/logging";
@@ -2355,7 +2354,7 @@ export function jsonField(spec: unknown): ReturnType<typeof Type.String> {
 
 export function serializeToolResult(
   result: unknown,
-  strategy: AgentRunRequest["contextStrategy"],
+  _strategy: AgentRunRequest["contextStrategy"],
   name: string,
   args: Record<string, unknown>,
 ) {
@@ -2386,9 +2385,7 @@ export function serializeToolResult(
     if (!text) return "ok";
     // skill-tools.ts already bounds skill content; the context budget selector may still shorten it.
     if (text.length <= 12_000 || VERBATIM_TOOL_RESULTS.has(name)) return text;
-    return (strategy ?? DEFAULT_CONTEXT_STRATEGY) === "current"
-      ? clipToolResultText(text)
-      : shortenToolResultText(text, 12_000, { name, arguments: args });
+    return shortenToolResultText(text, 12_000, { name, arguments: args });
   } catch {
     return "ok";
   }

@@ -298,6 +298,16 @@ function shortenStructuredResult(source: string, size: number): string | undefin
     // String encoding deltas preserve the budget without reencoding untouched structure.
     encodedLength += JSON.stringify(shortened).length - JSON.stringify(value).length;
   }
+  if (encodedLength > size) {
+    const isError =
+      payload && typeof payload === "object" && "isError" in payload ? payload.isError : undefined;
+    return JSON.stringify({
+      contextTruncated: true,
+      needsRetry: true,
+      ...(typeof isError === "boolean" ? { isError } : {}),
+      error: "Read less at the same offset/cursor; never repeat writes.",
+    });
+  }
   return JSON.stringify(holder.payload);
 }
 

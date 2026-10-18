@@ -144,9 +144,32 @@ describe("serializeToolResult", () => {
       structuredContent,
       content: [{ type: "text", text: JSON.stringify(structuredContent) }],
     };
-    const projected = JSON.stringify({ structuredContent });
-    expect(serializeToolResult(result, "current", "mcp__service__read", {})).toBe(
-      `${projected.slice(0, TOOL_RESULT_TEXT_LIMIT)}…`,
-    );
+    const projected = serializeToolResult(result, "current", "mcp__service__read", {});
+    expect(projected.length).toBeLessThanOrEqual(TOOL_RESULT_TEXT_LIMIT);
+    expect(JSON.parse(projected)).toMatchObject({ contextTruncated: true });
   });
+
+  it.each(["current", "retrieval"] as const)(
+    "returns a bounded JSON retry notice when %s result metadata cannot fit",
+    (strategy) => {
+      const result = {
+        isError: false,
+        rows: Array.from({ length: 100 }, (_, index) => ({
+          id: `row-${index}`,
+          name: "x".repeat(120),
+          status: "unreviewed",
+        })),
+      };
+      const original = JSON.stringify(result);
+      const projected = serializeToolResult(result, strategy, "mcp__service__read", {});
+      expect(projected.length).toBeLessThanOrEqual(TOOL_RESULT_TEXT_LIMIT);
+      expect(JSON.parse(projected)).toEqual({
+        contextTruncated: true,
+        needsRetry: true,
+        isError: false,
+        error: "Read less at the same offset/cursor; never repeat writes.",
+      });
+      expect(JSON.stringify(result)).toBe(original);
+    },
+  );
 });
