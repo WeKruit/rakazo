@@ -385,6 +385,7 @@ import {
   MISSING_TOOL_FINAL_RESPONSE_ERROR,
   maxToolCallsPerTurn,
   PiAgentRuntime,
+  parametersFor,
   providerFailureText,
 } from "./pi-runtime.js";
 import { TOOL_RESULT_TEXT_LIMIT } from "./pi-runtime-limits.js";
@@ -2136,5 +2137,41 @@ describe("Pi connector tool dispatch", () => {
       undefined,
       { onShellStillRunning: expect.any(Function) },
     );
+  });
+
+  it.each([
+    { artifactId: "artifact-version-1" },
+    { artifactId: "artifact-version-1", path: "shared/original.zip" },
+  ])("preserves explicit artifact write arguments without inventing content: %j", async (args) => {
+    fakeAgentState.invoke = { name: "write_file", args };
+    const executeTool = vi.fn(async () => ({ ok: true }));
+    const runtime = new PiAgentRuntime();
+    const tool = builtinAgentTools.find((entry) => entry.name === "write_file")!;
+    const schema = JSON.parse(JSON.stringify(parametersFor(tool)));
+    expect(schema.properties.artifactId).toBeDefined();
+    expect(schema.required ?? []).not.toContain("content");
+    for await (const _event of runtime.run(
+      {
+        botId: "b",
+        threadId: "t",
+        runId: "r",
+        prompt: "Use the saved original in the workspace.",
+        instructions: "Use the original artifact version.",
+        history: [],
+        tools: [tool],
+        model: { provider: "test", id: "dispatch-test-model" },
+        executeTool,
+      },
+      {
+        operationId: "artifact-write",
+        traceId: "artifact-write",
+        spaceId: "w",
+        userId: "u",
+        signal: new AbortController().signal,
+      },
+    )) {
+      // Exhaust the runtime event stream so native tool dispatch completes.
+    }
+    expect(executeTool.mock.calls[0]?.slice(0, 2)).toEqual(["write_file", args]);
   });
 });

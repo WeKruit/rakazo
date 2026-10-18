@@ -1,3 +1,4 @@
+import { createHash } from "node:crypto";
 import type {
   AgentRunRequest,
   AgentRuntimeEvent,
@@ -29,6 +30,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import type * as AutoReviewModule from "./auto-review.js";
 import { runAutoReviewJudge } from "./auto-review.js";
 import type * as ComputerLifecycleModule from "./computer-lifecycle.js";
+import type * as ComputerWorkspaceModule from "./computer-workspace.js";
 import { createRunExecutor, selectBuiltinToolsForRun } from "./executor.js";
 import {
   CATALOG_EXECUTE,
@@ -91,6 +93,13 @@ vi.mock("./computer-lifecycle.js", async (importOriginal) => ({
   acquireComputerExecutionLease: async () => null,
   provisionComputer: async () => ({ id: "computer-1", kind: "desktop" }),
 }));
+
+const checkpointWorkspace = vi.hoisted(() => vi.fn(async () => "home-revision"));
+vi.mock("./computer-workspace.js", async (importOriginal) => ({
+  ...(await importOriginal<typeof ComputerWorkspaceModule>()),
+  checkpointRunComputerWorkspace: checkpointWorkspace,
+}));
+beforeEach(() => checkpointWorkspace.mockClear());
 
 vi.mock("./auto-review.js", async (importOriginal) => ({
   ...(await importOriginal<typeof AutoReviewModule>()),
@@ -310,6 +319,7 @@ function fixture(
     actionApprovalRule: { findMany: vi.fn(async (): Promise<ActionApprovalRule[]> => []) },
     actionAutoReviewPreference: { findUnique: vi.fn(async () => ({ enabled: false })) },
     externalEffect,
+    artifact: { findFirst: vi.fn(), findMany: vi.fn(async () => []) },
   };
   const pauseRunForInput = vi.fn(async () => {
     run.status = "waiting_input";
@@ -341,13 +351,17 @@ function fixture(
       truncated: false,
     })),
   };
+  const sandbox = {
+    describe: () => ({ capabilities: { graphical: false } }),
+    writeFile: vi.fn(async () => undefined),
+  };
   const executor = createRunExecutor({
     contextStrategy: options.contextStrategy,
     web,
     prisma,
     runtime: { describe: () => ({ capabilities: { scripted: false } }), run: runtimeRun },
     connector,
-    sandbox: { describe: () => ({ capabilities: { graphical: false } }) },
+    sandbox,
     memory: {
       describe: () => ({ capabilities: {} }),
       read: memoryRead,
@@ -372,6 +386,7 @@ function fixture(
     effects,
     results,
     web,
+    sandbox,
     sourceMessages,
     scratchpadRows,
     memoryCommit,
@@ -410,6 +425,180 @@ function fixture(
     },
   };
 }
+
+describe("explicit artifact workspace writes", () => {
+  const bytes = new Uint8Array([0, 255, 128, 13, 10]);
+  const hash = createHash("sha256").update(bytes).digest("hex");
+  const original = {
+    id: "artifact-version-1",
+    storageKey: "stored-version-1",
+    name: "original.zip",
+    mimeType: "application/zip",
+    size: bytes.byteLength,
+    hash,
+    version: 1,
+    rootArtifactId: null,
+  };
+
+  it("keeps initial and reclaimed steering attachments as references without restoring deleted copies", async () => {
+    const f = fixture("reference-only-upload");
+    const human = {
+      id: "human-upload",
+      seq: 1,
+      role: "user",
+      botId: null,
+      runId: f.runData.id,
+      blocks: [
+        {
+          kind: "file" as const,
+          artifactId: original.id,
+          name: original.name,
+          mimeType: original.mimeType,
+          size: original.size,
+        },
+      ],
+    };
+    f.runData.sourceMessageId = human.id;
+    f.prisma.message.findMany.mockResolvedValue([human]);
+    f.claimSteering.mockResolvedValue([
+      {
+        id: "steering-1",
+        messageId: human.id,
+        text: "Read the saved original.",
+        blocks: human.blocks,
+      },
+    ]);
+    f.runtimeRun.mockImplementation(async function* (request) {
+      expect(request.prompt).not.toContain("available on your computer");
+      expect(request.instructions).toContain(`"artifactId":"${original.id}"`);
+      const [steering] = await request.claimSteering!([]);
+      expect(steering!.text).toContain(`"artifactId":"${original.id}"`);
+      expect(steering!.text).not.toContain("available on your computer");
+      yield { type: "done" as const, text: "Reference retained." };
+    });
+    await f.run();
+    await f.run();
+    expect(f.artifacts.get).not.toHaveBeenCalled();
+    expect(f.sandbox.writeFile).not.toHaveBeenCalled();
+    expect(checkpointWorkspace).not.toHaveBeenCalled();
+  });
+
+  it("writes verified original binary bytes once and replays the exact saved version receipt", async () => {
+    const f = fixture("original-binary-write");
+    f.prisma.artifact.findFirst.mockResolvedValue(original);
+    f.artifacts.get.mockResolvedValue(bytes);
+    const args = { artifactId: original.id };
+    f.setCalls([{ name: "write_file", args, executionId: "copy-1" }]);
+    let releaseCheckpoint!: (revision: string) => void;
+    checkpointWorkspace.mockImplementationOnce(
+      () =>
+        new Promise<string>((resolve) => {
+          releaseCheckpoint = resolve;
+        }),
+    );
+    const running = f.run();
+    await vi.waitFor(() => expect(checkpointWorkspace).toHaveBeenCalledOnce());
+    expect(f.finalizeRun).not.toHaveBeenCalled();
+    releaseCheckpoint("home-revision");
+    await running;
+    expect(f.prisma.artifact.findFirst).toHaveBeenCalledWith({
+      where: { id: original.id, spaceId: "space-1", userId: "user-1" },
+    });
+    expect(f.artifacts.get).toHaveBeenCalledWith(original.storageKey, expect.anything());
+    expect(f.sandbox.writeFile).toHaveBeenCalledWith(
+      expect.anything(),
+      { path: `attachments/${original.id}.zip`, content: bytes },
+      expect.anything(),
+    );
+    expect(f.results[0]).toMatchObject({
+      ok: true,
+      path: `attachments/${original.id}.zip`,
+      artifactId: original.id,
+      version: 1,
+      sha256: hash,
+    });
+    expect(checkpointWorkspace).toHaveBeenCalledOnce();
+    expect(checkpointWorkspace.mock.invocationCallOrder[0]).toBeLessThan(
+      f.finalizeRun.mock.invocationCallOrder[0]!,
+    );
+    expect(f.effects).toHaveLength(1);
+    expect(f.effects[0]?.status).toBe("completed");
+
+    // A newer family version or a deleted original cannot turn a replay into another write.
+    f.prisma.artifact.findFirst.mockResolvedValue({
+      ...original,
+      id: "artifact-version-2",
+      version: 2,
+      rootArtifactId: original.id,
+    });
+    f.setCalls([{ name: "write_file", args, executionId: "copy-replay" }]);
+    await f.run();
+    expect(f.results.at(-1)).toEqual(f.results[0]);
+    expect(f.prisma.artifact.findFirst).toHaveBeenCalledOnce();
+    expect(f.sandbox.writeFile).toHaveBeenCalledOnce();
+    expect(checkpointWorkspace).toHaveBeenCalledOnce();
+    f.prisma.artifact.findFirst.mockResolvedValue(null);
+    await f.run();
+    expect(f.results.at(-1)).toEqual(f.results[0]);
+    expect(f.prisma.artifact.findFirst).toHaveBeenCalledOnce();
+    expect(f.sandbox.writeFile).toHaveBeenCalledOnce();
+  });
+
+  it("waits for native approval before reading or writing an artifact", async () => {
+    const f = fixture("approved-original-write");
+    f.prisma.actionApprovalRule.findMany.mockResolvedValue([
+      { effect: "require_approval", matchKind: "tool", matchValue: "write_file" },
+    ]);
+    f.prisma.artifact.findFirst.mockResolvedValue(original);
+    f.artifacts.get.mockResolvedValue(bytes);
+    f.setCalls([
+      {
+        name: "write_file",
+        args: { path: "shared/original.zip", artifactId: original.id },
+        executionId: "copy-1",
+      },
+    ]);
+    await f.run();
+    expect(f.pauseRunForInput).toHaveBeenCalledOnce();
+    expect(f.prisma.artifact.findFirst).not.toHaveBeenCalled();
+    expect(f.artifacts.get).not.toHaveBeenCalled();
+    expect(f.sandbox.writeFile).not.toHaveBeenCalled();
+    f.effects[0]!.status = "approved";
+    await f.run();
+    expect(f.sandbox.writeFile).toHaveBeenCalledWith(
+      expect.anything(),
+      { path: "shared/original.zip", content: bytes },
+      expect.anything(),
+    );
+    expect(checkpointWorkspace).toHaveBeenCalledOnce();
+  });
+
+  it.each([{}, { artifactId: "artifact-version-1", content: "replacement" }, { artifactId: "" }])(
+    "rejects missing or ambiguous write sources before effects: %j",
+    async (args) => {
+      const f = fixture("invalid-original-write");
+      f.setCalls([{ name: "write_file", args, executionId: "invalid-1" }]);
+      await f.run();
+      expect(f.results[0]).toMatchObject({ error: expect.any(String) });
+      expect(f.effects).toHaveLength(0);
+      expect(f.artifacts.get).not.toHaveBeenCalled();
+      expect(f.sandbox.writeFile).not.toHaveBeenCalled();
+      expect(checkpointWorkspace).not.toHaveBeenCalled();
+    },
+  );
+
+  it.each(["unavailable", "corrupt"])("does not write an %s original", async (failure) => {
+    const f = fixture(`invalid-artifact-${failure}`);
+    f.prisma.artifact.findFirst.mockResolvedValue(failure === "unavailable" ? null : original);
+    f.artifacts.get.mockResolvedValue(new Uint8Array([9, 8, 7]));
+    f.setCalls([{ name: "write_file", args: { artifactId: original.id }, executionId: "copy-1" }]);
+    await f.run();
+    expect(f.results[0]).toMatchObject({ error: expect.any(String) });
+    if (failure === "unavailable") expect(f.artifacts.get).not.toHaveBeenCalled();
+    expect(f.sandbox.writeFile).not.toHaveBeenCalled();
+    expect(checkpointWorkspace).not.toHaveBeenCalled();
+  });
+});
 
 describe("durable mid-turn narration", () => {
   it.each(["web_search", "message_user"])(
@@ -3850,6 +4039,7 @@ describe("native recruiting assessment effect delivery", () => {
         expect(JSON.parse(line.slice(line.indexOf("{")))).toMatchObject({
           messageId: human.id,
           files: [
+            ...(mixed ? [{ blockIndex: 0, artifactId: "image-upload" }] : []),
             {
               blockIndex: mixed ? 2 : 0,
               artifactId: file.artifactId,

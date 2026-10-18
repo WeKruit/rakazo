@@ -74,7 +74,7 @@ describe("attachment helpers", () => {
     ).toBe("hello\n[image: shot.png]\n[file: brief.pdf (application/pdf, 99 bytes)]");
   });
 
-  it("extracts only exact native file references without inferring IDs from names or text", () => {
+  it("extracts exact native file and image references without inferring IDs from names or text", () => {
     const file = {
       kind: "file" as const,
       artifactId: "original-upload",
@@ -92,12 +92,11 @@ describe("attachment helpers", () => {
         { ...file, size: "42" },
         file,
       ]),
-    ).toEqual(
-      [2, 6].map((blockIndex) => ({
-        blockIndex,
-        artifactId: file.artifactId,
-      })),
-    );
+    ).toEqual([
+      { blockIndex: 1, artifactId: "image" },
+      { blockIndex: 2, artifactId: file.artifactId },
+      { blockIndex: 6, artifactId: file.artifactId },
+    ]);
     expect(messageFileReferences(null)).toEqual([]);
     expect(blocksToAgentHistoryText([file])).not.toContain(file.artifactId);
   });

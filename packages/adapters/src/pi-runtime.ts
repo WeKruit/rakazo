@@ -1392,8 +1392,9 @@ function toAgentTool(tool: ConnectorTool, host: ToolHost, exposedName: string): 
       }
       if (tool.name === "write_file") {
         return {
-          path: String(raw.path ?? "notes/result.txt"),
-          content: textContentArg(raw.content, ""),
+          ...(raw.path === undefined ? {} : { path: String(raw.path) }),
+          ...(Object.hasOwn(raw, "content") ? { content: textContentArg(raw.content, "") } : {}),
+          ...(Object.hasOwn(raw, "artifactId") ? { artifactId: raw.artifactId } : {}),
         };
       }
       if (tool.name === "computer_act") {
@@ -1986,9 +1987,6 @@ function safeJsonSchemaParameters(tool: ConnectorTool) {
 }
 
 function builtinParameters(tool: ConnectorTool) {
-  if (tool.name === "write_file") {
-    return Type.Object({ path: Type.String(), content: Type.String() });
-  }
   if (tool.name === "destination.write") {
     return Type.Object({
       collection: Type.String(),

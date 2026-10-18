@@ -290,14 +290,22 @@ export const builtinAgentTools: ConnectorTool[] = [
   {
     name: "write_file",
     description:
-      "Write a UTF-8 file into this bot's home. On a Team Computer, relative paths use the bot folder; use shared/... only for work other bots should share.",
+      "Write a UTF-8 file with path and content, or copy the verified original bytes of one saved artifact version with artifactId. Supply exactly one of content or artifactId. Use the exact version ID from native attachment/history references or artifact_read; never substitute a family ID or infer one from a filename. For artifactId, path is optional and defaults to attachments/<artifactId> with the original MIME extension. Attachments are saved originals, not automatic computer copies; use this before a workspace tool needs their bytes. On a Team Computer, relative paths use the bot folder; use shared/... only for intentionally shared work.",
     inputSchema: {
-      type: "object",
-      properties: {
-        path: { type: "string" },
-        content: { type: "string" },
-      },
-      required: ["path", "content"],
+      oneOf: [
+        {
+          type: "object",
+          properties: { path: { type: "string" }, content: { type: "string" } },
+          required: ["path", "content"],
+          additionalProperties: false,
+        },
+        {
+          type: "object",
+          properties: { path: { type: "string" }, artifactId: { type: "string", minLength: 1 } },
+          required: ["artifactId"],
+          additionalProperties: false,
+        },
+      ],
     },
   },
   {

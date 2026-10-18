@@ -324,16 +324,6 @@ describe("run workspace checkpoint", () => {
     expect(persist).toHaveBeenCalledOnce();
   });
 
-  it("marks materialized steering files for checkpointing", async () => {
-    const persist = vi.fn(async () => undefined);
-    const checkpoint = createRunWorkspaceCheckpoint(persist);
-
-    checkpoint.markFiles([]);
-    await expect(checkpoint.flush()).resolves.toBe(false);
-    checkpoint.markFiles([{ path: "attachments/result.txt" }]);
-    await expect(checkpoint.flush()).resolves.toBe(true);
-  });
-
   it("keeps a failed checkpoint dirty for retry", async () => {
     const persist = vi
       .fn<() => Promise<void>>()
@@ -769,24 +759,16 @@ describe("recent turn images", () => {
 });
 
 describe("steering attachment hydration", () => {
-  it("keeps successful attachment parts when another part is unavailable", async () => {
+  it("reports missing steering images without blocking available images", async () => {
     const imageBlocks: MessageBlock[] = [
       { kind: "image", artifactId: "image-1", name: "one.png", mimeType: "image/png" },
       { kind: "image", artifactId: "image-2", name: "two.png", mimeType: "image/png" },
     ];
     const withoutImage = await settleSteeringAttachmentLoads(
       Promise.reject(new Error("image missing")),
-      Promise.resolve(["attachment.pdf"]),
     );
-    expect(withoutImage).toMatchObject({ images: undefined, files: ["attachment.pdf"] });
+    expect(withoutImage).toMatchObject({ images: undefined });
     expect(withoutImage.unavailableInstruction).toContain("do not guess its contents");
-
-    const withoutFile = await settleSteeringAttachmentLoads(
-      Promise.resolve(["image.png"]),
-      Promise.reject(new Error("file missing")),
-    );
-    expect(withoutFile).toMatchObject({ images: ["image.png"], files: [] });
-    expect(withoutFile.unavailableInstruction).toContain("do not guess its contents");
 
     const partiallyHydratedImages = await loadCurrentTurnImages(
       {
@@ -811,12 +793,10 @@ describe("steering attachment hydration", () => {
     expect(partiallyHydratedImages).toHaveLength(1);
     const withPartiallyMissingImages = await settleSteeringAttachmentLoads(
       Promise.resolve(partiallyHydratedImages),
-      Promise.resolve([]),
       imageBlocks,
     );
     expect(withPartiallyMissingImages).toMatchObject({
       images: partiallyHydratedImages,
-      files: [],
     });
     expect(withPartiallyMissingImages.unavailableInstruction).toContain(
       "do not guess its contents",
@@ -824,22 +804,17 @@ describe("steering attachment hydration", () => {
 
     const withAllImagesMissing = await settleSteeringAttachmentLoads(
       Promise.resolve(undefined),
-      Promise.resolve([]),
       imageBlocks.slice(0, 1),
     );
     expect(withAllImagesMissing.unavailableInstruction).toContain("do not guess its contents");
 
     const withoutMissingImages = await settleSteeringAttachmentLoads(
       Promise.resolve(["image.png"]),
-      Promise.resolve([]),
       imageBlocks.slice(0, 1),
     );
     expect(withoutMissingImages.unavailableInstruction).toBe("");
 
-    const withoutExpectedImages = await settleSteeringAttachmentLoads(
-      Promise.resolve(undefined),
-      Promise.resolve([]),
-    );
+    const withoutExpectedImages = await settleSteeringAttachmentLoads(Promise.resolve(undefined));
     expect(withoutExpectedImages.unavailableInstruction).toBe("");
   });
 
@@ -849,12 +824,7 @@ describe("steering attachment hydration", () => {
     controller.abort();
 
     await expect(
-      settleSteeringAttachmentLoads(
-        Promise.reject(cancellation),
-        Promise.resolve([]),
-        undefined,
-        controller.signal,
-      ),
+      settleSteeringAttachmentLoads(Promise.reject(cancellation), undefined, controller.signal),
     ).rejects.toBe(cancellation);
   });
 
@@ -893,11 +863,7 @@ describe("steering attachment hydration", () => {
     );
     expect(images).toHaveLength(1);
     expect(missingTurnImagesInstruction(blocks, images)).toContain("do not guess its contents");
-    const settled = await settleSteeringAttachmentLoads(
-      Promise.resolve(images),
-      Promise.resolve([]),
-      blocks,
-    );
+    const settled = await settleSteeringAttachmentLoads(Promise.resolve(images), blocks);
     expect(settled.unavailableInstruction).toContain("do not guess its contents");
   });
 

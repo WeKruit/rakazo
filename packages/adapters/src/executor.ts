@@ -68,6 +68,7 @@ import {
   appendToolCallSegment,
   applyJudgeDecision,
   assertTransition,
+  attachmentExtensionForMimeType,
   blocksToAgentHistoryText,
   botMessageAllowsSilence,
   boundDirectApprovalDetails,
@@ -198,7 +199,7 @@ import {
   settleUncertainEffect,
   uncertainEffectResult,
 } from "./approval-effect.js";
-import { artifactReadFromTool } from "./artifact-read.js";
+import { artifactReadFromTool, readActorArtifact } from "./artifact-read.js";
 import {
   autoReviewTimeoutMs,
   deploymentAutoReviewDefault,
@@ -434,11 +435,7 @@ import {
 } from "./takeover-resume.js";
 import { TASK_CATALOG_GUIDANCE, taskCatalogFromTool } from "./task-catalog.js";
 import { getActiveTeachingSession, parsePlaybook } from "./teaching-session.js";
-import {
-  attachWorkspaceFileToThread,
-  currentTurnFilesInstruction,
-  materializeCurrentTurnFiles,
-} from "./thread-artifacts.js";
+import { attachWorkspaceFileToThread } from "./thread-artifacts.js";
 import type { TicketChangeNotifier } from "./ticket-changes.js";
 import { loadAgentTicketContext } from "./ticket-context.js";
 import {
@@ -510,9 +507,6 @@ export function createRunWorkspaceCheckpoint(checkpoint: () => Promise<unknown>)
   return {
     markDirty() {
       dirty = true;
-    },
-    markFiles(files: readonly unknown[]) {
-      if (files.length > 0) dirty = true;
     },
     async flush() {
       if (!dirty) return false;
@@ -4018,29 +4012,6 @@ export function createRunExecutor(deps: ExecutorDeps) {
         const workspaceCheckpoint = createRunWorkspaceCheckpoint(() =>
           checkpointRunComputerWorkspace(deps, storedComputer, computer, context),
         );
-        let currentTurnFiles: Awaited<ReturnType<typeof materializeCurrentTurnFiles>>;
-        try {
-          currentTurnFiles = deps.artifacts
-            ? await materializeCurrentTurnFiles(
-                {
-                  prisma: deps.prisma,
-                  artifacts: deps.artifacts,
-                  sandbox: deps.sandbox,
-                },
-                turnBlocks,
-                {
-                  context,
-                  computer,
-                  computerMode,
-                  markWorkspaceDirty: workspaceCheckpoint.markDirty,
-                },
-              )
-            : [];
-        } catch (error) {
-          await workspaceCheckpoint.flush().catch(() => undefined);
-          throw error;
-        }
-        const attachedFilesPrompt = currentTurnFilesInstruction(currentTurnFiles);
         const graphical =
           computer.kind !== "desktop" && deps.sandbox.describe().capabilities.graphical;
         // Gate on the model this run will actually call — the pair written to the run row
@@ -4357,6 +4328,14 @@ export function createRunExecutor(deps: ExecutorDeps) {
           }
           if (disabledBuiltinTools.has(name)) {
             return { error: "This tool is disabled for this bot." };
+          }
+          if (
+            name === "write_file" &&
+            (Object.hasOwn(args, "content") === Object.hasOwn(args, "artifactId") ||
+              (Object.hasOwn(args, "artifactId") &&
+                (typeof args.artifactId !== "string" || !args.artifactId.trim())))
+          ) {
+            return { error: "Supply exactly one of content or a real artifactId." };
           }
           if (PAGE_BROWSER_TOOL_NAMES.has(name) && !pageBrowserAllowed) {
             return { error: "Page browser is unavailable on this computer." };
@@ -6128,14 +6107,40 @@ export function createRunExecutor(deps: ExecutorDeps) {
             }
           }
           if (name === "write_file") {
-            const filePath = String(args.path ?? "notes/result.txt");
+            let original: Awaited<ReturnType<typeof readActorArtifact>> | undefined;
+            if (typeof args.artifactId === "string") {
+              if (!deps.artifacts) return finish({ error: "Artifact storage is unavailable." });
+              try {
+                original = await readActorArtifact(
+                  { prisma: deps.prisma, artifacts: deps.artifacts },
+                  { spaceId: run.spaceId, userId: run.userId },
+                  { artifactId: args.artifactId },
+                );
+              } catch (error) {
+                return finish({
+                  error:
+                    error instanceof IsolationError
+                      ? "Artifact is unavailable."
+                      : "Saved artifact could not be read or verified.",
+                });
+              }
+              if (original.bytes.byteLength > ATTACHMENT_MAX_BYTES)
+                return finish({ error: "Artifact exceeds the 10 MiB file limit." });
+            }
+            const filePath = String(
+              args.path ??
+                (original
+                  ? `attachments/${original.row.id}${attachmentExtensionForMimeType(original.row.mimeType)}`
+                  : "notes/result.txt"),
+            );
             if (graphical) {
               const activateRefusal = protectedActivateScriptWriteRefusal(filePath);
               if (activateRefusal) {
                 return finish({ error: desktopProtectionGuardMessage(activateRefusal) });
               }
             }
-            const content = new TextEncoder().encode(textContentArg(args.content, ""));
+            const content =
+              original?.bytes ?? new TextEncoder().encode(textContentArg(args.content, ""));
             workspaceCheckpoint.markDirty();
             try {
               await deps.sandbox.writeFile(
@@ -6150,7 +6155,17 @@ export function createRunExecutor(deps: ExecutorDeps) {
               throw error;
             }
             await recordComputerAction("write_file", filePath, { bytes: content.byteLength });
-            return finish({ ok: true, path: filePath });
+            return finish({
+              ok: true,
+              path: filePath,
+              ...(original
+                ? {
+                    artifactId: original.row.id,
+                    version: original.row.version,
+                    sha256: original.row.hash,
+                  }
+                : {}),
+            });
           }
           if (name === "render_plot") {
             if (args.charts !== undefined) {
@@ -8036,7 +8051,7 @@ export function createRunExecutor(deps: ExecutorDeps) {
           currentTurnImages,
         );
         const taskPrompt = expandSkillReferencesInPrompt(
-          [task.prompt, attachedFilesPrompt, missingImagesInstruction].filter(Boolean).join("\n\n"),
+          [task.prompt, missingImagesInstruction].filter(Boolean).join("\n\n"),
           agentSkills,
         );
         const invokedSkill = savedSkills.find((skill) =>
@@ -8057,11 +8072,7 @@ export function createRunExecutor(deps: ExecutorDeps) {
         const prompt = [
           replyContext,
           nativeSources?.currentAnswer
-            ? [
-                blocksToAgentHistoryText(turnBlocks ?? []),
-                attachedFilesPrompt,
-                missingImagesInstruction,
-              ]
+            ? [blocksToAgentHistoryText(turnBlocks ?? []), missingImagesInstruction]
                 .filter(Boolean)
                 .join("\n\n")
             : basePrompt,
@@ -8404,30 +8415,12 @@ export function createRunExecutor(deps: ExecutorDeps) {
                             : undefined));
                     return Promise.all(
                       steering.map(async (item) => {
-                        const { images, files, unavailableInstruction } =
+                        const { images, unavailableInstruction } =
                           await settleSteeringAttachmentLoads(
                             loadCurrentTurnImages(deps, item.blocks, context),
-                            deps.artifacts
-                              ? materializeCurrentTurnFiles(
-                                  {
-                                    prisma: deps.prisma,
-                                    artifacts: deps.artifacts,
-                                    sandbox: deps.sandbox,
-                                  },
-                                  item.blocks,
-                                  {
-                                    context,
-                                    computer,
-                                    computerMode,
-                                    markWorkspaceDirty: workspaceCheckpoint.markDirty,
-                                  },
-                                )
-                              : Promise.resolve([]),
                             item.blocks,
                             context.signal,
                           );
-                        workspaceCheckpoint.markFiles(files);
-                        const filesInstruction = currentTurnFilesInstruction(files);
                         return {
                           id: item.id,
                           messageId: item.messageId,
@@ -8438,7 +8431,6 @@ export function createRunExecutor(deps: ExecutorDeps) {
                             item.messageId === recruitingContextMessage?.messageId
                               ? steeringRoleText
                               : undefined,
-                            filesInstruction,
                             unavailableInstruction,
                             item.blocks.every((block) =>
                               ["text", "file", "image"].includes(block.kind),
@@ -9810,31 +9802,24 @@ export function missingTurnImagesInstruction(
   return expected > 0 && loaded < expected ? TURN_ATTACHMENT_UNAVAILABLE : "";
 }
 
-export async function settleSteeringAttachmentLoads<TImage, TFile>(
+export async function settleSteeringAttachmentLoads<TImage>(
   images: Promise<TImage[] | undefined>,
-  files: Promise<TFile[]>,
   blocks?: MessageBlock[],
   signal?: AbortSignal,
 ): Promise<{
   images: TImage[] | undefined;
-  files: TFile[];
   unavailableInstruction: string;
 }> {
-  const [loadedImages, loadedFiles] = await Promise.allSettled([images, files]);
+  const [loadedImages] = await Promise.allSettled([images]);
   if (signal?.aborted) {
     if (loadedImages.status === "rejected") throw loadedImages.reason;
-    if (loadedFiles.status === "rejected") throw loadedFiles.reason;
   }
   const expectedImageCount = blocks?.filter((block) => block.kind === "image").length ?? 0;
   const loadedImageCount =
     loadedImages.status === "fulfilled" ? (loadedImages.value?.length ?? 0) : 0;
-  const unavailable =
-    loadedImages.status === "rejected" ||
-    loadedFiles.status === "rejected" ||
-    loadedImageCount < expectedImageCount;
+  const unavailable = loadedImages.status === "rejected" || loadedImageCount < expectedImageCount;
   return {
     images: loadedImages.status === "fulfilled" ? loadedImages.value : undefined,
-    files: loadedFiles.status === "fulfilled" ? loadedFiles.value : [],
     unavailableInstruction: unavailable ? STEERING_ATTACHMENT_UNAVAILABLE : "",
   };
 }

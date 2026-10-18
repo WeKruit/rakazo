@@ -88,13 +88,13 @@ export function messageBlockForArtifact(artifact: {
   };
 }
 
-/** Original IDs are read references; artifact_read supplies authorized metadata and content. */
+/** Original IDs are references; artifact_read supplies authorized metadata and content. */
 export function messageFileReferences(blocks: unknown) {
   if (!Array.isArray(blocks)) return [];
   return blocks.flatMap((block, blockIndex) => {
-    if (!block || typeof block !== "object" || block.kind !== "file") return [];
+    if (!block || typeof block !== "object" || !["file", "image"].includes(block.kind)) return [];
     const parsed = MessageBlockSchema.safeParse(block);
-    if (!parsed.success || parsed.data.kind !== "file") return [];
+    if (!parsed.success || (parsed.data.kind !== "file" && parsed.data.kind !== "image")) return [];
     return [{ blockIndex, artifactId: parsed.data.artifactId }];
   });
 }

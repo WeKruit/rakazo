@@ -239,7 +239,7 @@ describe("local history retrieval", () => {
     expect(sql(mock).sql).toContain('t."userId" =');
     expect(sql(mock).sql).toContain('t."botId" =');
   });
-  it("retains exact uploaded-file references from scoped messages without a run or artifact query", async () => {
+  it("retains exact file and image references from scoped messages without a run or artifact query", async () => {
     const { mock, prisma } = db();
     const upload = {
       ...row(1, "Read the supplied PDF"),
@@ -258,6 +258,7 @@ describe("local history retrieval", () => {
     mock.$queryRaw.mockResolvedValue([upload]);
     const result = await readHistory(prisma, scope, { messageId: upload.id });
     const files = [
+      { blockIndex: 0, artifactId: "photo" },
       {
         blockIndex: 2,
         artifactId: "original-pdf",
