@@ -1252,8 +1252,11 @@ function activeCompaction(
         providerContextPrefix("", [], runtimeMessagesToLlm(messages)),
         estimatePiImageTokens,
       ) + 240;
-    if (!inserted || after >= before || after > window - output)
+    if (!inserted || after >= before || after > window - output) {
+      // ponytail: a rejected summary must not abort exact context that already fits.
+      if (!overflow) return;
       throw new Error("Pi compaction could not fit context while preserving required messages.");
+    }
     signal.throwIfAborted();
     // PrepareRequest's context replacement does not update Agent.state itself.
     getAgent().state.messages = messages;

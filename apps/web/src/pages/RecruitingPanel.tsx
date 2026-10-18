@@ -1568,6 +1568,11 @@ function RecruitingWorkspace({
   const loadingMore = useRef(false);
   const readEpoch = useRef(0);
   const denyAccess = useCallback((error: unknown) => {
+    console.error("Recruiting request failed", {
+      name: error instanceof Error ? error.name : undefined,
+      code: error instanceof ORPCError ? error.code : undefined,
+      message: error instanceof Error ? error.message : undefined,
+    });
     if (
       !(error instanceof ORPCError) ||
       !["UNAUTHORIZED", "FORBIDDEN", "NOT_FOUND"].includes(error.code)

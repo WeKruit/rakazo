@@ -7,12 +7,15 @@ See [GOAL](../docs/wekruit/GOAL.md), [PLAN](../docs/wekruit/PLAN.md), and [PRODU
 Phase: 1 of 5 (Real sourcing and recruiting UI)
 Plan: Existing sourcing priority in PLAN.md; three independent workstreams active.
 Status: In progress
-Last activity: User requires real Autumn product acceptance and parallel UI/agent/automation development. Further fictional product-acceptance conversations are not part of this batch.
+Last activity: Production remains v70. A fresh connected Autumn task returned and saved two actual profiles with numeric match scores, reasons, gaps and sources; Sourcer delivered the final native web reply. Main's native memory write and clean-conversation recall passed. Same-task feedback/output-variation acceptance is in progress, not passed. No new fictional acceptance conversations.
 
 ## Active Work
-- Live: native Sourcer research on an actual saved candidate, with the existing Autumn research and evidence sources.
-- UI: exact role prose, material unknowns and readable criteria grouping using the existing recruiting panel.
-- Automation: preserve a Crew-bound routine's existing destination during native manual execution; inspect scheduling/delegation/recovery without adding an engine.
+- Live: actual original Autumn research returned one result and saved it into the existing candidate. Thirty people / forty-six source occurrences survived deployment unchanged; the later context failure remains open.
+- Liaison: native Main/Sourcer instructions and three existing shared skills now assign research/evaluation/ranking to Autumn. Read-only hashes verified the intended text and two untouched skills; native YAML description quoting is recorded. The fresh format run completed, but an earlier run continued older research before failing compaction; retain that failure rather than claiming every task stayed unchanged.
+- Feedback/cost: PeopleSearchBench is a static quality reference, separate from real same-task feedback acceptance. Preserve complete output outside model context and load only feedback-relevant material. Current primary-source Jev/large-file research and the paired-test decision are recorded without installing another harness or claiming savings.
+- UI: deployed exact role prose, material unknowns and readable criteria grouping. Real report inspection found an annotated multi-URL link-projection defect; a minimal shared fix is in progress.
+- UI acceptance gap: the fresh group's Recruiting panel showed a load error; its failing RPC is not identified. Native chat results are visible, but this is not complete Dashboard acceptance.
+- Automation: deployed Crew-bound manual routine destination validation using native group locking. No recurring task enabled; live scheduled handoff/recovery remains unaccepted.
 
 ## Decisions
 - Reuse Rakazo/Pi and Autumn's existing agent; no new harness, workflow DSL or search engine.

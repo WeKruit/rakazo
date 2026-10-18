@@ -6,19 +6,28 @@
 
 **Architecture:** 用户聊天/反馈 → Rakazo 原生 Main ↔ Sourcer ↔ Autumn Agent（已有 MCP/API）→ 结果/证据 → 用户反馈 → 同一个 Autumn task 继续。Main/Sourcer 通过 prompt、skills 和 playbook 自主协作；Rakazo/Pi 提供现成 harness、群聊、委派、会话、记忆和交互。网页、数据库和 Dashboard 保存并呈现真实输出，不接管 Agent 的推理和招聘步骤。
 
+**职责边界：** Autumn 负责研究、匹配和候选判断；Sourcer/Autumn agent 只做联络：传递 JD/playbook，把真人反馈转成同一 task 的 prompt/reply，接收并保存实际输出，简洁转述结果与问题。收到输出后不另读岗位/旧评估去重做候选评审、排序或资格判断；保存与连续性沿用原生记录。
+
 Supabase 独立数据库、原生 memory provider、Modal Volume 和 E2B 沿用现有职责。Schema 仅服务实际返回/持久化/展示；不新增规则语言、固定问卷、筛选引擎、第二层编排器或逐搜索审批。每 bot 的模型/连接及 memory/skills/MCP 替换先用原生设置。历史实现清单不能成为继续扩建自定义领域层的依据，也不授权盲删既有工作。
 
 **Tech Stack:** Rakazo/TypeScript、Pi、官方 Codex OAuth、Supabase Postgres、Graphile、Modal、E2B。
 
 ## 当前发布与缺口（2026-10-17）
 
-**当前并行开发，尚未发布：真实产品验收优先。** 产品验收只使用真实岗位、连接的 Autumn、真实返回候选和原研究反馈；不再新增虚构演示对话。独立 UI、Agent 和原生 automation 工作并行。GSD 执行索引位于 `.planning/ROADMAP.md`，完整要求仍由本计划、GOAL 和 PRODUCT-SCOPE 定义，不把执行索引当作新 harness。
+**最新线上为 v70 / `afb7f757`，真实产品验收优先。** 产品验收使用真实岗位、连接的 Autumn、真实返回候选和原研究反馈；不再新增虚构演示对话。独立 UI、Agent 和原生 automation 工作并行。GSD 的五阶段执行索引位于 `.planning/ROADMAP.md`，完整要求仍由现有 GOAL / PLAN / PRODUCT-SCOPE 定义；全部阶段仍未完成。
 
-- **真实 Agent 路径：** 已通过正常网页请求对一位已保存候选继续原 Autumn 研究。首次执行的候选读取、额度读取及原生压缩成功，但随后因上下文准入失败结束，尚未发出研究续接；不能标为业务通过。后续自然对话已从已有候选来源找回原研究，真实发送同 task 的 Autumn reply，provider 回执为 accepted，并继续读取实际状态；新结果保存与完整反馈采用仍待核验。保留失败记录，不改变全局上下文预算或原待答业务问题。
-- **招聘 UI：** 正在收口已有 Role / Missing info / Evidence：显示保存的业务原文与来源，隐藏任意内部字段键；复合条件保持完整逻辑分组；缺少语义问题的实际未决项仍有状态/来源提示，不将禁用确认伪装成没有问题。完整批次校准、持久评审/撤销及招聘漏斗仍未完成。
-- **原生 automation：** Rakazo 已有 schedule、webhook、运行历史和恢复，聊天创建可关联原 Crew。正在修复手动试运行错误落入私聊的问题，并用同一原生群锁校验成员/目的地；永久删除源 Crew 时一并清理其专属 routines，避免转入私聊。新能力尚未线上验收，未启用循环任务；逐 routine 数字预算、编辑器 Crew 选择及完整自动 Main/Sourcer/Autumn 恢复仍是缺口。
+**本批修复待发布。** 原生 Pi 压缩生成更大或不合适的摘要时，若原精确上下文仍满足同一预算，就保留原上下文；真正超限仍拒绝。原错误已在原工具循环中复现，170 项相关检查和类型检查通过；由于当时未启用会话原件记录，不能将这条已证实的缺陷等同于历史失败的唯一原因。候选来源按实际保存时间倒序、在分页前排序，保留历史和原游标隔离；复合 URL 文字保留原文，不再猜成单个链接。面板共享错误入口只记录 name/code/message，保留原授权和清空行为。
 
-**最新线上为 v69 / `538a56b3`。** 候选反馈可在原生 Dialog 选择当前群内接收 Agent，默认保持首位成员；私聊沿原路径。显式接收者在原所属群锁内重新核对，未知/移除的成员拒绝，不从候选证据或正文中的 @ 文本推断接收者。一次人类消息/事件交付到选中成员的原生执行或 steering；重试保留原候选、原文、接收者与 nonce，不消费任何待答卡。共享消息读取现在也给人类 follow-up 提供原始来源引用，Bot handoff 仍不冒充人类授权。没有新 endpoint、表、迁移、依赖或第二套 harness。
+**真实反馈已完成一轮输出修订。** 新 Autumn 研究返回两位真实候选的数值匹配信息并保存；在同一研究发送一次反馈后，返回两条分级结果并再次保存，原网页已正常回复。Autumn 第二轮报告 partial completion，必须保留；这还不是找到新一批候选或 PeopleSearchBench 成绩。当前有 30 人、50 条来源、29 位未评估者。面板初次加载失败后恢复，串行/并发真实服务读取均成功，故加载故障仍待实际客户端错误定位，不能宣称已修复。发布后先做同任务真实新候选续搜、保存、网页展示及刷新，再执行冻结的两题 PeopleSearchBench 招聘对照；全部用真实连接和返回结果，不新增模拟验收对话、筛选引擎或 harness。
+
+- **真实 Agent 路径：** 首次真实候选请求在研究续接前因上下文准入失败；第二次正常对话找回原研究，只发送一次 Autumn reply。Autumn 完成一条候选专属结果，Agent 已通过原生 `get_rows` / `save_results` 保存到原候选来源；候选保持 30 人，来源从 45 条增至 46 条，未评估仍为 29 人。真实网页已展开新报告，显示任职时间、个人/团队归属及证据限制；没有联系候选人或重新扩量。后续岗位/旧评估读取仍触发上下文失败，未完成最终总结，所以不能标为完整链路通过。报告保存与失败收尾分别记录，不重开终止 run、不改全局预算、不代答原业务问题。
+- **连续性接口：** 原生候选来源现在从已经核验的保存请求返回精确 provider task 引用，Agent 可以自己找回原 Autumn 研究；不猜编号、不新建 task/action 或迁移，普通 UI 不显示这些技术引用。实际原研究续接发生在此版本发布前，新接口的模型端采用仍需核验。
+- **招聘 UI：** Role / Missing info / Evidence 已显示保存的业务原文与来源，隐藏任意内部字段键；复合条件保持完整分组。真实网页核对 5+ 年要求、组合条件、30 人名单及新候选报告；缺失语义问题的未决项仍有状态/来源提示。真实报告还暴露了复合 URL 被当成整条链接的问题，最小共享投影修复进行中。完整批次校准、持久评审/撤销及招聘漏斗仍未完成。
+- **原生 automation：** 沿用 schedule、webhook、运行历史与恢复。修复手动试运行落入私聊：按保存的 Crew 目的地，在原生群锁内复核成员与线程；永久删除源 Crew 时清理其专属 routines。没有第二套调度器、schema 或已启用的循环任务。逐 routine 数字预算、编辑器 Crew 选择及真实自动 Main/Sourcer/Autumn 恢复仍是缺口。
+
+分批实现检查分别为来源连续性四文件 369 项、Role panel 158 项、原生 routine 六文件 62 项，均有相关类型/格式及独立审查；批次重叠，不能相加，也不作为真实业务通过数。八条新界面文案的十份编译语言目录已读取核验。云端 28 份源码/目录 hash 与不可变发布归档一致，health / ready / Web 为 200，ready 非 degraded；两次冷启动未就绪观察保留。实际替换前后 17 组业务/配置及全部既有执行、消息、效果深度相同：111 runs、277 messages、307 effects、109 migrations、30 人 / 46 条来源。原 Main 待答卡保持，未重复发出研究。新自然对话正在核对已保存真实结果的最终总结；完整首轮校准、反馈采用、全部专家、P6 和 M1–M5 仍未完成。
+
+**v69 历史发布 / `538a56b3`。** 候选反馈可在原生 Dialog 选择当前群内接收 Agent，默认保持首位成员；私聊沿原路径。显式接收者在原所属群锁内重新核对，未知/移除的成员拒绝，不从候选证据或正文中的 @ 文本推断接收者。一次人类消息/事件交付到选中成员的原生执行或 steering；重试保留原候选、原文、接收者与 nonce，不消费任何待答卡。共享消息读取现在也给人类 follow-up 提供原始来源引用，Bot handoff 仍不冒充人类授权。没有新 endpoint、表、迁移、依赖或第二套 harness。
 
 本批五个文件的 472 项聚焦检查、Core/Contracts/Adapters/API/Web 类型与十个文件格式检查通过，独立 SPEC/QUALITY 通过。本机原生 Lingui 提取/编译读取已验证十份语言目录的 14 条反馈文案。云端 27 份源码/语言目录 hash 与归档一致，health/ready/Web 为 200、ready 非 degraded；首次冷启动未就绪单独保留。正常网页向预存虚构候选提交一条明确发给 Sourcer 的本轮反馈，同时 Main 保持新建的纯展示待答卡。Sourcer 实际调用既有反馈工具，保存 proposed/round/scope，准确引用原人类消息并在原群回复。独立数据库核对唯一消息/事件/task/run、一次 completed 内部反馈效果及回复；没有研究/续搜、候选判断、岗位/记忆/权限变化或外联。13 组业务/配置快照和所有旧执行/消息/效果保持，原有 27 张卡逐字不变。
 
@@ -417,7 +426,16 @@ Review follow-up: current-revision G0 is checked at preparation, admission and e
 
 Legacy replay/G0 fixture repair: completed native role receipts serialized before the brief column now compare a missing brief as null only; returned/stored receipts are unchanged and other canonical/ownership checks remain strict. The executable replay regression failed before the fix and passes afterward, with foreign actor/space and unrelated tamper rejection checks. Shared PostgreSQL research fixtures now use sourced draft data and the actual human confirmation function, including reconfirmation after revisions and dynamic revision expectations; draft/stale G0 rejection cases are retained or added. Focused English offline suites pass 153 checks and DB type checking passes. PostgreSQL collection reports 208 skipped tests with database opt-in and connection variables explicitly unset: no designated isolated nonproduction database or local PostgreSQL executables are available. These fixture changes are statically checked, not real PostgreSQL acceptance; no database connection, migration or production action was performed. M1–M5 and live-source acceptance remain incomplete.
 
-The external quality suite is [LessieAI/people-search-bench](https://github.com/LessieAI/people-search-bench), inspected at `f1afbb928e7eb6104e8255d5a882fc1820682cb7`. It is separate from internal playbook acceptance and does not establish the location of the user's older benchmark. Two English adapted prompts (`rec_0001`, `rec_0002`) are explicitly labeled in the existing eval cases; age-based `rec_0006` is excluded. The existing cases/runner/services are reused for synthetic intake diagnostics; neither model trials nor the external live-verification benchmark have run, and no benchmark score/equivalence is claimed. No missing dependencies were installed.
+### Search quality and feedback acceptance
+
+Use [LessieAI/people-search-bench](https://github.com/LessieAI/people-search-bench), rechecked at `f1afbb928e7eb6104e8255d5a882fc1820682cb7`, as an external search-quality reference. Its 119 static queries include 30 recruiting queries; it does not test conversational feedback, memory or same-task continuation. Two English adapted prompts (`rec_0001`, `rec_0002`) already exist in the eval cases; exclude age-based `rec_0006`. Real acceptance uses actual connected Autumn outputs, not prefilled candidates or the earlier synthetic intake diagnostics.
+
+- Compare direct Autumn with Main/Sourcer → Autumn using the same frozen job-related requirements, result target, evidence window and search budget. Keep the evaluator separate from Autumn's own match scores; never turn its partial-match threshold into a hiring gate. Report a named subset/adaptation rather than an official full-suite score.
+- Verify feedback independently: a fresh conversation receives real results, then a human correction/positive or negative example changes the actual reply to the same Autumn task. Preserve unchanged requirements and exclusions. Check the subsequent real output against that correction, along with storage, original-thread delivery and total successful-task usage. Reusing a task ID alone is not proof the feedback was adopted.
+- The liaison needs the current brief, exact feedback, affected candidate references and only the passages needed to disambiguate it. Do not reread or locally reevaluate every returned candidate. Preserve complete provider receipts/artifacts outside model context, save pages from their exact receipts, and relay attributed values, gaps and references. Stable preferences use native versioned memory; one rejected candidate does not silently become a universal rule. This is feedback-driven task refinement, not model training.
+- Reuse native Pi compaction, memory, skill loading and exact artifact reads. First remove redundant instructions, repeated judgments and duplicate tool representations. A bounded Jev passage/skill-selection experiment is conditional on measured remaining waste; do not install another compactor or add a paid judgment to every turn. Measure all main/child/compaction/service calls and retries; OAuth capacity and cash charges remain separate.
+
+The upstream evaluator uses an LLM plus live Tavily verification and requires external credentials. Published per-person outputs are withheld, and metric defaults/entry points differ across released code and documentation; freeze and disclose the chosen settings before interpreting scores. The benchmark and paired trials have not run; no score, quality gain or cost saving is claimed. This research installs no dependency and authorizes no new subscription.
 
 
 云端接手批次 `37d943e` 已推送工作分支，仍未部署：共享原件授权读取与原生只读 `artifact_read` 已实现，核验实际字节/hash/长度并按 Unicode code point 连续分页；不改变 context budget。当前云端冻结离线安装、官方 Prisma generate、原两份 adapter 回归 120 项、相关回归 285 项（含六项新增读取检查）、DB/adapters/API/contracts/core 类型与格式检查通过。原生文件存储重新打开仅为离线合成恢复证据；真实同线程原件读取、条件修订和生产恢复仍待验收。

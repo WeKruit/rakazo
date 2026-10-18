@@ -646,6 +646,42 @@ describe("retained candidate report projection", () => {
       sourceUrls: ["https://example.test/profile", "https://example.test/project"],
     });
   });
+  it("keeps annotated and multi-URL report text out of links while retaining exact observations", () => {
+    const pages =
+      "https://example.test/person ; https://code.example.test/project (identity rejected)";
+    const inaccessible = "https://blocked.example.test/person (403 Forbidden)";
+    const profile = "https://example.test/person?name=Jane%20Doe#bio";
+    expect(
+      projectRecruitingCandidateReport({
+        pages_read: {
+          value: pages,
+          evidence: "Original page notes",
+          reasoning: "Identity is unresolved",
+          source_id: "mixed",
+        },
+        inaccessible_pages: { value: inaccessible, source_id: "archive" },
+        profile: { value: profile },
+        _sources: { mixed: pages, archive: "https://archive.example.test/person" },
+      }),
+    ).toEqual({
+      fields: [
+        {
+          label: "Pages read",
+          value: pages,
+          evidence: "Original page notes",
+          reasoning: "Identity is unresolved",
+          sourceUrls: [],
+        },
+        {
+          label: "Inaccessible pages",
+          value: inaccessible,
+          sourceUrls: ["https://archive.example.test/person"],
+        },
+        { label: "Profile", value: profile, sourceUrls: [profile] },
+      ],
+      sourceUrls: ["https://archive.example.test/person", profile],
+    });
+  });
   it("preserves a supplied absence-only flag and its report explanation", () => {
     expect(
       projectRecruitingCandidateReport({

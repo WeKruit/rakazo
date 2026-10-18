@@ -59,7 +59,11 @@ vi.mock("./pi-openai-compatible-provider.js", () => ({
   registerOpenAiCompatibleRuntime: (models: unknown) => models,
 }));
 
-import { selectContext } from "./context-selection.js";
+import {
+  estimateContextTokens,
+  providerContextPrefix,
+  selectContext,
+} from "./context-selection.js";
 import { toolCompletionAuditPayload } from "./executor.js";
 import { estimateModelContextTokens } from "./model-context.js";
 import { IMAGE_RETURNING_COMPUTER_TOOLS } from "./model-vision.js";
@@ -708,6 +712,69 @@ it("leaves the original state when the native summary cannot reduce context enou
       (entry) => "rakazoMessageId" in entry && entry.rakazoMessageId === "old-answer-0",
     ),
   ).toBe(true);
+});
+
+it("keeps fitting exact context when a native progress summary would exceed its remaining budget", async () => {
+  const { target, input } = compactionRequest(false);
+  input.instructions = `Exact run instructions: ${"i".repeat(90_000)}`;
+  input.history.unshift(
+    { id: "old-request", role: "user", content: "Earlier status request." },
+    { id: "old-progress", role: "assistant", content: "Earlier completed status check." },
+  );
+  input.tools = [
+    { name: "recruiting_role", inputSchema: { type: "object" }, description: "Read role" },
+  ];
+  const role = {
+    roleContext: "Exact current role and memory.",
+    workspace: { source: "r".repeat(25_433) },
+  };
+  input.executeTool = vi.fn(async () => role);
+  let turns = 0;
+  let summaries = 0;
+  providerState.stream.mockImplementation(
+    (_model: Model<"openai-completions">, context: Context) => {
+      if (context.systemPrompt?.includes("summarization assistant")) {
+        summaries++;
+        return stream(
+          target,
+          message(target, [{ type: "text", text: "s".repeat(12_000) }], "stop"),
+        );
+      }
+      turns++;
+      if (turns > 1)
+        return stream(target, message(target, [{ type: "text", text: "Done." }], "stop"));
+      const next = message(
+        target,
+        [{ type: "toolCall", id: "role", name: "recruiting_role", arguments: {} }],
+        "toolUse",
+      );
+      next.usage.totalTokens = 113_000;
+      return stream(target, next);
+    },
+  );
+  expect((await run(input)).at(-1)).toEqual({ type: "done", text: "Done." });
+  expect(summaries).toBe(1);
+  const original = convertToLlm(providerState.agent!.state.messages);
+  expect(estimateContextTokens(providerContextPrefix("", [], original)) + 240).toBeLessThan(
+    target.contextWindow - target.maxTokens,
+  );
+  expect(
+    original.find((entry) => entry.role === "toolResult" && entry.toolCallId === "role"),
+  ).toMatchObject({
+    content: [{ type: "text", text: JSON.stringify(role) }],
+  });
+  expect(
+    original.filter(
+      (entry) =>
+        entry.role === "user" &&
+        (typeof entry.content === "string"
+          ? entry.content === input.prompt
+          : entry.content.some((part) => part.type === "text" && part.text === input.prompt)),
+    ),
+  ).toHaveLength(1);
+  expect(
+    providerState.agent!.state.messages.some((entry) => entry.role === "compactionSummary"),
+  ).toBe(false);
 });
 
 it("does not compact an unfinished native tool batch", async () => {

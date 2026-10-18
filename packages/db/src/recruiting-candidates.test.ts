@@ -2311,6 +2311,12 @@ describe("native candidate source provenance", () => {
       roleRevisionId: "revision",
       artifactRef: { artifactId: f.artifact.id, sha256: f.artifact.hash },
     });
+    expect(f.tx.recruitingCandidateOccurrence.findMany).toHaveBeenCalledWith({
+      where: { roleId: "role", candidateKey: f.occurrence.candidateKey },
+      orderBy: [{ page: { observedAt: "desc" } }, { pageId: "asc" }, { rowIndex: "asc" }],
+      take: 26,
+      include: { page: { include: { effect: { select: { request: true } } } } },
+    });
     expect(f.tx.recruitingResearchAction.findFirst).not.toHaveBeenCalled();
   });
   it("keeps the exact provider task separate from historical custom task/action links", async () => {

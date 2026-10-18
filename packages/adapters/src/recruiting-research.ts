@@ -428,7 +428,8 @@ export function projectRecruitingCandidateReport(raw: unknown): RecruitingCandid
   const links = (value: unknown): string[] => {
     const values = Array.isArray(value) ? value : [value];
     return values.filter((value): value is string => {
-      if (typeof value !== "string") return false;
+      // ponytail: keep annotated or multi-URL prose as text instead of guessing link boundaries.
+      if (typeof value !== "string" || /\s/u.test(value)) return false;
       try {
         const url = new URL(value);
         return ["http:", "https:"].includes(url.protocol) && !url.username && !url.password;

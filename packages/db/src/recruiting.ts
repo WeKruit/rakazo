@@ -6614,7 +6614,7 @@ export async function listRecruitingCandidateSources(
       const total = await tx.recruitingCandidateOccurrence.count({ where });
       const rows = await tx.recruitingCandidateOccurrence.findMany({
         where,
-        orderBy: [{ pageId: "asc" }, { rowIndex: "asc" }],
+        orderBy: [{ page: { observedAt: "desc" } }, { pageId: "asc" }, { rowIndex: "asc" }],
         ...(cursor
           ? {
               cursor: { pageId_rowIndex: { pageId: cursor.key, rowIndex: Number(cursor.value) } },

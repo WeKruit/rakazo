@@ -7406,7 +7406,7 @@ describePostgres("recruiting domain (PostgreSQL)", () => {
       ],
       { observedAt: new Date("2026-10-16T00:00:00Z"), cursor: "exact-input-cursor" },
     );
-    await recordCandidatePage(
+    const latest = await recordCandidatePage(
       f,
       prepared,
       "candidate-next",
@@ -7463,6 +7463,18 @@ describePostgres("recruiting domain (PostgreSQL)", () => {
     });
     expect(sources.total).toBe(3);
     expect(sources.items[0]).toMatchObject({
+      effectId: latest.input.effectId,
+      rowIndex: 0,
+      observedAt: "2026-10-16T01:00:00.000Z",
+    });
+    expect(sources.nextCursor).not.toBeNull();
+    const older = await recruiting.listRecruitingCandidateSources(prisma, actor, {
+      roleId: f.role.role.id,
+      candidateKey: "linkedin:/in/example",
+      limit: 1,
+      cursor: sources.nextCursor!,
+    });
+    expect(older.items[0]).toMatchObject({
       taskId: prepared.task.id,
       actionId: prepared.action.id,
       roleRevisionId: prepared.action.roleRevisionId,
@@ -7475,7 +7487,14 @@ describePostgres("recruiting domain (PostgreSQL)", () => {
       requestCursor: "exact-input-cursor",
       outputId: "output-candidate-first",
     });
-    expect(sources.nextCursor).not.toBeNull();
+    const last = await recruiting.listRecruitingCandidateSources(prisma, actor, {
+      roleId: f.role.role.id,
+      candidateKey: "linkedin:/in/example",
+      limit: 1,
+      cursor: older.nextCursor!,
+    });
+    expect(last.items[0]).toMatchObject({ effectId: first.input.effectId, rowIndex: 1 });
+    expect(last.nextCursor).toBeNull();
     await expect(
       recruiting.listRecruitingCandidateSources(
         prisma,

@@ -2191,15 +2191,15 @@ it("opens retained candidate report fields through the native saved assessment s
   expect(api.getById).not.toHaveBeenCalled();
 });
 
-it("keeps repeated retained reports in native source disclosures with their saved dates", async () => {
+it("opens the latest retained report first while preserving dated history and pagination", async () => {
   const candidate = { ...candidateFixture("repeated-person", false), name: "Synthetic Engineer" };
   api.listCandidates.mockResolvedValue(candidatePage([candidate]));
-  api.listCandidateSources.mockResolvedValue({
+  const page = {
     roleId: role.id,
     candidateKey: candidate.candidateKey,
     total: 3,
     nextCursor: "more-sources",
-    items: [0, 1].map((index) => ({
+    items: [1, 0].map((index) => ({
       providerTaskId: "provider-task",
       taskId: null,
       actionId: null,
@@ -2216,21 +2216,39 @@ it("keeps repeated retained reports in native source disclosures with their save
         sourceUrls: [],
       },
     })),
+  };
+  api.listCandidateSources.mockResolvedValueOnce(page).mockResolvedValueOnce({
+    ...page,
+    nextCursor: null,
+    items: [{ ...page.items[0]!, effectId: "older-read", observedAt: "2025-12-31T00:00:00Z" }],
   });
   const view = await mounted("thread-1", undefined, false);
   await view.click("Evidence");
   await view.click(candidate.name);
   const sources = view.container.querySelector('[aria-label="Saved candidate sources"]')!;
-  const disclosures = [...sources.querySelectorAll("details")];
+  let disclosures = [...sources.querySelectorAll("details")];
   expect(disclosures).toHaveLength(2);
   expect(disclosures.map((item) => item.open)).toEqual([true, false]);
   expect(
     disclosures.map((item) => item.querySelector("summary time")?.getAttribute("datetime")),
-  ).toEqual(["2026-01-01T00:00:00Z", "2026-01-02T00:00:00Z"]);
+  ).toEqual(["2026-01-02T00:00:00Z", "2026-01-01T00:00:00Z"]);
   expect(
     disclosures.every((item) => item.querySelector("dl dt")?.textContent === "Geometry work"),
   ).toBe(true);
   expect(sources.textContent).toContain("More sources");
+  await view.click("More sources");
+  expect(api.listCandidateSources).toHaveBeenLastCalledWith({
+    roleId: role.id,
+    candidateKey: candidate.candidateKey,
+    limit: 20,
+    cursor: "more-sources",
+  });
+  disclosures = [...sources.querySelectorAll("details")];
+  expect(disclosures.map((item) => item.open)).toEqual([true, false, false]);
+  expect(
+    disclosures.map((item) => item.querySelector("summary time")?.getAttribute("datetime")),
+  ).toEqual(["2026-01-02T00:00:00Z", "2026-01-01T00:00:00Z", "2025-12-31T00:00:00Z"]);
+  expect(sources.textContent).not.toContain("More sources");
   expect(sources.textContent).not.toContain("Latest");
   expect(api.getById).not.toHaveBeenCalled();
 });
@@ -3873,8 +3891,8 @@ it("does not carry expanded evidence into another role with the same source refe
   expect(view.container.querySelector("[data-artifact-id]")).toBeNull();
 });
 
-it.each(["thread", "assessment sources", "bot memory"])(
-  "clears previously opened evidence after %s authorization is revoked and reloads without old selection",
+it.each(["thread", "assessment sources", "research", "questions", "user memory", "bot memory"])(
+  "logs only error metadata when %s access is revoked and clears previously opened evidence",
   async (boundary) => {
     const f = artifactSourceFixture();
     api.listAssessments.mockResolvedValue([
@@ -3888,15 +3906,27 @@ it.each(["thread", "assessment sources", "bot memory"])(
     await vi.waitFor(() =>
       expect(view.container.querySelector("mark")?.textContent).toBe(f.source.quote),
     );
-    if (boundary === "thread")
-      api.getWorkspace.mockRejectedValueOnce(new ORPCError("UNAUTHORIZED"));
-    else if (boundary === "assessment sources")
-      api.listAssessments.mockRejectedValueOnce(new ORPCError("NOT_FOUND"));
-    else
-      api.list
-        .mockImplementationOnce(async () => [])
-        .mockRejectedValueOnce(new ORPCError("FORBIDDEN"));
+    const error = new ORPCError(
+      boundary === "thread"
+        ? "UNAUTHORIZED"
+        : boundary === "bot memory"
+          ? "FORBIDDEN"
+          : "NOT_FOUND",
+      { message: "Read denied", data: { payload: "private source payload" } },
+    );
+    if (boundary === "thread") api.getWorkspace.mockRejectedValueOnce(error);
+    else if (boundary === "assessment sources") api.listAssessments.mockRejectedValueOnce(error);
+    else if (boundary === "research") api.listResearch.mockRejectedValueOnce(error);
+    else if (boundary === "questions") api.listQuestions.mockRejectedValueOnce(error);
+    else if (boundary === "user memory") api.list.mockRejectedValueOnce(error);
+    else api.list.mockImplementationOnce(async () => []).mockRejectedValueOnce(error);
+    const log = vi.spyOn(console, "error").mockImplementation(() => {});
     await view.click("Refresh");
+    const calls = log.mock.calls;
+    log.mockRestore();
+    expect(calls).toEqual([
+      ["Recruiting request failed", { name: error.name, code: error.code, message: error.message }],
+    ]);
     expect(view.container.textContent).toContain("Could not load recruiting");
     expect(view.container.textContent).not.toContain("candidate-1");
     expect(view.container.textContent).not.toContain(f.source.quote);
