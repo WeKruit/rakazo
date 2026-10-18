@@ -147,7 +147,7 @@ describe("recruiting run context", () => {
   );
 
   it.each(["instructions", "tool_result", "steering"] as const)(
-    "keeps business sourcing approvals distinct from intake and authorized continuation in %s context",
+    "distinguishes authorized exploration and continuation from formal calibration gates in %s context",
     async (placement) => {
       const { deps } = fixture();
       const loaded = await loadRecruitingRunContext(deps, run, { documents: [] }, context, {
@@ -158,21 +158,31 @@ describe("recruiting run context", () => {
       expect(text).toContain(
         "Intake, company/JD research and recovery reads do not require redundant confirmation",
       );
-      expect(text).toContain("actual human G0 approval and G1 approval of the JD/deck package");
+      expect(text).toContain(
+        "Formal calibration requires actual human G0 approval and G1 approval of the JD/deck package",
+      );
       expect(text).toContain("the human explicitly deferred S2 after G0");
       expect(text).toContain("Reconfirm materially revised requirements or JD/deck");
-      expect(text).toContain("already-authorized feedback on the same verified provider task");
-      expect(text).toContain("without demanding technical saved-record confirmation");
+      expect(text).toContain(
+        "Outside formal calibration or scale, small-scale exploration or same-task feedback/more results explicitly authorized by the current human request do not require G0/G1",
+      );
+      expect(text).toContain("follow the requested scope and usage limits");
+      expect(text).toContain("reuse the same verified provider task for continuation");
+      expect(text).toContain("Keep unknowns and pending cards");
+      expect(text).toContain(
+        "this does not approve requirements, JD/deck, business policies, calibration or scale",
+      );
       expect(text).toContain("never recast changed qualification as round-only scope");
       expect(text).toContain(
         "G2 approval of the calibration profiles and rule changes is required before scale",
       );
-      expect(text).toContain("These business approvals apply to native MCP sourcing too");
+      expect(text).toContain("These formal calibration/scale gates apply to native MCP too");
       expect(text).toContain(
         "ordinary continuation does not require saved-workspace research actions",
       );
       expect(text).toContain("Scheduling and outbound require their native approvals");
       expect(text).not.toContain("research requires G0 on the current brief revision");
+      expect(text).not.toContain("Candidate sourcing requires actual human G0 approval");
       expect(loaded!.text).toContain(text);
       expect(loaded!.manifest.placement).toBe(placement);
       expect(loaded!.workspace).toBe(workspace);
