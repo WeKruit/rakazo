@@ -62,7 +62,15 @@ Supabase 独立数据库、原生 memory provider、Modal Volume 和 E2B 沿用�
 
 ## 当前发布与缺口（2026-10-18）
 
-### v89 已发布；真实排名已展示，运行中恢复阻塞已定位
+### v90 已发布；原生运行及同一保存回执已恢复
+
+v90 / `00fd7c2c` 已发布；二十份运行源码 hash 匹配，20:31 UTC health/ready 均200、非 degraded，首次启动尚未监听的采样保留。未新增迁移、资源、工具权限或 provider 操作。旧 Graphile 作业保持锁定、仅由其原生替换语义移出键并停止重试；同一 Sourcer 执行自动以 fence2/新 attempt 接回，没有手工改租约或效果状态。
+
+20:32 UTC 原本被打断的同一 save_results 效果实际 completed/saved。新二十五行结果已存为第二来源页，去重后共二十五人，原二十人页及原文件保持；正常网页显示二十五人与五位新增人的对话交付。原 research/reply 仍各一次。182份受保护旧执行及十二条已取消记录保持。后续 Sourcer 收尾与 Main 返还、provider 实际终态分别核对，不以一次保存代替整个招聘目标完成。
+
+真实返回还确认了一处展示缺口：二十五行均有 numeric overall_rank（1–25），rank/original_pool_rank 只覆盖原二十人，五位新人明确为空。现有摘要隐藏后两个字段，累计查询只认 updated_rank，因此网页新人的普通排名为 Unknown、默认列表按无排名处理。下一发布只复用原查询/摘要：保留 updated_rank 的明确值/空值优先，再采用 overall_rank；普通 rank 仍只在同一来源页比较。展示真实 Overall rank / Original pool rank，不重算候选分数、填补空值或使用原名单局部排名混排。153项聚焦 DB 检查、类型/格式及独立复核通过；共享 Cards/Table/详情回归及网页类型/格式通过。真实发布、排序与截图仍待验。
+
+### v89 历史发布；真实排名、冷加载与恢复故障
 
 v89 / `c15e4692` 已发布，十六份运行源码 hash 与冻结归档一致；20:16 UTC 内部 health/ready 均200、非 degraded。原生候选摘要、单个保存结果的原排名和同身份冷预加载复用已上线。正常网页二十人 Cards/Table 已显示真实 rank、推荐和匹配理由；没有返回的 score/tier 保持缺失。多个结果不混比局部排名。Chrome Disable cache 的真实重载只发一次 bootstrap，响应200、该请求耗时1.43秒；这是一次请求证据，不是整页可用耗时或通用性能保证。
 

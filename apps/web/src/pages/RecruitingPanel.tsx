@@ -485,7 +485,15 @@ function CandidateResearchMatch({ candidate }: { candidate: RecruitingCandidate 
   const { t } = useLingui();
   const source = candidate.latestSource;
   const fields = source?.report?.fields.filter((field) =>
-    ["Rank", "Recommendation", "Fit reasons", "Match score", "Match tier"].includes(field.label),
+    [
+      "Rank",
+      "Overall rank",
+      "Original pool rank",
+      "Recommendation",
+      "Fit reasons",
+      "Match score",
+      "Match tier",
+    ].includes(field.label),
   );
   const hasScoreOrTier = fields?.some(
     (field) => field.label === "Match score" || field.label === "Match tier",

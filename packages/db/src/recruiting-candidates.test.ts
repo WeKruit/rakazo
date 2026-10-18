@@ -202,6 +202,7 @@ describe("candidate listing and shortlist boundaries", () => {
     });
     const query = f.tx.$queryRaw.mock.lastCall![0] as { sql: string; values: unknown[] };
     expect(query.sql).toContain("CASE WHEN returned.value ? 'updated_rank'");
+    expect(query.sql).toContain("WHEN returned.value ? 'overall_rank'");
     expect(query.sql).toContain("ELSE returned.value -> 'rank' END");
     expect(query.sql).toContain('AND page."effectId" =');
     expect(query.values.filter((value) => value === "selected-result")).toHaveLength(2);
@@ -398,7 +399,8 @@ describe("candidate listing and shortlist boundaries", () => {
           values: unknown[];
         };
         expect(multiplePages.sql).not.toContain("ELSE returned.value -> 'rank' END");
-        expect(multiplePages.values).toContain("updated_rank");
+        expect(multiplePages.sql).toContain("WHEN returned.value ? 'overall_rank'");
+        expect(multiplePages.sql).toContain("THEN returned.value -> 'updated_rank'");
         expect(multiplePages.sql).not.toContain('p."effectId" =');
       }
     },

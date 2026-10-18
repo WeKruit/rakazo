@@ -2339,6 +2339,8 @@ it.each(["Cards", "Table"])(
           fields: [
             { label: "Grade", value: "Provider strong", sourceUrls: [] },
             { label: "Rank", value: "3", sourceUrls: [] },
+            { label: "Overall rank", value: "3", sourceUrls: [] },
+            { label: "Original pool rank", value: "12", sourceUrls: [] },
             { label: "Recommendation", value: "Review this profile", sourceUrls: [] },
             {
               label: "Fit reasons",
@@ -2355,7 +2357,13 @@ it.each(["Cards", "Table"])(
       name: "Unknown match",
       latestSource: {
         ...source,
-        report: { fields: [{ label: "Match score", value: null, sourceUrls: [] }], sourceUrls: [] },
+        report: {
+          fields: [
+            { label: "Match score", value: null, sourceUrls: [] },
+            { label: "Original pool rank", value: null, sourceUrls: [] },
+          ],
+          sourceUrls: [],
+        },
       },
     };
     const unavailable = {
@@ -2374,16 +2382,21 @@ it.each(["Cards", "Table"])(
     expect(matches[0]?.textContent).toContain("Match tierProvider possible");
     expect([...matches[1]!.querySelectorAll("dd dd")].map((item) => item.textContent)).toEqual([
       "3",
+      "3",
+      "12",
       "Review this profile",
       "  Built the requested systems.\nRelevant project evidence.  ",
     ]);
     expect([...matches[1]!.querySelectorAll("dd dt")].map((item) => item.textContent)).toEqual([
       "Rank",
+      "Overall rank",
+      "Original pool rank",
       "Recommendation",
       "Fit reasons",
     ]);
     expect(matches[1]?.textContent).toContain("Score / tier not returned");
     expect(matches[2]?.textContent).toContain("Unknown");
+    expect(matches[2]?.textContent).toContain("Original pool rankUnknown");
     expect(matches[3]?.textContent).toContain("Source unavailable");
     expect(list.textContent).not.toContain("Unassessed");
     expect(api.listCandidateSources).not.toHaveBeenCalled();
@@ -2446,6 +2459,8 @@ it.each(["Cards", "Table"])(
     await view.click(noMatch.name);
     const match = view.container.querySelector('[role="dialog"] [aria-label="Research match"]')!;
     expect(match.textContent).toContain("Rank3");
+    expect(match.textContent).toContain("Overall rank3");
+    expect(match.textContent).toContain("Original pool rank12");
     expect(match.textContent).toContain("RecommendationReview this profile");
     expect(match.textContent).toContain(
       "Fit reasons  Built the requested systems.\nRelevant project evidence.  ",

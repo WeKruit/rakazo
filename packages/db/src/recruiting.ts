@@ -5729,9 +5729,15 @@ function candidateIndexQuery(
 ) {
   // ponytail: parse each saved page once; persist match fields only if large pools outgrow this projection.
   const matchSort = sort === "rank" || sort === "tier";
-  const matchField = sort === "rank" ? "updated_rank" : "match_tier";
   // ponytail: original ranks are comparable only within this exact saved result, never across pages.
   const pageRank = sort === "rank" && sourceEffectId !== undefined;
+  const matchCell =
+    sort === "rank"
+      ? Prisma.sql`CASE WHEN returned.value ? 'updated_rank'
+        THEN returned.value -> 'updated_rank'
+        WHEN returned.value ? 'overall_rank' THEN returned.value -> 'overall_rank'
+        ${pageRank ? Prisma.sql`ELSE returned.value -> 'rank'` : Prisma.empty} END`
+      : Prisma.sql`returned.value -> ${"match_tier"}`;
   const matchValue =
     sort === "rank"
       ? Prisma.sql`CASE WHEN jsonb_typeof(match."value") = 'number' THEN
@@ -5753,12 +5759,7 @@ function candidateIndexQuery(
     matchSort
       ? Prisma.sql`match_rows AS MATERIALIZED (
     SELECT page."effectId" AS "pageId", page."observedAt", (returned.ordinality - 1)::int AS "rowIndex",
-      ${
-        pageRank
-          ? Prisma.sql`CASE WHEN returned.value ? 'updated_rank'
-        THEN returned.value -> 'updated_rank' ELSE returned.value -> 'rank' END`
-          : Prisma.sql`returned.value -> ${matchField}`
-      } AS cell
+      ${matchCell} AS cell
     FROM "recruiting_candidate_pages" page
     JOIN "external_effects" effect ON effect."id" = page."effectId"
     CROSS JOIN LATERAL (
@@ -5771,12 +5772,14 @@ function candidateIndexQuery(
     ) envelope
     CROSS JOIN LATERAL jsonb_array_elements(CASE WHEN jsonb_typeof(envelope.body->'rows') = 'array'
       THEN envelope.body->'rows' ELSE '[]'::jsonb END) WITH ORDINALITY returned(value, ordinality)
-    WHERE page."roleId" = ${roleId} AND ${
-      pageRank
-        ? Prisma.sql`page."effectId" = ${sourceEffectId}
-      AND (returned.value ? 'updated_rank' OR returned.value ? 'rank')`
-        : Prisma.sql`returned.value ? ${matchField}`
-    }
+    WHERE page."roleId" = ${roleId}
+      ${pageRank ? Prisma.sql`AND page."effectId" = ${sourceEffectId}` : Prisma.empty}
+      AND ${
+        sort === "rank"
+          ? Prisma.sql`(returned.value ? 'updated_rank' OR returned.value ? 'overall_rank'
+          ${pageRank ? Prisma.sql`OR returned.value ? 'rank'` : Prisma.empty})`
+          : Prisma.sql`returned.value ? ${"match_tier"}`
+      }
   ),`
       : Prisma.empty
   } base AS (
