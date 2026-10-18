@@ -47,15 +47,17 @@ export function retainInitialBootstrapForIdentity(userId: string, spaceId: strin
   const generation = bootstrapGeneration;
   const matchesIdentity = (bootstrap: AppBootstrap) =>
     bootstrap.me.userId === userId && (spaceId === null || bootstrap.me.spaceId === spaceId);
-  const promise = primed.promise.then(async (bootstrap) => {
-    if (generation === bootstrapGeneration && !matchesIdentity(bootstrap)) {
-      bootstrap = await requestBootstrap(primed.botId);
-    }
-    if (generation !== bootstrapGeneration || !matchesIdentity(bootstrap)) {
-      throw new Error("Bootstrap identity changed");
-    }
-    return bootstrap;
-  });
+  const promise = primed.promise
+    .catch(() => undefined)
+    .then(async (bootstrap) => {
+      if (generation === bootstrapGeneration && (!bootstrap || !matchesIdentity(bootstrap))) {
+        bootstrap = await requestBootstrap(primed.botId);
+      }
+      if (generation !== bootstrapGeneration || !bootstrap || !matchesIdentity(bootstrap)) {
+        throw new Error("Bootstrap identity changed");
+      }
+      return bootstrap;
+    });
   void promise.catch(() => undefined);
   primedBootstrap = { botId: primed.botId, promise };
 }

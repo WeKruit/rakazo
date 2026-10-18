@@ -43,6 +43,44 @@ describe("initial bootstrap target", () => {
     expect(bootstrapRpc).toHaveBeenCalledTimes(2);
   });
 
+  it.each([
+    { userId: "user", spaceId: "space" },
+    { userId: "other-user", spaceId: "space" },
+    { userId: "user", spaceId: "other-space" },
+  ])("validates exactly one current fetch after a failed preload: %j", async (me) => {
+    vi.stubGlobal("window", { location: { pathname: "/app/bot" } });
+    const current = { me };
+    bootstrapRpc
+      .mockRejectedValueOnce(new Error("Preload unavailable"))
+      .mockResolvedValueOnce(current);
+    const bootstrap = await import("./bootstrap");
+    bootstrap.retainInitialBootstrapForIdentity("user", "space");
+    const response = bootstrap.takeInitialBootstrap("bot");
+    if (me.userId === "user" && me.spaceId === "space") {
+      expect(await response).toBe(current);
+    } else {
+      await expect(response).rejects.toThrow("Bootstrap identity changed");
+    }
+    expect(bootstrapRpc).toHaveBeenCalledTimes(2);
+  });
+
+  it("does not fetch again when an invalidated preload fails", async () => {
+    vi.stubGlobal("window", { location: { pathname: "/app/bot" } });
+    let reject!: (error: Error) => void;
+    bootstrapRpc.mockReturnValueOnce(
+      new Promise((_resolve, fail) => {
+        reject = fail;
+      }),
+    );
+    const bootstrap = await import("./bootstrap");
+    bootstrap.retainInitialBootstrapForIdentity("user", "space");
+    const response = bootstrap.takeInitialBootstrap("bot");
+    bootstrap.invalidateInitialBootstrap();
+    reject(new Error("Preload unavailable"));
+    await expect(response).rejects.toThrow("Bootstrap identity changed");
+    expect(bootstrapRpc).toHaveBeenCalledOnce();
+  });
+
   it("never returns a response for another account when the current fetch also mismatches", async () => {
     vi.stubGlobal("window", { location: { pathname: "/app/bot" } });
     bootstrapRpc.mockResolvedValue({ me: { userId: "other-user", spaceId: "space" } });
