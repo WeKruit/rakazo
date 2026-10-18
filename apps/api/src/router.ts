@@ -3252,7 +3252,7 @@ export function createRouter(deps: RouterDeps) {
         readRecruitingSource(deps, context.actor, input),
       ),
       listCandidates: authed.recruiting.listCandidates.handler(({ context, input }) =>
-        listRecruitingCandidates(deps.prisma, context.actor, input),
+        listRecruitingCandidates(deps, context.actor, input),
       ),
       listCandidateSources: authed.recruiting.listCandidateSources.handler(({ context, input }) =>
         listRecruitingCandidateSources(deps, context.actor, input),

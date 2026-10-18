@@ -432,13 +432,17 @@ msgstr "Agent connections"
 msgid "Agents:"
 msgstr "Agents:"
 
-#: src/pages/RecruitingPanel.tsx
-msgid "All assessments"
-msgstr "All assessments"
-
 #: src/pages/Artifacts.tsx
 msgid "All bots"
 msgstr "All bots"
+
+#: src/pages/RecruitingPanel.tsx
+msgid "All internal assessments"
+msgstr "All internal assessments"
+
+#: src/pages/RecruitingPanel.tsx
+msgid "All internal verdicts"
+msgstr "All internal verdicts"
 
 #: src/pages/RecruitingPanel.tsx
 msgid "All of"
@@ -463,10 +467,6 @@ msgstr "All time"
 #: src/pages/McpServersOverlay.tsx
 msgid "All tools"
 msgstr "All tools"
-
-#: src/pages/RecruitingPanel.tsx
-msgid "All verdicts"
-msgstr "All verdicts"
 
 #. placeholder {0}: rule.matchValue
 #: src/components/ApprovalRulesSettings.tsx
@@ -667,20 +667,8 @@ msgid "Ask the server owner to configure this provider."
 msgstr "Ask the server owner to configure this provider."
 
 #: src/pages/RecruitingPanel.tsx
-msgid "Assessed"
-msgstr "Assessed"
-
-#: src/pages/RecruitingPanel.tsx
-msgid "Assessment"
-msgstr "Assessment"
-
-#: src/pages/RecruitingPanel.tsx
 msgid "Assessment date"
 msgstr "Assessment date"
-
-#: src/pages/RecruitingPanel.tsx
-msgid "Assessment state"
-msgstr "Assessment state"
 
 #: src/pages/RecruitingPanel.tsx
 msgid "Assessment unavailable"
@@ -2663,10 +2651,6 @@ msgstr "Hard"
 msgid "Hard criteria"
 msgstr "Hard criteria"
 
-#: src/pages/RecruitingPanel.tsx
-msgid "Hard criteria filter"
-msgstr "Hard criteria filter"
-
 #: src/pages/RoutineEditor.tsx
 msgid "header"
 msgstr "header"
@@ -2817,6 +2801,34 @@ msgstr "Integration options"
 #: src/pages/Shell.tsx
 msgid "Integrations"
 msgstr "Integrations"
+
+#: src/pages/RecruitingPanel.tsx
+msgid "Internal assessment"
+msgstr "Internal assessment"
+
+#: src/pages/RecruitingPanel.tsx
+msgid "Internal assessment: current"
+msgstr "Internal assessment: current"
+
+#: src/pages/RecruitingPanel.tsx
+msgid "Internal assessment: outdated"
+msgstr "Internal assessment: outdated"
+
+#: src/pages/RecruitingPanel.tsx
+msgid "Internal verdict"
+msgstr "Internal verdict"
+
+#: src/pages/RecruitingPanel.tsx
+msgid "Internal verdict: met"
+msgstr "Internal verdict: met"
+
+#: src/pages/RecruitingPanel.tsx
+msgid "Internal verdict: unknown"
+msgstr "Internal verdict: unknown"
+
+#: src/pages/RecruitingPanel.tsx
+msgid "Internal verdict: unmet"
+msgstr "Internal verdict: unmet"
 
 #: src/pages/RoutineEditor.tsx
 #: src/pages/RoutineSchedule.tsx
@@ -3458,6 +3470,10 @@ msgstr "No credentials saved for this bot."
 #: src/pages/MessagingSettingsOverlay.tsx
 msgid "No group chats yet."
 msgstr "No group chats yet."
+
+#: src/pages/RecruitingPanel.tsx
+msgid "No internal assessment"
+msgstr "No internal assessment"
 
 #: src/components/AskCard.tsx
 msgid "No longer active"
@@ -4264,6 +4280,10 @@ msgid "Research history"
 msgstr "Research history"
 
 #: src/pages/RecruitingPanel.tsx
+msgid "Research match"
+msgstr "Research match"
+
+#: src/pages/RecruitingPanel.tsx
 msgid "Research round"
 msgstr "Research round"
 
@@ -4575,6 +4595,10 @@ msgstr "Saving…"
 #: src/lib/call-session.ts
 msgid "Say yes or no, or answer in a sentence."
 msgstr "Say yes or no, or answer in a sentence."
+
+#: src/pages/RecruitingPanel.tsx
+msgid "Score / tier not returned"
+msgstr "Score / tier not returned"
 
 #: src/pages/ModelSettingsOverlay.tsx
 #: src/pages/PluginsOverlay.tsx
@@ -5356,10 +5380,6 @@ msgstr "Type without recording"
 #: src/components/AskCard.tsx
 msgid "Type your answer"
 msgstr "Type your answer"
-
-#: src/pages/RecruitingPanel.tsx
-msgid "Unassessed"
-msgstr "Unassessed"
 
 #: src/pages/BotContextMenu.tsx
 msgid "Unassigned"

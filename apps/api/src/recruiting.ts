@@ -64,7 +64,7 @@ function candidateReportReader(
   artifacts = new Map<string, SavedArtifact>(),
 ) {
   let research: ReturnType<typeof recruiting.listRecruitingResearch> | undefined;
-  return async (source: RecruitingCandidateSource) => {
+  return async (source: Omit<RecruitingCandidateSource, "crmImports">) => {
     try {
       const { artifactId, sha256 } = source.artifactRef;
       let saved = artifacts.get(artifactId);
@@ -379,10 +379,25 @@ export const editRecruitingCriteria = (
 ) => authenticated(() => recruiting.editRecruitingCriteria(prisma, actor, input, material));
 
 export const listRecruitingCandidates = (
-  prisma: PrismaClient,
+  deps: RecruitingReadDeps,
   actor: Actor,
   input: Parameters<typeof recruiting.listRecruitingCandidates>[2],
-) => authenticated(() => recruiting.listRecruitingCandidates(prisma, actor, input));
+) =>
+  authenticated(async () => {
+    const page = await recruiting.listRecruitingCandidates(deps.prisma, actor, input);
+    const readReport = candidateReportReader(deps, actor, input.roleId);
+    for (const candidate of page.items) {
+      if (!candidate.latestSource) continue;
+      const { report: _report, ...metadata } = candidate.latestSource;
+      try {
+        candidate.latestSource = { ...metadata, report: (await readReport(metadata)).report };
+      } catch {
+        // Authorized provenance remains readable when its report bytes are unavailable.
+        candidate.latestSource = metadata;
+      }
+    }
+    return page;
+  });
 export const listRecruitingCandidateSources = (
   deps: RecruitingReadDeps,
   actor: Actor,

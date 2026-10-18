@@ -289,16 +289,11 @@ function CandidateFeedbackForm({
 function CandidateCounts({ counts }: { counts: ListRecruitingCandidatesOutput["counts"] }) {
   const { t } = useLingui();
   return (
-    <dl
-      className="grid grid-cols-2 gap-x-4 gap-y-3 sm:grid-cols-3"
-      aria-label={t`Saved candidate totals`}
-    >
+    <dl className="grid grid-cols-2 gap-x-4 gap-y-3" aria-label={t`Saved candidate totals`}>
       {[
         [<Trans key="source">Saved source rows</Trans>, counts.sourceRows],
         [<Trans key="candidates">Candidates</Trans>, counts.candidates],
         [<Trans key="identified">Identified profiles</Trans>, counts.identifiedCandidates],
-        [<Trans key="unassessed">Unassessed</Trans>, counts.unassessed],
-        [<Trans key="assessed">Assessed</Trans>, counts.assessed],
         [<Trans key="shortlist">Shortlist</Trans>, counts.shortlisted],
       ].map(([label, value], index) => (
         <div key={index}>
@@ -370,21 +365,54 @@ function CandidateProfile({
   );
 }
 
+function CandidateResearchMatch({ candidate }: { candidate: RecruitingCandidate }) {
+  const { t } = useLingui();
+  const source = candidate.latestSource;
+  const fields = source?.report?.fields.filter(
+    (field) => field.label === "Match score" || field.label === "Match tier",
+  );
+  return (
+    <dl aria-label={t`Research match`} className="space-y-1 text-xs">
+      <dt className="text-muted-foreground">
+        <Trans>Research match</Trans>
+      </dt>
+      <dd>
+        {source && !source.report ? (
+          <p className="text-muted-foreground">
+            <Trans>Source unavailable</Trans>
+          </p>
+        ) : fields?.length ? (
+          <dl>
+            {fields.map((field) => (
+              <div key={field.label} className="flex flex-wrap gap-x-2">
+                <dt className="text-muted-foreground">{field.label}</dt>
+                <dd className="whitespace-pre-wrap break-words text-base">
+                  {field.value ?? <Trans>Unknown</Trans>}
+                </dd>
+              </div>
+            ))}
+          </dl>
+        ) : (
+          <p className="text-muted-foreground">
+            <Trans>Score / tier not returned</Trans>
+          </p>
+        )}
+      </dd>
+    </dl>
+  );
+}
+
 function CandidateAssessment({ candidate }: { candidate: RecruitingCandidate }) {
   const assessment = candidate.latestAssessment;
   return assessment ? (
     <div className="flex flex-wrap items-center gap-2 text-xs">
       <span className="text-muted-foreground">
-        <Trans>Version {assessment.version}</Trans> ·{" "}
+        <Trans>Internal assessment</Trans> · <Trans>Version {assessment.version}</Trans> ·{" "}
         {assessment.isCurrent ? <Trans>Current</Trans> : <Trans>Outdated</Trans>}
       </span>
       <VerdictLabel verdict={assessment.hardGate} />
     </div>
-  ) : (
-    <p className="text-xs text-muted-foreground">
-      <Trans>Unassessed</Trans>
-    </p>
-  );
+  ) : null;
 }
 
 function ResearchActionStatus({ action }: { action: RecruitingResearchAction }) {
@@ -808,7 +836,7 @@ function ResearchResults({
                 className="space-y-2 border-s border-border ps-3"
               >
                 <p className="text-xs text-muted-foreground">
-                  <Trans>Unassessed</Trans> · provider_report
+                  <Trans>Research findings</Trans>
                 </p>
                 <details>
                   <summary className="cursor-pointer text-xs text-muted-foreground">
@@ -2753,7 +2781,7 @@ function RecruitingWorkspace({
                     }
                   />
                   <NativeSelect
-                    aria-label={t`Assessment state`}
+                    aria-label={t`Internal assessment`}
                     value={candidateFilters.assessmentState ?? "all"}
                     onChange={(event) =>
                       setCandidateFilters((current) => ({
@@ -2767,20 +2795,20 @@ function RecruitingWorkspace({
                     }
                   >
                     <NativeSelectOption value="all">
-                      <Trans>All assessments</Trans>
+                      <Trans>All internal assessments</Trans>
                     </NativeSelectOption>
                     <NativeSelectOption value="unassessed">
-                      <Trans>Unassessed</Trans>
+                      <Trans>No internal assessment</Trans>
                     </NativeSelectOption>
                     <NativeSelectOption value="current">
-                      <Trans>Current</Trans>
+                      <Trans>Internal assessment: current</Trans>
                     </NativeSelectOption>
                     <NativeSelectOption value="outdated">
-                      <Trans>Outdated</Trans>
+                      <Trans>Internal assessment: outdated</Trans>
                     </NativeSelectOption>
                   </NativeSelect>
                   <NativeSelect
-                    aria-label={t`Hard criteria filter`}
+                    aria-label={t`Internal verdict`}
                     value={candidateFilters.verdict ?? "all"}
                     onChange={(event) =>
                       setCandidateFilters((current) => ({
@@ -2793,16 +2821,16 @@ function RecruitingWorkspace({
                     }
                   >
                     <NativeSelectOption value="all">
-                      <Trans>All verdicts</Trans>
+                      <Trans>All internal verdicts</Trans>
                     </NativeSelectOption>
                     <NativeSelectOption value="met">
-                      <Trans>Met</Trans>
+                      <Trans>Internal verdict: met</Trans>
                     </NativeSelectOption>
                     <NativeSelectOption value="unmet">
-                      <Trans>Unmet</Trans>
+                      <Trans>Internal verdict: unmet</Trans>
                     </NativeSelectOption>
                     <NativeSelectOption value="unknown">
-                      <Trans>Unknown</Trans>
+                      <Trans>Internal verdict: unknown</Trans>
                     </NativeSelectOption>
                   </NativeSelect>
                   <NativeSelect
@@ -2986,6 +3014,7 @@ function RecruitingWorkspace({
                                   candidate={candidate}
                                   showDiagnostics={showDiagnostics}
                                 />
+                                <CandidateResearchMatch candidate={candidate} />
                                 <CandidateAssessment candidate={candidate} />
                                 {showCrm ? (
                                   <p className="text-xs text-muted-foreground">
@@ -3020,7 +3049,8 @@ function RecruitingWorkspace({
                                 t`Company`,
                                 t`Location`,
                                 t`Profile`,
-                                t`Assessment`,
+                                t`Research match`,
+                                t`Internal assessment`,
                                 ...(showCrm ? [t`CRM`] : []),
                                 t`Discoveries`,
                                 t`Shortlist`,
@@ -3066,6 +3096,9 @@ function RecruitingWorkspace({
                                     candidate={candidate}
                                     showDiagnostics={showDiagnostics}
                                   />
+                                </td>
+                                <td className="py-2 pe-3">
+                                  <CandidateResearchMatch candidate={candidate} />
                                 </td>
                                 <td className="py-2 pe-3">
                                   <CandidateAssessment candidate={candidate} />
@@ -3475,19 +3508,16 @@ function RecruitingWorkspace({
                   />
                 </section>
               ) : null}
-              {!selection.latestAssessment ? (
-                <p>
-                  <Trans>Unassessed</Trans>
-                </p>
-              ) : evidenceFailed ? (
+              <CandidateResearchMatch candidate={selection} />
+              {selection.latestAssessment && evidenceFailed ? (
                 <p role="alert">
                   <Trans>Could not load assessment</Trans>
                 </p>
-              ) : !selectedEvidence ? (
+              ) : selection.latestAssessment && !selectedEvidence ? (
                 <p role="status">
                   <Trans>Loading…</Trans>
                 </p>
-              ) : !selected ? (
+              ) : selection.latestAssessment && !selected ? (
                 <p role="alert">
                   <Trans>Assessment unavailable</Trans>
                 </p>
@@ -3517,7 +3547,8 @@ function RecruitingWorkspace({
                   : (selection?.name ?? t`Unnamed candidate`)}
               </h3>
               <p className="text-xs text-muted-foreground">
-                <Trans>Role</Trans> · <Trans>Version {selected.roleRevision.revision}</Trans>
+                <Trans>Internal assessment</Trans> · <Trans>Role</Trans> ·{" "}
+                <Trans>Version {selected.roleRevision.revision}</Trans>
               </p>
               <p className="flex items-center gap-2">
                 <span>

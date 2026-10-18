@@ -903,6 +903,100 @@ describe("retained candidate report API", () => {
       expect(result.items[0]?.roleRevisionId).toBe("old-revision");
     },
   );
+  it.each(["native", "legacy", "artifact-access", "hash", "bytes", "row"])(
+    "serves saved reports and withholds unverified fit after metadata authorization (%s)",
+    async (boundary) => {
+      const f = fixture(boundary === "legacy", (snapshot) => {
+        const supplied = structuredClone(rows);
+        Object.assign(supplied[0]!, {
+          match_score: { value: 0 },
+          match_tier: { value: "Provider possible" },
+        });
+        Object.assign(supplied[1]!, { match_score: { value: null } });
+        snapshot.providerResult.structuredContent.rows = supplied;
+        snapshot.providerResult.content[0].text = JSON.stringify({
+          rows: supplied,
+          next_cursor: "private-next",
+        });
+        if (snapshot.observation) snapshot.observation.rows = supplied;
+      });
+      const { crmImports: _imports, ...source } = f.occurrence;
+      const candidates = [source, { ...source, rowIndex: 1 }, undefined].map(
+        (latestSource, index) => ({
+          roleId: "role",
+          candidateKey: `candidate-${index}`,
+          name: `Person ${index}`,
+          title: null,
+          company: null,
+          location: null,
+          linkedinUrl: null,
+          resumeUrl: null,
+          evidenceUrls: null,
+          issues: [],
+          shortlisted: false,
+          revision: 0,
+          discoveryCount: latestSource ? 1 : 0,
+          firstDiscoveredAt: null,
+          lastDiscoveredAt: null,
+          crm: null,
+          latestAssessment: null,
+          ...(latestSource ? { latestSource } : {}),
+        }),
+      );
+      vi.mocked(db.listRecruitingCandidates).mockResolvedValue({
+        roleId: "role",
+        roleRevisionId: "revision",
+        crmTarget: null,
+        items: candidates,
+        nextCursor: "unchanged",
+        total: 3,
+        counts: {
+          sourceRows: 2,
+          candidates: 3,
+          identifiedCandidates: 0,
+          unassessed: 3,
+          assessed: 0,
+          shortlisted: 0,
+        },
+      });
+      if (boundary === "artifact-access") f.findFirst.mockResolvedValue(null as never);
+      if (boundary === "hash") source.artifactRef.sha256 = "0".repeat(64);
+      if (boundary === "bytes") f.get.mockResolvedValue(Buffer.from("changed"));
+      if (boundary === "row") {
+        source.rowIndex = 99;
+        candidates[1]!.latestSource!.rowIndex = 99;
+      }
+      const client = createRouterClient(createRouter(f.deps as RouterDeps), { context: { actor } });
+      const result = await client.recruiting.listCandidates({ roleId: "role", limit: 3 });
+      expect(result.nextCursor).toBe("unchanged");
+      expect(result.items.map((item) => item.candidateKey)).toEqual(
+        candidates.map((item) => item.candidateKey),
+      );
+      expect(result.items[2]?.latestSource).toBeUndefined();
+      if (["native", "legacy"].includes(boundary)) {
+        expect(result.items[0]?.latestSource?.report?.fields).toEqual(
+          expect.arrayContaining([
+            { label: "Match score", value: "0", sourceUrls: [] },
+            { label: "Match tier", value: "Provider possible", sourceUrls: [] },
+          ]),
+        );
+        expect(result.items[1]?.latestSource?.report?.fields).toContainEqual({
+          label: "Match score",
+          value: null,
+          sourceUrls: [],
+        });
+        expect(f.get).toHaveBeenCalledOnce();
+      } else {
+        expect(result.items[0]?.latestSource).toEqual(source);
+        expect(result.items[1]?.latestSource?.report).toBeUndefined();
+        if (boundary === "artifact-access") expect(f.get).not.toHaveBeenCalled();
+      }
+      expect(db.listRecruitingCandidates).toHaveBeenCalledWith(f.deps.prisma, actor, {
+        roleId: "role",
+        limit: 3,
+      });
+    },
+  );
   it("decodes the existing catalog request tuple without creating a local task", async () => {
     const f = fixture(false, (snapshot) => {
       const { route, args } = snapshot.request[2];

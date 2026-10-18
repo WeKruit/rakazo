@@ -7479,7 +7479,7 @@ describePostgres("recruiting domain (PostgreSQL)", () => {
       actionId: prepared.action.id,
       roleRevisionId: prepared.action.roleRevisionId,
       effectId: first.input.effectId,
-      rowIndex: 0,
+      rowIndex: 1,
       artifactRef: {
         artifactId: first.saved.outputArtifact.id,
         sha256: first.saved.outputArtifact.hash,
@@ -7493,7 +7493,7 @@ describePostgres("recruiting domain (PostgreSQL)", () => {
       limit: 1,
       cursor: older.nextCursor!,
     });
-    expect(last.items[0]).toMatchObject({ effectId: first.input.effectId, rowIndex: 1 });
+    expect(last.items[0]).toMatchObject({ effectId: first.input.effectId, rowIndex: 0 });
     expect(last.nextCursor).toBeNull();
     await expect(
       recruiting.listRecruitingCandidateSources(

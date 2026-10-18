@@ -5,6 +5,7 @@ import type {
   RecruitingAssessment,
   RecruitingAssessmentSnapshot,
   RecruitingAssessmentSourceRef,
+  RecruitingCandidate,
   RecruitingCrmCandidateSync,
   RecruitingCrmTarget,
   RecruitingEmploymentRule,
@@ -361,6 +362,7 @@ function candidateFixture(candidateKey = "candidate-1", assessed = true) {
         }
       : null,
     crm: null as RecruitingCrmCandidateSync | null,
+    latestSource: undefined as RecruitingCandidate["latestSource"],
   };
 }
 beforeEach(() => {
@@ -912,7 +914,7 @@ it.each(["Cards", "Table"])(
     expect(document.getElementById(dialog!.getAttribute("aria-labelledby")!)?.textContent).toBe(
       candidates[14]!.name,
     );
-    expect(dialog!.textContent).toContain("Unassessed");
+    expect(dialog!.textContent).not.toContain("Unassessed");
     expect(dialog!.textContent).toContain("Saved candidate sources");
     expect(dialog!.textContent).not.toContain("Unknown");
     expect(view.container.querySelector(viewName === "Cards" ? "ul" : "table")).toBe(list);
@@ -1121,7 +1123,7 @@ it("shows saved unassessed profiles and authoritative totals in Cards and Table"
   expect(view.container.textContent).toContain("Synthetic Avery");
   expect(view.container.textContent).toContain("Example Tools");
   expect(view.container.textContent).toContain("Remote");
-  expect(view.container.textContent).toContain("Unassessed");
+  expect(view.container.textContent).not.toContain("Unassessed");
   expect(view.container.querySelector("li")?.textContent).not.toContain("Unknown");
   expect(view.container.querySelector('a[href="https://example.test/avery"]')).not.toBeNull();
   await view.click("Table");
@@ -1527,7 +1529,7 @@ it("requests server pages and filters while keeping selected evidence outside th
   );
   expect(api.listCandidates.mock.lastCall?.[0].cursor).toBeUndefined();
   expect(view.container.textContent).toContain("Original systems requirement");
-  await changeSelect(view.container, "Assessment state", "unassessed");
+  await changeSelect(view.container, "Internal assessment", "unassessed");
   await changeSelect(view.container, "Candidate sort", "recent");
   expect(api.listCandidates).toHaveBeenLastCalledWith(
     expect.objectContaining({ query: "Synthetic", assessmentState: "unassessed", sort: "recent" }),
@@ -1569,8 +1571,8 @@ it("filters saved result pages alongside search updates and preserves the other 
     expect(select.textContent).not.toContain(id);
 
   await changeInput(view.container, "Search candidates", "Synthetic");
-  await changeSelect(view.container, "Assessment state", "unassessed");
-  await changeSelect(view.container, "Hard criteria filter", "unknown");
+  await changeSelect(view.container, "Internal assessment", "unassessed");
+  await changeSelect(view.container, "Internal verdict", "unknown");
   await changeSelect(view.container, "Candidate sort", "recent");
   const filters = {
     roleId: role.id,
@@ -2030,109 +2032,151 @@ it("shows unnamed candidates and real profile links without exposing their stora
   expect(api.getById).not.toHaveBeenCalled();
 });
 
-it("shows retained research fields and gaps for an unassessed candidate without qualification badges", async () => {
-  const candidate = { ...candidateFixture("internal-person", false), name: "Synthetic Engineer" };
-  api.listCandidates.mockResolvedValue(candidatePage([candidate]));
-  api.listCandidateSources.mockResolvedValue({
-    roleId: role.id,
-    candidateKey: candidate.candidateKey,
-    total: 1,
-    nextCursor: null,
-    items: [
-      {
-        taskId: "internal-task",
-        actionId: "internal-action",
-        roleRevisionId: revision.id,
-        effectId: "internal-effect",
-        providerTaskId: "internal-provider-task",
-        rowIndex: 4,
-        artifactRef: { artifactId: "internal-artifact", sha256: "a".repeat(64) },
-        requestCursor: null,
-        outputId: "internal-output",
-        observedAt: "2026-01-01T00:00:00Z",
-        crmImports: [crmSync("synced")],
+it.each(["Cards", "Table"])(
+  "shows provider match directly in %s while preserving retained reports and gaps",
+  async (viewName) => {
+    const candidate = { ...candidateFixture("internal-person", false), name: "Synthetic Engineer" };
+    api.listCandidates.mockResolvedValue(candidatePage([candidate]));
+    const source = {
+      taskId: "internal-task",
+      actionId: "internal-action",
+      roleRevisionId: revision.id,
+      effectId: "internal-effect",
+      providerTaskId: "internal-provider-task",
+      rowIndex: 4,
+      artifactRef: { artifactId: "internal-artifact", sha256: "a".repeat(64) },
+      requestCursor: null,
+      outputId: "internal-output",
+      observedAt: "2026-01-01T00:00:00Z",
+      crmImports: [crmSync("synced")],
+      report: {
+        fields: [
+          {
+            label: "Geometry work",
+            value: "  Built a mesh compiler.\nMaintained geometry tools.  ",
+            evidence: "Provider cites a project description.",
+            reasoning: "Provider reports relevant geometry work; dates are unconfirmed.",
+            sourceUrls: ["https://projects.example.test/mesh"],
+          },
+          {
+            label: "Full-time years",
+            value: null,
+            evidence: "Employment dates were not supplied.",
+            sourceUrls: [],
+          },
+          { label: "Provider tier", value: "Tier 1", sourceUrls: [] },
+          { label: "Provider rule", value: "true", sourceUrls: [] },
+        ],
+        sourceUrls: ["https://projects.example.test/mesh", "https://profile.example.test/engineer"],
+      },
+    };
+    api.listCandidateSources.mockResolvedValue({
+      roleId: role.id,
+      candidateKey: candidate.candidateKey,
+      total: 1,
+      nextCursor: null,
+      items: [source],
+    });
+    source.report.fields.push(
+      { label: "Match score", value: "0", sourceUrls: [] },
+      { label: "Match tier", value: "Provider possible", sourceUrls: [] },
+    );
+    candidate.latestSource = source;
+    const noMatch = {
+      ...candidateFixture("missing", false),
+      name: "Missing score and tier",
+      latestSource: {
+        ...source,
         report: {
-          fields: [
-            {
-              label: "Geometry work",
-              value: "  Built a mesh compiler.\nMaintained geometry tools.  ",
-              evidence: "Provider cites a project description.",
-              reasoning: "Provider reports relevant geometry work; dates are unconfirmed.",
-              sourceUrls: ["https://projects.example.test/mesh"],
-            },
-            {
-              label: "Full-time years",
-              value: null,
-              evidence: "Employment dates were not supplied.",
-              sourceUrls: [],
-            },
-            { label: "Provider tier", value: "Tier 1", sourceUrls: [] },
-            { label: "Provider rule", value: "true", sourceUrls: [] },
-          ],
-          sourceUrls: [
-            "https://projects.example.test/mesh",
-            "https://profile.example.test/engineer",
-          ],
+          fields: [{ label: "Grade", value: "Provider strong", sourceUrls: [] }],
+          sourceUrls: [],
         },
       },
-    ],
-  });
-  const view = await mounted("thread-1", undefined, false);
-  await view.click("Evidence");
-  await view.click(candidate.name);
-  const dialog = view.container.querySelector('[role="dialog"]')!;
-  const sources = dialog.querySelector('[aria-label="Saved candidate sources"]')!;
-  const report = sources.querySelector("dl")!;
-  expect(report).not.toBeNull();
-  expect([...report.querySelectorAll("dt")].map((item) => item.textContent)).toEqual([
-    "Geometry work",
-    "Full-time years",
-    "Provider tier",
-    "Provider rule",
-  ]);
-  expect(report.querySelector("dd > p")?.textContent).toBe(
-    "  Built a mesh compiler.\nMaintained geometry tools.  ",
-  );
-  expect(report.querySelectorAll("dd")[1]?.querySelector("p")?.textContent).toBe("Unknown");
-  expect(report.textContent).toContain("Provider cites a project description.");
-  expect(report.textContent).toContain(
-    "Provider reports relevant geometry work; dates are unconfirmed.",
-  );
-  expect(report.textContent).toContain("Employment dates were not supplied.");
-  expect(report.textContent).toContain("Tier 1");
-  expect(report.textContent).toContain("true");
-  for (const url of [
-    "https://projects.example.test/mesh",
-    "https://profile.example.test/engineer",
-  ]) {
-    expect(sources.querySelectorAll(`a[href="${url}"]`)).toHaveLength(1);
-    const link = sources.querySelector<HTMLAnchorElement>(`a[href="${url}"]`)!;
-    expect(link).not.toBeNull();
-    expect(link.target).toBe("_blank");
-    expect(link.rel).toContain("noreferrer");
-  }
-  expect(sources.querySelector("time")?.dateTime).toBe("2026-01-01T00:00:00Z");
-  expect(sources.textContent).toContain("Example Robotics · Geometry engineer");
-  expect(sources.textContent).toContain("CRM · Synced");
-  expect(dialog.textContent).toContain("Unassessed");
-  for (const hidden of [
-    "internal-person",
-    "internal-task",
-    "internal-action",
-    "internal-effect",
-    "internal-artifact",
-    "internal-output",
-    "provider_report",
-    "Hard criteria",
-    "Not met",
-    '{"fields"',
-  ])
-    expect(dialog.textContent).not.toContain(hidden);
-  expect(sources.querySelector("pre, mark, [role=status]")).toBeNull();
-  expect(api.getAssessment).not.toHaveBeenCalled();
-  expect(api.getById).not.toHaveBeenCalled();
-  expect(api.readSource).not.toHaveBeenCalled();
-});
+    };
+    const unknown = {
+      ...candidateFixture("unknown", false),
+      name: "Unknown match",
+      latestSource: {
+        ...source,
+        report: { fields: [{ label: "Match score", value: null, sourceUrls: [] }], sourceUrls: [] },
+      },
+    };
+    const unavailable = {
+      ...candidateFixture("unavailable", false),
+      name: "Unavailable report",
+      latestSource: { ...source, report: undefined },
+    };
+    api.listCandidates.mockResolvedValue(candidatePage([candidate, noMatch, unknown, unavailable]));
+    const view = await mounted("thread-1", undefined, false);
+    await view.click("Evidence");
+    await view.click(viewName);
+    const list = view.container.querySelector(viewName === "Cards" ? "ul" : "tbody")!;
+    const matches = [...list.querySelectorAll('[aria-label="Research match"]')];
+    expect(matches).toHaveLength(4);
+    expect(matches[0]?.textContent).toContain("Match score0");
+    expect(matches[0]?.textContent).toContain("Match tierProvider possible");
+    expect(matches[1]?.textContent).toContain("Score / tier not returned");
+    expect(matches[2]?.textContent).toContain("Unknown");
+    expect(matches[3]?.textContent).toContain("Source unavailable");
+    expect(list.textContent).not.toContain("Unassessed");
+    expect(api.listCandidateSources).not.toHaveBeenCalled();
+    await view.click(candidate.name);
+    const dialog = view.container.querySelector('[role="dialog"]')!;
+    const sources = dialog.querySelector('[aria-label="Saved candidate sources"]')!;
+    const report = sources.querySelector("dl")!;
+    expect(report).not.toBeNull();
+    expect([...report.querySelectorAll("dt")].map((item) => item.textContent)).toEqual([
+      "Geometry work",
+      "Full-time years",
+      "Provider tier",
+      "Provider rule",
+      "Match score",
+      "Match tier",
+    ]);
+    expect(report.querySelector("dd > p")?.textContent).toBe(
+      "  Built a mesh compiler.\nMaintained geometry tools.  ",
+    );
+    expect(report.querySelectorAll("dd")[1]?.querySelector("p")?.textContent).toBe("Unknown");
+    expect(report.textContent).toContain("Provider cites a project description.");
+    expect(report.textContent).toContain(
+      "Provider reports relevant geometry work; dates are unconfirmed.",
+    );
+    expect(report.textContent).toContain("Employment dates were not supplied.");
+    expect(report.textContent).toContain("Tier 1");
+    expect(report.textContent).toContain("true");
+    for (const url of [
+      "https://projects.example.test/mesh",
+      "https://profile.example.test/engineer",
+    ]) {
+      expect(sources.querySelectorAll(`a[href="${url}"]`)).toHaveLength(1);
+      const link = sources.querySelector<HTMLAnchorElement>(`a[href="${url}"]`)!;
+      expect(link).not.toBeNull();
+      expect(link.target).toBe("_blank");
+      expect(link.rel).toContain("noreferrer");
+    }
+    expect(sources.querySelector("time")?.dateTime).toBe("2026-01-01T00:00:00Z");
+    expect(sources.textContent).toContain("Example Robotics · Geometry engineer");
+    expect(sources.textContent).toContain("CRM · Synced");
+    expect(dialog.textContent).not.toContain("Unassessed");
+    for (const hidden of [
+      "internal-person",
+      "internal-task",
+      "internal-action",
+      "internal-effect",
+      "internal-artifact",
+      "internal-output",
+      "provider_report",
+      "Hard criteria",
+      "Not met",
+      '{"fields"',
+    ])
+      expect(dialog.textContent).not.toContain(hidden);
+    expect(sources.querySelector("pre, mark, [role=status]")).toBeNull();
+    expect(api.getAssessment).not.toHaveBeenCalled();
+    expect(api.getById).not.toHaveBeenCalled();
+    expect(api.readSource).not.toHaveBeenCalled();
+  },
+);
 
 it("opens retained candidate report fields through the native saved assessment source", async () => {
   const material = artifactSourceFixture(
@@ -3996,7 +4040,7 @@ it("shows unassessed raw provider rows from saved Artifacts without creating an 
   expect(
     view.container.querySelector('[data-research-action="raw-action"] > summary')?.textContent,
   ).toBe("Raw search results · continue · Role · Outdated");
-  expect(view.container.textContent).toContain("Unassessed");
+  expect(view.container.textContent).not.toContain("Unassessed");
   expect(view.container.textContent).toContain("provider_report");
   expect(view.container.textContent).toContain("Strong Match");
   expect(view.container.textContent).toContain("https://example.test/profile");
@@ -4755,7 +4799,8 @@ it("switches Cards/Table with one original-revision detail, preserves a refreshe
     "Company",
     "Location",
     "Profile",
-    "Assessment",
+    "Research match",
+    "Internal assessment",
     "Discoveries",
     "Shortlist",
   ]);

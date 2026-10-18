@@ -1007,7 +1007,45 @@ export const ListRecruitingCandidatesInput = z.strictObject({
   sort: z.enum(["name", "recent"]).optional(),
 });
 export type ListRecruitingCandidatesInput = z.infer<typeof ListRecruitingCandidatesInput>;
+/** Recruiter-readable projection of one exact retained provider row, never qualification. */
+export const RecruitingCandidateReportSchema = z.strictObject({
+  fields: z.array(
+    z.strictObject({
+      label: Text,
+      value: z.string().nullable(),
+      evidence: z.string().optional(),
+      reasoning: z.string().optional(),
+      sourceUrls: z.array(z.httpUrl()),
+    }),
+  ),
+  sourceUrls: z.array(z.httpUrl()),
+});
+export type RecruitingCandidateReport = z.infer<typeof RecruitingCandidateReportSchema>;
+
+const RecruitingCandidateSourceReferenceSchema = z
+  .strictObject({
+    report: RecruitingCandidateReportSchema.optional(),
+    providerTaskId: RecruitingId,
+    taskId: RecruitingId.nullable(),
+    actionId: RecruitingId.nullable(),
+    roleRevisionId: RecruitingId,
+    effectId: RecruitingId,
+    rowIndex: z.number().int().nonnegative(),
+    artifactRef: RecruitingArtifactRefSchema,
+    requestCursor: z.string().nullable(),
+    outputId: z.string().nullable(),
+    observedAt: IsoDate,
+  })
+  .refine((source) => (source.taskId === null) === (source.actionId === null), {
+    message: "Task and action references must be present or null together",
+  });
+export const RecruitingCandidateSourceSchema = RecruitingCandidateSourceReferenceSchema.safeExtend({
+  crmImports: z.array(RecruitingCrmCandidateSyncSchema),
+});
+export type RecruitingCandidateSource = z.infer<typeof RecruitingCandidateSourceSchema>;
+
 export const RecruitingCandidateSchema = z.strictObject({
+  latestSource: RecruitingCandidateSourceReferenceSchema.optional(),
   crm: RecruitingCrmCandidateSyncSchema.nullable(),
   roleId: RecruitingId,
   candidateKey: RecruitingId,
@@ -1085,40 +1123,6 @@ export const RecruitingCandidatesToolInputSchema = z.discriminatedUnion("operati
 ]);
 export type RecruitingCandidatesToolInput = z.infer<typeof RecruitingCandidatesToolInputSchema>;
 
-/** Recruiter-readable projection of one exact retained provider row, never qualification. */
-export const RecruitingCandidateReportSchema = z.strictObject({
-  fields: z.array(
-    z.strictObject({
-      label: Text,
-      value: z.string().nullable(),
-      evidence: z.string().optional(),
-      reasoning: z.string().optional(),
-      sourceUrls: z.array(z.httpUrl()),
-    }),
-  ),
-  sourceUrls: z.array(z.httpUrl()),
-});
-export type RecruitingCandidateReport = z.infer<typeof RecruitingCandidateReportSchema>;
-
-export const RecruitingCandidateSourceSchema = z
-  .strictObject({
-    crmImports: z.array(RecruitingCrmCandidateSyncSchema),
-    report: RecruitingCandidateReportSchema.optional(),
-    providerTaskId: RecruitingId,
-    taskId: RecruitingId.nullable(),
-    actionId: RecruitingId.nullable(),
-    roleRevisionId: RecruitingId,
-    effectId: RecruitingId,
-    rowIndex: z.number().int().nonnegative(),
-    artifactRef: RecruitingArtifactRefSchema,
-    requestCursor: z.string().nullable(),
-    outputId: z.string().nullable(),
-    observedAt: IsoDate,
-  })
-  .refine((source) => (source.taskId === null) === (source.actionId === null), {
-    message: "Task and action references must be present or null together",
-  });
-export type RecruitingCandidateSource = z.infer<typeof RecruitingCandidateSourceSchema>;
 export const ListRecruitingCandidateSourcesOutput = z.strictObject({
   roleId: RecruitingId,
   candidateKey: RecruitingId,

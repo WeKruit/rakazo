@@ -5245,6 +5245,7 @@ function writeCandidateCursor(scope: string, value: string, key: string): string
 function candidateIndexQuery(roleId: string) {
   return Prisma.sql`WITH base AS (
     SELECT c."roleId", c."candidateKey", c."shortlisted", c."revision",
+      p."pageId" AS "sourcePageId", p."rowIndex" AS "sourceRowIndex",
       p."name", p."title", p."company", p."location", p."linkedinUrl", p."resumeUrl", p."evidenceUrls",
       COALESCE(p."issues", '[]'::jsonb) AS "issues",
       d."discoveryCount",
@@ -5277,6 +5278,8 @@ function candidateIndexQuery(roleId: string) {
 }
 
 type CandidateQueryRow = {
+  sourcePageId: string | null;
+  sourceRowIndex: number | null;
   roleId: string;
   candidateKey: string;
   name: string | null;
@@ -6374,6 +6377,26 @@ async function crmSourceSync(
   };
 }
 
+function candidateSourceReference(
+  page: Prisma.RecruitingCandidatePageGetPayload<Record<string, never>> & {
+    effect: { request: Prisma.JsonValue };
+  },
+  rowIndex: number,
+) {
+  return {
+    providerTaskId: researchReadRequest(page.effect.request, undefined, "get_rows").args.task_id,
+    taskId: page.taskId,
+    actionId: page.actionId,
+    roleRevisionId: page.roleRevisionId,
+    effectId: page.effectId,
+    rowIndex,
+    artifactRef: { artifactId: page.artifactId, sha256: page.artifactHash },
+    requestCursor: page.requestCursor,
+    outputId: page.outputId,
+    observedAt: page.observedAt.toISOString(),
+  };
+}
+
 export async function listRecruitingCandidates(
   prisma: PrismaClient,
   actor: Actor,
@@ -6451,6 +6474,23 @@ export async function listRecruitingCandidates(
     ) SELECT * FROM ordered WHERE ${after}
       ORDER BY "sortValue" ${direction}, "candidateKey" COLLATE "C" ASC LIMIT ${limit + 1}`);
       const selected = rows.slice(0, limit);
+      const pageIds = [
+        ...new Set(selected.flatMap((row) => (row.sourcePageId ? [row.sourcePageId] : []))),
+      ];
+      const pages = new Map(
+        (pageIds.length
+          ? await tx.recruitingCandidatePage.findMany({
+              where: { roleId: role.id, effectId: { in: pageIds } },
+              include: { effect: { select: { request: true } } },
+            })
+          : []
+        ).map((page) => [page.effectId, page]),
+      );
+      if (pages.size !== pageIds.length) throw new IsolationError();
+      for (const page of pages.values()) {
+        if (page.roleId !== role.id) throw new IsolationError();
+        await candidatePageArtifact(tx, actor, page);
+      }
       const last = selected.at(-1);
       const { total, ...counts } = totals[0]!;
       const bound = role.crmBindingEffectId
@@ -6484,10 +6524,17 @@ export async function listRecruitingCandidates(
             assessmentCreatedAt,
             hardGate,
             sortValue: _sort,
+            sourcePageId,
+            sourceRowIndex,
             ...profile
           }) => ({
             ...profile,
             crm: syncs.get(profile.candidateKey) ?? null,
+            ...(sourcePageId && sourceRowIndex !== null
+              ? {
+                  latestSource: candidateSourceReference(pages.get(sourcePageId)!, sourceRowIndex),
+                }
+              : {}),
             latestAssessment:
               assessmentVersion === null
                 ? null
@@ -6614,7 +6661,7 @@ export async function listRecruitingCandidateSources(
       const total = await tx.recruitingCandidateOccurrence.count({ where });
       const rows = await tx.recruitingCandidateOccurrence.findMany({
         where,
-        orderBy: [{ page: { observedAt: "desc" } }, { pageId: "asc" }, { rowIndex: "asc" }],
+        orderBy: [{ page: { observedAt: "desc" } }, { pageId: "desc" }, { rowIndex: "desc" }],
         ...(cursor
           ? {
               cursor: { pageId_rowIndex: { pageId: cursor.key, rowIndex: Number(cursor.value) } },
@@ -6649,17 +6696,7 @@ export async function listRecruitingCandidateSources(
         candidateKey: candidate.candidateKey,
         items: selected.map(({ page, rowIndex }) => ({
           crmImports: syncs.get(`${page.effectId}:${rowIndex}`)!,
-          providerTaskId: researchReadRequest(page.effect.request, undefined, "get_rows").args
-            .task_id,
-          taskId: page.taskId,
-          actionId: page.actionId,
-          roleRevisionId: page.roleRevisionId,
-          effectId: page.effectId,
-          rowIndex,
-          artifactRef: { artifactId: page.artifactId, sha256: page.artifactHash },
-          requestCursor: page.requestCursor,
-          outputId: page.outputId,
-          observedAt: page.observedAt.toISOString(),
+          ...candidateSourceReference(page, rowIndex),
         })),
         nextCursor:
           rows.length > limit && last

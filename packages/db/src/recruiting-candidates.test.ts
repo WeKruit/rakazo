@@ -2313,12 +2313,81 @@ describe("native candidate source provenance", () => {
     });
     expect(f.tx.recruitingCandidateOccurrence.findMany).toHaveBeenCalledWith({
       where: { roleId: "role", candidateKey: f.occurrence.candidateKey },
-      orderBy: [{ page: { observedAt: "desc" } }, { pageId: "asc" }, { rowIndex: "asc" }],
+      orderBy: [{ page: { observedAt: "desc" } }, { pageId: "desc" }, { rowIndex: "desc" }],
       take: 26,
       include: { page: { include: { effect: { select: { request: true } } } } },
     });
     expect(f.tx.recruitingResearchAction.findFirst).not.toHaveBeenCalled();
   });
+  it.each(["valid", "foreign-actor", "artifact-hash"])(
+    "binds the bounded candidate page to its validated latest source at the %s boundary",
+    async (boundary) => {
+      const f = await nativeSourceFixture();
+      f.role.crmBindingEffectId = null;
+      const { page: _page, pageId, rowIndex, ...profile } = f.occurrence;
+      const row = {
+        ...profile,
+        sourcePageId: pageId,
+        sourceRowIndex: rowIndex,
+        shortlisted: false,
+        revision: 0,
+        discoveryCount: 1,
+        firstDiscoveredAt: f.page.observedAt.toISOString(),
+        lastDiscoveredAt: f.page.observedAt.toISOString(),
+        assessmentVersion: null,
+        assessmentRoleRevisionId: null,
+        assessmentCreatedAt: null,
+        hardGate: null,
+        sortValue: "example",
+      };
+      f.tx.$queryRaw
+        .mockResolvedValueOnce([
+          {
+            total: 1n,
+            sourceRows: 1n,
+            candidates: 1n,
+            identifiedCandidates: 1n,
+            unassessed: 1n,
+            assessed: 0n,
+            shortlisted: 0n,
+          },
+        ] as never)
+        .mockResolvedValueOnce([row] as never);
+      const findMany = vi.fn(async () => [{ ...f.page, effect: f.read }]);
+      const tx = {
+        ...f.tx,
+        recruitingCandidatePage: { ...f.tx.recruitingCandidatePage, findMany },
+      };
+      const prisma = { $transaction: vi.fn(async (fn) => fn(tx)) } as unknown as PrismaClient;
+      if (boundary === "artifact-hash") f.artifact.hash = "f".repeat(64);
+      const result = recruiting.listRecruitingCandidates(
+        prisma,
+        boundary === "foreign-actor" ? { ...actor, userId: "other" } : actor,
+        { roleId: "role", limit: 1 },
+      );
+      if (boundary !== "valid") {
+        await expect(result).rejects.toThrow(IsolationError);
+        if (boundary === "foreign-actor") expect(findMany).not.toHaveBeenCalled();
+        return;
+      }
+      expect((await result).items[0]?.latestSource).toMatchObject({
+        effectId: pageId,
+        rowIndex,
+        taskId: null,
+        actionId: null,
+        roleRevisionId: "revision",
+        artifactRef: { artifactId: f.artifact.id, sha256: f.artifact.hash },
+      });
+      expect(findMany).toHaveBeenCalledExactlyOnceWith({
+        where: { roleId: "role", effectId: { in: [pageId] } },
+        include: { effect: { select: { request: true } } },
+      });
+      const [statement] = f.tx.$queryRaw.mock.lastCall as unknown as [{ sql: string }];
+      expect(statement.sql).toContain(
+        'p."pageId" AS "sourcePageId", p."rowIndex" AS "sourceRowIndex"',
+      );
+    },
+  );
   it("keeps the exact provider task separate from historical custom task/action links", async () => {
     const f = crmFixture();
     const sources = await recruiting.listRecruitingCandidateSources(f.prisma, actor, {
