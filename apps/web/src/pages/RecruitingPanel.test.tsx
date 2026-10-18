@@ -2469,6 +2469,76 @@ it.each(["Cards", "Table"])(
   },
 );
 
+it.each(["Cards", "Table"])(
+  "marks earlier requirements per native candidate source in %s and details",
+  async (viewName) => {
+    const currentSource = {
+      providerTaskId: "native-task",
+      taskId: null,
+      actionId: null,
+      roleRevisionId: revision.id,
+      effectId: "current-source",
+      rowIndex: 0,
+      artifactRef: { artifactId: "current-artifact", sha256: "a".repeat(64) },
+      requestCursor: null,
+      outputId: null,
+      observedAt: "2026-01-02T00:00:00Z",
+      crmImports: [],
+      report: { fields: [{ label: "Rank", value: "1", sourceUrls: [] }], sourceUrls: [] },
+    };
+    const earlierSource = {
+      ...currentSource,
+      roleRevisionId: "revision-1",
+      effectId: "earlier-source",
+      artifactRef: { artifactId: "earlier-artifact", sha256: "b".repeat(64) },
+      observedAt: "2026-01-01T00:00:00Z",
+    };
+    const current = {
+      ...candidateFixture("current-person", false),
+      name: "Current source person",
+      latestSource: currentSource,
+    };
+    const earlier = {
+      ...candidateFixture("earlier-person", false),
+      name: "Earlier source person",
+      latestSource: earlierSource,
+    };
+    api.listCandidates.mockResolvedValue(candidatePage([current, earlier]));
+    api.listCandidateSources.mockResolvedValue({
+      roleId: role.id,
+      candidateKey: current.candidateKey,
+      items: [currentSource, earlierSource],
+      nextCursor: null,
+      total: 2,
+    });
+    const view = await mounted("thread-1", undefined, false);
+    await view.click("Evidence");
+    await view.click(viewName);
+    const list = view.container.querySelector(viewName === "Cards" ? "ul" : "tbody")!;
+    const matches = list.querySelectorAll('[aria-label="Research match"]');
+    const earlierLabel = "Research based on earlier requirements";
+    expect(matches).toHaveLength(2);
+    expect(matches[0]?.textContent).not.toContain(earlierLabel);
+    expect(matches[0]?.textContent).not.toMatch(/verified|reassessed|Current/i);
+    expect(matches[1]?.textContent).toContain(earlierLabel);
+    await view.click(current.name);
+    const dialog = view.container.querySelector('[role="dialog"]')!;
+    expect(dialog.querySelector('[aria-label="Research match"]')?.textContent).not.toContain(
+      earlierLabel,
+    );
+    const sources = dialog.querySelectorAll('[aria-label="Saved candidate sources"] > div');
+    expect(sources).toHaveLength(2);
+    expect(sources[0]?.textContent).not.toContain(earlierLabel);
+    expect(sources[1]?.textContent).toContain(earlierLabel);
+    expect(sources[0]?.textContent).not.toMatch(/verified|reassessed|Current/i);
+    await view.click("Close");
+    await view.click(earlier.name);
+    expect(
+      view.container.querySelector('[role="dialog"] [aria-label="Research match"]')?.textContent,
+    ).toContain(earlierLabel);
+  },
+);
+
 it("opens retained candidate report fields through the native saved assessment source", async () => {
   const material = artifactSourceFixture(
     '{"task_id":"internal-task","rows":[]}',

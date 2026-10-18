@@ -481,7 +481,13 @@ function CandidateProfile({
   );
 }
 
-function CandidateResearchMatch({ candidate }: { candidate: RecruitingCandidate }) {
+function CandidateResearchMatch({
+  candidate,
+  roleRevisionId,
+}: {
+  candidate: RecruitingCandidate;
+  roleRevisionId?: string;
+}) {
   const { t } = useLingui();
   const source = candidate.latestSource;
   const fields = source?.report?.fields.filter((field) =>
@@ -504,6 +510,11 @@ function CandidateResearchMatch({ candidate }: { candidate: RecruitingCandidate 
         <Trans>Research match</Trans>
       </dt>
       <dd>
+        {source && roleRevisionId && source.roleRevisionId !== roleRevisionId ? (
+          <p className="text-muted-foreground">
+            <Trans>Research based on earlier requirements</Trans>
+          </p>
+        ) : null}
         {source && !source.report ? (
           <p className="text-muted-foreground">
             <Trans>Source unavailable</Trans>
@@ -779,6 +790,11 @@ function CandidateSources({
             key={`${source.artifactRef.artifactId}:${source.rowIndex}:${source.effectId}`}
             className="space-y-2 border-s border-border ps-3"
           >
+            {source.roleRevisionId !== roleRevisionId ? (
+              <p className="text-xs text-muted-foreground">
+                <Trans>Research based on earlier requirements</Trans>
+              </p>
+            ) : null}
             {showDiagnostics ? (
               <p className="text-xs text-muted-foreground">
                 provider_report{action ? ` · ${action.kind}` : ""} · {source.observedAt}
@@ -3245,7 +3261,10 @@ function RecruitingWorkspace({
                                   candidate={candidate}
                                   showDiagnostics={showDiagnostics}
                                 />
-                                <CandidateResearchMatch candidate={candidate} />
+                                <CandidateResearchMatch
+                                  candidate={candidate}
+                                  roleRevisionId={workspace?.revision.id}
+                                />
                                 <CandidateAssessment candidate={candidate} />
                                 {showCrm ? (
                                   <p className="text-xs text-muted-foreground">
@@ -3329,7 +3348,10 @@ function RecruitingWorkspace({
                                   />
                                 </td>
                                 <td className="py-2 pe-3">
-                                  <CandidateResearchMatch candidate={candidate} />
+                                  <CandidateResearchMatch
+                                    candidate={candidate}
+                                    roleRevisionId={workspace?.revision.id}
+                                  />
                                 </td>
                                 <td className="py-2 pe-3">
                                   <CandidateAssessment candidate={candidate} />
@@ -3760,7 +3782,10 @@ function RecruitingWorkspace({
                   />
                 </section>
               ) : null}
-              <CandidateResearchMatch candidate={selection} />
+              <CandidateResearchMatch
+                candidate={selection}
+                roleRevisionId={workspace?.revision.id}
+              />
               {selection.latestAssessment && evidenceFailed ? (
                 <p role="alert">
                   <Trans>Could not load assessment</Trans>

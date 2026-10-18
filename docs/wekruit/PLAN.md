@@ -62,13 +62,25 @@ Supabase 独立数据库、原生 memory provider、Modal Volume 和 E2B 沿用�
 
 ## 当前发布与缺口（2026-10-18）
 
-### v90 已发布；原生运行及同一保存回执已恢复
+### v91 已发布；真实累计排序与重启后原文件读取
+
+v91 / `25eddcf9` 已发布到既有应用，二十份运行源码 hash 匹配，20:45 UTC 内部 health/ready 均200、非 degraded；无新迁移、权限、资源或订阅。发布前后十九组数据完全相同；二十一条 thread 中两条行 hash 改变，其余线程保持，无法仅凭快照归因到具体字段，不宣称二十组全等。原十五份记忆、三份暂停 Routine、十二条已取消记录及岗位/候选/来源页保持，无旧任务重放。
+
+真实二十五人原生读取及正常网页已验证累计排序。保留 updated_rank 明确值/空值优先，再采用实际 overall_rank；原名单局部 rank 不用于跨来源混排。现有 Cards/Table/详情显示 Overall rank / Original pool rank；实际顺序为1–25，去重二十五人、四十五条来源，两个保存原件及记录 hash/长度保持，未编造 score/tier 或本地重评。153项聚焦 DB 检查、相关类型/格式及独立复核通过；共享 UI 回归和网页类型/格式通过。线上有界原生读取11项核验与截图通过，不扩称任意并发或整体 UI 完全打磨。
+
+原生文件已走实际写入 → 读回 → 附件 → Main 读取；多次容器替换后，再从普通聊天让 Sourcer 重开原 Markdown，只读并重新附回。此次原生 run 自然 completed，list_files/read_file/attach_file 成功，新附件与冻结原件均为2232字节、同一 SHA-256，首标题和末条正文与实际文件一致。没有 write_file、记忆写入、研究或其他 Agent 调用，现有记忆元数据、Routine 与审批规则保持。read_file 审计未保留其完整返回体，文件字节保持由原件和新附件的实际受权读取证明。共享记忆范围是当前用户与 Space，私有记忆再限定 bot；当前共享 Teamcomputer 的文件目录仍不是严格安全隔离。PDF/CSV 全链路、多用户文件权限和完整恢复矩阵仍未验。
+
+完整 JD 强度已通过现有 Main/Sourcer instructions 与两份共享 skill 的四处精确修订保留；原生网页保存、实际四份内容 hash 及另三份 skill 保持已核对，不冒称具备配置 CAS 或逐 run 配置冻结。随后从普通聊天请 Main 重读已保存 JD、补回遗漏并保留既有候选；同一原群的真人触发执行自然完成，实际岗位由第一版四条修正为第二版六条，补回现代 backend 架构和独立调试真实数据问题，原四条表达、偏好及问题保持。实际原件、真人来源及版本绑定已核对；候选、来源页、出现记录和评估的全量摘要均与修订前一致，两份候选原件字节/hash 不变，仍二十五人。没有新研究/reply、CRM 或外发。旧候选证据没有按新六条重评，后续 Autumn 采用及新版要求下的研究展示仍待验，不将岗位修正当完整 playbook 通过。
+
+v90 恢复的原 Sourcer 已自然收尾，五位新人和二十位原人全部保留，原 research/reply 各一次。Autumn 后续终态/进度存在不一致报告，保存结果按 provisional 呈现，不用早期完成回执覆盖较晚状态。完整 playbook、千人目标、CRM 写入及 M1–M5/P6 均未完成，所有线仍共用原 US$150 增量预算，无真实外发。
+
+### v90 历史发布；原生运行及同一保存回执已恢复
 
 v90 / `00fd7c2c` 已发布；二十份运行源码 hash 匹配，20:31 UTC health/ready 均200、非 degraded，首次启动尚未监听的采样保留。未新增迁移、资源、工具权限或 provider 操作。旧 Graphile 作业保持锁定、仅由其原生替换语义移出键并停止重试；同一 Sourcer 执行自动以 fence2/新 attempt 接回，没有手工改租约或效果状态。
 
 20:32 UTC 原本被打断的同一 save_results 效果实际 completed/saved。新二十五行结果已存为第二来源页，去重后共二十五人，原二十人页及原文件保持；正常网页显示二十五人与五位新增人的对话交付。原 research/reply 仍各一次。182份受保护旧执行及十二条已取消记录保持。后续 Sourcer 收尾与 Main 返还、provider 实际终态分别核对，不以一次保存代替整个招聘目标完成。
 
-真实返回还确认了一处展示缺口：二十五行均有 numeric overall_rank（1–25），rank/original_pool_rank 只覆盖原二十人，五位新人明确为空。现有摘要隐藏后两个字段，累计查询只认 updated_rank，因此网页新人的普通排名为 Unknown、默认列表按无排名处理。下一发布只复用原查询/摘要：保留 updated_rank 的明确值/空值优先，再采用 overall_rank；普通 rank 仍只在同一来源页比较。展示真实 Overall rank / Original pool rank，不重算候选分数、填补空值或使用原名单局部排名混排。153项聚焦 DB 检查、类型/格式及独立复核通过；共享 Cards/Table/详情回归及网页类型/格式通过。真实发布、排序与截图仍待验。
+真实返回还确认了一处展示缺口：二十五行均有 numeric overall_rank（1–25），rank/original_pool_rank 只覆盖原二十人，五位新人明确为空。现有摘要隐藏 Overall rank / Original pool rank，累计查询只认 updated_rank，因此网页新人的普通排名为 Unknown、默认列表按无排名处理。下一发布只复用原查询/摘要：保留 updated_rank 的明确值/空值优先，再采用 overall_rank；普通 rank 仍只在同一来源页比较。展示真实 Overall rank / Original pool rank，不重算候选分数、填补空值或使用原名单局部排名混排。153项聚焦 DB 检查、类型/格式及独立复核通过；共享 Cards/Table/详情回归及网页类型/格式通过。真实发布、排序与截图仍待验。
 
 ### v89 历史发布；真实排名、冷加载与恢复故障
 

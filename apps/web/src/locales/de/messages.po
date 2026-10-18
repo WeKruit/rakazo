@@ -4301,6 +4301,10 @@ msgid "Research & writing"
 msgstr ""
 
 #: src/pages/RecruitingPanel.tsx
+msgid "Research based on earlier requirements"
+msgstr ""
+
+#: src/pages/RecruitingPanel.tsx
 msgid "Research findings"
 msgstr ""
 
