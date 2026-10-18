@@ -8,6 +8,12 @@ This is the GSD execution index. Product requirements, design principles and evi
 - [ ] **Phase 4: Recruiting service workflows** — Existing CRM and authorized enrichment, campaign, communication and scheduling services; replies and follow-ups remain behind sourcing in priority.
 - [ ] **Phase 5: Full-product acceptance** — All applicable actions, users, permissions, recovery, continuity and runtime substitutions with observed results.
 
+## Parallel delivery order
+
+The [A–H delivery lanes in PLAN](../docs/wekruit/PLAN.md#并行交付计划2026-10-18) overlap these phases. P0 is sourcing/playbook and feedback (A), the recruiting workbench (B), and the independent PeopleSearchBench comparison (C). Memory/routines (D), agent configuration/collaboration (E), interactions/permissions/recovery (F), and CRM/enrichment (G) proceed concurrently. Outreach, replies, ATS and scheduling (H) prepare native integrations and drafts concurrently while live activation remains lower priority and exactly approved. Shared executor/router/contracts/database edits have one integration owner; no additional harness or scheduler is implied.
+
+PeopleSearchBench is a cross-cutting acceptance lane, not a sixth product milestone: two official recruiting queries, direct Autumn versus normal Main/Sourcer, fresh independent tasks, then separately recorded same-task subset and general feedback. Reuse the upstream evaluator only with existing authorized access and verified remaining funds from the original shared US$150 cap. Preserve invalid pairs, provider failures, missing evidence and unknown cost; do not report a full-suite or feedback score from this subset.
+
 ## Phase Details
 
 ### Phase 1: Real sourcing and recruiting UI

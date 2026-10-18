@@ -12,6 +12,52 @@ Supabase 独立数据库、原生 memory provider、Modal Volume 和 E2B 沿用�
 
 **Tech Stack:** Rakazo/TypeScript、Pi、官方 Codex OAuth、Supabase Postgres、Graphile、Modal、E2B。
 
+## 并行交付计划（2026-10-18）
+
+用户最新要求：完整产品缺口全部纳入并行交付，增加独立 PeopleSearchBench 线。下列优先级决定资源与发布顺序，不要求等前一里程碑全部结束才启动下一条线；M1–M5/181 项范围不缩小。先完成 sourcing/filter playbook，回复与跟进保持后置。此节是下一批工作与退出条件，不是新增能力已完成的声明；当前已发布事实见下一节。
+
+### 优先级与交付线
+
+| 线 / 优先级 | 本轮产品结果 | 先复用什么、只补什么 | 真实退出条件 |
+| --- | --- | --- | --- |
+| A / P0 找人 playbook 与反馈 | JD/描述 → 关键澄清 → 用户确认 → Autumn → 任意人/子集/方向反馈 → 原研究续搜；真人决定可回看、修订和撤销 | Main/Sourcer instructions、现有 skills、research/reply、消息/岗位版本/候选来源。条件/filter 编辑代码已存在，先验采用；候选反馈目前主要是聊天及 proposed 回执，需补实际评审状态读写，不能当已学习。 | 真实岗位修改一条条件，选任意三位已有候选提交反馈；原 provider task 的实际请求只采用该范围及明确修改，新结果完整保存，页面刷新与重启后可查原文、采用版本及评审历史。单人、子集、整体方向分开核验；不强制每次反馈十人，也不代答正式业务批准。 |
+| B / P0 招聘工作台与产品 UI | 候选/证据/轮次/反馈/Dashboard 连贯可用，执行进度清楚，打开页面不丢状态 | 现有 RecruitingPanel、Cards/Table、原生候选 Dialog/Activity、授权来源阅读器。已有 Top20/Top10 聊天证明不等于数据库列表按匹配排序；列表当前仅 name/recent，视图/filter 主要留在组件内。 | 真实二百人按实际 Autumn 等级/排名的已存值稳定分页，不编造分数或本地评审；切换/重开/刷新恢复本岗位列表状态，不串岗位。反馈状态与原聊天一致；显示真实执行、委派和可展示摘要，内部参数只进诊断，真实审批目标/正文仍完整。 |
+| C / P0 PeopleSearchBench 对照 | 独立比较直连 Autumn 与正常网页 Main→Sourcer→Autumn，另测反馈采用；不另建评估 harness | 固定版本上游招聘题、现有直连与网页入口、原生任务/输出/usage 及上游 loader/judge。既有 London 无效配对和 Seattle 部分失败保留，不能算成功基线。 | 首批两题、两路、四个独立新任务；再对其中一题的两条原任务各做子集及一般方向反馈。输入、独立性、终态、保存/网页人数、证据、耗时及费用分开报告；官方评分缺依赖或额度则明确未评分，不换自制 judge。 |
+| D / P1 记忆、skills 与 Routine | 偏好写入/修改/撤回，跨对话采用，自动任务自行读取当前相关记忆、协作并回原群 | 原生 MemoryStore/CAS/revisions、read_memory、skills、schedule 与 Routine history；先修复已观察的旧记忆文件引用问题，不增加记忆服务或调度器。 | 正常语言创建任务；更新及撤回偏好后，新对话和下一次定时采用正确版本。跨重启、暂停越过到期、部分失败回原群且不重复。HTTP 回放/并发/入口轮换另验，首个入口凭证仍保留现有专项授权边界。 |
+| E / P1 原生 Agent 配置与协作 | 每 bot 独立配置、skills/plugins/MCP 分配、精确取消及真正的人类群成员；后续替换 runtime 不牵连其他 bot | 原生 Bot/Run、模型连接、群成员、taught skills/技能目录、工具 allowlist、stopThreadRuns。先补运行配置冻结和显式连接绑定；当前 Pi 内换模型已经存在，不冒充已接第二种 runtime。 | 只取消 Sourcer 而 Main/原卡继续；只分配 Sourcer 的技能/连接不能被 Main 调用；待答期间改配置，旧执行按原配置、新执行用新配置。指定连接失效明确停止，不借另一个账号。真人群权限验收后再接团队记忆；真实第二 runtime 必须实际跑通再显示支持。 |
+| F / P1 全卡型、文件与整品可靠性 | 多选、多字段、URL input、附件/Library 与原卡恢复；第二真实用户/组织的权限完整 | 同一 Ask/event/RPC/runtime/MCP 合同和原生文件/历史/SSE 权限；扩展现有交互而不是第二层卡片系统。网页优先，适用移动工作台随后复用共享读取契约。 | 真实原生卡在重启/断线后回答原请求，双客户端只接收一次；取消/过期/撤权拒绝。两位真实用户与未获权用户验证聊天、文件、记忆、卡片及工具隔离；PDF/CSV 上传阅读和适用移动路径各自有证据。 |
+| G / P1 CRM、补全与专家接入 | 现有 Supabase/CRM 状态与来源保存；data enrichment 通过已授权服务补全，避免重复付费 | 现有 CRM OAuth/RLS、MCP 读写和原生回执、候选 source link；ContactOut→LeadMagic→FullEnrich/Autumn 的现有连接与原始结果缓存。无第二个候选主库或补全执行器。 | 真实候选来源写入一次并按原组织读回，网页状态准确；拒绝越权、冲突不覆盖、未知写入不盲重试。真实补全来源/缺口保留，再查复用合法缓存；配额/限流/累计费用可核对。未开放的写权限不假装已接通。 |
+| H / P2 外联、回复、ATS、面试与日常工作 | Instantly Agent、workable、scheduling、executive assistant 通过原生群聊交接，草稿、文件和业务回执贯通 | 原生专员 instructions/skills/MCP、Routine、精确审批和已有 reply preflight。同步准备服务/草稿/文件路径；真实发送、邀请、提交及跟进运行保持后置。 | 抑制/hold/pass/完整历史在发送前生效；单次批准只产生一次供应商回执及 CRM 同步，未知不重发。收到回复后停止后续跟进；排期先确认再邀请；附件/私密信息去正确收件人。未确认的 playbook [I]/[GAP] 不变成已批准政策。 |
+
+范围归属沿用 PRODUCT-SCOPE 的稳定 ID：账号/团队 A 由 E/F 收口，Agent 配置 B 由 E，消息/历史 C 由 B/F，群聊/A2A D 由 E/F，后台/Routine E 由 D/F，原生交互 F 和 Library/文件/Computer G 由 F，memory/skills/plugins H 由 D/E，招聘服务 I 由 A/G/H，Juicebox J 与 Metix M 由 A/B/F/G/H。B 同时保留已完成 HTML 对话导出及后续最简单的图片/只读分享验收；分享权限不能借用开发者链接。既有 sandbox 继续原生可选使用，不新做电脑平台。Slack 继续暂停。
+
+### 文件归属与集成依赖
+
+- **业务 Agent / A、G、H：** 从实际已连接 bot instructions 和 skills 开始；代码复用 `packages/adapters/src/recruiting-feedback.ts`、`recruiting-context.ts`、`recruiting-research.ts`、`recruiting-reply.ts`。Autumn 继续负责候选研究/判断；本方记录真人决定、来源及采用，不创建本地评估者。Boss/Main 负责协调；Sourcer 负责 S1–S5；补全、Instantly、workable、scheduling、executive assistant 各按已有原生交接与 playbook 职责迁入，不新增无实际用途的专家。
+- **产品 UI / B：** `apps/web/src/pages/RecruitingPanel.tsx`、候选反馈入口所在 `Shell.tsx` 区段、现有报告/Activity/导出组件。条件/filter 采用验收先于扩建编辑器；真实 provider 等级/排名排序与列表恢复、评审历史分别交付。移动端已有聊天不是移动招聘工作台，需单列适用页面验收。
+- **原生平台 / D、E、F：** `packages/memory/src/index.ts`、`apps/api/src/memory-revisions.ts`、`packages/adapters/src/memory-context.ts`、`schedule-tools.ts`、`skill-tools.ts`；取消复用 `packages/db/src/cancel-runs.ts` / `apps/api/src/thread-target.ts`；连接复用 `packages/db/src/model-credentials.ts`、`packages/adapters/src/model-selection.ts`；卡片沿现有 Ask/MCP 入口。运行配置冻结 → 逐 bot 显式连接 → 实际 runtime 替换；human 群权限 → team memory；原生 Ask 合同 → 多字段/URL elicitation。后项可以先核查/准备，不能跳过前项授权语义直接发布。
+- **对照与验收 / C、M5：** 复用上游 benchmark 和现有私有回执/浏览器验证，维护可复现输入、未删减结果和所有失败；不改产品评分逻辑，不读另一臂结果来指导当前搜索。共享条件及原始资料可准备，正式对照须冻结所用发布与 live 配置后开始，期间不改 benchmark bot 指令。
+- `packages/contracts/src/recruiting.ts`、共享 Ask/RPC、`packages/db/src/recruiting.ts`、`schema.prisma`、`apps/api/src/router.ts`、`packages/adapters/src/executor.ts` 由主集成者统一处理；worker 只提交分配区段，避免全文件并发覆盖。A 的评审存取合同先确定，B 随即消费；不能为并行伪造返回。只补实际输出/反馈/授权所需持久字段，涉及未获准迁移时先完成可审阅版本。
+
+### 第一批可测试交付
+
+- [ ] **A+B：找人可连续使用。** 从真实 JD/描述进入，修改条件，反馈任意子集，查看同研究的新结果、持久决定/撤销及原证据；二百人视图的真实排序/分页/重开状态一起收口。交付普通网页入口、完整对话及截图；不再重跑一次二百人只证明相同读取能力。
+- [ ] **C：独立初搜与反馈对照。** 先冻结两道原题和共同输出，再用四个新研究完成初搜；其中一对各做两次原任务反馈。交付逐题/逐臂/逐轮报告；任务污染、provider failed、缺字段或费用未知均保留，不用输出人数代替成功或招聘质量。
+- [ ] **D+E+F：自主协作不丢状态。** 当前记忆修订/撤回和 Routine 引用先行验收；精确取消、连接冻结/分配、多字段原卡分别完成后集成。交付自然对话、重启后同卡继续、拒绝越权及原群历史；不以单测代替真实服务结果。
+- [ ] **G+H：服务链同步准备并分批接通。** 先现有组织的 CRM 来源写读及补全缓存，再交接 Instantly 草稿/附件；审批发送、回信停止、ATS/排期随后收口。真实外发继续等待对应原卡批准，不阻塞其他线。
+
+每批只运行修改路径的必要检查和真实产品验证，不等待 CodeQL/全部 CI 才推进独立工作。发布由主任务统一集成，核对线上版本及保留原数据；未通过的路径保留为失败，不抹掉旧卡或重开终止 run。性能/成本随各线记录历史读取、首响应、保存至最终回复延迟、缓存、主/子调用及重试，先定位已观察瓶颈，不另搭优化 harness。
+
+### PeopleSearchBench 运行边界
+
+使用 [官方仓库固定版本](https://github.com/LessieAI/people-search-bench/tree/f1afbb928e7eb6104e8255d5a882fc1820682cb7) 的 [recruiting.jsonl](https://github.com/LessieAI/people-search-bench/blob/f1afbb928e7eb6104e8255d5a882fc1820682cb7/data/queries/recruiting.jsonl)，首批 `rec_0001` 与 `rec_0002`；明确为招聘两题子集，而非全套结果。采用官方原题，双方相同输出附录、最多十人、原排名和证据；现有改写题不能标成官方原文。反馈续搜是另记的产品指标，上游静态题不提供该分数。
+
+- [ ] 在执行前核对**同一份原 US$150 增量预算**已用与余额；所有线、失败重试和可选 judge 共用，不能每线重置。历史 `costUsd:null` 不当零美元，tokens/credits 不能凭空换算现金；收费范围无法确认时先完成已有结果回读和不收费准备，不启动新的收费批次。无新资源、订阅或模型服务。
+- [ ] 冻结原始与实际 provider-bound 输入、来源权限、模型/配置、时间窗、实际可用限额和期望输出。双方任务、会话及结果不复用；审阅实际调用与来源，出现跨臂读取就判该配对无效。无法约束相同计算预算则披露，不能宣称等成本因果比较。
+- [ ] 初搜后，`rec_0002` 两臂各在本任务对实际非连续候选子集提交核查反馈，再提交相同整体搜索方向；检查原约束保留、范围、实际 reply、后续结果、保存与网页刷新。最小共四次建研究及四次反馈，另计轮询/模型/重试，不擅自扩成三十题或再次二百人检索。
+- [ ] 复用官方 CSV loader 和原版 judge；仅在已获准现有凭证、数据使用范围与余额满足时运行。其 OpenRouter/Tavily 依赖未满足就报告未评分，不另造评估 agent。上游当前 CLI 的 criterion/weighted_avg 不等同论文完整榜单；两臂实际提取 criteria 不同则不能作同条件评分比较，不把官方 relevance 阈值变成招聘录用门槛。
+- [ ] 报告逐题/臂/轮的任务独立性、provider 与应用终态、返回/保存/网页人数、来源可用性、官方原始评分或未评分原因、耗时、完整调用/重试和已确认/未知费用。原始候选和凭证仅留既有受权私有存储，不提交公共仓库。
+
 ## 当前发布与缺口（2026-10-18）
 
 **当前发布 v80 / `e1853223`：事件 Routine 归属与中断恢复修复已上线。** 每条匹配 Routine 独立关联原生执行、去重与历史；提交时重查活动状态、来源、所有者、目标会话和入口。HTTP 无匹配时忽略，正常聊天在没有消息 Routine 时保持原有处理。独立审查发现的多 Routine 部分成功、首条执行前中断及 ambient 消息恢复遗漏均已修复：原生隐藏事件与既有路由占用同事务保存原目标及来源，现有恢复路径只重试缺失的原目标，不转成普通 bot 调用。没有新增 schema、队列或 outbox。最终七个文件合并运行 301 项聚焦检查，API/DB/adapters 类型、格式、Web 构建及独立审查通过；十份运行源码 hash 符合冻结归档，health/ready 为 200、非 degraded。HTTP 回放、并发停用及入口轮换的真实验收仍未完成：首次 webhook 密钥尚待授权，未创建或导出凭证。
@@ -485,7 +531,7 @@ Use [LessieAI/people-search-bench](https://github.com/LessieAI/people-search-ben
 - The liaison needs the current brief, exact feedback, affected candidate references and only the passages needed to disambiguate it. Do not reread or locally reevaluate every returned candidate. Preserve complete provider receipts/artifacts outside model context, save pages from their exact receipts, and relay attributed values, gaps and references. Stable preferences use native versioned memory; one rejected candidate does not silently become a universal rule. This is feedback-driven task refinement, not model training.
 - Reuse native Pi compaction, memory, skill loading and exact artifact reads. First remove redundant instructions, repeated judgments and duplicate tool representations. A bounded Jev passage/skill-selection experiment is conditional on measured remaining waste; do not install another compactor or add a paid judgment to every turn. Measure all main/child/compaction/service calls and retries; OAuth capacity and cash charges remain separate.
 
-The upstream evaluator uses an LLM plus live Tavily verification and requires external credentials. Published per-person outputs are withheld, and metric defaults/entry points differ across released code and documentation; freeze and disclose the chosen settings before interpreting scores. The benchmark and paired trials have not run; no score, quality gain or cost saving is claimed. This research installs no dependency and authorizes no new subscription.
+The upstream evaluator uses an LLM plus live Tavily verification and requires external credentials. Published per-person outputs are withheld, and metric defaults/entry points differ across released code and documentation; freeze and disclose the chosen settings before interpreting scores. The official judge has not run. Earlier live pairs are recorded above: the London comparison was invalid because the wrapper read the direct task; Seattle used independent tasks but the wrapper provider failed despite returning and saving ten rows. No official score, quality gain or cost saving is claimed. The new parallel lane freezes fresh independent inputs and separately records feedback adoption; it does not erase these failures, install another harness or authorize a new subscription.
 
 
 云端接手批次 `37d943e` 已推送工作分支，仍未部署：共享原件授权读取与原生只读 `artifact_read` 已实现，核验实际字节/hash/长度并按 Unicode code point 连续分页；不改变 context budget。当前云端冻结离线安装、官方 Prisma generate、原两份 adapter 回归 120 项、相关回归 285 项（含六项新增读取检查）、DB/adapters/API/contracts/core 类型与格式检查通过。原生文件存储重新打开仅为离线合成恢复证据；真实同线程原件读取、条件修订和生产恢复仍待验收。
