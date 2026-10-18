@@ -5331,10 +5331,28 @@ function writeCandidateCursor(scope: string, value: string, key: string): string
 
 /** Latest source projection is selected by native read completion, never by backfill arrival. */
 function candidateIndexQuery(roleId: string) {
+  const fields = [
+    ["name", "name"],
+    ["title", "current_title"],
+    ["company", "current_company"],
+    ["location", "location"],
+    ["linkedinUrl", "linkedin_url"],
+    ["resumeUrl", "resume_url"],
+    ["evidenceUrls", "evidence_urls"],
+  ] as const;
   return Prisma.sql`WITH base AS (
     SELECT c."roleId", c."candidateKey", c."shortlisted", c."revision",
       p."pageId" AS "sourcePageId", p."rowIndex" AS "sourceRowIndex",
-      p."name", p."title", p."company", p."location", p."linkedinUrl", p."resumeUrl", p."evidenceUrls",
+      ${Prisma.join(
+        fields.map(([column]) =>
+          column === "evidenceUrls"
+            ? Prisma.sql`profile.${Prisma.raw(`"${column}"`)}->'value' AS ${Prisma.raw(`"${column}"`)}`
+            : Prisma.sql`profile.${Prisma.raw(`"${column}"`)}->>'value' AS ${Prisma.raw(`"${column}"`)}`,
+        ),
+      )},
+      ARRAY(SELECT DISTINCT value->>'pageId' FROM (VALUES ${Prisma.join(
+        fields.map(([column]) => Prisma.sql`(profile.${Prisma.raw(`"${column}"`)})`),
+      )}) fields(value) WHERE value IS NOT NULL) AS "profileSourcePageIds",
       COALESCE(p."issues", '[]'::jsonb) AS "issues",
       d."discoveryCount",
       to_char(d."firstDiscoveredAt", 'YYYY-MM-DD"T"HH24:MI:SS.MS"Z"') AS "firstDiscoveredAt",
@@ -5349,6 +5367,19 @@ function candidateIndexQuery(roleId: string) {
       WHERE o."roleId" = c."roleId" AND o."candidateKey" = c."candidateKey"
       ORDER BY page."observedAt" DESC, page."effectId" COLLATE "C" DESC, o."rowIndex" DESC LIMIT 1
     ) p ON true
+    LEFT JOIN LATERAL (
+      SELECT ${Prisma.join(
+        fields.map(
+          ([column, key]) => Prisma.sql`(array_agg(
+            jsonb_build_object('value', o.${Prisma.raw(`"${column}"`)}, 'pageId', o."pageId")
+            ORDER BY page."observedAt" DESC, page."effectId" COLLATE "C" DESC, o."rowIndex" DESC
+          ) FILTER (WHERE NOT (o."issues" ? ${`missing_field:${key}`})))[1] AS ${Prisma.raw(`"${column}"`)}`,
+        ),
+      )}
+      FROM "recruiting_candidate_occurrences" o
+      JOIN "recruiting_candidate_pages" page ON page."effectId" = o."pageId"
+      WHERE o."roleId" = c."roleId" AND o."candidateKey" = c."candidateKey"
+    ) profile ON true
     LEFT JOIN LATERAL (
       SELECT count(*)::int AS "discoveryCount", min(page."observedAt") AS "firstDiscoveredAt",
         max(page."observedAt") AS "lastDiscoveredAt"
@@ -5368,6 +5399,7 @@ function candidateIndexQuery(roleId: string) {
 type CandidateQueryRow = {
   sourcePageId: string | null;
   sourceRowIndex: number | null;
+  profileSourcePageIds: string[];
   roleId: string;
   candidateKey: string;
   name: string | null;
@@ -5389,6 +5421,37 @@ type CandidateQueryRow = {
   hardGate: string | null;
   sortValue: string;
 };
+
+async function candidateProfilePages(
+  tx: Tx,
+  actor: Actor,
+  roleId: string,
+  rows: Pick<CandidateQueryRow, "sourcePageId" | "profileSourcePageIds">[],
+) {
+  const pageIds = [
+    ...new Set(
+      rows.flatMap((row) => [
+        ...(row.sourcePageId ? [row.sourcePageId] : []),
+        ...row.profileSourcePageIds,
+      ]),
+    ),
+  ];
+  const pages = new Map(
+    (pageIds.length
+      ? await tx.recruitingCandidatePage.findMany({
+          where: { roleId, effectId: { in: pageIds } },
+          include: { effect: { select: { request: true } } },
+        })
+      : []
+    ).map((page) => [page.effectId, page]),
+  );
+  if (pages.size !== pageIds.length) throw new IsolationError();
+  for (const page of pages.values()) {
+    if (page.roleId !== roleId) throw new IsolationError();
+  }
+  await candidatePageArtifacts(tx, actor, [...pages.values()]);
+  return pages;
+}
 
 async function crmReadTarget(
   tx: Tx,
@@ -6562,23 +6625,7 @@ export async function listRecruitingCandidates(
     ) SELECT * FROM ordered WHERE ${after}
       ORDER BY "sortValue" ${direction}, "candidateKey" COLLATE "C" ASC LIMIT ${limit + 1}`);
       const selected = rows.slice(0, limit);
-      const pageIds = [
-        ...new Set(selected.flatMap((row) => (row.sourcePageId ? [row.sourcePageId] : []))),
-      ];
-      const pages = new Map(
-        (pageIds.length
-          ? await tx.recruitingCandidatePage.findMany({
-              where: { roleId: role.id, effectId: { in: pageIds } },
-              include: { effect: { select: { request: true } } },
-            })
-          : []
-        ).map((page) => [page.effectId, page]),
-      );
-      if (pages.size !== pageIds.length) throw new IsolationError();
-      for (const page of pages.values()) {
-        if (page.roleId !== role.id) throw new IsolationError();
-      }
-      await candidatePageArtifacts(tx, actor, [...pages.values()]);
+      const pages = await candidateProfilePages(tx, actor, role.id, selected);
       const last = selected.at(-1);
       const { total, ...counts } = totals[0]!;
       const bound = role.crmBindingEffectId
@@ -6614,6 +6661,7 @@ export async function listRecruitingCandidates(
             sortValue: _sort,
             sourcePageId,
             sourceRowIndex,
+            profileSourcePageIds: _profilePages,
             ...profile
           }) => ({
             ...profile,
@@ -6675,11 +6723,15 @@ export async function setRecruitingCandidateShortlist(
         revision: candidate.revision,
       };
     const [profile] = await tx.$queryRaw<
-      Pick<CandidateQueryRow, "name" | "linkedinUrl" | "resumeUrl">[]
+      Pick<
+        CandidateQueryRow,
+        "name" | "linkedinUrl" | "resumeUrl" | "sourcePageId" | "profileSourcePageIds"
+      >[]
     >(
-      Prisma.sql`${candidateIndexQuery(role.id)} SELECT "name", "linkedinUrl", "resumeUrl" FROM base WHERE "candidateKey" = ${candidate.candidateKey}`,
+      Prisma.sql`${candidateIndexQuery(role.id)} SELECT "name", "linkedinUrl", "resumeUrl", "sourcePageId", "profileSourcePageIds" FROM base WHERE "candidateKey" = ${candidate.candidateKey}`,
     );
     if (!profile) throw new IsolationError();
+    await candidateProfilePages(tx, actor, role.id, [profile]);
     const identity = [profile.name ?? "Unnamed candidate", profile.linkedinUrl ?? profile.resumeUrl]
       .filter(Boolean)
       .join(" · ");

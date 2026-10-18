@@ -7511,6 +7511,58 @@ describePostgres("recruiting domain (PostgreSQL)", () => {
     expect(unresolved.every((item) => item.name === null && item.issues.length > 0)).toBe(true);
   });
 
+  it("retains omitted profile fields but preserves explicit null, invalid and blank updates", async () => {
+    const { f, prepared } = await mappedResearchFixture();
+    const profile = canonicalCandidateRow("Example", "https://www.linkedin.com/in/example");
+    await recordCandidatePage(f, prepared, "profile-full", [profile], {
+      observedAt: new Date("2026-10-16T00:00:00Z"),
+    });
+    const compact = { name: profile.name, linkedin_url: profile.linkedin_url, updated_rank: 1 };
+    const latest = await recordCandidatePage(f, prepared, "profile-compact", [compact], {
+      observedAt: new Date("2026-10-16T01:00:00Z"),
+    });
+    const listed = await recruiting.listRecruitingCandidates(prisma, actor, {
+      roleId: f.role.role.id,
+      query: "Example Company",
+    });
+    expect(listed.total).toBe(1);
+    expect(listed.items[0]).toMatchObject({
+      title: "Engineer",
+      company: "Example Company",
+      location: "London",
+      evidenceUrls: ["https://example.test/project"],
+      latestSource: { effectId: latest.input.effectId, rowIndex: 0 },
+    });
+    await recordCandidatePage(
+      f,
+      prepared,
+      "profile-unknown",
+      [{ ...compact, current_title: null, current_company: 42, location: " " }],
+      { observedAt: new Date("2026-10-16T02:00:00Z") },
+    );
+    const final = await recordCandidatePage(f, prepared, "profile-compact-again", [compact], {
+      observedAt: new Date("2026-10-16T03:00:00Z"),
+    });
+    const unknown = await recruiting.listRecruitingCandidates(prisma, actor, {
+      roleId: f.role.role.id,
+    });
+    expect(unknown.items[0]).toMatchObject({
+      title: null,
+      company: null,
+      location: null,
+      evidenceUrls: ["https://example.test/project"],
+      latestSource: { effectId: final.input.effectId, rowIndex: 0 },
+    });
+    expect(
+      (
+        await recruiting.listRecruitingCandidates(prisma, actor, {
+          roleId: f.role.role.id,
+          query: "Example Company",
+        })
+      ).total,
+    ).toBe(0);
+  });
+
   it("recovers already recorded native pages without moving the current cursor or overwriting newer profiles", async () => {
     const { f, prepared } = await mappedResearchFixture();
     const old = await recordCandidatePage(

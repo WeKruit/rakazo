@@ -96,6 +96,7 @@ describe("candidate listing and shortlist boundaries", () => {
         shortlisted: false,
         revision: 0,
         discoveryCount: 1,
+        profileSourcePageIds: [],
         firstDiscoveredAt: "2026-10-16T00:00:00.000Z",
         lastDiscoveredAt: "2026-10-16T00:00:00.000Z",
         assessmentVersion: null,
@@ -216,6 +217,8 @@ describe("candidate listing and shortlist boundaries", () => {
           name: "Synthetic Avery",
           linkedinUrl: "https://www.linkedin.com/in/synthetic-avery",
           resumeUrl: null,
+          sourcePageId: null,
+          profileSourcePageIds: [],
         },
       ]);
     const input = {
@@ -247,7 +250,7 @@ describe("candidate listing and shortlist boundaries", () => {
       data: { shortlisted: true, revision: 1, shortlistMessageId: "human-shortlist-receipt" },
     });
     const profileQuery = f.tx.$queryRaw.mock.lastCall![0] as { values: unknown[] };
-    expect(profileQuery.values).toEqual(["role", f.candidate.candidateKey]);
+    expect(profileQuery.values.slice(-2)).toEqual(["role", f.candidate.candidateKey]);
   });
   it("rejects stale selection and performs no write for a no-op", async () => {
     const f = fixture();
@@ -1841,6 +1844,7 @@ describe("native CRM binding and source import", () => {
           shortlisted: false,
           revision: 0,
           discoveryCount: 1,
+          profileSourcePageIds: [],
           firstDiscoveredAt: "2026-10-16T00:00:00.000Z",
           lastDiscoveredAt: "2026-10-16T00:00:00.000Z",
           assessmentVersion: null,
@@ -2265,6 +2269,122 @@ async function nativeSourceFixture() {
 }
 
 describe("native candidate source provenance", () => {
+  it.each([
+    ["list", "valid"],
+    ["list", "historical-owner"],
+    ["list", "historical-hash"],
+    ["shortlist", "valid"],
+    ["shortlist", "historical-owner"],
+    ["shortlist", "historical-hash"],
+  ])(
+    "validates contributing history once for %s at the %s boundary",
+    async (operation, boundary) => {
+      vi.mocked(createThreadMessageInTransaction).mockClear();
+      const f = await nativeSourceFixture();
+      f.role.crmBindingEffectId = null;
+      const read = {
+        ...f.read,
+        id: "compact-read",
+        result: { structuredContent: { rows: [{ name: "Example", updated_rank: 1 }] } },
+      };
+      const bytes = Buffer.from(
+        stableJsonValue({ request: read.request, providerResult: read.result }),
+      );
+      const artifact = {
+        ...f.artifact,
+        id: "compact-artifact",
+        hash: createHash("sha256").update(bytes).digest("hex"),
+        size: bytes.length,
+        clientNonce: "recruiting-observation:compact-read",
+      };
+      const page = {
+        ...f.page,
+        effectId: read.id,
+        artifactId: artifact.id,
+        artifactHash: artifact.hash,
+        effect: read,
+      };
+      const historicalRun = { ...f.run, thread: f.thread };
+      if (boundary === "historical-owner") historicalRun.userId = "other";
+      if (boundary === "historical-hash") f.artifact.hash = "f".repeat(64);
+      f.tx.externalEffect.findMany.mockResolvedValue([
+        { ...f.read, run: historicalRun, recruitingCandidatePage: { artifact: f.artifact } },
+        { ...read, run: { ...f.run, thread: f.thread }, recruitingCandidatePage: { artifact } },
+      ] as never);
+      f.tx.event.findMany.mockResolvedValue([
+        f.event,
+        {
+          ...f.event,
+          id: "compact-event",
+          payload: {
+            ...f.event.payload,
+            effectId: read.id,
+            outputArtifact: { artifactId: artifact.id, sha256: artifact.hash },
+          },
+        },
+      ] as never);
+      const { page: _page, pageId: _pageId, rowIndex: _rowIndex, ...profile } = f.occurrence;
+      const row = {
+        ...profile,
+        sourcePageId: page.effectId,
+        sourceRowIndex: 0,
+        profileSourcePageIds: [page.effectId, f.page.effectId],
+        shortlisted: false,
+        revision: 0,
+        discoveryCount: 2,
+        firstDiscoveredAt: f.page.observedAt.toISOString(),
+        lastDiscoveredAt: f.page.observedAt.toISOString(),
+        assessmentVersion: null,
+        assessmentRoleRevisionId: null,
+        assessmentCreatedAt: null,
+        hardGate: null,
+        sortValue: "example",
+      };
+      f.tx.$queryRaw.mockResolvedValue([row] as never);
+      if (operation === "list")
+        f.tx.$queryRaw.mockResolvedValueOnce([
+          {
+            total: 1n,
+            sourceRows: 2n,
+            candidates: 1n,
+            identifiedCandidates: 1n,
+            unassessed: 1n,
+            assessed: 0n,
+            shortlisted: 0n,
+          },
+        ] as never);
+      const findMany = vi.fn(async () => [page, { ...f.page, effect: f.read }]);
+      const tx = {
+        ...f.tx,
+        recruitingCandidatePage: { ...f.tx.recruitingCandidatePage, findMany },
+      };
+      const prisma = { $transaction: vi.fn(async (fn) => fn(tx)) } as unknown as PrismaClient;
+      const result =
+        operation === "list"
+          ? recruiting.listRecruitingCandidates(prisma, actor, { roleId: "role" })
+          : recruiting.setRecruitingCandidateShortlist(prisma, actor, {
+              threadId: "thread",
+              roleId: "role",
+              candidateKey: f.occurrence.candidateKey,
+              expectedRevision: 0,
+              shortlisted: true,
+            });
+      if (boundary === "valid") {
+        const saved = await result;
+        if ("items" in saved) expect(saved.items[0]?.latestSource?.effectId).toBe(page.effectId);
+      } else {
+        await expect(result).rejects.toThrow(IsolationError);
+        expect(createThreadMessageInTransaction).not.toHaveBeenCalled();
+      }
+      expect(findMany).toHaveBeenCalledExactlyOnceWith({
+        where: { roleId: "role", effectId: { in: [page.effectId, f.page.effectId] } },
+        include: { effect: { select: { request: true } } },
+      });
+      expect(f.tx.externalEffect.findMany).toHaveBeenCalledTimes(1);
+      expect(f.tx.event.findMany).toHaveBeenCalledTimes(1);
+    },
+  );
+
   it("validates every native page in one snapshot proof batch, including duplicate-event rejection", async () => {
     const f = await nativeSourceFixture();
     const thread = await f.tx.thread.findFirst();
@@ -2432,6 +2552,7 @@ describe("native candidate source provenance", () => {
         ...profile,
         sourcePageId: pageId,
         sourceRowIndex: rowIndex,
+        profileSourcePageIds: [pageId],
         shortlisted: false,
         revision: 0,
         discoveryCount: 1,
