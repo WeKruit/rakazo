@@ -27,8 +27,9 @@ export type RecruitingFeedbackResult = {
   | { status: "needs_clarification" }
   | {
       status: "proposed";
-      nextTool?: "recruiting_role" | "recruiting_assess";
+      nextTool?: "recruiting_role";
     }
+  | { status: "recorded" | "already_recorded"; choice?: "good_example" | "not_fit" | "skip" }
   | {
       status: "saved";
       document: {
@@ -71,6 +72,7 @@ export async function executeRecruitingFeedback(
     workspace,
     threadId,
     botId: runBotId,
+    choice,
   } = await readRecruitingFeedbackContext(deps.prisma, actor, {
     runId,
     sourceMessageId,
@@ -79,17 +81,23 @@ export async function executeRecruitingFeedback(
     ...(feedback.target === "preference"
       ? {}
       : { roleId: feedback.roleId, expectedRoleRevision: feedback.expectedRoleRevision }),
+    ...(feedback.target === "candidate" ? { candidateKeys: feedback.candidateKeys } : {}),
   });
   if (runBotId !== botId)
     throw new RecruitingFeedbackValidationError("Recruiting feedback does not belong to this run");
   const result = { feedback, source, workspace };
   if (feedback.intent.basis === "inferred") return { ...result, status: "needs_clarification" };
-  if (feedback.target === "round") return { ...result, status: "proposed" };
-  if (feedback.target !== "preference")
+  if (feedback.target === "round" || feedback.target === "candidate")
+    return {
+      ...result,
+      status: choice ? "already_recorded" : "recorded",
+      ...(choice ? { choice } : {}),
+    };
+  if (feedback.target === "role")
     return {
       ...result,
       status: "proposed",
-      nextTool: feedback.target === "role" ? "recruiting_role" : "recruiting_assess",
+      nextTool: "recruiting_role",
     };
   const expected = options?.expectedMemory;
   if (

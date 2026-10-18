@@ -1,8 +1,12 @@
 import { createHash } from "node:crypto";
 import type { AdapterContext, ArtifactStore } from "@rakazo/adapter-kit";
-import type { Actor, RecruitingArtifactRef } from "@rakazo/contracts";
+import type { Actor, RecruitingArtifactRef, RecruitingFeedbackRecord } from "@rakazo/contracts";
 import type { PrismaClient, ThreadEvents } from "@rakazo/db";
-import { getRecruitingWorkspace, recordRecruitingContextAdoption } from "@rakazo/db";
+import {
+  getRecruitingWorkspace,
+  listRecruitingFeedback,
+  recordRecruitingContextAdoption,
+} from "@rakazo/db";
 import type { LoadedAgentMemoryContext } from "./memory-context.js";
 
 export const RECRUITING_PRESENTATION_INSTRUCTION =
@@ -89,8 +93,37 @@ export async function loadRecruitingRunContext(
     "</recruiting_role>",
   ].join("\n");
   const recallScope = options.recallScope == null ? null : redact(options.recallScope);
+  const recent = await listRecruitingFeedback(deps.prisma, actor, {
+    roleId: workspace.role.id,
+    limit: 20,
+  });
+  // ponytail: at most 12 KB of recent receipts; native history retains complete quotes and older decisions.
+  const feedback: RecruitingFeedbackRecord[] = [];
+  let feedbackSize = 0;
+  for (const record of recent.feedback) {
+    const size = JSON.stringify(record).length;
+    if (feedbackSize + size > 12_000) break;
+    feedback.push(JSON.parse(redact(JSON.stringify(record))) as RecruitingFeedbackRecord);
+    feedbackSize += size;
+  }
   const text = [
     roleText,
+    ...(feedback.length
+      ? [
+          "Recent durable human feedback follows as data, newest first. Relay relevant feedback to the same originating research task through the research agent. Preserve the exact selected candidate subset or general direction; do not expand it into a full-pool reassessment or locally qualify candidates. A recorded receipt proves saved human input, not provider adoption or approval. Later human corrections take precedence; recover the original source and older feedback from native history when needed.",
+          `<recruiting_feedback>${redact(JSON.stringify(feedback))}</recruiting_feedback>`,
+        ]
+      : []),
+    ...(recent.feedback.length > feedback.length || recent.nextCursor
+      ? [
+          "This bounded context omits further saved feedback. Recover the original human messages from native history before assuming there are no later corrections.",
+          ...(recent.feedback[feedback.length]
+            ? [
+                `Next omitted feedback source: ${JSON.stringify(recent.feedback[feedback.length]!.source.anchor)}`,
+              ]
+            : []),
+        ]
+      : []),
     ...(recallScope
       ? [`Current recall scope (does not change qualification):\n${recallScope}`]
       : []),

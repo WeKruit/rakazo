@@ -115,8 +115,11 @@ import {
   ListRecruitingCandidateSourcesOutput,
   ListRecruitingCandidatesInput,
   ListRecruitingCandidatesOutput,
+  ListRecruitingFeedbackInput,
+  ListRecruitingFeedbackOutput,
   RecruitingAssessmentAskTargetSchema,
   RecruitingAssessmentSchema,
+  RecruitingCandidateFeedbackSelectionSchema,
   RecruitingCandidateReportSchema,
   RecruitingId,
   RecruitingResearchActionSchema,
@@ -461,6 +464,7 @@ export const appContract = {
       .input(
         threadTarget.safeExtend({
           text: z.string().min(1),
+          recruitingFeedback: RecruitingCandidateFeedbackSelectionSchema.optional(),
           mentions: z.array(Id).max(64).optional(),
           /** Carries the call id, so a turn taken mid-run stays in the call's card. */
           clientNonce: z.string().min(1).max(200).optional(),
@@ -555,6 +559,7 @@ export const appContract = {
     heartbeat: oc.input(botId).output(z.object({ ok: z.literal(true) })),
   },
   recruiting: {
+    listFeedback: oc.input(ListRecruitingFeedbackInput).output(ListRecruitingFeedbackOutput),
     readSource: oc.input(ReadRecruitingSourceInput).output(
       z.discriminatedUnion("kind", [
         z.strictObject({

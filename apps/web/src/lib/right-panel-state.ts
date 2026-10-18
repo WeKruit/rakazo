@@ -85,7 +85,7 @@ export function readRecruitingPanelState(key: string | null): RecruitingPanelSta
   const empty: RecruitingPanelState = {
     tab: "role",
     candidateView: "cards",
-    filters: { sort: "name" },
+    filters: { sort: "rank" },
     pageCount: 1,
     selectedCandidateKey: null,
     detailOpen: false,

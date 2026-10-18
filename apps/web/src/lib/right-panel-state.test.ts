@@ -121,3 +121,9 @@ it("round trips only recruiting list settings and ignores malformed browser stat
   expect(readRecruitingPanelState("list")).toEqual(readRecruitingPanelState(null));
   expect(() => writeRecruitingPanelState("list", state)).not.toThrow();
 });
+
+it.each(["rank", "tier"] as const)("restores the explicit provider %s ordering", (sort) => {
+  const state = { ...readRecruitingPanelState(null), filters: { sort } };
+  vi.stubGlobal("localStorage", { getItem: () => JSON.stringify(state) });
+  expect(readRecruitingPanelState("list")).toEqual(state);
+});

@@ -164,6 +164,7 @@ import {
 import type { BoardEvents, Board as BoardRow, PrismaClient, ThreadEvents } from "@rakazo/db";
 import {
   appendEventInTransaction,
+  authorizeRecruitingFeedbackMessage,
   BotSectionNameConflictError,
   CannotDeleteDefaultSpaceError,
   CannotDeleteLastSpaceError,
@@ -273,6 +274,7 @@ import {
   listRecruitingAssessments,
   listRecruitingCandidateSources,
   listRecruitingCandidates,
+  listRecruitingFeedback,
   listRecruitingQuestions,
   listRecruitingResearch,
   readRecruitingSource,
@@ -2280,7 +2282,15 @@ export function createRouter(deps: RouterDeps) {
             threadId: target.threadId,
             botId: target.botId,
             userId: context.actor.userId,
-            blocks: [{ kind: "text", text: input.text }],
+            blocks: [
+              {
+                kind: "text",
+                text: input.text,
+                ...(input.recruitingFeedback
+                  ? { recruitingFeedback: input.recruitingFeedback }
+                  : {}),
+              },
+            ],
             prompt: input.text,
             trigger: "follow_up",
             clientNonce: input.clientNonce,
@@ -2335,13 +2345,26 @@ export function createRouter(deps: RouterDeps) {
             members,
             explicitMentions: input.mentions,
           });
-          const blocks = [{ kind: "text" as const, text: input.text }];
+          const blocks = [
+            {
+              kind: "text" as const,
+              text: input.text,
+              ...(input.recruitingFeedback ? { recruitingFeedback: input.recruitingFeedback } : {}),
+            },
+          ];
           const message = await createThreadMessageInTransaction(tx, {
             threadId: target.threadId,
             role: "user",
             blocks,
             clientNonce: input.clientNonce,
           });
+          if (input.recruitingFeedback)
+            await authorizeRecruitingFeedbackMessage(
+              tx,
+              context.actor,
+              target.threadId,
+              input.recruitingFeedback,
+            );
           const runIds: string[] = [];
           const createdRunIds: string[] = [];
           for (const botId of botIds) {
@@ -3295,6 +3318,9 @@ export function createRouter(deps: RouterDeps) {
       ),
       listAssessments: authed.recruiting.listAssessments.handler(({ context, input }) =>
         listRecruitingAssessments(deps.prisma, context.actor, input),
+      ),
+      listFeedback: authed.recruiting.listFeedback.handler(({ context, input }) =>
+        listRecruitingFeedback(deps.prisma, context.actor, input),
       ),
       getAssessment: authed.recruiting.getAssessment.handler(({ context, input }) =>
         getRecruitingAssessment(deps.prisma, context.actor, input),

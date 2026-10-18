@@ -32,6 +32,7 @@ const shellApi = vi.hoisted(() => ({
     getWorkspace: vi.fn(),
     listAssessments: vi.fn(),
     listCandidates: vi.fn(),
+    listFeedback: vi.fn(),
     listCandidateSources: vi.fn(),
     listResearch: vi.fn(),
     listQuestions: vi.fn(),
@@ -316,6 +317,7 @@ async function renderFeedbackShell(kind: "bot" | "group" = "bot") {
     },
   });
   shellApi.recruiting.listAssessments.mockResolvedValue([]);
+  shellApi.recruiting.listFeedback.mockResolvedValue({ feedback: [], nextCursor: null });
   shellApi.recruiting.listCandidates.mockResolvedValue({
     roleId: "internal-role",
     roleRevisionId: "internal-revision",
@@ -430,6 +432,13 @@ it.each(["bot", "group"] as const)(
       ...(kind === "group" ? { groupId: "group-1", mentions: ["bot-2"] } : { botId: "bot-1" }),
       text: `Candidate reference\n> Name: Synthetic Avery\n> Keep original evidence\n> Role: Systems engineer\n> Role version: 2\n> Title: Engineer\n> Company: Example Tools\n> LinkedIn: https://example.test/avery\n> Resume: Resume missing\n\nCandidate feedback: Not a fit\n\n${reason}`,
       clientNonce: expect.any(String),
+      recruitingFeedback: {
+        roleId: "internal-role",
+        roleRevisionId: "internal-revision",
+        expectedRoleRevision: 2,
+        candidateKeys: [view.candidate.candidateKey],
+        choice: "not_fit",
+      },
     });
     expect(shellApi.send).not.toHaveBeenCalled();
     expect(shellApi.answer).not.toHaveBeenCalled();
@@ -620,6 +629,10 @@ it("refreshes persisted recruiting changes while ignoring ongoing catalog and so
   });
   receive("Reply outcome", "agent.tool.completed", { name: "recruiting_reply", outcome: "error" });
   receive("Connector log", "effect.recorded", { tool: "mcp_execute_tool", logId: "log-1" });
+  receive("Candidate feedback saved", "thread.message.created", {
+    role: "user",
+    blocks: [{ kind: "text", text: "Not a fit", recruitingFeedback: { roleId: "role" } }],
+  });
   receive("Candidates saved", "recruiting.candidates.saved");
   receive("Preference saved", "memory.revised");
   receive("Thread cleared", "thread.cleared");
@@ -632,6 +645,7 @@ it("refreshes persisted recruiting changes while ignoring ongoing catalog and so
     "CRM import pending",
     "CRM import receipt",
     "Reply outcome",
+    "Candidate feedback saved",
     "Candidates saved",
     "Preference saved",
     "Thread cleared",

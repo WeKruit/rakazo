@@ -7511,6 +7511,112 @@ describePostgres("recruiting domain (PostgreSQL)", () => {
     expect(unresolved.every((item) => item.name === null && item.issues.length > 0)).toBe(true);
   });
 
+  it("orders native ranks and tiers across numeric, tie and unknown cursor boundaries with source proof", async () => {
+    const { f, prepared } = await mappedResearchFixture();
+    const row = (key: string, match: Prisma.InputJsonObject) => ({
+      ...canonicalCandidateRow(`Order ${key}`, `https://www.linkedin.com/in/order-${key}`),
+      ...match,
+    });
+    const original = await recordCandidatePage(
+      f,
+      prepared,
+      "match-original",
+      [
+        row("a", { updated_rank: { value: 10 }, match_tier: { value: "Strong" } }),
+        row("b", { updated_rank: 2, match_tier: "Promising" }),
+        row("c", { updated_rank: { value: 1 }, match_tier: { value: "Uncertain" } }),
+        row("d", { updated_rank: { value: 2 }, match_tier: { value: "Partial" } }),
+        row("e", { rank: 1, match_tier: "Unrecognized" }),
+        row("f", { updated_rank: null, match_tier: "Strong" }),
+        row("g", { updated_rank: "3", match_tier: null }),
+        row("h", { updated_rank: 1.5 }),
+        row("i", { updated_rank: -1 }),
+        row("j", { updated_rank: 9007199254740992 }),
+      ],
+      { observedAt: new Date("2026-10-16T00:00:00Z") },
+    );
+    const key = (suffix: string) => `linkedin:/in/order-${suffix}`;
+    let rankCursor: string | undefined;
+    for (const [sort, expected] of [
+      ["rank", ["c", "b", "d", "a", "e", "f", "g", "h", "i", "j"]],
+      ["tier", ["a", "f", "b", "d", "c", "e", "g", "h", "i", "j"]],
+    ] as const) {
+      const seen: string[] = [];
+      let cursor: string | undefined;
+      do {
+        const page = await recruiting.listRecruitingCandidates(prisma, actor, {
+          roleId: f.role.role.id,
+          sort,
+          limit: 3,
+          ...(cursor ? { cursor } : {}),
+        });
+        expect(page.total).toBe(10);
+        seen.push(...page.items.map((item) => item.candidateKey));
+        cursor = page.nextCursor ?? undefined;
+        if (sort === "rank" && !rankCursor) rankCursor = cursor;
+      } while (cursor);
+      expect(seen).toEqual(expected.map(key));
+      expect(new Set(seen).size).toBe(10);
+    }
+    await expect(
+      recruiting.listRecruitingCandidates(prisma, actor, {
+        roleId: f.role.role.id,
+        sort: "tier",
+        cursor: rankCursor,
+      }),
+    ).rejects.toThrow(recruiting.RecruitingConflictError);
+    const compact = await recordCandidatePage(f, prepared, "match-omitted", [row("a", {})], {
+      observedAt: new Date("2026-10-16T01:00:00Z"),
+    });
+    expect(
+      (
+        await recruiting.listRecruitingCandidates(prisma, actor, {
+          roleId: f.role.role.id,
+          sort: "rank",
+          limit: 10,
+        })
+      ).items.map((item) => item.candidateKey),
+    ).toEqual(["c", "b", "d", "a", "e", "f", "g", "h", "i", "j"].map(key));
+    await recordCandidatePage(
+      f,
+      prepared,
+      "match-cleared",
+      [row("b", { updated_rank: null, match_tier: null })],
+      {
+        observedAt: new Date("2026-10-16T02:00:00Z"),
+      },
+    );
+    expect(
+      (
+        await recruiting.listRecruitingCandidates(prisma, actor, {
+          roleId: f.role.role.id,
+          sort: "rank",
+          limit: 10,
+        })
+      ).items.map((item) => item.candidateKey),
+    ).toEqual(["c", "d", "a", "b", "e", "f", "g", "h", "i", "j"].map(key));
+    await prisma.artifact.update({
+      where: { id: original.saved.outputArtifact.id },
+      data: { hash: "f".repeat(64) },
+    });
+    expect(
+      (
+        await recruiting.listRecruitingCandidates(prisma, actor, {
+          roleId: f.role.role.id,
+          sort: "recent",
+          query: "Order a",
+        })
+      ).items[0]?.latestSource?.effectId,
+    ).toBe(compact.input.effectId);
+    await expect(
+      recruiting.listRecruitingCandidates(prisma, actor, {
+        roleId: f.role.role.id,
+        sort: "rank",
+        query: "Order a",
+      }),
+    ).rejects.toThrow(IsolationError);
+  });
+
   it("retains omitted profile fields but preserves explicit null, invalid and blank updates", async () => {
     const { f, prepared } = await mappedResearchFixture();
     const profile = canonicalCandidateRow("Example", "https://www.linkedin.com/in/example");

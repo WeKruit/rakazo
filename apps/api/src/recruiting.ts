@@ -64,6 +64,11 @@ function candidateReportReader(
   artifacts = new Map<string, SavedArtifact>(),
 ) {
   let research: ReturnType<typeof recruiting.listRecruitingResearch> | undefined;
+  // ponytail: share verified page decoding only within this actor/role read, never across requests.
+  const pages = new Map<
+    string,
+    { observation: RecruitingResearchObservation; requestCursor: unknown }
+  >();
   return async (source: Omit<RecruitingCandidateSource, "crmImports">) => {
     try {
       const { artifactId, sha256 } = source.artifactRef;
@@ -73,57 +78,75 @@ function candidateReportReader(
         artifacts.set(artifactId, saved);
       }
       if (saved.row.hash !== sha256) throw new IsolationError();
-      let observation: RecruitingResearchObservation;
-      let requestCursor: unknown;
-      if (source.taskId === null && source.actionId === null) {
-        const snapshot = JSON.parse(new TextDecoder("utf-8", { fatal: true }).decode(saved.bytes));
-        const direct = boundDirectApprovalDetails(snapshot?.request, "__rakazoCatalogTool");
-        const catalog = catalogApprovalDetails(snapshot?.request, "__rakazoCatalogTool");
-        const route = direct?.route ?? catalog?.route;
-        const args = direct?.args ?? catalog?.args.arguments;
-        if (
-          route?.connectorId !== "mcp" ||
-          route.toolName !== "get_rows" ||
-          !args ||
-          typeof args !== "object" ||
-          Array.isArray(args) ||
-          !("task_id" in args) ||
-          typeof args.task_id !== "string" ||
-          !args.task_id.trim() ||
-          (catalog && !["connectors_execute_tool", "mcp_execute_tool"].includes(catalog.toolName))
-        )
-          throw new IsolationError();
-        observation = classifyRecruitingResearchResult(snapshot.providerResult, {
-          operation: "rows",
-          providerTaskId: args.task_id,
-        });
-        requestCursor = "cursor" in args ? args.cursor : null;
-      } else {
-        research ??= recruiting.listRecruitingResearch(deps.prisma, actor, { roleId });
-        const context = await research;
-        const task = context.tasks.find((task) => task.id === source.taskId);
-        const action = context.actions.find((action) => action.id === source.actionId);
-        if (
-          !task ||
-          !action ||
-          task.roleId !== roleId ||
-          action.roleRevisionId !== source.roleRevisionId
-        )
-          throw new IsolationError();
-        const snapshot = await readRecruitingResearchReadArtifact(saved.bytes, {
-          task,
-          action,
-          artifact: source.artifactRef,
-        });
-        if (snapshot.operation !== "rows" || snapshot.effectId !== source.effectId)
-          throw new IsolationError();
-        observation = classifyRecruitingResearchResult(snapshot.providerResult, {
-          operation: "rows",
-          providerTaskId: task.providerTaskId ?? undefined,
-        });
-        if (!isDeepStrictEqual(snapshot.observation, observation)) throw new IsolationError();
-        requestCursor = snapshot.request.cursor ?? null;
+      const pageKey = JSON.stringify([
+        artifactId,
+        sha256,
+        source.taskId,
+        source.actionId,
+        source.roleRevisionId,
+        source.effectId,
+        source.requestCursor,
+        source.outputId,
+      ]);
+      let page = pages.get(pageKey);
+      if (!page) {
+        let observation: RecruitingResearchObservation;
+        let requestCursor: unknown;
+        if (source.taskId === null && source.actionId === null) {
+          const snapshot = JSON.parse(
+            new TextDecoder("utf-8", { fatal: true }).decode(saved.bytes),
+          );
+          const direct = boundDirectApprovalDetails(snapshot?.request, "__rakazoCatalogTool");
+          const catalog = catalogApprovalDetails(snapshot?.request, "__rakazoCatalogTool");
+          const route = direct?.route ?? catalog?.route;
+          const args = direct?.args ?? catalog?.args.arguments;
+          if (
+            route?.connectorId !== "mcp" ||
+            route.toolName !== "get_rows" ||
+            !args ||
+            typeof args !== "object" ||
+            Array.isArray(args) ||
+            !("task_id" in args) ||
+            typeof args.task_id !== "string" ||
+            !args.task_id.trim() ||
+            (catalog && !["connectors_execute_tool", "mcp_execute_tool"].includes(catalog.toolName))
+          )
+            throw new IsolationError();
+          observation = classifyRecruitingResearchResult(snapshot.providerResult, {
+            operation: "rows",
+            providerTaskId: args.task_id,
+          });
+          requestCursor = "cursor" in args ? args.cursor : null;
+        } else {
+          research ??= recruiting.listRecruitingResearch(deps.prisma, actor, { roleId });
+          const context = await research;
+          const task = context.tasks.find((task) => task.id === source.taskId);
+          const action = context.actions.find((action) => action.id === source.actionId);
+          if (
+            !task ||
+            !action ||
+            task.roleId !== roleId ||
+            action.roleRevisionId !== source.roleRevisionId
+          )
+            throw new IsolationError();
+          const snapshot = await readRecruitingResearchReadArtifact(saved.bytes, {
+            task,
+            action,
+            artifact: source.artifactRef,
+          });
+          if (snapshot.operation !== "rows" || snapshot.effectId !== source.effectId)
+            throw new IsolationError();
+          observation = classifyRecruitingResearchResult(snapshot.providerResult, {
+            operation: "rows",
+            providerTaskId: task.providerTaskId ?? undefined,
+          });
+          if (!isDeepStrictEqual(snapshot.observation, observation)) throw new IsolationError();
+          requestCursor = snapshot.request.cursor ?? null;
+        }
+        page = { observation, requestCursor };
+        pages.set(pageKey, page);
       }
+      const { observation, requestCursor } = page;
       if (
         requestCursor !== source.requestCursor ||
         (observation.outputId ?? null) !== source.outputId ||
@@ -344,6 +367,11 @@ export const listRecruitingAssessments = (
   actor: Actor,
   input: Parameters<typeof recruiting.listRecruitingAssessments>[2],
 ) => authenticated(() => recruiting.listRecruitingAssessments(prisma, actor, input));
+export const listRecruitingFeedback = (
+  prisma: PrismaClient,
+  actor: Actor,
+  input: Parameters<typeof recruiting.listRecruitingFeedback>[2],
+) => authenticated(() => recruiting.listRecruitingFeedback(prisma, actor, input));
 export const getRecruitingAssessment = (
   prisma: PrismaClient,
   actor: Actor,

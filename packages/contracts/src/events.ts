@@ -7,6 +7,7 @@ import {
   RecruitingActionDeliveryStateSchema,
   RecruitingArtifactRefSchema,
   RecruitingAssessmentAskTargetSchema,
+  RecruitingCandidateFeedbackSelectionSchema,
   RecruitingId,
 } from "./recruiting.js";
 
@@ -134,7 +135,11 @@ export const AskBlockSchema = z.object({
 });
 
 export const MessageBlock = z.discriminatedUnion("kind", [
-  z.object({ kind: z.literal("text"), text: z.string() }),
+  z.object({
+    kind: z.literal("text"),
+    text: z.string(),
+    recruitingFeedback: RecruitingCandidateFeedbackSelectionSchema.optional(),
+  }),
   z.object({
     kind: z.literal("card"),
     lines: z.array(z.object({ k: z.string(), v: z.string() })),

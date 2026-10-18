@@ -26,6 +26,7 @@ const api = vi.hoisted(() => ({
   readSource: vi.fn(),
   listAssessments: vi.fn(),
   listCandidates: vi.fn(),
+  listFeedback: vi.fn(),
   listCandidateSources: vi.fn(),
   setCandidateShortlist: vi.fn(),
   getAssessment: vi.fn(),
@@ -373,6 +374,7 @@ beforeEach(() => {
   vi.stubGlobal("IS_REACT_ACT_ENVIRONMENT", true);
   vi.stubGlobal("crypto", webcrypto);
   api.getWorkspace.mockResolvedValue({ role, revision });
+  api.listFeedback.mockResolvedValue({ feedback: [], nextCursor: null });
   api.readSource.mockRejectedValue(new Error("Source unavailable"));
   api.listAssessments.mockResolvedValue([assessment]);
   api.listCandidates.mockImplementation(async ({ roleId }: { roleId: string }) => {
@@ -740,6 +742,9 @@ it("requires an explicit feedback choice and preserves the authored reason witho
       threadId: "thread-1",
       roleTitle: role.title,
       roleVersion: revision.revision,
+      roleId: role.id,
+      candidateKey: candidate.candidateKey,
+      roleRevisionId: revision.id,
       name: candidate.name,
       title: null,
       company: null,
@@ -760,6 +765,41 @@ it("requires an explicit feedback choice and preserves the authored reason witho
   expect(api.editCriteria).not.toHaveBeenCalled();
   expect(api.reviseRole).not.toHaveBeenCalled();
   expect(api.update).not.toHaveBeenCalled();
+});
+
+it("reads durable candidate feedback after reopening, including the exact human quote and choice", async () => {
+  const candidate = { ...candidateFixture(), name: "Synthetic Avery" };
+  api.listCandidates.mockResolvedValue(candidatePage([candidate]));
+  api.listFeedback.mockResolvedValue({
+    feedback: [
+      {
+        id: "native-feedback",
+        createdAt: "2026-10-18T00:00:00.000Z",
+        roleRevisionId: revision.id,
+        choice: "not_fit",
+        feedback: {
+          target: "candidate",
+          expectedRoleRevision: 1,
+          candidateKeys: [candidate.candidateKey],
+        },
+        source: { quote: "No systems ownership. Keep this exact wording." },
+      },
+    ],
+    nextCursor: null,
+  });
+  const view = await mounted("thread-1", undefined, false);
+  await view.click("Evidence");
+  await view.click(candidate.name);
+  expect(api.listFeedback).toHaveBeenCalledWith({
+    roleId: role.id,
+    candidateKey: candidate.candidateKey,
+    limit: 20,
+  });
+  const dialog = view.container.querySelector('[role="dialog"]')!;
+  expect(dialog.textContent).toContain("No systems ownership. Keep this exact wording.");
+  expect(dialog.textContent).toContain("Not a fit");
+  expect(dialog.textContent).not.toContain("native-feedback");
+  expect(view.feedback).not.toHaveBeenCalled();
 });
 
 it("allows skipping without a reason and retains the same nonce and unchanged draft after an unknown outcome", async () => {
@@ -1689,6 +1729,31 @@ it("isolates saved recruiting list preferences by actor, thread and actual role"
   );
 });
 
+it("offers native Autumn rank and tier ordering while preserving candidate filters", async () => {
+  const view = await mounted("thread-1", undefined, false);
+  await view.click("Evidence");
+  const select = view.container.querySelector<HTMLSelectElement>(
+    'select[aria-label="Candidate sort"]',
+  )!;
+  expect([...select.options].map((option) => option.textContent)).toEqual([
+    "Autumn rank",
+    "Match tier",
+    "Name",
+    "Recently discovered",
+  ]);
+  expect(select.value).toBe("rank");
+  await changeInput(view.container, "Search candidates", "Synthetic");
+  for (const sort of ["tier", "rank"]) {
+    await changeSelect(view.container, "Candidate sort", sort);
+    expect(api.listCandidates).toHaveBeenLastCalledWith({
+      roleId: role.id,
+      limit: 30,
+      query: "Synthetic",
+      sort,
+    });
+  }
+});
+
 it("requests server pages and filters while keeping selected evidence outside the visible page", async () => {
   api.listCandidates
     .mockResolvedValueOnce({ ...candidatePage(), nextCursor: "page-2", total: 12 })
@@ -1826,7 +1891,7 @@ it("ignores late saved-result pages while retaining the original candidate discu
   expect(api.listCandidates).toHaveBeenLastCalledWith({
     roleId: role.id,
     limit: 30,
-    sort: "name",
+    sort: "rank",
     actionId: f.action.id,
     sourceEffectId: undefined,
   });
@@ -2990,7 +3055,7 @@ it.each(["action:action-1", "source:native-read-1"])(
     await view.render("thread-1", 1);
     expect(api.listCandidates.mock.lastCall?.[0]).toEqual({
       roleId: "role-next",
-      sort: "name",
+      sort: "rank",
       limit: 30,
     });
     expect(
@@ -4152,7 +4217,10 @@ it.each(["thread", "assessment sources", "research", "questions", "user memory",
     const calls = log.mock.calls;
     log.mockRestore();
     expect(calls).toEqual([
-      ["Recruiting request failed", { name: error.name, code: error.code, message: error.message }],
+      [
+        "Recruiting request failed",
+        JSON.stringify({ name: error.name, code: error.code, message: error.message }),
+      ],
     ]);
     expect(view.container.textContent).toContain("Could not load recruiting");
     expect(view.container.textContent).not.toContain("candidate-1");

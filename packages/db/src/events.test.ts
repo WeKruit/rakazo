@@ -2962,6 +2962,62 @@ describe("sendUserMessage", () => {
     return { tx, prisma, input };
   }
 
+  it("persists authored candidate feedback in the native message transaction and rejects stale metadata before steering", async () => {
+    const { tx, prisma, input } = routineDeliveryFixture();
+    const owner = { spaceId: input.spaceId, userId: input.userId };
+    tx.thread.findFirst.mockResolvedValue({
+      ...owner,
+      id: input.threadId,
+      botId: input.botId,
+      activeRecruitingRoleId: "role",
+    } as never);
+    Object.assign(tx, {
+      bot: { findFirst: vi.fn(async () => owner) },
+      recruitingRole: {
+        findFirst: vi.fn(async () => ({
+          ...owner,
+          id: "role",
+          sourceThreadId: input.threadId,
+          revision: 1,
+          currentRevisionId: "revision",
+        })),
+      },
+      recruitingCandidate: { findMany: vi.fn(async () => [{ candidateKey: "candidate" }]) },
+    });
+    const recruitingFeedback = {
+      roleId: "role",
+      roleRevisionId: "revision",
+      expectedRoleRevision: 1,
+      candidateKeys: ["candidate"],
+      choice: "not_fit" as const,
+    };
+    const feedback = {
+      ...input,
+      routineEvent: undefined,
+      trigger: "follow_up" as const,
+      blocks: [
+        { kind: "text" as const, text: "Not a fit: no systems ownership", recruitingFeedback },
+      ],
+    };
+    await sendUserMessage(prisma as unknown as PrismaClient, feedback);
+    expect(tx.message.create).toHaveBeenCalledWith(
+      expect.objectContaining({ data: expect.objectContaining({ blocks: feedback.blocks }) }),
+    );
+    tx.steeringMessage.create.mockClear();
+    await expect(
+      sendUserMessage(prisma as unknown as PrismaClient, {
+        ...feedback,
+        blocks: [
+          {
+            ...feedback.blocks[0]!,
+            recruitingFeedback: { ...recruitingFeedback, expectedRoleRevision: 2 },
+          },
+        ],
+      }),
+    ).rejects.toThrow("Recruiting revision changed");
+    expect(tx.steeringMessage.create).not.toHaveBeenCalled();
+  });
+
   it("atomically admits an event routine and attributes a distinct run even while chat is busy", async () => {
     const { tx, prisma, input } = routineDeliveryFixture();
     await sendUserMessage(prisma as unknown as PrismaClient, {

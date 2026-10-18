@@ -419,6 +419,14 @@ function readCollapsedRosterParents(userId: string | null | undefined): Set<stri
 export function eventChangesRecruitingPanel(
   event: Pick<ProductEvent, "type" | "payload">,
 ): boolean {
+  if (event.type === "thread.message.created" && event.payload.role === "user")
+    return (
+      Array.isArray(event.payload.blocks) &&
+      event.payload.blocks.some(
+        (block) =>
+          block && typeof block === "object" && block.kind === "text" && block.recruitingFeedback,
+      )
+    );
   if (event.type === "effect.recorded")
     return (
       (event.payload.tool === "recruiting_role" &&
@@ -1910,6 +1918,13 @@ export function ShellPage() {
     clientNonce: string,
   ): Promise<boolean> {
     if (!candidateScopeCurrent(candidate)) return false;
+    if (
+      !candidate.roleId ||
+      !candidate.roleRevisionId ||
+      !candidate.roleVersion ||
+      !candidate.candidateKey
+    )
+      return false;
     if (feedback.recipientBotId && !inGroup) return false;
     if (
       inGroup &&
@@ -1930,6 +1945,13 @@ export function ShellPage() {
         ? { groupId: groupId!, mentions: [feedback.recipientBotId!] }
         : { botId: active!.id }),
       text,
+      recruitingFeedback: {
+        roleId: candidate.roleId,
+        roleRevisionId: candidate.roleRevisionId,
+        expectedRoleRevision: candidate.roleVersion,
+        candidateKeys: [candidate.candidateKey],
+        choice: feedback.choice,
+      },
       clientNonce,
     });
     if (candidateScopeCurrent(candidate)) {

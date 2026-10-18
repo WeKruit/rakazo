@@ -18,6 +18,7 @@ import type {
   RecruitingCrmTarget,
   RecruitingEmploymentDay,
   RecruitingEmploymentRule,
+  RecruitingFeedbackRecord,
   RecruitingResearchAction,
   RecruitingResearchReadArtifact,
   RecruitingResearchTask,
@@ -69,7 +70,14 @@ import { rpc } from "../lib/rpc";
 export type CandidateDiscussionContext = Pick<
   RecruitingCandidate,
   "name" | "title" | "company" | "linkedinUrl" | "resumeUrl"
-> & { threadId: string; roleTitle: string; roleVersion?: number };
+> & {
+  threadId: string;
+  roleTitle: string;
+  roleVersion?: number;
+  roleId?: string;
+  roleRevisionId?: string;
+  candidateKey?: string;
+};
 
 export type CandidateFeedback = {
   choice: "good_example" | "not_fit" | "skip";
@@ -109,11 +117,13 @@ function CandidateFeedbackForm({
   recipients,
   onSend,
   onAccessError,
+  onRecorded,
 }: {
   candidate: CandidateDiscussionContext;
   recipients: Props["candidateFeedbackRecipients"];
   onSend: NonNullable<Props["onCandidateFeedback"]>;
   onAccessError: (error: unknown) => void;
+  onRecorded: () => void;
 }) {
   const { t } = useLingui();
   const [open, setOpen] = useState(false);
@@ -177,7 +187,10 @@ function CandidateFeedbackForm({
       const { candidate: originalCandidate, clientNonce, ...feedback } = submission;
       const accepted = await onSend(originalCandidate, feedback, clientNonce);
       if (!scope.current.active) return;
-      if (accepted) attempt.current = null;
+      if (accepted) {
+        attempt.current = null;
+        onRecorded();
+      }
       if (scope.current.generation !== generation) return;
       if (accepted) {
         setChoice("");
@@ -290,6 +303,102 @@ function CandidateFeedbackForm({
         </p>
       ) : null}
     </div>
+  );
+}
+
+function FeedbackHistory({
+  roleId,
+  candidateKey,
+  refreshSignal,
+  onAccessError,
+}: {
+  roleId: string;
+  candidateKey?: string;
+  refreshSignal?: number;
+  onAccessError: (error: unknown) => void;
+}) {
+  const [records, setRecords] = useState<RecruitingFeedbackRecord[]>([]);
+  const [cursor, setCursor] = useState<string | null>(null);
+  const [failed, setFailed] = useState(false);
+  const [pending, setPending] = useState(false);
+  const generation = useRef(0);
+  const read = useCallback(
+    async (before?: string) => {
+      const current = ++generation.current;
+      setPending(true);
+      setFailed(false);
+      try {
+        const result = await rpc.recruiting.listFeedback({
+          roleId,
+          ...(candidateKey ? { candidateKey } : {}),
+          limit: 20,
+          ...(before ? { before } : {}),
+        });
+        if (current !== generation.current) return;
+        setRecords((previous) => (before ? [...previous, ...result.feedback] : result.feedback));
+        setCursor(result.nextCursor);
+      } catch (error) {
+        if (current !== generation.current) return;
+        onAccessError(error);
+        setFailed(true);
+      } finally {
+        if (current === generation.current) setPending(false);
+      }
+    },
+    [roleId, candidateKey, onAccessError],
+  );
+  useEffect(() => {
+    setRecords([]);
+    setCursor(null);
+    void read();
+    return () => {
+      generation.current++;
+    };
+  }, [read, refreshSignal]);
+  if (!records.length && !failed) return null;
+  return (
+    <section className="space-y-2">
+      <h4 className="font-medium">
+        <Trans>Feedback history</Trans>
+      </h4>
+      {records.map((record) => (
+        <div key={record.id} className="space-y-1 border-l pl-3">
+          <p className="text-sm text-muted-foreground">
+            {record.choice === "good_example" ? (
+              <Trans>Good example</Trans>
+            ) : record.choice === "not_fit" ? (
+              <Trans>Not a fit</Trans>
+            ) : record.choice === "skip" ? (
+              <Trans>Skip for now</Trans>
+            ) : null}
+            {record.choice ? " · " : null}
+            <time dateTime={record.createdAt}>{new Date(record.createdAt).toLocaleString()}</time>
+            {record.feedback.target !== "preference" ? (
+              <>
+                {" "}
+                · <Trans>Role version {record.feedback.expectedRoleRevision}</Trans>
+              </>
+            ) : null}
+          </p>
+          <p className="whitespace-pre-wrap break-words text-sm">{record.source.quote}</p>
+        </div>
+      ))}
+      {failed ? (
+        <p role="alert">
+          <Trans>Could not load feedback</Trans>
+        </p>
+      ) : null}
+      {cursor || failed ? (
+        <Button
+          size="sm"
+          variant="outline"
+          disabled={pending}
+          onClick={() => void read(cursor ?? undefined)}
+        >
+          {failed ? <Trans>Retry</Trans> : <Trans>More</Trans>}
+        </Button>
+      ) : null}
+    </section>
   );
 }
 
@@ -1583,6 +1692,7 @@ function RecruitingWorkspace({
   const shortlistFilterId = useId();
   const [snapshot, setSnapshot] = useState<Snapshot | null>(null);
   const [refresh, setRefresh] = useState(0);
+  const [feedbackRefresh, setFeedbackRefresh] = useState(0);
   const [loading, setLoading] = useState(true);
   const [failed, setFailed] = useState(false);
   const [confirming, setConfirming] = useState(false);
@@ -1621,11 +1731,14 @@ function RecruitingWorkspace({
   const loadingMore = useRef(false);
   const readEpoch = useRef(0);
   const denyAccess = useCallback((error: unknown) => {
-    console.error("Recruiting request failed", {
-      name: error instanceof Error ? error.name : undefined,
-      code: error instanceof ORPCError ? error.code : undefined,
-      message: error instanceof Error ? error.message : undefined,
-    });
+    console.error(
+      "Recruiting request failed",
+      JSON.stringify({
+        name: error instanceof Error ? error.name : undefined,
+        code: error instanceof ORPCError ? error.code : undefined,
+        message: error instanceof Error ? error.message : undefined,
+      }),
+    );
     if (
       !(error instanceof ORPCError) ||
       !["UNAUTHORIZED", "FORBIDDEN", "NOT_FOUND"].includes(error.code)
@@ -2927,14 +3040,20 @@ function RecruitingWorkspace({
                   </NativeSelect>
                   <NativeSelect
                     aria-label={t`Candidate sort`}
-                    value={candidateFilters.sort ?? "name"}
+                    value={candidateFilters.sort ?? "rank"}
                     onChange={(event) =>
                       setCandidateFilters((current) => ({
                         ...current,
-                        sort: event.target.value as "name" | "recent",
+                        sort: event.target.value as ListRecruitingCandidatesInput["sort"],
                       }))
                     }
                   >
+                    <NativeSelectOption value="rank">
+                      <Trans>Autumn rank</Trans>
+                    </NativeSelectOption>
+                    <NativeSelectOption value="tier">
+                      <Trans>Match tier</Trans>
+                    </NativeSelectOption>
                     <NativeSelectOption value="name">
                       <Trans>Name</Trans>
                     </NativeSelectOption>
@@ -3415,6 +3534,14 @@ function RecruitingWorkspace({
             )}
           </TabsContent>
           <TabsContent value="activity" className="space-y-5">
+            {workspace ? (
+              <FeedbackHistory
+                key={workspace.role.id}
+                roleId={workspace.role.id}
+                refreshSignal={(refreshSignal ?? 0) + feedbackRefresh}
+                onAccessError={denyAccess}
+              />
+            ) : null}
             {!snapshot.research.tasks.length ? (
               <p className="text-muted-foreground">
                 {snapshot.research.observations.length ? (
@@ -3584,6 +3711,9 @@ function RecruitingWorkspace({
                     threadId,
                     roleTitle: workspace.role.title,
                     roleVersion: workspace.revision.revision,
+                    roleId: workspace.role.id,
+                    roleRevisionId: workspace.revision.id,
+                    candidateKey: selection.candidateKey,
                     name: selection.name,
                     title: selection.title,
                     company: selection.company,
@@ -3592,6 +3722,16 @@ function RecruitingWorkspace({
                   }}
                   onSend={onCandidateFeedback}
                   recipients={candidateFeedbackRecipients}
+                  onAccessError={denyAccess}
+                  onRecorded={() => setFeedbackRefresh((value) => value + 1)}
+                />
+              ) : null}
+              {workspace ? (
+                <FeedbackHistory
+                  key={`feedback:${workspace.role.id}:${selection.candidateKey}`}
+                  roleId={workspace.role.id}
+                  candidateKey={selection.candidateKey}
+                  refreshSignal={(refreshSignal ?? 0) + feedbackRefresh}
                   onAccessError={denyAccess}
                 />
               ) : null}

@@ -511,9 +511,8 @@ describe("recruiting contracts", () => {
       {
         ...scoped,
         target: "candidate",
-        operation: "fact",
-        candidateKey: "candidate-1",
-        expectedAssessmentVersion: 0,
+        operation: "review",
+        candidateKeys: ["candidate-1", "candidate-2", "candidate-3"],
       },
     ];
     expect(contracts.RecruitingHumanIntentSchema?.safeParse(intent).success).toBe(true);
@@ -1500,6 +1499,12 @@ describe("candidate index contracts", () => {
       issues: ["historical_schema_unknown"],
     };
     expect(contracts.RecruitingCandidateProfileSchema.parse(unknown)).toEqual(unknown);
+  });
+  it.each(["rank", "tier"])("accepts native provider %s candidate ordering", (sort) => {
+    expect(contracts.ListRecruitingCandidatesInput.parse({ roleId: "role", sort })).toEqual({
+      roleId: "role",
+      sort,
+    });
   });
   it("validates paginated candidates and independent shortlist intent", () => {
     expect(

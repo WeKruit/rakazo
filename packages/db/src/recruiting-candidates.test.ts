@@ -177,6 +177,110 @@ describe("candidate listing and shortlist boundaries", () => {
       expect(f.tx.$queryRaw).toHaveBeenCalledTimes(2);
     },
   );
+  it.each(["rank", "tier"] as const)(
+    "paginates native %s values numerically with unknowns last and scoped cursors",
+    async (sort) => {
+      const f = fixture();
+      const row = (key: string, sortValue: string) => ({
+        roleId: "role",
+        candidateKey: key,
+        name: key,
+        title: null,
+        company: null,
+        location: null,
+        linkedinUrl: null,
+        resumeUrl: null,
+        evidenceUrls: null,
+        issues: [],
+        shortlisted: false,
+        revision: 0,
+        discoveryCount: 1,
+        profileSourcePageIds: [],
+        firstDiscoveredAt: null,
+        lastDiscoveredAt: null,
+        assessmentVersion: null,
+        assessmentRoleRevisionId: null,
+        assessmentCreatedAt: null,
+        hardGate: null,
+        sortValue,
+        matchValue: sortValue ? Number(sortValue) : null,
+      });
+      const counts = [
+        {
+          total: 3n,
+          sourceRows: 3n,
+          candidates: 3n,
+          identifiedCandidates: 0n,
+          unassessed: 3n,
+          assessed: 0n,
+          shortlisted: 0n,
+        },
+      ];
+      f.tx.$queryRaw
+        .mockResolvedValueOnce(counts)
+        .mockResolvedValueOnce([row("a", "2"), row("b", "10")]);
+      const first = await recruiting.listRecruitingCandidates(f.prisma, actor, {
+        roleId: "role",
+        sort,
+        limit: 1,
+      });
+      expect(first.items[0]?.candidateKey).toBe("a");
+      expect(first.items[0]).not.toHaveProperty("matchValue");
+      const firstQuery = f.tx.$queryRaw.mock.lastCall![0] as { sql: string; values: unknown[] };
+      expect(firstQuery.sql).toContain(
+        'ORDER BY "matchValue" ASC NULLS LAST, "candidateKey" COLLATE "C" ASC',
+      );
+      expect(firstQuery.values).toContain(sort === "rank" ? "updated_rank" : "match_tier");
+      expect(firstQuery.sql).toContain('SELECT match."pageId"');
+      const decoded = JSON.parse(Buffer.from(first.nextCursor!, "base64url").toString("utf8"));
+      for (const value of [
+        "-1",
+        "1.5",
+        "NaN",
+        "1e3",
+        "9007199254740992",
+        ...(sort === "tier" ? ["4"] : ["0"]),
+      ]) {
+        const invalid = Buffer.from(JSON.stringify({ ...decoded, value })).toString("base64url");
+        await expect(
+          recruiting.listRecruitingCandidates(f.prisma, actor, {
+            roleId: "role",
+            sort,
+            cursor: invalid,
+          }),
+        ).rejects.toThrow(recruiting.RecruitingConflictError);
+      }
+      expect(f.tx.$queryRaw).toHaveBeenCalledTimes(2);
+      f.tx.$queryRaw
+        .mockResolvedValueOnce(counts)
+        .mockResolvedValueOnce([row("b", ""), row("c", "")]);
+      const unknown = await recruiting.listRecruitingCandidates(f.prisma, actor, {
+        roleId: "role",
+        sort,
+        limit: 1,
+        cursor: first.nextCursor!,
+      });
+      const nextQuery = f.tx.$queryRaw.mock.lastCall![0] as { sql: string; values: unknown[] };
+      expect(nextQuery.sql).toContain('"matchValue" IS NULL OR');
+      expect(nextQuery.sql).toContain("::numeric");
+      f.tx.$queryRaw.mockResolvedValueOnce(counts).mockResolvedValueOnce([row("c", "")]);
+      await recruiting.listRecruitingCandidates(f.prisma, actor, {
+        roleId: "role",
+        sort,
+        limit: 1,
+        cursor: unknown.nextCursor!,
+      });
+      const lastQuery = f.tx.$queryRaw.mock.lastCall![0] as { sql: string; values: unknown[] };
+      expect(lastQuery.sql).toContain('"matchValue" IS NULL AND "candidateKey" >');
+      await expect(
+        recruiting.listRecruitingCandidates(f.prisma, actor, {
+          roleId: "role",
+          sort: sort === "rank" ? "tier" : "rank",
+          cursor: first.nextCursor!,
+        }),
+      ).rejects.toThrow(recruiting.RecruitingConflictError);
+    },
+  );
   it.each([{ actionId: "action" }, { actionId: "action", sourceEffectId: "native-read" }])(
     "intersects source and action membership without changing the action predicate: %j",
     async (filters) => {
@@ -2542,9 +2646,13 @@ describe("native candidate source provenance", () => {
     });
     expect(f.tx.recruitingResearchAction.findFirst).not.toHaveBeenCalled();
   });
-  it.each(["valid", "foreign-actor", "artifact-hash"])(
-    "binds the bounded candidate page to its validated latest source at the %s boundary",
-    async (boundary) => {
+  it.each(
+    ["valid", "foreign-actor", "artifact-hash"].flatMap((boundary) =>
+      (["name", "rank", "tier"] as const).map((sort) => ({ boundary, sort })),
+    ),
+  )(
+    "binds the bounded candidate page to its validated latest source at $boundary for $sort",
+    async ({ boundary, sort }) => {
       const f = await nativeSourceFixture();
       f.role.crmBindingEffectId = null;
       const { page: _page, pageId, rowIndex, ...profile } = f.occurrence;
@@ -2587,7 +2695,7 @@ describe("native candidate source provenance", () => {
       const result = recruiting.listRecruitingCandidates(
         prisma,
         boundary === "foreign-actor" ? { ...actor, userId: "other" } : actor,
-        { roleId: "role", limit: 1 },
+        { roleId: "role", limit: 1, sort },
       );
       if (boundary !== "valid") {
         await expect(result).rejects.toThrow(IsolationError);

@@ -30,6 +30,7 @@ import {
 import type { RecruitingQuestionPauseContext } from "./recruiting.js";
 import {
   authorizeRecruitingApprovalAnswerInTransaction,
+  authorizeRecruitingFeedbackMessage,
   authorizeRecruitingQuestionAnswerInTransaction,
   commitRecruitingQuestionInTransaction,
   prepareRecruitingQuestionInTransaction,
@@ -532,6 +533,16 @@ export async function sendUserMessage(
         blocks: input.blocks,
         clientNonce: input.clientNonce,
       });
+      for (const block of input.blocks) {
+        if (block.kind !== "text" || !block.recruitingFeedback) continue;
+        if (input.trigger !== "follow_up") throw new IsolationError();
+        await authorizeRecruitingFeedbackMessage(
+          tx,
+          { spaceId: input.spaceId, userId: input.userId, email: "", isDeploymentOwner: false },
+          input.threadId,
+          block.recruitingFeedback,
+        );
+      }
       const createRun = input.createRun !== false;
       // Include the creation intro. It has no tools, so it must not absorb the message, and a
       // second run would overlap it on a dedicated computer. Pending steering waits for the

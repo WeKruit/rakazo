@@ -7,11 +7,12 @@ import { loadRecruitingRunContext } from "./recruiting-context.js";
 import { buildRecruitingResearchRequest } from "./recruiting-research.js";
 import { executeRecruitingRoleTool } from "./recruiting-tools.js";
 
-const db = vi.hoisted(() => ({ workspace: vi.fn(), adopt: vi.fn() }));
+const db = vi.hoisted(() => ({ workspace: vi.fn(), adopt: vi.fn(), feedback: vi.fn() }));
 vi.mock("@rakazo/db", async (original) => ({
   ...(await original<object>()),
   getRecruitingWorkspace: db.workspace,
   recordRecruitingContextAdoption: db.adopt,
+  listRecruitingFeedback: db.feedback,
 }));
 
 const run = { id: "run", spaceId: "space", userId: "owner", botId: "bot", threadId: "thread" };
@@ -99,6 +100,45 @@ describe("recruiting run context", () => {
   beforeEach(() => {
     vi.clearAllMocks();
     db.workspace.mockResolvedValue(workspace);
+    db.feedback.mockResolvedValue({ feedback: [], nextCursor: null });
+  });
+
+  it("adopts bounded durable human feedback with the role context after restart", async () => {
+    const { deps } = fixture();
+    const feedback = [
+      {
+        id: "feedback",
+        source: { quote: "Use Example Candidate as a positive example" },
+        feedback: { target: "candidate", candidateKeys: ["candidate"] },
+      },
+    ];
+    db.feedback.mockResolvedValueOnce({ feedback, nextCursor: "older-feedback" });
+    const loaded = await loadRecruitingRunContext(deps, run, { documents: [] }, context, {
+      reason: "restart",
+    });
+    expect(db.feedback).toHaveBeenCalledWith(
+      deps.prisma,
+      expect.objectContaining({ userId: run.userId }),
+      { roleId: workspace.role.id, limit: 20 },
+    );
+    expect(loaded!.text).toContain(JSON.stringify(feedback));
+    expect(loaded!.text).toContain("same originating research task");
+    expect(loaded!.manifest.text).toContain(JSON.stringify(feedback));
+  });
+
+  it("bounds adopted feedback and points to its original source when a receipt exceeds the budget", async () => {
+    const { deps } = fixture();
+    const quote = "human feedback ".repeat(1500);
+    db.feedback.mockResolvedValueOnce({
+      feedback: [{ source: { quote, anchor: { kind: "message", messageId: "oversize-source" } } }],
+      nextCursor: null,
+    });
+    const loaded = await loadRecruitingRunContext(deps, run, { documents: [] }, context, {
+      reason: "restart",
+    });
+    expect(loaded!.text).not.toContain(quote);
+    expect(loaded!.text).toContain("omits further saved feedback");
+    expect(loaded!.text).toContain("oversize-source");
   });
 
   it.each([

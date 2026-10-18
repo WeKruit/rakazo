@@ -29,6 +29,7 @@ vi.mock("@rakazo/db", async (importOriginal) => {
     getRecruitingWorkspace: vi.fn(),
     reviseRecruitingRole: vi.fn(),
     listRecruitingAssessments: vi.fn(),
+    listRecruitingFeedback: vi.fn(),
     getRecruitingAssessment: vi.fn(),
     listRecruitingResearch: vi.fn(),
     listRecruitingCandidates: vi.fn(),
@@ -43,6 +44,25 @@ const actor: Actor = {
   email: "owner@example.test",
   isDeploymentOwner: false,
 };
+
+it("reads feedback through the owned role boundary and rejects unauthenticated requests", async () => {
+  const client = createRouterClient(createRouter({ prisma } as RouterDeps), { context: { actor } });
+  vi.mocked(db.listRecruitingFeedback).mockResolvedValueOnce({ feedback: [], nextCursor: null });
+  expect(
+    await client.recruiting.listFeedback({ roleId: "role", candidateKey: "candidate", limit: 5 }),
+  ).toEqual({ feedback: [], nextCursor: null });
+  expect(db.listRecruitingFeedback).toHaveBeenCalledWith(prisma, actor, {
+    roleId: "role",
+    candidateKey: "candidate",
+    limit: 5,
+  });
+  const unauthenticated = createRouterClient(createRouter({ prisma } as RouterDeps), {
+    context: { actor: null },
+  });
+  await expect(unauthenticated.recruiting.listFeedback({ roleId: "role" })).rejects.toMatchObject({
+    code: "UNAUTHORIZED",
+  });
+});
 
 describe("readable recruiting sources", () => {
   const text = "Original 🧭 candidate evidence\nSecond line";
@@ -1011,6 +1031,26 @@ describe("retained candidate report API", () => {
     expect(result.items[0]?.report?.fields[0]?.value).toBe("Selected Person");
     expect(db.listRecruitingResearch).not.toHaveBeenCalled();
   });
+  it.each([false, true])(
+    "parses a shared saved page once across its candidate rows (%s)",
+    async (legacy) => {
+      const f = fixture(legacy);
+      f.page.items.push({ ...f.occurrence, rowIndex: 1 });
+      const parse = vi.spyOn(JSON, "parse");
+      try {
+        const result = await api.listRecruitingCandidateSources(f.deps, actor, input);
+        expect(result.items.map((item) => item.report?.fields[0]?.value)).toEqual([
+          "Selected Person",
+          "Neighbor Person",
+        ]);
+        expect(parse.mock.calls.filter(([text]) => text === f.bytes.toString("utf8"))).toHaveLength(
+          1,
+        );
+      } finally {
+        parse.mockRestore();
+      }
+    },
+  );
   it("reads a shared artifact once for multiple selected occurrences", async () => {
     const f = fixture();
     f.page.items.push({ ...f.occurrence });

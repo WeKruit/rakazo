@@ -821,13 +821,49 @@ export const RecruitingFeedbackInputSchema = z.discriminatedUnion("target", [
   z.strictObject({
     ...ScopedFeedback,
     target: z.literal("candidate"),
-    operation: z.literal("fact"),
-    candidateKey: RecruitingId,
-    expectedAssessmentVersion: z.number().int().nonnegative(),
+    operation: z.literal("review"),
+    candidateKeys: z
+      .array(RecruitingId)
+      .min(1)
+      .refine((keys) => new Set(keys).size === keys.length, "Candidate keys must be unique"),
   }),
   RecruitingPreferenceFeedbackSchema,
 ]);
 export type RecruitingFeedbackInput = z.infer<typeof RecruitingFeedbackInputSchema>;
+
+export const RecruitingFeedbackChoiceSchema = z.enum(["good_example", "not_fit", "skip"]);
+export const RecruitingCandidateFeedbackSelectionSchema = z.strictObject({
+  roleId: RecruitingId,
+  roleRevisionId: RecruitingId,
+  expectedRoleRevision: Revision,
+  candidateKeys: z
+    .array(RecruitingId)
+    .min(1)
+    .refine((keys) => new Set(keys).size === keys.length, "Candidate keys must be unique"),
+  choice: RecruitingFeedbackChoiceSchema,
+});
+export type RecruitingCandidateFeedbackSelection = z.infer<
+  typeof RecruitingCandidateFeedbackSelectionSchema
+>;
+export const RecruitingFeedbackRecordSchema = z.strictObject({
+  id: RecruitingId,
+  createdAt: IsoDate,
+  roleRevisionId: RecruitingId,
+  feedback: RecruitingFeedbackInputSchema,
+  source: RecruitingSourceRefSchema,
+  choice: RecruitingFeedbackChoiceSchema.optional(),
+});
+export type RecruitingFeedbackRecord = z.infer<typeof RecruitingFeedbackRecordSchema>;
+export const ListRecruitingFeedbackInput = z.strictObject({
+  roleId: RecruitingId,
+  candidateKey: RecruitingId.optional(),
+  limit: z.number().int().min(1).max(50).default(20),
+  before: RecruitingId.optional(),
+});
+export const ListRecruitingFeedbackOutput = z.strictObject({
+  feedback: z.array(RecruitingFeedbackRecordSchema),
+  nextCursor: RecruitingId.nullable(),
+});
 
 const RoleToolDefinition = {
   ...RoleDefinition,
@@ -1004,7 +1040,7 @@ export const ListRecruitingCandidatesInput = z.strictObject({
   shortlisted: z.boolean().optional(),
   actionId: RecruitingId.optional(),
   sourceEffectId: RecruitingId.optional(),
-  sort: z.enum(["name", "recent"]).optional(),
+  sort: z.enum(["name", "recent", "rank", "tier"]).optional(),
 });
 export type ListRecruitingCandidatesInput = z.infer<typeof ListRecruitingCandidatesInput>;
 /** Recruiter-readable projection of one exact retained provider row, never qualification. */

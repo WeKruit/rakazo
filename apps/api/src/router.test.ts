@@ -3655,9 +3655,31 @@ describe("threads.followUp", () => {
     let lockTail = Promise.resolve();
     const waitingRun = { id: "run-1", status: "waiting_input" };
     const tx = {
-      thread: { update: vi.fn().mockResolvedValue({ nextMessageSeq: 2, nextEventSeq: 2 }) },
+      thread: {
+        update: vi.fn().mockResolvedValue({ nextMessageSeq: 2, nextEventSeq: 2 }),
+        findFirst: vi.fn(async () => ({
+          id: "thread-1",
+          spaceId: "space-1",
+          userId: "user-1",
+          groupId: "group-1",
+          activeRecruitingRoleId: "role-1",
+        })),
+      },
+      recruitingRole: {
+        findFirst: vi.fn(async () => ({
+          id: "role-1",
+          sourceThreadId: "thread-1",
+          spaceId: "space-1",
+          userId: "user-1",
+          revision: 1,
+          currentRevisionId: "revision-1",
+        })),
+      },
+      recruitingCandidate: { findMany: vi.fn(async () => [{ candidateKey: "candidate-1" }]) },
       chatGroup: {
         findFirst: vi.fn().mockResolvedValue({
+          spaceId: "space-1",
+          userId: "user-1",
           members: memberBotIds.map((botId) => ({
             botId,
             bot: { id: botId, name: botId === "bot-1" ? "Main" : "Sourcer" },
@@ -3725,6 +3747,7 @@ describe("threads.followUp", () => {
           return await callback({
             ...tx,
             $queryRaw: async (...args: unknown[]) => {
+              if (!Array.isArray(args[0])) return [{ id: "role-1" }];
               // Model the row lock, not the whole transaction: pre-lock reads can race.
               const previous = lockTail;
               lockTail = new Promise<void>((resolve) => {
@@ -3781,6 +3804,31 @@ describe("threads.followUp", () => {
         ),
     };
   }
+
+  it.each(["bot", "group"] as const)(
+    "persists authored feedback metadata through the existing %s follow-up",
+    async (kind) => {
+      const f = fixture();
+      const recruitingFeedback = {
+        roleId: "role-1",
+        roleRevisionId: "revision-1",
+        expectedRoleRevision: 1,
+        candidateKeys: ["candidate-1"],
+        choice: "not_fit",
+      };
+      const { response } = await f.call({
+        ...(kind === "bot" ? { botId: "bot-1" } : {}),
+        recruitingFeedback,
+      });
+      expect(response.status).toBe(200);
+      const call =
+        kind === "bot"
+          ? f.sendUserMessage.mock.calls[0]![0]
+          : f.tx.message.create.mock.calls[0]![0].data;
+      expect(call.blocks).toEqual([{ kind: "text", text, recruitingFeedback }]);
+      if (kind === "group") expect(f.tx.recruitingCandidate.findMany).toHaveBeenCalledOnce();
+    },
+  );
 
   it("routes explicit feedback to idle Sourcer while Main keeps its pending ask", async () => {
     const { call, tx, waitingRun, enqueue } = fixture({ active: true });

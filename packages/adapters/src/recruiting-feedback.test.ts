@@ -150,26 +150,20 @@ describe("recruiting feedback", () => {
     expect(f.commit).not.toHaveBeenCalled();
   });
 
-  it.each([
-    ["role", "revise", "recruiting_role"],
-    ["candidate", "fact", "recruiting_assess"],
-  ] as const)("keeps %s feedback as a scoped proposal", async (target, operation, nextTool) => {
+  it("keeps role feedback as a scoped proposal", async () => {
     const f = fixture();
     const input = {
-      target,
-      operation,
+      target: "role",
+      operation: "revise",
       roleId: "role",
       expectedRoleRevision: 1,
       summary: "Scoped feedback",
       intent,
       sourceRefs: [],
-      ...(target === "candidate"
-        ? { candidateKey: "candidate", expectedAssessmentVersion: 0 }
-        : {}),
     };
     expect(await executeRecruitingFeedback(f.deps, trusted, input, context)).toMatchObject({
       status: "proposed",
-      nextTool,
+      nextTool: "recruiting_role",
       feedback: input,
       source,
     });
@@ -182,7 +176,7 @@ describe("recruiting feedback", () => {
     expect(f.commit).not.toHaveBeenCalled();
   });
 
-  it("keeps round feedback a proposal without forcing a saved-workspace research action", async () => {
+  it("records round feedback for the native receipt without forcing a research action", async () => {
     const f = fixture();
     const roundIntent = {
       basis: "direct",
@@ -205,7 +199,7 @@ describe("recruiting feedback", () => {
       sourceRefs: [],
     };
     expect(await executeRecruitingFeedback(f.deps, trusted, input, context)).toEqual({
-      status: "proposed",
+      status: "recorded",
       feedback: input,
       source: humanSource,
       workspace,
@@ -221,6 +215,36 @@ describe("recruiting feedback", () => {
     expect(f.read).not.toHaveBeenCalled();
     expect(f.commit).not.toHaveBeenCalled();
   });
+
+  it.each([["candidate"], ["candidate", "second", "third"]])(
+    "records exactly the selected candidate subset %j without local assessment or memory",
+    async (...candidateKeys) => {
+      const f = fixture();
+      const input = {
+        target: "candidate",
+        operation: "review",
+        roleId: "role",
+        expectedRoleRevision: 1,
+        candidateKeys,
+        summary: "Prefer this experience in the next search",
+        intent,
+        sourceRefs: [],
+      };
+      expect(await executeRecruitingFeedback(f.deps, trusted, input, context)).toEqual({
+        feedback: input,
+        source,
+        workspace,
+        status: "recorded",
+      });
+      expect(db.readContext).toHaveBeenCalledWith(
+        f.deps.prisma,
+        actor,
+        expect.objectContaining({ candidateKeys }),
+      );
+      expect(f.read).not.toHaveBeenCalled();
+      expect(f.commit).not.toHaveBeenCalled();
+    },
+  );
 
   it("revokes the last exact preference as an empty native revision", async () => {
     const f = fixture("old");
