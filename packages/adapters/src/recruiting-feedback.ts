@@ -120,7 +120,7 @@ export async function executeRecruitingFeedback(
   }
   if (expected && expected.content !== edited.content)
     throw new RecruitingFeedbackValidationError(
-      "Memory content does not match the recruiting preference edit",
+      'Memory content does not match the recruiting preference edit. Nothing was written. Use recruiting_feedback with target:"preference", the loaded scope, path and expectedRevision, and the full exact edit: add appends content; replace changes only its exact anchor; revoke removes only that anchor. Do not substitute a summary for content. Correct and resubmit only the originally authorized edit; required approvals still apply.',
     );
   context.signal.throwIfAborted();
   const saved = await deps.memory.commit(

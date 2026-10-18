@@ -583,13 +583,13 @@ export const builtinAgentTools: ConnectorTool[] = [
   {
     name: "recruiting_feedback",
     description:
-      "Classify human recruiting feedback as role requirements, this round's recall scope, candidate facts, or reusable preferences. Role and candidate feedback records a proposal for its matching tool. Round feedback records a proposal for continuation through the connected research agent's native MCP reply on the same existing provider task; recover its reference from authorized history or original receipts, never ask the user for internal IDs. Ordinary continuation does not require a saved-workspace action. After returned candidate results, recruiting_research save_results is optional. This tool never performs a search or turns round-only feedback into memory. Use direct human wording and its exact quote; inferred or ambiguous intent needs ask_user. Only explicit reusable preferences edit native memory. Read the native document revision first; replace/revoke requires the exact UTF-16 span and quote and preserves all other text. User scope is this user's bots in this Space, not the organization.",
+      'Classify human recruiting feedback as role requirements, this round\'s recall scope, candidate facts, or reusable preferences. Role and candidate feedback records a proposal for its matching tool. Round feedback records a proposal for continuation through the connected research agent\'s native MCP reply on the same existing provider task; recover its reference from authorized history or original receipts, never ask the user for internal IDs. Ordinary continuation does not require a saved-workspace action. After returned candidate results, recruiting_research save_results is optional. This tool never performs a search or turns round-only feedback into memory. Use direct human wording and its exact quote; inferred or ambiguous intent needs ask_user. For explicit reusable recruiting preferences, prefer one recruiting_feedback call with target:"preference". Read the native document with read_memory first and use its scope, path and expectedRevision, or revision 0 for a new document. operation:"add" appends the full exact preference text in content, separated from existing text by two newlines; never substitute a summary. operation:"replace" replaces only the anchored span with content; operation:"revoke" removes only that span. Both require the loaded exact UTF-16 span and quote in anchor and preserve all other text. User scope is this user\'s bots in this Space, not the organization. Correct deterministic pre-write validation errors using the loaded document and actual error, then resubmit only the originally authorized edit; required approvals still apply. Inspect the original receipt before retrying an unknown write outcome.',
     inputSchema: z.toJSONSchema(RecruitingFeedbackInputSchema, { io: "input" }),
   },
   {
     name: "remember",
     description:
-      "Replace this bot's native memory document. Read it with read_memory first and preserve other facts. Use the loaded expectedRevision, or 0 for a new document. Recruiting preferences require recruitingFeedback with an exact edit; role requirements, single-round scope and candidate facts belong in recruiting_feedback.",
+      'Replace this bot\'s native memory document. Read it with read_memory first and preserve other facts. Use the loaded expectedRevision, or 0 for a new document. For reusable recruiting preferences, prefer one recruiting_feedback call with target:"preference". If using recruitingFeedback here, top-level content must be the complete resulting native document; recruitingFeedback.content is the full exact text added or replacing an anchored span, never a summary. Both must match the same edit. Role requirements, single-round scope and candidate facts belong in recruiting_feedback.',
     inputSchema: {
       type: "object",
       properties: {
@@ -604,7 +604,7 @@ export const builtinAgentTools: ConnectorTool[] = [
   {
     name: "save_shared_memory",
     description:
-      "Replace a native memory document shared across this user's bots in this Space. Read it with read_memory first and preserve other facts. Use the loaded expectedRevision, or 0 for a new document. Recruiting preferences require recruitingFeedback with an exact edit; other recruiting feedback belongs in recruiting_feedback.",
+      'Replace a native memory document shared across this user\'s bots in this Space. Read it with read_memory first and preserve other facts. Use the loaded expectedRevision, or 0 for a new document. For reusable recruiting preferences, prefer one recruiting_feedback call with target:"preference". If using recruitingFeedback here, top-level content must be the complete resulting native document; recruitingFeedback.content is the full exact text added or replacing an anchored span, never a summary. Both must match the same edit. Other recruiting feedback belongs in recruiting_feedback.',
     inputSchema: {
       type: "object",
       properties: {
@@ -779,7 +779,7 @@ export const builtinAgentTools: ConnectorTool[] = [
   {
     name: "save_memory",
     description:
-      "Store a durable fact in this bot's semantic memory (preferences, decisions, recurring context). Recruiting preferences require recruitingFeedback with a native document revision and exact edit; they are saved only in native memory. Other recruiting feedback belongs in recruiting_feedback.",
+      'Store a durable fact in this bot\'s semantic memory (preferences, decisions, recurring context). For reusable recruiting preferences, prefer one recruiting_feedback call with target:"preference". If using recruitingFeedback here, read the native document with read_memory first and supply its scope, path and expectedRevision in recruitingFeedback (0 for a new document). These preferences are saved only in native memory: top-level content must be the complete resulting native document; recruitingFeedback.content is the full exact text added or replacing an anchored span, never a summary. Both must match the same edit. Other recruiting feedback belongs in recruiting_feedback.',
     inputSchema: {
       type: "object",
       properties: {

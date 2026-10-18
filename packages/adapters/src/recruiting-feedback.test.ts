@@ -271,6 +271,48 @@ describe("recruiting feedback", () => {
     expect(f.commit).toHaveBeenCalledOnce();
   });
 
+  it("explains a pre-write summary mismatch and accepts the corrected exact preference edit", async () => {
+    const f = fixture();
+    const content =
+      "# Recruiting preferences\n\n- Show the complete prompt.\n- Preserve source references.";
+    const expectedMemory = {
+      scope: preference.scope,
+      path: preference.path,
+      expectedRevision: preference.expectedRevision,
+      content: `keep this preference\n\n${content}`,
+    };
+    await expect(
+      executeRecruitingFeedback(f.deps, trusted, preference, context, { expectedMemory }),
+    ).rejects.toMatchObject({
+      name: "RecruitingFeedbackValidationError",
+      message: expect.stringContaining(
+        'Nothing was written. Use recruiting_feedback with target:"preference"',
+      ),
+    });
+    expect(f.commit).not.toHaveBeenCalled();
+
+    const corrected = { ...preference, content };
+    await executeRecruitingFeedback(f.deps, trusted, corrected, context);
+    expect(f.commit).toHaveBeenCalledExactlyOnceWith(
+      expect.objectContaining({
+        scope: expectedMemory.scope,
+        path: expectedMemory.path,
+        expectedRevision: expectedMemory.expectedRevision,
+        content: expectedMemory.content,
+        sourceRunId: trusted.runId,
+        sourceThreadId: "actual-run-thread",
+        recruiting: { sourceMessageId: trusted.sourceMessageId, feedback: corrected },
+      }),
+      context,
+    );
+    expect(db.readContext).toHaveBeenLastCalledWith(f.deps.prisma, actor, {
+      runId: trusted.runId,
+      sourceMessageId: trusted.sourceMessageId,
+      intent: preference.intent,
+      sourceRefs: preference.sourceRefs,
+    });
+  });
+
   it("rejects forged identity, unverified sources and mismatched adapter context before writing", async () => {
     const f = fixture();
     await expect(

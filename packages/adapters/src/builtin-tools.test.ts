@@ -75,4 +75,30 @@ describe("native recruiting approval tool", () => {
     expect(tool?.description).toContain("not a prerequisite");
     expect(tool?.description).toContain("linkedin_url");
   });
+
+  it("guides reusable preferences through one exact edit without confusing it with a full document", () => {
+    const feedback = builtinAgentTools.find((tool) => tool.name === "recruiting_feedback");
+    expect(feedback?.description).toContain(
+      'prefer one recruiting_feedback call with target:"preference"',
+    );
+    expect(feedback?.description).toContain(
+      'operation:"add" appends the full exact preference text',
+    );
+    expect(feedback?.description).toContain('operation:"replace" replaces only the anchored span');
+    expect(feedback?.description).toContain('operation:"revoke" removes only that span');
+    expect(feedback?.description).toContain("unknown write outcome");
+
+    for (const name of ["remember", "save_shared_memory", "save_memory"]) {
+      const tool = builtinAgentTools.find((entry) => entry.name === name);
+      expect(tool?.description).toContain(
+        'prefer one recruiting_feedback call with target:"preference"',
+      );
+      expect(tool?.description).toContain(
+        "top-level content must be the complete resulting native document",
+      );
+      expect(tool?.description).toContain(
+        "recruitingFeedback.content is the full exact text added or replacing an anchored span, never a summary",
+      );
+    }
+  });
 });
