@@ -766,6 +766,14 @@ export async function replaceComputer(
     },
   });
   if (claimed.count !== 1) throw new ComputerBusyError();
+  getLogger().info("computer.suspension.claimed", {
+    owner: "replace",
+    mode,
+    computerId,
+    claimStamp: claimStamp.toISOString(),
+    operationId: context.operationId,
+    runId: context.runId,
+  });
   const releaseClaim = () =>
     deps.prisma.computer.updateMany({
       where: { id: computerId, state: "suspending", updatedAt: claimStamp },

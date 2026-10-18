@@ -8,6 +8,7 @@ import type {
 import { computerSleepJob } from "@rakazo/adapter-kit";
 import { ACTIVE_RUN_STATUSES } from "@rakazo/core";
 import type { PrismaClient, ThreadEvents } from "@rakazo/db";
+import { getLogger } from "@rakazo/logging";
 import { expireComputerControl, hasActiveComputerControl } from "./computer-control.js";
 import { toComputerRef } from "./computer-lifecycle.js";
 import { checkpointComputerWorkspace } from "./computer-workspace.js";
@@ -246,6 +247,12 @@ export async function sleepComputerIfIdle(
     scheduleComputerSleep(deps.jobs, computerId);
     return;
   }
+  getLogger().info("computer.suspension.claimed", {
+    owner: "idle_sleep",
+    computerId,
+    claimStamp: checkpointedAt.toISOString(),
+    operationId: ctx.operationId,
+  });
   const suspensionClaim = {
     id: computerId,
     state: "suspending",
@@ -313,7 +320,15 @@ export async function sleepComputerIfIdle(
   }
 
   try {
+    getLogger().info("computer.idle.stop.begin", {
+      computerId,
+      claimStamp: checkpointedAt.toISOString(),
+    });
     await deps.sandbox.stop(ref, ctx);
+    getLogger().info("computer.idle.stop.complete", {
+      computerId,
+      claimStamp: checkpointedAt.toISOString(),
+    });
   } catch (error) {
     await deps.prisma.computer.updateMany({
       where: suspensionClaim,

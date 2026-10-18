@@ -2642,6 +2642,12 @@ export function createRouter(deps: RouterDeps) {
             message: "Other Team bots are still using this computer",
           });
         }
+        getLogger().info("computer.suspension.claimed", {
+          owner: "manual_stop",
+          computerId: bot.computer.id,
+          claimedAt: new Date().toISOString(),
+          operationId: "stop",
+        });
         const otherRun = await deps.prisma.run.findFirst({
           where: {
             botId: { not: bot.id },

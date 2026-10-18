@@ -285,10 +285,23 @@ export async function checkpointComputerWorkspace(
   }
   const staging = await mkdtemp(path.join(tmpdir(), "rakazo-workspace-"));
   try {
+    getLogger().info("computer.workspace.export.begin", {
+      operationId: context.operationId,
+      runId: context.runId,
+    });
     for await (const file of sandbox.exportWorkspace(computer, context)) {
       await writePortableFile(staging, file);
     }
-    return await home.commit(homeKey, staging, context);
+    getLogger().info("computer.workspace.export.complete", {
+      operationId: context.operationId,
+      runId: context.runId,
+    });
+    const revision = await home.commit(homeKey, staging, context);
+    getLogger().info("computer.workspace.commit.complete", {
+      operationId: context.operationId,
+      runId: context.runId,
+    });
+    return revision;
   } finally {
     await rm(staging, { recursive: true, force: true });
   }
@@ -329,6 +342,13 @@ export async function checkpointRunComputerWorkspace(
   });
   // The last finishing run or the already scheduled idle job will checkpoint the shared home.
   if (claimed.count !== 1) return undefined;
+  getLogger().info("computer.suspension.claimed", {
+    owner: "run_checkpoint",
+    computerId: computerRecord.id,
+    claimStamp: now.toISOString(),
+    operationId: context.operationId,
+    runId: context.runId,
+  });
   try {
     return await checkpointAndRecordComputerWorkspace(deps, computerRecord, computer, context);
   } finally {
