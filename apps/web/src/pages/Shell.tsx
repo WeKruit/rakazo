@@ -94,6 +94,7 @@ import {
   CircleAlert,
   Clock,
   Copy,
+  Download,
   FolderOpen,
   Gauge,
   LayoutGrid,
@@ -501,6 +502,7 @@ export function ShellPage() {
   const [sending, setSending] = useState(false);
   const sendingRef = useRef(false);
   const [sendError, setSendError] = useState<string | null>(null);
+  const [exportingConversation, setExportingConversation] = useState(false);
   const [attachmentNotice, setAttachmentNotice] = useState<string | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const [panel, setPanelState] = useState<Panel>(null);
@@ -3791,6 +3793,39 @@ export function ShellPage() {
             </button>
           </div>
           <div className="flex items-center gap-1">
+            {activeSnapshot?.threadId ? (
+              <button
+                type="button"
+                aria-label={t`Export conversation`}
+                title={t`Export conversation`}
+                disabled={exportingConversation}
+                aria-busy={exportingConversation}
+                className="app-no-drag grid h-[30px] w-[34px] place-items-center rounded-[9px] hover:bg-accent disabled:opacity-50"
+                onClick={async () => {
+                  const target = inGroup ? { groupId: groupId! } : { botId: active!.id };
+                  const title = inGroup
+                    ? (activeGroup?.name ?? activeSnapshot.groupName ?? t`Group`)
+                    : active!.name;
+                  setExportingConversation(true);
+                  try {
+                    const { downloadConversation } = await import("../lib/conversation-export");
+                    await downloadConversation({
+                      target,
+                      title,
+                      userName,
+                      locale: i18n.locale,
+                      agentName: (botId) => resolveTranscriptBot(botId ?? "")?.name ?? t`Agent`,
+                    });
+                  } catch (error) {
+                    setSendError(errorText(error, t`Could not export conversation`));
+                  } finally {
+                    setExportingConversation(false);
+                  }
+                }}
+              >
+                <Download size={18} strokeWidth={1.6} className="text-foreground/75" aria-hidden />
+              </button>
+            ) : null}
             {activeSnapshot?.threadId ? (
               <button
                 type="button"

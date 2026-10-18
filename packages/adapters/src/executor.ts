@@ -3210,6 +3210,14 @@ export function createRunExecutor(deps: ExecutorDeps) {
             select: { id: true },
           })
         : null;
+      if (routine.threadId && !targetThread) {
+        // A saved destination is part of the routine; losing it must not redirect the run.
+        await deps.prisma.routine.updateMany({
+          where: { id: routine.id, active: true, nextRunAt: scheduledAt },
+          data: { active: false, nextRunAt: null },
+        });
+        return;
+      }
       const thread = targetThread ?? bot.thread;
       // A schedule with no valid parseable cron among its crons (e.g. a
       // legacy row accepted before cron validation was added) fires the

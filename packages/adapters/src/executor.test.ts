@@ -1896,6 +1896,67 @@ describe("createRunExecutor", () => {
     );
   });
 
+  it("pauses a routine whose saved group is unavailable instead of falling back to the bot DM", async () => {
+    const scheduledAt = new Date(Date.now() - 1_000);
+    const pause = vi.fn(async () => ({ count: 1 }));
+    const enqueue = vi.fn(async () => undefined);
+    const taskCreate = vi.fn(async () => ({ id: "task-1" }));
+    const runCreate = vi.fn(async () => ({ id: "run-1" }));
+    const append = vi.fn(async () => undefined);
+    const transaction = vi.fn(async (callback: (tx: unknown) => Promise<unknown>) =>
+      callback({
+        routine: {
+          updateMany: vi.fn(async () => ({ count: 1 })),
+          findUnique: vi.fn(async () => ({
+            modelProvider: null,
+            modelId: null,
+            thinkingLevel: null,
+          })),
+        },
+        task: { create: taskCreate },
+        run: { create: runCreate },
+      }),
+    );
+    const prisma = {
+      routine: {
+        findUnique: vi.fn(async () => ({
+          id: "routine-1",
+          spaceId: "ws-1",
+          botId: "bot-1",
+          userId: "user-1",
+          prompt: "remind the group",
+          crons: [ONCE_ROUTINE_CRON],
+          timezone: "UTC",
+          active: true,
+          nextRunAt: scheduledAt,
+          threadId: "group-thread-1",
+        })),
+        updateMany: pause,
+      },
+      bot: { findUnique: vi.fn(async () => ({ id: "bot-1", thread: { id: "dm-thread-1" } })) },
+      thread: { findFirst: vi.fn(async () => null) },
+      agentSkill: { findMany: vi.fn(async () => []) },
+      $transaction: transaction,
+    } as unknown as PrismaClient;
+    const executor = createRunExecutor({
+      prisma,
+      jobs: { enqueue, cancel: vi.fn(async () => undefined), close: vi.fn(async () => undefined) },
+      events: { append },
+    } as unknown as Parameters<typeof createRunExecutor>[0]);
+
+    await executor.wakeRoutine("routine-1", scheduledAt.toISOString());
+
+    expect(pause).toHaveBeenCalledWith({
+      where: { id: "routine-1", active: true, nextRunAt: scheduledAt },
+      data: { active: false, nextRunAt: null },
+    });
+    expect(transaction).not.toHaveBeenCalled();
+    expect(taskCreate).not.toHaveBeenCalled();
+    expect(runCreate).not.toHaveBeenCalled();
+    expect(enqueue).not.toHaveBeenCalled();
+    expect(append).not.toHaveBeenCalled();
+  });
+
   it("wakes a tool-created 1:1 routine into the bot DM thread", async () => {
     const scheduledAt = new Date(Date.now() - 1_000);
     const taskCreate = vi.fn(async () => ({ id: "task-1" }));
