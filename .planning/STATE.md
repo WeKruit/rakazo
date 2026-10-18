@@ -1,28 +1,36 @@
 # Project State
 
 ## Project Reference
+
 See [GOAL](../docs/wekruit/GOAL.md), [PLAN](../docs/wekruit/PLAN.md), and [PRODUCT-SCOPE](../docs/wekruit/PRODUCT-SCOPE.md). They remain authoritative; this file is an execution cursor.
 
 ## Current Position
+
 Phase: 1 of 5 (Real sourcing and recruiting UI)
-Plan: Existing sourcing priority in PLAN.md; three independent workstreams active.
+Plan: Existing sourcing priority in PLAN.md; real feedback, UI and bounded benchmark observations are recorded.
 Status: In progress
-Last activity: Production remains v70. A fresh connected Autumn task returned and saved two actual profiles with numeric match scores, reasons, gaps and sources; Sourcer delivered the final native web reply. Main's native memory write and clean-conversation recall passed. Same-task feedback/output-variation acceptance is in progress, not passed. No new fictional acceptance conversations.
+Last activity: Production v74 / 99326a89 is healthy. Two real same-task sourcing continuations completed autonomously: five evidence updates, then three unseen people. The role now has 38 people / 63 sources. Actual provider tiers, unknowns and failed comparison attempts remain explicit. No new fictional acceptance conversations.
 
 ## Active Work
-- Live: actual original Autumn research returned one result and saved it into the existing candidate. Thirty people / forty-six source occurrences survived deployment unchanged; the later context failure remains open.
-- Liaison: native Main/Sourcer instructions and three existing shared skills now assign research/evaluation/ranking to Autumn. Read-only hashes verified the intended text and two untouched skills; native YAML description quoting is recorded. The fresh format run completed, but an earlier run continued older research before failing compaction; retain that failure rather than claiming every task stayed unchanged.
-- Feedback/cost: PeopleSearchBench is a static quality reference, separate from real same-task feedback acceptance. Preserve complete output outside model context and load only feedback-relevant material. Current primary-source Jev/large-file research and the paired-test decision are recorded without installing another harness or claiming savings.
-- UI: deployed exact role prose, material unknowns and readable criteria grouping. Real report inspection found an annotated multi-URL link-projection defect; a minimal shared fix is in progress.
-- UI acceptance gap: the fresh group's Recruiting panel showed a load error; its failing RPC is not identified. Native chat results are visible, but this is not complete Dashboard acceptance.
-- Automation: deployed Crew-bound manual routine destination validation using native group locking. No recurring task enabled; live scheduled handoff/recovery remains unaccepted.
+
+- Live: A single feedback reply on the existing Autumn task returned three distinct new people, saved all three rows and finished with a normal final table, without steering or research retries. Provider outcome was complete; all three remain possible and no numeric score was returned. The original role revision, questions and old source keys remain. The new three-person round and original source report survived a real web reload.
+- Context: Corrected byte/token mixing and unconditional 1KB tool cropping using existing Pi estimators and selection. Four shared source files, 223 focused checks, relevant types/format and independent review passed. The two fresh continuations used 17 and 22 answer calls respectively, with zero compaction or context error; the latter also recorded two retrieval calls. No fixed cost or speed improvement is claimed.
+- Recovery: 32 runtime hashes match the archive; final health/ready/Web were 200 and not degraded. Nineteen scoped datasets matched across v74 replacement: 119 runs, 304 messages, 379 effects, 109 migrations, 35 people and 55 sources. Subsequent real work adds three people and eight sources. No migration or old research replay.
+- Liaison: Existing Main instructions now assign initial human-authorized role creation/binding to Main before Sourcer delegation. A fresh real role retained only its three original requirements, started independent Autumn research and saved ten actual outputs. No DB bridge, source-admission weakening, permissions or second harness.
+- UI: Original latest score/tier appears in Cards/Table/details, with source evidence and history. People without a local assessment remain visible. Five-person feedback and new-search ten-person Role/Dashboard/Evidence/source views passed normal web reload; the newest three-person round and source report also survived reload. The original intermittent loading failure is not yet root-caused.
+- Benchmark: London direct returned ten, but wrapper read that task, invalidating comparison. Seattle used two fresh tasks after prospective isolation control: direct complete/ten rows; wrapper provider failed/ten partial rows retained, saved and relayed by the completed app run. Bounded public-source review is complete; blocked profiles and incomplete primary sources prevent a winner or official score. Input/output instructions differ and equal budgets were not enforceable. Earlier failures remain included.
+- Performance: Seattle relay used 30 answer calls and zero compaction, about 6m47s end to end. Post-save finalization latency remains a product gap; its cause is unconfirmed.
+- Memory and automation: One native memory write/clean-conversation recall passed. Jev/large-file research installed no extra harness and proves no general cost saving. The existing Crew-bound manual routine guard is deployed; recurring execution/recovery remains unaccepted and no recurrence was enabled.
 
 ## Decisions
-- Reuse Rakazo/Pi and Autumn's existing agent; no new harness, workflow DSL or search engine.
-- Product acceptance uses actual connected services and real role/results. Focused deterministic code checks do not count as business acceptance.
-- Preserve existing unanswered business cards and exact native approvals; development access does not supply missing business answers.
-- Existing resources and incremental budget remain; no automatic PR merge, unapproved production migration, access expansion or real outreach.
 
-## Blockers
-- Full first-round calibration still needs actual role decisions/confirmation; independent research, UI and routine development continue.
-- Full specialist workflows and all M1–M5 acceptance remain incomplete; see PLAN.md rather than a completion percentage.
+- Reuse Rakazo/Pi and Autumn's existing agent. No new harness, workflow DSL or local search/evaluation engine.
+- Product acceptance uses connected services, real roles and actual returned profiles. Deterministic code checks are implementation evidence only.
+- Preserve unanswered business cards and exact native approvals. Development access does not answer business decisions.
+- Keep the existing $150 incremental budget. No automatic PR merge, new resources/subscriptions, unapproved production migration, access expansion or outreach.
+
+## Remaining Gaps
+
+- One fresh comparison search ended with an Autumn error despite ten returned rows; completed delivery is not successful provider research. Earlier role-creation failures and the invalid London comparison remain recorded.
+- Formal first-round calibration still needs real role decisions and confirmation. Limited exploration and feedback continue without inventing those answers.
+- Full specialist workflows, all card/multi-user/routine recovery cases and M1–M5 remain incomplete. PLAN.md records the scope without a completion percentage.
