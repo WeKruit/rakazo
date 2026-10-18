@@ -2360,6 +2360,28 @@ export function serializeToolResult(
   args: Record<string, unknown>,
 ) {
   try {
+    if (
+      result &&
+      typeof result === "object" &&
+      Object.hasOwn(result, "structuredContent") &&
+      "structuredContent" in result &&
+      "content" in result &&
+      Array.isArray(result.content) &&
+      result.content.length === 1
+    ) {
+      const part = result.content[0];
+      if (
+        part?.type === "text" &&
+        typeof part.text === "string" &&
+        Object.keys(part).length === 2 &&
+        Object.hasOwn(part, "type") &&
+        Object.hasOwn(part, "text") &&
+        part.text === JSON.stringify(result.structuredContent)
+      ) {
+        const { content: _duplicateContent, ...envelope } = result;
+        result = envelope;
+      }
+    }
     const text = JSON.stringify(result);
     if (!text) return "ok";
     // skill-tools.ts already bounds skill content; the context budget selector may still shorten it.

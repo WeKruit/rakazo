@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { builtinAgentTools } from "./builtin-tools.js";
-import { describeToolActivity, parametersFor } from "./pi-runtime.js";
+import { describeToolActivity, parametersFor, serializeToolResult } from "./pi-runtime.js";
+import { TOOL_RESULT_TEXT_LIMIT } from "./pi-runtime-limits.js";
 
 it("requires a nonnegative native memory revision in Pi's tool schema", () => {
   const schema = parametersFor(builtinAgentTools.find((tool) => tool.name === "remember")!);
@@ -90,5 +91,62 @@ describe("describeToolActivity", () => {
 
   it("falls back to the tool name", () => {
     expect(describeToolActivity("destination_write", undefined)).toBe("Using destination_write");
+  });
+});
+
+describe("serializeToolResult", () => {
+  it.each(["current", "retrieval"] as const)(
+    "projects an exact duplicate MCP text payload once before the %s limit without changing the receipt",
+    (strategy) => {
+      const structuredContent = { data: { note: "x".repeat(6_500) } };
+      const content = [{ type: "text", text: JSON.stringify(structuredContent) }];
+      const result = Object.freeze({
+        content,
+        structuredContent,
+        isError: true,
+        _meta: { cursor: 2 },
+        extra: "retained",
+      });
+      expect(JSON.stringify(result).length).toBeGreaterThan(TOOL_RESULT_TEXT_LIMIT);
+
+      const serialized = serializeToolResult(result, strategy, "mcp__service__read", {});
+
+      expect(JSON.parse(serialized)).toEqual({
+        structuredContent,
+        isError: true,
+        _meta: { cursor: 2 },
+        extra: "retained",
+      });
+      expect(result.content).toBe(content);
+      expect(result.content[0]?.text).toBe(JSON.stringify(structuredContent));
+    },
+  );
+
+  const structuredContent = { value: "retained" };
+  const exact = { type: "text", text: JSON.stringify(structuredContent) };
+  it.each([
+    { structuredContent, content: [{ type: "text", text: '{ "value": "retained" }' }] },
+    { structuredContent, content: [exact, { type: "text", text: "another block" }] },
+    { structuredContent, content: [exact, { type: "image", data: "AA==", mimeType: "image/png" }] },
+    { structuredContent, content: [{ ...exact, annotations: { audience: ["user"] } }] },
+    { content: [exact], isError: false },
+    { structuredContent, content: "unknown content shape" },
+    "unknown result",
+  ])("preserves non-duplicate, multipart, annotated and unknown results: %j", (result) => {
+    expect(serializeToolResult(result, "current", "mcp__service__read", {})).toBe(
+      JSON.stringify(result),
+    );
+  });
+
+  it("still applies the existing limit when the deduplicated projection is too large", () => {
+    const structuredContent = { value: "x".repeat(TOOL_RESULT_TEXT_LIMIT) };
+    const result = {
+      structuredContent,
+      content: [{ type: "text", text: JSON.stringify(structuredContent) }],
+    };
+    const projected = JSON.stringify({ structuredContent });
+    expect(serializeToolResult(result, "current", "mcp__service__read", {})).toBe(
+      `${projected.slice(0, TOOL_RESULT_TEXT_LIMIT)}…`,
+    );
   });
 });
