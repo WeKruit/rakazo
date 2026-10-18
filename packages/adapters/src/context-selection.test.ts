@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import {
   ContextBudgetError,
   ContextCacheTracker,
@@ -245,6 +245,44 @@ describe("bounded context selection", () => {
       needsRetry: true,
       retry: { messageId: "anchor", limit: 1 },
     });
+  });
+  it("keeps escaped structured cropping exact without reencoding the whole result per leaf", () => {
+    const text = 'a😀\n"\\\t'.repeat(60);
+    const payload = {
+      task_id: "exact-task",
+      next_cursor: 'opaque:"\\😀',
+      rows: Array.from({ length: 200 }, (_, index) => ({
+        id: `row-${index}`,
+        name: `Item ${index}`,
+        evidence: text,
+      })),
+      output_id: "exact-output",
+    };
+    const source = JSON.stringify(payload);
+    const encode = vi.spyOn(JSON, "stringify");
+    let result: string;
+    let wholeEncodings: number;
+    try {
+      result = shortenToolResultText(source, 70_000, { name: "mcp__example__read" });
+      wholeEncodings = encode.mock.calls.filter(
+        ([value]) => value !== null && typeof value === "object" && "rows" in value,
+      ).length;
+    } finally {
+      encode.mockRestore();
+    }
+    // Freeze the original longest-leaf policy, including JSON escaping and tie order.
+    const notice = "\n[Tool result truncated to fit context; omitted evidence is unavailable.]\n";
+    expect(result).toBe(
+      JSON.stringify({
+        ...payload,
+        rows: payload.rows.map((row, index) => {
+          const keep = index < 196 ? 71 : 105;
+          return { ...row, evidence: `${text.slice(0, keep)}${notice}${text.slice(-keep)}` };
+        }),
+        contextTruncated: true,
+      }),
+    );
+    expect(wholeEncodings).toBe(2);
   });
   it("preserves generic JSON controls and marks omitted diagnostic strings", () => {
     const selected = selectContext(

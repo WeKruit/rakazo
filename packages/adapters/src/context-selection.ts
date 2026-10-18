@@ -278,8 +278,8 @@ function shortenStructuredResult(source: string, size: number): string | undefin
   else visit(payload);
   if (payload && typeof payload === "object" && !Array.isArray(payload))
     (payload as Record<string, unknown>).contextTruncated = true;
-  let encoded = JSON.stringify(holder.payload);
-  while (encoded.length > size) {
+  let encodedLength = JSON.stringify(holder.payload).length;
+  while (encodedLength > size) {
     const largest = leaves.reduce<(typeof leaves)[number] | undefined>((best, leaf) => {
       const value = (leaf.parent as Record<string, unknown>)[leaf.key];
       const prior = best ? (best.parent as Record<string, unknown>)[best.key] : undefined;
@@ -295,9 +295,10 @@ function shortenStructuredResult(source: string, size: number): string | undefin
     const shortened = `${value.slice(0, keep)}\n[Tool result truncated to fit context; omitted evidence is unavailable.]\n${value.slice(-keep)}`;
     if (shortened.length >= value.length) break;
     (largest.parent as Record<string, unknown>)[largest.key] = shortened;
-    encoded = JSON.stringify(holder.payload);
+    // String encoding deltas preserve the budget without reencoding untouched structure.
+    encodedLength += JSON.stringify(shortened).length - JSON.stringify(value).length;
   }
-  return encoded;
+  return JSON.stringify(holder.payload);
 }
 
 /** Shorten evidence cheaply while keeping structured controls and original-history offsets. */
