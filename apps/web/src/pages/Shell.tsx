@@ -5161,11 +5161,11 @@ const Transcript = memo(function Transcript({
       messageHasVisibleBlocks(message.blocks, showToolActivity),
     ),
   );
-  const workingBotName = workingBots.length === 1 ? workingBots[0]?.name : undefined;
-  const workingLabel =
-    workingBotName != null && workingBotName !== ""
-      ? t`${workingBotName} is working`
-      : t`Bots are working`;
+  const workingLabel = workingBots
+    .map(({ name, status }) =>
+      [name, status && rosterWorkStatusLabel(status)].filter(Boolean).join(" · "),
+    )
+    .join("; ");
   const [quoteDraft, setQuoteDraft] = useState<{
     message: ThreadMessage;
     text: string;

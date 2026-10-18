@@ -175,7 +175,10 @@ function pressEnter(textarea: HTMLTextAreaElement) {
   });
 }
 
-async function renderFeedbackShell(kind: "bot" | "group" = "bot") {
+async function renderFeedbackShell(
+  kind: "bot" | "group" = "bot",
+  runStatuses?: readonly ("queued" | "leased" | "running")[],
+) {
   (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
   globalThis.ResizeObserver ??= class {
     observe() {}
@@ -263,6 +266,17 @@ async function renderFeedbackShell(kind: "bot" | "group" = "bot") {
       error: null,
     },
   };
+  if (runStatuses) {
+    Object.assign(thread, {
+      run: { ...thread.run, status: runStatuses[0] },
+      activeRuns: runStatuses.map((status, index) => ({
+        ...thread.run,
+        id: `run-${index}`,
+        botId: members[index]!.botId,
+        status,
+      })),
+    });
+  }
   const bots = [bot, { ...bot, id: "bot-2", name: "Sourcer", threadId: "thread-2" }];
   const navigation = {
     spaces: [{ id: "space-1", name: "Recruiting", hasContent: true }],
@@ -404,6 +418,30 @@ async function renderFeedbackShell(kind: "bot" | "group" = "bot") {
     navigate: async (to: string) => act(async () => navigate(to)),
   };
 }
+
+it.each([
+  { statuses: ["queued"], label: "Main · Waiting in line…" },
+  { statuses: ["leased"], label: "Main · Starting…" },
+  { statuses: ["running"], label: "Main · Working…" },
+  {
+    statuses: ["queued", "running"],
+    label: "Main · Waiting in line…; Sourcer · Working…",
+  },
+  {
+    statuses: ["queued", "queued"],
+    label: "Main · Waiting in line…; Sourcer · Waiting in line…",
+  },
+] as const)("names each transcript run's actual state: $label", async ({ statuses, label }) => {
+  const view = await renderFeedbackShell("group", statuses);
+  await view.click("Close");
+  await view.click("Close panel");
+  const status = [...document.body.querySelectorAll('[role="status"]')].find((element) =>
+    element.textContent?.includes("Main"),
+  );
+  expect(status?.textContent).toBe(label);
+  expect(status?.textContent).not.toContain("is working");
+  expect(status?.textContent).not.toContain("Bots are working");
+});
 
 it.each(["bot", "group"] as const)(
   "sends authored candidate feedback through native followUp in a %s while leaving the pending Main card and composer attachments untouched",
