@@ -2087,7 +2087,7 @@ function RecruitingWorkspace({
           <TabsList
             variant="line"
             aria-label={t`Recruiting views`}
-            className="w-full overflow-x-auto justify-start"
+            className="no-scrollbar w-full overflow-x-auto justify-start"
           >
             <TabsTrigger value="role">
               <Trans>Role</Trans>
