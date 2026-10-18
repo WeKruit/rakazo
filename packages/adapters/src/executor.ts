@@ -4280,7 +4280,7 @@ export function createRunExecutor(deps: ExecutorDeps) {
         };
         const publishMidTurnNarration = async () => {
           const extracted = extractNarrationText(messageSegments, currentTextSegment);
-          const narration = clampUserProgressMessage(redactSecrets(extracted.text, runSecrets));
+          const narration = redactSecrets(extracted.text, runSecrets).trim();
           messageSegments = extracted.remaining;
           currentTextSegment = "";
           if (!narration) return;
@@ -8569,7 +8569,7 @@ export function createRunExecutor(deps: ExecutorDeps) {
               // does not treat pre-takeover text as the delegated final result.
               await publishMidTurnNarration();
               if (assembled.trim()) {
-                const narration = clampUserProgressMessage(redactSecrets(assembled, runSecrets));
+                const narration = redactSecrets(assembled, runSecrets).trim();
                 if (narration && runPromotesMidTurnNarration(run.trigger)) {
                   await publishMessage(
                     deps,

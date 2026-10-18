@@ -1,11 +1,12 @@
 import type {
   AgentRunRequest,
+  AgentRuntimeEvent,
   ConnectorProvider,
   ConnectorTool,
   MemorySnapshot,
   SemanticMemoryProvider,
 } from "@rakazo/adapter-kit";
-import type { RecruitingFeedbackInput, RecruitingSourceRef } from "@rakazo/contracts";
+import type { MessageBlock, RecruitingFeedbackInput, RecruitingSourceRef } from "@rakazo/contracts";
 import { RecruitingRoleToolInputSchema } from "@rakazo/contracts";
 import type { ActionApprovalRule } from "@rakazo/core";
 import { boundDirectApprovalRequest, RecruitingAssessmentValidationError } from "@rakazo/core";
@@ -317,7 +318,9 @@ function fixture(
   const finalizeRun = vi.fn(async () => ({ continuationRunId: null }));
   const claimSteering = vi.fn<ThreadEvents["claimSteering"]>(async () => []);
   let calls: ToolCall[] = [];
-  const runtimeRun = vi.fn(async function* (request: AgentRunRequest) {
+  const runtimeRun = vi.fn(async function* (
+    request: AgentRunRequest,
+  ): AsyncGenerator<AgentRuntimeEvent> {
     for (const call of calls) {
       const result = await request.executeTool!(call.name, call.args, call.executionId);
       results.push(result);
@@ -354,7 +357,13 @@ function fixture(
     },
     memoryProviders: { resolve: memoryProviderResolve },
     artifacts: options.attachmentStore === false ? undefined : artifacts,
-    events: { append: vi.fn(async () => undefined), pauseRunForInput, finalizeRun, claimSteering },
+    events: {
+      append: vi.fn(async () => undefined),
+      notify: vi.fn(async () => undefined),
+      pauseRunForInput,
+      finalizeRun,
+      claimSteering,
+    },
     jobs: { enqueue: vi.fn(async () => undefined) },
     secrets,
   } as unknown as Parameters<typeof createRunExecutor>[0]);
@@ -377,6 +386,7 @@ function fixture(
     runtimeRun,
     claimSteering,
     pauseRunForInput,
+    finalizeRun,
     disabledBuiltinTools,
     connector,
     setCalls(next: ToolCall[]) {
@@ -400,6 +410,76 @@ function fixture(
     },
   };
 }
+
+describe("durable mid-turn narration", () => {
+  it.each(["web_search", "message_user"])(
+    "preserves the complete redacted narration before %s without repeating it in the final",
+    async (toolName) => {
+      const secret = "fixture-private-token";
+      const f = fixture(`narration-${toolName}`, [secret]);
+      const narration = `Send this exact text once:\n\n> ${"完整内容 🔎 ".repeat(80)}${secret}\n> Complete suffix 🌿`;
+      const expected = narration.replace(secret, "[redacted]");
+      const messages: Array<{ blocks: MessageBlock[]; clientNonce?: string }> = [];
+      const tx = {
+        run: f.prisma.run,
+        thread: { update: vi.fn(async () => ({ nextMessageSeq: 2, nextEventSeq: 2 })) },
+        message: {
+          create: vi.fn(async ({ data }: { data: (typeof messages)[number] }) => {
+            messages.push(data);
+            return { id: `message-${messages.length}`, ...data };
+          }),
+        },
+        event: {
+          create: vi.fn(
+            async ({ data }: { data: { type: string; payload: { blocks: MessageBlock[] } } }) => ({
+              id: "event-1",
+              ...data,
+            }),
+          ),
+        },
+      };
+      Object.assign(f.prisma, {
+        $transaction: async (callback: (transaction: typeof tx) => Promise<unknown>) =>
+          callback(tx),
+      });
+      f.runtimeRun.mockImplementation(async function* (request) {
+        yield { type: "text" as const, text: narration };
+        const args =
+          toolName === "message_user"
+            ? { message: "Checking saved results." }
+            : { query: "fixture" };
+        yield { type: "tool" as const, name: toolName, args, executionId: "narration-call" };
+        f.results.push(await request.executeTool!(toolName, args, "narration-call"));
+        yield { type: "done" as const, text: narration };
+      });
+
+      await f.run();
+
+      const expectedBlocks: MessageBlock[][] = [[{ kind: "text", text: expected }]];
+      if (toolName === "message_user")
+        expectedBlocks.push([{ kind: "text", text: "Checking saved results." }]);
+      expect(messages.map((message) => message.blocks)).toEqual(expectedBlocks);
+      expect(messages.every((message) => message.clientNonce?.startsWith("user-progress:"))).toBe(
+        true,
+      );
+      expect(tx.event.create.mock.calls.map(([{ data }]) => data)).toEqual(
+        expectedBlocks.map((blocks) =>
+          expect.objectContaining({
+            type: "thread.message.created",
+            payload: expect.objectContaining({ blocks }),
+          }),
+        ),
+      );
+      expect(f.finalizeRun).toHaveBeenCalledWith(
+        expect.objectContaining({ outcome: "completed", blocks: [] }),
+      );
+      expect(JSON.stringify(messages)).not.toContain(secret);
+      expect(JSON.stringify(tx.event.create.mock.calls)).not.toContain(secret);
+      if (toolName === "message_user") expect(f.results).toEqual([{ ok: true }]);
+      else expect(f.web.search).toHaveBeenCalledOnce();
+    },
+  );
+});
 
 function roleReceipt(f: ReturnType<typeof fixture>, result: RecruitingRoleToolResult) {
   return async (
