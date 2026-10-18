@@ -23,7 +23,7 @@ function publisher() {
 }
 
 function fakePrisma(
-  runs: Array<{ id: string; updatedAt: Date }> = [],
+  runs: Array<{ id: string; updatedAt: Date; status?: "queued" | "leased" | "running" }> = [],
   routines: Array<{ id: string; nextRunAt: Date | null }> = [],
   controls: Array<{
     id: string;
@@ -34,7 +34,7 @@ function fakePrisma(
   }> = [],
 ) {
   return {
-    run: { findMany: vi.fn(async () => runs) },
+    run: { findMany: vi.fn(async () => runs.map((run) => ({ status: "queued", ...run }))) },
     routine: { findMany: vi.fn(async () => routines) },
     computer: { findMany: vi.fn(async () => controls) },
     messagingOutbound: { findFirst: vi.fn(async () => null) },
@@ -42,6 +42,40 @@ function fakePrisma(
 }
 
 describe("createJobReconciler", () => {
+  it.each(["leased", "running"] as const)(
+    "replaces a wakeup blocked by an expired %s owner without preserving its queue lock",
+    async (status) => {
+      const prisma = fakePrisma([{ id: "expired-run", updatedAt: new Date(0), status }]);
+      const { jobs, enqueue } = publisher();
+
+      await createJobReconciler({ prisma, jobs }).reconcileOnce();
+
+      expect(prisma.run.findMany).toHaveBeenCalledWith(
+        expect.objectContaining({
+          where: {
+            AND: [
+              {
+                OR: [
+                  { status: "queued" },
+                  {
+                    status: { in: ["leased", "running"] },
+                    leaseExpiresAt: { lte: expect.any(Date) },
+                  },
+                ],
+              },
+            ],
+          },
+        }),
+      );
+      expect(enqueue).toHaveBeenCalledWith({
+        name: "run.continue",
+        payload: { runId: "expired-run" },
+        replaceKey: "run:expired-run",
+        keepExisting: false,
+      });
+    },
+  );
+
   it("continues the main scans when an auxiliary reconciler fails", async () => {
     const prisma = fakePrisma();
     const { jobs } = publisher();
