@@ -7014,10 +7014,22 @@ export async function listRecruitingCandidates(
       const sort = input.sort ?? "rank";
       const matchSort = sort === "rank" || sort === "tier";
       const limit = input.limit ?? 25;
+      let rankDomainPageId = sort === "rank" ? input.sourceEffectId : undefined;
+      if (sort === "rank" && rankDomainPageId === undefined) {
+        const pages = await tx.recruitingCandidatePage.findMany({
+          where: { roleId: role.id },
+          select: { effectId: true },
+          take: 2,
+        });
+        if (pages.length === 1) rankDomainPageId = pages[0]!.effectId;
+      }
       const scope = candidateCursorScope({
         roleId: role.id,
         roleRevisionId: role.currentRevisionId,
         sort,
+        ...(input.sourceEffectId === undefined && rankDomainPageId !== undefined
+          ? { rankDomainPageId }
+          : {}),
         query: input.query ?? "",
         assessmentState: input.assessmentState ?? null,
         verdict: input.verdict ?? null,
@@ -7057,7 +7069,7 @@ export async function listRecruitingCandidates(
         clauses.push(
           Prisma.sql`EXISTS (SELECT 1 FROM "recruiting_candidate_occurrences" o JOIN "recruiting_candidate_pages" p ON p."effectId" = o."pageId" WHERE o."roleId" = b."roleId" AND o."candidateKey" = b."candidateKey" AND p."effectId" = ${input.sourceEffectId})`,
         );
-      const filtered = Prisma.sql`${candidateIndexQuery(role.id, sort, input.sourceEffectId)}, filtered AS (SELECT b.* FROM base b WHERE ${Prisma.join(clauses, " AND ")})`;
+      const filtered = Prisma.sql`${candidateIndexQuery(role.id, sort, rankDomainPageId)}, filtered AS (SELECT b.* FROM base b WHERE ${Prisma.join(clauses, " AND ")})`;
       const totals = await tx.$queryRaw<
         Array<{
           total: bigint;

@@ -7538,7 +7538,7 @@ describePostgres("recruiting domain (PostgreSQL)", () => {
     const key = (suffix: string) => `linkedin:/in/order-${suffix}`;
     let rankCursor: string | undefined;
     for (const [sort, expected] of [
-      ["rank", ["c", "b", "d", "a", "e", "f", "g", "h", "i", "j"]],
+      ["rank", ["c", "e", "b", "d", "a", "f", "g", "h", "i", "j"]],
       ["tier", ["a", "f", "b", "d", "c", "e", "g", "h", "i", "j"]],
     ] as const) {
       const seen: string[] = [];
@@ -7568,6 +7568,13 @@ describePostgres("recruiting domain (PostgreSQL)", () => {
     const compact = await recordCandidatePage(f, prepared, "match-omitted", [row("a", {})], {
       observedAt: new Date("2026-10-16T01:00:00Z"),
     });
+    await expect(
+      recruiting.listRecruitingCandidates(prisma, actor, {
+        roleId: f.role.role.id,
+        sort: "rank",
+        cursor: rankCursor,
+      }),
+    ).rejects.toThrow(recruiting.RecruitingConflictError);
     expect(
       (
         await recruiting.listRecruitingCandidates(prisma, actor, {

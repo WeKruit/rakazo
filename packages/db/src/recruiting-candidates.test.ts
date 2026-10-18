@@ -58,6 +58,9 @@ function fixture() {
       findUnique: vi.fn(async () => candidate),
       updateMany: vi.fn(async () => ({ count: 1 })),
     },
+    recruitingCandidatePage: {
+      findMany: vi.fn(async (_query: unknown) => [] as { effectId: string }[]),
+    },
   };
   const prisma = {
     $transaction: vi.fn(async (fn: (db: typeof tx) => Promise<unknown>) => fn(tx)),
@@ -177,7 +180,7 @@ describe("candidate listing and shortlist boundaries", () => {
       expect(f.tx.$queryRaw).toHaveBeenCalledTimes(2);
     },
   );
-  it("uses original ranks only inside an explicitly selected immutable result page", async () => {
+  it("uses original ranks inside an explicitly selected immutable result page", async () => {
     const f = fixture();
     f.tx.$queryRaw
       .mockResolvedValueOnce([
@@ -202,11 +205,68 @@ describe("candidate listing and shortlist boundaries", () => {
     expect(query.sql).toContain("ELSE returned.value -> 'rank' END");
     expect(query.sql).toContain('AND page."effectId" =');
     expect(query.values.filter((value) => value === "selected-result")).toHaveLength(2);
+    expect(f.tx.recruitingCandidatePage.findMany).not.toHaveBeenCalled();
   });
+  it.each([
+    ["name", undefined, []],
+    ["recent", undefined, []],
+    ["tier", undefined, []],
+    ["rank", "selected-result", []],
+    ["rank", undefined, [{ effectId: "first" }, { effectId: "second" }]],
+    ["rank", undefined, []],
+  ] as const)(
+    "preserves the existing %s cursor hash for unchanged source %s and pages %j",
+    async (sort, sourceEffectId, pages) => {
+      const f = fixture();
+      f.tx.recruitingCandidatePage.findMany.mockResolvedValue([...pages]);
+      const scope = createHash("sha256")
+        .update(
+          stableJsonValue({
+            roleId: "role",
+            roleRevisionId: "revision",
+            sort,
+            query: "",
+            assessmentState: null,
+            verdict: null,
+            shortlisted: null,
+            actionId: null,
+            sourceEffectId: sourceEffectId ?? null,
+          }),
+        )
+        .digest("hex");
+      const cursor = Buffer.from(
+        JSON.stringify({ version: 1, scope, value: "1", key: "previous-candidate" }),
+      ).toString("base64url");
+      f.tx.$queryRaw
+        .mockResolvedValueOnce([
+          {
+            total: 0n,
+            sourceRows: 0n,
+            candidates: 0n,
+            identifiedCandidates: 0n,
+            unassessed: 0n,
+            assessed: 0n,
+            shortlisted: 0n,
+          },
+        ])
+        .mockResolvedValueOnce([]);
+      await expect(
+        recruiting.listRecruitingCandidates(f.prisma, actor, {
+          roleId: "role",
+          sort,
+          sourceEffectId,
+          cursor,
+        }),
+      ).resolves.toMatchObject({ items: [], nextCursor: null });
+      expect(f.tx.$queryRaw).toHaveBeenCalledTimes(2);
+    },
+  );
   it.each(["rank", "tier"] as const)(
-    "paginates native %s values numerically with unknowns last and scoped cursors",
+    "paginates native %s values with unknowns last and isolated single-page rank cursors",
     async (sort) => {
       const f = fixture();
+      if (sort === "rank")
+        f.tx.recruitingCandidatePage.findMany.mockResolvedValue([{ effectId: "only-page" }]);
       const row = (key: string, sortValue: string) => ({
         roleId: "role",
         candidateKey: key,
@@ -256,8 +316,20 @@ describe("candidate listing and shortlist boundaries", () => {
       expect(firstQuery.sql).toContain(
         'ORDER BY "matchValue" ASC NULLS LAST, "candidateKey" COLLATE "C" ASC',
       );
-      expect(firstQuery.values).toContain(sort === "rank" ? "updated_rank" : "match_tier");
-      expect(firstQuery.sql).not.toContain("ELSE returned.value -> 'rank' END");
+      if (sort === "rank") {
+        expect(firstQuery.sql).toContain("ELSE returned.value -> 'rank' END");
+        expect(firstQuery.values).toContain("only-page");
+        expect(firstQuery.sql).not.toContain('p."effectId" =');
+        expect(f.tx.recruitingCandidatePage.findMany).toHaveBeenCalledExactlyOnceWith({
+          where: { roleId: "role" },
+          select: { effectId: true },
+          take: 2,
+        });
+      } else {
+        expect(firstQuery.values).toContain("match_tier");
+        expect(firstQuery.sql).not.toContain("ELSE returned.value -> 'rank' END");
+        expect(f.tx.recruitingCandidatePage.findMany).not.toHaveBeenCalled();
+      }
       expect(firstQuery.sql).toContain('SELECT match."pageId"');
       const decoded = JSON.parse(Buffer.from(first.nextCursor!, "base64url").toString("utf8"));
       for (const value of [
@@ -306,6 +378,29 @@ describe("candidate listing and shortlist boundaries", () => {
           cursor: first.nextCursor!,
         }),
       ).rejects.toThrow(recruiting.RecruitingConflictError);
+      if (sort === "rank") {
+        f.tx.recruitingCandidatePage.findMany.mockResolvedValue([
+          { effectId: "only-page" },
+          { effectId: "second-page" },
+        ]);
+        const calls = f.tx.$queryRaw.mock.calls.length;
+        await expect(
+          recruiting.listRecruitingCandidates(f.prisma, actor, {
+            roleId: "role",
+            cursor: first.nextCursor!,
+          }),
+        ).rejects.toThrow(recruiting.RecruitingConflictError);
+        expect(f.tx.$queryRaw).toHaveBeenCalledTimes(calls);
+        f.tx.$queryRaw.mockResolvedValueOnce(counts).mockResolvedValueOnce([]);
+        await recruiting.listRecruitingCandidates(f.prisma, actor, { roleId: "role" });
+        const multiplePages = f.tx.$queryRaw.mock.lastCall![0] as {
+          sql: string;
+          values: unknown[];
+        };
+        expect(multiplePages.sql).not.toContain("ELSE returned.value -> 'rank' END");
+        expect(multiplePages.values).toContain("updated_rank");
+        expect(multiplePages.sql).not.toContain('p."effectId" =');
+      }
     },
   );
   it.each([{ actionId: "action" }, { actionId: "action", sourceEffectId: "native-read" }])(
@@ -568,6 +663,7 @@ function observationFixture(rows: readonly unknown[] | undefined) {
       ]),
     },
     recruitingCandidatePage: {
+      findMany: vi.fn(async () => []),
       findUnique: vi.fn(async () => null),
       create: vi.fn(async ({ data }) => data),
     },
@@ -2530,10 +2626,11 @@ describe("native candidate source provenance", () => {
         await expect(result).rejects.toThrow(IsolationError);
         expect(createThreadMessageInTransaction).not.toHaveBeenCalled();
       }
-      expect(findMany).toHaveBeenCalledExactlyOnceWith({
+      expect(findMany).toHaveBeenLastCalledWith({
         where: { roleId: "role", effectId: { in: [page.effectId, f.page.effectId] } },
         include: { effect: { select: { request: true } } },
       });
+      expect(findMany).toHaveBeenCalledTimes(operation === "list" ? 2 : 1);
       expect(f.nativeProofs).toHaveBeenCalledTimes(1);
       expect(f.tx.event.findMany).toHaveBeenCalledTimes(1);
     },
@@ -2812,10 +2909,11 @@ describe("native candidate source provenance", () => {
         roleRevisionId: "revision",
         artifactRef: { artifactId: f.artifact.id, sha256: f.artifact.hash },
       });
-      expect(findMany).toHaveBeenCalledExactlyOnceWith({
+      expect(findMany).toHaveBeenLastCalledWith({
         where: { roleId: "role", effectId: { in: [pageId] } },
         include: { effect: { select: { request: true } } },
       });
+      expect(findMany).toHaveBeenCalledTimes(sort === "rank" ? 2 : 1);
       const [statement] = f.tx.$queryRaw.mock.calls[1] as unknown as [{ sql: string }];
       expect(statement.sql).toContain(
         'p."pageId" AS "sourcePageId", p."rowIndex" AS "sourceRowIndex"',
