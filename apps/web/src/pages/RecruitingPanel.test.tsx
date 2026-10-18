@@ -2336,7 +2336,16 @@ it.each(["Cards", "Table"])(
       latestSource: {
         ...source,
         report: {
-          fields: [{ label: "Grade", value: "Provider strong", sourceUrls: [] }],
+          fields: [
+            { label: "Grade", value: "Provider strong", sourceUrls: [] },
+            { label: "Rank", value: "3", sourceUrls: [] },
+            { label: "Recommendation", value: "Review this profile", sourceUrls: [] },
+            {
+              label: "Fit reasons",
+              value: "  Built the requested systems.\nRelevant project evidence.  ",
+              sourceUrls: [],
+            },
+          ],
           sourceUrls: [],
         },
       },
@@ -2363,6 +2372,16 @@ it.each(["Cards", "Table"])(
     expect(matches).toHaveLength(4);
     expect(matches[0]?.textContent).toContain("Match score0");
     expect(matches[0]?.textContent).toContain("Match tierProvider possible");
+    expect([...matches[1]!.querySelectorAll("dd dd")].map((item) => item.textContent)).toEqual([
+      "3",
+      "Review this profile",
+      "  Built the requested systems.\nRelevant project evidence.  ",
+    ]);
+    expect([...matches[1]!.querySelectorAll("dd dt")].map((item) => item.textContent)).toEqual([
+      "Rank",
+      "Recommendation",
+      "Fit reasons",
+    ]);
     expect(matches[1]?.textContent).toContain("Score / tier not returned");
     expect(matches[2]?.textContent).toContain("Unknown");
     expect(matches[3]?.textContent).toContain("Source unavailable");
@@ -2423,6 +2442,15 @@ it.each(["Cards", "Table"])(
     expect(api.getAssessment).not.toHaveBeenCalled();
     expect(api.getById).not.toHaveBeenCalled();
     expect(api.readSource).not.toHaveBeenCalled();
+    await view.click("Close");
+    await view.click(noMatch.name);
+    const match = view.container.querySelector('[role="dialog"] [aria-label="Research match"]')!;
+    expect(match.textContent).toContain("Rank3");
+    expect(match.textContent).toContain("RecommendationReview this profile");
+    expect(match.textContent).toContain(
+      "Fit reasons  Built the requested systems.\nRelevant project evidence.  ",
+    );
+    expect(match.textContent).toContain("Score / tier not returned");
   },
 );
 

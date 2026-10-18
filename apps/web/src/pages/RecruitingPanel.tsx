@@ -484,7 +484,10 @@ function CandidateProfile({
 function CandidateResearchMatch({ candidate }: { candidate: RecruitingCandidate }) {
   const { t } = useLingui();
   const source = candidate.latestSource;
-  const fields = source?.report?.fields.filter(
+  const fields = source?.report?.fields.filter((field) =>
+    ["Rank", "Recommendation", "Fit reasons", "Match score", "Match tier"].includes(field.label),
+  );
+  const hasScoreOrTier = fields?.some(
     (field) => field.label === "Match score" || field.label === "Match tier",
   );
   return (
@@ -497,21 +500,26 @@ function CandidateResearchMatch({ candidate }: { candidate: RecruitingCandidate 
           <p className="text-muted-foreground">
             <Trans>Source unavailable</Trans>
           </p>
-        ) : fields?.length ? (
-          <dl>
-            {fields.map((field) => (
-              <div key={field.label} className="flex flex-wrap gap-x-2">
-                <dt className="text-muted-foreground">{field.label}</dt>
-                <dd className="whitespace-pre-wrap break-words text-base">
-                  {field.value ?? <Trans>Unknown</Trans>}
-                </dd>
-              </div>
-            ))}
-          </dl>
         ) : (
-          <p className="text-muted-foreground">
-            <Trans>Score / tier not returned</Trans>
-          </p>
+          <>
+            {fields?.length ? (
+              <dl>
+                {fields.map((field) => (
+                  <div key={field.label} className="flex flex-wrap gap-x-2">
+                    <dt className="text-muted-foreground">{field.label}</dt>
+                    <dd className="whitespace-pre-wrap break-words text-base">
+                      {field.value ?? <Trans>Unknown</Trans>}
+                    </dd>
+                  </div>
+                ))}
+              </dl>
+            ) : null}
+            {!hasScoreOrTier ? (
+              <p className="text-muted-foreground">
+                <Trans>Score / tier not returned</Trans>
+              </p>
+            ) : null}
+          </>
         )}
       </dd>
     </dl>
