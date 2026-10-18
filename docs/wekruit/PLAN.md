@@ -62,13 +62,21 @@ Supabase 独立数据库、原生 memory provider、Modal Volume 和 E2B 沿用�
 
 ## 当前发布与缺口（2026-10-18）
 
-### v91 已发布；真实累计排序与重启后原文件读取
+### v92 已发布；旧要求下的候选研究状态
+
+v92 / `38deb2e9` 已发布到既有应用，二十份运行源码 hash 匹配，21:00 UTC 内部 health/ready 均200、非 degraded；最初未监听的冷启动采样保留。启动确认无 pending migration，无新迁移、权限、资源或订阅。替换前后二十组持久数据及逐行 hash 完全相同，十五份记忆、三份暂停 Routine、十二条已取消记录、修订后的岗位及候选/来源保持，无旧运行重放。
+
+复用既有当前岗位和每份来源的 roleRevisionId，只在旧来源显示“Research based on earlier requirements”。Cards/Table/详情共用原摘要，历史来源分别比较；普通原生 Autumn 来源没有自定义 task/action 也能显示。保存版本相等不标成重新评过，内部 assessment 的 Current/Outdated 不被混用。没有 schema、API、排序、候选评估或 Agent 权限变化。新增两项回归先失败再通过，合计十一个不同的相关 Web 用例通过；Web 类型/格式及十个语言目录的实际编译渲染通过。旧 broad catalog 对已不存在文案的断言失败保留，不称全套通过。正常网页已核对二十五张候选卡、表格、详情及同一人的两份历史来源，均提示基于旧版要求；第二版六条岗位要求和原对话保持。文件对话刷新后可继续聊天，原 Markdown 可预览。发布后原生只读12项核验通过，实际累计顺序仍1–25，二十五人/四十五条来源、两份候选原件及原/新 Markdown 字节/hash 全部保持；没有新研究、模型或数据库写入。此处的零模型调用仅指只读核验，不否认先前真实 Main/Sourcer 测试的调用。
+
+### v91 历史发布；真实累计排序与重启后原文件读取
 
 v91 / `25eddcf9` 已发布到既有应用，二十份运行源码 hash 匹配，20:45 UTC 内部 health/ready 均200、非 degraded；无新迁移、权限、资源或订阅。发布前后十九组数据完全相同；二十一条 thread 中两条行 hash 改变，其余线程保持，无法仅凭快照归因到具体字段，不宣称二十组全等。原十五份记忆、三份暂停 Routine、十二条已取消记录及岗位/候选/来源页保持，无旧任务重放。
 
 真实二十五人原生读取及正常网页已验证累计排序。保留 updated_rank 明确值/空值优先，再采用实际 overall_rank；原名单局部 rank 不用于跨来源混排。现有 Cards/Table/详情显示 Overall rank / Original pool rank；实际顺序为1–25，去重二十五人、四十五条来源，两个保存原件及记录 hash/长度保持，未编造 score/tier 或本地重评。153项聚焦 DB 检查、相关类型/格式及独立复核通过；共享 UI 回归和网页类型/格式通过。线上有界原生读取11项核验与截图通过，不扩称任意并发或整体 UI 完全打磨。
 
 原生文件已走实际写入 → 读回 → 附件 → Main 读取；多次容器替换后，再从普通聊天让 Sourcer 重开原 Markdown，只读并重新附回。此次原生 run 自然 completed，list_files/read_file/attach_file 成功，新附件与冻结原件均为2232字节、同一 SHA-256，首标题和末条正文与实际文件一致。没有 write_file、记忆写入、研究或其他 Agent 调用，现有记忆元数据、Routine 与审批规则保持。read_file 审计未保留其完整返回体，文件字节保持由原件和新附件的实际受权读取证明。共享记忆范围是当前用户与 Space，私有记忆再限定 bot；当前共享 Teamcomputer 的文件目录仍不是严格安全隔离。PDF/CSV 全链路、多用户文件权限和完整恢复矩阵仍未验。
+
+文件隔离直接复用原生配置：Team 的路径处理允许访问其他 bot 目录；Private 为 bot 绑定独立 Computer/homeKey，当前 E2B provider 使用独立 sandbox，Routine 复用所属 bot 的电脑，不提供每 Routine 文件 ACL。需要共享的产物可沿原生附件和真实版本引用交接；附件按 user+Space 授权，并非 bot 私有。普通 handoff 只传文字，不自动跨电脑复制任意二进制文件。切换 Private 不迁移 Team 旧文件；迁移前须待原执行终态、保留旧 home/checkpoint、按准确自有文件及 hash/权限搬移，不能复制整个共享电脑。本轮仅核查既有能力，未切换电脑、复制工作区或新建 sandbox；不增加文件服务或 harness。
 
 完整 JD 强度已通过现有 Main/Sourcer instructions 与两份共享 skill 的四处精确修订保留；原生网页保存、实际四份内容 hash 及另三份 skill 保持已核对，不冒称具备配置 CAS 或逐 run 配置冻结。随后从普通聊天请 Main 重读已保存 JD、补回遗漏并保留既有候选；同一原群的真人触发执行自然完成，实际岗位由第一版四条修正为第二版六条，补回现代 backend 架构和独立调试真实数据问题，原四条表达、偏好及问题保持。实际原件、真人来源及版本绑定已核对；候选、来源页、出现记录和评估的全量摘要均与修订前一致，两份候选原件字节/hash 不变，仍二十五人。没有新研究/reply、CRM 或外发。旧候选证据没有按新六条重评，后续 Autumn 采用及新版要求下的研究展示仍待验，不将岗位修正当完整 playbook 通过。
 
