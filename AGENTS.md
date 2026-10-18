@@ -15,6 +15,8 @@ Build a recruiting multi-agent product by composing Rakazo's existing harness an
 
 The current priority is playbook-driven sourcing and filtering. The wider product scope remains, but it does not require custom infrastructure for every listed feature.
 
+Use the source-workflow review in [PLAN.md — Grok Bot 工作方式的采用与差距](docs/wekruit/PLAN.md#grok-bot-工作方式的采用与差距) when continuing this work. Learn from actual conversations and routine state; an enabled routine or an agent's completion claim is not a verified service outcome. Preserve responsible-agent ownership, useful exception-based updates, scoped and retractable preferences, paid-lookup reuse, and hold/pause decisions. Historical scripts, candidate criteria, schedules and approvals are reference material, not new architecture or permission to replay work.
+
 ## Repository conventions
 
 - This is a public repository: assume all tracked content and diffs are public. Never commit secrets, `.env` files, private URLs, personal/customer data, or real production data; use fake placeholders. Review `git status` and the staged diff before committing, and never force-add ignored files. If private data appears, stop and alert the maintainer.
