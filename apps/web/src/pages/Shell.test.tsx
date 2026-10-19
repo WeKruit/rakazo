@@ -13,7 +13,12 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 vi.mock("@lingui/react/macro", () => {
   const t = (parts: TemplateStringsArray, ...values: unknown[]) =>
     parts.reduce((text, part, index) => `${text}${index > 0 ? values[index - 1] : ""}${part}`, "");
-  return { useLingui: () => ({ t }), Trans: ({ children }: { children: ReactNode }) => children };
+  return {
+    useLingui: () => ({ t }),
+    Trans: ({ children }: { children: ReactNode }) => children,
+    Plural: ({ _1, other, value }: { _1: string; other: string; value: number }) =>
+      (value === 1 ? _1 : other).replace("#", String(value)),
+  };
 });
 
 const shellApi = vi.hoisted(() => ({
@@ -294,7 +299,7 @@ async function renderFeedbackShell(
     spaces: navigation.spaces,
     archivedBots: [],
     archivedGroups: [],
-    thread,
+    thread: kind === "group" ? null : thread,
     routines: [],
   });
   shellApi.get.mockImplementation(async ({ botId }: { botId?: string }) =>
@@ -420,6 +425,13 @@ async function renderFeedbackShell(
     navigate: async (to: string) => act(async () => navigate(to)),
   };
 }
+
+it("loads a cold group from its own snapshot when bootstrap has no DM snapshot", async () => {
+  await renderFeedbackShell("group");
+  expect(shellApi.get).toHaveBeenCalledWith({ groupId: "group-1" }, expect.anything());
+  expect(container?.textContent).toContain("Choose the role location");
+  expect(shellApi.recruiting.getWorkspace).toHaveBeenCalledWith({ threadId: "thread-1" });
+});
 
 it.each([
   { owner: false, diagnostics: "off", visible: false },

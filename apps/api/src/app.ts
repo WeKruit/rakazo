@@ -580,7 +580,18 @@ export async function createApp(
     },
   });
   const rpc = new RPCHandler(router, {
-    clientInterceptors: [onError((error, { path }) => logUnexpectedRpcError(error, path))],
+    clientInterceptors: [
+      async ({ path, next }) => {
+        enrichLogContext({ "rpc.procedure": path.join(".") });
+        const started = performance.now();
+        try {
+          return await next();
+        } finally {
+          enrichLogContext({ "rpc.handler.duration_ms": Math.round(performance.now() - started) });
+        }
+      },
+      onError((error, { path }) => logUnexpectedRpcError(error, path)),
+    ],
   });
   const app = new Hono();
   app.use("*", requestLogging(logger));
@@ -642,7 +653,10 @@ export async function createApp(
   };
   const sessionActor = async (request: Request) => (await requestSession(request))?.actor ?? null;
   app.use("/rpc/*", async (c, next) => {
-    const session = await requestSession(c.req.raw);
+    const authStarted = performance.now();
+    const session = await requestSession(c.req.raw).finally(() => {
+      enrichLogContext({ "rpc.auth.duration_ms": Math.round(performance.now() - authStarted) });
+    });
     const actor = session?.actor ?? null;
     if (actor) {
       enrichLogContext({ "user.id": actor.userId, "space.id": actor.spaceId });

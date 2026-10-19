@@ -1,6 +1,7 @@
 import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { createLogger, createTestSink } from "@rakazo/logging";
 import { describe, expect, it, vi } from "vitest";
 import { sessionCookieHeader } from "../../../packages/testkit/src/index.js";
 import { createApp } from "./app.js";
@@ -14,6 +15,7 @@ describePostgres("ticket board app wiring", () => {
   it.each([false, true])("threads the environment flag through HTTP (%s)", async (enabled) => {
     vi.stubEnv("TICKET_BOARD_ENABLED", String(enabled));
     const dataDir = await mkdtemp(join(tmpdir(), "rakazo-board-test-"));
+    const sink = createTestSink();
     const handles = await createApp({
       databaseUrl: process.env.DATABASE_URL!,
       dataDir,
@@ -23,6 +25,7 @@ describePostgres("ticket board app wiring", () => {
       signupsEnabled: "true",
       webOrigin: "http://127.0.0.1:5173",
       authUrl: "http://127.0.0.1:5173",
+      logger: createLogger({ service: "rakazo-api", sinks: [sink] }),
     });
     try {
       const signup = await handles.app.request("/api/auth/sign-up/email", {
@@ -45,6 +48,16 @@ describePostgres("ticket board app wiring", () => {
       const me = await call("me");
       expect(me.status).toBe(200);
       expect(await me.json()).toMatchObject({ json: { ticketBoardEnabled: enabled } });
+      const completed = sink.events.find(
+        (event) =>
+          event.message === "http.request.completed" &&
+          event["request.id"] === me.headers.get("x-request-id"),
+      );
+      expect(completed).toMatchObject({
+        "rpc.procedure": "me",
+        "rpc.auth.duration_ms": expect.any(Number),
+        "rpc.handler.duration_ms": expect.any(Number),
+      });
       const bootstrap = await call("bootstrap");
       expect(bootstrap.status).toBe(200);
       expect(await bootstrap.json()).toMatchObject({
