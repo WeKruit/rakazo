@@ -93,6 +93,7 @@ vi.mock("../lib/rpc", async (importOriginal) => ({
   },
 }));
 
+import * as LocalTimezoneModule from "../lib/local-timezone";
 import * as RecruitingPanelModule from "./RecruitingPanel";
 import type { ComposerHandle } from "./Shell";
 import { Composer, candidateReferenceText, eventChangesRecruitingPanel, ShellPage } from "./Shell";
@@ -454,69 +455,80 @@ it("loads a cold group from its own snapshot when bootstrap has no DM snapshot",
   expect(shellApi.recruiting.getWorkspace).toHaveBeenCalledWith({ threadId: "thread-1" });
 });
 
-it("keeps paused one-shot edits inactive and rearms only after Active is enabled", async () => {
-  const routine: Routine = {
-    id: "routine-1",
-    botId: "bot-1",
-    name: "Saved work review",
-    prompt: "Review saved work",
-    crons: ["@once"],
-    timezone: "UTC",
-    active: false,
-    notify: true,
-    webhookEnabled: false,
-    githubEnabled: false,
-    messageProvider: null,
-    modelProvider: null,
-    modelId: null,
-    thinkingLevel: null,
-    lastRunAt: null,
-    nextRunAt: null,
-    createdAt: "2026-01-01T00:00:00Z",
-  };
-  shellApi.updateRoutine.mockImplementation(async (input) => ({
-    ...routine,
-    ...input,
-    nextRunAt: input.runAt ?? null,
-  }));
-  const view = await renderFeedbackShell("bot", undefined, { routines: [routine] });
-  await view.click("Close");
-  await view.navigate("/app/bot-1?routine=routine-1");
-  const instruction = [...document.body.querySelectorAll("label")]
-    .find((label) => label.textContent?.startsWith("Instruction"))!
-    .querySelector("textarea")!;
-  type(instruction, "Review only saved work");
-  await view.click("Save");
-  const edit = {
-    routineId: routine.id,
-    name: routine.name,
-    prompt: "Review only saved work",
-    webhookEnabled: false,
-    githubEnabled: false,
-    messageProvider: null,
-  };
-  expect(shellApi.updateRoutine).toHaveBeenCalledExactlyOnceWith(edit);
-  const active = document.body.querySelector<HTMLButtonElement>('[role="switch"]')!;
-  expect(active.getAttribute("aria-checked")).toBe("false");
-  await act(async () => active.click());
-  const runAt = document.body.querySelector<HTMLInputElement>('input[aria-label="Run at"]')!;
-  const futureLocal = "2099-01-01T12:00";
-  act(() => {
-    Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, "value")!.set!.call(
-      runAt,
-      futureLocal,
+it.each(["@once", "0 18 * * *"])(
+  "keeps paused %s edits inactive with the correct timezone and rearms one-shots only after Active is enabled",
+  async (cron) => {
+    vi.spyOn(LocalTimezoneModule, "localTimezone").mockReturnValue("America/Chicago");
+    const routine: Routine = {
+      id: "routine-1",
+      botId: "bot-1",
+      name: "Saved work review",
+      prompt: "Review saved work",
+      crons: [cron],
+      timezone: "America/Los_Angeles",
+      active: false,
+      notify: true,
+      webhookEnabled: false,
+      githubEnabled: false,
+      messageProvider: null,
+      modelProvider: null,
+      modelId: null,
+      thinkingLevel: null,
+      lastRunAt: null,
+      nextRunAt: null,
+      createdAt: "2026-01-01T00:00:00Z",
+    };
+    shellApi.updateRoutine.mockImplementation(async (input) => ({
+      ...routine,
+      ...input,
+      nextRunAt: input.runAt ?? null,
+    }));
+    const view = await renderFeedbackShell("bot", undefined, { routines: [routine] });
+    await view.click("Close");
+    await view.navigate("/app/bot-1?routine=routine-1");
+    expect(container?.textContent).toContain(
+      cron === "@once" ? "America/Chicago" : "America/Los_Angeles",
     );
-    runAt.dispatchEvent(new Event("input", { bubbles: true }));
-  });
-  await view.click("Save");
-  expect(shellApi.updateRoutine).toHaveBeenCalledTimes(2);
-  expect(shellApi.updateRoutine).toHaveBeenLastCalledWith({
-    ...edit,
-    active: true,
-    runAt: new Date(futureLocal).toISOString(),
-  });
-  expect(shellApi.answer).not.toHaveBeenCalled();
-});
+    expect(container?.textContent).not.toContain(
+      cron === "@once" ? "America/Los_Angeles" : "America/Chicago",
+    );
+    const instruction = [...document.body.querySelectorAll("label")]
+      .find((label) => label.textContent?.startsWith("Instruction"))!
+      .querySelector("textarea")!;
+    type(instruction, "Review only saved work");
+    await view.click("Save");
+    const edit = {
+      routineId: routine.id,
+      name: routine.name,
+      prompt: "Review only saved work",
+      webhookEnabled: false,
+      githubEnabled: false,
+      messageProvider: null,
+    };
+    expect(shellApi.updateRoutine).toHaveBeenCalledExactlyOnceWith(edit);
+    const active = document.body.querySelector<HTMLButtonElement>('[role="switch"]')!;
+    expect(active.getAttribute("aria-checked")).toBe("false");
+    if (cron !== "@once") return;
+    await act(async () => active.click());
+    const runAt = document.body.querySelector<HTMLInputElement>('input[aria-label="Run at"]')!;
+    const futureLocal = "2099-01-01T12:00";
+    act(() => {
+      Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, "value")!.set!.call(
+        runAt,
+        futureLocal,
+      );
+      runAt.dispatchEvent(new Event("input", { bubbles: true }));
+    });
+    await view.click("Save");
+    expect(shellApi.updateRoutine).toHaveBeenCalledTimes(2);
+    expect(shellApi.updateRoutine).toHaveBeenLastCalledWith({
+      ...edit,
+      active: true,
+      runAt: new Date(futureLocal).toISOString(),
+    });
+    expect(shellApi.answer).not.toHaveBeenCalled();
+  },
+);
 
 it.each([
   { owner: false, diagnostics: "off", visible: false },

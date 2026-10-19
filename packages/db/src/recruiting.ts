@@ -269,7 +269,12 @@ async function validateArtifact(
   return artifact;
 }
 
-async function validateSources(tx: Tx, actor: Actor, sources: readonly RecruitingSourceRef[]) {
+async function validateSources(
+  tx: Tx,
+  actor: Actor,
+  sources: readonly RecruitingSourceRef[],
+  authorizedThread?: Awaited<ReturnType<typeof requireThread>>,
+) {
   const artifacts = new Set<string>();
   const messageIds = new Set<string>();
   for (const source of sources) {
@@ -291,7 +296,12 @@ async function validateSources(tx: Tx, actor: Actor, sources: readonly Recruitin
   if (messages.length !== messageIds.size) throw new IsolationError();
   const threads = new Map<string, Awaited<ReturnType<typeof requireThread>>>();
   for (const threadId of new Set(messages.map((message) => message.threadId)))
-    threads.set(threadId, await requireThread(tx, actor, threadId));
+    threads.set(
+      threadId,
+      threadId === authorizedThread?.id
+        ? scoped(actor, authorizedThread)
+        : await requireThread(tx, actor, threadId),
+    );
   for (const message of messages) {
     const thread = threads.get(message.threadId)!;
     if (thread.groupId)
@@ -321,8 +331,9 @@ async function validateDefinition(
   tx: Tx,
   actor: Actor,
   definition: Pick<RecruitingRoleRevision, "sourceRefs" | "criteria">,
+  authorizedThread?: Awaited<ReturnType<typeof requireThread>>,
 ) {
-  return validateSources(tx, actor, definitionSources(definition));
+  return validateSources(tx, actor, definitionSources(definition), authorizedThread);
 }
 
 /** Trusted native storage access, separate from the submitted role definition. */
@@ -414,7 +425,12 @@ function definitionData(input: CreateRoleInput | ReviseRoleInput) {
   };
 }
 
-async function roleSnapshot(tx: Tx, actor: Actor, role: RecruitingRole): Promise<RoleSnapshot> {
+async function roleSnapshot(
+  tx: Tx,
+  actor: Actor,
+  role: RecruitingRole,
+  authorizedThread?: Awaited<ReturnType<typeof requireThread>>,
+): Promise<RoleSnapshot> {
   const row = await tx.recruitingRoleRevision.findFirst({
     where: { id: role.currentRevisionId, roleId: role.id, revision: role.revision },
   });
@@ -423,7 +439,7 @@ async function roleSnapshot(tx: Tx, actor: Actor, role: RecruitingRole): Promise
     ...row,
     createdAt: row.createdAt.toISOString(),
   });
-  await validateDefinition(tx, actor, revision);
+  await validateDefinition(tx, actor, revision, authorizedThread);
   if (revision.brief) validateRecruitingBrief(revision.brief, revision);
   const { crmBindingEffectId: _crm, ...publicRole } = role as RecruitingRole & {
     crmBindingEffectId?: string | null;
@@ -508,6 +524,7 @@ export async function getRecruitingWorkspace(
             tx,
             actor,
             await requireRole(tx, actor, thread.activeRecruitingRoleId, false, thread),
+            thread,
           )
         : null;
     },

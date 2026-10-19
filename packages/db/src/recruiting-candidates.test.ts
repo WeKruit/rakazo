@@ -2654,41 +2654,55 @@ describe("native CRM binding and source import", () => {
 });
 
 describe("recruiting workspace authorization", () => {
-  it.each(["same", "different", "thread-owner", "thread-space", "bot-owner", "bot-space"])(
-    "reuses only the authorized source thread at the %s boundary",
-    async (boundary) => {
-      const f = observationFixture([]);
-      const thread = await f.tx.thread.findFirst();
-      f.tx.thread.findFirst.mockClear();
-      if (boundary !== "same") f.role.sourceThreadId = "source-thread";
-      const source = { ...thread, id: f.role.sourceThreadId };
-      if (boundary === "thread-owner") source.userId = "other";
-      if (boundary === "thread-space") source.spaceId = "other";
-      f.tx.thread.findFirst
-        .mockResolvedValueOnce(thread)
-        .mockResolvedValueOnce(source)
-        .mockResolvedValue(thread);
-      if (boundary === "bot-owner" || boundary === "bot-space")
-        f.tx.bot.findFirst.mockResolvedValueOnce(actor).mockResolvedValue({
-          ...actor,
-          ...(boundary === "bot-owner" ? { userId: "other" } : { spaceId: "other" }),
-        });
-      f.tx.recruitingRoleRevision.findFirst.mockImplementation(async () => {
-        // Retained source provenance is validated separately after this authorization boundary.
-        expect(f.tx.thread.findFirst).toHaveBeenCalledTimes(boundary === "same" ? 1 : 2);
-        expect(f.tx.bot.findFirst).toHaveBeenCalledTimes(boundary === "same" ? 1 : 2);
-        return f.revision;
+  it.each([
+    "same",
+    "different",
+    "thread-owner",
+    "thread-space",
+    "bot-owner",
+    "bot-space",
+    "message-other",
+    "message-foreign",
+  ])("reuses only the authorized source thread at the %s boundary", async (boundary) => {
+    const f = observationFixture([]);
+    const thread = await f.tx.thread.findFirst();
+    f.tx.thread.findFirst.mockClear();
+    const messageSource = boundary.startsWith("message-");
+    if (boundary !== "same" && !messageSource) f.role.sourceThreadId = "source-thread";
+    const source = { ...thread, id: messageSource ? "source-thread" : f.role.sourceThreadId };
+    if (messageSource) (await f.tx.message.findMany())[0]!.threadId = source.id;
+    if (boundary === "thread-owner" || boundary === "message-foreign") source.userId = "other";
+    if (boundary === "thread-space") source.spaceId = "other";
+    f.tx.thread.findFirst
+      .mockResolvedValueOnce(thread)
+      .mockResolvedValueOnce(source)
+      .mockResolvedValue(thread);
+    if (boundary === "bot-owner" || boundary === "bot-space")
+      f.tx.bot.findFirst.mockResolvedValueOnce(actor).mockResolvedValue({
+        ...actor,
+        ...(boundary === "bot-owner" ? { userId: "other" } : { spaceId: "other" }),
       });
-      const result = recruiting.getRecruitingWorkspace(f.prisma, actor, { threadId: thread.id });
-      if (boundary === "same" || boundary === "different")
-        await expect(result).resolves.toMatchObject({ role: { id: "role" } });
-      else await expect(result).rejects.toThrow(IsolationError);
-      expect(f.tx.thread.findFirst).toHaveBeenNthCalledWith(boundary === "same" ? 1 : 2, {
-        where: { id: f.role.sourceThreadId, spaceId: actor.spaceId, userId: actor.userId },
-        select: expect.any(Object),
-      });
-    },
-  );
+    f.tx.recruitingRoleRevision.findFirst.mockImplementation(async () => {
+      // Retained source provenance is validated separately after this authorization boundary.
+      expect(f.tx.thread.findFirst).toHaveBeenCalledTimes(
+        boundary === "same" || messageSource ? 1 : 2,
+      );
+      expect(f.tx.bot.findFirst).toHaveBeenCalledTimes(
+        boundary === "same" || messageSource ? 1 : 2,
+      );
+      return f.revision;
+    });
+    const result = recruiting.getRecruitingWorkspace(f.prisma, actor, { threadId: thread.id });
+    if (boundary === "same" || boundary === "different" || boundary === "message-other") {
+      await expect(result).resolves.toMatchObject({ role: { id: "role" } });
+      expect(f.tx.thread.findFirst).toHaveBeenCalledTimes(boundary === "same" ? 1 : 2);
+      expect(f.tx.bot.findFirst).toHaveBeenCalledTimes(boundary === "same" ? 1 : 2);
+    } else await expect(result).rejects.toThrow(IsolationError);
+    expect(f.tx.thread.findFirst).toHaveBeenNthCalledWith(boundary === "same" ? 1 : 2, {
+      where: { id: source.id, spaceId: actor.spaceId, userId: actor.userId },
+      select: expect.any(Object),
+    });
+  });
 });
 
 describe("native observation indexing", () => {
