@@ -532,7 +532,7 @@ function CandidateResearchMatch({
                 {fields.map((field) => (
                   <div key={field.label} className="flex flex-wrap gap-x-2">
                     <dt className="text-muted-foreground">{field.label}</dt>
-                    <dd className="whitespace-pre-wrap break-words text-base">
+                    <dd className="whitespace-pre-wrap wrap-anywhere text-base">
                       {field.value ?? <Trans>Unknown</Trans>}
                     </dd>
                   </div>
