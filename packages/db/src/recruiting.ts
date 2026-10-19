@@ -5881,7 +5881,8 @@ function candidateIndexQuery(
         THEN returned.value -> 'updated_rank'
         WHEN returned.value ? 'overall_rank' THEN returned.value -> 'overall_rank'
         WHEN returned.value ? 'rank' THEN returned.value -> 'rank'
-        ELSE returned.value -> 'batch_rank' END`;
+        WHEN returned.value ? 'batch_rank' THEN returned.value -> 'batch_rank'
+        ELSE returned.value -> 'rank_this_batch_only' END`;
   const matchValue = Prisma.sql`CASE WHEN source.kind = 'rank' THEN
       CASE WHEN jsonb_typeof(match."value") = 'number' THEN
         CASE WHEN (match."value" #>> '{}')::numeric BETWEEN 1 AND 9007199254740991
@@ -5933,9 +5934,11 @@ function candidateIndexQuery(
         (rank_scope."pageId" IS NULL OR page."effectId" = rank_scope."pageId") AND
         (returned.value ? 'updated_rank' OR returned.value ? 'overall_rank' OR
           (rank_scope."pageId" IS NOT NULL AND
-            (returned.value ? 'rank' OR returned.value ? 'batch_rank')))),
+            (returned.value ? 'rank' OR returned.value ? 'batch_rank' OR returned.value ? 'rank_this_batch_only')))),
       ('tier', returned.value -> ${"match_tier"}, returned.value ? ${"match_tier"}),
-      ('score', returned.value -> ${"match_score"}, returned.value ? ${"match_score"} AND
+      ('score', CASE WHEN returned.value ? 'match_score' THEN returned.value -> 'match_score'
+        ELSE returned.value -> 'score' END,
+        (returned.value ? 'match_score' OR returned.value ? 'score') AND
         rank_scope."pageId" IS NOT NULL AND page."effectId" = rank_scope."pageId")
     ) source(kind, cell, present)
     CROSS JOIN LATERAL (SELECT CASE WHEN jsonb_typeof(source.cell) = 'object' AND source.cell ? 'value'
@@ -7318,8 +7321,9 @@ export async function listRecruitingCandidates(
         roleId: role.id,
         roleRevisionId: role.currentRevisionId,
         sort,
-        // Reject old cursors that treated saved batch-only ranks as unranked.
-        ...(sort === "rank" ? { rankProjection: 2 } : {}),
+        // Reject old cursors that treated provider-native match fields as unknown.
+        ...(sort === "rank" ? { rankProjection: 3 } : {}),
+        ...(sort === "score" ? { scoreProjection: 1 } : {}),
         ...(explicitSource ? { sourceProjection: 2 } : {}),
         ...(input.sourceEffectId === undefined && rankDomainPageId !== undefined
           ? { rankDomainPageId }

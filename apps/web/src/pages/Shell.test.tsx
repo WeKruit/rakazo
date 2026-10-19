@@ -1,6 +1,11 @@
 // @vitest-environment jsdom
 
-import type { AgentSkillCatalogEntry, ProductEvent, ThreadMessage } from "@rakazo/contracts";
+import type {
+  AgentSkillCatalogEntry,
+  ProductEvent,
+  Routine,
+  ThreadMessage,
+} from "@rakazo/contracts";
 import type { ComposerMention } from "@rakazo/core";
 import type { ComponentProps, ReactNode } from "react";
 import { act, createRef } from "react";
@@ -14,7 +19,7 @@ vi.mock("@lingui/react/macro", () => {
   const t = (parts: TemplateStringsArray, ...values: unknown[]) =>
     parts.reduce((text, part, index) => `${text}${index > 0 ? values[index - 1] : ""}${part}`, "");
   return {
-    useLingui: () => ({ t }),
+    useLingui: () => ({ t, i18n: { locale: "en" } }),
     Trans: ({ children }: { children: ReactNode }) => children,
     Plural: ({ _1, other, value }: { _1: string; other: string; value: number }) =>
       (value === 1 ? _1 : other).replace("#", String(value)),
@@ -33,6 +38,8 @@ const shellApi = vi.hoisted(() => ({
   stop: vi.fn(),
   createArtifact: vi.fn(),
   testRun: vi.fn(),
+  listRoutines: vi.fn(),
+  updateRoutine: vi.fn(),
   listSpaces: vi.fn(),
   recruiting: {
     getWorkspace: vi.fn(),
@@ -61,7 +68,16 @@ vi.mock("../lib/rpc", async (importOriginal) => ({
       markRead: vi.fn().mockResolvedValue({ ok: true }),
     },
     artifacts: { create: shellApi.createArtifact },
-    routines: { list: vi.fn().mockResolvedValue([]), testRun: shellApi.testRun },
+    routines: {
+      list: shellApi.listRoutines,
+      testRun: shellApi.testRun,
+      update: shellApi.updateRoutine,
+      history: vi.fn().mockResolvedValue({ runs: [], nextCursor: null }),
+    },
+    models: {
+      credentials: vi.fn().mockResolvedValue([]),
+      list: vi.fn().mockResolvedValue([]),
+    },
     skills: { list: vi.fn().mockResolvedValue([]) },
     spaces: { list: shellApi.listSpaces },
     memory: {
@@ -185,7 +201,7 @@ function pressEnter(textarea: HTMLTextAreaElement) {
 async function renderFeedbackShell(
   kind: "bot" | "group" = "bot",
   runStatuses?: readonly ("queued" | "leased" | "running" | "waiting_input")[],
-  options: { messages?: ThreadMessage[]; isDeploymentOwner?: boolean } = {},
+  options: { messages?: ThreadMessage[]; isDeploymentOwner?: boolean; routines?: Routine[] } = {},
 ) {
   (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
   globalThis.ResizeObserver ??= class {
@@ -294,6 +310,7 @@ async function renderFeedbackShell(
   shellApi.session = {
     data: { user: { id: "user-1", name: "Synthetic recruiter", email: "user@example.test" } },
   };
+  shellApi.listRoutines.mockResolvedValue(options.routines ?? []);
   shellApi.bootstrap.mockResolvedValue({
     me: { spaceId: "space-1", isDeploymentOwner: options.isDeploymentOwner ?? false },
     bots,
@@ -303,7 +320,7 @@ async function renderFeedbackShell(
     archivedBots: [],
     archivedGroups: [],
     thread: kind === "group" ? null : thread,
-    routines: [],
+    routines: options.routines ?? [],
   });
   shellApi.get.mockImplementation(async ({ botId }: { botId?: string }) =>
     botId === "bot-2"
@@ -435,6 +452,70 @@ it("loads a cold group from its own snapshot when bootstrap has no DM snapshot",
   expect(shellApi.get).toHaveBeenCalledWith({ groupId: "group-1" }, expect.anything());
   expect(container?.textContent).toContain("Choose the role location");
   expect(shellApi.recruiting.getWorkspace).toHaveBeenCalledWith({ threadId: "thread-1" });
+});
+
+it("keeps paused one-shot edits inactive and rearms only after Active is enabled", async () => {
+  const routine: Routine = {
+    id: "routine-1",
+    botId: "bot-1",
+    name: "Saved work review",
+    prompt: "Review saved work",
+    crons: ["@once"],
+    timezone: "UTC",
+    active: false,
+    notify: true,
+    webhookEnabled: false,
+    githubEnabled: false,
+    messageProvider: null,
+    modelProvider: null,
+    modelId: null,
+    thinkingLevel: null,
+    lastRunAt: null,
+    nextRunAt: null,
+    createdAt: "2026-01-01T00:00:00Z",
+  };
+  shellApi.updateRoutine.mockImplementation(async (input) => ({
+    ...routine,
+    ...input,
+    nextRunAt: input.runAt ?? null,
+  }));
+  const view = await renderFeedbackShell("bot", undefined, { routines: [routine] });
+  await view.click("Close");
+  await view.navigate("/app/bot-1?routine=routine-1");
+  const instruction = [...document.body.querySelectorAll("label")]
+    .find((label) => label.textContent?.startsWith("Instruction"))!
+    .querySelector("textarea")!;
+  type(instruction, "Review only saved work");
+  await view.click("Save");
+  const edit = {
+    routineId: routine.id,
+    name: routine.name,
+    prompt: "Review only saved work",
+    webhookEnabled: false,
+    githubEnabled: false,
+    messageProvider: null,
+  };
+  expect(shellApi.updateRoutine).toHaveBeenCalledExactlyOnceWith(edit);
+  const active = document.body.querySelector<HTMLButtonElement>('[role="switch"]')!;
+  expect(active.getAttribute("aria-checked")).toBe("false");
+  await act(async () => active.click());
+  const runAt = document.body.querySelector<HTMLInputElement>('input[aria-label="Run at"]')!;
+  const futureLocal = "2099-01-01T12:00";
+  act(() => {
+    Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, "value")!.set!.call(
+      runAt,
+      futureLocal,
+    );
+    runAt.dispatchEvent(new Event("input", { bubbles: true }));
+  });
+  await view.click("Save");
+  expect(shellApi.updateRoutine).toHaveBeenCalledTimes(2);
+  expect(shellApi.updateRoutine).toHaveBeenLastCalledWith({
+    ...edit,
+    active: true,
+    runAt: new Date(futureLocal).toISOString(),
+  });
+  expect(shellApi.answer).not.toHaveBeenCalled();
 });
 
 it.each([

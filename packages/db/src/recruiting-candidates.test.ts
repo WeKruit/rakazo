@@ -71,17 +71,21 @@ function fixture() {
 
 describe("candidate listing and shortlist boundaries", () => {
   beforeEach(() => vi.clearAllMocks());
-  it("authorizes before querying candidate data", async () => {
-    const f = fixture();
-    f.tx.recruitingRole.findFirst.mockResolvedValueOnce(null as never);
-    await expect(
-      recruiting.listRecruitingCandidates(f.prisma, actor, {
-        roleId: "foreign",
-        sourceEffectId: "native-read",
-      }),
-    ).rejects.toThrow(IsolationError);
-    expect(f.tx.$queryRaw).not.toHaveBeenCalled();
-  });
+  it.each(["rank", "score"] as const)(
+    "authorizes before querying candidate %s data",
+    async (sort) => {
+      const f = fixture();
+      f.tx.recruitingRole.findFirst.mockResolvedValueOnce(null as never);
+      await expect(
+        recruiting.listRecruitingCandidates(f.prisma, actor, {
+          roleId: "foreign",
+          sort,
+          sourceEffectId: "native-read",
+        }),
+      ).rejects.toThrow(IsolationError);
+      expect(f.tx.$queryRaw).not.toHaveBeenCalled();
+    },
+  );
   it.each(["Engineer", "Example Candidate", "https://www.linkedin.com/in/example-candidate"])(
     "uses scoped server counts and bounded SQL pagination for %s, with cursors bound to filters",
     async (search) => {
@@ -220,7 +224,13 @@ describe("candidate listing and shortlist boundaries", () => {
     expect(query.sql).toContain("CASE WHEN returned.value ? 'updated_rank'");
     expect(query.sql).toContain("WHEN returned.value ? 'overall_rank'");
     expect(query.sql).toContain("WHEN returned.value ? 'rank' THEN returned.value -> 'rank'");
-    expect(query.sql).toContain("ELSE returned.value -> 'batch_rank' END");
+    expect(query.sql).toContain(
+      "WHEN returned.value ? 'batch_rank' THEN returned.value -> 'batch_rank'",
+    );
+    expect(query.sql).toContain("ELSE returned.value -> 'rank_this_batch_only' END");
+    expect(query.sql).toContain(
+      "(returned.value ? 'rank' OR returned.value ? 'batch_rank' OR returned.value ? 'rank_this_batch_only')",
+    );
     expect(query.sql).toContain('page."effectId" = rank_scope."pageId"');
     expect(query.values).toContain("selected-result");
     expect(query.sql).toContain('AND page."effectId" = ?');
@@ -379,8 +389,11 @@ describe("candidate listing and shortlist boundaries", () => {
     ["rank", "selected-result", []],
     ["rank", undefined, [{ effectId: "first" }, { effectId: "second" }]],
     ["rank", undefined, []],
+    ["score", "selected-result", []],
+    ["score", undefined, [{ effectId: "first" }, { effectId: "second" }]],
+    ["score", undefined, []],
   ] as const)(
-    "uses the current %s rank projection for source %s and pages %j",
+    "uses the current %s projection for source %s and pages %j",
     async (sort, sourceEffectId, pages) => {
       const f = fixture();
       f.tx.recruitingCandidatePage.findMany.mockResolvedValue([...pages]);
@@ -390,7 +403,8 @@ describe("candidate listing and shortlist boundaries", () => {
             roleId: "role",
             roleRevisionId: "revision",
             sort,
-            ...(sort === "rank" ? { rankProjection: 2 } : {}),
+            ...(sort === "rank" ? { rankProjection: 3 } : {}),
+            ...(sort === "score" ? { scoreProjection: 1 } : {}),
             ...(sourceEffectId !== undefined ? { sourceProjection: 2 } : {}),
             query: "",
             assessmentState: null,
@@ -431,36 +445,41 @@ describe("candidate listing and shortlist boundaries", () => {
       expect(f.tx.$queryRaw).toHaveBeenCalledTimes(2);
     },
   );
-  it("rejects pre-batch-rank cursors before they can skip newly recognized ranks", async () => {
-    const f = fixture();
-    const scope = createHash("sha256")
-      .update(
-        stableJsonValue({
+  it.each(["rank", "score"] as const)(
+    "rejects pre-native-field %s cursors before they can skip newly recognized values",
+    async (sort) => {
+      const f = fixture();
+      const scope = createHash("sha256")
+        .update(
+          stableJsonValue({
+            roleId: "role",
+            roleRevisionId: "revision",
+            sort,
+            ...(sort === "rank" ? { rankProjection: 2 } : {}),
+            sourceProjection: 2,
+            query: "",
+            assessmentState: null,
+            verdict: null,
+            shortlisted: null,
+            actionId: null,
+            sourceEffectId: "selected-result",
+          }),
+        )
+        .digest("hex");
+      const cursor = Buffer.from(
+        JSON.stringify({ version: 1, scope, value: "", key: "previously-unranked" }),
+      ).toString("base64url");
+      await expect(
+        recruiting.listRecruitingCandidates(f.prisma, actor, {
           roleId: "role",
-          roleRevisionId: "revision",
-          sort: "rank",
-          query: "",
-          assessmentState: null,
-          verdict: null,
-          shortlisted: null,
-          actionId: null,
+          sort,
           sourceEffectId: "selected-result",
+          cursor,
         }),
-      )
-      .digest("hex");
-    const cursor = Buffer.from(
-      JSON.stringify({ version: 1, scope, value: "", key: "previously-unranked" }),
-    ).toString("base64url");
-    await expect(
-      recruiting.listRecruitingCandidates(f.prisma, actor, {
-        roleId: "role",
-        sort: "rank",
-        sourceEffectId: "selected-result",
-        cursor,
-      }),
-    ).rejects.toThrow(recruiting.RecruitingConflictError);
-    expect(f.tx.$queryRaw).not.toHaveBeenCalled();
-  });
+      ).rejects.toThrow(recruiting.RecruitingConflictError);
+      expect(f.tx.$queryRaw).not.toHaveBeenCalled();
+    },
+  );
   it.each(["rank", "tier", "score"] as const)(
     "paginates native %s values with unknowns last and isolated single-page rank cursors",
     async (sort) => {
@@ -521,7 +540,7 @@ describe("candidate listing and shortlist boundaries", () => {
         `ORDER BY "matchValue" ${sort === "score" ? "DESC" : "ASC"} NULLS LAST, "candidateKey" COLLATE "C" ASC`,
       );
       if (sort !== "tier") {
-        expect(firstQuery.sql).toContain("ELSE returned.value -> 'batch_rank' END");
+        expect(firstQuery.sql).toContain("ELSE returned.value -> 'rank_this_batch_only' END");
         expect(firstQuery.values).toContain("only-page");
         expect(firstQuery.sql).not.toContain('p."effectId" =');
         expect(f.tx.recruitingCandidatePage.findMany).toHaveBeenCalledExactlyOnceWith({
@@ -541,13 +560,19 @@ describe("candidate listing and shortlist boundaries", () => {
           expect(firstQuery.sql).toContain(
             'rank_scope."pageId" IS NOT NULL AND page."effectId" = rank_scope."pageId"',
           );
-          expect(firstQuery.values).toContain("match_score");
+          expect(firstQuery.sql).toContain(
+            "CASE WHEN returned.value ? 'match_score' THEN returned.value -> 'match_score'",
+          );
+          expect(firstQuery.sql).toContain("ELSE returned.value -> 'score' END");
+          expect(firstQuery.sql).toContain(
+            "(returned.value ? 'match_score' OR returned.value ? 'score') AND",
+          );
         }
       } else {
         expect(firstQuery.values).toContain("match_tier");
         expect(firstQuery.sql).toContain('(rank_scope."pageId" IS NOT NULL AND');
         expect(firstQuery.sql).toContain(
-          "(returned.value ? 'rank' OR returned.value ? 'batch_rank')",
+          "(returned.value ? 'rank' OR returned.value ? 'batch_rank' OR returned.value ? 'rank_this_batch_only')",
         );
         expect(f.tx.recruitingCandidatePage.findMany).not.toHaveBeenCalled();
       }
@@ -640,7 +665,7 @@ describe("candidate listing and shortlist boundaries", () => {
         expect(multiplePages.sql).toContain('CASE WHEN count(*) = 1 THEN min("effectId") END');
         expect(multiplePages.sql).toContain('(rank_scope."pageId" IS NOT NULL AND');
         expect(multiplePages.sql).toContain(
-          "(returned.value ? 'rank' OR returned.value ? 'batch_rank')",
+          "(returned.value ? 'rank' OR returned.value ? 'batch_rank' OR returned.value ? 'rank_this_batch_only')",
         );
         expect(multiplePages.sql).toContain("WHEN returned.value ? 'overall_rank'");
         expect(multiplePages.sql).toContain("THEN returned.value -> 'updated_rank'");

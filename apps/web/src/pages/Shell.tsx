@@ -4359,7 +4359,8 @@ export function ShellPage() {
                     };
                     let saved: Routine;
                     if (targetRoutine) {
-                      const armOneShot = routineNeedsOneShotArm(targetRoutine, crons);
+                      const armOneShot =
+                        routineDraft.active && routineNeedsOneShotArm(targetRoutine, crons);
                       let runAt: string | undefined;
                       if (armOneShot) {
                         if (!routineDraft.runAtLocal) {
