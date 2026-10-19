@@ -5,6 +5,7 @@ export * from "./artifact-read.js";
 export * from "./artifacts.js";
 export * from "./auto-review.js";
 export * from "./auto-review-factory.js";
+export * from "./autumn-files.js";
 export * from "./background-job-handlers.js";
 export * from "./billing-emulator.js";
 export * from "./bot-avatar.js";

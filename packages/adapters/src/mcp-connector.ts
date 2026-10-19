@@ -3,6 +3,7 @@ import type {
   ConnectorCall,
   ConnectorEvent,
   ConnectorProvider,
+  ConnectorRoute,
   ConnectorTool,
   SecretStore,
 } from "@rakazo/adapter-kit";
@@ -81,6 +82,53 @@ function reportAllowlistDrift(
       missing: drift.missing.slice(0, 10),
     },
   );
+}
+
+export async function requireMcpToolAssignment(
+  prisma: PrismaClient,
+  context: AdapterContext,
+  route: Pick<ConnectorRoute, "resourceId" | "resourceRevision">,
+  toolName: string,
+) {
+  if (!context.botId || !route.resourceId) throw new Error("MCP tools require a bot context");
+  const assignment = await prisma.botMcpServer.findFirst({
+    where: {
+      botId: context.botId,
+      serverId: route.resourceId,
+      spaceId: context.spaceId,
+      userId: context.userId,
+      server: { enabled: true },
+    },
+    include: { server: true },
+  });
+  if (
+    !assignment ||
+    (!assignment.allowAllTools &&
+      (!Array.isArray(assignment.allowedTools) || !assignment.allowedTools.includes(toolName)))
+  )
+    throw new Error("MCP tool is not assigned to this bot");
+  if (route.resourceRevision !== assignment.server.revision)
+    throw new Error("MCP server changed; rediscover the tool before trying again");
+  return assignment;
+}
+
+export async function loadMcpCredentialRecord(
+  prisma: PrismaClient,
+  secrets: SecretStore,
+  server: Pick<McpServer, "secretId">,
+  context: AdapterContext,
+  onRef?: (ref: string, recordId: string) => void,
+) {
+  const secret = server.secretId
+    ? await prisma.secret.findFirst({
+        where: { id: server.secretId, spaceId: context.spaceId, userId: context.userId },
+      })
+    : null;
+  if (secret) onRef?.(secret.ciphertext, secret.id);
+  const plaintext = secret
+    ? await secrets.load(secret.ciphertext, { recordId: secret.id, signal: context.signal })
+    : undefined;
+  return { secret, plaintext };
 }
 
 export class McpConnector implements ConnectorProvider {
@@ -271,31 +319,12 @@ export class McpConnector implements ConnectorProvider {
     let callStarted = false;
     let sessionKey: string | undefined;
     try {
-      const assignment = await this.prisma.botMcpServer.findFirst({
-        where: {
-          botId: context.botId,
-          serverId: call.route.resourceId,
-          spaceId: context.spaceId,
-          userId: context.userId,
-          server: { enabled: true },
-        },
-        include: { server: true },
-      });
-      if (
-        !assignment ||
-        (!assignment.allowAllTools &&
-          !(assignment.allowedTools as unknown[]).includes(call.route.toolName))
-      ) {
-        yield { type: "error", message: "MCP tool is not assigned to this bot" };
-        return;
-      }
-      if (call.route.resourceRevision !== assignment.server.revision) {
-        yield {
-          type: "error",
-          message: "MCP server changed; rediscover the tool before trying again",
-        };
-        return;
-      }
+      const assignment = await requireMcpToolAssignment(
+        this.prisma,
+        context,
+        call.route,
+        call.route.toolName,
+      );
       sessionKey = this.sessionKey(assignment.server, context);
       const session = await this.sessionFor(assignment.server, context);
       material = this.sessions.get(sessionKey)?.material;
@@ -423,24 +452,15 @@ export class McpConnector implements ConnectorProvider {
     // Hoisted so a throw after the secret is decoded can still hand the material out.
     let material: OAuthMaterial | undefined;
     try {
-      const secret = server.secretId
-        ? await this.prisma.secret.findFirst({
-            where: {
-              id: server.secretId,
-              spaceId: context.spaceId,
-              userId: context.userId,
-            },
-          })
-        : null;
+      const { secret, plaintext } = await loadMcpCredentialRecord(
+        this.prisma,
+        this.secrets,
+        server,
+        context,
+        onRef,
+      );
       let ref = secret?.ciphertext;
       let recordId = secret?.id;
-      if (secret) onRef(secret.ciphertext, secret.id);
-      const plaintext = secret
-        ? await this.secrets.load(secret.ciphertext, {
-            recordId: secret.id,
-            signal: context.signal,
-          })
-        : undefined;
       let digest = plaintext === undefined ? undefined : credentialDigest(plaintext);
       material = plaintext === undefined ? {} : (JSON.parse(plaintext) as OAuthMaterial);
       const loaded = { material, ...(secret ? { secretId: secret.id } : {}) };
