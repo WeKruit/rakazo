@@ -253,6 +253,16 @@ export function AskCard({
                       </option>
                     ))}
                   </select>
+                ) : field.type === "string" && !("format" in field && field.format) ? (
+                  <Textarea
+                    id={id}
+                    aria-label={label}
+                    aria-required={required}
+                    required={required && "minLength" in field && (field.minLength ?? 0) > 0}
+                    aria-describedby={field.description ? `${id}-description` : undefined}
+                    value={typeof value === "string" ? value : ""}
+                    onChange={(event) => setValue(event.target.value)}
+                  />
                 ) : (
                   <Input
                     id={id}

@@ -53,19 +53,27 @@ it("renders and answers the actual mobile multi-field card with typed multi-sele
       value,
       onChangeText,
       editable,
+      multiline,
+      keyboardType,
     }: {
       accessibilityLabel: string;
       value: string;
       onChangeText: (text: string) => void;
       editable: boolean;
-    }) => (
-      <input
-        aria-label={accessibilityLabel}
-        value={value}
-        disabled={!editable}
-        onChange={(event) => onChangeText(event.target.value)}
-      />
-    ),
+      multiline?: boolean;
+      keyboardType?: string;
+    }) => {
+      const Input = multiline ? "textarea" : "input";
+      return (
+        <Input
+          aria-label={accessibilityLabel}
+          data-keyboard-type={keyboardType}
+          value={value}
+          disabled={!editable}
+          onChange={(event) => onChangeText(event.target.value)}
+        />
+      );
+    },
     NativeSwitch: ({
       accessibilityLabel,
       value,
@@ -117,6 +125,7 @@ it("renders and answers the actual mobile multi-field card with typed multi-sele
       type: "object",
       properties: {
         website: { type: "string", title: "Website", format: "uri" },
+        guidance: { type: "string", title: "Guidance", maxLength: 12000 },
         count: { type: "integer", default: 2 },
         regions: {
           type: "array",
@@ -130,7 +139,23 @@ it("renders and answers the actual mobile multi-field card with typed multi-sele
   };
   try {
     act(() => root.render(<AskBlock ask={ask} canAnswer onAnswer={onAnswer} actionProps={{}} />));
+    const guidance = container.querySelector<HTMLTextAreaElement>(
+      'textarea[aria-label="Guidance"]',
+    )!;
+    expect(guidance).not.toBeNull();
+    const guidanceText = "Keep confirmed evidence.\nFlag missing evidence.";
+    act(() => {
+      Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, "value")!.set!.call(
+        guidance,
+        guidanceText,
+      );
+      guidance.dispatchEvent(new Event("input", { bubbles: true }));
+    });
     const input = container.querySelector<HTMLInputElement>('input[aria-label="Website"]')!;
+    expect(input.dataset.keyboardType).toBe("url");
+    expect(
+      container.querySelector<HTMLInputElement>('input[aria-label="count"]')!.dataset.keyboardType,
+    ).toBe("numbers-and-punctuation");
     const setWebsite = (value: string) =>
       act(() => {
         Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, "value")!.set!.call(
@@ -160,7 +185,12 @@ it("renders and answers the actual mobile multi-field card with typed multi-sele
     );
     expect(onAnswer).toHaveBeenCalledExactlyOnceWith({
       action: "accept",
-      content: { count: 2, regions: ["north", "south"], website: "https://example.com" },
+      content: {
+        count: 2,
+        regions: ["north", "south"],
+        website: "https://example.com",
+        guidance: guidanceText,
+      },
     });
     await act(async () =>
       [...container.querySelectorAll("button")]

@@ -4079,6 +4079,7 @@ function AskBlock({
                   <TextInput
                     accessibilityLabel={label}
                     accessibilityHint={field.description}
+                    multiline={field.type === "string" && !("format" in field && field.format)}
                     value={
                       typeof value === "string" || typeof value === "number" ? String(value) : ""
                     }

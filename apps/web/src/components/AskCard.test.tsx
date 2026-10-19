@@ -34,6 +34,7 @@ it("renders native form fields, validates URL and submits typed multi-select on 
       type: "object",
       properties: {
         website: { type: "string", title: "Website", format: "uri" },
+        guidance: { type: "string", title: "Guidance", maxLength: 12000 },
         regions: {
           type: "array",
           title: "Regions",
@@ -62,9 +63,24 @@ it("renders native form fields, validates URL and submits typed multi-select on 
   };
   try {
     act(() => root.render(<AskCard block={block} canAnswer onAnswer={answer} />));
-    expect(container.querySelector("textarea")).toBeNull();
+    const guidance = container.querySelector<HTMLTextAreaElement>(
+      'textarea[aria-label="Guidance"]',
+    )!;
+    expect(guidance).not.toBeNull();
+    const guidanceText = "Keep confirmed evidence.\nFlag missing evidence.";
+    act(() => {
+      Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, "value")!.set!.call(
+        guidance,
+        guidanceText,
+      );
+      guidance.dispatchEvent(new Event("input", { bubbles: true }));
+    });
     const input = container.querySelector<HTMLInputElement>('input[aria-label="Website"]')!;
     expect(input).not.toBeNull();
+    expect(input.type).toBe("url");
+    expect(container.querySelector<HTMLInputElement>('input[aria-label="Count"]')!.type).toBe(
+      "number",
+    );
     expect(input.required).toBe(true);
     expect(
       container.querySelector<HTMLInputElement>('input[aria-label="Confirmed"]')!.required,
@@ -102,6 +118,7 @@ it("renders native form fields, validates URL and submits typed multi-select on 
       action: "accept",
       content: {
         website: "https://example.com",
+        guidance: guidanceText,
         regions: ["north", "south"],
         count: 2,
         confirmed: true,
