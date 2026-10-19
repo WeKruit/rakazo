@@ -1970,16 +1970,17 @@ function RecruitingWorkspace({
     ).values(),
   ];
   const assessments = snapshot?.assessments ?? [];
-  const showInternalAssessments = showDiagnostics || !snapshot || assessments.length > 0;
+  const showInternalAssessments = showDiagnostics || assessments.length > 0;
+  const retainInternalAssessmentFilters = showInternalAssessments || !snapshot;
   const candidateRequestFilters = useMemo(() => {
     if (
-      showInternalAssessments ||
+      retainInternalAssessmentFilters ||
       (candidateFilters.assessmentState === undefined && candidateFilters.verdict === undefined)
     )
       return candidateFilters;
     const { assessmentState: _, verdict: __, ...filters } = candidateFilters;
     return filters;
-  }, [candidateFilters, showInternalAssessments]);
+  }, [candidateFilters, retainInternalAssessmentFilters]);
   const selectedKey =
     selection && selection.roleId === workspace?.role.id
       ? JSON.stringify([

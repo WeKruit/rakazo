@@ -1330,11 +1330,19 @@ it("keeps the candidate page when empty auxiliary assessments finish without cha
   const view = await mounted("thread-1", undefined, false);
   await view.click("Evidence");
   expect(view.container.textContent).toContain(candidate.name);
-  expect(api.listCandidates).toHaveBeenCalledTimes(1);
+  expect(api.listCandidates).toHaveBeenCalledExactlyOnceWith({
+    roleId: role.id,
+    limit: 30,
+    sort: "rank",
+  });
+  expect(view.container.querySelector('select[aria-label="Internal assessment"]')).toBeNull();
+  expect(view.container.querySelector('select[aria-label="Internal verdict"]')).toBeNull();
+  expect(view.container.textContent).not.toContain("Internal assessment");
   await act(async () => finish([]));
   expect(view.container.textContent).toContain(candidate.name);
   expect(api.listCandidates).toHaveBeenCalledTimes(1);
   expect(view.container.querySelector('select[aria-label="Internal assessment"]')).toBeNull();
+  expect(view.container.querySelector('select[aria-label="Internal verdict"]')).toBeNull();
 });
 
 it("keeps a pending or failed assessment read distinct from an empty assessment list", async () => {
