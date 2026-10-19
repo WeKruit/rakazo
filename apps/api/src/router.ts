@@ -70,6 +70,7 @@ import {
   hasActiveComputerControl,
   hostCredentialSource,
   isAutoReviewCheckerConfigured,
+  isCatalogModelChoice,
   isComputerScreenUnavailable,
   isSandboxGoneError,
   isScratchpadStatus,
@@ -795,6 +796,47 @@ export function createRouter(deps: RouterDeps) {
     deps.refreshExpiredModelCredential ??
     ((scope: { userId: string; spaceId: string }, secretId: string, provider: string) =>
       kickModelCredentialRefresh(deps.prisma, deps.secrets, scope, secretId, provider));
+  /** A routine may only name a connected model and settings that connection can run. */
+  async function assertRoutineModel(
+    actor: Actor,
+    model: {
+      modelProvider?: string | null;
+      modelId?: string | null;
+      thinkingLevel?: string | null;
+    },
+  ) {
+    const { modelProvider: provider, modelId, thinkingLevel } = model;
+    if (!provider || !modelId) return;
+    const message = await validateConnectedModelChoice(deps.prisma, actor, provider, modelId);
+    if (message) throw new ORPCError("BAD_REQUEST", { message });
+    if (isCatalogModelChoice(provider, modelId)) {
+      const credential = await findModelCredential(deps.prisma, actor, provider, modelId);
+      if (!credential) {
+        throw new ORPCError("BAD_REQUEST", { message: "Connect that model provider first" });
+      }
+      const authError = await validateStoredModelAuth(
+        deps.prisma,
+        deps.secrets,
+        actor.userId,
+        credential.secretId,
+        provider,
+        modelId,
+        codexCatalog,
+        {
+          onExpiredToken: () => refreshExpiredCredential(actor, credential.secretId, provider),
+        },
+      );
+      if (authError) throw new ORPCError("BAD_REQUEST", { message: authError });
+    }
+    if (thinkingLevel) {
+      const allowed = await allowedThinkingLevels(deps, actor, provider, modelId);
+      if (allowed && !allowed.includes(thinkingLevel)) {
+        throw new ORPCError("BAD_REQUEST", {
+          message: `Thinking level must be one of: ${allowed.join(", ")}`,
+        });
+      }
+    }
+  }
   const groupRepos = createGroupRepos(deps.prisma);
   const taughtSkills = createTaughtSkillsService({
     prisma: deps.prisma,
@@ -1739,6 +1781,7 @@ export function createRouter(deps: RouterDeps) {
                 deps.prisma,
                 context.actor,
                 effectiveProvider,
+                effectiveModelId,
               );
               if (credential && credential.defaultModel === effectiveModelId) {
                 const secret = await deps.prisma.secret.findFirst({
@@ -3404,7 +3447,7 @@ export function createRouter(deps: RouterDeps) {
           });
         }
         const bot = await repos.getBot(context.actor, input.botId);
-        await assertRoutineModel(deps, context.actor, input);
+        await assertRoutineModel(context.actor, input);
         // Validate every recurring cron even when inactive; @once and webhook-only have no next date.
         let nextRunAt: Date | null = null;
         if (input.crons.length > 0 && !isOneShotRoutineCrons(input.crons)) {
@@ -3490,8 +3533,8 @@ export function createRouter(deps: RouterDeps) {
               ? null
               : existing.thinkingLevel
             : input.thinkingLevel;
-        if (modelChanged) {
-          await assertRoutineModel(deps, context.actor, { modelProvider, modelId });
+        if (modelChanged || input.thinkingLevel) {
+          await assertRoutineModel(context.actor, { modelProvider, modelId, thinkingLevel });
         }
         if (crons.length === 0 && !webhookEnabled && !githubEnabled && !messageProvider) {
           throw new ORPCError("BAD_REQUEST", {
@@ -6528,7 +6571,7 @@ async function prepareAllowedThinkingLevels(
   }
   let allowed: string[] | undefined = ["off"];
   let savedSecret: { id: string; ciphertext: string } | undefined;
-  const credential = await findModelCredential(deps.prisma, actor, provider);
+  const credential = await findModelCredential(deps.prisma, actor, provider, modelId);
   if (credential && credential.defaultModel === modelId) {
     const secret = await deps.prisma.secret.findFirst({
       where: { id: credential.secretId, userId: actor.userId, spaceId: null },
@@ -6983,22 +7026,6 @@ function nextRoutineDate(crons: string[], timezone: string): Date {
   }
   if (!next) throw new ORPCError("BAD_REQUEST", { message: "Enter a valid cron expression." });
   return next;
-}
-
-/** A routine may only name a model the space has connected. */
-async function assertRoutineModel(
-  deps: RouterDeps,
-  actor: Actor,
-  model: { modelProvider?: string | null; modelId?: string | null },
-) {
-  if (!model.modelProvider || !model.modelId) return;
-  const message = await validateConnectedModelChoice(
-    deps.prisma,
-    actor,
-    model.modelProvider,
-    model.modelId,
-  );
-  if (message) throw new ORPCError("BAD_REQUEST", { message });
 }
 
 function mapRoutine(row: {
