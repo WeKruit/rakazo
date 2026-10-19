@@ -7,6 +7,7 @@ import type {
   ConnectorTool,
   SecretStore,
 } from "@rakazo/adapter-kit";
+import { attachmentExtensionForMimeType, inferAttachmentMimeType } from "@rakazo/core";
 import type { PrismaClient } from "@rakazo/db";
 import { z } from "zod";
 import { readActorArtifact } from "./artifact-read.js";
@@ -159,12 +160,19 @@ export class AutumnFileConnector implements ConnectorProvider {
         context,
         { artifactId: parsed.data.artifactId, fromTool: true },
       );
+      const reportedType = row.mimeType.split(";", 1)[0]?.trim().toLowerCase() ?? "";
+      const mimeType = inferAttachmentMimeType(row.name, reportedType);
       if (
         bytes.byteLength > 10_000_000 ||
         /[/\\\0]/.test(row.name) ||
-        !/\.(csv|txt|md|markdown)$/i.test(row.name)
+        !["text/csv", "text/plain", "text/markdown"].includes(reportedType) ||
+        !mimeType
       )
         throw new Error("A CSV, text or Markdown file up to 10 MB is required");
+      const filename =
+        inferAttachmentMimeType(row.name) === mimeType
+          ? row.name
+          : `${row.name}${attachmentExtensionForMimeType(mimeType)}`;
       const assertAuthorized = async () => {
         const current = await this.authorize(call.route, context);
         if (current.secretId !== credential.secretId || current.key !== credential.key)
@@ -192,7 +200,7 @@ export class AutumnFileConnector implements ConnectorProvider {
       };
       phase = "upload preparation";
       const presigned = Presigned.parse(
-        (await request("/upload-url", { task_id: parsed.data.task_id, filename: row.name })).data,
+        (await request("/upload-url", { task_id: parsed.data.task_id, filename })).data,
       );
       redactions.push(presigned.upload_url);
       phase = "file upload";

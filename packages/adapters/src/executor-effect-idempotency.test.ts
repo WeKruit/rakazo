@@ -21,6 +21,7 @@ import {
   claimRecruitingResearchAction,
   claimRecruitingResearchReadEffect,
   IsolationError,
+  Prisma,
   RecruitingSourceValidationError,
   recruitingResearchSnapshot,
   settleUncertainRecruitingResearchAction,
@@ -2929,6 +2930,87 @@ describe("native recruiting research executor integration", () => {
     expect(f.connector.execute).not.toHaveBeenCalled();
     expect(f.effects).toHaveLength(1);
   });
+
+  it.each([false, true])(
+    "settles a local P2028 against its authoritative save receipt (committed=%s)",
+    async (committed) => {
+      const f = fixture("native-candidate-transaction-error");
+      const input = {
+        operation: "save_results",
+        expectedRoleRevision: 1,
+        providerTaskId: "native-task",
+        cursor: null,
+      };
+      const saved = { status: "saved", sourceEffectId: "native-read", candidateRows: [] };
+      const failure = new Prisma.PrismaClientKnownRequestError("Local save transaction ended", {
+        code: "P2028",
+        clientVersion: "test",
+      });
+      vi.mocked(saveNativeRecruitingCandidateResults)
+        .mockReset()
+        .mockImplementation(async (_deps, trusted) => {
+          const effect = f.effects.find((item) => item.id === trusted.effectId)!;
+          expect(effect.status).toBe("executing");
+          if (committed) Object.assign(effect, { status: "completed", result: saved });
+          throw failure;
+        });
+      f.setCalls([{ name: "recruiting_research", args: input, executionId: "save-page" }]);
+
+      await f.run();
+      await f.run();
+
+      const result = committed
+        ? saved
+        : {
+            error: "Candidate results could not be saved. Previously saved results are unchanged.",
+          };
+      expect(f.results).toEqual([result, result]);
+      expect(JSON.stringify(f.results)).not.toContain(failure.message);
+      expect(f.effects).toEqual([expect.objectContaining({ status: "completed", result })]);
+      expect(saveNativeRecruitingCandidateResults).toHaveBeenCalledOnce();
+      expect(f.connector.execute).not.toHaveBeenCalled();
+    },
+  );
+
+  it.each(["unsettled", "read-failed"])(
+    "does not claim a local P2028 save completed when settlement is %s",
+    async (outcome) => {
+      const f = fixture("unsettled-native-candidate-save");
+      vi.mocked(saveNativeRecruitingCandidateResults)
+        .mockReset()
+        .mockImplementation(async () => {
+          f.prisma.externalEffect.updateMany.mockResolvedValueOnce({ count: 0 });
+          if (outcome === "read-failed")
+            f.prisma.externalEffect.findUnique.mockRejectedValueOnce(
+              new Error("Save outcome read failed"),
+            );
+          throw new Prisma.PrismaClientKnownRequestError("Local save transaction ended", {
+            code: "P2028",
+            clientVersion: "test",
+          });
+        });
+      f.setCalls([
+        {
+          name: "recruiting_research",
+          args: {
+            operation: "save_results",
+            expectedRoleRevision: 1,
+            providerTaskId: "native-task",
+            cursor: null,
+          },
+          executionId: "save-page",
+        },
+      ]);
+
+      await f.run(outcome === "read-failed" ? "Save outcome read failed" : undefined);
+
+      expect(f.effects[0]?.status).toBe("executing");
+      if (outcome === "unsettled")
+        expect(f.results).toEqual([{ error: expect.any(String), uncertain: true }]);
+      else expect(f.results).toEqual([]);
+      expect(f.connector.execute).not.toHaveBeenCalled();
+    },
+  );
 
   it("recovers an executing local candidate save after interruption before commit", async () => {
     const f = fixture("interrupted-native-candidate-save");

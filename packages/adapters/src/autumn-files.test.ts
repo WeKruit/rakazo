@@ -39,6 +39,7 @@ function fixture() {
     botId: "another-bot",
     runId: context.runId,
     name: "notes.md",
+    mimeType: "text/markdown",
     storageKey: "stored-original",
     hash: createHash("sha256").update(bytes).digest("hex"),
     size: bytes.byteLength,
@@ -189,6 +190,31 @@ describe("native Autumn file continuation", () => {
     expect(f.prisma.$queryRaw).toHaveBeenCalledOnce();
   });
 
+  it.each([
+    ["Recovered exclusion input", "text/plain", "Recovered exclusion input.txt"],
+    ["Saved report", "Text/Markdown; charset=utf-8", "Saved report.md"],
+    ["Saved rows", "text/csv; charset=utf-8", "Saved rows.csv"],
+    ["notes.markdown", "text/plain", "notes.markdown"],
+    ["notes.csv", "text/plain", "notes.csv.txt"],
+  ])(
+    "derives the upload filename from saved MIME without changing the artifact (%s)",
+    async (name, mimeType, filename) => {
+      const f = fixture();
+      Object.assign(f.artifact, { name, mimeType });
+      const original = { ...f.artifact };
+
+      expect(await f.execute()).toEqual([expect.objectContaining({ type: "result" })]);
+
+      expect(JSON.parse(String(f.fetch.mock.calls[0]![1]!.body))).toEqual({
+        task_id: "task-1",
+        filename,
+      });
+      expect(f.fetch.mock.calls[1]![1]!.body).toEqual(f.bytes);
+      expect(f.artifact).toEqual(original);
+      expect(createHash("sha256").update(f.bytes).digest("hex")).toBe(original.hash);
+    },
+  );
+
   it("discovers a local write tool only for the assigned official API-key connection without network calls", async () => {
     const f = fixture();
     expect(await f.connector.discoverTools(f.context)).toEqual([
@@ -261,21 +287,25 @@ describe("native Autumn file continuation", () => {
     expect(f.fetch).not.toHaveBeenCalled();
   });
 
-  it.each(["foreign actor", "internal context", "corrupt bytes", "unsupported file"])(
-    "retains the native artifact boundary for %s",
-    async (condition) => {
-      const f = fixture();
-      if (condition === "foreign actor") f.artifact.userId = "another-user";
-      if (condition === "internal context")
-        f.prisma.$queryRaw.mockResolvedValue([{ id: f.artifact.id }]);
-      if (condition === "corrupt bytes") f.artifact.hash = "0".repeat(64);
-      if (condition === "unsupported file") f.artifact.name = "private.bin";
-      expect(await f.execute()).toEqual([expect.objectContaining({ type: "error" })]);
-      expect(f.fetch).not.toHaveBeenCalled();
-      if (condition === "foreign actor" || condition === "internal context")
-        expect(f.artifacts.get).not.toHaveBeenCalled();
-    },
-  );
+  it.each([
+    "foreign actor",
+    "internal context",
+    "corrupt bytes",
+    "unsupported MIME",
+    "malformed path",
+  ])("retains the native artifact boundary for %s", async (condition) => {
+    const f = fixture();
+    if (condition === "foreign actor") f.artifact.userId = "another-user";
+    if (condition === "internal context")
+      f.prisma.$queryRaw.mockResolvedValue([{ id: f.artifact.id }]);
+    if (condition === "corrupt bytes") f.artifact.hash = "0".repeat(64);
+    if (condition === "unsupported MIME") f.artifact.mimeType = "application/octet-stream";
+    if (condition === "malformed path") f.artifact.name = "folder/notes.md";
+    expect(await f.execute()).toEqual([expect.objectContaining({ type: "error" })]);
+    expect(f.fetch).not.toHaveBeenCalled();
+    if (condition === "foreign actor" || condition === "internal context")
+      expect(f.artifacts.get).not.toHaveBeenCalled();
+  });
 
   it("blocks an unsafe presigned URL using the native URL policy without sending a PUT", async () => {
     const f = fixture();

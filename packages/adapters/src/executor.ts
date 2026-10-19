@@ -118,13 +118,7 @@ import {
   stableJsonValue,
   toolEffectIdempotencyKey,
 } from "@rakazo/core/node/approval-effect-key";
-import type {
-  McpServer,
-  Prisma,
-  PrismaClient,
-  RecruitingRoleToolResult,
-  ThreadEvents,
-} from "@rakazo/db";
+import type { McpServer, PrismaClient, RecruitingRoleToolResult, ThreadEvents } from "@rakazo/db";
 import {
   admitRecruitingCrmImport,
   admitRecruitingReply,
@@ -147,6 +141,7 @@ import {
   isTooManyDatabaseConnections,
   loadRunHistoryMessages,
   loadRunHumanSources,
+  Prisma,
   parseComputerMode,
   prepareRecruitingApproval,
   prepareRecruitingCrmBinding,
@@ -6656,6 +6651,29 @@ export function createRunExecutor(deps: ExecutorDeps) {
               if ("roleContext" in result) await retainRecruitingSource(result.source);
               return finish(redactConnectorPayload(result, runSecrets));
             } catch (error) {
+              if (
+                researchInput.data.operation === "save_results" &&
+                applied &&
+                claimedEffect &&
+                error instanceof Prisma.PrismaClientKnownRequestError &&
+                error.code === "P2028"
+              ) {
+                const result = {
+                  error:
+                    "Candidate results could not be saved. Previously saved results are unchanged.",
+                };
+                // The projection and completed receipt share the same effect-row lock.
+                // A CAS that loses to that transaction must return its real receipt.
+                if (await persistEffectResult(result)) return result;
+                const current = await deps.prisma.externalEffect.findUnique({
+                  where: { id: applied.effect.id },
+                });
+                if (current?.status === "completed") {
+                  const gate = resolveDuplicateEffectGate(current, name);
+                  if (gate.action === "return") return gate.result;
+                }
+                return uncertainEffectResult(name);
+              }
               if (error instanceof RecruitingCandidateOutputError)
                 return finish({ error: error.message });
               if (error instanceof IsolationError)
