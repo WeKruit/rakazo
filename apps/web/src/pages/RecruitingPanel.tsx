@@ -53,7 +53,7 @@ import {
   Textarea,
 } from "@rakazo/ui-web";
 import { Check, CircleHelp, RefreshCw, X } from "lucide-react";
-import { useCallback, useEffect, useId, useRef, useState } from "react";
+import { useCallback, useEffect, useId, useMemo, useRef, useState } from "react";
 import { ArtifactFileCard } from "../components/ArtifactFileCard";
 import { AskCard } from "../components/AskCard";
 import { Shimmer } from "../components/ai/primitives";
@@ -1933,6 +1933,12 @@ function RecruitingWorkspace({
     ).values(),
   ];
   const assessments = snapshot?.assessments ?? [];
+  const showInternalAssessments = showDiagnostics || !snapshot || assessments.length > 0;
+  const candidateRequestFilters = useMemo(() => {
+    if (showInternalAssessments) return candidateFilters;
+    const { assessmentState: _, verdict: __, ...filters } = candidateFilters;
+    return filters;
+  }, [candidateFilters, showInternalAssessments]);
   const selectedKey =
     selection && selection.roleId === workspace?.role.id
       ? JSON.stringify([
@@ -1973,7 +1979,11 @@ function RecruitingWorkspace({
     if (!roleId) return;
     const query = candidateQuery.current;
     void (async () => {
-      let page = await rpc.recruiting.listCandidates({ roleId, limit: 30, ...candidateFilters });
+      let page = await rpc.recruiting.listCandidates({
+        roleId,
+        limit: 30,
+        ...candidateRequestFilters,
+      });
       if (!isCurrent()) return;
       if (page.roleId !== roleId || page.roleRevisionId !== roleRevisionId) {
         setRefresh((value) => value + 1);
@@ -1986,7 +1996,7 @@ function RecruitingWorkspace({
         const next = await rpc.recruiting.listCandidates({
           roleId,
           limit: 30,
-          ...candidateFilters,
+          ...candidateRequestFilters,
           cursor: page.nextCursor,
         });
         if (!isCurrent()) return;
@@ -2043,7 +2053,7 @@ function RecruitingWorkspace({
     return () => {
       cancelled = true;
     };
-  }, [roleId, roleRevisionId, candidateFilters, snapshot, denyAccess]);
+  }, [roleId, roleRevisionId, candidateRequestFilters, snapshot, denyAccess]);
   useEffect(() => {
     let cancelled = false;
     const epoch = readEpoch.current;
@@ -2097,7 +2107,7 @@ function RecruitingWorkspace({
       const page = await rpc.recruiting.listCandidates({
         roleId,
         limit: 30,
-        ...candidateFilters,
+        ...candidateRequestFilters,
         cursor: candidatePage.nextCursor,
       });
       if (generation !== candidateGeneration.current || epoch !== readEpoch.current) return;
@@ -3017,59 +3027,63 @@ function RecruitingWorkspace({
                       }))
                     }
                   />
-                  <NativeSelect
-                    aria-label={t`Internal assessment`}
-                    value={candidateFilters.assessmentState ?? "all"}
-                    onChange={(event) =>
-                      setCandidateFilters((current) => ({
-                        ...current,
-                        assessmentState:
-                          event.target.value === "all"
-                            ? undefined
-                            : (event.target
-                                .value as ListRecruitingCandidatesInput["assessmentState"]),
-                      }))
-                    }
-                  >
-                    <NativeSelectOption value="all">
-                      <Trans>All internal assessments</Trans>
-                    </NativeSelectOption>
-                    <NativeSelectOption value="unassessed">
-                      <Trans>No internal assessment</Trans>
-                    </NativeSelectOption>
-                    <NativeSelectOption value="current">
-                      <Trans>Internal assessment: current</Trans>
-                    </NativeSelectOption>
-                    <NativeSelectOption value="outdated">
-                      <Trans>Internal assessment: outdated</Trans>
-                    </NativeSelectOption>
-                  </NativeSelect>
-                  <NativeSelect
-                    aria-label={t`Internal verdict`}
-                    value={candidateFilters.verdict ?? "all"}
-                    onChange={(event) =>
-                      setCandidateFilters((current) => ({
-                        ...current,
-                        verdict:
-                          event.target.value === "all"
-                            ? undefined
-                            : (event.target.value as Verdict),
-                      }))
-                    }
-                  >
-                    <NativeSelectOption value="all">
-                      <Trans>All internal verdicts</Trans>
-                    </NativeSelectOption>
-                    <NativeSelectOption value="met">
-                      <Trans>Internal verdict: met</Trans>
-                    </NativeSelectOption>
-                    <NativeSelectOption value="unmet">
-                      <Trans>Internal verdict: unmet</Trans>
-                    </NativeSelectOption>
-                    <NativeSelectOption value="unknown">
-                      <Trans>Internal verdict: unknown</Trans>
-                    </NativeSelectOption>
-                  </NativeSelect>
+                  {showInternalAssessments ? (
+                    <>
+                      <NativeSelect
+                        aria-label={t`Internal assessment`}
+                        value={candidateFilters.assessmentState ?? "all"}
+                        onChange={(event) =>
+                          setCandidateFilters((current) => ({
+                            ...current,
+                            assessmentState:
+                              event.target.value === "all"
+                                ? undefined
+                                : (event.target
+                                    .value as ListRecruitingCandidatesInput["assessmentState"]),
+                          }))
+                        }
+                      >
+                        <NativeSelectOption value="all">
+                          <Trans>All internal assessments</Trans>
+                        </NativeSelectOption>
+                        <NativeSelectOption value="unassessed">
+                          <Trans>No internal assessment</Trans>
+                        </NativeSelectOption>
+                        <NativeSelectOption value="current">
+                          <Trans>Internal assessment: current</Trans>
+                        </NativeSelectOption>
+                        <NativeSelectOption value="outdated">
+                          <Trans>Internal assessment: outdated</Trans>
+                        </NativeSelectOption>
+                      </NativeSelect>
+                      <NativeSelect
+                        aria-label={t`Internal verdict`}
+                        value={candidateFilters.verdict ?? "all"}
+                        onChange={(event) =>
+                          setCandidateFilters((current) => ({
+                            ...current,
+                            verdict:
+                              event.target.value === "all"
+                                ? undefined
+                                : (event.target.value as Verdict),
+                          }))
+                        }
+                      >
+                        <NativeSelectOption value="all">
+                          <Trans>All internal verdicts</Trans>
+                        </NativeSelectOption>
+                        <NativeSelectOption value="met">
+                          <Trans>Internal verdict: met</Trans>
+                        </NativeSelectOption>
+                        <NativeSelectOption value="unmet">
+                          <Trans>Internal verdict: unmet</Trans>
+                        </NativeSelectOption>
+                        <NativeSelectOption value="unknown">
+                          <Trans>Internal verdict: unknown</Trans>
+                        </NativeSelectOption>
+                      </NativeSelect>
+                    </>
+                  ) : null}
                   <NativeSelect
                     aria-label={t`Candidate sort`}
                     value={candidateFilters.sort ?? "rank"}
@@ -3300,7 +3314,7 @@ function RecruitingWorkspace({
                                 t`Location`,
                                 t`Profile`,
                                 t`Research match`,
-                                t`Internal assessment`,
+                                ...(showInternalAssessments ? [t`Internal assessment`] : []),
                                 ...(showCrm ? [t`CRM`] : []),
                                 t`Discoveries`,
                                 t`Shortlist`,
@@ -3353,9 +3367,11 @@ function RecruitingWorkspace({
                                     roleRevisionId={workspace?.revision.id}
                                   />
                                 </td>
-                                <td className="py-2 pe-3">
-                                  <CandidateAssessment candidate={candidate} />
-                                </td>
+                                {showInternalAssessments ? (
+                                  <td className="py-2 pe-3">
+                                    <CandidateAssessment candidate={candidate} />
+                                  </td>
+                                ) : null}
                                 {showCrm ? (
                                   <td className="py-2 pe-3 text-xs">
                                     <CrmStatus sync={candidate.crm} />

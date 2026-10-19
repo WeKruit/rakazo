@@ -1178,6 +1178,109 @@ it("shows saved unassessed profiles and authoritative totals in Cards and Table"
   expect(api.setCandidateShortlist).not.toHaveBeenCalled();
 });
 
+it("omits unused internal assessment controls without applying stored diagnostic filters", async () => {
+  api.listAssessments.mockResolvedValue([]);
+  const first = { ...candidateFixture("first-person", false), name: "Synthetic first" };
+  const second = { ...candidateFixture("second-person", false), name: "Synthetic second" };
+  api.listCandidates.mockImplementation(async ({ cursor, assessmentState, verdict }) => ({
+    ...candidatePage(assessmentState || verdict ? [] : [cursor ? second : first]),
+    nextCursor: assessmentState || verdict || cursor ? null : "page-2",
+    counts: { ...candidatePage().counts, candidates: 2, assessed: 0, unassessed: 2 },
+  }));
+  const diagnostic = await mounted();
+  await diagnostic.click("Evidence");
+  await diagnostic.click("Table");
+  await changeSelect(diagnostic.container, "Internal assessment", "current");
+  await changeSelect(diagnostic.container, "Internal verdict", "met");
+  await changeSelect(diagnostic.container, "Candidate sort", "recent");
+  await cleanup?.();
+  api.listCandidates.mockClear();
+
+  const view = await mounted("thread-1", undefined, false);
+  expect(view.container.querySelector('select[aria-label="Internal assessment"]')).toBeNull();
+  expect(view.container.querySelector('select[aria-label="Internal verdict"]')).toBeNull();
+  expect(view.container.querySelector("thead")?.textContent).not.toContain("Internal assessment");
+  expect(view.container.querySelector("tbody")?.textContent).toContain(first.name);
+  expect(view.container.querySelector('select[aria-label="Candidate sort"]')).toHaveProperty(
+    "value",
+    "recent",
+  );
+  expect(api.listCandidates).toHaveBeenCalledExactlyOnceWith({
+    roleId: role.id,
+    limit: 30,
+    sort: "recent",
+  });
+  await view.click("Load more");
+  expect(api.listCandidates).toHaveBeenLastCalledWith({
+    roleId: role.id,
+    limit: 30,
+    sort: "recent",
+    cursor: "page-2",
+  });
+  expect(view.container.querySelector("tbody")?.textContent).toContain(second.name);
+  await cleanup?.();
+  api.listCandidates.mockClear();
+  const reopened = await mounted("thread-1", undefined, false);
+  expect(api.listCandidates).toHaveBeenCalledTimes(2);
+  expect(api.listCandidates).toHaveBeenNthCalledWith(1, {
+    roleId: role.id,
+    limit: 30,
+    sort: "recent",
+  });
+  expect(api.listCandidates).toHaveBeenNthCalledWith(2, {
+    roleId: role.id,
+    limit: 30,
+    sort: "recent",
+    cursor: "page-2",
+  });
+
+  api.listAssessments.mockRejectedValueOnce(new Error("Assessment refresh failed"));
+  await reopened.render("thread-1", 1);
+  expect(reopened.container.textContent).toContain("Could not load recruiting");
+  expect(reopened.container.querySelector('select[aria-label="Internal assessment"]')).toBeNull();
+  expect(reopened.container.querySelector("tbody")?.textContent).toContain(second.name);
+
+  await reopened.render("thread-1", 1, true);
+  expect(
+    reopened.container.querySelector('select[aria-label="Internal assessment"]'),
+  ).toHaveProperty("value", "current");
+  expect(reopened.container.querySelector('select[aria-label="Internal verdict"]')).toHaveProperty(
+    "value",
+    "met",
+  );
+  expect(api.listCandidates).toHaveBeenLastCalledWith({
+    roleId: role.id,
+    limit: 30,
+    assessmentState: "current",
+    verdict: "met",
+    sort: "recent",
+  });
+});
+
+it("keeps a pending or failed assessment read distinct from an empty assessment list", async () => {
+  let fail!: (error: Error) => void;
+  api.listAssessments.mockImplementationOnce(
+    () =>
+      new Promise((_resolve, reject) => {
+        fail = reject;
+      }),
+  );
+  const view = await mounted("thread-1", undefined, false);
+  expect(view.container.textContent).toContain("Loading…");
+  expect(api.listCandidates).not.toHaveBeenCalled();
+  await act(async () => fail(new Error("Assessment read failed")));
+  expect(view.container.textContent).toContain("Could not load recruiting");
+  expect(api.listCandidates).not.toHaveBeenCalled();
+
+  await view.render("thread-1", 1);
+  await view.click("Evidence");
+  expect(view.container.querySelector('select[aria-label="Internal assessment"]')).not.toBeNull();
+  expect(view.container.querySelector('select[aria-label="Internal verdict"]')).not.toBeNull();
+  await view.click("Table");
+  expect(view.container.querySelector("thead")?.textContent).toContain("Internal assessment");
+  expect(view.container.querySelector("tbody")?.textContent).toContain("Internal assessment");
+});
+
 it.each([
   { viewName: "Cards", identified: true },
   { viewName: "Table", identified: true },
