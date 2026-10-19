@@ -1,41 +1,56 @@
 import { COMPUTER_UPDATE_STAGES, type ComputerUpdate } from "@rakazo/contracts";
 
 /** Shared polling and local presentation state; the server owns operation lifetime. */
-export function createComputerUpdates(client: {
-  list: () => Promise<ComputerUpdate[]>;
-  start: (botId: string, action: "update" | "recover") => Promise<ComputerUpdate>;
-  dismiss: (id: string) => Promise<unknown>;
-  releaseInterrupted: (id: string) => Promise<unknown>;
-}) {
+export function createComputerUpdates(
+  client: {
+    list: () => Promise<ComputerUpdate[]>;
+    start: (botId: string, action: "update" | "recover") => Promise<ComputerUpdate>;
+    dismiss: (id: string) => Promise<unknown>;
+    releaseInterrupted: (id: string) => Promise<unknown>;
+  },
+  subscribeActive?: (listener: (active: boolean) => void) => () => void,
+) {
   let state: { updates: ComputerUpdate[]; openId: string | null } = { updates: [], openId: null };
   const listeners = new Set<() => void>();
   let timer: ReturnType<typeof setTimeout> | undefined;
   let generation = 0;
   let revision = 0;
+  let watching = false;
+  let active = true;
+  let inFlight: Promise<void> | undefined;
   const emit = () => {
     for (const listener of listeners) listener();
   };
-  const poll = async (epoch: number) => {
-    const stamp = revision;
-    try {
-      const updates = (await client.list()).filter(
-        (update) => update.action !== "checkpoint" || computerUpdateNeedsAttention(update),
-      );
-      if (epoch !== generation || stamp !== revision) return;
-      if (JSON.stringify(state.updates) === JSON.stringify(updates)) return;
-      state = {
-        updates,
-        openId: updates.some((item) => item.id === state.openId) ? state.openId : null,
-      };
-      emit();
-    } catch {
-      /* Keep the last known operation through transient connection failures. */
-    } finally {
-      if (epoch === generation) {
-        clearTimeout(timer);
-        timer = setTimeout(() => void poll(epoch), state.updates.length ? 1500 : 15000);
+  const poll = (epoch: number): Promise<void> => {
+    if (epoch !== generation || !watching || !active) return Promise.resolve();
+    if (inFlight) return inFlight;
+    clearTimeout(timer);
+    inFlight = Promise.resolve().then(async () => {
+      const stamp = revision;
+      try {
+        if (epoch !== generation || !watching || !active) return;
+        const updates = (await client.list()).filter(
+          (update) => update.action !== "checkpoint" || computerUpdateNeedsAttention(update),
+        );
+        if (epoch !== generation || stamp !== revision) return;
+        if (JSON.stringify(state.updates) === JSON.stringify(updates)) return;
+        state = {
+          updates,
+          openId: updates.some((item) => item.id === state.openId) ? state.openId : null,
+        };
+        emit();
+      } catch {
+        /* Keep the last known operation through transient connection failures. */
+      } finally {
+        inFlight = undefined;
+        if (watching && active) {
+          clearTimeout(timer);
+          if (epoch !== generation || stamp !== revision) void poll(generation);
+          else timer = setTimeout(() => void poll(epoch), state.updates.length ? 1500 : 15000);
+        }
       }
-    }
+    });
+    return inFlight;
   };
   return {
     getSnapshot: () => state,
@@ -47,9 +62,21 @@ export function createComputerUpdates(client: {
     },
     watch() {
       const epoch = ++generation;
+      watching = true;
+      active = true;
+      clearTimeout(timer);
+      const unsubscribe = subscribeActive?.((next) => {
+        if (epoch !== generation) return;
+        active = next;
+        clearTimeout(timer);
+        if (active) void poll(epoch);
+      });
       void poll(epoch);
       return () => {
+        unsubscribe?.();
+        if (epoch !== generation) return;
         generation++;
+        watching = false;
         clearTimeout(timer);
         state = { updates: [], openId: null };
       };
@@ -69,13 +96,14 @@ export function createComputerUpdates(client: {
       };
       emit();
       clearTimeout(timer);
-      timer = setTimeout(() => void poll(epoch), 1500);
+      if (watching && active && !inFlight) timer = setTimeout(() => void poll(epoch), 1500);
     },
     async releaseInterrupted(id: string) {
       const epoch = generation;
       await client.releaseInterrupted(id);
       if (epoch !== generation) return;
       revision++;
+      await inFlight;
       await poll(epoch);
     },
     async dismiss(id: string) {
