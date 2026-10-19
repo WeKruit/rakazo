@@ -37,7 +37,7 @@ const context = {
 
 describe("computer provisioning", () => {
   it.each([false, true])(
-    "preserves a reused provider after archive invalidates boot (pause fails=%s)",
+    "preserves a reused provider after archive invalidates boot (stop would fail=%s)",
     async (pauseFails) => {
       const dataDir = await mkdtemp(path.join(tmpdir(), "rakazo-provision-race-"));
       const stopError = new Error("pause timed out");
@@ -103,14 +103,10 @@ describe("computer provisioning", () => {
           "computer-1",
           context,
         );
-        if (pauseFails)
-          await expect(result).rejects.toMatchObject({
-            errors: [expect.any(ComputerBusyError), stopError],
-          });
-        else await expect(result).rejects.toThrow("Computer is busy");
+        await expect(result).rejects.toThrow("Computer is busy");
         expect(destroy).not.toHaveBeenCalled();
-        expect(releaseScreen).toHaveBeenCalledOnce();
-        expect(stop).toHaveBeenCalledOnce();
+        expect(releaseScreen).not.toHaveBeenCalled();
+        expect(stop).not.toHaveBeenCalled();
         expect(prisma.computer.updateMany).toHaveBeenNthCalledWith(
           2,
           expect.objectContaining({
@@ -889,65 +885,92 @@ describe("computer provisioning", () => {
     },
   );
 
-  it("does not stop a pre-existing computer when reconnect setup fails", async () => {
-    const dataDir = await mkdtemp(path.join(tmpdir(), "rakazo-reconnect-unowned-"));
-    const failure = new Error("prepare failed");
-    const original = {
-      id: "computer-1",
-      homeKey: "bot-1",
-      providerRef: "provider-1",
-      kind: "box",
-      scope: "dedicated",
-      state: "running",
-      controlLeaseId: null,
-      updatedAt: new Date("2024-01-01T00:00:00.000Z"),
-    };
-    const ref = {
-      id: "provider-2",
-      botId: "bot-1",
-      kind: "e2b" as const,
-      providerRef: "provider-2",
-      fresh: false,
-    };
-    const prisma = {
-      computer: {
-        findUniqueOrThrow: vi.fn().mockResolvedValue(original),
-        update: vi.fn(),
-        updateMany: vi.fn().mockResolvedValue({ count: 1 }),
-      },
-    } as unknown as PrismaClient;
-    const sandbox = {
-      provision: vi.fn().mockResolvedValue(ref),
-      prepare: vi.fn().mockRejectedValue(failure),
-      importWorkspace: vi.fn(),
-      releaseScreen: vi.fn().mockResolvedValue(undefined),
-      destroy: vi.fn(),
-      stop: vi.fn(),
-    } as unknown as SandboxProvider;
+  it.each([
+    { state: "running", fresh: false },
+    { state: "error", fresh: false },
+    { state: "suspended", fresh: false },
+    { state: "running", fresh: undefined },
+    { state: "error", fresh: undefined },
+    { state: "suspended", fresh: undefined },
+  ])(
+    "preserves a reused $state computer when prepare fails (fresh=$fresh)",
+    async ({ state, fresh }) => {
+      const dataDir = await mkdtemp(path.join(tmpdir(), "rakazo-reconnect-unowned-"));
+      const failure = new Error("prepare failed");
+      const original = {
+        id: "computer-1",
+        homeKey: "bot-1",
+        providerRef: "provider-1",
+        kind: "box",
+        scope: "dedicated",
+        state,
+        controlLeaseId: null,
+        updatedAt: new Date("2024-01-01T00:00:00.000Z"),
+      };
+      const ref = {
+        id: "provider-1",
+        botId: "bot-1",
+        kind: "box" as const,
+        providerRef: "provider-1",
+        fresh,
+      };
+      const prisma = {
+        computer: {
+          findUniqueOrThrow: vi.fn().mockResolvedValue(original),
+          update: vi.fn(),
+          updateMany: vi.fn().mockResolvedValue({ count: 1 }),
+        },
+      } as unknown as PrismaClient;
+      const sandbox = {
+        provision: vi.fn().mockResolvedValue(ref),
+        prepare: vi.fn().mockRejectedValue(failure),
+        importWorkspace: vi.fn(),
+        releaseScreen: vi.fn().mockResolvedValue(undefined),
+        destroy: vi.fn(),
+        stop: vi.fn(),
+      } as unknown as SandboxProvider;
 
-    try {
-      await expect(
-        provisionComputer(
-          {
-            prisma,
-            sandbox,
-            home: new LocalAgentHomeStore(dataDir),
-            jobs: {} as JobPublisher,
-            events: {} as ThreadEvents,
-            dataDir,
-          },
-          "computer-1",
+      try {
+        await expect(
+          provisionComputer(
+            {
+              prisma,
+              sandbox,
+              home: new LocalAgentHomeStore(dataDir),
+              jobs: {} as JobPublisher,
+              events: {} as ThreadEvents,
+              dataDir,
+            },
+            "computer-1",
+            context,
+          ),
+        ).rejects.toBe(failure);
+        expect(sandbox.provision).toHaveBeenCalledWith(
+          expect.objectContaining({ providerRef: "provider-1", providerKind: "box" }),
           context,
-        ),
-      ).rejects.toBe(failure);
-      expect(sandbox.stop).not.toHaveBeenCalled();
-      expect(sandbox.destroy).not.toHaveBeenCalled();
-      expect(prisma.computer.update).not.toHaveBeenCalled();
-      expect(prisma.computer.updateMany).toHaveBeenCalledTimes(2);
-    } finally {
-      await rm(dataDir, { recursive: true, force: true });
-    }
-  });
+        );
+        expect(sandbox.importWorkspace).not.toHaveBeenCalled();
+        expect(sandbox.releaseScreen).not.toHaveBeenCalled();
+        expect(sandbox.stop).not.toHaveBeenCalled();
+        expect(sandbox.destroy).not.toHaveBeenCalled();
+        expect(prisma.computer.update).not.toHaveBeenCalled();
+        expect(prisma.computer.updateMany).toHaveBeenCalledTimes(2);
+        expect(prisma.computer.updateMany).toHaveBeenLastCalledWith({
+          where: {
+            maintenanceId: null,
+            id: "computer-1",
+            state: "booting",
+            providerRef: "provider-1",
+            kind: "box",
+            updatedAt: expect.any(Date),
+          },
+          data: { state: state === "running" ? "running" : "error" },
+        });
+      } finally {
+        await rm(dataDir, { recursive: true, force: true });
+      }
+    },
+  );
 
   it.each([
     { kind: "e2b" as const, providerRef: "provider-2", fresh: true },
@@ -1050,7 +1073,7 @@ describe("computer provisioning", () => {
         findUniqueOrThrow: vi.fn().mockResolvedValue({
           id: "computer-1",
           homeKey: "bot-1",
-          providerRef: fresh ? null : "provider-1",
+          providerRef: fresh ? null : "previous-provider",
           kind: "fake",
           scope: "dedicated",
           state: "stopped",
@@ -1092,7 +1115,7 @@ describe("computer provisioning", () => {
     }
   });
 
-  it("releases the screen when activation fails on a resumed Team computer", async () => {
+  it("preserves the provider when activation fails on a resumed Team computer", async () => {
     const dataDir = await mkdtemp(path.join(tmpdir(), "rakazo-team-activation-rollback-"));
     const ref = {
       id: "provider-1",
@@ -1149,8 +1172,8 @@ describe("computer provisioning", () => {
         ),
       ).rejects.toThrow("Computer is busy");
       expect(sandbox.execute).toHaveBeenCalled();
-      expect(releaseScreen).toHaveBeenCalledWith(ref, context);
-      expect(stop).toHaveBeenCalledWith(ref, context);
+      expect(releaseScreen).not.toHaveBeenCalled();
+      expect(stop).not.toHaveBeenCalled();
     } finally {
       await rm(dataDir, { recursive: true, force: true });
     }

@@ -315,6 +315,7 @@ export async function provisionComputer(
   });
   if (claimed.count !== 1) throw new ComputerBusyError();
   let provisioned: ComputerRef | undefined;
+  let replacement = false;
   try {
     await onProgress?.("recreating");
     const ref = await deps.sandbox.provision(
@@ -327,12 +328,12 @@ export async function provisionComputer(
       context,
     );
     provisioned = ref;
-    await deps.sandbox.prepare(ref, context);
-    const replacement =
+    replacement =
       ref.fresh === true ||
       !existing.providerRef ||
       existing.providerRef !== ref.providerRef ||
       existing.kind !== ref.kind;
+    await deps.sandbox.prepare(ref, context);
     if (replacement) {
       await onProgress?.("restoring");
       await restoreComputerWorkspace(deps.home, deps.sandbox, existing.homeKey, ref, context);
@@ -388,7 +389,7 @@ export async function provisionComputer(
   } catch (error) {
     // A failed reconnect never owns an existing workspace, even if setup failed.
     const rollbackError =
-      provisioned && (!reconnecting || provisioned.fresh === true)
+      provisioned && replacement
         ? await rollbackProvisionedComputer(deps.sandbox, provisioned, context)
         : undefined;
     try {
