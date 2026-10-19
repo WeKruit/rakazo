@@ -2618,7 +2618,10 @@ function nativeCandidateFixture() {
   };
   const tx = {
     ...f.tx,
-    $queryRaw: vi.fn(async () => [{ id: "thread" }]),
+    $queryRaw: vi.fn(
+      async (query: unknown): Promise<unknown[]> =>
+        (query as { sql: string }).sql.includes("incoming_source_rows") ? [] : [{ id: "thread" }],
+    ),
     externalEffect: {
       findMany: vi.fn(async () => [f.effect]),
       findFirst: vi.fn(async ({ where }) => (where.id === "save" ? saveEffect : f.effect)),
@@ -3267,6 +3270,90 @@ describe("native candidate source provenance", () => {
 });
 
 describe("native candidate results without domain actions", () => {
+  it("reuses exact source rows one-to-one within the same native read view", async () => {
+    const f = nativeCandidateFixture();
+    const anonymous = {
+      ...f.row,
+      name: { value: "Anonymous profile", source_id: "name-source" },
+      linkedin_url: null,
+      signals: { value: ["first", "second"], source_ids: ["a", "b"], reasoning: null },
+    };
+    const route = {
+      connectorId: "mcp" as const,
+      resourceId: "server",
+      resourceRevision: 1,
+      toolName: "get_rows",
+    };
+    const args = { task_id: "provider-task", limit: 20 };
+    const request = boundDirectApprovalRequest(route, args, "__rakazoCatalogTool");
+    const originalQuery = f.tx.$queryRaw.getMockImplementation()!;
+    f.tx.$queryRaw.mockImplementation(async (query: unknown) => {
+      if (!(query as { sql: string }).sql.includes("incoming_source_rows"))
+        return originalQuery(query);
+      return f.effect.id === "read"
+        ? []
+        : [
+            { rowIndex: 0, candidateKey: "source-row:read:1" },
+            { rowIndex: 2, candidateKey: "source-row:read:2" },
+          ];
+    });
+    for (const [effectId, rows] of [
+      ["read", [f.row, anonymous, structuredClone(anonymous)]],
+      [
+        "followup-read",
+        [
+          Object.fromEntries(Object.entries(anonymous).reverse()),
+          { ...f.row, match_score: 2 },
+          structuredClone(anonymous),
+        ],
+      ],
+    ] as const) {
+      Object.assign(f.effect, { id: effectId, request, result: { structuredContent: { rows } } });
+      Object.assign(f.saveEffect, { status: "executing", result: null });
+      const bytes = Buffer.from(stableJsonValue({ request, providerResult: f.effect.result }));
+      Object.assign(f.file, {
+        hash: createHash("sha256").update(bytes).digest("hex"),
+        size: bytes.length,
+        clientNonce: `recruiting-observation:${effectId}`,
+      });
+      await recruiting.saveNativeRecruitingCandidatePage(f.prisma, actor, f.trusted, f.input, {
+        sourceEffectId: effectId,
+        rows,
+        outputArtifact: f.file,
+      });
+    }
+    const writes = f.tx.recruitingCandidateOccurrence.createMany.mock.calls.map(
+      ([input]) => (input as { data: Array<{ candidateKey: string }> }).data,
+    );
+    expect(writes[1]?.map((row) => row.candidateKey)).toEqual([
+      "source-row:read:1",
+      "linkedin:/in/example",
+      "source-row:read:2",
+    ]);
+    expect(new Set(writes.flat().map((row) => row.candidateKey)).size).toBe(3);
+    expect(writes.flat()).toHaveLength(6);
+    const queries = f.tx.$queryRaw.mock.calls
+      .map(([query]) => query as { sql: string; values: unknown[] })
+      .filter((query) => query.sql.includes("incoming_source_rows"));
+    expect(queries).toHaveLength(2);
+    for (const query of queries) {
+      expect(query.values).toEqual(
+        expect.arrayContaining([
+          actor.spaceId,
+          actor.userId,
+          "role",
+          JSON.stringify(route),
+          JSON.stringify(args),
+        ]),
+      );
+      expect(query.sql).toContain("row_number()");
+      expect(query.sql).toContain("selected_source_pages");
+      expect(query.sql).toContain("count(*) AS multiplicity");
+      expect(query.sql).toContain('returned.value = incoming."row"');
+      expect(query.sql).not.toMatch(/->\s*'(?:name|source_id|source_ids)'/);
+    }
+  });
+
   it("reuses the locked run and same source thread without rereading validated artifact metadata", async () => {
     const f = nativeCandidateFixture();
     await recruiting.saveNativeRecruitingCandidatePage(f.prisma, actor, f.trusted, f.input, {

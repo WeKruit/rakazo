@@ -5067,6 +5067,7 @@ export async function recordRecruitingResearchObservation(
       if (recorded.hash !== input.outputArtifact.hash) throw new RecruitingConflictError();
       const candidateRows = await indexRecruitingCandidateRows(
         tx,
+        actor,
         action,
         task,
         effect,
@@ -5085,6 +5086,7 @@ export async function recordRecruitingResearchObservation(
     );
     const candidateRows = await indexRecruitingCandidateRows(
       tx,
+      actor,
       action,
       task,
       effect,
@@ -5232,6 +5234,7 @@ export async function listRecruitingResearch(
 
 async function indexRecruitingCandidateRows(
   tx: Tx,
+  actor: Actor,
   action: Pick<ResearchActionRow, "id" | "roleRevisionId" | "candidateOutputSchema"> | null,
   task: Pick<ResearchTaskRow, "id" | "roleId">,
   effect: ResearchEffectRow,
@@ -5247,10 +5250,11 @@ async function indexRecruitingCandidateRows(
       orderBy: { rowIndex: "asc" },
       select: { rowIndex: true, candidateKey: true },
     });
+  const schemaKnown =
+    action === null || action.candidateOutputSchema === RECRUITING_CANDIDATE_OUTPUT_SCHEMA;
   const rows = (input.rows ?? []).map((row, rowIndex) => {
     const { candidateKey, ...profile } = normalizeRecruitingCandidateRow(row, {
-      schemaKnown:
-        action === null || action.candidateOutputSchema === RECRUITING_CANDIDATE_OUTPUT_SCHEMA,
+      schemaKnown,
     });
     return {
       pageId: effect.id,
@@ -5262,6 +5266,98 @@ async function indexRecruitingCandidateRows(
       issues: [...profile.issues],
     };
   });
+  const sourceRows = schemaKnown
+    ? (input.rows ?? []).flatMap((row, rowIndex) =>
+        row !== null &&
+        typeof row === "object" &&
+        !Array.isArray(row) &&
+        rows[rowIndex]!.name !== null &&
+        rows[rowIndex]!.candidateKey === `source-row:${effect.id}:${rowIndex}`
+          ? [{ rowIndex, row }]
+          : [],
+      )
+    : [];
+  if (sourceRows.length) {
+    const call = researchReadRequest(effect.request, undefined, "get_rows");
+    // ponytail: compare this exact authorized read view in SQL; persist row fingerprints
+    // only if its growing page history outgrows this scoped scan. Caller holds the role lock.
+    const reused = await tx.$queryRaw<Array<{ rowIndex: number; candidateKey: string }>>(
+      Prisma.sql`
+        WITH incoming_source_rows AS (
+          SELECT (item->>'rowIndex')::int AS "rowIndex", item->'row' AS "row",
+            row_number() OVER (PARTITION BY item->'row' ORDER BY (item->>'rowIndex')::int) AS ordinal
+          FROM jsonb_array_elements(${JSON.stringify(sourceRows)}::jsonb) item
+        ), source_pages AS MATERIALIZED (
+          SELECT page."effectId", page."observedAt", previous."result"
+          FROM "recruiting_candidate_pages" page
+          JOIN "external_effects" previous ON previous."id" = page."effectId"
+          JOIN "runs" owner ON owner."id" = previous."runId"
+          JOIN "bots" bot ON bot."id" = owner."botId"
+          JOIN "threads" thread ON thread."id" = owner."threadId"
+          JOIN "artifacts" artifact ON artifact."id" = page."artifactId"
+          WHERE page."roleId" = ${task.roleId} AND page."effectId" <> ${effect.id}
+            AND previous."spaceId" = ${actor.spaceId} AND previous."status" = 'completed'
+            AND owner."spaceId" = ${actor.spaceId} AND owner."userId" = ${actor.userId}
+            AND bot."spaceId" = ${actor.spaceId} AND bot."userId" = ${actor.userId}
+            AND thread."spaceId" = ${actor.spaceId} AND thread."userId" = ${actor.userId}
+            AND artifact."spaceId" = ${actor.spaceId} AND artifact."userId" = ${actor.userId}
+            AND artifact."hash" = page."artifactHash" AND artifact."runId" = owner."id"
+            AND artifact."botId" = bot."id"
+            AND page."outputId" IS NOT DISTINCT FROM ${input.outputId ?? null}::text
+            AND previous."request"->>0 = '__rakazoCatalogTool'
+            AND (
+              (previous."request"->>1 = 'direct'
+                AND jsonb_array_length(CASE WHEN jsonb_typeof(previous."request") = 'array'
+                  THEN previous."request" ELSE '[]'::jsonb END) = 3
+                AND previous."request"->2->'route' = ${JSON.stringify(call.route)}::jsonb
+                AND previous."request"->2->'args' = ${JSON.stringify(call.args)}::jsonb)
+              OR (previous."request"->>1 IN ('connectors_execute_tool', 'mcp_execute_tool')
+                AND jsonb_array_length(CASE WHEN jsonb_typeof(previous."request") = 'array'
+                  THEN previous."request" ELSE '[]'::jsonb END) = 4
+                AND previous."request"->3 = ${JSON.stringify(call.route)}::jsonb
+                AND previous."request"->2->>'id' = ${`${call.route.resourceId}:get_rows`}
+                AND previous."request"->2->'arguments' = ${JSON.stringify(call.args)}::jsonb)
+            )
+        ), matched_source_rows AS (
+          SELECT DISTINCT ON (incoming."row", page."effectId", occurrence."candidateKey")
+            incoming."row", occurrence."candidateKey", page."observedAt", page."effectId",
+            occurrence."rowIndex"
+          FROM source_pages page
+          CROSS JOIN LATERAL (
+            SELECT COALESCE(page."result"->'structuredContent', (
+              SELECT CASE WHEN block->>'text' IS JSON OBJECT THEN (block->>'text')::jsonb END
+              FROM jsonb_array_elements(CASE WHEN jsonb_typeof(page."result"->'content') = 'array'
+                THEN page."result"->'content' ELSE '[]'::jsonb END) block
+              WHERE block->>'type' = 'text' AND block->>'text' IS JSON OBJECT LIMIT 1
+            )) AS body
+          ) envelope
+          CROSS JOIN LATERAL jsonb_array_elements(CASE WHEN jsonb_typeof(envelope.body->'rows') = 'array'
+            THEN envelope.body->'rows' ELSE '[]'::jsonb END) WITH ORDINALITY returned(value, ordinality)
+          JOIN "recruiting_candidate_occurrences" occurrence ON occurrence."pageId" = page."effectId"
+            AND occurrence."rowIndex" = returned.ordinality - 1
+          JOIN incoming_source_rows incoming ON returned.value = incoming."row"
+          WHERE occurrence."roleId" = ${task.roleId} AND occurrence."name" IS NOT NULL
+            AND occurrence."candidateKey" LIKE 'source-row:%'
+          ORDER BY incoming."row", page."effectId", occurrence."candidateKey", occurrence."rowIndex"
+        ), selected_source_pages AS (
+          SELECT DISTINCT ON ("row") "row", "effectId"
+          FROM (
+            SELECT "row", "effectId", "observedAt", count(*) AS multiplicity
+            FROM matched_source_rows GROUP BY "row", "effectId", "observedAt"
+          ) pages ORDER BY "row", multiplicity DESC, "observedAt", "effectId"
+        ), prior_source_rows AS (
+          SELECT matched."row", matched."candidateKey", row_number() OVER (
+            PARTITION BY matched."row" ORDER BY matched."rowIndex", matched."candidateKey"
+          ) AS ordinal FROM matched_source_rows matched JOIN selected_source_pages selected
+            ON matched."row" = selected."row" AND matched."effectId" = selected."effectId"
+        )
+        SELECT incoming."rowIndex", prior."candidateKey"
+        FROM incoming_source_rows incoming JOIN prior_source_rows prior
+          ON incoming."row" = prior."row" AND incoming.ordinal = prior.ordinal
+      `,
+    );
+    for (const { rowIndex, candidateKey } of reused) rows[rowIndex]!.candidateKey = candidateKey;
+  }
   await tx.recruitingCandidatePage.create({
     data: {
       effectId: effect.id,
@@ -5454,6 +5550,7 @@ export async function saveNativeRecruitingCandidatePage(
       : await createResearchArtifact(tx, actor, run, thread, captured.outputArtifact);
     const candidateRows = await indexRecruitingCandidateRows(
       tx,
+      actor,
       null,
       { id: source.effect.id, roleId: source.role.id },
       source.effect,
