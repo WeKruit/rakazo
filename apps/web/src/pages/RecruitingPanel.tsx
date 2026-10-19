@@ -484,9 +484,11 @@ function CandidateProfile({
 function CandidateResearchMatch({
   candidate,
   roleRevisionId,
+  compact = false,
 }: {
   candidate: RecruitingCandidate;
   roleRevisionId?: string;
+  compact?: boolean;
 }) {
   const { t } = useLingui();
   const source = candidate.latestSource;
@@ -506,6 +508,7 @@ function CandidateResearchMatch({
         "Match score",
         "Match tier",
       ].includes(field.label) &&
+      (!compact || field.label !== "Fit reasons") &&
       (field.label !== "Batch rank" || !hasHigherRank),
   );
   fields?.sort((a, b) => Number(a.label === "Fit reasons") - Number(b.label === "Fit reasons"));
@@ -539,7 +542,15 @@ function CandidateResearchMatch({
                 {fields.map((field) => (
                   <div key={field.label} className="flex flex-wrap gap-x-2">
                     <dt className="text-muted-foreground">{field.label}</dt>
-                    <dd className="whitespace-pre-wrap wrap-anywhere text-base">
+                    <dd
+                      className={`wrap-anywhere ${
+                        compact
+                          ? field.label === "Recommendation"
+                            ? "line-clamp-2"
+                            : ""
+                          : "whitespace-pre-wrap text-base"
+                      }`}
+                    >
                       {field.value ?? <Trans>Unknown</Trans>}
                     </dd>
                   </div>
@@ -3380,7 +3391,7 @@ function RecruitingWorkspace({
                       </ul>
                     ) : (
                       <div className="overflow-x-auto">
-                        <table className="w-full text-left text-sm">
+                        <table className="w-full text-left text-sm [&_td]:align-top [&_th]:align-top">
                           <caption className="sr-only">
                             <Trans>Saved candidates</Trans>
                           </caption>
@@ -3441,10 +3452,11 @@ function RecruitingWorkspace({
                                     showDiagnostics={showDiagnostics}
                                   />
                                 </td>
-                                <td className="py-2 pe-3">
+                                <td className="min-w-48 py-2 pe-3">
                                   <CandidateResearchMatch
                                     candidate={candidate}
                                     roleRevisionId={workspace?.revision.id}
+                                    compact
                                   />
                                 </td>
                                 {showInternalAssessments ? (

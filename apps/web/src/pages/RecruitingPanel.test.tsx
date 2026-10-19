@@ -2583,6 +2583,7 @@ it("shows unnamed candidates and real profile links without exposing their stora
 it.each(["Cards", "Table"])(
   "shows provider match directly in %s while preserving retained reports and gaps",
   async (viewName) => {
+    const fitReasons = "  Built the requested systems.\nRelevant project evidence.  ".repeat(80);
     const candidate = { ...candidateFixture("internal-person", false), name: "Synthetic Engineer" };
     api.listCandidates.mockResolvedValue(candidatePage([candidate]));
     const source = {
@@ -2616,7 +2617,7 @@ it.each(["Cards", "Table"])(
           { label: "Provider rule", value: "true", sourceUrls: [] },
           {
             label: "Fit reasons",
-            value: "  Built the requested systems.\nRelevant project evidence.  ",
+            value: fitReasons,
             sourceUrls: [],
           },
         ],
@@ -2688,29 +2689,38 @@ it.each(["Cards", "Table"])(
     expect([...matches[0]!.querySelectorAll("dd dt")].map((item) => item.textContent)).toEqual([
       "Match score",
       "Match tier",
-      "Fit reasons",
+      ...(viewName === "Cards" ? ["Fit reasons"] : []),
     ]);
-    expect(matches[0]?.textContent).toContain(
-      "Fit reasons  Built the requested systems.\nRelevant project evidence.  ",
-    );
+    if (viewName === "Cards") expect(matches[0]?.textContent).toContain(fitReasons);
+    else expect(matches[0]?.textContent).not.toContain(fitReasons);
     expect([...matches[1]!.querySelectorAll("dd dd")].map((item) => item.textContent)).toEqual([
       "3",
       "3",
       "12",
       "Review this profile",
-      "  Built the requested systems.\nRelevant project evidence.  ",
+      ...(viewName === "Cards"
+        ? ["  Built the requested systems.\nRelevant project evidence.  "]
+        : []),
     ]);
     expect([...matches[1]!.querySelectorAll("dd dt")].map((item) => item.textContent)).toEqual([
       "Rank",
       "Overall rank",
       "Original pool rank",
       "Recommendation",
-      "Fit reasons",
+      ...(viewName === "Cards" ? ["Fit reasons"] : []),
     ]);
     expect(matches[1]?.textContent).toContain("Score / tier not returned");
-    expect(matches[1]!.textContent!.indexOf("Score / tier not returned")).toBeLessThan(
-      matches[1]!.textContent!.indexOf("Fit reasons"),
-    );
+    if (viewName === "Cards")
+      expect(matches[1]!.textContent!.indexOf("Score / tier not returned")).toBeLessThan(
+        matches[1]!.textContent!.indexOf("Fit reasons"),
+      );
+    else {
+      const recommendation = [...matches[1]!.querySelectorAll("dt")].find(
+        (field) => field.textContent === "Recommendation",
+      )!.nextElementSibling!;
+      expect(recommendation.classList.contains("line-clamp-2")).toBe(true);
+      expect(matches[1]?.textContent).not.toContain("Fit reasons");
+    }
     expect(matches[2]?.textContent).toContain("Unknown");
     expect(matches[2]?.textContent).toContain("Original pool rankUnknown");
     expect(matches[3]?.textContent).toContain("Source unavailable");
@@ -2726,6 +2736,7 @@ it.each(["Cards", "Table"])(
       "Fit reasons",
     ]);
     expect(summary.textContent).toContain("Match score0");
+    expect(summary.textContent).toContain(fitReasons);
     const report = sources.querySelector("dl")!;
     expect(report).not.toBeNull();
     expect([...report.querySelectorAll("dt")].map((item) => item.textContent)).toEqual([
@@ -2748,6 +2759,7 @@ it.each(["Cards", "Table"])(
     expect(report.textContent).toContain("Employment dates were not supplied.");
     expect(report.textContent).toContain("Tier 1");
     expect(report.textContent).toContain("true");
+    expect(report.textContent).toContain(fitReasons);
     for (const url of [
       "https://projects.example.test/mesh",
       "https://profile.example.test/engineer",
