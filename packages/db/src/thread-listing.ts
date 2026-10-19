@@ -33,6 +33,9 @@ export function previewFromBlocks(blocks: unknown): string {
     if (
       block &&
       typeof block === "object" &&
+      "kind" in block &&
+      block.kind !== "bot_message_sent" &&
+      block.kind !== "bot_message_received" &&
       "text" in block &&
       typeof (block as { text?: unknown }).text === "string"
     ) {
