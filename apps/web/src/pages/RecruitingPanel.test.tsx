@@ -2540,6 +2540,11 @@ it.each(["Cards", "Table"])(
           },
           { label: "Provider tier", value: "Tier 1", sourceUrls: [] },
           { label: "Provider rule", value: "true", sourceUrls: [] },
+          {
+            label: "Fit reasons",
+            value: "  Built the requested systems.\nRelevant project evidence.  ",
+            sourceUrls: [],
+          },
         ],
         sourceUrls: ["https://projects.example.test/mesh", "https://profile.example.test/engineer"],
       },
@@ -2606,6 +2611,14 @@ it.each(["Cards", "Table"])(
     expect(matches).toHaveLength(4);
     expect(matches[0]?.textContent).toContain("Match score0");
     expect(matches[0]?.textContent).toContain("Match tierProvider possible");
+    expect([...matches[0]!.querySelectorAll("dd dt")].map((item) => item.textContent)).toEqual([
+      "Match score",
+      "Match tier",
+      "Fit reasons",
+    ]);
+    expect(matches[0]?.textContent).toContain(
+      "Fit reasons  Built the requested systems.\nRelevant project evidence.  ",
+    );
     expect([...matches[1]!.querySelectorAll("dd dd")].map((item) => item.textContent)).toEqual([
       "3",
       "3",
@@ -2621,6 +2634,9 @@ it.each(["Cards", "Table"])(
       "Fit reasons",
     ]);
     expect(matches[1]?.textContent).toContain("Score / tier not returned");
+    expect(matches[1]!.textContent!.indexOf("Score / tier not returned")).toBeLessThan(
+      matches[1]!.textContent!.indexOf("Fit reasons"),
+    );
     expect(matches[2]?.textContent).toContain("Unknown");
     expect(matches[2]?.textContent).toContain("Original pool rankUnknown");
     expect(matches[3]?.textContent).toContain("Source unavailable");
@@ -2629,6 +2645,13 @@ it.each(["Cards", "Table"])(
     await view.click(candidate.name);
     const dialog = view.container.querySelector('[role="dialog"]')!;
     const sources = dialog.querySelector('[aria-label="Saved candidate sources"]')!;
+    const summary = dialog.querySelector('[aria-label="Research match"]')!;
+    expect([...summary.querySelectorAll("dd dt")].map((item) => item.textContent)).toEqual([
+      "Match score",
+      "Match tier",
+      "Fit reasons",
+    ]);
+    expect(summary.textContent).toContain("Match score0");
     const report = sources.querySelector("dl")!;
     expect(report).not.toBeNull();
     expect([...report.querySelectorAll("dt")].map((item) => item.textContent)).toEqual([
@@ -2636,6 +2659,7 @@ it.each(["Cards", "Table"])(
       "Full-time years",
       "Provider tier",
       "Provider rule",
+      "Fit reasons",
       "Match score",
       "Match tier",
     ]);
@@ -2692,6 +2716,9 @@ it.each(["Cards", "Table"])(
       "Fit reasons  Built the requested systems.\nRelevant project evidence.  ",
     );
     expect(match.textContent).toContain("Score / tier not returned");
+    expect(match.textContent!.indexOf("Score / tier not returned")).toBeLessThan(
+      match.textContent!.indexOf("Fit reasons"),
+    );
   },
 );
 

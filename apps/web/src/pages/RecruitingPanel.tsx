@@ -501,6 +501,7 @@ function CandidateResearchMatch({
       "Match tier",
     ].includes(field.label),
   );
+  fields?.sort((a, b) => Number(a.label === "Fit reasons") - Number(b.label === "Fit reasons"));
   const hasScoreOrTier = fields?.some(
     (field) => field.label === "Match score" || field.label === "Match tier",
   );
@@ -521,6 +522,11 @@ function CandidateResearchMatch({
           </p>
         ) : (
           <>
+            {!hasScoreOrTier ? (
+              <p className="text-muted-foreground">
+                <Trans>Score / tier not returned</Trans>
+              </p>
+            ) : null}
             {fields?.length ? (
               <dl>
                 {fields.map((field) => (
@@ -532,11 +538,6 @@ function CandidateResearchMatch({
                   </div>
                 ))}
               </dl>
-            ) : null}
-            {!hasScoreOrTier ? (
-              <p className="text-muted-foreground">
-                <Trans>Score / tier not returned</Trans>
-              </p>
             ) : null}
           </>
         )}
