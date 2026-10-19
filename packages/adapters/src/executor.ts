@@ -9007,6 +9007,7 @@ export function createRunExecutor(deps: ExecutorDeps) {
             await workspaceCheckpoint.flush().catch(() => undefined);
           }
           if (interruptedByShutdown) {
+            getLogger().info("run interrupted by worker shutdown", { runId });
             await requeueComputerRun(deps, run, workerId, fence, resumeCheckpoint, heldForTakeover);
             return;
           }
