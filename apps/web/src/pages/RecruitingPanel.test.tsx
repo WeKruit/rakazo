@@ -1655,6 +1655,58 @@ it("reloads candidate pages when the CRM binding changes during pagination", asy
   expect(view.container.textContent).not.toContain(synced.crm.receipt!.candidate_id);
 });
 
+it("reveals the selected recruiting tab horizontally on selection and restore without moving focus", async () => {
+  const scrollBy = vi.fn();
+  const priorScrollBy = Object.getOwnPropertyDescriptor(HTMLElement.prototype, "scrollBy");
+  Object.defineProperty(HTMLElement.prototype, "scrollBy", { configurable: true, value: scrollBy });
+  const originalBounds = HTMLElement.prototype.getBoundingClientRect;
+  const bounds = vi
+    .spyOn(HTMLElement.prototype, "getBoundingClientRect")
+    .mockImplementation(function (this: HTMLElement) {
+      if (
+        this.getAttribute("role") === "tablist" &&
+        this.getAttribute("aria-label") === "Recruiting views"
+      )
+        return new DOMRect(0, 0, 320, 32);
+      if (this.getAttribute("role") === "tab" && this.textContent === "Evidence")
+        return new DOMRect(-24, 0, 80, 32);
+      return originalBounds.call(this);
+    });
+  const composer = document.createElement("textarea");
+  document.body.append(composer);
+  composer.focus();
+  try {
+    const view = await mounted();
+    await view.click("Evidence");
+    expect(scrollBy).toHaveBeenLastCalledWith({ left: -24 });
+    expect(scrollBy.mock.contexts.at(-1)).toBe(
+      view.container.querySelector('[role="tablist"][aria-label="Recruiting views"]'),
+    );
+    expect(document.activeElement).toBe(composer);
+
+    await cleanup?.();
+    scrollBy.mockClear();
+    const reopened = await mounted();
+    expect(
+      reopened.container.querySelector('[role="tab"][aria-selected="true"]')?.textContent,
+    ).toBe("Evidence");
+    expect(scrollBy).toHaveBeenLastCalledWith({ left: -24 });
+    expect(document.activeElement).toBe(composer);
+
+    scrollBy.mockClear();
+    const list = reopened.container.querySelector<HTMLElement>('[role="tablist"]')!;
+    list.scrollLeft = 240;
+    await reopened.render("thread-1", 1);
+    expect(scrollBy).not.toHaveBeenCalled();
+    expect(list.scrollLeft).toBe(240);
+  } finally {
+    composer.remove();
+    bounds.mockRestore();
+    if (priorScrollBy) Object.defineProperty(HTMLElement.prototype, "scrollBy", priorScrollBy);
+    else Reflect.deleteProperty(HTMLElement.prototype, "scrollBy");
+  }
+});
+
 it("restores the recruiting list and selected candidate from fresh pages after closing and reopening", async () => {
   const first = { ...candidateFixture("first-person", false), name: "Synthetic first" };
   let second = { ...candidateFixture("second-person", false), name: "Synthetic second" };

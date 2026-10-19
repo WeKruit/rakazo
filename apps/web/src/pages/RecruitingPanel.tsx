@@ -1731,6 +1731,7 @@ function RecruitingWorkspace({
   const [confirmationFailed, setConfirmationFailed] = useState(false);
   const [candidateList, setCandidateList] = useState(() => readRecruitingPanelState(null));
   const [candidateStorageKey, setCandidateStorageKey] = useState<string | null>(null);
+  const tabsList = useRef<HTMLDivElement>(null);
   const {
     candidateView,
     filters: candidateFilters,
@@ -1953,6 +1954,18 @@ function RecruitingWorkspace({
   const assessment = selected?.assessment;
   const roleId = workspace?.role.id;
   const roleRevisionId = workspace?.revision.id;
+  useEffect(() => {
+    const list = tabsList.current;
+    const selectedTab = list?.querySelector<HTMLElement>('[role="tab"][aria-selected="true"]');
+    if (!list || !selectedTab) return;
+    const listBounds = list.getBoundingClientRect();
+    const tabBounds = selectedTab.getBoundingClientRect();
+    const left =
+      tabBounds.left < listBounds.left
+        ? tabBounds.left - listBounds.left
+        : Math.max(0, tabBounds.right - listBounds.right);
+    if (left) list.scrollBy({ left });
+  }, [candidateList.tab, roleId]);
   useEffect(() => {
     if (candidateStorageKey) writeRecruitingPanelState(candidateStorageKey, candidateList);
   }, [candidateStorageKey, candidateList]);
@@ -2365,6 +2378,7 @@ function RecruitingWorkspace({
           className="gap-4"
         >
           <TabsList
+            ref={tabsList}
             variant="line"
             aria-label={t`Recruiting views`}
             className="no-scrollbar w-full overflow-x-auto justify-start"
