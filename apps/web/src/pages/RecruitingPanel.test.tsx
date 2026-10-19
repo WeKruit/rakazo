@@ -2723,6 +2723,65 @@ it.each(["Cards", "Table"])(
 );
 
 it.each(["Cards", "Table"])(
+  "shows batch ranks only without a higher-priority rank field in %s and details",
+  async (viewName) => {
+    const cases = [
+      { fields: [{ label: "Batch rank", value: "2" }], expected: ["Batch rank2"] },
+      ...["Updated rank", "Overall rank", "Rank"].flatMap((label) =>
+        ["4", null].map((value) => ({
+          fields: [
+            { label, value },
+            { label: "Batch rank", value: "2" },
+          ],
+          expected: [`${label}${value ?? "Unknown"}`],
+        })),
+      ),
+      { fields: [], expected: [] },
+    ];
+    const candidates = cases.map(({ fields }, index) => ({
+      ...candidateFixture(`rank-person-${index}`, false),
+      name: `Synthetic rank person ${index}`,
+      latestSource: {
+        providerTaskId: "native-task",
+        taskId: null,
+        actionId: null,
+        roleRevisionId: revision.id,
+        effectId: "saved-page",
+        rowIndex: index,
+        artifactRef: { artifactId: "saved-artifact", sha256: "a".repeat(64) },
+        requestCursor: "saved-batch-cursor",
+        outputId: null,
+        observedAt: "2026-01-01T00:00:00Z",
+        report: {
+          fields: fields.map((field) => ({ ...field, sourceUrls: [] })),
+          sourceUrls: [],
+        },
+      },
+    }));
+    const originals = structuredClone(candidates);
+    api.listCandidates.mockResolvedValue(candidatePage(candidates));
+    const view = await mounted("thread-1", undefined, false);
+    await view.click("Evidence");
+    await view.click(viewName);
+    const list = view.container.querySelector(viewName === "Cards" ? "ul" : "tbody")!;
+    const matches = [...list.querySelectorAll('[aria-label="Research match"]')];
+    expect(matches).toHaveLength(cases.length);
+    for (const [index, { expected }] of cases.entries()) {
+      expect(
+        [...matches[index]!.querySelectorAll("dd dl > div")].map((field) => field.textContent),
+      ).toEqual(expected);
+      expect(matches[index]!.textContent).toContain("Score / tier not returned");
+    }
+    await view.click(candidates[0]!.name);
+    const detail = view.container.querySelector('[role="dialog"] [aria-label="Research match"]')!;
+    expect(detail.textContent).toContain("Batch rank2");
+    expect(detail.textContent).not.toContain("Overall rank");
+    expect(detail.textContent).toContain("Score / tier not returned");
+    expect(candidates).toEqual(originals);
+  },
+);
+
+it.each(["Cards", "Table"])(
   "marks earlier requirements per native candidate source in %s and details",
   async (viewName) => {
     const currentSource = {

@@ -490,16 +490,23 @@ function CandidateResearchMatch({
 }) {
   const { t } = useLingui();
   const source = candidate.latestSource;
-  const fields = source?.report?.fields.filter((field) =>
-    [
-      "Rank",
-      "Overall rank",
-      "Original pool rank",
-      "Recommendation",
-      "Fit reasons",
-      "Match score",
-      "Match tier",
-    ].includes(field.label),
+  const hasHigherRank = source?.report?.fields.some((field) =>
+    ["Updated rank", "Overall rank", "Rank"].includes(field.label),
+  );
+  const fields = source?.report?.fields.filter(
+    (field) =>
+      [
+        "Rank",
+        "Updated rank",
+        "Overall rank",
+        "Original pool rank",
+        "Batch rank",
+        "Recommendation",
+        "Fit reasons",
+        "Match score",
+        "Match tier",
+      ].includes(field.label) &&
+      (field.label !== "Batch rank" || !hasHigherRank),
   );
   fields?.sort((a, b) => Number(a.label === "Fit reasons") - Number(b.label === "Fit reasons"));
   const hasScoreOrTier = fields?.some(
