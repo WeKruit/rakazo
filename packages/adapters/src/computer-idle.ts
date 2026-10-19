@@ -197,10 +197,12 @@ export async function sleepComputerIfIdle(
     home: AgentHomeStore;
     jobs: JobPublisher;
     events: ThreadEvents;
+    shutdownSignal: AbortSignal;
   },
   computerId: string,
 ): Promise<void> {
   if (!computerIdleSleepEnabled()) return;
+  deps.shutdownSignal.throwIfAborted();
   let computer = await loadComputer(deps.prisma, computerId);
   if (!computer?.providerRef || computer.state !== "running") return;
 
@@ -213,7 +215,9 @@ export async function sleepComputerIfIdle(
   const activeStatuses = hasActiveComputerControl(computer)
     ? [...ACTIVE_RUN_STATUSES]
     : ACTIVE_RUN_STATUSES.filter((status) => status !== "waiting_takeover");
-  if (await findActiveRun(deps.prisma, computerId, activeStatuses)) {
+  const activeRun = await findActiveRun(deps.prisma, computerId, activeStatuses);
+  deps.shutdownSignal.throwIfAborted();
+  if (activeRun) {
     scheduleComputerSleep(deps.jobs, computerId);
     return;
   }
@@ -227,9 +231,11 @@ export async function sleepComputerIfIdle(
     spaceId: computer.spaceId,
     userId: computer.userId,
     botId,
-    signal: new AbortController().signal,
+    signal: deps.shutdownSignal,
   };
-  if (await hasActiveBackgroundWork(deps.sandbox, ref, ctx, computerId)) {
+  const backgroundWork = await hasActiveBackgroundWork(deps.sandbox, ref, ctx, computerId);
+  ctx.signal.throwIfAborted();
+  if (backgroundWork) {
     scheduleComputerSleep(deps.jobs, computerId);
     await deps.sandbox.keepAlive?.(ref);
     return;
@@ -253,6 +259,7 @@ export async function sleepComputerIfIdle(
     ctx,
   );
   if (!maintenance) {
+    deps.shutdownSignal.throwIfAborted();
     scheduleComputerSleep(deps.jobs, computerId);
     return;
   }
@@ -269,12 +276,15 @@ export async function sleepComputerIfIdle(
         findActiveRun(deps.prisma, computerId, activeStatuses),
         hasActiveBackgroundWork(deps.sandbox, ref, maintenance.context, computerId),
       ]);
+      maintenance.context.signal.throwIfAborted();
       if (!active && !background) return true;
       scheduleComputerSleep(deps.jobs, computerId);
       if (background) await deps.sandbox.keepAlive?.(ref);
       return false;
     },
-    onFailure: () => scheduleComputerSleep(deps.jobs, computerId),
+    onFailure: () => {
+      if (!deps.shutdownSignal.aborted) scheduleComputerSleep(deps.jobs, computerId);
+    },
   });
   if (!stopped) return;
   const bots = await deps.prisma.bot.findMany({

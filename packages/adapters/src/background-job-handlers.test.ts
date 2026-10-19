@@ -43,6 +43,7 @@ describe("createBackgroundJobHandlers", () => {
       runtime: {} as unknown as AgentRuntime,
       secretStore: {} as unknown as EncryptedSecretStore,
       memoryProviders: { resolve: vi.fn(async () => null) },
+      shutdownSignal: new AbortController().signal,
       messaging: {} as unknown as MessagingSurface,
     });
 
@@ -83,6 +84,7 @@ describe("createBackgroundJobHandlers", () => {
       runtime,
       secretStore,
       memoryProviders,
+      shutdownSignal: new AbortController().signal,
       deploymentModelKey: "openrouter-key",
       deploymentModelConfigured: true,
     });
@@ -125,6 +127,7 @@ describe("createBackgroundJobHandlers", () => {
         runtime,
         secretStore: {} as unknown as EncryptedSecretStore,
         memoryProviders: { resolve: vi.fn(async () => null) },
+        shutdownSignal: new AbortController().signal,
       });
 
       await handlers["history.compact"]({ threadId: "thread-fixture", sourceRunId: "origin-run" });

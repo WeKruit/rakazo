@@ -32,6 +32,7 @@ export function createBackgroundJobHandlers(deps: {
   runtime: AgentRuntime;
   secretStore: SecretStore;
   memoryProviders: MemoryProviderResolver;
+  shutdownSignal: AbortSignal;
   deploymentModelKey?: string;
   deploymentModelConfigured?: boolean;
   messaging?: MessagingSurface;

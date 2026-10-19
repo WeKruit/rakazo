@@ -91,6 +91,116 @@ describe("sandbox idle", () => {
     expect(harness.jobs.enqueue).toHaveBeenCalledOnce();
   });
 
+  it.each(["before sleep", "during the active run check", "during the background probe"])(
+    "does not claim idle maintenance when shutdown starts %s",
+    async (stage) => {
+      const harness = idleHarness();
+      const reason = new Error("worker shutting down");
+      if (stage === "before sleep") harness.shutdown.abort(reason);
+      else if (stage === "during the active run check") {
+        harness.prisma.run.findFirst.mockImplementationOnce(async () => {
+          harness.shutdown.abort(reason);
+          return { id: "active-run" };
+        });
+      } else {
+        harness.sandbox.execute.mockImplementationOnce(async function* () {
+          harness.shutdown.abort(reason);
+          yield { type: "stdout", data: "rakazo-background-idle\n" } as const;
+          yield { type: "exit", code: 1 } as const;
+        });
+      }
+
+      await expect(sleepComputerIfIdle(harness.deps, harness.computer.id)).rejects.toBe(reason);
+
+      expect(harness.computerUpdate.create).not.toHaveBeenCalled();
+      expect(harness.computer.maintenanceId).toBeNull();
+      expect(harness.home.commit).not.toHaveBeenCalled();
+      expect(harness.sandbox.stop).not.toHaveBeenCalled();
+      expect(harness.jobs.enqueue).not.toHaveBeenCalled();
+    },
+  );
+
+  it("releases failed idle maintenance only after an export settles following shutdown", async () => {
+    const harness = idleHarness();
+    const entered = deferred();
+    const release = deferred();
+    const reason = new Error("worker shutting down");
+    harness.sandbox.exportWorkspace.mockImplementationOnce(async function* () {
+      entered.resolve();
+      await release.promise; // Deliberately ignore abort until the provider settles.
+      yield { path: "notes/result.txt", content: new TextEncoder().encode("durable") };
+    });
+    let settled = false;
+    const sleep = sleepComputerIfIdle(harness.deps, harness.computer.id).then(
+      () => {
+        settled = true;
+      },
+      (error: unknown) => {
+        settled = true;
+        return error;
+      },
+    );
+    await entered.promise;
+    harness.shutdown.abort(reason);
+    await Promise.resolve();
+
+    expect(settled).toBe(false);
+    expect(harness.operation.status).toBe("running");
+    expect(harness.computer.maintenanceId).toBe("checkpoint-1");
+    expect(harness.home.commit).not.toHaveBeenCalled();
+    expect(harness.sandbox.stop).not.toHaveBeenCalled();
+
+    release.resolve();
+    expect(await sleep).toBe(reason);
+    expect(harness.operation.status).toBe("failed");
+    expect(harness.computer.state).toBe("running");
+    expect(harness.computer.maintenanceId).toBeNull();
+    expect(harness.computer.homeRevision).toBe("rev-before");
+    expect(harness.home.commit).not.toHaveBeenCalled();
+    expect(harness.sandbox.stop).not.toHaveBeenCalled();
+    expect(harness.events.append).not.toHaveBeenCalled();
+    expect(harness.jobs.enqueue).not.toHaveBeenCalled();
+  });
+
+  it("does not reschedule or keep alive when shutdown interrupts the final background probe", async () => {
+    const harness = idleHarness();
+    const reason = new Error("worker shutting down");
+    harness.sandbox.execute
+      .mockImplementationOnce(harness.sandbox.execute.getMockImplementation()!)
+      .mockImplementationOnce(async function* () {
+        harness.shutdown.abort(reason);
+        yield { type: "exit", code: 0 } as const;
+      });
+
+    await expect(sleepComputerIfIdle(harness.deps, harness.computer.id)).rejects.toBe(reason);
+
+    expect(harness.home.commit).toHaveBeenCalledOnce();
+    expect(harness.computer.homeRevision).toBe("rev-checkpoint");
+    expect(harness.operation.status).toBe("failed");
+    expect(harness.computer.state).toBe("running");
+    expect(harness.computer.maintenanceId).toBeNull();
+    expect(harness.sandbox.stop).not.toHaveBeenCalled();
+    expect(harness.sandbox.keepAlive).not.toHaveBeenCalled();
+    expect(harness.jobs.enqueue).not.toHaveBeenCalled();
+  });
+
+  it("does not reschedule a failed idle claim after shutdown", async () => {
+    const harness = idleHarness();
+    const reason = new Error("worker shutting down");
+    harness.prisma.computer.updateMany.mockImplementationOnce(async () => {
+      harness.shutdown.abort(reason);
+      return { count: 0 };
+    });
+
+    await expect(sleepComputerIfIdle(harness.deps, harness.computer.id)).rejects.toBe(reason);
+
+    expect(harness.computer.state).toBe("running");
+    expect(harness.computer.maintenanceId).toBeNull();
+    expect(harness.jobs.enqueue).not.toHaveBeenCalled();
+    expect(harness.home.commit).not.toHaveBeenCalled();
+    expect(harness.sandbox.stop).not.toHaveBeenCalled();
+  });
+
   it("does not suspend a computer while bot-launched background work is active", async () => {
     const harness = idleHarness({ backgroundWorkProbeCode: 0 });
 
@@ -814,6 +924,7 @@ function idleHarness(
     providerBackgroundWorkStatus?: "active" | "idle" | "unknown";
   } = {},
 ) {
+  const shutdown = new AbortController();
   const backgroundWorkProbeCodes = [...(options.backgroundWorkProbeCodes ?? [])];
   const computer = {
     id: "computer-id",
@@ -974,6 +1085,7 @@ function idleHarness(
   };
   const events = { append: vi.fn().mockResolvedValue({}) };
   return {
+    shutdown,
     computer,
     computerUpdate,
     operation,
@@ -983,6 +1095,7 @@ function idleHarness(
     jobs,
     events,
     deps: {
+      shutdownSignal: shutdown.signal,
       prisma: db as unknown as PrismaClient,
       sandbox: sandbox as unknown as SandboxProvider,
       home: home as unknown as AgentHomeStore,

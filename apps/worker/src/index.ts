@@ -66,6 +66,7 @@ const logger = createRootLogger(SERVICE_NAMES.worker);
 async function main() {
   const databaseUrl = process.env.DATABASE_URL;
   if (!databaseUrl) throw new Error("DATABASE_URL is required");
+  const shutdown = new AbortController();
   // Shared by Prisma, the reconciliation leadership lock, and both graphile-worker
   // components (see GraphileJobPublisher/GraphileJobWorkerHost) — one pool instead
   // of four separate ones. Keep this modest: graphile holds a LISTEN client and
@@ -227,6 +228,7 @@ async function main() {
     messaging: messaging ? createMessagingContextLoader(prisma) : undefined,
     web: createWebProvider(),
     cloudAgent,
+    shutdownSignal: shutdown.signal,
   });
 
   const jobHandlers = createBackgroundJobHandlers({
@@ -244,6 +246,7 @@ async function main() {
     deploymentModelConfigured,
     messaging,
     cloudAgent,
+    shutdownSignal: shutdown.signal,
   });
   // graphile-worker run() connects through the shared pool. createPool already
   // retries connect() on 53300 a finite number of times. Keep retrying start
@@ -279,6 +282,7 @@ async function main() {
   const stop = async () => {
     if (stopping) return;
     stopping = true;
+    shutdown.abort();
     try {
       await reconciler.stop();
       await jobHost.stop();

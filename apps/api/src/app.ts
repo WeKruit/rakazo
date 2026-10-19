@@ -513,6 +513,7 @@ export async function createApp(
     deploymentModelConfigured: env.deploymentModelConfigured,
     messaging,
     cloudAgent,
+    shutdownSignal: shutdown.signal,
   });
   if (inMemoryJobs) {
     await inMemoryJobs.start(jobHandlers);
