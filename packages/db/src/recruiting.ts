@@ -504,7 +504,11 @@ export async function getRecruitingWorkspace(
     async (tx) => {
       const thread = await requireThread(tx, actor, input.threadId);
       return thread.activeRecruitingRoleId
-        ? roleSnapshot(tx, actor, await requireRole(tx, actor, thread.activeRecruitingRoleId))
+        ? roleSnapshot(
+            tx,
+            actor,
+            await requireRole(tx, actor, thread.activeRecruitingRoleId, false, thread),
+          )
         : null;
     },
     { isolationLevel: Prisma.TransactionIsolationLevel.RepeatableRead },
