@@ -5279,7 +5279,7 @@ async function indexRecruitingCandidateRows(
     : [];
   if (sourceRows.length) {
     const call = researchReadRequest(effect.request, undefined, "get_rows");
-    // ponytail: compare this exact authorized read view in SQL; persist row fingerprints
+    // ponytail: compare this authorized read view in SQL; persist row fingerprints
     // only if its growing page history outgrows this scoped scan. Caller holds the role lock.
     const reused = await tx.$queryRaw<Array<{ rowIndex: number; candidateKey: string }>>(
       Prisma.sql`
@@ -5288,7 +5288,9 @@ async function indexRecruitingCandidateRows(
             row_number() OVER (PARTITION BY item->'row' ORDER BY (item->>'rowIndex')::int) AS ordinal
           FROM jsonb_array_elements(${JSON.stringify(sourceRows)}::jsonb) item
         ), source_pages AS MATERIALIZED (
-          SELECT page."effectId", page."observedAt", previous."result"
+          SELECT page."effectId", page."observedAt", previous."result",
+            CASE WHEN previous."request"->>1 = 'direct' THEN previous."request"->2->'args'
+              ELSE previous."request"->2->'arguments' END AS args
           FROM "recruiting_candidate_pages" page
           JOIN "external_effects" previous ON previous."id" = page."effectId"
           JOIN "runs" owner ON owner."id" = previous."runId"
@@ -5310,33 +5312,49 @@ async function indexRecruitingCandidateRows(
                 AND jsonb_array_length(CASE WHEN jsonb_typeof(previous."request") = 'array'
                   THEN previous."request" ELSE '[]'::jsonb END) = 3
                 AND previous."request"->2->'route' = ${JSON.stringify(call.route)}::jsonb
-                AND previous."request"->2->'args' = ${JSON.stringify(call.args)}::jsonb)
+                AND (previous."request"->2->'args') - 'limit' = ${JSON.stringify(call.args)}::jsonb - 'limit')
               OR (previous."request"->>1 IN ('connectors_execute_tool', 'mcp_execute_tool')
                 AND jsonb_array_length(CASE WHEN jsonb_typeof(previous."request") = 'array'
                   THEN previous."request" ELSE '[]'::jsonb END) = 4
                 AND previous."request"->3 = ${JSON.stringify(call.route)}::jsonb
                 AND previous."request"->2->>'id' = ${`${call.route.resourceId}:get_rows`}
-                AND previous."request"->2->'arguments' = ${JSON.stringify(call.args)}::jsonb)
+                AND (previous."request"->2->'arguments') - 'limit' = ${JSON.stringify(call.args)}::jsonb - 'limit')
             )
+        ), read_results AS (
+          SELECT * FROM source_pages
+          UNION ALL
+          SELECT current."id", current."updatedAt", current."result", ${JSON.stringify(call.args)}::jsonb
+          FROM "external_effects" current WHERE current."id" = ${effect.id}
+            AND current."spaceId" = ${actor.spaceId} AND current."status" = 'completed'
+        ), read_views AS MATERIALIZED (
+          SELECT saved.*, envelope.body FROM read_results saved
+          CROSS JOIN LATERAL (
+            SELECT COALESCE(saved."result"->'structuredContent', (
+              SELECT CASE WHEN block->>'text' IS JSON OBJECT THEN (block->>'text')::jsonb END
+              FROM jsonb_array_elements(CASE WHEN jsonb_typeof(saved."result"->'content') = 'array'
+                THEN saved."result"->'content' ELSE '[]'::jsonb END) block
+              WHERE block->>'type' = 'text' AND block->>'text' IS JSON OBJECT LIMIT 1
+            )) AS body
+          ) envelope
         ), matched_source_rows AS (
           SELECT DISTINCT ON (incoming."row", page."effectId", occurrence."candidateKey")
             incoming."row", occurrence."candidateKey", page."observedAt", page."effectId",
             occurrence."rowIndex"
-          FROM source_pages page
-          CROSS JOIN LATERAL (
-            SELECT COALESCE(page."result"->'structuredContent', (
-              SELECT CASE WHEN block->>'text' IS JSON OBJECT THEN (block->>'text')::jsonb END
-              FROM jsonb_array_elements(CASE WHEN jsonb_typeof(page."result"->'content') = 'array'
-                THEN page."result"->'content' ELSE '[]'::jsonb END) block
-              WHERE block->>'type' = 'text' AND block->>'text' IS JSON OBJECT LIMIT 1
-            )) AS body
-          ) envelope
-          CROSS JOIN LATERAL jsonb_array_elements(CASE WHEN jsonb_typeof(envelope.body->'rows') = 'array'
-            THEN envelope.body->'rows' ELSE '[]'::jsonb END) WITH ORDINALITY returned(value, ordinality)
+          FROM read_views page JOIN read_views current ON current."effectId" = ${effect.id}
+          CROSS JOIN LATERAL jsonb_array_elements(CASE WHEN jsonb_typeof(page.body->'rows') = 'array'
+            THEN page.body->'rows' ELSE '[]'::jsonb END) WITH ORDINALITY returned(value, ordinality)
           JOIN "recruiting_candidate_occurrences" occurrence ON occurrence."pageId" = page."effectId"
             AND occurrence."rowIndex" = returned.ordinality - 1
           JOIN incoming_source_rows incoming ON returned.value = incoming."row"
-          WHERE occurrence."roleId" = ${task.roleId} AND occurrence."name" IS NOT NULL
+          WHERE page."effectId" <> current."effectId" AND (
+              page.args = current.args OR (
+                NOT (page.args ? 'cursor') AND NOT (current.args ? 'cursor')
+                AND page.body->'next_cursor' = 'null'::jsonb
+                AND current.body->'next_cursor' = 'null'::jsonb
+                AND jsonb_typeof(current.body->'rows') = 'array'
+              )
+            )
+            AND occurrence."roleId" = ${task.roleId} AND occurrence."name" IS NOT NULL
             AND occurrence."candidateKey" LIKE 'source-row:%'
           ORDER BY incoming."row", page."effectId", occurrence."candidateKey", occurrence."rowIndex"
         ), selected_source_pages AS (

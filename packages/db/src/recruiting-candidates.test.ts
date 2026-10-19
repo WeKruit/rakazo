@@ -3270,7 +3270,7 @@ describe("native candidate source provenance", () => {
 });
 
 describe("native candidate results without domain actions", () => {
-  it("reuses exact source rows one-to-one within the same native read view", async () => {
+  it.each([20, 100])("reuses complete source rows one-to-one with read limit %s", async (limit) => {
     const f = nativeCandidateFixture();
     const anonymous = {
       ...f.row,
@@ -3285,7 +3285,6 @@ describe("native candidate results without domain actions", () => {
       toolName: "get_rows",
     };
     const args = { task_id: "provider-task", limit: 20 };
-    const request = boundDirectApprovalRequest(route, args, "__rakazoCatalogTool");
     const originalQuery = f.tx.$queryRaw.getMockImplementation()!;
     f.tx.$queryRaw.mockImplementation(async (query: unknown) => {
       if (!(query as { sql: string }).sql.includes("incoming_source_rows"))
@@ -3308,7 +3307,16 @@ describe("native candidate results without domain actions", () => {
         ],
       ],
     ] as const) {
-      Object.assign(f.effect, { id: effectId, request, result: { structuredContent: { rows } } });
+      const request = boundDirectApprovalRequest(
+        route,
+        { ...args, limit: effectId === "read" ? 20 : limit },
+        "__rakazoCatalogTool",
+      );
+      Object.assign(f.effect, {
+        id: effectId,
+        request,
+        result: { structuredContent: { rows, next_cursor: null } },
+      });
       Object.assign(f.saveEffect, { status: "executing", result: null });
       const bytes = Buffer.from(stableJsonValue({ request, providerResult: f.effect.result }));
       Object.assign(f.file, {
@@ -3336,19 +3344,24 @@ describe("native candidate results without domain actions", () => {
       .map(([query]) => query as { sql: string; values: unknown[] })
       .filter((query) => query.sql.includes("incoming_source_rows"));
     expect(queries).toHaveLength(2);
-    for (const query of queries) {
+    for (const [index, query] of queries.entries()) {
       expect(query.values).toEqual(
         expect.arrayContaining([
           actor.spaceId,
           actor.userId,
           "role",
           JSON.stringify(route),
-          JSON.stringify(args),
+          JSON.stringify({ ...args, limit: index === 0 ? 20 : limit }),
         ]),
       );
       expect(query.sql).toContain("row_number()");
       expect(query.sql).toContain("selected_source_pages");
       expect(query.sql).toContain("count(*) AS multiplicity");
+      expect(query.sql).toContain("page.args = current.args");
+      expect(query.sql).toContain("NOT (page.args ? 'cursor')");
+      expect(query.sql).toContain("NOT (current.args ? 'cursor')");
+      expect(query.sql).toContain("page.body->'next_cursor' = 'null'::jsonb");
+      expect(query.sql).toContain("current.body->'next_cursor' = 'null'::jsonb");
       expect(query.sql).toContain('returned.value = incoming."row"');
       expect(query.sql).not.toMatch(/->\s*'(?:name|source_id|source_ids)'/);
     }
