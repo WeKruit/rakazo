@@ -4344,8 +4344,12 @@ export function ShellPage() {
                         routineId: targetRoutine.id,
                         name: routineDraft.name || t`Routine`,
                         prompt: routineDraft.prompt || t`Check in.`,
-                        crons,
-                        active: armOneShot ? true : routineDraft.active,
+                        ...(JSON.stringify(crons) !== JSON.stringify(targetRoutine.crons)
+                          ? { crons }
+                          : {}),
+                        ...(armOneShot || routineDraft.active !== targetRoutine.active
+                          ? { active: armOneShot ? true : routineDraft.active }
+                          : {}),
                         webhookEnabled: routineDraft.webhookEnabled,
                         githubEnabled: routineDraft.githubEnabled,
                         messageProvider: routineDraft.messageProvider,

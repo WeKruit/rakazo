@@ -3662,6 +3662,7 @@ describe("routines.update", () => {
     connectedModelId = "old-model",
   ) {
     const savedRoutine = { ...routine, ...model };
+    let archiveCommitted = false;
     const credential = {
       id: "credential-1",
       provider: "openai-compatible",
@@ -3676,7 +3677,10 @@ describe("routines.update", () => {
     }));
     const update = vi.fn(
       async (args: { where: Record<string, unknown>; data: Record<string, unknown> }) => {
-        if (archivedBeforeWrite) throw Object.assign(new Error("not found"), { code: "P2025" });
+        if (archivedBeforeWrite) {
+          archiveCommitted = true;
+          throw Object.assign(new Error("not found"), { code: "P2025" });
+        }
         return {
           ...savedRoutine,
           ...Object.fromEntries(
@@ -3699,7 +3703,9 @@ describe("routines.update", () => {
       secret: { findFirst: vi.fn(async () => ({ ciphertext: "secret-ref" })) },
       routine: {
         findFirst: vi.fn(async (args: { where: { bot?: { archivedAt: null } } }) =>
-          botArchived && args.where.bot?.archivedAt === null ? null : savedRoutine,
+          (botArchived || archiveCommitted) && args.where.bot?.archivedAt === null
+            ? null
+            : savedRoutine,
         ),
         update,
         create,
@@ -3771,7 +3777,15 @@ describe("routines.update", () => {
     expect(response.status).toBe(200);
     expect(update).toHaveBeenCalledWith(
       expect.objectContaining({
-        where: { id: "routine-1", bot: { archivedAt: null } },
+        where: {
+          id: "routine-1",
+          bot: { archivedAt: null },
+          active: false,
+          crons: { equals: ["@once"] },
+          timezone: "UTC",
+          nextRunAt: null,
+          lastRunAt: null,
+        },
         data: expect.objectContaining({ active: true }),
       }),
     );
@@ -3785,11 +3799,148 @@ describe("routines.update", () => {
     expect(enqueue).not.toHaveBeenCalled();
   });
 
+  it("does not re-arm a completed one-shot even if an older edit restored its due date", async () => {
+    const { call, update, enqueue } = fixture(false, false, {
+      lastRunAt: new Date(1_000),
+      nextRunAt: new Date(1_000),
+    });
+    expect((await call({ active: true, runAt: undefined })).response.status).toBe(400);
+    expect(update).not.toHaveBeenCalled();
+    expect(enqueue).not.toHaveBeenCalled();
+  });
+
   const ownModel = {
     modelProvider: "openai-compatible",
     modelId: "old-model",
     thinkingLevel: "high",
   };
+
+  it.each([
+    { label: "recurring prompt", crons: ["*/5 * * * *"], patch: { prompt: "Keep results local" } },
+    { label: "recurring model", crons: ["*/5 * * * *"], patch: { thinkingLevel: "low" } },
+    { label: "one-shot prompt", crons: ["@once"], patch: { prompt: "Keep results local" } },
+    { label: "one-shot model", crons: ["@once"], patch: { thinkingLevel: "low" } },
+  ])("preserves the claimed schedule during a concurrent $label edit", async ({ crons, patch }) => {
+    const dueAt = new Date(Date.now() - 1_000);
+    const oneShot = crons[0] === "@once";
+    const advancedNextRunAt = oneShot ? null : new Date(Date.now() + 300_000);
+    const f = fixture(false, false, { ...ownModel, crons, active: true, nextRunAt: dueAt });
+    // Wake has committed after the handler's first read but before this patch writes.
+    f.update.mockImplementationOnce(async ({ data }) => ({
+      ...routine,
+      ...ownModel,
+      crons,
+      active: !oneShot,
+      lastRunAt: dueAt,
+      nextRunAt: advancedNextRunAt,
+      ...Object.fromEntries(Object.entries(data).filter(([, value]) => value !== undefined)),
+    }));
+    const { response } = await f.call({
+      name: routine.name,
+      prompt: routine.prompt,
+      crons,
+      active: true,
+      webhookEnabled: false,
+      githubEnabled: false,
+      messageProvider: null,
+      runAt: undefined,
+      ...patch,
+    });
+    expect(response.status).toBe(200);
+    await expect(response.json()).resolves.toMatchObject({
+      json: { nextRunAt: advancedNextRunAt?.toISOString() ?? null, active: !oneShot },
+    });
+    expect(f.update.mock.calls[0]![0].data).not.toHaveProperty("nextRunAt");
+    expect(f.update.mock.calls[0]![0].data).not.toHaveProperty("active");
+  });
+
+  it.each([
+    {
+      label: "wake",
+      before: { active: true },
+      current: { nextRunAt: new Date(9_000) },
+      patch: { timezone: "America/New_York" },
+    },
+    {
+      label: "pause",
+      before: { active: true },
+      current: { active: false },
+      patch: { crons: ["0 9 * * *"] },
+    },
+    {
+      label: "resume",
+      before: { active: false },
+      current: { active: true },
+      patch: { active: true },
+    },
+    {
+      label: "completed one-shot",
+      before: { active: false, crons: ["@once"] },
+      current: { lastRunAt: new Date(9_000) },
+      patch: { active: true },
+    },
+  ])(
+    "rejects an intentional schedule change that races with $label",
+    async ({ before, current, patch }) => {
+      const snapshot = {
+        ...ownModel,
+        crons: ["*/5 * * * *"],
+        nextRunAt: null,
+        lastRunAt: null,
+        ...before,
+      };
+      const f = fixture(false, false, snapshot);
+      f.update.mockImplementationOnce(async ({ where, data }) => {
+        const actual = { ...routine, ...snapshot, ...current };
+        for (const column of ["active", "nextRunAt", "lastRunAt"] as const) {
+          if (Object.hasOwn(where, column) && String(where[column]) !== String(actual[column]))
+            throw Object.assign(new Error("not found"), { code: "P2025" });
+        }
+        return {
+          ...actual,
+          ...Object.fromEntries(Object.entries(data).filter(([, value]) => value !== undefined)),
+        };
+      });
+      const { response } = await f.call({
+        active: undefined,
+        runAt: before.crons ? new Date(Date.now() + 60_000).toISOString() : undefined,
+        ...patch,
+      });
+      expect(response.status).toBe(409);
+      expect(f.enqueue).not.toHaveBeenCalled();
+    },
+  );
+
+  it.each([
+    { patch: { active: false }, timezone: "UTC", hour: null },
+    { patch: { crons: ["0 9 * * *"] }, timezone: "UTC", hour: 9 },
+    { patch: { timezone: "America/New_York" }, timezone: "America/New_York", hour: 9 },
+  ])(
+    "keeps explicit pause/cron/timezone changes effective: $patch",
+    async ({ patch, timezone, hour }) => {
+      const f = fixture(false, false, {
+        active: true,
+        crons: ["0 9 * * *"],
+        nextRunAt: new Date(Date.now() - 1_000),
+        ...(patch.crons ? { crons: ["*/5 * * * *"] } : {}),
+      });
+      const { response } = await f.call({ active: undefined, runAt: undefined, ...patch });
+      expect(response.status).toBe(200);
+      const next = f.update.mock.calls[0]![0].data.nextRunAt;
+      if (hour === null) expect(next).toBeNull();
+      else {
+        expect(next).toBeInstanceOf(Date);
+        expect((next as Date).getTime()).toBeGreaterThan(Date.now());
+        expect(
+          new Intl.DateTimeFormat("en-GB", {
+            timeZone: timezone,
+            hour: "numeric",
+            hourCycle: "h23",
+          }).format(next as Date),
+        ).toBe(String(hour).padStart(2, "0"));
+      }
+    },
+  );
 
   it.each(["create", "update"])(
     "rejects unsupported thinking before a routine %s writes or schedules anything",
@@ -3832,7 +3983,9 @@ describe("routines.update", () => {
 
   it("leaves model columns out of unrelated updates", async () => {
     const { call, update } = fixture(false, false, ownModel);
-    expect((await call({ name: "Renamed" })).response.status).toBe(200);
+    expect(
+      (await call({ name: "Renamed", active: undefined, runAt: undefined })).response.status,
+    ).toBe(200);
     expect(update).toHaveBeenCalledWith(
       expect.objectContaining({ where: { id: "routine-1", bot: { archivedAt: null } } }),
     );

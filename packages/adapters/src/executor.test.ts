@@ -1599,6 +1599,7 @@ describe("createRunExecutor", () => {
           routine: {
             updateMany,
             findUnique: vi.fn(async () => ({
+              prompt: "say hi",
               modelProvider: null,
               modelId: null,
               thinkingLevel: null,
@@ -1677,7 +1678,7 @@ describe("createRunExecutor", () => {
           callback({
             routine: {
               updateMany: vi.fn(async () => ({ count: 1 })),
-              findUnique: vi.fn(async () => claimedModel),
+              findUnique: vi.fn(async () => ({ prompt: "say hi", ...claimedModel })),
             },
             task: { create: taskCreate },
             run: { create: runCreate },
@@ -1824,6 +1825,7 @@ describe("createRunExecutor", () => {
           routine: {
             updateMany: vi.fn(async () => ({ count: 1 })),
             findUnique: vi.fn(async () => ({
+              prompt: "say hi",
               modelProvider: null,
               modelId: null,
               thinkingLevel: null,
@@ -1957,6 +1959,7 @@ describe("createRunExecutor", () => {
           routine: {
             updateMany: vi.fn(async () => ({ count: 1 })),
             findUnique: vi.fn(async () => ({
+              prompt: "say hi",
               modelProvider: null,
               modelId: null,
               thinkingLevel: null,
@@ -1995,7 +1998,7 @@ describe("createRunExecutor", () => {
     );
   });
 
-  it("expands @skill mentions in the routine prompt at fire time", async () => {
+  it("expands skills from the prompt committed at claim time after a prompt-only edit", async () => {
     const scheduledAt = new Date(Date.now() - 1_000);
     const enqueue = vi.fn(async () => undefined);
     let createdPrompt = "";
@@ -2046,6 +2049,7 @@ description: Prepare standup notes
           routine: {
             updateMany: vi.fn(async () => ({ count: 1 })),
             findUnique: vi.fn(async () => ({
+              prompt: "Run @Daily standup, then keep the report local",
               modelProvider: null,
               modelId: null,
               thinkingLevel: null,
@@ -2066,6 +2070,8 @@ description: Prepare standup notes
 
     expect(createdPrompt).toContain("Use skill: Daily standup");
     expect(createdPrompt).toContain("Summarize wins");
+    expect(createdPrompt).toContain("keep the report local");
+    expect(createdPrompt).not.toContain("email me");
     expect(createdPrompt).not.toMatch(/@Daily standup/);
   });
 
@@ -2106,6 +2112,7 @@ description: Prepare standup notes
           routine: {
             updateMany,
             findUnique: vi.fn(async () => ({
+              prompt: "say hi",
               modelProvider: null,
               modelId: null,
               thinkingLevel: null,
@@ -2171,6 +2178,7 @@ description: Prepare standup notes
             routine: {
               updateMany: claimUpdateMany,
               findUnique: vi.fn(async () => ({
+                prompt: "say hi",
                 modelProvider: null,
                 modelId: null,
                 thinkingLevel: null,

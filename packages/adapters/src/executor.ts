@@ -3230,7 +3230,6 @@ export function createRunExecutor(deps: ExecutorDeps) {
         spaceId: routine.spaceId,
         userId: routine.userId,
       });
-      const routinePrompt = expandSkillReferencesInPrompt(routine.prompt, skillRecords);
       const claimed = await deps.prisma.$transaction(async (tx) => {
         const updated = await tx.routine.updateMany({
           where: {
@@ -3246,19 +3245,19 @@ export function createRunExecutor(deps: ExecutorDeps) {
           },
         });
         if (updated.count !== 1) return null;
-        // The claim locks the row, so this is the model that was committed when it fired.
-        const currentModel = await tx.routine.findUnique({
+        // The claim locks the row, so prompt and model are the values committed when it fired.
+        const currentRoutine = await tx.routine.findUnique({
           where: { id: routine.id },
-          select: { modelProvider: true, modelId: true, thinkingLevel: true },
+          select: { prompt: true, modelProvider: true, modelId: true, thinkingLevel: true },
         });
-        if (!currentModel) return null;
+        if (!currentRoutine) return null;
         const task = await tx.task.create({
           data: {
             spaceId: routine.spaceId,
             botId: bot.id,
             threadId: thread.id,
             userId: routine.userId,
-            prompt: routinePrompt,
+            prompt: expandSkillReferencesInPrompt(currentRoutine.prompt, skillRecords),
             status: "queued",
           },
         });
@@ -3272,7 +3271,7 @@ export function createRunExecutor(deps: ExecutorDeps) {
             status: "queued",
             trigger: "routine",
             routineId: routine.id,
-            ...routineRunModelPin(currentModel),
+            ...routineRunModelPin(currentRoutine),
           },
         });
       });

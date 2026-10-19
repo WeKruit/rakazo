@@ -3552,17 +3552,19 @@ export function createRouter(deps: RouterDeps) {
               message: "One-shot schedules must be created from chat.",
             });
           }
-          if (!existing.nextRunAt && existing.lastRunAt) {
+          if (existing.lastRunAt) {
             throw new ORPCError("BAD_REQUEST", {
               message: "This one-shot already ran.",
             });
           }
         }
-        const scheduleChanged =
-          (!existing.active && active) ||
-          (input.crons !== undefined &&
-            JSON.stringify(input.crons) !== JSON.stringify(existing.crons)) ||
-          (input.timezone !== undefined && input.timezone !== existing.timezone);
+        const activeChanged = active !== existing.active;
+        const cronsChanged =
+          input.crons !== undefined &&
+          JSON.stringify(input.crons) !== JSON.stringify(existing.crons);
+        const timezoneChanged =
+          input.timezone !== undefined && input.timezone !== existing.timezone;
+        const scheduleChanged = (!existing.active && active) || cronsChanged || timezoneChanged;
         const recalculatedNextRunAt =
           crons.length > 0 &&
           !isOneShotRoutineCrons(crons) &&
@@ -3595,6 +3597,7 @@ export function createRouter(deps: RouterDeps) {
             : isOneShotRoutineCrons(crons)
               ? (armedOneShotAt ?? existing.nextRunAt)
               : (recalculatedNextRunAt ?? existing.nextRunAt);
+        const changesSchedule = activeChanged || scheduleChanged || armedOneShotAt !== null;
         // Re-check the parent in the write itself so an archive that lands after the read wins.
         // Model patches must also match the snapshot used to resolve omitted model fields.
         const row = await deps.prisma.routine
@@ -3602,6 +3605,15 @@ export function createRouter(deps: RouterDeps) {
             where: {
               id: existing.id,
               bot: { archivedAt: null },
+              ...(changesSchedule
+                ? {
+                    active: existing.active,
+                    crons: { equals: existing.crons },
+                    timezone: existing.timezone,
+                    nextRunAt: existing.nextRunAt,
+                    lastRunAt: existing.lastRunAt,
+                  }
+                : {}),
               ...(touchesModel
                 ? {
                     modelProvider: existing.modelProvider,
@@ -3613,21 +3625,21 @@ export function createRouter(deps: RouterDeps) {
             data: {
               name: input.name,
               prompt: input.prompt,
-              crons: input.crons,
-              timezone: input.timezone,
-              active: input.active,
+              ...(cronsChanged ? { crons } : {}),
+              ...(timezoneChanged ? { timezone } : {}),
+              ...(activeChanged ? { active } : {}),
               notify: input.notify,
               webhookEnabled: input.webhookEnabled,
               githubEnabled: input.githubEnabled,
               messageProvider: input.messageProvider,
               ...(touchesModel ? { modelProvider, modelId, thinkingLevel } : {}),
-              nextRunAt,
+              ...(changesSchedule ? { nextRunAt } : {}),
             },
           })
           .catch(async (error: unknown) => {
             if (isRecordNotFound(error)) {
               if (
-                touchesModel &&
+                (touchesModel || changesSchedule) &&
                 (await deps.prisma.routine.findFirst({
                   where: {
                     id: existing.id,
@@ -3638,7 +3650,7 @@ export function createRouter(deps: RouterDeps) {
                   select: { id: true },
                 }))
               ) {
-                throw new ORPCError("CONFLICT", { message: "Routine model changed; retry." });
+                throw new ORPCError("CONFLICT", { message: "Routine changed; retry." });
               }
               throw new ORPCError("NOT_FOUND");
             }
