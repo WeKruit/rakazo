@@ -2673,6 +2673,8 @@ it.each(["Cards", "Table"])(
   "shows provider match directly in %s while preserving retained reports and gaps",
   async (viewName) => {
     const fitReasons = "  Built the requested systems.\nRelevant project evidence.  ".repeat(80);
+    const matchJudgment =
+      "  Unresolved lead: employment scope is unconfirmed.\nReview the gap.  ".repeat(80);
     const candidate = { ...candidateFixture("internal-person", false), name: "Synthetic Engineer" };
     api.listCandidates.mockResolvedValue(candidatePage([candidate]));
     const source = {
@@ -2768,6 +2770,8 @@ it.each(["Cards", "Table"])(
         report: {
           fields: [
             { label: "Match score", value: null, sourceUrls: [] },
+            { label: "Score", value: null, sourceUrls: [] },
+            { label: "Match judgment", value: null, sourceUrls: [] },
             { label: "Original pool rank", value: null, sourceUrls: [] },
           ],
           sourceUrls: [],
@@ -2779,13 +2783,29 @@ it.each(["Cards", "Table"])(
       name: "Unavailable report",
       latestSource: { ...source, report: undefined },
     };
-    api.listCandidates.mockResolvedValue(candidatePage([candidate, noMatch, unknown, unavailable]));
+    const nativeScore = {
+      ...candidateFixture("native-score", false),
+      name: "Synthetic unresolved lead",
+      latestSource: {
+        ...source,
+        report: {
+          fields: [
+            { label: "Score", value: "5/6", sourceUrls: [] },
+            { label: "Match judgment", value: matchJudgment, sourceUrls: [] },
+          ],
+          sourceUrls: [],
+        },
+      },
+    };
+    api.listCandidates.mockResolvedValue(
+      candidatePage([candidate, noMatch, unknown, unavailable, nativeScore]),
+    );
     const view = await mounted("thread-1", undefined, false);
     await view.click("Evidence");
     await view.click(viewName);
     const list = view.container.querySelector(viewName === "Cards" ? "ul" : "tbody")!;
     const matches = [...list.querySelectorAll('[aria-label="Research match"]')];
-    expect(matches).toHaveLength(4);
+    expect(matches).toHaveLength(5);
     expect(matches[0]?.textContent).toContain("Match score0");
     expect(matches[0]?.textContent).toContain("Match tierProvider possible");
     expect([...matches[0]!.querySelectorAll("dd dt")].map((item) => item.textContent)).toEqual([
@@ -2822,8 +2842,17 @@ it.each(["Cards", "Table"])(
       expect(matches[1]?.textContent).not.toContain("Fit reasons");
     }
     expect(matches[2]?.textContent).toContain("Unknown");
+    expect(matches[2]?.textContent).toContain("ScoreUnknown");
+    expect(matches[2]?.textContent).toContain("Match judgmentUnknown");
     expect(matches[2]?.textContent).toContain("Original pool rankUnknown");
     expect(matches[3]?.textContent).toContain("Source unavailable");
+    expect(matches[4]?.textContent).toContain("Score5/6");
+    expect(matches[4]?.textContent).not.toContain("Score / tier not returned");
+    const judgment = [...matches[4]!.querySelectorAll("dt")].find(
+      (field) => field.textContent === "Match judgment",
+    )!.nextElementSibling!;
+    expect(judgment.textContent).toBe(matchJudgment);
+    expect(judgment.classList.contains("line-clamp-2")).toBe(viewName === "Table");
     expect(list.textContent).not.toContain("Unassessed");
     expect(list.textContent).toContain("Resume: inaccessible");
     expect(api.listCandidateSources).not.toHaveBeenCalled();
@@ -2909,6 +2938,15 @@ it.each(["Cards", "Table"])(
       "Fit reasons  Built the requested systems.\nRelevant project evidence.  ",
     );
     expect(match.textContent).not.toContain("Score / tier not returned");
+    await view.click("Close");
+    await view.click(nativeScore.name);
+    const nativeMatch = view.container.querySelector(
+      '[role="dialog"] [aria-label="Research match"]',
+    )!;
+    expect(nativeMatch.textContent).toContain("Score5/6");
+    expect(nativeMatch.textContent).toContain(`Match judgment${matchJudgment}`);
+    expect(nativeMatch.textContent).not.toContain("Score / tier not returned");
+    expect(nativeMatch.querySelector(".line-clamp-2")).toBeNull();
   },
 );
 

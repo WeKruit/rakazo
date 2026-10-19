@@ -514,7 +514,9 @@ function CandidateResearchMatch({
         "Original pool rank",
         "Batch rank",
         "Recommendation",
+        "Match judgment",
         "Fit reasons",
+        "Score",
         "Match score",
         "Match tier",
         "Grade",
@@ -524,7 +526,7 @@ function CandidateResearchMatch({
   );
   fields?.sort((a, b) => Number(a.label === "Fit reasons") - Number(b.label === "Fit reasons"));
   const hasMatchRating = fields?.some((field) =>
-    ["Match score", "Match tier", "Grade"].includes(field.label),
+    ["Score", "Match score", "Match tier", "Grade"].includes(field.label),
   );
   return (
     <dl aria-label={t`Research match`} className="space-y-1 text-xs">
@@ -556,7 +558,7 @@ function CandidateResearchMatch({
                     <dd
                       className={`wrap-anywhere ${
                         compact
-                          ? field.label === "Recommendation"
+                          ? ["Recommendation", "Match judgment"].includes(field.label)
                             ? "line-clamp-2"
                             : ""
                           : "whitespace-pre-wrap text-base"
