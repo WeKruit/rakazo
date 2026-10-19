@@ -1,10 +1,12 @@
 import { once } from "node:events";
 import { createServer } from "node:http";
-import type { Api, Context, Model } from "@earendil-works/pi-ai";
+import type { Api, AssistantMessage, Context, Model } from "@earendil-works/pi-ai";
+import { createAssistantMessageEventStream } from "@earendil-works/pi-ai";
 import { builtinModels } from "@earendil-works/pi-ai/providers/all";
 import type { AgentRuntimeEvent } from "@rakazo/adapter-kit";
+import { createLogger, createTestSink, getLogger, installLogger } from "@rakazo/logging";
 import { Agent } from "undici";
-import { describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import {
   createOpenAiCompatibleFetch,
   registerOpenAiCompatibleRuntime,
@@ -57,6 +59,332 @@ async function run(usage?: object) {
   }
   return { events, beforeCall, afterCall, result: await stream.result() };
 }
+
+describe("Pi model stream timing", () => {
+  const previousLogger = getLogger();
+  let sink = createTestSink();
+  let clock = 0;
+  const message: AssistantMessage = {
+    role: "assistant",
+    content: [{ type: "text", text: "Private response must not be logged" }],
+    api: model.api,
+    provider: model.provider,
+    model: model.id,
+    usage: {
+      input: 1,
+      output: 1,
+      cacheRead: 0,
+      cacheWrite: 0,
+      totalTokens: 2,
+      cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 },
+    },
+    stopReason: "stop",
+    timestamp: 1,
+  };
+  beforeEach(() => {
+    clock = 0;
+    sink = createTestSink();
+    installLogger(createLogger({ service: "stream-check", sinks: [sink] }));
+    vi.spyOn(performance, "now").mockImplementation(() => clock);
+  });
+  afterEach(() => {
+    vi.restoreAllMocks();
+    installLogger(previousLogger);
+  });
+
+  it("separates SDK events and terminal time from accounting and observer waits", async () => {
+    const upstream = createAssistantMessageEventStream();
+    let markStarted!: () => void;
+    const started = new Promise<void>((resolve) => {
+      markStarted = resolve;
+    });
+    let markAccounting!: () => void;
+    const accounting = new Promise<void>((resolve) => {
+      markAccounting = resolve;
+    });
+    let finishAccounting!: () => void;
+    const settlement = new Promise<void>((resolve) => {
+      finishAccounting = resolve;
+    });
+    const recordUsage = vi.fn(() => {
+      markAccounting();
+      return settlement;
+    });
+    const push = vi.fn();
+    const stream = observedPiStream(
+      {
+        streamSimple: () => {
+          markStarted();
+          return upstream;
+        },
+      } as never,
+      model,
+      { messages: [] },
+      undefined,
+      push,
+      {
+        beforeCall: () => {
+          clock = 100;
+          return "reservation";
+        },
+        afterCall: () => {
+          clock = 150;
+        },
+      },
+      undefined,
+      { recordUsage },
+    );
+    await started;
+    const consumer = stream[Symbol.asyncIterator]();
+    clock = 103;
+    upstream.push({ type: "start", partial: message });
+    expect((await consumer.next()).value?.type).toBe("start");
+    clock = 105;
+    upstream.push({ type: "text_delta", contentIndex: 0, delta: "", partial: message });
+    await consumer.next();
+    clock = 107;
+    upstream.push({
+      type: "text_delta",
+      contentIndex: 0,
+      delta: "Private token",
+      partial: message,
+    });
+    await consumer.next();
+    clock = 111;
+    upstream.push({ type: "done", reason: "stop", message });
+    await accounting;
+    expect(sink.events.map((event) => event.message)).toEqual(["model.stream.started"]);
+    clock = 130;
+    finishAccounting();
+    expect((await consumer.next()).value).toMatchObject({ type: "done", message });
+    await consumer.next();
+    expect(await stream.result()).toBe(message);
+    expect(recordUsage).toHaveBeenCalledOnce();
+    expect(push).toHaveBeenCalledOnce();
+    const callId = push.mock.calls[0]![0].callId;
+    expect(sink.events).toEqual([
+      {
+        timestamp: expect.any(String),
+        level: "info",
+        message: "model.stream.started",
+        "service.name": "stream-check",
+        callId,
+        provider: model.provider,
+        model: model.id,
+        operationKind: "answer",
+      },
+      {
+        timestamp: expect.any(String),
+        level: "info",
+        message: "model.stream.timing",
+        "service.name": "stream-check",
+        callId,
+        provider: model.provider,
+        model: model.id,
+        operationKind: "answer",
+        outcome: "completed",
+        streamOutcome: "completed",
+        firstStreamEventMs: 3,
+        firstTextDeltaMs: 7,
+        streamWallMs: 11,
+        usageAccountingWallMs: 19,
+        wrapperWallMs: 50,
+      },
+    ]);
+  });
+
+  it.each(["error", "cancelled", "throw", "iteratorThrow", "accountingError"] as const)(
+    "keeps termination and once-only usage semantics for %s",
+    async (failure) => {
+      const controller = new AbortController();
+      const upstream = createAssistantMessageEventStream();
+      const error = new Error("Private provider diagnostic must not be logged");
+      const recordUsage = vi.fn(async () => {
+        clock = 17;
+        if (failure === "accountingError") throw error;
+      });
+      const push = vi.fn();
+      const stream = observedPiStream(
+        {
+          streamSimple: () => {
+            if (failure === "throw") {
+              clock = 11;
+              throw error;
+            }
+            if (failure === "iteratorThrow")
+              return {
+                [Symbol.asyncIterator]() {
+                  return {
+                    next: async () => {
+                      clock = 11;
+                      throw error;
+                    },
+                  };
+                },
+              } as never;
+            return upstream;
+          },
+        } as never,
+        model,
+        { messages: [] },
+        { signal: controller.signal },
+        push,
+        undefined,
+        undefined,
+        { recordUsage },
+      );
+      if (failure !== "throw" && failure !== "iteratorThrow") {
+        clock = 11;
+        if (failure === "cancelled") controller.abort(error);
+        if (failure === "accountingError") upstream.push({ type: "done", reason: "stop", message });
+        else
+          upstream.push({
+            type: "error",
+            reason: failure === "cancelled" ? "aborted" : "error",
+            error: { ...message, stopReason: failure === "cancelled" ? "aborted" : "error" },
+          });
+      }
+      for await (const _event of stream) {
+      }
+      const result = await stream.result();
+      expect(result.stopReason).toBe(failure === "cancelled" ? "aborted" : "error");
+      if (["throw", "iteratorThrow", "accountingError"].includes(failure))
+        expect(result.errorMessage).toBe(error.message);
+      expect(recordUsage).toHaveBeenCalledOnce();
+      expect(push).toHaveBeenCalledOnce();
+      expect(sink.events[1]).toMatchObject({
+        message: "model.stream.timing",
+        outcome: failure === "cancelled" ? "cancelled" : "error",
+        streamOutcome:
+          failure === "accountingError"
+            ? "completed"
+            : failure === "cancelled"
+              ? "cancelled"
+              : "error",
+        firstStreamEventMs: ["throw", "iteratorThrow"].includes(failure) ? null : 11,
+        firstTextDeltaMs: null,
+        streamWallMs: 11,
+        usageAccountingWallMs: 6,
+        wrapperWallMs: 17,
+      });
+      expect(JSON.stringify(sink.events)).not.toContain("Private");
+    },
+  );
+
+  it("keeps empty streams and pre-request cancellation distinct", async () => {
+    const upstream = createAssistantMessageEventStream();
+    upstream.end(message);
+    const recordUsage = vi.fn();
+    const streamSimple = vi.fn(() => upstream);
+    const stream = observedPiStream(
+      { streamSimple } as never,
+      model,
+      { messages: [] },
+      undefined,
+      vi.fn(),
+      undefined,
+      undefined,
+      { recordUsage },
+    );
+    for await (const _event of stream) {
+    }
+    expect(await stream.result()).toBe(message);
+    expect(recordUsage).not.toHaveBeenCalled();
+    expect(sink.events[1]).toMatchObject({
+      outcome: "completed",
+      streamOutcome: "empty",
+      firstStreamEventMs: null,
+      firstTextDeltaMs: null,
+      streamWallMs: 0,
+      usageAccountingWallMs: null,
+    });
+    const cancelled = observedPiStream(
+      { streamSimple } as never,
+      model,
+      { messages: [] },
+      { signal: AbortSignal.abort() },
+      vi.fn(),
+    );
+    for await (const _event of cancelled) {
+    }
+    expect(streamSimple).toHaveBeenCalledOnce();
+    expect(sink.events).toHaveLength(2);
+  });
+
+  it("keeps simultaneous streams locally correlated", async () => {
+    const upstreams = [createAssistantMessageEventStream(), createAssistantMessageEventStream()];
+    const streams = upstreams.map((upstream, index) => {
+      clock = index * 10;
+      return observedPiStream(
+        { streamSimple: () => upstream } as never,
+        { ...model, id: `fixture-${index}` },
+        { messages: [] },
+        undefined,
+        vi.fn(),
+      );
+    });
+    for (const index of [1, 0]) {
+      clock = index === 1 ? 15 : 30;
+      const consumer = streams[index]![Symbol.asyncIterator]();
+      upstreams[index]!.push({
+        type: "text_delta",
+        contentIndex: 0,
+        delta: "Private",
+        partial: message,
+      });
+      await consumer.next();
+      clock += 5;
+      upstreams[index]!.push({ type: "done", reason: "stop", message });
+      await consumer.next();
+      await consumer.next();
+    }
+    const summaries = sink.events.filter((event) => event.message === "model.stream.timing");
+    expect(summaries).toMatchObject([
+      { model: "fixture-1", firstStreamEventMs: 5, firstTextDeltaMs: 5, streamWallMs: 10 },
+      { model: "fixture-0", firstStreamEventMs: 30, firstTextDeltaMs: 30, streamWallMs: 35 },
+    ]);
+    expect(new Set(summaries.map((event) => event.callId)).size).toBe(2);
+    for (const summary of summaries)
+      expect(
+        sink.events.find(
+          (event) => event.message === "model.stream.started" && event.callId === summary.callId,
+        )?.model,
+      ).toBe(summary.model);
+  });
+
+  it("does not change execution when the native log sink fails", async () => {
+    vi.spyOn(console, "error").mockImplementation(() => {});
+    installLogger(
+      createLogger({
+        service: "stream-check",
+        sinks: [
+          {
+            write: () => {
+              throw new Error("sink unavailable");
+            },
+          },
+        ],
+      }),
+    );
+    const upstream = createAssistantMessageEventStream();
+    upstream.push({ type: "done", reason: "stop", message });
+    const recordUsage = vi.fn();
+    const stream = observedPiStream(
+      { streamSimple: () => upstream } as never,
+      model,
+      { messages: [] },
+      undefined,
+      vi.fn(),
+      undefined,
+      undefined,
+      { recordUsage },
+    );
+    for await (const _event of stream) {
+    }
+    expect(await stream.result()).toBe(message);
+    expect(recordUsage).toHaveBeenCalledOnce();
+  });
+});
 
 describe("Pi usage accounting", () => {
   it.each([false, true])(

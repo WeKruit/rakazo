@@ -15,6 +15,7 @@ import type {
   ModelCallObserver,
   UsageOperationKind,
 } from "@rakazo/adapter-kit";
+import { getLogger } from "@rakazo/logging";
 import { Agent } from "undici";
 import type { ContextBudget } from "./context-selection.js";
 import { estimateModelContextTokens } from "./model-context.js";
@@ -230,6 +231,7 @@ export function observedPiStream(
   const stream = createAssistantMessageEventStream();
   const reported: ReportedUsageFields = new Set();
   const callId = randomUUID();
+  let usageAccountingWallMs: number | null = null;
   const emitUsage = async (usage: AgentUsage, operationKind = attribution.operationKind) => {
     const event = {
       type: "usage" as const,
@@ -241,7 +243,14 @@ export function observedPiStream(
       operationKind,
     };
     try {
-      await hooks?.recordUsage?.(event);
+      const accountingStartedAt = hooks?.recordUsage ? performance.now() : undefined;
+      try {
+        await hooks?.recordUsage?.(event);
+      } finally {
+        if (accountingStartedAt !== undefined)
+          usageAccountingWallMs =
+            (usageAccountingWallMs ?? 0) + performance.now() - accountingStartedAt;
+      }
     } catch (error) {
       push(event);
       throw error;
@@ -256,6 +265,12 @@ export function observedPiStream(
     let partialMessage: AssistantMessage | undefined;
     let providerError: unknown;
     let providerThrew = false;
+    let streamStartedAt: number | undefined;
+    let streamEndedAt: number | undefined;
+    let firstStreamEventMs: number | null = null;
+    let firstTextDeltaMs: number | null = null;
+    let streamOutcome: "completed" | "error" | "cancelled" | "empty" | undefined;
+    let outcome: "completed" | "error" | "cancelled" = "completed";
     try {
       // A tool-budget or cancellation stop can reach Pi's next-turn hook after
       // aborting. It is not a model invocation and must not create unknown usage.
@@ -284,6 +299,13 @@ export function observedPiStream(
         ...(observer ? { maxRetries: 0 } : {}),
       };
       let upstream: ReturnType<Models["streamSimple"]>;
+      streamStartedAt = performance.now();
+      getLogger().info("model.stream.started", {
+        callId,
+        provider: model.provider,
+        model: model.id,
+        operationKind: attribution.operationKind,
+      });
       try {
         upstream = models.streamSimple(
           model,
@@ -312,6 +334,9 @@ export function observedPiStream(
           })()
         : upstream;
       for await (const event of events) {
+        const elapsed = performance.now() - streamStartedAt;
+        firstStreamEventMs ??= elapsed;
+        if (event.type === "text_delta" && event.delta.length > 0) firstTextDeltaMs ??= elapsed;
         if (hooks?.onProviderError) {
           partialMessage =
             event.type === "done"
@@ -321,6 +346,14 @@ export function observedPiStream(
                 : event.partial;
         }
         if (event.type === "done" || event.type === "error") {
+          streamEndedAt ??= performance.now();
+          streamOutcome =
+            event.type === "done"
+              ? "completed"
+              : event.reason === "aborted"
+                ? "cancelled"
+                : "error";
+          outcome = streamOutcome;
           const message = event.type === "done" ? event.message : event.error;
           normalized = normalizePiUsage(message.usage, model, reported);
           await emitUsage(
@@ -340,8 +373,20 @@ export function observedPiStream(
         if (event.type === "error") hooks?.onProviderError?.(event.error);
         stream.push(event);
       }
-      stream.end(await upstream.result());
+      const result = await upstream.result();
+      streamEndedAt ??= performance.now();
+      outcome =
+        result.stopReason === "aborted"
+          ? "cancelled"
+          : result.stopReason === "error"
+            ? "error"
+            : outcome;
+      streamOutcome ??= firstStreamEventMs === null ? "empty" : outcome;
+      stream.end(result);
     } catch (error) {
+      outcome = options?.signal?.aborted ? "cancelled" : "error";
+      streamEndedAt ??= performance.now();
+      streamOutcome ??= outcome;
       let terminalError = error;
       if (started && normalized === null) {
         try {
@@ -382,6 +427,24 @@ export function observedPiStream(
       if (providerThrew && terminalError === providerError) hooks?.onProviderError?.(message);
       stream.push({ type: "error", reason: "error", error: message });
       stream.end(message);
+    } finally {
+      if (streamStartedAt !== undefined) {
+        // SDK events are not HTTP chunks. Terminal time excludes accounting and
+        // observer settlement; wrapper wall time includes their existing waits.
+        getLogger().info("model.stream.timing", {
+          callId,
+          provider: model.provider,
+          model: model.id,
+          operationKind: attribution.operationKind,
+          outcome,
+          streamOutcome,
+          firstStreamEventMs,
+          firstTextDeltaMs,
+          streamWallMs: streamEndedAt! - streamStartedAt,
+          usageAccountingWallMs,
+          wrapperWallMs: performance.now() - streamStartedAt,
+        });
+      }
     }
   })();
   return stream;
