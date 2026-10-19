@@ -488,6 +488,9 @@ export async function checkpointComputerWorkspace(
     return home.revise(homeKey);
   }
   const staging = await mkdtemp(path.join(tmpdir(), "rakazo-workspace-"));
+  let stagedFileCount = 0;
+  let stagedBytes = 0;
+  let stagingWriteMs = 0;
   try {
     getLogger().info("computer.workspace.export.begin", {
       operationId: context.operationId,
@@ -495,19 +498,35 @@ export async function checkpointComputerWorkspace(
     });
     for await (const file of sandbox.exportWorkspace(computer, context)) {
       context.signal.throwIfAborted();
+      const writeStartedAt = performance.now();
       await writePortableFile(staging, file);
+      stagingWriteMs += performance.now() - writeStartedAt;
+      stagedFileCount++;
+      stagedBytes += file.content.byteLength;
     }
     getLogger().info("computer.workspace.export.complete", {
       operationId: context.operationId,
       runId: context.runId,
+      stagedFileCount,
+      stagedBytes,
+      stagingWriteMs,
     });
+    const guardStartedAt = performance.now();
     await beforeCommit?.();
     context.signal.throwIfAborted();
+    getLogger().info("computer.workspace.commit.begin", {
+      operationId: context.operationId,
+      runId: context.runId,
+      commitGuardMs: performance.now() - guardStartedAt,
+    });
+    const commitStartedAt = performance.now();
     const revision = await home.commit(homeKey, staging, context);
+    const commitMs = performance.now() - commitStartedAt;
     context.signal.throwIfAborted();
     getLogger().info("computer.workspace.commit.complete", {
       operationId: context.operationId,
       runId: context.runId,
+      commitMs,
     });
     return revision;
   } finally {

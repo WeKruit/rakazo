@@ -1,7 +1,8 @@
 import { createServer } from "node:http";
 import { CommandExitError, Sandbox, SandboxNotFoundError, TimeoutError } from "@e2b/desktop";
 import type { PortableFile } from "@rakazo/adapter-kit";
-import { describe, expect, it, vi } from "vitest";
+import { createLogger, createTestSink, getLogger, installLogger } from "@rakazo/logging";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { shouldSkipPortableWorkspaceFile } from "./computer-workspace.js";
 import type { E2BSandboxSdk } from "./e2b-sandbox.js";
 import { E2BSandboxProvider, isSandboxGoneError } from "./e2b-sandbox.js";
@@ -14,6 +15,11 @@ const context = {
   userId: "user",
   signal: new AbortController().signal,
 };
+const previousLogger = getLogger();
+afterEach(() => {
+  installLogger(previousLogger);
+  vi.restoreAllMocks();
+});
 
 describe("E2B computer backend", () => {
   it.each(["cached", "uncached"])("propagates an unknown %s pause outcome", async (source) => {
@@ -294,6 +300,8 @@ describe("E2B computer backend", () => {
   it.each(["list-error", "list-abort", "read-error", "read-abort"])(
     "settles issued export requests after %s without starting another batch",
     async (source) => {
+      const sink = createTestSink();
+      installLogger(createLogger({ service: "test", sinks: [sink] }));
       const root = "/home/user/rakazo-home";
       const controller = new AbortController();
       const failure = new Error(source);
@@ -353,6 +361,9 @@ describe("E2B computer backend", () => {
         pending.values().next().value!.reject(failure);
         await vi.waitFor(() => expect(active).toBe(7));
         expect(settled).toBe(false);
+        expect(sink.events.some((event) => event.message === "computer.workspace.export.io")).toBe(
+          false,
+        );
       } finally {
         releaseFuture = true;
         for (const entry of pending.values()) entry.resolve();
@@ -361,10 +372,25 @@ describe("E2B computer backend", () => {
       expect(await outcome).toBe(failure);
       expect(list).toHaveBeenCalledTimes(source.startsWith("list") ? 9 : 1);
       expect(read).toHaveBeenCalledTimes(source.startsWith("list") ? 0 : 8);
+      expect(
+        sink.events.filter((event) => event.message === "computer.workspace.export.io"),
+      ).toEqual([
+        expect.objectContaining({
+          operationId: context.operationId,
+          listCallCount: source.startsWith("list") ? 9 : 1,
+          readCallCount: source.startsWith("list") ? 0 : 8,
+          readBatchWaitMs: expect.any(Number),
+          metadataWallMs: expect.any(Number),
+        }),
+      ]);
     },
   );
 
   it("fills export batches across directories while preserving DFS files and pruning", async () => {
+    const sink = createTestSink();
+    installLogger(createLogger({ service: "test", sinks: [sink] }));
+    let clock = 0;
+    vi.spyOn(performance, "now").mockImplementation(() => clock);
     const root = "/home/user/rakazo-home";
     const directories: Record<string, Array<{ name: string; type: string; mode?: number }>> = {
       "": [
@@ -421,26 +447,38 @@ describe("E2B computer backend", () => {
       }
     });
     const provider = new E2BSandboxProvider("test-key", {
-      connect: vi.fn(async () => ({
-        sandboxId: "existing",
-        commands: { run: vi.fn(async () => ({ stdout: "", stderr: "", exitCode: 0 })) },
-        files: { list, read },
-      })),
+      connect: vi.fn(async () => {
+        clock += 3;
+        return {
+          sandboxId: "existing",
+          commands: {
+            run: vi.fn(async () => {
+              clock += 5;
+              return { stdout: "", stderr: "", exitCode: 0 };
+            }),
+          },
+          files: { list, read },
+        };
+      }),
     } as unknown as E2BSandboxSdk);
     const exported: PortableFile[] = [];
     const drain = (async () => {
       for await (const file of provider.exportWorkspace(
         { id: "existing", providerRef: "existing", kind: "e2b", botId: "bot" },
         context,
-      ))
+      )) {
         exported.push(file);
+        clock += 100; // Consumer work must not be counted as waiting for a read batch.
+      }
     })();
     try {
       await vi.waitFor(() => expect(active).toBe(8), { timeout: 250, interval: 5 });
       expect(read).toHaveBeenCalledTimes(8);
+      clock += 12;
       for (const release of [...pending.values()].reverse()) release();
       await vi.waitFor(() => expect(read).toHaveBeenCalledTimes(10));
       expect(active).toBe(2);
+      clock += 7;
     } finally {
       releaseFutureReads = true;
       for (const release of pending.values()) release();
@@ -471,6 +509,31 @@ describe("E2B computer backend", () => {
         (directory) => (directory ? `${root}/${directory}` : root),
       ),
     );
+    expect(read).toHaveBeenCalledTimes(10);
+    expect(sink.events).toEqual([
+      expect.objectContaining({
+        message: "computer.workspace.export.ready",
+        operationId: context.operationId,
+        connectionWaitMs: 3,
+        browserStopMs: 5,
+      }),
+      expect.objectContaining({
+        message: "computer.workspace.export.io",
+        operationId: context.operationId,
+        listCallCount: 8,
+        selectedFileCount: 10,
+        readCallCount: 10,
+        readFileCount: exported.length,
+        readBytes: exported.reduce((total, file) => total + file.content.byteLength, 0),
+        browserReadSkipCount: 1,
+        metadataWallMs: 0,
+        readBatchWaitMs: 19,
+      }),
+    ]);
+    expect(JSON.stringify(sink.events)).not.toContain(root);
+    expect(JSON.stringify(sink.events)).not.toContain("root.txt");
+    expect(JSON.stringify(sink.events)).not.toContain("Cookies");
+    expect(JSON.stringify(sink.events)).not.toContain("test-key");
   });
 
   it.each(["list-error", "read-error", "list-abort", "read-abort"])(

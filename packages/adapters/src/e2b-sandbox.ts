@@ -17,6 +17,7 @@ import type {
   TerminalRequest,
 } from "@rakazo/adapter-kit";
 import { boundedSandboxCommandTimeoutMs } from "@rakazo/core";
+import { getLogger } from "@rakazo/logging";
 import { sandboxIdleMs } from "./computer-idle.js";
 import { normalizeWorkspacePath, shellQuote, workspacePath } from "./computer-support.js";
 import {
@@ -316,8 +317,16 @@ export class E2BSandboxProvider implements SandboxProvider {
     computer: ComputerRef,
     context: AdapterContext,
   ): AsyncIterable<PortableFile> {
+    const connectionStartedAt = performance.now();
     const desktop = await this.box(computer);
+    const browserStartedAt = performance.now();
     await this.desktops.stopBrowsers(computer, context);
+    getLogger().info("computer.workspace.export.ready", {
+      operationId: context.operationId,
+      runId: context.runId,
+      connectionWaitMs: browserStartedAt - connectionStartedAt,
+      browserStopMs: performance.now() - browserStartedAt,
+    });
     yield* walkE2BWorkspace(desktop, "", context);
   }
 
@@ -459,6 +468,13 @@ async function* walkE2BWorkspace(
 ): AsyncIterable<PortableFile> {
   // ponytail: O(F + D) metadata fills batches; stream bounded metadata if trees grow.
   const files: Array<{ relative: string; mode: number }> = [];
+  let listCallCount = 0;
+  let readCallCount = 0;
+  let readFileCount = 0;
+  let readBytes = 0;
+  let browserReadSkipCount = 0;
+  let metadataWallMs = 0;
+  let readBatchWaitMs = 0;
   async function collectFiles(
     directory: string,
     entries: Awaited<ReturnType<typeof desktop.files.list>>,
@@ -479,6 +495,7 @@ async function* walkE2BWorkspace(
       const results = await Promise.allSettled(
         siblings.map(async (relative) => {
           context.signal.throwIfAborted();
+          listCallCount++;
           return desktop.files.list(workspacePath(E2B_WORKSPACE, relative), {
             signal: context.signal,
           });
@@ -493,38 +510,69 @@ async function* walkE2BWorkspace(
         await collectFiles(siblings[offset]!, entries);
     }
   }
-  context.signal.throwIfAborted();
-  await collectFiles(
-    directory,
-    await desktop.files.list(workspacePath(E2B_WORKSPACE, directory), { signal: context.signal }),
-  );
-  for (let index = 0; index < files.length; index += 8) {
-    const results = await Promise.allSettled(
-      files.slice(index, index + 8).map(async ({ relative, mode }) => {
-        context.signal.throwIfAborted();
-        const content = await desktop.files
-          .read(workspacePath(E2B_WORKSPACE, relative), {
-            format: "bytes",
-            signal: context.signal,
-          })
-          .catch((error) => {
-            context.signal.throwIfAborted();
-            if (relative.startsWith(".browser-profiles/")) return undefined;
-            throw error;
-          });
-        if (!content) return undefined;
-        return { path: relative, content, executable: Boolean(mode & 0o100) };
-      }),
-    );
-    context.signal.throwIfAborted();
-    const batch = results.map((result) => {
-      if (result.status === "rejected") throw result.reason;
-      return result.value;
-    });
-    for (const file of batch) {
+  try {
+    const metadataStartedAt = performance.now();
+    try {
       context.signal.throwIfAborted();
-      if (file) yield file;
+      listCallCount++;
+      await collectFiles(
+        directory,
+        await desktop.files.list(workspacePath(E2B_WORKSPACE, directory), {
+          signal: context.signal,
+        }),
+      );
+    } finally {
+      metadataWallMs = performance.now() - metadataStartedAt;
     }
+    for (let index = 0; index < files.length; index += 8) {
+      const readStartedAt = performance.now();
+      const results = await Promise.allSettled(
+        files.slice(index, index + 8).map(async ({ relative, mode }) => {
+          context.signal.throwIfAborted();
+          readCallCount++;
+          const content = await desktop.files
+            .read(workspacePath(E2B_WORKSPACE, relative), {
+              format: "bytes",
+              signal: context.signal,
+            })
+            .catch((error) => {
+              context.signal.throwIfAborted();
+              if (relative.startsWith(".browser-profiles/")) {
+                browserReadSkipCount++;
+                return undefined;
+              }
+              throw error;
+            });
+          if (!content) return undefined;
+          readFileCount++;
+          readBytes += content.byteLength;
+          return { path: relative, content, executable: Boolean(mode & 0o100) };
+        }),
+      );
+      readBatchWaitMs += performance.now() - readStartedAt;
+      context.signal.throwIfAborted();
+      const batch = results.map((result) => {
+        if (result.status === "rejected") throw result.reason;
+        return result.value;
+      });
+      for (const file of batch) {
+        context.signal.throwIfAborted();
+        if (file) yield file;
+      }
+    }
+  } finally {
+    getLogger().info("computer.workspace.export.io", {
+      operationId: context.operationId,
+      runId: context.runId,
+      metadataWallMs,
+      readBatchWaitMs,
+      listCallCount,
+      selectedFileCount: files.length,
+      readCallCount,
+      readFileCount,
+      readBytes,
+      browserReadSkipCount,
+    });
   }
 }
 
