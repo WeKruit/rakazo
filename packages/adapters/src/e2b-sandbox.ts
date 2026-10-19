@@ -457,17 +457,24 @@ async function* walkE2BWorkspace(
   directory: string,
   context: AdapterContext,
 ): AsyncIterable<PortableFile> {
-  const entries = await desktop.files.list(workspacePath(E2B_WORKSPACE, directory), {
-    signal: context.signal,
-  });
+  // ponytail: O(F) metadata fills batches across directories; stream bounded metadata if trees grow.
   const files: Array<{ relative: string; mode: number }> = [];
-  const directories: string[] = [];
-  for (const entry of entries) {
-    const relative = normalizeWorkspacePath(directory ? `${directory}/${entry.name}` : entry.name);
-    if (shouldSkipPortableWorkspaceFile(relative)) continue;
-    if (entry.type === "dir") directories.push(relative);
-    else if (entry.type === "file") files.push({ relative, mode: entry.mode });
+  async function collectFiles(directory: string): Promise<void> {
+    const entries = await desktop.files.list(workspacePath(E2B_WORKSPACE, directory), {
+      signal: context.signal,
+    });
+    const directories: string[] = [];
+    for (const entry of entries) {
+      const relative = normalizeWorkspacePath(
+        directory ? `${directory}/${entry.name}` : entry.name,
+      );
+      if (shouldSkipPortableWorkspaceFile(relative)) continue;
+      if (entry.type === "dir") directories.push(relative);
+      else if (entry.type === "file") files.push({ relative, mode: entry.mode });
+    }
+    for (const relative of directories) await collectFiles(relative);
   }
+  await collectFiles(directory);
   for (let index = 0; index < files.length; index += 8) {
     const batch = await Promise.all(
       files.slice(index, index + 8).map(async ({ relative, mode }) => {
@@ -488,7 +495,6 @@ async function* walkE2BWorkspace(
       if (file) yield file;
     }
   }
-  for (const relative of directories) yield* walkE2BWorkspace(desktop, relative, context);
 }
 
 function e2bCwd(cwd: string | undefined): string {

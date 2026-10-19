@@ -1,5 +1,6 @@
 import { createServer } from "node:http";
 import { CommandExitError, Sandbox, SandboxNotFoundError, TimeoutError } from "@e2b/desktop";
+import type { PortableFile } from "@rakazo/adapter-kit";
 import { describe, expect, it, vi } from "vitest";
 import { shouldSkipPortableWorkspaceFile } from "./computer-workspace.js";
 import type { E2BSandboxSdk } from "./e2b-sandbox.js";
@@ -200,6 +201,153 @@ describe("E2B computer backend", () => {
     expect(shouldSkipPortableWorkspaceFile(".browser-profiles/chromium/Cache/data")).toBe(true);
     expect(shouldSkipPortableWorkspaceFile(".browser-profiles/chromium/SingletonLock")).toBe(true);
   });
+
+  it("fills export batches across directories while preserving DFS files and pruning", async () => {
+    const root = "/home/user/rakazo-home";
+    const directories: Record<string, Array<{ name: string; type: string; mode?: number }>> = {
+      "": [
+        { name: "a", type: "dir" },
+        { name: "root.txt", type: "file" },
+        ...["b", "c", "d", ".browser-profiles"].map((name) => ({ name, type: "dir" })),
+        { name: "linked", type: "symlink" },
+      ],
+      a: [
+        { name: "nested", type: "dir" },
+        { name: "empty.txt", type: "file" },
+        { name: "script.sh", type: "file", mode: 0o700 },
+      ],
+      "a/nested": [{ name: "deep.txt", type: "file" }],
+      b: [
+        { name: "one.txt", type: "file" },
+        { name: "two.txt", type: "file" },
+      ],
+      c: [{ name: "one.txt", type: "file" }],
+      d: [{ name: "one.txt", type: "file" }],
+      ".browser-profiles": [{ name: "chromium", type: "dir" }],
+      ".browser-profiles/chromium": [
+        { name: "Cookies", type: "file" },
+        { name: "missing", type: "file" },
+        { name: "Cache", type: "dir" },
+        { name: "SingletonLock", type: "file" },
+        { name: "linked", type: "symlink" },
+      ],
+    };
+    const pending = new Map<string, () => void>();
+    let active = 0;
+    let peak = 0;
+    let releaseFutureReads = false;
+    const list = vi.fn(async (directory: string, options: unknown) => {
+      expect(options).toEqual({ signal: context.signal });
+      const entries = directories[directory === root ? "" : directory.slice(root.length + 1)];
+      if (!entries) throw new Error("unexpected directory");
+      return entries.map((entry) => ({ mode: 0o600, ...entry }));
+    });
+    const read = vi.fn(async (filePath: string, options: unknown) => {
+      expect(options).toEqual({ format: "bytes", signal: context.signal });
+      active += 1;
+      peak = Math.max(peak, active);
+      try {
+        if (!releaseFutureReads)
+          await new Promise<void>((resolve) => pending.set(filePath, resolve));
+        if (filePath.endsWith("/missing")) throw new Error("profile file disappeared");
+        return filePath.endsWith("/empty.txt")
+          ? new Uint8Array(0)
+          : new TextEncoder().encode(filePath.slice(root.length + 1));
+      } finally {
+        active -= 1;
+        pending.delete(filePath);
+      }
+    });
+    const provider = new E2BSandboxProvider("test-key", {
+      connect: vi.fn(async () => ({
+        sandboxId: "existing",
+        commands: { run: vi.fn(async () => ({ stdout: "", stderr: "", exitCode: 0 })) },
+        files: { list, read },
+      })),
+    } as unknown as E2BSandboxSdk);
+    const exported: PortableFile[] = [];
+    const drain = (async () => {
+      for await (const file of provider.exportWorkspace(
+        { id: "existing", providerRef: "existing", kind: "e2b", botId: "bot" },
+        context,
+      ))
+        exported.push(file);
+    })();
+    try {
+      await vi.waitFor(() => expect(active).toBe(8), { timeout: 250, interval: 5 });
+      expect(read).toHaveBeenCalledTimes(8);
+      for (const release of [...pending.values()].reverse()) release();
+      await vi.waitFor(() => expect(read).toHaveBeenCalledTimes(10));
+      expect(active).toBe(2);
+    } finally {
+      releaseFutureReads = true;
+      for (const release of pending.values()) release();
+      await drain;
+    }
+    expect(peak).toBe(8);
+    const expected = [
+      "root.txt",
+      "a/empty.txt",
+      "a/script.sh",
+      "a/nested/deep.txt",
+      "b/one.txt",
+      "b/two.txt",
+      "c/one.txt",
+      "d/one.txt",
+      ".browser-profiles/chromium/Cookies",
+    ];
+    expect(exported).toEqual(
+      expected.map((filePath) => ({
+        path: filePath,
+        content:
+          filePath === "a/empty.txt" ? new Uint8Array(0) : new TextEncoder().encode(filePath),
+        executable: filePath === "a/script.sh",
+      })),
+    );
+    expect(list.mock.calls.map(([directory]) => directory)).toEqual(
+      ["", "a", "a/nested", "b", "c", "d", ".browser-profiles", ".browser-profiles/chromium"].map(
+        (directory) => (directory ? `${root}/${directory}` : root),
+      ),
+    );
+  });
+
+  it.each(["list-error", "read-error", "list-abort", "read-abort"])(
+    "propagates an export %s without dropping ordinary files",
+    async (source) => {
+      const controller = new AbortController();
+      const failure = new Error(source);
+      const fail = () => {
+        if (source.endsWith("abort")) controller.abort(failure);
+        throw failure;
+      };
+      const list = vi.fn(async (_directory: string, options: { signal: AbortSignal }) => {
+        expect(options.signal).toBe(controller.signal);
+        if (source.startsWith("list")) fail();
+        return [{ name: "note.txt", type: "file", mode: 0o600 }];
+      });
+      const read = vi.fn(async (_filePath: string, options: { signal: AbortSignal }) => {
+        expect(options.signal).toBe(controller.signal);
+        fail();
+      });
+      const provider = new E2BSandboxProvider("test-key", {
+        connect: vi.fn(async () => ({
+          sandboxId: "existing",
+          commands: { run: vi.fn(async () => ({ stdout: "", stderr: "", exitCode: 0 })) },
+          files: { list, read },
+        })),
+      } as unknown as E2BSandboxSdk);
+      const drain = async () => {
+        for await (const _file of provider.exportWorkspace(
+          { id: "existing", providerRef: "existing", kind: "e2b", botId: "bot" },
+          { ...context, signal: controller.signal },
+        )) {
+          // Drain the public workspace export contract.
+        }
+      };
+      await expect(drain()).rejects.toBe(failure);
+      expect(read).toHaveBeenCalledTimes(source.startsWith("list") ? 0 : 1);
+    },
+  );
 
   it.each([
     "ECONNRESET",
