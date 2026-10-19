@@ -45,6 +45,7 @@ const EXPLICIT_APPROVAL_BUILTIN_TOOLS = new Set([
 // one-time human decision as a direct reply or campaign activation.
 const EXPLICIT_APPROVAL_MCP_OPERATIONS = new Set([
   "crm_import_candidate",
+  "crm_update_candidate_stage",
   "reply_to_email",
   "create_lead",
   "add_leads_to_campaign_or_list_bulk",

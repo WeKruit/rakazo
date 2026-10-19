@@ -49,11 +49,12 @@ describe("toolRequiresApproval", () => {
   });
 
   it.each([
+    "crm_update_candidate_stage",
     "reply_to_email",
     "create_lead",
     "add_leads_to_campaign_or_list_bulk",
     "activate_campaign",
-  ])("requires a one-time human decision for the resolved outbound operation %s", (toolName) => {
+  ])("requires a one-time human decision for the resolved protected operation %s", (toolName) => {
     expect(toolRequiresExplicitApproval("renamed_action", { connectorId: "mcp", toolName })).toBe(
       true,
     );
