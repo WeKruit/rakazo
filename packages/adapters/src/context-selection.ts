@@ -303,9 +303,8 @@ function shortenStructuredResult(source: string, size: number): string | undefin
       payload && typeof payload === "object" && "isError" in payload ? payload.isError : undefined;
     return JSON.stringify({
       contextTruncated: true,
-      needsRetry: true,
       ...(typeof isError === "boolean" ? { isError } : {}),
-      error: "Read less at the same offset/cursor; never repeat writes.",
+      notice: "Model excerpt omitted; original result unchanged. Never repeat writes.",
     });
   }
   return JSON.stringify(holder.payload);

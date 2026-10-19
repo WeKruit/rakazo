@@ -150,7 +150,7 @@ describe("serializeToolResult", () => {
   });
 
   it.each(["current", "retrieval"] as const)(
-    "returns a bounded JSON retry notice when %s result metadata cannot fit",
+    "marks only the model excerpt omitted when %s result metadata cannot fit",
     (strategy) => {
       const result = {
         isError: false,
@@ -165,9 +165,8 @@ describe("serializeToolResult", () => {
       expect(projected.length).toBeLessThanOrEqual(TOOL_RESULT_TEXT_LIMIT);
       expect(JSON.parse(projected)).toEqual({
         contextTruncated: true,
-        needsRetry: true,
         isError: false,
-        error: "Read less at the same offset/cursor; never repeat writes.",
+        notice: "Model excerpt omitted; original result unchanged. Never repeat writes.",
       });
       expect(JSON.stringify(result)).toBe(original);
     },

@@ -322,7 +322,7 @@ describe("bounded context selection", () => {
   });
 
   it.each([undefined, false, true])(
-    "omits oversized metadata without losing error status %s",
+    "omits oversized metadata without inventing a tool failure (status %s)",
     (isError) => {
       const payload = {
         ...(isError === undefined ? {} : { isError }),
@@ -334,9 +334,8 @@ describe("bounded context selection", () => {
       expect(projected.length).toBeLessThanOrEqual(128);
       expect(JSON.parse(projected)).toEqual({
         contextTruncated: true,
-        needsRetry: true,
         ...(isError === undefined ? {} : { isError }),
-        error: "Read less at the same offset/cursor; never repeat writes.",
+        notice: "Model excerpt omitted; original result unchanged. Never repeat writes.",
       });
       expect(JSON.stringify(payload)).toBe(original);
     },
