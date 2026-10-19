@@ -337,6 +337,7 @@ import {
   matchesFailedOAuthSecret,
   parseModelSecret,
   persistStoredModelSecret,
+  RetiredModelCredentialError,
   resolveModelAuth,
   secretValuesToRedact,
   serializeModelSecret,
@@ -10229,13 +10230,19 @@ async function resolveModelKey(
 }> {
   if (credential) {
     return withModelCredentialLock(credential.secretId, async () => {
-      const row = await deps.prisma.secret.findFirst({
-        where: { id: credential.secretId, userId, spaceId: null },
-      });
-      if (!row) {
-        if (requireStoredSecret) throw new Error("Backup model credential is no longer available");
-        cloudflareGatewayProviderEnv({ provider });
-        return { apiKey: deploymentKeyFor(deps, provider), redact: [] };
+      const [selected, row] = await Promise.all([
+        deps.prisma.userModelCredential.findFirst({
+          where: { id: credential.id, userId, provider, secretId: credential.secretId },
+          select: { id: true },
+        }),
+        deps.prisma.secret.findFirst({
+          where: { id: credential.secretId, userId, spaceId: null },
+        }),
+      ]);
+      if (!selected || !row) {
+        throw new RetiredModelCredentialError(
+          "Model connection is no longer available. Connect it again.",
+        );
       }
       const plaintext = await deps.secretStore.load(row.ciphertext, row.id);
       registerSecrets?.(secretValuesToRedact(parseModelSecret(plaintext)));

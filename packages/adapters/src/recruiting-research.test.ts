@@ -585,6 +585,35 @@ it("uses only the native redacted context projection when freezing a confirmed b
 });
 
 describe("retained candidate report projection", () => {
+  it.each([
+    ["rule_hr7_project_evidence", "Project evidence"],
+    ["round3_project_evidence", "Project evidence"],
+    ["rule_of_thumb", "Rule of thumb"],
+    ["round_trip_support", "Round trip support"],
+  ])("labels %s without changing the supplied report cell", (key, label) => {
+    const cell = {
+      value: "  Round 5: reported finding.\nUnchanged conclusion.  ",
+      evidence: "Original supporting quote.",
+      reasoning: "Original provider explanation.",
+      source_id: "reference",
+    };
+    const row = { [key]: cell, _sources: { reference: "https://example.test/evidence" } };
+    const original = structuredClone(row);
+    expect(projectRecruitingCandidateReport(row)).toEqual({
+      fields: [
+        {
+          label,
+          value: cell.value,
+          evidence: cell.evidence,
+          reasoning: cell.reasoning,
+          sourceUrls: [row._sources.reference],
+        },
+      ],
+      sourceUrls: [row._sources.reference],
+    });
+    expect(row).toEqual(original);
+  });
+
   it("keeps supplied values, unknowns and report notes while resolving only real source links", () => {
     expect(
       projectRecruitingCandidateReport({

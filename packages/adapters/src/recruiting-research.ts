@@ -469,6 +469,7 @@ export function projectRecruitingCandidateReport(raw: unknown): RecruitingCandid
       ]),
     ];
     const label = key
+      .replace(/^(?:rule_[a-z]+\d+|round\d+)_/i, "")
       .replace(/([a-z])([A-Z])/g, "$1 $2")
       .replace(/[_-]+/g, " ")
       .trim();

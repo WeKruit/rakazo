@@ -2554,9 +2554,10 @@ description: Prepare standup notes
     expect(runtimeRun).not.toHaveBeenCalled();
   });
 
-  it("fails a pinned routine run instead of falling back to the space default", async () => {
+  it.each(["provider", "credential", "secret"])("missing %s fails the run", async (missing) => {
     const runtimeRun = vi.fn();
     const finalizeRun = vi.fn(async () => ({ continuationRunId: null }));
+    const enqueue = vi.fn(async () => undefined);
     const run = {
       id: "run-1",
       botId: "bot-1",
@@ -2626,10 +2627,28 @@ description: Prepare standup notes
                 modelId: "deepseek/deepseek-v4-flash-0731",
                 isDefault: true,
               })
+            : missing === "provider"
+              ? null
+              : modelPreference({
+                  provider: "openai-compatible",
+                  secretId: "secret-selected",
+                  modelId: "private-model",
+                  isDefault: false,
+                }),
+        ),
+      },
+      userModelCredential: {
+        findFirst: vi.fn(async () =>
+          missing === "secret" ? { id: "credential-openai-compatible" } : null,
+        ),
+      },
+      secret: {
+        findFirst: vi.fn(async () =>
+          missing === "credential"
+            ? { id: "secret-selected", ciphertext: "selected-cipher" }
             : null,
         ),
       },
-      userModelCredential: { findFirst: vi.fn(async () => null) },
       deploymentSettings: { findUnique: vi.fn(async () => null) },
       taughtSkill: { findMany: vi.fn(async () => []) },
       botSecret: { findMany: vi.fn(async () => []) },
@@ -2646,7 +2665,7 @@ description: Prepare standup notes
       memoryProviders: { resolve: vi.fn(async () => null) },
       memory: { read: vi.fn(async () => ({ documents: [] })) },
       events: { append: vi.fn(async () => undefined), finalizeRun },
-      jobs: { enqueue: vi.fn(async () => undefined) },
+      jobs: { enqueue },
       secrets: [],
     } as unknown as Parameters<typeof createRunExecutor>[0]);
 
@@ -2655,11 +2674,80 @@ description: Prepare standup notes
     expect(finalizeRun).toHaveBeenCalledWith(
       expect.objectContaining({
         outcome: "failed",
-        error: "Connect that model provider first",
+        error:
+          missing === "provider"
+            ? "Connect that model provider first"
+            : "Model connection is no longer available. Connect it again.",
       }),
     );
     expect(runtimeRun).not.toHaveBeenCalled();
+    expect(enqueue).not.toHaveBeenCalled();
   });
+
+  it.each(["credential", "secret", "reconnected credential"])(
+    "rejects a selected model connection whose %s disappeared without borrowing another account",
+    async (missing) => {
+      const preference = modelPreference({
+        provider: "openrouter",
+        secretId: "secret-selected",
+        modelId: "deepseek/deepseek-v4-flash-0731",
+        isDefault: true,
+      });
+      const other = { ...preference.credential, id: "credential-other", secretId: "secret-other" };
+      const current =
+        missing === "credential"
+          ? [other]
+          : [
+              {
+                ...preference.credential,
+                secretId: missing === "reconnected credential" ? "secret-new" : "secret-selected",
+              },
+              other,
+            ];
+      const findCredential = vi.fn(
+        async ({ where }: { where: Record<string, string> }) =>
+          current.find((credential) =>
+            Object.entries(where).every(
+              ([key, value]) => credential[key as keyof typeof credential] === value,
+            ),
+          ) ?? null,
+      );
+      const load = vi.fn(() => serializeModelSecret({ kind: "api_key", key: "selected-test-key" }));
+      const prisma = {
+        bot: { findFirst: vi.fn(async () => null) },
+        spaceModelPreference: { findFirst: vi.fn(async () => preference) },
+        userModelCredential: { findFirst: findCredential },
+        deploymentSettings: { findUnique: vi.fn(async () => null) },
+        secret: {
+          findFirst: vi.fn(async () =>
+            missing === "secret" ? null : { id: "secret-selected", ciphertext: "selected-cipher" },
+          ),
+        },
+      } as unknown as PrismaClient;
+      const executor = createRunExecutor({
+        prisma,
+        secretStore: { load, put: vi.fn() },
+        deploymentModelKey: "deployment-openrouter-key",
+        deploymentModelConfigured: true,
+      } as unknown as Parameters<typeof createRunExecutor>[0]);
+
+      const failure = await executor
+        .resolveModel({ userId: "user-1", spaceId: "ws-1" })
+        .catch((error: unknown) => error);
+      expect(failure).toBeInstanceOf(RetiredModelCredentialError);
+      expect(isTerminalModelSetupError(failure)).toBe(true);
+      expect(load).not.toHaveBeenCalled();
+      expect(findCredential).toHaveBeenCalledWith({
+        where: {
+          id: preference.credential.id,
+          userId: "user-1",
+          provider: "openrouter",
+          secretId: "secret-selected",
+        },
+        select: { id: true },
+      });
+    },
+  );
 
   it("resolves a per-bot model override with that provider’s credential", async () => {
     const findFirst = vi.fn(
@@ -2692,13 +2780,23 @@ description: Prepare standup notes
         })),
       },
       spaceModelPreference: { findFirst },
-      userModelCredential: { findFirst: vi.fn(async () => null) },
+      userModelCredential: {
+        findFirst: vi.fn(async ({ where }: { where: { id?: string } }) =>
+          where.id === "credential-xai" ? { id: where.id } : null,
+        ),
+      },
       deploymentSettings: { findUnique: vi.fn(async () => null) },
-      secret: { findFirst: vi.fn(async () => null), findUnique: vi.fn(async () => null) },
+      secret: {
+        findFirst: vi.fn(async () => ({ id: "secret-xai", ciphertext: "test-cipher" })),
+        findUnique: vi.fn(async () => null),
+      },
     } as unknown as PrismaClient;
     const executor = createRunExecutor({
       prisma,
-      secretStore: { load: vi.fn(), put: vi.fn() },
+      secretStore: {
+        load: vi.fn(() => serializeModelSecret({ kind: "api_key", key: "test-model-key" })),
+        put: vi.fn(),
+      },
     } as unknown as Parameters<typeof createRunExecutor>[0]);
 
     const model = await executor.resolveModel({
@@ -2735,12 +2833,22 @@ description: Prepare standup notes
     );
     const prisma = {
       spaceModelPreference: { findFirst },
-      userModelCredential: { findFirst: vi.fn(async () => null) },
-      secret: { findFirst: vi.fn(async () => null), findUnique: vi.fn(async () => null) },
+      userModelCredential: {
+        findFirst: vi.fn(async ({ where }: { where: { id?: string } }) =>
+          where.id === "credential-xai" ? { id: where.id } : null,
+        ),
+      },
+      secret: {
+        findFirst: vi.fn(async () => ({ id: "secret-xai", ciphertext: "test-cipher" })),
+        findUnique: vi.fn(async () => null),
+      },
     } as unknown as PrismaClient;
     const executor = createRunExecutor({
       prisma,
-      secretStore: { load: vi.fn(), put: vi.fn() },
+      secretStore: {
+        load: vi.fn(() => serializeModelSecret({ kind: "api_key", key: "test-model-key" })),
+        put: vi.fn(),
+      },
     } as unknown as Parameters<typeof createRunExecutor>[0]);
 
     const model = await executor.resolveConnectedModel(
@@ -2828,7 +2936,11 @@ description: Prepare standup notes
           }),
         ),
       },
-      userModelCredential: { findFirst: vi.fn(async () => null) },
+      userModelCredential: {
+        findFirst: vi.fn(async ({ where }: { where: { id?: string } }) =>
+          where.id === "credential-openai-codex" ? { id: where.id } : null,
+        ),
+      },
       deploymentSettings: { findUnique: vi.fn(async () => null) },
       secret: {
         findFirst: vi.fn(async () => ({ id: "secret-codex", ciphertext: plaintext })),
@@ -2873,7 +2985,11 @@ description: Prepare standup notes
           }),
         ),
       },
-      userModelCredential: { findFirst: vi.fn(async () => null) },
+      userModelCredential: {
+        findFirst: vi.fn(async ({ where }: { where: { id?: string } }) =>
+          where.id === "credential-openai-codex" ? { id: where.id } : null,
+        ),
+      },
       deploymentSettings: { findUnique: vi.fn(async () => null) },
       secret: {
         findFirst: vi.fn(async () => ({ id: "secret-codex", ciphertext: plaintext })),
@@ -2937,7 +3053,11 @@ description: Prepare standup notes
           }),
         ),
       },
-      userModelCredential: { findFirst: vi.fn(async () => null) },
+      userModelCredential: {
+        findFirst: vi.fn(async ({ where }: { where: { id?: string } }) =>
+          where.id === "credential-openai-codex" ? { id: where.id } : null,
+        ),
+      },
       deploymentSettings: { findUnique: vi.fn(async () => null) },
       secret: {
         findFirst: vi.fn(async () => ({ id: "secret-codex", ciphertext: plaintext })),
@@ -2979,7 +3099,11 @@ description: Prepare standup notes
         })),
       },
       spaceModelPreference: { findFirst },
-      userModelCredential: { findFirst: vi.fn(async () => null) },
+      userModelCredential: {
+        findFirst: vi.fn(async ({ where }: { where: { id?: string } }) =>
+          where.id === "credential-scripted" ? { id: where.id } : null,
+        ),
+      },
       deploymentSettings: { findUnique: vi.fn(async () => null) },
       secret: {
         findFirst: vi.fn(async () => ({ id: "secret-scripted", ciphertext: plaintext })),
@@ -3031,7 +3155,11 @@ description: Prepare standup notes
     const prisma = {
       bot: { findFirst: vi.fn(async () => bot) },
       spaceModelPreference: { findFirst },
-      userModelCredential: { findFirst: vi.fn(async () => null) },
+      userModelCredential: {
+        findFirst: vi.fn(async ({ where }: { where: { id?: string } }) =>
+          where.id === "credential-openai-compatible" ? { id: where.id } : null,
+        ),
+      },
       deploymentSettings: { findUnique: vi.fn(async () => null) },
       secret: {
         findFirst: vi.fn(async () => ({
@@ -3091,13 +3219,23 @@ description: Prepare standup notes
         })),
       },
       spaceModelPreference: { findFirst },
-      userModelCredential: { findFirst: vi.fn(async () => null) },
+      userModelCredential: {
+        findFirst: vi.fn(async ({ where }: { where: { id?: string } }) =>
+          where.id === "credential-openrouter" ? { id: where.id } : null,
+        ),
+      },
       deploymentSettings: { findUnique: vi.fn(async () => null) },
-      secret: { findFirst: vi.fn(async () => null), findUnique: vi.fn(async () => null) },
+      secret: {
+        findFirst: vi.fn(async () => ({ id: "secret-or", ciphertext: "test-cipher" })),
+        findUnique: vi.fn(async () => null),
+      },
     } as unknown as PrismaClient;
     const executor = createRunExecutor({
       prisma,
-      secretStore: { load: vi.fn(), put: vi.fn() },
+      secretStore: {
+        load: vi.fn(() => serializeModelSecret({ kind: "api_key", key: "test-model-key" })),
+        put: vi.fn(),
+      },
       deploymentModelKey: "deployment-openrouter-key",
       deploymentModelConfigured: true,
     } as unknown as Parameters<typeof createRunExecutor>[0]);
@@ -3124,6 +3262,30 @@ description: Prepare standup notes
         where: expect.objectContaining({ isDefault: true }),
       }),
     );
+  });
+
+  it("uses the deployment credential when no model connection was selected", async () => {
+    const prisma = {
+      spaceModelPreference: { findFirst: vi.fn(async () => null) },
+      deploymentSettings: {
+        findUnique: vi.fn(async () => ({
+          defaultModelProvider: "openrouter",
+          defaultModelId: "deepseek/deepseek-v4-flash-0731",
+        })),
+      },
+    } as unknown as PrismaClient;
+    const executor = createRunExecutor({
+      prisma,
+      deploymentModelKey: "deployment-openrouter-key",
+      deploymentModelConfigured: true,
+    } as unknown as Parameters<typeof createRunExecutor>[0]);
+
+    await expect(
+      executor.resolveModel({ userId: "user-1", spaceId: "ws-1" }),
+    ).resolves.toMatchObject({
+      provider: "openrouter",
+      apiKey: "deployment-openrouter-key",
+    });
   });
 
   it("withholds the deployment key when settings name a different provider", async () => {
@@ -3172,13 +3334,23 @@ description: Prepare standup notes
         })),
       },
       spaceModelPreference: { findFirst },
-      userModelCredential: { findFirst: vi.fn(async () => null) },
+      userModelCredential: {
+        findFirst: vi.fn(async ({ where }: { where: { id?: string } }) =>
+          where.id === "credential-openrouter" ? { id: where.id } : null,
+        ),
+      },
       deploymentSettings: { findUnique: vi.fn(async () => null) },
-      secret: { findFirst: vi.fn(async () => null), findUnique: vi.fn(async () => null) },
+      secret: {
+        findFirst: vi.fn(async () => ({ id: "secret-or", ciphertext: "test-cipher" })),
+        findUnique: vi.fn(async () => null),
+      },
     } as unknown as PrismaClient;
     const executor = createRunExecutor({
       prisma,
-      secretStore: { load: vi.fn(), put: vi.fn() },
+      secretStore: {
+        load: vi.fn(() => serializeModelSecret({ kind: "api_key", key: "test-model-key" })),
+        put: vi.fn(),
+      },
     } as unknown as Parameters<typeof createRunExecutor>[0]);
 
     const model = await executor.resolveModel({
