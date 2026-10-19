@@ -54,7 +54,7 @@ export function ComputerUpdateProgress({ onCompleted }: { onCompleted: () => voi
     t`Reconnecting`,
   ];
   const title = (update: ComputerUpdate) =>
-    update.action === "checkpoint"
+    update.action === "checkpoint" && !computerUpdateNeedsAttention(update)
       ? t`Saving your workspace`
       : computerUpdateNeedsAttention(update)
         ? update.action === "recover"
