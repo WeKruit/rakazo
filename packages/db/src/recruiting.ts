@@ -1423,11 +1423,30 @@ export async function authorizeRecruitingMemoryCommit(
   if (
     request.sourceRunId !== run.id ||
     request.sourceThreadId !== run.threadId ||
-    (context.botId !== undefined && context.botId !== run.botId)
+    (context.botId !== undefined && context.botId !== run.botId) ||
+    (request.scope === "bot" && request.botId !== run.botId)
   )
     throw new IsolationError();
-  if (!thread.activeRecruitingRoleId && !request.recruiting) return;
-  if (!request.recruiting) throw new IsolationError();
+  if (!request.recruiting) {
+    const botNote = request.scope === "bot" && request.botId === run.botId;
+    const preferenceDocument =
+      existing &&
+      (await tx.event.findFirst({
+        where: {
+          spaceId: actor.spaceId,
+          type: "memory.revised",
+          AND: [
+            { payload: { path: ["kind"], equals: "recruiting_preference" } },
+            { payload: { path: ["documentId"], equals: existing.id } },
+            { payload: { path: ["scope"], equals: request.scope } },
+            { payload: { path: ["path"], equals: request.path } },
+          ],
+        },
+        select: { id: true },
+      }));
+    if ((!thread.activeRecruitingRoleId || botNote) && !preferenceDocument) return;
+    throw new IsolationError();
+  }
   const feedback = RecruitingPreferenceFeedbackSchema.parse(request.recruiting.feedback);
   if (
     feedback.intent.basis !== "direct" ||

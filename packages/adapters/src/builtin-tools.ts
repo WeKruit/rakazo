@@ -597,7 +597,7 @@ export const builtinAgentTools: ConnectorTool[] = [
   {
     name: "remember",
     description:
-      'Replace this bot\'s native memory document. Read it with read_memory first and preserve other facts. Use the loaded expectedRevision, or 0 for a new document. For reusable recruiting preferences, prefer one recruiting_feedback call with target:"preference". If using recruitingFeedback here, top-level content must be the complete resulting native document; recruitingFeedback.content is the full exact text added or replacing an anchored span, never a summary. Both must match the same edit. Role requirements, single-round scope and candidate facts belong in recruiting_feedback.',
+      'Replace this bot\'s native memory document. Read it with read_memory first and preserve other facts. Use the loaded expectedRevision, or 0 for a new document. For reusable recruiting preferences, prefer one recruiting_feedback call with target:"preference". If using recruitingFeedback here, top-level content must be the complete resulting native document; recruitingFeedback.content is the full exact text added or replacing an anchored span, never a summary. Both must match the same edit. New role requirements, round scope changes and candidate decisions belong in recruiting_feedback. An explicitly requested private working note may summarize existing saved role state without becoming a reusable preference.',
     inputSchema: {
       type: "object",
       properties: {
@@ -787,7 +787,7 @@ export const builtinAgentTools: ConnectorTool[] = [
   {
     name: "save_memory",
     description:
-      'Store a durable fact in this bot\'s semantic memory (preferences, decisions, recurring context). For reusable recruiting preferences, prefer one recruiting_feedback call with target:"preference". If using recruitingFeedback here, read the native document with read_memory first and supply its scope, path and expectedRevision in recruitingFeedback (0 for a new document). These preferences are saved only in native memory: top-level content must be the complete resulting native document; recruitingFeedback.content is the full exact text added or replacing an anchored span, never a summary. Both must match the same edit. Other recruiting feedback belongs in recruiting_feedback.',
+      'Store a durable fact in this bot\'s semantic memory (preferences, decisions, recurring context). For reusable recruiting preferences, prefer one recruiting_feedback call with target:"preference". If using recruitingFeedback here, read the native document with read_memory first and supply its scope, path and expectedRevision in recruitingFeedback (0 for a new document). These preferences are saved only in native memory: top-level content must be the complete resulting native document; recruitingFeedback.content is the full exact text added or replacing an anchored span, never a summary. Both must match the same edit. New role requirements, round scope changes and candidate decisions belong in recruiting_feedback. In isolated scope, an explicitly requested private working note may summarize existing saved role state without becoming a reusable preference.',
     inputSchema: {
       type: "object",
       properties: {

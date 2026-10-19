@@ -1,8 +1,10 @@
+import type { AdapterContext, MemoryCommitRequest } from "@rakazo/adapter-kit";
 import type { Actor } from "@rakazo/contracts";
 import { describe, expect, it, vi } from "vitest";
 import type { PrismaClient } from "./client.js";
 import {
   authorizeRecruitingFeedbackMessage,
+  authorizeRecruitingMemoryCommit,
   listRecruitingFeedback,
   readRecruitingFeedbackContext,
 } from "./recruiting.js";
@@ -201,6 +203,157 @@ function handoffFixture() {
     input: { ...f.input, sourceMessageId: handoff.id },
   };
 }
+
+describe("native recruiting memory admission", () => {
+  const context: AdapterContext = {
+    ...actor,
+    botId: "bot",
+    runId: "run",
+    operationId: "role-note",
+    traceId: "role-note",
+    signal: new AbortController().signal,
+  };
+  const request: MemoryCommitRequest = {
+    scope: "bot",
+    botId: "bot",
+    path: "role-notes.md",
+    content: "The current task is waiting for a source response.",
+    expectedRevision: 0,
+    sourceRunId: "run",
+    sourceThreadId: "thread",
+  };
+
+  it("allows a new native bot note in an active recruiting role", async () => {
+    const f = fixture();
+    await expect(
+      authorizeRecruitingMemoryCommit(f.tx as never, request, context, null),
+    ).resolves.toBeUndefined();
+  });
+
+  it("allows CAS edits to an ordinary private note without a preference receipt", async () => {
+    const f = fixture();
+    const findFirst = vi.fn(async () => null);
+    Object.assign(f.tx.event, { findFirst });
+    await expect(
+      authorizeRecruitingMemoryCommit(f.tx as never, { ...request, expectedRevision: 2 }, context, {
+        id: "note-document",
+        content: "Previous task state.",
+        revision: 2,
+      }),
+    ).resolves.toBeUndefined();
+    expect(findFirst).toHaveBeenCalledWith({
+      where: {
+        spaceId: actor.spaceId,
+        type: "memory.revised",
+        AND: [
+          { payload: { path: ["kind"], equals: "recruiting_preference" } },
+          { payload: { path: ["documentId"], equals: "note-document" } },
+          { payload: { path: ["scope"], equals: "bot" } },
+          { payload: { path: ["path"], equals: request.path } },
+        ],
+      },
+      select: { id: true },
+    });
+  });
+
+  it.each([
+    { scope: "bot" as const, activeRole: true },
+    { scope: "bot" as const, activeRole: false },
+    { scope: "user" as const, activeRole: true },
+    { scope: "user" as const, activeRole: false },
+  ])(
+    "requires exact preference feedback for a marked $scope document (active role: $activeRole)",
+    async ({ scope, activeRole }) => {
+      const f = fixture();
+      if (!activeRole)
+        f.tx.thread.findFirst.mockResolvedValue({
+          ...actor,
+          id: "thread",
+          botId: "bot",
+          activeRecruitingRoleId: null,
+        } as never);
+      const findFirst = vi.fn(async (_query: unknown) => ({
+        botId: scope === "user" ? "another-bot" : "bot",
+        payload: { kind: "recruiting_preference" },
+      }));
+      Object.assign(f.tx.event, { findFirst });
+      await expect(
+        authorizeRecruitingMemoryCommit(
+          f.tx as never,
+          { ...request, scope, botId: scope === "bot" ? "bot" : undefined, expectedRevision: 2 },
+          context,
+          { id: "preference-document", content: "Original preference.", revision: 2 },
+        ),
+      ).rejects.toThrow(IsolationError);
+      expect(findFirst).toHaveBeenCalled();
+      if (scope === "user") expect(findFirst.mock.calls[0]?.[0]).not.toHaveProperty("where.botId");
+    },
+  );
+
+  it("keeps an unmarked shared document on the native path when no role is active", async () => {
+    const f = fixture();
+    f.tx.thread.findFirst.mockResolvedValue({
+      ...actor,
+      id: "thread",
+      botId: "bot",
+      activeRecruitingRoleId: null,
+    } as never);
+    Object.assign(f.tx.event, { findFirst: vi.fn(async () => null) });
+    await expect(
+      authorizeRecruitingMemoryCommit(
+        f.tx as never,
+        { ...request, scope: "user", botId: undefined, expectedRevision: 2 },
+        context,
+        { id: "shared-note", content: "Previous task state.", revision: 2 },
+      ),
+    ).resolves.toBeUndefined();
+  });
+
+  it.each([
+    { scope: "user", botId: undefined },
+    { botId: "another-bot" },
+    { sourceRunId: "another-run" },
+    { sourceThreadId: "another-thread" },
+    { recruiting: { sourceMessageId: "human", feedback: {} } },
+  ])("keeps shared, foreign and explicit preference requests guarded: %j", async (patch) => {
+    const f = fixture();
+    await expect(
+      authorizeRecruitingMemoryCommit(
+        f.tx as never,
+        { ...request, ...patch } as MemoryCommitRequest,
+        context,
+        null,
+      ),
+    ).rejects.toThrow();
+  });
+
+  it.each([{ userId: "another-user" }, { spaceId: "another-space" }, { botId: "another-bot" }])(
+    "validates live run ownership before admitting a bot note: %j",
+    async (patch) => {
+      const f = fixture();
+      await expect(
+        authorizeRecruitingMemoryCommit(f.tx as never, request, { ...context, ...patch }, null),
+      ).rejects.toThrow(IsolationError);
+    },
+  );
+
+  it("rejects a bot note from a stopped run", async () => {
+    const f = fixture();
+    f.tx.run.findFirst.mockResolvedValue({
+      ...actor,
+      id: "run",
+      botId: "bot",
+      bot: actor,
+      threadId: "thread",
+      sourceMessageId: "human",
+      trigger: "follow_up",
+      status: "cancelled",
+    });
+    await expect(
+      authorizeRecruitingMemoryCommit(f.tx as never, request, context, null),
+    ).rejects.toThrow(IsolationError);
+  });
+});
 
 describe("native recruiting feedback records", () => {
   it("records a selected subset from the original human source across a proven native handoff", async () => {

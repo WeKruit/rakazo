@@ -2435,7 +2435,111 @@ describe("native recruiting feedback effect dispatch", () => {
     },
   );
 
-  it.each(["remember", "save_shared_memory", "save_memory"])(
+  it("keeps an active-role bot note on native remember without preference feedback", async () => {
+    const f = fixture("run-role-private-note");
+    f.thread.activeRecruitingRoleId = "role-1";
+    f.prisma.actionApprovalRule.findMany.mockResolvedValue([
+      { effect: "always_allow", matchKind: "tool", matchValue: "remember" },
+    ]);
+    const args = {
+      path: "role-notes.md",
+      content: "The current task is waiting for a source response.",
+      expectedRevision: 0,
+    };
+    f.memoryCommit.mockResolvedValue({ path: args.path, revision: 1 });
+    f.setCalls([{ name: "remember", args, executionId: "role-private-note" }]);
+
+    await f.run();
+
+    expect(f.results).toEqual([{ ok: true, path: args.path, revision: 1 }]);
+    expect(f.memoryCommit).toHaveBeenCalledWith(
+      {
+        ...args,
+        scope: "bot",
+        botId: "bot-1",
+        sourceRunId: f.runData.id,
+        sourceThreadId: f.thread.id,
+      },
+      expect.objectContaining({ botId: "bot-1", runId: f.runData.id }),
+    );
+    expect(executeRecruitingFeedback).not.toHaveBeenCalled();
+    expect(f.semanticSave).not.toHaveBeenCalled();
+  });
+
+  it.each(["remember", "save_memory"])(
+    "rejects malformed explicit preference feedback on an active-role %s note",
+    async (name) => {
+      const f = fixture(`run-role-private-note-invalid-feedback-${name}`);
+      f.thread.activeRecruitingRoleId = "role-1";
+      if (name === "save_memory")
+        f.memoryProviderResolve.mockResolvedValue({
+          provider: f.semanticMemory,
+          defaultScope: "isolated",
+        });
+      f.setCalls([
+        {
+          name,
+          args: {
+            path: "role-notes.md",
+            content: "The current task is waiting for a source response.",
+            expectedRevision: 0,
+            recruitingFeedback: {},
+          },
+          executionId: "role-private-note-invalid-feedback",
+        },
+      ]);
+
+      await f.run();
+
+      expect(f.results).toEqual([expect.objectContaining({ error: expect.any(String) })]);
+      expect(f.memoryCommit).not.toHaveBeenCalled();
+      expect(f.semanticSave).not.toHaveBeenCalled();
+      expect(executeRecruitingFeedback).not.toHaveBeenCalled();
+    },
+  );
+
+  it.each(["isolated", "shared"] as const)(
+    "uses the resolved %s semantic scope for an active-role note without preference feedback",
+    async (scope) => {
+      const f = fixture(`run-role-semantic-note-${scope}`);
+      f.thread.activeRecruitingRoleId = "role-1";
+      f.memoryProviderResolve.mockResolvedValue({
+        provider: f.semanticMemory,
+        defaultScope: scope,
+      });
+      f.prisma.actionApprovalRule.findMany.mockResolvedValue([
+        { effect: "always_allow", matchKind: "tool", matchValue: "save_memory" },
+      ]);
+      f.setCalls([
+        {
+          name: "save_memory",
+          args: { content: "The current task is waiting for a source response." },
+          executionId: "role-semantic-note",
+        },
+      ]);
+
+      await f.run();
+
+      if (scope === "isolated") {
+        expect(f.semanticSave).toHaveBeenCalledWith(
+          {
+            content: "The current task is waiting for a source response.",
+            scope,
+            botId: "bot-1",
+            source: { kind: "durable" },
+          },
+          expect.objectContaining({ botId: "bot-1", runId: f.runData.id }),
+        );
+      } else {
+        expect(f.results).toEqual([expect.objectContaining({ error: expect.any(String) })]);
+        expect(f.semanticSave).not.toHaveBeenCalled();
+      }
+      expect(f.memoryCommit).not.toHaveBeenCalled();
+      expect(executeRecruitingFeedback).not.toHaveBeenCalled();
+    },
+  );
+
+  it.each(["save_shared_memory", "save_memory"])(
     "rechecks the current role before %s dispatch after a role tool binds midrun",
     async (name) => {
       const f = fixture(`run-feedback-bind-midrun-${name}`);
@@ -2445,7 +2549,7 @@ describe("native recruiting feedback effect dispatch", () => {
       if (name === "save_memory") {
         f.memoryProviderResolve.mockResolvedValue({
           provider: f.semanticMemory,
-          defaultScope: "isolated",
+          defaultScope: "shared",
         });
       }
       vi.mocked(executeRecruitingRoleTool).mockImplementation(async () => {

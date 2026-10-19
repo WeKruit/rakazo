@@ -5186,7 +5186,9 @@ export function createRunExecutor(deps: ExecutorDeps) {
           const guardedMemory =
             memoryWrite &&
             (args.recruitingFeedback !== undefined ||
-              Boolean(currentMemoryThread?.activeRecruitingRoleId));
+              (name !== "remember" &&
+                !(name === "save_memory" && memoryScope === "isolated") &&
+                Boolean(currentMemoryThread?.activeRecruitingRoleId)));
           let recruitingPreference: RecruitingPreferenceFeedbackInput | undefined;
           if (guardedMemory || (name === "recruiting_feedback" && args.target === "preference")) {
             const parsed = RecruitingPreferenceFeedbackSchema.safeParse(
