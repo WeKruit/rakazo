@@ -3274,10 +3274,62 @@ describe("native candidate results without domain actions", () => {
       rows: [f.row],
       outputArtifact: f.file,
     });
-    expect(f.tx.run.findFirst).toHaveBeenCalledTimes(2);
-    expect(f.tx.thread.findFirst).toHaveBeenCalledTimes(4);
+    expect(f.tx.run.findFirst).toHaveBeenCalledTimes(1);
+    expect(f.tx.thread.findFirst).toHaveBeenCalledTimes(2);
+    expect(f.tx.artifact.findFirst).toHaveBeenCalledExactlyOnceWith({
+      where: { id: "context", spaceId: actor.spaceId, userId: actor.userId },
+    });
+    expect(f.tx.thread.findFirst).toHaveBeenLastCalledWith({
+      where: {
+        spaceId: actor.spaceId,
+        userId: actor.userId,
+        id: "thread",
+        groupId: null,
+        OR: [{ botId: "bot" }, { externalConversation: { botId: "bot" } }],
+      },
+    });
     expect(f.tx.artifact.findUniqueOrThrow).not.toHaveBeenCalled();
   });
+
+  it.each(["owner", "space", "hash", "run", "anchor", "unrelated-thread"])(
+    "still validates the adopted artifact %s when reusing the locked context",
+    async (boundary) => {
+      const f = nativeCandidateFixture();
+      const artifact = f.artifacts.get("context")!;
+      if (boundary === "owner") artifact.userId = "other";
+      if (boundary === "space") artifact.spaceId = "other";
+      if (boundary === "hash") artifact.hash = "f".repeat(64);
+      if (boundary === "run") {
+        artifact.runId = "other-run";
+        f.tx.run.findFirst.mockResolvedValueOnce(f.run).mockResolvedValueOnce({
+          ...f.run,
+          id: "other-run",
+          userId: "other",
+        });
+      }
+      if (boundary === "anchor" || boundary === "unrelated-thread") {
+        const thread = await f.tx.thread.findFirst();
+        if (boundary === "anchor")
+          f.tx.thread.findFirst.mockResolvedValueOnce(thread).mockResolvedValueOnce(null as never);
+        else {
+          Object.assign(artifact, { runId: null });
+          f.tx.thread.findFirst
+            .mockResolvedValueOnce(thread)
+            .mockResolvedValueOnce({ ...thread, id: "other-thread" })
+            .mockResolvedValueOnce({ ...thread, id: "other-thread", userId: "other" });
+        }
+      }
+      await expect(
+        recruiting.saveNativeRecruitingCandidatePage(f.prisma, actor, f.trusted, f.input, {
+          sourceEffectId: "read",
+          rows: [f.row],
+          outputArtifact: f.file,
+        }),
+      ).rejects.toThrow(IsolationError);
+      expect(f.tx.recruitingCandidatePage.create).not.toHaveBeenCalled();
+      expect(f.tx.externalEffect.updateMany).not.toHaveBeenCalled();
+    },
+  );
 
   it("still authorizes a different role source thread before saving", async () => {
     const f = nativeCandidateFixture();

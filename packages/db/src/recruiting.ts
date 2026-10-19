@@ -228,7 +228,15 @@ async function requireRun(tx: Tx, actor: Actor, runId: string) {
   return run;
 }
 
-async function validateArtifact(tx: Tx, actor: Actor, ref: RecruitingArtifactRef) {
+async function validateArtifact(
+  tx: Tx,
+  actor: Actor,
+  ref: RecruitingArtifactRef,
+  context?: {
+    run: Awaited<ReturnType<typeof requireRun>>;
+    thread: Awaited<ReturnType<typeof requireThread>>;
+  },
+) {
   const artifact = scoped(
     actor,
     await tx.artifact.findFirst({
@@ -237,7 +245,11 @@ async function validateArtifact(tx: Tx, actor: Actor, ref: RecruitingArtifactRef
   );
   if (artifact.hash !== ref.sha256 || (!artifact.groupId && !artifact.botId))
     throw new IsolationError();
-  const run = artifact.runId ? await requireRun(tx, actor, artifact.runId) : null;
+  const run = artifact.runId
+    ? artifact.runId === context?.run.id
+      ? scoped(actor, context.run)
+      : await requireRun(tx, actor, artifact.runId)
+    : null;
   const thread = await tx.thread.findFirst({
     where: {
       spaceId: actor.spaceId,
@@ -252,7 +264,8 @@ async function validateArtifact(tx: Tx, actor: Actor, ref: RecruitingArtifactRef
     },
   });
   if (!thread) throw new IsolationError();
-  await requireThread(tx, actor, thread.id);
+  if (context && thread.id === context.thread.id) scoped(actor, context.thread);
+  else await requireThread(tx, actor, thread.id);
   return artifact;
 }
 
@@ -3823,6 +3836,10 @@ async function requireResearchAdoption(
   role: Pick<RecruitingRole, "id" | "currentRevisionId">,
   ref?: RecruitingArtifactRef,
   before?: Date,
+  context?: {
+    run: Awaited<ReturnType<typeof requireRun>>;
+    thread: Awaited<ReturnType<typeof requireThread>>;
+  },
 ) {
   const event = await tx.event.findFirst({
     where: {
@@ -3858,7 +3875,7 @@ async function requireResearchAdoption(
         payload.contextArtifact.sha256 !== ref.sha256))
   )
     throw new RecruitingConflictError();
-  const artifact = await validateArtifact(tx, actor, payload.contextArtifact);
+  const artifact = await validateArtifact(tx, actor, payload.contextArtifact, context);
   if (artifact.runId !== run.id) throw new IsolationError();
 }
 
@@ -5344,6 +5361,7 @@ async function nativeCandidatePage(
       { id: role.id, currentRevisionId: role.currentRevisionId },
       undefined,
       effect.createdAt,
+      { run, thread },
     );
     return {
       role,
