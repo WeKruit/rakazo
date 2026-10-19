@@ -1,8 +1,9 @@
+import { readFileSync } from "node:fs";
 import type { Actor } from "@rakazo/contracts";
 import { buildSkillMd } from "@rakazo/core";
 import type { PrismaClient } from "@rakazo/db";
 import { describe, expect, it, vi } from "vitest";
-import { createAgentSkillsService } from "./agent-skills.js";
+import { createAgentSkillsService, resolveSkillContent } from "./agent-skills.js";
 
 const actor: Actor = {
   spaceId: "space-1",
@@ -112,3 +113,25 @@ describe("built-in skill precedence in the API", () => {
     },
   );
 });
+
+it.each([
+  { directory: "scheduling", name: "Coordinate interview" },
+  { directory: "email-outreach", name: "Review recruiting draft" },
+  { directory: "interview-materials", name: "Interview materials" },
+  { directory: "post-interview", name: "Interview follow-through" },
+])(
+  "imports $directory through native skill validation and reads its full content back",
+  async ({ directory, name }) => {
+    const content = readFileSync(
+      new URL(`../../../docs/wekruit/skills/${directory}/SKILL.md`, import.meta.url),
+      "utf8",
+    );
+    const validated = resolveSkillContent({ content });
+    expect(validated.name).toBe(name);
+    const { service } = setup([savedSkill(validated.name)]);
+    const saved = await service.update(actor, { skillId: "saved-1", content });
+    expect(saved.content).toBe(validated.content);
+    await expect(service.get(actor, { skillId: "saved-1" })).resolves.toMatchObject(validated);
+    expect(resolveSkillContent({ content: saved.content })).toEqual(validated);
+  },
+);
