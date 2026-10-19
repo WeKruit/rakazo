@@ -467,6 +467,70 @@ describe("thread event reduction", () => {
     expect(isThreadSnapshotEvent(event({ type: "agent.tool.completed" }))).toBe(true);
   });
 
+  it.each(["queued", "waiting_takeover"] as const)(
+    "projects a fenced requeue to %s without changing another run or its approval card",
+    (status) => {
+      const run = { ...threadRun("run-1"), status: "leased" as const };
+      const sibling = { ...threadRun("run-2", "bot-2"), status: "waiting_input" as const };
+      const card = message("ask-1", [
+        { kind: "ask", text: "Allow?", approvalEffectId: "effect-1", status: "pending" },
+      ]);
+      const initial = { ...snapshot([card]), groupId: "group-1", run, activeRuns: [run, sibling] };
+      const next = reduceThreadSnapshot(
+        initial,
+        event({ type: "run.requeued", payload: { status } }),
+      );
+      expect(isThreadSnapshotEvent(event({ type: "run.requeued" }))).toBe(true);
+      expect(next?.run?.status).toBe(status);
+      expect(next?.activeRuns?.[0]?.status).toBe(status);
+      expect(next?.activeRuns?.[1]).toBe(sibling);
+      expect(next?.messages).toEqual([card]);
+      expect(next?.cursor).toBe(4);
+    },
+  );
+
+  it("does not let a requeue replay regress newer attempts, terminals or pending input", () => {
+    for (const status of [
+      "running",
+      "completed",
+      "failed",
+      "cancelled",
+      "waiting_input",
+      "waiting_takeover",
+    ] as const) {
+      const run = { ...threadRun("run-1"), status };
+      const initial = { ...snapshot([]), cursor: 10, run, activeRuns: [run] };
+      expect(
+        reduceThreadSnapshot(
+          initial,
+          event({ type: "run.requeued", seq: 9, payload: { status: "queued" } }),
+        ),
+      ).toBe(initial);
+      if (status !== "running") {
+        expect(
+          reduceThreadSnapshot(
+            initial,
+            event({ type: "run.requeued", seq: 11, payload: { status: "queued" } }),
+          ),
+        ).toBe(initial);
+      }
+    }
+    const run = threadRun("run-1");
+    const initial = { ...snapshot([]), run, activeRuns: [run] };
+    for (const patch of [
+      { runId: "future-run" },
+      { botId: "other-bot" },
+      { threadId: "other-thread" },
+    ]) {
+      expect(
+        reduceThreadSnapshot(
+          initial,
+          event({ type: "run.requeued", seq: 11, payload: { status: "queued" }, ...patch }),
+        ),
+      ).toBe(initial);
+    }
+  });
+
   it("event-sources the active run on run.started so Stop does not wait on threads.get", () => {
     const initial = snapshot([]);
     const started = reduceThreadSnapshot(

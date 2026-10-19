@@ -1407,6 +1407,8 @@ function Thread({ sessionEpoch }: { sessionEpoch: number }) {
                 event.type === "thread.cloud_agent" ||
                 event.type === "thread.cleared" ||
                 event.type === "run.waiting_input" ||
+                event.type === "run.requeued" ||
+                event.type === "run.started" ||
                 event.type === "computer.takeover.requested" ||
                 isRunTerminalEvent(event)
               ) {

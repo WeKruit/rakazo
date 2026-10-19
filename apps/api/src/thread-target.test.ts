@@ -358,7 +358,13 @@ describe("threadSnapshot", () => {
       expect.objectContaining({
         where: expect.objectContaining({
           type: {
-            in: ["thread.progress", "thread.subagent", "agent.tool.called", "agent.tool.completed"],
+            in: [
+              "thread.progress",
+              "thread.subagent",
+              "agent.tool.called",
+              "agent.tool.completed",
+              "run.requeued",
+            ],
           },
         }),
       }),

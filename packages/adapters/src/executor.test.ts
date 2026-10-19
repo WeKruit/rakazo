@@ -2301,6 +2301,147 @@ description: Prepare standup notes
     expect(row).toEqual({ status: "queued", checkpoint: "takeover" });
   });
 
+  it.each(["busy", "admitted", "resumed", "cancelled", "reclaimed", "cancelled-busy"])(
+    "keeps a %s computer admission out of running state until it owns the computer",
+    async (outcome) => {
+      const originalStart = outcome === "resumed" ? new Date("2026-01-01T00:00:00Z") : null;
+      let inTransaction = false;
+      const row = {
+        id: "run-1",
+        spaceId: "workspace-1",
+        threadId: "thread-1",
+        botId: "bot-1",
+        status: "queued",
+        checkpoint: null as string | null,
+        leaseOwner: null as string | null,
+        leaseFence: 0,
+        startedAt: originalStart,
+      };
+      let entered!: () => void;
+      let release!: () => void;
+      const entering = new Promise<void>((resolve) => {
+        entered = resolve;
+      });
+      const admission = new Promise<void>((resolve) => {
+        release = resolve;
+      });
+      const stop = new Error("stop after admitted attempt");
+      const updateMany = vi.fn(async ({ where, data }) => {
+        if (
+          (typeof where.status === "string" && row.status !== where.status) ||
+          (where.status?.in && !where.status.in.includes(row.status)) ||
+          (where.leaseOwner && row.leaseOwner !== where.leaseOwner) ||
+          (where.leaseFence !== undefined && row.leaseFence !== where.leaseFence) ||
+          (where.checkpoint?.in && !where.checkpoint.in.includes(row.checkpoint))
+        )
+          return { count: 0 };
+        Object.assign(row, data);
+        return { count: 1 };
+      });
+      const createEvent = vi.fn(async ({ data }) => {
+        expect(inTransaction).toBe(true);
+        return { ...data, id: "event-1" };
+      });
+      const releaseLease = vi.fn(async () => ({ count: 1 }));
+      const createAttempt = vi.fn(async () => {
+        throw stop;
+      });
+      const notify = vi.fn(async () => {
+        expect(inTransaction).toBe(false);
+      });
+      const enqueue = vi.fn(async () => undefined);
+      const prisma = {
+        $queryRaw: vi.fn(async () => []),
+        $transaction: vi.fn(async (work) => {
+          inTransaction = true;
+          try {
+            return await work(prisma);
+          } finally {
+            inTransaction = false;
+          }
+        }),
+        run: {
+          findUnique: vi.fn(async () => ({ ...row })),
+          findUniqueOrThrow: vi.fn(async () => ({ ...row })),
+          updateMany,
+        },
+        bot: { findUniqueOrThrow: vi.fn(async () => ({ computerId: "computer-1" })) },
+        computer: {
+          findUniqueOrThrow: vi.fn(async () => {
+            entered();
+            await admission;
+            if (outcome === "cancelled" || outcome === "cancelled-busy") row.status = "cancelled";
+            if (outcome === "reclaimed") {
+              row.status = "running";
+              row.leaseOwner = "other-worker";
+              row.leaseFence += 1;
+            }
+            return { scope: "team", state: "running", maintenanceId: null };
+          }),
+          findUnique: vi.fn(async () => ({ state: "running", maintenanceId: null })),
+        },
+        computerExecutionLease: {
+          updateManyAndReturn: vi.fn(async () => []),
+          create: vi.fn(async () => {
+            if (outcome === "busy" || outcome === "cancelled-busy") throw { code: "P2002" };
+            return { fence: 1 };
+          }),
+          updateMany: releaseLease,
+        },
+        thread: { update: vi.fn(async () => ({ nextEventSeq: 7 })) },
+        event: { create: createEvent },
+        attempt: { create: createAttempt },
+      };
+      const executor = createRunExecutor({
+        prisma,
+        events: { notify },
+        jobs: { enqueue },
+      } as unknown as Parameters<typeof createRunExecutor>[0]);
+
+      const continuing = executor.continueRun(row.id, "worker-1");
+      await entering;
+      expect(row).toMatchObject({ status: "leased", startedAt: originalStart });
+      expect(createAttempt).not.toHaveBeenCalled();
+      release();
+      if (outcome === "admitted" || outcome === "resumed") {
+        await expect(continuing).rejects.toBe(stop);
+        expect(row.status).toBe("running");
+        expect(row.startedAt).toBeInstanceOf(Date);
+        if (originalStart) expect(row.startedAt).toBe(originalStart);
+        expect(createAttempt).toHaveBeenCalledOnce();
+      } else {
+        await continuing;
+        expect(row.status).toBe(
+          outcome === "busy" ? "queued" : outcome === "reclaimed" ? "running" : "cancelled",
+        );
+        expect(row.startedAt).toBeNull();
+        expect(createAttempt).not.toHaveBeenCalled();
+      }
+      const hasLease = outcome !== "busy" && outcome !== "cancelled-busy";
+      expect(releaseLease).toHaveBeenCalledTimes(hasLease ? 1 : 0);
+      if (hasLease)
+        expect(releaseLease).toHaveBeenCalledWith(
+          expect.objectContaining({
+            where: { computerId: "computer-1", botId: "bot-1", runId: row.id, fence: 1 },
+          }),
+        );
+      expect(createEvent).toHaveBeenCalledTimes(outcome === "busy" ? 1 : 0);
+      if (outcome === "busy") {
+        expect(createEvent).toHaveBeenCalledWith(
+          expect.objectContaining({
+            data: expect.objectContaining({
+              type: "run.requeued",
+              runId: row.id,
+              payload: { status: "queued" },
+            }),
+          }),
+        );
+        expect(notify).toHaveBeenCalledWith(row.threadId, 6);
+        expect(enqueue).toHaveBeenCalledOnce();
+      }
+    },
+  );
+
   it("restores a takeover checkpoint when a switching computer requeues the run", async () => {
     const updateMany = vi.fn(
       async (args: {
@@ -2314,9 +2455,17 @@ description: Prepare standup notes
     );
     const enqueue = vi.fn(async () => undefined);
     const prisma = {
+      $queryRaw: vi.fn(async () => []),
+      $transaction: vi.fn(async (work: (tx: unknown) => Promise<unknown>) => work(prisma)),
+      thread: { update: vi.fn(async () => ({ nextEventSeq: 7 })) },
+      event: {
+        create: vi.fn(async ({ data }: { data: Record<string, unknown> }) => ({ ...data, seq: 6 })),
+      },
       run: {
         findUnique: vi.fn(async () => ({
           id: "run-1",
+          spaceId: "workspace-1",
+          threadId: "thread-1",
           botId: "bot-1",
           status: "queued",
           checkpoint: "takeover-skipped",
@@ -2332,9 +2481,11 @@ description: Prepare standup notes
         })),
       },
     } as unknown as PrismaClient;
-    const executor = createRunExecutor({ prisma, jobs: { enqueue } } as unknown as Parameters<
-      typeof createRunExecutor
-    >[0]);
+    const executor = createRunExecutor({
+      prisma,
+      jobs: { enqueue },
+      events: { notify: vi.fn(async () => undefined) },
+    } as unknown as Parameters<typeof createRunExecutor>[0]);
 
     await executor.continueRun("run-1", "worker-1");
 
@@ -2361,10 +2512,6 @@ description: Prepare standup notes
           checkpoint = null;
           return { count: 1 };
         }
-        if (args.data.status === "running") {
-          checkpoint = "takeover";
-          return { count: 1 };
-        }
         if (args.where.checkpoint && typeof args.where.checkpoint === "object") {
           return { count: args.where.checkpoint.in.includes(checkpoint ?? "") ? 1 : 0 };
         }
@@ -2373,9 +2520,17 @@ description: Prepare standup notes
     );
     const enqueue = vi.fn(async () => undefined);
     const prisma = {
+      $queryRaw: vi.fn(async () => []),
+      $transaction: vi.fn(async (work: (tx: unknown) => Promise<unknown>) => work(prisma)),
+      thread: { update: vi.fn(async () => ({ nextEventSeq: 7 })) },
+      event: {
+        create: vi.fn(async ({ data }: { data: Record<string, unknown> }) => ({ ...data, seq: 6 })),
+      },
       run: {
         findUnique: vi.fn(async () => ({
           id: "run-1",
+          spaceId: "workspace-1",
+          threadId: "thread-1",
           botId: "bot-1",
           status: "waiting_takeover",
           checkpoint: null,
@@ -2385,15 +2540,17 @@ description: Prepare standup notes
         updateMany,
       },
       bot: {
-        findUniqueOrThrow: vi.fn(async () => ({
-          computerId: "computer-1",
-          computerSwitching: true,
-        })),
+        findUniqueOrThrow: vi.fn(async () => {
+          checkpoint = "takeover";
+          return { computerId: "computer-1", computerSwitching: true };
+        }),
       },
     } as unknown as PrismaClient;
-    const executor = createRunExecutor({ prisma, jobs: { enqueue } } as unknown as Parameters<
-      typeof createRunExecutor
-    >[0]);
+    const executor = createRunExecutor({
+      prisma,
+      jobs: { enqueue },
+      events: { notify: vi.fn(async () => undefined) },
+    } as unknown as Parameters<typeof createRunExecutor>[0]);
 
     await executor.continueRun("run-1", "worker-1");
 
@@ -2430,9 +2587,17 @@ description: Prepare standup notes
     );
     const enqueue = vi.fn(async () => undefined);
     const prisma = {
+      $queryRaw: vi.fn(async () => []),
+      $transaction: vi.fn(async (work: (tx: unknown) => Promise<unknown>) => work(prisma)),
+      thread: { update: vi.fn(async () => ({ nextEventSeq: 7 })) },
+      event: {
+        create: vi.fn(async ({ data }: { data: Record<string, unknown> }) => ({ ...data, seq: 6 })),
+      },
       run: {
         findUnique: vi.fn(async () => ({
           id: "run-1",
+          spaceId: "workspace-1",
+          threadId: "thread-1",
           botId: "bot-1",
           status: "waiting_takeover",
           checkpoint: null,
@@ -2448,9 +2613,11 @@ description: Prepare standup notes
         })),
       },
     } as unknown as PrismaClient;
-    const executor = createRunExecutor({ prisma, jobs: { enqueue } } as unknown as Parameters<
-      typeof createRunExecutor
-    >[0]);
+    const executor = createRunExecutor({
+      prisma,
+      jobs: { enqueue },
+      events: { notify: vi.fn(async () => undefined) },
+    } as unknown as Parameters<typeof createRunExecutor>[0]);
 
     await executor.continueRun("run-1", "worker-1");
 

@@ -15,6 +15,7 @@ import {
   ModelConnectInputSchema,
   ModelOAuthBeginSchema,
   normalizeCreateBotProfile,
+  ProductEventSchema,
   ProductEventType,
   parseModelContextWindow,
   parseModelMaxImagesPerPrompt,
@@ -334,6 +335,29 @@ describe("contracts", () => {
     expect(ProductEventType.options).toContain("thread.cleared");
     expect(ProductEventType.options).toContain("thread.subagent");
     expect(ProductEventType.options).toContain("bot.spawned");
+  });
+
+  it("limits native requeue events to their actual queued or held state", () => {
+    const event = {
+      id: "event-1",
+      spaceId: "space-1",
+      threadId: "thread-1",
+      botId: "bot-1",
+      runId: "run-1",
+      type: "run.requeued",
+      seq: 1,
+      createdAt: "2026-01-01T00:00:00Z",
+    };
+    for (const status of ["queued", "waiting_takeover"]) {
+      expect(ProductEventSchema.safeParse({ ...event, payload: { status } }).success).toBe(true);
+    }
+    for (const payload of [{}, { status: "running" }, { status: "queued", prompt: "internal" }]) {
+      expect(ProductEventSchema.safeParse({ ...event, payload }).success).toBe(false);
+    }
+    expect(
+      ProductEventSchema.safeParse({ ...event, runId: undefined, payload: { status: "queued" } })
+        .success,
+    ).toBe(false);
   });
 
   it("requires a distinct, non-empty bot order", () => {

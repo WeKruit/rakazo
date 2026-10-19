@@ -26,6 +26,7 @@ export const ProductEventType = z.enum([
   "thread.cloud_agent",
   "thread.call.ended",
   "run.started",
+  "run.requeued",
   "run.steering.claimed",
   "run.checkpointed",
   "run.waiting_input",
@@ -446,6 +447,10 @@ export const EffectApprovalAnsweredPayloadSchema = z.strictObject({
 });
 export type EffectApprovalAnsweredPayload = z.infer<typeof EffectApprovalAnsweredPayloadSchema>;
 
+const RunRequeuedPayloadSchema = z.strictObject({
+  status: z.enum(["queued", "waiting_takeover"]),
+});
+
 export const ProductEventSchema = z
   .object({
     id: Id,
@@ -459,6 +464,9 @@ export const ProductEventSchema = z
     payload: z.record(z.string(), z.unknown()),
   })
   .superRefine((event, ctx) => {
+    if (event.type === "run.requeued" && !event.runId) {
+      ctx.addIssue({ code: "custom", path: ["runId"], message: "Requeue requires its run" });
+    }
     const schema =
       event.type === "recruiting.context.adopted"
         ? RecruitingContextAdoptedPayloadSchema
@@ -478,7 +486,9 @@ export const ProductEventSchema = z
                       ? NativeAskAnswerPayloadSchema
                       : event.type === "effect.approval.answered"
                         ? EffectApprovalAnsweredPayloadSchema
-                        : null;
+                        : event.type === "run.requeued"
+                          ? RunRequeuedPayloadSchema
+                          : null;
     if (!schema) return;
     const parsed = schema.safeParse(event.payload);
     if (!parsed.success) {

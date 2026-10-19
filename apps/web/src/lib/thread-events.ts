@@ -246,6 +246,7 @@ export function isThreadSnapshotEvent(event: ProductEvent): boolean {
     event.type === "thread.message.updated" ||
     event.type === "thread.message.reaction" ||
     event.type === "run.started" ||
+    event.type === "run.requeued" ||
     event.type === "run.waiting_input" ||
     event.type === "computer.takeover.requested" ||
     isRunTerminalEvent(event)
@@ -257,6 +258,29 @@ export function reduceThreadSnapshot(
   event: ProductEvent,
 ): ThreadSnapshot | null {
   if (!prev) return prev;
+  if (event.type === "run.requeued") {
+    const status = event.payload.status;
+    const run = activeThreadRuns(prev).find((run) => run.id === event.runId);
+    if (
+      event.threadId !== prev.threadId ||
+      event.seq <= prev.cursor ||
+      (status !== "queued" && status !== "waiting_takeover") ||
+      !run ||
+      run.botId !== event.botId ||
+      !["queued", "leased", "running"].includes(run.status)
+    )
+      return prev;
+    return {
+      ...prev,
+      cursor: event.seq,
+      members: updateMemberStatus(prev.members, event.botId, status),
+      run: prev.run?.id === run.id ? { ...prev.run, status } : prev.run,
+      activeRuns: prev.activeRuns?.map((candidate) =>
+        candidate.id === run.id ? { ...candidate, status } : candidate,
+      ),
+      messages: prev.messages.filter((message) => message.id !== progressMessageId(event)),
+    };
+  }
   if (event.type === "thread.cleared") {
     return {
       ...prev,

@@ -544,7 +544,7 @@ describe("projectMessages", () => {
     ]);
   });
 
-  it("clears the live step trail once the run ends", () => {
+  it.each(["run.cancelled", "run.requeued"])("clears the live step trail on %s", (type) => {
     const messages = projectMessages([
       {
         id: "e1",
@@ -559,7 +559,7 @@ describe("projectMessages", () => {
         id: "e2",
         threadId: "t1",
         seq: 1,
-        type: "run.cancelled",
+        type,
         runId: "r1",
         payload: {},
         createdAt: "2026-01-01T00:00:01.000Z",
