@@ -60,6 +60,107 @@ describe("account preferences", () => {
     return { update, deps, actor, handler: new RPCHandler(createRouter(deps)) };
   }
 
+  function bootstrapDeps() {
+    const f = preferencesDeps("robot");
+    const stamp = new Date("2026-01-01T00:00:00Z");
+    const bot = {
+      id: "bot-1",
+      spaceId: f.actor.spaceId,
+      userId: f.actor.userId,
+      name: "Test bot",
+      title: "Assistant",
+      description: "",
+      instructions: "",
+      color: "blue",
+      notifyOnFinish: false,
+      pinned: false,
+      sectionId: null,
+      archivedAt: null,
+      parentBotId: null,
+      memoryScope: null,
+      createdAt: stamp,
+      updatedAt: stamp,
+      thread: { id: "thread-1", unread: false, messages: [], runs: [] },
+      runs: [],
+      computer: null,
+    };
+    const target = vi.fn().mockResolvedValue(bot);
+    const routines = vi.fn().mockResolvedValue([]);
+    const snapshot = vi.fn(async (read: (tx: PrismaClient) => Promise<unknown>) =>
+      read(f.deps.prisma),
+    );
+    Object.assign(f.deps.prisma, {
+      space: { findUnique: vi.fn().mockResolvedValue({ organizationId: "organization-1" }) },
+      spaceMember: {
+        findMany: vi.fn().mockResolvedValue([
+          {
+            spaceId: f.actor.spaceId,
+            role: "owner",
+            space: { name: "Test space", isDefault: true, deletingAt: null },
+          },
+        ]),
+      },
+      bot: {
+        findFirst: target,
+        findMany: vi.fn(async (input) =>
+          input.select || input.where.archivedAt !== null ? [] : [bot],
+        ),
+      },
+      chatGroup: { findMany: vi.fn().mockResolvedValue([]) },
+      botSection: { findMany: vi.fn().mockResolvedValue([]) },
+      externalConversation: { findMany: vi.fn().mockResolvedValue([]) },
+      routine: { findMany: routines },
+      message: { findMany: vi.fn().mockResolvedValue([]) },
+      event: { findFirst: vi.fn().mockResolvedValue({ seq: 4 }) },
+      run: { findFirst: vi.fn().mockResolvedValue(null) },
+      $queryRaw: vi.fn().mockResolvedValue([]),
+      $transaction: snapshot,
+    });
+    return {
+      ...f,
+      target,
+      routines,
+      snapshot,
+      client: createRouterClient(createRouter(f.deps), { context: { actor: f.actor } }),
+    };
+  }
+
+  it("returns bootstrap navigation without waiting for an unselected bot's reads", async () => {
+    const f = bootstrapDeps();
+    f.target.mockImplementation(() => new Promise(() => {}));
+    f.routines.mockImplementation(() => new Promise(() => {}));
+    await expect(f.client.bootstrap({})).resolves.toMatchObject({
+      bots: [{ id: "bot-1" }],
+      thread: null,
+      routines: [],
+    });
+    expect(f.target).not.toHaveBeenCalled();
+    expect(f.snapshot).not.toHaveBeenCalled();
+    expect(f.routines).not.toHaveBeenCalled();
+  }, 500);
+
+  it("bootstraps the explicitly selected bot's snapshot and routines", async () => {
+    const f = bootstrapDeps();
+    await expect(f.client.bootstrap({ botId: "bot-1" })).resolves.toMatchObject({
+      thread: { botId: "bot-1", threadId: "thread-1", cursor: 4 },
+      routines: [],
+    });
+    expect(f.target).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: {
+          id: "bot-1",
+          spaceId: f.actor.spaceId,
+          userId: f.actor.userId,
+          archivedAt: null,
+        },
+      }),
+    );
+    expect(f.snapshot).toHaveBeenCalledOnce();
+    expect(f.routines).toHaveBeenCalledWith({
+      where: { botId: "bot-1", spaceId: f.actor.spaceId },
+    });
+  });
+
   it("reports model credential store outages as service unavailable", async () => {
     const { deps, actor } = preferencesDeps("robot");
     Object.assign(deps.prisma, {

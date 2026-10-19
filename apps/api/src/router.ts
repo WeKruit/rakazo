@@ -1098,7 +1098,7 @@ export function createRouter(deps: RouterDeps) {
         groupRepos.listGroups(actor, { archived: true }),
       ]);
       const { bots, groups, botSections } = navigation.current;
-      const active = bots.find((bot) => bot.id === input.botId) ?? bots[0];
+      const active = bots.find((bot) => bot.id === input.botId);
       const [thread, routines] = active
         ? await Promise.all([
             resolveThreadTarget(deps.prisma, actor, { botId: active.id }).then((target) =>
