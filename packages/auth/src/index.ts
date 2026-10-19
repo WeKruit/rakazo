@@ -258,6 +258,7 @@ export function createAuth(prisma: PrismaClient, env: AuthEnv) {
     },
     rateLimit: authRateLimitOptions(),
     database: prismaAdapter(prisma, { provider: "postgresql" }),
+    advanced: { database: { joins: true } },
     emailAndPassword: {
       enabled: env.passwordAuth !== false,
       // Signup policy is mutable deployment state, so the request hook below

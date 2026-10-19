@@ -63,6 +63,72 @@ describe("auth policy", () => {
   });
 });
 
+describe("session relation reads", () => {
+  it("reads the current user with each session and still rejects expired or missing sessions", async () => {
+    const now = new Date();
+    const user = {
+      id: "user-1",
+      name: "Before",
+      email: "verified@example.test",
+      emailVerified: true,
+      image: null,
+      createdAt: now,
+      updatedAt: now,
+    };
+    const session = {
+      id: "session-1",
+      token: "offline-session-token",
+      userId: user.id,
+      expiresAt: new Date(now.getTime() + 7 * 24 * 60 * 60 * 1000),
+      createdAt: now,
+      updatedAt: now,
+    };
+    let stored: typeof session | null = session;
+    const prisma = {
+      session: {
+        findFirst: vi.fn(async ({ select }: { select?: Record<string, unknown> }) =>
+          stored ? { ...stored, ...(select?.user ? { user: { ...user } } : {}) } : null,
+        ),
+        findMany: vi.fn(async () => (stored ? [{ ...stored }] : [])),
+        deleteMany: vi.fn(async () => {
+          stored = null;
+          return { count: 1 };
+        }),
+      },
+      user: { findFirst: vi.fn(async () => ({ ...user })) },
+    };
+    const auth = createAuth(prisma as never, {
+      secret: "offline-auth-secret-at-least-32-characters",
+      baseURL: "http://auth.example.test",
+      webOrigin: "http://web.example.test",
+      signupsEnabled: undefined,
+      signupAllowlist: undefined,
+    });
+    const headers = new Headers({ authorization: `Bearer ${session.token}` });
+
+    await expect(auth.api.getSession({ headers })).resolves.toMatchObject({
+      user: { name: "Before" },
+    });
+    expect(prisma.session.findFirst).toHaveBeenCalledWith(
+      expect.objectContaining({ select: expect.objectContaining({ user: true }) }),
+    );
+    expect(prisma.user.findFirst).not.toHaveBeenCalled();
+
+    user.name = "After";
+    await expect(auth.api.getSession({ headers })).resolves.toMatchObject({
+      user: { name: "After" },
+    });
+    expect(prisma.session.findFirst).toHaveBeenCalledTimes(2);
+
+    session.expiresAt = new Date(now.getTime() - 1000);
+    await expect(auth.api.getSession({ headers })).resolves.toBeNull();
+    expect(prisma.session.deleteMany).toHaveBeenCalledTimes(1);
+    await expect(auth.api.getSession({ headers })).resolves.toBeNull();
+    expect(prisma.session.findFirst).toHaveBeenCalledTimes(4);
+    expect(prisma.user.findFirst).not.toHaveBeenCalled();
+  });
+});
+
 describe("authRateLimitOptions", () => {
   it("caps credential routes at 10 attempts per 15 minutes in a shared table", () => {
     expect(authRateLimitOptions("production")).toEqual({
