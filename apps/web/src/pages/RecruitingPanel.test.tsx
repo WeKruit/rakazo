@@ -2717,9 +2717,21 @@ it.each(["Cards", "Table"])(
     api.listCandidateSources.mockResolvedValue({
       roleId: role.id,
       candidateKey: candidate.candidateKey,
-      total: 1,
+      total: 2,
       nextCursor: null,
-      items: [source],
+      items: [
+        source,
+        {
+          ...source,
+          effectId: "earlier-effect",
+          artifactRef: { artifactId: "earlier-artifact", sha256: "b".repeat(64) },
+          observedAt: "2025-12-31T00:00:00Z",
+          report: {
+            fields: [{ label: "Grade", value: "Earlier round grade", sourceUrls: [] }],
+            sourceUrls: [],
+          },
+        },
+      ],
     });
     source.report.fields.push(
       { label: "Match score", value: "0", sourceUrls: [] },
@@ -2728,7 +2740,7 @@ it.each(["Cards", "Table"])(
     candidate.latestSource = source;
     const noMatch = {
       ...candidateFixture("missing", false),
-      name: "Missing score and tier",
+      name: "Provider graded match",
       latestSource: {
         ...source,
         report: {
@@ -2784,6 +2796,7 @@ it.each(["Cards", "Table"])(
     if (viewName === "Cards") expect(matches[0]?.textContent).toContain(fitReasons);
     else expect(matches[0]?.textContent).not.toContain(fitReasons);
     expect([...matches[1]!.querySelectorAll("dd dd")].map((item) => item.textContent)).toEqual([
+      "Provider strong",
       "3",
       "3",
       "12",
@@ -2793,18 +2806,15 @@ it.each(["Cards", "Table"])(
         : []),
     ]);
     expect([...matches[1]!.querySelectorAll("dd dt")].map((item) => item.textContent)).toEqual([
+      "Grade",
       "Rank",
       "Overall rank",
       "Original pool rank",
       "Recommendation",
       ...(viewName === "Cards" ? ["Fit reasons"] : []),
     ]);
-    expect(matches[1]?.textContent).toContain("Score / tier not returned");
-    if (viewName === "Cards")
-      expect(matches[1]!.textContent!.indexOf("Score / tier not returned")).toBeLessThan(
-        matches[1]!.textContent!.indexOf("Fit reasons"),
-      );
-    else {
+    expect(matches[1]?.textContent).not.toContain("Score / tier not returned");
+    if (viewName === "Table") {
       const recommendation = [...matches[1]!.querySelectorAll("dt")].find(
         (field) => field.textContent === "Recommendation",
       )!.nextElementSibling!;
@@ -2830,6 +2840,8 @@ it.each(["Cards", "Table"])(
     ]);
     expect(summary.textContent).toContain("Match score0");
     expect(summary.textContent).toContain(fitReasons);
+    expect(summary.textContent).not.toContain("Earlier round grade");
+    expect(sources.textContent).toContain("Earlier round grade");
     const report = sources.querySelector("dl")!;
     expect(report).not.toBeNull();
     expect([...report.querySelectorAll("dt")].map((item) => item.textContent)).toEqual([
@@ -2888,6 +2900,7 @@ it.each(["Cards", "Table"])(
     await view.click("Close");
     await view.click(noMatch.name);
     const match = view.container.querySelector('[role="dialog"] [aria-label="Research match"]')!;
+    expect(match.textContent).toContain("GradeProvider strong");
     expect(match.textContent).toContain("Rank3");
     expect(match.textContent).toContain("Overall rank3");
     expect(match.textContent).toContain("Original pool rank12");
@@ -2895,10 +2908,7 @@ it.each(["Cards", "Table"])(
     expect(match.textContent).toContain(
       "Fit reasons  Built the requested systems.\nRelevant project evidence.  ",
     );
-    expect(match.textContent).toContain("Score / tier not returned");
-    expect(match.textContent!.indexOf("Score / tier not returned")).toBeLessThan(
-      match.textContent!.indexOf("Fit reasons"),
-    );
+    expect(match.textContent).not.toContain("Score / tier not returned");
   },
 );
 

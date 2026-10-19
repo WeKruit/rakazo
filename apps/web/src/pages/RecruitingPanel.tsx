@@ -517,13 +517,14 @@ function CandidateResearchMatch({
         "Fit reasons",
         "Match score",
         "Match tier",
+        "Grade",
       ].includes(field.label) &&
       (!compact || field.label !== "Fit reasons") &&
       (field.label !== "Batch rank" || !hasHigherRank),
   );
   fields?.sort((a, b) => Number(a.label === "Fit reasons") - Number(b.label === "Fit reasons"));
-  const hasScoreOrTier = fields?.some(
-    (field) => field.label === "Match score" || field.label === "Match tier",
+  const hasMatchRating = fields?.some((field) =>
+    ["Match score", "Match tier", "Grade"].includes(field.label),
   );
   return (
     <dl aria-label={t`Research match`} className="space-y-1 text-xs">
@@ -542,7 +543,7 @@ function CandidateResearchMatch({
           </p>
         ) : (
           <>
-            {!hasScoreOrTier ? (
+            {!hasMatchRating ? (
               <p className="text-muted-foreground">
                 <Trans>Score / tier not returned</Trans>
               </p>
