@@ -2060,14 +2060,22 @@ function RecruitingWorkspace({
       setCandidatePage(page);
       setCandidateList((current) => ({ ...current, pageCount }));
       const selectedCandidateKey = candidateQuery.current.selectedCandidateKey;
+      const { sourceEffectId, actionId } = candidateRequestFilters;
+      const explicitSource = sourceEffectId !== undefined || actionId !== undefined;
       let restored = page.items.find((item) => item.candidateKey === selectedCandidateKey);
-      if (!restored && selectedCandidateKey && !candidateQuery.current.selection) {
+      if (
+        !restored &&
+        selectedCandidateKey &&
+        (!candidateQuery.current.selection || explicitSource)
+      ) {
         let cursor: string | undefined;
         do {
           const selectedPage = await rpc.recruiting.listCandidates({
             roleId,
             limit: 30,
             query: selectedCandidateKey,
+            ...(sourceEffectId !== undefined ? { sourceEffectId } : {}),
+            ...(actionId !== undefined ? { actionId } : {}),
             ...(cursor ? { cursor } : {}),
           });
           if (!isCurrent()) return;
@@ -2081,7 +2089,10 @@ function RecruitingWorkspace({
       }
       setSelection((current) =>
         current?.roleId === roleId
-          ? (page.items.find((item) => item.candidateKey === current.candidateKey) ?? current)
+          ? (page.items.find((item) => item.candidateKey === current.candidateKey) ??
+            (current.candidateKey === selectedCandidateKey
+              ? (restored ?? (explicitSource ? null : current))
+              : current))
           : (restored ?? null),
       );
     })()

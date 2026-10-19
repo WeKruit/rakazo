@@ -7888,14 +7888,25 @@ describePostgres("recruiting domain (PostgreSQL)", () => {
   it("filters saved native pages with overlapping identities without narrowing role counts", async () => {
     const { f, prepared } = await mappedResearchFixture();
     const pages = [];
-    for (const [label, name] of [
-      ["native-first", "Alpha"],
-      ["native-second", "Beta"],
+    for (const [label, name, hour] of [
+      ["native-first", "Alpha", "00"],
+      ["native-second", "Beta", "01"],
     ] as const) {
-      const page = await recordCandidatePage(f, prepared, label, [
-        canonicalCandidateRow("Shared", "https://www.linkedin.com/in/shared"),
-        canonicalCandidateRow(name, `https://www.linkedin.com/in/${name.toLowerCase()}`),
-      ]);
+      const page = await recordCandidatePage(
+        f,
+        prepared,
+        label,
+        [
+          {
+            ...canonicalCandidateRow("Shared", "https://www.linkedin.com/in/shared", label),
+            resume_url: { value: `https://example.test/${label}.pdf`, source_id: "person" },
+            batch_rank: { value: 1 },
+            match_tier: { value: "Strong" },
+          },
+          canonicalCandidateRow(name, `https://www.linkedin.com/in/${name.toLowerCase()}`),
+        ],
+        { observedAt: new Date(`2026-10-16T${hour}:00:00Z`) },
+      );
       pages.push(
         await prisma.recruitingCandidatePage.update({
           where: { effectId: page.input.effectId },
@@ -7903,9 +7914,13 @@ describePostgres("recruiting domain (PostgreSQL)", () => {
         }),
       );
     }
-    await recordCandidatePage(f, prepared, "action-page", [
-      canonicalCandidateRow("Shared", "https://www.linkedin.com/in/shared"),
-    ]);
+    const latest = await recordCandidatePage(
+      f,
+      prepared,
+      "action-page",
+      [canonicalCandidateRow("Shared", "https://www.linkedin.com/in/shared", "Latest company")],
+      { observedAt: new Date("2026-10-16T02:00:00Z") },
+    );
     const input = {
       roleId: f.role.role.id,
       sourceEffectId: pages[0]!.effectId,
@@ -7928,7 +7943,13 @@ describePostgres("recruiting domain (PostgreSQL)", () => {
       ...input,
       cursor: first.nextCursor!,
     });
-    expect(next.items[0]).toMatchObject({ candidateKey: "linkedin:/in/shared", discoveryCount: 3 });
+    expect(next.items[0]).toMatchObject({
+      candidateKey: "linkedin:/in/shared",
+      discoveryCount: 3,
+      company: "native-first",
+      resumeUrl: "https://example.test/native-first.pdf",
+      latestSource: { effectId: pages[0]!.effectId, rowIndex: 0 },
+    });
     expect(next.nextCursor).toBeNull();
     expect(next.total).toBe(first.total);
     expect(next.counts).toEqual(first.counts);
@@ -7941,6 +7962,30 @@ describePostgres("recruiting domain (PostgreSQL)", () => {
       "linkedin:/in/beta",
       "linkedin:/in/shared",
     ]);
+    expect(second.items[1]).toMatchObject({
+      company: "native-second",
+      resumeUrl: "https://example.test/native-second.pdf",
+      latestSource: { effectId: pages[1]!.effectId },
+    });
+    const ranked = await recruiting.listRecruitingCandidates(prisma, actor, {
+      ...input,
+      sort: "rank",
+      limit: 100,
+    });
+    expect(ranked.sortAvailability).toEqual({ rank: true, tier: true });
+    expect(ranked.items.map((item) => item.candidateKey)).toEqual([
+      "linkedin:/in/shared",
+      "linkedin:/in/alpha",
+    ]);
+    const all = await recruiting.listRecruitingCandidates(prisma, actor, {
+      roleId: input.roleId,
+      sort: "name",
+    });
+    expect(all.items.find((item) => item.candidateKey === "linkedin:/in/shared")).toMatchObject({
+      company: "Latest company",
+      resumeUrl: null,
+      latestSource: { effectId: latest.input.effectId },
+    });
     for (const sourceEffectId of [pages[1]!.effectId, undefined])
       await expect(
         recruiting.listRecruitingCandidates(prisma, actor, {
@@ -7958,8 +8003,13 @@ describePostgres("recruiting domain (PostgreSQL)", () => {
       actionId: prepared.action.id,
     });
     expect(action.total).toBe(1);
-    expect(intersection.items.map((item) => item.candidateKey)).toEqual(["linkedin:/in/shared"]);
-    expect(intersection.total).toBe(action.total);
+    expect(action.items[0]).toMatchObject({
+      company: "Latest company",
+      latestSource: { effectId: latest.input.effectId },
+    });
+    expect(intersection.items).toEqual([]);
+    expect(intersection.total).toBe(0);
+    expect(intersection.counts).toEqual(first.counts);
     const other = await mappedResearchFixture();
     await recordCandidatePage(other.f, other.prepared, "other-role-page", [
       canonicalCandidateRow("Shared", "https://www.linkedin.com/in/shared"),

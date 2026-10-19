@@ -101,6 +101,7 @@ describe("candidate listing and shortlist boundaries", () => {
         revision: 0,
         discoveryCount: 1,
         profileSourcePageIds: [],
+        countIdentified: false,
         firstDiscoveredAt: "2026-10-16T00:00:00.000Z",
         lastDiscoveredAt: "2026-10-16T00:00:00.000Z",
         assessmentVersion: null,
@@ -150,6 +151,7 @@ describe("candidate listing and shortlist boundaries", () => {
       expect(page.items.map((item) => item.candidateKey)).toEqual(["a"]);
       expect(page.crmTarget).toBeNull();
       expect(page.items[0]?.crm).toBeNull();
+      expect(page.items[0]).not.toHaveProperty("countIdentified");
       const query = f.tx.$queryRaw.mock.lastCall?.[0] as unknown as {
         sql: string;
         values: unknown[];
@@ -162,11 +164,10 @@ describe("candidate listing and shortlist boundaries", () => {
       expect(query.sql).toContain('b."linkedinUrl"');
       for (const [statement] of f.tx.$queryRaw.mock.calls) {
         const sql = statement as { sql: string; values: unknown[] };
-        expect(sql.sql).toContain(
-          'WHERE o."roleId" = b."roleId" AND o."candidateKey" = b."candidateKey" AND p."effectId" = ?',
-        );
+        expect(sql.sql).toContain('AND page."effectId" = ?');
+        expect(sql.sql).toContain('b."sourcePageId" IS NOT NULL');
         expect(sql.values).toContain("native-read");
-        expect(sql.sql).not.toContain('p."actionId" =');
+        expect(sql.sql).not.toContain('page."actionId" =');
       }
       const totals = f.tx.$queryRaw.mock.calls[0]![0] as { sql: string };
       expect(totals.sql).toContain('(SELECT count(*) FROM filtered) AS "total"');
@@ -219,9 +220,153 @@ describe("candidate listing and shortlist boundaries", () => {
     expect(query.sql).toContain("WHEN returned.value ? 'rank' THEN returned.value -> 'rank'");
     expect(query.sql).toContain("ELSE returned.value -> 'batch_rank' END");
     expect(query.sql).toContain('page."effectId" = rank_scope."pageId"');
-    expect(query.values.filter((value) => value === "selected-result")).toHaveLength(2);
+    expect(query.values).toContain("selected-result");
+    expect(query.sql).toContain('AND page."effectId" = ?');
     expect(f.tx.recruitingCandidatePage.findMany).not.toHaveBeenCalled();
   });
+  it.each([
+    { sourceEffectId: "historical-page" },
+    { actionId: "historical-action" },
+    { sourceEffectId: "historical-page", actionId: "historical-action" },
+  ])(
+    "uses one explicit observation scope for profile, primary source and matches: %j",
+    async (filters) => {
+      const f = fixture();
+      f.tx.$queryRaw
+        .mockResolvedValueOnce([
+          {
+            total: 0n,
+            rankAvailable: false,
+            tierAvailable: false,
+            sourceRows: 3n,
+            candidates: 2n,
+            identifiedCandidates: 2n,
+            unassessed: 2n,
+            assessed: 0n,
+            shortlisted: 1n,
+          },
+        ])
+        .mockResolvedValueOnce([]);
+      const page = await recruiting.listRecruitingCandidates(f.prisma, actor, {
+        roleId: "role",
+        sort: "name",
+        ...filters,
+      });
+      expect(page.counts).toMatchObject({
+        sourceRows: 3,
+        candidates: 2,
+        identifiedCandidates: 2,
+        shortlisted: 1,
+      });
+      for (const [statement] of f.tx.$queryRaw.mock.calls) {
+        const query = statement as { sql: string; values: unknown[] };
+        const primary = query.sql.slice(
+          query.sql.indexOf("SELECT o.*"),
+          query.sql.indexOf(") p ON true"),
+        );
+        const profile = query.sql.slice(
+          query.sql.indexOf(") p ON true"),
+          query.sql.indexOf(") profile ON true"),
+        );
+        const matches = query.sql.slice(
+          query.sql.indexOf("match_rows AS"),
+          query.sql.indexOf("base AS"),
+        );
+        for (const field of Object.keys(filters)) {
+          const column = field === "sourceEffectId" ? "effectId" : "actionId";
+          const predicate = `AND page."${column}" = ?`;
+          for (const section of [primary, profile, matches]) expect(section).toContain(predicate);
+          expect(query.values).toContain(filters[field as keyof typeof filters]);
+        }
+        expect(query.sql).toContain('b."sourcePageId" IS NOT NULL');
+        expect(query.sql).toContain(
+          'profile."identifiedLinkedinUrl" IS NOT NULL AS "countIdentified"',
+        );
+        expect(profile).toContain('AS "identifiedLinkedinUrl"');
+      }
+    },
+  );
+  it("binds original-rank comparability to the selected action's saved pages", async () => {
+    const f = fixture();
+    f.tx.recruitingCandidatePage.findMany.mockResolvedValue([{ effectId: "action-only-page" }]);
+    f.tx.$queryRaw
+      .mockResolvedValueOnce([
+        {
+          total: 0n,
+          rankAvailable: false,
+          tierAvailable: false,
+          sourceRows: 0n,
+          candidates: 0n,
+          identifiedCandidates: 0n,
+          unassessed: 0n,
+          assessed: 0n,
+          shortlisted: 0n,
+        },
+      ])
+      .mockResolvedValueOnce([]);
+    await recruiting.listRecruitingCandidates(f.prisma, actor, {
+      roleId: "role",
+      actionId: "action",
+      sort: "rank",
+    });
+    expect(f.tx.recruitingCandidatePage.findMany).toHaveBeenCalledExactlyOnceWith({
+      where: { roleId: "role", actionId: "action" },
+      select: { effectId: true },
+      take: 2,
+    });
+    const query = f.tx.$queryRaw.mock.lastCall![0] as { sql: string; values: unknown[] };
+    expect(query.values).toContain("action-only-page");
+    expect(query.sql).toContain('AND page."actionId" = ?');
+    expect(query.sql).not.toContain('AND page."effectId" = ?');
+  });
+  it.each(["name", "recent", "rank", "tier"] as const)(
+    "rejects a pre-source-projection %s cursor before reading a historical view",
+    async (sort) => {
+      const f = fixture();
+      const scope = createHash("sha256")
+        .update(
+          stableJsonValue({
+            roleId: "role",
+            roleRevisionId: "revision",
+            sort,
+            ...(sort === "rank" ? { rankProjection: 2 } : {}),
+            query: "",
+            assessmentState: null,
+            verdict: null,
+            shortlisted: null,
+            actionId: null,
+            sourceEffectId: "historical-page",
+          }),
+        )
+        .digest("hex");
+      f.tx.$queryRaw
+        .mockResolvedValueOnce([
+          {
+            total: 0n,
+            rankAvailable: false,
+            tierAvailable: false,
+            sourceRows: 0n,
+            candidates: 0n,
+            identifiedCandidates: 0n,
+            unassessed: 0n,
+            assessed: 0n,
+            shortlisted: 0n,
+          },
+        ])
+        .mockResolvedValueOnce([]);
+      await expect(
+        recruiting.listRecruitingCandidates(f.prisma, actor, {
+          roleId: "role",
+          sort,
+          sourceEffectId: "historical-page",
+          cursor: Buffer.from(
+            JSON.stringify({ version: 1, scope, value: "", key: "person" }),
+          ).toString("base64url"),
+        }),
+      ).rejects.toThrow(recruiting.RecruitingConflictError);
+      expect(f.tx.$queryRaw).not.toHaveBeenCalled();
+    },
+  );
   it.each([
     ["name", undefined, []],
     ["recent", undefined, []],
@@ -241,6 +386,7 @@ describe("candidate listing and shortlist boundaries", () => {
             roleRevisionId: "revision",
             sort,
             ...(sort === "rank" ? { rankProjection: 2 } : {}),
+            ...(sourceEffectId !== undefined ? { sourceProjection: 2 } : {}),
             query: "",
             assessmentState: null,
             verdict: null,
@@ -460,37 +606,6 @@ describe("candidate listing and shortlist boundaries", () => {
         expect(multiplePages.sql).toContain("WHEN returned.value ? 'overall_rank'");
         expect(multiplePages.sql).toContain("THEN returned.value -> 'updated_rank'");
         expect(multiplePages.sql).not.toContain('p."effectId" =');
-      }
-    },
-  );
-  it.each([{ actionId: "action" }, { actionId: "action", sourceEffectId: "native-read" }])(
-    "intersects source and action membership without changing the action predicate: %j",
-    async (filters) => {
-      const f = fixture();
-      f.tx.$queryRaw.mockResolvedValueOnce([
-        {
-          total: 0n,
-          rankAvailable: false,
-          tierAvailable: false,
-          sourceRows: 3n,
-          candidates: 2n,
-          identifiedCandidates: 2n,
-          unassessed: 2n,
-          assessed: 0n,
-          shortlisted: 0n,
-        },
-      ]);
-      await recruiting.listRecruitingCandidates(f.prisma, actor, { roleId: "role", ...filters });
-      for (const [statement] of f.tx.$queryRaw.mock.calls) {
-        const query = statement as { sql: string; values: unknown[] };
-        expect(query.sql).toContain(
-          'WHERE o."roleId" = b."roleId" AND o."candidateKey" = b."candidateKey" AND p."actionId" = ?',
-        );
-        expect(query.values).toContain("action");
-        if (filters.sourceEffectId) {
-          expect(query.sql).toContain(") AND EXISTS (");
-          expect(query.values).toContain(filters.sourceEffectId);
-        }
       }
     },
   );

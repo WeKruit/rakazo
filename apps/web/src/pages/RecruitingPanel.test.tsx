@@ -1797,6 +1797,76 @@ it("restores an excluded selected candidate through the existing saved-candidate
   });
 });
 
+it.each(["source", "action"])(
+  "refreshes an excluded open candidate within the selected %s and closes an absent detail",
+  async (kind) => {
+    const f = rawResultsFixture("action-1");
+    api.listResearch.mockResolvedValue({
+      tasks: [f.task],
+      actions: [f.action],
+      observations: [savedObservation, { ...savedObservation, effectId: "absent-page" }],
+    });
+    const selected = { ...candidateFixture("chosen-person", false), name: "Current profile" };
+    const historical = { ...selected, name: "Historical profile" };
+    const other = { ...candidateFixture("other-person", false), name: "Other profile" };
+    api.listCandidates.mockImplementation(async ({ query, sourceEffectId, actionId }) => {
+      if (sourceEffectId === "absent-page") return candidatePage(query ? [] : [other]);
+      if (sourceEffectId || actionId) return candidatePage(query ? [historical] : [other]);
+      return candidatePage([selected]);
+    });
+    const view = await mounted("thread-1", undefined, false);
+    await view.click("Evidence");
+    await view.click(selected.name);
+    const scope =
+      kind === "source" ? { sourceEffectId: savedObservation.effectId } : { actionId: f.action.id };
+    await changeSelect(view.container, "Research round", `${kind}:${Object.values(scope)[0]}`);
+    expect(api.listCandidates).toHaveBeenLastCalledWith({
+      roleId: role.id,
+      limit: 30,
+      query: selected.candidateKey,
+      ...scope,
+    });
+    expect(view.container.querySelector('[role="dialog"]')?.textContent).toContain(historical.name);
+    expect(view.container.querySelector('[role="dialog"]')?.textContent).not.toContain(
+      selected.name,
+    );
+    await changeSelect(view.container, "Research round", "source:absent-page");
+    expect(view.container.querySelector('[role="dialog"]')).toBeNull();
+  },
+);
+
+it("ignores an old-round selected-candidate response after the source changes", async () => {
+  const selected = { ...candidateFixture("chosen-person", false), name: "Current profile" };
+  const historical = { ...selected, name: "Historical profile" };
+  const fresh = { ...selected, name: "Fresh profile" };
+  const other = { ...candidateFixture("other-person", false), name: "Other profile" };
+  api.listResearch.mockResolvedValue({
+    tasks: [],
+    actions: [],
+    observations: [savedObservation, { ...savedObservation, effectId: "fresh-page" }],
+  });
+  let finish!: (page: ReturnType<typeof candidatePage>) => void;
+  api.listCandidates.mockImplementation(({ query, sourceEffectId }) => {
+    if (!sourceEffectId) return Promise.resolve(candidatePage([selected]));
+    if (!query) return Promise.resolve(candidatePage([other]));
+    if (sourceEffectId === "fresh-page") return Promise.resolve(candidatePage([fresh]));
+    return new Promise((resolve) => {
+      finish = resolve;
+    });
+  });
+  const view = await mounted("thread-1", undefined, false);
+  await view.click("Evidence");
+  await view.click(selected.name);
+  await changeSelect(view.container, "Research round", `source:${savedObservation.effectId}`);
+  expect(finish).toBeDefined();
+  await changeSelect(view.container, "Research round", "source:fresh-page");
+  await act(async () => finish(candidatePage([historical])));
+  expect(view.container.querySelector('[role="dialog"]')?.textContent).toContain(fresh.name);
+  expect(view.container.querySelector('[role="dialog"]')?.textContent).not.toContain(
+    historical.name,
+  );
+});
+
 it("ignores a late restored page after filters change and keeps the new depth on reopen", async () => {
   const first = { ...candidateFixture("first-person", false), name: "Synthetic first" };
   const second = { ...candidateFixture("second-person", false), name: "Synthetic second" };

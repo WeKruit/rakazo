@@ -5729,11 +5729,16 @@ function writeCandidateCursor(scope: string, value: string, key: string): string
 function candidateIndexQuery(
   roleId: string,
   sort?: CandidatesInput["sort"],
-  sourceEffectId?: string,
+  rankDomainPageId?: string,
+  displayScope?: Pick<CandidatesInput, "sourceEffectId" | "actionId">,
 ) {
   // ponytail: parse each saved page once; persist match fields only if large pools outgrow this projection.
   const includeMatches = sort !== undefined;
   const matchSort = sort === "rank" || sort === "tier";
+  const explicitSource =
+    displayScope?.sourceEffectId !== undefined || displayScope?.actionId !== undefined;
+  const sourceScope = Prisma.sql`${displayScope?.sourceEffectId !== undefined ? Prisma.sql`AND page."effectId" = ${displayScope.sourceEffectId}` : Prisma.empty}
+    ${displayScope?.actionId !== undefined ? Prisma.sql`AND page."actionId" = ${displayScope.actionId}` : Prisma.empty}`;
   // ponytail: original ranks are comparable only within this exact saved result, never across pages.
   const rankCell = Prisma.sql`CASE WHEN returned.value ? 'updated_rank'
         THEN returned.value -> 'updated_rank'
@@ -5760,11 +5765,11 @@ function candidateIndexQuery(
     includeMatches
       ? Prisma.sql`rank_scope AS MATERIALIZED (
     SELECT ${
-      sourceEffectId === undefined
+      rankDomainPageId === undefined
         ? Prisma.sql`(SELECT CASE WHEN count(*) = 1 THEN min("effectId") END FROM (
-          SELECT "effectId" FROM "recruiting_candidate_pages" WHERE "roleId" = ${roleId} LIMIT 2
+          SELECT "effectId" FROM "recruiting_candidate_pages" page WHERE "roleId" = ${roleId} ${sourceScope} LIMIT 2
         ) rank_pages)`
-        : Prisma.sql`${sourceEffectId}::text`
+        : Prisma.sql`${rankDomainPageId}::text`
     } AS "pageId"
   ), match_rows AS MATERIALIZED (
     SELECT page."effectId" AS "pageId", page."observedAt", (returned.ordinality - 1)::int AS "rowIndex",
@@ -5793,6 +5798,7 @@ function candidateIndexQuery(
     CROSS JOIN LATERAL (SELECT CASE WHEN jsonb_typeof(source.cell) = 'object' AND source.cell ? 'value'
       THEN source.cell->'value' ELSE source.cell END AS "value") match
     WHERE page."roleId" = ${roleId}
+      ${sourceScope}
       AND source.present
   ),`
       : Prisma.empty
@@ -5808,6 +5814,7 @@ function candidateIndexQuery(
             : Prisma.sql`profile.${Prisma.raw(`"${column}"`)}->>'value' AS ${Prisma.raw(`"${column}"`)}`,
         ),
       )},
+      ${explicitSource ? Prisma.sql`profile."identifiedLinkedinUrl"` : Prisma.sql`profile."linkedinUrl"->>'value'`} IS NOT NULL AS "countIdentified",
       ARRAY(SELECT DISTINCT value->>'pageId' FROM (VALUES ${Prisma.join(
         fields.map(([column]) => Prisma.sql`(profile.${Prisma.raw(`"${column}"`)})`),
       )}) fields(value) WHERE value IS NOT NULL
@@ -5824,6 +5831,7 @@ function candidateIndexQuery(
       SELECT o.* FROM "recruiting_candidate_occurrences" o
       JOIN "recruiting_candidate_pages" page ON page."effectId" = o."pageId"
       WHERE o."roleId" = c."roleId" AND o."candidateKey" = c."candidateKey"
+        ${sourceScope}
       ORDER BY page."observedAt" DESC, page."effectId" COLLATE "C" DESC, o."rowIndex" DESC LIMIT 1
     ) p ON true
     LEFT JOIN LATERAL (
@@ -5832,9 +5840,16 @@ function candidateIndexQuery(
           ([column, key]) => Prisma.sql`(array_agg(
             jsonb_build_object('value', o.${Prisma.raw(`"${column}"`)}, 'pageId', o."pageId")
             ORDER BY page."observedAt" DESC, page."effectId" COLLATE "C" DESC, o."rowIndex" DESC
-          ) FILTER (WHERE NOT (o."issues" ? ${`missing_field:${key}`})))[1] AS ${Prisma.raw(`"${column}"`)}`,
+          ) FILTER (WHERE NOT (o."issues" ? ${`missing_field:${key}`}) ${sourceScope}))[1] AS ${Prisma.raw(`"${column}"`)}`,
         ),
       )}
+      ${
+        explicitSource
+          ? Prisma.sql`, (array_agg(o."linkedinUrl"
+        ORDER BY page."observedAt" DESC, page."effectId" COLLATE "C" DESC, o."rowIndex" DESC
+      ) FILTER (WHERE NOT (o."issues" ? ${"missing_field:linkedin_url"})))[1] AS "identifiedLinkedinUrl"`
+          : Prisma.empty
+      }
       FROM "recruiting_candidate_occurrences" o
       JOIN "recruiting_candidate_pages" page ON page."effectId" = o."pageId"
       WHERE o."roleId" = c."roleId" AND o."candidateKey" = c."candidateKey"
@@ -5880,6 +5895,7 @@ type CandidateQueryRow = {
   sourcePageId: string | null;
   sourceRowIndex: number | null;
   profileSourcePageIds: string[];
+  countIdentified: boolean;
   roleId: string;
   candidateKey: string;
   name: string | null;
@@ -7040,10 +7056,14 @@ export async function listRecruitingCandidates(
       const sort = input.sort ?? "rank";
       const matchSort = sort === "rank" || sort === "tier";
       const limit = input.limit ?? 25;
+      const explicitSource = input.sourceEffectId !== undefined || input.actionId !== undefined;
       let rankDomainPageId = sort === "rank" ? input.sourceEffectId : undefined;
       if (sort === "rank" && rankDomainPageId === undefined) {
         const pages = await tx.recruitingCandidatePage.findMany({
-          where: { roleId: role.id },
+          where: {
+            roleId: role.id,
+            ...(input.actionId !== undefined ? { actionId: input.actionId } : {}),
+          },
           select: { effectId: true },
           take: 2,
         });
@@ -7055,6 +7075,7 @@ export async function listRecruitingCandidates(
         sort,
         // Reject old cursors that treated saved batch-only ranks as unranked.
         ...(sort === "rank" ? { rankProjection: 2 } : {}),
+        ...(explicitSource ? { sourceProjection: 2 } : {}),
         ...(input.sourceEffectId === undefined && rankDomainPageId !== undefined
           ? { rankDomainPageId }
           : {}),
@@ -7089,15 +7110,8 @@ export async function listRecruitingCandidates(
       if (input.verdict) clauses.push(Prisma.sql`b."hardGate" = ${input.verdict}`);
       if (input.shortlisted !== undefined)
         clauses.push(Prisma.sql`b."shortlisted" = ${input.shortlisted}`);
-      if (input.actionId)
-        clauses.push(
-          Prisma.sql`EXISTS (SELECT 1 FROM "recruiting_candidate_occurrences" o JOIN "recruiting_candidate_pages" p ON p."effectId" = o."pageId" WHERE o."roleId" = b."roleId" AND o."candidateKey" = b."candidateKey" AND p."actionId" = ${input.actionId})`,
-        );
-      if (input.sourceEffectId)
-        clauses.push(
-          Prisma.sql`EXISTS (SELECT 1 FROM "recruiting_candidate_occurrences" o JOIN "recruiting_candidate_pages" p ON p."effectId" = o."pageId" WHERE o."roleId" = b."roleId" AND o."candidateKey" = b."candidateKey" AND p."effectId" = ${input.sourceEffectId})`,
-        );
-      const filtered = Prisma.sql`${candidateIndexQuery(role.id, sort, rankDomainPageId ?? input.sourceEffectId)}, filtered AS (SELECT b.* FROM base b WHERE ${Prisma.join(clauses, " AND ")})`;
+      if (explicitSource) clauses.push(Prisma.sql`b."sourcePageId" IS NOT NULL`);
+      const filtered = Prisma.sql`${candidateIndexQuery(role.id, sort, rankDomainPageId ?? input.sourceEffectId, input)}, filtered AS (SELECT b.* FROM base b WHERE ${Prisma.join(clauses, " AND ")})`;
       const totals = await tx.$queryRaw<
         Array<{
           total: bigint;
@@ -7114,7 +7128,7 @@ export async function listRecruitingCandidates(
       (SELECT COALESCE(bool_or("rankValue" IS NOT NULL), false) FROM filtered) AS "rankAvailable",
       (SELECT COALESCE(bool_or("tierValue" IS NOT NULL), false) FROM filtered) AS "tierAvailable",
       COALESCE(sum("discoveryCount"), 0)::bigint AS "sourceRows", count(*) AS "candidates",
-      count(*) FILTER (WHERE "linkedinUrl" IS NOT NULL) AS "identifiedCandidates",
+      count(*) FILTER (WHERE "countIdentified") AS "identifiedCandidates",
       count(*) FILTER (WHERE "assessmentVersion" IS NULL) AS "unassessed",
       count(*) FILTER (WHERE "assessmentVersion" IS NOT NULL) AS "assessed",
       count(*) FILTER (WHERE "shortlisted") AS "shortlisted" FROM base`);
@@ -7179,6 +7193,7 @@ export async function listRecruitingCandidates(
             sourcePageId,
             sourceRowIndex,
             profileSourcePageIds: _profilePages,
+            countIdentified: _identified,
             ...profile
           }) => ({
             ...profile,
