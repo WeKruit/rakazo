@@ -202,6 +202,144 @@ describe("E2B computer backend", () => {
     expect(shouldSkipPortableWorkspaceFile(".browser-profiles/chromium/SingletonLock")).toBe(true);
   });
 
+  it("prefetches eight sibling lists before consuming their entries in DFS order", async () => {
+    const root = "/home/user/rakazo-home";
+    const siblings = Array.from({ length: 9 }, (_, index) => `dir-${index}`);
+    const pending = new Map<string, () => void>();
+    let releaseFutureLists = false;
+    let active = 0;
+    let peak = 0;
+    const list = vi.fn(async (directory: string, options: unknown) => {
+      expect(options).toEqual({ signal: context.signal });
+      if (directory === root) return siblings.map((name) => ({ name, type: "dir" }));
+      active += 1;
+      peak = Math.max(peak, active);
+      try {
+        if (!releaseFutureLists)
+          await new Promise<void>((resolve) => pending.set(directory, resolve));
+        return [
+          { name: "note.txt", type: "file", mode: 0o600 },
+          ...(directory.endsWith("/nested") ? [] : [{ name: "nested", type: "dir" }]),
+        ];
+      } finally {
+        active -= 1;
+        pending.delete(directory);
+      }
+    });
+    const read = vi.fn(async (filePath: string) =>
+      new TextEncoder().encode(filePath.slice(root.length + 1)),
+    );
+    const provider = new E2BSandboxProvider("test-key", {
+      connect: vi.fn(async () => ({
+        sandboxId: "existing",
+        commands: { run: vi.fn(async () => ({ stdout: "", stderr: "", exitCode: 0 })) },
+        files: { list, read },
+      })),
+    } as unknown as E2BSandboxSdk);
+    const exported: PortableFile[] = [];
+    const drain = (async () => {
+      for await (const file of provider.exportWorkspace(
+        { id: "existing", providerRef: "existing", kind: "e2b", botId: "bot" },
+        context,
+      ))
+        exported.push(file);
+    })();
+    try {
+      await vi.waitFor(() => expect(active).toBe(8), { timeout: 250, interval: 5 });
+      expect(list.mock.calls.map(([directory]) => directory)).toEqual([
+        root,
+        ...siblings.slice(0, 8).map((directory) => `${root}/${directory}`),
+      ]);
+      pending.get(`${root}/dir-0`)!();
+      await vi.waitFor(() => expect(active).toBe(7));
+      expect(list).toHaveBeenCalledTimes(9);
+      expect(read).not.toHaveBeenCalled();
+    } finally {
+      releaseFutureLists = true;
+      for (const release of [...pending.values()].reverse()) release();
+      await drain;
+    }
+    expect(peak).toBe(8);
+    expect(exported.map((file) => file.path)).toEqual(
+      siblings.flatMap((directory) => [`${directory}/note.txt`, `${directory}/nested/note.txt`]),
+    );
+    expect(read).toHaveBeenCalledTimes(18);
+    expect(list).toHaveBeenCalledTimes(19);
+  });
+
+  it.each(["list-error", "list-abort", "read-error", "read-abort"])(
+    "settles issued export requests after %s without starting another batch",
+    async (source) => {
+      const root = "/home/user/rakazo-home";
+      const controller = new AbortController();
+      const failure = new Error(source);
+      const pending = new Map<string, { resolve: () => void; reject: (error: Error) => void }>();
+      let active = 0;
+      let releaseFuture = false;
+      const wait = async (target: string) => {
+        active += 1;
+        try {
+          if (!releaseFuture)
+            await new Promise<void>((resolve, reject) => pending.set(target, { resolve, reject }));
+        } finally {
+          active -= 1;
+          pending.delete(target);
+        }
+      };
+      const list = vi.fn(async (directory: string) => {
+        if (source.startsWith("list") && directory !== root) await wait(directory);
+        return Array.from({ length: directory === root ? 9 : 0 }, (_, index) => ({
+          name: `entry-${index}`,
+          type: source.startsWith("list") ? "dir" : "file",
+          mode: 0o600,
+        }));
+      });
+      const read = vi.fn(async (filePath: string) => {
+        await wait(filePath);
+        return new Uint8Array(0);
+      });
+      const provider = new E2BSandboxProvider("test-key", {
+        connect: vi.fn(async () => ({
+          sandboxId: "existing",
+          commands: { run: vi.fn(async () => ({ stdout: "", stderr: "", exitCode: 0 })) },
+          files: { list, read },
+        })),
+      } as unknown as E2BSandboxSdk);
+      let settled = false;
+      const outcome = (async () => {
+        for await (const _file of provider.exportWorkspace(
+          { id: "existing", providerRef: "existing", kind: "e2b", botId: "bot" },
+          { ...context, signal: controller.signal },
+        )) {
+          // Drain the public workspace export contract.
+        }
+      })().then(
+        () => {
+          settled = true;
+          return undefined;
+        },
+        (error: unknown) => {
+          settled = true;
+          return error;
+        },
+      );
+      try {
+        await vi.waitFor(() => expect(active).toBe(8), { timeout: 250, interval: 5 });
+        if (source.endsWith("abort")) controller.abort(failure);
+        pending.values().next().value!.reject(failure);
+        await vi.waitFor(() => expect(active).toBe(7));
+        expect(settled).toBe(false);
+      } finally {
+        releaseFuture = true;
+        for (const entry of pending.values()) entry.resolve();
+        await outcome;
+      }
+      expect(await outcome).toBe(failure);
+      expect(list).toHaveBeenCalledTimes(source.startsWith("list") ? 9 : 1);
+      expect(read).toHaveBeenCalledTimes(source.startsWith("list") ? 0 : 8);
+    },
+  );
+
   it("fills export batches across directories while preserving DFS files and pruning", async () => {
     const root = "/home/user/rakazo-home";
     const directories: Record<string, Array<{ name: string; type: string; mode?: number }>> = {
@@ -305,7 +443,7 @@ describe("E2B computer backend", () => {
       })),
     );
     expect(list.mock.calls.map(([directory]) => directory)).toEqual(
-      ["", "a", "a/nested", "b", "c", "d", ".browser-profiles", ".browser-profiles/chromium"].map(
+      ["", "a", "b", "c", "d", ".browser-profiles", "a/nested", ".browser-profiles/chromium"].map(
         (directory) => (directory ? `${root}/${directory}` : root),
       ),
     );

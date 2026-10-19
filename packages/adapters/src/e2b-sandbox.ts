@@ -457,12 +457,13 @@ async function* walkE2BWorkspace(
   directory: string,
   context: AdapterContext,
 ): AsyncIterable<PortableFile> {
-  // ponytail: O(F) metadata fills batches across directories; stream bounded metadata if trees grow.
+  // ponytail: O(F + D) metadata fills batches; stream bounded metadata if trees grow.
   const files: Array<{ relative: string; mode: number }> = [];
-  async function collectFiles(directory: string): Promise<void> {
-    const entries = await desktop.files.list(workspacePath(E2B_WORKSPACE, directory), {
-      signal: context.signal,
-    });
+  async function collectFiles(
+    directory: string,
+    entries: Awaited<ReturnType<typeof desktop.files.list>>,
+  ): Promise<void> {
+    context.signal.throwIfAborted();
     const directories: string[] = [];
     for (const entry of entries) {
       const relative = normalizeWorkspacePath(
@@ -472,18 +473,42 @@ async function* walkE2BWorkspace(
       if (entry.type === "dir") directories.push(relative);
       else if (entry.type === "file") files.push({ relative, mode: entry.mode });
     }
-    for (const relative of directories) await collectFiles(relative);
+    for (let index = 0; index < directories.length; index += 8) {
+      const siblings = directories.slice(index, index + 8);
+      // Settle this batch before descending so nested lists share the same global limit.
+      const results = await Promise.allSettled(
+        siblings.map(async (relative) => {
+          context.signal.throwIfAborted();
+          return desktop.files.list(workspacePath(E2B_WORKSPACE, relative), {
+            signal: context.signal,
+          });
+        }),
+      );
+      context.signal.throwIfAborted();
+      const children = results.map((result) => {
+        if (result.status === "rejected") throw result.reason;
+        return result.value;
+      });
+      for (const [offset, entries] of children.entries())
+        await collectFiles(siblings[offset]!, entries);
+    }
   }
-  await collectFiles(directory);
+  context.signal.throwIfAborted();
+  await collectFiles(
+    directory,
+    await desktop.files.list(workspacePath(E2B_WORKSPACE, directory), { signal: context.signal }),
+  );
   for (let index = 0; index < files.length; index += 8) {
-    const batch = await Promise.all(
+    const results = await Promise.allSettled(
       files.slice(index, index + 8).map(async ({ relative, mode }) => {
+        context.signal.throwIfAborted();
         const content = await desktop.files
           .read(workspacePath(E2B_WORKSPACE, relative), {
             format: "bytes",
             signal: context.signal,
           })
           .catch((error) => {
+            context.signal.throwIfAborted();
             if (relative.startsWith(".browser-profiles/")) return undefined;
             throw error;
           });
@@ -491,7 +516,13 @@ async function* walkE2BWorkspace(
         return { path: relative, content, executable: Boolean(mode & 0o100) };
       }),
     );
+    context.signal.throwIfAborted();
+    const batch = results.map((result) => {
+      if (result.status === "rejected") throw result.reason;
+      return result.value;
+    });
     for (const file of batch) {
+      context.signal.throwIfAborted();
       if (file) yield file;
     }
   }
