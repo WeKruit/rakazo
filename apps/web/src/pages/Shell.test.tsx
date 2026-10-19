@@ -733,6 +733,8 @@ it("refreshes persisted recruiting changes while ignoring ongoing catalog and so
     name: "read_chat_history",
     outcome: "succeeded",
   });
+  receive("Research read bound", "recruiting.read", { phase: "bound" });
+  receive("Material read", "recruiting.material.read", { reader: "web_fetch" });
   receive("Role read", "agent.tool.completed", { name: "recruiting_role", outcome: "succeeded" });
   receive("Unchanged role", "effect.recorded", {
     tool: "recruiting_role",
@@ -775,6 +777,7 @@ it("refreshes persisted recruiting changes while ignoring ongoing catalog and so
     role: "user",
     blocks: [{ kind: "text", text: "Not a fit", recruitingFeedback: { roleId: "role" } }],
   });
+  receive("Research output recorded", "recruiting.read", { phase: "recorded" });
   receive("Candidates saved", "recruiting.candidates.saved");
   receive("Preference saved", "memory.revised");
   receive("Thread cleared", "thread.cleared");
@@ -788,6 +791,7 @@ it("refreshes persisted recruiting changes while ignoring ongoing catalog and so
     "CRM import receipt",
     "Reply outcome",
     "Candidate feedback saved",
+    "Research output recorded",
     "Candidates saved",
     "Preference saved",
     "Thread cleared",

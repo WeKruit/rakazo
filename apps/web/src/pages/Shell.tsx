@@ -442,7 +442,9 @@ export function eventChangesRecruitingPanel(
       event.payload.name === "recruiting_crm_import" || event.payload.name === "recruiting_reply"
     );
   return (
-    event.type.startsWith("recruiting.") ||
+    (event.type.startsWith("recruiting.") &&
+      event.type !== "recruiting.material.read" &&
+      !(event.type === "recruiting.read" && event.payload.phase === "bound")) ||
     event.type === "memory.revised" ||
     event.type === "thread.cleared" ||
     isRunTerminalEvent(event)
