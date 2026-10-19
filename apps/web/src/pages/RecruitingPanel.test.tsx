@@ -2615,6 +2615,7 @@ it.each(["Cards", "Table"])(
           },
           { label: "Provider tier", value: "Tier 1", sourceUrls: [] },
           { label: "Provider rule", value: "true", sourceUrls: [] },
+          { label: "Resume status", value: "inaccessible", sourceUrls: [] },
           {
             label: "Fit reasons",
             value: fitReasons,
@@ -2725,9 +2726,12 @@ it.each(["Cards", "Table"])(
     expect(matches[2]?.textContent).toContain("Original pool rankUnknown");
     expect(matches[3]?.textContent).toContain("Source unavailable");
     expect(list.textContent).not.toContain("Unassessed");
+    expect(list.textContent).toContain("Resume: inaccessible");
     expect(api.listCandidateSources).not.toHaveBeenCalled();
     await view.click(candidate.name);
     const dialog = view.container.querySelector('[role="dialog"]')!;
+    expect(dialog.textContent).toContain("Resume: inaccessible");
+    expect(dialog.textContent).not.toContain("Resume missing");
     const sources = dialog.querySelector('[aria-label="Saved candidate sources"]')!;
     const summary = dialog.querySelector('[aria-label="Research match"]')!;
     expect([...summary.querySelectorAll("dd dt")].map((item) => item.textContent)).toEqual([
@@ -2744,6 +2748,7 @@ it.each(["Cards", "Table"])(
       "Full-time years",
       "Provider tier",
       "Provider rule",
+      "Resume status",
       "Fit reasons",
       "Match score",
       "Match tier",

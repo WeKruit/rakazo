@@ -428,6 +428,9 @@ function CandidateProfile({
   candidate: RecruitingCandidate;
   showDiagnostics?: boolean;
 }) {
+  const resumeStatus = candidate.latestSource?.report?.fields
+    .find((field) => field.label === "Resume status")
+    ?.value?.trim();
   return (
     <div className="space-y-1 text-xs">
       {!candidate.name ? (
@@ -448,10 +451,17 @@ function CandidateProfile({
         {candidate.resumeUrl ? (
           <a className="underline" href={candidate.resumeUrl} target="_blank" rel="noreferrer">
             <Trans>Resume</Trans>
+            {resumeStatus ? ` (${resumeStatus})` : null}
           </a>
         ) : (
           <span className="text-muted-foreground">
-            <Trans>Resume missing</Trans>
+            {resumeStatus ? (
+              <>
+                <Trans>Resume</Trans>: {resumeStatus}
+              </>
+            ) : (
+              <Trans>Resume missing</Trans>
+            )}
           </span>
         )}
       </div>
