@@ -1,5 +1,6 @@
 import { createHash } from "node:crypto";
 import type {
+  AdapterContext,
   AgentRunRequest,
   AgentRuntimeEvent,
   ConnectorProvider,
@@ -31,6 +32,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import type * as AutoReviewModule from "./auto-review.js";
 import { runAutoReviewJudge } from "./auto-review.js";
 import type * as ComputerLifecycleModule from "./computer-lifecycle.js";
+import { acquireComputerExecutionLease } from "./computer-lifecycle.js";
 import type * as ComputerWorkspaceModule from "./computer-workspace.js";
 import { createRunExecutor, selectBuiltinToolsForRun } from "./executor.js";
 import {
@@ -91,7 +93,7 @@ vi.mock("./recruiting-feedback.js", async (importOriginal) => ({
 
 vi.mock("./computer-lifecycle.js", async (importOriginal) => ({
   ...(await importOriginal<typeof ComputerLifecycleModule>()),
-  acquireComputerExecutionLease: async () => null,
+  acquireComputerExecutionLease: vi.fn(async () => null),
   provisionComputer: async () => ({ id: "computer-1", kind: "desktop" }),
 }));
 
@@ -130,7 +132,11 @@ type ToolCall = {
 function fixture(
   runId = "run-1",
   secrets: string[] = [],
-  options: { contextStrategy?: AgentRunRequest["contextStrategy"]; attachmentStore?: boolean } = {},
+  options: {
+    contextStrategy?: AgentRunRequest["contextStrategy"];
+    attachmentStore?: boolean;
+    shutdownSignal?: AbortSignal;
+  } = {},
 ) {
   const effects: Effect[] = [];
   const results: unknown[] = [];
@@ -156,6 +162,9 @@ function fixture(
     status: "queued",
     trigger: "user",
     leaseFence: 0,
+    leaseOwner: null as string | null,
+    leaseExpiresAt: null as Date | null,
+    checkpoint: null as string | null,
     sourceMessageId: null as string | null,
   };
   const thread = {
@@ -242,10 +251,22 @@ function fixture(
       findMany: vi.fn(async () => []),
       findUnique: vi.fn(async () => run),
       findUniqueOrThrow: vi.fn(async () => run),
-      updateMany: vi.fn(async ({ data }: { data: Record<string, unknown> }) => {
-        Object.assign(run, data);
-        return { count: 1 };
-      }),
+      updateMany: vi.fn(
+        async ({
+          data,
+        }: {
+          where: {
+            status?: string | { in?: string[] };
+            leaseOwner?: string | null;
+            leaseFence?: number;
+            checkpoint?: string | null | { in?: (string | null)[] };
+          };
+          data: Record<string, unknown>;
+        }) => {
+          Object.assign(run, data);
+          return { count: 1 };
+        },
+      ),
     },
     bot: {
       findUniqueOrThrow: vi.fn(async () => ({
@@ -326,11 +347,12 @@ function fixture(
     run.status = "waiting_input";
     return true;
   });
-  const finalizeRun = vi.fn(async () => ({ continuationRunId: null }));
+  const finalizeRun = vi.fn<ThreadEvents["finalizeRun"]>(async () => ({ continuationRunId: null }));
   const claimSteering = vi.fn<ThreadEvents["claimSteering"]>(async () => []);
   let calls: ToolCall[] = [];
   const runtimeRun = vi.fn(async function* (
     request: AgentRunRequest,
+    _context?: Partial<AdapterContext>,
   ): AsyncGenerator<AgentRuntimeEvent> {
     for (const call of calls) {
       const result = await request.executeTool!(call.name, call.args, call.executionId);
@@ -356,7 +378,7 @@ function fixture(
     describe: () => ({ capabilities: { graphical: false } }),
     writeFile: vi.fn(async () => undefined),
   };
-  const executor = createRunExecutor({
+  const executorDeps = {
     contextStrategy: options.contextStrategy,
     web,
     prisma,
@@ -381,10 +403,14 @@ function fixture(
     },
     jobs: { enqueue: vi.fn(async () => undefined) },
     secrets,
-  } as unknown as Parameters<typeof createRunExecutor>[0]);
+    shutdownSignal: options.shutdownSignal,
+  } as unknown as Parameters<typeof createRunExecutor>[0];
+  const executor = createRunExecutor(executorDeps);
 
   return {
     effects,
+    executor,
+    executorDeps,
     results,
     web,
     sandbox,
@@ -426,6 +452,162 @@ function fixture(
     },
   };
 }
+
+describe("worker shutdown recovery", () => {
+  it.each([
+    "shutdown",
+    "cancelled",
+    "reclaimed",
+    "lease-abort",
+    "runtime-error-then-shutdown",
+  ] as const)("keeps the native recovery boundary for %s", async (interruption) => {
+    const shutdown = new AbortController();
+    const f = fixture(`run-${interruption}`, [], { shutdownSignal: shutdown.signal });
+    const taskId = f.runData.taskId;
+    const args = { path: "MEMORY.md", content: "Preserved note", expectedRevision: 0 };
+    f.effects.push({
+      id: "uncertain-write",
+      spaceId: f.runData.spaceId,
+      runId: f.runData.id,
+      kind: "remember",
+      idempotencyKey: toolEffectIdempotencyKey(f.runData.id, "remember", args),
+      status: "uncertain",
+      request: args,
+      result: { uncertain: true },
+    });
+    const before = structuredClone(f.effects);
+    let failRenewal = false;
+    f.prisma.run.updateMany.mockImplementation(async ({ where, data }) => {
+      if (
+        (failRenewal && !data.status) ||
+        (typeof where.status === "string" && where.status !== f.runData.status) ||
+        (typeof where.status === "object" &&
+          where.status.in &&
+          !where.status.in.includes(f.runData.status)) ||
+        (where.leaseOwner !== undefined && where.leaseOwner !== f.runData.leaseOwner) ||
+        (where.leaseFence !== undefined && where.leaseFence !== f.runData.leaseFence) ||
+        (where.checkpoint === null && f.runData.checkpoint !== null) ||
+        (typeof where.checkpoint === "object" &&
+          where.checkpoint?.in &&
+          !where.checkpoint.in.includes(f.runData.checkpoint))
+      )
+        return { count: 0 };
+      Object.assign(f.runData, data);
+      return { count: 1 };
+    });
+    const createEvent = vi.fn(async ({ data }: { data: Record<string, unknown> }) => ({
+      ...data,
+      seq: 1,
+    }));
+    const lease = { computerId: "computer-1", botId: "bot-1", runId: f.runData.id, fence: 1 };
+    vi.mocked(acquireComputerExecutionLease).mockResolvedValueOnce(lease);
+    const leaseUpdate = vi.fn(async () => ({ count: 1 }));
+    Object.assign(f.prisma, {
+      $transaction: vi.fn(async (work: (tx: unknown) => Promise<unknown>) => work(f.prisma)),
+      computerExecutionLease: { updateMany: leaseUpdate },
+    });
+    Object.assign(f.prisma.thread, { update: vi.fn(async () => ({ nextEventSeq: 2 })) });
+    Object.assign(f.prisma.event, { create: createEvent });
+    f.finalizeRun.mockImplementation(async (input) => {
+      if (
+        f.runData.status !== "running" ||
+        f.runData.leaseOwner !== input.leaseOwner ||
+        f.runData.leaseFence !== input.leaseFence
+      )
+        return false;
+      f.runData.status = input.outcome;
+      return { continuationRunId: null };
+    });
+    let entered!: () => void;
+    const entering = new Promise<void>((resolve) => {
+      entered = resolve;
+    });
+    let drain!: () => void;
+    const draining = new Promise<void>((resolve) => {
+      drain = resolve;
+    });
+    f.runtimeRun.mockImplementationOnce(async function* (_request, context) {
+      yield { type: "progress", text: "Working" };
+      try {
+        if (interruption === "runtime-error-then-shutdown") {
+          entered();
+          throw new Error("Original runtime failure");
+        }
+        if (interruption === "cancelled") f.runData.status = "cancelled";
+        if (interruption === "reclaimed") {
+          f.runData.leaseOwner = "newer-worker";
+          f.runData.leaseFence += 1;
+        }
+        if (interruption === "lease-abort") {
+          failRenewal = true;
+          await vi.advanceTimersByTimeAsync(60_000);
+          expect(context!.signal!.aborted).toBe(true);
+        }
+        shutdown.abort();
+        expect(context!.signal!.reason === shutdown.signal.reason).toBe(
+          interruption !== "lease-abort",
+        );
+        entered();
+        context!.signal!.throwIfAborted();
+      } finally {
+        if (interruption === "runtime-error-then-shutdown") shutdown.abort();
+        await draining;
+      }
+    });
+    if (interruption === "lease-abort") vi.useFakeTimers();
+    try {
+      const working = f.executor.continueRun(f.runData.id, "worker-1");
+      await entering;
+      expect(f.finalizeRun).not.toHaveBeenCalled();
+      expect(f.executorDeps.jobs.enqueue).not.toHaveBeenCalledWith(
+        expect.objectContaining({ name: "run.continue" }),
+      );
+      expect(leaseUpdate).not.toHaveBeenCalledWith(expect.objectContaining({ where: lease }));
+      drain();
+      await working;
+    } finally {
+      vi.useRealTimers();
+    }
+    expect(f.effects).toEqual(before);
+    expect(f.runData.taskId).toBe(taskId);
+    expect(leaseUpdate).toHaveBeenCalledWith(expect.objectContaining({ where: lease }));
+    if (interruption !== "shutdown") {
+      expect(f.runData.status).toBe(
+        interruption === "cancelled"
+          ? "cancelled"
+          : interruption === "reclaimed"
+            ? "running"
+            : "failed",
+      );
+      expect(f.executorDeps.jobs.enqueue).not.toHaveBeenCalledWith(
+        expect.objectContaining({ name: "run.continue" }),
+      );
+      expect(createEvent).not.toHaveBeenCalled();
+      return;
+    }
+    expect(f.runData).toMatchObject({ status: "queued", leaseOwner: null, leaseExpiresAt: null });
+    expect(f.finalizeRun).not.toHaveBeenCalled();
+    expect(createEvent).toHaveBeenCalledWith(
+      expect.objectContaining({ data: expect.objectContaining({ type: "run.requeued" }) }),
+    );
+    expect(f.executorDeps.jobs.enqueue).toHaveBeenCalledWith(
+      expect.objectContaining({ name: "run.continue", payload: { runId: f.runData.id } }),
+    );
+    expect(f.prisma.attempt.updateMany).toHaveBeenCalledWith(
+      expect.objectContaining({ data: { status: "interrupted", finishedAt: expect.any(Date) } }),
+    );
+    f.setCalls([{ name: "remember", args, executionId: "after-restart" }]);
+    await createRunExecutor({
+      ...f.executorDeps,
+      shutdownSignal: new AbortController().signal,
+    }).continueRun(f.runData.id, "worker-2");
+    expect(f.runData).toMatchObject({ status: "completed", taskId, leaseFence: 2 });
+    expect(f.runtimeRun).toHaveBeenCalledTimes(2);
+    expect(f.results).toEqual([{ uncertain: true }]);
+    expect(f.memoryCommit).not.toHaveBeenCalled();
+    expect(f.effects).toEqual(before);
+  });
+});
 
 describe("explicit artifact workspace writes", () => {
   const bytes = new Uint8Array([0, 255, 128, 13, 10]);

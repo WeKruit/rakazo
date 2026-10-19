@@ -610,6 +610,15 @@ export class PiAgentRuntime implements AgentRuntime {
         // message (stopReason "error" / "length") and still resolves the run.
         // state.errorMessage covers the error stop; the message itself covers a
         // length stop and any failure that never landed on state.
+        if (
+          !budgetExceeded &&
+          terminalMessage?.role === "assistant" &&
+          terminalMessage.stopReason === "aborted" &&
+          context?.signal?.aborted
+        ) {
+          queue.fail(context.signal.reason);
+          return;
+        }
         const providerFailure =
           !budgetExceeded && terminalMessage ? providerFailureText(terminalMessage) : undefined;
         const error = agent.state.errorMessage || providerFailure;

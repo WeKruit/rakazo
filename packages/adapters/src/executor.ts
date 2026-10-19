@@ -8998,8 +8998,17 @@ export function createRunExecutor(deps: ExecutorDeps) {
             getLogger().error("history.compact enqueue failed", error);
           }
         } catch (error) {
+          const interruptedByShutdown =
+            deps.shutdownSignal?.aborted &&
+            runAbortController?.signal.aborted &&
+            error === deps.shutdownSignal.reason &&
+            runAbortController.signal.reason === deps.shutdownSignal.reason;
           if (!terminalCheckpointComplete) {
             await workspaceCheckpoint.flush().catch(() => undefined);
+          }
+          if (interruptedByShutdown) {
+            await requeueComputerRun(deps, run, workerId, fence, resumeCheckpoint, heldForTakeover);
+            return;
           }
           const message = redactSecrets(
             error instanceof Error ? error.message : String(error),

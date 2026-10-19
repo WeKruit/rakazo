@@ -224,6 +224,42 @@ beforeEach(() => {
 
 afterEach(() => vi.useRealTimers());
 
+it.each(["context-abort", "provider-abort", "provider-error-then-shutdown"] as const)(
+  "preserves only the trusted context abort reason for %s",
+  async (failure) => {
+    const controller = new AbortController();
+    const reason = new DOMException("Worker is stopping", "AbortError");
+    const input = request();
+    if (failure === "provider-error-then-shutdown")
+      input.onUsage = async () => controller.abort(reason);
+    providerState.stream.mockImplementation(() => {
+      if (failure === "context-abort") controller.abort(reason);
+      return stream(
+        primary,
+        message(
+          primary,
+          [],
+          failure === "provider-error-then-shutdown" ? "error" : "aborted",
+          failure === "provider-error-then-shutdown" ? "Original provider failure" : "Aborted",
+        ),
+      );
+    });
+    const consume = async () => {
+      for await (const _event of new PiAgentRuntime().run(input, { signal: controller.signal })) {
+      }
+    };
+    const caught = await consume().catch((error: unknown) => error);
+    if (failure === "context-abort") expect(caught).toBe(reason);
+    else {
+      expect(caught).toBeInstanceOf(Error);
+      expect(caught).not.toBe(reason);
+      if (failure === "provider-error-then-shutdown")
+        expect((caught as Error).message).toContain("Original provider failure");
+    }
+    expect(providerState.stream).toHaveBeenCalledOnce();
+  },
+);
+
 function compactionRequest(withHistory = true) {
   const target = model("provider-a", "large", 128_000);
   providerState.models.set(
