@@ -66,6 +66,93 @@ describe("toolRequiresApproval", () => {
     ).toBe(false);
   });
 
+  it.each([
+    "GMAIL_SEND_EMAIL",
+    "GMAIL_SEND_DRAFT",
+    "GMAIL_FORWARD_MESSAGE",
+    "GMAIL_REPLY_TO_THREAD",
+    "GOOGLECALENDAR_CREATE_EVENT",
+    "GOOGLECALENDAR_UPDATE_EVENT",
+    "GOOGLECALENDAR_PATCH_EVENT",
+    "GOOGLECALENDAR_DELETE_EVENT",
+    "GOOGLECALENDAR_EVENTS_MOVE",
+    "GOOGLECALENDAR_QUICK_ADD",
+  ])("requires one-time approval for the resolved Composio action %s", (operation) => {
+    for (const toolName of [operation, operation.toLowerCase(), `g${operation.slice(1)}`]) {
+      expect(
+        toolRequiresExplicitApproval("renamed_action", { connectorId: "composio", toolName }),
+      ).toBe(true);
+      expect(toolRequiresExplicitApproval(operation)).toBe(false);
+      expect(toolRequiresExplicitApproval("renamed_action", { connectorId: "mcp", toolName })).toBe(
+        false,
+      );
+    }
+  });
+
+  it("finds protected actions in nested Composio batches without changing their arguments", () => {
+    const args = {
+      tools: [
+        { tool_slug: "GMAIL_FETCH_EMAILS", arguments: {} },
+        {
+          tool_slug: "composio_multi_execute_tool",
+          arguments: {
+            tools: [{ tool_slug: "gmail_send_email", arguments: { body: "Approved content" } }],
+          },
+        },
+      ],
+    };
+    const original = structuredClone(args);
+    expect(
+      toolRequiresExplicitApproval(
+        "renamed_batch",
+        { connectorId: "composio", toolName: "COMPOSIO_MULTI_EXECUTE_TOOL" },
+        args,
+      ),
+    ).toBe(true);
+    expect(args).toEqual(original);
+    expect(
+      toolRequiresExplicitApproval(
+        "renamed_batch",
+        { connectorId: "demo", toolName: "COMPOSIO_MULTI_EXECUTE_TOOL" },
+        args,
+      ),
+    ).toBe(false);
+  });
+
+  it.each([
+    "GMAIL_FETCH_EMAILS",
+    "GMAIL_FETCH_MESSAGE_BY_THREAD_ID",
+    "GMAIL_CREATE_EMAIL_DRAFT",
+    "GOOGLECALENDAR_FREE_BUSY_QUERY",
+    "GOOGLECALENDAR_FIND_FREE_SLOTS",
+    "GOOGLECALENDAR_EVENTS_GET",
+    "GOOGLECALENDAR_EVENTS_LIST",
+    "GMAIL_SEND_EMAIL_UNKNOWN",
+  ])("does not add mandatory approval to the Composio operation %s", (toolName) => {
+    const args = { tools: [{ tool_slug: "GMAIL_SEND_EMAIL", arguments: {} }] };
+    expect(
+      toolRequiresExplicitApproval("renamed_action", { connectorId: "composio", toolName }, args),
+    ).toBe(false);
+  });
+
+  it("does not add mandatory approval to a nested batch of reads", () => {
+    expect(
+      toolRequiresExplicitApproval(
+        "renamed_batch",
+        { connectorId: "composio", toolName: "COMPOSIO_MULTI_EXECUTE_TOOL" },
+        {
+          tools: [
+            { tool_slug: "GOOGLECALENDAR_FREE_BUSY_QUERY", arguments: {} },
+            {
+              tool_slug: "COMPOSIO_MULTI_EXECUTE_TOOL",
+              arguments: { tools: [{ tool_slug: "GMAIL_FETCH_EMAILS", arguments: {} }] },
+            },
+          ],
+        },
+      ),
+    ).toBe(false);
+  });
+
   it("requires explicit human approval of recruiting packages even with an always-allow rule", () => {
     const toolName = "recruiting_request_approval";
     const rules: ActionApprovalRule[] = [

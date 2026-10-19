@@ -5220,6 +5220,7 @@ export function createRunExecutor(deps: ExecutorDeps) {
           const requiresExplicitApproval = toolRequiresExplicitApproval(
             policyToolName,
             connectorCall.route,
+            args,
           );
           // Declared effect of the operation this call dispatches (installed API method and
           // flag). Install config is immutable per route resource, so it cannot drift before

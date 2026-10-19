@@ -1190,6 +1190,83 @@ describe.each([false, true])("native outbound draft approval, catalog=%s", (cata
   });
 });
 
+describe("Composio one-time outbound approval", () => {
+  const route = { connectorId: "composio", toolName: "COMPOSIO_MULTI_EXECUTE_TOOL" };
+  const args = {
+    tools: [
+      { tool_slug: "GOOGLECALENDAR_FREE_BUSY_QUERY", arguments: {} },
+      {
+        tool_slug: "COMPOSIO_MULTI_EXECUTE_TOOL",
+        arguments: {
+          tools: [
+            {
+              tool_slug: "GMAIL_SEND_EMAIL",
+              account: "mail-account-one",
+              arguments: {
+                recipient_email: "candidate@example.test",
+                subject: "Approved subject",
+                body: "Approved content",
+              },
+            },
+          ],
+        },
+      },
+    ],
+    sync_response_to_workbench: false,
+  };
+
+  it.each([
+    { catalog: false, autoReview: false },
+    { catalog: true, autoReview: false },
+    { catalog: false, autoReview: true },
+    { catalog: true, autoReview: true },
+  ])("keeps nested outbound approval exact for %j", async ({ catalog, autoReview }) => {
+    reviewMock.mockReset().mockResolvedValue({ decision: "pass", model: "mock" });
+    const f = fixture({
+      name: "renamed_batch",
+      catalog,
+      route,
+      readOnly: true,
+      autoReview,
+      rules: autoReview
+        ? []
+        : [{ effect: "always_allow", matchKind: "tool", matchValue: "renamed_batch" }],
+      inputSchema: { type: "object" },
+    });
+    f.setCalls([{ args, executionId: "draft-batch" }]);
+    await f.run();
+    expect(f.execute).not.toHaveBeenCalled();
+    expect(reviewMock).not.toHaveBeenCalled();
+    expect(f.pauseRunForInput).toHaveBeenCalledWith(
+      expect.objectContaining({
+        blocks: [
+          expect.objectContaining({
+            detail: expect.stringContaining("Approved content"),
+            actions: [
+              { id: "allow", label: "Allow once" },
+              { id: "deny", label: "Deny" },
+            ],
+          }),
+        ],
+      }),
+    );
+
+    f.effects[0]!.status = "approved";
+    f.setCalls([
+      {
+        args: { tools: [{ tool_slug: "GMAIL_FETCH_EMAILS", arguments: {} }] },
+        executionId: "resume-batch",
+      },
+    ]);
+    await f.run();
+    expect(f.execute).toHaveBeenCalledOnce();
+    expect(f.execute.mock.calls[0]?.[0]).toMatchObject({ route, args });
+    expect(f.effects).toHaveLength(1);
+    expect(f.effects[0]!.status).toBe("completed");
+    expect(reviewMock).not.toHaveBeenCalled();
+  });
+});
+
 describe("candidate-linked native reply", () => {
   const target = {
     mcpServerId: "crm-server",

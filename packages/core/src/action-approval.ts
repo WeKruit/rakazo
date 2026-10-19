@@ -50,6 +50,19 @@ const EXPLICIT_APPROVAL_MCP_OPERATIONS = new Set([
   "add_leads_to_campaign_or_list_bulk",
   "activate_campaign",
 ]);
+// Canonical actions in Composio's Gmail and Google Calendar toolkit catalogs.
+const EXPLICIT_APPROVAL_COMPOSIO_OPERATIONS = new Set([
+  "GMAIL_SEND_EMAIL",
+  "GMAIL_SEND_DRAFT",
+  "GMAIL_FORWARD_MESSAGE",
+  "GMAIL_REPLY_TO_THREAD",
+  "GOOGLECALENDAR_CREATE_EVENT",
+  "GOOGLECALENDAR_UPDATE_EVENT",
+  "GOOGLECALENDAR_PATCH_EVENT",
+  "GOOGLECALENDAR_DELETE_EVENT",
+  "GOOGLECALENDAR_EVENTS_MOVE",
+  "GOOGLECALENDAR_QUICK_ADD",
+]);
 
 const UNATTENDED_SAFE_BUILTIN_TOOLS = new Set([
   "recruiting_candidates",
@@ -124,11 +137,31 @@ export function toolRequiresApproval(
 export function toolRequiresExplicitApproval(
   toolName: string,
   route?: { connectorId: string; toolName: string },
+  args?: Record<string, unknown>,
 ): boolean {
-  return (
+  if (
     EXPLICIT_APPROVAL_BUILTIN_TOOLS.has(toolName) ||
     (route?.connectorId === "mcp" && EXPLICIT_APPROVAL_MCP_OPERATIONS.has(route.toolName))
-  );
+  )
+    return true;
+  if (route?.connectorId !== "composio") return false;
+  const operation = route.toolName.toUpperCase();
+  if (EXPLICIT_APPROVAL_COMPOSIO_OPERATIONS.has(operation)) return true;
+  if (operation !== "COMPOSIO_MULTI_EXECUTE_TOOL" || !Array.isArray(args?.tools)) return false;
+  return args.tools.some((item: unknown) => {
+    if (!item || typeof item !== "object" || Array.isArray(item)) return false;
+    const call = item as Record<string, unknown>;
+    return (
+      typeof call.tool_slug === "string" &&
+      toolRequiresExplicitApproval(
+        toolName,
+        { ...route, toolName: call.tool_slug },
+        call.arguments && typeof call.arguments === "object" && !Array.isArray(call.arguments)
+          ? (call.arguments as Record<string, unknown>)
+          : undefined,
+      )
+    );
+  });
 }
 
 /** External webhook runs may inspect state unattended, but side effects always need the owner. */
