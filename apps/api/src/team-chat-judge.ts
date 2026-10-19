@@ -206,7 +206,7 @@ export class ModelTeamChatEngagementJudge implements TeamChatEngagementJudge {
     const requestedProvider = this.deps.providerOverride ?? bot.modelProvider;
     const requestedModel = this.deps.modelOverride ?? bot.modelId;
     const overrideCredential = requestedProvider
-      ? await findModelCredential(this.deps.prisma, scope, requestedProvider)
+      ? await findModelCredential(this.deps.prisma, scope, requestedProvider, requestedModel)
       : null;
     const explicitJudgeOverride = Boolean(this.deps.providerOverride && this.deps.modelOverride);
     const useOverride = Boolean(
