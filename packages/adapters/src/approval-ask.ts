@@ -10,15 +10,18 @@ import { nativeMemorySaveError } from "./memory-tools.js";
 
 const MAX_APPROVAL_SUMMARY_LENGTH = 500;
 const MAX_APPROVAL_DETAIL_LENGTH = 4_000;
+type CrmApprovalOperation = "crm_update_candidate_stage" | "crm_append_candidate_note";
 
 export function buildApprovalAskBlock(
   effectId: string,
   toolName: string,
   args: Record<string, unknown>,
   secrets: string[],
-  options?: { reviewReason?: string; oneTimeOnly?: boolean },
+  options?: { reviewReason?: string; oneTimeOnly?: boolean; crmOperation?: CrmApprovalOperation },
 ): Extract<MessageBlock, { kind: "ask" }> {
-  const recruitingApproval = toolName === "recruiting_request_approval";
+  const crmOperation = options?.crmOperation;
+  const oneTimeOnly = Boolean(crmOperation || options?.oneTimeOnly);
+  const recruitingApproval = !crmOperation && toolName === "recruiting_request_approval";
   const parsedPreference = RecruitingPreferenceFeedbackSchema.safeParse(
     toolName === "recruiting_feedback"
       ? args
@@ -43,6 +46,7 @@ export function buildApprovalAskBlock(
     options?.reviewReason,
     preference,
     nativeMemory,
+    crmOperation,
   );
   const safeDetail = detail ? redactSecrets(detail, secrets) : undefined;
   return {
@@ -50,20 +54,24 @@ export function buildApprovalAskBlock(
     approvalEffectId: effectId,
     text: truncate(
       redactSecrets(
-        toolName === "create_space" || recruitingApproval
-          ? `${summary}?`
-          : `Review before ${summary}`,
+        crmOperation === "crm_update_candidate_stage"
+          ? "Review CRM stage change"
+          : crmOperation === "crm_append_candidate_note"
+            ? "Review CRM note"
+            : toolName === "create_space" || recruitingApproval
+              ? `${summary}?`
+              : `Review before ${summary}`,
         secrets,
       ),
       MAX_APPROVAL_SUMMARY_LENGTH,
     ),
     detail:
-      safeDetail && !recruitingApproval && !preference && !nativeMemory && !options?.oneTimeOnly
+      safeDetail && !recruitingApproval && !preference && !nativeMemory && !oneTimeOnly
         ? truncate(safeDetail, MAX_APPROVAL_DETAIL_LENGTH)
         : safeDetail,
     status: "pending",
     actions:
-      toolName === "create_space"
+      !crmOperation && toolName === "create_space"
         ? [
             { id: "allow", label: "Create space", outcome: "created" },
             { id: "deny", label: "Cancel", outcome: "cancelled" },
@@ -78,7 +86,7 @@ export function buildApprovalAskBlock(
             ]
           : [
               { id: "allow", label: "Allow once" },
-              ...(options?.oneTimeOnly ? [] : [{ id: "always", label: "Always allow this tool" }]),
+              ...(oneTimeOnly ? [] : [{ id: "always", label: "Always allow this tool" }]),
               { id: "deny", label: "Deny" },
             ],
   };
@@ -121,10 +129,21 @@ function formatApprovalDetail(
   reviewReason?: string,
   preference?: RecruitingPreferenceFeedbackInput,
   nativeMemory = false,
+  crmOperation?: CrmApprovalOperation,
 ): string | undefined {
   const lines: string[] = [];
   if (reviewReason?.trim()) {
     lines.push(reviewReason.trim().replace(/\u2014|\u2013/g, "-"));
+  }
+  if (crmOperation) {
+    return [
+      `Candidate: ${args.candidateName}`,
+      `Role: ${args.roleTitle}`,
+      "",
+      crmOperation === "crm_append_candidate_note"
+        ? `Visible to organization members.\nNote to append:\n${args.note}`
+        : `Stage: ${args.currentStage ?? "None"} → ${args.newStage ?? "None"}`,
+    ].join("\n");
   }
   if (preference) {
     lines.push(

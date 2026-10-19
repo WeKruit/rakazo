@@ -148,6 +148,7 @@ import {
   RecruitingConflictError,
   RecruitingSourceValidationError,
   readHistory,
+  readNativeCrmWriteApproval,
   readNativeReplyEmailProof,
   recordUsage,
   recruitingResearchSnapshot,
@@ -5765,6 +5766,50 @@ export function createRunExecutor(deps: ExecutorDeps) {
             }
             let files: MessageBlock[] = [];
             let approvalArgs = args;
+            let crmOperation:
+              | "crm_update_candidate_stage"
+              | "crm_append_candidate_note"
+              | undefined;
+            const approvalRoute = connectorCall.route;
+            if (
+              approvalRoute?.connectorId === "mcp" &&
+              (approvalRoute.toolName === "crm_update_candidate_stage" ||
+                approvalRoute.toolName === "crm_append_candidate_note")
+            ) {
+              try {
+                if (!approvalRoute.resourceId || typeof approvalRoute.resourceRevision !== "number")
+                  throw new IsolationError();
+                approvalArgs = await readNativeCrmWriteApproval(
+                  deps.prisma,
+                  researchActor.actor,
+                  {
+                    runId,
+                    threadId: thread.id,
+                    botId: bot.id,
+                    leaseOwner: workerId,
+                    leaseFence: fence,
+                  },
+                  {
+                    route: {
+                      ...approvalRoute,
+                      resourceId: approvalRoute.resourceId,
+                      resourceRevision: approvalRoute.resourceRevision,
+                    },
+                    args,
+                  },
+                );
+                crmOperation = approvalRoute.toolName;
+              } catch (error) {
+                if (!(error instanceof IsolationError)) throw error;
+                const result = {
+                  error:
+                    "Read the candidate's current CRM pipeline with get_crm_candidate_review before requesting approval. Its verified candidate, canonical role and original snapshot must match this change.",
+                };
+                return (await completeEffect(deps, applied!.effect.id, "intended", result))
+                  ? result
+                  : uncertainEffectResult(name);
+              }
+            }
             if (replySelection)
               approvalArgs = {
                 ...args,
@@ -5830,6 +5875,7 @@ export function createRunExecutor(deps: ExecutorDeps) {
                   ? "Approve this draft content only. Sending still requires complete current pre-send checks."
                   : reviewReason,
                 oneTimeOnly: requiresExplicitApproval,
+                crmOperation,
               },
             );
             const paused = await deps.events.pauseRunForInput({

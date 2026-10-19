@@ -3,6 +3,50 @@ import { describe, expect, it } from "vitest";
 import { buildApprovalAskBlock } from "./approval-ask.js";
 
 describe("buildApprovalAskBlock", () => {
+  it.each(["crm_update_candidate_stage", "crm_append_candidate_note"] as const)(
+    "shows only the trusted CRM target and complete approved change for %s",
+    (tool) => {
+      const note = `  Exact factual note.\n${"Preserve this paragraph. ".repeat(230)}  `;
+      const args = {
+        candidateName: "Ada *Example*",
+        roleTitle: "Platform Engineer",
+        ...(tool === "crm_append_candidate_note"
+          ? { note }
+          : { currentStage: null, newStage: "Interview" }),
+        p_candidate: "internal-candidate-id",
+        p_expected_updated_at: "internal-cas-token",
+        p_expected_notes: "Unrelated old private notes",
+      };
+      const block = buildApprovalAskBlock("original-effect", tool, args, [], {
+        crmOperation: tool,
+      });
+      expect(block.text).toBe(
+        tool === "crm_append_candidate_note" ? "Review CRM note" : "Review CRM stage change",
+      );
+      expect(block.detail).toBe(
+        "Candidate: Ada *Example*\nRole: Platform Engineer\n\n" +
+          (tool === "crm_append_candidate_note"
+            ? `Visible to organization members.\nNote to append:\n${note}`
+            : "Stage: None → Interview"),
+      );
+      expect(block.detail).not.toMatch(/internal-|expected_|Unrelated|crm_/);
+      expect(block.approvalEffectId).toBe("original-effect");
+      expect(block.actions?.map((action) => action.id)).toEqual(["allow", "deny"]);
+      expect(args.p_expected_notes).toBe("Unrelated old private notes");
+    },
+  );
+  it("does not infer a CRM target from another tool's display name", () => {
+    const block = buildApprovalAskBlock(
+      "effect",
+      "crm_append_candidate_note",
+      { p_note: "Other tool content" },
+      [],
+    );
+    expect(block.text).toBe("Review before Crm append candidate note");
+    expect(block.detail).toBe("p_note: Other tool content");
+    expect(block.actions?.map((action) => action.id)).toEqual(["allow", "always", "deny"]);
+  });
+
   it.each(["recruiting_feedback", "remember", "save_memory", "save_shared_memory"])(
     "shows the exact recruiting preference and scope for %s without internal routing fields",
     (tool) => {

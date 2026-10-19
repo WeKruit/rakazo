@@ -9,7 +9,8 @@ import { MEMORY_REVISION_CONFLICT_ERROR } from "@rakazo/adapter-kit";
 import type { ActionApprovalRule } from "@rakazo/core";
 import { approvalEffectKey, toolEffectIdempotencyKey } from "@rakazo/core/node/approval-effect-key";
 import type * as DatabaseModule from "@rakazo/db";
-import { RecruitingConflictError } from "@rakazo/db";
+import type { PauseRunForInput } from "@rakazo/db";
+import { IsolationError, RecruitingConflictError } from "@rakazo/db";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { catalogExecuteToolName, isApprovalPausedResult } from "./approval-effect.js";
 import { MAX_SHARED_MEMORY_CHARS } from "./builtin-tools.js";
@@ -25,6 +26,7 @@ vi.mock("./recruiting-assessment.js", async (original) => ({
 }));
 const recruitingApproval = vi.hoisted(() => ({ prepare: vi.fn(), execute: vi.fn() }));
 const replyProof = vi.hoisted(() => vi.fn());
+const crmApprovalProof = vi.hoisted(() => vi.fn());
 const recruitingReply = vi.hoisted(() => ({ resolve: vi.fn(), admit: vi.fn(), claim: vi.fn() }));
 const recruitingCrm = vi.hoisted(() => ({
   read: vi.fn(),
@@ -37,6 +39,7 @@ const recruitingCrm = vi.hoisted(() => ({
 beforeEach(() => {
   for (const mock of Object.values(recruitingCrm)) mock.mockReset();
   for (const mock of Object.values(recruitingReply)) mock.mockReset();
+  crmApprovalProof.mockReset();
   replyProof.mockReset().mockImplementation(async () => ({
     effectId: "native-email-read",
     result: { structuredContent: replyAnchor },
@@ -53,6 +56,7 @@ vi.mock("@rakazo/db", async (importOriginal) => ({
   admitRecruitingCrmImport: recruitingCrm.admit,
   claimRecruitingCrmImport: recruitingCrm.claim,
   readNativeReplyEmailProof: replyProof,
+  readNativeCrmWriteApproval: crmApprovalProof,
   resolveRecruitingReply: recruitingReply.resolve,
   admitRecruitingReply: recruitingReply.admit,
   claimRecruitingReply: recruitingReply.claim,
@@ -300,7 +304,7 @@ function fixture({
     actionAutoReviewPreference: { findUnique: vi.fn(async () => ({ enabled: autoReview })) },
     externalEffect,
   };
-  const pauseRunForInput = vi.fn(async () => {
+  const pauseRunForInput = vi.fn(async (_input: PauseRunForInput) => {
     run.status = "waiting_input";
     return true;
   });
@@ -904,6 +908,104 @@ describe.each([
       );
     });
   }
+});
+
+describe.each([false, true])("verified CRM approval target, catalog=%s", (catalog) => {
+  it.each(["crm_update_candidate_stage", "crm_append_candidate_note"])(
+    "keeps the trusted %s card separate from the immutable write payload",
+    async (operation) => {
+      const note = `  Exact note.\n${"Keep complete content. ".repeat(230)}  `;
+      const args = {
+        p_org: "internal-org",
+        p_candidate: "internal-candidate",
+        p_role: "internal-role",
+        p_expected_updated_at: "exact-cas-token",
+        ...(operation === "crm_append_candidate_note"
+          ? { p_expected_notes: "Old private notes", p_note: note }
+          : { p_expected_stage: "Screening", p_stage: "Interview" }),
+      };
+      const route = {
+        connectorId: "mcp",
+        resourceId: "resource-1",
+        resourceRevision: 1,
+        toolName: operation,
+      };
+      const f = fixture({
+        name: "renamed_write",
+        catalog,
+        readOnly: true,
+        autoReview: true,
+        inputSchema: { type: "object" },
+        route,
+        rules: [{ effect: "always_allow", matchKind: "tool", matchValue: "renamed_write" }],
+      });
+      crmApprovalProof.mockResolvedValue({
+        candidateName: "Ada Example",
+        roleTitle: "Platform Engineer",
+        ...(operation === "crm_append_candidate_note"
+          ? { note }
+          : { currentStage: "Screening", newStage: "Interview" }),
+      });
+      f.setCalls([{ args, executionId: "crm-change" }]);
+      await f.run();
+      expect(crmApprovalProof).toHaveBeenCalledWith(
+        f.prisma,
+        expect.anything(),
+        expect.objectContaining({ runId: "run-1", threadId: "thread-1", botId: "bot-1" }),
+        { route, args },
+      );
+      expect(f.execute).not.toHaveBeenCalled();
+      const card = f.pauseRunForInput.mock.calls[0]?.[0].blocks[0];
+      if (card?.kind !== "ask") throw new Error("Expected the original approval card");
+      expect(card).toMatchObject({
+        approvalEffectId: f.effects[0]?.id,
+        text:
+          operation === "crm_append_candidate_note" ? "Review CRM note" : "Review CRM stage change",
+        actions: [
+          { id: "allow", label: "Allow once" },
+          { id: "deny", label: "Deny" },
+        ],
+      });
+      expect(card.detail).toContain("Candidate: Ada Example\nRole: Platform Engineer");
+      expect(card.detail).not.toMatch(/internal-|exact-cas-token|Old private|expected_|crm_/);
+      if (operation === "crm_append_candidate_note") expect(card.detail).toContain(note);
+      const request = structuredClone(f.effects[0]!.request);
+      f.effects[0]!.status = "approved";
+      f.setCalls([{ args: { p_note: "Changed after approval" }, executionId: "replay" }]);
+      await f.run();
+      expect(f.execute).toHaveBeenCalledOnce();
+      expect(f.execute.mock.calls[0]?.[0].args).toEqual(args);
+      expect(f.effects[0]!.request).toEqual(request);
+      expect(crmApprovalProof).toHaveBeenCalledOnce();
+    },
+  );
+  it("returns a corrective read result without an approval card when target proof is missing", async () => {
+    const f = fixture({
+      name: "renamed_write",
+      catalog,
+      readOnly: true,
+      inputSchema: { type: "object" },
+      route: {
+        connectorId: "mcp",
+        resourceId: "resource-1",
+        resourceRevision: 1,
+        toolName: "crm_append_candidate_note",
+      },
+    });
+    crmApprovalProof.mockRejectedValue(new IsolationError());
+    f.setCalls([
+      { args: { candidateName: "Model-supplied label", p_note: "New note" }, executionId: "write" },
+    ]);
+    await f.run();
+    expect(f.pauseRunForInput).not.toHaveBeenCalled();
+    expect(f.execute).not.toHaveBeenCalled();
+    expect(f.effects[0]).toMatchObject({
+      status: "completed",
+      result: {
+        error: expect.stringContaining("get_crm_candidate_review"),
+      },
+    });
+  });
 });
 
 describe.each([false, true])("native outbound draft approval, catalog=%s", (catalog) => {

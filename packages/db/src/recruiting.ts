@@ -6180,12 +6180,26 @@ async function nativeMcpReadProof(
     const marker = "__rakazoCatalogTool";
     const direct = boundDirectApprovalDetails(effect.request, marker);
     const catalog = catalogApprovalDetails(effect.request, marker);
+    const readArgs = direct?.args ?? catalog?.args.arguments;
+    // p_review verifies an additional audit receipt for the same pipeline read. A newer
+    // failed verification must block an older successful snapshot too.
+    const expectedArgs =
+      route.toolName === "get_crm_candidate_review" &&
+      readArgs &&
+      typeof readArgs === "object" &&
+      !Array.isArray(readArgs) &&
+      "p_review" in readArgs
+        ? { ...args, p_review: readArgs.p_review }
+        : args;
     const expected = direct
-      ? boundDirectApprovalRequest(route, args, marker)
+      ? boundDirectApprovalRequest(route, expectedArgs, marker)
       : catalog && ["connectors_execute_tool", "mcp_execute_tool"].includes(catalog.toolName)
         ? catalogApprovalRequest(
             catalog.toolName,
-            { id: `${route.resourceId}:${encodeURIComponent(route.toolName)}`, arguments: args },
+            {
+              id: `${route.resourceId}:${encodeURIComponent(route.toolName)}`,
+              arguments: expectedArgs,
+            },
             marker,
             route,
           )
@@ -6204,6 +6218,89 @@ async function nativeMcpReadProof(
     return { effectId: effect.id, result };
   }
   return null;
+}
+
+/** Display only a canonical CRM target read by this bot; the write keeps its original CAS payload. */
+export async function readNativeCrmWriteApproval(
+  prisma: PrismaClient,
+  actor: Actor,
+  trusted: ResearchLease & { threadId: string; botId: string },
+  input: {
+    route: { connectorId: string; resourceId: string; resourceRevision: number; toolName: string };
+    args: Record<string, unknown>;
+  },
+) {
+  const { route, args } = input;
+  const stage = route.toolName === "crm_update_candidate_stage";
+  if (
+    route.connectorId !== "mcp" ||
+    (!stage && route.toolName !== "crm_append_candidate_note") ||
+    !route.resourceId?.trim() ||
+    !Number.isSafeInteger(route.resourceRevision) ||
+    route.resourceRevision < 1 ||
+    ![args.p_org, args.p_candidate, args.p_role, args.p_expected_updated_at].every(
+      (value) => typeof value === "string" && value.trim(),
+    ) ||
+    (stage
+      ? ![args.p_expected_stage, args.p_stage].every(
+          (value) => value === null || typeof value === "string",
+        )
+      : (args.p_expected_notes !== null && typeof args.p_expected_notes !== "string") ||
+        typeof args.p_note !== "string" ||
+        !args.p_note.trim())
+  )
+    throw new IsolationError();
+  return prisma.$transaction(async (tx) => {
+    const { run } = await lockLiveRecruitingRun(tx, actor, trusted.runId);
+    requireResearchLease(run, trusted);
+    if (run.threadId !== trusted.threadId || run.botId !== trusted.botId)
+      throw new IsolationError();
+    await requireReplyAssignment(tx, actor, run, route.resourceId, route.resourceRevision, [
+      "get_crm_candidate_review",
+      route.toolName,
+    ]);
+    const proof = await nativeMcpReadProof(
+      tx,
+      actor,
+      run.id,
+      { ...route, toolName: "get_crm_candidate_review" },
+      { p_org: args.p_org, p_candidate: args.p_candidate },
+    );
+    const result = proof?.result;
+    const structured =
+      result && typeof result === "object" && !Array.isArray(result)
+        ? result.structuredContent
+        : null;
+    const row =
+      structured && typeof structured === "object" && !Array.isArray(structured)
+        ? structured.data
+        : null;
+    if (
+      !row ||
+      typeof row !== "object" ||
+      Array.isArray(row) ||
+      row.organization_id !== args.p_org ||
+      row.candidate_id !== args.p_candidate ||
+      row.role_spec_id !== args.p_role ||
+      row.updated_at !== args.p_expected_updated_at ||
+      ![row.candidate_full_name, row.canonical_role_title].every(
+        (value) =>
+          typeof value === "string" && value.trim() && !/[\p{Cc}\p{Cf}\p{Zl}\p{Zp}]/u.test(value),
+      ) ||
+      (stage ? row.stage !== args.p_expected_stage : row.notes !== args.p_expected_notes)
+    )
+      throw new IsolationError();
+    return {
+      candidateName: row.candidate_full_name as string,
+      roleTitle: row.canonical_role_title as string,
+      ...(stage
+        ? {
+            currentStage: args.p_expected_stage as string | null,
+            newStage: args.p_stage as string | null,
+          }
+        : { note: args.p_note as string }),
+    };
+  });
 }
 
 /** Retained native source identity only: this grants neither freshness nor send approval. */
