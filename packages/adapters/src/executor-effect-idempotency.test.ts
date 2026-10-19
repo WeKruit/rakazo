@@ -4570,6 +4570,145 @@ describe("native recruiting assessment effect delivery", () => {
     await f.run();
   });
 
+  it.each([
+    "allowed",
+    "missing",
+    "disabled",
+    "allowlist",
+    "revision",
+    "revoked-after-list",
+    "database-error",
+  ] as const)(
+    "reads an original MCP receipt only through current history authorization (%s)",
+    async (access) => {
+      const f = fixture("recover-receipt", ["fixture-secret"]);
+      const originalMessage = {
+        id: "earlier-request",
+        seq: 1,
+        role: "user",
+        runId: null,
+        replyToMessageId: null,
+        blocks: [{ kind: "text", text: "Continue the saved task" }],
+        createdAt: new Date("2026-01-01"),
+      };
+      const oldRun = {
+        id: "old-run",
+        botId: f.runData.botId,
+        sourceMessageId: originalMessage.id,
+        status: "failed",
+        createdAt: originalMessage.createdAt,
+        completedAt: originalMessage.createdAt,
+      };
+      const route = {
+        connectorId: "mcp",
+        resourceId: "server-1",
+        resourceRevision: 1,
+        toolName: "research",
+      };
+      const oldEffect = {
+        id: "old-receipt",
+        spaceId: f.runData.spaceId,
+        runId: oldRun.id,
+        kind: "mcp__connection__research",
+        idempotencyKey: "old-execution",
+        status: "completed",
+        createdAt: originalMessage.createdAt,
+        request: boundDirectApprovalRequest(
+          route,
+          { prompt: "Original private request" },
+          "__rakazoCatalogTool",
+        ),
+        result: {
+          task_id: "original-task",
+          prompt: "Provider-returned wording",
+          echo: "fixture-secret",
+          state: "working",
+        },
+      };
+      f.effects.push(oldEffect);
+      const original = structuredClone(f.effects);
+      f.prisma.$queryRaw.mockResolvedValue([originalMessage]);
+      f.prisma.run.findMany.mockResolvedValue([oldRun] as never);
+      f.prisma.externalEffect.findMany.mockImplementation(async ({ where } = {}) =>
+        where?.status === "completed" ? [oldEffect] : [],
+      );
+      const findFirst = vi.fn(async ({ select }) =>
+        select.result ? { result: oldEffect.result } : oldEffect,
+      );
+      Object.assign(f.prisma.externalEffect, { findFirst });
+      const databaseError = new Error("Unexpected assignment lookup failure");
+      let checks = 0;
+      const assignmentLookup = vi.fn(async () => {
+        checks++;
+        if (access === "database-error") throw databaseError;
+        if (
+          access === "missing" ||
+          access === "disabled" ||
+          (access === "revoked-after-list" && checks > 1)
+        )
+          return null;
+        return {
+          allowAllTools: false,
+          allowedTools: access === "allowlist" ? [] : ["research"],
+          server: { enabled: true, revision: access === "revision" ? 2 : 1 },
+        };
+      });
+      Object.assign(f.prisma, { botMcpServer: { findFirst: assignmentLookup } });
+      const base = { messageId: originalMessage.id, linkedRunId: oldRun.id };
+      f.runtimeRun.mockImplementation(async function* (request) {
+        if (access === "database-error") {
+          await expect(
+            request.executeTool!(
+              "read_history",
+              { ...base, effectId: oldEffect.id },
+              "read-receipt",
+            ),
+          ).rejects.toBe(databaseError);
+        } else {
+          const metadata = await request.executeTool!("read_history", base, "list-receipts");
+          expect(metadata).toMatchObject({ untrusted: true, receipt: null });
+          expect(JSON.stringify(metadata)).not.toContain("Original private request");
+          const result = await request.executeTool!(
+            "read_history",
+            { ...base, effectId: oldEffect.id },
+            "read-receipt",
+          );
+          if (access === "allowed") {
+            expect(result).toMatchObject({
+              untrusted: true,
+              receipt: { effectId: oldEffect.id, offsetUnit: "utf16" },
+            });
+            const text = (result as { receipt: { text: string } }).receipt.text;
+            expect(JSON.parse(text)).toMatchObject({
+              task_id: "original-task",
+              prompt: "Provider-returned wording",
+              state: "working",
+            });
+            expect(text).not.toContain("fixture-secret");
+          } else {
+            expect(result).toMatchObject({ receipt: null, runs: [{ effects: [] }] });
+            expect(findFirst.mock.calls.some(([query]) => query.select.result)).toBe(false);
+          }
+        }
+        yield { type: "done", text: "Done" };
+      });
+      await f.run();
+      expect(assignmentLookup).toHaveBeenCalledWith({
+        where: {
+          botId: f.runData.botId,
+          serverId: route.resourceId,
+          spaceId: f.runData.spaceId,
+          userId: f.runData.userId,
+          server: { enabled: true },
+        },
+        include: { server: true },
+      });
+      expect(f.connector.execute).not.toHaveBeenCalled();
+      expect(f.artifacts.get).not.toHaveBeenCalled();
+      expect(f.effects).toEqual(original);
+    },
+  );
+
   it("provides exact full-block selections for the current run's native answer on each rebuilt request", async () => {
     const runId = "resumed-native-answer";
     const answerText = ` \r\n${"证".repeat(44)}😀 `;

@@ -1,3 +1,4 @@
+import { boundDirectApprovalRequest, catalogApprovalRequest } from "@rakazo/core";
 import { describe, expect, it, vi } from "vitest";
 import type { Prisma, PrismaClient } from "./client.js";
 import { historyMessageText, readHistory, searchHistory } from "./history-retrieval.js";
@@ -30,9 +31,252 @@ function db() {
     $queryRaw: vi.fn(),
     run: { findMany: vi.fn().mockResolvedValue([]) },
     artifact: { findMany: vi.fn().mockResolvedValue([]) },
+    externalEffect: { findMany: vi.fn().mockResolvedValue([]), findFirst: vi.fn() },
   };
   return { mock, prisma: mock as unknown as PrismaClient };
 }
+describe("history MCP receipts", () => {
+  const route = {
+    connectorId: "mcp",
+    resourceId: "connection",
+    resourceRevision: 1,
+    toolName: "research",
+  };
+  const oldRun = {
+    id: "old-run",
+    botId: scope.botId,
+    sourceMessageId: "message-1",
+    status: "completed",
+    createdAt: new Date("2026-01-01"),
+    completedAt: new Date("2026-01-01"),
+  };
+  const request = boundDirectApprovalRequest(
+    route,
+    { prompt: "Private request must not be exposed" },
+    "__rakazoCatalogTool",
+  );
+  const effect = (id: string, storedRequest: unknown = request) => ({
+    id,
+    runId: oldRun.id,
+    kind: "mcp__connection__research",
+    status: "completed",
+    createdAt: oldRun.createdAt,
+    request: storedRequest,
+  });
+  function receiptDb() {
+    const f = db();
+    f.mock.$queryRaw.mockResolvedValue([row(1)]);
+    f.mock.run.findMany.mockResolvedValue([oldRun]);
+    return f;
+  }
+  it("does not scan effects or assignments during an ordinary history read", async () => {
+    const { mock, prisma } = receiptDb();
+    const authorize = vi.fn(async () => true);
+    await readHistory(prisma, scope, { messageId: "message-1" }, authorize);
+    expect(mock.externalEffect.findMany).not.toHaveBeenCalled();
+    expect(mock.externalEffect.findFirst).not.toHaveBeenCalled();
+    expect(authorize).not.toHaveBeenCalled();
+  });
+  it("lists bounded authorized metadata, never results or request arguments", async () => {
+    const { mock, prisma } = receiptDb();
+    mock.externalEffect.findMany.mockResolvedValue(
+      Array.from({ length: 6 }, (_, i) => effect(`effect-${i}`)),
+    );
+    const authorize = vi.fn(async () => true);
+    const result = await readHistory(
+      prisma,
+      scope,
+      { messageId: "message-1", linkedRunId: oldRun.id },
+      authorize,
+    );
+    expect(result.runs[0]!.effects.map((e) => e.effectId)).toEqual([
+      "effect-0",
+      "effect-1",
+      "effect-2",
+      "effect-3",
+      "effect-4",
+    ]);
+    expect(result.nextEffectId).toBe("effect-4");
+    expect(result.receipt).toBeNull();
+    expect(JSON.stringify(result)).not.toContain("Private request");
+    expect(mock.externalEffect.findFirst).not.toHaveBeenCalled();
+    expect(mock.externalEffect.findMany.mock.calls[0]![0]).toMatchObject({
+      where: {
+        spaceId: scope.spaceId,
+        status: "completed",
+        runId: { in: [oldRun.id] },
+        run: {
+          spaceId: scope.spaceId,
+          userId: scope.userId,
+          threadId: scope.threadId,
+          botId: scope.botId,
+        },
+      },
+      select: { id: true, request: true },
+    });
+    expect(mock.externalEffect.findMany.mock.calls[0]![0].select).not.toHaveProperty("result");
+    expect(authorize).toHaveBeenCalledWith(route);
+  });
+  it("authorizes a selected receipt before fetching its original result and pages UTF-16 exactly", async () => {
+    const { mock, prisma } = receiptDb();
+    mock.$queryRaw.mockResolvedValue([row(1), row(2)]);
+    const original = {
+      task_id: "original-task",
+      prompt: `Provider-returned text ${"😀证".repeat(4000)}`,
+    };
+    const text = JSON.stringify(original);
+    mock.externalEffect.findFirst.mockImplementation(async ({ select }) =>
+      select.result ? { result: original } : effect("selected"),
+    );
+    let allow!: () => void;
+    const allowed = new Promise<void>((resolve) => {
+      allow = resolve;
+    });
+    const authorize = vi.fn(async () => {
+      await allowed;
+      return true;
+    });
+    const base = { messageId: "message-1", linkedRunId: oldRun.id, effectId: "selected" };
+    const first = readHistory(prisma, scope, base, authorize);
+    await vi.waitFor(() => expect(authorize).toHaveBeenCalledOnce());
+    expect(mock.externalEffect.findFirst).toHaveBeenCalledOnce();
+    expect(mock.externalEffect.findFirst.mock.calls[0]![0].select).not.toHaveProperty("result");
+    allow();
+    let page = await first;
+    let joined = "";
+    for (;;) {
+      const receipt = page.receipt!;
+      expect(page.messages[0]!.textOffset).toBe(0);
+      expect(mock.run.findMany.mock.lastCall![0].where.OR[0]).toEqual({
+        sourceMessageId: { in: ["message-1", "message-2"] },
+      });
+      expect(receipt.offsetUnit).toBe("utf16");
+      expect(receipt.text).not.toMatch(/^[\uDC00-\uDFFF]|[\uD800-\uDBFF]$/);
+      expect(Buffer.byteLength(JSON.stringify(page))).toBeLessThanOrEqual(10000);
+      joined += receipt.text;
+      if (receipt.nextTextOffset === null) break;
+      expect(receipt.nextTextOffset).toBeGreaterThan(receipt.textOffset);
+      page = await readHistory(
+        prisma,
+        scope,
+        { ...base, textOffset: receipt.nextTextOffset },
+        authorize,
+      );
+    }
+    expect(joined).toBe(text);
+    expect(JSON.parse(joined).prompt).toBe(original.prompt);
+    expect(mock.externalEffect.findFirst.mock.calls[1]![0]).toMatchObject({
+      where: { id: "selected", AND: [{ request: { equals: request } }] },
+      select: { result: true },
+    });
+  });
+  it.each(["denied", "unbound", "secret", "other-connector", "other-bot", "unlinked"])(
+    "does not expose %s receipts",
+    async (failure) => {
+      const { mock, prisma } = receiptDb();
+      const denied =
+        failure === "unbound" || failure === "secret"
+          ? { ...effect("hidden"), kind: "request_secret", request: { password: "Hidden secret" } }
+          : failure === "other-connector"
+            ? effect(
+                "hidden",
+                boundDirectApprovalRequest(
+                  { ...route, connectorId: "other" },
+                  {},
+                  "__rakazoCatalogTool",
+                ),
+              )
+            : effect("hidden");
+      if (failure === "other-bot")
+        mock.run.findMany.mockResolvedValue([{ ...oldRun, botId: "other-bot" }]);
+      if (failure === "unlinked") mock.run.findMany.mockResolvedValue([]);
+      mock.externalEffect.findMany.mockResolvedValue([denied]);
+      mock.externalEffect.findFirst.mockResolvedValue(denied);
+      const authorize = vi.fn(async () => failure !== "denied");
+      const page = await readHistory(
+        prisma,
+        scope,
+        { messageId: "message-1", linkedRunId: oldRun.id, effectId: "hidden" },
+        authorize,
+      );
+      expect(page.receipt).toBeNull();
+      expect(page.runs.flatMap((run) => run.effects)).toEqual([]);
+      expect(mock.externalEffect.findFirst.mock.calls.some(([query]) => query.select.result)).toBe(
+        false,
+      );
+      if (failure !== "denied") expect(authorize).not.toHaveBeenCalled();
+    },
+  );
+  it("paginates past rejected routes without disclosing their cursor or metadata", async () => {
+    const { mock, prisma } = receiptDb();
+    const denied = boundDirectApprovalRequest(
+      { ...route, resourceId: "unassigned" },
+      {},
+      "__rakazoCatalogTool",
+    );
+    const catalog = catalogApprovalRequest(
+      "mcp_execute_tool",
+      { id: "connection:research", arguments: {} },
+      "__rakazoCatalogTool",
+      route,
+    );
+    mock.externalEffect.findMany
+      .mockResolvedValueOnce(Array.from({ length: 6 }, (_, i) => effect(`denied-${i}`, denied)))
+      .mockResolvedValueOnce(Array.from({ length: 6 }, (_, i) => effect(`allowed-${i}`, catalog)));
+    const page = await readHistory(
+      prisma,
+      scope,
+      { messageId: "message-1", linkedRunId: oldRun.id },
+      async (route) => route.resourceId === "connection",
+    );
+    expect(page.nextEffectId).toBe("allowed-4");
+    expect(page.runs[0]!.effects).toHaveLength(5);
+    expect(JSON.stringify(page)).not.toContain("denied-");
+    expect(mock.externalEffect.findMany.mock.calls[1]![0].where.id).toEqual({ gt: "denied-5" });
+  });
+  it("keeps missing anchors and receipt-store failures on their original paths", async () => {
+    const { mock, prisma } = receiptDb();
+    const authorize = vi.fn(async () => true);
+    mock.$queryRaw.mockResolvedValue([]);
+    expect(
+      (await readHistory(prisma, scope, { messageId: "foreign" }, authorize)).receipt,
+    ).toBeNull();
+    expect(mock.externalEffect.findMany).not.toHaveBeenCalled();
+    expect(authorize).not.toHaveBeenCalled();
+    mock.$queryRaw.mockResolvedValue([row(1)]);
+    const error = new Error("receipt store unavailable");
+    mock.externalEffect.findMany.mockRejectedValue(error);
+    await expect(
+      readHistory(prisma, scope, { messageId: "message-1", linkedRunId: oldRun.id }, authorize),
+    ).rejects.toBe(error);
+  });
+  it("rejects an exhausted byte budget rather than return a stalled Unicode cursor", async () => {
+    const { mock, prisma } = receiptDb();
+    mock.$queryRaw.mockResolvedValue([row(1, "")]);
+    mock.externalEffect.findFirst.mockImplementation(async ({ select }) =>
+      select.result ? { result: "😀" } : effect("selected"),
+    );
+    const artifact = {
+      id: "artifact",
+      runId: oldRun.id,
+      name: "",
+      mimeType: "text/plain",
+      size: 1,
+    };
+    mock.artifact.findMany.mockResolvedValue([artifact]);
+    const input = {
+      messageId: "message-1",
+      linkedRunId: oldRun.id,
+      effectId: "selected",
+      textOffset: 1,
+    };
+    const initial = await readHistory(prisma, scope, input, async () => true);
+    artifact.name = "a".repeat(10000 - Buffer.byteLength(JSON.stringify(initial)) + 1);
+    await expect(readHistory(prisma, scope, input, async () => true)).rejects.toThrow(
+      "History metadata exceeds response budget",
+    );
+  });
+});
 function sql(mock: ReturnType<typeof db>["mock"], call = 0) {
   return mock.$queryRaw.mock.calls[call]![0] as Prisma.Sql;
 }

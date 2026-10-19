@@ -1,5 +1,21 @@
 import { describe, expect, it } from "vitest";
-import { HistorySearchInputSchema } from "./history.js";
+import { HistoryReadInputSchema, HistorySearchInputSchema } from "./history.js";
+
+it("binds receipt selection and pagination to one linked run", () => {
+  const base = { messageId: "message", linkedRunId: "run" };
+  expect(
+    HistoryReadInputSchema.parse({ ...base, effectId: "effect", textOffset: 2000 }),
+  ).toMatchObject({ effectId: "effect", textOffset: 2000 });
+  expect(HistoryReadInputSchema.parse({ ...base, effectAfterId: "effect" })).toMatchObject({
+    effectAfterId: "effect",
+  });
+  for (const input of [
+    { messageId: "message", effectId: "effect" },
+    { messageId: "message", effectAfterId: "effect" },
+    { ...base, effectId: "effect", effectAfterId: "other" },
+  ])
+    expect(HistoryReadInputSchema.safeParse(input).success).toBe(false);
+});
 
 describe("history date boundaries", () => {
   it.each([

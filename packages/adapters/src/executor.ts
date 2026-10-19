@@ -299,6 +299,7 @@ import {
   CATALOG_EXECUTE,
   uniquifyInstalledToolName,
 } from "./lazy-tool-catalog.js";
+import { requireMcpToolAssignment } from "./mcp-connector.js";
 import {
   buildMcpCredentialBlob,
   needsOAuthProbe,
@@ -7289,7 +7290,20 @@ export function createRunExecutor(deps: ExecutorDeps) {
             const response =
               name === "search_history"
                 ? await searchHistory(deps.prisma, scope, HistorySearchInputSchema.parse(args))
-                : await readHistory(deps.prisma, scope, HistoryReadInputSchema.parse(args));
+                : await readHistory(
+                    deps.prisma,
+                    scope,
+                    HistoryReadInputSchema.parse(args),
+                    async (route) => {
+                      try {
+                        await requireMcpToolAssignment(deps.prisma, context, route, route.toolName);
+                        return true;
+                      } catch (error) {
+                        if (error instanceof IsolationError) return false;
+                        throw error;
+                      }
+                    },
+                  );
             const redacted = redactConnectorPayload(response, runSecrets);
             // Redaction can expand short synthetic credentials; never let Pi clip the JSON.
             if (Buffer.byteLength(JSON.stringify(redacted), "utf8") > 11_000) {

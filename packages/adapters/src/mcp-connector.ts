@@ -10,6 +10,7 @@ import type {
 import { SecretStoreUnavailableError } from "@rakazo/adapter-kit";
 import { isLocalMcpHost } from "@rakazo/contracts";
 import type { McpServer, PrismaClient, ThreadEvents } from "@rakazo/db";
+import { IsolationError } from "@rakazo/db";
 import { getLogger } from "@rakazo/logging";
 import { catalogToolPrefix } from "./approval-effect.js";
 import { redactConnectorPayload, sanitizeConnectorError } from "./connector-safety.js";
@@ -90,7 +91,8 @@ export async function requireMcpToolAssignment(
   route: Pick<ConnectorRoute, "resourceId" | "resourceRevision">,
   toolName: string,
 ) {
-  if (!context.botId || !route.resourceId) throw new Error("MCP tools require a bot context");
+  if (!context.botId || !route.resourceId)
+    throw new IsolationError("MCP tools require a bot context");
   const assignment = await prisma.botMcpServer.findFirst({
     where: {
       botId: context.botId,
@@ -106,9 +108,9 @@ export async function requireMcpToolAssignment(
     (!assignment.allowAllTools &&
       (!Array.isArray(assignment.allowedTools) || !assignment.allowedTools.includes(toolName)))
   )
-    throw new Error("MCP tool is not assigned to this bot");
+    throw new IsolationError("MCP tool is not assigned to this bot");
   if (route.resourceRevision !== assignment.server.revision)
-    throw new Error("MCP server changed; rediscover the tool before trying again");
+    throw new IsolationError("MCP server changed; rediscover the tool before trying again");
   return assignment;
 }
 

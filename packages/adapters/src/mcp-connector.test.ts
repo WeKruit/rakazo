@@ -1,7 +1,8 @@
+import { IsolationError } from "@rakazo/db";
 import { createLogger, createTestSink, getLogger, installLogger } from "@rakazo/logging";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { InfisicalSecretStore } from "./infisical-secret-store.js";
-import { allowlistDrift, McpConnector } from "./mcp-connector.js";
+import { allowlistDrift, McpConnector, requireMcpToolAssignment } from "./mcp-connector.js";
 import { type McpOAuthBroker, StoredMcpOAuthProvider } from "./mcp-oauth.js";
 import { InMemoryRealtimeFanout } from "./realtime.js";
 import { migrateSecrets } from "./secret-migration.js";
@@ -30,6 +31,47 @@ const ASSIGNMENT = {
   allowedTools: [],
   server: SERVER,
 };
+
+describe("MCP assignment denial identity", () => {
+  it.each(["context", "assignment", "revision"])(
+    "classifies %s denial without changing its message",
+    async (failure) => {
+      const findFirst = vi.fn(async () => (failure === "assignment" ? null : ASSIGNMENT));
+      const context = {
+        spaceId: "w1",
+        userId: "u1",
+        ...(failure === "context" ? {} : { botId: "bot-1" }),
+      };
+      await expect(
+        requireMcpToolAssignment(
+          { botMcpServer: { findFirst } } as never,
+          context as never,
+          { resourceId: SERVER.id, resourceRevision: failure === "revision" ? 2 : 1 },
+          "tool",
+        ),
+      ).rejects.toMatchObject({
+        name: "IsolationError",
+        message:
+          failure === "context"
+            ? "MCP tools require a bot context"
+            : failure === "assignment"
+              ? "MCP tool is not assigned to this bot"
+              : "MCP server changed; rediscover the tool before trying again",
+      });
+    },
+  );
+  it("preserves an unexpected lookup failure by identity", async () => {
+    const error = new Error("Database unavailable");
+    const failure = requireMcpToolAssignment(
+      { botMcpServer: { findFirst: vi.fn().mockRejectedValue(error) } } as never,
+      { botId: "bot-1" } as never,
+      { resourceId: SERVER.id, resourceRevision: 1 },
+      "tool",
+    );
+    await expect(failure).rejects.toBe(error);
+    expect(error).not.toBeInstanceOf(IsolationError);
+  });
+});
 
 const TEST_NETWORK = {
   // Read the global per call so a fetch stubbed after construction still wins.
