@@ -51,7 +51,7 @@ msgstr "{0} {unitLabel}"
 
 #. placeholder {0}: candidatePage.total
 #: src/pages/RecruitingPanel.tsx
-msgid "{0} candidates"
+msgid "{0, plural, =1 {# candidate} other {# candidates}}"
 msgstr ""
 
 #. placeholder {0}: block.name

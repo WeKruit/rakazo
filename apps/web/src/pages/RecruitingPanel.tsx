@@ -1,4 +1,4 @@
-import { Trans, useLingui } from "@lingui/react/macro";
+import { Plural, Trans, useLingui } from "@lingui/react/macro";
 import { ORPCError } from "@orpc/client";
 import type {
   Artifact,
@@ -3188,7 +3188,7 @@ function RecruitingWorkspace({
                 {candidatePage ? (
                   <>
                     <p className="text-xs text-muted-foreground">
-                      <Trans>{candidatePage.total} candidates</Trans>
+                      <Plural value={candidatePage.total} _1="# candidate" other="# candidates" />
                     </p>
                     {candidatePage.crmTarget ? (
                       <p className="text-xs text-muted-foreground">

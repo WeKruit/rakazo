@@ -61,6 +61,35 @@ describe("lingui catalogs", () => {
     }
   });
 
+  it("compiles candidate counts with English fallback grammar in every locale", async () => {
+    const config = getConfig({
+      configPath: fileURLToPath(new URL("../../lingui.config.ts", import.meta.url)),
+    });
+    const [catalog] = await getCatalogs(config);
+    const source = await catalog!.read("en");
+    const candidateCountId = Object.entries(source ?? {}).find(
+      ([, entry]) =>
+        entry.origin?.some(([path]) => path === "src/pages/RecruitingPanel.tsx") &&
+        entry.message?.includes("# candidate"),
+    )?.[0];
+    expect(candidateCountId).toBeDefined();
+    for (const locale of config.locales) {
+      const { messages } = await catalog!.getTranslations(locale, config);
+      const compiled = createCompiledCatalog(
+        locale,
+        { [candidateCountId!]: messages[candidateCountId!]! },
+        { namespace: "json", strict: true },
+      );
+      expect(compiled.errors).toEqual([]);
+      i18n.load(locale, JSON.parse(compiled.source).messages);
+      i18n.activate(locale);
+      for (const count of [0, 1, 2])
+        expect(i18n._({ id: candidateCountId!, values: { 0: count } }), `${locale}: ${count}`).toBe(
+          `${count} candidate${count === 1 ? "" : "s"}`,
+        );
+    }
+  });
+
   it("falls back to the English source message when a translation is missing", () => {
     i18n.load("de", {});
     i18n.activate("de");

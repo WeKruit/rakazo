@@ -57,6 +57,8 @@ vi.mock("../lib/rpc", () => ({
 }));
 vi.mock("@lingui/react/macro", () => ({
   Trans: ({ children }: { children: ReactNode }) => children,
+  Plural: ({ _1, other, value }: { _1: string; other: string; value: number }) =>
+    (value === 1 ? _1 : other).replace("#", String(value)),
   useLingui: () => ({
     t: (parts: TemplateStringsArray, ...values: unknown[]) =>
       parts.reduce((text, part, index) => text + part + (values[index] ?? ""), ""),
@@ -2257,6 +2259,9 @@ it("shows unnamed candidates and real profile links without exposing their stora
   });
   const view = await mounted("thread-1", undefined, false);
   await view.click("Evidence");
+  expect(
+    [...view.container.querySelectorAll("p")].some((item) => item.textContent === "1 candidate"),
+  ).toBe(true);
   await view.click("Unnamed candidate");
   expect(view.container.querySelector(`a[href="${candidate.linkedinUrl}"]`)).not.toBeNull();
   expect(view.container.textContent).toContain("Research findings");

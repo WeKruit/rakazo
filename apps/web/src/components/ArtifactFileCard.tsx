@@ -20,8 +20,13 @@ type ArtifactFileCardProps = {
   size: number;
 };
 
-const PREVIEWABLE_MIME_TYPES = new Set(["text/markdown", "text/html", "application/pdf"]);
-const TEXT_MIME_TYPES = new Set(["text/markdown", "text/html"]);
+const PREVIEWABLE_MIME_TYPES = new Set([
+  "text/markdown",
+  "text/html",
+  "text/csv",
+  "application/pdf",
+]);
+const TEXT_MIME_TYPES = new Set(["text/markdown", "text/html", "text/csv"]);
 
 export function ArtifactFileCard(props: ArtifactFileCardProps) {
   const { t } = useLingui();
@@ -211,6 +216,10 @@ function FilePreview({
           <SandboxedHtmlViewer html={state.text} title={name} />
         ) : mimeType === "application/pdf" ? (
           <PdfViewer bytes={state.bytes} title={name} />
+        ) : mimeType === "text/csv" && state.text !== undefined ? (
+          <pre className="whitespace-pre-wrap break-words p-5 font-mono text-sm text-foreground">
+            {state.text}
+          </pre>
         ) : state.text !== undefined ? (
           <article className="mx-auto w-full max-w-[760px] px-8 py-10 text-[16px] leading-7 text-foreground sm:px-12 sm:py-12">
             <ChatMarkdown>{state.text}</ChatMarkdown>
