@@ -15,6 +15,7 @@ import {
   RecruitingResearchToolInputSchema,
   RecruitingRoleToolInputSchema,
   RecruitingShortlistToolInputSchema,
+  ScheduleUpdateToolInputSchema,
   SecretAskPurpose,
   SecretHttpRequest,
   TICKET_PRIORITIES,
@@ -996,6 +997,13 @@ export const builtinAgentTools: ConnectorTool[] = [
     name: "schedule_list",
     description: "List this bot's active and inactive schedules (routines).",
     inputSchema: { type: "object", properties: {} },
+  },
+  {
+    name: "schedule_update",
+    description:
+      "Edit, pause or resume one of this bot's existing routines using its exact routineId from schedule_list. In a group, only routines for this group are available. Supply only fields to change: name, prompt, crons, timezone, active or notify. Editing a paused routine leaves it paused unless active:true is explicit. Resume an unarmed, never-run one-shot with active:true and a future ISO runAt; a completed one-shot cannot run again. Keep the same routine and destination; this updates a bot routine, not a calendar event.",
+    inputSchema: z.toJSONSchema(ScheduleUpdateToolInputSchema, { io: "input" }),
+    readOnly: false,
   },
   {
     name: "schedule_cancel",

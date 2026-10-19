@@ -84,6 +84,7 @@ import {
   mapScratchpadItem,
   modelCredentialAuthKindsForSpace,
   modelCredentialDto,
+  nextRoutineDate as nextScheduleDate,
   normalizeSecretDestination,
   PushSessionEndedError,
   parseModelSecret,
@@ -98,6 +99,7 @@ import {
   probeOpenAiCompatibleModels,
   provisionComputer,
   queueComputerUpdate,
+  RoutineUpdateError,
   releaseComputerExecutionLease,
   replaceComputer,
   resolveAutoReviewChecker,
@@ -119,6 +121,7 @@ import {
   toComputerRef,
   touchRunningComputer,
   UNAVAILABLE_MODEL_FOR_AUTH_MESSAGE,
+  updateRoutine,
   updateTicket,
   validateConnectedModelChoice,
   validateModelAuthAvailability,
@@ -161,7 +164,6 @@ import {
   expandSkillReferencesInPrompt,
   hasMixedOneShotSchedule,
   isOneShotRoutineCrons,
-  nextCronDateAcrossStrict,
   resolveGroupTargetBotIds,
 } from "@rakazo/core";
 import type { BoardEvents, Board as BoardRow, PrismaClient, ThreadEvents } from "@rakazo/db";
@@ -3498,194 +3500,17 @@ export function createRouter(deps: RouterDeps) {
         return mapRoutine(row);
       }),
       update: authed.routines.update.handler(async ({ context, input }) => {
-        // Archived bots keep their routines paused, so resolve an active parent before any write.
-        const existing = await deps.prisma.routine.findFirst({
-          where: {
-            id: input.routineId,
-            spaceId: context.actor.spaceId,
-            userId: context.actor.userId,
-            bot: { archivedAt: null },
-          },
-        });
-        if (!existing) throw new ORPCError("NOT_FOUND");
-        const bot = await repos.getBot(context.actor, existing.botId);
-        const active = input.active ?? existing.active;
-        const crons = input.crons ?? existing.crons;
-        const timezone = input.timezone ?? existing.timezone;
-        const webhookEnabled = input.webhookEnabled ?? existing.webhookEnabled;
-        const githubEnabled = input.githubEnabled ?? existing.githubEnabled;
-        const messageProvider =
-          input.messageProvider === undefined ? existing.messageProvider : input.messageProvider;
-        const modelProvider =
-          input.modelProvider === undefined ? existing.modelProvider : input.modelProvider;
-        const modelId = input.modelId === undefined ? existing.modelId : input.modelId;
-        const hasModel = Boolean(modelProvider && modelId);
-        const modelChanged =
-          modelProvider !== existing.modelProvider || modelId !== existing.modelId;
-        const touchesModel =
-          input.modelProvider !== undefined ||
-          input.modelId !== undefined ||
-          input.thinkingLevel !== undefined;
-        if (Boolean(modelProvider) !== Boolean(modelId)) {
-          throw new ORPCError("BAD_REQUEST", {
-            message: "Model provider and model id must both be set or both cleared",
-          });
+        try {
+          return mapRoutine(
+            await updateRoutine(deps, context.actor, input, {
+              assertModel: (model) => assertRoutineModel(context.actor, model),
+            }),
+          );
+        } catch (error) {
+          if (error instanceof RoutineUpdateError)
+            throw new ORPCError(error.code, { message: error.message || undefined });
+          throw error;
         }
-        if (input.thinkingLevel && !hasModel) {
-          throw new ORPCError("BAD_REQUEST", { message: "Pick a model for this routine first" });
-        }
-        // A thinking level belongs to a model, so changing the model resets it.
-        const thinkingLevel = !hasModel
-          ? null
-          : input.thinkingLevel === undefined
-            ? modelChanged
-              ? null
-              : existing.thinkingLevel
-            : input.thinkingLevel;
-        if (modelChanged || input.thinkingLevel) {
-          await assertRoutineModel(context.actor, { modelProvider, modelId, thinkingLevel });
-        }
-        if (crons.length === 0 && !webhookEnabled && !githubEnabled && !messageProvider) {
-          throw new ORPCError("BAD_REQUEST", {
-            message: "Add a schedule, webhook, GitHub, or message trigger",
-          });
-        }
-        if (hasMixedOneShotSchedule(crons)) {
-          throw new ORPCError("BAD_REQUEST", {
-            message: "A one-time schedule can't be combined with other schedules.",
-          });
-        }
-        if (active && isOneShotRoutineCrons(crons)) {
-          if (!isOneShotRoutineCrons(existing.crons)) {
-            throw new ORPCError("BAD_REQUEST", {
-              message: "One-shot schedules must be created from chat.",
-            });
-          }
-          if (existing.lastRunAt) {
-            throw new ORPCError("BAD_REQUEST", {
-              message: "This one-shot already ran.",
-            });
-          }
-        }
-        const activeChanged = active !== existing.active;
-        const cronsChanged =
-          input.crons !== undefined &&
-          JSON.stringify(input.crons) !== JSON.stringify(existing.crons);
-        const timezoneChanged =
-          input.timezone !== undefined && input.timezone !== existing.timezone;
-        const scheduleChanged = (!existing.active && active) || cronsChanged || timezoneChanged;
-        const recalculatedNextRunAt =
-          crons.length > 0 &&
-          !isOneShotRoutineCrons(crons) &&
-          (scheduleChanged || (active && !existing.nextRunAt))
-            ? nextRoutineDate(crons, timezone)
-            : null;
-        let armedOneShotAt: Date | null = null;
-        if (active && isOneShotRoutineCrons(crons) && !existing.nextRunAt && !existing.lastRunAt) {
-          if (!input.runAt) {
-            throw new ORPCError("BAD_REQUEST", {
-              message: "Add a run time for this one-shot.",
-            });
-          }
-          const parsed = new Date(input.runAt);
-          if (!Number.isFinite(parsed.getTime()) || parsed.getTime() <= Date.now()) {
-            throw new ORPCError("BAD_REQUEST", {
-              message: "Run time must be in the future.",
-            });
-          }
-          armedOneShotAt = parsed;
-        } else if (input.runAt !== undefined) {
-          throw new ORPCError("BAD_REQUEST", {
-            message: "A run time is only for one-shots that have not run yet.",
-          });
-        }
-        const nextRunAt = !active
-          ? null
-          : crons.length === 0
-            ? null
-            : isOneShotRoutineCrons(crons)
-              ? (armedOneShotAt ?? existing.nextRunAt)
-              : (recalculatedNextRunAt ?? existing.nextRunAt);
-        const changesSchedule = activeChanged || scheduleChanged || armedOneShotAt !== null;
-        // Re-check the parent in the write itself so an archive that lands after the read wins.
-        // Model patches must also match the snapshot used to resolve omitted model fields.
-        const row = await deps.prisma.routine
-          .update({
-            where: {
-              id: existing.id,
-              bot: { archivedAt: null },
-              ...(changesSchedule
-                ? {
-                    active: existing.active,
-                    crons: { equals: existing.crons },
-                    timezone: existing.timezone,
-                    nextRunAt: existing.nextRunAt,
-                    lastRunAt: existing.lastRunAt,
-                  }
-                : {}),
-              ...(touchesModel
-                ? {
-                    modelProvider: existing.modelProvider,
-                    modelId: existing.modelId,
-                    thinkingLevel: existing.thinkingLevel,
-                  }
-                : {}),
-            },
-            data: {
-              name: input.name,
-              prompt: input.prompt,
-              ...(cronsChanged ? { crons } : {}),
-              ...(timezoneChanged ? { timezone } : {}),
-              ...(activeChanged ? { active } : {}),
-              notify: input.notify,
-              webhookEnabled: input.webhookEnabled,
-              githubEnabled: input.githubEnabled,
-              messageProvider: input.messageProvider,
-              ...(touchesModel ? { modelProvider, modelId, thinkingLevel } : {}),
-              ...(changesSchedule ? { nextRunAt } : {}),
-            },
-          })
-          .catch(async (error: unknown) => {
-            if (isRecordNotFound(error)) {
-              if (
-                (touchesModel || changesSchedule) &&
-                (await deps.prisma.routine.findFirst({
-                  where: {
-                    id: existing.id,
-                    spaceId: context.actor.spaceId,
-                    userId: context.actor.userId,
-                    bot: { archivedAt: null },
-                  },
-                  select: { id: true },
-                }))
-              ) {
-                throw new ORPCError("CONFLICT", { message: "Routine changed; retry." });
-              }
-              throw new ORPCError("NOT_FOUND");
-            }
-            throw error;
-          });
-        if (bot.thread) {
-          await deps.events.append({
-            spaceId: context.actor.spaceId,
-            threadId: bot.thread.id,
-            botId: bot.id,
-            type: "routine.updated",
-            payload: { routineId: row.id, active: row.active },
-          });
-        }
-        const scheduleNeedsSync =
-          existing.active !== row.active ||
-          scheduleChanged ||
-          (!existing.nextRunAt && !!row.nextRunAt);
-        if (scheduleNeedsSync) {
-          if (row.active && row.nextRunAt) {
-            await deps.jobs.enqueue(routineWakeupJob(row.id, row.nextRunAt));
-          } else {
-            await deps.jobs.cancel(routineJobKey(row.id));
-          }
-        }
-        return mapRoutine(row);
       }),
       remove: authed.routines.remove.handler(async ({ context, input }) => {
         const existing = await deps.prisma.routine.findFirst({
@@ -7039,14 +6864,11 @@ function throwIfAborted(signal?: AbortSignal) {
 }
 
 function nextRoutineDate(crons: string[], timezone: string): Date {
-  let next: Date | null;
   try {
-    next = nextCronDateAcrossStrict(crons, new Date(), timezone);
+    return nextScheduleDate(crons, timezone);
   } catch {
     throw new ORPCError("BAD_REQUEST", { message: "Enter a valid cron expression." });
   }
-  if (!next) throw new ORPCError("BAD_REQUEST", { message: "Enter a valid cron expression." });
-  return next;
 }
 
 function mapRoutine(row: {
@@ -7192,10 +7014,6 @@ async function messagingIdentityDto(
 
 function isUniqueViolation(error: unknown): boolean {
   return Boolean(error && typeof error === "object" && "code" in error && error.code === "P2002");
-}
-
-function isRecordNotFound(error: unknown): boolean {
-  return Boolean(error && typeof error === "object" && "code" in error && error.code === "P2025");
 }
 
 function messagingChannelDto(membership: {

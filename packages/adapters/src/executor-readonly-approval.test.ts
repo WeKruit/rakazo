@@ -18,6 +18,7 @@ import type * as ComputerLifecycleModule from "./computer-lifecycle.js";
 import { createRunExecutor, selectBuiltinToolsForRun } from "./executor.js";
 import { catalogEntries, resolveCatalogCall } from "./lazy-tool-catalog.js";
 import type * as RecruitingAssessmentModule from "./recruiting-assessment.js";
+import type * as ScheduleToolsModule from "./schedule-tools.js";
 
 const candidateReads = vi.hoisted(() => vi.fn());
 vi.mock("./recruiting-assessment.js", async (original) => ({
@@ -28,6 +29,11 @@ const recruitingApproval = vi.hoisted(() => ({ prepare: vi.fn(), execute: vi.fn(
 const replyProof = vi.hoisted(() => vi.fn());
 const crmApprovalProof = vi.hoisted(() => vi.fn());
 const nativeShortlist = vi.hoisted(() => ({ prepare: vi.fn(), execute: vi.fn() }));
+const scheduleUpdate = vi.hoisted(() => vi.fn());
+vi.mock("./schedule-tools.js", async (original) => ({
+  ...(await original<typeof ScheduleToolsModule>()),
+  updateScheduleFromTool: scheduleUpdate,
+}));
 const recruitingReply = vi.hoisted(() => ({ resolve: vi.fn(), admit: vi.fn(), claim: vi.fn() }));
 const recruitingCrm = vi.hoisted(() => ({
   read: vi.fn(),
@@ -43,6 +49,7 @@ beforeEach(() => {
   crmApprovalProof.mockReset();
   nativeShortlist.prepare.mockReset();
   nativeShortlist.execute.mockReset();
+  scheduleUpdate.mockReset();
   replyProof.mockReset().mockImplementation(async () => ({
     effectId: "native-email-read",
     result: { structuredContent: replyAnchor },
@@ -561,6 +568,70 @@ describe("native saved candidate reads", () => {
     expect(f.results).toEqual([{ error: "This tool is disabled for this bot." }]);
     expect(candidateReads).not.toHaveBeenCalled();
     expect(f.effects).toEqual([]);
+  });
+});
+
+describe("native schedule update uncertainty", () => {
+  it("uses current runtime identity and respects native replay and disable policy", async () => {
+    const f = fixture({ name: "schedule_update", builtin: true });
+    const args = { routineId: "routine", active: false };
+    const saved = { ok: true, routineId: "routine", active: false };
+    scheduleUpdate.mockResolvedValue(saved);
+    f.setCalls([{ args, executionId: "pause" }]);
+    await f.run();
+    expect(scheduleUpdate).toHaveBeenCalledWith(
+      expect.anything(),
+      expect.objectContaining({
+        actor: expect.objectContaining({ spaceId: "space-1", userId: "user-1" }),
+        botId: "bot-1",
+        threadId: "thread-1",
+        groupId: null,
+        runId: "run-1",
+        leaseOwner: "worker-1",
+        leaseFence: 1,
+      }),
+      args,
+    );
+    expect(f.results.at(-1)).toEqual(saved);
+    expect(f.pauseRunForInput).not.toHaveBeenCalled();
+    await f.run();
+    expect(scheduleUpdate).toHaveBeenCalledOnce();
+    expect(f.effects).toHaveLength(1);
+    const disabled = fixture({
+      name: "schedule_update",
+      builtin: true,
+      disabledBuiltinTools: ["schedule_update"],
+    });
+    await disabled.run();
+    expect(scheduleUpdate).toHaveBeenCalledOnce();
+    expect(disabled.effects).toEqual([]);
+  });
+
+  it("does not repeat a schedule update after an unknown local-commit/job-sync outcome", async () => {
+    const f = fixture({ name: "schedule_update", builtin: true });
+    const args = {
+      routineId: "routine",
+      active: true,
+      runAt: new Date(Date.now() + 60_000).toISOString(),
+    };
+    const interrupted = {
+      id: "interrupted-update",
+      spaceId: "space-1",
+      runId: "run-1",
+      kind: "schedule_update",
+      idempotencyKey: toolEffectIdempotencyKey("run-1", "schedule_update", args),
+      status: "executing",
+      request: args,
+    };
+    f.effects.push(interrupted);
+    f.setCalls([{ args, executionId: "recovery" }]);
+    await f.run();
+    expect(f.results.at(-1)).toMatchObject({ uncertain: true });
+    expect(f.effects).toHaveLength(1);
+    expect(interrupted.status).toBe("uncertain");
+    expect(f.execute).not.toHaveBeenCalled();
+    expect(f.pauseRunForInput).not.toHaveBeenCalled();
+    expect(scheduleUpdate).not.toHaveBeenCalled();
   });
 });
 

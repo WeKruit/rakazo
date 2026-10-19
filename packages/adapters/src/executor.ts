@@ -402,6 +402,7 @@ import {
   filterBuiltinToolsForRun,
   filterBuiltinToolsForThread,
   listSchedulesFromTool,
+  updateScheduleFromTool,
 } from "./schedule-tools.js";
 import { loadAgentScratchpadContext } from "./scratchpad-context.js";
 import {
@@ -7144,6 +7145,23 @@ export function createRunExecutor(deps: ExecutorDeps) {
               ...(thread.groupId ? { threadId: thread.id } : {}),
             });
           }
+          if (name === "schedule_update") {
+            return finish(
+              await updateScheduleFromTool(
+                deps,
+                {
+                  actor: researchActor.actor,
+                  botId: bot.id,
+                  threadId: thread.id,
+                  groupId: thread.groupId,
+                  runId,
+                  leaseOwner: workerId,
+                  leaseFence: fence,
+                },
+                args,
+              ),
+            );
+          }
           if (name === "schedule_cancel") {
             const cancelled = await cancelScheduleFromTool(deps, {
               spaceId: run.spaceId,
@@ -9644,8 +9662,8 @@ function scratchpadClause(disabled?: ReadonlySet<string>): string | undefined {
     builtinOffered(disabled, name),
   );
   if (pads.length === 0) return undefined;
-  const schedules = ["schedule_create", "schedule_list", "schedule_cancel"].some((name) =>
-    builtinOffered(disabled, name),
+  const schedules = ["schedule_create", "schedule_list", "schedule_update", "schedule_cancel"].some(
+    (name) => builtinOffered(disabled, name),
   );
   if (pads.length === 3 && schedules) {
     return "Use scratchpad_add / scratchpad_update / scratchpad_complete for open work that should outlive this turn (not reminders — those are schedule_*).";

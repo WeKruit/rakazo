@@ -1,5 +1,8 @@
+import { DisabledBuiltinToolsSchema, ScheduleUpdateToolInputSchema } from "@rakazo/contracts";
 import { ONCE_ROUTINE_CRON } from "@rakazo/core";
 import { describe, expect, it, vi } from "vitest";
+import { builtinAgentTools } from "./builtin-tools.js";
+import * as scheduleTools from "./schedule-tools.js";
 import {
   cancelScheduleFromTool,
   compactScheduleInput,
@@ -11,6 +14,210 @@ import {
   resolveScheduleTiming,
   SCHEDULE_TOOL_NAMES,
 } from "./schedule-tools.js";
+
+describe("native routine updates", () => {
+  it("registers an independently disableable update without model, trigger or runtime arguments", () => {
+    expect(SCHEDULE_TOOL_NAMES.has("schedule_update")).toBe(true);
+    expect(DisabledBuiltinToolsSchema.parse(["schedule_update"])).toEqual(["schedule_update"]);
+    expect(builtinAgentTools.find((tool) => tool.name === "schedule_update")?.readOnly).toBe(false);
+    const patch = { routineId: "routine", prompt: "Read the latest note" };
+    expect(ScheduleUpdateToolInputSchema.parse(patch)).toEqual(patch);
+    for (const field of [
+      "botId",
+      "threadId",
+      "runId",
+      "modelProvider",
+      "webhookEnabled",
+      "githubEnabled",
+      "messageProvider",
+    ]) {
+      expect(
+        ScheduleUpdateToolInputSchema.safeParse({ ...patch, [field]: "untrusted" }).success,
+      ).toBe(false);
+    }
+  });
+  it.each([
+    "edit paused",
+    "pause",
+    "resume",
+    "completed",
+    "armed replacement",
+    "foreign bot",
+    "foreign group",
+    "expired lease",
+    "lease expired while waiting",
+    "cancelled run",
+    "wrong run bot",
+    "removed group member",
+    "past time",
+    "schedule race",
+    "job failure",
+  ])("reuses the routine update boundary for %s", async (boundary) => {
+    expect(scheduleTools.updateScheduleFromTool).toBeTypeOf("function");
+    const actor = {
+      spaceId: "space",
+      userId: "owner",
+      email: "owner@example.test",
+      isDeploymentOwner: false,
+    };
+    const row = {
+      id: "routine",
+      ...actor,
+      botId: "bot",
+      threadId: "group-thread",
+      name: "Review",
+      prompt: "Read saved results",
+      crons: ["@once"],
+      timezone: "UTC",
+      active: boundary === "pause",
+      notify: false,
+      webhookEnabled: false,
+      githubEnabled: false,
+      messageProvider: null,
+      modelProvider: null,
+      modelId: null,
+      thinkingLevel: null,
+      nextRunAt:
+        boundary === "pause" || boundary === "armed replacement"
+          ? new Date(Date.now() + 60_000)
+          : null,
+      lastRunAt: boundary === "completed" ? new Date(1_000) : null,
+    };
+    const native = {
+      actor,
+      botId: "bot",
+      threadId: "group-thread",
+      groupId: "group",
+      runId: "run",
+      leaseOwner: "worker",
+      leaseFence: 1,
+    };
+    const run = {
+      ...actor,
+      id: "run",
+      botId: "bot",
+      threadId: "group-thread",
+      status: "running",
+      leaseOwner: "worker",
+      leaseFence: 1,
+      leaseExpiresAt: new Date(boundary === "expired lease" ? 0 : Date.now() + 60_000),
+      thread: { ...actor, id: "group-thread", botId: null, groupId: "group" },
+    };
+    if (boundary === "cancelled run") run.status = "cancelled";
+    if (boundary === "wrong run bot") run.botId = "other-bot";
+    let transaction = false;
+    const update = vi.fn(async ({ data }: { data: Record<string, unknown> }) => {
+      expect(transaction).toBe(true);
+      if (boundary === "schedule race")
+        throw Object.assign(new Error("not found"), { code: "P2025" });
+      Object.assign(
+        row,
+        Object.fromEntries(Object.entries(data).filter(([, value]) => value !== undefined)),
+      );
+      return { ...row };
+    });
+    const tx = {
+      $queryRaw: vi.fn(async (query?: unknown) => {
+        if (
+          boundary === "lease expired while waiting" &&
+          (query as { sql: string }).sql.includes('FROM "routines"')
+        )
+          run.leaseExpiresAt = new Date(0);
+        return [{ id: "group-thread" }];
+      }),
+      run: { findFirst: vi.fn(async () => run) },
+      chatGroupMember: {
+        findFirst: vi.fn(async () =>
+          boundary === "removed group member" ? null : { botId: "bot" },
+        ),
+      },
+      bot: {
+        findFirst: vi.fn(async () => ({ ...actor, id: "bot", thread: { id: "bot-thread" } })),
+      },
+      routine: {
+        findFirst: vi.fn(async ({ where }: { where: { botId?: string; threadId?: string } }) =>
+          (boundary === "foreign bot" && where.botId) ||
+          (boundary === "foreign group" && where.threadId)
+            ? null
+            : { ...row },
+        ),
+        update,
+      },
+    };
+    const prisma = {
+      ...tx,
+      $transaction: vi.fn(async (fn: (value: typeof tx) => Promise<unknown>) => {
+        transaction = true;
+        try {
+          return await fn(tx);
+        } finally {
+          transaction = false;
+        }
+      }),
+    };
+    const enqueue = vi.fn(async () => {
+      expect(transaction).toBe(false);
+      if (boundary === "job failure") throw new Error("job unavailable");
+    });
+    const cancel = vi.fn(async () => {
+      expect(transaction).toBe(false);
+    });
+    const deps = {
+      prisma,
+      jobs: { enqueue, cancel },
+      events: { append: vi.fn(async () => undefined) },
+    } as unknown as Parameters<typeof scheduleTools.updateScheduleFromTool>[0];
+    const patch =
+      boundary === "edit paused"
+        ? { prompt: "Use the latest saved note" }
+        : boundary === "pause"
+          ? { active: false }
+          : {
+              active: true,
+              runAt: new Date(boundary === "past time" ? 0 : Date.now() + 120_000).toISOString(),
+            };
+    const call = () =>
+      scheduleTools.updateScheduleFromTool(deps, native, { routineId: "routine", ...patch });
+    if (boundary === "job failure") {
+      await expect(call()).rejects.toThrow("job unavailable");
+      expect(row.active).toBe(true);
+      expect(update).toHaveBeenCalledOnce();
+      return;
+    }
+    const result = await call();
+    if (
+      [
+        "completed",
+        "armed replacement",
+        "foreign bot",
+        "foreign group",
+        "expired lease",
+        "lease expired while waiting",
+        "cancelled run",
+        "wrong run bot",
+        "removed group member",
+        "past time",
+        "schedule race",
+      ].includes(boundary)
+    ) {
+      expect(result).toHaveProperty("error");
+      expect(enqueue).not.toHaveBeenCalled();
+      expect(cancel).not.toHaveBeenCalled();
+      if (boundary !== "schedule race") expect(update).not.toHaveBeenCalled();
+      return;
+    }
+    expect(result).toMatchObject({ ok: true, routineId: "routine", active: boundary === "resume" });
+    expect((tx.$queryRaw.mock.calls[0]![0] as { sql: string }).sql).toContain("FOR NO KEY UPDATE");
+    expect(row.threadId).toBe("group-thread");
+    if (boundary === "edit paused") {
+      expect(update.mock.calls[0]![0].data).not.toHaveProperty("active");
+      expect(update.mock.calls[0]![0].data).not.toHaveProperty("nextRunAt");
+      expect(enqueue).not.toHaveBeenCalled();
+      expect(cancel).not.toHaveBeenCalled();
+    } else if (boundary === "pause") expect(cancel).toHaveBeenCalledWith("routine:routine");
+    else expect(enqueue).toHaveBeenCalledOnce();
+  });
+});
 
 describe("resolveScheduleTiming", () => {
   it("rejects repeating intervals under one minute", () => {
