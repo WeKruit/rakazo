@@ -232,7 +232,7 @@ describe("E2B computer backend", () => {
     expect(shouldSkipPortableWorkspaceFile("shared/BrowserMetrics-spare.pma")).toBe(false);
   });
 
-  it("prefetches eight sibling lists before consuming their entries in DFS order", async () => {
+  it("fills eight directory lists across branches while preserving DFS files", async () => {
     const root = "/home/user/rakazo-home";
     const siblings = Array.from({ length: 9 }, (_, index) => `dir-${index}`);
     const pending = new Map<string, () => void>();
@@ -284,6 +284,13 @@ describe("E2B computer backend", () => {
       await vi.waitFor(() => expect(active).toBe(7));
       expect(list).toHaveBeenCalledTimes(9);
       expect(read).not.toHaveBeenCalled();
+      for (const release of [...pending.values()].reverse()) release();
+      await vi.waitFor(() => expect(active).toBe(8), { timeout: 250, interval: 5 });
+      expect([...pending.keys()]).toEqual([
+        `${root}/dir-8`,
+        ...siblings.slice(0, 7).map((directory) => `${root}/${directory}/nested`),
+      ]);
+      expect(read).not.toHaveBeenCalled();
     } finally {
       releaseFutureLists = true;
       for (const release of [...pending.values()].reverse()) release();
@@ -320,11 +327,16 @@ describe("E2B computer backend", () => {
       };
       const list = vi.fn(async (directory: string) => {
         if (source.startsWith("list") && directory !== root) await wait(directory);
-        return Array.from({ length: directory === root ? 9 : 0 }, (_, index) => ({
-          name: `entry-${index}`,
-          type: source.startsWith("list") ? "dir" : "file",
-          mode: 0o600,
-        }));
+        return [
+          ...(source.startsWith("list") && directory === root
+            ? [{ name: "root.txt", type: "file", mode: 0o600 }]
+            : []),
+          ...Array.from({ length: directory === root ? 9 : 0 }, (_, index) => ({
+            name: `entry-${index}`,
+            type: source.startsWith("list") ? "dir" : "file",
+            mode: 0o600,
+          })),
+        ];
       });
       const read = vi.fn(async (filePath: string) => {
         await wait(filePath);
@@ -378,6 +390,7 @@ describe("E2B computer backend", () => {
         expect.objectContaining({
           operationId: context.operationId,
           listCallCount: source.startsWith("list") ? 9 : 1,
+          selectedFileCount: source.startsWith("list") ? 1 : 9,
           readCallCount: source.startsWith("list") ? 0 : 8,
           readBatchWaitMs: expect.any(Number),
           metadataWallMs: expect.any(Number),

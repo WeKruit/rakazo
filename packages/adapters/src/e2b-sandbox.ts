@@ -468,6 +468,8 @@ async function* walkE2BWorkspace(
 ): AsyncIterable<PortableFile> {
   // ponytail: O(F + D) metadata fills batches; stream bounded metadata if trees grow.
   const files: Array<{ relative: string; mode: number }> = [];
+  type Directory = { relative: string; files: typeof files; children: Directory[] };
+  const directories: Directory[] = [{ relative: directory, files: [], children: [] }];
   let listCallCount = 0;
   let readCallCount = 0;
   let readFileCount = 0;
@@ -475,52 +477,46 @@ async function* walkE2BWorkspace(
   let browserReadSkipCount = 0;
   let metadataWallMs = 0;
   let readBatchWaitMs = 0;
-  async function collectFiles(
-    directory: string,
-    entries: Awaited<ReturnType<typeof desktop.files.list>>,
-  ): Promise<void> {
-    context.signal.throwIfAborted();
-    const directories: string[] = [];
-    for (const entry of entries) {
-      const relative = normalizeWorkspacePath(
-        directory ? `${directory}/${entry.name}` : entry.name,
-      );
-      if (shouldSkipPortableWorkspaceFile(relative)) continue;
-      if (entry.type === "dir") directories.push(relative);
-      else if (entry.type === "file") files.push({ relative, mode: entry.mode });
-    }
-    for (let index = 0; index < directories.length; index += 8) {
-      const siblings = directories.slice(index, index + 8);
-      // Settle this batch before descending so nested lists share the same global limit.
-      const results = await Promise.allSettled(
-        siblings.map(async (relative) => {
-          context.signal.throwIfAborted();
-          listCallCount++;
-          return desktop.files.list(workspacePath(E2B_WORKSPACE, relative), {
-            signal: context.signal,
-          });
-        }),
-      );
-      context.signal.throwIfAborted();
-      const children = results.map((result) => {
-        if (result.status === "rejected") throw result.reason;
-        return result.value;
-      });
-      for (const [offset, entries] of children.entries())
-        await collectFiles(siblings[offset]!, entries);
-    }
-  }
   try {
     const metadataStartedAt = performance.now();
     try {
-      context.signal.throwIfAborted();
-      listCallCount++;
-      await collectFiles(
-        directory,
-        await desktop.files.list(workspacePath(E2B_WORKSPACE, directory), {
-          signal: context.signal,
-        }),
-      );
+      for (let index = 0; index < directories.length; ) {
+        const batch = directories.slice(index, index + 8);
+        index += batch.length;
+        const results = await Promise.allSettled(
+          batch.map(async ({ relative }) => {
+            context.signal.throwIfAborted();
+            listCallCount++;
+            return desktop.files.list(workspacePath(E2B_WORKSPACE, relative), {
+              signal: context.signal,
+            });
+          }),
+        );
+        context.signal.throwIfAborted();
+        for (const [offset, result] of results.entries()) {
+          if (result.status === "rejected") throw result.reason;
+          const parent = batch[offset]!;
+          for (const entry of result.value) {
+            const relative = normalizeWorkspacePath(
+              parent.relative ? `${parent.relative}/${entry.name}` : entry.name,
+            );
+            if (shouldSkipPortableWorkspaceFile(relative)) continue;
+            if (entry.type === "dir") {
+              const child: Directory = { relative, files: [], children: [] };
+              parent.children.push(child);
+              directories.push(child);
+            } else if (entry.type === "file") parent.files.push({ relative, mode: entry.mode });
+          }
+        }
+      }
+      const pending = [directories[0]!];
+      while (pending.length) {
+        context.signal.throwIfAborted();
+        const current = pending.pop()!;
+        for (const file of current.files) files.push(file);
+        for (let index = current.children.length - 1; index >= 0; index--)
+          pending.push(current.children[index]!);
+      }
     } finally {
       metadataWallMs = performance.now() - metadataStartedAt;
     }
@@ -567,7 +563,10 @@ async function* walkE2BWorkspace(
       metadataWallMs,
       readBatchWaitMs,
       listCallCount,
-      selectedFileCount: files.length,
+      selectedFileCount: directories.reduce(
+        (count, directory) => count + directory.files.length,
+        0,
+      ),
       readCallCount,
       readFileCount,
       readBytes,
