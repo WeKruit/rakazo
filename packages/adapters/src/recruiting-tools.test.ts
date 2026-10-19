@@ -18,6 +18,7 @@ import {
   saveNativeRecruitingCandidatePage,
   saveRecruitingAssessment,
 } from "@rakazo/db";
+import { createLogger, createTestSink, getLogger, installLogger } from "@rakazo/logging";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import { executeRecruitingAssessmentTool } from "./recruiting-assessment.js";
@@ -90,6 +91,81 @@ describe("optional native candidate output saving", () => {
       snapshot: { request: ["original-read"], providerResult: raw },
     };
   }
+  it.each(["succeeded", "readTX", "serializeArtifactPut", "atomicWriteTX"] as const)(
+    "summarizes only settled save phases for %s without changing the result",
+    async (outcome) => {
+      const previousLogger = getLogger();
+      const sink = createTestSink();
+      installLogger(createLogger({ service: "save-check", sinks: [sink] }));
+      let clock = 0;
+      const now = vi.spyOn(performance, "now").mockImplementation(() => clock);
+      try {
+        const failure = new Error("private diagnostic must not be logged");
+        const read = capture({
+          structuredContent: { rows: [{ name: "Example", linkedin_url: null }, null] },
+        });
+        vi.mocked(readNativeRecruitingCandidatePage).mockImplementation(async () => {
+          clock = 11;
+          if (outcome === "readTX") throw failure;
+          return read as never;
+        });
+        const put = vi.fn(async (_file: { bytes: Uint8Array }) => {
+          clock = 18;
+          if (outcome === "serializeArtifactPut") throw failure;
+          return { id: "retained-blob" };
+        });
+        let markEntered!: () => void;
+        const entered = new Promise<void>((resolve) => {
+          markEntered = resolve;
+        });
+        let resolveWrite!: (value: never) => void;
+        let rejectWrite!: (reason: Error) => void;
+        const settled = new Promise<never>((resolve, reject) => {
+          resolveWrite = resolve;
+          rejectWrite = reject;
+        });
+        vi.mocked(saveNativeRecruitingCandidatePage).mockImplementation(() => {
+          markEntered();
+          return settled;
+        });
+        const receipt = { status: "saved" };
+        const saving = tools.saveNativeRecruitingCandidateResults(
+          { prisma: {} as PrismaClient, artifacts: { put } } as never,
+          trusted,
+          input,
+          adapterContext,
+        );
+        if (outcome === "succeeded" || outcome === "atomicWriteTX") {
+          await entered;
+          expect(sink.events).toHaveLength(0);
+          clock = 31;
+          if (outcome === "succeeded") resolveWrite(receipt as never);
+          else rejectWrite(failure);
+        }
+        if (outcome === "succeeded") expect(await saving).toBe(receipt);
+        else await expect(saving).rejects.toBe(failure);
+        expect(sink.events).toHaveLength(1);
+        const event = sink.events[0]!;
+        expect(event).toEqual({
+          timestamp: expect.any(String),
+          level: "info",
+          message: "recruiting.candidates.save.timing",
+          "service.name": "save-check",
+          outcome: outcome === "succeeded" ? "succeeded" : "error",
+          failedPhase: outcome === "succeeded" ? null : outcome,
+          durationMs: clock,
+          readTXWallMs: 11,
+          serializeArtifactPutWallMs: outcome === "readTX" ? 0 : 7,
+          atomicWriteTXWallMs: clock === 31 ? 13 : 0,
+          rowCount: outcome === "readTX" ? null : 2,
+          bytes: clock === 31 ? put.mock.calls[0]![0].bytes.byteLength : null,
+        });
+      } finally {
+        now.mockRestore();
+        installLogger(previousLogger);
+      }
+    },
+  );
   it("saves the actual native page bytes and all candidate rows through existing storage", async () => {
     const rows = [{ name: "Example", linkedin_url: "https://linkedin.com/in/example" }, null];
     const read = capture({ structuredContent: { rows, next_cursor: "opaque-next" } });

@@ -34,6 +34,7 @@ import {
   saveNativeRecruitingCandidatePage,
   scoped,
 } from "@rakazo/db";
+import { getLogger } from "@rakazo/logging";
 
 import type { LoadedRecruitingRunContext } from "./recruiting-context.js";
 import type { RecruitingResearchRequest } from "./recruiting-research.js";
@@ -549,50 +550,91 @@ export async function saveNativeRecruitingCandidateResults(
   input: Extract<RecruitingResearchToolInput, { operation: "save_results" }>,
   context: AdapterContext,
 ) {
-  if (
-    context.runId !== trusted.runId ||
-    context.spaceId !== trusted.actor.spaceId ||
-    context.userId !== trusted.actor.userId
-  )
-    throw new IsolationError();
-  const source = await readNativeRecruitingCandidatePage(
-    deps.prisma,
-    trusted.actor,
-    trusted.runId,
-    input,
-  );
-  const observation = classifyRecruitingResearchResult(source.effect.result, {
-    operation: "rows",
-    providerTaskId: input.providerTaskId,
-  });
-  if (
-    observation.rows === undefined ||
-    (observation.rows.length > 0 &&
-      !observation.rows.some(
-        (row) =>
-          row !== null &&
-          typeof row === "object" &&
-          !Array.isArray(row) &&
-          Object.hasOwn(row, "name") &&
-          Object.hasOwn(row, "linkedin_url"),
-      ))
-  )
-    throw new RecruitingCandidateOutputError(
-      "Candidate results need name and linkedin_url columns. Company/JD evidence and unstructured results are not candidate pages. Preserve missing values as null; reread an existing candidate page rather than starting new research.",
+  const started = performance.now();
+  const wallMs = { readTX: 0, serializeArtifactPut: 0, atomicWriteTX: 0 };
+  let phase: keyof typeof wallMs | "validation" = "validation";
+  let phaseStarted = started;
+  let succeeded = false;
+  let rowCount: number | null = null;
+  let bytes: number | null = null;
+  try {
+    if (
+      context.runId !== trusted.runId ||
+      context.spaceId !== trusted.actor.spaceId ||
+      context.userId !== trusted.actor.userId
+    )
+      throw new IsolationError();
+    phase = "readTX";
+    phaseStarted = performance.now();
+    const source = await readNativeRecruitingCandidatePage(
+      deps.prisma,
+      trusted.actor,
+      trusted.runId,
+      input,
     );
-  const outputArtifact = await uploadResearchReceipt(
-    deps,
-    context,
-    source.snapshot,
-    "recruiting-candidates",
-    source.effect.id,
-  );
-  return saveNativeRecruitingCandidatePage(deps.prisma, trusted.actor, trusted, input, {
-    sourceEffectId: source.effect.id,
-    rows: observation.rows,
-    outputId: observation.outputId,
-    outputArtifact,
-  });
+    wallMs.readTX = performance.now() - phaseStarted;
+    phase = "validation";
+    const observation = classifyRecruitingResearchResult(source.effect.result, {
+      operation: "rows",
+      providerTaskId: input.providerTaskId,
+    });
+    rowCount = observation.rows?.length ?? null;
+    if (
+      observation.rows === undefined ||
+      (observation.rows.length > 0 &&
+        !observation.rows.some(
+          (row) =>
+            row !== null &&
+            typeof row === "object" &&
+            !Array.isArray(row) &&
+            Object.hasOwn(row, "name") &&
+            Object.hasOwn(row, "linkedin_url"),
+        ))
+    )
+      throw new RecruitingCandidateOutputError(
+        "Candidate results need name and linkedin_url columns. Company/JD evidence and unstructured results are not candidate pages. Preserve missing values as null; reread an existing candidate page rather than starting new research.",
+      );
+    phase = "serializeArtifactPut";
+    phaseStarted = performance.now();
+    const outputArtifact = await uploadResearchReceipt(
+      deps,
+      context,
+      source.snapshot,
+      "recruiting-candidates",
+      source.effect.id,
+    );
+    wallMs.serializeArtifactPut = performance.now() - phaseStarted;
+    bytes = outputArtifact.size;
+    phase = "atomicWriteTX";
+    phaseStarted = performance.now();
+    const result = await saveNativeRecruitingCandidatePage(
+      deps.prisma,
+      trusted.actor,
+      trusted,
+      input,
+      {
+        sourceEffectId: source.effect.id,
+        rows: observation.rows,
+        outputId: observation.outputId,
+        outputArtifact,
+      },
+    );
+    succeeded = true;
+    return result;
+  } finally {
+    const finished = performance.now();
+    if (phase !== "validation") wallMs[phase] = finished - phaseStarted;
+    getLogger().info("recruiting.candidates.save.timing", {
+      outcome: succeeded ? "succeeded" : "error",
+      failedPhase: succeeded ? null : phase,
+      durationMs: Math.round(finished - started),
+      readTXWallMs: Math.round(wallMs.readTX),
+      serializeArtifactPutWallMs: Math.round(wallMs.serializeArtifactPut),
+      atomicWriteTXWallMs: Math.round(wallMs.atomicWriteTX),
+      rowCount,
+      bytes,
+    });
+  }
 }
 
 export async function completeRecruitingResearchCall(
