@@ -645,8 +645,15 @@ export async function createApp(
     return auth.handler(emptyAuthBodyAsJson(c.req.raw));
   });
   mountLocalSettings(app, { token: env.desktopStackToken, prisma, rpc });
-  const requestSession = async (request: Request) => {
-    const session = await auth.api.getSession({ headers: sessionHeaders(request) });
+  const requestSession = async (request: Request, recordAuthTiming = false) => {
+    const sessionStarted = performance.now();
+    const session = await auth.api.getSession({ headers: sessionHeaders(request) }).finally(() => {
+      if (recordAuthTiming) {
+        enrichLogContext({
+          "rpc.auth.session.duration_ms": Math.round(performance.now() - sessionStarted),
+        });
+      }
+    });
     if (!session?.user) return null;
     const actor = await actorFromMembership(
       requireMembership(prisma, session.user.id, request.headers.get("x-rakazo-space-id")),
@@ -656,8 +663,22 @@ export async function createApp(
   const sessionActor = async (request: Request) => (await requestSession(request))?.actor ?? null;
   app.use("/rpc/*", async (c, next) => {
     const authStarted = performance.now();
-    const session = await requestSession(c.req.raw).finally(() => {
+    if (created.pool) {
+      enrichLogContext({
+        "rpc.auth.pool.start.waiting": created.pool.waitingCount,
+        "rpc.auth.pool.start.total": created.pool.totalCount,
+        "rpc.auth.pool.start.idle": created.pool.idleCount,
+      });
+    }
+    const session = await requestSession(c.req.raw, true).finally(() => {
       enrichLogContext({ "rpc.auth.duration_ms": Math.round(performance.now() - authStarted) });
+      if (created.pool) {
+        enrichLogContext({
+          "rpc.auth.pool.end.waiting": created.pool.waitingCount,
+          "rpc.auth.pool.end.total": created.pool.totalCount,
+          "rpc.auth.pool.end.idle": created.pool.idleCount,
+        });
+      }
     });
     const actor = session?.actor ?? null;
     if (actor) {
