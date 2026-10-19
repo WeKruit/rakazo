@@ -7,7 +7,7 @@ import { toolRequiresApproval, unattendedTriggerToolRequiresApproval } from "@ra
 import * as pdfText from "@rakazo/core/node/pdf-text";
 import type { PrismaClient } from "@rakazo/db";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { artifactReadFromTool } from "./artifact-read.js";
+import { artifactReadFromTool, readActorArtifact } from "./artifact-read.js";
 import { LocalArtifactStore } from "./artifacts.js";
 import { selectBuiltinToolsForRun } from "./executor.js";
 
@@ -17,8 +17,8 @@ function fixture(text = "\uFEFF中文😀\r\nend 🧑‍💻") {
   const bytes = Buffer.from(text);
   const row = {
     id: "saved-v1",
-    botId: "bot",
-    groupId: null,
+    botId: "bot" as string | null,
+    groupId: null as string | null,
     runId: "run",
     name: "original.txt",
     description: null,
@@ -26,7 +26,7 @@ function fixture(text = "\uFEFF中文😀\r\nend 🧑‍💻") {
     size: bytes.length,
     hash: createHash("sha256").update(bytes).digest("hex"),
     version: 1,
-    rootArtifactId: null,
+    rootArtifactId: null as string | null,
     storageKey: "private-key",
     createdAt: new Date(0),
     spaceId: actor.spaceId,
@@ -36,13 +36,94 @@ function fixture(text = "\uFEFF中文😀\r\nend 🧑‍💻") {
   const findFirst = vi.fn(async ({ where }) =>
     where.spaceId === row.spaceId && where.userId === row.userId ? row : null,
   );
+  const queryRaw = vi.fn(async (_query: unknown) => [] as Array<{ id: string }>);
   const deps = {
-    prisma: { artifact: { findFirst } } as unknown as PrismaClient,
+    prisma: { artifact: { findFirst }, $queryRaw: queryRaw } as unknown as PrismaClient,
     artifacts: { get } as unknown as ArtifactStore,
   };
-  return { deps, row, get, findFirst };
+  return { deps, row, get, findFirst, queryRaw };
 }
 describe("native saved artifact reading", () => {
+  it.each(["bot", "other-bot", null])(
+    "denies adopted private-memory context from %s before any tool storage read",
+    async (botId) => {
+      const marker = "synthetic private-memory marker";
+      const f = fixture(JSON.stringify({ memory: { documents: [{ includedContent: marker }] } }));
+      f.row.botId = botId;
+      f.row.mimeType = "application/json";
+      f.queryRaw.mockResolvedValue([{ id: f.row.id }]);
+      expect(
+        await artifactReadFromTool(f.deps, actor, {
+          artifactId: f.row.id,
+          jsonPath: ["memory", "documents", 0, "includedContent"],
+        }),
+      ).toEqual({ error: "Artifact is unavailable." });
+      expect(f.queryRaw).toHaveBeenCalledOnce();
+      expect(f.get).not.toHaveBeenCalled();
+
+      // Native human diagnostics retain the immutable original through their own authorization.
+      const saved = await readActorArtifact(f.deps, actor, { artifactId: f.row.id });
+      expect(saved.bytes.toString()).toContain(marker);
+      expect(f.queryRaw).toHaveBeenCalledOnce();
+    },
+  );
+  it("denies a renamed version in an adopted context family", async () => {
+    const f = fixture("private snapshot version");
+    f.row.name = "renamed.txt";
+    f.row.rootArtifactId = "adopted-context-root";
+    f.queryRaw.mockResolvedValue([{ id: f.row.rootArtifactId }]);
+    expect(await artifactReadFromTool(f.deps, actor, { artifactId: f.row.id })).toEqual({
+      error: "Artifact is unavailable.",
+    });
+    expect(f.get).not.toHaveBeenCalled();
+  });
+  it("binds actor and family while matching authoritative adoption and formal request hashes", async () => {
+    const f = fixture();
+    f.row.rootArtifactId = "context-family";
+    await artifactReadFromTool(f.deps, actor, { artifactId: f.row.id });
+    const query = f.queryRaw.mock.calls[0]![0] as { strings: string[]; values: unknown[] };
+    const sql = query.strings.join("?").replace(/\s+/g, " ");
+    expect(query.values).toEqual([actor.spaceId, actor.userId, "context-family", "context-family"]);
+    expect(sql).toContain('internal."spaceId" = ? AND internal."userId" = ?');
+    expect(sql).toContain('(internal.id = ? OR internal."rootArtifactId" = ?)');
+    for (const predicate of [
+      'event."runId" = internal."runId"',
+      'event."spaceId" = internal."spaceId"',
+      '(internal."botId" IS NULL OR event."botId" = internal."botId")',
+      "event.type = 'recruiting.context.adopted'",
+      "event.payload->'contextArtifact'->>'artifactId' = internal.id",
+      "event.payload->'contextArtifact'->>'sha256' = internal.hash",
+      'FROM "recruiting_research_actions" action',
+      '(action."contextArtifactId" = internal.id AND action."contextArtifactHash" = internal.hash)',
+      '(action."requestArtifactId" = internal.id AND action."requestArtifactHash" = internal.hash)',
+    ])
+      expect(sql).toContain(predicate);
+    // Candidate/source results and receipts contain no automatic contextText copy.
+    for (const field of [
+      "receiptArtifactId",
+      "outputArtifacts",
+      "recruiting_candidate_pages",
+      "name",
+      "clientNonce",
+    ])
+      expect(sql).not.toContain(field);
+  });
+  it("keeps ordinary cross-bot group attachments readable without trusting their names", async () => {
+    const f = fixture("ordinary shared attachment");
+    f.row.botId = "other-bot";
+    f.row.groupId = "shared-group";
+    f.row.name = "recruiting-context-run.json";
+    expect(await artifactReadFromTool(f.deps, actor, { artifactId: f.row.id })).toMatchObject({
+      text: "ordinary shared attachment",
+      artifact: { botId: "other-bot", groupId: "shared-group" },
+    });
+    expect(f.queryRaw).toHaveBeenCalledOnce();
+    expect(f.get).toHaveBeenCalledOnce();
+    expect(f.findFirst.mock.invocationCallOrder[0]).toBeLessThan(
+      f.queryRaw.mock.invocationCallOrder[0]!,
+    );
+    expect(f.queryRaw.mock.invocationCallOrder[0]).toBeLessThan(f.get.mock.invocationCallOrder[0]!);
+  });
   it("pages extracted PDF text while retaining its original identity and checking access before extraction", async () => {
     const original = "First page: Python evidence.\nSecond page: geometry 😀.\n";
     const extract = vi.spyOn(pdfText, "extractPdfText").mockResolvedValue(original);
@@ -172,6 +253,7 @@ describe("native saved artifact reading", () => {
         error: "Artifact is unavailable.",
       });
     expect(f.get).not.toHaveBeenCalled();
+    expect(f.queryRaw).not.toHaveBeenCalled();
   });
   it("returns exact metadata and lossless contiguous Unicode pages of the stored version", async () => {
     const original = "\uFEFF中文😀\r\nend 🧑‍💻";

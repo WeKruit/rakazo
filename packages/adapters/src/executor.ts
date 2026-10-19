@@ -6115,7 +6115,7 @@ export function createRunExecutor(deps: ExecutorDeps) {
                 original = await readActorArtifact(
                   { prisma: deps.prisma, artifacts: deps.artifacts },
                   { spaceId: run.spaceId, userId: run.userId },
-                  { artifactId: args.artifactId },
+                  { artifactId: args.artifactId, fromTool: true },
                 );
               } catch (error) {
                 return finish({

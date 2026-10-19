@@ -5,18 +5,43 @@ import { ArtifactReadInputSchema } from "@rakazo/contracts";
 import { readRecruitingJsonString } from "@rakazo/core";
 import { extractPdfText } from "@rakazo/core/node/pdf-text";
 import type { PrismaClient } from "@rakazo/db";
-import { IsolationError } from "@rakazo/db";
+import { IsolationError, Prisma } from "@rakazo/db";
 
 /** Actor authorization must precede all storage access, including existence checks. */
 export async function readActorArtifact(
-  deps: { prisma: Pick<PrismaClient, "artifact">; artifacts: ArtifactStore },
+  deps: { prisma: Pick<PrismaClient, "artifact" | "$queryRaw">; artifacts: ArtifactStore },
   actor: Pick<Actor, "spaceId" | "userId">,
-  input: { artifactId: string },
+  input: { artifactId: string; fromTool?: true },
 ) {
   const row = await deps.prisma.artifact.findFirst({
     where: { id: input.artifactId, spaceId: actor.spaceId, userId: actor.userId },
   });
   if (!row) throw new IsolationError();
+  if (input.fromTool) {
+    // Context and formal requests contain private memory. Tool reads cannot reopen their families.
+    const rootId = row.rootArtifactId ?? row.id;
+    const internal = await deps.prisma.$queryRaw<Array<{ id: string }>>(Prisma.sql`
+      SELECT internal.id FROM "artifacts" internal
+      WHERE internal."spaceId" = ${actor.spaceId} AND internal."userId" = ${actor.userId}
+        AND (internal.id = ${rootId} OR internal."rootArtifactId" = ${rootId})
+        AND (
+          EXISTS (
+            SELECT 1 FROM "events" event
+            WHERE event."runId" = internal."runId" AND event."spaceId" = internal."spaceId"
+              AND (internal."botId" IS NULL OR event."botId" = internal."botId")
+              AND event.type = 'recruiting.context.adopted'
+              AND event.payload->'contextArtifact'->>'artifactId' = internal.id
+              AND event.payload->'contextArtifact'->>'sha256' = internal.hash
+          ) OR EXISTS (
+            SELECT 1 FROM "recruiting_research_actions" action
+            WHERE (action."contextArtifactId" = internal.id AND action."contextArtifactHash" = internal.hash)
+              OR (action."requestArtifactId" = internal.id AND action."requestArtifactHash" = internal.hash)
+          )
+        )
+      LIMIT 1
+    `);
+    if (internal.length) throw new IsolationError();
+  }
   const bytes = await deps.artifacts.get(row.storageKey, {
     operationId: `artifact-get:${row.id}`,
     traceId: `artifact-get:${row.id}`,
@@ -32,7 +57,7 @@ export async function readActorArtifact(
 }
 
 export async function artifactReadFromTool(
-  deps: { prisma: Pick<PrismaClient, "artifact">; artifacts: ArtifactStore },
+  deps: { prisma: Pick<PrismaClient, "artifact" | "$queryRaw">; artifacts: ArtifactStore },
   actor: Pick<Actor, "spaceId" | "userId">,
   raw: unknown,
 ) {
@@ -41,7 +66,7 @@ export async function artifactReadFromTool(
   const { artifactId, jsonPath, offset, limit } = parsed.data;
   let saved: Awaited<ReturnType<typeof readActorArtifact>>;
   try {
-    saved = await readActorArtifact(deps, actor, { artifactId });
+    saved = await readActorArtifact(deps, actor, { artifactId, fromTool: true });
   } catch (error) {
     if (error instanceof IsolationError) return { error: "Artifact is unavailable." };
     // Storage errors may contain paths, credentials or provider internals.

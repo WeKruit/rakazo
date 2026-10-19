@@ -544,6 +544,52 @@ describe("explicit artifact workspace writes", () => {
     expect(f.sandbox.writeFile).toHaveBeenCalledOnce();
   });
 
+  it.each([
+    ["artifact_read", "adopted"],
+    ["write_file", "adopted"],
+    ["artifact_read", "contextArtifact"],
+    ["write_file", "contextArtifact"],
+    ["artifact_read", "requestArtifact"],
+    ["write_file", "requestArtifact"],
+  ])(
+    "blocks private-memory bytes at the real %s entry using %s provenance before storage or workspace access",
+    async (name, provenance) => {
+      const f = fixture(`private-context-${name}-${provenance}`);
+      const contextBytes = Buffer.from(
+        JSON.stringify({ memory: { documents: [{ includedContent: "private marker" }] } }),
+      );
+      const context = {
+        ...original,
+        botId: "other-bot",
+        createdAt: new Date(0),
+        mimeType: "application/json",
+        hash: createHash("sha256").update(contextBytes).digest("hex"),
+        size: contextBytes.length,
+      };
+      f.prisma.artifact.findFirst.mockResolvedValue(context);
+      f.artifacts.get.mockResolvedValue(contextBytes);
+      f.prisma.$queryRaw.mockImplementation(async (...args: unknown[]) => {
+        const query = args[0] as { strings?: string[] };
+        const sql = query?.strings?.join("") ?? "";
+        const matches =
+          provenance === "adopted"
+            ? sql.includes("recruiting.context.adopted")
+            : sql.includes(`action."${provenance}Id" = internal.id`) &&
+              sql.includes(`action."${provenance}Hash" = internal.hash`);
+        return matches ? [{ id: context.id }] : [];
+      });
+      f.setCalls([{ name, args: { artifactId: context.id }, executionId: "private-context" }]);
+      await f.run();
+      expect(f.results[0]).toEqual({ error: "Artifact is unavailable." });
+      expect(f.prisma.artifact.findFirst).toHaveBeenCalledWith({
+        where: { id: context.id, spaceId: "space-1", userId: "user-1" },
+      });
+      expect(f.artifacts.get).not.toHaveBeenCalled();
+      expect(f.sandbox.writeFile).not.toHaveBeenCalled();
+      expect(checkpointWorkspace).not.toHaveBeenCalled();
+    },
+  );
+
   it("waits for native approval before reading or writing an artifact", async () => {
     const f = fixture("approved-original-write");
     f.prisma.actionApprovalRule.findMany.mockResolvedValue([
