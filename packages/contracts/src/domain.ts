@@ -842,7 +842,7 @@ export const COMPUTER_UPDATE_STAGES = [
 ] as const;
 export const ComputerUpdateSchema = z.object({
   canReleaseReservation: z.boolean().optional(),
-  action: z.enum(["update", "recover"]),
+  action: z.enum(["update", "recover", "checkpoint"]),
   id: Id,
   botId: Id,
   name: z.string(),

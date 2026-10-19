@@ -1537,6 +1537,8 @@ describe("computer terminal and file transfer", () => {
       writeFile: vi.fn().mockResolvedValue(undefined),
     };
     const prisma = {
+      $queryRaw: vi.fn().mockResolvedValue([]),
+      $transaction: vi.fn(async (fn: (tx: unknown) => Promise<unknown>) => fn(prisma)),
       bot: {
         findFirst: vi.fn().mockResolvedValue({
           id: "bot-1",
@@ -1560,12 +1562,24 @@ describe("computer terminal and file transfer", () => {
         }),
       },
       computer: { updateMany: vi.fn().mockResolvedValue({ count: 1 }) },
-      computerExecutionLease: { findUnique: vi.fn().mockResolvedValue(null) },
+      computerExecutionLease: {
+        findUnique: vi.fn().mockResolvedValue(null),
+        deleteMany: vi.fn().mockResolvedValue({ count: 1 }),
+      },
+      computerUpdate: {
+        create: vi.fn().mockResolvedValue({ id: "manual-checkpoint" }),
+        updateMany: vi.fn().mockResolvedValue({ count: 1 }),
+      },
+      run: { findFirst: vi.fn().mockResolvedValue(null) },
     } as unknown as PrismaClient;
     const deps = {
       prisma,
       sandbox,
-      jobs: { enqueue: vi.fn().mockResolvedValue(undefined) },
+      home: { commit: vi.fn().mockResolvedValue("saved-revision") },
+      jobs: {
+        enqueue: vi.fn().mockResolvedValue(undefined),
+        cancel: vi.fn().mockResolvedValue(undefined),
+      },
       env: {
         webOrigin: "http://127.0.0.1:5173",
         screenProxySecret: "fake-test-secret",
@@ -1587,6 +1601,51 @@ describe("computer terminal and file transfer", () => {
     };
     return { sandbox, prisma, call };
   }
+
+  it.each(["confirmed", "unknown"])(
+    "keeps manual Stop under native ownership for a %s pause",
+    async (outcome) => {
+      const { sandbox, prisma, call } = setup();
+      Object.assign(sandbox, {
+        exportWorkspace: vi.fn(async function* () {}),
+        stop:
+          outcome === "unknown"
+            ? vi.fn().mockRejectedValue(new Error("pause timed out"))
+            : vi.fn().mockResolvedValue(undefined),
+      });
+      await expect(call("stop", {})).resolves.toMatchObject({
+        status: outcome === "unknown" ? 500 : 200,
+      });
+      expect(prisma.computer.updateMany).toHaveBeenCalledWith(
+        expect.objectContaining({ data: { homeRevision: "saved-revision" } }),
+      );
+      expect(prisma.computerUpdate.updateMany).toHaveBeenLastCalledWith(
+        expect.objectContaining({
+          data: { status: outcome === "unknown" ? "interrupted" : "completed" },
+        }),
+      );
+      expect(prisma.computer.updateMany).toHaveBeenCalledWith(
+        expect.objectContaining({
+          data: expect.objectContaining({
+            maintenanceId: "manual-checkpoint",
+            state: "suspending",
+          }),
+        }),
+      );
+      if (outcome === "unknown") {
+        expect(prisma.computer.updateMany).not.toHaveBeenCalledWith(
+          expect.objectContaining({ data: expect.objectContaining({ maintenanceId: null }) }),
+        );
+      } else {
+        expect(prisma.computer.updateMany).toHaveBeenLastCalledWith(
+          expect.objectContaining({
+            where: expect.objectContaining({ maintenanceId: "manual-checkpoint" }),
+            data: expect.objectContaining({ maintenanceId: null, state: "stopped" }),
+          }),
+        );
+      }
+    },
+  );
 
   it("prepares an unused bot's folders before listing a running Team Computer", async () => {
     const { sandbox, call } = setup();
@@ -1891,7 +1950,11 @@ describe("interrupted computer reservation release", () => {
       where: {
         id: "update-1",
         status: "interrupted",
-        computer: { spaceId: "space-1", bots: { some: { userId: "user-1", archivedAt: null } } },
+        OR: [
+          { computer: { bots: { some: { userId: "user-1", archivedAt: null } } } },
+          { action: "checkpoint", computer: { scope: "dedicated" } },
+        ],
+        computer: { spaceId: "space-1", bots: { some: { userId: "user-1" } } },
       },
     });
     expect(computerUpdate.updateMany).toHaveBeenCalledWith({

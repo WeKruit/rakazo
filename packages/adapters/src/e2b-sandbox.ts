@@ -374,15 +374,17 @@ export class E2BSandboxProvider implements SandboxProvider {
     return this.desktops.releaseScreen(computer, context);
   }
 
-  async stop(computer: ComputerRef, _context: AdapterContext): Promise<void> {
+  async stop(computer: ComputerRef, context: AdapterContext): Promise<void> {
+    context.signal.throwIfAborted();
     const id = computer.providerRef || computer.id;
     const desktop = this.boxes.get(id);
     this.forget(id);
-    if (desktop) {
-      await desktop.pause().catch(() => undefined);
-      return;
+    try {
+      if (desktop) await desktop.pause();
+      else await this.sdk.pause(id, { apiKey: this.apiKey });
+    } catch (error) {
+      if (!isSandboxGoneError(error)) throw error;
     }
-    await this.sdk.pause(id, { apiKey: this.apiKey }).catch(() => undefined);
   }
 
   async destroy(computer: ComputerRef, _context: AdapterContext): Promise<void> {

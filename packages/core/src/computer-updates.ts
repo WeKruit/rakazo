@@ -18,7 +18,9 @@ export function createComputerUpdates(client: {
   const poll = async (epoch: number) => {
     const stamp = revision;
     try {
-      const updates = await client.list();
+      const updates = (await client.list()).filter(
+        (update) => update.action !== "checkpoint" || computerUpdateNeedsAttention(update),
+      );
       if (epoch !== generation || stamp !== revision) return;
       if (JSON.stringify(state.updates) === JSON.stringify(updates)) return;
       state = {

@@ -46,7 +46,8 @@ import {
   CodexCatalogCache,
   ComputerBusyError,
   cancelComputerRunWork,
-  checkpointAndRecordComputerWorkspace,
+  checkpointAndStopComputerWorkspace,
+  claimComputerWorkspaceMaintenance,
   clearInactiveUserComputerControl,
   codexLiveCatalogsForSpace,
   codexLiveListsModel,
@@ -1816,7 +1817,11 @@ export function createRouter(deps: RouterDeps) {
         const claimed = await deps.prisma.$transaction(async (tx) => {
           await tx.$queryRaw`SELECT id FROM computers WHERE id = ${bot.computerId} FOR UPDATE`;
           return tx.bot.updateMany({
-            where: { id: bot.id, computerSwitching: false, computer: { maintenanceId: null } },
+            where: {
+              id: bot.id,
+              computerSwitching: false,
+              computer: { maintenanceId: null, state: { notIn: ["booting", "suspending"] } },
+            },
             data: { computerSwitching: true },
           });
         });
@@ -1836,8 +1841,21 @@ export function createRouter(deps: RouterDeps) {
             const ctx = computerContext(context.actor, bot.id, "computer.switch");
             const ref = toComputerRef(bot.computer);
             if (bot.computer.state === "running") {
-              await checkpointAndRecordComputerWorkspace(deps, bot.computer, ref, ctx);
-              await deps.sandbox.stop(ref, ctx);
+              const maintenance = await claimComputerWorkspaceMaintenance(
+                deps.prisma,
+                {
+                  computerId: bot.computer.id,
+                  botId: bot.id,
+                  providerRef: bot.computer.providerRef,
+                  switchingBotId: bot.id,
+                  where: { state: "running", providerRef: bot.computer.providerRef },
+                },
+                ctx,
+              );
+              if (!maintenance) throw new ComputerBusyError();
+              await checkpointAndStopComputerWorkspace(deps, bot.computer, ref, maintenance, {
+                state: "stopped",
+              });
             }
             await deps.prisma.computerExecutionLease.deleteMany({
               where: { computerId: bot.computer.id, botId: bot.id },
@@ -2625,81 +2643,52 @@ export function createRouter(deps: RouterDeps) {
         const bot = await repos.getBot(context.actor, input.botId);
         if (!bot.computer) throw new IsolationError();
         const controlLeaseId = bot.computer.controlLeaseId;
-        const now = new Date();
-        const claimed = await deps.prisma.computer.updateMany({
-          where: {
-            id: bot.computer.id,
-            state: { not: "suspending" },
-            maintenanceId: null,
-            executionLeases: {
-              none: { botId: { not: bot.id }, expiresAt: { gt: now } },
+        const ctx = computerContext(context.actor, bot.id, "stop");
+        const maintenance = await claimComputerWorkspaceMaintenance(
+          deps.prisma,
+          {
+            computerId: bot.computer.id,
+            botId: bot.id,
+            providerRef: bot.computer.providerRef,
+            where: {
+              state: { equals: bot.computer.state, notIn: ["booting", "suspending"] },
+              executionLeases: { none: { botId: { not: bot.id }, expiresAt: { gt: new Date() } } },
             },
           },
-          data: { state: "suspending" },
-        });
-        if (claimed.count !== 1) {
+          ctx,
+        );
+        if (!maintenance) {
           throw new ORPCError("CONFLICT", {
             message: "Other Team bots are still using this computer",
           });
         }
-        getLogger().info("computer.suspension.claimed", {
-          owner: "manual_stop",
-          computerId: bot.computer.id,
-          claimedAt: new Date().toISOString(),
-          operationId: "stop",
-        });
-        const otherRun = await deps.prisma.run.findFirst({
-          where: {
-            botId: { not: bot.id },
-            status: { in: [...ACTIVE_RUN_STATUSES] },
-            bot: { computerId: bot.computer.id },
-          },
-          select: { id: true },
-        });
-        if (otherRun) {
-          await deps.prisma.computer.updateMany({
-            where: { id: bot.computer.id, state: "suspending" },
-            data: { state: bot.computer.state },
-          });
-          throw new ORPCError("CONFLICT", {
-            message: "Other Team bots are still using this computer",
-          });
-        }
-        await deps.prisma.computerExecutionLease.deleteMany({
-          where: { computerId: bot.computer.id, botId: bot.id },
-        });
         try {
-          if (bot.computer.providerRef) {
-            const ctx = computerContext(context.actor, bot.id, "stop");
-            const ref = toComputerRef(bot.computer);
-            try {
-              await checkpointAndRecordComputerWorkspace(deps, bot.computer, ref, ctx);
-              await deps.sandbox.stop(ref, ctx);
-            } catch (error) {
-              // The sandbox is already gone: nothing left to checkpoint or stop.
-              if (!isSandboxGoneError(error)) throw error;
-            }
-          }
-          await deps.prisma.computer.update({
-            where: { id: bot.computer.id },
-            data: {
-              state: "stopped",
-              controlHolder: "none",
-              controlLeaseId: null,
-              controlLeaseExpiresAt: null,
-              controlBotId: null,
-              controlRunId: null,
+          const otherRun = await deps.prisma.run.findFirst({
+            where: {
+              botId: { not: bot.id },
+              status: { in: [...ACTIVE_RUN_STATUSES] },
+              bot: { computerId: bot.computer.id },
             },
+            select: { id: true },
+          });
+          if (otherRun)
+            throw new ORPCError("CONFLICT", {
+              message: "Other Team bots are still using this computer",
+            });
+          await deps.prisma.computerExecutionLease.deleteMany({
+            where: { computerId: bot.computer.id, botId: bot.id },
           });
         } catch (error) {
-          await deps.prisma.computer
-            .updateMany({
-              where: { id: bot.computer.id, state: "suspending" },
-              data: { state: "error" },
-            })
-            .catch(() => undefined);
+          await maintenance.finish(bot.computer.state, "failed");
           throw error;
         }
+        await checkpointAndStopComputerWorkspace(
+          deps,
+          bot.computer,
+          bot.computer.providerRef ? toComputerRef(bot.computer) : null,
+          maintenance,
+          { state: "stopped" },
+        );
         await deps.jobs.cancel(
           computerControlExpireJobKey(bot.computer.id, controlLeaseId ?? undefined),
         );
@@ -2738,9 +2727,13 @@ export function createRouter(deps: RouterDeps) {
         const rows = await deps.prisma.computerUpdate.findMany({
           where: {
             status: { in: ["queued", "running", "interrupted", "failed"] },
+            OR: [
+              { computer: { bots: { some: { userId: context.actor.userId, archivedAt: null } } } },
+              { action: "checkpoint", status: "interrupted", computer: { scope: "dedicated" } },
+            ],
             computer: {
               spaceId: context.actor.spaceId,
-              bots: { some: { userId: context.actor.userId, archivedAt: null } },
+              bots: { some: { userId: context.actor.userId } },
             },
           },
           include: {
@@ -2766,9 +2759,15 @@ export function createRouter(deps: RouterDeps) {
             where: {
               id: input.id,
               status: "interrupted",
+              OR: [
+                {
+                  computer: { bots: { some: { userId: context.actor.userId, archivedAt: null } } },
+                },
+                { action: "checkpoint", computer: { scope: "dedicated" } },
+              ],
               computer: {
                 spaceId: context.actor.spaceId,
-                bots: { some: { userId: context.actor.userId, archivedAt: null } },
+                bots: { some: { userId: context.actor.userId } },
               },
             },
           });

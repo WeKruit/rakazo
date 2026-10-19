@@ -15,6 +15,39 @@ const context = {
 };
 
 describe("E2B computer backend", () => {
+  it.each(["cached", "uncached"])("propagates an unknown %s pause outcome", async (source) => {
+    const failure = new TimeoutError("request timed out");
+    const pause = vi.fn().mockRejectedValue(failure);
+    const provider = new E2BSandboxProvider("test-key", {
+      pause,
+      connect: vi.fn(async () => ({ sandboxId: "existing", pause })),
+    } as unknown as E2BSandboxSdk);
+    const computer = {
+      id: "existing",
+      providerRef: "existing",
+      kind: "e2b" as const,
+      botId: "bot",
+    };
+    if (source === "cached")
+      await provider.provision(
+        { botId: "bot", homePath: "/ignored", providerRef: "existing", providerKind: "e2b" },
+        context,
+      );
+    await expect(provider.stop(computer, context)).rejects.toBe(failure);
+    expect(pause).toHaveBeenCalledOnce();
+  });
+
+  it("accepts an explicitly gone sandbox as stopped", async () => {
+    const pause = vi.fn().mockRejectedValue(new SandboxNotFoundError("Sandbox existing not found"));
+    const provider = new E2BSandboxProvider("test-key", { pause } as unknown as E2BSandboxSdk);
+    await expect(
+      provider.stop(
+        { id: "existing", providerRef: "existing", kind: "e2b", botId: "bot" },
+        context,
+      ),
+    ).resolves.toBeUndefined();
+    expect(pause).toHaveBeenCalledOnce();
+  });
   it("reports SDK nonzero command output with its real exit code", async () => {
     const failure = new CommandExitError({
       exitCode: 7,

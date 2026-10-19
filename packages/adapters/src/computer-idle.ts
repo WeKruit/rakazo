@@ -11,7 +11,10 @@ import type { PrismaClient, ThreadEvents } from "@rakazo/db";
 import { getLogger } from "@rakazo/logging";
 import { expireComputerControl, hasActiveComputerControl } from "./computer-control.js";
 import { toComputerRef } from "./computer-lifecycle.js";
-import { checkpointComputerWorkspace } from "./computer-workspace.js";
+import {
+  checkpointAndStopComputerWorkspace,
+  claimComputerWorkspaceMaintenance,
+} from "./computer-workspace.js";
 
 export const DEFAULT_SANDBOX_IDLE_MS = 10 * 60 * 1000;
 const BACKGROUND_WORK_MARKER_PREFIX = "/tmp/rakazo-background-";
@@ -216,12 +219,14 @@ export async function sleepComputerIfIdle(
   }
 
   const ref = toComputerRef(computer);
+  const botId = computer.controlBotId ?? computer.bots[0]?.id;
+  if (!botId) throw new Error("Computer checkpoint requires a bot id");
   const ctx: AdapterContext = {
     operationId: "computer.sleep",
     traceId: "computer.sleep",
     spaceId: computer.spaceId,
     userId: computer.userId,
-    botId: computer.controlBotId ?? undefined,
+    botId,
     signal: new AbortController().signal,
   };
   if (await hasActiveBackgroundWork(deps.sandbox, ref, ctx, computerId)) {
@@ -231,19 +236,23 @@ export async function sleepComputerIfIdle(
   }
 
   const checkpointedAt = new Date();
-  const recorded = await deps.prisma.computer.updateMany({
-    where: {
-      id: computerId,
-      state: "running",
-      maintenanceId: null,
+  const maintenance = await claimComputerWorkspaceMaintenance(
+    deps.prisma,
+    {
+      computerId,
+      botId,
       providerRef: computer.providerRef,
-      updatedAt: computer.updatedAt,
-      executionRunId: null,
-      executionLeases: { none: { expiresAt: { gt: checkpointedAt } } },
+      where: {
+        state: "running",
+        providerRef: computer.providerRef,
+        updatedAt: computer.updatedAt,
+        executionRunId: null,
+        executionLeases: { none: { expiresAt: { gt: checkpointedAt } } },
+      },
     },
-    data: { state: "suspending", updatedAt: checkpointedAt },
-  });
-  if (recorded.count !== 1) {
+    ctx,
+  );
+  if (!maintenance) {
     scheduleComputerSleep(deps.jobs, computerId);
     return;
   }
@@ -253,100 +262,21 @@ export async function sleepComputerIfIdle(
     claimStamp: checkpointedAt.toISOString(),
     operationId: ctx.operationId,
   });
-  const suspensionClaim = {
-    id: computerId,
-    state: "suspending",
-    providerRef: computer.providerRef,
-    updatedAt: checkpointedAt,
-  };
-
-  try {
-    const revision = await checkpointComputerWorkspace(
-      deps.home,
-      deps.sandbox,
-      computer.homeKey,
-      ref,
-      ctx,
-    );
-    const saved = await deps.prisma.computer.updateMany({
-      where: suspensionClaim,
-      data: { homeRevision: revision, updatedAt: checkpointedAt },
-    });
-    if (saved.count !== 1) {
-      await deps.prisma.computer.updateMany({
-        where: suspensionClaim,
-        data: { state: "running" },
-      });
+  const stopped = await checkpointAndStopComputerWorkspace(deps, computer, ref, maintenance, {
+    state: "suspended",
+    beforeStop: async () => {
+      const [active, background] = await Promise.all([
+        findActiveRun(deps.prisma, computerId, activeStatuses),
+        hasActiveBackgroundWork(deps.sandbox, ref, maintenance.context, computerId),
+      ]);
+      if (!active && !background) return true;
       scheduleComputerSleep(deps.jobs, computerId);
-      return;
-    }
-  } catch (error) {
-    await deps.prisma.computer.updateMany({
-      where: suspensionClaim,
-      data: { state: "running" },
-    });
-    scheduleComputerSleep(deps.jobs, computerId);
-    throw error;
-  }
-
-  const [current, activeAfterCheckpoint, backgroundAfterCheckpoint] = await Promise.all([
-    deps.prisma.computer.findUnique({
-      where: { id: computerId },
-      select: { state: true, providerRef: true, updatedAt: true },
-    }),
-    findActiveRun(deps.prisma, computerId, activeStatuses),
-    hasActiveBackgroundWork(deps.sandbox, ref, ctx, computerId),
-  ]);
-  if (activeAfterCheckpoint || backgroundAfterCheckpoint) {
-    await deps.prisma.computer.updateMany({
-      where: suspensionClaim,
-      data: { state: "running" },
-    });
-    scheduleComputerSleep(deps.jobs, computerId);
-    if (backgroundAfterCheckpoint) await deps.sandbox.keepAlive?.(ref);
-    return;
-  }
-  if (
-    current?.state !== "suspending" ||
-    current.providerRef !== computer.providerRef ||
-    current.updatedAt.getTime() !== checkpointedAt.getTime()
-  ) {
-    await deps.prisma.computer.updateMany({
-      where: suspensionClaim,
-      data: { state: "running" },
-    });
-    scheduleComputerSleep(deps.jobs, computerId);
-    return;
-  }
-
-  try {
-    getLogger().info("computer.idle.stop.begin", {
-      computerId,
-      claimStamp: checkpointedAt.toISOString(),
-    });
-    await deps.sandbox.stop(ref, ctx);
-    getLogger().info("computer.idle.stop.complete", {
-      computerId,
-      claimStamp: checkpointedAt.toISOString(),
-    });
-  } catch (error) {
-    await deps.prisma.computer.updateMany({
-      where: suspensionClaim,
-      data: { state: "running" },
-    });
-    throw error;
-  }
-  await deps.prisma.computer.update({
-    where: suspensionClaim,
-    data: {
-      state: "suspended",
-      controlHolder: "none",
-      controlLeaseId: null,
-      controlLeaseExpiresAt: null,
-      controlBotId: null,
-      controlRunId: null,
+      if (background) await deps.sandbox.keepAlive?.(ref);
+      return false;
     },
+    onFailure: () => scheduleComputerSleep(deps.jobs, computerId),
   });
+  if (!stopped) return;
   const bots = await deps.prisma.bot.findMany({
     where: { computerId },
     select: { id: true, thread: { select: { id: true } } },
@@ -379,6 +309,7 @@ function loadComputer(prisma: PrismaClient, computerId: string) {
       controlLeaseExpiresAt: true,
       controlBotId: true,
       updatedAt: true,
+      bots: { where: { archivedAt: null }, take: 1, select: { id: true } },
     },
   });
 }

@@ -520,7 +520,7 @@ async function recordTakeoverHandback(
 
 export async function performComputerUpdate(deps: Deps, updateId: string) {
   const claimed = await deps.prisma.computerUpdate.updateMany({
-    where: { id: updateId, status: "queued" },
+    where: { id: updateId, status: "queued", action: { in: ["update", "recover"] } },
     data: { status: "running" },
   });
   if (claimed.count !== 1) return; // Never replay a destructive operation on job redelivery.
@@ -528,6 +528,7 @@ export async function performComputerUpdate(deps: Deps, updateId: string) {
     where: { id: updateId },
     include: { computer: true },
   });
+  if (update.action !== "update" && update.action !== "recover") return;
   const controller = new AbortController();
   const heartbeat = setInterval(() => {
     void deps.prisma.computerUpdate
@@ -610,7 +611,7 @@ export async function reconcileComputerUpdates(deps: Pick<Deps, "prisma" | "jobs
     orderBy: { updatedAt: "asc" },
   });
   for (const update of updates) {
-    if (update.status === "queued") {
+    if (update.status === "queued" && (update.action === "update" || update.action === "recover")) {
       await deps.jobs.enqueue({
         name: "computer.update",
         payload: { updateId: update.id },

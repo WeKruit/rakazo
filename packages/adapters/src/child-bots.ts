@@ -21,10 +21,12 @@ import {
   withTransactionRetry,
 } from "@rakazo/db";
 import { getLogger } from "@rakazo/logging";
+import { ComputerBusyError } from "./computer-lifecycle.js";
 import { BrowserStoppedReleaseError } from "./computer-screens.js";
 import { toComputerRef } from "./computer-support.js";
 import {
-  checkpointAndRecordComputerWorkspace,
+  checkpointAndStopComputerWorkspace,
+  claimComputerWorkspaceMaintenance,
   isTeamBotFolderName,
   removeComputerWorkspaceDirectories,
   teamBrowserProfileName,
@@ -288,6 +290,11 @@ export async function archiveBot(
   const runIds = activeRuns.map((run) => run.id);
   const now = new Date();
   await deps.prisma.$transaction(async (tx) => {
+    if (dedicated) {
+      await tx.$queryRaw`SELECT id FROM computers WHERE id = ${dedicated.id} FOR UPDATE`;
+      const current = await tx.computer.findUnique({ where: { id: dedicated.id } });
+      if (current?.maintenanceId) throw new ComputerBusyError();
+    }
     await tx.run.updateMany({
       where: { id: { in: runIds } },
       data: { status: "cancelled", completedAt: now },
@@ -309,7 +316,7 @@ export async function archiveBot(
     });
     if (dedicated) {
       await tx.computer.updateMany({
-        where: { id: dedicated.id, state: { not: "running" } },
+        where: { id: dedicated.id, maintenanceId: null, state: { not: "running" } },
         data: { state: "stopped" },
       });
     }
@@ -328,15 +335,19 @@ export async function archiveBot(
     : null;
   if (currentDedicated?.providerRef && currentDedicated.state === "running") {
     const ref = toComputerRef(currentDedicated);
-    await checkpointAndRecordComputerWorkspace(deps, currentDedicated, ref, context);
-    await deps.sandbox.stop(ref, context);
-    await deps.prisma.computer.updateMany({
-      where: {
-        id: currentDedicated.id,
-        state: "running",
+    const maintenance = await claimComputerWorkspaceMaintenance(
+      deps.prisma,
+      {
+        computerId: currentDedicated.id,
+        botId: bot.id,
         providerRef: currentDedicated.providerRef,
+        where: { state: "running", providerRef: currentDedicated.providerRef },
       },
-      data: { state: "stopped" },
+      { ...context, botId: bot.id },
+    );
+    if (!maintenance) throw new ComputerBusyError();
+    await checkpointAndStopComputerWorkspace(deps, currentDedicated, ref, maintenance, {
+      state: "stopped",
     });
   }
 }

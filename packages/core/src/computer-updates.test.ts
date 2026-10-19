@@ -13,6 +13,24 @@ const update: ComputerUpdate = {
 };
 afterEach(() => vi.useRealTimers());
 describe("computer update presentation", () => {
+  it("keeps routine checkpointing quiet and exposes its existing interrupted recovery", async () => {
+    const checkpoint = { ...update, action: "checkpoint" as const };
+    let rows: ComputerUpdate[] = [checkpoint];
+    const store = createComputerUpdates({
+      list: async () => rows,
+      start: async () => update,
+      dismiss: async () => {},
+      releaseInterrupted: async () => {},
+    });
+    vi.useFakeTimers();
+    const stop = store.watch();
+    await Promise.resolve();
+    expect(store.getSnapshot().updates).toEqual([]);
+    rows = [{ ...checkpoint, status: "interrupted", canReleaseReservation: true }];
+    await vi.advanceTimersByTimeAsync(15_000);
+    expect(store.getSnapshot().updates).toEqual(rows);
+    stop();
+  });
   it("keeps a newly started update when an older poll returns, and closing does not stop polling", async () => {
     vi.useFakeTimers();
     let resolve!: (rows: ComputerUpdate[]) => void;

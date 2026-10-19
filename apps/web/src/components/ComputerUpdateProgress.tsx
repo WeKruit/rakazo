@@ -54,17 +54,19 @@ export function ComputerUpdateProgress({ onCompleted }: { onCompleted: () => voi
     t`Reconnecting`,
   ];
   const title = (update: ComputerUpdate) =>
-    computerUpdateNeedsAttention(update)
-      ? update.action === "recover"
-        ? t`Recovery failed`
-        : t`Update failed`
-      : update.action === "recover"
-        ? update.mode === "team"
-          ? t`Recovering Team Computer`
-          : t`Recovering ${update.name}’s Computer`
-        : update.mode === "team"
-          ? t`Updating Team Computer`
-          : t`Updating ${update.name}’s Computer`;
+    update.action === "checkpoint"
+      ? t`Saving your workspace`
+      : computerUpdateNeedsAttention(update)
+        ? update.action === "recover"
+          ? t`Recovery failed`
+          : t`Update failed`
+        : update.action === "recover"
+          ? update.mode === "team"
+            ? t`Recovering Team Computer`
+            : t`Recovering ${update.name}’s Computer`
+          : update.mode === "team"
+            ? t`Updating Team Computer`
+            : t`Updating ${update.name}’s Computer`;
   const selected = updates.find((update) => update.id === openId);
   return (
     <>

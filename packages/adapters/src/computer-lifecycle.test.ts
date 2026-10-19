@@ -36,56 +36,62 @@ const context = {
 } satisfies AdapterContext;
 
 describe("computer provisioning", () => {
-  it("stops a provider when archive invalidates its boot claim", async () => {
-    const dataDir = await mkdtemp(path.join(tmpdir(), "rakazo-provision-race-"));
-    const stop = vi.fn().mockResolvedValue(undefined);
-    const releaseScreen = vi.fn().mockResolvedValue(undefined);
-    const updateMany = vi
-      .fn()
-      .mockResolvedValueOnce({ count: 1 })
-      .mockResolvedValueOnce({ count: 0 })
-      .mockResolvedValueOnce({ count: 0 });
-    const computerRow = {
-      id: "computer-1",
-      homeKey: "bot-1",
-      providerRef: "provider-1",
-      kind: "cloud",
-      scope: "dedicated",
-      state: "stopped",
-      controlLeaseId: null,
-      updatedAt: new Date("2024-01-01T00:00:00.000Z"),
-    };
-    const prisma = {
-      computer: {
-        findUniqueOrThrow: vi.fn(async () => ({ ...computerRow })),
-        updateMany: vi.fn(async (args) => {
-          const result = await updateMany(args);
-          if (result.count === 1) {
-            Object.assign(
-              computerRow,
-              { updatedAt: new Date(computerRow.updatedAt.getTime() + 1) },
-              args.data,
-            );
-          }
-          return result;
-        }),
-      },
-    } as unknown as PrismaClient;
-    const sandbox = {
-      provision: vi.fn().mockResolvedValue({
-        id: "provider-1",
-        botId: "bot-1",
-        kind: "cloud",
+  it.each([false, true])(
+    "preserves a reused provider after archive invalidates boot (pause fails=%s)",
+    async (pauseFails) => {
+      const dataDir = await mkdtemp(path.join(tmpdir(), "rakazo-provision-race-"));
+      const stopError = new Error("pause timed out");
+      const stop = pauseFails
+        ? vi.fn().mockRejectedValue(stopError)
+        : vi.fn().mockResolvedValue(undefined);
+      const destroy = vi.fn().mockResolvedValue(undefined);
+      const releaseScreen = vi.fn().mockResolvedValue(undefined);
+      const updateMany = vi
+        .fn()
+        .mockResolvedValueOnce({ count: 1 })
+        .mockResolvedValueOnce({ count: 0 })
+        .mockResolvedValueOnce({ count: 0 });
+      const computerRow = {
+        id: "computer-1",
+        homeKey: "bot-1",
         providerRef: "provider-1",
-      }),
-      prepare: vi.fn().mockResolvedValue(undefined),
-      stop,
-      releaseScreen,
-    } as unknown as SandboxProvider;
+        kind: "cloud",
+        scope: "dedicated",
+        state: "stopped",
+        controlLeaseId: null,
+        updatedAt: new Date("2024-01-01T00:00:00.000Z"),
+      };
+      const prisma = {
+        computer: {
+          findUniqueOrThrow: vi.fn(async () => ({ ...computerRow })),
+          updateMany: vi.fn(async (args) => {
+            const result = await updateMany(args);
+            if (result.count === 1) {
+              Object.assign(
+                computerRow,
+                { updatedAt: new Date(computerRow.updatedAt.getTime() + 1) },
+                args.data,
+              );
+            }
+            return result;
+          }),
+        },
+      } as unknown as PrismaClient;
+      const sandbox = {
+        provision: vi.fn().mockResolvedValue({
+          id: "provider-1",
+          botId: "bot-1",
+          kind: "cloud",
+          providerRef: "provider-1",
+        }),
+        prepare: vi.fn().mockResolvedValue(undefined),
+        stop,
+        destroy,
+        releaseScreen,
+      } as unknown as SandboxProvider;
 
-    try {
-      await expect(
-        provisionComputer(
+      try {
+        const result = provisionComputer(
           {
             prisma,
             sandbox,
@@ -96,28 +102,34 @@ describe("computer provisioning", () => {
           },
           "computer-1",
           context,
-        ),
-      ).rejects.toThrow("Computer is busy");
-      expect(releaseScreen).toHaveBeenCalledOnce();
-      expect(stop).toHaveBeenCalledOnce();
-      expect(prisma.computer.updateMany).toHaveBeenNthCalledWith(
-        2,
-        expect.objectContaining({
-          where: {
-            maintenanceId: null,
-            id: "computer-1",
-            state: "booting",
-            updatedAt: expect.any(Date),
-            providerRef: "provider-1",
-            kind: "cloud",
-            bots: { some: { id: "bot-1", archivedAt: null } },
-          },
-        }),
-      );
-    } finally {
-      await rm(dataDir, { recursive: true, force: true });
-    }
-  });
+        );
+        if (pauseFails)
+          await expect(result).rejects.toMatchObject({
+            errors: [expect.any(ComputerBusyError), stopError],
+          });
+        else await expect(result).rejects.toThrow("Computer is busy");
+        expect(destroy).not.toHaveBeenCalled();
+        expect(releaseScreen).toHaveBeenCalledOnce();
+        expect(stop).toHaveBeenCalledOnce();
+        expect(prisma.computer.updateMany).toHaveBeenNthCalledWith(
+          2,
+          expect.objectContaining({
+            where: {
+              maintenanceId: null,
+              id: "computer-1",
+              state: "booting",
+              updatedAt: expect.any(Date),
+              providerRef: "provider-1",
+              kind: "cloud",
+              bots: { some: { id: "bot-1", archivedAt: null } },
+            },
+          }),
+        );
+      } finally {
+        await rm(dataDir, { recursive: true, force: true });
+      }
+    },
+  );
 
   it("does not reclaim abandoned booting when a live foreign lease exists", async () => {
     // Live foreign lease present: Prisma matches the booting reclaim only when the where
@@ -1588,11 +1600,16 @@ describe("computer execution leases", () => {
       expiresAt = data.expiresAt;
       return { count: 1 };
     });
-    const prisma = {
+    const client = {
+      $queryRaw: vi.fn().mockResolvedValue([]),
       computer: {
         findUniqueOrThrow: vi.fn().mockResolvedValue({ scope: "team", state: "running" }),
       },
       computerExecutionLease: { create, updateMany, updateManyAndReturn },
+    };
+    const prisma = {
+      ...client,
+      $transaction: vi.fn(async (callback: (tx: typeof client) => unknown) => callback(client)),
     } as unknown as PrismaClient;
     const lease = {
       computerId: "computer-1",
@@ -1697,6 +1714,7 @@ describe("computer execution leases", () => {
     };
     const create = vi.fn().mockRejectedValue(Object.assign(new Error("unique"), { code: "P2002" }));
     const client = {
+      $queryRaw: vi.fn().mockResolvedValue([]),
       thread: {
         update: vi
           .fn()
@@ -1936,17 +1954,22 @@ function leasePrisma(options: {
     scope: options.scope,
     state: "running",
   });
+  const client = {
+    $queryRaw: vi.fn().mockResolvedValue([]),
+    computer: {
+      findUniqueOrThrow,
+    },
+    computerExecutionLease: {
+      updateManyAndReturn,
+      create,
+      updateMany,
+      deleteMany,
+    },
+  };
   return {
     client: {
-      computer: {
-        findUniqueOrThrow,
-      },
-      computerExecutionLease: {
-        updateManyAndReturn,
-        create,
-        updateMany,
-        deleteMany,
-      },
+      ...client,
+      $transaction: vi.fn(async (callback: (tx: typeof client) => unknown) => callback(client)),
     } as unknown as PrismaClient,
     updateMany,
     updateManyAndReturn,

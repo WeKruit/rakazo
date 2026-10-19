@@ -88,7 +88,7 @@ describe("Team run checkpoints", () => {
     const { checkpointRunComputerWorkspace } = await import("./computer-workspace.js");
     const exportWorkspace = vi.fn();
     const updateMany = vi.fn().mockResolvedValue({ count: 0 });
-    const deps = { sandbox: { exportWorkspace }, home: {}, prisma: { computer: { updateMany } } };
+    const deps = checkpointDeps(exportWorkspace, updateMany);
     const result = await checkpointRunComputerWorkspace(
       deps as never,
       { id: "team", homeKey: "team", scope: "team" },
@@ -100,10 +100,14 @@ describe("Team run checkpoints", () => {
     expect(updateMany).toHaveBeenCalledWith(
       expect.objectContaining({
         where: expect.objectContaining({
-          state: "running",
-          executionLeases: {
-            none: { expiresAt: { gt: expect.any(Date) }, NOT: { runId: "run-a", fence: 2 } },
-          },
+          AND: expect.arrayContaining([
+            expect.objectContaining({
+              state: "running",
+              executionLeases: {
+                none: { expiresAt: { gt: expect.any(Date) }, NOT: { runId: "run-a", fence: 2 } },
+              },
+            }),
+          ]),
         }),
         data: expect.objectContaining({ state: "suspending" }),
       }),
@@ -117,7 +121,7 @@ describe("Team run checkpoints", () => {
       await Promise.reject(new Error("export failed"));
       yield { path: "unreachable", content: new Uint8Array() };
     });
-    const deps = { sandbox: { exportWorkspace }, home: {}, prisma: { computer: { updateMany } } };
+    const deps = checkpointDeps(exportWorkspace, updateMany);
     await expect(
       checkpointRunComputerWorkspace(
         deps as never,
@@ -130,11 +134,33 @@ describe("Team run checkpoints", () => {
       exportWorkspace.mock.invocationCallOrder[0]!,
     );
     expect(updateMany).toHaveBeenLastCalledWith({
-      where: { id: "team", providerRef: "remote", state: "suspending" },
-      data: { state: "running" },
+      where: {
+        id: "team",
+        providerRef: "remote",
+        state: "suspending",
+        maintenanceId: "checkpoint-1",
+      },
+      data: { state: "running", maintenanceId: null },
     });
   });
 });
+
+function checkpointDeps(
+  exportWorkspace: ReturnType<typeof vi.fn>,
+  updateMany: ReturnType<typeof vi.fn>,
+) {
+  const prisma = {
+    $queryRaw: vi.fn().mockResolvedValue([]),
+    computer: { updateMany },
+    computerUpdate: {
+      create: vi.fn().mockResolvedValue({ id: "checkpoint-1" }),
+      updateMany: vi.fn().mockResolvedValue({ count: 1 }),
+    },
+    $transaction: vi.fn(),
+  };
+  prisma.$transaction.mockImplementation(async (fn) => fn(prisma));
+  return { sandbox: { exportWorkspace }, home: {}, prisma };
+}
 
 describe("Team bot folder cleanup", () => {
   const computer: ComputerRef = {
