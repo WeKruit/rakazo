@@ -184,7 +184,13 @@ async function requireThread(tx: Tx, actor: Actor, threadId: string) {
   return thread;
 }
 
-async function requireRole(tx: Tx, actor: Actor, roleId: string, lock = false) {
+async function requireRole(
+  tx: Tx,
+  actor: Actor,
+  roleId: string,
+  lock = false,
+  thread?: Awaited<ReturnType<typeof requireThread>>,
+) {
   if (lock) {
     // One existing row lock orders role revisions and candidate assessment CAS writes.
     await tx.$queryRaw(
@@ -197,7 +203,8 @@ async function requireRole(tx: Tx, actor: Actor, roleId: string, lock = false) {
       where: { id: roleId, spaceId: actor.spaceId, userId: actor.userId },
     }),
   );
-  await requireThread(tx, actor, role.sourceThreadId);
+  if (role.sourceThreadId === thread?.id) scoped(actor, thread);
+  else await requireThread(tx, actor, role.sourceThreadId);
   return role;
 }
 
@@ -3874,10 +3881,7 @@ async function requireResearchAdoption(
         payload.contextArtifact.sha256 !== ref.sha256))
   )
     throw new RecruitingConflictError();
-  await validateArtifact(tx, actor, payload.contextArtifact);
-  const artifact = await tx.artifact.findUniqueOrThrow({
-    where: { id: payload.contextArtifact.artifactId },
-  });
+  const artifact = await validateArtifact(tx, actor, payload.contextArtifact);
   if (artifact.runId !== run.id) throw new IsolationError();
 }
 
@@ -5301,16 +5305,41 @@ async function nativeCandidatePage(
   actor: Actor,
   runId: string,
   input: NativeCandidateSaveInput,
+  context?: {
+    run: Awaited<ReturnType<typeof requireRun>>;
+    thread: Awaited<ReturnType<typeof requireThread>>;
+  },
 ) {
-  const run = await requireRun(tx, actor, runId);
-  const thread = await requireThread(tx, actor, run.threadId);
+  const run = context?.run ?? (await requireRun(tx, actor, runId));
+  const thread = context?.thread ?? (await requireThread(tx, actor, run.threadId));
+  if (run.id !== runId || thread.id !== run.threadId) throw new IsolationError();
   if (!thread.activeRecruitingRoleId) throw new IsolationError();
-  const role = await requireRole(tx, actor, thread.activeRecruitingRoleId, true);
+  const role = await requireRole(tx, actor, thread.activeRecruitingRoleId, true, thread);
   if (!role.currentRevisionId || role.revision !== input.expectedRoleRevision)
     throw new RecruitingConflictError();
-  // ponytail: scan one run's receipts; index native MCP route metadata if long runs make this costly.
+  // ponytail: filter the native JSON receipt; keep the full parser and provenance checks below.
   const effects = await tx.externalEffect.findMany({
-    where: { spaceId: actor.spaceId, runId, status: "completed" },
+    where: {
+      spaceId: actor.spaceId,
+      runId,
+      status: "completed",
+      request: { path: ["0"], equals: "__rakazoCatalogTool" },
+      OR: ["direct", "connectors_execute_tool", "mcp_execute_tool"].map((tool) => {
+        const route = tool === "direct" ? ["2", "route"] : ["3"];
+        const args = ["2", tool === "direct" ? "args" : "arguments"];
+        return {
+          AND: [
+            { request: { path: ["1"], equals: tool } },
+            { request: { path: [...route, "toolName"], equals: "get_rows" } },
+            { request: { path: [...args, "task_id"], equals: input.providerTaskId } },
+            { request: { path: [...args, "cursor"], equals: input.cursor ?? Prisma.AnyNull } },
+            ...(input.mcpServerId === undefined
+              ? []
+              : [{ request: { path: [...route, "resourceId"], equals: input.mcpServerId } }]),
+          ],
+        };
+      }),
+    },
     orderBy: [{ createdAt: "desc" }, { id: "desc" }],
   });
   for (const effect of effects) {
@@ -5406,7 +5435,7 @@ export async function saveNativeRecruitingCandidatePage(
     if (saving.status === "completed") return saving.result;
     requireResearchLease(run, trusted);
     if (saving.status !== "executing") throw new IsolationError();
-    const source = await nativeCandidatePage(tx, actor, run.id, input);
+    const source = await nativeCandidatePage(tx, actor, run.id, input, { run, thread });
     const bytes = Buffer.from(stableJsonValue(source.snapshot));
     if (
       source.effect.id !== captured.sourceEffectId ||

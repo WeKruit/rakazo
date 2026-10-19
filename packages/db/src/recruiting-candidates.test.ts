@@ -8,6 +8,7 @@ import {
 import { stableJsonValue } from "@rakazo/core/node/approval-effect-key";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import type { PrismaClient } from "./client.js";
+import { Prisma } from "./client.js";
 import { appendEventInTransaction } from "./events.js";
 import { createThreadMessageInTransaction } from "./messages.js";
 import * as recruiting from "./recruiting.js";
@@ -3044,6 +3045,88 @@ describe("native candidate source provenance", () => {
 });
 
 describe("native candidate results without domain actions", () => {
+  it("reuses the locked run and same source thread without rereading validated artifact metadata", async () => {
+    const f = nativeCandidateFixture();
+    await recruiting.saveNativeRecruitingCandidatePage(f.prisma, actor, f.trusted, f.input, {
+      sourceEffectId: "read",
+      rows: [f.row],
+      outputArtifact: f.file,
+    });
+    expect(f.tx.run.findFirst).toHaveBeenCalledTimes(2);
+    expect(f.tx.thread.findFirst).toHaveBeenCalledTimes(4);
+    expect(f.tx.artifact.findUniqueOrThrow).not.toHaveBeenCalled();
+  });
+
+  it("still authorizes a different role source thread before saving", async () => {
+    const f = nativeCandidateFixture();
+    f.role.sourceThreadId = "source-thread";
+    const thread = await f.tx.thread.findFirst();
+    f.tx.thread.findFirst.mockClear();
+    f.tx.thread.findFirst
+      .mockResolvedValueOnce(thread)
+      .mockResolvedValueOnce({ ...thread, id: "source-thread", userId: "other" });
+    await expect(
+      recruiting.saveNativeRecruitingCandidatePage(f.prisma, actor, f.trusted, f.input, {
+        sourceEffectId: "read",
+        rows: [f.row],
+        outputArtifact: f.file,
+      }),
+    ).rejects.toThrow(IsolationError);
+    expect(f.tx.recruitingCandidatePage.create).not.toHaveBeenCalled();
+  });
+
+  it.each(
+    ["direct", "connectors_execute_tool", "mcp_execute_tool"].flatMap((tool) =>
+      [undefined, null, "next-page"].map((cursor) => ({ tool, cursor })),
+    ),
+  )(
+    "filters native $tool receipts by task and cursor $cursor before loading their results",
+    async ({ tool, cursor }) => {
+      const f = nativeCandidateFixture();
+      const route = {
+        connectorId: "mcp",
+        resourceId: "server",
+        resourceRevision: 1,
+        toolName: "get_rows",
+      };
+      const args = { task_id: "provider-task", ...(cursor === undefined ? {} : { cursor }) };
+      f.effect.request = (
+        tool === "direct"
+          ? boundDirectApprovalRequest(route, args, "__rakazoCatalogTool")
+          : catalogApprovalRequest(
+              tool,
+              { id: "server:get_rows", arguments: args },
+              "__rakazoCatalogTool",
+              route,
+            )
+      ) as never;
+      const result = await recruiting.readNativeRecruitingCandidatePage(f.prisma, actor, "run", {
+        ...f.input,
+        cursor: cursor ?? null,
+      });
+      expect(result.effect.id).toBe("read");
+      const argsPath = ["2", tool === "direct" ? "args" : "arguments"];
+      expect(f.tx.externalEffect.findMany).toHaveBeenCalledExactlyOnceWith({
+        where: expect.objectContaining({
+          spaceId: actor.spaceId,
+          runId: "run",
+          status: "completed",
+          request: { path: ["0"], equals: "__rakazoCatalogTool" },
+          OR: expect.arrayContaining([
+            {
+              AND: expect.arrayContaining([
+                { request: { path: ["1"], equals: tool } },
+                { request: { path: [...argsPath, "task_id"], equals: "provider-task" } },
+                { request: { path: [...argsPath, "cursor"], equals: cursor ?? Prisma.AnyNull } },
+              ]),
+            },
+          ]),
+        }),
+        orderBy: [{ createdAt: "desc" }, { id: "desc" }],
+      });
+    },
+  );
+
   it("derives the connection from the completed native receipt when saving without an internal ID", async () => {
     const f = nativeCandidateFixture();
     const { mcpServerId: _, ...input } = f.input;
