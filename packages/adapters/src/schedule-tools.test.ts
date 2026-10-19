@@ -52,6 +52,9 @@ describe("native routine updates", () => {
     "past time",
     "schedule race",
     "job failure",
+    "missing approval target",
+    "blank approval name",
+    "invalid approval input",
   ])("reuses the routine update boundary for %s", async (boundary) => {
     expect(scheduleTools.updateScheduleFromTool).toBeTypeOf("function");
     const actor = {
@@ -65,7 +68,7 @@ describe("native routine updates", () => {
       ...actor,
       botId: "bot",
       threadId: "group-thread",
-      name: "Review",
+      name: boundary === "blank approval name" ? "  " : "Review",
       prompt: "Read saved results",
       crons: ["@once"],
       timezone: "UTC",
@@ -137,7 +140,8 @@ describe("native routine updates", () => {
       routine: {
         findFirst: vi.fn(async ({ where }: { where: { botId?: string; threadId?: string } }) =>
           (boundary === "foreign bot" && where.botId) ||
-          (boundary === "foreign group" && where.threadId)
+          (boundary === "foreign group" && where.threadId) ||
+          boundary === "missing approval target"
             ? null
             : { ...row },
         ),
@@ -173,9 +177,60 @@ describe("native routine updates", () => {
         : boundary === "pause"
           ? { active: false }
           : {
+              ...(boundary === "resume"
+                ? {
+                    name: "Renamed review",
+                    prompt: "Read the latest note\nKeep exact text",
+                    crons: ["@once"],
+                    timezone: "UTC",
+                    notify: false,
+                  }
+                : {}),
               active: true,
               runAt: new Date(boundary === "past time" ? 0 : Date.now() + 120_000).toISOString(),
             };
+    const approval = scheduleTools.prepareScheduleUpdateFromTool(deps, native, {
+      routineId: "routine",
+      ...patch,
+      ...(boundary === "invalid approval input" ? { botId: "untrusted" } : {}),
+    });
+    if (
+      [
+        "foreign bot",
+        "foreign group",
+        "expired lease",
+        "cancelled run",
+        "wrong run bot",
+        "removed group member",
+        "missing approval target",
+        "blank approval name",
+        "invalid approval input",
+      ].includes(boundary)
+    ) {
+      await expect(approval).rejects.toThrow();
+    } else {
+      expect(await approval).toEqual({ routineName: row.name, ...patch });
+      expect(tx.routine.findFirst).toHaveBeenCalledWith({
+        where: {
+          id: "routine",
+          botId: "bot",
+          threadId: "group-thread",
+          spaceId: actor.spaceId,
+          userId: actor.userId,
+          bot: { archivedAt: null },
+        },
+      });
+    }
+    expect(update).not.toHaveBeenCalled();
+    expect(deps.events.append).not.toHaveBeenCalled();
+    expect(enqueue).not.toHaveBeenCalled();
+    expect(cancel).not.toHaveBeenCalled();
+    if (
+      ["missing approval target", "blank approval name", "invalid approval input"].includes(
+        boundary,
+      )
+    )
+      return;
     const call = () =>
       scheduleTools.updateScheduleFromTool(deps, native, { routineId: "routine", ...patch });
     if (boundary === "job failure") {

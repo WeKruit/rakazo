@@ -395,6 +395,41 @@ async function assertScheduleRun(client: Prisma.TransactionClient, native: Nativ
     throw new IsolationError();
 }
 
+async function readScopedRoutine(
+  client: Prisma.TransactionClient,
+  actor: Actor,
+  routineId: string,
+  native?: NativeScheduleContext,
+) {
+  // Archived bots keep their routines paused, so resolve an active parent before any write.
+  const existing = await client.routine.findFirst({
+    where: {
+      id: routineId,
+      ...(native
+        ? { botId: native.botId, ...(native.groupId ? { threadId: native.threadId } : {}) }
+        : {}),
+      spaceId: actor.spaceId,
+      userId: actor.userId,
+      bot: { archivedAt: null },
+    },
+  });
+  if (!existing) throw new RoutineUpdateError("NOT_FOUND");
+  return existing;
+}
+
+export async function prepareScheduleUpdateFromTool(
+  deps: Pick<ScheduleToolDeps, "prisma">,
+  native: NativeScheduleContext,
+  raw: unknown,
+) {
+  const { routineId, ...changes } = ScheduleUpdateToolInputSchema.parse(raw);
+  await assertScheduleRun(deps.prisma, native);
+  const existing = await readScopedRoutine(deps.prisma, native.actor, routineId, native);
+  if (!existing.name?.trim())
+    throw new RoutineUpdateError("BAD_REQUEST", { message: "Routine name is unavailable." });
+  return { routineName: existing.name, ...changes };
+}
+
 export async function updateRoutine(
   deps: ScheduleToolDeps,
   actor: Actor,
@@ -410,19 +445,7 @@ export async function updateRoutine(
 ) {
   const native = options.native;
   const executeUpdate = async (client: Prisma.TransactionClient) => {
-    // Archived bots keep their routines paused, so resolve an active parent before any write.
-    const existing = await client.routine.findFirst({
-      where: {
-        id: input.routineId,
-        ...(native
-          ? { botId: native.botId, ...(native.groupId ? { threadId: native.threadId } : {}) }
-          : {}),
-        spaceId: actor.spaceId,
-        userId: actor.userId,
-        bot: { archivedAt: null },
-      },
-    });
-    if (!existing) throw new RoutineUpdateError("NOT_FOUND");
+    const existing = await readScopedRoutine(client, actor, input.routineId, native);
     const bot = await client.bot.findFirst({
       where: { id: existing.botId, spaceId: actor.spaceId, userId: actor.userId, archivedAt: null },
       include: { thread: true },

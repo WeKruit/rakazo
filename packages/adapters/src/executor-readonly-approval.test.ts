@@ -19,6 +19,7 @@ import { createRunExecutor, selectBuiltinToolsForRun } from "./executor.js";
 import { catalogEntries, resolveCatalogCall } from "./lazy-tool-catalog.js";
 import type * as RecruitingAssessmentModule from "./recruiting-assessment.js";
 import type * as ScheduleToolsModule from "./schedule-tools.js";
+import { RoutineUpdateError } from "./schedule-tools.js";
 
 const candidateReads = vi.hoisted(() => vi.fn());
 vi.mock("./recruiting-assessment.js", async (original) => ({
@@ -30,8 +31,10 @@ const replyProof = vi.hoisted(() => vi.fn());
 const crmApprovalProof = vi.hoisted(() => vi.fn());
 const nativeShortlist = vi.hoisted(() => ({ prepare: vi.fn(), execute: vi.fn() }));
 const scheduleUpdate = vi.hoisted(() => vi.fn());
+const schedulePrepare = vi.hoisted(() => vi.fn());
 vi.mock("./schedule-tools.js", async (original) => ({
   ...(await original<typeof ScheduleToolsModule>()),
+  prepareScheduleUpdateFromTool: schedulePrepare,
   updateScheduleFromTool: scheduleUpdate,
 }));
 const recruitingReply = vi.hoisted(() => ({ resolve: vi.fn(), admit: vi.fn(), claim: vi.fn() }));
@@ -50,6 +53,7 @@ beforeEach(() => {
   nativeShortlist.prepare.mockReset();
   nativeShortlist.execute.mockReset();
   scheduleUpdate.mockReset();
+  schedulePrepare.mockReset();
   replyProof.mockReset().mockImplementation(async () => ({
     effectId: "native-email-read",
     result: { structuredContent: replyAnchor },
@@ -572,6 +576,80 @@ describe("native saved candidate reads", () => {
 });
 
 describe("native schedule update uncertainty", () => {
+  it.each(["user", "webhook"])(
+    "uses the verified routine name for %s approval and preserves the original request",
+    async (trigger) => {
+      const f = fixture({
+        name: "schedule_update",
+        builtin: true,
+        trigger,
+        rules: [{ effect: "require_approval", matchKind: "tool", matchValue: "schedule_update" }],
+      });
+      const args = {
+        routineId: "internal-routine-target",
+        prompt: "Read the latest note",
+        active: false,
+      };
+      const saved = { ok: true, routineId: args.routineId, active: false };
+      schedulePrepare.mockResolvedValue({
+        routineName: "Saved review routine",
+        prompt: args.prompt,
+        active: false,
+      });
+      scheduleUpdate.mockResolvedValue(saved);
+      f.setCalls([{ args, executionId: "review" }]);
+      await f.run();
+      expect(schedulePrepare).toHaveBeenCalledWith(
+        expect.anything(),
+        expect.objectContaining({
+          actor: expect.objectContaining({ spaceId: "space-1", userId: "user-1" }),
+          botId: "bot-1",
+          threadId: "thread-1",
+          groupId: null,
+          runId: "run-1",
+          leaseOwner: "worker-1",
+          leaseFence: 1,
+        }),
+        args,
+      );
+      expect(f.effects).toHaveLength(1);
+      expect(f.effects[0]!.request).toEqual(args);
+      const card = f.pauseRunForInput.mock.calls[0]![0].blocks[0];
+      expect(card).toMatchObject({ kind: "ask", approvalEffectId: f.effects[0]!.id });
+      if (card?.kind !== "ask") throw new Error("Expected a routine approval card");
+      expect(card.detail).toContain("Saved review routine");
+      expect(card.detail).toContain(args.prompt);
+      expect(card.detail).toContain("Paused");
+      expect(card.detail).not.toContain(args.routineId);
+      expect(scheduleUpdate).not.toHaveBeenCalled();
+      f.effects[0]!.status = "approved";
+      await f.run();
+      expect(scheduleUpdate).toHaveBeenCalledOnce();
+      expect(scheduleUpdate.mock.calls[0]![2]).toEqual(args);
+      expect(f.results.at(-1)).toEqual(saved);
+    },
+  );
+
+  it.each(["unavailable scope", "missing name"])(
+    "does not create an approval card for %s",
+    async (boundary) => {
+      const f = fixture({ name: "schedule_update", builtin: true, trigger: "webhook" });
+      schedulePrepare.mockRejectedValue(
+        boundary === "missing name"
+          ? new RoutineUpdateError("BAD_REQUEST", { message: "Routine name is unavailable." })
+          : new IsolationError(),
+      );
+      f.setCalls([
+        { args: { routineId: "routine", active: false }, executionId: "invalid-target" },
+      ]);
+      await f.run();
+      expect(f.results.at(-1)).toHaveProperty("error");
+      expect(f.effects[0]!.status).toBe("completed");
+      expect(f.pauseRunForInput).not.toHaveBeenCalled();
+      expect(scheduleUpdate).not.toHaveBeenCalled();
+    },
+  );
+
   it("uses current runtime identity and respects native replay and disable policy", async () => {
     const f = fixture({ name: "schedule_update", builtin: true });
     const args = { routineId: "routine", active: false };
@@ -594,6 +672,7 @@ describe("native schedule update uncertainty", () => {
     );
     expect(f.results.at(-1)).toEqual(saved);
     expect(f.pauseRunForInput).not.toHaveBeenCalled();
+    expect(schedulePrepare).not.toHaveBeenCalled();
     await f.run();
     expect(scheduleUpdate).toHaveBeenCalledOnce();
     expect(f.effects).toHaveLength(1);

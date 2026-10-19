@@ -402,6 +402,8 @@ import {
   filterBuiltinToolsForRun,
   filterBuiltinToolsForThread,
   listSchedulesFromTool,
+  prepareScheduleUpdateFromTool,
+  RoutineUpdateError,
   updateScheduleFromTool,
 } from "./schedule-tools.js";
 import { loadAgentScratchpadContext } from "./scratchpad-context.js";
@@ -5882,6 +5884,35 @@ export function createRunExecutor(deps: ExecutorDeps) {
                 );
               } catch (error) {
                 const result = roleError(error);
+                return (await completeEffect(deps, applied!.effect.id, "intended", result))
+                  ? result
+                  : uncertainEffectResult(name);
+              }
+            }
+            if (name === "schedule_update") {
+              try {
+                approvalArgs = await prepareScheduleUpdateFromTool(
+                  deps,
+                  {
+                    actor: researchActor.actor,
+                    botId: bot.id,
+                    threadId: thread.id,
+                    groupId: thread.groupId,
+                    runId,
+                    leaseOwner: workerId,
+                    leaseFence: fence,
+                  },
+                  args,
+                );
+              } catch (error) {
+                let result: { error: string; code?: string };
+                if (error instanceof RoutineUpdateError)
+                  result = { error: error.message || "Schedule not found.", code: error.code };
+                else if (error instanceof IsolationError)
+                  result = { error: "Schedule run is no longer available." };
+                else if (error instanceof Error && error.name === "ZodError")
+                  result = { error: sanitizeConnectorError(error, runSecrets) };
+                else throw error;
                 return (await completeEffect(deps, applied!.effect.id, "intended", result))
                   ? result
                   : uncertainEffectResult(name);

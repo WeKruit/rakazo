@@ -3,7 +3,7 @@ import {
   RecruitingApprovalToolInputSchema,
   RecruitingPreferenceFeedbackSchema,
 } from "@rakazo/contracts";
-import { humanizeToolName, redactSecrets } from "@rakazo/core";
+import { formatCron, humanizeToolName, redactSecrets } from "@rakazo/core";
 import { redactToolArgsForReview } from "./auto-review.js";
 import { sharedMemorySaveError } from "./builtin-tools.js";
 import { nativeMemorySaveError } from "./memory-tools.js";
@@ -19,6 +19,9 @@ export function buildApprovalAskBlock(
   secrets: string[],
   options?: { reviewReason?: string; oneTimeOnly?: boolean; crmOperation?: CrmApprovalOperation },
 ): Extract<MessageBlock, { kind: "ask" }> {
+  const scheduleUpdate = toolName === "schedule_update";
+  if (scheduleUpdate && (typeof args.routineName !== "string" || !args.routineName.trim()))
+    throw new Error("Schedule approval requires a verified routine name.");
   const shortlist = toolName === "recruiting_shortlist";
   if (
     shortlist &&
@@ -64,21 +67,28 @@ export function buildApprovalAskBlock(
     approvalEffectId: effectId,
     text: truncate(
       redactSecrets(
-        shortlist
-          ? "Review shortlist change"
-          : crmOperation === "crm_update_candidate_stage"
-            ? "Review CRM stage change"
-            : crmOperation === "crm_append_candidate_note"
-              ? "Review CRM note"
-              : toolName === "create_space" || recruitingApproval
-                ? `${summary}?`
-                : `Review before ${summary}`,
+        scheduleUpdate
+          ? "Review routine change"
+          : shortlist
+            ? "Review shortlist change"
+            : crmOperation === "crm_update_candidate_stage"
+              ? "Review CRM stage change"
+              : crmOperation === "crm_append_candidate_note"
+                ? "Review CRM note"
+                : toolName === "create_space" || recruitingApproval
+                  ? `${summary}?`
+                  : `Review before ${summary}`,
         secrets,
       ),
       MAX_APPROVAL_SUMMARY_LENGTH,
     ),
     detail:
-      safeDetail && !recruitingApproval && !preference && !nativeMemory && !oneTimeOnly
+      safeDetail &&
+      !scheduleUpdate &&
+      !recruitingApproval &&
+      !preference &&
+      !nativeMemory &&
+      !oneTimeOnly
         ? truncate(safeDetail, MAX_APPROVAL_DETAIL_LENGTH)
         : safeDetail,
     status: "pending",
@@ -146,6 +156,18 @@ function formatApprovalDetail(
   const lines: string[] = [];
   if (reviewReason?.trim()) {
     lines.push(reviewReason.trim().replace(/\u2014|\u2013/g, "-"));
+  }
+  if (toolName === "schedule_update") {
+    lines.push(`Routine: ${args.routineName}`);
+    if (args.name !== undefined) lines.push(`Name: ${args.name}`);
+    if (args.prompt !== undefined) lines.push(`Prompt:\n${args.prompt}`);
+    if (Array.isArray(args.crons))
+      lines.push(`Schedules: ${args.crons.map(formatCron).join("; ") || "None"}`);
+    if (args.timezone !== undefined) lines.push(`Timezone: ${args.timezone}`);
+    if (args.active !== undefined) lines.push(`Status: ${args.active ? "Active" : "Paused"}`);
+    if (args.notify !== undefined) lines.push(`Notifications: ${args.notify ? "On" : "Off"}`);
+    if (args.runAt !== undefined) lines.push(`Run at: ${args.runAt}`);
+    return lines.join("\n");
   }
   if (toolName === "recruiting_shortlist")
     return [

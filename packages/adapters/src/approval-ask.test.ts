@@ -3,6 +3,57 @@ import { describe, expect, it } from "vitest";
 import { buildApprovalAskBlock } from "./approval-ask.js";
 
 describe("buildApprovalAskBlock", () => {
+  it.each([false, true])("shows the complete trusted routine update (%s)", (active) => {
+    const prompt = `  Exact instruction.\n${"Keep this paragraph. ".repeat(240)}Ending token-secret  `;
+    const args = {
+      routineName: "Saved review",
+      name: "Updated review",
+      prompt,
+      crons: ["0 9 * * 1", "15 14 * * 5"],
+      timezone: "America/Chicago",
+      active,
+      notify: !active,
+      runAt: "2026-10-20T18:00:00-05:00",
+      routineId: "internal-routine-id",
+      expectedRevision: 7,
+    };
+    const block = buildApprovalAskBlock("routine-effect", "schedule_update", args, [
+      "token-secret",
+    ]);
+    expect(block.text).toBe("Review routine change");
+    expect(block.detail).toBe(
+      `Routine: Saved review\nName: Updated review\nPrompt:\n${prompt.replace("token-secret", "[redacted]")}\nSchedules: Every Monday at 9:00 AM; Every Friday at 2:15 PM\nTimezone: America/Chicago\nStatus: ${active ? "Active" : "Paused"}\nNotifications: ${active ? "Off" : "On"}\nRun at: 2026-10-20T18:00:00-05:00`,
+    );
+    expect(block.detail!.length).toBeGreaterThan(4_000);
+    expect(block.detail).not.toMatch(/internal-|expectedRevision|routineId|token-secret/);
+    expect(block.approvalEffectId).toBe("routine-effect");
+    expect(block.actions?.map((action) => action.id)).toEqual(["allow", "always", "deny"]);
+    expect(args.prompt).toBe(prompt);
+  });
+  it("shows only requested routine changes and keeps the one-time approval option", () => {
+    const block = buildApprovalAskBlock(
+      "routine-effect",
+      "schedule_update",
+      { routineName: "Saved review", active: false, crons: [] },
+      [],
+      { oneTimeOnly: true },
+    );
+    expect(block.detail).toBe("Routine: Saved review\nSchedules: None\nStatus: Paused");
+    expect(block.actions?.map((action) => action.id)).toEqual(["allow", "deny"]);
+  });
+  it.each([undefined, null, "", "   ", 42])(
+    "rejects routine approval without a verified name: %s",
+    (routineName) => {
+      expect(() =>
+        buildApprovalAskBlock(
+          "routine-effect",
+          "schedule_update",
+          { routineName, routineId: "internal-routine-id", active: false },
+          [],
+        ),
+      ).toThrow("Schedule approval requires a verified routine name.");
+    },
+  );
   it.each([true, false])("shows only the trusted shortlist change (%s)", (shortlisted) => {
     const args = {
       candidateName: "Ada Example",
