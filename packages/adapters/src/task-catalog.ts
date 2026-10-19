@@ -63,7 +63,6 @@ export async function taskCatalogFromTool(deps: TaskCatalogToolDeps, input: Task
     return [
       {
         name: tool.name,
-        description: tool.description,
         readOnly: tool.readOnly ?? false,
         ...(tool.route?.resourceId ? { resourceId: tool.route.resourceId } : {}),
       },
