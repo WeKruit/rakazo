@@ -2,6 +2,7 @@ import type { ToolCall } from "@earendil-works/pi-ai";
 import { validateToolArguments } from "@earendil-works/pi-ai";
 import { ElicitRequestFormParamsSchema } from "@modelcontextprotocol/sdk/types.js";
 import {
+  ArtifactReadInputSchema,
   AskUserInputSchema,
   RecruitingCandidatesToolInputSchema,
   RecruitingRoleToolInputSchema,
@@ -12,6 +13,80 @@ import { parseConnectorToolArgs } from "./lazy-tool-catalog.js";
 import { jsonSchemaParameters, parametersFor } from "./pi-runtime.js";
 
 describe("jsonSchemaParameters", () => {
+  it("preserves artifact paging integers and path indexes on the native Pi wire", () => {
+    const tool = builtinAgentTools.find((entry) => entry.name === "artifact_read")!;
+    const parameters = parametersFor(tool);
+    const wire = JSON.parse(JSON.stringify(parameters));
+    expect(wire.properties.offset).toMatchObject({ type: "integer", minimum: 0 });
+    expect(wire.properties.limit).toMatchObject({ type: "integer", minimum: 1, maximum: 16000 });
+    expect(wire.properties.jsonPath.items.anyOf).toContainEqual(
+      expect.objectContaining({ type: "integer", minimum: 0 }),
+    );
+    const base = { artifactId: "artifact-1", jsonPath: ["rows", 0, "text"], offset: 0, limit: 1 };
+    for (const args of [base, { ...base, jsonPath: [], offset: 2, limit: 16000 }]) {
+      expect(ArtifactReadInputSchema.parse(args)).toEqual(args);
+      expect(
+        validateToolArguments(
+          { name: tool.name, description: tool.description, parameters },
+          { type: "toolCall", id: "artifact-page", name: tool.name, arguments: args },
+        ),
+      ).toEqual(args);
+    }
+    for (const args of [
+      { ...base, offset: -1 },
+      { ...base, offset: 0.5 },
+      { ...base, limit: 0 },
+      { ...base, limit: 16001 },
+      { ...base, limit: 1.5 },
+      { ...base, jsonPath: ["rows", -1, "text"] },
+      { ...base, jsonPath: ["rows", 0.5, "text"] },
+    ]) {
+      expect(ArtifactReadInputSchema.safeParse(args).success).toBe(false);
+      expect(() => parseConnectorToolArgs(wire, args)).toThrow();
+    }
+  });
+
+  it("preserves declared number constraints without turning decimals into integers", () => {
+    const value = {
+      type: "number",
+      minimum: -1,
+      maximum: 2,
+      exclusiveMinimum: -1,
+      exclusiveMaximum: 2,
+      multipleOf: 0.25,
+      description: "A bounded decimal",
+    };
+    const tool = {
+      name: "bounded_decimal",
+      description: "Read a numeric value",
+      inputSchema: { type: "object", properties: { value }, required: ["value"] },
+    };
+    const parameters = parametersFor(tool);
+    expect(JSON.parse(JSON.stringify(parameters)).properties.value).toEqual(value);
+    for (const number of [0, 0.5, 1.75]) {
+      const args = { value: number };
+      expect(
+        validateToolArguments(
+          { name: tool.name, description: tool.description, parameters },
+          { type: "toolCall", id: "decimal-value", name: tool.name, arguments: args },
+        ),
+      ).toEqual(args);
+    }
+    for (const number of [-1, 2, 0.1]) {
+      expect(() =>
+        validateToolArguments(
+          { name: tool.name, description: tool.description, parameters },
+          {
+            type: "toolCall",
+            id: "invalid-decimal-value",
+            name: tool.name,
+            arguments: { value: number },
+          },
+        ),
+      ).toThrow();
+    }
+  });
+
   it("preserves the standard elicitation schema through the native ask tool parameters", () => {
     const tool = builtinAgentTools.find((entry) => entry.name === "ask_user")!;
     const parameters = parametersFor(tool);
