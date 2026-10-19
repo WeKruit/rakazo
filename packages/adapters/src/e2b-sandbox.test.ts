@@ -200,6 +200,30 @@ describe("E2B computer backend", () => {
     expect(shouldSkipPortableWorkspaceFile("project/lock")).toBe(false);
     expect(shouldSkipPortableWorkspaceFile(".browser-profiles/chromium/Cache/data")).toBe(true);
     expect(shouldSkipPortableWorkspaceFile(".browser-profiles/chromium/SingletonLock")).toBe(true);
+    for (const profile of [".browser-profiles/chromium", ".browser-profiles/chromium/Default"]) {
+      expect(shouldSkipPortableWorkspaceFile(`${profile}/component_crx_cache`)).toBe(true);
+      expect(shouldSkipPortableWorkspaceFile(`${profile}/component_crx_cache/package.crx`)).toBe(
+        true,
+      );
+      expect(shouldSkipPortableWorkspaceFile(`${profile}/BrowserMetrics-spare.pma`)).toBe(true);
+      for (const retained of [
+        "component_crx_cache-notes/package.crx",
+        "BrowserMetrics-spare.pma.notes",
+        "Safe Browsing/data",
+        "WidevineCdm/component",
+        "WasmTtsEngine/component",
+        "OnDeviceHeadSuggestModel/component",
+        "Cookies",
+        "Local Storage/data",
+        "IndexedDB/data",
+        "Sessions/data",
+        "Preferences",
+      ]) {
+        expect(shouldSkipPortableWorkspaceFile(`${profile}/${retained}`)).toBe(false);
+      }
+    }
+    expect(shouldSkipPortableWorkspaceFile("project/component_crx_cache/package.crx")).toBe(false);
+    expect(shouldSkipPortableWorkspaceFile("shared/BrowserMetrics-spare.pma")).toBe(false);
   });
 
   it("prefetches eight sibling lists before consuming their entries in DFS order", async () => {

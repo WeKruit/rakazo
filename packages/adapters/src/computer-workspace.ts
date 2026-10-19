@@ -28,9 +28,11 @@ const skippedBrowserProfileDirectories = new Set([
   "DawnGraphiteCache",
   "DawnWebGPUCache",
   "Crashpad",
+  "component_crx_cache",
 ]);
 const skippedBrowserProfileFiles = new Set([
   "BrowserMetrics",
+  "BrowserMetrics-spare.pma",
   "DevToolsActivePort",
   "SingletonCookie",
   "SingletonLock",
