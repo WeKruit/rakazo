@@ -3106,6 +3106,10 @@ msgid "Mark as Unread"
 msgstr "읽지 않음으로 표시"
 
 #: src/pages/RecruitingPanel.tsx
+msgid "Match score"
+msgstr ""
+
+#: src/pages/RecruitingPanel.tsx
 msgid "Match tier"
 msgstr ""
 
@@ -5065,6 +5069,10 @@ msgstr "실행 단계"
 #: src/pages/Shell.tsx
 msgid "Stop"
 msgstr "중지"
+
+#: src/pages/Shell.tsx
+msgid "Stop {name}"
+msgstr ""
 
 #: src/pages/Shell.tsx
 msgid "Stop speaking"

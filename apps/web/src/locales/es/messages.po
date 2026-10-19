@@ -3106,6 +3106,10 @@ msgid "Mark as Unread"
 msgstr "Marcar como no leído"
 
 #: src/pages/RecruitingPanel.tsx
+msgid "Match score"
+msgstr ""
+
+#: src/pages/RecruitingPanel.tsx
 msgid "Match tier"
 msgstr ""
 
@@ -5065,6 +5069,10 @@ msgstr "Pasos"
 #: src/pages/Shell.tsx
 msgid "Stop"
 msgstr "Detener"
+
+#: src/pages/Shell.tsx
+msgid "Stop {name}"
+msgstr ""
 
 #: src/pages/Shell.tsx
 msgid "Stop speaking"

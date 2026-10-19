@@ -18,6 +18,34 @@ describe("lingui catalogs", () => {
     i18n.activate("en");
   });
 
+  it("compiles match-score and member-stop labels without source-message descriptors", async () => {
+    const config = getConfig({
+      configPath: fileURLToPath(new URL("../../lingui.config.ts", import.meta.url)),
+    });
+    const [catalog] = await getCatalogs(config);
+    const source = await catalog!.read("en");
+    const entries = ["Match score", "Stop {name}"].map((message) => {
+      const entry = Object.entries(source ?? {}).find(([, entry]) => entry.message === message);
+      expect(entry, message).toBeDefined();
+      return entry!;
+    });
+    for (const locale of config.locales) {
+      const { messages } = await catalog!.getTranslations(locale, config);
+      const compiled = createCompiledCatalog(
+        locale,
+        Object.fromEntries(entries.map(([id]) => [id, messages[id]!])),
+        { namespace: "json", strict: true },
+      );
+      expect(compiled.errors).toEqual([]);
+      i18n.load(locale, JSON.parse(compiled.source).messages);
+      i18n.activate(locale);
+      for (const [id, entry] of entries)
+        expect(i18n._({ id, values: { name: "Synthetic agent" } }), locale).toBe(
+          entry.message?.replaceAll("{name}", "Synthetic agent"),
+        );
+    }
+  });
+
   it("compiles Recruiting messages for production without source-message descriptors", async () => {
     const config = getConfig({
       configPath: fileURLToPath(new URL("../../lingui.config.ts", import.meta.url)),

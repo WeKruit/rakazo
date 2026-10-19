@@ -3106,6 +3106,10 @@ msgid "Mark as Unread"
 msgstr "Mark as Unread"
 
 #: src/pages/RecruitingPanel.tsx
+msgid "Match score"
+msgstr "Match score"
+
+#: src/pages/RecruitingPanel.tsx
 msgid "Match tier"
 msgstr "Match tier"
 
@@ -5065,6 +5069,10 @@ msgstr "Steps"
 #: src/pages/Shell.tsx
 msgid "Stop"
 msgstr "Stop"
+
+#: src/pages/Shell.tsx
+msgid "Stop {name}"
+msgstr "Stop {name}"
 
 #: src/pages/Shell.tsx
 msgid "Stop speaking"
