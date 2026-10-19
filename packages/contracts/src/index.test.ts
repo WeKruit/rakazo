@@ -31,6 +31,17 @@ import {
 } from "./index.js";
 
 describe("contracts", () => {
+  it("keeps an exact run selector on the existing authorized thread stop target", () => {
+    const schema = appContract.threads.stop["~orpc"].inputSchema!;
+    expect(schema.parse({ groupId: "group-1", runId: "run-1" })).toEqual({
+      groupId: "group-1",
+      runId: "run-1",
+    });
+    expect(schema.parse({ botId: "bot-1" })).toEqual({ botId: "bot-1" });
+    expect(schema.safeParse({ runId: "run-1" }).success).toBe(false);
+    expect(schema.safeParse({ groupId: "group-1", runId: "" }).success).toBe(false);
+  });
+
   it("validates standard elicitation form fields and structured decisions", () => {
     const schema = AskRequestedSchema.parse({
       type: "object",

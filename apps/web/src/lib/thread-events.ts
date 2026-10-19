@@ -119,15 +119,28 @@ export function threadRunError(
   return run.error ?? null;
 }
 
-export function clearActiveThreadRuns(snapshot: ThreadSnapshot): ThreadSnapshot {
-  const runIds = new Set(activeThreadRuns(snapshot).map((run) => run.id));
-  const computer = snapshot.computer?.busyBotName
-    ? { ...snapshot.computer, busyBotName: null }
-    : snapshot.computer;
+export function clearActiveThreadRuns(snapshot: ThreadSnapshot, runId?: string): ThreadSnapshot {
+  const runs = activeThreadRuns(snapshot);
+  const stopped = runs.filter((run) => runId === undefined || run.id === runId);
+  if (runId !== undefined && stopped.length === 0) return snapshot;
+  const runIds = new Set(stopped.map((run) => run.id));
+  const activeRuns = runs.filter((run) => !runIds.has(run.id));
+  const computer =
+    !activeRuns.length && snapshot.computer?.busyBotName
+      ? { ...snapshot.computer, busyBotName: null }
+      : snapshot.computer;
   return {
     ...snapshot,
-    run: null,
-    activeRuns: [],
+    run: runId !== undefined && snapshot.run?.id !== runId ? snapshot.run : (activeRuns[0] ?? null),
+    activeRuns,
+    members: snapshot.members?.map((member) =>
+      stopped.some((run) => run.botId === member.botId)
+        ? {
+            ...member,
+            status: activeRuns.find((run) => run.botId === member.botId)?.status ?? "idle",
+          }
+        : member,
+    ),
     messages: snapshot.messages.filter(
       (message) =>
         !message.runId || !runIds.has(message.runId) || !message.id.startsWith("progress:"),

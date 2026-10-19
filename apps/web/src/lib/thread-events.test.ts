@@ -4,7 +4,7 @@ import type {
   ThreadMessage,
   ThreadSnapshot,
 } from "@rakazo/contracts";
-import { withLiveStreamingProgress } from "@rakazo/core";
+import { answerableAskMessageIds, withLiveStreamingProgress } from "@rakazo/core";
 import { describe, expect, it } from "vitest";
 import {
   activeThreadRuns,
@@ -776,6 +776,42 @@ describe("thread event reduction", () => {
     expect(stopped.activeRuns).toEqual([]);
     expect(stopped.messages).toEqual([durable]);
     expect(stopped.computer?.busyBotName).toBeNull();
+  });
+
+  it("clears only the selected member run and keeps the other waiting card answerable", () => {
+    const first = { ...threadRun("run-a"), botId: "bot-a", status: "waiting_input" as const };
+    const second = { ...threadRun("run-b"), botId: "bot-b", status: "waiting_input" as const };
+    const cards = [first, second].map((run) => ({
+      ...message(`ask:${run.id}`, [
+        { kind: "ask" as const, text: "Choose", status: "pending" as const },
+      ]),
+      runId: run.id,
+      botId: run.botId,
+    }));
+    const progress = [first, second].map((run) => ({
+      ...message(`progress:${run.id}`, [{ kind: "progress" as const, text: "Working" }]),
+      runId: run.id,
+    }));
+    const initial = {
+      ...snapshot([...cards, ...progress]),
+      run: first,
+      activeRuns: [first, second],
+      members: [first, second].map((run) => ({
+        botId: run.botId,
+        name: run.botId,
+        color: "ink",
+        status: run.status,
+      })),
+      computer: computer({ state: "running", busyBotName: "Crew" }),
+    };
+    const stopped = clearActiveThreadRuns(initial, "run-a");
+    expect(stopped.run).toBe(second);
+    expect(stopped.activeRuns).toEqual([second]);
+    expect(stopped.messages).toEqual([...cards, progress[1]]);
+    expect(answerableAskMessageIds(stopped)).toEqual(["ask:run-b"]);
+    expect(stopped.members?.map((member) => member.status)).toEqual(["idle", "waiting_input"]);
+    expect(stopped.computer).toBe(initial.computer);
+    expect(clearActiveThreadRuns(initial, "run-unknown")).toBe(initial);
   });
 
   it("keeps an optimistic stop clear when an older cursor refresh still looks busy", () => {

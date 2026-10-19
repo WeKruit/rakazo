@@ -464,7 +464,9 @@ export const appContract = {
         }),
       )
       .output(z.object({ ok: z.literal(true) })),
-    stop: oc.input(threadTarget).output(z.object({ ok: z.literal(true) })),
+    stop: oc
+      .input(threadTarget.safeExtend({ runId: Id.optional() }))
+      .output(z.object({ ok: z.literal(true) })),
     followUp: oc
       .input(
         threadTarget.safeExtend({

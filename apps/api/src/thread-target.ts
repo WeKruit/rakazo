@@ -1111,12 +1111,14 @@ export async function stopThreadRuns(
   },
   actor: Actor,
   target: ThreadTarget,
+  runId?: string,
 ) {
   const { runIds, computers, leases, eventSeq } = await deps.prisma.$transaction(async (tx) => {
     await tx.$queryRaw`SELECT id FROM threads WHERE id = ${target.threadId} FOR UPDATE`;
     const cancelled = await tx.run.updateManyAndReturn({
       where: {
         threadId: target.threadId,
+        ...(runId !== undefined ? { id: runId } : {}),
         status: { in: [...ACTIVE_RUN_STATUSES] },
       },
       data: { status: "cancelled", completedAt: new Date() },
@@ -1125,7 +1127,9 @@ export async function stopThreadRuns(
     const ids = cancelled.map((run) => run.id);
     await tx.steeringMessage.deleteMany({
       where: {
-        botId: { in: target.kind === "bot" ? [target.botId] : target.memberBotIds },
+        ...(runId !== undefined
+          ? { runId: { in: ids } }
+          : { botId: { in: target.kind === "bot" ? [target.botId] : target.memberBotIds } }),
         message: { threadId: target.threadId },
       },
     });

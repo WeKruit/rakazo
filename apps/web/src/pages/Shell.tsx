@@ -2430,60 +2430,68 @@ export function ShellPage() {
       t,
     ],
   );
-  const stopRun = useCallback(async () => {
-    if (sending) return;
-    sendingRef.current = true;
-    setSending(true);
-    try {
-      const botTarget = activeBotId.current;
-      const groupTarget = activeGroupId.current;
-      if (groupTarget) {
+  const stopRun = useCallback(
+    async (runId?: string) => {
+      if (sending) return;
+      sendingRef.current = true;
+      setSending(true);
+      try {
+        const botTarget = activeBotId.current;
+        const groupTarget = activeGroupId.current;
+        if (groupTarget) {
+          setSendError(null);
+          try {
+            await rpc.threads.stop({
+              groupId: groupTarget,
+              ...(runId !== undefined ? { runId } : {}),
+            });
+          } catch (error) {
+            if (activeGroupId.current === groupTarget) {
+              setSendError(errorText(error, t`Failed to stop`));
+            }
+            return;
+          }
+          // Clear run UI ahead of the run.cancelled event so refresh races with in-flight gets.
+          if (activeGroupId.current === groupTarget) {
+            updateSnapshot((prev) =>
+              prev && prev.groupId === groupTarget ? clearActiveThreadRuns(prev, runId) : prev,
+            );
+          }
+          await refreshGroupThreadRef.current(groupTarget).catch(() => undefined);
+          return;
+        }
+        if (!botTarget) return;
         setSendError(null);
         try {
-          await rpc.threads.stop({ groupId: groupTarget });
+          await rpc.threads.stop({ botId: botTarget, ...(runId !== undefined ? { runId } : {}) });
         } catch (error) {
-          if (activeGroupId.current === groupTarget) {
+          if (activeBotId.current === botTarget) {
             setSendError(errorText(error, t`Failed to stop`));
           }
           return;
         }
-        // Clear run UI ahead of the run.cancelled event so refresh races with in-flight gets.
-        if (activeGroupId.current === groupTarget) {
-          updateSnapshot((prev) =>
-            prev && prev.groupId === groupTarget ? clearActiveThreadRuns(prev) : prev,
-          );
-        }
-        await refreshGroupThreadRef.current(groupTarget).catch(() => undefined);
-        return;
-      }
-      if (!botTarget) return;
-      setSendError(null);
-      try {
-        await rpc.threads.stop({ botId: botTarget });
-      } catch (error) {
+        // Clear local run/busy immediately rather than waiting for run.cancelled so a
+        // superseded in-flight refresh (older cursor) cannot leave Stop enabled / Take control
+        // blocked while the API is already idle.
         if (activeBotId.current === botTarget) {
-          setSendError(errorText(error, t`Failed to stop`));
+          updateSnapshot((prev) =>
+            !prev || (prev.botId !== botTarget && prev.botId)
+              ? prev
+              : clearActiveThreadRuns(prev, runId),
+          );
+          const currentComputer = computerRef.current;
+          if (runId === undefined && currentComputer?.busyBotName) {
+            commitComputer({ ...currentComputer, busyBotName: null });
+          }
         }
-        return;
+        await refreshThreadRef.current(botTarget).catch(() => undefined);
+      } finally {
+        sendingRef.current = false;
+        setSending(false);
       }
-      // Clear local run/busy immediately rather than waiting for run.cancelled so a
-      // superseded in-flight refresh (older cursor) cannot leave Stop enabled / Take control
-      // blocked while the API is already idle.
-      if (activeBotId.current === botTarget) {
-        updateSnapshot((prev) =>
-          !prev || (prev.botId !== botTarget && prev.botId) ? prev : clearActiveThreadRuns(prev),
-        );
-        const currentComputer = computerRef.current;
-        if (currentComputer?.busyBotName) {
-          commitComputer({ ...currentComputer, busyBotName: null });
-        }
-      }
-      await refreshThreadRef.current(botTarget).catch(() => undefined);
-    } finally {
-      sendingRef.current = false;
-      setSending(false);
-    }
-  }, [sending, t]);
+    },
+    [sending, t],
+  );
   const stopTeaching = useCallback(async () => {
     const id = activeBotId.current;
     if (!id || teachBusy) return;
@@ -3941,6 +3949,28 @@ export function ShellPage() {
             onOpenComputer={onOpenComputer}
           />
         )}
+        {inGroup && composerRunning ? (
+          <div className="flex flex-wrap gap-1 px-6 pb-2">
+            {currentRuns
+              .filter((run) => isActive(run.status))
+              .map((run) => {
+                const name = resolveTranscriptBot(run.botId)?.name ?? t`Agent`;
+                return (
+                  <Button
+                    key={run.id}
+                    type="button"
+                    variant="ghost"
+                    size="sm"
+                    aria-label={t`Stop ${name}`}
+                    disabled={sending}
+                    onClick={() => void stopRun(run.id)}
+                  >
+                    <Trans>Stop {name}</Trans>
+                  </Button>
+                );
+              })}
+          </div>
+        ) : null}
         {recordingSkill ? (
           <div className="px-6 pb-2 text-center text-[13px] text-destructive">
             <Trans>Teaching in progress. Stop teaching before sending a new message.</Trans>

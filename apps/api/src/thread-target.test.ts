@@ -3344,6 +3344,118 @@ describe("sendThreadMessage", () => {
 });
 
 describe("stopThreadRuns", () => {
+  it.each(["run-a", "run-foreign", "run-unknown"])(
+    "stops only the requested run in the authorized thread: %s",
+    async (runId) => {
+      const rows = [
+        { id: "run-a", botId: "bot-a", threadId: "thread-1" },
+        { id: "run-b", botId: "bot-b", threadId: "thread-1" },
+        { id: "run-foreign", botId: "bot-a", threadId: "other-thread" },
+      ];
+      const cancelled = runId === "run-a" ? ["run-a"] : [];
+      const execute = vi.fn(async function* () {
+        yield { type: "exit", code: 0 };
+      });
+      const releaseScreen = vi.fn().mockResolvedValue(undefined);
+      const tx = {
+        $queryRaw: vi.fn(),
+        thread: { update: vi.fn().mockResolvedValue({ nextEventSeq: 2 }) },
+        run: {
+          updateManyAndReturn: vi.fn(
+            async ({ where }: { where: { threadId: string; id?: string } }) =>
+              rows.filter(
+                (row) =>
+                  row.threadId === where.threadId &&
+                  (where.id === undefined || row.id === where.id),
+              ),
+          ),
+          findUnique: vi.fn().mockResolvedValue({ status: "cancelled" }),
+        },
+        steeringMessage: { deleteMany: vi.fn().mockResolvedValue({ count: 0 }) },
+        computerExecutionLease: {
+          findMany: vi
+            .fn()
+            .mockResolvedValue([{ computerId: "team", botId: "bot-a", runId: "run-a", fence: 2 }]),
+        },
+        computer: {
+          findMany: vi.fn().mockResolvedValue([
+            {
+              id: "team",
+              homeKey: "home",
+              kind: "fake",
+              providerRef: "team-provider",
+              executionBotId: "bot-b",
+              executionRunId: "run-b",
+            },
+          ]),
+        },
+        event: {
+          create: vi.fn(async ({ data }: { data: Record<string, unknown> }) => data),
+          deleteMany: vi.fn().mockResolvedValue({ count: 0 }),
+        },
+      };
+      const prisma = {
+        $transaction: vi.fn(async (callback: (client: typeof tx) => Promise<unknown>) =>
+          callback(tx),
+        ),
+        computerExecutionLease: { updateMany: vi.fn().mockResolvedValue({ count: 0 }) },
+        computer: { updateMany: vi.fn().mockResolvedValue({ count: 0 }) },
+      } as unknown as PrismaClient;
+      const notify = vi.fn().mockResolvedValue(undefined);
+      await stopThreadRuns(
+        {
+          prisma,
+          sandbox: { execute, releaseScreen } as unknown as SandboxProvider,
+          events: { notify } as never,
+        },
+        { spaceId: "space-1", userId: "user-1" } as Actor,
+        {
+          kind: "group",
+          groupId: "group-1",
+          groupName: "Crew",
+          threadId: "thread-1",
+          members: [],
+          memberBotIds: ["bot-a", "bot-b"],
+        },
+        runId,
+      );
+      expect(tx.run.updateManyAndReturn).toHaveBeenCalledWith(
+        expect.objectContaining({
+          where: { threadId: "thread-1", id: runId, status: expect.anything() },
+        }),
+      );
+      expect(tx.steeringMessage.deleteMany).toHaveBeenCalledWith({
+        where: { runId: { in: cancelled }, message: { threadId: "thread-1" } },
+      });
+      expect(tx.event.create).toHaveBeenCalledTimes(cancelled.length);
+      expect(execute).toHaveBeenCalledTimes(cancelled.length);
+      if (cancelled.length) {
+        expect(execute).toHaveBeenCalledWith(
+          expect.anything(),
+          expect.anything(),
+          expect.objectContaining({ runId: "run-a", botId: "bot-a", screenLeaseId: "run-a:2" }),
+        );
+        expect(tx.event.deleteMany).toHaveBeenCalledWith({
+          where: { type: "thread.progress", runId: { in: cancelled } },
+        });
+      } else {
+        expect(tx.computerExecutionLease.findMany).not.toHaveBeenCalled();
+        expect(tx.event.deleteMany).not.toHaveBeenCalled();
+        expect(notify).not.toHaveBeenCalled();
+      }
+      expect(prisma.computerExecutionLease.updateMany).toHaveBeenCalledWith({
+        where: { runId: { in: cancelled } },
+        data: { expiresAt: new Date(0) },
+      });
+      expect(prisma.computer.updateMany).toHaveBeenCalledWith(
+        expect.objectContaining({
+          where: { executionRunId: { in: cancelled } },
+        }),
+      );
+      expect(releaseScreen).toHaveBeenCalledTimes(cancelled.length);
+    },
+  );
+
   it("snapshots every lease when group members share a team computer", async () => {
     const releaseScreen = vi.fn().mockResolvedValue(undefined);
     const execute = vi.fn(async function* () {

@@ -30,6 +30,7 @@ const shellApi = vi.hoisted(() => ({
   followUp: vi.fn(),
   send: vi.fn(),
   answer: vi.fn(),
+  stop: vi.fn(),
   createArtifact: vi.fn(),
   testRun: vi.fn(),
   listSpaces: vi.fn(),
@@ -54,6 +55,7 @@ vi.mock("../lib/rpc", async (importOriginal) => ({
       followUp: shellApi.followUp,
       send: shellApi.send,
       answer: shellApi.answer,
+      stop: shellApi.stop,
       subscribe: vi.fn().mockRejectedValue(new Error("Offline test")),
       head: vi.fn().mockResolvedValue(null),
       markRead: vi.fn().mockResolvedValue({ ok: true }),
@@ -182,7 +184,7 @@ function pressEnter(textarea: HTMLTextAreaElement) {
 
 async function renderFeedbackShell(
   kind: "bot" | "group" = "bot",
-  runStatuses?: readonly ("queued" | "leased" | "running")[],
+  runStatuses?: readonly ("queued" | "leased" | "running" | "waiting_input")[],
   options: { messages?: ThreadMessage[]; isDeploymentOwner?: boolean } = {},
 ) {
   (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
@@ -273,8 +275,9 @@ async function renderFeedbackShell(
     },
   };
   if (runStatuses) {
+    pending.runId = "run-0";
     Object.assign(thread, {
-      run: { ...thread.run, status: runStatuses[0] },
+      run: { ...thread.run, id: "run-0", status: runStatuses[0] },
       activeRuns: runStatuses.map((status, index) => ({
         ...thread.run,
         id: `run-${index}`,
@@ -419,6 +422,7 @@ async function renderFeedbackShell(
     reason,
     render,
     pending,
+    thread,
     candidate,
     members,
     getProps: () => props!,
@@ -500,6 +504,24 @@ it.each([
     }
   },
 );
+
+it("stops one group member while preserving the other working run and global Stop", async () => {
+  const view = await renderFeedbackShell("group", ["waiting_input", "running"]);
+  await view.click("Close");
+  await view.click("Close panel");
+  const remaining = { ...view.thread.run, id: "run-1", botId: "bot-2", status: "running" };
+  shellApi.get.mockResolvedValue({ ...view.thread, run: remaining, activeRuns: [remaining] });
+  shellApi.stop.mockResolvedValue({ ok: true });
+  await view.click("Stop Main");
+  expect(shellApi.stop).toHaveBeenLastCalledWith({ groupId: "group-1", runId: "run-0" });
+  expect(document.body.querySelector('button[aria-label="Stop Main"]')).toBeNull();
+  expect(document.body.querySelector('button[aria-label="Stop Sourcer"]')).not.toBeNull();
+  expect(document.body.textContent).toContain("Sourcer · Working…");
+  shellApi.get.mockResolvedValue({ ...view.thread, run: null, activeRuns: [] });
+  await view.click("Stop");
+  expect(shellApi.stop).toHaveBeenLastCalledWith({ groupId: "group-1" });
+  expect(document.body.querySelector('button[aria-label="Stop Sourcer"]')).toBeNull();
+});
 
 it.each([
   { statuses: ["queued"], label: "Main · Waiting in line…" },
