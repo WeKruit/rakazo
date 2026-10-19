@@ -2941,6 +2941,199 @@ function nativeCandidateFixture() {
   return { ...f, tx, prisma, input, trusted, saveEffect, file, row, snapshot };
 }
 
+describe("native candidate shortlist", () => {
+  beforeEach(() => vi.clearAllMocks());
+
+  it.each([null, "", "   "])(
+    "rejects approval without an actual candidate name: %s",
+    async (name) => {
+      const f = nativeCandidateFixture();
+      const input = {
+        roleId: "role",
+        expectedRoleRevision: 1,
+        candidateKey: "candidate",
+        expectedRevision: 0,
+        shortlisted: true,
+      };
+      f.tx.$queryRaw.mockResolvedValue([
+        {
+          id: "thread",
+          name,
+          linkedinUrl: null,
+          resumeUrl: null,
+          sourcePageId: null,
+          profileSourcePageIds: [],
+        },
+      ]);
+      await expect(
+        recruiting.prepareNativeRecruitingShortlist(
+          f.prisma,
+          actor,
+          { ...f.trusted, threadId: "thread", botId: "bot" },
+          input,
+        ),
+      ).rejects.toThrow(IsolationError);
+      expect(createThreadMessageInTransaction).not.toHaveBeenCalled();
+      expect(f.tx.recruitingCandidate.updateMany).not.toHaveBeenCalled();
+    },
+  );
+
+  it("records a bot decision atomically and replays its receipt after a later human decision", async () => {
+    expect(recruiting.executeNativeRecruitingShortlist).toBeTypeOf("function");
+    const f = nativeCandidateFixture();
+    const input = {
+      roleId: "role",
+      expectedRoleRevision: 1,
+      candidateKey: "candidate",
+      expectedRevision: 0,
+      shortlisted: true,
+    };
+    Object.assign(f.saveEffect, { kind: "recruiting_shortlist", request: input });
+    const trusted = { ...f.trusted, threadId: "thread", botId: "bot", effectRequest: input };
+    const candidate = await f.tx.recruitingCandidate.findUnique();
+    f.tx.recruitingCandidate.findUnique.mockImplementation(async () => ({ ...candidate }));
+    f.tx.recruitingCandidate.updateMany.mockImplementation(async (...args: unknown[]) => {
+      const { data } = args[0] as { data: Partial<typeof candidate> };
+      Object.assign(candidate, data);
+      return { count: 1 };
+    });
+    f.tx.$queryRaw.mockResolvedValue([
+      {
+        id: "thread",
+        name: "Synthetic Avery",
+        linkedinUrl: null,
+        resumeUrl: null,
+        sourcePageId: null,
+        profileSourcePageIds: [],
+      },
+    ]);
+    expect(
+      await recruiting.prepareNativeRecruitingShortlist(f.prisma, actor, trusted, input),
+    ).toEqual({
+      candidateName: "Synthetic Avery",
+      roleTitle: "Example engineer",
+      shortlisted: true,
+    });
+    const saved = await recruiting.executeNativeRecruitingShortlist(
+      f.prisma,
+      actor,
+      trusted,
+      input,
+    );
+    expect(saved).toEqual({
+      kind: "saved",
+      roleId: "role",
+      candidateKey: "candidate",
+      shortlisted: true,
+      revision: 1,
+    });
+    expect(createThreadMessageInTransaction).toHaveBeenCalledWith(
+      f.tx,
+      expect.objectContaining({
+        role: "bot",
+        botId: "bot",
+        runId: "run",
+        threadId: "thread",
+        clientNonce: "recruiting-shortlist:save",
+      }),
+    );
+    expect(f.saveEffect).toMatchObject({ status: "completed", result: saved });
+    expect(appendEventInTransaction).toHaveBeenCalledWith(
+      f.tx,
+      expect.objectContaining({
+        type: "effect.recorded",
+        payload: { effectId: "save", tool: "recruiting_shortlist", result: saved },
+      }),
+    );
+    await recruiting.setRecruitingCandidateShortlist(f.prisma, actor, {
+      threadId: "thread",
+      roleId: "role",
+      candidateKey: "candidate",
+      expectedRevision: 1,
+      shortlisted: false,
+    });
+    expect(candidate).toMatchObject({ shortlisted: false, revision: 2 });
+    expect(
+      await recruiting.executeNativeRecruitingShortlist(f.prisma, actor, trusted, input),
+    ).toEqual(saved);
+    expect(candidate).toMatchObject({ shortlisted: false, revision: 2 });
+    expect(f.tx.recruitingCandidate.updateMany).toHaveBeenCalledTimes(2);
+    expect(createThreadMessageInTransaction).toHaveBeenCalledTimes(2);
+    expect(vi.mocked(createThreadMessageInTransaction).mock.calls[1]![1].role).toBe("user");
+  });
+
+  it.each([
+    "no-op",
+    "cancelled",
+    "expired lease",
+    "wrong thread",
+    "wrong bot",
+    "foreign actor",
+    "changed role",
+    "changed role revision",
+    "stale candidate",
+    "changed request",
+    "foreign profile",
+  ])("preserves native shortlist boundaries for %s", async (boundary) => {
+    expect(recruiting.executeNativeRecruitingShortlist).toBeTypeOf("function");
+    const f = nativeCandidateFixture();
+    const input = {
+      roleId: "role",
+      expectedRoleRevision: 1,
+      candidateKey: "candidate",
+      expectedRevision: 0,
+      shortlisted: boundary !== "no-op",
+    };
+    Object.assign(f.saveEffect, { kind: "recruiting_shortlist", request: input });
+    const trusted = { ...f.trusted, threadId: "thread", botId: "bot", effectRequest: input };
+    const candidate = await f.tx.recruitingCandidate.findUnique();
+    f.tx.$queryRaw.mockResolvedValue([
+      {
+        id: "thread",
+        name: "Synthetic Avery",
+        linkedinUrl: null,
+        resumeUrl: null,
+        sourcePageId: null,
+        profileSourcePageIds: boundary === "foreign profile" ? ["foreign-page"] : [],
+      },
+    ]);
+    if (boundary === "cancelled") f.run.status = "cancelled";
+    if (boundary === "expired lease") Object.assign(f.run, { leaseExpiresAt: new Date(0) });
+    if (boundary === "wrong thread") trusted.threadId = "other-thread";
+    if (boundary === "wrong bot") trusted.botId = "other-bot";
+    if (boundary === "foreign actor") f.run.userId = "other-owner";
+    if (boundary === "changed role")
+      f.tx.thread.findFirst.mockResolvedValue({
+        ...actor,
+        id: "thread",
+        botId: "bot",
+        activeRecruitingRoleId: "other-role",
+      });
+    if (boundary === "changed role revision") f.role.revision = 2;
+    if (boundary === "stale candidate") candidate.revision = 1;
+    if (boundary === "changed request") trusted.effectRequest = { ...input, shortlisted: false };
+    if (boundary === "no-op") {
+      expect(
+        await recruiting.executeNativeRecruitingShortlist(f.prisma, actor, trusted, input),
+      ).toEqual({
+        kind: "saved",
+        roleId: "role",
+        candidateKey: "candidate",
+        shortlisted: false,
+        revision: 0,
+      });
+      expect(f.saveEffect.status).toBe("completed");
+    } else {
+      await expect(
+        recruiting.executeNativeRecruitingShortlist(f.prisma, actor, trusted, input),
+      ).rejects.toThrow();
+      expect(f.tx.externalEffect.updateMany).not.toHaveBeenCalled();
+    }
+    expect(createThreadMessageInTransaction).not.toHaveBeenCalled();
+    expect(f.tx.recruitingCandidate.updateMany).not.toHaveBeenCalled();
+  });
+});
+
 async function nativeSourceFixture() {
   const f = crmFixture();
   const read = f.effects.get("read")!;

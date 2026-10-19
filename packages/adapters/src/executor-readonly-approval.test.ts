@@ -27,6 +27,7 @@ vi.mock("./recruiting-assessment.js", async (original) => ({
 const recruitingApproval = vi.hoisted(() => ({ prepare: vi.fn(), execute: vi.fn() }));
 const replyProof = vi.hoisted(() => vi.fn());
 const crmApprovalProof = vi.hoisted(() => vi.fn());
+const nativeShortlist = vi.hoisted(() => ({ prepare: vi.fn(), execute: vi.fn() }));
 const recruitingReply = vi.hoisted(() => ({ resolve: vi.fn(), admit: vi.fn(), claim: vi.fn() }));
 const recruitingCrm = vi.hoisted(() => ({
   read: vi.fn(),
@@ -40,6 +41,8 @@ beforeEach(() => {
   for (const mock of Object.values(recruitingCrm)) mock.mockReset();
   for (const mock of Object.values(recruitingReply)) mock.mockReset();
   crmApprovalProof.mockReset();
+  nativeShortlist.prepare.mockReset();
+  nativeShortlist.execute.mockReset();
   replyProof.mockReset().mockImplementation(async () => ({
     effectId: "native-email-read",
     result: { structuredContent: replyAnchor },
@@ -57,6 +60,8 @@ vi.mock("@rakazo/db", async (importOriginal) => ({
   claimRecruitingCrmImport: recruitingCrm.claim,
   readNativeReplyEmailProof: replyProof,
   readNativeCrmWriteApproval: crmApprovalProof,
+  prepareNativeRecruitingShortlist: nativeShortlist.prepare,
+  executeNativeRecruitingShortlist: nativeShortlist.execute,
   resolveRecruitingReply: recruitingReply.resolve,
   admitRecruitingReply: recruitingReply.admit,
   claimRecruitingReply: recruitingReply.claim,
@@ -556,6 +561,158 @@ describe("native saved candidate reads", () => {
     expect(f.results).toEqual([{ error: "This tool is disabled for this bot." }]);
     expect(candidateReads).not.toHaveBeenCalled();
     expect(f.effects).toEqual([]);
+  });
+});
+
+describe("native shortlist dispatch", () => {
+  it("recovers an executing uncommitted local shortlist exactly once", async () => {
+    const f = fixture({ name: "recruiting_shortlist", builtin: true });
+    const args = {
+      roleId: "role",
+      expectedRoleRevision: 1,
+      candidateKey: "candidate",
+      expectedRevision: 0,
+      shortlisted: true,
+    };
+    const result = {
+      kind: "saved",
+      roleId: "role",
+      candidateKey: "candidate",
+      shortlisted: true,
+      revision: 1,
+    };
+    const interrupted = {
+      id: "interrupted",
+      spaceId: "space-1",
+      runId: "run-1",
+      kind: "recruiting_shortlist",
+      idempotencyKey: toolEffectIdempotencyKey("run-1", "recruiting_shortlist", args),
+      status: "executing",
+      request: args,
+    };
+    f.effects.push(interrupted);
+    nativeShortlist.execute.mockImplementation(async (_prisma, _actor, trusted) => {
+      expect(trusted).toMatchObject({
+        effectId: "interrupted",
+        effectRequest: args,
+        leaseOwner: "worker-1",
+      });
+      Object.assign(f.effects[0]!, { status: "completed", result });
+      return result;
+    });
+    f.setCalls([{ args, executionId: "recovery" }]);
+    await f.run();
+    expect(nativeShortlist.execute).toHaveBeenCalledTimes(1);
+    expect(f.results.at(-1)).toEqual(result);
+    expect(f.effects).toHaveLength(1);
+    expect(f.effects[0]!.status).toBe("completed");
+    await f.run();
+    expect(nativeShortlist.execute).toHaveBeenCalledTimes(1);
+    expect(f.results.at(-1)).toEqual(result);
+    expect(f.execute).not.toHaveBeenCalled();
+  });
+
+  it.each(["user", "webhook"])(
+    "uses native effects and existing approval policy for %s",
+    async (trigger) => {
+      const f = fixture({ name: "recruiting_shortlist", builtin: true, trigger });
+      const args = {
+        roleId: "role",
+        expectedRoleRevision: 1,
+        candidateKey: "candidate",
+        expectedRevision: 0,
+        shortlisted: true,
+      };
+      const result = {
+        kind: "saved",
+        roleId: "role",
+        candidateKey: "candidate",
+        shortlisted: true,
+        revision: 1,
+      };
+      nativeShortlist.prepare.mockResolvedValue({
+        candidateName: "Synthetic Avery",
+        roleTitle: "Example role",
+        shortlisted: true,
+      });
+      nativeShortlist.execute.mockImplementation(async (_prisma, _actor, trusted) => {
+        Object.assign(f.effects.find((effect) => effect.id === trusted.effectId)!, {
+          status: "completed",
+          result,
+        });
+        return result;
+      });
+      f.setCalls([{ args, executionId: "first" }]);
+      await f.run();
+      expect(f.effects).toHaveLength(1);
+      expect(f.effects[0]!.request).toEqual(args);
+      if (trigger === "webhook") {
+        expect(nativeShortlist.execute).not.toHaveBeenCalled();
+        expect(nativeShortlist.prepare).toHaveBeenCalledWith(
+          f.prisma,
+          expect.objectContaining({ spaceId: "space-1", userId: "user-1" }),
+          expect.objectContaining({
+            threadId: "thread-1",
+            botId: "bot-1",
+            runId: "run-1",
+            leaseOwner: "worker-1",
+          }),
+          args,
+        );
+        const card = f.pauseRunForInput.mock.calls[0]![0].blocks[0];
+        if (card?.kind !== "ask") throw new Error("Expected the original approval card");
+        expect(card).toMatchObject({ kind: "ask", approvalEffectId: f.effects[0]!.id });
+        expect(card.detail).toContain("Synthetic Avery");
+        expect(card.detail).not.toContain("candidateKey");
+        f.effects[0]!.status = "approved";
+        await f.run();
+      } else {
+        expect(f.pauseRunForInput).not.toHaveBeenCalled();
+        expect(nativeShortlist.prepare).not.toHaveBeenCalled();
+      }
+      expect(nativeShortlist.execute).toHaveBeenCalledTimes(1);
+      expect(nativeShortlist.execute).toHaveBeenCalledWith(
+        f.prisma,
+        expect.objectContaining({ userId: "user-1" }),
+        expect.objectContaining({
+          threadId: "thread-1",
+          botId: "bot-1",
+          effectRequest: args,
+          effectId: f.effects[0]!.id,
+        }),
+        args,
+      );
+      expect(f.results.at(-1)).toEqual(result);
+      await f.run();
+      expect(nativeShortlist.execute).toHaveBeenCalledTimes(1);
+      expect(f.effects).toHaveLength(1);
+      expect(f.execute).not.toHaveBeenCalled();
+    },
+  );
+
+  it("is separately disableable without changing read-only candidate access", async () => {
+    const options = {
+      graphicalToolsAllowed: false,
+      groupId: null,
+      trigger: "user",
+      semanticMemoryEnabled: false,
+      messagingChannelRun: false,
+    };
+    expect(selectBuiltinToolsForRun(options).map((tool) => tool.name)).toContain(
+      "recruiting_shortlist",
+    );
+    expect(
+      selectBuiltinToolsForRun({ ...options, messagingChannelRun: true }).map((tool) => tool.name),
+    ).not.toContain("recruiting_shortlist");
+    const f = fixture({
+      name: "recruiting_shortlist",
+      builtin: true,
+      disabledBuiltinTools: ["recruiting_shortlist"],
+    });
+    await f.run();
+    expect(nativeShortlist.execute).not.toHaveBeenCalled();
+    expect(f.effects).toEqual([]);
+    expect(f.results).toEqual([{ error: "This tool is disabled for this bot." }]);
   });
 });
 

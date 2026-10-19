@@ -1156,6 +1156,12 @@ export const SetRecruitingCandidateShortlistOutput = z.strictObject({
 export type SetRecruitingCandidateShortlistOutput = z.infer<
   typeof SetRecruitingCandidateShortlistOutput
 >;
+export const RecruitingShortlistToolInputSchema = SetRecruitingCandidateShortlistInput.omit({
+  threadId: true,
+}).extend({ expectedRoleRevision: Revision });
+export const RecruitingShortlistToolResultSchema = SetRecruitingCandidateShortlistOutput.extend({
+  kind: z.literal("saved"),
+});
 export const ListRecruitingCandidateSourcesInput = z.strictObject({
   roleId: RecruitingId,
   candidateKey: RecruitingId,

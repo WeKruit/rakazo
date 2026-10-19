@@ -3,6 +3,44 @@ import { describe, expect, it } from "vitest";
 import { buildApprovalAskBlock } from "./approval-ask.js";
 
 describe("buildApprovalAskBlock", () => {
+  it.each([true, false])("shows only the trusted shortlist change (%s)", (shortlisted) => {
+    const args = {
+      candidateName: "Ada Example",
+      roleTitle: "Platform Engineer",
+      shortlisted,
+      candidateKey: "internal-candidate-key",
+      roleId: "internal-role-id",
+      expectedRevision: 7,
+    };
+    for (const oneTimeOnly of [false, true]) {
+      const block = buildApprovalAskBlock("original-effect", "recruiting_shortlist", args, [], {
+        oneTimeOnly,
+      });
+      expect(block.text).toBe("Review shortlist change");
+      expect(block.detail).toBe(
+        `Candidate: Ada Example\nRole: Platform Engineer\n\n${shortlisted ? "Add to shortlist" : "Remove from shortlist"}`,
+      );
+      expect(block.approvalEffectId).toBe("original-effect");
+      expect(block.actions?.map((action) => action.id)).toEqual(
+        oneTimeOnly ? ["allow", "deny"] : ["allow", "always", "deny"],
+      );
+      expect(block.detail).not.toMatch(/internal-|Revision|Key|CRM/);
+    }
+    expect(args.candidateKey).toBe("internal-candidate-key");
+  });
+  it.each([
+    {},
+    { candidateKey: "internal-candidate-key", roleId: "internal-role-id", expectedRevision: 7 },
+    { candidateName: "", roleTitle: "Platform Engineer", shortlisted: true },
+    { candidateName: "Ada Example", roleTitle: " ", shortlisted: true },
+    { candidateName: 42, roleTitle: "Platform Engineer", shortlisted: true },
+    { candidateName: "Ada Example", roleTitle: [], shortlisted: true },
+    { candidateName: "Ada Example", roleTitle: "Platform Engineer", shortlisted: "true" },
+  ])("rejects a shortlist approval without a valid display target: %j", (args) => {
+    expect(() => buildApprovalAskBlock("effect", "recruiting_shortlist", args, [])).toThrow(
+      "Shortlist approval requires a verified candidate, role and action.",
+    );
+  });
   it.each(["crm_update_candidate_stage", "crm_append_candidate_note"] as const)(
     "shows only the trusted CRM target and complete approved change for %s",
     (tool) => {

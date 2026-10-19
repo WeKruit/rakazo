@@ -6,6 +6,7 @@ import {
   RecruitingCrmImportInputSchema,
   RecruitingCrmTargetToolInputSchema,
   RecruitingReplyInputSchema,
+  RecruitingShortlistToolInputSchema,
 } from "@rakazo/contracts";
 import { describe, expect, it } from "vitest";
 import { z } from "zod";
@@ -31,6 +32,7 @@ describe("native recruiting approval tool", () => {
       ["recruiting_crm_target", RecruitingCrmTargetToolInputSchema],
       ["recruiting_crm_import", RecruitingCrmImportInputSchema],
       ["recruiting_reply", RecruitingReplyInputSchema],
+      ["recruiting_shortlist", RecruitingShortlistToolInputSchema],
     ] as const;
     const names = contracts.map(([name]) => name);
     expect(DisabledBuiltinToolsSchema.parse(names)).toEqual(names);

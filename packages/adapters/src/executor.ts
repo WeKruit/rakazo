@@ -61,6 +61,7 @@ import {
   RecruitingPreferenceFeedbackSchema,
   RecruitingReplyInputSchema,
   RecruitingResearchToolInputSchema,
+  RecruitingShortlistToolInputSchema,
 } from "@rakazo/contracts";
 import type { ActionApprovalRule, ToolCallStreak } from "@rakazo/core";
 import {
@@ -130,6 +131,7 @@ import {
   createSpaceForMember,
   createThreadMessageInTransaction,
   effectiveMemoryScope,
+  executeNativeRecruitingShortlist,
   executeRecruitingApproval,
   executeRecruitingCrmBinding,
   findDefaultModelCredential,
@@ -143,6 +145,7 @@ import {
   loadRunHumanSources,
   Prisma,
   parseComputerMode,
+  prepareNativeRecruitingShortlist,
   prepareRecruitingApproval,
   prepareRecruitingCrmBinding,
   RecruitingConflictError,
@@ -4354,6 +4357,9 @@ export function createRunExecutor(deps: ExecutorDeps) {
               : undefined;
           if (researchInput && !researchInput.success)
             return { error: sanitizeConnectorError(researchInput.error, runSecrets) };
+          const atomicRecruitingMutation =
+            name === "recruiting_shortlist" ||
+            (researchInput?.success === true && researchInput.data.operation === "save_results");
           const researchActor = {
             actor: {
               spaceId: run.spaceId,
@@ -4978,6 +4984,12 @@ export function createRunExecutor(deps: ExecutorDeps) {
           }
           if (name === "recruiting_crm_target") {
             const parsed = RecruitingCrmTargetToolInputSchema.safeParse(args);
+            if (!parsed.success) return { error: sanitizeConnectorError(parsed.error, runSecrets) };
+            args = parsed.data;
+            effectRequest = args;
+          }
+          if (name === "recruiting_shortlist") {
+            const parsed = RecruitingShortlistToolInputSchema.safeParse(args);
             if (!parsed.success) return { error: sanitizeConnectorError(parsed.error, runSecrets) };
             args = parsed.data;
             effectRequest = args;
@@ -5735,12 +5747,7 @@ export function createRunExecutor(deps: ExecutorDeps) {
                 return retryGate.result;
               }
               if (retryGate.action === "uncertain") {
-                if (
-                  name === "recruiting_research" &&
-                  researchInput?.success &&
-                  researchInput.data.operation === "save_results" &&
-                  current.status === "executing"
-                ) {
+                if (atomicRecruitingMutation && current.status === "executing") {
                   if (!(await renewRunLease(deps, runId, workerId, fence)))
                     return pauseForApproval();
                   // Local projection and receipt commit atomically; no provider call is replayed.
@@ -5857,6 +5864,21 @@ export function createRunExecutor(deps: ExecutorDeps) {
                   args,
                   { artifacts: deps.artifacts, context },
                 ));
+              } catch (error) {
+                const result = roleError(error);
+                return (await completeEffect(deps, applied!.effect.id, "intended", result))
+                  ? result
+                  : uncertainEffectResult(name);
+              }
+            }
+            if (name === "recruiting_shortlist") {
+              try {
+                approvalArgs = await prepareNativeRecruitingShortlist(
+                  deps.prisma,
+                  researchActor.actor,
+                  crmContext,
+                  args,
+                );
               } catch (error) {
                 const result = roleError(error);
                 return (await completeEffect(deps, applied!.effect.id, "intended", result))
@@ -5990,12 +6012,7 @@ export function createRunExecutor(deps: ExecutorDeps) {
                 return requestApproval();
               }
             } else if (gate.action === "uncertain") {
-              if (
-                name === "recruiting_research" &&
-                researchInput?.success &&
-                researchInput.data.operation === "save_results" &&
-                applied.effect.status === "executing"
-              ) {
+              if (atomicRecruitingMutation && applied.effect.status === "executing") {
                 const early = await claimOrReturn("intended");
                 if (early !== undefined) return early;
               } else {
@@ -6731,6 +6748,27 @@ export function createRunExecutor(deps: ExecutorDeps) {
               if (error instanceof Error && error.name === "ZodError")
                 return finish({ error: sanitizeConnectorError(error, runSecrets) });
               throw error;
+            }
+          }
+          if (name === "recruiting_shortlist") {
+            if (applied && !claimedEffect) {
+              const early = await claimOrReturn("intended");
+              if (early !== undefined) return early;
+            }
+            try {
+              if (!applied || !claimedEffect) throw new IsolationError();
+              return await executeNativeRecruitingShortlist(
+                deps.prisma,
+                researchActor.actor,
+                {
+                  ...crmContext,
+                  effectId: applied.effect.id,
+                  effectRequest: applied.effect.request,
+                },
+                args,
+              );
+            } catch (error) {
+              return finish(roleError(error));
             }
           }
           if (name === "recruiting_candidates") {
@@ -9390,6 +9428,7 @@ export function selectBuiltinToolsForRun(options: {
           "recruiting_request_approval",
           "recruiting_assess",
           "recruiting_candidates",
+          "recruiting_shortlist",
           "recruiting_feedback",
           "recruiting_research",
           "recruiting_crm_target",

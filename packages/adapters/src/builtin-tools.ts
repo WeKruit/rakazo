@@ -14,6 +14,7 @@ import {
   RecruitingReplyInputSchema,
   RecruitingResearchToolInputSchema,
   RecruitingRoleToolInputSchema,
+  RecruitingShortlistToolInputSchema,
   SecretAskPurpose,
   SecretHttpRequest,
   TICKET_PRIORITIES,
@@ -538,6 +539,13 @@ export const builtinAgentTools: ConnectorTool[] = [
       'Read saved candidates for the current thread role. List uses {operation:"list",query?,cursor?,limit?}; query matches saved names and profile URLs. Sources uses {operation:"sources",candidateKey,cursor?,limit?} with an exact returned candidateKey. Preserve pagination and ambiguity; never choose the first match or invent identities, sources or totals. Read actual source bytes with artifact_read using the returned artifactRef and rowIndex before citing evidence. This tool only reads existing saved data and never searches externally or assesses candidates. Internal keys and artifact references are for tool use; speak to the recruiter using candidate names.',
     inputSchema: z.toJSONSchema(RecruitingCandidatesToolInputSchema, { io: "input" }),
     readOnly: true,
+  },
+  {
+    name: "recruiting_shortlist",
+    description:
+      "Set or remove one saved candidate's shortlist bookmark in the current role. Read recruiting_candidates and recruiting_role first; supply their exact roleId, expectedRoleRevision, candidateKey and expectedRevision, plus shortlisted. This records this bot's saved review action, not a new qualification judgment, CRM stage or outreach. Preserve provider output and other candidates. Reuse the original receipt after an unknown outcome; do not invent candidate identities or bypass native approval and permission policy.",
+    inputSchema: z.toJSONSchema(RecruitingShortlistToolInputSchema, { io: "input" }),
+    readOnly: false,
   },
   {
     name: "recruiting_assess",

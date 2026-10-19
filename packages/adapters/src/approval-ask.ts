@@ -19,6 +19,16 @@ export function buildApprovalAskBlock(
   secrets: string[],
   options?: { reviewReason?: string; oneTimeOnly?: boolean; crmOperation?: CrmApprovalOperation },
 ): Extract<MessageBlock, { kind: "ask" }> {
+  const shortlist = toolName === "recruiting_shortlist";
+  if (
+    shortlist &&
+    (typeof args.candidateName !== "string" ||
+      !args.candidateName.trim() ||
+      typeof args.roleTitle !== "string" ||
+      !args.roleTitle.trim() ||
+      typeof args.shortlisted !== "boolean")
+  )
+    throw new Error("Shortlist approval requires a verified candidate, role and action.");
   const crmOperation = options?.crmOperation;
   const oneTimeOnly = Boolean(crmOperation || options?.oneTimeOnly);
   const recruitingApproval = !crmOperation && toolName === "recruiting_request_approval";
@@ -54,13 +64,15 @@ export function buildApprovalAskBlock(
     approvalEffectId: effectId,
     text: truncate(
       redactSecrets(
-        crmOperation === "crm_update_candidate_stage"
-          ? "Review CRM stage change"
-          : crmOperation === "crm_append_candidate_note"
-            ? "Review CRM note"
-            : toolName === "create_space" || recruitingApproval
-              ? `${summary}?`
-              : `Review before ${summary}`,
+        shortlist
+          ? "Review shortlist change"
+          : crmOperation === "crm_update_candidate_stage"
+            ? "Review CRM stage change"
+            : crmOperation === "crm_append_candidate_note"
+              ? "Review CRM note"
+              : toolName === "create_space" || recruitingApproval
+                ? `${summary}?`
+                : `Review before ${summary}`,
         secrets,
       ),
       MAX_APPROVAL_SUMMARY_LENGTH,
@@ -135,6 +147,13 @@ function formatApprovalDetail(
   if (reviewReason?.trim()) {
     lines.push(reviewReason.trim().replace(/\u2014|\u2013/g, "-"));
   }
+  if (toolName === "recruiting_shortlist")
+    return [
+      `Candidate: ${args.candidateName}`,
+      `Role: ${args.roleTitle}`,
+      "",
+      args.shortlisted ? "Add to shortlist" : "Remove from shortlist",
+    ].join("\n");
   if (crmOperation) {
     return [
       `Candidate: ${args.candidateName}`,

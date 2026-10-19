@@ -76,6 +76,8 @@ import {
   RecruitingRoleRevisionSchema,
   RecruitingRoleSchema,
   RecruitingRoleToolInputSchema,
+  RecruitingShortlistToolInputSchema,
+  RecruitingShortlistToolResultSchema,
   RecruitingSourceRefSchema,
   ReviseRecruitingRoleInput,
   SaveRecruitingAssessmentInput,
@@ -7510,64 +7512,204 @@ export async function setRecruitingCandidateShortlist(
     await tx.$queryRaw(
       Prisma.sql`SELECT "id" FROM "threads" WHERE "id" = ${input.threadId} AND "spaceId" = ${actor.spaceId} AND "userId" = ${actor.userId} FOR UPDATE`,
     );
-    const thread = await requireThread(tx, actor, input.threadId);
-    if (thread.activeRecruitingRoleId !== input.roleId) throw new IsolationError();
-    const role = await requireRole(tx, actor, input.roleId, true);
-    const candidate = await tx.recruitingCandidate.findUnique({
-      where: { roleId_candidateKey: { roleId: role.id, candidateKey: input.candidateKey } },
-    });
-    if (!candidate) throw new IsolationError();
-    if (candidate.revision !== input.expectedRevision) throw new RecruitingConflictError();
-    if (candidate.shortlisted === input.shortlisted)
-      return {
-        roleId: role.id,
-        candidateKey: candidate.candidateKey,
-        shortlisted: candidate.shortlisted,
-        revision: candidate.revision,
-      };
-    const [profile] = await tx.$queryRaw<
-      Pick<
-        CandidateQueryRow,
-        "name" | "linkedinUrl" | "resumeUrl" | "sourcePageId" | "profileSourcePageIds"
-      >[]
-    >(
-      Prisma.sql`${candidateIndexQuery(role.id)} SELECT "name", "linkedinUrl", "resumeUrl", "sourcePageId", "profileSourcePageIds" FROM base WHERE "candidateKey" = ${candidate.candidateKey}`,
-    );
-    if (!profile) throw new IsolationError();
-    await candidateProfilePages(tx, actor, role.id, [profile]);
-    const identity = [profile.name ?? "Unnamed candidate", profile.linkedinUrl ?? profile.resumeUrl]
-      .filter(Boolean)
-      .join(" · ");
-    const message = await createThreadMessageInTransaction(tx, {
-      threadId: thread.id,
-      role: "user",
-      clientNonce: `recruiting-shortlist:${JSON.stringify([role.id, role.currentRevisionId, candidate.candidateKey, candidate.revision, input.shortlisted])}`,
-      blocks: [
-        {
-          kind: "text",
-          text: `${input.shortlisted ? "Shortlist" : "Remove from shortlist"} ${identity} for ${role.title} (requirements version ${role.revision}).`,
-        },
-      ],
-    });
-    const changed = await tx.recruitingCandidate.updateMany({
-      where: {
-        roleId: role.id,
-        candidateKey: candidate.candidateKey,
-        revision: input.expectedRevision,
-      },
-      data: {
-        shortlisted: input.shortlisted,
-        revision: candidate.revision + 1,
-        shortlistMessageId: message.id,
-      },
-    });
-    if (changed.count !== 1) throw new RecruitingConflictError();
+    return setCandidateShortlistInTransaction(tx, actor, input);
+  });
+}
+
+async function shortlistTarget(
+  tx: Tx,
+  actor: Actor,
+  input: ShortlistInput,
+  authorizedThread?: Awaited<ReturnType<typeof requireThread>>,
+) {
+  const thread = authorizedThread ?? (await requireThread(tx, actor, input.threadId));
+  if (thread.activeRecruitingRoleId !== input.roleId) throw new IsolationError();
+  const role = await requireRole(tx, actor, input.roleId, true, thread);
+  const candidate = await tx.recruitingCandidate.findUnique({
+    where: { roleId_candidateKey: { roleId: role.id, candidateKey: input.candidateKey } },
+  });
+  if (!candidate) throw new IsolationError();
+  if (candidate.revision !== input.expectedRevision) throw new RecruitingConflictError();
+  return { thread, role, candidate };
+}
+
+async function shortlistProfile(tx: Tx, actor: Actor, roleId: string, candidateKey: string) {
+  const [profile] = await tx.$queryRaw<
+    Pick<
+      CandidateQueryRow,
+      "name" | "linkedinUrl" | "resumeUrl" | "sourcePageId" | "profileSourcePageIds"
+    >[]
+  >(
+    Prisma.sql`${candidateIndexQuery(roleId)} SELECT "name", "linkedinUrl", "resumeUrl", "sourcePageId", "profileSourcePageIds" FROM base WHERE "candidateKey" = ${candidateKey}`,
+  );
+  if (!profile) throw new IsolationError();
+  await candidateProfilePages(tx, actor, roleId, [profile]);
+  return profile;
+}
+
+async function setCandidateShortlistInTransaction(
+  tx: Tx,
+  actor: Actor,
+  input: ShortlistInput,
+  native?: { runId: string; botId: string; effectId: string },
+  target?: Awaited<ReturnType<typeof shortlistTarget>>,
+) {
+  const { thread, role, candidate } = target ?? (await shortlistTarget(tx, actor, input));
+  if (candidate.shortlisted === input.shortlisted)
     return {
       roleId: role.id,
       candidateKey: candidate.candidateKey,
+      shortlisted: candidate.shortlisted,
+      revision: candidate.revision,
+    };
+  const profile = await shortlistProfile(tx, actor, role.id, candidate.candidateKey);
+  const identity = [profile.name ?? "Unnamed candidate", profile.linkedinUrl ?? profile.resumeUrl]
+    .filter(Boolean)
+    .join(" · ");
+  const message = await createThreadMessageInTransaction(tx, {
+    threadId: thread.id,
+    role: native ? "bot" : "user",
+    ...(native ? { botId: native.botId, runId: native.runId } : {}),
+    clientNonce: `recruiting-shortlist:${native ? native.effectId : JSON.stringify([role.id, role.currentRevisionId, candidate.candidateKey, candidate.revision, input.shortlisted])}`,
+    blocks: [
+      {
+        kind: "text",
+        text: `${input.shortlisted ? "Shortlist" : "Remove from shortlist"} ${identity} for ${role.title} (requirements version ${role.revision}).`,
+      },
+    ],
+  });
+  const changed = await tx.recruitingCandidate.updateMany({
+    where: {
+      roleId: role.id,
+      candidateKey: candidate.candidateKey,
+      revision: input.expectedRevision,
+    },
+    data: {
       shortlisted: input.shortlisted,
       revision: candidate.revision + 1,
+      shortlistMessageId: message.id,
+    },
+  });
+  if (changed.count !== 1) throw new RecruitingConflictError();
+  return {
+    roleId: role.id,
+    candidateKey: candidate.candidateKey,
+    shortlisted: input.shortlisted,
+    revision: candidate.revision + 1,
+  };
+}
+
+type NativeShortlistContext = ResearchLease & { threadId: string; botId: string };
+
+async function nativeShortlistTarget(
+  tx: Tx,
+  actor: Actor,
+  trusted: NativeShortlistContext,
+  input: ReturnType<typeof RecruitingShortlistToolInputSchema.parse>,
+  authorized?: Awaited<ReturnType<typeof lockLiveRecruitingRun>>,
+) {
+  const { run, thread } = authorized ?? (await lockLiveRecruitingRun(tx, actor, trusted.runId));
+  if (run.threadId !== trusted.threadId || run.botId !== trusted.botId) throw new IsolationError();
+  requireResearchLease(run, trusted);
+  const { expectedRoleRevision, ...selection } = input;
+  const target = await shortlistTarget(tx, actor, { ...selection, threadId: thread.id }, thread);
+  if (target.role.revision !== expectedRoleRevision) throw new RecruitingConflictError();
+  await requireResearchAdoption(tx, actor, run, target.role, undefined, undefined, { run, thread });
+  return { ...target, run };
+}
+
+export async function prepareNativeRecruitingShortlist(
+  prisma: PrismaClient,
+  actor: Actor,
+  trusted: NativeShortlistContext,
+  raw: unknown,
+) {
+  const input = RecruitingShortlistToolInputSchema.parse(raw);
+  return prisma.$transaction(async (tx) => {
+    const { role, candidate } = await nativeShortlistTarget(tx, actor, trusted, input);
+    const profile = await shortlistProfile(tx, actor, role.id, candidate.candidateKey);
+    if (!profile.name?.trim()) throw new IsolationError();
+    return {
+      candidateName: profile.name,
+      roleTitle: role.title,
+      shortlisted: input.shortlisted,
     };
+  });
+}
+
+export async function executeNativeRecruitingShortlist(
+  prisma: PrismaClient,
+  actor: Actor,
+  trusted: NativeShortlistContext & { effectId: string; effectRequest: unknown },
+  raw: unknown,
+) {
+  const input = RecruitingShortlistToolInputSchema.parse(raw);
+  if (stableJsonValue(input) !== stableJsonValue(trusted.effectRequest)) throw new IsolationError();
+  return prisma.$transaction(async (tx) => {
+    const { run, thread } = await lockLiveRecruitingRun(tx, actor, trusted.runId, false);
+    if (run.threadId !== trusted.threadId || run.botId !== trusted.botId)
+      throw new IsolationError();
+    await tx.$queryRaw(
+      Prisma.sql`SELECT "id" FROM "external_effects" WHERE "id" = ${trusted.effectId} FOR UPDATE`,
+    );
+    const effect = await tx.externalEffect.findFirst({
+      where: {
+        id: trusted.effectId,
+        spaceId: actor.spaceId,
+        runId: run.id,
+        kind: "recruiting_shortlist",
+      },
+    });
+    if (!effect || stableJsonValue(effect.request) !== stableJsonValue(input))
+      throw new IsolationError();
+    if (effect.status === "completed") {
+      const result = RecruitingShortlistToolResultSchema.parse(effect.result);
+      if (
+        result.roleId !== input.roleId ||
+        result.candidateKey !== input.candidateKey ||
+        result.shortlisted !== input.shortlisted
+      )
+        throw new IsolationError();
+      return result;
+    }
+    if (effect.status !== "executing") throw new IsolationError();
+    const target = await nativeShortlistTarget(tx, actor, trusted, input, { run, thread });
+    const { expectedRoleRevision: _expectedRoleRevision, ...selection } = input;
+    const result = {
+      kind: "saved" as const,
+      ...(await setCandidateShortlistInTransaction(
+        tx,
+        actor,
+        { ...selection, threadId: run.threadId },
+        { runId: run.id, botId: run.botId, effectId: effect.id },
+        target,
+      )),
+    };
+    const completed = await tx.externalEffect.updateMany({
+      where: {
+        id: effect.id,
+        spaceId: actor.spaceId,
+        runId: run.id,
+        status: "executing",
+        run: {
+          status: "running",
+          leaseOwner: trusted.leaseOwner,
+          leaseFence: trusted.leaseFence,
+          leaseExpiresAt: { gt: new Date() },
+        },
+      },
+      data: { status: "completed", result },
+    });
+    if (completed.count !== 1) throw new IsolationError();
+    await appendEventInTransaction(tx, {
+      spaceId: actor.spaceId,
+      threadId: run.threadId,
+      botId: run.botId,
+      runId: run.id,
+      type: "effect.recorded",
+      payload: { effectId: effect.id, tool: "recruiting_shortlist", result },
+    });
+    return result;
   });
 }
 

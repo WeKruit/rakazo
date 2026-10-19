@@ -428,13 +428,20 @@ export function eventChangesRecruitingPanel(
           block && typeof block === "object" && block.kind === "text" && block.recruitingFeedback,
       )
     );
-  if (event.type === "effect.recorded")
+  if (event.type === "effect.recorded") {
+    const result = event.payload.result;
     return (
       (event.payload.tool === "recruiting_role" &&
         event.payload.status === "saved" &&
         event.payload.changed === true) ||
-      (event.payload.tool === "recruiting_crm_target" && event.payload.status === "connected")
+      (event.payload.tool === "recruiting_crm_target" && event.payload.status === "connected") ||
+      (event.payload.tool === "recruiting_shortlist" &&
+        result !== null &&
+        typeof result === "object" &&
+        "kind" in result &&
+        result.kind === "saved")
     );
+  }
   // ponytail: arbitrary MCP aliases refresh at run termination;
   // immediate updates need a persisted native recruiting receipt.
   if (event.type === "agent.tool.completed")

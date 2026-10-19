@@ -852,6 +852,19 @@ it("refreshes persisted recruiting changes while ignoring ongoing catalog and so
     tool: "recruiting_crm_target",
     status: "connected",
   });
+  receive("Shortlisted", "effect.recorded", {
+    tool: "recruiting_shortlist",
+    result: { kind: "saved", shortlisted: true },
+  });
+  receive("Removed from shortlist", "effect.recorded", {
+    tool: "recruiting_shortlist",
+    result: { kind: "saved", shortlisted: false },
+  });
+  receive("Shortlist conflict", "effect.recorded", {
+    tool: "recruiting_shortlist",
+    result: { kind: "conflict" },
+  });
+  receive("Shortlist pending", "effect.recorded", { tool: "recruiting_shortlist" });
   receive("CRM lookup", "agent.tool.completed", {
     name: "recruiting_crm_target",
     outcome: "succeeded",
@@ -880,6 +893,8 @@ it("refreshes persisted recruiting changes while ignoring ongoing catalog and so
   expect(refreshes).toEqual([
     "Role cleared",
     "CRM connected",
+    "Shortlisted",
+    "Removed from shortlist",
     "CRM import pending",
     "CRM import receipt",
     "Reply outcome",
