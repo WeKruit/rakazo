@@ -7,7 +7,7 @@ Review recruiting email, introductions, campaign imports and screening under the
 
 ## Read the actual sources
 
-Discover assigned tools and schemas. Resolve account, candidate, role, campaign and original provider thread from saved records; never guess or switch accounts. Confirm the recipient is the candidate, not an internal/recruiter account. Read the full relevant conversation, including sent, queued and read messages, through supported pagination. Previews/unread lists do not prove full coverage.
+Discover assigned tools and schemas. Resolve account, candidate, role, campaign and original provider thread from saved records; never guess or switch accounts. Verify candidate-facing recipients are the actual candidate; HM-only/internal mail requires its separately authorized audience. Read the full relevant conversation, including sent, queued and read messages, through supported pagination. Previews/unread lists do not prove full coverage.
 
 Before each send, freshly check disposition, applicable hold/pass sources, global suppression, duplicates, Gmail/Instantly and tracker/CRM sent history, and received materials. Read approved company facts, salary, disclosure, JD PDFs, deck and policy. Hold/pass, opt-out, newer replies, answered rounds or duplicates stop the draft. Leave held candidates unread. Missing sources or incomplete history/capabilities remain blockers after approval. Never invent arguments or declare unknown checks complete.
 
