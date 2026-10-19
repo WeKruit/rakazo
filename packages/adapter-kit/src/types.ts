@@ -1,4 +1,5 @@
 import type {
+  AskRequestedSchema,
   CacheCapabilities as ConnectionCacheCapabilities,
   ConnectionCatalogItem,
   RecruitingPreferenceFeedbackInput,
@@ -517,7 +518,12 @@ export interface AgentRunRequest {
 export interface ScriptedTurn {
   assistant?: string;
   toolCalls?: Array<{ name: string; args: Record<string, unknown> }>;
-  ask?: { text: string; detail?: string; actions?: Array<{ id: string; label: string }> };
+  ask?: {
+    text: string;
+    detail?: string;
+    actions?: Array<{ id: string; label: string }>;
+    requestedSchema?: AskRequestedSchema;
+  };
   takeover?: { reason: string };
   files?: Array<{ path: string; content: string }>;
   memory?: Array<{
@@ -574,6 +580,7 @@ export type AgentRuntimeEvent =
       text: string;
       detail?: string;
       actions?: Array<{ id: string; label: string }>;
+      requestedSchema?: AskRequestedSchema;
     }
   | { type: "takeover"; reason: string }
   | ({

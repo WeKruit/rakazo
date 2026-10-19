@@ -2,18 +2,28 @@ import type { MenuAction } from "@expo/ui/community/menu";
 import { ChatMarkdown } from "@rakazo/chat-ui/native";
 import type {
   AgentSkillCatalogEntry,
+  AskAnswer,
+  AskFormContent,
+  AskFormResponse,
   Connection,
   ConnectionCatalogItem,
   MessageBlock,
   MessageReaction,
   Routine,
 } from "@rakazo/contracts";
-import { canReactToThreadMessage, MESSAGE_REACTIONS } from "@rakazo/contracts";
+import {
+  canReactToThreadMessage,
+  MESSAGE_REACTIONS,
+  parseAskFormResponse,
+} from "@rakazo/contracts";
 import type { SlashActionId, ThreadItem } from "@rakazo/core";
 import {
   abortableDelay,
   answerableAskMessageIds,
   appendNewerThreadPage,
+  askFormContent,
+  askFormDefaults,
+  askFormOptions,
   attachmentsForThread,
   buildComposerMentionOptions,
   cloudAgentHttpsUrl,
@@ -99,9 +109,11 @@ import { InlineImageAttachment } from "../components/inline-image-attachment";
 import { McpApprovalCard } from "../components/McpApprovalCard";
 import type { MarkdownArtifactPreviewTarget } from "../components/markdown-artifact-preview";
 import { MarkdownArtifactPreview } from "../components/markdown-artifact-preview";
+import { MenuPicker } from "../components/menu-picker";
 import { MessageCaption } from "../components/message-caption";
 import { MessageContextMenu } from "../components/message-context-menu";
 import { NativeActionButton } from "../components/native-action-button";
+import { NativeSwitch } from "../components/native-switch";
 import { NativeSymbol } from "../components/native-symbol";
 import { ReplyDismissButton } from "../components/reply-dismiss-button";
 import { ReplyLine } from "../components/reply-line";
@@ -1712,7 +1724,7 @@ function Thread({ sessionEpoch }: { sessionEpoch: number }) {
   }
 
   const answerMessage = useCallback(
-    async (message: MobileMessage, answer: string, username?: string) => {
+    async (message: MobileMessage, answer: AskAnswer, username?: string) => {
       const targetBotId = botId;
       const targetGroupId = groupId;
       if (readOnly || (!targetBotId && !targetGroupId) || !message.runId) return;
@@ -2805,7 +2817,7 @@ type MessageRowActions = {
   select: (text: string) => void;
   speak: (message: MobileMessage) => void;
   react: (message: MobileMessage, reaction: MessageReaction) => void;
-  answer: (message: MobileMessage, answer: string, username?: string) => Promise<void>;
+  answer: (message: MobileMessage, answer: AskAnswer, username?: string) => Promise<void>;
   openBot: (id: string, name: string) => void;
   openComputer: (id: string, name: string) => void;
   previewMarkdown: (target: MarkdownArtifactPreviewTarget) => void;
@@ -3134,7 +3146,7 @@ const MessageBubble = memo(function MessageBubble({
   message: MobileMessage;
   members?: MobileSnapshot["members"];
   canAnswer: boolean;
-  onAnswer: (message: MobileMessage, answer: string, username?: string) => Promise<void>;
+  onAnswer: (message: MobileMessage, answer: AskAnswer, username?: string) => Promise<void>;
   onOpenBot: (botId: string, name: string) => void;
   onOpenComputer: (botId: string, name: string) => void;
   onChoiceDismissed?: (question: string) => void;
@@ -3884,7 +3896,7 @@ function AskBlock({
 }: {
   ask: Extract<MobileMessage["blocks"][number], { kind: "ask" }>;
   canAnswer: boolean;
-  onAnswer: (answer: string, username?: string) => Promise<void>;
+  onAnswer: (answer: AskAnswer, username?: string) => Promise<void>;
   actionProps: MessageActionProps;
 }) {
   const tokens = useMobileTokens();
@@ -3893,6 +3905,9 @@ function AskBlock({
   const [username, setUsername] = useState("");
   const [error, setError] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
+  const [formValues, setFormValues] = useState<AskFormContent>(() =>
+    ask.requestedSchema ? askFormDefaults(ask.requestedSchema) : {},
+  );
   const answered = ask.status === "answered";
   const secretInput = isSecretAskBlock(ask);
   const loginInput = secretInput && ask.credential?.auth.type === "login";
@@ -3920,6 +3935,25 @@ function AskBlock({
       setError(
         secretInput ? t("Could not send answer") : errorText(cause, t("Could not send answer")),
       );
+    } finally {
+      setSubmitting(false);
+    }
+  }
+
+  async function submitForm(action: AskFormResponse["action"]) {
+    if (submitting || !ask.requestedSchema) return;
+    setError(null);
+    try {
+      const response = parseAskFormResponse(
+        ask.requestedSchema,
+        action === "accept"
+          ? { action, content: askFormContent(ask.requestedSchema, formValues) }
+          : { action },
+      );
+      setSubmitting(true);
+      await onAnswer(response);
+    } catch (cause) {
+      setError(errorText(cause, t("Could not send answer")));
     } finally {
       setSubmitting(false);
     }
@@ -3956,6 +3990,139 @@ function AskBlock({
         <Text style={{ color: tokens.success, fontSize: 14 }}>
           {secretInput ? t("Saved") : t("Answered: {answer}", { answer: ask.answer ?? t("Done") })}
         </Text>
+      ) : canAnswer && ask.requestedSchema ? (
+        <>
+          {Object.entries(ask.requestedSchema.properties).map(([name, field]) => {
+            const label = field.title ?? name;
+            const options = askFormOptions(field);
+            const value = formValues[name];
+            const setValue = (next: AskFormContent[string] | undefined) =>
+              setFormValues((current: AskFormContent) => {
+                const values = { ...current };
+                if (next === undefined) delete values[name];
+                else values[name] = next;
+                return values;
+              });
+            return (
+              <View key={name} style={{ gap: 6 }}>
+                <Text style={{ color: tokens.foreground, fontWeight: "600" }}>
+                  {label}
+                  {ask.requestedSchema!.required?.includes(name) ? " *" : ""}
+                </Text>
+                {field.description ? (
+                  <Text style={{ color: tokens.mutedForeground, fontSize: 13 }}>
+                    {field.description}
+                  </Text>
+                ) : null}
+                {field.type === "array" ? (
+                  options?.map((option) => (
+                    <View
+                      key={option.value}
+                      style={{
+                        flexDirection: "row",
+                        alignItems: "center",
+                        justifyContent: "space-between",
+                        gap: 8,
+                      }}
+                    >
+                      <Text style={{ color: tokens.foreground, flex: 1 }}>{option.label}</Text>
+                      <NativeSwitch
+                        accessibilityLabel={`${label}: ${option.label}`}
+                        disabled={submitting}
+                        value={Array.isArray(value) && value.includes(option.value)}
+                        onValueChange={(checked) =>
+                          setValue(
+                            checked
+                              ? [...(Array.isArray(value) ? value : []), option.value]
+                              : (Array.isArray(value) ? value : []).filter(
+                                  (item) => item !== option.value,
+                                ),
+                          )
+                        }
+                      />
+                    </View>
+                  ))
+                ) : field.type === "boolean" ? (
+                  <NativeSwitch
+                    accessibilityLabel={label}
+                    disabled={submitting}
+                    value={value === true}
+                    onValueChange={setValue}
+                  />
+                ) : options ? (
+                  <View
+                    pointerEvents={submitting ? "none" : "auto"}
+                    accessibilityElementsHidden={submitting}
+                    importantForAccessibility={submitting ? "no-hide-descendants" : "auto"}
+                  >
+                    <MenuPicker
+                      label={label}
+                      choices={[
+                        { key: "", label: t("Select") },
+                        ...options.map((option, index) => ({
+                          key: String(index),
+                          label: option.label,
+                        })),
+                      ]}
+                      value={
+                        value === undefined
+                          ? ""
+                          : String(options.findIndex((option) => option.value === value))
+                      }
+                      onChange={(key) => {
+                        if (!submitting)
+                          setValue(key === "" ? undefined : options[Number(key)]?.value);
+                      }}
+                    />
+                  </View>
+                ) : (
+                  <TextInput
+                    accessibilityLabel={label}
+                    accessibilityHint={field.description}
+                    value={
+                      typeof value === "string" || typeof value === "number" ? String(value) : ""
+                    }
+                    onChangeText={setValue}
+                    keyboardType={
+                      field.type === "number" || field.type === "integer"
+                        ? "numbers-and-punctuation"
+                        : "format" in field && field.format === "uri"
+                          ? "url"
+                          : "format" in field && field.format === "email"
+                            ? "email-address"
+                            : "default"
+                    }
+                    autoCapitalize="none"
+                    autoCorrect={false}
+                    editable={!submitting}
+                    style={[
+                      askInputStyles.field,
+                      { borderColor: tokens.border, color: tokens.foreground },
+                    ]}
+                  />
+                )}
+              </View>
+            );
+          })}
+          <NativeActionButton
+            label={t("Send answer")}
+            disabled={submitting}
+            busy={submitting}
+            onPress={() => void submitForm("accept")}
+          />
+          <NativeActionButton
+            label={t("Decline")}
+            disabled={submitting}
+            prominence="secondary"
+            onPress={() => void submitForm("decline")}
+          />
+          <NativeActionButton
+            label={t("Cancel")}
+            disabled={submitting}
+            prominence="plain"
+            onPress={() => void submitForm("cancel")}
+          />
+        </>
       ) : canAnswer ? (
         <>
           {loginInput ? (

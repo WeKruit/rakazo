@@ -99,6 +99,7 @@ export class ScriptedAgentRuntime implements AgentRuntime {
             text: turn.ask.text,
             detail: turn.ask.detail,
             actions: turn.ask.actions,
+            requestedSchema: turn.ask.requestedSchema,
           };
           return;
         }

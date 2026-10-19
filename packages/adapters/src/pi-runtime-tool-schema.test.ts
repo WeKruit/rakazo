@@ -1,6 +1,8 @@
 import type { ToolCall } from "@earendil-works/pi-ai";
 import { validateToolArguments } from "@earendil-works/pi-ai";
+import { ElicitRequestFormParamsSchema } from "@modelcontextprotocol/sdk/types.js";
 import {
+  AskUserInputSchema,
   RecruitingCandidatesToolInputSchema,
   RecruitingRoleToolInputSchema,
 } from "@rakazo/contracts";
@@ -10,6 +12,41 @@ import { parseConnectorToolArgs } from "./lazy-tool-catalog.js";
 import { jsonSchemaParameters, parametersFor } from "./pi-runtime.js";
 
 describe("jsonSchemaParameters", () => {
+  it("preserves the standard elicitation schema through the native ask tool parameters", () => {
+    const tool = builtinAgentTools.find((entry) => entry.name === "ask_user")!;
+    const parameters = parametersFor(tool);
+    const requestedSchema = {
+      type: "object",
+      properties: {
+        url: { type: "string", format: "uri", title: "Website" },
+        choice: { type: "string", oneOf: [{ const: "a", title: "Option A" }] },
+        tags: {
+          type: "array",
+          minItems: 1,
+          maxItems: 2,
+          items: {
+            anyOf: [
+              { const: "a", title: "A" },
+              { const: "b", title: "B" },
+            ],
+          },
+        },
+      },
+      required: ["url", "tags"],
+    };
+    const args = { question: "Details?", requestedSchema };
+    expect(
+      ElicitRequestFormParamsSchema.parse({ message: args.question, requestedSchema })
+        .requestedSchema,
+    ).toEqual(requestedSchema);
+    expect(AskUserInputSchema.parse(args)).toEqual(args);
+    expect(
+      validateToolArguments(
+        { name: tool.name, description: tool.description, parameters },
+        { type: "toolCall", id: "ask-form", name: tool.name, arguments: args },
+      ),
+    ).toEqual(args);
+  });
   it("preserves candidate list/source pagination and rejects model-selected scope", () => {
     const tool = builtinAgentTools.find((entry) => entry.name === "recruiting_candidates")!;
     expect(tool).toBeDefined();

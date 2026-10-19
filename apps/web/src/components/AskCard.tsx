@@ -1,11 +1,18 @@
 import { t } from "@lingui/core/macro";
 import { Trans, useLingui } from "@lingui/react/macro";
 import { ChatMarkdown } from "@rakazo/chat-ui/web";
-import type { ThreadMessage } from "@rakazo/contracts";
-import { commandVariableName } from "@rakazo/contracts";
-import { isApprovalAskBlock, isSecretAskBlock, selectedAskActionLabel } from "@rakazo/core";
+import type { AskAnswer, AskFormContent, AskFormResponse, ThreadMessage } from "@rakazo/contracts";
+import { commandVariableName, parseAskFormResponse } from "@rakazo/contracts";
+import {
+  askFormContent,
+  askFormDefaults,
+  askFormOptions,
+  isApprovalAskBlock,
+  isSecretAskBlock,
+  selectedAskActionLabel,
+} from "@rakazo/core";
 import { Button, Input, Textarea } from "@rakazo/ui-web";
-import { useState } from "react";
+import { useId, useState } from "react";
 import { errorText } from "../lib/user-error";
 
 export type AskBlock = Extract<ThreadMessage["blocks"][number], { kind: "ask" }>;
@@ -54,13 +61,17 @@ export function AskCard({
 }: {
   block: AskBlock;
   canAnswer: boolean;
-  onAnswer: (text: string, username?: string) => Promise<void>;
+  onAnswer: (text: AskAnswer, username?: string) => Promise<void>;
 }) {
   const { t } = useLingui();
   const [answer, setAnswer] = useState("");
   const [username, setUsername] = useState("");
   const [pendingAction, setPendingAction] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [formValues, setFormValues] = useState<AskFormContent>(() =>
+    block.requestedSchema ? askFormDefaults(block.requestedSchema) : {},
+  );
+  const formId = useId();
   const submitting = pendingAction !== null;
   const approvalActions = isApprovalAskBlock(block) ? block.actions : undefined;
   const askActions = block.actions;
@@ -89,6 +100,25 @@ export function AskCard({
           ? t`Could not submit this answer`
           : errorText(err, t`Could not submit this answer`),
       );
+    } finally {
+      setPendingAction(null);
+    }
+  }
+
+  async function submitForm(action: AskFormResponse["action"]) {
+    if (submitting || !block.requestedSchema) return;
+    setError(null);
+    try {
+      const response = parseAskFormResponse(
+        block.requestedSchema,
+        action === "accept"
+          ? { action, content: askFormContent(block.requestedSchema, formValues) }
+          : { action },
+      );
+      setPendingAction(action);
+      await onAnswer(response);
+    } catch (cause) {
+      setError(errorText(cause, t`Could not submit this answer`));
     } finally {
       setPendingAction(null);
     }
@@ -132,6 +162,156 @@ export function AskCard({
         <div className="mt-3.5 text-[13.5px] font-medium text-muted-foreground">
           <Trans>No longer active</Trans>
         </div>
+      ) : block.requestedSchema ? (
+        <form
+          className="mt-3.5 flex flex-col gap-4"
+          onSubmit={(event) => {
+            event.preventDefault();
+            void submitForm("accept");
+          }}
+        >
+          {Object.entries(block.requestedSchema.properties).map(([name, field], index) => {
+            const id = `${formId}-${index}`;
+            const label = field.title ?? name;
+            const required = block.requestedSchema!.required?.includes(name);
+            const options = askFormOptions(field);
+            const value = formValues[name];
+            const setValue = (next: AskFormContent[string] | undefined) =>
+              setFormValues((current) => {
+                const values = { ...current };
+                if (next === undefined) delete values[name];
+                else values[name] = next;
+                return values;
+              });
+            return (
+              <fieldset key={name} className="min-w-0 space-y-2" disabled={submitting}>
+                <legend className="text-sm font-medium">
+                  {label}
+                  {required ? " *" : ""}
+                </legend>
+                {field.description ? (
+                  <p id={`${id}-description`} className="text-sm text-muted-foreground">
+                    {field.description}
+                  </p>
+                ) : null}
+                {field.type === "array" ? (
+                  options?.map((option) => (
+                    <label key={option.value} className="flex items-center gap-2 text-sm">
+                      <input
+                        type="checkbox"
+                        aria-label={option.label}
+                        aria-describedby={field.description ? `${id}-description` : undefined}
+                        checked={Array.isArray(value) && value.includes(option.value)}
+                        onChange={(event) =>
+                          setValue(
+                            event.target.checked
+                              ? [...(Array.isArray(value) ? value : []), option.value]
+                              : (Array.isArray(value) ? value : []).filter(
+                                  (item) => item !== option.value,
+                                ),
+                          )
+                        }
+                      />
+                      {option.label}
+                    </label>
+                  ))
+                ) : field.type === "boolean" ? (
+                  <label className="flex items-center gap-2 text-sm">
+                    <input
+                      type="checkbox"
+                      aria-label={label}
+                      checked={value === true}
+                      onChange={(event) => setValue(event.target.checked)}
+                    />
+                    {label}
+                  </label>
+                ) : options ? (
+                  <select
+                    id={id}
+                    aria-label={label}
+                    aria-required={required}
+                    required={required}
+                    aria-describedby={field.description ? `${id}-description` : undefined}
+                    className="h-10 w-full rounded-md border border-input bg-background px-3 text-base"
+                    value={
+                      value === undefined
+                        ? ""
+                        : String(options.findIndex((option) => option.value === value))
+                    }
+                    onChange={(event) =>
+                      setValue(
+                        event.target.value === ""
+                          ? undefined
+                          : options[Number(event.target.value)]?.value,
+                      )
+                    }
+                  >
+                    <option value=""></option>
+                    {options.map((option, optionIndex) => (
+                      <option key={option.value} value={String(optionIndex)}>
+                        {option.label}
+                      </option>
+                    ))}
+                  </select>
+                ) : (
+                  <Input
+                    id={id}
+                    aria-label={label}
+                    aria-required={required}
+                    // JSON Schema permits an explicitly empty plain string unless constrained.
+                    required={
+                      required &&
+                      (field.type === "number" ||
+                        field.type === "integer" ||
+                        ("format" in field && Boolean(field.format)) ||
+                        ("minLength" in field && (field.minLength ?? 0) > 0))
+                    }
+                    aria-describedby={field.description ? `${id}-description` : undefined}
+                    type={
+                      field.type === "number" || field.type === "integer"
+                        ? "number"
+                        : "format" in field
+                          ? field.format === "uri"
+                            ? "url"
+                            : field.format === "email"
+                              ? "email"
+                              : field.format === "date"
+                                ? "date"
+                                : "text"
+                          : "text"
+                    }
+                    step={field.type === "integer" ? 1 : "any"}
+                    min={"minimum" in field ? field.minimum : undefined}
+                    max={"maximum" in field ? field.maximum : undefined}
+                    value={typeof value === "string" || typeof value === "number" ? value : ""}
+                    onChange={(event) => setValue(event.target.value)}
+                  />
+                )}
+              </fieldset>
+            );
+          })}
+          <div className="flex flex-wrap gap-2">
+            <Button type="submit" disabled={submitting}>
+              {pendingAction === "accept" ? <Trans>Sending…</Trans> : <Trans>Send answer</Trans>}
+            </Button>
+            <Button
+              type="button"
+              variant="outline"
+              disabled={submitting}
+              onClick={() => void submitForm("decline")}
+            >
+              <Trans>Decline</Trans>
+            </Button>
+            <Button
+              type="button"
+              variant="ghost"
+              disabled={submitting}
+              onClick={() => void submitForm("cancel")}
+            >
+              <Trans>Cancel</Trans>
+            </Button>
+          </div>
+        </form>
       ) : askActions?.length ? (
         <div className="mt-3.5 space-y-1.5">
           {askActions.map((action) => (
@@ -190,7 +370,11 @@ export function AskCard({
           </Button>
         </form>
       ) : null}
-      {block.status !== "answered" && canAnswer && !secretInput && !approvalActions ? (
+      {block.status !== "answered" &&
+      canAnswer &&
+      !secretInput &&
+      !approvalActions &&
+      !block.requestedSchema ? (
         <form
           className="mt-3.5 flex flex-col gap-2"
           onSubmit={(event) => {

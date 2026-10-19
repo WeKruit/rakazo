@@ -143,7 +143,12 @@ export function createRunSecretWriter(secretStore: SecretStore): RunSecretWriter
         const ask = blocks.success
           ? blocks.data.find((block) => block.kind === "ask" && block.status !== "answered")
           : undefined;
-        if (!run || ask?.kind !== "ask" || !isSecretAskBlock(ask))
+        if (
+          !run ||
+          ask?.kind !== "ask" ||
+          !isSecretAskBlock(ask) ||
+          typeof input.answer !== "string"
+        )
           return commit({
             store: async () => {
               throw new Error("Secret request changed; retry");

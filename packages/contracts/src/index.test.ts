@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import {
+  AskRequestedSchema,
   appContract,
   BOT_DESCRIPTION_MAX_LENGTH,
   BOT_INSTRUCTIONS_MAX_LENGTH,
@@ -17,6 +18,7 @@ import {
   normalizeCreateBotProfile,
   ProductEventSchema,
   ProductEventType,
+  parseAskFormResponse,
   parseModelContextWindow,
   parseModelMaxImagesPerPrompt,
   parseModelMaxTokens,
@@ -29,6 +31,70 @@ import {
 } from "./index.js";
 
 describe("contracts", () => {
+  it("validates standard elicitation form fields and structured decisions", () => {
+    const schema = AskRequestedSchema.parse({
+      type: "object",
+      properties: {
+        website: { type: "string", format: "uri" },
+        regions: {
+          type: "array",
+          minItems: 1,
+          items: {
+            anyOf: [
+              { const: "north", title: "North" },
+              { const: "south", title: "South" },
+            ],
+          },
+        },
+        count: { type: "integer", minimum: 1, maximum: 3 },
+      },
+      required: ["website", "regions", "count"],
+    });
+    const content = { website: "https://example.com", regions: ["north", "south"], count: 2 };
+    expect(parseAskFormResponse(schema, { action: "accept", content })).toEqual({
+      action: "accept",
+      content,
+    });
+    for (const invalid of [
+      { ...content, website: "invalid" },
+      { ...content, regions: ["unknown"] },
+      { ...content, count: 1.5 },
+      { ...content, extra: true },
+      { website: content.website },
+    ])
+      expect(() => parseAskFormResponse(schema, { action: "accept", content: invalid })).toThrow();
+    expect(parseAskFormResponse(schema, { action: "cancel" })).toEqual({ action: "cancel" });
+    expect(parseAskFormResponse(schema, { action: "decline" })).toEqual({ action: "decline" });
+    expect(() => parseAskFormResponse(schema, { action: "cancel", content })).toThrow();
+    const defaults = AskRequestedSchema.parse({
+      type: "object",
+      properties: {
+        label: { type: "string", default: "Suggested" },
+        optional: { type: "boolean", default: true },
+      },
+      required: ["label"],
+    });
+    expect(() => parseAskFormResponse(defaults, { action: "accept", content: {} })).toThrow();
+    expect(
+      parseAskFormResponse(defaults, { action: "accept", content: { label: "Chosen" } }),
+    ).toEqual({ action: "accept", content: { label: "Chosen" } });
+    expect(
+      MessageBlock.safeParse({
+        kind: "ask",
+        text: "Form",
+        requestedSchema: schema,
+        input: "secret",
+      }).success,
+    ).toBe(false);
+    expect(
+      MessageBlock.safeParse({
+        kind: "ask",
+        text: "Form",
+        requestedSchema: schema,
+        approvalEffectId: "effect-1",
+      }).success,
+    ).toBe(false);
+  });
   it("accepts structured live activity progress", () => {
     expect(MessageBlock.parse({ kind: "progress", text: "Using browser", activity: true })).toEqual(
       { kind: "progress", text: "Using browser", activity: true },

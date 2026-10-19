@@ -100,7 +100,12 @@ import {
   VoiceInfoSchema,
   VoiceStatusSchema,
 } from "./domain.js";
-import { AskBlockSchema, ComputerCommandSchema, ProductEventSchema } from "./events.js";
+import {
+  AskAnswerSchema,
+  AskBlockSchema,
+  ComputerCommandSchema,
+  ProductEventSchema,
+} from "./events.js";
 import { Id, IsoDate, RunStatus } from "./ids.js";
 import {
   IntegrationProviderConfigSchema,
@@ -490,7 +495,7 @@ export const appContract = {
         threadTarget.safeExtend({
           runId: Id,
           messageId: Id,
-          answer: z.string().min(1),
+          answer: AskAnswerSchema,
           /** Carries the call id for an answer spoken during a call. */
           clientNonce: z.string().min(1).max(200).optional(),
           /** Only for a login card; `answer` carries its password. */

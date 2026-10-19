@@ -8526,6 +8526,12 @@ export function createRunExecutor(deps: ExecutorDeps) {
               });
             } else if (event.type === "ask") {
               if (!(await renewRunLease(deps, runId, workerId, fence))) return;
+              // Schema keys and enum values are identities: reject secrets rather than redact them.
+              if (
+                event.requestedSchema &&
+                containsSecret(JSON.stringify(event.requestedSchema), runSecrets)
+              )
+                throw new Error("Ask form contains protected input");
               const safeText = redactSecrets(event.text, runSecrets);
               const safeDetail = event.detail
                 ? redactSecrets(event.detail, runSecrets)
@@ -8550,6 +8556,7 @@ export function createRunExecutor(deps: ExecutorDeps) {
                     detail: safeDetail,
                     status: "pending",
                     actions: safeActions,
+                    requestedSchema: event.requestedSchema,
                   },
                 ],
                 // Keep unredacted labels on the run for resume; message blocks stay redacted.

@@ -1,10 +1,15 @@
 // @vitest-environment jsdom
 
 import { readFileSync } from "node:fs";
+import { parseAskFormResponse } from "@rakazo/contracts";
 import type { ThreadScrollState } from "@rakazo/core";
 import {
   answerableAskMessageIds,
   appendNewerThreadPage,
+  askFormContent,
+  askFormDefaults,
+  askFormOptions,
+  isSecretAskBlock,
   leaveThreadWindow,
   openThreadWindow,
   reconcileThreadScrollState,
@@ -25,6 +30,159 @@ const handler = source.slice(
   source.indexOf("  function showLatest() {"),
   source.indexOf("  async function loadOlderMessages() {"),
 );
+
+it("renders and answers the actual mobile multi-field card with typed multi-select and URL validation", async () => {
+  (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
+  const surface = ({ children }: { children?: React.ReactNode }) => <div>{children}</div>;
+  const scope = {
+    React,
+    useState,
+    askFormContent,
+    askFormDefaults,
+    askFormOptions,
+    parseAskFormResponse,
+    isSecretAskBlock,
+    useMobileTokens: () => ({}),
+    useI18n: () => ({ t: (text: string) => text }),
+    errorText: (error: Error) => error.message,
+    View: surface,
+    Text: surface,
+    askInputStyles: { field: {} },
+    TextInput: ({
+      accessibilityLabel,
+      value,
+      onChangeText,
+      editable,
+    }: {
+      accessibilityLabel: string;
+      value: string;
+      onChangeText: (text: string) => void;
+      editable: boolean;
+    }) => (
+      <input
+        aria-label={accessibilityLabel}
+        value={value}
+        disabled={!editable}
+        onChange={(event) => onChangeText(event.target.value)}
+      />
+    ),
+    NativeSwitch: ({
+      accessibilityLabel,
+      value,
+      onValueChange,
+      disabled,
+    }: {
+      accessibilityLabel: string;
+      value: boolean;
+      onValueChange: (value: boolean) => void;
+      disabled: boolean;
+    }) => (
+      <input
+        type="checkbox"
+        aria-label={accessibilityLabel}
+        checked={value}
+        disabled={disabled}
+        onChange={(event) => onValueChange(event.target.checked)}
+      />
+    ),
+    NativeActionButton: ({
+      label,
+      disabled,
+      onPress,
+    }: {
+      label: string;
+      disabled: boolean;
+      onPress: () => void;
+    }) => (
+      <button type="button" disabled={disabled} onClick={onPress}>
+        {label}
+      </button>
+    ),
+  };
+  const blockSource = source.slice(
+    source.indexOf("function AskBlock("),
+    source.indexOf("\nconst askInputStyles"),
+  );
+  const compiled = ts.transpileModule(`${blockSource}\nreturn AskBlock;`, {
+    compilerOptions: { jsx: ts.JsxEmit.React, target: ts.ScriptTarget.ES2022 },
+  }).outputText;
+  const AskBlock = new Function(...Object.keys(scope), compiled)(...Object.values(scope));
+  const container = document.createElement("div");
+  const root = createRoot(container);
+  const onAnswer = vi.fn().mockResolvedValue(undefined);
+  const ask = {
+    kind: "ask",
+    text: "Details?",
+    requestedSchema: {
+      type: "object",
+      properties: {
+        website: { type: "string", title: "Website", format: "uri" },
+        count: { type: "integer", default: 2 },
+        regions: {
+          type: "array",
+          title: "Regions",
+          minItems: 1,
+          items: { type: "string", enum: ["north", "south"] },
+        },
+      },
+      required: ["website", "regions"],
+    },
+  };
+  try {
+    act(() => root.render(<AskBlock ask={ask} canAnswer onAnswer={onAnswer} actionProps={{}} />));
+    const input = container.querySelector<HTMLInputElement>('input[aria-label="Website"]')!;
+    const setWebsite = (value: string) =>
+      act(() => {
+        Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, "value")!.set!.call(
+          input,
+          value,
+        );
+        input.dispatchEvent(new Event("input", { bubbles: true }));
+      });
+    act(() =>
+      container.querySelector<HTMLInputElement>('input[aria-label="Regions: north"]')!.click(),
+    );
+    act(() =>
+      container.querySelector<HTMLInputElement>('input[aria-label="Regions: south"]')!.click(),
+    );
+    setWebsite("invalid");
+    await act(async () =>
+      [...container.querySelectorAll("button")]
+        .find((button) => button.textContent === "Send answer")!
+        .click(),
+    );
+    expect(onAnswer).not.toHaveBeenCalled();
+    setWebsite("https://example.com");
+    await act(async () =>
+      [...container.querySelectorAll("button")]
+        .find((button) => button.textContent === "Send answer")!
+        .click(),
+    );
+    expect(onAnswer).toHaveBeenCalledExactlyOnceWith({
+      action: "accept",
+      content: { count: 2, regions: ["north", "south"], website: "https://example.com" },
+    });
+    await act(async () =>
+      [...container.querySelectorAll("button")]
+        .find((button) => button.textContent === "Cancel")!
+        .click(),
+    );
+    expect(onAnswer).toHaveBeenLastCalledWith({ action: "cancel" });
+    act(() =>
+      root.render(
+        <AskBlock
+          ask={{ ...ask, status: "answered", answer: "Saved details" }}
+          canAnswer={false}
+          onAnswer={onAnswer}
+          actionProps={{}}
+        />,
+      ),
+    );
+    expect(container.querySelector("input")).toBeNull();
+  } finally {
+    act(() => root.unmount());
+  }
+});
 
 function page(seqs: number[]) {
   return {

@@ -420,6 +420,103 @@ describe("native approval answer provenance", () => {
 });
 
 describe("ordinary native Ask answer provenance", () => {
+  it("does not turn a structured form response into approval or secret input", async () => {
+    for (const block of [
+      {
+        kind: "ask" as const,
+        text: "Approve?",
+        approvalEffectId: "effect-1",
+        actions: [
+          { id: "allow", label: "Allow" },
+          { id: "deny", label: "Deny" },
+        ],
+      },
+      { kind: "ask" as const, text: "Code?", input: "secret" as const },
+    ]) {
+      const f = ordinaryAnswerFixture([block]);
+      const store = vi.fn();
+      expect(
+        await answerRunInput(
+          f.prisma,
+          { ...f.input, answer: { action: "accept", content: { decision: "allow" } } },
+          undefined,
+          { store },
+        ),
+      ).toBe(false);
+      expect(f.tx.run.updateMany).not.toHaveBeenCalled();
+      expect(store).not.toHaveBeenCalled();
+    }
+  });
+
+  it("validates the persisted form before resuming the same run and original card", async () => {
+    const requestedSchema = {
+      type: "object" as const,
+      properties: {
+        website: { type: "string" as const, format: "uri" as const },
+        regions: {
+          type: "array" as const,
+          minItems: 1,
+          items: { type: "string" as const, enum: ["north", "south"] },
+        },
+      },
+      required: ["website", "regions"],
+    };
+    const f = ordinaryAnswerFixture([
+      { kind: "ask", text: "Details?", requestedSchema, status: "pending" },
+    ]);
+    for (const answer of [
+      "plain text",
+      { action: "accept", content: { website: "invalid", regions: ["north"] } },
+      { action: "accept", content: { website: "https://example.com", regions: ["unknown"] } },
+    ]) {
+      expect(await answerRunInput(f.prisma, { ...f.input, answer } as never)).toBe(false);
+    }
+    expect(await answerWaitingRunWithTextInTransaction(f.tx as never, f.input)).toBeNull();
+    expect(f.tx.run.updateMany).not.toHaveBeenCalled();
+    const response = {
+      action: "accept" as const,
+      content: { website: "https://example.com", regions: ["north", "south"] },
+    };
+    expect(await answerRunInput(f.prisma, { ...f.input, answer: response } as never)).toBe(true);
+    expect(f.rows[0]).toMatchObject({
+      id: "ask-card",
+      runId: "run-1",
+      blocks: [{ kind: "ask", status: "answered", requestedSchema, formResponse: response }],
+    });
+    expect(f.tx.task.updateMany).toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: { prompt: expect.stringContaining(JSON.stringify(response)) },
+      }),
+    );
+    expect(await answerRunInput(f.prisma, { ...f.input, answer: response } as never)).toBe(false);
+  });
+
+  it.each(["cancel", "decline"] as const)(
+    "records form %s without approving an effect",
+    async (action) => {
+      const f = ordinaryAnswerFixture([
+        {
+          kind: "ask",
+          text: "Details?",
+          status: "pending",
+          requestedSchema: {
+            type: "object",
+            properties: { label: { type: "string" } },
+            required: ["label"],
+          },
+        },
+      ]);
+      expect(await answerRunInput(f.prisma, { ...f.input, answer: { action } } as never)).toBe(
+        true,
+      );
+      expect(f.rows[0]?.blocks[0]).toMatchObject({ status: "answered", formResponse: { action } });
+      expect(f.tx.task.updateMany).toHaveBeenCalledWith(
+        expect.objectContaining({
+          data: { prompt: expect.stringContaining(JSON.stringify({ action })) },
+        }),
+      );
+    },
+  );
   it("records the visible selected label as a human message and links the exact answered Ask block", async () => {
     const f = ordinaryAnswerFixture([
       { kind: "text", text: "Choose a location" },

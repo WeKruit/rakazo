@@ -110,30 +110,158 @@ const ChartBlock = z
 export const SecretAskPurpose = z.enum(["otp", "password", "api_key"]);
 export type SecretAskPurpose = z.infer<typeof SecretAskPurpose>;
 
-export const AskBlockSchema = z.object({
-  kind: z.literal("ask"),
-  text: z.string(),
-  approvalEffectId: Id.optional(),
-  detail: z.string().optional(),
-  input: z.enum(["text", "secret"]).optional(),
-  /** Why the secret is needed; drives field label on the masked card. */
-  purpose: SecretAskPurpose.optional(),
-  // Records what the runtime could produce under either deployment mode, so
-  // an ask persisted before an owner toggles the private-HTTP flag still
-  // validates on replay.
-  credential: botSecretDestinationSchema({ allowPrivateHttpOrigin: true }).optional(),
-  status: z.enum(["pending", "answered"]).optional(),
-  answer: z.string().optional(),
-  actions: z
-    .array(
-      z.object({
-        id: z.string(),
-        label: z.string(),
-        outcome: z.enum(["created", "cancelled"]).optional(),
-      }),
-    )
-    .optional(),
+// ponytail: MCP form-mode's flat vocabulary; expand with upstream fields rather
+// than a separate schema engine. Zod's native importer validates formats/bounds.
+const formTitle = { title: z.string().optional(), description: z.string().optional() };
+const formOption = z.strictObject({ const: z.string(), title: z.string() });
+const formString = z.strictObject({
+  ...formTitle,
+  type: z.literal("string"),
+  minLength: z.number().int().nonnegative().optional(),
+  maxLength: z.number().int().nonnegative().optional(),
+  format: z.enum(["date", "uri", "email", "date-time"]).optional(),
+  default: z.string().optional(),
 });
+export const AskFormFieldSchema = z.union([
+  formString,
+  z.strictObject({
+    ...formTitle,
+    type: z.literal("string"),
+    enum: z.array(z.string()).min(1),
+    enumNames: z.array(z.string()).optional(),
+    default: z.string().optional(),
+  }),
+  z.strictObject({
+    ...formTitle,
+    type: z.literal("string"),
+    oneOf: z.array(formOption).min(1),
+    default: z.string().optional(),
+  }),
+  z.strictObject({
+    ...formTitle,
+    type: z.enum(["number", "integer"]),
+    minimum: z.number().optional(),
+    maximum: z.number().optional(),
+    default: z.number().optional(),
+  }),
+  z.strictObject({ ...formTitle, type: z.literal("boolean"), default: z.boolean().optional() }),
+  z.strictObject({
+    ...formTitle,
+    type: z.literal("array"),
+    minItems: z.number().int().nonnegative().optional(),
+    maxItems: z.number().int().nonnegative().optional(),
+    items: z.union([
+      z.strictObject({ type: z.literal("string"), enum: z.array(z.string()).min(1) }),
+      z.strictObject({ anyOf: z.array(formOption).min(1) }),
+    ]),
+    default: z.array(z.string()).optional(),
+  }),
+]);
+export type AskFormField = z.infer<typeof AskFormFieldSchema>;
+export const AskRequestedSchema = z
+  .strictObject({
+    type: z.literal("object"),
+    properties: z.record(z.string(), AskFormFieldSchema),
+    required: z.array(z.string()).optional(),
+  })
+  .refine(
+    (schema) => schema.required?.every((name) => Object.hasOwn(schema.properties, name)) ?? true,
+    "Required fields must exist",
+  );
+export type AskRequestedSchema = z.infer<typeof AskRequestedSchema>;
+const AskFormContent = z.record(
+  z.string(),
+  z.union([z.string(), z.number(), z.boolean(), z.array(z.string())]),
+);
+export type AskFormContent = z.infer<typeof AskFormContent>;
+export const AskFormResponseSchema = z.discriminatedUnion("action", [
+  z.strictObject({ action: z.literal("accept"), content: AskFormContent }),
+  z.strictObject({ action: z.literal("cancel") }),
+  z.strictObject({ action: z.literal("decline") }),
+]);
+export type AskFormResponse = z.infer<typeof AskFormResponseSchema>;
+export const AskAnswerSchema = z.union([z.string().min(1), AskFormResponseSchema]);
+export type AskAnswer = z.infer<typeof AskAnswerSchema>;
+
+export function parseAskFormResponse(
+  schema: AskRequestedSchema,
+  response: unknown,
+): AskFormResponse {
+  const parsed = AskFormResponseSchema.parse(response);
+  if (parsed.action !== "accept") return parsed;
+  // JSON Schema defaults are UI suggestions, not implicit user answers.
+  const properties = Object.fromEntries(
+    Object.entries(schema.properties).map(([name, { default: _default, ...field }]) => [
+      name,
+      field,
+    ]),
+  );
+  const result = z
+    .fromJSONSchema({ ...schema, properties, additionalProperties: false })
+    .safeParse(parsed.content);
+  if (!result.success)
+    throw new Error(
+      result.error.issues.map((issue) => `${issue.path.join(".")}: ${issue.message}`).join("\n"),
+    );
+  const content = result.data;
+  return { action: "accept", content: AskFormContent.parse(content) };
+}
+
+const askQuestion = { question: z.string().min(1).max(240) };
+export const AskUserInputSchema = z.union([
+  z.strictObject({
+    ...askQuestion,
+    options: z
+      .array(z.string().trim().min(1).max(80))
+      .min(2)
+      .max(4)
+      .refine((values) => new Set(values).size === values.length),
+  }),
+  z.strictObject({ ...askQuestion, requestedSchema: AskRequestedSchema }),
+]);
+export const AskUserInputJsonSchema = z.toJSONSchema(AskUserInputSchema);
+
+export const AskBlockSchema = z
+  .object({
+    kind: z.literal("ask"),
+    text: z.string(),
+    approvalEffectId: Id.optional(),
+    detail: z.string().optional(),
+    input: z.enum(["text", "secret"]).optional(),
+    /** Why the secret is needed; drives field label on the masked card. */
+    purpose: SecretAskPurpose.optional(),
+    // Records what the runtime could produce under either deployment mode, so
+    // an ask persisted before an owner toggles the private-HTTP flag still
+    // validates on replay.
+    credential: botSecretDestinationSchema({ allowPrivateHttpOrigin: true }).optional(),
+    status: z.enum(["pending", "answered"]).optional(),
+    answer: z.string().optional(),
+    requestedSchema: AskRequestedSchema.optional(),
+    formResponse: AskFormResponseSchema.optional(),
+    actions: z
+      .array(
+        z.object({
+          id: z.string(),
+          label: z.string(),
+          outcome: z.enum(["created", "cancelled"]).optional(),
+        }),
+      )
+      .optional(),
+  })
+  .refine(
+    (block) =>
+      !block.requestedSchema ||
+      (!block.approvalEffectId &&
+        block.input !== "secret" &&
+        !block.purpose &&
+        !block.credential &&
+        !block.actions?.length),
+    "A form cannot be an approval, secret or choice card",
+  )
+  .refine(
+    (block) => !block.formResponse || Boolean(block.requestedSchema && block.status === "answered"),
+    "A form response belongs to an answered form",
+  );
 
 export const MessageBlock = z.discriminatedUnion("kind", [
   z.object({

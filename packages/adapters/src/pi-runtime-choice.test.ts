@@ -3,6 +3,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 
 const fakeAgentState = vi.hoisted(() => ({
   options: ["Berlin", "Seoul", "Toronto"],
+  form: undefined as Record<string, unknown> | undefined,
   tools: [] as Array<{
     name: string;
     execute: (toolCallId: string, params: Record<string, unknown>) => Promise<unknown>;
@@ -27,7 +28,9 @@ vi.mock("@earendil-works/pi-agent-core", async (importOriginal) => ({
       if (!askUser) throw new Error("ask_user tool missing");
       await askUser.execute("call-choice-1", {
         question: "Which city should I use?",
-        options: fakeAgentState.options,
+        ...(fakeAgentState.form
+          ? { requestedSchema: fakeAgentState.form }
+          : { options: fakeAgentState.options }),
       });
     }
 
@@ -99,6 +102,26 @@ describe("Pi choice asks", () => {
   beforeEach(() => {
     fakeAgentState.tools = [];
     fakeAgentState.options = ["Berlin", "Seoul", "Toronto"];
+    fakeAgentState.form = undefined;
+  });
+
+  it("emits the standard multi-field schema on the native ask and pauses", async () => {
+    fakeAgentState.form = {
+      type: "object",
+      properties: {
+        website: { type: "string", format: "uri" },
+        regions: { type: "array", items: { type: "string", enum: ["north", "south"] } },
+      },
+      required: ["website"],
+    };
+    const events: AgentRuntimeEvent[] = [];
+    for await (const event of new PiAgentRuntime().run(runRequest, runContext)) events.push(event);
+    expect(events).toContainEqual({
+      type: "ask",
+      text: "Which city should I use?",
+      requestedSchema: fakeAgentState.form,
+    });
+    expect(events.some((event) => event.type === "text")).toBe(false);
   });
 
   it("emits a tappable ask and stops without a finished-work fallback", async () => {

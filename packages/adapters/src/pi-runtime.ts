@@ -45,7 +45,7 @@ import type {
   ConnectorTool,
   ModelCallObserver,
 } from "@rakazo/adapter-kit";
-import { usableModelId } from "@rakazo/contracts";
+import { AskUserInputSchema, usableModelId } from "@rakazo/contracts";
 import { abortableDelay } from "@rakazo/core";
 import { getLogger } from "@rakazo/logging";
 import { isToolPauseResult } from "./approval-effect.js";
@@ -1383,7 +1383,8 @@ function toAgentTool(tool: ConnectorTool, host: ToolHost, exposedName: string): 
           question: String(raw.question ?? "What should I use?"),
           // Keep a missing/invalid options value as-is so schema minItems can reject it;
           // do not coerce to [] (that used to look like a valid empty list upstream).
-          options,
+          ...(options === undefined ? {} : { options }),
+          ...(raw.requestedSchema === undefined ? {} : { requestedSchema: raw.requestedSchema }),
         };
       }
       if (tool.name === "request_secret") {
@@ -1496,28 +1497,30 @@ function toAgentTool(tool: ConnectorTool, host: ToolHost, exposedName: string): 
             };
           }
           if (tool.name === "ask_user") {
-            const options = Array.isArray(args.options)
-              ? args.options.map((option) => String(option).trim())
-              : [];
-            if (
-              options.length < 2 ||
-              options.length > 4 ||
-              options.some((option) => option.length === 0 || option.length > 80) ||
-              new Set(options).size !== options.length
-            ) {
-              throw new Error("ask_user requires two to four unique, non-empty options");
-            }
+            const parsed = AskUserInputSchema.safeParse(args);
+            if (!parsed.success)
+              throw new Error(
+                "ask_user requires two to four unique, non-empty options or a valid requestedSchema",
+              );
+            const { question } = parsed.data;
+            const options = "options" in parsed.data ? parsed.data.options : undefined;
+            const requestedSchema =
+              "requestedSchema" in parsed.data ? parsed.data.requestedSchema : undefined;
             host.pausePending = true;
             host.queue.push({
               type: "ask",
-              text: String(args.question ?? "What should I use?"),
-              actions: options.map((label, index) => ({
-                id: `choice-${index + 1}`,
-                label,
-              })),
+              text: question,
+              ...(requestedSchema
+                ? { requestedSchema }
+                : {
+                    actions: options!.map((label, index) => ({
+                      id: `choice-${index + 1}`,
+                      label,
+                    })),
+                  }),
             });
             return {
-              content: [{ type: "text", text: "Waiting for the user's choice." }],
+              content: [{ type: "text", text: "Waiting for the user's answer." }],
               details: args,
               terminate: true,
             };
@@ -1997,14 +2000,7 @@ function builtinParameters(tool: ConnectorTool) {
     return Type.Object({ reason: Type.String() });
   }
   if (tool.name === "ask_user") {
-    return Type.Object({
-      question: Type.String({ maxLength: 240 }),
-      options: Type.Array(Type.String({ minLength: 1, maxLength: 80 }), {
-        minItems: 2,
-        maxItems: 4,
-        uniqueItems: true,
-      }),
-    });
+    return Type.Unsafe(tool.inputSchema) as unknown as ReturnType<typeof Type.Object>;
   }
   if (tool.name === "remember") {
     return Type.Object({

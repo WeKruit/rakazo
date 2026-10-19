@@ -1,6 +1,7 @@
 import { describe, expect, it, vi } from "vitest";
 import {
   commitConsumedRunSecret,
+  createRunSecretWriter,
   normalizeSecretAskPurpose,
   reconcileManagedConnection,
   resolveCompletedSecretLeftover,
@@ -9,6 +10,36 @@ import {
   secretPausedToolResult,
   tryCompleteConnectionWithCode,
 } from "./run-secret.js";
+
+it("does not prepare a structured form response as a secret", async () => {
+  const put = vi.fn();
+  const writer = createRunSecretWriter({ put } as never);
+  const prisma = {
+    run: { findFirst: vi.fn().mockResolvedValue({ botId: "bot-1", userId: "user-1" }) },
+    message: {
+      findFirst: vi
+        .fn()
+        .mockResolvedValue({ blocks: [{ kind: "ask", text: "Code", input: "secret" }] }),
+    },
+  };
+  const commit = vi.fn().mockResolvedValue(false);
+  expect(
+    await writer.withPrepared!(
+      prisma as never,
+      {
+        spaceId: "space-1",
+        threadId: "thread-1",
+        runId: "run-1",
+        messageId: "ask-1",
+        answeredByUserId: "user-1",
+        answer: { action: "cancel" },
+      },
+      commit,
+    ),
+  ).toBe(false);
+  expect(put).not.toHaveBeenCalled();
+  expect(commit).toHaveBeenCalledOnce();
+});
 
 describe("runSecretKind", () => {
   it("scopes secrets to a single run", () => {

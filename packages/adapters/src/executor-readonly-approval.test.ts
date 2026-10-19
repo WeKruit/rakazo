@@ -1,5 +1,6 @@
 import type {
   AgentRunRequest,
+  AgentRuntimeEvent,
   AutoReviewProvider,
   ConnectorCall,
   ConnectorTool,
@@ -318,7 +319,9 @@ function fixture({
   let calls: { name?: string; args: Record<string, unknown>; executionId: string }[] = [
     { args: { id: "item-1" }, executionId: "call-1" },
   ];
-  const runtimeRun = vi.fn(async function* (request: AgentRunRequest) {
+  const runtimeRun = vi.fn(async function* (
+    request: AgentRunRequest,
+  ): AsyncGenerator<AgentRuntimeEvent> {
     for (const call of calls) {
       const result = await request.executeTool!(
         call.name ?? (catalog ? catalogName : name),
@@ -394,6 +397,7 @@ function fixture({
     commit,
     sharedMemoryState,
     pauseRunForInput,
+    runtimeRun,
     setCalls(next: typeof calls) {
       calls = next;
     },
@@ -409,6 +413,56 @@ function fixture({
     },
   };
 }
+
+describe("native form pause", () => {
+  it("persists the exact schema on the original run's native Ask card", async () => {
+    const f = fixture();
+    const requestedSchema = {
+      type: "object" as const,
+      properties: {
+        website: { type: "string" as const, format: "uri" as const },
+        regions: {
+          type: "array" as const,
+          items: { type: "string" as const, enum: ["north", "south"] },
+        },
+      },
+      required: ["website"],
+    };
+    f.runtimeRun.mockImplementation(async function* () {
+      yield { type: "ask", text: "Details?", requestedSchema };
+    });
+    await f.run();
+    expect(f.pauseRunForInput).toHaveBeenCalledExactlyOnceWith(
+      expect.objectContaining({
+        spaceId: "space-1",
+        threadId: "thread-1",
+        botId: "bot-1",
+        runId: "run-1",
+        attemptId: "attempt-1",
+        leaseOwner: "worker-1",
+        blocks: [expect.objectContaining({ kind: "ask", status: "pending", requestedSchema })],
+      }),
+    );
+    expect(f.execute).not.toHaveBeenCalled();
+    expect(f.effects).toHaveLength(0);
+  });
+
+  it("rejects a secret-bearing schema instead of mutating enum identity", async () => {
+    const f = fixture({ secrets: ["protected-test-token"] });
+    f.runtimeRun.mockImplementation(async function* () {
+      yield {
+        type: "ask",
+        text: "Details?",
+        requestedSchema: {
+          type: "object",
+          properties: { token: { type: "string", enum: ["protected-test-token", "plain"] } },
+        },
+      };
+    });
+    await f.run({ allowFailure: true });
+    expect(f.pauseRunForInput).not.toHaveBeenCalled();
+  });
+});
 
 describe("disabled builtins", () => {
   it("refuses a direct call before any effect or memory write", async () => {
@@ -1600,6 +1654,10 @@ describe("connector read-only metadata and approval enforcement", () => {
         trigger: "webhook",
         rules: [{ effect: "always_allow", matchKind: "tool", matchValue: name }],
       });
+      if (name === "write_file")
+        f.setCalls([
+          { args: { path: "shared/note.md", content: "A saved note." }, executionId: "call-1" },
+        ]);
       await f.run();
       expect(f.pauseRunForInput).toHaveBeenCalledOnce();
       expect(isApprovalPausedResult(f.results[0])).toBe(true);

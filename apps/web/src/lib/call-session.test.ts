@@ -149,6 +149,33 @@ describe("call session", () => {
     expect(callIdFromClientNonce(String(answer.mock.calls[0]?.[0]?.clientNonce))).toBeDefined();
   });
 
+  it("keeps a structured form on its original card instead of answering by dictation", async () => {
+    const ask = {
+      ...botMessage("ask-form", ""),
+      blocks: [
+        {
+          kind: "ask" as const,
+          text: "Details",
+          status: "pending" as const,
+          requestedSchema: {
+            type: "object" as const,
+            properties: { website: { type: "string" as const, format: "uri" as const } },
+            required: ["website"],
+          },
+        },
+      ],
+    };
+    getThread.mockResolvedValue(
+      snapshot([ask], { ...runningRun, status: "waiting_input" } as ThreadSnapshot["run"]) as never,
+    );
+    startCall({ botId: "call-bot", botName: "Ada", transcribe: false });
+    await vi.mocked(runThreadSubscription).mock.calls.at(-1)?.[0]?.refresh();
+    await heard("https://example.com");
+    expect(answer).not.toHaveBeenCalled();
+    expect(send).not.toHaveBeenCalled();
+    expect(followUp).not.toHaveBeenCalled();
+  });
+
   it("drops a send that finishes after the same bot is called again", async () => {
     let finishSend: (value: { runId: string; taskId: string }) => void = () => undefined;
     let failSend: (error: Error) => void = () => undefined;

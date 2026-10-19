@@ -1,12 +1,20 @@
 import { createHash } from "node:crypto";
 import type { RealtimeFanout } from "@rakazo/adapter-kit";
-import type { BotSecretDestination, MessageBlock, ProductEvent } from "@rakazo/contracts";
+import type {
+  AskAnswer,
+  AskFormResponse,
+  BotSecretDestination,
+  MessageBlock,
+  ProductEvent,
+} from "@rakazo/contracts";
 import {
   encodeLoginSecret,
   LoginSecretValue,
   MessageBlock as MessageBlockSchema,
+  parseAskFormResponse,
 } from "@rakazo/contracts";
 import {
+  askFormAnswerText,
   blocksToAgentHistoryText,
   callIdFromClientNonce,
   isApprovalAskBlock,
@@ -219,7 +227,7 @@ export interface AnswerRunInput {
   runId: string;
   messageId: string;
   answeredByUserId: string;
-  answer: string;
+  answer: AskAnswer;
   /** Server-only: an authenticated composer message already created in this transaction. */
   answerMessageId?: string;
   /** Identifies a spoken answer as part of a live voice call. */
@@ -806,24 +814,37 @@ async function commitAnswerRunInput(
     (block) => block.kind === "ask" && block.status !== "answered",
   );
   if (pendingAsk?.kind !== "ask") return null;
+  let formResponse: AskFormResponse | undefined;
+  try {
+    if (pendingAsk.requestedSchema)
+      formResponse = parseAskFormResponse(pendingAsk.requestedSchema, input.answer);
+    else if (typeof input.answer !== "string") return null;
+  } catch {
+    return null;
+  }
+  const answerText = formResponse
+    ? askFormAnswerText(pendingAsk.requestedSchema!, formResponse)
+    : (input.answer as string);
+  // Composer/voice messages cannot stand in for a structured card submission.
+  if (formResponse && (input.answerMessageId || input.username || input.clientNonce)) return null;
   const approvalAsk = isApprovalAskBlock(pendingAsk);
   const secretAsk = isSecretAskBlock(pendingAsk);
   const choiceAsk = !approvalAsk && !secretAsk && Boolean(pendingAsk.actions?.length);
-  const selectedChoice = choiceAsk ? resolveAskChoice(input.answer, pendingAsk.actions) : undefined;
+  const selectedChoice = choiceAsk ? resolveAskChoice(answerText, pendingAsk.actions) : undefined;
   if (secretAsk && !runSecretWriter) return null;
   if (secretAsk && pendingAsk.credential && run.userId !== input.answeredByUserId) return null;
   const loginAsk = secretAsk && pendingAsk.credential?.auth.type === "login";
   // A username belongs only to a login card, which cannot be saved without one.
   if (loginAsk !== Boolean(input.username?.trim())) return null;
   const login = loginAsk
-    ? LoginSecretValue.safeParse({ username: input.username!.trim(), password: input.answer })
+    ? LoginSecretValue.safeParse({ username: input.username!.trim(), password: answerText })
     : undefined;
   if (login && !login.success) return null;
   let approvalEffect: { id: string; kind: string; request: Prisma.JsonValue } | null = null;
   let approvalUserId: string | null = null;
 
   if (approvalAsk) {
-    if (!pendingAsk.actions?.some((action) => action.id === input.answer)) return null;
+    if (!pendingAsk.actions?.some((action) => action.id === answerText)) return null;
     approvalEffect = await tx.externalEffect.findFirst({
       where: {
         id: pendingAsk.approvalEffectId,
@@ -835,8 +856,8 @@ async function commitAnswerRunInput(
     if (!approvalEffect) return null;
     if (
       approvalEffect.kind === "recruiting_request_approval" &&
-      (input.answer === "always" ||
-        (input.answer === "allow" &&
+      (answerText === "always" ||
+        (answerText === "allow" &&
           !(await authorizeRecruitingApprovalAnswerInTransaction(
             tx,
             input,
@@ -844,14 +865,14 @@ async function commitAnswerRunInput(
           ))))
     )
       return null;
-    if (input.answer === "always") {
+    if (answerText === "always") {
       if (run.userId !== input.answeredByUserId) return null;
       approvalUserId = input.answeredByUserId;
     }
   }
 
   const ordinaryAsk = !approvalAsk && !secretAsk;
-  if (ordinaryAsk && !input.answer.trim()) return null;
+  if (ordinaryAsk && !answerText.trim()) return null;
   let answerMessageId = input.answerMessageId;
   if (answerMessageId !== undefined) {
     if (!ordinaryAsk) return null;
@@ -871,7 +892,7 @@ async function commitAnswerRunInput(
       answerBlocks.data
         .filter((block) => block.kind === "text")
         .map((block) => block.text)
-        .join("\n") !== input.answer
+        .join("\n") !== answerText
     )
       return null;
   }
@@ -900,7 +921,7 @@ async function commitAnswerRunInput(
   });
   if (queued.count !== 1) return null;
 
-  const recordedAnswer = secretAsk ? "" : (selectedChoice?.id ?? input.answer);
+  const recordedAnswer = secretAsk ? "" : (selectedChoice?.id ?? answerText);
   const callId = callIdFromClientNonce(input.clientNonce);
   const recordsCallUtterance = Boolean(callId && !secretAsk);
 
@@ -910,7 +931,7 @@ async function commitAnswerRunInput(
     const blocks = [
       {
         kind: "text" as const,
-        text: ordinaryAsk ? (selectedChoice?.label ?? input.answer) : input.answer,
+        text: ordinaryAsk ? (selectedChoice?.label ?? answerText) : answerText,
       },
     ];
     const utterance = await createThreadMessageInTransaction(tx, {
@@ -933,12 +954,12 @@ async function commitAnswerRunInput(
   }
 
   if (approvalAsk) {
-    const allowed = input.answer === "allow" || input.answer === "always";
+    const allowed = answerText === "allow" || answerText === "always";
     await tx.externalEffect.update({
       where: { id: approvalEffect!.id },
       data: { status: allowed ? "approved" : "denied" },
     });
-    if (input.answer === "always") {
+    if (answerText === "always") {
       await tx.actionApprovalRule.upsert({
         where: {
           spaceId_createdByUserId_effect_matchKind_matchValue: {
@@ -966,7 +987,7 @@ async function commitAnswerRunInput(
       runId: input.runId,
       userId: run.userId,
       spaceId: input.spaceId,
-      plaintext: login?.success ? encodeLoginSecret(login.data) : input.answer,
+      plaintext: login?.success ? encodeLoginSecret(login.data) : answerText,
       tx,
     });
     await tx.externalEffect.updateMany({
@@ -991,7 +1012,11 @@ async function commitAnswerRunInput(
         prompt: resumePrompt(
           run,
           pendingAsk.text,
-          selectedChoice ? `Selected choice ${selectedChoice.id}: ${resumeLabel}` : input.answer,
+          formResponse
+            ? JSON.stringify(formResponse)
+            : selectedChoice
+              ? `Selected choice ${selectedChoice.id}: ${resumeLabel}`
+              : answerText,
         ),
       },
     });
@@ -1004,6 +1029,7 @@ async function commitAnswerRunInput(
           ...block,
           status: "answered" as const,
           answer: recordedAnswer,
+          ...(formResponse ? { formResponse } : {}),
         }
       : block,
   );
@@ -1044,7 +1070,7 @@ async function commitAnswerRunInput(
         messageId: message.id,
         askIndex: parsed.data.indexOf(pendingAsk),
         answeredByUserId: input.answeredByUserId,
-        answer: input.answer,
+        answer: answerText,
         requestHash: createHash("sha256")
           .update(stableJsonValue(approvalEffect!.request))
           .digest("hex"),
@@ -1090,7 +1116,12 @@ export async function answerWaitingRunWithTextInTransaction(
   if (!input.answer.trim()) return null;
   const found = await findPendingAsk(tx, input);
   if (!found) return null;
-  if (isApprovalAskBlock(found.pendingAsk) || isSecretAskBlock(found.pendingAsk)) return null;
+  if (
+    isApprovalAskBlock(found.pendingAsk) ||
+    isSecretAskBlock(found.pendingAsk) ||
+    found.pendingAsk.requestedSchema
+  )
+    return null;
   return commitAnswerRunInput(tx, { ...input, messageId: found.messageId });
 }
 
@@ -1099,6 +1130,8 @@ export async function pauseRunForInput(
   input: PauseRunForInput,
   realtime?: RealtimeFanout,
 ): Promise<boolean> {
+  // Validate the exact durable card before changing run/attempt state.
+  MessageBlockSchema.array().parse(input.blocks);
   const committed = await prisma.$transaction(async (tx: Prisma.TransactionClient) => {
     // Thread row first, then run rows — the same order as clearThread and finalizeRun, so a
     // concurrent clear cannot deadlock against this transaction.

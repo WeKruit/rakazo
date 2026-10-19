@@ -1,6 +1,7 @@
 import type { ConnectorTool } from "@rakazo/adapter-kit";
 import {
   ArtifactReadInputSchema,
+  AskUserInputJsonSchema,
   BotSecretName,
   botSecretDestinationSchema,
   RecruitingApprovalToolInputSchema,
@@ -371,21 +372,8 @@ export const builtinAgentTools: ConnectorTool[] = [
   {
     name: "ask_user",
     description:
-      "Ask the user one short multiple-choice question with tappable options, then wait for their selection. Use this instead of asking them to type when two to four concise choices are enough. A custom-answer input is always shown; offer real decisions only, without an extra custom-input option.",
-    inputSchema: {
-      type: "object",
-      properties: {
-        question: { type: "string", maxLength: 240 },
-        options: {
-          type: "array",
-          items: { type: "string", minLength: 1, maxLength: 80 },
-          minItems: 2,
-          maxItems: 4,
-          uniqueItems: true,
-        },
-      },
-      required: ["question", "options"],
-    },
+      "Ask the user a question, then wait. Supply options for two to four concise choices (a custom-answer input is also shown, so offer real decisions without an extra custom-input option), or requestedSchema for a standard MCP form with multiple primitive fields, enums and multi-select arrays. Do not collect secrets or approvals in a form; use their native tools.",
+    inputSchema: AskUserInputJsonSchema,
   },
   {
     name: "message_user",

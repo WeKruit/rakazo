@@ -139,7 +139,7 @@ export function startCall(call: {
   unsubDictation = dictation.subscribe((heard) => {
     if (!state) return;
     if (heard.status === "listening") {
-      set({ heard: pendingSecretAsk(thread) ? "" : heard.transcript });
+      set({ heard: pendingScreenAsk(thread) ? "" : heard.transcript });
       watchInterim(heard.transcript);
     } else clearInterim();
     if (heard.error) {
@@ -292,7 +292,7 @@ async function listen() {
   if (guardTimer) return;
   set({ phase: "listening", heard: "" });
   speaker.stop();
-  if (state.muted || pendingSecretAsk(thread)) {
+  if (state.muted || pendingScreenAsk(thread)) {
     dictation.stop("cancel");
     micOpen = false;
     return;
@@ -302,7 +302,7 @@ async function listen() {
 
 /** Starts dictation unless it is already running, muted, or waiting on a typed secret. */
 async function openMic() {
-  if (!state || micOpen || state.muted || pendingSecretAsk(thread)) return;
+  if (!state || micOpen || state.muted || pendingScreenAsk(thread)) return;
   micOpen = true;
   try {
     await dictation.listen({
@@ -342,8 +342,8 @@ async function handleTranscript(text: string) {
     void listen();
     return;
   }
-  if (pendingSecretAsk(thread)) {
-    set({ heard: "", caption: t`Hang up, then enter the code on screen.` });
+  if (pendingScreenAsk(thread)) {
+    set({ heard: "", caption: t`Hang up, then answer on screen.` });
     return;
   }
   const { botId, exchanges } = state;
@@ -435,7 +435,7 @@ function reactToThread() {
   if (!state) return;
   // The bot already said goodbye: neither its marker nor the work it files after it is spoken.
   if (botEndedCall) return;
-  if (pendingSecretAsk(thread)) {
+  if (pendingScreenAsk(thread)) {
     dictation.stop("cancel");
     micOpen = false;
     set({ heard: "" });
@@ -448,7 +448,7 @@ function reactToThread() {
   if (lastBot && !spokenMessageIds.has(lastBot.id) && replyFinished(lastBot)) {
     const text = speechFromBlocks(lastBot.blocks);
     const ask = lastBot.blocks.find((block) => block.kind === "ask" && block.status !== "answered");
-    const secretAsk = ask && isSecretAskBlock(ask);
+    const screenAsk = ask?.kind === "ask" && (isSecretAskBlock(ask) || ask.requestedSchema);
     if (text) {
       // Never spoken again, interrupted or not.
       spokenMessageIds.add(lastBot.id);
@@ -456,8 +456,8 @@ function reactToThread() {
       set({ exchanges: [...state.exchanges, { role: "bot", text }], heard: "" });
       spokenMemory.remember(text);
       void speaker.speak(
-        secretAsk
-          ? `${text}. ${t`Hang up first, then enter the code on screen.`}`
+        screenAsk
+          ? `${text}. ${t`Hang up first, then answer on screen.`}`
           : ask
             ? `${text}. ${t`Say yes or no, or answer in a sentence.`}`
             : text,
@@ -488,12 +488,15 @@ function runActive(snapshot: ThreadSnapshot | null) {
   return Boolean(snapshot?.run && RUN_ACTIVE.includes(snapshot.run.status));
 }
 
-function pendingSecretAsk(snapshot: ThreadSnapshot | null) {
+function pendingScreenAsk(snapshot: ThreadSnapshot | null) {
   const askId = latestAskId(snapshot);
   const askMessage = snapshot?.messages.find((message) => message.id === askId);
   return Boolean(
     askMessage?.blocks.some(
-      (block) => block.kind === "ask" && isSecretAskBlock(block) && block.status !== "answered",
+      (block) =>
+        block.kind === "ask" &&
+        (isSecretAskBlock(block) || block.requestedSchema) &&
+        block.status !== "answered",
     ),
   );
 }
