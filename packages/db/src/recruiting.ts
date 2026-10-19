@@ -5231,7 +5231,7 @@ async function indexRecruitingCandidateRows(
       select: { rowIndex: true, candidateKey: true },
     });
   const rows = (input.rows ?? []).map((row, rowIndex) => {
-    const { candidateIdentity, ...profile } = normalizeRecruitingCandidateRow(row, {
+    const { candidateKey, ...profile } = normalizeRecruitingCandidateRow(row, {
       schemaKnown:
         action === null || action.candidateOutputSchema === RECRUITING_CANDIDATE_OUTPUT_SCHEMA,
     });
@@ -5239,9 +5239,7 @@ async function indexRecruitingCandidateRows(
       pageId: effect.id,
       rowIndex,
       roleId: task.roleId,
-      candidateKey: candidateIdentity
-        ? `linkedin:${candidateIdentity}`
-        : `source-row:${effect.id}:${rowIndex}`,
+      candidateKey: candidateKey ?? `source-row:${effect.id}:${rowIndex}`,
       ...profile,
       evidenceUrls: profile.evidenceUrls === null ? Prisma.DbNull : [...profile.evidenceUrls],
       issues: [...profile.issues],

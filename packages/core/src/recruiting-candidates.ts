@@ -45,10 +45,10 @@ function webUrl(value: string): URL | null {
 export function normalizeRecruitingCandidateRow(
   row: unknown,
   options: { schemaKnown: boolean },
-): RecruitingCandidateProfile & { candidateIdentity: string | null } {
+): RecruitingCandidateProfile & { candidateKey: string | null } {
   if (!options.schemaKnown)
-    return { ...emptyProfile(), issues: ["historical_schema_unknown"], candidateIdentity: null };
-  if (!record(row)) return { ...emptyProfile(), issues: ["invalid_row"], candidateIdentity: null };
+    return { ...emptyProfile(), issues: ["historical_schema_unknown"], candidateKey: null };
+  if (!record(row)) return { ...emptyProfile(), issues: ["invalid_row"], candidateKey: null };
   const issues: string[] = [];
   const values: Record<string, unknown> = {};
   for (const key of Object.keys(RecruitingCandidateOutputRowSchema.shape) as Array<
@@ -72,14 +72,25 @@ export function normalizeRecruitingCandidateRow(
       values[key] = parsed.data;
     }
   }
-  let candidateIdentity: string | null = null;
+  let candidateKey: string | null = null;
   if (typeof values.linkedin_url === "string") {
     const url = webUrl(values.linkedin_url);
-    candidateIdentity =
-      url && !url.port ? recruitingCalibrationIdentity(values.linkedin_url) : null;
-    if (!candidateIdentity) {
+    const identity = url && !url.port ? recruitingCalibrationIdentity(values.linkedin_url) : null;
+    if (identity) candidateKey = `linkedin:${identity}`;
+    else {
       values.linkedin_url = null;
       issues.push("invalid_url:linkedin_url");
+    }
+  }
+  if (!candidateKey && Object.hasOwn(row, "profile_url")) {
+    const cell = row.profile_url;
+    const value = record(cell) && Object.hasOwn(cell, "value") ? cell.value : cell;
+    const url = typeof value === "string" ? webUrl(value) : null;
+    if (url) {
+      if (/(^|\.)linkedin\.com\.?$/.test(url.hostname)) {
+        const identity = !url.port ? recruitingCalibrationIdentity(url.href) : null;
+        if (identity) candidateKey = `linkedin:${identity}`;
+      } else candidateKey = `profile:${url.href}`;
     }
   }
   if (typeof values.resume_url === "string" && !webUrl(values.resume_url)) {
@@ -104,6 +115,6 @@ export function normalizeRecruitingCandidateRow(
       evidenceUrls: values.evidence_urls,
       issues,
     }),
-    candidateIdentity,
+    candidateKey,
   };
 }

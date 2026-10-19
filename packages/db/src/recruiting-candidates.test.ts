@@ -837,14 +837,14 @@ function crmFixture() {
     observedAt: f.now,
     rowCount: 1,
   };
-  const { candidateIdentity, ...profile } = normalizeRecruitingCandidateRow(raw, {
+  const { candidateKey, ...profile } = normalizeRecruitingCandidateRow(raw, {
     schemaKnown: true,
   });
   const occurrence = {
     pageId: page.effectId,
     rowIndex: 0,
     roleId: "role",
-    candidateKey: `linkedin:${candidateIdentity}`,
+    candidateKey: candidateKey ?? `source-row:${page.effectId}:0`,
     ...profile,
     page,
   };
@@ -3258,6 +3258,71 @@ describe("native candidate results without domain actions", () => {
       }),
     );
     expect(f.tx.recruitingResearchAction.update).not.toHaveBeenCalled();
+  });
+
+  it("persists explicit profile keys and distinct unknown rows across native source pages", async () => {
+    const candidateKey = "profile:https://portfolio.example.test/avery";
+    for (const [effectId, cursor] of [
+      ["first-read", null],
+      ["followup-read", "next-page"],
+    ] as const) {
+      const f = nativeCandidateFixture();
+      const row = {
+        ...f.row,
+        linkedin_url: null,
+        profile_url: { value: "https://portfolio.example.test/avery", source_id: effectId },
+      };
+      Object.assign(f.effect, {
+        id: effectId,
+        request: boundDirectApprovalRequest(
+          {
+            connectorId: "mcp",
+            resourceId: "server",
+            resourceRevision: 1,
+            toolName: "get_rows",
+          },
+          { task_id: "provider-task", cursor },
+          "__rakazoCatalogTool",
+        ),
+        result: { structuredContent: { rows: [row, null] } },
+      });
+      Object.assign(f.input, { cursor });
+      const bytes = Buffer.from(
+        stableJsonValue({ request: f.effect.request, providerResult: f.effect.result }),
+      );
+      Object.assign(f.file, {
+        hash: createHash("sha256").update(bytes).digest("hex"),
+        size: bytes.length,
+        clientNonce: `recruiting-observation:${effectId}`,
+      });
+      const result = await recruiting.saveNativeRecruitingCandidatePage(
+        f.prisma,
+        actor,
+        f.trusted,
+        f.input,
+        { sourceEffectId: effectId, rows: [row, null], outputArtifact: f.file },
+      );
+      const unknownKey = `source-row:${effectId}:1`;
+      expect(result).toMatchObject({
+        candidateRows: [
+          { rowIndex: 0, candidateKey },
+          { rowIndex: 1, candidateKey: unknownKey },
+        ],
+      });
+      expect(f.tx.recruitingCandidate.createMany).toHaveBeenCalledWith({
+        data: [
+          { roleId: "role", candidateKey },
+          { roleId: "role", candidateKey: unknownKey },
+        ],
+        skipDuplicates: true,
+      });
+      expect(f.tx.recruitingCandidateOccurrence.createMany).toHaveBeenCalledWith({
+        data: [
+          expect.objectContaining({ pageId: effectId, rowIndex: 0, candidateKey }),
+          expect.objectContaining({ pageId: effectId, rowIndex: 1, candidateKey: unknownKey }),
+        ],
+      });
+    }
   });
 
   it.each(["foreign-run", "wrong-hash", "expired-lease", "stale-role", "changed-receipt"])(

@@ -26,7 +26,7 @@ describe("canonical recruiting candidate output", () => {
       resumeUrl: null,
       evidenceUrls: candidate.evidence_urls,
       issues: [],
-      candidateIdentity: "/in/synthetic-engineer",
+      candidateKey: "linkedin:/in/synthetic-engineer",
     });
   });
 
@@ -51,8 +51,100 @@ describe("canonical recruiting candidate output", () => {
       "https://www.linkedin.com/in/synthetic-engineer/?trk=other#about",
     ];
     expect(
-      variants.map((linkedin_url) => normalize({ ...candidate, linkedin_url }).candidateIdentity),
-    ).toEqual(["/in/synthetic-engineer", "/in/synthetic-engineer"]);
+      variants.map((linkedin_url) => normalize({ ...candidate, linkedin_url }).candidateKey),
+    ).toEqual(["linkedin:/in/synthetic-engineer", "linkedin:/in/synthetic-engineer"]);
+  });
+
+  it("keeps the declared profile key across evaluation changes without inventing LinkedIn", () => {
+    const profileUrl = "https://Profiles.Example.test/People/Example?View=Full#About";
+    const first = Object.freeze({
+      ...candidate,
+      linkedin_url: null,
+      profile_url: Object.freeze({ value: profileUrl, source_id: "first-cell" }),
+      fit_reasons: "Initial provider observation",
+    });
+    const second = Object.freeze({
+      ...first,
+      profile_url: profileUrl,
+      fit_reasons: "Updated provider observation",
+    });
+    const before = JSON.stringify([first, second]);
+    expect(normalize(first).candidateKey).toBe(
+      "profile:https://profiles.example.test/People/Example?View=Full#About",
+    );
+    expect(normalize(second).candidateKey).toBe(normalize(first).candidateKey);
+    expect(normalize(first).linkedinUrl).toBeNull();
+    expect(JSON.stringify([first, second])).toBe(before);
+  });
+
+  it("keeps distinct declared profile URLs distinct and never merges on name or provenance", () => {
+    const urls = [
+      "http://profiles.example.test/People/Example?View=Full#About",
+      "https://profiles.example.test/People/Example?View=Full#About",
+      "https://profiles.example.test/people/Example?View=Full#About",
+      "https://profiles.example.test/People/Example?View=Other#About",
+      "https://profiles.example.test/People/Example?View=Full#Other",
+    ];
+    const keys = urls.map(
+      (value) =>
+        normalize({
+          ...candidate,
+          linkedin_url: null,
+          profile_url: { value, source_id: "same-cell" },
+        }).candidateKey,
+    );
+    expect(keys).toEqual(urls.map((url) => `profile:${url}`));
+    expect(new Set(keys).size).toBe(urls.length);
+    expect(
+      normalize({ ...candidate, linkedin_url: null, source_id: "same-cell" }).candidateKey,
+    ).toBeNull();
+  });
+
+  it("only reads an own, valid HTTP profile URL or native sourced value", () => {
+    for (const profile_url of [
+      null,
+      undefined,
+      { value: null, source_id: "person-looking-id" },
+      { source_id: "https://profiles.example.test/person" },
+      { value: ["https://profiles.example.test/person"] },
+      Object.create({ value: "https://profiles.example.test/person" }),
+      "not a URL",
+      "javascript:alert(1)",
+      "file:///private/person",
+      "https://user:password@profiles.example.test/person",
+    ])
+      expect(normalize({ ...candidate, linkedin_url: null, profile_url }).candidateKey).toBeNull();
+    const inherited = Object.assign(
+      Object.create({ profile_url: "https://profiles.example.test/person" }),
+      {
+        ...candidate,
+        linkedin_url: null,
+      },
+    );
+    expect(normalize(inherited).candidateKey).toBeNull();
+  });
+
+  it("uses the same LinkedIn key from either declared field and rejects company profiles", () => {
+    const profile_url = "https://linkedin.com/in/Synthetic-Engineer/?trk=other#about";
+    expect(normalize({ ...candidate, linkedin_url: null, profile_url }).candidateKey).toBe(
+      "linkedin:/in/synthetic-engineer",
+    );
+    expect(normalize({ ...candidate, linkedin_url: null, profile_url }).linkedinUrl).toBeNull();
+    expect(
+      normalize({ ...candidate, profile_url: "https://profiles.example.test/another" })
+        .candidateKey,
+    ).toBe("linkedin:/in/synthetic-engineer");
+    for (const invalid of [
+      "https://linkedin.com/company/example",
+      "http://linkedin.com/in/example",
+      "https://linkedin.com:8443/in/example",
+      "https://linkedin.com/in/example/extra",
+      "https://uk.linkedin.com/in/example",
+      "https://linkedin.com./company/example",
+    ])
+      expect(
+        normalize({ ...candidate, linkedin_url: null, profile_url: invalid }).candidateKey,
+      ).toBeNull();
   });
 
   it("never finds identity or names by scanning aliases or unrelated source links", () => {
@@ -61,7 +153,7 @@ describe("canonical recruiting candidate output", () => {
       profile: candidate.linkedin_url,
       _sources: { source: candidate.linkedin_url },
     });
-    expect(result.candidateIdentity).toBeNull();
+    expect(result.candidateKey).toBeNull();
     expect(result.name).toBeNull();
     expect(result.linkedinUrl).toBeNull();
     expect(result.issues).toContain("missing_field:name");
@@ -80,7 +172,7 @@ describe("canonical recruiting candidate output", () => {
     });
     expect(unknown.issues).toEqual([]);
     expect(unknown.evidenceUrls).toBeNull();
-    expect(unknown.candidateIdentity).toBeNull();
+    expect(unknown.candidateKey).toBeNull();
     expect(normalize({ ...candidate, evidence_urls: [] }).evidenceUrls).toEqual([]);
   });
 
@@ -89,7 +181,7 @@ describe("canonical recruiting candidate output", () => {
     expect(result.name).toBeNull();
     expect(result.title).toBeNull();
     expect(result.company).toBe(candidate.current_company);
-    expect(result.candidateIdentity).toBe("/in/synthetic-engineer");
+    expect(result.candidateKey).toBe("linkedin:/in/synthetic-engineer");
     expect(result.issues).toEqual(["invalid_field:name", "invalid_field:current_title"]);
   });
 
@@ -105,7 +197,7 @@ describe("canonical recruiting candidate output", () => {
     ]) {
       const result = normalize({ ...candidate, linkedin_url });
       expect(result.linkedinUrl).toBeNull();
-      expect(result.candidateIdentity).toBeNull();
+      expect(result.candidateKey).toBeNull();
       expect(result.issues).toContain("invalid_url:linkedin_url");
     }
     const invalidSources = normalize({
@@ -138,14 +230,14 @@ describe("canonical recruiting candidate output", () => {
       resumeUrl: null,
       evidenceUrls: null,
       issues: ["historical_schema_unknown"],
-      candidateIdentity: null,
+      candidateKey: null,
     });
   });
 
   it("records an invalid row without inventing a candidate profile", () => {
     const result = normalize(null);
     expect(result.name).toBeNull();
-    expect(result.candidateIdentity).toBeNull();
+    expect(result.candidateKey).toBeNull();
     expect(result.issues).toEqual(["invalid_row"]);
   });
 
