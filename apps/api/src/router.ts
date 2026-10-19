@@ -54,6 +54,7 @@ import {
   commentTicket,
   computerSupportsTerminal,
   computerSupportsUpdate,
+  computerUpdateIsCurrent,
   computerUpdateView,
   createFaviconResolver,
   createTicket,
@@ -2786,12 +2787,20 @@ export function createRouter(deps: RouterDeps) {
                   where: { userId: context.actor.userId, archivedAt: null },
                   select: { id: true, name: true },
                 },
+                updates: {
+                  where: { action: "checkpoint", status: "completed" },
+                  orderBy: { createdAt: "desc" },
+                  take: 1,
+                  select: { createdAt: true },
+                },
               },
             },
           },
           orderBy: { createdAt: "desc" },
         });
-        return rows.map((row) => computerUpdateView(row, context.actor.isDeploymentOwner));
+        return rows
+          .filter(computerUpdateIsCurrent)
+          .map((row) => computerUpdateView(row, context.actor.isDeploymentOwner));
       }),
       releaseInterrupted: authed.computer.releaseInterrupted.handler(async ({ context, input }) => {
         if (!context.actor.isDeploymentOwner) throw new ORPCError("FORBIDDEN");

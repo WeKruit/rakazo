@@ -1990,6 +1990,86 @@ describe("integration setup authorization", () => {
   });
 });
 
+describe("computer maintenance visibility", () => {
+  it("keeps unresolved operations but stops presenting a superseded checkpoint failure", async () => {
+    const completed = {
+      action: "checkpoint",
+      status: "completed",
+      createdAt: new Date("2026-01-01T00:00:02Z"),
+    };
+    const failed = {
+      id: "saved-later",
+      botId: "bot-1",
+      action: "checkpoint",
+      status: "failed",
+      stage: "saving",
+      updatedAt: new Date("2026-01-01T00:00:01Z"),
+      computer: {
+        scope: "team",
+        maintenanceId: null,
+        bots: [{ id: "bot-1", name: "Writer" }],
+        updates: [completed],
+      },
+    };
+    const rows = [
+      failed,
+      { ...failed, id: "unsaved", computer: { ...failed.computer, updates: [] } },
+      { ...failed, id: "later-failure", updatedAt: new Date("2026-01-01T00:00:03Z") },
+      { ...failed, id: "same-instant", updatedAt: completed.createdAt },
+      { ...failed, id: "interrupted", status: "interrupted" },
+      { ...failed, id: "update-failed", action: "update" },
+      { ...failed, id: "recover-failed", action: "recover" },
+      { ...failed, id: "running", status: "running" },
+      {
+        ...failed,
+        id: "still-owned",
+        computer: { ...failed.computer, maintenanceId: "still-owned" },
+      },
+    ];
+    const findMany = vi.fn().mockResolvedValue(rows);
+    const prisma = { computerUpdate: { findMany } } as unknown as PrismaClient;
+    const client = createRouterClient(createRouter({ prisma } as RouterDeps), {
+      context: {
+        actor: {
+          userId: "user-1",
+          spaceId: "space-1",
+          email: "user@rakazo.test",
+          isDeploymentOwner: true,
+        },
+      },
+    });
+
+    const visible = await client.computer.updates();
+
+    expect(visible.map((row) => row.id)).toEqual(rows.slice(1).map((row) => row.id));
+    expect(findMany).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: expect.objectContaining({
+          computer: { spaceId: "space-1", bots: { some: { userId: "user-1" } } },
+        }),
+        include: {
+          computer: {
+            include: {
+              bots: {
+                where: { userId: "user-1", archivedAt: null },
+                select: { id: true, name: true },
+              },
+              updates: {
+                where: { action: "checkpoint", status: "completed" },
+                orderBy: { createdAt: "desc" },
+                take: 1,
+                select: { createdAt: true },
+              },
+            },
+          },
+        },
+      }),
+    );
+    expect(rows[0]).toBe(failed);
+    expect(failed.status).toBe("failed");
+  });
+});
+
 describe("interrupted computer reservation release", () => {
   function fixture() {
     const order: string[] = [];

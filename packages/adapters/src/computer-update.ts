@@ -27,6 +27,22 @@ const STALE_MS = 10 * 60_000;
 const UNCONFIRMED_HANDBACK_STATUSES = ["reserving", "revoking"] as const;
 const PENDING_HANDBACK_STATUSES = ["reserving", "revoking", "revoked"] as const;
 
+/** The related updates are completed checkpoints on this same computer. */
+export function computerUpdateIsCurrent(row: {
+  id: string;
+  action: string;
+  status: string;
+  updatedAt: Date;
+  computer: { maintenanceId: string | null; updates: { createdAt: Date }[] };
+}): boolean {
+  return (
+    row.action !== "checkpoint" ||
+    row.status !== "failed" ||
+    row.computer.maintenanceId === row.id ||
+    !row.computer.updates.some((checkpoint) => checkpoint.createdAt > row.updatedAt)
+  );
+}
+
 export function computerUpdateView(
   row: {
     action: string;
