@@ -36,6 +36,7 @@ export function previewFromBlocks(blocks: unknown): string {
       "kind" in block &&
       block.kind !== "bot_message_sent" &&
       block.kind !== "bot_message_received" &&
+      block.kind !== "handoff" &&
       "text" in block &&
       typeof (block as { text?: unknown }).text === "string"
     ) {

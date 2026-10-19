@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 import { previewFromBlocks } from "./thread-listing.js";
 
 describe("previewFromBlocks", () => {
-  it.each(["bot_message_sent", "bot_message_received"])(
+  it.each(["bot_message_sent", "bot_message_received", "handoff"])(
     "keeps %s instructions out of conversation previews",
     (kind) => {
       const internal = { kind, text: "Internal delegation instructions" };
