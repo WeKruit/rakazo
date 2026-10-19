@@ -46,7 +46,15 @@ export function createComputerUpdates(
         if (watching && active) {
           clearTimeout(timer);
           if (epoch !== generation || stamp !== revision) void poll(generation);
-          else timer = setTimeout(() => void poll(epoch), state.updates.length ? 1500 : 15000);
+          else
+            timer = setTimeout(
+              () => void poll(epoch),
+              state.updates.some(
+                (update) => update.status === "queued" || update.status === "running",
+              )
+                ? 1500
+                : 15000,
+            );
         }
       }
     });

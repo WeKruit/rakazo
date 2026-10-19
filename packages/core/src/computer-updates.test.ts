@@ -13,6 +13,30 @@ const update: ComputerUpdate = {
 };
 afterEach(() => vi.useRealTimers());
 describe("computer update presentation", () => {
+  it.each(["failed", "interrupted"] as const)(
+    "keeps a %s card visible without polling it as running work",
+    async (status) => {
+      vi.useFakeTimers();
+      const terminal = { ...update, status };
+      const list = vi.fn(async () => [terminal]);
+      const store = createComputerUpdates({
+        list,
+        start: async () => update,
+        dismiss: async () => {},
+        releaseInterrupted: async () => {},
+      });
+      const stop = store.watch();
+      await vi.advanceTimersByTimeAsync(0);
+      store.open(terminal.id);
+      await vi.advanceTimersByTimeAsync(14_999);
+      expect(list).toHaveBeenCalledOnce();
+      expect(store.getSnapshot()).toEqual({ updates: [terminal], openId: terminal.id });
+      await vi.advanceTimersByTimeAsync(1);
+      expect(list).toHaveBeenCalledTimes(2);
+      stop();
+    },
+  );
+
   it("pauses hidden polling without losing the open card or duplicating an issued read", async () => {
     vi.useFakeTimers();
     let setActive!: (active: boolean) => void;
