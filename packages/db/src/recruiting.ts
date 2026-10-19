@@ -1126,6 +1126,19 @@ export async function readRecruitingFeedbackContext(
         throw new RecruitingConflictError();
     }
     await validateSources(tx, actor, sourceRefs);
+    if (input.candidateKeys) {
+      if (
+        !workspace ||
+        !input.candidateKeys.length ||
+        new Set(input.candidateKeys).size !== input.candidateKeys.length
+      )
+        throw new IsolationError();
+      const candidates = await tx.recruitingCandidate.findMany({
+        where: { roleId: workspace.role.id, candidateKey: { in: [...input.candidateKeys] } },
+        select: { candidateKey: true },
+      });
+      if (candidates.length !== input.candidateKeys.length) throw new IsolationError();
+    }
     let choice: "good_example" | "not_fit" | "skip" | undefined;
     if (intent.basis === "direct") {
       choice = verifiedFeedbackChoice(
@@ -1134,61 +1147,6 @@ export async function readRecruitingFeedbackContext(
         input.expectedRoleRevision,
         input.candidateKeys,
       );
-      if (
-        choice &&
-        !(await tx.recruitingCandidate.findUnique({
-          where: {
-            roleId_candidateKey: { roleId: input.roleId!, candidateKey: input.candidateKeys![0]! },
-          },
-        }))
-      )
-        throw new IsolationError();
-      if (input.candidateKeys && !choice) {
-        if (
-          !workspace ||
-          !input.candidateKeys.length ||
-          new Set(input.candidateKeys).size !== input.candidateKeys.length
-        )
-          throw new IsolationError();
-        const profiles = await tx.recruitingCandidateOccurrence.findMany({
-          where: { roleId: workspace.role.id, candidateKey: { in: [...input.candidateKeys] } },
-          select: { candidateKey: true, name: true, linkedinUrl: true, resumeUrl: true },
-        });
-        const links = new Set(extractLinksFromText(intent.quote));
-        for (const key of input.candidateKeys) {
-          const matches = profiles.filter((profile) => profile.candidateKey === key);
-          if (!matches.length) throw new IsolationError();
-          if (
-            matches.some((profile) =>
-              [profile.linkedinUrl, profile.resumeUrl].some((url) => url && links.has(url)),
-            )
-          )
-            continue;
-          let identified = false;
-          for (const name of new Set(
-            matches.flatMap((profile) => (profile.name ? [profile.name] : [])),
-          )) {
-            const escaped = name.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
-            if (
-              !new RegExp(`(^|[^\\p{L}\\p{N}])${escaped}($|[^\\p{L}\\p{N}])`, "iu").test(
-                intent.quote,
-              )
-            )
-              continue;
-            if (
-              (await tx.recruitingCandidateOccurrence.count({
-                where: {
-                  roleId: workspace.role.id,
-                  name: { equals: name, mode: "insensitive" },
-                  candidateKey: { not: key },
-                },
-              })) === 0
-            )
-              identified = true;
-          }
-          if (!identified) throw new IsolationError();
-        }
-      }
     }
     return {
       source,

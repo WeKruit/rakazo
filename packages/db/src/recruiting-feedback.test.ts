@@ -109,15 +109,18 @@ function fixture() {
     event: { findMany: vi.fn(async () => []) },
     steeringMessage: { findMany: vi.fn(async (_query: unknown) => [] as unknown[]) },
     recruitingCandidate: {
-      findUnique: vi.fn(async () => ({ roleId: "role", candidateKey: "avery" })),
-      findMany: vi.fn(async () => [{ candidateKey: "avery" }]),
-    },
-    recruitingCandidateOccurrence: {
-      findMany: vi.fn(async () => [
-        { candidateKey: "avery", name: "Example Avery", linkedinUrl: null, resumeUrl: null },
-        { candidateKey: "blair", name: "Example Blair", linkedinUrl: null, resumeUrl: null },
-      ]),
-      count: vi.fn(async (_input: unknown) => 0),
+      findMany: vi.fn(
+        async ({
+          where,
+        }: {
+          where: { roleId: string; candidateKey: { in: readonly string[] } };
+        }) =>
+          where.roleId === "role"
+            ? ["avery", "blair"]
+                .filter((candidateKey) => where.candidateKey.in.includes(candidateKey))
+                .map((candidateKey) => ({ candidateKey }))
+            : [],
+      ),
     },
     externalEffect: {
       findMany: vi.fn(async (_input: unknown) => []),
@@ -361,10 +364,10 @@ describe("native recruiting feedback records", () => {
     const quote =
       "Use Example Avery as a positive example, Example Blair is not a fit, and inspect Example Casey only.";
     f.source.blocks = [{ kind: "text", text: quote }];
-    f.tx.recruitingCandidateOccurrence.findMany.mockResolvedValueOnce([
-      { candidateKey: "avery", name: "Example Avery", linkedinUrl: null, resumeUrl: null },
-      { candidateKey: "blair", name: "Example Blair", linkedinUrl: null, resumeUrl: null },
-      { candidateKey: "casey", name: "Example Casey", linkedinUrl: null, resumeUrl: null },
+    f.tx.recruitingCandidate.findMany.mockResolvedValueOnce([
+      { candidateKey: "avery" },
+      { candidateKey: "blair" },
+      { candidateKey: "casey" },
     ]);
     const result = await readRecruitingFeedbackContext(f.prisma, actor, {
       ...f.input,
@@ -592,34 +595,62 @@ describe("native recruiting feedback records", () => {
       },
     });
   });
-  it("validates every selected candidate against the actual human quote", async () => {
+  it.each([
+    { basis: "direct", quote: "Recheck Avery and Blair only." },
+    { basis: "direct", quote: "Recheck the first two people only." },
+    { basis: "inferred", quote: "Recheck Avery and Blair only." },
+    { basis: "inferred", quote: "Recheck the first two people only." },
+  ] as const)("admits context-resolved $basis candidate references: $quote", async (intent) => {
     const f = fixture();
-    expect(await readRecruitingFeedbackContext(f.prisma, actor, f.input)).toMatchObject({
-      source: { quote },
+    f.source.blocks = [{ kind: "text", text: intent.quote }];
+    const result = await readRecruitingFeedbackContext(f.prisma, actor, { ...f.input, intent });
+    expect(result).toMatchObject({
+      source: { quote: intent.quote, anchor: { kind: "message", messageId: "human" } },
+      workspace: { role: { id: "role" } },
     });
-    f.tx.recruitingCandidateOccurrence.findMany.mockResolvedValueOnce([
-      { candidateKey: "other", name: "Other Person", linkedinUrl: null, resumeUrl: null },
-    ]);
-    await expect(
-      readRecruitingFeedbackContext(f.prisma, actor, { ...f.input, candidateKeys: ["other"] }),
-    ).rejects.toThrow(IsolationError);
-    f.tx.recruitingCandidateOccurrence.count.mockResolvedValueOnce(1);
-    await expect(readRecruitingFeedbackContext(f.prisma, actor, f.input)).rejects.toThrow(
-      IsolationError,
-    );
+    expect(f.tx.recruitingCandidate.findMany).toHaveBeenCalledWith({
+      where: { roleId: "role", candidateKey: { in: ["avery", "blair"] } },
+      select: { candidateKey: true },
+    });
   });
+
+  it.each([
+    { basis: "direct", candidateKeys: ["avery", "foreign-role-candidate"] },
+    { basis: "direct", candidateKeys: ["avery", "missing"] },
+    { basis: "direct", candidateKeys: [] },
+    { basis: "direct", candidateKeys: ["avery", "avery"] },
+    { basis: "inferred", candidateKeys: ["avery", "foreign-role-candidate"] },
+    { basis: "inferred", candidateKeys: ["avery", "missing"] },
+    { basis: "inferred", candidateKeys: [] },
+    { basis: "inferred", candidateKeys: ["avery", "avery"] },
+  ] as const)(
+    "rejects unauthorized or invalid $basis candidate keys: $candidateKeys",
+    async (input) => {
+      const f = fixture();
+      await expect(
+        readRecruitingFeedbackContext(f.prisma, actor, {
+          ...f.input,
+          candidateKeys: input.candidateKeys,
+          intent: { ...f.input.intent, basis: input.basis },
+        }),
+      ).rejects.toThrow(IsolationError);
+    },
+  );
+
   it("preserves the authenticated form selection and refuses broader or different candidates", async () => {
     const f = fixture();
     f.source.blocks = [{ kind: "text", text: quote, recruitingFeedback: selection }];
-    f.tx.recruitingCandidateOccurrence.findMany.mockResolvedValueOnce([]);
     expect(
       await readRecruitingFeedbackContext(f.prisma, actor, {
         ...f.input,
         candidateKeys: ["avery"],
       }),
     ).toMatchObject({ choice: "not_fit" });
-    expect(f.tx.recruitingCandidateOccurrence.findMany).not.toHaveBeenCalled();
-    f.tx.recruitingCandidate.findUnique.mockResolvedValueOnce(null as never);
+    expect(f.tx.recruitingCandidate.findMany).toHaveBeenCalledWith({
+      where: { roleId: "role", candidateKey: { in: ["avery"] } },
+      select: { candidateKey: true },
+    });
+    f.tx.recruitingCandidate.findMany.mockResolvedValueOnce([]);
     await expect(
       readRecruitingFeedbackContext(f.prisma, actor, { ...f.input, candidateKeys: ["avery"] }),
     ).rejects.toThrow(IsolationError);
@@ -631,21 +662,6 @@ describe("native recruiting feedback records", () => {
     ).rejects.toThrow(IsolationError);
     await expect(
       readRecruitingFeedbackContext(f.prisma, actor, { ...f.input, candidateKeys: undefined }),
-    ).rejects.toThrow(IsolationError);
-  });
-  it("refuses case-insensitive name ambiguity instead of selecting a different saved candidate", async () => {
-    const f = fixture();
-    f.tx.recruitingCandidateOccurrence.count.mockImplementationOnce(async (query) => {
-      const name = (query as { where: { name: unknown } }).where.name;
-      return typeof name === "object" &&
-        name !== null &&
-        "mode" in name &&
-        name.mode === "insensitive"
-        ? 1
-        : 0;
-    });
-    await expect(
-      readRecruitingFeedbackContext(f.prisma, actor, { ...f.input, candidateKeys: ["avery"] }),
     ).rejects.toThrow(IsolationError);
   });
   it("authorizes feedback history before reading effects and binds pagination to that scope", async () => {
