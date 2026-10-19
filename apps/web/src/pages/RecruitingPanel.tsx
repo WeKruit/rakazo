@@ -1997,7 +1997,10 @@ function RecruitingWorkspace({
   const resetUnavailableCandidateSort = useCallback(
     (page: ListRecruitingCandidatesOutput, filters: RecruitingPanelState["filters"]) => {
       const sort = filters.sort ?? "rank";
-      if ((sort === "rank" || sort === "tier") && !page.sortAvailability[sort]) {
+      if (
+        (sort === "rank" || sort === "tier" || sort === "score") &&
+        !page.sortAvailability[sort]
+      ) {
         setCandidatePage(null);
         setCandidateList((current) => ({
           ...current,
@@ -3169,6 +3172,11 @@ function RecruitingWorkspace({
                       {candidatePage.sortAvailability.tier ? (
                         <NativeSelectOption value="tier">
                           <Trans>Match tier</Trans>
+                        </NativeSelectOption>
+                      ) : null}
+                      {candidatePage.sortAvailability.score ? (
+                        <NativeSelectOption value="score">
+                          <Trans>Match score</Trans>
                         </NativeSelectOption>
                       ) : null}
                       <NativeSelectOption value="name">

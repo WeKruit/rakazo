@@ -5734,12 +5734,12 @@ function candidateIndexQuery(
 ) {
   // ponytail: parse each saved page once; persist match fields only if large pools outgrow this projection.
   const includeMatches = sort !== undefined;
-  const matchSort = sort === "rank" || sort === "tier";
+  const matchSort = sort === "rank" || sort === "tier" || sort === "score";
   const explicitSource =
     displayScope?.sourceEffectId !== undefined || displayScope?.actionId !== undefined;
   const sourceScope = Prisma.sql`${displayScope?.sourceEffectId !== undefined ? Prisma.sql`AND page."effectId" = ${displayScope.sourceEffectId}` : Prisma.empty}
     ${displayScope?.actionId !== undefined ? Prisma.sql`AND page."actionId" = ${displayScope.actionId}` : Prisma.empty}`;
-  // ponytail: original ranks are comparable only within this exact saved result, never across pages.
+  // ponytail: original ranks and scores are comparable only within one exact saved result.
   const rankCell = Prisma.sql`CASE WHEN returned.value ? 'updated_rank'
         THEN returned.value -> 'updated_rank'
         WHEN returned.value ? 'overall_rank' THEN returned.value -> 'overall_rank'
@@ -5750,6 +5750,10 @@ function candidateIndexQuery(
         CASE WHEN (match."value" #>> '{}')::numeric BETWEEN 1 AND 9007199254740991
           AND trunc((match."value" #>> '{}')::numeric) = (match."value" #>> '{}')::numeric
           THEN (match."value" #>> '{}')::numeric::bigint END END
+      WHEN source.kind = 'score' THEN
+        CASE WHEN jsonb_typeof(match."value") = 'number' THEN
+          CASE WHEN abs((match."value" #>> '{}')::numeric) <= ${Number.MAX_VALUE}::numeric
+            THEN (match."value" #>> '{}')::numeric END END
       ELSE CASE match."value" #>> '{}'
         WHEN 'Strong' THEN 0 WHEN 'Promising' THEN 1 WHEN 'Partial' THEN 2 WHEN 'Uncertain' THEN 3 END END`;
   const fields = [
@@ -5793,7 +5797,9 @@ function candidateIndexQuery(
         (returned.value ? 'updated_rank' OR returned.value ? 'overall_rank' OR
           (rank_scope."pageId" IS NOT NULL AND
             (returned.value ? 'rank' OR returned.value ? 'batch_rank')))),
-      ('tier', returned.value -> ${"match_tier"}, returned.value ? ${"match_tier"})
+      ('tier', returned.value -> ${"match_tier"}, returned.value ? ${"match_tier"}),
+      ('score', returned.value -> ${"match_score"}, returned.value ? ${"match_score"} AND
+        rank_scope."pageId" IS NOT NULL AND page."effectId" = rank_scope."pageId")
     ) source(kind, cell, present)
     CROSS JOIN LATERAL (SELECT CASE WHEN jsonb_typeof(source.cell) = 'object' AND source.cell ? 'value'
       THEN source.cell->'value' ELSE source.cell END AS "value") match
@@ -5804,8 +5810,8 @@ function candidateIndexQuery(
       : Prisma.empty
   } base AS (
     SELECT c."roleId", c."candidateKey", c."shortlisted", c."revision",
-      ${includeMatches ? Prisma.sql`match."rankValue", match."tierValue",` : Prisma.empty}
-      ${matchSort ? Prisma.sql`${sort === "rank" ? Prisma.sql`match."rankValue"` : Prisma.sql`match."tierValue"`} AS "matchValue",` : Prisma.empty}
+      ${includeMatches ? Prisma.sql`match."rankValue", match."tierValue", match."scoreValue",` : Prisma.empty}
+      ${matchSort ? Prisma.sql`match.${Prisma.raw(`"${sort}Value"`)} AS "matchValue",` : Prisma.empty}
       p."pageId" AS "sourcePageId", p."rowIndex" AS "sourceRowIndex",
       ${Prisma.join(
         fields.map(([column]) =>
@@ -5818,7 +5824,7 @@ function candidateIndexQuery(
       ARRAY(SELECT DISTINCT value->>'pageId' FROM (VALUES ${Prisma.join(
         fields.map(([column]) => Prisma.sql`(profile.${Prisma.raw(`"${column}"`)})`),
       )}) fields(value) WHERE value IS NOT NULL
-      ${matchSort ? Prisma.sql`UNION SELECT ${sort === "rank" ? Prisma.sql`match."rankPageId"` : Prisma.sql`match."tierPageId"`} WHERE ${sort === "rank" ? Prisma.sql`match."rankPageId"` : Prisma.sql`match."tierPageId"`} IS NOT NULL` : Prisma.empty}) AS "profileSourcePageIds",
+      ${matchSort ? Prisma.sql`UNION SELECT match.${Prisma.raw(`"${sort}PageId"`)} WHERE match.${Prisma.raw(`"${sort}PageId"`)} IS NOT NULL` : Prisma.empty}) AS "profileSourcePageIds",
       COALESCE(p."issues", '[]'::jsonb) AS "issues",
       d."discoveryCount",
       to_char(d."firstDiscoveredAt", 'YYYY-MM-DD"T"HH24:MI:SS.MS"Z"') AS "firstDiscoveredAt",
@@ -5862,10 +5868,14 @@ function candidateIndexQuery(
           FILTER (WHERE m.kind = 'rank'))[1] AS "rankValue",
         (array_agg(m.value ORDER BY m."observedAt" DESC, m."pageId" COLLATE "C" DESC, m."rowIndex" DESC)
           FILTER (WHERE m.kind = 'tier'))[1] AS "tierValue",
+        (array_agg(m.value ORDER BY m."observedAt" DESC, m."pageId" COLLATE "C" DESC, m."rowIndex" DESC)
+          FILTER (WHERE m.kind = 'score'))[1] AS "scoreValue",
         (array_agg(m."pageId" ORDER BY m."observedAt" DESC, m."pageId" COLLATE "C" DESC, m."rowIndex" DESC)
           FILTER (WHERE m.kind = 'rank'))[1] AS "rankPageId",
         (array_agg(m."pageId" ORDER BY m."observedAt" DESC, m."pageId" COLLATE "C" DESC, m."rowIndex" DESC)
-          FILTER (WHERE m.kind = 'tier'))[1] AS "tierPageId"
+          FILTER (WHERE m.kind = 'tier'))[1] AS "tierPageId",
+        (array_agg(m."pageId" ORDER BY m."observedAt" DESC, m."pageId" COLLATE "C" DESC, m."rowIndex" DESC)
+          FILTER (WHERE m.kind = 'score'))[1] AS "scorePageId"
       FROM "recruiting_candidate_occurrences" o
       JOIN match_rows m ON m."pageId" = o."pageId" AND m."rowIndex" = o."rowIndex"
       WHERE o."roleId" = c."roleId" AND o."candidateKey" = c."candidateKey"
@@ -5892,6 +5902,7 @@ type CandidateQueryRow = {
   matchValue?: unknown;
   rankValue?: unknown;
   tierValue?: unknown;
+  scoreValue?: unknown;
   sourcePageId: string | null;
   sourceRowIndex: number | null;
   profileSourcePageIds: string[];
@@ -7054,11 +7065,11 @@ export async function listRecruitingCandidates(
     async (tx) => {
       const role = await requireRole(tx, actor, input.roleId);
       const sort = input.sort ?? "rank";
-      const matchSort = sort === "rank" || sort === "tier";
+      const matchSort = sort === "rank" || sort === "tier" || sort === "score";
       const limit = input.limit ?? 25;
       const explicitSource = input.sourceEffectId !== undefined || input.actionId !== undefined;
-      let rankDomainPageId = sort === "rank" ? input.sourceEffectId : undefined;
-      if (sort === "rank" && rankDomainPageId === undefined) {
+      let rankDomainPageId = sort === "rank" || sort === "score" ? input.sourceEffectId : undefined;
+      if ((sort === "rank" || sort === "score") && rankDomainPageId === undefined) {
         const pages = await tx.recruitingCandidatePage.findMany({
           where: {
             roleId: role.id,
@@ -7090,10 +7101,12 @@ export async function listRecruitingCandidates(
       if (
         matchSort &&
         cursor?.value &&
-        (!/^\d+$/.test(cursor.value) ||
-          !Number.isSafeInteger(Number(cursor.value)) ||
-          Number(cursor.value) < (sort === "rank" ? 1 : 0) ||
-          (sort === "tier" && Number(cursor.value) > 3))
+        (sort === "score"
+          ? !/^-?\d+(?:\.\d+)?$/.test(cursor.value) || !Number.isFinite(Number(cursor.value))
+          : !/^\d+$/.test(cursor.value) ||
+            !Number.isSafeInteger(Number(cursor.value)) ||
+            Number(cursor.value) < (sort === "rank" ? 1 : 0) ||
+            (sort === "tier" && Number(cursor.value) > 3))
       )
         throw new RecruitingConflictError();
       const clauses = [Prisma.sql`true`];
@@ -7123,10 +7136,12 @@ export async function listRecruitingCandidates(
           shortlisted: bigint;
           rankAvailable: boolean;
           tierAvailable: boolean;
+          scoreAvailable: boolean;
         }>
       >(Prisma.sql`${filtered} SELECT (SELECT count(*) FROM filtered) AS "total",
       (SELECT COALESCE(bool_or("rankValue" IS NOT NULL), false) FROM filtered) AS "rankAvailable",
       (SELECT COALESCE(bool_or("tierValue" IS NOT NULL), false) FROM filtered) AS "tierAvailable",
+      (SELECT COALESCE(bool_or("scoreValue" IS NOT NULL), false) FROM filtered) AS "scoreAvailable",
       COALESCE(sum("discoveryCount"), 0)::bigint AS "sourceRows", count(*) AS "candidates",
       count(*) FILTER (WHERE "countIdentified") AS "identifiedCandidates",
       count(*) FILTER (WHERE "assessmentVersion" IS NULL) AS "unassessed",
@@ -7142,7 +7157,7 @@ export async function listRecruitingCandidates(
         ? matchSort
           ? cursor.value === ""
             ? Prisma.sql`("matchValue" IS NULL AND "candidateKey" > ${cursor.key} COLLATE "C")`
-            : Prisma.sql`("matchValue" IS NULL OR "matchValue" > ${cursor.value}::numeric OR ("matchValue" = ${cursor.value}::numeric AND "candidateKey" > ${cursor.key} COLLATE "C"))`
+            : Prisma.sql`("matchValue" IS NULL OR "matchValue" ${sort === "score" ? Prisma.sql`<` : Prisma.sql`>`} ${cursor.value}::numeric OR ("matchValue" = ${cursor.value}::numeric AND "candidateKey" > ${cursor.key} COLLATE "C"))`
           : sort === "name"
             ? Prisma.sql`("sortValue" > ${cursor.value} COLLATE "C" OR ("sortValue" = ${cursor.value} COLLATE "C" AND "candidateKey" > ${cursor.key} COLLATE "C"))`
             : Prisma.sql`("sortValue" < ${cursor.value} COLLATE "C" OR ("sortValue" = ${cursor.value} COLLATE "C" AND "candidateKey" > ${cursor.key} COLLATE "C"))`
@@ -7150,11 +7165,11 @@ export async function listRecruitingCandidates(
       const rows = await tx.$queryRaw<CandidateQueryRow[]>(Prisma.sql`${filtered}, ordered AS (
       SELECT *, ${sortValue} AS "sortValue" FROM filtered
     ) SELECT * FROM ordered WHERE ${after}
-      ORDER BY ${matchSort ? Prisma.sql`"matchValue" ASC NULLS LAST` : Prisma.sql`"sortValue" ${direction}`}, "candidateKey" COLLATE "C" ASC LIMIT ${limit + 1}`);
+      ORDER BY ${matchSort ? Prisma.sql`"matchValue" ${sort === "score" ? Prisma.sql`DESC` : Prisma.sql`ASC`} NULLS LAST` : Prisma.sql`"sortValue" ${direction}`}, "candidateKey" COLLATE "C" ASC LIMIT ${limit + 1}`);
       const selected = rows.slice(0, limit);
       const pages = await candidateProfilePages(tx, actor, role.id, selected);
       const last = selected.at(-1);
-      const { total, rankAvailable, tierAvailable, ...counts } = totals[0]!;
+      const { total, rankAvailable, tierAvailable, scoreAvailable, ...counts } = totals[0]!;
       const bound = role.crmBindingEffectId
         ? await crmBindingReceipt(tx, actor, role.id, role.crmBindingEffectId)
         : null;
@@ -7176,7 +7191,7 @@ export async function listRecruitingCandidates(
             syncs.set(link.occurrence.candidateKey, await crmSourceSync(tx, actor, link));
       }
       return ListRecruitingCandidatesOutput.parse({
-        sortAvailability: { rank: rankAvailable, tier: tierAvailable },
+        sortAvailability: { rank: rankAvailable, tier: tierAvailable, score: scoreAvailable },
         crmTarget: bound ? { bindingEffectId: bound.bindingEffectId, target: bound.target } : null,
         roleId: role.id,
         roleRevisionId: role.currentRevisionId,
@@ -7189,6 +7204,7 @@ export async function listRecruitingCandidates(
             matchValue: _match,
             rankValue: _rank,
             tierValue: _tier,
+            scoreValue: _score,
             sortValue: _sort,
             sourcePageId,
             sourceRowIndex,

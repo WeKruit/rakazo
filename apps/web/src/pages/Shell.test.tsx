@@ -339,7 +339,7 @@ async function renderFeedbackShell(
   shellApi.recruiting.listAssessments.mockResolvedValue([]);
   shellApi.recruiting.listFeedback.mockResolvedValue({ feedback: [], nextCursor: null });
   shellApi.recruiting.listCandidates.mockResolvedValue({
-    sortAvailability: { rank: true, tier: true },
+    sortAvailability: { rank: true, tier: true, score: true },
     roleId: "internal-role",
     roleRevisionId: "internal-revision",
     items: [candidate],

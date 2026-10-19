@@ -444,7 +444,7 @@ describe("native recruiting RPC", () => {
       await client.recruiting.getAssessment({ roleId: "role", candidateKey: "row" }),
     ).toBeNull();
     const candidatePage = {
-      sortAvailability: { rank: false, tier: false },
+      sortAvailability: { rank: false, tier: false, score: false },
       roleId: "role",
       roleRevisionId: "revision",
       crmTarget: null,
@@ -969,7 +969,7 @@ describe("retained candidate report API", () => {
         }),
       );
       vi.mocked(db.listRecruitingCandidates).mockResolvedValue({
-        sortAvailability: { rank: false, tier: false },
+        sortAvailability: { rank: false, tier: false, score: false },
         roleId: "role",
         roleRevisionId: "revision",
         crmTarget: null,

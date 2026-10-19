@@ -1055,7 +1055,7 @@ export const ListRecruitingCandidatesInput = z.strictObject({
   shortlisted: z.boolean().optional(),
   actionId: RecruitingId.optional(),
   sourceEffectId: RecruitingId.optional(),
-  sort: z.enum(["name", "recent", "rank", "tier"]).optional(),
+  sort: z.enum(["name", "recent", "rank", "tier", "score"]).optional(),
 });
 export type ListRecruitingCandidatesInput = z.infer<typeof ListRecruitingCandidatesInput>;
 /** Recruiter-readable projection of one exact retained provider row, never qualification. */
@@ -1118,7 +1118,7 @@ export const RecruitingCandidateSchema = z.strictObject({
 });
 export type RecruitingCandidate = z.infer<typeof RecruitingCandidateSchema>;
 export const ListRecruitingCandidatesOutput = z.strictObject({
-  sortAvailability: z.strictObject({ rank: z.boolean(), tier: z.boolean() }),
+  sortAvailability: z.strictObject({ rank: z.boolean(), tier: z.boolean(), score: z.boolean() }),
   crmTarget: z
     .strictObject({ bindingEffectId: RecruitingId, target: RecruitingCrmTargetSchema })
     .nullable(),

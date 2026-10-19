@@ -1500,7 +1500,7 @@ describe("candidate index contracts", () => {
     };
     expect(contracts.RecruitingCandidateProfileSchema.parse(unknown)).toEqual(unknown);
   });
-  it.each(["rank", "tier"])("accepts native provider %s candidate ordering", (sort) => {
+  it.each(["rank", "tier", "score"])("accepts native provider %s candidate ordering", (sort) => {
     expect(contracts.ListRecruitingCandidatesInput.parse({ roleId: "role", sort })).toEqual({
       roleId: "role",
       sort,

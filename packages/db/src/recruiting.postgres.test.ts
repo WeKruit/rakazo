@@ -7511,7 +7511,7 @@ describePostgres("recruiting domain (PostgreSQL)", () => {
     expect(unresolved.every((item) => item.name === null && item.issues.length > 0)).toBe(true);
   });
 
-  it("orders native ranks and tiers across numeric, tie and unknown cursor boundaries with source proof", async () => {
+  it("orders native ranks, tiers and scores across numeric, tie and unknown cursor boundaries with source proof", async () => {
     const { f, prepared } = await mappedResearchFixture();
     const row = (key: string, match: Prisma.InputJsonObject) => ({
       ...canonicalCandidateRow(`Order ${key}`, `https://www.linkedin.com/in/order-${key}`),
@@ -7522,14 +7522,22 @@ describePostgres("recruiting domain (PostgreSQL)", () => {
       prepared,
       "match-original",
       [
-        row("a", { updated_rank: { value: 10 }, match_tier: { value: "Strong" } }),
-        row("b", { updated_rank: 2, match_tier: "Promising" }),
-        row("c", { updated_rank: { value: 1 }, match_tier: { value: "Uncertain" } }),
-        row("d", { updated_rank: { value: 2 }, match_tier: { value: "Partial" } }),
-        row("e", { rank: 1, match_tier: "Unrecognized" }),
-        row("f", { updated_rank: null, match_tier: "Strong" }),
-        row("g", { updated_rank: "3", match_tier: null }),
-        row("h", { updated_rank: 1.5 }),
+        row("a", { updated_rank: { value: 10 }, match_tier: { value: "Strong" }, match_score: 55 }),
+        row("b", { updated_rank: 2, match_tier: "Promising", match_score: { value: 72.5 } }),
+        row("c", {
+          updated_rank: { value: 1 },
+          match_tier: { value: "Uncertain" },
+          match_score: 72.5,
+        }),
+        row("d", {
+          updated_rank: { value: 2 },
+          match_tier: { value: "Partial" },
+          match_score: { value: 0 },
+        }),
+        row("e", { rank: 1, match_tier: "Unrecognized", match_score: null }),
+        row("f", { updated_rank: null, match_tier: "Strong", match_score: "90" }),
+        row("g", { updated_rank: "3", match_tier: null, match_score: { value: true } }),
+        row("h", { updated_rank: 1.5, match_score: { value: -0.5 } }),
         row("i", { updated_rank: -1 }),
         row("j", { updated_rank: 9007199254740992 }),
       ],
@@ -7537,9 +7545,11 @@ describePostgres("recruiting domain (PostgreSQL)", () => {
     );
     const key = (suffix: string) => `linkedin:/in/order-${suffix}`;
     let rankCursor: string | undefined;
+    let scoreCursor: string | undefined;
     for (const [sort, expected] of [
       ["rank", ["c", "e", "b", "d", "a", "f", "g", "h", "i", "j"]],
       ["tier", ["a", "f", "b", "d", "c", "e", "g", "h", "i", "j"]],
+      ["score", ["b", "c", "a", "d", "h", "e", "f", "g", "i", "j"]],
     ] as const) {
       const seen: string[] = [];
       let cursor: string | undefined;
@@ -7554,6 +7564,7 @@ describePostgres("recruiting domain (PostgreSQL)", () => {
         seen.push(...page.items.map((item) => item.candidateKey));
         cursor = page.nextCursor ?? undefined;
         if (sort === "rank" && !rankCursor) rankCursor = cursor;
+        if (sort === "score" && !scoreCursor) scoreCursor = cursor;
       } while (cursor);
       expect(seen).toEqual(expected.map(key));
       expect(new Set(seen).size).toBe(10);
@@ -7568,6 +7579,35 @@ describePostgres("recruiting domain (PostgreSQL)", () => {
     const compact = await recordCandidatePage(f, prepared, "match-omitted", [row("a", {})], {
       observedAt: new Date("2026-10-16T01:00:00Z"),
     });
+    await expect(
+      recruiting.listRecruitingCandidates(prisma, actor, {
+        roleId: f.role.role.id,
+        sort: "score",
+        cursor: scoreCursor,
+      }),
+    ).rejects.toThrow(recruiting.RecruitingConflictError);
+    const unavailable = await recruiting.listRecruitingCandidates(prisma, actor, {
+      roleId: f.role.role.id,
+      sort: "score",
+    });
+    expect(unavailable.sortAvailability.score).toBe(false);
+    const saved = await recruiting.listRecruitingCandidates(prisma, actor, {
+      roleId: f.role.role.id,
+      sort: "score",
+      sourceEffectId: original.input.effectId,
+    });
+    expect(saved.sortAvailability.score).toBe(true);
+    expect(saved.items.map((item) => item.candidateKey)).toEqual(
+      ["b", "c", "a", "d", "h", "e", "f", "g", "i", "j"].map(key),
+    );
+    await expect(
+      recruiting.listRecruitingCandidates(prisma, actor, {
+        roleId: f.role.role.id,
+        sort: "score",
+        sourceEffectId: original.input.effectId,
+        cursor: scoreCursor,
+      }),
+    ).rejects.toThrow(recruiting.RecruitingConflictError);
     await expect(
       recruiting.listRecruitingCandidates(prisma, actor, {
         roleId: f.role.role.id,
@@ -7972,7 +8012,7 @@ describePostgres("recruiting domain (PostgreSQL)", () => {
       sort: "rank",
       limit: 100,
     });
-    expect(ranked.sortAvailability).toEqual({ rank: true, tier: true });
+    expect(ranked.sortAvailability).toEqual({ rank: true, tier: true, score: false });
     expect(ranked.items.map((item) => item.candidateKey)).toEqual([
       "linkedin:/in/shared",
       "linkedin:/in/alpha",

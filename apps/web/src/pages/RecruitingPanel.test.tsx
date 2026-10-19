@@ -324,7 +324,7 @@ function crmSync(status: RecruitingCrmCandidateSync["status"]): RecruitingCrmCan
 }
 function candidatePage(items = [candidateFixture()]) {
   return {
-    sortAvailability: { rank: true, tier: true },
+    sortAvailability: { rank: true, tier: true, score: true },
     roleId: role.id,
     roleRevisionId: revision.id,
     crmTarget: null as { bindingEffectId: string; target: RecruitingCrmTarget } | null,
@@ -1957,7 +1957,7 @@ it("isolates saved recruiting list preferences by actor, thread and actual role"
   );
 });
 
-it("offers native Autumn rank and tier ordering while preserving candidate filters", async () => {
+it("offers native Autumn rank, tier and score ordering while preserving candidate filters", async () => {
   const view = await mounted("thread-1", undefined, false);
   await view.click("Evidence");
   const select = view.container.querySelector<HTMLSelectElement>(
@@ -1966,12 +1966,13 @@ it("offers native Autumn rank and tier ordering while preserving candidate filte
   expect([...select.options].map((option) => option.textContent)).toEqual([
     "Autumn rank",
     "Match tier",
+    "Match score",
     "Name",
     "Recently discovered",
   ]);
   expect(select.value).toBe("rank");
   await changeInput(view.container, "Search candidates", "Synthetic");
-  for (const sort of ["tier", "rank"]) {
+  for (const sort of ["tier", "rank", "score"]) {
     await changeSelect(view.container, "Candidate sort", sort);
     expect(api.listCandidates).toHaveBeenLastCalledWith({
       roleId: role.id,
@@ -1982,12 +1983,12 @@ it("offers native Autumn rank and tier ordering while preserving candidate filte
   }
 });
 
-it.each(["rank", "tier"])(
+it.each(["rank", "tier", "score"])(
   "normalizes a saved unavailable %s sort to Name from the authoritative scope signal",
   async (sort) => {
     api.listCandidates.mockResolvedValue({
       ...candidatePage(),
-      sortAvailability: { rank: true, tier: true },
+      sortAvailability: { rank: true, tier: true, score: true },
     });
     const saved = await mounted("thread-1", undefined, false);
     await saved.click("Evidence");
@@ -1996,7 +1997,7 @@ it.each(["rank", "tier"])(
     const person = { ...candidateFixture("unranked", false), name: "Synthetic Avery" };
     api.listCandidates.mockClear().mockResolvedValue({
       ...candidatePage([person]),
-      sortAvailability: { rank: false, tier: false },
+      sortAvailability: { rank: false, tier: false, score: false },
     });
     const view = await mounted("thread-1", undefined, false);
     const select = view.container.querySelector<HTMLSelectElement>(
@@ -2017,35 +2018,38 @@ it.each(["rank", "tier"])(
   },
 );
 
-it("ignores sort availability from a late previous search scope", async () => {
-  let finish!: (page: ReturnType<typeof candidatePage>) => void;
-  api.listCandidates.mockImplementation(({ query }) =>
-    query === "Previous"
-      ? new Promise((resolve) => {
-          finish = resolve;
-        })
-      : Promise.resolve(candidatePage()),
-  );
-  const view = await mounted("thread-1", undefined, false);
-  await view.click("Evidence");
-  await changeSelect(view.container, "Candidate sort", "tier");
-  await changeInput(view.container, "Search candidates", "Previous");
-  expect(view.container.querySelector('select[aria-label="Candidate sort"]')).toBeNull();
-  await changeInput(view.container, "Search candidates", "Current");
-  await act(async () =>
-    finish({ ...candidatePage(), sortAvailability: { rank: false, tier: false } }),
-  );
-  expect(view.container.querySelector('select[aria-label="Candidate sort"]')).toHaveProperty(
-    "value",
-    "tier",
-  );
-  expect(api.listCandidates).toHaveBeenLastCalledWith({
-    roleId: role.id,
-    limit: 30,
-    query: "Current",
-    sort: "tier",
-  });
-});
+it.each(["tier", "score"])(
+  "ignores %s availability from a late previous search scope",
+  async (sort) => {
+    let finish!: (page: ReturnType<typeof candidatePage>) => void;
+    api.listCandidates.mockImplementation(({ query }) =>
+      query === "Previous"
+        ? new Promise((resolve) => {
+            finish = resolve;
+          })
+        : Promise.resolve(candidatePage()),
+    );
+    const view = await mounted("thread-1", undefined, false);
+    await view.click("Evidence");
+    await changeSelect(view.container, "Candidate sort", sort);
+    await changeInput(view.container, "Search candidates", "Previous");
+    expect(view.container.querySelector('select[aria-label="Candidate sort"]')).toBeNull();
+    await changeInput(view.container, "Search candidates", "Current");
+    await act(async () =>
+      finish({ ...candidatePage(), sortAvailability: { rank: false, tier: false, score: false } }),
+    );
+    expect(view.container.querySelector('select[aria-label="Candidate sort"]')).toHaveProperty(
+      "value",
+      sort,
+    );
+    expect(api.listCandidates).toHaveBeenLastCalledWith({
+      roleId: role.id,
+      limit: 30,
+      query: "Current",
+      sort,
+    });
+  },
+);
 
 it("requests server pages and filters while keeping selected evidence outside the visible page", async () => {
   api.listCandidates
