@@ -216,7 +216,8 @@ describe("candidate listing and shortlist boundaries", () => {
     const query = f.tx.$queryRaw.mock.lastCall![0] as { sql: string; values: unknown[] };
     expect(query.sql).toContain("CASE WHEN returned.value ? 'updated_rank'");
     expect(query.sql).toContain("WHEN returned.value ? 'overall_rank'");
-    expect(query.sql).toContain("ELSE returned.value -> 'rank' END");
+    expect(query.sql).toContain("WHEN returned.value ? 'rank' THEN returned.value -> 'rank'");
+    expect(query.sql).toContain("ELSE returned.value -> 'batch_rank' END");
     expect(query.sql).toContain('page."effectId" = rank_scope."pageId"');
     expect(query.values.filter((value) => value === "selected-result")).toHaveLength(2);
     expect(f.tx.recruitingCandidatePage.findMany).not.toHaveBeenCalled();
@@ -229,7 +230,7 @@ describe("candidate listing and shortlist boundaries", () => {
     ["rank", undefined, [{ effectId: "first" }, { effectId: "second" }]],
     ["rank", undefined, []],
   ] as const)(
-    "preserves the existing %s cursor hash for unchanged source %s and pages %j",
+    "uses the current %s rank projection for source %s and pages %j",
     async (sort, sourceEffectId, pages) => {
       const f = fixture();
       f.tx.recruitingCandidatePage.findMany.mockResolvedValue([...pages]);
@@ -239,6 +240,7 @@ describe("candidate listing and shortlist boundaries", () => {
             roleId: "role",
             roleRevisionId: "revision",
             sort,
+            ...(sort === "rank" ? { rankProjection: 2 } : {}),
             query: "",
             assessmentState: null,
             verdict: null,
@@ -277,6 +279,36 @@ describe("candidate listing and shortlist boundaries", () => {
       expect(f.tx.$queryRaw).toHaveBeenCalledTimes(2);
     },
   );
+  it("rejects pre-batch-rank cursors before they can skip newly recognized ranks", async () => {
+    const f = fixture();
+    const scope = createHash("sha256")
+      .update(
+        stableJsonValue({
+          roleId: "role",
+          roleRevisionId: "revision",
+          sort: "rank",
+          query: "",
+          assessmentState: null,
+          verdict: null,
+          shortlisted: null,
+          actionId: null,
+          sourceEffectId: "selected-result",
+        }),
+      )
+      .digest("hex");
+    const cursor = Buffer.from(
+      JSON.stringify({ version: 1, scope, value: "", key: "previously-unranked" }),
+    ).toString("base64url");
+    await expect(
+      recruiting.listRecruitingCandidates(f.prisma, actor, {
+        roleId: "role",
+        sort: "rank",
+        sourceEffectId: "selected-result",
+        cursor,
+      }),
+    ).rejects.toThrow(recruiting.RecruitingConflictError);
+    expect(f.tx.$queryRaw).not.toHaveBeenCalled();
+  });
   it.each(["rank", "tier"] as const)(
     "paginates native %s values with unknowns last and isolated single-page rank cursors",
     async (sort) => {
@@ -336,7 +368,7 @@ describe("candidate listing and shortlist boundaries", () => {
         'ORDER BY "matchValue" ASC NULLS LAST, "candidateKey" COLLATE "C" ASC',
       );
       if (sort === "rank") {
-        expect(firstQuery.sql).toContain("ELSE returned.value -> 'rank' END");
+        expect(firstQuery.sql).toContain("ELSE returned.value -> 'batch_rank' END");
         expect(firstQuery.values).toContain("only-page");
         expect(firstQuery.sql).not.toContain('p."effectId" =');
         expect(f.tx.recruitingCandidatePage.findMany).toHaveBeenCalledExactlyOnceWith({
@@ -346,8 +378,9 @@ describe("candidate listing and shortlist boundaries", () => {
         });
       } else {
         expect(firstQuery.values).toContain("match_tier");
+        expect(firstQuery.sql).toContain('(rank_scope."pageId" IS NOT NULL AND');
         expect(firstQuery.sql).toContain(
-          "(rank_scope.\"pageId\" IS NOT NULL AND returned.value ? 'rank')",
+          "(returned.value ? 'rank' OR returned.value ? 'batch_rank')",
         );
         expect(f.tx.recruitingCandidatePage.findMany).not.toHaveBeenCalled();
       }
@@ -420,8 +453,9 @@ describe("candidate listing and shortlist boundaries", () => {
           values: unknown[];
         };
         expect(multiplePages.sql).toContain('CASE WHEN count(*) = 1 THEN min("effectId") END');
+        expect(multiplePages.sql).toContain('(rank_scope."pageId" IS NOT NULL AND');
         expect(multiplePages.sql).toContain(
-          "(rank_scope.\"pageId\" IS NOT NULL AND returned.value ? 'rank')",
+          "(returned.value ? 'rank' OR returned.value ? 'batch_rank')",
         );
         expect(multiplePages.sql).toContain("WHEN returned.value ? 'overall_rank'");
         expect(multiplePages.sql).toContain("THEN returned.value -> 'updated_rank'");

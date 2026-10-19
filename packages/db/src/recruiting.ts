@@ -5738,7 +5738,8 @@ function candidateIndexQuery(
   const rankCell = Prisma.sql`CASE WHEN returned.value ? 'updated_rank'
         THEN returned.value -> 'updated_rank'
         WHEN returned.value ? 'overall_rank' THEN returned.value -> 'overall_rank'
-        ELSE returned.value -> 'rank' END`;
+        WHEN returned.value ? 'rank' THEN returned.value -> 'rank'
+        ELSE returned.value -> 'batch_rank' END`;
   const matchValue = Prisma.sql`CASE WHEN source.kind = 'rank' THEN
       CASE WHEN jsonb_typeof(match."value") = 'number' THEN
         CASE WHEN (match."value" #>> '{}')::numeric BETWEEN 1 AND 9007199254740991
@@ -5785,7 +5786,8 @@ function candidateIndexQuery(
       ('rank', ${rankCell},
         (rank_scope."pageId" IS NULL OR page."effectId" = rank_scope."pageId") AND
         (returned.value ? 'updated_rank' OR returned.value ? 'overall_rank' OR
-          (rank_scope."pageId" IS NOT NULL AND returned.value ? 'rank'))),
+          (rank_scope."pageId" IS NOT NULL AND
+            (returned.value ? 'rank' OR returned.value ? 'batch_rank')))),
       ('tier', returned.value -> ${"match_tier"}, returned.value ? ${"match_tier"})
     ) source(kind, cell, present)
     CROSS JOIN LATERAL (SELECT CASE WHEN jsonb_typeof(source.cell) = 'object' AND source.cell ? 'value'
@@ -7051,6 +7053,8 @@ export async function listRecruitingCandidates(
         roleId: role.id,
         roleRevisionId: role.currentRevisionId,
         sort,
+        // Reject old cursors that treated saved batch-only ranks as unranked.
+        ...(sort === "rank" ? { rankProjection: 2 } : {}),
         ...(input.sourceEffectId === undefined && rankDomainPageId !== undefined
           ? { rankDomainPageId }
           : {}),
