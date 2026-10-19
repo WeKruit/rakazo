@@ -90,7 +90,7 @@ export function normalizeRecruitingCandidateRow(
       if (/(^|\.)linkedin\.com\.?$/.test(url.hostname)) {
         const identity = !url.port ? recruitingCalibrationIdentity(url.href) : null;
         if (identity) candidateKey = `linkedin:${identity}`;
-      } else candidateKey = `profile:${url.href}`;
+      }
     }
   }
   if (typeof values.resume_url === "string" && !webUrl(values.resume_url)) {

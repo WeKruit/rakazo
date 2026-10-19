@@ -3603,8 +3603,7 @@ describe("native candidate results without domain actions", () => {
     expect(f.tx.recruitingResearchAction.update).not.toHaveBeenCalled();
   });
 
-  it("persists explicit profile keys and distinct unknown rows across native source pages", async () => {
-    const candidateKey = "profile:https://portfolio.example.test/avery";
+  it("keeps people sharing an article distinct across native source pages", async () => {
     for (const [effectId, cursor] of [
       ["first-read", null],
       ["followup-read", "next-page"],
@@ -3613,8 +3612,10 @@ describe("native candidate results without domain actions", () => {
       const row = {
         ...f.row,
         linkedin_url: null,
-        profile_url: { value: "https://portfolio.example.test/avery", source_id: effectId },
+        profile_url: { value: "https://example.test/interviews/two-people", source_id: effectId },
       };
+      const rows = [row, { ...row, name: "Another Example" }, null];
+      const before = JSON.stringify(rows);
       Object.assign(f.effect, {
         id: effectId,
         request: boundDirectApprovalRequest(
@@ -3627,7 +3628,7 @@ describe("native candidate results without domain actions", () => {
           { task_id: "provider-task", cursor },
           "__rakazoCatalogTool",
         ),
-        result: { structuredContent: { rows: [row, null] } },
+        result: { structuredContent: { rows } },
       });
       Object.assign(f.input, { cursor });
       const bytes = Buffer.from(
@@ -3643,18 +3644,22 @@ describe("native candidate results without domain actions", () => {
         actor,
         f.trusted,
         f.input,
-        { sourceEffectId: effectId, rows: [row, null], outputArtifact: f.file },
+        { sourceEffectId: effectId, rows, outputArtifact: f.file },
       );
-      const unknownKey = `source-row:${effectId}:1`;
+      const candidateKey = `source-row:${effectId}:0`;
+      const otherKey = `source-row:${effectId}:1`;
+      const unknownKey = `source-row:${effectId}:2`;
       expect(result).toMatchObject({
         candidateRows: [
           { rowIndex: 0, candidateKey },
-          { rowIndex: 1, candidateKey: unknownKey },
+          { rowIndex: 1, candidateKey: otherKey },
+          { rowIndex: 2, candidateKey: unknownKey },
         ],
       });
       expect(f.tx.recruitingCandidate.createMany).toHaveBeenCalledWith({
         data: [
           { roleId: "role", candidateKey },
+          { roleId: "role", candidateKey: otherKey },
           { roleId: "role", candidateKey: unknownKey },
         ],
         skipDuplicates: true,
@@ -3662,9 +3667,11 @@ describe("native candidate results without domain actions", () => {
       expect(f.tx.recruitingCandidateOccurrence.createMany).toHaveBeenCalledWith({
         data: [
           expect.objectContaining({ pageId: effectId, rowIndex: 0, candidateKey }),
-          expect.objectContaining({ pageId: effectId, rowIndex: 1, candidateKey: unknownKey }),
+          expect.objectContaining({ pageId: effectId, rowIndex: 1, candidateKey: otherKey }),
+          expect.objectContaining({ pageId: effectId, rowIndex: 2, candidateKey: unknownKey }),
         ],
       });
+      expect(JSON.stringify(rows)).toBe(before);
     }
   });
 

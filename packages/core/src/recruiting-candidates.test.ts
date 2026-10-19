@@ -55,8 +55,26 @@ describe("canonical recruiting candidate output", () => {
     ).toEqual(["linkedin:/in/synthetic-engineer", "linkedin:/in/synthetic-engineer"]);
   });
 
-  it("keeps the declared profile key across evaluation changes without inventing LinkedIn", () => {
-    const profileUrl = "https://Profiles.Example.test/People/Example?View=Full#About";
+  it("does not infer person identity from two people sharing an article", () => {
+    const rows = ["Example One", "Example Two"].map((name) =>
+      Object.freeze({
+        ...candidate,
+        name,
+        linkedin_url: null,
+        profile_url: Object.freeze({
+          value: "https://example.test/interviews/two-people",
+          source_id: "article",
+        }),
+      }),
+    );
+    const before = JSON.stringify(rows);
+    expect(rows.map((row) => normalize(row).candidateKey)).toEqual([null, null]);
+    expect(rows.map((row) => normalize(row).name)).toEqual(["Example One", "Example Two"]);
+    expect(JSON.stringify(rows)).toBe(before);
+  });
+
+  it("keeps the LinkedIn profile key across evaluation changes without changing projected fields", () => {
+    const profileUrl = "https://www.linkedin.com/in/Synthetic-Engineer/?trk=example#about";
     const first = Object.freeze({
       ...candidate,
       linkedin_url: null,
@@ -69,15 +87,13 @@ describe("canonical recruiting candidate output", () => {
       fit_reasons: "Updated provider observation",
     });
     const before = JSON.stringify([first, second]);
-    expect(normalize(first).candidateKey).toBe(
-      "profile:https://profiles.example.test/People/Example?View=Full#About",
-    );
+    expect(normalize(first).candidateKey).toBe("linkedin:/in/synthetic-engineer");
     expect(normalize(second).candidateKey).toBe(normalize(first).candidateKey);
     expect(normalize(first).linkedinUrl).toBeNull();
     expect(JSON.stringify([first, second])).toBe(before);
   });
 
-  it("keeps distinct declared profile URLs distinct and never merges on name or provenance", () => {
+  it("does not infer person identity from generic URLs, name or provenance", () => {
     const urls = [
       "http://profiles.example.test/People/Example?View=Full#About",
       "https://profiles.example.test/People/Example?View=Full#About",
@@ -93,14 +109,13 @@ describe("canonical recruiting candidate output", () => {
           profile_url: { value, source_id: "same-cell" },
         }).candidateKey,
     );
-    expect(keys).toEqual(urls.map((url) => `profile:${url}`));
-    expect(new Set(keys).size).toBe(urls.length);
+    expect(keys).toEqual(urls.map(() => null));
     expect(
       normalize({ ...candidate, linkedin_url: null, source_id: "same-cell" }).candidateKey,
     ).toBeNull();
   });
 
-  it("only reads an own, valid HTTP profile URL or native sourced value", () => {
+  it("does not infer person identity from invalid or inherited profile fields", () => {
     for (const profile_url of [
       null,
       undefined,
