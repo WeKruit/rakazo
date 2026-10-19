@@ -1258,6 +1258,85 @@ it("omits unused internal assessment controls without applying stored diagnostic
   });
 });
 
+it.each([false, true])(
+  "loads candidates while auxiliary reads hang and rechecks the thread binding (changed: %s)",
+  async (changed) => {
+    const pending = new Promise<never>(() => {});
+    api.listAssessments.mockReturnValue(pending);
+    api.listResearch.mockReturnValue(pending);
+    api.listQuestions.mockReturnValue(pending);
+    api.list.mockReturnValue(pending);
+    const candidate = {
+      ...candidateFixture("candidate-before-rebind", false),
+      name: "Before rebind",
+    };
+    const next = {
+      role: { ...role, id: "role-next", title: "Next role", currentRevisionId: "revision-next" },
+      revision: { ...revision, id: "revision-next", roleId: "role-next" },
+    };
+    let finishVerification!: (value: {
+      role: RecruitingRole;
+      revision: RecruitingRoleRevision;
+    }) => void;
+    api.getWorkspace
+      .mockResolvedValueOnce({ role, revision })
+      .mockImplementationOnce(
+        () =>
+          new Promise((resolve) => {
+            finishVerification = resolve;
+          }),
+      )
+      .mockResolvedValue(changed ? next : { role, revision });
+    api.listCandidates.mockImplementation(async ({ roleId }: { roleId: string }) =>
+      roleId === role.id
+        ? candidatePage([candidate])
+        : { ...candidatePage([]), roleId: next.role.id, roleRevisionId: next.revision.id },
+    );
+    const view = await mounted();
+    expect(api.listCandidates).toHaveBeenCalled();
+    expect(api.getWorkspace).toHaveBeenCalledTimes(2);
+    await view.click("Evidence");
+    expect(view.container.textContent).not.toContain(candidate.name);
+    await act(async () => finishVerification(changed ? next : { role, revision }));
+    if (changed) {
+      expect(view.container.textContent).not.toContain(candidate.name);
+      await view.click("Role");
+      expect(view.container.textContent).toContain(next.role.title);
+    } else {
+      expect(view.container.textContent).toContain(candidate.name);
+      await view.click("Memory");
+      expect(view.container.textContent).toContain("Loading…");
+      expect(view.container.textContent).not.toContain("No saved memory in these scopes");
+      api.listCandidates.mockResolvedValue(
+        candidatePage([{ ...candidate, name: "After refresh" }]),
+      );
+      await view.click("Refresh");
+      await view.click("Evidence");
+      expect(view.container.textContent).toContain("After refresh");
+      expect(api.listCandidates).toHaveBeenCalledTimes(2);
+    }
+  },
+);
+
+it("keeps the candidate page when empty auxiliary assessments finish without changing filters", async () => {
+  let finish!: (value: RecruitingAssessmentSnapshot[]) => void;
+  api.listAssessments.mockReturnValueOnce(
+    new Promise((resolve) => {
+      finish = resolve;
+    }),
+  );
+  const candidate = { ...candidateFixture("saved-candidate", false), name: "Saved candidate" };
+  api.listCandidates.mockResolvedValue(candidatePage([candidate]));
+  const view = await mounted("thread-1", undefined, false);
+  await view.click("Evidence");
+  expect(view.container.textContent).toContain(candidate.name);
+  expect(api.listCandidates).toHaveBeenCalledTimes(1);
+  await act(async () => finish([]));
+  expect(view.container.textContent).toContain(candidate.name);
+  expect(api.listCandidates).toHaveBeenCalledTimes(1);
+  expect(view.container.querySelector('select[aria-label="Internal assessment"]')).toBeNull();
+});
+
 it("keeps a pending or failed assessment read distinct from an empty assessment list", async () => {
   let fail!: (error: Error) => void;
   api.listAssessments.mockImplementationOnce(
@@ -1266,12 +1345,14 @@ it("keeps a pending or failed assessment read distinct from an empty assessment 
         fail = reject;
       }),
   );
+  api.listCandidates.mockResolvedValue(candidatePage());
   const view = await mounted("thread-1", undefined, false);
+  await view.click("Missing info");
   expect(view.container.textContent).toContain("Loading…");
-  expect(api.listCandidates).not.toHaveBeenCalled();
+  expect(api.listCandidates).toHaveBeenCalledTimes(1);
   await act(async () => fail(new Error("Assessment read failed")));
   expect(view.container.textContent).toContain("Could not load recruiting");
-  expect(api.listCandidates).not.toHaveBeenCalled();
+  expect(api.listCandidates).toHaveBeenCalledTimes(1);
 
   await view.render("thread-1", 1);
   await view.click("Evidence");
@@ -5202,7 +5283,7 @@ it("restores only the native panel preference and still performs reads only", as
   expect(api.list).toHaveBeenCalledWith({ scope: "bot", botId: "bot-1" });
   for (const name of ["Evidence", "Missing info", "Memory", "Activity", "Role"])
     await view.click(name);
-  expect(api.getWorkspace).toHaveBeenCalledTimes(2);
+  expect(api.getWorkspace).toHaveBeenCalledTimes(3);
   for (const method of [api.createRole, api.bindRole, api.reviseRole, api.update, api.search])
     expect(method).not.toHaveBeenCalled();
   expect(localStorage.getItem("layout")).toBe('{"panel":"recruiting"}');

@@ -1752,6 +1752,9 @@ function RecruitingWorkspace({
   const { t } = useLingui();
   const shortlistFilterId = useId();
   const [snapshot, setSnapshot] = useState<Snapshot | null>(null);
+  const [workspaceSnapshot, setWorkspaceSnapshot] = useState<Pick<Snapshot, "workspace"> | null>(
+    null,
+  );
   const [refresh, setRefresh] = useState(0);
   const [feedbackRefresh, setFeedbackRefresh] = useState(0);
   const [loading, setLoading] = useState(true);
@@ -1811,6 +1814,7 @@ function RecruitingWorkspace({
     readEpoch.current++;
     candidateGeneration.current++;
     setSnapshot(null);
+    setWorkspaceSnapshot(null);
     setCandidatePage(null);
     setSelection(null);
     setCandidateList((current) => ({ ...current, selectedCandidateKey: null, detailOpen: false }));
@@ -1872,7 +1876,7 @@ function RecruitingWorkspace({
     async function load() {
       try {
         let workspace = await rpc.recruiting.getWorkspace({ threadId }).catch(onReadError);
-        while (!cancelled) {
+        while (!cancelled && epoch === readEpoch.current) {
           updateEditScope(workspace);
           setSnapshot((current) =>
             current?.workspace?.role.id !== workspace?.role.id ||
@@ -1880,6 +1884,7 @@ function RecruitingWorkspace({
               ? null
               : current,
           );
+          setWorkspaceSnapshot({ workspace });
           const [assessments, research, questions, documents] = await Promise.all([
             workspace
               ? rpc.recruiting.listAssessments({ roleId: workspace.role.id }).catch(onReadError)
@@ -1927,7 +1932,7 @@ function RecruitingWorkspace({
       cancelled = true;
     };
   }, [userId, threadId, botId, refresh, refreshSignal, denyAccess]);
-  const workspace = snapshot?.workspace;
+  const workspace = workspaceSnapshot?.workspace;
   const criteria = workspace?.revision.criteria ?? [];
   const brief = workspace?.revision.brief;
   const briefClarifications = brief ? recruitingBriefClarifications(brief) : [];
@@ -1967,7 +1972,11 @@ function RecruitingWorkspace({
   const assessments = snapshot?.assessments ?? [];
   const showInternalAssessments = showDiagnostics || !snapshot || assessments.length > 0;
   const candidateRequestFilters = useMemo(() => {
-    if (showInternalAssessments) return candidateFilters;
+    if (
+      showInternalAssessments ||
+      (candidateFilters.assessmentState === undefined && candidateFilters.verdict === undefined)
+    )
+      return candidateFilters;
     const { assessmentState: _, verdict: __, ...filters } = candidateFilters;
     return filters;
   }, [candidateFilters, showInternalAssessments]);
@@ -2081,6 +2090,12 @@ function RecruitingWorkspace({
         page = { ...next, items: page.items.concat(next.items) };
         pageCount++;
       }
+      const verified = await rpc.recruiting.getWorkspace({ threadId });
+      if (!isCurrent()) return;
+      if (verified?.role.id !== roleId || verified?.revision.id !== roleRevisionId) {
+        setRefresh((value) => value + 1);
+        return;
+      }
       setCandidatePage(page);
       setCandidateList((current) => ({ ...current, pageCount }));
       const selectedCandidateKey = candidateQuery.current.selectedCandidateKey;
@@ -2138,7 +2153,8 @@ function RecruitingWorkspace({
     roleId,
     roleRevisionId,
     candidateRequestFilters,
-    snapshot,
+    workspaceSnapshot,
+    threadId,
     denyAccess,
     resetUnavailableCandidateSort,
   ]);
@@ -2390,7 +2406,7 @@ function RecruitingWorkspace({
             variant="ghost"
             size="icon-sm"
             aria-label={t`Refresh`}
-            disabled={loading}
+            disabled={candidateLoading || (loading && !workspaceSnapshot)}
             onClick={() => setRefresh((value) => value + 1)}
           >
             <RefreshCw size={16} aria-hidden />
@@ -2405,14 +2421,16 @@ function RecruitingWorkspace({
           <Trans>Could not load recruiting</Trans>
         </p>
       ) : null}
-      {loading ? (
+      {loading &&
+      (!workspaceSnapshot ||
+        ["dashboard", "missing", "memory", "activity"].includes(candidateList.tab)) ? (
         <div role="status" className="text-muted-foreground">
           <Shimmer>
             <Trans>Loading…</Trans>
           </Shimmer>
         </div>
       ) : null}
-      {snapshot ? (
+      {workspaceSnapshot ? (
         <Tabs
           value={candidateList.tab}
           onValueChange={(tab) =>
@@ -2461,17 +2479,19 @@ function RecruitingWorkspace({
             <h3 className="font-medium">
               <Trans>Research history</Trans>
             </h3>
-            {!snapshot.research.tasks.length && !snapshot.research.observations.length ? (
+            {snapshot &&
+            !snapshot.research.tasks.length &&
+            !snapshot.research.observations.length ? (
               <p className="text-muted-foreground">
                 <Trans>No saved research</Trans>
               </p>
             ) : (
-              snapshot.research.tasks.map((task, index) => (
+              snapshot?.research.tasks.map((task, index) => (
                 <div key={task.id} className="space-y-2 border-s border-border ps-3">
                   <p>
                     {showDiagnostics ? task.id : <Trans>Search {index + 1}</Trans>} · {task.state}
                   </p>
-                  {snapshot.research.actions
+                  {snapshot?.research.actions
                     .filter((action) => action.taskId === task.id)
                     .map((action) => (
                       <div key={action.id} className="space-y-1">
@@ -2509,9 +2529,9 @@ function RecruitingWorkspace({
                 </div>
               ))
             )}
-            {snapshot.research.observations.length ? (
+            {snapshot?.research.observations.length ? (
               <ul aria-label={t`Saved research results`} className="space-y-3">
-                {snapshot.research.observations.map((observation) => (
+                {snapshot?.research.observations.map((observation) => (
                   <li key={observation.effectId} className="space-y-1 border-s border-border ps-3">
                     <p>
                       {observation.rowCount === null ? (
@@ -3090,8 +3110,8 @@ function RecruitingWorkspace({
             {workspace ? (
               <>
                 {showDiagnostics
-                  ? snapshot.research.tasks.flatMap((task) =>
-                      snapshot.research.actions
+                  ? snapshot?.research.tasks.flatMap((task) =>
+                      snapshot?.research.actions
                         .filter(
                           (action) => action.taskId === task.id && action.outputArtifacts.length,
                         )
@@ -3210,6 +3230,7 @@ function RecruitingWorkspace({
                   ) : null}
                   <NativeSelect
                     aria-label={t`Research round`}
+                    disabled={!snapshot}
                     value={
                       candidateFilters.sourceEffectId
                         ? `source:${candidateFilters.sourceEffectId}`
@@ -3229,7 +3250,7 @@ function RecruitingWorkspace({
                     <NativeSelectOption value="all">
                       <Trans>All rounds</Trans>
                     </NativeSelectOption>
-                    {snapshot.research.actions.map((action, index) => (
+                    {snapshot?.research.actions.map((action, index) => (
                       <NativeSelectOption key={`action:${action.id}`} value={`action:${action.id}`}>
                         {showDiagnostics ? (
                           <>
@@ -3240,7 +3261,7 @@ function RecruitingWorkspace({
                         )}
                       </NativeSelectOption>
                     ))}
-                    {snapshot.research.observations.map((observation) => (
+                    {snapshot?.research.observations.map((observation) => (
                       <NativeSelectOption
                         key={`source:${observation.effectId}`}
                         value={`source:${observation.effectId}`}
@@ -3523,7 +3544,7 @@ function RecruitingWorkspace({
             )}
           </TabsContent>
           <TabsContent value="missing" className="space-y-5">
-            {snapshot.questions.map((question) => {
+            {snapshot?.questions.map((question) => {
               const candidateKey =
                 question.target.kind === "candidate" ? question.target.candidateKey : null;
               const target = question.groupId
@@ -3627,7 +3648,7 @@ function RecruitingWorkspace({
                   </p>
                 </>
               ) : null}
-              {!roleQuestions.length && !unphrasedBriefFields.length ? (
+              {snapshot && !roleQuestions.length && !unphrasedBriefFields.length ? (
                 <p className="text-muted-foreground">
                   <Trans>No saved questions</Trans>
                 </p>
@@ -3637,7 +3658,7 @@ function RecruitingWorkspace({
               <h3 className="font-medium">
                 <Trans>Candidate facts</Trans>
               </h3>
-              {!assessments.length ? (
+              {!snapshot ? null : !assessments.length ? (
                 <p className="text-muted-foreground">
                   <Trans>No saved assessments</Trans>
                 </p>
@@ -3675,12 +3696,12 @@ function RecruitingWorkspace({
                 </p>
               ) : null}
             </div>
-            {!snapshot.documents.length ? (
+            {snapshot?.documents.length === 0 ? (
               <p className="text-muted-foreground">
                 <Trans>No saved memory in these scopes</Trans>
               </p>
             ) : (
-              snapshot.documents.map((document) => (
+              snapshot?.documents.map((document) => (
                 <MemoryDocumentView
                   key={`${document.id}:${document.revision}`}
                   document={document}
@@ -3698,16 +3719,16 @@ function RecruitingWorkspace({
                 onAccessError={denyAccess}
               />
             ) : null}
-            {!snapshot.research.tasks.length ? (
+            {snapshot?.research.tasks.length === 0 ? (
               <p className="text-muted-foreground">
-                {snapshot.research.observations.length ? (
+                {snapshot?.research.observations.length ? (
                   <Trans>Results saved</Trans>
                 ) : (
                   <Trans>No research activity</Trans>
                 )}
               </p>
             ) : (
-              snapshot.research.tasks.map((task, index) => (
+              snapshot?.research.tasks.map((task, index) => (
                 <div key={task.id} className="space-y-3">
                   <div>
                     <h3 className="font-medium">
@@ -3718,7 +3739,7 @@ function RecruitingWorkspace({
                       {showDiagnostics && task.providerTaskId ? `· ${task.providerTaskId}` : ""}
                     </p>
                   </div>
-                  {snapshot.research.actions
+                  {snapshot?.research.actions
                     .filter((action) => action.taskId === task.id)
                     .map((action) => (
                       <div key={action.id} className="space-y-2 border-s border-border ps-3">
