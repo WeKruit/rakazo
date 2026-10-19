@@ -46,6 +46,7 @@ const EXPLICIT_APPROVAL_BUILTIN_TOOLS = new Set([
 const EXPLICIT_APPROVAL_MCP_OPERATIONS = new Set([
   "crm_import_candidate",
   "crm_update_candidate_stage",
+  "crm_append_candidate_note",
   "reply_to_email",
   "create_lead",
   "add_leads_to_campaign_or_list_bulk",

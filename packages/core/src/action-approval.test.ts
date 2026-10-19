@@ -50,6 +50,7 @@ describe("toolRequiresApproval", () => {
 
   it.each([
     "crm_update_candidate_stage",
+    "crm_append_candidate_note",
     "reply_to_email",
     "create_lead",
     "add_leads_to_campaign_or_list_bulk",
