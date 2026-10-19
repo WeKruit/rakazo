@@ -1118,6 +1118,7 @@ export const RecruitingCandidateSchema = z.strictObject({
 });
 export type RecruitingCandidate = z.infer<typeof RecruitingCandidateSchema>;
 export const ListRecruitingCandidatesOutput = z.strictObject({
+  sortAvailability: z.strictObject({ rank: z.boolean(), tier: z.boolean() }),
   crmTarget: z
     .strictObject({ bindingEffectId: RecruitingId, target: RecruitingCrmTargetSchema })
     .nullable(),

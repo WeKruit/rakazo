@@ -1744,6 +1744,8 @@ function RecruitingWorkspace({
   function setCandidateFilters(
     update: (current: RecruitingPanelState["filters"]) => RecruitingPanelState["filters"],
   ) {
+    candidateGeneration.current++;
+    setCandidatePage(null);
     setCandidateList((current) => ({ ...current, filters: update(current.filters), pageCount: 1 }));
   }
   function setCandidateDetailOpen(detailOpen: boolean) {
@@ -1965,7 +1967,28 @@ function RecruitingWorkspace({
     ? (selectedCrm?.target ?? candidatePage?.crmTarget?.target)
     : undefined;
   const candidateQuery = useRef({ ...candidateList, roleRevisionId, selection });
-  candidateQuery.current = { ...candidateList, roleRevisionId, selection };
+  candidateQuery.current = {
+    ...candidateList,
+    filters: candidateRequestFilters,
+    roleRevisionId,
+    selection,
+  };
+  const resetUnavailableCandidateSort = useCallback(
+    (page: ListRecruitingCandidatesOutput, filters: RecruitingPanelState["filters"]) => {
+      const sort = filters.sort ?? "rank";
+      if ((sort === "rank" || sort === "tier") && !page.sortAvailability[sort]) {
+        setCandidatePage(null);
+        setCandidateList((current) => ({
+          ...current,
+          filters: { ...current.filters, sort: "name" },
+          pageCount: 1,
+        }));
+        return true;
+      }
+      return false;
+    },
+    [],
+  );
   useEffect(() => {
     let cancelled = false;
     const generation = ++candidateGeneration.current;
@@ -1989,6 +2012,7 @@ function RecruitingWorkspace({
         setRefresh((value) => value + 1);
         return;
       }
+      if (resetUnavailableCandidateSort(page, candidateRequestFilters)) return;
       let pageCount = 1;
       // ponytail: replay only the saved page depth with fresh cursors; never cache candidate records.
       for (let index = 1; index < query.pageCount && page.nextCursor; index++) {
@@ -2008,6 +2032,7 @@ function RecruitingWorkspace({
           setRefresh((value) => value + 1);
           return;
         }
+        if (resetUnavailableCandidateSort(next, candidateRequestFilters)) return;
         page = { ...next, items: page.items.concat(next.items) };
         pageCount++;
       }
@@ -2053,7 +2078,14 @@ function RecruitingWorkspace({
     return () => {
       cancelled = true;
     };
-  }, [roleId, roleRevisionId, candidateRequestFilters, snapshot, denyAccess]);
+  }, [
+    roleId,
+    roleRevisionId,
+    candidateRequestFilters,
+    snapshot,
+    denyAccess,
+    resetUnavailableCandidateSort,
+  ]);
   useEffect(() => {
     let cancelled = false;
     const epoch = readEpoch.current;
@@ -2120,6 +2152,7 @@ function RecruitingWorkspace({
         setRefresh((value) => value + 1);
         return;
       }
+      if (resetUnavailableCandidateSort(page, candidateRequestFilters)) return;
       setCandidatePage((current) =>
         current ? { ...page, items: current.items.concat(page.items) } : page,
       );
@@ -2192,7 +2225,7 @@ function RecruitingWorkspace({
         if (isCurrent() && generation === candidateGeneration.current) {
           if (page.roleId !== candidate.roleId || page.roleRevisionId !== query.roleRevisionId)
             setRefresh((value) => value + 1);
-          else {
+          else if (!resetUnavailableCandidateSort(page, query.filters)) {
             setCandidatePage(page);
             setCandidateList((current) => ({ ...current, pageCount: 1 }));
             setCandidateFailed(false);
@@ -3084,29 +3117,35 @@ function RecruitingWorkspace({
                       </NativeSelect>
                     </>
                   ) : null}
-                  <NativeSelect
-                    aria-label={t`Candidate sort`}
-                    value={candidateFilters.sort ?? "rank"}
-                    onChange={(event) =>
-                      setCandidateFilters((current) => ({
-                        ...current,
-                        sort: event.target.value as ListRecruitingCandidatesInput["sort"],
-                      }))
-                    }
-                  >
-                    <NativeSelectOption value="rank">
-                      <Trans>Autumn rank</Trans>
-                    </NativeSelectOption>
-                    <NativeSelectOption value="tier">
-                      <Trans>Match tier</Trans>
-                    </NativeSelectOption>
-                    <NativeSelectOption value="name">
-                      <Trans>Name</Trans>
-                    </NativeSelectOption>
-                    <NativeSelectOption value="recent">
-                      <Trans>Recently discovered</Trans>
-                    </NativeSelectOption>
-                  </NativeSelect>
+                  {candidatePage ? (
+                    <NativeSelect
+                      aria-label={t`Candidate sort`}
+                      value={candidateFilters.sort ?? "rank"}
+                      onChange={(event) =>
+                        setCandidateFilters((current) => ({
+                          ...current,
+                          sort: event.target.value as ListRecruitingCandidatesInput["sort"],
+                        }))
+                      }
+                    >
+                      {candidatePage.sortAvailability.rank ? (
+                        <NativeSelectOption value="rank">
+                          <Trans>Autumn rank</Trans>
+                        </NativeSelectOption>
+                      ) : null}
+                      {candidatePage.sortAvailability.tier ? (
+                        <NativeSelectOption value="tier">
+                          <Trans>Match tier</Trans>
+                        </NativeSelectOption>
+                      ) : null}
+                      <NativeSelectOption value="name">
+                        <Trans>Name</Trans>
+                      </NativeSelectOption>
+                      <NativeSelectOption value="recent">
+                        <Trans>Recently discovered</Trans>
+                      </NativeSelectOption>
+                    </NativeSelect>
+                  ) : null}
                   <NativeSelect
                     aria-label={t`Research round`}
                     value={

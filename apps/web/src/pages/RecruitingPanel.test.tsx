@@ -324,6 +324,7 @@ function crmSync(status: RecruitingCrmCandidateSync["status"]): RecruitingCrmCan
 }
 function candidatePage(items = [candidateFixture()]) {
   return {
+    sortAvailability: { rank: true, tier: true },
     roleId: role.id,
     roleRevisionId: revision.id,
     crmTarget: null as { bindingEffectId: string; target: RecruitingCrmTarget } | null,
@@ -1857,6 +1858,71 @@ it("offers native Autumn rank and tier ordering while preserving candidate filte
       sort,
     });
   }
+});
+
+it.each(["rank", "tier"])(
+  "normalizes a saved unavailable %s sort to Name from the authoritative scope signal",
+  async (sort) => {
+    api.listCandidates.mockResolvedValue({
+      ...candidatePage(),
+      sortAvailability: { rank: true, tier: true },
+    });
+    const saved = await mounted("thread-1", undefined, false);
+    await saved.click("Evidence");
+    await changeSelect(saved.container, "Candidate sort", sort);
+    await cleanup?.();
+    const person = { ...candidateFixture("unranked", false), name: "Synthetic Avery" };
+    api.listCandidates.mockClear().mockResolvedValue({
+      ...candidatePage([person]),
+      sortAvailability: { rank: false, tier: false },
+    });
+    const view = await mounted("thread-1", undefined, false);
+    const select = view.container.querySelector<HTMLSelectElement>(
+      'select[aria-label="Candidate sort"]',
+    )!;
+    expect([...select.options].map((option) => option.textContent)).toEqual([
+      "Name",
+      "Recently discovered",
+    ]);
+    expect(select.value).toBe("name");
+    expect(api.listCandidates).toHaveBeenLastCalledWith({
+      roleId: role.id,
+      limit: 30,
+      sort: "name",
+    });
+    expect(view.container.textContent).toContain("Score / tier not returned");
+    expect(view.container.textContent).toContain(person.name);
+  },
+);
+
+it("ignores sort availability from a late previous search scope", async () => {
+  let finish!: (page: ReturnType<typeof candidatePage>) => void;
+  api.listCandidates.mockImplementation(({ query }) =>
+    query === "Previous"
+      ? new Promise((resolve) => {
+          finish = resolve;
+        })
+      : Promise.resolve(candidatePage()),
+  );
+  const view = await mounted("thread-1", undefined, false);
+  await view.click("Evidence");
+  await changeSelect(view.container, "Candidate sort", "tier");
+  await changeInput(view.container, "Search candidates", "Previous");
+  expect(view.container.querySelector('select[aria-label="Candidate sort"]')).toBeNull();
+  await changeInput(view.container, "Search candidates", "Current");
+  await act(async () =>
+    finish({ ...candidatePage(), sortAvailability: { rank: false, tier: false } }),
+  );
+  expect(view.container.querySelector('select[aria-label="Candidate sort"]')).toHaveProperty(
+    "value",
+    "tier",
+  );
+  expect(api.listCandidates).toHaveBeenLastCalledWith({
+    roleId: role.id,
+    limit: 30,
+    query: "Current",
+    sort: "tier",
+  });
 });
 
 it("requests server pages and filters while keeping selected evidence outside the visible page", async () => {

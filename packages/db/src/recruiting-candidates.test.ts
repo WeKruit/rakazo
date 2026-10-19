@@ -112,6 +112,8 @@ describe("candidate listing and shortlist boundaries", () => {
       f.tx.$queryRaw.mockResolvedValueOnce([
         {
           total: 19n,
+          rankAvailable: false,
+          tierAvailable: false,
           sourceRows: 30n,
           candidates: 20n,
           identifiedCandidates: 4n,
@@ -129,6 +131,14 @@ describe("candidate listing and shortlist boundaries", () => {
         sourceEffectId: "native-read",
       });
       expect(page.total).toBe(19);
+      expect(page).toHaveProperty("sortAvailability", { rank: false, tier: false });
+      const totalsQuery = f.tx.$queryRaw.mock.calls[0]![0] as {
+        sql: string;
+        values: unknown[];
+      };
+      expect(totalsQuery.sql).toContain('bool_or("rankValue" IS NOT NULL), false) FROM filtered');
+      expect(totalsQuery.sql).toContain('bool_or("tierValue" IS NOT NULL), false) FROM filtered');
+      expect(totalsQuery.values).not.toContain(2);
       expect(page.counts).toEqual({
         sourceRows: 30,
         candidates: 20,
@@ -187,6 +197,8 @@ describe("candidate listing and shortlist boundaries", () => {
       .mockResolvedValueOnce([
         {
           total: 0n,
+          rankAvailable: false,
+          tierAvailable: false,
           sourceRows: 0n,
           candidates: 0n,
           identifiedCandidates: 0n,
@@ -205,7 +217,7 @@ describe("candidate listing and shortlist boundaries", () => {
     expect(query.sql).toContain("CASE WHEN returned.value ? 'updated_rank'");
     expect(query.sql).toContain("WHEN returned.value ? 'overall_rank'");
     expect(query.sql).toContain("ELSE returned.value -> 'rank' END");
-    expect(query.sql).toContain('AND page."effectId" =');
+    expect(query.sql).toContain('page."effectId" = rank_scope."pageId"');
     expect(query.values.filter((value) => value === "selected-result")).toHaveLength(2);
     expect(f.tx.recruitingCandidatePage.findMany).not.toHaveBeenCalled();
   });
@@ -243,6 +255,8 @@ describe("candidate listing and shortlist boundaries", () => {
         .mockResolvedValueOnce([
           {
             total: 0n,
+            rankAvailable: false,
+            tierAvailable: false,
             sourceRows: 0n,
             candidates: 0n,
             identifiedCandidates: 0n,
@@ -296,6 +310,8 @@ describe("candidate listing and shortlist boundaries", () => {
       const counts = [
         {
           total: 3n,
+          rankAvailable: true,
+          tierAvailable: true,
           sourceRows: 3n,
           candidates: 3n,
           identifiedCandidates: 0n,
@@ -313,6 +329,7 @@ describe("candidate listing and shortlist boundaries", () => {
         limit: 1,
       });
       expect(first.items[0]?.candidateKey).toBe("a");
+      expect(first.sortAvailability).toEqual({ rank: true, tier: true });
       expect(first.items[0]).not.toHaveProperty("matchValue");
       const firstQuery = f.tx.$queryRaw.mock.lastCall![0] as { sql: string; values: unknown[] };
       expect(firstQuery.sql).toContain(
@@ -329,10 +346,12 @@ describe("candidate listing and shortlist boundaries", () => {
         });
       } else {
         expect(firstQuery.values).toContain("match_tier");
-        expect(firstQuery.sql).not.toContain("ELSE returned.value -> 'rank' END");
+        expect(firstQuery.sql).toContain(
+          "(rank_scope.\"pageId\" IS NOT NULL AND returned.value ? 'rank')",
+        );
         expect(f.tx.recruitingCandidatePage.findMany).not.toHaveBeenCalled();
       }
-      expect(firstQuery.sql).toContain('SELECT match."pageId"');
+      expect(firstQuery.sql).toContain(`SELECT match."${sort === "rank" ? "rank" : "tier"}PageId"`);
       const decoded = JSON.parse(Buffer.from(first.nextCursor!, "base64url").toString("utf8"));
       for (const value of [
         "-1",
@@ -361,6 +380,7 @@ describe("candidate listing and shortlist boundaries", () => {
         limit: 1,
         cursor: first.nextCursor!,
       });
+      expect(unknown.sortAvailability).toEqual({ rank: true, tier: true });
       const nextQuery = f.tx.$queryRaw.mock.lastCall![0] as { sql: string; values: unknown[] };
       expect(nextQuery.sql).toContain('"matchValue" IS NULL OR');
       expect(nextQuery.sql).toContain("::numeric");
@@ -399,7 +419,10 @@ describe("candidate listing and shortlist boundaries", () => {
           sql: string;
           values: unknown[];
         };
-        expect(multiplePages.sql).not.toContain("ELSE returned.value -> 'rank' END");
+        expect(multiplePages.sql).toContain('CASE WHEN count(*) = 1 THEN min("effectId") END');
+        expect(multiplePages.sql).toContain(
+          "(rank_scope.\"pageId\" IS NOT NULL AND returned.value ? 'rank')",
+        );
         expect(multiplePages.sql).toContain("WHEN returned.value ? 'overall_rank'");
         expect(multiplePages.sql).toContain("THEN returned.value -> 'updated_rank'");
         expect(multiplePages.sql).not.toContain('p."effectId" =');
@@ -413,6 +436,8 @@ describe("candidate listing and shortlist boundaries", () => {
       f.tx.$queryRaw.mockResolvedValueOnce([
         {
           total: 0n,
+          rankAvailable: false,
+          tierAvailable: false,
           sourceRows: 3n,
           candidates: 2n,
           identifiedCandidates: 2n,
@@ -2060,6 +2085,8 @@ describe("native CRM binding and source import", () => {
       .mockResolvedValueOnce([
         {
           total: 1n,
+          rankAvailable: false,
+          tierAvailable: false,
           sourceRows: 1n,
           candidates: 1n,
           identifiedCandidates: 1n,
@@ -2598,6 +2625,8 @@ describe("native candidate source provenance", () => {
         f.tx.$queryRaw.mockResolvedValueOnce([
           {
             total: 1n,
+            rankAvailable: false,
+            tierAvailable: false,
             sourceRows: 2n,
             candidates: 1n,
             identifiedCandidates: 1n,
@@ -2878,6 +2907,8 @@ describe("native candidate source provenance", () => {
         .mockResolvedValueOnce([
           {
             total: 1n,
+            rankAvailable: false,
+            tierAvailable: false,
             sourceRows: 1n,
             candidates: 1n,
             identifiedCandidates: 1n,
