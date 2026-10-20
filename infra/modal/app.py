@@ -27,6 +27,13 @@ image = (
     modal.Image.from_registry("node:24.22.0-bookworm-slim", add_python="3.11")
     .apt_install("ca-certificates", "git", "openssl", "poppler-utils")
     .run_commands("corepack enable", "corepack prepare pnpm@9.15.0 --activate")
+    .workdir("/app")
+    .add_local_file(ROOT / "package.json", "/app/package.json", copy=True)
+    .add_local_file(ROOT / "pnpm-lock.yaml", "/app/pnpm-lock.yaml", copy=True)
+    .add_local_file(ROOT / "pnpm-workspace.yaml", "/app/pnpm-workspace.yaml", copy=True)
+    .add_local_file(ROOT / ".npmrc", "/app/.npmrc", copy=True)
+    .add_local_dir(ROOT / "patches", "/app/patches", copy=True)
+    .run_commands("pnpm fetch --frozen-lockfile")
     .add_local_dir(
         ROOT,
         "/app",
@@ -36,9 +43,8 @@ image = (
             "**/__pycache__", "**/__pycache__/**",
         ),
     )
-    .workdir("/app")
     .run_commands(
-        "pnpm install --frozen-lockfile",
+        "pnpm install --offline --frozen-lockfile",
         "pnpm --filter @rakazo/db generate",
         "pnpm --filter @rakazo/web check",
         "RAKAZO_ALLOW_DEV_SECRETS=1 pnpm --filter @rakazo/web build",

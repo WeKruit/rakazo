@@ -7,6 +7,14 @@ native sandbox provider. No Docker daemon or additional agent harness is used.
 Use a new App, Secret and Volume dedicated to this product. The Modal workspace
 provides account access and billing; unrelated applications are not modified.
 
+The image caches dependency downloads before copying application source, using
+[pnpm 9.15.0 fetch](https://github.com/pnpm/pnpm/blob/v9.15.0/pkg-manager/plugin-commands-installation/src/fetch.ts).
+Its input layer includes the lockfile, root `package.json` (overrides and patch
+configuration), `pnpm-workspace.yaml`, `.npmrc` and `patches/`. The full frozen
+source is then copied as before, followed by `pnpm install --offline --frozen-lockfile`
+and the existing generation, checks and build. Development and optional dependencies
+remain included. Add any new pnpm configuration or hook files to the fetch input layer.
+
 ## Before deploying
 
 - Use Node 24 and Modal 1.6.1 or newer. Check the workspace billing summary before
