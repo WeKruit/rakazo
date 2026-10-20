@@ -1,5 +1,5 @@
 import { Trans, useLingui } from "@lingui/react/macro";
-import type { RoutineHistory } from "@rakazo/contracts";
+import type { RoutineDelegation, RoutineHistory, RoutineRun } from "@rakazo/contracts";
 import { Button } from "@rakazo/ui-web";
 import { ChevronDown } from "lucide-react";
 import { useEffect, useId, useRef, useState } from "react";
@@ -7,6 +7,64 @@ import { Link } from "react-router-dom";
 import { rpc } from "../lib/rpc";
 import { formatToolActivityDuration } from "../lib/tool-activity-view";
 import { statusLabel, statusTone } from "./ActivityList";
+
+function RoutineRunRow({
+  run,
+  childrenByParent,
+  locale,
+}: {
+  run: RoutineRun | RoutineDelegation;
+  childrenByParent: ReadonlyMap<string, RoutineDelegation[]>;
+  locale: string;
+}) {
+  const at = run.startedAt ?? run.createdAt;
+  const duration =
+    run.startedAt && run.completedAt
+      ? formatToolActivityDuration(Date.parse(run.completedAt) - Date.parse(run.startedAt))
+      : null;
+  const chatTo = run.messageId
+    ? run.groupId
+      ? `/app/g/${encodeURIComponent(run.groupId)}?m=${encodeURIComponent(run.messageId)}`
+      : `/app/${encodeURIComponent(run.botId)}?m=${encodeURIComponent(run.messageId)}`
+    : null;
+  const children = childrenByParent.get(run.id);
+  return (
+    <li className="py-2.5 text-[13px]" data-testid="routine-run-row">
+      <div className="flex items-center justify-between gap-2">
+        <time dateTime={at} title={new Date(at).toLocaleString(locale)}>
+          {new Date(at).toLocaleString(locale, {
+            month: "short",
+            day: "numeric",
+            year: "numeric",
+            hour: "numeric",
+            minute: "2-digit",
+          })}
+        </time>
+        <span className={statusTone(run.status)}>{statusLabel(run.status)}</span>
+      </div>
+      <div className="mt-1 flex items-center justify-between gap-2">
+        <span>{["botName" in run ? run.botName : null, duration].filter(Boolean).join(" · ")}</span>
+        {chatTo ? (
+          <Link to={chatTo} className="text-foreground underline underline-offset-2">
+            <Trans>View chat</Trans>
+          </Link>
+        ) : null}
+      </div>
+      {children?.length ? (
+        <ul className="mt-2 divide-y divide-border border-s border-border ps-3">
+          {children.map((child) => (
+            <RoutineRunRow
+              key={child.id}
+              run={child}
+              childrenByParent={childrenByParent}
+              locale={locale}
+            />
+          ))}
+        </ul>
+      ) : null}
+    </li>
+  );
+}
 
 export function RoutineRunHistory({ routineId }: { routineId: string }) {
   const { i18n } = useLingui();
@@ -191,41 +249,19 @@ export function RoutineRunHistory({ routineId }: { routineId: string }) {
       {runs && runs.length > 0 ? (
         <ul id={listId} className="mt-2 divide-y divide-border">
           {(expanded ? runs : runs.slice(0, 1)).map((run) => {
-            const at = run.startedAt ?? run.createdAt;
-            const duration =
-              run.startedAt && run.completedAt
-                ? formatToolActivityDuration(
-                    Date.parse(run.completedAt) - Date.parse(run.startedAt),
-                  )
-                : null;
-            const chatTo = run.messageId
-              ? run.groupId
-                ? `/app/g/${encodeURIComponent(run.groupId)}?m=${encodeURIComponent(run.messageId)}`
-                : `/app/${encodeURIComponent(run.botId)}?m=${encodeURIComponent(run.messageId)}`
-              : null;
+            const childrenByParent = new Map<string, RoutineDelegation[]>();
+            for (const child of run.delegations) {
+              const siblings = childrenByParent.get(child.parentRunId);
+              if (siblings) siblings.push(child);
+              else childrenByParent.set(child.parentRunId, [child]);
+            }
             return (
-              <li key={run.id} className="py-2.5 text-[13px]" data-testid="routine-run-row">
-                <div className="flex items-center justify-between gap-2">
-                  <time dateTime={at} title={new Date(at).toLocaleString(i18n.locale || "en")}>
-                    {new Date(at).toLocaleString(i18n.locale || "en", {
-                      month: "short",
-                      day: "numeric",
-                      year: "numeric",
-                      hour: "numeric",
-                      minute: "2-digit",
-                    })}
-                  </time>
-                  <span className={statusTone(run.status)}>{statusLabel(run.status)}</span>
-                </div>
-                <div className="mt-1 flex items-center justify-between gap-2">
-                  <span>{duration}</span>
-                  {chatTo ? (
-                    <Link to={chatTo} className="text-foreground underline underline-offset-2">
-                      <Trans>View chat</Trans>
-                    </Link>
-                  ) : null}
-                </div>
-              </li>
+              <RoutineRunRow
+                key={run.id}
+                run={run}
+                childrenByParent={childrenByParent}
+                locale={i18n.locale || "en"}
+              />
             );
           })}
         </ul>
