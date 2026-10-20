@@ -221,6 +221,46 @@ describe("toolRequiresApproval", () => {
     },
   );
 
+  it.each([
+    "create_booking",
+    "reschedule_booking",
+    "cancel_booking",
+    "confirm_booking",
+    "add_booking_attendee",
+  ])("requires one-time approval for the official Cal.com %s operation", (toolName) => {
+    const route = { connectorId: "mcp", toolName };
+    for (const endpoint of [
+      "https://mcp.cal.com/mcp",
+      "https://mcp.cal.com/mcp?toolsets=bookings,availability",
+      "https://MCP.CAL.COM:443/mcp/",
+    ])
+      expect(toolRequiresExplicitApproval("renamed", route, {}, endpoint)).toBe(true);
+    for (const endpoint of [
+      "https://example.test/mcp",
+      "https://mcp.cal.com.evil.test/mcp",
+      "https://mcp.cal.com/other",
+      "http://mcp.cal.com/mcp",
+    ])
+      expect(toolRequiresExplicitApproval("renamed", route, {}, endpoint)).toBe(false);
+    for (const read of [
+      "get_me",
+      "get_event_types",
+      "get_event_type",
+      "get_availability",
+      "get_busy_times",
+      "get_connected_calendars",
+      "get_conferencing_apps",
+    ])
+      expect(
+        toolRequiresExplicitApproval(
+          "renamed",
+          { ...route, toolName: read },
+          {},
+          "https://mcp.cal.com/mcp",
+        ),
+      ).toBe(false);
+  });
+
   it("requires approval for consequential builtins and destination writes", () => {
     expect(toolRequiresApproval("destination.write", false)).toBe(true);
     expect(toolRequiresApproval("destination.write", true)).toBe(true);

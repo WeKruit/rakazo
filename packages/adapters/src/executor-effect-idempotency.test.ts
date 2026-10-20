@@ -456,6 +456,98 @@ function fixture(
   };
 }
 
+describe("native Cal.com booking approvals", () => {
+  it.each(
+    (["direct", "catalog"] as const).flatMap((mode) =>
+      [
+        "create_booking",
+        "reschedule_booking",
+        "cancel_booking",
+        "confirm_booking",
+        "add_booking_attendee",
+      ].map((operation) => ({ mode, operation })),
+    ),
+  )(
+    "requires one-time approval and replays the frozen $mode $operation once",
+    async ({ mode, operation }) => {
+      const f = fixture(`cal-${mode}-${operation}`);
+      const route = {
+        connectorId: "mcp",
+        resourceId: "cal-1",
+        resourceRevision: 3,
+        toolName: operation,
+      };
+      const tool = {
+        name: `mcp__cal__${operation}`,
+        description: operation,
+        readOnly: true,
+        inputSchema: { type: "object" },
+        route,
+      };
+      Object.assign(f.prisma, {
+        botMcpServer: {
+          findFirst: vi.fn(async () => ({
+            allowAllTools: false,
+            allowedTools: [operation],
+            server: {
+              id: route.resourceId,
+              revision: route.resourceRevision,
+              endpoint: "https://mcp.cal.com/mcp?toolsets=bookings,availability",
+            },
+          })),
+        },
+      });
+      const entries = catalogEntries([tool]);
+      f.connector.discoverTools.mockResolvedValue(
+        mode === "direct" ? [tool] : lazyCatalogTools("connectors", "mcp", "MCP", entries),
+      );
+      if (mode === "catalog")
+        f.connector.resolveCall.mockImplementation(async (call) =>
+          resolveCatalogCall(call, entries),
+        );
+      f.prisma.actionApprovalRule.findMany.mockResolvedValue([
+        { effect: "always_allow", matchKind: "tool", matchValue: tool.name },
+      ]);
+      const original = {
+        bookingUid: "booking-1",
+        start: "2026-10-23T15:00:00Z",
+        attendee: { email: "candidate@example.test" },
+      };
+      const call = (args: Record<string, unknown>, executionId: string) => ({
+        name: mode === "direct" ? tool.name : "connectors_execute_tool",
+        args: mode === "direct" ? args : { id: entries[0]!.id, arguments: args },
+        executionId,
+      });
+      f.setCalls([call(original, "initial")]);
+      await f.run();
+      expect(f.connector.execute).not.toHaveBeenCalled();
+      expect(f.pauseRunForInput).toHaveBeenCalledOnce();
+      const card = f.pauseRunForInput.mock.calls[0]![0].blocks.at(-1)!;
+      expect(card).toMatchObject({
+        kind: "ask",
+        actions: [
+          { id: "allow", label: "Allow once" },
+          { id: "deny", label: "Deny" },
+        ],
+      });
+      expect(f.effects).toHaveLength(1);
+      const request = structuredClone(f.effects[0]!.request);
+      f.effects[0]!.status = "approved";
+      f.setCalls([call({ ...original, start: "2026-10-24T15:00:00Z" }, "approved")]);
+      await f.run();
+      expect(f.connector.execute).toHaveBeenCalledExactlyOnceWith(
+        expect.objectContaining({ route, args: original }),
+        expect.anything(),
+      );
+      expect(f.effects[0]).toMatchObject({ status: "completed", request });
+      f.setCalls([call(original, "duplicate")]);
+      await f.run();
+      expect(f.connector.execute).toHaveBeenCalledOnce();
+      expect(f.effects).toHaveLength(1);
+    },
+  );
+});
+
 describe("worker shutdown recovery", () => {
   it.each([
     "shutdown",

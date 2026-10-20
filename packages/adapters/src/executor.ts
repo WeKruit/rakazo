@@ -98,9 +98,9 @@ import {
   messagingChannelId,
   messagingChannelPrivacyBlock,
   messagingDmSurfaceNote,
-  nativeGoogleMcpWriteEndpoint,
   nextCronDateAcross,
   nextFence,
+  oneTimeMcpWriteEndpoint,
   planActionGate,
   promptInvokesSkill,
   RecruitingAssessmentValidationError,
@@ -5277,9 +5277,9 @@ export function createRunExecutor(deps: ExecutorDeps) {
                   : name;
           if (disabledBuiltinTools.has(policyToolName))
             return { error: "This tool is disabled for this bot." };
-          const googleWriteServer =
+          const oneTimeMcpWriteServer =
             connectorCall.route?.connectorId === "mcp" &&
-            nativeGoogleMcpWriteEndpoint(connectorCall.route.toolName)
+            oneTimeMcpWriteEndpoint(connectorCall.route.toolName)
               ? (
                   await requireMcpToolAssignment(
                     deps.prisma,
@@ -5293,7 +5293,7 @@ export function createRunExecutor(deps: ExecutorDeps) {
             policyToolName,
             connectorCall.route,
             args,
-            googleWriteServer?.endpoint,
+            oneTimeMcpWriteServer?.endpoint,
           );
           // Declared effect of the operation this call dispatches (installed API method and
           // flag). Install config is immutable per route resource, so it cannot drift before
