@@ -388,7 +388,10 @@ async function loadRoleMaterials(
   return bytes;
 }
 
-async function validateBriefAuthorship(tx: Tx, definition: CreateRoleInput | ReviseRoleInput) {
+function validateBriefAuthorship(
+  definition: CreateRoleInput | ReviseRoleInput,
+  messages: ReadonlyMap<string, SourceMessage>,
+) {
   if (!definition.brief) return;
   const sources = new Map(definitionSources(definition).map((source) => [source.id, source]));
   const attributed = [
@@ -409,15 +412,10 @@ async function validateBriefAuthorship(tx: Tx, definition: CreateRoleInput | Rev
     }
   }
   if (!messageIds.size) return;
-  const messages = await tx.message.findMany({
-    where: { id: { in: [...messageIds] } },
-    include: humanMessageInclude,
-  });
-  if (
-    messages.length !== messageIds.size ||
-    messages.some((message) => !isNativeHumanMessage(message))
-  )
-    throw new IsolationError();
+  for (const id of messageIds) {
+    const message = messages.get(id);
+    if (!message || !isNativeHumanMessage(message)) throw new IsolationError();
+  }
 }
 
 function definitionData(input: CreateRoleInput | ReviseRoleInput) {
@@ -473,8 +471,8 @@ async function createRoleInTransaction(
 ) {
   await requireThread(tx, actor, input.sourceThreadId);
   if (input.brief) validateRecruitingBrief(input.brief, input);
-  await validateReadSources(tx, actor, definitionSources(input), artifacts);
-  await validateBriefAuthorship(tx, input);
+  const messages = await validateReadSources(tx, actor, definitionSources(input), artifacts);
+  validateBriefAuthorship(input, messages);
   const role = await tx.recruitingRole.create({
     data: {
       id: randomUUID(),
@@ -547,7 +545,15 @@ export async function reviseRecruitingRole(
 ): Promise<RoleSnapshot> {
   const input = ReviseRecruitingRoleInput.parse(untrusted);
   const artifacts = await loadRoleMaterials(prisma, actor, input, material);
-  return prisma.$transaction((tx) => reviseRoleInTransaction(tx, actor, input, artifacts));
+  return prisma.$transaction(async (tx) =>
+    reviseRoleInTransaction(
+      tx,
+      actor,
+      input,
+      artifacts,
+      await requireRole(tx, actor, input.roleId, true),
+    ),
+  );
 }
 
 async function reviseRoleInTransaction(
@@ -555,12 +561,20 @@ async function reviseRoleInTransaction(
   actor: Actor,
   input: ReviseRoleInput,
   artifacts: ReadonlyMap<string, Uint8Array>,
+  role: Awaited<ReturnType<typeof requireRole>>,
+  authorizedThread?: Awaited<ReturnType<typeof requireThread>>,
 ) {
-  const role = await requireRole(tx, actor, input.roleId, true);
+  if (role.id !== input.roleId) throw new IsolationError();
   if (role.revision !== input.expectedRevision) throw new RecruitingConflictError();
   if (input.brief) validateRecruitingBrief(input.brief, input);
-  await validateReadSources(tx, actor, definitionSources(input), artifacts);
-  await validateBriefAuthorship(tx, input);
+  const messages = await validateReadSources(
+    tx,
+    actor,
+    definitionSources(input),
+    artifacts,
+    authorizedThread,
+  );
+  validateBriefAuthorship(input, messages);
   const revision = await tx.recruitingRoleRevision.create({
     data: { roleId: role.id, revision: role.revision + 1, ...definitionData(input) },
   });
@@ -575,12 +589,17 @@ async function reviseRoleInTransaction(
     data: { title: input.title, revision: revision.revision, currentRevisionId: revision.id },
   });
   if (changed.count !== 1) throw new RecruitingConflictError();
-  return roleSnapshot(tx, actor, {
-    ...role,
-    title: input.title,
-    revision: revision.revision,
-    currentRevisionId: revision.id,
-  });
+  return roleSnapshot(
+    tx,
+    actor,
+    {
+      ...role,
+      title: input.title,
+      revision: revision.revision,
+      currentRevisionId: revision.id,
+    },
+    authorizedThread,
+  );
 }
 
 /** Human-only RPC; not exposed as a model tool. CAS, human receipt and revision are atomic. */
@@ -601,21 +620,26 @@ export async function confirmRecruitingBrief(
     );
     const thread = await requireThread(tx, actor, input.threadId);
     if (thread.activeRecruitingRoleId !== input.roleId) throw new IsolationError();
-    const role = await requireRole(tx, actor, input.roleId, true);
+    const role = await requireRole(tx, actor, input.roleId, true, thread);
     if (role.revision !== input.expectedRevision) throw new RecruitingConflictError();
-    const workspace = await roleSnapshot(tx, actor, role);
+    const workspace = await roleSnapshot(tx, actor, role, thread);
     const { revision } = workspace;
     if (!revision.brief)
       throw new RecruitingPlaybookValidationError(
         "Read the original material and prepare a sourced brief first.",
       );
     validateRecruitingBrief(revision.brief, revision);
-    await validateReadSources(tx, actor, definitionSources(revision), artifacts);
-    await validateBriefAuthorship(tx, {
-      ...revision,
-      expectedRevision: role.revision,
-      title: role.title,
-    });
+    const messages = await validateReadSources(
+      tx,
+      actor,
+      definitionSources(revision),
+      artifacts,
+      thread,
+    );
+    validateBriefAuthorship(
+      { ...revision, expectedRevision: role.revision, title: role.title },
+      messages,
+    );
     if (recruitingBriefClarifications(revision.brief).length)
       throw new RecruitingPlaybookValidationError(
         "Resolve the material brief questions before confirmation.",
@@ -700,7 +724,7 @@ export async function editRecruitingCriteria(
     );
     const thread = await requireThread(tx, actor, input.threadId);
     if (thread.activeRecruitingRoleId !== input.roleId) throw new IsolationError();
-    const role = await requireRole(tx, actor, input.roleId, true);
+    const role = await requireRole(tx, actor, input.roleId, true, thread);
     if (role.revision !== input.expectedRevision) throw new RecruitingConflictError();
     const { revision } = await roleSnapshot(tx, actor, role);
     const changes = input.criteria.flatMap((edit) => {
@@ -878,6 +902,8 @@ export async function editRecruitingCriteria(
           : revision.brief,
       },
       artifacts,
+      role,
+      thread,
     );
   });
 }
@@ -2002,13 +2028,10 @@ export async function executeRecruitingRoleMutation(
       input.intent.quote,
       input.operation === "create",
     );
-    const current = thread.activeRecruitingRoleId
-      ? await roleSnapshot(
-          tx,
-          actor,
-          await requireRole(tx, actor, thread.activeRecruitingRoleId, true),
-        )
+    const currentRole = thread.activeRecruitingRoleId
+      ? await requireRole(tx, actor, thread.activeRecruitingRoleId, true, thread)
       : null;
+    const current = currentRole ? await roleSnapshot(tx, actor, currentRole, thread) : null;
     if (input.operation === "revise") {
       if (current?.role.id !== input.roleId) throw new IsolationError();
       if (current.role.revision !== input.expectedRevision) throw new RecruitingConflictError();
@@ -2071,6 +2094,8 @@ export async function executeRecruitingRoleMutation(
                   expectedRevision: input.expectedRevision,
                 }),
                 artifacts,
+                currentRole!,
+                thread,
               );
       }
       result = {
@@ -2858,10 +2883,34 @@ async function validateReadSources(
   actor: Actor,
   sources: readonly (RecruitingAssessmentSourceRef | RecruitingSourceRef)[],
   artifacts: ReadonlyMap<string, Uint8Array>,
+  authorizedThread?: Awaited<ReturnType<typeof requireThread>>,
 ) {
-  await validateSources(tx, actor, sources);
-  // ponytail: reuse native reads only within this validation call; every reference is checked below.
-  const messages = new Map<string, SourceMessage>();
+  await validateSources(tx, actor, sources, authorizedThread);
+  const unique = new Map(sources.map((source) => [stableJsonValue(source), source]));
+  const messageIds = new Set<string>();
+  const artifactIds = new Set<string>();
+  for (const source of unique.values()) {
+    if (source.readState === "read" && source.quote === undefined) continue;
+    if (source.anchor.kind === "message") messageIds.add(source.anchor.messageId);
+    else artifactIds.add(source.anchor.artifact.artifactId);
+  }
+  if (messageIds.size)
+    await tx.$queryRaw(
+      Prisma.sql`SELECT "id" FROM "messages" WHERE "id" IN (${Prisma.join([...messageIds].sort())}) ORDER BY "id" FOR SHARE`,
+    );
+  if (artifactIds.size)
+    await tx.$queryRaw(
+      Prisma.sql`SELECT "id" FROM "artifacts" WHERE "id" IN (${Prisma.join([...artifactIds].sort())}) ORDER BY "id" FOR SHARE`,
+    );
+  // ponytail: reuse locked rows only within this validation call; every quote is checked below.
+  const loadedMessages = messageIds.size
+    ? await tx.message.findMany({
+        where: { id: { in: [...messageIds] } },
+        include: humanMessageInclude,
+      })
+    : [];
+  if (loadedMessages.length !== messageIds.size) throw new IsolationError();
+  const messages = new Map(loadedMessages.map((message) => [message.id, message]));
   const rows = new Map<string, Prisma.ArtifactGetPayload<Record<string, never>>>();
   const pdfTexts = new Map<string, string>();
   const provenance = new Map<
@@ -2872,25 +2921,13 @@ async function validateReadSources(
       payload?: RecruitingMaterialReadPayload;
     }
   >();
-  const unique = new Map(sources.map((source) => [stableJsonValue(source), source]));
   for (const source of unique.values()) {
     // A role reference without a quote remains a locator; it does not attest to material text.
     if (source.readState === "read" && source.quote === undefined) continue;
     const selection = "selection" in source ? source.selection : undefined;
     if (source.anchor.kind === "message") {
-      let message = messages.get(source.anchor.messageId);
-      if (!message) {
-        await tx.$queryRaw(
-          Prisma.sql`SELECT "id" FROM "messages" WHERE "id" = ${source.anchor.messageId} FOR SHARE`,
-        );
-        const current = await tx.message.findUnique({
-          where: { id: source.anchor.messageId },
-          include: humanMessageInclude,
-        });
-        if (!current) throw new IsolationError();
-        message = current;
-        messages.set(message.id, message);
-      }
+      const message = messages.get(source.anchor.messageId);
+      if (!message) throw new IsolationError();
       if (source.readState !== "read" || source.quote === undefined) continue;
       if (!isNativeHumanMessage(message) || source.kind === "provider_report")
         throw new IsolationError();
@@ -2916,9 +2953,6 @@ async function validateReadSources(
     } else {
       let artifact = rows.get(source.anchor.artifact.artifactId);
       if (!artifact) {
-        await tx.$queryRaw(
-          Prisma.sql`SELECT "id" FROM "artifacts" WHERE "id" = ${source.anchor.artifact.artifactId} FOR SHARE`,
-        );
         artifact = await tx.artifact.findUniqueOrThrow({
           where: { id: source.anchor.artifact.artifactId },
         });
@@ -3029,6 +3063,7 @@ async function validateReadSources(
       assessmentSelection(text, start, selection?.end ?? start + source.quote.length, source.quote);
     }
   }
+  return messages;
 }
 
 async function requireAssessmentAdoption(
