@@ -67,6 +67,77 @@ import { McpServersOverlay } from "./McpServersOverlay";
 
 afterEach(() => vi.unstubAllGlobals());
 
+it("distinguishes a pending or failed read from a successfully loaded empty server list", async () => {
+  vi.stubGlobal("IS_REACT_ACT_ENVIRONMENT", true);
+  let channel!: { onmessage?: (event: { data: { type: string } }) => void };
+  vi.stubGlobal(
+    "BroadcastChannel",
+    class {
+      constructor() {
+        channel = this;
+      }
+      onmessage?: (event: { data: { type: string } }) => void;
+      close() {}
+    },
+  );
+  let rejectInitial!: (error: Error) => void;
+  const initial = new Promise<unknown[]>((_resolve, reject) => {
+    rejectInitial = reject;
+  });
+  api.servers.mockReturnValueOnce(initial);
+  api.bots.mockResolvedValue([]);
+  api.all.mockResolvedValue([]);
+  const container = document.createElement("div");
+  const root = createRoot(container);
+  try {
+    await act(async () => root.render(<McpServersOverlay onClose={() => undefined} />));
+    expect(container.querySelector('[role="status"]')?.textContent).toBe("Loading…");
+    expect(container.textContent).not.toContain("No MCP servers yet.");
+    await act(async () => rejectInitial(new Error("Server list unavailable")));
+    expect(container.querySelector('[role="status"]')).toBeNull();
+    expect(container.querySelector('[role="alert"]')?.textContent).toBe("Server list unavailable");
+    expect(container.textContent).not.toContain("No MCP servers yet.");
+
+    let resolveRecovery!: (servers: unknown[]) => void;
+    const recovery = new Promise<unknown[]>((resolve) => {
+      resolveRecovery = resolve;
+    });
+    api.servers.mockReturnValueOnce(recovery);
+    await act(async () => channel.onmessage?.({ data: { type: "mcp-oauth-complete" } }));
+    expect(container.querySelector('[role="status"]')?.textContent).toBe("Loading…");
+    expect(container.querySelector('[role="alert"]')).toBeNull();
+    await act(async () =>
+      resolveRecovery([
+        {
+          id: "server-a",
+          name: "Saved research",
+          slug: "research",
+          transport: "streamable_http",
+          endpoint: "https://example.test/mcp",
+          oauthStatus: "none",
+        },
+      ]),
+    );
+    expect(container.textContent).toContain("Saved research");
+    expect(container.querySelector('[role="status"]')).toBeNull();
+    expect(container.textContent).not.toContain("No MCP servers yet.");
+
+    api.servers.mockRejectedValueOnce(new Error("Refresh unavailable"));
+    await act(async () => channel.onmessage?.({ data: { type: "mcp-oauth-complete" } }));
+    expect(container.querySelector('[role="alert"]')?.textContent).toBe("Refresh unavailable");
+    expect(container.textContent).toContain("Saved research");
+    expect(container.textContent).not.toContain("No MCP servers yet.");
+
+    api.servers.mockResolvedValueOnce([]);
+    await act(async () => channel.onmessage?.({ data: { type: "mcp-oauth-complete" } }));
+    expect(container.textContent).toContain("No MCP servers yet.");
+    expect(container.textContent).not.toContain("Saved research");
+    expect(container.querySelector('[role="alert"], [role="status"]')).toBeNull();
+  } finally {
+    await act(async () => root.unmount());
+  }
+});
+
 it("passes advanced OAuth settings through the existing connection without granting tool access or retaining the secret", async () => {
   vi.stubGlobal("IS_REACT_ACT_ENVIRONMENT", true);
   vi.stubGlobal(
