@@ -8123,26 +8123,34 @@ export async function listRecruitingCandidates(
             countIdentified: _identified,
             consideration,
             ...profile
-          }) => ({
-            ...profile,
-            crm: syncs.get(profile.candidateKey) ?? null,
-            decision: candidateConsideration(actor, consideration)?.operation ?? null,
-            ...(sourcePageId && sourceRowIndex !== null
-              ? {
-                  latestSource: candidateSourceReference(pages.get(sourcePageId)!, sourceRowIndex),
-                }
-              : {}),
-            latestAssessment:
-              assessmentVersion === null
-                ? null
-                : {
-                    version: assessmentVersion,
-                    roleRevisionId: assessmentRoleRevisionId,
-                    createdAt: assessmentCreatedAt,
-                    isCurrent: assessmentRoleRevisionId === role.currentRevisionId,
-                    hardGate,
-                  },
-          }),
+          }) => {
+            const decision = candidateConsideration(actor, consideration);
+            return {
+              ...profile,
+              crm: syncs.get(profile.candidateKey) ?? null,
+              decision: decision?.operation ?? null,
+              decisionReason: decision?.source.quote ?? null,
+              decisionAt: decision?.source.createdAt ?? null,
+              ...(sourcePageId && sourceRowIndex !== null
+                ? {
+                    latestSource: candidateSourceReference(
+                      pages.get(sourcePageId)!,
+                      sourceRowIndex,
+                    ),
+                  }
+                : {}),
+              latestAssessment:
+                assessmentVersion === null
+                  ? null
+                  : {
+                      version: assessmentVersion,
+                      roleRevisionId: assessmentRoleRevisionId,
+                      createdAt: assessmentCreatedAt,
+                      isCurrent: assessmentRoleRevisionId === role.currentRevisionId,
+                      hardGate,
+                    },
+            };
+          },
         ),
         nextCursor:
           rows.length > limit && last

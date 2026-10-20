@@ -1201,6 +1201,8 @@ export const RecruitingCandidateSchema = z.strictObject({
   ...RecruitingCandidateProfileSchema.shape,
   shortlisted: z.boolean(),
   decision: z.enum(["hold", "pass", "resume"]).nullable(),
+  decisionReason: RecruitingCandidateConsiderationSchema.shape.source.shape.quote.nullable(),
+  decisionAt: RecruitingCandidateConsiderationSchema.shape.source.shape.createdAt.nullable(),
   revision: z.number().int().nonnegative(),
   discoveryCount: z.number().int().nonnegative(),
   firstDiscoveredAt: IsoDate.nullable(),

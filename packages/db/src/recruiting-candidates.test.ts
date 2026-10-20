@@ -168,6 +168,11 @@ describe("candidate listing and shortlist boundaries", () => {
       });
       expect(page.total).toBe(19);
       expect(page.items[0]?.decision).toBe("hold");
+      expect(page.items[0]).toMatchObject({
+        decisionReason: "Pause consideration of Avery",
+        decisionAt: "2026-10-16T00:00:00.000Z",
+      });
+      expect(page.items[0]).not.toHaveProperty("consideration");
       expect(page).toHaveProperty("sortAvailability", { rank: false, tier: false, score: false });
       const totalsQuery = f.tx.$queryRaw.mock.calls[0]![0] as {
         sql: string;
