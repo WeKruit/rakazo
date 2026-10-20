@@ -2,7 +2,7 @@ import type { McpOAuthConfig } from "@rakazo/contracts";
 import { rpc } from "./rpc";
 
 export const MCP_OAUTH_CHANNEL = "rakazo-mcp-oauth";
-const MCP_OAUTH_TIMEOUT_MS = 2 * 60 * 1000;
+const MCP_OAUTH_TIMEOUT_MS = 10 * 60_000;
 
 export type McpOauthResult =
   | "connected"
