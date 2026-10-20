@@ -911,6 +911,10 @@ msgstr "Annuler le nouveau bot"
 msgid "Cancel new group"
 msgstr "Annuler le nouveau groupe"
 
+#: src/pages/GroupPanel.tsx
+msgid "Cancel new role"
+msgstr ""
+
 #: src/pages/shell/chat-context.tsx
 msgid "Cancel reply"
 msgstr "Annuler la réponse"
@@ -1193,6 +1197,10 @@ msgstr "Code"
 msgid "Collapse {0}"
 msgstr "Réduire {0}"
 
+#: src/pages/Shell.tsx
+msgid "Collapse navigation"
+msgstr ""
+
 #: src/pages/shell/avatar-studio-popover.tsx
 msgid "Color"
 msgstr "Couleur"
@@ -1419,6 +1427,11 @@ msgstr "Continuer avec {0}"
 #: src/pages/Auth.tsx
 msgid "Continue with email"
 msgstr "Continuer avec l'e-mail"
+
+#: src/pages/Shell.tsx
+#: src/pages/shell/RecruitingNavigation.tsx
+msgid "Conversation"
+msgstr ""
 
 #: src/components/ComputersUnavailableHint.tsx
 #: src/pages/ModelSettingsOverlay.tsx
@@ -1965,6 +1978,10 @@ msgstr "Créer un nouveau groupe"
 #: src/pages/shell/bot-picker.tsx
 msgid "Create new Space"
 msgstr "Créer un nouvel espace"
+
+#: src/pages/GroupPanel.tsx
+msgid "Create role"
+msgstr ""
 
 #: src/pages/RoutineEditor.tsx
 msgid "Create Routine"
@@ -2705,6 +2722,10 @@ msgstr "Bonjour, c'est ainsi que je sonnerai quand je lirai les réponses à voi
 msgid "Hide bots"
 msgstr "Masquer les bots"
 
+#: src/pages/Shell.tsx
+msgid "Hide navigation"
+msgstr ""
+
 #: src/pages/Auth.tsx
 msgid "Hide password"
 msgstr "Masquer le mot de passe"
@@ -3392,6 +3413,10 @@ msgstr "Nommez ce bot"
 msgid "Name this group"
 msgstr "Nommez ce groupe"
 
+#: src/pages/GroupPanel.tsx
+msgid "Name this role"
+msgstr ""
+
 #: src/pages/RoutineEditor.tsx
 msgid "Name this routine"
 msgstr "Nommez cette routine"
@@ -3434,6 +3459,11 @@ msgstr "Nouvel élément de travaux en cours"
 #: src/pages/Auth.tsx
 msgid "New password"
 msgstr "Nouveau mot de passe"
+
+#: src/pages/GroupPanel.tsx
+#: src/pages/shell/RecruitingNavigation.tsx
+msgid "New role"
+msgstr ""
 
 #: src/pages/RecruitingPanel.tsx
 msgid "New search"
@@ -3763,6 +3793,10 @@ msgstr "Ouvrir la navigation"
 #: src/pages/RecruitingPanel.tsx
 msgid "Open original question"
 msgstr "Ouvrir la question d’origine"
+
+#: src/pages/shell/RecruitingNavigation.tsx
+msgid "Open roles"
+msgstr ""
 
 #: src/components/computer/TerminalApp.tsx
 msgid "Open shell"
@@ -4141,6 +4175,10 @@ msgstr "Recréer un ordinateur qui ne fonctionne pas."
 msgid "Recreating the computer"
 msgstr "Recréation de l'ordinateur"
 
+#: src/pages/shell/RecruitingNavigation.tsx
+msgid "Recruiter"
+msgstr ""
+
 #: src/pages/RecruitingPanel.tsx
 msgid "Recruiter verified"
 msgstr ""
@@ -4152,6 +4190,10 @@ msgstr ""
 
 #: src/pages/RecruitingPanel.tsx
 msgid "Recruiting views"
+msgstr ""
+
+#: src/pages/shell/RecruitingNavigation.tsx
+msgid "Recruiting workspace"
 msgstr ""
 
 #: src/App.tsx
@@ -4446,6 +4488,14 @@ msgstr "Robot"
 msgid "Role"
 msgstr ""
 
+#: src/pages/Shell.tsx
+msgid "Role conversation"
+msgstr ""
+
+#: src/pages/shell/RecruitingNavigation.tsx
+msgid "Role conversations"
+msgstr ""
+
 #: src/pages/RecruitingPanel.tsx
 msgid "Role definition"
 msgstr ""
@@ -4453,6 +4503,10 @@ msgstr ""
 #. placeholder {0}: unphrasedBriefFields.length
 #: src/pages/RecruitingPanel.tsx
 msgid "Role details needing clarification: {0}"
+msgstr ""
+
+#: src/pages/GroupPanel.tsx
+msgid "Role name"
 msgstr ""
 
 #: src/pages/RecruitingPanel.tsx
@@ -4714,6 +4768,10 @@ msgstr "Rechercher des modèles"
 msgid "Search providers"
 msgstr "Rechercher des fournisseurs"
 
+#: src/pages/shell/RecruitingNavigation.tsx
+msgid "Search roles"
+msgstr ""
+
 #: src/pages/ActivityList.tsx
 msgid "Search runs"
 msgstr ""
@@ -4881,6 +4939,10 @@ msgstr "Afficher la liste"
 msgid "Show more"
 msgstr "Afficher plus"
 
+#: src/pages/Shell.tsx
+msgid "Show navigation"
+msgstr ""
+
 #: src/pages/Auth.tsx
 msgid "Show password"
 msgstr "Afficher le mot de passe"
@@ -5041,6 +5103,10 @@ msgstr ""
 #: src/components/teach/TeachComputerOverlay.tsx
 msgid "Start recording"
 msgstr "Démarrer l'enregistrement"
+
+#: src/pages/Shell.tsx
+msgid "Start recruiting"
+msgstr ""
 
 #: src/pages/ActivityList.tsx
 msgid "Starting"
@@ -5229,6 +5295,10 @@ msgstr "La connexion a expiré."
 #: src/lib/model-connection-preflight.ts
 msgid "The provider is rate-limiting requests."
 msgstr "Le fournisseur limite le débit des requêtes."
+
+#: src/pages/Shell.tsx
+msgid "The recruiting team changed. Open the role again."
+msgstr ""
 
 #: src/pages/MemorySettingsOverlay.tsx
 msgid "The selected memory provider is not available in this build."
@@ -5468,6 +5538,10 @@ msgstr ""
 #: src/pages/BotContextMenu.tsx
 msgid "Unpin"
 msgstr "Désépingler"
+
+#: src/pages/shell/RecruitingNavigation.tsx
+msgid "Unread"
+msgstr ""
 
 #. placeholder {0}: pending.file.name
 #: src/pages/Shell.tsx

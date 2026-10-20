@@ -911,6 +911,10 @@ msgstr "Yeni botu iptal et"
 msgid "Cancel new group"
 msgstr "Yeni grubu iptal et"
 
+#: src/pages/GroupPanel.tsx
+msgid "Cancel new role"
+msgstr ""
+
 #: src/pages/shell/chat-context.tsx
 msgid "Cancel reply"
 msgstr "Yanıtı iptal et"
@@ -1193,6 +1197,10 @@ msgstr "Kod"
 msgid "Collapse {0}"
 msgstr ""
 
+#: src/pages/Shell.tsx
+msgid "Collapse navigation"
+msgstr ""
+
 #: src/pages/shell/avatar-studio-popover.tsx
 msgid "Color"
 msgstr "Renk"
@@ -1419,6 +1427,11 @@ msgstr "{0} ile devam et"
 #: src/pages/Auth.tsx
 msgid "Continue with email"
 msgstr "E-posta ile devam et"
+
+#: src/pages/Shell.tsx
+#: src/pages/shell/RecruitingNavigation.tsx
+msgid "Conversation"
+msgstr ""
 
 #: src/components/ComputersUnavailableHint.tsx
 #: src/pages/ModelSettingsOverlay.tsx
@@ -1965,6 +1978,10 @@ msgstr "Yeni grup oluştur"
 #: src/pages/shell/bot-picker.tsx
 msgid "Create new Space"
 msgstr "Yeni space oluştur"
+
+#: src/pages/GroupPanel.tsx
+msgid "Create role"
+msgstr ""
 
 #: src/pages/RoutineEditor.tsx
 msgid "Create Routine"
@@ -2705,6 +2722,10 @@ msgstr "Merhaba, yanıtları sesli okuduğumda böyle duyulacağım."
 msgid "Hide bots"
 msgstr ""
 
+#: src/pages/Shell.tsx
+msgid "Hide navigation"
+msgstr ""
+
 #: src/pages/Auth.tsx
 msgid "Hide password"
 msgstr ""
@@ -3392,6 +3413,10 @@ msgstr "Bota bir ad ver"
 msgid "Name this group"
 msgstr "Gruba bir ad ver"
 
+#: src/pages/GroupPanel.tsx
+msgid "Name this role"
+msgstr ""
+
 #: src/pages/RoutineEditor.tsx
 msgid "Name this routine"
 msgstr ""
@@ -3434,6 +3459,11 @@ msgstr "Yeni açık iş öğesi"
 #: src/pages/Auth.tsx
 msgid "New password"
 msgstr "Yeni parola"
+
+#: src/pages/GroupPanel.tsx
+#: src/pages/shell/RecruitingNavigation.tsx
+msgid "New role"
+msgstr ""
 
 #: src/pages/RecruitingPanel.tsx
 msgid "New search"
@@ -3763,6 +3793,10 @@ msgstr "Gezinmeyi aç"
 #: src/pages/RecruitingPanel.tsx
 msgid "Open original question"
 msgstr "Orijinal soruyu aç"
+
+#: src/pages/shell/RecruitingNavigation.tsx
+msgid "Open roles"
+msgstr ""
 
 #: src/components/computer/TerminalApp.tsx
 msgid "Open shell"
@@ -4141,6 +4175,10 @@ msgstr "Çalışmayan bir bilgisayarı yeniden oluşturun."
 msgid "Recreating the computer"
 msgstr ""
 
+#: src/pages/shell/RecruitingNavigation.tsx
+msgid "Recruiter"
+msgstr ""
+
 #: src/pages/RecruitingPanel.tsx
 msgid "Recruiter verified"
 msgstr ""
@@ -4152,6 +4190,10 @@ msgstr ""
 
 #: src/pages/RecruitingPanel.tsx
 msgid "Recruiting views"
+msgstr ""
+
+#: src/pages/shell/RecruitingNavigation.tsx
+msgid "Recruiting workspace"
 msgstr ""
 
 #: src/App.tsx
@@ -4446,6 +4488,14 @@ msgstr ""
 msgid "Role"
 msgstr ""
 
+#: src/pages/Shell.tsx
+msgid "Role conversation"
+msgstr ""
+
+#: src/pages/shell/RecruitingNavigation.tsx
+msgid "Role conversations"
+msgstr ""
+
 #: src/pages/RecruitingPanel.tsx
 msgid "Role definition"
 msgstr ""
@@ -4453,6 +4503,10 @@ msgstr ""
 #. placeholder {0}: unphrasedBriefFields.length
 #: src/pages/RecruitingPanel.tsx
 msgid "Role details needing clarification: {0}"
+msgstr ""
+
+#: src/pages/GroupPanel.tsx
+msgid "Role name"
 msgstr ""
 
 #: src/pages/RecruitingPanel.tsx
@@ -4714,6 +4768,10 @@ msgstr ""
 msgid "Search providers"
 msgstr "Sağlayıcı ara"
 
+#: src/pages/shell/RecruitingNavigation.tsx
+msgid "Search roles"
+msgstr ""
+
 #: src/pages/ActivityList.tsx
 msgid "Search runs"
 msgstr ""
@@ -4881,6 +4939,10 @@ msgstr ""
 msgid "Show more"
 msgstr "Daha fazla göster"
 
+#: src/pages/Shell.tsx
+msgid "Show navigation"
+msgstr ""
+
 #: src/pages/Auth.tsx
 msgid "Show password"
 msgstr ""
@@ -5041,6 +5103,10 @@ msgstr ""
 #: src/components/teach/TeachComputerOverlay.tsx
 msgid "Start recording"
 msgstr "Kaydı başlat"
+
+#: src/pages/Shell.tsx
+msgid "Start recruiting"
+msgstr ""
 
 #: src/pages/ActivityList.tsx
 msgid "Starting"
@@ -5229,6 +5295,10 @@ msgstr "Bağlantı zaman aşımına uğradı."
 #: src/lib/model-connection-preflight.ts
 msgid "The provider is rate-limiting requests."
 msgstr "Sağlayıcı istek hızını sınırlıyor."
+
+#: src/pages/Shell.tsx
+msgid "The recruiting team changed. Open the role again."
+msgstr ""
 
 #: src/pages/MemorySettingsOverlay.tsx
 msgid "The selected memory provider is not available in this build."
@@ -5468,6 +5538,10 @@ msgstr ""
 #: src/pages/BotContextMenu.tsx
 msgid "Unpin"
 msgstr "Sabitlemeyi kaldır"
+
+#: src/pages/shell/RecruitingNavigation.tsx
+msgid "Unread"
+msgstr ""
 
 #. placeholder {0}: pending.file.name
 #: src/pages/Shell.tsx

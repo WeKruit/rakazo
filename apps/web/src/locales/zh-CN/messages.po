@@ -911,6 +911,10 @@ msgstr "取消新建 Bot"
 msgid "Cancel new group"
 msgstr "取消新建群组"
 
+#: src/pages/GroupPanel.tsx
+msgid "Cancel new role"
+msgstr ""
+
 #: src/pages/shell/chat-context.tsx
 msgid "Cancel reply"
 msgstr "取消回复"
@@ -1193,6 +1197,10 @@ msgstr "代码"
 msgid "Collapse {0}"
 msgstr "折叠 {0}"
 
+#: src/pages/Shell.tsx
+msgid "Collapse navigation"
+msgstr ""
+
 #: src/pages/shell/avatar-studio-popover.tsx
 msgid "Color"
 msgstr "颜色"
@@ -1419,6 +1427,11 @@ msgstr "通过 {0} 继续"
 #: src/pages/Auth.tsx
 msgid "Continue with email"
 msgstr "使用邮箱继续"
+
+#: src/pages/Shell.tsx
+#: src/pages/shell/RecruitingNavigation.tsx
+msgid "Conversation"
+msgstr ""
 
 #: src/components/ComputersUnavailableHint.tsx
 #: src/pages/ModelSettingsOverlay.tsx
@@ -1965,6 +1978,10 @@ msgstr "新建群组"
 #: src/pages/shell/bot-picker.tsx
 msgid "Create new Space"
 msgstr "新建工作区"
+
+#: src/pages/GroupPanel.tsx
+msgid "Create role"
+msgstr ""
 
 #: src/pages/RoutineEditor.tsx
 msgid "Create Routine"
@@ -2705,6 +2722,10 @@ msgstr "你好，这是我朗读回复时的声音。"
 msgid "Hide bots"
 msgstr ""
 
+#: src/pages/Shell.tsx
+msgid "Hide navigation"
+msgstr ""
+
 #: src/pages/Auth.tsx
 msgid "Hide password"
 msgstr "隐藏密码"
@@ -3392,6 +3413,10 @@ msgstr "给这个 Bot 命名"
 msgid "Name this group"
 msgstr "给这个群组命名"
 
+#: src/pages/GroupPanel.tsx
+msgid "Name this role"
+msgstr ""
+
 #: src/pages/RoutineEditor.tsx
 msgid "Name this routine"
 msgstr "给这个例行任务命名"
@@ -3434,6 +3459,11 @@ msgstr "新的待办"
 #: src/pages/Auth.tsx
 msgid "New password"
 msgstr "新密码"
+
+#: src/pages/GroupPanel.tsx
+#: src/pages/shell/RecruitingNavigation.tsx
+msgid "New role"
+msgstr ""
 
 #: src/pages/RecruitingPanel.tsx
 msgid "New search"
@@ -3763,6 +3793,10 @@ msgstr "打开导航"
 #: src/pages/RecruitingPanel.tsx
 msgid "Open original question"
 msgstr "打开原问题"
+
+#: src/pages/shell/RecruitingNavigation.tsx
+msgid "Open roles"
+msgstr ""
 
 #: src/components/computer/TerminalApp.tsx
 msgid "Open shell"
@@ -4141,6 +4175,10 @@ msgstr "重建无法正常工作的电脑。"
 msgid "Recreating the computer"
 msgstr ""
 
+#: src/pages/shell/RecruitingNavigation.tsx
+msgid "Recruiter"
+msgstr ""
+
 #: src/pages/RecruitingPanel.tsx
 msgid "Recruiter verified"
 msgstr ""
@@ -4152,6 +4190,10 @@ msgstr ""
 
 #: src/pages/RecruitingPanel.tsx
 msgid "Recruiting views"
+msgstr ""
+
+#: src/pages/shell/RecruitingNavigation.tsx
+msgid "Recruiting workspace"
 msgstr ""
 
 #: src/App.tsx
@@ -4446,6 +4488,14 @@ msgstr "机器人"
 msgid "Role"
 msgstr ""
 
+#: src/pages/Shell.tsx
+msgid "Role conversation"
+msgstr ""
+
+#: src/pages/shell/RecruitingNavigation.tsx
+msgid "Role conversations"
+msgstr ""
+
 #: src/pages/RecruitingPanel.tsx
 msgid "Role definition"
 msgstr ""
@@ -4454,6 +4504,10 @@ msgstr ""
 #: src/pages/RecruitingPanel.tsx
 msgid "Role details needing clarification: {0}"
 msgstr "仍需澄清的岗位信息：{0} 项"
+
+#: src/pages/GroupPanel.tsx
+msgid "Role name"
+msgstr ""
 
 #: src/pages/RecruitingPanel.tsx
 msgid "Role revision"
@@ -4714,6 +4768,10 @@ msgstr "搜索模型"
 msgid "Search providers"
 msgstr "搜索提供方"
 
+#: src/pages/shell/RecruitingNavigation.tsx
+msgid "Search roles"
+msgstr ""
+
 #: src/pages/ActivityList.tsx
 msgid "Search runs"
 msgstr ""
@@ -4881,6 +4939,10 @@ msgstr ""
 msgid "Show more"
 msgstr "显示更多"
 
+#: src/pages/Shell.tsx
+msgid "Show navigation"
+msgstr ""
+
 #: src/pages/Auth.tsx
 msgid "Show password"
 msgstr "显示密码"
@@ -5041,6 +5103,10 @@ msgstr ""
 #: src/components/teach/TeachComputerOverlay.tsx
 msgid "Start recording"
 msgstr "开始录制"
+
+#: src/pages/Shell.tsx
+msgid "Start recruiting"
+msgstr ""
 
 #: src/pages/ActivityList.tsx
 msgid "Starting"
@@ -5229,6 +5295,10 @@ msgstr "连接超时。"
 #: src/lib/model-connection-preflight.ts
 msgid "The provider is rate-limiting requests."
 msgstr "提供方正在限制请求频率。"
+
+#: src/pages/Shell.tsx
+msgid "The recruiting team changed. Open the role again."
+msgstr ""
 
 #: src/pages/MemorySettingsOverlay.tsx
 msgid "The selected memory provider is not available in this build."
@@ -5468,6 +5538,10 @@ msgstr ""
 #: src/pages/BotContextMenu.tsx
 msgid "Unpin"
 msgstr "取消置顶"
+
+#: src/pages/shell/RecruitingNavigation.tsx
+msgid "Unread"
+msgstr ""
 
 #. placeholder {0}: pending.file.name
 #: src/pages/Shell.tsx
