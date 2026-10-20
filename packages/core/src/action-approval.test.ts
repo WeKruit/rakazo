@@ -174,6 +174,53 @@ describe("toolRequiresApproval", () => {
     expect(toolRequiresExplicitApproval(toolName)).toBe(true);
   });
 
+  it.each([
+    [
+      "https://gmailmcp.googleapis.com/mcp/v1",
+      ["create_draft", "label_message", "label_thread", "unlabel_message", "unlabel_thread"],
+      "gmail",
+    ],
+    [
+      "https://calendarmcp.googleapis.com/mcp/v1",
+      ["create_event", "update_event", "delete_event", "respond_to_event"],
+      "calendar",
+    ],
+  ])(
+    "requires one-time approval only for exact official Google writes at %s",
+    (endpoint, operations, prefix) => {
+      for (const operation of operations)
+        for (const name of [operation, `${prefix}.${operation}`]) {
+          const route = { connectorId: "mcp", toolName: name };
+          expect(toolRequiresExplicitApproval("renamed", route, {}, endpoint)).toBe(true);
+          expect(
+            toolRequiresExplicitApproval("renamed", route, {}, "https://example.test/mcp"),
+          ).toBe(false);
+          for (const equivalent of [
+            `${endpoint}?other=1`,
+            `${endpoint}/`,
+            endpoint.replace(".com/", ".com:443/"),
+            endpoint.replace("googleapis.com", "GOOGLEAPIS.COM"),
+          ])
+            expect(toolRequiresExplicitApproval("renamed", route, {}, equivalent)).toBe(true);
+          for (const foreign of [
+            endpoint.replace("googleapis.com", "googleapis.com.evil.test"),
+            endpoint.replace("/mcp/v1", "/other"),
+            endpoint.replace("https:", "http:"),
+            "invalid",
+          ])
+            expect(toolRequiresExplicitApproval("renamed", route, {}, foreign)).toBe(false);
+        }
+      expect(
+        toolRequiresExplicitApproval(
+          "renamed",
+          { connectorId: "mcp", toolName: "list_events" },
+          {},
+          endpoint,
+        ),
+      ).toBe(false);
+    },
+  );
+
   it("requires approval for consequential builtins and destination writes", () => {
     expect(toolRequiresApproval("destination.write", false)).toBe(true);
     expect(toolRequiresApproval("destination.write", true)).toBe(true);

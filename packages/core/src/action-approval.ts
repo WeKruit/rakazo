@@ -69,6 +69,35 @@ const EXPLICIT_APPROVAL_COMPOSIO_OPERATIONS = new Set([
   "GOOGLECALENDAR_EVENTS_IMPORT",
 ]);
 
+const GOOGLE_MCP_GMAIL_WRITES = new Set([
+  "create_draft",
+  "label_message",
+  "label_thread",
+  "unlabel_message",
+  "unlabel_thread",
+]);
+const GOOGLE_MCP_CALENDAR_WRITES = new Set([
+  "create_event",
+  "update_event",
+  "delete_event",
+  "respond_to_event",
+]);
+
+/** Exact Google Workspace MCP writes, including the service-qualified wire names. */
+export function nativeGoogleMcpWriteEndpoint(toolName: string): string | undefined {
+  if (
+    GOOGLE_MCP_GMAIL_WRITES.has(toolName) ||
+    (toolName.startsWith("gmail.") && GOOGLE_MCP_GMAIL_WRITES.has(toolName.slice(6)))
+  )
+    return "https://gmailmcp.googleapis.com/mcp/v1";
+  if (
+    GOOGLE_MCP_CALENDAR_WRITES.has(toolName) ||
+    (toolName.startsWith("calendar.") && GOOGLE_MCP_CALENDAR_WRITES.has(toolName.slice(9)))
+  )
+    return "https://calendarmcp.googleapis.com/mcp/v1";
+  return undefined;
+}
+
 const UNATTENDED_SAFE_BUILTIN_TOOLS = new Set([
   "recruiting_candidates",
   "browser_snapshot",
@@ -143,12 +172,25 @@ export function toolRequiresExplicitApproval(
   toolName: string,
   route?: { connectorId: string; toolName: string },
   args?: Record<string, unknown>,
+  serverEndpoint?: string | null,
 ): boolean {
   if (
     EXPLICIT_APPROVAL_BUILTIN_TOOLS.has(toolName) ||
     (route?.connectorId === "mcp" && EXPLICIT_APPROVAL_MCP_OPERATIONS.has(route.toolName))
   )
     return true;
+  if (route?.connectorId === "mcp" && serverEndpoint) {
+    try {
+      const url = new URL(serverEndpoint);
+      if (
+        `${url.origin}${url.pathname.replace(/\/$/, "")}` ===
+        nativeGoogleMcpWriteEndpoint(route.toolName)
+      )
+        return true;
+    } catch {
+      /* A malformed endpoint cannot identify the official service. */
+    }
+  }
   if (route?.connectorId !== "composio") return false;
   const operation = route.toolName.toUpperCase();
   if (EXPLICIT_APPROVAL_COMPOSIO_OPERATIONS.has(operation)) return true;

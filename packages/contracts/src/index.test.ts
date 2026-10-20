@@ -31,6 +31,49 @@ import {
 } from "./index.js";
 
 describe("contracts", () => {
+  it("accepts pre-registered MCP OAuth clients without allowing protocol or secret URL parameters", () => {
+    const schema = appContract.mcp.oauth.begin["~orpc"].inputSchema!;
+    const input = {
+      serverId: "server-1",
+      redirectUri: "https://app.example.test/mcp/oauth/callback",
+      oauth: {
+        clientId: "registered-client",
+        clientSecret: "private-client-secret",
+        scopes: ["mail.readonly"],
+        authorizationParams: { access_type: "offline", prompt: "consent" },
+      },
+    };
+    expect(schema.parse(input)).toEqual(input);
+    for (const key of [
+      "state",
+      "client_id",
+      "client_secret",
+      "redirect_uri",
+      "response_type",
+      "response_mode",
+      "request",
+      "request_uri",
+      "code_challenge",
+      "code_challenge_method",
+      "resource",
+      "scope",
+      "access_token",
+    ]) {
+      expect(
+        schema.safeParse({
+          ...input,
+          oauth: { ...input.oauth, authorizationParams: { [key]: "override" } },
+        }).success,
+      ).toBe(false);
+    }
+    expect(
+      schema.safeParse({
+        ...input,
+        oauth: { ...input.oauth, authorizationParams: { prompt: input.oauth.clientSecret } },
+      }).success,
+    ).toBe(false);
+  });
+
   it("keeps an exact run selector on the existing authorized thread stop target", () => {
     const schema = appContract.threads.stop["~orpc"].inputSchema!;
     expect(schema.parse({ groupId: "group-1", runId: "run-1" })).toEqual({
