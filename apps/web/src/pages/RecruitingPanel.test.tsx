@@ -5982,7 +5982,7 @@ it("switches Cards/Table with one original-revision detail, preserves a refreshe
   expect(view.container.textContent).not.toContain("Built a compiler");
 });
 
-it("shows exact brief prose and sourced details while collecting unresolved questions in Missing info", async () => {
+it("shows sourced brief prose and unresolved confirmation questions in Role and Missing info", async () => {
   const brief = {
     fields: [
       {
@@ -6053,8 +6053,8 @@ it("shows exact brief prose and sourced details while collecting unresolved ques
   expect(prose?.closest("li")?.textContent).toContain(source.quote);
   expect(view.container.textContent).toContain("Conflicting information");
   expect(view.container.textContent).toContain("Assumption");
-  expect(view.container.textContent).not.toContain(brief.questions[0]!.question);
-  expect(view.container.textContent).not.toContain(brief.questions[1]!.question);
+  expect(view.container.textContent).toContain(brief.questions[0]!.question);
+  expect(view.container.textContent).toContain(brief.questions[1]!.question);
   expect(
     [...view.container.querySelectorAll("button")].find(
       (button) => button.textContent === "Confirm brief",
@@ -6269,6 +6269,43 @@ it("renders saved compound requirements with the same nested groups in Role and 
   await view.click("candidate-1");
   check(view.container.querySelector('[role="dialog"]')!);
   expect(api.editCriteria).not.toHaveBeenCalled();
+});
+
+it("shows the required salary question beside disabled confirmation when saved questions are empty", async () => {
+  api.getWorkspace.mockResolvedValue({
+    role,
+    revision: {
+      ...revision,
+      definitionQuestions: [],
+      criteria: revision.criteria.map((criterion) => ({ ...criterion, definitionQuestions: [] })),
+      brief: {
+        fields: [
+          {
+            key: "location",
+            value: "Remote in the United Kingdom",
+            origin: "jd",
+            state: "known",
+            consequential: true,
+            sourceRefIds: [source.id],
+          },
+        ],
+        questions: [],
+        rules: [],
+        searchFilters: [],
+        confirmation: null,
+      },
+    },
+  });
+  const view = await mounted("thread-1", undefined, false);
+  const confirm = [...view.container.querySelectorAll("button")].find(
+    (button) => button.textContent === "Confirm brief",
+  )!;
+  expect(confirm.disabled).toBe(true);
+  expect(confirm.parentElement!.textContent).toContain(
+    "What salary range may be stated in outreach?",
+  );
+  expect(view.container.textContent).not.toContain("salary_range");
+  expect(api.confirmBrief).not.toHaveBeenCalled();
 });
 
 it("confirms only the reviewed brief revision through the human API", async () => {

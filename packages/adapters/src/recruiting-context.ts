@@ -1,6 +1,7 @@
 import { createHash } from "node:crypto";
 import type { AdapterContext, ArtifactStore } from "@rakazo/adapter-kit";
 import type { Actor, RecruitingArtifactRef, RecruitingFeedbackRecord } from "@rakazo/contracts";
+import { recruitingBriefClarifications } from "@rakazo/core";
 import type { PrismaClient, ThreadEvents } from "@rakazo/db";
 import {
   getRecruitingWorkspace,
@@ -86,7 +87,12 @@ export async function loadRecruitingRunContext(
     "Intake, company/JD research and recovery reads do not require redundant confirmation. Formal calibration requires actual human G0 approval and G1 approval of the JD/deck package, unless the human explicitly deferred S2 after G0. Reconfirm materially revised requirements or JD/deck at the applicable gate. A saved record is not human approval. Outside formal calibration or scale, small-scale exploration or same-task feedback/more results explicitly authorized by the current human request do not require G0/G1; follow the requested scope and usage limits, reuse the same verified provider task for continuation, and avoid technical saved-record confirmation or repeated approvals. Keep unknowns and pending cards; this does not approve requirements, JD/deck, business policies, calibration or scale. Keep human rule changes explicit; never recast changed qualification as round-only scope. G2 approval of the calibration profiles and rule changes is required before scale, even on the same task. These formal calibration/scale gates apply to native MCP too; ordinary continuation does not require saved-workspace research actions.",
     "<recruiting_role>",
     JSON.stringify(
-      workspace,
+      {
+        ...workspace,
+        derivedClarifications: workspace.revision.brief
+          ? recruitingBriefClarifications(workspace.revision.brief)
+          : null,
+      },
       (_key, value) => (typeof value === "string" ? redact(value) : value),
       2,
     ),

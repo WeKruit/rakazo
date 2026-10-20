@@ -103,6 +103,93 @@ describe("recruiting run context", () => {
     db.feedback.mockResolvedValue({ feedback: [], nextCursor: null });
   });
 
+  it.each(["absent", "missing", "ready"] as const)(
+    "projects %s salary clarifications in initial and native role-read context without changing saved questions",
+    async (salary) => {
+      const brief = {
+        searchFilters: [],
+        fields: [
+          {
+            key: "location",
+            value: "Bay Area, on-site",
+            state: "known" as const,
+            origin: "user_instruction" as const,
+            consequential: true,
+            sourceRefIds: [],
+          },
+          ...(salary === "absent"
+            ? []
+            : [
+                {
+                  key: "salary_range",
+                  value: salary === "ready" ? "USD 180,000–270,000" : null,
+                  state: salary === "ready" ? ("known" as const) : ("missing" as const),
+                  origin: "user_instruction" as const,
+                  consequential: true,
+                  sourceRefIds: [],
+                },
+              ]),
+        ],
+        rules: [],
+        questions: [],
+        confirmation:
+          salary === "ready"
+            ? {
+                revision: 1,
+                userId: run.userId,
+                messageId: "confirmed",
+                confirmedAt: "2026-10-20T00:00:00.000Z",
+              }
+            : null,
+      };
+      const current = { ...workspace, revision: { ...workspace.revision, brief } };
+      const savedBefore = JSON.stringify(current);
+      db.workspace.mockResolvedValue(current);
+      const { deps } = fixture();
+      deps.prisma = {
+        run: { findFirst: vi.fn().mockResolvedValue({ ...run, bot: run }) },
+      } as unknown as PrismaClient;
+      const initial = await loadRecruitingRunContext(deps, run, { documents: [] }, context, {
+        reason: "run",
+      });
+      const read = await executeRecruitingRoleTool(
+        deps.prisma,
+        {
+          actor: { spaceId: run.spaceId, userId: run.userId, email: "", isDeploymentOwner: false },
+          runId: run.id,
+          sourceMessageId: null,
+        },
+        { operation: "read" },
+      );
+      const adopted = await loadRecruitingRunContext(deps, run, { documents: [] }, context, {
+        reason: "role_tool",
+        placement: "tool_result",
+        trustedWorkspace: read.workspace!,
+      });
+
+      for (const loaded of [initial!, adopted!]) {
+        const projected = JSON.parse(
+          loaded.manifest.roleText.match(/<recruiting_role>\n([\s\S]*)\n<\/recruiting_role>/)![1]!,
+        );
+        expect(projected.derivedClarifications).toEqual(
+          salary === "ready"
+            ? []
+            : [
+                {
+                  fieldKey: "salary_range",
+                  question: "What salary range may be stated in outreach?",
+                },
+              ],
+        );
+        expect(projected.revision.brief).toEqual(brief);
+        expect(loaded.workspace).toBe(current);
+      }
+      expect(read.workspace).toBe(current);
+      expect(current.revision.brief.questions).toEqual([]);
+      expect(JSON.stringify(current)).toBe(savedBefore);
+    },
+  );
+
   it("adopts bounded durable human feedback with the role context after restart", async () => {
     const { deps } = fixture();
     const feedback = [
