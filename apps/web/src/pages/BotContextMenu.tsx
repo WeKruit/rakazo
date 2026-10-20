@@ -43,6 +43,7 @@ export function BotContextMenu({
   onClear,
   onArchive,
   onDelete,
+  showDeveloperActions,
 }: {
   bot: ChatMenuTarget;
   position: ContextMenuPosition;
@@ -58,6 +59,7 @@ export function BotContextMenu({
   onClear: () => void;
   onArchive: () => void;
   onDelete: () => void;
+  showDeveloperActions: boolean;
 }) {
   const { t } = useLingui();
 
@@ -86,67 +88,73 @@ export function BotContextMenu({
         sideOffset={0}
         className="max-h-[min(420px,calc(100vh-16px))] w-[264px] overflow-y-auto"
       >
-        <DropdownMenuItem onClick={onTogglePinned}>
-          <Pin />
-          {bot.pinned ? t`Unpin` : t`Pin`}
-        </DropdownMenuItem>
-        <DropdownMenuSub>
-          <DropdownMenuSubTrigger>
-            <Folder />
-            {t`Move to`}
-          </DropdownMenuSubTrigger>
-          <DropdownMenuSubContent className="max-h-[min(420px,calc(100vh-16px))] min-w-[180px] overflow-y-auto">
-            {sections.map((section) => (
-              <DropdownMenuItem key={section.id} onClick={() => onMoveToSection(section.id)}>
+        {showDeveloperActions ? (
+          <>
+            <DropdownMenuItem onClick={onTogglePinned}>
+              <Pin />
+              {bot.pinned ? t`Unpin` : t`Pin`}
+            </DropdownMenuItem>
+            <DropdownMenuSub>
+              <DropdownMenuSubTrigger>
                 <Folder />
-                <span dir="auto">{section.name}</span>
-                {bot.sectionId === section.id ? <Check className="ms-auto" /> : null}
-              </DropdownMenuItem>
-            ))}
-            <DropdownMenuItem onClick={() => onMoveToSection(null)}>
-              <Folder />
-              {t`Unassigned`}
-              {bot.sectionId === null ? <Check className="ms-auto" /> : null}
+                {t`Move to`}
+              </DropdownMenuSubTrigger>
+              <DropdownMenuSubContent className="max-h-[min(420px,calc(100vh-16px))] min-w-[180px] overflow-y-auto">
+                {sections.map((section) => (
+                  <DropdownMenuItem key={section.id} onClick={() => onMoveToSection(section.id)}>
+                    <Folder />
+                    <span dir="auto">{section.name}</span>
+                    {bot.sectionId === section.id ? <Check className="ms-auto" /> : null}
+                  </DropdownMenuItem>
+                ))}
+                <DropdownMenuItem onClick={() => onMoveToSection(null)}>
+                  <Folder />
+                  {t`Unassigned`}
+                  {bot.sectionId === null ? <Check className="ms-auto" /> : null}
+                </DropdownMenuItem>
+                <DropdownMenuSeparator />
+                <DropdownMenuItem onClick={onCreateSection}>
+                  <FolderPlus />
+                  {t`New section`}
+                </DropdownMenuItem>
+                {bot.sectionId && onRenameSection ? (
+                  <DropdownMenuItem onClick={() => onRenameSection(bot.sectionId!)}>
+                    <Pencil />
+                    {t`Rename section`}
+                  </DropdownMenuItem>
+                ) : null}
+              </DropdownMenuSubContent>
+            </DropdownMenuSub>
+            <DropdownMenuItem onClick={onToggleUnread}>
+              {bot.unread ? <BellDot /> : <Bell />}
+              {bot.unread ? t`Mark as Read` : t`Mark as Unread`}
             </DropdownMenuItem>
             <DropdownMenuSeparator />
-            <DropdownMenuItem onClick={onCreateSection}>
-              <FolderPlus />
-              {t`New section`}
+            <DropdownMenuItem onClick={onEdit}>
+              <Pencil />
+              {t`Edit Profile`}
             </DropdownMenuItem>
-            {bot.sectionId && onRenameSection ? (
-              <DropdownMenuItem onClick={() => onRenameSection(bot.sectionId!)}>
-                <Pencil />
-                {t`Rename section`}
-              </DropdownMenuItem>
-            ) : null}
-          </DropdownMenuSubContent>
-        </DropdownMenuSub>
-        <DropdownMenuItem onClick={onToggleUnread}>
-          {bot.unread ? <BellDot /> : <Bell />}
-          {bot.unread ? t`Mark as Read` : t`Mark as Unread`}
-        </DropdownMenuItem>
-        <DropdownMenuSeparator />
-        <DropdownMenuItem onClick={onEdit}>
-          <Pencil />
-          {t`Edit Profile`}
-        </DropdownMenuItem>
-        <DropdownMenuItem onClick={onDuplicate}>
-          <Copy />
-          {t`Duplicate`}
-        </DropdownMenuItem>
-        <DropdownMenuSeparator />
-        <DropdownMenuItem onClick={onClear}>
-          <Eraser />
-          {t`Clear conversation`}
-        </DropdownMenuItem>
+            <DropdownMenuItem onClick={onDuplicate}>
+              <Copy />
+              {t`Duplicate`}
+            </DropdownMenuItem>
+            <DropdownMenuSeparator />
+            <DropdownMenuItem onClick={onClear}>
+              <Eraser />
+              {t`Clear conversation`}
+            </DropdownMenuItem>
+          </>
+        ) : null}
         <DropdownMenuItem onClick={onArchive}>
           <Archive />
           {t`Archive`}
         </DropdownMenuItem>
-        <DropdownMenuItem variant="destructive" onClick={onDelete}>
-          <Trash2 />
-          {t`Delete`}
-        </DropdownMenuItem>
+        {showDeveloperActions ? (
+          <DropdownMenuItem variant="destructive" onClick={onDelete}>
+            <Trash2 />
+            {t`Delete`}
+          </DropdownMenuItem>
+        ) : null}
       </DropdownMenuContent>
     </DropdownMenu>
   );

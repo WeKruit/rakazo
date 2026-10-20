@@ -959,6 +959,8 @@ function RecruitingWorkspaceShot() {
       <aside className="hidden w-[248px] shrink-0 border-e border-sidebar-border bg-sidebar pt-6 md:flex">
         <RecruitingNavigation
           groups={[group]}
+          archivedGroups={[]}
+          archivedOpen={false}
           groupId={group.id}
           query={query}
           dashboardOpen
@@ -969,6 +971,11 @@ function RecruitingWorkspaceShot() {
           onDashboard={() => undefined}
           onOpenRole={() => undefined}
           onNewRole={() => undefined}
+          canCreateRoleFrom={() => false}
+          onNewRoleFrom={() => undefined}
+          onRoleMenu={() => undefined}
+          onToggleArchived={() => undefined}
+          onRestoreRole={() => undefined}
         />
       </aside>
       <section className="mx-auto min-w-0 max-w-[1180px] flex-1 px-4 py-6 md:px-8">
