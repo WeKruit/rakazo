@@ -211,7 +211,12 @@ async function requireRole(
   return role;
 }
 
-async function requireRun(tx: Tx, actor: Actor, runId: string) {
+async function requireRun(
+  tx: Tx,
+  actor: Actor,
+  runId: string,
+  authorizedThread?: Awaited<ReturnType<typeof requireThread>>,
+) {
   const run = scoped(
     actor,
     await tx.run.findFirst({
@@ -227,7 +232,8 @@ async function requireRun(tx: Tx, actor: Actor, runId: string) {
     }),
   );
   scoped(actor, run.bot);
-  await requireThread(tx, actor, run.threadId);
+  if (run.threadId === authorizedThread?.id) scoped(actor, authorizedThread);
+  else await requireThread(tx, actor, run.threadId);
   return run;
 }
 
@@ -236,7 +242,7 @@ async function validateArtifact(
   actor: Actor,
   ref: RecruitingArtifactRef,
   context?: {
-    run: Awaited<ReturnType<typeof requireRun>>;
+    run?: Awaited<ReturnType<typeof requireRun>>;
     thread: Awaited<ReturnType<typeof requireThread>>;
   },
 ) {
@@ -249,9 +255,9 @@ async function validateArtifact(
   if (artifact.hash !== ref.sha256 || (!artifact.groupId && !artifact.botId))
     throw new IsolationError();
   const run = artifact.runId
-    ? artifact.runId === context?.run.id
+    ? artifact.runId === context?.run?.id
       ? scoped(actor, context.run)
-      : await requireRun(tx, actor, artifact.runId)
+      : await requireRun(tx, actor, artifact.runId, context?.thread)
     : null;
   const thread = await tx.thread.findFirst({
     where: {
@@ -277,6 +283,7 @@ async function validateSources(
   actor: Actor,
   sources: readonly RecruitingSourceRef[],
   authorizedThread?: Awaited<ReturnType<typeof requireThread>>,
+  authorizedRun?: Awaited<ReturnType<typeof requireRun>>,
 ) {
   const artifacts = new Set<string>();
   const messageIds = new Set<string>();
@@ -284,7 +291,12 @@ async function validateSources(
     if (source.anchor.kind === "artifact") {
       const key = `${source.anchor.artifact.artifactId}:${source.anchor.artifact.sha256}`;
       if (artifacts.has(key)) continue;
-      await validateArtifact(tx, actor, source.anchor.artifact);
+      await validateArtifact(
+        tx,
+        actor,
+        source.anchor.artifact,
+        authorizedThread ? { run: authorizedRun, thread: authorizedThread } : undefined,
+      );
       artifacts.add(key);
     } else {
       messageIds.add(source.anchor.messageId);
@@ -335,8 +347,9 @@ async function validateDefinition(
   actor: Actor,
   definition: Pick<RecruitingRoleRevision, "sourceRefs" | "criteria">,
   authorizedThread?: Awaited<ReturnType<typeof requireThread>>,
+  authorizedRun?: Awaited<ReturnType<typeof requireRun>>,
 ) {
-  return validateSources(tx, actor, definitionSources(definition), authorizedThread);
+  return validateSources(tx, actor, definitionSources(definition), authorizedThread, authorizedRun);
 }
 
 /** Trusted native storage access, separate from the submitted role definition. */
@@ -431,6 +444,7 @@ async function roleSnapshot(
   actor: Actor,
   role: RecruitingRole,
   authorizedThread?: Awaited<ReturnType<typeof requireThread>>,
+  authorizedRun?: Awaited<ReturnType<typeof requireRun>>,
 ): Promise<RoleSnapshot> {
   const row = await tx.recruitingRoleRevision.findFirst({
     where: { id: role.currentRevisionId, roleId: role.id, revision: role.revision },
@@ -440,7 +454,7 @@ async function roleSnapshot(
     ...row,
     createdAt: row.createdAt.toISOString(),
   });
-  await validateDefinition(tx, actor, revision, authorizedThread);
+  await validateDefinition(tx, actor, revision, authorizedThread, authorizedRun);
   if (revision.brief) validateRecruitingBrief(revision.brief, revision);
   const { crmBindingEffectId: _crm, ...publicRole } = role as RecruitingRole & {
     crmBindingEffectId?: string | null;
@@ -3919,7 +3933,7 @@ async function researchContextInTransaction(
   let task = taskId ? await tx.recruitingResearchTask.findUnique({ where: { id: taskId } }) : null;
   const roleId = input.historical && task ? task.roleId : thread.activeRecruitingRoleId;
   if (!roleId) throw new IsolationError();
-  const role = await requireRole(tx, actor, roleId, true);
+  const role = await requireRole(tx, actor, roleId, true, thread);
   let nativeResearchTarget: NativeRecruitingResearchTarget | undefined;
   if (!action && input.toolName === "reply" && input.purpose === "scale") {
     const gate = await requireRecruitingResearchGate(tx, actor, input, role, task);
@@ -3945,7 +3959,7 @@ async function researchContextInTransaction(
   }
   if (input.expectedRoleRevision !== undefined && role.revision !== input.expectedRoleRevision)
     throw new RecruitingConflictError();
-  const workspace = await roleSnapshot(tx, actor, role);
+  const workspace = await roleSnapshot(tx, actor, role, thread, run);
   const source = input.intent
     ? (
         await requireResearchSource(
@@ -3958,7 +3972,8 @@ async function researchContextInTransaction(
       ).source
     : null;
   if ((taskId && !task) || (task && task.roleId !== role.id)) throw new IsolationError();
-  if (task) await requireRun(tx, actor, task.createdByRunId);
+  if (task && task.createdByRunId !== run.id)
+    await requireRun(tx, actor, task.createdByRunId, thread);
   const boundServerId = task?.mcpServerId ?? nativeResearchTarget?.mcpServerId;
   if (input.mcpServerId && boundServerId && input.mcpServerId !== boundServerId)
     throw new IsolationError();
@@ -4016,7 +4031,8 @@ async function researchContextInTransaction(
       }))
     )
       throw new IsolationError();
-    const origin = await requireRun(tx, actor, action.runId);
+    const origin =
+      action.runId === run.id ? run : await requireRun(tx, actor, action.runId, thread);
     const message = await tx.message.findUnique({
       where: { id: action.sourceMessageId },
       include: humanMessageInclude,
@@ -4037,7 +4053,7 @@ async function researchContextInTransaction(
       ...(snapshot.receiptArtifact ? [snapshot.receiptArtifact] : []),
       ...snapshot.outputArtifacts,
     ])
-      await validateArtifact(tx, actor, ref);
+      await validateArtifact(tx, actor, ref, { run, thread });
     requestArtifact = await tx.artifact.findUniqueOrThrow({
       where: { id: action.requestArtifactId },
     });
@@ -4053,7 +4069,7 @@ async function researchContextInTransaction(
         }))
       )
         throw new IsolationError();
-      await requireRun(tx, actor, effect.runId);
+      if (effect.runId !== run.id) await requireRun(tx, actor, effect.runId, thread);
     }
   }
   return {
@@ -4244,7 +4260,15 @@ export async function prepareRecruitingResearchAction(
       !input.clientNonce
     )
       throw new IsolationError();
-    await requireResearchAdoption(tx, actor, run, workspace.role, input.contextArtifact);
+    await requireResearchAdoption(
+      tx,
+      actor,
+      run,
+      workspace.role,
+      input.contextArtifact,
+      undefined,
+      { run, thread },
+    );
     if (
       input.providerTaskId !== undefined &&
       input.providerTaskId !==
@@ -4478,11 +4502,22 @@ async function researchCanDispatch(
   )
     return false;
   try {
-    await requireResearchAdoption(tx, actor, origin, workspace.role, {
-      artifactId: action.contextArtifactId,
-      sha256: action.contextArtifactHash,
+    await requireResearchAdoption(
+      tx,
+      actor,
+      origin,
+      workspace.role,
+      {
+        artifactId: action.contextArtifactId,
+        sha256: action.contextArtifactHash,
+      },
+      undefined,
+      { run, thread },
+    );
+    await requireResearchAdoption(tx, actor, run, workspace.role, undefined, undefined, {
+      run,
+      thread,
     });
-    await requireResearchAdoption(tx, actor, run, workspace.role);
   } catch (error) {
     if (error instanceof RecruitingConflictError) return false;
     throw error;
