@@ -61,10 +61,36 @@ function harness(
     },
     messageCreate,
     runCreate,
+    eventCreate: tx.event.create,
   };
 }
 
 describe("group handoff ownership", () => {
+  it("retries a transaction conflict before creating one child and notifying once", async () => {
+    const { deps, messageCreate, runCreate, eventCreate } = harness([
+      { kind: "text", text: "user request" },
+    ]);
+    messageCreate.mockRejectedValueOnce(
+      Object.assign(new Error("write conflict or a deadlock"), { code: "P2034" }),
+    );
+
+    await expect(
+      handoffToGroupBot(deps as never, run, "group-1", {
+        bot_id: "bot-b",
+        message: "Do the distinct next stage",
+      }),
+    ).resolves.toMatchObject({ ok: true, botId: "bot-b", runId: "run-b" });
+
+    expect(deps.prisma.$transaction).toHaveBeenCalledTimes(2);
+    expect(messageCreate).toHaveBeenCalledTimes(2);
+    expect(runCreate).toHaveBeenCalledOnce();
+    expect(eventCreate).toHaveBeenCalledOnce();
+    expect(deps.events.notify).toHaveBeenCalledExactlyOnceWith(run.threadId, 1);
+    expect(deps.jobs.enqueue).toHaveBeenCalledExactlyOnceWith(
+      expect.objectContaining({ name: "run.continue", payload: { runId: "run-b" } }),
+    );
+  });
+
   it("marks a new ownership transfer as a follow-up with a chain hop", async () => {
     const { deps, messageCreate, runCreate } = harness([{ kind: "text", text: "user request" }]);
 

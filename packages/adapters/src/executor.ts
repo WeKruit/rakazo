@@ -165,6 +165,7 @@ import {
   SpaceLimitError,
   searchHistory,
   settleUncertainRecruitingResearchAction,
+  withTransactionRetry,
 } from "@rakazo/db";
 import { getLogger } from "@rakazo/logging";
 import { parse as parseShellCommand } from "shell-quote";
@@ -10257,8 +10258,10 @@ async function publishMessage(
     blocks = blocks.filter((block) => block.kind === "ask" || block.kind === "computer");
     if (blocks.length === 0) return null;
   }
-  const committed = await deps.prisma.$transaction((tx) =>
-    persistMessageInTransaction(tx, run, role, blocks, markUnread, clientNonce),
+  const committed = await withTransactionRetry(() =>
+    deps.prisma.$transaction((tx) =>
+      persistMessageInTransaction(tx, run, role, blocks, markUnread, clientNonce),
+    ),
   );
   await deps.events.notify(run.threadId, committed.eventSeq).catch((error) => {
     getLogger().error("thread message realtime notification", error);
