@@ -92,6 +92,15 @@ function fixture(crmBindingEffectId: string | null = null) {
     },
   ];
   const humanMessages = new Map<string, Record<string, unknown>>();
+  const sourceMessage = (id: string) =>
+    humanMessages.get(id) ?? {
+      id,
+      threadId: "thread",
+      role: "user",
+      botId: null,
+      externalTranscriptFor: null,
+      blocks: [{ kind: "text", text: "GBP 90,000 to 120,000. Location unrestricted." }],
+    };
   const tx = {
     $queryRaw: vi.fn(async () => []),
     thread: {
@@ -100,18 +109,9 @@ function fixture(crmBindingEffectId: string | null = null) {
     },
     bot: { findFirst: vi.fn(async () => actor) },
     message: {
-      findUnique: vi.fn(
-        async ({ where }) =>
-          humanMessages.get(where.id) ?? {
-            id: "jd-message",
-            role: "user",
-            botId: null,
-            externalTranscriptFor: null,
-            blocks: [{ kind: "text", text: "GBP 90,000 to 120,000. Location unrestricted." }],
-          },
-      ),
+      findUnique: vi.fn(async ({ where }) => sourceMessage(where.id)),
       findMany: vi.fn(async ({ where }: { where: { id: { in: string[] } } }) =>
-        where.id.in.map((id) => humanMessages.get(id) ?? { id, threadId: "thread" }),
+        where.id.in.map(sourceMessage),
       ),
       create: vi.fn(async ({ data }) => {
         const message = {
@@ -151,7 +151,7 @@ function fixture(crmBindingEffectId: string | null = null) {
   const prisma = {
     $transaction: vi.fn(async (callback) => callback(tx)),
   } as unknown as PrismaClient;
-  return { prisma, tx, thread, revisions };
+  return { prisma, tx, thread, revisions, humanMessages };
 }
 
 function criteriaFixture(crmBindingEffectId: string | null = null) {
@@ -459,8 +459,6 @@ describe("native human criterion editing", () => {
     if (mode === "raced-binding")
       f.tx.thread.findFirst
         .mockImplementationOnce(async () => f.thread)
-        .mockImplementationOnce(async () => f.thread)
-        .mockImplementationOnce(async () => f.thread)
         .mockImplementation(async () => ({ ...f.thread, activeRecruitingRoleId: "foreign" }));
     await expect(recruiting.editRecruitingCriteria(f.prisma, actor, f.input)).rejects.toThrow();
     expect(f.tx.message.create).not.toHaveBeenCalled();
@@ -468,8 +466,9 @@ describe("native human criterion editing", () => {
 
   it("rechecks original source quotes rather than trusting the retained snapshot", async () => {
     const f = criteriaFixture();
-    f.tx.message.findUnique.mockResolvedValue({
+    f.humanMessages.set("jd-message", {
       id: "jd-message",
+      threadId: "thread",
       role: "user",
       botId: null,
       externalTranscriptFor: null,
@@ -838,8 +837,9 @@ describe("native human brief confirmation", () => {
 
 it("revalidates the original quoted material before recording confirmation", async () => {
   const f = fixture();
-  f.tx.message.findUnique.mockResolvedValueOnce({
+  f.humanMessages.set("jd-message", {
     id: "jd-message",
+    threadId: "thread",
     role: "user",
     botId: null,
     externalTranscriptFor: null,
@@ -1214,6 +1214,100 @@ describe("original PDF source validation (mocked DB, storage and processor)", ()
     expect(extractPdfText).toHaveBeenCalledTimes(2);
   });
 
+  it("batch-loads quoted messages while still rejecting a forged second quote", async () => {
+    const f = pdfFixture();
+    const human = {
+      id: "jd-message",
+      threadId: "thread",
+      role: "user",
+      botId: null,
+      externalTranscriptFor: null,
+      blocks: [{ kind: "text", text: "GBP 90,000 to 120,000. Location unrestricted." }],
+    };
+    f.humanMessages.set(human.id, human);
+    f.humanMessages.set("second-human", { ...human, id: "second-human" });
+    const { sourceRefs } = ReviseRecruitingRoleInput.parse({
+      ...f.input,
+      sourceRefs: [
+        ...f.input.sourceRefs,
+        f.revisions[0]!.sourceRefs[0]!,
+        {
+          ...f.revisions[0]!.sourceRefs[0]!,
+          id: "location-quote",
+          quote: "Location unrestricted.",
+        },
+        {
+          ...f.revisions[0]!.sourceRefs[0]!,
+          id: "second-human-source",
+          anchor: { kind: "message", messageId: "second-human", locator: "blocks[0].text" },
+        },
+      ],
+    });
+    await recruiting.reviseRecruitingRole(f.prisma, actor, { ...f.input, sourceRefs }, f.material);
+    expect(f.tx.message.findUnique).not.toHaveBeenCalled();
+    expect(f.tx.artifact.findUniqueOrThrow).toHaveBeenCalledOnce();
+    const messageLock = f.tx.$queryRaw.mock.calls.findIndex(([query]) =>
+      (query as { sql?: string })?.sql?.includes('FROM "messages"'),
+    );
+    expect(
+      f.tx.$queryRaw.mock.calls.filter(([query]) =>
+        (query as { sql?: string })?.sql?.includes('FROM "messages"'),
+      ),
+    ).toHaveLength(1);
+    const fullRead = f.tx.message.findMany.mock.calls.findIndex(([args]) => "include" in args);
+    expect(f.tx.message.findMany.mock.invocationCallOrder[0]).toBeLessThan(
+      f.tx.$queryRaw.mock.invocationCallOrder[messageLock]!,
+    );
+    expect(f.tx.$queryRaw.mock.invocationCallOrder[messageLock]).toBeLessThan(
+      f.tx.message.findMany.mock.invocationCallOrder[fullRead]!,
+    );
+    expect(f.provider).toHaveBeenCalledOnce();
+    expect(extractPdfText).toHaveBeenCalledOnce();
+
+    f.tx.recruitingRoleRevision.create.mockClear();
+    await expect(
+      recruiting.reviseRecruitingRole(
+        f.prisma,
+        actor,
+        {
+          ...f.input,
+          expectedRevision: 2,
+          sourceRefs: sourceRefs.map((source) =>
+            source.id === "second-quote" ? { ...source, quote: "Invented evidence" } : source,
+          ),
+        },
+        f.material,
+      ),
+    ).rejects.toThrow(recruiting.RecruitingSourceValidationError);
+    expect(f.tx.recruitingRoleRevision.create).not.toHaveBeenCalled();
+  });
+
+  it("rejects a foreign message before locking sources or loading their full content", async () => {
+    const f = pdfFixture();
+    f.humanMessages.set("jd-message", { id: "jd-message", threadId: "foreign-thread" });
+    f.tx.thread.findFirst.mockImplementation(async ({ where }) =>
+      where.id === "foreign-thread" ? { ...f.thread, userId: "foreign" } : f.thread,
+    );
+    await expect(
+      recruiting.reviseRecruitingRole(
+        f.prisma,
+        actor,
+        ReviseRecruitingRoleInput.parse({
+          ...f.input,
+          sourceRefs: [f.source, f.revisions[0]!.sourceRefs[0]!],
+        }),
+        f.material,
+      ),
+    ).rejects.toThrow(IsolationError);
+    expect(
+      f.tx.$queryRaw.mock.calls.filter(([query]) =>
+        (query as { sql?: string })?.sql?.includes("FOR SHARE"),
+      ),
+    ).toHaveLength(0);
+    expect(f.tx.message.findMany.mock.calls.some(([args]) => "include" in args)).toBe(false);
+    expect(f.tx.recruitingRoleRevision.create).not.toHaveBeenCalled();
+  });
+
   it.each([
     "foreign",
     "hash",
@@ -1454,20 +1548,15 @@ async function calibrationFixture() {
   }));
   const quoteFor = (profile: (typeof profiles)[number]) =>
     `Profile ${profile.linkedinUrl}\nEvidence ${profile.evidenceUrl}`;
-  const findMessage = f.tx.message.findUnique.getMockImplementation()!;
-  f.tx.message.findUnique.mockImplementation(async (args) => {
-    const profile = profiles.find((profile) => args.where.id === `profile-${profile.candidateKey}`);
-    return profile
-      ? {
-          id: args.where.id,
-          threadId: "thread",
-          role: "user",
-          botId: null,
-          externalTranscriptFor: null,
-          blocks: [{ kind: "text", text: quoteFor(profile) }],
-        }
-      : findMessage(args);
-  });
+  for (const profile of profiles)
+    f.humanMessages.set(`profile-${profile.candidateKey}`, {
+      id: `profile-${profile.candidateKey}`,
+      threadId: "thread",
+      role: "user",
+      botId: null,
+      externalTranscriptFor: null,
+      blocks: [{ kind: "text", text: quoteFor(profile) }],
+    });
   const assessments = profiles.map((profile) => ({
     roleId: "role",
     candidateKey: profile.candidateKey,
@@ -2149,12 +2238,9 @@ it.each(["-other", "?fake=true", "#section"])(
       ref.selection.end = quote.length;
     }
     f.assessments[0]!.sourceRefs[0]!.url = profile.linkedinUrl;
-    const findMessage = f.tx.message.findUnique.getMockImplementation()!;
-    f.tx.message.findUnique.mockImplementation(async (args) => {
-      const message = await findMessage(args);
-      return args.where.id === `profile-${profile.candidateKey}`
-        ? { ...message, blocks: [{ kind: "text", text: quote }] }
-        : message;
+    f.humanMessages.set(`profile-${profile.candidateKey}`, {
+      ...f.humanMessages.get(`profile-${profile.candidateKey}`),
+      blocks: [{ kind: "text", text: quote }],
     });
     await expect(
       recruiting.prepareRecruitingApproval(f.prisma, actor, f.trusted, f.input, f.material),
