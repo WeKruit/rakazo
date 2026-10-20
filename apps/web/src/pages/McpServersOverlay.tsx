@@ -46,6 +46,8 @@ function oauthActionLabel(server: McpServer, pending: boolean): string {
 export function McpServersOverlay({ onClose }: { onClose: () => void }) {
   const { t } = useLingui();
   const [servers, setServers] = useState<McpServer[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [loadError, setLoadError] = useState<string | null>(null);
   const [bots, setBots] = useState<Bot[]>([]);
   const [botAssignments, setBotAssignments] = useState<Record<string, BotMcpServer[]>>({});
   const [confirmingDelete, setConfirmingDelete] = useState<string | null>(null);
@@ -64,26 +66,35 @@ export function McpServersOverlay({ onClose }: { onClose: () => void }) {
   const [oauthPending, setOauthPending] = useState<string | null>(null);
 
   async function refresh() {
-    const [nextServers, nextBots, assignments] = await Promise.all([
-      rpc.mcp.servers.list(),
-      rpc.bots.list(),
-      rpc.mcp.assignments.all(),
-    ]);
-    const activeBots = nextBots.filter((bot) => !bot.archivedAt);
-    setServers(nextServers);
-    setBots(activeBots);
-    setBotAssignments(
-      Object.fromEntries(
-        activeBots.map((bot) => [
-          bot.id,
-          assignments.filter((assignment) => assignment.botId === bot.id),
-        ]),
-      ),
-    );
+    setLoading(true);
+    setLoadError(null);
+    try {
+      const [nextServers, nextBots, assignments] = await Promise.all([
+        rpc.mcp.servers.list(),
+        rpc.bots.list(),
+        rpc.mcp.assignments.all(),
+      ]);
+      const activeBots = nextBots.filter((bot) => !bot.archivedAt);
+      setServers(nextServers);
+      setBots(activeBots);
+      setBotAssignments(
+        Object.fromEntries(
+          activeBots.map((bot) => [
+            bot.id,
+            assignments.filter((assignment) => assignment.botId === bot.id),
+          ]),
+        ),
+      );
+    } catch (err) {
+      setLoadError(errorText(err, t`Could not load MCP servers`));
+      throw err;
+    } finally {
+      setLoading(false);
+    }
   }
 
   useEffect(() => {
-    void refresh().catch((err: unknown) => setError(errorText(err, t`Could not load MCP servers`)));
+    void refresh().catch(() => undefined);
   }, []);
 
   useEffect(() => {
@@ -318,12 +329,12 @@ export function McpServersOverlay({ onClose }: { onClose: () => void }) {
             <X />
           </DialogClose>
         </DialogHeader>
-        {error ? (
+        {error || loadError ? (
           <p
             role="alert"
             className="mx-6 mt-5 rounded-xl border border-destructive/40 bg-destructive/10 p-3 text-xs text-destructive"
           >
-            {error}
+            {error ?? loadError}
           </p>
         ) : null}
         <div className="rk-scroll grid min-h-0 grid-cols-1 gap-5 overflow-y-auto p-6 lg:grid-cols-2">
@@ -479,7 +490,11 @@ export function McpServersOverlay({ onClose }: { onClose: () => void }) {
               <Trans>Configured servers</Trans>
             </h2>
             <div className="mt-3 space-y-2">
-              {servers.length === 0 ? (
+              {loading && servers.length === 0 ? (
+                <p role="status" className="p-5 text-sm text-muted-foreground">
+                  <Trans>Loading…</Trans>
+                </p>
+              ) : servers.length === 0 && !loadError ? (
                 <p className="rounded-xl border border-dashed border-border p-5 text-sm text-muted-foreground">
                   <Trans>No MCP servers yet.</Trans>
                 </p>
