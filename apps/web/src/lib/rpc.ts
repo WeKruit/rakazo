@@ -77,8 +77,11 @@ const link = new RPCLink<RpcClientContext>({
     }
     const spaceId =
       options.context.spaceId === undefined ? selectedSpaceId() : options.context.spaceId;
+    const headers = withSpaceHeaders(request.headers, spaceId);
+    if (!headers.has("x-request-id")) headers.set("x-request-id", crypto.randomUUID());
+    const started = performance.now();
     const response = await fetch(request, {
-      headers: withSpaceHeaders(request.headers, spaceId),
+      headers,
       credentials: "include",
     });
     if (!response.ok) {
@@ -89,6 +92,9 @@ const link = new RPCLink<RpcClientContext>({
         pathname: new URL(request.url).pathname,
         status: response.status,
         contentType: response.headers.get("content-type"),
+        timestamp: new Date().toISOString(),
+        durationMs: Math.round(performance.now() - started),
+        "sent-x-request-id": headers.get("x-request-id"),
         ...(requestId ? { "x-request-id": requestId } : {}),
         ...(traceparent ? { traceparent } : {}),
       });

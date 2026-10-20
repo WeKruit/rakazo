@@ -19,6 +19,7 @@ vi.mock("@orpc/client/fetch", () => ({
 }));
 
 afterEach(() => {
+  vi.useRealTimers();
   vi.unstubAllGlobals();
   vi.restoreAllMocks();
 });
@@ -26,6 +27,11 @@ afterEach(() => {
 it.each([200, 503])(
   "preserves the HTTP response and logs only safe metadata for status %s",
   async (status) => {
+    vi.useFakeTimers({ toFake: ["Date"] });
+    vi.setSystemTime(new Date("2025-01-02T03:04:05.000Z"));
+    const randomUUID = vi.fn(() => "11111111-1111-4111-8111-111111111111");
+    vi.stubGlobal("crypto", { randomUUID });
+    const now = vi.spyOn(performance, "now").mockReturnValue(100);
     const log = vi.spyOn(console, "error").mockImplementation(() => undefined);
     const response = new Response("private-response-body", {
       status,
@@ -37,7 +43,10 @@ it.each([200, 503])(
         authorization: "private-response-token",
       },
     });
-    const fetch = vi.fn(async () => response);
+    const fetch = vi.fn(async () => {
+      now.mockReturnValue(175);
+      return response;
+    });
     vi.stubGlobal("fetch", fetch);
     const abort = new AbortController();
     const request = new Request(
@@ -50,6 +59,8 @@ it.each([200, 503])(
       },
     );
     const returned = await transport(request, undefined, { context: { spaceId: "private-space" } });
+    expect(fetch).toHaveBeenCalledOnce();
+    expect(randomUUID).toHaveBeenCalledOnce();
     expect(returned).toBe(response);
     expect(returned.bodyUsed).toBe(false);
     const [sent, init] = fetch.mock.calls[0]! as unknown as [Request, RequestInit];
@@ -59,6 +70,10 @@ it.each([200, 503])(
     expect(new Headers(init.headers).get("authorization")).toBe("Bearer private-token");
     expect(new Headers(init.headers).get("cookie")).toBe("private-cookie");
     expect(new Headers(init.headers).get("x-rakazo-space-id")).toBe("private-space");
+    expect(new Headers(init.headers).get("x-request-id")).toBe(
+      "11111111-1111-4111-8111-111111111111",
+    );
+    expect(request.headers.has("x-request-id")).toBe(false);
     abort.abort();
     expect(sent.signal.aborted).toBe(true);
     if (status === 200) expect(log).not.toHaveBeenCalled();
@@ -68,6 +83,9 @@ it.each([200, 503])(
         pathname: "/rpc/recruiting/listCandidates",
         status: 503,
         contentType: "application/json",
+        timestamp: "2025-01-02T03:04:05.000Z",
+        durationMs: 75,
+        "sent-x-request-id": "11111111-1111-4111-8111-111111111111",
         "x-request-id": "request-example",
         traceparent: "00-aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa-bbbbbbbbbbbbbbbb-01",
       });
@@ -75,6 +93,37 @@ it.each([200, 503])(
     }
   },
 );
+
+it("preserves a caller request ID when the response has no correlation headers", async () => {
+  const log = vi.spyOn(console, "error").mockImplementation(() => undefined);
+  const randomUUID = vi.fn();
+  vi.stubGlobal("crypto", { randomUUID });
+  const response = new Response("private-response-body", { status: 503 });
+  const fetch = vi.fn(async () => response);
+  vi.stubGlobal("fetch", fetch);
+  const request = new Request("https://example.test/rpc/recruiting/getWorkspace", {
+    method: "POST",
+    headers: { "X-Request-ID": "caller-request-id" },
+    body: "private-request-body",
+  });
+
+  expect(await transport(request, undefined, { context: {} })).toBe(response);
+  expect(fetch).toHaveBeenCalledOnce();
+  expect(randomUUID).not.toHaveBeenCalled();
+  const [, init] = fetch.mock.calls[0]! as unknown as [Request, RequestInit];
+  expect(new Headers(init.headers).get("x-request-id")).toBe("caller-request-id");
+  expect(response.bodyUsed).toBe(false);
+  expect(log).toHaveBeenCalledExactlyOnceWith("RPC request failed", {
+    method: "POST",
+    pathname: "/rpc/recruiting/getWorkspace",
+    status: 503,
+    contentType: "text/plain;charset=UTF-8",
+    timestamp: expect.stringMatching(/^\d{4}-\d\d-\d\dT.*Z$/),
+    durationMs: expect.any(Number),
+    "sent-x-request-id": "caller-request-id",
+  });
+  expect(JSON.stringify(log.mock.calls)).not.toContain("private");
+});
 
 describe("space selection storage", () => {
   it("reports localStorage write failures without throwing", () => {
