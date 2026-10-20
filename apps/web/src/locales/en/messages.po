@@ -5784,3 +5784,23 @@ msgstr "Your name"
 #: src/pages/Welcome.tsx
 msgid "Your team of always-on agents<0/>that you can give real work to."
 msgstr "Your team of always-on agents<0/>that you can give real work to."
+
+#: src/pages/McpServersOverlay.tsx
+msgid "Advanced OAuth"
+msgstr "Advanced OAuth"
+
+#: src/pages/McpServersOverlay.tsx
+msgid "Scopes"
+msgstr "Scopes"
+
+#: src/pages/McpServersOverlay.tsx
+msgid "Space-separated scopes"
+msgstr "Space-separated scopes"
+
+#: src/pages/McpServersOverlay.tsx
+msgid "Authorization parameters"
+msgstr "Authorization parameters"
+
+#: src/pages/McpServersOverlay.tsx
+msgid "Check the OAuth client settings."
+msgstr "Check the OAuth client settings."

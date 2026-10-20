@@ -5,14 +5,23 @@ import { act } from "react";
 import { createRoot } from "react-dom/client";
 import { afterEach, expect, it, vi } from "vitest";
 
-const api = vi.hoisted(() => ({ servers: vi.fn(), bots: vi.fn(), all: vi.fn(), replace: vi.fn() }));
+const api = vi.hoisted(() => ({
+  servers: vi.fn(),
+  bots: vi.fn(),
+  all: vi.fn(),
+  replace: vi.fn(),
+  connect: vi.fn(),
+}));
 vi.mock("../lib/rpc", () => ({
   rpc: {
     bots: { list: api.bots },
     mcp: { servers: { list: api.servers }, assignments: { all: api.all, replace: api.replace } },
   },
 }));
-vi.mock("../lib/mcp-connect", () => ({ MCP_OAUTH_CHANNEL: "mcp-test" }));
+vi.mock("../lib/mcp-connect", () => ({
+  MCP_OAUTH_CHANNEL: "mcp-test",
+  connectMcpOauth: api.connect,
+}));
 vi.mock("@lingui/react/macro", () => ({
   useLingui: () => ({ t: (parts: TemplateStringsArray) => parts.join("") }),
   Trans: ({ children }: { children?: ReactNode }) => children,
@@ -57,6 +66,71 @@ vi.mock("@rakazo/ui-web", () => {
 import { McpServersOverlay } from "./McpServersOverlay";
 
 afterEach(() => vi.unstubAllGlobals());
+
+it("passes advanced OAuth settings through the existing connection without granting tool access or retaining the secret", async () => {
+  vi.stubGlobal("IS_REACT_ACT_ENVIRONMENT", true);
+  vi.stubGlobal(
+    "BroadcastChannel",
+    class {
+      close() {}
+    },
+  );
+  api.servers.mockResolvedValue([
+    {
+      id: "server-a",
+      name: "Mail",
+      slug: "mail",
+      transport: "streamable_http",
+      endpoint: "https://example.test/mcp",
+      oauthStatus: "none",
+    },
+  ]);
+  api.bots.mockResolvedValue([]);
+  api.all.mockResolvedValue([]);
+  api.replace.mockReset();
+  api.connect.mockReset().mockRejectedValueOnce(new Error("Authorization unavailable"));
+  const container = document.createElement("div");
+  const root = createRoot(container);
+  try {
+    await act(async () => root.render(<McpServersOverlay onClose={() => undefined} />));
+    const form = container.querySelector<HTMLFormElement>('form[aria-label="Mail OAuth"]');
+    expect(form).not.toBeNull();
+    if (!form) throw new Error("Missing native OAuth form");
+    for (const [name, value] of Object.entries({
+      clientId: "registered",
+      clientSecret: "private-client-secret",
+      scopes: "mail.readonly calendar.readonly",
+      authorizationParams: "access_type=offline&prompt=consent",
+    })) {
+      form.querySelector<HTMLInputElement>(`[name="${name}"]`)!.value = value;
+    }
+    await act(async () =>
+      form.dispatchEvent(new Event("submit", { bubbles: true, cancelable: true })),
+    );
+    expect(api.connect).toHaveBeenCalledExactlyOnceWith("server-a", {
+      clientId: "registered",
+      clientSecret: "private-client-secret",
+      scopes: ["mail.readonly", "calendar.readonly"],
+      authorizationParams: { access_type: "offline", prompt: "consent" },
+    });
+    expect(form.querySelector<HTMLInputElement>('[name="clientSecret"]')!.value).toBe("");
+    expect(container.textContent).not.toContain("private-client-secret");
+    expect(container.querySelector('[role="alert"]')?.textContent).toBe(
+      "Authorization unavailable",
+    );
+    expect(api.replace).not.toHaveBeenCalled();
+    form.querySelector<HTMLInputElement>('[name="authorizationParams"]')!.value = "state=override";
+    await act(async () =>
+      form.dispatchEvent(new Event("submit", { bubbles: true, cancelable: true })),
+    );
+    expect(api.connect).toHaveBeenCalledTimes(1);
+    expect(container.querySelector('[role="alert"]')?.textContent).toBe(
+      "Check the OAuth client settings.",
+    );
+  } finally {
+    await act(async () => root.unmount());
+  }
+});
 
 it("assigns exact tools without an all-tools grant and keeps other servers and failed edits intact", async () => {
   vi.stubGlobal("IS_REACT_ACT_ENVIRONMENT", true);

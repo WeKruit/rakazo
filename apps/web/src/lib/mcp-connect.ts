@@ -1,3 +1,4 @@
+import type { McpOAuthConfig } from "@rakazo/contracts";
 import { rpc } from "./rpc";
 
 export const MCP_OAUTH_CHANNEL = "rakazo-mcp-oauth";
@@ -15,10 +16,14 @@ export type McpOauthResult =
  *
  * The BroadcastChannel (not window.opener) is the completion signal because
  * provider login pages with COOP sever the opener link. */
-export async function connectMcpOauth(serverId: string): Promise<McpOauthResult> {
+export async function connectMcpOauth(
+  serverId: string,
+  oauth?: McpOAuthConfig,
+): Promise<McpOauthResult> {
   const started = await rpc.mcp.oauth.begin({
     serverId,
     redirectUri: `${window.location.origin}/mcp/oauth/callback`,
+    ...(oauth ? { oauth } : {}),
   });
   if (started.status !== "authorization_required") return started.status;
   const popup = window.open(

@@ -1718,6 +1718,71 @@ describe.each([false, true])("native outbound draft approval, catalog=%s", (cata
   });
 });
 
+describe("official Google MCP one-time approval", () => {
+  it.each([
+    { catalog: false, autoReview: false },
+    { catalog: true, autoReview: false },
+    { catalog: false, autoReview: true },
+    { catalog: true, autoReview: true },
+  ])(
+    "binds the official service, exact request and single-use approval for %j",
+    async ({ catalog, autoReview }) => {
+      reviewMock.mockReset().mockResolvedValue({ decision: "pass", model: "mock" });
+      const route = {
+        connectorId: "mcp",
+        resourceId: "calendar-server",
+        resourceRevision: 1,
+        toolName: "calendar.create_event",
+      };
+      const f = fixture({
+        name: "renamed_google_write",
+        route,
+        catalog,
+        autoReview,
+        readOnly: true,
+        inputSchema: { type: "object" },
+        rules: [{ effect: "always_allow", matchKind: "tool", matchValue: "renamed_google_write" }],
+      });
+      const findFirst = vi.fn().mockResolvedValue({
+        allowAllTools: false,
+        allowedTools: [route.toolName],
+        server: { endpoint: "https://calendarmcp.googleapis.com/mcp/v1", revision: 1 },
+      });
+      Object.assign(f.prisma, { botMcpServer: { findFirst } });
+      const args = { title: "Approved meeting", attendees: ["attendee@example.test"] };
+      f.setCalls([{ args, executionId: "google-write" }]);
+      await f.run();
+      expect(findFirst).toHaveBeenCalledWith({
+        where: {
+          botId: "bot-1",
+          serverId: "calendar-server",
+          spaceId: "space-1",
+          userId: "user-1",
+          server: { enabled: true },
+        },
+        include: { server: true },
+      });
+      expect(f.execute).not.toHaveBeenCalled();
+      expect(reviewMock).not.toHaveBeenCalled();
+      expect(f.pauseRunForInput).toHaveBeenCalledOnce();
+      expect(f.pauseRunForInput.mock.calls[0]![0].blocks[0]).toMatchObject({
+        actions: [
+          { id: "allow", label: "Allow once" },
+          { id: "deny", label: "Deny" },
+        ],
+      });
+      f.effects[0]!.status = "approved";
+      f.setCalls([{ args: { title: "Changed by model" }, executionId: "google-resume" }]);
+      await f.run();
+      expect(f.execute).toHaveBeenCalledOnce();
+      expect(f.execute.mock.calls[0]![0]).toMatchObject({ route, args });
+      expect(f.effects).toHaveLength(1);
+      expect(f.effects[0]!.status).toBe("completed");
+      expect(f.pauseRunForInput).toHaveBeenCalledOnce();
+    },
+  );
+});
+
 describe("Composio one-time outbound approval", () => {
   const route = { connectorId: "composio", toolName: "COMPOSIO_MULTI_EXECUTE_TOOL" };
   const args = {

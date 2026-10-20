@@ -1,6 +1,7 @@
 import { t } from "@lingui/core/macro";
 import { Trans, useLingui } from "@lingui/react/macro";
 import type { Bot, BotMcpServer, McpServer, McpTransport } from "@rakazo/contracts";
+import { McpOAuthConfigInput } from "@rakazo/contracts";
 import { deriveMcpSlug } from "@rakazo/core";
 import {
   Badge,
@@ -175,11 +176,33 @@ export function McpServersOverlay({ onClose }: { onClose: () => void }) {
     }
   }
 
-  async function connectOAuth(server: McpServer) {
+  async function connectOAuth(server: McpServer, form: HTMLFormElement) {
     setError(null);
+    const fields = new FormData(form);
+    const clientId = String(fields.get("clientId") ?? "").trim();
+    const clientSecret = String(fields.get("clientSecret") ?? "");
+    const scopes = String(fields.get("scopes") ?? "").trim();
+    const params = String(fields.get("authorizationParams") ?? "").trim();
+    const secretInput = form.elements.namedItem("clientSecret");
+    if (secretInput instanceof HTMLInputElement) secretInput.value = "";
+    const configured = clientId || clientSecret || scopes || params;
+    const parsed = configured
+      ? McpOAuthConfigInput.safeParse({
+          clientId,
+          ...(clientSecret ? { clientSecret } : {}),
+          ...(scopes ? { scopes: scopes.split(/\s+/) } : {}),
+          ...(params
+            ? { authorizationParams: Object.fromEntries(new URLSearchParams(params)) }
+            : {}),
+        })
+      : undefined;
+    if (parsed && !parsed.success) {
+      setError(t`Check the OAuth client settings.`);
+      return;
+    }
     setOauthPending(server.id);
     try {
-      const result = await connectMcpOauth(server.id);
+      const result = await connectMcpOauth(server.id, parsed?.data);
       if (result !== "cancelled") setOauthPending(null);
       await refresh();
       if (result === "connected") return;
@@ -193,7 +216,8 @@ export function McpServersOverlay({ onClose }: { onClose: () => void }) {
       }
       setOauthPending((current) => (current === server.id ? null : current));
     } catch (err) {
-      setError(errorText(err, t`Could not start OAuth`));
+      const message = errorText(err, t`Could not start OAuth`);
+      setError(clientSecret ? message.split(clientSecret).join("[redacted]") : message);
       setOauthPending(null);
     }
   }
@@ -562,13 +586,57 @@ export function McpServersOverlay({ onClose }: { onClose: () => void }) {
                         ) : null}
                         <div className="mt-3 flex flex-wrap gap-2">
                           {server.transport !== "stdio" ? (
-                            <>
-                              <Button
-                                type="button"
-                                size="sm"
-                                disabled={oauthPending === server.id}
-                                onClick={() => void connectOAuth(server)}
-                              >
+                            <form
+                              aria-label={`${server.name} OAuth`}
+                              onSubmit={(event) => {
+                                event.preventDefault();
+                                void connectOAuth(server, event.currentTarget);
+                              }}
+                              className="space-y-3"
+                            >
+                              <details className="text-sm">
+                                <summary className="cursor-pointer">
+                                  <Trans>Advanced OAuth</Trans>
+                                </summary>
+                                <div className="mt-3 space-y-3">
+                                  <label className="block" htmlFor={`oauth-client-${server.id}`}>
+                                    <Trans>Client ID</Trans>
+                                    <Input
+                                      id={`oauth-client-${server.id}`}
+                                      name="clientId"
+                                      autoComplete="off"
+                                    />
+                                  </label>
+                                  <label className="block" htmlFor={`oauth-secret-${server.id}`}>
+                                    <Trans>Client secret</Trans>
+                                    <Input
+                                      name="clientSecret"
+                                      id={`oauth-secret-${server.id}`}
+                                      type="password"
+                                      autoComplete="new-password"
+                                    />
+                                  </label>
+                                  <label className="block" htmlFor={`oauth-scopes-${server.id}`}>
+                                    <Trans>Scopes</Trans>
+                                    <Input
+                                      name="scopes"
+                                      id={`oauth-scopes-${server.id}`}
+                                      placeholder={t`Space-separated scopes`}
+                                      autoComplete="off"
+                                    />
+                                  </label>
+                                  <label className="block" htmlFor={`oauth-params-${server.id}`}>
+                                    <Trans>Authorization parameters</Trans>
+                                    <Input
+                                      name="authorizationParams"
+                                      id={`oauth-params-${server.id}`}
+                                      placeholder="access_type=offline&prompt=consent"
+                                      autoComplete="off"
+                                    />
+                                  </label>
+                                </div>
+                              </details>
+                              <Button type="submit" size="sm" disabled={oauthPending === server.id}>
                                 {oauthActionLabel(server, oauthPending === server.id)}
                               </Button>
                               {server.oauthStatus !== "none" ? (
@@ -582,7 +650,7 @@ export function McpServersOverlay({ onClose }: { onClose: () => void }) {
                                   <Trans>Disconnect</Trans>
                                 </Button>
                               ) : null}
-                            </>
+                            </form>
                           ) : null}
                           <Button
                             type="button"

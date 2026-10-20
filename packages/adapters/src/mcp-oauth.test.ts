@@ -1,12 +1,17 @@
+import { getLogger } from "@rakazo/logging";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import type { OAuthMaterial } from "./mcp-oauth.js";
 import {
   McpOAuthBroker,
   McpReauthorizationRequiredError,
+  oauthMaterialSecrets,
   StoredMcpOAuthProvider,
 } from "./mcp-oauth.js";
 
-afterEach(() => vi.unstubAllGlobals());
+afterEach(() => {
+  vi.unstubAllGlobals();
+  vi.restoreAllMocks();
+});
 
 const TEST_NETWORK = {
   // Read the global per call so a fetch stubbed after construction still wins.
@@ -547,11 +552,33 @@ describe("MCP OAuth", () => {
     },
   );
 
-  it.each(["https://mcp.example.test", "http://127.0.0.1:8080"])(
-    "drives discovery, registration, PKCE, redirect, and token exchange for %s",
-    async (mcpOrigin) => {
+  it.each([
+    { mcpOrigin: "https://mcp.example.test", preRegistered: false },
+    { mcpOrigin: "http://127.0.0.1:8080", preRegistered: false },
+    { mcpOrigin: "https://mcp.example.test", preRegistered: true },
+    { mcpOrigin: "https://mcp.example.test", preRegistered: true, existingGrant: true },
+    {
+      mcpOrigin: "https://mcp.example.test",
+      preRegistered: true,
+      existingGrant: true,
+      tokenRejected: true,
+    },
+  ])(
+    "drives discovery, registration, PKCE, redirect, and token exchange for %j",
+    async ({ mcpOrigin, preRegistered, existingGrant, tokenRejected }) => {
       const requests: string[] = [];
       let registration: Record<string, unknown> | undefined;
+      const existingMaterial = existingGrant
+        ? {
+            oauth: {
+              clientInformation: { client_id: "old-client", client_secret: "old-secret" },
+              tokens: { access_token: "old-working-token", token_type: "bearer" },
+            },
+          }
+        : undefined;
+      const existingSecret = existingGrant
+        ? { id: "secret-existing", ciphertext: "encrypted-existing" }
+        : null;
       vi.stubGlobal(
         "fetch",
         vi.fn(async (input: string | URL | Request, init?: RequestInit) => {
@@ -571,6 +598,7 @@ describe("MCP OAuth", () => {
             return Response.json({
               resource: `${mcpOrigin}/mcp`,
               authorization_servers: ["https://auth.example.test"],
+              ...(preRegistered ? { scopes_supported: ["mail.readonly", "mail.write"] } : {}),
             });
           }
           if (url.href === "https://auth.example.test/.well-known/oauth-authorization-server") {
@@ -578,7 +606,12 @@ describe("MCP OAuth", () => {
               issuer: "https://auth.example.test",
               authorization_endpoint: "https://auth.example.test/authorize",
               token_endpoint: "https://auth.example.test/token",
-              registration_endpoint: "https://auth.example.test/register",
+              ...(!preRegistered
+                ? { registration_endpoint: "https://auth.example.test/register" }
+                : {}),
+              ...(preRegistered
+                ? { token_endpoint_auth_methods_supported: ["client_secret_post"] }
+                : {}),
               response_types_supported: ["code"],
               grant_types_supported: ["authorization_code", "refresh_token"],
               code_challenge_methods_supported: ["S256"],
@@ -596,6 +629,16 @@ describe("MCP OAuth", () => {
             );
           }
           if (url.href === "https://auth.example.test/token" && request.method === "POST") {
+            if (preRegistered) {
+              const body = new URLSearchParams(await request.text());
+              expect(body.get("client_id")).toBe("registered-client-id");
+              expect(body.get("client_secret")).toBe("private-client-secret");
+            }
+            if (tokenRejected)
+              return Response.json(
+                { error: "invalid_client", error_description: "Rejected private-client-secret" },
+                { status: 401 },
+              );
             return Response.json({
               access_token: "access-token",
               refresh_token: "refresh-token",
@@ -620,12 +663,12 @@ describe("MCP OAuth", () => {
           findFirst: vi.fn().mockResolvedValue({
             endpoint: `${mcpOrigin}/mcp`,
             revision: 1,
-            secretId: null,
+            secretId: existingSecret?.id ?? null,
           }),
           update: vi.fn().mockResolvedValue({}),
         },
         secret: {
-          findFirst: vi.fn(),
+          findFirst: vi.fn().mockResolvedValue(existingSecret),
           create: vi.fn().mockResolvedValue({}),
           deleteMany: vi.fn().mockResolvedValue({ count: 1 }),
         },
@@ -636,12 +679,12 @@ describe("MCP OAuth", () => {
             id: "server-1",
             endpoint: `${mcpOrigin}/mcp`,
             revision: 1,
-            secretId: null,
+            secretId: existingSecret?.id ?? null,
           }),
           update: vi.fn().mockResolvedValue({}),
         },
         secret: {
-          findFirst: vi.fn(),
+          findFirst: vi.fn().mockResolvedValue(existingSecret),
           create: vi.fn().mockResolvedValue({}),
           deleteMany: vi.fn().mockResolvedValue({ count: 1 }),
         },
@@ -649,19 +692,39 @@ describe("MCP OAuth", () => {
         deploymentSettings: deploymentOwner("user-1"),
         $transaction: vi.fn(async (callback: (client: typeof tx) => unknown) => callback(tx)),
       };
-      const broker = new McpOAuthBroker(prisma as never, { put } as never, TEST_NETWORK);
+      const broker = new McpOAuthBroker(
+        prisma as never,
+        { put, load: async () => JSON.stringify(existingMaterial) } as never,
+        TEST_NETWORK,
+      );
+      const oauth = preRegistered
+        ? {
+            clientId: "registered-client-id",
+            clientSecret: "private-client-secret",
+            scopes: ["mail.readonly"],
+            authorizationParams: { access_type: "offline", prompt: "consent" },
+          }
+        : undefined;
 
       const started = await broker.begin({
         serverId: "server-1",
         spaceId: "workspace-1",
         userId: "user-1",
         redirectUri: "http://127.0.0.1:5173/mcp/oauth/callback",
+        ...(oauth ? { oauth } : {}),
       });
       expect(started.status).toBe("authorization_required");
       if (started.status !== "authorization_required") throw new Error("OAuth was not requested");
       const authorizationUrl = new URL(started.authorizationUrl);
 
-      expect(registration).toMatchObject({ client_name: "Rakazo", application_type: "native" });
+      if (preRegistered) {
+        expect(registration).toBeUndefined();
+        expect(authorizationUrl.searchParams.get("scope")).toBe("mail.readonly");
+        expect(authorizationUrl.searchParams.get("access_type")).toBe("offline");
+        expect(authorizationUrl.searchParams.get("prompt")).toBe("consent");
+        expect(JSON.stringify(started)).not.toContain("private-client-secret");
+      } else
+        expect(registration).toMatchObject({ client_name: "Rakazo", application_type: "native" });
       expect(authorizationUrl.origin).toBe("https://auth.example.test");
       expect(authorizationUrl.searchParams.get("client_id")).toBe("registered-client-id");
       expect(authorizationUrl.searchParams.get("code_challenge_method")).toBe("S256");
@@ -672,20 +735,38 @@ describe("MCP OAuth", () => {
         spaceId: "workspace-1",
         userId: "user-1",
         redirectUri: "http://127.0.0.1:5173/mcp/oauth/callback",
+        ...(oauth ? { oauth } : {}),
       });
       expect(second.status).toBe("authorization_required");
       if (second.status !== "authorization_required") throw new Error("OAuth was not requested");
       expect(second.sessionId).not.toBe(started.sessionId);
       expect(tx.secret.create).not.toHaveBeenCalled();
       expect(tx.mcpServer.update).not.toHaveBeenCalled();
+      if (existingMaterial)
+        expect(existingMaterial.oauth.tokens.access_token).toBe("old-working-token");
 
-      await broker.complete({
+      const warnings = tokenRejected
+        ? vi.spyOn(getLogger(), "warn").mockImplementation(() => undefined)
+        : undefined;
+      const complete = broker.complete({
         sessionId: started.sessionId,
         code: "authorization-code",
         state: started.sessionId,
         spaceId: "workspace-1",
         userId: "user-1",
       });
+      if (tokenRejected) {
+        const failure = await complete.catch((error: Error) => error);
+        expect(failure).toBeInstanceOf(Error);
+        expect(String(failure)).not.toContain("private-client-secret");
+        expect(warnings).toHaveBeenCalled();
+        expect(JSON.stringify(warnings!.mock.calls)).not.toContain("private-client-secret");
+        expect(tx.secret.create).not.toHaveBeenCalled();
+        expect(tx.mcpServer.update).not.toHaveBeenCalled();
+        expect(existingMaterial?.oauth.tokens.access_token).toBe("old-working-token");
+        return;
+      }
+      await complete;
 
       expect(requests).toContain("POST https://auth.example.test/token");
       expect(
@@ -698,8 +779,53 @@ describe("MCP OAuth", () => {
         data: { secretId: expect.any(String), revision: { increment: 1 } },
       });
       expect(prisma.mcpServer.update).not.toHaveBeenCalled();
+      if (preRegistered) {
+        expect(storedPayloads.map((value) => JSON.parse(value)).at(-1).oauth).toMatchObject({
+          clientInformation: {
+            client_id: "registered-client-id",
+            client_secret: "private-client-secret",
+          },
+          scope: "mail.readonly",
+          authorizationParams: { access_type: "offline", prompt: "consent" },
+          tokens: { access_token: "access-token" },
+        });
+      }
     },
   );
+
+  it("preserves a configured client and authorization settings when invalidating its grant", async () => {
+    const material: OAuthMaterial = {
+      oauth: {
+        preRegistered: true,
+        clientInformation: { client_id: "client", client_secret: "private-secret" },
+        scope: "mail.readonly",
+        authorizationParams: { access_type: "offline" },
+        tokens: { access_token: "token", token_type: "bearer" },
+      },
+    };
+    const provider = new StoredMcpOAuthProvider("server", material, async () => undefined, {
+      redirectUri: "https://app.example.test/mcp/oauth/callback",
+    });
+    await provider.invalidateCredentials("client");
+    expect(provider.clientInformation()).toEqual({
+      client_id: "client",
+      client_secret: "private-secret",
+    });
+    await provider.invalidateCredentials("all");
+    expect(material.oauth).toMatchObject({
+      preRegistered: true,
+      clientInformation: { client_id: "client", client_secret: "private-secret" },
+      scope: "mail.readonly",
+      authorizationParams: { access_type: "offline" },
+    });
+    expect(await provider.tokens()).toBeUndefined();
+    expect(oauthMaterialSecrets(material)).toContain("private-secret");
+    await expect(
+      provider.redirectToAuthorization(
+        new URL("https://auth.example.test/authorize?ref=private-secret"),
+      ),
+    ).rejects.toThrow("credential");
+  });
 
   it("applies the transport URL policy to OAuth traffic: no plain-HTTP endpoints, no redirects", async () => {
     const fetchCalls: string[] = [];

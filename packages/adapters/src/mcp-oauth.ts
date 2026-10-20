@@ -15,7 +15,8 @@ import type {
 } from "@modelcontextprotocol/sdk/shared/auth.js";
 import type { SecretStore } from "@rakazo/adapter-kit";
 import { SecretStoreUnavailableError } from "@rakazo/adapter-kit";
-import { isLocalMcpHost } from "@rakazo/contracts";
+import type { McpOAuthConfig } from "@rakazo/contracts";
+import { isLocalMcpHost, McpOAuthConfigInput } from "@rakazo/contracts";
 import { readBoundedResponseBytes } from "@rakazo/core";
 import type { PrismaClient } from "@rakazo/db";
 import { getLogger } from "@rakazo/logging";
@@ -29,6 +30,9 @@ type OAuthState = {
   tokens?: OAuthTokens;
   obtainedAt?: number;
   clientInformation?: OAuthClientInformationMixed;
+  preRegistered?: boolean;
+  scope?: string;
+  authorizationParams?: Record<string, string>;
   discoveryState?: OAuthDiscoveryState;
   redirectUri?: string;
   codeVerifier?: string;
@@ -232,6 +236,7 @@ export class StoredMcpOAuthProvider implements OAuthClientProvider {
       response_types: ["code"],
       token_endpoint_auth_method: "none",
       application_type: applicationType,
+      ...(this.material.oauth?.scope ? { scope: this.material.oauth.scope } : {}),
     } as OAuthClientMetadata;
   }
 
@@ -311,6 +316,21 @@ export class StoredMcpOAuthProvider implements OAuthClientProvider {
     let authorizationUrl: URL;
     try {
       authorizationUrl = validateUrl(url, { allowHttpLocalhost: true });
+      if (this.material.oauth?.scope)
+        authorizationUrl.searchParams.set("scope", this.material.oauth.scope);
+      for (const [key, value] of Object.entries(this.material.oauth?.authorizationParams ?? {})) {
+        authorizationUrl.searchParams.set(key, value);
+      }
+      const client = this.material.oauth?.clientInformation;
+      const secret = client && "client_secret" in client ? client.client_secret : undefined;
+      if (
+        secret &&
+        (authorizationUrl.href.includes(secret) ||
+          authorizationUrl.href.includes(encodeURIComponent(secret)) ||
+          [...authorizationUrl.searchParams.values()].some((value) => value.includes(secret)))
+      ) {
+        throw new Error("OAuth authorization URL contains a credential");
+      }
     } catch (error) {
       if (!this.options.onAuthorization) {
         await this.invalidateCredentials("tokens");
@@ -360,9 +380,21 @@ export class StoredMcpOAuthProvider implements OAuthClientProvider {
   ): Promise<void> {
     if (scope === "all") {
       const redirectUri = this.redirectUrl;
-      this.material.oauth = redirectUri ? { redirectUri } : undefined;
+      const previous = this.material.oauth;
+      this.material.oauth = previous?.preRegistered
+        ? {
+            redirectUri,
+            preRegistered: true,
+            clientInformation: previous.clientInformation,
+            scope: previous.scope,
+            authorizationParams: previous.authorizationParams,
+          }
+        : redirectUri
+          ? { redirectUri }
+          : undefined;
     } else if (this.material.oauth) {
-      if (scope === "client") delete this.material.oauth.clientInformation;
+      if (scope === "client" && !this.material.oauth.preRegistered)
+        delete this.material.oauth.clientInformation;
       if (scope === "tokens") {
         delete this.material.oauth.tokens;
         delete this.material.oauth.obtainedAt;
@@ -409,6 +441,7 @@ function oauthFetch(
   network: RemoteTransportDependencies,
   material: OAuthMaterial = {},
   allowPrivateEndpoint = false,
+  redactionSecrets: string[] = [],
 ): {
   fetch: typeof fetch;
   close: () => Promise<void>;
@@ -464,7 +497,7 @@ function oauthFetch(
     close: () => safeFetch.close(),
     publicError: (error, message) => {
       if (error instanceof Error && networkErrors.has(error)) return error;
-      const secrets = oauthMaterialSecrets(material);
+      const secrets = [...oauthMaterialSecrets(material), ...redactionSecrets];
       const sdk = sanitizeConnectorError(error, secrets);
       const surfaced = rejection ? formatOAuthRejection(rejection, sdk, secrets) : undefined;
       getLogger().warn(`${message}: ${surfaced ?? sdk}`);
@@ -577,6 +610,7 @@ export class McpOAuthBroker {
     spaceId: string;
     userId: string;
     redirectUri: string;
+    oauth?: McpOAuthConfig;
   }): Promise<
     | { status: "authorization_required"; sessionId: string; authorizationUrl: string }
     | { status: "already_connected" | "authorization_not_requested" }
@@ -609,6 +643,37 @@ export class McpOAuthBroker {
     const sessionId = randomUUID();
     const context = { spaceId: input.spaceId, userId: input.userId };
     const loaded = await this.loadMaterial(server, context);
+    if (input.oauth) {
+      const config = McpOAuthConfigInput.parse(input.oauth);
+      const previous = loaded.material.oauth ?? {};
+      const sameClient = previous.clientInformation?.client_id === config.clientId;
+      const clientInformation = {
+        ...(sameClient ? previous.clientInformation : {}),
+        client_id: config.clientId,
+        ...(config.clientSecret ? { client_secret: config.clientSecret } : {}),
+      };
+      if (config.clientSecret && "token_endpoint_auth_method" in clientInformation)
+        delete clientInformation.token_endpoint_auth_method;
+      const configured = {
+        ...previous,
+        preRegistered: true,
+        clientInformation,
+        scope: config.scopes?.join(" ") ?? (sameClient ? previous.scope : undefined),
+        authorizationParams:
+          config.authorizationParams ?? (sameClient ? previous.authorizationParams : undefined),
+      };
+      if (
+        !isDeepStrictEqual(previous.clientInformation, configured.clientInformation) ||
+        previous.scope !== configured.scope ||
+        !isDeepStrictEqual(previous.authorizationParams, configured.authorizationParams)
+      ) {
+        // Stage a new grant without changing the working connection until success.
+        delete configured.tokens;
+        delete configured.obtainedAt;
+        delete configured.codeVerifier;
+      }
+      loaded.material.oauth = configured;
+    }
     let authorizationUrl: URL | undefined;
     const provider = this.createProvider(server, context, loaded, {
       interactive: true,
@@ -790,6 +855,7 @@ export class McpOAuthBroker {
       this.network,
       {},
       await actorMayUsePrivateEndpoint(this.prisma, pending.userId, this.allowPrivateEndpoint),
+      oauthMaterialSecrets(pending.material),
     );
     const transport = new StreamableHTTPClientTransport(endpoint, {
       authProvider: pending.provider,
