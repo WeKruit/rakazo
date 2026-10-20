@@ -911,6 +911,10 @@ msgstr "새 Bot 만들기 취소"
 msgid "Cancel new group"
 msgstr "새 그룹 만들기 취소"
 
+#: src/pages/GroupPanel.tsx
+msgid "Cancel new role"
+msgstr ""
+
 #: src/pages/shell/chat-context.tsx
 msgid "Cancel reply"
 msgstr "답장 취소"
@@ -1193,6 +1197,10 @@ msgstr "코드"
 msgid "Collapse {0}"
 msgstr "{0} 접기"
 
+#: src/pages/Shell.tsx
+msgid "Collapse navigation"
+msgstr ""
+
 #: src/pages/shell/avatar-studio-popover.tsx
 msgid "Color"
 msgstr "색상"
@@ -1419,6 +1427,11 @@ msgstr "{0}(으)로 계속"
 #: src/pages/Auth.tsx
 msgid "Continue with email"
 msgstr "이메일로 계속하기"
+
+#: src/pages/Shell.tsx
+#: src/pages/shell/RecruitingNavigation.tsx
+msgid "Conversation"
+msgstr ""
 
 #: src/components/ComputersUnavailableHint.tsx
 #: src/pages/ModelSettingsOverlay.tsx
@@ -1965,6 +1978,10 @@ msgstr "새 그룹 만들기"
 #: src/pages/shell/bot-picker.tsx
 msgid "Create new Space"
 msgstr "새 스페이스 만들기"
+
+#: src/pages/GroupPanel.tsx
+msgid "Create role"
+msgstr ""
 
 #: src/pages/RoutineEditor.tsx
 msgid "Create Routine"
@@ -2705,6 +2722,10 @@ msgstr "안녕하세요. 답변을 소리 내어 읽을 때 이런 목소리로 
 msgid "Hide bots"
 msgstr ""
 
+#: src/pages/Shell.tsx
+msgid "Hide navigation"
+msgstr ""
+
 #: src/pages/Auth.tsx
 msgid "Hide password"
 msgstr "비밀번호 숨기기"
@@ -3392,6 +3413,10 @@ msgstr "Bot 이름"
 msgid "Name this group"
 msgstr "그룹 이름"
 
+#: src/pages/GroupPanel.tsx
+msgid "Name this role"
+msgstr ""
+
 #: src/pages/RoutineEditor.tsx
 msgid "Name this routine"
 msgstr "이 루틴의 이름을 정하세요"
@@ -3434,6 +3459,11 @@ msgstr "새 진행 작업"
 #: src/pages/Auth.tsx
 msgid "New password"
 msgstr "새 비밀번호"
+
+#: src/pages/GroupPanel.tsx
+#: src/pages/shell/RecruitingNavigation.tsx
+msgid "New role"
+msgstr ""
 
 #: src/pages/RecruitingPanel.tsx
 msgid "New search"
@@ -3763,6 +3793,10 @@ msgstr "메뉴 열기"
 #: src/pages/RecruitingPanel.tsx
 msgid "Open original question"
 msgstr "원래 질문 열기"
+
+#: src/pages/shell/RecruitingNavigation.tsx
+msgid "Open roles"
+msgstr ""
 
 #: src/components/computer/TerminalApp.tsx
 msgid "Open shell"
@@ -4141,6 +4175,10 @@ msgstr "작동하지 않는 컴퓨터를 다시 만듭니다."
 msgid "Recreating the computer"
 msgstr ""
 
+#: src/pages/shell/RecruitingNavigation.tsx
+msgid "Recruiter"
+msgstr ""
+
 #: src/pages/RecruitingPanel.tsx
 msgid "Recruiter verified"
 msgstr ""
@@ -4152,6 +4190,10 @@ msgstr ""
 
 #: src/pages/RecruitingPanel.tsx
 msgid "Recruiting views"
+msgstr ""
+
+#: src/pages/shell/RecruitingNavigation.tsx
+msgid "Recruiting workspace"
 msgstr ""
 
 #: src/App.tsx
@@ -4446,6 +4488,14 @@ msgstr "로봇"
 msgid "Role"
 msgstr ""
 
+#: src/pages/Shell.tsx
+msgid "Role conversation"
+msgstr ""
+
+#: src/pages/shell/RecruitingNavigation.tsx
+msgid "Role conversations"
+msgstr ""
+
 #: src/pages/RecruitingPanel.tsx
 msgid "Role definition"
 msgstr ""
@@ -4453,6 +4503,10 @@ msgstr ""
 #. placeholder {0}: unphrasedBriefFields.length
 #: src/pages/RecruitingPanel.tsx
 msgid "Role details needing clarification: {0}"
+msgstr ""
+
+#: src/pages/GroupPanel.tsx
+msgid "Role name"
 msgstr ""
 
 #: src/pages/RecruitingPanel.tsx
@@ -4714,6 +4768,10 @@ msgstr "모델 검색"
 msgid "Search providers"
 msgstr "AI 서비스 검색"
 
+#: src/pages/shell/RecruitingNavigation.tsx
+msgid "Search roles"
+msgstr ""
+
 #: src/pages/ActivityList.tsx
 msgid "Search runs"
 msgstr ""
@@ -4881,6 +4939,10 @@ msgstr ""
 msgid "Show more"
 msgstr "더 보기"
 
+#: src/pages/Shell.tsx
+msgid "Show navigation"
+msgstr ""
+
 #: src/pages/Auth.tsx
 msgid "Show password"
 msgstr "비밀번호 표시"
@@ -5041,6 +5103,10 @@ msgstr ""
 #: src/components/teach/TeachComputerOverlay.tsx
 msgid "Start recording"
 msgstr "작업 녹화 시작"
+
+#: src/pages/Shell.tsx
+msgid "Start recruiting"
+msgstr ""
 
 #: src/pages/ActivityList.tsx
 msgid "Starting"
@@ -5229,6 +5295,10 @@ msgstr "연결 시간이 초과되었습니다."
 #: src/lib/model-connection-preflight.ts
 msgid "The provider is rate-limiting requests."
 msgstr "서비스가 요청 속도를 제한하고 있습니다."
+
+#: src/pages/Shell.tsx
+msgid "The recruiting team changed. Open the role again."
+msgstr ""
 
 #: src/pages/MemorySettingsOverlay.tsx
 msgid "The selected memory provider is not available in this build."
@@ -5468,6 +5538,10 @@ msgstr ""
 #: src/pages/BotContextMenu.tsx
 msgid "Unpin"
 msgstr "고정 해제"
+
+#: src/pages/shell/RecruitingNavigation.tsx
+msgid "Unread"
+msgstr ""
 
 #. placeholder {0}: pending.file.name
 #: src/pages/Shell.tsx

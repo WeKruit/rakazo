@@ -911,6 +911,10 @@ msgstr "Cancel new bot"
 msgid "Cancel new group"
 msgstr "Cancel new group"
 
+#: src/pages/GroupPanel.tsx
+msgid "Cancel new role"
+msgstr "Cancel new role"
+
 #: src/pages/shell/chat-context.tsx
 msgid "Cancel reply"
 msgstr "Cancel reply"
@@ -1193,6 +1197,10 @@ msgstr "Code"
 msgid "Collapse {0}"
 msgstr "Collapse {0}"
 
+#: src/pages/Shell.tsx
+msgid "Collapse navigation"
+msgstr "Collapse navigation"
+
 #: src/pages/shell/avatar-studio-popover.tsx
 msgid "Color"
 msgstr "Color"
@@ -1427,6 +1435,11 @@ msgstr "Continue with {0}"
 #: src/pages/Auth.tsx
 msgid "Continue with email"
 msgstr "Continue with email"
+
+#: src/pages/Shell.tsx
+#: src/pages/shell/RecruitingNavigation.tsx
+msgid "Conversation"
+msgstr "Conversation"
 
 #: src/components/ComputersUnavailableHint.tsx
 #: src/pages/ModelSettingsOverlay.tsx
@@ -1973,6 +1986,10 @@ msgstr "Create new Group"
 #: src/pages/shell/bot-picker.tsx
 msgid "Create new Space"
 msgstr "Create new Space"
+
+#: src/pages/GroupPanel.tsx
+msgid "Create role"
+msgstr "Create role"
 
 #: src/pages/RoutineEditor.tsx
 msgid "Create Routine"
@@ -2713,6 +2730,10 @@ msgstr "Hi, this is how I'll sound when I read replies out loud."
 msgid "Hide bots"
 msgstr "Hide bots"
 
+#: src/pages/Shell.tsx
+msgid "Hide navigation"
+msgstr "Hide navigation"
+
 #: src/pages/Auth.tsx
 msgid "Hide password"
 msgstr "Hide password"
@@ -3404,6 +3425,10 @@ msgstr "Name this bot"
 msgid "Name this group"
 msgstr "Name this group"
 
+#: src/pages/GroupPanel.tsx
+msgid "Name this role"
+msgstr "Name this role"
+
 #: src/pages/RoutineEditor.tsx
 msgid "Name this routine"
 msgstr "Name this routine"
@@ -3446,6 +3471,11 @@ msgstr "New open-work item"
 #: src/pages/Auth.tsx
 msgid "New password"
 msgstr "New password"
+
+#: src/pages/GroupPanel.tsx
+#: src/pages/shell/RecruitingNavigation.tsx
+msgid "New role"
+msgstr "New role"
 
 #: src/pages/RecruitingPanel.tsx
 msgid "New search"
@@ -3783,6 +3813,10 @@ msgstr "Open navigation"
 #: src/pages/RecruitingPanel.tsx
 msgid "Open original question"
 msgstr "Open original question"
+
+#: src/pages/shell/RecruitingNavigation.tsx
+msgid "Open roles"
+msgstr "Open roles"
 
 #: src/components/computer/TerminalApp.tsx
 msgid "Open shell"
@@ -4166,6 +4200,10 @@ msgstr "Recreate a computer that is not working."
 msgid "Recreating the computer"
 msgstr "Recreating the computer"
 
+#: src/pages/shell/RecruitingNavigation.tsx
+msgid "Recruiter"
+msgstr "Recruiter"
+
 #: src/pages/RecruitingPanel.tsx
 msgid "Recruiter verified"
 msgstr "Recruiter verified"
@@ -4178,6 +4216,10 @@ msgstr "Recruiting"
 #: src/pages/RecruitingPanel.tsx
 msgid "Recruiting views"
 msgstr "Recruiting views"
+
+#: src/pages/shell/RecruitingNavigation.tsx
+msgid "Recruiting workspace"
+msgstr "Recruiting workspace"
 
 #: src/App.tsx
 #: src/components/ErrorBoundary.tsx
@@ -4476,6 +4518,14 @@ msgstr "Robot"
 msgid "Role"
 msgstr "Role"
 
+#: src/pages/Shell.tsx
+msgid "Role conversation"
+msgstr "Role conversation"
+
+#: src/pages/shell/RecruitingNavigation.tsx
+msgid "Role conversations"
+msgstr "Role conversations"
+
 #: src/pages/RecruitingPanel.tsx
 msgid "Role definition"
 msgstr "Role definition"
@@ -4484,6 +4534,10 @@ msgstr "Role definition"
 #: src/pages/RecruitingPanel.tsx
 msgid "Role details needing clarification: {0}"
 msgstr "Role details needing clarification: {0}"
+
+#: src/pages/GroupPanel.tsx
+msgid "Role name"
+msgstr "Role name"
 
 #: src/pages/RecruitingPanel.tsx
 msgid "Role revision"
@@ -4748,6 +4802,10 @@ msgstr "Search models"
 msgid "Search providers"
 msgstr "Search providers"
 
+#: src/pages/shell/RecruitingNavigation.tsx
+msgid "Search roles"
+msgstr "Search roles"
+
 #: src/pages/ActivityList.tsx
 msgid "Search runs"
 msgstr "Search runs"
@@ -4915,6 +4973,10 @@ msgstr "Show list"
 msgid "Show more"
 msgstr "Show more"
 
+#: src/pages/Shell.tsx
+msgid "Show navigation"
+msgstr "Show navigation"
+
 #: src/pages/Auth.tsx
 msgid "Show password"
 msgstr "Show password"
@@ -5075,6 +5137,10 @@ msgstr "Start {trialDays}-day free trial"
 #: src/components/teach/TeachComputerOverlay.tsx
 msgid "Start recording"
 msgstr "Start recording"
+
+#: src/pages/Shell.tsx
+msgid "Start recruiting"
+msgstr "Start recruiting"
 
 #: src/pages/ActivityList.tsx
 msgid "Starting"
@@ -5268,6 +5334,10 @@ msgstr "The connection timed out."
 #: src/lib/model-connection-preflight.ts
 msgid "The provider is rate-limiting requests."
 msgstr "The provider is rate-limiting requests."
+
+#: src/pages/Shell.tsx
+msgid "The recruiting team changed. Open the role again."
+msgstr "The recruiting team changed. Open the role again."
 
 #: src/pages/MemorySettingsOverlay.tsx
 msgid "The selected memory provider is not available in this build."
@@ -5507,6 +5577,10 @@ msgstr "Unnamed candidate"
 #: src/pages/BotContextMenu.tsx
 msgid "Unpin"
 msgstr "Unpin"
+
+#: src/pages/shell/RecruitingNavigation.tsx
+msgid "Unread"
+msgstr "Unread"
 
 #. placeholder {0}: pending.file.name
 #: src/pages/Shell.tsx

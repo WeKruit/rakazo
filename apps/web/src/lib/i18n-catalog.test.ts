@@ -18,6 +18,58 @@ describe("lingui catalogs", () => {
     i18n.activate("en");
   });
 
+  it("compiles recruiter workspace labels in every production locale without source descriptors", async () => {
+    const config = getConfig({
+      configPath: fileURLToPath(new URL("../../lingui.config.ts", import.meta.url)),
+    });
+    const [catalog] = await getCatalogs(config);
+    const source = await catalog!.read("en");
+    const labels = [
+      "Recruiter",
+      "Recruiting workspace",
+      "Conversation",
+      "Open roles",
+      "New role",
+      "Search roles",
+      "Role conversations",
+      "Unread",
+      "Collapse navigation",
+      "Show navigation",
+      "Hide navigation",
+      "Role conversation",
+      "Start recruiting",
+      "Cancel new role",
+      "Role name",
+      "Name this role",
+      "Create role",
+      "The recruiting team changed. Open the role again.",
+    ];
+    const entries = labels.map((label) => {
+      const entry = Object.entries(source ?? {}).find(([, entry]) => entry.message === label);
+      expect(entry, label).toBeDefined();
+      return entry!;
+    });
+    expect(Object.fromEntries(entries.map(([id, entry]) => [id, entry.message]))).toMatchObject({
+      oVEIRb: "Recruiter",
+      Stovzk: "Open roles",
+      YyNOE7: "Conversation",
+      pzfKRn: "Search roles",
+    });
+    for (const locale of config.locales) {
+      const { messages } = await catalog!.getTranslations(locale, config);
+      const compiled = createCompiledCatalog(locale, messages, { namespace: "json", strict: true });
+      expect(compiled.errors).toEqual([]);
+      i18n.load(locale, JSON.parse(compiled.source).messages);
+      i18n.activate(locale);
+      for (const [id, entry] of entries) {
+        const rendered = i18n._({ id });
+        expect(rendered, `${locale} ${entry.message}`).not.toBe(id);
+        expect(rendered, `${locale} ${entry.message}`).not.toBe("");
+        if (locale === "en") expect(rendered).toBe(entry.message);
+      }
+    }
+  });
+
   it("compiles match-score and member-stop labels without source-message descriptors", async () => {
     const config = getConfig({
       configPath: fileURLToPath(new URL("../../lingui.config.ts", import.meta.url)),
