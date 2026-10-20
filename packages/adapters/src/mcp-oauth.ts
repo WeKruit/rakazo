@@ -4,7 +4,7 @@ import type {
   OAuthClientProvider,
   OAuthDiscoveryState,
 } from "@modelcontextprotocol/sdk/client/auth.js";
-import { refreshAuthorization } from "@modelcontextprotocol/sdk/client/auth.js";
+import { auth, refreshAuthorization } from "@modelcontextprotocol/sdk/client/auth.js";
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { StreamableHTTPClientTransport } from "@modelcontextprotocol/sdk/client/streamableHttp.js";
 import { InvalidGrantError } from "@modelcontextprotocol/sdk/server/auth/errors.js";
@@ -20,7 +20,7 @@ import { isLocalMcpHost, McpOAuthConfigInput } from "@rakazo/contracts";
 import { readBoundedResponseBytes } from "@rakazo/core";
 import type { PrismaClient } from "@rakazo/db";
 import { getLogger } from "@rakazo/logging";
-import { sanitizeConnectorError } from "./connector-safety.js";
+import { combineSignals, sanitizeConnectorError } from "./connector-safety.js";
 import { secureFetch, validateUrl, withEndpointOriginFallback } from "./mcp-transport.js";
 import { actorMayUsePrivateEndpoint } from "./private-endpoint.js";
 import type { RemoteTransportDependencies } from "./remote-mcp.js";
@@ -703,6 +703,20 @@ export class McpOAuthBroker {
     const signal = AbortSignal.timeout(15_000);
     try {
       await client.connect(transport, { signal, timeout: 15_000 });
+      // Initialization may be public even when tools require the configured OAuth client.
+      if (!authorizationUrl && provider.clientInformation() && !(await provider.tokens()))
+        await auth(provider, {
+          serverUrl: endpoint,
+          fetchFn: (input, init) =>
+            networkFetch.fetch(input, {
+              ...init,
+              signal: combineSignals(
+                signal,
+                input instanceof Request ? input.signal : undefined,
+                init?.signal ?? undefined,
+              ),
+            }),
+        });
     } catch (error) {
       if (!authorizationUrl) throw networkFetch.publicError(error, "Could not start MCP OAuth");
     } finally {
