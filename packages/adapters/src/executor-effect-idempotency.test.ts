@@ -923,7 +923,7 @@ describe("explicit artifact workspace writes", () => {
 
 describe("durable mid-turn narration", () => {
   it.each(["web_search", "message_user"])(
-    "preserves the complete redacted narration before %s without repeating it in the final",
+    "retries the message transaction before %s without repeating narration or tool execution",
     async (toolName) => {
       const secret = "fixture-private-token";
       const f = fixture(`narration-${toolName}`, [secret]);
@@ -948,9 +948,14 @@ describe("durable mid-turn narration", () => {
           ),
         },
       };
+      tx.message.create.mockRejectedValueOnce(
+        Object.assign(new Error("write conflict or a deadlock"), { code: "P2034" }),
+      );
+      const transaction = vi.fn(async (callback: (transaction: typeof tx) => Promise<unknown>) =>
+        callback(tx),
+      );
       Object.assign(f.prisma, {
-        $transaction: async (callback: (transaction: typeof tx) => Promise<unknown>) =>
-          callback(tx),
+        $transaction: transaction,
       });
       f.runtimeRun.mockImplementation(async function* (request) {
         yield { type: "text" as const, text: narration };
@@ -969,6 +974,10 @@ describe("durable mid-turn narration", () => {
       if (toolName === "message_user")
         expectedBlocks.push([{ kind: "text", text: "Checking saved results." }]);
       expect(messages.map((message) => message.blocks)).toEqual(expectedBlocks);
+      expect(transaction).toHaveBeenCalledTimes(expectedBlocks.length + 1);
+      expect(tx.message.create).toHaveBeenCalledTimes(expectedBlocks.length + 1);
+      expect(f.executorDeps.events.notify).toHaveBeenCalledTimes(expectedBlocks.length);
+      expect(f.runtimeRun).toHaveBeenCalledOnce();
       expect(messages.every((message) => message.clientNonce?.startsWith("user-progress:"))).toBe(
         true,
       );
