@@ -205,7 +205,13 @@ function pressEnter(textarea: HTMLTextAreaElement) {
 async function renderFeedbackShell(
   kind: "bot" | "group" = "bot",
   runStatuses?: readonly ("queued" | "leased" | "running" | "waiting_input")[],
-  options: { messages?: ThreadMessage[]; isDeploymentOwner?: boolean; routines?: Routine[] } = {},
+  options: {
+    messages?: ThreadMessage[];
+    isDeploymentOwner?: boolean;
+    routines?: Routine[];
+    openFeedback?: boolean;
+    threadReady?: Promise<void>;
+  } = {},
 ) {
   setToolActivityPreference(
     localStorage.getItem("rakazo.showToolActivity") === "on" ||
@@ -332,11 +338,12 @@ async function renderFeedbackShell(
     thread: kind === "group" ? null : thread,
     routines: options.routines ?? [],
   });
-  shellApi.get.mockImplementation(async ({ botId }: { botId?: string }) =>
-    botId === "bot-2"
+  shellApi.get.mockImplementation(async ({ botId }: { botId?: string }) => {
+    if (options.threadReady) await options.threadReady;
+    return botId === "bot-2"
       ? { ...thread, botId, threadId: "thread-2", messages: [], run: null }
-      : thread,
-  );
+      : thread;
+  });
   shellApi.listSpaces.mockResolvedValue(navigation);
   shellApi.createGroup.mockResolvedValue({ ...group, id: "group-new" });
   shellApi.followUp.mockResolvedValue({ ok: true });
@@ -431,10 +438,12 @@ async function renderFeedbackShell(
     expect(button, name).toBeDefined();
     await act(async () => button.click());
   };
-  await click("Recruiting");
-  await click("Evidence");
-  await click(candidate.name);
-  await click("Give feedback");
+  if (options.openFeedback !== false) {
+    await click("Recruiting");
+    await click("Evidence");
+    await click(candidate.name);
+    await click("Give feedback");
+  }
   const choose = async (choice: string, label = "Feedback") =>
     act(async () => {
       const select = document.body.querySelector<HTMLSelectElement>(
@@ -464,6 +473,83 @@ it("loads a cold group from its own snapshot when bootstrap has no DM snapshot",
   expect(shellApi.get).toHaveBeenCalledWith({ groupId: "group-1" }, expect.anything());
   expect(container?.textContent).toContain("Choose the role location");
   expect(shellApi.recruiting.getWorkspace).toHaveBeenCalledWith({ threadId: "thread-1" });
+});
+
+it("enables Dashboard only after a cold native thread snapshot is available", async () => {
+  setToolActivityPreference("off");
+  let finishThread!: () => void;
+  const threadReady = new Promise<void>((resolve) => {
+    finishThread = resolve;
+  });
+  const view = await renderFeedbackShell("group", undefined, {
+    isDeploymentOwner: false,
+    openFeedback: false,
+    threadReady,
+  });
+  const dashboard = [
+    ...container!.querySelectorAll<HTMLButtonElement>(
+      '[data-testid="recruiting-navigation"] button',
+    ),
+  ].find((button) => button.textContent === "Dashboard")!;
+  expect(dashboard.disabled).toBe(true);
+  await view.click("Dashboard");
+  expect(container?.querySelector('[data-testid="side-panel"]')?.getAttribute("data-panel")).toBe(
+    "closed",
+  );
+  expect(shellApi.recruiting.getWorkspace).not.toHaveBeenCalled();
+  await act(async () => {
+    finishThread();
+  });
+  expect(dashboard.disabled).toBe(false);
+  await view.click("Dashboard");
+  expect(container?.querySelector('[role="tab"][aria-selected="true"]')?.textContent).toBe(
+    "Dashboard",
+  );
+  expect(dashboard.getAttribute("aria-current")).toBe("page");
+});
+
+it("selects the native Dashboard tab, follows tab changes, and returns to the same role conversation", async () => {
+  setToolActivityPreference("off");
+  const view = await renderFeedbackShell("group", undefined, {
+    isDeploymentOwner: false,
+    openFeedback: false,
+  });
+  const originalCard = document.body.querySelector('[data-message-id="pending-main"]');
+  const navigation = container!.querySelector('[data-testid="recruiting-navigation"]')!;
+  const dashboard = [...navigation.querySelectorAll("button")].find(
+    (button) => button.textContent === "Dashboard",
+  )!;
+  const conversation = [...navigation.querySelectorAll("button")].find(
+    (button) => button.textContent === "Conversation",
+  )!;
+  const selectedTab = () =>
+    container?.querySelector('[role="tab"][aria-selected="true"]')?.textContent;
+  await view.click("Dashboard");
+  expect(selectedTab()).toBe("Dashboard");
+  expect(dashboard.getAttribute("aria-current")).toBe("page");
+  await view.click("Role");
+  expect(selectedTab()).toBe("Role");
+  expect(dashboard.hasAttribute("aria-current")).toBe(false);
+  expect(conversation.getAttribute("aria-current")).toBe("page");
+  await view.click("Dashboard");
+  expect(selectedTab()).toBe("Dashboard");
+  await view.click("Conversation");
+  expect(container?.querySelector('[data-testid="side-panel"]')?.getAttribute("data-panel")).toBe(
+    "closed",
+  );
+  expect(dashboard.hasAttribute("aria-current")).toBe(false);
+  expect(document.body.querySelector('[data-message-id="pending-main"]')).toBe(originalCard);
+  shellApi.send.mockResolvedValue({ runId: "same-role-run" });
+  const prompt = "Summarize the saved requirements for this role.";
+  type(container!.querySelector<HTMLTextAreaElement>('textarea[name="chat-message"]')!, prompt);
+  await view.click("Send");
+  expect(shellApi.send).toHaveBeenCalledExactlyOnceWith(
+    expect.objectContaining({ groupId: "group-1", text: prompt, mentions: undefined }),
+  );
+  await view.navigate("/app/bot-2");
+  await view.click("Recruiting");
+  expect(selectedTab()).toBe("Role");
+  expect(dashboard.hasAttribute("aria-current")).toBe(false);
 });
 
 it.each([false, true])(

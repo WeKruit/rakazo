@@ -962,6 +962,7 @@ function RecruitingWorkspaceShot() {
           groupId={group.id}
           query={query}
           dashboardOpen
+          canOpenDashboard
           canCreateRole={false}
           onQueryChange={setQuery}
           onConversation={() => undefined}
