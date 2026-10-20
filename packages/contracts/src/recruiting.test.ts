@@ -354,6 +354,27 @@ describe("recruiting contracts", () => {
     },
   );
 
+  it("allows omitting a local task only for scale continuation from the completed native G2", () => {
+    const input = {
+      ...researchRound,
+      operation: "continue",
+      purpose: "scale",
+      approvalEffectId: "g2",
+    };
+    expect(contracts.RecruitingResearchToolInputSchema.parse(input)).toEqual(input);
+    expect(
+      contracts.RecruitingResearchToolInputSchema.safeParse({ ...input, purpose: "calibration" })
+        .success,
+    ).toBe(false);
+    for (const injected of [
+      { providerTaskId: "provider" },
+      { mcpServerId: "server" },
+      { serverRevision: 1 },
+    ])
+      expect(
+        contracts.RecruitingResearchToolInputSchema.safeParse({ ...input, ...injected }).success,
+      ).toBe(false);
+  });
   it("rejects invalid research identifiers, revisions and blank round text", () => {
     const prepare = researchInputs[0]!;
     for (const invalid of [

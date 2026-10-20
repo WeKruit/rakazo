@@ -1613,8 +1613,8 @@ describe("owner approval answer admission", () => {
   });
 });
 
-async function gatedResearchFixture() {
-  const f = await calibrationFixture();
+async function gatedResearchFixture(native?: Awaited<ReturnType<typeof nativeCalibrationFixture>>) {
+  const f = native ?? (await calibrationFixture());
   const source = {
     id: "source",
     threadId: "thread",
@@ -1664,7 +1664,7 @@ async function gatedResearchFixture() {
     },
     event: {
       ...f.tx.event,
-      findMany: vi.fn(async () => []),
+      findMany: "findMany" in f.tx.event ? f.tx.event.findMany : vi.fn(async () => []),
       findFirst: vi.fn(async ({ where }) =>
         where.type === "recruiting.context.adopted" ? adoption : f.tx.event.findFirst({ where }),
       ),
@@ -1694,6 +1694,10 @@ async function gatedResearchFixture() {
           pendingActionId: null,
           ...data,
         };
+        return task;
+      }),
+      upsert: vi.fn(async ({ create }) => {
+        task ??= { id: "task", pendingActionId: null, state: "active", ...create };
         return task;
       }),
       update: vi.fn(async ({ data }) => {
@@ -1788,6 +1792,10 @@ async function gatedResearchFixture() {
     source,
     calibrationInput: f.input,
     getAction: () => action!,
+    getTask: () => task,
+    setTask: (value: Record<string, any> | null) => {
+      task = value;
+    },
   };
 }
 
@@ -2248,13 +2256,16 @@ async function nativeCalibrationFixture() {
       candidateOutputSchema: "candidate_output_v1",
     },
   };
+  const pages = [page];
+  const proofs = [proof];
+  const nativeEvents = [event];
   const query = f.tx.$queryRaw.getMockImplementation()!;
   f.tx.$queryRaw.mockImplementation(async (sql?: unknown) =>
-    (sql as { sql: string }).sql.includes('FROM "external_effects" e') ? [proof] : query(),
+    (sql as { sql: string }).sql.includes('FROM "external_effects" e') ? proofs : query(),
   );
   const tx = Object.assign(f.tx, {
-    event: { ...f.tx.event, findMany: vi.fn(async () => [event]) },
-    recruitingCandidatePage: { findMany: vi.fn(async () => [page]) },
+    event: { ...f.tx.event, findMany: vi.fn(async () => nativeEvents) },
+    recruitingCandidatePage: { findMany: vi.fn(async () => pages) },
     recruitingCandidateOccurrence: {
       findUnique: vi.fn(async ({ where }) =>
         occurrences.find(
@@ -2287,7 +2298,20 @@ async function nativeCalibrationFixture() {
   tx.recruitingAssessment.findFirst.mockImplementation(() => {
     throw new Error("Native G2 must not evaluate or load assessments");
   });
-  return { ...f, tx, input, rows, occurrences, page, artifact, proof, event };
+  return {
+    ...f,
+    tx,
+    input,
+    rows,
+    occurrences,
+    page,
+    artifact,
+    proof,
+    event,
+    pages,
+    proofs,
+    nativeEvents,
+  };
 }
 
 describe("native calibration approval evidence", () => {
@@ -2461,5 +2485,377 @@ describe("native calibration approval evidence", () => {
       recruiting.prepareRecruitingApproval(f.prisma, actor, f.trusted, f.input, f.material),
     ).rejects.toThrow();
     expect(f.tx.recruitingAssessment.findFirst).not.toHaveBeenCalled();
+  });
+});
+
+describe("native G2 scale task adoption", () => {
+  it("resolves without writes, then atomically adopts one genuine continue action and restores it without create history", async () => {
+    const native = await nativeCalibrationFixture();
+    const f = await gatedResearchFixture(native);
+    f.approve("native-g2", f.calibrationInput);
+    await recruiting.executeRecruitingApproval(
+      f.prisma,
+      actor,
+      { ...f.trusted, effectId: "native-g2", effectRequest: f.calibrationInput },
+      f.calibrationInput,
+      f.material,
+    );
+    const selection = {
+      runId: "run",
+      clientNonce: "native-scale",
+      toolName: "reply" as const,
+      purpose: "scale" as const,
+      approvalEffectId: "native-g2",
+      expectedRoleRevision: 1,
+      sourceMessageId: "source",
+      intent: f.input.intent,
+    };
+    const preflight = await recruiting.readRecruitingResearchContext(f.prisma, actor, selection);
+    expect(preflight).toMatchObject({
+      task: null,
+      server: { id: "server", revision: 1 },
+      nativeResearchTarget: {
+        mcpServerId: "server",
+        serverRevision: 1,
+        providerTaskId: "provider-task",
+      },
+    });
+    expect(f.tx.recruitingResearchTask.create).not.toHaveBeenCalled();
+    expect(f.tx.recruitingResearchTask.upsert).not.toHaveBeenCalled();
+    const input = {
+      ...f.input,
+      kind: "continue" as const,
+      purpose: "scale" as const,
+      approvalEffectId: "native-g2",
+      clientNonce: "native-scale",
+      providerTaskId: "provider-task",
+    };
+    const prepared = await recruiting.prepareRecruitingResearchAction(f.prisma, actor, input);
+    expect(prepared.task).toMatchObject({
+      roleId: "role",
+      mcpServerId: "server",
+      serverRevision: 1,
+      providerTaskId: "provider-task",
+      createdByRunId: "run",
+    });
+    expect(prepared.action).toMatchObject({
+      kind: "continue",
+      purpose: "scale",
+      approvalEffectId: "native-g2",
+    });
+    expect(f.tx.recruitingResearchAction.create).toHaveBeenCalledOnce();
+    expect(f.tx.recruitingResearchTask.create).not.toHaveBeenCalled();
+    expect((await recruiting.prepareRecruitingResearchAction(f.prisma, actor, input)).created).toBe(
+      false,
+    );
+    expect(f.tx.recruitingResearchAction.create).toHaveBeenCalledOnce();
+    f.getTask()!.pendingActionId = null;
+    f.getAction().deliveryState = "accepted";
+    const restored = await recruiting.readRecruitingResearchContext(f.prisma, actor, {
+      runId: "run",
+      taskId: prepared.task.id,
+    });
+    expect(restored.action?.kind).toBe("continue");
+    expect(f.tx.recruitingResearchAction.findFirst).toHaveBeenCalledWith({
+      where: { taskId: prepared.task.id },
+      orderBy: { id: "desc" },
+    });
+    expect(native.page.taskId).toBeNull();
+    expect(native.page.actionId).toBeNull();
+  });
+  it.each([
+    "missing-g2",
+    "stale-role",
+    "stale-source",
+    "reply-denied",
+    "server-revision",
+    "foreign-mapping",
+    "wrong-frozen-target",
+  ])("rejects %s before adopting a task or action", async (boundary) => {
+    const native = await nativeCalibrationFixture();
+    const f = await gatedResearchFixture(native);
+    f.approve("native-g2", f.calibrationInput);
+    await recruiting.executeRecruitingApproval(
+      f.prisma,
+      actor,
+      { ...f.trusted, effectId: "native-g2", effectRequest: f.calibrationInput },
+      f.calibrationInput,
+      f.material,
+    );
+    const input = {
+      ...f.input,
+      kind: "continue" as const,
+      purpose: "scale" as const,
+      approvalEffectId: "native-g2",
+      clientNonce: "native-scale",
+      providerTaskId: "provider-task",
+    };
+    if (boundary === "missing-g2") f.effects.delete("native-g2");
+    if (boundary === "stale-role")
+      f.tx.recruitingRole.findFirst.mockResolvedValue({
+        ...(await f.tx.recruitingRole.findFirst()),
+        revision: 2,
+        currentRevisionId: "revision-2",
+      });
+    if (boundary === "stale-source") native.page.roleRevisionId = "old-revision";
+    if (boundary === "reply-denied")
+      f.tx.botMcpServer.findFirst.mockResolvedValue({
+        allowAllTools: false,
+        allowedTools: ["research"],
+      } as never);
+    if (boundary === "server-revision")
+      f.tx.mcpServer.findFirst.mockResolvedValue({
+        ...(await f.tx.mcpServer.findFirst()),
+        revision: 2,
+      });
+    if (boundary === "foreign-mapping")
+      f.setTask({
+        id: "foreign-task",
+        roleId: "other-role",
+        mcpServerId: "server",
+        serverRevision: 1,
+        providerTaskId: "provider-task",
+        createdByRunId: "run",
+        pendingActionId: null,
+      });
+    if (boundary === "wrong-frozen-target") input.providerTaskId = "other-provider-task";
+    await expect(
+      recruiting.prepareRecruitingResearchAction(f.prisma, actor, input),
+    ).rejects.toThrow();
+    expect(f.tx.recruitingResearchTask.upsert).not.toHaveBeenCalled();
+    expect(f.tx.recruitingResearchAction.create).not.toHaveBeenCalled();
+    expect(native.page.taskId).toBeNull();
+  });
+  it("keeps a pending adopted action and rejects another nonce instead of creating a replacement", async () => {
+    const f = await gatedResearchFixture(await nativeCalibrationFixture());
+    f.approve("native-g2", f.calibrationInput);
+    await recruiting.executeRecruitingApproval(
+      f.prisma,
+      actor,
+      { ...f.trusted, effectId: "native-g2", effectRequest: f.calibrationInput },
+      f.calibrationInput,
+      f.material,
+    );
+    const input = {
+      ...f.input,
+      kind: "continue" as const,
+      purpose: "scale" as const,
+      approvalEffectId: "native-g2",
+      clientNonce: "native-scale",
+      providerTaskId: "provider-task",
+    };
+    const first = await recruiting.prepareRecruitingResearchAction(f.prisma, actor, input);
+    await expect(
+      recruiting.prepareRecruitingResearchAction(f.prisma, actor, {
+        ...input,
+        clientNonce: "replacement",
+      }),
+    ).rejects.toThrow();
+    expect(f.tx.recruitingResearchTask.upsert).toHaveBeenCalledOnce();
+    expect(f.tx.recruitingResearchAction.create).toHaveBeenCalledOnce();
+    expect(f.getTask()!.pendingActionId).toBe(first.action.id);
+  });
+  it("does not derive native task authority from historical assessment receipts", async () => {
+    const f = await gatedResearchFixture();
+    f.approve("old-g2", f.calibrationInput);
+    await recruiting.executeRecruitingApproval(
+      f.prisma,
+      actor,
+      { ...f.trusted, effectId: "old-g2", effectRequest: f.calibrationInput },
+      f.calibrationInput,
+      f.material,
+    );
+    await expect(
+      recruiting.readRecruitingResearchContext(f.prisma, actor, {
+        runId: "run",
+        toolName: "reply",
+        purpose: "scale",
+        approvalEffectId: "old-g2",
+      }),
+    ).rejects.toThrow(IsolationError);
+    expect(f.tx.recruitingResearchTask.upsert).not.toHaveBeenCalled();
+  });
+
+  it("rejects an explicit local task that differs from the native G2 source task", async () => {
+    const f = await gatedResearchFixture(await nativeCalibrationFixture());
+    f.approve("native-g2", f.calibrationInput);
+    await recruiting.executeRecruitingApproval(
+      f.prisma,
+      actor,
+      { ...f.trusted, effectId: "native-g2", effectRequest: f.calibrationInput },
+      f.calibrationInput,
+      f.material,
+    );
+    f.setTask({
+      id: "other-task",
+      roleId: "role",
+      mcpServerId: "server",
+      serverRevision: 1,
+      providerTaskId: "other-provider-task",
+      pendingActionId: null,
+      createdByRunId: "run",
+    });
+    await expect(
+      recruiting.prepareRecruitingResearchAction(f.prisma, actor, {
+        ...f.input,
+        kind: "continue",
+        purpose: "scale",
+        taskId: "other-task",
+        approvalEffectId: "native-g2",
+        providerTaskId: "other-provider-task",
+      }),
+    ).rejects.toThrow(IsolationError);
+    expect(f.tx.recruitingResearchAction.create).not.toHaveBeenCalled();
+  });
+  it.each(["admission", "claim"])("rechecks the native G2 task at final %s", async (stage) => {
+    const f = await gatedResearchFixture(await nativeCalibrationFixture());
+    f.approve("native-g2", f.calibrationInput);
+    await recruiting.executeRecruitingApproval(
+      f.prisma,
+      actor,
+      { ...f.trusted, effectId: "native-g2", effectRequest: f.calibrationInput },
+      f.calibrationInput,
+      f.material,
+    );
+    const prepared = await recruiting.prepareRecruitingResearchAction(f.prisma, actor, {
+      ...f.input,
+      kind: "continue",
+      purpose: "scale",
+      approvalEffectId: "native-g2",
+      providerTaskId: "provider-task",
+    });
+    const input = {
+      ...f.trusted,
+      actionId: prepared.action.id,
+      purpose: "scale" as const,
+      approvalEffectId: "native-g2",
+      requestArtifact: {
+        artifactId: prepared.requestArtifact.id,
+        sha256: prepared.requestArtifact.hash,
+      },
+      contextArtifact: f.input.contextArtifact,
+      frozenRequest: { tool: "reply" },
+      effectKind: "mcp_reply",
+    };
+    const admitted =
+      stage === "claim"
+        ? await recruiting.admitRecruitingResearchAction(f.prisma, actor, input)
+        : null;
+    f.getTask()!.providerTaskId = "different-task";
+    if (admitted) {
+      expect(
+        await recruiting.claimRecruitingResearchAction(f.prisma, actor, {
+          ...f.trusted,
+          actionId: prepared.action.id,
+          effectId: admitted.effect!.id,
+          from: "intended",
+        }),
+      ).toBe(false);
+      expect(f.effects.get(admitted.effect!.id)!.status).toBe("intended");
+    } else
+      expect((await recruiting.admitRecruitingResearchAction(f.prisma, actor, input)).status).toBe(
+        "superseded",
+      );
+    expect(f.getAction().deliveryState).toBe("superseded");
+  });
+
+  it("rejects a new provider create action under native same-task G2 approval", async () => {
+    const f = await gatedResearchFixture(await nativeCalibrationFixture());
+    f.approve("native-g2", f.calibrationInput);
+    await recruiting.executeRecruitingApproval(
+      f.prisma,
+      actor,
+      { ...f.trusted, effectId: "native-g2", effectRequest: f.calibrationInput },
+      f.calibrationInput,
+      f.material,
+    );
+    await expect(
+      recruiting.prepareRecruitingResearchAction(f.prisma, actor, {
+        ...f.input,
+        purpose: "scale",
+        approvalEffectId: "native-g2",
+      }),
+    ).rejects.toThrow(IsolationError);
+    expect(f.tx.recruitingResearchTask.create).not.toHaveBeenCalled();
+  });
+  it("rejects mixed verified native tasks rather than selecting one or rewriting old pages", async () => {
+    const native = await nativeCalibrationFixture();
+    const request = boundDirectApprovalRequest(
+      { connectorId: "mcp", resourceId: "server", resourceRevision: 1, toolName: "get_rows" },
+      { task_id: "other-provider-task", limit: 10 },
+      "__rakazoCatalogTool",
+    );
+    const result = {
+      structuredContent: {
+        ...native.proof.effectResult.structuredContent,
+        task_id: "other-provider-task",
+      },
+    };
+    const bytes = Buffer.from(stableJsonValue({ request, providerResult: result }));
+    const artifact = {
+      ...native.artifact,
+      id: "other-artifact",
+      storageKey: "other-artifact",
+      hash: createHash("sha256").update(bytes).digest("hex"),
+      size: bytes.length,
+      clientNonce: "recruiting-observation:other-read",
+    };
+    native.artifacts.push(artifact);
+    native.bytes.set(artifact.id, bytes);
+    const page = {
+      ...native.page,
+      effectId: "other-read",
+      artifactId: artifact.id,
+      artifactHash: artifact.hash,
+      effect: { request, result },
+    };
+    native.pages.push(page);
+    native.proofs.push({
+      ...native.proof,
+      ...artifact,
+      effectId: page.effectId,
+      effectRequest: request,
+      effectResult: result,
+    });
+    native.nativeEvents.push({
+      ...native.event,
+      id: "other-save",
+      payload: {
+        ...native.event.payload,
+        effectId: page.effectId,
+        providerTaskId: "other-provider-task",
+        outputArtifact: { artifactId: artifact.id, sha256: artifact.hash },
+      },
+    });
+    for (let index = 5; index < 10; index++) {
+      Object.assign(native.input.profiles[index]!.source, {
+        effectId: page.effectId,
+        providerTaskId: "other-provider-task",
+        artifactRef: { artifactId: artifact.id, sha256: artifact.hash },
+      });
+      Object.assign(native.occurrences[index]!, { pageId: page.effectId, page });
+    }
+    const f = await gatedResearchFixture(native);
+    f.approve("mixed-g2", f.calibrationInput);
+    await recruiting.executeRecruitingApproval(
+      f.prisma,
+      actor,
+      { ...f.trusted, effectId: "mixed-g2", effectRequest: f.calibrationInput },
+      f.calibrationInput,
+      f.material,
+    );
+    await expect(
+      recruiting.prepareRecruitingResearchAction(f.prisma, actor, {
+        ...f.input,
+        kind: "continue",
+        purpose: "scale",
+        approvalEffectId: "mixed-g2",
+        providerTaskId: "provider-task",
+      }),
+    ).rejects.toThrow(IsolationError);
+    expect(f.tx.recruitingResearchTask.upsert).not.toHaveBeenCalled();
+    expect(native.pages.every((saved) => saved.taskId === null && saved.actionId === null)).toBe(
+      true,
+    );
   });
 });
