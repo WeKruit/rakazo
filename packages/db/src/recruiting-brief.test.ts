@@ -1421,6 +1421,276 @@ describe("original PDF source validation (mocked DB, storage and processor)", ()
   );
 });
 
+describe("native brief approval bridge", () => {
+  function briefFixture() {
+    const f = approvalFixture();
+    f.revisions[0]!.brief.confirmation = null;
+    const input = { stage: "brief", roleId: "role", expectedRoleRevision: 1 } as const;
+    return { ...f, input };
+  }
+
+  it("prepares only the stored requirements and confirms once in the original effect transaction", async () => {
+    const f = briefFixture();
+    const display = await recruiting.prepareRecruitingApproval(
+      f.prisma,
+      actor,
+      f.trusted,
+      f.input,
+      f.material,
+    );
+    expect(display).toMatchObject({ roleTitle: "Example engineer", files: [] });
+    expect(display).toHaveProperty("requirements");
+    expect((display as { requirements: string }).requirements).toContain("GBP 90,000 to 120,000");
+    expect(f.tx.message.create).not.toHaveBeenCalled();
+    f.approve("brief-effect", f.input);
+    let activeTransaction = false;
+    vi.mocked(f.prisma.$transaction).mockImplementation(async (callback: any) => {
+      expect(activeTransaction).toBe(false);
+      activeTransaction = true;
+      try {
+        return await callback(f.tx);
+      } finally {
+        activeTransaction = false;
+      }
+    });
+    for (const write of [
+      f.tx.message.create,
+      f.tx.recruitingRoleRevision.create,
+      f.tx.recruitingRole.updateMany,
+      f.tx.externalEffect.updateMany,
+      f.tx.event.create,
+    ]) {
+      const original = write.getMockImplementation()! as (...args: any[]) => unknown;
+      write.mockImplementation(async (...args: any[]) => {
+        expect(activeTransaction).toBe(true);
+        return original(...args);
+      });
+    }
+    const trusted = { ...f.trusted, effectId: "brief-effect", effectRequest: f.input };
+    const receipt = await recruiting.executeRecruitingApproval(
+      f.prisma,
+      actor,
+      trusted,
+      f.input,
+      f.material,
+    );
+    expect(receipt).toMatchObject({
+      stage: "brief",
+      roleRevisionId: "revision-2",
+      approvalEffectId: "brief-effect",
+    });
+    expect(f.revisions[1]!.brief.confirmation).toMatchObject({
+      revision: 2,
+      userId: actor.userId,
+      confirmedAt: "2026-10-16T18:00:00.000Z",
+    });
+    expect(f.tx.message.create).toHaveBeenCalledOnce();
+    expect(f.tx.recruitingRoleRevision.create).toHaveBeenCalledOnce();
+    expect(f.effects.get("brief-effect")!.status).toBe("completed");
+    expect(f.tx.event.create).toHaveBeenCalledOnce();
+    f.run.status = "completed";
+    f.thread.activeRecruitingRoleId = "another-role";
+    expect(
+      await recruiting.executeRecruitingApproval(f.prisma, actor, trusted, f.input, f.material),
+    ).toEqual(receipt);
+    expect(f.tx.message.create).toHaveBeenCalledOnce();
+    expect(f.tx.recruitingRoleRevision.create).toHaveBeenCalledOnce();
+    expect(f.tx.event.create).toHaveBeenCalledOnce();
+    f.revisions[1]!.brief.fields[0]!.value = "Changed after confirmation";
+    await expect(
+      recruiting.executeRecruitingApproval(f.prisma, actor, trusted, f.input, f.material),
+    ).rejects.toThrow();
+  });
+
+  it.each([
+    "stale",
+    "unbound",
+    "foreign",
+    "space",
+    "expired",
+    "run-owner",
+    "run-space",
+    "run-thread",
+    "bot",
+    "missing-salary",
+    "quote",
+    "agent-source",
+    "missing-proof",
+    "other-owner",
+    "hash",
+    "card",
+  ])("rejects %s before confirming requirements", async (boundary) => {
+    const f = briefFixture();
+    f.approve("brief-effect", f.input);
+    if (boundary === "stale")
+      await confirmRecruitingBrief(f.prisma, actor, {
+        threadId: "thread",
+        roleId: "role",
+        expectedRevision: 1,
+      });
+    if (boundary === "unbound") f.thread.activeRecruitingRoleId = "different-role";
+    if (boundary === "foreign") f.thread.userId = "someone-else";
+    if (boundary === "space") f.thread.spaceId = "different-space";
+    if (boundary === "expired") f.run.leaseExpiresAt = new Date(0);
+    if (boundary === "run-owner") f.run.userId = "someone-else";
+    if (boundary === "run-space") f.run.spaceId = "different-space";
+    if (boundary === "run-thread") f.run.threadId = "different-thread";
+    if (boundary === "bot") f.run.botId = "different-bot";
+    if (boundary === "missing-salary") f.revisions[0]!.brief.fields.splice(0, 1);
+    if (boundary === "quote") f.revisions[0]!.sourceRefs[0]!.quote = "Invented quote";
+    if (boundary === "agent-source")
+      f.humanMessages.set("jd-message", {
+        id: "jd-message",
+        threadId: "thread",
+        role: "bot",
+        botId: "bot",
+        blocks: [{ kind: "text", text: f.revisions[0]!.sourceRefs[0]!.quote }],
+      });
+    if (boundary === "missing-proof") f.events.length = 0;
+    if (boundary === "other-owner") f.events[0]!.payload.answeredByUserId = "teammate";
+    if (boundary === "hash") f.events[0]!.payload.requestHash = "a".repeat(64);
+    if (boundary === "card")
+      f.cards.get("card-brief-effect")!.blocks[0].approvalEffectId = "other-effect";
+    f.tx.message.create.mockClear();
+    f.tx.recruitingRoleRevision.create.mockClear();
+    await expect(
+      recruiting.executeRecruitingApproval(
+        f.prisma,
+        actor,
+        { ...f.trusted, effectId: "brief-effect", effectRequest: f.input },
+        f.input,
+        f.material,
+      ),
+    ).rejects.toThrow();
+    expect(f.tx.message.create).not.toHaveBeenCalled();
+    expect(f.tx.recruitingRoleRevision.create).not.toHaveBeenCalled();
+    expect(f.tx.externalEffect.updateMany).not.toHaveBeenCalled();
+  });
+
+  it("revalidates exact artifact bytes and all stored requirement semantics", async () => {
+    const f = briefFixture();
+    Object.assign(f.tx, { recruitingResearchAction: { findFirst: vi.fn(async () => null) } });
+    const source = {
+      id: "artifact-source",
+      kind: "original_material",
+      anchor: {
+        kind: "artifact",
+        artifact: { artifactId: "jd", sha256: f.artifacts[0]!.hash },
+        locator: "text",
+      },
+      readState: "read",
+      readAt: "2026-10-16T18:00:00Z",
+      quote: "Final engineer job description",
+    } as const;
+    f.revisions[0]!.sourceRefs.push(source as never);
+    f.revisions[0]!.criteria.push({
+      id: "experience",
+      priority: "hard",
+      expression: {
+        kind: "atom",
+        id: "experience-atom",
+        statement: "Relevant engineering work",
+        employmentRule: {
+          minimumMonths: 24,
+          countingRule: "complete_calendar_months",
+          qualificationDefinition: "Full-time engineering",
+          cutoff: { kind: "fixed", date: { precision: "day", year: 2026, month: 10, day: 20 } },
+        },
+      },
+      definitionQuestions: [],
+      sourceRefs: [source],
+    });
+    f.revisions[0]!.brief.rules.push({
+      criterionId: "experience",
+      origin: "jd",
+      effect: "reject",
+      sourceRefIds: [source.id],
+    });
+    f.revisions[0]!.brief.searchFilters.push({
+      id: "search-filter",
+      mode: "prefer",
+      statement: "Related companies",
+      origin: "inferred",
+      sourceRefIds: [],
+    });
+    const display = await recruiting.prepareRecruitingApproval(
+      f.prisma,
+      actor,
+      f.trusted,
+      f.input,
+      f.material,
+    );
+    expect(display.requirements).toContain(
+      "minimum 24 complete calendar months; Full-time engineering; cutoff: 2026-10-20",
+    );
+    expect(display.requirements).toContain("Search prefer: Related companies (Assumption)");
+    expect(display.requirements).not.toMatch(/experience-atom|artifact-source|search-filter/);
+    f.approve("brief-effect", f.input);
+    f.bytes.set("jd", new TextEncoder().encode("Changed source bytes"));
+    await expect(
+      recruiting.executeRecruitingApproval(
+        f.prisma,
+        actor,
+        { ...f.trusted, effectId: "brief-effect", effectRequest: f.input },
+        f.input,
+        f.material,
+      ),
+    ).rejects.toThrow();
+    expect(f.tx.message.create).not.toHaveBeenCalled();
+    expect(f.tx.externalEffect.updateMany).not.toHaveBeenCalled();
+  });
+
+  it("revalidates the exact selected version when answering and leaves deny to the existing card path", async () => {
+    const f = briefFixture();
+    f.run.status = "waiting_input";
+    const answer = {
+      spaceId: actor.spaceId,
+      threadId: "thread",
+      runId: "run",
+      messageId: "card",
+      answeredByUserId: actor.userId,
+      answer: "allow",
+    };
+    const tx = f.tx as unknown as Prisma.TransactionClient;
+    expect(
+      await recruiting.authorizeRecruitingApprovalAnswerInTransaction(tx, answer, f.input),
+    ).toBe(true);
+    expect(
+      await recruiting.authorizeRecruitingApprovalAnswerInTransaction(
+        tx,
+        { ...answer, answeredByUserId: "teammate" },
+        f.input,
+      ),
+    ).toBe(false);
+    await confirmRecruitingBrief(f.prisma, actor, {
+      threadId: "thread",
+      roleId: "role",
+      expectedRevision: 1,
+    });
+    expect(
+      await recruiting.authorizeRecruitingApprovalAnswerInTransaction(tx, answer, f.input),
+    ).toBe(false);
+  });
+
+  it("does not complete the effect if the confirmation CAS fails", async () => {
+    const f = briefFixture();
+    f.approve("brief-effect", f.input);
+    f.tx.recruitingRole.updateMany.mockResolvedValueOnce({ count: 0 });
+    await expect(
+      recruiting.executeRecruitingApproval(
+        f.prisma,
+        actor,
+        { ...f.trusted, effectId: "brief-effect", effectRequest: f.input },
+        f.input,
+        f.material,
+      ),
+    ).rejects.toThrow(recruiting.RecruitingConflictError);
+    expect(f.tx.externalEffect.updateMany).not.toHaveBeenCalled();
+    expect(f.tx.event.create).not.toHaveBeenCalled();
+    expect(f.effects.get("brief-effect")!.status).toBe("executing");
+  });
+});
+
 describe("native recruiting stage approvals", () => {
   it("preflights real authorized files without writes and rejects changed bytes", async () => {
     const f = approvalFixture();

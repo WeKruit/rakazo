@@ -612,7 +612,7 @@ async function reviseRoleInTransaction(
   );
 }
 
-/** Human-only RPC; not exposed as a model tool. CAS, human receipt and revision are atomic. */
+/** Human RPC and the verified native approval share one atomic confirmation write. */
 export async function confirmRecruitingBrief(
   prisma: PrismaClient,
   actor: Actor,
@@ -624,96 +624,123 @@ export async function confirmRecruitingBrief(
   if (loaded?.role.id !== input.roleId) throw new IsolationError();
   if (loaded.role.revision !== input.expectedRevision) throw new RecruitingConflictError();
   const artifacts = await loadRoleMaterials(prisma, actor, loaded.revision, material);
-  return prisma.$transaction(async (tx) => {
-    await tx.$queryRaw(
-      Prisma.sql`SELECT "id" FROM "threads" WHERE "id" = ${input.threadId} AND "spaceId" = ${actor.spaceId} AND "userId" = ${actor.userId} FOR UPDATE`,
+  return prisma.$transaction((tx) =>
+    confirmRecruitingBriefInTransaction(tx, actor, input, artifacts),
+  );
+}
+
+function requireConfirmableBrief(revision: RecruitingRoleRevision) {
+  if (!revision.brief)
+    throw new RecruitingPlaybookValidationError(
+      "Read the original material and prepare a sourced brief first.",
     );
-    const thread = await requireThread(tx, actor, input.threadId);
-    if (thread.activeRecruitingRoleId !== input.roleId) throw new IsolationError();
-    const role = await requireRole(tx, actor, input.roleId, true, thread);
-    if (role.revision !== input.expectedRevision) throw new RecruitingConflictError();
-    const workspace = await roleSnapshot(tx, actor, role, thread);
-    const { revision } = workspace;
-    if (!revision.brief)
-      throw new RecruitingPlaybookValidationError(
-        "Read the original material and prepare a sourced brief first.",
-      );
-    validateRecruitingBrief(revision.brief, revision);
-    const messages = await validateReadSources(
-      tx,
-      actor,
-      definitionSources(revision),
-      artifacts,
-      thread,
+  validateRecruitingBrief(revision.brief, revision);
+  if (recruitingBriefClarifications(revision.brief).length)
+    throw new RecruitingPlaybookValidationError(
+      "Resolve the material brief questions before confirmation.",
     );
-    validateBriefAuthorship(
-      { ...revision, expectedRevision: role.revision, title: role.title },
-      messages,
-    );
-    if (recruitingBriefClarifications(revision.brief).length)
-      throw new RecruitingPlaybookValidationError(
-        "Resolve the material brief questions before confirmation.",
-      );
-    if (
-      revision.criteria.some(
-        (criterion) => criterion.priority === "hard" && criterion.definitionQuestions.length,
-      )
+  if (
+    revision.criteria.some(
+      (criterion) => criterion.priority === "hard" && criterion.definitionQuestions.length,
     )
-      throw new RecruitingPlaybookValidationError(
-        "Resolve the material hard-criterion questions before confirmation.",
-      );
-    if (revision.brief.confirmation?.revision === role.revision) return workspace;
-    const nextRevision = role.revision + 1;
-    const message = await createThreadMessageInTransaction(tx, {
-      threadId: thread.id,
-      role: "user",
-      blocks: [
-        {
-          kind: "text",
-          text: `Confirm recruiting brief for ${role.title} (requirements version ${role.revision}).`,
-        },
-      ],
-    });
-    const brief = {
-      ...revision.brief,
-      confirmation: {
-        revision: nextRevision,
-        userId: actor.userId,
-        messageId: message.id,
-        confirmedAt: new Date().toISOString(),
+  )
+    throw new RecruitingPlaybookValidationError(
+      "Resolve the material hard-criterion questions before confirmation.",
+    );
+}
+
+async function confirmRecruitingBriefInTransaction(
+  tx: Prisma.TransactionClient,
+  actor: Actor,
+  input: { threadId: string; roleId: string; expectedRevision: number },
+  artifacts: ReadonlyMap<string, Uint8Array>,
+  approval?: { runId: string; confirmedAt: string },
+): Promise<RoleSnapshot> {
+  await tx.$queryRaw(
+    Prisma.sql`SELECT "id" FROM "threads" WHERE "id" = ${input.threadId} AND "spaceId" = ${actor.spaceId} AND "userId" = ${actor.userId} FOR UPDATE`,
+  );
+  const thread = await requireThread(tx, actor, input.threadId);
+  if (thread.activeRecruitingRoleId !== input.roleId) throw new IsolationError();
+  const role = await requireRole(tx, actor, input.roleId, true, thread);
+  if (role.revision !== input.expectedRevision) throw new RecruitingConflictError();
+  const workspace = await roleSnapshot(tx, actor, role, thread);
+  const { revision } = workspace;
+  requireConfirmableBrief(revision);
+  const messages = await validateReadSources(
+    tx,
+    actor,
+    definitionSources(revision),
+    artifacts,
+    thread,
+  );
+  validateBriefAuthorship(
+    { ...revision, expectedRevision: role.revision, title: role.title },
+    messages,
+  );
+  if (revision.brief!.confirmation?.revision === role.revision) return workspace;
+  const nextRevision = role.revision + 1;
+  const message = await createThreadMessageInTransaction(tx, {
+    threadId: thread.id,
+    role: "user",
+    ...(approval ? { runId: approval.runId } : {}),
+    blocks: [
+      {
+        kind: "text",
+        text: `Confirm recruiting brief for ${role.title} (requirements version ${role.revision}).`,
       },
-    };
-    const saved = await tx.recruitingRoleRevision.create({
-      data: {
-        roleId: role.id,
-        revision: nextRevision,
-        ...definitionData({ ...revision, expectedRevision: role.revision, title: role.title }),
-        brief: brief as Prisma.InputJsonValue,
-      },
-    });
-    const changed = await tx.recruitingRole.updateMany({
-      where: {
-        id: role.id,
-        spaceId: actor.spaceId,
-        userId: actor.userId,
-        revision: role.revision,
-        currentRevisionId: role.currentRevisionId,
-      },
-      data: { revision: nextRevision, currentRevisionId: saved.id },
-    });
-    if (changed.count !== 1) throw new RecruitingConflictError();
-    return roleSnapshot(tx, actor, {
-      ...role,
+    ],
+  });
+  const brief = {
+    ...revision.brief,
+    confirmation: {
       revision: nextRevision,
-      currentRevisionId: saved.id,
-    });
+      userId: actor.userId,
+      messageId: message.id,
+      confirmedAt: approval?.confirmedAt ?? new Date().toISOString(),
+    },
+  };
+  const saved = await tx.recruitingRoleRevision.create({
+    data: {
+      roleId: role.id,
+      revision: nextRevision,
+      ...definitionData({ ...revision, expectedRevision: role.revision, title: role.title }),
+      brief: brief as Prisma.InputJsonValue,
+    },
+  });
+  const changed = await tx.recruitingRole.updateMany({
+    where: {
+      id: role.id,
+      spaceId: actor.spaceId,
+      userId: actor.userId,
+      revision: role.revision,
+      currentRevisionId: role.currentRevisionId,
+    },
+    data: { revision: nextRevision, currentRevisionId: saved.id },
+  });
+  if (changed.count !== 1) throw new RecruitingConflictError();
+  return roleSnapshot(tx, actor, {
+    ...role,
+    revision: nextRevision,
+    currentRevisionId: saved.id,
   });
 }
 
-function criterionStatement(expression: RecruitingCriterionExpression): string {
-  if (expression.kind === "atom") return expression.statement;
-  if (expression.kind === "not") return `NOT (${criterionStatement(expression.item)})`;
-  return `(${expression.items.map(criterionStatement).join(expression.kind === "all" ? " AND " : " OR ")})`;
+function criterionStatement(
+  expression: RecruitingCriterionExpression,
+  includeEmployment = false,
+): string {
+  if (expression.kind === "atom") {
+    const rule = includeEmployment ? expression.employmentRule : undefined;
+    if (!rule) return expression.statement;
+    const cutoff =
+      rule.cutoff.kind === "fixed"
+        ? `${rule.cutoff.date.year}-${String(rule.cutoff.date.month).padStart(2, "0")}-${String(rule.cutoff.date.day).padStart(2, "0")}`
+        : "assessment date";
+    return `${expression.statement} (minimum ${rule.minimumMonths} complete calendar months; ${rule.qualificationDefinition}; cutoff: ${cutoff})`;
+  }
+  if (expression.kind === "not")
+    return `NOT (${criterionStatement(expression.item, includeEmployment)})`;
+  return `(${expression.items.map((item) => criterionStatement(item, includeEmployment)).join(expression.kind === "all" ? " AND " : " OR ")})`;
 }
 
 /** Human-only edit of existing criteria; native authorship and the role CAS commit together. */
@@ -3072,7 +3099,9 @@ async function approvalWorkspace(
   tx: Tx,
   actor: Actor,
   threadId: string,
-  input: Pick<RetainedRecruitingApprovalRequest, "roleId" | "expectedRoleRevision">,
+  input: Pick<RetainedRecruitingApprovalRequest, "roleId" | "expectedRoleRevision"> & {
+    stage?: RetainedRecruitingApprovalRequest["stage"];
+  },
   current = true,
   requireSelection = current,
 ) {
@@ -3090,6 +3119,11 @@ async function approvalWorkspace(
   });
   await validateDefinition(tx, actor, revision);
   if (revision.brief) validateRecruitingBrief(revision.brief, revision);
+  if (input.stage === "brief") {
+    requireConfirmableBrief(revision);
+    if (revision.brief!.confirmation) throw new RecruitingConflictError();
+    return { role, revision, thread };
+  }
   requireRecruitingBriefConfirmation(revision);
   const confirmation = revision.brief!.confirmation!;
   const human = await tx.message.findUnique({
@@ -3099,7 +3133,7 @@ async function approvalWorkspace(
   if (confirmation.userId !== actor.userId || !human || !isNativeHumanMessage(human))
     throw new IsolationError();
   await requireThread(tx, actor, human.threadId);
-  return { role, revision };
+  return { role, revision, thread };
 }
 
 async function approvalAnswerProof(
@@ -3176,11 +3210,55 @@ async function completedRecruitingApproval(
     throw new RecruitingConflictError();
   const { run, proof } = await approvalAnswerProof(tx, actor, effect);
   const workspace = await approvalWorkspace(tx, actor, run.threadId, input, current, false);
+  let approvedRevisionId = workspace.revision.id;
+  if (input.stage === "brief") {
+    const row = await tx.recruitingRoleRevision.findFirst({
+      where: { roleId: input.roleId, revision: input.expectedRoleRevision + 1 },
+    });
+    if (!row) throw new IsolationError();
+    const revision = RecruitingRoleRevisionSchema.parse({
+      ...row,
+      createdAt: row.createdAt.toISOString(),
+    });
+    const confirmation = revision.brief?.confirmation;
+    const human =
+      confirmation &&
+      (await tx.message.findUnique({
+        where: { id: confirmation.messageId },
+        include: humanMessageInclude,
+      }));
+    if (
+      !confirmation ||
+      confirmation.revision !== input.expectedRoleRevision + 1 ||
+      confirmation.userId !== actor.userId ||
+      confirmation.confirmedAt !== proof.createdAt.toISOString() ||
+      !human ||
+      !isNativeHumanMessage(human) ||
+      human.threadId !== run.threadId ||
+      human.runId !== run.id ||
+      stableJsonValue(
+        definitionData({
+          ...revision,
+          expectedRevision: revision.revision,
+          title: workspace.role.title,
+        }),
+      ) !==
+        stableJsonValue(
+          definitionData({
+            ...workspace.revision,
+            expectedRevision: input.expectedRoleRevision,
+            title: workspace.role.title,
+          }),
+        )
+    )
+      throw new IsolationError();
+    approvedRevisionId = revision.id;
+  }
   const expected: RecruitingApprovalResult = {
     status: "approved",
     stage: input.stage,
     roleId: input.roleId,
-    roleRevisionId: workspace.revision.id,
+    roleRevisionId: approvedRevisionId,
     approvalEffectId: effect.id,
     payloadHash: recruitingApprovalHash(input),
     approvedByUserId: actor.userId,
@@ -3207,8 +3285,8 @@ async function completedRecruitingApproval(
       })
   )
     throw new IsolationError();
-  const package_ = await recruitingApprovalPackage(tx, actor, input, current);
-  return { input, result: expected, package: package_ };
+  const package_ = await recruitingApprovalPackage(tx, actor, input, current, undefined, workspace);
+  return { input, result: expected, package: package_, workspace };
 }
 
 type NativeRecruitingResearchTarget = {
@@ -3222,6 +3300,7 @@ type RecruitingApprovalPackage = {
   sourceRefs: RecruitingAssessmentSourceRef[];
   profiles?: { name: string; linkedinUrl: string; evidenceUrl: string }[];
   nativeResearchTarget?: NativeRecruitingResearchTarget;
+  requirements?: string;
 };
 
 async function recruitingApprovalPackage(
@@ -3230,7 +3309,52 @@ async function recruitingApprovalPackage(
   input: RetainedRecruitingApprovalRequest,
   current = true,
   bytes?: ReadonlyMap<string, Uint8Array>,
+  workspace?: Awaited<ReturnType<typeof approvalWorkspace>>,
 ): Promise<RecruitingApprovalPackage> {
+  if (input.stage === "brief") {
+    if (!workspace || workspace.revision.revision !== input.expectedRoleRevision)
+      throw new IsolationError();
+    const { revision, role, thread } = workspace;
+    requireConfirmableBrief(revision);
+    if (bytes) {
+      const messages = await validateReadSources(
+        tx,
+        actor,
+        definitionSources(revision),
+        bytes,
+        thread,
+      );
+      validateBriefAuthorship(
+        { ...revision, title: role.title, expectedRevision: revision.revision },
+        messages,
+      );
+    }
+    const brief = revision.brief!;
+    return {
+      files: [],
+      documentRefs: [],
+      sourceRefs: definitionSources(revision),
+      requirements: [
+        ...brief.fields.map(
+          (field) =>
+            `${field.key.replaceAll("_", " ")}: ${field.value ?? "Unknown"}${field.state === "conflict" ? " (Conflicting information)" : field.state === "missing" && field.value !== null ? " (Unconfirmed)" : ""}${field.origin === "inferred" ? " (Assumption)" : ""}`,
+        ),
+        ...brief.searchFilters.map(
+          (filter) =>
+            `Search ${filter.mode}: ${filter.statement}${filter.origin === "inferred" ? " (Assumption)" : ""}`,
+        ),
+        ...revision.criteria.map((criterion) => {
+          const rule = brief.rules.find((rule) => rule.criterionId === criterion.id)!;
+          return `${criterion.priority === "hard" ? "Required" : "Preferred"}: ${criterionStatement(criterion.expression, true)} (${rule.effect === "reject" ? "Reject if not met" : "Flag for review"}${rule.origin === "inferred" ? "; Assumption" : ""})`;
+        }),
+        ...revision.preferences.map((preference) => `Preference: ${preference}`),
+        ...revision.definitionQuestions.map((question) => `Open question: ${question}`),
+        ...revision.criteria.flatMap((criterion) =>
+          criterion.definitionQuestions.map((question) => `Open question: ${question}`),
+        ),
+      ].join("\n"),
+    };
+  }
   if (input.stage === "calibration") {
     const documents = await completedRecruitingApproval(
       tx,
@@ -3506,8 +3630,8 @@ async function loadRecruitingApprovalMaterials(
       )
         throw new IsolationError();
     }
-    await approvalWorkspace(tx, actor, trusted.threadId, input, !replay);
-    return recruitingApprovalPackage(tx, actor, input, !replay);
+    const workspace = await approvalWorkspace(tx, actor, trusted.threadId, input, !replay);
+    return recruitingApprovalPackage(tx, actor, input, !replay, undefined, workspace);
   });
   // Reuse the existing native Artifact authorization/store reader; synthetic locators are never persisted.
   return loadRoleMaterials(
@@ -3541,6 +3665,7 @@ export async function prepareRecruitingApproval(
   files: MessageBlock[];
   roleTitle: string;
   profiles?: RecruitingApprovalPackage["profiles"];
+  requirements?: string;
 }> {
   const input = RetainedRecruitingApprovalRequestSchema.parse(untrustedInput);
   const bytes = await loadRecruitingApprovalMaterials(prisma, actor, trusted, input, material);
@@ -3549,12 +3674,14 @@ export async function prepareRecruitingApproval(
     if (run.threadId !== trusted.threadId || run.botId !== trusted.botId)
       throw new IsolationError();
     requireResearchLease(run, trusted);
-    const { role } = await approvalWorkspace(tx, actor, trusted.threadId, input);
-    const package_ = await recruitingApprovalPackage(tx, actor, input, true, bytes);
+    const workspace = await approvalWorkspace(tx, actor, trusted.threadId, input);
+    const { role } = workspace;
+    const package_ = await recruitingApprovalPackage(tx, actor, input, true, bytes, workspace);
     return {
       files: package_.files,
       roleTitle: role.title,
       ...(package_.profiles ? { profiles: package_.profiles } : {}),
+      ...(package_.requirements ? { requirements: package_.requirements } : {}),
     };
   });
 }
@@ -3618,19 +3745,33 @@ export async function executeRecruitingApproval(
         input.stage,
         false,
       );
-      await recruitingApprovalPackage(tx, actor, input, false, bytes);
+      await recruitingApprovalPackage(tx, actor, input, false, bytes, saved.workspace);
       return saved.result;
     }
     requireResearchLease(run, trusted);
     if (effect.status !== "executing") throw new IsolationError();
     const workspace = await approvalWorkspace(tx, actor, trusted.threadId, input);
     const { proof } = await approvalAnswerProof(tx, actor, effect);
-    await recruitingApprovalPackage(tx, actor, input, true, bytes);
+    let approvedRevisionId = workspace.revision.id;
+    if (input.stage === "brief") {
+      const confirmed = await confirmRecruitingBriefInTransaction(
+        tx,
+        actor,
+        {
+          threadId: trusted.threadId,
+          roleId: input.roleId,
+          expectedRevision: input.expectedRoleRevision,
+        },
+        bytes,
+        { runId: run.id, confirmedAt: proof.createdAt.toISOString() },
+      );
+      approvedRevisionId = confirmed.revision.id;
+    } else await recruitingApprovalPackage(tx, actor, input, true, bytes);
     const result: RecruitingApprovalResult = {
       status: "approved",
       stage: input.stage,
       roleId: input.roleId,
-      roleRevisionId: workspace.revision.id,
+      roleRevisionId: approvedRevisionId,
       approvalEffectId: effect.id,
       payloadHash: recruitingApprovalHash(input),
       approvedByUserId: actor.userId,
@@ -3681,8 +3822,8 @@ export async function authorizeRecruitingApprovalAnswerInTransaction(
     const request = RetainedRecruitingApprovalRequestSchema.parse(effectRequest);
     const { run } = await lockLiveRecruitingRun(tx, actor, input.runId, false);
     if (run.status !== "waiting_input" || run.threadId !== input.threadId) return false;
-    await approvalWorkspace(tx, actor, input.threadId, request);
-    await recruitingApprovalPackage(tx, actor, request);
+    const workspace = await approvalWorkspace(tx, actor, input.threadId, request);
+    await recruitingApprovalPackage(tx, actor, request, true, undefined, workspace);
     return true;
   } catch (error) {
     if (

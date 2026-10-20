@@ -17,6 +17,7 @@ type CrmApprovalOperation =
 
 type RecruitingApprovalDisplay = {
   roleTitle: string;
+  requirements?: string;
   profiles?: { name: string; linkedinUrl: string; evidenceUrl: string }[];
 };
 
@@ -92,7 +93,9 @@ export function buildApprovalAskBlock(
                 : crmOperation === "crm_append_candidate_note"
                   ? "Review CRM note"
                   : toolName === "create_space" || recruitingApproval
-                    ? `${summary}?`
+                    ? args.stage === "brief" && recruitingApproval
+                      ? summary
+                      : `${summary}?`
                     : `Review before ${summary}`,
         secrets,
       ),
@@ -118,7 +121,12 @@ export function buildApprovalAskBlock(
           ? [
               {
                 id: "allow",
-                label: args.stage === "documents" ? "Approve documents" : "Approve calibration",
+                label:
+                  args.stage === "brief"
+                    ? "Confirm requirements"
+                    : args.stage === "documents"
+                      ? "Approve documents"
+                      : "Approve calibration",
               },
               { id: "deny", label: "Deny" },
             ]
@@ -136,7 +144,11 @@ function describeApprovalAction(
   displayToolName: string,
 ): string {
   if (toolName === "recruiting_request_approval") {
-    return args.stage === "documents" ? "Approve role documents" : "Approve 10-profile calibration";
+    return args.stage === "brief"
+      ? "Confirm requirements"
+      : args.stage === "documents"
+        ? "Approve role documents"
+        : "Approve 10-profile calibration";
   }
   if (toolName === "destination.write") {
     const collection = args.collection ? String(args.collection) : "records";
@@ -171,7 +183,10 @@ function formatApprovalDetail(
   recruiting?: RecruitingApprovalDisplay,
 ): string | undefined {
   const lines: string[] = [];
-  if (reviewReason?.trim()) {
+  if (
+    reviewReason?.trim() &&
+    !(toolName === "recruiting_request_approval" && args.stage === "brief")
+  ) {
     lines.push(reviewReason.trim().replace(/\u2014|\u2013/g, "-"));
   }
   if (toolName === "schedule_update") {
@@ -230,7 +245,11 @@ function formatApprovalDetail(
     const request = RetainedRecruitingApprovalRequestSchema.parse(args);
     if (recruiting) lines.push(`Role: ${recruiting.roleTitle}`);
     lines.push(`Role version: ${request.expectedRoleRevision}`);
-    if (request.stage === "documents") {
+    if (request.stage === "brief") {
+      if (!recruiting?.roleTitle.trim() || !recruiting.requirements?.trim())
+        throw new Error("Requirements confirmation requires verified role requirements.");
+      lines.push(recruiting.requirements);
+    } else if (request.stage === "documents") {
       lines.push(
         "Job description: attached",
         "Named JD PDF: attached",

@@ -370,6 +370,7 @@ const RecruitingCalibrationApproval = {
   ruleChanges: z.array(Text).readonly(),
 };
 export const RecruitingApprovalToolInputSchema = z.discriminatedUnion("stage", [
+  z.strictObject({ ...RecruitingApprovalScope, stage: z.literal("brief") }),
   RecruitingDocumentsApprovalInputSchema,
   z.strictObject({
     ...RecruitingCalibrationApproval,
