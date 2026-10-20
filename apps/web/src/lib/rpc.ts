@@ -77,10 +77,23 @@ const link = new RPCLink<RpcClientContext>({
     }
     const spaceId =
       options.context.spaceId === undefined ? selectedSpaceId() : options.context.spaceId;
-    return fetch(request, {
+    const response = await fetch(request, {
       headers: withSpaceHeaders(request.headers, spaceId),
       credentials: "include",
     });
+    if (!response.ok) {
+      const requestId = response.headers.get("x-request-id");
+      const traceparent = response.headers.get("traceparent");
+      console.error("RPC request failed", {
+        method: request.method,
+        pathname: new URL(request.url).pathname,
+        status: response.status,
+        contentType: response.headers.get("content-type"),
+        ...(requestId ? { "x-request-id": requestId } : {}),
+        ...(traceparent ? { traceparent } : {}),
+      });
+    }
+    return response;
   },
 });
 

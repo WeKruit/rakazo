@@ -544,7 +544,7 @@ export const builtinAgentTools: ConnectorTool[] = [
   {
     name: "recruiting_shortlist",
     description:
-      "Set or remove one saved candidate's shortlist bookmark in the current role. Read recruiting_candidates and recruiting_role first; supply their exact roleId, expectedRoleRevision, candidateKey and expectedRevision, plus shortlisted. This records this bot's saved review action, not a new qualification judgment, CRM stage or outreach. Preserve provider output and other candidates. Reuse the original receipt after an unknown outcome; do not invent candidate identities or bypass native approval and permission policy.",
+      "Set or remove one saved candidate's shortlist bookmark in the current role. Use roleId and expectedRoleRevision from this run's immutable current-role context; read recruiting_role only when that context is missing or stale. Resolve the selected candidate with a bounded recruiting_candidates list using query for its saved name or profile URL; preserve ambiguity and use its current candidateKey and revision as expectedRevision, plus shortlisted. Never reuse a prior turn's candidate revision. This records this bot's saved review action, not a new qualification judgment, CRM stage or outreach. Preserve provider output and other candidates. Reuse the original receipt after an unknown outcome; do not invent candidate identities or bypass native approval and permission policy.",
     inputSchema: z.toJSONSchema(RecruitingShortlistToolInputSchema, { io: "input" }),
     readOnly: false,
   },
