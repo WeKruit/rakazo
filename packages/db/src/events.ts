@@ -1757,7 +1757,9 @@ async function notifyRealtime(
   threadId: string,
   cursor: number,
 ): Promise<void> {
-  await realtime?.publish(threadTopic(threadId), JSON.stringify({ cursor })).catch(() => undefined);
+  await realtime?.publish(threadTopic(threadId), JSON.stringify({ cursor })).catch((error) => {
+    getLogger().error("thread.realtime.publish.failed", error, { threadId, cursor });
+  });
 }
 
 export async function eventsAfter(
