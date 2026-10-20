@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 
-import type { Group } from "@rakazo/contracts";
+import type { Bot, Group } from "@rakazo/contracts";
 import type { ComponentProps, ReactNode } from "react";
 import { act } from "react";
 import type { Root } from "react-dom/client";
@@ -45,7 +45,7 @@ vi.mock("@rakazo/ui-web", () => ({
   DialogTitle: ({ children }: { children: ReactNode }) => <h2>{children}</h2>,
 }));
 
-import { GroupSettings } from "./GroupPanel";
+import { CreateGroupForm, GroupSettings } from "./GroupPanel";
 
 const group: Group = {
   id: "group-1",
@@ -128,6 +128,37 @@ afterEach(async () => {
   await act(async () => root.unmount());
   container.remove();
   vi.unstubAllGlobals();
+});
+
+it("creates a role with the current native crew order after a membership refresh, without a specialist picker", async () => {
+  const onCreate = vi.fn().mockResolvedValue(undefined);
+  const bots = [
+    { id: "coordinator", name: "Main", archivedAt: null },
+    { id: "researcher", name: "Sourcer", archivedAt: null },
+  ] as Bot[];
+  const renderRole = (current: Bot[]) =>
+    act(async () =>
+      root.render(
+        <CreateGroupForm bots={current} recruiting onCancel={() => {}} onCreate={onCreate} />,
+      ),
+    );
+  await renderRole(bots);
+  expect(container.textContent).not.toContain("Sourcer");
+  const input = container.querySelector("input")!;
+  act(() => {
+    Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, "value")!.set!.call(
+      input,
+      "Systems engineer",
+    );
+    input.dispatchEvent(new Event("input", { bubbles: true }));
+  });
+  const replacement = { id: "scheduler", name: "Scheduling", archivedAt: null } as Bot;
+  await renderRole([bots[1]!, bots[0]!, replacement]);
+  await click("Create role");
+  expect(onCreate).toHaveBeenCalledExactlyOnceWith({
+    name: "Systems engineer",
+    botIds: ["researcher", "coordinator", "scheduler"],
+  });
 });
 
 describe("GroupSettings", () => {

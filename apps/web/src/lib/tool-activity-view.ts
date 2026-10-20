@@ -39,7 +39,12 @@ export function renderableMessageBlocks(
   showToolActivity: boolean,
 ): MessageBlock[] {
   return blocks.filter(
-    (block) => !isToolActivityBlock(block) || shouldRenderToolCard(block, showToolActivity),
+    (block) =>
+      (showToolActivity ||
+        !["handoff", "bot_message_sent", "bot_message_received", "subagent", "child_bot"].includes(
+          block.kind,
+        )) &&
+      (!isToolActivityBlock(block) || shouldRenderToolCard(block, showToolActivity)),
   );
 }
 
@@ -61,7 +66,5 @@ export function messageHasVisibleBlocks(
   blocks: readonly MessageBlock[],
   showToolActivity: boolean,
 ): boolean {
-  return blocks.some(
-    (block) => !isToolActivityBlock(block) || shouldRenderToolCard(block, showToolActivity),
-  );
+  return renderableMessageBlocks(blocks, showToolActivity).length > 0;
 }

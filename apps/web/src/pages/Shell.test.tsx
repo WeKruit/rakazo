@@ -41,6 +41,7 @@ const shellApi = vi.hoisted(() => ({
   listRoutines: vi.fn(),
   updateRoutine: vi.fn(),
   listSpaces: vi.fn(),
+  createGroup: vi.fn(),
   recruiting: {
     getWorkspace: vi.fn(),
     listAssessments: vi.fn(),
@@ -80,6 +81,7 @@ vi.mock("../lib/rpc", async (importOriginal) => ({
     },
     skills: { list: vi.fn().mockResolvedValue([]) },
     spaces: { list: shellApi.listSpaces },
+    groups: { create: shellApi.createGroup },
     memory: {
       list: vi.fn().mockResolvedValue([]),
       providerConfig: vi.fn().mockResolvedValue(null),
@@ -94,6 +96,7 @@ vi.mock("../lib/rpc", async (importOriginal) => ({
 }));
 
 import * as LocalTimezoneModule from "../lib/local-timezone";
+import { setToolActivityPreference } from "../lib/tool-activity-preference";
 import * as RecruitingPanelModule from "./RecruitingPanel";
 import type { ComposerHandle } from "./Shell";
 import { Composer, candidateReferenceText, eventChangesRecruitingPanel, ShellPage } from "./Shell";
@@ -204,6 +207,12 @@ async function renderFeedbackShell(
   runStatuses?: readonly ("queued" | "leased" | "running" | "waiting_input")[],
   options: { messages?: ThreadMessage[]; isDeploymentOwner?: boolean; routines?: Routine[] } = {},
 ) {
+  setToolActivityPreference(
+    localStorage.getItem("rakazo.showToolActivity") === "on" ||
+      (options.isDeploymentOwner === undefined && !localStorage.getItem("rakazo.showToolActivity"))
+      ? "on"
+      : "off",
+  );
   (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
   globalThis.ResizeObserver ??= class {
     observe() {}
@@ -313,7 +322,7 @@ async function renderFeedbackShell(
   };
   shellApi.listRoutines.mockResolvedValue(options.routines ?? []);
   shellApi.bootstrap.mockResolvedValue({
-    me: { spaceId: "space-1", isDeploymentOwner: options.isDeploymentOwner ?? false },
+    me: { spaceId: "space-1", isDeploymentOwner: options.isDeploymentOwner ?? true },
     bots,
     botSections: [],
     groups: [group],
@@ -329,6 +338,7 @@ async function renderFeedbackShell(
       : thread,
   );
   shellApi.listSpaces.mockResolvedValue(navigation);
+  shellApi.createGroup.mockResolvedValue({ ...group, id: "group-new" });
   shellApi.followUp.mockResolvedValue({ ok: true });
   const candidate = {
     roleId: "internal-role",
@@ -454,6 +464,122 @@ it("loads a cold group from its own snapshot when bootstrap has no DM snapshot",
   expect(shellApi.get).toHaveBeenCalledWith({ groupId: "group-1" }, expect.anything());
   expect(container?.textContent).toContain("Choose the role location");
   expect(shellApi.recruiting.getWorkspace).toHaveBeenCalledWith({ threadId: "thread-1" });
+});
+
+it.each([false, true])(
+  "shows the recruiter workspace to owner=%s without explicit diagnostics and sends plain text in the same native role",
+  async (owner) => {
+    setToolActivityPreference("off");
+    const view = await renderFeedbackShell("group", undefined, { isDeploymentOwner: owner });
+    expect(container?.querySelector('[data-product-view="recruiting"]')).not.toBeNull();
+    expect(
+      container?.querySelector('[data-testid="recruiting-navigation"]')?.textContent,
+    ).toContain("Open roles");
+    expect(container?.querySelector('[data-testid="create-menu-trigger"]')).toBeNull();
+    expect(document.body.querySelector('select[aria-label="Send to"]')).toBeNull();
+    expect(view.getProps().candidateFeedbackRecipients).toEqual([{ id: "bot-1", name: "Main" }]);
+    await view.choose("skip");
+    await view.click("Send feedback");
+    expect(shellApi.followUp).toHaveBeenCalledWith(
+      expect.objectContaining({ groupId: "group-1", mentions: ["bot-1"] }),
+    );
+    await view.click("Close");
+    await view.click("Close panel");
+    shellApi.send.mockResolvedValue({ runId: "run-plain" });
+    const prompt = "Find candidates for this role, then help me schedule interviews.";
+    const textarea = container!.querySelector<HTMLTextAreaElement>(
+      'textarea[name="chat-message"]',
+    )!;
+    type(textarea, prompt);
+    await view.click("Send");
+    expect(shellApi.send).toHaveBeenCalledExactlyOnceWith(
+      expect.objectContaining({ groupId: "group-1", text: prompt, mentions: undefined }),
+    );
+    expect(document.body.querySelector('[data-message-id="pending-main"]')).not.toBeNull();
+  },
+);
+
+it("refuses a partial crew when membership changes while New role stays open", async () => {
+  setToolActivityPreference("off");
+  const view = await renderFeedbackShell("group", undefined, { isDeploymentOwner: false });
+  await view.click("Close");
+  await view.click("Close panel");
+  await view.click("New role");
+  const input = container!.querySelector<HTMLInputElement>('input[placeholder="Name this role"]')!;
+  act(() => {
+    Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, "value")!.set!.call(
+      input,
+      "Systems engineer",
+    );
+    input.dispatchEvent(new Event("input", { bubbles: true }));
+  });
+  view.members.push({
+    botId: "not-in-current-bots",
+    name: "Scheduler",
+    color: "ink",
+    status: "idle",
+  });
+  await view.render();
+  await view.click("Create role");
+  expect(shellApi.createGroup).not.toHaveBeenCalled();
+  expect(container?.textContent).toContain("The recruiting team changed. Open the role again.");
+  expect(document.body.querySelector('[data-message-id="pending-main"]')).not.toBeNull();
+});
+
+it("switches the owner presentation while retaining the same native thread, pending specialist card, draft and attachment", async () => {
+  setToolActivityPreference("off");
+  const specialist: ThreadMessage = {
+    id: "pending-specialist",
+    threadId: "thread-1",
+    seq: 2,
+    role: "bot",
+    botId: "bot-2",
+    runId: "run-1",
+    createdAt: "2026-01-01T00:01:00Z",
+    blocks: [
+      {
+        kind: "ask",
+        text: "Which interview time works?",
+        input: "text",
+        status: "pending",
+        actions: [{ id: "morning", label: "Morning" }],
+      },
+    ],
+  };
+  const view = await renderFeedbackShell("group", ["running", "waiting_input"], {
+    isDeploymentOwner: true,
+    messages: [specialist],
+  });
+  await view.click("Close");
+  await view.click("Close panel");
+  pickAttachment();
+  const draft = "Keep this role conversation open.";
+  type(container!.querySelector<HTMLTextAreaElement>('textarea[name="chat-message"]')!, draft);
+  for (const preference of ["on", "off"] as const) {
+    await act(async () => {
+      setToolActivityPreference(preference);
+    });
+    expect(
+      container?.querySelector('[data-testid="shell-root"]')?.getAttribute("data-product-view"),
+    ).toBe(preference === "on" ? "developer" : "recruiting");
+    expect(
+      document.body.querySelector('[data-message-id="pending-specialist"]')?.textContent,
+    ).toContain("Which interview time works?");
+    expect(
+      container!.querySelector<HTMLTextAreaElement>('textarea[name="chat-message"]')!.value,
+    ).toBe(draft);
+    expect(document.body.textContent).toContain("notes.txt");
+    expect(document.body.querySelector('[data-message-id="pending-main"]')).not.toBeNull();
+  }
+  await view.click("Morning");
+  expect(shellApi.answer).toHaveBeenCalledExactlyOnceWith({
+    groupId: "group-1",
+    runId: "run-1",
+    messageId: "pending-specialist",
+    answer: "morning",
+  });
+  expect(shellApi.send).not.toHaveBeenCalled();
+  expect(shellApi.createArtifact).not.toHaveBeenCalled();
 });
 
 it.each(["@once", "0 18 * * *"])(
@@ -587,10 +713,8 @@ it.each([
       ],
     });
     const transcript = document.querySelector('[data-testid="transcript"]')!;
-    expect(transcript.textContent).toContain("Saved CRM records");
-    expect(transcript.textContent).toContain("completed");
-    expect(transcript.textContent).toContain("Remaining CRM records");
-    expect(transcript.textContent).toContain("Working…");
+    expect(transcript.textContent?.includes("Saved CRM records")).toBe(visible);
+    expect(transcript.textContent?.includes("Remaining CRM records")).toBe(visible);
     expect(transcript.textContent).toContain("The saved candidate review is ready.");
     expect(transcript.textContent).toContain("Choose the role location");
     for (const text of Object.values(internals)) {

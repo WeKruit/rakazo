@@ -60,12 +60,14 @@ export function userVisibleMessages<T extends PresentableMessage>(
     if (message.runId && backgroundRunIds.has(message.runId)) {
       return message.blocks.some(isBackgroundInputBlock);
     }
-    if (isPeerReceiptBlocks(message.blocks)) return includePeerReceipts;
+    if (isPeerReceiptBlocks(message.blocks)) {
+      return includePeerReceipts || message.blocks.some(isBackgroundInputBlock);
+    }
     if (!message.runId || !peerRunIds.has(message.runId)) return true;
     // Keep peer-run ask cards, and (unless the caller opts out) the bot's own text reply.
     const includeText = options.includeDelegatedReplyText !== false;
     return message.blocks.some(
-      (block) => block.kind === "ask" || (includeText && block.kind === "text"),
+      (block) => isBackgroundInputBlock(block) || (includeText && block.kind === "text"),
     );
   });
 }
