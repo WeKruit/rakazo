@@ -82,9 +82,16 @@ const GOOGLE_MCP_CALENDAR_WRITES = new Set([
   "delete_event",
   "respond_to_event",
 ]);
+const CAL_MCP_BOOKING_WRITES = new Set([
+  "create_booking",
+  "reschedule_booking",
+  "cancel_booking",
+  "confirm_booking",
+  "add_booking_attendee",
+]);
 
-/** Exact Google Workspace MCP writes, including the service-qualified wire names. */
-export function nativeGoogleMcpWriteEndpoint(toolName: string): string | undefined {
+/** Native MCP writes requiring a one-time decision at their exact official endpoint. */
+export function oneTimeMcpWriteEndpoint(toolName: string): string | undefined {
   if (
     GOOGLE_MCP_GMAIL_WRITES.has(toolName) ||
     (toolName.startsWith("gmail.") && GOOGLE_MCP_GMAIL_WRITES.has(toolName.slice(6)))
@@ -95,6 +102,7 @@ export function nativeGoogleMcpWriteEndpoint(toolName: string): string | undefin
     (toolName.startsWith("calendar.") && GOOGLE_MCP_CALENDAR_WRITES.has(toolName.slice(9)))
   )
     return "https://calendarmcp.googleapis.com/mcp/v1";
+  if (CAL_MCP_BOOKING_WRITES.has(toolName)) return "https://mcp.cal.com/mcp";
   return undefined;
 }
 
@@ -184,7 +192,7 @@ export function toolRequiresExplicitApproval(
       const url = new URL(serverEndpoint);
       if (
         `${url.origin}${url.pathname.replace(/\/$/, "")}` ===
-        nativeGoogleMcpWriteEndpoint(route.toolName)
+        oneTimeMcpWriteEndpoint(route.toolName)
       )
         return true;
     } catch {
