@@ -560,7 +560,13 @@ describe("buildApprovalAskBlock", () => {
       documentsApprovalEffectId: "documents-effect",
       profiles: Array.from({ length: 10 }, (_, index) => ({
         candidateKey: `candidate-${index}`,
-        assessmentVersion: index + 1,
+        source: {
+          effectId: "saved-page",
+          rowIndex: index,
+          providerTaskId: "task",
+          roleRevisionId: "revision",
+          artifactRef: { artifactId: "artifact", sha256: "a".repeat(64) },
+        },
         linkedinUrl: `https://www.linkedin.com/in/candidate-${index}`,
         evidenceUrl: `https://example.test/evidence/${index}?source=${"context".repeat(80)}`,
       })),
@@ -575,6 +581,16 @@ describe("buildApprovalAskBlock", () => {
       "recruiting_request_approval",
       request,
       ["token-secret"],
+      {
+        recruiting: {
+          roleTitle: "Systems engineer",
+          profiles: request.profiles.map((profile, index) => ({
+            name: `Verified person ${index}`,
+            linkedinUrl: profile.linkedinUrl,
+            evidenceUrl: profile.evidenceUrl,
+          })),
+        },
+      },
     );
 
     expect(block).toMatchObject({
@@ -592,10 +608,15 @@ describe("buildApprovalAskBlock", () => {
     expect(block.detail).not.toContain("token-secret");
     expect(block.detail).not.toContain("documents-effect");
     expect(block.detail).not.toContain("candidateKey");
+    expect(block.detail).toContain("Role: Systems engineer");
+    for (let index = 0; index < 10; index++)
+      expect(block.detail).toContain(`Verified person ${index}`);
+    for (const internal of ["saved-page", "artifact", "providerTaskId", "roleRevisionId"])
+      expect(block.detail).not.toContain(internal);
     for (const profile of request.profiles) {
       expect(block.detail).toContain(profile.linkedinUrl);
       expect(block.detail).toContain(profile.evidenceUrl);
-      expect(block.detail).toContain(`Assessment version: ${profile.assessmentVersion}`);
+      expect(block.detail).not.toContain("Assessment version");
     }
     for (const rule of request.ruleChanges)
       expect(block.detail).toContain(rule.replace("token-secret", "[redacted]"));

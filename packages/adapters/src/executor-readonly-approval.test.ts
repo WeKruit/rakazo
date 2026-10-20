@@ -1,3 +1,4 @@
+import { validateToolArguments } from "@earendil-works/pi-ai";
 import type {
   AgentRunRequest,
   AgentRuntimeEvent,
@@ -13,10 +14,11 @@ import type { PauseRunForInput } from "@rakazo/db";
 import { IsolationError, RecruitingConflictError } from "@rakazo/db";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { catalogExecuteToolName, isApprovalPausedResult } from "./approval-effect.js";
-import { MAX_SHARED_MEMORY_CHARS } from "./builtin-tools.js";
+import { builtinAgentTools, MAX_SHARED_MEMORY_CHARS } from "./builtin-tools.js";
 import type * as ComputerLifecycleModule from "./computer-lifecycle.js";
 import { createRunExecutor, selectBuiltinToolsForRun } from "./executor.js";
 import { catalogEntries, resolveCatalogCall } from "./lazy-tool-catalog.js";
+import { parametersFor } from "./pi-runtime.js";
 import type * as RecruitingAssessmentModule from "./recruiting-assessment.js";
 import type * as ScheduleToolsModule from "./schedule-tools.js";
 import { RoutineUpdateError } from "./schedule-tools.js";
@@ -2155,7 +2157,9 @@ describe("native recruiting package approval", () => {
     size: 128,
   };
   beforeEach(() => {
-    recruitingApproval.prepare.mockReset().mockResolvedValue({ files: [file] });
+    recruitingApproval.prepare
+      .mockReset()
+      .mockResolvedValue({ files: [file], roleTitle: "Verified role" });
     recruitingApproval.execute.mockReset();
     reviewMock.mockReset();
   });
@@ -2241,6 +2245,189 @@ describe("native recruiting package approval", () => {
     expect(recruitingApproval.execute).toHaveBeenCalledOnce();
     expect(f.pauseRunForInput).toHaveBeenCalledOnce();
     expect(f.results.at(-1)).toEqual(result);
+  });
+  it("renders only the verified native role and ten saved people without changing effect arguments", async () => {
+    const f = approvalFixture();
+    const profiles = Array.from({ length: 10 }, (_, index) => ({
+      candidateKey: `linkedin:example-${index}`,
+      linkedinUrl: `https://www.linkedin.com/in/example-${index}`,
+      evidenceUrl: `https://example.test/evidence/${index}`,
+      source: {
+        effectId: "raw-read",
+        rowIndex: index,
+        roleRevisionId: "role-revision",
+        providerTaskId: "provider-task",
+        artifactRef: { artifactId: "raw-artifact", sha256: "a".repeat(64) },
+      },
+    }));
+    const request = {
+      stage: "calibration",
+      roleId: "role-example",
+      expectedRoleRevision: 2,
+      documentsApprovalEffectId: "g1",
+      profiles,
+      ruleChanges: ["Keep original evidence."],
+    };
+    recruitingApproval.prepare.mockResolvedValue({
+      files: [file],
+      roleTitle: "Verified role",
+      profiles: profiles.map((profile, index) => ({
+        name: `Verified person ${index}`,
+        linkedinUrl: profile.linkedinUrl,
+        evidenceUrl: profile.evidenceUrl,
+      })),
+    });
+    f.setCalls([{ args: request, executionId: "native-g2" }]);
+    await f.run();
+    const paused = f.pauseRunForInput.mock.calls[0]![0] as PauseRunForInput;
+    const card = paused.blocks.find((block) => block.kind === "ask");
+    expect(card).toMatchObject({
+      actions: [
+        { id: "allow", label: "Approve calibration" },
+        { id: "deny", label: "Deny" },
+      ],
+    });
+    expect(card?.kind === "ask" && card.detail).toContain("Role: Verified role");
+    expect(card?.kind === "ask" && card.detail).toContain("Verified person 9");
+    expect(card?.kind === "ask" && card.detail).not.toMatch(
+      /Assessment version|raw-read|raw-artifact|provider-task|role-revision/,
+    );
+    expect(f.effects[0]!.request).toEqual(request);
+  });
+  it("replays an exact stored assessment approval while refusing to create another legacy request", async () => {
+    const f = approvalFixture();
+    const request = {
+      stage: "calibration",
+      roleId: "role-example",
+      expectedRoleRevision: 2,
+      documentsApprovalEffectId: "g1",
+      ruleChanges: ["Original rule."],
+      profiles: Array.from({ length: 10 }, (_, index) => ({
+        candidateKey: `person-${index}`,
+        assessmentVersion: 1,
+        linkedinUrl: `https://www.linkedin.com/in/example-${index}`,
+        evidenceUrl: `https://example.test/evidence/${index}`,
+      })),
+    };
+    const historical = {
+      id: "old-g2",
+      spaceId: "space-1",
+      runId: "run-1",
+      kind: "recruiting_request_approval",
+      status: "approved",
+      idempotencyKey: approvalEffectKey("run-1", "recruiting_request_approval", request),
+      request,
+    };
+    f.effects.push(historical);
+    const result = { status: "approved", stage: "calibration", approvalEffectId: "old-g2" };
+    recruitingApproval.execute.mockImplementation(async () => {
+      Object.assign(f.effects[0]!, { status: "completed", result });
+      return result;
+    });
+    f.setCalls([{ args: { ...request, expectedRoleRevision: 99 }, executionId: "legacy-replay" }]);
+    await f.run();
+    expect(recruitingApproval.execute).toHaveBeenCalledWith(
+      expect.anything(),
+      expect.anything(),
+      expect.objectContaining({ effectId: "old-g2", effectRequest: request }),
+      request,
+      expect.anything(),
+    );
+    expect(f.results.at(-1)).toEqual(result);
+    expect(f.effects).toHaveLength(1);
+    expect(recruitingApproval.prepare).not.toHaveBeenCalled();
+    expect(f.pauseRunForInput).not.toHaveBeenCalled();
+    recruitingApproval.execute.mockClear();
+    f.setCalls([{ args: request, executionId: "legacy-new" }]);
+    await f.run();
+    expect(recruitingApproval.execute).not.toHaveBeenCalled();
+    expect(f.effects).toHaveLength(1);
+    expect(f.results.at(-1)).toHaveProperty("error");
+  });
+  it("admits only the authenticated original legacy request through Pi validation during replay", async () => {
+    const f = approvalFixture();
+    const request = {
+      stage: "calibration",
+      roleId: "role-example",
+      expectedRoleRevision: 2,
+      documentsApprovalEffectId: "g1",
+      ruleChanges: ["Original rule."],
+      profiles: Array.from({ length: 10 }, (_, index) => ({
+        candidateKey: `person-${index}`,
+        assessmentVersion: 1,
+        linkedinUrl: `https://www.linkedin.com/in/example-${index}`,
+        evidenceUrl: `https://example.test/evidence/${index}`,
+      })),
+    };
+    const historical = {
+      id: "old-g2",
+      spaceId: "space-1",
+      runId: "run-1",
+      kind: "recruiting_request_approval",
+      status: "approved",
+      idempotencyKey: approvalEffectKey("run-1", "recruiting_request_approval", request),
+      request,
+    };
+    f.effects.push(historical);
+    let schema: ReturnType<typeof parametersFor> | undefined;
+    let validationError: unknown;
+    recruitingApproval.execute.mockImplementation(async () => {
+      Object.assign(historical, { status: "completed" });
+      return { status: "approved" };
+    });
+    f.runtimeRun.mockImplementationOnce(async function* (runtimeRequest: AgentRunRequest) {
+      const tool = runtimeRequest.tools.find(
+        (entry) => entry.name === "recruiting_request_approval",
+      )!;
+      schema = parametersFor(tool);
+      try {
+        validateToolArguments(
+          { ...tool, parameters: schema },
+          { type: "toolCall", id: "old", name: tool.name, arguments: request },
+        );
+      } catch (error) {
+        validationError = error;
+        return;
+      }
+      await runtimeRequest.executeTool!(tool.name, request, "legacy-validated");
+      yield { type: "done" as const, text: "Done" };
+    });
+    await f.run({ allowFailure: true });
+    expect(validationError).toBeUndefined();
+    const ordinary = builtinAgentTools.find(
+      (entry) => entry.name === "recruiting_request_approval",
+    )!;
+    expect(() =>
+      validateToolArguments(
+        { ...ordinary, parameters: parametersFor(ordinary) },
+        { type: "toolCall", id: "fresh", name: ordinary.name, arguments: request },
+      ),
+    ).toThrow();
+    expect(recruitingApproval.execute).toHaveBeenCalledOnce();
+    const tool = {
+      name: "recruiting_request_approval",
+      description: "Review",
+      parameters: schema!,
+    };
+    for (const changed of [
+      { ...request, expectedRoleRevision: 3 },
+      { ...request, ruleChanges: ["Invented rule."] },
+      {
+        ...request,
+        profiles: request.profiles.map((profile) => ({ ...profile, assessmentVersion: 2 })),
+      },
+    ]) {
+      expect(() =>
+        validateToolArguments(tool, {
+          type: "toolCall",
+          id: "changed",
+          name: tool.name,
+          arguments: changed,
+        }),
+      ).toThrow();
+    }
+    expect(f.effects).toHaveLength(1);
+    expect(f.pauseRunForInput).not.toHaveBeenCalled();
   });
 });
 

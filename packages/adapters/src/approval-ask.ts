@@ -1,7 +1,7 @@
 import type { MessageBlock, RecruitingPreferenceFeedbackInput } from "@rakazo/contracts";
 import {
-  RecruitingApprovalToolInputSchema,
   RecruitingPreferenceFeedbackSchema,
+  RetainedRecruitingApprovalRequestSchema,
 } from "@rakazo/contracts";
 import { formatCron, humanizeToolName, redactSecrets } from "@rakazo/core";
 import { redactToolArgsForReview } from "./auto-review.js";
@@ -15,12 +15,22 @@ type CrmApprovalOperation =
   | "crm_update_candidate_stage"
   | "crm_append_candidate_note";
 
+type RecruitingApprovalDisplay = {
+  roleTitle: string;
+  profiles?: { name: string; linkedinUrl: string; evidenceUrl: string }[];
+};
+
 export function buildApprovalAskBlock(
   effectId: string,
   toolName: string,
   args: Record<string, unknown>,
   secrets: string[],
-  options?: { reviewReason?: string; oneTimeOnly?: boolean; crmOperation?: CrmApprovalOperation },
+  options?: {
+    reviewReason?: string;
+    oneTimeOnly?: boolean;
+    crmOperation?: CrmApprovalOperation;
+    recruiting?: RecruitingApprovalDisplay;
+  },
 ): Extract<MessageBlock, { kind: "ask" }> {
   const scheduleUpdate = toolName === "schedule_update";
   if (scheduleUpdate && (typeof args.routineName !== "string" || !args.routineName.trim()))
@@ -78,6 +88,7 @@ export function buildApprovalAskBlock(
     nativeMemory,
     crmOperation,
     considerationOperation,
+    options?.recruiting,
   );
   const safeDetail = detail ? redactSecrets(detail, secrets) : undefined;
   return {
@@ -176,6 +187,7 @@ function formatApprovalDetail(
   nativeMemory = false,
   crmOperation?: CrmApprovalOperation,
   considerationOperation?: "hold" | "pass" | "resume",
+  recruiting?: RecruitingApprovalDisplay,
 ): string | undefined {
   const lines: string[] = [];
   if (reviewReason?.trim()) {
@@ -245,7 +257,8 @@ function formatApprovalDetail(
     return lines.join("\n\n");
   }
   if (toolName === "recruiting_request_approval") {
-    const request = RecruitingApprovalToolInputSchema.parse(args);
+    const request = RetainedRecruitingApprovalRequestSchema.parse(args);
+    if (recruiting) lines.push(`Role: ${recruiting.roleTitle}`);
     lines.push(`Role version: ${request.expectedRoleRevision}`);
     if (request.stage === "documents") {
       lines.push(
@@ -255,12 +268,29 @@ function formatApprovalDetail(
         `Deck: ${request.documents.deck ? "attached" : "not provided"}`,
       );
     } else {
-      for (const [index, profile] of request.profiles.entries())
-        lines.push(
-          `${index + 1}. ${profile.linkedinUrl}`,
-          `Evidence: ${profile.evidenceUrl}`,
-          `Assessment version: ${profile.assessmentVersion}`,
-        );
+      for (const [index, profile] of request.profiles.entries()) {
+        if ("source" in profile) {
+          const verified = recruiting?.profiles?.[index];
+          if (
+            !recruiting?.roleTitle.trim() ||
+            recruiting.profiles?.length !== 10 ||
+            !verified?.name.trim() ||
+            verified.linkedinUrl !== profile.linkedinUrl ||
+            verified.evidenceUrl !== profile.evidenceUrl
+          )
+            throw new Error("Calibration approval requires verified role and candidate evidence.");
+          lines.push(
+            `${index + 1}. ${verified.name}`,
+            verified.linkedinUrl,
+            `Evidence: ${verified.evidenceUrl}`,
+          );
+        } else
+          lines.push(
+            `${index + 1}. ${profile.linkedinUrl}`,
+            `Evidence: ${profile.evidenceUrl}`,
+            `Assessment version: ${profile.assessmentVersion}`,
+          );
+      }
       lines.push(
         request.ruleChanges.length ? "Rule changes:" : "Rule changes: none",
         ...request.ruleChanges,

@@ -6,7 +6,12 @@ import type {
   RecruitingCriterion,
 } from "@rakazo/contracts";
 import { ReviseRecruitingRoleInput } from "@rakazo/contracts";
-import { qualifiedEmploymentMonths, RecruitingPlaybookValidationError } from "@rakazo/core";
+import {
+  boundDirectApprovalRequest,
+  normalizeRecruitingCandidateRow,
+  qualifiedEmploymentMonths,
+  RecruitingPlaybookValidationError,
+} from "@rakazo/core";
 import { stableJsonValue } from "@rakazo/core/node/approval-effect-key";
 import { extractPdfText } from "@rakazo/core/node/pdf-text";
 import { beforeEach, describe, expect, it, vi } from "vitest";
@@ -1015,7 +1020,7 @@ function approvalFixture() {
   const cards = new Map<string, Record<string, any>>();
   const tx = {
     ...f.tx,
-    $queryRaw: vi.fn(async () => [{ id: "thread" }]),
+    $queryRaw: vi.fn(async (_query?: unknown): Promise<unknown[]> => [{ id: "thread" }]),
     run: { findFirst: vi.fn(async () => run), findUnique: vi.fn(async () => run) },
     artifact: {
       findFirst: vi.fn(async ({ where }) => artifacts.find((row) => row.id === where.id)),
@@ -1062,7 +1067,17 @@ function approvalFixture() {
       }),
     },
     externalEffect: {
-      findFirst: vi.fn(async ({ where }) => effects.get(where.id)),
+      findFirst: vi.fn(async ({ where }) =>
+        where.id
+          ? effects.get(where.id)
+          : [...effects.values()].find(
+              (effect) =>
+                effect.spaceId === where.spaceId &&
+                effect.runId === where.runId &&
+                effect.kind === where.kind &&
+                stableJsonValue(effect.request) === stableJsonValue(where.request.equals),
+            ),
+      ),
       findUnique: vi.fn(async ({ where }) => effects.get(where.id)),
       updateMany: vi.fn(async ({ where, data }) => {
         Object.assign(effects.get(where.id)!, data);
@@ -1490,6 +1505,15 @@ async function calibrationFixture() {
     profiles,
     ruleChanges: ["Prioritize supplied implementation evidence."],
   };
+  // These fixtures exercise exact pre-existing assessment requests, never a new producer.
+  f.effects.set("retained-calibration", {
+    id: "retained-calibration",
+    spaceId: actor.spaceId,
+    runId: "run",
+    kind: "recruiting_request_approval",
+    status: "intended",
+    request: input,
+  });
   return { ...f, input, assessments };
 }
 
@@ -2129,3 +2153,313 @@ it.each(["-other", "?fake=true", "#section"])(
     ).rejects.toThrow();
   },
 );
+
+async function nativeCalibrationFixture() {
+  const f = approvalFixture();
+  f.approve("g1", f.input);
+  await recruiting.executeRecruitingApproval(
+    f.prisma,
+    actor,
+    { ...f.trusted, effectId: "g1", effectRequest: f.input },
+    f.input,
+    f.material,
+  );
+  const rows = Array.from({ length: 10 }, (_, index) => ({
+    name: `Example person ${index}`,
+    linkedin_url: `https://www.linkedin.com/in/example-${index}/`,
+    current_title: "Engineer",
+    current_company: "Example",
+    location: null,
+    resume_url: null,
+    evidence_urls: [],
+    technical_evidence: { value: "Supplied implementation", source_id: `evidence-${index}` },
+    _sources: {
+      [`evidence-${index}`]: `https://example.test/evidence/${index}`,
+      unrelated: "https://example.test/unreferenced",
+    },
+  }));
+  const request = boundDirectApprovalRequest(
+    { connectorId: "mcp", resourceId: "server", resourceRevision: 1, toolName: "get_rows" },
+    { task_id: "provider-task", limit: 10 },
+    "__rakazoCatalogTool",
+  );
+  const result = { structuredContent: { task_id: "provider-task", rows, next_cursor: null } };
+  const body = Buffer.from(stableJsonValue({ request, providerResult: result }));
+  const artifact = {
+    ...f.artifacts[0]!,
+    id: "native-artifact",
+    runId: "run",
+    storageKey: "native-artifact",
+    mimeType: "application/json",
+    name: "Candidates.json",
+    size: body.length,
+    hash: createHash("sha256").update(body).digest("hex"),
+    clientNonce: "recruiting-observation:native-read",
+  };
+  f.artifacts.push(artifact);
+  f.bytes.set(artifact.id, body);
+  const page = {
+    effectId: "native-read",
+    roleId: "role",
+    roleRevisionId: "revision-1",
+    taskId: null,
+    actionId: null,
+    artifactId: artifact.id,
+    artifactHash: artifact.hash,
+    rowCount: 10,
+    requestCursor: null,
+    outputId: null,
+    observedAt: new Date(0),
+    effect: { request, result },
+  };
+  const occurrences = rows.map((row, rowIndex) => ({
+    ...normalizeRecruitingCandidateRow(row, { schemaKnown: true }),
+    roleId: "role",
+    pageId: page.effectId,
+    rowIndex,
+    page,
+  }));
+  const proof = {
+    ...artifact,
+    effectId: page.effectId,
+    effectStatus: "completed",
+    effectRequest: request,
+    effectResult: result,
+    effectRun: { ...f.run, thread: { ...f.thread, bot: actor } },
+  };
+  const event = {
+    id: "native-save",
+    seq: 100,
+    spaceId: actor.spaceId,
+    threadId: "thread",
+    botId: "bot",
+    runId: "run",
+    type: "recruiting.candidates.saved",
+    createdAt: new Date(0),
+    payload: {
+      roleId: "role",
+      roleRevisionId: "revision-1",
+      effectId: page.effectId,
+      mcpServerId: "server",
+      serverRevision: 1,
+      providerTaskId: "provider-task",
+      requestCursor: null,
+      outputArtifact: { artifactId: artifact.id, sha256: artifact.hash },
+      candidateOutputSchema: "candidate_output_v1",
+    },
+  };
+  const query = f.tx.$queryRaw.getMockImplementation()!;
+  f.tx.$queryRaw.mockImplementation(async (sql?: unknown) =>
+    (sql as { sql: string }).sql.includes('FROM "external_effects" e') ? [proof] : query(),
+  );
+  const tx = Object.assign(f.tx, {
+    event: { ...f.tx.event, findMany: vi.fn(async () => [event]) },
+    recruitingCandidatePage: { findMany: vi.fn(async () => [page]) },
+    recruitingCandidateOccurrence: {
+      findUnique: vi.fn(async ({ where }) =>
+        occurrences.find(
+          (row) =>
+            row.pageId === where.pageId_rowIndex.pageId &&
+            row.rowIndex === where.pageId_rowIndex.rowIndex,
+        ),
+      ),
+    },
+  });
+  const input = {
+    stage: "calibration" as const,
+    roleId: "role",
+    expectedRoleRevision: 1,
+    documentsApprovalEffectId: "g1",
+    ruleChanges: ["Keep the supplied implementation evidence."],
+    profiles: occurrences.map((row, index) => ({
+      candidateKey: row.candidateKey!,
+      linkedinUrl: rows[index]!.linkedin_url,
+      evidenceUrl: `https://example.test/evidence/${index}`,
+      source: {
+        effectId: page.effectId,
+        rowIndex: index,
+        artifactRef: { artifactId: artifact.id, sha256: artifact.hash },
+        roleRevisionId: "revision-1",
+        providerTaskId: "provider-task",
+      },
+    })),
+  };
+  tx.recruitingAssessment.findFirst.mockImplementation(() => {
+    throw new Error("Native G2 must not evaluate or load assessments");
+  });
+  return { ...f, tx, input, rows, occurrences, page, artifact, proof, event };
+}
+
+describe("native calibration approval evidence", () => {
+  it("prepares ten retained Autumn rows and records the unchanged native request without assessments", async () => {
+    const f = await nativeCalibrationFixture();
+    const prepared = await recruiting.prepareRecruitingApproval(
+      f.prisma,
+      actor,
+      f.trusted,
+      f.input,
+      f.material,
+    );
+    expect(prepared).toMatchObject({
+      files: expect.any(Array),
+      roleTitle: "Example engineer",
+      profiles: f.rows.map((row, index) => ({
+        name: row.name,
+        linkedinUrl: row.linkedin_url,
+        evidenceUrl: f.input.profiles[index]!.evidenceUrl,
+      })),
+    });
+    f.approve("native-g2", f.input);
+    const original = stableJsonValue(f.effects.get("native-g2")!.request);
+    const receipt = await recruiting.executeRecruitingApproval(
+      f.prisma,
+      actor,
+      { ...f.trusted, effectId: "native-g2", effectRequest: f.input },
+      f.input,
+      f.material,
+    );
+    expect(receipt).toMatchObject({
+      stage: "calibration",
+      roleRevisionId: "revision-1",
+      payloadHash: createHash("sha256").update(original).digest("hex"),
+    });
+    expect(stableJsonValue(f.effects.get("native-g2")!.request)).toBe(original);
+    expect(f.tx.recruitingAssessment.findFirst).not.toHaveBeenCalled();
+    f.thread.activeRecruitingRoleId = "another-role";
+    f.run.status = "completed";
+    f.tx.recruitingRole.findFirst.mockResolvedValue({
+      ...(await f.tx.recruitingRole.findFirst()),
+      revision: 2,
+      currentRevisionId: "revision-2",
+    });
+    const writes = f.tx.event.create.mock.calls.length;
+    expect(
+      await recruiting.executeRecruitingApproval(
+        f.prisma,
+        actor,
+        { ...f.trusted, effectId: "native-g2", effectRequest: f.input },
+        f.input,
+        f.material,
+      ),
+    ).toEqual(receipt);
+    expect(f.tx.event.create).toHaveBeenCalledTimes(writes);
+  });
+  it("accepts an exact retained profile_url identity without rewriting the stored null LinkedIn projection", async () => {
+    const f = await nativeCalibrationFixture();
+    const linkedin = f.rows[0]!.linkedin_url;
+    Object.assign(f.rows[0]!, { profile_url: linkedin, linkedin_url: null });
+    f.occurrences[0]!.linkedinUrl = null;
+    const bytes = Buffer.from(
+      stableJsonValue({ request: f.proof.effectRequest, providerResult: f.proof.effectResult }),
+    );
+    const hash = createHash("sha256").update(bytes).digest("hex");
+    Object.assign(f.artifact, { hash, size: bytes.length });
+    Object.assign(f.proof, { hash, size: bytes.length });
+    f.page.artifactHash = hash;
+    f.event.payload.outputArtifact.sha256 = hash;
+    for (const profile of f.input.profiles) profile.source.artifactRef.sha256 = hash;
+    f.bytes.set(f.artifact.id, bytes);
+    const prepared = await recruiting.prepareRecruitingApproval(
+      f.prisma,
+      actor,
+      f.trusted,
+      f.input,
+      f.material,
+    );
+    expect(prepared.profiles?.[0]).toMatchObject({ name: f.rows[0]!.name, linkedinUrl: linkedin });
+    expect(f.occurrences[0]!.linkedinUrl).toBeNull();
+  });
+  it("rechecks current role, exact source and owner before accepting a native card answer", async () => {
+    const f = await nativeCalibrationFixture();
+    f.run.status = "waiting_input";
+    const answer = {
+      spaceId: actor.spaceId,
+      threadId: "thread",
+      runId: "run",
+      messageId: "native-card",
+      answeredByUserId: actor.userId,
+      answer: "allow",
+    };
+    const tx = f.tx as unknown as Prisma.TransactionClient;
+    expect(
+      await recruiting.authorizeRecruitingApprovalAnswerInTransaction(tx, answer, f.input),
+    ).toBe(true);
+    f.page.roleRevisionId = "old-revision";
+    expect(
+      await recruiting.authorizeRecruitingApprovalAnswerInTransaction(tx, answer, f.input),
+    ).toBe(false);
+    expect(
+      await recruiting.authorizeRecruitingApprovalAnswerInTransaction(
+        tx,
+        { ...answer, answer: "deny" },
+        f.input,
+      ),
+    ).toBe(false);
+    f.page.roleRevisionId = "revision-1";
+    expect(
+      await recruiting.authorizeRecruitingApprovalAnswerInTransaction(
+        tx,
+        { ...answer, answeredByUserId: "another-owner" },
+        f.input,
+      ),
+    ).toBe(false);
+    f.thread.activeRecruitingRoleId = "other-role";
+    expect(
+      await recruiting.authorizeRecruitingApprovalAnswerInTransaction(tx, answer, f.input),
+    ).toBe(false);
+  });
+  it("does not prepare a new assessment-shaped request or revive a denied historical one", async () => {
+    const f = await calibrationFixture();
+    f.effects.delete("retained-calibration");
+    await expect(
+      recruiting.prepareRecruitingApproval(f.prisma, actor, f.trusted, f.input, f.material),
+    ).rejects.toThrow(IsolationError);
+    f.effects.set("denied", {
+      id: "denied",
+      spaceId: actor.spaceId,
+      runId: "run",
+      kind: "recruiting_request_approval",
+      request: f.input,
+      status: "denied",
+    });
+    await expect(
+      recruiting.prepareRecruitingApproval(f.prisma, actor, f.trusted, f.input, f.material),
+    ).rejects.toThrow(IsolationError);
+  });
+  it.each([
+    "foreign-owner",
+    "foreign-space",
+    "foreign-role",
+    "stale-source",
+    "forged-task",
+    "forged-artifact",
+    "missing-save-proof",
+    "forged-row",
+    "forged-projection",
+    "duplicate-identity",
+    "unassociated-url",
+    "changed-bytes",
+    "missing-g1",
+  ])("rejects native %s before creating an approval", async (boundary) => {
+    const f = await nativeCalibrationFixture();
+    if (boundary === "foreign-owner") f.proof.effectRun.userId = "other";
+    if (boundary === "foreign-space") f.proof.spaceId = "other";
+    if (boundary === "foreign-role") f.page.roleId = "other";
+    if (boundary === "stale-source") f.page.roleRevisionId = "old-revision";
+    if (boundary === "forged-task") f.input.profiles[0]!.source.providerTaskId = "other-task";
+    if (boundary === "forged-artifact")
+      f.input.profiles[0]!.source.artifactRef.sha256 = "a".repeat(64);
+    if (boundary === "missing-save-proof") f.tx.event.findMany.mockResolvedValue([]);
+    if (boundary === "forged-row") f.input.profiles[0]!.source.rowIndex = 100;
+    if (boundary === "forged-projection") f.occurrences[0]!.name = "Invented person";
+    if (boundary === "duplicate-identity") f.input.profiles[1] = f.input.profiles[0]!;
+    if (boundary === "unassociated-url")
+      f.input.profiles[0]!.evidenceUrl = "https://example.test/unreferenced";
+    if (boundary === "changed-bytes") f.bytes.set(f.artifact.id, Buffer.from("changed"));
+    if (boundary === "missing-g1") f.effects.delete("g1");
+    await expect(
+      recruiting.prepareRecruitingApproval(f.prisma, actor, f.trusted, f.input, f.material),
+    ).rejects.toThrow();
+    expect(f.tx.recruitingAssessment.findFirst).not.toHaveBeenCalled();
+  });
+});

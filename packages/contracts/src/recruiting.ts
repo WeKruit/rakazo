@@ -341,35 +341,68 @@ const RecruitingApprovalScope = {
   roleId: RecruitingId,
   expectedRoleRevision: Revision,
 };
-export const RecruitingApprovalToolInputSchema = z.discriminatedUnion("stage", [
-  z.strictObject({
-    ...RecruitingApprovalScope,
-    stage: z.literal("documents"),
-    documents: z.strictObject({
-      jdText: RecruitingArtifactRefSchema,
-      namedPdf: RecruitingArtifactRefSchema,
-      anonymousPdf: RecruitingArtifactRefSchema.nullable(),
-      deck: RecruitingArtifactRefSchema.nullable(),
-    }),
+const RecruitingCandidateEvidenceReference = {
+  providerTaskId: RecruitingId,
+  roleRevisionId: RecruitingId,
+  effectId: RecruitingId,
+  rowIndex: z.number().int().nonnegative(),
+  artifactRef: RecruitingArtifactRefSchema,
+};
+const RecruitingApprovalProfile = {
+  candidateKey: RecruitingId,
+  linkedinUrl: z.httpUrl().refine((url) => new URL(url).protocol === "https:"),
+  evidenceUrl: z.httpUrl(),
+};
+const RecruitingDocumentsApprovalInputSchema = z.strictObject({
+  ...RecruitingApprovalScope,
+  stage: z.literal("documents"),
+  documents: z.strictObject({
+    jdText: RecruitingArtifactRefSchema,
+    namedPdf: RecruitingArtifactRefSchema,
+    anonymousPdf: RecruitingArtifactRefSchema.nullable(),
+    deck: RecruitingArtifactRefSchema.nullable(),
   }),
+});
+const RecruitingCalibrationApproval = {
+  ...RecruitingApprovalScope,
+  stage: z.literal("calibration"),
+  documentsApprovalEffectId: RecruitingId,
+  ruleChanges: z.array(Text).readonly(),
+};
+export const RecruitingApprovalToolInputSchema = z.discriminatedUnion("stage", [
+  RecruitingDocumentsApprovalInputSchema,
   z.strictObject({
-    ...RecruitingApprovalScope,
-    stage: z.literal("calibration"),
-    documentsApprovalEffectId: RecruitingId,
+    ...RecruitingCalibrationApproval,
     profiles: z
       .array(
         z.strictObject({
-          candidateKey: RecruitingId,
-          assessmentVersion: Revision,
-          linkedinUrl: z.httpUrl().refine((url) => new URL(url).protocol === "https:"),
-          evidenceUrl: z.httpUrl(),
+          ...RecruitingApprovalProfile,
+          source: z.strictObject(RecruitingCandidateEvidenceReference),
         }),
       )
       .length(10),
-    ruleChanges: z.array(Text).readonly(),
   }),
 ]);
 export type RecruitingApprovalToolInput = z.infer<typeof RecruitingApprovalToolInputSchema>;
+
+/** Decode exact retained requests only; historical assessments are never new native evidence. */
+export const RetainedRecruitingApprovalRequestSchema = z.union([
+  RecruitingApprovalToolInputSchema,
+  z.strictObject({
+    ...RecruitingCalibrationApproval,
+    profiles: z
+      .array(
+        z.strictObject({
+          ...RecruitingApprovalProfile,
+          assessmentVersion: Revision,
+        }),
+      )
+      .length(10),
+  }),
+]);
+export type RetainedRecruitingApprovalRequest = z.infer<
+  typeof RetainedRecruitingApprovalRequestSchema
+>;
 
 export const RecruitingResearchTaskSchema = z.strictObject({
   id: RecruitingId,
@@ -1119,13 +1152,9 @@ export type RecruitingCandidateReport = z.infer<typeof RecruitingCandidateReport
 const RecruitingCandidateSourceReferenceSchema = z
   .strictObject({
     report: RecruitingCandidateReportSchema.optional(),
-    providerTaskId: RecruitingId,
+    ...RecruitingCandidateEvidenceReference,
     taskId: RecruitingId.nullable(),
     actionId: RecruitingId.nullable(),
-    roleRevisionId: RecruitingId,
-    effectId: RecruitingId,
-    rowIndex: z.number().int().nonnegative(),
-    artifactRef: RecruitingArtifactRefSchema,
     requestCursor: z.string().nullable(),
     outputId: z.string().nullable(),
     observedAt: IsoDate,

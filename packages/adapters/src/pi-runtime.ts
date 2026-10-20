@@ -2227,8 +2227,13 @@ export function jsonSchemaParameters(
   options: FieldOptions = {},
 ): ReturnType<typeof Type.Object> {
   // Preserve local references and intersections until parametersFor flattens root combinators.
-  // Rebuilding properties loses recursive definitions and allOf-only constraints.
-  if (schema.$defs || Array.isArray(schema.allOf)) {
+  // Rebuilding properties loses recursive definitions, intersections and exact retained-payload constraints.
+  if (
+    schema.$defs ||
+    Array.isArray(schema.allOf) ||
+    "const" in schema ||
+    Array.isArray(schema.enum)
+  ) {
     return Type.Unsafe({ ...schema, ...options }) as unknown as ReturnType<typeof Type.Object>;
   }
   // Top-level oneOf/anyOf (e.g. request_secret's credential XOR connectionId)

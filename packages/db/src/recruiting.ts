@@ -8,7 +8,6 @@ import type {
   ListRecruitingCandidatesOutput as CandidatesOutput,
   CreateRecruitingRoleInput as CreateRoleInput,
   MessageBlock,
-  RecruitingApprovalToolInput,
   RecruitingArtifactRef,
   RecruitingAssessmentAskInput,
   RecruitingAssessmentSnapshot,
@@ -33,6 +32,7 @@ import type {
   RecruitingRoleRevision,
   RecruitingRoleToolInput,
   RecruitingSourceRef,
+  RetainedRecruitingApprovalRequest,
   ReviseRecruitingRoleInput as ReviseRoleInput,
   SaveRecruitingAssessmentInput as SaveAssessmentInput,
   SetRecruitingCandidateShortlistInput as ShortlistInput,
@@ -54,7 +54,6 @@ import {
   ProductEventSchema,
   RECRUITING_CANDIDATE_OUTPUT_SCHEMA,
   ReassessRecruitingAssessmentInput,
-  RecruitingApprovalToolInputSchema,
   RecruitingArtifactRefSchema,
   RecruitingAssessmentAskInputSchema,
   RecruitingAssessmentSchema,
@@ -83,6 +82,7 @@ import {
   RecruitingShortlistToolInputSchema,
   RecruitingShortlistToolResultSchema,
   RecruitingSourceRefSchema,
+  RetainedRecruitingApprovalRequestSchema,
   ReviseRecruitingRoleInput,
   SaveRecruitingAssessmentInput,
   SetRecruitingCandidateShortlistInput,
@@ -100,6 +100,7 @@ import {
   mergeRecruitingReassessment,
   normalizeRecruitingCandidateRow,
   parseRecruitingCrmImportReceipt,
+  projectRecruitingCandidateReport,
   RecruitingPlaybookValidationError,
   readRecruitingJsonString,
   recruitingBriefClarifications,
@@ -108,7 +109,7 @@ import {
   validateRecruitingBrief,
   validateRecruitingTextSelection,
 } from "@rakazo/core";
-import { stableJsonValue } from "@rakazo/core/node/approval-effect-key";
+import { mcpObject, stableJsonValue } from "@rakazo/core/node/approval-effect-key";
 import { extractPdfText } from "@rakazo/core/node/pdf-text";
 import type { PrismaClient } from "./client.js";
 import { Prisma } from "./client.js";
@@ -3362,7 +3363,7 @@ type RecruitingApprovalContext = {
 };
 export type RecruitingApprovalResult = {
   status: "approved";
-  stage: RecruitingApprovalToolInput["stage"];
+  stage: RetainedRecruitingApprovalRequest["stage"];
   roleId: string;
   roleRevisionId: string;
   approvalEffectId: string;
@@ -3379,7 +3380,7 @@ async function approvalWorkspace(
   tx: Tx,
   actor: Actor,
   threadId: string,
-  input: Pick<RecruitingApprovalToolInput, "roleId" | "expectedRoleRevision">,
+  input: Pick<RetainedRecruitingApprovalRequest, "roleId" | "expectedRoleRevision">,
   current = true,
   requireSelection = current,
 ) {
@@ -3461,7 +3462,7 @@ async function completedRecruitingApproval(
   actor: Actor,
   effectId: string,
   scope: { roleId: string; expectedRoleRevision: number },
-  stage: RecruitingApprovalToolInput["stage"],
+  stage: RetainedRecruitingApprovalRequest["stage"],
   current = true,
 ) {
   const effect = await tx.externalEffect.findFirst({
@@ -3474,7 +3475,7 @@ async function completedRecruitingApproval(
   });
   if (effect?.kind !== "recruiting_request_approval" || effect.status !== "completed")
     throw new IsolationError();
-  const input = RecruitingApprovalToolInputSchema.parse(effect.request);
+  const input = RetainedRecruitingApprovalRequestSchema.parse(effect.request);
   if (
     input.stage !== stage ||
     input.roleId !== scope.roleId ||
@@ -3522,12 +3523,13 @@ type RecruitingApprovalPackage = {
   files: MessageBlock[];
   documentRefs: RecruitingArtifactRef[];
   sourceRefs: RecruitingAssessmentSourceRef[];
+  profiles?: { name: string; linkedinUrl: string; evidenceUrl: string }[];
 };
 
 async function recruitingApprovalPackage(
   tx: Tx,
   actor: Actor,
-  input: RecruitingApprovalToolInput,
+  input: RetainedRecruitingApprovalRequest,
   current = true,
   bytes?: ReadonlyMap<string, Uint8Array>,
 ): Promise<RecruitingApprovalPackage> {
@@ -3550,8 +3552,95 @@ async function recruitingApprovalPackage(
       new Set(identities).size !== 10
     )
       throw new IsolationError();
+    const nativeRefs = input.profiles.flatMap((profile) =>
+      "source" in profile ? [profile.source] : [],
+    );
+    const pageIds = [...new Set(nativeRefs.map((ref) => ref.effectId))];
+    const pages = pageIds.length
+      ? await tx.recruitingCandidatePage.findMany({
+          where: { roleId: input.roleId, effectId: { in: pageIds } },
+          include: { effect: { select: { request: true, result: true } } },
+        })
+      : [];
+    if (pages.length !== pageIds.length) throw new IsolationError();
+    const artifacts = await candidatePageArtifacts(tx, actor, pages, true);
+    const savedPages = new Map(pages.map((page) => [page.effectId, page]));
+    const profiles: NonNullable<RecruitingApprovalPackage["profiles"]> = [];
     const sources: RecruitingAssessmentSourceRef[] = [];
     for (const profile of input.profiles) {
+      if ("source" in profile) {
+        const ref = profile.source;
+        const page = savedPages.get(ref.effectId);
+        const artifact = artifacts.get(ref.effectId);
+        if (
+          !page ||
+          !artifact ||
+          page.roleId !== input.roleId ||
+          page.roleRevisionId !== documents.result.roleRevisionId ||
+          ref.roleRevisionId !== page.roleRevisionId ||
+          artifact.id !== ref.artifactRef.artifactId ||
+          artifact.hash !== ref.artifactRef.sha256 ||
+          page.rowCount === null ||
+          ref.rowIndex >= page.rowCount ||
+          researchReadRequest(page.effect.request, undefined, "get_rows").args.task_id !==
+            ref.providerTaskId
+        )
+          throw new IsolationError();
+        const occurrence = await tx.recruitingCandidateOccurrence.findUnique({
+          where: { pageId_rowIndex: { pageId: ref.effectId, rowIndex: ref.rowIndex } },
+        });
+        const result = page.effect.result;
+        const body = mcpObject(result);
+        if (
+          !body ||
+          !Array.isArray(body.rows) ||
+          !result ||
+          typeof result !== "object" ||
+          Array.isArray(result) ||
+          (result.isError !== undefined && result.isError !== false) ||
+          result.error !== undefined ||
+          body.error !== undefined ||
+          (body.task_id !== undefined && body.task_id !== ref.providerTaskId) ||
+          body.rows.length !== page.rowCount
+        )
+          throw new IsolationError();
+        const raw = body.rows[ref.rowIndex];
+        const normalized = normalizeRecruitingCandidateRow(raw, { schemaKnown: true });
+        const urls = projectRecruitingCandidateReport(raw).sourceUrls;
+        if (
+          !occurrence ||
+          occurrence.roleId !== input.roleId ||
+          occurrence.candidateKey !== profile.candidateKey ||
+          normalized.candidateKey !== profile.candidateKey ||
+          !normalized.name?.trim() ||
+          /[\p{Cc}\p{Cf}\p{Zl}\p{Zp}]/u.test(normalized.name) ||
+          normalized.name !== occurrence.name ||
+          normalized.linkedinUrl !== occurrence.linkedinUrl ||
+          profile.candidateKey !==
+            `linkedin:${recruitingCalibrationIdentity(profile.linkedinUrl)}` ||
+          !urls.includes(profile.linkedinUrl) ||
+          !urls.includes(profile.evidenceUrl)
+        )
+          throw new IsolationError();
+        if (bytes) {
+          const original = bytes.get(artifact.id);
+          if (
+            !original ||
+            original.byteLength !== artifact.size ||
+            createHash("sha256").update(original).digest("hex") !== artifact.hash ||
+            stableJsonValue(
+              JSON.parse(new TextDecoder("utf-8", { fatal: true }).decode(original)),
+            ) !== stableJsonValue({ request: page.effect.request, providerResult: result })
+          )
+            throw new IsolationError();
+        }
+        profiles.push({
+          name: normalized.name,
+          linkedinUrl: urls.find((url) => url === profile.linkedinUrl)!,
+          evidenceUrl: urls.find((url) => url === profile.evidenceUrl)!,
+        });
+        continue;
+      }
       const row = await tx.recruitingAssessment.findFirst({
         where: {
           roleId: input.roleId,
@@ -3619,7 +3708,15 @@ async function recruitingApprovalPackage(
       await recruitingApprovalPackage(tx, actor, documents.input, current, bytes);
       await validateReadSources(tx, actor, sources, bytes);
     }
-    return { ...documents.package, sourceRefs: sources };
+    return {
+      ...documents.package,
+      sourceRefs: sources,
+      documentRefs: [
+        ...documents.package.documentRefs,
+        ...nativeRefs.map((ref) => ref.artifactRef),
+      ],
+      ...(profiles.length ? { profiles } : {}),
+    };
   }
   const files: MessageBlock[] = [];
   const documentRefs: RecruitingArtifactRef[] = [];
@@ -3668,7 +3765,7 @@ async function loadRecruitingApprovalMaterials(
   prisma: PrismaClient,
   actor: Actor,
   trusted: RecruitingApprovalContext,
-  input: RecruitingApprovalToolInput,
+  input: RetainedRecruitingApprovalRequest,
   material: RecruitingRoleMaterialContext | undefined,
   replay = false,
 ) {
@@ -3677,6 +3774,29 @@ async function loadRecruitingApprovalMaterials(
     if (run.threadId !== trusted.threadId || run.botId !== trusted.botId)
       throw new IsolationError();
     if (!replay) requireResearchLease(run, trusted);
+    if (
+      input.stage === "calibration" &&
+      input.profiles.some((profile) => "assessmentVersion" in profile)
+    ) {
+      const retained = await tx.externalEffect.findFirst({
+        where: {
+          spaceId: actor.spaceId,
+          runId: run.id,
+          kind: "recruiting_request_approval",
+          request: { equals: input as Prisma.InputJsonValue },
+          status: { in: ["intended", "approved", "executing", "completed"] },
+        },
+      });
+      if (
+        !retained ||
+        retained.runId !== run.id ||
+        retained.spaceId !== actor.spaceId ||
+        retained.kind !== "recruiting_request_approval" ||
+        !["intended", "approved", "executing", "completed"].includes(retained.status) ||
+        stableJsonValue(retained.request) !== stableJsonValue(input)
+      )
+        throw new IsolationError();
+    }
     await approvalWorkspace(tx, actor, trusted.threadId, input, !replay);
     return recruitingApprovalPackage(tx, actor, input, !replay);
   });
@@ -3708,17 +3828,25 @@ export async function prepareRecruitingApproval(
   trusted: RecruitingApprovalContext,
   untrustedInput: unknown,
   material?: RecruitingRoleMaterialContext,
-): Promise<{ files: MessageBlock[] }> {
-  const input = RecruitingApprovalToolInputSchema.parse(untrustedInput);
+): Promise<{
+  files: MessageBlock[];
+  roleTitle: string;
+  profiles?: RecruitingApprovalPackage["profiles"];
+}> {
+  const input = RetainedRecruitingApprovalRequestSchema.parse(untrustedInput);
   const bytes = await loadRecruitingApprovalMaterials(prisma, actor, trusted, input, material);
   return prisma.$transaction(async (tx) => {
     const { run } = await lockLiveRecruitingRun(tx, actor, trusted.runId);
     if (run.threadId !== trusted.threadId || run.botId !== trusted.botId)
       throw new IsolationError();
     requireResearchLease(run, trusted);
-    await approvalWorkspace(tx, actor, trusted.threadId, input);
+    const { role } = await approvalWorkspace(tx, actor, trusted.threadId, input);
     const package_ = await recruitingApprovalPackage(tx, actor, input, true, bytes);
-    return { files: package_.files };
+    return {
+      files: package_.files,
+      roleTitle: role.title,
+      ...(package_.profiles ? { profiles: package_.profiles } : {}),
+    };
   });
 }
 
@@ -3729,7 +3857,7 @@ export async function executeRecruitingApproval(
   untrustedInput: unknown,
   material?: RecruitingRoleMaterialContext,
 ): Promise<RecruitingApprovalResult> {
-  const input = RecruitingApprovalToolInputSchema.parse(untrustedInput);
+  const input = RetainedRecruitingApprovalRequestSchema.parse(untrustedInput);
   if (stableJsonValue(input) !== stableJsonValue(trusted.effectRequest)) throw new IsolationError();
   // Read status only to permit immutable completed receipts after the run/role has advanced.
   const retained = await prisma.$transaction((tx) =>
@@ -3841,7 +3969,7 @@ export async function authorizeRecruitingApprovalAnswerInTransaction(
     isDeploymentOwner: false,
   };
   try {
-    const request = RecruitingApprovalToolInputSchema.parse(effectRequest);
+    const request = RetainedRecruitingApprovalRequestSchema.parse(effectRequest);
     const { run } = await lockLiveRecruitingRun(tx, actor, input.runId, false);
     if (run.status !== "waiting_input" || run.threadId !== input.threadId) return false;
     await approvalWorkspace(tx, actor, input.threadId, request);
