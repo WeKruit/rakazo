@@ -212,10 +212,43 @@ describe("recruiting reply draft translation", () => {
     { ...crm, pipeline: { ...crm.pipeline, stage: "Passed" } },
     { ...crm, pipeline: { ...crm.pipeline, review_result: "rejected" } },
     { ...crm, roleInterests: [{ ...crm.roleInterests[0], interest: "declined" }] },
-  ])("stops on a definite CRM blocker %j", (state) => {
+    {
+      ...crm,
+      pipeline: { ...crm.pipeline, role_spec_id: otherId, stage: "Hold" },
+      candidate: { ...crm.candidate, status: "passed" },
+    },
+    {
+      ...crm,
+      pipeline: { ...crm.pipeline, role_spec_id: otherId, stage: "Hold" },
+      candidate: { ...crm.candidate, status: "do_not_contact" },
+    },
+    {
+      ...crm,
+      pipeline: { ...crm.pipeline, role_spec_id: otherId, stage: "Hold" },
+      suppressed: true,
+    },
+    {
+      ...crm,
+      pipeline: {
+        ...crm.pipeline,
+        role_spec_id: otherId,
+        stage: "Hold",
+        review_result: "rejected",
+      },
+    },
+    {
+      ...crm,
+      pipeline: { ...crm.pipeline, role_spec_id: otherId, stage: "Hold" },
+      roleInterests: [{ ...crm.roleInterests[0], interest: "declined" }],
+    },
+  ])("stops on a definite CRM blocker %j", async (state) => {
     expect(
       prepareRecruitingReply({ ...selection, crmProof: crmEnvelope(state) }, content).status,
     ).toBe("blocked");
+    const f = fixture();
+    f.outputs[0] = crmEnvelope(state);
+    expect((await f.run()).status).toBe("blocked");
+    expect(f.execute).toHaveBeenCalledOnce();
   });
 
   it("retains definite suppression before unresolved role or stage details", () => {
@@ -256,16 +289,34 @@ describe("recruiting reply draft translation", () => {
     },
   );
 
-  it("preserves a known unknown interest and a different primary pipeline role", () => {
-    const state = {
-      ...crm,
-      pipeline: { ...crm.pipeline, role_spec_id: otherId },
-      roleInterests: [{ ...crm.roleInterests[0], interest: "unknown" }],
-    };
-    expect(
-      prepareRecruitingReply({ ...selection, crmProof: crmEnvelope(state) }, content).status,
-    ).toBe("ready");
-  });
+  it.each([
+    [otherId, "Interested", "ready"],
+    [otherId, "Hold", "ready"],
+    [otherId, "Passed", "ready"],
+    [otherId, "Unknown stage", "ready"],
+    [null, "Interested", "ready"],
+    [null, "On hold", "blocked"],
+    [null, "Passed", "blocked"],
+    [null, "Unknown stage", "incomplete"],
+  ] as const)(
+    "preserves unknown interest with primary pipeline role %s and stage %s",
+    async (role_spec_id, stage, status) => {
+      const state = {
+        ...crm,
+        pipeline: { ...crm.pipeline, role_spec_id, stage },
+        roleInterests: [{ ...crm.roleInterests[0], interest: "unknown" }],
+      };
+      expect(
+        prepareRecruitingReply({ ...selection, crmProof: crmEnvelope(state) }, content).status,
+      ).toBe(status);
+      const f = fixture();
+      f.outputs[0] = crmEnvelope(state);
+      expect(await f.run()).toMatchObject({
+        status: status === "ready" ? "clear" : status,
+        gaps: ["legacy_hold_sources", "gmail_history"],
+      });
+    },
+  );
 
   it.each([
     { ...selection, crmProof: { isError: true, structuredContent: { data: crm } } },

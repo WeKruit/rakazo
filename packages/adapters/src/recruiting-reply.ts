@@ -175,6 +175,8 @@ export function prepareRecruitingReply(
       : ["passed", "do_not_contact"].includes(crm.candidate.status)
         ? "crm_candidate_blocked"
         : crm.pipeline &&
+            (crm.pipeline.role_spec_id === null ||
+              crm.pipeline.role_spec_id === target.crmRoleId) &&
             [
               "hold",
               "on hold",
@@ -201,7 +203,8 @@ export function prepareRecruitingReply(
     return { status: "incomplete", reasons: ["crm_suppression_unknown"] };
   if (
     !crm.pipeline ||
-    !["Interested", "Screening", "Interview", "Offer", "Hired"].includes(crm.pipeline.stage)
+    ((crm.pipeline.role_spec_id === null || crm.pipeline.role_spec_id === target.crmRoleId) &&
+      !["Interested", "Screening", "Interview", "Offer", "Hired"].includes(crm.pipeline.stage))
   )
     return { status: "incomplete", reasons: ["crm_pipeline_unknown"] };
   if (
