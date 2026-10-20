@@ -18,7 +18,12 @@ import { act } from "react";
 import { createRoot } from "react-dom/client";
 import { MemoryRouter } from "react-router-dom";
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
-import { readRightPanelState, writeRightPanelState } from "../lib/right-panel-state";
+import {
+  readRecruitingPanelState,
+  readRightPanelState,
+  rightPanelStorageKey,
+  writeRightPanelState,
+} from "../lib/right-panel-state";
 
 const api = vi.hoisted(() => ({
   session: { data: { user: { id: "actor-1" } } },
@@ -484,6 +489,7 @@ async function mounted(
   botId?: string,
   showDiagnostics = true,
   recipients?: ComponentProps<typeof RecruitingPanel>["candidateFeedbackRecipients"],
+  navigation: Pick<ComponentProps<typeof RecruitingPanel>, "tab" | "onTabChange"> = {},
 ) {
   const container = document.createElement("div");
   document.body.append(container);
@@ -496,11 +502,13 @@ async function mounted(
     refreshSignal = 0,
     diagnostics = showDiagnostics,
     feedbackRecipients = recipients,
+    tabNavigation = navigation,
   ) =>
     act(async () =>
       root.render(
         <MemoryRouter>
           <RecruitingPanel
+            {...tabNavigation}
             threadId={id}
             botId={botId}
             showDiagnostics={diagnostics}
@@ -1794,6 +1802,61 @@ it("reveals the selected recruiting tab horizontally on selection and restore wi
     if (priorScrollBy) Object.defineProperty(HTMLElement.prototype, "scrollBy", priorScrollBy);
     else Reflect.deleteProperty(HTMLElement.prototype, "scrollBy");
   }
+});
+
+it("keeps an explicit Dashboard selection through delayed native hydration and preserves the saved list when changing tabs", async () => {
+  const storageKey = `${rightPanelStorageKey("actor-1", role.spaceId, "group", "thread-1")}:recruiting:${role.id}`;
+  const selected = {
+    ...candidateFixture("selected-candidate", false),
+    name: "Synthetic saved candidate",
+  };
+  const saved = {
+    ...readRecruitingPanelState(null),
+    tab: "role",
+    candidateView: "table",
+    filters: { sort: "recent", query: "Synthetic" },
+    selectedCandidateKey: selected.candidateKey,
+    detailOpen: true,
+  };
+  localStorage.setItem(storageKey, JSON.stringify(saved));
+  api.listCandidates.mockResolvedValue(candidatePage([selected]));
+  let finishWorkspace!: (value: { role: RecruitingRole; revision: RecruitingRoleRevision }) => void;
+  api.getWorkspace.mockImplementationOnce(
+    () =>
+      new Promise((resolve) => {
+        finishWorkspace = resolve;
+      }),
+  );
+  const onTabChange = vi.fn();
+  const view = await mounted("thread-1", undefined, false, undefined, {
+    tab: "dashboard",
+    onTabChange,
+  });
+  await act(async () => {
+    finishWorkspace({ role, revision });
+  });
+  expect(view.container.querySelector('[role="tab"][aria-selected="true"]')?.textContent).toBe(
+    "Dashboard",
+  );
+  expect(onTabChange).toHaveBeenLastCalledWith("dashboard");
+  const stored = readRecruitingPanelState(storageKey);
+  expect(stored).toEqual({ ...saved, tab: "dashboard" });
+  const dialog = view.container.querySelector('[role="dialog"]');
+  expect(dialog?.textContent).toContain(selected.name);
+  const workspaceReads = api.getWorkspace.mock.calls.length;
+  await view.render("thread-1", 0, false, undefined, { tab: "evidence", onTabChange });
+  expect(view.container.querySelector('[role="tab"][aria-selected="true"]')?.textContent).toBe(
+    "Evidence",
+  );
+  expect(readRecruitingPanelState(storageKey)).toEqual({ ...saved, tab: "evidence" });
+  expect(view.container.querySelector('[role="dialog"]')).toBe(dialog);
+  expect(view.container.querySelector('input[aria-label="Search candidates"]')).toHaveProperty(
+    "value",
+    "Synthetic",
+  );
+  expect(api.getWorkspace.mock.calls.length).toBe(workspaceReads);
+  expect(api.answer).not.toHaveBeenCalled();
+  expect(api.setCandidateShortlist).not.toHaveBeenCalled();
 });
 
 it("restores the recruiting list and selected candidate from fresh pages after closing and reopening", async () => {

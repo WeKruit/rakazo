@@ -221,7 +221,7 @@ import {
 import { markAfterPaint, markOnce } from "../lib/performance";
 import { quoteDraftForSelection } from "../lib/quote-selection";
 import { getResponseStreamingEnabled, subscribeResponseStreaming } from "../lib/response-streaming";
-import type { Panel, RightPanelState } from "../lib/right-panel-state";
+import type { Panel, RecruitingPanelState, RightPanelState } from "../lib/right-panel-state";
 import {
   readRightPanelState,
   rightPanelStorageKey,
@@ -474,6 +474,10 @@ export function ShellPage() {
   const session = authClient.useSession();
   const userId = session.data?.user.id;
   const [groups, setGroups] = useState<Group[]>([]);
+  const [recruitingTab, setRecruitingTab] = useState<{
+    threadId: string;
+    tab: RecruitingPanelState["tab"];
+  } | null>(null);
   const [bots, setBots] = useState<Bot[]>([]);
   const botsRef = useRef(bots);
   botsRef.current = bots;
@@ -1896,6 +1900,18 @@ export function ShellPage() {
     threadSnapshotCache.current.get(inGroup ? `group:${groupId}` : `bot:${active?.id}`) ??
     null;
   const composerDraftKey = inGroup ? `group:${groupId}` : `bot:${active?.id}`;
+  const activeRecruitingTab =
+    recruitingTab?.threadId === activeSnapshot?.threadId ? recruitingTab?.tab : undefined;
+  const changeRecruitingTab = useCallback(
+    (tab: RecruitingPanelState["tab"]) => {
+      const threadId = activeSnapshot?.threadId;
+      if (!threadId) return;
+      setRecruitingTab((current) =>
+        current?.threadId === threadId && current.tab === tab ? current : { threadId, tab },
+      );
+    },
+    [activeSnapshot?.threadId],
+  );
   const composerRef = useMemo(
     () => createRef<ComposerHandle>(),
     [userId, bootstrapMe?.spaceId, composerDraftKey, activeSnapshot?.threadId],
@@ -3076,7 +3092,8 @@ export function ShellPage() {
               groups={groups}
               groupId={groupId}
               query={query}
-              dashboardOpen={panel === "recruiting"}
+              dashboardOpen={panel === "recruiting" && activeRecruitingTab === "dashboard"}
+              canOpenDashboard={Boolean(activeSnapshot?.threadId)}
               canCreateRole={
                 roleCrewBots.length === activeGroup?.members.length &&
                 roleCrewBots.length >= GROUP_MEMBER_MIN &&
@@ -3086,9 +3103,10 @@ export function ShellPage() {
               onConversation={() => {
                 setPanel(null);
                 setMobileSidebarOpen(false);
-                navigate(firstThreadRoute(bots, groups));
+                if (!active && !activeGroup) navigate(firstThreadRoute(bots, groups));
               }}
               onDashboard={() => {
+                changeRecruitingTab("dashboard");
                 setPanel("recruiting");
                 setMobileSidebarOpen(false);
               }}
@@ -4304,6 +4322,8 @@ export function ShellPage() {
                 threadId={activeSnapshot.threadId}
                 botId={inGroup ? undefined : active?.id}
                 refreshSignal={recruitingRefresh}
+                tab={activeRecruitingTab}
+                onTabChange={changeRecruitingTab}
                 showDiagnostics={showToolActivity}
                 onClose={() => setPanel(null)}
                 onDiscussCandidate={discussCandidate}

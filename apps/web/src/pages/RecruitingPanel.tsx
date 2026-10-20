@@ -91,6 +91,8 @@ type Props = {
   refreshSignal?: number;
   onClose: () => void;
   showDiagnostics?: boolean;
+  tab?: RecruitingPanelState["tab"];
+  onTabChange?: (tab: RecruitingPanelState["tab"]) => void;
   onRevealMessage?: (target: { botId?: string; groupId?: string; messageId: string }) => void;
   onDiscussCandidate?: (candidate: CandidateDiscussionContext) => void;
   candidateFeedbackRecipients?: { id: string; name: string }[];
@@ -1751,6 +1753,8 @@ function RecruitingWorkspace({
   onCandidateFeedback,
   candidateFeedbackRecipients,
   showDiagnostics = false,
+  tab,
+  onTabChange,
 }: Props & { userId?: string }) {
   const { t } = useLingui();
   const shortlistFilterId = useId();
@@ -1765,6 +1769,15 @@ function RecruitingWorkspace({
   const [confirming, setConfirming] = useState(false);
   const [confirmationFailed, setConfirmationFailed] = useState(false);
   const [candidateList, setCandidateList] = useState(() => readRecruitingPanelState(null));
+  const activeTab = tab ?? candidateList.tab;
+  const requestedTab = useRef(tab);
+  requestedTab.current = tab;
+  useEffect(() => {
+    if (tab) setCandidateList((current) => (current.tab === tab ? current : { ...current, tab }));
+  }, [tab]);
+  useEffect(() => {
+    if (workspaceSnapshot) onTabChange?.(activeTab);
+  }, [activeTab, workspaceSnapshot, onTabChange]);
   const [candidateStorageKey, setCandidateStorageKey] = useState<string | null>(null);
   const tabsList = useRef<HTMLDivElement>(null);
   const {
@@ -1863,7 +1876,10 @@ function RecruitingWorkspace({
           : null;
       setCandidateStorageKey(key);
       const saved = readRecruitingPanelState(key);
-      setCandidateList((current) => ({ ...saved, tab: changingRole ? current.tab : saved.tab }));
+      setCandidateList((current) => ({
+        ...saved,
+        tab: requestedTab.current ?? (changingRole ? current.tab : saved.tab),
+      }));
       setCandidatePage(null);
       setSelection(null);
       candidateHandoff.current = null;
@@ -2012,7 +2028,7 @@ function RecruitingWorkspace({
         ? tabBounds.left - listBounds.left
         : Math.max(0, tabBounds.right - listBounds.right);
     if (left) list.scrollBy({ left });
-  }, [candidateList.tab, roleId]);
+  }, [activeTab, roleId]);
   useEffect(() => {
     if (candidateStorageKey) writeRecruitingPanelState(candidateStorageKey, candidateList);
   }, [candidateStorageKey, candidateList]);
@@ -2434,8 +2450,7 @@ function RecruitingWorkspace({
         </p>
       ) : null}
       {loading &&
-      (!workspaceSnapshot ||
-        ["dashboard", "missing", "memory", "activity"].includes(candidateList.tab)) ? (
+      (!workspaceSnapshot || ["dashboard", "missing", "memory", "activity"].includes(activeTab)) ? (
         <div role="status" className="text-muted-foreground">
           <Shimmer>
             <Trans>Loading…</Trans>
@@ -2444,10 +2459,12 @@ function RecruitingWorkspace({
       ) : null}
       {workspaceSnapshot ? (
         <Tabs
-          value={candidateList.tab}
-          onValueChange={(tab) =>
-            setCandidateList((current) => ({ ...current, tab: tab as RecruitingPanelState["tab"] }))
-          }
+          value={activeTab}
+          onValueChange={(value) => {
+            const tab = value as RecruitingPanelState["tab"];
+            setCandidateList((current) => ({ ...current, tab }));
+            onTabChange?.(tab);
+          }}
           className="gap-4"
         >
           <TabsList

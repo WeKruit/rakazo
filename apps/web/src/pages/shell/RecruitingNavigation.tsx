@@ -9,6 +9,7 @@ export function RecruitingNavigation({
   groupId,
   query,
   dashboardOpen,
+  canOpenDashboard,
   canCreateRole,
   onQueryChange,
   onConversation,
@@ -20,6 +21,7 @@ export function RecruitingNavigation({
   groupId?: string;
   query: string;
   dashboardOpen: boolean;
+  canOpenDashboard: boolean;
   canCreateRole: boolean;
   onQueryChange: (query: string) => void;
   onConversation: () => void;
@@ -46,7 +48,8 @@ export function RecruitingNavigation({
       </div>
       <nav aria-label={t`Recruiting workspace`} className="space-y-1">
         <Button
-          variant={!groupId && !dashboardOpen ? "default" : "ghost"}
+          variant={!dashboardOpen ? "default" : "ghost"}
+          aria-current={!dashboardOpen ? "page" : undefined}
           className="w-full justify-start rounded-[10px]"
           onClick={onConversation}
         >
@@ -55,6 +58,8 @@ export function RecruitingNavigation({
         </Button>
         <Button
           variant={dashboardOpen ? "default" : "ghost"}
+          aria-current={dashboardOpen ? "page" : undefined}
+          disabled={!canOpenDashboard}
           className="w-full justify-start rounded-[10px]"
           onClick={onDashboard}
         >
