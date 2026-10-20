@@ -1889,6 +1889,100 @@ async function gatedResearchFixture(native?: Awaited<ReturnType<typeof nativeCal
 }
 
 describe("research stage gate enforcement", () => {
+  it("reuses current transaction authorization while still validating earlier and foreign artifact targets", async () => {
+    for (const boundary of [
+      "current",
+      "earlier-run",
+      "owned-thread",
+      "foreign-thread",
+      "foreign-group",
+      "foreign-bot",
+      "foreign-user",
+      "foreign-run-user",
+      "foreign-run-bot",
+    ] as const) {
+      const f = await gatedResearchFixture();
+      const artifact = (await f.tx.artifact.findFirst({ where: { id: "context" } }))!;
+      const otherThread = {
+        ...f.thread,
+        id: "other-thread",
+        botId: "other-bot",
+        userId: boundary === "foreign-thread" ? "another-human" : actor.userId,
+      };
+      const earlier = {
+        ...f.run,
+        id: "earlier-run",
+        threadId: ["owned-thread", "foreign-thread"].includes(boundary)
+          ? otherThread.id
+          : f.thread.id,
+        botId: ["owned-thread", "foreign-thread"].includes(boundary)
+          ? otherThread.botId
+          : f.run.botId,
+        userId: boundary === "foreign-run-user" ? "another-human" : actor.userId,
+        bot: boundary === "foreign-run-bot" ? { ...actor, userId: "another-human" } : actor,
+      };
+      if (
+        [
+          "earlier-run",
+          "owned-thread",
+          "foreign-thread",
+          "foreign-run-user",
+          "foreign-run-bot",
+        ].includes(boundary)
+      )
+        Object.assign(artifact, { runId: earlier.id });
+      if (["owned-thread", "foreign-thread"].includes(boundary))
+        Object.assign(artifact, { botId: otherThread.botId });
+      if (boundary === "foreign-group") Object.assign(artifact, { groupId: "other-group" });
+      if (boundary === "foreign-bot") Object.assign(artifact, { botId: "other-bot" });
+      if (boundary === "foreign-user") Object.assign(artifact, { userId: "another-human" });
+      Object.assign(f.revisions[0]!, {
+        sourceRefs: [
+          ...f.revisions[0]!.sourceRefs,
+          {
+            id: "retained-context",
+            kind: "original_material",
+            anchor: { kind: "artifact", artifact: f.input.contextArtifact, locator: "text" },
+            readState: "unread",
+            readAt: null,
+          },
+        ],
+      });
+      f.tx.run.findFirst.mockImplementation(async ({ where }) =>
+        where.id === earlier.id ? earlier : f.run,
+      );
+      f.tx.thread.findFirst.mockImplementation(async ({ where }) => {
+        const target = where.id === otherThread.id ? otherThread : f.thread;
+        if (
+          ("groupId" in where &&
+            where.groupId &&
+            where.groupId !== (target as { groupId?: string }).groupId) ||
+          ("OR" in where && artifact.botId !== target.botId)
+        )
+          return null as never;
+        return target;
+      });
+      f.tx.thread.findFirst.mockClear();
+      f.tx.run.findFirst.mockClear();
+      const result = recruiting.readRecruitingResearchContext(f.prisma, actor, {
+        runId: f.run.id,
+        sourceMessageId: f.input.sourceMessageId,
+        intent: f.input.intent,
+      });
+      if (["current", "earlier-run", "owned-thread"].includes(boundary)) {
+        await expect(result).resolves.toMatchObject({ workspace: { role: { id: "role" } } });
+        if (boundary !== "owned-thread")
+          expect(f.tx.thread.findFirst, boundary).toHaveBeenCalledTimes(2);
+        expect(f.tx.run.findFirst, boundary).toHaveBeenCalledTimes(boundary === "current" ? 1 : 2);
+      } else await expect(result, boundary).rejects.toThrow(IsolationError);
+      if (["owned-thread", "foreign-thread"].includes(boundary))
+        expect(f.tx.thread.findFirst).toHaveBeenCalledWith(
+          expect.objectContaining({ where: expect.objectContaining({ id: otherThread.id }) }),
+        );
+      expect(f.tx.recruitingResearchAction.create).not.toHaveBeenCalled();
+    }
+  });
+
   it.each(["admission", "claim"])(
     "supersedes a pending old-version search after a human edit before %s",
     async (stage) => {
