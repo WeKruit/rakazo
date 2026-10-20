@@ -3519,11 +3519,17 @@ async function completedRecruitingApproval(
   return { input, result: expected, package: package_ };
 }
 
+type NativeRecruitingResearchTarget = {
+  mcpServerId: string;
+  serverRevision: number;
+  providerTaskId: string;
+};
 type RecruitingApprovalPackage = {
   files: MessageBlock[];
   documentRefs: RecruitingArtifactRef[];
   sourceRefs: RecruitingAssessmentSourceRef[];
   profiles?: { name: string; linkedinUrl: string; evidenceUrl: string }[];
+  nativeResearchTarget?: NativeRecruitingResearchTarget;
 };
 
 async function recruitingApprovalPackage(
@@ -3566,6 +3572,7 @@ async function recruitingApprovalPackage(
     const artifacts = await candidatePageArtifacts(tx, actor, pages, true);
     const savedPages = new Map(pages.map((page) => [page.effectId, page]));
     const profiles: NonNullable<RecruitingApprovalPackage["profiles"]> = [];
+    const nativeTargets = new Map<string, NativeRecruitingResearchTarget>();
     const sources: RecruitingAssessmentSourceRef[] = [];
     for (const profile of input.profiles) {
       if ("source" in profile) {
@@ -3634,6 +3641,13 @@ async function recruitingApprovalPackage(
           )
             throw new IsolationError();
         }
+        const call = researchReadRequest(page.effect.request, undefined, "get_rows");
+        const target = {
+          mcpServerId: call.route.resourceId,
+          serverRevision: call.route.resourceRevision,
+          providerTaskId: ref.providerTaskId,
+        };
+        nativeTargets.set(stableJsonValue(target), target);
         profiles.push({
           name: normalized.name,
           linkedinUrl: urls.find((url) => url === profile.linkedinUrl)!,
@@ -3716,6 +3730,9 @@ async function recruitingApprovalPackage(
         ...nativeRefs.map((ref) => ref.artifactRef),
       ],
       ...(profiles.length ? { profiles } : {}),
+      ...(nativeTargets.size === 1
+        ? { nativeResearchTarget: [...nativeTargets.values()][0]! }
+        : {}),
     };
   }
   const files: MessageBlock[] = [];
@@ -3990,12 +4007,13 @@ export async function authorizeRecruitingApprovalAnswerInTransaction(
 async function requireRecruitingResearchGate(
   tx: Tx,
   actor: Actor,
-  input: { purpose?: string | null; approvalEffectId?: string | null },
+  input: { purpose?: string | null; approvalEffectId?: string | null; kind?: string },
   role: RecruitingRole,
+  task?: Pick<ResearchTaskRow, "mcpServerId" | "serverRevision" | "providerTaskId"> | null,
 ) {
   if (!input.approvalEffectId || !["calibration", "scale"].includes(input.purpose ?? ""))
     throw new IsolationError();
-  return completedRecruitingApproval(
+  const gate = await completedRecruitingApproval(
     tx,
     actor,
     input.approvalEffectId,
@@ -4005,6 +4023,22 @@ async function requireRecruitingResearchGate(
     },
     input.purpose === "calibration" ? "documents" : "calibration",
   );
+  if (
+    gate.input.stage === "calibration" &&
+    gate.input.profiles.some((profile) => "source" in profile)
+  ) {
+    const target = gate.package.nativeResearchTarget;
+    if (
+      input.kind === "create" ||
+      !target ||
+      (task &&
+        (task.mcpServerId !== target.mcpServerId ||
+          task.serverRevision !== target.serverRevision ||
+          task.providerTaskId !== target.providerTaskId))
+    )
+      throw new IsolationError();
+  }
+  return gate;
 }
 
 export type RecruitingResearchContextInput = {
@@ -4018,6 +4052,8 @@ export type RecruitingResearchContextInput = {
   clientNonce?: string;
   toolName?: "research" | "reply" | "get_task" | "get_rows";
   historical?: boolean;
+  purpose?: RecruitingResearchPurpose;
+  approvalEffectId?: string;
 };
 
 export function recruitingResearchSnapshot(task: ResearchTaskRow, action: ResearchActionRow) {
@@ -4206,13 +4242,27 @@ async function researchContextInTransaction(
   const roleId = input.historical && task ? task.roleId : thread.activeRecruitingRoleId;
   if (!roleId) throw new IsolationError();
   const role = await requireRole(tx, actor, roleId, true);
+  let nativeResearchTarget: NativeRecruitingResearchTarget | undefined;
+  if (!action && input.toolName === "reply" && input.purpose === "scale") {
+    const gate = await requireRecruitingResearchGate(tx, actor, input, role, task);
+    nativeResearchTarget = gate.package.nativeResearchTarget;
+    if (!taskId) {
+      if (!nativeResearchTarget) throw new IsolationError();
+      task = await tx.recruitingResearchTask.findUnique({
+        where: { mcpServerId_serverRevision_providerTaskId: nativeResearchTarget },
+      });
+    }
+  }
   if (action)
     action = await tx.recruitingResearchAction.findUniqueOrThrow({ where: { id: action.id } });
   if (task) task = await tx.recruitingResearchTask.findUniqueOrThrow({ where: { id: task.id } });
   if (!action && task && !input.actionId && !input.clientNonce) {
     action = task.pendingActionId
       ? await tx.recruitingResearchAction.findUnique({ where: { id: task.pendingActionId } })
-      : await tx.recruitingResearchAction.findFirst({ where: { taskId: task.id, kind: "create" } });
+      : await tx.recruitingResearchAction.findFirst({
+          where: { taskId: task.id },
+          orderBy: { id: "desc" },
+        });
     if (!action || action.taskId !== task.id) throw new IsolationError();
   }
   if (input.expectedRoleRevision !== undefined && role.revision !== input.expectedRoleRevision)
@@ -4229,11 +4279,12 @@ async function researchContextInTransaction(
         )
       ).source
     : null;
-  if (taskId && (!task || task.roleId !== role.id)) throw new IsolationError();
+  if ((taskId && !task) || (task && task.roleId !== role.id)) throw new IsolationError();
   if (task) await requireRun(tx, actor, task.createdByRunId);
-  if (input.mcpServerId && task && input.mcpServerId !== task.mcpServerId)
+  const boundServerId = task?.mcpServerId ?? nativeResearchTarget?.mcpServerId;
+  if (input.mcpServerId && boundServerId && input.mcpServerId !== boundServerId)
     throw new IsolationError();
-  const serverId = task?.mcpServerId ?? input.mcpServerId;
+  const serverId = boundServerId ?? input.mcpServerId;
   const server = serverId
     ? scoped(
         actor,
@@ -4271,7 +4322,11 @@ async function researchContextInTransaction(
         (!Array.isArray(assignment.allowedTools) || !assignment.allowedTools.includes(toolName)))
     )
       throw new IsolationError();
-    if (task && task.serverRevision !== server.revision) throw new RecruitingConflictError();
+    if (
+      (task && task.serverRevision !== server.revision) ||
+      (nativeResearchTarget && nativeResearchTarget.serverRevision !== server.revision)
+    )
+      throw new RecruitingConflictError();
   }
   let effect: ResearchEffectRow | null = null;
   let requestArtifact: Prisma.ArtifactGetPayload<Record<string, never>> | null = null;
@@ -4323,7 +4378,18 @@ async function researchContextInTransaction(
       await requireRun(tx, actor, effect.runId);
     }
   }
-  return { run, thread, workspace, server, task, action, effect, requestArtifact, source };
+  return {
+    run,
+    thread,
+    workspace,
+    server,
+    task,
+    action,
+    effect,
+    requestArtifact,
+    source,
+    nativeResearchTarget,
+  };
 }
 
 export async function readRecruitingResearchContext(
@@ -4463,6 +4529,8 @@ export type RecruitingResearchPreparationInput = {
   mcpServerId: string;
   serverRevision: number;
   taskId?: string;
+  /** Assertion from the frozen continue manifest, never a public task selector. */
+  providerTaskId?: string;
   kind: "create" | "continue";
   purpose: RecruitingResearchPurpose;
   approvalEffectId: string;
@@ -4488,7 +4556,7 @@ export async function prepareRecruitingResearchAction(
     });
     const { run, thread, workspace, server, source } = context;
     requireRecruitingBriefConfirmation(workspace.revision);
-    await requireRecruitingResearchGate(tx, actor, input, workspace.role);
+    await requireRecruitingResearchGate(tx, actor, input, workspace.role, context.task);
     if (
       !server ||
       server.revision !== input.serverRevision ||
@@ -4499,6 +4567,12 @@ export async function prepareRecruitingResearchAction(
     )
       throw new IsolationError();
     await requireResearchAdoption(tx, actor, run, workspace.role, input.contextArtifact);
+    if (
+      input.providerTaskId !== undefined &&
+      input.providerTaskId !==
+        (context.task?.providerTaskId ?? context.nativeResearchTarget?.providerTaskId)
+    )
+      throw new RecruitingConflictError();
     if (context.action) {
       const action = context.action;
       const artifact = context.requestArtifact!;
@@ -4522,6 +4596,24 @@ export async function prepareRecruitingResearchAction(
       return { task: context.task!, action, requestArtifact: artifact, created: false };
     }
     let task = context.task;
+    if (input.kind === "continue" && !input.taskId) {
+      const target = context.nativeResearchTarget;
+      if (input.purpose !== "scale" || !target || input.providerTaskId !== target.providerTaskId)
+        throw new IsolationError();
+      task ??= await tx.recruitingResearchTask.upsert({
+        where: { mcpServerId_serverRevision_providerTaskId: target },
+        update: {},
+        create: { ...target, roleId: workspace.role.id, createdByRunId: run.id },
+      });
+      if (
+        task.roleId !== workspace.role.id ||
+        task.mcpServerId !== target.mcpServerId ||
+        task.serverRevision !== target.serverRevision ||
+        task.providerTaskId !== target.providerTaskId
+      )
+        throw new IsolationError();
+      await requireRun(tx, actor, task.createdByRunId);
+    }
     if (input.kind === "create") {
       if (input.taskId) throw new IsolationError();
       const unresolved = await tx.recruitingResearchTask.findMany({
@@ -4656,7 +4748,7 @@ async function researchCanDispatch(
   }
   if (!task || !action || !server) throw new IsolationError();
   try {
-    await requireRecruitingResearchGate(tx, actor, action, workspace.role);
+    await requireRecruitingResearchGate(tx, actor, action, workspace.role, task);
   } catch (error) {
     if (
       error instanceof IsolationError ||

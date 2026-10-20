@@ -142,7 +142,14 @@ export async function prepareRecruitingResearchTool(
   )
     throw new IsolationError();
   const selector =
-    input.operation === "prepare" ? { mcpServerId: input.mcpServerId } : { taskId: input.taskId };
+    input.operation === "prepare"
+      ? { mcpServerId: input.mcpServerId }
+      : {
+          ...(input.taskId ? { taskId: input.taskId } : {}),
+          toolName: "reply" as const,
+          purpose: input.purpose,
+          approvalEffectId: input.approvalEffectId,
+        };
   const cached = await readRecruitingResearchContext(deps.prisma, trusted.actor, {
     runId: trusted.runId,
     ...selector,
@@ -202,7 +209,8 @@ export async function prepareRecruitingResearchTool(
       ? { operation: "create" as const }
       : {
           operation: "continue" as const,
-          providerTaskId: saved.task?.providerTaskId ?? "",
+          providerTaskId:
+            saved.task?.providerTaskId ?? saved.nativeResearchTarget?.providerTaskId ?? "",
         }),
   });
   const name = `recruiting-request-${request.sha256}.json`;
@@ -219,7 +227,10 @@ export async function prepareRecruitingResearchTool(
     approvalEffectId: input.approvalEffectId,
     mcpServerId: server.id,
     serverRevision: server.revision,
-    ...(input.operation === "continue" ? { taskId: input.taskId } : {}),
+    ...(input.operation === "continue" && input.taskId ? { taskId: input.taskId } : {}),
+    ...(request.manifest.operation === "continue"
+      ? { providerTaskId: request.manifest.args.task_id }
+      : {}),
     kind: request.manifest.operation,
     clientNonce: input.clientNonce,
     recallScope: input.recallScope,

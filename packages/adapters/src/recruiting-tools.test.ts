@@ -1,3 +1,4 @@
+import { validateToolArguments } from "@earendil-works/pi-ai";
 import type { Actor } from "@rakazo/contracts";
 import { boundDirectApprovalRequest, readRecruitingResearchReadArtifact } from "@rakazo/core";
 import type * as Database from "@rakazo/db";
@@ -21,6 +22,8 @@ import {
 import { createLogger, createTestSink, getLogger, installLogger } from "@rakazo/logging";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
+import { builtinAgentTools } from "./builtin-tools.js";
+import { parametersFor } from "./pi-runtime.js";
 import { executeRecruitingAssessmentTool } from "./recruiting-assessment.js";
 import type { LoadedRecruitingRunContext } from "./recruiting-context.js";
 import { buildRecruitingResearchRequest } from "./recruiting-research.js";
@@ -1214,6 +1217,77 @@ describe("native research preparation", () => {
         message: expect.stringContaining("Research purpose:\nscale"),
       },
     });
+  });
+
+  it("freezes the verified native G2 task before adopting its first formal scale action", async () => {
+    const f = researchFixture("continue");
+    vi.mocked(readRecruitingResearchContext).mockResolvedValue({
+      ...f.saved,
+      action: null,
+      task: null,
+      nativeResearchTarget: {
+        mcpServerId: "source",
+        serverRevision: 2,
+        providerTaskId: "provider-original",
+      },
+    } as never);
+    vi.mocked(prepareRecruitingResearchAction).mockImplementation(
+      async (_db, _actor, prepared) =>
+        ({
+          task: f.task,
+          action: { ...f.action, ...prepared, id: "native-scale-action" },
+        }) as never,
+    );
+    const round = continuationInput;
+    const nativeInput = {
+      ...round,
+      operation: "continue" as const,
+      purpose: "scale" as const,
+      approvalEffectId: "native-g2",
+      clientNonce: "native-scale",
+    };
+    const nativeTool = builtinAgentTools.find((entry) => entry.name === "recruiting_research")!;
+    expect(
+      validateToolArguments(
+        { ...nativeTool, parameters: parametersFor(nativeTool) },
+        { type: "toolCall", id: "native-scale", name: nativeTool.name, arguments: nativeInput },
+      ),
+    ).toEqual(nativeInput);
+    const result = await tools.prepareRecruitingResearchTool(
+      f.deps,
+      f.trusted,
+      nativeInput,
+      context,
+      async () => loaded,
+    );
+    expect(readRecruitingResearchContext).toHaveBeenCalledWith(
+      f.deps.prisma,
+      actor,
+      expect.objectContaining({
+        purpose: "scale",
+        approvalEffectId: "native-g2",
+        toolName: "reply",
+      }),
+    );
+    expect(prepareRecruitingResearchAction).toHaveBeenCalledWith(
+      f.deps.prisma,
+      actor,
+      expect.objectContaining({
+        kind: "continue",
+        purpose: "scale",
+        approvalEffectId: "native-g2",
+        providerTaskId: "provider-original",
+      }),
+    );
+    const manifest = JSON.parse(Buffer.from(f.uploads[0]!.bytes).toString("utf8"));
+    expect(manifest).toMatchObject({
+      version: 3,
+      operation: "continue",
+      purpose: "scale",
+      args: { task_id: "provider-original" },
+      route: { resourceId: "source", resourceRevision: 2, toolName: "reply" },
+    });
+    expect(result).toMatchObject({ task: { id: "task" } });
   });
 
   it.each([

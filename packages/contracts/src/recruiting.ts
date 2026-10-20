@@ -1013,7 +1013,20 @@ export const RecruitingResearchToolInputSchema = z.discriminatedUnion("operation
     operation: z.literal("prepare"),
     mcpServerId: RecruitingId,
   }),
-  z.strictObject({ ...ResearchRoundInput, operation: z.literal("continue"), taskId: RecruitingId }),
+  z.discriminatedUnion("purpose", [
+    z.strictObject({
+      ...ResearchRoundInput,
+      operation: z.literal("continue"),
+      purpose: z.literal("calibration"),
+      taskId: RecruitingId,
+    }),
+    z.strictObject({
+      ...ResearchRoundInput,
+      operation: z.literal("continue"),
+      purpose: z.literal("scale"),
+      taskId: RecruitingId.optional(),
+    }),
+  ]),
   z.strictObject({ operation: z.literal("start"), actionId: RecruitingId }),
   z.strictObject({ operation: z.literal("status"), taskId: RecruitingId }),
   z.strictObject({
