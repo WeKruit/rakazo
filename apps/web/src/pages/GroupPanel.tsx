@@ -69,17 +69,22 @@ function MemberPicker({
 
 export function CreateGroupForm({
   bots,
+  recruiting = false,
   onCancel,
   onCreate,
 }: {
   bots: Bot[];
+  recruiting?: boolean;
   onCancel: () => void;
   onCreate: (input: { name: string; botIds: string[] }) => Promise<void>;
 }) {
   const { t } = useLingui();
   const nameId = useId();
   const [name, setName] = useState("");
-  const [selected, setSelected] = useState<string[]>([]);
+  const [selection, setSelected] = useState<string[]>([]);
+  const selected = recruiting
+    ? bots.filter((bot) => !bot.archivedAt).map((bot) => bot.id)
+    : selection;
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -100,12 +105,12 @@ export function CreateGroupForm({
     <div>
       <div className="mb-4 flex items-center justify-between">
         <span className="text-[13.5px] text-muted-foreground">
-          <Trans>New group</Trans>
+          {recruiting ? <Trans>New role</Trans> : <Trans>New group</Trans>}
         </span>
         <Button
           variant="ghost"
           size="icon-sm"
-          aria-label={t`Cancel new group`}
+          aria-label={recruiting ? t`Cancel new role` : t`Cancel new group`}
           onClick={onCancel}
           className="text-muted-foreground"
         >
@@ -118,32 +123,42 @@ export function CreateGroupForm({
         </p>
       ) : null}
       <label htmlFor={nameId} className="block text-sm text-muted-foreground">
-        <Trans>Name</Trans>
+        {recruiting ? <Trans>Role name</Trans> : <Trans>Name</Trans>}
         <Input
           id={nameId}
           value={name}
           onChange={(e) => setName(e.target.value)}
-          placeholder={t`Name this group`}
+          placeholder={recruiting ? t`Name this role` : t`Name this group`}
           className="mt-2"
         />
       </label>
-      <div className="mt-5 text-sm text-muted-foreground">
-        <Trans>
-          Members (pick {GROUP_MEMBER_MIN}–{GROUP_MEMBER_MAX})
-        </Trans>
-      </div>
-      <MemberPicker
-        bots={bots}
-        selected={selected}
-        onChange={setSelected}
-        maxHeight="max-h-[280px]"
-      />
+      {!recruiting ? (
+        <>
+          <div className="mt-5 text-sm text-muted-foreground">
+            <Trans>
+              Members (pick {GROUP_MEMBER_MIN}–{GROUP_MEMBER_MAX})
+            </Trans>
+          </div>
+          <MemberPicker
+            bots={bots}
+            selected={selected}
+            onChange={setSelected}
+            maxHeight="max-h-[280px]"
+          />
+        </>
+      ) : null}
       <Button
         className="mt-5 w-full"
         disabled={submitting || !validSelection(name, selected)}
         onClick={() => void create()}
       >
-        {submitting ? <Trans>Creating…</Trans> : <Trans>Create group</Trans>}
+        {submitting ? (
+          <Trans>Creating…</Trans>
+        ) : recruiting ? (
+          <Trans>Create role</Trans>
+        ) : (
+          <Trans>Create group</Trans>
+        )}
       </Button>
     </div>
   );

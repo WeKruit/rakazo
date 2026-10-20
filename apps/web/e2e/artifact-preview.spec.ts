@@ -3,6 +3,20 @@ import { captureScreenshot, completeOnboarding, signup } from "./helpers";
 
 test.describe.configure({ mode: "serial" });
 
+test("recruiter workspace uses the supplied role navigation with existing candidate evidence", async ({
+  page,
+}, testInfo) => {
+  await page.setViewportSize({ width: 1440, height: 900 });
+  await page.goto("/e2e/fixtures/marketing-shots.html?view=recruiting-workspace");
+  await expect(page.getByTestId("recruiting-navigation")).toBeVisible();
+  await expect(page.getByRole("navigation", { name: "Role conversations" })).toContainText(
+    "Systems engineer",
+  );
+  await expect(page.getByRole("button", { name: "Dashboard", exact: true })).toBeVisible();
+  await expect(page.getByText("Synthetic recruiting evidence", { exact: true })).toBeVisible();
+  await captureScreenshot(page, testInfo, "recruiting-workspace-template");
+});
+
 test("recruiting search filters remain separate from qualification and retain their source", async ({
   page,
 }, testInfo) => {

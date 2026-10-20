@@ -74,6 +74,42 @@ describe("tool card render decisions", () => {
     expect(messageHasVisibleBlocks([approval], false)).toBe(true);
   });
 
+  it("hides native delegation chrome while preserving mixed business results and exact consent", () => {
+    const approval: MessageBlock = {
+      kind: "ask",
+      text: "Send this exact draft?",
+      approvalEffectId: "effect-original",
+      detail: "To: person@example.test\nBody: Original draft",
+      actions: [{ id: "allow", label: "Allow once" }],
+    };
+    const internal: MessageBlock[] = [
+      { kind: "handoff", fromBotId: "main", toBotId: "specialist", text: "internal handoff" },
+      {
+        kind: "bot_message_sent",
+        toBotId: "specialist",
+        toBotName: "Specialist",
+        text: "internal payload",
+      },
+      {
+        kind: "subagent",
+        agentId: "internal-agent",
+        name: "Internal work",
+        task: "internal task",
+        status: "completed",
+      },
+    ];
+    expect(renderableMessageBlocks([...internal, textBlock, approval], false)).toEqual([
+      textBlock,
+      approval,
+    ]);
+    expect(renderableMessageBlocks([...internal, textBlock, approval], true)).toEqual([
+      ...internal,
+      textBlock,
+      approval,
+    ]);
+    expect(messageHasVisibleBlocks(internal, false)).toBe(false);
+  });
+
   it("never surfaces a progress block marked as activity", () => {
     expect(messageHasVisibleBlocks([liveActivity], true)).toBe(false);
     expect(messageHasVisibleBlocks([liveActivity], false)).toBe(false);

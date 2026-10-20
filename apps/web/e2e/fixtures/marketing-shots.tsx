@@ -1,6 +1,6 @@
 import { I18nProvider } from "@lingui/react";
 import { ChatMarkdown } from "@rakazo/chat-ui/web";
-import type { Bot, Me, ModelCatalogEntry, RecruitingCandidate } from "@rakazo/contracts";
+import type { Bot, Group, Me, ModelCatalogEntry, RecruitingCandidate } from "@rakazo/contracts";
 import { defaultCronPreset } from "@rakazo/core";
 import { BotAvatar, Button } from "@rakazo/ui-web";
 import { ArrowUp, Bell, LayoutGrid, Monitor, PanelLeftClose, Plus, Search } from "lucide-react";
@@ -14,6 +14,7 @@ import { RoutineEditor } from "../../src/pages/RoutineEditor";
 import { SettingsOverlay } from "../../src/pages/SettingsOverlay";
 import { BotSettings, CreateBotForm } from "../../src/pages/shell/bot-panel";
 import { TimeSeparator } from "../../src/pages/shell/chat-context";
+import { RecruitingNavigation } from "../../src/pages/shell/RecruitingNavigation";
 import "../../src/styles.css";
 
 const demoRpc: Record<string, unknown> = {
@@ -936,6 +937,48 @@ async function prepareRecruitingSourceShot() {
       : profileArtifact;
 }
 
+function RecruitingWorkspaceShot() {
+  const [query, setQuery] = useState("");
+  const workspace = demoRpc["recruiting/getWorkspace"] as { role: { title: string } };
+  const group: Group = {
+    id: "group-demo",
+    spaceId: "space-demo",
+    name: workspace.role.title,
+    pinned: false,
+    sectionId: null,
+    archivedAt: null,
+    members: [],
+    threadId: "thread-demo",
+    preview: "",
+    unread: false,
+    createdAt: "2026-10-07T00:00:00Z",
+    updatedAt: "2026-10-07T00:00:00Z",
+  };
+  return (
+    <main data-product-view="recruiting" className="flex min-h-full bg-background text-foreground">
+      <aside className="hidden w-[248px] shrink-0 border-e border-sidebar-border bg-sidebar pt-6 md:flex">
+        <RecruitingNavigation
+          groups={[group]}
+          groupId={group.id}
+          query={query}
+          dashboardOpen
+          canCreateRole={false}
+          onQueryChange={setQuery}
+          onConversation={() => undefined}
+          onDashboard={() => undefined}
+          onOpenRole={() => undefined}
+          onNewRole={() => undefined}
+        />
+      </aside>
+      <section className="mx-auto min-w-0 max-w-[1180px] flex-1 px-4 py-6 md:px-8">
+        <p className="mb-3 text-xs text-muted-foreground">Synthetic recruiting evidence</p>
+        <h1 className="recruiting-heading mb-6 text-[32px]">{workspace.role.title}</h1>
+        <RecruitingPanel threadId="thread-demo" botId="bot-inbox" onClose={() => undefined} />
+      </section>
+    </main>
+  );
+}
+
 if (view === "subscription") {
   demoRpc.me = subscriptionMe;
   demoRpc["models/list"] = subscriptionCatalog;
@@ -943,11 +986,17 @@ if (view === "subscription") {
   demoRpc["models/backups"] = [];
 }
 
-void (view === "recruiting" ? prepareRecruitingSourceShot() : Promise.resolve())
+void (
+  view === "recruiting" || view === "recruiting-workspace"
+    ? prepareRecruitingSourceShot()
+    : Promise.resolve()
+)
   .then(() => bootstrapI18n("en"))
   .then(() => {
     const shot =
-      view === "recruiting" ? (
+      view === "recruiting-workspace" ? (
+        <RecruitingWorkspaceShot />
+      ) : view === "recruiting" ? (
         <main className="mx-auto max-w-[900px] bg-background p-8 text-foreground">
           <p className="mb-5 text-xs text-muted-foreground">Synthetic recruiting evidence</p>
           <RecruitingPanel threadId="thread-demo" botId="bot-inbox" onClose={() => undefined} />

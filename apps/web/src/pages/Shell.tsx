@@ -31,6 +31,8 @@ import {
   ATTACHMENT_MAX_BYTES,
   ATTACHMENT_MAX_COUNT,
   canReactToThreadMessage,
+  GROUP_MEMBER_MAX,
+  GROUP_MEMBER_MIN,
   MESSAGE_REACTIONS,
   normalizeCreateBotProfile,
 } from "@rakazo/contracts";
@@ -143,7 +145,7 @@ import { useNavigate, useParams, useSearchParams } from "react-router-dom";
 import { ArtifactFileCard } from "../components/ArtifactFileCard";
 import { AskCard } from "../components/AskCard";
 import { ActiveBotGlyph, CollaborationMarker } from "../components/ai/CollaborationMarker";
-import { Shimmer } from "../components/ai/primitives";
+import { LoadingState, Shimmer } from "../components/ai/primitives";
 import { CloudAgentCard } from "../components/CloudAgentCard";
 import { ComputerMaintenanceActions } from "../components/ComputerMaintenanceActions";
 import {
@@ -304,6 +306,7 @@ import {
   ChoiceCard,
   McpApprovalCard,
 } from "./shell/message-cards";
+import { RecruitingNavigation } from "./shell/RecruitingNavigation";
 import { commitSpaceRename, sidebarGroupsForSpaces } from "./shell/space-sidebar";
 import { WindowChrome } from "./WindowChrome";
 
@@ -738,6 +741,11 @@ export function ShellPage() {
     () => getToolActivityEnabled(bootstrapMe?.isDeploymentOwner === true),
     () => false,
   );
+  useEffect(() => {
+    if (!showToolActivity && panel && panel !== "recruiting" && panel !== "create-group") {
+      setPanel(null);
+    }
+  }, [showToolActivity, panel]);
   const [keepComputerRecovery, setKeepComputerRecovery] = useState(false);
   const recoveryHoldTimer = useRef<number | undefined>(undefined);
   const showComputerRecoveryHint =
@@ -876,6 +884,11 @@ export function ShellPage() {
   computerOpenRef.current = computerOpen;
   computerBotIdRef.current = computerBotId ?? active?.id;
   const activeGroup = groups.find((group) => group.id === groupId);
+  // Reuse this role's ordered native crew; its first member already owns default sends.
+  const roleCrewBots = (activeGroup?.members ?? []).flatMap((member) => {
+    const bot = bots.find((bot) => bot.id === member.botId && !bot.archivedAt);
+    return bot ? [bot] : [];
+  });
   const activePendingAttachments = useMemo(
     () => attachmentsForThread(pendingAttachments, inGroup ? groupId : active?.id),
     [active?.id, groupId, inGroup, pendingAttachments],
@@ -1888,10 +1901,12 @@ export function ShellPage() {
     [userId, bootstrapMe?.spaceId, composerDraftKey, activeSnapshot?.threadId],
   );
   const candidateFeedbackRecipients = inGroup
-    ? (activeSnapshot?.members ?? activeGroup?.members ?? []).map((member) => ({
-        id: member.botId,
-        name: member.name,
-      }))
+    ? (activeSnapshot?.members ?? activeGroup?.members ?? [])
+        .filter((_member, index) => showToolActivity || index === 0)
+        .map((member) => ({
+          id: member.botId,
+          name: member.name,
+        }))
     : undefined;
   const discussionScope = useRef({ composerRef, panel, active: true, candidateFeedbackRecipients });
   discussionScope.current.composerRef = composerRef;
@@ -1998,8 +2013,11 @@ export function ShellPage() {
     rememberSeenRunErrorId(runId);
   }, []);
   const transcriptMessages = useMemo(
-    () => userVisibleMessages(activeSnapshot?.messages ?? [], { includePeerReceipts: true }),
-    [activeSnapshot?.messages],
+    () =>
+      userVisibleMessages(activeSnapshot?.messages ?? [], {
+        includePeerReceipts: showToolActivity,
+      }),
+    [activeSnapshot?.messages, showToolActivity],
   );
   const transcriptArtifactTarget = useMemo<ArtifactTarget>(
     () => (inGroup ? { groupId: groupId ?? "" } : { botId: active?.id ?? "" }),
@@ -2960,10 +2978,12 @@ export function ShellPage() {
     .slice(0, 2)
     .toUpperCase();
 
+  // biome-ignore format: ponytail: preserve the native console markup when sharing this shell.
   const shell = (
     <div
       data-testid="shell-root"
       data-ready={shellReady}
+      data-product-view={showToolActivity ? "developer" : "recruiting"}
       className="relative flex h-full min-w-0 overflow-clip bg-background text-foreground/90"
       onTouchStartCapture={(event) => {
         if (
@@ -3012,7 +3032,7 @@ export function ShellPage() {
           if (active) void refreshThread(active.id);
         }}
       />
-      {bootstrapMe !== undefined ? (
+      {showToolActivity && bootstrapMe !== undefined ? (
         <HostComputerPrompt initialMe={bootstrapMe ?? undefined} onMeUpdated={setBootstrapMe} />
       ) : null}
       {mobileSidebarOpen ? (
@@ -3033,9 +3053,59 @@ export function ShellPage() {
         } ${
           botsSidebarCollapsed
             ? "md:w-0 md:max-w-0 md:overflow-hidden md:border-e-0 md:opacity-0 md:pointer-events-none"
-            : "md:w-[316px]"
+            : showToolActivity
+              ? "md:w-[316px]"
+              : "md:w-[248px]"
         }`}
       >
+        {!showToolActivity ? (
+          <>
+            <div className="app-drag flex items-center justify-between px-5 pt-4 pb-1">
+              <WindowChrome />
+              <Button
+                variant="ghost"
+                size="icon-sm"
+                className="app-no-drag hidden md:inline-flex"
+                aria-label={t`Collapse navigation`}
+                onClick={() => setBotsSidebarCollapsedPref(true)}
+              >
+                <PanelLeftClose size={15} aria-hidden="true" />
+              </Button>
+            </div>
+            <RecruitingNavigation
+              groups={groups}
+              groupId={groupId}
+              query={query}
+              dashboardOpen={panel === "recruiting"}
+              canCreateRole={
+                roleCrewBots.length === activeGroup?.members.length &&
+                roleCrewBots.length >= GROUP_MEMBER_MIN &&
+                roleCrewBots.length <= GROUP_MEMBER_MAX
+              }
+              onQueryChange={setQuery}
+              onConversation={() => {
+                setPanel(null);
+                setMobileSidebarOpen(false);
+                navigate(firstThreadRoute(bots, groups));
+              }}
+              onDashboard={() => {
+                setPanel("recruiting");
+                setMobileSidebarOpen(false);
+              }}
+              onOpenRole={(id) => {
+                setPanel(null);
+                setMobileSidebarOpen(false);
+                navigate(`/app/g/${id}`);
+              }}
+              onNewRole={() => {
+                setPanel("create-group");
+                setMobileSidebarOpen(false);
+              }}
+            />
+          </>
+        ) : null}
+        {showToolActivity && (
+          <>
         <div className="app-drag flex items-center justify-between px-[18px] pb-3 pt-4">
           <WindowChrome />
           <div className="relative flex items-center gap-2.5">
@@ -3624,6 +3694,8 @@ export function ShellPage() {
             </div>
           ) : null}
         </div>
+          </>
+        )}
         <button
           type="button"
           onClick={() => setPluginsOpen(true)}
@@ -3652,7 +3724,7 @@ export function ShellPage() {
               align="start"
               className="w-[calc(316px-1.5rem)] max-w-[calc(100vw-3rem)] gap-0 p-1 data-closed:animate-none"
             >
-              {bootstrapMe?.ticketBoardEnabled ? (
+              {showToolActivity && bootstrapMe?.ticketBoardEnabled ? (
                 <Button
                   variant="ghost"
                   className="w-full justify-start font-normal"
@@ -3676,7 +3748,7 @@ export function ShellPage() {
                 }}
               >
                 <FolderOpen className="text-muted-foreground" strokeWidth={1.75} />
-                <Trans>Artifacts</Trans>
+                {showToolActivity ? <Trans>Artifacts</Trans> : <Trans>Files</Trans>}
               </Button>
               <Button
                 variant="ghost"
@@ -3725,10 +3797,18 @@ export function ShellPage() {
         <button
           type="button"
           data-testid="bots-sidebar-edge"
-          aria-label={botsSidebarCollapsed ? t`Show bots` : t`Hide bots`}
+          aria-label={
+            showToolActivity
+              ? botsSidebarCollapsed
+                ? t`Show bots`
+                : t`Hide bots`
+              : botsSidebarCollapsed
+                ? t`Show navigation`
+                : t`Hide navigation`
+          }
           aria-pressed={!botsSidebarCollapsed}
           className={`absolute inset-y-0 z-50 hidden w-2 cursor-ew-resize touch-none border-0 bg-transparent p-0 md:block ${
-            botsSidebarCollapsed ? "start-0" : "start-[308px]"
+            botsSidebarCollapsed ? "start-0" : showToolActivity ? "start-[308px]" : "start-[240px]"
           }`}
           onPointerDown={(event) => {
             event.currentTarget.setPointerCapture(event.pointerId);
@@ -3796,41 +3876,47 @@ export function ShellPage() {
               <button
                 type="button"
                 data-testid="restore-bots-sidebar"
-                aria-label={t`Show bots`}
-                title={t`Show bots`}
+                aria-label={showToolActivity ? t`Show bots` : t`Show navigation`}
+                title={showToolActivity ? t`Show bots` : t`Show navigation`}
                 onClick={() => setBotsSidebarCollapsedPref(false)}
                 className="app-no-drag hidden h-8 w-8 shrink-0 place-items-center rounded-lg text-foreground/75 hover:bg-accent md:grid"
               >
                 <PanelLeftOpen size={19} strokeWidth={1.7} aria-hidden="true" />
               </button>
             ) : null}
-            <button
-              type="button"
-              data-testid="bot-settings-trigger"
-              onClick={() => setPanel(inGroup ? "group-settings" : "settings")}
-              className="app-no-drag flex min-w-0 items-center gap-3"
-            >
-              {inGroup ? (
-                <GroupAvatar
-                  members={activeSnapshot?.members ?? activeGroup?.members ?? []}
-                  size={26}
-                />
-              ) : active ? (
-                <BotAvatar
-                  color={active.color}
-                  identity={active.id}
-                  size={26}
-                  status={active.status}
-                />
-              ) : null}
-              <span className="min-w-0">
-                <span className="block truncate text-[16px] font-medium text-foreground" dir="auto">
-                  {inGroup
-                    ? (activeGroup?.name ?? activeSnapshot?.groupName ?? t`Group`)
-                    : (active?.name ?? t`Select a bot`)}
+            {showToolActivity ? (
+              <button
+                type="button"
+                data-testid="bot-settings-trigger"
+                onClick={() => setPanel(inGroup ? "group-settings" : "settings")}
+                className="app-no-drag flex min-w-0 items-center gap-3"
+              >
+                {inGroup ? (
+                  <GroupAvatar
+                    members={activeSnapshot?.members ?? activeGroup?.members ?? []}
+                    size={26}
+                  />
+                ) : active ? (
+                  <BotAvatar
+                    color={active.color}
+                    identity={active.id}
+                    size={26}
+                    status={active.status}
+                  />
+                ) : null}
+                <span className="min-w-0">
+                  <span className="block truncate text-[16px] font-medium text-foreground" dir="auto">
+                    {inGroup
+                      ? (activeGroup?.name ?? activeSnapshot?.groupName ?? t`Group`)
+                      : (active?.name ?? t`Select a bot`)}
+                  </span>
                 </span>
-              </span>
-            </button>
+              </button>
+            ) : (
+              <h1 className="recruiting-heading min-w-0 truncate text-[27px] leading-none text-foreground" dir="auto">
+                {inGroup ? (activeGroup?.name ?? activeSnapshot?.groupName ?? t`Role conversation`) : t`Conversation`}
+              </h1>
+            )}
           </div>
           <div className="flex items-center gap-1">
             {activeSnapshot?.threadId ? (
@@ -3884,7 +3970,7 @@ export function ShellPage() {
                 />
               </button>
             ) : null}
-            {!inGroup && active ? (
+            {showToolActivity && !inGroup && active ? (
               <button
                 type="button"
                 title={t`Agent computer`}
@@ -3906,9 +3992,11 @@ export function ShellPage() {
         </div>
         {!active && !activeGroup && initialBotsLoaded ? (
           <div className="grid flex-1 place-items-center">
-            <Button onClick={() => setPanel("create")}>
+            <Button
+              onClick={() => (showToolActivity ? setPanel("create") : navigate("/onboarding"))}
+            >
               <Plus size={16} aria-hidden="true" />
-              <Trans>Create new Bot</Trans>
+              {showToolActivity ? <Trans>Create new Bot</Trans> : <Trans>Start recruiting</Trans>}
             </Button>
           </div>
         ) : !activeSnapshot ? (
@@ -3958,7 +4046,7 @@ export function ShellPage() {
             onOpenComputer={onOpenComputer}
           />
         )}
-        {inGroup && composerRunning ? (
+        {showToolActivity && inGroup && composerRunning ? (
           <div className="flex flex-wrap gap-1 px-6 pb-2">
             {currentRuns
               .filter((run) => isActive(run.status))
@@ -4028,22 +4116,26 @@ export function ShellPage() {
             replyQuote={activeReplyQuote}
             replyTargetName={replyTargetName}
             onClearReply={clearReply}
-            mentionTargets={composerMentionTargets}
-            agentSkills={agentSkills}
-            onSlashOpen={refreshAgentSkills}
-            onSlashAction={(action) => {
-              if (action === "chat-settings") {
-                setPanel(inGroup ? "group-settings" : "settings");
-                return;
-              }
-              if (action === "settings-general") {
-                openSettings("general");
-                return;
-              }
-              if (action === "settings-usage") {
-                openSettings("usage");
-              }
-            }}
+            mentionTargets={showToolActivity ? composerMentionTargets : []}
+            agentSkills={showToolActivity ? agentSkills : []}
+            onSlashOpen={showToolActivity ? refreshAgentSkills : undefined}
+            onSlashAction={
+              showToolActivity
+                ? (action) => {
+                    if (action === "chat-settings") {
+                      setPanel(inGroup ? "group-settings" : "settings");
+                      return;
+                    }
+                    if (action === "settings-general") {
+                      openSettings("general");
+                      return;
+                    }
+                    if (action === "settings-usage") {
+                      openSettings("usage");
+                    }
+                  }
+                : undefined
+            }
           />
         ) : null}
       </main>
@@ -4227,9 +4319,22 @@ export function ShellPage() {
             ) : null}
             {panel === "create-group" ? (
               <CreateGroupForm
-                bots={bots}
+                key={showToolActivity ? "group" : "role"}
+                bots={showToolActivity ? bots : roleCrewBots}
+                recruiting={!showToolActivity}
                 onCancel={() => setPanel(null)}
-                onCreate={(input) => createGroup(input)}
+                onCreate={(input) => {
+                  if (
+                    !showToolActivity &&
+                    (!activeGroup ||
+                      roleCrewBots.length !== activeGroup.members.length ||
+                      input.botIds.length !== activeGroup.members.length ||
+                      !input.botIds.every((id, index) => id === activeGroup.members[index]?.botId))
+                  ) {
+                    throw new Error(t`The recruiting team changed. Open the role again.`);
+                  }
+                  return createGroup(input);
+                }}
               />
             ) : null}
             {panel === "group-settings" && activeGroup ? (
@@ -5206,11 +5311,17 @@ const Transcript = memo(function Transcript({
       messageHasVisibleBlocks(message.blocks, showToolActivity),
     ),
   );
-  const workingLabel = workingBots
-    .map(({ name, status }) =>
-      [name, status && rosterWorkStatusLabel(status)].filter(Boolean).join(" · "),
-    )
-    .join("; ");
+  const workingLabel = showToolActivity
+    ? workingBots
+        .map(({ name, status }) =>
+          [name, status && rosterWorkStatusLabel(status)].filter(Boolean).join(" · "),
+        )
+        .join("; ")
+    : workingBots.some((bot) => bot.status === "running")
+      ? t`Working…`
+      : workingBots.some((bot) => bot.status === "leased")
+        ? t`Starting…`
+        : t`Waiting in line…`;
   const [quoteDraft, setQuoteDraft] = useState<{
     message: ThreadMessage;
     text: string;
@@ -5518,7 +5629,9 @@ const Transcript = memo(function Transcript({
                         peerReceipt
                           ? undefined
                           : message.role === "bot"
-                            ? memberName?.(message.botId)
+                            ? showToolActivity
+                              ? memberName?.(message.botId)
+                              : undefined
                             : undefined
                       }
                       memberName={memberName}
@@ -5603,7 +5716,11 @@ const Transcript = memo(function Transcript({
                 block.kind === "progress" && !isToolActivityBlock(block) && Boolean(block.text),
             ),
         ) ? (
-          <ActiveBotGlyph bots={workingBots} label={workingLabel} />
+          showToolActivity ? (
+            <ActiveBotGlyph bots={workingBots} label={workingLabel} />
+          ) : (
+            <LoadingState label={workingLabel} />
+          )
         ) : null}
       </div>
       {quoteDraft ? (
@@ -6071,10 +6188,11 @@ export const Composer = memo(function Composer({
   }, [agentSkills, slashQuery]);
 
   const slashActionOptions = useMemo(() => {
+    if (!onSlashAction) return [];
     if (slashQuery === null) return [];
     const query = slashQuery.trim().toLowerCase();
     return SLASH_ACTIONS.filter((action) => !query || action.label.toLowerCase().includes(query));
-  }, [slashQuery]);
+  }, [slashQuery, onSlashAction]);
 
   const showSlashPicker =
     slashQuery !== null &&
@@ -7108,7 +7226,7 @@ const MessageView = memo(function MessageView({
   return (
     <>
       {messageContext}
-      {message.blocks.map((block, i) => {
+      {visibleNarrationBlocks.map((block, i) => {
         if (block.kind === "steps" && shouldRenderToolCard(block, showToolActivity)) {
           return (
             <StandaloneToolActivity

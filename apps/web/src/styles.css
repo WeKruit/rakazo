@@ -1,3 +1,4 @@
+@import url("https://fonts.googleapis.com/css2?family=Newsreader:opsz,wght@6..72,400;6..72,500&family=Hanken+Grotesk:wght@400;500;600;700&display=swap");
 @import "tailwindcss";
 @import "@rakazo/ui-web/styles.css";
 @import "@fontsource-variable/geist/wght.css";
@@ -40,6 +41,17 @@ body,
 
 .app-no-drag {
   -webkit-app-region: no-drag;
+}
+
+[data-product-view="recruiting"] {
+  font-family: "Hanken Grotesk", ui-sans-serif, system-ui, sans-serif;
+  letter-spacing: -0.005em;
+}
+
+.recruiting-heading {
+  font-family: "Newsreader", Georgia, serif;
+  font-weight: 400;
+  letter-spacing: -0.02em;
 }
 
 @keyframes rkPulse {
