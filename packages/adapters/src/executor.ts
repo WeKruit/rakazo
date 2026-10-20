@@ -5794,13 +5794,15 @@ export function createRunExecutor(deps: ExecutorDeps) {
             let files: MessageBlock[] = [];
             let approvalArgs = args;
             let crmOperation:
+              | "crm_bind_candidate_role"
               | "crm_update_candidate_stage"
               | "crm_append_candidate_note"
               | undefined;
             const approvalRoute = connectorCall.route;
             if (
               approvalRoute?.connectorId === "mcp" &&
-              (approvalRoute.toolName === "crm_update_candidate_stage" ||
+              (approvalRoute.toolName === "crm_bind_candidate_role" ||
+                approvalRoute.toolName === "crm_update_candidate_stage" ||
                 approvalRoute.toolName === "crm_append_candidate_note")
             ) {
               try {
@@ -5830,7 +5832,9 @@ export function createRunExecutor(deps: ExecutorDeps) {
                 if (!(error instanceof IsolationError)) throw error;
                 const result = {
                   error:
-                    "Read the candidate's current CRM pipeline with get_crm_candidate_review before requesting approval. Its verified candidate, canonical role and original snapshot must match this change.",
+                    approvalRoute.toolName === "crm_bind_candidate_role"
+                      ? "Read the candidate with list_crm_candidates and the exact canonical role with get_crm_role in this organization before requesting approval."
+                      : "Read the candidate's current CRM pipeline with get_crm_candidate_review before requesting approval. Its verified candidate, canonical role and original snapshot must match this change.",
                 };
                 return (await completeEffect(deps, applied!.effect.id, "intended", result))
                   ? result

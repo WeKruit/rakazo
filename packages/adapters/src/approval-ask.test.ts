@@ -171,6 +171,29 @@ describe("buildApprovalAskBlock", () => {
     );
     expect(block.detail!.length).toBeGreaterThan(4_000);
   });
+  it("shows only the verified candidate, canonical role and client for a CRM role binding", () => {
+    const args = {
+      candidateName: "Ada Example",
+      roleTitle: "Platform Engineer",
+      clientName: "Example Company",
+      p_org: "internal-org",
+      p_candidate: "internal-candidate",
+      p_role: "internal-role",
+    };
+    const block = buildApprovalAskBlock("binding-effect", "renamed_write", args, [], {
+      crmOperation: "crm_bind_candidate_role",
+    });
+    expect(block.text).toBe("Review CRM role binding");
+    expect(block.detail).toBe(
+      "Candidate: Ada Example\nRole: Platform Engineer\nClient: Example Company\n\nBind candidate to this role",
+    );
+    expect(block.detail).not.toMatch(/internal-|p_org|p_candidate|p_role/);
+    expect(block.actions).toEqual([
+      { id: "allow", label: "Allow once" },
+      { id: "deny", label: "Deny" },
+    ]);
+    expect(block.approvalEffectId).toBe("binding-effect");
+  });
   it.each(["crm_update_candidate_stage", "crm_append_candidate_note"] as const)(
     "shows only the trusted CRM target and complete approved change for %s",
     (tool) => {

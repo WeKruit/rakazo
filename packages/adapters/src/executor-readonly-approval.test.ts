@@ -1218,6 +1218,123 @@ describe.each([
 });
 
 describe.each([false, true])("verified CRM approval target, catalog=%s", (catalog) => {
+  it("approves a verified CRM role binding once and replays only its original three UUIDs", async () => {
+    const args = {
+      p_org: "10000000-0000-4000-8000-000000000001",
+      p_candidate: "40000000-0000-4000-8000-000000000004",
+      p_role: "20000000-0000-4000-8000-000000000002",
+    };
+    const route = {
+      connectorId: "mcp",
+      resourceId: "resource-1",
+      resourceRevision: 1,
+      toolName: "crm_bind_candidate_role",
+    };
+    const f = fixture({
+      name: "renamed_write",
+      catalog,
+      readOnly: true,
+      autoReview: true,
+      inputSchema: { type: "object" },
+      route,
+      rules: [{ effect: "always_allow", matchKind: "tool", matchValue: "renamed_write" }],
+    });
+    crmApprovalProof.mockResolvedValue({
+      candidateName: "Ada Example",
+      roleTitle: "Platform Engineer",
+      clientName: "Example Company",
+    });
+    f.setCalls([{ args, executionId: "role-binding" }]);
+    await f.run();
+    expect(crmApprovalProof).toHaveBeenCalledWith(
+      f.prisma,
+      expect.anything(),
+      expect.objectContaining({ runId: "run-1", threadId: "thread-1", botId: "bot-1" }),
+      { route, args },
+    );
+    expect(f.execute).not.toHaveBeenCalled();
+    expect(reviewMock).not.toHaveBeenCalled();
+    const card = f.pauseRunForInput.mock.calls[0]?.[0].blocks[0];
+    expect(card).toMatchObject({
+      text: "Review CRM role binding",
+      detail:
+        "Candidate: Ada Example\nRole: Platform Engineer\nClient: Example Company\n\nBind candidate to this role",
+      actions: [
+        { id: "allow", label: "Allow once" },
+        { id: "deny", label: "Deny" },
+      ],
+    });
+    const request = structuredClone(f.effects[0]!.request);
+    f.effects[0]!.status = "approved";
+    f.setCalls([{ args: { p_role: "changed-after-approval" }, executionId: "replay-binding" }]);
+    await f.run();
+    expect(f.execute).toHaveBeenCalledOnce();
+    expect(f.execute.mock.calls[0]?.[0].args).toEqual(args);
+    expect(f.effects[0]!.request).toEqual(request);
+    expect(crmApprovalProof).toHaveBeenCalledOnce();
+  });
+  it("requires fresh native list and canonical role proof before showing a binding card", async () => {
+    const f = fixture({
+      name: "renamed_write",
+      catalog,
+      readOnly: true,
+      inputSchema: { type: "object" },
+      route: {
+        connectorId: "mcp",
+        resourceId: "resource-1",
+        resourceRevision: 1,
+        toolName: "crm_bind_candidate_role",
+      },
+    });
+    crmApprovalProof.mockRejectedValue(new IsolationError());
+    f.setCalls([{ args: { candidateName: "Model label" }, executionId: "unverified-binding" }]);
+    await f.run();
+    expect(f.execute).not.toHaveBeenCalled();
+    expect(f.pauseRunForInput).not.toHaveBeenCalled();
+    expect(f.effects[0]).toMatchObject({
+      status: "completed",
+      result: { error: expect.stringMatching(/list_crm_candidates.*get_crm_role/) },
+    });
+  });
+  it("does not repeat an uncertain CRM role binding after its one-time approval", async () => {
+    const f = fixture({
+      name: "renamed_write",
+      catalog,
+      readOnly: true,
+      transportUncertain: true,
+      inputSchema: { type: "object" },
+      route: {
+        connectorId: "mcp",
+        resourceId: "resource-1",
+        resourceRevision: 1,
+        toolName: "crm_bind_candidate_role",
+      },
+    });
+    crmApprovalProof.mockResolvedValue({
+      candidateName: "Ada Example",
+      roleTitle: "Platform Engineer",
+      clientName: "Example Company",
+    });
+    f.setCalls([
+      {
+        args: {
+          p_org: "10000000-0000-4000-8000-000000000001",
+          p_candidate: "40000000-0000-4000-8000-000000000004",
+          p_role: "20000000-0000-4000-8000-000000000002",
+        },
+        executionId: "binding",
+      },
+    ]);
+    await f.run();
+    f.effects[0]!.status = "approved";
+    await f.run();
+    expect(f.effects[0]).toMatchObject({ status: "uncertain", result: { uncertain: true } });
+    const result = f.effects[0]!.result;
+    await f.run();
+    expect(f.execute).toHaveBeenCalledOnce();
+    expect(f.results.at(-1)).toEqual(result);
+    expect(crmApprovalProof).toHaveBeenCalledOnce();
+  });
   it.each(["crm_update_candidate_stage", "crm_append_candidate_note"])(
     "keeps the trusted %s card separate from the immutable write payload",
     async (operation) => {
