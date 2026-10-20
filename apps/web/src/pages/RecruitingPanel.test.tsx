@@ -2087,6 +2087,13 @@ it("ignores a late restored page after filters change and keeps the new depth on
   hold = true;
   const reopened = await mounted("thread-1", undefined, false);
   expect(finish).toBeDefined();
+  expect(reopened.container.querySelector("ul")?.textContent).toContain(first.name);
+  expect(reopened.container.querySelector("ul")?.textContent).not.toContain(second.name);
+  expect(
+    [...reopened.container.querySelectorAll("button")].find(
+      (button) => button.textContent === "Load more",
+    ),
+  ).toHaveProperty("disabled", true);
   await changeSelect(reopened.container, "Candidate sort", "recent");
   await act(async () => finish(candidatePage([second])));
   expect(reopened.container.querySelector("ul")?.textContent).toContain(fresh.name);
@@ -2100,6 +2107,41 @@ it("ignores a late restored page after filters change and keeps the new depth on
     limit: 30,
     sort: "recent",
   });
+});
+
+it("keeps the displayed page depth after a restored page fails and is loaded manually", async () => {
+  const people = ["first", "second", "third"].map((name) => ({
+    ...candidateFixture(`${name}-person`, false),
+    name: `Synthetic ${name}`,
+  }));
+  let rejectNextPage = false;
+  api.listCandidates.mockImplementation(({ cursor }) => {
+    if (cursor && rejectNextPage) {
+      rejectNextPage = false;
+      return Promise.reject(new Error("Page unavailable"));
+    }
+    const index = cursor === "page-3" ? 2 : cursor === "page-2" ? 1 : 0;
+    return Promise.resolve({
+      ...candidatePage([people[index]!]),
+      nextCursor: index < 2 ? `page-${index + 2}` : null,
+    });
+  });
+  const view = await mounted("thread-1", undefined, false);
+  await view.click("Evidence");
+  await view.click("Load more");
+  await cleanup?.();
+  rejectNextPage = true;
+  const reopened = await mounted("thread-1", undefined, false);
+  expect(reopened.container.textContent).toContain("Could not load candidates");
+  expect(reopened.container.querySelector("ul")?.textContent).toContain(people[0]!.name);
+  await reopened.click("Load more");
+  expect(reopened.container.querySelector("ul")?.textContent).toContain(people[1]!.name);
+  await cleanup?.();
+  api.listCandidates.mockClear();
+  const again = await mounted("thread-1", undefined, false);
+  expect(again.container.querySelector("ul")?.textContent).toContain(people[1]!.name);
+  expect(again.container.textContent).not.toContain(people[2]!.name);
+  expect(api.listCandidates).toHaveBeenCalledTimes(2);
 });
 
 it("isolates saved recruiting list preferences by actor, thread and actual role", async () => {

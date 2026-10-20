@@ -2100,6 +2100,14 @@ function RecruitingWorkspace({
         return;
       }
       if (resetUnavailableCandidateSort(page, candidateRequestFilters)) return;
+      const verified = await rpc.recruiting.getWorkspace({ threadId });
+      if (!isCurrent()) return;
+      if (verified?.role.id !== roleId || verified?.revision.id !== roleRevisionId) {
+        setRefresh((value) => value + 1);
+        return;
+      }
+      setCandidatePage(page);
+      setCandidateList((current) => ({ ...current, pageCount: 1 }));
       let pageCount = 1;
       // ponytail: replay only the saved page depth with fresh cursors; never cache candidate records.
       for (let index = 1; index < query.pageCount && page.nextCursor; index++) {
@@ -2116,21 +2124,16 @@ function RecruitingWorkspace({
           next.roleRevisionId !== roleRevisionId ||
           next.crmTarget?.bindingEffectId !== page.crmTarget?.bindingEffectId
         ) {
+          setCandidatePage(null);
           setRefresh((value) => value + 1);
           return;
         }
         if (resetUnavailableCandidateSort(next, candidateRequestFilters)) return;
         page = { ...next, items: page.items.concat(next.items) };
         pageCount++;
+        setCandidatePage(page);
+        setCandidateList((current) => ({ ...current, pageCount }));
       }
-      const verified = await rpc.recruiting.getWorkspace({ threadId });
-      if (!isCurrent()) return;
-      if (verified?.role.id !== roleId || verified?.revision.id !== roleRevisionId) {
-        setRefresh((value) => value + 1);
-        return;
-      }
-      setCandidatePage(page);
-      setCandidateList((current) => ({ ...current, pageCount }));
       const selectedCandidateKey = candidateQuery.current.selectedCandidateKey;
       const { sourceEffectId, actionId } = candidateRequestFilters;
       const explicitSource = sourceEffectId !== undefined || actionId !== undefined;
