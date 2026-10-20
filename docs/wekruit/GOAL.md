@@ -130,6 +130,7 @@ M1=P0–P6，M2=招聘工作台，M3=完整 Agent 产品，M4=服务/工作迁�
 ## 固定边界
 
 - 网页优先；Slack 不在当前实现范围。不再建设另一套 gateway、agent harness 或测试产品。
+- 一岗位一原生群对话，Main/Sourcer/Outreach/Scheduling 沿该岗位对话接续筛选、反馈和外联，不把不同岗位混在同一业务上下文。旧测试按用户要求原生归档、保留可恢复历史；内部真实邮箱先验证发送、回复和邮件约面，再按精确审批执行实际候选外联。
 - 复用当前 Modal 部署、Supabase 中独立的 rakazo 数据库、Modal Volume 与原生 E2B sandbox。
   数据库保存状态，Volume 保存原生文件和检查点；不在 Mac 运行 Docker 或重复启动旧服务。
 - 不改变现有 CRM 结构；CRM 身份及组织权限独立验证，数据库连接成功不代表已接通。
