@@ -321,6 +321,8 @@ async function renderFeedbackShell(
       trigger: "user",
       routineId: null,
       error: null,
+      startedAt: null,
+      createdAt: "2026-08-25T12:00:00.000Z",
     },
   };
   if (runStatuses) {
@@ -1069,6 +1071,52 @@ it.each([
   expect(status?.textContent).toBe(label);
   expect(status?.textContent).not.toContain("is working");
   expect(status?.textContent).not.toContain("Bots are working");
+});
+
+it("keeps the native queued and running elapsed time when revisiting a role", async () => {
+  setToolActivityPreference("off");
+  const now = vi.spyOn(Date, "now").mockReturnValue(Date.parse("2026-08-25T12:02:00.000Z"));
+  const view = await renderFeedbackShell("group", ["queued"], {
+    isDeploymentOwner: false,
+    openFeedback: false,
+  });
+  expect(container?.textContent).toContain("Waiting in line…2m 0.0s");
+  shellApi.get.mockImplementation(async ({ groupId }) =>
+    groupId
+      ? view.thread
+      : {
+          ...view.thread,
+          threadId: "thread-dm",
+          groupId: undefined,
+          groupName: undefined,
+          botId: "bot-1",
+          messages: [],
+          run: null,
+          activeRuns: [],
+        },
+  );
+  await view.navigate("/app/bot-1");
+  now.mockReturnValue(Date.parse("2026-08-25T12:03:00.000Z"));
+  await view.navigate("/app/g/group-1");
+  expect(container?.textContent).toContain("Waiting in line…3m 0.0s");
+  await view.navigate("/app/bot-1");
+  const running = { ...view.thread.run, status: "running", startedAt: "2026-08-25T12:01:00.000Z" };
+  const earlier = {
+    ...running,
+    id: "run-earlier",
+    botId: "bot-2",
+    startedAt: "2026-08-25T11:00:00.000Z",
+  };
+  Object.assign(view.thread, {
+    run: { ...earlier, status: "completed" },
+    activeRuns: [running, { ...earlier, status: "waiting_input" }],
+  });
+  await view.navigate("/app/g/group-1");
+  expect(container?.textContent).toContain("Working…2m 0.0s");
+  await view.navigate("/app/bot-1");
+  now.mockReturnValue(Date.parse("2026-08-25T12:04:00.000Z"));
+  await view.navigate("/app/g/group-1");
+  expect(container?.textContent).toContain("Working…3m 0.0s");
 });
 
 it.each(["bot", "group"] as const)(
