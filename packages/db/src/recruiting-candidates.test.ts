@@ -86,7 +86,14 @@ describe("candidate listing and shortlist boundaries", () => {
       expect(f.tx.$queryRaw).not.toHaveBeenCalled();
     },
   );
-  it.each(["Engineer", "Example Candidate", "https://www.linkedin.com/in/example-candidate"])(
+  it.each([
+    "Engineer",
+    "Example Candidate",
+    "Example\t \nCandidate",
+    "示例\t 候选人",
+    "50%_Engineer",
+    "https://www.linkedin.com/in/example-candidate",
+  ])(
     "uses scoped server counts and bounded SQL pagination for %s, with cursors bound to filters",
     async (search) => {
       const f = fixture();
@@ -169,6 +176,8 @@ describe("candidate listing and shortlist boundaries", () => {
       expect(query.sql).toContain('b."linkedinUrl"');
       for (const [statement] of f.tx.$queryRaw.mock.calls) {
         const sql = statement as { sql: string; values: unknown[] };
+        expect(sql.sql).not.toContain(search);
+        expect(sql.values).toContain(search);
         expect(sql.sql).toContain('AND page."effectId" = ?');
         expect(sql.sql).toContain('b."sourcePageId" IS NOT NULL');
         expect(sql.values).toContain("native-read");
@@ -177,6 +186,35 @@ describe("candidate listing and shortlist boundaries", () => {
       const totals = f.tx.$queryRaw.mock.calls[0]![0] as { sql: string };
       expect(totals.sql).toContain('(SELECT count(*) FROM filtered) AS "total"');
       expect(totals.sql).toContain('AS "shortlisted" FROM base');
+      const legacyScope = createHash("sha256")
+        .update(
+          stableJsonValue({
+            roleId: "role",
+            roleRevisionId: "revision",
+            sort: "name",
+            sourceProjection: 2,
+            query: search,
+            assessmentState: null,
+            verdict: null,
+            shortlisted: null,
+            actionId: null,
+            sourceEffectId: "native-read",
+          }),
+        )
+        .digest("hex");
+      const legacyCursor = Buffer.from(
+        JSON.stringify({ version: 1, scope: legacyScope, value: "a", key: "a" }),
+      ).toString("base64url");
+      await expect(
+        recruiting.listRecruitingCandidates(f.prisma, actor, {
+          roleId: "role",
+          limit: 1,
+          sort: "name",
+          query: search,
+          sourceEffectId: "native-read",
+          cursor: legacyCursor,
+        }),
+      ).rejects.toThrow(recruiting.RecruitingConflictError);
       for (const changed of [
         { query: "Different" },
         { sourceEffectId: "other-read" },

@@ -7347,6 +7347,8 @@ export async function listRecruitingCandidates(
         ...(input.sourceEffectId === undefined && rankDomainPageId !== undefined
           ? { rankDomainPageId }
           : {}),
+        // Reject search cursors that could skip newly matched whitespace variants.
+        ...(input.query ? { queryProjection: 1 } : {}),
         query: input.query ?? "",
         assessmentState: input.assessmentState ?? null,
         verdict: input.verdict ?? null,
@@ -7369,7 +7371,7 @@ export async function listRecruitingCandidates(
       const clauses = [Prisma.sql`true`];
       if (input.query)
         clauses.push(
-          Prisma.sql`strpos(lower(concat_ws(' ', b."name", b."title", b."company", b."location", b."linkedinUrl", b."candidateKey")), lower(${input.query})) > 0`,
+          Prisma.sql`strpos(lower(regexp_replace(concat_ws(' ', b."name", b."title", b."company", b."location", b."linkedinUrl", b."candidateKey"), '[[:space:]]+', ' ', 'g')), lower(regexp_replace(${input.query}, '[[:space:]]+', ' ', 'g'))) > 0`,
         );
       if (input.assessmentState === "unassessed")
         clauses.push(Prisma.sql`b."assessmentVersion" IS NULL`);
