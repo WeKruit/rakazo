@@ -2774,6 +2774,92 @@ it("shows unnamed candidates and real profile links without exposing their stora
   expect(api.getById).not.toHaveBeenCalled();
 });
 
+it("uses business gate labels only in explicit match-summary expressions while preserving diagnostics and sources", async () => {
+  const candidate = {
+    ...candidateFixture("summary-candidate", false),
+    name: "G2 Researcher",
+    company: "G2",
+  };
+  const source = {
+    taskId: "summary-task",
+    actionId: "summary-action",
+    roleRevisionId: revision.id,
+    effectId: "summary-effect",
+    providerTaskId: "summary-provider-task",
+    rowIndex: 0,
+    artifactRef: { artifactId: "summary-artifact", sha256: "a".repeat(64) },
+    requestCursor: null,
+    outputId: "summary-output",
+    observedAt: "2026-01-01T00:00:00Z",
+    crmImports: [],
+    report: {
+      fields: [
+        {
+          label: "Recommendation",
+          value:
+            "not qualification, not G2; G2 approval pending. Managed G2 approval workflows at G2. https://example.test/G2 approval guide",
+          evidence: "Original quote: not qualification, not G2.",
+          sourceUrls: ["https://example.test/G2"],
+        },
+        {
+          label: "Match judgment",
+          value: "gate G0 is pending; playbook gate G1 is pending. requires G2. G2 is a product.",
+          sourceUrls: [],
+        },
+        {
+          label: "Fit reasons",
+          value: "gate G3 is pending; gate G4 is pending. Studied G2 signals.",
+          sourceUrls: [],
+        },
+        { label: "Rank", value: "2", sourceUrls: [] },
+        { label: "Score", value: "5/6", sourceUrls: [] },
+      ],
+      sourceUrls: ["https://example.test/G2"],
+    },
+  };
+  candidate.latestSource = source;
+  const original = JSON.stringify(source);
+  api.listCandidates.mockResolvedValue(candidatePage([candidate]));
+  api.listCandidateSources.mockResolvedValue({
+    roleId: role.id,
+    candidateKey: candidate.candidateKey,
+    total: 1,
+    nextCursor: null,
+    items: [source],
+  });
+  const view = await mounted("thread-1", undefined, false);
+  await view.click("Evidence");
+  for (const layout of ["Cards", "Table"]) {
+    await view.click(layout);
+    const summary = view.container.querySelector('[aria-label="Research match"]')!;
+    expect(summary.textContent).toContain("not qualification, not Review of the ten candidates");
+    expect(summary.textContent).toContain("G2 approval pending");
+    expect(summary.textContent).toContain("Managed G2 approval workflows at G2.");
+    expect(summary.textContent).toContain("gate Recruiting brief");
+    expect(summary.textContent).toContain("playbook gate Job description and company materials");
+    expect(summary.textContent).toContain("requires G2.");
+    expect(summary.textContent).toContain("G2 is a product");
+    expect(summary.textContent).toContain("https://example.test/G2 approval guide");
+    expect(summary.textContent).toContain("Rank2");
+    expect(summary.textContent).toContain("Score5/6");
+  }
+  await view.click(candidate.name);
+  const summary = view.container.querySelector('[role="dialog"] [aria-label="Research match"]')!;
+  expect(summary.textContent).toContain("gate Campaign and lead list");
+  expect(summary.textContent).toContain("gate Individual message or scheduling action");
+  expect(summary.textContent).toContain("Studied G2 signals");
+  const sources = view.container.querySelector('[aria-label="Saved candidate sources"]')!;
+  for (const field of source.report.fields) expect(sources.textContent).toContain(field.value);
+  expect(sources.textContent).toContain(source.report.fields[0]!.evidence);
+  expect(sources.querySelector('a[href="https://example.test/G2"]')).not.toBeNull();
+  await view.render("thread-1", 0, true);
+  const diagnostics = view.container.querySelector(
+    '[role="dialog"] [aria-label="Research match"]',
+  )!;
+  for (const field of source.report.fields) expect(diagnostics.textContent).toContain(field.value);
+  expect(JSON.stringify(source)).toBe(original);
+});
+
 it.each(["Cards", "Table"])(
   "shows provider match directly in %s while preserving retained reports and gaps",
   async (viewName) => {
