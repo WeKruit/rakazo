@@ -4732,7 +4732,7 @@ describePostgres("recruiting domain (PostgreSQL)", () => {
     const f = await researchFixture(false);
     await expect(
       recruiting.prepareRecruitingResearchAction(prisma, actor, f.input),
-    ).rejects.toThrow(/G0/);
+    ).rejects.toThrow(/Confirm the current recruiting brief/);
     expect(await prisma.recruitingResearchTask.count({ where: { roleId: f.role.role.id } })).toBe(
       0,
     );
@@ -6774,7 +6774,7 @@ describePostgres("recruiting domain (PostgreSQL)", () => {
           clientNonce: `${f.input.clientNonce}-draft`,
           requestArtifact: f.metadata("request-draft"),
         }),
-      ).rejects.toThrow(/G0/);
+      ).rejects.toThrow(/Confirm the current recruiting brief/);
       const revised = await recruiting.confirmRecruitingBrief(prisma, actor, {
         threadId: f.thread.id,
         roleId: revisedDraft.role.id,
