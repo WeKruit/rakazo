@@ -556,17 +556,53 @@ describe("MCP OAuth", () => {
     { mcpOrigin: "https://mcp.example.test", preRegistered: false },
     { mcpOrigin: "http://127.0.0.1:8080", preRegistered: false },
     { mcpOrigin: "https://mcp.example.test", preRegistered: true },
+    { mcpOrigin: "https://mcp.example.test", preRegistered: true, publicInitialize: true },
     { mcpOrigin: "https://mcp.example.test", preRegistered: true, existingGrant: true },
+    {
+      mcpOrigin: "https://mcp.example.test",
+      preRegistered: true,
+      publicInitialize: true,
+      existingGrant: true,
+    },
     {
       mcpOrigin: "https://mcp.example.test",
       preRegistered: true,
       existingGrant: true,
       tokenRejected: true,
     },
+    {
+      mcpOrigin: "https://mcp.example.test",
+      preRegistered: true,
+      publicInitialize: true,
+      existingGrant: true,
+      tokenRejected: true,
+    },
+    {
+      mcpOrigin: "https://mcp.example.test",
+      preRegistered: true,
+      publicInitialize: true,
+      existingGrant: true,
+      abortDiscovery: true,
+    },
   ])(
     "drives discovery, registration, PKCE, redirect, and token exchange for %j",
-    async ({ mcpOrigin, preRegistered, existingGrant, tokenRejected }) => {
+    async ({
+      mcpOrigin,
+      preRegistered,
+      publicInitialize,
+      existingGrant,
+      tokenRejected,
+      abortDiscovery,
+    }) => {
       const requests: string[] = [];
+      const discoverySignals: AbortSignal[] = [];
+      const deadline = abortDiscovery ? new AbortController() : undefined;
+      if (deadline) {
+        const timeout = AbortSignal.timeout;
+        vi.spyOn(AbortSignal, "timeout").mockImplementation((milliseconds) =>
+          milliseconds === 15_000 ? deadline.signal : timeout(milliseconds),
+        );
+      }
       let registration: Record<string, unknown> | undefined;
       const existingMaterial = existingGrant
         ? {
@@ -587,6 +623,20 @@ describe("MCP OAuth", () => {
           requests.push(`${request.method} ${url.toString()}`);
 
           if (url.href === `${mcpOrigin}/mcp` && request.method === "POST") {
+            if (publicInitialize) {
+              const body = (await request.json()) as { id?: number; method: string };
+              return body.method === "initialize"
+                ? Response.json({
+                    jsonrpc: "2.0",
+                    id: body.id,
+                    result: {
+                      protocolVersion: "2025-03-26",
+                      capabilities: { tools: {} },
+                      serverInfo: { name: "public-initialize", version: "1" },
+                    },
+                  })
+                : new Response(null, { status: 202 });
+            }
             return new Response(null, {
               status: 401,
               headers: {
@@ -595,6 +645,18 @@ describe("MCP OAuth", () => {
             });
           }
           if (url.href === `${mcpOrigin}/.well-known/oauth-protected-resource/mcp`) {
+            if (deadline) {
+              discoverySignals.push(request.signal);
+              return new Promise<Response>((_resolve, reject) => {
+                request.signal.addEventListener("abort", () => reject(request.signal.reason), {
+                  once: true,
+                });
+                queueMicrotask(() => {
+                  deadline.abort(new DOMException("OAuth deadline elapsed", "TimeoutError"));
+                  if (!request.signal.aborted) reject(new Error("Discovery lost its deadline"));
+                });
+              });
+            }
             return Response.json({
               resource: `${mcpOrigin}/mcp`,
               authorization_servers: ["https://auth.example.test"],
@@ -706,13 +768,25 @@ describe("MCP OAuth", () => {
           }
         : undefined;
 
-      const started = await broker.begin({
+      const beginning = broker.begin({
         serverId: "server-1",
         spaceId: "workspace-1",
         userId: "user-1",
         redirectUri: "http://127.0.0.1:5173/mcp/oauth/callback",
         ...(oauth ? { oauth } : {}),
       });
+      if (deadline) {
+        await expect(beginning).rejects.toThrow();
+        expect(discoverySignals).toHaveLength(1);
+        expect(discoverySignals[0]!.aborted).toBe(true);
+        expect(put).not.toHaveBeenCalled();
+        expect(prisma.mcpOAuthSession.create).not.toHaveBeenCalled();
+        expect(tx.secret.create).not.toHaveBeenCalled();
+        expect(tx.mcpServer.update).not.toHaveBeenCalled();
+        expect(existingMaterial?.oauth.tokens.access_token).toBe("old-working-token");
+        return;
+      }
+      const started = await beginning;
       expect(started.status).toBe("authorization_required");
       if (started.status !== "authorization_required") throw new Error("OAuth was not requested");
       const authorizationUrl = new URL(started.authorizationUrl);
