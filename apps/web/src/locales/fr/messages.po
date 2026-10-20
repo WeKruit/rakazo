@@ -4305,7 +4305,7 @@ msgid "Research & writing"
 msgstr "Recherche et rédaction"
 
 #: src/pages/RecruitingPanel.tsx
-msgid "Research based on earlier requirements"
+msgid "Saved before latest role update"
 msgstr ""
 
 #: src/pages/RecruitingPanel.tsx

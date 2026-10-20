@@ -536,7 +536,7 @@ function CandidateResearchMatch({
       <dd>
         {source && roleRevisionId && source.roleRevisionId !== roleRevisionId ? (
           <p className="text-muted-foreground">
-            <Trans>Research based on earlier requirements</Trans>
+            <Trans>Saved before latest role update</Trans>
           </p>
         ) : null}
         {source && !source.report ? (
@@ -824,7 +824,7 @@ function CandidateSources({
           >
             {source.roleRevisionId !== roleRevisionId ? (
               <p className="text-xs text-muted-foreground">
-                <Trans>Research based on earlier requirements</Trans>
+                <Trans>Saved before latest role update</Trans>
               </p>
             ) : null}
             {showDiagnostics ? (
