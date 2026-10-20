@@ -2,6 +2,7 @@ import type { AdapterContext, MemoryStore } from "@rakazo/adapter-kit";
 import { MEMORY_REVISION_CONFLICT_ERROR } from "@rakazo/adapter-kit";
 import type {
   Actor,
+  RecruitingCandidateFeedbackSelection,
   RecruitingFeedbackInput,
   RecruitingRole,
   RecruitingRoleRevision,
@@ -10,7 +11,10 @@ import type {
 import { RecruitingFeedbackInputSchema } from "@rakazo/contracts";
 import { applyRecruitingPreferenceEdit } from "@rakazo/core";
 import type { PrismaClient } from "@rakazo/db";
-import { readRecruitingFeedbackContext } from "@rakazo/db";
+import {
+  executeNativeRecruitingCandidateDecision,
+  readRecruitingFeedbackContext,
+} from "@rakazo/db";
 
 export class RecruitingFeedbackValidationError extends Error {
   constructor(message: string) {
@@ -29,7 +33,10 @@ export type RecruitingFeedbackResult = {
       status: "proposed";
       nextTool?: "recruiting_role";
     }
-  | { status: "recorded" | "already_recorded"; choice?: "good_example" | "not_fit" | "skip" }
+  | {
+      status: "recorded" | "already_recorded";
+      choice?: RecruitingCandidateFeedbackSelection["choice"];
+    }
   | {
       status: "saved";
       document: {
@@ -48,6 +55,13 @@ export async function executeRecruitingFeedback(
   untrusted: unknown,
   context: AdapterContext,
   options?: {
+    mutation?: {
+      effectId: string;
+      effectRequest: unknown;
+      leaseOwner: string;
+      leaseFence: number;
+      threadId: string;
+    };
     expectedMemory?: {
       scope: "bot" | "user";
       path: string;
@@ -67,6 +81,22 @@ export async function executeRecruitingFeedback(
   )
     throw new RecruitingFeedbackValidationError("Recruiting feedback does not belong to this run");
   context.signal.throwIfAborted();
+  if (
+    feedback.target === "candidate" &&
+    feedback.operation !== "review" &&
+    feedback.intent.basis === "direct"
+  ) {
+    if (!options?.mutation)
+      throw new RecruitingFeedbackValidationError(
+        "Candidate decisions require a native effect and live lease",
+      );
+    return executeNativeRecruitingCandidateDecision(
+      deps.prisma,
+      actor,
+      { ...options.mutation, runId, sourceMessageId, botId },
+      feedback,
+    );
+  }
   const {
     source,
     workspace,

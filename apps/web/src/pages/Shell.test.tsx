@@ -342,7 +342,8 @@ async function renderFeedbackShell(
     evidenceUrls: [],
     issues: [],
     shortlisted: false,
-    revision: 0,
+    decision: null,
+    revision: 7,
     discoveryCount: 1,
     latestAssessment: null,
   };
@@ -687,6 +688,64 @@ it.each(["bot", "group"] as const)(
   },
 );
 
+it.each(
+  (["bot", "group"] as const).flatMap((kind) =>
+    [
+      { choice: "hold", label: "Pause consideration" },
+      { choice: "pass", label: "Stop considering" },
+      { choice: "resume", label: "Resume consideration" },
+    ].map((decision) => ({ kind, ...decision })),
+  ),
+)(
+  "sends explicit $label through native followUp in a $kind with candidate CAS",
+  async ({ kind, choice, label }) => {
+    const view = await renderFeedbackShell(kind);
+    if (kind === "group") await view.choose("bot-2", "Send to");
+    await view.choose(choice);
+    await view.click("Send feedback");
+    expect(shellApi.followUp).toHaveBeenCalledExactlyOnceWith({
+      ...(kind === "group" ? { groupId: "group-1", mentions: ["bot-2"] } : { botId: "bot-1" }),
+      text: expect.stringContaining(`Candidate feedback: ${label}`),
+      clientNonce: expect.any(String),
+      recruitingFeedback: {
+        roleId: "internal-role",
+        roleRevisionId: "internal-revision",
+        expectedRoleRevision: 2,
+        candidateKeys: [view.candidate.candidateKey],
+        candidateRevisions: [
+          { candidateKey: view.candidate.candidateKey, expectedRevision: view.candidate.revision },
+        ],
+        choice,
+      },
+    });
+    expect(shellApi.send).not.toHaveBeenCalled();
+    expect(shellApi.answer).not.toHaveBeenCalled();
+    expect(shellApi.recruiting.setCandidateShortlist).not.toHaveBeenCalled();
+  },
+);
+
+it.each([undefined, -1, 0.5, Number.NaN])(
+  "rejects an explicit decision with invalid candidate revision %s before followUp",
+  async (candidateRevision) => {
+    const view = await renderFeedbackShell();
+    const accepted = await view.getProps().onCandidateFeedback!(
+      {
+        ...view.candidate,
+        threadId: "thread-1",
+        roleTitle: "Systems engineer",
+        roleId: "internal-role",
+        roleRevisionId: "internal-revision",
+        roleVersion: 2,
+        candidateRevision,
+      },
+      { choice: "hold", reason: "" },
+      "invalid-revision",
+    );
+    expect(accepted).toBe(false);
+    expect(shellApi.followUp).not.toHaveBeenCalled();
+  },
+);
+
 it.each(["bot", "group"] as const)(
   "retains authored feedback in a %s after an uncertain native RPC outcome and retries with the same nonce and recipient",
   async (kind) => {
@@ -865,6 +924,20 @@ it("refreshes persisted recruiting changes while ignoring ongoing catalog and so
     result: { kind: "conflict" },
   });
   receive("Shortlist pending", "effect.recorded", { tool: "recruiting_shortlist" });
+  for (const operation of ["hold", "pass", "resume"])
+    receive(`Consideration ${operation}`, "effect.recorded", {
+      tool: "recruiting_feedback",
+      result: { status: "recorded", feedback: { target: "candidate", operation } },
+    });
+  receive("Review feedback", "effect.recorded", {
+    tool: "recruiting_feedback",
+    result: { status: "recorded", feedback: { target: "candidate", operation: "review" } },
+  });
+  receive("Pending consideration", "effect.recorded", { tool: "recruiting_feedback" });
+  receive("Failed consideration", "effect.recorded", {
+    tool: "recruiting_feedback",
+    result: { status: "needs_clarification", feedback: { target: "candidate", operation: "hold" } },
+  });
   receive("CRM lookup", "agent.tool.completed", {
     name: "recruiting_crm_target",
     outcome: "succeeded",
@@ -895,6 +968,9 @@ it("refreshes persisted recruiting changes while ignoring ongoing catalog and so
     "CRM connected",
     "Shortlisted",
     "Removed from shortlist",
+    "Consideration hold",
+    "Consideration pass",
+    "Consideration resume",
     "CRM import pending",
     "CRM import receipt",
     "Reply outcome",

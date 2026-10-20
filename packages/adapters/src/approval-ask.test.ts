@@ -92,6 +92,85 @@ describe("buildApprovalAskBlock", () => {
       "Shortlist approval requires a verified candidate, role and action.",
     );
   });
+  it.each([
+    { operation: "hold", action: "Pause consideration" },
+    { operation: "pass", action: "Stop considering" },
+    { operation: "resume", action: "Resume consideration" },
+  ] as const)(
+    "shows only the trusted consideration change for $operation",
+    ({ operation, action }) => {
+      const args = {
+        candidateNames: ["Ada Example", "Grace Example"],
+        roleTitle: "Platform Engineer",
+        operation,
+        candidateKeys: ["internal-candidate-a", "internal-candidate-b"],
+        roleId: "internal-role-id",
+        quote: "Unrelated private quote",
+        model: "Unrelated model output",
+      };
+      for (const oneTimeOnly of [false, true]) {
+        const block = buildApprovalAskBlock("original-effect", "recruiting_feedback", args, [], {
+          oneTimeOnly,
+          reviewReason: "Unrelated review reason",
+        });
+        expect(block.text).toBe("Review consideration change");
+        expect(block.detail).toBe(
+          `Candidates: Ada Example, Grace Example\nRole: Platform Engineer\n\n${action}`,
+        );
+        expect(block.approvalEffectId).toBe("original-effect");
+        expect(block.actions?.map((item) => item.id)).toEqual(
+          oneTimeOnly ? ["allow", "deny"] : ["allow", "always", "deny"],
+        );
+        expect(block.detail).not.toMatch(/internal-|candidateKeys|roleId|quote|model|Unrelated/);
+      }
+      expect(args.operation).toBe(operation);
+      expect(args.candidateKeys).toEqual(["internal-candidate-a", "internal-candidate-b"]);
+    },
+  );
+  it.each([
+    {},
+    { candidateNames: [] },
+    { candidateNames: "Ada Example" },
+    { candidateNames: [""] },
+    { candidateNames: ["Ada Example", " "] },
+    { candidateNames: [42] },
+    { candidateNames: ["Ada Example"], roleTitle: "" },
+    { candidateNames: ["Ada Example"], roleTitle: " " },
+    { candidateNames: ["Ada Example"], roleTitle: [] },
+  ])("rejects consideration approval without actual names and role: %j", (invalid) => {
+    expect(() =>
+      buildApprovalAskBlock(
+        "effect",
+        "recruiting_feedback",
+        {
+          roleTitle: "Platform Engineer",
+          ...invalid,
+          operation: "hold",
+        },
+        [],
+      ),
+    ).toThrow("Consideration approval requires verified candidates, role and action.");
+  });
+  it("keeps all verified consideration targets and redacts secrets", () => {
+    const candidateNames = Array.from(
+      { length: 250 },
+      (_, index) => `Synthetic candidate ${index}`,
+    );
+    const block = buildApprovalAskBlock(
+      "effect",
+      "recruiting_feedback",
+      {
+        candidateNames,
+        roleTitle: "Platform Engineer token-secret",
+        operation: "hold",
+      },
+      ["token-secret"],
+    );
+    expect(block.detail).toBe(
+      `Candidates: ${candidateNames.join(", ")}\nRole: Platform Engineer [redacted]\n\nPause consideration`,
+    );
+    expect(block.detail!.length).toBeGreaterThan(4_000);
+  });
   it.each(["crm_update_candidate_stage", "crm_append_candidate_note"] as const)(
     "shows only the trusted CRM target and complete approved change for %s",
     (tool) => {

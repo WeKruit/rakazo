@@ -12,6 +12,7 @@ import type {
   RecruitingArtifactRef,
   RecruitingAssessmentSourceRef,
   RecruitingCandidate,
+  RecruitingCandidateFeedbackSelection,
   RecruitingCandidateReport,
   RecruitingCriterionExpression,
   RecruitingCrmCandidateSync,
@@ -77,10 +78,11 @@ export type CandidateDiscussionContext = Pick<
   roleId?: string;
   roleRevisionId?: string;
   candidateKey?: string;
+  candidateRevision?: number;
 };
 
 export type CandidateFeedback = {
-  choice: "good_example" | "not_fit" | "skip";
+  choice: RecruitingCandidateFeedbackSelection["choice"];
   reason: string;
   recipientBotId?: string;
 };
@@ -133,6 +135,7 @@ function CandidateFeedbackForm({
   const [pending, setPending] = useState(false);
   const [failed, setFailed] = useState(false);
   const [sent, setSent] = useState(false);
+  const reasonRequired = choice === "good_example" || choice === "not_fit";
   const scope = useRef({ active: true, busy: false, generation: 0 });
   const attempt = useRef<
     (CandidateFeedback & { candidate: CandidateDiscussionContext; clientNonce: string }) | null
@@ -158,12 +161,7 @@ function CandidateFeedbackForm({
     setFailed(false);
   }
   async function submit() {
-    if (
-      scope.current.busy ||
-      recipientUnavailable ||
-      !choice ||
-      (choice !== "skip" && !reason.trim())
-    )
+    if (scope.current.busy || recipientUnavailable || !choice || (reasonRequired && !reason.trim()))
       return;
     const generation = scope.current.generation;
     if (
@@ -269,12 +267,21 @@ function CandidateFeedbackForm({
             <NativeSelectOption value="skip">
               <Trans>Skip for now</Trans>
             </NativeSelectOption>
+            <NativeSelectOption value="hold">
+              <Trans>Pause consideration</Trans>
+            </NativeSelectOption>
+            <NativeSelectOption value="pass">
+              <Trans>Stop considering</Trans>
+            </NativeSelectOption>
+            <NativeSelectOption value="resume">
+              <Trans>Resume consideration</Trans>
+            </NativeSelectOption>
           </NativeSelect>
           <Textarea
             className="text-base md:text-base"
             aria-label={t`Reason`}
             placeholder={t`Reason`}
-            required={choice === "good_example" || choice === "not_fit"}
+            required={reasonRequired}
             value={reason}
             onChange={(event) => {
               edited();
@@ -285,7 +292,7 @@ function CandidateFeedbackForm({
             size="sm"
             type="submit"
             disabled={
-              pending || recipientUnavailable || !choice || (choice !== "skip" && !reason.trim())
+              pending || recipientUnavailable || !choice || (reasonRequired && !reason.trim())
             }
           >
             {pending ? <Trans>Sending…</Trans> : <Trans>Send feedback</Trans>}
@@ -370,6 +377,12 @@ function FeedbackHistory({
               <Trans>Not a fit</Trans>
             ) : record.choice === "skip" ? (
               <Trans>Skip for now</Trans>
+            ) : record.choice === "hold" ? (
+              <Trans>Pause consideration</Trans>
+            ) : record.choice === "pass" ? (
+              <Trans>Stop considering</Trans>
+            ) : record.choice === "resume" ? (
+              <Trans>Resume consideration</Trans>
             ) : null}
             {record.choice ? " · " : null}
             <time dateTime={record.createdAt}>{new Date(record.createdAt).toLocaleString()}</time>
@@ -399,6 +412,22 @@ function FeedbackHistory({
         </Button>
       ) : null}
     </section>
+  );
+}
+
+function CandidateDecision({ decision }: Pick<RecruitingCandidate, "decision">) {
+  if (!decision) return null;
+  return (
+    <span className="whitespace-nowrap text-xs font-normal text-muted-foreground">
+      {" · "}
+      {decision === "hold" ? (
+        <Trans>On hold</Trans>
+      ) : decision === "pass" ? (
+        <Trans>Not pursuing</Trans>
+      ) : (
+        <Trans>Consideration resumed</Trans>
+      )}
+    </span>
   );
 }
 
@@ -2157,6 +2186,7 @@ function RecruitingWorkspace({
     roleId,
     roleRevisionId,
     candidateRequestFilters,
+    feedbackRefresh,
     workspaceSnapshot,
     threadId,
     denyAccess,
@@ -3386,6 +3416,7 @@ function RecruitingWorkspace({
                                 </div>
                                 <p className="text-xs text-muted-foreground">
                                   {workspace?.role.title}
+                                  <CandidateDecision decision={candidate.decision} />
                                 </p>
                                 {candidate.title || candidate.company ? (
                                   <p>
@@ -3477,7 +3508,10 @@ function RecruitingWorkspace({
                                         : t`Unnamed candidate`)}
                                   </Button>
                                 </th>
-                                <td className="py-2 pe-3">{workspace?.role.title}</td>
+                                <td className="py-2 pe-3">
+                                  {workspace?.role.title}
+                                  <CandidateDecision decision={candidate.decision} />
+                                </td>
                                 <td className="py-2 pe-3">{candidate.title ?? "—"}</td>
                                 <td className="py-2 pe-3">{candidate.company ?? "—"}</td>
                                 <td className="py-2 pe-3">{candidate.location ?? "—"}</td>
@@ -3849,6 +3883,7 @@ function RecruitingWorkspace({
                 <DialogTitle className="break-words">
                   {selection.name ??
                     (showDiagnostics ? selection.candidateKey : t`Unnamed candidate`)}
+                  <CandidateDecision decision={selection.decision} />
                 </DialogTitle>
                 <DialogClose
                   ref={candidateClose}
@@ -3895,6 +3930,7 @@ function RecruitingWorkspace({
                     roleId: workspace.role.id,
                     roleRevisionId: workspace.revision.id,
                     candidateKey: selection.candidateKey,
+                    candidateRevision: selection.revision,
                     name: selection.name,
                     title: selection.title,
                     company: selection.company,

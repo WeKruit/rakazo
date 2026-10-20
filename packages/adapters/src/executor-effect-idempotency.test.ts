@@ -23,6 +23,8 @@ import {
   claimRecruitingResearchReadEffect,
   IsolationError,
   Prisma,
+  prepareNativeRecruitingCandidateDecision,
+  RecruitingConflictError,
   RecruitingSourceValidationError,
   recruitingResearchSnapshot,
   settleUncertainRecruitingResearchAction,
@@ -85,6 +87,7 @@ vi.mock("@rakazo/db", async (importOriginal) => ({
   claimRecruitingResearchAction: vi.fn(),
   claimRecruitingResearchReadEffect: vi.fn(),
   settleUncertainRecruitingResearchAction: vi.fn(),
+  prepareNativeRecruitingCandidateDecision: vi.fn(),
 }));
 vi.mock("./recruiting-feedback.js", async (importOriginal) => ({
   ...(await importOriginal<typeof RecruitingFeedbackModule>()),
@@ -343,7 +346,7 @@ function fixture(
     externalEffect,
     artifact: { findFirst: vi.fn(), findMany: vi.fn(async () => []) },
   };
-  const pauseRunForInput = vi.fn(async () => {
+  const pauseRunForInput = vi.fn<ThreadEvents["pauseRunForInput"]>(async () => {
     run.status = "waiting_input";
     return true;
   });
@@ -2483,6 +2486,158 @@ describe("native recruiting feedback effect dispatch", () => {
       expect(f.effects.filter((effect) => effect.kind === "recruiting_feedback")).toHaveLength(1);
       expect(f.memoryCommit).not.toHaveBeenCalled();
       expect(f.semanticSave).not.toHaveBeenCalled();
+    },
+  );
+
+  it.each(["new", "executing recovery"])(
+    "returns the atomic candidate decision receipt without completing it twice: %s",
+    async (mode) => {
+      const f = fixture(`run-candidate-decision-${mode}`);
+      const decision = {
+        target: "candidate",
+        operation: "hold",
+        roleId: "role-1",
+        expectedRoleRevision: 1,
+        candidateKeys: ["avery"],
+        candidateRevisions: [{ candidateKey: "avery", expectedRevision: 0 }],
+        summary: "Pause consideration",
+        intent: { basis: "direct", quote: "Hold Avery for this role" },
+        sourceRefs: [],
+      } satisfies RecruitingFeedbackInput;
+      const receipt = {
+        feedback: decision,
+        source: { ...source, quote: decision.intent.quote },
+        workspace: null,
+        status: "recorded" as const,
+      };
+      if (mode === "executing recovery")
+        f.effects.push({
+          id: "interrupted-decision",
+          spaceId: "space-1",
+          runId: f.runData.id,
+          kind: "recruiting_feedback",
+          idempotencyKey: toolEffectIdempotencyKey(f.runData.id, "recruiting_feedback", decision),
+          status: "executing",
+          request: decision,
+        });
+      vi.mocked(executeRecruitingFeedback).mockImplementation(
+        async (_deps, _trusted, _raw, _context, options) => {
+          expect(options?.mutation).toMatchObject({
+            effectRequest: decision,
+            leaseOwner: "worker-1",
+            threadId: f.runData.threadId,
+          });
+          const effect = f.effects.find((item) => item.id === options?.mutation?.effectId)!;
+          expect(effect.status).toBe("executing");
+          Object.assign(effect, { status: "completed", result: receipt });
+          return receipt;
+        },
+      );
+      f.setCalls([
+        { name: "recruiting_feedback", args: decision, executionId: "candidate-decision" },
+      ]);
+      await f.run();
+      await f.run();
+      expect(f.results).toEqual([receipt, receipt]);
+      expect(executeRecruitingFeedback).toHaveBeenCalledOnce();
+      expect(f.effects).toEqual([
+        expect.objectContaining({ status: "completed", result: receipt }),
+      ]);
+      expect(f.prisma.externalEffect.updateMany).not.toHaveBeenCalledWith(
+        expect.objectContaining({ data: expect.objectContaining({ result: receipt }) }),
+      );
+    },
+  );
+
+  it.each(["valid", "stale"])(
+    "keeps the original decision request while preparing a %s trusted approval",
+    async (mode) => {
+      const f = fixture(`run-decision-approval-${mode}`);
+      const decision = {
+        target: "candidate",
+        operation: "hold",
+        roleId: "internal-role",
+        expectedRoleRevision: 1,
+        candidateKeys: ["internal-candidate"],
+        candidateRevisions: [{ candidateKey: "internal-candidate", expectedRevision: 0 }],
+        summary: "Pause consideration",
+        intent: { basis: "direct", quote: "Hold Avery" },
+        sourceRefs: [],
+      } satisfies RecruitingFeedbackInput;
+      const originalRequest = JSON.stringify(decision);
+      f.prisma.actionApprovalRule.findMany.mockResolvedValue([
+        { effect: "require_approval", matchKind: "tool", matchValue: "recruiting_feedback" },
+      ]);
+      vi.mocked(prepareNativeRecruitingCandidateDecision).mockReset();
+      if (mode === "stale")
+        vi.mocked(prepareNativeRecruitingCandidateDecision).mockRejectedValue(
+          new RecruitingConflictError(),
+        );
+      else
+        vi.mocked(prepareNativeRecruitingCandidateDecision).mockResolvedValue({
+          candidateNames: ["Example Avery"],
+          roleTitle: "Engineer",
+          operation: "hold",
+        });
+      f.setCalls([
+        { name: "recruiting_feedback", args: decision, executionId: "decision-approval" },
+      ]);
+      await f.run();
+      expect(prepareNativeRecruitingCandidateDecision).toHaveBeenCalledExactlyOnceWith(
+        f.prisma,
+        expect.objectContaining({ spaceId: "space-1", userId: "user-1" }),
+        expect.objectContaining({
+          runId: f.runData.id,
+          threadId: f.runData.threadId,
+          botId: f.runData.botId,
+          leaseOwner: "worker-1",
+        }),
+        decision,
+      );
+      expect(JSON.stringify(f.effects[0]?.request)).toBe(originalRequest);
+      expect(executeRecruitingFeedback).not.toHaveBeenCalled();
+      if (mode === "stale") {
+        expect(f.pauseRunForInput).not.toHaveBeenCalled();
+        expect(f.results).toEqual([expect.objectContaining({ code: "CONFLICT" })]);
+      } else {
+        const block = f.pauseRunForInput.mock.calls[0]![0].blocks.at(-1)!;
+        expect(block).toMatchObject({
+          kind: "ask",
+          text: "Review consideration change",
+          detail: "Candidates: Example Avery\nRole: Engineer\n\nPause consideration",
+        });
+        expect(JSON.stringify(block)).not.toContain("internal-");
+      }
+    },
+  );
+
+  it.each(["hold", "pass", "resume"] as const)(
+    "clarifies inferred %s before an existing ask rule without writing or creating a card",
+    async (operation) => {
+      const f = fixture(`run-inferred-consideration-${operation}`);
+      f.prisma.actionApprovalRule.findMany.mockResolvedValue([
+        { effect: "require_approval", matchKind: "tool", matchValue: "recruiting_feedback" },
+      ]);
+      const input = {
+        target: "candidate",
+        operation,
+        roleId: "internal-role",
+        expectedRoleRevision: 1,
+        candidateKeys: ["internal-candidate"],
+        candidateRevisions: [{ candidateKey: "internal-candidate", expectedRevision: 0 }],
+        summary: "Ambiguous feedback",
+        intent: { basis: "inferred", quote: "Review Avery" },
+        sourceRefs: [],
+      } satisfies RecruitingFeedbackInput;
+      f.setCalls([
+        { name: "recruiting_feedback", args: input, executionId: "inferred-consideration" },
+      ]);
+      await f.run();
+      expect(f.results).toEqual([{ status: "needs_clarification" }]);
+      expect(f.pauseRunForInput).not.toHaveBeenCalled();
+      expect(executeRecruitingFeedback).not.toHaveBeenCalled();
+      expect(f.effects).toEqual([]);
+      expect(f.memoryCommit).not.toHaveBeenCalled();
     },
   );
 

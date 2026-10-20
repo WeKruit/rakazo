@@ -32,6 +32,20 @@ export function buildApprovalAskBlock(
       typeof args.shortlisted !== "boolean")
   )
     throw new Error("Shortlist approval requires a verified candidate, role and action.");
+  const considerationOperation =
+    toolName === "recruiting_feedback" &&
+    (args.operation === "hold" || args.operation === "pass" || args.operation === "resume")
+      ? args.operation
+      : undefined;
+  if (
+    considerationOperation &&
+    (!Array.isArray(args.candidateNames) ||
+      args.candidateNames.length === 0 ||
+      args.candidateNames.some((name) => typeof name !== "string" || !name.trim()) ||
+      typeof args.roleTitle !== "string" ||
+      !args.roleTitle.trim())
+  )
+    throw new Error("Consideration approval requires verified candidates, role and action.");
   const crmOperation = options?.crmOperation;
   const oneTimeOnly = Boolean(crmOperation || options?.oneTimeOnly);
   const recruitingApproval = !crmOperation && toolName === "recruiting_request_approval";
@@ -60,6 +74,7 @@ export function buildApprovalAskBlock(
     preference,
     nativeMemory,
     crmOperation,
+    considerationOperation,
   );
   const safeDetail = detail ? redactSecrets(detail, secrets) : undefined;
   return {
@@ -71,13 +86,15 @@ export function buildApprovalAskBlock(
           ? "Review routine change"
           : shortlist
             ? "Review shortlist change"
-            : crmOperation === "crm_update_candidate_stage"
-              ? "Review CRM stage change"
-              : crmOperation === "crm_append_candidate_note"
-                ? "Review CRM note"
-                : toolName === "create_space" || recruitingApproval
-                  ? `${summary}?`
-                  : `Review before ${summary}`,
+            : considerationOperation
+              ? "Review consideration change"
+              : crmOperation === "crm_update_candidate_stage"
+                ? "Review CRM stage change"
+                : crmOperation === "crm_append_candidate_note"
+                  ? "Review CRM note"
+                  : toolName === "create_space" || recruitingApproval
+                    ? `${summary}?`
+                    : `Review before ${summary}`,
         secrets,
       ),
       MAX_APPROVAL_SUMMARY_LENGTH,
@@ -85,6 +102,7 @@ export function buildApprovalAskBlock(
     detail:
       safeDetail &&
       !scheduleUpdate &&
+      !considerationOperation &&
       !recruitingApproval &&
       !preference &&
       !nativeMemory &&
@@ -152,6 +170,7 @@ function formatApprovalDetail(
   preference?: RecruitingPreferenceFeedbackInput,
   nativeMemory = false,
   crmOperation?: CrmApprovalOperation,
+  considerationOperation?: "hold" | "pass" | "resume",
 ): string | undefined {
   const lines: string[] = [];
   if (reviewReason?.trim()) {
@@ -175,6 +194,17 @@ function formatApprovalDetail(
       `Role: ${args.roleTitle}`,
       "",
       args.shortlisted ? "Add to shortlist" : "Remove from shortlist",
+    ].join("\n");
+  if (considerationOperation)
+    return [
+      `Candidates: ${(args.candidateNames as string[]).join(", ")}`,
+      `Role: ${args.roleTitle}`,
+      "",
+      {
+        hold: "Pause consideration",
+        pass: "Stop considering",
+        resume: "Resume consideration",
+      }[considerationOperation],
     ].join("\n");
   if (crmOperation) {
     return [

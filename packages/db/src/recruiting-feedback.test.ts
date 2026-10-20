@@ -5,10 +5,17 @@ import type { PrismaClient } from "./client.js";
 import {
   authorizeRecruitingFeedbackMessage,
   authorizeRecruitingMemoryCommit,
+  executeNativeRecruitingCandidateDecision,
   listRecruitingFeedback,
+  prepareNativeRecruitingCandidateDecision,
   readRecruitingFeedbackContext,
 } from "./recruiting.js";
 import { IsolationError } from "./scope.js";
+
+vi.mock("./events.js", async (load) => ({
+  ...(await load<typeof import("./events.js")>()),
+  appendEventInTransaction: vi.fn(async () => ({})),
+}));
 
 const actor: Actor = {
   spaceId: "space",
@@ -534,6 +541,474 @@ describe("native recruiting feedback records", () => {
       authorizeRecruitingFeedbackMessage(f.tx as never, actor, "thread", selection),
     ).rejects.toThrow(IsolationError);
   });
+  it("applies only the selected role-local hold and restore with candidate CAS", async () => {
+    const f = fixture();
+    const updateMany = vi.fn(async (_query: unknown) => ({ count: 1 }));
+    Object.assign(f.tx.recruitingCandidate, { updateMany });
+    f.tx.recruitingCandidate.findMany.mockImplementation(
+      async ({ where }) =>
+        where.candidateKey.in.map((candidateKey) => ({
+          candidateKey,
+          consideration: null,
+          revision: candidateKey === "avery" ? 2 : 0,
+        })) as never,
+    );
+    const held = {
+      ...selection,
+      choice: "hold",
+      candidateRevisions: [{ candidateKey: "avery", expectedRevision: 2 }],
+    };
+    f.source.blocks = [
+      { kind: "text", text: "Hold Avery for this role", recruitingFeedback: held },
+    ];
+    await authorizeRecruitingFeedbackMessage(f.tx as never, actor, "thread", held, f.source.id);
+    expect(updateMany).toHaveBeenCalledExactlyOnceWith({
+      where: { roleId: "role", candidateKey: "avery", revision: 2 },
+      data: {
+        revision: { increment: 1 },
+        consideration: expect.objectContaining({
+          operation: "hold",
+          source: expect.objectContaining({
+            messageId: f.source.id,
+            threadId: f.source.threadId,
+            seq: f.source.seq,
+            quote: "Hold Avery for this role",
+            actor: { userId: actor.userId, spaceId: actor.spaceId },
+          }),
+        }),
+      },
+    });
+    const resumed = {
+      ...held,
+      choice: "resume",
+      candidateRevisions: [{ candidateKey: "avery", expectedRevision: 3 }],
+    };
+    const newer = {
+      ...f.source,
+      id: "newer",
+      seq: 2,
+      blocks: [{ kind: "text", text: "Resume Avery for this role", recruitingFeedback: resumed }],
+    };
+    f.tx.message.findFirst.mockResolvedValue(newer);
+    f.tx.recruitingCandidate.findMany.mockResolvedValue([
+      { candidateKey: "avery", revision: 3, consideration: null },
+    ] as never);
+    await authorizeRecruitingFeedbackMessage(f.tx as never, actor, "thread", resumed, newer.id);
+    expect(updateMany).toHaveBeenLastCalledWith({
+      where: { roleId: "role", candidateKey: "avery", revision: 3 },
+      data: {
+        revision: { increment: 1 },
+        consideration: expect.objectContaining({
+          operation: "resume",
+          source: expect.objectContaining({ messageId: newer.id }),
+        }),
+      },
+    });
+    f.tx.recruitingCandidate.findMany.mockResolvedValue([
+      { candidateKey: "avery", revision: 4, consideration: null },
+    ] as never);
+    await expect(
+      authorizeRecruitingFeedbackMessage(f.tx as never, actor, "thread", resumed, newer.id),
+    ).rejects.toThrow("Recruiting revision changed");
+    expect(updateMany).toHaveBeenCalledTimes(2);
+  });
+
+  it("rejects an older intent from another thread even with the latest candidate revision", async () => {
+    const f = fixture();
+    const current = {
+      ...selection,
+      choice: "hold",
+      candidateRevisions: [{ candidateKey: "avery", expectedRevision: 4 }],
+    };
+    f.source.createdAt = new Date("2026-10-18T01:00:00Z");
+    f.source.seq = 100;
+    f.source.blocks = [{ kind: "text", text: "Hold Avery", recruitingFeedback: current }];
+    const newer = {
+      ...f.source,
+      id: "new-group-human",
+      threadId: "another-thread",
+      seq: 1,
+      createdAt: new Date("2026-10-18T02:00:00Z"),
+      blocks: [
+        {
+          kind: "text",
+          text: "Resume Avery",
+          recruitingFeedback: {
+            ...current,
+            choice: "resume",
+            candidateRevisions: [{ candidateKey: "avery", expectedRevision: 3 }],
+          },
+        },
+      ],
+    };
+    f.tx.message.findMany.mockResolvedValue([f.source, newer]);
+    f.tx.recruitingCandidate.findMany.mockResolvedValue([
+      {
+        candidateKey: "avery",
+        revision: 4,
+        consideration: {
+          operation: "resume",
+          source: {
+            messageId: newer.id,
+            threadId: newer.threadId,
+            seq: newer.seq,
+            createdAt: newer.createdAt.toISOString(),
+            quote: "Resume Avery",
+            actor: { userId: actor.userId, spaceId: actor.spaceId },
+          },
+        },
+      },
+    ] as never);
+    const updateMany = vi.fn(async () => ({ count: 1 }));
+    Object.assign(f.tx.recruitingCandidate, { updateMany });
+    await expect(
+      authorizeRecruitingFeedbackMessage(f.tx as never, actor, "thread", current, f.source.id),
+    ).rejects.toThrow("Recruiting revision changed");
+    expect(updateMany).not.toHaveBeenCalled();
+  });
+
+  it.each(["chat", "authored form"])(
+    "completes an executing native %s decision atomically and replays its receipt after a later restore",
+    async (mode) => {
+      const f = fixture();
+      const feedback = {
+        target: "candidate",
+        operation: "hold",
+        roleId: "role",
+        expectedRoleRevision: 1,
+        summary: "Pause consideration",
+        intent: { basis: "direct", quote: "Hold Avery for this role" },
+        sourceRefs: [],
+        candidateKeys: ["avery"],
+        candidateRevisions: [{ candidateKey: "avery", expectedRevision: 0 }],
+      };
+      f.source.blocks = [
+        {
+          kind: "text",
+          text: feedback.intent.quote,
+          ...(mode === "authored form"
+            ? {
+                recruitingFeedback: {
+                  ...selection,
+                  choice: "hold",
+                  candidateRevisions: feedback.candidateRevisions,
+                },
+              }
+            : {}),
+        },
+      ];
+      const run = await f.tx.run.findFirst({});
+      f.tx.run.findFirst.mockResolvedValue({
+        ...run,
+        leaseOwner: "worker",
+        leaseFence: 2,
+        leaseExpiresAt: new Date(Date.now() + 60_000),
+      } as never);
+      let revision = mode === "authored form" ? 1 : 0;
+      let consideration: unknown =
+        mode === "authored form"
+          ? {
+              operation: "hold",
+              source: {
+                messageId: f.source.id,
+                threadId: f.source.threadId,
+                seq: f.source.seq,
+                createdAt: f.source.createdAt.toISOString(),
+                quote: feedback.intent.quote,
+                actor: { userId: actor.userId, spaceId: actor.spaceId },
+              },
+            }
+          : null;
+      f.tx.recruitingCandidate.findMany.mockImplementation(
+        async () => [{ candidateKey: "avery", revision, consideration }] as never,
+      );
+      const updateMany = vi.fn(async ({ data }: { data: { consideration: unknown } }) => {
+        revision++;
+        consideration = data.consideration;
+        return { count: 1 };
+      });
+      Object.assign(f.tx.recruitingCandidate, { updateMany });
+      const effect = {
+        id: "decision-effect",
+        kind: "recruiting_feedback",
+        spaceId: actor.spaceId,
+        runId: "run",
+        status: "executing",
+        request: feedback,
+        result: null as unknown,
+      };
+      f.tx.externalEffect.findFirst.mockResolvedValue(effect as never);
+      const complete = vi.fn(async ({ data }: { data: object }) => {
+        Object.assign(effect, data);
+        return { count: 1 };
+      });
+      Object.assign(f.tx.externalEffect, { updateMany: complete });
+      const trusted = {
+        runId: "run",
+        threadId: "thread",
+        botId: "bot",
+        sourceMessageId: "human",
+        leaseOwner: "worker",
+        leaseFence: 2,
+        effectId: effect.id,
+        effectRequest: feedback,
+      };
+      const result = await executeNativeRecruitingCandidateDecision(
+        f.prisma,
+        actor,
+        trusted,
+        feedback,
+      );
+      expect(result).toMatchObject({
+        status: mode === "authored form" ? "already_recorded" : "recorded",
+        feedback,
+      });
+      expect(revision).toBe(1);
+      expect(effect.status).toBe("completed");
+      revision = 2; // A newer human restore has already committed.
+      consideration = { ...(consideration as object), operation: "resume" };
+      f.tx.run.findFirst.mockResolvedValue({ ...run, status: "cancelled" } as never);
+      await expect(
+        executeNativeRecruitingCandidateDecision(f.prisma, actor, trusted, feedback),
+      ).resolves.toEqual(result);
+      expect(updateMany).toHaveBeenCalledTimes(mode === "authored form" ? 0 : 1);
+      expect(complete).toHaveBeenCalledOnce();
+    },
+  );
+
+  it.each(["valid", "stale", "missing name", "blank name"])(
+    "prepares only verified candidate names for a %s decision approval",
+    async (boundary) => {
+      const f = fixture();
+      const feedback = {
+        target: "candidate",
+        operation: "hold",
+        roleId: "role",
+        expectedRoleRevision: 1,
+        summary: "Pause consideration",
+        intent: { basis: "direct", quote },
+        sourceRefs: [],
+        candidateKeys: ["avery"],
+        candidateRevisions: [
+          { candidateKey: "avery", expectedRevision: boundary === "stale" ? 1 : 0 },
+        ],
+      };
+      const run = await f.tx.run.findFirst({});
+      f.tx.run.findFirst.mockResolvedValue({
+        ...run,
+        leaseOwner: "worker",
+        leaseFence: 2,
+        leaseExpiresAt: new Date(Date.now() + 60_000),
+      } as never);
+      f.tx.recruitingCandidate.findMany.mockResolvedValue([
+        { candidateKey: "avery", consideration: null, revision: 0 },
+      ] as never);
+      f.tx.$queryRaw.mockResolvedValue([
+        {
+          id: "thread",
+          name:
+            boundary === "missing name" ? null : boundary === "blank name" ? "  " : "Example Avery",
+          sourcePageId: null,
+          profileSourcePageIds: [],
+        },
+      ] as never);
+      const updateMany = vi.fn();
+      Object.assign(f.tx.recruitingCandidate, { updateMany });
+      const preflight = prepareNativeRecruitingCandidateDecision(
+        f.prisma,
+        actor,
+        {
+          runId: "run",
+          threadId: "thread",
+          botId: "bot",
+          sourceMessageId: "human",
+          leaseOwner: "worker",
+          leaseFence: 2,
+        },
+        feedback,
+      );
+      if (boundary === "valid")
+        await expect(preflight).resolves.toEqual({
+          candidateNames: ["Example Avery"],
+          roleTitle: "Engineer",
+          operation: "hold",
+        });
+      else await expect(preflight).rejects.toThrow();
+      expect(updateMany).not.toHaveBeenCalled();
+    },
+  );
+
+  it.each(["cancelled", "expired", "foreign-bot", "foreign-role", "stale", "race", "inferred"])(
+    "rejects native decision boundary %s",
+    async (boundary) => {
+      const f = fixture();
+      const feedback = {
+        target: "candidate",
+        operation: "pass",
+        roleId: boundary === "foreign-role" ? "other" : "role",
+        expectedRoleRevision: 1,
+        summary: "Stop considering",
+        intent: { basis: boundary === "inferred" ? "inferred" : "direct", quote },
+        sourceRefs: [],
+        candidateKeys: ["avery"],
+        candidateRevisions: [
+          { candidateKey: "avery", expectedRevision: boundary === "stale" ? 1 : 0 },
+        ],
+      };
+      const run = await f.tx.run.findFirst({});
+      f.tx.run.findFirst.mockResolvedValue({
+        ...run,
+        status: boundary === "cancelled" ? "cancelled" : "running",
+        leaseOwner: "worker",
+        leaseFence: 2,
+        leaseExpiresAt: new Date(Date.now() + (boundary === "expired" ? -60_000 : 60_000)),
+      } as never);
+      f.tx.recruitingCandidate.findMany.mockResolvedValue([
+        { candidateKey: "avery", consideration: null, revision: 0 },
+      ] as never);
+      const updateMany = vi.fn(async () => ({ count: 0 }));
+      Object.assign(f.tx.recruitingCandidate, { updateMany });
+      f.tx.externalEffect.findFirst.mockResolvedValue({
+        id: "effect",
+        status: "executing",
+        request: feedback,
+      } as never);
+      await expect(
+        executeNativeRecruitingCandidateDecision(
+          f.prisma,
+          actor,
+          {
+            runId: "run",
+            threadId: "thread",
+            botId: boundary === "foreign-bot" ? "foreign" : "bot",
+            sourceMessageId: "human",
+            leaseOwner: "worker",
+            leaseFence: 2,
+            effectId: "effect",
+            effectRequest: feedback,
+          },
+          feedback,
+        ),
+      ).rejects.toThrow();
+      if (boundary === "race") expect(updateMany).toHaveBeenCalledOnce();
+      else expect(updateMany).not.toHaveBeenCalled();
+    },
+  );
+
+  it.each([["avery"], ["blair"], ["avery", "blair"]])(
+    "applies an explicit pass only to the requested subset %j",
+    async (...keys) => {
+      const f = fixture();
+      const candidateKeys = keys as string[];
+      const selected = {
+        ...selection,
+        choice: "pass",
+        candidateKeys,
+        candidateRevisions: candidateKeys.map((candidateKey) => ({
+          candidateKey,
+          expectedRevision: 3,
+        })),
+      };
+      f.source.blocks = [
+        {
+          kind: "text",
+          text: "Stop considering only these people for this role",
+          recruitingFeedback: selected,
+        },
+      ];
+      f.tx.recruitingCandidate.findMany.mockImplementation(
+        async ({ where }) =>
+          where.candidateKey.in.map((candidateKey) => ({
+            candidateKey,
+            revision: 3,
+            consideration: null,
+          })) as never,
+      );
+      const updateMany = vi.fn(async (_query: unknown) => ({ count: 1 }));
+      Object.assign(f.tx.recruitingCandidate, { updateMany });
+      await authorizeRecruitingFeedbackMessage(
+        f.tx as never,
+        actor,
+        "thread",
+        selected,
+        f.source.id,
+      );
+      expect(
+        updateMany.mock.calls.map(
+          ([input]) => (input as { where: { candidateKey: string } }).where.candidateKey,
+        ),
+      ).toEqual(candidateKeys);
+    },
+  );
+
+  it("omits deleted human proof from history without losing its scan cursor", async () => {
+    const f = fixture();
+    const feedback = {
+      target: "candidate",
+      operation: "hold",
+      roleId: "role",
+      expectedRoleRevision: 1,
+      candidateKeys: ["avery"],
+      candidateRevisions: [{ candidateKey: "avery", expectedRevision: 0 }],
+      summary: "Pause consideration",
+      intent: { basis: "direct", quote },
+      sourceRefs: [],
+    };
+    const source = {
+      id: "human-message:human",
+      kind: "original_material",
+      anchor: { kind: "message", messageId: "human", locator: "blocks[0].text" },
+      readState: "read",
+      readAt: "2026-10-18T00:00:00.000Z",
+      quote,
+    };
+    const retained = {
+      id: "retained",
+      createdAt: new Date("2026-10-18T01:00:00Z"),
+      request: feedback,
+      result: { feedback, source, workspace: { revision: { id: "revision" } } },
+    };
+    const removed = {
+      ...retained,
+      id: "deleted-proof",
+      createdAt: new Date("2026-10-18T02:00:00Z"),
+      result: {
+        ...retained.result,
+        source: { ...source, anchor: { ...source.anchor, messageId: "deleted-human" } },
+      },
+    };
+    f.tx.externalEffect.findMany
+      .mockResolvedValueOnce([removed, retained] as never)
+      .mockResolvedValueOnce([retained] as never);
+    f.tx.message.findMany.mockImplementation(async (query) =>
+      (query as { where: { id?: unknown } }).where.id ? [f.source] : [],
+    );
+    const first = await listRecruitingFeedback(f.prisma, actor, { roleId: "role", limit: 1 });
+    expect(first).toEqual({ feedback: [], nextCursor: removed.id });
+    f.tx.externalEffect.findFirst.mockResolvedValueOnce(removed as never);
+    const second = await listRecruitingFeedback(f.prisma, actor, {
+      roleId: "role",
+      limit: 1,
+      before: first.nextCursor!,
+    });
+    expect(second.feedback.map((record) => record.id)).toEqual([retained.id]);
+    expect(second.nextCursor).toBeNull();
+  });
+
+  it.each(["not_fit", "skip", "good_example"])(
+    "keeps %s review feedback separate from hold/pass decisions",
+    async (choice) => {
+      const f = fixture();
+      const updateMany = vi.fn();
+      Object.assign(f.tx.recruitingCandidate, { updateMany });
+      await authorizeRecruitingFeedbackMessage(f.tx as never, actor, "thread", {
+        ...selection,
+        choice,
+      });
+      expect(updateMany).not.toHaveBeenCalled();
+    },
+  );
+
   it("merges native form and general feedback with one scope-bound cursor", async () => {
     const f = fixture();
     const form = {

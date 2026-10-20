@@ -430,6 +430,24 @@ export function eventChangesRecruitingPanel(
     );
   if (event.type === "effect.recorded") {
     const result = event.payload.result;
+    if (
+      event.payload.tool === "recruiting_feedback" &&
+      result &&
+      typeof result === "object" &&
+      "status" in result &&
+      result.status === "recorded" &&
+      "feedback" in result
+    ) {
+      const feedback = result.feedback;
+      return (
+        feedback !== null &&
+        typeof feedback === "object" &&
+        "target" in feedback &&
+        feedback.target === "candidate" &&
+        "operation" in feedback &&
+        ["hold", "pass", "resume"].includes(String(feedback.operation))
+      );
+    }
     return (
       (event.payload.tool === "recruiting_role" &&
         event.payload.status === "saved" &&
@@ -1935,6 +1953,15 @@ export function ShellPage() {
       !candidate.candidateKey
     )
       return false;
+    const decision =
+      feedback.choice === "hold" || feedback.choice === "pass" || feedback.choice === "resume";
+    if (
+      decision &&
+      (candidate.candidateRevision === undefined ||
+        !Number.isSafeInteger(candidate.candidateRevision) ||
+        candidate.candidateRevision < 0)
+    )
+      return false;
     if (feedback.recipientBotId && !inGroup) return false;
     if (
       inGroup &&
@@ -1943,12 +1970,14 @@ export function ShellPage() {
       )
     )
       return false;
-    const choice =
-      feedback.choice === "good_example"
-        ? t`Good example`
-        : feedback.choice === "not_fit"
-          ? t`Not a fit`
-          : t`Skip for now`;
+    const choice = {
+      good_example: t`Good example`,
+      not_fit: t`Not a fit`,
+      skip: t`Skip for now`,
+      hold: t`Pause consideration`,
+      pass: t`Stop considering`,
+      resume: t`Resume consideration`,
+    }[feedback.choice];
     const text = `${candidateReferenceText(candidate)}${t`Candidate feedback`}: ${choice}\n\n${feedback.reason}`;
     const receipt = await rpc.threads.followUp({
       ...(inGroup
@@ -1960,6 +1989,16 @@ export function ShellPage() {
         roleRevisionId: candidate.roleRevisionId,
         expectedRoleRevision: candidate.roleVersion,
         candidateKeys: [candidate.candidateKey],
+        ...(decision
+          ? {
+              candidateRevisions: [
+                {
+                  candidateKey: candidate.candidateKey,
+                  expectedRevision: candidate.candidateRevision!,
+                },
+              ],
+            }
+          : {}),
         choice: feedback.choice,
       },
       clientNonce,

@@ -480,6 +480,44 @@ describe("recruiting contracts", () => {
     ).toBe(false);
   });
 
+  it("requires exact candidate revisions for explicit role-local decisions", () => {
+    for (const operation of ["hold", "pass", "resume"]) {
+      const input = {
+        target: "candidate",
+        operation,
+        roleId: "role",
+        expectedRoleRevision: 1,
+        summary: "An explicit human decision",
+        intent: { basis: "direct", quote: "Hold Avery" },
+        sourceRefs: [],
+        candidateKeys: ["avery", "blair"],
+        candidateRevisions: [
+          { candidateKey: "avery", expectedRevision: 0 },
+          { candidateKey: "blair", expectedRevision: 2 },
+        ],
+      };
+      expect(contracts.RecruitingFeedbackInputSchema.safeParse(input).success).toBe(true);
+      expect(
+        contracts.RecruitingFeedbackInputSchema.safeParse({
+          ...input,
+          candidateRevisions: undefined,
+        }).success,
+      ).toBe(false);
+      expect(
+        contracts.RecruitingFeedbackInputSchema.safeParse({
+          ...input,
+          candidateRevisions: [input.candidateRevisions[0]],
+        }).success,
+      ).toBe(false);
+      expect(
+        contracts.RecruitingFeedbackInputSchema.safeParse({
+          ...input,
+          candidateRevisions: [input.candidateRevisions[0], input.candidateRevisions[0]],
+        }).success,
+      ).toBe(false);
+    }
+  });
+
   it("accepts closed semantic feedback inputs without model-selected runtime identity", () => {
     const intent = { basis: "direct", quote: "Always show the complete prompt" };
     const preference = {

@@ -830,33 +830,76 @@ const ScopedFeedback = {
   intent: RecruitingHumanIntentSchema,
   sourceRefs: SourceRefs,
 };
+const CandidateRevisions = z.array(
+  z.strictObject({
+    candidateKey: RecruitingId,
+    expectedRevision: z.number().int().nonnegative(),
+  }),
+);
+function validateCandidateDecision(
+  input: {
+    candidateKeys: string[];
+    candidateRevisions?: { candidateKey: string }[];
+    operation?: string;
+    choice?: string;
+  },
+  ctx: z.RefinementCtx,
+) {
+  const decision = input.operation ?? input.choice;
+  if (!["hold", "pass", "resume"].includes(decision ?? "")) return;
+  const revisions = input.candidateRevisions;
+  if (
+    !revisions ||
+    revisions.length !== input.candidateKeys.length ||
+    new Set(revisions.map((item) => item.candidateKey)).size !== revisions.length ||
+    revisions.some((item) => !input.candidateKeys.includes(item.candidateKey))
+  )
+    ctx.addIssue({
+      code: "custom",
+      path: ["candidateRevisions"],
+      message: "Provide one current revision for every selected candidate",
+    });
+}
 export const RecruitingFeedbackInputSchema = z.discriminatedUnion("target", [
   z.strictObject({ ...ScopedFeedback, target: z.literal("role"), operation: z.literal("revise") }),
   z.strictObject({ ...ScopedFeedback, target: z.literal("round"), operation: z.literal("scope") }),
-  z.strictObject({
-    ...ScopedFeedback,
-    target: z.literal("candidate"),
-    operation: z.literal("review"),
-    candidateKeys: z
-      .array(RecruitingId)
-      .min(1)
-      .refine((keys) => new Set(keys).size === keys.length, "Candidate keys must be unique"),
-  }),
+  z
+    .strictObject({
+      ...ScopedFeedback,
+      target: z.literal("candidate"),
+      operation: z.enum(["review", "hold", "pass", "resume"]),
+      candidateRevisions: CandidateRevisions.optional(),
+      candidateKeys: z
+        .array(RecruitingId)
+        .min(1)
+        .refine((keys) => new Set(keys).size === keys.length, "Candidate keys must be unique"),
+    })
+    .superRefine(validateCandidateDecision),
   RecruitingPreferenceFeedbackSchema,
 ]);
 export type RecruitingFeedbackInput = z.infer<typeof RecruitingFeedbackInputSchema>;
 
-export const RecruitingFeedbackChoiceSchema = z.enum(["good_example", "not_fit", "skip"]);
-export const RecruitingCandidateFeedbackSelectionSchema = z.strictObject({
-  roleId: RecruitingId,
-  roleRevisionId: RecruitingId,
-  expectedRoleRevision: Revision,
-  candidateKeys: z
-    .array(RecruitingId)
-    .min(1)
-    .refine((keys) => new Set(keys).size === keys.length, "Candidate keys must be unique"),
-  choice: RecruitingFeedbackChoiceSchema,
-});
+export const RecruitingFeedbackChoiceSchema = z.enum([
+  "good_example",
+  "not_fit",
+  "skip",
+  "hold",
+  "pass",
+  "resume",
+]);
+export const RecruitingCandidateFeedbackSelectionSchema = z
+  .strictObject({
+    roleId: RecruitingId,
+    roleRevisionId: RecruitingId,
+    expectedRoleRevision: Revision,
+    candidateKeys: z
+      .array(RecruitingId)
+      .min(1)
+      .refine((keys) => new Set(keys).size === keys.length, "Candidate keys must be unique"),
+    choice: RecruitingFeedbackChoiceSchema,
+    candidateRevisions: CandidateRevisions.optional(),
+  })
+  .superRefine(validateCandidateDecision);
 export type RecruitingCandidateFeedbackSelection = z.infer<
   typeof RecruitingCandidateFeedbackSelectionSchema
 >;
@@ -1095,6 +1138,19 @@ export const RecruitingCandidateSourceSchema = RecruitingCandidateSourceReferenc
 });
 export type RecruitingCandidateSource = z.infer<typeof RecruitingCandidateSourceSchema>;
 
+// Server-written business state; this snapshot is never accepted as native tool input.
+export const RecruitingCandidateConsiderationSchema = z.strictObject({
+  operation: z.enum(["hold", "pass", "resume"]),
+  source: z.strictObject({
+    messageId: RecruitingId,
+    threadId: RecruitingId,
+    seq: z.number().int().nonnegative(),
+    createdAt: IsoDate,
+    quote: Text,
+    actor: z.strictObject({ userId: RecruitingId, spaceId: RecruitingId }),
+  }),
+});
+
 export const RecruitingCandidateSchema = z.strictObject({
   latestSource: RecruitingCandidateSourceReferenceSchema.optional(),
   crm: RecruitingCrmCandidateSyncSchema.nullable(),
@@ -1102,6 +1158,7 @@ export const RecruitingCandidateSchema = z.strictObject({
   candidateKey: RecruitingId,
   ...RecruitingCandidateProfileSchema.shape,
   shortlisted: z.boolean(),
+  decision: z.enum(["hold", "pass", "resume"]).nullable(),
   revision: z.number().int().nonnegative(),
   discoveryCount: z.number().int().nonnegative(),
   firstDiscoveredAt: IsoDate.nullable(),

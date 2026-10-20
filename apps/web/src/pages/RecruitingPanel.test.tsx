@@ -354,6 +354,7 @@ function candidateFixture(candidateKey = "candidate-1", assessed = true) {
     evidenceUrls: null as string[] | null,
     issues: [] as string[],
     shortlisted: false,
+    decision: null as RecruitingCandidate["decision"],
     revision: 0,
     discoveryCount: 2,
     firstDiscoveredAt: "2026-01-01T00:00:00Z",
@@ -747,6 +748,7 @@ it("requires an explicit feedback choice and preserves the authored reason witho
       roleVersion: revision.revision,
       roleId: role.id,
       candidateKey: candidate.candidateKey,
+      candidateRevision: candidate.revision,
       roleRevisionId: revision.id,
       name: candidate.name,
       title: null,
@@ -768,6 +770,111 @@ it("requires an explicit feedback choice and preserves the authored reason witho
   expect(api.editCriteria).not.toHaveBeenCalled();
   expect(api.reviseRole).not.toHaveBeenCalled();
   expect(api.update).not.toHaveBeenCalled();
+});
+
+it.each([
+  { choice: "hold", label: "Pause consideration" },
+  { choice: "pass", label: "Stop considering" },
+  { choice: "resume", label: "Resume consideration" },
+] as const)(
+  "sends explicit $label with the current candidate revision and no required reason",
+  async ({ choice, label }) => {
+    const candidate = { ...candidateFixture(), name: "Synthetic Avery", revision: 7 };
+    api.listCandidates.mockResolvedValue(candidatePage([candidate]));
+    const view = await mounted("thread-1", undefined, false);
+    await view.click("Evidence");
+    await view.click(candidate.name);
+    await view.click("Give feedback");
+    expect(
+      view.container.querySelector(`select[aria-label="Feedback"] option[value="${choice}"]`)
+        ?.textContent,
+    ).toBe(label);
+    await changeSelect(view.container, "Feedback", choice);
+    expect(
+      view.container.querySelector<HTMLTextAreaElement>('textarea[aria-label="Reason"]')!.required,
+    ).toBe(false);
+    await view.click("Send feedback");
+    expect(view.feedback).toHaveBeenCalledExactlyOnceWith(
+      expect.objectContaining({
+        roleId: role.id,
+        roleRevisionId: revision.id,
+        roleVersion: revision.revision,
+        candidateKey: candidate.candidateKey,
+        candidateRevision: 7,
+      }),
+      { choice, reason: "" },
+      expect.any(String),
+    );
+    expect(api.setCandidateShortlist).not.toHaveBeenCalled();
+    expect(api.editCriteria).not.toHaveBeenCalled();
+    expect(api.update).not.toHaveBeenCalled();
+  },
+);
+
+it.each([
+  { decision: "hold", label: "On hold" },
+  { decision: "pass", label: "Not pursuing" },
+  { decision: "resume", label: "Consideration resumed" },
+] as const)(
+  "shows saved $label in the existing Cards, Table and detail metadata",
+  async ({ decision, label }) => {
+    const candidate = { ...candidateFixture(), name: "Synthetic Avery", decision };
+    api.listCandidates.mockResolvedValue(candidatePage([candidate]));
+    const view = await mounted("thread-1", undefined, false);
+    await view.click("Evidence");
+    expect(view.container.querySelector("li")?.textContent).toContain(`${role.title} · ${label}`);
+    await view.click("Table");
+    expect(view.container.querySelector("tbody td")?.textContent).toBe(`${role.title} · ${label}`);
+    await view.click(candidate.name);
+    expect(view.container.querySelector('[role="dialog"]')?.textContent).toContain(label);
+    expect(view.feedback).not.toHaveBeenCalled();
+  },
+);
+
+it("reads the saved decision and revision after hold before resuming without an external refresh", async () => {
+  const candidate = {
+    ...candidateFixture("candidate-1", false),
+    name: "Synthetic Avery",
+    revision: 7,
+  };
+  api.listCandidates.mockResolvedValue(candidatePage([candidate]));
+  const view = await mounted("thread-1", undefined, false);
+  await view.click("Evidence");
+  await view.click(candidate.name);
+  await view.click("Give feedback");
+  const reads = api.listCandidates.mock.calls.length;
+  const historyReads = api.listFeedback.mock.calls.length;
+  let finishRead!: (page: ReturnType<typeof candidatePage>) => void;
+  api.listCandidates.mockReturnValueOnce(
+    new Promise((resolve) => {
+      finishRead = resolve;
+    }),
+  );
+  await changeSelect(view.container, "Feedback", "hold");
+  await view.click("Send feedback");
+  expect(api.listCandidates).toHaveBeenCalledTimes(reads + 1);
+  expect(api.listFeedback.mock.calls.length).toBeGreaterThan(historyReads);
+  expect(view.container.querySelector('[role="dialog"]')?.textContent).not.toContain("On hold");
+  const held = { ...candidate, decision: "hold" as const, revision: 8 };
+  await act(async () => finishRead(candidatePage([held])));
+  expect(view.container.querySelector('[role="dialog"]')?.textContent).toContain("On hold");
+  api.listCandidates.mockResolvedValue(
+    candidatePage([{ ...held, decision: "resume", revision: 9 }]),
+  );
+  await changeSelect(view.container, "Feedback", "resume");
+  await view.click("Send feedback");
+  expect(
+    view.feedback.mock.calls.map(([context, feedback]) => [
+      context.candidateRevision,
+      feedback.choice,
+    ]),
+  ).toEqual([
+    [7, "hold"],
+    [8, "resume"],
+  ]);
+  expect(view.container.querySelector('[role="dialog"]')?.textContent).toContain(
+    "Consideration resumed",
+  );
 });
 
 it("reads durable candidate feedback after reopening, including the exact human quote and choice", async () => {

@@ -2428,6 +2428,7 @@ export function createRouter(deps: RouterDeps) {
               context.actor,
               target.threadId,
               input.recruitingFeedback,
+              message.id,
             );
           const runIds: string[] = [];
           const createdRunIds: string[] = [];

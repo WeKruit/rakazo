@@ -58,6 +58,7 @@ import {
   RecruitingApprovalToolInputSchema,
   RecruitingCrmImportInputSchema,
   RecruitingCrmTargetToolInputSchema,
+  RecruitingFeedbackInputSchema,
   RecruitingPreferenceFeedbackSchema,
   RecruitingReplyInputSchema,
   RecruitingResearchToolInputSchema,
@@ -145,6 +146,7 @@ import {
   loadRunHumanSources,
   Prisma,
   parseComputerMode,
+  prepareNativeRecruitingCandidateDecision,
   prepareNativeRecruitingShortlist,
   prepareRecruitingApproval,
   prepareRecruitingCrmBinding,
@@ -4360,7 +4362,22 @@ export function createRunExecutor(deps: ExecutorDeps) {
               : undefined;
           if (researchInput && !researchInput.success)
             return { error: sanitizeConnectorError(researchInput.error, runSecrets) };
+          const candidateOperation =
+            name === "recruiting_feedback" &&
+            args.target === "candidate" &&
+            ["hold", "pass", "resume"].includes(String(args.operation));
+          const decisionInput = candidateOperation
+            ? RecruitingFeedbackInputSchema.safeParse(args)
+            : undefined;
+          if (decisionInput && !decisionInput.success)
+            return { error: sanitizeConnectorError(decisionInput.error, runSecrets) };
+          if (decisionInput?.success && decisionInput.data.intent.basis === "inferred") {
+            // An inferred decision needs clarification, before it can become an approval-ready action.
+            return { status: "needs_clarification" };
+          }
+          const candidateDecision = decisionInput?.success === true;
           const atomicRecruitingMutation =
+            Boolean(candidateDecision) ||
             name === "recruiting_shortlist" ||
             (researchInput?.success === true && researchInput.data.operation === "save_results");
           const researchActor = {
@@ -5874,6 +5891,21 @@ export function createRunExecutor(deps: ExecutorDeps) {
                   : uncertainEffectResult(name);
               }
             }
+            if (candidateDecision) {
+              try {
+                approvalArgs = await prepareNativeRecruitingCandidateDecision(
+                  deps.prisma,
+                  researchActor.actor,
+                  { ...crmContext, sourceMessageId: recruitingSourceMessageId },
+                  args,
+                );
+              } catch (error) {
+                const result = roleError(error);
+                return (await completeEffect(deps, applied!.effect.id, "intended", result))
+                  ? result
+                  : uncertainEffectResult(name);
+              }
+            }
             if (name === "recruiting_shortlist") {
               try {
                 approvalArgs = await prepareNativeRecruitingShortlist(
@@ -6670,9 +6702,20 @@ export function createRunExecutor(deps: ExecutorDeps) {
                         content: args.content as string,
                       },
                     }
-                  : undefined,
+                  : applied && candidateDecision
+                    ? {
+                        mutation: {
+                          effectId: applied.effect.id,
+                          effectRequest: applied.effect.request,
+                          leaseOwner: workerId,
+                          leaseFence: fence,
+                          threadId: run.threadId,
+                        },
+                      }
+                    : undefined,
               );
-              return finish(await deliverRecruitingFeedbackResult(result));
+              const delivered = await deliverRecruitingFeedbackResult(result);
+              return candidateDecision ? delivered : finish(delivered);
             } catch (error) {
               if (error instanceof IsolationError)
                 return finish({ error: "Recruiting feedback or source is unavailable" });

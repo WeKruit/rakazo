@@ -13,10 +13,12 @@ import type {
   RecruitingAssessmentAskInput,
   RecruitingAssessmentSnapshot,
   RecruitingAssessmentSourceRef,
+  RecruitingCandidateFeedbackSelection,
   RecruitingCriterionExpression,
   RecruitingCrmCandidateSync,
   RecruitingCrmImportInput,
   RecruitingCrmTarget,
+  RecruitingFeedbackInput,
   RecruitingFeedbackRecord,
   RecruitingHumanIntent,
   RecruitingMaterialReadPayload,
@@ -56,11 +58,13 @@ import {
   RecruitingArtifactRefSchema,
   RecruitingAssessmentAskInputSchema,
   RecruitingAssessmentSchema,
+  RecruitingCandidateConsiderationSchema,
   RecruitingCandidateFeedbackSelectionSchema,
   RecruitingCandidateOutputSchemaId,
   RecruitingCrmBindingInputSchema,
   RecruitingCrmImportArgsSchema,
   RecruitingCrmImportInputSchema,
+  RecruitingFeedbackChoiceSchema,
   RecruitingFeedbackInputSchema,
   RecruitingFeedbackRecordSchema,
   RecruitingHumanIntentSchema,
@@ -126,8 +130,8 @@ type RoleSnapshot = { role: RecruitingRole; revision: RecruitingRoleRevision };
 export type { RecruitingAssessmentSnapshot } from "@rakazo/contracts";
 
 export class RecruitingConflictError extends Error {
-  constructor() {
-    super("Recruiting revision changed");
+  constructor(message = "Recruiting revision changed") {
+    super(message);
     this.name = "RecruitingConflictError";
   }
 }
@@ -969,7 +973,10 @@ async function requireRunSource(
   return { source: hint, steering, answers };
 }
 
-function compareHumanMessages(left: SourceMessage, right: SourceMessage): number {
+function compareHumanMessages(
+  left: Pick<SourceMessage, "threadId" | "seq" | "createdAt">,
+  right: Pick<SourceMessage, "threadId" | "seq" | "createdAt">,
+): number {
   return left.threadId === right.threadId
     ? left.seq - right.seq
     : left.createdAt.getTime() - right.createdAt.getTime();
@@ -1092,11 +1099,137 @@ function verifiedFeedbackChoice(
   return selected.choice;
 }
 
+function candidateConsideration(actor: Actor, value: Prisma.JsonValue | null) {
+  if (value === null) return null;
+  const state = RecruitingCandidateConsiderationSchema.parse(value);
+  if (state.source.actor.userId !== actor.userId || state.source.actor.spaceId !== actor.spaceId)
+    throw new IsolationError();
+  return state;
+}
+
+async function requireCandidateConsideration(
+  tx: Tx,
+  actor: Actor,
+  roleId: string,
+  candidateKey: string,
+) {
+  const candidate = await tx.recruitingCandidate.findUnique({
+    where: { roleId_candidateKey: { roleId, candidateKey } },
+  });
+  if (!candidate) throw new IsolationError();
+  const state = candidateConsideration(actor, candidate.consideration);
+  if (state?.operation === "hold" || state?.operation === "pass")
+    throw new RecruitingConflictError(
+      state.operation === "hold"
+        ? "Candidate is on hold for this role"
+        : "Candidate is not being pursued for this role",
+    );
+}
+
+async function candidateDecisionTarget(
+  tx: Tx,
+  actor: Actor,
+  roleId: string,
+  keys: readonly string[],
+  revisions: { candidateKey: string; expectedRevision: number }[],
+  operation: "hold" | "pass" | "resume",
+  human: SourceMessage,
+  quote: string,
+  allowRecorded = false,
+) {
+  if (
+    !isNativeHumanMessage(human) ||
+    !(human.blocks as { kind: string; text?: string }[]).some(
+      (block) => block.kind === "text" && block.text?.includes(quote),
+    )
+  )
+    throw new IsolationError();
+  const candidates = await tx.recruitingCandidate.findMany({
+    where: { roleId, candidateKey: { in: [...keys] } },
+    select: { candidateKey: true, revision: true, consideration: true },
+  });
+  if (candidates.length !== keys.length) throw new IsolationError();
+  const existing = new Map(
+    candidates.map((candidate) => [
+      candidate.candidateKey,
+      candidateConsideration(actor, candidate.consideration),
+    ]),
+  );
+  const recorded = candidates.filter((candidate) => {
+    const prior = existing.get(candidate.candidateKey);
+    return prior?.source.messageId === human.id && prior.operation === operation;
+  });
+  if (allowRecorded && recorded.length) {
+    if (recorded.length !== keys.length) throw new RecruitingConflictError();
+    return { candidates, recorded: true };
+  }
+  for (const candidate of candidates) {
+    const expected = revisions.find((item) => item.candidateKey === candidate.candidateKey)!;
+    const prior = existing.get(candidate.candidateKey);
+    if (
+      candidate.revision !== expected.expectedRevision ||
+      (prior &&
+        (prior.source.messageId === human.id ||
+          compareHumanMessages(human, {
+            ...prior.source,
+            createdAt: new Date(prior.source.createdAt),
+          }) <= 0))
+    )
+      throw new RecruitingConflictError();
+  }
+  return { candidates, recorded: false };
+}
+
+async function setCandidateDecisionInTransaction(
+  tx: Tx,
+  actor: Actor,
+  roleId: string,
+  keys: readonly string[],
+  revisions: { candidateKey: string; expectedRevision: number }[],
+  operation: "hold" | "pass" | "resume",
+  human: SourceMessage,
+  quote: string,
+  allowRecorded = false,
+) {
+  const { candidates, recorded } = await candidateDecisionTarget(
+    tx,
+    actor,
+    roleId,
+    keys,
+    revisions,
+    operation,
+    human,
+    quote,
+    allowRecorded,
+  );
+  if (recorded) return "already_recorded" as const;
+  const consideration = RecruitingCandidateConsiderationSchema.parse({
+    operation,
+    source: {
+      messageId: human.id,
+      threadId: human.threadId,
+      seq: human.seq,
+      createdAt: human.createdAt.toISOString(),
+      quote,
+      actor: { userId: actor.userId, spaceId: actor.spaceId },
+    },
+  });
+  for (const candidate of candidates) {
+    const changed = await tx.recruitingCandidate.updateMany({
+      where: { roleId, candidateKey: candidate.candidateKey, revision: candidate.revision },
+      data: { revision: { increment: 1 }, consideration },
+    });
+    if (changed.count !== 1) throw new RecruitingConflictError();
+  }
+  return "recorded" as const;
+}
+
 export async function authorizeRecruitingFeedbackMessage(
   tx: Tx,
   actor: Actor,
   threadId: string,
   untrusted: unknown,
+  messageId?: string,
 ) {
   const selected = RecruitingCandidateFeedbackSelectionSchema.parse(untrusted);
   const thread = await requireThread(tx, actor, threadId);
@@ -1107,6 +1240,36 @@ export async function authorizeRecruitingFeedbackMessage(
     role.currentRevisionId !== selected.roleRevisionId
   )
     throw new RecruitingConflictError();
+  if (selected.choice === "hold" || selected.choice === "pass" || selected.choice === "resume") {
+    const message = messageId
+      ? await tx.message.findFirst({
+          where: { id: messageId, threadId },
+          include: humanMessageInclude,
+        })
+      : null;
+    if (
+      !message ||
+      !isNativeHumanMessage(message) ||
+      verifiedFeedbackChoice(message, role.id, role.revision, selected.candidateKeys) !==
+        selected.choice
+    )
+      throw new IsolationError();
+    const block = MessageBlockSchema.array()
+      .parse(message.blocks)
+      .find((item) => item.kind === "text" && item.recruitingFeedback);
+    if (block?.kind !== "text") throw new IsolationError();
+    await setCandidateDecisionInTransaction(
+      tx,
+      actor,
+      role.id,
+      selected.candidateKeys,
+      selected.candidateRevisions!,
+      selected.choice,
+      message,
+      block.text,
+    );
+    return;
+  }
   const candidates = await tx.recruitingCandidate.findMany({
     where: { roleId: role.id, candidateKey: { in: selected.candidateKeys } },
     select: { candidateKey: true },
@@ -1131,66 +1294,251 @@ export async function readRecruitingFeedbackContext(
   workspace: RoleSnapshot | null;
   threadId: string;
   botId: string;
-  choice?: "good_example" | "not_fit" | "skip";
+  choice?: RecruitingCandidateFeedbackSelection["choice"];
 }> {
+  return prisma.$transaction(async (tx) => {
+    const { message: _message, ...result } = await feedbackContextInTransaction(tx, actor, input);
+    return result;
+  });
+}
+
+async function feedbackContextInTransaction(
+  tx: Tx,
+  actor: Actor,
+  input: Parameters<typeof readRecruitingFeedbackContext>[2],
+  authorized?: Awaited<ReturnType<typeof lockLiveRecruitingRun>>,
+) {
   const intent = RecruitingHumanIntentSchema.parse(input.intent);
   const sourceRefs = RecruitingSourceRefSchema.array().parse(input.sourceRefs);
+  const { run, thread } = authorized ?? (await lockLiveRecruitingRun(tx, actor, input.runId));
+  const { source, message } = await requireCurrentHumanSource(
+    tx,
+    actor,
+    run,
+    input.sourceMessageId,
+    intent.quote,
+  );
+  const workspace = thread.activeRecruitingRoleId
+    ? await roleSnapshot(
+        tx,
+        actor,
+        await requireRole(tx, actor, thread.activeRecruitingRoleId, true),
+      )
+    : null;
+  if (input.roleId !== undefined || input.expectedRoleRevision !== undefined) {
+    if (
+      !input.roleId ||
+      input.expectedRoleRevision === undefined ||
+      workspace?.role.id !== input.roleId
+    )
+      throw new IsolationError();
+    if (workspace.role.revision !== input.expectedRoleRevision) throw new RecruitingConflictError();
+  }
+  await validateSources(tx, actor, sourceRefs);
+  if (input.candidateKeys) {
+    if (
+      !workspace ||
+      !input.candidateKeys.length ||
+      new Set(input.candidateKeys).size !== input.candidateKeys.length
+    )
+      throw new IsolationError();
+    const candidates = await tx.recruitingCandidate.findMany({
+      where: { roleId: workspace.role.id, candidateKey: { in: [...input.candidateKeys] } },
+      select: { candidateKey: true },
+    });
+    if (candidates.length !== input.candidateKeys.length) throw new IsolationError();
+  }
+  let choice: RecruitingCandidateFeedbackSelection["choice"] | undefined;
+  if (intent.basis === "direct") {
+    choice = verifiedFeedbackChoice(
+      message,
+      input.roleId,
+      input.expectedRoleRevision,
+      input.candidateKeys,
+    );
+  }
+  return {
+    source,
+    message,
+    workspace,
+    threadId: run.threadId,
+    botId: run.botId,
+    ...(choice ? { choice } : {}),
+  };
+}
+
+type NativeCandidateDecisionContext = ResearchLease & {
+  threadId: string;
+  botId: string;
+  sourceMessageId: string | null;
+};
+
+async function nativeCandidateDecisionContext(
+  tx: Tx,
+  actor: Actor,
+  trusted: NativeCandidateDecisionContext,
+  input: Extract<RecruitingFeedbackInput, { target: "candidate" }>,
+  authorized?: Awaited<ReturnType<typeof lockLiveRecruitingRun>>,
+) {
+  const current = authorized ?? (await lockLiveRecruitingRun(tx, actor, trusted.runId));
+  if (current.run.threadId !== trusted.threadId || current.run.botId !== trusted.botId)
+    throw new IsolationError();
+  requireResearchLease(current.run, trusted);
+  const context = await feedbackContextInTransaction(
+    tx,
+    actor,
+    { ...input, runId: trusted.runId, sourceMessageId: trusted.sourceMessageId },
+    current,
+  );
+  if (!context.workspace || (context.choice && context.choice !== input.operation))
+    throw new IsolationError();
+  return { ...context, workspace: context.workspace };
+}
+
+export async function prepareNativeRecruitingCandidateDecision(
+  prisma: PrismaClient,
+  actor: Actor,
+  trusted: NativeCandidateDecisionContext,
+  raw: unknown,
+) {
+  const input = RecruitingFeedbackInputSchema.parse(raw);
+  if (
+    input.target !== "candidate" ||
+    input.operation === "review" ||
+    input.intent.basis !== "direct"
+  )
+    throw new IsolationError();
+  const operation = input.operation;
   return prisma.$transaction(async (tx) => {
-    const { run, thread } = await lockLiveRecruitingRun(tx, actor, input.runId);
-    const { source, message } = await requireCurrentHumanSource(
+    const context = await nativeCandidateDecisionContext(tx, actor, trusted, input);
+    await candidateDecisionTarget(
       tx,
       actor,
-      run,
-      input.sourceMessageId,
-      intent.quote,
+      input.roleId,
+      input.candidateKeys,
+      input.candidateRevisions!,
+      operation,
+      context.message,
+      input.intent.quote,
+      true,
     );
-    const workspace = thread.activeRecruitingRoleId
-      ? await roleSnapshot(
-          tx,
-          actor,
-          await requireRole(tx, actor, thread.activeRecruitingRoleId, true),
-        )
-      : null;
-    if (input.roleId !== undefined || input.expectedRoleRevision !== undefined) {
-      if (
-        !input.roleId ||
-        input.expectedRoleRevision === undefined ||
-        workspace?.role.id !== input.roleId
-      )
-        throw new IsolationError();
-      if (workspace.role.revision !== input.expectedRoleRevision)
-        throw new RecruitingConflictError();
-    }
-    await validateSources(tx, actor, sourceRefs);
-    if (input.candidateKeys) {
-      if (
-        !workspace ||
-        !input.candidateKeys.length ||
-        new Set(input.candidateKeys).size !== input.candidateKeys.length
-      )
-        throw new IsolationError();
-      const candidates = await tx.recruitingCandidate.findMany({
-        where: { roleId: workspace.role.id, candidateKey: { in: [...input.candidateKeys] } },
-        select: { candidateKey: true },
-      });
-      if (candidates.length !== input.candidateKeys.length) throw new IsolationError();
-    }
-    let choice: "good_example" | "not_fit" | "skip" | undefined;
-    if (intent.basis === "direct") {
-      choice = verifiedFeedbackChoice(
-        message,
-        input.roleId,
-        input.expectedRoleRevision,
-        input.candidateKeys,
-      );
-    }
+    const profiles = await candidateProfiles(tx, actor, input.roleId, input.candidateKeys);
+    if (profiles.some((profile) => !profile.name?.trim()) || !context.workspace.role.title.trim())
+      throw new IsolationError();
     return {
-      source,
-      workspace,
+      candidateNames: profiles.map((profile) => profile.name!),
+      roleTitle: context.workspace.role.title,
+      operation,
+    };
+  });
+}
+
+export async function executeNativeRecruitingCandidateDecision(
+  prisma: PrismaClient,
+  actor: Actor,
+  trusted: NativeCandidateDecisionContext & { effectId: string; effectRequest: unknown },
+  raw: unknown,
+) {
+  const input = RecruitingFeedbackInputSchema.parse(raw);
+  if (
+    input.target !== "candidate" ||
+    input.operation === "review" ||
+    input.intent.basis !== "direct" ||
+    stableJsonValue(input) !== stableJsonValue(trusted.effectRequest)
+  )
+    throw new IsolationError();
+  const decision = input.operation;
+  return prisma.$transaction(async (tx) => {
+    const authorized = await lockLiveRecruitingRun(tx, actor, trusted.runId, false);
+    const { run } = authorized;
+    if (run.threadId !== trusted.threadId || run.botId !== trusted.botId)
+      throw new IsolationError();
+    await tx.$queryRaw(
+      Prisma.sql`SELECT "id" FROM "external_effects" WHERE "id" = ${trusted.effectId} FOR UPDATE`,
+    );
+    const effect = await tx.externalEffect.findFirst({
+      where: {
+        id: trusted.effectId,
+        spaceId: actor.spaceId,
+        runId: run.id,
+        kind: "recruiting_feedback",
+      },
+    });
+    if (!effect || stableJsonValue(effect.request) !== stableJsonValue(input))
+      throw new IsolationError();
+    if (effect.status === "completed") {
+      const result = effect.result as {
+        status?: unknown;
+        feedback?: unknown;
+        source?: unknown;
+        workspace?: { role?: unknown; revision?: unknown };
+        choice?: unknown;
+      } | null;
+      if (
+        !result ||
+        !["recorded", "already_recorded"].includes(String(result.status)) ||
+        stableJsonValue(RecruitingFeedbackInputSchema.parse(result.feedback)) !==
+          stableJsonValue(input)
+      )
+        throw new IsolationError();
+      const workspace = {
+        role: RecruitingRoleSchema.parse(result.workspace?.role),
+        revision: RecruitingRoleRevisionSchema.parse(result.workspace?.revision),
+      };
+      if (workspace.role.id !== input.roleId) throw new IsolationError();
+      return {
+        feedback: input,
+        source: RecruitingSourceRefSchema.parse(result.source),
+        workspace,
+        status: result.status as "recorded" | "already_recorded",
+        ...(result.choice ? { choice: RecruitingFeedbackChoiceSchema.parse(result.choice) } : {}),
+      };
+    }
+    if (effect.status !== "executing") throw new IsolationError();
+    const context = await nativeCandidateDecisionContext(tx, actor, trusted, input, authorized);
+    const status = await setCandidateDecisionInTransaction(
+      tx,
+      actor,
+      input.roleId,
+      input.candidateKeys,
+      input.candidateRevisions!,
+      decision,
+      context.message,
+      input.intent.quote,
+      true,
+    );
+    const result = {
+      feedback: input,
+      source: context.source,
+      workspace: context.workspace,
+      status,
+      ...(context.choice ? { choice: context.choice } : {}),
+    };
+    const completed = await tx.externalEffect.updateMany({
+      where: {
+        id: effect.id,
+        spaceId: actor.spaceId,
+        runId: run.id,
+        status: "executing",
+        run: {
+          status: "running",
+          leaseOwner: trusted.leaseOwner,
+          leaseFence: trusted.leaseFence,
+          leaseExpiresAt: { gt: new Date() },
+        },
+      },
+      data: { status: "completed", result: result as unknown as Prisma.InputJsonValue },
+    });
+    if (completed.count !== 1) throw new IsolationError();
+    await appendEventInTransaction(tx, {
+      spaceId: actor.spaceId,
       threadId: run.threadId,
       botId: run.botId,
-      ...(choice ? { choice } : {}),
-    };
+      runId: run.id,
+      type: "effect.recorded",
+      payload: { effectId: effect.id, tool: "recruiting_feedback", result },
+    });
+    return result;
   });
 }
 
@@ -1276,7 +1624,12 @@ export async function listRecruitingFeedback(
           choice: selected.choice,
           feedback: {
             target: "candidate",
-            operation: "review",
+            operation: ["hold", "pass", "resume"].includes(selected.choice)
+              ? selected.choice
+              : "review",
+            ...(selected.candidateRevisions
+              ? { candidateRevisions: selected.candidateRevisions }
+              : {}),
             roleId: role.id,
             expectedRoleRevision: selected.expectedRoleRevision,
             candidateKeys: selected.candidateKeys,
@@ -1345,12 +1698,15 @@ export async function listRecruitingFeedback(
       : [];
     const byId = new Map([...native, ...messages].map((message) => [message.id, message]));
     const authorizedThreads = new Set([role.sourceThreadId]);
+    const verified = new Set<string>();
     for (const record of feedback) {
       const human =
         record.source.anchor.kind === "message"
           ? byId.get(record.source.anchor.messageId)
           : undefined;
-      if (!human || !isNativeHumanMessage(human)) throw new IsolationError();
+      // Chat deletion removes navigable proof, not the independent candidate consideration.
+      if (!human) continue;
+      if (!isNativeHumanMessage(human)) throw new IsolationError();
       if (!authorizedThreads.has(human.threadId)) {
         await requireThread(tx, actor, human.threadId);
         authorizedThreads.add(human.threadId);
@@ -1373,6 +1729,7 @@ export async function listRecruitingFeedback(
         )
       )
         throw new IsolationError();
+      verified.add(record.id);
     }
     feedback.sort(
       (left, right) =>
@@ -1380,7 +1737,7 @@ export async function listRecruitingFeedback(
     );
     const page = feedback.slice(0, input.limit);
     return ListRecruitingFeedbackOutput.parse({
-      feedback: page,
+      feedback: page.filter((record) => verified.has(record.id)),
       nextCursor: feedback.length > input.limit ? page.at(-1)!.id : null,
     });
   });
@@ -5968,7 +6325,7 @@ function candidateIndexQuery(
   ),`
       : Prisma.empty
   } base AS (
-    SELECT c."roleId", c."candidateKey", c."shortlisted", c."revision",
+    SELECT c."roleId", c."candidateKey", c."shortlisted", c."revision", c."consideration",
       ${includeMatches ? Prisma.sql`match."rankValue", match."tierValue", match."scoreValue",` : Prisma.empty}
       ${matchSort ? Prisma.sql`match.${Prisma.raw(`"${sort}Value"`)} AS "matchValue",` : Prisma.empty}
       p."pageId" AS "sourcePageId", p."rowIndex" AS "sourceRowIndex",
@@ -6058,6 +6415,7 @@ function candidateIndexQuery(
 }
 
 type CandidateQueryRow = {
+  consideration: Prisma.JsonValue | null;
   matchValue?: unknown;
   rankValue?: unknown;
   tierValue?: unknown;
@@ -6970,6 +7328,7 @@ async function replyContext(
   if (current) {
     requireResearchLease(run, trusted);
     if (role.crmBindingEffectId !== imported.bindingEffectId) throw new RecruitingConflictError();
+    await requireCandidateConsideration(tx, actor, role.id, imported.occurrence.candidateKey);
     await requireReplyAssignment(
       tx,
       actor,
@@ -7427,6 +7786,7 @@ export async function listRecruitingCandidates(
       ORDER BY ${matchSort ? Prisma.sql`"matchValue" ${sort === "score" ? Prisma.sql`DESC` : Prisma.sql`ASC`} NULLS LAST` : Prisma.sql`"sortValue" ${direction}`}, "candidateKey" COLLATE "C" ASC LIMIT ${limit + 1}`);
       const selected = rows.slice(0, limit);
       const pages = await candidateProfilePages(tx, actor, role.id, selected);
+
       const last = selected.at(-1);
       const { total, rankAvailable, tierAvailable, scoreAvailable, ...counts } = totals[0]!;
       const bound = role.crmBindingEffectId
@@ -7469,10 +7829,12 @@ export async function listRecruitingCandidates(
             sourceRowIndex,
             profileSourcePageIds: _profilePages,
             countIdentified: _identified,
+            consideration,
             ...profile
           }) => ({
             ...profile,
             crm: syncs.get(profile.candidateKey) ?? null,
+            decision: candidateConsideration(actor, consideration)?.operation ?? null,
             ...(sourcePageId && sourceRowIndex !== null
               ? {
                   latestSource: candidateSourceReference(pages.get(sourcePageId)!, sourceRowIndex),
@@ -7535,18 +7897,23 @@ async function shortlistTarget(
   return { thread, role, candidate };
 }
 
-async function shortlistProfile(tx: Tx, actor: Actor, roleId: string, candidateKey: string) {
-  const [profile] = await tx.$queryRaw<
+async function candidateProfiles(
+  tx: Tx,
+  actor: Actor,
+  roleId: string,
+  candidateKeys: readonly string[],
+) {
+  const profiles = await tx.$queryRaw<
     Pick<
       CandidateQueryRow,
       "name" | "linkedinUrl" | "resumeUrl" | "sourcePageId" | "profileSourcePageIds"
     >[]
   >(
-    Prisma.sql`${candidateIndexQuery(roleId)} SELECT "name", "linkedinUrl", "resumeUrl", "sourcePageId", "profileSourcePageIds" FROM base WHERE "candidateKey" = ${candidateKey}`,
+    Prisma.sql`${candidateIndexQuery(roleId)} SELECT "name", "linkedinUrl", "resumeUrl", "sourcePageId", "profileSourcePageIds" FROM base WHERE "candidateKey" IN (${Prisma.join(candidateKeys)})`,
   );
-  if (!profile) throw new IsolationError();
-  await candidateProfilePages(tx, actor, roleId, [profile]);
-  return profile;
+  if (profiles.length !== candidateKeys.length) throw new IsolationError();
+  await candidateProfilePages(tx, actor, roleId, profiles);
+  return profiles;
 }
 
 async function setCandidateShortlistInTransaction(
@@ -7564,7 +7931,7 @@ async function setCandidateShortlistInTransaction(
       shortlisted: candidate.shortlisted,
       revision: candidate.revision,
     };
-  const profile = await shortlistProfile(tx, actor, role.id, candidate.candidateKey);
+  const profile = (await candidateProfiles(tx, actor, role.id, [candidate.candidateKey]))[0]!;
   const identity = [profile.name ?? "Unnamed candidate", profile.linkedinUrl ?? profile.resumeUrl]
     .filter(Boolean)
     .join(" · ");
@@ -7629,7 +7996,7 @@ export async function prepareNativeRecruitingShortlist(
   const input = RecruitingShortlistToolInputSchema.parse(raw);
   return prisma.$transaction(async (tx) => {
     const { role, candidate } = await nativeShortlistTarget(tx, actor, trusted, input);
-    const profile = await shortlistProfile(tx, actor, role.id, candidate.candidateKey);
+    const profile = (await candidateProfiles(tx, actor, role.id, [candidate.candidateKey]))[0]!;
     if (!profile.name?.trim()) throw new IsolationError();
     return {
       candidateName: profile.name,

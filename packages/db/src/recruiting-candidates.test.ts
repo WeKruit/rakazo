@@ -42,7 +42,13 @@ function fixture() {
     currentRevisionId: "revision",
     revision: 1,
   };
-  const candidate = { roleId: "role", candidateKey: "candidate", shortlisted: false, revision: 0 };
+  const candidate = {
+    roleId: "role",
+    candidateKey: "candidate",
+    shortlisted: false,
+    revision: 0,
+    consideration: null as unknown,
+  };
   const tx = {
     $queryRaw: vi.fn(async (_query: unknown) => [] as unknown[]),
     recruitingRole: { findFirst: vi.fn(async () => role) },
@@ -109,6 +115,7 @@ describe("candidate listing and shortlist boundaries", () => {
         evidenceUrls: null,
         issues: [],
         shortlisted: false,
+        consideration: null,
         revision: 0,
         discoveryCount: 1,
         profileSourcePageIds: [],
@@ -135,7 +142,23 @@ describe("candidate listing and shortlist boundaries", () => {
           shortlisted: 2n,
         },
       ]);
-      f.tx.$queryRaw.mockResolvedValueOnce([row("a"), row("b")]);
+      f.tx.$queryRaw.mockResolvedValueOnce([
+        {
+          ...row("a"),
+          consideration: {
+            operation: "hold",
+            source: {
+              messageId: "deleted-human",
+              threadId: "deleted-bot-thread",
+              seq: 3,
+              createdAt: "2026-10-16T00:00:00.000Z",
+              quote: "Pause consideration of Avery",
+              actor: { userId: actor.userId, spaceId: actor.spaceId },
+            },
+          },
+        },
+        row("b"),
+      ]);
       const page = await recruiting.listRecruitingCandidates(f.prisma, actor, {
         roleId: "role",
         limit: 1,
@@ -144,6 +167,7 @@ describe("candidate listing and shortlist boundaries", () => {
         sourceEffectId: "native-read",
       });
       expect(page.total).toBe(19);
+      expect(page.items[0]?.decision).toBe("hold");
       expect(page).toHaveProperty("sortAvailability", { rank: false, tier: false, score: false });
       const totalsQuery = f.tx.$queryRaw.mock.calls[0]![0] as {
         sql: string;
@@ -536,6 +560,7 @@ describe("candidate listing and shortlist boundaries", () => {
         evidenceUrls: null,
         issues: [],
         shortlisted: false,
+        consideration: null,
         revision: 0,
         discoveryCount: 1,
         profileSourcePageIds: [],
@@ -1176,6 +1201,7 @@ function crmFixture() {
       findUnique: vi.fn(async () => ({
         roleId: role.id,
         candidateKey: occurrence.candidateKey,
+        consideration: null,
         shortlisted: false,
         revision: 0,
       })),
@@ -1988,6 +2014,102 @@ describe("durable recruiting reply linkage", () => {
     });
     expect(resolved?.effect).toBeUndefined();
   });
+  it.each(["hold", "pass", "resume"] as const)(
+    "retains pure CRM archival while enforcing current-role %s before a reply",
+    async (operation) => {
+      const f = crmFixture();
+      const candidate = await f.tx.recruitingCandidate.findUnique();
+      const consideration = {
+        operation,
+        source: {
+          messageId: "deleted-human",
+          threadId: "deleted-source-thread",
+          seq: 2,
+          createdAt: "2026-10-18T00:00:00.000Z",
+          quote: "An explicit consideration decision",
+          actor: { userId: actor.userId, spaceId: actor.spaceId },
+        },
+      };
+      f.tx.recruitingCandidate.findUnique.mockResolvedValue({
+        ...candidate,
+        consideration,
+      } as never);
+      const archived = (await recruiting.resolveRecruitingCrmImport(
+        f.prisma,
+        actor,
+        f.trusted,
+        f.input,
+      ))!;
+      expect(archived.input).toEqual(f.input);
+      await expect(
+        recruiting.admitRecruitingCrmImport(f.prisma, actor, f.trusted, f.input, {
+          effectKind: "crm-import",
+          effectRequest: boundDirectApprovalRequest(
+            archived.route,
+            archived.args,
+            "__rakazoCatalogTool",
+          ),
+        }),
+      ).resolves.toMatchObject({ effect: { status: "intended" } });
+      const reply = await replyFixture();
+      const importedCandidate = await reply.tx.recruitingCandidate.findUnique();
+      reply.tx.recruitingCandidate.findUnique.mockResolvedValue({
+        ...importedCandidate,
+        consideration,
+      } as never);
+      const resolved = recruiting.resolveRecruitingReply(
+        reply.prisma,
+        actor,
+        reply.trusted,
+        reply.input,
+      );
+      if (operation === "resume")
+        await expect(resolved).resolves.toMatchObject({ input: reply.input });
+      else await expect(resolved).rejects.toThrow(recruiting.RecruitingConflictError);
+    },
+  );
+
+  it("rechecks a later hold before claiming the original approved reply", async () => {
+    const f = await replyFixture();
+    const admitted = await recruiting.admitRecruitingReply(
+      f.prisma,
+      actor,
+      f.trusted,
+      f.input,
+      f.native,
+    );
+    const effect = f.effects.get(admitted.effect.id)!;
+    effect.status = "approved";
+    f.approvals.add(effect.id);
+    const candidate = await f.tx.recruitingCandidate.findUnique();
+    f.tx.recruitingCandidate.findUnique.mockResolvedValue({
+      ...candidate,
+      consideration: {
+        operation: "hold",
+        source: {
+          messageId: "later-human",
+          threadId: "another-thread",
+          seq: 1,
+          createdAt: "2026-10-19T00:00:00.000Z",
+          quote: "Pause consideration",
+          actor: { userId: actor.userId, spaceId: actor.spaceId },
+        },
+      },
+    } as never);
+    await expect(
+      recruiting.claimRecruitingReply(f.prisma, actor, f.trusted, f.input, {
+        ...f.native,
+        effectId: effect.id,
+        from: "approved",
+      }),
+    ).rejects.toThrow(recruiting.RecruitingConflictError);
+    expect(effect.status).toBe("approved");
+    effect.status = "completed";
+    await expect(
+      recruiting.resolveRecruitingReply(f.prisma, actor, f.trusted, f.input),
+    ).resolves.toMatchObject({ effect: { status: "completed" } });
+  });
+
   it.each([
     "role",
     "revision",
@@ -2547,6 +2669,7 @@ describe("native CRM binding and source import", () => {
       .mockResolvedValueOnce([
         {
           ...profile,
+          consideration: null,
           shortlisted: false,
           revision: 0,
           discoveryCount: 1,
@@ -3302,6 +3425,7 @@ describe("native candidate source provenance", () => {
         sourceRowIndex: 0,
         profileSourcePageIds: [page.effectId, f.page.effectId],
         shortlisted: false,
+        consideration: null,
         revision: 0,
         discoveryCount: 2,
         firstDiscoveredAt: f.page.observedAt.toISOString(),
@@ -3591,6 +3715,7 @@ describe("native candidate source provenance", () => {
         sourceRowIndex: rowIndex,
         profileSourcePageIds: [pageId],
         shortlisted: false,
+        consideration: null,
         revision: 0,
         discoveryCount: 1,
         firstDiscoveredAt: f.page.observedAt.toISOString(),
@@ -4057,6 +4182,19 @@ describe("native candidate results without domain actions", () => {
 
   it("indexes native candidates and completes its save receipt atomically without fake tasks", async () => {
     const f = nativeCandidateFixture();
+    const candidate = await f.tx.recruitingCandidate.findUnique();
+    const consideration = {
+      operation: "hold",
+      source: {
+        messageId: "human-decision",
+        threadId: "thread",
+        seq: 5,
+        createdAt: "2026-10-18T00:00:00.000Z",
+        quote: "Pause consideration",
+        actor: { userId: actor.userId, spaceId: actor.spaceId },
+      },
+    };
+    Object.assign(candidate, { candidateKey: "linkedin:/in/example", consideration, revision: 5 });
     const result = await recruiting.saveNativeRecruitingCandidatePage(
       f.prisma,
       actor,
@@ -4093,6 +4231,8 @@ describe("native candidate results without domain actions", () => {
       ],
       skipDuplicates: true,
     });
+    expect(candidate).toMatchObject({ consideration, revision: 5 });
+    expect(f.tx.recruitingCandidate.updateMany).not.toHaveBeenCalled();
     expect(f.saveEffect).toMatchObject({ status: "completed", result });
     expect(appendEventInTransaction).toHaveBeenCalledWith(
       f.tx,

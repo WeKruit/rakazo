@@ -5,10 +5,11 @@ import type { PrismaClient } from "@rakazo/db";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { executeRecruitingFeedback } from "./recruiting-feedback.js";
 
-const db = vi.hoisted(() => ({ readContext: vi.fn() }));
+const db = vi.hoisted(() => ({ readContext: vi.fn(), decision: vi.fn() }));
 vi.mock("@rakazo/db", async (original) => ({
   ...(await original<object>()),
   readRecruitingFeedbackContext: db.readContext,
+  executeNativeRecruitingCandidateDecision: db.decision,
 }));
 const actor: Actor = {
   spaceId: "space",
@@ -76,6 +77,43 @@ describe("recruiting feedback", () => {
       threadId: "actual-run-thread",
       botId: "bot",
     });
+  });
+
+  it("uses the shared atomic candidate decision with trusted runtime and lease", async () => {
+    const f = fixture();
+    const feedback = {
+      target: "candidate",
+      operation: "hold",
+      roleId: "role",
+      expectedRoleRevision: 1,
+      candidateKeys: ["avery"],
+      candidateRevisions: [{ candidateKey: "avery", expectedRevision: 2 }],
+      summary: "Pause consideration",
+      intent,
+      sourceRefs: [],
+    };
+    const mutation = {
+      effectId: "effect",
+      effectRequest: feedback,
+      leaseOwner: "worker",
+      leaseFence: 2,
+      threadId: "thread",
+    };
+    db.decision.mockResolvedValue({ feedback, source, workspace, status: "recorded" });
+    await expect(
+      executeRecruitingFeedback(f.deps, trusted, feedback, context, { mutation }),
+    ).resolves.toMatchObject({ status: "recorded" });
+    expect(db.decision).toHaveBeenCalledExactlyOnceWith(
+      f.deps.prisma,
+      actor,
+      { ...mutation, runId: trusted.runId, sourceMessageId: trusted.sourceMessageId, botId: "bot" },
+      feedback,
+    );
+    expect(db.readContext).not.toHaveBeenCalled();
+    expect(f.commit).not.toHaveBeenCalled();
+    await expect(executeRecruitingFeedback(f.deps, trusted, feedback, context)).rejects.toThrow(
+      "native effect and live lease",
+    );
   });
 
   it("constructs and commits one reusable preference with runtime provenance and the loaded revision", async () => {

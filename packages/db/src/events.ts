@@ -551,6 +551,7 @@ export async function sendUserMessage(
           { spaceId: input.spaceId, userId: input.userId, email: "", isDeploymentOwner: false },
           input.threadId,
           block.recruitingFeedback,
+          message.id,
         );
       }
       const createRun = input.createRun !== false;
