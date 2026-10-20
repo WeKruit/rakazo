@@ -55,6 +55,18 @@ describe("native recruiting approval tool", () => {
     expect(tool?.description).toMatch(/one-time human confirmation/i);
     expect(tool?.description).toMatch(/exact current package/i);
     expect(tool?.description).toMatch(/never self-approve/i);
+    expect(
+      RecruitingApprovalToolInputSchema.parse({
+        stage: "brief",
+        roleId: "role",
+        expectedRoleRevision: 3,
+      }),
+    ).toEqual({ stage: "brief", roleId: "role", expectedRoleRevision: 3 });
+    expect(tool?.description).toContain('stage:"brief"');
+    expect(tool?.description).toContain("Generic ask_user answers never confirm requirements");
+    const role = builtinAgentTools.find((entry) => entry.name === "recruiting_role");
+    expect(role?.description).toContain('recruiting_request_approval stage:"brief"');
+    expect(role?.description).not.toContain("in the Role panel");
   });
 
   it("binds research to the matching playbook gate and keeps continuations in their phase", () => {

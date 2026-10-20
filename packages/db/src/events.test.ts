@@ -232,14 +232,17 @@ describe("native approval answer provenance", () => {
     expect(f.tx.actionApprovalRule.upsert).not.toHaveBeenCalled();
   });
 
-  it("rejects an invalid recruiting allow but leaves stale cards usable for deny", async () => {
-    const f = approvalAnswerFixture({ stage: "documents", roleId: "missing-role" });
-    f.effect.kind = "recruiting_request_approval";
-    await expect(answerRunInput(f.prisma, { ...f.input, answer: "allow" })).resolves.toBe(false);
-    expect(f.tx.externalEffect.update).not.toHaveBeenCalled();
-    await expect(answerRunInput(f.prisma, { ...f.input, answer: "deny" })).resolves.toBe(true);
-    expect(f.effect.status).toBe("denied");
-  });
+  it.each(["brief", "documents"])(
+    "rejects an invalid %s allow but leaves stale cards usable for deny",
+    async (stage) => {
+      const f = approvalAnswerFixture({ stage, roleId: "missing-role" });
+      f.effect.kind = "recruiting_request_approval";
+      await expect(answerRunInput(f.prisma, { ...f.input, answer: "allow" })).resolves.toBe(false);
+      expect(f.tx.externalEffect.update).not.toHaveBeenCalled();
+      await expect(answerRunInput(f.prisma, { ...f.input, answer: "deny" })).resolves.toBe(true);
+      expect(f.effect.status).toBe("denied");
+    },
+  );
 
   it.each(["allow", "always", "deny"])(
     "records one exact %s decision with the authenticated approver and canonical persisted request hash",

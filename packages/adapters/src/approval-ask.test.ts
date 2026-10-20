@@ -3,6 +3,41 @@ import { describe, expect, it } from "vitest";
 import { buildApprovalAskBlock } from "./approval-ask.js";
 
 describe("buildApprovalAskBlock", () => {
+  it("confirms exact server-owned requirements in the original one-time card without model display fields", () => {
+    const request = RecruitingApprovalToolInputSchema.parse({
+      stage: "brief",
+      roleId: "internal-role",
+      expectedRoleRevision: 3,
+    });
+    const requirements = `Salary range: GBP 90,000 to 120,000\n${"Exact saved requirement. ".repeat(220)}`;
+    const block = buildApprovalAskBlock(
+      "original-effect",
+      "recruiting_request_approval",
+      request,
+      [],
+      {
+        reviewReason: "Model-supplied substitute requirements",
+        recruiting: { roleTitle: "Platform engineer", requirements },
+      },
+    );
+    expect(block.text).toBe("Confirm requirements");
+    expect(block.actions).toEqual([
+      { id: "allow", label: "Confirm requirements" },
+      { id: "deny", label: "Deny" },
+    ]);
+    expect(block.detail).toBe(`Role: Platform engineer\nRole version: 3\n${requirements}`);
+    expect(block.detail).not.toContain("internal-role");
+    expect(block.detail!.length).toBeGreaterThan(4_000);
+    expect(() =>
+      buildApprovalAskBlock("original-effect", "recruiting_request_approval", request, []),
+    ).toThrow(/verified/i);
+    expect(
+      RecruitingApprovalToolInputSchema.safeParse({
+        ...request,
+        requirements: "Model-supplied substitute",
+      }).success,
+    ).toBe(false);
+  });
   it.each([false, true])("shows the complete trusted routine update (%s)", (active) => {
     const prompt = `  Exact instruction.\n${"Keep this paragraph. ".repeat(240)}Ending token-secret  `;
     const args = {
