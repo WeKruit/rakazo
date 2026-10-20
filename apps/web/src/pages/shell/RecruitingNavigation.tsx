@@ -1,11 +1,21 @@
 import { Trans, useLingui } from "@lingui/react/macro";
 import type { Group } from "@rakazo/contracts";
 import { Button, Input } from "@rakazo/ui-web";
-import { BriefcaseBusiness, ChartNoAxesCombined, MessageSquare, Plus, Search } from "lucide-react";
+import {
+  BriefcaseBusiness,
+  ChartNoAxesCombined,
+  MessageSquare,
+  MoreHorizontal,
+  Plus,
+  Search,
+} from "lucide-react";
+import type { ContextMenuPosition } from "../BotContextMenu";
 
 /** The supplied WeKruit RecruiterShell chrome, over the existing native conversations. */
 export function RecruitingNavigation({
   groups,
+  archivedGroups,
+  archivedOpen,
   groupId,
   query,
   dashboardOpen,
@@ -16,8 +26,15 @@ export function RecruitingNavigation({
   onDashboard,
   onOpenRole,
   onNewRole,
+  canCreateRoleFrom,
+  onNewRoleFrom,
+  onRoleMenu,
+  onToggleArchived,
+  onRestoreRole,
 }: {
   groups: Group[];
+  archivedGroups: Group[];
+  archivedOpen: boolean;
   groupId?: string;
   query: string;
   dashboardOpen: boolean;
@@ -28,6 +45,11 @@ export function RecruitingNavigation({
   onDashboard: () => void;
   onOpenRole: (id: string) => void;
   onNewRole: () => void;
+  canCreateRoleFrom: (id: string) => boolean;
+  onNewRoleFrom: (id: string) => void;
+  onRoleMenu: (id: string, anchor: HTMLButtonElement, position: ContextMenuPosition) => void;
+  onToggleArchived: () => void;
+  onRestoreRole: (id: string) => void;
 }) {
   const { t } = useLingui();
   const visibleGroups = groups.filter((group) =>
@@ -95,32 +117,87 @@ export function RecruitingNavigation({
           className="h-9 rounded-[10px] bg-card ps-9 text-[13px]"
         />
       </div>
-      <nav
-        aria-label={t`Role conversations`}
-        className="rk-scroll min-h-0 flex-1 space-y-1 overflow-y-auto"
-      >
-        {visibleGroups.map((group) => (
-          <Button
-            key={group.id}
-            variant={group.id === groupId && !dashboardOpen ? "secondary" : "ghost"}
-            className="h-auto min-h-11 w-full justify-start rounded-[10px] px-3 py-3 text-start"
-            aria-current={group.id === groupId ? "page" : undefined}
-            onClick={() => onOpenRole(group.id)}
-          >
-            <BriefcaseBusiness size={17} className="shrink-0" aria-hidden="true" />
-            <span className="min-w-0 flex-1 truncate" dir="auto">
-              {group.name}
-            </span>
-            {group.unread ? (
-              <span
-                className="size-1.5 rounded-full bg-primary"
-                role="img"
-                aria-label={t`Unread`}
-              />
-            ) : null}
-          </Button>
-        ))}
-      </nav>
+      <div className="rk-scroll min-h-0 flex-1 space-y-1 overflow-y-auto">
+        <nav aria-label={t`Role conversations`} className="space-y-1">
+          {visibleGroups.map((group) => (
+            <div key={group.id} className="flex items-center gap-1">
+              <Button
+                variant={group.id === groupId && !dashboardOpen ? "secondary" : "ghost"}
+                className="h-auto min-h-11 min-w-0 flex-1 justify-start rounded-[10px] px-3 py-3 text-start"
+                aria-current={group.id === groupId ? "page" : undefined}
+                onClick={() => onOpenRole(group.id)}
+                onContextMenu={(event) => {
+                  event.preventDefault();
+                  onRoleMenu(group.id, event.currentTarget, { x: event.clientX, y: event.clientY });
+                }}
+              >
+                <BriefcaseBusiness size={17} className="shrink-0" aria-hidden="true" />
+                <span className="min-w-0 flex-1 truncate" dir="auto">
+                  {group.name}
+                </span>
+                {group.unread ? (
+                  <span
+                    className="size-1.5 rounded-full bg-primary"
+                    role="img"
+                    aria-label={t`Unread`}
+                  />
+                ) : null}
+              </Button>
+              <Button
+                variant="ghost"
+                size="icon-sm"
+                aria-label={t`Actions for ${group.name}`}
+                onClick={(event) => {
+                  const bounds = event.currentTarget.getBoundingClientRect();
+                  onRoleMenu(group.id, event.currentTarget, { x: bounds.left, y: bounds.bottom });
+                }}
+              >
+                <MoreHorizontal size={15} aria-hidden="true" />
+              </Button>
+            </div>
+          ))}
+        </nav>
+        {archivedGroups.length > 0 ? (
+          <div className="mt-3 border-t border-border pt-2">
+            <Button
+              variant="ghost"
+              className="w-full justify-between text-muted-foreground"
+              aria-label={t`Archived`}
+              aria-expanded={archivedOpen}
+              onClick={onToggleArchived}
+            >
+              <Trans>Archived</Trans>
+              <span>{archivedGroups.length}</span>
+            </Button>
+            {archivedOpen
+              ? archivedGroups.map((group) => (
+                  <fieldset
+                    key={group.id}
+                    aria-label={group.name}
+                    className="space-y-1 rounded-lg px-3 py-2"
+                  >
+                    <span className="block truncate text-sm" dir="auto">
+                      {group.name}
+                    </span>
+                    <div className="flex gap-1">
+                      <Button
+                        variant="ghost"
+                        size="xs"
+                        disabled={!canCreateRoleFrom(group.id)}
+                        onClick={() => onNewRoleFrom(group.id)}
+                      >
+                        <Trans>New role</Trans>
+                      </Button>
+                      <Button variant="ghost" size="xs" onClick={() => onRestoreRole(group.id)}>
+                        <Trans>Restore</Trans>
+                      </Button>
+                    </div>
+                  </fieldset>
+                ))
+              : null}
+          </div>
+        ) : null}
+      </div>
     </div>
   );
 }

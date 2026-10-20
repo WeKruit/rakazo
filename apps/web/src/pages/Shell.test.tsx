@@ -42,6 +42,12 @@ const shellApi = vi.hoisted(() => ({
   updateRoutine: vi.fn(),
   listSpaces: vi.fn(),
   createGroup: vi.fn(),
+  archiveGroup: vi.fn(),
+  restoreGroup: vi.fn(),
+  listArchivedGroups: vi.fn(),
+  listArchivedBots: vi.fn(),
+  archiveBot: vi.fn(),
+  updateBot: vi.fn(),
   recruiting: {
     getWorkspace: vi.fn(),
     listAssessments: vi.fn(),
@@ -81,7 +87,17 @@ vi.mock("../lib/rpc", async (importOriginal) => ({
     },
     skills: { list: vi.fn().mockResolvedValue([]) },
     spaces: { list: shellApi.listSpaces },
-    groups: { create: shellApi.createGroup },
+    groups: {
+      create: shellApi.createGroup,
+      archive: shellApi.archiveGroup,
+      restore: shellApi.restoreGroup,
+      listArchived: shellApi.listArchivedGroups,
+    },
+    bots: {
+      listArchived: shellApi.listArchivedBots,
+      archive: shellApi.archiveBot,
+      update: shellApi.updateBot,
+    },
     memory: {
       list: vi.fn().mockResolvedValue([]),
       providerConfig: vi.fn().mockResolvedValue(null),
@@ -211,6 +227,7 @@ async function renderFeedbackShell(
     routines?: Routine[];
     openFeedback?: boolean;
     threadReady?: Promise<void>;
+    allGroupsArchived?: boolean;
   } = {},
 ) {
   setToolActivityPreference(
@@ -319,9 +336,12 @@ async function renderFeedbackShell(
     });
   }
   const bots = [bot, { ...bot, id: "bot-2", name: "Sourcer", threadId: "thread-2" }];
+  const archivedGroup = { ...group, archivedAt: "2026-01-02T00:00:00Z" };
+  const activeGroups = options.allGroupsArchived ? [] : [group];
+  const archivedGroups = options.allGroupsArchived ? [archivedGroup] : [];
   const navigation = {
     spaces: [{ id: "space-1", name: "Recruiting", hasContent: true }],
-    current: { bots, botSections: [], groups: [group] },
+    current: { bots, botSections: [], groups: activeGroups },
   };
   shellApi.session = {
     data: { user: { id: "user-1", name: "Synthetic recruiter", email: "user@example.test" } },
@@ -331,10 +351,10 @@ async function renderFeedbackShell(
     me: { spaceId: "space-1", isDeploymentOwner: options.isDeploymentOwner ?? true },
     bots,
     botSections: [],
-    groups: [group],
+    groups: activeGroups,
     spaces: navigation.spaces,
     archivedBots: [],
-    archivedGroups: [],
+    archivedGroups,
     thread: kind === "group" ? null : thread,
     routines: options.routines ?? [],
   });
@@ -346,6 +366,10 @@ async function renderFeedbackShell(
   });
   shellApi.listSpaces.mockResolvedValue(navigation);
   shellApi.createGroup.mockResolvedValue({ ...group, id: "group-new" });
+  shellApi.archiveGroup.mockResolvedValue({ ok: true });
+  shellApi.restoreGroup.mockResolvedValue({ ok: true });
+  shellApi.listArchivedGroups.mockResolvedValue(archivedGroups);
+  shellApi.listArchivedBots.mockResolvedValue([]);
   shellApi.followUp.mockResolvedValue({ ok: true });
   const candidate = {
     roleId: "internal-role",
@@ -463,6 +487,11 @@ async function renderFeedbackShell(
     thread,
     candidate,
     members,
+    group,
+    archivedGroup,
+    archivedGroups,
+    navigation,
+    bots,
     getProps: () => props!,
     navigate: async (to: string) => act(async () => navigate(to)),
   };
@@ -473,6 +502,197 @@ it("loads a cold group from its own snapshot when bootstrap has no DM snapshot",
   expect(shellApi.get).toHaveBeenCalledWith({ groupId: "group-1" }, expect.anything());
   expect(container?.textContent).toContain("Choose the role location");
   expect(shellApi.recruiting.getWorkspace).toHaveBeenCalledWith({ threadId: "thread-1" });
+});
+
+it("archives and restores an ordinary role through the native lifecycle without changing bots or messages", async () => {
+  setToolActivityPreference("off");
+  const view = await renderFeedbackShell("bot", undefined, {
+    isDeploymentOwner: false,
+    openFeedback: false,
+  });
+  const messages = JSON.stringify(view.thread.messages);
+  const bots = JSON.stringify(view.bots);
+  shellApi.archiveGroup.mockImplementation(async () => {
+    view.navigation.current.groups = [];
+    shellApi.listArchivedGroups.mockResolvedValue([view.archivedGroup]);
+    return { ok: true };
+  });
+  await view.click("Actions for Recruiting crew");
+  await act(async () => {
+    await import("./BotContextMenu");
+  });
+  const menu = document.body.querySelector('[role="menu"]')!;
+  expect(menu.textContent).toBe("Archive");
+  await act(async () => menu.querySelector<HTMLElement>('[role="menuitem"]')!.click());
+  expect(shellApi.archiveGroup).toHaveBeenCalledExactlyOnceWith({ groupId: "group-1" });
+  expect(
+    container?.querySelector('nav[aria-label="Role conversations"]')?.textContent,
+  ).not.toContain(view.group.name);
+  await view.click("Archived");
+  const archived = container?.querySelector('fieldset[aria-label="Recruiting crew"]');
+  expect(archived?.textContent).toContain("Restore");
+  shellApi.restoreGroup.mockImplementation(async () => {
+    view.navigation.current.groups = [view.group];
+    shellApi.listArchivedGroups.mockResolvedValue([]);
+    return { ok: true };
+  });
+  await view.click("Restore");
+  expect(shellApi.restoreGroup).toHaveBeenCalledExactlyOnceWith({ groupId: "group-1" });
+  expect(container?.querySelector('nav[aria-label="Role conversations"]')?.textContent).toContain(
+    view.group.name,
+  );
+  expect(JSON.stringify(view.thread.messages)).toBe(messages);
+  expect(JSON.stringify(view.bots)).toBe(bots);
+  expect(shellApi.archiveBot).not.toHaveBeenCalled();
+  expect(shellApi.updateBot).not.toHaveBeenCalled();
+  expect(shellApi.createGroup).not.toHaveBeenCalled();
+  expect(shellApi.send).not.toHaveBeenCalled();
+  expect(shellApi.answer).not.toHaveBeenCalled();
+});
+
+it("creates a fresh role only from an explicitly selected archived role's exact crew", async () => {
+  setToolActivityPreference("off");
+  const view = await renderFeedbackShell("bot", undefined, {
+    isDeploymentOwner: false,
+    openFeedback: false,
+    allGroupsArchived: true,
+  });
+  const original = JSON.stringify({
+    group: view.archivedGroup,
+    messages: view.thread.messages,
+    bots: view.bots,
+  });
+  await view.click("New role");
+  expect(container?.querySelector('input[placeholder="Name this role"]')).toBeNull();
+  const archived = container!.querySelector('fieldset[aria-label="Recruiting crew"]')!;
+  const useCrew = [...archived.querySelectorAll<HTMLButtonElement>("button")].find(
+    (button) => button.textContent === "New role",
+  )!;
+  await act(async () => useCrew.click());
+  const input = container!.querySelector<HTMLInputElement>('input[placeholder="Name this role"]')!;
+  act(() => {
+    Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, "value")!.set!.call(
+      input,
+      "Fresh systems role",
+    );
+    input.dispatchEvent(new Event("input", { bubbles: true }));
+  });
+  const fresh = {
+    ...view.group,
+    id: "group-new",
+    threadId: "thread-new",
+    name: "Fresh systems role",
+  };
+  shellApi.createGroup.mockImplementation(async () => {
+    view.navigation.current.groups = [fresh];
+    return fresh;
+  });
+  shellApi.get.mockImplementation(async ({ groupId }) =>
+    groupId === fresh.id
+      ? {
+          ...view.thread,
+          threadId: fresh.threadId,
+          groupId: fresh.id,
+          groupName: fresh.name,
+          messages: [],
+          run: null,
+        }
+      : view.thread,
+  );
+  await view.click("Create role");
+  expect(shellApi.createGroup).toHaveBeenCalledExactlyOnceWith({
+    name: fresh.name,
+    botIds: view.archivedGroup.members.map((member) => member.botId),
+  });
+  expect(shellApi.restoreGroup).not.toHaveBeenCalled();
+  expect(shellApi.archiveBot).not.toHaveBeenCalled();
+  expect(shellApi.updateBot).not.toHaveBeenCalled();
+  expect(shellApi.send).not.toHaveBeenCalled();
+  expect(
+    JSON.stringify({ group: view.archivedGroup, messages: view.thread.messages, bots: view.bots }),
+  ).toBe(original);
+  expect(container?.querySelector('[data-message-id="pending-main"]')).toBeNull();
+  expect(container?.querySelector("h1")?.textContent).toBe(fresh.name);
+});
+
+it("resets an archived source's draft and error, then keeps its team fixed during creation", async () => {
+  setToolActivityPreference("off");
+  const view = await renderFeedbackShell("bot", undefined, {
+    isDeploymentOwner: false,
+    openFeedback: false,
+    allGroupsArchived: true,
+  });
+  const second = {
+    ...view.archivedGroup,
+    id: "group-second",
+    name: "Second archived role",
+    members: [...view.members].reverse(),
+  };
+  view.archivedGroups.push(second);
+  await view.render();
+  await view.click("New role");
+  const sourceButton = (name: string) =>
+    [...container!.querySelectorAll<HTMLFieldSetElement>("fieldset")]
+      .find((item) => item.getAttribute("aria-label") === name)!
+      .querySelector<HTMLButtonElement>("button")!;
+  const roleName = () =>
+    container!.querySelector<HTMLInputElement>('input[placeholder="Name this role"]')!;
+  const nameRole = (name: string) =>
+    act(() => {
+      const input = roleName();
+      Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, "value")!.set!.call(input, name);
+      input.dispatchEvent(new Event("input", { bubbles: true }));
+    });
+  await act(async () => sourceButton(view.group.name).click());
+  nameRole("First draft");
+  shellApi.createGroup.mockRejectedValueOnce(new Error("First creation failed"));
+  await view.click("Create role");
+  expect(container?.textContent).toContain("First creation failed");
+  await act(async () => sourceButton(second.name).click());
+  expect(roleName().value).toBe("");
+  expect(container?.textContent).not.toContain("First creation failed");
+  nameRole("Fresh second role");
+  let finish!: () => void;
+  const pending = new Promise<void>((resolve) => {
+    finish = resolve;
+  });
+  const fresh = {
+    ...view.group,
+    id: "group-new",
+    threadId: "thread-new",
+    name: "Fresh second role",
+    members: second.members,
+  };
+  shellApi.createGroup.mockClear();
+  shellApi.createGroup.mockImplementation(async () => {
+    await pending;
+    view.navigation.current.groups = [fresh];
+    return fresh;
+  });
+  shellApi.get.mockImplementation(async ({ groupId }) =>
+    groupId === fresh.id
+      ? {
+          ...view.thread,
+          threadId: fresh.threadId,
+          groupId: fresh.id,
+          groupName: fresh.name,
+          members: fresh.members,
+          messages: [],
+          run: null,
+        }
+      : view.thread,
+  );
+  await view.click("Create role");
+  expect(sourceButton(view.group.name).disabled).toBe(true);
+  await act(async () => sourceButton(view.group.name).click());
+  expect(roleName().value).toBe(fresh.name);
+  expect(shellApi.createGroup).toHaveBeenCalledExactlyOnceWith({
+    name: fresh.name,
+    botIds: second.members.map((member) => member.botId),
+  });
+  await act(async () => finish());
+  expect(container?.querySelector("h1")?.textContent).toBe(fresh.name);
+  expect(container?.querySelector('input[placeholder="Name this role"]')).toBeNull();
 });
 
 it("enables Dashboard only after a cold native thread snapshot is available", async () => {

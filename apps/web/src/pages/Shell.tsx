@@ -507,6 +507,8 @@ export function ShellPage() {
   const [archivedBots, setArchivedBots] = useState<Bot[]>([]);
   const [archivedGroups, setArchivedGroups] = useState<Group[]>([]);
   const [archivedOpen, setArchivedOpen] = useState(false);
+  const [newRoleSourceId, setNewRoleSourceId] = useState<string | null>(null);
+  const [creatingGroup, setCreatingGroup] = useState(false);
   const [collapsedSidebarSections, setCollapsedSidebarSections] = useState(() => new Set<string>());
   const [collapsedRosterParents, setCollapsedRosterParents] = useState(() => new Set<string>());
 
@@ -906,8 +908,24 @@ export function ShellPage() {
   computerOpenRef.current = computerOpen;
   computerBotIdRef.current = computerBotId ?? active?.id;
   const activeGroup = groups.find((group) => group.id === groupId);
+  const roleSourceGroup =
+    panel === "create-group" && newRoleSourceId
+      ? [...groups, ...archivedGroups].find((group) => group.id === newRoleSourceId)
+      : activeGroup;
+  function canCreateRoleFrom(id: string) {
+    const group = [...groups, ...archivedGroups].find((group) => group.id === id);
+    return Boolean(
+      !creatingGroup &&
+        group &&
+        group.members.length >= GROUP_MEMBER_MIN &&
+        group.members.length <= GROUP_MEMBER_MAX &&
+        group.members.every((member) =>
+          bots.some((bot) => bot.id === member.botId && !bot.archivedAt),
+        ),
+    );
+  }
   // Reuse this role's ordered native crew; its first member already owns default sends.
-  const roleCrewBots = (activeGroup?.members ?? []).flatMap((member) => {
+  const roleCrewBots = (roleSourceGroup?.members ?? []).flatMap((member) => {
     const bot = bots.find((bot) => bot.id === member.botId && !bot.archivedAt);
     return bot ? [bot] : [];
   });
@@ -2633,13 +2651,33 @@ export function ShellPage() {
   }, []);
 
   async function createGroup(input: { name: string; botIds: string[] }) {
-    const group = await rpc.groups.create(input);
-    setGroups((current) =>
-      current.some((item) => item.id === group.id) ? current : [group, ...current],
-    );
-    navigate(`/app/g/${group.id}`);
-    setPanel(null);
-    await refreshBots().catch(() => undefined);
+    setCreatingGroup(true);
+    try {
+      const group = await rpc.groups.create(input);
+      setGroups((current) =>
+        current.some((item) => item.id === group.id) ? current : [group, ...current],
+      );
+      navigate(`/app/g/${group.id}`);
+      setPanel(null);
+      setNewRoleSourceId(null);
+      await refreshBots().catch(() => undefined);
+    } finally {
+      setCreatingGroup(false);
+    }
+  }
+
+  function startNewRole(sourceId: string) {
+    if (!canCreateRoleFrom(sourceId)) return;
+    setNewRoleSourceId(sourceId);
+    setPanel("create-group");
+    setMobileSidebarOpen(false);
+  }
+
+  function restoreGroup(groupId: string) {
+    return rpc.groups
+      .restore({ groupId })
+      .then(() => refreshBots(true))
+      .catch((error) => setSendError(errorText(error, t`Could not continue`)));
   }
 
   function cancelFocusPrompt() {
@@ -3129,15 +3167,16 @@ export function ShellPage() {
             </div>
             <RecruitingNavigation
               groups={groups}
+              archivedGroups={archivedGroups}
+              archivedOpen={archivedOpen}
               groupId={groupId}
               query={query}
               dashboardOpen={panel === "recruiting" && activeRecruitingTab === "dashboard"}
               canOpenDashboard={Boolean(activeSnapshot?.threadId)}
               canCreateRole={
-                roleCrewBots.length === activeGroup?.members.length &&
-                roleCrewBots.length >= GROUP_MEMBER_MIN &&
-                roleCrewBots.length <= GROUP_MEMBER_MAX
+                Boolean(activeGroup && canCreateRoleFrom(activeGroup.id)) || archivedGroups.some((group) => canCreateRoleFrom(group.id))
               }
+              canCreateRoleFrom={canCreateRoleFrom}
               onQueryChange={setQuery}
               onConversation={() => {
                 setPanel(null);
@@ -3155,8 +3194,16 @@ export function ShellPage() {
                 navigate(`/app/g/${id}`);
               }}
               onNewRole={() => {
-                setPanel("create-group");
-                setMobileSidebarOpen(false);
+                if (activeGroup && canCreateRoleFrom(activeGroup.id)) startNewRole(activeGroup.id);
+                else setArchivedOpen(true);
+              }}
+              onNewRoleFrom={startNewRole}
+              onToggleArchived={() => setArchivedOpen((open) => !open)}
+              onRestoreRole={(id) => void restoreGroup(id)}
+              onRoleMenu={(id, anchor, position) => {
+                if (groups.find((group) => group.id === id)?.spaceId !== bootstrapMe?.spaceId) return;
+                botMenuAnchor.current = anchor;
+                setBotMenu({ kind: "group", id, position });
               }}
             />
           </>
@@ -3728,9 +3775,7 @@ export function ShellPage() {
                         variant="ghost"
                         size="xs"
                         onClick={() =>
-                          void rpc.groups
-                            .restore({ groupId: group.id })
-                            .then(() => refreshBots(true))
+                          void restoreGroup(group.id)
                         }
                       >
                         <Trans>Restore</Trans>
@@ -4378,17 +4423,18 @@ export function ShellPage() {
             ) : null}
             {panel === "create-group" ? (
               <CreateGroupForm
-                key={showToolActivity ? "group" : "role"}
+                key={showToolActivity ? "group" : `role:${roleSourceGroup?.id}`}
                 bots={showToolActivity ? bots : roleCrewBots}
                 recruiting={!showToolActivity}
-                onCancel={() => setPanel(null)}
+                onCancel={() => { setPanel(null); setNewRoleSourceId(null); }}
                 onCreate={(input) => {
                   if (
                     !showToolActivity &&
-                    (!activeGroup ||
-                      roleCrewBots.length !== activeGroup.members.length ||
-                      input.botIds.length !== activeGroup.members.length ||
-                      !input.botIds.every((id, index) => id === activeGroup.members[index]?.botId))
+                    (!roleSourceGroup ||
+                      !canCreateRoleFrom(roleSourceGroup.id) ||
+                      roleCrewBots.length !== roleSourceGroup.members.length ||
+                      input.botIds.length !== roleSourceGroup.members.length ||
+                      !input.botIds.every((id, index) => id === roleSourceGroup.members[index]?.botId))
                   ) {
                     throw new Error(t`The recruiting team changed. Open the role again.`);
                   }
@@ -4645,6 +4691,7 @@ export function ShellPage() {
         {contextChat && botMenu ? (
           <BotContextMenu
             bot={contextChat}
+            showDeveloperActions={showToolActivity}
             position={botMenu.position}
             onClose={closeBotMenu}
             sections={botSections}
@@ -4742,7 +4789,7 @@ export function ShellPage() {
               const request = contextBot
                 ? rpc.bots.archive({ botId: contextBot.id })
                 : rpc.groups.archive({ groupId: contextGroup!.id });
-              void request.then(() => refreshBots(true));
+              void request.then(() => refreshBots(true)).catch((error) => setSendError(errorText(error, t`Could not continue`)));
             }}
             onDelete={() => {
               if (contextBot) setDeleteTarget(contextBot);
