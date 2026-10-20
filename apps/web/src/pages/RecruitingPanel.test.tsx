@@ -3159,7 +3159,7 @@ it.each(["Cards", "Table"])(
 );
 
 it.each(["Cards", "Table"])(
-  "marks earlier requirements per native candidate source in %s and details",
+  "marks sources saved before the latest role update in %s and details",
   async (viewName) => {
     const currentSource = {
       providerTaskId: "native-task",
@@ -3205,7 +3205,7 @@ it.each(["Cards", "Table"])(
     await view.click(viewName);
     const list = view.container.querySelector(viewName === "Cards" ? "ul" : "tbody")!;
     const matches = list.querySelectorAll('[aria-label="Research match"]');
-    const earlierLabel = "Research based on earlier requirements";
+    const earlierLabel = "Saved before latest role update";
     expect(matches).toHaveLength(2);
     expect(matches[0]?.textContent).not.toContain(earlierLabel);
     expect(matches[0]?.textContent).not.toMatch(/verified|reassessed|Current/i);
