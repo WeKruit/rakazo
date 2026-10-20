@@ -49,6 +49,7 @@ describe("toolRequiresApproval", () => {
   });
 
   it.each([
+    "crm_bind_candidate_role",
     "crm_update_candidate_stage",
     "crm_append_candidate_note",
     "reply_to_email",

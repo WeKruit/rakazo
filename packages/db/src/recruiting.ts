@@ -6187,29 +6187,32 @@ async function nativeMcpReadProof(
   actor: Actor,
   runId: string,
   route: { connectorId: string; resourceId: string; resourceRevision: number; toolName: string },
-  args: Record<string, unknown>,
+  args:
+    | Record<string, unknown>
+    | ((args: Record<string, unknown>, result: Record<string, unknown>) => boolean),
 ) {
   // ponytail: compare this run's native envelopes in O(n); index by route if long runs require it.
   const effects = await tx.externalEffect.findMany({
     where: { spaceId: actor.spaceId, runId },
     orderBy: [{ createdAt: "desc" }, { id: "desc" }],
   });
+  const seenQueries = new Set<string>();
   for (const effect of effects) {
     if (effect.spaceId !== actor.spaceId || effect.runId !== runId) throw new IsolationError();
     const marker = "__rakazoCatalogTool";
     const direct = boundDirectApprovalDetails(effect.request, marker);
     const catalog = catalogApprovalDetails(effect.request, marker);
-    const readArgs = direct?.args ?? catalog?.args.arguments;
+    const nativeArgs = direct?.args ?? catalog?.args.arguments;
+    if (!nativeArgs || typeof nativeArgs !== "object" || Array.isArray(nativeArgs)) continue;
+    const readArgs = nativeArgs as Record<string, unknown>;
     // p_review verifies an additional audit receipt for the same pipeline read. A newer
     // failed verification must block an older successful snapshot too.
     const expectedArgs =
-      route.toolName === "get_crm_candidate_review" &&
-      readArgs &&
-      typeof readArgs === "object" &&
-      !Array.isArray(readArgs) &&
-      "p_review" in readArgs
-        ? { ...args, p_review: readArgs.p_review }
-        : args;
+      typeof args === "function"
+        ? readArgs
+        : route.toolName === "get_crm_candidate_review" && "p_review" in readArgs
+          ? { ...args, p_review: readArgs.p_review }
+          : args;
     const expected = direct
       ? boundDirectApprovalRequest(route, expectedArgs, marker)
       : catalog && ["connectors_execute_tool", "mcp_execute_tool"].includes(catalog.toolName)
@@ -6224,6 +6227,11 @@ async function nativeMcpReadProof(
           )
         : null;
     if (!expected || stableJsonValue(effect.request) !== stableJsonValue(expected)) continue;
+    // Discovery considers only the newest native receipt for each exact query,
+    // including failed or empty reads; a different query can still prove the target.
+    const queryKey = stableJsonValue(expectedArgs);
+    if (seenQueries.has(queryKey)) continue;
+    seenQueries.add(queryKey);
     const result = effect.result;
     if (
       effect.status !== "completed" ||
@@ -6232,14 +6240,17 @@ async function nativeMcpReadProof(
       Array.isArray(result) ||
       (result.isError !== undefined && result.isError !== false) ||
       result.error !== undefined
-    )
+    ) {
+      if (typeof args === "function") continue;
       return null;
+    }
+    if (typeof args === "function" && !args(readArgs, result)) continue;
     return { effectId: effect.id, result };
   }
   return null;
 }
 
-/** Display only a canonical CRM target read by this bot; the write keeps its original CAS payload. */
+/** Display only a canonical CRM target read by this bot; the write keeps its original payload. */
 export async function readNativeCrmWriteApproval(
   prisma: PrismaClient,
   actor: Actor,
@@ -6251,22 +6262,30 @@ export async function readNativeCrmWriteApproval(
 ) {
   const { route, args } = input;
   const stage = route.toolName === "crm_update_candidate_stage";
+  const binding = route.toolName === "crm_bind_candidate_role";
   if (
     route.connectorId !== "mcp" ||
-    (!stage && route.toolName !== "crm_append_candidate_note") ||
+    (!binding && !stage && route.toolName !== "crm_append_candidate_note") ||
     !route.resourceId?.trim() ||
     !Number.isSafeInteger(route.resourceRevision) ||
     route.resourceRevision < 1 ||
-    ![args.p_org, args.p_candidate, args.p_role, args.p_expected_updated_at].every(
-      (value) => typeof value === "string" && value.trim(),
-    ) ||
-    (stage
-      ? ![args.p_expected_stage, args.p_stage].every(
-          (value) => value === null || typeof value === "string",
+    ![
+      args.p_org,
+      args.p_candidate,
+      args.p_role,
+      ...(binding ? [] : [args.p_expected_updated_at]),
+    ].every((value) => typeof value === "string" && value.trim()) ||
+    (binding
+      ? ![args.p_org, args.p_candidate, args.p_role].every(
+          (value) => RecruitingCrmImportArgsSchema.shape.p_org.safeParse(value).success,
         )
-      : (args.p_expected_notes !== null && typeof args.p_expected_notes !== "string") ||
-        typeof args.p_note !== "string" ||
-        !args.p_note.trim())
+      : stage
+        ? ![args.p_expected_stage, args.p_stage].every(
+            (value) => value === null || typeof value === "string",
+          )
+        : (args.p_expected_notes !== null && typeof args.p_expected_notes !== "string") ||
+          typeof args.p_note !== "string" ||
+          !args.p_note.trim())
   )
     throw new IsolationError();
   return prisma.$transaction(async (tx) => {
@@ -6275,9 +6294,65 @@ export async function readNativeCrmWriteApproval(
     if (run.threadId !== trusted.threadId || run.botId !== trusted.botId)
       throw new IsolationError();
     await requireReplyAssignment(tx, actor, run, route.resourceId, route.resourceRevision, [
-      "get_crm_candidate_review",
+      ...(binding ? ["list_crm_candidates", "get_crm_role"] : ["get_crm_candidate_review"]),
       route.toolName,
     ]);
+    if (binding) {
+      const proof = await nativeMcpReadProof(
+        tx,
+        actor,
+        run.id,
+        { ...route, toolName: "list_crm_candidates" },
+        (readArgs, result) => {
+          const data = result.structuredContent as { data?: { rows?: unknown } } | undefined;
+          return (
+            readArgs.p_org === args.p_org &&
+            Array.isArray(data?.data?.rows) &&
+            data.data.rows.some(
+              (row) =>
+                row &&
+                typeof row === "object" &&
+                !Array.isArray(row) &&
+                row.candidate_id === args.p_candidate,
+            )
+          );
+        },
+      );
+      const rows = (
+        proof?.result.structuredContent as
+          | { data?: { rows?: Record<string, unknown>[] } }
+          | undefined
+      )?.data?.rows;
+      const candidates = rows?.filter((row) => row?.candidate_id === args.p_candidate);
+      const roleProof = await nativeMcpReadProof(
+        tx,
+        actor,
+        run.id,
+        { ...route, toolName: "get_crm_role" },
+        { p_org: args.p_org, p_role: args.p_role },
+      );
+      const role = (
+        roleProof?.result.structuredContent as { data?: Record<string, unknown> } | undefined
+      )?.data;
+      if (
+        candidates?.length !== 1 ||
+        !role ||
+        typeof role !== "object" ||
+        Array.isArray(role) ||
+        role.role_spec_id !== args.p_role ||
+        !RecruitingCrmImportArgsSchema.shape.p_org.safeParse(role.client_id).success ||
+        ![candidates[0]?.full_name, role.role_label, role.client_label].every(
+          (value) =>
+            typeof value === "string" && value.trim() && !/[\p{Cc}\p{Cf}\p{Zl}\p{Zp}]/u.test(value),
+        )
+      )
+        throw new IsolationError();
+      return {
+        candidateName: candidates[0]!.full_name as string,
+        roleTitle: role.role_label as string,
+        clientName: role.client_label as string,
+      };
+    }
     const proof = await nativeMcpReadProof(
       tx,
       actor,

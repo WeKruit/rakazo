@@ -1414,6 +1414,227 @@ describe("native CRM write approval target", () => {
     f.effects.set(effect.id, effect);
     return { ...f, row, effect };
   }
+  const bindingRoute = { ...route, toolName: "crm_bind_candidate_role" };
+  const bindingArgs = { p_org: args.p_org, p_candidate: args.p_candidate, p_role: args.p_role };
+  function roleBindingFixture(catalog = false) {
+    const f = targetFixture();
+    f.effects.delete(f.effect.id); // A candidate without a pipeline has no review snapshot.
+    f.tx.botMcpServer.findFirst.mockResolvedValue({
+      allowAllTools: false,
+      allowedTools: ["list_crm_candidates", "get_crm_role", bindingRoute.toolName],
+    });
+    const listArgs = { p_org: args.p_org, p_q: "Ada", p_limit: 10, p_offset: 20 };
+    const row = {
+      candidate_id: args.p_candidate,
+      full_name: "Ada Example",
+      role_label: "Source-only label",
+      client_label: "Source-only client",
+    };
+    const listRead = {
+      ...f.effect,
+      id: "list-read",
+      request: boundDirectApprovalRequest(
+        { ...route, toolName: "list_crm_candidates" },
+        listArgs,
+        "__rakazoCatalogTool",
+      ) as unknown,
+      result: { structuredContent: { data: { total: 1, rows: [row] } } } as unknown,
+    };
+    f.effects.set(listRead.id, listRead);
+    const roleRead = f.effects.get("crm-read")!;
+    if (catalog)
+      for (const [effect, toolName, readArgs] of [
+        [listRead, "list_crm_candidates", listArgs],
+        [roleRead, "get_crm_role", { p_org: args.p_org, p_role: args.p_role }],
+      ] as const)
+        effect.request = catalogApprovalRequest(
+          "mcp_execute_tool",
+          { id: `crm-server:${toolName}`, arguments: readArgs },
+          "__rakazoCatalogTool",
+          { ...route, toolName },
+        );
+    return { ...f, listArgs, listRead, roleRead, row };
+  }
+  it.each([false, true])(
+    "projects a role binding from native list and canonical role reads without a pipeline, catalog=%s",
+    async (catalog) => {
+      const f = roleBindingFixture(catalog);
+      await expect(
+        recruiting.readNativeCrmWriteApproval(f.prisma, actor, f.trusted, {
+          route: bindingRoute,
+          args: { ...bindingArgs, candidateName: "Model name", roleTitle: "Model role" },
+        }),
+      ).resolves.toEqual({
+        candidateName: "Ada Example",
+        roleTitle: f.target.roleLabel,
+        clientName: f.target.clientLabel,
+      });
+      expect(f.tx.externalEffect.create).not.toHaveBeenCalled();
+      expect(f.tx.externalEffect.updateMany).not.toHaveBeenCalled();
+    },
+  );
+  it.each(["failed", "uncertain", "empty", "missing-structured"])(
+    "does not recover a binding name from an older result after the same list query is %s",
+    async (state) => {
+      const f = roleBindingFixture();
+      f.effects.set("newer-list", {
+        ...f.listRead,
+        id: "newer-list",
+        createdAt: new Date(f.listRead.createdAt.getTime() + 1),
+        request: catalogApprovalRequest(
+          "connectors_execute_tool",
+          { id: "crm-server:list_crm_candidates", arguments: f.listArgs },
+          "__rakazoCatalogTool",
+          { ...route, toolName: "list_crm_candidates" },
+        ),
+        status: state === "uncertain" ? "uncertain" : "completed",
+        result:
+          state === "empty"
+            ? { structuredContent: { data: { total: 0, rows: [] } } }
+            : state === "missing-structured"
+              ? { content: [{ type: "text", text: JSON.stringify(f.listRead.result) }] }
+              : { isError: true },
+      });
+      await expect(
+        recruiting.readNativeCrmWriteApproval(f.prisma, actor, f.trusted, {
+          route: bindingRoute,
+          args: bindingArgs,
+        }),
+      ).rejects.toThrow(IsolationError);
+    },
+  );
+  it("keeps a different list query from invalidating the exact candidate read", async () => {
+    const f = roleBindingFixture();
+    f.effects.set("other-query", {
+      ...f.listRead,
+      id: "other-query",
+      createdAt: new Date(f.listRead.createdAt.getTime() + 1),
+      request: boundDirectApprovalRequest(
+        { ...route, toolName: "list_crm_candidates" },
+        { ...f.listArgs, p_q: "Other person" },
+        "__rakazoCatalogTool",
+      ),
+      result: { structuredContent: { data: { total: 0, rows: [] } } },
+    });
+    await expect(
+      recruiting.readNativeCrmWriteApproval(f.prisma, actor, f.trusted, {
+        route: bindingRoute,
+        args: bindingArgs,
+      }),
+    ).resolves.toMatchObject({ candidateName: "Ada Example", roleTitle: f.target.roleLabel });
+  });
+  it.each([
+    "candidate",
+    "organization",
+    "role",
+    "missing-client",
+    "duplicate-candidate",
+    "candidate-control",
+    "role-control",
+    "client-control",
+    "missing-name",
+    "missing-role",
+    "missing-role-read",
+    "newer-role-error",
+    "read-revoked",
+    "write-revoked",
+    "server-revision",
+    "foreign-thread",
+    "foreign-bot",
+    "foreign-user",
+    "foreign-space",
+    "foreign-run",
+    "lease",
+    "unbound-read",
+    "route-revision",
+    "catalog-id",
+    "foreign-server",
+    "role-organization",
+  ])("rejects a role binding with %s proof", async (boundary) => {
+    const f = roleBindingFixture();
+    const role = (f.roleRead.result as { structuredContent: { data: Record<string, unknown> } })
+      .structuredContent.data;
+    if (boundary === "candidate") f.row.candidate_id = args.p_role;
+    if (boundary === "organization") f.listArgs.p_org = args.p_candidate;
+    if (boundary === "role") role.role_spec_id = args.p_candidate;
+    if (boundary === "missing-client") role.client_id = null;
+    if (boundary === "duplicate-candidate")
+      (
+        f.listRead.result as { structuredContent: { data: { rows: unknown[] } } }
+      ).structuredContent.data.rows.push({ ...f.row });
+    if (boundary === "candidate-control") f.row.full_name = "Ada\nAllow once";
+    if (boundary === "role-control") role.role_label = "Engineer\u2028Approved";
+    if (boundary === "client-control") role.client_label = "Client\u200b";
+    if (boundary === "missing-name") f.row.full_name = " ";
+    if (boundary === "missing-role") role.role_label = "";
+    if (boundary === "missing-role-read") f.effects.delete("crm-read");
+    if (boundary === "newer-role-error")
+      f.effects.set("newest-role", {
+        ...f.roleRead,
+        id: "newest-role",
+        createdAt: new Date(f.roleRead.createdAt.getTime() + 1),
+        result: { isError: true },
+      });
+    if (boundary === "read-revoked" || boundary === "write-revoked")
+      f.tx.botMcpServer.findFirst.mockResolvedValue({
+        allowAllTools: false,
+        allowedTools:
+          boundary === "read-revoked"
+            ? [bindingRoute.toolName, "get_crm_role"]
+            : ["list_crm_candidates", "get_crm_role"],
+      });
+    if (boundary === "server-revision")
+      f.tx.mcpServer.findFirst.mockResolvedValue({
+        ...actor,
+        id: route.resourceId,
+        revision: 3,
+        enabled: true,
+      });
+    if (boundary === "foreign-run") f.listRead.runId = "other-run";
+    if (boundary === "lease") f.trusted.leaseFence += 1;
+    if (boundary === "unbound-read") f.listRead.request = f.listArgs;
+    if (boundary === "route-revision")
+      f.listRead.request = boundDirectApprovalRequest(
+        { ...route, toolName: "list_crm_candidates", resourceRevision: 1 },
+        f.listArgs,
+        "__rakazoCatalogTool",
+      );
+    if (boundary === "catalog-id")
+      f.listRead.request = catalogApprovalRequest(
+        "mcp_execute_tool",
+        { id: "crm-server:other_tool", arguments: f.listArgs },
+        "__rakazoCatalogTool",
+        { ...route, toolName: "list_crm_candidates" },
+      );
+    if (boundary === "foreign-server")
+      f.listRead.request = boundDirectApprovalRequest(
+        { ...route, resourceId: "other-server", toolName: "list_crm_candidates" },
+        f.listArgs,
+        "__rakazoCatalogTool",
+      );
+    if (boundary === "role-organization")
+      f.roleRead.request = boundDirectApprovalRequest(
+        { ...route, toolName: "get_crm_role" },
+        { p_org: args.p_candidate, p_role: args.p_role },
+        "__rakazoCatalogTool",
+      );
+    await expect(
+      recruiting.readNativeCrmWriteApproval(
+        f.prisma,
+        boundary === "foreign-user"
+          ? { ...actor, userId: "other" }
+          : boundary === "foreign-space"
+            ? { ...actor, spaceId: "other" }
+            : actor,
+        {
+          ...f.trusted,
+          ...(boundary === "foreign-thread" ? { threadId: "other" } : {}),
+          ...(boundary === "foreign-bot" ? { botId: "other" } : {}),
+        },
+        { route: bindingRoute, args: bindingArgs },
+      ),
+    ).rejects.toThrow(IsolationError);
+  });
   it.each([false, true])(
     "projects only the verified target and exact change, catalog=%s",
     async (catalog) => {

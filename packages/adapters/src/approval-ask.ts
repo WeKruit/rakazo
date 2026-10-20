@@ -10,7 +10,10 @@ import { nativeMemorySaveError } from "./memory-tools.js";
 
 const MAX_APPROVAL_SUMMARY_LENGTH = 500;
 const MAX_APPROVAL_DETAIL_LENGTH = 4_000;
-type CrmApprovalOperation = "crm_update_candidate_stage" | "crm_append_candidate_note";
+type CrmApprovalOperation =
+  | "crm_bind_candidate_role"
+  | "crm_update_candidate_stage"
+  | "crm_append_candidate_note";
 
 export function buildApprovalAskBlock(
   effectId: string,
@@ -71,13 +74,15 @@ export function buildApprovalAskBlock(
           ? "Review routine change"
           : shortlist
             ? "Review shortlist change"
-            : crmOperation === "crm_update_candidate_stage"
-              ? "Review CRM stage change"
-              : crmOperation === "crm_append_candidate_note"
-                ? "Review CRM note"
-                : toolName === "create_space" || recruitingApproval
-                  ? `${summary}?`
-                  : `Review before ${summary}`,
+            : crmOperation === "crm_bind_candidate_role"
+              ? "Review CRM role binding"
+              : crmOperation === "crm_update_candidate_stage"
+                ? "Review CRM stage change"
+                : crmOperation === "crm_append_candidate_note"
+                  ? "Review CRM note"
+                  : toolName === "create_space" || recruitingApproval
+                    ? `${summary}?`
+                    : `Review before ${summary}`,
         secrets,
       ),
       MAX_APPROVAL_SUMMARY_LENGTH,
@@ -180,10 +185,13 @@ function formatApprovalDetail(
     return [
       `Candidate: ${args.candidateName}`,
       `Role: ${args.roleTitle}`,
+      ...(crmOperation === "crm_bind_candidate_role" ? [`Client: ${args.clientName}`] : []),
       "",
-      crmOperation === "crm_append_candidate_note"
-        ? `Visible to organization members.\nNote to append:\n${args.note}`
-        : `Stage: ${args.currentStage ?? "None"} → ${args.newStage ?? "None"}`,
+      crmOperation === "crm_bind_candidate_role"
+        ? "Bind candidate to this role"
+        : crmOperation === "crm_append_candidate_note"
+          ? `Visible to organization members.\nNote to append:\n${args.note}`
+          : `Stage: ${args.currentStage ?? "None"} → ${args.newStage ?? "None"}`,
     ].join("\n");
   }
   if (preference) {
