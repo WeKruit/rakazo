@@ -32,6 +32,7 @@ import {
   readRecruitingJsonString,
   readRecruitingResearchReadArtifact,
   recruitingBriefClarifications,
+  recruitingGateLabels,
   validateRecruitingTextSelection,
   verifyRecruitingArtifactBytes,
 } from "@rakazo/core";
@@ -522,13 +523,29 @@ function CandidateProfile({
   );
 }
 
+function recruitingMatchSummaryText(value: string): string {
+  // ponytail: ambiguous codes may name companies/products; translate only explicit gate expressions.
+  return value.replace(
+    /https?:\/\/\S+|\bnot qualification,\s*not G[0-4](?=$|[.,;:!?)]|\s+gate\b)|\b(?:playbook\s+)?gate\s+G[0-4]\b/gi,
+    (expression) =>
+      /^https?:\/\//i.test(expression)
+        ? expression
+        : expression.replace(
+            /\bG[0-4]\b/gi,
+            (gate) => recruitingGateLabels[gate.toUpperCase() as keyof typeof recruitingGateLabels],
+          ),
+  );
+}
+
 function CandidateResearchMatch({
   candidate,
   roleRevisionId,
+  showDiagnostics,
   compact = false,
 }: {
   candidate: RecruitingCandidate;
   roleRevisionId?: string;
+  showDiagnostics: boolean;
   compact?: boolean;
 }) {
   const { t } = useLingui();
@@ -595,7 +612,16 @@ function CandidateResearchMatch({
                           : "whitespace-pre-wrap text-base"
                       }`}
                     >
-                      {field.value ?? <Trans>Unknown</Trans>}
+                      {field.value === null ? (
+                        <Trans>Unknown</Trans>
+                      ) : showDiagnostics ||
+                        !["Recommendation", "Match judgment", "Fit reasons"].includes(
+                          field.label,
+                        ) ? (
+                        field.value
+                      ) : (
+                        recruitingMatchSummaryText(field.value)
+                      )}
                     </dd>
                   </div>
                 ))}
@@ -3472,6 +3498,7 @@ function RecruitingWorkspace({
                                 <CandidateResearchMatch
                                   candidate={candidate}
                                   roleRevisionId={workspace?.revision.id}
+                                  showDiagnostics={showDiagnostics}
                                 />
                                 <CandidateAssessment candidate={candidate} />
                                 {showCrm ? (
@@ -3562,6 +3589,7 @@ function RecruitingWorkspace({
                                   <CandidateResearchMatch
                                     candidate={candidate}
                                     roleRevisionId={workspace?.revision.id}
+                                    showDiagnostics={showDiagnostics}
                                     compact
                                   />
                                 </td>
@@ -4001,6 +4029,7 @@ function RecruitingWorkspace({
               <CandidateResearchMatch
                 candidate={selection}
                 roleRevisionId={workspace?.revision.id}
+                showDiagnostics={showDiagnostics}
               />
               {selection.latestAssessment && evidenceFailed ? (
                 <p role="alert">

@@ -143,6 +143,13 @@ export function requireRecruitingBriefConfirmation(
 }
 
 export type RecruitingGate = "G0" | "G1" | "G2" | "G3" | "G4";
+export const recruitingGateLabels = {
+  G0: "Recruiting brief",
+  G1: "Job description and company materials",
+  G2: "Review of the ten candidates",
+  G3: "Campaign and lead list",
+  G4: "Individual message or scheduling action",
+} as const satisfies Record<RecruitingGate, string>;
 export type RecruitingGateReceipt = {
   gate: RecruitingGate;
   roleRevisionId: string;
@@ -213,15 +220,7 @@ export function requireRecruitingPlaybookGate(input: {
       )
     )
       throw new RecruitingPlaybookValidationError(
-        `${
-          {
-            G0: "Recruiting brief",
-            G1: "Job description and company materials",
-            G2: "Review of the ten candidates",
-            G3: "Campaign and lead list",
-            G4: "Individual message or scheduling action",
-          }[gate]
-        } requires approval for the exact current material.`,
+        `${recruitingGateLabels[gate]} requires approval for the exact current material.`,
       );
   }
   if (
