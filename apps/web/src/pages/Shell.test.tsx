@@ -1306,6 +1306,11 @@ it("refreshes persisted recruiting changes while ignoring ongoing catalog and so
   });
   receive("Research read bound", "recruiting.read", { phase: "bound" });
   receive("Material read", "recruiting.material.read", { reader: "web_fetch" });
+  receive("Context read adopted", "recruiting.context.adopted", {
+    roleId: "role",
+    roleRevisionId: "revision",
+    contextArtifact: { artifactId: "context", sha256: "a".repeat(64) },
+  });
   receive("Role read", "agent.tool.completed", { name: "recruiting_role", outcome: "succeeded" });
   receive("Unchanged role", "effect.recorded", {
     tool: "recruiting_role",
@@ -1363,6 +1368,8 @@ it("refreshes persisted recruiting changes while ignoring ongoing catalog and so
   });
   receive("Research output recorded", "recruiting.read", { phase: "recorded" });
   receive("Candidates saved", "recruiting.candidates.saved");
+  receive("Question asked", "recruiting.question.asked");
+  receive("Assessment saved", "recruiting.assessment.saved");
   receive("Preference saved", "memory.revised");
   receive("Thread cleared", "thread.cleared");
   receive("Run complete", "run.completed");
@@ -1379,6 +1386,8 @@ it("refreshes persisted recruiting changes while ignoring ongoing catalog and so
     "Candidate feedback saved",
     "Research output recorded",
     "Candidates saved",
+    "Question asked",
+    "Assessment saved",
     "Preference saved",
     "Thread cleared",
     "Run complete",

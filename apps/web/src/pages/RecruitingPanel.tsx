@@ -2720,6 +2720,13 @@ function RecruitingWorkspace({
                         </dl>
                       </details>
                     ) : null}
+                    {workspace.revision.brief.confirmation?.revision !==
+                      workspace.revision.revision &&
+                      roleQuestions.map((question) => (
+                        <p key={question} className="text-sm text-muted-foreground">
+                          {question}
+                        </p>
+                      ))}
                     {workspace.revision.brief.confirmation?.revision ===
                     workspace.revision.revision ? (
                       <p>
