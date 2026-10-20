@@ -4075,7 +4075,7 @@ export function ShellPage() {
         ) : null}
         {active || activeGroup ? (
           <Composer
-            key={`${userId}:${bootstrapMe?.spaceId}:${composerDraftKey}`}
+            key={`${userId}:${bootstrapMe?.spaceId}:${composerDraftKey}:${showToolActivity ? "developer" : "recruiting"}`}
             ref={composerRef}
             draftKey={composerDraftKey}
             enterToSend={enterToSend}
