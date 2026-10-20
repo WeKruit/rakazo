@@ -2045,10 +2045,7 @@ export async function executeRecruitingRoleMutation(
           title: input.title,
           brief: input.brief,
           sourceRefs: [...input.sourceRefs.filter((ref) => ref.id !== humanSource.id), humanSource],
-          criteria: input.criteria.map((criterion) => ({
-            ...criterion,
-            sourceRefs: criterion.sourceRefs.length ? criterion.sourceRefs : [humanSource],
-          })),
+          criteria: input.criteria,
           preferences: input.preferences,
           definitionQuestions: input.definitionQuestions,
         };

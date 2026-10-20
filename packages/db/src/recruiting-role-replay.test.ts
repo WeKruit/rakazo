@@ -101,13 +101,14 @@ function fixture() {
     externalEffect: { findFirst: vi.fn(async () => effect) },
     // Current state has advanced; replay must check the historical row without rewinding it.
     recruitingRole: {
+      create: vi.fn(),
       findFirst: vi.fn(async () => ({
         ...saved.workspace.role,
         revision: 2,
         currentRevisionId: "revision-2",
       })),
     },
-    recruitingRoleRevision: { findFirst: vi.fn(async () => row) },
+    recruitingRoleRevision: { create: vi.fn(), findFirst: vi.fn(async () => row) },
   };
   const prisma = {
     $transaction: vi.fn(async (callback) => callback(tx)),
@@ -138,6 +139,8 @@ describe("native role creation after clarification", () => {
     "forged answer",
     "new steering",
     "bind",
+    "explicit criterion source",
+    "missing criterion source",
   ])(
     "preserves the original hiring intent with multiple authenticated answers: %s",
     async (boundary) => {
@@ -238,10 +241,30 @@ describe("native role creation after clarification", () => {
       if (boundary === "foreign thread") f.human.threadId = "foreign";
       if (boundary === "bot source") f.human.role = "bot";
       if (boundary === "forged answer") receipts.at(-1)!.payload.answeredByUserId = "foreign";
+      const criterion = {
+        id: "systems",
+        priority: "hard" as const,
+        expression: {
+          kind: "atom" as const,
+          id: "systems-atom",
+          statement: "Build reliable systems",
+        },
+        sourceRefs:
+          boundary === "explicit criterion source"
+            ? [{ ...f.input.sourceRefs[0]!, id: "requirement", quote: "Build reliable systems" }]
+            : [],
+        definitionQuestions: [],
+      };
+      if (boundary.includes("criterion source"))
+        f.human.blocks = [
+          { kind: "text", text: `${f.input.intent.quote}. Build reliable systems` },
+        ];
       const input =
         boundary === "bind"
           ? { operation: "bind" as const, roleId: null, intent: f.input.intent }
-          : f.input;
+          : boundary.includes("criterion source")
+            ? { ...f.input, criteria: [criterion] }
+            : f.input;
       Object.assign(f.effect, { request: input });
       const result = executeRecruitingRoleMutation(
         f.prisma,
@@ -249,7 +272,20 @@ describe("native role creation after clarification", () => {
         { ...f.context, effectRequest: input },
         input,
       );
-      if (!["valid", "latest hint", "latest intent"].includes(boundary)) {
+      if (boundary === "missing criterion source") {
+        await expect(result).rejects.toMatchObject({
+          name: "ZodError",
+          issues: [
+            expect.objectContaining({ path: ["criteria", 0, "sourceRefs"], code: "too_small" }),
+          ],
+        });
+        expect(create).not.toHaveBeenCalled();
+        expect(f.tx.recruitingRoleRevision.create).not.toHaveBeenCalled();
+        return;
+      }
+      if (
+        !["valid", "latest hint", "latest intent", "explicit criterion source"].includes(boundary)
+      ) {
         await expect(result).rejects.toThrow(IsolationError);
         expect(create).not.toHaveBeenCalled();
         return;
@@ -265,6 +301,17 @@ describe("native role creation after clarification", () => {
         ),
       ).toEqual(expect.arrayContaining([f.human.id, ...answers.map((answer) => answer.id)]));
       expect(create).toHaveBeenCalledOnce();
+      if (boundary === "explicit criterion source") {
+        expect(saved.workspace?.revision.criteria).toEqual([criterion]);
+        expect(saved.workspace?.revision.sourceRefs).toEqual(
+          expect.arrayContaining([
+            expect.objectContaining({
+              id: `human-message:${f.human.id}`,
+              quote: f.input.intent.quote,
+            }),
+          ]),
+        );
+      }
     },
   );
 });
@@ -272,12 +319,26 @@ describe("native role creation after clarification", () => {
 describe("pre-brief immutable recruiting role receipt replay", () => {
   it("replays the original completed receipt against a migrated null brief without rewriting it", async () => {
     const f = fixture();
+    const oldCriterion = {
+      id: "legacy",
+      priority: "hard",
+      expression: { kind: "atom", id: "legacy-atom", statement: "Build reliable systems" },
+      sourceRefs: [],
+      definitionQuestions: [],
+    };
+    Object.assign(f.input, { criteria: [oldCriterion] });
+    const storedCriteria = [{ ...oldCriterion, sourceRefs: [f.saved.source] }];
+    Object.assign(f.saved.workspace.revision, { criteria: storedCriteria });
+    Object.assign(f.row, { criteria: structuredClone(storedCriteria) });
     const before = JSON.stringify(f.saved);
     expect(await executeRecruitingRoleMutation(f.prisma, actor, f.context, f.input)).toEqual(
       f.saved,
     );
     expect(JSON.stringify(f.effect.result)).toBe(before);
     expect(f.saved.workspace.revision).not.toHaveProperty("brief");
+    expect(f.input.criteria[0]).toMatchObject({ sourceRefs: [] });
+    expect(f.tx.recruitingRole.create).not.toHaveBeenCalled();
+    expect(f.tx.recruitingRoleRevision.create).not.toHaveBeenCalled();
     expect(f.tx.recruitingRoleRevision.findFirst).toHaveBeenCalledWith({
       where: { id: "revision-1", roleId: "role", revision: 1 },
     });
