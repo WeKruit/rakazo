@@ -3,7 +3,8 @@ import type { RealtimeFanout } from "@rakazo/adapter-kit";
 import type { MessageBlock } from "@rakazo/contracts";
 import { encodeLoginSecret, ProductEventSchema } from "@rakazo/contracts";
 import { stableJsonValue } from "@rakazo/core/node/approval-effect-key";
-import { describe, expect, it, vi } from "vitest";
+import { createLogger, createTestSink, installLogger } from "@rakazo/logging";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import type { PrismaClient } from "./client.js";
 import {
   answerRunInput,
@@ -22,6 +23,10 @@ import {
 } from "./events.js";
 import { RunHistoryWriteError } from "./messages.js";
 import { IsolationError } from "./scope.js";
+
+afterEach(() => {
+  installLogger(createLogger({ service: "rakazo-test", level: "off", sinks: [] }));
+});
 
 class TestFanout implements RealtimeFanout {
   subscriber: ((payload: string) => void) | undefined;
@@ -1718,6 +1723,8 @@ describe("answerRunInput", () => {
   });
 
   it("answers only the selected pending prompt and publishes its update", async () => {
+    const sink = createTestSink();
+    installLogger(createLogger({ service: "rakazo-test", sinks: [sink] }));
     const fanout = new TestFanout();
     const publish = vi.spyOn(fanout, "publish");
     publish.mockRejectedValueOnce(new Error("realtime unavailable"));
@@ -1814,6 +1821,15 @@ describe("answerRunInput", () => {
       }),
     );
     expect(publish).toHaveBeenCalledWith("thread:thread-1", JSON.stringify({ cursor: 9 }));
+    expect(sink.events).toEqual([
+      expect.objectContaining({
+        level: "error",
+        message: "thread.realtime.publish.failed",
+        threadId: "thread-1",
+        cursor: 9,
+      }),
+    ]);
+    expect(JSON.stringify(sink.events)).not.toContain("Paris");
   });
 
   it.each(["routine", "user"])(
