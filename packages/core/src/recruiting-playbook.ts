@@ -95,7 +95,14 @@ export function recruitingBriefClarifications(brief: RecruitingBriefDraft) {
     question:
       brief.questions.find(
         (question) => question.fieldKey === field.key && !question.answeredBySourceRefId,
-      )?.question ?? `Please resolve ${field.key}.`,
+      )?.question ??
+      (field.key === "salary_range"
+        ? "What salary range may be stated in outreach?"
+        : field.key === "location"
+          ? "What location or remote work scope applies?"
+          : field.key === "company_deck"
+            ? "Is a company deck available?"
+            : "Please clarify the unresolved role detail."),
   }));
   if (!brief.fields.some((field) => field.key === "salary_range"))
     questions.unshift({
@@ -131,7 +138,7 @@ export function requireRecruitingBriefConfirmation(
     recruitingBriefClarifications(brief).length
   )
     throw new RecruitingPlaybookValidationError(
-      "G0 requires explicit confirmation of the current recruiting brief.",
+      "Confirm the current recruiting brief before continuing.",
     );
 }
 
@@ -206,7 +213,15 @@ export function requireRecruitingPlaybookGate(input: {
       )
     )
       throw new RecruitingPlaybookValidationError(
-        `${gate} requires a current exact native approval.`,
+        `${
+          {
+            G0: "Recruiting brief",
+            G1: "Job description and company materials",
+            G2: "Review of the ten candidates",
+            G3: "Campaign and lead list",
+            G4: "Individual message or scheduling action",
+          }[gate]
+        } requires approval for the exact current material.`,
       );
   }
   if (
@@ -222,7 +237,7 @@ export function requireRecruitingPlaybookGate(input: {
       ))
   )
     throw new RecruitingPlaybookValidationError(
-      "G2 requires exactly ten distinct evidenced profiles.",
+      "Candidate review requires exactly ten distinct profiles with supporting evidence.",
     );
 }
 

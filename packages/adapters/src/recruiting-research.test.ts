@@ -571,7 +571,9 @@ describe("confirmed brief adoption", () => {
     ]) {
       const updated = structuredClone(context);
       updated.workspace.revision.brief!.confirmation = confirmation;
-      expect(() => buildRecruitingResearchRequest({ ...request, context: updated })).toThrow(/G0/);
+      expect(() => buildRecruitingResearchRequest({ ...request, context: updated })).toThrow(
+        /Confirm the current recruiting brief/,
+      );
     }
   });
 });

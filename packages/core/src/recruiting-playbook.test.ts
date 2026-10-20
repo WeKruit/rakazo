@@ -127,6 +127,29 @@ describe("sourced recruiting intake", () => {
       "location",
     ]);
   });
+  it("phrases missing known brief fields without exposing internal keys", () => {
+    const draft = brief();
+    draft.fields[0] = { ...draft.fields[0]!, state: "missing", value: null };
+    draft.fields.push(
+      { ...draft.fields[0]!, key: "company_deck", consequential: true },
+      { ...draft.fields[0]!, key: "private_internal_field", consequential: true },
+    );
+    expect(recruitingBriefClarifications(draft)).toEqual([
+      { fieldKey: "salary_range", question: "What salary range may be stated in outreach?" },
+      { fieldKey: "company_deck", question: "Is a company deck available?" },
+      {
+        fieldKey: "private_internal_field",
+        question: "Please clarify the unresolved role detail.",
+      },
+    ]);
+    draft.questions.push({
+      id: "deck-question",
+      fieldKey: "company_deck",
+      question: "Should we use the saved company presentation?",
+      answeredBySourceRefId: null,
+    });
+    expect(recruitingBriefClarifications(draft)[1]!.question).toBe(draft.questions[0]!.question);
+  });
   it("accepts sourced unrestricted location without inventing a retrieval restriction", () => {
     const draft = brief();
     draft.fields[1]!.value = "Unrestricted";
@@ -270,8 +293,12 @@ describe("sourced recruiting intake", () => {
       },
     };
     expect(() => requireRecruitingBriefConfirmation(confirmed)).not.toThrow();
-    expect(() => requireRecruitingBriefConfirmation({ ...confirmed, revision: 3 })).toThrow(/G0/);
-    expect(() => requireRecruitingBriefConfirmation({ revision: 1, brief: null })).toThrow(/G0/);
+    expect(() => requireRecruitingBriefConfirmation({ ...confirmed, revision: 3 })).toThrow(
+      "Confirm the current recruiting brief before continuing.",
+    );
+    expect(() => requireRecruitingBriefConfirmation({ revision: 1, brief: null })).toThrow(
+      "Confirm the current recruiting brief before continuing.",
+    );
     expect(RecruitingBriefDraftSchema.safeParse(confirmed.brief).success).toBe(false);
     expect(
       RecruitingRoleToolInputSchema.safeParse({
@@ -329,8 +356,10 @@ describe("deterministic playbook approval gates", () => {
       input.receipts.map((receipt) => ({ ...receipt, spaceId: "foreign" })),
       input.receipts.map((receipt) => ({ ...receipt, approvedByUserId: "foreign" })),
       input.receipts.map((receipt) => ({ ...receipt, payloadHash: "b".repeat(64) })),
-    ])
+    ]) {
       expect(() => requireRecruitingPlaybookGate({ ...input, receipts })).toThrow(/approval/);
+      expect(() => requireRecruitingPlaybookGate({ ...input, receipts })).not.toThrow(/\bG[0-4]\b/);
+    }
   });
   it("rejects nine, eleven, duplicated or unevidenced calibration profiles", () => {
     const receipts = gates.map((gate) => ({
@@ -361,7 +390,9 @@ describe("deterministic playbook approval gates", () => {
           receipts,
           calibration,
         }),
-      ).toThrow(/ten/);
+      ).toThrow(
+        "Candidate review requires exactly ten distinct profiles with supporting evidence.",
+      );
   });
   it("blocks suppression, hold/pass and duplicates before the CRM-note exception", () => {
     const base = {

@@ -5907,6 +5907,63 @@ it("shows exact brief prose and sourced details while collecting unresolved ques
   expect(api.confirmBrief).not.toHaveBeenCalled();
 });
 
+it("names known brief details and asks their missing question without requesting another question", async () => {
+  api.getWorkspace.mockResolvedValue({
+    role,
+    revision: {
+      ...revision,
+      definitionQuestions: [],
+      criteria: revision.criteria.map((criterion) => ({ ...criterion, definitionQuestions: [] })),
+      brief: {
+        fields: [
+          {
+            key: "salary_range",
+            value: "GBP 90,000 to 120,000",
+            state: "known",
+            origin: "jd",
+            consequential: true,
+            sourceRefIds: [source.id],
+          },
+          {
+            key: "location",
+            value: "Remote in the United Kingdom",
+            state: "known",
+            origin: "jd",
+            consequential: true,
+            sourceRefIds: [source.id],
+          },
+          {
+            key: "company_deck",
+            value: null,
+            state: "missing",
+            origin: "jd",
+            consequential: true,
+            sourceRefIds: [],
+          },
+        ],
+        questions: [],
+        rules: [],
+        searchFilters: [],
+        confirmation: null,
+      },
+    },
+  });
+  const view = await mounted("thread-1", undefined, false);
+  expect(view.container.textContent).toContain("Salary range");
+  expect(view.container.textContent).toContain("Location");
+  expect(view.container.textContent).toContain("GBP 90,000 to 120,000");
+  await view.click("Missing info");
+  const definition = [...view.container.querySelectorAll("h3")].find(
+    (item) => item.textContent === "Role definition",
+  )!.parentElement!;
+  expect(definition.textContent).toContain("Is a company deck available?");
+  expect(definition.textContent).not.toContain("Ask an agent to clarify in chat.");
+  expect(definition.textContent).not.toContain("company_deck");
+  expect(definition.textContent).not.toContain("salary_range");
+  expect(definition.textContent).not.toContain("What salary range may be stated in outreach?");
+  expect(api.confirmBrief).not.toHaveBeenCalled();
+});
+
 it.each(["missing", "conflict", "known"] as const)(
   "keeps an unphrased consequential %s field visible as unresolved without exposing its key",
   async (state) => {

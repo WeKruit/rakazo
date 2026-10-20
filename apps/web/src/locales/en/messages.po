@@ -1230,6 +1230,10 @@ msgstr "Compact"
 msgid "Company"
 msgstr "Company"
 
+#: src/pages/RecruitingPanel.tsx
+msgid "Company deck"
+msgstr "Company deck"
+
 #. placeholder {0}: candidate.company
 #: src/pages/Shell.tsx
 msgid "Company: {0}"
@@ -2866,6 +2870,10 @@ msgstr "Interval amount"
 #: src/pages/RoutineSchedule.tsx
 msgid "Interval unit"
 msgstr "Interval unit"
+
+#: src/pages/RecruitingPanel.tsx
+msgid "Is a company deck available?"
+msgstr "Is a company deck available?"
 
 #: src/pages/MemorySettingsOverlay.tsx
 #: src/pages/shell/bot-panel.tsx
@@ -4534,6 +4542,10 @@ msgstr "Running…"
 #: src/pages/RoutineEditor.tsx
 msgid "Runs when this bot receives a verified message from this provider."
 msgstr "Runs when this bot receives a verified message from this provider."
+
+#: src/pages/RecruitingPanel.tsx
+msgid "Salary range"
+msgstr "Salary range"
 
 #: src/components/AskCard.tsx
 #: src/components/teach/SkillDraftCard.tsx

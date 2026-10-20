@@ -1939,11 +1939,15 @@ function RecruitingWorkspace({
   const criteria = workspace?.revision.criteria ?? [];
   const brief = workspace?.revision.brief;
   const briefClarifications = brief ? recruitingBriefClarifications(brief) : [];
+  const briefFieldLabels: Record<string, string> = {
+    salary_range: t`Salary range`,
+    location: t`Location`,
+    company_deck: t`Company deck`,
+  };
   const unphrasedBriefFields = (brief?.fields ?? []).filter(
     (field) =>
       briefClarifications.some(({ fieldKey }) => fieldKey === field.key) &&
-      field.key !== "salary_range" &&
-      field.key !== "location" &&
+      !Object.hasOwn(briefFieldLabels, field.key) &&
       !brief?.questions.some(
         (question) => question.fieldKey === field.key && !question.answeredBySourceRefId,
       ),
@@ -1957,6 +1961,7 @@ function RecruitingWorkspace({
         if (saved) return [saved.question];
         if (fieldKey === "salary_range") return [t`What salary range may be stated in outreach?`];
         if (fieldKey === "location") return [t`What location or remote work scope applies?`];
+        if (fieldKey === "company_deck") return [t`Is a company deck available?`];
         // ponytail: arbitrary keys have no display label; only saved prose identifies the question.
         return showDiagnostics ? [question] : [];
       }),
@@ -2625,6 +2630,11 @@ function RecruitingWorkspace({
                         .filter((field) => field.value !== null)
                         .map((field) => (
                           <li key={field.key} className="space-y-1">
+                            {Object.hasOwn(briefFieldLabels, field.key) ? (
+                              <p className="text-xs text-muted-foreground">
+                                {briefFieldLabels[field.key]}
+                              </p>
+                            ) : null}
                             <p className="whitespace-pre-wrap">{field.value}</p>
                             {field.state !== "known" ? (
                               <p className="text-xs text-muted-foreground">
