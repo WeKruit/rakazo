@@ -62,6 +62,7 @@ import {
   RecruitingReplyInputSchema,
   RecruitingResearchToolInputSchema,
   RecruitingShortlistToolInputSchema,
+  RetainedRecruitingApprovalRequestSchema,
 } from "@rakazo/contracts";
 import type { ActionApprovalRule, ToolCallStreak } from "@rakazo/core";
 import {
@@ -4142,6 +4143,27 @@ export function createRunExecutor(deps: ExecutorDeps) {
           select: { id: true, kind: true, request: true },
         });
         const approvedEffectReplays = createApprovedEffectReplayQueue(approvedEffects);
+        const legacyCalibrations = approvedEffects.flatMap((effect) => {
+          if (effect.kind !== "recruiting_request_approval") return [];
+          const saved = RetainedRecruitingApprovalRequestSchema.safeParse(effect.request);
+          return saved.success &&
+            saved.data.stage === "calibration" &&
+            saved.data.profiles.some((profile) => "assessmentVersion" in profile)
+            ? [effect.request]
+            : [];
+        });
+        if (legacyCalibrations.length) {
+          const index = tools.findIndex((tool) => tool.name === "recruiting_request_approval");
+          if (index !== -1)
+            tools[index] = {
+              ...tools[index]!,
+              inputSchema: {
+                ...RetainedRecruitingApprovalRequestSchema.toJSONSchema({ io: "input" }),
+                // ponytail: this legacy recovery run accepts only approved originals; the next run rebuilds native parameters.
+                enum: legacyCalibrations,
+              },
+            };
+        }
         const baseComputerInstruction = persistentComputerInstruction({
           heldForTakeover,
           graphicalToolsAllowed,
@@ -4980,7 +5002,11 @@ export function createRunExecutor(deps: ExecutorDeps) {
             approvedEffectReplays.take(nextApprovedTool);
           }
           if (name === "recruiting_request_approval") {
-            const parsed = RecruitingApprovalToolInputSchema.safeParse(args);
+            const parsed = (
+              nextApprovedTool === name
+                ? RetainedRecruitingApprovalRequestSchema
+                : RecruitingApprovalToolInputSchema
+            ).safeParse(args);
             if (!parsed.success) return { error: sanitizeConnectorError(parsed.error, runSecrets) };
             args = parsed.data;
             effectRequest = args;
@@ -5776,6 +5802,9 @@ export function createRunExecutor(deps: ExecutorDeps) {
             }
             let files: MessageBlock[] = [];
             let approvalArgs = args;
+            let recruitingApproval:
+              | Awaited<ReturnType<typeof prepareRecruitingApproval>>
+              | undefined;
             let crmOperation:
               | "crm_bind_candidate_role"
               | "crm_update_candidate_stage"
@@ -5858,7 +5887,7 @@ export function createRunExecutor(deps: ExecutorDeps) {
             if (name === "recruiting_request_approval") {
               try {
                 if (!deps.artifacts) throw new IsolationError();
-                ({ files } = await prepareRecruitingApproval(
+                recruitingApproval = await prepareRecruitingApproval(
                   deps.prisma,
                   researchActor.actor,
                   {
@@ -5870,7 +5899,8 @@ export function createRunExecutor(deps: ExecutorDeps) {
                   },
                   args,
                   { artifacts: deps.artifacts, context },
-                ));
+                );
+                files = recruitingApproval.files;
               } catch (error) {
                 const result = roleError(error);
                 return (await completeEffect(deps, applied!.effect.id, "intended", result))
@@ -5934,6 +5964,7 @@ export function createRunExecutor(deps: ExecutorDeps) {
                   : reviewReason,
                 oneTimeOnly: requiresExplicitApproval,
                 crmOperation,
+                recruiting: recruitingApproval,
               },
             );
             const paused = await deps.events.pauseRunForInput({

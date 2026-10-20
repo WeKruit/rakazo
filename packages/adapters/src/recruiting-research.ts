@@ -1,6 +1,5 @@
 import { createHash } from "node:crypto";
 import type {
-  RecruitingCandidateReport,
   RecruitingHumanIntent,
   RecruitingResearchObservation,
   RecruitingResearchPurpose,
@@ -19,7 +18,11 @@ import {
   RECRUITING_CANDIDATE_OUTPUT_INSTRUCTIONS,
   requireRecruitingBriefConfirmation,
 } from "@rakazo/core";
-import { stableJsonValue } from "@rakazo/core/node/approval-effect-key";
+import { mcpObject } from "@rakazo/core/node/approval-effect-key";
+
+export { isRecruitingCandidateReportField, projectRecruitingCandidateReport } from "@rakazo/core";
+export { mcpObject } from "@rakazo/core/node/approval-effect-key";
+
 import { z } from "zod";
 import type { LoadedRecruitingRunContext } from "./recruiting-context.js";
 
@@ -343,146 +346,4 @@ function record(value: unknown): Record<string, unknown> | undefined {
 
 function nonblank(value: unknown): value is string {
   return typeof value === "string" && value.trim().length > 0;
-}
-
-export function mcpObject(raw: unknown): Record<string, unknown> | undefined {
-  const envelope = record(raw);
-  if (!envelope) return undefined;
-  const bodies: Record<string, unknown>[] = [];
-  if (envelope.structuredContent !== undefined) {
-    const body = record(envelope.structuredContent);
-    if (!body) return undefined;
-    bodies.push(body);
-  }
-  for (const block of Array.isArray(envelope.content) ? envelope.content : []) {
-    if (record(block)?.type !== "text" || typeof block.text !== "string") continue;
-    try {
-      const body = record(JSON.parse(block.text));
-      if (body) bodies.push(body);
-    } catch {
-      /* Narrative text is never a structured receipt. */
-    }
-  }
-  if (!bodies.length) return undefined;
-  try {
-    const first = stableJsonValue(bodies[0]);
-    if (bodies.some((body) => stableJsonValue(body) !== first)) return undefined;
-  } catch {
-    return undefined;
-  }
-  return bodies[0];
-}
-
-// These are transport/provenance fields, not provider observations about the person.
-const reportMetadata = new Set([
-  "id",
-  "taskid",
-  "taskids",
-  "providertaskid",
-  "artifactid",
-  "artifactids",
-  "artifactref",
-  "actionid",
-  "effectid",
-  "runid",
-  "threadid",
-  "roleid",
-  "rolerevisionid",
-  "sourceid",
-  "shardid",
-  "shardids",
-  "outputid",
-  "receiptid",
-  "request",
-  "response",
-  "route",
-  "routing",
-  "cursor",
-  "nextcursor",
-  "requestcursor",
-  "providerresult",
-  "observation",
-  "metadata",
-  "traceid",
-  "storagekey",
-  "sha256",
-  "hash",
-  "toolname",
-  "connectorid",
-  "resourceid",
-  "resourcerevision",
-  "cataloggroup",
-  "clientnonce",
-]);
-
-/** The same business/provenance boundary governs report display and retained row equivalence. */
-export function isRecruitingCandidateReportField(key: string): boolean {
-  return !key.startsWith("_") && !reportMetadata.has(key.replace(/[_-]/g, "").toLowerCase());
-}
-
-/** Display supplied scalar observations only; the original artifact remains authoritative. */
-export function projectRecruitingCandidateReport(raw: unknown): RecruitingCandidateReport {
-  const row = record(raw);
-  if (!row) throw new Error("Retained candidate row is invalid");
-  const sources = record(row._sources);
-  const links = (value: unknown): string[] => {
-    const values = Array.isArray(value) ? value : [value];
-    return values.filter((value): value is string => {
-      // ponytail: keep annotated or multi-URL prose as text instead of guessing link boundaries.
-      if (typeof value !== "string" || /\s/u.test(value)) return false;
-      try {
-        const url = new URL(value);
-        return ["http:", "https:"].includes(url.protocol) && !url.username && !url.password;
-      } catch {
-        return false;
-      }
-    });
-  };
-  const scalar = (value: unknown): value is string | number | boolean | null =>
-    value === null ||
-    typeof value === "string" ||
-    typeof value === "boolean" ||
-    (typeof value === "number" && Number.isFinite(value));
-  const fields: RecruitingCandidateReport["fields"] = [];
-  for (const [key, rawCell] of Object.entries(row)) {
-    if (!isRecruitingCandidateReportField(key)) continue;
-    const cell = record(rawCell);
-    const absent =
-      cell &&
-      !Object.hasOwn(cell, "value") &&
-      Object.hasOwn(cell, "absent") &&
-      typeof cell.absent === "boolean";
-    const value =
-      cell && Object.hasOwn(cell, "value") ? cell.value : absent ? cell.absent : rawCell;
-    if (!scalar(value) && !(Array.isArray(value) && value.every(scalar))) continue;
-    const sourceIds = cell
-      ? Array.isArray(cell.source_id)
-        ? cell.source_id
-        : [cell.source_id]
-      : [];
-    const sourceUrls = [
-      ...new Set([
-        ...links(value),
-        ...sourceIds.flatMap((id) =>
-          typeof id === "string" && sources && Object.hasOwn(sources, id) ? links(sources[id]) : [],
-        ),
-      ]),
-    ];
-    const label = key
-      .replace(/^(?:rule_[a-z]+\d+|round\d+)_/i, "")
-      .replace(/([a-z])([A-Z])/g, "$1 $2")
-      .replace(/[_-]+/g, " ")
-      .trim();
-    if (!label) continue;
-    fields.push({
-      label: label[0]!.toUpperCase() + label.slice(1) + (absent ? " absent" : ""),
-      value:
-        value === null ? null : Array.isArray(value) ? value.map(String).join("\n") : String(value),
-      ...(typeof cell?.evidence === "string" ? { evidence: cell.evidence } : {}),
-      ...(typeof cell?.reasoning === "string" ? { reasoning: cell.reasoning } : {}),
-      sourceUrls,
-    });
-  }
-  if (!fields.length) throw new Error("Retained candidate row has no readable observations");
-  return { fields, sourceUrls: [...new Set(fields.flatMap((field) => field.sourceUrls))] };
 }

@@ -418,7 +418,13 @@ describe("recruiting contracts", () => {
       documentsApprovalEffectId: "documents-approval",
       profiles: Array.from({ length: 10 }, (_, i) => ({
         candidateKey: `candidate-${i}`,
-        assessmentVersion: 1,
+        source: {
+          effectId: "source-effect",
+          rowIndex: i,
+          roleRevisionId: "role-revision",
+          providerTaskId: "provider-task",
+          artifactRef: artifact,
+        },
         linkedinUrl: `https://www.linkedin.com/in/example-${i}`,
         evidenceUrl: `https://example.com/evidence/${i}`,
       })),
@@ -427,6 +433,34 @@ describe("recruiting contracts", () => {
     const schema = contracts.RecruitingApprovalToolInputSchema;
     expect(schema.parse(documents)).toEqual(documents);
     expect(schema.parse(calibration)).toEqual(calibration);
+    const historical = {
+      ...calibration,
+      profiles: calibration.profiles.map(({ source: _source, ...profile }) => ({
+        ...profile,
+        assessmentVersion: 1,
+      })),
+    };
+    expect(schema.safeParse(historical).success).toBe(false);
+    expect(contracts.RetainedRecruitingApprovalRequestSchema.parse(historical)).toEqual(historical);
+    expect(
+      JSON.stringify(contracts.RecruitingApprovalToolInputSchema.toJSONSchema()),
+    ).not.toContain("assessmentVersion");
+    for (const field of [
+      "effectId",
+      "rowIndex",
+      "roleRevisionId",
+      "providerTaskId",
+      "artifactRef",
+    ]) {
+      const source = { ...calibration.profiles[0]!.source };
+      delete source[field as keyof typeof source];
+      expect(
+        schema.safeParse({
+          ...calibration,
+          profiles: [{ ...calibration.profiles[0], source }, ...calibration.profiles.slice(1)],
+        }).success,
+      ).toBe(false);
+    }
     for (const input of [documents, calibration]) {
       for (const field of ["approvedByUserId", "approvedAt", "status", "spaceId", "runId"])
         expect(schema.safeParse({ ...input, [field]: "forged" }).success).toBe(false);

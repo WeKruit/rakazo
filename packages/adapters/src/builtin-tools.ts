@@ -582,7 +582,7 @@ export const builtinAgentTools: ConnectorTool[] = [
   {
     name: "recruiting_request_approval",
     description:
-      "Request one-time human confirmation of the exact current package: role documents or the ten-profile calibration and rule changes. Use the current role revision and real artifact, assessment and approval effect references. Save and confirm qualification changes in the role first; this approval records the review and does not edit the role. Never self-approve.",
+      "Request one-time human confirmation of the exact current package: role documents or the ten-profile calibration and rule changes. Use the current role revision, the completed document approval effect, and ten exact saved candidate sources (effectId, rowIndex, artifactRef, roleRevisionId, providerTaskId), with their observed LinkedIn and evidence URLs. Save and confirm qualification changes in the role first; this approval records the review and does not edit the role. Never self-approve.",
     inputSchema: z.toJSONSchema(RecruitingApprovalToolInputSchema, { io: "input" }),
   },
   {
