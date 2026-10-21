@@ -7,6 +7,7 @@ import type {
   ThreadMessage,
 } from "@rakazo/contracts";
 import type { ComposerMention } from "@rakazo/core";
+import * as CoreModule from "@rakazo/core";
 import type { ComponentProps, ReactNode } from "react";
 import { act, createRef } from "react";
 import type { Root } from "react-dom/client";
@@ -48,6 +49,7 @@ const shellApi = vi.hoisted(() => ({
   listArchivedBots: vi.fn(),
   archiveBot: vi.fn(),
   updateBot: vi.fn(),
+  reorderBots: vi.fn(),
   recruiting: {
     getWorkspace: vi.fn(),
     listAssessments: vi.fn(),
@@ -97,6 +99,7 @@ vi.mock("../lib/rpc", async (importOriginal) => ({
       listArchived: shellApi.listArchivedBots,
       archive: shellApi.archiveBot,
       update: shellApi.updateBot,
+      reorder: shellApi.reorderBots,
     },
     memory: {
       list: vi.fn().mockResolvedValue([]),
@@ -129,6 +132,7 @@ afterEach(() => {
   localStorage.clear();
   vi.restoreAllMocks();
   vi.clearAllMocks();
+  vi.useRealTimers();
 });
 
 const bob: ComposerMention = { kind: "bot", id: "bot-2", name: "Bob" };
@@ -504,6 +508,245 @@ it("loads a cold group from its own snapshot when bootstrap has no DM snapshot",
   expect(container?.textContent).toContain("Choose the role location");
   expect(shellApi.recruiting.getWorkspace).toHaveBeenCalledWith({ threadId: "thread-1" });
 });
+
+it.each(["success", "error"] as const)(
+  "coalesces navigation refreshes through %s while retaining events, archive reads and a newly created role",
+  async (firstOutcome) => {
+    vi.useFakeTimers();
+    vi.spyOn(document, "visibilityState", "get").mockReturnValue("visible");
+    const streams: Array<{
+      options: Parameters<typeof CoreModule.runThreadSubscription>[0];
+      head: { threadId: string; cursor: number };
+    }> = [];
+    vi.spyOn(CoreModule, "runThreadSubscription").mockImplementation(async (options) => {
+      const head = await options.loadInitial();
+      if (head) streams.push({ options, head });
+    });
+    setToolActivityPreference("off");
+    const view = await renderFeedbackShell("bot", undefined, {
+      openFeedback: false,
+      isDeploymentOwner: false,
+    });
+    let resolveFirst!: (value: typeof view.navigation) => void;
+    let rejectFirst!: (error: Error) => void;
+    let resolveSecond!: (value: typeof view.navigation) => void;
+    shellApi.listSpaces
+      .mockReturnValueOnce(
+        new Promise((resolve, reject) => {
+          resolveFirst = resolve;
+          rejectFirst = reject;
+        }),
+      )
+      .mockReturnValueOnce(
+        new Promise((resolve) => {
+          resolveSecond = resolve;
+        }),
+      );
+    await act(async () => {
+      window.dispatchEvent(new Event("focus"));
+      await vi.advanceTimersByTimeAsync(51);
+    });
+    expect(shellApi.listSpaces).toHaveBeenCalledTimes(1);
+    const stream = streams.at(-1)!;
+    await act(async () => {
+      for (const [index, type] of (
+        ["run.started", "bot.archived", "run.completed"] as const
+      ).entries()) {
+        stream.options.onEvent(
+          {
+            id: `navigation-event-${index}`,
+            type,
+            threadId: stream.head.threadId,
+            botId: "bot-1",
+            spaceId: "space-1",
+            runId: "run-main",
+            seq: index + 2,
+            payload: {},
+            createdAt: "2026-01-01T00:00:00Z",
+          },
+          stream.head,
+        );
+      }
+      window.dispatchEvent(new Event("focus"));
+      await vi.advanceTimersByTimeAsync(3_100);
+    });
+    expect(shellApi.listSpaces).toHaveBeenCalledTimes(1);
+    await view.navigate("/app/g/group-1");
+    const fresh = {
+      ...view.group,
+      id: "group-new",
+      threadId: "thread-new",
+      name: "Fresh systems role",
+    };
+    shellApi.createGroup.mockResolvedValue(fresh);
+    shellApi.get.mockImplementation(async ({ groupId }) =>
+      groupId === fresh.id
+        ? {
+            ...view.thread,
+            threadId: fresh.threadId,
+            groupId: fresh.id,
+            groupName: fresh.name,
+            messages: [],
+            run: null,
+          }
+        : view.thread,
+    );
+    await view.click("New role");
+    const input = container!.querySelector<HTMLInputElement>(
+      'input[placeholder="Name this role"]',
+    )!;
+    act(() => {
+      Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, "value")!.set!.call(
+        input,
+        fresh.name,
+      );
+      input.dispatchEvent(new Event("input", { bubbles: true }));
+    });
+    await view.click("Create role");
+    expect(shellApi.createGroup).toHaveBeenCalledExactlyOnceWith({
+      name: fresh.name,
+      botIds: view.members.map((member) => member.botId),
+    });
+    await act(async () => {
+      if (firstOutcome === "success") resolveFirst(view.navigation);
+      else rejectFirst(new Error("Navigation unavailable"));
+    });
+    expect(shellApi.listSpaces).toHaveBeenCalledTimes(2);
+    expect(container?.querySelector("h1")?.textContent).toBe(fresh.name);
+    expect(shellApi.listArchivedGroups).toHaveBeenCalledOnce();
+    expect(shellApi.listArchivedBots).toHaveBeenCalledOnce();
+    await act(async () => vi.advanceTimersByTimeAsync(6_000));
+    expect(shellApi.listSpaces).toHaveBeenCalledTimes(2);
+    const updated = structuredClone(view.navigation);
+    updated.current.groups[0]!.name = "Refreshed recruiting crew";
+    updated.current.groups.unshift(fresh);
+    await act(async () => resolveSecond(updated));
+    expect(shellApi.listSpaces).toHaveBeenCalledTimes(2);
+    expect(container?.textContent).toContain("Refreshed recruiting crew");
+    expect(container?.querySelector("h1")?.textContent).toBe(fresh.name);
+    expect(container?.querySelector('textarea[name="chat-message"]')).not.toBeNull();
+    expect(shellApi.send).not.toHaveBeenCalled();
+    expect(shellApi.answer).not.toHaveBeenCalled();
+    await act(async () => vi.advanceTimersByTimeAsync(3_000));
+    expect(shellApi.listSpaces).toHaveBeenCalledTimes(3);
+    expect(shellApi.listArchivedGroups).toHaveBeenCalledOnce();
+  },
+);
+
+it.each(["archive", "order"] as const)(
+  "retains %s refresh options when a normal refresh is already pending",
+  async (operation) => {
+    vi.useFakeTimers();
+    vi.spyOn(document, "visibilityState", "get").mockReturnValue("visible");
+    setToolActivityPreference(operation === "order" ? "on" : "off");
+    const view = await renderFeedbackShell("bot", undefined, {
+      openFeedback: false,
+      allGroupsArchived: operation === "archive",
+    });
+    let reject!: (error: Error) => void;
+    let resolveNavigation!: (value: typeof view.navigation) => void;
+    if (operation === "archive") {
+      shellApi.listSpaces.mockReturnValueOnce(
+        new Promise((resolve) => {
+          resolveNavigation = resolve;
+        }),
+      );
+      shellApi.listArchivedGroups.mockReturnValueOnce(
+        new Promise((_resolve, fail) => {
+          reject = fail;
+        }),
+      );
+      shellApi.restoreGroup.mockImplementation(async () => {
+        view.navigation.current.groups = [view.group];
+        return { ok: true };
+      });
+      await view.click("Archived");
+      await view.click("Restore");
+      shellApi.listArchivedGroups.mockResolvedValue([]);
+    } else {
+      shellApi.listSpaces.mockReturnValueOnce(
+        new Promise((resolve) => {
+          resolveNavigation = resolve;
+        }),
+      );
+      shellApi.reorderBots.mockRejectedValueOnce(new Error("Order could not be saved"));
+      await act(async () =>
+        container!
+          .querySelector('[data-roster-bot-id="bot-1"]')!
+          .dispatchEvent(
+            new KeyboardEvent("keydown", { key: "ArrowDown", altKey: true, bubbles: true }),
+          ),
+      );
+      expect(shellApi.reorderBots).toHaveBeenCalledExactlyOnceWith({ botIds: ["bot-2", "bot-1"] });
+    }
+    expect(shellApi.listSpaces).toHaveBeenCalledTimes(1);
+    await act(async () => {
+      window.dispatchEvent(new Event("focus"));
+      await vi.advanceTimersByTimeAsync(51);
+    });
+    expect(shellApi.listSpaces).toHaveBeenCalledTimes(1);
+    if (operation === "archive") {
+      await act(async () => reject(new Error("Navigation unavailable")));
+      expect(shellApi.listSpaces).toHaveBeenCalledTimes(1);
+    }
+    await act(async () => resolveNavigation(view.navigation));
+    expect(shellApi.listSpaces).toHaveBeenCalledTimes(2);
+    if (operation === "archive") {
+      expect(shellApi.listArchivedGroups).toHaveBeenCalledTimes(2);
+      expect(shellApi.listArchivedBots).toHaveBeenCalledTimes(2);
+      expect(container?.querySelector('fieldset[aria-label="Recruiting crew"]')).toBeNull();
+      expect(
+        container?.querySelector('nav[aria-label="Role conversations"]')?.textContent,
+      ).toContain(view.group.name);
+    } else {
+      expect(
+        [...container!.querySelectorAll("[data-roster-bot-id]")].map((row) =>
+          row.getAttribute("data-roster-bot-id"),
+        ),
+      ).toEqual(["bot-1", "bot-2"]);
+    }
+  },
+);
+
+it.each(["unmount", "user"] as const)(
+  "drops the old navigation response and queued refresh after %s changes",
+  async (change) => {
+    vi.useFakeTimers();
+    vi.spyOn(document, "visibilityState", "get").mockReturnValue("visible");
+    const view = await renderFeedbackShell("bot", undefined, { openFeedback: false });
+    let resolve!: (value: typeof view.navigation) => void;
+    shellApi.listSpaces.mockReturnValueOnce(
+      new Promise((done) => {
+        resolve = done;
+      }),
+    );
+    await act(async () => {
+      window.dispatchEvent(new Event("focus"));
+      await vi.advanceTimersByTimeAsync(51);
+      window.dispatchEvent(new Event("focus"));
+      await vi.advanceTimersByTimeAsync(51);
+    });
+    expect(shellApi.listSpaces).toHaveBeenCalledTimes(1);
+    if (change === "unmount") {
+      act(() => root!.unmount());
+      root = null;
+    } else {
+      shellApi.session = {
+        data: { user: { id: "other-user", name: "Other", email: "other@example.test" } },
+      };
+      await view.render();
+      shellApi.session = {
+        data: { user: { id: "user-1", name: "Synthetic recruiter", email: "user@example.test" } },
+      };
+      await view.render();
+    }
+    const stale = structuredClone(view.navigation);
+    stale.current.bots[0]!.name = "Old private navigation";
+    await act(async () => resolve(stale));
+    expect(shellApi.listSpaces).toHaveBeenCalledTimes(1);
+    expect(container?.textContent).not.toContain("Old private navigation");
+  },
+);
 
 it("archives and restores an ordinary role through the native lifecycle without changing bots or messages", async () => {
   setToolActivityPreference("off");
