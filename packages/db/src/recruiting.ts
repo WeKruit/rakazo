@@ -3141,8 +3141,10 @@ async function approvalAnswerProof(
   tx: Tx,
   actor: Actor,
   effect: { id: string; runId: string; request: unknown },
+  authorizedRun?: Awaited<ReturnType<typeof requireRun>>,
 ) {
-  const run = await requireRun(tx, actor, effect.runId);
+  const run =
+    authorizedRun?.id === effect.runId ? authorizedRun : await requireRun(tx, actor, effect.runId);
   const proof = await tx.event.findFirst({
     where: {
       spaceId: actor.spaceId,
@@ -6552,14 +6554,14 @@ async function candidateProfilePages(
 async function crmReadTarget(
   tx: Tx,
   actor: Actor,
-  run: { threadId: string; botId: string },
+  run: { id: string; threadId: string; botId: string },
   effectId: string,
 ) {
   const effect = await tx.externalEffect.findFirst({
     where: { id: effectId, spaceId: actor.spaceId, status: "completed" },
   });
   if (!effect) throw new IsolationError();
-  const owner = await requireRun(tx, actor, effect.runId);
+  const owner = effect.runId === run.id ? run : await requireRun(tx, actor, effect.runId);
   const target = extractRecruitingCrmTarget(effect);
   if (!target || owner.threadId !== run.threadId || owner.botId !== run.botId)
     throw new IsolationError();
@@ -6592,7 +6594,7 @@ async function internalCrmEffectRun(
   });
   // Internal record keeping is autonomous; an existing card still owns its exact decision.
   const requiresHumanApproval = effect.status === "approved" || Boolean(card || answer);
-  if (requiresHumanApproval) await approvalAnswerProof(tx, actor, effect);
+  if (requiresHumanApproval) await approvalAnswerProof(tx, actor, effect, run);
   return { run, requiresHumanApproval };
 }
 
