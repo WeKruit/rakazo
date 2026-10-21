@@ -3562,7 +3562,7 @@ async function nativeSourceFixture() {
       effectId: read.id,
       effectStatus: read.status,
       effectRequest: read.request,
-      effectResult: read.result,
+      effectResult: read.result === null ? null : JSON.stringify(read.result),
       effectRun: { ...f.run, thread },
     },
   ]);
@@ -3620,7 +3620,7 @@ describe("native candidate source provenance", () => {
           effectId: f.read.id,
           effectStatus: f.read.status,
           effectRequest: f.read.request,
-          effectResult: f.read.result,
+          effectResult: f.read.result === null ? null : JSON.stringify(f.read.result),
           effectRun: historicalRun,
         },
         {
@@ -3628,7 +3628,7 @@ describe("native candidate source provenance", () => {
           effectId: read.id,
           effectStatus: read.status,
           effectRequest: read.request,
-          effectResult: read.result,
+          effectResult: read.result === null ? null : JSON.stringify(read.result),
           effectRun: { ...f.run, thread: f.thread },
         },
       ] as never);
@@ -3724,7 +3724,7 @@ describe("native candidate source provenance", () => {
         effectId: f.read.id,
         effectStatus: f.read.status,
         effectRequest: f.read.request,
-        effectResult: f.read.result,
+        effectResult: f.read.result === null ? null : JSON.stringify(f.read.result),
         effectRun: { ...f.run, thread: f.thread },
       },
     ]);
@@ -3757,12 +3757,18 @@ describe("native candidate source provenance", () => {
       "artifacts",
     ])
       expect(statement.sql).toContain(`"${table}"`);
-    expect(statement.sql).toContain('e."result"');
+    expect(statement.sql).toContain('e."result"::text AS "effectResult"');
     expect(statement.values).toEqual([f.read.id, actor.spaceId]);
     f.read.result = { changed: true } as never;
     await expect(
       recruiting.listRecruitingResearch(prisma, actor, { roleId: "role" }),
     ).rejects.toThrow(IsolationError);
+    queryRaw.mockResolvedValueOnce([
+      { ...(await f.nativeProofs())[0]!, effectResult: "{malformed" },
+    ]);
+    await expect(
+      recruiting.listRecruitingResearch(prisma, actor, { roleId: "role" }),
+    ).rejects.toThrow(SyntaxError);
   });
 
   it("validates every native page in one snapshot proof batch, including duplicate-event rejection", async () => {
@@ -3808,7 +3814,7 @@ describe("native candidate source provenance", () => {
           effectId: page.effectId,
           effectStatus: page.effect.status,
           effectRequest: page.effect.request,
-          effectResult: page.effect.result,
+          effectResult: page.effect.result === null ? null : JSON.stringify(page.effect.result),
           effectRun: { ...f.run, thread: { ...thread, bot: actor } },
         })) as never,
     );
