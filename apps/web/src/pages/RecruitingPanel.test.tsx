@@ -2863,9 +2863,25 @@ it("uses business gate labels only in explicit match-summary expressions while p
 it.each(["Cards", "Table"])(
   "shows provider match directly in %s while preserving retained reports and gaps",
   async (viewName) => {
+    async function toggleDescription(parent: Element, label: string, value: string) {
+      const trigger = parent.querySelector<HTMLElement>(`summary[aria-label="${label}: Details"]`);
+      expect(trigger).not.toBeNull();
+      const disclosure = trigger!.parentElement as HTMLDetailsElement;
+      expect(disclosure.open).toBe(false);
+      const fullText = disclosure.querySelector(":scope > p")!;
+      expect(fullText.textContent).toBe(value);
+      expect(fullText.closest(".line-clamp-2")).toBeNull();
+      await act(async () => trigger!.click());
+      expect(disclosure.open).toBe(true);
+      await act(async () => trigger!.click());
+      expect(disclosure.open).toBe(false);
+    }
     const fitReasons = "  Built the requested systems.\nRelevant project evidence.  ".repeat(80);
     const matchJudgment =
       "  Unresolved lead: employment scope is unconfirmed.\nReview the gap.  ".repeat(80);
+    const recommendation = "Review the supplied evidence and unresolved employment scope. ".repeat(
+      20,
+    );
     const candidate = { ...candidateFixture("internal-person", false), name: "Synthetic Engineer" };
     api.listCandidates.mockResolvedValue(candidatePage([candidate]));
     const source = {
@@ -2931,6 +2947,7 @@ it.each(["Cards", "Table"])(
       { label: "Match tier", value: "Provider possible", sourceUrls: [] },
     );
     candidate.latestSource = source;
+    const retainedSource = JSON.stringify(source);
     const noMatch = {
       ...candidateFixture("missing", false),
       name: "Provider graded match",
@@ -2983,6 +3000,7 @@ it.each(["Cards", "Table"])(
           fields: [
             { label: "Score", value: "5/6", sourceUrls: [] },
             { label: "Match judgment", value: matchJudgment, sourceUrls: [] },
+            { label: "Recommendation", value: recommendation, sourceUrls: [] },
           ],
           sourceUrls: [],
         },
@@ -3029,21 +3047,29 @@ it.each(["Cards", "Table"])(
       const recommendation = [...matches[1]!.querySelectorAll("dt")].find(
         (field) => field.textContent === "Recommendation",
       )!.nextElementSibling!;
-      expect(recommendation.classList.contains("line-clamp-2")).toBe(true);
+      expect(
+        recommendation.matches(".line-clamp-2") ||
+          Boolean(recommendation.querySelector(".line-clamp-2")),
+      ).toBe(true);
+      expect(recommendation.querySelector("details")).toBeNull();
       expect(matches[1]?.textContent).not.toContain("Fit reasons");
     }
     expect(matches[2]?.textContent).toContain("Unknown");
     expect(matches[2]?.textContent).toContain("ScoreUnknown");
     expect(matches[2]?.textContent).toContain("Match judgmentUnknown");
     expect(matches[2]?.textContent).toContain("Original pool rankUnknown");
+    expect(matches[2]?.querySelector("details")).toBeNull();
     expect(matches[3]?.textContent).toContain("Source unavailable");
     expect(matches[4]?.textContent).toContain("Score5/6");
     expect(matches[4]?.textContent).not.toContain("Score / tier not returned");
     const judgment = [...matches[4]!.querySelectorAll("dt")].find(
       (field) => field.textContent === "Match judgment",
     )!.nextElementSibling!;
-    expect(judgment.textContent).toBe(matchJudgment);
-    expect(judgment.classList.contains("line-clamp-2")).toBe(viewName === "Table");
+    const candidateReads = api.listCandidates.mock.calls.length;
+    await toggleDescription(judgment, "Match judgment", matchJudgment);
+    await toggleDescription(matches[4]!, "Recommendation", recommendation);
+    if (viewName === "Cards") await toggleDescription(matches[0]!, "Fit reasons", fitReasons);
+    expect(api.listCandidates).toHaveBeenCalledTimes(candidateReads);
     expect(list.textContent).not.toContain("Unassessed");
     expect(list.textContent).toContain("Resume: inaccessible");
     expect(api.listCandidateSources).not.toHaveBeenCalled();
@@ -3060,6 +3086,7 @@ it.each(["Cards", "Table"])(
     ]);
     expect(summary.textContent).toContain("Match score0");
     expect(summary.textContent).toContain(fitReasons);
+    await toggleDescription(summary, "Fit reasons", fitReasons);
     expect(summary.textContent).not.toContain("Earlier round grade");
     expect(sources.textContent).toContain("Earlier round grade");
     const report = sources.querySelector("dl")!;
@@ -3086,6 +3113,9 @@ it.each(["Cards", "Table"])(
     expect(report.textContent).toContain("Tier 1");
     expect(report.textContent).toContain("true");
     expect(report.textContent).toContain(fitReasons);
+    await toggleDescription(report, "Fit reasons", fitReasons);
+    expect(dialog.querySelector("h2")?.textContent).toBe(candidate.name);
+    expect(api.listCandidates).toHaveBeenCalledTimes(candidateReads);
     for (const url of [
       "https://projects.example.test/mesh",
       "https://profile.example.test/engineer",
@@ -3137,7 +3167,15 @@ it.each(["Cards", "Table"])(
     expect(nativeMatch.textContent).toContain("Score5/6");
     expect(nativeMatch.textContent).toContain(`Match judgment${matchJudgment}`);
     expect(nativeMatch.textContent).not.toContain("Score / tier not returned");
-    expect(nativeMatch.querySelector(".line-clamp-2")).toBeNull();
+    await toggleDescription(nativeMatch, "Match judgment", matchJudgment);
+    await view.render("thread-1", 0, true);
+    const diagnostics = view.container.querySelector(
+      '[role="dialog"] [aria-label="Research match"]',
+    )!;
+    expect(diagnostics.querySelector("details")).toBeNull();
+    expect(diagnostics.textContent).toContain(`Match judgment${matchJudgment}`);
+    expect(diagnostics.textContent).toContain(`Recommendation${recommendation}`);
+    expect(JSON.stringify(source)).toBe(retainedSource);
   },
 );
 
