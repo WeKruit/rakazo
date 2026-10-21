@@ -2750,6 +2750,47 @@ describe("native recruiting feedback effect dispatch", () => {
     expect(f.semanticSave).not.toHaveBeenCalled();
   });
 
+  it.each(["recruiting_feedback", "save_shared_memory", "remember"])(
+    "reports invalid preference fields before approval or mutation through %s",
+    async (name) => {
+      const f = fixture(`run-invalid-preference-edit-${name}`);
+      f.thread.activeRecruitingRoleId = "role-1";
+      const invalid = {
+        ...feedback,
+        operation: "revoke",
+        anchor: { start: 0, end: 3, quote: "old" },
+        content: "",
+      };
+      f.setCalls([
+        {
+          name,
+          args:
+            name === "recruiting_feedback"
+              ? invalid
+              : {
+                  path: invalid.path,
+                  content: "remaining",
+                  expectedRevision: 0,
+                  recruitingFeedback: invalid,
+                },
+          executionId: "invalid-preference-edit",
+        },
+      ]);
+
+      await f.run();
+
+      expect(f.results).toEqual([{ error: expect.any(String) }]);
+      expect(JSON.parse((f.results[0] as { error: string }).error)).toContainEqual(
+        expect.objectContaining({ code: "unrecognized_keys", keys: ["content"] }),
+      );
+      expect(f.effects).toEqual([]);
+      expect(f.pauseRunForInput).not.toHaveBeenCalled();
+      expect(f.memoryCommit).not.toHaveBeenCalled();
+      expect(f.semanticSave).not.toHaveBeenCalled();
+      expect(executeRecruitingFeedback).not.toHaveBeenCalled();
+    },
+  );
+
   it.each(["remember", "save_memory"])(
     "rejects malformed explicit preference feedback on an active-role %s note",
     async (name) => {
