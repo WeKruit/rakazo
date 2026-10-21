@@ -5,6 +5,7 @@ import {
   ArtifactReadInputSchema,
   AskUserInputSchema,
   RecruitingCandidatesToolInputSchema,
+  RecruitingPreferenceFeedbackSchema,
   RecruitingRoleToolInputSchema,
 } from "@rakazo/contracts";
 import { describe, expect, it } from "vitest";
@@ -174,6 +175,45 @@ describe("jsonSchemaParameters", () => {
       "One exact contiguous substring from one actual current human text block, preserving whitespace; do not normalize whitespace or join blocks.",
     );
   });
+
+  it.each(["recruiting_feedback", "remember", "save_shared_memory"])(
+    "preserves unique-quote preference edits through the %s native Pi wire",
+    (name) => {
+      const tool = builtinAgentTools.find((entry) => entry.name === name)!;
+      const parameters = parametersFor(tool);
+      const wire = JSON.parse(JSON.stringify(parameters));
+      for (const operation of ["replace", "revoke"] as const) {
+        const feedback = {
+          target: "preference",
+          scope: name === "remember" ? "bot" : "user",
+          path: "preferences.md",
+          expectedRevision: 2,
+          intent: { basis: "direct", quote: "Remove only the obsolete reminder." },
+          sourceRefs: [],
+          anchor: { quote: "  obsolete\r\n🙂" },
+          ...(operation === "replace" ? { operation, content: "updated" } : { operation }),
+        };
+        expect(RecruitingPreferenceFeedbackSchema.parse(feedback)).toEqual(feedback);
+        const args =
+          name === "recruiting_feedback"
+            ? feedback
+            : {
+                path: feedback.path,
+                expectedRevision: 2,
+                content: "remaining",
+                recruitingFeedback: feedback,
+              };
+        expect(parseConnectorToolArgs(tool.inputSchema, args)).toEqual(args);
+        expect(parseConnectorToolArgs(wire, args)).toEqual(args);
+        expect(
+          validateToolArguments(
+            { name, description: tool.description, parameters },
+            { type: "toolCall", id: "quote-only-edit", name, arguments: args },
+          ),
+        ).toEqual(args);
+      }
+    },
+  );
 
   it("explains operation-specific role inputs without inventing source identifiers", () => {
     const tool = builtinAgentTools.find((entry) => entry.name === "recruiting_role")!;
