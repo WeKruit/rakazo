@@ -127,6 +127,83 @@ describe("buildApprovalAskBlock", () => {
       "Shortlist approval requires a verified candidate, role and action.",
     );
   });
+  it("shows the verified recruiting role and CRM destination without the frozen binding internals", () => {
+    const args = {
+      operation: "bind",
+      roleId: "internal-recruiting-role",
+      expectedRoleRevision: 3,
+      expectedBindingEffectId: "internal-prior-binding",
+      crmRoleReadEffectId: "internal-role-read",
+      roleTitle: "Platform Engineer",
+      target: {
+        mcpServerId: "internal-server",
+        serverRevision: 2,
+        organizationId: "10000000-0000-4000-8000-000000000001",
+        crmRoleId: "20000000-0000-4000-8000-000000000001",
+        crmClientId: "30000000-0000-4000-8000-000000000001",
+        clientLabel: "Example Company",
+        roleLabel: "Backend Engineer",
+      },
+    };
+    const frozen = structuredClone(args);
+    const block = buildApprovalAskBlock("original-binding", "recruiting_crm_target", args, []);
+    expect(block.text).toBe("Review CRM role connection");
+    expect(block.detail).toBe(
+      "Role: Platform Engineer\nCRM client: Example Company\nCRM role: Backend Engineer\n\nConnect this recruiting role to the CRM role pool",
+    );
+    expect(block.actions?.map((action) => action.id)).toEqual(["allow", "deny"]);
+    expect(block.approvalEffectId).toBe("original-binding");
+    expect(block.status).toBe("pending");
+    expect(`${block.text}\n${block.detail}`).not.toMatch(
+      /internal-|[0-9a-f]{8}-|Revision|EffectId|recruiting_crm|operation|target:/,
+    );
+    expect(args).toEqual(frozen);
+  });
+  it("shows the exact saved candidate facts and verified CRM pool for a renamed native import", () => {
+    const args = {
+      p_org: "10000000-0000-4000-8000-000000000001",
+      p_role: "20000000-0000-4000-8000-000000000001",
+      p_name: "Ada Example",
+      p_linkedin_url: "https://www.linkedin.com/in/ada-example",
+      p_source_file: "rakazo:artifact:internal-artifact:sha256:internal-hash:row:0",
+      p_title: "Platform Engineer",
+      p_company: "Example Company",
+      p_location: "Chicago",
+    };
+    const target = {
+      mcpServerId: "internal-server",
+      serverRevision: 2,
+      organizationId: args.p_org,
+      crmRoleId: args.p_role,
+      crmClientId: "30000000-0000-4000-8000-000000000001",
+      clientLabel: "Example Robotics",
+      roleLabel: "Backend Engineer",
+    };
+    const frozen = structuredClone(args);
+    const block = buildApprovalAskBlock("original-import", "renamed_write", args, [], {
+      crmImportTarget: target,
+    });
+    expect(block.text).toBe("Review CRM import");
+    expect(block.detail).toBe(
+      "Candidate: Ada Example\nLinkedIn: https://www.linkedin.com/in/ada-example\nCRM client: Example Robotics\nCRM role: Backend Engineer\nSource: Saved research result\nTitle: Platform Engineer\nCompany: Example Company\nLocation: Chicago\n\nSave these supplied facts and add this person to the CRM role pool",
+    );
+    expect(block.actions?.map((action) => action.id)).toEqual(["allow", "deny"]);
+    expect(block.approvalEffectId).toBe("original-import");
+    expect(block.status).toBe("pending");
+    expect(`${block.text}\n${block.detail}`).not.toMatch(
+      /internal-|[0-9a-f]{8}-|p_org|p_role|p_source_file|rakazo:|renamed_write/,
+    );
+    expect(args).toEqual(frozen);
+  });
+  it.each([
+    ["recruiting_crm_target", { operation: "read", roleTitle: "Engineer" }],
+    ["recruiting_crm_target", { operation: "unknown", roleTitle: "Engineer" }],
+    ["recruiting_crm_target", { operation: "bind", roleTitle: " " }],
+    ["recruiting_crm_target", { operation: "bind", roleTitle: "Engineer", target: {} }],
+    ["recruiting_crm_import", { p_name: "Ada Example" }],
+  ])("rejects an unverifiable native CRM approval preview for %s: %j", (tool, args) => {
+    expect(() => buildApprovalAskBlock("effect", tool, args, [])).toThrow(/verified/i);
+  });
   it("shows only the verified candidate, canonical role and client for a CRM role binding", () => {
     const args = {
       candidateName: "Ada Example",

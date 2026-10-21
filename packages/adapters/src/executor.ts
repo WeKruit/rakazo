@@ -5979,6 +5979,7 @@ export function createRunExecutor(deps: ExecutorDeps) {
                 oneTimeOnly: requiresExplicitApproval,
                 crmOperation,
                 recruiting: recruitingApproval,
+                crmImportTarget: crmImportSelection?.target,
               },
             );
             const paused = await deps.events.pauseRunForInput({
