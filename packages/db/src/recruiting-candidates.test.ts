@@ -4093,6 +4093,7 @@ describe("native candidate source provenance", () => {
           sourceRowIndex: rowIndex,
           profileSourcePageIds: [pageId],
           shortlisted: false,
+          consideration: null,
           revision: 0,
           discoveryCount: 1,
           firstDiscoveredAt: f.page.observedAt.toISOString(),
