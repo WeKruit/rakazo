@@ -2,6 +2,7 @@ import { createHash } from "node:crypto";
 import type { AdapterContext, ArtifactStore } from "@rakazo/adapter-kit";
 import type { Actor } from "@rakazo/contracts";
 import type { PrismaClient, ThreadEvents } from "@rakazo/db";
+import { createLogger, createTestSink, getLogger, installLogger } from "@rakazo/logging";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import {
   executeRecruitingAssessmentTool,
@@ -521,6 +522,74 @@ describe("native saved candidate reads", () => {
   beforeEach(() => {
     vi.clearAllMocks();
     db.workspace.mockResolvedValue(workspace);
+  });
+
+  it.each([
+    ["list", "succeeded"],
+    ["list", "error"],
+    ["sources", "succeeded"],
+    ["sources", "error"],
+  ] as const)("logs only settled safe read metadata for %s/%s", async (operation, outcome) => {
+    const previousLogger = getLogger();
+    const sink = createTestSink();
+    installLogger(createLogger({ service: "candidate-read-check", sinks: [sink] }));
+    let clock = 0;
+    const now = vi.spyOn(performance, "now").mockImplementation(() => clock);
+    try {
+      const f = fixture();
+      const failure = new Error("private candidate URL and database diagnostic");
+      const page = { candidateKey: "private-candidate", items: ["private result"] };
+      let entered!: () => void;
+      const reading = new Promise<void>((resolve) => {
+        entered = resolve;
+      });
+      let resolveRead!: (value: unknown) => void;
+      let rejectRead!: (error: Error) => void;
+      const result = new Promise((resolve, reject) => {
+        resolveRead = resolve;
+        rejectRead = reject;
+      });
+      const reader = operation === "list" ? db.candidates : db.sources;
+      reader.mockImplementation(() => {
+        entered();
+        return result;
+      });
+      const paging = outcome === "succeeded" ? { limit: 2, cursor: "private-cursor" } : {};
+      const pending = executeRecruitingCandidatesTool(
+        f.deps,
+        trusted,
+        operation === "list"
+          ? { operation, query: "private query https://example.test/profile", ...paging }
+          : { operation, candidateKey: "private-candidate", ...paging },
+        context,
+      );
+      await reading;
+      expect(sink.events).toHaveLength(0);
+      clock = 17.6;
+      if (outcome === "succeeded") {
+        resolveRead(page);
+        expect(await pending).toBe(page);
+      } else {
+        rejectRead(failure);
+        await expect(pending).rejects.toBe(failure);
+      }
+      expect(sink.events).toEqual([
+        {
+          timestamp: expect.any(String),
+          level: "info",
+          message: "recruiting.candidates.read.timing",
+          "service.name": "candidate-read-check",
+          operation,
+          limit: paging.limit ?? null,
+          hasCursor: paging.cursor !== undefined,
+          durationMs: 18,
+          outcome,
+        },
+      ]);
+    } finally {
+      now.mockRestore();
+      installLogger(previousLogger);
+    }
   });
 
   it.each(["Example Candidate", "https://www.linkedin.com/in/example-candidate"])(

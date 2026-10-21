@@ -25,6 +25,7 @@ import {
   saveRecruitingAssessment,
   scoped,
 } from "@rakazo/db";
+import { getLogger } from "@rakazo/logging";
 import { inputPausedToolResult } from "./approval-effect.js";
 
 type RecruitingRunContext = { actor: Actor; runId: string; threadId: string; botId: string };
@@ -71,23 +72,42 @@ export async function executeRecruitingCandidatesTool(
   context: AdapterContext,
 ) {
   const input = RecruitingCandidatesToolInputSchema.parse(untrusted);
-  await requireRecruitingRun(deps.prisma, trusted, context);
-  const workspace = await getRecruitingWorkspace(deps.prisma, trusted.actor, {
-    threadId: trusted.threadId,
-  });
-  if (!workspace) return { status: "no_current_role" as const };
-  if (input.operation === "list") {
+  const started = performance.now();
+  let succeeded = false;
+  try {
+    await requireRecruitingRun(deps.prisma, trusted, context);
+    const workspace = await getRecruitingWorkspace(deps.prisma, trusted.actor, {
+      threadId: trusted.threadId,
+    });
+    if (!workspace) {
+      succeeded = true;
+      return { status: "no_current_role" as const };
+    }
+    if (input.operation === "list") {
+      const { operation: _operation, ...query } = input;
+      const result = await listRecruitingCandidates(deps.prisma, trusted.actor, {
+        roleId: workspace.role.id,
+        ...query,
+      });
+      succeeded = true;
+      return result;
+    }
     const { operation: _operation, ...query } = input;
-    return listRecruitingCandidates(deps.prisma, trusted.actor, {
+    const result = await listRecruitingCandidateSources(deps.prisma, trusted.actor, {
       roleId: workspace.role.id,
       ...query,
     });
+    succeeded = true;
+    return result;
+  } finally {
+    getLogger().info("recruiting.candidates.read.timing", {
+      operation: input.operation,
+      limit: input.limit ?? null,
+      hasCursor: input.cursor !== undefined,
+      durationMs: Math.round(performance.now() - started),
+      outcome: succeeded ? "succeeded" : "error",
+    });
   }
-  const { operation: _operation, ...query } = input;
-  return listRecruitingCandidateSources(deps.prisma, trusted.actor, {
-    roleId: workspace.role.id,
-    ...query,
-  });
 }
 
 export async function executeRecruitingAssessmentTool(
