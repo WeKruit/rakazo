@@ -1579,7 +1579,7 @@ export async function authorizeRecruitingMemoryCommit(
   return {
     source,
     operation: feedback.operation,
-    previousAnchor: feedback.operation === "add" ? null : feedback.anchor,
+    previousAnchor: edit.previousAnchor,
     anchor: edit.anchor,
     runId: run.id,
     threadId: run.threadId,

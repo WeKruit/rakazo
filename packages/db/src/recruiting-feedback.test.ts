@@ -233,6 +233,46 @@ describe("native recruiting memory admission", () => {
     ).resolves.toBeUndefined();
   });
 
+  it("records resolved quote-only revocation coordinates while retaining current-human and CAS checks", async () => {
+    const f = fixture();
+    f.source.blocks = [{ kind: "text", text: `${quote}\nRemove only old.` }];
+    Object.assign(f.tx, { memoryRevision: { findUnique: vi.fn(async () => null) } });
+    const content = "🙂 keep\r\nold\nKeep this.";
+    const start = content.indexOf("old");
+    const edit: MemoryCommitRequest = {
+      ...request,
+      scope: "user",
+      botId: undefined,
+      expectedRevision: 2,
+      content: content.slice(0, start) + content.slice(start + 3),
+      recruiting: {
+        sourceMessageId: f.source.id,
+        feedback: {
+          target: "preference",
+          scope: "user",
+          path: request.path,
+          expectedRevision: 2,
+          operation: "revoke",
+          anchor: { quote: "old" },
+          intent: { basis: "direct", quote: "Remove only old." },
+          sourceRefs: [],
+        },
+      },
+    };
+    const existing = { id: "document", content, revision: 2 };
+    await expect(
+      authorizeRecruitingMemoryCommit(f.tx as never, edit, context, existing),
+    ).resolves.toMatchObject({
+      operation: "revoke",
+      previousAnchor: { start, end: start + 3, quote: "old" },
+      anchor: null,
+      source: { anchor: { messageId: f.source.id }, quote: "Remove only old." },
+    });
+    await expect(
+      authorizeRecruitingMemoryCommit(f.tx as never, edit, context, { ...existing, revision: 3 }),
+    ).rejects.toThrow();
+  });
+
   it("allows CAS edits to an ordinary private note without a preference receipt", async () => {
     const f = fixture();
     const findFirst = vi.fn(async () => null);

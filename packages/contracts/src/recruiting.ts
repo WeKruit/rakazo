@@ -837,13 +837,16 @@ export const RecruitingHumanIntentSchema = z.strictObject({
 });
 export type RecruitingHumanIntent = z.infer<typeof RecruitingHumanIntentSchema>;
 
-const PreferenceAnchor = z
-  .strictObject({
-    start: z.number().int().nonnegative(),
-    end: z.number().int().positive(),
-    quote: z.string().min(1),
-  })
-  .refine((anchor) => anchor.end > anchor.start, { message: "Anchor end must follow its start" });
+const PreferenceAnchor = z.union([
+  z
+    .strictObject({
+      start: z.number().int().nonnegative(),
+      end: z.number().int().positive(),
+      quote: z.string().min(1),
+    })
+    .refine((anchor) => anchor.end > anchor.start, { message: "Anchor end must follow its start" }),
+  z.strictObject({ quote: z.string().min(1) }),
+]);
 const PreferenceContent = z.string().refine((content) => content.trim().length > 0, {
   message: "Preference content must not be blank",
 });

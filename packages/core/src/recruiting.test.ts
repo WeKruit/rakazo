@@ -194,10 +194,12 @@ describe("exact recruiting preference edits", () => {
     const input = { ...preference, operation: "add" as const, content: "  prompt preference\n" };
     expect(core.applyRecruitingPreferenceEdit?.("", input)).toEqual({
       content: input.content,
+      previousAnchor: null,
       anchor: { start: 0, end: input.content.length, quote: input.content },
     });
     expect(core.applyRecruitingPreferenceEdit?.("🙂 previous", input)).toEqual({
       content: `🙂 previous\n\n${input.content}`,
+      previousAnchor: null,
       anchor: {
         start: "🙂 previous\n\n".length,
         end: "🙂 previous\n\n".length + input.content.length,
@@ -217,6 +219,7 @@ describe("exact recruiting preference edits", () => {
     });
     expect(result).toEqual({
       content: "🙂 old\nkeep new🙂\n",
+      previousAnchor: { start, end: start + 3, quote: "old" },
       anchor: { start, end: start + 5, quote: "new🙂" },
     });
   });
@@ -228,14 +231,75 @@ describe("exact recruiting preference edits", () => {
         operation: "revoke",
         anchor: { start: 5, end: 8, quote: "old" },
       }),
-    ).toEqual({ content: "keep\n\nkeep", anchor: null });
+    ).toEqual({
+      content: "keep\n\nkeep",
+      previousAnchor: { start: 5, end: 8, quote: "old" },
+      anchor: null,
+    });
     expect(
       core.applyRecruitingPreferenceEdit?.("🙂", {
         ...preference,
         operation: "revoke",
         anchor: { start: 0, end: 2, quote: "🙂" },
       }),
-    ).toEqual({ content: "", anchor: null });
+    ).toEqual({
+      content: "",
+      previousAnchor: { start: 0, end: 2, quote: "🙂" },
+      anchor: null,
+    });
+  });
+
+  it.each(["replace", "revoke"] as const)(
+    "resolves a unique exact quote for %s and returns its authoritative UTF-16 audit anchor",
+    (operation) => {
+      const content = "🙂 keep\r\n  old\r\nKeep trailing space. ";
+      const quote = "  old\r\n";
+      const start = content.indexOf(quote);
+      const replacement = operation === "replace" ? "new🙂\n" : "";
+      const result = core.applyRecruitingPreferenceEdit(content, {
+        ...preference,
+        ...(operation === "replace" ? { operation, content: replacement } : { operation }),
+        anchor: { quote },
+      });
+      expect(result).toEqual({
+        content: content.slice(0, start) + replacement + content.slice(start + quote.length),
+        previousAnchor: { start, end: start + quote.length, quote },
+        anchor: replacement ? { start, end: start + replacement.length, quote: replacement } : null,
+      });
+    },
+  );
+
+  it("rejects missing and ambiguous exact quotes, including overlapping occurrences", () => {
+    for (const quote of ["OLD", "old ", "missing"]) {
+      expect(() =>
+        core.applyRecruitingPreferenceEdit("🙂 old", {
+          ...preference,
+          operation: "revoke",
+          anchor: { quote },
+        }),
+      ).toThrow(/quote.*not found/i);
+    }
+    for (const [content, quote] of [
+      ["old old", "old"],
+      ["aaa", "aa"],
+    ] as const) {
+      expect(() =>
+        core.applyRecruitingPreferenceEdit(content, {
+          ...preference,
+          operation: "revoke",
+          anchor: { quote },
+        }),
+      ).toThrow(/quote.*more than once/i);
+    }
+    for (const quote of ["", "\ud83d", "\ude42"]) {
+      expect(() =>
+        core.applyRecruitingPreferenceEdit("🙂", {
+          ...preference,
+          operation: "revoke",
+          anchor: { quote },
+        }),
+      ).toThrow();
+    }
   });
 
   it("rejects stale, out-of-range and surrogate-splitting anchors without fuzzy matching", () => {
@@ -244,6 +308,7 @@ describe("exact recruiting preference edits", () => {
       { start: 1, end: 2, quote: "\ude42" },
       { start: -1, end: 2, quote: "🙂" },
       { start: 0, end: 20, quote: "🙂 old" },
+      { start: 0, end: 3, quote: "old" },
       { start: 3, end: 6, quote: "new" },
       { start: 3, end: 3, quote: "old" },
     ])

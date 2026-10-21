@@ -110,11 +110,16 @@ export async function readRecruitingResearchReadArtifact(
 export function applyRecruitingPreferenceEdit(
   content: string,
   preference: RecruitingPreferenceFeedbackInput,
-): { content: string; anchor: { start: number; end: number; quote: string } | null } {
+): {
+  content: string;
+  previousAnchor: { start: number; end: number; quote: string } | null;
+  anchor: { start: number; end: number; quote: string } | null;
+} {
   if (preference.operation === "add") {
     const prefix = content ? `${content}\n\n` : "";
     return {
       content: prefix + preference.content,
+      previousAnchor: null,
       anchor: {
         start: prefix.length,
         end: prefix.length + preference.content.length,
@@ -122,7 +127,22 @@ export function applyRecruitingPreferenceEdit(
       },
     };
   }
-  const { start, end, quote } = preference.anchor;
+  let anchor = preference.anchor;
+  if (!("start" in anchor)) {
+    if ("end" in anchor)
+      throw new Error("Preference anchor does not match the loaded memory revision");
+    const start = content.indexOf(anchor.quote);
+    if (start < 0)
+      throw new Error(
+        "Preference anchor quote was not found in the loaded memory revision; reload the document and use an exact quote",
+      );
+    if (content.indexOf(anchor.quote, start + 1) !== -1)
+      throw new Error(
+        "Preference anchor quote occurs more than once in the loaded memory revision; provide exact UTF-16 start and end offsets",
+      );
+    anchor = { start, end: start + anchor.quote.length, quote: anchor.quote };
+  }
+  const { start, end, quote } = anchor;
   if (
     !Number.isSafeInteger(start) ||
     !Number.isSafeInteger(end) ||
@@ -137,6 +157,7 @@ export function applyRecruitingPreferenceEdit(
   const replacement = preference.operation === "replace" ? preference.content : "";
   return {
     content: content.slice(0, start) + replacement + content.slice(end),
+    previousAnchor: { start, end, quote },
     anchor: replacement ? { start, end: start + replacement.length, quote: replacement } : null,
   };
 }
