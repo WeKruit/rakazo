@@ -491,7 +491,10 @@ async function mounted(
   botId?: string,
   showDiagnostics = true,
   recipients?: ComponentProps<typeof RecruitingPanel>["candidateFeedbackRecipients"],
-  navigation: Pick<ComponentProps<typeof RecruitingPanel>, "tab" | "onTabChange"> = {},
+  navigation: Pick<
+    ComponentProps<typeof RecruitingPanel>,
+    "tab" | "onTabChange" | "presentation" | "view"
+  > = {},
 ) {
   const container = document.createElement("div");
   document.body.append(container);
@@ -2670,8 +2673,6 @@ it("renders Dashboard totals for the linked role and actual research delivery st
     "19",
     "12",
     "10",
-    "9",
-    "3",
     "2",
   ]);
   expect(view.container.textContent).toContain("task-1 · active");
@@ -5282,7 +5283,7 @@ it("shows unassessed raw provider rows from saved Artifacts without creating an 
     view.container.querySelector('[data-research-action="raw-action"] > summary')?.textContent,
   ).toBe("Raw search results · continue · Role · Outdated");
   expect(view.container.textContent).not.toContain("Unassessed");
-  expect(view.container.textContent).toContain("provider_report");
+  expect(view.container.textContent).toContain("Research findings");
   expect(view.container.textContent).toContain("Strong Match");
   expect(view.container.textContent).toContain("https://example.test/profile");
   expect(view.container.textContent).toContain("Outdated");
@@ -6534,4 +6535,123 @@ it("keeps an unresolved brief unconfirmed and preserves its view after a conflic
   expect(view.container.textContent).toContain("Brief changed or could not be confirmed");
   expect(view.container.textContent).toContain("GBP 90,000 to 120,000");
   expect(view.container.textContent).not.toContain("Brief confirmed");
+});
+
+it("renders the sourcing workspace from saved findings and uses native draft, shortlist and detail actions", async () => {
+  const candidate = {
+    ...candidateFixture("workspace-person", false),
+    name: "Taylor Example",
+    title: "Robotics engineer",
+    company: "Example Robotics",
+    location: "Bay Area",
+    linkedinUrl: "https://example.test/taylor",
+    latestSource: {
+      providerTaskId: "native-task",
+      taskId: null,
+      actionId: null,
+      roleRevisionId: revision.id,
+      effectId: "saved-page",
+      rowIndex: 0,
+      artifactRef: { artifactId: "saved-artifact", sha256: "a".repeat(64) },
+      requestCursor: null,
+      outputId: null,
+      observedAt: "2026-01-01T00:00:00Z",
+      report: {
+        fields: [
+          { label: "Match score", value: "5/6", sourceUrls: [] },
+          {
+            label: "Fit reasons",
+            value: "Built robot data tools; database ownership is unknown.",
+            sourceUrls: ["https://example.test/work"],
+          },
+          {
+            label: "Company context",
+            value: "Makes warehouse robots; this does not establish personal implementation.",
+            sourceUrls: ["https://example.test/company"],
+          },
+        ],
+        sourceUrls: ["https://example.test/work", "https://example.test/company"],
+      },
+    },
+  };
+  api.listAssessments.mockResolvedValue([]);
+  api.listCandidates.mockResolvedValue(candidatePage([candidate]));
+  api.setCandidateShortlist.mockResolvedValue({ ...candidate, shortlisted: true, revision: 1 });
+  const view = await mounted("thread-1", undefined, false, undefined, {
+    presentation: "workspace",
+  });
+  const card = view.container.querySelector(".hire-candidate-card");
+  expect(card?.textContent).toContain("Taylor Example");
+  expect(card?.textContent).toContain("Bay Area");
+  expect(card?.querySelector(".hire-match-score")?.textContent).toBe("Match score: 5/6");
+  expect(card?.textContent).not.toContain("% match");
+  expect(card?.textContent).toContain("database ownership is unknown");
+  expect(card?.textContent).toContain("does not establish personal implementation");
+  expect(card?.textContent).toContain("Resume missing");
+  expect(card?.querySelector('a[href="https://example.test/work"]')).not.toBeNull();
+  expect(card?.querySelector('a[href="https://example.test/company"]')).not.toBeNull();
+  await view.click("Email draft");
+  expect(view.discuss).toHaveBeenCalledExactlyOnceWith(
+    expect.objectContaining({
+      threadId: "thread-1",
+      roleId: role.id,
+      candidateKey: candidate.candidateKey,
+      roleTitle: role.title,
+      name: candidate.name,
+      intent: "email_draft",
+    }),
+  );
+  expect(api.setCandidateShortlist).not.toHaveBeenCalled();
+  await view.click("Shortlist Taylor Example");
+  expect(api.setCandidateShortlist).toHaveBeenCalledExactlyOnceWith({
+    threadId: "thread-1",
+    roleId: role.id,
+    candidateKey: candidate.candidateKey,
+    expectedRevision: 0,
+    shortlisted: true,
+  });
+  await view.click("View Taylor Example");
+  expect(view.container.querySelector('[role="dialog"]')).not.toBeNull();
+  expect(
+    view.container.querySelector(".hire-profile-drawer")?.getAttribute("data-product-view"),
+  ).toBe("recruiting");
+});
+
+it("keeps workspace shortlist and contacts navigation out of saved filters and candidate mutations", async () => {
+  api.listAssessments.mockResolvedValue([]);
+  api.listCandidates.mockResolvedValue(
+    candidatePage([{ ...candidateFixture("nav-person", false), name: "Nav Person" }]),
+  );
+  const view = await mounted("thread-1", undefined, false, undefined, {
+    presentation: "workspace",
+    view: "shortlist",
+  });
+  expect(api.listCandidates).toHaveBeenLastCalledWith(
+    expect.objectContaining({ roleId: role.id, shortlisted: true }),
+  );
+  expect(api.setCandidateShortlist).not.toHaveBeenCalled();
+  api.listCandidates.mockClear();
+  await view.render("thread-1", 0, false, undefined, {
+    presentation: "workspace",
+    view: "contacts",
+  });
+  expect(api.listCandidates).toHaveBeenLastCalledWith(
+    expect.not.objectContaining({ shortlisted: true }),
+  );
+  expect(view.container.querySelector("tbody")?.textContent).toContain("Nav Person");
+  expect([...view.container.querySelectorAll("thead th")].map((cell) => cell.textContent)).toEqual([
+    "Candidate",
+    "Current role",
+    "Company",
+    "Location",
+    "Research match",
+    "Shortlist",
+  ]);
+  expect(api.setCandidateShortlist).not.toHaveBeenCalled();
+  await view.render("thread-1", 0, false, undefined, {
+    presentation: "workspace",
+    view: "results",
+  });
+  expect(view.container.querySelector(".hire-card-grid")).not.toBeNull();
+  expect(view.container.querySelector('input[aria-label="Search candidates"]')).not.toBeNull();
 });

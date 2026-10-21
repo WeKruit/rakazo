@@ -1314,3 +1314,30 @@ export const ListRecruitingCandidateSourcesOutput = z.strictObject({
 export type ListRecruitingCandidateSourcesOutput = z.infer<
   typeof ListRecruitingCandidateSourcesOutput
 >;
+
+/** Editable outreach output only; native artifacts/history own persistence, never sending state. */
+export const RecruitingOutreachSequenceSchema = z.strictObject({
+  kind: z.literal("wekruit.outreach-sequence"),
+  version: z.literal(1),
+  roleTitle: Text,
+  recipients: z
+    .array(
+      z.strictObject({
+        name: Text,
+        linkedinUrl: z.httpUrl().nullable(),
+        email: z.email().nullable(),
+        steps: z
+          .array(
+            z.strictObject({
+              subject: z.string(),
+              body: z.string(),
+              dayOffset: z.number().int().nonnegative().nullable(),
+            }),
+          )
+          .min(1),
+      }),
+    )
+    .min(1),
+  revisesArtifactId: RecruitingId.optional(),
+});
+export type RecruitingOutreachSequence = z.infer<typeof RecruitingOutreachSequenceSchema>;

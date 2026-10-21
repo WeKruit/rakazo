@@ -164,6 +164,7 @@ import {
   expandSkillReferencesInPrompt,
   hasMixedOneShotSchedule,
   isOneShotRoutineCrons,
+  promptTextForAttachments,
   resolveGroupTargetBotIds,
 } from "@rakazo/core";
 import type { BoardEvents, Board as BoardRow, PrismaClient, ThreadEvents } from "@rakazo/db";
@@ -227,6 +228,7 @@ import { createAgentSkillsService } from "./agent-skills.js";
 import { aiConsentStatus, allowAiConsent } from "./ai-consent.js";
 import {
   ArtifactListCursorError,
+  buildUserMessageBlocks,
   createOwnedArtifact,
   deleteArtifactFamily,
   getOwnedArtifact,
@@ -235,6 +237,8 @@ import {
   listArtifactVersions,
   listOwnedArtifacts,
   listSpaceArtifacts,
+  resolveGroupSendAttachments,
+  resolveSendAttachments,
 } from "./artifacts.js";
 import type { BillingService } from "./billing.js";
 import { botProfileLabelsChanged, commitBotUpdate } from "./bot-update.js";
@@ -2380,21 +2384,24 @@ export function createRouter(deps: RouterDeps) {
             throw new ORPCError("BAD_REQUEST", { message: "Recipients require a group chat." });
           }
           await assertTeachingSendAllowed(deps.prisma, context.actor.spaceId, target.botId);
+          const { blocks: attachmentBlocks, artifacts } = await resolveSendAttachments(
+            deps,
+            context.actor,
+            target.botId,
+            input.artifactIds,
+          );
+          const blocks = buildUserMessageBlocks(input.text, attachmentBlocks).map((block) =>
+            block.kind === "text" && input.recruitingFeedback
+              ? { ...block, recruitingFeedback: input.recruitingFeedback }
+              : block,
+          );
           const sent = await deps.events.sendUserMessage({
             spaceId: context.actor.spaceId,
             threadId: target.threadId,
             botId: target.botId,
             userId: context.actor.userId,
-            blocks: [
-              {
-                kind: "text",
-                text: input.text,
-                ...(input.recruitingFeedback
-                  ? { recruitingFeedback: input.recruitingFeedback }
-                  : {}),
-              },
-            ],
-            prompt: input.text,
+            blocks,
+            prompt: promptTextForAttachments(input.text, artifacts),
             trigger: "follow_up",
             clientNonce: input.clientNonce,
           });
@@ -2448,13 +2455,18 @@ export function createRouter(deps: RouterDeps) {
             members,
             explicitMentions: input.mentions,
           });
-          const blocks = [
-            {
-              kind: "text" as const,
-              text: input.text,
-              ...(input.recruitingFeedback ? { recruitingFeedback: input.recruitingFeedback } : {}),
-            },
-          ];
+          const { blocks: attachmentBlocks, artifacts } = await resolveGroupSendAttachments(
+            { prisma: tx },
+            context.actor,
+            target.groupId,
+            members.map((member) => member.id),
+            input.artifactIds,
+          );
+          const blocks = buildUserMessageBlocks(input.text, attachmentBlocks).map((block) =>
+            block.kind === "text" && input.recruitingFeedback
+              ? { ...block, recruitingFeedback: input.recruitingFeedback }
+              : block,
+          );
           const message = await createThreadMessageInTransaction(tx, {
             threadId: target.threadId,
             role: "user",
@@ -2497,7 +2509,7 @@ export function createRouter(deps: RouterDeps) {
                   botId,
                   threadId: target.threadId,
                   userId: context.actor.userId,
-                  prompt: input.text,
+                  prompt: promptTextForAttachments(input.text, artifacts),
                   status: "queued",
                 },
               });

@@ -32,6 +32,14 @@
 
 **Goal:** 在现有 Rakazo 网页交付 Main/Sourcer 原生协作、可恢复交互与记忆，迁入现有招聘工作，完成 [GOAL.md](GOAL.md) 的 P0–P6 基础闭环与 [PRODUCT-SCOPE.md](PRODUCT-SCOPE.md) 的 Juicebox / Metix / Grok Bot 完整产品范围。
 
+### 当前交付：指定模板与 Agent 优化并行
+
+UI 的依据固定为 `WeKruit/wekruit-pa` 的 `codex/wekruit-branding` 分支、提交 `c7f2dd6a9c979af13743d18712062f794c2facfb` 中的 `SourcingStudioDemo`，不是该仓库另一套 RecruiterShell。复用原导航、字体、配色、全宽候选卡、详情抽屉和邮件编辑布局；原模板的模拟候选、打分、发送和预约状态不进入产品。普通用户以岗位工作台为入口，开发视图保留原生群聊与工具细节。
+
+本批接通原生岗位创建及首条 JD、真实候选 Cards/Table/详情/反馈、文件驱动的 Sequence 编辑。Sequence 输出格式仅服务实际主题、正文、收件人及建议间隔展示；保存通过原生 ArtifactStore 和不回答旧卡的 `threads.followUp`，保留原件、精确附件版本、账号/Space/岗位隔离及相同内容重试的 nonce。未知联系方式和间隔仍为空，不生成发送状态。读取优化只复用同一事务内已验证的来源证明，不缓存授权、审批或写操作。
+
+相关离线检查已覆盖编辑、重试、切换上下文和原卡保持；它们不代替真实网页验收。发布后须分别以两个真实岗位核验候选加载、草稿编辑保存、完整对话和恢复，并对同一批来源测量读取性能。Inbox 与 Interview 仍缺少真实邮件/日历结果的页面投影，不能称为完整复刻。全文 playbook、M1–M5 和业务外联闭环仍未完成。
+
 **Architecture:** 用户聊天/反馈 → Rakazo 原生 Main ↔ Sourcer ↔ Autumn Agent（已有 MCP/API）→ 结果/证据 → 用户反馈 → 同一个 Autumn task 继续。Main/Sourcer 通过 prompt、skills 和 playbook 自主协作；Rakazo/Pi 提供现成 harness、群聊、委派、会话、记忆和交互。网页、数据库和 Dashboard 保存并呈现真实输出，不接管 Agent 的推理和招聘步骤。
 
 **同一角色对话的 Skill 采用补验（2026-10-21）：** 继续使用 v161，没有新代码发布。原生每次运行会重读 Skill 名称/简介目录，正文由 `skill_read` 按当前用户/空间重新读取；未发现需要重建会话的正文缓存。只在现有 Candidate Skill 补真实 Autumn 结构化 cell 的按字段读法，并让简介覆盖已保存候选查询；原生编辑器和物理只读数据库全文核对一致，其他配置及业务记录在该配置检查点保持。随后正常问法、没有 Skill 名或工具参数的单人查询，实际匹配并完成 `skill_read`，同一原岗位返回贡献/公司业务/来源/简历和缺口，网页显示对应真实候选卡。约165秒、13次工具完成事件，候选/来源/要求、旧卡、原消息及原回执、记忆、Routine和已采集的模型/工具策略保持；完整 Bot 元数据摘要变化仍保留。不是全套 Playbook/P6 完成。

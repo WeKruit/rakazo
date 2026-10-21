@@ -17,7 +17,7 @@ import {
   serializeModelSecret,
 } from "@rakazo/adapters";
 import type { Actor, Bot, ProductEvent } from "@rakazo/contracts";
-import { REPLY_QUOTE_MAX_LENGTH } from "@rakazo/contracts";
+import { ATTACHMENT_MAX_COUNT, REPLY_QUOTE_MAX_LENGTH } from "@rakazo/contracts";
 import { openScreenCapability } from "@rakazo/core/node/screen-capability";
 import type { PrismaClient } from "@rakazo/db";
 import { createLogger, createTestSink, installLogger } from "@rakazo/logging";
@@ -4251,7 +4251,9 @@ describe("threads.followUp", () => {
     let message: { id: string } | null = replay ? { id: "message-1" } : null;
     let lockTail = Promise.resolve();
     const waitingRun = { id: "run-1", status: "waiting_input" };
+    const artifactFindMany = vi.fn().mockResolvedValue([]);
     const tx = {
+      artifact: { findMany: artifactFindMany },
       thread: {
         update: vi.fn().mockResolvedValue({ nextMessageSeq: 2, nextEventSeq: 2 }),
         findFirst: vi.fn(async () => ({
@@ -4324,6 +4326,7 @@ describe("threads.followUp", () => {
       return ownedAtLock ? [{ id: "group-1" }] : [];
     });
     const prisma = {
+      artifact: { findMany: artifactFindMany },
       bot: {
         findFirst: vi.fn().mockResolvedValue({ id: "bot-1", thread: { id: "thread-1" } }),
       },
@@ -4378,6 +4381,7 @@ describe("threads.followUp", () => {
     } satisfies Actor;
     return {
       tx,
+      artifactFindMany,
       waitingRun,
       lockGroup,
       notify,
@@ -4401,6 +4405,116 @@ describe("threads.followUp", () => {
         ),
     };
   }
+
+  it.each(["bot", "group"] as const)(
+    "attaches the selected saved file version to a non-answering %s follow-up",
+    async (kind) => {
+      const f = fixture({ active: true });
+      const artifact = {
+        id: "artifact-v2",
+        name: "outreach-draft.json",
+        mimeType: "application/json",
+        size: 42,
+        storageKey: "saved-version-2",
+        version: 2,
+      };
+      f.artifactFindMany.mockResolvedValue([artifact]);
+      const { response } = await f.call({
+        ...(kind === "bot" ? { botId: "bot-1" } : { mentions: ["bot-2"] }),
+        artifactIds: [artifact.id],
+      });
+      expect(response.status).toBe(200);
+      expect(f.artifactFindMany).toHaveBeenCalledExactlyOnceWith({
+        where: {
+          id: { in: [artifact.id] },
+          spaceId: "space-1",
+          userId: "user-1",
+          ...(kind === "bot"
+            ? { botId: "bot-1", groupId: null }
+            : {
+                OR: [{ groupId: "group-1" }, { groupId: null, botId: { in: ["bot-1", "bot-2"] } }],
+              }),
+        },
+      });
+      const blocks = [
+        { kind: "text", text },
+        {
+          kind: "file",
+          artifactId: artifact.id,
+          name: artifact.name,
+          mimeType: artifact.mimeType,
+          size: artifact.size,
+        },
+      ];
+      const prompt = `${text}\n\nUser attached file "outreach-draft.json" (application/json, 42 bytes).`;
+      if (kind === "bot") {
+        expect(f.sendUserMessage).toHaveBeenCalledWith(
+          expect.objectContaining({ blocks, prompt, trigger: "follow_up", clientNonce }),
+        );
+      } else {
+        expect(f.tx.message.create).toHaveBeenCalledWith(
+          expect.objectContaining({ data: expect.objectContaining({ blocks, clientNonce }) }),
+        );
+        expect(f.tx.task.create).toHaveBeenCalledWith({
+          data: expect.objectContaining({ botId: "bot-2", prompt }),
+        });
+      }
+      expect(f.tx.message.findMany).not.toHaveBeenCalled();
+      expect(f.tx.run.update).not.toHaveBeenCalled();
+      expect(f.waitingRun.status).toBe("waiting_input");
+    },
+  );
+
+  it.each(["bot", "group"] as const)(
+    "rejects a foreign saved file before writing a %s follow-up",
+    async (kind) => {
+      const f = fixture();
+      const { response } = await f.call({
+        ...(kind === "bot" ? { botId: "bot-1" } : {}),
+        artifactIds: ["foreign-artifact"],
+      });
+      expect(response.status).toBeGreaterThanOrEqual(400);
+      expect(f.artifactFindMany).toHaveBeenCalledOnce();
+      expect(f.sendUserMessage).not.toHaveBeenCalled();
+      expect(f.tx.message.create).not.toHaveBeenCalled();
+      expect(f.tx.task.create).not.toHaveBeenCalled();
+      expect(f.enqueue).not.toHaveBeenCalled();
+    },
+  );
+
+  it("does not duplicate an attached group follow-up on a nonce replay", async () => {
+    const f = fixture({ active: true });
+    f.artifactFindMany.mockResolvedValue([
+      {
+        id: "artifact-v2",
+        name: "draft.json",
+        mimeType: "application/json",
+        size: 42,
+        storageKey: "saved-v2",
+      },
+    ]);
+    const request = { artifactIds: ["artifact-v2"], mentions: ["bot-2"] };
+    const first = await f.call(request);
+    const replay = await f.call(request);
+    expect([first.response.status, replay.response.status]).toEqual([200, 200]);
+    expect(f.artifactFindMany).toHaveBeenCalledOnce();
+    expect(f.tx.message.create).toHaveBeenCalledOnce();
+    expect(f.tx.event.create).toHaveBeenCalledOnce();
+    expect(f.tx.run.create).toHaveBeenCalledOnce();
+  });
+
+  it("rejects too many follow-up attachments at the shared contract boundary", async () => {
+    const f = fixture();
+    const { response } = await f.call({
+      artifactIds: Array.from(
+        { length: ATTACHMENT_MAX_COUNT + 1 },
+        (_, index) => `artifact-${index}`,
+      ),
+    });
+    expect(response.status).toBe(400);
+    expect(f.artifactFindMany).not.toHaveBeenCalled();
+    expect(f.tx.message.create).not.toHaveBeenCalled();
+  });
 
   it.each(["bot", "group"] as const)(
     "persists authored feedback metadata through the existing %s follow-up",
