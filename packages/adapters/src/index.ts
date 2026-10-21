@@ -108,6 +108,7 @@ export * from "./railway-sandbox.js";
 export * from "./realtime.js";
 export {
   classifyRecruitingResearchResult,
+  createRecruitingCandidateReportReader,
   isRecruitingCandidateReportField,
   projectRecruitingCandidateReport,
 } from "./recruiting-research.js";

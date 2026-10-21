@@ -519,6 +519,75 @@ describe("native recruiting_assess adapter", () => {
 });
 
 describe("native saved candidate reads", () => {
+  function sourceFixture() {
+    const f = fixture();
+    const snapshot = {
+      request: [
+        "__rakazoCatalogTool",
+        "direct",
+        {
+          route: {
+            connectorId: "mcp",
+            resourceId: "saved-connection",
+            resourceRevision: 1,
+            toolName: "get_rows",
+          },
+          args: { task_id: "provider-task", cursor: "original-cursor" },
+        },
+      ],
+      providerResult: {
+        structuredContent: {
+          rows: [
+            {
+              name: { value: "Selected Person", source_id: "profile" },
+              concerns: { value: null, evidence: "No code supplied" },
+              _sources: { profile: "https://example.test/selected" },
+            },
+            { name: { value: "Neighbor Person" } },
+          ],
+          next_cursor: null,
+        },
+      },
+    };
+    const bytes = Buffer.from(JSON.stringify(snapshot));
+    const hash = createHash("sha256").update(bytes).digest("hex");
+    const source = {
+      crmImports: [],
+      providerTaskId: "provider-task",
+      taskId: null,
+      actionId: null,
+      roleRevisionId: "old-revision",
+      effectId: "source-effect",
+      rowIndex: 0,
+      artifactRef: { artifactId: "original-page", sha256: hash },
+      requestCursor: "original-cursor",
+      outputId: null,
+      observedAt: "2026-10-17T00:00:00.000Z",
+    };
+    const page = {
+      roleId: "role",
+      candidateKey: "candidate-one",
+      total: 3,
+      nextCursor: "next-source",
+      items: [source],
+    };
+    const findFirst = vi.fn(async () => ({
+      id: "original-page",
+      spaceId: actor.spaceId,
+      userId: actor.userId,
+      storageKey: "stored",
+      botId: "bot",
+      hash,
+      size: bytes.length,
+    }));
+    const internalFamilies = vi.fn(async () => [] as Array<{ id: string }>);
+    Object.assign(f.deps.prisma.artifact, { findFirst });
+    Object.assign(f.deps.prisma, { $queryRaw: internalFamilies });
+    f.get.mockResolvedValue(bytes);
+    db.sources.mockResolvedValue(page);
+    return { ...f, source, page, findFirst, internalFamilies };
+  }
+
   beforeEach(() => {
     vi.clearAllMocks();
     db.workspace.mockResolvedValue(workspace);
@@ -538,7 +607,10 @@ describe("native saved candidate reads", () => {
     try {
       const f = fixture();
       const failure = new Error("private candidate URL and database diagnostic");
-      const page = { candidateKey: "private-candidate", items: ["private result"] };
+      const page = {
+        candidateKey: "private-candidate",
+        items: operation === "list" ? ["private result"] : [],
+      };
       let entered!: () => void;
       const reading = new Promise<void>((resolve) => {
         entered = resolve;
@@ -568,7 +640,7 @@ describe("native saved candidate reads", () => {
       clock = 17.6;
       if (outcome === "succeeded") {
         resolveRead(page);
-        expect(await pending).toBe(page);
+        expect(await pending).toEqual(page);
       } else {
         rejectRead(failure);
         await expect(pending).rejects.toBe(failure);
@@ -607,7 +679,7 @@ describe("native saved candidate reads", () => {
       };
       db.candidates.mockResolvedValue(page);
       const result = await executeRecruitingCandidatesTool(
-        { prisma: f.deps.prisma },
+        f.deps,
         trusted,
         { operation: "list", query, limit: 2, cursor: "opaque+/=" },
         context,
@@ -629,31 +701,39 @@ describe("native saved candidate reads", () => {
     },
   );
 
-  it("returns the existing source page with exact artifact references without reading bytes", async () => {
-    const f = fixture();
-    const page = {
-      roleId: "role",
-      candidateKey: "candidate-one",
-      total: 3,
-      nextCursor: "next-source",
-      items: [
-        { rowIndex: 4, artifactRef: { artifactId: "original-page", sha256: "d".repeat(64) } },
-      ],
-    };
-    db.sources.mockResolvedValue(page);
-    expect(
-      await executeRecruitingCandidatesTool(
-        f.deps,
-        trusted,
-        {
-          operation: "sources",
-          candidateKey: "candidate-one",
-          cursor: "original-cursor",
-          limit: 1,
+  it("returns verified selected source reports with unchanged references and pagination", async () => {
+    const f = sourceFixture();
+    f.page.items.push({ ...f.source });
+    const result = await executeRecruitingCandidatesTool(
+      f.deps,
+      trusted,
+      {
+        operation: "sources",
+        candidateKey: "candidate-one",
+        cursor: "original-cursor",
+        limit: 1,
+      },
+      context,
+    );
+    expect(result).toMatchObject({
+      ...f.page,
+      items: f.page.items.map((source) => ({
+        ...source,
+        report: {
+          fields: [
+            {
+              label: "Name",
+              value: "Selected Person",
+              sourceUrls: ["https://example.test/selected"],
+            },
+            { label: "Concerns", value: null, evidence: "No code supplied", sourceUrls: [] },
+          ],
+          sourceUrls: ["https://example.test/selected"],
         },
-        context,
-      ),
-    ).toBe(page);
+      })),
+    });
+    expect(JSON.stringify(result)).not.toContain("Neighbor Person");
+    expect(f.page.items.every((source) => !("report" in source))).toBe(true);
     expect(db.sources).toHaveBeenCalledWith(f.deps.prisma, actor, {
       roleId: "role",
       candidateKey: "candidate-one",
@@ -661,9 +741,39 @@ describe("native saved candidate reads", () => {
       limit: 1,
     });
     expect(db.candidates).not.toHaveBeenCalled();
-    expect(f.get).not.toHaveBeenCalled();
+    expect(f.findFirst).toHaveBeenCalledWith({
+      where: { id: "original-page", spaceId: actor.spaceId, userId: actor.userId },
+    });
+    expect(f.internalFamilies).toHaveBeenCalledOnce();
+    expect(f.get).toHaveBeenCalledOnce();
     expect(db.save).not.toHaveBeenCalled();
   });
+
+  it.each(["artifact-store", "actor", "internal-family", "hash", "bytes", "row", "cursor"])(
+    "fails the native read instead of returning metadata-only evidence at the %s boundary",
+    async (boundary) => {
+      const f = sourceFixture();
+      if (boundary === "artifact-store") f.deps.artifacts = undefined as never;
+      if (boundary === "actor") f.findFirst.mockResolvedValue(null as never);
+      if (boundary === "internal-family")
+        f.internalFamilies.mockResolvedValue([{ id: "internal-context-version" }]);
+      if (boundary === "hash") f.source.artifactRef.sha256 = "0".repeat(64);
+      if (boundary === "bytes") f.get.mockResolvedValue(Buffer.from("changed"));
+      if (boundary === "row") f.source.rowIndex = 99;
+      if (boundary === "cursor") f.source.requestCursor = "different-cursor";
+      await expect(
+        executeRecruitingCandidatesTool(
+          f.deps,
+          trusted,
+          { operation: "sources", candidateKey: "candidate-one", limit: 1 },
+          context,
+        ),
+      ).rejects.toThrow("Resource not found");
+      if (["artifact-store", "actor", "internal-family"].includes(boundary))
+        expect(f.get).not.toHaveBeenCalled();
+      expect(db.save).not.toHaveBeenCalled();
+    },
+  );
 
   it.each(["list", "sources"])(
     "reports no current role for %s without inventing a page",

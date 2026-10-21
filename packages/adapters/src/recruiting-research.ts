@@ -1,5 +1,9 @@
 import { createHash } from "node:crypto";
+import { isDeepStrictEqual } from "node:util";
+import type { ArtifactStore } from "@rakazo/adapter-kit";
 import type {
+  Actor,
+  RecruitingCandidateSource,
   RecruitingHumanIntent,
   RecruitingResearchObservation,
   RecruitingResearchPurpose,
@@ -15,10 +19,17 @@ import {
   RecruitingSourceRefSchema,
 } from "@rakazo/contracts";
 import {
+  boundDirectApprovalDetails,
+  catalogApprovalDetails,
+  projectRecruitingCandidateReport,
   RECRUITING_CANDIDATE_OUTPUT_INSTRUCTIONS,
+  readRecruitingResearchReadArtifact,
   requireRecruitingBriefConfirmation,
 } from "@rakazo/core";
 import { mcpObject } from "@rakazo/core/node/approval-effect-key";
+import type { PrismaClient } from "@rakazo/db";
+import { IsolationError, listRecruitingResearch } from "@rakazo/db";
+import { readActorArtifact } from "./artifact-read.js";
 
 export { isRecruitingCandidateReportField, projectRecruitingCandidateReport } from "@rakazo/core";
 export { mcpObject } from "@rakazo/core/node/approval-effect-key";
@@ -346,4 +357,118 @@ function record(value: unknown): Record<string, unknown> | undefined {
 
 function nonblank(value: unknown): value is string {
   return typeof value === "string" && value.trim().length > 0;
+}
+
+/** Both source views project the same actor-verified occurrence; no provider reads or writes. */
+export function createRecruitingCandidateReportReader(
+  deps: { prisma: PrismaClient; artifacts: ArtifactStore },
+  actor: Actor,
+  roleId: string,
+  options: {
+    artifacts?: Map<string, Awaited<ReturnType<typeof readActorArtifact>>>;
+    fromTool?: true;
+  } = {},
+) {
+  const artifacts =
+    options.artifacts ?? new Map<string, Awaited<ReturnType<typeof readActorArtifact>>>();
+  let research: ReturnType<typeof listRecruitingResearch> | undefined;
+  // ponytail: share verified page decoding only within this actor/role read, never across requests.
+  const pages = new Map<
+    string,
+    { observation: RecruitingResearchObservation; requestCursor: unknown }
+  >();
+  return async (source: Omit<RecruitingCandidateSource, "crmImports">) => {
+    try {
+      const { artifactId, sha256 } = source.artifactRef;
+      let saved = artifacts.get(artifactId);
+      if (!saved) {
+        saved = await readActorArtifact(deps, actor, { artifactId, fromTool: options.fromTool });
+        artifacts.set(artifactId, saved);
+      }
+      if (saved.row.hash !== sha256) throw new IsolationError();
+      const pageKey = JSON.stringify([
+        artifactId,
+        sha256,
+        source.taskId,
+        source.actionId,
+        source.roleRevisionId,
+        source.effectId,
+        source.requestCursor,
+        source.outputId,
+      ]);
+      let page = pages.get(pageKey);
+      if (!page) {
+        let observation: RecruitingResearchObservation;
+        let requestCursor: unknown;
+        if (source.taskId === null && source.actionId === null) {
+          const snapshot = JSON.parse(
+            new TextDecoder("utf-8", { fatal: true }).decode(saved.bytes),
+          );
+          const direct = boundDirectApprovalDetails(snapshot?.request, "__rakazoCatalogTool");
+          const catalog = catalogApprovalDetails(snapshot?.request, "__rakazoCatalogTool");
+          const route = direct?.route ?? catalog?.route;
+          const args = direct?.args ?? catalog?.args.arguments;
+          if (
+            route?.connectorId !== "mcp" ||
+            route.toolName !== "get_rows" ||
+            !args ||
+            typeof args !== "object" ||
+            Array.isArray(args) ||
+            !("task_id" in args) ||
+            typeof args.task_id !== "string" ||
+            !args.task_id.trim() ||
+            (catalog && !["connectors_execute_tool", "mcp_execute_tool"].includes(catalog.toolName))
+          )
+            throw new IsolationError();
+          observation = classifyRecruitingResearchResult(snapshot.providerResult, {
+            operation: "rows",
+            providerTaskId: args.task_id,
+          });
+          requestCursor = "cursor" in args ? args.cursor : null;
+        } else {
+          research ??= listRecruitingResearch(deps.prisma, actor, { roleId });
+          const context = await research;
+          const task = context.tasks.find((task) => task.id === source.taskId);
+          const action = context.actions.find((action) => action.id === source.actionId);
+          if (
+            !task ||
+            !action ||
+            task.roleId !== roleId ||
+            action.roleRevisionId !== source.roleRevisionId
+          )
+            throw new IsolationError();
+          const snapshot = await readRecruitingResearchReadArtifact(saved.bytes, {
+            task,
+            action,
+            artifact: source.artifactRef,
+          });
+          if (snapshot.operation !== "rows" || snapshot.effectId !== source.effectId)
+            throw new IsolationError();
+          observation = classifyRecruitingResearchResult(snapshot.providerResult, {
+            operation: "rows",
+            providerTaskId: task.providerTaskId ?? undefined,
+          });
+          if (!isDeepStrictEqual(snapshot.observation, observation)) throw new IsolationError();
+          requestCursor = snapshot.request.cursor ?? null;
+        }
+        page = { observation, requestCursor };
+        pages.set(pageKey, page);
+      }
+      const { observation, requestCursor } = page;
+      if (
+        requestCursor !== source.requestCursor ||
+        (observation.outputId ?? null) !== source.outputId ||
+        observation.deliveryState !== "accepted" ||
+        !observation.rows ||
+        !Number.isSafeInteger(source.rowIndex) ||
+        source.rowIndex < 0 ||
+        !Object.hasOwn(observation.rows, source.rowIndex)
+      )
+        throw new IsolationError();
+      const row = observation.rows[source.rowIndex];
+      return { row, report: projectRecruitingCandidateReport(row) };
+    } catch {
+      throw new IsolationError();
+    }
+  };
 }

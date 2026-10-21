@@ -513,6 +513,7 @@ describe("native saved candidate reads", () => {
         builtin: true,
         autoReview: true,
         trigger,
+        artifacts: true,
       });
       const page = {
         roleId: "role",
@@ -533,7 +534,7 @@ describe("native saved candidate reads", () => {
       await f.run();
       expect(candidateReads).toHaveBeenCalledTimes(3);
       expect(candidateReads).toHaveBeenCalledWith(
-        { prisma: f.prisma },
+        { prisma: f.prisma, artifacts: expect.objectContaining({ get: expect.any(Function) }) },
         expect.objectContaining({
           actor: expect.objectContaining({ spaceId: "space-1", userId: "user-1" }),
           runId: "run-1",
@@ -550,6 +551,20 @@ describe("native saved candidate reads", () => {
       expect(reviewMock).not.toHaveBeenCalled();
     },
   );
+
+  it("fails a source read without artifact storage before dispatching the native reader", async () => {
+    const f = fixture({ name: "recruiting_candidates", builtin: true });
+    f.setCalls([
+      {
+        args: { operation: "sources", candidateKey: "candidate", limit: 1 },
+        executionId: "source",
+      },
+    ]);
+    await f.run();
+    expect(candidateReads).not.toHaveBeenCalled();
+    expect(f.results).toEqual([{ error: "Recruiting role or source is unavailable" }]);
+    expect(f.effects).toEqual([]);
+  });
 
   it("honors native tool availability and disable settings", async () => {
     const options = {

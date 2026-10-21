@@ -27,6 +27,7 @@ import {
 } from "@rakazo/db";
 import { getLogger } from "@rakazo/logging";
 import { inputPausedToolResult } from "./approval-effect.js";
+import { createRecruitingCandidateReportReader } from "./recruiting-research.js";
 
 type RecruitingRunContext = { actor: Actor; runId: string; threadId: string; botId: string };
 export type RecruitingAssessmentToolContext = RecruitingRunContext & {
@@ -66,7 +67,7 @@ async function requireRecruitingRun(
 }
 
 export async function executeRecruitingCandidatesTool(
-  deps: { prisma: PrismaClient },
+  deps: { prisma: PrismaClient; artifacts: ArtifactStore },
   trusted: RecruitingRunContext,
   untrusted: unknown,
   context: AdapterContext,
@@ -93,12 +94,24 @@ export async function executeRecruitingCandidatesTool(
       return result;
     }
     const { operation: _operation, ...query } = input;
+    if (!deps.artifacts) throw new IsolationError();
     const result = await listRecruitingCandidateSources(deps.prisma, trusted.actor, {
       roleId: workspace.role.id,
       ...query,
     });
+    const readReport = createRecruitingCandidateReportReader(
+      deps,
+      trusted.actor,
+      workspace.role.id,
+      {
+        fromTool: true,
+      },
+    );
+    const items = [];
+    for (const source of result.items)
+      items.push({ ...source, report: (await readReport(source)).report });
     succeeded = true;
-    return result;
+    return { ...result, items };
   } finally {
     getLogger().info("recruiting.candidates.read.timing", {
       operation: input.operation,

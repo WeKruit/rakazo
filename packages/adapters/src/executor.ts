@@ -6854,10 +6854,11 @@ export function createRunExecutor(deps: ExecutorDeps) {
           }
           if (name === "recruiting_candidates") {
             try {
+              if (!deps.artifacts) throw new IsolationError();
               return finish(
                 redactConnectorPayload(
                   await executeRecruitingCandidatesTool(
-                    { prisma: deps.prisma },
+                    { prisma: deps.prisma, artifacts: deps.artifacts },
                     { actor: researchActor.actor, runId, threadId: thread.id, botId: bot.id },
                     args,
                     context,
