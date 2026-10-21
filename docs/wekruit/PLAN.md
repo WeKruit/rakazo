@@ -6,9 +6,11 @@
 
 **原生 Agent 读取已接通：** `595736f0` 复用网页既有的原件报告阅读器，原生来源读取沿用账号/岗位/来源、字节/hash及行号校验，列表返回和受保护内部原件限制保持。正常聊天已由 Main 原生交接 Sourcer，只读取指定真实候选和一份保存报告，原对话返回贡献、雇主信息缺口、来源、简历和未知；两次运行完成、七次工具成功，无电脑拆解、供应商研究、重评、CRM写入或外发。整轮约184秒，不能宣称端到端提速。聊天新产生的群元数据与两份原生上下文原件单独核对，不冒称全程每行相同。
 
-**CRM 增量已推送，尚未发布：** [CRM Draft PR #57](https://github.com/WeKruit/headhunter-agent/pull/57) 的 `de24d58` 复用已有原子 importer、同人多岗位 membership、原生 MCP 和 CRM 详情展示；不改已有人员资料、canonical pipeline、阶段、审阅、备注或兴趣。沿当前列表/计数补岗位关联，保留归档、未审阅、邮件摘要和目录契约。47项 MCP 检查、42项 CRM/review 网页检查、相关类型/格式及两次独立源码复核通过；批次不与历史累加，SQL回归与并发尚未实际运行。生产只读检查确认所需身份函数、importer及membership尚不存在；既有数据已含不符合严格身份校验的地址和重复身份，新迁移前检查会失败。没有自动清理历史、放宽去重或执行迁移，也没有发布依赖缺失RPC的CRM前端、扩大工具分配或写业务行。真实导入及读回仍未验收。
+**CRM 增量已推送，尚未发布：** [CRM Draft PR #57](https://github.com/WeKruit/headhunter-agent/pull/57) 的 `ae3e191` 复用原生 MCP、已有身份规范化和原子候选/来源/多岗位关联，不覆盖原资料或 canonical pipeline。生产只读检查发现旧数据含不规范地址和重复身份；本次已移除“先治理全库才能导入一人”的前提，改由原生 PostgreSQL 事务锁后按组织及本次身份读取：零条新增、一条复用、多条明确报错，不静默合并或清理历史。同一来源重复调用复用存储回执。锁持有到外层事务结束；普通读取继续，但当前方案会串行化全表候选写入，不宣称没有并发成本。
 
-**当前缺口与下一步：** 旧读取失败原件保留；一次原15秒限制的物理只读测量约5.6秒，其中五份约12.6MB原件查询约3.4秒、后续JavaScript间隔约27ms，不支持“JSON解析卡死”的归因。后续仍需并发/持续运行验收。CRM只读已定位原有客户/岗位，候选池未绑定或导入；先解决已实证的历史身份数据与严格导入前检查之间的发布阻碍，不替用户合并或清理旧CRM。Gmail授权超时关闭，仍待本人处理Google安全提示和实际账户grant。原材料/十人校准决定、完整发送/排期、全部卡型和多用户验收未完成；P6及M1–M5均未完成。
+**数据库实现检查已实际通过：** 既有云端 PostgreSQL 16 RLS job 的[41项检查全部通过](https://github.com/WeKruit/headhunter-agent/actions/runs/39559315852/job/119086491961)，包含完整导入 SQL 回归、双连接同人并发、等待外部写入后读取新提交、外层事务回滚及组织隔离。没有在 Mac 启动数据库、Docker 或新增测试基础设施。另50项 MCP/auth 检查、DB/MCP 类型、格式及独立 SPEC/QUALITY 复核通过；此前42项未改动 CRM/review 网页检查不重复累加。这些是隔离数据库与源码检查，不是生产业务验收。生产身份函数、importer及membership仍缺，未执行迁移、发布依赖缺失RPC的CRM前端、扩大工具分配或写业务行。
+
+**当前缺口与下一步：** 旧读取失败原件保留；一次原15秒限制的物理只读测量约5.6秒，其中五份约12.6MB原件查询约3.4秒、后续JavaScript间隔约27ms，不支持“JSON解析卡死”的归因。后续仍需持续运行验收。CRM只读已定位原有客户/岗位，候选池未绑定或导入；数据库实现检查通过后，准备精确生产 SQL/MCP 发布范围及 Main 原生工具配置，再按单独授权做真实原卡导入和网页读回。Gmail授权超时关闭，仍待本人处理Google安全提示和实际账户grant。原材料/十人校准决定、完整发送/排期、全部卡型和多用户验收未完成；P6及M1–M5均未完成。
 
 > **For agentic workers:** Follow [AGENTS.md — WeKruit design principles](../../AGENTS.md#wekruit-design-principles). This plan defines product outcomes and records evidence; it does not authorize another harness or a fixed recruiting workflow. Reuse native capability first and change only a demonstrated integration gap.
 
@@ -930,11 +932,11 @@ flowchart TD
 
 #### 当前增量：CRM 导入与原生写入恢复（未发布）
 
-- CRM 新增单一 security-invoker 导入 RPC，原子保存候选、来源和正式多岗位关联。组织内身份唯一约束覆盖并发及其他写入入口；身份不明、无效或既有重复资料不能静默合并。相同候选的精确来源重放只保留一条，新轮次来源另存。旧 pipeline、profile、stage 和评审不覆盖。CRM 读取及列表/树同时采用正式关联，候选详情仅在有关联时显示 `Roles`。
+- CRM 新增单一 security-invoker 导入 RPC，原子保存候选、来源和正式多岗位关联。在 READ COMMITTED 下先取得候选表原生写锁，再以新快照查找本组织、本次身份；已有其他入口的候选写入也参与数据库锁。零条新增、一条复用、多条拒绝；不要求先清理全库、不新增全局身份 CHECK/唯一索引，不声称约束其他入口将来永远不产生重复。相同候选的精确来源重放只保留一条，新轮次另存。原 pipeline、profile、stage 和评审不覆盖。CRM 读取及列表/树采用正式关联，候选详情仅在有关联时显示 `Role associations`。当前组织内 O(N) 查找及跨组织候选写串行化是明确容量边界；事务内不做模型或网络工作。
 - Rakazo 根据实际 MCP route 的 `crm_import_candidate` 操作要求原生一次性人类审批。永久允许、自动审查和错误的只读注记均不能绕过。原卡显示完整脱敏参数，回答后执行已保存原参数；搜索仍按既有 full access、额度和限流策略执行。
 - MCP 区分调用前拒绝和调用后响应丢失。后者保留原生 uncertain，不能当已完成或盲目重发。检索写入另原子修正当前 task/action 的 unknown 展示，不伪造 provider receipt，不改终态、较新轮次或旧历史记录。精确回执并发到达时复用真实完成结果。
 - CRM 已与最新 main 的 canonical campaign/role 映射整合，使用同一岗位组合唯一键；没有重复建立岗位键或改写上游 campaign 函数。生产只读元数据确认该键及新关联表尚不存在，导入迁移因此仅在缺少时创建这个相同键，不依赖上游业务数据修复。迁移账本读取被权限拒绝，不能声称已核验 CRM 全部迁移。部署必须分别确认范围，不能把所有 pending migration 一键应用。
-- 当前证据是离线原生执行器、MCP、严格 DTO/真实 Supabase 客户端边界和组件检查，以及静态独立审查。真实 PostgreSQL/RLS/并发用例已写但未执行；没有生产写入、MCP 工具分配扩大、部署或外发。合成工作台截图不证明这些新增 CRM 能力已在线。
+- 当前数据库实现证据另包括 `ae3e191` 的41项真实云端 PostgreSQL RLS 检查全部通过，包含 SQL 回归及两个连接的并发/回滚；不是生产迁移或真实候选业务写入。原生执行器、MCP、DTO/客户端边界和组件检查分别保留，不累加成整品验收。没有生产写入、工具分配扩大、部署或外发；合成工作台截图不证明新增 CRM 能力已在线。
 - 最终原生审批/连接/恢复组合检查为 315 项通过、234 项 PostgreSQL 明确跳过；CRM MCP/auth 33 项和 Web 27 项分别通过，不累加成整品验收。实际 Stop 后的同 fence/同 effect-owner 仅允许记录未知结果，不重新打开 cancelled run/task，旧 fence、其他 owner 及终态/较新领域记录保持拒绝或原状。相关类型、格式及独立 SPEC/QUALITY 审查通过。
 
 **下一项业务优先**：候选索引与 CRM 回执关联代码已接，先完成此批检查；随后对接精确外联草稿、原生审批、实际 provider receipt 与回复停止。获得单独发布授权后，依次做真实目标绑定、原卡导入、重复/未知结果和网页恢复验收。G3 是 Instantly 名单导入/活动启用，不是 CRM 事实落库；不能用 G3 的十人校准要求阻止未评估候选保存。真实写入与外联闭环未通过，P6 保持未完成。
