@@ -5777,7 +5777,7 @@ export function createRunExecutor(deps: ExecutorDeps) {
               const [messages, answers] = await Promise.all([
                 deps.prisma.message.findMany({
                   where: {
-                    spaceId: run.spaceId,
+                    thread: { spaceId: run.spaceId, userId: run.userId },
                     threadId: thread.id,
                     runId,
                     botId: bot.id,

@@ -1922,6 +1922,16 @@ describe("internal policy changes preserve existing human cards", () => {
             : ([] as never),
         );
       await f.run();
+      expect(f.prisma.message.findMany).toHaveBeenCalledWith({
+        where: {
+          thread: { spaceId: "space-1", userId: "user-1" },
+          threadId: "thread-1",
+          runId: "run-1",
+          botId: "bot-1",
+          role: "bot",
+        },
+        select: { blocks: true },
+      });
       expect(f.execute).not.toHaveBeenCalled();
       expect(isApprovalPausedResult(f.results.at(-1))).toBe(true);
       expect(f.effects[0]).toEqual(original);
