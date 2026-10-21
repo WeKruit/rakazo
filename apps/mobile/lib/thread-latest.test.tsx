@@ -13,6 +13,7 @@ import {
   leaveThreadWindow,
   openThreadWindow,
   reconcileThreadScrollState,
+  selectedAskActionLabel,
 } from "@rakazo/core";
 import React, { act, useCallback, useRef, useState } from "react";
 import { createRoot } from "react-dom/client";
@@ -31,6 +32,54 @@ const handler = source.slice(
   source.indexOf("  async function loadOlderMessages() {"),
 );
 
+const formatterSource = source.slice(
+  source.indexOf("function formatApprovalAnswer("),
+  source.indexOf("\nfunction formatAttachmentSkip("),
+);
+const compiledFormatter = ts.transpileModule(`${formatterSource}\nreturn formatApprovalAnswer;`, {
+  compilerOptions: { target: ts.ScriptTarget.ES2022 },
+}).outputText;
+const formatApprovalAnswer = new Function("t", "selectedAskActionLabel", compiledFormatter)(
+  (text: string, values?: { answer: string }) =>
+    text.replace("{answer}", values?.answer ?? "{answer}"),
+  selectedAskActionLabel,
+);
+
+it("preserves server approval labels in completed mobile answers and retains native outcomes", () => {
+  const cases = [
+    { id: "allow", label: "Confirm requirements", expected: "Answered: Confirm requirements" },
+    { id: "allow", label: "Approve documents", expected: "Answered: Approve documents" },
+    { id: "allow", label: "Approve calibration", expected: "Answered: Approve calibration" },
+    {
+      id: "always",
+      label: "Approve future documents",
+      expected: "Answered: Approve future documents",
+    },
+    {
+      id: "deny",
+      label: "Keep the current documents",
+      expected: "Answered: Keep the current documents",
+    },
+    { id: "allow", label: "Allow once", expected: "Allowed once" },
+    { id: "always", label: "Always allow this tool", expected: "Always allowed" },
+    { id: "always", label: "Always allow", expected: "Always allowed" },
+    { id: "deny", label: "Deny", expected: "Denied" },
+    { id: "allow", label: "Create space", outcome: "created", expected: "Created" },
+    { id: "deny", label: "Cancel", outcome: "cancelled", expected: "Cancelled" },
+  ];
+  for (const { expected, ...action } of cases) {
+    expect(formatApprovalAnswer(action.id, [action], true)).toBe(expected);
+  }
+  for (const [answer, expected] of [
+    ["allow", "Allowed once"],
+    ["always", "Always allowed"],
+    ["deny", "Denied"],
+  ]) {
+    expect(formatApprovalAnswer(answer, undefined, true)).toBe(expected);
+    expect(formatApprovalAnswer(answer, [{ id: "other", label: "Other" }], true)).toBe(expected);
+  }
+});
+
 it("renders and answers the actual mobile multi-field card with typed multi-select and URL validation", async () => {
   (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
   const surface = ({ children }: { children?: React.ReactNode }) => <div>{children}</div>;
@@ -42,8 +91,12 @@ it("renders and answers the actual mobile multi-field card with typed multi-sele
     askFormOptions,
     parseAskFormResponse,
     isSecretAskBlock,
+    formatApprovalAnswer,
     useMobileTokens: () => ({}),
-    useI18n: () => ({ t: (text: string) => text }),
+    useI18n: () => ({
+      t: (text: string, values?: { answer: string }) =>
+        text.replace("{answer}", values?.answer ?? "{answer}"),
+    }),
     errorText: (error: Error) => error.message,
     View: surface,
     Text: surface,
@@ -209,6 +262,30 @@ it("renders and answers the actual mobile multi-field card with typed multi-sele
       ),
     );
     expect(container.querySelector("input")).toBeNull();
+    for (const [answer, expected] of [
+      ["allow", "Allowed once"],
+      ["always", "Always allowed"],
+      ["deny", "Denied"],
+    ]) {
+      act(() =>
+        root.render(
+          <AskBlock
+            ask={{
+              kind: "ask",
+              text: "Review this decision",
+              approvalEffectId: "effect-test",
+              status: "answered",
+              answer,
+            }}
+            canAnswer={false}
+            onAnswer={onAnswer}
+            actionProps={{}}
+          />,
+        ),
+      );
+      expect(container.textContent).toContain(expected);
+      expect(container.textContent).not.toContain(`Answered: ${answer}`);
+    }
   } finally {
     act(() => root.unmount());
   }

@@ -247,9 +247,17 @@ function formatApprovalAnswer(
   const outcome = selectedAction?.outcome;
   if (approval && outcome === "created") return t("Created");
   if (approval && outcome === "cancelled") return t("Cancelled");
-  if (approval && answer === "allow") return t("Allowed once");
-  if (approval && answer === "always") return t("Always allowed");
-  if (approval && answer === "deny") return t("Denied");
+  const label = selectedAction?.label;
+  if (approval && answer === "allow" && (label === undefined || label === "Allow once"))
+    return t("Allowed once");
+  if (
+    approval &&
+    answer === "always" &&
+    (label === undefined || label === "Always allow this tool" || label === "Always allow")
+  )
+    return t("Always allowed");
+  if (approval && answer === "deny" && (label === undefined || label === "Deny"))
+    return t("Denied");
   return t("Answered: {answer}", { answer: selectedAskActionLabel(answer, actions) });
 }
 
@@ -3516,7 +3524,7 @@ const MessageBubble = memo(function MessageBubble({
               {formatApprovalAnswer(
                 askBlock.answer,
                 askBlock.actions,
-                isApprovalAskBlock(askBlock),
+                Boolean(askBlock.approvalEffectId),
               )}
             </Text>
           ) : canAnswer && onAnswer ? (
@@ -3988,7 +3996,11 @@ function AskBlock({
       ) : null}
       {answered ? (
         <Text style={{ color: tokens.success, fontSize: 14 }}>
-          {secretInput ? t("Saved") : t("Answered: {answer}", { answer: ask.answer ?? t("Done") })}
+          {secretInput
+            ? t("Saved")
+            : ask.approvalEffectId
+              ? formatApprovalAnswer(ask.answer, ask.actions, true)
+              : t("Answered: {answer}", { answer: ask.answer ?? t("Done") })}
         </Text>
       ) : canAnswer && ask.requestedSchema ? (
         <>

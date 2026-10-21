@@ -298,6 +298,7 @@ describe("native question answers", () => {
           <AskActions
             actions={[
               { id: "allow", label: "Allow once" },
+              { id: "always", label: "Always allow this tool" },
               { id: "deny", label: "Deny" },
             ]}
             onAnswer={vi.fn()}
@@ -305,8 +306,37 @@ describe("native question answers", () => {
         ),
       );
       expect(container.querySelector("textarea")).toBeNull();
-      expect(container.textContent).toContain("Allow once");
-      expect(container.textContent).toContain("Deny");
+      expect([...container.querySelectorAll("button")].map((button) => button.textContent)).toEqual(
+        ["Allow once", "Always allow", "Deny"],
+      );
+    } finally {
+      act(() => root.unmount());
+    }
+  });
+
+  it.each([
+    ["allow", "Confirm requirements"],
+    ["allow", "Approve documents"],
+    ["allow", "Approve calibration"],
+    ["always", "Approve future documents"],
+    ["deny", "Keep the current documents"],
+    ["allow", "Create space"],
+    ["deny", "Cancel"],
+    ["allow", "Allow once"],
+    ["always", "Always allow"],
+    ["deny", "Deny"],
+  ])("preserves the server's %s action label %s and original answer id", async (id, label) => {
+    vi.stubGlobal("IS_REACT_ACT_ENVIRONMENT", true);
+    const container = document.createElement("div");
+    const root = createRoot(container);
+    const onAnswer = vi.fn().mockResolvedValue(undefined);
+    try {
+      act(() => root.render(<AskActions actions={[{ id, label }]} onAnswer={onAnswer} />));
+      const action = container.querySelector("button");
+      expect(action?.textContent).toBe(label);
+      expect(container.querySelector("textarea")).toBeNull();
+      await act(async () => action!.click());
+      expect(onAnswer).toHaveBeenCalledExactlyOnceWith(id);
     } finally {
       act(() => root.unmount());
     }
