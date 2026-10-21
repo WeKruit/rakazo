@@ -2,28 +2,46 @@ import { Trans, useLingui } from "@lingui/react/macro";
 import type { Group } from "@rakazo/contracts";
 import { Button, Input } from "@rakazo/ui-web";
 import {
-  BriefcaseBusiness,
-  ChartNoAxesCombined,
-  MessageSquare,
+  Bookmark,
+  CalendarDays,
+  FolderOpen,
+  Inbox,
   MoreHorizontal,
-  Plus,
+  PanelLeft,
+  PlusCircle,
   Search,
+  Send,
+  Sparkles,
+  Users,
+  WandSparkles,
 } from "lucide-react";
 import type { ContextMenuPosition } from "../BotContextMenu";
 
-/** The supplied WeKruit RecruiterShell chrome, over the existing native conversations. */
+export type RecruitingWorkspaceView =
+  | "conversation"
+  | "results"
+  | "brief"
+  | "feedback"
+  | "shortlist"
+  | "contacts"
+  | "sequence"
+  | "inbox"
+  | "interview"
+  | "workflow";
+
+/** The supplied WeKruit /hire navigation over native recruiting conversations. */
 export function RecruitingNavigation({
   groups,
   archivedGroups,
   archivedOpen,
   groupId,
   query,
-  dashboardOpen,
   canOpenDashboard,
   canCreateRole,
   onQueryChange,
-  onConversation,
-  onDashboard,
+  view,
+  onView,
+  onCollapse,
   onOpenRole,
   onNewRole,
   canCreateRoleFrom,
@@ -37,12 +55,12 @@ export function RecruitingNavigation({
   archivedOpen: boolean;
   groupId?: string;
   query: string;
-  dashboardOpen: boolean;
   canOpenDashboard: boolean;
   canCreateRole: boolean;
   onQueryChange: (query: string) => void;
-  onConversation: () => void;
-  onDashboard: () => void;
+  view: RecruitingWorkspaceView;
+  onView: (view: RecruitingWorkspaceView) => void;
+  onCollapse: () => void;
   onOpenRole: (id: string) => void;
   onNewRole: () => void;
   canCreateRoleFrom: (id: string) => boolean;
@@ -55,57 +73,79 @@ export function RecruitingNavigation({
   const visibleGroups = groups.filter((group) =>
     group.name.toLocaleLowerCase().includes(query.trim().toLocaleLowerCase()),
   );
+  const destinations = [
+    { view: "shortlist", label: t`Shortlist`, Icon: Bookmark },
+    { view: "contacts", label: t`Contacts`, Icon: Users },
+    { view: "sequence", label: t`Sequence`, Icon: Send },
+    { view: "inbox", label: t`Inbox`, Icon: Inbox },
+    { view: "interview", label: t`Interview`, Icon: CalendarDays },
+  ] as const;
   return (
-    <div className="flex min-h-0 flex-1 flex-col px-4 pb-4" data-testid="recruiting-navigation">
-      <div className="flex items-center gap-3 px-1 pb-7 pt-2">
-        <span className="recruiting-heading grid size-[34px] place-items-center rounded-[9px] bg-primary text-[21px] text-primary-foreground">
-          W
-        </span>
-        <span className="flex flex-col leading-tight">
-          <strong className="text-[15px] font-semibold">WeKruit</strong>
-          <span className="text-xs text-muted-foreground">
-            <Trans>Recruiter</Trans>
-          </span>
-        </span>
+    <div
+      className="hire-navigation flex min-h-0 flex-1 flex-col"
+      data-testid="recruiting-navigation"
+    >
+      <div className="hire-brand-row">
+        <button
+          type="button"
+          className="hire-brand"
+          aria-label={t`WeKruit home`}
+          onClick={() => onView("results")}
+        >
+          <img className="hire-brand-logo" src="/wekruit-logo.png" alt="" aria-hidden="true" />
+          <span>WeKruit</span>
+        </button>
+        <button
+          type="button"
+          className="hire-sidebar-collapse"
+          aria-label={t`Collapse navigation`}
+          onClick={onCollapse}
+        >
+          <PanelLeft size={17} aria-hidden="true" />
+        </button>
       </div>
-      <nav aria-label={t`Recruiting workspace`} className="space-y-1">
-        <Button
-          variant={!dashboardOpen ? "default" : "ghost"}
-          aria-current={!dashboardOpen ? "page" : undefined}
-          className="w-full justify-start rounded-[10px]"
-          onClick={onConversation}
-        >
-          <MessageSquare size={18} aria-hidden="true" />
-          <Trans>Conversation</Trans>
+      <nav aria-label={t`Recruiting workspace`} className="hire-nav">
+        <Button variant="ghost" disabled={!canCreateRole} onClick={onNewRole}>
+          <PlusCircle size={18} aria-hidden="true" />
+          <Trans>New Role</Trans>
         </Button>
-        <Button
-          variant={dashboardOpen ? "default" : "ghost"}
-          aria-current={dashboardOpen ? "page" : undefined}
-          disabled={!canOpenDashboard}
-          className="w-full justify-start rounded-[10px]"
-          onClick={onDashboard}
-        >
-          <ChartNoAxesCombined size={18} aria-hidden="true" />
-          <Trans>Dashboard</Trans>
-        </Button>
-      </nav>
-      <div className="mb-3 mt-7 flex items-center justify-between px-2">
-        <span className="text-[11px] font-semibold uppercase tracking-[0.12em] text-muted-foreground">
-          <Trans>Open roles</Trans>
-        </span>
         <Button
           variant="ghost"
-          size="icon-sm"
-          aria-label={t`New role`}
-          disabled={!canCreateRole}
-          onClick={onNewRole}
+          aria-current={view === "brief" ? "page" : undefined}
+          disabled={!canOpenDashboard}
+          onClick={() => onView("brief")}
         >
-          <Plus size={16} aria-hidden="true" />
+          <FolderOpen size={18} aria-hidden="true" />
+          <Trans>Job Brief</Trans>
         </Button>
+        <Button
+          variant="ghost"
+          aria-current={view === "feedback" ? "page" : undefined}
+          disabled={!canOpenDashboard}
+          onClick={() => onView("feedback")}
+        >
+          <Sparkles size={18} aria-hidden="true" />
+          <Trans>Client feedback</Trans>
+        </Button>
+        {destinations.map(({ view: target, label, Icon }) => (
+          <Button
+            key={target}
+            variant="ghost"
+            disabled={!canOpenDashboard}
+            aria-current={view === target ? "page" : undefined}
+            onClick={() => onView(target)}
+          >
+            <Icon size={18} aria-hidden="true" />
+            {label}
+          </Button>
+        ))}
+      </nav>
+      <div className="hire-role-heading">
+        <Trans>All roles</Trans>
       </div>
-      <div className="relative mb-3">
+      <div className="relative mx-1 mb-2">
         <Search
-          className="pointer-events-none absolute start-3 top-2.5 text-muted-foreground"
+          className="pointer-events-none absolute start-3 top-2 text-muted-foreground"
           size={15}
           aria-hidden="true"
         />
@@ -114,7 +154,7 @@ export function RecruitingNavigation({
           placeholder={t`Search roles`}
           value={query}
           onChange={(event) => onQueryChange(event.target.value)}
-          className="h-9 rounded-[10px] bg-card ps-9 text-[13px]"
+          className="h-8 rounded-lg border-sidebar-border bg-transparent ps-9 text-xs"
         />
       </div>
       <div className="rk-scroll min-h-0 flex-1 space-y-1 overflow-y-auto">
@@ -122,22 +162,22 @@ export function RecruitingNavigation({
           {visibleGroups.map((group) => (
             <div key={group.id} className="flex items-center gap-1">
               <Button
-                variant={group.id === groupId && !dashboardOpen ? "secondary" : "ghost"}
-                className="h-auto min-h-11 min-w-0 flex-1 justify-start rounded-[10px] px-3 py-3 text-start"
-                aria-current={group.id === groupId ? "page" : undefined}
+                variant="ghost"
+                className="hire-role-button h-auto min-h-[39px] min-w-0 flex-1 justify-start gap-3 rounded-[9px] px-2.5 py-2 text-start text-sm font-normal"
+                aria-current={group.id === groupId && view === "results" ? "page" : undefined}
                 onClick={() => onOpenRole(group.id)}
                 onContextMenu={(event) => {
                   event.preventDefault();
                   onRoleMenu(group.id, event.currentTarget, { x: event.clientX, y: event.clientY });
                 }}
               >
-                <BriefcaseBusiness size={17} className="shrink-0" aria-hidden="true" />
+                <span className="size-2 shrink-0 rounded-full bg-link" aria-hidden="true" />
                 <span className="min-w-0 flex-1 truncate" dir="auto">
                   {group.name}
                 </span>
                 {group.unread ? (
                   <span
-                    className="size-1.5 rounded-full bg-primary"
+                    className="size-1.5 rounded-full bg-link"
                     role="img"
                     aria-label={t`Unread`}
                   />
@@ -197,6 +237,17 @@ export function RecruitingNavigation({
               : null}
           </div>
         ) : null}
+      </div>
+      <div className="hire-sidebar-bottom">
+        <Button
+          variant="ghost"
+          disabled={!canOpenDashboard}
+          aria-current={view === "workflow" ? "page" : undefined}
+          onClick={() => onView("workflow")}
+        >
+          <WandSparkles size={17} aria-hidden="true" />
+          <Trans>Recruiting workflow</Trans>
+        </Button>
       </div>
     </div>
   );

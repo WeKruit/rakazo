@@ -18,6 +18,7 @@ vi.mock("@rakazo/ui-web", () => ({
   BotAvatar: () => <span />,
   Button: (props: ComponentProps<"button">) => <button {...props} />,
   Input: (props: ComponentProps<"input">) => <input {...props} />,
+  Textarea: (props: ComponentProps<"textarea">) => <textarea {...props} />,
   AlertDialog: ({
     children,
     onOpenChange,
@@ -144,20 +145,82 @@ it("creates a role with the current native crew order after a membership refresh
     );
   await renderRole(bots);
   expect(container.textContent).not.toContain("Sourcer");
-  const input = container.querySelector("input")!;
+  const input = container.querySelector("textarea")!;
+  expect(container.textContent).toContain("Who are you looking for?");
+  expect(container.querySelector("input")).toBeNull();
   act(() => {
-    Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, "value")!.set!.call(
+    Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, "value")!.set!.call(
       input,
-      "Systems engineer",
+      "We need a systems engineer. https://example.com/jobs/systems",
     );
     input.dispatchEvent(new Event("input", { bubbles: true }));
   });
   const replacement = { id: "scheduler", name: "Scheduling", archivedAt: null } as Bot;
   await renderRole([bots[1]!, bots[0]!, replacement]);
-  await click("Create role");
+  await click("Continue");
   expect(onCreate).toHaveBeenCalledExactlyOnceWith({
-    name: "Systems engineer",
+    name: "New role",
+    description: "We need a systems engineer. https://example.com/jobs/systems",
     botIds: ["researcher", "coordinator", "scheduler"],
+  });
+});
+
+it("keeps the typed recruiting request when native creation fails and retries that same request", async () => {
+  const onCreate = vi
+    .fn()
+    .mockRejectedValueOnce(new Error("Could not save the role"))
+    .mockResolvedValueOnce(undefined);
+  const bots = [
+    { id: "coordinator", name: "Main", archivedAt: null },
+    { id: "researcher", name: "Sourcer", archivedAt: null },
+  ] as Bot[];
+  await act(async () =>
+    root.render(<CreateGroupForm bots={bots} recruiting onCancel={() => {}} onCreate={onCreate} />),
+  );
+  expect(button("Continue").disabled).toBe(true);
+  const input = container.querySelector("textarea")!;
+  await act(async () => {
+    Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, "value")!.set!.call(
+      input,
+      "  Find engineers with robotics experience.  ",
+    );
+    input.dispatchEvent(new Event("input", { bubbles: true }));
+  });
+  await click("Continue");
+  expect(container.querySelector('[role="alert"]')?.textContent).toBe("Could not save the role");
+  expect(input.value).toBe("  Find engineers with robotics experience.  ");
+  await click("Continue");
+  expect(onCreate).toHaveBeenCalledTimes(2);
+  expect(onCreate.mock.calls[1]).toEqual(onCreate.mock.calls[0]);
+  expect(onCreate.mock.calls[1]?.[0].description).toBe("Find engineers with robotics experience.");
+});
+
+it("keeps the native group name and member picker in the developer form", async () => {
+  const bots = [
+    { id: "coordinator", name: "Main", archivedAt: null },
+    { id: "researcher", name: "Sourcer", archivedAt: null },
+  ] as Bot[];
+  const onCreate = vi.fn().mockResolvedValue(undefined);
+  await act(async () =>
+    root.render(<CreateGroupForm bots={bots} onCancel={() => {}} onCreate={onCreate} />),
+  );
+  expect(container.querySelector("textarea")).toBeNull();
+  expect(container.querySelector("input")).not.toBeNull();
+  expect(container.textContent).toContain("Members (pick");
+  await click("Main");
+  await click("Sourcer");
+  await act(async () => {
+    const input = container.querySelector("input")!;
+    Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, "value")!.set!.call(
+      input,
+      "Working group",
+    );
+    input.dispatchEvent(new Event("input", { bubbles: true }));
+  });
+  await click("Create group");
+  expect(onCreate).toHaveBeenCalledExactlyOnceWith({
+    name: "Working group",
+    botIds: ["coordinator", "researcher"],
   });
 });
 

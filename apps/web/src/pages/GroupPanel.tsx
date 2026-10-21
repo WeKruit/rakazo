@@ -1,7 +1,7 @@
 import { Trans, useLingui } from "@lingui/react/macro";
 import { type Bot, GROUP_MEMBER_MAX, GROUP_MEMBER_MIN, type Group } from "@rakazo/contracts";
-import { BotAvatar, Button, Input } from "@rakazo/ui-web";
-import { Check, X } from "lucide-react";
+import { BotAvatar, Button, Input, Textarea } from "@rakazo/ui-web";
+import { ArrowRight, Check, X } from "lucide-react";
 import { useEffect, useId, useMemo, useRef, useState } from "react";
 import { errorText } from "../lib/user-error";
 import { DeleteItemDialog } from "./shell/dialogs";
@@ -76,11 +76,12 @@ export function CreateGroupForm({
   bots: Bot[];
   recruiting?: boolean;
   onCancel: () => void;
-  onCreate: (input: { name: string; botIds: string[] }) => Promise<void>;
+  onCreate: (input: { name: string; botIds: string[]; description?: string }) => Promise<void>;
 }) {
   const { t } = useLingui();
   const nameId = useId();
   const [name, setName] = useState("");
+  const [description, setDescription] = useState("");
   const [selection, setSelected] = useState<string[]>([]);
   const selected = recruiting
     ? bots.filter((bot) => !bot.archivedAt).map((bot) => bot.id)
@@ -88,29 +89,79 @@ export function CreateGroupForm({
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
+  const roleName = recruiting ? t`New role` : name.trim();
+  const canCreate =
+    validSelection(roleName, selected) && (!recruiting || Boolean(description.trim()));
+
   async function create() {
-    if (submitting || !validSelection(name, selected)) return;
+    if (submitting || !canCreate) return;
     setSubmitting(true);
     setError(null);
     try {
-      await onCreate({ name: name.trim(), botIds: selected });
+      await onCreate({
+        name: roleName,
+        botIds: selected,
+        ...(recruiting ? { description: description.trim() } : {}),
+      });
     } catch (cause) {
-      setError(errorText(cause, t`Could not create group`));
+      setError(errorText(cause, recruiting ? t`Could not create role` : t`Could not create group`));
     } finally {
       setSubmitting(false);
     }
+  }
+
+  if (recruiting) {
+    return (
+      <div className="hire-new">
+        <div className="hire-new-inner">
+          <Button
+            variant="ghost"
+            size="icon-sm"
+            className="hire-new-cancel"
+            aria-label={t`Cancel new role`}
+            disabled={submitting}
+            onClick={onCancel}
+          >
+            <X aria-hidden="true" />
+          </Button>
+          <h1>
+            <Trans>Who are you looking for?</Trans>
+          </h1>
+          <div className="hire-composer">
+            <Textarea
+              aria-label={t`Job description`}
+              value={description}
+              onChange={(event) => setDescription(event.target.value)}
+              placeholder={t`Start with a role title or paste a job description…`}
+              disabled={submitting}
+            />
+            <div className="hire-composer-actions">
+              <Button disabled={submitting || !canCreate} onClick={() => void create()}>
+                {submitting ? <Trans>Creating…</Trans> : <Trans>Continue</Trans>}
+                <ArrowRight size={15} aria-hidden="true" />
+              </Button>
+            </div>
+          </div>
+          {error ? (
+            <p role="alert" className="mt-3 text-sm text-destructive">
+              {error}
+            </p>
+          ) : null}
+        </div>
+      </div>
+    );
   }
 
   return (
     <div>
       <div className="mb-4 flex items-center justify-between">
         <span className="text-[13.5px] text-muted-foreground">
-          {recruiting ? <Trans>New role</Trans> : <Trans>New group</Trans>}
+          <Trans>New group</Trans>
         </span>
         <Button
           variant="ghost"
           size="icon-sm"
-          aria-label={recruiting ? t`Cancel new role` : t`Cancel new group`}
+          aria-label={t`Cancel new group`}
           onClick={onCancel}
           className="text-muted-foreground"
         >
@@ -123,42 +174,32 @@ export function CreateGroupForm({
         </p>
       ) : null}
       <label htmlFor={nameId} className="block text-sm text-muted-foreground">
-        {recruiting ? <Trans>Role name</Trans> : <Trans>Name</Trans>}
+        <Trans>Name</Trans>
         <Input
           id={nameId}
           value={name}
           onChange={(e) => setName(e.target.value)}
-          placeholder={recruiting ? t`Name this role` : t`Name this group`}
+          placeholder={t`Name this group`}
           className="mt-2"
         />
       </label>
-      {!recruiting ? (
-        <>
-          <div className="mt-5 text-sm text-muted-foreground">
-            <Trans>
-              Members (pick {GROUP_MEMBER_MIN}–{GROUP_MEMBER_MAX})
-            </Trans>
-          </div>
-          <MemberPicker
-            bots={bots}
-            selected={selected}
-            onChange={setSelected}
-            maxHeight="max-h-[280px]"
-          />
-        </>
-      ) : null}
+      <div className="mt-5 text-sm text-muted-foreground">
+        <Trans>
+          Members (pick {GROUP_MEMBER_MIN}–{GROUP_MEMBER_MAX})
+        </Trans>
+      </div>
+      <MemberPicker
+        bots={bots}
+        selected={selected}
+        onChange={setSelected}
+        maxHeight="max-h-[280px]"
+      />
       <Button
         className="mt-5 w-full"
-        disabled={submitting || !validSelection(name, selected)}
+        disabled={submitting || !canCreate}
         onClick={() => void create()}
       >
-        {submitting ? (
-          <Trans>Creating…</Trans>
-        ) : recruiting ? (
-          <Trans>Create role</Trans>
-        ) : (
-          <Trans>Create group</Trans>
-        )}
+        {submitting ? <Trans>Creating…</Trans> : <Trans>Create group</Trans>}
       </Button>
     </div>
   );

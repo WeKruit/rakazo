@@ -35,6 +35,7 @@ import {
   GROUP_MEMBER_MIN,
   MESSAGE_REACTIONS,
   normalizeCreateBotProfile,
+  RecruitingOutreachSequenceSchema,
 } from "@rakazo/contracts";
 import type { ComposerMention, SlashActionId } from "@rakazo/core";
 import {
@@ -271,6 +272,10 @@ import { ActivityList } from "./ActivityList";
 import type { ContextMenuPosition } from "./BotContextMenu";
 import { CreateGroupForm, GroupSettings, memberName } from "./GroupPanel";
 import { HostComputerPrompt } from "./HostComputerPrompt";
+import {
+  RecruitingCorrespondence,
+  type RecruitingSequenceSaveInput,
+} from "./RecruitingCorrespondence";
 import type { CandidateDiscussionContext, CandidateFeedback } from "./RecruitingPanel";
 import { RecruitingPanel } from "./RecruitingPanel";
 import { ResizableSidePanel } from "./ResizableSidePanel";
@@ -306,6 +311,7 @@ import {
   ChoiceCard,
   McpApprovalCard,
 } from "./shell/message-cards";
+import type { RecruitingWorkspaceView } from "./shell/RecruitingNavigation";
 import { RecruitingNavigation } from "./shell/RecruitingNavigation";
 import { commitSpaceRename, sidebarGroupsForSpaces } from "./shell/space-sidebar";
 import { WindowChrome } from "./WindowChrome";
@@ -1973,6 +1979,52 @@ export function ShellPage() {
     threadSnapshotCache.current.get(inGroup ? `group:${groupId}` : `bot:${active?.id}`) ??
     null;
   const composerDraftKey = inGroup ? `group:${groupId}` : `bot:${active?.id}`;
+  const workspaceViews: readonly RecruitingWorkspaceView[] = [
+    "conversation",
+    "results",
+    "brief",
+    "feedback",
+    "shortlist",
+    "contacts",
+    "sequence",
+    "inbox",
+    "interview",
+    "workflow",
+  ];
+  const requestedWorkspaceView = searchParams.get("view") as RecruitingWorkspaceView | null;
+  const recruitingWorkspaceView: RecruitingWorkspaceView =
+    requestedWorkspaceView && workspaceViews.includes(requestedWorkspaceView)
+      ? requestedWorkspaceView
+      : inGroup
+        ? "results"
+        : "conversation";
+  const workspaceNewRole = !showToolActivity && panel === "create-group";
+  const workspaceCandidates =
+    !showToolActivity &&
+    !workspaceNewRole &&
+    ["results", "shortlist", "contacts", "workflow"].includes(recruitingWorkspaceView);
+  const workspaceCorrespondence =
+    !showToolActivity &&
+    !workspaceNewRole &&
+    ["sequence", "inbox", "interview"].includes(recruitingWorkspaceView);
+  const workspaceFull = workspaceNewRole || workspaceCandidates || workspaceCorrespondence;
+  function openRecruitingView(view: RecruitingWorkspaceView) {
+    setSearchParams(
+      (current) => {
+        const next = new URLSearchParams(current);
+        next.set("view", view);
+        return next;
+      },
+      { replace: true },
+    );
+    setMobileSidebarOpen(false);
+    if (view === "brief" || view === "feedback") {
+      changeRecruitingTab(view === "brief" ? "role" : "evidence");
+      setPanel("recruiting");
+    } else {
+      setPanel(null);
+    }
+  }
   const activeRecruitingTab =
     recruitingTab?.threadId === activeSnapshot?.threadId ? recruitingTab?.tab : undefined;
   const changeRecruitingTab = useCallback(
@@ -1997,9 +2049,16 @@ export function ShellPage() {
           name: member.name,
         }))
     : undefined;
-  const discussionScope = useRef({ composerRef, panel, active: true, candidateFeedbackRecipients });
+  const discussionScope = useRef({
+    composerRef,
+    panel,
+    workspaceCandidates,
+    active: true,
+    candidateFeedbackRecipients,
+  });
   discussionScope.current.composerRef = composerRef;
   discussionScope.current.panel = panel;
+  discussionScope.current.workspaceCandidates = workspaceCandidates;
   discussionScope.current.candidateFeedbackRecipients = candidateFeedbackRecipients;
   useEffect(() => {
     discussionScope.current.active = true;
@@ -2013,7 +2072,8 @@ export function ShellPage() {
         bootstrapMe?.spaceId &&
         discussionScope.current.active &&
         discussionScope.current.composerRef === composerRef &&
-        discussionScope.current.panel === "recruiting" &&
+        (discussionScope.current.panel === "recruiting" ||
+          discussionScope.current.workspaceCandidates) &&
         (selectedSpaceId() ?? bootstrapMe.spaceId) === bootstrapMe.spaceId &&
         candidate.threadId === activeSnapshot?.threadId &&
         (inGroup ? activeGroupId.current === groupId : activeBotId.current === active?.id),
@@ -2023,8 +2083,12 @@ export function ShellPage() {
     if (!candidateScopeCurrent(candidate)) return;
     composerRef.current?.insertContext({
       draftKey: composerDraftKey,
-      text: candidateReferenceText(candidate),
+      text:
+        candidate.intent === "email_draft"
+          ? `${candidateReferenceText(candidate)}${t`Prepare a personalized first email and follow-ups for this person using our saved evidence and playbook. Keep unknown facts marked, do not invent an email address, and save the drafts here without sending.`}`
+          : candidateReferenceText(candidate),
     });
+    if (!showToolActivity) openRecruitingView("conversation");
   }
   async function feedbackCandidate(
     candidate: CandidateDiscussionContext,
@@ -2115,6 +2179,61 @@ export function ShellPage() {
     () => (inGroup ? { groupId: groupId ?? "" } : { botId: active?.id ?? "" }),
     [active?.id, groupId, inGroup],
   );
+  const sequenceScopeKey = JSON.stringify([
+    userId,
+    bootstrapMe?.spaceId,
+    activeSnapshot?.threadId,
+    transcriptArtifactTarget,
+    workspaceCorrespondence,
+  ]);
+  const sequenceScope = useRef(sequenceScopeKey);
+  sequenceScope.current = sequenceScopeKey;
+  async function saveSequenceDraft(input: RecruitingSequenceSaveInput) {
+    const scopeCurrent = () =>
+      discussionScope.current.active &&
+      sequenceScope.current === sequenceScopeKey &&
+      (selectedSpaceId() ?? bootstrapMe?.spaceId) === bootstrapMe?.spaceId;
+    if (!userId || !bootstrapMe?.spaceId || !activeSnapshot?.threadId || !scopeCurrent())
+      throw new Error(t`Return to the original role before saving this draft.`);
+    const recipient = activeSnapshot.members?.[0] ?? activeGroup?.members?.[0];
+    if (inGroup && !recipient)
+      throw new Error(t`Wait for this role to finish loading before saving.`);
+    const source = transcriptMessages
+      .flatMap((message) => message.blocks)
+      .find((block) => block.kind === "file" && block.artifactId === input.sourceArtifactId);
+    if (source?.kind !== "file" || source.mimeType !== "application/json")
+      throw new Error(t`Open the saved sequence before editing it.`);
+    const sequence = RecruitingOutreachSequenceSchema.parse({
+      ...input.sequence,
+      revisesArtifactId: input.sourceArtifactId,
+    });
+    const contentBase64 = await readFileAsBase64(
+      new File([JSON.stringify(sequence, null, 2)], source.name, { type: "application/json" }),
+    );
+    if (!scopeCurrent()) throw new Error(t`Return to the original role before saving this draft.`);
+    const artifact = await rpc.artifacts.create({
+      ...transcriptArtifactTarget,
+      name: source.name,
+      mimeType: "application/json",
+      contentBase64,
+      clientNonce: input.clientNonce,
+    });
+    if (!scopeCurrent())
+      throw new Error(
+        t`The file was saved. Return to the original role and retry to share it there.`,
+      );
+    await rpc.threads.followUp({
+      ...transcriptArtifactTarget,
+      ...(inGroup ? { mentions: [recipient!.botId] } : {}),
+      artifactIds: [artifact.id],
+      clientNonce: input.clientNonce,
+      text: t`I edited the attached email sequence. Keep this as the current unsent draft for this role. Do not send or enroll anyone.`,
+    });
+    if (scopeCurrent()) {
+      if (inGroup) void refreshGroupThreadRef.current(groupId!).catch(() => undefined);
+      else void refreshThreadRef.current(active!.id).catch(() => undefined);
+    }
+  }
   const transcriptMembers = activeSnapshot?.members ?? activeGroup?.members;
   const resolveTranscriptBot = useCallback(
     (botId: string) => {
@@ -2669,14 +2788,36 @@ export function ShellPage() {
     if (text && id) void speaker.speak(text, { botId: id, messageId: message.id });
   }, []);
 
-  async function createGroup(input: { name: string; botIds: string[] }) {
+  const pendingRoleCreation = useRef<{ key: string; group: Group; clientNonce: string } | null>(
+    null,
+  );
+  async function createGroup(input: { name: string; botIds: string[]; description?: string }) {
     setCreatingGroup(true);
     try {
-      const group = await rpc.groups.create(input);
+      const key = JSON.stringify([userId, bootstrapMe?.spaceId, input]);
+      let attempt =
+        input.description && pendingRoleCreation.current?.key === key
+          ? pendingRoleCreation.current
+          : null;
+      const group =
+        attempt?.group ?? (await rpc.groups.create({ name: input.name, botIds: input.botIds }));
+      if (input.description && !attempt) {
+        attempt = { key, group, clientNonce: crypto.randomUUID() };
+        pendingRoleCreation.current = attempt;
+      }
       setGroups((current) =>
         current.some((item) => item.id === group.id) ? current : [group, ...current],
       );
-      navigate(`/app/g/${group.id}`);
+      if (input.description && attempt) {
+        await rpc.threads.followUp({
+          groupId: group.id,
+          text: input.description,
+          mentions: [input.botIds[0]!],
+          clientNonce: attempt.clientNonce,
+        });
+        pendingRoleCreation.current = null;
+      }
+      navigate(`/app/g/${group.id}${input.description ? "?view=brief" : ""}`);
       setPanel(null);
       setNewRoleSourceId(null);
       await refreshBots().catch(() => undefined);
@@ -3094,6 +3235,31 @@ export function ShellPage() {
     .slice(0, 2)
     .toUpperCase();
 
+  const roleCreationForm = (
+    <CreateGroupForm
+      key={showToolActivity ? "group" : `role:${roleSourceGroup?.id}`}
+      bots={showToolActivity ? bots : roleCrewBots}
+      recruiting={!showToolActivity}
+      onCancel={() => {
+        setPanel(null);
+        setNewRoleSourceId(null);
+      }}
+      onCreate={(input) => {
+        if (
+          !showToolActivity &&
+          (!roleSourceGroup ||
+            !canCreateRoleFrom(roleSourceGroup.id) ||
+            roleCrewBots.length !== roleSourceGroup.members.length ||
+            input.botIds.length !== roleSourceGroup.members.length ||
+            !input.botIds.every((id, index) => id === roleSourceGroup.members[index]?.botId))
+        ) {
+          throw new Error(t`The recruiting team changed. Open the role again.`);
+        }
+        return createGroup(input);
+      }}
+    />
+  );
+
   // biome-ignore format: ponytail: preserve the native console markup when sharing this shell.
   const shell = (
     <div
@@ -3171,50 +3337,31 @@ export function ShellPage() {
             ? "md:w-0 md:max-w-0 md:overflow-hidden md:border-e-0 md:opacity-0 md:pointer-events-none"
             : showToolActivity
               ? "md:w-[316px]"
-              : "md:w-[248px]"
+              : "md:w-[260px]"
         }`}
       >
         {!showToolActivity ? (
           <>
-            <div className="app-drag flex items-center justify-between px-5 pt-4 pb-1">
-              <WindowChrome />
-              <Button
-                variant="ghost"
-                size="icon-sm"
-                className="app-no-drag hidden md:inline-flex"
-                aria-label={t`Collapse navigation`}
-                onClick={() => setBotsSidebarCollapsedPref(true)}
-              >
-                <PanelLeftClose size={15} aria-hidden="true" />
-              </Button>
-            </div>
+            {desktopBridge() ? <div className="app-drag px-5 pt-4"><WindowChrome /></div> : null}
             <RecruitingNavigation
               groups={groups}
               archivedGroups={archivedGroups}
               archivedOpen={archivedOpen}
               groupId={groupId}
               query={query}
-              dashboardOpen={panel === "recruiting" && activeRecruitingTab === "dashboard"}
+              view={recruitingWorkspaceView}
+              onView={openRecruitingView}
+              onCollapse={() => setBotsSidebarCollapsedPref(true)}
               canOpenDashboard={Boolean(activeSnapshot?.threadId)}
               canCreateRole={
                 Boolean(activeGroup && canCreateRoleFrom(activeGroup.id)) || archivedGroups.some((group) => canCreateRoleFrom(group.id))
               }
               canCreateRoleFrom={canCreateRoleFrom}
               onQueryChange={setQuery}
-              onConversation={() => {
-                setPanel(null);
-                setMobileSidebarOpen(false);
-                if (!active && !activeGroup) navigate(firstThreadRoute(bots, groups));
-              }}
-              onDashboard={() => {
-                changeRecruitingTab("dashboard");
-                setPanel("recruiting");
-                setMobileSidebarOpen(false);
-              }}
               onOpenRole={(id) => {
                 setPanel(null);
                 setMobileSidebarOpen(false);
-                navigate(`/app/g/${id}`);
+                navigate(`/app/g/${id}?view=results`);
               }}
               onNewRole={() => {
                 if (activeGroup && canCreateRoleFrom(activeGroup.id)) startNewRole(activeGroup.id);
@@ -3933,7 +4080,7 @@ export function ShellPage() {
           }
           aria-pressed={!botsSidebarCollapsed}
           className={`absolute inset-y-0 z-50 hidden w-2 cursor-ew-resize touch-none border-0 bg-transparent p-0 md:block ${
-            botsSidebarCollapsed ? "start-0" : showToolActivity ? "start-[308px]" : "start-[240px]"
+            botsSidebarCollapsed ? "start-0" : showToolActivity ? "start-[308px]" : "start-[252px]"
           }`}
           onPointerDown={(event) => {
             event.currentTarget.setPointerCapture(event.pointerId);
@@ -3977,6 +4124,75 @@ export function ShellPage() {
         inert={mobileSidebarOpen}
         className="isolate flex min-w-0 flex-1 flex-col bg-background"
       >
+        {workspaceFull ? (
+          <div className={botsSidebarCollapsed ? "flex items-center px-4 pt-3" : "flex items-center px-4 pt-3 md:hidden"}>
+            <Button
+              variant="ghost"
+              size="icon-sm"
+              aria-label={botsSidebarCollapsed ? t`Show navigation` : t`Open navigation`}
+              onClick={() => {
+                setBotsSidebarCollapsedPref(false);
+                setMobileSidebarOpen(true);
+              }}
+            >
+              <PanelLeftOpen size={19} aria-hidden="true" />
+            </Button>
+          </div>
+        ) : null}
+        {workspaceFull && !workspaceNewRole && !activeSnapshot ? (
+          <div role="status" className="grid min-h-0 flex-1 place-items-center text-muted-foreground">
+            <Shimmer><Trans>Loading…</Trans></Shimmer>
+          </div>
+        ) : null}
+        {workspaceNewRole ? (
+          <div className="rk-scroll recruiting-workspace-main min-h-0 flex-1 overflow-y-auto">
+            {roleCreationForm}
+          </div>
+        ) : null}
+        {workspaceCorrespondence && activeSnapshot?.threadId ? (
+          <div className="rk-scroll recruiting-workspace-main min-h-0 flex-1 overflow-y-auto">
+            <RecruitingCorrespondence
+              view={recruitingWorkspaceView as "sequence" | "inbox" | "interview"}
+              messages={transcriptMessages}
+              artifactTarget={transcriptArtifactTarget}
+              outreachBotIds={(activeSnapshot.members ?? []).filter((member) => member.name === "Outreach").map((member) => member.botId)}
+              onConversation={(text) => {
+                if (text) composerRef.current?.insertContext({ draftKey: composerDraftKey, text });
+                openRecruitingView("conversation");
+              }}
+              onOpenConnections={() => setPluginsOpen(true)}
+              onSaveDraft={saveSequenceDraft}
+            />
+          </div>
+        ) : null}
+        {workspaceCandidates && activeSnapshot?.threadId ? (
+          <div className="rk-scroll recruiting-workspace-main min-h-0 flex-1 overflow-y-auto">
+            <div className="recruiting-workspace-content">
+              <RecruitingPanel
+                key={`${userId}:${bootstrapMe?.spaceId}:${activeSnapshot.threadId}:workspace`}
+                presentation="workspace"
+                view={recruitingWorkspaceView === "shortlist" ? "shortlist" : recruitingWorkspaceView === "contacts" ? "contacts" : "results"}
+                threadId={activeSnapshot.threadId}
+                botId={inGroup ? undefined : active?.id}
+                refreshSignal={recruitingRefresh}
+                tab={recruitingWorkspaceView === "workflow" ? "dashboard" : "evidence"}
+                showDiagnostics={false}
+                onClose={() => openRecruitingView("conversation")}
+                onDiscussCandidate={discussCandidate}
+                onCandidateFeedback={feedbackCandidate}
+                candidateFeedbackRecipients={candidateFeedbackRecipients}
+                onRevealMessage={(target) => navigate({
+                  pathname: target.groupId ? `/app/g/${target.groupId}` : `/app/${target.botId}`,
+                  search: `?${new URLSearchParams({ view: "conversation", m: target.messageId })}`,
+                })}
+              />
+              <div className="flex justify-end py-4">
+                <Button variant="outline" onClick={() => openRecruitingView("feedback")}><Trans>Refine in chat</Trans></Button>
+              </div>
+            </div>
+          </div>
+        ) : null}
+        <div hidden={workspaceFull} className={workspaceFull ? "hidden" : "flex min-h-0 flex-1 flex-col"}>
         {/* Inside main so the composer and its menus stay above it. */}
         {!mobileSidebarOpen ? (
           <div
@@ -4264,16 +4480,17 @@ export function ShellPage() {
             }
           />
         ) : null}
+        </div>
       </main>
 
       <CallCard onSettings={() => openSettings("voice")} />
 
       <ResizableSidePanel
         botsSidebarCollapsed={botsSidebarCollapsed}
-        open={Boolean(panel && (active || activeGroup || panel === "create"))}
+        open={Boolean(!workspaceFull && panel && (active || activeGroup || panel === "create"))}
         panel={panel ?? "closed"}
       >
-        {panel && (active || activeGroup || panel === "create") ? (
+        {!workspaceFull && panel && (active || activeGroup || panel === "create") ? (
           <div className="rk-scroll h-full w-full overflow-y-auto px-5 py-[17px]">
             {panel !== "routine" &&
             panel !== "create" &&
@@ -4445,27 +4662,7 @@ export function ShellPage() {
                 }}
               />
             ) : null}
-            {panel === "create-group" ? (
-              <CreateGroupForm
-                key={showToolActivity ? "group" : `role:${roleSourceGroup?.id}`}
-                bots={showToolActivity ? bots : roleCrewBots}
-                recruiting={!showToolActivity}
-                onCancel={() => { setPanel(null); setNewRoleSourceId(null); }}
-                onCreate={(input) => {
-                  if (
-                    !showToolActivity &&
-                    (!roleSourceGroup ||
-                      !canCreateRoleFrom(roleSourceGroup.id) ||
-                      roleCrewBots.length !== roleSourceGroup.members.length ||
-                      input.botIds.length !== roleSourceGroup.members.length ||
-                      !input.botIds.every((id, index) => id === roleSourceGroup.members[index]?.botId))
-                  ) {
-                    throw new Error(t`The recruiting team changed. Open the role again.`);
-                  }
-                  return createGroup(input);
-                }}
-              />
-            ) : null}
+            {panel === "create-group" ? roleCreationForm : null}
             {panel === "group-settings" && activeGroup ? (
               <GroupSettings
                 key={activeGroup.id}

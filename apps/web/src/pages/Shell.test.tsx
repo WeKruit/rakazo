@@ -116,6 +116,7 @@ vi.mock("../lib/rpc", async (importOriginal) => ({
 
 import * as LocalTimezoneModule from "../lib/local-timezone";
 import { setToolActivityPreference } from "../lib/tool-activity-preference";
+import * as RecruitingCorrespondenceModule from "./RecruitingCorrespondence";
 import * as RecruitingPanelModule from "./RecruitingPanel";
 import type { ComposerHandle } from "./Shell";
 import { Composer, candidateReferenceText, eventChangesRecruitingPanel, ShellPage } from "./Shell";
@@ -232,6 +233,7 @@ async function renderFeedbackShell(
     openFeedback?: boolean;
     threadReady?: Promise<void>;
     allGroupsArchived?: boolean;
+    initialPath?: string;
   } = {},
 ) {
   setToolActivityPreference(
@@ -454,7 +456,14 @@ async function renderFeedbackShell(
   const render = () =>
     act(async () =>
       root!.render(
-        <MemoryRouter initialEntries={[kind === "group" ? "/app/g/group-1" : "/app/bot-1"]}>
+        <MemoryRouter
+          initialEntries={[
+            options.initialPath ??
+              (kind === "group"
+                ? "/app/g/group-1?view=conversation"
+                : "/app/bot-1?view=conversation"),
+          ]}
+        >
           <ShellRoutes />
         </MemoryRouter>,
       ),
@@ -591,20 +600,14 @@ it.each(["success", "error"] as const)(
           }
         : view.thread,
     );
-    await view.click("New role");
-    const input = container!.querySelector<HTMLInputElement>(
-      'input[placeholder="Name this role"]',
+    await view.click("New Role");
+    const input = container!.querySelector<HTMLTextAreaElement>(
+      'textarea[aria-label="Job description"]',
     )!;
-    act(() => {
-      Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, "value")!.set!.call(
-        input,
-        fresh.name,
-      );
-      input.dispatchEvent(new Event("input", { bubbles: true }));
-    });
-    await view.click("Create role");
+    type(input, fresh.name);
+    await view.click("Continue");
     expect(shellApi.createGroup).toHaveBeenCalledExactlyOnceWith({
-      name: fresh.name,
+      name: "New role",
       botIds: view.members.map((member) => member.botId),
     });
     await act(async () => {
@@ -806,21 +809,17 @@ it("creates a fresh role only from an explicitly selected archived role's exact 
     messages: view.thread.messages,
     bots: view.bots,
   });
-  await view.click("New role");
-  expect(container?.querySelector('input[placeholder="Name this role"]')).toBeNull();
+  await view.click("New Role");
+  expect(container?.querySelector('textarea[aria-label="Job description"]')).toBeNull();
   const archived = container!.querySelector('fieldset[aria-label="Recruiting crew"]')!;
   const useCrew = [...archived.querySelectorAll<HTMLButtonElement>("button")].find(
     (button) => button.textContent === "New role",
   )!;
   await act(async () => useCrew.click());
-  const input = container!.querySelector<HTMLInputElement>('input[placeholder="Name this role"]')!;
-  act(() => {
-    Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, "value")!.set!.call(
-      input,
-      "Fresh systems role",
-    );
-    input.dispatchEvent(new Event("input", { bubbles: true }));
-  });
+  const input = container!.querySelector<HTMLTextAreaElement>(
+    'textarea[aria-label="Job description"]',
+  )!;
+  type(input, "Fresh systems role");
   const fresh = {
     ...view.group,
     id: "group-new",
@@ -843,9 +842,9 @@ it("creates a fresh role only from an explicitly selected archived role's exact 
         }
       : view.thread,
   );
-  await view.click("Create role");
+  await view.click("Continue");
   expect(shellApi.createGroup).toHaveBeenCalledExactlyOnceWith({
-    name: fresh.name,
+    name: "New role",
     botIds: view.archivedGroup.members.map((member) => member.botId),
   });
   expect(shellApi.restoreGroup).not.toHaveBeenCalled();
@@ -874,23 +873,18 @@ it("resets an archived source's draft and error, then keeps its team fixed durin
   };
   view.archivedGroups.push(second);
   await view.render();
-  await view.click("New role");
+  await view.click("New Role");
   const sourceButton = (name: string) =>
     [...container!.querySelectorAll<HTMLFieldSetElement>("fieldset")]
       .find((item) => item.getAttribute("aria-label") === name)!
       .querySelector<HTMLButtonElement>("button")!;
   const roleName = () =>
-    container!.querySelector<HTMLInputElement>('input[placeholder="Name this role"]')!;
-  const nameRole = (name: string) =>
-    act(() => {
-      const input = roleName();
-      Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, "value")!.set!.call(input, name);
-      input.dispatchEvent(new Event("input", { bubbles: true }));
-    });
+    container!.querySelector<HTMLTextAreaElement>('textarea[aria-label="Job description"]')!;
+  const nameRole = (name: string) => type(roleName(), name);
   await act(async () => sourceButton(view.group.name).click());
   nameRole("First draft");
   shellApi.createGroup.mockRejectedValueOnce(new Error("First creation failed"));
-  await view.click("Create role");
+  await view.click("Continue");
   expect(container?.textContent).toContain("First creation failed");
   await act(async () => sourceButton(second.name).click());
   expect(roleName().value).toBe("");
@@ -926,20 +920,20 @@ it("resets an archived source's draft and error, then keeps its team fixed durin
         }
       : view.thread,
   );
-  await view.click("Create role");
+  await view.click("Continue");
   expect(sourceButton(view.group.name).disabled).toBe(true);
   await act(async () => sourceButton(view.group.name).click());
   expect(roleName().value).toBe(fresh.name);
   expect(shellApi.createGroup).toHaveBeenCalledExactlyOnceWith({
-    name: fresh.name,
+    name: "New role",
     botIds: second.members.map((member) => member.botId),
   });
   await act(async () => finish());
   expect(container?.querySelector("h1")?.textContent).toBe(fresh.name);
-  expect(container?.querySelector('input[placeholder="Name this role"]')).toBeNull();
+  expect(container?.querySelector('textarea[aria-label="Job description"]')).toBeNull();
 });
 
-it("enables Dashboard only after a cold native thread snapshot is available", async () => {
+it("enables Job Brief only after a cold native thread snapshot is available", async () => {
   setToolActivityPreference("off");
   let finishThread!: () => void;
   const threadReady = new Promise<void>((resolve) => {
@@ -950,58 +944,47 @@ it("enables Dashboard only after a cold native thread snapshot is available", as
     openFeedback: false,
     threadReady,
   });
-  const dashboard = [
+  const brief = [
     ...container!.querySelectorAll<HTMLButtonElement>(
       '[data-testid="recruiting-navigation"] button',
     ),
-  ].find((button) => button.textContent === "Dashboard")!;
-  expect(dashboard.disabled).toBe(true);
-  await view.click("Dashboard");
+  ].find((button) => button.textContent === "Job Brief")!;
+  expect(brief.disabled).toBe(true);
+  await view.click("Job Brief");
   expect(container?.querySelector('[data-testid="side-panel"]')?.getAttribute("data-panel")).toBe(
     "closed",
   );
   expect(shellApi.recruiting.getWorkspace).not.toHaveBeenCalled();
-  await act(async () => {
-    finishThread();
-  });
-  expect(dashboard.disabled).toBe(false);
-  await view.click("Dashboard");
-  expect(container?.querySelector('[role="tab"][aria-selected="true"]')?.textContent).toBe(
-    "Dashboard",
-  );
-  expect(dashboard.getAttribute("aria-current")).toBe("page");
+  await act(async () => finishThread());
+  expect(brief.disabled).toBe(false);
+  await view.click("Job Brief");
+  expect(container?.querySelector('[role="tab"][aria-selected="true"]')?.textContent).toBe("Role");
+  expect(brief.getAttribute("aria-current")).toBe("page");
 });
 
-it("selects the native Dashboard tab, follows tab changes, and returns to the same role conversation", async () => {
+it("opens native brief and feedback views, reviews workflow, and continues the same role conversation", async () => {
   setToolActivityPreference("off");
   const view = await renderFeedbackShell("group", undefined, {
     isDeploymentOwner: false,
     openFeedback: false,
   });
   const originalCard = document.body.querySelector('[data-message-id="pending-main"]');
-  const navigation = container!.querySelector('[data-testid="recruiting-navigation"]')!;
-  const dashboard = [...navigation.querySelectorAll("button")].find(
-    (button) => button.textContent === "Dashboard",
-  )!;
-  const conversation = [...navigation.querySelectorAll("button")].find(
-    (button) => button.textContent === "Conversation",
-  )!;
   const selectedTab = () =>
     container?.querySelector('[role="tab"][aria-selected="true"]')?.textContent;
-  await view.click("Dashboard");
-  expect(selectedTab()).toBe("Dashboard");
-  expect(dashboard.getAttribute("aria-current")).toBe("page");
-  await view.click("Role");
+  await view.click("Job Brief");
   expect(selectedTab()).toBe("Role");
-  expect(dashboard.hasAttribute("aria-current")).toBe(false);
-  expect(conversation.getAttribute("aria-current")).toBe("page");
-  await view.click("Dashboard");
-  expect(selectedTab()).toBe("Dashboard");
-  await view.click("Conversation");
-  expect(container?.querySelector('[data-testid="side-panel"]')?.getAttribute("data-panel")).toBe(
-    "closed",
+  await view.click("Client feedback");
+  expect(selectedTab()).toBe("Evidence");
+  expect(document.body.querySelector('[data-message-id="pending-main"]')).toBe(originalCard);
+  await view.click("Recruiting workflow");
+  expect(view.getProps().presentation).toBe("workspace");
+  expect(view.getProps().tab).toBe("dashboard");
+  expect(container?.querySelector(".recruiting-workspace-content")?.textContent).toContain(
+    "Research history",
   );
-  expect(dashboard.hasAttribute("aria-current")).toBe(false);
+  await view.click("Job Brief");
+  expect(selectedTab()).toBe("Role");
+  await view.click("Close panel");
   expect(document.body.querySelector('[data-message-id="pending-main"]')).toBe(originalCard);
   shellApi.send.mockResolvedValue({ runId: "same-role-run" });
   const prompt = "Summarize the saved requirements for this role.";
@@ -1010,10 +993,198 @@ it("selects the native Dashboard tab, follows tab changes, and returns to the sa
   expect(shellApi.send).toHaveBeenCalledExactlyOnceWith(
     expect.objectContaining({ groupId: "group-1", text: prompt, mentions: undefined }),
   );
-  await view.navigate("/app/bot-2");
+  await view.navigate("/app/bot-2?view=conversation");
   await view.click("Recruiting");
   expect(selectedTab()).toBe("Role");
-  expect(dashboard.hasAttribute("aria-current")).toBe(false);
+});
+
+it("opens a normal recruiting role on native candidate results and restores collapsed workspace navigation", async () => {
+  setToolActivityPreference("off");
+  const view = await renderFeedbackShell("group", undefined, {
+    isDeploymentOwner: false,
+    openFeedback: false,
+    initialPath: "/app/g/group-1",
+  });
+  expect(view.getProps().presentation).toBe("workspace");
+  expect(view.getProps().threadId).toBe(view.thread.threadId);
+  expect(view.getProps().showDiagnostics).toBe(false);
+  expect(container?.querySelector(".hire-card-grid")?.textContent).toContain(view.candidate.name);
+  expect(shellApi.recruiting.getWorkspace).toHaveBeenCalledWith({ threadId: view.thread.threadId });
+  expect(shellApi.recruiting.listCandidates).toHaveBeenCalledWith(
+    expect.objectContaining({ roleId: "internal-role" }),
+  );
+  const navigation = container!.querySelector('[data-testid="recruiting-navigation"]')!;
+  const labels = [...navigation.querySelectorAll(".hire-nav > button")].map(
+    (button) => button.textContent,
+  );
+  expect(labels).toEqual([
+    "New Role",
+    "Job Brief",
+    "Client feedback",
+    "Shortlist",
+    "Contacts",
+    "Sequence",
+    "Inbox",
+    "Interview",
+  ]);
+  const card = document.body.querySelector('[data-message-id="pending-main"]');
+  await view.click("Collapse navigation");
+  expect(
+    container?.querySelector('[data-testid="bots-sidebar"]')?.getAttribute("data-collapsed"),
+  ).toBe("true");
+  const restore = container!.querySelector<HTMLButtonElement>(
+    'main button[aria-label="Show navigation"]',
+  )!;
+  expect(restore).not.toBeNull();
+  expect(restore.closest("[hidden]")).toBeNull();
+  await act(async () => restore.click());
+  expect(
+    container?.querySelector('[data-testid="bots-sidebar"]')?.getAttribute("data-collapsed"),
+  ).toBe("false");
+  expect(document.body.querySelector('[data-message-id="pending-main"]')).toBe(card);
+  expect(shellApi.answer).not.toHaveBeenCalled();
+  expect(shellApi.send).not.toHaveBeenCalled();
+});
+
+it("sends candidate feedback from the default results workspace to Main without answering another native card", async () => {
+  setToolActivityPreference("off");
+  const view = await renderFeedbackShell("group", undefined, {
+    isDeploymentOwner: false,
+    openFeedback: false,
+    initialPath: "/app/g/group-1",
+  });
+  const card = document.body.querySelector('[data-message-id="pending-main"]');
+  await act(async () =>
+    container!.querySelector<HTMLButtonElement>(".hire-candidate-identity")!.click(),
+  );
+  await view.click("Give feedback");
+  await view.choose("good_example");
+  const reason = "This is closer. Prefer candidates from robotics companies for the next search.";
+  view.reason(reason);
+  await view.click("Send feedback");
+  expect(shellApi.followUp).toHaveBeenCalledExactlyOnceWith(
+    expect.objectContaining({
+      groupId: "group-1",
+      mentions: ["bot-1"],
+      clientNonce: expect.any(String),
+      text: expect.stringContaining(reason),
+      recruitingFeedback: {
+        roleId: "internal-role",
+        roleRevisionId: "internal-revision",
+        expectedRoleRevision: 2,
+        candidateKeys: [view.candidate.candidateKey],
+        choice: "good_example",
+      },
+    }),
+  );
+  expect(document.body.textContent).toContain("Feedback sent");
+  expect(document.body.querySelector('[data-message-id="pending-main"]')).toBe(card);
+  expect(view.pending.blocks[0]).toMatchObject({ status: "pending" });
+  expect(shellApi.answer).not.toHaveBeenCalled();
+  expect(shellApi.send).not.toHaveBeenCalled();
+});
+
+it.each(["user", "thread", "view"] as const)(
+  "rejects a default-results candidate callback after its %s scope changes",
+  async (change) => {
+    setToolActivityPreference("off");
+    const view = await renderFeedbackShell("group", undefined, {
+      isDeploymentOwner: false,
+      openFeedback: false,
+      initialPath: "/app/g/group-1",
+    });
+    const send = view.getProps().onCandidateFeedback!;
+    const candidate = {
+      ...view.candidate,
+      threadId: "thread-1",
+      roleTitle: "Systems engineer",
+      roleId: "internal-role",
+      roleRevisionId: "internal-revision",
+      roleVersion: 2,
+    };
+    if (change === "user") {
+      shellApi.session = {
+        data: { user: { id: "other-user", name: "Other recruiter", email: "other@example.test" } },
+      };
+      await view.render();
+    } else {
+      await view.navigate(
+        change === "thread" ? "/app/bot-2?view=conversation" : "/app/g/group-1?view=sequence",
+      );
+    }
+    let accepted: boolean | undefined;
+    await act(async () => {
+      accepted = await send(
+        candidate,
+        { choice: "good_example", reason: "Keep this role only.", recipientBotId: "bot-1" },
+        "old-workspace-feedback",
+      );
+    });
+    expect(accepted).toBe(false);
+    expect(shellApi.followUp).not.toHaveBeenCalled();
+    expect(shellApi.answer).not.toHaveBeenCalled();
+  },
+);
+
+it("retries an exact natural role request in its confirmed native group with the same follow-up nonce", async () => {
+  setToolActivityPreference("off");
+  const view = await renderFeedbackShell("group", undefined, {
+    isDeploymentOwner: false,
+    openFeedback: false,
+  });
+  const description =
+    "Find robotics data engineers in the Bay Area.\nUse this JD: https://example.test/jobs/data-infra";
+  const fresh = {
+    ...view.group,
+    id: "new-role-group",
+    threadId: "new-role-thread",
+    name: "New role",
+  };
+  shellApi.createGroup.mockImplementation(async () => {
+    view.navigation.current.groups.unshift(fresh);
+    return fresh;
+  });
+  shellApi.get.mockImplementation(async ({ groupId }) =>
+    groupId === fresh.id
+      ? {
+          ...view.thread,
+          groupId: fresh.id,
+          groupName: fresh.name,
+          threadId: fresh.threadId,
+          messages: [],
+          run: null,
+        }
+      : view.thread,
+  );
+  shellApi.followUp.mockRejectedValueOnce(new Error("Connection lost after dispatch"));
+  await view.click("New Role");
+  const input = container!.querySelector<HTMLTextAreaElement>(
+    'textarea[aria-label="Job description"]',
+  )!;
+  type(input, description);
+  await view.click("Continue");
+  expect(container?.querySelector('[role="alert"]')?.textContent).toBe(
+    "Connection lost after dispatch",
+  );
+  expect(input.value).toBe(description);
+  expect(shellApi.createGroup).toHaveBeenCalledExactlyOnceWith({
+    name: "New role",
+    botIds: view.members.map((member) => member.botId),
+  });
+  expect(shellApi.followUp).toHaveBeenCalledExactlyOnceWith({
+    groupId: fresh.id,
+    text: description,
+    mentions: ["bot-1"],
+    clientNonce: expect.any(String),
+  });
+  await view.click("Continue");
+  expect(shellApi.createGroup).toHaveBeenCalledOnce();
+  expect(shellApi.followUp).toHaveBeenCalledTimes(2);
+  expect(shellApi.followUp.mock.calls[1]).toEqual(shellApi.followUp.mock.calls[0]);
+  expect(shellApi.answer).not.toHaveBeenCalled();
+  expect(shellApi.send).not.toHaveBeenCalled();
+  expect(container?.querySelector('textarea[aria-label="Job description"]')).toBeNull();
+  expect(container?.querySelector("h1")?.textContent).toBe(fresh.name);
 });
 
 it.each([false, true])(
@@ -1024,7 +1195,7 @@ it.each([false, true])(
     expect(container?.querySelector('[data-product-view="recruiting"]')).not.toBeNull();
     expect(
       container?.querySelector('[data-testid="recruiting-navigation"]')?.textContent,
-    ).toContain("Open roles");
+    ).toContain("All roles");
     expect(container?.querySelector('[data-testid="create-menu-trigger"]')).toBeNull();
     expect(document.body.querySelector('select[aria-label="Send to"]')).toBeNull();
     expect(view.getProps().candidateFeedbackRecipients).toEqual([{ id: "bot-1", name: "Main" }]);
@@ -1054,15 +1225,11 @@ it("refuses a partial crew when membership changes while New role stays open", a
   const view = await renderFeedbackShell("group", undefined, { isDeploymentOwner: false });
   await view.click("Close");
   await view.click("Close panel");
-  await view.click("New role");
-  const input = container!.querySelector<HTMLInputElement>('input[placeholder="Name this role"]')!;
-  act(() => {
-    Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, "value")!.set!.call(
-      input,
-      "Systems engineer",
-    );
-    input.dispatchEvent(new Event("input", { bubbles: true }));
-  });
+  await view.click("New Role");
+  const input = container!.querySelector<HTMLTextAreaElement>(
+    'textarea[aria-label="Job description"]',
+  )!;
+  type(input, "Systems engineer");
   view.members.push({
     botId: "not-in-current-bots",
     name: "Scheduler",
@@ -1070,7 +1237,7 @@ it("refuses a partial crew when membership changes while New role stays open", a
     status: "idle",
   });
   await view.render();
-  await view.click("Create role");
+  await view.click("Continue");
   expect(shellApi.createGroup).not.toHaveBeenCalled();
   expect(container?.textContent).toContain("The recruiting team changed. Open the role again.");
   expect(document.body.querySelector('[data-message-id="pending-main"]')).not.toBeNull();
@@ -2214,6 +2381,125 @@ it("preserves edits made after returning, even when the text matches the submiss
   expect(returned.value).toBe("submitted text");
   expect(localStorage.getItem(`rakazo.composerDraft.${draftKey}`)).toBe("submitted text");
 });
+
+it.each(["normal", "retry", "switch", "missing-source"] as const)(
+  "saves an edited sequence through the original non-answering thread (%s)",
+  async (mode) => {
+    setToolActivityPreference("off");
+    let props: ComponentProps<typeof RecruitingCorrespondenceModule.RecruitingCorrespondence>;
+    vi.spyOn(RecruitingCorrespondenceModule, "RecruitingCorrespondence").mockImplementation(
+      (value) => {
+        props = value;
+        return <div />;
+      },
+    );
+    const view = await renderFeedbackShell("group", undefined, {
+      isDeploymentOwner: false,
+      openFeedback: false,
+      initialPath: "/app/g/group-1?view=sequence",
+      messages: [
+        {
+          id: "draft-file-message",
+          threadId: "thread-1",
+          seq: 2,
+          role: "user",
+          createdAt: "2026-01-01T00:00:00Z",
+          blocks: [
+            {
+              kind: "file",
+              artifactId: "draft-original",
+              name: "sequence.json",
+              mimeType: "application/json",
+              size: 1,
+            },
+          ],
+        },
+      ],
+    });
+    const save = props!.onSaveDraft!;
+    const input: RecruitingCorrespondenceModule.RecruitingSequenceSaveInput = {
+      sourceArtifactId: "draft-original",
+      name: "sequence.json",
+      clientNonce: "exact-edit-nonce",
+      sequence: {
+        kind: "wekruit.outreach-sequence",
+        version: 1,
+        roleTitle: "Systems engineer",
+        recipients: [
+          {
+            name: "Avery",
+            email: null,
+            linkedinUrl: null,
+            steps: [{ dayOffset: null, subject: "A role", body: "Edited draft" }],
+          },
+        ],
+      },
+    };
+    shellApi.createArtifact.mockResolvedValue({ id: "draft-edited" });
+    if (mode === "missing-source") {
+      await act(async () => {
+        await expect(save({ ...input, sourceArtifactId: "foreign-file" })).rejects.toThrow(
+          "Open the saved sequence",
+        );
+      });
+      expect(shellApi.createArtifact).not.toHaveBeenCalled();
+      expect(shellApi.followUp).not.toHaveBeenCalled();
+      return;
+    }
+    if (mode === "retry") shellApi.followUp.mockRejectedValueOnce(new Error("Receipt lost"));
+    if (mode === "switch") {
+      let finishUpload!: (value: { id: string }) => void;
+      shellApi.createArtifact.mockImplementationOnce(
+        () =>
+          new Promise((resolve) => {
+            finishUpload = resolve;
+          }),
+      );
+      let pending!: Promise<void>;
+      await act(async () => {
+        pending = save(input);
+        await new Promise((resolve) => setTimeout(resolve, 5));
+      });
+      await view.navigate("/app/bot-2?view=conversation");
+      const rejected = expect(pending).rejects.toThrow("file was saved");
+      await act(async () => {
+        finishUpload({ id: "draft-edited" });
+        await rejected;
+      });
+      expect(shellApi.followUp).not.toHaveBeenCalled();
+    } else {
+      if (mode === "retry")
+        await act(async () => {
+          await expect(save(input)).rejects.toThrow("Receipt lost");
+        });
+      await act(async () => save(input));
+      expect(shellApi.createArtifact).toHaveBeenLastCalledWith(
+        expect.objectContaining({
+          groupId: "group-1",
+          clientNonce: "exact-edit-nonce",
+          mimeType: "application/json",
+        }),
+      );
+      expect(shellApi.followUp).toHaveBeenLastCalledWith(
+        expect.objectContaining({
+          groupId: "group-1",
+          mentions: ["bot-1"],
+          artifactIds: ["draft-edited"],
+          clientNonce: "exact-edit-nonce",
+        }),
+      );
+      if (mode === "retry") {
+        expect(shellApi.createArtifact.mock.calls[0]).toEqual(
+          shellApi.createArtifact.mock.calls[1],
+        );
+        expect(shellApi.followUp.mock.calls[0]).toEqual(shellApi.followUp.mock.calls[1]);
+      }
+    }
+    expect(view.pending.blocks[0]).toMatchObject({ status: "pending" });
+    expect(shellApi.answer).not.toHaveBeenCalled();
+    expect(shellApi.send).not.toHaveBeenCalled();
+  },
+);
 
 it("clears accepted saved text when only an attachment was picked during the send", async () => {
   let finishSend = (_accepted: boolean) => {};

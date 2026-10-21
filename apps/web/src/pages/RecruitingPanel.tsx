@@ -53,7 +53,22 @@ import {
   TabsTrigger,
   Textarea,
 } from "@rakazo/ui-web";
-import { Check, CircleHelp, RefreshCw, X } from "lucide-react";
+import {
+  ArrowRight,
+  Bookmark,
+  BriefcaseBusiness,
+  Building2,
+  Check,
+  CircleHelp,
+  LayoutGrid,
+  List,
+  Mail,
+  MapPin,
+  RefreshCw,
+  Sparkles,
+  X,
+} from "lucide-react";
+import type { Ref } from "react";
 import { useCallback, useEffect, useId, useMemo, useRef, useState } from "react";
 import { ArtifactFileCard, SourceText } from "../components/ArtifactFileCard";
 import { AskCard } from "../components/AskCard";
@@ -78,6 +93,7 @@ export type CandidateDiscussionContext = Pick<
   roleId?: string;
   roleRevisionId?: string;
   candidateKey?: string;
+  intent?: "email_draft";
 };
 
 export type CandidateFeedback = {
@@ -92,6 +108,8 @@ type Props = {
   refreshSignal?: number;
   onClose: () => void;
   showDiagnostics?: boolean;
+  presentation?: "panel" | "workspace";
+  view?: "results" | "shortlist" | "contacts";
   tab?: RecruitingPanelState["tab"];
   onTabChange?: (tab: RecruitingPanelState["tab"]) => void;
   onRevealMessage?: (target: { botId?: string; groupId?: string; messageId: string }) => void;
@@ -638,6 +656,150 @@ function CandidateResearchMatch({
         )}
       </dd>
     </dl>
+  );
+}
+
+function SourcingCandidateCard({
+  candidate,
+  selected,
+  triggerRef,
+  onOpen,
+  onShortlist,
+  shortlistPending,
+  shortlistFailed,
+  onEmailDraft,
+}: {
+  candidate: RecruitingCandidate;
+  selected: boolean;
+  triggerRef?: Ref<HTMLButtonElement>;
+  onOpen: (trigger: HTMLButtonElement) => void;
+  onShortlist: () => void;
+  shortlistPending: boolean;
+  shortlistFailed: boolean;
+  onEmailDraft?: () => void;
+}) {
+  const { t } = useLingui();
+  const name = candidate.name ?? t`Unnamed candidate`;
+  const fields = candidate.latestSource?.report?.fields ?? [];
+  const match = ["Match tier", "Grade", "Match score", "Score"]
+    .map((label) => fields.find((field) => field.label === label && field.value !== null))
+    .find(Boolean);
+  const summary = ["Fit reasons", "Recommendation", "Match judgment"]
+    .map((label) => fields.find((field) => field.label === label && field.value))
+    .find(Boolean);
+  const employer = fields.find((field) =>
+    ["Company context", "Employer context", "Employer description", "Company description"].includes(
+      field.label,
+    ),
+  );
+  return (
+    <article className="hire-candidate-card" data-selected={selected || undefined}>
+      <div className="hire-card-top">
+        <Checkbox
+          aria-label={t`Shortlist ${name}`}
+          checked={candidate.shortlisted}
+          disabled={shortlistPending}
+          onCheckedChange={onShortlist}
+        />
+        <button
+          type="button"
+          ref={triggerRef}
+          className="hire-candidate-identity"
+          aria-haspopup="dialog"
+          aria-pressed={selected}
+          onClick={(event) => onOpen(event.currentTarget)}
+        >
+          <span className="hire-avatar" aria-hidden>
+            {name
+              .split(/\s+/u)
+              .slice(0, 2)
+              .map((part) => Array.from(part)[0])
+              .join("")}
+          </span>
+          <span>
+            <strong>{name}</strong>
+            <small>
+              <MapPin size={12} aria-hidden />
+              {candidate.location ?? t`Location not returned`}
+            </small>
+          </span>
+        </button>
+        {match ? (
+          <span className="hire-match-score">
+            {match.label}: {match.value}
+          </span>
+        ) : null}
+      </div>
+      <div className="hire-card-history">
+        <span>
+          <BriefcaseBusiness size={16} aria-hidden />
+          <strong>
+            {[candidate.title, candidate.company].filter(Boolean).join(" · ") ||
+              t`Current role not returned`}
+          </strong>
+        </span>
+      </div>
+      {summary ? (
+        <div className="hire-card-evidence">
+          <Sparkles size={14} aria-hidden />
+          <div>
+            <p>{recruitingMatchSummaryText(summary.value!)}</p>
+            {summary.sourceUrls.map((url) => (
+              <a key={url} href={url} target="_blank" rel="noreferrer">
+                {new URL(url).hostname}
+              </a>
+            ))}
+          </div>
+        </div>
+      ) : null}
+      {employer ? (
+        <div className="hire-peer-evidence">
+          <Building2 size={14} aria-hidden />
+          <div>
+            <strong>{employer.label}</strong>
+            <p>{employer.value ?? t`Unknown`}</p>
+            {employer.sourceUrls.map((url) => (
+              <a key={url} href={url} target="_blank" rel="noreferrer">
+                {new URL(url).hostname}
+              </a>
+            ))}
+          </div>
+        </div>
+      ) : null}
+      <CandidateProfile candidate={candidate} />
+      {shortlistFailed ? (
+        <p role="alert" className="text-destructive">
+          <Trans>Could not save shortlist</Trans>
+        </p>
+      ) : null}
+      <div className="hire-card-actions">
+        <button
+          type="button"
+          disabled={shortlistPending}
+          onClick={onShortlist}
+          aria-label={
+            candidate.shortlisted ? t`Remove ${name} from shortlist` : t`Add ${name} to shortlist`
+          }
+        >
+          <Bookmark size={16} aria-hidden fill={candidate.shortlisted ? "currentColor" : "none"} />
+          {candidate.shortlisted ? <Trans>Shortlisted</Trans> : <Trans>Shortlist</Trans>}
+        </button>
+        {onEmailDraft ? (
+          <button type="button" onClick={onEmailDraft}>
+            <Mail size={15} aria-hidden />
+            <Trans>Email draft</Trans>
+          </button>
+        ) : null}
+        <button
+          type="button"
+          aria-label={t`View ${name}`}
+          aria-haspopup="dialog"
+          onClick={(event) => onOpen(event.currentTarget)}
+        >
+          <ArrowRight size={16} aria-hidden />
+        </button>
+      </div>
+    </article>
   );
 }
 
@@ -1803,6 +1965,8 @@ function RecruitingWorkspace({
   onCandidateFeedback,
   candidateFeedbackRecipients,
   showDiagnostics = false,
+  presentation = "panel",
+  view = "results",
   tab,
   onTabChange,
 }: Props & { userId?: string }) {
@@ -1819,7 +1983,7 @@ function RecruitingWorkspace({
   const [confirming, setConfirming] = useState(false);
   const [confirmationFailed, setConfirmationFailed] = useState(false);
   const [candidateList, setCandidateList] = useState(() => readRecruitingPanelState(null));
-  const activeTab = tab ?? candidateList.tab;
+  const activeTab = tab ?? (presentation === "workspace" ? "evidence" : candidateList.tab);
   const requestedTab = useRef(tab);
   requestedTab.current = tab;
   useEffect(() => {
@@ -1831,10 +1995,19 @@ function RecruitingWorkspace({
   const [candidateStorageKey, setCandidateStorageKey] = useState<string | null>(null);
   const tabsList = useRef<HTMLDivElement>(null);
   const {
-    candidateView,
-    filters: candidateFilters,
+    candidateView: storedCandidateView,
+    filters: storedCandidateFilters,
     detailOpen: candidateDetailOpen,
   } = candidateList;
+  const candidateView =
+    presentation === "workspace" && view === "contacts" ? "table" : storedCandidateView;
+  const candidateFilters = useMemo(
+    () =>
+      presentation === "workspace" && view === "shortlist"
+        ? { ...storedCandidateFilters, shortlisted: true as const }
+        : storedCandidateFilters,
+    [presentation, view, storedCandidateFilters],
+  );
   const [selection, setSelection] = useState<RecruitingCandidate | null>(null);
   const candidateTrigger = useRef<HTMLButtonElement>(null);
   const candidateClose = useRef<HTMLButtonElement>(null);
@@ -2474,26 +2647,35 @@ function RecruitingWorkspace({
     }
   }
   return (
-    <section aria-label={t`Recruiting`} className="space-y-4 text-sm">
-      <div className="flex items-center justify-between gap-2">
-        <h2 className="text-base font-medium">
-          <Trans>Recruiting</Trans>
-        </h2>
-        <div className="flex gap-1">
-          <Button
-            variant="ghost"
-            size="icon-sm"
-            aria-label={t`Refresh`}
-            disabled={candidateLoading || (loading && !workspaceSnapshot)}
-            onClick={() => setRefresh((value) => value + 1)}
-          >
-            <RefreshCw size={16} aria-hidden />
-          </Button>
-          <Button variant="ghost" size="icon-sm" aria-label={t`Close panel`} onClick={onClose}>
-            <X size={16} aria-hidden />
-          </Button>
+    <section
+      aria-label={t`Recruiting`}
+      className={
+        presentation === "workspace"
+          ? "hire-recruiting-workspace space-y-4 text-sm"
+          : "space-y-4 text-sm"
+      }
+    >
+      {presentation !== "workspace" ? (
+        <div className="flex items-center justify-between gap-2">
+          <h2 className="text-base font-medium">
+            <Trans>Recruiting</Trans>
+          </h2>
+          <div className="flex gap-1">
+            <Button
+              variant="ghost"
+              size="icon-sm"
+              aria-label={t`Refresh`}
+              disabled={candidateLoading || (loading && !workspaceSnapshot)}
+              onClick={() => setRefresh((value) => value + 1)}
+            >
+              <RefreshCw size={16} aria-hidden />
+            </Button>
+            <Button variant="ghost" size="icon-sm" aria-label={t`Close panel`} onClick={onClose}>
+              <X size={16} aria-hidden />
+            </Button>
+          </div>
         </div>
-      </div>
+      ) : null}
       {failed ? (
         <p role="alert" className="text-destructive">
           <Trans>Could not load recruiting</Trans>
@@ -2517,31 +2699,33 @@ function RecruitingWorkspace({
           }}
           className="gap-4"
         >
-          <TabsList
-            ref={tabsList}
-            variant="line"
-            aria-label={t`Recruiting views`}
-            className="no-scrollbar w-full overflow-x-auto justify-start"
-          >
-            <TabsTrigger value="role">
-              <Trans>Role</Trans>
-            </TabsTrigger>
-            <TabsTrigger value="dashboard">
-              <Trans>Dashboard</Trans>
-            </TabsTrigger>
-            <TabsTrigger value="evidence">
-              <Trans>Evidence</Trans>
-            </TabsTrigger>
-            <TabsTrigger value="missing">
-              <Trans>Missing info</Trans>
-            </TabsTrigger>
-            <TabsTrigger value="memory">
-              <Trans>Memory</Trans>
-            </TabsTrigger>
-            <TabsTrigger value="activity">
-              <Trans>Activity</Trans>
-            </TabsTrigger>
-          </TabsList>
+          {presentation !== "workspace" ? (
+            <TabsList
+              ref={tabsList}
+              variant="line"
+              aria-label={t`Recruiting views`}
+              className="no-scrollbar w-full overflow-x-auto justify-start"
+            >
+              <TabsTrigger value="role">
+                <Trans>Role</Trans>
+              </TabsTrigger>
+              <TabsTrigger value="dashboard">
+                <Trans>Dashboard</Trans>
+              </TabsTrigger>
+              <TabsTrigger value="evidence">
+                <Trans>Evidence</Trans>
+              </TabsTrigger>
+              <TabsTrigger value="missing">
+                <Trans>Missing info</Trans>
+              </TabsTrigger>
+              <TabsTrigger value="memory">
+                <Trans>Memory</Trans>
+              </TabsTrigger>
+              <TabsTrigger value="activity">
+                <Trans>Activity</Trans>
+              </TabsTrigger>
+            </TabsList>
+          ) : null}
           <TabsContent value="dashboard" className="space-y-4">
             {workspace ? <h3 className="font-medium">{workspace.role.title}</h3> : null}
             {candidateFailed ? (
@@ -3216,7 +3400,13 @@ function RecruitingWorkspace({
                         )),
                     )
                   : null}
-                <div className="flex flex-wrap gap-2">
+                <div
+                  className={
+                    presentation === "workspace"
+                      ? "hire-results-filters flex flex-wrap gap-2"
+                      : "flex flex-wrap gap-2"
+                  }
+                >
                   <Input
                     aria-label={t`Search candidates`}
                     placeholder={t`Search candidates`}
@@ -3366,42 +3556,53 @@ function RecruitingWorkspace({
                       </NativeSelectOption>
                     ))}
                   </NativeSelect>
-                  <label htmlFor={shortlistFilterId} className="flex items-center gap-2">
-                    <Checkbox
-                      id={shortlistFilterId}
-                      checked={candidateFilters.shortlisted === true}
-                      onCheckedChange={(checked) =>
-                        setCandidateFilters((current) => ({
-                          ...current,
-                          shortlisted: checked ? true : undefined,
-                        }))
-                      }
-                    />
-                    <Trans>Shortlisted only</Trans>
-                  </label>
+                  {!(presentation === "workspace" && view === "shortlist") ? (
+                    <label htmlFor={shortlistFilterId} className="flex items-center gap-2">
+                      <Checkbox
+                        id={shortlistFilterId}
+                        checked={candidateFilters.shortlisted === true}
+                        onCheckedChange={(checked) =>
+                          setCandidateFilters((current) => ({
+                            ...current,
+                            shortlisted: checked ? true : undefined,
+                          }))
+                        }
+                      />
+                      <Trans>Shortlisted only</Trans>
+                    </label>
+                  ) : null}
                 </div>
-                <fieldset className="flex gap-1" aria-label={t`Saved candidates`}>
-                  <Button
-                    size="sm"
-                    variant={candidateView === "cards" ? "secondary" : "ghost"}
-                    aria-pressed={candidateView === "cards"}
-                    onClick={() =>
-                      setCandidateList((current) => ({ ...current, candidateView: "cards" }))
+                {!(presentation === "workspace" && view === "contacts") ? (
+                  <fieldset
+                    className={
+                      presentation === "workspace" ? "hire-view-toggle flex gap-1" : "flex gap-1"
                     }
+                    aria-label={t`Saved candidates`}
                   >
-                    <Trans>Cards</Trans>
-                  </Button>
-                  <Button
-                    size="sm"
-                    variant={candidateView === "table" ? "secondary" : "ghost"}
-                    aria-pressed={candidateView === "table"}
-                    onClick={() =>
-                      setCandidateList((current) => ({ ...current, candidateView: "table" }))
-                    }
-                  >
-                    <Trans>Table</Trans>
-                  </Button>
-                </fieldset>
+                    <Button
+                      size="sm"
+                      variant={candidateView === "cards" ? "secondary" : "ghost"}
+                      aria-pressed={candidateView === "cards"}
+                      onClick={() =>
+                        setCandidateList((current) => ({ ...current, candidateView: "cards" }))
+                      }
+                    >
+                      {presentation === "workspace" ? <LayoutGrid size={15} aria-hidden /> : null}
+                      <Trans>Cards</Trans>
+                    </Button>
+                    <Button
+                      size="sm"
+                      variant={candidateView === "table" ? "secondary" : "ghost"}
+                      aria-pressed={candidateView === "table"}
+                      onClick={() =>
+                        setCandidateList((current) => ({ ...current, candidateView: "table" }))
+                      }
+                    >
+                      {presentation === "workspace" ? <List size={15} aria-hidden /> : null}
+                      <Trans>Table</Trans>
+                    </Button>
+                  </fieldset>
+                ) : null}
                 {candidateFailed ? (
                   <p role="alert" className="text-destructive">
                     <Trans>Could not load candidates</Trans>
@@ -3428,93 +3629,144 @@ function RecruitingWorkspace({
                         <Trans>No saved candidates</Trans>
                       </p>
                     ) : candidateView === "cards" ? (
-                      <ul className="grid gap-2">
+                      <ul
+                        className={presentation === "workspace" ? "hire-card-grid" : "grid gap-2"}
+                      >
                         {candidatePage.items.map((candidate) => (
                           <li key={candidate.candidateKey}>
-                            <Card
-                              size="sm"
-                              className={
-                                selection?.candidateKey === candidate.candidateKey
-                                  ? "ring-primary"
-                                  : undefined
-                              }
-                            >
-                              <CardContent className="space-y-2">
-                                <div className="flex items-start justify-between gap-2">
-                                  <Button
-                                    ref={
-                                      selection?.candidateKey === candidate.candidateKey
-                                        ? candidateTrigger
-                                        : undefined
-                                    }
-                                    variant="link"
-                                    className="h-auto justify-start whitespace-normal break-all p-0 text-left"
-                                    aria-haspopup="dialog"
-                                    aria-pressed={
-                                      selection?.candidateKey === candidate.candidateKey
-                                    }
-                                    onClick={(event) =>
-                                      selectCandidate(candidate, event.currentTarget)
-                                    }
-                                  >
-                                    {candidate.name ??
-                                      (showDiagnostics
-                                        ? candidate.candidateKey
-                                        : t`Unnamed candidate`)}
-                                  </Button>
-                                  <Checkbox
-                                    aria-label={t`Shortlist ${candidate.name ?? (showDiagnostics ? candidate.candidateKey : t`Unnamed candidate`)}`}
-                                    checked={candidate.shortlisted}
-                                    disabled={shortlistPending !== null}
-                                    onCheckedChange={(checked) =>
-                                      void setShortlist(candidate, !!checked)
-                                    }
-                                  />
-                                </div>
-                                <p className="text-xs text-muted-foreground">
-                                  {workspace?.role.title}
-                                </p>
-                                {candidate.title || candidate.company ? (
-                                  <p>
-                                    {[candidate.title, candidate.company]
-                                      .filter(Boolean)
-                                      .join(" · ")}
-                                  </p>
-                                ) : null}
-                                {candidate.location ? (
-                                  <p className="text-muted-foreground">{candidate.location}</p>
-                                ) : null}
-                                <CandidateProfile
-                                  candidate={candidate}
-                                  showDiagnostics={showDiagnostics}
-                                />
-                                <CandidateResearchMatch
-                                  candidate={candidate}
-                                  roleRevisionId={workspace?.revision.id}
-                                  showDiagnostics={showDiagnostics}
-                                />
-                                <CandidateAssessment candidate={candidate} />
-                                {showCrm ? (
+                            {presentation === "workspace" ? (
+                              <SourcingCandidateCard
+                                candidate={candidate}
+                                selected={selection?.candidateKey === candidate.candidateKey}
+                                triggerRef={
+                                  selection?.candidateKey === candidate.candidateKey
+                                    ? candidateTrigger
+                                    : undefined
+                                }
+                                onOpen={(trigger) => selectCandidate(candidate, trigger)}
+                                onShortlist={() =>
+                                  void setShortlist(candidate, !candidate.shortlisted)
+                                }
+                                shortlistPending={shortlistPending !== null}
+                                shortlistFailed={shortlistFailed === candidate.candidateKey}
+                                onEmailDraft={
+                                  onDiscussCandidate
+                                    ? () =>
+                                        onDiscussCandidate({
+                                          threadId,
+                                          roleTitle: workspace.role.title,
+                                          roleId: workspace.role.id,
+                                          roleRevisionId: workspace.revision.id,
+                                          roleVersion: workspace.revision.revision,
+                                          candidateKey: candidate.candidateKey,
+                                          name: candidate.name,
+                                          title: candidate.title,
+                                          company: candidate.company,
+                                          linkedinUrl: candidate.linkedinUrl,
+                                          resumeUrl: candidate.resumeUrl,
+                                          intent: "email_draft",
+                                        })
+                                    : undefined
+                                }
+                              />
+                            ) : (
+                              <Card
+                                size="sm"
+                                className={
+                                  selection?.candidateKey === candidate.candidateKey
+                                    ? "ring-primary"
+                                    : undefined
+                                }
+                              >
+                                <CardContent className="space-y-2">
+                                  <div className="flex items-start justify-between gap-2">
+                                    <Button
+                                      ref={
+                                        selection?.candidateKey === candidate.candidateKey
+                                          ? candidateTrigger
+                                          : undefined
+                                      }
+                                      variant="link"
+                                      className="h-auto justify-start whitespace-normal break-all p-0 text-left"
+                                      aria-haspopup="dialog"
+                                      aria-pressed={
+                                        selection?.candidateKey === candidate.candidateKey
+                                      }
+                                      onClick={(event) =>
+                                        selectCandidate(candidate, event.currentTarget)
+                                      }
+                                    >
+                                      {candidate.name ??
+                                        (showDiagnostics
+                                          ? candidate.candidateKey
+                                          : t`Unnamed candidate`)}
+                                    </Button>
+                                    <Checkbox
+                                      aria-label={t`Shortlist ${candidate.name ?? (showDiagnostics ? candidate.candidateKey : t`Unnamed candidate`)}`}
+                                      checked={candidate.shortlisted}
+                                      disabled={shortlistPending !== null}
+                                      onCheckedChange={(checked) =>
+                                        void setShortlist(candidate, !!checked)
+                                      }
+                                    />
+                                  </div>
                                   <p className="text-xs text-muted-foreground">
-                                    <Trans>CRM</Trans> · <CrmStatus sync={candidate.crm} />
+                                    {workspace?.role.title}
                                   </p>
-                                ) : null}
-                                <p className="text-xs text-muted-foreground">
-                                  <Trans>{candidate.discoveryCount} saved discoveries</Trans>
-                                </p>
-                                {shortlistFailed === candidate.candidateKey ? (
-                                  <p role="alert" className="text-destructive">
-                                    <Trans>Could not save shortlist</Trans>
+                                  {candidate.title || candidate.company ? (
+                                    <p>
+                                      {[candidate.title, candidate.company]
+                                        .filter(Boolean)
+                                        .join(" · ")}
+                                    </p>
+                                  ) : null}
+                                  {candidate.location ? (
+                                    <p className="text-muted-foreground">{candidate.location}</p>
+                                  ) : null}
+                                  <CandidateProfile
+                                    candidate={candidate}
+                                    showDiagnostics={showDiagnostics}
+                                  />
+                                  <CandidateResearchMatch
+                                    candidate={candidate}
+                                    roleRevisionId={workspace?.revision.id}
+                                    showDiagnostics={showDiagnostics}
+                                  />
+                                  <CandidateAssessment candidate={candidate} />
+                                  {showCrm ? (
+                                    <p className="text-xs text-muted-foreground">
+                                      <Trans>CRM</Trans> · <CrmStatus sync={candidate.crm} />
+                                    </p>
+                                  ) : null}
+                                  <p className="text-xs text-muted-foreground">
+                                    <Trans>{candidate.discoveryCount} saved discoveries</Trans>
                                   </p>
-                                ) : null}
-                              </CardContent>
-                            </Card>
+                                  {shortlistFailed === candidate.candidateKey ? (
+                                    <p role="alert" className="text-destructive">
+                                      <Trans>Could not save shortlist</Trans>
+                                    </p>
+                                  ) : null}
+                                </CardContent>
+                              </Card>
+                            )}
                           </li>
                         ))}
                       </ul>
                     ) : (
-                      <div className="overflow-x-auto">
-                        <table className="w-full text-left text-sm [&_td]:align-top [&_th]:align-top">
+                      <div
+                        className={
+                          presentation === "workspace"
+                            ? "hire-table-wrap overflow-x-auto"
+                            : "overflow-x-auto"
+                        }
+                      >
+                        <table
+                          className={
+                            presentation === "workspace"
+                              ? "hire-table w-full text-left text-sm [&_td]:align-top [&_th]:align-top"
+                              : "w-full text-left text-sm [&_td]:align-top [&_th]:align-top"
+                          }
+                        >
                           <caption className="sr-only">
                             <Trans>Saved candidates</Trans>
                           </caption>
@@ -3522,15 +3774,15 @@ function RecruitingWorkspace({
                             <tr className="border-b border-border">
                               {[
                                 t`Candidate`,
-                                t`Role`,
-                                t`Title`,
+                                ...(presentation !== "workspace" ? [t`Role`] : []),
+                                presentation === "workspace" ? t`Current role` : t`Title`,
                                 t`Company`,
                                 t`Location`,
-                                t`Profile`,
+                                ...(presentation !== "workspace" ? [t`Profile`] : []),
                                 t`Research match`,
                                 ...(showInternalAssessments ? [t`Internal assessment`] : []),
                                 ...(showCrm ? [t`CRM`] : []),
-                                t`Discoveries`,
+                                ...(presentation !== "workspace" ? [t`Discoveries`] : []),
                                 t`Shortlist`,
                               ].map((label) => (
                                 <th key={label} scope="col" className="py-2 pe-3 font-medium">
@@ -3564,17 +3816,24 @@ function RecruitingWorkspace({
                                         ? candidate.candidateKey
                                         : t`Unnamed candidate`)}
                                   </Button>
+                                  {presentation === "workspace" ? (
+                                    <CandidateProfile candidate={candidate} />
+                                  ) : null}
                                 </th>
-                                <td className="py-2 pe-3">{workspace?.role.title}</td>
+                                {presentation !== "workspace" ? (
+                                  <td className="py-2 pe-3">{workspace?.role.title}</td>
+                                ) : null}
                                 <td className="py-2 pe-3">{candidate.title ?? "—"}</td>
                                 <td className="py-2 pe-3">{candidate.company ?? "—"}</td>
                                 <td className="py-2 pe-3">{candidate.location ?? "—"}</td>
-                                <td className="py-2 pe-3">
-                                  <CandidateProfile
-                                    candidate={candidate}
-                                    showDiagnostics={showDiagnostics}
-                                  />
-                                </td>
+                                {presentation !== "workspace" ? (
+                                  <td className="py-2 pe-3">
+                                    <CandidateProfile
+                                      candidate={candidate}
+                                      showDiagnostics={showDiagnostics}
+                                    />
+                                  </td>
+                                ) : null}
                                 <td className="min-w-48 py-2 pe-3">
                                   <CandidateResearchMatch
                                     candidate={candidate}
@@ -3593,9 +3852,11 @@ function RecruitingWorkspace({
                                     <CrmStatus sync={candidate.crm} />
                                   </td>
                                 ) : null}
-                                <td className="py-2 pe-3 tabular-nums">
-                                  {candidate.discoveryCount}
-                                </td>
+                                {presentation !== "workspace" ? (
+                                  <td className="py-2 pe-3 tabular-nums">
+                                    {candidate.discoveryCount}
+                                  </td>
+                                ) : null}
                                 <td className="py-2">
                                   <Checkbox
                                     aria-label={t`Shortlist ${candidate.name ?? (showDiagnostics ? candidate.candidateKey : t`Unnamed candidate`)}`}
@@ -3929,8 +4190,13 @@ function RecruitingWorkspace({
         <DialogContent
           showCloseButton={false}
           initialFocus={candidateClose}
+          data-product-view={presentation === "workspace" ? "recruiting" : undefined}
           finalFocus={candidateHandoff.current ? false : candidateTrigger}
-          className="max-h-[85dvh] overflow-y-auto text-base leading-relaxed sm:max-w-2xl"
+          className={
+            presentation === "workspace"
+              ? "hire-profile-drawer inset-y-0 right-0 left-auto top-0 h-dvh max-h-dvh translate-x-0 translate-y-0 overflow-y-auto rounded-none text-sm leading-relaxed sm:max-w-2xl"
+              : "max-h-[85dvh] overflow-y-auto text-base leading-relaxed sm:max-w-2xl"
+          }
         >
           {selection ? (
             <div className="space-y-3">
