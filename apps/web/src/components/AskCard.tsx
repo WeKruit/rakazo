@@ -29,10 +29,15 @@ function formatAnsweredState(
   if (!approval) return t`Answered: ${selectedAskActionLabel(answer, actions)}`;
   if (outcome === "created") return t`Created`;
   if (outcome === "cancelled") return t`Cancelled`;
-  if (answer === "allow") return t`Allowed once`;
-  if (answer === "always") return t`Always allowed`;
-  if (answer === "deny") return t`Denied`;
-  return t`Answered: ${answer}`;
+  const label = actions?.find((action) => action.id === answer)?.label;
+  if (answer === "allow" && (label === undefined || label === "Allow once")) return t`Allowed once`;
+  if (
+    answer === "always" &&
+    (label === undefined || label === "Always allow this tool" || label === "Always allow")
+  )
+    return t`Always allowed`;
+  if (answer === "deny" && (label === undefined || label === "Deny")) return t`Denied`;
+  return t`Answered: ${selectedAskActionLabel(answer, actions)}`;
 }
 
 function approvalActionLabel(
@@ -42,9 +47,10 @@ function approvalActionLabel(
 ): string {
   if (outcome === "created") return t`Create space`;
   if (outcome === "cancelled") return t`Cancel`;
-  if (id === "allow") return t`Allow once`;
-  if (id === "always") return t`Always allow this tool`;
-  if (id === "deny") return t`Deny`;
+  if (id === "allow" && fallback === "Allow once") return t`Allow once`;
+  if (id === "always" && (fallback === "Always allow this tool" || fallback === "Always allow"))
+    return t`Always allow this tool`;
+  if (id === "deny" && fallback === "Deny") return t`Deny`;
   return fallback;
 }
 
@@ -152,9 +158,9 @@ export function AskCard({
         <div className="mt-3.5 whitespace-pre-wrap text-[13.5px] font-medium text-success">
           {formatAnsweredState(
             block.answer,
-            Boolean(approvalActions),
+            Boolean(block.approvalEffectId),
             secretInput,
-            approvalActions?.find((action) => action.id === block.answer)?.outcome,
+            askActions?.find((action) => action.id === block.answer)?.outcome,
             askActions,
           )}
         </div>

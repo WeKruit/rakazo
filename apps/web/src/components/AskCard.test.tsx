@@ -296,3 +296,124 @@ it("keeps approval cards restricted to their native decisions", () => {
     act(() => root.unmount());
   }
 });
+
+it.each([
+  ["allow", "Confirm requirements"],
+  ["allow", "Approve documents"],
+  ["allow", "Approve calibration"],
+  ["always", "Approve future documents"],
+  ["deny", "Keep the current documents"],
+])("preserves the server's %s approval label %s before and after answering", async (id, label) => {
+  const container = document.createElement("div");
+  const root = createRoot(container);
+  const answer = vi.fn().mockResolvedValue(undefined);
+  const block: AskBlock = {
+    kind: "ask",
+    text: "Review this decision",
+    approvalEffectId: "effect-test",
+    actions: [
+      { id: "allow", label: "Allow once" },
+      { id: "always", label: "Always allow this tool" },
+      { id: "deny", label: "Deny" },
+    ].map((action) => (action.id === id ? { ...action, label } : action)),
+  };
+  try {
+    act(() => root.render(<AskCard block={block} canAnswer onAnswer={answer} />));
+    const button = [...container.querySelectorAll("button")].find(
+      (button) => button.textContent === label,
+    );
+    expect(button).toBeDefined();
+    expect(container.querySelector("form, input, textarea")).toBeNull();
+    await act(async () => button!.click());
+    expect(answer).toHaveBeenCalledExactlyOnceWith(id, undefined);
+    act(() =>
+      root.render(
+        <AskCard
+          block={{ ...block, status: "answered", answer: id }}
+          canAnswer={false}
+          onAnswer={answer}
+        />,
+      ),
+    );
+    expect(container.textContent).toContain(`Answered: ${label}`);
+    expect(container.querySelector("button")).toBeNull();
+  } finally {
+    act(() => root.unmount());
+  }
+});
+
+it.each([
+  { id: "allow", label: "Allow once", expected: "Allowed once" },
+  { id: "always", label: "Always allow this tool", expected: "Always allowed" },
+  { id: "deny", label: "Deny", expected: "Denied" },
+  { id: "allow", label: "Create space", outcome: "created" as const, expected: "Created" },
+  { id: "deny", label: "Cancel", outcome: "cancelled" as const, expected: "Cancelled" },
+])("retains the native $label approval outcome", ({ expected, ...action }) => {
+  const container = document.createElement("div");
+  const root = createRoot(container);
+  const block: AskBlock = {
+    kind: "ask",
+    text: "Review this decision",
+    approvalEffectId: "effect-test",
+    actions: [
+      { id: "allow", label: "Allow once" },
+      { id: "always", label: "Always allow this tool" },
+      { id: "deny", label: "Deny" },
+    ].map((original) => (original.id === action.id ? action : original)),
+  };
+  try {
+    act(() => root.render(<AskCard block={block} canAnswer onAnswer={vi.fn()} />));
+    expect(container.textContent).toContain(action.label);
+    act(() =>
+      root.render(
+        <AskCard
+          block={{ ...block, status: "answered", answer: action.id }}
+          canAnswer={false}
+          onAnswer={vi.fn()}
+        />,
+      ),
+    );
+    expect(container.textContent).toContain(expected);
+  } finally {
+    act(() => root.unmount());
+  }
+});
+
+it.each([
+  ["allow", "Allowed once"],
+  ["always", "Always allowed"],
+  ["deny", "Denied"],
+])(
+  "keeps legacy approval answer %s readable when its action is unavailable",
+  (answer, expected) => {
+    const container = document.createElement("div");
+    const root = createRoot(container);
+    try {
+      for (const actions of [
+        undefined,
+        [{ id: "allow", label: "Allow once" }].filter((action) => action.id !== answer),
+      ]) {
+        act(() =>
+          root.render(
+            <AskCard
+              block={{
+                kind: "ask",
+                text: "Review this decision",
+                approvalEffectId: "effect-test",
+                status: "answered",
+                answer,
+                actions,
+              }}
+              canAnswer={false}
+              onAnswer={vi.fn()}
+            />,
+          ),
+        );
+        expect(container.textContent).toContain(expected);
+        expect(container.textContent).not.toContain(`Answered: ${answer}`);
+      }
+    } finally {
+      act(() => root.unmount());
+    }
+  },
+);

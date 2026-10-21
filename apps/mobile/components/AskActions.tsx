@@ -10,9 +10,10 @@ import { NativeActionButton } from "./native-action-button";
 type AskAction = { id: string; label: string };
 
 const KNOWN_ASK_ACTION_LABELS: Record<string, string> = {
-  allow: "Allow once",
-  always: "Always allow",
-  deny: "Deny",
+  "Allow once": "Allow once",
+  "Always allow": "Always allow",
+  "Always allow this tool": "Always allow",
+  Deny: "Deny",
 };
 
 export function AskActions({
@@ -77,8 +78,8 @@ export function AskActions({
             >
               {pendingAction === action.id
                 ? t("Sending…")
-                : Object.hasOwn(KNOWN_ASK_ACTION_LABELS, action.id)
-                  ? t(KNOWN_ASK_ACTION_LABELS[action.id]!)
+                : Object.hasOwn(KNOWN_ASK_ACTION_LABELS, action.label)
+                  ? t(KNOWN_ASK_ACTION_LABELS[action.label]!)
                   : action.label}
             </Text>
           </Pressable>
