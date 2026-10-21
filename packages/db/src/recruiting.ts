@@ -8645,16 +8645,28 @@ export async function listRecruitingCandidateSources(
       }
       await candidatePageArtifacts(tx, actor, [...pages.values()]);
       const last = selected.at(-1);
-      const syncs = new Map<string, RecruitingCrmCandidateSync[]>();
-      for (const row of selected) {
-        const imports = await tx.recruitingCrmImport.findMany({
-          where: { pageId: row.pageId, rowIndex: row.rowIndex },
-          include: { effect: true, occurrence: true },
-          orderBy: [{ effect: { createdAt: "asc" } }, { effectId: "asc" }],
-        });
-        const states = [];
-        for (const link of imports) states.push(await crmSourceSync(tx, actor, link));
-        syncs.set(`${row.pageId}:${row.rowIndex}`, states);
+      const syncs = new Map<string, RecruitingCrmCandidateSync[]>(
+        selected.map((row) => [`${row.pageId}:${row.rowIndex}`, []]),
+      );
+      const imports = selected.length
+        ? await tx.recruitingCrmImport.findMany({
+            where: {
+              occurrence: where,
+              OR: selected.map((row) => ({ pageId: row.pageId, rowIndex: row.rowIndex })),
+            },
+            include: { effect: true, occurrence: true },
+            orderBy: [{ effect: { createdAt: "asc" } }, { effectId: "asc" }],
+          })
+        : [];
+      for (const link of imports) {
+        const states = syncs.get(`${link.pageId}:${link.rowIndex}`);
+        if (
+          !states ||
+          link.occurrence.roleId !== role.id ||
+          link.occurrence.candidateKey !== candidate.candidateKey
+        )
+          throw new IsolationError();
+        states.push(await crmSourceSync(tx, actor, link));
       }
       return ListRecruitingCandidateSourcesOutput.parse({
         roleId: role.id,

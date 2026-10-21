@@ -3931,6 +3931,168 @@ describe("native candidate source provenance", () => {
     });
     expect(f.tx.recruitingResearchAction.findFirst).not.toHaveBeenCalled();
   });
+  it("loads source imports once and keeps each receipt on its exact source page", async () => {
+    const f = await nativeSourceFixture();
+    const resolved = (await recruiting.resolveRecruitingCrmImport(
+      f.prisma,
+      actor,
+      f.trusted,
+      f.input,
+    ))!;
+    const admitted = await recruiting.admitRecruitingCrmImport(
+      f.prisma,
+      actor,
+      f.trusted,
+      f.input,
+      {
+        effectKind: "crm-import",
+        effectRequest: boundDirectApprovalRequest(
+          resolved.route,
+          resolved.args,
+          "__rakazoCatalogTool",
+        ),
+      },
+    );
+    const effect = f.effects.get(admitted.effect.id)!;
+    effect.status = "completed";
+    effect.result = {
+      structuredContent: {
+        data: {
+          candidate_id: "40000000-0000-4000-8000-000000000004",
+          source_id: "50000000-0000-4000-8000-000000000005",
+          membership_id: "60000000-0000-4000-8000-000000000006",
+          organization_id: f.target.organizationId,
+          role_spec_id: f.target.crmRoleId,
+          linkedin_identity: "/in/example",
+          source_file: resolved.args.p_source_file,
+        },
+      },
+    };
+    const request = structuredClone(f.page.effect.request);
+    const read = { ...f.page.effect, id: "later-read", request };
+    const bytes = Buffer.from(stableJsonValue({ request, providerResult: read.result }));
+    const artifact = {
+      ...f.artifact,
+      id: "later-artifact",
+      clientNonce: `recruiting-observation:${read.id}`,
+      size: bytes.length,
+      hash: createHash("sha256").update(bytes).digest("hex"),
+    };
+    const page = {
+      ...f.page,
+      effectId: read.id,
+      effect: read,
+      artifactId: artifact.id,
+      artifactHash: artifact.hash,
+    };
+    f.nativeProofs.mockResolvedValue([
+      ...(await f.nativeProofs()),
+      {
+        ...artifact,
+        effectId: read.id,
+        effectStatus: read.status,
+        effectRequest: read.request,
+        effectResult: read.result === null ? null : JSON.stringify(read.result),
+        effectRun: { ...f.run, thread: f.thread },
+      },
+    ]);
+    f.tx.event.findMany.mockResolvedValue([
+      f.event,
+      {
+        ...f.event,
+        id: "later-save",
+        payload: {
+          ...f.event.payload,
+          effectId: read.id,
+          outputArtifact: { artifactId: artifact.id, sha256: artifact.hash },
+        },
+      },
+    ] as never);
+    f.tx.recruitingCandidateOccurrence.count.mockResolvedValue(2);
+    f.tx.recruitingCandidateOccurrence.findMany.mockResolvedValue([
+      f.occurrence,
+      { ...f.occurrence, pageId: page.effectId, page },
+    ]);
+    const findImports = f.tx.recruitingCrmImport.findMany.getMockImplementation()!;
+    f.tx.recruitingCrmImport.findMany.mockImplementation(async (...args: unknown[]) => {
+      const where = (
+        args[0] as {
+          where: {
+            pageId?: string;
+            rowIndex?: number;
+            OR?: { pageId: string; rowIndex: number }[];
+          };
+        }
+      ).where;
+      const tuples = where.OR ?? [where];
+      return (await findImports()).filter((link) =>
+        tuples.some((tuple) => tuple.pageId === link.pageId && tuple.rowIndex === link.rowIndex),
+      );
+    });
+    f.tx.recruitingCrmImport.findMany.mockClear();
+    const sources = await recruiting.listRecruitingCandidateSources(f.prisma, actor, {
+      roleId: "role",
+      candidateKey: f.occurrence.candidateKey,
+    });
+    expect(f.tx.recruitingCrmImport.findMany).toHaveBeenCalledExactlyOnceWith({
+      where: {
+        occurrence: { roleId: "role", candidateKey: f.occurrence.candidateKey },
+        OR: [
+          { pageId: f.page.effectId, rowIndex: 0 },
+          { pageId: page.effectId, rowIndex: 0 },
+        ],
+      },
+      include: { effect: true, occurrence: true },
+      orderBy: [{ effect: { createdAt: "asc" } }, { effectId: "asc" }],
+    });
+    expect(sources.items[0]?.crmImports).toMatchObject([
+      {
+        effectId: effect.id,
+        status: "synced",
+        receipt: { source_file: resolved.args.p_source_file },
+      },
+    ]);
+    expect(sources.items[1]?.crmImports).toEqual([]);
+  });
+  it("does not query imports when the selected source page is empty", async () => {
+    const f = await nativeSourceFixture();
+    f.tx.recruitingCandidateOccurrence.count.mockResolvedValue(0);
+    f.tx.recruitingCandidateOccurrence.findMany.mockResolvedValue([]);
+    const sources = await recruiting.listRecruitingCandidateSources(f.prisma, actor, {
+      roleId: "role",
+      candidateKey: f.occurrence.candidateKey,
+    });
+    expect(sources.items).toEqual([]);
+    expect(f.tx.recruitingCrmImport.findMany).not.toHaveBeenCalled();
+  });
+  it.each(["unselected-tuple", "other-role", "other-candidate"])(
+    "rejects an out-of-scope source import before reading its receipt: %s",
+    async (boundary) => {
+      const f = await nativeSourceFixture();
+      f.tx.recruitingCrmImport.findMany.mockResolvedValue([
+        {
+          effectId: "unexpected-import",
+          bindingEffectId: f.binding.id,
+          pageId: f.page.effectId,
+          rowIndex: boundary === "unselected-tuple" ? 1 : 0,
+          occurrence: {
+            ...f.occurrence,
+            roleId: boundary === "other-role" ? "other-role" : f.role.id,
+            candidateKey:
+              boundary === "other-candidate" ? "other-candidate" : f.occurrence.candidateKey,
+          },
+        },
+      ] as never);
+      f.tx.externalEffect.findFirst.mockClear();
+      await expect(
+        recruiting.listRecruitingCandidateSources(f.prisma, actor, {
+          roleId: "role",
+          candidateKey: f.occurrence.candidateKey,
+        }),
+      ).rejects.toThrow(IsolationError);
+      expect(f.tx.externalEffect.findFirst).not.toHaveBeenCalled();
+    },
+  );
   it.each(
     ["valid", "foreign-actor", "artifact-hash"].flatMap((boundary) =>
       (["name", "rank", "tier", "score"] as const).map((sort) => ({ boundary, sort })),
