@@ -1,5 +1,7 @@
 import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
+import { transformSync } from "@babel/core";
+import linguiMacro from "@lingui/babel-plugin-lingui-macro";
 import { createCompiledCatalog, getCatalogs } from "@lingui/cli/api";
 import { getConfig } from "@lingui/conf";
 import { i18n } from "@lingui/core";
@@ -16,6 +18,40 @@ describe("lingui catalogs", () => {
   beforeEach(() => {
     i18n.load("en", {});
     i18n.activate("en");
+  });
+
+  it("resolves every compiled artifact-card label from production catalogs", async () => {
+    const config = getConfig({
+      configPath: fileURLToPath(new URL("../../lingui.config.ts", import.meta.url)),
+    });
+    const component = fileURLToPath(new URL("../components/ArtifactFileCard.tsx", import.meta.url));
+    const compiled = transformSync(readFileSync(component, "utf8"), {
+      filename: component,
+      babelrc: false,
+      configFile: false,
+      parserOpts: { plugins: ["typescript", "jsx"] },
+      plugins: [[linguiMacro, { linguiConfig: config }]],
+    });
+    const ids = [...new Set([...compiled!.code!.matchAll(/\bid:\s*"([^"]+)"/g)].map((m) => m[1]!))];
+    expect(ids.length).toBeGreaterThan(5);
+    const [catalog] = await getCatalogs(config);
+    for (const locale of config.locales) {
+      const { messages } = await catalog!.getTranslations(locale, config);
+      for (const id of ids) expect(messages[id], `${locale} ${id}`).toBeDefined();
+      const result = createCompiledCatalog(
+        locale,
+        Object.fromEntries(ids.map((id) => [id, messages[id]!])),
+        { namespace: "json", strict: true },
+      );
+      expect(result.errors).toEqual([]);
+      i18n.load(locale, JSON.parse(result.source).messages);
+      i18n.activate(locale);
+      for (const id of ids)
+        expect(
+          i18n._({ id, values: { 0: "Job description", name: "Job description" } }),
+          locale,
+        ).not.toBe(id);
+    }
   });
 
   it("compiles recruiter workspace labels in every production locale without source descriptors", async () => {
