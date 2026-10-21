@@ -295,13 +295,20 @@ function fixture({
     attempt: {
       create: vi.fn(async () => ({ id: "attempt-1" })),
       update: vi.fn(),
-      updateMany: vi.fn(async () => ({ count: 1 })),
+      updateMany: vi.fn(async (_input?: unknown) => ({ count: 1 })),
     },
     thread: { findUniqueOrThrow: vi.fn(async () => ({ id: run.threadId, groupId: null })) },
-    message: { findMany: vi.fn(async () => []) },
-    event: { findMany: vi.fn(async () => []) },
+    message: { findMany: vi.fn(async (_query?: unknown): Promise<{ blocks: unknown }[]> => []) },
+    event: { findMany: vi.fn(async (_query?: unknown): Promise<{ id: string }[]> => []) },
     task: { findUniqueOrThrow: vi.fn(async () => ({ id: run.taskId, prompt })) },
     connection: { findMany: vi.fn(async () => []) },
+    botMcpServer: {
+      findFirst: vi.fn(async () => ({
+        allowAllTools: false,
+        allowedTools: providerTools.map((entry) => entry.route?.toolName),
+        server: { endpoint: replyServerEndpoint, enabled: true, revision: 1 },
+      })),
+    },
     mcpServer: {
       findFirst: vi.fn(async () => ({ endpoint: replyServerEndpoint, enabled: true, revision: 1 })),
     },
@@ -324,6 +331,10 @@ function fixture({
   };
   const pauseRunForInput = vi.fn(async (_input: PauseRunForInput) => {
     run.status = "waiting_input";
+    await prisma.attempt.updateMany({
+      where: { id: "attempt-1", status: "running" },
+      data: { status: "waiting_input" },
+    });
     return true;
   });
   const finalizeRun = vi.fn(async () => ({ continuationRunId: null }));
@@ -813,30 +824,8 @@ describe("native shortlist dispatch", () => {
       await f.run();
       expect(f.effects).toHaveLength(1);
       expect(f.effects[0]!.request).toEqual(args);
-      if (trigger === "webhook") {
-        expect(nativeShortlist.execute).not.toHaveBeenCalled();
-        expect(nativeShortlist.prepare).toHaveBeenCalledWith(
-          f.prisma,
-          expect.objectContaining({ spaceId: "space-1", userId: "user-1" }),
-          expect.objectContaining({
-            threadId: "thread-1",
-            botId: "bot-1",
-            runId: "run-1",
-            leaseOwner: "worker-1",
-          }),
-          args,
-        );
-        const card = f.pauseRunForInput.mock.calls[0]![0].blocks[0];
-        if (card?.kind !== "ask") throw new Error("Expected the original approval card");
-        expect(card).toMatchObject({ kind: "ask", approvalEffectId: f.effects[0]!.id });
-        expect(card.detail).toContain("Synthetic Avery");
-        expect(card.detail).not.toContain("candidateKey");
-        f.effects[0]!.status = "approved";
-        await f.run();
-      } else {
-        expect(f.pauseRunForInput).not.toHaveBeenCalled();
-        expect(nativeShortlist.prepare).not.toHaveBeenCalled();
-      }
+      expect(f.pauseRunForInput).not.toHaveBeenCalled();
+      expect(nativeShortlist.prepare).not.toHaveBeenCalled();
       expect(nativeShortlist.execute).toHaveBeenCalledTimes(1);
       expect(nativeShortlist.execute).toHaveBeenCalledWith(
         f.prisma,
@@ -931,12 +920,94 @@ describe("native saved-candidate CRM workflow", () => {
     });
   });
 
-  it("confirms a real CRM target once and replays the original binding on its card", async () => {
+  it.each(["user", "webhook"])(
+    "connects the verified native CRM target without a human card and reuses its receipt for %s",
+    async (trigger) => {
+      const f = fixture({
+        name: "recruiting_crm_target",
+        builtin: true,
+        autoReview: true,
+        trigger,
+      });
+      f.setCalls([{ args: binding, executionId: "internal-binding" }]);
+      await f.run();
+      expect(recruitingCrm.bind).toHaveBeenCalledOnce();
+      expect(f.pauseRunForInput).not.toHaveBeenCalled();
+      expect(reviewMock).not.toHaveBeenCalled();
+      expect(f.prisma.externalEffect.updateMany).toHaveBeenCalledWith(
+        expect.objectContaining({
+          where: { id: f.effects[0]!.id, status: "intended" },
+          data: { status: "executing" },
+        }),
+      );
+      // Native binding commits the receipt atomically with its domain write.
+      f.effects[0]!.status = "completed";
+      f.effects[0]!.result = { status: "connected", target };
+      await f.run();
+      expect(recruitingCrm.bind).toHaveBeenCalledOnce();
+      expect(f.effects).toHaveLength(1);
+    },
+  );
+
+  it.each([false, true])(
+    "saves a verified native CRM import without approval, catalog=%s",
+    async (catalog) => {
+      const f = fixture({
+        name: "renamed_import",
+        catalog,
+        route,
+        readOnly: false,
+        autoReview: true,
+        inputSchema: { type: "object" },
+      });
+      recruitingCrm.resolve.mockImplementation(async () => ({
+        input: source,
+        target,
+        route,
+        args,
+        effect: f.effects[0],
+      }));
+      recruitingCrm.admit.mockImplementation(async (_prisma, _actor, _trusted, _input, call) => {
+        let effect = f.effects[0];
+        if (!effect) {
+          effect = {
+            id: "internal-import",
+            kind: call.effectKind,
+            idempotencyKey: "native-source-import",
+            status: "intended",
+            request: call.effectRequest,
+            runId: "run-1",
+          };
+          f.effects.push(effect);
+        }
+        return { status: effect.status === "completed" ? "completed" : "ready", effect };
+      });
+      recruitingCrm.claim.mockImplementation(async (_prisma, _actor, _trusted, _input, call) => {
+        expect(call.from).toBe("intended");
+        f.effects[0]!.status = "executing";
+        return true;
+      });
+      f.setCalls([{ name: "recruiting_crm_import", args: source, executionId: "internal-import" }]);
+      await f.run();
+      expect(f.execute).toHaveBeenCalledOnce();
+      expect(f.execute.mock.calls[0]?.[0].args).toEqual(args);
+      expect(f.pauseRunForInput).not.toHaveBeenCalled();
+      expect(reviewMock).not.toHaveBeenCalled();
+      expect(recruitingCrm.claim).toHaveBeenCalledOnce();
+      await f.run();
+      expect(f.execute).toHaveBeenCalledOnce();
+      expect(f.effects).toHaveLength(1);
+    },
+  );
+
+  it("honors an explicit CRM target approval rule and replays its original card", async () => {
     const f = fixture({
       name: "recruiting_crm_target",
       builtin: true,
       autoReview: true,
-      rules: [{ effect: "always_allow", matchKind: "tool", matchValue: "recruiting_crm_target" }],
+      rules: [
+        { effect: "require_approval", matchKind: "tool", matchValue: "recruiting_crm_target" },
+      ],
     });
     f.setCalls([{ args: binding, executionId: "bind-target" }]);
     await f.run();
@@ -1001,6 +1072,7 @@ describe("native saved-candidate CRM workflow", () => {
         route,
         readOnly: true,
         inputSchema: { type: "object" },
+        rules: [{ effect: "require_approval", matchKind: "tool", matchValue: "renamed_import" }],
       });
       recruitingCrm.resolve.mockImplementation(async () => ({
         input: source,
@@ -1091,6 +1163,26 @@ describe("native saved-candidate CRM workflow", () => {
     },
   );
 
+  it.each([false, true])(
+    "rejects a raw CRM import without a verified saved source, catalog=%s",
+    async (catalog) => {
+      const f = fixture({
+        name: "renamed_import",
+        route,
+        catalog,
+        readOnly: true,
+        autoReview: false,
+        inputSchema: { type: "object" },
+      });
+      f.setCalls([{ args, executionId: "raw-import" }]);
+      await f.run();
+      expect(f.execute).not.toHaveBeenCalled();
+      expect(f.pauseRunForInput).not.toHaveBeenCalled();
+      expect(f.effects).toEqual([]);
+      expect(f.results[0]).toMatchObject({ error: expect.stringContaining("saved candidate") });
+    },
+  );
+
   it("honors disabled native imports when their approved effect resumes through direct MCP", async () => {
     const f = fixture({
       name: "renamed_import",
@@ -1170,7 +1262,6 @@ describe("native saved-candidate CRM workflow", () => {
 });
 
 describe.each([
-  "crm_import_candidate",
   "reply_to_email",
   "create_lead",
   "add_leads_to_campaign_or_list_bulk",
@@ -1250,6 +1341,43 @@ describe.each([
 });
 
 describe.each([false, true])("verified CRM approval target, catalog=%s", (catalog) => {
+  it.each(["crm_bind_candidate_role", "crm_update_candidate_stage", "crm_append_candidate_note"])(
+    "saves verified internal %s without an approval card",
+    async (toolName) => {
+      const route = { connectorId: "mcp", resourceId: "resource-1", resourceRevision: 1, toolName };
+      const f = fixture({
+        name: "renamed_write",
+        route,
+        catalog,
+        readOnly: true,
+        autoReview: true,
+        inputSchema: { type: "object" },
+      });
+      crmApprovalProof.mockResolvedValue({
+        candidateName: "Ada Example",
+        roleTitle: "Platform Engineer",
+      });
+      const args = {
+        p_org: "verified-org",
+        p_candidate: "verified-person",
+        p_role: "verified-role",
+      };
+      f.setCalls([{ args, executionId: "ordinary-storage" }]);
+      await f.run();
+      expect(crmApprovalProof).toHaveBeenCalledOnce();
+      expect(f.execute).toHaveBeenCalledOnce();
+      expect(f.execute.mock.calls[0]?.[0].args).toEqual(args);
+      expect(f.pauseRunForInput).not.toHaveBeenCalled();
+      expect(reviewMock).not.toHaveBeenCalled();
+      const saved = f.effects[0]!.result;
+      crmApprovalProof.mockRejectedValueOnce(new IsolationError());
+      await f.run();
+      expect(f.results.at(-1)).toEqual(saved);
+      expect(f.execute).toHaveBeenCalledOnce();
+      expect(f.effects).toHaveLength(1);
+    },
+  );
+
   it("approves a verified CRM role binding once and replays only its original three UUIDs", async () => {
     const args = {
       p_org: "10000000-0000-4000-8000-000000000001",
@@ -1269,7 +1397,7 @@ describe.each([false, true])("verified CRM approval target, catalog=%s", (catalo
       autoReview: true,
       inputSchema: { type: "object" },
       route,
-      rules: [{ effect: "always_allow", matchKind: "tool", matchValue: "renamed_write" }],
+      rules: [{ effect: "require_approval", matchKind: "tool", matchValue: "renamed_write" }],
     });
     crmApprovalProof.mockResolvedValue({
       candidateName: "Ada Example",
@@ -1303,7 +1431,7 @@ describe.each([false, true])("verified CRM approval target, catalog=%s", (catalo
     expect(f.execute).toHaveBeenCalledOnce();
     expect(f.execute.mock.calls[0]?.[0].args).toEqual(args);
     expect(f.effects[0]!.request).toEqual(request);
-    expect(crmApprovalProof).toHaveBeenCalledOnce();
+    expect(crmApprovalProof).toHaveBeenCalledTimes(2);
   });
   it("requires fresh native list and canonical role proof before showing a binding card", async () => {
     const f = fixture({
@@ -1358,8 +1486,7 @@ describe.each([false, true])("verified CRM approval target, catalog=%s", (catalo
       },
     ]);
     await f.run();
-    f.effects[0]!.status = "approved";
-    await f.run();
+    expect(f.pauseRunForInput).not.toHaveBeenCalled();
     expect(f.effects[0]).toMatchObject({ status: "uncertain", result: { uncertain: true } });
     const result = f.effects[0]!.result;
     await f.run();
@@ -1393,7 +1520,7 @@ describe.each([false, true])("verified CRM approval target, catalog=%s", (catalo
         autoReview: true,
         inputSchema: { type: "object" },
         route,
-        rules: [{ effect: "always_allow", matchKind: "tool", matchValue: "renamed_write" }],
+        rules: [{ effect: "require_approval", matchKind: "tool", matchValue: "renamed_write" }],
       });
       crmApprovalProof.mockResolvedValue({
         candidateName: "Ada Example",
@@ -1432,7 +1559,7 @@ describe.each([false, true])("verified CRM approval target, catalog=%s", (catalo
       expect(f.execute).toHaveBeenCalledOnce();
       expect(f.execute.mock.calls[0]?.[0].args).toEqual(args);
       expect(f.effects[0]!.request).toEqual(request);
-      expect(crmApprovalProof).toHaveBeenCalledOnce();
+      expect(crmApprovalProof).toHaveBeenCalledTimes(2);
     },
   );
   it("returns a corrective read result without an approval card when target proof is missing", async () => {
@@ -1457,9 +1584,7 @@ describe.each([false, true])("verified CRM approval target, catalog=%s", (catalo
     expect(f.execute).not.toHaveBeenCalled();
     expect(f.effects[0]).toMatchObject({
       status: "completed",
-      result: {
-        error: expect.stringContaining("get_crm_candidate_review"),
-      },
+      result: { error: expect.stringContaining("get_crm_candidate_review") },
     });
   });
 });
@@ -1748,7 +1873,143 @@ describe.each([false, true])("native outbound draft approval, catalog=%s", (cata
   });
 });
 
+describe("internal policy changes preserve existing human cards", () => {
+  it.each(["card", "decision"])(
+    "does not claim an old intended write with stored %s linkage",
+    async (linkage) => {
+      const rules: ActionApprovalRule[] = [
+        { effect: "require_approval", matchKind: "tool", matchValue: "renamed_write" },
+      ];
+      const route = {
+        connectorId: "mcp",
+        resourceId: "resource-1",
+        resourceRevision: 1,
+        toolName: "crm_append_candidate_note",
+      };
+      const f = fixture({
+        name: "renamed_write",
+        route,
+        autoReview: false,
+        readOnly: false,
+        inputSchema: { type: "object" },
+        rules,
+      });
+      crmApprovalProof.mockResolvedValue({
+        candidateName: "Ada Example",
+        roleTitle: "Platform Engineer",
+        note: "Saved note",
+      });
+      f.setCalls([
+        {
+          args: { p_org: "org", p_candidate: "person", p_role: "role", p_note: "Saved note" },
+          executionId: "old-card",
+        },
+      ]);
+      await f.run();
+      const original = structuredClone(f.effects[0]);
+      const card = structuredClone(f.pauseRunForInput.mock.calls[0]![0].blocks);
+      rules.splice(0);
+      if (linkage === "card")
+        f.prisma.message.findMany.mockImplementation(async (query?: unknown) =>
+          (query as { where?: { runId?: string } })?.where?.runId === "run-1"
+            ? [{ blocks: card }]
+            : ([] as never),
+        );
+      else
+        f.prisma.event.findMany.mockImplementation(async (query?: unknown) =>
+          (query as { where?: { type?: string } })?.where?.type === "effect.approval.answered"
+            ? [{ id: "original-answer" }]
+            : ([] as never),
+        );
+      await f.run();
+      expect(f.execute).not.toHaveBeenCalled();
+      expect(isApprovalPausedResult(f.results.at(-1))).toBe(true);
+      expect(f.effects[0]).toEqual(original);
+      expect(f.pauseRunForInput).toHaveBeenCalledTimes(2);
+      expect(f.pauseRunForInput.mock.calls[0]![0].blocks).toEqual(card);
+      expect(f.pauseRunForInput.mock.calls[1]![0]).toMatchObject({
+        existingApprovalEffectId: original!.id,
+        blocks: [],
+      });
+      expect(await f.prisma.run.findUnique()).toMatchObject({ status: "waiting_input" });
+      expect(f.prisma.attempt.updateMany).toHaveBeenCalledWith(
+        expect.objectContaining({ data: { status: "waiting_input" } }),
+      );
+      f.effects[0]!.status = "denied";
+      await f.run();
+      expect(f.execute).not.toHaveBeenCalled();
+      expect(f.effects[0]!.status).toBe("denied");
+    },
+  );
+});
+
 describe("official Google MCP one-time approval", () => {
+  it("keeps a third-party same-name mailbox write under ordinary connector policy", async () => {
+    reviewMock.mockReset().mockResolvedValue({ decision: "ask", model: "mock" });
+    const route = {
+      connectorId: "mcp",
+      resourceId: "foreign-server",
+      resourceRevision: 1,
+      toolName: "create_draft",
+    };
+    const f = fixture({
+      name: "renamed_google_write",
+      route,
+      autoReview: true,
+      readOnly: false,
+      inputSchema: { type: "object" },
+    });
+    Object.assign(f.prisma, {
+      botMcpServer: {
+        findFirst: vi.fn().mockResolvedValue({
+          allowAllTools: false,
+          allowedTools: [route.toolName],
+          server: { endpoint: "https://example.test/mcp", revision: 1 },
+        }),
+      },
+    });
+    await f.run();
+    expect(f.execute).not.toHaveBeenCalled();
+    expect(reviewMock).toHaveBeenCalledOnce();
+    expect(f.pauseRunForInput).toHaveBeenCalledOnce();
+  });
+
+  it.each(["create_draft", "gmail.label_message", "unlabel_thread"])(
+    "executes assigned official internal Gmail %s without an approval card",
+    async (toolName) => {
+      reviewMock.mockReset();
+      const route = {
+        connectorId: "mcp",
+        resourceId: "gmail-server",
+        resourceRevision: 1,
+        toolName,
+      };
+      const f = fixture({
+        name: "renamed_google_write",
+        route,
+        autoReview: true,
+        readOnly: false,
+        inputSchema: { type: "object" },
+      });
+      Object.assign(f.prisma, {
+        botMcpServer: {
+          findFirst: vi.fn().mockResolvedValue({
+            allowAllTools: false,
+            allowedTools: [toolName],
+            server: { endpoint: "https://gmailmcp.googleapis.com/mcp/v1", revision: 1 },
+          }),
+        },
+      });
+      f.setCalls([
+        { args: { subject: "Saved draft", body: "Private text" }, executionId: "draft" },
+      ]);
+      await f.run();
+      expect(f.execute).toHaveBeenCalledOnce();
+      expect(f.pauseRunForInput).not.toHaveBeenCalled();
+      expect(reviewMock).not.toHaveBeenCalled();
+    },
+  );
+
   it.each([
     { catalog: false, autoReview: false },
     { catalog: true, autoReview: false },
@@ -2532,12 +2793,12 @@ describe("connector read-only metadata and approval enforcement", () => {
   });
 
   it.each(["shell", "write_file"])(
-    "forces owner approval for webhook-triggered %s despite an allow rule",
+    "preserves explicit approval for webhook-triggered %s",
     async (name) => {
       const f = fixture({
         name,
         trigger: "webhook",
-        rules: [{ effect: "always_allow", matchKind: "tool", matchValue: name }],
+        rules: [{ effect: "require_approval", matchKind: "tool", matchValue: name }],
       });
       if (name === "write_file")
         f.setCalls([

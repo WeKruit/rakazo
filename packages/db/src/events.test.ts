@@ -1238,6 +1238,140 @@ describe("finalizeComputerControlRelease", () => {
 });
 
 describe("pauseRunForInput", () => {
+  function pendingApprovalFixture() {
+    const run = {
+      id: "run-1",
+      spaceId: "workspace-1",
+      threadId: "thread-1",
+      botId: "bot-1",
+      status: "running",
+      leaseOwner: "worker-1",
+      leaseFence: 3,
+      leaseExpiresAt: new Date(Date.now() + 60_000),
+      checkpoint: "original-checkpoint",
+    };
+    const effect = {
+      id: "effect-1",
+      runId: run.id,
+      spaceId: run.spaceId,
+      status: "intended",
+      request: { draft: "original" },
+    };
+    const card = {
+      id: "message-1",
+      threadId: run.threadId,
+      runId: run.id,
+      botId: run.botId,
+      role: "bot",
+      blocks: [
+        {
+          kind: "ask",
+          text: "Approve the original draft",
+          approvalEffectId: effect.id,
+          status: "pending",
+          actions: [
+            { id: "allow", label: "Allow once" },
+            { id: "deny", label: "Deny" },
+          ],
+        },
+      ],
+    };
+    const attempt = { status: "running" };
+    const tx = {
+      $queryRaw: vi.fn().mockResolvedValue([{ id: run.threadId }]),
+      externalEffect: { findFirst: vi.fn(async () => effect), updateMany: vi.fn() },
+      message: {
+        findMany: vi.fn(async () => [card]),
+        create: vi.fn(async () => ({ id: "new-card" })),
+        update: vi.fn(),
+      },
+      run: {
+        updateMany: vi.fn(async ({ where, data }) => {
+          if (
+            Object.entries(where).some(([key, value]) => {
+              if (key === "leaseExpiresAt")
+                return run.leaseExpiresAt.getTime() <= (value as { gt: Date }).gt.getTime();
+              return run[key as keyof typeof run] !== value;
+            })
+          )
+            return { count: 0 };
+          Object.assign(run, data);
+          return { count: 1 };
+        }),
+        findUnique: vi.fn(async () => run),
+      },
+      attempt: {
+        updateMany: vi.fn(async ({ data }) => {
+          Object.assign(attempt, data);
+          return { count: 1 };
+        }),
+      },
+      thread: { update: vi.fn(async () => ({ nextEventSeq: 9, nextMessageSeq: 4 })) },
+      event: {
+        create: vi.fn(async ({ data }) => ({ ...event(data.seq), ...data })),
+        deleteMany: vi.fn(async () => ({ count: 1 })),
+        findFirst: vi.fn(async () => null as object | null),
+      },
+    };
+    const prisma = { $transaction: vi.fn(async (fn) => fn(tx)) } as unknown as PrismaClient;
+    const input = {
+      spaceId: run.spaceId,
+      threadId: run.threadId,
+      botId: run.botId,
+      runId: run.id,
+      attemptId: "attempt-1",
+      leaseOwner: "worker-1",
+      leaseFence: 3,
+      blocks: [] as MessageBlock[],
+      existingApprovalEffectId: effect.id,
+    };
+    return { prisma, tx, run, effect, card, attempt, input };
+  }
+  it("reuses an original pending approval card and durably pauses its run and attempt", async () => {
+    const f = pendingApprovalFixture();
+    const original = structuredClone({ card: f.card, effect: f.effect });
+    await expect(pauseRunForInput(f.prisma, f.input)).resolves.toBe(true);
+    expect(f.run.status).toBe("waiting_input");
+    expect(f.attempt.status).toBe("waiting_input");
+    expect(f.run.checkpoint).toBe("original-checkpoint");
+    expect({ card: f.card, effect: f.effect }).toEqual(original);
+    expect(f.tx.message.create).not.toHaveBeenCalled();
+    expect(f.tx.message.update).not.toHaveBeenCalled();
+    expect(f.tx.externalEffect.updateMany).not.toHaveBeenCalled();
+    expect(f.tx.event.create.mock.calls.map(([input]) => input.data.type)).toEqual([
+      "run.waiting_input",
+    ]);
+  });
+  it.each([
+    "space",
+    "thread",
+    "bot",
+    "effect-run",
+    "effect-status",
+    "answered",
+    "answer-event",
+    "lease",
+    "card-actions",
+  ])("does not reuse a pending approval across the %s boundary", async (boundary) => {
+    const f = pendingApprovalFixture();
+    if (boundary === "space") f.effect.spaceId = "another-space";
+    if (boundary === "thread") f.card.threadId = "another-thread";
+    if (boundary === "bot") f.card.botId = "another-bot";
+    if (boundary === "effect-run") f.effect.runId = "another-run";
+    if (boundary === "effect-status") f.effect.status = "denied";
+    if (boundary === "answered") f.card.blocks[0]!.status = "answered";
+    if (boundary === "answer-event") f.tx.event.findFirst.mockResolvedValue({ id: "answer" });
+    if (boundary === "lease") f.input.leaseFence += 1;
+    if (boundary === "card-actions")
+      f.card.blocks[0]!.actions = [{ id: "continue", label: "Continue" }];
+    await expect(pauseRunForInput(f.prisma, f.input)).resolves.toBe(false);
+    expect(f.run.status).toBe("running");
+    expect(f.attempt.status).toBe("running");
+    expect(f.tx.message.create).not.toHaveBeenCalled();
+    expect(f.tx.message.update).not.toHaveBeenCalled();
+    expect(f.tx.externalEffect.updateMany).not.toHaveBeenCalled();
+    expect(f.tx.event.create).not.toHaveBeenCalled();
+  });
   it("stores the paused run, prompt, and status event in one transaction", async () => {
     const fanout = new TestFanout();
     const publish = vi.spyOn(fanout, "publish");

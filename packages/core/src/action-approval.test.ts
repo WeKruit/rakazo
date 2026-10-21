@@ -19,20 +19,20 @@ import {
 } from "./action-approval.js";
 
 describe("toolRequiresApproval", () => {
-  it("requires hard human approval only for the native CRM bind policy alias", () => {
-    expect(toolRequiresExplicitApproval("recruiting_crm_bind")).toBe(true);
-    expect(toolRequiresApproval("recruiting_crm_bind", false)).toBe(true);
+  it("keeps native internal CRM storage outside mandatory human approval", () => {
+    expect(toolRequiresExplicitApproval("recruiting_crm_bind")).toBe(false);
+    expect(toolRequiresApproval("recruiting_crm_bind", false)).toBe(false);
     expect(toolRequiresExplicitApproval("recruiting_crm_target")).toBe(false);
     expect(toolRequiresApproval("recruiting_crm_target", false)).toBe(false);
   });
 
-  it("requires one-time CRM import approval from the resolved MCP operation", () => {
+  it("does not make CRM storage a mandatory one-time human decision", () => {
     expect(
       toolRequiresExplicitApproval("renamed_import", {
         connectorId: "mcp",
         toolName: "crm_import_candidate",
       }),
-    ).toBe(true);
+    ).toBe(false);
     expect(toolRequiresExplicitApproval("mcp__crm__crm_import_candidate")).toBe(false);
     expect(
       toolRequiresExplicitApproval("renamed_import", {
@@ -49,9 +49,6 @@ describe("toolRequiresApproval", () => {
   });
 
   it.each([
-    "crm_bind_candidate_role",
-    "crm_update_candidate_stage",
-    "crm_append_candidate_note",
     "reply_to_email",
     "create_lead",
     "add_leads_to_campaign_or_list_bulk",
@@ -176,11 +173,6 @@ describe("toolRequiresApproval", () => {
 
   it.each([
     [
-      "https://gmailmcp.googleapis.com/mcp/v1",
-      ["create_draft", "label_message", "label_thread", "unlabel_message", "unlabel_thread"],
-      "gmail",
-    ],
-    [
       "https://calendarmcp.googleapis.com/mcp/v1",
       ["create_event", "update_event", "delete_event", "respond_to_event"],
       "calendar",
@@ -218,6 +210,21 @@ describe("toolRequiresApproval", () => {
           endpoint,
         ),
       ).toBe(false);
+    },
+  );
+
+  it.each(["create_draft", "label_message", "label_thread", "unlabel_message", "unlabel_thread"])(
+    "does not require a human decision for internal Gmail %s",
+    (toolName) => {
+      for (const name of [toolName, `gmail.${toolName}`])
+        expect(
+          toolRequiresExplicitApproval(
+            "renamed",
+            { connectorId: "mcp", toolName: name },
+            {},
+            "https://gmailmcp.googleapis.com/mcp/v1",
+          ),
+        ).toBe(false);
     },
   );
 
@@ -342,7 +349,7 @@ describe("resolveActionApprovalDetail", () => {
 
 describe("unattendedTriggerToolRequiresApproval", () => {
   it("forces approval for webhook-triggered local side effects", () => {
-    for (const name of ["shell", "write_file", "browser_act", "computer_act"]) {
+    for (const name of ["shell", "browser_act", "computer_act"]) {
       expect(unattendedTriggerToolRequiresApproval("webhook", name, false)).toBe(true);
     }
   });
@@ -356,6 +363,15 @@ describe("unattendedTriggerToolRequiresApproval", () => {
       "request_takeover",
       "run_subagent",
       "recruiting_candidates",
+      "recruiting_crm_target",
+      "recruiting_crm_import",
+      "recruiting_role",
+      "recruiting_feedback",
+      "recruiting_shortlist",
+      "remember",
+      "save_memory",
+      "save_shared_memory",
+      "write_file",
     ]) {
       expect(unattendedTriggerToolRequiresApproval("webhook", name, false)).toBe(false);
     }

@@ -308,6 +308,7 @@ describe("recruiting run context", () => {
         "ordinary continuation does not require saved-workspace research actions",
       );
       expect(text).toContain("Scheduling and outbound require their native approvals");
+      expect(text).toContain("Internal record keeping does not require human approval by default");
       expect(text).not.toContain("research requires G0 on the current brief revision");
       expect(text).not.toContain("Candidate sourcing requires actual human G0 approval");
       expect(loaded!.text).toContain(text);

@@ -970,6 +970,7 @@ async function lockLiveRecruitingRun(tx: Tx, actor: Actor, runId: string, requir
     actor,
     await tx.run.findFirst({
       where: { id: runId, spaceId: actor.spaceId, userId: actor.userId },
+      omit: { checkpoint: true },
       include: { bot: { select: { spaceId: true, userId: true } } },
     }),
   );
@@ -6923,6 +6924,35 @@ async function crmReadTarget(
   return target;
 }
 
+async function internalCrmEffectRun(
+  tx: Tx,
+  actor: Actor,
+  effect: { id: string; runId: string; status: string; request: unknown },
+) {
+  const run = await requireRun(tx, actor, effect.runId);
+  const card = await tx.message.findFirst({
+    where: {
+      runId: run.id,
+      role: "bot",
+      blocks: { array_contains: [{ approvalEffectId: effect.id }] },
+    },
+    select: { id: true },
+  });
+  const answer = await tx.event.findFirst({
+    where: {
+      spaceId: actor.spaceId,
+      threadId: run.threadId,
+      botId: run.botId,
+      runId: run.id,
+      type: "effect.approval.answered",
+      payload: { path: ["effectId"], equals: effect.id },
+    },
+  });
+  // Internal record keeping is autonomous; an existing card still owns its exact decision.
+  if (effect.status === "approved" || card || answer) await approvalAnswerProof(tx, actor, effect);
+  return run;
+}
+
 async function crmBindingReceipt(tx: Tx, actor: Actor, roleId: string, effectId: string) {
   const effect = await tx.externalEffect.findFirst({
     where: {
@@ -6936,7 +6966,7 @@ async function crmBindingReceipt(tx: Tx, actor: Actor, roleId: string, effectId:
     throw new IsolationError();
   const parsed = RecruitingCrmBindingInputSchema.safeParse(effect.request);
   if (!parsed.success || parsed.data.roleId !== roleId) throw new IsolationError();
-  const { run } = await approvalAnswerProof(tx, actor, effect);
+  const run = await internalCrmEffectRun(tx, actor, effect);
   const target = await crmReadTarget(tx, actor, run, parsed.data.crmRoleReadEffectId);
   const result = { status: "connected" as const, roleId, bindingEffectId: effect.id, target };
   if (stableJsonValue(effect.result) !== stableJsonValue(result)) throw new IsolationError();
@@ -7339,7 +7369,7 @@ export async function executeRecruitingCrmBinding(
     if (effect.status === "completed") return crmBindingReceipt(tx, actor, role.id, effect.id);
     if (effect.status !== "executing") throw new IsolationError();
     const { target } = await prepareCrmBinding(tx, actor, trusted, input);
-    await approvalAnswerProof(tx, actor, effect);
+    await internalCrmEffectRun(tx, actor, effect);
     const changed = await tx.recruitingRole.updateMany({
       where: {
         id: role.id,
@@ -7473,7 +7503,7 @@ async function crmImportContext(
   }
   if (input === null) return null;
   input = RecruitingCrmImportInputSchema.parse(input);
-  const role = await requireRole(tx, actor, input.roleId, true);
+  const role = await requireRole(tx, actor, input.roleId, true, thread);
   const binding = await crmBindingReceipt(tx, actor, role.id, input.bindingEffectId);
   const source = await crmImportSource(tx, actor, input);
   const args = crmImportArgs(binding.target, source);
@@ -7564,7 +7594,10 @@ export async function admitRecruitingCrmImport(
     if (effect.status === "completed") return { status: "completed" as const, effect };
     if (effect.status === "denied") return { status: "denied" as const, effect };
     if (effect.status === "uncertain") return { status: "unknown" as const, effect };
-    const owner = await tx.run.findUniqueOrThrow({ where: { id: effect.runId } });
+    const owner = await tx.run.findUniqueOrThrow({
+      where: { id: effect.runId },
+      select: { status: true, leaseExpiresAt: true },
+    });
     const live =
       ["queued", "leased", "waiting_input"].includes(owner.status) ||
       (owner.status === "running" &&
@@ -7620,7 +7653,7 @@ export async function claimRecruitingCrmImport(
     if (effect.status !== native.from || !["approved", "intended"].includes(native.from))
       return false;
     assertCrmImportRequest(effect.request, resolved.route, resolved.args);
-    await approvalAnswerProof(tx, actor, effect);
+    await internalCrmEffectRun(tx, actor, effect);
     const changed = await tx.externalEffect.updateMany({
       where: {
         id: effect.id,
