@@ -2681,6 +2681,40 @@ describe("durable recruiting reply linkage", () => {
 });
 
 describe("native CRM binding and source import", () => {
+  it("reuses the authorized binding owner for its proof and same-owner CRM read", async () => {
+    const f = crmFixture();
+    await expect(
+      recruiting.getRecruitingCrmTarget(f.prisma, actor, { runId: f.run.id, roleId: f.role.id }),
+    ).resolves.toEqual({ roleId: f.role.id, bindingEffectId: f.binding.id, target: f.target });
+    expect(f.tx.run.findFirst).toHaveBeenCalledTimes(2);
+    expect(f.tx.message.findUnique).toHaveBeenCalledWith({
+      where: { id: `approval-card:${f.binding.id}` },
+    });
+  });
+  it.each(["same-scope", "foreign-owner", "different-thread", "different-bot"])(
+    "rechecks a historical CRM read owned by a %s run",
+    async (boundary) => {
+      const f = crmFixture();
+      const historical = { ...f.run, id: "historical-read-run" };
+      if (boundary === "foreign-owner") historical.userId = "another-owner";
+      if (boundary === "different-thread") historical.threadId = "another-thread";
+      if (boundary === "different-bot") historical.botId = "another-bot";
+      f.runs.set(historical.id, historical);
+      f.effects.get("crm-read")!.runId = historical.id;
+      const result = recruiting.getRecruitingCrmTarget(f.prisma, actor, {
+        runId: f.run.id,
+        roleId: f.role.id,
+      });
+      if (boundary === "same-scope")
+        await expect(result).resolves.toMatchObject({ target: f.target });
+      else await expect(result).rejects.toThrow(IsolationError);
+      expect(f.tx.run.findFirst).toHaveBeenCalledWith(
+        expect.objectContaining({
+          where: { id: historical.id, spaceId: actor.spaceId, userId: actor.userId },
+        }),
+      );
+    },
+  );
   it("binds and replays an internal CRM target without a human approval card", async () => {
     const f = crmFixture();
     f.role.crmBindingEffectId = null;
