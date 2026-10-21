@@ -6591,8 +6591,9 @@ async function internalCrmEffectRun(
     },
   });
   // Internal record keeping is autonomous; an existing card still owns its exact decision.
-  if (effect.status === "approved" || card || answer) await approvalAnswerProof(tx, actor, effect);
-  return run;
+  const requiresHumanApproval = effect.status === "approved" || Boolean(card || answer);
+  if (requiresHumanApproval) await approvalAnswerProof(tx, actor, effect);
+  return { run, requiresHumanApproval };
 }
 
 async function crmBindingReceipt(tx: Tx, actor: Actor, roleId: string, effectId: string) {
@@ -6608,7 +6609,7 @@ async function crmBindingReceipt(tx: Tx, actor: Actor, roleId: string, effectId:
     throw new IsolationError();
   const parsed = RecruitingCrmBindingInputSchema.safeParse(effect.request);
   if (!parsed.success || parsed.data.roleId !== roleId) throw new IsolationError();
-  const run = await internalCrmEffectRun(tx, actor, effect);
+  const { run } = await internalCrmEffectRun(tx, actor, effect);
   const target = await crmReadTarget(tx, actor, run, parsed.data.crmRoleReadEffectId);
   const result = { status: "connected" as const, roleId, bindingEffectId: effect.id, target };
   if (stableJsonValue(effect.result) !== stableJsonValue(result)) throw new IsolationError();
@@ -7247,6 +7248,71 @@ export async function admitRecruitingCrmImport(
         owner.leaseExpiresAt.getTime() > Date.now());
     if (effect.runId !== trusted.runId && live) return { status: "busy" as const, effect };
     if (effect.status === "executing") return { status: "unknown" as const, effect };
+    if (
+      effect.runId !== trusted.runId &&
+      effect.status === "intended" &&
+      ["failed", "completed"].includes(owner.status)
+    ) {
+      requireResearchLease(resolved.run, trusted);
+      const thread = await requireThread(tx, actor, resolved.run.threadId);
+      const role = await requireRole(tx, actor, input.roleId, false, thread);
+      if (
+        thread.activeRecruitingRoleId !== role.id ||
+        role.crmBindingEffectId !== input.bindingEffectId
+      )
+        throw new RecruitingConflictError();
+      await currentCrmServer(tx, actor, resolved.run, resolved.target);
+      await tx.$queryRaw(
+        Prisma.sql`SELECT "id" FROM "external_effects" WHERE "id" = ${effect.id} FOR UPDATE`,
+      );
+      const pending = await tx.externalEffect.findFirst({
+        where: { id: effect.id, spaceId: actor.spaceId, runId: effect.runId, status: "intended" },
+      });
+      if (!pending) return { status: "busy" as const, effect };
+      if (
+        pending.kind !== native.effectKind ||
+        pending.idempotencyKey !== crmImportKey(input) ||
+        stableJsonValue(pending.request) !== stableJsonValue(native.effectRequest)
+      )
+        throw new IsolationError();
+      assertCrmImportRequest(pending.request, resolved.route, resolved.args);
+      const history = await internalCrmEffectRun(tx, actor, pending);
+      if (
+        history.run.threadId !== resolved.run.threadId ||
+        history.run.botId !== resolved.run.botId
+      )
+        throw new IsolationError();
+      if (history.requiresHumanApproval) return { status: "stopped" as const, effect };
+      const transferred = await tx.externalEffect.updateMany({
+        where: {
+          id: pending.id,
+          spaceId: actor.spaceId,
+          runId: history.run.id,
+          status: "intended",
+          kind: native.effectKind,
+          request: { equals: pending.request as Prisma.InputJsonValue },
+          run: {
+            spaceId: actor.spaceId,
+            userId: actor.userId,
+            threadId: resolved.run.threadId,
+            botId: resolved.run.botId,
+            status: { in: ["failed", "completed"] },
+          },
+        },
+        data: { runId: resolved.run.id },
+      });
+      if (transferred.count !== 1) return { status: "busy" as const, effect };
+      effect = { ...pending, runId: resolved.run.id };
+      await appendEventInTransaction(tx, {
+        spaceId: actor.spaceId,
+        threadId: resolved.run.threadId,
+        botId: resolved.run.botId,
+        runId: resolved.run.id,
+        type: "effect.reconciled",
+        payload: { effectId: effect.id, previousRunId: history.run.id, kind: effect.kind },
+      });
+      return { status: "ready" as const, effect };
+    }
     if (
       effect.runId !== trusted.runId ||
       ["cancelled", "failed", "completed"].includes(owner.status)
