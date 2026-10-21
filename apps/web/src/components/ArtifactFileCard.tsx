@@ -83,7 +83,7 @@ export function ArtifactFileCard(props: ArtifactFileCardProps) {
           <button
             ref={previewButton}
             type="button"
-            aria-label={t`Preview ${name}`}
+            aria-label={t`Preview ${preview?.label ?? props.name}`}
             disabled={preview?.source === null}
             onClick={() => setPreviewOpen(true)}
             className="flex min-w-0 flex-1 items-center gap-3 px-4 py-3 text-left hover:bg-accent"
