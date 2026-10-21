@@ -537,6 +537,37 @@ function recruitingMatchSummaryText(value: string): string {
   );
 }
 
+function CandidateReportValue({
+  label,
+  value,
+  compact = false,
+}: Pick<RecruitingCandidateReport["fields"][number], "label" | "value"> & {
+  compact?: boolean;
+}) {
+  const { t } = useLingui();
+  if (
+    value === null ||
+    value.length <= 240 ||
+    !["Recommendation", "Match judgment", "Fit reasons"].includes(label)
+  )
+    return (
+      <p className={compact ? "line-clamp-2" : "whitespace-pre-wrap"}>
+        {value ?? <Trans>Unknown</Trans>}
+      </p>
+    );
+  return (
+    <details className="group/summary">
+      <summary aria-label={`${label}: ${t`Details`}`} className="cursor-pointer">
+        <span className="line-clamp-2 whitespace-pre-wrap group-open/summary:hidden">{value}</span>
+        <span className="text-xs text-muted-foreground">
+          <Trans>Details</Trans>
+        </span>
+      </summary>
+      <p className="whitespace-pre-wrap">{value}</p>
+    </details>
+  );
+}
+
 function CandidateResearchMatch({
   candidate,
   roleRevisionId,
@@ -606,7 +637,8 @@ function CandidateResearchMatch({
                     <dd
                       className={`wrap-anywhere ${
                         compact
-                          ? ["Recommendation", "Match judgment"].includes(field.label)
+                          ? showDiagnostics &&
+                            ["Recommendation", "Match judgment"].includes(field.label)
                             ? "line-clamp-2"
                             : ""
                           : "whitespace-pre-wrap text-base"
@@ -620,7 +652,11 @@ function CandidateResearchMatch({
                         ) ? (
                         field.value
                       ) : (
-                        recruitingMatchSummaryText(field.value)
+                        <CandidateReportValue
+                          label={field.label}
+                          value={recruitingMatchSummaryText(field.value)}
+                          compact={compact}
+                        />
                       )}
                     </dd>
                   </div>
@@ -729,7 +765,7 @@ function CandidateReport({ report }: { report: RecruitingCandidateReport }) {
           <div key={index}>
             <dt className="font-medium">{field.label}</dt>
             <dd className="space-y-1">
-              <p className="whitespace-pre-wrap">{field.value ?? <Trans>Unknown</Trans>}</p>
+              <CandidateReportValue label={field.label} value={field.value} />
               {field.evidence ? (
                 <p className="whitespace-pre-wrap text-muted-foreground">{field.evidence}</p>
               ) : null}
