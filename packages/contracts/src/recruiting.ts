@@ -4,6 +4,24 @@ import { Id, IsoDate } from "./ids.js";
 import { RecruitingCrmCandidateSyncSchema, RecruitingCrmTargetSchema } from "./recruiting-crm.js";
 
 export const RecruitingId = Id.refine((value) => value.trim().length > 0, "ID must not be blank");
+
+export const ReadRecruitingSourceInput = z.discriminatedUnion("kind", [
+  z.strictObject({
+    kind: z.literal("role"),
+    threadId: Id,
+    roleRevisionId: RecruitingId,
+    sourceRefId: RecruitingId,
+  }),
+  z.strictObject({
+    kind: z.literal("assessment"),
+    roleId: RecruitingId,
+    candidateKey: RecruitingId,
+    version: z.number().int().positive(),
+    sourceRefId: RecruitingId,
+  }),
+]);
+export type ReadRecruitingSourceInput = z.infer<typeof ReadRecruitingSourceInput>;
+
 const Text = z.string().trim().min(1);
 const Revision = z.number().int().positive();
 

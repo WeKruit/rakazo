@@ -304,6 +304,8 @@ import {
   isPeerRun,
   loadAllMessages,
   loadMessagePage,
+  projectRecruitingApprovalEvent,
+  projectRecruitingApprovalFiles,
   shouldForwardBackgroundThreadEvent,
   shouldForwardPeerThreadEvent,
 } from "./thread-message-pages.js";
@@ -1117,7 +1119,17 @@ export function createRouter(deps: RouterDeps) {
         botSections,
         archivedBots,
         archivedGroups,
-        thread,
+        thread: thread
+          ? {
+              ...thread,
+              messages: await projectRecruitingApprovalFiles(
+                deps.prisma,
+                actor,
+                thread.threadId,
+                thread.messages,
+              ),
+            }
+          : null,
         routines,
         spaces: navigation.spaces,
       };
@@ -2046,16 +2058,20 @@ export function createRouter(deps: RouterDeps) {
       ),
       get: authed.groups.get.handler(async ({ context, input }) => {
         const group = await groupRepos.getGroup(context.actor, input.groupId);
+        const page = await loadMessagePage(
+          deps.prisma,
+          group.thread!.id,
+          undefined,
+          THREAD_MESSAGE_PAGE_SIZE,
+        );
         return {
           ...groupRepos.mapGroup(group),
-          messages: (
-            await loadMessagePage(
-              deps.prisma,
-              group.thread!.id,
-              undefined,
-              THREAD_MESSAGE_PAGE_SIZE,
-            )
-          ).messages,
+          messages: await projectRecruitingApprovalFiles(
+            deps.prisma,
+            context.actor,
+            group.thread!.id,
+            page.messages,
+          ),
         };
       }),
       duplicate: authed.groups.duplicate.handler(async ({ context, input }) => {
@@ -2177,13 +2193,22 @@ export function createRouter(deps: RouterDeps) {
         const target = await resolveThreadTarget(deps.prisma, context.actor, input, {
           includeArchived: true,
         });
-        return threadSnapshot(deps, target);
+        const snapshot = await threadSnapshot(deps, target);
+        return {
+          ...snapshot,
+          messages: await projectRecruitingApprovalFiles(
+            deps.prisma,
+            context.actor,
+            target.threadId,
+            snapshot.messages,
+          ),
+        };
       }),
       messages: authed.threads.messages.handler(async ({ context, input }) => {
         const target = await resolveThreadTarget(deps.prisma, context.actor, input, {
           includeArchived: true,
         });
-        return loadMessagePage(
+        const page = await loadMessagePage(
           deps.prisma,
           target.threadId,
           input.before,
@@ -2192,6 +2217,15 @@ export function createRouter(deps: RouterDeps) {
           input.includePeerRuns,
           input.includePeerReceipts,
         );
+        return {
+          ...page,
+          messages: await projectRecruitingApprovalFiles(
+            deps.prisma,
+            context.actor,
+            target.threadId,
+            page.messages,
+          ),
+        };
       }),
       subscribe: authed.threads.subscribe.handler(async function* ({ context, input }) {
         const target = await resolveThreadTarget(deps.prisma, context.actor, input);
@@ -2245,7 +2279,12 @@ export function createRouter(deps: RouterDeps) {
             } else if (await isBackgroundRun(deps.prisma, event.runId, backgroundRunCache)) {
               if (!shouldForwardBackgroundThreadEvent(event)) continue;
             }
-            yield event;
+            yield await projectRecruitingApprovalEvent(
+              deps.prisma,
+              context.actor,
+              target.threadId,
+              event,
+            );
           }
         } finally {
           // Not awaited: closing can queue behind a read that the abort has not landed on yet.
