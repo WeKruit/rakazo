@@ -12,6 +12,8 @@
 
 **本次获准生产执行（2026-10-21）：** 仅应用两份指定 SQL：身份/候选抑制读取前置函数，以及原子导入/多岗位关联/现有列表计数。生产 PostgreSQL 17 的七个函数正文、设置、限定 ACL 及新关联表 RLS/约束均与获准源码匹配；六张原业务表的数量和逐行摘要前后完全一致。既有规范化函数 owner/ACL/设置及去空白正文一致，原始定义 hash 因源码空白变化而不同，不冒称逐字未变。原生 Supabase 页面发布同一 MCP，下载读回七份源码全部匹配，原认证设置保持且匿名请求401。只给 Main 原八个读工具追加导入及岗位关联读取；其他 Bot 含归档者的分配、服务器元数据/版本和20行旧待答卡/检查点保持。实际运行的五份相关原生源码也与所选发布一致。未部署 CRM 前端、改动 canonical pipeline、写候选或外发；没有登记迁移账本或应用其他 pending 文件。正常人类问法已在原岗位发起目标绑定及单人导入的审批准备，实际目标/候选写入仍须原生一次性审批，不把上线等同业务完成。
 
+**原卡展示修复已发布并读回（2026-10-21）：** 所选发布 `b918c645` 仅修正原生 CRM 审批展示；公开工作分支对应 `4b1ab80c`，保留该分支已有候选考虑状态逻辑。新卡沿用可信目标，旧卡由现有授权消息 DTO 投影同一已保存卡片，history/pages/SSE 共享一处；只改显示文案，不改原卡、effect、检查点或按钮。274项聚焦检查、API类型及两项独立复核通过。实际运行四份改动源码hash匹配、健康/就绪均200；重启前后20组数据摘要、逐行摘要、23行待答记录、109条迁移、Bot/skills/memory/routines均保持。原岗位网页已显示可读的 CRM 岗位关联审核与真实候选证据；尚未代点岗位关联或候选导入，不把卡片可见称为业务导入验收完成。
+
 **当前缺口与下一步：** 旧读取失败原件保留；一次原15秒限制的物理只读测量约5.6秒，其中五份约12.6MB原件查询约3.4秒、后续JavaScript间隔约27ms，不支持“JSON解析卡死”的归因。后续仍需持续运行验收。CRM SQL/MCP及Main受限工具配置已完成，接下来核对原会话真实目标/导入审批、服务回执、网页读回及恢复；候选池尚未绑定或导入。Gmail授权超时关闭，仍待本人处理Google安全提示和实际账户grant。原材料/十人校准决定、完整发送/排期、全部卡型和多用户验收未完成；P6及M1–M5均未完成。
 
 > **For agentic workers:** Follow [AGENTS.md — WeKruit design principles](../../AGENTS.md#wekruit-design-principles). This plan defines product outcomes and records evidence; it does not authorize another harness or a fixed recruiting workflow. Reuse native capability first and change only a demonstrated integration gap.
