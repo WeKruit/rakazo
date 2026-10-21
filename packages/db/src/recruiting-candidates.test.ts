@@ -3140,6 +3140,177 @@ describe("native CRM binding and source import", () => {
       expect(f.tx.externalEffect.updateMany).not.toHaveBeenCalled();
     },
   );
+  async function unclaimedCrmRetryFixture() {
+    const f = crmFixture();
+    const resolved = (await recruiting.resolveRecruitingCrmImport(
+      f.prisma,
+      actor,
+      f.trusted,
+      f.input,
+    ))!;
+    const native = {
+      effectKind: "crm-import",
+      effectRequest: boundDirectApprovalRequest(
+        resolved.route,
+        resolved.args,
+        "__rakazoCatalogTool",
+      ),
+    };
+    const admitted = await recruiting.admitRecruitingCrmImport(
+      f.prisma,
+      actor,
+      f.trusted,
+      f.input,
+      native,
+    );
+    const effect = f.effects.get(admitted.effect.id)!;
+    f.run.status = "completed";
+    const next = {
+      ...f.run,
+      id: "next-run",
+      status: "running",
+      leaseExpiresAt: new Date(Date.now() + 60_000),
+    };
+    f.runs.set(next.id, next);
+    const trusted = { ...f.trusted, runId: next.id };
+    return { ...f, native, effect, next, trusted };
+  }
+  it.each(["completed", "failed"])(
+    "reuses the same undispatched card-free import after its owner %s",
+    async (status) => {
+      const f = await unclaimedCrmRetryFixture();
+      f.run.status = status;
+      const before = structuredClone({
+        run: f.run,
+        request: f.effect.request,
+        links: f.links,
+        result: f.effect.result,
+      });
+      const retried = await recruiting.admitRecruitingCrmImport(
+        f.prisma,
+        actor,
+        f.trusted,
+        f.input,
+        f.native,
+      );
+      expect(retried).toMatchObject({
+        status: "ready",
+        effect: { id: f.effect.id, runId: f.next.id, status: "intended" },
+      });
+      expect({
+        run: f.run,
+        request: f.effect.request,
+        links: f.links,
+        result: f.effect.result,
+      }).toEqual(before);
+      expect(f.tx.externalEffect.create).toHaveBeenCalledOnce();
+      expect(appendEventInTransaction).toHaveBeenCalledWith(
+        f.tx,
+        expect.objectContaining({
+          type: "effect.reconciled",
+          runId: f.next.id,
+          payload: expect.objectContaining({ effectId: f.effect.id, previousRunId: f.run.id }),
+        }),
+      );
+      const claim = { ...f.native, effectId: f.effect.id, from: "intended" as const };
+      await expect(
+        recruiting.claimRecruitingCrmImport(f.prisma, actor, f.trusted, f.input, claim),
+      ).resolves.toBe(true);
+      await expect(
+        recruiting.claimRecruitingCrmImport(f.prisma, actor, f.trusted, f.input, claim),
+      ).resolves.toBe(false);
+    },
+  );
+  it("leaves the original import owned by its original run when the retry CAS loses", async () => {
+    const f = await unclaimedCrmRetryFixture();
+    f.tx.externalEffect.updateMany.mockResolvedValueOnce({ count: 0 });
+    const result = await recruiting.admitRecruitingCrmImport(
+      f.prisma,
+      actor,
+      f.trusted,
+      f.input,
+      f.native,
+    );
+    expect(result).toMatchObject({
+      status: "busy",
+      effect: { id: f.effect.id, runId: f.run.id, status: "intended" },
+    });
+    expect(f.links).toHaveLength(1);
+    expect(f.tx.externalEffect.create).toHaveBeenCalledOnce();
+    expect(appendEventInTransaction).not.toHaveBeenCalledWith(
+      f.tx,
+      expect.objectContaining({ type: "effect.reconciled", runId: f.next.id }),
+    );
+  });
+  it.each([
+    "cancelled",
+    "approved",
+    "denied",
+    "executing",
+    "uncertain",
+    "live",
+    "thread",
+    "bot",
+    "actor",
+    "binding",
+    "assignment",
+    "lease",
+    "source",
+    "request",
+    "pending-card",
+    "answered-card",
+  ])("never adopts an unclaimed import across the %s boundary", async (boundary) => {
+    const f = await unclaimedCrmRetryFixture();
+    if (boundary === "cancelled") f.run.status = "cancelled";
+    if (["approved", "denied", "executing", "uncertain"].includes(boundary))
+      f.effect.status = boundary;
+    if (boundary === "live") f.run.status = "running";
+    if (boundary === "thread") f.run.threadId = "another-thread";
+    if (boundary === "bot") f.run.botId = "another-bot";
+    if (boundary === "binding") f.role.crmBindingEffectId = "new-binding";
+    if (boundary === "assignment")
+      f.tx.botMcpServer.findFirst.mockResolvedValue({ allowAllTools: false, allowedTools: [] });
+    if (boundary === "lease") f.trusted.leaseFence += 1;
+    if (boundary === "source") f.occurrence.name = "Changed source";
+    if (boundary === "request") f.native.effectKind = "another-tool";
+    if (boundary === "pending-card" || boundary === "answered-card") f.cards.add(f.effect.id);
+    if (boundary === "answered-card") f.approvals.add(f.effect.id);
+    const retry = recruiting.admitRecruitingCrmImport(
+      f.prisma,
+      boundary === "actor" ? { ...actor, userId: "foreign" } : actor,
+      f.trusted,
+      f.input,
+      f.native,
+    );
+    if (
+      [
+        "thread",
+        "bot",
+        "actor",
+        "binding",
+        "assignment",
+        "lease",
+        "source",
+        "request",
+        "pending-card",
+      ].includes(boundary)
+    )
+      await expect(retry).rejects.toThrow();
+    else
+      await expect(retry).resolves.toMatchObject({
+        status:
+          boundary === "denied"
+            ? "denied"
+            : ["executing", "uncertain"].includes(boundary)
+              ? "unknown"
+              : boundary === "live"
+                ? "busy"
+                : "stopped",
+      });
+    expect(f.effect.runId).toBe(f.run.id);
+    expect(f.tx.externalEffect.updateMany).not.toHaveBeenCalled();
+    expect(f.tx.externalEffect.create).toHaveBeenCalledOnce();
+  });
   it("keeps another live owner busy and terminal unclaimed owner stopped without transferring effects", async () => {
     const f = crmFixture();
     const resolved = (await recruiting.resolveRecruitingCrmImport(
@@ -3171,7 +3342,7 @@ describe("native CRM binding and source import", () => {
       (await recruiting.admitRecruitingCrmImport(f.prisma, actor, f.trusted, f.input, native))
         .status,
     ).toBe("busy");
-    owner.status = "failed";
+    owner.status = "cancelled";
     f.role.crmBindingEffectId = "new-target";
     expect(
       (await recruiting.admitRecruitingCrmImport(f.prisma, actor, f.trusted, f.input, native))
