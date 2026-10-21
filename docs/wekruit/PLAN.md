@@ -6,7 +6,9 @@
 
 **原生 Agent 读取已接通：** `595736f0` 复用网页既有的原件报告阅读器，原生来源读取沿用账号/岗位/来源、字节/hash及行号校验，列表返回和受保护内部原件限制保持。正常聊天已由 Main 原生交接 Sourcer，只读取指定真实候选和一份保存报告，原对话返回贡献、雇主信息缺口、来源、简历和未知；两次运行完成、七次工具成功，无电脑拆解、供应商研究、重评、CRM写入或外发。整轮约184秒，不能宣称端到端提速。聊天新产生的群元数据与两份原生上下文原件单独核对，不冒称全程每行相同。
 
-**当前缺口与下一步：** 旧读取失败原件保留；一次原15秒限制的物理只读测量约5.6秒，其中五份约12.6MB原件查询约3.4秒、后续JavaScript间隔约27ms，不支持“JSON解析卡死”的归因。后续仍需并发/持续运行验收。CRM只读已定位原有客户/岗位，候选池未绑定或导入；优先核对现有 importer 的最小发布依赖和精确写入批准，不直接套含额外结构变更的旧迁移。Gmail授权超时关闭，仍待本人处理Google安全提示和实际账户grant。原材料/十人校准决定、完整发送/排期、全部卡型和多用户验收未完成；P6及M1–M5均未完成。
+**CRM 增量已推送，尚未发布：** [CRM Draft PR #57](https://github.com/WeKruit/headhunter-agent/pull/57) 的 `de24d58` 复用已有原子 importer、同人多岗位 membership、原生 MCP 和 CRM 详情展示；不改已有人员资料、canonical pipeline、阶段、审阅、备注或兴趣。沿当前列表/计数补岗位关联，保留归档、未审阅、邮件摘要和目录契约。47项 MCP 检查、42项 CRM/review 网页检查、相关类型/格式及两次独立源码复核通过；批次不与历史累加，SQL回归与并发尚未实际运行。生产只读检查确认所需身份函数、importer及membership尚不存在；既有数据已含不符合严格身份校验的地址和重复身份，新迁移前检查会失败。没有自动清理历史、放宽去重或执行迁移，也没有发布依赖缺失RPC的CRM前端、扩大工具分配或写业务行。真实导入及读回仍未验收。
+
+**当前缺口与下一步：** 旧读取失败原件保留；一次原15秒限制的物理只读测量约5.6秒，其中五份约12.6MB原件查询约3.4秒、后续JavaScript间隔约27ms，不支持“JSON解析卡死”的归因。后续仍需并发/持续运行验收。CRM只读已定位原有客户/岗位，候选池未绑定或导入；先解决已实证的历史身份数据与严格导入前检查之间的发布阻碍，不替用户合并或清理旧CRM。Gmail授权超时关闭，仍待本人处理Google安全提示和实际账户grant。原材料/十人校准决定、完整发送/排期、全部卡型和多用户验收未完成；P6及M1–M5均未完成。
 
 > **For agentic workers:** Follow [AGENTS.md — WeKruit design principles](../../AGENTS.md#wekruit-design-principles). This plan defines product outcomes and records evidence; it does not authorize another harness or a fixed recruiting workflow. Reuse native capability first and change only a demonstrated integration gap.
 
