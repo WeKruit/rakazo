@@ -2,9 +2,8 @@ import { isDeepStrictEqual } from "node:util";
 import { ORPCError } from "@orpc/server";
 import type { ArtifactStore } from "@rakazo/adapter-kit";
 import {
-  classifyRecruitingResearchResult,
+  createRecruitingCandidateReportReader,
   isRecruitingCandidateReportField,
-  projectRecruitingCandidateReport,
   readActorArtifact,
 } from "@rakazo/adapters";
 import type {
@@ -12,16 +11,12 @@ import type {
   ReadRecruitingSourceInput,
   RecruitingAssessmentSourceRef,
   RecruitingCandidateSource,
-  RecruitingResearchObservation,
   RecruitingSourceRef,
   RecruitingSourceSelection,
 } from "@rakazo/contracts";
 import {
-  boundDirectApprovalDetails,
-  catalogApprovalDetails,
   RecruitingPlaybookValidationError,
   readRecruitingJsonString,
-  readRecruitingResearchReadArtifact,
   validateRecruitingTextSelection,
 } from "@rakazo/core";
 import { extractPdfText } from "@rakazo/core/node/pdf-text";
@@ -54,116 +49,6 @@ async function authenticated<T>(operation: () => Promise<T>): Promise<T> {
 }
 
 type RecruitingReadDeps = { prisma: PrismaClient; artifacts: ArtifactStore };
-type SavedArtifact = Awaited<ReturnType<typeof readActorArtifact>>;
-
-/** Both source views project the same actor-verified occurrence; no provider reads or writes. */
-function candidateReportReader(
-  deps: RecruitingReadDeps,
-  actor: Actor,
-  roleId: string,
-  artifacts = new Map<string, SavedArtifact>(),
-) {
-  let research: ReturnType<typeof recruiting.listRecruitingResearch> | undefined;
-  // ponytail: share verified page decoding only within this actor/role read, never across requests.
-  const pages = new Map<
-    string,
-    { observation: RecruitingResearchObservation; requestCursor: unknown }
-  >();
-  return async (source: Omit<RecruitingCandidateSource, "crmImports">) => {
-    try {
-      const { artifactId, sha256 } = source.artifactRef;
-      let saved = artifacts.get(artifactId);
-      if (!saved) {
-        saved = await readActorArtifact(deps, actor, { artifactId });
-        artifacts.set(artifactId, saved);
-      }
-      if (saved.row.hash !== sha256) throw new IsolationError();
-      const pageKey = JSON.stringify([
-        artifactId,
-        sha256,
-        source.taskId,
-        source.actionId,
-        source.roleRevisionId,
-        source.effectId,
-        source.requestCursor,
-        source.outputId,
-      ]);
-      let page = pages.get(pageKey);
-      if (!page) {
-        let observation: RecruitingResearchObservation;
-        let requestCursor: unknown;
-        if (source.taskId === null && source.actionId === null) {
-          const snapshot = JSON.parse(
-            new TextDecoder("utf-8", { fatal: true }).decode(saved.bytes),
-          );
-          const direct = boundDirectApprovalDetails(snapshot?.request, "__rakazoCatalogTool");
-          const catalog = catalogApprovalDetails(snapshot?.request, "__rakazoCatalogTool");
-          const route = direct?.route ?? catalog?.route;
-          const args = direct?.args ?? catalog?.args.arguments;
-          if (
-            route?.connectorId !== "mcp" ||
-            route.toolName !== "get_rows" ||
-            !args ||
-            typeof args !== "object" ||
-            Array.isArray(args) ||
-            !("task_id" in args) ||
-            typeof args.task_id !== "string" ||
-            !args.task_id.trim() ||
-            (catalog && !["connectors_execute_tool", "mcp_execute_tool"].includes(catalog.toolName))
-          )
-            throw new IsolationError();
-          observation = classifyRecruitingResearchResult(snapshot.providerResult, {
-            operation: "rows",
-            providerTaskId: args.task_id,
-          });
-          requestCursor = "cursor" in args ? args.cursor : null;
-        } else {
-          research ??= recruiting.listRecruitingResearch(deps.prisma, actor, { roleId });
-          const context = await research;
-          const task = context.tasks.find((task) => task.id === source.taskId);
-          const action = context.actions.find((action) => action.id === source.actionId);
-          if (
-            !task ||
-            !action ||
-            task.roleId !== roleId ||
-            action.roleRevisionId !== source.roleRevisionId
-          )
-            throw new IsolationError();
-          const snapshot = await readRecruitingResearchReadArtifact(saved.bytes, {
-            task,
-            action,
-            artifact: source.artifactRef,
-          });
-          if (snapshot.operation !== "rows" || snapshot.effectId !== source.effectId)
-            throw new IsolationError();
-          observation = classifyRecruitingResearchResult(snapshot.providerResult, {
-            operation: "rows",
-            providerTaskId: task.providerTaskId ?? undefined,
-          });
-          if (!isDeepStrictEqual(snapshot.observation, observation)) throw new IsolationError();
-          requestCursor = snapshot.request.cursor ?? null;
-        }
-        page = { observation, requestCursor };
-        pages.set(pageKey, page);
-      }
-      const { observation, requestCursor } = page;
-      if (
-        requestCursor !== source.requestCursor ||
-        (observation.outputId ?? null) !== source.outputId ||
-        observation.deliveryState !== "accepted" ||
-        !observation.rows ||
-        !Number.isSafeInteger(source.rowIndex) ||
-        source.rowIndex < 0 ||
-        !Object.hasOwn(observation.rows, source.rowIndex)
-      )
-        throw new IsolationError();
-      const row = observation.rows[source.rowIndex];
-      return { row, report: projectRecruitingCandidateReport(row) };
-    } catch {
-      throw new IsolationError();
-    }
-  };
-}
 
 /** Bind exact UTF-16 quotes in MCP array text to one canonical saved person. */
 function selectedProviderRow(
@@ -304,12 +189,9 @@ export const readRecruitingSource = (
       validateRecruitingTextSelection(text, start, end, source.quote);
       if (input.kind === "assessment" && source.kind === "provider_report" && json) {
         const selected = selectedProviderRow(bytes, text, selection);
-        const readReport = candidateReportReader(
-          deps,
-          actor,
-          input.roleId,
-          new Map([[row.id, { row, bytes }]]),
-        );
+        const readReport = createRecruitingCandidateReportReader(deps, actor, input.roleId, {
+          artifacts: new Map([[row.id, { row, bytes }]]),
+        });
         // ponytail: use existing occurrence pagination; add an artifact selector only if histories grow large.
         const matches: RecruitingCandidateSource[] = [];
         let cursor: string | undefined;
@@ -413,7 +295,7 @@ export const listRecruitingCandidates = (
 ) =>
   authenticated(async () => {
     const page = await recruiting.listRecruitingCandidates(deps.prisma, actor, input);
-    const readReport = candidateReportReader(deps, actor, input.roleId);
+    const readReport = createRecruitingCandidateReportReader(deps, actor, input.roleId);
     for (const candidate of page.items) {
       if (!candidate.latestSource) continue;
       const { report: _report, ...metadata } = candidate.latestSource;
@@ -433,7 +315,7 @@ export const listRecruitingCandidateSources = (
 ) =>
   authenticated(async () => {
     const page = await recruiting.listRecruitingCandidateSources(deps.prisma, actor, input);
-    const readReport = candidateReportReader(deps, actor, input.roleId);
+    const readReport = createRecruitingCandidateReportReader(deps, actor, input.roleId);
     const items: RecruitingCandidateSource[] = [];
     for (const source of page.items) {
       const { report: _report, ...metadata } = source;
