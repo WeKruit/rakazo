@@ -1,5 +1,11 @@
-import type { MessageBlock, RecruitingPreferenceFeedbackInput } from "@rakazo/contracts";
+import type {
+  MessageBlock,
+  RecruitingCrmTarget,
+  RecruitingPreferenceFeedbackInput,
+} from "@rakazo/contracts";
 import {
+  RecruitingCrmImportArgsSchema,
+  RecruitingCrmTargetSchema,
   RecruitingPreferenceFeedbackSchema,
   RetainedRecruitingApprovalRequestSchema,
 } from "@rakazo/contracts";
@@ -31,6 +37,7 @@ export function buildApprovalAskBlock(
     oneTimeOnly?: boolean;
     crmOperation?: CrmApprovalOperation;
     recruiting?: RecruitingApprovalDisplay;
+    crmImportTarget?: RecruitingCrmTarget;
   },
 ): Extract<MessageBlock, { kind: "ask" }> {
   const scheduleUpdate = toolName === "schedule_update";
@@ -60,8 +67,31 @@ export function buildApprovalAskBlock(
       !args.roleTitle.trim())
   )
     throw new Error("Consideration approval requires verified candidates, role and action.");
+  const crmTarget = toolName === "recruiting_crm_target";
+  const crmImport = options?.crmImportTarget !== undefined;
+  const target = RecruitingCrmTargetSchema.safeParse(
+    crmTarget ? args.target : options?.crmImportTarget,
+  );
+  if (
+    crmTarget &&
+    (args.operation !== "bind" ||
+      typeof args.roleTitle !== "string" ||
+      !args.roleTitle.trim() ||
+      !target.success)
+  )
+    throw new Error("CRM connection approval requires a verified role and destination.");
+  const importArgs = crmImport ? RecruitingCrmImportArgsSchema.safeParse(args) : undefined;
+  if (
+    (toolName === "recruiting_crm_import" && !crmImport) ||
+    (crmImport &&
+      (!target.success ||
+        !importArgs?.success ||
+        importArgs.data.p_org !== target.data.organizationId ||
+        importArgs.data.p_role !== target.data.crmRoleId))
+  )
+    throw new Error("CRM import approval requires verified candidate facts and destination.");
   const crmOperation = options?.crmOperation;
-  const oneTimeOnly = Boolean(crmOperation || options?.oneTimeOnly);
+  const oneTimeOnly = Boolean(crmTarget || crmImport || crmOperation || options?.oneTimeOnly);
   const recruitingApproval = !crmOperation && toolName === "recruiting_request_approval";
   const parsedPreference = RecruitingPreferenceFeedbackSchema.safeParse(
     toolName === "recruiting_feedback"
@@ -90,6 +120,7 @@ export function buildApprovalAskBlock(
     crmOperation,
     considerationOperation,
     options?.recruiting,
+    options?.crmImportTarget,
   );
   const safeDetail = detail ? redactSecrets(detail, secrets) : undefined;
   return {
@@ -99,21 +130,25 @@ export function buildApprovalAskBlock(
       redactSecrets(
         scheduleUpdate
           ? "Review routine change"
-          : shortlist
-            ? "Review shortlist change"
-            : considerationOperation
-              ? "Review consideration change"
-              : crmOperation === "crm_bind_candidate_role"
-                ? "Review CRM role binding"
-                : crmOperation === "crm_update_candidate_stage"
-                  ? "Review CRM stage change"
-                  : crmOperation === "crm_append_candidate_note"
-                    ? "Review CRM note"
-                    : toolName === "create_space" || recruitingApproval
-                      ? args.stage === "brief" && recruitingApproval
-                        ? summary
-                        : `${summary}?`
-                      : `Review before ${summary}`,
+          : crmTarget
+            ? "Review CRM role connection"
+            : crmImport
+              ? "Review CRM import"
+              : shortlist
+                ? "Review shortlist change"
+                : considerationOperation
+                  ? "Review consideration change"
+                  : crmOperation === "crm_bind_candidate_role"
+                    ? "Review CRM role binding"
+                    : crmOperation === "crm_update_candidate_stage"
+                      ? "Review CRM stage change"
+                      : crmOperation === "crm_append_candidate_note"
+                        ? "Review CRM note"
+                        : toolName === "create_space" || recruitingApproval
+                          ? args.stage === "brief" && recruitingApproval
+                            ? summary
+                            : `${summary}?`
+                          : `Review before ${summary}`,
         secrets,
       ),
       MAX_APPROVAL_SUMMARY_LENGTH,
@@ -200,7 +235,31 @@ function formatApprovalDetail(
   crmOperation?: CrmApprovalOperation,
   considerationOperation?: "hold" | "pass" | "resume",
   recruiting?: RecruitingApprovalDisplay,
+  crmImportTarget?: RecruitingCrmTarget,
 ): string | undefined {
+  if (toolName === "recruiting_crm_target") {
+    const target = args.target as RecruitingCrmTarget;
+    return [
+      `Role: ${args.roleTitle}`,
+      `CRM client: ${target.clientLabel}`,
+      `CRM role: ${target.roleLabel}`,
+      "",
+      "Connect this recruiting role to the CRM role pool",
+    ].join("\n");
+  }
+  if (crmImportTarget)
+    return [
+      `Candidate: ${args.p_name}`,
+      `LinkedIn: ${args.p_linkedin_url}`,
+      `CRM client: ${crmImportTarget.clientLabel}`,
+      `CRM role: ${crmImportTarget.roleLabel}`,
+      "Source: Saved research result",
+      ...(args.p_title === undefined ? [] : [`Title: ${args.p_title}`]),
+      ...(args.p_company === undefined ? [] : [`Company: ${args.p_company}`]),
+      ...(args.p_location === undefined ? [] : [`Location: ${args.p_location}`]),
+      "",
+      "Save these supplied facts and add this person to the CRM role pool",
+    ].join("\n");
   const lines: string[] = [];
   if (
     reviewReason?.trim() &&

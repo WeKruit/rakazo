@@ -1,4 +1,5 @@
 import type { ProductEvent } from "@rakazo/contracts";
+import { boundDirectApprovalRequest } from "@rakazo/core";
 import type { PrismaClient } from "@rakazo/db";
 import { describe, expect, it, vi } from "vitest";
 import {
@@ -12,6 +13,191 @@ import {
   shouldForwardBackgroundThreadEvent,
   shouldForwardPeerThreadEvent,
 } from "./thread-message-pages.js";
+
+describe("native CRM connection approval presentation", () => {
+  function fixture() {
+    const actor = {
+      userId: "owner",
+      spaceId: "space",
+      email: "owner@example.test",
+      isDeploymentOwner: false,
+    };
+    const request = {
+      operation: "bind",
+      roleId: "role",
+      expectedRoleRevision: 2,
+      expectedBindingEffectId: null,
+      crmRoleReadEffectId: "read",
+    };
+    const ask = {
+      kind: "ask" as const,
+      text: "Review internal operation",
+      detail: JSON.stringify(request),
+      status: "pending" as const,
+      approvalEffectId: "approval",
+      actions: [
+        { id: "allow", label: "Allow once" },
+        { id: "deny", label: "Deny" },
+      ],
+    };
+    const message = {
+      id: "card",
+      threadId: "thread",
+      runId: "run",
+      botId: "bot",
+      role: "bot" as const,
+      blocks: [ask],
+    };
+    const target = {
+      mcpServerId: "server",
+      serverRevision: 1,
+      organizationId: "10000000-0000-4000-8000-000000000001",
+      crmRoleId: "20000000-0000-4000-8000-000000000002",
+      crmClientId: "30000000-0000-4000-8000-000000000003",
+      clientLabel: "Example Client",
+      roleLabel: "Platform Engineer",
+    };
+    const approval = {
+      id: "approval",
+      kind: "recruiting_crm_target",
+      runId: "run",
+      status: "intended",
+      request,
+      result: null,
+      run: { botId: "bot" },
+    };
+    const source = {
+      id: "read",
+      kind: "mcp__crm__get_crm_role",
+      runId: "read-run",
+      status: "completed",
+      request: boundDirectApprovalRequest(
+        {
+          connectorId: "mcp",
+          resourceId: target.mcpServerId,
+          resourceRevision: 1,
+          toolName: "get_crm_role",
+        },
+        { p_org: target.organizationId, p_role: target.crmRoleId },
+        "__rakazoCatalogTool",
+      ),
+      result: {
+        structuredContent: {
+          data: {
+            role_spec_id: target.crmRoleId,
+            client_id: target.crmClientId,
+            client_label: target.clientLabel,
+            role_label: target.roleLabel,
+          },
+        },
+      },
+      run: { botId: "bot" },
+    };
+    const role = {
+      id: "role",
+      title: "Software Engineer",
+      crmBindingEffectId: null as string | null,
+      revision: 2,
+      currentRevisionId: "revision",
+      currentRevision: { id: "revision", roleId: "role", revision: 2 },
+    };
+    const externalEffect = {
+      findMany: vi.fn(
+        async (query: {
+          where: { run: { userId: string }; spaceId: string; id: { in: string[] } };
+        }) =>
+          query.where.run.userId !== "owner" || query.where.spaceId !== "space"
+            ? []
+            : query.where.id.in.includes("approval")
+              ? [approval]
+              : [source],
+      ),
+    };
+    const persistedMessage = structuredClone(message);
+    const prisma = {
+      externalEffect,
+      message: { findMany: vi.fn(async () => [persistedMessage]) },
+      thread: { findFirst: vi.fn(async () => ({ activeRecruitingRole: role })) },
+    } as unknown as PrismaClient;
+    return { actor, request, ask, message, approval, source, role, persistedMessage, prisma };
+  }
+
+  it("presents the SAME fileless history card using native evidence without changing originals", async () => {
+    const f = fixture();
+    const before = structuredClone({
+      message: f.message,
+      approval: f.approval,
+      persistedMessage: f.persistedMessage,
+    });
+    const [shown] = await projectRecruitingApprovalFiles(f.prisma, f.actor, "thread", [f.message]);
+    expect(shown!.blocks[0]).toEqual({
+      ...f.ask,
+      text: "Review CRM role connection",
+      detail:
+        "Role: Software Engineer\nCRM client: Example Client\nCRM role: Platform Engineer\n\nConnect this recruiting role to the CRM role pool",
+    });
+    expect(f.message).toEqual(before.message);
+    expect(f.approval).toEqual(before.approval);
+    expect(f.persistedMessage).toEqual(before.persistedMessage);
+  });
+
+  it.each([
+    "actor",
+    "space",
+    "thread",
+    "effect-run",
+    "effect-bot",
+    "source-bot",
+    "source-status",
+    "source-route",
+    "role",
+    "revision",
+    "binding",
+    "persisted-card",
+  ])("does not derive business labels from mismatched %s", async (change) => {
+    const f = fixture();
+    if (change === "actor") f.actor.userId = "foreign";
+    if (change === "space") f.actor.spaceId = "foreign";
+    if (change === "thread") f.message.threadId = "foreign";
+    if (change === "effect-run") f.approval.runId = "foreign";
+    if (change === "effect-bot") f.approval.run.botId = "foreign";
+    if (change === "source-bot") f.source.run.botId = "foreign";
+    if (change === "source-status") f.source.status = "intended";
+    if (change === "source-route") f.source.request = {} as typeof f.source.request;
+    if (change === "role") f.role.id = "foreign";
+    if (change === "revision") f.role.currentRevision.revision = 3;
+    if (change === "binding") f.role.crmBindingEffectId = "foreign";
+    if (change === "persisted-card") f.persistedMessage.blocks[0]!.approvalEffectId = "foreign";
+    expect(
+      (await projectRecruitingApprovalFiles(f.prisma, f.actor, "thread", [f.message]))[0],
+    ).toEqual(f.message);
+  });
+
+  it("uses identical trusted presentation for SSE and ignores injected display labels", async () => {
+    const f = fixture();
+    const event: ProductEvent = {
+      id: "event",
+      spaceId: "space",
+      threadId: "thread",
+      runId: "run",
+      botId: "bot",
+      seq: 3,
+      type: "thread.message.updated",
+      createdAt: "2026-10-20T00:00:00.000Z",
+      payload: {
+        messageId: "card",
+        role: "bot",
+        blocks: [{ ...f.ask, text: "Forged role", detail: "Forged client" }],
+      },
+    };
+    const before = structuredClone(event);
+    const shown = await projectRecruitingApprovalEvent(f.prisma, f.actor, "thread", event);
+    expect(shown.payload.blocks).toEqual(
+      (await projectRecruitingApprovalFiles(f.prisma, f.actor, "thread", [f.message]))[0]!.blocks,
+    );
+    expect(event).toEqual(before);
+  });
+});
 
 describe("native approval file previews", () => {
   function fixture() {
@@ -144,7 +330,7 @@ describe("native approval file previews", () => {
       expect.objectContaining({
         where: expect.objectContaining({
           spaceId: "space",
-          kind: "recruiting_request_approval",
+          kind: { in: ["recruiting_request_approval", "recruiting_crm_target"] },
           run: expect.objectContaining({ userId: "owner", spaceId: "space", threadId: "thread" }),
         }),
       }),

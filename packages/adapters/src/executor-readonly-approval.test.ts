@@ -947,7 +947,8 @@ describe("native saved-candidate CRM workflow", () => {
       expect.objectContaining({
         blocks: [
           expect.objectContaining({
-            detail: expect.stringContaining(target.clientLabel),
+            text: "Review CRM role connection",
+            detail: `Role: Native data role\nCRM client: ${target.clientLabel}\nCRM role: ${target.roleLabel}\n\nConnect this recruiting role to the CRM role pool`,
             actions: [
               { id: "allow", label: "Allow once" },
               { id: "deny", label: "Deny" },
@@ -1036,6 +1037,20 @@ describe("native saved-candidate CRM workflow", () => {
       await f.run();
       expect(recruitingCrm.admit).toHaveBeenCalledOnce();
       expect(f.pauseRunForInput).toHaveBeenCalledOnce();
+      expect(f.pauseRunForInput).toHaveBeenCalledWith(
+        expect.objectContaining({
+          blocks: [
+            expect.objectContaining({
+              text: "Review CRM import",
+              detail: `Candidate: ${args.p_name}\nLinkedIn: ${args.p_linkedin_url}\nCRM client: ${target.clientLabel}\nCRM role: ${target.roleLabel}\nSource: Saved research result\n\nSave these supplied facts and add this person to the CRM role pool`,
+              actions: [
+                { id: "allow", label: "Allow once" },
+                { id: "deny", label: "Deny" },
+              ],
+            }),
+          ],
+        }),
+      );
       expect(recruitingCrm.claim).not.toHaveBeenCalled();
       expect(f.execute).not.toHaveBeenCalled();
 
