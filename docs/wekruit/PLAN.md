@@ -6,11 +6,13 @@
 
 **原生 Agent 读取已接通：** `595736f0` 复用网页既有的原件报告阅读器，原生来源读取沿用账号/岗位/来源、字节/hash及行号校验，列表返回和受保护内部原件限制保持。正常聊天已由 Main 原生交接 Sourcer，只读取指定真实候选和一份保存报告，原对话返回贡献、雇主信息缺口、来源、简历和未知；两次运行完成、七次工具成功，无电脑拆解、供应商研究、重评、CRM写入或外发。整轮约184秒，不能宣称端到端提速。聊天新产生的群元数据与两份原生上下文原件单独核对，不冒称全程每行相同。
 
-**CRM 增量已推送，尚未发布：** [CRM Draft PR #57](https://github.com/WeKruit/headhunter-agent/pull/57) 的 `ae3e191` 复用原生 MCP、已有身份规范化和原子候选/来源/多岗位关联，不覆盖原资料或 canonical pipeline。生产只读检查发现旧数据含不规范地址和重复身份；本次已移除“先治理全库才能导入一人”的前提，改由原生 PostgreSQL 事务锁后按组织及本次身份读取：零条新增、一条复用、多条明确报错，不静默合并或清理历史。同一来源重复调用复用存储回执。锁持有到外层事务结束；普通读取继续，但当前方案会串行化全表候选写入，不宣称没有并发成本。
+**CRM SQL/MCP 已获准发布，真实导入待原卡审批：** [CRM Draft PR #57](https://github.com/WeKruit/headhunter-agent/pull/57) 的 `ae3e191` 复用原生 MCP、已有身份规范化和原子候选/来源/多岗位关联，不覆盖原资料或 canonical pipeline。生产只读检查发现旧数据含不规范地址和重复身份；本次已移除“先治理全库才能导入一人”的前提，改由原生 PostgreSQL 事务锁后按组织及本次身份读取：零条新增、一条复用、多条明确报错，不静默合并或清理历史。同一来源重复调用复用存储回执。锁持有到外层事务结束；普通读取继续，但当前方案会串行化全表候选写入，不宣称没有并发成本。
 
-**数据库实现检查已实际通过：** 既有云端 PostgreSQL 16 RLS job 的[41项检查全部通过](https://github.com/WeKruit/headhunter-agent/actions/runs/39559315852/job/119086491961)，包含完整导入 SQL 回归、双连接同人并发、等待外部写入后读取新提交、外层事务回滚及组织隔离。没有在 Mac 启动数据库、Docker 或新增测试基础设施。另50项 MCP/auth 检查、DB/MCP 类型、格式及独立 SPEC/QUALITY 复核通过；此前42项未改动 CRM/review 网页检查不重复累加。这些是隔离数据库与源码检查，不是生产业务验收。生产身份函数、importer及membership仍缺，未执行迁移、发布依赖缺失RPC的CRM前端、扩大工具分配或写业务行。
+**数据库实现检查已实际通过：** 既有云端 PostgreSQL 16 RLS job 的[41项检查全部通过](https://github.com/WeKruit/headhunter-agent/actions/runs/39559315852/job/119086491961)，包含完整导入 SQL 回归、双连接同人并发、等待外部写入后读取新提交、外层事务回滚及组织隔离。没有在 Mac 启动数据库、Docker 或新增测试基础设施。另50项 MCP/auth 检查、DB/MCP 类型、格式及独立 SPEC/QUALITY 复核通过；此前42项未改动 CRM/review 网页检查不重复累加。这些是隔离数据库与源码检查，不是生产业务验收。
 
-**当前缺口与下一步：** 旧读取失败原件保留；一次原15秒限制的物理只读测量约5.6秒，其中五份约12.6MB原件查询约3.4秒、后续JavaScript间隔约27ms，不支持“JSON解析卡死”的归因。后续仍需持续运行验收。CRM只读已定位原有客户/岗位，候选池未绑定或导入；数据库实现检查通过后，准备精确生产 SQL/MCP 发布范围及 Main 原生工具配置，再按单独授权做真实原卡导入和网页读回。Gmail授权超时关闭，仍待本人处理Google安全提示和实际账户grant。原材料/十人校准决定、完整发送/排期、全部卡型和多用户验收未完成；P6及M1–M5均未完成。
+**本次获准生产执行（2026-10-21）：** 仅应用两份指定 SQL：身份/候选抑制读取前置函数，以及原子导入/多岗位关联/现有列表计数。生产 PostgreSQL 17 的七个函数正文、设置、限定 ACL 及新关联表 RLS/约束均与获准源码匹配；六张原业务表的数量和逐行摘要前后完全一致。既有规范化函数 owner/ACL/设置及去空白正文一致，原始定义 hash 因源码空白变化而不同，不冒称逐字未变。原生 Supabase 页面发布同一 MCP，下载读回七份源码全部匹配，原认证设置保持且匿名请求401。只给 Main 原八个读工具追加导入及岗位关联读取；其他 Bot 含归档者的分配、服务器元数据/版本和20行旧待答卡/检查点保持。实际运行的五份相关原生源码也与所选发布一致。未部署 CRM 前端、改动 canonical pipeline、写候选或外发；没有登记迁移账本或应用其他 pending 文件。正常人类问法已在原岗位发起目标绑定及单人导入的审批准备，实际目标/候选写入仍须原生一次性审批，不把上线等同业务完成。
+
+**当前缺口与下一步：** 旧读取失败原件保留；一次原15秒限制的物理只读测量约5.6秒，其中五份约12.6MB原件查询约3.4秒、后续JavaScript间隔约27ms，不支持“JSON解析卡死”的归因。后续仍需持续运行验收。CRM SQL/MCP及Main受限工具配置已完成，接下来核对原会话真实目标/导入审批、服务回执、网页读回及恢复；候选池尚未绑定或导入。Gmail授权超时关闭，仍待本人处理Google安全提示和实际账户grant。原材料/十人校准决定、完整发送/排期、全部卡型和多用户验收未完成；P6及M1–M5均未完成。
 
 > **For agentic workers:** Follow [AGENTS.md — WeKruit design principles](../../AGENTS.md#wekruit-design-principles). This plan defines product outcomes and records evidence; it does not authorize another harness or a fixed recruiting workflow. Reuse native capability first and change only a demonstrated integration gap.
 
