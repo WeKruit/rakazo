@@ -157,6 +157,8 @@ export interface PauseRunForInput {
   leaseOwner: string;
   leaseFence: number;
   blocks: MessageBlock[];
+  /** Server-owned replay binding; reuse its pending native card without rewriting it. */
+  existingApprovalEffectId?: string;
   /**
    * Unredacted choice actions for resume. Persisted only on the run checkpoint
    * (not in message blocks) so clients still see redacted labels.
@@ -1132,10 +1134,82 @@ export async function pauseRunForInput(
 ): Promise<boolean> {
   // Validate the exact durable card before changing run/attempt state.
   MessageBlockSchema.array().parse(input.blocks);
+  if (
+    input.existingApprovalEffectId !== undefined &&
+    (!input.existingApprovalEffectId.trim() ||
+      input.blocks.length ||
+      input.offeredActions?.length ||
+      input.recruitingQuestion)
+  )
+    return false;
   const committed = await prisma.$transaction(async (tx: Prisma.TransactionClient) => {
     // Thread row first, then run rows — the same order as clearThread and finalizeRun, so a
     // concurrent clear cannot deadlock against this transaction.
     await tx.$queryRaw`SELECT id FROM threads WHERE id = ${input.threadId} FOR UPDATE`;
+    if (input.existingApprovalEffectId) {
+      await tx.$queryRaw`SELECT id FROM external_effects WHERE id = ${input.existingApprovalEffectId} FOR UPDATE`;
+      const effect = await tx.externalEffect.findFirst({
+        where: {
+          id: input.existingApprovalEffectId,
+          spaceId: input.spaceId,
+          runId: input.runId,
+          status: "intended",
+        },
+        select: { id: true, spaceId: true, runId: true, status: true },
+      });
+      if (
+        !effect ||
+        effect.id !== input.existingApprovalEffectId ||
+        effect.spaceId !== input.spaceId ||
+        effect.runId !== input.runId ||
+        effect.status !== "intended"
+      )
+        return null;
+      const cards = await tx.message.findMany({
+        where: {
+          threadId: input.threadId,
+          runId: input.runId,
+          botId: input.botId,
+          role: "bot",
+          blocks: { array_contains: [{ approvalEffectId: effect.id }] },
+        },
+        select: { id: true, threadId: true, runId: true, botId: true, role: true, blocks: true },
+        take: 2,
+      });
+      const message = cards.length === 1 ? cards[0] : undefined;
+      const parsed = MessageBlockSchema.array().safeParse(message?.blocks);
+      const asks = parsed.success
+        ? parsed.data.filter(
+            (block) => block.kind === "ask" && block.approvalEffectId === effect.id,
+          )
+        : [];
+      const ask = asks.length === 1 ? asks[0] : undefined;
+      if (
+        !message ||
+        message.threadId !== input.threadId ||
+        message.runId !== input.runId ||
+        message.botId !== input.botId ||
+        message.role !== "bot" ||
+        ask?.kind !== "ask" ||
+        ask.status !== "pending" ||
+        !isApprovalAskBlock(ask) ||
+        ask.input === "secret" ||
+        ask.credential
+      )
+        return null;
+      const answered = await tx.event.findFirst({
+        where: {
+          spaceId: input.spaceId,
+          threadId: input.threadId,
+          botId: input.botId,
+          runId: input.runId,
+          type: "effect.approval.answered",
+          payload: { path: ["effectId"], equals: effect.id },
+        },
+        select: { id: true },
+      });
+      if (answered) return null;
+    }
     const question = input.recruitingQuestion
       ? await prepareRecruitingQuestionInTransaction(tx, input)
       : undefined;
@@ -1149,7 +1223,9 @@ export async function pauseRunForInput(
         status: "running",
         leaseOwner: input.leaseOwner,
         leaseFence: input.leaseFence,
-        ...(input.recruitingQuestion ? { leaseExpiresAt: { gt: new Date() } } : {}),
+        ...(input.recruitingQuestion || input.existingApprovalEffectId
+          ? { leaseExpiresAt: { gt: new Date() } }
+          : {}),
       },
       data: {
         status: "waiting_input",
@@ -1173,24 +1249,27 @@ export async function pauseRunForInput(
     });
     if (attempt.count !== 1) throw new Error("Active run attempt was not available to pause");
 
-    const message = await createThreadMessageInTransaction(tx, {
-      threadId: input.threadId,
-      role: "bot",
-      blocks: input.blocks,
-      botId: input.botId,
-      runId: input.runId,
-      ...(question?.kind === "new"
-        ? { clientNonce: `recruiting-question:${question.effectId}` }
-        : {}),
-    });
-    await appendEventInTransaction(tx, {
-      spaceId: input.spaceId,
-      threadId: input.threadId,
-      botId: input.botId,
-      type: "thread.message.created",
-      runId: input.runId,
-      payload: { messageId: message.id, role: "bot", blocks: input.blocks },
-    });
+    const message = input.existingApprovalEffectId
+      ? null
+      : await createThreadMessageInTransaction(tx, {
+          threadId: input.threadId,
+          role: "bot",
+          blocks: input.blocks,
+          botId: input.botId,
+          runId: input.runId,
+          ...(question?.kind === "new"
+            ? { clientNonce: `recruiting-question:${question.effectId}` }
+            : {}),
+        });
+    if (message)
+      await appendEventInTransaction(tx, {
+        spaceId: input.spaceId,
+        threadId: input.threadId,
+        botId: input.botId,
+        type: "thread.message.created",
+        runId: input.runId,
+        payload: { messageId: message.id, role: "bot", blocks: input.blocks },
+      });
     let waitingEvent = await appendEventInTransaction(tx, {
       spaceId: input.spaceId,
       threadId: input.threadId,
@@ -1199,7 +1278,7 @@ export async function pauseRunForInput(
       runId: input.runId,
       payload: {},
     });
-    if (question?.kind === "new")
+    if (question?.kind === "new" && message)
       waitingEvent = await commitRecruitingQuestionInTransaction(tx, input, question, message);
     await tx.event.deleteMany({ where: { runId: input.runId, type: "thread.progress" } });
     return { threadId: waitingEvent.threadId, seq: waitingEvent.seq };

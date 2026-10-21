@@ -1073,6 +1073,7 @@ function crmFixture() {
     [f.effect.id, f.effect as never],
   ]);
   const approvals = new Set([binding.id]);
+  const cards = new Set([binding.id]);
   const role = { ...f.role, title: "Native role", crmBindingEffectId: binding.id as string | null };
   const page = {
     effectId: "read",
@@ -1259,6 +1260,10 @@ function crmFixture() {
     },
     message: {
       ...f.tx.message,
+      findFirst: vi.fn(async ({ where }) => {
+        const id = where.blocks.array_contains[0].approvalEffectId;
+        return cards.has(id) ? { id: `approval-card:${id}` } : null;
+      }),
       findUnique: vi.fn(async ({ where }) => {
         if (!where.id.startsWith("approval-card:")) return await f.tx.message.findUnique();
         const id = where.id.slice("approval-card:".length);
@@ -1351,6 +1356,7 @@ function crmFixture() {
     binding,
     effects,
     approvals,
+    cards,
     role,
     page,
     occurrence,
@@ -2548,6 +2554,66 @@ describe("durable recruiting reply linkage", () => {
 });
 
 describe("native CRM binding and source import", () => {
+  it("binds and replays an internal CRM target without a human approval card", async () => {
+    const f = crmFixture();
+    f.role.crmBindingEffectId = null;
+    f.binding.status = "executing";
+    f.approvals.clear();
+    f.cards.clear();
+    const saved = await recruiting.executeRecruitingCrmBinding(
+      f.prisma,
+      actor,
+      { ...f.trusted, effectId: f.binding.id, effectRequest: f.bindingInput },
+      f.bindingInput,
+    );
+    expect(saved).toEqual(f.binding.result);
+    expect(f.role.crmBindingEffectId).toBe(f.binding.id);
+    f.run.status = "completed";
+    expect(
+      await recruiting.executeRecruitingCrmBinding(
+        f.prisma,
+        actor,
+        { ...f.trusted, effectId: f.binding.id, effectRequest: f.bindingInput },
+        f.bindingInput,
+      ),
+    ).toEqual(saved);
+    expect(f.tx.recruitingRole.updateMany).toHaveBeenCalledOnce();
+  });
+  it("claims a verified card-free internal import once without human approval", async () => {
+    const f = crmFixture();
+    f.approvals.clear();
+    f.cards.clear();
+    const resolved = (await recruiting.resolveRecruitingCrmImport(
+      f.prisma,
+      actor,
+      f.trusted,
+      f.input,
+    ))!;
+    const native = {
+      effectKind: "crm-import",
+      effectRequest: boundDirectApprovalRequest(
+        resolved.route,
+        resolved.args,
+        "__rakazoCatalogTool",
+      ),
+    };
+    const admitted = await recruiting.admitRecruitingCrmImport(
+      f.prisma,
+      actor,
+      f.trusted,
+      f.input,
+      native,
+    );
+    const claim = { ...native, effectId: admitted.effect.id, from: "intended" as const };
+    await expect(
+      recruiting.claimRecruitingCrmImport(f.prisma, actor, f.trusted, f.input, claim),
+    ).resolves.toBe(true);
+    await expect(
+      recruiting.claimRecruitingCrmImport(f.prisma, actor, f.trusted, f.input, claim),
+    ).resolves.toBe(false);
+    expect(f.effects.get(admitted.effect.id)!.status).toBe("executing");
+    expect(f.links).toHaveLength(1);
+  });
   it("binds only from a retained role read and native human approval, then replays the immutable receipt", async () => {
     expect(recruiting.prepareRecruitingCrmBinding).toBeTypeOf("function");
     const f = crmFixture();
@@ -2585,6 +2651,119 @@ describe("native CRM binding and source import", () => {
     ).toEqual(saved);
     expect(f.role.crmBindingEffectId).toBe("new-binding");
   });
+  it.each(["lease", "thread", "bot", "actor", "revision", "server", "assignment", "request"])(
+    "keeps the %s boundary for a card-free internal binding",
+    async (boundary) => {
+      const f = crmFixture();
+      f.role.crmBindingEffectId = null;
+      f.binding.status = "executing";
+      f.cards.clear();
+      f.approvals.clear();
+      const trusted = {
+        ...f.trusted,
+        effectId: f.binding.id,
+        effectRequest: f.bindingInput as unknown,
+      };
+      if (boundary === "lease") trusted.leaseFence += 1;
+      if (boundary === "thread") trusted.threadId = "another-thread";
+      if (boundary === "bot") trusted.botId = "another-bot";
+      if (boundary === "revision") f.role.revision += 1;
+      if (boundary === "server")
+        f.tx.mcpServer.findFirst.mockResolvedValue({
+          ...actor,
+          id: "crm-server",
+          revision: 3,
+          enabled: true,
+        });
+      if (boundary === "assignment")
+        f.tx.botMcpServer.findFirst.mockResolvedValue({ allowAllTools: false, allowedTools: [] });
+      if (boundary === "request") trusted.effectRequest = { ...f.bindingInput, operation: "read" };
+      await expect(
+        recruiting.executeRecruitingCrmBinding(
+          f.prisma,
+          boundary === "actor" ? { ...actor, userId: "another-owner" } : actor,
+          trusted,
+          f.bindingInput,
+        ),
+      ).rejects.toThrow();
+      expect(f.tx.recruitingRole.updateMany).not.toHaveBeenCalled();
+      expect(f.binding.status).toBe("executing");
+    },
+  );
+  it.each(["pending", "denied", "changed-request", "missing-card"])(
+    "does not reinterpret a %s human binding decision as autonomous storage",
+    async (boundary) => {
+      const f = crmFixture();
+      f.role.crmBindingEffectId = null;
+      f.binding.status = "executing";
+      if (boundary === "pending") f.approvals.clear();
+      if (boundary === "missing-card") f.tx.message.findUnique.mockResolvedValue(null as never);
+      if (boundary === "denied" || boundary === "changed-request") {
+        const original = f.tx.event.findFirst.getMockImplementation()!;
+        f.tx.event.findFirst.mockImplementation(async (query) => {
+          const event = await original(query);
+          if (event) {
+            if (boundary === "denied") event.payload.answer = "deny";
+            else event.payload.requestHash = "a".repeat(64);
+          }
+          return event;
+        });
+      }
+      await expect(
+        recruiting.executeRecruitingCrmBinding(
+          f.prisma,
+          actor,
+          { ...f.trusted, effectId: f.binding.id, effectRequest: f.bindingInput },
+          f.bindingInput,
+        ),
+      ).rejects.toThrow(IsolationError);
+      expect(f.tx.recruitingRole.updateMany).not.toHaveBeenCalled();
+    },
+  );
+  it.each(["approved", "denied", "lease", "source", "assignment", "binding"])(
+    "preserves the %s boundary before claiming a card-free import",
+    async (boundary) => {
+      const f = crmFixture();
+      f.cards.clear();
+      f.approvals.clear();
+      const resolved = (await recruiting.resolveRecruitingCrmImport(
+        f.prisma,
+        actor,
+        f.trusted,
+        f.input,
+      ))!;
+      const native = {
+        effectKind: "crm-import",
+        effectRequest: boundDirectApprovalRequest(
+          resolved.route,
+          resolved.args,
+          "__rakazoCatalogTool",
+        ),
+      };
+      const admitted = await recruiting.admitRecruitingCrmImport(
+        f.prisma,
+        actor,
+        f.trusted,
+        f.input,
+        native,
+      );
+      const effect = f.effects.get(admitted.effect.id)!;
+      if (boundary === "approved" || boundary === "denied") effect.status = boundary;
+      if (boundary === "lease") f.trusted.leaseFence += 1;
+      if (boundary === "source") f.occurrence.name = "Changed source";
+      if (boundary === "assignment")
+        f.tx.botMcpServer.findFirst.mockResolvedValue({ allowAllTools: false, allowedTools: [] });
+      if (boundary === "binding") f.role.crmBindingEffectId = "changed-binding";
+      const claim = recruiting.claimRecruitingCrmImport(f.prisma, actor, f.trusted, f.input, {
+        ...native,
+        effectId: admitted.effect.id,
+        from: boundary === "approved" ? "approved" : "intended",
+      });
+      if (boundary === "denied") await expect(claim).resolves.toBe(false);
+      else await expect(claim).rejects.toThrow();
+      expect(f.tx.externalEffect.updateMany).not.toHaveBeenCalled();
+    },
+  );
   it("derives immutable professional args and reserves one native effect/source link", async () => {
     const f = crmFixture();
     const resolved = await recruiting.resolveRecruitingCrmImport(
@@ -2629,6 +2808,7 @@ describe("native CRM binding and source import", () => {
     expect(f.links).toHaveLength(1);
     expect(f.tx.externalEffect.create).toHaveBeenCalledOnce();
     const claim = { ...native, effectId: first.effect.id, from: "approved" as const };
+    f.cards.add(first.effect.id);
     await expect(
       recruiting.claimRecruitingCrmImport(f.prisma, actor, f.trusted, f.input, {
         ...claim,

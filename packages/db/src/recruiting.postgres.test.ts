@@ -7144,7 +7144,7 @@ describePostgres("recruiting domain (PostgreSQL)", () => {
     });
   }
 
-  async function crmCandidateFixture() {
+  async function crmCandidateFixture(humanApproval = true) {
     const { f, prepared } = await mappedResearchFixture();
     const page = await recordCandidatePage(f, prepared, "crm-candidate", [
       canonicalCandidateRow("Example", "https://www.linkedin.com/in/example"),
@@ -7222,7 +7222,7 @@ describePostgres("recruiting domain (PostgreSQL)", () => {
         request: bindInput,
       },
     });
-    await approveCrmEffect(f, effect);
+    if (humanApproval) await approveCrmEffect(f, effect);
     const trusted = { ...f.lease, threadId: f.thread.id, botId };
     const saved = await recruiting.executeRecruitingCrmBinding(
       prisma,
@@ -7249,6 +7249,26 @@ describePostgres("recruiting domain (PostgreSQL)", () => {
     return { f, page, server, target, trusted, saved, input, native, resolved };
   }
 
+  it("binds and claims internal CRM storage without human approval while retaining one native claim", async () => {
+    const f = await crmCandidateFixture(false);
+    const first = await recruiting.admitRecruitingCrmImport(
+      prisma,
+      actor,
+      f.trusted,
+      f.input,
+      f.native,
+    );
+    const claim = { ...f.native, effectId: first.effect.id, from: "intended" as const };
+    expect(
+      await recruiting.claimRecruitingCrmImport(prisma, actor, f.trusted, f.input, claim),
+    ).toBe(true);
+    expect(
+      await recruiting.claimRecruitingCrmImport(prisma, actor, f.trusted, f.input, claim),
+    ).toBe(false);
+    expect(
+      await prisma.event.count({ where: { runId: f.f.run.id, type: "effect.approval.answered" } }),
+    ).toBe(0);
+  });
   it("reserves a CRM source import once and rechecks native human approval and current binding at dispatch", async () => {
     const f = await crmCandidateFixture();
     expect(
@@ -7268,17 +7288,17 @@ describePostgres("recruiting domain (PostgreSQL)", () => {
         },
       }),
     ).toBe(1);
-    await expect(
-      recruiting.claimRecruitingCrmImport(prisma, actor, f.trusted, f.input, {
-        ...f.native,
-        effectId: first.effect.id,
-        from: "intended",
-      }),
-    ).rejects.toThrow(IsolationError);
     await prisma.externalEffect.update({
       where: { id: first.effect.id },
       data: { status: "approved" },
     });
+    await expect(
+      recruiting.claimRecruitingCrmImport(prisma, actor, f.trusted, f.input, {
+        ...f.native,
+        effectId: first.effect.id,
+        from: "approved",
+      }),
+    ).rejects.toThrow(IsolationError);
     await approveCrmEffect(f.f, first.effect);
     const canonical = await recruiting.resolveRecruitingCrmImport(
       prisma,

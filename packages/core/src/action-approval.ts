@@ -36,18 +36,10 @@ const APPROVAL_REQUIRED_BUILTIN_TOOLS = new Set([
   "cloud_agent_reply",
   "cloud_agent_cancel",
 ]);
-const EXPLICIT_APPROVAL_BUILTIN_TOOLS = new Set([
-  "create_space",
-  "recruiting_request_approval",
-  "recruiting_crm_bind",
-]);
+const EXPLICIT_APPROVAL_BUILTIN_TOOLS = new Set(["create_space", "recruiting_request_approval"]);
 // Lead enrollment may start an already-active campaign; it needs the same
 // one-time human decision as a direct reply or campaign activation.
 const EXPLICIT_APPROVAL_MCP_OPERATIONS = new Set([
-  "crm_import_candidate",
-  "crm_bind_candidate_role",
-  "crm_update_candidate_stage",
-  "crm_append_candidate_note",
   "reply_to_email",
   "create_lead",
   "add_leads_to_campaign_or_list_bulk",
@@ -90,13 +82,18 @@ const CAL_MCP_BOOKING_WRITES = new Set([
   "add_booking_attendee",
 ]);
 
-/** Native MCP writes requiring a one-time decision at their exact official endpoint. */
-export function oneTimeMcpWriteEndpoint(toolName: string): string | undefined {
+/** Native non-sending mailbox writes; the executor must verify the assigned official endpoint. */
+export function internalMcpWriteEndpoint(toolName: string): string | undefined {
   if (
     GOOGLE_MCP_GMAIL_WRITES.has(toolName) ||
     (toolName.startsWith("gmail.") && GOOGLE_MCP_GMAIL_WRITES.has(toolName.slice(6)))
   )
     return "https://gmailmcp.googleapis.com/mcp/v1";
+  return undefined;
+}
+
+/** Native MCP writes requiring a one-time decision at their exact official endpoint. */
+export function oneTimeMcpWriteEndpoint(toolName: string): string | undefined {
   if (
     GOOGLE_MCP_CALENDAR_WRITES.has(toolName) ||
     (toolName.startsWith("calendar.") && GOOGLE_MCP_CALENDAR_WRITES.has(toolName.slice(9)))
@@ -108,6 +105,17 @@ export function oneTimeMcpWriteEndpoint(toolName: string): string | undefined {
 
 const UNATTENDED_SAFE_BUILTIN_TOOLS = new Set([
   "recruiting_candidates",
+  "recruiting_crm_target",
+  "recruiting_crm_bind",
+  "recruiting_crm_import",
+  "recruiting_role",
+  "recruiting_feedback",
+  "recruiting_shortlist",
+  "recruiting_research",
+  "remember",
+  "save_memory",
+  "save_shared_memory",
+  "write_file",
   "browser_snapshot",
   "cloud_agent_status",
   "computer_observe",
@@ -219,7 +227,7 @@ export function toolRequiresExplicitApproval(
   });
 }
 
-/** External webhook runs may inspect state unattended, but side effects always need the owner. */
+/** Webhooks may inspect and save native internal state; other side effects still need the owner. */
 export function unattendedTriggerToolRequiresApproval(
   trigger: string,
   toolName: string,

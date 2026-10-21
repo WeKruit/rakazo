@@ -54,6 +54,7 @@ import {
   HistoryReadInputSchema,
   HistorySearchInputSchema,
   isAttachmentImageMimeType,
+  MessageBlock as MessageBlockSchema,
   OPENAI_COMPATIBLE_PROVIDER_ID,
   RecruitingApprovalToolInputSchema,
   RecruitingCrmImportInputSchema,
@@ -88,6 +89,8 @@ import {
   formatSkillsCatalogInstruction,
   humanizeToolName,
   inferAttachmentMimeType,
+  internalMcpWriteEndpoint,
+  isApprovalAskBlock,
   isBackgroundRunTrigger,
   isCallClientNonce,
   isMessagingChannelRun,
@@ -5079,6 +5082,15 @@ export function createRunExecutor(deps: ExecutorDeps) {
               return { error: sanitizeConnectorError(error, runSecrets) };
             }
           }
+          if (
+            !crmImportSelection &&
+            connectorCall.route?.connectorId === "mcp" &&
+            connectorCall.route.toolName === "crm_import_candidate"
+          )
+            return {
+              error:
+                "Save this person through the saved candidate source so the CRM destination and original evidence stay linked.",
+            };
           if (crmImportSelection) {
             if (disabledBuiltinTools.has("recruiting_crm_import"))
               return { error: "This tool is disabled for this bot." };
@@ -5260,9 +5272,20 @@ export function createRunExecutor(deps: ExecutorDeps) {
                   : name;
           if (disabledBuiltinTools.has(policyToolName))
             return { error: "This tool is disabled for this bot." };
-          const oneTimeMcpWriteServer =
+          const nativeCrmRoute = connectorCall.route;
+          const ordinaryCrmWrite = Boolean(
+            nativeCrmRoute?.connectorId === "mcp" &&
+              [
+                "crm_bind_candidate_role",
+                "crm_update_candidate_stage",
+                "crm_append_candidate_note",
+              ].includes(nativeCrmRoute.toolName),
+          );
+          const nativeMcpWriteServer =
             connectorCall.route?.connectorId === "mcp" &&
-            oneTimeMcpWriteEndpoint(connectorCall.route.toolName)
+            (oneTimeMcpWriteEndpoint(connectorCall.route.toolName) ||
+              internalMcpWriteEndpoint(connectorCall.route.toolName) ||
+              ordinaryCrmWrite)
               ? (
                   await requireMcpToolAssignment(
                     deps.prisma,
@@ -5276,18 +5299,69 @@ export function createRunExecutor(deps: ExecutorDeps) {
             policyToolName,
             connectorCall.route,
             args,
-            oneTimeMcpWriteServer?.endpoint,
+            nativeMcpWriteServer?.endpoint,
           );
           // Declared effect of the operation this call dispatches (installed API method and
           // flag). Install config is immutable per route resource, so it cannot drift before
           // execute; a catalog call uses the tool it was just resolved to. Known one-time
           // mutations stay writes even when remote metadata advertises them as reads.
+          const internalMcpEndpoint =
+            connectorCall.route?.connectorId === "mcp"
+              ? internalMcpWriteEndpoint(connectorCall.route.toolName)
+              : undefined;
+          const nativeMcpUrl = nativeMcpWriteServer?.endpoint
+            ? URL.parse(nativeMcpWriteServer.endpoint)
+            : null;
+          const internalMailboxWrite = Boolean(
+            internalMcpEndpoint &&
+              nativeMcpUrl &&
+              `${nativeMcpUrl.origin}${nativeMcpUrl.pathname.replace(/\/$/, "")}` ===
+                internalMcpEndpoint,
+          );
+          const nativeCrmWrite =
+            connectorCall.route?.connectorId === "mcp" &&
+            [
+              "crm_import_candidate",
+              "crm_bind_candidate_role",
+              "crm_update_candidate_stage",
+              "crm_append_candidate_note",
+            ].includes(connectorCall.route.toolName);
           const declaredReadOnly = viaConnector
-            ? requiresExplicitApproval
+            ? requiresExplicitApproval || internalMailboxWrite || nativeCrmWrite
               ? false
               : (resolvedTool ?? connectorTools.get(name))?.readOnly
             : undefined;
+          let nativeCrmWriteApproval:
+            | Awaited<ReturnType<typeof readNativeCrmWriteApproval>>
+            | undefined;
+          const loadNativeCrmWriteApproval = async () => {
+            if (!ordinaryCrmWrite || nativeCrmWriteApproval) return;
+            if (!nativeCrmRoute?.resourceId || typeof nativeCrmRoute.resourceRevision !== "number")
+              throw new IsolationError();
+            nativeCrmWriteApproval = await readNativeCrmWriteApproval(
+              deps.prisma,
+              researchActor.actor,
+              crmContext,
+              {
+                route: {
+                  ...nativeCrmRoute,
+                  resourceId: nativeCrmRoute.resourceId,
+                  resourceRevision: nativeCrmRoute.resourceRevision,
+                },
+                args,
+              },
+            );
+          };
+          // Internal writes keep their real write effect and explicit user rules.
+          // Exact CRM assignment is verified above; source proof is checked before a new claim,
+          // so an existing completed or denied receipt remains authoritative.
+          const verifiedInternalWrite = Boolean(
+            crmImportSelection ||
+              (ordinaryCrmWrite && nativeMcpWriteServer) ||
+              internalMailboxWrite,
+          );
           const requiresUnattendedApproval =
+            !verifiedInternalWrite &&
             !researchMutation &&
             unattendedTriggerToolRequiresApproval(
               run.trigger,
@@ -5296,6 +5370,7 @@ export function createRunExecutor(deps: ExecutorDeps) {
               declaredReadOnly,
             );
           const requiresApprovalByDefault =
+            !verifiedInternalWrite &&
             !researchMutation &&
             (requiresUnattendedApproval ||
               toolRequiresApproval(
@@ -5576,7 +5651,8 @@ export function createRunExecutor(deps: ExecutorDeps) {
           if (context.signal.aborted) return pauseForApproval();
 
           const needsApproval = gateDecision === "ask";
-          const bypassApproval = gateDecision === "allow" && requiresApprovalByDefault;
+          const bypassApproval =
+            gateDecision === "allow" && (requiresApprovalByDefault || verifiedInternalWrite);
           let claimedEffect = false;
           const executeRole = () =>
             executeRecruitingRoleTool(
@@ -5678,6 +5754,82 @@ export function createRunExecutor(deps: ExecutorDeps) {
           const claimOrReturn = async (
             from: "approved" | "intended",
           ): Promise<unknown | undefined> => {
+            // A relaxed default applies to fresh work, not to an existing human card.
+            // Only its native answer may transition that effect to approved or denied.
+            if (from === "intended" && applied?.duplicate) {
+              const [messages, answers] = await Promise.all([
+                deps.prisma.message.findMany({
+                  where: {
+                    spaceId: run.spaceId,
+                    threadId: thread.id,
+                    runId,
+                    botId: bot.id,
+                    role: "bot",
+                  },
+                  select: { blocks: true },
+                }),
+                deps.prisma.event.findMany({
+                  where: {
+                    spaceId: run.spaceId,
+                    threadId: thread.id,
+                    runId,
+                    botId: bot.id,
+                    type: "effect.approval.answered",
+                    payload: { path: ["effectId"], equals: applied.effect.id },
+                  },
+                  select: { id: true },
+                  take: 1,
+                }),
+              ]);
+              if (
+                answers.length ||
+                messages.some((message) => {
+                  const blocks = MessageBlockSchema.array().safeParse(message.blocks);
+                  return (
+                    blocks.success &&
+                    blocks.data.some(
+                      (block) =>
+                        block.kind === "ask" &&
+                        block.approvalEffectId === applied.effect.id &&
+                        isApprovalAskBlock(block),
+                    )
+                  );
+                })
+              ) {
+                await workspaceCheckpoint.flush();
+                const paused = await deps.events.pauseRunForInput({
+                  spaceId: run.spaceId,
+                  threadId: thread.id,
+                  botId: bot.id,
+                  runId,
+                  attemptId: attempt.id,
+                  leaseOwner: workerId,
+                  leaseFence: fence,
+                  blocks: [],
+                  existingApprovalEffectId: applied.effect.id,
+                });
+                if (!paused)
+                  throw new Error(
+                    "Could not restore this run's existing approval; try sending again.",
+                  );
+                return pauseForApproval();
+              }
+            }
+            try {
+              await loadNativeCrmWriteApproval();
+            } catch (error) {
+              if (!(error instanceof IsolationError)) throw error;
+              const result = {
+                error:
+                  nativeCrmRoute?.toolName === "crm_bind_candidate_role"
+                    ? "Read the candidate with list_crm_candidates and the exact canonical role with get_crm_role in this organization before saving the association."
+                    : "Read the candidate's current CRM pipeline with get_crm_candidate_review before saving this change. Its verified candidate, canonical role and original snapshot must match this change.",
+              };
+              if (from === "approved") return result;
+              return (await completeEffect(deps, applied!.effect.id, "intended", result))
+                ? result
+                : uncertainEffectResult(name);
+            }
             try {
               const unlinked = await unlinkedReplyError();
               if (unlinked) return unlinked;
@@ -5834,25 +5986,9 @@ export function createRunExecutor(deps: ExecutorDeps) {
               try {
                 if (!approvalRoute.resourceId || typeof approvalRoute.resourceRevision !== "number")
                   throw new IsolationError();
-                approvalArgs = await readNativeCrmWriteApproval(
-                  deps.prisma,
-                  researchActor.actor,
-                  {
-                    runId,
-                    threadId: thread.id,
-                    botId: bot.id,
-                    leaseOwner: workerId,
-                    leaseFence: fence,
-                  },
-                  {
-                    route: {
-                      ...approvalRoute,
-                      resourceId: approvalRoute.resourceId,
-                      resourceRevision: approvalRoute.resourceRevision,
-                    },
-                    args,
-                  },
-                );
+                await loadNativeCrmWriteApproval();
+                if (!nativeCrmWriteApproval) throw new IsolationError();
+                approvalArgs = nativeCrmWriteApproval;
                 crmOperation = approvalRoute.toolName;
               } catch (error) {
                 if (!(error instanceof IsolationError)) throw error;
@@ -6917,6 +7053,10 @@ export function createRunExecutor(deps: ExecutorDeps) {
                     roleId: input.roleId,
                   }),
                 );
+              if (applied && !claimedEffect) {
+                const early = await claimOrReturn("intended");
+                if (early !== undefined) return early;
+              }
               if (!applied || !claimedEffect) throw new IsolationError();
               return await executeRecruitingCrmBinding(
                 deps.prisma,

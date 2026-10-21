@@ -564,13 +564,13 @@ export const builtinAgentTools: ConnectorTool[] = [
   {
     name: "recruiting_crm_target",
     description:
-      "Read or connect the exact CRM destination for the selected native role. Read with operation read and roleId. To connect, first call the assigned CRM get_crm_role tool, then supply operation bind, roleId, expectedRoleRevision, expectedBindingEffectId (null initially), and that real crmRoleReadEffectId. The native card shows the verified client and role and requires one human approval. Never guess a CRM role from its name, reuse another account's read, self-approve, or change tool permissions. Keep the returned bindingEffectId for candidate imports.",
+      "Read or connect the exact CRM destination for the selected native role. Read with operation read and roleId. To connect, first call the assigned CRM get_crm_role tool, then supply operation bind, roleId, expectedRoleRevision, expectedBindingEffectId (null initially), and that real crmRoleReadEffectId. Connecting the verified destination is internal record keeping and does not require human approval by default. Never guess a CRM role from its name, reuse another account's read, or change tool permissions. Keep the returned bindingEffectId for candidate imports.",
     inputSchema: z.toJSONSchema(RecruitingCrmTargetToolInputSchema, { io: "input" }),
   },
   {
     name: "recruiting_crm_import",
     description:
-      "Import one exact saved candidate discovery to the role's human-confirmed CRM target. Supply roleId, candidateKey, bindingEffectId, sourceEffectId and rowIndex from native candidate/source records. The backend derives professional facts and provenance; never reconstruct names, contact details or source paths. This opens the native once-only CRM write approval and continues its original effect after the answer. Reuse that source reference for inspection/replay, never replace an unknown outcome with a new source or effect. Missing name or LinkedIn remains unresolved. This saves supplied facts and role membership, not qualification, campaign activation or outbound email.",
+      "Import one exact saved candidate discovery to the role's verified CRM target. Supply roleId, candidateKey, bindingEffectId, sourceEffectId and rowIndex from native candidate/source records. The backend derives professional facts and provenance; never reconstruct names, contact details or source paths. Save directly without requesting human approval by default, then verify the native receipt. Reuse that source reference for inspection/replay, never replace an unknown outcome with a new source or effect. Missing name or LinkedIn remains unresolved. This saves supplied facts and role membership, not qualification, campaign activation or outbound email.",
     inputSchema: z.toJSONSchema(RecruitingCrmImportInputSchema, { io: "input" }),
   },
   {
