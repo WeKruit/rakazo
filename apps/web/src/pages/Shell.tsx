@@ -603,7 +603,21 @@ export function ShellPage() {
   const botsRefreshEpoch = useRef(0);
   const botsRefreshApplied = useRef(0);
   const archivedBotsRefreshEpoch = useRef(0);
-  const botsRefreshInFlight = useRef(0);
+  const botsRefreshInFlight = useRef<Promise<void> | null>(null);
+  const pendingBotsRefresh = useRef<{
+    user: { id: string | undefined };
+    request: number;
+    archivedRequest: number | null;
+    includeArchived: boolean;
+    replaceBotOrder: boolean;
+  } | null>(null);
+  const botsRefreshUser = useRef({ id: userId });
+  if (botsRefreshUser.current.id !== userId) {
+    botsRefreshUser.current = { id: userId };
+    pendingBotsRefresh.current = null;
+    botsRefreshEpoch.current++;
+    archivedBotsRefreshEpoch.current++;
+  }
   // A very fast run can finish over SSE while its threads.send response is still
   // returning. Do not let that late receipt resurrect terminal work as queued.
   const terminalRunReceipts = useRef(new Set<string>());
@@ -1081,70 +1095,106 @@ export function ShellPage() {
   );
 
   const refreshBots = useCallback(
-    async (includeArchived = false, replaceBotOrder = false) => {
-      markOnce("rk:renderer:bots-request-start");
+    (includeArchived = false, replaceBotOrder = false) => {
+      const user = botsRefreshUser.current;
+      if (!user.id) return Promise.resolve();
+      const pending = pendingBotsRefresh.current;
       const request = ++botsRefreshEpoch.current;
-      const botOrderEpoch = botOrderEpochRef.current;
-      const preserveBotOrder = savingBotOrderRef.current || pendingBotOrderRef.current !== null;
       const archivedRequest = includeArchived ? ++archivedBotsRefreshEpoch.current : null;
-      botsRefreshInFlight.current += 1;
-      try {
-        const [navigation, archived, archivedGroupList] = await Promise.all([
-          rpc.spaces.list(),
-          includeArchived ? rpc.bots.listArchived() : Promise.resolve(null),
-          includeArchived ? rpc.groups.listArchived() : Promise.resolve(null),
-        ]);
-        const { bots: list, botSections: sections, groups: groupList } = navigation.current;
-        markOnce("rk:renderer:bots-response");
-        const botsFresh = request === botsRefreshEpoch.current;
-        const archivedFresh =
-          archivedRequest != null && archivedRequest === archivedBotsRefreshEpoch.current;
-        // A newer non-archived refresh can win the bots epoch while an older
-        // includeArchived request still owns archivedBotsRefreshEpoch — apply
-        // whichever slices are still current.
-        if (!botsFresh && !archivedFresh) return;
-        if (archivedFresh && archived) setArchivedBots(archived);
-        if (archivedFresh && archivedGroupList) setArchivedGroups(archivedGroupList);
-        if (!botsFresh) return;
-        if (
-          botOrderEpoch === botOrderEpochRef.current &&
-          (replaceBotOrder || (!preserveBotOrder && !savingBotOrderRef.current))
-        ) {
-          setBots(list);
-        }
-        setBotSections(sections);
-        setGroups(groupList);
-        setSpaces(navigation.spaces);
-        setInitialBotsLoaded(true);
-        botsRefreshApplied.current = request;
-        if (
-          includeArchived &&
-          list.length === 0 &&
-          archived?.length === 0 &&
-          groupList.length === 0 &&
-          archivedGroupList?.length === 0 &&
-          !navigation.spaces.some((space) => space.hasContent)
-        ) {
-          // Only the very first bot everywhere needs onboarding. An empty
-          // current space with content elsewhere stays in the app so the
-          // space can be switched to or deleted instead of trapping the user.
-          navigate("/onboarding", { replace: true });
-          return;
-        }
-        const currentGroupId = routeGroupId.current;
-        if (currentGroupId) {
-          if (!groupList.some((group) => group.id === currentGroupId)) {
-            navigate(firstThreadRoute(list, groupList), { replace: true });
+      // ponytail: retain one pending refresh in this shell; merge triggers, never candidate data.
+      pendingBotsRefresh.current = {
+        user,
+        request,
+        archivedRequest:
+          archivedRequest ?? (pending?.user === user ? pending.archivedRequest : null),
+        includeArchived: includeArchived || (pending?.user === user && pending.includeArchived),
+        replaceBotOrder: replaceBotOrder || (pending?.user === user && pending.replaceBotOrder),
+      };
+      if (botsRefreshInFlight.current) return botsRefreshInFlight.current;
+      const refreshing = Promise.resolve().then(async () => {
+        try {
+          while (pendingBotsRefresh.current) {
+            const { user, request, archivedRequest, includeArchived, replaceBotOrder } =
+              pendingBotsRefresh.current;
+            pendingBotsRefresh.current = null;
+            if (user !== botsRefreshUser.current) continue;
+            markOnce("rk:renderer:bots-request-start");
+            const botOrderEpoch = botOrderEpochRef.current;
+            const preserveBotOrder =
+              savingBotOrderRef.current || pendingBotOrderRef.current !== null;
+            const requests = [
+              rpc.spaces.list(),
+              includeArchived ? rpc.bots.listArchived() : Promise.resolve(null),
+              includeArchived ? rpc.groups.listArchived() : Promise.resolve(null),
+            ] as const;
+            try {
+              const [navigation, archived, archivedGroupList] = await Promise.all(requests);
+              if (user !== botsRefreshUser.current) continue;
+              const { bots: list, botSections: sections, groups: groupList } = navigation.current;
+              markOnce("rk:renderer:bots-response");
+              const botsFresh = request === botsRefreshEpoch.current;
+              const archivedFresh =
+                archivedRequest != null && archivedRequest === archivedBotsRefreshEpoch.current;
+              if (!botsFresh && replaceBotOrder && botOrderEpoch === botOrderEpochRef.current) {
+                const pending =
+                  pendingBotsRefresh.current as (typeof pendingBotsRefresh)["current"];
+                if (pending?.user === user) pending.replaceBotOrder = true;
+              }
+              if (!botsFresh && !archivedFresh) continue;
+              if (archivedFresh && archived) setArchivedBots(archived);
+              if (archivedFresh && archivedGroupList) setArchivedGroups(archivedGroupList);
+              if (!botsFresh) continue;
+              if (
+                botOrderEpoch === botOrderEpochRef.current &&
+                (replaceBotOrder || (!preserveBotOrder && !savingBotOrderRef.current))
+              ) {
+                setBots(list);
+              }
+              setBotSections(sections);
+              setGroups(groupList);
+              setSpaces(navigation.spaces);
+              setInitialBotsLoaded(true);
+              botsRefreshApplied.current = request;
+              if (
+                includeArchived &&
+                list.length === 0 &&
+                archived?.length === 0 &&
+                groupList.length === 0 &&
+                archivedGroupList?.length === 0 &&
+                !navigation.spaces.some((space) => space.hasContent)
+              ) {
+                navigate("/onboarding", { replace: true });
+                continue;
+              }
+              const currentGroupId = routeGroupId.current;
+              if (currentGroupId) {
+                if (!groupList.some((group) => group.id === currentGroupId)) {
+                  navigate(firstThreadRoute(list, groupList), { replace: true });
+                }
+                continue;
+              }
+              const currentBotId = routeBotId.current;
+              if (!currentBotId || !list.some((bot) => bot.id === currentBotId)) {
+                navigate(firstThreadRoute(list, groupList), { replace: true });
+              }
+            } catch (error) {
+              await Promise.allSettled(requests);
+              // Other callers can enqueue while this failed batch settles.
+              const pending = pendingBotsRefresh.current as (typeof pendingBotsRefresh)["current"];
+              if (!pending) throw error;
+              if (pending.user === user) {
+                pending.includeArchived ||= includeArchived;
+                pending.replaceBotOrder ||= replaceBotOrder;
+                pending.archivedRequest ??= archivedRequest;
+              }
+            }
           }
-          return;
+        } finally {
+          botsRefreshInFlight.current = null;
         }
-        const currentBotId = routeBotId.current;
-        if (!currentBotId || !list.some((bot) => bot.id === currentBotId)) {
-          navigate(firstThreadRoute(list, groupList), { replace: true });
-        }
-      } finally {
-        botsRefreshInFlight.current -= 1;
-      }
+      });
+      botsRefreshInFlight.current = refreshing;
+      return refreshing;
     },
     [navigate],
   );
@@ -1309,6 +1359,7 @@ export function ShellPage() {
 
   useEffect(() => {
     let cancelled = false;
+    botsRefreshUser.current = { id: userId };
     const providerConfigRevision = memoryProviderConfigRevision.current;
     void rpc.memory
       .providerConfig()
@@ -1384,14 +1435,17 @@ export function ShellPage() {
     };
     window.addEventListener("focus", refreshVisibleBots);
     document.addEventListener("visibilitychange", refreshVisibleBots);
-    // Poll skips while a refresh is in flight; focus/visibility and event-driven
-    // callers still bump botsRefreshEpoch so only the latest response applies.
+    // Poll never queues more work while event/focus refreshes are draining.
     const poll = window.setInterval(() => {
-      if (botsRefreshInFlight.current > 0) return;
+      if (botsRefreshInFlight.current) return;
       refreshVisibleBots();
     }, 3_000);
     return () => {
       cancelled = true;
+      botsRefreshUser.current = { id: undefined };
+      pendingBotsRefresh.current = null;
+      botsRefreshEpoch.current++;
+      archivedBotsRefreshEpoch.current++;
       window.clearTimeout(refreshTimer);
       window.clearInterval(poll);
       window.removeEventListener("focus", refreshVisibleBots);
