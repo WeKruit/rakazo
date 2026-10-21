@@ -889,6 +889,57 @@ it("switches the owner presentation while retaining the same native thread, pend
   expect(shellApi.createArtifact).not.toHaveBeenCalled();
 });
 
+it.each([
+  { owner: false, diagnostics: "off", visible: false },
+  { owner: false, diagnostics: "on", visible: false },
+  { owner: true, diagnostics: "off", visible: false },
+  { owner: true, diagnostics: "on", visible: true },
+] as const)(
+  "keeps keyboard bot switching in explicit owner diagnostics: owner=$owner, diagnostics=$diagnostics",
+  async ({ owner, diagnostics, visible }) => {
+    setToolActivityPreference(diagnostics);
+    await renderFeedbackShell("group", undefined, {
+      isDeploymentOwner: owner,
+      openFeedback: false,
+    });
+    const reads = shellApi.get.mock.calls.length;
+    const shortcut = async (key: string, modifier: "metaKey" | "ctrlKey") =>
+      act(async () => {
+        window.dispatchEvent(
+          new KeyboardEvent("keydown", { key, [modifier]: true, bubbles: true }),
+        );
+      });
+    const palette = () => document.body.querySelector('[data-testid="command-palette"]');
+    await shortcut("k", "metaKey");
+    expect(Boolean(palette())).toBe(visible);
+    if (!visible) {
+      await shortcut("k", "ctrlKey");
+      await shortcut("2", "metaKey");
+      expect(palette()).toBeNull();
+      expect(shellApi.get).toHaveBeenCalledTimes(reads);
+      expect(document.body.querySelector('[data-message-id="pending-main"]')).not.toBeNull();
+      return;
+    }
+    await act(async () => {
+      setToolActivityPreference("off");
+    });
+    expect(palette()).toBeNull();
+    await shortcut("k", "ctrlKey");
+    await shortcut("2", "metaKey");
+    expect(palette()).toBeNull();
+    expect(shellApi.get).toHaveBeenCalledTimes(reads);
+    await act(async () => {
+      setToolActivityPreference("on");
+    });
+    expect(palette()).toBeNull();
+    await shortcut("k", "ctrlKey");
+    expect(palette()).not.toBeNull();
+    await shortcut("2", "metaKey");
+    expect(shellApi.get).toHaveBeenLastCalledWith({ botId: "bot-2" }, expect.anything());
+    expect(palette()).toBeNull();
+  },
+);
+
 it.each(["@once", "0 18 * * *"])(
   "keeps paused %s edits inactive with the correct timezone and rearms one-shots only after Active is enabled",
   async (cron) => {
