@@ -6572,8 +6572,10 @@ async function internalCrmEffectRun(
   tx: Tx,
   actor: Actor,
   effect: { id: string; runId: string; status: string; request: unknown },
+  authorizedRun?: Awaited<ReturnType<typeof requireRun>>,
 ) {
-  const run = await requireRun(tx, actor, effect.runId);
+  const run =
+    authorizedRun?.id === effect.runId ? authorizedRun : await requireRun(tx, actor, effect.runId);
   const card = await tx.message.findFirst({
     where: {
       runId: run.id,
@@ -7014,7 +7016,7 @@ export async function executeRecruitingCrmBinding(
     if (effect.status === "completed") return crmBindingReceipt(tx, actor, role.id, effect.id);
     if (effect.status !== "executing") throw new IsolationError();
     const { target } = await prepareCrmBinding(tx, actor, trusted, input);
-    await internalCrmEffectRun(tx, actor, effect);
+    await internalCrmEffectRun(tx, actor, effect, run);
     const changed = await tx.recruitingRole.updateMany({
       where: {
         id: role.id,
@@ -7050,7 +7052,15 @@ export async function executeRecruitingCrmBinding(
   });
 }
 
-async function crmImportSource(tx: Tx, actor: Actor, input: RecruitingCrmImportInput) {
+async function crmImportSource(
+  tx: Tx,
+  actor: Actor,
+  input: RecruitingCrmImportInput,
+  verifiedPages?: ReadonlyMap<
+    string,
+    Prisma.RecruitingCandidatePageGetPayload<Record<string, never>>
+  >,
+) {
   const occurrence = await tx.recruitingCandidateOccurrence.findUnique({
     where: { pageId_rowIndex: { pageId: input.sourceEffectId, rowIndex: input.rowIndex } },
     include: { page: true },
@@ -7062,7 +7072,23 @@ async function crmImportSource(tx: Tx, actor: Actor, input: RecruitingCrmImportI
   )
     throw new IsolationError();
   const { page } = occurrence;
-  await candidatePageArtifact(tx, actor, page, true);
+  const verified = verifiedPages?.get(page.effectId);
+  if (
+    !verified ||
+    page.taskId !== null ||
+    page.actionId !== null ||
+    verified.taskId !== null ||
+    verified.actionId !== null ||
+    verified.effectId !== page.effectId ||
+    verified.roleId !== input.roleId ||
+    verified.roleId !== page.roleId ||
+    verified.roleRevisionId !== page.roleRevisionId ||
+    verified.artifactId !== page.artifactId ||
+    verified.artifactHash !== page.artifactHash ||
+    verified.rowCount !== page.rowCount ||
+    verified.requestCursor !== page.requestCursor
+  )
+    await candidatePageArtifact(tx, actor, page, true);
   if (page.rowCount === null || input.rowIndex >= page.rowCount) throw new IsolationError();
   const identity = occurrence.linkedinUrl
     ? recruitingCalibrationIdentity(occurrence.linkedinUrl)
@@ -7170,7 +7196,7 @@ async function crmImportContext(
   });
   const effect = link?.effect;
   if (effect) {
-    await requireRun(tx, actor, effect.runId);
+    if (effect.runId !== run.id) await requireRun(tx, actor, effect.runId, thread);
     if (effect.spaceId !== actor.spaceId || effect.idempotencyKey !== crmImportKey(input))
       throw new IsolationError();
     assertCrmImportRequest(effect.request, route, args);
@@ -7239,10 +7265,13 @@ export async function admitRecruitingCrmImport(
     if (effect.status === "completed") return { status: "completed" as const, effect };
     if (effect.status === "denied") return { status: "denied" as const, effect };
     if (effect.status === "uncertain") return { status: "unknown" as const, effect };
-    const owner = await tx.run.findUniqueOrThrow({
-      where: { id: effect.runId },
-      select: { status: true, leaseExpiresAt: true },
-    });
+    const owner =
+      effect.runId === resolved.run.id
+        ? resolved.run
+        : await tx.run.findUniqueOrThrow({
+            where: { id: effect.runId },
+            select: { status: true, leaseExpiresAt: true },
+          });
     const live =
       ["queued", "leased", "waiting_input"].includes(owner.status) ||
       (owner.status === "running" &&
@@ -7363,7 +7392,7 @@ export async function claimRecruitingCrmImport(
     if (effect.status !== native.from || !["approved", "intended"].includes(native.from))
       return false;
     assertCrmImportRequest(effect.request, resolved.route, resolved.args);
-    await internalCrmEffectRun(tx, actor, effect);
+    await internalCrmEffectRun(tx, actor, effect, resolved.run);
     const changed = await tx.externalEffect.updateMany({
       where: {
         id: effect.id,
@@ -7850,6 +7879,10 @@ async function crmSourceSync(
   tx: Tx,
   actor: Actor,
   link: Prisma.RecruitingCrmImportGetPayload<{ include: { effect: true; occurrence: true } }>,
+  verified?: {
+    pages: ReadonlyMap<string, Prisma.RecruitingCandidatePageGetPayload<Record<string, never>>>;
+    binding?: Awaited<ReturnType<typeof crmBindingReceipt>>;
+  },
 ): Promise<RecruitingCrmCandidateSync> {
   const input = {
     roleId: link.occurrence.roleId,
@@ -7858,8 +7891,12 @@ async function crmSourceSync(
     sourceEffectId: link.pageId,
     rowIndex: link.rowIndex,
   };
-  const bound = await crmBindingReceipt(tx, actor, input.roleId, input.bindingEffectId);
-  const source = await crmImportSource(tx, actor, input);
+  const bound =
+    verified?.binding?.roleId === input.roleId &&
+    verified.binding.bindingEffectId === input.bindingEffectId
+      ? verified.binding
+      : await crmBindingReceipt(tx, actor, input.roleId, input.bindingEffectId);
+  const source = await crmImportSource(tx, actor, input, verified?.pages);
   const args = crmImportArgs(bound.target, source);
   const owner = await requireRun(tx, actor, link.effect.runId);
   const ownerState = await tx.run.findUniqueOrThrow({ where: { id: owner.id } });
@@ -8052,7 +8089,10 @@ export async function listRecruitingCandidates(
         });
         for (const link of imports)
           if (!syncs.has(link.occurrence.candidateKey))
-            syncs.set(link.occurrence.candidateKey, await crmSourceSync(tx, actor, link));
+            syncs.set(
+              link.occurrence.candidateKey,
+              await crmSourceSync(tx, actor, link, { pages, binding: bound }),
+            );
       }
       return ListRecruitingCandidatesOutput.parse({
         sortAvailability: { rank: rankAvailable, tier: tierAvailable, score: scoreAvailable },
@@ -8392,7 +8432,7 @@ export async function listRecruitingCandidateSources(
           link.occurrence.candidateKey !== candidate.candidateKey
         )
           throw new IsolationError();
-        states.push(await crmSourceSync(tx, actor, link));
+        states.push(await crmSourceSync(tx, actor, link, { pages }));
       }
       return ListRecruitingCandidateSourcesOutput.parse({
         roleId: role.id,

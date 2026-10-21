@@ -2554,6 +2554,88 @@ describe("durable recruiting reply linkage", () => {
 });
 
 describe("native CRM binding and source import", () => {
+  it("reuses the current locked owner while admitting and claiming an internal import", async () => {
+    const f = crmFixture();
+    const resolved = (await recruiting.resolveRecruitingCrmImport(
+      f.prisma,
+      actor,
+      f.trusted,
+      f.input,
+    ))!;
+    const native = {
+      effectKind: "crm-import",
+      effectRequest: boundDirectApprovalRequest(
+        resolved.route,
+        resolved.args,
+        "__rakazoCatalogTool",
+      ),
+    };
+    const admitted = await recruiting.admitRecruitingCrmImport(
+      f.prisma,
+      actor,
+      f.trusted,
+      f.input,
+      native,
+    );
+    f.tx.run.findFirst.mockClear();
+    await expect(
+      recruiting.claimRecruitingCrmImport(f.prisma, actor, f.trusted, f.input, {
+        ...native,
+        effectId: admitted.effect.id,
+        from: "intended",
+      }),
+    ).resolves.toBe(true);
+    expect(f.tx.run.findFirst).toHaveBeenCalledTimes(6);
+    expect(f.tx.run.findUniqueOrThrow).not.toHaveBeenCalledWith({
+      where: { id: f.run.id },
+      select: { status: true, leaseExpiresAt: true },
+    });
+    expect(f.effects.get(admitted.effect.id)!.status).toBe("executing");
+    expect(f.links).toHaveLength(1);
+  });
+  it.each(["owner", "space", "bot-owner"])(
+    "still authorizes a historical import's %s scope",
+    async (boundary) => {
+      const f = crmFixture();
+      const resolved = (await recruiting.resolveRecruitingCrmImport(
+        f.prisma,
+        actor,
+        f.trusted,
+        f.input,
+      ))!;
+      const native = {
+        effectKind: "crm-import",
+        effectRequest: boundDirectApprovalRequest(
+          resolved.route,
+          resolved.args,
+          "__rakazoCatalogTool",
+        ),
+      };
+      const admitted = await recruiting.admitRecruitingCrmImport(
+        f.prisma,
+        actor,
+        f.trusted,
+        f.input,
+        native,
+      );
+      const oldOwner = { ...f.run, id: "historical-owner", bot: { ...f.run.bot } };
+      if (boundary === "owner") oldOwner.userId = "foreign";
+      if (boundary === "space") oldOwner.spaceId = "foreign";
+      if (boundary === "bot-owner") oldOwner.bot.userId = "foreign";
+      f.runs.set(oldOwner.id, oldOwner);
+      f.effects.get(admitted.effect.id)!.runId = oldOwner.id;
+      f.tx.run.findFirst.mockClear();
+      await expect(
+        recruiting.resolveRecruitingCrmImport(f.prisma, actor, f.trusted, f.input),
+      ).rejects.toThrow(IsolationError);
+      expect(f.tx.run.findFirst).toHaveBeenCalledWith(
+        expect.objectContaining({
+          where: { id: oldOwner.id, spaceId: actor.spaceId, userId: actor.userId },
+        }),
+      );
+      expect(f.tx.externalEffect.updateMany).not.toHaveBeenCalled();
+    },
+  );
   it("reuses the authorized binding owner for its proof and same-owner CRM read", async () => {
     const f = crmFixture();
     await expect(
@@ -3833,6 +3915,166 @@ async function nativeSourceFixture() {
 }
 
 describe("native candidate source provenance", () => {
+  async function nativeImportReadFixture() {
+    const f = await nativeSourceFixture();
+    const resolved = (await recruiting.resolveRecruitingCrmImport(
+      f.prisma,
+      actor,
+      f.trusted,
+      f.input,
+    ))!;
+    const admitted = await recruiting.admitRecruitingCrmImport(
+      f.prisma,
+      actor,
+      f.trusted,
+      f.input,
+      {
+        effectKind: "crm-import",
+        effectRequest: boundDirectApprovalRequest(
+          resolved.route,
+          resolved.args,
+          "__rakazoCatalogTool",
+        ),
+      },
+    );
+    f.nativeProofs.mockClear();
+    f.tx.externalEffect.findFirst.mockClear();
+    return { ...f, importEffect: f.effects.get(admitted.effect.id)! };
+  }
+  function nativeCandidateListRead(f: Awaited<ReturnType<typeof nativeImportReadFixture>>) {
+    const { page: _page, pageId, rowIndex, ...profile } = f.occurrence;
+    f.tx.$queryRaw
+      .mockResolvedValueOnce([
+        {
+          total: 1n,
+          rankAvailable: false,
+          tierAvailable: false,
+          scoreAvailable: false,
+          sourceRows: 1n,
+          candidates: 1n,
+          identifiedCandidates: 1n,
+          unassessed: 1n,
+          assessed: 0n,
+          shortlisted: 0n,
+        },
+      ] as never)
+      .mockResolvedValueOnce([
+        {
+          ...profile,
+          sourcePageId: pageId,
+          sourceRowIndex: rowIndex,
+          profileSourcePageIds: [pageId],
+          shortlisted: false,
+          revision: 0,
+          discoveryCount: 1,
+          firstDiscoveredAt: f.page.observedAt.toISOString(),
+          lastDiscoveredAt: f.page.observedAt.toISOString(),
+          assessmentVersion: null,
+          assessmentRoleRevisionId: null,
+          assessmentCreatedAt: null,
+          hardGate: null,
+          sortValue: "example",
+        },
+      ] as never);
+    f.tx.recruitingCandidatePage.findMany.mockResolvedValue([
+      { ...f.page, effect: f.read },
+    ] as never);
+    return recruiting.listRecruitingCandidates(f.prisma, actor, {
+      roleId: f.role.id,
+      query: "Example",
+      limit: 1,
+    });
+  }
+  it("reuses the same read snapshot's native page and binding while projecting a candidate import", async () => {
+    const f = await nativeImportReadFixture();
+    const listed = await nativeCandidateListRead(f);
+    expect(listed.items[0]?.crm).toMatchObject({
+      effectId: f.importEffect.id,
+      status: "pending",
+      target: f.target,
+    });
+    expect(f.nativeProofs).toHaveBeenCalledOnce();
+    expect(
+      f.tx.externalEffect.findFirst.mock.calls.filter(([query]) => query.where.id === f.binding.id),
+    ).toHaveLength(1);
+  });
+  it("reuses the same source-list snapshot's verified native report for its import projection", async () => {
+    const f = await nativeImportReadFixture();
+    const sources = await recruiting.listRecruitingCandidateSources(f.prisma, actor, {
+      roleId: f.role.id,
+      candidateKey: f.occurrence.candidateKey,
+    });
+    expect(sources.items[0]?.crmImports).toMatchObject([
+      { effectId: f.importEffect.id, status: "pending", target: f.target },
+    ]);
+    expect(f.nativeProofs).toHaveBeenCalledOnce();
+  });
+  it.each(["hash", "role", "revision", "artifact", "effect", "cursor"])(
+    "does not reuse a native proof for a mismatched imported source %s",
+    async (boundary) => {
+      const f = await nativeImportReadFixture();
+      const page = { ...f.page };
+      if (boundary === "hash") page.artifactHash = "f".repeat(64);
+      if (boundary === "role") page.roleId = "another-role";
+      if (boundary === "revision") page.roleRevisionId = "another-revision";
+      if (boundary === "artifact") page.artifactId = "foreign-artifact";
+      if (boundary === "effect") page.effectId = "different-effect";
+      if (boundary === "cursor") page.requestCursor = "different-cursor" as never;
+      f.tx.recruitingCandidateOccurrence.findUnique.mockResolvedValue({ ...f.occurrence, page });
+      await expect(nativeCandidateListRead(f)).rejects.toThrow(IsolationError);
+      expect(f.nativeProofs).toHaveBeenCalledTimes(2);
+      expect(f.tx.externalEffect.updateMany).not.toHaveBeenCalled();
+    },
+  );
+  it("does not reuse the current binding for an import from another binding", async () => {
+    const f = await nativeImportReadFixture();
+    f.links[0]!.bindingEffectId = "another-binding";
+    await expect(nativeCandidateListRead(f)).rejects.toThrow(IsolationError);
+    expect(f.tx.externalEffect.findFirst).toHaveBeenCalledWith(
+      expect.objectContaining({ where: expect.objectContaining({ id: "another-binding" }) }),
+    );
+  });
+  it("keeps historical action sources subject to the canonical import schema check", async () => {
+    const f = crmFixture();
+    const resolved = (await recruiting.resolveRecruitingCrmImport(
+      f.prisma,
+      actor,
+      f.trusted,
+      f.input,
+    ))!;
+    await recruiting.admitRecruitingCrmImport(f.prisma, actor, f.trusted, f.input, {
+      effectKind: "crm-import",
+      effectRequest: boundDirectApprovalRequest(
+        resolved.route,
+        resolved.args,
+        "__rakazoCatalogTool",
+      ),
+    });
+    const action = await f.tx.recruitingResearchAction.findFirst();
+    action.candidateOutputSchema = null as never;
+    await expect(
+      recruiting.listRecruitingCandidateSources(f.prisma, actor, {
+        roleId: f.role.id,
+        candidateKey: f.occurrence.candidateKey,
+      }),
+    ).rejects.toThrow(IsolationError);
+  });
+  it("revalidates the full native source when claiming a write after a read snapshot", async () => {
+    const f = await nativeImportReadFixture();
+    await nativeCandidateListRead(f);
+    f.nativeProofs.mockClear();
+    f.artifact.hash = "f".repeat(64);
+    await expect(
+      recruiting.claimRecruitingCrmImport(f.prisma, actor, f.trusted, f.input, {
+        effectId: f.importEffect.id,
+        effectKind: f.importEffect.kind,
+        effectRequest: f.importEffect.request,
+        from: "intended",
+      }),
+    ).rejects.toThrow(IsolationError);
+    expect(f.nativeProofs).toHaveBeenCalledOnce();
+    expect(f.importEffect.status).toBe("intended");
+  });
   it.each([
     ["list", "valid"],
     ["list", "historical-owner"],
