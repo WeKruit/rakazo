@@ -2682,7 +2682,7 @@ async function nativeCalibrationFixture() {
     effectId: page.effectId,
     effectStatus: "completed",
     effectRequest: request,
-    effectResult: result,
+    effectResult: result === null ? null : JSON.stringify(result),
     effectRun: { ...f.run, thread: { ...f.thread, bot: actor } },
   };
   const event = {
@@ -2823,8 +2823,9 @@ describe("native calibration approval evidence", () => {
     const linkedin = f.rows[0]!.linkedin_url;
     Object.assign(f.rows[0]!, { profile_url: linkedin, linkedin_url: null });
     f.occurrences[0]!.linkedinUrl = null;
+    f.proof.effectResult = JSON.stringify(f.page.effect.result);
     const bytes = Buffer.from(
-      stableJsonValue({ request: f.proof.effectRequest, providerResult: f.proof.effectResult }),
+      stableJsonValue({ request: f.proof.effectRequest, providerResult: f.page.effect.result }),
     );
     const hash = createHash("sha256").update(bytes).digest("hex");
     Object.assign(f.artifact, { hash, size: bytes.length });
@@ -3237,7 +3238,7 @@ describe("native G2 scale task adoption", () => {
     );
     const result = {
       structuredContent: {
-        ...native.proof.effectResult.structuredContent,
+        ...native.page.effect.result.structuredContent,
         task_id: "other-provider-task",
       },
     };
@@ -3265,7 +3266,7 @@ describe("native G2 scale task adoption", () => {
       ...artifact,
       effectId: page.effectId,
       effectRequest: request,
-      effectResult: result,
+      effectResult: result === null ? null : JSON.stringify(result),
     });
     native.nativeEvents.push({
       ...native.event,

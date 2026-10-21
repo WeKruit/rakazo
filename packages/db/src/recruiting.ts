@@ -6132,7 +6132,7 @@ async function candidatePageArtifacts(
     effectId: string;
     effectStatus: string;
     effectRequest: Prisma.JsonValue;
-    effectResult: Prisma.JsonValue;
+    effectResult: string | null;
     effectRun: Owner & {
       id: string;
       threadId: string;
@@ -6149,10 +6149,11 @@ async function candidatePageArtifacts(
     };
   };
   // ponytail: join proof metadata once; ORM includes add serial round trips to the same snapshot.
+  // Read large provider JSON as text, then parse once instead of Prisma's raw JSON conversion.
   const proofs = nativeIds.length
     ? await tx.$queryRaw<ProofRow[]>(Prisma.sql`
         SELECT e."id" AS "effectId", e."status" AS "effectStatus",
-          e."request" AS "effectRequest", e."result" AS "effectResult",
+          e."request" AS "effectRequest", e."result"::text AS "effectResult",
           jsonb_build_object(
             'id', r."id", 'spaceId', r."spaceId", 'userId', r."userId",
             'threadId', r."threadId", 'botId', r."botId",
@@ -6187,14 +6188,14 @@ async function candidatePageArtifacts(
       effectId: id,
       effectStatus: status,
       effectRequest: request,
-      effectResult: result,
+      effectResult: resultJson,
       effectRun: run,
       ...artifact
     }) => ({
       id,
       status,
       request,
-      result,
+      result: resultJson === null ? null : JSON.parse(resultJson),
       run,
       recruitingCandidatePage: artifact.id ? { artifact } : null,
     }),
