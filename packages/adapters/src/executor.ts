@@ -5261,8 +5261,7 @@ export function createRunExecutor(deps: ExecutorDeps) {
             );
             if (!parsed.success)
               return {
-                error:
-                  "Recruiting memory requires a reusable-preference recruitingFeedback with its loaded document revision and exact edit.",
+                error: sanitizeConnectorError(parsed.error, runSecrets),
               };
             recruitingPreference = parsed.data;
           }
