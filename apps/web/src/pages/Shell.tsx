@@ -2952,6 +2952,10 @@ export function ShellPage() {
   }, [computerOpen]);
 
   useEffect(() => {
+    if (!showToolActivity) {
+      setCommandPaletteOpen(false);
+      return;
+    }
     function onKey(event: KeyboardEvent) {
       if (!isCommandPaletteHotkey(event)) return;
       event.preventDefault();
@@ -2959,7 +2963,7 @@ export function ShellPage() {
     }
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, []);
+  }, [showToolActivity]);
 
   useEffect(() => {
     const heartbeatBotId = computerBot?.id ?? active?.id;
@@ -5005,15 +5009,17 @@ export function ShellPage() {
           </DropdownMenu>
         ) : null}
 
-        <CommandPalette
-          open={commandPaletteOpen}
-          onOpenChange={setCommandPaletteOpen}
-          bots={bots}
-          onSelectBot={(id) => {
-            setMobileSidebarOpen(false);
-            navigate(`/app/${id}`);
-          }}
-        />
+        {showToolActivity && (
+          <CommandPalette
+            open={commandPaletteOpen}
+            onOpenChange={setCommandPaletteOpen}
+            bots={bots}
+            onSelectBot={(id) => {
+              setMobileSidebarOpen(false);
+              navigate(`/app/${id}`);
+            }}
+          />
+        )}
 
         {newSpaceOpen ? (
           <NewSpaceDialog
