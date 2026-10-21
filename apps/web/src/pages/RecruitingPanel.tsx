@@ -55,7 +55,7 @@ import {
 } from "@rakazo/ui-web";
 import { Check, CircleHelp, RefreshCw, X } from "lucide-react";
 import { useCallback, useEffect, useId, useMemo, useRef, useState } from "react";
-import { ArtifactFileCard } from "../components/ArtifactFileCard";
+import { ArtifactFileCard, SourceText } from "../components/ArtifactFileCard";
 import { AskCard } from "../components/AskCard";
 import { Shimmer } from "../components/ai/primitives";
 import { decodeArtifactBase64 } from "../lib/artifact-open";
@@ -1424,7 +1424,6 @@ function ArtifactReference({
   showDiagnostics?: boolean;
   sourceRequest?: ReadRecruitingSourceInput;
 }) {
-  const { t } = useLingui();
   const [open, setOpen] = useState(false);
   const sourceKey = JSON.stringify([reference, source, showDiagnostics, sourceRequest]);
   const currentSource = useRef({ reference, source, sourceRequest });
@@ -1548,22 +1547,11 @@ function ArtifactReference({
           {current?.excerpt?.kind === "report" ? (
             <CandidateReport report={current.excerpt.report} />
           ) : current?.excerpt?.kind === "text" ? (
-            <div className="space-y-1">
-              <p className="text-xs text-muted-foreground">
-                <Trans>Source text</Trans>
-              </p>
-              <pre
-                role="document"
-                aria-label={t`Source text`}
-                className="whitespace-pre-wrap break-words font-sans text-sm leading-relaxed"
-              >
-                {current.excerpt.text.slice(0, current.excerpt.start)}
-                <mark className="bg-accent text-accent-foreground">
-                  {current.excerpt.text.slice(current.excerpt.start, current.excerpt.end)}
-                </mark>
-                {current.excerpt.text.slice(current.excerpt.end)}
-              </pre>
-            </div>
+            <SourceText
+              text={current.excerpt.text}
+              start={current.excerpt.start}
+              end={current.excerpt.end}
+            />
           ) : current?.unavailable ? (
             <p role="alert">
               <Trans>Source unavailable</Trans>

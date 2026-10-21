@@ -1,3 +1,4 @@
+import type { ProductEvent } from "@rakazo/contracts";
 import type { PrismaClient } from "@rakazo/db";
 import { describe, expect, it, vi } from "vitest";
 import {
@@ -6,9 +7,337 @@ import {
   isPeerRun,
   loadAllMessages,
   loadMessagePage,
+  projectRecruitingApprovalEvent,
+  projectRecruitingApprovalFiles,
   shouldForwardBackgroundThreadEvent,
   shouldForwardPeerThreadEvent,
 } from "./thread-message-pages.js";
+
+describe("native approval file previews", () => {
+  function fixture() {
+    const actor = {
+      userId: "owner",
+      spaceId: "space",
+      email: "owner@example.test",
+      isDeploymentOwner: false,
+    };
+    const ref = { artifactId: "jd-artifact", sha256: "a".repeat(64) };
+    const request = {
+      stage: "documents",
+      roleId: "role",
+      expectedRoleRevision: 5,
+      documents: {
+        jdText: ref,
+        namedPdf: { artifactId: "pdf-artifact", sha256: "b".repeat(64) },
+        anonymousPdf: null,
+        deck: null,
+      },
+    };
+    const source = {
+      id: "actual-source",
+      kind: "original_material",
+      anchor: { kind: "artifact", artifact: ref, locator: "text" },
+      readState: "read",
+      readAt: "2026-10-20T00:00:00.000Z",
+      quote: "Exact requirements",
+    };
+    const role = {
+      id: "role",
+      revision: 5,
+      currentRevisionId: "revision-5",
+      currentRevision: {
+        id: "revision-5",
+        roleId: "role",
+        revision: 5,
+        sourceRefs: [source],
+        criteria: [],
+      },
+    };
+    const file = {
+      kind: "file" as const,
+      artifactId: ref.artifactId,
+      name: "original.json",
+      mimeType: "application/json",
+      size: 42,
+    };
+    const pdf = {
+      kind: "file" as const,
+      artifactId: "pdf-artifact",
+      name: "Original.pdf",
+      mimeType: "application/pdf",
+      size: 100,
+    };
+    const message = {
+      id: "card",
+      threadId: "thread",
+      runId: "run",
+      botId: "bot",
+      role: "bot" as const,
+      blocks: [
+        file,
+        pdf,
+        {
+          kind: "ask" as const,
+          text: "Review documents",
+          status: "pending" as const,
+          approvalEffectId: "approval",
+        },
+      ],
+    };
+    const effects = [
+      { id: "approval", runId: "run", status: "intended", request, run: { botId: "bot" } },
+    ];
+    const externalEffect = {
+      findMany: vi.fn(
+        async (_query: { where: { run: { userId: string }; spaceId: string } }) => effects,
+      ),
+    };
+    const thread = { findFirst: vi.fn(async () => ({ activeRecruitingRole: role })) };
+    const artifactRow = {
+      id: ref.artifactId,
+      hash: ref.sha256,
+      name: file.name,
+      mimeType: file.mimeType,
+      size: file.size,
+    };
+    const artifact = { findMany: vi.fn(async () => [artifactRow]) };
+    const prisma = { externalEffect, thread, artifact } as unknown as PrismaClient;
+    const read = (messages = [message], requestActor = actor) =>
+      projectRecruitingApprovalFiles(prisma, requestActor, "thread", messages);
+    return {
+      actor,
+      ref,
+      request,
+      source,
+      role,
+      file,
+      pdf,
+      message,
+      effects,
+      externalEffect,
+      thread,
+      artifact,
+      prisma,
+      read,
+    };
+  }
+
+  it("adds an exact existing source target without changing the persisted card or original file fields", async () => {
+    const f = fixture();
+    const before = structuredClone(f.message);
+    const [message] = await f.read();
+    expect(message!.blocks[0]).toEqual({
+      ...f.file,
+      preview: {
+        label: "Job description",
+        source: {
+          kind: "role",
+          threadId: "thread",
+          roleRevisionId: "revision-5",
+          sourceRefId: "actual-source",
+        },
+      },
+    });
+    expect(message!.blocks.slice(1)).toEqual(f.message.blocks.slice(1));
+    expect(f.message).toEqual(before);
+    expect(f.externalEffect.findMany).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: expect.objectContaining({
+          spaceId: "space",
+          kind: "recruiting_request_approval",
+          run: expect.objectContaining({ userId: "owner", spaceId: "space", threadId: "thread" }),
+        }),
+      }),
+    );
+    expect(f.artifact.findMany).toHaveBeenCalledOnce();
+    expect(f.thread.findFirst).toHaveBeenCalledOnce();
+  });
+
+  it.each([
+    "revision",
+    "role",
+    "unread",
+    "quote",
+    "locator",
+    "source-hash",
+    "source-id-conflict",
+    "source-kind",
+  ])("keeps the trusted label but no target for %s", async (change) => {
+    const f = fixture();
+    if (change === "revision") f.role.revision = 6;
+    if (change === "role") f.role.id = "other-role";
+    if (change === "unread") {
+      f.source.readState = "unread";
+      f.source.readAt = null as unknown as string;
+    }
+    if (change === "quote") f.source.quote = "";
+    if (change === "locator") f.source.anchor.locator = "different-field";
+    if (change === "source-hash") f.source.anchor.artifact = { ...f.ref, sha256: "c".repeat(64) };
+    if (change === "source-id-conflict")
+      f.role.currentRevision.sourceRefs.push({
+        ...f.source,
+        quote: "Different source with the same id",
+      });
+    if (change === "source-kind")
+      Object.assign(f.source.anchor, { kind: "message", messageId: "message", locator: "text" });
+    const [message] = await f.read();
+    expect(message!.blocks[0]).toEqual({
+      ...f.file,
+      preview: { label: "Job description", source: null },
+    });
+  });
+
+  it("inherits only the exact completed documents request for a calibration card", async () => {
+    const f = fixture();
+    const documents = {
+      ...f.effects[0]!,
+      id: "documents",
+      runId: "documents-run",
+      status: "completed",
+      run: { botId: "documents-bot" },
+    };
+    Object.assign(f.effects[0]!, {
+      request: {
+        stage: "calibration",
+        roleId: "role",
+        expectedRoleRevision: 5,
+        documentsApprovalEffectId: "documents",
+        ruleChanges: [],
+        profiles: Array.from({ length: 10 }, (_, i) => ({
+          candidateKey: `candidate-${i}`,
+          linkedinUrl: `https://www.linkedin.com/in/person-${i}`,
+          evidenceUrl: `https://example.test/person-${i}`,
+          source: {
+            providerTaskId: "provider-task",
+            roleRevisionId: "revision-5",
+            effectId: "saved-page",
+            rowIndex: i,
+            artifactRef: f.ref,
+          },
+        })),
+      },
+    });
+    f.externalEffect.findMany.mockResolvedValueOnce(f.effects).mockResolvedValueOnce([documents]);
+    expect((await f.read())[0]!.blocks[0]).toMatchObject({
+      preview: { source: { sourceRefId: "actual-source" } },
+    });
+    expect(f.externalEffect.findMany).toHaveBeenCalledTimes(2);
+    documents.request = { ...f.request, roleId: "other-role" };
+    f.externalEffect.findMany.mockResolvedValueOnce(f.effects).mockResolvedValueOnce([documents]);
+    expect((await f.read())[0]!.blocks[0]).toEqual(f.file);
+  });
+
+  it.each([
+    "missing-effect",
+    "run",
+    "bot",
+    "file-hash",
+    "file-fields",
+    "foreign-actor",
+    "foreign-space",
+    "foreign-thread",
+  ])("does not trust a forged or out-of-scope %s", async (change) => {
+    const f = fixture();
+    const actor = { ...f.actor };
+    if (change === "missing-effect") f.effects.splice(0);
+    if (change === "run") f.effects[0]!.runId = "other-run";
+    if (change === "bot") f.effects[0]!.run.botId = "other-bot";
+    if (change === "file-hash")
+      f.artifact.findMany.mockResolvedValue([
+        {
+          id: f.ref.artifactId,
+          hash: "c".repeat(64),
+          name: f.file.name,
+          mimeType: f.file.mimeType,
+          size: f.file.size,
+        },
+      ]);
+    if (change === "file-fields") f.file.size++;
+    if (change === "foreign-actor") actor.userId = "foreign";
+    if (change === "foreign-space") actor.spaceId = "foreign";
+    if (change === "foreign-thread") f.message.threadId = "foreign";
+    if (change === "foreign-actor" || change === "foreign-space")
+      f.externalEffect.findMany.mockImplementation(
+        async ({ where }: { where: { run: { userId: string }; spaceId: string } }) =>
+          where.run.userId === "owner" && where.spaceId === "space" ? f.effects : [],
+      );
+    const [message] = await f.read([f.message], actor);
+    expect(message!.blocks[0]).not.toHaveProperty("preview");
+  });
+
+  it("strips untrusted preview metadata and makes no reads for ordinary files or messages", async () => {
+    const f = fixture();
+    const forged = { ...f.file, preview: { label: "Forged", source: null } };
+    const [message] = await f.read([{ ...f.message, blocks: [forged] }]);
+    expect(message!.blocks).toEqual([f.file]);
+    expect(f.externalEffect.findMany).not.toHaveBeenCalled();
+    expect(f.thread.findFirst).not.toHaveBeenCalled();
+    expect(f.artifact.findMany).not.toHaveBeenCalled();
+  });
+
+  it("batches multiple attachments and cards in the same page", async () => {
+    const f = fixture();
+    await f.read([f.message, { ...f.message, id: "second-card" }]);
+    expect(f.externalEffect.findMany).toHaveBeenCalledOnce();
+    expect(f.artifact.findMany).toHaveBeenCalledOnce();
+    expect(f.thread.findFirst).toHaveBeenCalledOnce();
+  });
+
+  it.each(["thread.message.created", "thread.message.updated"] as const)(
+    "projects %s with original event, card and approval identity",
+    async (type) => {
+      const f = fixture();
+      const event: ProductEvent = {
+        id: "event",
+        spaceId: "space",
+        threadId: "thread",
+        botId: "bot",
+        runId: "run",
+        seq: 4,
+        type,
+        createdAt: "2026-10-20T00:00:00.000Z",
+        payload: {
+          messageId: "card",
+          role: "bot",
+          blocks: [
+            { ...f.file, preview: { label: "Forged", source: null } },
+            ...f.message.blocks.slice(1),
+          ],
+        },
+      };
+      const before = structuredClone(event);
+      const projected = await projectRecruitingApprovalEvent(f.prisma, f.actor, "thread", event);
+      expect(projected).toEqual({
+        ...event,
+        payload: { ...event.payload, blocks: (await f.read())[0]!.blocks },
+      });
+      expect((projected.payload.blocks as typeof f.message.blocks)[2]).toEqual(f.message.blocks[2]);
+      expect(event).toEqual(before);
+    },
+  );
+
+  it("strips forged live preview without querying non-native or foreign events", async () => {
+    const f = fixture();
+    const blocks = [{ ...f.file, preview: { label: "Forged", source: null } }];
+    for (const spaceId of ["space", "foreign"]) {
+      const event: ProductEvent = {
+        id: "event",
+        spaceId,
+        threadId: "thread",
+        botId: "bot",
+        runId: "run",
+        seq: 4,
+        type: "thread.message.created",
+        createdAt: "2026-10-20T00:00:00.000Z",
+        payload: { messageId: "card", role: "bot", blocks },
+      };
+      expect(
+        (await projectRecruitingApprovalEvent(f.prisma, f.actor, "thread", event)).payload.blocks,
+      ).toEqual([f.file]);
+    }
+    expect(f.externalEffect.findMany).not.toHaveBeenCalled();
+  });
+});
 
 describe("thread message pages", () => {
   it("keeps the base page and cursor unchanged when its waiting card is already loaded", async () => {

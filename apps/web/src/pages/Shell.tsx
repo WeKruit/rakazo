@@ -7518,6 +7518,7 @@ const MessageView = memo(function MessageView({
                 name={block.name}
                 mimeType={block.mimeType}
                 size={block.size}
+                preview={block.preview}
               />
             </div>
           );

@@ -610,9 +610,10 @@ function Thread({ sessionEpoch }: { sessionEpoch: number }) {
   const newerLoadFailed = useRef(false);
   const pinnedScrollMetrics = useRef({ offset: 0, viewport: 0, content: 0 });
   const joinPinnedAfterLayout = useRef<number | null>(null);
-  const [markdownPreview, setMarkdownPreview] = useState<MarkdownArtifactPreviewTarget | null>(
-    null,
-  );
+  const [markdownPreview, setMarkdownPreview] = useState<{
+    threadKey: string;
+    target: MarkdownArtifactPreviewTarget;
+  } | null>(null);
   const [dismissedChoiceQuestions, setDismissedChoiceQuestions] = useState<
     ReadonlyMap<string, ReadonlySet<string>>
   >(() => new Map());
@@ -1556,6 +1557,7 @@ function Thread({ sessionEpoch }: { sessionEpoch: number }) {
     setReplyTarget(null);
     setReplyQuote(null);
     setQuoteTarget(null);
+    setMarkdownPreview(null);
     setAttachmentNotice(null);
     setError(null);
   }, [threadKey]);
@@ -2040,7 +2042,9 @@ function Thread({ sessionEpoch }: { sessionEpoch: number }) {
     answer: answerMessage,
     openBot,
     openComputer,
-    previewMarkdown: setMarkdownPreview,
+    previewMarkdown: (target) => {
+      if (threadKey !== undefined) setMarkdownPreview({ threadKey, target });
+    },
     previewImage: (target) =>
       router.push({
         pathname: "/image",
@@ -2650,10 +2654,10 @@ function Thread({ sessionEpoch }: { sessionEpoch: number }) {
         </View>
       </Modal>
       <SelectTextSheet text={selectableText} onClose={() => setSelectableText(null)} />
-      {markdownPreview && artifactTarget ? (
+      {threadKey !== undefined && markdownPreview?.threadKey === threadKey && artifactTarget ? (
         <MarkdownArtifactPreview
           threadTarget={artifactTarget}
-          target={markdownPreview}
+          target={markdownPreview.target}
           onClose={() => setMarkdownPreview(null)}
         />
       ) : null}
@@ -3177,6 +3181,116 @@ const MessageBubble = memo(function MessageBubble({
     (block): block is Extract<MessageBlock, { kind: "mcp_approval" }> =>
       block.kind === "mcp_approval",
   );
+  const attachments = message.blocks.filter(
+    (block) => block.kind === "image" || block.kind === "file",
+  );
+  function renderAttachment(
+    attachment: Extract<MessageBlock, { kind: "image" | "file" }>,
+    index: number,
+  ) {
+    return attachment.kind === "image" ? (
+      attachment.artifactId && isInlineImageMimeType(attachment.mimeType) ? (
+        <InlineImageAttachment
+          key={`${attachment.artifactId}-${index}`}
+          threadTarget={artifactTarget}
+          artifactId={attachment.artifactId}
+          name={attachment.name ?? t("Image")}
+          mimeType={attachment.mimeType ?? "image/png"}
+          labelColor={message.role === "user" ? tokens.secondaryForeground : tokens.foreground}
+          pressableProps={actionProps}
+          onOpen={() =>
+            onPreviewImage({
+              artifactId: attachment.artifactId!,
+              name: attachment.name ?? t("Image"),
+              mimeType: attachment.mimeType ?? "image/png",
+            })
+          }
+        />
+      ) : (
+        <Pressable
+          {...actionProps}
+          key={`${attachment.artifactId ?? attachment.name ?? "image"}-${index}`}
+          onPress={() =>
+            attachment.artifactId
+              ? void openMobileArtifact(
+                  artifactTarget,
+                  attachment.artifactId,
+                  attachment.name ?? t("Image"),
+                  attachment.mimeType ?? "image/png",
+                ).catch((err) =>
+                  Alert.alert(t("Could not open image"), errorText(err, t("Try again."))),
+                )
+              : undefined
+          }
+        >
+          <Text
+            style={{
+              color: message.role === "user" ? tokens.secondaryForeground : tokens.foreground,
+              fontSize: 15,
+            }}
+          >
+            🖼 {attachment.name ?? t("Image")}
+          </Text>
+        </Pressable>
+      )
+    ) : (
+      <Pressable
+        {...actionProps}
+        key={`${attachment.artifactId ?? attachment.name ?? "file"}-${index}`}
+        onPress={() =>
+          attachment.preview
+            ? onPreviewMarkdown({
+                artifactId: attachment.artifactId,
+                name: attachment.name,
+                mimeType: attachment.mimeType,
+                preview: attachment.preview,
+                messageId: message.id,
+              })
+            : attachment.artifactId
+              ? attachment.mimeType === "text/markdown"
+                ? onPreviewMarkdown({
+                    artifactId: attachment.artifactId,
+                    name: attachment.name ?? t("Markdown file"),
+                    mimeType: attachment.mimeType,
+                  })
+                : void openMobileArtifact(
+                    artifactTarget,
+                    attachment.artifactId,
+                    attachment.name ?? t("File"),
+                    attachment.mimeType ?? "text/plain",
+                  ).catch((err) =>
+                    Alert.alert(t("Could not open file"), errorText(err, t("Try again."))),
+                  )
+              : undefined
+        }
+      >
+        <Text
+          style={{
+            color: message.role === "user" ? tokens.secondaryForeground : tokens.foreground,
+            fontSize: 15,
+          }}
+        >
+          📎 {attachment.preview?.label ?? attachment.name ?? t("File")}
+        </Text>
+        {attachment.preview?.source === null ? (
+          <Text style={{ color: tokens.mutedForeground, fontSize: 13 }}>
+            {t("Source unavailable")}
+          </Text>
+        ) : null}
+        {formatFileSize(attachment.size) ? (
+          <Text
+            style={{
+              color: tokens.mutedForeground,
+              marginTop: 4,
+              fontSize: 13,
+            }}
+          >
+            {formatFileSize(attachment.size)}
+          </Text>
+        ) : null}
+      </Pressable>
+    );
+  }
   const ask = message.blocks.find(
     (block): block is Extract<MessageBlock, { kind: "ask" }> =>
       block.kind === "ask" && !isApprovalAskBlock(block) && !block.actions?.length,
@@ -3209,6 +3323,7 @@ const MessageBubble = memo(function MessageBubble({
             onAccessibilityAction={actionProps.onAccessibilityAction}
           />
         ))}
+        {attachments.map(renderAttachment)}
       </View>
     );
   }
@@ -3563,12 +3678,10 @@ const MessageBubble = memo(function MessageBubble({
             onAccessibilityAction={actionProps.onAccessibilityAction}
           />
         ))}
+        {attachments.map(renderAttachment)}
       </View>
     );
   }
-  const attachments = message.blocks.filter(
-    (block) => block.kind === "image" || block.kind === "file",
-  );
   const caption = message.blocks
     .flatMap((block) => {
       if (block.kind === "channel_message" && block.text) {
@@ -3617,99 +3730,7 @@ const MessageBubble = memo(function MessageBubble({
             streaming={message.id.startsWith("progress:")}
           />
         ) : null}
-        {attachments.map((attachment, index) =>
-          attachment.kind === "image" ? (
-            attachment.artifactId && isInlineImageMimeType(attachment.mimeType) ? (
-              <InlineImageAttachment
-                key={`${attachment.artifactId}-${index}`}
-                threadTarget={artifactTarget}
-                artifactId={attachment.artifactId}
-                name={attachment.name ?? t("Image")}
-                mimeType={attachment.mimeType ?? "image/png"}
-                labelColor={
-                  message.role === "user" ? tokens.secondaryForeground : tokens.foreground
-                }
-                pressableProps={actionProps}
-                onOpen={() =>
-                  onPreviewImage({
-                    artifactId: attachment.artifactId!,
-                    name: attachment.name ?? t("Image"),
-                    mimeType: attachment.mimeType ?? "image/png",
-                  })
-                }
-              />
-            ) : (
-              <Pressable
-                {...actionProps}
-                key={`${attachment.artifactId ?? attachment.name ?? "image"}-${index}`}
-                onPress={() =>
-                  attachment.artifactId
-                    ? void openMobileArtifact(
-                        artifactTarget,
-                        attachment.artifactId,
-                        attachment.name ?? t("Image"),
-                        attachment.mimeType ?? "image/png",
-                      ).catch((err) =>
-                        Alert.alert(t("Could not open image"), errorText(err, t("Try again."))),
-                      )
-                    : undefined
-                }
-              >
-                <Text
-                  style={{
-                    color: message.role === "user" ? tokens.secondaryForeground : tokens.foreground,
-                    fontSize: 15,
-                  }}
-                >
-                  🖼 {attachment.name ?? t("Image")}
-                </Text>
-              </Pressable>
-            )
-          ) : (
-            <Pressable
-              {...actionProps}
-              key={`${attachment.artifactId ?? attachment.name ?? "file"}-${index}`}
-              onPress={() =>
-                attachment.artifactId
-                  ? attachment.mimeType === "text/markdown"
-                    ? onPreviewMarkdown({
-                        artifactId: attachment.artifactId,
-                        name: attachment.name ?? t("Markdown file"),
-                        mimeType: attachment.mimeType,
-                      })
-                    : void openMobileArtifact(
-                        artifactTarget,
-                        attachment.artifactId,
-                        attachment.name ?? t("File"),
-                        attachment.mimeType ?? "text/plain",
-                      ).catch((err) =>
-                        Alert.alert(t("Could not open file"), errorText(err, t("Try again."))),
-                      )
-                  : undefined
-              }
-            >
-              <Text
-                style={{
-                  color: message.role === "user" ? tokens.secondaryForeground : tokens.foreground,
-                  fontSize: 15,
-                }}
-              >
-                📎 {attachment.name ?? t("File")}
-              </Text>
-              {formatFileSize(attachment.size) ? (
-                <Text
-                  style={{
-                    color: tokens.mutedForeground,
-                    marginTop: 4,
-                    fontSize: 13,
-                  }}
-                >
-                  {formatFileSize(attachment.size)}
-                </Text>
-              ) : null}
-            </Pressable>
-          ),
-        )}
+        {attachments.map(renderAttachment)}
         {appConnectBlocks.map((block, index) => (
           <AppConnectCard
             key={`${block.provider}-${index}`}

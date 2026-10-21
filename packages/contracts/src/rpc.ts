@@ -124,6 +124,7 @@ import {
   ListRecruitingCandidatesOutput,
   ListRecruitingFeedbackInput,
   ListRecruitingFeedbackOutput,
+  ReadRecruitingSourceInput,
   RecruitingAssessmentAskTargetSchema,
   RecruitingAssessmentSchema,
   RecruitingCandidateFeedbackSelectionSchema,
@@ -147,22 +148,6 @@ const recruitingWorkspace = z.strictObject({
   role: RecruitingRoleSchema,
   revision: RecruitingRoleRevisionSchema,
 });
-export const ReadRecruitingSourceInput = z.discriminatedUnion("kind", [
-  z.strictObject({
-    kind: z.literal("role"),
-    threadId: Id,
-    roleRevisionId: RecruitingId,
-    sourceRefId: RecruitingId,
-  }),
-  z.strictObject({
-    kind: z.literal("assessment"),
-    roleId: RecruitingId,
-    candidateKey: RecruitingId,
-    version: z.number().int().positive(),
-    sourceRefId: RecruitingId,
-  }),
-]);
-export type ReadRecruitingSourceInput = z.infer<typeof ReadRecruitingSourceInput>;
 export const RecruitingAssessmentSnapshotSchema = z
   .strictObject({
     assessment: RecruitingAssessmentSchema,

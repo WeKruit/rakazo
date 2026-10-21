@@ -69,7 +69,8 @@ vi.mock("@lingui/react/macro", () => ({
       parts.reduce((text, part, index) => text + part + (values[index] ?? ""), ""),
   }),
 }));
-vi.mock("../components/ArtifactFileCard", () => ({
+vi.mock("../components/ArtifactFileCard", async (importOriginal) => ({
+  ...(await importOriginal<Record<string, unknown>>()),
   ArtifactFileCard: ({
     name,
     artifactId,

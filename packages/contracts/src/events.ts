@@ -4,6 +4,7 @@ import { Id, IsoDate } from "./ids.js";
 import { McpTransportSchema } from "./mcp.js";
 import {
   RECRUITING_CANDIDATE_OUTPUT_SCHEMA,
+  ReadRecruitingSourceInput,
   RecruitingActionDeliveryStateSchema,
   RecruitingArtifactRefSchema,
   RecruitingAssessmentAskTargetSchema,
@@ -394,6 +395,9 @@ export const MessageBlock = z.discriminatedUnion("kind", [
     mimeType: z.string(),
     name: z.string(),
     size: z.number().int().nonnegative(),
+    preview: z
+      .object({ label: z.string(), source: ReadRecruitingSourceInput.nullable() })
+      .optional(),
   }),
   z.object({
     kind: z.literal("handoff"),
