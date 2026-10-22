@@ -2192,9 +2192,6 @@ export function ShellPage() {
     ["running", "queued", "leased"].includes(run.status),
   );
   const transcriptRunning = workingRuns.length > 0;
-  const workingStartedAt = transcriptRunning
-    ? Math.min(...workingRuns.map((run) => Date.parse(run.startedAt ?? run.createdAt)))
-    : undefined;
   const composerRunning = currentRuns.some((run) => isActive(run.status));
   const runError = threadRunError(activeSnapshot, dismissedRunErrorIds);
   const displayedRunError =
@@ -4414,7 +4411,6 @@ export function ShellPage() {
             answerableAskMessageIds={answerableAskIds}
             running={transcriptRunning}
             workingBots={workingBots}
-            workingStartedAt={workingStartedAt}
             onLoadOlder={loadOlder}
             onOpenBot={openBot}
             onAnswer={answerMessage}
@@ -5638,7 +5634,6 @@ const Transcript = memo(function Transcript({
   answerableAskMessageIds,
   running,
   workingBots,
-  workingStartedAt,
   onLoadOlder,
   onOpenBot,
   onAnswer,
@@ -5668,7 +5663,6 @@ const Transcript = memo(function Transcript({
   answerableAskMessageIds: string[];
   running: boolean;
   workingBots: GroupAvatarMember[];
-  workingStartedAt: number | undefined;
   onLoadOlder: () => void | Promise<void>;
   onOpenBot: (botId: string) => void;
   onAnswer: (message: ThreadMessage, text: AskAnswer, username?: string) => Promise<void>;
@@ -6120,7 +6114,14 @@ const Transcript = memo(function Transcript({
           showToolActivity ? (
             <ActiveBotGlyph bots={workingBots} label={workingLabel} />
           ) : (
-            <LoadingState label={workingLabel} startedAt={workingStartedAt} />
+            <LoadingState
+              label={workingLabel}
+              indicator={
+                <span aria-hidden>
+                  <Shimmer>{workingLabel}</Shimmer>
+                </span>
+              }
+            />
           )
         ) : null}
       </div>

@@ -1584,14 +1584,19 @@ it.each([
   expect(status?.textContent).not.toContain("Bots are working");
 });
 
-it("keeps the native queued and running elapsed time when revisiting a role", async () => {
+it("keeps native working states without counting waiting-input time as execution after resume", async () => {
   setToolActivityPreference("off");
   const now = vi.spyOn(Date, "now").mockReturnValue(Date.parse("2026-08-25T12:02:00.000Z"));
   const view = await renderFeedbackShell("group", ["queued"], {
     isDeploymentOwner: false,
     openFeedback: false,
   });
-  expect(container?.textContent).toContain("Waiting in line…2m 0.0s");
+  const progress = () =>
+    [...container!.querySelectorAll('[role="status"]')].find((element) =>
+      /Waiting in line|Working/.test(element.textContent ?? ""),
+    );
+  expect(progress()?.textContent).toContain("Waiting in line…");
+  expect(progress()?.textContent).not.toContain("2m 0.0s");
   shellApi.get.mockImplementation(async ({ groupId }) =>
     groupId
       ? view.thread
@@ -1609,7 +1614,8 @@ it("keeps the native queued and running elapsed time when revisiting a role", as
   await view.navigate("/app/bot-1");
   now.mockReturnValue(Date.parse("2026-08-25T12:03:00.000Z"));
   await view.navigate("/app/g/group-1");
-  expect(container?.textContent).toContain("Waiting in line…3m 0.0s");
+  expect(progress()?.textContent).toContain("Waiting in line…");
+  expect(progress()?.textContent).not.toContain("3m 0.0s");
   await view.navigate("/app/bot-1");
   const running = { ...view.thread.run, status: "running", startedAt: "2026-08-25T12:01:00.000Z" };
   const earlier = {
@@ -1623,11 +1629,29 @@ it("keeps the native queued and running elapsed time when revisiting a role", as
     activeRuns: [running, { ...earlier, status: "waiting_input" }],
   });
   await view.navigate("/app/g/group-1");
-  expect(container?.textContent).toContain("Working…2m 0.0s");
+  expect(progress()?.textContent).toContain("Working…");
+  expect(progress()?.textContent).not.toContain("2m 0.0s");
   await view.navigate("/app/bot-1");
   now.mockReturnValue(Date.parse("2026-08-25T12:04:00.000Z"));
   await view.navigate("/app/g/group-1");
-  expect(container?.textContent).toContain("Working…3m 0.0s");
+  expect(progress()?.textContent).toContain("Working…");
+  expect(progress()?.textContent).not.toContain("3m 0.0s");
+  await view.navigate("/app/bot-1");
+  const waiting = { ...running, status: "waiting_input" };
+  Object.assign(view.thread, { run: waiting, activeRuns: [waiting] });
+  await view.navigate("/app/g/group-1");
+  expect(progress()).toBeUndefined();
+  now.mockReturnValue(Date.parse("2026-08-25T12:17:00.000Z"));
+  Object.assign(view.thread, { run: running, activeRuns: [running] });
+  await view.click("Remote");
+  expect(shellApi.answer).toHaveBeenCalledWith({
+    groupId: "group-1",
+    runId: running.id,
+    messageId: "pending-main",
+    answer: "remote",
+  });
+  expect(progress()?.textContent).toContain("Working…");
+  expect(progress()?.textContent).not.toContain("16m 0.0s");
 });
 
 it.each(["bot", "group"] as const)(
