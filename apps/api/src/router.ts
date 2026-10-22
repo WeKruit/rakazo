@@ -73,6 +73,7 @@ import {
   isAutoReviewCheckerConfigured,
   isCatalogModelChoice,
   isComputerScreenUnavailable,
+  isDeploymentModelChoice,
   isSandboxGoneError,
   isScratchpadStatus,
   kickModelCredentialRefresh,
@@ -630,7 +631,6 @@ export interface RouterDeps {
     defaultModel: string;
     deploymentModelConfigured?: boolean;
     deploymentModelHostCredentials?: boolean;
-    autumnServiceConfigured?: boolean;
     webOrigin: string;
     privacyPolicyUrl?: string;
     screenProxySecret: string;
@@ -803,6 +803,9 @@ export function createRouter(deps: RouterDeps) {
   const onboardingDeps = { prisma: deps.prisma, events: deps.events, connectors: deps.connectors };
   const mcpOAuth = deps.mcpOAuth ?? new McpOAuthBroker(deps.prisma, deps.secrets);
   const codexCatalog = deps.codexCatalog ?? new CodexCatalogCache();
+  const deploymentModel = deps.env.deploymentModelConfigured
+    ? { provider: deps.env.defaultProvider }
+    : null;
   const favicons = deps.favicons ?? createFaviconResolver();
   const refreshExpiredCredential =
     deps.refreshExpiredModelCredential ??
@@ -819,25 +822,33 @@ export function createRouter(deps: RouterDeps) {
   ) {
     const { modelProvider: provider, modelId, thinkingLevel } = model;
     if (!provider || !modelId) return;
-    const message = await validateConnectedModelChoice(deps.prisma, actor, provider, modelId);
+    const message = await validateConnectedModelChoice(
+      deps.prisma,
+      actor,
+      provider,
+      modelId,
+      deploymentModel,
+    );
     if (message) throw new ORPCError("BAD_REQUEST", { message });
     if (isCatalogModelChoice(provider, modelId)) {
       const credential = await findModelCredential(deps.prisma, actor, provider, modelId);
-      if (!credential) {
+      if (!credential && !isDeploymentModelChoice(provider, modelId, deploymentModel)) {
         throw new ORPCError("BAD_REQUEST", { message: "Connect that model provider first" });
       }
-      const authError = await validateStoredModelAuth(
-        deps.prisma,
-        deps.secrets,
-        actor.userId,
-        credential.secretId,
-        provider,
-        modelId,
-        codexCatalog,
-        {
-          onExpiredToken: () => refreshExpiredCredential(actor, credential.secretId, provider),
-        },
-      );
+      const authError = credential
+        ? await validateStoredModelAuth(
+            deps.prisma,
+            deps.secrets,
+            actor.userId,
+            credential.secretId,
+            provider,
+            modelId,
+            codexCatalog,
+            {
+              onExpiredToken: () => refreshExpiredCredential(actor, credential.secretId, provider),
+            },
+          )
+        : undefined;
       if (authError) throw new ORPCError("BAD_REQUEST", { message: authError });
     }
     if (thinkingLevel) {
@@ -1229,7 +1240,12 @@ export function createRouter(deps: RouterDeps) {
         const catalog = live.size > 0 ? applyCodexLiveCatalog(available, auth, live) : available;
         // The scripted fixture only exists to drive the scripted runtime; a real
         // runtime cannot execute it, so it stays out of the user-facing catalog.
-        return deps.env.agentRuntime === "scripted" ? [...catalog, scriptedCatalogEntry] : catalog;
+        const choices = catalog.map((entry) =>
+          deploymentModel?.provider === entry.provider && !entry.placeholder
+            ? { ...entry, deployment: true }
+            : entry,
+        );
+        return deps.env.agentRuntime === "scripted" ? [...choices, scriptedCatalogEntry] : choices;
       }),
       credentials: authed.models.credentials.handler(async ({ context }) => {
         const rows = await deps.prisma.userModelCredential.findMany({
@@ -1760,17 +1776,20 @@ export function createRouter(deps: RouterDeps) {
             input.modelProvider,
             input.modelId,
           );
-          if (!credential) {
+          if (
+            !credential &&
+            !isDeploymentModelChoice(input.modelProvider, input.modelId, deploymentModel)
+          ) {
             throw new ORPCError("BAD_REQUEST", { message: "Connect that model provider first" });
           }
           const knownModels = [...listPiCatalog(), scriptedCatalogEntry];
           const inCatalog = knownModels.some(
             (item) => item.provider === input.modelProvider && item.id === input.modelId,
           );
-          if (!inCatalog && credential.defaultModel !== input.modelId) {
+          if (!inCatalog && credential?.defaultModel !== input.modelId) {
             throw new ORPCError("BAD_REQUEST", { message: "Unknown model for that provider" });
           }
-          if (inCatalog) {
+          if (inCatalog && credential) {
             const authError = await validateStoredModelAuth(
               deps.prisma,
               deps.secrets,
@@ -4627,7 +4646,6 @@ export function createRouter(deps: RouterDeps) {
     onboarding: {
       ensureRecruiting: authed.onboarding.ensureRecruiting.handler(({ context }) =>
         ensureRecruitingWorkspace(deps.prisma, context.actor, {
-          hasAutumnService: Boolean(deps.env.autumnServiceConfigured),
           sandboxKind: deps.env.sandboxProvider,
         }),
       ),

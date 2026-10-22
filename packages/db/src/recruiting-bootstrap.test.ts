@@ -70,7 +70,6 @@ describe("ensureRecruitingWorkspace", () => {
   it("creates one private four-specialist crew atomically with platform defaults and no credentials or schedules", async () => {
     const f = fixture();
     const result = await recruiting.ensureRecruitingWorkspace(f.prisma, actor, {
-      hasAutumnService: true,
       sandboxKind: "fake",
     });
     expect(native.bot.mock.calls.map(([, , input]) => input.name)).toEqual([
@@ -120,12 +119,12 @@ describe("ensureRecruitingWorkspace", () => {
   it("reuses an existing product crew without overwriting private instructions, membership or names", async () => {
     const f = fixture();
     const first = await recruiting.ensureRecruitingWorkspace(f.prisma, actor, {
-      hasAutumnService: false,
       sandboxKind: "fake",
     });
     f.bots[0]!.instructions = "My private instructions";
+    f.tx.mcpServer.create.mockClear();
+    f.tx.botMcpServer.createMany.mockClear();
     const again = await recruiting.ensureRecruitingWorkspace(f.prisma, actor, {
-      hasAutumnService: false,
       sandboxKind: "fake",
     });
     expect(again).toEqual(first);
@@ -135,12 +134,29 @@ describe("ensureRecruitingWorkspace", () => {
     expect(f.tx.mcpServer.create).not.toHaveBeenCalled();
   });
 
+  it("establishes fresh service access before a platform key exists, without repairing it on repeat", async () => {
+    const f = fixture();
+    const options = { sandboxKind: "fake" };
+    await recruiting.ensureRecruitingWorkspace(f.prisma, actor, options);
+    expect(f.tx.mcpServer.create).toHaveBeenCalledWith({
+      data: expect.objectContaining({
+        endpoint: "https://api.autumn.ai/mcp",
+        secretId: undefined,
+      }),
+    });
+    expect(f.tx.botMcpServer.createMany).toHaveBeenCalledTimes(1);
+    f.tx.botMcpServer.createMany.mockClear();
+    f.tx.mcpServer.create.mockClear();
+    await recruiting.ensureRecruitingWorkspace(f.prisma, actor, options);
+    expect(f.tx.botMcpServer.createMany).not.toHaveBeenCalled();
+    expect(f.tx.mcpServer.create).not.toHaveBeenCalled();
+  });
+
   it("rejects shared or foreign Spaces before creating any agents", async () => {
     const f = fixture();
     f.tx.space.findFirst.mockResolvedValueOnce(null as never);
     await expect(
       recruiting.ensureRecruitingWorkspace(f.prisma, actor, {
-        hasAutumnService: false,
         sandboxKind: "fake",
       }),
     ).rejects.toThrow();
@@ -159,7 +175,6 @@ describe("ensureRecruitingWorkspace", () => {
     });
     await expect(
       recruiting.ensureRecruitingWorkspace(f.prisma, actor, {
-        hasAutumnService: false,
         sandboxKind: "fake",
       }),
     ).rejects.toThrow();
@@ -168,7 +183,7 @@ describe("ensureRecruitingWorkspace", () => {
 
   it("does not revive an archived product workspace", async () => {
     const f = fixture();
-    const options = { hasAutumnService: false, sandboxKind: "fake" };
+    const options = { sandboxKind: "fake" };
     await recruiting.ensureRecruitingWorkspace(f.prisma, actor, options);
     f.getGroup()!.archivedAt = new Date();
     await expect(recruiting.ensureRecruitingWorkspace(f.prisma, actor, options)).rejects.toThrow();
@@ -185,7 +200,6 @@ describe("ensureRecruitingWorkspace", () => {
     await expect(
       recruiting.ensureRecruitingWorkspace(f.prisma, actor, {
         sandboxKind: "fake",
-        hasAutumnService: true,
       }),
     ).rejects.toThrow("customized");
     expect(f.tx.mcpServer.create).not.toHaveBeenCalled();
@@ -194,7 +208,7 @@ describe("ensureRecruitingWorkspace", () => {
 
   it("does not restore a deliberately removed Autumn assignment on repeat setup", async () => {
     const f = fixture();
-    const options = { sandboxKind: "fake", hasAutumnService: true };
+    const options = { sandboxKind: "fake" };
     await recruiting.ensureRecruitingWorkspace(f.prisma, actor, options);
     f.tx.botMcpServer.createMany.mockClear();
     f.tx.mcpServer.create.mockClear();
@@ -212,7 +226,6 @@ describe("ensureRecruitingWorkspace", () => {
     native.group.mockRejectedValueOnce(new Error("group write failed"));
     await expect(
       recruiting.ensureRecruitingWorkspace(f.prisma, actor, {
-        hasAutumnService: true,
         sandboxKind: "fake",
       }),
     ).rejects.toThrow("group write failed");

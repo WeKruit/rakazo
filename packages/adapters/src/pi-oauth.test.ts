@@ -2,6 +2,7 @@ import type { Credential, OAuthCredential } from "@earendil-works/pi-ai";
 import type { ModelCredentialFailedState, ModelCredentialRetireReason } from "@rakazo/adapter-kit";
 import type { PrismaClient } from "@rakazo/db";
 import { afterEach, describe, expect, it, vi } from "vitest";
+import { PiRuntimeCredentialStore } from "./pi-credentials.js";
 import {
   CHATGPT_OAUTH_PROVIDER,
   COPILOT_OAUTH_PROVIDER,
@@ -19,6 +20,7 @@ import {
   resolveModelAuth,
   secretValuesToRedact,
   serializeModelSecret,
+  storedModelOAuthModifier,
   terminalOAuthRefreshErrorMarker,
   XAI_OAUTH_PROVIDER,
 } from "./pi-oauth.js";
@@ -31,6 +33,81 @@ const oauthCred = (overrides: Partial<OAuthCredential> = {}): OAuthCredential =>
   accountId: "acct",
   ...overrides,
 });
+
+// Deterministic single-connection database stand-in; not a PostgreSQL concurrency proof.
+function storedCredentialDb(initial = "cipher") {
+  const state = { present: true, secretId: "secret-1", ciphertext: initial, active: false };
+  const owner = { id: "credential-1", userId: "user-1", provider: CHATGPT_OAUTH_PROVIDER };
+  const findOwner = vi.fn(async ({ where }: { where: Record<string, unknown> }) =>
+    state.present &&
+    Object.entries(where).every(([key, value]) =>
+      key === "secretId" ? state.secretId === value : owner[key as keyof typeof owner] === value,
+    )
+      ? { ...owner, secretId: state.secretId }
+      : null,
+  );
+  const findSecret = vi.fn(async ({ where }: { where: Record<string, unknown> }) =>
+    state.present && where.id === state.secretId
+      ? { id: state.secretId, ciphertext: state.ciphertext }
+      : null,
+  );
+  const update = vi.fn(async ({ data }: { data: { ciphertext: string } }) => {
+    state.ciphertext = data.ciphertext;
+    return { id: state.secretId };
+  });
+  const tx = {
+    $executeRaw: vi.fn(async () => 0),
+    $queryRaw: vi.fn(async (query: { sql: string; values: unknown[] }) => {
+      if (query.sql.includes("user_model_credentials")) {
+        return state.present &&
+          query.values.includes(owner.userId) &&
+          query.values.includes(owner.provider) &&
+          query.values.includes(state.secretId)
+          ? [{ id: owner.id, secretId: state.secretId }]
+          : [];
+      }
+      return state.present ? [{ id: state.secretId, ciphertext: state.ciphertext }] : [];
+    }),
+    secret: { findFirst: findSecret, update, deleteMany: vi.fn(async () => ({ count: 1 })) },
+    userModelCredential: {
+      findFirst: findOwner,
+      count: vi.fn(async () => (state.present ? 1 : 0)),
+      delete: vi.fn(async () => {
+        state.present = false;
+        return owner;
+      }),
+    },
+    userVoiceCredential: { count: vi.fn(async () => 0) },
+    spaceModelPreference: { deleteMany: vi.fn(async () => ({ count: 1 })) },
+  };
+  let tail = Promise.resolve();
+  const transaction = vi.fn((fn: (client: typeof tx) => Promise<unknown>) => {
+    const operation = tail.then(async () => {
+      state.active = true;
+      try {
+        return await fn(tx);
+      } finally {
+        state.active = false;
+      }
+    });
+    tail = operation.then(
+      () => undefined,
+      () => undefined,
+    );
+    return operation;
+  });
+  const prisma = {
+    secret: {
+      findFirst: findSecret,
+      update: vi.fn(async () => {
+        throw new Error("root write inside locked operation");
+      }),
+    },
+    userModelCredential: { findFirst: findOwner },
+    $transaction: transaction,
+  } as unknown as PrismaClient;
+  return { prisma, tx, state, update };
+}
 
 // Unsigned fake JWT: base64url JSON payload, no real token material.
 const fakeJwt = (payload: unknown) =>
@@ -948,17 +1025,102 @@ describe("matchesFailedOAuthSecret", () => {
   });
 });
 
+describe("stored model OAuth modification", () => {
+  const scope = { userId: "user-1", spaceId: "ws-1" };
+  const ref = { id: "credential-1", provider: CHATGPT_OAUTH_PROVIDER, secretId: "secret-1" };
+  function setup() {
+    const initial = oauthCred({ expires: 1 });
+    const db = storedCredentialDb(serializeModelSecret({ kind: "oauth", credential: initial }));
+    const secretStore = {
+      load: vi.fn(async (ciphertext: string) => ciphertext),
+      put: vi.fn(async (next: string) => ({ id: "secret-1", ref: next, ciphertext: next })),
+    };
+    const modify = storedModelOAuthModifier(db.prisma, secretStore, scope, ref);
+    const store = () =>
+      new PiRuntimeCredentialStore(CHATGPT_OAUTH_PROVIDER, initial, undefined, undefined, modify);
+    return { ...db, secretStore, modify, store };
+  }
+  it("serializes two request stores on the native transaction, rotates once and adopts the committed result", async () => {
+    const { store, prisma, tx, secretStore } = setup();
+    const first = store();
+    const second = store();
+    const rotate = vi.fn(async () =>
+      oauthCred({ access: "rotated", refresh: "new-refresh", expires: Date.now() + 3_600_000 }),
+    );
+    const fn = async (current: Credential | undefined) =>
+      current?.type === "oauth" && current.expires === 1 ? rotate() : undefined;
+    await Promise.all([
+      first.modify(CHATGPT_OAUTH_PROVIDER, fn),
+      second.modify(CHATGPT_OAUTH_PROVIDER, fn),
+    ]);
+    expect(rotate).toHaveBeenCalledOnce();
+    expect(secretStore.put).toHaveBeenCalledOnce();
+    expect(prisma.secret.update).not.toHaveBeenCalled();
+    expect(prisma.$transaction).toHaveBeenCalledTimes(2);
+    expect(tx.$queryRaw).toHaveBeenCalledTimes(4);
+    expect(tx.$queryRaw.mock.calls[0]?.[0].sql).toContain("FOR UPDATE");
+    expect(first.accessToken).toBe("rotated");
+    expect(second.accessToken).toBe("rotated");
+    await second.modify(CHATGPT_OAUTH_PROVIDER, async (current) => current);
+    expect(secretStore.put).toHaveBeenCalledOnce();
+  });
+  it("commits terminal retirement before rejecting and never resurrects the stale request credential", async () => {
+    const { store, state, update } = setup();
+    const first = store();
+    const second = store();
+    const failure = new Error('OAuth refresh failed (400): {"error":"invalid_grant"}');
+    await expect(
+      first.modify(CHATGPT_OAUTH_PROVIDER, async () => {
+        throw failure;
+      }),
+    ).rejects.toBe(failure);
+    expect(state.active).toBe(false);
+    expect(state.present).toBe(false);
+    const fn = vi.fn(async () => oauthCred());
+    await expect(second.modify(CHATGPT_OAUTH_PROVIDER, fn)).rejects.toBeInstanceOf(
+      RetiredModelCredentialError,
+    );
+    expect(fn).not.toHaveBeenCalled();
+    expect(update).not.toHaveBeenCalled();
+  });
+  it("persists a completed rotation before surfacing request cancellation", async () => {
+    const { store, state, update } = setup();
+    const abort = new AbortController();
+    await expect(
+      store().modify(
+        CHATGPT_OAUTH_PROVIDER,
+        async () => {
+          abort.abort();
+          return oauthCred({ access: "rotated" });
+        },
+        { signal: abort.signal },
+      ),
+    ).rejects.toMatchObject({ name: "AbortError" });
+    expect(state.active).toBe(false);
+    expect(update).toHaveBeenCalledOnce();
+    expect(parseModelSecret(state.ciphertext)).toMatchObject({ credential: { access: "rotated" } });
+  });
+  it("rejects another owner and a reconnected secret before invoking the refresh callback", async () => {
+    const { prisma, state, secretStore } = setup();
+    const fn = vi.fn(async () => oauthCred());
+    await expect(
+      storedModelOAuthModifier(prisma, secretStore, { ...scope, userId: "other" }, ref)(fn),
+    ).rejects.toBeInstanceOf(RetiredModelCredentialError);
+    state.secretId = "reconnected-secret";
+    await expect(
+      storedModelOAuthModifier(prisma, secretStore, scope, ref)(fn),
+    ).rejects.toBeInstanceOf(RetiredModelCredentialError);
+    expect(fn).not.toHaveBeenCalled();
+    expect(prisma.$transaction).not.toHaveBeenCalled();
+  });
+});
+
 describe("refreshExpiredModelCredential", () => {
   const scope = { userId: "user-1", spaceId: "ws-1" };
 
   function secretRow(initial: string) {
     let current = initial;
-    const prisma = {
-      secret: {
-        findFirst: vi.fn(async () => ({ id: "secret-1", ciphertext: "cipher" })),
-        update: vi.fn(async () => ({})),
-      },
-    } as unknown as PrismaClient;
+    const { prisma, update } = storedCredentialDb();
     const secretStore = {
       load: vi.fn(async () => current),
       put: vi.fn(async (next: string) => {
@@ -973,7 +1135,7 @@ describe("refreshExpiredModelCredential", () => {
     return {
       prisma,
       secretStore,
-      update: prisma.secret.update as unknown as ReturnType<typeof vi.fn>,
+      update,
     };
   }
 
@@ -1102,12 +1264,7 @@ describe("kickModelCredentialRefresh", () => {
       kind: "oauth",
       credential: oauthCred({ access: "old", expires: 1 }),
     });
-    const prisma = {
-      secret: {
-        findFirst: vi.fn(async () => ({ id: "secret-1", ciphertext: "cipher" })),
-        update: vi.fn(async () => ({})),
-      },
-    } as unknown as PrismaClient;
+    const { prisma } = storedCredentialDb();
     const secretStore = {
       load: vi.fn(async () => current),
       put: vi.fn(async (next: string) => {

@@ -1594,14 +1594,54 @@ describe("deployment Autumn credentials", () => {
     expect(load).toHaveBeenCalledTimes(1);
   });
 
-  it("does not authenticate when the deployment service key is absent", async () => {
+  it("reports an unconfigured platform service before authentication when its key is absent", async () => {
     vi.stubEnv("AUTUMN_API_KEY", " ");
-    const result = await loadMcpCredentialRecord(
-      {} as never,
-      {} as never,
-      official,
-      context as never,
+    await expect(
+      loadMcpCredentialRecord({} as never, {} as never, official, context as never),
+    ).rejects.toThrow("Recruiting research is not configured on this server");
+  });
+
+  it("activates the existing service assignment after platform configuration without network or OAuth while unavailable", async () => {
+    vi.stubEnv("AUTUMN_API_KEY", " ");
+    const state = { failNext: false, initializations: 0, headers: [] as Record<string, string>[] };
+    const fetch = mcpFetch(state, official.endpoint);
+    vi.stubGlobal("fetch", fetch);
+    const providerFor = vi.fn().mockResolvedValue(undefined);
+    const findMany = vi
+      .fn()
+      .mockResolvedValue([{ ...ASSIGNMENT, server: { ...SERVER, ...official, slug: "autumn" } }]);
+    const load = vi.fn();
+    const connector = new McpConnector(
+      { botMcpServer: { findMany } } as never,
+      { load } as never,
+      { network: TEST_NETWORK },
+      { providerFor } as never,
     );
-    expect(result.plaintext).toBeUndefined();
+    const scoped = { ...context, botId: ASSIGNMENT.botId };
+    try {
+      await expect(connector.discoverTools(scoped as never)).resolves.toEqual([]);
+      expect(fetch).not.toHaveBeenCalled();
+      expect(providerFor).not.toHaveBeenCalled();
+      vi.stubEnv("AUTUMN_API_KEY", "platform-service-key");
+      await expect(connector.discoverTools(scoped as never)).resolves.toEqual([
+        expect.objectContaining({ name: "mcp__autumn__echo" }),
+      ]);
+      expect(
+        state.headers.every((headers) => headers.authorization === "Bearer platform-service-key"),
+      ).toBe(true);
+      expect(load).not.toHaveBeenCalled();
+      expect(findMany).toHaveBeenLastCalledWith(
+        expect.objectContaining({
+          where: {
+            botId: scoped.botId,
+            spaceId: scoped.spaceId,
+            userId: scoped.userId,
+            server: { enabled: true },
+          },
+        }),
+      );
+    } finally {
+      await connector.close();
+    }
   });
 });

@@ -159,6 +159,30 @@ describe("clampCatalogThinkingLevel", () => {
 });
 
 describe("connected model choices", () => {
+  it("offers deployment-funded catalog models without fabricating personal credentials", () => {
+    const catalog = [
+      { provider: "openai", id: "gpt-6-luna", label: "Luna", deployment: true },
+      { provider: "openai", id: "gpt-6.1-sol", label: "Sol", deployment: true },
+      { provider: "anthropic", id: "claude-sonnet-5", label: "Sonnet" },
+      {
+        provider: "openai",
+        id: "placeholder",
+        label: "Custom",
+        deployment: true,
+        placeholder: true,
+      },
+    ];
+    expect(connectedModelChoices([], catalog).map((choice) => choice.key)).toEqual([
+      "openai::gpt-6-luna",
+      "openai::gpt-6.1-sol",
+    ]);
+    expect(
+      connectedModelChoices([{ provider: "openai", label: "OpenAI" }], catalog).map(
+        (choice) => choice.key,
+      ),
+    ).toEqual(["openai::gpt-6-luna", "openai::gpt-6.1-sol"]);
+  });
+
   const deepseek = [
     {
       provider: "deepseek",

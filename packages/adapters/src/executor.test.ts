@@ -2992,6 +2992,107 @@ description: Prepare standup notes
     );
   });
 
+  it("resolves per-bot and explicit helper catalog models with deployment credentials only", async () => {
+    vi.stubEnv("PI_DEFAULT_PROVIDER", "openai");
+    const secretLoad = vi.fn();
+    const prisma = {
+      bot: {
+        findFirst: vi.fn(async () => ({
+          modelProvider: "openai",
+          modelId: "gpt-6-luna",
+          thinkingLevel: "high",
+        })),
+      },
+      spaceModelPreference: { findFirst: vi.fn(async () => null) },
+      userModelCredential: { findFirst: vi.fn(async () => null) },
+      deploymentSettings: { findUnique: vi.fn(async () => null) },
+    } as unknown as PrismaClient;
+    const executor = createRunExecutor({
+      prisma,
+      secretStore: { load: secretLoad, put: vi.fn() },
+      deploymentModelKey: "platform-test-key",
+      deploymentModelConfigured: true,
+    } as unknown as Parameters<typeof createRunExecutor>[0]);
+    try {
+      await expect(
+        executor.resolveModel({ userId: "user-1", spaceId: "ws-1", botId: "bot-1" }),
+      ).resolves.toMatchObject({
+        provider: "openai",
+        id: "gpt-6-luna",
+        apiKey: "platform-test-key",
+        thinkingLevel: "high",
+      });
+      await expect(
+        executor.resolveConnectedModel(
+          { userId: "user-1", spaceId: "ws-1" },
+          "openai",
+          "gpt-4.1-mini",
+        ),
+      ).resolves.toMatchObject({
+        provider: "openai",
+        id: "gpt-4.1-mini",
+        apiKey: "platform-test-key",
+      });
+      await expect(
+        executor.resolveConnectedModel(
+          { userId: "user-1", spaceId: "ws-1" },
+          "anthropic",
+          "claude-sonnet-5",
+        ),
+      ).rejects.toThrow(/Connect/);
+      await expect(
+        executor.resolveConnectedModel(
+          { userId: "user-1", spaceId: "ws-1" },
+          "openai",
+          "not-a-model",
+        ),
+      ).rejects.toThrow();
+      expect(secretLoad).not.toHaveBeenCalled();
+    } finally {
+      vi.unstubAllEnvs();
+    }
+  });
+
+  it("does not replace a selected personal model's missing secret with deployment funding", async () => {
+    vi.stubEnv("PI_DEFAULT_PROVIDER", "openai");
+    const preference = modelPreference({
+      provider: "openai",
+      secretId: "secret-personal",
+      modelId: "gpt-6-luna",
+      isDefault: false,
+    });
+    const prisma = {
+      spaceModelPreference: { findFirst: vi.fn(async () => preference) },
+      userModelCredential: { findFirst: vi.fn(async () => ({ id: "credential-openai" })) },
+      secret: { findFirst: vi.fn(async () => null) },
+      $transaction: vi.fn(async (operation: (tx: unknown) => Promise<unknown>) =>
+        operation({
+          $queryRaw: vi
+            .fn()
+            .mockResolvedValueOnce([{ id: "credential-openai", secretId: "secret-personal" }])
+            .mockResolvedValueOnce([]),
+        }),
+      ),
+    } as unknown as PrismaClient;
+    const executor = createRunExecutor({
+      prisma,
+      secretStore: { load: vi.fn(), put: vi.fn() },
+      deploymentModelKey: "platform-test-key",
+      deploymentModelConfigured: true,
+    } as unknown as Parameters<typeof createRunExecutor>[0]);
+    try {
+      await expect(
+        executor.resolveConnectedModel(
+          { userId: "user-1", spaceId: "ws-1" },
+          "openai",
+          "gpt-6-luna",
+        ),
+      ).rejects.toBeInstanceOf(RetiredModelCredentialError);
+    } finally {
+      vi.unstubAllEnvs();
+    }
+  });
+
   it("resolves an explicit subagent model within the active user and space", async () => {
     const preference = modelPreference({
       provider: "xai",
@@ -3094,6 +3195,16 @@ description: Prepare standup notes
       expires: Date.now() + 60_000,
     });
     const prisma = {
+      $transaction: vi.fn(async (fn) =>
+        fn({
+          $executeRaw: vi.fn(async () => 0),
+          $queryRaw: vi.fn(async (query: { sql: string }) =>
+            query.sql.includes("user_model_credentials")
+              ? [{ id: "credential-openai-codex", secretId: "secret-codex" }]
+              : [{ id: "secret-codex", ciphertext: plaintext }],
+          ),
+        }),
+      ),
       bot: {
         findFirst: vi.fn(async () => ({
           modelProvider: provider,
@@ -3143,6 +3254,16 @@ description: Prepare standup notes
       accountId: "acct-live",
     });
     const prisma = {
+      $transaction: vi.fn(async (fn) =>
+        fn({
+          $executeRaw: vi.fn(async () => 0),
+          $queryRaw: vi.fn(async (query: { sql: string }) =>
+            query.sql.includes("user_model_credentials")
+              ? [{ id: "credential-openai-codex", secretId: "secret-codex" }]
+              : [{ id: "secret-codex", ciphertext: plaintext }],
+          ),
+        }),
+      ),
       bot: {
         findFirst: vi.fn(async () => ({
           modelProvider: provider,
@@ -3211,6 +3332,16 @@ description: Prepare standup notes
       accountId: "acct-live",
     });
     const prisma = {
+      $transaction: vi.fn(async (fn) =>
+        fn({
+          $executeRaw: vi.fn(async () => 0),
+          $queryRaw: vi.fn(async (query: { sql: string }) =>
+            query.sql.includes("user_model_credentials")
+              ? [{ id: "credential-openai-codex", secretId: "secret-codex" }]
+              : [{ id: "secret-codex", ciphertext: plaintext }],
+          ),
+        }),
+      ),
       bot: {
         findFirst: vi.fn(async () => ({
           modelProvider: provider,

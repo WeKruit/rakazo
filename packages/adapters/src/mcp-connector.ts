@@ -128,12 +128,13 @@ export async function loadMcpCredentialRecord(
       })
     : null;
   if (secret) onRef?.(secret.ciphertext, secret.id);
-  const deploymentKey =
+  const platformService =
     !server.secretId &&
     server.transport === "streamable_http" &&
-    server.endpoint === "https://api.autumn.ai/mcp"
-      ? process.env.AUTUMN_API_KEY?.trim()
-      : undefined;
+    server.endpoint === "https://api.autumn.ai/mcp";
+  const deploymentKey = platformService ? process.env.AUTUMN_API_KEY?.trim() : undefined;
+  if (platformService && !deploymentKey)
+    throw new Error("Recruiting research is not configured on this server");
   const plaintext = secret
     ? await secrets.load(secret.ciphertext, { recordId: secret.id, signal: context.signal })
     : deploymentKey

@@ -29,6 +29,20 @@ export function isCatalogModelChoice(provider: string, modelId: string) {
   );
 }
 
+/** Platform funding applies only to this deployment's provider and concrete native models. */
+export function isDeploymentModelChoice(
+  provider: string,
+  modelId: string,
+  deployment?: { provider: string } | null,
+) {
+  return (
+    deployment?.provider === provider &&
+    listPiCatalog().some(
+      (entry) => entry.provider === provider && entry.id === modelId && !entry.placeholder,
+    )
+  );
+}
+
 export function defaultCatalogModelId(
   provider: string,
   credentialPlaintext?: string,
@@ -328,9 +342,11 @@ export async function validateConnectedModelChoice(
   actor: Pick<Actor, "userId" | "spaceId">,
   provider: string,
   modelId: string,
+  deployment?: { provider: string } | null,
 ) {
   const credential = await findModelCredential(prisma, actor, provider);
-  if (!credential) return "Connect that model provider first";
+  if (!credential && !isDeploymentModelChoice(provider, modelId, deployment))
+    return "Connect that model provider first";
   if (!usableModelId(modelId)) return "Unknown model for that provider";
   if (isCatalogModelChoice(provider, modelId)) return undefined;
   // Free-form saved IDs only resolve at runtime for openai-compatible connections.
@@ -416,8 +432,11 @@ export function inboundRoutineModelPin(routines: readonly ModelChoice[]) {
 export function pinnedModelCredentialError(
   choice: ModelChoice,
   credential: { defaultModel: string | null } | null,
+  deployment?: { provider: string } | null,
 ): string | undefined {
   if (!choice.modelProvider || !usableModelId(choice.modelId)) return undefined;
+  if (!credential && isDeploymentModelChoice(choice.modelProvider, choice.modelId!, deployment))
+    return undefined;
   if (!credential) return "Connect that model provider first";
   const modelId = usableModelId(choice.modelId);
   if (
@@ -442,7 +461,11 @@ export function selectConfiguredModel(input: {
   const { override: bot, overrideCredential, defaultCredential, settings, deployment } = input;
   const hasOverride = Boolean(bot?.modelProvider && usableModelId(bot.modelId));
   // The override provider, model and credential must win together.
-  const useOverride = Boolean(hasOverride && overrideCredential);
+  const useOverride = Boolean(
+    hasOverride &&
+      (overrideCredential ||
+        isDeploymentModelChoice(bot!.modelProvider!, bot!.modelId!, deployment)),
+  );
   const credential = useOverride ? overrideCredential : defaultCredential;
   const id =
     usableModelId(useOverride ? bot!.modelId : null) ??

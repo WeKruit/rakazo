@@ -49,6 +49,39 @@ const defaults: SelectionInput = {
 };
 
 describe("configured model selection", () => {
+  it("keeps a catalog bot override on deployment funding without borrowing the personal default", () => {
+    expect(
+      selectConfiguredModel({
+        ...defaults,
+        override: { modelProvider: "openai", modelId: "gpt-6-luna", thinkingLevel: "high" },
+        deployment: { provider: "openai", model: "gpt-6.1-sol" },
+      }),
+    ).toEqual({ provider: "openai", id: "gpt-6-luna", credential: null, thinkingLevel: "high" });
+  });
+
+  it("still uses an explicit personal connection ahead of the deployment", () => {
+    const personal = credential("openai", "gpt-6.1-sol");
+    expect(
+      selectConfiguredModel({
+        ...defaults,
+        override: { modelProvider: "openai", modelId: "gpt-6-luna", thinkingLevel: null },
+        overrideCredential: personal,
+        deployment: { provider: "openai", model: "gpt-6.1-sol" },
+      }),
+    ).toMatchObject({ provider: "openai", id: "gpt-6-luna", credential: personal });
+  });
+
+  it("allows a pinned deployment catalog model but not another provider or an unknown model", () => {
+    const choice = { modelProvider: "openai", modelId: "gpt-6-luna", thinkingLevel: "high" };
+    expect(pinnedModelCredentialError(choice, null, { provider: "openai" })).toBeUndefined();
+    expect(pinnedModelCredentialError(choice, null, { provider: "openrouter" })).toMatch(/Connect/);
+    expect(
+      pinnedModelCredentialError({ ...choice, modelId: "not-a-model" }, null, {
+        provider: "openai",
+      }),
+    ).toBeDefined();
+  });
+
   it.each<{
     name: string;
     input: Partial<SelectionInput>;
@@ -970,6 +1003,27 @@ describe("connected model validation", () => {
     userId: "user-1",
     spaceId: "space-1",
   };
+
+  it("accepts only the configured deployment provider's catalog without a personal credential", async () => {
+    const prisma = {
+      spaceModelPreference: { findFirst: vi.fn(async () => null) },
+      userModelCredential: { findFirst: vi.fn(async () => null) },
+    } as unknown as PrismaClient;
+    await expect(
+      validateConnectedModelChoice(prisma, actor, "openai", "gpt-6-luna", { provider: "openai" }),
+    ).resolves.toBeUndefined();
+    for (const [provider, model] of [
+      ["anthropic", "claude-sonnet-5"],
+      ["openai", "not-a-model"],
+    ]) {
+      await expect(
+        validateConnectedModelChoice(prisma, actor, provider!, model!, { provider: "openai" }),
+      ).resolves.toBeDefined();
+    }
+    await expect(
+      validateConnectedModelChoice(prisma, actor, "openai", "gpt-6-luna"),
+    ).resolves.toBeDefined();
+  });
 
   it("accepts catalog and saved free-form models but rejects unavailable choices", async () => {
     const catalogPrisma = {

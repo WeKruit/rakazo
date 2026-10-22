@@ -71,6 +71,16 @@ describe("team chat engagement judge", () => {
           findMany: vi.fn(async () => preferences),
         },
         userModelCredential: {
+          findFirst: vi.fn(async ({ where }) =>
+            preferences
+              .map((row) => row.credential)
+              .find(
+                (row) =>
+                  row.id === where.id &&
+                  row.userId === where.userId &&
+                  row.secretId === where.secretId,
+              ),
+          ),
           findMany: vi.fn(async () => preferences.map((row) => row.credential)),
         },
         secret: {
