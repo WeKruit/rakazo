@@ -42,11 +42,14 @@ type SessionEntry = {
   digest?: string;
   ref?: string;
   recordId?: string;
+  invalidated?: boolean;
+  changeVersion?: number;
 };
 type PendingSession = {
   revision: number;
   promise: Promise<McpSession>;
   invalidated?: boolean;
+  changeVersion?: number;
   ref?: string;
 };
 
@@ -182,9 +185,19 @@ export class McpConnector implements ConnectorProvider {
     this.unsubscribe =
       this.secrets.onChange?.((ref) => {
         for (const [key, entry] of this.sessions)
-          if (entry.ref === ref) void this.evict(key).catch(() => undefined);
+          if (entry.ref === ref) {
+            // OAuth may renew inside the active request. Static credential changes
+            // keep the existing immediate eviction and reconnect behavior.
+            if (entry.material.oauth?.tokens) {
+              entry.invalidated = true;
+              entry.changeVersion = (entry.changeVersion ?? 0) + 1;
+            } else void this.evict(key).catch(() => undefined);
+          }
         for (const entry of this.connecting.values())
-          if (entry.ref === ref) entry.invalidated = true;
+          if (entry.ref === ref) {
+            entry.invalidated = true;
+            entry.changeVersion = (entry.changeVersion ?? 0) + 1;
+          }
       }) ?? (() => {});
   }
 
@@ -410,6 +423,41 @@ export class McpConnector implements ConnectorProvider {
     await entry.session.close();
   }
 
+  private async validateSecretChange(
+    server: McpServer,
+    context: AdapterContext,
+    entry: SessionEntry,
+    changed: { changeVersion?: number } = entry,
+  ): Promise<number> {
+    // An OAuth refresh notifies its own connection after adopting the committed
+    // grant. Revalidate before reuse without closing that in-flight request.
+    const changeVersion = changed.changeVersion ?? 0;
+    const { ref, digest, recordId } = entry;
+    context.signal.throwIfAborted();
+    if (!recordId || !ref || !digest)
+      throw new Error("Secret changed during MCP connection; retry");
+    const secret = await this.prisma.secret.findFirst({
+      where: { id: recordId, userId: context.userId, spaceId: context.spaceId },
+    });
+    if (secret?.ciphertext !== ref) throw new Error("Secret changed during MCP connection; retry");
+    const plaintext = await this.secrets.load(ref, { recordId, signal: context.signal });
+    const current = await this.prisma.mcpServer.findFirst({
+      where: { id: server.id, userId: context.userId, spaceId: context.spaceId, enabled: true },
+    });
+    context.signal.throwIfAborted();
+    if (
+      !current ||
+      current.revision !== server.revision ||
+      current.endpoint !== server.endpoint ||
+      current.transport !== server.transport ||
+      current.secretId !== recordId ||
+      credentialDigest(plaintext) !== digest ||
+      (changed.changeVersion ?? 0) !== changeVersion
+    )
+      throw new Error("Secret changed during MCP connection; retry");
+    return changeVersion;
+  }
+
   private async sessionFor(server: McpServer, context: AdapterContext): Promise<McpSession> {
     const sessionKey = this.sessionKey(server, context);
     const existing = this.sessions.get(sessionKey);
@@ -432,8 +480,20 @@ export class McpConnector implements ConnectorProvider {
           getLogger().warn("MCP secret revalidation failed; retaining the live session");
         }
       }
-      // A fresh read can detect rotation and synchronously evict this entry.
-      if (this.sessions.get(sessionKey) === existing) return existing.session;
+      if (this.sessions.get(sessionKey) === existing) {
+        try {
+          if (existing.invalidated) {
+            const version = await this.validateSecretChange(server, context, existing);
+            if ((existing.changeVersion ?? 0) !== version)
+              throw new Error("Secret changed during MCP connection; retry");
+            existing.invalidated = false;
+          }
+        } catch (error) {
+          await this.evict(sessionKey);
+          throw new Error(sanitizeConnectorError(error, oauthMaterialSecrets(existing.material)));
+        }
+        if (this.sessions.get(sessionKey) === existing) return existing.session;
+      }
       return this.sessionFor(server, context);
     }
     const pending = this.connecting.get(sessionKey);
@@ -456,10 +516,7 @@ export class McpConnector implements ConnectorProvider {
         live.digest = digest;
       }
     }).then(async ({ session, material, ref, digest, recordId }) => {
-      if (this.connecting.get(sessionKey)?.invalidated) {
-        await session.close();
-        throw new Error("Secret changed during MCP connection; retry");
-      }
+      const pending = this.connecting.get(sessionKey);
       connected = {
         session,
         revision: server.revision,
@@ -468,6 +525,16 @@ export class McpConnector implements ConnectorProvider {
         digest,
         recordId,
       };
+      try {
+        if (pending?.invalidated) {
+          const version = await this.validateSecretChange(server, context, connected, pending);
+          if ((pending.changeVersion ?? 0) !== version)
+            throw new Error("Secret changed during MCP connection; retry");
+        }
+      } catch (error) {
+        await session.close().catch(() => undefined);
+        throw new Error(sanitizeConnectorError(error, oauthMaterialSecrets(material)));
+      }
       this.sessions.set(sessionKey, connected);
       return session;
     });
