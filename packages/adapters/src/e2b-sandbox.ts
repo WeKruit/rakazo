@@ -193,9 +193,19 @@ export class E2BSandboxProvider implements SandboxProvider {
   }
 
   async prepare(computer: ComputerRef, _context: AdapterContext): Promise<void> {
+    const startedAt = performance.now();
     const desktop = await this.box(computer);
+    const connectedAt = performance.now();
     if (computer.fresh) await desktop.files.makeDir(E2B_WORKSPACE);
     const result = await this.runSetupCommand(desktop, PREPARE_LINUX_DESKTOP, _context.signal);
+    getLogger().info("computer.prepare.timing", {
+      operationId: _context.operationId,
+      runId: _context.runId,
+      fresh: computer.fresh === true,
+      connectMs: Math.round(connectedAt - startedAt),
+      prepareMs: Math.round(performance.now() - connectedAt),
+      exitCode: result.exitCode,
+    });
     if (result.exitCode !== 0)
       throw new Error(result.stderr || "could not prepare computer desktop tools");
   }

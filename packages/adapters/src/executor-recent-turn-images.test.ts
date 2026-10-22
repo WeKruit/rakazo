@@ -1,5 +1,6 @@
 import type { AgentRunRequest } from "@rakazo/adapter-kit";
 import type { MessageBlock } from "@rakazo/contracts";
+import { createLogger, createTestSink, getLogger, installLogger } from "@rakazo/logging";
 import { describe, expect, it, vi } from "vitest";
 import type * as ComputerLifecycleModule from "./computer-lifecycle.js";
 import { createRunExecutor } from "./executor.js";
@@ -198,6 +199,31 @@ describe("recent turn images follow model vision", () => {
     expect(request.model.id).toBe(TEXT_ONLY_MODEL);
     expect(request.history.find((entry) => entry.id === "earlier")?.images).toBeUndefined();
     expect(get).not.toHaveBeenCalled();
+  });
+
+  it("logs cumulative setup milestones once before the model runtime starts", async () => {
+    const previous = getLogger();
+    const sink = createTestSink();
+    installLogger(createLogger({ service: "setup-timing-check", sinks: [sink] }));
+    try {
+      await runWithModel(TEXT_ONLY_MODEL);
+    } finally {
+      installLogger(previous);
+    }
+    const setup = sink.events.filter((event) => event.message === "run.setup.timing");
+    expect(setup).toHaveLength(1);
+    const marks = [
+      "lease",
+      "contextLoad",
+      "runStarted",
+      "discoveryJoin",
+      "recruitingContext",
+      "modelKey",
+      "computer",
+      "runtimeStart",
+    ].map((name) => setup[0]![`${name}Ms`] as number);
+    expect(marks.every((value) => Number.isInteger(value) && value >= 0)).toBe(true);
+    expect(marks).toEqual([...marks].sort((a, b) => a - b));
   });
 
   it("attaches an earlier turn's image for a model that can see it", async () => {
