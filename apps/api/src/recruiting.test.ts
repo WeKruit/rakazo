@@ -599,6 +599,269 @@ describe("saved recruiting correspondence", () => {
       api.getRecruitingCorrespondence(prisma, actor, target, "inbox"),
     ).rejects.toMatchObject({ code: "NOT_FOUND" });
   });
+  async function gmailObservation(
+    tool: string,
+    args: Record<string, unknown>,
+    body: unknown,
+    previous?: { tool: string; args: Record<string, unknown>; body: unknown },
+    failed = false,
+  ) {
+    const { client, prisma, retained } = fixture();
+    client.mcpServer.findMany.mockResolvedValueOnce([
+      {
+        id: "gmail",
+        name: "Gmail",
+        endpoint: "https://gmailmcp.googleapis.com/mcp/v1",
+        secretId: "encrypted-reference",
+        revision: 1,
+        enabled: true,
+        assignments: [{ botId: "main", allowAllTools: true, allowedTools: [] }],
+      },
+    ]);
+    const request = (toolName: string, args: Record<string, unknown>) => [
+      "__rakazoCatalogTool",
+      "direct",
+      {
+        route: { connectorId: "mcp", resourceId: "gmail", resourceRevision: 1, toolName },
+        args,
+      },
+    ];
+    const rows = [
+      { ...retained, status: failed ? "failed" : retained.status, request: request(tool, args) },
+    ];
+    const results = [{ id: retained.id, result: { structuredContent: body } }];
+    if (previous) {
+      rows.push({
+        ...retained,
+        id: "older",
+        request: request(previous.tool, previous.args),
+        updatedAt: new Date("2026-10-21T00:00:00Z"),
+      });
+      results.push({ id: "older", result: { structuredContent: previous.body } });
+    }
+    client.externalEffect.findMany
+      .mockReset()
+      .mockResolvedValueOnce(rows)
+      .mockResolvedValueOnce(results);
+    return api.getRecruitingCorrespondence(prisma, actor, target, "inbox");
+  }
+  const gmailMessage = {
+    id: "gmail-message",
+    threadId: "gmail-thread",
+    sender: "person@example.test",
+    toRecipients: ["team@example.test"],
+    subject: "Selected message",
+    date: "2026-10-22T01:00:00Z",
+    plaintextBody: "Provider plain text",
+    snippet: "Provider preview",
+    htmlBody: "<script>untrusted()</script>",
+    viewUrl: "https://mail.google.com/mail/u/0/#all/gmail-message",
+  };
+  it("projects an explicitly selected Gmail message using the official camelCase plain-text schema", async () => {
+    const result = await gmailObservation(
+      "get_message",
+      { messageId: gmailMessage.id, messageFormat: "PLAIN_TEXT" },
+      gmailMessage,
+    );
+    expect(result).toMatchObject({
+      status: "ready",
+      partial: true,
+      emails: [
+        {
+          id: "gmail:gmail-message",
+          sender: gmailMessage.sender,
+          recipients: gmailMessage.toRecipients,
+          subject: gmailMessage.subject,
+          date: gmailMessage.date,
+          body: gmailMessage.plaintextBody,
+          snippet: false,
+          url: gmailMessage.viewUrl,
+        },
+      ],
+    });
+    expect(JSON.stringify(result)).not.toContain("untrusted()");
+  });
+  it("projects only messages from the exact selected Gmail thread, newest first", async () => {
+    const result = await gmailObservation(
+      "get_thread",
+      { threadId: gmailMessage.threadId },
+      {
+        id: gmailMessage.threadId,
+        messages: [gmailMessage, { ...gmailMessage, id: "second", subject: "Newest message" }],
+      },
+    );
+    expect(result.status).toBe("ready");
+    expect(result.emails.map((message) => message.subject)).toEqual([
+      "Newest message",
+      gmailMessage.subject,
+    ]);
+  });
+  it.each([
+    {},
+    { threads: [{ id: "unselected", messages: [gmailMessage] }], nextPageToken: "next" },
+  ])(
+    "does not associate Gmail search discovery with the role or call undisplayed matches empty: %j",
+    async (body) => {
+      expect(await gmailObservation("search_threads", {}, body)).toMatchObject({
+        status: "not_checked",
+        partial: true,
+        emails: [],
+      });
+    },
+  );
+  it.each([
+    ["get_message", { messageId: "another-message" }, gmailMessage],
+    [
+      "get_thread",
+      { threadId: "another-thread" },
+      { id: gmailMessage.threadId, messages: [gmailMessage] },
+    ],
+    [
+      "get_thread",
+      { threadId: gmailMessage.threadId },
+      { id: gmailMessage.threadId, messages: [{ ...gmailMessage, threadId: "another-thread" }] },
+    ],
+  ])("rejects a Gmail selected-read identity mismatch for %s", async (tool, args, body) => {
+    expect(
+      await gmailObservation(tool as string, args as Record<string, unknown>, body),
+    ).toMatchObject({ status: "unsupported", emails: [] });
+  });
+  it.each([
+    ["MINIMAL", gmailMessage],
+    [
+      "FULL_CONTENT",
+      { id: gmailMessage.id, htmlBody: gmailMessage.htmlBody, snippet: gmailMessage.snippet },
+    ],
+  ])("keeps Gmail %s summaries or HTML-only bodies as previews", async (messageFormat, body) => {
+    expect(
+      await gmailObservation("get_message", { messageId: gmailMessage.id, messageFormat }, body),
+    ).toMatchObject({
+      status: "ready",
+      emails: [{ body: gmailMessage.snippet, snippet: true }],
+    });
+  });
+  it("bounds Gmail body display without claiming a truncated body is complete", async () => {
+    const result = await gmailObservation(
+      "get_message",
+      { messageId: gmailMessage.id },
+      { ...gmailMessage, plaintextBody: "a".repeat(50_001) },
+    );
+    expect(result.emails[0]?.body).toHaveLength(50_000);
+    expect(result.emails[0]?.snippet).toBe(true);
+  });
+  it("keeps missing Gmail metadata unknown and bounds selected thread display", async () => {
+    const metadata = await gmailObservation(
+      "get_message",
+      {
+        messageId: gmailMessage.id,
+        messageFormat: "METADATA_ONLY",
+      },
+      { id: gmailMessage.id },
+    );
+    expect(metadata.emails).toEqual([
+      {
+        id: "gmail:gmail-message",
+        sender: null,
+        recipients: [],
+        subject: "",
+        body: "",
+        snippet: true,
+        date: null,
+        url: null,
+      },
+    ]);
+    const thread = await gmailObservation(
+      "get_thread",
+      { threadId: gmailMessage.threadId },
+      {
+        id: gmailMessage.threadId,
+        messages: Array.from({ length: 51 }, (_, index) => ({
+          ...gmailMessage,
+          id: `message-${index}`,
+        })),
+      },
+    );
+    expect(thread.emails).toHaveLength(50);
+    expect(thread.partial).toBe(true);
+  });
+  it.each([
+    { ...gmailMessage, date: "not-a-date" },
+    { ...gmailMessage, toRecipients: "not-an-array" },
+  ])(
+    "rejects malformed Gmail display fields without exposing an unvalidated record",
+    async (body) => {
+      expect(
+        await gmailObservation("get_message", { messageId: gmailMessage.id }, body),
+      ).toMatchObject({ status: "unsupported", emails: [] });
+    },
+  );
+  it("does not replace a newer selected Gmail preview with an older thread body", async () => {
+    const result = await gmailObservation(
+      "get_message",
+      { messageId: gmailMessage.id, messageFormat: "MINIMAL" },
+      {
+        ...gmailMessage,
+        snippet: "Latest preview",
+      },
+      {
+        tool: "get_thread",
+        args: { threadId: gmailMessage.threadId },
+        body: { id: gmailMessage.threadId, messages: [gmailMessage] },
+      },
+    );
+    expect(result.emails).toHaveLength(1);
+    expect(result.emails[0]).toMatchObject({ body: "Latest preview", snippet: true });
+  });
+  it("does not revive older Gmail full content after a newer selected format failed validation", async () => {
+    expect(
+      await gmailObservation(
+        "get_message",
+        { messageId: gmailMessage.id, messageFormat: "MINIMAL" },
+        {},
+        {
+          tool: "get_message",
+          args: { messageId: gmailMessage.id, messageFormat: "FULL_CONTENT" },
+          body: gmailMessage,
+        },
+      ),
+    ).toMatchObject({ status: "unsupported", emails: [] });
+  });
+  it.each([false, true])(
+    "does not revive an older Gmail thread body after a newer selected message is invalid or failed: %s",
+    async (failed) => {
+      expect(
+        await gmailObservation(
+          "get_message",
+          { messageId: gmailMessage.id },
+          failed ? gmailMessage : { ...gmailMessage, date: "not-a-date" },
+          {
+            tool: "get_thread",
+            args: { threadId: gmailMessage.threadId },
+            body: { id: gmailMessage.threadId, messages: [gmailMessage] },
+          },
+          failed,
+        ),
+      ).toMatchObject({ status: failed ? "failed" : "unsupported", emails: [] });
+    },
+  );
+  it.each([false, true])(
+    "does not revive an older Gmail message after its selected thread is invalid or failed: %s",
+    async (failed) => {
+      expect(
+        await gmailObservation(
+          "get_thread",
+          { threadId: gmailMessage.threadId },
+          { id: gmailMessage.threadId, messages: failed ? [gmailMessage] : "not-an-array" },
+          {
+            tool: "get_message",
+            args: { messageId: gmailMessage.id },
+            body: gmailMessage,
+          },
+          failed,
+        ),
+      ).toMatchObject({ status: failed ? "failed" : "unsupported", emails: [] });
+    },
+  );
   it.each([false, true, undefined])(
     "projects the observed Cal text-only empty result without assuming pagination: %s",
     async (hasNextPage) => {

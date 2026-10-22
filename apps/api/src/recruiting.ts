@@ -288,7 +288,11 @@ export async function getRecruitingCorrespondence(
           ? { campaign_id: campaignId }
           : source.provider?.kind === "cal" && call.route.toolName === "get_availability"
             ? calAvailabilitySubject(call.args)
-            : query,
+            : source.provider?.kind === "gmail" && call.route.toolName !== "search_threads"
+              ? call.route.toolName === "get_message"
+                ? { messageId: call.args.messageId }
+                : { threadId: call.args.threadId }
+              : query,
       ]);
       // ponytail: Inbox shows the latest campaign check, not accumulated mailbox history; native cursor coverage stays explicit.
       // A new check replaces the prior observation, including empty/error.
@@ -336,6 +340,8 @@ export async function getRecruitingCorrespondence(
     let parsed = false;
     let failed = false;
     const emails = new Map<string, RecruitingCorrespondence["emails"][number]>();
+    const gmailMessages = new Map<string, string>();
+    const gmailThreads = new Map<string, string>();
     const mailMembership = new Set<string>();
     const events = new Map<string, RecruitingCorrespondence["events"][number]>();
     // Details may supplement only messages present in the latest selected campaign snapshot.
@@ -350,6 +356,17 @@ export async function getRecruitingCorrespondence(
         (typeof call.args.id !== "string" || !emails.has(`${source.id}:${call.args.id}`))
       )
         continue;
+      if (provider.kind === "gmail" && call.route.toolName !== "search_threads") {
+        const thread = call.route.toolName === "get_thread";
+        const selectedId = thread ? call.args.threadId : call.args.messageId;
+        if (typeof selectedId === "string" && selectedId.trim()) {
+          const claims = thread ? gmailThreads : gmailMessages;
+          const key = `${source.id}:${selectedId}`;
+          if (claims.has(key)) continue;
+          // The latest authorized identity observation replaces older bodies even on failure.
+          claims.set(key, effect.id);
+        }
+      }
       const result = byId.get(effect.id);
       if (result === undefined) continue;
       output.checkedAt ??= effect.updatedAt.toISOString();
@@ -513,6 +530,70 @@ export async function getRecruitingCorrespondence(
             continue;
           }
           if (!events.has(id)) events.set(id, event.data);
+        }
+        continue;
+      }
+      if (provider.kind === "gmail" && body) {
+        // ponytail: selected native reads leave mailbox coverage and canonical role association unknown.
+        output.partial = true;
+        if (call.route.toolName === "search_threads") continue;
+        const thread = call.route.toolName === "get_thread";
+        const selectedId = thread ? call.args.threadId : call.args.messageId;
+        if (typeof selectedId !== "string" || !selectedId.trim() || body.id !== selectedId) {
+          unsupported = true;
+          continue;
+        }
+        const rows = thread ? (body.messages === undefined ? [] : body.messages) : [body];
+        if (!Array.isArray(rows)) {
+          unsupported = true;
+          continue;
+        }
+        const format = call.args.messageFormat;
+        const full =
+          format === undefined ||
+          format === "MESSAGE_FORMAT_UNSPECIFIED" ||
+          format === "FULL_CONTENT" ||
+          format === "PLAIN_TEXT";
+        parsed = true;
+        for (const value of rows.toReversed()) {
+          const row = correspondenceRecord(value);
+          if (
+            typeof row?.id !== "string" ||
+            !row.id.trim() ||
+            (thread && row.threadId !== undefined && row.threadId !== selectedId)
+          ) {
+            unsupported = true;
+            continue;
+          }
+          const threadId = thread ? selectedId : row.threadId;
+          const threadOwner =
+            typeof threadId === "string" ? gmailThreads.get(`${source.id}:${threadId}`) : undefined;
+          const id = `${source.id}:${row.id}`;
+          const messageOwner = gmailMessages.get(id);
+          if (
+            (threadOwner && threadOwner !== effect.id) ||
+            (messageOwner && messageOwner !== effect.id)
+          )
+            continue;
+          gmailMessages.set(id, effect.id);
+          const plain = full ? row.plaintextBody : undefined;
+          const text =
+            typeof plain === "string" ? plain : typeof row.snippet === "string" ? row.snippet : "";
+          const message = RecruitingCorrespondenceSchema.shape.emails.element.safeParse({
+            id,
+            sender: row.sender ?? null,
+            recipients: row.toRecipients ?? [],
+            subject: row.subject ?? "",
+            body: text.slice(0, 50_000),
+            snippet: typeof plain !== "string" || text.length > 50_000,
+            date: row.date ?? null,
+            url: row.viewUrl ?? null,
+          });
+          if (!message.success) {
+            unsupported = true;
+            continue;
+          }
+          if (!emails.has(message.data.id)) emails.set(message.data.id, message.data);
         }
         continue;
       }
