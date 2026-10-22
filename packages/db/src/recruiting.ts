@@ -5634,7 +5634,8 @@ export async function listRecruitingResearch(
   actor: Actor,
   input: { roleId: string },
 ) {
-  return prisma.$transaction(
+  const afterRead: Array<() => void> = [];
+  const result = await prisma.$transaction(
     async (tx) => {
       const role = await requireRole(tx, actor, input.roleId);
       const rows = await tx.recruitingResearchTask.findMany({
@@ -5689,7 +5690,7 @@ export async function listRecruitingResearch(
         orderBy: [{ observedAt: "asc" }, { effectId: "asc" }],
         include: { effect: { select: { runId: true, request: true } } },
       });
-      await candidatePageArtifacts(tx, actor, pages);
+      await candidatePageArtifacts(tx, actor, pages, false, afterRead);
       const observations = [];
       for (const page of pages) {
         const call = researchReadRequest(page.effect.request, undefined, "get_rows");
@@ -5710,6 +5711,8 @@ export async function listRecruitingResearch(
     },
     { isolationLevel: Prisma.TransactionIsolationLevel.RepeatableRead },
   );
+  for (const verify of afterRead) verify();
+  return result;
 }
 
 async function indexRecruitingCandidateRows(
@@ -6152,6 +6155,7 @@ async function candidatePageArtifacts(
   actor: Actor,
   pages: Prisma.RecruitingCandidatePageGetPayload<Record<string, never>>[],
   canonical = false,
+  afterRead?: Array<() => void>,
 ): Promise<Map<string, Prisma.ArtifactGetPayload<Record<string, never>>>> {
   const nativeIds = pages
     .filter((page) => page.taskId === null && page.actionId === null)
@@ -6224,7 +6228,7 @@ async function candidatePageArtifacts(
       id,
       status,
       request,
-      result: resultJson === null ? null : JSON.parse(resultJson),
+      resultJson,
       run,
       recruitingCandidatePage: artifact.id ? { artifact } : null,
     }),
@@ -6280,9 +6284,6 @@ async function candidatePageArtifacts(
       createdAt: event.createdAt.toISOString(),
     }).payload;
     const artifact = effect.recruitingCandidatePage?.artifact;
-    const bytes = Buffer.from(
-      stableJsonValue({ request: effect.request, providerResult: effect.result }),
-    );
     if (
       !artifact ||
       artifact.id !== page.artifactId ||
@@ -6292,8 +6293,6 @@ async function candidatePageArtifacts(
       artifact.botId !== run.botId ||
       artifact.clientNonce !== `recruiting-observation:${effect.id}` ||
       artifact.hash !== page.artifactHash ||
-      artifact.size !== bytes.length ||
-      artifact.hash !== createHash("sha256").update(bytes).digest("hex") ||
       event.runId !== run.id ||
       event.threadId !== run.threadId ||
       event.botId !== run.botId ||
@@ -6308,6 +6307,23 @@ async function candidatePageArtifacts(
         stableJsonValue({ artifactId: artifact.id, sha256: artifact.hash })
     )
       throw new IsolationError();
+    const verifyBytes = () => {
+      const bytes = Buffer.from(
+        stableJsonValue({
+          request: effect.request,
+          providerResult: effect.resultJson === null ? null : JSON.parse(effect.resultJson),
+        }),
+      );
+      if (
+        artifact.size !== bytes.length ||
+        artifact.hash !== createHash("sha256").update(bytes).digest("hex")
+      )
+        throw new IsolationError();
+    };
+    // Read-only callers verify captured bytes before return without holding the database snapshot.
+    // Mutating callers omit afterRead and keep this check inside their atomic transaction.
+    if (afterRead) afterRead.push(verifyBytes);
+    else verifyBytes();
     artifacts.set(page.effectId, artifact);
   }
   return artifacts;
@@ -6551,6 +6567,7 @@ async function candidateProfilePages(
   actor: Actor,
   roleId: string,
   rows: Pick<CandidateQueryRow, "sourcePageId" | "profileSourcePageIds">[],
+  afterRead?: Array<() => void>,
 ) {
   const pageIds = [
     ...new Set(
@@ -6573,7 +6590,7 @@ async function candidateProfilePages(
   for (const page of pages.values()) {
     if (page.roleId !== roleId) throw new IsolationError();
   }
-  await candidatePageArtifacts(tx, actor, [...pages.values()]);
+  await candidatePageArtifacts(tx, actor, [...pages.values()], false, afterRead);
   return pages;
 }
 
@@ -7917,6 +7934,7 @@ async function crmSourceSync(
     }>[];
     binding?: Awaited<ReturnType<typeof crmBindingReceipt>>;
   },
+  afterRead?: Array<() => void>,
 ): Promise<Map<string, RecruitingCrmCandidateSync>> {
   const syncs = new Map<string, RecruitingCrmCandidateSync>();
   if (!links.length) return syncs;
@@ -7936,7 +7954,7 @@ async function crmSourceSync(
     if (page.taskId === null && page.actionId === null && !pages.has(page.effectId))
       missing.set(page.effectId, page);
   }
-  await candidatePageArtifacts(tx, actor, [...missing.values()], true);
+  await candidatePageArtifacts(tx, actor, [...missing.values()], true, afterRead);
   for (const [id, page] of missing) pages.set(id, page);
   const ownerScope = { spaceId: actor.spaceId, userId: actor.userId };
   const owners = new Map(
@@ -8052,7 +8070,8 @@ export async function listRecruitingCandidates(
   raw: CandidatesInput,
 ): Promise<CandidatesOutput> {
   const input = ListRecruitingCandidatesInput.parse(raw);
-  return prisma.$transaction(
+  const afterRead: Array<() => void> = [];
+  const result = await prisma.$transaction(
     async (tx) => {
       const role = await requireRole(tx, actor, input.roleId);
       const sort = input.sort ?? "rank";
@@ -8183,7 +8202,8 @@ export async function listRecruitingCandidates(
         }) => (row.candidateKey === null ? [] : [row]),
       );
       const selected = rows.slice(0, limit);
-      const pages = await candidateProfilePages(tx, actor, role.id, selected);
+      const pages = await candidateProfilePages(tx, actor, role.id, selected, afterRead);
+
       const last = selected.at(-1);
       const {
         total,
@@ -8225,11 +8245,13 @@ export async function listRecruitingCandidates(
         for (const link of imports)
           if (!latest.has(link.occurrence.candidateKey))
             latest.set(link.occurrence.candidateKey, link);
-        const projected = await crmSourceSync(tx, actor, [...latest.values()], {
-          pages,
-          sources: imports.map((link) => link.occurrence),
-          binding: bound,
-        });
+        const projected = await crmSourceSync(
+          tx,
+          actor,
+          [...latest.values()],
+          { pages, sources: imports.map((link) => link.occurrence), binding: bound },
+          afterRead,
+        );
         for (const [key, link] of latest) syncs.set(key, projected.get(link.effectId)!);
       }
       return ListRecruitingCandidatesOutput.parse({
@@ -8285,6 +8307,8 @@ export async function listRecruitingCandidates(
     },
     { isolationLevel: Prisma.TransactionIsolationLevel.RepeatableRead },
   );
+  for (const verify of afterRead) verify();
+  return result;
 }
 
 export async function setRecruitingCandidateShortlist(
@@ -8505,7 +8529,8 @@ export async function listRecruitingCandidateSources(
   raw: CandidateSourcesInput,
 ): Promise<CandidateSourcesOutput> {
   const input = ListRecruitingCandidateSourcesInput.parse(raw);
-  return prisma.$transaction(
+  const afterRead: Array<() => void> = [];
+  const result = await prisma.$transaction(
     async (tx) => {
       const role = await requireRole(tx, actor, input.roleId);
       const candidate = await tx.recruitingCandidate.findUnique({
@@ -8548,7 +8573,7 @@ export async function listRecruitingCandidateSources(
         if (page.roleId !== role.id) throw new IsolationError();
         pages.set(page.effectId, page);
       }
-      await candidatePageArtifacts(tx, actor, [...pages.values()]);
+      await candidatePageArtifacts(tx, actor, [...pages.values()], false, afterRead);
       const last = selected.at(-1);
       const syncs = new Map<string, RecruitingCrmCandidateSync[]>(
         selected.map((row) => [`${row.pageId}:${row.rowIndex}`, []]),
@@ -8571,7 +8596,13 @@ export async function listRecruitingCandidateSources(
         )
           throw new IsolationError();
       }
-      const projected = await crmSourceSync(tx, actor, imports, { pages, sources: selected });
+      const projected = await crmSourceSync(
+        tx,
+        actor,
+        imports,
+        { pages, sources: selected },
+        afterRead,
+      );
       for (const link of imports)
         syncs.get(`${link.pageId}:${link.rowIndex}`)!.push(projected.get(link.effectId)!);
       return ListRecruitingCandidateSourcesOutput.parse({
@@ -8590,4 +8621,6 @@ export async function listRecruitingCandidateSources(
     },
     { isolationLevel: Prisma.TransactionIsolationLevel.RepeatableRead },
   );
+  for (const verify of afterRead) verify();
+  return result;
 }
