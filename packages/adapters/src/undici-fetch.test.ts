@@ -1,5 +1,5 @@
 import { createServer } from "node:http";
-import { parseErrorResponse } from "@modelcontextprotocol/sdk/client/auth.js";
+import { parseErrorResponse } from "@modelcontextprotocol/client";
 import { Agent, Response as UndiciResponse } from "undici";
 import { describe, expect, it } from "vitest";
 import { dispatcherFetch, fetchPairedWithDispatcher } from "./undici-fetch.js";

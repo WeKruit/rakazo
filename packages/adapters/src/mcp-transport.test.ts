@@ -1,6 +1,12 @@
 import { strict as assert } from "node:assert";
 import { createServer } from "node:http";
 import type { AddressInfo } from "node:net";
+import {
+  InsufficientScopeError,
+  RegistrationRejectedError,
+  SSEClientTransport,
+  StreamableHTTPClientTransport,
+} from "@modelcontextprotocol/client";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { StoredMcpOAuthProvider } from "./mcp-oauth.js";
 import {
@@ -28,6 +34,252 @@ function logicalHref(input: string | URL | Request, init?: RequestInit): string 
 }
 
 describe("MCP transport seam", () => {
+  it.each(["extra field", "error code"])(
+    "withholds OAuth credential echoes in %s from native SDK errors and warnings",
+    async (kind) => {
+      const credential = "private-protocol-token";
+      const warning = vi.spyOn(console, "warn").mockImplementation(() => undefined);
+      const provider = new StoredMcpOAuthProvider(
+        "server-1",
+        {
+          secret: credential,
+          oauth: {
+            redirectUri: "http://127.0.0.1:5173/mcp/oauth/callback",
+            discoveryState: {
+              authorizationServerUrl: "https://auth.example.test",
+              authorizationServerMetadata: {
+                issuer: "https://auth.example.test",
+                authorization_endpoint: "https://auth.example.test/authorize",
+                token_endpoint: "https://auth.example.test/token",
+                registration_endpoint: "https://auth.example.test/register",
+                response_types_supported: ["code"],
+              },
+            },
+          },
+        },
+        async () => undefined,
+      );
+      const session = new McpSession();
+      try {
+        const error = await session
+          .connectRemote({
+            url: "https://mcp.example.test/mcp",
+            fallbackToSse: false,
+            authProvider: provider,
+            network: {
+              ...TEST_NETWORK,
+              fetch: async (input, init) => {
+                if (logicalHref(input, init) === "https://auth.example.test/register")
+                  return Response.json(
+                    {
+                      error: kind === "error code" ? credential : "registration_not_supported",
+                      error_description: "Public registration rejection",
+                      debug: credential,
+                    },
+                    { status: 400 },
+                  );
+                return new Response(null, { status: 401 });
+              },
+            },
+          })
+          .catch((failure: unknown) => failure);
+        expect(error).toBeInstanceOf(RegistrationRejectedError);
+        expect((error as RegistrationRejectedError).body).not.toContain(credential);
+        expect(JSON.parse((error as RegistrationRejectedError).body)).toEqual({
+          error: kind === "error code" ? "[redacted]" : "registration_not_supported",
+          error_description: "Public registration rejection",
+        });
+        expect(JSON.stringify(warning.mock.calls)).not.toContain(credential);
+      } finally {
+        await session.close();
+        warning.mockRestore();
+      }
+    },
+  );
+
+  it("withholds thrown refresh credential echoes from native SDK warnings", async () => {
+    const credential = "private-refresh-token";
+    const warning = vi.spyOn(console, "warn").mockImplementation(() => undefined);
+    const provider = new StoredMcpOAuthProvider(
+      "server-1",
+      {
+        oauth: {
+          redirectUri: "http://127.0.0.1:5173/mcp/oauth/callback",
+          clientInformation: { client_id: "client", issuer: "https://auth.example.test" },
+          tokens: {
+            access_token: "access",
+            token_type: "Bearer",
+            refresh_token: credential,
+            issuer: "https://auth.example.test",
+          },
+          discoveryState: {
+            authorizationServerUrl: "https://auth.example.test",
+            authorizationServerMetadata: {
+              issuer: "https://auth.example.test",
+              authorization_endpoint: "https://auth.example.test/authorize",
+              token_endpoint: "https://auth.example.test/token",
+              response_types_supported: ["code"],
+            },
+          },
+        },
+      },
+      async () => undefined,
+    );
+    const session = new McpSession();
+    try {
+      await expect(
+        session.connectRemote({
+          url: "https://mcp.example.test/mcp",
+          fallbackToSse: false,
+          authProvider: provider,
+          network: {
+            ...TEST_NETWORK,
+            fetch: async (input, init) => {
+              if (logicalHref(input, init) === "https://auth.example.test/token")
+                throw new Error(`Network rejected ${credential}`);
+              return new Response(null, { status: 401 });
+            },
+          },
+        }),
+      ).rejects.toThrow();
+      expect(JSON.stringify(warning.mock.calls)).not.toContain(credential);
+    } finally {
+      await session.close();
+      warning.mockRestore();
+    }
+  });
+
+  it("retains native output-schema validation after tool discovery", async () => {
+    const session = new McpSession();
+    const fetch = async (input: string | URL | Request, init?: RequestInit) => {
+      const request = input instanceof Request ? input : new Request(input, init);
+      if (request.method === "GET") return new Response(null, { status: 405 });
+      const message = await request.json();
+      if (message.id == null) return new Response(null, { status: 202 });
+      const result =
+        message.method === "initialize"
+          ? {
+              protocolVersion: "2025-11-25",
+              serverInfo: { name: "test", version: "1" },
+              capabilities: { tools: {} },
+            }
+          : message.method === "tools/list"
+            ? {
+                tools: [
+                  {
+                    name: "read_count",
+                    inputSchema: { type: "object" },
+                    outputSchema: {
+                      type: "object",
+                      properties: { count: { type: "integer" } },
+                      required: ["count"],
+                    },
+                  },
+                ],
+              }
+            : { content: [], structuredContent: { count: "invalid" } };
+      return Response.json({ jsonrpc: "2.0", id: message.id, result });
+    };
+    try {
+      await session.connectRemote({
+        url: "https://mcp.example.test/mcp",
+        fallbackToSse: false,
+        network: { ...TEST_NETWORK, fetch },
+      });
+      await session.listTools();
+      await expect(session.callTool("read_count")).rejects.toThrow(/output|schema|validation/i);
+    } finally {
+      await session.close();
+    }
+  });
+  it.each(["streamable-http", "sse"])(
+    "uses the native %s GET refresh hook and retries once",
+    async (kind) => {
+      let token = "old";
+      const headers: string[] = [];
+      const refreshed = vi.fn(async () => {
+        token = "new";
+      });
+      const fetch = vi.fn(async (_input: string | URL, init?: RequestInit) => {
+        headers.push(new Headers(init?.headers).get("authorization") ?? "");
+        if (headers.at(-1) === "Bearer old") return new Response(null, { status: 401 });
+        if (kind === "streamable-http") return new Response(null, { status: 405 });
+        return new Response(
+          new ReadableStream({
+            start(controller) {
+              controller.enqueue(new TextEncoder().encode("event: endpoint\ndata: /messages\n\n"));
+            },
+          }),
+          { headers: { "content-type": "text/event-stream" } },
+        );
+      });
+      const options = {
+        fetch,
+        authProvider: { token: async () => token, onUnauthorized: refreshed },
+      };
+      const transport =
+        kind === "sse"
+          ? new SSEClientTransport(new URL("https://mcp.example.test/sse"), options)
+          : new StreamableHTTPClientTransport(new URL("https://mcp.example.test/mcp"), options);
+      try {
+        await transport.start();
+        if (transport instanceof StreamableHTTPClientTransport)
+          await transport.resumeStream("saved-cursor");
+        expect(refreshed).toHaveBeenCalledOnce();
+        expect(headers).toEqual(["Bearer old", "Bearer new"]);
+      } finally {
+        await transport.close();
+      }
+    },
+  );
+
+  it("does not repeat native POST refresh after a second 401", async () => {
+    const onUnauthorized = vi.fn(async () => undefined);
+    const fetch = vi.fn(async () => new Response(null, { status: 401 }));
+    const session = new McpSession();
+    try {
+      await expect(
+        session.connectRemote({
+          url: "https://mcp.example.test/mcp",
+          fallbackToSse: false,
+          authProvider: { token: async () => "token", onUnauthorized },
+          network: { ...TEST_NETWORK, fetch },
+        }),
+      ).rejects.toThrow(/401|re-authentication/i);
+      expect(onUnauthorized).toHaveBeenCalledOnce();
+      expect(fetch).toHaveBeenCalledTimes(2);
+    } finally {
+      await session.close();
+    }
+  });
+
+  it("surfaces native scope expansion without refreshing or widening consent", async () => {
+    const onUnauthorized = vi.fn(async () => undefined);
+    const session = new McpSession();
+    try {
+      await expect(
+        session.connectRemote({
+          url: "https://mcp.example.test/mcp",
+          fallbackToSse: false,
+          authProvider: { token: async () => "token", onUnauthorized },
+          network: {
+            ...TEST_NETWORK,
+            fetch: async () =>
+              new Response(null, {
+                status: 403,
+                headers: {
+                  "WWW-Authenticate": 'Bearer error="insufficient_scope", scope="mail.send"',
+                },
+              }),
+          },
+        }),
+      ).rejects.toBeInstanceOf(InsufficientScopeError);
+      expect(onUnauthorized).not.toHaveBeenCalled();
+    } finally {
+      await session.close();
+    }
+  });
+
   it("rejects unsafe URLs and oversized URLs before network access", () => {
     expect(() => validateUrl("http://remote.example/mcp")).toThrow("HTTPS");
     expect(() => validateUrl("https://user:pass@example.com/mcp")).toThrow("credentials");
@@ -312,8 +564,13 @@ describe("MCP transport seam", () => {
       {
         oauth: {
           redirectUri: "http://127.0.0.1:5173/mcp/oauth/callback",
-          tokens: { access_token: "stale-access", refresh_token: "refresh", token_type: "bearer" },
-          clientInformation: { client_id: "client-1" },
+          tokens: {
+            access_token: "stale-access",
+            refresh_token: "refresh",
+            token_type: "bearer",
+            issuer: "https://auth.example.test",
+          },
+          clientInformation: { client_id: "client-1", issuer: "https://auth.example.test" },
           discoveryState: {
             authorizationServerUrl: "https://auth.example.test",
             resourceMetadata: {

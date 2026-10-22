@@ -1,18 +1,24 @@
 import { randomUUID } from "node:crypto";
 import { isDeepStrictEqual } from "node:util";
 import type {
-  OAuthClientProvider,
-  OAuthDiscoveryState,
-} from "@modelcontextprotocol/sdk/client/auth.js";
-import { auth, refreshAuthorization } from "@modelcontextprotocol/sdk/client/auth.js";
-import { Client } from "@modelcontextprotocol/sdk/client/index.js";
-import { StreamableHTTPClientTransport } from "@modelcontextprotocol/sdk/client/streamableHttp.js";
-import { InvalidGrantError } from "@modelcontextprotocol/sdk/server/auth/errors.js";
-import type {
+  FetchLike,
   OAuthClientInformationMixed,
   OAuthClientMetadata,
-  OAuthTokens,
-} from "@modelcontextprotocol/sdk/shared/auth.js";
+  OAuthClientProvider,
+  OAuthDiscoveryState,
+  StoredOAuthClientInformation,
+  StoredOAuthTokens,
+} from "@modelcontextprotocol/client";
+import {
+  auth,
+  Client,
+  extractWWWAuthenticateParams,
+  OAuthError,
+  OAuthErrorCode,
+  RegistrationRejectedError,
+  refreshAuthorization,
+  StreamableHTTPClientTransport,
+} from "@modelcontextprotocol/client";
 import type { SecretStore } from "@rakazo/adapter-kit";
 import { SecretStoreUnavailableError } from "@rakazo/adapter-kit";
 import type { McpOAuthConfig } from "@rakazo/contracts";
@@ -21,15 +27,17 @@ import { readBoundedResponseBytes } from "@rakazo/core";
 import type { PrismaClient } from "@rakazo/db";
 import { getLogger } from "@rakazo/logging";
 import { combineSignals, sanitizeConnectorError } from "./connector-safety.js";
+import type { McpRuntimeAuth } from "./mcp-transport.js";
 import { secureFetch, validateUrl, withEndpointOriginFallback } from "./mcp-transport.js";
 import { actorMayUsePrivateEndpoint } from "./private-endpoint.js";
 import type { RemoteTransportDependencies } from "./remote-mcp.js";
+import { deferSecretChanges } from "./secret-changes.js";
 import { persistPreparedSecret } from "./secret-persistence.js";
 
 type OAuthState = {
-  tokens?: OAuthTokens;
+  tokens?: StoredOAuthTokens;
   obtainedAt?: number;
-  clientInformation?: OAuthClientInformationMixed;
+  clientInformation?: StoredOAuthClientInformation;
   preRegistered?: boolean;
   scope?: string;
   authorizationParams?: Record<string, string>;
@@ -197,6 +205,15 @@ type ProviderOptions = {
   onPersisted?: (record: { id: string; ref: string; material: OAuthMaterial }) => void;
   /** Network for renewing an expired access token through its stored refresh token. */
   refreshNetwork?: () => Promise<{ fetch: typeof fetch; close: () => Promise<void> }>;
+  refresh?: (rejected?: RejectedMcpRequest) => Promise<void>;
+  generation?: () => string | undefined;
+};
+
+type RejectedMcpRequest = {
+  bearer: string | null;
+  generation?: string;
+  response: Response;
+  signal?: AbortSignal;
 };
 
 /** Refresh before expiry to cover clock skew and request time. */
@@ -208,6 +225,68 @@ export class StoredMcpOAuthProvider implements OAuthClientProvider {
   private readonly runtimeState = randomUUID();
   private persistQueue = Promise.resolve();
   private refreshing?: Promise<void>;
+  private readonly rejectedRequests = new WeakMap<Response, RejectedMcpRequest>();
+
+  readonly runtimeAuth: McpRuntimeAuth = {
+    provider: {
+      token: async () => (await this.tokens())?.access_token,
+      onUnauthorized: async (context) => {
+        const rejected = this.rejectedRequests.get(context.response);
+        if (!rejected) throw new McpReauthorizationRequiredError(this.serverId);
+        const fetchFn: FetchLike = async (input, init) => {
+          try {
+            const response = await context.fetchFn(input, init);
+            if (response.ok) return response;
+            const rejection = await readOAuthRejection(response);
+            return rejection
+              ? redactOAuthRejectionResponse(
+                  response,
+                  rejection,
+                  oauthMaterialSecrets(this.material),
+                )
+              : opaqueOAuthFailure(response);
+          } catch (error) {
+            const message = sanitizeConnectorError(error, oauthMaterialSecrets(this.material));
+            if (error instanceof Error && error.message === message) throw error;
+            throw new Error(message);
+          }
+        };
+        if (this.options.refresh) {
+          try {
+            await this.options.refresh(rejected);
+          } catch (error) {
+            if (!this.options.onAuthorization || this.material.oauth?.tokens) throw error;
+          }
+        } else {
+          const challenge = extractWWWAuthenticateParams(context.response);
+          await auth(this, {
+            serverUrl: context.serverUrl,
+            fetchFn,
+            resourceMetadataUrl: challenge.resourceMetadataUrl,
+            scope: challenge.scope,
+          });
+          return;
+        }
+        if (!this.material.oauth?.tokens) {
+          if (!this.options.onAuthorization)
+            throw new McpReauthorizationRequiredError(this.serverId);
+          await auth(this, { serverUrl: context.serverUrl, fetchFn });
+        }
+      },
+    },
+    wrapFetch: (fetch) => async (input, init) => {
+      const observed = {
+        bearer: new Headers(
+          init?.headers ?? (input instanceof Request ? input.headers : undefined),
+        ).get("authorization"),
+        generation: this.options.generation?.(),
+        signal: init?.signal ?? (input instanceof Request ? input.signal : undefined),
+      };
+      const response = await fetch(input, init);
+      if (response.status === 401) this.rejectedRequests.set(response, { ...observed, response });
+      return response;
+    },
+  };
 
   constructor(
     readonly serverId: string,
@@ -255,9 +334,11 @@ export class StoredMcpOAuthProvider implements OAuthClientProvider {
    * expiry, so the SDK's 401-driven refresh does not run. Renew from the stored
    * expiry before returning a token that has lapsed.
    */
-  async tokens(): Promise<OAuthTokens | undefined> {
+  async tokens(): Promise<StoredOAuthTokens | undefined> {
     if (this.options.refreshNetwork && this.accessTokenExpired()) {
-      this.refreshing ??= this.refreshExpiredToken().finally(() => {
+      this.refreshing ??= (
+        this.options.refresh ? this.options.refresh() : this.refreshExpiredToken()
+      ).finally(() => {
         this.refreshing = undefined;
       });
       await this.refreshing;
@@ -295,7 +376,7 @@ export class StoredMcpOAuthProvider implements OAuthClientProvider {
       });
       await this.saveTokens(next);
     } catch (error) {
-      if (error instanceof InvalidGrantError) {
+      if (error instanceof OAuthError && error.code === OAuthErrorCode.InvalidGrant) {
         // A revoked refresh token cannot recover through a second SDK attempt.
         // Clear only the grant so the existing authorization path requests reconnect.
         await this.invalidateCredentials("tokens");
@@ -306,7 +387,7 @@ export class StoredMcpOAuthProvider implements OAuthClientProvider {
     }
   }
 
-  async saveTokens(value: OAuthTokens): Promise<void> {
+  async saveTokens(value: StoredOAuthTokens): Promise<void> {
     const oauth = this.oauth();
     oauth.tokens = value;
     oauth.obtainedAt = Date.now();
@@ -483,7 +564,15 @@ function oauthFetch(
       const response = await fallbackFetch(input, init);
       if (!response.ok) {
         const next = await readOAuthRejection(response);
-        if (next) rejection = next;
+        if (next) {
+          rejection = next;
+          // Native OAuth recovery logs error descriptions before returning to our redactor.
+          return redactOAuthRejectionResponse(response, next, [
+            ...oauthMaterialSecrets(material),
+            ...redactionSecrets,
+          ]);
+        }
+        return opaqueOAuthFailure(response);
       }
       return response;
     } catch (error) {
@@ -499,7 +588,7 @@ function oauthFetch(
       if (error instanceof Error && networkErrors.has(error)) return error;
       const secrets = [...oauthMaterialSecrets(material), ...redactionSecrets];
       const sdk = sanitizeConnectorError(error, secrets);
-      const surfaced = rejection ? formatOAuthRejection(rejection, sdk, secrets) : undefined;
+      const surfaced = rejection ? formatOAuthRejection(rejection, sdk, secrets, error) : undefined;
       getLogger().warn(`${message}: ${surfaced ?? sdk}`);
       return new Error(surfaced ? `${message}: ${surfaced}` : message);
     },
@@ -507,6 +596,29 @@ function oauthFetch(
 }
 
 type OAuthRejection = { status: number; code: string; description: string };
+
+function opaqueOAuthFailure(response: Response): Response {
+  const headers = new Headers(response.headers);
+  headers.delete("content-length");
+  return new Response(null, { status: response.status, statusText: response.statusText, headers });
+}
+
+function redactOAuthRejectionResponse(
+  response: Response,
+  rejection: OAuthRejection,
+  secrets: string[],
+): Response {
+  const description = sanitizeConnectorError(rejection.description, secrets);
+  const code = sanitizeConnectorError(rejection.code, secrets);
+  const headers = new Headers(response.headers);
+  headers.delete("content-length");
+  headers.set("content-type", "application/json");
+  return new Response(JSON.stringify({ error: code, error_description: description }), {
+    status: response.status,
+    statusText: response.statusText,
+    headers,
+  });
+}
 
 const OAUTH_ERROR_BODY_MAX_CHARS = 8_000;
 // A JavaScript character is at most 3 UTF-8 bytes, so a longer body cannot pass the character cap.
@@ -555,12 +667,29 @@ function formatOAuthRejection(
   rejection: OAuthRejection,
   sdk: string,
   secrets: string[],
+  error: unknown,
 ): string | undefined {
   if (sdk.includes("Raw body:")) return undefined;
   // Redact the whole description first. A later cut can land inside a secret, and
   // the redactor only matches the complete value.
   const cleaned = sanitizeConnectorError(rejection.description, secrets);
-  if (cleaned.trim() !== sdk.trim()) return undefined;
+  if (error instanceof RegistrationRejectedError) {
+    let body: { error?: unknown; error_description?: unknown };
+    try {
+      body = JSON.parse(error.body);
+    } catch {
+      return undefined;
+    }
+    if (
+      error.status !== rejection.status ||
+      body.error !== rejection.code ||
+      sanitizeConnectorError(
+        typeof body.error_description === "string" ? body.error_description : "",
+        secrets,
+      ).trim() !== cleaned.trim()
+    )
+      return undefined;
+  } else if (cleaned.trim() !== sdk.trim()) return undefined;
   const description = cleaned.replace(/\s+/g, " ").trim().slice(0, 300);
   const detail = description ? `${rejection.code}: ${description}` : rejection.code;
   return sanitizeConnectorError(`HTTP ${rejection.status} ${detail}`, secrets);
@@ -599,7 +728,7 @@ export class McpOAuthBroker {
     context: ActorRef,
     loaded?: { material: OAuthMaterial; secretId?: string },
     onPersisted?: ProviderOptions["onPersisted"],
-  ): Promise<OAuthClientProvider | undefined> {
+  ): Promise<StoredMcpOAuthProvider | undefined> {
     const material = loaded ?? (await this.loadMaterial(server, context));
     if (!material.material.oauth) return undefined;
     return this.createProvider(server, context, material, { onPersisted });
@@ -684,6 +813,7 @@ export class McpOAuthBroker {
       },
     });
     const initialOAuth = structuredClone(loaded.material.oauth);
+    const initialSecretId = loaded.secretId;
     // Never destroy working tokens here: if this attempt fails (network error,
     // cancelled popup), the server keeps its valid connection. The SDK itself
     // invalidates dead tokens when a refresh is rejected with invalid_grant.
@@ -696,10 +826,14 @@ export class McpOAuthBroker {
     );
     const transport = new StreamableHTTPClientTransport(endpoint, {
       requestInit: { headers: networkFetch.headers },
-      authProvider: provider,
-      fetch: networkFetch.fetch,
+      authProvider: provider.runtimeAuth.provider,
+      fetch: provider.runtimeAuth.wrapFetch(networkFetch.fetch),
+      onInsufficientScope: "throw",
     });
-    const client = new Client({ name: "rakazo-oauth", version: "0.1.0" });
+    const client = new Client(
+      { name: "rakazo-oauth", version: "0.1.0" },
+      { enforceStrictCapabilities: true },
+    );
     const signal = AbortSignal.timeout(15_000);
     try {
       await client.connect(transport, { signal, timeout: 15_000 });
@@ -725,7 +859,10 @@ export class McpOAuthBroker {
     }
     if (!authorizationUrl) {
       if (await provider.tokens()) {
-        if (!isDeepStrictEqual(initialOAuth, loaded.material.oauth))
+        if (
+          loaded.secretId === initialSecretId &&
+          !isDeepStrictEqual(initialOAuth, loaded.material.oauth)
+        )
           await this.replaceMaterial(
             server.id,
             loaded.material,
@@ -790,6 +927,7 @@ export class McpOAuthBroker {
     sessionId: string;
     code: string;
     state: string;
+    iss?: string;
     spaceId: string;
     userId: string;
   }): Promise<void> {
@@ -876,7 +1014,7 @@ export class McpOAuthBroker {
       fetch: networkFetch.fetch,
     });
     try {
-      await transport.finishAuth(input.code);
+      await transport.finishAuth(input.code, input.iss);
     } catch (error) {
       throw networkFetch.publicError(error, "Could not complete MCP OAuth");
     } finally {
@@ -945,7 +1083,7 @@ export class McpOAuthBroker {
     options: ProviderOptions = {},
   ): StoredMcpOAuthProvider {
     const { id, endpoint, revision } = server;
-    return new StoredMcpOAuthProvider(
+    const provider = new StoredMcpOAuthProvider(
       id,
       loaded.material,
       async (material) => {
@@ -977,8 +1115,171 @@ export class McpOAuthBroker {
             }
           : {}),
         ...options,
+        generation: () => loaded.secretId,
+        ...(!options.interactive || loaded.material.oauth?.tokens
+          ? {
+              refresh: async (rejected?: RejectedMcpRequest) => {
+                if (!endpoint) throw new McpReauthorizationRequiredError(id);
+                // Prepare policy before checking out the single transaction connection.
+                const allowPrivateEndpoint = await actorMayUsePrivateEndpoint(
+                  this.prisma,
+                  context.userId,
+                  this.allowPrivateEndpoint,
+                );
+                let network: ReturnType<typeof oauthFetch> | undefined;
+                try {
+                  const observed = await deferSecretChanges(async () => {
+                    const next = await this.prisma.$transaction(
+                      async (tx) => {
+                        await tx.$executeRaw`SET LOCAL lock_timeout = '5s'`;
+                        await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtext('mcp-oauth-material'), hashtext(${id}))`;
+                        await tx.$queryRaw`SELECT id FROM mcp_servers WHERE id = ${id} AND "spaceId" = ${context.spaceId} AND "userId" = ${context.userId} FOR UPDATE`;
+                        const current = await tx.mcpServer.findFirst({
+                          where: {
+                            id,
+                            spaceId: context.spaceId,
+                            userId: context.userId,
+                            enabled: true,
+                          },
+                        });
+                        if (
+                          !current ||
+                          current.revision !== revision ||
+                          current.endpoint !== endpoint ||
+                          !current.secretId
+                        )
+                          throw new McpReauthorizationRequiredError(id);
+                        await tx.$queryRaw`SELECT id FROM secrets WHERE id = ${current.secretId} FOR UPDATE`;
+                        const secret = await tx.secret.findFirst({
+                          where: {
+                            id: current.secretId,
+                            userId: context.userId,
+                            spaceId: context.spaceId,
+                            kind: "mcp",
+                          },
+                        });
+                        if (!secret) throw new McpReauthorizationRequiredError(id);
+                        const material = await this.read(secret.ciphertext, secret.id);
+                        network = oauthFetch(
+                          endpoint,
+                          this.network,
+                          {},
+                          allowPrivateEndpoint,
+                          oauthMaterialSecrets(material),
+                        );
+                        const token = material.oauth?.tokens;
+                        const expiry =
+                          material.oauth?.obtainedAt && token?.expires_in
+                            ? material.oauth.obtainedAt +
+                              token.expires_in * 1000 -
+                              TOKEN_REFRESH_SKEW_MS
+                            : Infinity;
+                        const superseded =
+                          rejected &&
+                          (rejected.generation !== current.secretId ||
+                            rejected.bearer !== (token ? `Bearer ${token.access_token}` : null));
+                        if (!token || (Date.now() < expiry && (!rejected || superseded)))
+                          return { material, secretId: secret.id, ref: secret.ciphertext };
+                        const stagedMaterial = structuredClone(material);
+                        const staged = new StoredMcpOAuthProvider(
+                          id,
+                          stagedMaterial,
+                          async () => undefined,
+                          { redirectUri: options.redirectUri, onAuthorization: () => undefined },
+                        );
+                        const signal = combineSignals(
+                          rejected?.signal,
+                          AbortSignal.timeout(15_000),
+                        );
+                        let error: unknown;
+                        try {
+                          const fetchFn: FetchLike = async (input, init) => {
+                            try {
+                              return await network!.fetch(input, {
+                                ...init,
+                                signal: combineSignals(signal, init?.signal ?? undefined),
+                              });
+                            } catch (failure) {
+                              throw new Error(
+                                sanitizeConnectorError(failure, oauthMaterialSecrets(material)),
+                              );
+                            }
+                          };
+                          const challenge = rejected
+                            ? extractWWWAuthenticateParams(rejected.response)
+                            : undefined;
+                          const outcome = await auth(staged, {
+                            serverUrl: endpoint,
+                            resourceMetadataUrl: challenge?.resourceMetadataUrl,
+                            scope: challenge?.scope,
+                            fetchFn,
+                          });
+                          if (outcome !== "AUTHORIZED")
+                            throw new McpReauthorizationRequiredError(id);
+                        } catch (failure) {
+                          if (
+                            failure instanceof OAuthError &&
+                            failure.code === OAuthErrorCode.InvalidGrant
+                          )
+                            await staged.invalidateCredentials("tokens");
+                          // A terminal native invalidation commits; transient errors preserve the grant.
+                          if (stagedMaterial.oauth?.tokens || !material.oauth?.tokens)
+                            throw network.publicError(failure, "Could not refresh MCP OAuth");
+                          error = new McpReauthorizationRequiredError(id);
+                        }
+                        if (isDeepStrictEqual(material, stagedMaterial))
+                          return { material, secretId: secret.id, ref: secret.ciphertext, error };
+                        // Finish a successful rotation even if its originating resource request was canceled.
+                        const stored = await this.secrets.put(JSON.stringify(stagedMaterial), {
+                          operationId: "mcp.oauth.persist",
+                          traceId: "mcp.oauth.persist",
+                          userId: context.userId,
+                          spaceId: context.spaceId,
+                          botId: "mcp",
+                          signal: new AbortController().signal,
+                        });
+                        await tx.secret.create({
+                          data: {
+                            id: stored.id,
+                            ciphertext: stored.ciphertext,
+                            userId: context.userId,
+                            spaceId: context.spaceId,
+                            kind: "mcp",
+                          },
+                        });
+                        await tx.mcpServer.update({ where: { id }, data: { secretId: stored.id } });
+                        await tx.secret.deleteMany({ where: { id: secret.id } });
+                        return {
+                          material: stagedMaterial,
+                          secretId: stored.id,
+                          ref: stored.ciphertext,
+                          error,
+                        };
+                      },
+                      { timeout: 40_000, maxWait: 5_000 },
+                    );
+                    // Adopt only after commit, before deferred invalidations notify this live session.
+                    for (const key of Object.keys(loaded.material))
+                      delete loaded.material[key as keyof OAuthMaterial];
+                    Object.assign(loaded.material, next.material);
+                    loaded.secretId = next.secretId;
+                    options.onPersisted?.({
+                      id: next.secretId,
+                      ref: next.ref,
+                      material: next.material,
+                    });
+                    return next;
+                  });
+                  if (observed.error) throw observed.error;
+                } finally {
+                  await network?.close().catch(() => undefined);
+                }
+              },
+            }
+          : {}),
       },
     );
+    return provider;
   }
 
   private async replaceMaterial(

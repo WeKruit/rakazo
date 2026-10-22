@@ -1,8 +1,7 @@
 import { lookup } from "node:dns/promises";
 import type { LookupFunction } from "node:net";
 import { isIP } from "node:net";
-import { Client } from "@modelcontextprotocol/sdk/client/index.js";
-import { StreamableHTTPClientTransport } from "@modelcontextprotocol/sdk/client/streamableHttp.js";
+import { Client, StreamableHTTPClientTransport } from "@modelcontextprotocol/client";
 import type { ConnectorTool } from "@rakazo/adapter-kit";
 import { isCloudMetadataHost, isLocalMcpHost, isPrivateNetworkHost } from "@rakazo/contracts";
 import { Agent } from "undici";
@@ -56,10 +55,13 @@ export async function listRemoteMcpTools(options: RemoteMcpOptions): Promise<Con
     const tools: ConnectorTool[] = [];
     let cursor: string | undefined;
     for (let page = 0; page < MAX_MCP_PAGES && tools.length < MAX_MCP_TOOLS; page += 1) {
-      const result = await client.listTools(cursor ? { cursor } : undefined, {
-        signal,
-        timeout: MCP_TIMEOUT_MS,
-      });
+      const result = await client.request(
+        { method: "tools/list", params: cursor ? { cursor } : {} },
+        {
+          signal,
+          timeout: MCP_TIMEOUT_MS,
+        },
+      );
       for (const tool of result.tools) {
         if (tools.length >= MAX_MCP_TOOLS) break;
         tools.push({
@@ -82,10 +84,13 @@ export async function callRemoteMcpTool(
   args: Record<string, unknown>,
 ): Promise<unknown> {
   return withRemoteMcpClient(options, async (client, signal) => {
-    const result = await client.callTool({ name: toolName, arguments: args }, undefined, {
-      signal,
-      timeout: MCP_TIMEOUT_MS,
-    });
+    const result = await client.callTool(
+      { name: toolName, arguments: args },
+      {
+        signal,
+        timeout: MCP_TIMEOUT_MS,
+      },
+    );
     return limitRemoteMcpPayload({
       content: result.content,
       structuredContent: result.structuredContent,
@@ -119,7 +124,10 @@ async function withRemoteMcpClient<T>(
     },
     fetch: safeFetch,
   });
-  const client = new Client({ name: "rakazo", version: "0.1.0" }, { capabilities: {} });
+  const client = new Client(
+    { name: "rakazo", version: "0.1.0" },
+    { capabilities: {}, enforceStrictCapabilities: true },
+  );
   try {
     await client.connect(transport, { signal, timeout: MCP_TIMEOUT_MS });
     return await run(client, signal);

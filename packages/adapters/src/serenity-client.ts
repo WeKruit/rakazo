@@ -1,6 +1,5 @@
 import { isIP } from "node:net";
-import { Client } from "@modelcontextprotocol/sdk/client/index.js";
-import { StreamableHTTPClientTransport } from "@modelcontextprotocol/sdk/client/streamableHttp.js";
+import { Client, StreamableHTTPClientTransport } from "@modelcontextprotocol/client";
 import { isLocalMcpHost } from "@rakazo/contracts";
 import { Agent } from "undici";
 import { combineSignals } from "./connector-safety.js";
@@ -327,7 +326,10 @@ async function withSerenityClient<T>(
       return assertNotRateLimited(response);
     },
   });
-  const client = new Client({ name: "rakazo", version: "0.1.0" }, { capabilities: {} });
+  const client = new Client(
+    { name: "rakazo", version: "0.1.0" },
+    { capabilities: {}, enforceStrictCapabilities: true },
+  );
   try {
     await client.connect(transport, { signal: requestSignal, timeout: SERENITY_TIMEOUT_MS });
     return await run(client, requestSignal);
@@ -360,8 +362,8 @@ export async function probeSerenity(
       config,
       signal,
       async (client, requestSignal) => {
-        const listed = await client.listTools(
-          {},
+        const listed = await client.request(
+          { method: "tools/list", params: {} },
           { signal: requestSignal, timeout: SERENITY_TIMEOUT_MS },
         );
         const names = new Set(listed.tools.map((tool) => tool.name));
@@ -410,7 +412,6 @@ export async function recallSerenity(
               ...(options.entity ? { entity: options.entity } : {}),
             },
           },
-          undefined,
           { signal, timeout: SERENITY_TIMEOUT_MS },
         );
         const body = mcpTextPayload(result);
@@ -467,7 +468,6 @@ export async function rememberSerenity(
               ...(options.operationKey ? { operation_key: options.operationKey } : {}),
             },
           },
-          undefined,
           { signal, timeout: SERENITY_TIMEOUT_MS },
         );
         const body = mcpTextPayload(result);
@@ -526,7 +526,6 @@ export async function forgetSerenity(
               ...(options.reason?.trim() ? { reason: options.reason.trim() } : {}),
             },
           },
-          undefined,
           { signal, timeout: SERENITY_TIMEOUT_MS },
         );
         const body = mcpTextPayload(result);
