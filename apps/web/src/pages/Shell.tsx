@@ -1,7 +1,7 @@
 import { i18n } from "@lingui/core";
 import { t } from "@lingui/core/macro";
 import { Trans, useLingui } from "@lingui/react/macro";
-import { ChatMarkdown, LinkifiedText } from "@rakazo/chat-ui/web";
+import { ChatMarkdown, LinkFaviconsContext, LinkifiedText } from "@rakazo/chat-ui/web";
 import type {
   AgentSkillCatalogEntry,
   AskAnswer,
@@ -133,6 +133,7 @@ import {
   memo,
   Suspense,
   useCallback,
+  useContext,
   useEffect,
   useId,
   useImperativeHandle,
@@ -489,6 +490,7 @@ export function eventChangesRecruitingPanel(
 
 export function ShellPage() {
   const { t } = useLingui();
+  const linkFavicons = useContext(LinkFaviconsContext);
   const { botId, groupId } = useParams();
   const navigate = useNavigate();
   const [searchParams, setSearchParams] = useSearchParams();
@@ -4257,6 +4259,7 @@ export function ShellPage() {
             </div>
           ) : null}
           <div className={workspaceBrief ? "hire-brief-grid" : "contents"}>
+        <LinkFaviconsContext.Provider value={workspaceFull ? null : linkFavicons}>
         <section hidden={workspaceFull} aria-label={t`Role conversation`} className={workspaceFull ? "hidden" : workspaceBrief ? "hire-chat-panel" : "flex min-h-0 flex-1 flex-col"}>
         {/* Inside main so the composer and its menus stay above it. */}
         {!mobileSidebarOpen ? (
@@ -4547,6 +4550,7 @@ export function ShellPage() {
           />
         ) : null}
         </section>
+        </LinkFaviconsContext.Provider>
           {workspaceBrief && activeSnapshot?.threadId ? (
             <aside aria-label={t`Saved role summary`}>
               <RecruitingPanel

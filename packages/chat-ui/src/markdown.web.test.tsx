@@ -136,7 +136,7 @@ const ICON = "data:image/png;base64,iVBORw0KGgo=";
 
 async function renderLinks(
   markdown: string,
-  favicons: LinkFavicons,
+  favicons: LinkFavicons | null,
   options: { streaming?: boolean } = {},
 ) {
   vi.stubGlobal("IS_REACT_ACT_ENVIRONMENT", true);
@@ -334,6 +334,72 @@ describe("web markdown website links", () => {
       expect(again.container.querySelector(".rk-chat-link-tile img")).not.toBeNull();
       await again.cleanup();
     } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it.each(["queued", "in-flight"] as const)(
+    "stops a %s busy lookup when its source is disabled, then resolves on reveal",
+    async (state) => {
+      vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
+      let view: Awaited<ReturnType<typeof renderLinks>> | undefined;
+      try {
+        let finish!: (answer: { icon: null; retry: true }) => void;
+        const load = vi
+          .fn<LinkFavicons["load"]>()
+          .mockResolvedValue({ icon: null, retry: true })
+          .mockReturnValueOnce(
+            state === "queued"
+              ? Promise.resolve({ icon: null, retry: true })
+              : new Promise((resolve) => {
+                  finish = resolve;
+                }),
+          );
+        view = await renderLinks(`[Source](https://hidden-${state}.example.test/)`, { load });
+        expect(load).toHaveBeenCalledOnce();
+        await view.render(false, null);
+        if (state === "in-flight") await act(async () => finish({ icon: null, retry: true }));
+        await act(async () => vi.advanceTimersByTimeAsync(60_000));
+        expect(load).toHaveBeenCalledOnce();
+        load.mockResolvedValue({ icon: ICON });
+        await view.render(false);
+        expect(load).toHaveBeenCalledTimes(2);
+        expect(view.container.querySelector(".rk-chat-link-tile img")).not.toBeNull();
+        await view.render(false, null);
+        await view.render(false);
+        expect(load).toHaveBeenCalledTimes(2);
+      } finally {
+        await view?.cleanup();
+        vi.useRealTimers();
+      }
+    },
+  );
+
+  it("keeps a shared busy retry while another visible link still needs it", async () => {
+    vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
+    let first: Awaited<ReturnType<typeof renderLinks>> | undefined;
+    let second: Awaited<ReturnType<typeof renderLinks>> | undefined;
+    try {
+      const load = vi
+        .fn<LinkFavicons["load"]>()
+        .mockResolvedValueOnce({ icon: null, retry: true })
+        .mockResolvedValue({ icon: ICON });
+      const otherLoad = vi.fn<LinkFavicons["load"]>();
+      first = await renderLinks("[First](https://shared-visible.example.test/)", { load });
+      second = await renderLinks("[Second](https://shared-visible.example.test/)", {
+        load: otherLoad,
+      });
+      await first.render(false, null);
+      await act(async () => vi.advanceTimersByTimeAsync(10_000));
+      expect(load).toHaveBeenCalledTimes(2);
+      expect(otherLoad).not.toHaveBeenCalled();
+      expect(second.container.querySelector(".rk-chat-link-tile img")).not.toBeNull();
+      await first.render(false);
+      expect(load).toHaveBeenCalledTimes(2);
+      expect(first.container.querySelector(".rk-chat-link-tile img")).not.toBeNull();
+    } finally {
+      await first?.cleanup();
+      await second?.cleanup();
       vi.useRealTimers();
     }
   });
