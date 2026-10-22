@@ -208,6 +208,7 @@ beforeEach(() => {
         if (!value || value.challenge !== challenge) return json({ error: "invalid_grant" }, 400);
         return json({
           access_token: "fake-access-token",
+          refresh_token: "fake-refresh-token",
           token_type: "Bearer",
           expires_in: 300,
           ...(omitIdToken ? {} : { id_token: jwt({ ...value.claims, nonce: value.nonce }) }),
@@ -224,6 +225,33 @@ afterEach(() => {
 });
 
 describe("OIDC callbacks", () => {
+  it("encrypts upstream tokens and resolves them only for the selected native account owner", async () => {
+    setup();
+    expect((await signIn()).headers.get("location")).toBe(`${origin}/app`);
+    const account = rows("account")[0]!;
+    expect(account).toMatchObject({
+      accessToken: expect.any(String),
+      refreshToken: expect.any(String),
+      accountId: oidcAccountSubject(issuer, "subject-1"),
+    });
+    expect(account.accessToken).not.toBe("fake-access-token");
+    expect(account.refreshToken).not.toBe("fake-refresh-token");
+    await expect(
+      auth.api.getAccessToken({
+        body: { accountId: String(account.id), userId: String(account.userId) },
+      }),
+    ).resolves.toMatchObject({ accessToken: "fake-access-token" });
+
+    cookies = "";
+    await signIn({ sub: "subject-2", email: "other@example.test", email_verified: true });
+    const other = rows("account").find((row) => row.userId !== account.userId)!;
+    await expect(
+      auth.api.getAccessToken({
+        body: { accountId: String(account.id), userId: String(other.userId) },
+      }),
+    ).rejects.toMatchObject({ body: { code: "ACCOUNT_NOT_FOUND" } });
+  });
+
   it.each([true, false, undefined])(
     "preserves email_verified=%s through the real callback",
     async (verified) => {
