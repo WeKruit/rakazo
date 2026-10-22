@@ -3,6 +3,7 @@ import { ORPCError } from "@orpc/server";
 import type { ArtifactStore } from "@rakazo/adapter-kit";
 import {
   createRecruitingCandidateReportReader,
+  hasPlatformMcpCredential,
   isRecruitingCandidateReportField,
   readActorArtifact,
   readInstantlyEmail,
@@ -135,6 +136,7 @@ export async function getRecruitingCorrespondence(
         id: true,
         name: true,
         endpoint: true,
+        transport: true,
         secretId: true,
         enabled: true,
         revision: true,
@@ -161,7 +163,7 @@ export async function getRecruitingCorrespondence(
         name: source.name,
         status: !source.enabled
           ? "disabled"
-          : !source.secretId
+          : !source.secretId && !hasPlatformMcpCredential(source)
             ? "needs_connection"
             : !source.assignments.some((assignment) =>
                   source.provider?.tools.some((tool) => correspondenceAllows(assignment, tool)),

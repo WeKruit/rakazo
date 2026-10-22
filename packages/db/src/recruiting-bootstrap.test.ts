@@ -39,7 +39,7 @@ function fixture() {
     deploymentSettings: { findUnique: vi.fn(async () => ({ computerHost: "docker" })) },
     mcpServer: {
       findFirst: vi.fn(async () => null),
-      create: vi.fn(async ({ data }) => ({ id: "autumn-a", ...data })),
+      create: vi.fn(async ({ data }) => ({ id: `${data.slug}-a`, ...data })),
     },
     botMcpServer: { createMany: vi.fn(async () => ({ count: 2 })) },
   };
@@ -116,6 +116,34 @@ describe("ensureRecruitingWorkspace", () => {
     });
   });
 
+  it("gives fresh Main and Outreach only scoped FullEnrich tools without copying credentials", async () => {
+    const f = fixture();
+    await recruiting.ensureRecruitingWorkspace(f.prisma, actor, { sandboxKind: "fake" });
+    expect(f.tx.mcpServer.create).toHaveBeenCalledWith({
+      data: expect.objectContaining({
+        spaceId: actor.spaceId,
+        userId: actor.userId,
+        slug: "fullenrich",
+        endpoint: "https://mcp.fullenrich.com/mcp",
+        secretId: undefined,
+      }),
+    });
+    expect(f.tx.botMcpServer.createMany).toHaveBeenCalledWith({
+      data: [0, 2].map((index) =>
+        expect.objectContaining({
+          botId: f.bots[index]!.id,
+          serverId: "fullenrich-a",
+          allowAllTools: false,
+          allowedTools: ["get_credits", "enrich_bulk", "get_enrichment_results"],
+        }),
+      ),
+      skipDuplicates: true,
+    });
+    f.tx.botMcpServer.createMany.mockClear();
+    await recruiting.ensureRecruitingWorkspace(f.prisma, actor, { sandboxKind: "fake" });
+    expect(f.tx.botMcpServer.createMany).not.toHaveBeenCalled();
+  });
+
   it("reuses an existing product crew without overwriting private instructions, membership or names", async () => {
     const f = fixture();
     const first = await recruiting.ensureRecruitingWorkspace(f.prisma, actor, {
@@ -144,7 +172,7 @@ describe("ensureRecruitingWorkspace", () => {
         secretId: undefined,
       }),
     });
-    expect(f.tx.botMcpServer.createMany).toHaveBeenCalledTimes(1);
+    expect(f.tx.botMcpServer.createMany).toHaveBeenCalledTimes(2);
     f.tx.botMcpServer.createMany.mockClear();
     f.tx.mcpServer.create.mockClear();
     await recruiting.ensureRecruitingWorkspace(f.prisma, actor, options);
@@ -219,6 +247,26 @@ describe("ensureRecruitingWorkspace", () => {
       expect.any(Function),
       expect.objectContaining({ isolationLevel: "ReadCommitted" }),
     );
+  });
+
+  it("does not overwrite a customized FullEnrich endpoint during fresh setup", async () => {
+    const f = fixture();
+    f.tx.mcpServer.findFirst.mockResolvedValueOnce(null).mockResolvedValueOnce({
+      id: "private-contact-service",
+      endpoint: "https://custom.example.test/mcp",
+      transport: "streamable_http",
+    } as never);
+    await expect(
+      recruiting.ensureRecruitingWorkspace(f.prisma, actor, { sandboxKind: "fake" }),
+    ).rejects.toThrow("FullEnrich connection is customized");
+    expect(f.tx.mcpServer.create.mock.calls.some(([{ data }]) => data.slug === "fullenrich")).toBe(
+      false,
+    );
+    expect(
+      f.tx.botMcpServer.createMany.mock.calls.every(([{ data }]) =>
+        data.every((row) => row.serverId !== "private-contact-service"),
+      ),
+    ).toBe(true);
   });
 
   it("propagates native group creation failure from the same transaction before assigning services", async () => {

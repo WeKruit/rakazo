@@ -37,6 +37,55 @@ export { mcpObject } from "@rakazo/core/node/approval-effect-key";
 import { z } from "zod";
 import type { LoadedRecruitingRunContext } from "./recruiting-context.js";
 
+async function nativeMcpCreationReceipts(
+  prisma: PrismaClient,
+  actor: Pick<AdapterContext, "userId" | "spaceId">,
+  server: Pick<McpServer, "id" | "revision">,
+  toolName: string,
+) {
+  // ponytail: inspect only native creation receipts, never full saved candidate outputs.
+  const effects = await prisma.externalEffect.findMany({
+    where: {
+      spaceId: actor.spaceId,
+      status: "completed",
+      run: { spaceId: actor.spaceId, userId: actor.userId },
+      OR: [["2", "route"], ["3"]].map((path) => ({
+        AND: [
+          { request: { path: [...path, "connectorId"], equals: "mcp" } },
+          { request: { path: [...path, "resourceId"], equals: server.id } },
+          { request: { path: [...path, "resourceRevision"], equals: server.revision } },
+          { request: { path: [...path, "toolName"], equals: toolName } },
+        ],
+      })),
+    },
+    select: { request: true, result: true },
+  });
+  const receipts: Array<{ args: Record<string, unknown>; result: unknown }> = [];
+  for (const effect of effects) {
+    const direct = boundDirectApprovalDetails(effect.request, "__rakazoCatalogTool");
+    const catalog = catalogApprovalDetails(effect.request, "__rakazoCatalogTool");
+    const route = direct?.route ?? catalog?.route;
+    const requestArgs = direct?.args ?? record(catalog?.args.arguments);
+    if (
+      route?.connectorId !== "mcp" ||
+      route.resourceId !== server.id ||
+      route.resourceRevision !== server.revision ||
+      route.toolName !== toolName ||
+      !requestArgs ||
+      (!direct &&
+        (!catalog ||
+          !["connectors_execute_tool", "mcp_execute_tool"].includes(catalog.toolName) ||
+          catalog.args.id !== `${server.id}:${toolName}`))
+    )
+      continue;
+    receipts.push({
+      args: requestArgs,
+      result: record(effect.result)?.providerResult ?? effect.result,
+    });
+  }
+  return receipts;
+}
+
 /** A shared provider account never grants access to another product user's research. */
 export async function requireAutumnTaskOwnership(
   prisma: PrismaClient,
@@ -67,49 +116,47 @@ export async function requireAutumnTaskOwnership(
     select: { id: true },
   });
   if (task) return;
-  // ponytail: inspect only native creation receipts, never full saved candidate outputs.
-  const effects = await prisma.externalEffect.findMany({
-    where: {
-      spaceId: actor.spaceId,
-      status: "completed",
-      run: { spaceId: actor.spaceId, userId: actor.userId },
-      OR: [["2", "route"], ["3"]].map((path) => ({
-        AND: [
-          { request: { path: [...path, "connectorId"], equals: "mcp" } },
-          { request: { path: [...path, "resourceId"], equals: server.id } },
-          { request: { path: [...path, "resourceRevision"], equals: server.revision } },
-          { request: { path: [...path, "toolName"], equals: "research" } },
-        ],
-      })),
-    },
-    select: { request: true, result: true },
-  });
-  for (const effect of effects) {
-    const direct = boundDirectApprovalDetails(effect.request, "__rakazoCatalogTool");
-    const catalog = catalogApprovalDetails(effect.request, "__rakazoCatalogTool");
-    const route = direct?.route ?? catalog?.route;
-    const requestArgs = direct?.args ?? record(catalog?.args.arguments);
-    if (
-      route?.connectorId !== "mcp" ||
-      route.resourceId !== server.id ||
-      route.resourceRevision !== server.revision ||
-      route.toolName !== "research" ||
-      !requestArgs ||
-      !nonblank(requestArgs.prompt) ||
-      requestArgs.task_id !== undefined ||
-      (!direct &&
-        (!catalog ||
-          !["connectors_execute_tool", "mcp_execute_tool"].includes(catalog.toolName) ||
-          catalog.args.id !== `${server.id}:research`))
-    )
-      continue;
-    const result = record(effect.result)?.providerResult ?? effect.result;
-    const observation = classifyRecruitingResearchResult(result, { operation: "create" });
+  for (const receipt of await nativeMcpCreationReceipts(prisma, actor, server, "research")) {
+    if (!nonblank(receipt.args.prompt) || receipt.args.task_id !== undefined) continue;
+    const observation = classifyRecruitingResearchResult(receipt.result, { operation: "create" });
     if (observation.deliveryState === "accepted" && observation.providerTaskId === args.task_id)
       return;
   }
   throw new IsolationError(
     "This research is not available in your workspace. Use scoped research history or start new research in this conversation.",
+  );
+}
+
+/** Shared contact-enrichment funding does not share another person's job history. */
+export async function requireFullEnrichJobOwnership(
+  prisma: PrismaClient,
+  actor: Pick<AdapterContext, "userId" | "spaceId">,
+  server: Pick<McpServer, "id" | "revision" | "transport" | "endpoint">,
+  toolName: string,
+  args: Record<string, unknown>,
+): Promise<void> {
+  if (
+    server.transport !== "streamable_http" ||
+    server.endpoint !== "https://mcp.fullenrich.com/mcp"
+  )
+    return;
+  if (toolName === "get_credits" && Object.keys(args).length === 0) return;
+  if (toolName === "enrich_bulk" && args.enrichment_id === undefined) return;
+  if (toolName === "get_enrichment_results" && nonblank(args.enrichment_id)) {
+    for (const receipt of await nativeMcpCreationReceipts(prisma, actor, server, "enrich_bulk")) {
+      if (
+        !Array.isArray(receipt.args.contacts) ||
+        !receipt.args.contacts.length ||
+        receipt.args.enrichment_id !== undefined ||
+        record(receipt.result)?.isError === true
+      )
+        continue;
+      const body = mcpObject(receipt.result);
+      if (body?.enrichment_id === args.enrichment_id && body.error === undefined) return;
+    }
+  }
+  throw new IsolationError(
+    "This contact lookup is not available in your workspace. Start a new lookup in this conversation.",
   );
 }
 
