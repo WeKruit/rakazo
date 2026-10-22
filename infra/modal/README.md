@@ -61,6 +61,33 @@ preemption from interrupting the sole file-store writer. Modal charges 3× the
 standard CPU and memory rates for this placement; the existing resource bounds
 remain unchanged. Deployments and application failures can still require a restart.
 
+## Shared artifact storage
+
+The native API and worker can use Supabase private object storage through the same
+`ArtifactStore` interface. Configure all three server-only fields together:
+
+- `ARTIFACT_STORAGE_URL`: the HTTPS project origin, without a path or query.
+- `ARTIFACT_STORAGE_KEY`: the project server secret key (`sb_secret_…`), kept in
+  the existing private deployment Secret. It is sent only as `apikey`.
+- `ARTIFACT_STORAGE_BUCKET`: one existing private bucket name.
+
+With all three fields absent, the existing local provider remains selected.
+Partial or invalid remote configuration stops startup. Remote failures do not
+fall back to local files, and this adapter does not create buckets or permissions.
+
+Do not enable remote storage over an existing installation until all referenced
+local artifact objects have been copied from `artifacts/<space>/<uuid>` to
+`<space>/<uuid>` in the private bucket, preserving their storage keys and checking
+actual bytes against each database row's length and SHA256. Quiesce writers for
+the final inventory and cutover so no attachment is omitted. Switch API and worker
+together; retain the verified old data. No such copy or cutover is performed by
+this configuration change.
+
+This only shares immutable artifact objects. Agent home checkpoints, pending OAuth
+logins and credential-refresh coordination still require their own native-state
+work before multiple application containers can be enabled safely. Keep the
+single-writer deployment until those boundaries and failover are verified.
+
 ## Acceptance
 
 An open port is only liveness. The deployment is accepted only after native owner

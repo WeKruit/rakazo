@@ -1,4 +1,6 @@
+import type { ArtifactStorageOptions } from "@rakazo/adapters";
 import {
+  artifactStorageOptionsFromEnv,
   resolveCloudAgentProvider,
   resolveDeploymentModel,
   resolveSandboxProvider,
@@ -31,6 +33,7 @@ export interface AppEnv {
   signupAllowlist: string | undefined;
   encryptionKey: string;
   dataDir: string;
+  artifactStorage?: ArtifactStorageOptions;
   /** Opt-in Pi JSONL session recording under DATA_DIR/pi-sessions. Default off. */
   piSessionRecording: boolean;
   ticketBoardEnabled: boolean;
@@ -110,6 +113,7 @@ export interface AppEnv {
 
 export function loadEnv(source: NodeJS.ProcessEnv = process.env): AppEnv {
   secretStoreOptionsFromEnv(source);
+  const artifactStorage = artifactStorageOptionsFromEnv(source);
   const issuer = optional(source.OIDC_ISSUER);
   const clientId = optional(source.OIDC_CLIENT_ID);
   const clientSecret = optional(source.OIDC_CLIENT_SECRET);
@@ -172,6 +176,7 @@ export function loadEnv(source: NodeJS.ProcessEnv = process.env): AppEnv {
     signupAllowlist: source.SIGNUP_ALLOWLIST,
     encryptionKey: resolveEncryptionKey(source),
     dataDir: source.DATA_DIR ?? "./data",
+    artifactStorage,
     piSessionRecording: source.PI_SESSION_RECORDING === "true",
     ticketBoardEnabled: source.TICKET_BOARD_ENABLED === "true",
     sandboxSupervisorUrl: source.SANDBOX_SUPERVISOR_URL ?? "http://127.0.0.1:7091",
