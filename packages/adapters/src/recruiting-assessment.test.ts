@@ -12,6 +12,7 @@ import {
 
 const db = vi.hoisted(() => ({
   workspace: vi.fn(),
+  roleId: vi.fn(),
   assessment: vi.fn(),
   save: vi.fn(),
   material: vi.fn(),
@@ -22,6 +23,7 @@ const db = vi.hoisted(() => ({
 vi.mock("@rakazo/db", async (original) => ({
   ...(await original<object>()),
   getRecruitingWorkspace: db.workspace,
+  getRecruitingWorkspaceRoleId: db.roleId,
   getRecruitingAssessment: db.assessment,
   saveRecruitingAssessment: db.save,
   recordRecruitingWebMaterial: db.material,
@@ -591,6 +593,21 @@ describe("native saved candidate reads", () => {
   beforeEach(() => {
     vi.clearAllMocks();
     db.workspace.mockResolvedValue(workspace);
+    // The candidate tool reads only the current role id; keep it in step with the snapshot mock.
+    db.roleId.mockImplementation(
+      async (...args: unknown[]) =>
+        ((await db.workspace(...args)) as typeof workspace | null)?.role.id ?? null,
+    );
+  });
+
+  it("reads candidates with the current role id instead of the full role snapshot", async () => {
+    const f = fixture();
+    db.roleId.mockResolvedValueOnce("role");
+    db.candidates.mockResolvedValue({ roleId: "role", items: [], total: 0, nextCursor: null });
+    await executeRecruitingCandidatesTool(f.deps, trusted, { operation: "list" }, context);
+    expect(db.roleId).toHaveBeenCalledWith(f.deps.prisma, actor, { threadId: "thread" });
+    expect(db.workspace).not.toHaveBeenCalled();
+    expect(db.candidates).toHaveBeenCalledWith(f.deps.prisma, actor, { roleId: "role" });
   });
 
   it.each([
@@ -655,6 +672,10 @@ describe("native saved candidate reads", () => {
           limit: paging.limit ?? null,
           hasCursor: paging.cursor !== undefined,
           durationMs: 18,
+          authorizeMs: 0,
+          queryMs: outcome === "succeeded" ? 18 : null,
+          reportReadMs: operation === "sources" && outcome === "succeeded" ? 0 : null,
+          itemCount: outcome === "succeeded" ? page.items.length : null,
           outcome,
         },
       ]);

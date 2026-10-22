@@ -212,13 +212,26 @@ describe("E2B computer backend", () => {
         true,
       );
       expect(shouldSkipPortableWorkspaceFile(`${profile}/BrowserMetrics-spare.pma`)).toBe(true);
+      for (const downloaded of [
+        "optimization_guide_model_store/43/model.tflite",
+        "WasmTtsEngine/component",
+        "WidevineCdm/component",
+        "OnDeviceHeadSuggestModel/component",
+        "OptimizationHints/component",
+        "hyphen-data/component",
+        "ZxcvbnData/component",
+        "Dictionaries/en-US.bdic",
+        "GraphiteDawnCache/data",
+        "extensions_crx_cache/package.crx",
+      ]) {
+        expect(shouldSkipPortableWorkspaceFile(`${profile}/${downloaded}`)).toBe(true);
+      }
       for (const retained of [
         "component_crx_cache-notes/package.crx",
         "BrowserMetrics-spare.pma.notes",
         "Safe Browsing/data",
-        "WidevineCdm/component",
-        "WasmTtsEngine/component",
-        "OnDeviceHeadSuggestModel/component",
+        "CertificateRevocation/component",
+        "Extensions/extension/manifest.json",
         "Cookies",
         "Local Storage/data",
         "IndexedDB/data",
@@ -229,6 +242,7 @@ describe("E2B computer backend", () => {
       }
     }
     expect(shouldSkipPortableWorkspaceFile("project/component_crx_cache/package.crx")).toBe(false);
+    expect(shouldSkipPortableWorkspaceFile("project/WidevineCdm/notes.md")).toBe(false);
     expect(shouldSkipPortableWorkspaceFile("shared/BrowserMetrics-spare.pma")).toBe(false);
   });
 
@@ -359,7 +373,7 @@ describe("E2B computer backend", () => {
           ...(source.startsWith("list") && directory === root
             ? [{ name: "root.txt", type: "file", mode: 0o600 }]
             : []),
-          ...Array.from({ length: directory === root ? 9 : 0 }, (_, index) => ({
+          ...Array.from({ length: directory === root ? 33 : 0 }, (_, index) => ({
             name: `entry-${index}`,
             type: source.startsWith("list") ? "dir" : "file",
             mode: 0o600,
@@ -396,10 +410,10 @@ describe("E2B computer backend", () => {
         },
       );
       try {
-        await vi.waitFor(() => expect(active).toBe(8), { timeout: 250, interval: 5 });
+        await vi.waitFor(() => expect(active).toBe(32), { timeout: 250, interval: 5 });
         if (source.endsWith("abort")) controller.abort(failure);
         pending.values().next().value!.reject(failure);
-        await vi.waitFor(() => expect(active).toBe(7));
+        await vi.waitFor(() => expect(active).toBe(31));
         expect(settled).toBe(false);
         expect(sink.events.some((event) => event.message === "computer.workspace.export.io")).toBe(
           false,
@@ -410,16 +424,16 @@ describe("E2B computer backend", () => {
         await outcome;
       }
       expect(await outcome).toBe(failure);
-      expect(list).toHaveBeenCalledTimes(source.startsWith("list") ? 9 : 1);
-      expect(read).toHaveBeenCalledTimes(source.startsWith("list") ? 0 : 8);
+      expect(list).toHaveBeenCalledTimes(source.startsWith("list") ? 33 : 1);
+      expect(read).toHaveBeenCalledTimes(source.startsWith("list") ? 0 : 32);
       expect(
         sink.events.filter((event) => event.message === "computer.workspace.export.io"),
       ).toEqual([
         expect.objectContaining({
           operationId: context.operationId,
-          listCallCount: source.startsWith("list") ? 9 : 1,
-          selectedFileCount: source.startsWith("list") ? 1 : 9,
-          readCallCount: source.startsWith("list") ? 0 : 8,
+          listCallCount: source.startsWith("list") ? 33 : 1,
+          selectedFileCount: source.startsWith("list") ? 1 : 33,
+          readCallCount: source.startsWith("list") ? 0 : 32,
           readBatchWaitMs: expect.any(Number),
           metadataWallMs: expect.any(Number),
         }),
@@ -524,19 +538,16 @@ describe("E2B computer backend", () => {
       }
     })();
     try {
-      await vi.waitFor(() => expect(active).toBe(8), { timeout: 250, interval: 5 });
-      expect(read).toHaveBeenCalledTimes(8);
-      clock += 12;
-      for (const release of [...pending.values()].reverse()) release();
-      await vi.waitFor(() => expect(read).toHaveBeenCalledTimes(10));
-      expect(active).toBe(2);
-      clock += 7;
+      // One round trip covers every file across directories.
+      await vi.waitFor(() => expect(active).toBe(10), { timeout: 250, interval: 5 });
+      expect(read).toHaveBeenCalledTimes(10);
+      clock += 19;
     } finally {
       releaseFutureReads = true;
       for (const release of pending.values()) release();
       await drain;
     }
-    expect(peak).toBe(8);
+    expect(peak).toBe(10);
     const expected = [
       "root.txt",
       "a/empty.txt",
@@ -1262,6 +1273,50 @@ describe("sandbox-gone detection", () => {
     for (const error of gone) {
       expect(isSandboxGoneError(error), error.message).toBe(true);
     }
+  });
+
+  it("bounds each export read batch by bytes as well as file count", async () => {
+    const root = "/home/user/rakazo-home";
+    const mb = 1024 * 1024;
+    const sizes = [20 * mb, 20 * mb, 1, 1, 30 * mb];
+    const list = vi.fn(async () =>
+      sizes.map((size, index) => ({
+        name: `f${index}`,
+        type: "file",
+        mode: 0o600,
+        size,
+        path: `${root}/f${index}`,
+      })),
+    );
+    let active = 0;
+    const batches: string[][] = [];
+    let current: string[] = [];
+    const read = vi.fn(async (filePath: string) => {
+      if (active === 0) {
+        current = [];
+        batches.push(current);
+      }
+      active += 1;
+      current.push(filePath.slice(root.length + 1));
+      await new Promise((resolve) => setTimeout(resolve, 1));
+      active -= 1;
+      return new Uint8Array(0);
+    });
+    const provider = new E2BSandboxProvider("test-key", {
+      connect: vi.fn(async () => ({
+        sandboxId: "existing",
+        commands: { run: vi.fn(async () => ({ stdout: "", stderr: "", exitCode: 0 })) },
+        files: { list, read },
+      })),
+    } as unknown as E2BSandboxSdk);
+    for await (const _file of provider.exportWorkspace(
+      { id: "existing", providerRef: "existing", kind: "e2b", botId: "bot" },
+      context,
+    )) {
+      // Drain.
+    }
+    // A single oversized file still exports on its own; small files share a batch.
+    expect(batches).toEqual([["f0"], ["f1", "f2", "f3"], ["f4"]]);
   });
 
   it("never reads a live sandbox as gone", () => {
