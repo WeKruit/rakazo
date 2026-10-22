@@ -616,7 +616,7 @@ it.each(["success", "error"] as const)(
       else rejectFirst(new Error("Navigation unavailable"));
     });
     expect(shellApi.listSpaces).toHaveBeenCalledTimes(2);
-    expect(container?.querySelector("h1")?.textContent).toBe(fresh.name);
+    expect(container?.querySelector(".hire-brief-role")?.textContent).toBe(fresh.name);
     expect(shellApi.listArchivedGroups).toHaveBeenCalledOnce();
     expect(shellApi.listArchivedBots).toHaveBeenCalledOnce();
     await act(async () => vi.advanceTimersByTimeAsync(6_000));
@@ -627,7 +627,7 @@ it.each(["success", "error"] as const)(
     await act(async () => resolveSecond(updated));
     expect(shellApi.listSpaces).toHaveBeenCalledTimes(2);
     expect(container?.textContent).toContain("Refreshed recruiting crew");
-    expect(container?.querySelector("h1")?.textContent).toBe(fresh.name);
+    expect(container?.querySelector(".hire-brief-role")?.textContent).toBe(fresh.name);
     expect(container?.querySelector('textarea[name="chat-message"]')).not.toBeNull();
     expect(shellApi.send).not.toHaveBeenCalled();
     expect(shellApi.answer).not.toHaveBeenCalled();
@@ -856,7 +856,7 @@ it("creates a fresh role only from an explicitly selected archived role's exact 
     JSON.stringify({ group: view.archivedGroup, messages: view.thread.messages, bots: view.bots }),
   ).toBe(original);
   expect(container?.querySelector('[data-message-id="pending-main"]')).toBeNull();
-  expect(container?.querySelector("h1")?.textContent).toBe(fresh.name);
+  expect(container?.querySelector(".hire-brief-role")?.textContent).toBe(fresh.name);
 });
 
 it("resets an archived source's draft and error, then keeps its team fixed during creation", async () => {
@@ -930,8 +930,52 @@ it("resets an archived source's draft and error, then keeps its team fixed durin
     botIds: second.members.map((member) => member.botId),
   });
   await act(async () => finish());
-  expect(container?.querySelector("h1")?.textContent).toBe(fresh.name);
+  expect(container?.querySelector(".hire-brief-role")?.textContent).toBe(fresh.name);
   expect(container?.querySelector('textarea[aria-label="Job description"]')).toBeNull();
+});
+
+it("keeps one native chat, draft, attachment and pending card through full-width brief and feedback views", async () => {
+  setToolActivityPreference("off");
+  const view = await renderFeedbackShell("group", undefined, {
+    isDeploymentOwner: false,
+    openFeedback: false,
+  });
+  pickAttachment();
+  const composer = container!.querySelector<HTMLTextAreaElement>('textarea[name="chat-message"]')!;
+  const draft = "Keep robotics-company experience preferred, not required.";
+  type(composer, draft);
+  const card = document.body.querySelector('[data-message-id="pending-main"]');
+  for (const [label, summary] of [
+    ["Job Brief", "brief"],
+    ["Client feedback", "feedback"],
+  ] as const) {
+    await view.click(label);
+    expect(container?.querySelector(".hire-brief-grid")).not.toBeNull();
+    expect(view.getProps().summary).toBe(summary);
+    expect(container?.querySelector('[data-testid="side-panel"]')?.getAttribute("data-panel")).toBe(
+      "closed",
+    );
+    expect(container!.querySelector('textarea[name="chat-message"]')).toBe(composer);
+    expect(composer.value).toBe(draft);
+    expect(document.body.textContent).toContain("notes.txt");
+    expect(document.body.querySelector('[data-message-id="pending-main"]')).toBe(card);
+    expect(card?.closest(".hire-chat-panel")).not.toBeNull();
+  }
+  await view.navigate("/app/g/group-1?view=results");
+  await view.navigate("/app/g/group-1?view=brief");
+  expect(container!.querySelector('textarea[name="chat-message"]')).toBe(composer);
+  expect(composer.value).toBe(draft);
+  expect(shellApi.send).not.toHaveBeenCalled();
+  expect(shellApi.followUp).not.toHaveBeenCalled();
+  expect(shellApi.answer).not.toHaveBeenCalled();
+  expect(shellApi.createArtifact).not.toHaveBeenCalled();
+  await view.click("Remote");
+  expect(shellApi.answer).toHaveBeenCalledExactlyOnceWith({
+    groupId: "group-1",
+    runId: "run-main",
+    messageId: "pending-main",
+    answer: "remote",
+  });
 });
 
 it("enables Job Brief only after a cold native thread snapshot is available", async () => {
@@ -959,7 +1003,10 @@ it("enables Job Brief only after a cold native thread snapshot is available", as
   await act(async () => finishThread());
   expect(brief.disabled).toBe(false);
   await view.click("Job Brief");
-  expect(container?.querySelector('[role="tab"][aria-selected="true"]')?.textContent).toBe("Role");
+  expect(view.getProps().summary).toBe("brief");
+  expect(
+    container?.querySelector('.hire-live-criteria[aria-label="Search Criteria"]'),
+  ).not.toBeNull();
   expect(brief.getAttribute("aria-current")).toBe("page");
 });
 
@@ -973,9 +1020,12 @@ it("opens native brief and feedback views, reviews workflow, and continues the s
   const selectedTab = () =>
     container?.querySelector('[role="tab"][aria-selected="true"]')?.textContent;
   await view.click("Job Brief");
-  expect(selectedTab()).toBe("Role");
+  expect(view.getProps().summary).toBe("brief");
   await view.click("Client feedback");
-  expect(selectedTab()).toBe("Evidence");
+  expect(view.getProps().summary).toBe("feedback");
+  expect(container?.querySelector(".hire-live-criteria")?.textContent).toContain(
+    "No saved feedback yet.",
+  );
   expect(document.body.querySelector('[data-message-id="pending-main"]')).toBe(originalCard);
   await view.click("Recruiting workflow");
   expect(view.getProps().presentation).toBe("workspace");
@@ -984,8 +1034,8 @@ it("opens native brief and feedback views, reviews workflow, and continues the s
     "Research history",
   );
   await view.click("Job Brief");
-  expect(selectedTab()).toBe("Role");
-  await view.click("Close panel");
+  expect(view.getProps().summary).toBe("brief");
+  await view.navigate("/app/g/group-1?view=conversation");
   expect(document.body.querySelector('[data-message-id="pending-main"]')).toBe(originalCard);
   shellApi.send.mockResolvedValue({ runId: "same-role-run" });
   const prompt = "Summarize the saved requirements for this role.";
@@ -1185,7 +1235,7 @@ it("retries an exact natural role request in its confirmed native group with the
   expect(shellApi.answer).not.toHaveBeenCalled();
   expect(shellApi.send).not.toHaveBeenCalled();
   expect(container?.querySelector('textarea[aria-label="Job description"]')).toBeNull();
-  expect(container?.querySelector("h1")?.textContent).toBe(fresh.name);
+  expect(container?.querySelector(".hire-brief-role")?.textContent).toBe(fresh.name);
 });
 
 it.each([false, true])(

@@ -119,6 +119,7 @@ import {
   Search,
   Settings,
   Smile,
+  Sparkles,
   Square,
   SquareKanban,
   TextQuote,
@@ -2026,6 +2027,10 @@ export function ShellPage() {
     !workspaceNewRole &&
     ["sequence", "inbox", "interview"].includes(recruitingWorkspaceView);
   const workspaceFull = workspaceNewRole || workspaceCandidates || workspaceCorrespondence;
+  const workspaceBrief =
+    !showToolActivity &&
+    !workspaceNewRole &&
+    ["brief", "feedback"].includes(recruitingWorkspaceView);
   function openRecruitingView(view: RecruitingWorkspaceView) {
     setSearchParams(
       (current) => {
@@ -2036,12 +2041,7 @@ export function ShellPage() {
       { replace: true },
     );
     setMobileSidebarOpen(false);
-    if (view === "brief" || view === "feedback") {
-      changeRecruitingTab(view === "brief" ? "role" : "evidence");
-      setPanel("recruiting");
-    } else {
-      setPanel(null);
-    }
+    setPanel(null);
   }
   const activeRecruitingTab =
     recruitingTab?.threadId === activeSnapshot?.threadId ? recruitingTab?.tab : undefined;
@@ -4231,7 +4231,20 @@ export function ShellPage() {
             </div>
           </div>
         ) : null}
-        <div hidden={workspaceFull} className={workspaceFull ? "hidden" : "flex min-h-0 flex-1 flex-col"}>
+        <div className={workspaceBrief ? "hire-brief-view rk-scroll" : "contents"}>
+          {workspaceBrief ? (
+            <div className="hire-brief-top">
+              <div>
+                <span className="hire-eyebrow">{recruitingWorkspaceView === "brief" ? <Trans>Job Brief</Trans> : <Trans>Client feedback</Trans>}</span>
+                <h1>{recruitingWorkspaceView === "brief" ? <Trans>Let’s define the search.</Trans> : <Trans>Let’s sharpen the search.</Trans>}</h1>
+                <p className="hire-brief-role" dir="auto">{inGroup ? (activeGroup?.name ?? activeSnapshot?.groupName) : active?.name}</p>
+                <p>{recruitingWorkspaceView === "brief" ? <Trans>Describe the role and clarify what matters in the conversation.</Trans> : <Trans>Tell WeKruit what to change for a person, a few candidates, or the whole search.</Trans>}</p>
+              </div>
+              <Button variant="outline" className="hire-outline-button" onClick={() => openRecruitingView("results")}><Trans>Back to results</Trans></Button>
+            </div>
+          ) : null}
+          <div className={workspaceBrief ? "hire-brief-grid" : "contents"}>
+        <section hidden={workspaceFull} aria-label={t`Role conversation`} className={workspaceFull ? "hidden" : workspaceBrief ? "hire-chat-panel" : "flex min-h-0 flex-1 flex-col"}>
         {/* Inside main so the composer and its menus stay above it. */}
         {!mobileSidebarOpen ? (
           <div
@@ -4240,7 +4253,7 @@ export function ShellPage() {
             className="absolute bottom-20 start-0 top-16 z-20 w-8 touch-none md:hidden"
           />
         ) : null}
-        <div className="app-drag flex items-center justify-between border-b border-sidebar-border px-3 py-[17px] md:px-[22px]">
+        <div className={workspaceBrief ? "app-drag hire-panel-heading justify-between" : "app-drag flex items-center justify-between border-b border-sidebar-border px-3 py-[17px] md:px-[22px]"}>
           <div className="flex min-w-0 items-center gap-2">
             {/* Collapsed bots sidebar: this header is the leading edge for window chrome. */}
             {botsSidebarCollapsed && desktopBridge() ? <WindowChrome /> : null}
@@ -4292,6 +4305,8 @@ export function ShellPage() {
                   </span>
                 </span>
               </button>
+            ) : workspaceBrief ? (
+              <div className="hire-assistant-identity"><Sparkles size={18} aria-hidden /><div><strong>WeKruit</strong><span>{recruitingWorkspaceView === "brief" ? <Trans>Recruiting assistant</Trans> : <Trans>Search refinement</Trans>}</span></div></div>
             ) : (
               <h1 className="recruiting-heading min-w-0 truncate text-[27px] leading-none text-foreground" dir="auto">
                 {inGroup ? (activeGroup?.name ?? activeSnapshot?.groupName ?? t`Role conversation`) : t`Conversation`}
@@ -4332,7 +4347,7 @@ export function ShellPage() {
                 <Download size={18} strokeWidth={1.6} className="text-foreground/75" aria-hidden />
               </button>
             ) : null}
-            {activeSnapshot?.threadId ? (
+            {activeSnapshot?.threadId && !workspaceBrief ? (
               <button
                 type="button"
                 aria-label={t`Recruiting`}
@@ -4519,6 +4534,22 @@ export function ShellPage() {
             }
           />
         ) : null}
+        </section>
+          {workspaceBrief && activeSnapshot?.threadId ? (
+            <aside aria-label={t`Saved role summary`}>
+              <RecruitingPanel
+                key={`${userId}:${bootstrapMe?.spaceId}:${activeSnapshot.threadId}:summary`}
+                presentation="workspace"
+                summary={recruitingWorkspaceView === "brief" ? "brief" : "feedback"}
+                threadId={activeSnapshot.threadId}
+                botId={inGroup ? undefined : active?.id}
+                refreshSignal={recruitingRefresh}
+                showDiagnostics={false}
+                onClose={() => openRecruitingView("conversation")}
+              />
+            </aside>
+          ) : null}
+          </div>
         </div>
       </main>
 
@@ -4526,10 +4557,10 @@ export function ShellPage() {
 
       <ResizableSidePanel
         botsSidebarCollapsed={botsSidebarCollapsed}
-        open={Boolean(!workspaceFull && panel && (active || activeGroup || panel === "create"))}
+        open={Boolean(!workspaceFull && !(workspaceBrief && panel === "recruiting") && panel && (active || activeGroup || panel === "create"))}
         panel={panel ?? "closed"}
       >
-        {!workspaceFull && panel && (active || activeGroup || panel === "create") ? (
+        {!workspaceFull && !(workspaceBrief && panel === "recruiting") && panel && (active || activeGroup || panel === "create") ? (
           <div className="rk-scroll h-full w-full overflow-y-auto px-5 py-[17px]">
             {panel !== "routine" &&
             panel !== "create" &&

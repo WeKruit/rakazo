@@ -61,24 +61,27 @@ describe("lingui catalogs", () => {
     const [catalog] = await getCatalogs(config);
     const source = await catalog!.read("en");
     const labels = [
-      "Recruiter",
       "Recruiting workspace",
-      "Conversation",
-      "Open roles",
-      "New role",
+      "WeKruit home",
+      "All roles",
+      "New Role",
+      "Job Brief",
+      "Client feedback",
+      "Shortlist",
+      "Contacts",
+      "Sequence",
+      "Inbox",
+      "Interview",
+      "Recruiting workflow",
+      "Subject",
+      "Save draft",
+      "Recipients",
       "Search roles",
       "Role conversations",
       "Unread",
       "Collapse navigation",
       "Show navigation",
       "Hide navigation",
-      "Role conversation",
-      "Start recruiting",
-      "Cancel new role",
-      "Role name",
-      "Name this role",
-      "Create role",
-      "The recruiting team changed. Open the role again.",
     ];
     const entries = labels.map((label) => {
       const entry = Object.entries(source ?? {}).find(([, entry]) => entry.message === label);
@@ -86,10 +89,8 @@ describe("lingui catalogs", () => {
       return entry!;
     });
     expect(Object.fromEntries(entries.map(([id, entry]) => [id, entry.message]))).toMatchObject({
-      oVEIRb: "Recruiter",
-      Stovzk: "Open roles",
-      YyNOE7: "Conversation",
       pzfKRn: "Search roles",
+      ipQKNM: "Sequence",
     });
     for (const locale of config.locales) {
       const { messages } = await catalog!.getTranslations(locale, config);
@@ -103,6 +104,44 @@ describe("lingui catalogs", () => {
         expect(rendered, `${locale} ${entry.message}`).not.toBe("");
         if (locale === "en") expect(rendered).toBe(entry.message);
       }
+    }
+  });
+
+  it("resolves the actual recruiting workspace component messages in production catalogs", async () => {
+    const config = getConfig({
+      configPath: fileURLToPath(new URL("../../lingui.config.ts", import.meta.url)),
+    });
+    const ids = new Set<string>();
+    for (const path of [
+      "../pages/shell/RecruitingNavigation.tsx",
+      "../pages/RecruitingCorrespondence.tsx",
+      "../pages/GroupPanel.tsx",
+    ]) {
+      const filename = fileURLToPath(new URL(path, import.meta.url));
+      const compiled = transformSync(readFileSync(filename, "utf8"), {
+        filename,
+        babelrc: false,
+        configFile: false,
+        parserOpts: { plugins: ["typescript", "jsx"] },
+        plugins: [[linguiMacro, { linguiConfig: config }]],
+      });
+      for (const match of compiled!.code!.matchAll(/\bid(?::\s*|=)"([^"]+)"/g)) ids.add(match[1]!);
+    }
+    expect(ids.size).toBeGreaterThan(40);
+    const [catalog] = await getCatalogs(config);
+    for (const locale of config.locales) {
+      const { messages } = await catalog!.getTranslations(locale, config);
+      for (const id of ids) expect(messages[id], `${locale} ${id}`).toBeDefined();
+      const compiled = createCompiledCatalog(
+        locale,
+        Object.fromEntries([...ids].map((id) => [id, messages[id]!])),
+        { namespace: "json", strict: true },
+      );
+      expect(compiled.errors).toEqual([]);
+      i18n.load(locale, JSON.parse(compiled.source).messages);
+      i18n.activate(locale);
+      for (const id of ids)
+        expect(i18n._({ id, values: { 0: 1, name: "Draft" } }), `${locale} ${id}`).not.toBe(id);
     }
   });
 
