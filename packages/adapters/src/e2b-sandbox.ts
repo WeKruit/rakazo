@@ -470,7 +470,9 @@ async function* walkE2BWorkspace(
   const files: Array<{ relative: string; mode: number }> = [];
   type Directory = { relative: string; files: typeof files; children: Directory[] };
   const directories: Directory[] = [{ relative: directory, files: [], children: [] }];
+  const directoryByPath = new Map([[directory, directories[0]!]]);
   let listCallCount = 0;
+  let selectedFileCount = 0;
   let readCallCount = 0;
   let readFileCount = 0;
   let readBytes = 0;
@@ -487,25 +489,50 @@ async function* walkE2BWorkspace(
           batch.map(async ({ relative }) => {
             context.signal.throwIfAborted();
             listCallCount++;
-            return desktop.files.list(workspacePath(E2B_WORKSPACE, relative), {
-              signal: context.signal,
-            });
+            // Profile branches retain per-directory pruning before entering transient folders.
+            const depth =
+              relative &&
+              relative !== ".browser-profiles" &&
+              !relative.startsWith(".browser-profiles/")
+                ? 8
+                : 1;
+            return {
+              depth,
+              entries: await desktop.files.list(workspacePath(E2B_WORKSPACE, relative), {
+                depth,
+                signal: context.signal,
+              }),
+            };
           }),
         );
         context.signal.throwIfAborted();
         for (const [offset, result] of results.entries()) {
           if (result.status === "rejected") throw result.reason;
           const parent = batch[offset]!;
-          for (const entry of result.value) {
+          const prefix = `${workspacePath(E2B_WORKSPACE, parent.relative)}/`;
+          for (const entry of result.value.entries) {
+            if (!entry.path.startsWith(prefix))
+              throw new Error("Path escapes the computer workspace");
+            const withinListed = normalizeWorkspacePath(entry.path.slice(prefix.length));
             const relative = normalizeWorkspacePath(
-              parent.relative ? `${parent.relative}/${entry.name}` : entry.name,
+              parent.relative ? `${parent.relative}/${withinListed}` : withinListed,
             );
             if (shouldSkipPortableWorkspaceFile(relative)) continue;
+            if (entry.type !== "dir" && entry.type !== "file") continue;
+            const separator = relative.lastIndexOf("/");
+            const containing = directoryByPath.get(
+              separator < 0 ? "" : relative.slice(0, separator),
+            );
+            if (!containing) throw new Error("Invalid computer workspace listing");
             if (entry.type === "dir") {
               const child: Directory = { relative, files: [], children: [] };
-              parent.children.push(child);
-              directories.push(child);
-            } else if (entry.type === "file") parent.files.push({ relative, mode: entry.mode });
+              containing.children.push(child);
+              directoryByPath.set(relative, child);
+              if (withinListed.split("/").length === result.value.depth) directories.push(child);
+            } else {
+              containing.files.push({ relative, mode: entry.mode });
+              selectedFileCount++;
+            }
           }
         }
       }
@@ -563,10 +590,7 @@ async function* walkE2BWorkspace(
       metadataWallMs,
       readBatchWaitMs,
       listCallCount,
-      selectedFileCount: directories.reduce(
-        (count, directory) => count + directory.files.length,
-        0,
-      ),
+      selectedFileCount,
       readCallCount,
       readFileCount,
       readBytes,
