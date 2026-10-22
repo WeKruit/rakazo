@@ -1241,6 +1241,8 @@ export const ModelCatalogEntrySchema = z.object({
   id: z.string(),
   label: z.string(),
   billing: z.string(),
+  /** Available through deployment credentials, without a personal provider connection. */
+  deployment: z.boolean().optional(),
   auth: z.enum(["api-key", "oauth", "both"]).optional(),
   oauthLabel: z.string().optional(),
   authHint: z.string().optional(),

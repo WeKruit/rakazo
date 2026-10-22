@@ -9,7 +9,7 @@ import type {
 import { getLogger } from "@rakazo/logging";
 import type { InfisicalSecretStoreOptions } from "./infisical-secret-store.js";
 import { INFISICAL_REF_PREFIX, InfisicalSecretStore } from "./infisical-secret-store.js";
-import { SecretChanges } from "./secret-changes.js";
+import { afterSecretCommit, SecretChanges } from "./secret-changes.js";
 import { EncryptedSecretStore } from "./secrets.js";
 
 export function secretStoreOptionsFromEnv(
@@ -113,7 +113,7 @@ export class ComposedSecretStore extends SecretChanges implements SecretStore {
       context,
       options,
     );
-    await this.publish(record.ref);
+    await afterSecretCommit(() => this.publish(record.ref));
     return record;
   }
   load(ref: string, context: SecretContext): Promise<string> {
@@ -128,7 +128,7 @@ export class ComposedSecretStore extends SecretChanges implements SecretStore {
         : this.encrypted
       ).delete(ref, context);
     } finally {
-      await this.publish(ref);
+      await afterSecretCommit(() => this.publish(ref));
     }
   }
 

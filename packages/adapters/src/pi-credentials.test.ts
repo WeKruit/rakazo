@@ -21,6 +21,46 @@ function credential(overrides: Partial<OAuthCredential> = {}): OAuthCredential {
 }
 
 describe("PiRuntimeCredentialStore", () => {
+  it("reloads under the shared modifier so separate request stores rotate once and adopt fresh state", async () => {
+    let stored = credential({ access: "old", expires: 1 });
+    let tail = Promise.resolve();
+    const modify = vi.fn(
+      (fn: (current: OAuthCredential) => Promise<OAuthCredential | undefined>) => {
+        const operation = tail.then(async () => {
+          stored = (await fn(stored)) ?? stored;
+          return stored;
+        });
+        tail = operation.then(() => undefined);
+        return operation;
+      },
+    );
+    const refresh = vi.fn(async (current) =>
+      current?.expires === 1 ? credential({ access: "rotated" }) : undefined,
+    );
+    const first = new PiRuntimeCredentialStore(
+      "openai-codex",
+      stored,
+      undefined,
+      undefined,
+      modify,
+    );
+    const second = new PiRuntimeCredentialStore(
+      "openai-codex",
+      stored,
+      undefined,
+      undefined,
+      modify,
+    );
+    await Promise.all([
+      first.modify("openai-codex", refresh),
+      second.modify("openai-codex", refresh),
+    ]);
+    expect(modify).toHaveBeenCalledTimes(2);
+    expect(refresh.mock.calls.map(([current]) => current.access)).toEqual(["old", "rotated"]);
+    expect(first.accessToken).toBe("rotated");
+    expect(second.accessToken).toBe("rotated");
+  });
+
   it("does not configure openai-codex without a stored OAuth credential", async () => {
     expect(await builtinModels().getAuth("openai-codex")).toBeUndefined();
   });

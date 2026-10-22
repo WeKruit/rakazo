@@ -447,6 +447,11 @@ export interface AgentRunModel {
   oauth?: {
     credential: AgentModelOAuthCredential;
     persist?: (credential: AgentModelOAuthCredential) => Promise<void>;
+    /** Authoritative load-modify-persist operation, shared by API and workers. */
+    modify?: (
+      fn: (current: AgentModelOAuthCredential) => Promise<AgentModelOAuthCredential | undefined>,
+      signal?: AbortSignal,
+    ) => Promise<AgentModelOAuthCredential>;
     /** Drop the stored credential after a terminal provider rejection. */
     retire?: (
       reason: ModelCredentialRetireReason,

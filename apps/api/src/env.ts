@@ -48,8 +48,6 @@ export interface AppEnv {
   deploymentModelKey: string | undefined;
   /** The deployment default model can run; see resolveDeploymentModel. */
   deploymentModelConfigured: boolean;
-  /** Native Autumn MCP uses the deployment service key; never returned to clients. */
-  autumnServiceConfigured?: boolean;
   /** The deployment default model runs on the host's credentials rather than a key. */
   deploymentModelHostCredentials: boolean;
   e2bApiKey: string | undefined;
@@ -193,7 +191,6 @@ export function loadEnv(source: NodeJS.ProcessEnv = process.env): AppEnv {
     // Provider, model and key resolve together: see resolveDeploymentModel.
     deploymentModelKey: deploymentModel.key,
     deploymentModelConfigured: deploymentModel.configured,
-    autumnServiceConfigured: Boolean(source.AUTUMN_API_KEY?.trim()),
     deploymentModelHostCredentials: deploymentModel.hostCredentials,
     e2bApiKey: source.E2B_API_KEY,
     daytonaApiKey: source.DAYTONA_API_KEY,

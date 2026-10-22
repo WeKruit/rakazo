@@ -2120,16 +2120,19 @@ describe("computer maintenance visibility", () => {
     ];
     const findMany = vi.fn().mockResolvedValue(rows);
     const prisma = { computerUpdate: { findMany } } as unknown as PrismaClient;
-    const client = createRouterClient(createRouter({ prisma } as RouterDeps), {
-      context: {
-        actor: {
-          userId: "user-1",
-          spaceId: "space-1",
-          email: "user@rakazo.test",
-          isDeploymentOwner: true,
+    const client = createRouterClient(
+      createRouter({ prisma, env: { deploymentModelConfigured: false } } as RouterDeps),
+      {
+        context: {
+          actor: {
+            userId: "user-1",
+            spaceId: "space-1",
+            email: "user@rakazo.test",
+            isDeploymentOwner: true,
+          },
         },
       },
-    });
+    );
 
     const visible = await client.computer.updates();
 
@@ -3533,6 +3536,7 @@ describe("bot model auth on save", () => {
   function saveDeps(options: {
     modelId: string;
     plaintext?: string;
+    deploymentProvider?: string;
     preferences: (args: { where: { modelId?: string; credential?: { provider?: string } } }) => {
       credential: ReturnType<typeof credentialRow>;
       isDefault: boolean;
@@ -3617,7 +3621,8 @@ describe("bot model auth on save", () => {
       },
       codexCatalog: { read: vi.fn(async () => []) },
       env: {
-        defaultProvider: "fake",
+        deploymentModelConfigured: Boolean(options.deploymentProvider),
+        defaultProvider: options.deploymentProvider ?? "fake",
         defaultModel: "fake-model",
         webOrigin: "http://127.0.0.1:5173",
         screenProxySecret: "fake-test-secret",
@@ -3633,6 +3638,77 @@ describe("bot model auth on save", () => {
       handler: new RPCHandler(createRouter(deps)),
     };
   }
+
+  it.each([true, false])(
+    "exposes platform catalog choices only when deployment funding is %s",
+    async (configured) => {
+      const handler = new RPCHandler(
+        createRouter({
+          prisma: {
+            userModelCredential: { findMany: vi.fn(async () => []) },
+            spaceModelPreference: { findMany: vi.fn(async () => []) },
+          },
+          env: {
+            deploymentModelConfigured: configured,
+            defaultProvider: "openai",
+            defaultModel: luna,
+          },
+        } as unknown as RouterDeps),
+      );
+      const response = await call(handler, "models/list", null);
+      expect(response.status).toBe(200);
+      const body = (await response.json()) as {
+        json: Array<{ provider: string; id: string; deployment?: boolean }>;
+      };
+      expect(
+        body.json.find((entry) => entry.provider === "openai" && entry.id === luna)?.deployment,
+      ).toBe(configured ? true : undefined);
+      expect(
+        body.json.filter((entry) => entry.deployment).every((entry) => entry.provider === "openai"),
+      ).toBe(true);
+      expect(JSON.stringify(body)).not.toMatch(/secretId|apiKey/);
+    },
+  );
+
+  it.each(["bots/update", "routines/create", "routines/update"])(
+    "allows %s to select a platform catalog model without personal authorization",
+    async (path) => {
+      const { handler, secretFindFirst } = saveDeps({
+        modelId: luna,
+        deploymentProvider: "openai",
+        preferences: () => null,
+      });
+      const response = await call(handler, path, {
+        ...(path === "bots/update"
+          ? { botId: "bot-1" }
+          : path === "routines/create"
+            ? { botId: "bot-1", name: "Later", prompt: "say done", crons: ["@once"] }
+            : { routineId: "routine-1" }),
+        modelProvider: "openai",
+        modelId: luna,
+      });
+      expect(response.status).toBe(200);
+      expect(secretFindFirst).not.toHaveBeenCalled();
+    },
+  );
+
+  it.each(["anthropic", "openai"])(
+    "rejects an unfunded or unknown bot choice for %s",
+    async (provider) => {
+      const { handler, botUpdate } = saveDeps({
+        modelId: luna,
+        deploymentProvider: "openai",
+        preferences: () => null,
+      });
+      const response = await call(handler, "bots/update", {
+        botId: "bot-1",
+        modelProvider: provider,
+        modelId: provider === "openai" ? "not-a-model" : "claude-sonnet-5",
+      });
+      expect(response.status).toBe(400);
+      expect(botUpdate).not.toHaveBeenCalled();
+    },
+  );
 
   it("saves a rename while resending an existing Spark override", async () => {
     const { preferenceFindFirst, secretFindFirst, botUpdate, handler } = saveDeps({

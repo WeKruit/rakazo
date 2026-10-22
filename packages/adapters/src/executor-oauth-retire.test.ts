@@ -51,6 +51,19 @@ function oauthPrisma() {
     ],
   };
   const tx = {
+    $executeRaw: vi.fn(async () => 0),
+    $queryRaw: vi.fn(async (query: { sql: string; values: unknown[] }) =>
+      query.sql.includes("user_model_credentials")
+        ? state.credentials.filter(
+            (row) =>
+              query.values.includes(row.userId) &&
+              query.values.includes(row.provider) &&
+              query.values.includes(row.secretId),
+          )
+        : state.secrets.filter(
+            (row) => query.values.includes(row.id) && query.values.includes(row.userId),
+          ),
+    ),
     userModelCredential: {
       findFirst: vi.fn(
         async (args: { where: { id: string; userId: string } }) =>
@@ -185,6 +198,7 @@ describe("OAuth credential retirement on terminal refresh rejection", () => {
       if (rotated) {
         load
           .mockResolvedValueOnce(expiredOAuthPlaintext())
+          .mockResolvedValueOnce(expiredOAuthPlaintext())
           .mockResolvedValue(rotatedOAuthPlaintext());
       }
       const secretStore = { load, put: vi.fn() };
@@ -210,7 +224,7 @@ describe("OAuth credential retirement on terminal refresh rejection", () => {
           select: { id: true },
         });
       }
-      if (rotated) expect(load).toHaveBeenCalledTimes(2);
+      if (rotated) expect(load).toHaveBeenCalledTimes(3);
     },
   );
 
@@ -297,6 +311,7 @@ describe("OAuth credential retirement on terminal refresh rejection", () => {
     const { prisma, state } = oauthPrisma();
     const load = vi
       .fn()
+      .mockImplementationOnce(() => expiredOAuthPlaintext())
       .mockImplementationOnce(() => expiredOAuthPlaintext())
       .mockImplementation(() => rotatedOAuthPlaintext());
     const executor = oauthExecutor(prisma, load);

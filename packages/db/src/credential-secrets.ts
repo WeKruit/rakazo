@@ -34,6 +34,62 @@ export async function deleteUnreferencedCredentialSecret(
   }
 }
 
+export async function lockModelCredentialSecret(
+  tx: Prisma.TransactionClient,
+  input: { userId: string; provider: string; credentialId?: string; secretId: string },
+) {
+  await tx.$executeRaw`SET LOCAL lock_timeout = '5s'`;
+  const [credential] = await tx.$queryRaw<Array<{ id: string; secretId: string }>>(Prisma.sql`
+    SELECT id, "secretId" FROM user_model_credentials
+    WHERE "userId" = ${input.userId} AND provider = ${input.provider}
+      AND "secretId" = ${input.secretId}
+      ${input.credentialId ? Prisma.sql`AND id = ${input.credentialId}` : Prisma.empty}
+    ORDER BY id FOR UPDATE
+  `);
+  if (!credential) return undefined;
+  const [secret] = await tx.$queryRaw<Array<{ id: string; ciphertext: string }>>(Prisma.sql`
+    SELECT id, ciphertext FROM secrets WHERE id = ${credential.secretId}
+      AND "userId" = ${input.userId} AND "spaceId" IS NULL AND kind = 'model' FOR UPDATE
+  `);
+  return secret ? { credential, secret } : undefined;
+}
+
+/** Caller already holds the credential/secret locks; do not open another transaction. */
+export async function retireModelCredentialInTransaction(
+  tx: Prisma.TransactionClient,
+  input: {
+    userId: string;
+    credentialId: string;
+    secretId?: string;
+    matchesFailedSecret?: (secret: {
+      id: string;
+      ciphertext: string;
+    }) => boolean | Promise<boolean>;
+  },
+): Promise<boolean> {
+  const credential = await tx.userModelCredential.findFirst({
+    where: { id: input.credentialId, userId: input.userId },
+  });
+  if (!credential || (input.secretId && credential.secretId !== input.secretId)) return false;
+  if (input.matchesFailedSecret) {
+    const secret = await tx.secret.findFirst({
+      where: { id: credential.secretId, userId: input.userId, spaceId: null },
+      select: { id: true, ciphertext: true },
+    });
+    if (secret && !(await input.matchesFailedSecret(secret))) return false;
+  }
+  await tx.spaceModelPreference.deleteMany({
+    where: { userId: input.userId, credentialId: credential.id },
+  });
+  await tx.userModelCredential.delete({ where: { id: credential.id } });
+  await deleteUnreferencedCredentialSecret(tx, {
+    credentialKind: "model",
+    credentialId: credential.id,
+    secretId: credential.secretId,
+  });
+  return true;
+}
+
 /**
  * Drop a model credential whose stored OAuth material is dead, along with the
  * secret row nothing else references. The provider then reports `disconnected`
@@ -101,16 +157,11 @@ export async function retireModelCredential(
           )
             return false;
         }
-        await tx.spaceModelPreference.deleteMany({
-          where: { userId: input.userId, credentialId: credential.id },
+        return retireModelCredentialInTransaction(tx, {
+          userId: input.userId,
+          credentialId: input.credentialId,
+          secretId: input.secretId,
         });
-        await tx.userModelCredential.delete({ where: { id: credential.id } });
-        await deleteUnreferencedCredentialSecret(tx, {
-          credentialKind: "model",
-          credentialId: credential.id,
-          secretId: credential.secretId,
-        });
-        return true;
       },
       { isolationLevel: Prisma.TransactionIsolationLevel.Serializable },
     );

@@ -15,7 +15,7 @@ const AUTUMN_TOOLS = ["credits", "research", "get_task", "get_rows", "reply", "s
 export async function ensureRecruitingWorkspace(
   prisma: PrismaClient,
   actor: Actor,
-  options: { hasAutumnService: boolean; sandboxKind: string },
+  options: { sandboxKind: string },
 ): Promise<{ botId: string; groupId: string }> {
   const groupId = `recruiting-${createHash("sha256")
     .update(JSON.stringify([actor.spaceId, actor.userId]))
@@ -95,7 +95,7 @@ export async function ensureRecruitingWorkspace(
           botIds: ownedBots.map((bot) => bot.id),
         });
       }
-      if (options.hasAutumnService && !existing) {
+      if (!existing) {
         const prior = await tx.mcpServer.findFirst({
           where: { spaceId: actor.spaceId, userId: actor.userId, slug: "autumn" },
         });
