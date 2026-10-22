@@ -2,10 +2,12 @@ import type { ReactNode } from "react";
 
 export function MessageHoverMetadata({
   side,
+  below = false,
   pinned = false,
   children,
 }: {
   side: "start" | "end";
+  below?: boolean;
   pinned?: boolean;
   children: ReactNode;
 }) {
@@ -17,12 +19,16 @@ export function MessageHoverMetadata({
   return (
     <div
       data-testid="message-hover-rail"
-      className={`absolute top-1/2 z-10 flex -translate-y-1/2 items-center transition-opacity ${reveal} ${
-        side === "end" ? "start-full ms-1" : "end-full me-1"
-      } [@media(hover:none)]:static [@media(hover:none)]:mt-1 [@media(hover:none)]:w-full [@media(hover:none)]:translate-y-0 ${
-        side === "end"
-          ? "[@media(hover:none)]:ms-0 [@media(hover:none)]:justify-start"
-          : "[@media(hover:none)]:me-0 [@media(hover:none)]:justify-end"
+      className={`z-10 flex items-center transition-opacity ${reveal} ${
+        below
+          ? `static mt-1 w-full ${side === "end" ? "justify-start" : "justify-end"}`
+          : `absolute top-1/2 -translate-y-1/2 ${
+              side === "end" ? "start-full ms-1" : "end-full me-1"
+            } [@media(hover:none)]:static [@media(hover:none)]:mt-1 [@media(hover:none)]:w-full [@media(hover:none)]:translate-y-0 ${
+              side === "end"
+                ? "[@media(hover:none)]:ms-0 [@media(hover:none)]:justify-start"
+                : "[@media(hover:none)]:me-0 [@media(hover:none)]:justify-end"
+            }`
       }`}
     >
       {children}

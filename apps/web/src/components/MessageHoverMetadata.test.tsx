@@ -68,4 +68,19 @@ describe("MessageHoverMetadata", () => {
     expect(html).toContain("pointer-events-auto opacity-100");
     expect(html).not.toContain("group-hover/message:opacity-100");
   });
+
+  it("keeps a narrow contextual rail below its bubble and progressively reveals actions", () => {
+    const html = renderToStaticMarkup(
+      <MessageHoverMetadata below side="end">
+        <button type="button">Reply</button>
+      </MessageHoverMetadata>,
+    );
+    expect(html).toContain("static");
+    expect(html).toContain("w-full");
+    expect(html).toContain("justify-start");
+    expect(html).not.toContain("start-full");
+    expect(html).not.toContain("absolute");
+    expect(html).toContain("group-hover/message:opacity-100");
+    expect(html).toContain("focus-within:opacity-100");
+  });
 });

@@ -4570,6 +4570,7 @@ export function ShellPage() {
         ) : (
           <Transcript
             key={activeSnapshot?.threadId}
+            narrow={roleChatWorkspace}
             visible={!workspaceFull || (roleChatWorkspace && roleChatOpen)}
             scrollRef={messageScroll}
             scrollRequest={scrollRequest}
@@ -5797,6 +5798,7 @@ export function ShellPage() {
 }
 
 const Transcript = memo(function Transcript({
+  narrow,
   visible,
   scrollRef,
   scrollRequest,
@@ -5827,6 +5829,7 @@ const Transcript = memo(function Transcript({
   onSpeak,
   onOpenComputer,
 }: {
+  narrow: boolean;
   visible: boolean;
   scrollRef: RefObject<HTMLDivElement | null>;
   scrollRequest: { messageId: string; nonce: number } | null;
@@ -6184,9 +6187,13 @@ const Transcript = memo(function Transcript({
                       peerReceipt
                         ? undefined
                         : `relative w-fit min-w-0 ${
-                            message.role === "user"
-                              ? "max-w-[min(84%,calc(100%_-_8rem))] [@media(hover:none)]:max-w-[84%]"
-                              : "max-w-[min(88%,calc(100%_-_8rem))] [@media(hover:none)]:max-w-[88%]"
+                            narrow
+                              ? message.role === "user"
+                                ? "max-w-[88%]"
+                                : "max-w-full"
+                              : message.role === "user"
+                                ? "max-w-[min(84%,calc(100%_-_8rem))] [@media(hover:none)]:max-w-[84%]"
+                                : "max-w-[min(88%,calc(100%_-_8rem))] [@media(hover:none)]:max-w-[88%]"
                           }`
                     }
                   >
@@ -6226,6 +6233,7 @@ const Transcript = memo(function Transcript({
                     {peerReceipt ? null : (
                       <MessageHoverActions
                         message={message}
+                        below={narrow}
                         side={message.role === "user" ? "start" : "end"}
                         onReply={onReply}
                         onReact={onReact}
@@ -6238,19 +6246,27 @@ const Transcript = memo(function Transcript({
                     dateTime={message.createdAt}
                     data-testid="message-hover-time"
                     className={cn(
-                      "pointer-events-none absolute top-1 z-10 text-xs tabular-nums text-muted-foreground opacity-0 transition-opacity group-hover/message:opacity-100 group-focus-within/message:opacity-100 group-has-[[aria-expanded=true]]/message:opacity-100 [@media(hover:none)]:transition-none",
-                      // Hover keeps the date in the side margin. Touch leaves that margin for the bubble and drops the revealed time under it.
-                      message.role === "user"
-                        ? "start-0 max-w-[max(8rem,16%)] text-start"
-                        : "end-0 max-w-[max(8rem,12%)] text-end",
-                      "[@media(hover:none)]:group-hover/message:static [@media(hover:none)]:group-focus-within/message:static [@media(hover:none)]:group-has-[[aria-expanded=true]]/message:static",
-                      "[@media(hover:none)]:group-hover/message:block [@media(hover:none)]:group-focus-within/message:block [@media(hover:none)]:group-has-[[aria-expanded=true]]/message:block",
-                      "[@media(hover:none)]:group-hover/message:mt-1 [@media(hover:none)]:group-focus-within/message:mt-1 [@media(hover:none)]:group-has-[[aria-expanded=true]]/message:mt-1",
-                      "[@media(hover:none)]:group-hover/message:w-full [@media(hover:none)]:group-focus-within/message:w-full [@media(hover:none)]:group-has-[[aria-expanded=true]]/message:w-full",
-                      "[@media(hover:none)]:group-hover/message:max-w-none [@media(hover:none)]:group-focus-within/message:max-w-none [@media(hover:none)]:group-has-[[aria-expanded=true]]/message:max-w-none",
-                      message.role === "user"
-                        ? "[@media(hover:none)]:group-hover/message:text-end [@media(hover:none)]:group-focus-within/message:text-end [@media(hover:none)]:group-has-[[aria-expanded=true]]/message:text-end"
-                        : "[@media(hover:none)]:group-hover/message:text-start [@media(hover:none)]:group-focus-within/message:text-start [@media(hover:none)]:group-has-[[aria-expanded=true]]/message:text-start",
+                      "pointer-events-none absolute z-10 text-xs tabular-nums text-muted-foreground opacity-0 transition-opacity group-hover/message:opacity-100 group-focus-within/message:opacity-100 group-has-[[aria-expanded=true]]/message:opacity-100 [@media(hover:none)]:transition-none",
+                      narrow
+                        ? [
+                            "bottom-1 max-w-[50%]",
+                            message.role === "user" ? "start-0 text-start" : "end-0 text-end",
+                          ]
+                        : [
+                            "top-1",
+                            // Hover keeps the date in the side margin. Touch leaves that margin for the bubble and drops the revealed time under it.
+                            message.role === "user"
+                              ? "start-0 max-w-[max(8rem,16%)] text-start"
+                              : "end-0 max-w-[max(8rem,12%)] text-end",
+                            "[@media(hover:none)]:group-hover/message:static [@media(hover:none)]:group-focus-within/message:static [@media(hover:none)]:group-has-[[aria-expanded=true]]/message:static",
+                            "[@media(hover:none)]:group-hover/message:block [@media(hover:none)]:group-focus-within/message:block [@media(hover:none)]:group-has-[[aria-expanded=true]]/message:block",
+                            "[@media(hover:none)]:group-hover/message:mt-1 [@media(hover:none)]:group-focus-within/message:mt-1 [@media(hover:none)]:group-has-[[aria-expanded=true]]/message:mt-1",
+                            "[@media(hover:none)]:group-hover/message:w-full [@media(hover:none)]:group-focus-within/message:w-full [@media(hover:none)]:group-has-[[aria-expanded=true]]/message:w-full",
+                            "[@media(hover:none)]:group-hover/message:max-w-none [@media(hover:none)]:group-focus-within/message:max-w-none [@media(hover:none)]:group-has-[[aria-expanded=true]]/message:max-w-none",
+                            message.role === "user"
+                              ? "[@media(hover:none)]:group-hover/message:text-end [@media(hover:none)]:group-focus-within/message:text-end [@media(hover:none)]:group-has-[[aria-expanded=true]]/message:text-end"
+                              : "[@media(hover:none)]:group-hover/message:text-start [@media(hover:none)]:group-focus-within/message:text-start [@media(hover:none)]:group-has-[[aria-expanded=true]]/message:text-start",
+                          ],
                     )}
                   >
                     {formatMessageTime(message.createdAt, i18n.locale || "en")}
@@ -7495,11 +7511,13 @@ function formatRosterTime(isoDate?: string | null): string {
 function MessageHoverActions({
   message,
   side,
+  below = false,
   onReply,
   onReact,
 }: {
   message: ThreadMessage;
   side: "start" | "end";
+  below?: boolean;
   onReply: (message: ThreadMessage) => void;
   onReact: (message: ThreadMessage, reaction: MessageReaction) => Promise<void>;
 }) {
@@ -7520,7 +7538,7 @@ function MessageHoverActions({
     "grid h-7 w-7 place-items-center text-muted-foreground transition-colors hover:text-foreground";
 
   return (
-    <MessageHoverMetadata pinned={moreOpen || reactionsOpen} side={side}>
+    <MessageHoverMetadata pinned={moreOpen || reactionsOpen} side={side} below={below}>
       <div data-testid="message-hover-actions" className="flex items-center gap-0.5">
         {canReactToThreadMessage(message) ? (
           <Popover open={reactionsOpen} onOpenChange={setReactionsOpen}>
