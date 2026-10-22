@@ -32,6 +32,8 @@ M2/M3/M4 中独立工作可与 M1 并行。每个 worker 明确文件归属，�
 
 新人应走同一条产品路径：获准注册/登录 → 本人的私有 Space → 自动安装维护中的招聘配置 → 直接交给助手 JD 或职位描述。只有个人邮箱、日历在首次需要时由本人连接；Codex OAuth、其他平台模型、Autumn、CRM、enrichment、Instantly、招聘 skills、记忆/文件及 Routine 都由平台维护，不要求新人逐个连接。组织共享另行明确授权，不能复制管理员个人 OAuth、历史、审批或客户资料。
 
+平台招聘 skills/playbook 共享只读；用户的私人 skills、偏好和长期记忆属于本人，不能因使用相同默认技能或模型 key 合并。模型计费授权与执行身份分开，Codex/Pi 的原生对话、工具、文件、任务、审批及上下文缓存仍按真实 user/Space 分开。当前源码已有对应原生边界；双用户在线验收仍须完成，不能以共享 key 已配置代替隔离证明。
+
 Codex OAuth 的平台供给仍未完成：现有运行链只将其作为真实用户的个人模型连接，部署级解析目前支持 API key 或 IAM/ADC host 凭据，不能用闲置旧配置字段假装可执行。官方 [ChatGPT plan usage](https://developers.openai.com/siwc/token-sharing-open-source) 将现有开放接入定义为同一用户/工作区授权，并为付费或远程托管应用提供另外申请入口；[Codex workload identity](https://developers.openai.com/api/docs/guides/workload-identity-federation#use-workload-identity-with-codex) 提供需工作区启用的 beta 途径。当前没有本产品适用接入获准或该工作区已启用的证据。平台 OAuth 必须沿现有 Pi/部署凭据接口实现明确的授权归属、加密刷新锁、撤销和目录；不能替换客户 actor、克隆个人 grant 或将 `configured` 强制改为 true。部署 API key 是已支持的独立路径，不替代此项用户要求。
 
 当前注册代码复用 Better Auth、邮箱密码及可选 OIDC；白名单账号需要邮箱所有权证明。无邮件投递时仅首个账号的既有初始化例外不能用于后续新人。线上公开认证能力已实际返回：密码登录开启、SSO 未配置、密码找回不可用。同一部署的物理 READ ONLY 核对确认注册开关开启、策略已初始化、一条白名单及一位现有 human；SMTP、发件地址、OIDC 和环境级模型供给均未配置。此时新人即使获白名单准入，也会被原生注册规则要求的验证邮件服务阻塞；这是配置及代码路径核对，尚未实际创建新账号。因此需要先接通原生认证邮件投递，或配置并验证可信 OIDC，不能用关闭验证代替注册完成。

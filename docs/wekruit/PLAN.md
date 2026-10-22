@@ -4,6 +4,20 @@
 
 **Goal:** 在现有 Rakazo 网页交付 Main/Sourcer 原生协作、可恢复交互与记忆，迁入现有招聘工作，完成 [GOAL.md](GOAL.md) 的 P0–P6 基础闭环与 [PRODUCT-SCOPE.md](PRODUCT-SCOPE.md) 的 Juicebox / Metix / Grok Bot 完整产品范围。
 
+### 2026-10-22：产品 SSO 与平台 API 配置已上线，上手读取失败已修复
+
+已发布所选 `5f747ebb`（公开镜像 `d25c7d3c`），135份运行源码 hash 与固定归档一致，内部 health/ready 为200 JSON且非 degraded；前后20组保护记录精确保持，109份迁移、原 executing prepare、记忆、Routine 与业务配置保留。十份原 home/restore 未提交改动继续排除。首次公开503和过早的未就绪观察保留，不能称零停机或多副本高可用。
+
+经本次明确批准创建独立产品 OIDC 客户端，只绑定原产品登录回调，使用原生 confidential client/PKCE 与 `client_secret_post`，请求 `openid email profile offline_access`。专用客户端密钥已轮换并仅供原 Modal 加密 Secret 使用，旧 CRM 客户端精确保持，无新组织权限、迁移或付费资源。线上认证能力已实际变为 SSO available，原密码登录保持；产品自身的密码验证/找回邮件仍未配置。正常网页 Link SSO 已经本人完成邮件认证后返回原账号和岗位；物理只读核对确认同一账号新增 OIDC Account，access/refresh/ID token 均存在，未创建重复用户，原业务记录保持。未读取或导出这些 token 的值；元数据不等于本轮已验证实际刷新或全新用户注册。请求范围固定为上述四项，Account.scope 当前为空，不能据此宣称已从存储验证完整授予范围。
+
+用户已补充的平台 OpenAI key 经官方模型目录读取200验证，原生目录支持的部署模型已配置在原 Secret，新实例实际读回 provider/model/密钥存在状态；不返回凭据、不复制为私人连接、不改已有个人模型选择。此项尚无本轮平台推理/新人自然对话成功回执，也不替代平台 Codex OAuth 的授权和接入交付。后备切换与登录失败自动化仍按用户要求后做。
+
+上手页面已修复确定缺陷：原先任一初始化读取失败会吞错进入 bot 阶段，可能跳过模型检查和调用自动创建。现在保留错误并重试同一组原生读取，完整成功之前不初始化；旧请求、StrictMode、卸载及 Retry 迟到结果不得污染新流程，不清空用户输入。8项聚焦检查、Web生产类型/格式、原生多语言提取编译及独立复核通过；批次不累加，不以 mock 检查充当真实新人验收。
+
+共享技能与私人记忆继续复用现有边界：builtin catalog 共享只读，私人 skills 与 Markdown memory 强制 user+Space，跨 bot 的 user-scope 仍属于同一个人。Pi 每个 run 新建 Agent、读取当前授权历史；上下文缓存包含真实 user/Space/bot/thread/模型凭据作用域，不因平台 key 共用合并。以上为源码核对，尚未证明两位真实用户的在线交叉隔离。可选外部 semantic memory 的 Space-shared 与本人跨 bot memory 含义不同，默认新人不启用它；未启用 provider 的 fact 归属与删除边界仍须单独验收。
+
+下一步仍是平台模型执行、新人准入/自动初始化/重登和双用户隔离；已有账号的原生 SSO 关联回调已通过，不能代替这些验收。现有身份登录页面限定组织邮箱，不能当通用客户注册已完成；产品 OIDC 账户到 CRM 的 access-token/RLS 接线尚未接入生产，不能从相同邮箱或已有登录推断 CRM 授权。M1–M5 全范围继续 active。
+
 ### 2026-10-22：原生连接窗口已发布，个人 Codex 跨实例续聊已验证
 
 用户进一步明确：仅个人邮箱/日历按需连接，其他招聘服务与 Codex OAuth 均应由平台提供；已同步 GOAL 和 PRODUCT-SCOPE，不把新人改成逐服务配置。当前部署模型仅支持平台 API key/原生 host 凭据；现有 Codex OAuth 仍绑定个人，旧闲置部署密文字段不参与执行。已核对官方远程托管申请及工作区 WIF beta 文档，尚无适用接入已获准证据；此项仍是产品缺口，不复制个人 grant、不借管理员 actor，也不以 API key 验收替代它。
