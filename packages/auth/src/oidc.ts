@@ -147,18 +147,25 @@ export function oidcAccountSubject(issuer: string, subject: string) {
     .digest("hex");
 }
 
-/** Stored ID tokens were verified during linking; bind their subject to the stored account ID. */
+/** Stored ID tokens were verified during linking; bind them to the current issuer, client and subject. */
 export function isCurrentOidcAccount(
   account: { providerId: string; accountId: string; idToken?: string | null },
   issuer: string | undefined,
+  clientId: string | undefined,
 ) {
-  if (!issuer || account.providerId !== "oidc" || !account.idToken) return false;
+  if (!issuer || !clientId || account.providerId !== "oidc" || !account.idToken) return false;
   try {
     const claims = JSON.parse(
       Buffer.from(account.idToken.split(".")[1] ?? "", "base64url").toString(),
     );
+    const audiences = typeof claims.aud === "string" ? [claims.aud] : claims.aud;
     return (
       claims.iss === issuer &&
+      Array.isArray(audiences) &&
+      audiences.length > 0 &&
+      audiences.every((audience) => typeof audience === "string" && audience.length > 0) &&
+      audiences.includes(clientId) &&
+      (claims.azp === undefined ? audiences.length === 1 : claims.azp === clientId) &&
       typeof claims.sub === "string" &&
       account.accountId === oidcAccountSubject(issuer, claims.sub)
     );

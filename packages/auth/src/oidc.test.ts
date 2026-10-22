@@ -336,6 +336,25 @@ describe("OIDC callbacks", () => {
     expect(rows("user")).toHaveLength(1);
     expect(rows("account")).toHaveLength(1);
   });
+  it("does not mark an old client account as the current SSO link", async () => {
+    setup();
+    await signIn();
+    expect(await (await request("/account-security")).json()).toMatchObject({ ssoLinked: true });
+    auth.disposeOidcDiscovery();
+    setup({
+      oidc: {
+        issuer,
+        clientId: "replacement-client",
+        clientSecret: "fake-secret",
+        name: "SSO",
+        scopes: [],
+        allowSignupBypass: false,
+      },
+    });
+    expect(await (await request("/account-security")).json()).toMatchObject({ ssoLinked: false });
+    expect(rows("user")).toHaveLength(1);
+    expect(rows("account")).toHaveLength(1);
+  });
   it("links only through an authenticated link flow", async () => {
     setup();
     expect(
@@ -656,17 +675,61 @@ describe("SSO-only account deletion", () => {
   );
 });
 
-it("counts only stored OIDC subjects bound to the current issuer", () => {
+it("counts only stored OIDC subjects bound to the current issuer and client", () => {
   const account = {
     providerId: "oidc",
     accountId: oidcAccountSubject(issuer, "subject-1"),
     idToken: jwt({ sub: "subject-1" }),
   };
-  expect(isCurrentOidcAccount(account, issuer)).toBe(true);
-  expect(isCurrentOidcAccount(account, undefined)).toBe(false);
-  expect(isCurrentOidcAccount(account, "https://replacement.example.test")).toBe(false);
-  expect(isCurrentOidcAccount({ ...account, providerId: "credential" }, issuer)).toBe(false);
-  expect(isCurrentOidcAccount({ ...account, accountId: "unbound" }, issuer)).toBe(false);
-  expect(isCurrentOidcAccount({ ...account, idToken: null }, issuer)).toBe(false);
-  expect(isCurrentOidcAccount({ ...account, idToken: "malformed" }, issuer)).toBe(false);
+  expect(isCurrentOidcAccount(account, issuer, "test-client")).toBe(true);
+  expect(isCurrentOidcAccount(account, issuer, "replacement-client")).toBe(false);
+  expect(isCurrentOidcAccount(account, issuer, undefined)).toBe(false);
+  expect(isCurrentOidcAccount(account, undefined, "test-client")).toBe(false);
+  expect(isCurrentOidcAccount(account, "https://replacement.example.test", "test-client")).toBe(
+    false,
+  );
+  expect(
+    isCurrentOidcAccount({ ...account, providerId: "credential" }, issuer, "test-client"),
+  ).toBe(false);
+  expect(isCurrentOidcAccount({ ...account, accountId: "unbound" }, issuer, "test-client")).toBe(
+    false,
+  );
+  expect(isCurrentOidcAccount({ ...account, idToken: null }, issuer, "test-client")).toBe(false);
+  expect(isCurrentOidcAccount({ ...account, idToken: "malformed" }, issuer, "test-client")).toBe(
+    false,
+  );
+});
+
+it.each([
+  ["single audience", { aud: "test-client" }, true],
+  ["single audience array", { aud: ["test-client"] }, true],
+  ["single authorized party", { aud: "test-client", azp: "test-client" }, true],
+  [
+    "multiple authorized audiences",
+    { aud: ["other-client", "test-client"], azp: "test-client" },
+    true,
+  ],
+  ["wrong audience", { aud: "other-client" }, false],
+  ["missing audience", { aud: undefined }, false],
+  ["empty audience", { aud: [] }, false],
+  ["numeric audience", { aud: 1 }, false],
+  ["object audience", { aud: { client: "test-client" } }, false],
+  ["malformed audience array", { aud: ["test-client", null], azp: "test-client" }, false],
+  ["empty audience entry", { aud: ["test-client", ""], azp: "test-client" }, false],
+  ["multiple audiences without authorized party", { aud: ["test-client", "other-client"] }, false],
+  ["wrong authorized party", { aud: ["test-client", "other-client"], azp: "other-client" }, false],
+  ["wrong single authorized party", { aud: "test-client", azp: "other-client" }, false],
+  ["null authorized party", { aud: "test-client", azp: null }, false],
+] as const)("checks the stored OIDC %s", (_label, claims, accepted) => {
+  expect(
+    isCurrentOidcAccount(
+      {
+        providerId: "oidc",
+        accountId: oidcAccountSubject(issuer, "subject-1"),
+        idToken: jwt({ sub: "subject-1", ...claims }),
+      },
+      issuer,
+      "test-client",
+    ),
+  ).toBe(accepted);
 });
