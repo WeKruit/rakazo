@@ -29,7 +29,10 @@ import type { McpOAuthBroker, OAuthMaterial } from "./mcp-oauth.js";
 import { oauthMaterialSecrets } from "./mcp-oauth.js";
 import { McpSession } from "./mcp-transport.js";
 import { actorMayUsePrivateEndpoint } from "./private-endpoint.js";
-import { requireAutumnTaskOwnership } from "./recruiting-research.js";
+import {
+  requireAutumnTaskOwnership,
+  requireFullEnrichJobOwnership,
+} from "./recruiting-research.js";
 import type { RemoteTransportDependencies } from "./remote-mcp.js";
 
 type SessionEntry = {
@@ -115,6 +118,22 @@ export async function requireMcpToolAssignment(
   return assignment;
 }
 
+function platformMcpCredential(server: Pick<McpServer, "secretId" | "transport" | "endpoint">) {
+  if (server.secretId || server.transport !== "streamable_http") return undefined;
+  if (server.endpoint === "https://api.autumn.ai/mcp")
+    return { key: process.env.AUTUMN_API_KEY?.trim(), label: "Recruiting research" };
+  if (server.endpoint === "https://mcp.fullenrich.com/mcp")
+    return { key: process.env.FULLENRICH_API_KEY?.trim(), label: "Contact enrichment" };
+  return undefined;
+}
+
+/** Connection readiness only; never return deployment credentials to product clients. */
+export function hasPlatformMcpCredential(
+  server: Pick<McpServer, "secretId" | "transport" | "endpoint">,
+): boolean {
+  return Boolean(platformMcpCredential(server)?.key);
+}
+
 export async function loadMcpCredentialRecord(
   prisma: PrismaClient,
   secrets: SecretStore,
@@ -128,13 +147,10 @@ export async function loadMcpCredentialRecord(
       })
     : null;
   if (secret) onRef?.(secret.ciphertext, secret.id);
-  const platformService =
-    !server.secretId &&
-    server.transport === "streamable_http" &&
-    server.endpoint === "https://api.autumn.ai/mcp";
-  const deploymentKey = platformService ? process.env.AUTUMN_API_KEY?.trim() : undefined;
+  const platformService = platformMcpCredential(server);
+  const deploymentKey = platformService?.key;
   if (platformService && !deploymentKey)
-    throw new Error("Recruiting research is not configured on this server");
+    throw new Error(`${platformService.label} is not configured on this server`);
   const plaintext = secret
     ? await secrets.load(secret.ciphertext, { recordId: secret.id, signal: context.signal })
     : deploymentKey
@@ -338,6 +354,13 @@ export class McpConnector implements ConnectorProvider {
         call.route.toolName,
       );
       await requireAutumnTaskOwnership(
+        this.prisma,
+        context,
+        assignment.server,
+        call.route.toolName,
+        call.args,
+      );
+      await requireFullEnrichJobOwnership(
         this.prisma,
         context,
         assignment.server,

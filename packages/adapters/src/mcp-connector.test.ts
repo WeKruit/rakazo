@@ -204,6 +204,58 @@ describe("official Autumn task dispatch", () => {
   );
 });
 
+it("denies an unowned FullEnrich job before connecting or loading credentials", async () => {
+  const fetch = vi.fn();
+  vi.stubGlobal("fetch", fetch);
+  const load = vi.fn();
+  const connector = new McpConnector(
+    {
+      botMcpServer: {
+        findFirst: vi.fn().mockResolvedValue({
+          ...ASSIGNMENT,
+          server: { ...SERVER, endpoint: "https://mcp.fullenrich.com/mcp" },
+        }),
+      },
+      externalEffect: { findMany: vi.fn().mockResolvedValue([]) },
+    } as never,
+    { load } as never,
+    { network: TEST_NETWORK },
+  );
+  try {
+    const events = [];
+    for await (const event of connector.execute(
+      {
+        tool: "mcp__fullenrich__get_enrichment_results",
+        executionId: "unowned-job",
+        route: {
+          connectorId: "mcp",
+          resourceId: SERVER.id,
+          resourceRevision: 1,
+          toolName: "get_enrichment_results",
+        },
+        args: { enrichment_id: "foreign-job" },
+      },
+      {
+        spaceId: "w1",
+        userId: "u1",
+        botId: "bot-1",
+        signal: new AbortController().signal,
+      } as never,
+    ))
+      events.push(event);
+    expect(events).toEqual([
+      expect.objectContaining({
+        type: "error",
+        message: expect.stringMatching(/not available in your workspace/i),
+      }),
+    ]);
+    expect(fetch).not.toHaveBeenCalled();
+    expect(load).not.toHaveBeenCalled();
+  } finally {
+    await connector.close();
+  }
+});
+
 describe("MCP connector session cache", () => {
   it.each(["direct", "catalog"])(
     "marks a thrown %s tool call uncertain and preserves returned provider errors",
@@ -1531,7 +1583,10 @@ describe("allowlistDrift", () => {
   });
 });
 
-describe("deployment Autumn credentials", () => {
+describe.each([
+  ["Autumn", "https://api.autumn.ai/mcp", "AUTUMN_API_KEY", "Recruiting research"],
+  ["FullEnrich", "https://mcp.fullenrich.com/mcp", "FULLENRICH_API_KEY", "Contact enrichment"],
+])("deployment %s credentials", (name, endpoint, env, label) => {
   afterEach(() => vi.unstubAllEnvs());
   const context = {
     userId: "new-user",
@@ -1541,11 +1596,11 @@ describe("deployment Autumn credentials", () => {
   const official = {
     secretId: null,
     transport: "streamable_http",
-    endpoint: "https://api.autumn.ai/mcp",
+    endpoint,
   };
 
   it("supplies the platform key in memory without loading or copying another account's secret", async () => {
-    vi.stubEnv("AUTUMN_API_KEY", "platform-service-key");
+    vi.stubEnv(env, "platform-service-key");
     const findFirst = vi.fn();
     const load = vi.fn();
     const result = await loadMcpCredentialRecord(
@@ -1565,8 +1620,11 @@ describe("deployment Autumn credentials", () => {
     "https://api.autumn.ai.example.test/mcp",
     "https://other.example.test/mcp",
     "http://api.autumn.ai/mcp",
+    "https://mcp.fullenrich.com/mcp?redirect=other",
+    "https://mcp.fullenrich.com.example.test/mcp",
+    "http://mcp.fullenrich.com/mcp",
   ])("never supplies a platform key to a different endpoint: %s", async (endpoint) => {
-    vi.stubEnv("AUTUMN_API_KEY", "platform-service-key");
+    vi.stubEnv(env, "platform-service-key");
     const result = await loadMcpCredentialRecord(
       {} as never,
       {} as never,
@@ -1577,7 +1635,7 @@ describe("deployment Autumn credentials", () => {
   });
 
   it("preserves actor-scoped personal credentials and refuses a missing owned secret", async () => {
-    vi.stubEnv("AUTUMN_API_KEY", "platform-service-key");
+    vi.stubEnv(env, "platform-service-key");
     const row = { id: "personal-secret", ciphertext: "encrypted-reference" };
     const findFirst = vi.fn().mockResolvedValueOnce(row).mockResolvedValueOnce(null);
     const load = vi.fn().mockResolvedValue('{"secret":"personal-service-key"}');
@@ -1595,21 +1653,23 @@ describe("deployment Autumn credentials", () => {
   });
 
   it("reports an unconfigured platform service before authentication when its key is absent", async () => {
-    vi.stubEnv("AUTUMN_API_KEY", " ");
+    vi.stubEnv(env, " ");
     await expect(
       loadMcpCredentialRecord({} as never, {} as never, official, context as never),
-    ).rejects.toThrow("Recruiting research is not configured on this server");
+    ).rejects.toThrow(`${label} is not configured on this server`);
   });
 
   it("activates the existing service assignment after platform configuration without network or OAuth while unavailable", async () => {
-    vi.stubEnv("AUTUMN_API_KEY", " ");
+    vi.stubEnv(env, " ");
     const state = { failNext: false, initializations: 0, headers: [] as Record<string, string>[] };
     const fetch = mcpFetch(state, official.endpoint);
     vi.stubGlobal("fetch", fetch);
     const providerFor = vi.fn().mockResolvedValue(undefined);
     const findMany = vi
       .fn()
-      .mockResolvedValue([{ ...ASSIGNMENT, server: { ...SERVER, ...official, slug: "autumn" } }]);
+      .mockResolvedValue([
+        { ...ASSIGNMENT, server: { ...SERVER, ...official, slug: name.toLowerCase() } },
+      ]);
     const load = vi.fn();
     const connector = new McpConnector(
       { botMcpServer: { findMany } } as never,
@@ -1622,9 +1682,9 @@ describe("deployment Autumn credentials", () => {
       await expect(connector.discoverTools(scoped as never)).resolves.toEqual([]);
       expect(fetch).not.toHaveBeenCalled();
       expect(providerFor).not.toHaveBeenCalled();
-      vi.stubEnv("AUTUMN_API_KEY", "platform-service-key");
+      vi.stubEnv(env, "platform-service-key");
       await expect(connector.discoverTools(scoped as never)).resolves.toEqual([
-        expect.objectContaining({ name: "mcp__autumn__echo" }),
+        expect.objectContaining({ name: `mcp__${name.toLowerCase()}__echo` }),
       ]);
       expect(
         state.headers.every((headers) => headers.authorization === "Bearer platform-service-key"),

@@ -8,7 +8,131 @@ import {
   projectRecruitingCandidateReport,
   readRecruitingResearchRequest,
   requireAutumnTaskOwnership,
+  requireFullEnrichJobOwnership,
 } from "./recruiting-research.js";
+
+describe("FullEnrich job ownership", () => {
+  const actor = { userId: "owner", spaceId: "space" };
+  const server = {
+    id: "contact-server",
+    revision: 2,
+    transport: "streamable_http",
+    endpoint: "https://mcp.fullenrich.com/mcp",
+  };
+  const route = {
+    connectorId: "mcp",
+    resourceId: server.id,
+    resourceRevision: 2,
+    toolName: "enrich_bulk",
+  };
+  const creation = {
+    contacts: [{ linkedin_url: "https://linkedin.com/in/example-person" }],
+    fields: ["work_email"],
+  };
+  const request = ["__rakazoCatalogTool", "direct", { route, args: creation }];
+  const result = {
+    content: [{ type: "text", text: JSON.stringify({ enrichment_id: "owned-job" }) }],
+  };
+  function fixture(savedRequest: unknown = request, savedResult: unknown = result) {
+    return {
+      externalEffect: {
+        findMany: vi.fn(async ({ where }) =>
+          where.spaceId === actor.spaceId &&
+          where.run.spaceId === actor.spaceId &&
+          where.run.userId === actor.userId
+            ? [{ request: savedRequest, result: savedResult }]
+            : [],
+        ),
+      },
+    };
+  }
+  const authorize = (
+    db: ReturnType<typeof fixture>,
+    tool = "get_enrichment_results",
+    args: Record<string, unknown> = { enrichment_id: "owned-job" },
+    who = actor,
+    connection = server,
+  ) => requireFullEnrichJobOwnership(db as never, who, connection, tool, args);
+
+  it.each(["direct", "connectors_execute_tool", "mcp_execute_tool"])(
+    "accepts an owned successful %s creation receipt",
+    async (kind) => {
+      const saved =
+        kind === "direct"
+          ? request
+          : [
+              "__rakazoCatalogTool",
+              kind,
+              { id: `${server.id}:enrich_bulk`, arguments: creation },
+              route,
+            ];
+      const db = fixture(saved);
+      await expect(authorize(db)).resolves.toBeUndefined();
+      expect(db.externalEffect.findMany).toHaveBeenCalledWith(
+        expect.objectContaining({
+          where: expect.objectContaining({
+            status: "completed",
+            spaceId: actor.spaceId,
+            run: actor,
+          }),
+        }),
+      );
+    },
+  );
+  it.each(["user", "space", "job", "connection", "revision", "read", "error", "malformed"])(
+    "does not grant ownership from %s mismatch",
+    async (change) => {
+      const saved = structuredClone(request);
+      const body = saved[2] as { route: typeof route };
+      if (change === "connection") body.route.resourceId = "other-server";
+      if (change === "revision") body.route.resourceRevision = 1;
+      if (change === "read") body.route.toolName = "get_enrichment_results";
+      const db = fixture(
+        saved,
+        change === "error"
+          ? { ...result, isError: true }
+          : change === "malformed"
+            ? { content: [{ type: "text", text: "Job owned-job" }] }
+            : result,
+      );
+      await expect(
+        authorize(
+          db,
+          "get_enrichment_results",
+          { enrichment_id: change === "job" ? "foreign-job" : "owned-job" },
+          {
+            userId: change === "user" ? "other" : actor.userId,
+            spaceId: change === "space" ? "other" : actor.spaceId,
+          },
+        ),
+      ).rejects.toThrow();
+    },
+  );
+  it("allows creation and credits but denies unscoped account tools and malformed job reads", async () => {
+    const db = fixture();
+    await expect(authorize(db, "enrich_bulk", creation)).resolves.toBeUndefined();
+    await expect(authorize(db, "get_credits", {})).resolves.toBeUndefined();
+    expect(db.externalEffect.findMany).not.toHaveBeenCalled();
+    for (const [tool, args] of [
+      ["export_enrichment_results", { enrichment_id: "owned-job" }],
+      ["get_enrichment_results", {}],
+      ["list_enrichments", {}],
+      ["enrich_bulk", { ...creation, enrichment_id: "foreign-job" }],
+      ["get_credits", { enrichment_id: "foreign-job" }],
+    ] as const)
+      await expect(authorize(db, tool, args)).rejects.toThrow();
+  });
+  it("does not apply provider guards to a different configured integration", async () => {
+    const db = fixture();
+    await expect(
+      authorize(db, "custom_tool", {}, actor, {
+        ...server,
+        endpoint: "https://custom.example.test/mcp",
+      }),
+    ).resolves.toBeUndefined();
+    expect(db.externalEffect.findMany).not.toHaveBeenCalled();
+  });
+});
 
 describe("Autumn task ownership", () => {
   const actor = { userId: "owner", spaceId: "space" };

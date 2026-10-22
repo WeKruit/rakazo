@@ -16,7 +16,10 @@ import {
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import * as api from "./recruiting.js";
 import type { RouterDeps } from "./router.js";
-import { createRouter } from "./router.js";
+import { createRouter as createNativeRouter } from "./router.js";
+
+const createRouter = (deps: RouterDeps) =>
+  createNativeRouter({ env: { deploymentModelConfigured: false } as RouterDeps["env"], ...deps });
 
 vi.mock("@rakazo/core/node/pdf-text", () => ({ extractPdfText: vi.fn() }));
 vi.mock("@rakazo/db", async (importOriginal) => {
@@ -683,6 +686,66 @@ describe("saved recruiting correspondence", () => {
       work_emails: [{ email: "person@example.test", status: "HIGH_PROBABILITY" }],
     },
   };
+  it("recognizes exact platform FullEnrich readiness without exposing a credential or inventing a personal connection", async () => {
+    vi.stubEnv("FULLENRICH_API_KEY", "platform-service-key");
+    try {
+      const { client, prisma } = contactFixture({ status: "FINISHED", results: [contactRow] });
+      client.mcpServer.findMany.mockReset().mockResolvedValue([
+        {
+          id: "mail",
+          name: "FullEnrich",
+          endpoint: "https://mcp.fullenrich.com/mcp",
+          transport: "streamable_http",
+          secretId: null,
+          revision: 1,
+          enabled: true,
+          assignments: [
+            { botId: "main", allowAllTools: false, allowedTools: ["get_enrichment_results"] },
+          ],
+        },
+      ]);
+      const result = await api.getRecruitingCorrespondence(prisma, actor, target, "contacts");
+      expect(result.connections).toEqual([{ name: "FullEnrich", status: "configured" }]);
+      expect(JSON.stringify(result)).not.toContain("platform-service-key");
+      vi.stubEnv("FULLENRICH_API_KEY", " ");
+      client.externalEffect.findMany.mockResolvedValue([]);
+      expect(
+        (await api.getRecruitingCorrespondence(prisma, actor, target, "contacts")).connections,
+      ).toEqual([{ name: "FullEnrich", status: "needs_connection" }]);
+    } finally {
+      vi.unstubAllEnvs();
+    }
+  });
+  it.each([
+    { endpoint: "https://mcp.fullenrich.com/mcp?redirect=other", transport: "streamable_http" },
+    { endpoint: "https://mcp.fullenrich.com/mcp", transport: "stdio" },
+  ])(
+    "does not advertise deployment credentials for another endpoint or transport: %s",
+    async (connection) => {
+      vi.stubEnv("FULLENRICH_API_KEY", "platform-service-key");
+      try {
+        const { client, prisma } = contactFixture({ status: "FINISHED", results: [contactRow] });
+        client.mcpServer.findMany.mockReset().mockResolvedValue([
+          {
+            id: "mail",
+            name: "FullEnrich",
+            ...connection,
+            secretId: null,
+            revision: 1,
+            enabled: true,
+            assignments: [
+              { botId: "main", allowAllTools: false, allowedTools: ["get_enrichment_results"] },
+            ],
+          },
+        ]);
+        expect(
+          (await api.getRecruitingCorrespondence(prisma, actor, target, "contacts")).connections,
+        ).toEqual([{ name: "FullEnrich", status: "needs_connection" }]);
+      } finally {
+        vi.unstubAllEnvs();
+      }
+    },
+  );
   it("projects the actual FullEnrich text result only for the canonical current-role identity, preserving provider uncertainty", async () => {
     const { client, prisma } = contactFixture({ status: "FINISHED", results: [contactRow] });
     const result = await api.getRecruitingCorrespondence(prisma, actor, target, "contacts");
