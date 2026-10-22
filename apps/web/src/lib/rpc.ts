@@ -87,17 +87,20 @@ const link = new RPCLink<RpcClientContext>({
     if (!response.ok) {
       const requestId = response.headers.get("x-request-id");
       const traceparent = response.headers.get("traceparent");
-      console.error("RPC request failed", {
-        method: request.method,
-        pathname: new URL(request.url).pathname,
-        status: response.status,
-        contentType: response.headers.get("content-type"),
-        timestamp: new Date().toISOString(),
-        durationMs: Math.round(performance.now() - started),
-        "sent-x-request-id": headers.get("x-request-id"),
-        ...(requestId ? { "x-request-id": requestId } : {}),
-        ...(traceparent ? { traceparent } : {}),
-      });
+      console.error(
+        "RPC request failed",
+        JSON.stringify({
+          method: request.method,
+          pathname: new URL(request.url).pathname,
+          status: response.status,
+          contentType: response.headers.get("content-type"),
+          timestamp: new Date().toISOString(),
+          durationMs: Math.round(performance.now() - started),
+          "sent-x-request-id": headers.get("x-request-id"),
+          ...(requestId ? { "x-request-id": requestId } : {}),
+          ...(traceparent ? { traceparent } : {}),
+        }),
+      );
     }
     return response;
   },

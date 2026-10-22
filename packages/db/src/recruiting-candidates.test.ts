@@ -1299,6 +1299,9 @@ function crmFixture() {
     },
     run: {
       findFirst: vi.fn(async ({ where }) => runs.get(where.id) ?? null),
+      findMany: vi.fn(async ({ where }) =>
+        [...runs.values()].filter((run) => where.id.in.includes(run.id)),
+      ),
       findUnique: vi.fn(async ({ where }) => runs.get(where.id) ?? null),
       findUniqueOrThrow: vi.fn(async ({ where }) => {
         const run = runs.get(where.id);
@@ -4229,6 +4232,84 @@ describe("native candidate source provenance", () => {
     ]);
     expect(f.nativeProofs).toHaveBeenCalledOnce();
   });
+  it("batches native CRM source and owner reads while preserving each historical binding and status", async () => {
+    const f = await nativeImportReadFixture();
+    const otherBinding = {
+      ...f.binding,
+      id: "another-binding",
+      result: { ...(f.binding.result as object), bindingEffectId: "another-binding" },
+    };
+    const otherEffect = {
+      ...f.importEffect,
+      id: "another-import",
+      status: "executing",
+      idempotencyKey: `recruiting-crm-import:${stableJsonValue([otherBinding.id, f.page.effectId, 0])}`,
+    };
+    f.effects.set(otherBinding.id, otherBinding);
+    f.effects.set(otherEffect.id, otherEffect);
+    f.links.push({ ...f.links[0]!, effectId: otherEffect.id, bindingEffectId: otherBinding.id });
+    Object.assign(f.run, { leaseExpiresAt: new Date(0) });
+    f.tx.run.findFirst.mockClear();
+    f.tx.run.findUniqueOrThrow.mockClear();
+    f.tx.recruitingCandidateOccurrence.findUnique.mockClear();
+    const before = structuredClone({ links: f.links, effects: [...f.effects.values()] });
+    const sources = await recruiting.listRecruitingCandidateSources(f.prisma, actor, {
+      roleId: f.role.id,
+      candidateKey: f.occurrence.candidateKey,
+    });
+    expect(sources.items[0]?.crmImports).toEqual([
+      expect.objectContaining({ effectId: f.importEffect.id, status: "pending", receipt: null }),
+      expect.objectContaining({ effectId: otherEffect.id, status: "unknown", receipt: null }),
+    ]);
+    expect(sources.items[0]?.crmImports.map((item) => item.bindingEffectId)).toEqual([
+      f.binding.id,
+      otherBinding.id,
+    ]);
+    expect(f.tx.run.findMany).toHaveBeenCalledOnce();
+    expect(f.tx.run.findMany).toHaveBeenCalledWith({
+      where: {
+        spaceId: actor.spaceId,
+        userId: actor.userId,
+        id: { in: [f.run.id] },
+        bot: { spaceId: actor.spaceId, userId: actor.userId },
+        thread: {
+          spaceId: actor.spaceId,
+          userId: actor.userId,
+          OR: [
+            { botId: { not: null }, bot: { spaceId: actor.spaceId, userId: actor.userId } },
+            {
+              botId: null,
+              groupId: { not: null },
+              group: { spaceId: actor.spaceId, userId: actor.userId },
+            },
+            {
+              botId: null,
+              groupId: null,
+              externalConversationId: { not: null },
+              externalConversation: {
+                spaceId: actor.spaceId,
+                userId: actor.userId,
+                bot: { spaceId: actor.spaceId, userId: actor.userId },
+              },
+            },
+          ],
+        },
+      },
+      select: { id: true, spaceId: true, userId: true, status: true, leaseExpiresAt: true },
+    });
+    expect(f.tx.run.findUniqueOrThrow).not.toHaveBeenCalled();
+    expect(f.tx.recruitingCandidateOccurrence.findUnique).not.toHaveBeenCalled();
+    expect(f.nativeProofs).toHaveBeenCalledOnce();
+    expect({ links: f.links, effects: [...f.effects.values()] }).toEqual(before);
+  });
+  it.each(["missing", "foreign"])("rejects a %s batched CRM import owner", async (boundary) => {
+    const f = await nativeImportReadFixture();
+    f.tx.run.findMany.mockResolvedValue(
+      boundary === "missing" ? [] : [{ ...f.run, userId: "another-owner" }],
+    );
+    await expect(nativeCandidateListRead(f)).rejects.toThrow(IsolationError);
+    expect(f.tx.externalEffect.updateMany).not.toHaveBeenCalled();
+  });
   it.each(["hash", "role", "revision", "artifact", "effect", "cursor"])(
     "does not reuse a native proof for a mismatched imported source %s",
     async (boundary) => {
@@ -4240,7 +4321,13 @@ describe("native candidate source provenance", () => {
       if (boundary === "artifact") page.artifactId = "foreign-artifact";
       if (boundary === "effect") page.effectId = "different-effect";
       if (boundary === "cursor") page.requestCursor = "different-cursor" as never;
-      f.tx.recruitingCandidateOccurrence.findUnique.mockResolvedValue({ ...f.occurrence, page });
+      f.tx.recruitingCrmImport.findMany.mockResolvedValue([
+        {
+          ...f.links[0]!,
+          effect: f.importEffect,
+          occurrence: { ...f.occurrence, page },
+        },
+      ]);
       await expect(nativeCandidateListRead(f)).rejects.toThrow(IsolationError);
       expect(f.nativeProofs).toHaveBeenCalledTimes(2);
       expect(f.tx.externalEffect.updateMany).not.toHaveBeenCalled();
