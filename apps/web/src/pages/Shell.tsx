@@ -2307,6 +2307,39 @@ export function ShellPage() {
     setReplyTarget(null);
     setReplyQuote(null);
   }, []);
+  const managedConnectionBots =
+    !booting &&
+    bootstrapMe?.userId === userId &&
+    (selectedSpaceId() ?? bootstrapMe?.spaceId) === bootstrapMe?.spaceId
+      ? bots.filter((bot) => !bot.archivedAt && bot.spaceId === bootstrapMe?.spaceId)
+      : [];
+  const managedConnectionMain = managedConnectionBots.find(
+    (bot) => bot.spawnKey === `recruiting:${userId}:main`,
+  );
+  const connectionMemberIds = workspaceNewRole
+    ? managedConnectionMain
+      ? ["main", "outreach", "scheduling"].flatMap((key) => {
+          const bot = managedConnectionBots.find(
+            (bot) => bot.spawnKey === `recruiting:${userId}:${key}`,
+          );
+          return bot ? [bot.id] : [];
+        })
+      : []
+    : validatedThreadEpoch.current === historyEpoch.current &&
+        (inGroup
+          ? snapshotRef.current?.groupId === groupId
+          : snapshotRef.current?.botId === active?.id)
+      ? inGroup
+        ? (snapshotRef.current?.members ?? []).map((member) => member.botId)
+        : active
+          ? [active.id]
+          : []
+      : [];
+  const recruitingConnectionBot = (key: "outreach" | "scheduling") =>
+    managedConnectionBots.find(
+      (bot) =>
+        connectionMemberIds.includes(bot.id) && bot.spawnKey === `recruiting:${userId}:${key}`,
+    )?.id;
   const currentRuns = activeThreadRuns(activeSnapshot);
   const answerableAskIds = answerableAskMessageIds(
     validatedThreadEpoch.current === historyEpoch.current &&
@@ -5541,7 +5574,11 @@ export function ShellPage() {
 
         {pluginsOpen ? (
           <PluginsOverlay
-            activeBotId={activeBotId.current}
+            key={JSON.stringify([userId, bootstrapMe?.spaceId, panelTarget, activeSnapshot?.threadId, connectionMemberIds])}
+            activeBotId={workspaceNewRole ? undefined : activeBotId.current}
+            coordinatorBotId={connectionMemberIds[0]}
+            recruitingBotIds={{outreach: recruitingConnectionBot("outreach"), scheduling: recruitingConnectionBot("scheduling")}}
+            memberBotIds={inGroup || workspaceNewRole ? connectionMemberIds : undefined}
             developerView={showToolActivity}
             onClose={() => setPluginsOpen(false)}
             onOpenMcp={() => {

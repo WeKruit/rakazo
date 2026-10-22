@@ -4556,8 +4556,8 @@ export function createRouter(deps: RouterDeps) {
                   userId: context.actor.userId,
                   botId: bot.id,
                   serverId: server.id,
-                  allowAllTools: true,
-                  allowedTools: [],
+                  allowAllTools: input.allowedTools === undefined,
+                  allowedTools: input.allowedTools ?? [],
                 },
                 update: {},
               });

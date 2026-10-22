@@ -809,7 +809,14 @@ export const appContract = {
       list: oc.input(botId).output(z.array(BotMcpServerSchema)),
       all: oc.output(z.array(BotMcpServerSchema)),
       approve: oc
-        .input(z.object({ botId: Id, serverId: Id, threadId: Id.optional() }))
+        .input(
+          z.object({
+            botId: Id,
+            serverId: Id,
+            threadId: Id.optional(),
+            allowedTools: z.array(z.string().min(1).max(200)).max(500).optional(),
+          }),
+        )
         .output(BotMcpServerSchema),
       dismiss: oc
         .input(z.object({ botId: Id, serverId: Id, threadId: Id.optional() }))

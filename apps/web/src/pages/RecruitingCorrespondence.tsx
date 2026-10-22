@@ -551,8 +551,13 @@ function SavedCorrespondenceView({
                 ) : null}
               </div>
               <p>
-                <time dateTime={event.start}>{event.start}</time> –{" "}
-                <time dateTime={event.end}>{event.end}</time>
+                <time dateTime={event.start}>{event.start}</time>
+                {event.end ? (
+                  <>
+                    {" "}
+                    – <time dateTime={event.end}>{event.end}</time>
+                  </>
+                ) : null}
                 {event.timeZone ? ` · ${event.timeZone}` : ""}
               </p>
               {event.attendees.length ? (
