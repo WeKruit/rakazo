@@ -10,18 +10,20 @@ type ConversationTarget = { botId: string } | { groupId: string };
 
 export async function loadConversationMessages(
   target: ConversationTarget,
+  isCurrent: () => boolean,
 ): Promise<ThreadMessage[]> {
   const spaceId = selectedSpaceId();
   const messages = new Map<string, ThreadMessage>();
   let threadId: string | undefined;
   let before: number | undefined;
   for (;;) {
+    if (!isCurrent()) throw new Error("The conversation changed during export");
     if (spaceId !== selectedSpaceId()) throw new Error("The workspace changed during export");
     const page = await rpc.threads.messages({
       ...target,
       ...(before === undefined ? {} : { before }),
     });
-    if (spaceId !== selectedSpaceId() || (threadId && threadId !== page.threadId)) {
+    if (!isCurrent() || spaceId !== selectedSpaceId() || (threadId && threadId !== page.threadId)) {
       throw new Error("The conversation changed during export");
     }
     threadId = page.threadId;
@@ -125,9 +127,11 @@ export function conversationDocument({
 export async function downloadConversation(
   input: Omit<Parameters<typeof conversationDocument>[0], "messages"> & {
     target: ConversationTarget;
+    isCurrent: () => boolean;
   },
 ): Promise<void> {
-  const messages = await loadConversationMessages(input.target);
+  const messages = await loadConversationMessages(input.target, input.isCurrent);
+  if (!input.isCurrent()) throw new Error("The conversation changed during export");
   const html = conversationDocument({ ...input, messages });
   const name =
     input.title

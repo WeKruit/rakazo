@@ -1,8 +1,15 @@
 // @vitest-environment jsdom
 import type { ThreadMessage } from "@rakazo/contracts";
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import { conversationDocument, loadConversationMessages } from "./conversation-export";
+import { downloadArtifactBytes } from "./artifact-open";
+import {
+  conversationDocument,
+  downloadConversation,
+  loadConversationMessages,
+} from "./conversation-export";
 import { rpc, selectedSpaceId } from "./rpc";
+
+vi.mock("./artifact-open", () => ({ downloadArtifactBytes: vi.fn() }));
 
 vi.mock("./rpc", () => ({
   rpc: { threads: { messages: vi.fn() } },
@@ -43,9 +50,9 @@ describe("conversation export", () => {
         messages: [message(1, []), message(2, []), message(3, [])],
         olderCursor: null,
       });
-    expect((await loadConversationMessages({ groupId: "g" })).map((m) => m.seq)).toEqual([
-      1, 2, 3, 4,
-    ]);
+    expect(
+      (await loadConversationMessages({ groupId: "g" }, () => true)).map((m) => m.seq),
+    ).toEqual([1, 2, 3, 4]);
     expect(rpc.threads.messages).toHaveBeenLastCalledWith({ groupId: "g", before: 3 });
   });
 
@@ -55,13 +62,15 @@ describe("conversation export", () => {
       messages: [],
       olderCursor: 3,
     });
-    await expect(loadConversationMessages({ botId: "b" })).rejects.toThrow();
+    await expect(loadConversationMessages({ botId: "b" }, () => true)).rejects.toThrow();
     vi.mocked(rpc.threads.messages)
       .mockResolvedValueOnce({ threadId: "t", messages: [], olderCursor: 3 })
       .mockResolvedValueOnce({ threadId: "other", messages: [], olderCursor: null });
-    await expect(loadConversationMessages({ botId: "b" })).rejects.toThrow();
+    await expect(loadConversationMessages({ botId: "b" }, () => true)).rejects.toThrow();
     vi.mocked(rpc.threads.messages).mockRejectedValueOnce(new Error("unavailable"));
-    await expect(loadConversationMessages({ botId: "b" })).rejects.toThrow("unavailable");
+    await expect(loadConversationMessages({ botId: "b" }, () => true)).rejects.toThrow(
+      "unavailable",
+    );
   });
 
   it("does not mix workspaces when the selection changes during a request", async () => {
@@ -74,10 +83,44 @@ describe("conversation export", () => {
       messages: [],
       olderCursor: null,
     });
-    await expect(loadConversationMessages({ groupId: "g" })).rejects.toThrow(
+    await expect(loadConversationMessages({ groupId: "g" }, () => true)).rejects.toThrow(
       "conversation changed",
     );
   });
+
+  it.each(["actor", "unmount"] as const)(
+    "does not download a late response after its %s boundary changes in the default Space",
+    async (boundary) => {
+      vi.mocked(selectedSpaceId).mockReturnValue(null);
+      let actor = "owner";
+      let active = true;
+      let finish!: (page: Awaited<ReturnType<typeof rpc.threads.messages>>) => void;
+      vi.mocked(rpc.threads.messages).mockReturnValueOnce(
+        new Promise((resolve) => {
+          finish = resolve;
+        }),
+      );
+      const exported = downloadConversation({
+        target: { groupId: "g" },
+        title: "Hiring",
+        userName: "Recruiter",
+        agentName: () => "WeKruit",
+        locale: "en",
+        isCurrent: () => active && actor === "owner",
+      });
+      if (boundary === "actor") actor = "different-owner";
+      else active = false;
+      finish({
+        threadId: "t",
+        messages: [message(1, [{ kind: "text", text: "Private hiring notes" }])],
+        olderCursor: null,
+      });
+
+      await expect(exported).rejects.toThrow("conversation changed");
+      expect(downloadArtifactBytes).not.toHaveBeenCalled();
+      expect(rpc.threads.messages).toHaveBeenCalledOnce();
+    },
+  );
 
   it("keeps every table row and native answers without tool data, secrets, scripts or live controls", () => {
     const rows = Array.from(
