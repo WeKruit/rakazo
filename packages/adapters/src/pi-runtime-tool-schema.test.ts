@@ -1,6 +1,6 @@
 import type { ToolCall } from "@earendil-works/pi-ai";
 import { validateToolArguments } from "@earendil-works/pi-ai";
-import { ElicitRequestFormParamsSchema } from "@modelcontextprotocol/sdk/types.js";
+import { ElicitRequestFormParamsSchema } from "@modelcontextprotocol/core";
 import {
   ArtifactReadInputSchema,
   AskUserInputSchema,

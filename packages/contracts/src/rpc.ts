@@ -851,7 +851,14 @@ export const appContract = {
           ]),
         ),
       complete: oc
-        .input(z.object({ sessionId: Id, code: z.string().min(1), state: z.string().min(1) }))
+        .input(
+          z.object({
+            sessionId: Id,
+            code: z.string().min(1),
+            state: z.string().min(1),
+            iss: z.string().min(1).optional(),
+          }),
+        )
         .output(z.object({ ok: z.literal(true) })),
       disconnect: oc.input(z.object({ serverId: Id })).output(z.object({ ok: z.literal(true) })),
     },

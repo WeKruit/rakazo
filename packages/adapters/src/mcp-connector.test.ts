@@ -1295,12 +1295,12 @@ describe("MCP connector session cache", () => {
           `POST ${SERVER.endpoint}`,
           "POST https://auth.example.test/token",
         ]);
-        expect(invalidate).toHaveBeenCalledWith("all");
+        expect(invalidate.mock.calls).toEqual([["client"], ["tokens"]]);
+        expect(provider.clientInformation()).toBeUndefined();
+        await expect(provider.tokens()).resolves.toBeUndefined();
         expect(requests.some((request) => request.url === metadataUrl)).toBe(false);
-        // The endpoint-origin compatibility retry remains allowed, through remote policy.
-        expect(
-          requests.some((request) => request.url === "https://mcp.example.test/private-probe"),
-        ).toBe(true);
+        // Native invalid_client recovery retains validated discovery instead of following a new challenge.
+        expect(provider.discoveryState()?.authorizationServerUrl).toBe("https://auth.example.test");
         expect(requests.every((request) => new URL(request.url).protocol === "https:")).toBe(true);
       } finally {
         await connector.close();
