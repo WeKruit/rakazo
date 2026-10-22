@@ -2,7 +2,12 @@ import { IsolationError } from "@rakazo/db";
 import { createLogger, createTestSink, getLogger, installLogger } from "@rakazo/logging";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { InfisicalSecretStore } from "./infisical-secret-store.js";
-import { allowlistDrift, McpConnector, requireMcpToolAssignment } from "./mcp-connector.js";
+import {
+  allowlistDrift,
+  loadMcpCredentialRecord,
+  McpConnector,
+  requireMcpToolAssignment,
+} from "./mcp-connector.js";
 import { type McpOAuthBroker, StoredMcpOAuthProvider } from "./mcp-oauth.js";
 import { InMemoryRealtimeFanout } from "./realtime.js";
 import { migrateSecrets } from "./secret-migration.js";
@@ -145,6 +150,59 @@ function mcpFetch(
     return new Response(null, { status: 202 });
   });
 }
+
+describe("official Autumn task dispatch", () => {
+  it.each(["get_task", "get_rows", "reply", "stop_task", "list_tasks"])(
+    "denies an unowned %s call before connecting to the provider",
+    async (toolName) => {
+      const fetch = vi.fn();
+      vi.stubGlobal("fetch", fetch);
+      const load = vi.fn();
+      const connector = new McpConnector(
+        {
+          botMcpServer: {
+            findFirst: vi.fn().mockResolvedValue({
+              ...ASSIGNMENT,
+              server: { ...SERVER, endpoint: "https://api.autumn.ai/mcp" },
+            }),
+          },
+          recruitingResearchTask: { findFirst: vi.fn().mockResolvedValue(null) },
+          externalEffect: { findMany: vi.fn().mockResolvedValue([]) },
+        } as never,
+        { load } as never,
+        { network: TEST_NETWORK },
+      );
+      const events = [];
+      try {
+        for await (const event of connector.execute(
+          {
+            tool: `mcp__autumn__${toolName}`,
+            executionId: "isolated-call",
+            route: { connectorId: "mcp", resourceId: SERVER.id, resourceRevision: 1, toolName },
+            args: { task_id: "foreign-task" },
+          },
+          {
+            spaceId: "w1",
+            userId: "u1",
+            botId: "bot-1",
+            signal: new AbortController().signal,
+          } as never,
+        ))
+          events.push(event);
+        expect(events).toEqual([
+          expect.objectContaining({
+            type: "error",
+            message: expect.stringMatching(/scoped research history/i),
+          }),
+        ]);
+        expect(fetch).not.toHaveBeenCalled();
+        expect(load).not.toHaveBeenCalled();
+      } finally {
+        await connector.close();
+      }
+    },
+  );
+});
 
 describe("MCP connector session cache", () => {
   it.each(["direct", "catalog"])(
@@ -1470,5 +1528,80 @@ describe("allowlistDrift", () => {
       offered: 2,
       stringAllowedCount: 1,
     });
+  });
+});
+
+describe("deployment Autumn credentials", () => {
+  afterEach(() => vi.unstubAllEnvs());
+  const context = {
+    userId: "new-user",
+    spaceId: "private-space",
+    signal: new AbortController().signal,
+  };
+  const official = {
+    secretId: null,
+    transport: "streamable_http",
+    endpoint: "https://api.autumn.ai/mcp",
+  };
+
+  it("supplies the platform key in memory without loading or copying another account's secret", async () => {
+    vi.stubEnv("AUTUMN_API_KEY", "platform-service-key");
+    const findFirst = vi.fn();
+    const load = vi.fn();
+    const result = await loadMcpCredentialRecord(
+      { secret: { findFirst } } as never,
+      { load } as never,
+      official,
+      context as never,
+    );
+    expect(JSON.parse(result.plaintext!)).toEqual({ secret: "platform-service-key" });
+    expect(result.secret).toBeNull();
+    expect(findFirst).not.toHaveBeenCalled();
+    expect(load).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    "https://api.autumn.ai/mcp?redirect=other",
+    "https://api.autumn.ai.example.test/mcp",
+    "https://other.example.test/mcp",
+    "http://api.autumn.ai/mcp",
+  ])("never supplies a platform key to a different endpoint: %s", async (endpoint) => {
+    vi.stubEnv("AUTUMN_API_KEY", "platform-service-key");
+    const result = await loadMcpCredentialRecord(
+      {} as never,
+      {} as never,
+      { ...official, endpoint },
+      context as never,
+    );
+    expect(result.plaintext).toBeUndefined();
+  });
+
+  it("preserves actor-scoped personal credentials and refuses a missing owned secret", async () => {
+    vi.stubEnv("AUTUMN_API_KEY", "platform-service-key");
+    const row = { id: "personal-secret", ciphertext: "encrypted-reference" };
+    const findFirst = vi.fn().mockResolvedValueOnce(row).mockResolvedValueOnce(null);
+    const load = vi.fn().mockResolvedValue('{"secret":"personal-service-key"}');
+    const server = { ...official, secretId: row.id };
+    const prisma = { secret: { findFirst } } as never;
+    const secrets = { load } as never;
+    const personal = await loadMcpCredentialRecord(prisma, secrets, server, context as never);
+    expect(JSON.parse(personal.plaintext!)).toEqual({ secret: "personal-service-key" });
+    expect(findFirst).toHaveBeenCalledWith({
+      where: { id: row.id, userId: context.userId, spaceId: context.spaceId },
+    });
+    const missing = await loadMcpCredentialRecord(prisma, secrets, server, context as never);
+    expect(missing.plaintext).toBeUndefined();
+    expect(load).toHaveBeenCalledTimes(1);
+  });
+
+  it("does not authenticate when the deployment service key is absent", async () => {
+    vi.stubEnv("AUTUMN_API_KEY", " ");
+    const result = await loadMcpCredentialRecord(
+      {} as never,
+      {} as never,
+      official,
+      context as never,
+    );
+    expect(result.plaintext).toBeUndefined();
   });
 });
