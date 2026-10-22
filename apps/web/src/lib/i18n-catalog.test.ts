@@ -116,6 +116,8 @@ describe("lingui catalogs", () => {
       "../pages/shell/RecruitingNavigation.tsx",
       "../pages/RecruitingCorrespondence.tsx",
       "../pages/GroupPanel.tsx",
+      "../pages/Shell.tsx",
+      "../pages/RecruitingPanel.tsx",
     ]) {
       const filename = fileURLToPath(new URL(path, import.meta.url));
       const compiled = transformSync(readFileSync(filename, "utf8"), {
@@ -125,9 +127,11 @@ describe("lingui catalogs", () => {
         parserOpts: { plugins: ["typescript", "jsx"] },
         plugins: [[linguiMacro, { linguiConfig: config }]],
       });
-      for (const match of compiled!.code!.matchAll(/\bid(?::\s*|=)"([^"]+)"/g)) ids.add(match[1]!);
+      for (const match of compiled!.code!.matchAll(/\/\*\*\s*i18n\s*\*\/\s*\{\s*id:\s*"([^"]+)"/g))
+        ids.add(match[1]!);
     }
     expect(ids.size).toBeGreaterThan(40);
+    expect(ids.has("liuegf")).toBe(true);
     const [catalog] = await getCatalogs(config);
     for (const locale of config.locales) {
       const { messages } = await catalog!.getTranslations(locale, config);
