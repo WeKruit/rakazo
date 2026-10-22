@@ -1292,7 +1292,10 @@ describe("sandbox-gone detection", () => {
     const batches: string[][] = [];
     let current: string[] = [];
     const read = vi.fn(async (filePath: string) => {
-      if (active === 0) batches.push((current = []));
+      if (active === 0) {
+        current = [];
+        batches.push(current);
+      }
       active += 1;
       current.push(filePath.slice(root.length + 1));
       await new Promise((resolve) => setTimeout(resolve, 1));
