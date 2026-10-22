@@ -1542,6 +1542,120 @@ describe("MCP loopback endpoints", () => {
   });
 });
 
+describe("bounded native MCP assignment", () => {
+  function assignmentDeps(existing?: { allowAllTools: boolean; allowedTools: string[] }) {
+    const actor = {
+      spaceId: "space-1",
+      userId: "user-1",
+      email: "user@example.test",
+      isDeploymentOwner: false,
+    } satisfies Actor;
+    const upsert = vi.fn(async ({ create }: { create: Record<string, unknown> }) => ({
+      ...create,
+      ...existing,
+      id: "assignment-1",
+      createdAt: new Date(0),
+      updatedAt: new Date(0),
+    }));
+    const prisma = {
+      thread: { findMany: vi.fn().mockResolvedValue([]) },
+      bot: { findFirst: vi.fn().mockResolvedValue({ id: "bot-1" }) },
+      mcpServer: { findFirst: vi.fn().mockResolvedValue({ id: "server-1" }) },
+      botMcpServer: { upsert },
+      $transaction: vi.fn(async (fn: (tx: unknown) => unknown) => fn(prisma)),
+    };
+    const deps = {
+      prisma,
+      env: {
+        defaultProvider: "fake",
+        defaultModel: "fake",
+        webOrigin: "https://app.example.test",
+        sandboxProvider: "fake",
+        screenProxySecret: "test",
+      },
+    } as unknown as RouterDeps;
+    const handler = new RPCHandler(createRouter(deps));
+    const approve = (allowedTools?: string[]) =>
+      handler.handle(
+        new Request("https://app.example.test/rpc/mcp/assignments/approve", {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify({
+            json: {
+              botId: "bot-1",
+              serverId: "server-1",
+              ...(allowedTools ? { allowedTools } : {}),
+            },
+          }),
+        }),
+        { prefix: "/rpc", context: { actor } },
+      );
+    return { actor, prisma, upsert, approve };
+  }
+  it("atomically adds only the requested tool allowlist within the current actor and Space", async () => {
+    const { actor, prisma, upsert, approve } = assignmentDeps();
+    const { response } = await approve(["get_thread", "create_draft"]);
+    expect(response.status).toBe(200);
+    expect((await response.json()).json).toMatchObject({
+      allowAllTools: false,
+      allowedTools: ["get_thread", "create_draft"],
+    });
+    expect(upsert).toHaveBeenCalledWith({
+      where: { botId_serverId: { botId: "bot-1", serverId: "server-1" } },
+      create: {
+        spaceId: actor.spaceId,
+        userId: actor.userId,
+        botId: "bot-1",
+        serverId: "server-1",
+        allowAllTools: false,
+        allowedTools: ["get_thread", "create_draft"],
+      },
+      update: {},
+    });
+    expect(prisma.bot.findFirst).toHaveBeenCalledWith({
+      where: { id: "bot-1", spaceId: actor.spaceId, userId: actor.userId },
+      select: { id: true },
+    });
+    expect(prisma.mcpServer.findFirst).toHaveBeenCalledWith({
+      where: { id: "server-1", spaceId: actor.spaceId, userId: actor.userId, enabled: true },
+      select: { id: true },
+    });
+  });
+  it.each([{ allowedTools: ["get_thread"] }, { allowedTools: [] }])(
+    "does not replace an existing narrower or revoked %j assignment",
+    async ({ allowedTools }) => {
+      const { upsert, approve } = assignmentDeps({ allowAllTools: false, allowedTools });
+      const { response } = await approve(["get_thread", "create_draft"]);
+      expect(response.status).toBe(200);
+      expect((await response.json()).json).toMatchObject({ allowAllTools: false, allowedTools });
+      expect(upsert.mock.calls[0]?.[0]).toMatchObject({ update: {} });
+    },
+  );
+  it("retains the native default only for an explicit unbounded connection request", async () => {
+    const { approve } = assignmentDeps();
+    const { response } = await approve();
+    expect(response.status).toBe(200);
+    expect((await response.json()).json).toMatchObject({ allowAllTools: true, allowedTools: [] });
+  });
+  it("does not assign a missing, disabled or foreign server", async () => {
+    const { prisma, upsert, approve } = assignmentDeps();
+    prisma.mcpServer.findFirst.mockResolvedValue(null as never);
+    const { response } = await approve(["get_thread"]);
+    expect(response.status).not.toBe(200);
+    expect(upsert).not.toHaveBeenCalled();
+  });
+  it.each([[""], ["x".repeat(201)], Array.from({ length: 501 }, () => "get_thread")])(
+    "validates tool names and count before writing",
+    async (...tools) => {
+      const { prisma, upsert, approve } = assignmentDeps();
+      const { response } = await approve(tools as string[]);
+      expect(response.status).toBe(400);
+      expect(prisma.$transaction).not.toHaveBeenCalled();
+      expect(upsert).not.toHaveBeenCalled();
+    },
+  );
+});
+
 describe("private API connectors", () => {
   function privateDeps(mcpAllowPrivateEndpoint = false) {
     const create = vi.fn(async ({ data }: { data: Record<string, unknown> }) => ({

@@ -76,11 +76,17 @@ export function PluginsOverlay({
   onClose,
   onOpenMcp,
   activeBotId,
+  coordinatorBotId,
+  recruitingBotIds,
+  memberBotIds,
   developerView = false,
 }: {
   onClose: () => void;
   onOpenMcp?: () => void;
   activeBotId?: string;
+  coordinatorBotId?: string;
+  recruitingBotIds?: { outreach?: string; scheduling?: string };
+  memberBotIds?: string[];
   developerView?: boolean;
 }) {
   const { t } = useLingui();
@@ -116,8 +122,16 @@ export function PluginsOverlay({
   const connectionAttempt = useRef<AbortController | null>(null);
   const mounted = useRef(false);
   const refreshVersion = useRef(0);
-  const activeScope = useRef(activeBotId);
-  activeScope.current = activeBotId;
+  const connectionScope = JSON.stringify([
+    developerView,
+    activeBotId,
+    coordinatorBotId,
+    recruitingBotIds?.outreach,
+    recruitingBotIds?.scheduling,
+    memberBotIds,
+  ]);
+  const activeScope = useRef(connectionScope);
+  activeScope.current = connectionScope;
   const [servers, setServers] = useState<McpServer[]>([]);
   const [assignments, setAssignments] = useState<BotMcpServer[]>([]);
 
@@ -180,13 +194,17 @@ export function PluginsOverlay({
       refreshVersion.current++;
       connectionAttempt.current?.abort();
     };
-  }, [developerView, activeBotId]);
+  }, [developerView, connectionScope]);
 
   const nativeServices = servers.flatMap((server) => {
     const access = assignments.filter(
       (assignment) =>
         assignment.serverId === server.id &&
-        (activeBotId === undefined || assignment.botId === activeBotId),
+        (activeBotId !== undefined
+          ? assignment.botId === activeBotId
+          : memberBotIds
+            ? memberBotIds.includes(assignment.botId)
+            : true),
     );
     return access.length
       ? [
@@ -203,7 +221,7 @@ export function PluginsOverlay({
   async function retry() {
     setLoading(true);
     setCatalogError(null);
-    const scope = activeBotId;
+    const scope = connectionScope;
     const request = refresh();
     const version = refreshVersion.current;
     const current = () =>
@@ -226,7 +244,7 @@ export function PluginsOverlay({
     connectionAttempt.current?.abort();
     const controller = new AbortController();
     connectionAttempt.current = controller;
-    const scope = activeBotId;
+    const scope = connectionScope;
     const current = () =>
       mounted.current && !controller.signal.aborted && activeScope.current === scope;
     setPending(server.id);
@@ -249,6 +267,79 @@ export function PluginsOverlay({
       if (current()) setPending(null);
       if (connectionAttempt.current === controller) connectionAttempt.current = null;
     }
+  }
+
+  async function connectProductServer(serverId: string) {
+    const scope = connectionScope;
+    const current = () => mounted.current && activeScope.current === scope;
+    const server = (await rpc.mcp.servers.list()).find((row) => row.id === serverId);
+    if (!current()) return;
+    if (!coordinatorBotId || !server?.enabled || !server.endpoint)
+      throw new Error(t`Could not connect`);
+    const url = new URL(server.endpoint);
+    const endpoint = `${url.origin}${url.pathname.replace(/\/$/, "")}`;
+    const personal = [
+      "https://gmailmcp.googleapis.com/mcp/v1",
+      "https://calendarmcp.googleapis.com/mcp/v1",
+      "https://mcp.cal.com/mcp",
+    ].includes(endpoint);
+    if (
+      server.oauthStatus === "reconnect" ||
+      (personal && server.oauthStatus !== "connected" && !server.hasSecret)
+    )
+      throw new Error(t`Could not connect`);
+    const recipients = new Map<string, string[] | undefined>();
+    const mailReads = ["get_message", "get_thread", "search_threads"];
+    if (endpoint === "https://gmailmcp.googleapis.com/mcp/v1") {
+      recipients.set(coordinatorBotId, mailReads);
+      for (const id of [recruitingBotIds?.outreach, recruitingBotIds?.scheduling])
+        if (id) recipients.set(id, [...mailReads, "list_drafts", "get_draft", "create_draft"]);
+    } else if (endpoint === "https://calendarmcp.googleapis.com/mcp/v1") {
+      const reads = ["list_calendars", "list_events", "get_event", "search_events", "suggest_time"];
+      recipients.set(coordinatorBotId, reads);
+      if (recruitingBotIds?.scheduling)
+        recipients.set(recruitingBotIds.scheduling, [
+          ...reads,
+          "create_event",
+          "update_event",
+          "delete_event",
+          "respond_to_event",
+        ]);
+    } else if (endpoint === "https://mcp.cal.com/mcp") {
+      const reads = [
+        "get_bookings",
+        "get_booking",
+        "get_availability",
+        "get_me",
+        "get_event_types",
+        "get_event_type",
+        "get_busy_times",
+        "get_connected_calendars",
+        "get_conferencing_apps",
+      ];
+      recipients.set(coordinatorBotId, reads);
+      if (recruitingBotIds?.scheduling)
+        recipients.set(recruitingBotIds.scheduling, [
+          ...reads,
+          "create_booking",
+          "reschedule_booking",
+          "cancel_booking",
+          "confirm_booking",
+          "add_booking_attendee",
+        ]);
+    } else recipients.set(coordinatorBotId, undefined);
+    for (const [botId, allowedTools] of recipients) {
+      if (!current()) return;
+      const assignment = await rpc.mcp.assignments.approve({
+        botId,
+        serverId,
+        ...(allowedTools ? { allowedTools } : {}),
+      });
+      if (!current()) return;
+      if (!assignment.allowAllTools && !assignment.allowedTools.length)
+        throw new Error(t`Could not connect`);
+    }
+    if (current()) await refresh();
   }
 
   const detailItem = useMemo(() => {
@@ -818,7 +909,9 @@ export function PluginsOverlay({
           {setupOpen ? (
             <div className="mb-6">
               <IntegrationSetup
+                key={connectionScope}
                 botId={developerView ? activeBotId : undefined}
+                onServerConnected={developerView ? undefined : connectProductServer}
                 productView={!developerView}
                 onDone={() => {
                   if (!mounted.current) return;

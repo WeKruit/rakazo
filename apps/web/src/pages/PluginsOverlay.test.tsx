@@ -13,6 +13,7 @@ const api = vi.hoisted(() => ({
   assignments: vi.fn(),
   connect: vi.fn(),
   approve: vi.fn(),
+  setup: vi.fn(),
 }));
 vi.mock("../lib/rpc", () => ({
   rpc: {
@@ -26,9 +27,20 @@ vi.mock("../lib/rpc", () => ({
 }));
 vi.mock("../lib/mcp-connect", () => ({ connectMcpOauth: api.connect }));
 vi.mock("../components/integrations/IntegrationSetup", () => ({
-  IntegrationSetup: ({ productView, botId }: { productView?: boolean; botId?: string }) => (
-    <div data-testid="app-search" data-product-view={productView} data-bot-id={botId} />
-  ),
+  IntegrationSetup: (props: {
+    productView?: boolean;
+    botId?: string;
+    onServerConnected?: (id: string) => void | Promise<void>;
+  }) => {
+    api.setup(props);
+    return (
+      <div
+        data-testid="app-search"
+        data-product-view={props.productView}
+        data-bot-id={props.botId}
+      />
+    );
+  },
 }));
 vi.mock("@lingui/react/macro", () => ({
   Trans: ({ children }: { children?: ReactNode }) => children,
@@ -101,7 +113,11 @@ afterEach(async () => {
   vi.resetAllMocks();
   vi.unstubAllGlobals();
 });
-async function open(activeBotId: string | undefined = "main", developerView = false) {
+async function open(
+  activeBotId: string | undefined = "main",
+  developerView = false,
+  extra: Partial<ComponentProps<typeof PluginsOverlay>> = {},
+) {
   const host = document.createElement("div");
   document.body.append(host);
   const root = createRoot(host);
@@ -116,6 +132,7 @@ async function open(activeBotId: string | undefined = "main", developerView = fa
           activeBotId={botId}
           developerView={developerView}
           onClose={() => undefined}
+          {...extra}
         />,
       ),
     );
@@ -126,6 +143,7 @@ async function open(activeBotId: string | undefined = "main", developerView = fa
         activeBotId={activeBotId}
         developerView={developerView}
         onClose={() => undefined}
+        {...extra}
       />,
     ),
   );
@@ -303,6 +321,193 @@ it("reuses the public app search without presenting server configuration to ordi
   } finally {
     await act(async () => root.unmount());
   }
+});
+
+it("does not show Added before the native connection assignment completes", async () => {
+  const { IntegrationSetup } = await vi.importActual<
+    typeof import("../components/integrations/IntegrationSetup")
+  >("../components/integrations/IntegrationSetup");
+  const endpoint = "https://mailbox.example.test/mcp";
+  api.servers.mockResolvedValue([server("Mailbox", { endpoint, oauthStatus: "connected" })]);
+  api.search.mockResolvedValue({
+    enabled: true,
+    results: [{ name: "Mailbox", surfaces: [{ kind: "mcp", source: endpoint }] }],
+  });
+  api.connect.mockResolvedValue("connected");
+  let finish!: () => void;
+  const assigned = vi.fn(
+    () =>
+      new Promise<void>((resolve) => {
+        finish = resolve;
+      }),
+  );
+  const host = document.createElement("div");
+  const root = createRoot(host);
+  try {
+    await act(async () =>
+      root.render(<IntegrationSetup productView onServerConnected={assigned} />),
+    );
+    await act(async () => {
+      const input = host.querySelector('input[aria-label="Search apps"]')!;
+      Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, "value")!.set!.call(
+        input,
+        "Mailbox",
+      );
+      input.dispatchEvent(new Event("input", { bubbles: true }));
+    });
+    await act(async () =>
+      host
+        .querySelector("form")!
+        .dispatchEvent(new Event("submit", { bubbles: true, cancelable: true })),
+    );
+    await act(async () => button(host, "Connect").click());
+    expect(assigned).toHaveBeenCalledWith("Mailbox");
+    expect(host.textContent).not.toContain("Added");
+    await act(async () => finish());
+    expect(host.textContent).toContain("Added");
+  } finally {
+    await act(async () => root.unmount());
+  }
+});
+
+it("gives a personal Gmail connection narrow native access to the current coordinator and managed specialists only", async () => {
+  api.servers.mockResolvedValue([
+    server("Mailbox", {
+      endpoint: "https://gmailmcp.googleapis.com/mcp/v1",
+      oauthStatus: "connected",
+      hasSecret: true,
+    }),
+  ]);
+  api.approve.mockImplementation(async (input) => ({ ...input, allowAllTools: false }));
+  const host = await open(undefined, false, {
+    coordinatorBotId: "legacy-main",
+    recruitingBotIds: { outreach: "managed-outreach", scheduling: "managed-scheduling" },
+  });
+  await act(async () => button(host, "Connect an app").click());
+  const setup = api.setup.mock.calls.at(-1)![0];
+  expect(setup.onServerConnected).toBeTypeOf("function");
+  await act(async () => setup.onServerConnected("Mailbox"));
+  expect(api.approve.mock.calls.map(([input]) => [input.botId, input.allowedTools])).toEqual([
+    ["legacy-main", ["get_message", "get_thread", "search_threads"]],
+    [
+      "managed-outreach",
+      ["get_message", "get_thread", "search_threads", "list_drafts", "get_draft", "create_draft"],
+    ],
+    [
+      "managed-scheduling",
+      ["get_message", "get_thread", "search_threads", "list_drafts", "get_draft", "create_draft"],
+    ],
+  ]);
+});
+
+it.each([
+  "https://calendarmcp.googleapis.com/mcp/v1",
+  "https://mcp.cal.com/mcp?toolsets=bookings,availability",
+])("keeps personal calendar %s writes on managed Scheduling only", async (endpoint) => {
+  api.servers.mockResolvedValue([
+    server("Calendar", { endpoint, oauthStatus: "connected", hasSecret: true }),
+  ]);
+  api.approve.mockImplementation(async (input) => ({ ...input, allowAllTools: false }));
+  const host = await open(undefined, false, {
+    coordinatorBotId: "main",
+    recruitingBotIds: { outreach: "outreach", scheduling: "scheduling" },
+  });
+  await act(async () => button(host, "Connect an app").click());
+  await act(async () => api.setup.mock.calls.at(-1)![0].onServerConnected("Calendar"));
+  expect(api.approve.mock.calls.map(([input]) => input.botId)).toEqual(["main", "scheduling"]);
+  const main = api.approve.mock.calls[0]![0].allowedTools as string[];
+  const scheduling = api.approve.mock.calls[1]![0].allowedTools as string[];
+  const write = endpoint.includes("calendarmcp") ? "create_event" : "create_booking";
+  expect(main).not.toContain(write);
+  expect(scheduling).toContain(write);
+  expect(main).not.toContain("call_api_operation");
+  expect(scheduling).not.toContain("call_api_operation");
+});
+
+it("reuses an explicit generic app Connect on the actual coordinator only", async () => {
+  api.servers.mockResolvedValue([server("App", { endpoint: "https://generic.example.test/mcp" })]);
+  api.approve.mockImplementation(async (input) => ({
+    ...input,
+    allowAllTools: true,
+    allowedTools: [],
+  }));
+  const host = await open(undefined, false, {
+    coordinatorBotId: "native-first",
+    recruitingBotIds: { outreach: "outreach", scheduling: "scheduling" },
+  });
+  await act(async () => button(host, "Connect an app").click());
+  await act(async () => api.setup.mock.calls.at(-1)![0].onServerConnected("App"));
+  expect(api.approve).toHaveBeenCalledExactlyOnceWith({ botId: "native-first", serverId: "App" });
+});
+
+it.each(["disabled", "revoked", "unconfirmed", "no-coordinator"])(
+  "does not report a product assignment for %s access",
+  async (state) => {
+    api.servers.mockResolvedValue([
+      server("Mailbox", {
+        endpoint: "https://gmailmcp.googleapis.com/mcp/v1",
+        enabled: state !== "disabled",
+        oauthStatus: state === "unconfirmed" ? "reconnect" : "connected",
+        hasSecret: true,
+      }),
+    ]);
+    api.approve.mockResolvedValue({ allowAllTools: false, allowedTools: [] });
+    const host = await open(undefined, false, {
+      coordinatorBotId: state === "no-coordinator" ? undefined : "main",
+    });
+    await act(async () => button(host, "Connect an app").click());
+    await expect(api.setup.mock.calls.at(-1)![0].onServerConnected("Mailbox")).rejects.toThrow();
+    expect(api.approve).toHaveBeenCalledTimes(state === "revoked" ? 1 : 0);
+  },
+);
+
+it("does not assign an old scope when its server read completes after the conversation changes", async () => {
+  api.servers.mockResolvedValue([server("App")]);
+  const host = await open("main", false, { coordinatorBotId: "main" });
+  await act(async () => button(host, "Connect an app").click());
+  const connected = api.setup.mock.calls.at(-1)![0].onServerConnected;
+  let finish!: (rows: unknown[]) => void;
+  api.servers.mockReturnValueOnce(
+    new Promise((resolve) => {
+      finish = resolve;
+    }),
+  );
+  const pending = connected("App");
+  await rerender?.("other");
+  await act(async () => finish([server("App")]));
+  await pending;
+  expect(api.approve).not.toHaveBeenCalled();
+});
+
+it("stops assigning specialists when the conversation changes during the coordinator grant", async () => {
+  api.servers.mockResolvedValue([
+    server("Mailbox", {
+      endpoint: "https://gmailmcp.googleapis.com/mcp/v1",
+      oauthStatus: "connected",
+      hasSecret: true,
+    }),
+  ]);
+  let finish!: (grant: unknown) => void;
+  api.approve.mockReturnValueOnce(
+    new Promise((resolve) => {
+      finish = resolve;
+    }),
+  );
+  const host = await open("main", false, {
+    coordinatorBotId: "main",
+    recruitingBotIds: { outreach: "outreach", scheduling: "scheduling" },
+  });
+  await act(async () => button(host, "Connect an app").click());
+  const connected = api.setup.mock.calls.at(-1)![0].onServerConnected;
+  let pending!: Promise<void>;
+  await act(async () => {
+    pending = connected("Mailbox");
+  });
+  expect(api.approve).toHaveBeenCalledTimes(1);
+  await rerender?.("other");
+  await act(async () => finish({ allowAllTools: false, allowedTools: ["get_thread"] }));
+  await pending;
+  expect(api.approve).toHaveBeenCalledTimes(1);
 });
 
 it("does not grant access or notify a closed parent after public app OAuth finishes late", async () => {

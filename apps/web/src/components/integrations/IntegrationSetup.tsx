@@ -25,7 +25,7 @@ export function IntegrationSetup({
   managedOnly?: boolean;
   initialState?: IntegrationSetupState | null;
   botId?: string;
-  onServerConnected?: (id: string) => void;
+  onServerConnected?: (id: string) => void | Promise<void>;
   productView?: boolean;
 }) {
   const { t } = useLingui();
@@ -147,8 +147,9 @@ export function IntegrationSetup({
       if (!current() || result === "cancelled") return;
       if (botId) await rpc.mcp.assignments.approve({ botId, serverId: server.id });
       if (!current()) return;
+      await onServerConnected?.(server.id);
+      if (!current()) return;
       setConnected((current) => [...current, url]);
-      onServerConnected?.(server.id);
     });
   }
 

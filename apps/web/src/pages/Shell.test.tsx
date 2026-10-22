@@ -31,6 +31,7 @@ vi.mock("@lingui/react/macro", () => {
 });
 
 const shellApi = vi.hoisted(() => ({
+  plugins: vi.fn(),
   session: {
     data: { user: { id: "user-1", name: "Synthetic recruiter", email: "user@example.test" } },
   },
@@ -70,6 +71,12 @@ const shellApi = vi.hoisted(() => ({
   },
 }));
 vi.mock("../lib/auth", () => ({ authClient: { useSession: () => shellApi.session } }));
+vi.mock("./PluginsOverlay", () => ({
+  PluginsOverlay: (props: unknown) => {
+    shellApi.plugins(props);
+    return null;
+  },
+}));
 vi.mock("../lib/conversation-export", () => ({
   downloadConversation: shellApi.exportConversation,
 }));
@@ -574,6 +581,83 @@ async function renderFeedbackShell(
     navigate: async (to: string) => act(async () => navigate(to)),
   };
 }
+
+it("uses the native current coordinator and exact managed member keys for ordinary app connections", async () => {
+  const view = await renderFeedbackShell("group", undefined, {
+    isDeploymentOwner: false,
+    openFeedback: false,
+  });
+  Object.assign(view.bots[0]!, { spawnKey: "onboarding:first" });
+  Object.assign(view.bots[1]!, {
+    name: "Renamed specialist",
+    spawnKey: "recruiting:user-1:outreach",
+  });
+  view.bots.push({
+    ...view.bots[1]!,
+    id: "outside",
+    spawnKey: "recruiting:user-1:scheduling",
+  } as never);
+  view.bots.push({
+    ...view.bots[1]!,
+    id: "legacy-scheduling",
+    name: "Scheduling",
+    spawnKey: null,
+  } as never);
+  view.members.push({
+    botId: "legacy-scheduling",
+    name: "Scheduling",
+    color: "ink",
+    status: "idle",
+  });
+  await view.render();
+  await view.click("Integrations");
+  expect(shellApi.plugins.mock.calls.at(-1)?.[0]).toMatchObject({
+    coordinatorBotId: "bot-1",
+    recruitingBotIds: { outreach: "bot-2", scheduling: undefined },
+    memberBotIds: ["bot-1", "bot-2", "legacy-scheduling"],
+    developerView: false,
+  });
+  await view.click("New Role");
+  expect(shellApi.plugins.mock.calls.at(-1)?.[0]).toMatchObject({
+    coordinatorBotId: undefined,
+    memberBotIds: [],
+  });
+});
+
+it("connects personal apps from New Role using only this user's installed native recruiting defaults", async () => {
+  const view = await renderFeedbackShell("group", undefined, {
+    isDeploymentOwner: false,
+    openFeedback: false,
+  });
+  Object.assign(view.bots[0]!, { name: "Renamed lead", spawnKey: "recruiting:user-1:main" });
+  view.bots.push({
+    ...view.bots[1]!,
+    id: "managed-outreach",
+    name: "Private helper",
+    spawnKey: "recruiting:user-1:outreach",
+  } as never);
+  view.bots.push({
+    ...view.bots[1]!,
+    id: "managed-scheduling",
+    name: "Other helper",
+    spawnKey: "recruiting:user-1:scheduling",
+  } as never);
+  view.bots.unshift({
+    ...view.bots[1]!,
+    id: "foreign",
+    spaceId: "other-space",
+    spawnKey: "recruiting:user-1:main",
+  } as never);
+  await view.render();
+  await view.click("New Role");
+  await view.click("Integrations");
+  expect(shellApi.plugins.mock.calls.at(-1)?.[0]).toMatchObject({
+    coordinatorBotId: "bot-1",
+    recruitingBotIds: { outreach: "managed-outreach", scheduling: "managed-scheduling" },
+    memberBotIds: ["bot-1", "managed-outreach", "managed-scheduling"],
+    developerView: false,
+  });
+});
 
 it.each([
   { owner: false, preference: "on", allGroupsArchived: false, expected: "/app/g/group-1" },
