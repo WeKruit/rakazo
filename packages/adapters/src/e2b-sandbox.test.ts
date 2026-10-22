@@ -232,30 +232,46 @@ describe("E2B computer backend", () => {
     expect(shouldSkipPortableWorkspaceFile("shared/BrowserMetrics-spare.pma")).toBe(false);
   });
 
-  it("fills eight directory lists across branches while preserving DFS files", async () => {
+  it("uses native recursive listing for ordinary subtrees without losing deep files or DFS order", async () => {
     const root = "/home/user/rakazo-home";
     const siblings = Array.from({ length: 9 }, (_, index) => `dir-${index}`);
-    const pending = new Map<string, () => void>();
-    let releaseFutureLists = false;
-    let active = 0;
-    let peak = 0;
-    const list = vi.fn(async (directory: string, options: unknown) => {
-      expect(options).toEqual({ signal: context.signal });
-      if (directory === root) return siblings.map((name) => ({ name, type: "dir" }));
-      active += 1;
-      peak = Math.max(peak, active);
-      try {
-        if (!releaseFutureLists)
-          await new Promise<void>((resolve) => pending.set(directory, resolve));
-        return [
-          { name: "note.txt", type: "file", mode: 0o600 },
-          ...(directory.endsWith("/nested") ? [] : [{ name: "nested", type: "dir" }]),
-        ];
-      } finally {
-        active -= 1;
-        pending.delete(directory);
+    type Entry = { name: string; type: string; mode: number; path: string };
+    const tree = new Map<string, Entry[]>([
+      [root, siblings.map((name) => ({ name, path: `${root}/${name}`, type: "dir", mode: 0o700 }))],
+    ]);
+    const expected: PortableFile[] = [];
+    for (const sibling of siblings) {
+      let directory = `${root}/${sibling}`;
+      for (let level = 0; level < 10; level++) {
+        const relative = `${directory.slice(root.length + 1)}/note.txt`;
+        tree.set(directory, [
+          { name: "note.txt", path: `${directory}/note.txt`, type: "file", mode: 0o700 },
+          ...(level < 9
+            ? [{ name: "nested", path: `${directory}/nested`, type: "dir", mode: 0o700 }]
+            : []),
+        ]);
+        expected.push({
+          path: relative,
+          content: new TextEncoder().encode(relative),
+          executable: true,
+        });
+        directory += "/nested";
       }
-    });
+    }
+    const list = vi.fn(
+      async (directory: string, options: { depth?: number; signal: AbortSignal }) => {
+        expect(options.signal).toBe(context.signal);
+        const entries: Entry[] = [];
+        function walk(current: string, depth: number) {
+          for (const entry of tree.get(current) ?? []) {
+            entries.push(entry);
+            if (entry.type === "dir" && depth > 1) walk(entry.path, depth - 1);
+          }
+        }
+        walk(directory, options.depth ?? 1);
+        return entries;
+      },
+    );
     const read = vi.fn(async (filePath: string) =>
       new TextEncoder().encode(filePath.slice(root.length + 1)),
     );
@@ -267,42 +283,54 @@ describe("E2B computer backend", () => {
       })),
     } as unknown as E2BSandboxSdk);
     const exported: PortableFile[] = [];
-    const drain = (async () => {
-      for await (const file of provider.exportWorkspace(
-        { id: "existing", providerRef: "existing", kind: "e2b", botId: "bot" },
-        context,
-      ))
-        exported.push(file);
-    })();
-    try {
-      await vi.waitFor(() => expect(active).toBe(8), { timeout: 250, interval: 5 });
-      expect(list.mock.calls.map(([directory]) => directory)).toEqual([
-        root,
-        ...siblings.slice(0, 8).map((directory) => `${root}/${directory}`),
-      ]);
-      pending.get(`${root}/dir-0`)!();
-      await vi.waitFor(() => expect(active).toBe(7));
-      expect(list).toHaveBeenCalledTimes(9);
-      expect(read).not.toHaveBeenCalled();
-      for (const release of [...pending.values()].reverse()) release();
-      await vi.waitFor(() => expect(active).toBe(8), { timeout: 250, interval: 5 });
-      expect([...pending.keys()]).toEqual([
-        `${root}/dir-8`,
-        ...siblings.slice(0, 7).map((directory) => `${root}/${directory}/nested`),
-      ]);
-      expect(read).not.toHaveBeenCalled();
-    } finally {
-      releaseFutureLists = true;
-      for (const release of [...pending.values()].reverse()) release();
-      await drain;
-    }
-    expect(peak).toBe(8);
-    expect(exported.map((file) => file.path)).toEqual(
-      siblings.flatMap((directory) => [`${directory}/note.txt`, `${directory}/nested/note.txt`]),
-    );
-    expect(read).toHaveBeenCalledTimes(18);
+    for await (const file of provider.exportWorkspace(
+      { id: "existing", providerRef: "existing", kind: "e2b", botId: "bot" },
+      context,
+    ))
+      exported.push(file);
+    expect(exported).toEqual(expected);
+    expect(read).toHaveBeenCalledTimes(90);
+    // The same tree previously required one remote listing for each of its 91 directories.
     expect(list).toHaveBeenCalledTimes(19);
+    expect(list.mock.calls[0]).toEqual([root, { depth: 1, signal: context.signal }]);
+    expect(list.mock.calls.slice(1).every(([, options]) => options.depth === 8)).toBe(true);
   });
+
+  it.each(["outside", "parent", "sibling", "unlisted-parent"] as const)(
+    "rejects a recursive %s path before reading its contents",
+    async (source) => {
+      const root = "/home/user/rakazo-home";
+      const invalid = {
+        outside: "/outside/note.txt",
+        parent: `${root}/a/../note.txt`,
+        sibling: `${root}/b/note.txt`,
+        "unlisted-parent": `${root}/a/linked/note.txt`,
+      }[source]!;
+      const list = vi.fn(async (directory: string) =>
+        directory === root
+          ? [{ name: "a", path: `${root}/a`, type: "dir", mode: 0o700 }]
+          : [{ name: "note.txt", path: invalid, type: "file", mode: 0o600 }],
+      );
+      const read = vi.fn();
+      const provider = new E2BSandboxProvider("test-key", {
+        connect: vi.fn(async () => ({
+          sandboxId: "existing",
+          commands: { run: vi.fn(async () => ({ stdout: "", stderr: "", exitCode: 0 })) },
+          files: { list, read },
+        })),
+      } as unknown as E2BSandboxSdk);
+      const drain = async () => {
+        for await (const _file of provider.exportWorkspace(
+          { id: "existing", providerRef: "existing", kind: "e2b", botId: "bot" },
+          context,
+        )) {
+          // Drain the native export contract.
+        }
+      };
+      await expect(drain()).rejects.toThrow();
+      expect(read).not.toHaveBeenCalled();
+    },
+  );
 
   it.each(["list-error", "list-abort", "read-error", "read-abort"])(
     "settles issued export requests after %s without starting another batch",
@@ -336,7 +364,7 @@ describe("E2B computer backend", () => {
             type: source.startsWith("list") ? "dir" : "file",
             mode: 0o600,
           })),
-        ];
+        ].map((entry) => ({ ...entry, path: `${directory}/${entry.name}` }));
       });
       const read = vi.fn(async (filePath: string) => {
         await wait(filePath);
@@ -437,12 +465,23 @@ describe("E2B computer backend", () => {
     let active = 0;
     let peak = 0;
     let releaseFutureReads = false;
-    const list = vi.fn(async (directory: string, options: unknown) => {
-      expect(options).toEqual({ signal: context.signal });
-      const entries = directories[directory === root ? "" : directory.slice(root.length + 1)];
-      if (!entries) throw new Error("unexpected directory");
-      return entries.map((entry) => ({ mode: 0o600, ...entry }));
-    });
+    const list = vi.fn(
+      async (directory: string, options: { depth: number; signal: AbortSignal }) => {
+        expect(options.signal).toBe(context.signal);
+        const entries: Array<{ name: string; type: string; mode: number; path: string }> = [];
+        function walk(relative: string, depth: number) {
+          const children = directories[relative];
+          if (!children) throw new Error("unexpected directory");
+          for (const entry of children) {
+            const path = relative ? `${relative}/${entry.name}` : entry.name;
+            entries.push({ mode: 0o600, ...entry, path: `${root}/${path}` });
+            if (entry.type === "dir" && depth > 1) walk(path, depth - 1);
+          }
+        }
+        walk(directory === root ? "" : directory.slice(root.length + 1), options.depth);
+        return entries;
+      },
+    );
     const read = vi.fn(async (filePath: string, options: unknown) => {
       expect(options).toEqual({ format: "bytes", signal: context.signal });
       active += 1;
@@ -518,7 +557,7 @@ describe("E2B computer backend", () => {
       })),
     );
     expect(list.mock.calls.map(([directory]) => directory)).toEqual(
-      ["", "a", "b", "c", "d", ".browser-profiles", "a/nested", ".browser-profiles/chromium"].map(
+      ["", "a", "b", "c", "d", ".browser-profiles", ".browser-profiles/chromium"].map(
         (directory) => (directory ? `${root}/${directory}` : root),
       ),
     );
@@ -533,7 +572,7 @@ describe("E2B computer backend", () => {
       expect.objectContaining({
         message: "computer.workspace.export.io",
         operationId: context.operationId,
-        listCallCount: 8,
+        listCallCount: 7,
         selectedFileCount: 10,
         readCallCount: 10,
         readFileCount: exported.length,
@@ -561,7 +600,7 @@ describe("E2B computer backend", () => {
       const list = vi.fn(async (_directory: string, options: { signal: AbortSignal }) => {
         expect(options.signal).toBe(controller.signal);
         if (source.startsWith("list")) fail();
-        return [{ name: "note.txt", type: "file", mode: 0o600 }];
+        return [{ name: "note.txt", path: `${_directory}/note.txt`, type: "file", mode: 0o600 }];
       });
       const read = vi.fn(async (_filePath: string, options: { signal: AbortSignal }) => {
         expect(options.signal).toBe(controller.signal);
