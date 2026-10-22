@@ -572,6 +572,60 @@ async function mounted(
   return { container: document.body, render, click, expand, reveal, discuss, feedback };
 }
 
+it("debounces candidate typing and aborts superseded query and role reads without publishing late rows", async () => {
+  vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
+  try {
+    const view = await mounted("thread-1", undefined, false, undefined, {
+      presentation: "workspace",
+    });
+    api.listCandidates.mockClear();
+    let finishOld!: (page: ReturnType<typeof candidatePage>) => void;
+    api.listCandidates.mockReturnValueOnce(
+      new Promise((resolve) => {
+        finishOld = resolve;
+      }),
+    );
+    await changeInput(view.container, "Search candidates", "A");
+    await changeInput(view.container, "Search candidates", "Av");
+    await changeInput(view.container, "Search candidates", "Avery");
+    expect(
+      view.container.querySelector<HTMLInputElement>('[aria-label="Search candidates"]')!.value,
+    ).toBe("Avery");
+    expect(api.listCandidates).not.toHaveBeenCalled();
+    await act(async () => vi.advanceTimersByTimeAsync(250));
+    expect(api.listCandidates).toHaveBeenCalledTimes(1);
+    expect(api.listCandidates.mock.lastCall?.[0]).toMatchObject({
+      query: "Avery",
+      roleId: role.id,
+    });
+    const oldSignal = api.listCandidates.mock.lastCall?.[1]?.signal as AbortSignal;
+    expect(oldSignal?.aborted).toBe(false);
+    await changeInput(view.container, "Search candidates", "Other");
+    expect(oldSignal.aborted).toBe(true);
+    await act(async () => vi.advanceTimersByTimeAsync(250));
+    expect(api.listCandidates).toHaveBeenCalledTimes(2);
+    const otherSignal = api.listCandidates.mock.lastCall?.[1]?.signal as AbortSignal;
+    expect(otherSignal.aborted).toBe(false);
+    api.getWorkspace.mockResolvedValue({
+      role: { ...role, id: "other-role", sourceThreadId: "other-thread" },
+      revision: { ...revision, id: "other-revision", roleId: "other-role" },
+    });
+    api.listCandidates.mockReturnValue(new Promise(() => {}));
+    await view.render("other-thread");
+    expect(otherSignal.aborted).toBe(true);
+    expect(api.listCandidates.mock.lastCall?.[0]).toMatchObject({ roleId: "other-role" });
+    await act(async () =>
+      finishOld(candidatePage([{ ...candidateFixture(), name: "Late old person" }])),
+    );
+    expect(view.container.textContent).not.toContain("Late old person");
+    expect(view.container.textContent).not.toContain("Could not load candidates");
+  } finally {
+    await cleanup?.();
+    cleanup = undefined;
+    vi.useRealTimers();
+  }
+});
+
 it.each(["results", "shortlist", "contacts"] as const)(
   "loads %s candidates without unrelated assessment, question or memory history and keeps native evidence and feedback",
   async (viewName) => {
@@ -690,6 +744,7 @@ it.each(["results", "shortlist", "contacts"] as const)(
         roleId: role.id,
         ...(viewName === "shortlist" ? { shortlisted: true } : {}),
       }),
+      { signal: expect.any(AbortSignal) },
     );
     expect(view.container.querySelector('select[aria-label="Internal assessment"]')).not.toBeNull();
     expect(
@@ -796,6 +851,7 @@ it("preserves an explicit workspace assessment filter when a refreshed pool has 
   ).toBe("current");
   expect(api.listCandidates).toHaveBeenLastCalledWith(
     expect.objectContaining({ roleId: role.id, assessmentState: "current" }),
+    { signal: expect.any(AbortSignal) },
   );
   expect(api.listAssessments).not.toHaveBeenCalled();
 });
@@ -1043,6 +1099,9 @@ async function changeInput(container: HTMLElement, name: string, value: string) 
     Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, "value")!.set!.call(input, value);
     input.dispatchEvent(new Event("input", { bubbles: true }));
   });
+  if (name === "Search candidates" && !vi.isFakeTimers()) {
+    await act(async () => new Promise((resolve) => setTimeout(resolve, 260)));
+  }
 }
 
 async function changeSelect(container: HTMLElement, name: string, value: string) {
@@ -1686,34 +1745,48 @@ it("omits unused internal assessment controls without applying stored diagnostic
     "value",
     "recent",
   );
-  expect(api.listCandidates).toHaveBeenCalledExactlyOnceWith({
-    roleId: role.id,
-    limit: 30,
-    sort: "recent",
-  });
+  expect(api.listCandidates).toHaveBeenCalledExactlyOnceWith(
+    {
+      roleId: role.id,
+      limit: 30,
+      sort: "recent",
+    },
+    { signal: expect.any(AbortSignal) },
+  );
   await view.click("Load more");
-  expect(api.listCandidates).toHaveBeenLastCalledWith({
-    roleId: role.id,
-    limit: 30,
-    sort: "recent",
-    cursor: "page-2",
-  });
+  expect(api.listCandidates).toHaveBeenLastCalledWith(
+    {
+      roleId: role.id,
+      limit: 30,
+      sort: "recent",
+      cursor: "page-2",
+    },
+    { signal: expect.any(AbortSignal) },
+  );
   expect(view.container.querySelector("tbody")?.textContent).toContain(second.name);
   await cleanup?.();
   api.listCandidates.mockClear();
   const reopened = await mounted("thread-1", undefined, false);
   expect(api.listCandidates).toHaveBeenCalledTimes(2);
-  expect(api.listCandidates).toHaveBeenNthCalledWith(1, {
-    roleId: role.id,
-    limit: 30,
-    sort: "recent",
-  });
-  expect(api.listCandidates).toHaveBeenNthCalledWith(2, {
-    roleId: role.id,
-    limit: 30,
-    sort: "recent",
-    cursor: "page-2",
-  });
+  expect(api.listCandidates).toHaveBeenNthCalledWith(
+    1,
+    {
+      roleId: role.id,
+      limit: 30,
+      sort: "recent",
+    },
+    { signal: expect.any(AbortSignal) },
+  );
+  expect(api.listCandidates).toHaveBeenNthCalledWith(
+    2,
+    {
+      roleId: role.id,
+      limit: 30,
+      sort: "recent",
+      cursor: "page-2",
+    },
+    { signal: expect.any(AbortSignal) },
+  );
 
   api.listAssessments.mockRejectedValueOnce(new Error("Assessment refresh failed"));
   await reopened.render("thread-1", 1);
@@ -1729,13 +1802,16 @@ it("omits unused internal assessment controls without applying stored diagnostic
     "value",
     "met",
   );
-  expect(api.listCandidates).toHaveBeenLastCalledWith({
-    roleId: role.id,
-    limit: 30,
-    assessmentState: "current",
-    verdict: "met",
-    sort: "recent",
-  });
+  expect(api.listCandidates).toHaveBeenLastCalledWith(
+    {
+      roleId: role.id,
+      limit: 30,
+      assessmentState: "current",
+      verdict: "met",
+      sort: "recent",
+    },
+    { signal: expect.any(AbortSignal) },
+  );
 });
 
 it.each([false, true])(
@@ -1810,11 +1886,14 @@ it("keeps the candidate page when empty auxiliary assessments finish without cha
   const view = await mounted("thread-1", undefined, false);
   await view.click("Evidence");
   expect(view.container.textContent).toContain(candidate.name);
-  expect(api.listCandidates).toHaveBeenCalledExactlyOnceWith({
-    roleId: role.id,
-    limit: 30,
-    sort: "rank",
-  });
+  expect(api.listCandidates).toHaveBeenCalledExactlyOnceWith(
+    {
+      roleId: role.id,
+      limit: 30,
+      sort: "rank",
+    },
+    { signal: expect.any(AbortSignal) },
+  );
   expect(view.container.querySelector('select[aria-label="Internal assessment"]')).toBeNull();
   expect(view.container.querySelector('select[aria-label="Internal verdict"]')).toBeNull();
   expect(view.container.textContent).not.toContain("Internal assessment");
@@ -2196,6 +2275,7 @@ it("omits stale current CRM details for an excluded selection while refreshing i
   expect(current.textContent).not.toContain("Pending approval");
   expect(api.listCandidates).not.toHaveBeenCalledWith(
     expect.objectContaining({ query: pending.candidateKey }),
+    { signal: expect.any(AbortSignal) },
   );
 });
 
@@ -2367,19 +2447,24 @@ it("restores the recruiting list and selected candidate from fresh pages after c
   expect(reopened.container.querySelector('[role="dialog"]')?.textContent).not.toContain(
     "Synthetic second",
   );
-  expect(api.listCandidates).toHaveBeenNthCalledWith(1, {
-    roleId: role.id,
-    limit: 30,
-    query: "Synthetic",
-    assessmentState: "unassessed",
-    verdict: "unknown",
-    sort: "recent",
-    sourceEffectId: savedObservation.effectId,
-    shortlisted: true,
-  });
+  expect(api.listCandidates).toHaveBeenNthCalledWith(
+    1,
+    {
+      roleId: role.id,
+      limit: 30,
+      query: "Synthetic",
+      assessmentState: "unassessed",
+      verdict: "unknown",
+      sort: "recent",
+      sourceEffectId: savedObservation.effectId,
+      shortlisted: true,
+    },
+    { signal: expect.any(AbortSignal) },
+  );
   expect(api.listCandidates).toHaveBeenNthCalledWith(
     2,
     expect.objectContaining({ cursor: "page-2" }),
+    { signal: expect.any(AbortSignal) },
   );
   expect(reopened.container.querySelector('select[aria-label="Research round"]')).toHaveProperty(
     "value",
@@ -2414,11 +2499,14 @@ it("restores an excluded selected candidate through the existing saved-candidate
   expect(reopened.container.querySelector("ul")?.textContent).toContain(other.name);
   expect(reopened.container.querySelector("ul")?.textContent).not.toContain(selected.name);
   expect(reopened.container.querySelector('[role="dialog"]')?.textContent).toContain(selected.name);
-  expect(api.listCandidates).toHaveBeenLastCalledWith({
-    roleId: role.id,
-    query: selected.candidateKey,
-    limit: 30,
-  });
+  expect(api.listCandidates).toHaveBeenLastCalledWith(
+    {
+      roleId: role.id,
+      query: selected.candidateKey,
+      limit: 30,
+    },
+    { signal: expect.any(AbortSignal) },
+  );
 });
 
 it.each(["source", "action"])(
@@ -2444,12 +2532,15 @@ it.each(["source", "action"])(
     const scope =
       kind === "source" ? { sourceEffectId: savedObservation.effectId } : { actionId: f.action.id };
     await changeSelect(view.container, "Research round", `${kind}:${Object.values(scope)[0]}`);
-    expect(api.listCandidates).toHaveBeenLastCalledWith({
-      roleId: role.id,
-      limit: 30,
-      query: selected.candidateKey,
-      ...scope,
-    });
+    expect(api.listCandidates).toHaveBeenLastCalledWith(
+      {
+        roleId: role.id,
+        limit: 30,
+        query: selected.candidateKey,
+        ...scope,
+      },
+      { signal: expect.any(AbortSignal) },
+    );
     expect(view.container.querySelector('[role="dialog"]')?.textContent).toContain(historical.name);
     expect(view.container.querySelector('[role="dialog"]')?.textContent).not.toContain(
       selected.name,
@@ -2530,11 +2621,14 @@ it("ignores a late restored page after filters change and keeps the new depth on
   api.listCandidates.mockClear();
   const again = await mounted("thread-1", undefined, false);
   expect(again.container.querySelector("ul")?.textContent).toContain(fresh.name);
-  expect(api.listCandidates).toHaveBeenCalledExactlyOnceWith({
-    roleId: role.id,
-    limit: 30,
-    sort: "recent",
-  });
+  expect(api.listCandidates).toHaveBeenCalledExactlyOnceWith(
+    {
+      roleId: role.id,
+      limit: 30,
+      sort: "recent",
+    },
+    { signal: expect.any(AbortSignal) },
+  );
 });
 
 it("keeps the displayed page depth after a restored page fails and is loaded manually", async () => {
@@ -2642,12 +2736,15 @@ it.each([false, true])(
     await changeInput(view.container, "Search candidates", "Synthetic");
     for (const sort of ["tier", "rank", "score"]) {
       await changeSelect(view.container, "Candidate sort", sort);
-      expect(api.listCandidates).toHaveBeenLastCalledWith({
-        roleId: role.id,
-        limit: 30,
-        query: "Synthetic",
-        sort,
-      });
+      expect(api.listCandidates).toHaveBeenLastCalledWith(
+        {
+          roleId: role.id,
+          limit: 30,
+          query: "Synthetic",
+          sort,
+        },
+        { signal: expect.any(AbortSignal) },
+      );
     }
   },
 );
@@ -2677,11 +2774,14 @@ it.each(["rank", "tier", "score"])(
       "Recently discovered",
     ]);
     expect(select.value).toBe("name");
-    expect(api.listCandidates).toHaveBeenLastCalledWith({
-      roleId: role.id,
-      limit: 30,
-      sort: "name",
-    });
+    expect(api.listCandidates).toHaveBeenLastCalledWith(
+      {
+        roleId: role.id,
+        limit: 30,
+        sort: "name",
+      },
+      { signal: expect.any(AbortSignal) },
+    );
     expect(view.container.textContent).toContain("Score / tier not returned");
     expect(view.container.textContent).toContain(person.name);
   },
@@ -2711,12 +2811,15 @@ it.each(["tier", "score"])(
       "value",
       sort,
     );
-    expect(api.listCandidates).toHaveBeenLastCalledWith({
-      roleId: role.id,
-      limit: 30,
-      query: "Current",
-      sort,
-    });
+    expect(api.listCandidates).toHaveBeenLastCalledWith(
+      {
+        roleId: role.id,
+        limit: 30,
+        query: "Current",
+        sort,
+      },
+      { signal: expect.any(AbortSignal) },
+    );
   },
 );
 
@@ -2736,10 +2839,12 @@ it("requests server pages and filters while keeping selected evidence outside th
   await view.click("Load more");
   expect(api.listCandidates).toHaveBeenLastCalledWith(
     expect.objectContaining({ roleId: role.id, cursor: "page-2" }),
+    { signal: expect.any(AbortSignal) },
   );
   await changeInput(view.container, "Search candidates", "Synthetic");
   expect(api.listCandidates).toHaveBeenLastCalledWith(
     expect.objectContaining({ query: "Synthetic" }),
+    { signal: expect.any(AbortSignal) },
   );
   expect(api.listCandidates.mock.lastCall?.[0].cursor).toBeUndefined();
   expect(view.container.textContent).toContain("Original systems requirement");
@@ -2747,6 +2852,7 @@ it("requests server pages and filters while keeping selected evidence outside th
   await changeSelect(view.container, "Candidate sort", "recent");
   expect(api.listCandidates).toHaveBeenLastCalledWith(
     expect.objectContaining({ query: "Synthetic", assessmentState: "unassessed", sort: "recent" }),
+    { signal: expect.any(AbortSignal) },
   );
   expect(view.container.textContent).toContain("Built a compiler");
 });
@@ -2797,37 +2903,52 @@ it("filters saved result pages alongside search updates and preserves the other 
     sort: "recent",
   };
   await changeSelect(view.container, "Research round", `action:${f.action.id}`);
-  expect(api.listCandidates).toHaveBeenLastCalledWith({
-    ...filters,
-    actionId: f.action.id,
-    sourceEffectId: undefined,
-  });
+  expect(api.listCandidates).toHaveBeenLastCalledWith(
+    {
+      ...filters,
+      actionId: f.action.id,
+      sourceEffectId: undefined,
+    },
+    { signal: expect.any(AbortSignal) },
+  );
   await changeSelect(view.container, "Research round", savedOptions[0]!.value);
-  expect(api.listCandidates).toHaveBeenLastCalledWith({
-    ...filters,
-    actionId: undefined,
-    sourceEffectId: savedObservation.effectId,
-  });
+  expect(api.listCandidates).toHaveBeenLastCalledWith(
+    {
+      ...filters,
+      actionId: undefined,
+      sourceEffectId: savedObservation.effectId,
+    },
+    { signal: expect.any(AbortSignal) },
+  );
   await view.click("Load more");
-  expect(api.listCandidates).toHaveBeenLastCalledWith({
-    ...filters,
-    actionId: undefined,
-    sourceEffectId: savedObservation.effectId,
-    cursor: "page-2",
-  });
+  expect(api.listCandidates).toHaveBeenLastCalledWith(
+    {
+      ...filters,
+      actionId: undefined,
+      sourceEffectId: savedObservation.effectId,
+      cursor: "page-2",
+    },
+    { signal: expect.any(AbortSignal) },
+  );
   await changeSelect(view.container, "Research round", `action:${f.action.id}`);
-  expect(api.listCandidates).toHaveBeenLastCalledWith({
-    ...filters,
-    actionId: f.action.id,
-    sourceEffectId: undefined,
-  });
+  expect(api.listCandidates).toHaveBeenLastCalledWith(
+    {
+      ...filters,
+      actionId: f.action.id,
+      sourceEffectId: undefined,
+    },
+    { signal: expect.any(AbortSignal) },
+  );
   await changeSelect(view.container, "Research round", savedOptions[1]!.value);
   await changeSelect(view.container, "Research round", "all");
-  expect(api.listCandidates).toHaveBeenLastCalledWith({
-    ...filters,
-    actionId: undefined,
-    sourceEffectId: undefined,
-  });
+  expect(api.listCandidates).toHaveBeenLastCalledWith(
+    {
+      ...filters,
+      actionId: undefined,
+      sourceEffectId: undefined,
+    },
+    { signal: expect.any(AbortSignal) },
+  );
   expect(select.value).toBe("all");
   expect(api.setCandidateShortlist).not.toHaveBeenCalled();
   expect(api.getById).not.toHaveBeenCalled();
@@ -2854,13 +2975,16 @@ it("ignores late saved-result pages while retaining the original candidate discu
   );
   await view.click("Load more");
   await changeSelect(view.container, "Research round", `action:${f.action.id}`);
-  expect(api.listCandidates).toHaveBeenLastCalledWith({
-    roleId: role.id,
-    limit: 30,
-    sort: "rank",
-    actionId: f.action.id,
-    sourceEffectId: undefined,
-  });
+  expect(api.listCandidates).toHaveBeenLastCalledWith(
+    {
+      roleId: role.id,
+      limit: 30,
+      sort: "rank",
+      actionId: f.action.id,
+      sourceEffectId: undefined,
+    },
+    { signal: expect.any(AbortSignal) },
+  );
   await act(async () =>
     finish(candidatePage([{ ...candidateFixture("late-person", false), name: "Late candidate" }])),
   );
@@ -4329,6 +4453,7 @@ it("keeps a pending shortlist and its receipt across candidate filter changes", 
   expect(checkbox().getAttribute("aria-disabled")).not.toBe("true");
   expect(api.listCandidates).toHaveBeenLastCalledWith(
     expect.objectContaining({ query: "candidate" }),
+    { signal: expect.any(AbortSignal) },
   );
 });
 
@@ -4458,6 +4583,7 @@ it.each(["action:action-1", "source:native-read-1"])(
           ? { actionId: f.action.id }
           : { sourceEffectId: savedObservation.effectId },
       ),
+      { signal: expect.any(AbortSignal) },
     );
     const next = {
       role: { ...role, id: "role-next", currentRevisionId: "revision-next" },
@@ -7069,6 +7195,7 @@ it("keeps workspace shortlist and contacts navigation out of saved filters and c
   });
   expect(api.listCandidates).toHaveBeenLastCalledWith(
     expect.objectContaining({ roleId: role.id, shortlisted: true }),
+    { signal: expect.any(AbortSignal) },
   );
   expect(api.setCandidateShortlist).not.toHaveBeenCalled();
   api.listCandidates.mockClear();
@@ -7078,6 +7205,7 @@ it("keeps workspace shortlist and contacts navigation out of saved filters and c
   });
   expect(api.listCandidates).toHaveBeenLastCalledWith(
     expect.not.objectContaining({ shortlisted: true }),
+    { signal: expect.any(AbortSignal) },
   );
   expect(view.container.querySelector("tbody")?.textContent).toContain("Nav Person");
   expect([...view.container.querySelectorAll("thead th")].map((cell) => cell.textContent)).toEqual([
@@ -7124,6 +7252,7 @@ it("does not display the Contacts pool as a pending Shortlist query and retains 
   await view.render("thread-1", 0, false, undefined, { ...navigation, view: "shortlist" });
   expect(api.listCandidates).toHaveBeenLastCalledWith(
     expect.objectContaining({ roleId: role.id, shortlisted: true }),
+    { signal: expect.any(AbortSignal) },
   );
   expect(view.container.querySelector(".hire-card-grid")?.textContent ?? "").not.toContain(
     candidate.name,
