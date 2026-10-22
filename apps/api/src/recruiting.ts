@@ -407,7 +407,9 @@ export async function getRecruitingCorrespondence(
         body.next_starting_after !== null &&
         body.next_starting_after !== "";
       for (const row of rows) {
-        const email = readInstantlyEmail(row);
+        // Display does not use provider thread IDs; outbound anchors retain their strict UUID check.
+        const { thread_id: _threadId, ...display } = correspondenceRecord(row) ?? {};
+        const email = readInstantlyEmail(display);
         if (!email) {
           unsupported = true;
           output.partial = true;
