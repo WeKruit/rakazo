@@ -4,15 +4,25 @@
 
 **Goal:** 在现有 Rakazo 网页交付 Main/Sourcer 原生协作、可恢复交互与记忆，迁入现有招聘工作，完成 [GOAL.md](GOAL.md) 的 P0–P6 基础闭环与 [PRODUCT-SCOPE.md](PRODUCT-SCOPE.md) 的 Juicebox / Metix / Grok Bot 完整产品范围。
 
-### 2026-10-22：平台开箱范围与原生连接窗口修复
+### 2026-10-22：原生连接窗口已发布，个人 Codex 跨实例续聊已验证
 
 用户进一步明确：仅个人邮箱/日历按需连接，其他招聘服务与 Codex OAuth 均应由平台提供；已同步 GOAL 和 PRODUCT-SCOPE，不把新人改成逐服务配置。当前部署模型仅支持平台 API key/原生 host 凭据；现有 Codex OAuth 仍绑定个人，旧闲置部署密文字段不参与执行。已核对官方远程托管申请及工作区 WIF beta 文档，尚无适用接入已获准证据；此项仍是产品缺口，不复制个人 grant、不借管理员 actor，也不以 API key 验收替代它。
 
-连接窗口的实际根因已定位：普通页面只列托管 connector catalog，未读取已有 native MCP 服务，因而平台服务已配置仍显示空目录。正在复用原生 servers/assignments/OAuth 与已有公共搜索，补普通产品服务卡和只含 Boolean 的平台配置状态；不创建新 endpoint、目录、broker 或 harness，不赋予/恢复工具权限。相关源码及检查仍在集成，不能称已发布。
+连接窗口的实际根因是普通页面只列托管 connector catalog，未读取已有 native MCP 服务，因而平台服务已配置仍显示空目录。现已复用原生 servers/assignments/OAuth 与已有公共搜索，普通产品页展示实际获分配服务及只含 Boolean 的平台配置状态；默认不查询管理目录或工具详情，开发者管理入口保留。不创建新 endpoint、目录、broker 或 harness，不赋予/恢复工具权限。OAuth 取消、bot 切换、卸载及旧请求的延迟结果不会回写新页面；独立 review 发现的 Retry 竞争已先复现再修复。网页15项相关检查、生产类型与格式通过，独立复核通过。
+
+已将所选 `d1ec7881`（公开镜像 `7c7e1a2b`）从固定归档发布至原 Modal 应用。135份运行源码 hash 一致，内部 health/ready 为200 JSON且非 degraded；20组保护记录精确保持、109份迁移不变、原 executing prepare 保留。未提交的十份 home/restore 改动未包含。首次公开探针503保留；后续公开 `/ready` 返回的是 SPA HTML，不能作 JSON readiness 证明。没有新增迁移、资源、工具授权、订阅、Routine 或外发。
+
+普通网页已显示现有五项服务的实际配置状态，原岗位候选池、CRM状态、原卡和未发送草稿保留。通过同一网页原对话正常输入、没有 agent 地址或 JSON 的只读续聊，实际 `openai-codex` / `gpt-6.1-sol` run 完成；原生候选读取成功，无写 effect。回复引用已保留的未发送评审草稿上下文，不是本轮重新读取草稿文件或创建邮箱草稿。此项只证明既有个人 Codex 在实例替换后继续执行，不证明平台共享 OAuth、实际 refresh-token 轮换、两位新人或全部卡型恢复。完整业务数值、截图与物理只读回执留在私有验收记录，不提交公开仓库。
+
+原生 OIDC refresh 已沿已安装官方 OAuth helper 实现完整八秒 discovery/token 请求界限，保留当前 issuer、无重定向和 HTTPS endpoint 检查及加密持久化，不引入另一个认证代理。71项 OIDC 检查与190项 API router 检查分别通过，相关类型/格式与独立复核通过；与网页批次有交叠，不累加，不称已启用产品 SSO 或真实供应商轮换验收。
+
+附件在本次正常实例替换前后均经原生 ArtifactStore 实际读取全文并核对长度/hash：全部引用对象内容清单一致，验证对象属于现有原 Modal Volume。只读检查未导出正文、写对象或执行 Volume 操作，连接均关闭；非静默快照，读取前 metadata 门禁不等于硬字节流量上限。本次证据替代此前仅元数据的窄结论，但不证明突发硬退出、持久 checkpoint 屏障、home 精确版本恢复、多副本接管或远程 ArtifactStore 切换。存储仍为原 LocalArtifactStore/Modal Volume。
+
+可持续登录与平台供给是独立边界：原生 OAuth 可加密保存并由后端刷新，无需保持登录网页；撤销或续期失败仍需重新连接。当前模型 OAuth 仍属于真实用户；平台 OAuth 还缺明确平台凭据供给、原生刷新/撤销/目录接入及适用托管产品授权。用户要求继续保留，不以个人 grant 复制、管理员 actor 或 API key 路径替代验收。新人注册的邮件/可信 OIDC、真实新用户的 CRM 身份与组织权限、两位真人隔离、邮件/日历及完整 playbook 仍未通过；M1–M5和原累计预算继续进行。
 
 ### 2026-10-22：新人注册与可替换底座边界核对
 
-新人差距与现有接口统一记录在 [PRODUCT-SCOPE.md — 新人开箱与底座接口](PRODUCT-SCOPE.md#新人开箱与底座接口)，不新增另一份框架或追踪表。线上公开 `/api/auth/capabilities` 实际200：密码登录开启、SSO为空、密码找回不可用。现有容器的物理 READ ONLY / RepeatableRead 元数据核对进一步确认：注册开启且策略已初始化，一条白名单、一位现有 human 与 owner；SMTP、发件地址、OIDC 及环境级模型供给均未配置。按既有原生规则，后续白名单新人会被验证邮件服务缺失阻塞；未创建测试账号或发送邮件，不把路径推导称实际注册验收。不能复制管理员账号或关闭身份验证使其通过。普通网页的 Integrations 窗口实际显示尚未配置服务目录，这与当前账号已有部分 MCP 连接并不矛盾，不能据后者宣布新人连接入口完成。
+新人差距与现有接口统一记录在 [PRODUCT-SCOPE.md — 新人开箱与底座接口](PRODUCT-SCOPE.md#新人开箱与底座接口)，不新增另一份框架或追踪表。线上公开 `/api/auth/capabilities` 实际200：密码登录开启、SSO为空、密码找回不可用。现有容器的物理 READ ONLY / RepeatableRead 元数据核对进一步确认：注册开启且策略已初始化，一条白名单、一位现有 human 与 owner；SMTP、发件地址、OIDC 及环境级模型供给均未配置。按既有原生规则，后续白名单新人会被验证邮件服务缺失阻塞；未创建测试账号或发送邮件，不把路径推导称实际注册验收。不能复制管理员账号或关闭身份验证使其通过。当时普通网页的 Integrations 窗口实际显示尚未配置服务目录；上方新发布已修复实际服务列表，但不据现有账号可见服务宣布新人连接或权限验收完成。
 
 已有原生注册/私有 Space、四角色/五份内置 skills 和幂等安装维护；平台 Autumn/FullEnrich 可复用。仍优先补平台认证入口与模型供给，再完成真实用户的 CRM 身份/组织权限、个人连接和两位新人隔离验收。`AgentRuntime`、模型、连接/工具、记忆、文件、sandbox、Routine 与渠道均沿现有边界；逐 bot runtime/明确 connection 绑定、运行配置冻结及高可用仍是实际 gap，不用接口存在冒充实现完成。当前执行器为 Pi，个人 Codex 模型 OAuth 不能当作所有用户的部署级供给。
 
