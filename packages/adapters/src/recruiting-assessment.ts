@@ -75,11 +75,18 @@ export async function executeRecruitingCandidatesTool(
   const input = RecruitingCandidatesToolInputSchema.parse(untrusted);
   const started = performance.now();
   let succeeded = false;
+  // Phase split for the existing timing line: authorization, database page, saved reports.
+  let authorizeMs: number | null = null;
+  let queryMs: number | null = null;
+  let reportReadMs: number | null = null;
+  let itemCount: number | null = null;
   try {
     await requireRecruitingRun(deps.prisma, trusted, context);
     const workspace = await getRecruitingWorkspace(deps.prisma, trusted.actor, {
       threadId: trusted.threadId,
     });
+    authorizeMs = Math.round(performance.now() - started);
+    const queryStarted = performance.now();
     if (!workspace) {
       succeeded = true;
       return { status: "no_current_role" as const };
@@ -90,6 +97,8 @@ export async function executeRecruitingCandidatesTool(
         roleId: workspace.role.id,
         ...query,
       });
+      queryMs = Math.round(performance.now() - queryStarted);
+      itemCount = result.items.length;
       succeeded = true;
       return result;
     }
@@ -99,6 +108,9 @@ export async function executeRecruitingCandidatesTool(
       roleId: workspace.role.id,
       ...query,
     });
+    queryMs = Math.round(performance.now() - queryStarted);
+    itemCount = result.items.length;
+    const reportsStarted = performance.now();
     const readReport = createRecruitingCandidateReportReader(
       deps,
       trusted.actor,
@@ -110,6 +122,7 @@ export async function executeRecruitingCandidatesTool(
     const items = [];
     for (const source of result.items)
       items.push({ ...source, report: (await readReport(source)).report });
+    reportReadMs = Math.round(performance.now() - reportsStarted);
     succeeded = true;
     return { ...result, items };
   } finally {
@@ -118,6 +131,10 @@ export async function executeRecruitingCandidatesTool(
       limit: input.limit ?? null,
       hasCursor: input.cursor !== undefined,
       durationMs: Math.round(performance.now() - started),
+      authorizeMs,
+      queryMs,
+      reportReadMs,
+      itemCount,
       outcome: succeeded ? "succeeded" : "error",
     });
   }
