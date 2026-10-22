@@ -287,6 +287,189 @@ afterEach(() => {
 });
 
 describe("OIDC callbacks", () => {
+  it("bounds refresh discovery, token exchange and body reads with one deadline", async () => {
+    setup();
+    await signIn();
+    const account = rows("account")[0]!;
+    account.accessTokenExpiresAt = new Date(0);
+    account.scope = "openid,email,profile";
+    const { adapter, stored, tx } = await tokenTransaction(account);
+    const fetch = vi.mocked(globalThis.fetch);
+    const original = fetch.getMockImplementation()!;
+    let discoverySignal: AbortSignal | null | undefined;
+    let tokenSignal: AbortSignal | null | undefined;
+    fetch.mockImplementation(async (input, init) => {
+      if (String(input).endsWith("openid-configuration")) {
+        discoverySignal = init?.signal;
+        expect(init?.redirect).toBe("manual");
+      }
+      return original(input, init);
+    });
+    refreshTokenRequest.mockImplementation(async (init?: RequestInit) => {
+      tokenSignal = init?.signal;
+      expect(init?.redirect).toBe("manual");
+      expect(new URLSearchParams(String(init?.body))).toEqual(
+        new URLSearchParams({
+          grant_type: "refresh_token",
+          refresh_token: "fake-refresh-token",
+          client_id: "test-client",
+          client_secret: "test-client-secret",
+        }),
+      );
+      return json({
+        access_token: "rotated-access-token",
+        refresh_token: "rotated-refresh-token",
+        token_type: "Bearer",
+        expires_in: 300,
+        scope: "openid",
+      });
+    });
+    const timeout = vi.spyOn(AbortSignal, "timeout");
+    try {
+      await expect(
+        runWithAdapter(adapter, () =>
+          auth.api.getAccessToken({
+            body: { accountId: String(account.id), userId: String(account.userId) },
+          }),
+        ),
+      ).resolves.toMatchObject({
+        accessToken: "rotated-access-token",
+        scopes: ["openid", "email", "profile"],
+      });
+      expect(timeout).toHaveBeenCalledExactlyOnceWith(8_000);
+      expect(discoverySignal).toBeInstanceOf(AbortSignal);
+      expect(tokenSignal).toBe(discoverySignal);
+      expect(tx.account.update).toHaveBeenCalledTimes(1);
+      expect(stored.scope).toBe("openid,email,profile");
+    } finally {
+      timeout.mockRestore();
+    }
+  });
+
+  it.each(["discovery", "discovery body", "token", "token body"])(
+    "aborts a stalled refresh %s without writing tokens",
+    async (stage) => {
+      setup();
+      await signIn();
+      const account = rows("account")[0]!;
+      account.accessTokenExpiresAt = new Date(0);
+      const before = structuredClone(account);
+      const { adapter, stored, tx } = await tokenTransaction(account);
+      const fetch = vi.mocked(globalThis.fetch);
+      const original = fetch.getMockImplementation()!;
+      let signal: AbortSignal | undefined;
+      fetch.mockImplementation(async (input, init) => {
+        const current = String(input).endsWith("openid-configuration") ? "discovery" : "token";
+        if (!stage.startsWith(current)) return original(input, init);
+        signal = init?.signal ?? undefined;
+        expect(signal).toBeInstanceOf(AbortSignal);
+        if (signal!.aborted) throw signal!.reason;
+        if (stage.endsWith("body"))
+          return new Response(
+            new ReadableStream({
+              start(controller) {
+                signal!.addEventListener("abort", () => controller.error(signal!.reason), {
+                  once: true,
+                });
+              },
+            }),
+            { headers: { "content-type": "application/json" } },
+          );
+        return new Promise<Response>((_, reject) => {
+          signal!.addEventListener("abort", () => reject(signal!.reason), { once: true });
+        });
+      });
+      const nativeTimeout = AbortSignal.timeout.bind(AbortSignal);
+      const timeout = vi.spyOn(AbortSignal, "timeout").mockImplementation((milliseconds) => {
+        expect(milliseconds).toBe(8_000);
+        return nativeTimeout(25);
+      });
+      try {
+        await expect(
+          runWithAdapter(adapter, () =>
+            auth.api.getAccessToken({
+              body: { accountId: String(account.id), userId: String(account.userId) },
+            }),
+          ),
+        ).rejects.toMatchObject({ body: { code: "FAILED_TO_GET_ACCESS_TOKEN" } });
+        expect(signal?.aborted).toBe(true);
+        expect(timeout).toHaveBeenCalledExactlyOnceWith(8_000);
+        expect(tx.account.update).not.toHaveBeenCalled();
+        expect(stored).toEqual(before);
+      } finally {
+        timeout.mockRestore();
+      }
+    },
+  );
+
+  it.each([
+    "issuer change",
+    "discovery redirect",
+    "HTTP endpoint",
+    "credential endpoint",
+    "fragment endpoint",
+    "token redirect",
+    "token error",
+  ])("rejects refresh %s without replacing the stored grant", async (failure) => {
+    setup();
+    await signIn();
+    const account = rows("account")[0]!;
+    account.accessTokenExpiresAt = new Date(0);
+    const before = structuredClone(account);
+    const { adapter, stored, tx } = await tokenTransaction(account);
+    const fetch = vi.mocked(globalThis.fetch);
+    const original = fetch.getMockImplementation()!;
+    fetch.mockImplementation(async (input, init) => {
+      if (String(input).endsWith("openid-configuration")) {
+        if (failure === "issuer change")
+          return json({
+            issuer: "https://other.example.test",
+            token_endpoint: `${issuer}/token`,
+          });
+        if (failure === "discovery redirect")
+          return new Response(null, {
+            status: 302,
+            headers: { location: `${issuer}/elsewhere` },
+          });
+        if (failure.endsWith("endpoint"))
+          return json({
+            issuer,
+            token_endpoint:
+              failure === "HTTP endpoint"
+                ? "http://identity.example.test/token"
+                : failure === "credential endpoint"
+                  ? "https://client:secret@identity.example.test/token"
+                  : `${issuer}/token#fragment`,
+          });
+      }
+      return original(input, init);
+    });
+    if (failure === "token redirect")
+      refreshTokenRequest.mockResolvedValue(
+        new Response(null, { status: 302, headers: { location: `${issuer}/elsewhere` } }),
+      );
+    if (failure === "token error")
+      refreshTokenRequest.mockResolvedValue(
+        json({ access_token: "must-not-be-stored", error: "invalid_grant" }),
+      );
+
+    await expect(
+      runWithAdapter(adapter, () =>
+        auth.api.getAccessToken({
+          body: { accountId: String(account.id), userId: String(account.userId) },
+        }),
+      ),
+    ).rejects.toMatchObject({ body: { code: "FAILED_TO_GET_ACCESS_TOKEN" } });
+    expect(tx.account.update).not.toHaveBeenCalled();
+    expect(stored).toEqual(before);
+    if (
+      failure === "issuer change" ||
+      failure === "discovery redirect" ||
+      failure.endsWith("endpoint")
+    )
+      expect(refreshTokenRequest).not.toHaveBeenCalled();
+  });
+
   it("keeps native account refresh reads and encrypted writes on the supplied Prisma adapter", async () => {
     setup();
     await signIn();

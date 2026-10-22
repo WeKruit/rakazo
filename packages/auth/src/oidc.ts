@@ -1,6 +1,7 @@
 import { createHash } from "node:crypto";
 import type { BetterAuthPlugin } from "better-auth";
 import { APIError } from "better-auth/api";
+import { getOAuth2Tokens, refreshAccessTokenRequest } from "better-auth/oauth2";
 import { genericOAuth } from "better-auth/plugins";
 
 export interface OidcConfig {
@@ -122,10 +123,56 @@ export function oidcDiscovery(config: OidcConfig) {
           if (!resolved.accountSubject) throw unavailable();
           return resolved.accountSubject(data);
         },
-        refreshAccessToken: async (token, context) => {
-          const resolved = await getProvider();
-          if (!resolved.refreshAccessToken) throw unavailable();
-          return resolved.refreshAccessToken(token, context);
+        refreshAccessToken: async (token) => {
+          const signal = AbortSignal.timeout(8_000);
+          // ponytail: re-discover once per refresh until Generic OAuth exposes refresh fetch options.
+          const discovery = await fetch(
+            `${config.issuer.replace(/\/$/, "")}/.well-known/openid-configuration`,
+            { signal, redirect: "manual" },
+          );
+          if (!discovery.ok) throw unavailable();
+          const metadata = await discovery.json();
+          if (
+            !metadata ||
+            typeof metadata !== "object" ||
+            !("issuer" in metadata) ||
+            metadata.issuer !== config.issuer ||
+            !("token_endpoint" in metadata) ||
+            typeof metadata.token_endpoint !== "string" ||
+            !metadata.token_endpoint
+          )
+            throw unavailable();
+          const endpoint = new URL(metadata.token_endpoint);
+          if (
+            endpoint.protocol !== "https:" ||
+            endpoint.username ||
+            endpoint.password ||
+            endpoint.hash
+          )
+            throw unavailable();
+          const request = await refreshAccessTokenRequest({
+            refreshToken: token,
+            tokenEndpoint: metadata.token_endpoint,
+            options: { clientId: config.clientId, clientSecret: config.clientSecret },
+          });
+          const response = await fetch(metadata.token_endpoint, {
+            ...request,
+            method: "POST",
+            signal,
+            redirect: "manual",
+          });
+          if (!response.ok) throw unavailable();
+          const data = await response.json();
+          if (
+            !data ||
+            typeof data !== "object" ||
+            !("access_token" in data) ||
+            typeof data.access_token !== "string" ||
+            !data.access_token ||
+            ("error" in data && data.error)
+          )
+            throw unavailable();
+          return getOAuth2Tokens(data);
         },
       };
       return { context: { socialProviders: [lazy, ...ctx.socialProviders] } };
