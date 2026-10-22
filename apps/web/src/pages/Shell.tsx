@@ -2237,18 +2237,70 @@ export function ShellPage() {
         (inGroup ? activeGroupId.current === groupId : activeBotId.current === active?.id),
     );
   }
-  function discussCandidate(candidate: CandidateDiscussionContext) {
+  const candidateRequests = useRef(new Map<string, string>());
+  async function discussCandidate(candidate: CandidateDiscussionContext) {
     if (!candidateScopeCurrent(candidate)) return;
-    composerRef.current?.insertContext({
-      draftKey: composerDraftKey,
-      text:
-        candidate.intent === "email_draft"
-          ? `${candidateReferenceText(candidate)}${t`Prepare a personalized first email and follow-ups for this person using our saved evidence and playbook. Keep unknown facts marked, do not invent an email address, and save the drafts here without sending.`}`
-          : candidate.intent === "contact_lookup"
-            ? `${candidateReferenceText(candidate)}${t`Find this person's work email from saved evidence or available connected services. If a connection is missing, explain what needs connecting. Save the returned source and provider status, do not invent contact details, and do not send a message.`}`
-            : candidateReferenceText(candidate),
-    });
+    const text =
+      candidate.intent === "email_draft"
+        ? `${candidateReferenceText(candidate)}${t`Prepare a personalized first email and follow-ups for this person using our saved evidence and playbook. Keep unknown facts marked, do not invent an email address, and save the drafts here without sending.`}`
+        : candidate.intent === "contact_lookup"
+          ? `${candidateReferenceText(candidate)}${t`Find this person's work email from saved evidence or available connected services. If a connection is missing, explain what needs connecting. Save the returned source and provider status, do not invent contact details, and do not send a message.`}`
+          : candidateReferenceText(candidate);
+    if (!candidate.intent) {
+      composerRef.current?.insertContext({ draftKey: composerDraftKey, text });
+      if (!showToolActivity) openRoleChat();
+      return;
+    }
+    if (
+      sendingRef.current ||
+      !candidate.roleId ||
+      !candidate.roleRevisionId ||
+      !candidate.candidateKey ||
+      validatedThreadEpoch.current !== historyEpoch.current
+    )
+      return;
+    const key = JSON.stringify([
+      userId,
+      bootstrapMe?.spaceId,
+      composerDraftKey,
+      candidate.threadId,
+      candidate.roleId,
+      candidate.roleRevisionId,
+      candidate.candidateKey,
+      candidate.intent,
+      text,
+    ]);
+    sendingRef.current = true;
+    setSending(true);
+    setSendError(null);
     if (!showToolActivity) openRoleChat();
+    try {
+      const workspace = await rpc.recruiting.getWorkspace({ threadId: candidate.threadId });
+      if (!candidateScopeCurrent(candidate)) return;
+      if (
+        workspace?.role.id !== candidate.roleId ||
+        workspace?.revision.id !== candidate.roleRevisionId
+      )
+        throw new Error(t`This role changed. Select the candidate again.`);
+      const clientNonce = candidateRequests.current.get(key) ?? newClientNonce();
+      candidateRequests.current.set(key, clientNonce);
+      await rpc.threads.followUp({
+        ...(inGroup ? { groupId: groupId! } : { botId: active!.id }),
+        text,
+        clientNonce,
+      });
+      if (candidateRequests.current.get(key) === clientNonce) candidateRequests.current.delete(key);
+      if (candidateScopeCurrent(candidate)) {
+        if (inGroup) void refreshGroupThreadRef.current(groupId!).catch(() => undefined);
+        else void refreshThreadRef.current(active!.id).catch(() => undefined);
+      }
+    } catch (error) {
+      if (candidateScopeCurrent(candidate))
+        setSendError(errorText(error, t`Failed to send message`));
+    } finally {
+      sendingRef.current = false;
+      setSending(false);
+    }
   }
   async function feedbackCandidate(
     candidate: CandidateDiscussionContext,

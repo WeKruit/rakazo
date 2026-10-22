@@ -28,13 +28,14 @@ import {
 } from "@rakazo/core";
 import { mcpObject, stableJsonValue } from "@rakazo/core/node/approval-effect-key";
 import { extractPdfText } from "@rakazo/core/node/pdf-text";
-import type { PrismaClient, RecruitingRoleMaterialContext } from "@rakazo/db";
+import type { PrismaClient, RecruitingRoleMaterialContext, ThreadEvents } from "@rakazo/db";
 import * as recruiting from "@rakazo/db";
 import {
   IsolationError,
   RecruitingConflictError,
   RecruitingSourceValidationError,
 } from "@rakazo/db";
+import { getLogger } from "@rakazo/logging";
 import type { ParseError } from "jsonc-parser";
 import { findNodeAtLocation, parseTree } from "jsonc-parser";
 import type { ThreadTarget } from "./thread-target.js";
@@ -58,6 +59,30 @@ async function authenticated<T>(operation: () => Promise<T>): Promise<T> {
 }
 
 type RecruitingReadDeps = { prisma: PrismaClient; artifacts: ArtifactStore };
+
+/** Wake the native durable stream only after the mutation has committed. */
+export async function notifyRecruitingChange(
+  deps: { prisma: PrismaClient; events: Pick<ThreadEvents, "notify"> },
+  actor: Actor,
+  threadId: string,
+) {
+  try {
+    const event = await deps.prisma.event.findFirst({
+      where: {
+        spaceId: actor.spaceId,
+        threadId,
+        type: "recruiting.changed",
+        thread: { userId: actor.userId, spaceId: actor.spaceId },
+      },
+      select: { seq: true },
+      orderBy: { seq: "desc" },
+    });
+    if (event) await deps.events.notify(threadId, event.seq);
+  } catch (error) {
+    // The save committed; native stream catch-up still replays a missed wake-up.
+    getLogger().error("recruiting.change.notification.failed", error);
+  }
+}
 
 function correspondenceProvider(endpoint: string | null, view: "inbox" | "interview" | "contacts") {
   if (!endpoint) return null;
@@ -173,6 +198,7 @@ export async function getRecruitingCorrespondence(
       partial: false,
       connections: sources.map((source) => ({
         name: source.name,
+        checkIssue: null,
         status: !source.enabled
           ? "disabled"
           : !source.secretId && !hasPlatformMcpCredential(source)
@@ -256,6 +282,22 @@ export async function getRecruitingCorrespondence(
     output.partial = retained.length > 200;
     const seen = new Set<string>();
     let unsupported = false;
+    let failed = false;
+    const connections = new Map(
+      sources.map((source, index) => [source.id, output.connections[index]!]),
+    );
+    const checkIssue = (
+      sourceId: string,
+      updatedAt: Date,
+      status: "failed" | "unsupported" = "unsupported",
+    ) => {
+      if (status === "failed") failed = true;
+      else unsupported = true;
+      const connection = connections.get(sourceId);
+      const checkedAt = updatedAt.toISOString();
+      if (connection && (!connection.checkIssue || checkedAt > connection.checkIssue.checkedAt))
+        connection.checkIssue = { status, checkedAt };
+    };
     const reads = retained.slice(0, 200).flatMap((effect) => {
       const call = correspondenceCall(effect.request);
       const source = sourceRows.find(
@@ -299,7 +341,7 @@ export async function getRecruitingCorrespondence(
       if (seen.has(key)) return [];
       seen.add(key);
       if (call.route.resourceRevision !== source.revision || !source.provider) {
-        unsupported = true;
+        checkIssue(source.id, effect.updatedAt);
         output.checkedAt ??= effect.updatedAt.toISOString();
         output.connectionChanged ||= call.route.resourceRevision !== source.revision;
         return [];
@@ -338,7 +380,6 @@ export async function getRecruitingCorrespondence(
     );
     const contactKeys = new Set<string>();
     let parsed = false;
-    let failed = false;
     const emails = new Map<string, RecruitingCorrespondence["emails"][number]>();
     const gmailMessages = new Map<string, string>();
     const gmailThreads = new Map<string, string>();
@@ -378,13 +419,13 @@ export async function getRecruitingCorrespondence(
           ("error" in result ||
             ("isError" in result && result.isError !== false && result.isError !== undefined)))
       ) {
-        failed = true;
+        checkIssue(source.id, effect.updatedAt, "failed");
         continue;
       }
       const body = mcpObject(result);
       if (provider.kind === "fullenrich" && body) {
         if (typeof call.args.enrichment_id !== "string" || !call.args.enrichment_id.trim()) {
-          unsupported = true;
+          checkIssue(source.id, effect.updatedAt);
           continue;
         }
         if (body.status === "in_progress") {
@@ -392,7 +433,7 @@ export async function getRecruitingCorrespondence(
           continue;
         }
         if (body.status !== "FINISHED" || !Array.isArray(body.results)) {
-          unsupported = true;
+          checkIssue(source.id, effect.updatedAt);
           continue;
         }
         parsed = true;
@@ -409,7 +450,7 @@ export async function getRecruitingCorrespondence(
           const profileIdentity =
             typeof network?.url === "string" ? recruitingCalibrationIdentity(network.url) : null;
           if (!identity || identity !== profileIdentity) {
-            unsupported = true;
+            checkIssue(source.id, effect.updatedAt);
             continue;
           }
           const candidateKey = `linkedin:${identity}`;
@@ -417,7 +458,7 @@ export async function getRecruitingCorrespondence(
           contactKeys.add(candidateKey);
           const info = correspondenceRecord(entry?.contact_info);
           if (!info || !Array.isArray(info.work_emails)) {
-            unsupported = true;
+            checkIssue(source.id, effect.updatedAt);
             continue;
           }
           const addresses = [info.most_probable_work_email, ...info.work_emails]
@@ -436,7 +477,7 @@ export async function getRecruitingCorrespondence(
             checkedAt: effect.updatedAt.toISOString(),
           });
           if (!contact.success) {
-            unsupported = true;
+            checkIssue(source.id, effect.updatedAt);
             continue;
           }
           contact.data.emails = [
@@ -448,7 +489,7 @@ export async function getRecruitingCorrespondence(
       }
       if (provider.kind === "cal" && body) {
         if (body.status !== "success") {
-          unsupported = true;
+          checkIssue(source.id, effect.updatedAt);
           continue;
         }
         const availability = call.route.toolName === "get_availability";
@@ -456,18 +497,18 @@ export async function getRecruitingCorrespondence(
         if (availability) {
           const days = correspondenceRecord(body.data);
           if (!days) {
-            unsupported = true;
+            checkIssue(source.id, effect.updatedAt);
             continue;
           }
           rows = Object.values(days).flatMap((slots) => {
             if (Array.isArray(slots)) return slots;
-            unsupported = true;
+            checkIssue(source.id, effect.updatedAt);
             return [];
           });
         } else {
           rows = call.route.toolName === "get_booking" ? [body.data] : (body.data as unknown[]);
           if (!Array.isArray(rows)) {
-            unsupported = true;
+            checkIssue(source.id, effect.updatedAt);
             continue;
           }
           if (call.route.toolName === "get_bookings") {
@@ -489,7 +530,7 @@ export async function getRecruitingCorrespondence(
               !row.uid.trim() ||
               (call.route.toolName === "get_booking" && row.uid !== call.args.bookingUid))
           ) {
-            unsupported = true;
+            checkIssue(source.id, effect.updatedAt);
             continue;
           }
           const id = availability
@@ -526,7 +567,7 @@ export async function getRecruitingCorrespondence(
             (!availability && !event.data.end) ||
             (event.data.end && Date.parse(event.data.end) <= Date.parse(event.data.start))
           ) {
-            unsupported = true;
+            checkIssue(source.id, effect.updatedAt);
             continue;
           }
           if (!events.has(id)) events.set(id, event.data);
@@ -540,12 +581,12 @@ export async function getRecruitingCorrespondence(
         const thread = call.route.toolName === "get_thread";
         const selectedId = thread ? call.args.threadId : call.args.messageId;
         if (typeof selectedId !== "string" || !selectedId.trim() || body.id !== selectedId) {
-          unsupported = true;
+          checkIssue(source.id, effect.updatedAt);
           continue;
         }
         const rows = thread ? (body.messages === undefined ? [] : body.messages) : [body];
         if (!Array.isArray(rows)) {
-          unsupported = true;
+          checkIssue(source.id, effect.updatedAt);
           continue;
         }
         const format = call.args.messageFormat;
@@ -562,7 +603,7 @@ export async function getRecruitingCorrespondence(
             !row.id.trim() ||
             (thread && row.threadId !== undefined && row.threadId !== selectedId)
           ) {
-            unsupported = true;
+            checkIssue(source.id, effect.updatedAt);
             continue;
           }
           const threadId = thread ? selectedId : row.threadId;
@@ -590,7 +631,7 @@ export async function getRecruitingCorrespondence(
             url: row.viewUrl ?? null,
           });
           if (!message.success) {
-            unsupported = true;
+            checkIssue(source.id, effect.updatedAt);
             continue;
           }
           if (!emails.has(message.data.id)) emails.set(message.data.id, message.data);
@@ -598,12 +639,12 @@ export async function getRecruitingCorrespondence(
         continue;
       }
       if (provider.kind !== "instantly" || !body) {
-        unsupported = true;
+        checkIssue(source.id, effect.updatedAt);
         continue;
       }
       const rows = call.route.toolName === "list_emails" ? body.items : [body];
       if (!Array.isArray(rows)) {
-        unsupported = true;
+        checkIssue(source.id, effect.updatedAt);
         continue;
       }
       if (call.route.toolName === "list_emails") {
@@ -622,7 +663,7 @@ export async function getRecruitingCorrespondence(
         const { thread_id: _threadId, ...display } = correspondenceRecord(row) ?? {};
         const email = readInstantlyEmail(display);
         if (!email) {
-          unsupported = true;
+          checkIssue(source.id, effect.updatedAt);
           output.partial = true;
           continue;
         }
@@ -632,7 +673,7 @@ export async function getRecruitingCorrespondence(
           call.route.toolName === "get_email" &&
           (email.id !== call.args.id || !mailMembership.has(membership))
         ) {
-          unsupported = true;
+          checkIssue(source.id, effect.updatedAt);
           continue;
         }
         if (
@@ -640,7 +681,7 @@ export async function getRecruitingCorrespondence(
           !mailCampaigns.has(stableJsonValue([source.id, email.campaign_id])) ||
           (call.route.toolName === "list_emails" && email.campaign_id !== call.args.campaign_id)
         ) {
-          unsupported = true;
+          checkIssue(source.id, effect.updatedAt);
           continue;
         }
         parsed = true;

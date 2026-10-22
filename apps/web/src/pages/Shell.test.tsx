@@ -1936,14 +1936,134 @@ it("opens a normal recruiting role on native candidate results and restores coll
   expect(contactDraft.closest<HTMLElement>('section[aria-label="Role conversation"]')?.hidden).toBe(
     false,
   );
-  for (const line of view.candidate.name.split("\n")) expect(contactDraft.value).toContain(line);
-  expect(contactDraft.value).toContain("Find this person's work email from saved evidence");
-  expect(contactDraft.value).toContain("do not send a message");
+  expect(contactDraft.value).toBe("");
+  expect(shellApi.followUp).toHaveBeenCalledExactlyOnceWith({
+    groupId: "group-1",
+    text: expect.stringContaining("Find this person's work email from saved evidence"),
+    clientNonce: expect.any(String),
+  });
+  const request = shellApi.followUp.mock.calls[0]![0].text;
+  for (const line of view.candidate.name.split("\n")) expect(request).toContain(line);
+  expect(request).toContain("do not send a message");
   expect(document.body.querySelector('[data-message-id="pending-main"]')).toBe(card);
   expect(shellApi.recruiting.setCandidateShortlist).not.toHaveBeenCalled();
   expect(shellApi.answer).not.toHaveBeenCalled();
   expect(shellApi.send).not.toHaveBeenCalled();
-  expect(shellApi.followUp).not.toHaveBeenCalled();
+});
+
+it("starts an unsent email draft from Contacts while preserving the current composer and native question", async () => {
+  setToolActivityPreference("off");
+  const view = await renderFeedbackShell("group", ["running"], {
+    isDeploymentOwner: false,
+    openFeedback: false,
+    initialPath: "/app/g/group-1?view=contacts",
+  });
+  const card = document.body.querySelector('[data-message-id="pending-main"]');
+  const draft = container!.querySelector<HTMLTextAreaElement>('textarea[name="chat-message"]')!;
+  type(draft, "Keep my separate draft");
+  pickAttachment();
+  shellApi.get.mockClear();
+  await view.click("Email draft");
+  expect(shellApi.followUp).toHaveBeenCalledExactlyOnceWith({
+    groupId: "group-1",
+    text: expect.stringContaining("Prepare a personalized first email and follow-ups"),
+    clientNonce: expect.any(String),
+  });
+  expect(shellApi.followUp.mock.calls[0]![0].text).toContain(
+    "save the drafts here without sending",
+  );
+  expect(shellApi.followUp.mock.calls[0]![0].text).toContain(view.candidate.linkedinUrl);
+  expect(shellApi.get).toHaveBeenCalledWith({ groupId: "group-1" }, undefined);
+  expect(draft.value).toBe("Keep my separate draft");
+  expect(document.body.textContent).toContain("notes.txt");
+  expect(document.body.querySelector('[data-message-id="pending-main"]')).toBe(card);
+  expect(shellApi.answer).not.toHaveBeenCalled();
+  expect(shellApi.send).not.toHaveBeenCalled();
+  expect(shellApi.createArtifact).not.toHaveBeenCalled();
+});
+
+it.each(["user", "space", "thread", "role", "unmount"] as const)(
+  "does not start a contact lookup after its %s changes during the role check",
+  async (change) => {
+    setToolActivityPreference("off");
+    const view = await renderFeedbackShell("group", undefined, {
+      isDeploymentOwner: false,
+      openFeedback: false,
+      initialPath: "/app/g/group-1?view=contacts",
+    });
+    const workspace = await shellApi.recruiting.getWorkspace({ threadId: view.thread.threadId });
+    let finish!: (value: typeof workspace) => void;
+    shellApi.recruiting.getWorkspace.mockReturnValueOnce(
+      new Promise((resolve) => {
+        finish = resolve;
+      }),
+    );
+    await view.click("Find email");
+    if (change === "user") {
+      shellApi.session = {
+        data: { user: { id: "other-user", name: "Other recruiter", email: "other@example.test" } },
+      };
+      await view.render();
+    } else if (change === "space") localStorage.setItem("rakazo:space-id", "other-space");
+    else if (change === "thread") await view.navigate("/app/bot-2");
+    else if (change === "unmount") {
+      await act(async () => root!.unmount());
+      root = null;
+    }
+    await act(async () =>
+      finish(
+        change === "role"
+          ? { ...workspace, revision: { ...workspace.revision, id: "new-revision" } }
+          : workspace,
+      ),
+    );
+    expect(shellApi.followUp).not.toHaveBeenCalled();
+    expect(shellApi.answer).not.toHaveBeenCalled();
+    expect(shellApi.send).not.toHaveBeenCalled();
+  },
+);
+
+it("deduplicates a pending contact lookup and retries an uncertain native follow-up with the same nonce", async () => {
+  setToolActivityPreference("off");
+  const view = await renderFeedbackShell("group", undefined, {
+    isDeploymentOwner: false,
+    openFeedback: false,
+    initialPath: "/app/g/group-1?view=contacts",
+  });
+  let reject!: (error: Error) => void;
+  shellApi.followUp.mockReturnValueOnce(
+    new Promise((_resolve, fail) => {
+      reject = fail;
+    }),
+  );
+  await view.click("Find email");
+  await view.click("Find email");
+  expect(shellApi.followUp).toHaveBeenCalledTimes(1);
+  await act(async () => reject(new Error("Receipt lost")));
+  await view.click("Find email");
+  expect(shellApi.followUp).toHaveBeenCalledTimes(2);
+  expect(shellApi.followUp.mock.calls[1]).toEqual(shellApi.followUp.mock.calls[0]);
+  expect(shellApi.answer).not.toHaveBeenCalled();
+});
+
+it("keeps an uncertain contact lookup nonce across another successful candidate action", async () => {
+  setToolActivityPreference("off");
+  const view = await renderFeedbackShell("group", undefined, {
+    isDeploymentOwner: false,
+    openFeedback: false,
+    initialPath: "/app/g/group-1?view=contacts",
+  });
+  shellApi.followUp.mockRejectedValueOnce(new Error("Receipt lost"));
+  await view.click("Find email");
+  await view.click("Email draft");
+  await view.click("Find email");
+  expect(shellApi.followUp).toHaveBeenCalledTimes(3);
+  expect(shellApi.followUp.mock.calls[2]).toEqual(shellApi.followUp.mock.calls[0]);
+  expect(shellApi.followUp.mock.calls[1]![0].clientNonce).not.toBe(
+    shellApi.followUp.mock.calls[0]![0].clientNonce,
+  );
+  expect(shellApi.answer).not.toHaveBeenCalled();
+  expect(shellApi.send).not.toHaveBeenCalled();
 });
 
 it("sends candidate feedback from the default results workspace to Main without answering another native card", async () => {
@@ -2830,6 +2950,7 @@ it("refreshes persisted recruiting changes while ignoring ongoing catalog and so
     blocks: [{ kind: "text", text: "Not a fit", recruitingFeedback: { roleId: "role" } }],
   });
   receive("Research output recorded", "recruiting.read", { phase: "recorded" });
+  receive("Saved on another page", "recruiting.changed", { roleId: "role" });
   receive("Candidates saved", "recruiting.candidates.saved");
   receive("Question asked", "recruiting.question.asked");
   receive("Assessment saved", "recruiting.assessment.saved");
@@ -2848,6 +2969,7 @@ it("refreshes persisted recruiting changes while ignoring ongoing catalog and so
     "Reply outcome",
     "Candidate feedback saved",
     "Research output recorded",
+    "Saved on another page",
     "Candidates saved",
     "Question asked",
     "Assessment saved",

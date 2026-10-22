@@ -1292,6 +1292,9 @@ export const RecruitingCorrespondenceSchema = z.strictObject({
     z.strictObject({
       name: z.string(),
       status: z.enum(["configured", "needs_connection", "needs_access", "disabled"]),
+      checkIssue: z
+        .strictObject({ status: z.enum(["failed", "unsupported"]), checkedAt: IsoDate })
+        .nullable(),
     }),
   ),
   emails: z.array(

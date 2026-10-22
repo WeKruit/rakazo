@@ -13,6 +13,17 @@ const base = {
 };
 
 describe("recruiting material and assessment events", () => {
+  it("validates a saved workspace change without fabricating an effect or exposing content", () => {
+    for (const roleId of ["role-synthetic", null])
+      expect(
+        ProductEventSchema.safeParse({ ...base, type: "recruiting.changed", payload: { roleId } })
+          .success,
+      ).toBe(true);
+    for (const payload of [{}, { roleId: " " }, { roleId: "role-synthetic", rawText: "private" }])
+      expect(
+        ProductEventSchema.safeParse({ ...base, type: "recruiting.changed", payload }).success,
+      ).toBe(false);
+  });
   const candidates = {
     roleId: "role-synthetic",
     roleRevisionId: "revision-synthetic",

@@ -41,7 +41,9 @@ vi.mock("@rakazo/db", async (importOriginal) => {
     setRecruitingCandidateShortlist: vi.fn(),
   };
 });
-const prisma = {} as PrismaClient;
+const prisma = {
+  event: { findFirst: vi.fn(async () => null) },
+} as unknown as PrismaClient;
 const actor: Actor = {
   userId: "owner",
   spaceId: "space",
@@ -173,6 +175,69 @@ describe("saved recruiting correspondence", () => {
       select: { id: true },
     });
   });
+  it.each([
+    [{ isError: true, content: [{ type: "text", text: "private-provider-failure" }] }, "failed"],
+    [{ structuredContent: { id: "selected", date: "invalid-date" } }, "unsupported"],
+  ])(
+    "retains valid mail while exposing only the affected service's saved check issue: %j",
+    async (result, status) => {
+      const { client, prisma, retained } = fixture();
+      const gmail = {
+        id: "gmail",
+        name: "Gmail",
+        endpoint: "https://gmailmcp.googleapis.com/mcp/v1",
+        secretId: "encrypted-reference",
+        revision: 1,
+        enabled: true,
+        assignments: [{ botId: "main", allowAllTools: false, allowedTools: ["get_message"] }],
+      };
+      client.mcpServer.findMany.mockResolvedValueOnce([
+        ...(await client.mcpServer.findMany()),
+        gmail,
+      ]);
+      const check = {
+        ...retained,
+        id: "gmail-check",
+        updatedAt: new Date("2026-10-22T01:01:00Z"),
+        request: [
+          "__rakazoCatalogTool",
+          "direct",
+          {
+            route: {
+              connectorId: "mcp",
+              resourceId: "gmail",
+              resourceRevision: 1,
+              toolName: "get_message",
+            },
+            args: { messageId: "selected" },
+          },
+        ],
+      };
+      client.externalEffect.findMany
+        .mockReset()
+        .mockResolvedValueOnce([check, retained])
+        .mockResolvedValueOnce([
+          { id: check.id, result },
+          { id: retained.id, result: { structuredContent: { items: [email] } } },
+        ]);
+      const output = await api.getRecruitingCorrespondence(prisma, actor, target, "inbox");
+      expect(output).toMatchObject({
+        status: "ready",
+        partial: true,
+        emails: [{ body: email.body.text }],
+        connections: [
+          { name: "Instantly", status: "configured", checkIssue: null },
+          {
+            name: "Gmail",
+            status: "configured",
+            checkIssue: { status, checkedAt: check.updatedAt.toISOString() },
+          },
+        ],
+      });
+      expect(output.emails).toHaveLength(1);
+      expect(JSON.stringify(output)).not.toContain("private-provider-failure");
+    },
+  );
   it("displays native opaque Instantly thread IDs without weakening outbound anchor validation", async () => {
     const row = { ...email, thread_id: "provider-opaque-thread" };
     const { prisma } = fixture({
@@ -558,7 +623,9 @@ describe("saved recruiting correspondence", () => {
       },
     ]);
     const result = await api.getRecruitingCorrespondence(prisma, actor, target, "inbox");
-    expect(result.connections).toEqual([{ name: "Instantly", status: "needs_access" }]);
+    expect(result.connections).toEqual([
+      { name: "Instantly", status: "needs_access", checkIssue: null },
+    ]);
     expect(result.emails).toEqual([]);
     expect(client.externalEffect.findMany).not.toHaveBeenCalled();
   });
@@ -680,6 +747,24 @@ describe("saved recruiting correspondence", () => {
       ],
     });
     expect(JSON.stringify(result)).not.toContain("untrusted()");
+  });
+  it("does not report a superseded Gmail check issue after the latest observation succeeds", async () => {
+    const result = await gmailObservation(
+      "get_message",
+      { messageId: gmailMessage.id, messageFormat: "PLAIN_TEXT" },
+      gmailMessage,
+      {
+        tool: "get_message",
+        args: { messageId: gmailMessage.id, messageFormat: "FULL_CONTENT" },
+        body: {},
+      },
+    );
+    expect(result).toMatchObject({
+      status: "ready",
+      partial: true,
+      connections: [{ name: "Gmail", status: "configured", checkIssue: null }],
+      emails: [{ body: gmailMessage.plaintextBody }],
+    });
   });
   it("projects only messages from the exact selected Gmail thread, newest first", async () => {
     const result = await gmailObservation(
@@ -1219,13 +1304,15 @@ describe("saved recruiting correspondence", () => {
         },
       ]);
       const result = await api.getRecruitingCorrespondence(prisma, actor, target, "contacts");
-      expect(result.connections).toEqual([{ name: "FullEnrich", status: "configured" }]);
+      expect(result.connections).toEqual([
+        { name: "FullEnrich", status: "configured", checkIssue: null },
+      ]);
       expect(JSON.stringify(result)).not.toContain("platform-service-key");
       vi.stubEnv("FULLENRICH_API_KEY", " ");
       client.externalEffect.findMany.mockResolvedValue([]);
       expect(
         (await api.getRecruitingCorrespondence(prisma, actor, target, "contacts")).connections,
-      ).toEqual([{ name: "FullEnrich", status: "needs_connection" }]);
+      ).toEqual([{ name: "FullEnrich", status: "needs_connection", checkIssue: null }]);
     } finally {
       vi.unstubAllEnvs();
     }
@@ -1254,7 +1341,7 @@ describe("saved recruiting correspondence", () => {
         ]);
         expect(
           (await api.getRecruitingCorrespondence(prisma, actor, target, "contacts")).connections,
-        ).toEqual([{ name: "FullEnrich", status: "needs_connection" }]);
+        ).toEqual([{ name: "FullEnrich", status: "needs_connection", checkIssue: null }]);
       } finally {
         vi.unstubAllEnvs();
       }
@@ -1730,6 +1817,55 @@ describe("authenticated recruiting API", () => {
 });
 
 describe("native recruiting RPC", () => {
+  it.each([false, true])(
+    "signals a saved recruiting change only after its native mutation commits, failure=%s",
+    async (failed) => {
+      const event = { findFirst: vi.fn(async () => ({ seq: 17 })) };
+      const notify = vi.fn(async () => {});
+      const storage = { ...prisma, event } as unknown as PrismaClient;
+      const client = createRouterClient(
+        createRouter({ prisma: storage, events: { notify } } as unknown as RouterDeps),
+        { context: { actor } },
+      );
+      const saved = { roleId: "role", candidateKey: "candidate", shortlisted: true, revision: 1 };
+      let finish!: () => void;
+      vi.mocked(db.setRecruitingCandidateShortlist).mockImplementationOnce(
+        () =>
+          new Promise((resolve, reject) => {
+            finish = () => (failed ? reject(new IsolationError()) : resolve(saved));
+          }),
+      );
+      const saving = client.recruiting.setCandidateShortlist({
+        threadId: "thread",
+        roleId: "role",
+        candidateKey: "candidate",
+        expectedRevision: 0,
+        shortlisted: true,
+      });
+      await vi.waitFor(() => expect(finish).toBeTypeOf("function"));
+      expect(event.findFirst).not.toHaveBeenCalled();
+      expect(notify).not.toHaveBeenCalled();
+      finish();
+      if (failed) {
+        await expect(saving).rejects.toMatchObject({ code: "NOT_FOUND" });
+        expect(event.findFirst).not.toHaveBeenCalled();
+        expect(notify).not.toHaveBeenCalled();
+      } else {
+        expect(await saving).toEqual(saved);
+        expect(event.findFirst).toHaveBeenCalledExactlyOnceWith({
+          where: {
+            spaceId: actor.spaceId,
+            threadId: "thread",
+            type: "recruiting.changed",
+            thread: { userId: actor.userId, spaceId: actor.spaceId },
+          },
+          select: { seq: true },
+          orderBy: { seq: "desc" },
+        });
+        expect(notify).toHaveBeenCalledExactlyOnceWith("thread", 17);
+      }
+    },
+  );
   it("runs the existing router through shared storage with its authenticated actor", async () => {
     const client = createRouterClient(createRouter({ prisma } as RouterDeps), {
       context: { actor },

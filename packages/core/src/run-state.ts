@@ -10,10 +10,17 @@ export const ACTIVE_RUN_STATUSES = [
 const TERMINAL: RunStatus[] = ["completed", "failed", "cancelled"];
 /**
  * These turns carry their own prompt and must not take a user message as steering.
- * Routine and webhook runs are not the conversation. The creation intro has no tools;
- * a message that lands during it waits, and the continuation after the intro finishes answers it.
+ * Routine, webhook, and peer-message turns have their own recipient. User messages
+ * wait for their own continuation instead of being answered back to another bot.
+ * The creation intro has no tools and likewise cannot take user steering.
  */
-const NON_CONVERSATIONAL_RUN_TRIGGERS = new Set(["routine", "webhook", "created", "tickets"]);
+const NON_CONVERSATIONAL_RUN_TRIGGERS = new Set([
+  "routine",
+  "webhook",
+  "created",
+  "tickets",
+  "bot_message",
+]);
 
 /**
  * Background triggers do internal work that must not leak into the chat: the

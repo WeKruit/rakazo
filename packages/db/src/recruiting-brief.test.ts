@@ -34,7 +34,8 @@ function fixture(crmBindingEffectId: string | null = null) {
     id: "thread",
     spaceId: "space",
     userId: "human",
-    botId: "bot",
+    botId: "bot" as string | null,
+    groupId: null as string | null,
     activeRecruitingRoleId: "role",
   };
   let role = {
@@ -105,9 +106,13 @@ function fixture(crmBindingEffectId: string | null = null) {
     $queryRaw: vi.fn(async () => []),
     thread: {
       findFirst: vi.fn(async (_args: { where: { id: string } }) => thread),
-      update: vi.fn(async () => ({ nextMessageSeq: 2 })),
+      update: vi.fn(async () => ({ nextMessageSeq: 2, nextEventSeq: 1 })),
     },
     bot: { findFirst: vi.fn(async () => actor) },
+    chatGroup: { findFirst: vi.fn(async () => actor) },
+    event: {
+      create: vi.fn(async ({ data }) => ({ id: "changed-event", createdAt: new Date(), ...data })),
+    },
     message: {
       findUnique: vi.fn(async ({ where }) => sourceMessage(where.id)),
       findMany: vi.fn(async ({ where }: { where: { id: { in: string[] } } }) =>
@@ -217,6 +222,30 @@ function criteriaFixture(crmBindingEffectId: string | null = null) {
 }
 
 describe("native human criterion editing", () => {
+  it.each([false, true])(
+    "records a durable saved change in the authorized thread, group=%s",
+    async (group) => {
+      const f = criteriaFixture();
+      if (group) {
+        f.thread.botId = null;
+        f.thread.groupId = "group";
+      }
+      const saved = await recruiting.editRecruitingCriteria(f.prisma, actor, f.input);
+      expect(saved.role.revision).toBe(2);
+      expect(f.tx.event.create).toHaveBeenCalledExactlyOnceWith({
+        data: expect.objectContaining({
+          spaceId: actor.spaceId,
+          threadId: f.thread.id,
+          botId: f.thread.botId ?? f.thread.id,
+          type: "recruiting.changed",
+          payload: { roleId: saved.role.id },
+        }),
+      });
+      expect(f.tx.event.create.mock.invocationCallOrder[0]).toBeGreaterThan(
+        f.tx.recruitingRole.updateMany.mock.invocationCallOrder[0]!,
+      );
+    },
+  );
   it("allows a filter-only human revision when qualification has no criteria", async () => {
     const f = fixture();
     const saved = await recruiting.editRecruitingCriteria(f.prisma, actor, {
@@ -409,6 +438,7 @@ describe("native human criterion editing", () => {
       expect(f.tx.message.create).not.toHaveBeenCalled();
       expect(f.tx.recruitingRoleRevision.create).not.toHaveBeenCalled();
       expect(f.tx.recruitingRole.updateMany).not.toHaveBeenCalled();
+      expect(f.tx.event.create).not.toHaveBeenCalled();
     },
   );
 
@@ -795,6 +825,15 @@ describe("native human brief confirmation", () => {
       expect(f.tx.message.create).toHaveBeenCalledOnce();
       expect(f.tx.recruitingRoleRevision.create).toHaveBeenCalledOnce();
       expect(f.tx.recruitingRole.updateMany).toHaveBeenCalledOnce();
+      expect(f.tx.event.create).toHaveBeenCalledExactlyOnceWith({
+        data: expect.objectContaining({
+          spaceId: actor.spaceId,
+          threadId: "thread",
+          botId: "bot",
+          type: "recruiting.changed",
+          payload: { roleId: saved.role.id },
+        }),
+      });
       expect(f.prisma.$transaction).toHaveBeenCalledTimes(4);
     },
   );
@@ -1487,7 +1526,10 @@ describe("native brief approval bridge", () => {
     expect(f.tx.message.create).toHaveBeenCalledOnce();
     expect(f.tx.recruitingRoleRevision.create).toHaveBeenCalledOnce();
     expect(f.effects.get("brief-effect")!.status).toBe("completed");
-    expect(f.tx.event.create).toHaveBeenCalledOnce();
+    expect(f.tx.event.create.mock.calls.map(([{ data }]) => data.type)).toEqual([
+      "recruiting.changed",
+      "effect.recorded",
+    ]);
     f.run.status = "completed";
     f.thread.activeRecruitingRoleId = "another-role";
     expect(
@@ -1495,7 +1537,7 @@ describe("native brief approval bridge", () => {
     ).toEqual(receipt);
     expect(f.tx.message.create).toHaveBeenCalledOnce();
     expect(f.tx.recruitingRoleRevision.create).toHaveBeenCalledOnce();
-    expect(f.tx.event.create).toHaveBeenCalledOnce();
+    expect(f.tx.event.create).toHaveBeenCalledTimes(2);
     f.revisions[1]!.brief.fields[0]!.value = "Changed after confirmation";
     await expect(
       recruiting.executeRecruitingApproval(f.prisma, actor, trusted, f.input, f.material),
