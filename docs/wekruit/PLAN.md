@@ -32,6 +32,10 @@
 
 **Goal:** 在现有 Rakazo 网页交付 Main/Sourcer 原生协作、可恢复交互与记忆，迁入现有招聘工作，完成 [GOAL.md](GOAL.md) 的 P0–P6 基础闭环与 [PRODUCT-SCOPE.md](PRODUCT-SCOPE.md) 的 Juicebox / Metix / Grok Bot 完整产品范围。
 
+### 2026-10-22：核心 Agent 优化与产品交付分线
+
+用户已明确：独立 session 完整负责核心 Agent 的 memory、成本追踪、任务最短有效路径、工具/MCP/CLI 效率、招聘 skills、主动澄清与真实 Autumn/PeopleSearchBench；当前 session 持续做产品注册/登录、新人自动安装、业务集成、前端 Dashboard/聊天与发布。沿现有接口交接，不另建抽象或将 Agent 策略耦合进页面。当前产品先完成平台模型实际执行、准入账号的新手链路及 CRM 身份接线；两位真人与网页验收仍需实证。职责与验收边界统一见 [PRODUCT-SCOPE.md](PRODUCT-SCOPE.md#核心-agent-与产品的并行职责)。私有交接含真实版本、工作区和证据位置，不将客户资料或密钥写入公开仓库。
+
 ### 2026-10-22：产品 SSO 与平台 API 配置已上线，上手读取失败已修复
 
 已发布所选 `5f747ebb`（公开镜像 `d25c7d3c`），135份运行源码 hash 与固定归档一致，内部 health/ready 为200 JSON且非 degraded；前后20组保护记录精确保持，109份迁移、原 executing prepare、记忆、Routine 与业务配置保留。十份原 home/restore 未提交改动继续排除。首次公开503和过早的未就绪观察保留，不能称零停机或多副本高可用。
