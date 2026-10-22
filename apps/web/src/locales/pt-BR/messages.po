@@ -1458,6 +1458,10 @@ msgstr "O teste de conexão falhou."
 msgid "Connection to {0} is still pending. You can close this and check again."
 msgstr "A conexão com o {0} ainda está pendente. Você pode fechar isso e verificar novamente."
 
+#: src/pages/RecruitingPanel.tsx
+msgid "Consideration resumed"
+msgstr ""
+
 #: src/pages/shell/RecruitingNavigation.tsx
 msgid "Contacts"
 msgstr ""
@@ -3904,6 +3908,10 @@ msgid "Not now"
 msgstr "Agora não"
 
 #: src/pages/RecruitingPanel.tsx
+msgid "Not pursuing"
+msgstr ""
+
+#: src/pages/RecruitingPanel.tsx
 msgid "Not reviewed"
 msgstr ""
 
@@ -3951,6 +3959,10 @@ msgstr "Em chamada com {0}"
 
 #: src/pages/RoutineEditor.tsx
 msgid "On a schedule"
+msgstr ""
+
+#: src/pages/RecruitingPanel.tsx
+msgid "On hold"
 msgstr ""
 
 #. placeholder {0}: preset.time
@@ -4162,6 +4174,11 @@ msgstr "Cole sua chave API"
 #: src/lib/model-connection-preflight.ts
 msgid "Paste your API key, then test again."
 msgstr "Cole sua chave de API e teste novamente."
+
+#: src/pages/RecruitingPanel.tsx
+#: src/pages/Shell.tsx
+msgid "Pause consideration"
+msgstr ""
 
 #: src/pages/RoutineEditor.tsx
 msgid "Paused"
@@ -4697,6 +4714,11 @@ msgstr ""
 
 #: src/pages/RecruitingPanel.tsx
 msgid "Resume"
+msgstr ""
+
+#: src/pages/RecruitingPanel.tsx
+#: src/pages/Shell.tsx
+msgid "Resume consideration"
 msgstr ""
 
 #: src/pages/RecruitingPanel.tsx
@@ -5515,6 +5537,11 @@ msgstr "Parar"
 
 #: src/pages/Shell.tsx
 msgid "Stop {name}"
+msgstr ""
+
+#: src/pages/RecruitingPanel.tsx
+#: src/pages/Shell.tsx
+msgid "Stop considering"
 msgstr ""
 
 #: src/pages/Shell.tsx

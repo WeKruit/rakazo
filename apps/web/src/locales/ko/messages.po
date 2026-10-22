@@ -1458,6 +1458,10 @@ msgstr "연결 테스트에 실패했습니다."
 msgid "Connection to {0} is still pending. You can close this and check again."
 msgstr "{0} 연결이 아직 진행 중입니다. 이 창을 닫고 나중에 다시 확인할 수 있습니다."
 
+#: src/pages/RecruitingPanel.tsx
+msgid "Consideration resumed"
+msgstr ""
+
 #: src/pages/shell/RecruitingNavigation.tsx
 msgid "Contacts"
 msgstr ""
@@ -3904,6 +3908,10 @@ msgid "Not now"
 msgstr "나중에"
 
 #: src/pages/RecruitingPanel.tsx
+msgid "Not pursuing"
+msgstr ""
+
+#: src/pages/RecruitingPanel.tsx
 msgid "Not reviewed"
 msgstr ""
 
@@ -3952,6 +3960,10 @@ msgstr "{0}님과 통화 중"
 #: src/pages/RoutineEditor.tsx
 msgid "On a schedule"
 msgstr "일정에 따라"
+
+#: src/pages/RecruitingPanel.tsx
+msgid "On hold"
+msgstr ""
 
 #. placeholder {0}: preset.time
 #: src/pages/RoutineSchedule.tsx
@@ -4162,6 +4174,11 @@ msgstr "API 키를 붙여넣으세요"
 #: src/lib/model-connection-preflight.ts
 msgid "Paste your API key, then test again."
 msgstr "API 키를 붙여넣은 뒤 다시 테스트하세요."
+
+#: src/pages/RecruitingPanel.tsx
+#: src/pages/Shell.tsx
+msgid "Pause consideration"
+msgstr ""
 
 #: src/pages/RoutineEditor.tsx
 msgid "Paused"
@@ -4697,6 +4714,11 @@ msgstr ""
 
 #: src/pages/RecruitingPanel.tsx
 msgid "Resume"
+msgstr ""
+
+#: src/pages/RecruitingPanel.tsx
+#: src/pages/Shell.tsx
+msgid "Resume consideration"
 msgstr ""
 
 #: src/pages/RecruitingPanel.tsx
@@ -5515,6 +5537,11 @@ msgstr "중지"
 
 #: src/pages/Shell.tsx
 msgid "Stop {name}"
+msgstr ""
+
+#: src/pages/RecruitingPanel.tsx
+#: src/pages/Shell.tsx
+msgid "Stop considering"
 msgstr ""
 
 #: src/pages/Shell.tsx

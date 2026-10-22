@@ -1458,6 +1458,10 @@ msgstr "连接测试失败。"
 msgid "Connection to {0} is still pending. You can close this and check again."
 msgstr "与 {0} 的连接仍在等待。可以关闭此窗口稍后再看。"
 
+#: src/pages/RecruitingPanel.tsx
+msgid "Consideration resumed"
+msgstr ""
+
 #: src/pages/shell/RecruitingNavigation.tsx
 msgid "Contacts"
 msgstr ""
@@ -3904,6 +3908,10 @@ msgid "Not now"
 msgstr "暂不"
 
 #: src/pages/RecruitingPanel.tsx
+msgid "Not pursuing"
+msgstr ""
+
+#: src/pages/RecruitingPanel.tsx
 msgid "Not reviewed"
 msgstr ""
 
@@ -3952,6 +3960,10 @@ msgstr "正在与 {0} 通话"
 #: src/pages/RoutineEditor.tsx
 msgid "On a schedule"
 msgstr "按计划"
+
+#: src/pages/RecruitingPanel.tsx
+msgid "On hold"
+msgstr ""
 
 #. placeholder {0}: preset.time
 #: src/pages/RoutineSchedule.tsx
@@ -4162,6 +4174,11 @@ msgstr "粘贴你的 API 密钥"
 #: src/lib/model-connection-preflight.ts
 msgid "Paste your API key, then test again."
 msgstr "请粘贴你的 API 密钥，然后重新测试。"
+
+#: src/pages/RecruitingPanel.tsx
+#: src/pages/Shell.tsx
+msgid "Pause consideration"
+msgstr ""
 
 #: src/pages/RoutineEditor.tsx
 msgid "Paused"
@@ -4697,6 +4714,11 @@ msgstr ""
 
 #: src/pages/RecruitingPanel.tsx
 msgid "Resume"
+msgstr ""
+
+#: src/pages/RecruitingPanel.tsx
+#: src/pages/Shell.tsx
+msgid "Resume consideration"
 msgstr ""
 
 #: src/pages/RecruitingPanel.tsx
@@ -5515,6 +5537,11 @@ msgstr "停止"
 
 #: src/pages/Shell.tsx
 msgid "Stop {name}"
+msgstr ""
+
+#: src/pages/RecruitingPanel.tsx
+#: src/pages/Shell.tsx
+msgid "Stop considering"
 msgstr ""
 
 #: src/pages/Shell.tsx

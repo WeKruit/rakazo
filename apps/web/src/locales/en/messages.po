@@ -1458,13 +1458,13 @@ msgstr "Connection test failed."
 msgid "Connection to {0} is still pending. You can close this and check again."
 msgstr "Connection to {0} is still pending. You can close this and check again."
 
-#: src/pages/shell/RecruitingNavigation.tsx
-msgid "Contacts"
-msgstr "Contacts"
-
 #: src/pages/RecruitingPanel.tsx
 msgid "Consideration resumed"
 msgstr "Consideration resumed"
+
+#: src/pages/shell/RecruitingNavigation.tsx
+msgid "Contacts"
+msgstr "Contacts"
 
 #: src/pages/RecruitingPanel.tsx
 msgid "Context"
