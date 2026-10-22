@@ -4,6 +4,32 @@
 
 **Goal:** 在现有 Rakazo 网页交付 Main/Sourcer 原生协作、可恢复交互与记忆，迁入现有招聘工作，完成 [GOAL.md](GOAL.md) 的 P0–P6 基础闭环与 [PRODUCT-SCOPE.md](PRODUCT-SCOPE.md) 的 Juicebox / Metix / Grok Bot 完整产品范围。
 
+### 2026-10-22：新用户产品登录、平台供给与记忆隔离
+
+**产品目标：** 产品账号登录一次即可进入招聘体验；模型和平台招聘服务由部署方供给。共享的是服务能力与费用，用户身份、私人上下文和业务授权不合并。此项与高可用/工作区快照优化并行，不代替原功能或可靠性验收。
+
+直接 OpenAI 支持所选提交 `6252a1a3`、公开镜像 `3f9923dd`；仅新增原生 provider 注册与回归，没有启用或部署。线上只读核对确认部署级模型尚未配置，注册仍受原名单策略限制，原账号使用其个人 Codex 连接。新人免服务授权流程当前仍未完成，不能提前宣布可邀请用户直接找人。
+
+[OpenAI 认证文档](https://learn.chatgpt.com/docs/auth) 区分订阅登录与按量 API；[App Server 文档](https://learn.chatgpt.com/docs/app-server#authentication) 明确其旧订阅认证不用于商业/托管服务。本产品的平台供给沿现有 API 配置实现，不将个人订阅凭据视为所有客户的公共授权；API 调用继续计入原预算。
+
+已核对的原生能力和边界：
+
+- 首次获准登录会创建该用户的 Personal 组织、Space、成员关系及初始记忆，不复用管理员。当前普通多 Agent Crew 仍属于一个人；完整多人邀请/团队共享流程尚未开放。
+- Markdown memory 读写同时限定 Space 与 human；`save_shared_memory` 表示同一人的多个 Agent 共享。外部语义记忆的 shared namespace 及默认 team computer/home 则按整个 Space 共享；独立客户不能放入同一个管理员 Space。
+- 对话、Bot、Group 和附件保留原 user/Space 授权。账号/Space 变化会重挂载网页状态并失效旧 bootstrap；当前源码复核和聚焦检查未发现正常换账号路径重显旧人的招聘/历史缓存，不扩大为两个真人的线上验收。
+- 已配置 deployment model 时，原生 `needsModel=false`，onboarding 和普通聊天无需个人模型授权。本轮仅沿现有 provider/key/model registry 补直接 OpenAI API 支持；复用既有服务器配置项和 Pi provider，不复制个人 Codex OAuth。源代码/类型/聚焦回归通过，尚未启用或产生模型调用。
+- 当前 Autumn MCP 仍按用户、Space、Bot assignment 和 secret owner 认证；管理员现有连接不会自动供新 Personal Space 使用。复用同一平台 key 还须约束 provider task 的归属：不能只复制 key 或信任模型传入的任务引用。个人 Gmail/Calendar 与平台 broker 配置也不是同一种授权。
+
+明确实施顺序：
+
+1. **平台模型供给。** 复用 deployment API 配置，让新建招聘 Agent 跟随已配置的产品默认模型；不复制管理员个人模型 pin。现有个人连接和已运行会话不因新增 provider 支持而自动切换。API 用量独立计费，仍受原总预算约束。
+2. **原生招聘 bootstrap。** 复用现有 Bot/Group/skill 创建与唯一键，幂等配置新用户自己的 Main/Sourcer 和通用 playbook。只迁稳定产品职责，保留未知；不复制别人的消息、记忆、岗位要求、候选、任务或授权。新账号现在只创建通用 Chief，这个缺口仍在。
+3. **Autumn 平台供给与任务隔离。** 在原 ConnectorTool/ToolHost/MCP 边界使用服务器管理的服务授权，复用已有任务/执行回执确定调用归属；未取得本租户所有权的读取、反馈、文件续接和任务枚举均不能透传。先确认供应商可用的账号/项目级隔离，不凭空假设它支持。
+4. **真实新人验收。** 两个真实账号分别登录，无个人模型连接也能聊天、创建岗位和使用已配置招聘服务；A 的两个 Agent 可召回 A 的用户记忆，B 不能通过对话、工具、源文件、下载、缓存或 Routine 取得 A 的私有内容。不同 Space 同样隔离，明确组织共享另验。先保留当前访问策略，不把注册直接改为全网开放。
+
+本轮已有检查：新用户原生创建8项、附件在存储访问前同时校验 actor/Space 1项通过；14项其他附件检查仅因名称过滤跳过。部署模型、网页身份生命周期、草稿和招聘缓存的另一批14项聚焦检查通过，其中包含7项模型 resolver 检查，不能累加计数。真实 Postgres memory 隔离检查因无指定隔离非生产数据库未运行；没有启动本地 Postgres，也没有把它们称作通过。当前线上配置与第二真实账号仍须分别验收，不将源码支持、mock 检查或一次原账号登录当作新人验收完成。
+
+
 ### 2026-10-22：Agent 存储、命令工具与高可用实施边界
 
 **目标：** 一个应用实例退出或替换时，已保存的候选、原对话、记忆、文件和待答卡不丢失；其他就绪实例继续接收请求；原任务恢复时不重复执行业务操作。当前核心持久化已有真实证明，**应用多副本高可用尚未完成**。不可抢占配置减少一种中断原因，不代替此验收。
