@@ -2192,7 +2192,7 @@ export function ShellPage() {
   discussionScope.current.panel = panel;
   discussionScope.current.workspaceCandidates = workspaceCandidates;
   discussionScope.current.candidateFeedbackRecipients = candidateFeedbackRecipients;
-  useEffect(() => {
+  useLayoutEffect(() => {
     discussionScope.current.active = true;
     return () => {
       discussionScope.current.active = false;
@@ -4458,6 +4458,14 @@ export function ShellPage() {
                     const { downloadConversation } = await import("../lib/conversation-export");
                     await downloadConversation({
                       target,
+                      isCurrent: () =>
+                        Boolean(
+                          userId &&
+                            bootstrapMe?.spaceId &&
+                            discussionScope.current.active &&
+                            userId === botsRefreshUser.current.id &&
+                            (selectedSpaceId() ?? bootstrapMe.spaceId) === bootstrapMe.spaceId,
+                        ),
                       title,
                       userName,
                       locale: i18n.locale,
