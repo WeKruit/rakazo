@@ -829,6 +829,81 @@ it("uses the authorized group bootstrap without fetching the same thread again",
   );
 });
 
+it.each(["bot", "group"] as const)(
+  "recovers a failed recruiting workspace after its native %s subscription refresh succeeds",
+  async (kind) => {
+    let stream!: Parameters<typeof CoreModule.runThreadSubscription>[0];
+    vi.spyOn(CoreModule, "runThreadSubscription").mockImplementation(async (options) => {
+      await options.loadInitial();
+      stream = options;
+    });
+    vi.spyOn(console, "error").mockImplementation(() => {});
+    shellApi.recruiting.getWorkspace.mockRejectedValueOnce(new Error("Service unavailable"));
+    const view = await renderFeedbackShell(kind, undefined, {
+      openFeedback: false,
+      isDeploymentOwner: false,
+      initialPath: kind === "group" ? "/app/g/group-1?view=results" : "/app/bot-1?view=results",
+    });
+    expect(container?.textContent).toContain("Could not load recruiting");
+    expect(container?.textContent).not.toContain(view.candidate.name);
+    shellApi.recruiting.getWorkspace.mockClear();
+    shellApi.get.mockRejectedValueOnce(new Error("Still reconnecting"));
+    await act(async () => {
+      await expect(stream.refresh()).rejects.toThrow("Still reconnecting");
+    });
+    expect(shellApi.recruiting.getWorkspace).not.toHaveBeenCalled();
+    await act(async () => {
+      await stream.refresh();
+    });
+    expect(shellApi.recruiting.getWorkspace).toHaveBeenCalledWith({
+      threadId: view.thread.threadId,
+    });
+    expect(container?.textContent).toContain(view.candidate.name);
+    expect(container?.textContent).not.toContain("Could not load recruiting");
+  },
+);
+
+it.each(["user", "space", "thread", "unmount"] as const)(
+  "does not invalidate recruiting reads when a recovered subscription outlives its %s",
+  async (change) => {
+    const streams: Parameters<typeof CoreModule.runThreadSubscription>[0][] = [];
+    vi.spyOn(CoreModule, "runThreadSubscription").mockImplementation(async (options) => {
+      await options.loadInitial();
+      streams.push(options);
+    });
+    const view = await renderFeedbackShell("bot", undefined, {
+      openFeedback: false,
+      isDeploymentOwner: false,
+      initialPath: "/app/bot-1?view=results",
+    });
+    let finish!: (value: typeof view.thread) => void;
+    shellApi.get.mockReturnValueOnce(
+      new Promise((resolve) => {
+        finish = resolve;
+      }),
+    );
+    const recovering = streams.at(-1)!.refresh();
+    if (change === "user") {
+      shellApi.session = {
+        data: { user: { id: "other-user", name: "Other", email: "other@example.test" } },
+      };
+      await view.render();
+    } else if (change === "space") localStorage.setItem("rakazo:space-id", "other-space");
+    else if (change === "thread") await view.navigate("/app/bot-2?view=results");
+    else {
+      await act(async () => root!.unmount());
+      root = null;
+    }
+    shellApi.recruiting.getWorkspace.mockClear();
+    await act(async () => {
+      finish(view.thread);
+      await recovering;
+    });
+    expect(shellApi.recruiting.getWorkspace).not.toHaveBeenCalled();
+    if (change === "thread") expect(container?.textContent).toContain(view.candidate.name);
+  },
+);
+
 it("does not apply a delayed group bootstrap to another selected conversation", async () => {
   let finish!: () => void;
   const view = await renderFeedbackShell("group", undefined, {

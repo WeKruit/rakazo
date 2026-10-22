@@ -989,26 +989,34 @@ export function ShellPage() {
   activeBotId.current = inGroup ? undefined : active?.id;
   const activeGroupId = useRef<string | undefined>(groupId);
   activeGroupId.current = groupId;
-  const invalidateRecruiting = useCallback(
-    (event: ProductEvent) => {
+  const refreshRecruitingReads = useCallback(
+    (threadId: string, spaceId: string | undefined) => {
       const current = snapshotRef.current;
       if (
-        event.spaceId !== bootstrapMe?.spaceId ||
-        event.threadId !== current?.threadId ||
+        !userId ||
+        !bootstrapMe?.spaceId ||
+        botsRefreshUser.current.id !== userId ||
+        (selectedSpaceId() ?? bootstrapMe.spaceId) !== bootstrapMe.spaceId ||
+        spaceId !== bootstrapMe.spaceId ||
+        threadId !== current?.threadId ||
         (activeGroupId.current
           ? current?.groupId !== activeGroupId.current
           : current?.botId !== activeBotId.current)
       )
         return;
-      if (eventChangesRecruitingPanel(event)) {
-        clearRecruitingReads(
-          recruitingReadCache.current,
-          JSON.stringify([userId, bootstrapMe?.spaceId, current.threadId]),
-        );
-        setRecruitingRefresh((value) => value + 1);
-      }
+      clearRecruitingReads(
+        recruitingReadCache.current,
+        JSON.stringify([userId, spaceId, current.threadId]),
+      );
+      setRecruitingRefresh((value) => value + 1);
     },
     [bootstrapMe?.spaceId, userId],
+  );
+  const invalidateRecruiting = useCallback(
+    (event: ProductEvent) => {
+      if (eventChangesRecruitingPanel(event)) refreshRecruitingReads(event.threadId, event.spaceId);
+    },
+    [refreshRecruitingReads],
   );
   const screenRequest = useRef(0);
   const contextBot =
@@ -1691,7 +1699,16 @@ export function ShellPage() {
       },
       loadHead: () =>
         rpc.threads.head({ botId: active.id }, { signal: threadSnapshotSignal(abort.signal) }),
-      refresh: () => refreshThread(active.id, threadSnapshotSignal(abort.signal)),
+      refresh: async () => {
+        const fresh = await refreshThread(active.id, threadSnapshotSignal(abort.signal));
+        if (
+          !abort.signal.aborted &&
+          epoch === historyEpoch.current &&
+          activeBotId.current === active.id
+        )
+          refreshRecruitingReads(fresh.threadId, bootstrapMe?.spaceId);
+        return fresh;
+      },
       currentSnapshot: () =>
         validatedThreadEpoch.current === historyEpoch.current ? snapshotRef.current : null,
       subscribe: (cursor) =>
@@ -1758,7 +1775,13 @@ export function ShellPage() {
     return () => {
       abort.abort();
     };
-  }, [active?.id, markBotReadIfVisible, notifyBrowserForEvent, invalidateRecruiting]);
+  }, [
+    active?.id,
+    markBotReadIfVisible,
+    notifyBrowserForEvent,
+    invalidateRecruiting,
+    refreshRecruitingReads,
+  ]);
 
   useEffect(() => {
     if (!groupId || !activeGroup) return;
@@ -1816,7 +1839,16 @@ export function ShellPage() {
           : refreshGroupThread(groupId, threadSnapshotSignal(abort.signal));
       },
       loadHead: () => rpc.threads.head({ groupId }, { signal: threadSnapshotSignal(abort.signal) }),
-      refresh: () => refreshGroupThread(groupId, threadSnapshotSignal(abort.signal)),
+      refresh: async () => {
+        const fresh = await refreshGroupThread(groupId, threadSnapshotSignal(abort.signal));
+        if (
+          !abort.signal.aborted &&
+          epoch === historyEpoch.current &&
+          activeGroupId.current === groupId
+        )
+          refreshRecruitingReads(fresh.threadId, bootstrapMe?.spaceId);
+        return fresh;
+      },
       currentSnapshot: () =>
         validatedThreadEpoch.current === historyEpoch.current ? snapshotRef.current : null,
       subscribe: (cursor) => rpc.threads.subscribe({ groupId, cursor }, { signal: abort.signal }),
@@ -1865,7 +1897,13 @@ export function ShellPage() {
       document.removeEventListener("visibilitychange", markVisibleGroupRead);
       abort.abort();
     };
-  }, [activeGroup?.id, groupId, notifyBrowserForEvent, invalidateRecruiting]);
+  }, [
+    activeGroup?.id,
+    groupId,
+    notifyBrowserForEvent,
+    invalidateRecruiting,
+    refreshRecruitingReads,
+  ]);
 
   const sidebarGroups = useMemo(() => {
     const sidebarSpaces =
