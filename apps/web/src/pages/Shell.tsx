@@ -686,7 +686,6 @@ export function ShellPage() {
     SpaceMemoryConfig | null | undefined
   >(undefined);
   const memoryProviderConfigRevision = useRef(0);
-  const call = useCallSession();
   const [voiceStatus, setVoiceStatus] = useState<VoiceStatus | null>(null);
   const [speakingMessageId, setSpeakingMessageId] = useState<string | null>(null);
   const [dismissedRunErrorIds, setDismissedRunErrorIds] =
@@ -779,6 +778,7 @@ export function ShellPage() {
   const [loadingOlder, setLoadingOlder] = useState(false);
   const [initialBotsLoaded, setInitialBotsLoaded] = useState(false);
   const [bootstrapMe, setBootstrapMe] = useState<Me | null>();
+  const call = useCallSession(userId, bootstrapMe?.spaceId);
   const showToolActivity = useSyncExternalStore(
     subscribeToolActivity,
     () => getToolActivityEnabled(bootstrapMe?.isDeploymentOwner === true),
@@ -4631,11 +4631,14 @@ export function ShellPage() {
             onVoice={
               !inGroup && active
                 ? () => {
+                    if (!userId || !bootstrapMe?.spaceId) return;
                     if (!voiceStatus?.ready) {
                       openSettings("voice");
                       return;
                     }
                     startCall({
+                      userId,
+                      spaceId: bootstrapMe.spaceId,
                       botId: active.id,
                       botName: active.name,
                       botColor: active.color,
@@ -4693,7 +4696,11 @@ export function ShellPage() {
         </div>
       </main>
 
-      <CallCard onSettings={() => openSettings("voice")} />
+      <CallCard
+        userId={userId}
+        spaceId={bootstrapMe?.spaceId}
+        onSettings={() => openSettings("voice")}
+      />
 
       <ResizableSidePanel
         botsSidebarCollapsed={botsSidebarCollapsed}

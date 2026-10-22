@@ -23,6 +23,8 @@ export type CallPhase = "listening" | "thinking" | "speaking";
 export type CallExchange = { role: "user" | "bot"; text: string };
 
 export interface CallState {
+  userId: string;
+  spaceId: string;
   botId: string;
   botName: string;
   botColor: string;
@@ -47,6 +49,8 @@ export const ECHO_GUARD_MS = 600;
 let state: CallState | null = null;
 /** Shared by every message this call sends, so the thread can group one call's exchange. */
 let callId = "";
+/** Invalidates delayed server closes when the authenticated owner leaves. */
+let ownerEpoch = 0;
 /** Requests for this call that must persist before its server-side hang-up. */
 const pendingCallSends = new Map<string, Set<Promise<unknown>>>();
 let transcribe: boolean | undefined;
@@ -79,12 +83,19 @@ export function subscribe(watcher: () => void): () => void {
   };
 }
 
-export function getSnapshot(): CallState | null {
-  return state;
+export function getSnapshot(
+  userId: string | undefined,
+  spaceId: string | undefined,
+): CallState | null {
+  return state?.userId === userId && state?.spaceId === spaceId ? state : null;
 }
 
-export function useCallSession(): CallState | null {
-  return useSyncExternalStore(subscribe, getSnapshot, getSnapshot);
+export function useCallSession(
+  userId: string | undefined,
+  spaceId: string | undefined,
+): CallState | null {
+  const read = () => getSnapshot(userId, spaceId);
+  return useSyncExternalStore(subscribe, read, read);
 }
 
 function emit() {
@@ -98,12 +109,15 @@ function set(patch: Partial<CallState>) {
 }
 
 export function startCall(call: {
+  userId: string;
+  spaceId: string;
   botId: string;
   botName: string;
   botColor?: string;
   transcribe?: boolean;
 }): void {
-  endCall();
+  if (state && (state.userId !== call.userId || state.spaceId !== call.spaceId)) discardCall();
+  else endCall();
   callId = randomId();
   transcribe = call.transcribe;
   spokenMemory.clear();
@@ -112,6 +126,8 @@ export function startCall(call: {
   bargedIn = false;
   awaitingReply = false;
   state = {
+    userId: call.userId,
+    spaceId: call.spaceId,
     botId: call.botId,
     botName: call.botName,
     botColor: call.botColor ?? "",
@@ -158,7 +174,11 @@ export function endCall(): void {
   if (state && !botEndedCall) {
     const { botId } = state;
     const closingCallId = callId;
-    const closeServerCall = () => rpc.threads.endCall({ botId, callId: closingCallId });
+    const closingOwnerEpoch = ownerEpoch;
+    const closeServerCall = async () =>
+      closingOwnerEpoch === ownerEpoch
+        ? rpc.threads.endCall({ botId, callId: closingCallId })
+        : undefined;
     const pendingSends = [...(pendingCallSends.get(closingCallId) ?? [])];
     // The server checks durable user messages, so its close must follow an in-flight write.
     if (pendingSends.length === 0) void closeServerCall().catch(() => undefined);
@@ -167,6 +187,16 @@ export function endCall(): void {
         .then(closeServerCall)
         .catch(() => undefined);
   }
+  clearCall();
+}
+
+/** An auth boundary releases local state without submitting the prior owner's call. */
+export function discardCall(): void {
+  ownerEpoch++;
+  clearCall();
+}
+
+function clearCall(): void {
   feed?.abort();
   feed = null;
   hangUpAfterReply = false;
@@ -216,18 +246,20 @@ export function toggleTranscript(): void {
 function watchThread(botId: string) {
   const controller = new AbortController();
   feed = controller;
-  const load = async () => commit(await rpc.threads.get({ botId }, { signal: controller.signal }));
+  const load = async () =>
+    commit(await rpc.threads.get({ botId }, { signal: controller.signal }), controller);
   void runThreadSubscription({
     signal: controller.signal,
     loadInitial: load,
     loadHead: () => rpc.threads.head({ botId }, { signal: controller.signal }),
     refresh: load,
-    currentSnapshot: () => thread,
+    currentSnapshot: () => (feed === controller && !controller.signal.aborted ? thread : null),
     subscribe: (cursor) => rpc.threads.subscribe({ botId, cursor }, { signal: controller.signal }),
     applyEvent: (event) => {
-      if (isThreadSnapshotEvent(event)) commit(reduceThreadSnapshot(thread, event));
+      if (isThreadSnapshotEvent(event)) commit(reduceThreadSnapshot(thread, event), controller);
     },
     onEvent: (event) => {
+      if (feed !== controller || controller.signal.aborted) return;
       // The bot hung up: speak the farewell it wrote and stop there — the rest of its
       // work lands in the thread as chat, which the caller is no longer listening to.
       if (event.type !== "thread.call.ended" || event.payload.callId !== callId) return;
@@ -258,8 +290,8 @@ function speakFarewell(payload: Record<string, unknown>) {
   void speaker.speak(farewell, { botId: state.botId, messageId });
 }
 
-function commit(next: ThreadSnapshot | null) {
-  if (!next) return null;
+function commit(next: ThreadSnapshot | null, source: AbortController | null) {
+  if (!next || !state || !source || source !== feed || source.signal.aborted) return null;
   thread = next;
   reactToThread();
   return next;
@@ -304,13 +336,17 @@ async function listen() {
 async function openMic() {
   if (!state || micOpen || state.muted || pendingScreenAsk(thread)) return;
   micOpen = true;
+  const callFeed = feed;
   try {
     await dictation.listen({
       mode: "endpoint",
       transcribe,
-      onFinal: (text) => void handleTranscript(text),
+      onFinal: (text) => {
+        if (feed === callFeed && !callFeed?.signal.aborted) void handleTranscript(text);
+      },
     });
   } catch (error) {
+    if (feed !== callFeed || callFeed?.signal.aborted) return;
     micOpen = false;
     set({ caption: errorText(error, t`Microphone failed`) });
   }
@@ -390,7 +426,7 @@ async function handleTranscript(text: string) {
   }
   if (!state || state.botId !== botId || callId !== turnCallId) return;
   try {
-    commit(await rpc.threads.get({ botId }, { signal: callFeed?.signal }));
+    commit(await rpc.threads.get({ botId }, { signal: callFeed?.signal }), callFeed);
   } catch (error) {
     if (!state || state.botId !== botId || callId !== turnCallId) return;
     awaitingReply = false;

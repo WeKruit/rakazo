@@ -23,6 +23,7 @@ import {
   retainInitialBootstrapForIdentity,
   subscribeTicketBoardEnabled,
 } from "./lib/bootstrap";
+import { discardCall } from "./lib/call-session";
 import { markAfterPaint, markOnce } from "./lib/performance";
 import { getRemoteImagesEnabled, subscribeRemoteImages } from "./lib/remote-images-preference";
 import { rpc, selectedSpaceId, subscribeSpaceSelection } from "./lib/rpc";
@@ -105,6 +106,7 @@ function SessionApp() {
   const spaceId = useSyncExternalStore(subscribeSpaceSelection, selectedSpaceId, () => null);
   const userId = session.data?.user.id ?? null;
   const identity = JSON.stringify([userId, spaceId]);
+  useLayoutEffect(() => discardCall, [identity]);
   const previousIdentity = useRef({ userId, spaceId });
   const initialSessionResolved = useRef(false);
   if (previousIdentity.current.userId !== userId || previousIdentity.current.spaceId !== spaceId) {
