@@ -29,6 +29,37 @@ const RECRUITING_SERVICES = [
   },
 ];
 
+const CRM_READ_TOOLS = [
+  "whoami",
+  "list_crm_memberships",
+  "list_crm_candidates",
+  "get_crm_role",
+  "get_crm_candidate_source_context",
+  "get_crm_candidate_review",
+  "list_crm_candidate_messages",
+  "list_crm_roles",
+];
+function recruitingServices(
+  firstPartyMcpUrl?: string,
+): Array<(typeof RECRUITING_SERVICES)[number] & { toolsByBot?: Record<string, string[]> }> {
+  return firstPartyMcpUrl
+    ? [
+        ...RECRUITING_SERVICES,
+        {
+          slug: "recruiting-crm",
+          name: "Recruiting CRM",
+          description: "Your recruiting records",
+          endpoint: firstPartyMcpUrl,
+          bots: ["main", "sourcer"],
+          tools: CRM_READ_TOOLS,
+          toolsByBot: {
+            main: [...CRM_READ_TOOLS, "crm_import_candidate", "list_crm_candidate_roles"],
+          },
+        },
+      ]
+    : RECRUITING_SERVICES;
+}
+
 export const RECRUITING_PRESET_SOURCE = "builtin:recruiting";
 const BOT_FIELDS = ["name", "title", "description", "instructions"] as const;
 type ManagedBot = { id: string; fields: Partial<Record<(typeof BOT_FIELDS)[number], string>> };
@@ -45,7 +76,8 @@ type ManagedPreset = {
   services: Record<string, ManagedService>;
 };
 const digest = (value: unknown) => createHash("sha256").update(JSON.stringify(value)).digest("hex");
-const catalogDigest = () => digest([RECRUITING_DEFAULT_BOTS, RECRUITING_SERVICES]);
+const catalogDigest = (firstPartyMcpUrl?: string) =>
+  digest([RECRUITING_DEFAULT_BOTS, recruitingServices(firstPartyMcpUrl)]);
 export function recruitingPresetId(actor: Pick<Actor, "spaceId" | "userId">): string {
   return `recruiting-defaults-${digest([actor.spaceId, actor.userId])}`;
 }
@@ -132,13 +164,14 @@ async function savePreset(
   tx: Prisma.TransactionClient,
   actor: Actor,
   config: ManagedPreset | null,
+  firstPartyMcpUrl?: string,
 ) {
   await tx.capabilityInstall.create({
     data: {
       ...presetWhere(actor),
       name: "Recruiting defaults",
       version: config ? "1" : "unmanaged",
-      digest: config ? catalogDigest() : null,
+      digest: config ? catalogDigest(firstPartyMcpUrl) : null,
       config: config ?? { managed: false },
     },
   });
@@ -161,9 +194,13 @@ async function upgradeInTransaction(
   tx: Prisma.TransactionClient,
   actor: Actor,
   installed: CapabilityInstall,
-  options: { sandboxKind: string },
+  options: { sandboxKind: string; firstPartyMcpUrl?: string },
 ) {
-  if (installed.version === "unmanaged" || installed.digest === catalogDigest()) return;
+  if (
+    installed.version === "unmanaged" ||
+    installed.digest === catalogDigest(options.firstPartyMcpUrl)
+  )
+    return;
   if (installed.version !== "1")
     throw new IsolationError("Unsupported recruiting defaults version");
   const baseline = readPreset(installed.config);
@@ -282,7 +319,7 @@ async function upgradeInTransaction(
     where: { spaceId: actor.spaceId, userId: actor.userId },
     include: { assignments: { where: { spaceId: actor.spaceId, userId: actor.userId } } },
   });
-  for (const service of RECRUITING_SERVICES) {
+  for (const service of recruitingServices(options.firstPartyMcpUrl)) {
     let managed = baseline.services[service.slug];
     let server = servers.find((item) => item.slug === service.slug);
     if (!managed && unchangedMembers) {
@@ -326,7 +363,10 @@ async function upgradeInTransaction(
       if (!managedBot || !Object.keys(managedBot.fields).length || !bot) continue;
       const current = server.assignments.find((item) => item.botId === bot.id);
       const saved = managed.assignments[key];
-      const desired = { allowAllTools: false, allowedTools: service.tools };
+      const desired = {
+        allowAllTools: false,
+        allowedTools: service.toolsByBot?.[key] ?? service.tools,
+      };
       if (saved === undefined) {
         // Only newly introduced service scope is auto-assigned. Missing old grants stay revoked.
         if ((originalServices.has(service.slug) && !newBotIds.has(bot.id)) || current) {
@@ -380,7 +420,7 @@ async function upgradeInTransaction(
   }
   await tx.capabilityInstall.updateMany({
     where: presetWhere(actor),
-    data: { version: "1", digest: catalogDigest(), config: baseline },
+    data: { version: "1", digest: catalogDigest(options.firstPartyMcpUrl), config: baseline },
   });
 }
 
@@ -388,10 +428,14 @@ async function upgradeInTransaction(
 export async function upgradeRecruitingWorkspace(
   prisma: PrismaClient,
   actor: Actor,
-  options: { sandboxKind: string },
+  options: { sandboxKind: string; firstPartyMcpUrl?: string },
 ): Promise<void> {
   const installed = await prisma.capabilityInstall.findFirst({ where: presetWhere(actor) });
-  if (!installed || installed.version === "unmanaged" || installed.digest === catalogDigest())
+  if (
+    !installed ||
+    installed.version === "unmanaged" ||
+    installed.digest === catalogDigest(options.firstPartyMcpUrl)
+  )
     return;
   await prisma.$transaction(
     async (tx) => {
@@ -425,7 +469,7 @@ export async function upgradeRecruitingWorkspace(
 export async function ensureRecruitingWorkspace(
   prisma: PrismaClient,
   actor: Actor,
-  options: { sandboxKind: string },
+  options: { sandboxKind: string; firstPartyMcpUrl?: string },
 ): Promise<{ botId: string; groupId: string }> {
   const groupId = `recruiting-${createHash("sha256")
     .update(JSON.stringify([actor.spaceId, actor.userId]))
@@ -511,11 +555,14 @@ export async function ensureRecruitingWorkspace(
           botIds: ownedBots.map((bot) => bot.id),
         });
       }
+      const createdServiceIds = new Set<string>();
       if (!existing)
-        for (const service of RECRUITING_SERVICES) {
+        for (const service of recruitingServices(options.firstPartyMcpUrl)) {
           const prior = await tx.mcpServer.findFirst({
             where: { spaceId: actor.spaceId, userId: actor.userId, slug: service.slug },
           });
+          // A same-slug personal CRM connection is not a product-owned installation.
+          if (prior && service.slug === "recruiting-crm") continue;
           if (
             prior &&
             (prior.endpoint !== service.endpoint || prior.transport !== "streamable_http")
@@ -536,6 +583,7 @@ export async function ensureRecruitingWorkspace(
                 secretId: undefined,
               },
             }));
+          if (!prior) createdServiceIds.add(server.id);
           await tx.botMcpServer.createMany({
             data: ownedBots
               .filter(
@@ -547,14 +595,17 @@ export async function ensureRecruitingWorkspace(
                 botId: bot.id,
                 serverId: server.id,
                 allowAllTools: false,
-                allowedTools: service.tools,
+                allowedTools:
+                  service.toolsByBot?.[
+                    RECRUITING_DEFAULT_BOTS.find((role) => bot.spawnKey === spawnKey(role.key))!.key
+                  ] ?? service.tools,
               })),
             skipDuplicates: true,
           });
         }
       if (existing) {
         if (installed) await upgradeInTransaction(tx, actor, installed, options);
-        else await savePreset(tx, actor, null);
+        else await savePreset(tx, actor, null, options.firstPartyMcpUrl);
       } else {
         const servers = await tx.mcpServer.findMany({
           where: { spaceId: actor.spaceId, userId: actor.userId },
@@ -571,9 +622,10 @@ export async function ensureRecruitingWorkspace(
           const bot = ownedBots.find((item) => item.spawnKey === spawnKey(role.key));
           if (bot) baseline.bots[role.key] = botBaseline(bot);
         }
-        for (const service of RECRUITING_SERVICES) {
+        for (const service of recruitingServices(options.firstPartyMcpUrl)) {
           const server = servers.find((item) => item.slug === service.slug);
           if (!server) throw new IsolationError();
+          if (service.slug === "recruiting-crm" && !createdServiceIds.has(server.id)) continue;
           const assignments: ManagedService["assignments"] = {};
           for (const key of service.bots) {
             const row = server.assignments.find((item) => item.botId === baseline.bots[key]?.id);
@@ -585,7 +637,7 @@ export async function ensureRecruitingWorkspace(
             assignments,
           };
         }
-        await savePreset(tx, actor, baseline);
+        await savePreset(tx, actor, baseline, options.firstPartyMcpUrl);
       }
       const main = ownedBots.find((bot) => bot.spawnKey === spawnKey("main"));
       if (!main) throw new IsolationError();

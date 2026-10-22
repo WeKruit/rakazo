@@ -29,6 +29,7 @@ import type { OidcConfig } from "./oidc.js";
 import { oidcDiscovery } from "./oidc.js";
 
 export type { OidcConfig } from "./oidc.js";
+export { getOidcAccessToken, oidcConfigFromEnv } from "./oidc.js";
 
 export interface AuthEnv {
   passwordAuth?: boolean;
@@ -681,7 +682,17 @@ export function loopbackTwinOrigins(origin: string): string[] {
  * route under it stays closed, including ones a future plugin version adds.
  */
 export function isBlockedAuthPath(path: string): boolean {
-  return path.startsWith("/organization");
+  let normalized: string;
+  try {
+    normalized = decodeURIComponent(path).replace(/\/+$/, "");
+  } catch {
+    return true;
+  }
+  // Upstream grants are consumed only by the row-locked server-side native helpers.
+  return (
+    normalized.startsWith("/organization") ||
+    ["/get-access-token", "/refresh-token", "/account-info"].includes(normalized)
+  );
 }
 
 function isOidcCallback(

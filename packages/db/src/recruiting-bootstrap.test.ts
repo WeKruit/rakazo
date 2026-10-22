@@ -87,7 +87,7 @@ function fixture() {
     members: { botId: string }[];
   } | null = null;
   const tx = {
-    $queryRaw: vi.fn(async () => [{ complete: true }]),
+    $queryRaw: vi.fn(async (_query: { sql: string }) => [{ complete: true }]),
     spaceMember: {
       findUnique: vi.fn(async () => ({ organizationId: "org-a", space: { deletingAt: null } })),
     },
@@ -425,7 +425,9 @@ describe("ensureRecruitingWorkspace", () => {
     );
     expect(
       f.tx.botMcpServer.createMany.mock.calls.every(([{ data }]) =>
-        data.every((row) => row.serverId !== "private-contact-service"),
+        data.every(
+          (row: Pick<AssignmentRow, "serverId">) => row.serverId !== "private-contact-service",
+        ),
       ),
     ).toBe(true);
   });
@@ -698,4 +700,92 @@ it("defers before writes when native computer quota maintenance already holds it
   } finally {
     vi.unstubAllEnvs();
   }
+});
+
+describe("managed first-party recruiting CRM installation", () => {
+  const endpoint = "https://crm.example.test/mcp";
+  const options = { sandboxKind: "fake", firstPartyMcpUrl: endpoint };
+  it("installs Main ten tools and Sourcer eight reads without copying credentials or changing the four native agents", async () => {
+    const f = fixture();
+    await recruiting.ensureRecruitingWorkspace(f.prisma, actor, options);
+    const server = f.servers.find((row) => row.slug === "recruiting-crm");
+    expect(server).toMatchObject({ endpoint, transport: "streamable_http" });
+    expect(server?.secretId).toBeUndefined();
+    expect(f.bots).toHaveLength(4);
+    const assignments = f.assignments.filter((row) => row.serverId === server!.id);
+    expect(assignments).toHaveLength(2);
+    const main = assignments.find((row) => row.botId === f.bots[0]!.id)!;
+    const sourcer = assignments.find((row) => row.botId === f.bots[1]!.id)!;
+    expect(main.allowedTools).toEqual([
+      "whoami",
+      "list_crm_memberships",
+      "list_crm_candidates",
+      "get_crm_role",
+      "get_crm_candidate_source_context",
+      "get_crm_candidate_review",
+      "list_crm_candidate_messages",
+      "list_crm_roles",
+      "crm_import_candidate",
+      "list_crm_candidate_roles",
+    ]);
+    expect(sourcer.allowedTools).toEqual(main.allowedTools.slice(0, 8));
+    expect(assignments.every((row) => row.allowAllTools === false)).toBe(true);
+  });
+  it("adds the newly configured native service to an unchanged managed crew, preserving revocations on subsequent upgrades", async () => {
+    const f = fixture();
+    await recruiting.ensureRecruitingWorkspace(f.prisma, actor, { sandboxKind: "fake" });
+    await recruiting.upgradeRecruitingWorkspace(f.prisma, actor, options);
+    const server = f.servers.find((row) => row.slug === "recruiting-crm")!;
+    expect(server).toBeDefined();
+    const main = f.assignments.find(
+      (row) => row.serverId === server.id && row.botId === f.bots[0]!.id,
+    )!;
+    expect(main.allowedTools).toHaveLength(10);
+    main.allowedTools = [];
+    const installed = f.presets[0]!;
+    installed.digest = "changed-catalog";
+    await recruiting.upgradeRecruitingWorkspace(f.prisma, actor, options);
+    expect(main.allowedTools).toEqual([]);
+    f.servers.splice(f.servers.indexOf(server), 1);
+    installed.digest = "changed-again";
+    await recruiting.upgradeRecruitingWorkspace(f.prisma, actor, options);
+    expect(f.servers.some((row) => row.slug === "recruiting-crm")).toBe(false);
+  });
+  it.each(["fresh", "upgrade"])(
+    "preserves a private same-slug connection during %s setup without adopting or assigning it",
+    async (stage) => {
+      const f = fixture();
+      if (stage === "upgrade")
+        await recruiting.ensureRecruitingWorkspace(f.prisma, actor, { sandboxKind: "fake" });
+      const privateServer = {
+        id: "private-crm",
+        slug: "recruiting-crm",
+        endpoint,
+        transport: "streamable_http",
+        secretId: "private-secret",
+        enabled: true,
+        revision: 1,
+        args: [],
+        headers: {},
+        env: {},
+        command: null,
+      };
+      f.servers.push(privateServer);
+      if (stage === "upgrade")
+        await recruiting.upgradeRecruitingWorkspace(f.prisma, actor, options);
+      else await recruiting.ensureRecruitingWorkspace(f.prisma, actor, options);
+      expect(f.servers.find((row) => row.id === privateServer.id)).toEqual(privateServer);
+      expect(f.assignments.some((row) => row.serverId === privateServer.id)).toBe(false);
+      expect((f.presets[0]!.config as ManagedState).services["recruiting-crm"]).toBeUndefined();
+    },
+  );
+  it("defers the new service upgrade while an original crew run is active", async () => {
+    const f = fixture();
+    await recruiting.ensureRecruitingWorkspace(f.prisma, actor, { sandboxKind: "fake" });
+    const before = structuredClone(f.presets[0]);
+    f.busy();
+    await recruiting.upgradeRecruitingWorkspace(f.prisma, actor, options);
+    expect(f.servers).toHaveLength(2);
+    expect(f.presets[0]).toEqual(before);
+  });
 });

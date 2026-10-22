@@ -27,7 +27,7 @@ import {
 } from "./lazy-tool-catalog.js";
 import type { McpOAuthBroker, OAuthMaterial } from "./mcp-oauth.js";
 import { oauthMaterialSecrets } from "./mcp-oauth.js";
-import { McpSession } from "./mcp-transport.js";
+import { type McpRuntimeAuth, McpSession } from "./mcp-transport.js";
 import { actorMayUsePrivateEndpoint } from "./private-endpoint.js";
 import {
   requireAutumnTaskOwnership,
@@ -121,6 +121,26 @@ export async function requireMcpToolAssignment(
   return assignment;
 }
 
+/** Both composition roots and the connector enforce the same exact resource boundary. */
+export function firstPartyMcpUrl(value: string | undefined): string | undefined {
+  const endpoint = value?.trim();
+  if (!endpoint) return undefined;
+  const url = new URL(endpoint);
+  if (
+    url.protocol !== "https:" ||
+    url.username ||
+    url.password ||
+    url.search ||
+    url.hash ||
+    endpoint.includes("?") ||
+    endpoint.includes("#")
+  )
+    throw new Error(
+      "FIRST_PARTY_MCP_URL must be an HTTPS URL without credentials, query or fragment",
+    );
+  return url.href;
+}
+
 function platformMcpCredential(server: Pick<McpServer, "secretId" | "transport" | "endpoint">) {
   if (server.secretId || server.transport !== "streamable_http") return undefined;
   if (server.endpoint === "https://api.autumn.ai/mcp")
@@ -169,6 +189,7 @@ export class McpConnector implements ConnectorProvider {
   // catalog access. Each attempt needs its own executionId.
   private discoverySeq = 0;
   private readonly unsubscribe: () => void;
+  private readonly firstPartyEndpoint?: string;
   constructor(
     private readonly prisma: PrismaClient,
     private readonly secrets: SecretStore,
@@ -179,9 +200,14 @@ export class McpConnector implements ConnectorProvider {
       /** Audit sink for failed discovery. Without it the log line stays the only trace. */
       events?: Pick<ThreadEvents, "append">;
       allowPrivateEndpoint?: boolean;
+      firstParty?: {
+        endpoint: string;
+        accessToken: (context: AdapterContext, rejectedToken?: string) => Promise<string>;
+      };
     } = {},
     private readonly oauth?: McpOAuthBroker,
   ) {
+    this.firstPartyEndpoint = firstPartyMcpUrl(options.firstParty?.endpoint);
     this.unsubscribe =
       this.secrets.onChange?.((ref) => {
         for (const [key, entry] of this.sessions)
@@ -593,8 +619,53 @@ export class McpConnector implements ConnectorProvider {
           context.userId,
           this.options.allowPrivateEndpoint === true,
         );
+        const firstParty =
+          !server.secretId &&
+          server.transport === "streamable_http" &&
+          server.endpoint === this.firstPartyEndpoint
+            ? this.options.firstParty
+            : undefined;
+        let runtimeAuth: McpRuntimeAuth | undefined;
+        if (firstParty) {
+          const rejected = new WeakMap<Response, { token: string; signal?: AbortSignal }>();
+          const read = async (rejectedToken?: string, signal?: AbortSignal) => {
+            // Cached MCP sessions outlive a run; never retain that run's aborted signal.
+            const token = await firstParty.accessToken(
+              { ...context, signal: signal ?? AbortSignal.timeout(15_000) },
+              rejectedToken,
+            );
+            material!.redact ??= [];
+            if (!material!.redact.includes(token)) material!.redact.push(token);
+            return token;
+          };
+          runtimeAuth = {
+            provider: {
+              token: () => read(),
+              onUnauthorized: async ({ response, serverUrl }) => {
+                const request = rejected.get(response);
+                if (!request || serverUrl.href !== this.firstPartyEndpoint)
+                  throw new Error("Your CRM sign-in is unavailable. Sign in again.");
+                request.signal?.throwIfAborted();
+                await read(request.token, request.signal);
+              },
+            },
+            wrapFetch: (fetch) => async (input, init) => {
+              const headers = new Headers(
+                init?.headers ?? (input instanceof Request ? input.headers : undefined),
+              );
+              const authorization = headers.get("authorization");
+              const response = await fetch(input, init);
+              if (response.status === 401 && authorization?.startsWith("Bearer "))
+                rejected.set(response, {
+                  token: authorization.slice(7),
+                  signal: init?.signal ?? (input instanceof Request ? input.signal : undefined),
+                });
+              return response;
+            },
+          };
+        }
         const authProvider =
-          !localHttp && this.oauth
+          !firstParty && !localHttp && this.oauth
             ? await this.oauth.providerFor(server, context, loaded, (record) => {
                 ref = record.ref;
                 recordId = record.id;
@@ -623,6 +694,7 @@ export class McpConnector implements ConnectorProvider {
           headerPolicy: { headers },
           fallbackToSse: false,
           authProvider,
+          runtimeAuth,
           network: this.options.network,
           signal: context.signal,
         });

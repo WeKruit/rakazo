@@ -24,6 +24,7 @@ import {
   createWebProvider,
   databaseCapacityBackoffMs,
   ExpoPushProvider,
+  firstPartyMcpUrl,
   GraphileJobPublisher,
   GraphileJobWorkerHost,
   InMemoryJobQueue,
@@ -50,7 +51,8 @@ import {
   sandboxProviderOptionsFromEnv,
   withSecretPersistence,
 } from "@rakazo/adapters";
-import { resolveEncryptionKey, resolveSupervisorToken } from "@rakazo/core";
+import { createAuth, getOidcAccessToken, oidcConfigFromEnv } from "@rakazo/auth";
+import { resolveAuthSecret, resolveEncryptionKey, resolveSupervisorToken } from "@rakazo/core";
 import {
   createBoardEvents,
   createDb,
@@ -111,6 +113,22 @@ async function main() {
     prisma,
   });
   const allowPrivateEndpoint = process.env.MCP_ALLOW_PRIVATE_ENDPOINT === "true";
+  const trustedMcpEndpoint = firstPartyMcpUrl(process.env.FIRST_PARTY_MCP_URL);
+  const firstPartyOidc = trustedMcpEndpoint ? oidcConfigFromEnv(process.env) : undefined;
+  if (trustedMcpEndpoint && !firstPartyOidc)
+    throw new Error("FIRST_PARTY_MCP_URL requires OIDC configuration");
+  const firstPartyAuth =
+    trustedMcpEndpoint && firstPartyOidc
+      ? createAuth(prisma, {
+          oidc: firstPartyOidc,
+          passwordAuth: process.env.AUTH_PASSWORD_ENABLED !== "false",
+          secret: resolveAuthSecret(process.env),
+          baseURL: process.env.BETTER_AUTH_URL ?? process.env.WEB_ORIGIN ?? "http://127.0.0.1:5173",
+          webOrigin: process.env.WEB_ORIGIN ?? "http://127.0.0.1:5173",
+          signupsEnabled: process.env.SIGNUPS_ENABLED,
+          signupAllowlist: process.env.SIGNUP_ALLOWLIST,
+        })
+      : undefined;
   const mcpOAuth = new McpOAuthBroker(prisma, secrets, {}, allowPrivateEndpoint);
   const mcp = new McpConnector(
     prisma,
@@ -123,6 +141,14 @@ async function main() {
         .filter(Boolean),
       events,
       allowPrivateEndpoint,
+      firstParty:
+        trustedMcpEndpoint && firstPartyOidc && firstPartyAuth
+          ? {
+              endpoint: trustedMcpEndpoint,
+              accessToken: (context, rejectedToken) =>
+                getOidcAccessToken(prisma, firstPartyAuth, firstPartyOidc, context, rejectedToken),
+            }
+          : undefined,
     },
     mcpOAuth,
   );
@@ -295,6 +321,7 @@ async function main() {
       await realtime.close();
       await connector.stop();
       await mcp.close();
+      firstPartyAuth?.disposeOidcDiscovery();
       await prisma.$disconnect().catch(() => undefined);
       await pool.end().catch(() => undefined);
     } finally {

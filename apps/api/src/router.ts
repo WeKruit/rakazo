@@ -646,6 +646,7 @@ export interface RouterDeps {
     imageTag?: string;
     integrationsCatalogUrl?: string;
     mcpAllowPrivateEndpoint?: boolean;
+    firstPartyMcpUrl?: string;
   };
 }
 
@@ -1121,6 +1122,7 @@ export function createRouter(deps: RouterDeps) {
       const actor = context.actor;
       await upgradeRecruitingWorkspace(deps.prisma, actor, {
         sandboxKind: deps.env.sandboxProvider,
+        firstPartyMcpUrl: deps.env.firstPartyMcpUrl,
       });
       const [me, navigation, archivedBots, archivedGroups, groupThread] = await Promise.all([
         meDto(deps, actor),
@@ -4669,6 +4671,7 @@ export function createRouter(deps: RouterDeps) {
       ensureRecruiting: authed.onboarding.ensureRecruiting.handler(({ context }) =>
         ensureRecruitingWorkspace(deps.prisma, context.actor, {
           sandboxKind: deps.env.sandboxProvider,
+          firstPartyMcpUrl: deps.env.firstPartyMcpUrl,
         }),
       ),
       start: authed.onboarding.start.handler(async ({ context, input }) => {

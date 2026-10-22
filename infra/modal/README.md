@@ -78,6 +78,25 @@ and platform service/task authorization must be verified separately before calli
 new-user onboarding complete. Personal email/calendar connections also retain
 their own ownership and authorization.
 
+## Product sign-in and first-party MCP
+
+An explicitly trusted MCP service can consume the signed-in product user's native
+OIDC Account without a second service login. Configure `FIRST_PARTY_MCP_URL` with
+the exact HTTPS endpoint, alongside the existing `OIDC_*` product sign-in fields.
+API and worker use the same configuration and auth secret. The URL cannot include
+credentials, query parameters or a fragment; unrelated endpoints retain their own
+authentication. Existing personal MCP connections take precedence.
+
+The native recruiting defaults install the configured CRM connection and scoped
+tool assignments for new private workspaces. Managed upgrades preserve private
+changes and revoked assignments. Installing a tool is not a CRM membership grant:
+the service still authorizes the actual user's organization and row permissions.
+Tokens remain in the original encrypted OIDC Account; they are read/refreshed under
+its database row lock, never copied into an MCP secret or sent to the browser.
+The upstream token HTTP endpoints are closed; server-side native refresh remains
+available. Verify real OIDC-to-service calls, concurrent refresh and new-user
+isolation separately before calling this integration accepted.
+
 ## Shared artifact storage
 
 The native API and worker can use Supabase private object storage through the same

@@ -802,6 +802,8 @@ export function ShellPage() {
     () => getToolActivityEnabled(bootstrapMe?.isDeploymentOwner === true),
     () => false,
   );
+  const showToolActivityRef = useRef<boolean | null>(null);
+  showToolActivityRef.current = bootstrapMe ? showToolActivity : null;
   useEffect(() => {
     if (!showToolActivity && panel && panel !== "recruiting" && panel !== "create-group") {
       setPanel(null);
@@ -1194,16 +1196,22 @@ export function ShellPage() {
                 navigate("/onboarding", { replace: true });
                 continue;
               }
+              const developerView = showToolActivityRef.current;
+              if (developerView === null) continue;
               const currentGroupId = routeGroupId.current;
               if (currentGroupId) {
                 if (!groupList.some((group) => group.id === currentGroupId)) {
-                  navigate(firstThreadRoute(list, groupList), { replace: true });
+                  navigate(firstThreadRoute(list, groupList, !developerView), {
+                    replace: true,
+                  });
                 }
                 continue;
               }
               const currentBotId = routeBotId.current;
               if (!currentBotId || !list.some((bot) => bot.id === currentBotId)) {
-                navigate(firstThreadRoute(list, groupList), { replace: true });
+                navigate(firstThreadRoute(list, groupList, !developerView), {
+                  replace: true,
+                });
               }
             } catch (error) {
               await Promise.allSettled(requests);
@@ -1463,6 +1471,8 @@ export function ShellPage() {
       .then((bootstrap) => {
         if (cancelled || botsRefreshUser.current !== user) return;
         const groupList = bootstrap.groups;
+        const recruiting = !getToolActivityEnabled(bootstrap.me.isDeploymentOwner === true);
+        showToolActivityRef.current = !recruiting;
         setBootstrapMe(bootstrap.me);
         // Skip list/route writes only if a later refreshBots() successfully
         // committed (failed refreshes bump epoch but not botsRefreshApplied).
@@ -1510,19 +1520,35 @@ export function ShellPage() {
         }
         if (routeGroupId.current) {
           if (!groupList.some((group) => group.id === routeGroupId.current)) {
-            navigate(firstThreadRoute(bootstrap.bots, groupList), { replace: true });
+            navigate(firstThreadRoute(bootstrap.bots, groupList, recruiting), { replace: true });
           }
           return;
         }
-        const selectedBotId = bootstrap.thread?.botId ?? bootstrap.bots[0]?.id;
-        if (selectedBotId && selectedBotId !== routeBotId.current) {
-          navigate(`/app/${selectedBotId}`, { replace: true });
+        if (!bootstrap.bots.some((bot) => bot.id === routeBotId.current)) {
+          navigate(firstThreadRoute(bootstrap.bots, groupList, recruiting), { replace: true });
         }
       })
       .catch(() => {
-        if (cancelled) return;
+        if (cancelled || botsRefreshUser.current !== user) return;
         setBootstrapMe(null);
-        return refreshBots(true).catch(() => undefined);
+        showToolActivityRef.current = null;
+        const spaceId = selectedSpaceId();
+        return rpc
+          .me()
+          .then((me) => {
+            if (
+              cancelled ||
+              botsRefreshUser.current !== user ||
+              me.userId !== user.id ||
+              spaceId !== selectedSpaceId() ||
+              (spaceId !== null && me.spaceId !== spaceId)
+            )
+              return;
+            setBootstrapMe(me);
+            showToolActivityRef.current = getToolActivityEnabled(me.isDeploymentOwner === true);
+            return refreshBots(true);
+          })
+          .catch(() => undefined);
       })
       .finally(() => {
         bootstrapReady = true;
@@ -7634,7 +7660,9 @@ function MessageHoverActions({
 function firstThreadRoute(
   bots: readonly Pick<Bot, "id">[],
   groups: readonly Pick<Group, "id">[],
+  recruiting = false,
 ): string {
+  if (recruiting && groups[0]) return `/app/g/${groups[0].id}`;
   if (bots[0]) return `/app/${bots[0].id}`;
   if (groups[0]) return `/app/g/${groups[0].id}`;
   return "/app";

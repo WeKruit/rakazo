@@ -26,6 +26,26 @@ describe("auth policy", () => {
     }
   });
 
+  it("keeps upstream token reads and rotations server-only, including encoded or trailing-slash routes", () => {
+    for (const path of [
+      "/get-access-token",
+      "/refresh-token",
+      "/account-info",
+      "/get-access-token/",
+      "/%72efresh-token",
+      "/account%2Dinfo///",
+    ])
+      expect(isBlockedAuthPath(path), path).toBe(true);
+    for (const path of [
+      "/list-accounts",
+      "/link-social",
+      "/unlink-account",
+      "/callback/oidc",
+      "/delete-user",
+    ])
+      expect(isBlockedAuthPath(path), path).toBe(false);
+  });
+
   it("keeps the account routes the apps call", () => {
     for (const path of [
       "/sign-up/email",

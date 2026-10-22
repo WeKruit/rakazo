@@ -49,6 +49,22 @@ describe("loadEnv", () => {
     ).toBe("https://catalog.example.test/feed");
   });
 
+  it("requires product OIDC for an explicitly trusted first-party MCP endpoint", () => {
+    expect(loadEnv(base).firstPartyMcpUrl).toBeUndefined();
+    expect(() => loadEnv({ ...base, FIRST_PARTY_MCP_URL: "https://crm.example.test/mcp" })).toThrow(
+      "FIRST_PARTY_MCP_URL requires OIDC configuration",
+    );
+    expect(
+      loadEnv({
+        ...base,
+        FIRST_PARTY_MCP_URL: " https://crm.example.test/mcp ",
+        OIDC_ISSUER: "https://identity.example.test/auth/v1",
+        OIDC_CLIENT_ID: "product-client",
+        OIDC_CLIENT_SECRET: "test-product-client-secret",
+      }).firstPartyMcpUrl,
+    ).toBe("https://crm.example.test/mcp");
+  });
+
   it("falls back to none when a remote provider key is missing", () => {
     expect(
       loadEnv({

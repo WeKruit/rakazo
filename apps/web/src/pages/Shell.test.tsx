@@ -16,7 +16,7 @@ import { act, createRef } from "react";
 import type { Root } from "react-dom/client";
 import { createRoot } from "react-dom/client";
 import type { NavigateFunction } from "react-router-dom";
-import { MemoryRouter, Route, Routes, useNavigate } from "react-router-dom";
+import { MemoryRouter, Route, Routes, useLocation, useNavigate } from "react-router-dom";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 vi.mock("@lingui/react/macro", () => {
@@ -35,6 +35,7 @@ const shellApi = vi.hoisted(() => ({
     data: { user: { id: "user-1", name: "Synthetic recruiter", email: "user@example.test" } },
   },
   bootstrap: vi.fn(),
+  me: vi.fn(),
   get: vi.fn(),
   messages: vi.fn(),
   followUp: vi.fn(),
@@ -76,6 +77,7 @@ vi.mock("../lib/rpc", async (importOriginal) => ({
   ...(await importOriginal<typeof import("../lib/rpc")>()),
   rpc: {
     bootstrap: shellApi.bootstrap,
+    me: shellApi.me,
     threads: {
       get: shellApi.get,
       messages: shellApi.messages,
@@ -364,7 +366,16 @@ async function renderFeedbackShell(
   const activeGroups = options.allGroupsArchived ? [] : [group];
   const archivedGroups = options.allGroupsArchived ? [archivedGroup] : [];
   const navigation = {
-    spaces: [{ id: "space-1", name: "Recruiting", hasContent: true }],
+    spaces: [
+      {
+        id: "space-1",
+        name: "Recruiting",
+        hasContent: true,
+        bots,
+        groups: activeGroups,
+        botSections: [],
+      },
+    ],
     current: { bots, botSections: [], groups: activeGroups },
   };
   shellApi.session = {
@@ -372,7 +383,11 @@ async function renderFeedbackShell(
   };
   shellApi.listRoutines.mockResolvedValue(options.routines ?? []);
   const bootstrap = {
-    me: { spaceId: "space-1", isDeploymentOwner: options.isDeploymentOwner ?? true },
+    me: {
+      userId: "user-1",
+      spaceId: "space-1",
+      isDeploymentOwner: options.isDeploymentOwner ?? true,
+    },
     bots,
     botSections: [],
     groups: activeGroups,
@@ -382,9 +397,15 @@ async function renderFeedbackShell(
     thread: kind === "group" && !options.bootstrapGroup ? null : thread,
     routines: options.routines ?? [],
   };
-  shellApi.bootstrap.mockImplementation(async () => {
+  shellApi.me.mockResolvedValue(bootstrap.me);
+  shellApi.bootstrap.mockImplementation(async ({ botId }: { botId?: string }) => {
     if (options.bootstrapReady) await options.bootstrapReady;
-    return bootstrap;
+    return botId === "bot-2"
+      ? {
+          ...bootstrap,
+          thread: { ...thread, botId, threadId: "thread-2", messages: [], run: null },
+        }
+      : bootstrap;
   });
   shellApi.get.mockImplementation(async ({ botId }: { botId?: string }) => {
     if (options.threadReady) await options.threadReady;
@@ -479,10 +500,14 @@ async function renderFeedbackShell(
   document.body.append(container);
   root = createRoot(container);
   let navigate!: NavigateFunction;
+  let path = "";
   function ShellRoutes() {
     navigate = useNavigate();
+    const location = useLocation();
+    path = location.pathname + location.search;
     return (
       <Routes>
+        <Route path="/app" element={<ShellPage />} />
         <Route path="/app/g/:groupId" element={<ShellPage />} />
         <Route path="/app/:botId" element={<ShellPage />} />
       </Routes>
@@ -544,10 +569,152 @@ async function renderFeedbackShell(
     navigation,
     bootstrap,
     bots,
+    getPath: () => path,
     getProps: () => props!,
     navigate: async (to: string) => act(async () => navigate(to)),
   };
 }
+
+it.each([
+  { owner: false, preference: "on", allGroupsArchived: false, expected: "/app/g/group-1" },
+  { owner: true, preference: "off", allGroupsArchived: false, expected: "/app/g/group-1" },
+  { owner: true, preference: "on", allGroupsArchived: false, expected: "/app/bot-1" },
+  { owner: false, preference: "off", allGroupsArchived: true, expected: "/app/bot-1" },
+] as const)(
+  "opens the native default conversation at $expected for owner=$owner and developer=$preference",
+  async ({ owner, preference, allGroupsArchived, expected }) => {
+    setToolActivityPreference(preference);
+    const view = await renderFeedbackShell(expected.includes("/g/") ? "group" : "bot", undefined, {
+      isDeploymentOwner: owner,
+      allGroupsArchived,
+      openFeedback: false,
+      initialPath: "/app",
+    });
+    expect(view.getPath()).toBe(expected);
+    expect(shellApi.me).not.toHaveBeenCalled();
+    expect(shellApi.send).not.toHaveBeenCalled();
+    expect(shellApi.answer).not.toHaveBeenCalled();
+  },
+);
+
+it("uses the authorized role navigation order after the initial bootstrap fails", async () => {
+  setToolActivityPreference("off");
+  let reject!: (error: Error) => void;
+  const view = await renderFeedbackShell("group", undefined, {
+    isDeploymentOwner: false,
+    openFeedback: false,
+    initialPath: "/app",
+    bootstrapReady: new Promise((_resolve, fail) => {
+      reject = fail;
+    }),
+  });
+  const recent = { ...view.group, id: "recent-role", name: "Recent role" };
+  view.navigation.current.groups.unshift(recent);
+  await act(async () => reject(new Error("Bootstrap unavailable")));
+  expect(view.getPath()).toBe(`/app/g/${recent.id}`);
+  expect(shellApi.listSpaces).toHaveBeenCalledOnce();
+  expect(shellApi.me).toHaveBeenCalledOnce();
+});
+
+it("waits for native owner identity before restoring the developer default after bootstrap failure", async () => {
+  setToolActivityPreference("on");
+  let reject!: (error: Error) => void;
+  const view = await renderFeedbackShell("bot", undefined, {
+    isDeploymentOwner: true,
+    openFeedback: false,
+    initialPath: "/app",
+    bootstrapReady: new Promise((_resolve, fail) => {
+      reject = fail;
+    }),
+  });
+  let finish!: (value: typeof view.bootstrap.me) => void;
+  shellApi.me.mockReturnValueOnce(
+    new Promise((resolve) => {
+      finish = resolve;
+    }),
+  );
+  await act(async () => reject(new Error("Bootstrap unavailable")));
+  expect(view.getPath()).toBe("/app");
+  expect(shellApi.listSpaces).not.toHaveBeenCalled();
+  await act(async () => finish(view.bootstrap.me));
+  expect(view.getPath()).toBe("/app/bot-1");
+  expect(shellApi.me).toHaveBeenCalledOnce();
+});
+
+it.each(["unmount", "user", "space"])(
+  "ignores a bootstrap identity recovery that completes after %s changes",
+  async (change) => {
+    let reject!: (error: Error) => void;
+    const view = await renderFeedbackShell("group", undefined, {
+      isDeploymentOwner: false,
+      openFeedback: false,
+      initialPath: "/app",
+      bootstrapReady: new Promise((_resolve, fail) => {
+        reject = fail;
+      }),
+    });
+    let finish!: (value: typeof view.bootstrap.me) => void;
+    shellApi.me.mockReturnValueOnce(
+      new Promise((resolve) => {
+        finish = resolve;
+      }),
+    );
+    await act(async () => reject(new Error("Bootstrap unavailable")));
+    expect(shellApi.me).toHaveBeenCalledOnce();
+    if (change === "unmount") {
+      act(() => root!.unmount());
+      root = null;
+    } else if (change === "user") {
+      shellApi.session = {
+        data: { user: { id: "other-user", name: "Other", email: "other@example.test" } },
+      };
+      await view.render();
+    } else {
+      localStorage.setItem("rakazo:space-id", "other-space");
+    }
+    await act(async () => finish(view.bootstrap.me));
+    expect(shellApi.listSpaces).not.toHaveBeenCalled();
+    expect(view.getPath()).toBe("/app");
+  },
+);
+
+it("does not infer a default view from local preferences when identity recovery fails", async () => {
+  vi.useFakeTimers();
+  vi.spyOn(document, "visibilityState", "get").mockReturnValue("visible");
+  vi.spyOn(document, "hasFocus").mockReturnValue(true);
+  setToolActivityPreference("on");
+  let reject!: (error: Error) => void;
+  const view = await renderFeedbackShell("bot", undefined, {
+    isDeploymentOwner: true,
+    openFeedback: false,
+    initialPath: "/app",
+    bootstrapReady: new Promise((_resolve, fail) => {
+      reject = fail;
+    }),
+  });
+  shellApi.me.mockRejectedValueOnce(new Error("Identity unavailable"));
+  await act(async () => reject(new Error("Bootstrap unavailable")));
+  await act(async () => vi.advanceTimersByTimeAsync(15_100));
+  expect(view.getPath()).toBe("/app");
+  expect(container?.querySelector('[data-product-view="developer"]')).toBeNull();
+});
+
+it.each(["/app/bot-2?view=conversation", "/app/g/group-1?view=brief"])(
+  "preserves an explicit recruiting conversation deep link %s",
+  async (initialPath) => {
+    setToolActivityPreference("off");
+    const view = await renderFeedbackShell(
+      initialPath.includes("/g/") ? "group" : "bot",
+      undefined,
+      {
+        isDeploymentOwner: false,
+        openFeedback: false,
+        initialPath,
+      },
+    );
+    expect(view.getPath()).toBe(initialPath);
+  },
+);
 
 it("loads a cold group from its own snapshot when bootstrap has no DM snapshot", async () => {
   await renderFeedbackShell("group");
@@ -1609,6 +1776,7 @@ it("opens a normal recruiting role on native candidate results and restores coll
   expect(shellApi.recruiting.getWorkspace).toHaveBeenCalledWith({ threadId: view.thread.threadId });
   expect(shellApi.recruiting.listCandidates).toHaveBeenCalledWith(
     expect.objectContaining({ roleId: "internal-role" }),
+    expect.objectContaining({ signal: expect.any(AbortSignal) }),
   );
   const navigation = container!.querySelector('[data-testid="recruiting-navigation"]')!;
   const labels = [...navigation.querySelectorAll(".hire-nav > button")].map(

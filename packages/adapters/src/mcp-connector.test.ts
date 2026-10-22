@@ -4,6 +4,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { InfisicalSecretStore } from "./infisical-secret-store.js";
 import {
   allowlistDrift,
+  firstPartyMcpUrl,
   loadMcpCredentialRecord,
   McpConnector,
   requireMcpToolAssignment,
@@ -1905,6 +1906,194 @@ describe.each([
           },
         }),
       );
+    } finally {
+      await connector.close();
+    }
+  });
+});
+
+describe("first-party product OIDC MCP connection", () => {
+  const endpoint = "https://crm.example.test/mcp";
+  const context = {
+    spaceId: "w1",
+    userId: "u1",
+    botId: "bot-1",
+    signal: new AbortController().signal,
+  };
+  it("limits the existing endpoint configuration to a credential-free HTTPS resource", () => {
+    expect(firstPartyMcpUrl(undefined)).toBeUndefined();
+    expect(firstPartyMcpUrl(` ${endpoint} `)).toBe(endpoint);
+    for (const url of [
+      "http://crm.example.test/mcp",
+      `${endpoint}?x=1`,
+      `${endpoint}#x`,
+      `${endpoint}?`,
+      `${endpoint}#`,
+      "https://user:secret@crm.example.test/mcp",
+    ])
+      expect(() => firstPartyMcpUrl(url)).toThrow();
+  });
+  it.each(["other endpoint", "personal secret", "no assignment"])(
+    "does not bridge %s or grant access",
+    async (kind) => {
+      const state = { failNext: false, initializations: 0 };
+      const server = {
+        ...SERVER,
+        endpoint: kind === "other endpoint" ? `${endpoint}/other` : endpoint,
+        secretId: kind === "personal secret" ? "personal-secret" : null,
+      };
+      vi.stubGlobal("fetch", mcpFetch(state, server.endpoint));
+      const accessToken = vi.fn().mockRejectedValue(new Error("Must not access product token"));
+      const connector = new McpConnector(
+        {
+          botMcpServer: {
+            findMany: vi
+              .fn()
+              .mockResolvedValue(kind === "no assignment" ? [] : [{ ...ASSIGNMENT, server }]),
+          },
+          secret: { findFirst: vi.fn().mockResolvedValue(null) },
+        } as never,
+        {} as never,
+        { network: TEST_NETWORK, firstParty: { endpoint, accessToken } },
+      );
+      try {
+        await connector.discoverTools(context as never);
+        expect(accessToken).not.toHaveBeenCalled();
+      } finally {
+        await connector.close();
+      }
+    },
+  );
+  it("does not retain a completed run's cancellation signal and denies revoked identity before another dispatch", async () => {
+    const state = { failNext: false, initializations: 0, calls: [] as string[] };
+    vi.stubGlobal("fetch", mcpFetch(state, endpoint));
+    let revoked = false;
+    const accessToken = vi.fn(async (actor: typeof context) => {
+      expect(actor.signal.aborted).toBe(false);
+      if (revoked) throw new IsolationError("CRM identity disconnected");
+      return "current-access";
+    });
+    const server = { ...SERVER, endpoint };
+    const row = { ...ASSIGNMENT, server };
+    const connector = new McpConnector(
+      {
+        botMcpServer: {
+          findMany: vi.fn().mockResolvedValue([row]),
+          findFirst: vi.fn().mockResolvedValue(row),
+        },
+      } as never,
+      {} as never,
+      { network: TEST_NETWORK, firstParty: { endpoint, accessToken } },
+    );
+    const firstRun = new AbortController();
+    const call = {
+      tool: "mcp__demo__echo",
+      executionId: "first-party",
+      args: {},
+      route: {
+        connectorId: "mcp",
+        resourceId: server.id,
+        resourceRevision: server.revision,
+        toolName: "echo",
+      },
+    };
+    try {
+      expect(
+        await connector.discoverTools({ ...context, signal: firstRun.signal } as never),
+      ).toHaveLength(1);
+      firstRun.abort();
+      const before = [];
+      for await (const event of connector.execute(call, context as never)) before.push(event);
+      expect(before.at(-1)).toMatchObject({ type: "result" });
+      expect(state.initializations).toBe(1);
+      revoked = true;
+      const after = [];
+      for await (const event of connector.execute(call, context as never)) after.push(event);
+      expect(after.at(-1)).toMatchObject({ type: "error" });
+      expect(state.calls).toEqual(["echo"]);
+    } finally {
+      await connector.close();
+    }
+  });
+  it("uses the current caller token on every native request and refreshes the precise rejected bearer once", async () => {
+    const state = {
+      failNext: false,
+      initializations: 0,
+      headers: [] as Record<string, string>[],
+      calls: [] as string[],
+      callResult: { content: [{ type: "text", text: "first-access rotated-access" }] },
+    };
+    const native = mcpFetch(state, endpoint);
+    let reject = false;
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (input: string | URL | Request, init?: RequestInit) => {
+        const request = input instanceof Request ? input : new Request(input, init);
+        if (reject && request.headers.get("authorization") === "Bearer first-access") {
+          reject = false;
+          return new Response(null, { status: 401 });
+        }
+        return native(input, init);
+      }),
+    );
+    let token = "first-access";
+    const accessToken = vi.fn(async (actor: typeof context, rejected?: string) => {
+      expect(actor.userId).toBe(context.userId);
+      expect(actor.spaceId).toBe(context.spaceId);
+      if (rejected) {
+        expect(rejected).toBe("first-access");
+        token = "rotated-access";
+      }
+      return token;
+    });
+    const server = { ...SERVER, endpoint };
+    const row = { ...ASSIGNMENT, server };
+    const prisma = {
+      botMcpServer: {
+        findMany: vi.fn().mockResolvedValue([row]),
+        findFirst: vi.fn().mockResolvedValue(row),
+      },
+    };
+    const put = vi.fn();
+    const providerFor = vi.fn();
+    const connector = new McpConnector(
+      prisma as never,
+      { put } as never,
+      { network: TEST_NETWORK, firstParty: { endpoint, accessToken } },
+      { providerFor } as never,
+    );
+    try {
+      expect(await connector.discoverTools(context as never)).toHaveLength(1);
+      const before = accessToken.mock.calls.length;
+      reject = true;
+      const events = [];
+      for await (const event of connector.execute(
+        {
+          tool: "mcp__demo__echo",
+          executionId: "first-party",
+          args: {},
+          route: {
+            connectorId: "mcp",
+            resourceId: server.id,
+            resourceRevision: server.revision,
+            toolName: "echo",
+          },
+        },
+        context as never,
+      ))
+        events.push(event);
+      expect(events.at(-1)).toMatchObject({ type: "result" });
+      expect(JSON.stringify(events)).not.toContain("first-access");
+      expect(JSON.stringify(events)).not.toContain("rotated-access");
+      expect(accessToken.mock.calls.length).toBeGreaterThan(before);
+      expect(accessToken.mock.calls.filter(([, rejected]) => rejected !== undefined)).toHaveLength(
+        1,
+      );
+      expect(
+        state.headers.some((headers) => headers.authorization === "Bearer rotated-access"),
+      ).toBe(true);
+      expect(providerFor).not.toHaveBeenCalled();
+      expect(put).not.toHaveBeenCalled();
     } finally {
       await connector.close();
     }
