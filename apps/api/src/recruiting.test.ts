@@ -41,7 +41,9 @@ vi.mock("@rakazo/db", async (importOriginal) => {
     setRecruitingCandidateShortlist: vi.fn(),
   };
 });
-const prisma = {} as PrismaClient;
+const prisma = {
+  event: { findFirst: vi.fn(async () => null) },
+} as unknown as PrismaClient;
 const actor: Actor = {
   userId: "owner",
   spaceId: "space",
@@ -1815,6 +1817,55 @@ describe("authenticated recruiting API", () => {
 });
 
 describe("native recruiting RPC", () => {
+  it.each([false, true])(
+    "signals a saved recruiting change only after its native mutation commits, failure=%s",
+    async (failed) => {
+      const event = { findFirst: vi.fn(async () => ({ seq: 17 })) };
+      const notify = vi.fn(async () => {});
+      const storage = { ...prisma, event } as unknown as PrismaClient;
+      const client = createRouterClient(
+        createRouter({ prisma: storage, events: { notify } } as unknown as RouterDeps),
+        { context: { actor } },
+      );
+      const saved = { roleId: "role", candidateKey: "candidate", shortlisted: true, revision: 1 };
+      let finish!: () => void;
+      vi.mocked(db.setRecruitingCandidateShortlist).mockImplementationOnce(
+        () =>
+          new Promise((resolve, reject) => {
+            finish = () => (failed ? reject(new IsolationError()) : resolve(saved));
+          }),
+      );
+      const saving = client.recruiting.setCandidateShortlist({
+        threadId: "thread",
+        roleId: "role",
+        candidateKey: "candidate",
+        expectedRevision: 0,
+        shortlisted: true,
+      });
+      await vi.waitFor(() => expect(finish).toBeTypeOf("function"));
+      expect(event.findFirst).not.toHaveBeenCalled();
+      expect(notify).not.toHaveBeenCalled();
+      finish();
+      if (failed) {
+        await expect(saving).rejects.toMatchObject({ code: "NOT_FOUND" });
+        expect(event.findFirst).not.toHaveBeenCalled();
+        expect(notify).not.toHaveBeenCalled();
+      } else {
+        expect(await saving).toEqual(saved);
+        expect(event.findFirst).toHaveBeenCalledExactlyOnceWith({
+          where: {
+            spaceId: actor.spaceId,
+            threadId: "thread",
+            type: "recruiting.changed",
+            thread: { userId: actor.userId, spaceId: actor.spaceId },
+          },
+          select: { seq: true },
+          orderBy: { seq: "desc" },
+        });
+        expect(notify).toHaveBeenCalledExactlyOnceWith("thread", 17);
+      }
+    },
+  );
   it("runs the existing router through shared storage with its authenticated actor", async () => {
     const client = createRouterClient(createRouter({ prisma } as RouterDeps), {
       context: { actor },

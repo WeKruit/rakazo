@@ -28,13 +28,14 @@ import {
 } from "@rakazo/core";
 import { mcpObject, stableJsonValue } from "@rakazo/core/node/approval-effect-key";
 import { extractPdfText } from "@rakazo/core/node/pdf-text";
-import type { PrismaClient, RecruitingRoleMaterialContext } from "@rakazo/db";
+import type { PrismaClient, RecruitingRoleMaterialContext, ThreadEvents } from "@rakazo/db";
 import * as recruiting from "@rakazo/db";
 import {
   IsolationError,
   RecruitingConflictError,
   RecruitingSourceValidationError,
 } from "@rakazo/db";
+import { getLogger } from "@rakazo/logging";
 import type { ParseError } from "jsonc-parser";
 import { findNodeAtLocation, parseTree } from "jsonc-parser";
 import type { ThreadTarget } from "./thread-target.js";
@@ -58,6 +59,30 @@ async function authenticated<T>(operation: () => Promise<T>): Promise<T> {
 }
 
 type RecruitingReadDeps = { prisma: PrismaClient; artifacts: ArtifactStore };
+
+/** Wake the native durable stream only after the mutation has committed. */
+export async function notifyRecruitingChange(
+  deps: { prisma: PrismaClient; events: Pick<ThreadEvents, "notify"> },
+  actor: Actor,
+  threadId: string,
+) {
+  try {
+    const event = await deps.prisma.event.findFirst({
+      where: {
+        spaceId: actor.spaceId,
+        threadId,
+        type: "recruiting.changed",
+        thread: { userId: actor.userId, spaceId: actor.spaceId },
+      },
+      select: { seq: true },
+      orderBy: { seq: "desc" },
+    });
+    if (event) await deps.events.notify(threadId, event.seq);
+  } catch (error) {
+    // The save committed; native stream catch-up still replays a missed wake-up.
+    getLogger().error("recruiting.change.notification.failed", error);
+  }
+}
 
 function correspondenceProvider(endpoint: string | null, view: "inbox" | "interview" | "contacts") {
   if (!endpoint) return null;

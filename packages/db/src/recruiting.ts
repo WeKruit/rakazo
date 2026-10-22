@@ -191,6 +191,21 @@ async function requireThread(tx: Tx, actor: Actor, threadId: string) {
   return thread;
 }
 
+async function recordRecruitingChange(
+  tx: Tx,
+  actor: Actor,
+  thread: Awaited<ReturnType<typeof requireThread>>,
+  roleId: string | null,
+) {
+  await appendEventInTransaction(tx, {
+    spaceId: actor.spaceId,
+    threadId: thread.id,
+    botId: thread.botId ?? thread.id,
+    type: "recruiting.changed",
+    payload: { roleId },
+  });
+}
+
 async function requireRole(
   tx: Tx,
   actor: Actor,
@@ -483,7 +498,7 @@ async function createRoleInTransaction(
   input: CreateRoleInput,
   artifacts: ReadonlyMap<string, Uint8Array>,
 ) {
-  await requireThread(tx, actor, input.sourceThreadId);
+  const thread = await requireThread(tx, actor, input.sourceThreadId);
   if (input.brief) validateRecruitingBrief(input.brief, input);
   const messages = await validateReadSources(tx, actor, definitionSources(input), artifacts);
   validateBriefAuthorship(input, messages);
@@ -505,6 +520,7 @@ async function createRoleInTransaction(
     where: { id: input.sourceThreadId },
     data: { activeRecruitingRoleId: role.id },
   });
+  await recordRecruitingChange(tx, actor, thread, role.id);
   return roleSnapshot(tx, actor, role);
 }
 
@@ -521,12 +537,15 @@ async function bindRoleInTransaction(
   actor: Actor,
   input: { threadId: string; roleId: string | null },
 ) {
-  await requireThread(tx, actor, input.threadId);
+  const thread = await requireThread(tx, actor, input.threadId);
   const role = input.roleId ? await requireRole(tx, actor, input.roleId) : null;
+  if ((thread.activeRecruitingRoleId ?? null) === (role?.id ?? null))
+    return role ? roleSnapshot(tx, actor, role) : null;
   await tx.thread.update({
     where: { id: input.threadId },
     data: { activeRecruitingRoleId: role?.id ?? null },
   });
+  await recordRecruitingChange(tx, actor, thread, role?.id ?? null);
   return role ? roleSnapshot(tx, actor, role) : null;
 }
 
@@ -559,15 +578,15 @@ export async function reviseRecruitingRole(
 ): Promise<RoleSnapshot> {
   const input = ReviseRecruitingRoleInput.parse(untrusted);
   const artifacts = await loadRoleMaterials(prisma, actor, input, material);
-  return prisma.$transaction(async (tx) =>
-    reviseRoleInTransaction(
-      tx,
-      actor,
-      input,
-      artifacts,
-      await requireRole(tx, actor, input.roleId, true),
-    ),
-  );
+  return prisma.$transaction(async (tx) => {
+    // Match criteria, confirmation and native writes: lock the thread before the role.
+    await tx.$queryRaw(
+      Prisma.sql`SELECT "id" FROM "threads" WHERE "id" = (SELECT "sourceThreadId" FROM "recruiting_roles" WHERE "id" = ${input.roleId} AND "spaceId" = ${actor.spaceId} AND "userId" = ${actor.userId}) AND "spaceId" = ${actor.spaceId} AND "userId" = ${actor.userId} FOR UPDATE`,
+    );
+    const role = await requireRole(tx, actor, input.roleId, true);
+    const thread = await requireThread(tx, actor, role.sourceThreadId);
+    return reviseRoleInTransaction(tx, actor, input, artifacts, role, thread);
+  });
 }
 
 async function reviseRoleInTransaction(
@@ -603,6 +622,12 @@ async function reviseRoleInTransaction(
     data: { title: input.title, revision: revision.revision, currentRevisionId: revision.id },
   });
   if (changed.count !== 1) throw new RecruitingConflictError();
+  await recordRecruitingChange(
+    tx,
+    actor,
+    authorizedThread ?? (await requireThread(tx, actor, role.sourceThreadId)),
+    role.id,
+  );
   return roleSnapshot(
     tx,
     actor,
@@ -722,6 +747,7 @@ async function confirmRecruitingBriefInTransaction(
     data: { revision: nextRevision, currentRevisionId: saved.id },
   });
   if (changed.count !== 1) throw new RecruitingConflictError();
+  await recordRecruitingChange(tx, actor, thread, role.id);
   return roleSnapshot(tx, actor, {
     ...role,
     revision: nextRevision,
@@ -8725,6 +8751,7 @@ async function setCandidateShortlistInTransaction(
     },
   });
   if (changed.count !== 1) throw new RecruitingConflictError();
+  await recordRecruitingChange(tx, actor, thread, role.id);
   return {
     roleId: role.id,
     candidateKey: candidate.candidateKey,

@@ -869,6 +869,13 @@ describe("candidate listing and shortlist boundaries", () => {
       where: { roleId: "role", candidateKey: f.candidate.candidateKey, revision: 0 },
       data: { shortlisted: true, revision: 1, shortlistMessageId: "human-shortlist-receipt" },
     });
+    expect(appendEventInTransaction).toHaveBeenCalledExactlyOnceWith(f.tx, {
+      spaceId: actor.spaceId,
+      threadId: "thread",
+      botId: "bot",
+      type: "recruiting.changed",
+      payload: { roleId: "role" },
+    });
     const profileQuery = f.tx.$queryRaw.mock.lastCall![0] as { values: unknown[] };
     expect(profileQuery.values.slice(-2)).toEqual(["role", f.candidate.candidateKey]);
   });
@@ -887,6 +894,7 @@ describe("candidate listing and shortlist boundaries", () => {
     });
     expect(createThreadMessageInTransaction).not.toHaveBeenCalled();
     expect(f.tx.recruitingCandidate.updateMany).not.toHaveBeenCalled();
+    expect(appendEventInTransaction).not.toHaveBeenCalled();
     await expect(
       recruiting.setRecruitingCandidateShortlist(f.prisma, actor, {
         ...input,

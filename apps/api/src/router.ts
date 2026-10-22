@@ -294,6 +294,7 @@ import {
   listRecruitingFeedback,
   listRecruitingQuestions,
   listRecruitingResearch,
+  notifyRecruitingChange,
   readRecruitingSource,
   reviseRecruitingRole,
   setRecruitingCandidateShortlist,
@@ -3463,42 +3464,56 @@ export function createRouter(deps: RouterDeps) {
       listCandidateSources: authed.recruiting.listCandidateSources.handler(({ context, input }) =>
         listRecruitingCandidateSources(deps, context.actor, input),
       ),
-      setCandidateShortlist: authed.recruiting.setCandidateShortlist.handler(({ context, input }) =>
-        setRecruitingCandidateShortlist(deps.prisma, context.actor, input),
+      setCandidateShortlist: authed.recruiting.setCandidateShortlist.handler(
+        async ({ context, input }) => {
+          const saved = await setRecruitingCandidateShortlist(deps.prisma, context.actor, input);
+          await notifyRecruitingChange(deps, context.actor, input.threadId);
+          return saved;
+        },
       ),
-      editCriteria: authed.recruiting.editCriteria.handler(({ context, input }) =>
-        editRecruitingCriteria(deps.prisma, context.actor, input, {
+      editCriteria: authed.recruiting.editCriteria.handler(async ({ context, input }) => {
+        const saved = await editRecruitingCriteria(deps.prisma, context.actor, input, {
           artifacts: deps.artifacts,
           context: connectionContext(context.actor, randomUUID()),
-        }),
-      ),
-      confirmBrief: authed.recruiting.confirmBrief.handler(({ context, input }) =>
-        confirmRecruitingBrief(deps.prisma, context.actor, input, {
+        });
+        await notifyRecruitingChange(deps, context.actor, input.threadId);
+        return saved;
+      }),
+      confirmBrief: authed.recruiting.confirmBrief.handler(async ({ context, input }) => {
+        const saved = await confirmRecruitingBrief(deps.prisma, context.actor, input, {
           artifacts: deps.artifacts,
           context: connectionContext(context.actor, randomUUID()),
-        }),
-      ),
+        });
+        await notifyRecruitingChange(deps, context.actor, input.threadId);
+        return saved;
+      }),
       listQuestions: authed.recruiting.listQuestions.handler(({ context, input }) =>
         listRecruitingQuestions(deps.prisma, context.actor, input),
       ),
-      createRole: authed.recruiting.createRole.handler(({ context, input }) =>
-        createRecruitingRole(deps.prisma, context.actor, input, {
+      createRole: authed.recruiting.createRole.handler(async ({ context, input }) => {
+        const saved = await createRecruitingRole(deps.prisma, context.actor, input, {
           artifacts: deps.artifacts,
           context: connectionContext(context.actor, randomUUID()),
-        }),
-      ),
-      bindRole: authed.recruiting.bindRole.handler(({ context, input }) =>
-        bindRecruitingRole(deps.prisma, context.actor, input),
-      ),
+        });
+        await notifyRecruitingChange(deps, context.actor, input.sourceThreadId);
+        return saved;
+      }),
+      bindRole: authed.recruiting.bindRole.handler(async ({ context, input }) => {
+        const saved = await bindRecruitingRole(deps.prisma, context.actor, input);
+        await notifyRecruitingChange(deps, context.actor, input.threadId);
+        return saved;
+      }),
       getWorkspace: authed.recruiting.getWorkspace.handler(({ context, input }) =>
         getRecruitingWorkspace(deps.prisma, context.actor, input),
       ),
-      reviseRole: authed.recruiting.reviseRole.handler(({ context, input }) =>
-        reviseRecruitingRole(deps.prisma, context.actor, input, {
+      reviseRole: authed.recruiting.reviseRole.handler(async ({ context, input }) => {
+        const saved = await reviseRecruitingRole(deps.prisma, context.actor, input, {
           artifacts: deps.artifacts,
           context: connectionContext(context.actor, randomUUID()),
-        }),
-      ),
+        });
+        await notifyRecruitingChange(deps, context.actor, saved.role.sourceThreadId);
+        return saved;
+      }),
       listAssessments: authed.recruiting.listAssessments.handler(({ context, input }) =>
         listRecruitingAssessments(deps.prisma, context.actor, input),
       ),

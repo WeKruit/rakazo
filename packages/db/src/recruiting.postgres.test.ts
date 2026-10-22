@@ -4353,6 +4353,8 @@ describePostgres("recruiting domain (PostgreSQL)", () => {
 
   it("atomically saves a human criterion edit, invalidates confirmation and preserves old assessment versions", async () => {
     const f = await researchFixture(true, true);
+    const cursor =
+      (await prisma.thread.findUniqueOrThrow({ where: { id: f.thread.id } })).nextEventSeq - 1;
     const original = await prisma.recruitingRoleRevision.findUniqueOrThrow({
       where: { id: f.role.revision.id },
     });
@@ -4383,6 +4385,23 @@ describePostgres("recruiting domain (PostgreSQL)", () => {
       ],
     };
     const saved = await recruiting.editRecruitingCriteria(prisma, actor, input);
+    const second = createDb(databaseUrl!);
+    try {
+      expect(await recruiting.eventsAfter(second.prisma, f.thread.id, cursor)).toMatchObject([
+        {
+          spaceId: actor.spaceId,
+          threadId: f.thread.id,
+          type: "recruiting.changed",
+          payload: { roleId: saved.role.id },
+        },
+      ]);
+      expect(
+        await recruiting.getRecruitingWorkspace(second.prisma, actor, { threadId: f.thread.id }),
+      ).toEqual(saved);
+    } finally {
+      await second.prisma.$disconnect();
+      await second.pool.end();
+    }
     expect(saved.role.revision).toBe(f.role.role.revision + 1);
     expect(saved.revision.brief?.confirmation).toBeNull();
     const human = saved.revision.sourceRefs.at(-1)!;
@@ -4431,6 +4450,54 @@ describePostgres("recruiting domain (PostgreSQL)", () => {
       }),
     ).toEqual(saved);
     expect(await prisma.message.count({ where: { threadId: f.thread.id } })).toBe(before + 1);
+    expect(await recruiting.eventsAfter(prisma, f.thread.id, cursor)).toHaveLength(1);
+  });
+
+  it("rolls back the recruiting change event and its saved mutation if native event persistence fails", async () => {
+    const f = await researchFixture(false, true);
+    const beforeThread = await prisma.thread.findUniqueOrThrow({ where: { id: f.thread.id } });
+    const beforeRole = await prisma.recruitingRole.findUniqueOrThrow({
+      where: { id: f.role.role.id },
+    });
+    const beforeMessages = await prisma.message.count({ where: { threadId: f.thread.id } });
+    const beforeEvents = await prisma.event.count({ where: { threadId: f.thread.id } });
+    const failure = new Error("Injected failure after native saved-change event write");
+    const failing = prisma.$extends({
+      query: {
+        event: {
+          async create({ args, query }) {
+            const event = await query(args);
+            if (args.data.type === "recruiting.changed") throw failure;
+            return event;
+          },
+        },
+      },
+    });
+    await expect(
+      recruiting.editRecruitingCriteria(failing as unknown as PrismaClient, actor, {
+        threadId: f.thread.id,
+        roleId: f.role.role.id,
+        expectedRevision: f.role.role.revision,
+        criteria: [
+          {
+            criterionId: "compensation",
+            priority: "preferred",
+            atoms: [{ atomId: "salary", statement: "GBP 100,000 to 120,000" }],
+          },
+        ],
+      }),
+    ).rejects.toThrow(failure);
+    expect(await prisma.thread.findUniqueOrThrow({ where: { id: f.thread.id } })).toEqual(
+      beforeThread,
+    );
+    expect(
+      await prisma.recruitingRole.findUniqueOrThrow({ where: { id: f.role.role.id } }),
+    ).toEqual(beforeRole);
+    expect(await prisma.message.count({ where: { threadId: f.thread.id } })).toBe(beforeMessages);
+    expect(await prisma.event.count({ where: { threadId: f.thread.id } })).toBe(beforeEvents);
+    expect(await prisma.recruitingRoleRevision.count({ where: { roleId: f.role.role.id } })).toBe(
+      1,
+    );
   });
 
   it("commits only one concurrent human criterion edit across two connections", async () => {

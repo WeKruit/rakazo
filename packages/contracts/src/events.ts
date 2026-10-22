@@ -60,6 +60,7 @@ export const ProductEventType = z.enum([
   "group.created",
   "group.updated",
   "group.handoff",
+  "recruiting.changed",
   "recruiting.context.adopted",
   "recruiting.action.transitioned",
   "recruiting.read",
@@ -482,6 +483,11 @@ export function foldComputerCommands<T extends ComputerCommand>(events: T[]): T[
   return [...byId.values()];
 }
 
+export const RecruitingChangedPayloadSchema = z.strictObject({
+  roleId: RecruitingId.nullable(),
+});
+export type RecruitingChangedPayload = z.infer<typeof RecruitingChangedPayloadSchema>;
+
 export const RecruitingContextAdoptedPayloadSchema = z.strictObject({
   roleId: RecruitingId,
   roleRevisionId: RecruitingId,
@@ -600,27 +606,29 @@ export const ProductEventSchema = z
       ctx.addIssue({ code: "custom", path: ["runId"], message: "Requeue requires its run" });
     }
     const schema =
-      event.type === "recruiting.context.adopted"
-        ? RecruitingContextAdoptedPayloadSchema
-        : event.type === "recruiting.action.transitioned"
-          ? RecruitingActionTransitionedPayloadSchema
-          : event.type === "recruiting.read"
-            ? RecruitingReadPayloadSchema
-            : event.type === "recruiting.candidates.saved"
-              ? RecruitingCandidatesSavedPayloadSchema
-              : event.type === "recruiting.material.read"
-                ? RecruitingMaterialReadPayloadSchema
-                : event.type === "recruiting.assessment.saved"
-                  ? RecruitingAssessmentSavedPayloadSchema
-                  : event.type === "recruiting.question.asked"
-                    ? RecruitingQuestionAskedPayloadSchema
-                    : event.type === "thread.choice"
-                      ? NativeAskAnswerPayloadSchema
-                      : event.type === "effect.approval.answered"
-                        ? EffectApprovalAnsweredPayloadSchema
-                        : event.type === "run.requeued"
-                          ? RunRequeuedPayloadSchema
-                          : null;
+      event.type === "recruiting.changed"
+        ? RecruitingChangedPayloadSchema
+        : event.type === "recruiting.context.adopted"
+          ? RecruitingContextAdoptedPayloadSchema
+          : event.type === "recruiting.action.transitioned"
+            ? RecruitingActionTransitionedPayloadSchema
+            : event.type === "recruiting.read"
+              ? RecruitingReadPayloadSchema
+              : event.type === "recruiting.candidates.saved"
+                ? RecruitingCandidatesSavedPayloadSchema
+                : event.type === "recruiting.material.read"
+                  ? RecruitingMaterialReadPayloadSchema
+                  : event.type === "recruiting.assessment.saved"
+                    ? RecruitingAssessmentSavedPayloadSchema
+                    : event.type === "recruiting.question.asked"
+                      ? RecruitingQuestionAskedPayloadSchema
+                      : event.type === "thread.choice"
+                        ? NativeAskAnswerPayloadSchema
+                        : event.type === "effect.approval.answered"
+                          ? EffectApprovalAnsweredPayloadSchema
+                          : event.type === "run.requeued"
+                            ? RunRequeuedPayloadSchema
+                            : null;
     if (!schema) return;
     const parsed = schema.safeParse(event.payload);
     if (!parsed.success) {
