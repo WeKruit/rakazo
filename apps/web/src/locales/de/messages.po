@@ -4334,6 +4334,10 @@ msgid "Quote"
 msgstr ""
 
 #: src/pages/RecruitingPanel.tsx
+msgid "Rank"
+msgstr ""
+
+#: src/pages/RecruitingPanel.tsx
 msgid "Raw search results"
 msgstr "Unbearbeitete Suchergebnisse"
 

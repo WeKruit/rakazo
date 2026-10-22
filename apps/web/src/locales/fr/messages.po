@@ -4334,6 +4334,10 @@ msgid "Quote"
 msgstr "Citer"
 
 #: src/pages/RecruitingPanel.tsx
+msgid "Rank"
+msgstr ""
+
+#: src/pages/RecruitingPanel.tsx
 msgid "Raw search results"
 msgstr "Résultats de recherche bruts"
 

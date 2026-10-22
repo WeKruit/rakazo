@@ -1,5 +1,6 @@
 // @vitest-environment jsdom
 
+import { ORPCError } from "@orpc/client";
 import type { LinkFavicons } from "@rakazo/chat-ui/web";
 import { LinkFaviconsContext } from "@rakazo/chat-ui/web";
 import type {
@@ -35,6 +36,7 @@ const shellApi = vi.hoisted(() => ({
   },
   bootstrap: vi.fn(),
   get: vi.fn(),
+  messages: vi.fn(),
   followUp: vi.fn(),
   send: vi.fn(),
   answer: vi.fn(),
@@ -70,6 +72,7 @@ vi.mock("../lib/rpc", async (importOriginal) => ({
     bootstrap: shellApi.bootstrap,
     threads: {
       get: shellApi.get,
+      messages: shellApi.messages,
       followUp: shellApi.followUp,
       send: shellApi.send,
       answer: shellApi.answer,
@@ -234,6 +237,7 @@ async function renderFeedbackShell(
     routines?: Routine[];
     openFeedback?: boolean;
     bootstrapReady?: Promise<void>;
+    bootstrapGroup?: boolean;
     threadReady?: Promise<void>;
     allGroupsArchived?: boolean;
     initialPath?: string;
@@ -254,6 +258,7 @@ async function renderFeedbackShell(
   };
   Element.prototype.scrollTo ??= () => {};
   Element.prototype.scrollIntoView ??= () => {};
+  Element.prototype.animate ??= vi.fn<typeof Element.prototype.animate>();
   window.matchMedia ??= () =>
     ({
       matches: true,
@@ -367,7 +372,7 @@ async function renderFeedbackShell(
     spaces: navigation.spaces,
     archivedBots: [],
     archivedGroups,
-    thread: kind === "group" ? null : thread,
+    thread: kind === "group" && !options.bootstrapGroup ? null : thread,
     routines: options.routines ?? [],
   };
   shellApi.bootstrap.mockImplementation(async () => {
@@ -381,6 +386,11 @@ async function renderFeedbackShell(
       : thread;
   });
   shellApi.listSpaces.mockResolvedValue(navigation);
+  shellApi.messages.mockResolvedValue({
+    threadId: thread.threadId,
+    messages: thread.messages,
+    olderCursor: null,
+  });
   shellApi.createGroup.mockResolvedValue({ ...group, id: "group-new" });
   shellApi.archiveGroup.mockResolvedValue({ ok: true });
   shellApi.restoreGroup.mockResolvedValue({ ok: true });
@@ -516,6 +526,7 @@ async function renderFeedbackShell(
     archivedGroup,
     archivedGroups,
     navigation,
+    bootstrap,
     bots,
     getProps: () => props!,
     navigate: async (to: string) => act(async () => navigate(to)),
@@ -527,6 +538,148 @@ it("loads a cold group from its own snapshot when bootstrap has no DM snapshot",
   expect(shellApi.get).toHaveBeenCalledWith({ groupId: "group-1" }, expect.anything());
   expect(container?.textContent).toContain("Choose the role location");
   expect(shellApi.recruiting.getWorkspace).toHaveBeenCalledWith({ threadId: "thread-1" });
+});
+
+it("uses the authorized group bootstrap without fetching the same thread again", async () => {
+  vi.spyOn(CoreModule, "runThreadSubscription").mockImplementation(async (options) => {
+    await options.loadInitial();
+  });
+  const view = await renderFeedbackShell("group", undefined, {
+    openFeedback: false,
+    bootstrapGroup: true,
+  });
+  expect(shellApi.bootstrap).toHaveBeenCalledExactlyOnceWith({ groupId: "group-1" });
+  expect(shellApi.get).not.toHaveBeenCalled();
+  expect(container?.textContent).toContain("Choose the role location");
+  await view.click("Remote");
+  expect(shellApi.answer).toHaveBeenCalledWith(
+    expect.objectContaining({
+      groupId: "group-1",
+      runId: "run-main",
+      messageId: "pending-main",
+      answer: "remote",
+    }),
+  );
+});
+
+it("does not apply a delayed group bootstrap to another selected conversation", async () => {
+  let finish!: () => void;
+  const view = await renderFeedbackShell("group", undefined, {
+    openFeedback: false,
+    bootstrapGroup: true,
+    bootstrapReady: new Promise((resolve) => {
+      finish = resolve;
+    }),
+  });
+  const next = { ...view.group, id: "group-2", name: "Current role", threadId: "thread-2" };
+  view.bootstrap.groups.push(next);
+  shellApi.get.mockResolvedValue({
+    ...view.thread,
+    groupId: next.id,
+    threadId: next.threadId,
+    messages: [],
+    run: null,
+  });
+  await view.navigate("/app/g/group-2?view=conversation");
+  await act(async () => finish());
+  expect(shellApi.get).toHaveBeenCalledWith({ groupId: "group-2" }, expect.anything());
+  expect(container?.querySelector('[data-message-id="pending-main"]')).toBeNull();
+  expect(container?.textContent).toContain("Current role");
+});
+
+it.each(["pending", "FORBIDDEN", "UNAUTHORIZED", "NOT_FOUND"] as const)(
+  "does not activate cached questions after a failed intervening visit while the current read is %s",
+  async (outcome) => {
+    vi.spyOn(CoreModule, "runThreadSubscription").mockImplementation(async (options) => {
+      await options.loadInitial().catch(() => null);
+    });
+    const view = await renderFeedbackShell("group", undefined, {
+      openFeedback: false,
+      bootstrapGroup: true,
+    });
+    view.bootstrap.groups.push({ ...view.group, id: "group-2", threadId: "thread-2" });
+    let finish!: (value: typeof view.thread) => void;
+    let deny!: (error: Error) => void;
+    shellApi.get.mockImplementation(({ groupId }) =>
+      groupId === "group-2"
+        ? Promise.reject(new Error("Offline"))
+        : new Promise((resolve, reject) => {
+            finish = resolve;
+            deny = reject;
+          }),
+    );
+    await view.navigate("/app/g/group-2?view=conversation");
+    await view.navigate("/app/g/group-1?view=conversation");
+    const card = container!.querySelector('[data-message-id="pending-main"]')!;
+    const choice = [...card.querySelectorAll<HTMLButtonElement>("button")].find(
+      (button) => button.textContent === "Remote",
+    )!;
+    expect(!choice || choice.disabled).toBe(true);
+    await act(async () => choice?.click());
+    expect(shellApi.answer).not.toHaveBeenCalled();
+    if (outcome !== "pending") {
+      await act(async () => deny(new ORPCError(outcome)));
+      expect(container?.querySelector('[data-message-id="pending-main"]')).toBeNull();
+    } else {
+      await act(async () => finish(view.thread));
+      const fresh = [...container!.querySelectorAll<HTMLButtonElement>("button")].find(
+        (button) => button.textContent === "Remote",
+      )!;
+      expect(fresh.disabled).toBe(false);
+    }
+  },
+);
+
+it("does not let a denied read from an abandoned visit clear a freshly validated question", async () => {
+  vi.spyOn(CoreModule, "runThreadSubscription").mockImplementation(async (options) => {
+    await options.loadInitial().catch(() => null);
+  });
+  const view = await renderFeedbackShell("group", undefined, {
+    openFeedback: false,
+    bootstrapGroup: true,
+  });
+  view.bootstrap.groups.push({ ...view.group, id: "group-2", threadId: "thread-2" });
+  let rejectOld!: (error: Error) => void;
+  let finishCurrent!: (value: typeof view.thread) => void;
+  let visits = 0;
+  shellApi.get.mockImplementation(({ groupId }) => {
+    if (groupId === "group-2")
+      return Promise.resolve({
+        ...view.thread,
+        groupId,
+        threadId: "thread-2",
+        messages: [],
+        run: null,
+      });
+    return new Promise((resolve, reject) => {
+      if (++visits === 1) rejectOld = reject;
+      else finishCurrent = resolve;
+    });
+  });
+  await view.navigate("/app/g/group-2?view=conversation");
+  await view.navigate("/app/g/group-1?view=conversation");
+  await view.navigate("/app/g/group-2?view=conversation");
+  await view.navigate("/app/g/group-1?view=conversation");
+  await act(async () => finishCurrent(view.thread));
+  await act(async () => rejectOld(new ORPCError("FORBIDDEN")));
+  const card = container!.querySelector('[data-message-id="pending-main"]')!;
+  const choice = [...card.querySelectorAll<HTMLButtonElement>("button")].find(
+    (button) => button.textContent === "Remote",
+  )!;
+  expect(choice.disabled).toBe(false);
+});
+
+it("keeps the native around-message read when a group bootstrap opens a search jump", async () => {
+  await renderFeedbackShell("group", undefined, {
+    openFeedback: false,
+    bootstrapGroup: true,
+    initialPath: "/app/g/group-1?view=conversation&m=pending-main",
+  });
+  expect(shellApi.messages).toHaveBeenCalledWith({
+    groupId: "group-1",
+    around: { messageId: "pending-main" },
+  });
+  expect(container?.querySelector('[data-message-id="pending-main"]')).not.toBeNull();
 });
 
 it("waits for bootstrap before reconciling another client's navigation every fifteen active seconds", async () => {
@@ -1476,9 +1629,48 @@ it.each([false, true])(
     type(textarea, prompt);
     await view.click("Send");
     expect(shellApi.send).toHaveBeenCalledExactlyOnceWith(
-      expect.objectContaining({ groupId: "group-1", text: prompt, mentions: undefined }),
+      expect.objectContaining({
+        groupId: "group-1",
+        text: prompt,
+        mentions: undefined,
+        addressing: "coordinator",
+      }),
     );
     expect(document.body.querySelector('[data-message-id="pending-main"]')).not.toBeNull();
+  },
+);
+
+it.each([
+  { kind: "group", diagnostics: "off", addressing: "coordinator" },
+  { kind: "group", diagnostics: "on", addressing: undefined },
+  { kind: "bot", diagnostics: "off", addressing: undefined },
+] as const)(
+  "keeps pasted mentions as authored text in $kind with diagnostics=$diagnostics",
+  async ({ kind, diagnostics, addressing }) => {
+    setToolActivityPreference(diagnostics);
+    const view = await renderFeedbackShell(kind, undefined, {
+      isDeploymentOwner: true,
+      openFeedback: false,
+    });
+    shellApi.send.mockResolvedValue({ runId: "run-pasted" });
+    const prompt = "@Sourcer ask @everyone to draft a reply to recruiter@example.test.";
+    const textarea = container!.querySelector<HTMLTextAreaElement>(
+      'textarea[name="chat-message"]',
+    )!;
+    const card = document.body.querySelector('[data-message-id="pending-main"]');
+    type(textarea, prompt);
+    await view.click("Send");
+    expect(shellApi.send).toHaveBeenCalledExactlyOnceWith(
+      expect.objectContaining({
+        ...(kind === "group" ? { groupId: "group-1" } : { botId: "bot-1" }),
+        text: prompt,
+        mentions: undefined,
+      }),
+    );
+    expect(shellApi.send.mock.calls[0]![0].addressing).toBe(addressing);
+    expect(shellApi.followUp).not.toHaveBeenCalled();
+    expect(shellApi.answer).not.toHaveBeenCalled();
+    expect(document.body.querySelector('[data-message-id="pending-main"]')).toBe(card);
   },
 );
 
@@ -1853,7 +2045,10 @@ it("keeps native working states without counting waiting-input time as execution
   await view.navigate("/app/g/group-1");
   expect(progress()).toBeUndefined();
   now.mockReturnValue(Date.parse("2026-08-25T12:17:00.000Z"));
-  Object.assign(view.thread, { run: running, activeRuns: [running] });
+  shellApi.answer.mockImplementationOnce(async () => {
+    Object.assign(view.thread, { run: running, activeRuns: [running] });
+    return { ok: true };
+  });
   await view.click("Remote");
   expect(shellApi.answer).toHaveBeenCalledWith({
     groupId: "group-1",

@@ -1100,22 +1100,29 @@ export function createRouter(deps: RouterDeps) {
     },
     bootstrap: authed.bootstrap.handler(async ({ context, input }) => {
       const actor = context.actor;
-      const [me, navigation, archivedBots, archivedGroups] = await Promise.all([
+      const [me, navigation, archivedBots, archivedGroups, groupThread] = await Promise.all([
         meDto(deps, actor),
         spaceNavigationDto(deps, actor, repos, groupRepos),
         repos.listBots(actor, { archived: true }),
         groupRepos.listGroups(actor, { archived: true }),
+        input.groupId
+          ? resolveThreadTarget(deps.prisma, actor, { groupId: input.groupId }).then((target) =>
+              threadSnapshot(deps, target),
+            )
+          : Promise.resolve(null),
       ]);
       const { bots, groups, botSections } = navigation.current;
       const active = bots.find((bot) => bot.id === input.botId);
-      const [thread, routines] = active
-        ? await Promise.all([
-            resolveThreadTarget(deps.prisma, actor, { botId: active.id }).then((target) =>
-              threadSnapshot(deps, target),
-            ),
-            listRoutinesDto(deps, actor, active.id),
-          ])
-        : [null, []];
+      const [thread, routines] = input.groupId
+        ? [groups.some((group) => group.id === input.groupId) ? groupThread : null, []]
+        : active
+          ? await Promise.all([
+              resolveThreadTarget(deps.prisma, actor, { botId: active.id }).then((target) =>
+                threadSnapshot(deps, target),
+              ),
+              listRoutinesDto(deps, actor, active.id),
+            ])
+          : [null, []];
       return {
         me,
         bots,

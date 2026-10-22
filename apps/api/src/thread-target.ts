@@ -631,6 +631,7 @@ export async function sendThreadMessage(
   input: {
     text?: string;
     artifactIds?: string[];
+    addressing?: "coordinator" | "mentions";
     mentions?: MentionTargetInput[];
     replyToMessageId?: string;
     replyQuote?: string;
@@ -868,10 +869,12 @@ export async function sendThreadMessage(
         const members = await lockAndLoadGroupMembers(tx, actor, target);
         const memberBotIds = members.map((member) => member.botId);
         const mentionTargets = splitMentionTargets(input.mentions);
+        // Coordinator routing does not reinterpret the recruiter's authored text as bot commands.
         const targetBotIds = resolveGroupTargetBotIds({
-          text: input.text ?? "",
+          text: input.addressing === "coordinator" ? "" : (input.text ?? ""),
           members: members.map((member) => ({ id: member.botId, name: member.name })),
-          explicitMentions: mentionTargets.botMentionIds,
+          explicitMentions:
+            input.addressing === "coordinator" ? undefined : mentionTargets.botMentionIds,
         });
         const { blocks: attachmentBlocks, artifacts } = await resolveGroupSendAttachments(
           { prisma: tx },

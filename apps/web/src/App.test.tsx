@@ -91,7 +91,7 @@ it("uses the existing cold preload once when the first session resolves", async 
     capability.sessionPending = false;
     await act(async () => root.render(render()));
     const bootstrap = await vi.importActual<typeof BootstrapApi>("./lib/bootstrap");
-    expect((await bootstrap.takeInitialBootstrap()).me.userId).toBe("user-a");
+    expect((await bootstrap.takeInitialBootstrap(undefined, "group-a")).me.userId).toBe("user-a");
     expect(capability.bootstrap).toHaveBeenCalledOnce();
     expect(capability.resetBootstrap).not.toHaveBeenCalled();
   } finally {
@@ -130,7 +130,7 @@ it("recreates authenticated state during render when the account or selected spa
     expect(
       container.firstElementChild?.querySelector("[data-owner]")?.getAttribute("data-owner"),
     ).toBe("user-a:space-a");
-    staleRequest = actualBootstrap.takeInitialBootstrap();
+    staleRequest = actualBootstrap.takeInitialBootstrap(undefined, "group-a");
     capability.userId = "user-b";
     await act(async () => root.render(render()));
     expect(container.querySelector("[data-owner]")?.getAttribute("data-owner")).toBe(

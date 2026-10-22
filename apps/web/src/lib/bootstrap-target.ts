@@ -1,18 +1,22 @@
-export function initialBootstrapTarget(pathname: string, desktop: boolean) {
+export function initialBootstrapTarget(
+  pathname: string,
+  desktop: boolean,
+): { botId?: string; groupId?: string } | null {
   const appRoute = pathname === "/app" || pathname.startsWith("/app/");
   if (!appRoute && !(desktop && pathname === "/")) return null;
-  return { botId: appRoute ? botIdFromPath(pathname) : undefined };
+  return appRoute ? threadTargetFromPath(pathname) : { botId: undefined };
 }
 
-function botIdFromPath(pathname: string) {
+function threadTargetFromPath(pathname: string) {
   const segments = pathname.split("/");
-  if (segments[2] === "g" || segments[2] === "artifacts" || segments[2] === "board")
-    return undefined;
-  const encoded = segments[2];
-  if (!encoded) return undefined;
+  if (segments[2] === "artifacts" || segments[2] === "board") return { botId: undefined };
+  const group = segments[2] === "g";
+  const encoded = segments[group ? 3 : 2];
+  if (!encoded) return { botId: undefined };
   try {
-    return decodeURIComponent(encoded);
+    const id = decodeURIComponent(encoded);
+    return group ? { groupId: id } : { botId: id };
   } catch {
-    return undefined;
+    return { botId: undefined };
   }
 }

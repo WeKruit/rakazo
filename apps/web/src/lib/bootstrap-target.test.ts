@@ -22,12 +22,74 @@ describe("initial bootstrap target", () => {
     expect(initialBootstrapTarget("/app/research%20bot", false)).toEqual({
       botId: "research bot",
     });
-    expect(initialBootstrapTarget("/app/g/group-1", false)).toEqual({ botId: undefined });
+    expect(initialBootstrapTarget("/app/g/group%201", false)).toEqual({ groupId: "group 1" });
+    expect(initialBootstrapTarget("/app/g/%E0%A4%A", false)).toEqual({ botId: undefined });
   });
 
   it("does not prime unrelated routes", () => {
     expect(initialBootstrapTarget("/sign-in", true)).toBeNull();
     expect(initialBootstrapTarget("/onboarding", false)).toBeNull();
+  });
+
+  it("reuses the selected group's identity-verified preload", async () => {
+    vi.stubGlobal("window", { location: { pathname: "/app/g/group-1" } });
+    const current = {
+      me: { userId: "user", spaceId: "space" },
+      thread: { groupId: "group-1", threadId: "thread-1" },
+    };
+    bootstrapRpc.mockResolvedValue(current);
+    const bootstrap = await import("./bootstrap");
+    bootstrap.retainInitialBootstrapForIdentity("user", "space");
+    expect(await bootstrap.takeInitialBootstrap(undefined, "group-1")).toBe(current);
+    expect(bootstrapRpc).toHaveBeenCalledExactlyOnceWith({ groupId: "group-1" });
+  });
+
+  it("does not consume another group's in-flight preload after navigation", async () => {
+    vi.stubGlobal("window", { location: { pathname: "/app/g/old-group" } });
+    let finish!: (value: unknown) => void;
+    const current = { me: { userId: "user", spaceId: "space" }, thread: { groupId: "new-group" } };
+    bootstrapRpc
+      .mockReturnValueOnce(
+        new Promise((resolve) => {
+          finish = resolve;
+        }),
+      )
+      .mockResolvedValueOnce(current);
+    const bootstrap = await import("./bootstrap");
+    const response = bootstrap.takeInitialBootstrap(undefined, "new-group");
+    finish({ me: { userId: "user", spaceId: "space" }, thread: { groupId: "old-group" } });
+    expect(await response).toBe(current);
+    expect(bootstrapRpc).toHaveBeenNthCalledWith(2, { groupId: "new-group" });
+  });
+
+  it("rejects a retained group response after its authenticated identity is invalidated", async () => {
+    vi.stubGlobal("window", { location: { pathname: "/app/g/group-1" } });
+    let finish!: (value: unknown) => void;
+    bootstrapRpc.mockReturnValueOnce(
+      new Promise((resolve) => {
+        finish = resolve;
+      }),
+    );
+    const bootstrap = await import("./bootstrap");
+    bootstrap.retainInitialBootstrapForIdentity("user", "space");
+    const response = bootstrap.takeInitialBootstrap(undefined, "group-1");
+    bootstrap.invalidateInitialBootstrap();
+    finish({ me: { userId: "user", spaceId: "space" }, thread: { groupId: "group-1" } });
+    await expect(response).rejects.toThrow("Bootstrap identity changed");
+    expect(bootstrapRpc).toHaveBeenCalledExactlyOnceWith({ groupId: "group-1" });
+  });
+
+  it.each([
+    { userId: "other-user", spaceId: "space" },
+    { userId: "user", spaceId: "other-space" },
+  ])("replaces a group preload belonging to another identity: %j", async (me) => {
+    vi.stubGlobal("window", { location: { pathname: "/app/g/group-1" } });
+    const current = { me: { userId: "user", spaceId: "space" }, thread: { groupId: "group-1" } };
+    bootstrapRpc.mockResolvedValueOnce({ me }).mockResolvedValueOnce(current);
+    const bootstrap = await import("./bootstrap");
+    bootstrap.retainInitialBootstrapForIdentity("user", "space");
+    expect(await bootstrap.takeInitialBootstrap(undefined, "group-1")).toBe(current);
+    expect(bootstrapRpc).toHaveBeenNthCalledWith(2, { groupId: "group-1" });
   });
 
   it.each([

@@ -161,6 +161,98 @@ describe("account preferences", () => {
     });
   });
 
+  function groupBootstrapDeps() {
+    const f = bootstrapDeps();
+    const group = {
+      id: "group-1",
+      spaceId: f.actor.spaceId,
+      userId: f.actor.userId,
+      name: "Recruiting team",
+      pinned: false,
+      sectionId: null,
+      archivedAt: null,
+      createdAt: new Date("2026-01-01T00:00:00Z"),
+      updatedAt: new Date("2026-01-01T00:00:00Z"),
+      thread: { id: "group-thread", unread: false, messages: [] },
+      members: ["bot-1", "bot-2"].map((id) => ({ bot: { id, name: id, color: "blue", runs: [] } })),
+    };
+    const groupTarget = vi.fn().mockResolvedValue(group);
+    Object.assign(f.deps.prisma, {
+      chatGroup: {
+        findFirst: groupTarget,
+        findMany: vi.fn(async (input) => (input.where.archivedAt === null ? [group] : [])),
+      },
+      run: { findFirst: vi.fn().mockResolvedValue(null), findMany: vi.fn().mockResolvedValue([]) },
+    });
+    return { ...f, group, groupTarget };
+  }
+
+  it("bootstraps the selected authorized group through its native snapshot", async () => {
+    const f = groupBootstrapDeps();
+    await expect(f.client.bootstrap({ groupId: "group-1" })).resolves.toMatchObject({
+      thread: { groupId: "group-1", threadId: "group-thread", cursor: 4 },
+      routines: [],
+    });
+    expect(f.groupTarget).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: {
+          id: "group-1",
+          spaceId: f.actor.spaceId,
+          userId: f.actor.userId,
+          archivedAt: null,
+        },
+      }),
+    );
+    expect(f.snapshot).toHaveBeenCalledOnce();
+    expect(f.target).not.toHaveBeenCalled();
+    expect(f.routines).not.toHaveBeenCalled();
+  });
+
+  it("loads the selected group snapshot while navigation is still loading", async () => {
+    const f = groupBootstrapDeps();
+    const memberships = await f.deps.prisma.spaceMember.findMany();
+    let finish!: (value: typeof memberships) => void;
+    vi.mocked(f.deps.prisma.spaceMember.findMany).mockReturnValueOnce(
+      new Promise((resolve) => {
+        finish = resolve;
+      }) as never,
+    );
+    const response = f.client.bootstrap({ groupId: "group-1" });
+    await vi.waitFor(() => expect(f.groupTarget).toHaveBeenCalledOnce());
+    await vi.waitFor(() => expect(f.snapshot).toHaveBeenCalledOnce());
+    finish(memberships);
+    await expect(response).resolves.toMatchObject({ thread: { groupId: "group-1" } });
+  });
+
+  it.each(["missing-group", "foreign-group"])(
+    "does not expose an inaccessible bootstrap target %s",
+    async (groupId) => {
+      const f = groupBootstrapDeps();
+      f.groupTarget.mockResolvedValue(null);
+      await expect(f.client.bootstrap({ groupId })).rejects.toThrow("Resource not found");
+      expect(f.groupTarget).toHaveBeenCalledWith(
+        expect.objectContaining({
+          where: {
+            id: groupId,
+            spaceId: f.actor.spaceId,
+            userId: f.actor.userId,
+            archivedAt: null,
+          },
+        }),
+      );
+      expect(f.snapshot).not.toHaveBeenCalled();
+    },
+  );
+
+  it("does not read a requested group without an authenticated actor", async () => {
+    const f = groupBootstrapDeps();
+    const client = createRouterClient(createRouter(f.deps), { context: { actor: null } });
+    await expect(client.bootstrap({ groupId: "group-1" })).rejects.toMatchObject({
+      code: "UNAUTHORIZED",
+    });
+    expect(f.groupTarget).not.toHaveBeenCalled();
+  });
+
   it("reports model credential store outages as service unavailable", async () => {
     const { deps, actor } = preferencesDeps("robot");
     Object.assign(deps.prisma, {
