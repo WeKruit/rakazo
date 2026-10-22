@@ -130,7 +130,8 @@ import {
   validateStoredModelAuth,
   verifyMcpInstall,
 } from "@rakazo/adapters";
-import type { Auth } from "@rakazo/auth";
+import type { Auth, OidcConfig } from "@rakazo/auth";
+import { getOidcAccountStatus } from "@rakazo/auth";
 import type {
   Actor,
   BoardEvent,
@@ -647,6 +648,7 @@ export interface RouterDeps {
     integrationsCatalogUrl?: string;
     mcpAllowPrivateEndpoint?: boolean;
     firstPartyMcpUrl?: string;
+    oidc?: Pick<OidcConfig, "issuer" | "clientId">;
   };
 }
 
@@ -808,6 +810,29 @@ export function createRouter(deps: RouterDeps) {
   const repos = createRepos(deps.prisma);
   const onboardingDeps = { prisma: deps.prisma, events: deps.events, connectors: deps.connectors };
   const mcpOAuth = deps.mcpOAuth ?? new McpOAuthBroker(deps.prisma, deps.secrets);
+  const usesProductIdentity = (row: {
+    transport: string;
+    endpoint: string | null;
+    secretId: string | null;
+  }) =>
+    Boolean(
+      deps.env.firstPartyMcpUrl &&
+        row.transport === "streamable_http" &&
+        row.endpoint === deps.env.firstPartyMcpUrl &&
+        !row.secretId,
+    );
+  const productIdentityStatus = (actor: Actor) =>
+    deps.env.oidc
+      ? getOidcAccountStatus(deps.prisma, deps.env.oidc, actor)
+      : Promise.resolve("reconnect" as const);
+  async function mcpServerForActor(row: Parameters<typeof mcpServerDto>[0], actor: Actor) {
+    return mcpServerDto(
+      row,
+      usesProductIdentity(row)
+        ? await productIdentityStatus(actor)
+        : await mcpOAuth.statusFor(row, actor),
+    );
+  }
   const codexCatalog = deps.codexCatalog ?? new CodexCatalogCache();
   const deploymentModel = deps.env.deploymentModelConfigured
     ? { provider: deps.env.defaultProvider }
@@ -4214,14 +4239,19 @@ export function createRouter(deps: RouterDeps) {
               })
             : [];
           const ciphertextById = new Map(secrets.map((secret) => [secret.id, secret.ciphertext]));
+          const productStatus = rows.some(usesProductIdentity)
+            ? await productIdentityStatus(context.actor)
+            : undefined;
           return Promise.all(
             rows.map(async (row) =>
               mcpServerDto(
                 row,
-                await mcpOAuth.statusForCiphertext(
-                  row.secretId ? ciphertextById.get(row.secretId) : undefined,
-                  row.secretId ?? undefined,
-                ),
+                usesProductIdentity(row)
+                  ? productStatus
+                  : await mcpOAuth.statusForCiphertext(
+                      row.secretId ? ciphertextById.get(row.secretId) : undefined,
+                      row.secretId ?? undefined,
+                    ),
               ),
             ),
           );
@@ -4273,7 +4303,7 @@ export function createRouter(deps: RouterDeps) {
               },
             });
           });
-          return mcpServerDto(row, await mcpOAuth.statusFor(row, context.actor));
+          return mcpServerForActor(row, context.actor);
         }),
         update: authed.mcp.servers.update.handler(async ({ context, input }) => {
           for (let attempt = 0; attempt < 5; attempt++) {
@@ -4416,7 +4446,7 @@ export function createRouter(deps: RouterDeps) {
                   return updated;
                 }),
             );
-            if (row) return mcpServerDto(row, await mcpOAuth.statusFor(row, context.actor));
+            if (row) return mcpServerForActor(row, context.actor);
           }
           throw new ORPCError("CONFLICT", { message: "MCP credentials changed; retry" });
         }),
@@ -4630,6 +4660,26 @@ export function createRouter(deps: RouterDeps) {
             const expectedRedirect = new URL("/mcp/oauth/callback", deps.env.webOrigin).toString();
             if (new URL(input.redirectUri).toString() !== expectedRedirect) {
               throw new Error("MCP OAuth redirect URI is not allowed");
+            }
+            if (deps.env.firstPartyMcpUrl) {
+              const server = await deps.prisma.mcpServer.findFirst({
+                where: {
+                  id: input.serverId,
+                  spaceId: context.actor.spaceId,
+                  userId: context.actor.userId,
+                  enabled: true,
+                },
+              });
+              if (!server?.enabled) throw new IsolationError();
+              if (usesProductIdentity(server)) {
+                const status = await productIdentityStatus(context.actor);
+                return {
+                  status:
+                    status === "connected"
+                      ? ("already_connected" as const)
+                      : ("product_sign_in_required" as const),
+                };
+              }
             }
             return await mcpOAuth.begin({
               ...input,

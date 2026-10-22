@@ -9,6 +9,7 @@ import type { Auth, AuthEnv } from "./index.js";
 import { createAuth } from "./index.js";
 import {
   getOidcAccessToken,
+  getOidcAccountStatus,
   isCurrentOidcAccount,
   oidcAccountSubject,
   oidcConfigFromEnv,
@@ -1312,4 +1313,93 @@ describe("first-party CRM native OIDC access", () => {
       expect(refreshTokenRequest).not.toHaveBeenCalled();
     },
   );
+});
+
+describe("read-only product OIDC connection metadata", () => {
+  const config = { issuer, clientId: "test-client" };
+  const context = { userId: "product-user", spaceId: "product-space" };
+  function metadata(extra: Record<string, unknown> = {}) {
+    return {
+      id: "product-account",
+      userId: context.userId,
+      providerId: "oidc",
+      accountId: oidcAccountSubject(issuer, "subject-1"),
+      idToken: jwt({ sub: "subject-1", aud: config.clientId }),
+      hasAccessToken: true,
+      hasRefreshToken: true,
+      accessTokenExpiresAt: new Date(Date.now() + 60_000) as Date | null,
+      refreshTokenExpiresAt: null as Date | null,
+      ...extra,
+    };
+  }
+  function client(rows: ReturnType<typeof metadata>[]) {
+    return {
+      $queryRaw: vi
+        .fn()
+        .mockResolvedValueOnce([{ userId: context.userId, spaceId: context.spaceId }])
+        .mockResolvedValueOnce(rows),
+      $transaction: vi.fn(),
+    };
+  }
+  it("reports an issuer/client-bound current account without decrypting or refreshing any grant", async () => {
+    const prisma = client([metadata()]);
+    expect(await getOidcAccountStatus(prisma as never, config, context)).toBe("connected");
+    expect(prisma.$transaction).not.toHaveBeenCalled();
+    expect(globalThis.fetch).not.toHaveBeenCalled();
+    const sql = prisma.$queryRaw.mock.calls[1]![0].sql as string;
+    expect(sql).toContain('"accessToken" IS NOT NULL');
+    expect(sql).toContain('"refreshToken" IS NOT NULL');
+    expect(sql).not.toContain('SELECT "accessToken"');
+  });
+  it.each([
+    "missing",
+    "unlink",
+    "owner",
+    "issuer",
+    "client",
+    "expired",
+    "expired-refresh",
+    "missing-expiry",
+    "invalid-expiry",
+    "empty-token",
+    "ambiguous",
+  ])("does not claim a valid connection for %s account metadata", async (failure) => {
+    const row = metadata();
+    if (failure === "owner") row.userId = "another-user";
+    if (failure === "issuer")
+      row.accountId = oidcAccountSubject("https://other.example.test", "subject-1");
+    if (failure === "client") row.idToken = jwt({ sub: "subject-1", aud: "other-client" });
+    if (failure === "expired" || failure === "expired-refresh")
+      row.accessTokenExpiresAt = new Date(0);
+    if (failure === "expired") row.hasRefreshToken = false;
+    if (failure === "missing-expiry") row.accessTokenExpiresAt = null;
+    if (failure === "invalid-expiry") row.accessTokenExpiresAt = new Date(Number.NaN);
+    if (failure === "empty-token") {
+      row.hasAccessToken = false;
+      row.hasRefreshToken = false;
+    }
+    if (failure === "expired-refresh") row.refreshTokenExpiresAt = new Date(0);
+    const rows =
+      failure === "missing" || failure === "unlink"
+        ? []
+        : failure === "ambiguous"
+          ? [row, row]
+          : [row];
+    expect(await getOidcAccountStatus(client(rows) as never, config, context)).toBe("reconnect");
+    expect(globalThis.fetch).not.toHaveBeenCalled();
+  });
+  it("recognizes refreshable expiry without exercising that refresh and rejects a removed Space membership", async () => {
+    expect(
+      await getOidcAccountStatus(
+        client([metadata({ accessTokenExpiresAt: new Date(0) })]) as never,
+        config,
+        context,
+      ),
+    ).toBe("connected");
+    const prisma = client([]);
+    prisma.$queryRaw.mockReset().mockResolvedValue([]);
+    await expect(getOidcAccountStatus(prisma as never, config, context)).rejects.toThrow();
+    expect(prisma.$queryRaw).toHaveBeenCalledTimes(1);
+    expect(globalThis.fetch).not.toHaveBeenCalled();
+  });
 });
