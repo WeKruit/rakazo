@@ -1851,6 +1851,83 @@ describe("retained candidate report API", () => {
       }
     },
   );
+  it("hydrates distinct artifacts concurrently without duplicating shared pages or changing order", async () => {
+    const f = fixture();
+    const second = {
+      ...f.occurrence,
+      rowIndex: 1,
+      artifactRef: { ...f.occurrence.artifactRef, artifactId: "second" },
+    };
+    const unreadable = {
+      ...f.occurrence,
+      artifactRef: { ...f.occurrence.artifactRef, artifactId: "unreadable" },
+    };
+    f.page.items[0] = {
+      ...f.occurrence,
+      artifactRef: { ...f.occurrence.artifactRef, sha256: "0".repeat(64) },
+    };
+    f.page.items.push(
+      second,
+      { ...f.occurrence, rowIndex: 1 },
+      unreadable,
+      { ...unreadable, rowIndex: 1 },
+      { ...f.occurrence, artifactRef: { ...f.occurrence.artifactRef, artifactId: "fourth" } },
+      { ...f.occurrence, artifactRef: { ...f.occurrence.artifactRef, artifactId: "last" } },
+    );
+    f.findFirst.mockImplementation(async (...args: unknown[]) => {
+      const { where } = args[0] as { where: { id: string; spaceId: string; userId: string } };
+      expect(where).toEqual({ id: where.id, spaceId: actor.spaceId, userId: actor.userId });
+      return {
+        id: where.id,
+        spaceId: actor.spaceId,
+        userId: actor.userId,
+        storageKey: where.id,
+        botId: "bot",
+        mimeType: "application/json",
+        hash: f.occurrence.artifactRef.sha256,
+        size: f.bytes.length,
+      };
+    });
+    let release!: () => void;
+    const blocked = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    f.get.mockImplementation(async (...args: unknown[]) => {
+      const key = args[0];
+      if (key === f.occurrence.artifactRef.artifactId) await blocked;
+      return key === "unreadable" ? Buffer.from("changed") : f.bytes;
+    });
+    const pending = api.listRecruitingCandidateSources(f.deps, actor, input);
+    let result!: Awaited<typeof pending>;
+    try {
+      await vi.waitFor(() => expect(f.get).toHaveBeenCalledTimes(4));
+    } finally {
+      release();
+      result = await pending;
+    }
+    expect(f.get).toHaveBeenCalledTimes(5);
+    expect(result.items.map((item) => item.report?.fields[0]?.value)).toEqual([
+      undefined,
+      "Neighbor Person",
+      "Neighbor Person",
+      undefined,
+      undefined,
+      "Selected Person",
+      "Selected Person",
+    ]);
+    expect(result.items[3]).toEqual(unreadable);
+    expect(result.items[4]?.report).toBeUndefined();
+    expect(result.items.map((item) => item.artifactRef.artifactId)).toEqual([
+      "report-artifact",
+      "second",
+      "report-artifact",
+      "unreadable",
+      "unreadable",
+      "fourth",
+      "last",
+    ]);
+  });
+
   it("reads a shared artifact once for multiple selected occurrences", async () => {
     const f = fixture();
     f.page.items.push({ ...f.occurrence });
