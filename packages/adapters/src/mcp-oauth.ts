@@ -47,6 +47,8 @@ type OAuthState = {
 };
 
 export type OAuthMaterial = {
+  /** Request/session-only redaction values; never persisted as credential material. */
+  redact?: string[];
   secret?: string;
   env?: Record<string, string>;
   headers?: Record<string, string>;
@@ -62,6 +64,7 @@ export function oauthMaterialSecrets(material: OAuthMaterial): string[] {
     const bearer = value.match(/^Bearer\s+(.+)$/i);
     if (bearer?.[1]) values.push(bearer[1]);
   };
+  for (const value of material.redact ?? []) add(value);
   add(material.secret);
   add(material.oauth?.tokens?.access_token);
   add(material.oauth?.tokens?.refresh_token);

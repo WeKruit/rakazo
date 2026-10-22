@@ -12,6 +12,7 @@
   "dependencies": {
     "@rakazo/adapter-kit": "workspace:*",
     "@rakazo/adapters": "workspace:*",
+    "@rakazo/auth": "workspace:*",
     "@rakazo/core": "workspace:*",
     "@rakazo/db": "workspace:*",
     "@rakazo/logging": "workspace:*",

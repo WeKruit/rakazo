@@ -4,6 +4,14 @@
 
 **Goal:** 在现有 Rakazo 网页交付 Main/Sourcer 原生协作、可恢复交互与记忆，迁入现有招聘工作，完成 [GOAL.md](GOAL.md) 的 P0–P6 基础闭环与 [PRODUCT-SCOPE.md](PRODUCT-SCOPE.md) 的 Juicebox / Metix / Grok Bot 完整产品范围。
 
+### 2026-10-22：重登入口与产品身份到 CRM 接线增量，待在线验收
+
+普通产品的默认入口现复用本人已授权、原生排序的招聘群聊；显式私聊/岗位深链与 developer 原默认保持。bootstrap 失败恢复先读取真实 user/Space，身份未知不推断模式，账号/Space 切换与卸载后丢弃迟到结果；成功路径不增加身份读取。18项聚焦检查、Web生产类型及独立复核通过。
+
+产品 OIDC Account 到显式受信第一方 MCP 的接线复用 Better Auth 加密 token、原生 Prisma adapter 与 Account 行锁；API/worker使用同源配置，401比较实际被拒 token 的代次，个人连接优先，token不复制到MCP Secret。未使用的公开token HTTP接口关闭，内部原生刷新和正常登录/link保留。配置 `FIRST_PARTY_MCP_URL` 后，新人沿现有 managed defaults 自动安装 CRM 连接，Main十项工具、Sourcer八项读取；无配置目录/digest不变，私人连接、撤销/删除及运行中任务不被接管。真实路由的配置传递遗漏已在独立复核中补齐。
+
+认证/MCP五份文件291项、默认安装36项、配置读取24项分别通过，不累加为产品总数；生产源码类型图和独立审查通过。全DB含测试类型检查仍有既存 credential-secrets fixture 的两条错误，未修改或宣称整套通过。以上是实现与聚焦检查；真实 PostgreSQL 刷新竞争、实际产品身份到CRM调用、平台模型推理与两位新人浏览器验收仍须完成，不能提前称开箱闭环或高可用完成。本增量不含旧home/restore改动、生产迁移或外联。
+
 ### 2026-10-22：核心 Agent 优化与产品交付分线
 
 用户已明确：独立 session 完整负责核心 Agent 的 memory、成本追踪、任务最短有效路径、工具/MCP/CLI 效率、招聘 skills、主动澄清与真实 Autumn/PeopleSearchBench；当前 session 持续做产品注册/登录、新人自动安装、业务集成、前端 Dashboard/聊天与发布。沿现有接口交接，不另建抽象或将 Agent 策略耦合进页面。当前产品先完成平台模型实际执行、准入账号的新手链路及 CRM 身份接线；两位真人与网页验收仍需实证。职责与验收边界统一见 [PRODUCT-SCOPE.md](PRODUCT-SCOPE.md#核心-agent-与产品的并行职责)。私有交接含真实版本、工作区和证据位置，不将客户资料或密钥写入公开仓库。

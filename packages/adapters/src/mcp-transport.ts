@@ -56,6 +56,7 @@ export interface McpRemoteOptions {
   fallbackToSse?: boolean;
   /** Let the official SDK own token refresh, re-authentication, and request retry. */
   authProvider?: (OAuthClientProvider & { runtimeAuth?: McpRuntimeAuth }) | AuthProvider;
+  runtimeAuth?: McpRuntimeAuth;
   network?: RemoteTransportDependencies;
   signal?: AbortSignal;
   timeoutMs?: number;
@@ -295,9 +296,10 @@ export class McpSession {
     this.remoteFetch = safeFetch;
     const resourceFetch = withEndpointOriginFallback(url.origin, safeFetch);
     const runtimeAuth =
-      options.authProvider && "runtimeAuth" in options.authProvider
+      options.runtimeAuth ??
+      (options.authProvider && "runtimeAuth" in options.authProvider
         ? options.authProvider.runtimeAuth
-        : undefined;
+        : undefined);
     const fetch = runtimeAuth ? runtimeAuth.wrapFetch(resourceFetch) : resourceFetch;
     const signal = combineSignals(options.signal, AbortSignal.timeout(options.timeoutMs ?? 15_000));
     let usedFallback = false;

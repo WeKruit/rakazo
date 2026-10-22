@@ -7,28 +7,37 @@ import type { Mock } from "vitest";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { Auth, AuthEnv } from "./index.js";
 import { createAuth } from "./index.js";
-import { isCurrentOidcAccount, oidcAccountSubject } from "./oidc.js";
+import {
+  getOidcAccessToken,
+  isCurrentOidcAccount,
+  oidcAccountSubject,
+  oidcConfigFromEnv,
+} from "./oidc.js";
 
 const state = vi.hoisted(() => ({
   db: {} as Record<string, Record<string, unknown>[]>,
   blockRootAdapter: false,
 }));
-vi.mock("better-auth/adapters/prisma", () => ({
-  prismaAdapter: () => {
-    const create = memoryAdapter(state.db);
-    return (...args: Parameters<typeof create>) =>
-      new Proxy(create(...args), {
-        get(target, key, receiver) {
-          const value = Reflect.get(target, key, receiver);
-          if (state.blockRootAdapter && typeof value === "function")
-            return () => {
-              throw new Error("Root adapter used inside token transaction");
-            };
-          return value;
-        },
-      });
-  },
-}));
+vi.mock("better-auth/adapters/prisma", async (original) => {
+  const native = await original<typeof PrismaAdapterModule>();
+  return {
+    prismaAdapter: (prisma: object, options: Parameters<typeof native.prismaAdapter>[1]) => {
+      if ("$queryRaw" in prisma) return native.prismaAdapter(prisma, options);
+      const create = memoryAdapter(state.db);
+      return (...args: Parameters<typeof create>) =>
+        new Proxy(create(...args), {
+          get(target, key, receiver) {
+            const value = Reflect.get(target, key, receiver);
+            if (state.blockRootAdapter && typeof value === "function")
+              return () => {
+                throw new Error("Root adapter used inside token transaction");
+              };
+            return value;
+          },
+        });
+    },
+  };
+});
 vi.mock("@rakazo/db", async (original) => ({
   ...(await original<typeof Db>()),
   bootstrapUserSpace: vi.fn(),
@@ -258,7 +267,9 @@ beforeEach(() => {
       if (url.pathname === "/token") {
         const body = new URLSearchParams(String(init?.body));
         if (body.get("grant_type") === "refresh_token") {
-          expect(body.get("refresh_token")).toBe("fake-refresh-token");
+          expect(["fake-refresh-token", "rotated-refresh-token"]).toContain(
+            body.get("refresh_token"),
+          );
           return refreshTokenRequest(init);
         }
         const code = body.get("code")!;
@@ -1095,4 +1106,210 @@ it.each([
       "test-client",
     ),
   ).toBe(accepted);
+});
+
+describe("first-party CRM native OIDC access", () => {
+  function dbForToken(tx: Record<string, unknown>, stored: Record<string, unknown>) {
+    let tail = Promise.resolve();
+    const queryRaw = vi.fn(async (query: { strings?: string[] }) =>
+      String(query.strings?.join(" ")).includes("space_members")
+        ? [{ userId: stored.userId, spaceId: "space-1" }]
+        : [structuredClone(stored)],
+    );
+    Object.assign(tx, { $executeRaw: vi.fn(async () => 0), $queryRaw: queryRaw });
+    return {
+      queryRaw,
+      $transaction: vi.fn((run: (client: unknown) => Promise<unknown>) => {
+        const previous = tail;
+        let release!: () => void;
+        tail = new Promise<void>((resolve) => {
+          release = resolve;
+        });
+        return previous.then(() => run(tx)).finally(release);
+      }),
+    };
+  }
+
+  it("shares existing OIDC env validation without inventing another login configuration", () => {
+    expect(oidcConfigFromEnv({})).toBeUndefined();
+    expect(() => oidcConfigFromEnv({ OIDC_CLIENT_ID: "id" })).toThrow(
+      "must be configured together",
+    );
+    expect(() => oidcConfigFromEnv({ AUTH_PASSWORD_ENABLED: "false" })).toThrow(
+      "requires OIDC configuration",
+    );
+    expect(
+      oidcConfigFromEnv({
+        OIDC_ISSUER: issuer,
+        OIDC_CLIENT_ID: "test-client",
+        OIDC_CLIENT_SECRET: "test-client-secret",
+      }),
+    ).toMatchObject({ issuer, scopes: ["openid", "email", "profile"] });
+  });
+
+  it("uses the native encrypted account adapter and adopts one rotation for concurrent readers and stale 401s", async () => {
+    setup();
+    await signIn();
+    const account = rows("account")[0]!;
+    account.accessTokenExpiresAt = new Date(0);
+    const { stored, tx } = await tokenTransaction(account);
+    const prisma = dbForToken(tx, stored);
+    const context = { userId: String(account.userId), spaceId: "space-1" };
+    const [a, b] = await Promise.all([
+      getOidcAccessToken(
+        prisma as never,
+        auth,
+        {
+          issuer,
+          clientId: "test-client",
+          clientSecret: "test-client-secret",
+          name: "SSO",
+          scopes: ["openid", "email", "profile"],
+          allowSignupBypass: false,
+        },
+        context,
+      ),
+      getOidcAccessToken(
+        prisma as never,
+        auth,
+        {
+          issuer,
+          clientId: "test-client",
+          clientSecret: "test-client-secret",
+          name: "SSO",
+          scopes: ["openid", "email", "profile"],
+          allowSignupBypass: false,
+        },
+        context,
+      ),
+    ]);
+    expect([a, b]).toEqual(["rotated-access-token", "rotated-access-token"]);
+    expect(refreshTokenRequest).toHaveBeenCalledTimes(1);
+    expect(stored.accessToken).not.toBe("rotated-access-token");
+    expect(stored.refreshToken).not.toBe("rotated-refresh-token");
+    await expect(
+      getOidcAccessToken(
+        prisma as never,
+        auth,
+        {
+          issuer,
+          clientId: "test-client",
+          clientSecret: "test-client-secret",
+          name: "SSO",
+          scopes: ["openid", "email", "profile"],
+          allowSignupBypass: false,
+        },
+        context,
+        "fake-access-token",
+      ),
+    ).resolves.toBe("rotated-access-token");
+    expect(refreshTokenRequest).toHaveBeenCalledTimes(1);
+    expect(JSON.stringify(prisma.queryRaw.mock.calls)).toContain("FOR UPDATE");
+  });
+
+  it("refreshes a still-current 401 grant through native encrypted persistence, but never retries a failing rotation", async () => {
+    setup();
+    await signIn();
+    const account = rows("account")[0]!;
+    const { stored, tx } = await tokenTransaction(account);
+    const prisma = dbForToken(tx, stored);
+    const config = {
+      issuer,
+      clientId: "test-client",
+      clientSecret: "test-client-secret",
+      name: "SSO",
+      scopes: ["openid", "email", "profile"],
+      allowSignupBypass: false,
+    };
+    const context = { userId: String(account.userId), spaceId: "space-1" };
+    await expect(
+      getOidcAccessToken(prisma as never, auth, config, context, "fake-access-token"),
+    ).resolves.toBe("rotated-access-token");
+    expect(refreshTokenRequest).toHaveBeenCalledTimes(1);
+    const saved = structuredClone(stored);
+    refreshTokenRequest.mockImplementation(async (init) => {
+      expect(new URLSearchParams(String(init?.body)).get("refresh_token")).toBe(
+        "rotated-refresh-token",
+      );
+      return json({ error: "temporarily_unavailable" }, 503);
+    });
+    await expect(
+      getOidcAccessToken(prisma as never, auth, config, context, "rotated-access-token"),
+    ).rejects.toMatchObject({ body: { code: "FAILED_TO_REFRESH_ACCESS_TOKEN" } });
+    expect(refreshTokenRequest).toHaveBeenCalledTimes(2);
+    expect(stored).toEqual(saved);
+  });
+
+  it("publishes a native successful rotation before honoring caller cancellation", async () => {
+    setup();
+    await signIn();
+    const account = rows("account")[0]!;
+    account.accessTokenExpiresAt = new Date(0);
+    const { stored, tx } = await tokenTransaction(account);
+    const prisma = dbForToken(tx, stored);
+    const caller = new AbortController();
+    const native = refreshTokenRequest.getMockImplementation()!;
+    refreshTokenRequest.mockImplementation(async (init) => {
+      caller.abort();
+      return native(init);
+    });
+    const config = {
+      issuer,
+      clientId: "test-client",
+      clientSecret: "test-client-secret",
+      name: "SSO",
+      scopes: ["openid", "email", "profile"],
+      allowSignupBypass: false,
+    };
+    await expect(
+      getOidcAccessToken(prisma as never, auth, config, {
+        userId: String(account.userId),
+        spaceId: "space-1",
+        signal: caller.signal,
+      }),
+    ).rejects.toMatchObject({ name: "AbortError" });
+    const writes = tx.account.update.mock.calls.length;
+    expect(writes).toBe(1);
+    await expect(
+      getOidcAccessToken(prisma as never, auth, config, {
+        userId: String(account.userId),
+        spaceId: "space-1",
+      }),
+    ).resolves.toBe("rotated-access-token");
+    expect(refreshTokenRequest).toHaveBeenCalledTimes(1);
+  });
+
+  it.each(["membership", "owner", "client", "issuer", "expired-without-refresh"])(
+    "rejects invalid %s before CRM dispatch",
+    async (failure) => {
+      setup();
+      await signIn();
+      const account = rows("account")[0]!;
+      const { stored, tx } = await tokenTransaction(account);
+      const prisma = dbForToken(tx, stored);
+      if (failure === "membership") prisma.queryRaw.mockResolvedValueOnce([]);
+      if (failure === "owner") stored.userId = "another-user";
+      if (failure === "expired-without-refresh") {
+        stored.accessTokenExpiresAt = new Date(0);
+        stored.refreshToken = null;
+      }
+      const config = {
+        issuer,
+        clientId: "test-client",
+        clientSecret: "test-client-secret",
+        name: "SSO",
+        scopes: ["openid", "email", "profile"],
+        allowSignupBypass: false,
+      };
+      if (failure === "client") config.clientId = "another-client";
+      if (failure === "issuer") config.issuer = "https://another.example.test";
+      await expect(
+        getOidcAccessToken(prisma as never, auth, config, {
+          userId: String(account.userId),
+          spaceId: "space-1",
+        }),
+      ).rejects.toThrow();
+      expect(refreshTokenRequest).not.toHaveBeenCalled();
+    },
+  );
 });

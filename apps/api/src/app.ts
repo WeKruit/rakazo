@@ -72,7 +72,12 @@ import {
   toTeamChatInbound,
   withSecretPersistence,
 } from "@rakazo/adapters";
-import { createAuth, isBlockedAuthPath, loopbackTwinOrigins } from "@rakazo/auth";
+import {
+  createAuth,
+  getOidcAccessToken,
+  isBlockedAuthPath,
+  loopbackTwinOrigins,
+} from "@rakazo/auth";
 import type { Actor, AuthCapabilities } from "@rakazo/contracts";
 import { signupAllowlistBootUpdate, signupPolicyFromEnv } from "@rakazo/core";
 import type { Pool, PrismaClient } from "@rakazo/db";
@@ -306,6 +311,7 @@ export async function createApp(
   const home = new LocalAgentHomeStore(env.dataDir);
   const artifacts = createArtifactStore(env.dataDir, env.artifactStorage);
   const memory = new MarkdownMemoryStore(prisma);
+  const firstPartyOidc = env.oidc;
   const mcp = new McpConnector(
     prisma,
     secrets,
@@ -315,6 +321,14 @@ export async function createApp(
       network: remoteConnectors,
       events,
       allowPrivateEndpoint: env.mcpAllowPrivateEndpoint,
+      firstParty:
+        env.firstPartyMcpUrl && firstPartyOidc
+          ? {
+              endpoint: env.firstPartyMcpUrl,
+              accessToken: (context, rejectedToken) =>
+                getOidcAccessToken(prisma, auth, firstPartyOidc, context, rejectedToken),
+            }
+          : undefined,
     },
     mcpOAuth,
   );
@@ -579,6 +593,7 @@ export async function createApp(
       imageTag: env.imageTag,
       integrationsCatalogUrl: env.integrationsCatalogUrl,
       mcpAllowPrivateEndpoint: env.mcpAllowPrivateEndpoint,
+      firstPartyMcpUrl: env.firstPartyMcpUrl,
     },
   });
   const rpc = new RPCHandler(router, {

@@ -1,8 +1,12 @@
 import { createHash } from "node:crypto";
+import { runWithAdapter } from "@better-auth/core/context";
+import { IsolationError, Prisma, type PrismaClient, requireMembership } from "@rakazo/db";
 import type { BetterAuthPlugin } from "better-auth";
+import { prismaAdapter } from "better-auth/adapters/prisma";
 import { APIError } from "better-auth/api";
 import { getOAuth2Tokens, refreshAccessTokenRequest } from "better-auth/oauth2";
 import { genericOAuth } from "better-auth/plugins";
+import type { Auth } from "./index.js";
 
 export interface OidcConfig {
   issuer: string;
@@ -11,6 +15,128 @@ export interface OidcConfig {
   name: string;
   scopes: string[];
   allowSignupBypass: boolean;
+}
+
+/** API and worker read exactly the same existing product sign-in configuration. */
+export function oidcConfigFromEnv(
+  source: Record<string, string | undefined>,
+): OidcConfig | undefined {
+  const optional = (value: string | undefined) => value?.trim() || undefined;
+  const issuer = optional(source.OIDC_ISSUER);
+  const clientId = optional(source.OIDC_CLIENT_ID);
+  const clientSecret = optional(source.OIDC_CLIENT_SECRET);
+  const credentials = [issuer, clientId, clientSecret];
+  if (credentials.some(Boolean) && !credentials.every(Boolean))
+    throw new Error(
+      "OIDC_ISSUER, OIDC_CLIENT_ID and OIDC_CLIENT_SECRET must be configured together",
+    );
+  if (issuer) {
+    try {
+      const url = new URL(issuer);
+      if (url.protocol !== "https:" || url.username || url.password || url.search || url.hash)
+        throw new Error();
+    } catch {
+      throw new Error("OIDC_ISSUER must be an HTTPS issuer URL");
+    }
+  }
+  for (const key of ["AUTH_PASSWORD_ENABLED", "OIDC_ALLOW_SIGNUP_BYPASS"]) {
+    const value = source[key];
+    if (value && !["true", "false"].includes(value))
+      throw new Error(`${key} must be true or false`);
+  }
+  if (source.AUTH_PASSWORD_ENABLED === "false" && !issuer)
+    throw new Error("AUTH_PASSWORD_ENABLED=false requires OIDC configuration");
+  return issuer && clientId && clientSecret
+    ? {
+        issuer,
+        clientId,
+        clientSecret,
+        name: optional(source.OIDC_NAME) ?? "SSO",
+        scopes: (optional(source.OIDC_SCOPES) ?? "openid email profile")
+          .split(/[\s,]+/)
+          .filter(Boolean),
+        allowSignupBypass: source.OIDC_ALLOW_SIGNUP_BYPASS === "true",
+      }
+    : undefined;
+}
+
+/** Read/rotate the current caller's grant on one native Account transaction, never an MCP secret. */
+export async function getOidcAccessToken(
+  prisma: PrismaClient,
+  auth: Pick<Auth, "api" | "options">,
+  oidc: OidcConfig,
+  context: { userId: string; spaceId: string; signal?: AbortSignal },
+  rejectedToken?: string,
+): Promise<string> {
+  context.signal?.throwIfAborted();
+  const outcome = await prisma.$transaction(
+    async (tx) => {
+      await tx.$executeRaw`SET LOCAL lock_timeout = '5s'`;
+      await requireMembership(tx as PrismaClient, context.userId, context.spaceId);
+      const accounts = await tx.$queryRaw<
+        Array<{
+          id: string;
+          userId: string;
+          providerId: string;
+          accountId: string;
+          idToken: string | null;
+        }>
+      >(Prisma.sql`
+      SELECT id, "userId", "providerId", "accountId", "idToken" FROM account
+      WHERE "userId" = ${context.userId} AND "providerId" = 'oidc'
+      ORDER BY id FOR UPDATE
+    `);
+      const matching = accounts.filter(
+        (account) =>
+          account.userId === context.userId &&
+          isCurrentOidcAccount(account, oidc.issuer, oidc.clientId),
+      );
+      if (matching.length !== 1)
+        throw new IsolationError("Your CRM sign-in is unavailable. Sign in again.");
+      context.signal?.throwIfAborted();
+      const account = matching[0]!;
+      const adapter = prismaAdapter(tx, { provider: "postgresql" })(auth.options);
+      // Native OAuth refresh uses its bounded provider signal. Once rotating, persist before observing cancellation.
+      try {
+        const token = await runWithAdapter(adapter, async () => {
+          let result: {
+            accessToken?: string;
+            accessTokenExpiresAt?: Date;
+            idToken?: string | null;
+          } = await auth.api.getAccessToken({
+            body: { accountId: account.id, userId: context.userId },
+          });
+          if (rejectedToken !== undefined && result.accessToken === rejectedToken)
+            result = await auth.api.refreshToken({
+              body: { accountId: account.id, userId: context.userId },
+            });
+          const expiresAt = result.accessTokenExpiresAt
+            ? new Date(result.accessTokenExpiresAt).getTime()
+            : Number.NaN;
+          if (
+            !result.accessToken ||
+            !Number.isFinite(expiresAt) ||
+            expiresAt <= Date.now() ||
+            !isCurrentOidcAccount(
+              { ...account, idToken: result.idToken ?? account.idToken },
+              oidc.issuer,
+              oidc.clientId,
+            )
+          )
+            throw new IsolationError("Your CRM sign-in is unavailable. Sign in again.");
+          return result.accessToken;
+        });
+        return { token };
+      } catch (error) {
+        // A completed provider rotation must commit even if subsequent validation rejects it.
+        return { error };
+      }
+    },
+    { timeout: 30_000, maxWait: 5_000 },
+  );
+  if ("error" in outcome) throw outcome.error;
+  context.signal?.throwIfAborted();
+  return outcome.token;
 }
 
 /** Discovery never gates API startup. Failed attempts share exponential backoff. */
