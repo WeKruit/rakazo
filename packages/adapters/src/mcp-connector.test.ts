@@ -8,6 +8,7 @@ import {
   McpConnector,
   requireMcpToolAssignment,
 } from "./mcp-connector.js";
+import type { OAuthMaterial } from "./mcp-oauth.js";
 import { type McpOAuthBroker, StoredMcpOAuthProvider } from "./mcp-oauth.js";
 import { InMemoryRealtimeFanout } from "./realtime.js";
 import { migrateSecrets } from "./secret-migration.js";
@@ -378,6 +379,210 @@ describe("MCP connector session cache", () => {
       }
     },
   );
+
+  it.each([
+    "accepted",
+    "live-refresh",
+    "live-revoked",
+    "live-endpoint",
+    "live-later-notification",
+    "revoked",
+    "disabled",
+    "endpoint",
+    "transport",
+    "revision",
+    "foreign-owner",
+    "pointer",
+    "missing-secret",
+    "ref",
+    "digest",
+    "later-notification",
+    "cancelled",
+  ])("publishes only the authoritative refreshed MCP connection: %s", async (change) => {
+    const controller = new AbortController();
+    const context = {
+      spaceId: "w1",
+      userId: "u1",
+      botId: "bot-1",
+      signal: controller.signal,
+    };
+    const initial = {
+      oauth: {
+        obtainedAt: 1,
+        tokens: {
+          access_token: "expired-access",
+          refresh_token: "initial-refresh",
+          token_type: "bearer",
+          expires_in: 1,
+        },
+      },
+    };
+    const accepted = {
+      oauth: {
+        obtainedAt: Date.now(),
+        tokens: {
+          access_token: "accepted-access",
+          refresh_token: "accepted-refresh",
+          token_type: "bearer",
+          expires_in: 3600,
+        },
+      },
+    };
+    const assignment = { ...ASSIGNMENT, server: { ...SERVER, secretId: "initial-secret" } };
+    const current: Omit<typeof assignment.server, "secretId"> & {
+      secretId: string | null;
+      userId: string;
+      spaceId: string;
+      enabled: boolean;
+    } = { ...assignment.server, userId: "u1", spaceId: "w1", enabled: true };
+    let row: { id: string; ciphertext: string } | null = {
+      id: "initial-secret",
+      ciphertext: "initial-ref",
+    };
+    let notify = (_ref: string) => {};
+    let afterLiveRefresh = false;
+    const load = vi.fn(async (ref: string) => {
+      if (ref === "initial-ref") return JSON.stringify(initial);
+      if (
+        change === "later-notification" ||
+        (afterLiveRefresh && change === "live-later-notification")
+      )
+        notify(ref);
+      if (change === "cancelled") controller.abort();
+      return JSON.stringify(change === "digest" ? initial : accepted);
+    });
+    const findServer = vi.fn(
+      async ({
+        where,
+      }: {
+        where: { id: string; spaceId: string; userId: string; enabled: boolean };
+      }) =>
+        current.id === where.id &&
+        current.spaceId === where.spaceId &&
+        current.userId === where.userId &&
+        current.enabled === where.enabled
+          ? current
+          : null,
+    );
+    const prisma = {
+      botMcpServer: {
+        findMany: vi.fn(async () => [assignment]),
+        findFirst: vi.fn(async () => assignment),
+      },
+      mcpServer: { findFirst: findServer },
+      secret: { findFirst: vi.fn(async () => row) },
+    };
+    const refresh = vi.fn();
+    let activeMaterial: OAuthMaterial | undefined;
+    const providerFor: McpOAuthBroker["providerFor"] = async (
+      _server,
+      _context,
+      loaded,
+      persisted,
+    ) => {
+      activeMaterial = loaded.material;
+      return new StoredMcpOAuthProvider(SERVER.id, loaded.material, async () => undefined, {
+        refreshNetwork: async () => ({ fetch: globalThis.fetch, close: async () => undefined }),
+        refresh: async () => {
+          refresh();
+          Object.assign(loaded.material, structuredClone(accepted));
+          row = { id: "accepted-secret", ciphertext: "accepted-ref" };
+          current.secretId = row.id;
+          persisted?.({ id: row.id, ref: row.ciphertext, material: accepted });
+          // The broker adopts its committed grant before flushing the native store notification.
+          notify(row.ciphertext);
+          if (change === "revoked") current.secretId = null;
+          if (change === "disabled") current.enabled = false;
+          if (change === "endpoint") current.endpoint = "https://other.example.test/mcp";
+          if (change === "transport") current.transport = "sse";
+          if (change === "revision") current.revision += 1;
+          if (change === "foreign-owner") current.userId = "u2";
+          if (change === "pointer") current.secretId = "other-secret";
+          if (change === "missing-secret") row = null;
+          if (change === "ref") row!.ciphertext = "other-ref";
+        },
+      });
+    };
+    const state = { failNext: false, initializations: 0, calls: [] as string[] };
+    vi.stubGlobal("fetch", mcpFetch(state));
+    const connector = new McpConnector(
+      prisma as never,
+      {
+        load,
+        onChange(listener: (ref: string) => void) {
+          notify = listener;
+          return () => {};
+        },
+      } as never,
+      { network: TEST_NETWORK },
+      { providerFor } as McpOAuthBroker,
+    );
+    try {
+      const tools = await connector.discoverTools(context as never);
+      expect(refresh).toHaveBeenCalledOnce();
+      const succeeds = change === "accepted" || change.startsWith("live-");
+      expect(tools).toHaveLength(succeeds ? 1 : 0);
+      expect((connector as unknown as { sessions: Map<string, unknown> }).sessions.size).toBe(
+        succeeds ? 1 : 0,
+      );
+      expect(prisma.secret.findFirst).toHaveBeenLastCalledWith({
+        where: { id: "accepted-secret", userId: "u1", spaceId: "w1" },
+      });
+      if (["missing-secret", "ref"].includes(change)) expect(findServer).not.toHaveBeenCalled();
+      else
+        expect(findServer).toHaveBeenCalledWith({
+          where: { id: SERVER.id, userId: "u1", spaceId: "w1", enabled: true },
+        });
+      if (change.startsWith("live-")) {
+        activeMaterial!.oauth!.obtainedAt = 1;
+        const events = [];
+        for await (const event of connector.execute(
+          {
+            tool: tools[0]!.name,
+            args: {},
+            executionId: "live-refresh",
+            route: tools[0]!.route,
+          },
+          context as never,
+        ))
+          events.push(event);
+        expect(events).toMatchObject([{ type: "result" }]);
+        expect(refresh).toHaveBeenCalledTimes(2);
+        expect((connector as unknown as { sessions: Map<string, unknown> }).sessions.size).toBe(1);
+        afterLiveRefresh = true;
+        if (change === "live-refresh") {
+          await connector.discoverTools(context as never);
+          expect(state.initializations).toBe(1);
+        } else {
+          if (change === "live-revoked") current.secretId = null;
+          if (change === "live-endpoint") current.endpoint = "https://other.example.test/mcp";
+          notify("accepted-ref");
+          const denied = [];
+          for await (const event of connector.execute(
+            {
+              tool: tools[0]!.name,
+              args: {},
+              executionId: "after-live-change",
+              route: tools[0]!.route,
+            },
+            context as never,
+          ))
+            denied.push(event);
+          expect(denied).toMatchObject([{ type: "error" }]);
+          expect(state.calls).toEqual(["echo"]);
+          expect((connector as unknown as { sessions: Map<string, unknown> }).sessions.size).toBe(
+            0,
+          );
+        }
+      } else if (change === "accepted") {
+        await connector.discoverTools(context as never);
+        expect(refresh).toHaveBeenCalledOnce();
+        expect(state.initializations).toBe(1);
+      }
+    } finally {
+      await connector.close();
+    }
+  });
 
   it("keeps sessions across unchanged TTL reads and reconnects on observed rotation", async () => {
     vi.useFakeTimers();
