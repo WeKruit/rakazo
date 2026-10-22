@@ -12,6 +12,8 @@ UI 的依据固定为 `WeKruit/wekruit-pa` 的 `codex/wekruit-branding` 分支�
 
 相关离线检查已覆盖编辑、重试、切换上下文和原卡保持；它们不代替真实网页验收。发布后须分别以两个真实岗位核验候选加载、草稿编辑保存、完整对话和恢复，并对同一批来源测量读取性能。Inbox 与 Interview 仍缺少真实邮件/日历结果的页面投影，不能称为完整复刻。全文 playbook、M1–M5 和业务外联闭环仍未完成。
 
+追加实现：Job Brief 与 Client feedback 使用原模板的完整聊天/370px 摘要布局，复用同一原生 Transcript、Composer、待处理卡及实际岗位/反馈记录。候选工作台停止读取无关的批量评估、问题和记忆，保留真实轮次、证据、单人评估和反馈。真实网页暴露的新文案翻译键问题来自未更新的 Lingui 目录；通过原提取/编译流程及生产目录检查修复，不在组件中添加替代文案。候选读取已减少数据库查询，但单次发布前后延迟样本不能证明提速，偶发读取失败仍需真实网页跟踪。
+
 **Architecture:** 用户聊天/反馈 → Rakazo 原生 Main ↔ Sourcer ↔ Autumn Agent（已有 MCP/API）→ 结果/证据 → 用户反馈 → 同一个 Autumn task 继续。Main/Sourcer 通过 prompt、skills 和 playbook 自主协作；Rakazo/Pi 提供现成 harness、群聊、委派、会话、记忆和交互。网页、数据库和 Dashboard 保存并呈现真实输出，不接管 Agent 的推理和招聘步骤。
 
 **职责边界：** Autumn 负责研究、匹配和候选判断；Sourcer/Autumn agent 只做联络：传递 JD/playbook，把真人反馈转成同一 task 的 prompt/reply，接收并保存实际输出，简洁转述结果与问题。收到输出后不另读岗位/旧评估去重做候选评审、排序或资格判断；保存与连续性沿用原生记录。 用户可反馈任意一人、几人或整体方向；仅传递实际涉及的对象与规则，不强制整批复审，也不把局部反馈扩成全池重新评估。

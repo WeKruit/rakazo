@@ -109,6 +109,7 @@ type Props = {
   onClose: () => void;
   showDiagnostics?: boolean;
   presentation?: "panel" | "workspace";
+  summary?: "brief" | "feedback";
   view?: "results" | "shortlist" | "contacts";
   tab?: RecruitingPanelState["tab"];
   onTabChange?: (tab: RecruitingPanelState["tab"]) => void;
@@ -332,11 +333,13 @@ function FeedbackHistory({
   candidateKey,
   refreshSignal,
   onAccessError,
+  showEmpty = false,
 }: {
   roleId: string;
   candidateKey?: string;
   refreshSignal?: number;
   onAccessError: (error: unknown) => void;
+  showEmpty?: boolean;
 }) {
   const [records, setRecords] = useState<RecruitingFeedbackRecord[]>([]);
   const [cursor, setCursor] = useState<string | null>(null);
@@ -376,12 +379,17 @@ function FeedbackHistory({
       generation.current++;
     };
   }, [read, refreshSignal]);
-  if (!records.length && !failed) return null;
+  if (!records.length && !failed && !showEmpty) return null;
   return (
     <section className="space-y-2">
       <h4 className="font-medium">
         <Trans>Feedback history</Trans>
       </h4>
+      {showEmpty && !records.length && !failed ? (
+        <p role={pending ? "status" : undefined} className="text-sm text-muted-foreground">
+          {pending ? <Trans>Loading…</Trans> : <Trans>No saved feedback yet.</Trans>}
+        </p>
+      ) : null}
       {records.map((record) => (
         <div key={record.id} className="space-y-1 border-l pl-3">
           <p className="text-sm text-muted-foreground">
@@ -1966,6 +1974,7 @@ function RecruitingWorkspace({
   candidateFeedbackRecipients,
   showDiagnostics = false,
   presentation = "panel",
+  summary,
   view = "results",
   tab,
   onTabChange,
@@ -1984,6 +1993,8 @@ function RecruitingWorkspace({
   const [confirmationFailed, setConfirmationFailed] = useState(false);
   const [candidateList, setCandidateList] = useState(() => readRecruitingPanelState(null));
   const activeTab = tab ?? (presentation === "workspace" ? "evidence" : candidateList.tab);
+  const candidateWorkspace =
+    presentation === "workspace" && !showDiagnostics && activeTab === "evidence" && !summary;
   const requestedTab = useRef(tab);
   requestedTab.current = tab;
   useEffect(() => {
@@ -2127,22 +2138,25 @@ function RecruitingWorkspace({
               : current,
           );
           setWorkspaceSnapshot({ workspace });
+          if (summary) return;
           const [assessments, research, questions, documents] = await Promise.all([
-            workspace
+            workspace && !candidateWorkspace
               ? rpc.recruiting.listAssessments({ roleId: workspace.role.id }).catch(onReadError)
               : Promise.resolve([]),
             workspace
               ? rpc.recruiting.listResearch({ roleId: workspace.role.id }).catch(onReadError)
               : Promise.resolve({ tasks: [], actions: [], observations: [] }),
-            workspace
+            workspace && !candidateWorkspace
               ? rpc.recruiting
                   .listQuestions({ threadId, roleId: workspace.role.id })
                   .catch(onReadError)
               : Promise.resolve({ questions: [] }),
-            Promise.all([
-              rpc.memory.list({ scope: "user" }).catch(onReadError),
-              ...(botId ? [rpc.memory.list({ scope: "bot", botId }).catch(onReadError)] : []),
-            ]).then((lists) => lists.flat()),
+            candidateWorkspace
+              ? Promise.resolve([])
+              : Promise.all([
+                  rpc.memory.list({ scope: "user" }).catch(onReadError),
+                  ...(botId ? [rpc.memory.list({ scope: "bot", botId }).catch(onReadError)] : []),
+                ]).then((lists) => lists.flat()),
           ]);
           if (cancelled || epoch !== readEpoch.current) return;
           const verified = await rpc.recruiting.getWorkspace({ threadId }).catch(onReadError);
@@ -2173,7 +2187,7 @@ function RecruitingWorkspace({
     return () => {
       cancelled = true;
     };
-  }, [userId, threadId, botId, refresh, refreshSignal, denyAccess]);
+  }, [userId, threadId, botId, refresh, refreshSignal, denyAccess, summary, candidateWorkspace]);
   const workspace = workspaceSnapshot?.workspace;
   const criteria = workspace?.revision.criteria ?? [];
   const brief = workspace?.revision.brief;
@@ -2217,8 +2231,15 @@ function RecruitingWorkspace({
     ).values(),
   ];
   const assessments = snapshot?.assessments ?? [];
-  const showInternalAssessments = showDiagnostics || assessments.length > 0;
-  const retainInternalAssessmentFilters = showInternalAssessments || !snapshot;
+  const showInternalAssessments =
+    showDiagnostics ||
+    assessments.length > 0 ||
+    (candidateWorkspace &&
+      ((candidatePage?.counts.assessed ?? 0) > 0 ||
+        candidateFilters.assessmentState !== undefined ||
+        candidateFilters.verdict !== undefined));
+  const retainInternalAssessmentFilters =
+    candidateWorkspace || showInternalAssessments || !snapshot;
   const candidateRequestFilters = useMemo(() => {
     if (
       retainInternalAssessmentFilters ||
@@ -2301,7 +2322,7 @@ function RecruitingWorkspace({
     setCandidateLoading(!!roleId);
     setCandidateFailed(false);
     setCandidatePage(null);
-    if (!roleId) return;
+    if (!roleId || summary) return;
     const query = candidateQuery.current;
     void (async () => {
       let page = await rpc.recruiting.listCandidates({
@@ -2408,6 +2429,7 @@ function RecruitingWorkspace({
     threadId,
     denyAccess,
     resetUnavailableCandidateSort,
+    summary,
   ]);
   useEffect(() => {
     let cancelled = false;
@@ -2645,6 +2667,159 @@ function RecruitingWorkspace({
     } finally {
       if (isCurrent()) setSavingCriteria(false);
     }
+  }
+  if (summary) {
+    return (
+      <section
+        className="hire-live-criteria"
+        aria-label={summary === "brief" ? t`Search Criteria` : t`Search refinement`}
+      >
+        <div className="hire-panel-heading">
+          {summary === "brief" ? (
+            <BriefcaseBusiness size={18} aria-hidden />
+          ) : (
+            <Building2 size={18} aria-hidden />
+          )}
+          <div>
+            <strong>
+              {summary === "brief" ? (
+                <Trans>Search Criteria</Trans>
+              ) : (
+                <Trans>Search refinement</Trans>
+              )}
+            </strong>
+            <span>
+              <Trans>From this role’s saved requirements</Trans>
+            </span>
+          </div>
+          <Button
+            variant="ghost"
+            size="icon-sm"
+            aria-label={t`Refresh criteria`}
+            disabled={loading}
+            onClick={() => setRefresh((value) => value + 1)}
+          >
+            <RefreshCw size={15} aria-hidden />
+          </Button>
+        </div>
+        {failed ? (
+          <p role="alert" className="hire-source-hint">
+            <Trans>Could not load recruiting. Refresh to try again.</Trans>
+          </p>
+        ) : loading && !workspaceSnapshot ? (
+          <p role="status" className="hire-source-hint">
+            <Trans>Loading…</Trans>
+          </p>
+        ) : workspace ? (
+          <>
+            <div className="hire-jd-summary">
+              <strong>{workspace.role.title}</strong>
+            </div>
+            {brief?.fields
+              .filter((field) => field.value !== null)
+              .map((field) => (
+                <div className="hire-criterion-row" key={field.key}>
+                  {Object.hasOwn(briefFieldLabels, field.key) ? (
+                    <span>{briefFieldLabels[field.key]}</span>
+                  ) : null}
+                  <strong className="whitespace-pre-wrap">{field.value}</strong>
+                  {field.state === "conflict" ? (
+                    <span>
+                      <Trans>Conflicting information</Trans>
+                    </span>
+                  ) : field.state !== "known" ? (
+                    <span>
+                      <Trans>Unknown</Trans>
+                    </span>
+                  ) : null}
+                  {field.origin === "inferred" ? (
+                    <span>
+                      <Trans>Assumption</Trans>
+                    </span>
+                  ) : null}
+                </div>
+              ))}
+            {brief?.searchFilters.map((filter) => (
+              <div className="hire-criterion-row" key={filter.id}>
+                <span>
+                  {filter.mode === "include" ? (
+                    <Trans>Include</Trans>
+                  ) : filter.mode === "exclude" ? (
+                    <Trans>Exclude</Trans>
+                  ) : (
+                    <Trans>Prefer</Trans>
+                  )}
+                </span>
+                <strong>{filter.statement}</strong>
+              </div>
+            ))}
+            {criteria.map((criterion) => (
+              <div className="hire-criterion-row" key={criterion.id}>
+                <span>
+                  {criterion.priority === "hard" ? (
+                    <Trans>Required</Trans>
+                  ) : (
+                    <Trans>Preferred</Trans>
+                  )}
+                </span>
+                <CriteriaExpression expression={criterion.expression} />
+              </div>
+            ))}
+            {workspace.revision.preferences.length ? (
+              <div className="hire-criterion-row">
+                <span>
+                  <Trans>Preferences</Trans>
+                </span>
+                <ul>
+                  {workspace.revision.preferences.map((preference) => (
+                    <li key={preference}>{preference}</li>
+                  ))}
+                </ul>
+              </div>
+            ) : null}
+            {!brief?.fields.some((field) => field.value !== null) &&
+            !brief?.searchFilters.length &&
+            !criteria.length &&
+            !workspace.revision.preferences.length ? (
+              <p className="hire-source-hint">
+                <Trans>Share the role requirements in the conversation to build this brief.</Trans>
+              </p>
+            ) : null}
+            {roleSources.length ? (
+              <details className="hire-criterion-row">
+                <summary>
+                  <Trans>Role sources</Trans>
+                </summary>
+                <Sources
+                  sourceTarget={{ kind: "role", threadId, roleRevisionId: workspace.revision.id }}
+                  sources={roleSources}
+                  showDiagnostics={false}
+                />
+              </details>
+            ) : null}
+            {summary === "feedback" ? (
+              <div className="hire-criterion-row">
+                <FeedbackHistory
+                  key={workspace.role.id}
+                  roleId={workspace.role.id}
+                  refreshSignal={(refreshSignal ?? 0) + refresh}
+                  onAccessError={denyAccess}
+                  showEmpty
+                />
+              </div>
+            ) : null}
+            <p className="hire-source-hint">
+              <Check size={15} aria-hidden />
+              <Trans>Requirements and feedback stay with this role.</Trans>
+            </p>
+          </>
+        ) : (
+          <p className="hire-source-hint">
+            <Trans>No role linked yet. Describe the role in this conversation.</Trans>
+          </p>
+        )}
+      </section>
+    );
   }
   return (
     <section

@@ -492,7 +492,7 @@ async function mounted(
   recipients?: ComponentProps<typeof RecruitingPanel>["candidateFeedbackRecipients"],
   navigation: Pick<
     ComponentProps<typeof RecruitingPanel>,
-    "tab" | "onTabChange" | "presentation" | "view"
+    "tab" | "onTabChange" | "presentation" | "view" | "summary"
   > = {},
 ) {
   const container = document.createElement("div");
@@ -553,6 +553,208 @@ async function mounted(
   };
   return { container: document.body, render, click, expand, reveal, discuss, feedback };
 }
+
+it.each(["results", "shortlist", "contacts"] as const)(
+  "loads %s candidates without unrelated assessment, question or memory history and keeps native evidence and feedback",
+  async (viewName) => {
+    api.listCandidates.mockResolvedValue(
+      candidatePage([{ ...candidateFixture(), shortlisted: viewName === "shortlist" }]),
+    );
+    const view = await mounted("thread-1", undefined, false, undefined, {
+      presentation: "workspace",
+      view: viewName,
+      tab: "evidence",
+    });
+    expect(api.listAssessments).not.toHaveBeenCalled();
+    expect(api.listQuestions).not.toHaveBeenCalled();
+    expect(api.list).not.toHaveBeenCalled();
+    expect(api.listResearch).toHaveBeenCalledExactlyOnceWith({ roleId: role.id });
+    expect(api.listCandidates).toHaveBeenCalledWith(
+      expect.objectContaining({
+        roleId: role.id,
+        ...(viewName === "shortlist" ? { shortlisted: true } : {}),
+      }),
+    );
+    expect(view.container.querySelector('select[aria-label="Internal assessment"]')).not.toBeNull();
+    expect(
+      view.container.querySelector('select[aria-label="Research round"]')?.textContent,
+    ).toContain("Search update");
+    await act(async () =>
+      view.container
+        .querySelector<HTMLButtonElement>(
+          ".hire-candidate-identity, .hire-table button[aria-haspopup='dialog']",
+        )!
+        .click(),
+    );
+    expect(api.getAssessment).toHaveBeenCalledWith({
+      roleId: role.id,
+      candidateKey: "candidate-1",
+      version: 1,
+    });
+    expect(api.listCandidateSources).toHaveBeenCalledWith(
+      expect.objectContaining({ roleId: role.id, candidateKey: "candidate-1" }),
+    );
+    expect(api.listFeedback).toHaveBeenCalledWith({
+      roleId: role.id,
+      candidateKey: "candidate-1",
+      limit: 20,
+    });
+    await view.click("Give feedback");
+    await changeSelect(view.container, "Feedback", "good_example");
+    await changeFeedbackReason(view.container, "Prefer this background for the next search.");
+    await view.click("Send feedback");
+    expect(view.feedback).toHaveBeenCalledWith(
+      expect.objectContaining({ roleId: role.id, candidateKey: "candidate-1" }),
+      expect.objectContaining({
+        choice: "good_example",
+        reason: "Prefer this background for the next search.",
+      }),
+      expect.any(String),
+    );
+    expect(api.answer).not.toHaveBeenCalled();
+  },
+);
+
+it("preserves an explicit workspace assessment filter when a refreshed pool has no assessments", async () => {
+  api.listCandidates.mockResolvedValue(candidatePage());
+  const view = await mounted("thread-1", undefined, false, undefined, {
+    presentation: "workspace",
+    tab: "evidence",
+  });
+  await changeSelect(view.container, "Internal assessment", "current");
+  const empty = candidatePage([]);
+  empty.counts.assessed = 0;
+  api.listCandidates.mockResolvedValue(empty);
+  await view.render("thread-1", 1);
+  expect(
+    view.container.querySelector<HTMLSelectElement>('select[aria-label="Internal assessment"]')
+      ?.value,
+  ).toBe("current");
+  expect(api.listCandidates).toHaveBeenLastCalledWith(
+    expect.objectContaining({ roleId: role.id, assessmentState: "current" }),
+  );
+  expect(api.listAssessments).not.toHaveBeenCalled();
+});
+
+it("shows actual saved brief criteria without exposing internal field keys or fetching unrelated views", async () => {
+  api.getWorkspace.mockResolvedValue({
+    role,
+    revision: {
+      ...revision,
+      brief: {
+        fields: [
+          {
+            key: "location",
+            value: "Bay Area, no remote",
+            state: "known",
+            origin: "user_instruction",
+            consequential: true,
+            sourceRefIds: [source.id],
+          },
+          {
+            key: "salary_range",
+            value: "Not disclosed",
+            state: "unknown",
+            origin: "jd",
+            consequential: true,
+            sourceRefIds: [source.id],
+          },
+          {
+            key: "private_internal_scope_key",
+            value: "Robotics-company experience is a preference",
+            state: "known",
+            origin: "inferred",
+            consequential: false,
+            sourceRefIds: [source.id],
+          },
+        ],
+        searchFilters: [
+          {
+            id: "filter-internal",
+            mode: "prefer",
+            statement: "Previous robotics-company employment",
+            origin: "user_instruction",
+            sourceRefIds: [source.id],
+          },
+        ],
+        rules: [],
+        questions: [],
+        confirmation: null,
+      },
+    },
+  });
+  const view = await mounted("thread-1", undefined, false, undefined, {
+    presentation: "workspace",
+    summary: "brief",
+  });
+  expect(view.container.textContent).toContain("Systems engineer");
+  expect(view.container.textContent).toContain("Bay Area, no remote");
+  expect(view.container.textContent).toContain("Not disclosed");
+  expect(view.container.textContent).toContain("Assumption");
+  expect(view.container.textContent).toContain("Previous robotics-company employment");
+  expect(view.container.textContent).toContain("Build systems");
+  expect(view.container.textContent).not.toContain("private_internal_scope_key");
+  expect(view.container.textContent).not.toContain("salary_range");
+  expect(view.container.querySelector('[role="tablist"]')).toBeNull();
+  expect(api.listCandidates).not.toHaveBeenCalled();
+  expect(api.listAssessments).not.toHaveBeenCalled();
+  expect(api.listResearch).not.toHaveBeenCalled();
+  expect(api.listQuestions).not.toHaveBeenCalled();
+  expect(api.list).not.toHaveBeenCalled();
+  expect(api.confirmBrief).not.toHaveBeenCalled();
+  expect(api.editCriteria).not.toHaveBeenCalled();
+});
+
+it("keeps feedback summaries scoped to the current role and ignores a late previous-role response", async () => {
+  let finish!: (value: { feedback: unknown[]; nextCursor: null }) => void;
+  api.listFeedback.mockReturnValueOnce(
+    new Promise((resolve) => {
+      finish = resolve;
+    }),
+  );
+  const view = await mounted("thread-1", undefined, false, undefined, {
+    presentation: "workspace",
+    summary: "feedback",
+  });
+  expect(api.listFeedback).toHaveBeenCalledExactlyOnceWith({ roleId: role.id, limit: 20 });
+  const nextRole = {
+    ...role,
+    id: "other-role",
+    sourceThreadId: "thread-2",
+    title: "Simulation engineer",
+  };
+  api.getWorkspace.mockResolvedValue({
+    role: nextRole,
+    revision: {
+      ...revision,
+      roleId: nextRole.id,
+      preferences: ["Simulation experience"],
+      criteria: [],
+    },
+  });
+  await view.render("thread-2");
+  expect(api.listFeedback).toHaveBeenLastCalledWith({ roleId: nextRole.id, limit: 20 });
+  await act(async () =>
+    finish({
+      feedback: [
+        {
+          id: "old-feedback",
+          feedback: { target: "role", expectedRoleRevision: 2 },
+          source: { quote: "Old role feedback must stay behind" },
+          createdAt: "2026-01-01T00:00:00Z",
+        },
+      ],
+      nextCursor: null,
+    }),
+  );
+  expect(view.container.textContent).toContain("Simulation engineer");
+  expect(view.container.textContent).toContain("Simulation experience");
+  expect(view.container.textContent).toContain("No saved feedback yet.");
+  expect(view.container.textContent).not.toContain("Old role feedback must stay behind");
+  expect(view.container.textContent).not.toContain("Small teams");
+  expect(api.answer).not.toHaveBeenCalled();
+  expect(api.editCriteria).not.toHaveBeenCalled();
+});
 
 async function changeStatement(container: HTMLElement, statement: string, index = 0) {
   const input = container.querySelectorAll<HTMLTextAreaElement>('textarea[aria-label="Statement"]')[
@@ -6512,9 +6714,9 @@ it("renders the sourcing workspace from saved findings and uses native draft, sh
 
 it("keeps workspace shortlist and contacts navigation out of saved filters and candidate mutations", async () => {
   api.listAssessments.mockResolvedValue([]);
-  api.listCandidates.mockResolvedValue(
-    candidatePage([{ ...candidateFixture("nav-person", false), name: "Nav Person" }]),
-  );
+  const page = candidatePage([{ ...candidateFixture("nav-person", false), name: "Nav Person" }]);
+  page.counts.assessed = 0;
+  api.listCandidates.mockResolvedValue(page);
   const view = await mounted("thread-1", undefined, false, undefined, {
     presentation: "workspace",
     view: "shortlist",
