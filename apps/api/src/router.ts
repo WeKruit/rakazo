@@ -279,6 +279,7 @@ import {
   createRecruitingRole,
   editRecruitingCriteria,
   getRecruitingAssessment,
+  getRecruitingCorrespondence,
   getRecruitingWorkspace,
   listRecruitingAssessments,
   listRecruitingCandidateSources,
@@ -3389,6 +3390,14 @@ export function createRouter(deps: RouterDeps) {
       }),
     },
     recruiting: {
+      correspondence: authed.recruiting.correspondence.handler(async ({ context, input }) =>
+        getRecruitingCorrespondence(
+          deps.prisma,
+          context.actor,
+          await resolveThreadTarget(deps.prisma, context.actor, input),
+          input.view,
+        ),
+      ),
       readSource: authed.recruiting.readSource.handler(({ context, input }) =>
         readRecruitingSource(deps, context.actor, input),
       ),

@@ -129,6 +129,7 @@ import {
   RecruitingAssessmentSchema,
   RecruitingCandidateFeedbackSelectionSchema,
   RecruitingCandidateReportSchema,
+  RecruitingCorrespondenceSchema,
   RecruitingId,
   RecruitingResearchActionSchema,
   RecruitingResearchSavedObservationSchema,
@@ -571,6 +572,9 @@ export const appContract = {
     heartbeat: oc.input(botId).output(z.object({ ok: z.literal(true) })),
   },
   recruiting: {
+    correspondence: oc
+      .input(threadTarget.safeExtend({ view: z.enum(["inbox", "interview", "contacts"]) }))
+      .output(RecruitingCorrespondenceSchema),
     listFeedback: oc.input(ListRecruitingFeedbackInput).output(ListRecruitingFeedbackOutput),
     readSource: oc.input(ReadRecruitingSourceInput).output(
       z.discriminatedUnion("kind", [

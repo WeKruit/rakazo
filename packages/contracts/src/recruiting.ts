@@ -1341,3 +1341,54 @@ export const RecruitingOutreachSequenceSchema = z.strictObject({
   revisesArtifactId: RecruitingId.optional(),
 });
 export type RecruitingOutreachSequence = z.infer<typeof RecruitingOutreachSequenceSchema>;
+
+/** Read-only presentation of retained provider receipts; never a send or booking command. */
+export const RecruitingCorrespondenceSchema = z.strictObject({
+  status: z.enum(["not_checked", "ready", "empty", "unsupported", "failed"]),
+  checkedAt: IsoDate.nullable(),
+  connectionChanged: z.boolean(),
+  connections: z.array(
+    z.strictObject({
+      name: z.string(),
+      status: z.enum(["configured", "needs_connection", "needs_access", "disabled"]),
+    }),
+  ),
+  emails: z.array(
+    z.strictObject({
+      id: Id,
+      sender: z.string().nullable(),
+      recipients: z.array(z.string()),
+      subject: z.string(),
+      body: z.string(),
+      snippet: z.boolean(),
+      date: IsoDate.nullable(),
+      url: z.httpUrl().nullable(),
+    }),
+  ),
+  events: z.array(
+    z.strictObject({
+      id: Id,
+      kind: z.enum(["event", "availability"]),
+      title: z.string().nullable(),
+      start: z.string(),
+      end: z.string(),
+      timeZone: z.string().nullable(),
+      attendees: z.array(z.string()),
+      status: z.string().nullable(),
+      location: z.string().nullable(),
+      url: z.httpUrl().nullable(),
+    }),
+  ),
+  contacts: z.array(
+    z.strictObject({
+      candidateKey: RecruitingId,
+      linkedinUrl: z.httpUrl(),
+      emails: z.array(z.strictObject({ address: z.email(), status: z.string().nullable() })),
+      phones: z.array(z.strictObject({ number: z.string(), type: z.string().nullable() })),
+      source: z.string(),
+      checkedAt: IsoDate,
+    }),
+  ),
+  partial: z.boolean(),
+});
+export type RecruitingCorrespondence = z.infer<typeof RecruitingCorrespondenceSchema>;

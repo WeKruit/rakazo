@@ -17,6 +17,11 @@ msgstr ""
 msgid " (unread)"
 msgstr " (непрочитано)"
 
+#. placeholder {0}: candidatePage.counts.candidates
+#: src/pages/RecruitingPanel.tsx
+msgid "{0, plural, =1 {# candidate in the pool} other {# candidates in the pool}}"
+msgstr ""
+
 #. placeholder {0}: candidatePage.total
 #: src/pages/RecruitingPanel.tsx
 msgid "{0, plural, =1 {# candidate} other {# candidates}}"
@@ -261,6 +266,10 @@ msgstr "Аккаунты"
 #: src/components/ApprovalRulesSettings.tsx
 msgid "Action confirmations"
 msgstr "Подтверждения действий"
+
+#: src/pages/RecruitingPanel.tsx
+msgid "Actions"
+msgstr ""
 
 #. placeholder {0}: bot.name
 #. placeholder {0}: group.name
@@ -676,14 +685,6 @@ msgstr ""
 msgid "Ask the server owner to configure this provider."
 msgstr "Попросите владельца сервера настроить этого провайдера."
 
-#: src/pages/RecruitingCorrespondence.tsx
-msgid "Ask WeKruit to read the connected calendar. No available times or bookings have been loaded into this view."
-msgstr ""
-
-#: src/pages/RecruitingCorrespondence.tsx
-msgid "Ask WeKruit to read the connected mailbox. Replies have not been loaded into this view."
-msgstr ""
-
 #: src/pages/RecruitingPanel.tsx
 msgid "Assessment date"
 msgstr ""
@@ -755,10 +756,6 @@ msgstr "Автоматические отправители появятся п�
 msgid "Autumn rank"
 msgstr ""
 
-#: src/pages/RecruitingCorrespondence.tsx
-msgid "Availability not loaded"
-msgstr ""
-
 #: src/pages/RecruitingPanel.tsx
 msgid "Available"
 msgstr ""
@@ -766,6 +763,10 @@ msgstr ""
 #: src/pages/RoutineEditor.tsx
 msgid "Available after the routine is saved"
 msgstr "Доступно после сохранения задачи"
+
+#: src/pages/RecruitingCorrespondence.tsx
+msgid "Available time"
+msgstr ""
 
 #: src/pages/shell/bot-credentials.tsx
 msgid "Available to this bot's shell commands as {commandVariable}"
@@ -897,6 +898,10 @@ msgstr ""
 msgid "Brief confirmed"
 msgstr ""
 
+#: src/pages/RecruitingPanel.tsx
+msgid "Browse all candidates"
+msgstr ""
+
 #: src/pages/PluginsOverlay.tsx
 msgid "Browse MCP servers"
 msgstr "Просмотреть MCP-серверы"
@@ -908,6 +913,10 @@ msgstr ""
 #: src/pages/KnowledgeSection.tsx
 msgid "Built-in"
 msgstr "Встроенный"
+
+#: src/pages/RecruitingCorrespondence.tsx
+msgid "Calendar event"
+msgstr ""
 
 #: src/App.tsx
 msgid "Can't reach the server."
@@ -986,10 +995,6 @@ msgstr ""
 msgid "Candidate reference"
 msgstr ""
 
-#: src/pages/RecruitingCorrespondence.tsx
-msgid "Candidate replies"
-msgstr ""
-
 #: src/pages/RecruitingPanel.tsx
 msgid "Candidate sort"
 msgstr ""
@@ -1066,10 +1071,6 @@ msgstr "Проверить."
 
 #: src/pages/RecruitingCorrespondence.tsx
 msgid "Check inbox"
-msgstr ""
-
-#: src/pages/RecruitingCorrespondence.tsx
-msgid "Check real availability before preparing an invitation."
 msgstr ""
 
 #: src/lib/model-connection-preflight.ts
@@ -1153,6 +1154,7 @@ msgstr ""
 msgid "Clearing…"
 msgstr "Очистка…"
 
+#: src/pages/RecruitingPanel.tsx
 #: src/pages/Shell.tsx
 #: src/pages/shell/RecruitingNavigation.tsx
 msgid "Client feedback"
@@ -1346,6 +1348,10 @@ msgstr "Компьютеры выключены. Установите SANDBOX_PR
 msgid "Configure a plugin catalog on the server to connect apps."
 msgstr ""
 
+#: src/pages/RecruitingCorrespondence.tsx
+msgid "Configured"
+msgstr ""
+
 #: src/pages/ModelSettingsOverlay.tsx
 msgid "Configured by deployment"
 msgstr "Настраивается путем развертывания"
@@ -1390,6 +1396,10 @@ msgstr "Подключить модель"
 #: src/pages/ModelBackupsSettings.tsx
 msgid "Connect a provider to add backups."
 msgstr "Подключите провайдера, чтобы добавить резервные модели."
+
+#: src/pages/RecruitingCorrespondence.tsx
+msgid "Connect account"
+msgstr ""
 
 #: src/pages/ModelSettingsOverlay.tsx
 msgid "Connect API key"
@@ -1466,6 +1476,11 @@ msgstr "Соединение с {0} все еще не завершено. Вы 
 msgid "Consideration resumed"
 msgstr ""
 
+#: src/pages/RecruitingPanel.tsx
+msgid "Contact details have not been checked yet."
+msgstr ""
+
+#: src/pages/RecruitingPanel.tsx
 #: src/pages/shell/RecruitingNavigation.tsx
 msgid "Contacts"
 msgstr ""
@@ -1755,6 +1770,10 @@ msgstr ""
 msgid "Could not load commands"
 msgstr ""
 
+#: src/pages/RecruitingPanel.tsx
+msgid "Could not load contact details. Refresh to try again."
+msgstr ""
+
 #: src/pages/shell/bot-credentials.tsx
 msgid "Could not load credentials."
 msgstr ""
@@ -1791,6 +1810,10 @@ msgstr ""
 #: src/pages/RoutineRunHistory.tsx
 msgid "Could not load run history"
 msgstr "Не удалось загрузить историю запусков"
+
+#: src/pages/RecruitingCorrespondence.tsx
+msgid "Could not load saved results. Try refreshing."
+msgstr ""
 
 #: src/pages/RecruitingPanel.tsx
 msgid "Could not load search results"
@@ -2329,6 +2352,10 @@ msgstr ""
 msgid "Direct MCP"
 msgstr "Прямой MCP"
 
+#: src/pages/RecruitingCorrespondence.tsx
+msgid "Disabled"
+msgstr ""
+
 #: src/pages/shell/bot-panel.tsx
 msgid "Disabled tools"
 msgstr ""
@@ -2472,8 +2499,13 @@ msgid "Edit search filters"
 msgstr ""
 
 #: src/pages/Auth.tsx
+#: src/pages/RecruitingPanel.tsx
 msgid "Email"
 msgstr "Электронная почта"
+
+#: src/pages/RecruitingCorrespondence.tsx
+msgid "Email content"
+msgstr ""
 
 #: src/pages/RecruitingPanel.tsx
 msgid "Email draft"
@@ -2495,8 +2527,16 @@ msgstr ""
 msgid "Email verification required"
 msgstr "Требуется подтверждение электронной почты"
 
+#: src/pages/RecruitingCorrespondence.tsx
+msgid "Emails"
+msgstr ""
+
 #: src/pages/RecruitingPanel.tsx
 msgid "Employment rule"
+msgstr ""
+
+#: src/pages/RecruitingCorrespondence.tsx
+msgid "Enable for this role"
 msgstr ""
 
 #: src/pages/BillingSettingsPanel.tsx
@@ -2683,10 +2723,18 @@ msgstr ""
 msgid "Filters"
 msgstr ""
 
+#: src/pages/RecruitingPanel.tsx
+msgid "Find email"
+msgstr ""
+
 #: src/pages/ModelSettingsOverlay.tsx
 #: src/pages/Onboarding.tsx
 msgid "Find models"
 msgstr "Найти модели"
+
+#: src/pages/Shell.tsx
+msgid "Find this person's work email from saved evidence or available connected services. If a connection is missing, explain what needs connecting. Save the returned source and provider status, do not invent contact details, and do not send a message."
+msgstr ""
 
 #: src/pages/ModelSettingsOverlay.tsx
 #: src/pages/Onboarding.tsx
@@ -2890,6 +2938,10 @@ msgid "High"
 msgstr ""
 
 #: src/pages/RecruitingPanel.tsx
+msgid "High probability"
+msgstr ""
+
+#: src/pages/RecruitingPanel.tsx
 msgid "Hiring manager"
 msgstr ""
 
@@ -2961,10 +3013,6 @@ msgstr ""
 
 #: src/pages/shell/message-cards.tsx
 msgid "Inbox & email"
-msgstr ""
-
-#: src/pages/RecruitingCorrespondence.tsx
-msgid "Inbox not loaded"
 msgstr ""
 
 #: src/pages/RecruitingPanel.tsx
@@ -3113,6 +3161,10 @@ msgstr "Знание"
 msgid "Language"
 msgstr "Язык"
 
+#: src/pages/RecruitingCorrespondence.tsx
+msgid "Last checked"
+msgstr ""
+
 #: src/components/DesktopUpdates.tsx
 msgid "Later"
 msgstr "Позже"
@@ -3202,6 +3254,10 @@ msgstr ""
 msgid "Loading activity…"
 msgstr "Загрузка активности…"
 
+#: src/pages/RecruitingPanel.tsx
+msgid "Loading contact details…"
+msgstr ""
+
 #: src/pages/PluginsOverlay.tsx
 msgid "Loading integrations…"
 msgstr "Загрузка интеграций…"
@@ -3221,6 +3277,10 @@ msgstr "Загрузка предварительного просмотра…"
 #: src/components/ApprovalRulesSettings.tsx
 msgid "Loading rules…"
 msgstr "Загрузка правил…"
+
+#: src/pages/RecruitingCorrespondence.tsx
+msgid "Loading saved results…"
+msgstr ""
 
 #: src/pages/RecruitingCorrespondence.tsx
 msgid "Loading sequence…"
@@ -3286,10 +3346,6 @@ msgstr ""
 
 #: src/pages/shell/bot-credentials.tsx
 msgid "Lowercase letters, numbers, hyphens and underscores, starting with a letter."
-msgstr ""
-
-#: src/pages/RecruitingCorrespondence.tsx
-msgid "Mailbox"
 msgstr ""
 
 #: src/components/ComputerUpdateProgress.tsx
@@ -3436,6 +3492,10 @@ msgstr "Сообщение"
 msgid "Message {activeName}"
 msgstr "Сообщение {activeName}"
 
+#: src/pages/RecruitingCorrespondence.tsx
+msgid "Message body unavailable"
+msgstr ""
+
 #: src/pages/Shell.tsx
 msgid "Message composer"
 msgstr "Поле сообщения"
@@ -3575,6 +3635,10 @@ msgstr "Ещё"
 #: src/components/ComputerMaintenanceActions.tsx
 msgid "More computer actions"
 msgstr "Больше действий с компьютером"
+
+#: src/pages/RecruitingCorrespondence.tsx
+msgid "More results may be available. This is not the complete mailbox or calendar."
+msgstr ""
 
 #: src/pages/RecruitingPanel.tsx
 msgid "More sources"
@@ -3753,6 +3817,10 @@ msgstr "Групповых чатов пока нет."
 msgid "No internal assessment"
 msgstr ""
 
+#: src/pages/RecruitingCorrespondence.tsx
+msgid "No invitation is created by this view. Availability is the saved observation, not a reservation. Calendar records may include other roles; their role association has not been verified."
+msgstr ""
+
 #: src/components/AskCard.tsx
 msgid "No longer active"
 msgstr "Больше не активен"
@@ -3862,9 +3930,29 @@ msgstr ""
 msgid "No saved result rows"
 msgstr "Нет сохранённых строк результатов"
 
+#: src/pages/RecruitingCorrespondence.tsx
+msgid "No saved results"
+msgstr ""
+
+#: src/pages/RecruitingCorrespondence.tsx
+msgid "No service configured for this role."
+msgstr ""
+
+#: src/pages/RecruitingPanel.tsx
+msgid "No shortlisted candidates match these filters."
+msgstr ""
+
+#: src/pages/RecruitingPanel.tsx
+msgid "No shortlisted candidates yet."
+msgstr ""
+
 #: src/pages/KnowledgeSection.tsx
 msgid "No skills yet"
 msgstr "Навыков пока нет"
+
+#: src/pages/RecruitingCorrespondence.tsx
+msgid "No subject"
+msgstr ""
 
 #: src/pages/MessagingSettingsOverlay.tsx
 msgid "No team conversations yet."
@@ -3907,6 +3995,10 @@ msgstr ""
 msgid "Not checked"
 msgstr ""
 
+#: src/pages/RecruitingCorrespondence.tsx
+msgid "Not checked yet"
+msgstr ""
+
 #: src/pages/ModelBackupsSettings.tsx
 msgid "Not connected"
 msgstr "Не подключена"
@@ -3915,16 +4007,16 @@ msgstr "Не подключена"
 msgid "Not in the plugin catalog"
 msgstr "Нет в каталоге плагинов"
 
-#: src/pages/RecruitingCorrespondence.tsx
-msgid "Not loaded"
-msgstr ""
-
 #: src/pages/shell/message-cards.tsx
 msgid "Not now"
 msgstr "Не сейчас"
 
 #: src/pages/RecruitingPanel.tsx
 msgid "Not pursuing"
+msgstr ""
+
+#: src/pages/RecruitingPanel.tsx
+msgid "Not returned"
 msgstr ""
 
 #: src/pages/RecruitingPanel.tsx
@@ -4017,6 +4109,10 @@ msgstr ""
 msgid "Open <0>{0}</0> to finish signing in."
 msgstr ""
 
+#: src/pages/RecruitingCorrespondence.tsx
+msgid "Open calendar event"
+msgstr ""
+
 #: src/components/ComputersUnavailableHint.tsx
 msgid "Open computer settings"
 msgstr ""
@@ -4032,6 +4128,10 @@ msgstr "Открыть в полном окне"
 #: src/pages/Shell.tsx
 msgid "Open navigation"
 msgstr "Открыть навигацию"
+
+#: src/pages/RecruitingCorrespondence.tsx
+msgid "Open original email"
+msgstr ""
 
 #: src/pages/RecruitingPanel.tsx
 msgid "Open original question"
@@ -4103,6 +4203,10 @@ msgstr "Органичный"
 #: src/pages/memory-providers/SupermemorySettingsForm.tsx
 msgid "Organization API key"
 msgstr "Ключ API организации"
+
+#: src/pages/RecruitingCorrespondence.tsx
+msgid "Original email results saved in this role conversation."
+msgstr ""
 
 #: src/pages/shell/chat-context.tsx
 msgid "Original message unavailable"
@@ -4204,6 +4308,10 @@ msgstr "Приостановлено"
 msgid "Pending approval"
 msgstr ""
 
+#: src/pages/RecruitingPanel.tsx
+msgid "Phone"
+msgstr ""
+
 #: src/pages/Shell.tsx
 #: src/pages/shell/chat-context.tsx
 msgid "Photo"
@@ -4274,6 +4382,10 @@ msgstr "Предварительный просмотр {0}"
 msgid "Preview isn't available for this file type — download it to view it."
 msgstr ""
 
+#: src/pages/RecruitingCorrespondence.tsx
+msgid "Preview only. Ask for the complete message to read the full body."
+msgstr ""
+
 #: src/pages/Board.tsx
 #: src/pages/RecruitingPanel.tsx
 msgid "Priority"
@@ -4307,6 +4419,10 @@ msgstr ""
 #: src/pages/Onboarding.tsx
 msgid "Provider"
 msgstr "Поставщик"
+
+#: src/pages/RecruitingPanel.tsx
+msgid "Provider status"
+msgstr ""
 
 #: src/pages/RecruitingPanel.tsx
 msgid "Provider task"
@@ -4351,10 +4467,6 @@ msgstr ""
 
 #: src/pages/Shell.tsx
 msgid "Reactions"
-msgstr ""
-
-#: src/pages/RecruitingCorrespondence.tsx
-msgid "Read candidate replies from your connected email account."
 msgstr ""
 
 #: src/pages/shell/bot-panel.tsx
@@ -4501,6 +4613,10 @@ msgstr "Обновить"
 
 #: src/pages/RecruitingPanel.tsx
 msgid "Refresh criteria"
+msgstr ""
+
+#: src/pages/RecruitingCorrespondence.tsx
+msgid "Refresh saved results"
 msgstr ""
 
 #: src/components/teach/TeachComputerOverlay.tsx
@@ -4968,6 +5084,10 @@ msgstr "Сохранено"
 msgid "Saved before latest role update"
 msgstr ""
 
+#: src/pages/RecruitingCorrespondence.tsx
+msgid "Saved calendar checks in this conversation."
+msgstr ""
+
 #: src/pages/RecruitingPanel.tsx
 msgid "Saved candidate sources"
 msgstr ""
@@ -4980,8 +5100,16 @@ msgstr ""
 msgid "Saved candidates"
 msgstr ""
 
+#: src/pages/RecruitingCorrespondence.tsx
+msgid "Saved emails"
+msgstr ""
+
 #: src/pages/RecruitingPanel.tsx
 msgid "Saved facts"
+msgstr ""
+
+#: src/pages/RecruitingPanel.tsx
+msgid "Saved feedback for this role"
 msgstr ""
 
 #: src/pages/RecruitingCorrespondence.tsx
@@ -5135,7 +5263,6 @@ msgstr "Поиск моделей"
 msgid "Search providers"
 msgstr "Поиск поставщиков"
 
-#: src/pages/RecruitingPanel.tsx
 #: src/pages/Shell.tsx
 msgid "Search refinement"
 msgstr ""
@@ -5211,6 +5338,10 @@ msgstr ""
 msgid "Send with Enter"
 msgstr "Отправлять по Enter"
 
+#: src/pages/RecruitingCorrespondence.tsx
+msgid "Sender unavailable"
+msgstr ""
+
 #: src/components/AskCard.tsx
 #: src/pages/RecruitingPanel.tsx
 msgid "Sending…"
@@ -5249,6 +5380,10 @@ msgstr "Имя сервера"
 #: src/pages/Onboarding.tsx
 msgid "Server URL"
 msgstr "URL-адрес сервера"
+
+#: src/pages/RecruitingCorrespondence.tsx
+msgid "Service connections"
+msgstr ""
 
 #: src/components/call/CallCard.tsx
 #: src/pages/MessagingSettingsOverlay.tsx
@@ -5311,6 +5446,10 @@ msgstr ""
 
 #: src/pages/RecruitingPanel.tsx
 msgid "Shortlist {name}"
+msgstr ""
+
+#: src/pages/RecruitingPanel.tsx
+msgid "Shortlist people from search results to keep them here."
 msgstr ""
 
 #: src/pages/RecruitingPanel.tsx
@@ -5427,6 +5566,14 @@ msgstr "Slack не включен"
 #: src/components/SoftwareUpdateSection.tsx
 msgid "Software update"
 msgstr "Обновление программного обеспечения"
+
+#: src/pages/RecruitingPanel.tsx
+msgid "Some saved contact details could not be displayed."
+msgstr ""
+
+#: src/pages/RecruitingCorrespondence.tsx
+msgid "Some saved results use an earlier connection setup. Check again to load results from the current connection."
+msgstr ""
 
 #: src/App.tsx
 #: src/lib/user-error.ts
@@ -5732,12 +5879,20 @@ msgstr "Время ожидания соединения истекло."
 msgid "The file was saved. Return to the original role and retry to share it there."
 msgstr ""
 
+#: src/pages/RecruitingCorrespondence.tsx
+msgid "The last check failed"
+msgstr ""
+
 #: src/lib/model-connection-preflight.ts
 msgid "The provider is rate-limiting requests."
 msgstr "Поставщик ограничивает частоту запросов."
 
 #: src/pages/Shell.tsx
 msgid "The recruiting team changed. Open the role again."
+msgstr ""
+
+#: src/pages/RecruitingCorrespondence.tsx
+msgid "The saved check returned no matching records. It does not confirm the entire account is empty."
 msgstr ""
 
 #: src/pages/MemorySettingsOverlay.tsx
@@ -5819,6 +5974,10 @@ msgstr ""
 #: src/pages/Auth.tsx
 msgid "This reset link is invalid or expired"
 msgstr "Эта ссылка для сброса недействительна или срок ее действия истек."
+
+#: src/pages/RecruitingCorrespondence.tsx
+msgid "This result cannot be displayed yet"
+msgstr ""
 
 #: src/pages/shell/message-cards.tsx
 msgid "This server cannot be assigned without a bot."
@@ -6083,6 +6242,10 @@ msgstr "Использовать рекомендации по умолчани�
 
 #: src/components/teach/TeachRecordingChrome.tsx
 msgid "Use Protected input for passwords."
+msgstr ""
+
+#: src/pages/RecruitingCorrespondence.tsx
+msgid "Use the connected service to check this role. Saved results will appear here when the agent finishes."
 msgstr ""
 
 #: src/pages/ModelSettingsOverlay.tsx

@@ -14,6 +14,7 @@ import type {
   RecruitingCandidate,
   RecruitingCandidateFeedbackSelection,
   RecruitingCandidateReport,
+  RecruitingCorrespondence,
   RecruitingCriterionExpression,
   RecruitingCrmCandidateSync,
   RecruitingCrmTarget,
@@ -95,7 +96,7 @@ export type CandidateDiscussionContext = Pick<
   roleRevisionId?: string;
   candidateKey?: string;
   candidateRevision?: number;
-  intent?: "email_draft";
+  intent?: "email_draft" | "contact_lookup";
 };
 
 export type CandidateFeedback = {
@@ -107,8 +108,10 @@ export type CandidateFeedback = {
 type Props = {
   threadId: string;
   botId?: string;
+  groupId?: string;
   refreshSignal?: number;
   onClose: () => void;
+  onBrowseCandidates?: () => void;
   showDiagnostics?: boolean;
   presentation?: "panel" | "workspace";
   summary?: "brief" | "feedback";
@@ -1012,6 +1015,77 @@ function CandidateReport({
           </a>
         ))}
     </div>
+  );
+}
+
+function CandidateContactFields({
+  candidate,
+  labels,
+  contacts,
+  kind,
+}: {
+  candidate: RecruitingCandidate;
+  labels: readonly string[];
+  contacts: RecruitingCorrespondence["contacts"];
+  kind: "email" | "phone" | "status";
+}) {
+  const { t } = useLingui();
+  const matched = contacts.filter((contact) => contact.candidateKey === candidate.candidateKey);
+  const originalFields =
+    candidate.latestSource?.report?.fields.filter((field) =>
+      labels.includes(field.label.toLowerCase()),
+    ) ?? [];
+  const fields = matched.length
+    ? matched.flatMap((contact) =>
+        kind === "phone"
+          ? contact.phones.map((phone) => ({
+              label: phone.type ?? t`Phone`,
+              value: phone.number,
+              sourceUrls: [],
+            }))
+          : contact.emails.map((email) => ({
+              label: kind === "email" ? t`Email` : email.address,
+              value:
+                kind === "email"
+                  ? email.address
+                  : email.status === "HIGH_PROBABILITY"
+                    ? t`High probability`
+                    : email.status,
+              sourceUrls: [],
+            })),
+      )
+    : originalFields;
+  return (
+    <>
+      {fields.length ? (
+        <CandidateReport report={{ fields, sourceUrls: [] }} />
+      ) : (
+        <span className="text-muted-foreground">
+          <Trans>Not returned</Trans>
+        </span>
+      )}
+      {matched.length && originalFields.length ? (
+        <details className="mt-2">
+          <summary className="cursor-pointer text-xs text-muted-foreground">
+            <Trans>Original source</Trans>
+          </summary>
+          <CandidateReport report={{ fields: originalFields, sourceUrls: [] }} />
+        </details>
+      ) : null}
+      {kind === "status"
+        ? matched.map((contact) => (
+            <p
+              className="mt-2 text-xs text-muted-foreground"
+              key={`${contact.source}:${contact.checkedAt}`}
+            >
+              {contact.source} ·{" "}
+              <time dateTime={contact.checkedAt}>
+                {new Date(contact.checkedAt).toLocaleString()}
+              </time>
+            </p>
+          ))
+        : null}
+    </>
   );
 }
 
@@ -2036,8 +2110,10 @@ function RecruitingWorkspace({
   userId,
   threadId,
   botId,
+  groupId,
   refreshSignal,
   onClose,
+  onBrowseCandidates,
   onRevealMessage,
   onDiscussCandidate,
   onCandidateFeedback,
@@ -2063,6 +2139,8 @@ function RecruitingWorkspace({
   const [confirmationFailed, setConfirmationFailed] = useState(false);
   const [candidateList, setCandidateList] = useState(() => readRecruitingPanelState(null));
   const activeTab = tab ?? (presentation === "workspace" ? "evidence" : candidateList.tab);
+  const contactsView = presentation === "workspace" && view === "contacts";
+  const shortlistView = presentation === "workspace" && view === "shortlist";
   const candidateWorkspace =
     presentation === "workspace" && !showDiagnostics && activeTab === "evidence" && !summary;
   const requestedTab = useRef(tab);
@@ -2080,8 +2158,7 @@ function RecruitingWorkspace({
     filters: storedCandidateFilters,
     detailOpen: candidateDetailOpen,
   } = candidateList;
-  const candidateView =
-    presentation === "workspace" && view === "contacts" ? "table" : storedCandidateView;
+  const candidateView = contactsView ? "table" : storedCandidateView;
   const candidateFilters = useMemo(
     () =>
       presentation === "workspace" && view === "shortlist"
@@ -2259,6 +2336,44 @@ function RecruitingWorkspace({
     };
   }, [userId, threadId, botId, refresh, refreshSignal, denyAccess, summary, candidateWorkspace]);
   const workspace = workspaceSnapshot?.workspace;
+  const contactsKey =
+    contactsView && workspace && (botId || groupId)
+      ? JSON.stringify([
+          userId,
+          threadId,
+          workspace.role.id,
+          botId,
+          groupId,
+          refresh,
+          refreshSignal,
+        ])
+      : null;
+  const [contactsRead, setContactsRead] = useState<{
+    key: string;
+    data?: RecruitingCorrespondence;
+    failed?: boolean;
+  }>();
+  useEffect(() => {
+    if (!contactsKey) return;
+    let cancelled = false;
+    setContactsRead({ key: contactsKey });
+    void rpc.recruiting
+      .correspondence({ ...(groupId ? { groupId } : { botId: botId! }), view: "contacts" })
+      .then((data) => {
+        if (!cancelled) setContactsRead({ key: contactsKey, data });
+      })
+      .catch((error) => {
+        if (!cancelled) {
+          denyAccess(error);
+          setContactsRead({ key: contactsKey, failed: true });
+        }
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [contactsKey, botId, groupId, denyAccess]);
+  const currentContacts = contactsRead?.key === contactsKey ? contactsRead : undefined;
+  const contacts = currentContacts?.data?.contacts ?? [];
   const criteria = workspace?.revision.criteria ?? [];
   const brief = workspace?.revision.brief;
   const briefClarifications = brief ? recruitingBriefClarifications(brief) : [];
@@ -2538,6 +2653,26 @@ function RecruitingWorkspace({
       detailOpen: true,
     }));
   }
+  function discussCandidate(
+    candidate: RecruitingCandidate,
+    intent: CandidateDiscussionContext["intent"],
+  ) {
+    if (!workspace || !onDiscussCandidate) return;
+    onDiscussCandidate({
+      threadId,
+      roleTitle: workspace.role.title,
+      roleId: workspace.role.id,
+      roleRevisionId: workspace.revision.id,
+      roleVersion: workspace.revision.revision,
+      candidateKey: candidate.candidateKey,
+      name: candidate.name,
+      title: candidate.title,
+      company: candidate.company,
+      linkedinUrl: candidate.linkedinUrl,
+      resumeUrl: candidate.resumeUrl,
+      intent,
+    });
+  }
   const revealCandidateMessage: Props["onRevealMessage"] = onRevealMessage
     ? (target) => {
         candidateHandoff.current = () => onRevealMessage(target);
@@ -2740,10 +2875,11 @@ function RecruitingWorkspace({
     }
   }
   if (summary) {
+    const CriteriaBody = summary === "feedback" ? "details" : "div";
     return (
       <section
         className="hire-live-criteria"
-        aria-label={summary === "brief" ? t`Search Criteria` : t`Search refinement`}
+        aria-label={summary === "brief" ? t`Search Criteria` : t`Client feedback`}
       >
         <div className="hire-panel-heading">
           {summary === "brief" ? (
@@ -2756,11 +2892,15 @@ function RecruitingWorkspace({
               {summary === "brief" ? (
                 <Trans>Search Criteria</Trans>
               ) : (
-                <Trans>Search refinement</Trans>
+                <Trans>Client feedback</Trans>
               )}
             </strong>
             <span>
-              <Trans>From this role’s saved requirements</Trans>
+              {summary === "brief" ? (
+                <Trans>From this role’s saved requirements</Trans>
+              ) : (
+                <Trans>Saved feedback for this role</Trans>
+              )}
             </span>
           </div>
           <Button
@@ -2786,99 +2926,106 @@ function RecruitingWorkspace({
             <div className="hire-jd-summary">
               <strong>{workspace.role.title}</strong>
             </div>
-            {brief?.fields
-              .filter((field) => field.value !== null)
-              .map((field) => (
-                <div className="hire-criterion-row" key={field.key}>
-                  {Object.hasOwn(briefFieldLabels, field.key) ? (
-                    <span>{briefFieldLabels[field.key]}</span>
-                  ) : null}
-                  <strong className="whitespace-pre-wrap">{field.value}</strong>
-                  {field.state === "conflict" ? (
-                    <span>
-                      <Trans>Conflicting information</Trans>
-                    </span>
-                  ) : field.state !== "known" ? (
-                    <span>
-                      <Trans>Unknown</Trans>
-                    </span>
-                  ) : null}
-                  {field.origin === "inferred" ? (
-                    <span>
-                      <Trans>Assumption</Trans>
-                    </span>
-                  ) : null}
+            {summary === "feedback" ? (
+              <FeedbackHistory
+                key={workspace.role.id}
+                roleId={workspace.role.id}
+                refreshSignal={(refreshSignal ?? 0) + refresh}
+                onAccessError={denyAccess}
+                showEmpty
+              />
+            ) : null}
+            <CriteriaBody className={summary === "feedback" ? "hire-criterion-row" : "contents"}>
+              {summary === "feedback" ? (
+                <summary>
+                  <Trans>Search Criteria</Trans>
+                </summary>
+              ) : null}
+              {brief?.fields
+                .filter((field) => field.value !== null)
+                .map((field) => (
+                  <div className="hire-criterion-row" key={field.key}>
+                    {Object.hasOwn(briefFieldLabels, field.key) ? (
+                      <span>{briefFieldLabels[field.key]}</span>
+                    ) : null}
+                    <strong className="whitespace-pre-wrap">{field.value}</strong>
+                    {field.state === "conflict" ? (
+                      <span>
+                        <Trans>Conflicting information</Trans>
+                      </span>
+                    ) : field.state !== "known" ? (
+                      <span>
+                        <Trans>Unknown</Trans>
+                      </span>
+                    ) : null}
+                    {field.origin === "inferred" ? (
+                      <span>
+                        <Trans>Assumption</Trans>
+                      </span>
+                    ) : null}
+                  </div>
+                ))}
+              {brief?.searchFilters.map((filter) => (
+                <div className="hire-criterion-row" key={filter.id}>
+                  <span>
+                    {filter.mode === "include" ? (
+                      <Trans>Include</Trans>
+                    ) : filter.mode === "exclude" ? (
+                      <Trans>Exclude</Trans>
+                    ) : (
+                      <Trans>Prefer</Trans>
+                    )}
+                  </span>
+                  <strong>{filter.statement}</strong>
                 </div>
               ))}
-            {brief?.searchFilters.map((filter) => (
-              <div className="hire-criterion-row" key={filter.id}>
-                <span>
-                  {filter.mode === "include" ? (
-                    <Trans>Include</Trans>
-                  ) : filter.mode === "exclude" ? (
-                    <Trans>Exclude</Trans>
-                  ) : (
-                    <Trans>Prefer</Trans>
-                  )}
-                </span>
-                <strong>{filter.statement}</strong>
-              </div>
-            ))}
-            {criteria.map((criterion) => (
-              <div className="hire-criterion-row" key={criterion.id}>
-                <span>
-                  {criterion.priority === "hard" ? (
-                    <Trans>Required</Trans>
-                  ) : (
-                    <Trans>Preferred</Trans>
-                  )}
-                </span>
-                <CriteriaExpression expression={criterion.expression} />
-              </div>
-            ))}
-            {workspace.revision.preferences.length ? (
-              <div className="hire-criterion-row">
-                <span>
-                  <Trans>Preferences</Trans>
-                </span>
-                <ul>
-                  {workspace.revision.preferences.map((preference) => (
-                    <li key={preference}>{preference}</li>
-                  ))}
-                </ul>
-              </div>
-            ) : null}
-            {!brief?.fields.some((field) => field.value !== null) &&
-            !brief?.searchFilters.length &&
-            !criteria.length &&
-            !workspace.revision.preferences.length ? (
-              <p className="hire-source-hint">
-                <Trans>Share the role requirements in the conversation to build this brief.</Trans>
-              </p>
-            ) : null}
-            {roleSources.length ? (
-              <details className="hire-criterion-row">
-                <summary>
-                  <Trans>Role sources</Trans>
-                </summary>
-                <Sources
-                  sourceTarget={{ kind: "role", threadId, roleRevisionId: workspace.revision.id }}
-                  sources={roleSources}
-                  showDiagnostics={false}
-                />
-              </details>
-            ) : null}
-            {summary === "feedback" ? (
-              <div className="hire-criterion-row">
-                <FeedbackHistory
-                  key={workspace.role.id}
-                  roleId={workspace.role.id}
-                  refreshSignal={(refreshSignal ?? 0) + refresh}
-                  onAccessError={denyAccess}
-                  showEmpty
-                />
-              </div>
-            ) : null}
+              {criteria.map((criterion) => (
+                <div className="hire-criterion-row" key={criterion.id}>
+                  <span>
+                    {criterion.priority === "hard" ? (
+                      <Trans>Required</Trans>
+                    ) : (
+                      <Trans>Preferred</Trans>
+                    )}
+                  </span>
+                  <CriteriaExpression expression={criterion.expression} />
+                </div>
+              ))}
+              {workspace.revision.preferences.length ? (
+                <div className="hire-criterion-row">
+                  <span>
+                    <Trans>Preferences</Trans>
+                  </span>
+                  <ul>
+                    {workspace.revision.preferences.map((preference) => (
+                      <li key={preference}>{preference}</li>
+                    ))}
+                  </ul>
+                </div>
+              ) : null}
+              {!brief?.fields.some((field) => field.value !== null) &&
+              !brief?.searchFilters.length &&
+              !criteria.length &&
+              !workspace.revision.preferences.length ? (
+                <p className="hire-source-hint">
+                  <Trans>
+                    Share the role requirements in the conversation to build this brief.
+                  </Trans>
+                </p>
+              ) : null}
+              {roleSources.length ? (
+                <details className="hire-criterion-row">
+                  <summary>
+                    <Trans>Role sources</Trans>
+                  </summary>
+                  <Sources
+                    sourceTarget={{ kind: "role", threadId, roleRevisionId: workspace.revision.id }}
+                    sources={roleSources}
+                    showDiagnostics={false}
+                  />
+                </details>
+              ) : null}
+            </CriteriaBody>
             <p className="hire-source-hint">
               <Check size={15} aria-hidden />
               <Trans>Requirements and feedback stay with this role.</Trans>
@@ -2901,6 +3048,40 @@ function RecruitingWorkspace({
           : "space-y-4 text-sm"
       }
     >
+      {shortlistView || contactsView ? (
+        <header className="hire-section-header">
+          <h1>{shortlistView ? <Trans>Shortlist</Trans> : <Trans>Contacts</Trans>}</h1>
+          {workspace ? <p>{workspace.role.title}</p> : null}
+          {candidatePage ? (
+            <p>
+              <Plural
+                value={candidatePage.counts.candidates}
+                _1="# candidate in the pool"
+                other="# candidates in the pool"
+              />
+            </p>
+          ) : null}
+        </header>
+      ) : null}
+      {contactsKey ? (
+        currentContacts?.failed || currentContacts?.data?.status === "failed" ? (
+          <p role="alert" className="text-destructive">
+            <Trans>Could not load contact details. Refresh to try again.</Trans>
+          </p>
+        ) : !currentContacts?.data ? (
+          <p role="status">
+            <Trans>Loading contact details…</Trans>
+          </p>
+        ) : currentContacts.data.partial || currentContacts.data.status === "unsupported" ? (
+          <p className="text-muted-foreground">
+            <Trans>Some saved contact details could not be displayed.</Trans>
+          </p>
+        ) : currentContacts.data.status === "not_checked" ? (
+          <p className="text-muted-foreground">
+            <Trans>Contact details have not been checked yet.</Trans>
+          </p>
+        ) : null
+      ) : null}
       {presentation !== "workspace" ? (
         <div className="flex items-center justify-between gap-2">
           <h2 className="text-base font-medium">
@@ -3871,9 +4052,35 @@ function RecruitingWorkspace({
                       </p>
                     ) : null}
                     {!candidatePage.items.length ? (
-                      <p className="text-muted-foreground">
-                        <Trans>No saved candidates</Trans>
-                      </p>
+                      <div className="space-y-3 text-muted-foreground">
+                        <p>
+                          {shortlistView ? (
+                            candidatePage.counts.shortlisted === 0 ? (
+                              <Trans>No shortlisted candidates yet.</Trans>
+                            ) : (
+                              <Trans>No shortlisted candidates match these filters.</Trans>
+                            )
+                          ) : (
+                            <Trans>No saved candidates</Trans>
+                          )}
+                        </p>
+                        {shortlistView && onBrowseCandidates ? (
+                          <>
+                            <p>
+                              <Trans>Shortlist people from search results to keep them here.</Trans>
+                            </p>
+                            <Button
+                              variant="outline"
+                              onClick={() => {
+                                setCandidateFilters(() => readRecruitingPanelState(null).filters);
+                                onBrowseCandidates();
+                              }}
+                            >
+                              <Trans>Browse all candidates</Trans>
+                            </Button>
+                          </>
+                        ) : null}
+                      </div>
                     ) : candidateView === "cards" ? (
                       <ul
                         className={presentation === "workspace" ? "hire-card-grid" : "grid gap-2"}
@@ -3897,21 +4104,7 @@ function RecruitingWorkspace({
                                 shortlistFailed={shortlistFailed === candidate.candidateKey}
                                 onEmailDraft={
                                   onDiscussCandidate
-                                    ? () =>
-                                        onDiscussCandidate({
-                                          threadId,
-                                          roleTitle: workspace.role.title,
-                                          roleId: workspace.role.id,
-                                          roleRevisionId: workspace.revision.id,
-                                          roleVersion: workspace.revision.revision,
-                                          candidateKey: candidate.candidateKey,
-                                          name: candidate.name,
-                                          title: candidate.title,
-                                          company: candidate.company,
-                                          linkedinUrl: candidate.linkedinUrl,
-                                          resumeUrl: candidate.resumeUrl,
-                                          intent: "email_draft",
-                                        })
+                                    ? () => discussCandidate(candidate, "email_draft")
                                     : undefined
                                 }
                               />
@@ -4026,11 +4219,16 @@ function RecruitingWorkspace({
                                 t`Company`,
                                 t`Location`,
                                 ...(presentation !== "workspace" ? [t`Profile`] : []),
-                                t`Research match`,
-                                ...(showInternalAssessments ? [t`Internal assessment`] : []),
+                                ...(contactsView
+                                  ? [t`Email`, t`Phone`, t`Provider status`]
+                                  : [t`Research match`]),
+                                ...(!contactsView && showInternalAssessments
+                                  ? [t`Internal assessment`]
+                                  : []),
                                 ...(showCrm ? [t`CRM`] : []),
                                 ...(presentation !== "workspace" ? [t`Discoveries`] : []),
                                 t`Shortlist`,
+                                ...(contactsView && onDiscussCandidate ? [t`Actions`] : []),
                               ].map((label) => (
                                 <th key={label} scope="col" className="py-2 pe-3 font-medium">
                                   {label}
@@ -4084,15 +4282,68 @@ function RecruitingWorkspace({
                                     />
                                   </td>
                                 ) : null}
-                                <td className="min-w-48 py-2 pe-3">
-                                  <CandidateResearchMatch
-                                    candidate={candidate}
-                                    roleRevisionId={workspace?.revision.id}
-                                    showDiagnostics={showDiagnostics}
-                                    compact
-                                  />
-                                </td>
-                                {showInternalAssessments ? (
+                                {contactsView ? (
+                                  <>
+                                    <td className="min-w-48 py-2 pe-3">
+                                      <CandidateContactFields
+                                        candidate={candidate}
+                                        contacts={contacts}
+                                        kind="email"
+                                        labels={[
+                                          "email",
+                                          "emails",
+                                          "email address",
+                                          "email addresses",
+                                          "work email",
+                                          "work email address",
+                                          "professional email",
+                                          "business email",
+                                          "personal email",
+                                        ]}
+                                      />
+                                    </td>
+                                    <td className="py-2 pe-3">
+                                      <CandidateContactFields
+                                        candidate={candidate}
+                                        contacts={contacts}
+                                        kind="phone"
+                                        labels={[
+                                          "phone",
+                                          "phone number",
+                                          "phone numbers",
+                                          "mobile",
+                                          "mobile phone",
+                                          "work phone",
+                                          "business phone",
+                                        ]}
+                                      />
+                                    </td>
+                                    <td className="py-2 pe-3">
+                                      <CandidateContactFields
+                                        candidate={candidate}
+                                        contacts={contacts}
+                                        kind="status"
+                                        labels={[
+                                          "email status",
+                                          "email verification",
+                                          "email verification status",
+                                          "contact status",
+                                          "verification status",
+                                        ]}
+                                      />
+                                    </td>
+                                  </>
+                                ) : (
+                                  <td className="min-w-48 py-2 pe-3">
+                                    <CandidateResearchMatch
+                                      candidate={candidate}
+                                      roleRevisionId={workspace?.revision.id}
+                                      showDiagnostics={showDiagnostics}
+                                      compact
+                                    />
+                                  </td>
+                                )}
+                                {!contactsView && showInternalAssessments ? (
                                   <td className="py-2 pe-3">
                                     <CandidateAssessment candidate={candidate} />
                                   </td>
@@ -4122,6 +4373,26 @@ function RecruitingWorkspace({
                                     </p>
                                   ) : null}
                                 </td>
+                                {contactsView && onDiscussCandidate ? (
+                                  <td className="py-2">
+                                    <Button
+                                      variant="outline"
+                                      size="sm"
+                                      disabled={!candidate.name && !candidate.linkedinUrl}
+                                      onClick={() => discussCandidate(candidate, "contact_lookup")}
+                                    >
+                                      <Trans>Find email</Trans>
+                                    </Button>
+                                    <Button
+                                      variant="ghost"
+                                      size="sm"
+                                      disabled={!candidate.name && !candidate.linkedinUrl}
+                                      onClick={() => discussCandidate(candidate, "email_draft")}
+                                    >
+                                      <Trans>Email draft</Trans>
+                                    </Button>
+                                  </td>
+                                ) : null}
                               </tr>
                             ))}
                           </tbody>
