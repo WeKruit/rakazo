@@ -752,6 +752,44 @@ export const editRecruitingCriteria = (
   material?: RecruitingRoleMaterialContext,
 ) => authenticated(() => recruiting.editRecruitingCriteria(prisma, actor, input, material));
 
+async function hydrateRecruitingCandidateReports(
+  deps: RecruitingReadDeps,
+  actor: Actor,
+  roleId: string,
+  sources: Omit<RecruitingCandidateSource, "crmImports">[],
+) {
+  const artifacts = new Map<string, Awaited<ReturnType<typeof readActorArtifact>>>();
+  const readReport = createRecruitingCandidateReportReader(deps, actor, roleId, { artifacts });
+  const byArtifact = new Map<string, typeof sources>();
+  for (const source of sources) {
+    const group = byArtifact.get(source.artifactRef.artifactId) ?? [];
+    group.push(source);
+    byArtifact.set(source.artifactRef.artifactId, group);
+  }
+  const groups = [...byArtifact.values()];
+  // ponytail: bound parallel multi-MB reads to four pages; tune only after measured storage capacity.
+  for (let start = 0; start < groups.length; start += 4) {
+    await Promise.all(
+      groups.slice(start, start + 4).map(async (group) => {
+        for (const source of group) delete source.report;
+        const artifactId = group[0]!.artifactRef.artifactId;
+        try {
+          artifacts.set(artifactId, await readActorArtifact(deps, actor, { artifactId }));
+        } catch {
+          return;
+        }
+        for (const source of group) {
+          try {
+            source.report = (await readReport(source)).report;
+          } catch {
+            // Authorized provenance remains readable when its report bytes are unavailable.
+          }
+        }
+      }),
+    );
+  }
+}
+
 export const listRecruitingCandidates = (
   deps: RecruitingReadDeps,
   actor: Actor,
@@ -759,17 +797,12 @@ export const listRecruitingCandidates = (
 ) =>
   authenticated(async () => {
     const page = await recruiting.listRecruitingCandidates(deps.prisma, actor, input);
-    const readReport = createRecruitingCandidateReportReader(deps, actor, input.roleId);
-    for (const candidate of page.items) {
-      if (!candidate.latestSource) continue;
-      const { report: _report, ...metadata } = candidate.latestSource;
-      try {
-        candidate.latestSource = { ...metadata, report: (await readReport(metadata)).report };
-      } catch {
-        // Authorized provenance remains readable when its report bytes are unavailable.
-        candidate.latestSource = metadata;
-      }
-    }
+    await hydrateRecruitingCandidateReports(
+      deps,
+      actor,
+      input.roleId,
+      page.items.flatMap((candidate) => (candidate.latestSource ? [candidate.latestSource] : [])),
+    );
     return page;
   });
 export const listRecruitingCandidateSources = (
@@ -779,18 +812,8 @@ export const listRecruitingCandidateSources = (
 ) =>
   authenticated(async () => {
     const page = await recruiting.listRecruitingCandidateSources(deps.prisma, actor, input);
-    const readReport = createRecruitingCandidateReportReader(deps, actor, input.roleId);
-    const items: RecruitingCandidateSource[] = [];
-    for (const source of page.items) {
-      const { report: _report, ...metadata } = source;
-      try {
-        items.push({ ...metadata, report: (await readReport(source)).report });
-      } catch {
-        // Authorized provenance remains readable when its report bytes are unavailable.
-        items.push(metadata);
-      }
-    }
-    return { ...page, items };
+    await hydrateRecruitingCandidateReports(deps, actor, input.roleId, page.items);
+    return page;
   });
 export const setRecruitingCandidateShortlist = (
   prisma: PrismaClient,
