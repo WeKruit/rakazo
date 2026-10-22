@@ -1174,6 +1174,183 @@ function groupTarget() {
 }
 
 describe("sendThreadMessage", () => {
+  it.each([
+    {
+      addressing: "coordinator",
+      text: "Find candidates for this role.",
+      mentions: undefined,
+      expected: ["bot-a"],
+    },
+    {
+      addressing: "coordinator",
+      text: "@Sourcer please review the saved evidence.",
+      mentions: ["bot-b"],
+      expected: ["bot-a"],
+    },
+    {
+      addressing: "coordinator",
+      text: "@everyone compare these candidates.",
+      mentions: undefined,
+      expected: ["bot-a"],
+    },
+    {
+      addressing: "coordinator",
+      text: "Draft a reply to recruiter@Sourcer.example, not a send.",
+      mentions: undefined,
+      expected: ["bot-a"],
+    },
+    {
+      addressing: undefined,
+      text: "@Sourcer please review the saved evidence.",
+      mentions: ["bot-b"],
+      expected: ["bot-b"],
+    },
+    {
+      addressing: "mentions",
+      text: "@everyone compare these candidates.",
+      mentions: undefined,
+      expected: ["bot-a", "bot-b"],
+    },
+  ] as const)(
+    "routes a group message using $addressing while preserving $text",
+    async ({ addressing, text, mentions, expected }) => {
+      let sequence = 0;
+      const tx = {
+        $queryRaw: vi.fn().mockResolvedValue([{ id: "group-1" }]),
+        thread: {
+          update: vi.fn(async () => ({ nextMessageSeq: ++sequence, nextEventSeq: sequence })),
+        },
+        chatGroup: {
+          findFirst: vi.fn().mockResolvedValue({
+            id: "group-1",
+            members: [
+              { bot: { id: "bot-a", name: "Main", color: null } },
+              { bot: { id: "bot-b", name: "Sourcer", color: null } },
+            ],
+          }),
+          update: vi.fn(),
+        },
+        message: {
+          create: vi.fn(
+            async ({ data }: { data: { threadId: string; blocks: MessageBlock[] } }) => ({
+              ...data,
+              id: "message-1",
+              seq: 1,
+            }),
+          ),
+          update: vi.fn(),
+        },
+        run: {
+          findMany: vi.fn().mockResolvedValue([]),
+          create: vi.fn(
+            async ({ data }: { data: { botId: string; taskId: string; status: string } }) => ({
+              ...data,
+              id: `run-${data.botId}`,
+            }),
+          ),
+          findUnique: vi.fn().mockResolvedValue({ status: "queued" }),
+        },
+        task: {
+          create: vi.fn(async ({ data }: { data: { botId: string; prompt: string } }) => ({
+            ...data,
+            id: `task-${data.botId}`,
+          })),
+        },
+        event: {
+          create: vi.fn(async ({ data }: { data: { threadId: string } }) => ({ ...data, seq: 2 })),
+        },
+      };
+      const prisma = {
+        message: { findUnique: vi.fn().mockResolvedValue(null) },
+        $transaction: vi.fn(async (callback: (client: typeof tx) => unknown) => callback(tx)),
+      } as unknown as PrismaClient;
+      const actor = { spaceId: "space-1", userId: "user-1" } as Actor;
+      const target = {
+        kind: "group",
+        groupId: "group-1",
+        groupName: "Role",
+        threadId: "thread-1",
+        members: [],
+        memberBotIds: ["bot-b", "bot-a"],
+      } satisfies ThreadTarget;
+      const enqueue = vi.fn().mockResolvedValue(undefined);
+
+      const result = await sendThreadMessage(
+        {
+          prisma,
+          events: { notify: vi.fn().mockResolvedValue(undefined) } as never,
+          jobs: { enqueue } as never,
+        },
+        actor,
+        target,
+        { text, addressing, mentions: mentions ? [...mentions] : undefined, clientNonce: "send-1" },
+      );
+
+      expect(result.runIds).toEqual(expected.map((id) => `run-${id}`));
+      expect(tx.task.create.mock.calls.map(([{ data }]) => data.botId)).toEqual(expected);
+      expect(tx.task.create).toHaveBeenCalledWith({
+        data: expect.objectContaining({ prompt: text }),
+      });
+      expect(tx.message.create).toHaveBeenCalledExactlyOnceWith({
+        data: expect.objectContaining({ threadId: "thread-1", blocks: [{ kind: "text", text }] }),
+      });
+      expect(tx.chatGroup.findFirst).toHaveBeenCalledWith(
+        expect.objectContaining({
+          where: {
+            id: "group-1",
+            spaceId: actor.spaceId,
+            userId: actor.userId,
+            archivedAt: null,
+            thread: { id: "thread-1" },
+          },
+        }),
+      );
+      expect(tx.run.findMany).toHaveBeenCalledWith(
+        expect.objectContaining({
+          where: expect.objectContaining({ botId: { in: [...expected] } }),
+        }),
+      );
+      expect(enqueue).toHaveBeenCalledTimes(expected.length);
+    },
+  );
+
+  it("does not route coordinator messages into a group outside the actor scope", async () => {
+    const tx = {
+      $queryRaw: vi.fn().mockResolvedValue([]),
+      chatGroup: { findFirst: vi.fn() },
+      message: { create: vi.fn() },
+      task: { create: vi.fn() },
+    };
+    const prisma = {
+      message: { findUnique: vi.fn().mockResolvedValue(null) },
+      $transaction: vi.fn(async (callback: (client: typeof tx) => unknown) => callback(tx)),
+    } as unknown as PrismaClient;
+    await expect(
+      sendThreadMessage(
+        { prisma, events: { notify: vi.fn() } as never, jobs: { enqueue: vi.fn() } as never },
+        { spaceId: "other-space", userId: "other-user" } as Actor,
+        {
+          kind: "group",
+          groupId: "group-1",
+          groupName: "Role",
+          threadId: "thread-1",
+          members: [],
+          memberBotIds: ["bot-a", "bot-b"],
+        },
+        { text: "@everyone review the saved evidence", addressing: "coordinator" },
+      ),
+    ).rejects.toThrow();
+    expect(tx.$queryRaw).toHaveBeenCalledWith(
+      expect.anything(),
+      "group-1",
+      "other-space",
+      "other-user",
+    );
+    expect(tx.chatGroup.findFirst).not.toHaveBeenCalled();
+    expect(tx.message.create).not.toHaveBeenCalled();
+    expect(tx.task.create).not.toHaveBeenCalled();
+  });
+
   const composerAnswer = {
     id: "msg-1",
     threadId: "thread-1",
@@ -1470,8 +1647,8 @@ describe("sendThreadMessage", () => {
     );
   });
 
-  it("continues every waiting run for a group bot after free-text answers", async () => {
-    const rawAnswer = " \n  Paris evidence 😀\n  ";
+  it("continues every waiting run for the coordinator after an authored free-text answer", async () => {
+    const rawAnswer = " \n  Paris evidence 😀 @Beta @everyone\n  ";
     const rawComposerAnswer = { ...composerAnswer, blocks: [{ kind: "text", text: rawAnswer }] };
     const waitingAsk = {
       id: "ask-1",
@@ -1510,11 +1687,19 @@ describe("sendThreadMessage", () => {
         findFirst: vi.fn().mockResolvedValue({ botId: "bot-a", userId: "user-1" }),
         updateMany: vi.fn().mockResolvedValue({ count: 1 }),
         findUnique: vi.fn().mockResolvedValue({ status: "queued" }),
-        create: vi.fn(),
+        create: vi.fn().mockResolvedValue({
+          id: "unexpected-run",
+          taskId: "unexpected-task",
+          botId: "bot-b",
+          status: "queued",
+        }),
       },
       steeringMessage: { create: vi.fn() },
       event: { create: vi.fn().mockResolvedValue({ seq: 2, threadId: "thread-1" }) },
-      task: { create: vi.fn(), updateMany: vi.fn().mockResolvedValue({ count: 1 }) },
+      task: {
+        create: vi.fn().mockResolvedValue({ id: "unexpected-task" }),
+        updateMany: vi.fn().mockResolvedValue({ count: 1 }),
+      },
       chatGroup: {
         findFirst: vi.fn().mockResolvedValue({
           id: "group-1",
@@ -1552,6 +1737,7 @@ describe("sendThreadMessage", () => {
         target,
         {
           text: rawAnswer,
+          addressing: "coordinator",
           clientNonce: "nonce-ask-group-multi",
         },
       ),
@@ -1572,6 +1758,19 @@ describe("sendThreadMessage", () => {
       }),
     );
     expect(tx.run.updateMany).toHaveBeenCalledTimes(2);
+    expect(tx.run.findMany).toHaveBeenCalledWith(
+      expect.objectContaining({ where: expect.objectContaining({ botId: { in: ["bot-a"] } }) }),
+    );
+    expect(tx.message.update).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: { id: "ask-1" },
+        data: expect.objectContaining({
+          blocks: expect.arrayContaining([
+            expect.objectContaining({ kind: "ask", status: "answered" }),
+          ]),
+        }),
+      }),
+    );
     expect(tx.task.create).not.toHaveBeenCalled();
     expect(tx.run.create).not.toHaveBeenCalled();
     expect(tx.event.create).toHaveBeenCalledWith({
@@ -1589,8 +1788,18 @@ describe("sendThreadMessage", () => {
     );
   });
 
-  it("still requires the card for a pending approval ask", async () => {
+  it.each(["bot", "group"] as const)("keeps native %s approval cards", async (kind) => {
     const tx = {
+      $queryRaw: vi.fn().mockResolvedValue([{ id: "group-1" }]),
+      chatGroup: {
+        findFirst: vi.fn().mockResolvedValue({
+          id: "group-1",
+          members: [
+            { bot: { id: "bot-1", name: "Main", color: null } },
+            { bot: { id: "bot-2", name: "Sourcer", color: null } },
+          ],
+        }),
+      },
       thread: {
         update: vi.fn().mockResolvedValue({ nextMessageSeq: 2 }),
       },
@@ -1628,7 +1837,9 @@ describe("sendThreadMessage", () => {
       run: {
         findMany: vi
           .fn()
-          .mockResolvedValue([{ id: "run-waiting", taskId: "task-1", status: "waiting_input" }]),
+          .mockResolvedValue([
+            { id: "run-waiting", taskId: "task-1", botId: "bot-1", status: "waiting_input" },
+          ]),
       },
       steeringMessage: { create: vi.fn() },
       event: { create: vi.fn() },
@@ -1639,12 +1850,22 @@ describe("sendThreadMessage", () => {
       $transaction: vi.fn(async (callback: (client: typeof tx) => unknown) => callback(tx)),
     } as unknown as PrismaClient;
     const actor = { spaceId: "workspace-1", userId: "user-1" } as Actor;
-    const target = {
-      kind: "bot",
-      botId: "bot-1",
-      threadId: "thread-1",
-      bot: { computer: null },
-    } as ThreadTarget;
+    const target =
+      kind === "group"
+        ? ({
+            kind: "group",
+            groupId: "group-1",
+            groupName: "Role",
+            threadId: "thread-1",
+            members: [],
+            memberBotIds: ["bot-1", "bot-2"],
+          } as ThreadTarget)
+        : ({
+            kind: "bot",
+            botId: "bot-1",
+            threadId: "thread-1",
+            bot: { computer: null },
+          } as ThreadTarget);
 
     await expect(
       sendThreadMessage(
@@ -1656,7 +1877,8 @@ describe("sendThreadMessage", () => {
         actor,
         target,
         {
-          text: "allow",
+          text: kind === "group" ? "@Sourcer @everyone allow" : "allow",
+          addressing: kind === "group" ? "coordinator" : undefined,
           clientNonce: "nonce-1",
         },
       ),
@@ -1665,6 +1887,8 @@ describe("sendThreadMessage", () => {
       message: "Answer the pending ask first.",
     });
     expect(tx.steeringMessage.create).not.toHaveBeenCalled();
+    expect(tx.message.update).not.toHaveBeenCalled();
+    expect(tx.task.create).not.toHaveBeenCalled();
   });
 
   it("waits for the creation intro instead of starting a second run", async () => {

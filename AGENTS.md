@@ -17,6 +17,8 @@ Build a recruiting multi-agent product by composing Rakazo's existing harness an
 
 The current priority is playbook-driven sourcing and filtering. The wider product scope remains, but it does not require custom infrastructure for every listed feature.
 
+Ordinary recruiting UI presents one assistant and accepts plain human messages. Its coordinator owns specialist routing, including when pasted text contains agent mentions. System-generated agent identities, addressing controls, tool names, task/artifact IDs and runtime diagnostics belong only in the deployment-owner developer view. Preserve original human-authored messages, useful recruiting evidence, unknowns, clarification inputs and exact external-send confirmations. Product acceptance must start from the ordinary input without `@Main` or specialist-selection instructions; use the existing native handoff mechanism for internal delegation.
+
 Use the source-workflow review in [PLAN.md — Grok Bot 工作方式的采用与差距](docs/wekruit/PLAN.md#grok-bot-工作方式的采用与差距) when continuing this work. Learn from actual conversations and routine state; an enabled routine or an agent's completion claim is not a verified service outcome. Preserve responsible-agent ownership, useful exception-based updates, scoped and retractable preferences, paid-lookup reuse, and hold/pause decisions. Historical scripts, candidate criteria, schedules and approvals are reference material, not new architecture or permission to replay work.
 
 ## Repository conventions

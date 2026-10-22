@@ -2357,31 +2357,34 @@ it("isolates saved recruiting list preferences by actor, thread and actual role"
   );
 });
 
-it("offers native Autumn rank, tier and score ordering while preserving candidate filters", async () => {
-  const view = await mounted("thread-1", undefined, false);
-  await view.click("Evidence");
-  const select = view.container.querySelector<HTMLSelectElement>(
-    'select[aria-label="Candidate sort"]',
-  )!;
-  expect([...select.options].map((option) => option.textContent)).toEqual([
-    "Autumn rank",
-    "Match tier",
-    "Match score",
-    "Name",
-    "Recently discovered",
-  ]);
-  expect(select.value).toBe("rank");
-  await changeInput(view.container, "Search candidates", "Synthetic");
-  for (const sort of ["tier", "rank", "score"]) {
-    await changeSelect(view.container, "Candidate sort", sort);
-    expect(api.listCandidates).toHaveBeenLastCalledWith({
-      roleId: role.id,
-      limit: 30,
-      query: "Synthetic",
-      sort,
-    });
-  }
-});
+it.each([false, true])(
+  "keeps candidate sort values with diagnostics=%s",
+  async (showDiagnostics) => {
+    const view = await mounted("thread-1", undefined, showDiagnostics);
+    await view.click("Evidence");
+    const select = view.container.querySelector<HTMLSelectElement>(
+      'select[aria-label="Candidate sort"]',
+    )!;
+    expect([...select.options].map((option) => option.textContent)).toEqual([
+      showDiagnostics ? "Autumn rank" : "Rank",
+      "Match tier",
+      "Match score",
+      "Name",
+      "Recently discovered",
+    ]);
+    expect(select.value).toBe("rank");
+    await changeInput(view.container, "Search candidates", "Synthetic");
+    for (const sort of ["tier", "rank", "score"]) {
+      await changeSelect(view.container, "Candidate sort", sort);
+      expect(api.listCandidates).toHaveBeenLastCalledWith({
+        roleId: role.id,
+        limit: 30,
+        query: "Synthetic",
+        sort,
+      });
+    }
+  },
+);
 
 it.each(["rank", "tier", "score"])(
   "normalizes a saved unavailable %s sort to Name from the authoritative scope signal",

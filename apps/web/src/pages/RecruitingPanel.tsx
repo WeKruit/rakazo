@@ -3704,7 +3704,7 @@ function RecruitingWorkspace({
                     >
                       {candidatePage.sortAvailability.rank ? (
                         <NativeSelectOption value="rank">
-                          <Trans>Autumn rank</Trans>
+                          {showDiagnostics ? <Trans>Autumn rank</Trans> : <Trans>Rank</Trans>}
                         </NativeSelectOption>
                       ) : null}
                       {candidatePage.sortAvailability.tier ? (

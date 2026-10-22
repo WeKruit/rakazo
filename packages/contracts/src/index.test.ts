@@ -31,6 +31,33 @@ import {
 } from "./index.js";
 
 describe("contracts", () => {
+  it("accepts an explicit group addressing mode without changing direct bot sends", () => {
+    const schema = appContract.threads.send["~orpc"].inputSchema!;
+    for (const addressing of ["coordinator", "mentions"] as const) {
+      const input = { groupId: "group-1", text: "@Sourcer ask @everyone", addressing };
+      expect(schema.parse(input)).toEqual(input);
+      expect(schema.safeParse({ botId: "bot-1", text: "Hello", addressing }).success).toBe(false);
+    }
+    expect(schema.parse({ botId: "bot-1", text: "Hello" })).toEqual({
+      botId: "bot-1",
+      text: "Hello",
+    });
+    expect(schema.parse({ groupId: "group-1", text: "Hello" })).toEqual({
+      groupId: "group-1",
+      text: "Hello",
+    });
+    expect(schema.safeParse({ groupId: "group-1", text: "Hello", addressing: "all" }).success).toBe(
+      false,
+    );
+  });
+
+  it("accepts one optional bootstrap target without dropping group identity", () => {
+    const schema = appContract.bootstrap["~orpc"].inputSchema!;
+    expect(schema.parse({})).toEqual({});
+    expect(schema.parse({ botId: "bot-1" })).toEqual({ botId: "bot-1" });
+    expect(schema.parse({ groupId: "group-1" })).toEqual({ groupId: "group-1" });
+    expect(schema.safeParse({ botId: "bot-1", groupId: "group-1" }).success).toBe(false);
+  });
   it("accepts pre-registered MCP OAuth clients without allowing protocol or secret URL parameters", () => {
     const schema = appContract.mcp.oauth.begin["~orpc"].inputSchema!;
     const input = {

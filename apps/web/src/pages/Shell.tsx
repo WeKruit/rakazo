@@ -1,6 +1,7 @@
 import { i18n } from "@lingui/core";
 import { t } from "@lingui/core/macro";
 import { Trans, useLingui } from "@lingui/react/macro";
+import { ORPCError } from "@orpc/client";
 import { ChatMarkdown, LinkFaviconsContext, LinkifiedText } from "@rakazo/chat-ui/web";
 import type {
   AgentSkillCatalogEntry,
@@ -591,6 +592,7 @@ export function ShellPage() {
   // ponytail: keep at most 20 threads in this authenticated shell; switching
   // account/space reloads it. Native refresh/SSE remains authoritative.
   const threadSnapshotCache = useRef(new Map<string, ThreadSnapshot>());
+  const validatedThreadEpoch = useRef<number | null>(null);
   const botsRefreshEpoch = useRef(0);
   const botsRefreshApplied = useRef(0);
   const archivedBotsRefreshEpoch = useRef(0);
@@ -1202,20 +1204,50 @@ export function ShellPage() {
     });
   }
 
+  async function readThreadSnapshot(
+    target: { botId?: string; groupId?: string },
+    signal: AbortSignal | undefined,
+    isCurrent: () => boolean,
+  ) {
+    try {
+      return await rpc.threads.get(target, signal ? { signal } : undefined);
+    } catch (error) {
+      if (
+        isCurrent() &&
+        !signal?.aborted &&
+        error instanceof ORPCError &&
+        ["UNAUTHORIZED", "FORBIDDEN", "NOT_FOUND"].includes(error.code)
+      ) {
+        threadSnapshotCache.current.delete(
+          target.groupId ? `group:${target.groupId}` : `bot:${target.botId}`,
+        );
+        validatedThreadEpoch.current = null;
+        commitSnapshot(null);
+      }
+      throw error;
+    }
+  }
+
   async function refreshGroupThread(id: string, signal?: AbortSignal) {
     const scrollElement = messageScroll.current;
     const stickToEnd = !scrollElement || transcriptIsNearEnd(scrollElement);
     markOnce("rk:renderer:thread-request-start");
+    const epoch = historyEpoch.current;
     const request = ++groupRefreshEpoch.current;
-    const snap = await rpc.threads.get({ groupId: id }, signal ? { signal } : undefined);
+    const isCurrent = () =>
+      activeGroupId.current === id &&
+      epoch === historyEpoch.current &&
+      request === groupRefreshEpoch.current;
+    const snap = await readThreadSnapshot({ groupId: id }, signal, isCurrent);
     markOnce("rk:renderer:thread-response");
-    if (activeGroupId.current !== id || request !== groupRefreshEpoch.current) return snap;
+    if (!isCurrent()) return snap;
     const reconciled = reconcileRefreshedThread(
       snapshotRef.current,
       snap,
       computerRef.current,
       expandedHistoryThread.current === snap.threadId,
     );
+    validatedThreadEpoch.current = epoch;
     commitSnapshot(reconciled.snapshot);
     if (!computerOpenRef.current) commitComputer(null);
     setRoutines([]);
@@ -1239,7 +1271,11 @@ export function ShellPage() {
     const request = ++threadRefreshEpoch.current;
     // Apply threads.get as soon as it returns so stop/takeover status is not held behind
     // routines/skills/screen fetches (progress can advance the cursor meanwhile).
-    const snap = await rpc.threads.get({ botId: id }, signal ? { signal } : undefined);
+    const isCurrent = () =>
+      activeBotId.current === id &&
+      epoch === historyEpoch.current &&
+      request === threadRefreshEpoch.current;
+    const snap = await readThreadSnapshot({ botId: id }, signal, isCurrent);
     markOnce("rk:renderer:thread-response");
     if (
       activeBotId.current !== id ||
@@ -1254,6 +1290,7 @@ export function ShellPage() {
       computerRef.current,
       expandedHistoryThread.current === snap.threadId,
     );
+    validatedThreadEpoch.current = epoch;
     commitSnapshot(reconciled.snapshot);
     commitComputer(reconciled.computer);
     cacheComputerFor(id, { computer: reconciled.computer });
@@ -1387,9 +1424,9 @@ export function ShellPage() {
         }
       });
     const appliedAtStart = botsRefreshApplied.current;
-    void takeInitialBootstrap(botId)
+    void takeInitialBootstrap(botId, groupId)
       .then((bootstrap) => {
-        if (cancelled) return;
+        if (cancelled || botsRefreshUser.current !== user) return;
         const groupList = bootstrap.groups;
         setBootstrapMe(bootstrap.me);
         // Skip list/route writes only if a later refreshBots() successfully
@@ -1404,7 +1441,19 @@ export function ShellPage() {
           setSpaces(bootstrap.spaces);
           setInitialBotsLoaded(true);
         }
-        if (!groupId && bootstrap.thread) {
+        const selectedThread =
+          bootstrap.thread &&
+          (groupId
+            ? routeGroupId.current === groupId && bootstrap.thread.groupId === groupId
+            : !routeGroupId.current &&
+              routeBotId.current === botId &&
+              bootstrap.thread.botId === botId);
+        if (
+          applyBotLists &&
+          selectedThread &&
+          bootstrap.thread &&
+          !(groupId && searchParamsRef.current.get("m"))
+        ) {
           bootstrappedThread.current = bootstrap.thread;
           commitSnapshot(bootstrap.thread);
           commitComputer(bootstrap.thread.computer ?? null);
@@ -1424,14 +1473,14 @@ export function ShellPage() {
           navigate("/onboarding", { replace: true });
           return;
         }
-        if (groupId) {
-          if (!groupList.some((group) => group.id === groupId)) {
+        if (routeGroupId.current) {
+          if (!groupList.some((group) => group.id === routeGroupId.current)) {
             navigate(firstThreadRoute(bootstrap.bots, groupList), { replace: true });
           }
           return;
         }
         const selectedBotId = bootstrap.thread?.botId ?? bootstrap.bots[0]?.id;
-        if (selectedBotId && selectedBotId !== botId) {
+        if (selectedBotId && selectedBotId !== routeBotId.current) {
           navigate(`/app/${selectedBotId}`, { replace: true });
         }
       })
@@ -1557,7 +1606,7 @@ export function ShellPage() {
       setScreenUrl(null);
     }
     expandedHistoryThread.current = null;
-    historyEpoch.current += 1;
+    const epoch = ++historyEpoch.current;
     const abort = new AbortController();
     void runThreadSubscription({
       signal: abort.signal,
@@ -1565,16 +1614,24 @@ export function ShellPage() {
         const primed = bootstrappedThread.current;
         bootstrappedThread.current = null;
         // Pending search jumps load the around-page separately; avoid replacing it with latest.
-        return primed?.botId === active.id
-          ? primed
-          : pendingJump
-            ? rpc.threads.get({ botId: active.id }, { signal: threadSnapshotSignal(abort.signal) })
-            : refreshThread(active.id, threadSnapshotSignal(abort.signal));
+        if (primed?.botId === active.id) {
+          validatedThreadEpoch.current = epoch;
+          commitSnapshot({ ...primed });
+          return primed;
+        }
+        return pendingJump
+          ? readThreadSnapshot(
+              { botId: active.id },
+              threadSnapshotSignal(abort.signal),
+              () => epoch === historyEpoch.current && activeBotId.current === active.id,
+            )
+          : refreshThread(active.id, threadSnapshotSignal(abort.signal));
       },
       loadHead: () =>
         rpc.threads.head({ botId: active.id }, { signal: threadSnapshotSignal(abort.signal) }),
       refresh: () => refreshThread(active.id, threadSnapshotSignal(abort.signal)),
-      currentSnapshot: () => snapshotRef.current,
+      currentSnapshot: () =>
+        validatedThreadEpoch.current === historyEpoch.current ? snapshotRef.current : null,
       subscribe: (cursor) =>
         rpc.threads.subscribe({ botId: active.id, cursor }, { signal: abort.signal }),
       beforeEvent: (event) => {
@@ -1676,17 +1733,30 @@ export function ShellPage() {
       pinnedAroundRef.current = null;
       expandedHistoryThread.current = null;
     }
-    historyEpoch.current += 1;
+    const epoch = ++historyEpoch.current;
     const abort = new AbortController();
     void runThreadSubscription({
       signal: abort.signal,
-      loadInitial: () =>
-        pendingJump
-          ? rpc.threads.get({ groupId }, { signal: threadSnapshotSignal(abort.signal) })
-          : refreshGroupThread(groupId, threadSnapshotSignal(abort.signal)),
+      loadInitial: async () => {
+        const primed = bootstrappedThread.current;
+        bootstrappedThread.current = null;
+        if (!pendingJump && primed?.groupId === groupId) {
+          validatedThreadEpoch.current = epoch;
+          commitSnapshot({ ...primed });
+          return primed;
+        }
+        return pendingJump
+          ? readThreadSnapshot(
+              { groupId },
+              threadSnapshotSignal(abort.signal),
+              () => epoch === historyEpoch.current && activeGroupId.current === groupId,
+            )
+          : refreshGroupThread(groupId, threadSnapshotSignal(abort.signal));
+      },
       loadHead: () => rpc.threads.head({ groupId }, { signal: threadSnapshotSignal(abort.signal) }),
       refresh: () => refreshGroupThread(groupId, threadSnapshotSignal(abort.signal)),
-      currentSnapshot: () => snapshotRef.current,
+      currentSnapshot: () =>
+        validatedThreadEpoch.current === historyEpoch.current ? snapshotRef.current : null,
       subscribe: (cursor) => rpc.threads.subscribe({ groupId, cursor }, { signal: abort.signal }),
       applyEvent: (event) =>
         applyThreadEvent(
@@ -1882,7 +1952,16 @@ export function ShellPage() {
     jumpGeneration.current += 1;
     const jumpId = jumpGeneration.current;
     const [snap, page] = await Promise.all([
-      rpc.threads.get(threadTarget),
+      readThreadSnapshot(
+        threadTarget,
+        undefined,
+        () =>
+          epoch === historyEpoch.current &&
+          jumpId === jumpGeneration.current &&
+          (target.groupId
+            ? activeGroupId.current === target.groupId
+            : activeBotId.current === target.botId),
+      ),
       rpc.threads.messages({ ...threadTarget, around: { messageId: target.messageId } }),
     ]);
     // The epoch check drops a jump that raced a conversation clear (or a bot switch): applying
@@ -1905,6 +1984,7 @@ export function ShellPage() {
         }
       : null;
     if (targetInPage) initiallyScrolledThread.current = page.threadId;
+    validatedThreadEpoch.current = epoch;
     commitSnapshot({
       ...snap,
       messages: targetInPage ? page.messages : snap.messages,
@@ -2166,7 +2246,14 @@ export function ShellPage() {
     setReplyQuote(null);
   }, []);
   const currentRuns = activeThreadRuns(activeSnapshot);
-  const answerableAskIds = answerableAskMessageIds(activeSnapshot);
+  const answerableAskIds = answerableAskMessageIds(
+    validatedThreadEpoch.current === historyEpoch.current &&
+      (inGroup
+        ? snapshotRef.current?.groupId === groupId
+        : snapshotRef.current?.botId === active?.id)
+      ? snapshotRef.current
+      : null,
+  );
   const workingRuns = currentRuns.filter((run) =>
     ["running", "queued", "leased"].includes(run.status),
   );
@@ -2445,6 +2532,16 @@ export function ShellPage() {
       const botId = activeBotId.current;
       const groupId = activeGroupId.current;
       if (!botId && !groupId) return;
+      const current = snapshotRef.current;
+      if (
+        validatedThreadEpoch.current !== historyEpoch.current ||
+        !current ||
+        current.threadId !== message.threadId ||
+        (groupId ? current.groupId !== groupId : current.botId !== botId) ||
+        !answerableAskMessageIds(current).includes(message.id) ||
+        !current.messages.some((item) => item.id === message.id && item.runId === message.runId)
+      )
+        return;
       await rpc.threads.answer({
         ...(groupId ? { groupId } : { botId: botId! }),
         runId: message.runId ?? "",
@@ -2608,6 +2705,7 @@ export function ShellPage() {
         if (groupTarget) {
           await rpc.threads.send({
             groupId: groupTarget,
+            addressing: showToolActivity ? undefined : "coordinator",
             clientNonce,
             text: trimmed || undefined,
             mentions: plan.mentionPayload.length ? plan.mentionPayload : undefined,
@@ -2680,6 +2778,7 @@ export function ShellPage() {
       navigate,
       pendingAttachments,
       sending,
+      showToolActivity,
       t,
     ],
   );

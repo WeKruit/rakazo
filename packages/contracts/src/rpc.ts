@@ -218,6 +218,7 @@ const threadSendInput = threadTarget
   .safeExtend({
     text: z.string().optional(),
     artifactIds: z.array(Id).max(ATTACHMENT_MAX_COUNT).optional(),
+    addressing: z.enum(["coordinator", "mentions"]).optional(),
     /** Bare bot ids (legacy) or typed mention chips from the composer. */
     mentions: z
       .array(z.union([Id, structuredMentionTarget]))
@@ -228,6 +229,13 @@ const threadSendInput = threadTarget
     clientNonce: z.string().min(1).max(200).optional(),
   })
   .superRefine((input, ctx) => {
+    if (input.addressing && !input.groupId) {
+      ctx.addIssue({
+        code: "custom",
+        message: "Addressing mode requires a group",
+        path: ["addressing"],
+      });
+    }
     const text = input.text?.trim() ?? "";
     const artifactIds = input.artifactIds ?? [];
     if (!text && artifactIds.length === 0) {
@@ -282,7 +290,16 @@ export const appContract = {
       .input(z.object({ spaceId: Id }))
       .output(z.object({ ok: z.literal(true), activeSpaceId: Id })),
   },
-  bootstrap: oc.input(z.object({ botId: Id.optional() })).output(AppBootstrapSchema),
+  bootstrap: oc
+    .input(
+      z
+        .object({ botId: Id.optional(), groupId: Id.optional() })
+        .refine((input) => !(input.botId && input.groupId), {
+          message: "Provide at most one of botId or groupId",
+          path: ["botId"],
+        }),
+    )
+    .output(AppBootstrapSchema),
   deployment: {
     get: oc.output(DeploymentSettingsSchema),
     update: oc
