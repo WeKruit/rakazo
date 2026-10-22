@@ -759,6 +759,10 @@ msgstr ""
 msgid "Availability not loaded"
 msgstr ""
 
+#: src/pages/RecruitingPanel.tsx
+msgid "Available"
+msgstr ""
+
 #: src/pages/RoutineEditor.tsx
 msgid "Available after the routine is saved"
 msgstr "保存例行任务后可用"
@@ -1516,6 +1520,10 @@ msgstr "复制"
 
 #: src/components/ComputersUnavailableHint.tsx
 msgid "Copy .env example"
+msgstr ""
+
+#: src/pages/RecruitingPanel.tsx
+msgid "Could not access"
 msgstr ""
 
 #: src/pages/ScratchpadSection.tsx
@@ -3497,6 +3505,10 @@ msgid "minutes"
 msgstr "分钟"
 
 #: src/pages/RecruitingPanel.tsx
+msgid "Missing"
+msgstr ""
+
+#: src/pages/RecruitingPanel.tsx
 msgid "Missing info"
 msgstr ""
 
@@ -3889,6 +3901,10 @@ msgstr ""
 
 #: src/pages/RecruitingPanel.tsx
 msgid "Not accepted"
+msgstr ""
+
+#: src/pages/RecruitingPanel.tsx
+msgid "Not checked"
 msgstr ""
 
 #: src/pages/ModelBackupsSettings.tsx

@@ -479,6 +479,23 @@ function CandidateCounts({ counts }: { counts: ListRecruitingCandidatesOutput["c
   );
 }
 
+function CandidateResumeStatus({ value }: { value: string }) {
+  switch (value.trim().toLowerCase()) {
+    case "not_checked":
+      return <Trans>Not checked</Trans>;
+    case "inaccessible":
+      return <Trans>Could not access</Trans>;
+    case "available":
+      return <Trans>Available</Trans>;
+    case "missing":
+      return <Trans>Missing</Trans>;
+    case "unknown":
+      return <Trans>Unknown</Trans>;
+    default:
+      return value;
+  }
+}
+
 function CandidateProfile({
   candidate,
   showDiagnostics = false,
@@ -509,13 +526,19 @@ function CandidateProfile({
         {candidate.resumeUrl ? (
           <a className="underline" href={candidate.resumeUrl} target="_blank" rel="noreferrer">
             <Trans>Resume</Trans>
-            {resumeStatus ? ` (${resumeStatus})` : null}
+            {resumeStatus ? (
+              <>
+                {" "}
+                ({showDiagnostics ? resumeStatus : <CandidateResumeStatus value={resumeStatus} />})
+              </>
+            ) : null}
           </a>
         ) : (
           <span className="text-muted-foreground">
             {resumeStatus ? (
               <>
-                <Trans>Resume</Trans>: {resumeStatus}
+                <Trans>Resume</Trans>:{" "}
+                {showDiagnostics ? resumeStatus : <CandidateResumeStatus value={resumeStatus} />}
               </>
             ) : (
               <Trans>Resume missing</Trans>
@@ -567,10 +590,18 @@ function CandidateReportValue({
   label,
   value,
   compact = false,
+  showDiagnostics = false,
 }: Pick<RecruitingCandidateReport["fields"][number], "label" | "value"> & {
   compact?: boolean;
+  showDiagnostics?: boolean;
 }) {
   const { t } = useLingui();
+  if (label === "Resume status" && value !== null && !showDiagnostics)
+    return (
+      <p className={compact ? "line-clamp-2" : "whitespace-pre-wrap"}>
+        <CandidateResumeStatus value={value} />
+      </p>
+    );
   if (
     value === null ||
     value.length <= 240 ||
@@ -926,7 +957,13 @@ function CrmDetails({
   );
 }
 
-function CandidateReport({ report }: { report: RecruitingCandidateReport }) {
+function CandidateReport({
+  report,
+  showDiagnostics = false,
+}: {
+  report: RecruitingCandidateReport;
+  showDiagnostics?: boolean;
+}) {
   const fieldUrls = new Set(report.fields.flatMap((field) => field.sourceUrls));
   return (
     <div className="space-y-3 break-words font-sans text-base leading-relaxed">
@@ -935,7 +972,11 @@ function CandidateReport({ report }: { report: RecruitingCandidateReport }) {
           <div key={index}>
             <dt className="font-medium">{field.label}</dt>
             <dd className="space-y-1">
-              <CandidateReportValue label={field.label} value={field.value} />
+              <CandidateReportValue
+                label={field.label}
+                value={field.value}
+                showDiagnostics={showDiagnostics}
+              />
               {field.evidence ? (
                 <p className="whitespace-pre-wrap text-muted-foreground">{field.evidence}</p>
               ) : null}
@@ -1107,7 +1148,7 @@ function CandidateSources({
                   </time>
                 </summary>
                 {source.report ? (
-                  <CandidateReport report={source.report} />
+                  <CandidateReport report={source.report} showDiagnostics={showDiagnostics} />
                 ) : (
                   <p className="text-muted-foreground">
                     <Trans>Source unavailable</Trans>
@@ -1744,7 +1785,7 @@ function ArtifactReference({
             </p>
           )}
           {current?.excerpt?.kind === "report" ? (
-            <CandidateReport report={current.excerpt.report} />
+            <CandidateReport report={current.excerpt.report} showDiagnostics={showDiagnostics} />
           ) : current?.excerpt?.kind === "text" ? (
             <SourceText
               text={current.excerpt.text}

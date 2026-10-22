@@ -3171,6 +3171,60 @@ it("uses business gate labels only in explicit match-summary expressions while p
   expect(JSON.stringify(source)).toBe(original);
 });
 
+it.each([
+  ["not_checked", "Not checked"],
+  ["inaccessible", "Could not access"],
+  ["available", "Available"],
+  ["missing", "Missing"],
+  ["unknown", "Unknown"],
+  [
+    "Candidate supplied a CV through the recruiter",
+    "Candidate supplied a CV through the recruiter",
+  ],
+])("shows readable resume status %s while preserving provider evidence", async (status, label) => {
+  const candidate = {
+    ...candidateFixture("resume-person", false),
+    name: "Resume Example",
+    resumeUrl: status === "available" ? "https://example.test/resume.pdf" : null,
+    latestSource: {
+      ...savedObservation,
+      taskId: null,
+      actionId: null,
+      rowIndex: 0,
+      outputId: null,
+      report: {
+        fields: [{ label: "Resume status", value: status, sourceUrls: [] }],
+        sourceUrls: [],
+      },
+    },
+  };
+  const original = JSON.stringify(candidate);
+  api.listCandidates.mockResolvedValue(candidatePage([candidate]));
+  api.listCandidateSources.mockResolvedValue({
+    roleId: role.id,
+    candidateKey: candidate.candidateKey,
+    total: 1,
+    nextCursor: null,
+    items: [{ ...candidate.latestSource, crmImports: [] }],
+  });
+  const view = await mounted("thread-1", undefined, false, undefined, {
+    presentation: "workspace",
+    tab: "evidence",
+  });
+  const card = view.container.querySelector(".hire-candidate-card")!;
+  expect(card.textContent).toContain(
+    status === "available" ? `Resume (${label})` : `Resume: ${label}`,
+  );
+  await view.click("View Resume Example");
+  const dialog = view.container.querySelector('[role="dialog"]')!;
+  const sources = dialog.querySelector('[aria-label="Saved candidate sources"]')!;
+  expect(sources.textContent).toContain(label);
+  if (status !== label) expect(dialog.textContent).not.toContain(`Resume: ${status}`);
+  await view.render("thread-1", 0, true);
+  expect(view.container.querySelector('[role="dialog"]')?.textContent).toContain(status);
+  expect(JSON.stringify(candidate)).toBe(original);
+});
+
 it.each(["Cards", "Table"])(
   "shows provider match directly in %s while preserving retained reports and gaps",
   async (viewName) => {
@@ -3382,11 +3436,11 @@ it.each(["Cards", "Table"])(
     if (viewName === "Cards") await toggleDescription(matches[0]!, "Fit reasons", fitReasons);
     expect(api.listCandidates).toHaveBeenCalledTimes(candidateReads);
     expect(list.textContent).not.toContain("Unassessed");
-    expect(list.textContent).toContain("Resume: inaccessible");
+    expect(list.textContent).toContain("Resume: Could not access");
     expect(api.listCandidateSources).not.toHaveBeenCalled();
     await view.click(candidate.name);
     const dialog = view.container.querySelector('[role="dialog"]')!;
-    expect(dialog.textContent).toContain("Resume: inaccessible");
+    expect(dialog.textContent).toContain("Resume: Could not access");
     expect(dialog.textContent).not.toContain("Resume missing");
     const sources = dialog.querySelector('[aria-label="Saved candidate sources"]')!;
     const summary = dialog.querySelector('[aria-label="Research match"]')!;

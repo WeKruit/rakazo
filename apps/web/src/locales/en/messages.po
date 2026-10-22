@@ -759,6 +759,10 @@ msgstr "Autumn rank"
 msgid "Availability not loaded"
 msgstr "Availability not loaded"
 
+#: src/pages/RecruitingPanel.tsx
+msgid "Available"
+msgstr "Available"
+
 #: src/pages/RoutineEditor.tsx
 msgid "Available after the routine is saved"
 msgstr "Available after the routine is saved"
@@ -1517,6 +1521,10 @@ msgstr "Copy"
 #: src/components/ComputersUnavailableHint.tsx
 msgid "Copy .env example"
 msgstr "Copy .env example"
+
+#: src/pages/RecruitingPanel.tsx
+msgid "Could not access"
+msgstr "Could not access"
 
 #: src/pages/ScratchpadSection.tsx
 msgid "Could not add"
@@ -3497,6 +3505,10 @@ msgid "minutes"
 msgstr "minutes"
 
 #: src/pages/RecruitingPanel.tsx
+msgid "Missing"
+msgstr "Missing"
+
+#: src/pages/RecruitingPanel.tsx
 msgid "Missing info"
 msgstr "Missing info"
 
@@ -3890,6 +3902,10 @@ msgstr "Not a fit"
 #: src/pages/RecruitingPanel.tsx
 msgid "Not accepted"
 msgstr "Not accepted"
+
+#: src/pages/RecruitingPanel.tsx
+msgid "Not checked"
+msgstr "Not checked"
 
 #: src/pages/ModelBackupsSettings.tsx
 msgid "Not connected"
