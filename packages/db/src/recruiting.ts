@@ -7060,13 +7060,18 @@ async function crmImportSource(
     string,
     Prisma.RecruitingCandidatePageGetPayload<Record<string, never>>
   >,
+  source?: Prisma.RecruitingCandidateOccurrenceGetPayload<{ include: { page: true } }>,
 ) {
-  const occurrence = await tx.recruitingCandidateOccurrence.findUnique({
-    where: { pageId_rowIndex: { pageId: input.sourceEffectId, rowIndex: input.rowIndex } },
-    include: { page: true },
-  });
+  const occurrence =
+    source ??
+    (await tx.recruitingCandidateOccurrence.findUnique({
+      where: { pageId_rowIndex: { pageId: input.sourceEffectId, rowIndex: input.rowIndex } },
+      include: { page: true },
+    }));
   if (
     !occurrence ||
+    occurrence.pageId !== input.sourceEffectId ||
+    occurrence.rowIndex !== input.rowIndex ||
     occurrence.roleId !== input.roleId ||
     occurrence.candidateKey !== input.candidateKey
   )
@@ -7878,59 +7883,121 @@ export async function claimRecruitingReply(
 async function crmSourceSync(
   tx: Tx,
   actor: Actor,
-  link: Prisma.RecruitingCrmImportGetPayload<{ include: { effect: true; occurrence: true } }>,
-  verified?: {
+  links: Prisma.RecruitingCrmImportGetPayload<{ include: { effect: true; occurrence: true } }>[],
+  verified: {
     pages: ReadonlyMap<string, Prisma.RecruitingCandidatePageGetPayload<Record<string, never>>>;
+    sources: readonly Prisma.RecruitingCandidateOccurrenceGetPayload<{
+      include: { page: true };
+    }>[];
     binding?: Awaited<ReturnType<typeof crmBindingReceipt>>;
   },
-): Promise<RecruitingCrmCandidateSync> {
-  const input = {
-    roleId: link.occurrence.roleId,
-    candidateKey: link.occurrence.candidateKey,
-    bindingEffectId: link.bindingEffectId,
-    sourceEffectId: link.pageId,
-    rowIndex: link.rowIndex,
-  };
-  const bound =
-    verified?.binding?.roleId === input.roleId &&
-    verified.binding.bindingEffectId === input.bindingEffectId
-      ? verified.binding
-      : await crmBindingReceipt(tx, actor, input.roleId, input.bindingEffectId);
-  const source = await crmImportSource(tx, actor, input, verified?.pages);
-  const args = crmImportArgs(bound.target, source);
-  const owner = await requireRun(tx, actor, link.effect.runId);
-  const ownerState = await tx.run.findUniqueOrThrow({ where: { id: owner.id } });
-  if (link.effect.spaceId !== actor.spaceId || link.effect.idempotencyKey !== crmImportKey(input))
-    throw new IsolationError();
-  assertCrmImportRequest(
-    link.effect.request,
-    {
-      connectorId: "mcp",
-      resourceId: bound.target.mcpServerId,
-      resourceRevision: bound.target.serverRevision,
-      toolName: "crm_import_candidate",
-    },
-    args,
+): Promise<Map<string, RecruitingCrmCandidateSync>> {
+  const syncs = new Map<string, RecruitingCrmCandidateSync>();
+  if (!links.length) return syncs;
+  // ponytail: batch retained read proofs inside this snapshot, never cache authorization across reads.
+  const sources = new Map(
+    verified.sources.map((source) => [`${source.pageId}:${source.rowIndex}`, source]),
   );
-  const receipt = parseRecruitingCrmImportReceipt(link.effect, bound.target, args);
-  const status = deriveRecruitingCrmImportStatus(
-    { ...link.effect, ownerRunStatus: ownerState.status },
-    bound.target,
-    args,
+  const pages = new Map(verified.pages);
+  const missing = new Map<
+    string,
+    Prisma.RecruitingCandidatePageGetPayload<Record<string, never>>
+  >();
+  for (const link of links) {
+    const source = sources.get(`${link.pageId}:${link.rowIndex}`);
+    if (!source) throw new IsolationError();
+    const page = source.page;
+    if (page.taskId === null && page.actionId === null && !pages.has(page.effectId))
+      missing.set(page.effectId, page);
+  }
+  await candidatePageArtifacts(tx, actor, [...missing.values()], true);
+  for (const [id, page] of missing) pages.set(id, page);
+  const ownerScope = { spaceId: actor.spaceId, userId: actor.userId };
+  const owners = new Map(
+    (
+      await tx.run.findMany({
+        where: {
+          ...ownerScope,
+          id: { in: [...new Set(links.map((link) => link.effect.runId))] },
+          bot: ownerScope,
+          thread: {
+            ...ownerScope,
+            OR: [
+              { botId: { not: null }, bot: ownerScope },
+              { botId: null, groupId: { not: null }, group: ownerScope },
+              {
+                botId: null,
+                groupId: null,
+                externalConversationId: { not: null },
+                externalConversation: { ...ownerScope, bot: ownerScope },
+              },
+            ],
+          },
+        },
+        select: { id: true, spaceId: true, userId: true, status: true, leaseExpiresAt: true },
+      })
+    ).map((run) => [run.id, run]),
   );
-  return {
-    effectId: link.effect.id,
-    bindingEffectId: link.bindingEffectId,
-    sourceEffectId: link.pageId,
-    rowIndex: link.rowIndex,
-    target: bound.target,
-    status:
-      status === "syncing" &&
-      (!ownerState.leaseExpiresAt || ownerState.leaseExpiresAt.getTime() <= Date.now())
-        ? "unknown"
-        : status,
-    receipt,
-  };
+  const bindings = new Map<string, Awaited<ReturnType<typeof crmBindingReceipt>>>();
+  for (const link of links) {
+    const input = {
+      roleId: link.occurrence.roleId,
+      candidateKey: link.occurrence.candidateKey,
+      bindingEffectId: link.bindingEffectId,
+      sourceEffectId: link.pageId,
+      rowIndex: link.rowIndex,
+    };
+    let bound = bindings.get(link.bindingEffectId);
+    if (!bound || bound.roleId !== input.roleId) {
+      bound =
+        verified.binding?.roleId === input.roleId &&
+        verified.binding.bindingEffectId === input.bindingEffectId
+          ? verified.binding
+          : await crmBindingReceipt(tx, actor, input.roleId, input.bindingEffectId);
+      bindings.set(link.bindingEffectId, bound);
+    }
+    const source = await crmImportSource(
+      tx,
+      actor,
+      input,
+      pages,
+      sources.get(`${link.pageId}:${link.rowIndex}`),
+    );
+    const args = crmImportArgs(bound.target, source);
+    const ownerState = scoped(actor, owners.get(link.effect.runId) ?? null);
+    if (link.effect.spaceId !== actor.spaceId || link.effect.idempotencyKey !== crmImportKey(input))
+      throw new IsolationError();
+    assertCrmImportRequest(
+      link.effect.request,
+      {
+        connectorId: "mcp",
+        resourceId: bound.target.mcpServerId,
+        resourceRevision: bound.target.serverRevision,
+        toolName: "crm_import_candidate",
+      },
+      args,
+    );
+    const receipt = parseRecruitingCrmImportReceipt(link.effect, bound.target, args);
+    const status = deriveRecruitingCrmImportStatus(
+      { ...link.effect, ownerRunStatus: ownerState.status },
+      bound.target,
+      args,
+    );
+    syncs.set(link.effect.id, {
+      effectId: link.effect.id,
+      bindingEffectId: link.bindingEffectId,
+      sourceEffectId: link.pageId,
+      rowIndex: link.rowIndex,
+      target: bound.target,
+      status:
+        status === "syncing" &&
+        (!ownerState.leaseExpiresAt || ownerState.leaseExpiresAt.getTime() <= Date.now())
+          ? "unknown"
+          : status,
+      receipt,
+    });
+  }
+  return syncs;
 }
 
 function candidateSourceReference(
@@ -8125,15 +8192,19 @@ export async function listRecruitingCandidates(
               candidateKey: { in: selected.map((row) => row.candidateKey) },
             },
           },
-          include: { effect: true, occurrence: true },
+          include: { effect: true, occurrence: { include: { page: true } } },
           orderBy: [{ effect: { createdAt: "desc" } }, { effectId: "desc" }],
         });
+        const latest = new Map<string, (typeof imports)[number]>();
         for (const link of imports)
-          if (!syncs.has(link.occurrence.candidateKey))
-            syncs.set(
-              link.occurrence.candidateKey,
-              await crmSourceSync(tx, actor, link, { pages, binding: bound }),
-            );
+          if (!latest.has(link.occurrence.candidateKey))
+            latest.set(link.occurrence.candidateKey, link);
+        const projected = await crmSourceSync(tx, actor, [...latest.values()], {
+          pages,
+          sources: imports.map((link) => link.occurrence),
+          binding: bound,
+        });
+        for (const [key, link] of latest) syncs.set(key, projected.get(link.effectId)!);
       }
       return ListRecruitingCandidatesOutput.parse({
         sortAvailability: { rank: rankAvailable, tier: tierAvailable, score: scoreAvailable },
@@ -8466,15 +8537,16 @@ export async function listRecruitingCandidateSources(
           })
         : [];
       for (const link of imports) {
-        const states = syncs.get(`${link.pageId}:${link.rowIndex}`);
         if (
-          !states ||
+          !syncs.has(`${link.pageId}:${link.rowIndex}`) ||
           link.occurrence.roleId !== role.id ||
           link.occurrence.candidateKey !== candidate.candidateKey
         )
           throw new IsolationError();
-        states.push(await crmSourceSync(tx, actor, link, { pages }));
       }
+      const projected = await crmSourceSync(tx, actor, imports, { pages, sources: selected });
+      for (const link of imports)
+        syncs.get(`${link.pageId}:${link.rowIndex}`)!.push(projected.get(link.effectId)!);
       return ListRecruitingCandidateSourcesOutput.parse({
         roleId: role.id,
         candidateKey: candidate.candidateKey,

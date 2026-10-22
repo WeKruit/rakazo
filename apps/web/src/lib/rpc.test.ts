@@ -78,17 +78,20 @@ it.each([200, 503])(
     expect(sent.signal.aborted).toBe(true);
     if (status === 200) expect(log).not.toHaveBeenCalled();
     else {
-      expect(log).toHaveBeenCalledExactlyOnceWith("RPC request failed", {
-        method: "POST",
-        pathname: "/rpc/recruiting/listCandidates",
-        status: 503,
-        contentType: "application/json",
-        timestamp: "2025-01-02T03:04:05.000Z",
-        durationMs: 75,
-        "sent-x-request-id": "11111111-1111-4111-8111-111111111111",
-        "x-request-id": "request-example",
-        traceparent: "00-aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa-bbbbbbbbbbbbbbbb-01",
-      });
+      expect(log).toHaveBeenCalledExactlyOnceWith(
+        "RPC request failed",
+        JSON.stringify({
+          method: "POST",
+          pathname: "/rpc/recruiting/listCandidates",
+          status: 503,
+          contentType: "application/json",
+          timestamp: "2025-01-02T03:04:05.000Z",
+          durationMs: 75,
+          "sent-x-request-id": "11111111-1111-4111-8111-111111111111",
+          "x-request-id": "request-example",
+          traceparent: "00-aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa-bbbbbbbbbbbbbbbb-01",
+        }),
+      );
       expect(JSON.stringify(log.mock.calls)).not.toContain("private");
     }
   },
@@ -113,7 +116,10 @@ it("preserves a caller request ID when the response has no correlation headers",
   const [, init] = fetch.mock.calls[0]! as unknown as [Request, RequestInit];
   expect(new Headers(init.headers).get("x-request-id")).toBe("caller-request-id");
   expect(response.bodyUsed).toBe(false);
-  expect(log).toHaveBeenCalledExactlyOnceWith("RPC request failed", {
+  expect(log).toHaveBeenCalledOnce();
+  expect(log.mock.calls[0]?.[0]).toBe("RPC request failed");
+  expect(typeof log.mock.calls[0]?.[1]).toBe("string");
+  expect(JSON.parse(log.mock.calls[0]![1])).toEqual({
     method: "POST",
     pathname: "/rpc/recruiting/getWorkspace",
     status: 503,
