@@ -48,9 +48,11 @@ test("onboarding skips model connect when a default model is already available",
 
   expect((await createRequest).postDataJSON()).toMatchObject({ json: {} });
   await expect(page).toHaveURL(/\/app\/g\//);
-  await expect(page.getByRole("combobox", { name: "Message", exact: true })).toBeVisible({
-    timeout: 20_000,
-  });
+  await expect(page.getByRole("combobox", { name: "Message Recruiting", exact: true })).toBeVisible(
+    {
+      timeout: 20_000,
+    },
+  );
   const bots = await rpc<Array<{ name: string; modelProvider: string | null }>>(
     page,
     "bots/list",
