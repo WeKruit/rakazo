@@ -206,6 +206,8 @@ import {
   newestVoiceCredentialOrder,
   Prisma,
   parseComputerMode,
+  RECRUITING_PRESET_SOURCE,
+  recruitingPresetId,
   pushSessionExpiresAt,
   releaseSpaceDeletionClaim,
   renameSpaceForMember,
@@ -223,6 +225,7 @@ import {
   toTicketCommentDto,
   toTicketDto,
   touchGroupUpdatedAt,
+  upgradeRecruitingWorkspace,
 } from "@rakazo/db";
 import { getLogger } from "@rakazo/logging";
 import { deleteAgentSecret, listAgentSecrets, putAgentSecret } from "./agent-secrets.js";
@@ -1114,6 +1117,9 @@ export function createRouter(deps: RouterDeps) {
     },
     bootstrap: authed.bootstrap.handler(async ({ context, input }) => {
       const actor = context.actor;
+      await upgradeRecruitingWorkspace(deps.prisma, actor, {
+        sandboxKind: deps.env.sandboxProvider,
+      });
       const [me, navigation, archivedBots, archivedGroups, groupThread] = await Promise.all([
         meDto(deps, actor),
         spaceNavigationDto(deps, actor, repos, groupRepos),
@@ -3987,7 +3993,15 @@ export function createRouter(deps: RouterDeps) {
     capabilities: {
       list: authed.capabilities.list.handler(async ({ context }) => {
         const rows = await deps.prisma.capabilityInstall.findMany({
-          where: { spaceId: context.actor.spaceId, userId: context.actor.userId },
+          where: {
+            spaceId: context.actor.spaceId,
+            userId: context.actor.userId,
+            NOT: {
+              id: recruitingPresetId(context.actor),
+              kind: "plugin",
+              source: RECRUITING_PRESET_SOURCE,
+            },
+          },
         });
         return rows.map((row) => ({
           id: row.id,
@@ -4152,6 +4166,12 @@ export function createRouter(deps: RouterDeps) {
             },
           });
           if (!existing) return;
+          if (
+            existing.id === recruitingPresetId(context.actor) &&
+            existing.kind === "plugin" &&
+            existing.source === RECRUITING_PRESET_SOURCE
+          )
+            throw new ORPCError("NOT_FOUND");
           await tx.capabilityInstall.delete({ where: { id: existing.id } });
           if (existing.secretId) {
             const shared = await tx.capabilityInstall.count({

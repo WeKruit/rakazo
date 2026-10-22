@@ -1,5 +1,6 @@
+import { createHash } from "node:crypto";
 import type { Actor } from "@rakazo/contracts";
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { PrismaClient } from "./client.js";
 import * as recruiting from "./recruiting-bootstrap.js";
 
@@ -13,38 +14,178 @@ const actor: Actor = {
   isDeploymentOwner: false,
 };
 
+type BotRow = {
+  id: string;
+  spawnKey: string;
+  name: string;
+  title: string;
+  description: string;
+  instructions: string;
+  archivedAt: Date | null;
+  modelId?: string;
+};
+type ServiceRow = {
+  id: string;
+  slug: string;
+  endpoint: string;
+  transport: string;
+  secretId?: string;
+  enabled: boolean;
+  revision: number;
+  args: unknown[];
+  headers: object;
+  env: object;
+  command: null;
+};
+type AssignmentRow = {
+  id: string;
+  botId: string;
+  serverId: string;
+  allowAllTools: boolean;
+  allowedTools: string[];
+};
+type PresetRow = {
+  id: string;
+  kind: string;
+  source: string;
+  version: string;
+  digest: string | null;
+  spaceId: string;
+  userId: string;
+  config: unknown;
+};
+type ManagedState = {
+  schemaVersion: number;
+  groupId: string;
+  members: string[];
+  bots: Record<string, { id: string; fields: Record<string, string> }>;
+  services: Record<
+    string,
+    {
+      id: string;
+      signature: string;
+      assignments: Record<string, { id: string; signature: string } | null>;
+    }
+  >;
+};
+const hash = (value: unknown) => createHash("sha256").update(JSON.stringify(value)).digest("hex");
 function fixture() {
-  const bots: Array<{
-    id: string;
-    spawnKey: string;
-    name: string;
-    instructions: string;
-    archivedAt: Date | null;
-  }> = [];
+  const bots: BotRow[] = [];
+  const servers: ServiceRow[] = [];
+  const assignments: AssignmentRow[] = [];
+  const presets: PresetRow[] = [];
+  let busy = false;
+  let botSequence = 0;
+  let assignmentSequence = 0;
   let group: {
     id: string;
     userId: string;
     spaceId: string;
+    name: string;
     archivedAt: Date | null;
     thread: { id: string };
+    members: { botId: string }[];
   } | null = null;
   const tx = {
-    $queryRaw: vi.fn(async () => []),
+    $queryRaw: vi.fn(async () => [{ complete: true }]),
     spaceMember: {
       findUnique: vi.fn(async () => ({ organizationId: "org-a", space: { deletingAt: null } })),
     },
     space: { findFirst: vi.fn(async () => ({ id: actor.spaceId })) },
-    bot: { findMany: vi.fn(async () => bots), count: vi.fn(async () => bots.length) },
+    run: { count: vi.fn(async () => (busy ? 1 : 0)) },
+    bot: {
+      findMany: vi.fn(async () => bots),
+      count: vi.fn(async () => bots.length),
+      updateMany: vi.fn(async ({ where, data }) => {
+        const bot = bots.find((row) => row.id === where.id && !row.archivedAt);
+        if (
+          !bot ||
+          Object.keys(data).some(
+            (key) => (bot as unknown as Record<string, unknown>)[key] !== where[key],
+          )
+        )
+          return { count: 0 };
+        Object.assign(bot, data);
+        return { count: 1 };
+      }),
+    },
     chatGroup: { findFirst: vi.fn(async () => group), count: vi.fn(async () => (group ? 1 : 0)) },
+    chatGroupMember: {
+      createMany: vi.fn(async ({ data }) => {
+        group!.members.push(...data.map((row: { botId: string }) => ({ botId: row.botId })));
+        return { count: data.length };
+      }),
+    },
     deploymentSettings: { findUnique: vi.fn(async () => ({ computerHost: "docker" })) },
     mcpServer: {
-      findFirst: vi.fn(async () => null),
-      create: vi.fn(async ({ data }) => ({ id: `${data.slug}-a`, ...data })),
+      findFirst: vi.fn(async ({ where }) => servers.find((row) => row.slug === where.slug) ?? null),
+      findMany: vi.fn(async () =>
+        servers.map((row) => ({
+          ...row,
+          assignments: assignments.filter((a) => a.serverId === row.id),
+        })),
+      ),
+      create: vi.fn(async ({ data }) => {
+        const row = {
+          id: `${data.slug}-a`,
+          enabled: true,
+          revision: 1,
+          args: [],
+          headers: {},
+          env: {},
+          command: null,
+          ...data,
+        };
+        servers.push(row);
+        return row;
+      }),
     },
-    botMcpServer: { createMany: vi.fn(async () => ({ count: 2 })) },
+    botMcpServer: {
+      findMany: vi.fn(async () => assignments),
+      createMany: vi.fn(async ({ data }) => {
+        for (const row of data)
+          if (!assignments.some((a) => a.botId === row.botId && a.serverId === row.serverId))
+            assignments.push({ id: `assignment-${assignmentSequence++}`, ...row });
+        return { count: data.length };
+      }),
+      updateMany: vi.fn(async ({ where, data }) => {
+        const row = assignments.find(
+          (a) =>
+            a.id === where.id &&
+            a.allowAllTools === where.allowAllTools &&
+            JSON.stringify(a.allowedTools) === JSON.stringify(where.allowedTools.equals),
+        );
+        if (!row) return { count: 0 };
+        Object.assign(row, data);
+        return { count: 1 };
+      }),
+    },
+    capabilityInstall: {
+      findFirst: vi.fn(
+        async ({ where }) =>
+          presets.find(
+            (row) =>
+              row.id === where.id &&
+              row.spaceId === where.spaceId &&
+              row.userId === where.userId &&
+              row.kind === where.kind &&
+              row.source === where.source,
+          ) ?? null,
+      ),
+      create: vi.fn(async ({ data }) => {
+        presets.push(data);
+        return data;
+      }),
+      updateMany: vi.fn(async ({ where, data }) => {
+        const row = presets.find((p) => p.id === where.id);
+        if (!row) return { count: 0 };
+        Object.assign(row, data);
+        return { count: 1 };
+      }),
+    },
   };
   native.bot.mockImplementation(async (_tx, _actor, input) => {
-    const bot = { id: `bot-${bots.length}`, ...input, archivedAt: null };
+    const bot = { id: `bot-${botSequence++}`, ...input, archivedAt: null };
     bots.push(bot);
     return bot;
   });
@@ -53,18 +194,36 @@ function fixture() {
       id: input.id,
       userId: actor.userId,
       spaceId: actor.spaceId,
+      name: input.name,
       archivedAt: null,
       thread: { id: "crew-thread" },
+      members: input.botIds.map((botId: string) => ({ botId })),
     };
     return group;
   });
   const prisma = {
     $transaction: vi.fn(async (callback) => callback(tx)),
+    capabilityInstall: tx.capabilityInstall,
   } as unknown as PrismaClient;
-  return { prisma, tx, bots, getGroup: () => group };
+  return {
+    prisma,
+    tx,
+    bots,
+    servers,
+    assignments,
+    presets,
+    busy: () => {
+      busy = true;
+    },
+    getGroup: () => group,
+  };
 }
 
-beforeEach(() => vi.clearAllMocks());
+beforeEach(() => {
+  vi.clearAllMocks();
+  vi.stubEnv("SANDBOX_MAX_COMPUTERS_PER_USER", "0");
+});
+afterEach(() => vi.unstubAllEnvs());
 
 describe("ensureRecruitingWorkspace", () => {
   it("creates one private four-specialist crew atomically with platform defaults and no credentials or schedules", async () => {
@@ -197,6 +356,8 @@ describe("ensureRecruitingWorkspace", () => {
     f.bots.push({
       id: "custom",
       name: "Custom",
+      title: "",
+      description: "",
       spawnKey: "private",
       instructions: "Keep",
       archivedAt: null,
@@ -281,4 +442,260 @@ describe("ensureRecruitingWorkspace", () => {
     expect(native.bot.mock.calls.every(([tx]) => tx === f.tx)).toBe(true);
     expect(f.tx.mcpServer.create).not.toHaveBeenCalled();
   });
+});
+
+describe("managed recruiting default upgrades", () => {
+  const options = { sandboxKind: "fake" };
+  async function previous() {
+    const f = fixture();
+    await recruiting.ensureRecruitingWorkspace(f.prisma, actor, options);
+    const state = f.presets[0]!.config as ManagedState;
+    f.bots[0]!.instructions = "Earlier maintained instructions";
+    state.bots.main!.fields.instructions = hash(f.bots[0]!.instructions);
+    f.presets[0]!.digest = "earlier-release";
+    return { ...f, state };
+  }
+  it("records fresh defaults atomically without raw instructions, credentials or model pins", async () => {
+    const f = fixture();
+    await recruiting.ensureRecruitingWorkspace(f.prisma, actor, options);
+    expect(f.presets).toHaveLength(1);
+    expect(f.presets[0]).toMatchObject({
+      kind: "plugin",
+      source: "builtin:recruiting",
+      version: "1",
+    });
+    expect(f.tx.capabilityInstall.create.mock.invocationCallOrder[0]).toBeGreaterThan(
+      native.group.mock.invocationCallOrder[0]!,
+    );
+    expect(JSON.stringify(f.presets[0]!.config)).not.toContain(f.bots[0]!.instructions);
+    expect(JSON.stringify(f.presets[0]!.config)).not.toMatch(/secretId|modelId|ciphertext/);
+  });
+  it("updates only unchanged managed fields, keeps personal fields and becomes idempotent", async () => {
+    const f = await previous();
+    f.bots[0]!.name = "My recruiting partner";
+    f.bots[0]!.modelId = "my-personal-model";
+    await recruiting.upgradeRecruitingWorkspace(f.prisma, actor, options);
+    expect(f.bots[0]!.instructions).not.toBe("Earlier maintained instructions");
+    expect(f.bots[0]!.name).toBe("My recruiting partner");
+    expect(f.bots[0]!.modelId).toBe("my-personal-model");
+    f.tx.bot.updateMany.mockClear();
+    await recruiting.upgradeRecruitingWorkspace(f.prisma, actor, options);
+    expect(f.tx.bot.updateMany).not.toHaveBeenCalled();
+  });
+  it("does not overwrite private instructions or restore removed bots, assignments, connections or group members", async () => {
+    const f = await previous();
+    f.bots[0]!.instructions = "My private instructions";
+    const removedBot = f.bots.splice(1, 1)[0]!;
+    f.getGroup()!.members = f.getGroup()!.members.filter((m) => m.botId !== removedBot.id);
+    f.assignments.splice(0, 1);
+    f.servers.splice(1, 1);
+    const before = JSON.stringify({
+      bots: f.bots,
+      assignments: f.assignments,
+      servers: f.servers,
+      group: f.getGroup(),
+    });
+    await recruiting.upgradeRecruitingWorkspace(f.prisma, actor, options);
+    expect(
+      JSON.stringify({
+        bots: f.bots,
+        assignments: f.assignments,
+        servers: f.servers,
+        group: f.getGroup(),
+      }),
+    ).toBe(before);
+  });
+  it.each(["queued", "leased", "running", "waiting_input", "waiting_takeover"])(
+    "defers upgrades while an existing %s task could reload configuration",
+    async (status) => {
+      const f = await previous();
+      f.busy();
+      const before = JSON.stringify(f.presets);
+      await recruiting.upgradeRecruitingWorkspace(f.prisma, actor, options);
+      expect(f.bots[0]!.instructions).toBe("Earlier maintained instructions");
+      expect(JSON.stringify(f.presets)).toBe(before);
+      expect(f.tx.run.count).toHaveBeenCalledWith({
+        where: {
+          spaceId: actor.spaceId,
+          userId: actor.userId,
+          status: { in: expect.arrayContaining([status]) },
+        },
+      });
+    },
+  );
+  it("does not adopt a legacy workspace or create content from the update-only entrypoint", async () => {
+    const f = fixture();
+    await recruiting.upgradeRecruitingWorkspace(f.prisma, actor, options);
+    expect(native.bot).not.toHaveBeenCalled();
+    expect(f.presets).toHaveLength(0);
+    await recruiting.ensureRecruitingWorkspace(f.prisma, actor, options);
+    f.presets.splice(0);
+    f.bots[0]!.instructions = "Private legacy instructions";
+    await recruiting.ensureRecruitingWorkspace(f.prisma, actor, options);
+    expect(f.presets[0]).toMatchObject({ version: "unmanaged" });
+    expect(f.bots[0]!.instructions).toBe("Private legacy instructions");
+  });
+  it("adds a newly maintained service only in unchanged managed scope, retaining revocation history", async () => {
+    const f = await previous();
+    delete f.state.services.fullenrich;
+    f.servers.splice(1, 1);
+    for (let i = f.assignments.length - 1; i >= 0; i--)
+      if (f.assignments[i]!.serverId === "fullenrich-a") f.assignments.splice(i, 1);
+    await recruiting.upgradeRecruitingWorkspace(f.prisma, actor, options);
+    expect(f.servers.some((s) => s.slug === "fullenrich")).toBe(true);
+    expect(f.assignments.filter((a) => a.serverId === "fullenrich-a")).toHaveLength(2);
+  });
+});
+
+it("upgrades exact managed tool sets without changing a user-replaced assignment", async () => {
+  const f = fixture();
+  const options = { sandboxKind: "fake" };
+  await recruiting.ensureRecruitingWorkspace(f.prisma, actor, options);
+  const state = f.presets[0]!.config as ManagedState;
+  f.assignments[0]!.allowedTools = ["research"];
+  state.services.autumn!.assignments.main!.signature = hash([false, ["research"]]);
+  f.assignments[1]!.allowedTools = ["credits"];
+  f.presets[0]!.digest = "previous-release";
+  await recruiting.upgradeRecruitingWorkspace(f.prisma, actor, options);
+  expect(f.assignments[0]!.allowedTools).toEqual([
+    "credits",
+    "research",
+    "get_task",
+    "get_rows",
+    "reply",
+    "stop_task",
+  ]);
+  expect(f.assignments[1]!.allowedTools).toEqual(["credits"]);
+  expect(f.tx.botMcpServer.updateMany).toHaveBeenCalledWith(
+    expect.objectContaining({
+      where: expect.objectContaining({
+        id: f.assignments[0]!.id,
+        allowedTools: { equals: ["research"] },
+      }),
+    }),
+  );
+});
+
+it("adds a new maintained role using the configured native sandbox, without reviving an archived one", async () => {
+  const f = fixture();
+  const options = { sandboxKind: "docker" };
+  await recruiting.ensureRecruitingWorkspace(f.prisma, actor, options);
+  const state = f.presets[0]!.config as ManagedState;
+  const removed = f.bots.splice(2, 1)[0]!;
+  delete state.bots.outreach;
+  delete state.services.fullenrich!.assignments.outreach;
+  f.getGroup()!.members = f.getGroup()!.members.filter((row) => row.botId !== removed.id);
+  state.members = state.members.filter((id) => id !== removed.id);
+  for (let i = f.assignments.length - 1; i >= 0; i--)
+    if (f.assignments[i]!.botId === removed.id) f.assignments.splice(i, 1);
+  f.bots[1]!.archivedAt = new Date();
+  f.presets[0]!.digest = "previous-release";
+  f.tx.deploymentSettings.findUnique.mockResolvedValue({ computerHost: "this-mac" });
+  await recruiting.upgradeRecruitingWorkspace(f.prisma, actor, options);
+  expect(native.bot).toHaveBeenLastCalledWith(
+    f.tx,
+    actor,
+    expect.objectContaining({ name: "Outreach" }),
+    "desktop",
+  );
+  expect(native.bot).toHaveBeenCalledTimes(5);
+  expect(f.bots[1]!.archivedAt).not.toBeNull();
+  expect(f.assignments.filter((row) => row.serverId === "fullenrich-a")).toHaveLength(2);
+});
+
+it("does not resurrect a deleted managed workspace or apply another actor's ledger", async () => {
+  const f = fixture();
+  const options = { sandboxKind: "fake" };
+  await recruiting.ensureRecruitingWorkspace(f.prisma, actor, options);
+  f.presets[0]!.digest = "previous-release";
+  const calls = f.tx.bot.updateMany.mock.calls.length;
+  await recruiting.upgradeRecruitingWorkspace(
+    f.prisma,
+    { ...actor, userId: "another-person" },
+    options,
+  );
+  await recruiting.upgradeRecruitingWorkspace(
+    f.prisma,
+    { ...actor, spaceId: "another-space" },
+    options,
+  );
+  expect(f.tx.bot.updateMany.mock.calls).toHaveLength(calls);
+  f.tx.chatGroup.findFirst.mockResolvedValue(null);
+  f.bots.splice(0);
+  await expect(recruiting.ensureRecruitingWorkspace(f.prisma, actor, options)).rejects.toThrow(
+    "removed",
+  );
+  expect(native.bot).toHaveBeenCalledTimes(4);
+});
+
+it("preserves a simultaneous private edit when the native field compare-and-set loses", async () => {
+  const f = fixture();
+  const options = { sandboxKind: "fake" };
+  await recruiting.ensureRecruitingWorkspace(f.prisma, actor, options);
+  const state = f.presets[0]!.config as ManagedState;
+  f.bots[0]!.instructions = "Earlier maintained instructions";
+  state.bots.main!.fields.instructions = hash(f.bots[0]!.instructions);
+  f.presets[0]!.digest = "previous-release";
+  f.tx.bot.updateMany.mockImplementationOnce(async ({ where }) => {
+    expect(where.instructions).toBe("Earlier maintained instructions");
+    f.bots[0]!.instructions = "Concurrent private edit";
+    return { count: 0 };
+  });
+  await recruiting.upgradeRecruitingWorkspace(f.prisma, actor, options);
+  expect(f.bots[0]!.instructions).toBe("Concurrent private edit");
+  expect((f.presets[0]!.config as ManagedState).bots.main!.fields.instructions).toBe(
+    hash("Earlier maintained instructions"),
+  );
+});
+
+it.each(["chat_groups", "threads", "mcp_servers", "bot_mcp_servers", "bots"])(
+  "defers the entire upgrade without mutations when %s has a concurrently locked row",
+  async (table) => {
+    const f = fixture();
+    const options = { sandboxKind: "fake" };
+    await recruiting.ensureRecruitingWorkspace(f.prisma, actor, options);
+    const state = f.presets[0]!.config as ManagedState;
+    f.bots[0]!.instructions = "Earlier maintained instructions";
+    state.bots.main!.fields.instructions = hash(f.bots[0]!.instructions);
+    f.presets[0]!.digest = "previous-release";
+    const before = JSON.stringify({ bots: f.bots, assignments: f.assignments, presets: f.presets });
+    f.tx.bot.updateMany.mockClear();
+    f.tx.botMcpServer.updateMany.mockClear();
+    f.tx.botMcpServer.createMany.mockClear();
+    f.tx.capabilityInstall.updateMany.mockClear();
+    f.tx.$queryRaw.mockImplementation(async (query) => [
+      { complete: !query.sql.includes(`FROM ${table}\n`) },
+    ]);
+    await recruiting.upgradeRecruitingWorkspace(f.prisma, actor, options);
+    expect(JSON.stringify({ bots: f.bots, assignments: f.assignments, presets: f.presets })).toBe(
+      before,
+    );
+    expect(f.tx.bot.updateMany).not.toHaveBeenCalled();
+    expect(f.tx.botMcpServer.updateMany).not.toHaveBeenCalled();
+    expect(f.tx.botMcpServer.createMany).not.toHaveBeenCalled();
+    expect(f.tx.capabilityInstall.updateMany).not.toHaveBeenCalled();
+  },
+);
+
+it("defers before writes when native computer quota maintenance already holds its user lock", async () => {
+  const f = fixture();
+  const options = { sandboxKind: "fake" };
+  await recruiting.ensureRecruitingWorkspace(f.prisma, actor, options);
+  const state = f.presets[0]!.config as ManagedState;
+  f.bots[0]!.instructions = "Earlier maintained instructions";
+  state.bots.main!.fields.instructions = hash(f.bots[0]!.instructions);
+  delete state.bots.outreach;
+  f.presets[0]!.digest = "previous-release";
+  const before = JSON.stringify({ bots: f.bots, assignments: f.assignments, presets: f.presets });
+  vi.stubEnv("SANDBOX_MAX_COMPUTERS_PER_USER", "1");
+  try {
+    f.tx.$queryRaw.mockImplementation(async () => [{ complete: true, acquired: false }]);
+    await recruiting.upgradeRecruitingWorkspace(f.prisma, actor, options);
+    expect(JSON.stringify({ bots: f.bots, assignments: f.assignments, presets: f.presets })).toBe(
+      before,
+    );
+    expect(native.bot).toHaveBeenCalledTimes(4);
+  } finally {
+    vi.unstubAllEnvs();
+  }
 });
