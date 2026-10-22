@@ -65,6 +65,7 @@ describe("saved recruiting correspondence", () => {
     to_address_email_list: "team@example.test",
     body: { text: "Original provider body" },
     organization_id: "58713398-41d5-40cb-a2d2-0b2ecd1af269",
+    campaign_id: "917ea6c3-b928-47a8-b11f-d19178e68d48",
     eaccount: "team@example.test",
   };
   function fixture({
@@ -87,7 +88,7 @@ describe("saved recruiting correspondence", () => {
           toolName: "list_emails",
         },
         args: {
-          campaign_id: "saved-campaign",
+          campaign_id: email.campaign_id,
           email_type: "received",
           limit: 2,
           privateKey: "never-return-arguments",
@@ -183,6 +184,281 @@ describe("saved recruiting correspondence", () => {
     });
     expect(JSON.stringify(result)).not.toContain(row.thread_id);
   });
+  it("shows the latest selected campaign check without merging earlier variants or account-wide exploration", async () => {
+    const { client, prisma, retained } = fixture();
+    const variant = [
+      "__rakazoCatalogTool",
+      "direct",
+      {
+        ...(retained.request[2] as object),
+        args: { campaign_id: email.campaign_id, email_type: "all", limit: 10 },
+      },
+    ];
+    const global = [
+      "__rakazoCatalogTool",
+      "direct",
+      {
+        ...(retained.request[2] as object),
+        args: { email_type: "all", limit: 100 },
+      },
+    ];
+    client.externalEffect.findMany
+      .mockReset()
+      .mockResolvedValueOnce([
+        retained,
+        { ...retained, id: "older-variant", request: variant },
+        { ...retained, id: "global", request: global },
+      ])
+      .mockResolvedValueOnce([
+        { id: retained.id, result: { structuredContent: { items: [email] } } },
+      ]);
+    expect(await api.getRecruitingCorrespondence(prisma, actor, target, "inbox")).toMatchObject({
+      status: "ready",
+      partial: false,
+      emails: [{ subject: email.subject }],
+    });
+    expect(client.externalEffect.findMany.mock.calls[1]![0].where.id).toEqual({
+      in: [retained.id],
+    });
+  });
+  it("does not present a global mailbox read as checked role correspondence", async () => {
+    const { client, prisma, retained } = fixture();
+    retained.request[2] = {
+      ...(retained.request[2] as object),
+      args: { email_type: "all", limit: 100 },
+    } as never;
+    client.externalEffect.findMany.mockReset().mockResolvedValueOnce([retained]);
+    expect(await api.getRecruitingCorrespondence(prisma, actor, target, "inbox")).toMatchObject({
+      status: "not_checked",
+      checkedAt: null,
+      emails: [],
+    });
+    expect(client.externalEffect.findMany).toHaveBeenCalledTimes(1);
+  });
+  it.each([
+    [{ items: [] }, "empty"],
+    [{ items: "malformed" }, "unsupported"],
+  ])(
+    "keeps the latest selected campaign observation instead of resurrecting older filter variants: %j",
+    async (body, status) => {
+      const { client, prisma, retained } = fixture();
+      const older = {
+        ...retained,
+        id: "older",
+        request: [
+          "__rakazoCatalogTool",
+          "direct",
+          {
+            ...(retained.request[2] as object),
+            args: { campaign_id: email.campaign_id, email_type: "all", limit: 10 },
+          },
+        ],
+      };
+      client.externalEffect.findMany
+        .mockReset()
+        .mockResolvedValueOnce([retained, older])
+        .mockResolvedValueOnce([{ id: retained.id, result: { structuredContent: body } }]);
+      expect(await api.getRecruitingCorrespondence(prisma, actor, target, "inbox")).toMatchObject({
+        status,
+        emails: [],
+      });
+      expect(client.externalEffect.findMany.mock.calls[1]![0].where.id).toEqual({
+        in: [retained.id],
+      });
+    },
+  );
+  it("does not display a returned message from a different campaign than the native scoped read", async () => {
+    const { prisma } = fixture({
+      result: {
+        structuredContent: {
+          items: [{ ...email, campaign_id: "d0843b17-c57a-4d9c-8fd5-434c0f708b63" }],
+        },
+      },
+    });
+    expect(await api.getRecruitingCorrespondence(prisma, actor, target, "inbox")).toMatchObject({
+      status: "unsupported",
+      emails: [],
+    });
+  });
+  it.each([
+    [{ structuredContent: { items: [] } }, "empty"],
+    [{ isError: true }, "failed"],
+    [{ structuredContent: { items: "malformed" } }, "unsupported"],
+  ])(
+    "never revives old email details after the latest campaign check: %j",
+    async (result, status) => {
+      const { client, prisma, retained } = fixture();
+      client.mcpServer.findMany.mockResolvedValueOnce([
+        {
+          id: "mail",
+          name: "Instantly",
+          endpoint: "https://mcp.instantly.ai/mcp",
+          secretId: "encrypted-reference",
+          revision: 1,
+          enabled: true,
+          assignments: [
+            { botId: "main", allowAllTools: false, allowedTools: ["list_emails", "get_email"] },
+          ],
+        },
+      ]);
+      const detail = {
+        ...retained,
+        id: "old-detail",
+        request: [
+          "__rakazoCatalogTool",
+          "direct",
+          {
+            route: {
+              connectorId: "mcp",
+              resourceId: "mail",
+              resourceRevision: 1,
+              toolName: "get_email",
+            },
+            args: { id: email.id },
+          },
+        ],
+      };
+      client.externalEffect.findMany
+        .mockReset()
+        .mockResolvedValueOnce([retained, detail])
+        .mockResolvedValueOnce([
+          { id: retained.id, result },
+          { id: detail.id, result: { structuredContent: email } },
+        ]);
+      expect(await api.getRecruitingCorrespondence(prisma, actor, target, "inbox")).toMatchObject({
+        status,
+        emails: [],
+      });
+    },
+  );
+  it("does not let an unrelated detail failure turn a checked-empty role snapshot into a failure", async () => {
+    const { client, prisma, retained } = fixture();
+    client.mcpServer.findMany.mockResolvedValueOnce([
+      {
+        id: "mail",
+        name: "Instantly",
+        endpoint: "https://mcp.instantly.ai/mcp",
+        secretId: "encrypted-reference",
+        revision: 1,
+        enabled: true,
+        assignments: [
+          { botId: "main", allowAllTools: false, allowedTools: ["list_emails", "get_email"] },
+        ],
+      },
+    ]);
+    const detail = {
+      ...retained,
+      id: "old-detail",
+      updatedAt: new Date("2026-10-22T01:05:00Z"),
+      status: "failed",
+      request: [
+        "__rakazoCatalogTool",
+        "direct",
+        {
+          route: {
+            connectorId: "mcp",
+            resourceId: "mail",
+            resourceRevision: 1,
+            toolName: "get_email",
+          },
+          args: { id: email.id },
+        },
+      ],
+    };
+    client.externalEffect.findMany
+      .mockReset()
+      .mockResolvedValueOnce([retained, detail])
+      .mockResolvedValueOnce([
+        { id: retained.id, result: { structuredContent: { items: [] } } },
+        { id: detail.id, result: { isError: true } },
+      ]);
+    expect(await api.getRecruitingCorrespondence(prisma, actor, target, "inbox")).toMatchObject({
+      status: "empty",
+      partial: false,
+      checkedAt: retained.updatedAt.toISOString(),
+      emails: [],
+    });
+  });
+  it.each([false, true])(
+    "supplements a listed message only when detail campaign identity also matches: %s",
+    async (differentCampaign) => {
+      const { client, prisma, retained } = fixture();
+      client.mcpServer.findMany.mockResolvedValueOnce([
+        {
+          id: "mail",
+          name: "Instantly",
+          endpoint: "https://mcp.instantly.ai/mcp",
+          secretId: "encrypted-reference",
+          revision: 1,
+          enabled: true,
+          assignments: [
+            { botId: "main", allowAllTools: false, allowedTools: ["list_emails", "get_email"] },
+          ],
+        },
+      ]);
+      const detail = {
+        ...retained,
+        id: "detail",
+        request: [
+          "__rakazoCatalogTool",
+          "direct",
+          {
+            route: {
+              connectorId: "mcp",
+              resourceId: "mail",
+              resourceRevision: 1,
+              toolName: "get_email",
+            },
+            args: { id: email.id },
+          },
+        ],
+      };
+      const otherCampaignId = "d0843b17-c57a-4d9c-8fd5-434c0f708b63";
+      const otherCampaign = {
+        ...retained,
+        id: "other-campaign",
+        request: [
+          "__rakazoCatalogTool",
+          "direct",
+          {
+            ...(retained.request[2] as object),
+            args: { campaign_id: otherCampaignId, email_type: "received", limit: 10 },
+          },
+        ],
+      };
+      client.externalEffect.findMany
+        .mockReset()
+        .mockResolvedValueOnce([detail, retained, ...(differentCampaign ? [otherCampaign] : [])])
+        .mockResolvedValueOnce([
+          { id: retained.id, result: { structuredContent: { items: [email] } } },
+          {
+            id: detail.id,
+            result: {
+              structuredContent: {
+                ...email,
+                campaign_id: differentCampaign ? otherCampaignId : email.campaign_id,
+                body: { text: "Full saved detail" },
+              },
+            },
+          },
+          ...(differentCampaign
+            ? [{ id: otherCampaign.id, result: { structuredContent: { items: [] } } }]
+            : []),
+        ]);
+      const output = await api.getRecruitingCorrespondence(prisma, actor, target, "inbox");
+      expect(output).toMatchObject({
+        status: "ready",
+        partial: differentCampaign,
+        emails: [
+          {
+            body: differentCampaign ? email.body.text : "Full saved detail",
+            snippet: differentCampaign,
+          },
+        ],
+      });
+      expect(output.emails).toHaveLength(1);
+    },
+  );
   it.each([{ enabled: false }, { permission: false }])(
     "does not fetch provider payloads after native permission is unavailable: %j",
     async (options) => {

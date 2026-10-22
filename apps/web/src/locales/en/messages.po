@@ -1047,6 +1047,10 @@ msgstr "Chat apps, group channels, and agent connections."
 msgid "Chat Settings"
 msgstr "Chat Settings"
 
+#: src/pages/Shell.tsx
+msgid "Chat with WeKruit"
+msgstr "Chat with WeKruit"
+
 #: src/components/ComputersUnavailableHint.tsx
 #: src/pages/HostComputerPrompt.tsx
 msgid "Check again"
@@ -1259,6 +1263,10 @@ msgstr "Collapse {0}"
 #: src/pages/shell/RecruitingNavigation.tsx
 msgid "Collapse navigation"
 msgstr "Collapse navigation"
+
+#: src/pages/Shell.tsx
+msgid "Collapse role chat"
+msgstr "Collapse role chat"
 
 #: src/pages/shell/avatar-studio-popover.tsx
 msgid "Color"
@@ -4124,6 +4132,10 @@ msgstr "Open original email"
 #: src/pages/RecruitingPanel.tsx
 msgid "Open original question"
 msgstr "Open original question"
+
+#: src/pages/Shell.tsx
+msgid "Open role chat"
+msgstr "Open role chat"
 
 #: src/components/computer/TerminalApp.tsx
 msgid "Open shell"

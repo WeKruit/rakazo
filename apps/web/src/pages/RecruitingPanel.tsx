@@ -76,6 +76,8 @@ import { AskCard } from "../components/AskCard";
 import { Shimmer } from "../components/ai/primitives";
 import { decodeArtifactBase64 } from "../lib/artifact-open";
 import { authClient } from "../lib/auth";
+import type { RecruitingReadCache } from "../lib/recruiting-read-cache";
+import { clearRecruitingReads, rememberRecruitingRead } from "../lib/recruiting-read-cache";
 import type { RecruitingPanelState } from "../lib/right-panel-state";
 import {
   readRecruitingPanelState,
@@ -107,6 +109,8 @@ type Props = {
   threadId: string;
   botId?: string;
   groupId?: string;
+  readCache?: RecruitingReadCache;
+  readCacheScope?: string;
   refreshSignal?: number;
   onClose: () => void;
   onBrowseCandidates?: () => void;
@@ -143,12 +147,14 @@ function CandidateFeedbackForm({
   onSend,
   onAccessError,
   onRecorded,
+  disabled = false,
 }: {
   candidate: CandidateDiscussionContext;
   recipients: Props["candidateFeedbackRecipients"];
   onSend: NonNullable<Props["onCandidateFeedback"]>;
   onAccessError: (error: unknown) => void;
   onRecorded: () => void;
+  disabled?: boolean;
 }) {
   const { t } = useLingui();
   const [open, setOpen] = useState(false);
@@ -184,6 +190,7 @@ function CandidateFeedbackForm({
   }
   async function submit() {
     if (
+      disabled ||
       scope.current.busy ||
       recipientUnavailable ||
       !choice ||
@@ -310,7 +317,11 @@ function CandidateFeedbackForm({
             size="sm"
             type="submit"
             disabled={
-              pending || recipientUnavailable || !choice || (choice !== "skip" && !reason.trim())
+              disabled ||
+              pending ||
+              recipientUnavailable ||
+              !choice ||
+              (choice !== "skip" && !reason.trim())
             }
           >
             {pending ? <Trans>Sending…</Trans> : <Trans>Send feedback</Trans>}
@@ -337,21 +348,35 @@ function FeedbackHistory({
   refreshSignal,
   onAccessError,
   showEmpty = false,
+  readCache,
+  readCacheScope,
 }: {
   roleId: string;
   candidateKey?: string;
   refreshSignal?: number;
   onAccessError: (error: unknown) => void;
   showEmpty?: boolean;
+  readCache?: RecruitingReadCache;
+  readCacheScope?: string;
 }) {
-  const [records, setRecords] = useState<RecruitingFeedbackRecord[]>([]);
-  const [cursor, setCursor] = useState<string | null>(null);
+  const cacheKey = readCacheScope
+    ? `${readCacheScope}:feedback:${JSON.stringify([roleId, candidateKey])}`
+    : undefined;
+  const cached = cacheKey
+    ? (readCache?.entries.get(cacheKey) as
+        | Awaited<ReturnType<typeof rpc.recruiting.listFeedback>>
+        | undefined)
+    : undefined;
+  const [records, setRecords] = useState<RecruitingFeedbackRecord[]>(cached?.feedback ?? []);
+  const [cursor, setCursor] = useState<string | null>(cached?.nextCursor ?? null);
   const [failed, setFailed] = useState(false);
   const [pending, setPending] = useState(false);
   const generation = useRef(0);
+  const displayedFeedbackScope = useRef(cacheKey);
   const read = useCallback(
     async (before?: string) => {
       const current = ++generation.current;
+      const cacheEpoch = readCache?.epoch;
       setPending(true);
       setFailed(false);
       try {
@@ -361,7 +386,8 @@ function FeedbackHistory({
           limit: 20,
           ...(before ? { before } : {}),
         });
-        if (current !== generation.current) return;
+        if (current !== generation.current || (readCache && cacheEpoch !== readCache.epoch)) return;
+        if (!before) rememberRecruitingRead(readCache, cacheKey, result, cacheEpoch);
         setRecords((previous) => (before ? [...previous, ...result.feedback] : result.feedback));
         setCursor(result.nextCursor);
       } catch (error) {
@@ -372,11 +398,14 @@ function FeedbackHistory({
         if (current === generation.current) setPending(false);
       }
     },
-    [roleId, candidateKey, onAccessError],
+    [roleId, candidateKey, onAccessError, readCache, cacheKey],
   );
   useEffect(() => {
-    setRecords([]);
-    setCursor(null);
+    if (cached || !readCache || displayedFeedbackScope.current !== cacheKey) {
+      setRecords(cached?.feedback ?? []);
+      setCursor(cached?.nextCursor ?? null);
+    }
+    displayedFeedbackScope.current = cacheKey;
     void read();
     return () => {
       generation.current++;
@@ -2082,6 +2111,8 @@ function RecruitingWorkspace({
   threadId,
   botId,
   groupId,
+  readCache,
+  readCacheScope,
   refreshSignal,
   onClose,
   onBrowseCandidates,
@@ -2099,16 +2130,29 @@ function RecruitingWorkspace({
   const { t } = useLingui();
   const shortlistFilterId = useId();
   const [snapshot, setSnapshot] = useState<Snapshot | null>(null);
+  const workspaceCacheKey = readCacheScope ? `${readCacheScope}:workspace` : undefined;
   const [workspaceSnapshot, setWorkspaceSnapshot] = useState<Pick<Snapshot, "workspace"> | null>(
-    null,
+    () =>
+      workspaceCacheKey
+        ? ((readCache?.entries.get(workspaceCacheKey) as Pick<Snapshot, "workspace"> | undefined) ??
+          null)
+        : null,
   );
+  const initialStorageKey =
+    workspaceSnapshot?.workspace && userId
+      ? `${rightPanelStorageKey(userId, workspaceSnapshot.workspace.role.spaceId, botId ? "bot" : "group", threadId)}:recruiting:${workspaceSnapshot.workspace.role.id}`
+      : null;
   const [refresh, setRefresh] = useState(0);
+  const workspaceReadKey = JSON.stringify([threadId, refresh, refreshSignal]);
+  const [validatedWorkspaceRead, setValidatedWorkspaceRead] = useState<string>();
   const [feedbackRefresh, setFeedbackRefresh] = useState(0);
   const [loading, setLoading] = useState(true);
   const [failed, setFailed] = useState(false);
   const [confirming, setConfirming] = useState(false);
   const [confirmationFailed, setConfirmationFailed] = useState(false);
-  const [candidateList, setCandidateList] = useState(() => readRecruitingPanelState(null));
+  const [candidateList, setCandidateList] = useState(() =>
+    readRecruitingPanelState(initialStorageKey),
+  );
   const activeTab = tab ?? (presentation === "workspace" ? "evidence" : candidateList.tab);
   const contactsView = presentation === "workspace" && view === "contacts";
   const shortlistView = presentation === "workspace" && view === "shortlist";
@@ -2122,7 +2166,7 @@ function RecruitingWorkspace({
   useEffect(() => {
     if (workspaceSnapshot) onTabChange?.(activeTab);
   }, [activeTab, workspaceSnapshot, onTabChange]);
-  const [candidateStorageKey, setCandidateStorageKey] = useState<string | null>(null);
+  const [candidateStorageKey, setCandidateStorageKey] = useState<string | null>(initialStorageKey);
   const tabsList = useRef<HTMLDivElement>(null);
   const {
     candidateView: storedCandidateView,
@@ -2165,40 +2209,55 @@ function RecruitingWorkspace({
   const candidateGeneration = useRef(0);
   const loadingMore = useRef(false);
   const readEpoch = useRef(0);
-  const denyAccess = useCallback((error: unknown) => {
-    console.error(
-      "Recruiting request failed",
-      JSON.stringify({
-        name: error instanceof Error ? error.name : undefined,
-        code: error instanceof ORPCError ? error.code : undefined,
-        message: error instanceof Error ? error.message : undefined,
-      }),
-    );
-    if (
-      !(error instanceof ORPCError) ||
-      !["UNAUTHORIZED", "FORBIDDEN", "NOT_FOUND"].includes(error.code)
-    )
-      return;
-    readEpoch.current++;
-    candidateGeneration.current++;
-    setSnapshot(null);
-    setWorkspaceSnapshot(null);
-    setCandidatePage(null);
-    setSelection(null);
-    setCandidateList((current) => ({ ...current, selectedCandidateKey: null, detailOpen: false }));
-    candidateHandoff.current = null;
-    setSelectedEvidence(null);
-    setCriteriaEdit(null);
-    shortlistMutation.current = null;
-    setShortlistPending(null);
-    setFailed(true);
-    editScope.current.roleId = null;
-    editScope.current.generation++;
-  }, []);
+  const candidateValidation = useRef<number | undefined>(undefined);
+  const candidateValidatedRead = useRef<string | undefined>(undefined);
+  const displayedCandidateQuery = useRef<string | undefined>(undefined);
+  const denyAccess = useCallback(
+    (error: unknown) => {
+      console.error(
+        "Recruiting request failed",
+        JSON.stringify({
+          name: error instanceof Error ? error.name : undefined,
+          code: error instanceof ORPCError ? error.code : undefined,
+          message: error instanceof Error ? error.message : undefined,
+        }),
+      );
+      if (
+        !(error instanceof ORPCError) ||
+        !["UNAUTHORIZED", "FORBIDDEN", "NOT_FOUND"].includes(error.code)
+      )
+        return;
+      readEpoch.current++;
+      clearRecruitingReads(readCache, readCacheScope);
+      candidateGeneration.current++;
+      setSnapshot(null);
+      setWorkspaceSnapshot(null);
+      setCandidatePage(null);
+      setSelection(null);
+      setCandidateList((current) => ({
+        ...current,
+        selectedCandidateKey: null,
+        detailOpen: false,
+      }));
+      candidateHandoff.current = null;
+      setSelectedEvidence(null);
+      setCriteriaEdit(null);
+      shortlistMutation.current = null;
+      setShortlistPending(null);
+      setFailed(true);
+      editScope.current.roleId = null;
+      editScope.current.generation++;
+    },
+    [readCache, readCacheScope],
+  );
   const [criteriaEdit, setCriteriaEdit] = useState<CriteriaEdit | null>(null);
   const [savingCriteria, setSavingCriteria] = useState(false);
   const [criteriaFailed, setCriteriaFailed] = useState(false);
-  const editScope = useRef({ active: true, roleId: null as string | null, generation: 0 });
+  const editScope = useRef({
+    active: true,
+    roleId: workspaceSnapshot?.workspace?.role.id ?? (null as string | null),
+    generation: 0,
+  });
   useEffect(() => {
     editScope.current.active = true;
     return () => {
@@ -2210,12 +2269,17 @@ function RecruitingWorkspace({
   useEffect(() => {
     let cancelled = false;
     const epoch = readEpoch.current;
+    let cacheEpoch = readCache?.epoch;
     setLoading(true);
     setFailed(false);
     const updateEditScope = (workspace: Snapshot["workspace"]) => {
       const roleId = workspace?.role.id ?? null;
       if (editScope.current.roleId === roleId) return;
       const changingRole = editScope.current.roleId !== null;
+      if (changingRole) {
+        clearRecruitingReads(readCache, readCacheScope);
+        cacheEpoch = readCache?.epoch;
+      }
       editScope.current.roleId = roleId;
       editScope.current.generation++;
       candidateGeneration.current++;
@@ -2255,7 +2319,13 @@ function RecruitingWorkspace({
               ? null
               : current,
           );
-          setWorkspaceSnapshot({ workspace });
+          setWorkspaceSnapshot((current) =>
+            current && JSON.stringify(current.workspace) === JSON.stringify(workspace)
+              ? current
+              : { workspace },
+          );
+          rememberRecruitingRead(readCache, workspaceCacheKey, { workspace }, cacheEpoch);
+          setValidatedWorkspaceRead(workspaceReadKey);
           if (summary) return;
           const [assessments, research, questions, documents] = await Promise.all([
             workspace && !candidateWorkspace
@@ -2305,8 +2375,24 @@ function RecruitingWorkspace({
     return () => {
       cancelled = true;
     };
-  }, [userId, threadId, botId, refresh, refreshSignal, denyAccess, summary, candidateWorkspace]);
+  }, [
+    userId,
+    threadId,
+    botId,
+    refresh,
+    refreshSignal,
+    denyAccess,
+    summary,
+    candidateWorkspace,
+    readCache,
+    workspaceCacheKey,
+    workspaceReadKey,
+  ]);
   const workspace = workspaceSnapshot?.workspace;
+  const contactsCacheKey =
+    readCacheScope && workspace
+      ? `${readCacheScope}:contacts:${JSON.stringify([workspace.role.id, workspace.revision.id, botId, groupId])}`
+      : undefined;
   const contactsKey =
     contactsView && workspace && (botId || groupId)
       ? JSON.stringify([
@@ -2321,28 +2407,45 @@ function RecruitingWorkspace({
       : null;
   const [contactsRead, setContactsRead] = useState<{
     key: string;
+    cacheKey?: string;
     data?: RecruitingCorrespondence;
     failed?: boolean;
   }>();
   useEffect(() => {
     if (!contactsKey) return;
     let cancelled = false;
-    setContactsRead({ key: contactsKey });
+    const cacheEpoch = readCache?.epoch;
+    setContactsRead((current) => ({
+      key: contactsKey,
+      cacheKey: contactsCacheKey,
+      data:
+        (contactsCacheKey
+          ? (readCache?.entries.get(contactsCacheKey) as RecruitingCorrespondence | undefined)
+          : undefined) ??
+        (readCache && current?.cacheKey === contactsCacheKey ? current?.data : undefined),
+    }));
     void rpc.recruiting
       .correspondence({ ...(groupId ? { groupId } : { botId: botId! }), view: "contacts" })
       .then((data) => {
-        if (!cancelled) setContactsRead({ key: contactsKey, data });
+        if (!cancelled && (!readCache || cacheEpoch === readCache.epoch)) {
+          rememberRecruitingRead(readCache, contactsCacheKey, data, cacheEpoch);
+          setContactsRead({ key: contactsKey, cacheKey: contactsCacheKey, data });
+        }
       })
       .catch((error) => {
         if (!cancelled) {
           denyAccess(error);
-          setContactsRead({ key: contactsKey, failed: true });
+          setContactsRead((current) =>
+            current?.key === contactsKey
+              ? { ...current, failed: true }
+              : { key: contactsKey, failed: true },
+          );
         }
       });
     return () => {
       cancelled = true;
     };
-  }, [contactsKey, botId, groupId, denyAccess]);
+  }, [contactsKey, botId, groupId, denyAccess, readCache, contactsCacheKey]);
   const currentContacts = contactsRead?.key === contactsKey ? contactsRead : undefined;
   const contacts = currentContacts?.data?.contacts ?? [];
   const criteria = workspace?.revision.criteria ?? [];
@@ -2417,6 +2520,23 @@ function RecruitingWorkspace({
   const assessment = selected?.assessment;
   const roleId = workspace?.role.id;
   const roleRevisionId = workspace?.revision.id;
+  const candidateQueryKey = JSON.stringify([
+    userId,
+    threadId,
+    roleId,
+    roleRevisionId,
+    candidateRequestFilters,
+  ]);
+  const candidateFresh =
+    !candidateLoading &&
+    !candidateFailed &&
+    validatedWorkspaceRead === workspaceReadKey &&
+    candidateValidatedRead.current === `${workspaceReadKey}:${candidateQueryKey}` &&
+    (!readCache || candidateValidation.current === readCache.epoch);
+  const candidatesCacheKey =
+    readCacheScope && roleId && roleRevisionId
+      ? `${readCacheScope}:candidates:${JSON.stringify([roleId, roleRevisionId, candidateRequestFilters])}`
+      : undefined;
   useEffect(() => {
     const list = tabsList.current;
     const selectedTab = list?.querySelector<HTMLElement>('[role="tab"][aria-selected="true"]');
@@ -2472,13 +2592,25 @@ function RecruitingWorkspace({
     let cancelled = false;
     const generation = ++candidateGeneration.current;
     const epoch = readEpoch.current;
+    const cacheEpoch = readCache?.epoch;
     const isCurrent = () =>
-      !cancelled && generation === candidateGeneration.current && epoch === readEpoch.current;
+      !cancelled &&
+      generation === candidateGeneration.current &&
+      epoch === readEpoch.current &&
+      (!readCache || cacheEpoch === readCache.epoch);
     loadingMore.current = false;
-    setCandidateLoading(!!roleId);
+    setCandidateLoading(!!roleId && validatedWorkspaceRead === workspaceReadKey);
     setCandidateFailed(false);
-    setCandidatePage(null);
-    if (!roleId || summary) return;
+    setCandidatePage(
+      (current) =>
+        (candidatesCacheKey
+          ? (readCache?.entries.get(candidatesCacheKey) as
+              | ListRecruitingCandidatesOutput
+              | undefined)
+          : undefined) ?? (displayedCandidateQuery.current === candidateQueryKey ? current : null),
+    );
+    displayedCandidateQuery.current = candidateQueryKey;
+    if (!roleId || summary || validatedWorkspaceRead !== workspaceReadKey) return;
     const query = candidateQuery.current;
     void (async () => {
       let page = await rpc.recruiting.listCandidates({
@@ -2498,10 +2630,18 @@ function RecruitingWorkspace({
         setRefresh((value) => value + 1);
         return;
       }
+      candidateValidation.current = cacheEpoch;
+      candidateValidatedRead.current = `${workspaceReadKey}:${candidateQueryKey}`;
       setCandidatePage(page);
+      rememberRecruitingRead(
+        readCache,
+        candidatesCacheKey,
+        { ...page, crmTarget: null, items: page.items.map((item) => ({ ...item, crm: null })) },
+        cacheEpoch,
+      );
       setCandidateList((current) => ({ ...current, pageCount: 1 }));
       let pageCount = 1;
-      // ponytail: replay only the saved page depth with fresh cursors; never cache candidate records.
+      // ponytail: replay saved page depth with fresh cursors; cached rows are display-only until verified.
       for (let index = 1; index < query.pageCount && page.nextCursor; index++) {
         if (!isCurrent()) return;
         const next = await rpc.recruiting.listCandidates({
@@ -2524,6 +2664,12 @@ function RecruitingWorkspace({
         page = { ...next, items: page.items.concat(next.items) };
         pageCount++;
         setCandidatePage(page);
+        rememberRecruitingRead(
+          readCache,
+          candidatesCacheKey,
+          { ...page, crmTarget: null, items: page.items.map((item) => ({ ...item, crm: null })) },
+          cacheEpoch,
+        );
         setCandidateList((current) => ({ ...current, pageCount }));
       }
       const selectedCandidateKey = candidateQuery.current.selectedCandidateKey;
@@ -2586,6 +2732,11 @@ function RecruitingWorkspace({
     denyAccess,
     resetUnavailableCandidateSort,
     summary,
+    candidatesCacheKey,
+    candidateQueryKey,
+    readCache,
+    workspaceReadKey,
+    validatedWorkspaceRead,
   ]);
   useEffect(() => {
     let cancelled = false;
@@ -2627,7 +2778,13 @@ function RecruitingWorkspace({
     candidate: RecruitingCandidate,
     intent: CandidateDiscussionContext["intent"],
   ) {
-    if (!workspace || !onDiscussCandidate) return;
+    if (
+      !workspace ||
+      !onDiscussCandidate ||
+      !candidateFresh ||
+      (readCache && candidateValidation.current !== readCache.epoch)
+    )
+      return;
     onDiscussCandidate({
       threadId,
       roleTitle: workspace.role.title,
@@ -2691,7 +2848,12 @@ function RecruitingWorkspace({
     }
   }
   async function setShortlist(candidate: RecruitingCandidate, shortlisted: boolean) {
-    if (shortlistMutation.current) return;
+    if (
+      shortlistMutation.current ||
+      !candidateFresh ||
+      (readCache && candidateValidation.current !== readCache.epoch)
+    )
+      return;
     const mutation = {};
     shortlistMutation.current = mutation;
     const roleGeneration = editScope.current.generation;
@@ -2719,6 +2881,7 @@ function RecruitingWorkspace({
         saved.shortlisted !== shortlisted
       )
         throw new Error("Shortlist receipt does not match the submitted candidate");
+      clearRecruitingReads(readCache, readCacheScope);
       setCandidatePage((current) =>
         current
           ? {
@@ -2732,35 +2895,8 @@ function RecruitingWorkspace({
       setSelection((current) =>
         current?.candidateKey === saved.candidateKey ? { ...current, ...saved } : current,
       );
-      // Counts and active filters are authoritative after the saved human change.
-      const generation = ++candidateGeneration.current;
-      const query = candidateQuery.current;
-      loadingMore.current = false;
-      setCandidateLoading(true);
-      try {
-        const page = await rpc.recruiting.listCandidates({
-          roleId: candidate.roleId,
-          limit: 30,
-          ...query.filters,
-        });
-        if (isCurrent() && generation === candidateGeneration.current) {
-          if (page.roleId !== candidate.roleId || page.roleRevisionId !== query.roleRevisionId)
-            setRefresh((value) => value + 1);
-          else if (!resetUnavailableCandidateSort(page, query.filters)) {
-            setCandidatePage(page);
-            setCandidateList((current) => ({ ...current, pageCount: 1 }));
-            setCandidateFailed(false);
-          }
-        }
-      } catch (error) {
-        if (isCurrent()) {
-          denyAccess(error);
-          if (epoch === readEpoch.current && generation === candidateGeneration.current)
-            setCandidateFailed(true);
-        }
-      } finally {
-        if (isCurrent() && generation === candidateGeneration.current) setCandidateLoading(false);
-      }
+      // Reuse the role-verified loader for authoritative counts after this saved change.
+      setRefresh((value) => value + 1);
     } catch (error) {
       if (isCurrent()) {
         denyAccess(error);
@@ -2810,6 +2946,8 @@ function RecruitingWorkspace({
   );
   async function saveCriteria() {
     if (
+      loading ||
+      failed ||
       !criteriaEdit ||
       savingCriteria ||
       invalidCriteria ||
@@ -2901,6 +3039,8 @@ function RecruitingWorkspace({
                 key={workspace.role.id}
                 roleId={workspace.role.id}
                 refreshSignal={(refreshSignal ?? 0) + refresh}
+                readCache={readCache}
+                readCacheScope={readCacheScope}
                 onAccessError={denyAccess}
                 showEmpty
               />
@@ -3366,6 +3506,8 @@ function RecruitingWorkspace({
                     ) : (
                       <Button
                         disabled={
+                          loading ||
+                          failed ||
                           confirming ||
                           briefClarifications.length > 0 ||
                           workspace.revision.criteria.some(
@@ -3669,6 +3811,8 @@ function RecruitingWorkspace({
                       <Button
                         size="sm"
                         disabled={
+                          loading ||
+                          failed ||
                           savingCriteria ||
                           invalidCriteria ||
                           invalidSearchFilters ||
@@ -4070,7 +4214,7 @@ function RecruitingWorkspace({
                                 onShortlist={() =>
                                   void setShortlist(candidate, !candidate.shortlisted)
                                 }
-                                shortlistPending={shortlistPending !== null}
+                                shortlistPending={shortlistPending !== null || !candidateFresh}
                                 shortlistFailed={shortlistFailed === candidate.candidateKey}
                                 onEmailDraft={
                                   onDiscussCandidate
@@ -4113,7 +4257,7 @@ function RecruitingWorkspace({
                                     <Checkbox
                                       aria-label={t`Shortlist ${candidate.name ?? (showDiagnostics ? candidate.candidateKey : t`Unnamed candidate`)}`}
                                       checked={candidate.shortlisted}
-                                      disabled={shortlistPending !== null}
+                                      disabled={shortlistPending !== null || !candidateFresh}
                                       onCheckedChange={(checked) =>
                                         void setShortlist(candidate, !!checked)
                                       }
@@ -4328,7 +4472,7 @@ function RecruitingWorkspace({
                                   <Checkbox
                                     aria-label={t`Shortlist ${candidate.name ?? (showDiagnostics ? candidate.candidateKey : t`Unnamed candidate`)}`}
                                     checked={candidate.shortlisted}
-                                    disabled={shortlistPending !== null}
+                                    disabled={shortlistPending !== null || !candidateFresh}
                                     onCheckedChange={(checked) =>
                                       void setShortlist(candidate, !!checked)
                                     }
@@ -4344,7 +4488,10 @@ function RecruitingWorkspace({
                                     <Button
                                       variant="outline"
                                       size="sm"
-                                      disabled={!candidate.name && !candidate.linkedinUrl}
+                                      disabled={
+                                        !candidateFresh ||
+                                        (!candidate.name && !candidate.linkedinUrl)
+                                      }
                                       onClick={() => discussCandidate(candidate, "contact_lookup")}
                                     >
                                       <Trans>Find email</Trans>
@@ -4352,7 +4499,10 @@ function RecruitingWorkspace({
                                     <Button
                                       variant="ghost"
                                       size="sm"
-                                      disabled={!candidate.name && !candidate.linkedinUrl}
+                                      disabled={
+                                        !candidateFresh ||
+                                        (!candidate.name && !candidate.linkedinUrl)
+                                      }
                                       onClick={() => discussCandidate(candidate, "email_draft")}
                                     >
                                       <Trans>Email draft</Trans>
@@ -4557,6 +4707,8 @@ function RecruitingWorkspace({
                 key={workspace.role.id}
                 roleId={workspace.role.id}
                 refreshSignal={(refreshSignal ?? 0) + feedbackRefresh}
+                readCache={readCache}
+                readCacheScope={readCacheScope}
                 onAccessError={denyAccess}
               />
             ) : null}
@@ -4743,10 +4895,20 @@ function RecruitingWorkspace({
                     linkedinUrl: selection.linkedinUrl,
                     resumeUrl: selection.resumeUrl,
                   }}
-                  onSend={onCandidateFeedback}
+                  onSend={(...args) =>
+                    candidateFresh &&
+                    (!readCache || candidateValidation.current === readCache.epoch)
+                      ? onCandidateFeedback(...args)
+                      : Promise.resolve(false)
+                  }
+                  disabled={!candidateFresh}
                   recipients={candidateFeedbackRecipients}
                   onAccessError={denyAccess}
-                  onRecorded={() => setFeedbackRefresh((value) => value + 1)}
+                  onRecorded={() => {
+                    clearRecruitingReads(readCache, readCacheScope);
+                    setRefresh((value) => value + 1);
+                    setFeedbackRefresh((value) => value + 1);
+                  }}
                 />
               ) : null}
               {workspace ? (
@@ -4755,6 +4917,8 @@ function RecruitingWorkspace({
                   roleId={workspace.role.id}
                   candidateKey={selection.candidateKey}
                   refreshSignal={(refreshSignal ?? 0) + feedbackRefresh}
+                  readCache={readCache}
+                  readCacheScope={readCacheScope}
                   onAccessError={denyAccess}
                 />
               ) : null}
@@ -4790,7 +4954,7 @@ function RecruitingWorkspace({
                   key={`${selection.roleId}:${selection.candidateKey}`}
                   candidate={selection}
                   research={snapshot.research}
-                  refreshSignal={candidatePage}
+                  refreshSignal={candidateFresh ? candidatePage : null}
                   roleRevisionId={workspace.revision.id}
                   onAccessError={denyAccess}
                   showDiagnostics={showDiagnostics}

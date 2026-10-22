@@ -1047,6 +1047,10 @@ msgstr "Apps de chat, canales de grupo y conexiones de agentes."
 msgid "Chat Settings"
 msgstr "Configuración del chat"
 
+#: src/pages/Shell.tsx
+msgid "Chat with WeKruit"
+msgstr ""
+
 #: src/components/ComputersUnavailableHint.tsx
 #: src/pages/HostComputerPrompt.tsx
 msgid "Check again"
@@ -1258,6 +1262,10 @@ msgstr "Contraer {0}"
 
 #: src/pages/shell/RecruitingNavigation.tsx
 msgid "Collapse navigation"
+msgstr ""
+
+#: src/pages/Shell.tsx
+msgid "Collapse role chat"
 msgstr ""
 
 #: src/pages/shell/avatar-studio-popover.tsx
@@ -4124,6 +4132,10 @@ msgstr ""
 #: src/pages/RecruitingPanel.tsx
 msgid "Open original question"
 msgstr "Abrir pregunta original"
+
+#: src/pages/Shell.tsx
+msgid "Open role chat"
+msgstr ""
 
 #: src/components/computer/TerminalApp.tsx
 msgid "Open shell"

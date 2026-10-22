@@ -224,6 +224,8 @@ import {
 } from "../lib/pending-attachments";
 import { markAfterPaint, markOnce } from "../lib/performance";
 import { quoteDraftForSelection } from "../lib/quote-selection";
+import type { RecruitingReadCache } from "../lib/recruiting-read-cache";
+import { clearRecruitingReads } from "../lib/recruiting-read-cache";
 import { getResponseStreamingEnabled, subscribeResponseStreaming } from "../lib/response-streaming";
 import type { Panel, RecruitingPanelState, RightPanelState } from "../lib/right-panel-state";
 import {
@@ -545,6 +547,15 @@ export function ShellPage() {
   const fileInputRef = useRef<HTMLInputElement>(null);
   const [panel, setPanelState] = useState<Panel>(null);
   const [recruitingRefresh, setRecruitingRefresh] = useState(0);
+  const [roleChatOpen, setRoleChatOpen] = useState(false);
+  const roleChatId = useId();
+  const roleChatTrigger = useRef<HTMLButtonElement>(null);
+  const roleChatSection = useRef<HTMLElement>(null);
+  const recruitingReadCache = useRef<RecruitingReadCache>({ entries: new Map(), epoch: 0 });
+  useEffect(() => {
+    const cache = recruitingReadCache.current;
+    return () => clearRecruitingReads(cache);
+  }, []);
   const [restoredPanelKey, setRestoredPanelKey] = useState<string | null>(null);
   const panelStorageKeyRef = useRef<string | null>(null);
   const observedPanelKey = useRef<string | null>(null);
@@ -969,9 +980,15 @@ export function ShellPage() {
           : current?.botId !== activeBotId.current)
       )
         return;
-      if (eventChangesRecruitingPanel(event)) setRecruitingRefresh((value) => value + 1);
+      if (eventChangesRecruitingPanel(event)) {
+        clearRecruitingReads(
+          recruitingReadCache.current,
+          JSON.stringify([userId, bootstrapMe?.spaceId, current.threadId]),
+        );
+        setRecruitingRefresh((value) => value + 1);
+      }
     },
-    [bootstrapMe?.spaceId],
+    [bootstrapMe?.spaceId, userId],
   );
   const screenRequest = useRef(0);
   const contextBot =
@@ -2108,6 +2125,17 @@ export function ShellPage() {
     !workspaceNewRole &&
     ["sequence", "inbox", "interview"].includes(recruitingWorkspaceView);
   const workspaceFull = workspaceNewRole || workspaceCandidates || workspaceCorrespondence;
+  const roleChatWorkspace = workspaceFull && !workspaceNewRole && Boolean(activeSnapshot?.threadId);
+  useEffect(() => {
+    if (roleChatWorkspace && roleChatOpen)
+      roleChatSection.current
+        ?.querySelector<HTMLTextAreaElement>('textarea[name="chat-message"]')
+        ?.focus();
+  }, [roleChatWorkspace, roleChatOpen, activeSnapshot?.threadId]);
+  const recruitingCacheScope =
+    userId && bootstrapMe?.spaceId && activeSnapshot?.threadId
+      ? JSON.stringify([userId, bootstrapMe.spaceId, activeSnapshot.threadId])
+      : undefined;
   const workspaceBrief =
     !showToolActivity &&
     !workspaceNewRole &&
@@ -2140,6 +2168,11 @@ export function ShellPage() {
     () => createRef<ComposerHandle>(),
     [userId, bootstrapMe?.spaceId, composerDraftKey, activeSnapshot?.threadId],
   );
+  function openRoleChat(text?: string) {
+    if (text) composerRef.current?.insertContext({ draftKey: composerDraftKey, text });
+    if (roleChatWorkspace) setRoleChatOpen(true);
+    else openRecruitingView("conversation");
+  }
   const candidateFeedbackRecipients = inGroup
     ? (activeSnapshot?.members ?? activeGroup?.members ?? [])
         .filter((_member, index) => showToolActivity || index === 0)
@@ -2189,7 +2222,7 @@ export function ShellPage() {
             ? `${candidateReferenceText(candidate)}${t`Find this person's work email from saved evidence or available connected services. If a connection is missing, explain what needs connecting. Save the returned source and provider status, do not invent contact details, and do not send a message.`}`
             : candidateReferenceText(candidate),
     });
-    if (!showToolActivity) openRecruitingView("conversation");
+    if (!showToolActivity) openRoleChat();
   }
   async function feedbackCandidate(
     candidate: CandidateDiscussionContext,
@@ -4243,7 +4276,7 @@ export function ShellPage() {
       <main
         aria-hidden={mobileSidebarOpen || undefined}
         inert={mobileSidebarOpen}
-        className="isolate flex min-w-0 flex-1 flex-col bg-background"
+        className={cn("isolate flex min-w-0 flex-1 flex-col bg-background", roleChatWorkspace && "hire-role-chat-workspace", roleChatWorkspace && roleChatOpen && "hire-role-chat-open")}
       >
         {workspaceFull ? (
           <div className={botsSidebarCollapsed ? "flex items-center px-4 pt-3" : "flex items-center px-4 pt-3 md:hidden"}>
@@ -4278,12 +4311,13 @@ export function ShellPage() {
               artifactTarget={transcriptArtifactTarget}
               outreachBotIds={(activeSnapshot.members ?? []).filter((member) => member.name === "Outreach").map((member) => member.botId)}
               onConversation={(text) => {
-                if (text) composerRef.current?.insertContext({ draftKey: composerDraftKey, text });
-                openRecruitingView("conversation");
+                openRoleChat(text);
               }}
               onOpenConnections={() => setPluginsOpen(true)}
               onSaveDraft={saveSequenceDraft}
               refreshSignal={recruitingRefresh}
+              readCache={recruitingReadCache.current}
+              readCacheScope={recruitingCacheScope}
             />
           </div>
         ) : null}
@@ -4297,6 +4331,8 @@ export function ShellPage() {
                 threadId={activeSnapshot.threadId}
                 botId={inGroup ? undefined : active?.id}
                 groupId={inGroup ? groupId : undefined}
+                readCache={recruitingReadCache.current}
+                readCacheScope={recruitingCacheScope}
                 refreshSignal={recruitingRefresh}
                 tab={recruitingWorkspaceView === "workflow" ? "dashboard" : "evidence"}
                 showDiagnostics={false}
@@ -4311,11 +4347,12 @@ export function ShellPage() {
                 })}
               />
               <div className="flex justify-end py-4">
-                <Button variant="outline" onClick={() => openRecruitingView("feedback")}><Trans>Refine in chat</Trans></Button>
+                <Button variant="outline" onClick={() => openRoleChat()}><Trans>Refine in chat</Trans></Button>
               </div>
             </div>
           </div>
         ) : null}
+        {roleChatWorkspace && !roleChatOpen ? <Button ref={roleChatTrigger} className="absolute bottom-4 end-4 z-20" aria-label={t`Open role chat`} aria-controls={roleChatId} aria-expanded={false} onClick={() => openRoleChat()}><Sparkles size={17} aria-hidden /><Trans>Chat with WeKruit</Trans></Button> : null}
         <div className={workspaceBrief ? "hire-brief-view rk-scroll" : "contents"}>
           {workspaceBrief ? (
             <div className="hire-brief-top">
@@ -4329,8 +4366,8 @@ export function ShellPage() {
             </div>
           ) : null}
           <div className={workspaceBrief ? "hire-brief-grid" : "contents"}>
-        <LinkFaviconsContext.Provider value={workspaceFull ? null : linkFavicons}>
-        <section hidden={workspaceFull} aria-label={t`Role conversation`} className={workspaceFull ? "hidden" : workspaceBrief ? "hire-chat-panel" : "flex min-h-0 flex-1 flex-col"}>
+        <LinkFaviconsContext.Provider value={workspaceFull && !(roleChatWorkspace && roleChatOpen) ? null : linkFavicons}>
+        <section ref={roleChatSection} id={roleChatId} hidden={workspaceFull && !(roleChatWorkspace && roleChatOpen)} aria-label={t`Role conversation`} className={roleChatWorkspace ? "hire-role-chat" : workspaceFull ? "hidden" : workspaceBrief ? "hire-chat-panel" : "flex min-h-0 flex-1 flex-col"}>
         {/* Inside main so the composer and its menus stay above it. */}
         {!mobileSidebarOpen ? (
           <div
@@ -4391,6 +4428,8 @@ export function ShellPage() {
                   </span>
                 </span>
               </button>
+            ) : roleChatWorkspace ? (
+              <div className="hire-assistant-identity"><Sparkles size={18} aria-hidden /><div><strong>WeKruit</strong><span>{inGroup ? (activeGroup?.name ?? activeSnapshot?.groupName) : active?.name}</span></div></div>
             ) : workspaceBrief ? (
               <div className="hire-assistant-identity"><Sparkles size={18} aria-hidden /><div><strong>WeKruit</strong><span>{recruitingWorkspaceView === "brief" ? <Trans>Recruiting assistant</Trans> : <Trans>Search refinement</Trans>}</span></div></div>
             ) : (
@@ -4400,6 +4439,7 @@ export function ShellPage() {
             )}
           </div>
           <div className="flex items-center gap-1">
+            {roleChatWorkspace ? <Button variant="ghost" size="icon-sm" aria-label={t`Collapse role chat`} onClick={() => { setRoleChatOpen(false); requestAnimationFrame(() => roleChatTrigger.current?.focus()); }}><X size={18} aria-hidden /></Button> : null}
             {activeSnapshot?.threadId ? (
               <button
                 type="button"
@@ -4435,7 +4475,7 @@ export function ShellPage() {
                 <Download size={18} strokeWidth={1.6} className="text-foreground/75" aria-hidden />
               </button>
             ) : null}
-            {activeSnapshot?.threadId && !workspaceBrief ? (
+            {activeSnapshot?.threadId && !workspaceBrief && !roleChatWorkspace ? (
               <button
                 type="button"
                 aria-label={t`Recruiting`}
@@ -4629,6 +4669,8 @@ export function ShellPage() {
                 key={`${userId}:${bootstrapMe?.spaceId}:${activeSnapshot.threadId}:summary`}
                 presentation="workspace"
                 summary={recruitingWorkspaceView === "brief" ? "brief" : "feedback"}
+                readCache={recruitingReadCache.current}
+                readCacheScope={recruitingCacheScope}
                 threadId={activeSnapshot.threadId}
                 botId={inGroup ? undefined : active?.id}
                 refreshSignal={recruitingRefresh}

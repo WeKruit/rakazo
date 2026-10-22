@@ -160,6 +160,51 @@ body,
   margin: 0 auto;
   padding: 16px 0 65px;
 }
+[data-product-view="recruiting"] .hire-role-chat-workspace {
+  --hire-role-chat-width: clamp(320px, 34vw, 420px);
+  position: relative;
+}
+[data-product-view="recruiting"] .hire-role-chat-open > .recruiting-workspace-main {
+  margin-inline-end: var(--hire-role-chat-width);
+  container-type: inline-size;
+}
+[data-product-view="recruiting"] .hire-role-chat {
+  position: absolute;
+  inset-block: 0;
+  inset-inline-end: 0;
+  z-index: 20;
+  width: var(--hire-role-chat-width);
+  min-width: 0;
+  min-height: 0;
+  flex-direction: column;
+  border-inline-start: 1px solid var(--border);
+  background: var(--background);
+}
+[data-product-view="recruiting"] .hire-role-chat:not([hidden]) {
+  display: flex;
+}
+[data-product-view="recruiting"] .hire-role-chat[hidden] {
+  display: none;
+}
+@container (max-width: 680px) {
+  [data-product-view="recruiting"] .hire-role-chat-open .hire-card-grid {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}
+@media (max-width: 940px) {
+  [data-product-view="recruiting"] .hire-role-chat-open > .recruiting-workspace-main {
+    margin-inline-end: 0;
+  }
+  [data-product-view="recruiting"] .hire-role-chat {
+    position: static;
+    width: 100%;
+    height: 55dvh;
+    max-height: 65%;
+    flex-shrink: 0;
+    border-inline-start: 0;
+    border-top: 1px solid var(--border);
+  }
+}
 [data-product-view="recruiting"] .hire-brief-view {
   width: min(1200px, calc(100% - 80px));
   min-height: 0;
