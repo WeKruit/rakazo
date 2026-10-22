@@ -1,13 +1,140 @@
 import { createHash } from "node:crypto";
 import type { RecruitingSourceRef } from "@rakazo/contracts";
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import type { LoadedRecruitingRunContext } from "./recruiting-context.js";
 import {
   buildRecruitingResearchRequest,
   classifyRecruitingResearchResult,
   projectRecruitingCandidateReport,
   readRecruitingResearchRequest,
+  requireAutumnTaskOwnership,
 } from "./recruiting-research.js";
+
+describe("Autumn task ownership", () => {
+  const actor = { userId: "owner", spaceId: "space" };
+  const server = {
+    id: "autumn-server",
+    revision: 2,
+    transport: "streamable_http",
+    endpoint: "https://api.autumn.ai/mcp",
+  };
+  const route = {
+    connectorId: "mcp",
+    resourceId: server.id,
+    resourceRevision: 2,
+    toolName: "research",
+  };
+  const direct = ["__rakazoCatalogTool", "direct", { route, args: { prompt: "Find engineers" } }];
+  function fixture(
+    request: unknown = direct,
+    result: unknown = { structuredContent: { task_id: "owned-task" } },
+  ) {
+    return {
+      recruitingResearchTask: { findFirst: vi.fn(async () => null) },
+      externalEffect: {
+        findMany: vi.fn(async ({ where }) =>
+          where.spaceId === actor.spaceId &&
+          where.run.spaceId === actor.spaceId &&
+          where.run.userId === actor.userId
+            ? [{ request, result }]
+            : [],
+        ),
+      },
+    };
+  }
+  const authorize = (
+    db: ReturnType<typeof fixture>,
+    tool = "get_task",
+    args: Record<string, unknown> = { task_id: "owned-task" },
+    context = actor,
+    connection = server,
+  ) => requireAutumnTaskOwnership(db as never, context, connection, tool, args);
+
+  it.each(["get_task", "get_rows", "reply", "stop_task", "continue_with_file"])(
+    "reuses an owned native creation receipt for %s",
+    async (tool) => {
+      await expect(authorize(fixture(), tool)).resolves.toBeUndefined();
+    },
+  );
+  it.each(["connectors_execute_tool", "mcp_execute_tool"])(
+    "accepts the canonical %s creation receipt",
+    async (tool) => {
+      const request = [
+        "__rakazoCatalogTool",
+        tool,
+        { id: `${server.id}:research`, arguments: { prompt: "Find engineers" } },
+        route,
+      ];
+      await expect(authorize(fixture(request))).resolves.toBeUndefined();
+    },
+  );
+  it.each(["user", "space", "task", "connection", "revision", "read", "error", "malformed"])(
+    "does not grant ownership from %s mismatch",
+    async (change) => {
+      const request = structuredClone(direct);
+      const body = request[2] as { route: typeof route };
+      if (change === "connection") body.route.resourceId = "other-server";
+      if (change === "revision") body.route.resourceRevision = 1;
+      if (change === "read") body.route.toolName = "get_task";
+      const db = fixture(
+        request,
+        change === "error"
+          ? { isError: true, structuredContent: { task_id: "owned-task" } }
+          : change === "malformed"
+            ? { content: [{ type: "text", text: "Task owned-task" }] }
+            : undefined,
+      );
+      await expect(
+        authorize(
+          db,
+          "get_rows",
+          { task_id: change === "task" ? "foreign-task" : "owned-task" },
+          {
+            userId: change === "user" ? "other-user" : actor.userId,
+            spaceId: change === "space" ? "other-space" : actor.spaceId,
+          },
+        ),
+      ).rejects.toThrow();
+    },
+  );
+  it("accepts an existing actor-scoped native research task", async () => {
+    const db = fixture();
+    db.recruitingResearchTask.findFirst.mockResolvedValue({ id: "native-task" } as never);
+    await expect(authorize(db)).resolves.toBeUndefined();
+    expect(db.recruitingResearchTask.findFirst).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: expect.objectContaining({
+          providerTaskId: "owned-task",
+          mcpServerId: server.id,
+          serverRevision: 2,
+          role: actor,
+          createdByRun: actor,
+        }),
+      }),
+    );
+    expect(db.externalEffect.findMany).not.toHaveBeenCalled();
+  });
+  it.each(["list_tasks", "get_team", "get_usage", "invite_member", "unknown"])(
+    "denies account-wide or unsupported %s before querying receipts",
+    async (tool) => {
+      const db = fixture();
+      await expect(authorize(db, tool, {})).rejects.toThrow(/scoped research history/i);
+      expect(db.externalEffect.findMany).not.toHaveBeenCalled();
+    },
+  );
+  it("does not constrain other MCP providers or require a task for a new research call", async () => {
+    const db = fixture();
+    await expect(authorize(db, "research", { prompt: "Find engineers" })).resolves.toBeUndefined();
+    await expect(authorize(db, "credits", {})).resolves.toBeUndefined();
+    await expect(
+      authorize(db, "list_tasks", {}, actor, { ...server, endpoint: "https://mcp.example.test" }),
+    ).resolves.toBeUndefined();
+    expect(db.externalEffect.findMany).not.toHaveBeenCalled();
+    await expect(
+      authorize(db, "research", { prompt: "Find engineers", task_id: "foreign-task" }),
+    ).rejects.toThrow();
+  });
+});
 
 const source: RecruitingSourceRef = {
   id: "human-message:human",

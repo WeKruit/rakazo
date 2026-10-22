@@ -1,7 +1,9 @@
 import { createHash } from "node:crypto";
 import type { AdapterContext, ConnectorCall, ConnectorEvent } from "@rakazo/adapter-kit";
-import { describe, expect, it, vi } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { AutumnFileConnector } from "./autumn-files.js";
+
+afterEach(() => vi.unstubAllEnvs());
 
 function fixture() {
   const context: AdapterContext = {
@@ -46,6 +48,20 @@ function fixture() {
     rootArtifactId: null,
   };
   const prisma = {
+    recruitingResearchTask: {
+      findFirst: vi.fn(async ({ where }) =>
+        where.providerTaskId === "task-1" &&
+        where.mcpServerId === server.id &&
+        where.serverRevision === server.revision &&
+        where.role.userId === context.userId &&
+        where.role.spaceId === context.spaceId &&
+        where.createdByRun.userId === context.userId &&
+        where.createdByRun.spaceId === context.spaceId
+          ? { id: "native-task-1" }
+          : null,
+      ),
+    },
+    externalEffect: { findMany: vi.fn(async () => []) },
     botMcpServer: {
       findMany: vi.fn(async () => [assignment]),
       findFirst: vi.fn(async ({ where }) =>
@@ -134,6 +150,23 @@ function fixture() {
 }
 
 describe("native Autumn file continuation", () => {
+  it("uses the configured official platform credential without copying a personal secret", async () => {
+    vi.stubEnv("AUTUMN_API_KEY", "platform-service-key");
+    const f = fixture();
+    Object.assign(f.server, { secretId: null });
+    expect(await f.execute()).toEqual([expect.objectContaining({ type: "result" })]);
+    expect(f.secrets.load).not.toHaveBeenCalled();
+    expect(new Headers(f.fetch.mock.calls[0]![1]!.headers).get("authorization")).toBe(
+      "Bearer platform-service-key",
+    );
+  });
+  it("rejects a foreign task before reading the file or dispatching upload requests", async () => {
+    const f = fixture();
+    f.call.args.task_id = "foreign-task";
+    expect(await f.execute()).toEqual([expect.objectContaining({ type: "error" })]);
+    expect(f.artifacts.get).not.toHaveBeenCalled();
+    expect(f.fetch).not.toHaveBeenCalled();
+  });
   it("uploads exact saved bytes without API auth and continues the same task with its validated filename", async () => {
     const f = fixture();
     const events = await f.execute();

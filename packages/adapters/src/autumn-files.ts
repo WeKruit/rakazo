@@ -8,12 +8,13 @@ import type {
   SecretStore,
 } from "@rakazo/adapter-kit";
 import { attachmentExtensionForMimeType, inferAttachmentMimeType } from "@rakazo/core";
-import type { PrismaClient } from "@rakazo/db";
+import type { McpServer, PrismaClient } from "@rakazo/db";
 import { z } from "zod";
 import { readActorArtifact } from "./artifact-read.js";
 import { readBoundedText } from "./connector-http.js";
 import { redactConnectorPayload } from "./connector-safety.js";
 import { loadMcpCredentialRecord, requireMcpToolAssignment } from "./mcp-connector.js";
+import { requireAutumnTaskOwnership } from "./recruiting-research.js";
 import type { RemoteTransportDependencies } from "./remote-mcp.js";
 import { createSafeRemoteFetch } from "./remote-mcp.js";
 
@@ -99,7 +100,7 @@ export class AutumnFileConnector implements ConnectorProvider {
   private async authorize(
     route: ConnectorCall["route"],
     context: AdapterContext,
-  ): Promise<{ key: string; secretId: string }> {
+  ): Promise<{ key: string; secretId?: string; server: McpServer }> {
     context.signal.throwIfAborted();
     if (route?.connectorId !== "autumn-files" || route.toolName !== "continue_with_file")
       throw new Error("Autumn file route required");
@@ -113,7 +114,7 @@ export class AutumnFileConnector implements ConnectorProvider {
       context,
     );
     context.signal.throwIfAborted();
-    if (!secret || !plaintext) throw new Error("An existing API-key credential is required");
+    if (!plaintext) throw new Error("An existing API-key credential is required");
     const material = z
       .object({
         secret: z.string().optional(),
@@ -137,7 +138,7 @@ export class AutumnFileConnector implements ConnectorProvider {
       throw new Error("An unambiguous API-key credential is required");
     const key = bearer ?? apiKey;
     if (!key) throw new Error("An existing API-key credential is required");
-    return { key, secretId: secret.id };
+    return { key, secretId: secret?.id, server };
   }
 
   async *execute(call: ConnectorCall, context: AdapterContext): AsyncIterable<ConnectorEvent> {
@@ -154,6 +155,13 @@ export class AutumnFileConnector implements ConnectorProvider {
     try {
       const credential = await this.authorize(call.route, context);
       redactions.push(credential.key);
+      await requireAutumnTaskOwnership(
+        this.prisma,
+        context,
+        credential.server,
+        "continue_with_file",
+        parsed.data,
+      );
       phase = "saved file verification";
       const { row, bytes } = await readActorArtifact(
         { prisma: this.prisma, artifacts: this.artifacts },
@@ -177,6 +185,13 @@ export class AutumnFileConnector implements ConnectorProvider {
         const current = await this.authorize(call.route, context);
         if (current.secretId !== credential.secretId || current.key !== credential.key)
           throw new Error("Autumn credentials changed during file continuation");
+        await requireAutumnTaskOwnership(
+          this.prisma,
+          context,
+          current.server,
+          "continue_with_file",
+          parsed.data,
+        );
       };
       const request = async (path: string, body: unknown) => {
         await assertAuthorized();

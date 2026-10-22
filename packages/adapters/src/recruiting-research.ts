@@ -1,6 +1,6 @@
 import { createHash } from "node:crypto";
 import { isDeepStrictEqual } from "node:util";
-import type { ArtifactStore } from "@rakazo/adapter-kit";
+import type { AdapterContext, ArtifactStore } from "@rakazo/adapter-kit";
 import type {
   Actor,
   RecruitingCandidateSource,
@@ -27,7 +27,7 @@ import {
   requireRecruitingBriefConfirmation,
 } from "@rakazo/core";
 import { mcpObject } from "@rakazo/core/node/approval-effect-key";
-import type { PrismaClient } from "@rakazo/db";
+import type { McpServer, PrismaClient } from "@rakazo/db";
 import { IsolationError, listRecruitingResearch } from "@rakazo/db";
 import { readActorArtifact } from "./artifact-read.js";
 
@@ -36,6 +36,82 @@ export { mcpObject } from "@rakazo/core/node/approval-effect-key";
 
 import { z } from "zod";
 import type { LoadedRecruitingRunContext } from "./recruiting-context.js";
+
+/** A shared provider account never grants access to another product user's research. */
+export async function requireAutumnTaskOwnership(
+  prisma: PrismaClient,
+  actor: Pick<AdapterContext, "userId" | "spaceId">,
+  server: Pick<McpServer, "id" | "revision" | "transport" | "endpoint">,
+  toolName: string,
+  args: Record<string, unknown>,
+): Promise<void> {
+  if (server.transport !== "streamable_http" || server.endpoint !== "https://api.autumn.ai/mcp")
+    return;
+  if (["research", "credits"].includes(toolName) && args.task_id === undefined) return;
+  if (
+    !["get_task", "get_rows", "reply", "stop_task", "continue_with_file"].includes(toolName) ||
+    typeof args.task_id !== "string" ||
+    !args.task_id.trim()
+  )
+    throw new IsolationError(
+      "Use scoped research history or start new research in this conversation; account-wide Autumn access is unavailable.",
+    );
+  const task = await prisma.recruitingResearchTask.findFirst({
+    where: {
+      providerTaskId: args.task_id,
+      mcpServerId: server.id,
+      serverRevision: server.revision,
+      role: { spaceId: actor.spaceId, userId: actor.userId },
+      createdByRun: { spaceId: actor.spaceId, userId: actor.userId },
+    },
+    select: { id: true },
+  });
+  if (task) return;
+  // ponytail: inspect only native creation receipts, never full saved candidate outputs.
+  const effects = await prisma.externalEffect.findMany({
+    where: {
+      spaceId: actor.spaceId,
+      status: "completed",
+      run: { spaceId: actor.spaceId, userId: actor.userId },
+      OR: [["2", "route"], ["3"]].map((path) => ({
+        AND: [
+          { request: { path: [...path, "connectorId"], equals: "mcp" } },
+          { request: { path: [...path, "resourceId"], equals: server.id } },
+          { request: { path: [...path, "resourceRevision"], equals: server.revision } },
+          { request: { path: [...path, "toolName"], equals: "research" } },
+        ],
+      })),
+    },
+    select: { request: true, result: true },
+  });
+  for (const effect of effects) {
+    const direct = boundDirectApprovalDetails(effect.request, "__rakazoCatalogTool");
+    const catalog = catalogApprovalDetails(effect.request, "__rakazoCatalogTool");
+    const route = direct?.route ?? catalog?.route;
+    const requestArgs = direct?.args ?? record(catalog?.args.arguments);
+    if (
+      route?.connectorId !== "mcp" ||
+      route.resourceId !== server.id ||
+      route.resourceRevision !== server.revision ||
+      route.toolName !== "research" ||
+      !requestArgs ||
+      !nonblank(requestArgs.prompt) ||
+      requestArgs.task_id !== undefined ||
+      (!direct &&
+        (!catalog ||
+          !["connectors_execute_tool", "mcp_execute_tool"].includes(catalog.toolName) ||
+          catalog.args.id !== `${server.id}:research`))
+    )
+      continue;
+    const result = record(effect.result)?.providerResult ?? effect.result;
+    const observation = classifyRecruitingResearchResult(result, { operation: "create" });
+    if (observation.deliveryState === "accepted" && observation.providerTaskId === args.task_id)
+      return;
+  }
+  throw new IsolationError(
+    "This research is not available in your workspace. Use scoped research history or start new research in this conversation.",
+  );
+}
 
 const Text = z.string().refine((text) => text.trim().length > 0, "Text must not be blank");
 const Route = z.strictObject({

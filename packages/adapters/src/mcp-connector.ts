@@ -29,6 +29,7 @@ import type { McpOAuthBroker, OAuthMaterial } from "./mcp-oauth.js";
 import { oauthMaterialSecrets } from "./mcp-oauth.js";
 import { McpSession } from "./mcp-transport.js";
 import { actorMayUsePrivateEndpoint } from "./private-endpoint.js";
+import { requireAutumnTaskOwnership } from "./recruiting-research.js";
 import type { RemoteTransportDependencies } from "./remote-mcp.js";
 
 type SessionEntry = {
@@ -117,7 +118,7 @@ export async function requireMcpToolAssignment(
 export async function loadMcpCredentialRecord(
   prisma: PrismaClient,
   secrets: SecretStore,
-  server: Pick<McpServer, "secretId">,
+  server: Pick<McpServer, "secretId" | "transport" | "endpoint">,
   context: AdapterContext,
   onRef?: (ref: string, recordId: string) => void,
 ) {
@@ -127,9 +128,17 @@ export async function loadMcpCredentialRecord(
       })
     : null;
   if (secret) onRef?.(secret.ciphertext, secret.id);
+  const deploymentKey =
+    !server.secretId &&
+    server.transport === "streamable_http" &&
+    server.endpoint === "https://api.autumn.ai/mcp"
+      ? process.env.AUTUMN_API_KEY?.trim()
+      : undefined;
   const plaintext = secret
     ? await secrets.load(secret.ciphertext, { recordId: secret.id, signal: context.signal })
-    : undefined;
+    : deploymentKey
+      ? JSON.stringify({ secret: deploymentKey })
+      : undefined;
   return { secret, plaintext };
 }
 
@@ -326,6 +335,13 @@ export class McpConnector implements ConnectorProvider {
         context,
         call.route,
         call.route.toolName,
+      );
+      await requireAutumnTaskOwnership(
+        this.prisma,
+        context,
+        assignment.server,
+        call.route.toolName,
+        call.args,
       );
       sessionKey = this.sessionKey(assignment.server, context);
       const session = await this.sessionFor(assignment.server, context);
