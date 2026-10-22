@@ -2241,6 +2241,8 @@ function RecruitingWorkspace({
   } | null>(null);
   const [evidenceFailed, setEvidenceFailed] = useState(false);
   const candidateGeneration = useRef(0);
+  const candidateReadAbort = useRef<AbortController | null>(null);
+  const previousCandidateSearch = useRef<{ scope: string; query?: string } | undefined>(undefined);
   const loadingMore = useRef(false);
   const readEpoch = useRef(0);
   const candidateValidation = useRef<number | undefined>(undefined);
@@ -2647,12 +2649,22 @@ function RecruitingWorkspace({
     displayedCandidateQuery.current = candidateQueryKey;
     if (!roleId || summary || validatedWorkspaceRead !== workspaceReadKey) return;
     const query = candidateQuery.current;
-    void (async () => {
-      let page = await rpc.recruiting.listCandidates({
-        roleId,
-        limit: 30,
-        ...candidateRequestFilters,
-      });
+    const abort = new AbortController();
+    candidateReadAbort.current = abort;
+    const scope = JSON.stringify([userId, threadId, roleId, roleRevisionId]);
+    const queryChanged =
+      previousCandidateSearch.current?.scope === scope &&
+      previousCandidateSearch.current.query !== candidateRequestFilters.query;
+    previousCandidateSearch.current = { scope, query: candidateRequestFilters.query };
+    const load = async () => {
+      let page = await rpc.recruiting.listCandidates(
+        {
+          roleId,
+          limit: 30,
+          ...candidateRequestFilters,
+        },
+        { signal: abort.signal },
+      );
       if (!isCurrent()) return;
       if (page.roleId !== roleId || page.roleRevisionId !== roleRevisionId) {
         setRefresh((value) => value + 1);
@@ -2679,12 +2691,15 @@ function RecruitingWorkspace({
       // ponytail: replay saved page depth with fresh cursors; cached rows are display-only until verified.
       for (let index = 1; index < query.pageCount && page.nextCursor; index++) {
         if (!isCurrent()) return;
-        const next = await rpc.recruiting.listCandidates({
-          roleId,
-          limit: 30,
-          ...candidateRequestFilters,
-          cursor: page.nextCursor,
-        });
+        const next = await rpc.recruiting.listCandidates(
+          {
+            roleId,
+            limit: 30,
+            ...candidateRequestFilters,
+            cursor: page.nextCursor,
+          },
+          { signal: abort.signal },
+        );
         if (!isCurrent()) return;
         if (
           next.roleId !== roleId ||
@@ -2718,14 +2733,17 @@ function RecruitingWorkspace({
       ) {
         let cursor: string | undefined;
         do {
-          const selectedPage = await rpc.recruiting.listCandidates({
-            roleId,
-            limit: 30,
-            query: selectedCandidateKey,
-            ...(sourceEffectId !== undefined ? { sourceEffectId } : {}),
-            ...(actionId !== undefined ? { actionId } : {}),
-            ...(cursor ? { cursor } : {}),
-          });
+          const selectedPage = await rpc.recruiting.listCandidates(
+            {
+              roleId,
+              limit: 30,
+              query: selectedCandidateKey,
+              ...(sourceEffectId !== undefined ? { sourceEffectId } : {}),
+              ...(actionId !== undefined ? { actionId } : {}),
+              ...(cursor ? { cursor } : {}),
+            },
+            { signal: abort.signal },
+          );
           if (!isCurrent()) return;
           if (selectedPage.roleId !== roleId || selectedPage.roleRevisionId !== roleRevisionId) {
             setRefresh((value) => value + 1);
@@ -2743,20 +2761,34 @@ function RecruitingWorkspace({
               : current))
           : (restored ?? null),
       );
-    })()
-      .catch((error: unknown) => {
-        if (cancelled || generation !== candidateGeneration.current || epoch !== readEpoch.current)
-          return;
-        denyAccess(error);
-        if (generation === candidateGeneration.current && epoch === readEpoch.current)
-          setCandidateFailed(true);
-      })
-      .finally(() => {
-        if (!cancelled && generation === candidateGeneration.current && epoch === readEpoch.current)
-          setCandidateLoading(false);
-      });
+    };
+    const start = () =>
+      void load()
+        .catch((error: unknown) => {
+          if (
+            cancelled ||
+            generation !== candidateGeneration.current ||
+            epoch !== readEpoch.current
+          )
+            return;
+          denyAccess(error);
+          if (generation === candidateGeneration.current && epoch === readEpoch.current)
+            setCandidateFailed(true);
+        })
+        .finally(() => {
+          if (
+            !cancelled &&
+            generation === candidateGeneration.current &&
+            epoch === readEpoch.current
+          )
+            setCandidateLoading(false);
+        });
+    const timer = queryChanged ? setTimeout(start, 250) : undefined;
+    if (timer === undefined) start();
     return () => {
       cancelled = true;
+      clearTimeout(timer);
+      abort.abort();
     };
   }, [
     roleId,
@@ -2846,17 +2878,26 @@ function RecruitingWorkspace({
     if (!candidatePage?.nextCursor || !roleId || loadingMore.current) return;
     const generation = candidateGeneration.current;
     const epoch = readEpoch.current;
+    const signal = candidateReadAbort.current?.signal;
     loadingMore.current = true;
     setCandidateLoading(true);
     setCandidateFailed(false);
     try {
-      const page = await rpc.recruiting.listCandidates({
-        roleId,
-        limit: 30,
-        ...candidateRequestFilters,
-        cursor: candidatePage.nextCursor,
-      });
-      if (generation !== candidateGeneration.current || epoch !== readEpoch.current) return;
+      const page = await rpc.recruiting.listCandidates(
+        {
+          roleId,
+          limit: 30,
+          ...candidateRequestFilters,
+          cursor: candidatePage.nextCursor,
+        },
+        { signal },
+      );
+      if (
+        signal?.aborted ||
+        generation !== candidateGeneration.current ||
+        epoch !== readEpoch.current
+      )
+        return;
       if (
         page.roleId !== roleId ||
         page.roleRevisionId !== roleRevisionId ||
@@ -2872,12 +2913,20 @@ function RecruitingWorkspace({
       );
       setCandidateList((current) => ({ ...current, pageCount: current.pageCount + 1 }));
     } catch (error) {
-      if (generation === candidateGeneration.current && epoch === readEpoch.current) {
+      if (
+        !signal?.aborted &&
+        generation === candidateGeneration.current &&
+        epoch === readEpoch.current
+      ) {
         denyAccess(error);
         setCandidateFailed(true);
       }
     } finally {
-      if (generation === candidateGeneration.current && epoch === readEpoch.current) {
+      if (
+        !signal?.aborted &&
+        generation === candidateGeneration.current &&
+        epoch === readEpoch.current
+      ) {
         loadingMore.current = false;
         setCandidateLoading(false);
       }
