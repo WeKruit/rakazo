@@ -60,6 +60,52 @@ export function oidcConfigFromEnv(
     : undefined;
 }
 
+/** Product connection display only: no grant decryption, provider request, refresh or write lock. */
+export async function getOidcAccountStatus(
+  prisma: PrismaClient,
+  oidc: Pick<OidcConfig, "issuer" | "clientId">,
+  context: { userId: string; spaceId: string },
+): Promise<"connected" | "reconnect"> {
+  await requireMembership(prisma, context.userId, context.spaceId);
+  const accounts = await prisma.$queryRaw<
+    Array<{
+      id: string;
+      userId: string;
+      providerId: string;
+      accountId: string;
+      idToken: string | null;
+      hasAccessToken: boolean;
+      hasRefreshToken: boolean;
+      accessTokenExpiresAt: Date | null;
+      refreshTokenExpiresAt: Date | null;
+    }>
+  >(Prisma.sql`
+    SELECT id, "userId", "providerId", "accountId", "idToken",
+      ("accessToken" IS NOT NULL AND "accessToken" <> '') AS "hasAccessToken",
+      ("refreshToken" IS NOT NULL AND "refreshToken" <> '') AS "hasRefreshToken",
+      "accessTokenExpiresAt", "refreshTokenExpiresAt"
+    FROM account WHERE "userId" = ${context.userId} AND "providerId" = 'oidc'
+  `);
+  const matching = accounts.filter(
+    (account) =>
+      account.userId === context.userId &&
+      isCurrentOidcAccount(account, oidc.issuer, oidc.clientId),
+  );
+  if (matching.length !== 1) return "reconnect";
+  const account = matching[0]!;
+  const expires = account.accessTokenExpiresAt?.getTime();
+  const now = Date.now();
+  const usable =
+    account.hasAccessToken && expires !== undefined && Number.isFinite(expires) && expires > now;
+  const refreshable =
+    expires !== undefined &&
+    Number.isFinite(expires) &&
+    expires <= now &&
+    account.hasRefreshToken &&
+    (account.refreshTokenExpiresAt === null || account.refreshTokenExpiresAt.getTime() > now);
+  return usable || refreshable ? "connected" : "reconnect";
+}
+
 /** Read/rotate the current caller's grant on one native Account transaction, never an MCP secret. */
 export async function getOidcAccessToken(
   prisma: PrismaClient,

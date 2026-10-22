@@ -16,6 +16,7 @@ import {
   screenLeaseIdForRun,
   serializeModelSecret,
 } from "@rakazo/adapters";
+import * as nativeAuth from "@rakazo/auth";
 import type { Actor, Bot, ProductEvent } from "@rakazo/contracts";
 import { ATTACHMENT_MAX_COUNT, REPLY_QUOTE_MAX_LENGTH } from "@rakazo/contracts";
 import { openScreenCapability } from "@rakazo/core/node/screen-capability";
@@ -1043,7 +1044,7 @@ describe("MCP prepared credential updates", () => {
 describe("MCP loopback endpoints", () => {
   const LOOPBACK = "http://localhost:3100/api/auth/get-session";
 
-  function mcpDeps() {
+  function mcpDeps(firstParty = false) {
     const list = vi.fn().mockResolvedValue([]);
     const create = vi.fn(async ({ data }: { data: Record<string, unknown> }) => ({
       ...data,
@@ -1072,6 +1073,12 @@ describe("MCP loopback endpoints", () => {
     const deps = {
       prisma,
       env: {
+        ...(firstParty
+          ? {
+              firstPartyMcpUrl: "https://crm.example.test/mcp",
+              oidc: { issuer: "https://identity.example.test", clientId: "product-client" },
+            }
+          : {}),
         defaultProvider: "fake",
         defaultModel: "fake-model",
         webOrigin: "http://127.0.0.1:5173",
@@ -1080,7 +1087,7 @@ describe("MCP loopback endpoints", () => {
       },
       dataDir: "/tmp/rakazo-router-test",
     } as unknown as RouterDeps;
-    return { create, list, handler: new RPCHandler(createRouter(deps)) };
+    return { create, list, prisma, deps, handler: new RPCHandler(createRouter(deps)) };
   }
 
   function actor(isDeploymentOwner: boolean): Actor {
@@ -1162,6 +1169,333 @@ describe("MCP loopback endpoints", () => {
       vi.unstubAllEnvs();
     }
   });
+
+  it("projects one product identity read across exact first-party servers while keeping private and other endpoints unchanged", async () => {
+    const status = vi.spyOn(nativeAuth, "getOidcAccountStatus").mockResolvedValue("connected");
+    const { list, handler } = mcpDeps(true);
+    const server = {
+      id: "crm",
+      spaceId: "workspace-1",
+      slug: "crm",
+      name: "CRM",
+      description: "",
+      transport: "streamable_http",
+      endpoint: "https://crm.example.test/mcp",
+      command: null,
+      args: [],
+      env: {},
+      headers: {},
+      secretId: null,
+      enabled: true,
+      revision: 1,
+      createdAt: new Date(0),
+      updatedAt: new Date(0),
+    };
+    list.mockResolvedValue([
+      server,
+      { ...server, id: "crm-two" },
+      { ...server, id: "private", secretId: "own-secret" },
+      { ...server, id: "other", endpoint: `${server.endpoint}?x=1` },
+    ]);
+    try {
+      const { response } = await handler.handle(rpc("mcp/servers/list", {}), {
+        prefix: "/rpc",
+        context: { actor: actor(false) },
+      });
+      expect(
+        (await response.json()).json.map((row: { oauthStatus: string }) => row.oauthStatus),
+      ).toEqual(["connected", "connected", "none", "none"]);
+      expect(status).toHaveBeenCalledTimes(1);
+      expect(status).toHaveBeenCalledWith(
+        expect.anything(),
+        { issuer: "https://identity.example.test", clientId: "product-client" },
+        actor(false),
+      );
+    } finally {
+      status.mockRestore();
+    }
+  });
+
+  it.each(["connected", "reconnect"] as const)(
+    "returns native product sign-in status %s without starting generic MCP OAuth",
+    async (state) => {
+      const status = vi.spyOn(nativeAuth, "getOidcAccountStatus").mockResolvedValue(state);
+      const { deps, prisma } = mcpDeps(true);
+      const begin = vi.fn().mockRejectedValue(new Error("Generic MCP OAuth must not run"));
+      vi.mocked(prisma.mcpServer.findFirst).mockResolvedValue({
+        id: "crm",
+        spaceId: "workspace-1",
+        userId: "member-1",
+        endpoint: "https://crm.example.test/mcp",
+        transport: "streamable_http",
+        enabled: true,
+        secretId: null,
+      } as never);
+      const handler = new RPCHandler(createRouter({ ...deps, mcpOAuth: { begin } as never }));
+      try {
+        const { response } = await handler.handle(
+          rpc("mcp/oauth/begin", {
+            serverId: "crm",
+            redirectUri: "http://127.0.0.1:5173/mcp/oauth/callback",
+          }),
+          { prefix: "/rpc", context: { actor: actor(false) } },
+        );
+        expect(response.status).toBe(200);
+        expect((await response.json()).json.status).toBe(
+          state === "connected" ? "already_connected" : "product_sign_in_required",
+        );
+        expect(begin).not.toHaveBeenCalled();
+      } finally {
+        status.mockRestore();
+      }
+    },
+  );
+
+  it("does not read product Account metadata for personal, non-exact or other-transport servers", async () => {
+    const status = vi.spyOn(nativeAuth, "getOidcAccountStatus");
+    const { list, handler } = mcpDeps(true);
+    const server = {
+      id: "crm",
+      spaceId: "workspace-1",
+      slug: "crm",
+      name: "CRM",
+      description: "",
+      transport: "streamable_http",
+      endpoint: "https://crm.example.test/mcp",
+      command: null,
+      args: [],
+      env: {},
+      headers: {},
+      secretId: null,
+      enabled: true,
+      revision: 1,
+      createdAt: new Date(0),
+      updatedAt: new Date(0),
+    };
+    list.mockResolvedValue([
+      { ...server, secretId: "personal" },
+      { ...server, endpoint: `${server.endpoint}/` },
+      { ...server, transport: "sse" },
+    ]);
+    try {
+      const { response } = await handler.handle(rpc("mcp/servers/list", {}), {
+        prefix: "/rpc",
+        context: { actor: actor(false) },
+      });
+      expect(response.status).toBe(200);
+      expect(
+        (await response.json()).json.map((row: { oauthStatus: string }) => row.oauthStatus),
+      ).toEqual(["none", "none", "none"]);
+      expect(status).not.toHaveBeenCalled();
+    } finally {
+      status.mockRestore();
+    }
+  });
+
+  it("requires product sign-in without OIDC configuration rather than trying generic MCP OAuth", async () => {
+    const status = vi.spyOn(nativeAuth, "getOidcAccountStatus");
+    const { deps, prisma, list } = mcpDeps(true);
+    delete deps.env.oidc;
+    const server = {
+      id: "crm",
+      spaceId: "workspace-1",
+      userId: "member-1",
+      slug: "crm",
+      name: "CRM",
+      description: "",
+      transport: "streamable_http",
+      endpoint: "https://crm.example.test/mcp",
+      command: null,
+      args: [],
+      env: {},
+      headers: {},
+      secretId: null,
+      enabled: true,
+      revision: 1,
+      createdAt: new Date(0),
+      updatedAt: new Date(0),
+    };
+    list.mockResolvedValue([server]);
+    vi.mocked(prisma.mcpServer.findFirst).mockResolvedValue(server as never);
+    const begin = vi.fn();
+    const handler = new RPCHandler(createRouter({ ...deps, mcpOAuth: { begin } as never }));
+    try {
+      const listed = await handler.handle(rpc("mcp/servers/list", {}), {
+        prefix: "/rpc",
+        context: { actor: actor(false) },
+      });
+      expect((await listed.response.json()).json[0].oauthStatus).toBe("reconnect");
+      const started = await handler.handle(
+        rpc("mcp/oauth/begin", {
+          serverId: "crm",
+          redirectUri: "http://127.0.0.1:5173/mcp/oauth/callback",
+        }),
+        { prefix: "/rpc", context: { actor: actor(false) } },
+      );
+      expect(started.response.status).toBe(200);
+      expect((await started.response.json()).json).toEqual({ status: "product_sign_in_required" });
+      expect(status).not.toHaveBeenCalled();
+      expect(begin).not.toHaveBeenCalled();
+    } finally {
+      status.mockRestore();
+    }
+  });
+
+  it.each(["disabled", "foreign"])(
+    "rejects a %s server before product sign-in or generic OAuth",
+    async (kind) => {
+      const status = vi.spyOn(nativeAuth, "getOidcAccountStatus");
+      const { deps, prisma } = mcpDeps(true);
+      vi.mocked(prisma.mcpServer.findFirst).mockResolvedValue(
+        kind === "foreign"
+          ? null
+          : ({
+              id: "crm",
+              endpoint: "https://crm.example.test/mcp",
+              transport: "streamable_http",
+              enabled: false,
+              secretId: null,
+            } as never),
+      );
+      const begin = vi.fn();
+      const handler = new RPCHandler(createRouter({ ...deps, mcpOAuth: { begin } as never }));
+      try {
+        const { response } = await handler.handle(
+          rpc("mcp/oauth/begin", {
+            serverId: "crm",
+            redirectUri: "http://127.0.0.1:5173/mcp/oauth/callback",
+          }),
+          { prefix: "/rpc", context: { actor: actor(false) } },
+        );
+        expect(response.status).toBe(400);
+        expect(prisma.mcpServer.findFirst).toHaveBeenCalledWith({
+          where: { id: "crm", spaceId: "workspace-1", userId: "member-1", enabled: true },
+        });
+        expect(status).not.toHaveBeenCalled();
+        expect(begin).not.toHaveBeenCalled();
+      } finally {
+        status.mockRestore();
+      }
+    },
+  );
+
+  it("keeps the existing personal MCP OAuth broker for a first-party server with its own secret", async () => {
+    const status = vi.spyOn(nativeAuth, "getOidcAccountStatus");
+    const { deps, prisma } = mcpDeps(true);
+    vi.mocked(prisma.mcpServer.findFirst).mockResolvedValue({
+      id: "crm",
+      endpoint: "https://crm.example.test/mcp",
+      transport: "streamable_http",
+      enabled: true,
+      secretId: "personal",
+    } as never);
+    const begin = vi.fn().mockResolvedValue({ status: "authorization_not_requested" });
+    const handler = new RPCHandler(createRouter({ ...deps, mcpOAuth: { begin } as never }));
+    try {
+      const { response } = await handler.handle(
+        rpc("mcp/oauth/begin", {
+          serverId: "crm",
+          redirectUri: "http://127.0.0.1:5173/mcp/oauth/callback",
+        }),
+        { prefix: "/rpc", context: { actor: actor(false) } },
+      );
+      expect(response.status).toBe(200);
+      expect((await response.json()).json).toEqual({ status: "authorization_not_requested" });
+      expect(begin).toHaveBeenCalledWith({
+        serverId: "crm",
+        spaceId: "workspace-1",
+        userId: "member-1",
+        redirectUri: "http://127.0.0.1:5173/mcp/oauth/callback",
+      });
+      expect(status).not.toHaveBeenCalled();
+    } finally {
+      status.mockRestore();
+    }
+  });
+
+  it.each(["connected", "reconnect"] as const)(
+    "projects the same %s product connection status after create and update",
+    async (state) => {
+      const status = vi.spyOn(nativeAuth, "getOidcAccountStatus").mockResolvedValue(state);
+      const { deps, prisma } = mcpDeps(true);
+      deps.remoteConnectors = {
+        resolveHostname: async () => [{ address: "93.184.216.34", family: 4 }],
+      } as RouterDeps["remoteConnectors"];
+      const server = {
+        id: "server-1",
+        spaceId: "workspace-1",
+        userId: "member-1",
+        slug: "crm",
+        name: "CRM",
+        description: "",
+        transport: "streamable_http",
+        endpoint: "https://crm.example.test/mcp",
+        command: null,
+        args: [],
+        env: {},
+        headers: {},
+        secretId: null,
+        enabled: true,
+        revision: 1,
+        createdAt: new Date(0),
+        updatedAt: new Date(0),
+      };
+      vi.mocked(prisma.mcpServer.findFirst).mockResolvedValue(server as never);
+      prisma.mcpServer.update = vi
+        .fn()
+        .mockResolvedValue({ ...server, name: "Updated CRM", revision: 2 });
+      prisma.$executeRaw = vi.fn().mockResolvedValue(1);
+      const handler = new RPCHandler(createRouter(deps));
+      try {
+        const created = await handler.handle(
+          rpc("mcp/servers/create", {
+            slug: "crm",
+            name: "CRM",
+            transport: "streamable_http",
+            endpoint: server.endpoint,
+          }),
+          { prefix: "/rpc", context: { actor: actor(false) } },
+        );
+        expect(created.response.status).toBe(200);
+        const createdBody = await created.response.json();
+        expect(createdBody.json).toMatchObject({
+          oauthStatus: state,
+          hasSecret: false,
+          platformCredentialConfigured: false,
+        });
+        const updated = await handler.handle(
+          rpc("mcp/servers/update", {
+            id: server.id,
+            config: {
+              slug: "crm",
+              name: "Updated CRM",
+              transport: "streamable_http",
+              endpoint: server.endpoint,
+            },
+          }),
+          { prefix: "/rpc", context: { actor: actor(false) } },
+        );
+        expect(updated.response.status).toBe(200);
+        const updatedBody = await updated.response.json();
+        expect(updatedBody.json).toMatchObject({
+          oauthStatus: state,
+          name: "Updated CRM",
+          hasSecret: false,
+          platformCredentialConfigured: false,
+        });
+        expect(status).toHaveBeenCalledTimes(2);
+        for (const body of [createdBody, updatedBody]) {
+          expect(body.json).not.toHaveProperty("issuer");
+          expect(body.json).not.toHaveProperty("clientId");
+          expect(body.json).not.toHaveProperty("idToken");
+          expect(body.json).not.toHaveProperty("accessToken");
+          expect(body.json).not.toHaveProperty("refreshToken");
+        }
+      } finally {
+        status.mockRestore();
+      }
+    },
+  );
 
   it("refuses a loopback endpoint from a user who is not the deployment owner", async () => {
     const { create, handler } = mcpDeps();
