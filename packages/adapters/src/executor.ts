@@ -3334,6 +3334,12 @@ export function createRunExecutor(deps: ExecutorDeps) {
 
     async continueRun(runId: string, workerId: string) {
       const run = await deps.prisma.run.findUnique({ where: { id: runId } });
+      // Cumulative ms from pickup to each setup milestone, logged once before the model runtime starts.
+      const setupStartedAt = performance.now();
+      const setupMarks: Record<string, number> = {};
+      const setupMark = (name: string) => {
+        setupMarks[`${name}Ms`] = Math.round(performance.now() - setupStartedAt);
+      };
       if (!run) return;
       const previouslyClaimed = run.leaseFence > 0;
       // Only an answer queues a waiting ask; a redelivered wake must leave its card pending.
@@ -3425,6 +3431,7 @@ export function createRunExecutor(deps: ExecutorDeps) {
           throw error;
         });
 
+      setupMark("lease");
       let leaseValid = true;
       let lastLeaseCheckAt = 0;
       let retainComputerLease = false;
@@ -3519,6 +3526,7 @@ export function createRunExecutor(deps: ExecutorDeps) {
           }),
           loadBotCommandEnvironment(deps.prisma, deps.secretStore, run),
         ]);
+        setupMark("contextLoad");
         const historySearchBeforeSeq =
           contextStrategy !== "current" && run.sourceMessageId
             ? (messages.find((message) => message.id === run.sourceMessageId)?.seq ??
@@ -3606,6 +3614,7 @@ export function createRunExecutor(deps: ExecutorDeps) {
           payload: { trigger: run.trigger, routineId: run.routineId },
         });
 
+        setupMark("runStarted");
         const discoveredPromise = deps.connector
           ? deps.connector.discoverTools(context)
           : Promise.resolve([]);
@@ -3790,6 +3799,7 @@ export function createRunExecutor(deps: ExecutorDeps) {
               }),
           recallPromise,
         ]);
+        setupMark("discoveryJoin");
         let currentRecruitingContext: LoadedRecruitingRunContext | undefined;
         let memoryContext = loadedMemoryContext;
         let recruitingSourceMessageId = run.sourceMessageId ?? null;
@@ -3985,6 +3995,7 @@ export function createRunExecutor(deps: ExecutorDeps) {
           await failRunBeforeModel(MISSING_MODEL_MESSAGE);
           return;
         }
+        setupMark("recruitingContext");
         // An incompatible saved model is a configuration error. Record it on the run.
         // Leaving it for the setup catch would retry and replace the message.
         let resolved: Awaited<ReturnType<typeof resolveModelKey>>;
@@ -4017,10 +4028,12 @@ export function createRunExecutor(deps: ExecutorDeps) {
           });
         }
 
+        setupMark("modelKey");
         if (!bot.computer) throw new Error("Bot has no computer");
         const storedComputer = bot.computer;
         const computerMode = parseComputerMode(storedComputer.scope);
         const computer = await provisionComputer(deps, storedComputer.id, context, "bot");
+        setupMark("computer");
         screenRelease = { computer, context };
         scheduleComputerSleep(deps.jobs, storedComputer.id);
         const workspaceCheckpoint = createRunWorkspaceCheckpoint(() =>
@@ -8570,6 +8583,12 @@ export function createRunExecutor(deps: ExecutorDeps) {
         );
 
         try {
+          setupMark("runtimeStart");
+          getLogger().info("run.setup.timing", {
+            runId,
+            sinceRunCreatedMs: run.createdAt ? Date.now() - run.createdAt.getTime() : null,
+            ...setupMarks,
+          });
           const runtimeEvents = deps.runtime.run(
             {
               botId: bot.id,
