@@ -29,6 +29,9 @@ import { sandboxCommandArgv } from "./sandbox-command-environment.js";
 
 const E2B_WORKSPACE = "/home/user/rakazo-home";
 const E2B_BROWSER_PROFILES = `${E2B_WORKSPACE}/.browser-profiles`;
+// Export latency is per-request round trips, not bytes; bytes stay bounded per batch.
+const EXPORT_CONCURRENCY = 32;
+const EXPORT_BATCH_BYTES = 32 * 1024 * 1024;
 
 export interface E2BSandboxSdk {
   create(options: ReturnType<typeof e2bCreateOptions>): Promise<Sandbox>;
@@ -467,7 +470,7 @@ async function* walkE2BWorkspace(
   context: AdapterContext,
 ): AsyncIterable<PortableFile> {
   // ponytail: O(F + D) metadata fills batches; stream bounded metadata if trees grow.
-  const files: Array<{ relative: string; mode: number }> = [];
+  const files: Array<{ relative: string; mode: number; size: number }> = [];
   type Directory = { relative: string; files: typeof files; children: Directory[] };
   const directories: Directory[] = [{ relative: directory, files: [], children: [] }];
   const directoryByPath = new Map([[directory, directories[0]!]]);
@@ -483,7 +486,7 @@ async function* walkE2BWorkspace(
     const metadataStartedAt = performance.now();
     try {
       for (let index = 0; index < directories.length; ) {
-        const batch = directories.slice(index, index + 8);
+        const batch = directories.slice(index, index + EXPORT_CONCURRENCY);
         index += batch.length;
         const results = await Promise.allSettled(
           batch.map(async ({ relative }) => {
@@ -530,7 +533,7 @@ async function* walkE2BWorkspace(
               directoryByPath.set(relative, child);
               if (withinListed.split("/").length === result.value.depth) directories.push(child);
             } else {
-              containing.files.push({ relative, mode: entry.mode });
+              containing.files.push({ relative, mode: entry.mode, size: entry.size });
               selectedFileCount++;
             }
           }
@@ -547,10 +550,17 @@ async function* walkE2BWorkspace(
     } finally {
       metadataWallMs = performance.now() - metadataStartedAt;
     }
-    for (let index = 0; index < files.length; index += 8) {
+    for (let index = 0; index < files.length; ) {
+      let end = index + 1;
+      for (let bytes = files[index]!.size; end < files.length; end++) {
+        bytes += files[end]!.size;
+        if (end - index >= EXPORT_CONCURRENCY || bytes > EXPORT_BATCH_BYTES) break;
+      }
+      const readBatch = files.slice(index, end);
+      index = end;
       const readStartedAt = performance.now();
       const results = await Promise.allSettled(
-        files.slice(index, index + 8).map(async ({ relative, mode }) => {
+        readBatch.map(async ({ relative, mode }) => {
           context.signal.throwIfAborted();
           readCallCount++;
           const content = await desktop.files
