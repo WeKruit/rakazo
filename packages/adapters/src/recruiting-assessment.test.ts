@@ -655,6 +655,10 @@ describe("native saved candidate reads", () => {
           limit: paging.limit ?? null,
           hasCursor: paging.cursor !== undefined,
           durationMs: 18,
+          authorizeMs: 0,
+          queryMs: outcome === "succeeded" ? 18 : null,
+          reportReadMs: operation === "sources" && outcome === "succeeded" ? 0 : null,
+          itemCount: outcome === "succeeded" ? page.items.length : null,
           outcome,
         },
       ]);
