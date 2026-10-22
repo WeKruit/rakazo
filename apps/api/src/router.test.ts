@@ -1044,6 +1044,7 @@ describe("MCP loopback endpoints", () => {
   const LOOPBACK = "http://localhost:3100/api/auth/get-session";
 
   function mcpDeps() {
+    const list = vi.fn().mockResolvedValue([]);
     const create = vi.fn(async ({ data }: { data: Record<string, unknown> }) => ({
       ...data,
       id: "server-1",
@@ -1055,6 +1056,7 @@ describe("MCP loopback endpoints", () => {
     const prisma = {
       mcpServer: {
         create,
+        findMany: list,
         findFirst: vi
           .fn()
           .mockResolvedValue({ id: "server-1", endpoint: LOOPBACK, secretId: null }),
@@ -1063,7 +1065,7 @@ describe("MCP loopback endpoints", () => {
         count: vi.fn().mockResolvedValue(0),
         deleteMany: vi.fn().mockResolvedValue({ count: 0 }),
       },
-      secret: { findFirst: vi.fn() },
+      secret: { findFirst: vi.fn(), findMany: vi.fn().mockResolvedValue([]) },
       deploymentSettings: { findUnique: vi.fn().mockResolvedValue({ ownerUserId: "owner-1" }) },
       $transaction: vi.fn(async (run: (tx: unknown) => Promise<unknown>) => run(prisma)),
     } as unknown as PrismaClient;
@@ -1078,7 +1080,7 @@ describe("MCP loopback endpoints", () => {
       },
       dataDir: "/tmp/rakazo-router-test",
     } as unknown as RouterDeps;
-    return { create, handler: new RPCHandler(createRouter(deps)) };
+    return { create, list, handler: new RPCHandler(createRouter(deps)) };
   }
 
   function actor(isDeploymentOwner: boolean): Actor {
@@ -1104,6 +1106,62 @@ describe("MCP loopback endpoints", () => {
     name: "Local",
     endpoint: LOOPBACK,
   };
+
+  it("reports platform configuration without credentials or overriding a personal connection", async () => {
+    vi.stubEnv("AUTUMN_API_KEY", "test-platform-credential-not-for-clients");
+    vi.stubEnv("FULLENRICH_API_KEY", "");
+    try {
+      const { list, handler } = mcpDeps();
+      const server = {
+        id: "research-service",
+        spaceId: "workspace-1",
+        slug: "research",
+        name: "Recruiting research",
+        description: "",
+        transport: "streamable_http",
+        endpoint: "https://api.autumn.ai/mcp",
+        command: null,
+        args: [],
+        env: {},
+        headers: {},
+        secretId: null,
+        enabled: true,
+        revision: 1,
+        createdAt: new Date(0),
+        updatedAt: new Date(0),
+      };
+      list.mockResolvedValue([
+        server,
+        { ...server, id: "other-endpoint", endpoint: "https://api.autumn.ai/mcp?other=1" },
+        { ...server, id: "unconfigured-service", endpoint: "https://mcp.fullenrich.com/mcp" },
+        { ...server, id: "stdio-service", transport: "stdio" },
+        { ...server, id: "personal-service", secretId: "personal-secret" },
+      ]);
+      const { response } = await handler.handle(rpc("mcp/servers/list", {}), {
+        prefix: "/rpc",
+        context: { actor: actor(false) },
+      });
+      expect(response.status).toBe(200);
+      const body = (await response.json()) as {
+        json: Array<{ platformCredentialConfigured: boolean; oauthStatus: string }>;
+      };
+      expect(body.json.map((row) => row.platformCredentialConfigured)).toEqual([
+        true,
+        false,
+        false,
+        false,
+        false,
+      ]);
+      expect(body.json.every((row) => row.oauthStatus === "none")).toBe(true);
+      expect(JSON.stringify(body)).not.toContain("test-platform-credential-not-for-clients");
+      expect(list).toHaveBeenCalledWith({
+        where: { spaceId: "workspace-1", userId: "member-1" },
+        orderBy: [{ name: "asc" }, { createdAt: "asc" }],
+      });
+    } finally {
+      vi.unstubAllEnvs();
+    }
+  });
 
   it("refuses a loopback endpoint from a user who is not the deployment owner", async () => {
     const { create, handler } = mcpDeps();
