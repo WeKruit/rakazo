@@ -61,6 +61,23 @@ preemption from interrupting the sole file-store writer. Modal charges 3× the
 standard CPU and memory rates for this placement; the existing resource bounds
 remain unchanged. Deployments and application failures can still require a restart.
 
+## Platform-funded inference
+
+Native onboarding and chat can use a deployment-supplied model without each user
+connecting a model account. For direct OpenAI, set `PI_DEFAULT_PROVIDER=openai`
+and keep `OPENAI_API_KEY` in the deployment Secret. `PI_DEFAULT_MODEL` can select
+an explicitly supported native model; the OpenAI default is `gpt-6-luna` through
+Pi's OpenAI Responses provider. These are the existing deployment configuration
+fields; no user credential is created or copied.
+
+API calls use the platform account's API billing, separately from ChatGPT plan
+credits. Existing personal model connections and explicitly selected bot/routine
+models remain personal; this configuration does not rewrite them. Keep the actual
+caller identity and native Space isolation. Product recruiting-agent bootstrap
+and platform service/task authorization must be verified separately before calling
+new-user onboarding complete. Personal email/calendar connections also retain
+their own ownership and authorization.
+
 ## Shared artifact storage
 
 The native API and worker can use Supabase private object storage through the same
