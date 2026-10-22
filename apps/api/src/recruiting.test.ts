@@ -173,6 +173,69 @@ describe("saved recruiting correspondence", () => {
       select: { id: true },
     });
   });
+  it.each([
+    [{ isError: true, content: [{ type: "text", text: "private-provider-failure" }] }, "failed"],
+    [{ structuredContent: { id: "selected", date: "invalid-date" } }, "unsupported"],
+  ])(
+    "retains valid mail while exposing only the affected service's saved check issue: %j",
+    async (result, status) => {
+      const { client, prisma, retained } = fixture();
+      const gmail = {
+        id: "gmail",
+        name: "Gmail",
+        endpoint: "https://gmailmcp.googleapis.com/mcp/v1",
+        secretId: "encrypted-reference",
+        revision: 1,
+        enabled: true,
+        assignments: [{ botId: "main", allowAllTools: false, allowedTools: ["get_message"] }],
+      };
+      client.mcpServer.findMany.mockResolvedValueOnce([
+        ...(await client.mcpServer.findMany()),
+        gmail,
+      ]);
+      const check = {
+        ...retained,
+        id: "gmail-check",
+        updatedAt: new Date("2026-10-22T01:01:00Z"),
+        request: [
+          "__rakazoCatalogTool",
+          "direct",
+          {
+            route: {
+              connectorId: "mcp",
+              resourceId: "gmail",
+              resourceRevision: 1,
+              toolName: "get_message",
+            },
+            args: { messageId: "selected" },
+          },
+        ],
+      };
+      client.externalEffect.findMany
+        .mockReset()
+        .mockResolvedValueOnce([check, retained])
+        .mockResolvedValueOnce([
+          { id: check.id, result },
+          { id: retained.id, result: { structuredContent: { items: [email] } } },
+        ]);
+      const output = await api.getRecruitingCorrespondence(prisma, actor, target, "inbox");
+      expect(output).toMatchObject({
+        status: "ready",
+        partial: true,
+        emails: [{ body: email.body.text }],
+        connections: [
+          { name: "Instantly", status: "configured", checkIssue: null },
+          {
+            name: "Gmail",
+            status: "configured",
+            checkIssue: { status, checkedAt: check.updatedAt.toISOString() },
+          },
+        ],
+      });
+      expect(output.emails).toHaveLength(1);
+      expect(JSON.stringify(output)).not.toContain("private-provider-failure");
+    },
+  );
   it("displays native opaque Instantly thread IDs without weakening outbound anchor validation", async () => {
     const row = { ...email, thread_id: "provider-opaque-thread" };
     const { prisma } = fixture({
@@ -558,7 +621,9 @@ describe("saved recruiting correspondence", () => {
       },
     ]);
     const result = await api.getRecruitingCorrespondence(prisma, actor, target, "inbox");
-    expect(result.connections).toEqual([{ name: "Instantly", status: "needs_access" }]);
+    expect(result.connections).toEqual([
+      { name: "Instantly", status: "needs_access", checkIssue: null },
+    ]);
     expect(result.emails).toEqual([]);
     expect(client.externalEffect.findMany).not.toHaveBeenCalled();
   });
@@ -680,6 +745,24 @@ describe("saved recruiting correspondence", () => {
       ],
     });
     expect(JSON.stringify(result)).not.toContain("untrusted()");
+  });
+  it("does not report a superseded Gmail check issue after the latest observation succeeds", async () => {
+    const result = await gmailObservation(
+      "get_message",
+      { messageId: gmailMessage.id, messageFormat: "PLAIN_TEXT" },
+      gmailMessage,
+      {
+        tool: "get_message",
+        args: { messageId: gmailMessage.id, messageFormat: "FULL_CONTENT" },
+        body: {},
+      },
+    );
+    expect(result).toMatchObject({
+      status: "ready",
+      partial: true,
+      connections: [{ name: "Gmail", status: "configured", checkIssue: null }],
+      emails: [{ body: gmailMessage.plaintextBody }],
+    });
   });
   it("projects only messages from the exact selected Gmail thread, newest first", async () => {
     const result = await gmailObservation(
@@ -1219,13 +1302,15 @@ describe("saved recruiting correspondence", () => {
         },
       ]);
       const result = await api.getRecruitingCorrespondence(prisma, actor, target, "contacts");
-      expect(result.connections).toEqual([{ name: "FullEnrich", status: "configured" }]);
+      expect(result.connections).toEqual([
+        { name: "FullEnrich", status: "configured", checkIssue: null },
+      ]);
       expect(JSON.stringify(result)).not.toContain("platform-service-key");
       vi.stubEnv("FULLENRICH_API_KEY", " ");
       client.externalEffect.findMany.mockResolvedValue([]);
       expect(
         (await api.getRecruitingCorrespondence(prisma, actor, target, "contacts")).connections,
-      ).toEqual([{ name: "FullEnrich", status: "needs_connection" }]);
+      ).toEqual([{ name: "FullEnrich", status: "needs_connection", checkIssue: null }]);
     } finally {
       vi.unstubAllEnvs();
     }
@@ -1254,7 +1339,7 @@ describe("saved recruiting correspondence", () => {
         ]);
         expect(
           (await api.getRecruitingCorrespondence(prisma, actor, target, "contacts")).connections,
-        ).toEqual([{ name: "FullEnrich", status: "needs_connection" }]);
+        ).toEqual([{ name: "FullEnrich", status: "needs_connection", checkIssue: null }]);
       } finally {
         vi.unstubAllEnvs();
       }

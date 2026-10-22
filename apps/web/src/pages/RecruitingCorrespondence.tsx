@@ -406,6 +406,15 @@ function SavedCorrespondenceView({
               ) : (
                 <Trans>Connect account</Trans>
               )}
+              {connection.checkIssue ? (
+                <p role="alert" className="mt-1 text-destructive">
+                  {connection.checkIssue.status === "failed" ? (
+                    <Trans>A saved check failed.</Trans>
+                  ) : (
+                    <Trans>A saved result cannot be displayed.</Trans>
+                  )}
+                </p>
+              ) : null}
             </li>
           ))}
           {!data.connections.length ? (

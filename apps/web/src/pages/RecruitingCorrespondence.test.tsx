@@ -197,6 +197,67 @@ it("renders only retained email fields, supports selection and never treats assi
   expect(view.conversation).not.toHaveBeenCalled();
 });
 
+it.each([
+  ["inbox", "failed", "A saved check failed."],
+  ["interview", "unsupported", "A saved result cannot be displayed."],
+] as const)(
+  "shows a service's %s check issue without hiding other saved results",
+  async (kind, status, text) => {
+    readCorrespondence.mockResolvedValue({
+      status: "ready",
+      checkedAt: "2026-10-22T01:00:00Z",
+      connections: [
+        { name: "Available service", status: "configured", checkIssue: null },
+        {
+          name: "Affected service",
+          status: "configured",
+          checkIssue: { status, checkedAt: "2026-10-22T01:00:00Z" },
+        },
+      ],
+      emails: [
+        {
+          id: "saved",
+          sender: "person@example.test",
+          recipients: [],
+          subject: "Saved reply",
+          body: "Original reply remains",
+          snippet: false,
+          date: null,
+          url: null,
+        },
+      ],
+      events: [
+        {
+          id: "saved",
+          kind: "event",
+          title: "Saved interview",
+          start: "2026-10-23T10:00:00Z",
+          end: "2026-10-23T10:30:00Z",
+          timeZone: "UTC",
+          attendees: [],
+          status: "accepted",
+          location: null,
+          url: null,
+        },
+      ],
+      partial: true,
+    });
+    const view = await mount({ view: kind });
+    const alert = view.container.querySelector('[role="alert"]');
+    expect(alert?.textContent).toContain(text);
+    expect(alert?.closest("li")?.textContent).toContain("Affected service");
+    expect(view.container.textContent).toContain("Configured");
+    expect(view.container.textContent).toContain(
+      kind === "inbox" ? "Original reply remains" : "Saved interview",
+    );
+    expect(view.container.textContent).not.toMatch(/No saved results|Connect account/);
+    await view.click(kind === "inbox" ? "Check inbox" : "Check availability");
+    expect(view.conversation).toHaveBeenCalledExactlyOnceWith(
+      expect.stringContaining("Don't send"),
+    );
+  },
+);
+
 it("shows actual observed calendar events separately from available times and does not imply booking", async () => {
   readCorrespondence.mockResolvedValue({
     status: "ready",
