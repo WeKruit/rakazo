@@ -9,9 +9,17 @@ const BARS = [9, 15, 21, 15, 9];
 const TRANSCRIPT_LINES = 4;
 const EDITABLE = /^(?:input|textarea|select)$/i;
 
-export function CallCard({ onSettings }: { onSettings: () => void }) {
+export function CallCard({
+  userId,
+  spaceId,
+  onSettings,
+}: {
+  userId: string | undefined;
+  spaceId: string | undefined;
+  onSettings: () => void;
+}) {
   const { t } = useLingui();
-  const call = useCallSession();
+  const call = useCallSession(userId, spaceId);
   const navigate = useNavigate();
   const { botId } = useParams();
   const onCall = Boolean(call);

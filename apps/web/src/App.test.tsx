@@ -16,6 +16,7 @@ const capability = vi.hoisted(() => {
     userId: "user-1" as string | null,
     sessionPending: false,
     resetBootstrap: vi.fn(),
+    discardCall: vi.fn(),
     bootstrap: vi.fn(async () => ({
       me: { userId: "user-a", spaceId: "space-a", ticketBoardEnabled: false },
     })),
@@ -47,6 +48,7 @@ vi.mock("./lib/auth", () => ({
     }),
   },
 }));
+vi.mock("./lib/call-session", () => ({ discardCall: capability.discardCall }));
 vi.mock("./lib/remote-images-preference", () => ({
   getRemoteImagesEnabled: () => false,
   subscribeRemoteImages: () => () => {},
@@ -109,6 +111,7 @@ it("recreates authenticated state during render when the account or selected spa
   capability.userId = "user-a";
   capability.shellOwners = [];
   capability.resetBootstrap.mockClear();
+  capability.discardCall.mockClear();
   window.localStorage.setItem("rakazo:space-id", "space-a");
   const container = document.createElement("div");
   const root = createRoot(container);
@@ -130,12 +133,14 @@ it("recreates authenticated state during render when the account or selected spa
     expect(
       container.firstElementChild?.querySelector("[data-owner]")?.getAttribute("data-owner"),
     ).toBe("user-a:space-a");
+    expect(capability.discardCall).not.toHaveBeenCalled();
     staleRequest = actualBootstrap.takeInitialBootstrap(undefined, "group-a");
     capability.userId = "user-b";
     await act(async () => root.render(render()));
     expect(container.querySelector("[data-owner]")?.getAttribute("data-owner")).toBe(
       "user-b:space-a",
     );
+    expect(capability.discardCall).toHaveBeenCalledTimes(1);
     resolveStale(oldBootstrap);
     await staleRequest;
     expect(actualBootstrap.getTicketBoardEnabled()).toBe(false);
@@ -155,6 +160,7 @@ it("recreates authenticated state during render when the account or selected spa
     );
     expect(capability.shellOwners.every(({ current, owner }) => current === owner)).toBe(true);
     expect(capability.resetBootstrap).toHaveBeenCalledTimes(3);
+    expect(capability.discardCall).toHaveBeenCalledTimes(3);
   } finally {
     await act(async () => root.unmount());
     resolveStale(oldBootstrap);
