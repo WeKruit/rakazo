@@ -4,6 +4,12 @@
 
 **Goal:** 在现有 Rakazo 网页交付 Main/Sourcer 原生协作、可恢复交互与记忆，迁入现有招聘工作，完成 [GOAL.md](GOAL.md) 的 P0–P6 基础闭环与 [PRODUCT-SCOPE.md](PRODUCT-SCOPE.md) 的 Juicebox / Metix / Grok Bot 完整产品范围。
 
+### 2026-10-22：新人注册与可替换底座边界核对
+
+新人差距与现有接口统一记录在 [PRODUCT-SCOPE.md — 新人开箱与底座接口](PRODUCT-SCOPE.md#新人开箱与底座接口)，不新增另一份框架或追踪表。线上公开 `/api/auth/capabilities` 实际200：密码登录开启、SSO为空、密码找回不可用。现有白名单注册在首个账号之后需要邮件投递或正确配置的可信 OIDC；不能复制管理员账号或关闭身份验证使其通过。普通网页的 Integrations 窗口实际显示尚未配置服务目录，这与当前账号已有部分 MCP 连接并不矛盾，不能据后者宣布新人连接入口完成。
+
+已有原生注册/私有 Space、四角色/五份内置 skills 和幂等安装维护；平台 Autumn/FullEnrich 可复用。仍优先补平台认证入口与模型供给，再完成真实用户的 CRM 身份/组织权限、个人连接和两位新人隔离验收。`AgentRuntime`、模型、连接/工具、记忆、文件、sandbox、Routine 与渠道均沿现有边界；逐 bot runtime/明确 connection 绑定、运行配置冻结及高可用仍是实际 gap，不用接口存在冒充实现完成。当前执行器为 Pi，个人 Codex 模型 OAuth 不能当作所有用户的部署级供给。
+
 ### 2026-10-22：原生来源读取与正常停机修复已发布
 
 当前运行所选 `299fd06b`，公开镜像 `d9548a00`，仍在原 Modal 应用、Secret 与 Volume。固定提交归档发布完成，132份运行源码 hash 一致、health/ready 均200且非 degraded；前后20组保护记录精确保持、109份迁移不变。没有包含未提交的 home 或认证扩展实验，没有新增迁移、资源、权限、订阅、Routine 或外发。

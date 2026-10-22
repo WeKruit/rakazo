@@ -28,6 +28,36 @@ M2/M3/M4 中独立工作可与 M1 并行。每个 worker 明确文件归属，�
 - 复现研究中用户可用的功能及正确业务语义。参考产品的私有后端算法、内部权限入口、隐藏推理，以及静态分析暴露的缺陷不是已知可复刻接口；不能把其错误权限/费用/年限逻辑照搬。可见活动和提供者允许展示的摘要须与真实执行对应。
 - 本表的“待验”不等于上游没有实现：先沿 Rakazo 真实调用链确认并复用，只有实际缺口才写代码。研究、代码、离线检查、线上操作、外部回执分别记录。
 
+## 新人开箱与底座接口
+
+新人应走同一条产品路径：获准注册/登录 → 本人的私有 Space → 自动安装维护中的招聘配置 → 直接交给助手 JD 或职位描述。平台模型、Autumn 和通用招聘 skills 不由新人逐个连接；个人邮箱、日历在首次需要时由本人连接。组织共享另行明确授权，不能复制管理员个人 OAuth、历史、审批或客户资料。
+
+当前注册代码复用 Better Auth、邮箱密码及可选 OIDC；白名单账号需要邮箱所有权证明。无邮件投递时仅首个账号的既有初始化例外不能用于后续新人。线上公开认证能力已实际返回：密码登录开启、SSO 未配置、密码找回不可用。因此需要先接通原生认证邮件投递，或配置并验证可信 OIDC，不能用关闭验证代替注册完成。
+
+| 新人条件 | 已有基础 | 尚须完成 |
+| --- | --- | --- |
+| 身份与准入 | 原生注册、登录、白名单、邮箱验证、密码找回及可选 OIDC 代码 | 当前部署的验证/找回邮件或可信 OIDC；实际新人注册、退出与重新登录 |
+| 平台模型 | 原生部署级模型配置可使 onboarding 跳过个人模型连接；管理员个人 Codex 可用 | 可用的平台供给及真实调用；不复制个人订阅凭据，不把空 key 或零余额算就绪 |
+| 招聘配置 | 四个招聘角色、五份内置 skills、本人私有工作区，以及 Autumn/FullEnrich 的部署级服务配置；原生安装基线维护与私人覆盖保留 | 两位真实新人自动安装、重复登录/升级不重复配置、不覆盖私人选择的验收 |
+| 下游服务 | 原生 MCP/OAuth、个人连接与真实用户/Space 权限；现有账号已完成一次 CRM 保存/读回 | 新人 CRM 身份与组织/RLS 对接；实际可用的连接目录；Instantly 与个人邮箱/日历的按需连接，不继承管理员连接 |
+| 隔离与恢复 | 原生用户/Space、记忆、文件、任务、原卡及 Routine 边界和已有单账号恢复证据 | 两位真人的跨账号拒绝、跨 Agent 本人共享、全部卡型与文件持久恢复、多副本故障接管 |
+
+底座采用以下**已存在的源码边界**；不另建 gateway、harness 或每功能一个 MCP。接口存在、当前适配器可用、某种替换已验收是三件事。
+
+| 边界 | 权威接口/实现入口 | 替换时保持的产品语义 |
+| --- | --- | --- |
+| 身份与权限 | Better Auth；服务端生成的 `Actor` / `AdapterContext` | 实际 human、Space、bot、run 与取消信号贯穿工具和存储；部署级付费不改变调用人，不信任前端自报身份 |
+| 聊天与原卡 | 现有 `contracts`、认证 RPC、原生 Thread/Run/Event 与实时更新 | 岗位/联系人上下文映射到已有对话；选择、自定义输入、审批回应原请求；Dashboard 与聊天读取同一业务记录。外部 provider session 不等于产品对话 ID |
+| 执行器与模型 | `AgentRuntime.run/abort`；`ModelProvider` 提供目录；当前实际执行器为 `PiAgentRuntime` | 模型/provider/OAuth/API key 是模型连接；实际推理由 runtime 执行，替换整个 agent runtime 需要对应 adapter。当前逐 bot runtime、明确 connection 绑定及运行配置冻结尚未完整实现，不能声称已可任意切换或迁移原生 session |
+| 业务工具与连接 | `ConnectorProvider`、`ConnectionAuthProvider`、`ConnectorTool` 与现有 native executor/`ToolHost` | Autumn、CRM、邮件、日历沿相同工具入口；网页和 Agent 共用授权业务服务。工具调用能力不意味着继承别人 OAuth；发送/邀请保留准确原生确认 |
+| 记忆 | `MemoryStore.read/search/commit`；可选 `SemanticMemoryProvider` | 用户跨 Agent 记忆与 bot 私有记忆按原 scope 读取，写入保留 revision；语义检索插件不能改变所有权、撤销语义或覆盖会话原文 |
+| skills 与默认配置 | 原生 skill 目录、builtin skills、`CapabilityInstall` / `ensureRecruitingWorkspace` | 产品默认统一维护，保留私人覆盖、撤销和活动任务；不复制客户上下文，不另外写固定招聘工作流 |
+| 文件、工作区与密钥 | `ArtifactStore`、`AgentHomeStore`、`SecretStore` | 附件引用/hash/权限保持；home 版本须对应真实可恢复文件；更换存储不能退回无权限本地副本，密钥不进入网页或 prompt |
+| 电脑与执行环境 | `SandboxProvider` | 只承载确实需要的文件/命令/电脑能力；当前保留原生 provider，不把 sandbox 当业务数据库或独立用户身份 |
+| Routine 与渠道 | 原生 Routine + `JobPublisher` / `JobWorkerHost`、`RealtimeFanout`、`MessagingSurface` | 每项工作保留负责人、用户/Space、暂停和去重语义；重连/重启不是新业务授权。渠道 adapter 复用同一对话层；Slack 仍延期 |
+
+上述 TypeScript provider 接口位于 `packages/adapter-kit/src/interfaces.ts`，共同上下文及 `ConnectorTool` 位于 `types.ts`；`ToolHost` 是 Pi runtime 的内部执行接口。供应商实现放 adapters，选择和依赖配置留在现有 API/worker composition roots；前端不直接读取供应商密钥或各自实现一套业务操作。当前网页使用 Rakazo 原生 RPC/事件，未以 AG-UI 接入验收。新增或替换适配器须沿原有 contracts/校验与 actor 权限，保留稳定请求标识、真实回执、取消/未知结果和原卡恢复；只验证实际支持的能力，不承诺不同供应商原生 session 无损迁移。
+
 ## Grok Bot 功能清单（保留原动作 ID）
 
 来源：已归档的只读 UI/原生协议研究和用户明确要求。旧表基于早期独立 Gateway 的实现状态已失效；本表按当前 Rakazo 发布证据保守标记。
