@@ -56,6 +56,11 @@ upstream migrations before starting the three services. The Volume is mounted at
 the services stop. One container avoids concurrent containers writing the same
 native file store; scaling requires revisiting that storage boundary.
 
+The server uses Modal's native `nonpreemptible=True` placement to prevent platform
+preemption from interrupting the sole file-store writer. Modal charges 3× the
+standard CPU and memory rates for this placement; the existing resource bounds
+remain unchanged. Deployments and application failures can still require a restart.
+
 ## Acceptance
 
 An open port is only liveness. The deployment is accepted only after native owner

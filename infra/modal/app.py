@@ -69,6 +69,7 @@ image = (
     min_containers=1,
     max_containers=1,  # ponytail: one native DATA_DIR writer; scale only with a shared store.
     max_concurrency=128,
+    nonpreemptible=True,
     cpu=(0.125, 0.5),
     memory=(2048, 4096),
     startup_timeout=180,
