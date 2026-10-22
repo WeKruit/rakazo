@@ -254,6 +254,7 @@ export function createAuth(prisma: PrismaClient, env: AuthEnv) {
     baseURL: env.baseURL,
     trustedOrigins: [...buildTrustedOrigins(env), "rakazo://"],
     account: {
+      encryptOAuthTokens: true,
       accountLinking: { enabled: true, disableImplicitLinking: true, trustedProviders: [] },
     },
     rateLimit: authRateLimitOptions(),
