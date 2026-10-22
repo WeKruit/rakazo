@@ -29,6 +29,17 @@ const skippedBrowserProfileDirectories = new Set([
   "DawnWebGPUCache",
   "Crashpad",
   "component_crx_cache",
+  // Component-updater downloads Chromium fetches again on demand. Security lists stay.
+  "optimization_guide_model_store",
+  "WasmTtsEngine",
+  "WidevineCdm",
+  "OnDeviceHeadSuggestModel",
+  "OptimizationHints",
+  "hyphen-data",
+  "ZxcvbnData",
+  "Dictionaries",
+  "GraphiteDawnCache",
+  "extensions_crx_cache",
 ]);
 const skippedBrowserProfileFiles = new Set([
   "BrowserMetrics",
