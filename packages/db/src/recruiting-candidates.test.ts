@@ -4216,6 +4216,129 @@ describe("native candidate source provenance", () => {
       limit: 1,
     });
   }
+  it.each(["candidates", "sources", "research"] as const)(
+    "releases the read snapshot before verifying full native result bytes for %s",
+    async (operation) => {
+      const base = await nativeImportReadFixture();
+      let inTransaction = false;
+      const f = {
+        ...base,
+        prisma: {
+          $transaction: vi.fn(async (fn: (tx: typeof base.tx) => Promise<unknown>) => {
+            inTransaction = true;
+            try {
+              return await fn(base.tx);
+            } finally {
+              inTransaction = false;
+            }
+          }),
+        } as unknown as PrismaClient,
+      };
+      Object.assign(f.tx.recruitingResearchTask, { findMany: vi.fn(async () => []) });
+      f.tx.recruitingCandidatePage.findMany.mockResolvedValue([
+        { ...f.page, effect: f.read },
+      ] as never);
+      let resultJson = JSON.stringify(f.read.result);
+      const parse = JSON.parse;
+      let byteChecks = 0;
+      const parseSpy = vi.spyOn(JSON, "parse").mockImplementation((text, reviver) => {
+        if (text === resultJson) {
+          byteChecks += 1;
+          expect(inTransaction).toBe(false);
+        }
+        return parse(text, reviver);
+      });
+      try {
+        const read = () =>
+          operation === "candidates"
+            ? nativeCandidateListRead(f)
+            : operation === "sources"
+              ? recruiting.listRecruitingCandidateSources(f.prisma, actor, {
+                  roleId: f.role.id,
+                  candidateKey: f.occurrence.candidateKey,
+                })
+              : recruiting.listRecruitingResearch(f.prisma, actor, { roleId: f.role.id });
+        await read();
+        expect(byteChecks).toBe(1);
+        f.read.result = { changed: true } as never;
+        resultJson = JSON.stringify(f.read.result);
+        await expect(read()).rejects.toThrow(IsolationError);
+        expect(byteChecks).toBe(2);
+        f.run.userId = "another-owner";
+        await expect(read()).rejects.toThrow(IsolationError);
+        expect(byteChecks).toBe(2);
+      } finally {
+        parseSpy.mockRestore();
+      }
+    },
+  );
+  it.each([false, true])(
+    "keeps full native byte verification atomic with shortlist writes, corrupted=%s",
+    async (corrupted) => {
+      vi.mocked(createThreadMessageInTransaction).mockClear();
+      const f = await nativeSourceFixture();
+      const { page: _page, pageId, rowIndex, ...profile } = f.occurrence;
+      const queryRaw = f.tx.$queryRaw.getMockImplementation()!;
+      f.tx.$queryRaw.mockImplementation(async (...args: unknown[]) =>
+        (args[0] as { sql: string }).sql.includes('FROM "external_effects" e')
+          ? Reflect.apply(queryRaw, undefined, args)
+          : ([
+              {
+                ...profile,
+                sourcePageId: pageId,
+                sourceRowIndex: rowIndex,
+                profileSourcePageIds: [pageId],
+              },
+            ] as never),
+      );
+      f.tx.recruitingCandidatePage.findMany.mockResolvedValue([
+        { ...f.page, effect: f.read },
+      ] as never);
+      if (corrupted) f.read.result = { changed: true } as never;
+      let inTransaction = false;
+      const prisma = {
+        $transaction: vi.fn(async (fn: (tx: typeof f.tx) => Promise<unknown>) => {
+          inTransaction = true;
+          try {
+            return await fn(f.tx);
+          } finally {
+            inTransaction = false;
+          }
+        }),
+      } as unknown as PrismaClient;
+      const resultJson = JSON.stringify(f.read.result);
+      const parse = JSON.parse;
+      let byteChecks = 0;
+      const parseSpy = vi.spyOn(JSON, "parse").mockImplementation((text, reviver) => {
+        if (text === resultJson) {
+          byteChecks += 1;
+          expect(inTransaction).toBe(true);
+          expect(f.tx.recruitingCandidate.updateMany).not.toHaveBeenCalled();
+        }
+        return parse(text, reviver);
+      });
+      try {
+        const save = recruiting.setRecruitingCandidateShortlist(prisma, actor, {
+          threadId: "thread",
+          roleId: f.role.id,
+          candidateKey: f.occurrence.candidateKey,
+          expectedRevision: 0,
+          shortlisted: true,
+        });
+        if (corrupted) {
+          await expect(save).rejects.toThrow(IsolationError);
+          expect(f.tx.recruitingCandidate.updateMany).not.toHaveBeenCalled();
+          expect(createThreadMessageInTransaction).not.toHaveBeenCalled();
+        } else {
+          await expect(save).resolves.toMatchObject({ shortlisted: true });
+          expect(f.tx.recruitingCandidate.updateMany).toHaveBeenCalledOnce();
+        }
+        expect(byteChecks).toBe(1);
+      } finally {
+        parseSpy.mockRestore();
+      }
+    },
+  );
   it("reuses the same read snapshot's native page and binding while projecting a candidate import", async () => {
     const f = await nativeImportReadFixture();
     const listed = await nativeCandidateListRead(f);
