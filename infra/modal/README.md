@@ -61,6 +61,14 @@ preemption from interrupting the sole file-store writer. Modal charges 3× the
 standard CPU and memory rates for this placement; the existing resource bounds
 remain unchanged. Deployments and application failures can still require a restart.
 
+Compute is pinned to `us-west`; the existing routing region and public URL stay
+unchanged so native sign-in and authorized connector callbacks keep their current
+origin. This moves compute, not the routing proxy or the Supabase database. The
+existing Volume is reused and remains the only native file store. Region selection
+adds Modal's published compute multiplier, within the existing usage budget; it
+does not require another plan. Keep the single-writer bounds and use the immediately
+previous frozen product release for rollback, not an older core-package baseline.
+
 ## Platform-funded inference
 
 Native onboarding and chat can use a deployment-supplied model without each user

@@ -65,6 +65,7 @@ image = (
     volumes={"/data": files},
     env={"MODAL_APP_NAME": APP_NAME},
     port=8000,
+    compute_region="us-west",
     unauthenticated=True,  # Native Better Auth protects application/API routes.
     min_containers=1,
     max_containers=1,  # ponytail: one native DATA_DIR writer; scale only with a shared store.
