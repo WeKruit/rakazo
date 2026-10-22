@@ -1,6 +1,7 @@
 import { createHash } from "node:crypto";
 import { createRouterClient } from "@orpc/server";
 import type { ArtifactStore } from "@rakazo/adapter-kit";
+import { readInstantlyEmail } from "@rakazo/adapters";
 import type { Actor } from "@rakazo/contracts";
 import { RecruitingAssessmentSnapshotSchema } from "@rakazo/contracts";
 import { extractPdfText } from "@rakazo/core/node/pdf-text";
@@ -167,6 +168,20 @@ describe("saved recruiting correspondence", () => {
       },
       select: { id: true },
     });
+  });
+  it("displays native opaque Instantly thread IDs without weakening outbound anchor validation", async () => {
+    const row = { ...email, thread_id: "provider-opaque-thread" };
+    const { prisma } = fixture({
+      result: { structuredContent: { items: [row], next_starting_after: null } },
+    });
+    expect(readInstantlyEmail(row)).toBeNull();
+    const result = await api.getRecruitingCorrespondence(prisma, actor, target, "inbox");
+    expect(result).toMatchObject({
+      status: "ready",
+      partial: false,
+      emails: [{ sender: row.from_address_email, subject: row.subject, body: row.body.text }],
+    });
+    expect(JSON.stringify(result)).not.toContain(row.thread_id);
   });
   it.each([{ enabled: false }, { permission: false }])(
     "does not fetch provider payloads after native permission is unavailable: %j",
