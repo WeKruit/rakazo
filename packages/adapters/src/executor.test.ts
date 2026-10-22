@@ -2302,7 +2302,7 @@ description: Prepare standup notes
   });
 
   it.each(["busy", "admitted", "resumed", "cancelled", "reclaimed", "cancelled-busy"])(
-    "keeps a %s computer admission out of running state until it owns the computer",
+    "keeps a %s retained takeover admission out of running state until it owns the computer",
     async (outcome) => {
       const originalStart = outcome === "resumed" ? new Date("2026-01-01T00:00:00Z") : null;
       let inTransaction = false;
@@ -2312,7 +2312,7 @@ description: Prepare standup notes
         threadId: "thread-1",
         botId: "bot-1",
         status: "queued",
-        checkpoint: null as string | null,
+        checkpoint: "takeover" as string | null,
         leaseOwner: null as string | null,
         leaseFence: 0,
         startedAt: originalStart,

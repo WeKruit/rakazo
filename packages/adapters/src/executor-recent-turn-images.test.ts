@@ -1,14 +1,20 @@
 import type { AgentRunRequest } from "@rakazo/adapter-kit";
 import type { MessageBlock } from "@rakazo/contracts";
-import { describe, expect, it, vi } from "vitest";
+import { beforeEach, describe, expect, it, vi } from "vitest";
 import type * as ComputerLifecycleModule from "./computer-lifecycle.js";
+import { acquireComputerExecutionLease, provisionComputer } from "./computer-lifecycle.js";
 import { createRunExecutor } from "./executor.js";
 
 vi.mock("./computer-lifecycle.js", async (importOriginal) => ({
   ...(await importOriginal<typeof ComputerLifecycleModule>()),
-  acquireComputerExecutionLease: async () => null,
-  provisionComputer: async () => ({ id: "computer-1", kind: "desktop" }),
+  acquireComputerExecutionLease: vi.fn(async () => null),
+  provisionComputer: vi.fn(async () => ({ id: "computer-1", kind: "desktop" })),
 }));
+
+beforeEach(() => {
+  vi.mocked(acquireComputerExecutionLease).mockClear();
+  vi.mocked(provisionComputer).mockClear();
+});
 
 const TEXT_ONLY_MODEL = "deepseek/deepseek-v4-flash-0731";
 const VISION_MODEL = "openai/gpt-4o";
@@ -186,6 +192,10 @@ async function runWithModel(
 
   await executor.continueRun(run.id, "worker-1");
   expect(runtimeRun).toHaveBeenCalled();
+  if (!scripted) {
+    expect(acquireComputerExecutionLease).not.toHaveBeenCalled();
+    expect(provisionComputer).not.toHaveBeenCalled();
+  }
   expect(finalizeRun).not.toHaveBeenCalledWith(expect.objectContaining({ outcome: "failed" }));
   if (!request) throw new Error("runtime was not called");
   return { request, get, prisma, run };
