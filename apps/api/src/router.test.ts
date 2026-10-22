@@ -20,6 +20,7 @@ import type { Actor, Bot, ProductEvent } from "@rakazo/contracts";
 import { ATTACHMENT_MAX_COUNT, REPLY_QUOTE_MAX_LENGTH } from "@rakazo/contracts";
 import { openScreenCapability } from "@rakazo/core/node/screen-capability";
 import type { PrismaClient } from "@rakazo/db";
+import { recruitingPresetId } from "@rakazo/db";
 import { createLogger, createTestSink, installLogger } from "@rakazo/logging";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import type { RouterDeps } from "./router.js";
@@ -110,6 +111,7 @@ describe("account preferences", () => {
       botSection: { findMany: vi.fn().mockResolvedValue([]) },
       externalConversation: { findMany: vi.fn().mockResolvedValue([]) },
       routine: { findMany: routines },
+      capabilityInstall: { findFirst: vi.fn().mockResolvedValue(null) },
       message: { findMany: vi.fn().mockResolvedValue([]) },
       event: { findFirst: vi.fn().mockResolvedValue({ seq: 4 }) },
       run: { findFirst: vi.fn().mockResolvedValue(null) },
@@ -138,6 +140,69 @@ describe("account preferences", () => {
     expect(f.snapshot).not.toHaveBeenCalled();
     expect(f.routines).not.toHaveBeenCalled();
   }, 500);
+
+  it("does not load navigation when the managed recruiting upgrade cannot be read", async () => {
+    const f = bootstrapDeps();
+    vi.mocked(f.deps.prisma.capabilityInstall.findFirst).mockRejectedValue(
+      new Error("Preset storage unavailable"),
+    );
+    await expect(f.client.bootstrap({})).rejects.toThrow("Preset storage unavailable");
+    expect(f.deps.prisma.bot.findMany).not.toHaveBeenCalled();
+    expect(f.deps.prisma.user.findUniqueOrThrow).not.toHaveBeenCalled();
+  });
+
+  it("keeps the internal recruiting preset out of the user's plugin list", async () => {
+    const { actor, deps } = preferencesDeps("robot");
+    const findMany = vi.fn().mockResolvedValue([]);
+    Object.assign(deps.prisma, { capabilityInstall: { findMany } });
+    const client = createRouterClient(createRouter(deps), { context: { actor } });
+    await expect(client.capabilities.list()).resolves.toEqual([]);
+    expect(findMany).toHaveBeenCalledWith({
+      where: {
+        spaceId: actor.spaceId,
+        userId: actor.userId,
+        NOT: { id: recruitingPresetId(actor), kind: "plugin", source: "builtin:recruiting" },
+      },
+    });
+  });
+
+  it("does not remove the recruiting management baseline through plugin uninstall", async () => {
+    const { actor, deps } = preferencesDeps("robot");
+    const id = recruitingPresetId(actor);
+    const remove = vi.fn();
+    const findFirst = vi.fn().mockResolvedValue({
+      id,
+      kind: "plugin",
+      source: "builtin:recruiting",
+    });
+    const tx = { capabilityInstall: { findFirst, delete: remove } };
+    Object.assign(deps.prisma, {
+      ...tx,
+      $transaction: vi.fn(async (read: (tx: unknown) => Promise<unknown>) => read(tx)),
+    });
+    const client = createRouterClient(createRouter(deps), { context: { actor } });
+    await expect(client.capabilities.remove({ id })).rejects.toMatchObject({
+      code: "NOT_FOUND",
+    });
+    expect(remove).not.toHaveBeenCalled();
+    expect(findFirst).toHaveBeenCalledWith({
+      where: { id, spaceId: actor.spaceId, userId: actor.userId },
+    });
+  });
+
+  it("keeps user plugins removable even when their source matches the internal preset", async () => {
+    const { actor, deps } = preferencesDeps("robot");
+    const remove = vi.fn().mockResolvedValue({});
+    const row = { id: "user-plugin", kind: "plugin", source: "builtin:recruiting" };
+    const tx = { capabilityInstall: { findFirst: vi.fn().mockResolvedValue(row), delete: remove } };
+    Object.assign(deps.prisma, {
+      ...tx,
+      $transaction: vi.fn(async (read: (tx: unknown) => Promise<unknown>) => read(tx)),
+    });
+    const client = createRouterClient(createRouter(deps), { context: { actor } });
+    await expect(client.capabilities.remove({ id: row.id })).resolves.toEqual({ ok: true });
+    expect(remove).toHaveBeenCalledWith({ where: { id: row.id } });
+  });
 
   it("bootstraps the explicitly selected bot's snapshot and routines", async () => {
     const f = bootstrapDeps();
