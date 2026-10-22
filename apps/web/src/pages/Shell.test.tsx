@@ -1,5 +1,7 @@
 // @vitest-environment jsdom
 
+import type { LinkFavicons } from "@rakazo/chat-ui/web";
+import { LinkFaviconsContext } from "@rakazo/chat-ui/web";
 import type {
   AgentSkillCatalogEntry,
   ProductEvent,
@@ -235,6 +237,7 @@ async function renderFeedbackShell(
     threadReady?: Promise<void>;
     allGroupsArchived?: boolean;
     initialPath?: string;
+    favicons?: LinkFavicons;
   } = {},
 ) {
   setToolActivityPreference(
@@ -461,16 +464,18 @@ async function renderFeedbackShell(
   const render = () =>
     act(async () =>
       root!.render(
-        <MemoryRouter
-          initialEntries={[
-            options.initialPath ??
-              (kind === "group"
-                ? "/app/g/group-1?view=conversation"
-                : "/app/bot-1?view=conversation"),
-          ]}
-        >
-          <ShellRoutes />
-        </MemoryRouter>,
+        <LinkFaviconsContext.Provider value={options.favicons ?? null}>
+          <MemoryRouter
+            initialEntries={[
+              options.initialPath ??
+                (kind === "group"
+                  ? "/app/g/group-1?view=conversation"
+                  : "/app/bot-1?view=conversation"),
+            ]}
+          >
+            <ShellRoutes />
+          </MemoryRouter>
+        </LinkFaviconsContext.Provider>,
       ),
     );
   await render();
@@ -1089,6 +1094,54 @@ it("resets an archived source's draft and error, then keeps its team fixed durin
   await act(async () => finish());
   expect(container?.querySelector(".hire-brief-role")?.textContent).toBe(fresh.name);
   expect(container?.querySelector('textarea[aria-label="Job description"]')).toBeNull();
+});
+
+it("defers hidden conversation icons until revealed without remounting the draft or pending question", async () => {
+  const load = vi.fn<LinkFavicons["load"]>().mockResolvedValue({
+    icon: "data:image/png;base64,AAAA",
+  });
+  const view = await renderFeedbackShell("group", undefined, {
+    isDeploymentOwner: false,
+    openFeedback: false,
+    initialPath: "/app/g/group-1?view=results",
+    favicons: { load },
+    messages: [
+      {
+        id: "saved-source-message",
+        threadId: "thread-1",
+        seq: 2,
+        role: "bot",
+        botId: "bot-1",
+        runId: "run-main",
+        createdAt: "2026-01-01T00:00:00Z",
+        blocks: [
+          { kind: "text", text: "[Public source](https://hidden-conversation.example.test/)" },
+        ],
+      },
+    ],
+  });
+  const composer = container!.querySelector<HTMLTextAreaElement>('textarea[name="chat-message"]')!;
+  const card = container!.querySelector('[data-message-id="pending-main"]');
+  const conversation = composer.closest<HTMLElement>('section[aria-label="Role conversation"]')!;
+  expect(conversation.hidden).toBe(true);
+  expect(load).not.toHaveBeenCalled();
+  type(composer, "Keep my unsent recruiting note.");
+  await view.navigate("/app/g/group-1?view=conversation");
+  expect(load).toHaveBeenCalledExactlyOnceWith("https://hidden-conversation.example.test");
+  expect(conversation.hidden).toBe(false);
+  expect(container!.querySelector('textarea[name="chat-message"]')).toBe(composer);
+  expect(composer.value).toBe("Keep my unsent recruiting note.");
+  expect(container!.querySelector('[data-message-id="pending-main"]')).toBe(card);
+  const icon = conversation.querySelector(".rk-chat-link-tile img");
+  expect(icon).not.toBeNull();
+  await view.navigate("/app/g/group-1?view=results");
+  await view.navigate("/app/g/group-1?view=conversation");
+  expect(load).toHaveBeenCalledOnce();
+  expect(conversation.querySelector(".rk-chat-link-tile img")).toBe(icon);
+  expect(container!.querySelector('[data-message-id="pending-main"]')).toBe(card);
+  expect(composer.value).toBe("Keep my unsent recruiting note.");
+  expect(shellApi.answer).not.toHaveBeenCalled();
+  expect(shellApi.send).not.toHaveBeenCalled();
 });
 
 it("keeps one native chat, draft, attachment and pending card through full-width brief and feedback views", async () => {

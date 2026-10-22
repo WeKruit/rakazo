@@ -367,7 +367,7 @@ export function useLinkFavicon(href: string): { icon: string | null; unusable: (
   const snapshot = () => (origin ? (linkFavicons.get(key) ?? null) : null);
   const icon = useSyncExternalStore(subscribeLinkFavicons, snapshot, snapshot);
   useEffect(() => {
-    if (!origin) return;
+    if (!source || paused || !origin) return;
     mountedFaviconLinks.set(key, (mountedFaviconLinks.get(key) ?? 0) + 1);
     return () => {
       const left = (mountedFaviconLinks.get(key) ?? 1) - 1;
@@ -382,7 +382,7 @@ export function useLinkFavicon(href: string): { icon: string | null; unusable: (
       busyFaviconRetries.delete(key);
       pendingFavicons.delete(key);
     };
-  }, [key, origin]);
+  }, [source, paused, key, origin]);
   useEffect(() => {
     if (!source || paused || !origin) return;
     if (linkFavicons.has(key) || pendingFavicons.has(key)) return;
