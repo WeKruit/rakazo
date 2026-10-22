@@ -1405,6 +1405,53 @@ it("keeps the same role chat widget, draft and native card across workspace menu
   expect(shellApi.answer).not.toHaveBeenCalled();
 });
 
+it("uses the narrow role column without the desktop metadata gutter and preserves the same chat", async () => {
+  setToolActivityPreference("off");
+  const view = await renderFeedbackShell("group", undefined, {
+    isDeploymentOwner: false,
+    openFeedback: false,
+    initialPath: "/app/g/group-1?view=results",
+    messages: [
+      {
+        id: "saved-role-reply",
+        threadId: "thread-1",
+        seq: 2,
+        role: "bot",
+        botId: "bot-1",
+        createdAt: "2026-01-01T00:01:00Z",
+        blocks: [
+          { kind: "text", text: "The saved candidate evidence remains available for this role." },
+        ],
+      },
+    ],
+  });
+  const composer = container!.querySelector<HTMLTextAreaElement>('textarea[name="chat-message"]')!;
+  const message = container!.querySelector('[data-message-id="saved-role-reply"]')!;
+  const frame = message.querySelector('[data-testid="message-bubble-frame"]')!;
+  const card = container!.querySelector('[data-message-id="pending-main"]');
+  await view.click("Open role chat");
+  expect(frame.classList.contains("max-w-full")).toBe(true);
+  expect(frame.className).not.toContain("8rem");
+  expect(
+    message.querySelector('[data-testid="message-hover-rail"]')?.classList.contains("static"),
+  ).toBe(true);
+  expect(
+    message.querySelector('[data-testid="message-hover-time"]')?.classList.contains("bottom-1"),
+  ).toBe(true);
+  type(composer, "Keep this unsent role note.");
+  await view.navigate("/app/g/group-1?view=conversation");
+  expect(container!.querySelector('[data-message-id="saved-role-reply"]')).toBe(message);
+  expect(frame.className).toContain("8rem");
+  expect(message.querySelector('[data-testid="message-hover-rail"]')?.className).toContain(
+    "start-full",
+  );
+  expect(container!.querySelector('textarea[name="chat-message"]')).toBe(composer);
+  expect(composer.value).toBe("Keep this unsent role note.");
+  expect(container!.querySelector('[data-message-id="pending-main"]')).toBe(card);
+  expect(shellApi.send).not.toHaveBeenCalled();
+  expect(shellApi.answer).not.toHaveBeenCalled();
+});
+
 it("follows the latest messages on role chat reveal while preserving a manually chosen scroll position", async () => {
   const view = await renderFeedbackShell("group", undefined, {
     isDeploymentOwner: false,
