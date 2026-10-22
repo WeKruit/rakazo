@@ -468,12 +468,16 @@ export async function getRecruitingCorrespondence(
         if (emails.has(id) && call.route.toolName !== "get_email") continue;
         if (call.route.toolName === "list_emails") mailMembership.add(membership);
         const text = email.body.text || email.content_preview || "";
+        const displayText =
+          call.route.toolName === "list_emails"
+            ? text.replace(/\[truncated — use get_email for full content\](\s*)$/u, "$1")
+            : text;
         emails.set(id, {
           id,
           sender: email.from_address_email ?? null,
           recipients: email.to_address_email_list ? [email.to_address_email_list] : [],
           subject: email.subject,
-          body: text.slice(0, 50_000),
+          body: displayText.slice(0, 50_000),
           snippet:
             call.route.toolName === "list_emails" || !email.body.text || text.length > 50_000,
           date: email.timestamp_email,

@@ -184,6 +184,24 @@ describe("saved recruiting correspondence", () => {
     });
     expect(JSON.stringify(result)).not.toContain(row.thread_id);
   });
+  it("removes only the terminal provider truncation annotation from an Inbox preview", async () => {
+    const annotation = "[truncated — use get_email for full content]";
+    const candidateText = `Original candidate text, including ${annotation} in a quoted sentence.`;
+    const body = `${candidateText}\n\n${annotation}\n`;
+    const result = {
+      structuredContent: {
+        items: [{ ...email, body: { text: body } }],
+        next_starting_after: "saved-next-page",
+      },
+    };
+    const { prisma } = fixture({ result });
+    expect(await api.getRecruitingCorrespondence(prisma, actor, target, "inbox")).toMatchObject({
+      status: "ready",
+      partial: true,
+      emails: [{ body: `${candidateText}\n\n\n`, snippet: true }],
+    });
+    expect(result.structuredContent.items[0]!.body.text).toBe(body);
+  });
   it("shows the latest selected campaign check without merging earlier variants or account-wide exploration", async () => {
     const { client, prisma, retained } = fixture();
     const variant = [

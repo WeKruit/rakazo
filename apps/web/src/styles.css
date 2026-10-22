@@ -186,6 +186,19 @@ body,
 [data-product-view="recruiting"] .hire-role-chat[hidden] {
   display: none;
 }
+[data-product-view="recruiting"] :where(.hire-role-chat) .hire-assistant-identity > div {
+  display: flex;
+  min-width: 0;
+  flex-direction: column;
+  gap: 2px;
+}
+[data-product-view="recruiting"] :where(.hire-role-chat) .hire-assistant-identity span {
+  overflow: hidden;
+  color: var(--muted-foreground);
+  font-size: 12px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
 @container (max-width: 680px) {
   [data-product-view="recruiting"] .hire-role-chat-open .hire-card-grid {
     grid-template-columns: minmax(0, 1fr);

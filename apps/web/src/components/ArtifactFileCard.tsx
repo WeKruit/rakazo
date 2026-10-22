@@ -60,11 +60,11 @@ export function ArtifactFileCard(props: ArtifactFileCardProps) {
 
   if (!previewable) {
     return (
-      <div>
+      <div className="min-w-0 max-w-full wrap-anywhere">
         <button
           type="button"
           onClick={() => void startDownload()}
-          className="rounded-2xl border border-border bg-card px-4 py-3 text-left text-[14px] text-foreground hover:bg-accent"
+          className="max-w-full rounded-2xl border border-border bg-card px-4 py-3 text-left text-[14px] text-foreground hover:bg-accent"
         >
           <div className="font-medium">{props.name}</div>
           <div className="mt-1 text-muted-foreground">
@@ -78,8 +78,8 @@ export function ArtifactFileCard(props: ArtifactFileCardProps) {
 
   return (
     <>
-      <div>
-        <div className="flex min-w-[280px] overflow-hidden rounded-2xl border border-border bg-card text-left text-foreground">
+      <div className="min-w-0 max-w-full wrap-anywhere">
+        <div className="flex min-w-0 max-w-full overflow-hidden rounded-2xl border border-border bg-card text-left text-foreground">
           <button
             ref={previewButton}
             type="button"
@@ -96,7 +96,9 @@ export function ArtifactFileCard(props: ArtifactFileCardProps) {
               )}
             </span>
             <span className="min-w-0">
-              <span className="block truncate text-[14px] font-medium">{name}</span>
+              <span title={name} className="block truncate text-[14px] font-medium">
+                {name}
+              </span>
               <span className="mt-0.5 block text-[13px] text-muted-foreground">
                 {preview?.source === null ? (
                   <Trans>Source unavailable</Trans>
