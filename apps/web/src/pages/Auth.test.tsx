@@ -7,6 +7,7 @@ import { afterEach, beforeEach, expect, it, vi } from "vitest";
 import { authClient } from "../lib/auth";
 import type { AuthCapabilities } from "../lib/auth-capabilities";
 import { fetchAuthCapabilities } from "../lib/auth-capabilities";
+import { selectedSpaceId, selectSpace } from "../lib/rpc";
 import { AuthPage } from "./Auth";
 
 vi.mock("@lingui/react/macro", () => ({
@@ -36,7 +37,6 @@ vi.mock("@rakazo/ui-web", () => ({
 }));
 vi.mock("../lib/auth-capabilities", () => ({ fetchAuthCapabilities: vi.fn() }));
 vi.mock("../lib/auth", () => ({ authClient: { signIn: { social: vi.fn(async () => ({})) } } }));
-vi.mock("../lib/rpc", () => ({ clearSpaceSelection: vi.fn() }));
 const capabilities: AuthCapabilities = {
   passwordAuth: false,
   sso: { name: "Example", availability: "unavailable" },
@@ -55,6 +55,7 @@ afterEach(async () => {
   await act(async () => root.unmount());
   host.remove();
   vi.restoreAllMocks();
+  window.localStorage.clear();
   delete window.rakazoDesktop;
 });
 async function render(mode: "in" | "up" | "forgot" = "in") {
@@ -121,6 +122,36 @@ it("hides SSO in password recovery", async () => {
   await render("forgot");
   expect(host.textContent).not.toContain("Continue with Example");
 });
+
+it.each(["in", "up"] as const)(
+  "clears the previous account's Space before starting SSO on %s",
+  async (mode) => {
+    expect(selectSpace("previous-account-space")).toBe(true);
+    vi.mocked(fetchAuthCapabilities).mockResolvedValue(capabilities);
+    let selectedAtSignIn: string | null | undefined;
+    vi.mocked(authClient.signIn.social).mockImplementationOnce(async () => {
+      selectedAtSignIn = selectedSpaceId();
+      return {
+        data: null,
+        error: {
+          code: "SSO_UNAVAILABLE",
+          message: "Unavailable",
+          status: 503,
+          statusText: "Unavailable",
+        },
+      };
+    });
+    await render(mode);
+    const button = host.querySelector("button")!;
+    await act(async () => button.click());
+    expect(authClient.signIn.social).toHaveBeenCalledTimes(1);
+    expect(selectedAtSignIn).toBeNull();
+    expect(selectedSpaceId()).toBeNull();
+    expect(host.querySelector('[role="alert"]')?.textContent).toBe(
+      "SSO is temporarily unavailable. Try again.",
+    );
+  },
+);
 
 it("selects a non-redirecting SSO request on desktop", async () => {
   vi.spyOn(window, "open").mockReturnValue({ close: vi.fn() } as unknown as Window);

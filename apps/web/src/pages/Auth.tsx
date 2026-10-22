@@ -128,6 +128,7 @@ export function AuthPage({ mode }: { mode: AuthMode }) {
 
   async function signInWithSso() {
     setError(null);
+    clearSpaceSelection();
     try {
       const result = await runSsoFlow(
         (disableRedirect, callbackURL) =>
