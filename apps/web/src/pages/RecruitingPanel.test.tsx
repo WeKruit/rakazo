@@ -503,7 +503,15 @@ async function mounted(
   recipients?: ComponentProps<typeof RecruitingPanel>["candidateFeedbackRecipients"],
   navigation: Pick<
     ComponentProps<typeof RecruitingPanel>,
-    "tab" | "onTabChange" | "presentation" | "view" | "summary" | "onBrowseCandidates" | "groupId"
+    | "tab"
+    | "onTabChange"
+    | "presentation"
+    | "view"
+    | "summary"
+    | "onBrowseCandidates"
+    | "groupId"
+    | "readCache"
+    | "readCacheScope"
   > = {},
 ) {
   const container = document.createElement("div");
@@ -723,6 +731,54 @@ it.each(["results", "shortlist", "contacts"] as const)(
     expect(api.answer).not.toHaveBeenCalled();
   },
 );
+
+it("shows a warm scoped pool read-only until current validation and evicts it on denial without restoring late rows", async () => {
+  const cache = { entries: new Map<string, unknown>(), epoch: 0 };
+  const scope = JSON.stringify(["actor-1", role.spaceId, "thread-1"]);
+  const options = {
+    presentation: "workspace" as const,
+    view: "results" as const,
+    readCache: cache,
+    readCacheScope: scope,
+  };
+  const candidate = { ...candidateFixture("warm-person", false), name: "Saved person" };
+  const page = candidatePage([candidate]);
+  api.listCandidates.mockResolvedValue(page);
+  await mounted("thread-1", undefined, false, undefined, options);
+  await cleanup?.();
+  cleanup = undefined;
+  cache.entries.set("another-role:workspace", { title: "Other role" });
+  let finishWorkspace!: (value: unknown) => void;
+  let finishRows!: (value: unknown) => void;
+  api.getWorkspace.mockReturnValueOnce(
+    new Promise((resolve) => {
+      finishWorkspace = resolve;
+    }),
+  );
+  api.listCandidates.mockClear();
+  api.listCandidates.mockReturnValueOnce(
+    new Promise((resolve) => {
+      finishRows = resolve;
+    }),
+  );
+  const view = await mounted("thread-1", undefined, false, undefined, options);
+  expect(view.container.querySelector(".hire-card-grid")?.textContent).toContain(candidate.name);
+  expect(api.listCandidates).not.toHaveBeenCalled();
+  const shortlist = view.container.querySelector<HTMLElement>('.hire-card-grid [role="checkbox"]')!;
+  expect(shortlist.hasAttribute("data-disabled")).toBe(true);
+  await act(async () => shortlist.click());
+  expect(api.setCandidateShortlist).not.toHaveBeenCalled();
+  await act(async () => finishWorkspace({ role, revision }));
+  expect(api.listCandidates).toHaveBeenCalledOnce();
+  api.getWorkspace.mockRejectedValueOnce(new ORPCError("FORBIDDEN"));
+  await view.render("thread-1", 1);
+  expect(view.container.querySelector(".hire-card-grid")).toBeNull();
+  expect([...cache.entries.keys()].some((key) => key.startsWith(`${scope}:`))).toBe(false);
+  expect(cache.entries.has("another-role:workspace")).toBe(true);
+  await act(async () => finishRows(page));
+  expect(view.container.querySelector(".hire-card-grid")).toBeNull();
+  expect([...cache.entries.keys()].some((key) => key.startsWith(`${scope}:`))).toBe(false);
+});
 
 it("preserves an explicit workspace assessment filter when a refreshed pool has no assessments", async () => {
   api.listCandidates.mockResolvedValue(candidatePage());
@@ -3024,7 +3080,10 @@ it("persists shortlist with the candidate revision and leaves conflicts visibly 
       finish = resolve;
     }),
   );
-  const view = await mounted();
+  const view = await mounted("thread-1", undefined, true, undefined, {
+    readCache: { entries: new Map(), epoch: 0 },
+    readCacheScope: JSON.stringify(["actor-1", role.spaceId, "thread-1"]),
+  });
   await view.click("Evidence");
   await view.click("Shortlist candidate-1");
   expect(api.setCandidateShortlist).toHaveBeenCalledExactlyOnceWith({

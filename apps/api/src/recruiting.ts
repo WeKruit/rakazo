@@ -260,8 +260,20 @@ export async function getRecruitingCorrespondence(
       const query = Object.fromEntries(
         Object.entries(call.args).filter(([key]) => key !== "limit"),
       );
-      const key = stableJsonValue([source.id, call.route.toolName, query]);
-      // A new check replaces the prior observation for the same provider query, including empty/error.
+      const campaignId = call.args.campaign_id;
+      if (
+        view === "inbox" &&
+        call.route.toolName === "list_emails" &&
+        (typeof campaignId !== "string" || !campaignId.trim())
+      )
+        return []; // Account-wide exploration is not evidence of this role's correspondence.
+      const key = stableJsonValue([
+        source.id,
+        call.route.toolName,
+        call.route.toolName === "list_emails" ? { campaign_id: campaignId } : query,
+      ]);
+      // ponytail: Inbox shows the latest campaign check, not accumulated mailbox history; native cursor coverage stays explicit.
+      // A new check replaces the prior observation, including empty/error.
       if (seen.has(key)) return [];
       seen.add(key);
       if (call.route.resourceRevision !== source.revision || !source.provider) {
@@ -276,6 +288,14 @@ export async function getRecruitingCorrespondence(
       if (unsupported) output.status = "unsupported";
       return output;
     }
+    const mailCampaigns = new Set(
+      reads
+        .filter(
+          (read) =>
+            read.provider.kind === "instantly" && read.call.route.toolName === "list_emails",
+        )
+        .map((read) => stableJsonValue([read.source.id, read.call.args.campaign_id])),
+    );
     const results = await prisma.externalEffect.findMany({
       where: { ...scope, id: { in: reads.map((read) => read.effect.id) } },
       select: { id: true, result: true },
@@ -298,7 +318,19 @@ export async function getRecruitingCorrespondence(
     let parsed = false;
     let failed = false;
     const emails = new Map<string, RecruitingCorrespondence["emails"][number]>();
-    for (const { effect, call, source, provider } of reads) {
+    const mailMembership = new Set<string>();
+    // Details may supplement only messages present in the latest selected campaign snapshot.
+    const projections = [
+      ...reads.filter((read) => read.call.route.toolName !== "get_email"),
+      ...reads.filter((read) => read.call.route.toolName === "get_email"),
+    ];
+    for (const { effect, call, source, provider } of projections) {
+      if (
+        provider.kind === "instantly" &&
+        call.route.toolName === "get_email" &&
+        (typeof call.args.id !== "string" || !emails.has(`${source.id}:${call.args.id}`))
+      )
+        continue;
       const result = byId.get(effect.id);
       if (result === undefined) continue;
       output.checkedAt ??= effect.updatedAt.toISOString();
@@ -401,7 +433,7 @@ export async function getRecruitingCorrespondence(
         unsupported = true;
         continue;
       }
-      parsed = true;
+      if (call.route.toolName === "list_emails") parsed = true;
       output.partial ||=
         body.next_starting_after !== undefined &&
         body.next_starting_after !== null &&
@@ -416,7 +448,25 @@ export async function getRecruitingCorrespondence(
           continue;
         }
         const id = `${source.id}:${email.id}`;
-        if (emails.has(id)) continue;
+        const membership = stableJsonValue([source.id, email.campaign_id, email.id]);
+        if (
+          call.route.toolName === "get_email" &&
+          (email.id !== call.args.id || !mailMembership.has(membership))
+        ) {
+          unsupported = true;
+          continue;
+        }
+        if (
+          !email.campaign_id ||
+          !mailCampaigns.has(stableJsonValue([source.id, email.campaign_id])) ||
+          (call.route.toolName === "list_emails" && email.campaign_id !== call.args.campaign_id)
+        ) {
+          unsupported = true;
+          continue;
+        }
+        parsed = true;
+        if (emails.has(id) && call.route.toolName !== "get_email") continue;
+        if (call.route.toolName === "list_emails") mailMembership.add(membership);
         const text = email.body.text || email.content_preview || "";
         emails.set(id, {
           id,

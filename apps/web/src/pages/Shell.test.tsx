@@ -1358,6 +1358,54 @@ it("keeps one native chat, draft, attachment and pending card through full-width
   });
 });
 
+it("keeps the same role chat widget, draft and native card across workspace menus without creating another thread", async () => {
+  setToolActivityPreference("off");
+  const view = await renderFeedbackShell("group", undefined, {
+    isDeploymentOwner: false,
+    openFeedback: false,
+    initialPath: "/app/g/group-1?view=results",
+  });
+  const composer = container!.querySelector<HTMLTextAreaElement>('textarea[name="chat-message"]')!;
+  const chat = composer.closest<HTMLElement>('section[aria-label="Role conversation"]')!;
+  const card = document.body.querySelector('[data-message-id="pending-main"]');
+  await view.click("Open role chat");
+  expect(chat.hidden).toBe(false);
+  expect(chat.classList.contains("hire-role-chat")).toBe(true);
+  type(composer, "Which saved candidates have robotics experience?");
+  for (const label of ["Contacts", "Shortlist", "Sequence", "Inbox", "Interview"]) {
+    await view.click(label);
+    expect(container!.querySelector('textarea[name="chat-message"]')).toBe(composer);
+    expect(composer.value).toBe("Which saved candidates have robotics experience?");
+    expect(document.body.querySelector('[data-message-id="pending-main"]')).toBe(card);
+    expect(chat.hidden).toBe(false);
+    expect(container?.querySelector("main")?.classList.contains("hire-role-chat-open")).toBe(true);
+    expect(chat.querySelector('button[aria-label="Recruiting"]')).toBeNull();
+  }
+  expect(chat.querySelector(".hire-assistant-identity")?.textContent).toContain(view.group.name);
+  shellApi.send.mockResolvedValue({ runId: "same-role-run" });
+  await view.click("Send");
+  expect(shellApi.send).toHaveBeenCalledExactlyOnceWith(
+    expect.objectContaining({
+      groupId: "group-1",
+      text: "Which saved candidates have robotics experience?",
+      addressing: "coordinator",
+      mentions: undefined,
+    }),
+  );
+  expect(container?.querySelector(".hire-standard-view h1")?.textContent).toBe("Interview");
+  expect(document.body.querySelector('[data-message-id="pending-main"]')).toBe(card);
+  await view.click("Collapse role chat");
+  expect(chat.hidden).toBe(true);
+  await view.click("Open role chat");
+  expect(chat.hidden).toBe(false);
+  await view.click("New Role");
+  expect(chat.hidden).toBe(true);
+  expect(container?.querySelector('button[aria-label="Open role chat"]')).toBeNull();
+  expect(container?.querySelector("main")?.classList.contains("hire-role-chat-open")).toBe(false);
+  expect(shellApi.followUp).not.toHaveBeenCalled();
+  expect(shellApi.answer).not.toHaveBeenCalled();
+});
+
 it("enables Job Brief only after a cold native thread snapshot is available", async () => {
   setToolActivityPreference("off");
   let finishThread!: () => void;

@@ -11,6 +11,8 @@ import { useEffect, useRef, useState } from "react";
 import { ArtifactFileCard } from "../components/ArtifactFileCard";
 import type { ArtifactTarget } from "../lib/artifact-open";
 import { fetchArtifactBytes } from "../lib/artifact-open";
+import type { RecruitingReadCache } from "../lib/recruiting-read-cache";
+import { clearRecruitingReads, rememberRecruitingRead } from "../lib/recruiting-read-cache";
 import { rpc } from "../lib/rpc";
 
 export type RecruitingSequenceSaveInput = {
@@ -29,6 +31,8 @@ type Props = {
   onOpenConnections: () => void;
   onSaveDraft?: (input: RecruitingSequenceSaveInput) => Promise<void>;
   refreshSignal?: number;
+  readCache?: RecruitingReadCache;
+  readCacheScope?: string;
 };
 
 function SequenceEditor({
@@ -266,29 +270,78 @@ function SavedCorrespondenceView({
   onConversation,
   onOpenConnections,
   refreshSignal = 0,
-}: Pick<Props, "artifactTarget" | "onConversation" | "onOpenConnections" | "refreshSignal"> & {
+  readCache,
+  readCacheScope,
+}: Pick<
+  Props,
+  | "artifactTarget"
+  | "onConversation"
+  | "onOpenConnections"
+  | "refreshSignal"
+  | "readCache"
+  | "readCacheScope"
+> & {
   view: "inbox" | "interview";
 }) {
   const { t } = useLingui();
   const [refresh, setRefresh] = useState(0);
   const [selectedId, setSelectedId] = useState<string>();
   const key = JSON.stringify([artifactTarget, view, refreshSignal, refresh]);
-  const [read, setRead] = useState<{ key: string; data?: SavedCorrespondence; failed?: boolean }>();
+  const scopeKey = JSON.stringify([readCacheScope, artifactTarget, view]);
+  const savedWorkspace = readCacheScope
+    ? (readCache?.entries.get(`${readCacheScope}:workspace`) as
+        | { workspace: Awaited<ReturnType<typeof rpc.recruiting.getWorkspace>> }
+        | undefined)
+    : undefined;
+  const cacheKey =
+    readCacheScope && savedWorkspace?.workspace
+      ? `${readCacheScope}:correspondence:${JSON.stringify([view, artifactTarget, savedWorkspace.workspace.role.id, savedWorkspace.workspace.revision.id])}`
+      : undefined;
+  const [read, setRead] = useState<{
+    key: string;
+    scopeKey?: string;
+    data?: SavedCorrespondence;
+    failed?: boolean;
+  }>();
   useEffect(() => {
     let cancelled = false;
-    setRead({ key });
+    const cacheEpoch = readCache?.epoch;
+    setRead((current) => ({
+      key,
+      scopeKey,
+      data:
+        (cacheKey
+          ? (readCache?.entries.get(cacheKey) as SavedCorrespondence | undefined)
+          : undefined) ?? (readCache && current?.scopeKey === scopeKey ? current?.data : undefined),
+    }));
     void rpc.recruiting
       .correspondence({ ...artifactTarget, view })
       .then((data) => {
-        if (!cancelled) setRead({ key, data });
+        if (!cancelled && (!readCache || cacheEpoch === readCache.epoch)) {
+          rememberRecruitingRead(readCache, cacheKey, data, cacheEpoch);
+          setRead({ key, scopeKey, data });
+        }
       })
-      .catch(() => {
-        if (!cancelled) setRead({ key, failed: true });
+      .catch((error) => {
+        if (!cancelled) {
+          if (
+            error &&
+            typeof error === "object" &&
+            "code" in error &&
+            ["UNAUTHORIZED", "FORBIDDEN", "NOT_FOUND"].includes(String(error.code))
+          ) {
+            clearRecruitingReads(readCache, readCacheScope);
+            setRead({ key, failed: true });
+          } else
+            setRead((current) =>
+              current?.key === key ? { ...current, failed: true } : { key, failed: true },
+            );
+        }
       });
     return () => {
       cancelled = true;
     };
-  }, [key]);
+  }, [key, cacheKey, readCache, readCacheScope, scopeKey]);
   const current = read?.key === key ? read : undefined;
   const data = current?.data;
   const selected = data?.emails.find((email) => email.id === selectedId) ?? data?.emails[0];
@@ -533,6 +586,8 @@ export function RecruitingCorrespondence({
   onOpenConnections,
   onSaveDraft,
   refreshSignal,
+  readCache,
+  readCacheScope,
 }: Props) {
   const { t } = useLingui();
   const [selectedArtifactId, setSelectedArtifactId] = useState<string | null>(null);
@@ -749,6 +804,8 @@ export function RecruitingCorrespondence({
       onConversation={onConversation}
       onOpenConnections={onOpenConnections}
       refreshSignal={refreshSignal}
+      readCache={readCache}
+      readCacheScope={readCacheScope}
     />
   );
 }
