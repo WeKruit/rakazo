@@ -1528,6 +1528,7 @@ export function ShellPage() {
   }, []);
 
   useEffect(() => {
+    if (!showToolActivity) return;
     let cancelled = false;
     void rpc.agentSkills
       .list()
@@ -1540,7 +1541,7 @@ export function ShellPage() {
     return () => {
       cancelled = true;
     };
-  }, []);
+  }, [showToolActivity]);
 
   const refreshAgentSkills = useCallback(() => {
     void rpc.agentSkills
@@ -2400,7 +2401,9 @@ export function ShellPage() {
   const replyTargetName = activeReplyTarget
     ? activeReplyTarget.role === "user"
       ? t`You`
-      : (resolveTranscriptMemberName(activeReplyTarget.botId) ?? active?.name ?? t`Bot`)
+      : showToolActivity
+        ? (resolveTranscriptMemberName(activeReplyTarget.botId) ?? active?.name ?? t`Bot`)
+        : "WeKruit"
     : undefined;
   const composerMentionTargets = useMemo(
     () =>
@@ -3462,11 +3465,13 @@ export function ShellPage() {
         mobileSidebarSwipeRef.current = null;
       }}
     >
-      <ComputerUpdateProgress
-        onCompleted={() => {
-          if (active) void refreshThread(active.id);
-        }}
-      />
+      {showToolActivity ? (
+        <ComputerUpdateProgress
+          onCompleted={() => {
+            if (active) void refreshThread(active.id);
+          }}
+        />
+      ) : null}
       {showToolActivity && bootstrapMe !== undefined ? (
         <HostComputerPrompt initialMe={bootstrapMe ?? undefined} onMeUpdated={setBootstrapMe} />
       ) : null}
@@ -4450,7 +4455,9 @@ export function ShellPage() {
                       title,
                       userName,
                       locale: i18n.locale,
-                      agentName: (botId) => resolveTranscriptBot(botId ?? "")?.name ?? t`Agent`,
+                      agentName: (botId) => showToolActivity
+                        ? (resolveTranscriptBot(botId ?? "")?.name ?? t`Agent`)
+                        : "WeKruit",
                     });
                   } catch (error) {
                     setSendError(errorText(error, t`Could not export conversation`));
@@ -7673,9 +7680,11 @@ const MessageView = memo(function MessageView({
         author={
           (message.replyPreview?.role ?? replyParent?.role) === "user"
             ? t`You`
-            : ((replyBotId ? peerBot(replyBotId)?.name : undefined) ??
-              memberName?.(replyBotId) ??
-              t`Bot`)
+            : showToolActivity
+              ? ((replyBotId ? peerBot(replyBotId)?.name : undefined) ??
+                memberName?.(replyBotId) ??
+                t`Bot`)
+              : "WeKruit"
         }
         onJump={onJumpToMessage}
       />

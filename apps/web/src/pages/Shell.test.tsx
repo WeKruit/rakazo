@@ -42,8 +42,10 @@ const shellApi = vi.hoisted(() => ({
   answer: vi.fn(),
   stop: vi.fn(),
   createArtifact: vi.fn(),
+  exportConversation: vi.fn(),
   testRun: vi.fn(),
   listRoutines: vi.fn(),
+  listAgentSkills: vi.fn().mockResolvedValue([]),
   updateRoutine: vi.fn(),
   listSpaces: vi.fn(),
   createGroup: vi.fn(),
@@ -66,6 +68,9 @@ const shellApi = vi.hoisted(() => ({
   },
 }));
 vi.mock("../lib/auth", () => ({ authClient: { useSession: () => shellApi.session } }));
+vi.mock("../lib/conversation-export", () => ({
+  downloadConversation: shellApi.exportConversation,
+}));
 vi.mock("../lib/rpc", async (importOriginal) => ({
   ...(await importOriginal<typeof import("../lib/rpc")>()),
   rpc: {
@@ -110,7 +115,7 @@ vi.mock("../lib/rpc", async (importOriginal) => ({
       list: vi.fn().mockResolvedValue([]),
       providerConfig: vi.fn().mockResolvedValue(null),
     },
-    agentSkills: { list: vi.fn().mockResolvedValue([]) },
+    agentSkills: { list: shellApi.listAgentSkills },
     voice: { status: vi.fn().mockResolvedValue(null) },
     messaging: { status: vi.fn().mockResolvedValue({ enabled: false, providers: [] }) },
     usage: { summary: vi.fn().mockResolvedValue({ inputTokens: 0, outputTokens: 0, runs: 0 }) },
@@ -119,6 +124,7 @@ vi.mock("../lib/rpc", async (importOriginal) => ({
   },
 }));
 
+import * as ComputerUpdateProgressModule from "../components/ComputerUpdateProgress";
 import * as LocalTimezoneModule from "../lib/local-timezone";
 import { setToolActivityPreference } from "../lib/tool-activity-preference";
 import * as RecruitingCorrespondenceModule from "./RecruitingCorrespondence";
@@ -1698,6 +1704,10 @@ it("refuses a partial crew when membership changes while New role stays open", a
 });
 
 it("switches the owner presentation while retaining the same native thread, pending specialist card, draft and attachment", async () => {
+  vi.spyOn(ComputerUpdateProgressModule, "ComputerUpdateProgress").mockImplementation(() => (
+    <div data-testid="native-computer-update">Computer update status</div>
+  ));
+  const exportConversation = shellApi.exportConversation.mockResolvedValue(undefined);
   setToolActivityPreference("off");
   const specialist: ThreadMessage = {
     id: "pending-specialist",
@@ -1706,6 +1716,8 @@ it("switches the owner presentation while retaining the same native thread, pend
     role: "bot",
     botId: "bot-2",
     runId: "run-1",
+    replyToMessageId: "pending-main",
+    replyPreview: { role: "bot", botId: "bot-1", text: "Choose the role location" },
     createdAt: "2026-01-01T00:01:00Z",
     blocks: [
       {
@@ -1721,8 +1733,22 @@ it("switches the owner presentation while retaining the same native thread, pend
     isDeploymentOwner: true,
     messages: [specialist],
   });
+  expect(container?.querySelector('[data-testid="native-computer-update"]')).toBeNull();
+  expect(shellApi.listAgentSkills).not.toHaveBeenCalled();
+  expect(
+    container?.querySelector(
+      '[data-message-id="pending-specialist"] [data-testid="reply-parent-preview"]',
+    )?.textContent,
+  ).toContain("WeKruit:");
   await view.click("Close");
   await view.click("Close panel");
+  await act(async () =>
+    container!
+      .querySelector<HTMLButtonElement>(
+        '[data-message-id="pending-specialist"] button[aria-label="Reply"]',
+      )!
+      .click(),
+  );
   pickAttachment();
   const draft = "Keep this role conversation open.";
   type(container!.querySelector<HTMLTextAreaElement>('textarea[name="chat-message"]')!, draft);
@@ -1733,6 +1759,22 @@ it("switches the owner presentation while retaining the same native thread, pend
     expect(
       container?.querySelector('[data-testid="shell-root"]')?.getAttribute("data-product-view"),
     ).toBe(preference === "on" ? "developer" : "recruiting");
+    expect(Boolean(container?.querySelector('[data-testid="native-computer-update"]'))).toBe(
+      preference === "on",
+    );
+    expect(shellApi.listAgentSkills).toHaveBeenCalledTimes(1);
+    expect(container?.querySelector('[data-testid="reply-chip"]')?.textContent).toContain(
+      preference === "on" ? "Sourcer:" : "WeKruit:",
+    );
+    expect(
+      container?.querySelector(
+        '[data-message-id="pending-specialist"] [data-testid="reply-parent-preview"]',
+      )?.textContent,
+    ).toContain(preference === "on" ? "Main:" : "WeKruit:");
+    await view.click("Export conversation");
+    const exported = exportConversation.mock.lastCall![0];
+    expect(exported.target).toEqual({ groupId: "group-1" });
+    expect(exported.agentName("bot-2")).toBe(preference === "on" ? "Sourcer" : "WeKruit");
     expect(
       document.body.querySelector('[data-message-id="pending-specialist"]')?.textContent,
     ).toContain("Which interview time works?");
