@@ -1,5 +1,5 @@
 import { expect, test } from "@playwright/test";
-import { captureScreenshot, signup } from "./helpers";
+import { captureScreenshot, rpc, signup } from "./helpers";
 
 test("onboarding skips model connect when a default model is already available", async ({
   page,
@@ -26,7 +26,7 @@ test("onboarding skips model connect when a default model is already available",
     }),
   );
 
-  const createRequest = page.waitForRequest("**/rpc/bots/create");
+  const createRequest = page.waitForRequest("**/rpc/onboarding/ensureRecruiting");
   const stamp = Date.now();
   await signup(
     page,
@@ -46,17 +46,29 @@ test("onboarding skips model connect when a default model is already available",
     await expect(page.getByRole("button", { name, exact: true })).toBeHidden();
   }
 
-  expect((await createRequest).postDataJSON()).toMatchObject({
-    json: {
-      name: "Chief",
-      title: "",
-      description: "",
-      instructions: "",
-      spawnKey: "onboarding:first",
-    },
-  });
-  await expect(page.getByRole("combobox", { name: "Message Chief" })).toBeVisible({
+  expect((await createRequest).postDataJSON()).toMatchObject({ json: {} });
+  await expect(page).toHaveURL(/\/app\/g\//);
+  await expect(page.getByRole("combobox", { name: "Message", exact: true })).toBeVisible({
     timeout: 20_000,
   });
+  const bots = await rpc<Array<{ name: string; modelProvider: string | null }>>(
+    page,
+    "bots/list",
+    {},
+  );
+  expect(bots.map((bot) => bot.name).sort()).toEqual(["Main", "Outreach", "Scheduling", "Sourcer"]);
+  expect(bots.every((bot) => bot.modelProvider === null)).toBe(true);
+  const first = await rpc<{ botId: string; groupId: string }>(
+    page,
+    "onboarding/ensureRecruiting",
+    {},
+  );
+  const second = await rpc<{ botId: string; groupId: string }>(
+    page,
+    "onboarding/ensureRecruiting",
+    {},
+  );
+  expect(second).toEqual(first);
+  expect((await rpc<unknown[]>(page, "bots/list", {})).length).toBe(4);
   await captureScreenshot(page, testInfo, "onboarding-model-auto-skip");
 });
