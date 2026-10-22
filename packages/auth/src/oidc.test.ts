@@ -1,13 +1,34 @@
 import { createHash, generateKeyPairSync, sign } from "node:crypto";
+import { runWithAdapter } from "@better-auth/core/context";
 import type * as Db from "@rakazo/db";
 import { memoryAdapter } from "better-auth/adapters/memory";
+import type * as PrismaAdapterModule from "better-auth/adapters/prisma";
+import type { Mock } from "vitest";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { Auth, AuthEnv } from "./index.js";
 import { createAuth } from "./index.js";
 import { isCurrentOidcAccount, oidcAccountSubject } from "./oidc.js";
 
-const state = vi.hoisted(() => ({ db: {} as Record<string, Record<string, unknown>[]> }));
-vi.mock("better-auth/adapters/prisma", () => ({ prismaAdapter: () => memoryAdapter(state.db) }));
+const state = vi.hoisted(() => ({
+  db: {} as Record<string, Record<string, unknown>[]>,
+  blockRootAdapter: false,
+}));
+vi.mock("better-auth/adapters/prisma", () => ({
+  prismaAdapter: () => {
+    const create = memoryAdapter(state.db);
+    return (...args: Parameters<typeof create>) =>
+      new Proxy(create(...args), {
+        get(target, key, receiver) {
+          const value = Reflect.get(target, key, receiver);
+          if (state.blockRootAdapter && typeof value === "function")
+            return () => {
+              throw new Error("Root adapter used inside token transaction");
+            };
+          return value;
+        },
+      });
+  },
+}));
 vi.mock("@rakazo/db", async (original) => ({
   ...(await original<typeof Db>()),
   bootstrapUserSpace: vi.fn(),
@@ -25,6 +46,7 @@ let cookies: string;
 let sentCodes: string[];
 let corruptSignature = false;
 let omitIdToken = false;
+let refreshTokenRequest: Mock<(init?: RequestInit) => Promise<Response>>;
 const codes = new Map<
   string,
   { challenge: string; nonce: string; claims: Record<string, unknown> }
@@ -156,6 +178,33 @@ async function signIn(claims?: Record<string, unknown>) {
 }
 const rows = (model: string) => state.db[model] ?? [];
 
+async function tokenTransaction(account: Record<string, unknown>) {
+  const stored = structuredClone(account);
+  const tx = {
+    account: {
+      findMany: vi.fn(async ({ where }: { where: { userId: { equals: string } } }) =>
+        where.userId.equals === stored.userId ? [structuredClone(stored)] : [],
+      ),
+      update: vi.fn(
+        async ({ where, data }: { where: { id: string }; data: Record<string, unknown> }) => {
+          expect(where).toEqual({ id: account.id });
+          Object.assign(stored, data);
+          return structuredClone(stored);
+        },
+      ),
+    },
+  };
+  const { prismaAdapter } = await vi.importActual<typeof PrismaAdapterModule>(
+    "better-auth/adapters/prisma",
+  );
+  state.blockRootAdapter = true;
+  return {
+    tx,
+    stored,
+    adapter: prismaAdapter(tx, { provider: "postgresql" })(auth.options),
+  };
+}
+
 function expireOidcProofs() {
   for (const value of rows("verification")) {
     if (String(value.identifier).startsWith("oidc-reauth-")) value.expiresAt = new Date(0);
@@ -179,6 +228,15 @@ beforeEach(() => {
   sentCodes = [];
   corruptSignature = false;
   omitIdToken = false;
+  state.blockRootAdapter = false;
+  refreshTokenRequest = vi.fn(async () =>
+    json({
+      access_token: "rotated-access-token",
+      refresh_token: "rotated-refresh-token",
+      token_type: "Bearer",
+      expires_in: 300,
+    }),
+  );
   codes.clear();
   vi.stubGlobal(
     "fetch",
@@ -199,6 +257,10 @@ beforeEach(() => {
       if (url.pathname === "/jwks") return json({ keys: [jwk] });
       if (url.pathname === "/token") {
         const body = new URLSearchParams(String(init?.body));
+        if (body.get("grant_type") === "refresh_token") {
+          expect(body.get("refresh_token")).toBe("fake-refresh-token");
+          return refreshTokenRequest(init);
+        }
         const code = body.get("code")!;
         const value = codes.get(code);
         codes.delete(code);
@@ -225,6 +287,124 @@ afterEach(() => {
 });
 
 describe("OIDC callbacks", () => {
+  it("keeps native account refresh reads and encrypted writes on the supplied Prisma adapter", async () => {
+    setup();
+    await signIn();
+    const account = rows("account")[0]!;
+    cookies = "";
+    await signIn({ sub: "subject-2", email: "other@example.test", email_verified: true });
+    const other = rows("account").find((row) => row.userId !== account.userId)!;
+    account.accessTokenExpiresAt = new Date(0);
+    const { adapter, stored, tx } = await tokenTransaction(account);
+
+    await expect(
+      runWithAdapter(adapter, () =>
+        auth.api.getAccessToken({
+          body: { accountId: String(account.id), userId: String(account.userId) },
+        }),
+      ),
+    ).resolves.toMatchObject({ accessToken: "rotated-access-token" });
+    expect(tx.account.findMany).toHaveBeenCalledTimes(1);
+    expect(tx.account.findMany).toHaveBeenLastCalledWith({
+      where: { userId: { equals: account.userId } },
+      take: 100,
+      skip: 0,
+      select: undefined,
+    });
+    expect(tx.account.update).toHaveBeenCalledTimes(1);
+    expect(stored.accessToken).not.toBe("rotated-access-token");
+    expect(stored.refreshToken).not.toBe("rotated-refresh-token");
+    expect(stored.accessToken).not.toBe(account.accessToken);
+    expect(stored.refreshToken).not.toBe(account.refreshToken);
+    await expect(
+      runWithAdapter(adapter, () =>
+        auth.api.getAccessToken({
+          body: { accountId: String(account.id), userId: String(other.userId) },
+        }),
+      ),
+    ).rejects.toMatchObject({ body: { code: "ACCOUNT_NOT_FOUND" } });
+    expect(tx.account.findMany).toHaveBeenLastCalledWith({
+      where: { userId: { equals: other.userId } },
+      take: 100,
+      skip: 0,
+      select: undefined,
+    });
+    expect(tx.account.update).toHaveBeenCalledTimes(1);
+    expect(refreshTokenRequest).toHaveBeenCalledTimes(1);
+    await expect(
+      auth.api.getAccessToken({
+        body: { accountId: String(account.id), userId: String(account.userId) },
+      }),
+    ).rejects.toThrow("Root adapter used inside token transaction");
+  });
+
+  it.each(["provider failure", "transport cancellation"])(
+    "does not write account tokens after native refresh %s",
+    async (failure) => {
+      setup();
+      await signIn();
+      const account = rows("account")[0]!;
+      account.accessTokenExpiresAt = new Date(0);
+      const before = structuredClone(account);
+      const { adapter, stored, tx } = await tokenTransaction(account);
+      if (failure === "provider failure")
+        refreshTokenRequest.mockResolvedValue(json({ error: "temporarily_unavailable" }, 503));
+      else refreshTokenRequest.mockRejectedValue(new DOMException("Aborted", "AbortError"));
+
+      await expect(
+        runWithAdapter(adapter, () =>
+          auth.api.getAccessToken({
+            body: { accountId: String(account.id), userId: String(account.userId) },
+          }),
+        ),
+      ).rejects.toMatchObject({ body: { code: "FAILED_TO_GET_ACCESS_TOKEN" } });
+      expect(tx.account.findMany).toHaveBeenCalledTimes(1);
+      expect(tx.account.update).not.toHaveBeenCalled();
+      expect(stored).toEqual(before);
+      expect(account).toEqual(before);
+    },
+  );
+
+  it("persists successful native rotation when caller cancellation cannot be forwarded", async () => {
+    setup();
+    await signIn();
+    const account = rows("account")[0]!;
+    account.accessTokenExpiresAt = new Date(0);
+    const { adapter, stored, tx } = await tokenTransaction(account);
+    const caller = new AbortController();
+    refreshTokenRequest.mockImplementation(async (init?: RequestInit) => {
+      expect(init?.signal).not.toBe(caller.signal);
+      caller.abort();
+      expect(init?.signal?.aborted).not.toBe(true);
+      return json({
+        access_token: "rotated-access-token",
+        refresh_token: "rotated-refresh-token",
+        token_type: "Bearer",
+        expires_in: 300,
+      });
+    });
+
+    // Native getAccessToken has no AbortSignal input; do not race a rotating grant.
+    await expect(
+      runWithAdapter(adapter, () =>
+        auth.api.getAccessToken({
+          body: { accountId: String(account.id), userId: String(account.userId) },
+        }),
+      ),
+    ).resolves.toMatchObject({ accessToken: "rotated-access-token" });
+    expect(caller.signal.aborted).toBe(true);
+    expect(tx.account.update).toHaveBeenCalledTimes(1);
+    expect(stored.accessToken).not.toBe(account.accessToken);
+    await expect(
+      runWithAdapter(adapter, () =>
+        auth.api.getAccessToken({
+          body: { accountId: String(account.id), userId: String(account.userId) },
+        }),
+      ),
+    ).resolves.toMatchObject({ accessToken: "rotated-access-token" });
+    expect(refreshTokenRequest).toHaveBeenCalledTimes(1);
+  });
+
   it("encrypts upstream tokens and resolves them only for the selected native account owner", async () => {
     setup();
     expect((await signIn()).headers.get("location")).toBe(`${origin}/app`);
