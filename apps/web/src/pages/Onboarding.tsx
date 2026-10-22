@@ -70,6 +70,8 @@ export function OnboardingPage() {
   const navigate = useNavigate();
   const fieldId = useId();
   const [step, setStep] = useState<"loading" | "model" | "integrations" | "bot">("loading");
+  const [initializationAttempt, setInitializationAttempt] = useState(0);
+  const [initializationError, setInitializationError] = useState<string | null>(null);
   const [integrationSetup, setIntegrationSetup] = useState<IntegrationSetupState | null>(null);
   const needsIntegrationSetup = integrationSetup?.needsSetup ?? false;
   const [integrationServers, setIntegrationServers] = useState<string[]>([]);
@@ -137,14 +139,12 @@ export function OnboardingPage() {
   });
 
   useEffect(() => {
+    let active = true;
     mountedRef.current = true;
-    void Promise.all([
-      rpc.me(),
-      rpc.models.list().catch(() => []),
-      rpc.integrationSetup.get().catch(() => null),
-    ])
+    setInitializationError(null);
+    void Promise.all([rpc.me(), rpc.models.list(), rpc.integrationSetup.get()])
       .then(([me, models, integrations]) => {
-        if (!mountedRef.current) return;
+        if (!active || !mountedRef.current) return;
         setIntegrationSetup(integrations);
         setCatalog(models);
         deploymentDefaultModelRef.current = me.defaultModel;
@@ -160,12 +160,16 @@ export function OnboardingPage() {
         }
         setStep(me.needsModel ? "model" : integrations?.needsSetup ? "integrations" : "bot");
       })
-      .catch(() => setStep("bot"));
+      .catch((error) => {
+        if (active && mountedRef.current)
+          setInitializationError(errorText(error, t`Could not load your setup`));
+      });
     return () => {
+      active = false;
       mountedRef.current = false;
       modelProbe.invalidate();
     };
-  }, []);
+  }, [initializationAttempt]);
 
   const providers = useMemo(() => {
     const seen = new Map<string, ModelCatalogEntry>();
@@ -496,9 +500,23 @@ export function OnboardingPage() {
     <div className="min-h-full bg-background px-6 py-12">
       <div className="mx-auto w-full max-w-[560px]">
         {step === "loading" ? (
-          <p className="text-muted-foreground">
-            <Trans>Loading…</Trans>
-          </p>
+          initializationError ? (
+            <div>
+              <p role="alert" className="text-sm text-destructive">
+                {initializationError}
+              </p>
+              <Button
+                className="mt-4"
+                onClick={() => setInitializationAttempt((attempt) => attempt + 1)}
+              >
+                <Trans>Try again</Trans>
+              </Button>
+            </div>
+          ) : (
+            <p className="text-muted-foreground">
+              <Trans>Loading…</Trans>
+            </p>
+          )
         ) : null}
         {step === "model" ? (
           <div>

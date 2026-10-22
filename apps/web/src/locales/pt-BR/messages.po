@@ -1670,10 +1670,6 @@ msgstr "Não foi possível criar a seção"
 msgid "Could not create space"
 msgstr ""
 
-#: src/pages/Onboarding.tsx
-#~ msgid "Could not create your bot"
-#~ msgstr "Não foi possível criar o seu bot"
-
 #: src/pages/shell/dialogs.tsx
 msgid "Could not delete bot"
 msgstr "Não foi possível apagar"
@@ -1873,6 +1869,10 @@ msgstr ""
 #: src/pages/VoiceSettingsOverlay.tsx
 msgid "Could not load voice settings"
 msgstr "Não foi possível carregar as configurações de voz"
+
+#: src/pages/Onboarding.tsx
+msgid "Could not load your setup"
+msgstr ""
 
 #: src/pages/BillingSettingsPanel.tsx
 #: src/pages/Paywall.tsx

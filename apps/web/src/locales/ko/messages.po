@@ -1670,10 +1670,6 @@ msgstr "섹션을 만들지 못했습니다."
 msgid "Could not create space"
 msgstr "스페이스를 만들 수 없습니다"
 
-#: src/pages/Onboarding.tsx
-#~ msgid "Could not create your bot"
-#~ msgstr "Bot을 만들지 못했습니다."
-
 #: src/pages/shell/dialogs.tsx
 msgid "Could not delete bot"
 msgstr "Bot을 삭제하지 못했습니다."
@@ -1873,6 +1869,10 @@ msgstr "업데이트 상태를 불러올 수 없습니다"
 #: src/pages/VoiceSettingsOverlay.tsx
 msgid "Could not load voice settings"
 msgstr "음성 설정을 불러오지 못했습니다."
+
+#: src/pages/Onboarding.tsx
+msgid "Could not load your setup"
+msgstr ""
 
 #: src/pages/BillingSettingsPanel.tsx
 #: src/pages/Paywall.tsx
