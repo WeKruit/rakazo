@@ -8,7 +8,11 @@ import { afterEach, beforeEach, expect, it, vi } from "vitest";
 
 const preview = vi.hoisted(() => vi.fn());
 const fetchArtifactBytes = vi.hoisted(() => vi.fn());
+const readCorrespondence = vi.hoisted(() => vi.fn());
 vi.mock("../lib/artifact-open", () => ({ fetchArtifactBytes }));
+vi.mock("../lib/rpc", () => ({
+  rpc: { recruiting: { correspondence: readCorrespondence } },
+}));
 vi.mock("../components/ArtifactFileCard", () => ({
   ArtifactFileCard: (props: { artifactId: string; name: string }) => {
     preview(props);
@@ -26,7 +30,17 @@ vi.mock("@lingui/react/macro", () => ({
 import { RecruitingCorrespondence } from "./RecruitingCorrespondence";
 
 let cleanup: (() => Promise<void>) | undefined;
-beforeEach(() => vi.stubGlobal("IS_REACT_ACT_ENVIRONMENT", true));
+beforeEach(() => {
+  vi.stubGlobal("IS_REACT_ACT_ENVIRONMENT", true);
+  readCorrespondence.mockResolvedValue({
+    status: "not_checked",
+    checkedAt: null,
+    connections: [],
+    emails: [],
+    events: [],
+    partial: false,
+  });
+});
 afterEach(async () => {
   await cleanup?.();
   cleanup = undefined;
@@ -56,18 +70,23 @@ async function mount(props: Partial<ComponentProps<typeof RecruitingCorresponden
   const root = createRoot(container);
   const conversation = vi.fn();
   const connections = vi.fn();
-  await act(async () =>
-    root.render(
-      <RecruitingCorrespondence
-        view="sequence"
-        messages={[]}
-        artifactTarget={{ groupId: "role-group" }}
-        onConversation={conversation}
-        onOpenConnections={connections}
-        {...props}
-      />,
-    ),
-  );
+  let currentProps = props;
+  async function render(next: typeof props = {}) {
+    currentProps = { ...currentProps, ...next };
+    await act(async () =>
+      root.render(
+        <RecruitingCorrespondence
+          view="sequence"
+          messages={[]}
+          artifactTarget={{ groupId: "role-group" }}
+          onConversation={conversation}
+          onOpenConnections={connections}
+          {...currentProps}
+        />,
+      ),
+    );
+  }
+  await render();
   cleanup = async () => {
     await act(async () => root.unmount());
     container.remove();
@@ -79,7 +98,7 @@ async function mount(props: Partial<ComponentProps<typeof RecruitingCorresponden
     expect(button).toBeDefined();
     await act(async () => button!.click());
   }
-  return { container, click, conversation, connections };
+  return { container, click, conversation, connections, render };
 }
 
 it("shows saved Outreach files by actual owner, deduplicates native attachments and preserves artifact scope", async () => {
@@ -113,7 +132,7 @@ it("does not infer draft ownership or sequence steps from filenames", async () =
 });
 
 it.each(["inbox", "interview"] as const)(
-  "keeps %s unloaded until actual provider data exists and offers real native actions",
+  "reads saved %s results and distinguishes an unchecked service from an empty result",
   async (kind) => {
     const view = await mount({
       view: kind,
@@ -122,9 +141,11 @@ it.each(["inbox", "interview"] as const)(
         message("chat", "outreach", [{ kind: "text", text: "Sent and interview scheduled" }]),
       ],
     });
-    expect(view.container.textContent).toContain(
-      kind === "inbox" ? "Inbox not loaded" : "Availability not loaded",
-    );
+    expect(readCorrespondence).toHaveBeenCalledExactlyOnceWith({
+      groupId: "role-group",
+      view: kind,
+    });
+    expect(view.container.textContent).toContain("Not checked yet");
     expect(view.container.textContent).not.toContain("Sent and interview scheduled");
     expect(view.container.querySelector("textarea,input,select")).toBeNull();
     await view.click(kind === "inbox" ? "Check inbox" : "Check availability");
@@ -135,6 +156,144 @@ it.each(["inbox", "interview"] as const)(
     expect(view.connections).toHaveBeenCalledExactlyOnceWith();
   },
 );
+
+it("renders only retained email fields, supports selection and never treats assistant narration as mail", async () => {
+  readCorrespondence.mockResolvedValue({
+    status: "ready",
+    checkedAt: "2026-10-22T01:00:00Z",
+    connections: [{ name: "Mailbox", status: "configured" }],
+    emails: [
+      {
+        id: "email-1",
+        sender: "one@example.test",
+        recipients: ["team@example.test"],
+        subject: "Interview question",
+        body: "Can we speak Thursday? <script>unsafe()</script>",
+        snippet: false,
+        date: "2026-10-22T00:00:00Z",
+        url: null,
+      },
+      {
+        id: "email-2",
+        sender: "two@example.test",
+        recipients: [],
+        subject: "Another reply",
+        body: "Please share the role.",
+        snippet: true,
+        date: null,
+        url: null,
+      },
+    ],
+    events: [],
+    partial: true,
+  });
+  const view = await mount({ view: "inbox" });
+  expect(view.container.textContent).toContain("Can we speak Thursday?");
+  expect(view.container.querySelector("script")).toBeNull();
+  expect(view.container.textContent).toContain("More results may be available");
+  await view.click("Another reply");
+  expect(view.container.textContent).toContain("Please share the role.");
+  expect(view.container.textContent).toContain("Preview only");
+  expect(view.conversation).not.toHaveBeenCalled();
+});
+
+it("shows actual observed calendar events separately from available times and does not imply booking", async () => {
+  readCorrespondence.mockResolvedValue({
+    status: "ready",
+    checkedAt: "2026-10-22T01:00:00Z",
+    connections: [],
+    emails: [],
+    partial: false,
+    events: [
+      {
+        id: "event-1",
+        kind: "event",
+        title: "Recruiting conversation",
+        start: "2026-10-23T10:00:00-07:00",
+        end: "2026-10-23T10:30:00-07:00",
+        timeZone: "America/Los_Angeles",
+        attendees: ["one@example.test"],
+        status: "tentative",
+        location: null,
+        url: null,
+      },
+      {
+        id: "slot-1",
+        kind: "availability",
+        title: null,
+        start: "2026-10-23T11:00:00-07:00",
+        end: "2026-10-23T11:30:00-07:00",
+        timeZone: "America/Los_Angeles",
+        attendees: [],
+        status: null,
+        location: null,
+        url: null,
+      },
+    ],
+  });
+  const view = await mount({ view: "interview" });
+  expect(view.container.textContent).toContain("Recruiting conversation");
+  expect(view.container.textContent).toContain("tentative");
+  expect(view.container.textContent).toContain("Available time");
+  expect(view.container.textContent).toContain("No invitation is created by this view");
+  expect(view.conversation).not.toHaveBeenCalled();
+});
+
+it.each(["empty", "failed", "unsupported"])(
+  "shows the actual %s read outcome without inventing results",
+  async (status) => {
+    readCorrespondence.mockResolvedValue({
+      status,
+      checkedAt: "2026-10-22T01:00:00Z",
+      connections: [{ name: "Calendar", status: "needs_access" }],
+      emails: [],
+      events: [],
+      partial: false,
+    });
+    const view = await mount({ view: "interview" });
+    expect(view.container.textContent).toContain(
+      status === "empty"
+        ? "No saved results"
+        : status === "failed"
+          ? "The last check failed"
+          : "This result cannot be displayed yet",
+    );
+    expect(view.container.textContent).toContain("Enable for this role");
+    await view.click("Refresh saved results");
+    expect(readCorrespondence).toHaveBeenCalledTimes(2);
+    expect(view.conversation).not.toHaveBeenCalled();
+  },
+);
+
+it("discards late mail from the previous role and refreshes after native completion, not streamed messages", async () => {
+  let finish!: (value: unknown) => void;
+  readCorrespondence.mockReturnValueOnce(
+    new Promise((resolve) => {
+      finish = resolve;
+    }),
+  );
+  const view = await mount({ view: "inbox", refreshSignal: 0 });
+  await view.render({ artifactTarget: { groupId: "another-role" } });
+  await act(async () =>
+    finish({
+      status: "ready",
+      checkedAt: null,
+      connections: [],
+      emails: [{ id: "old", sender: "old@example.test", subject: "Old role email" }],
+      events: [],
+      partial: false,
+    }),
+  );
+  expect(view.container.textContent).not.toContain("Old role email");
+  expect(readCorrespondence).toHaveBeenCalledTimes(2);
+  await view.render({
+    messages: [message("stream", "main", [{ kind: "text", text: "Still checking" }])],
+  });
+  expect(readCorrespondence).toHaveBeenCalledTimes(2);
+  await view.render({ refreshSignal: 1 });
+  expect(readCorrespondence).toHaveBeenCalledTimes(3);
+  expect(readCorrespondence.mock.lastCall![0]).toEqual({ groupId: "another-role", view: "inbox" });
+});
 
 it("edits the real three-step sequence and saves an immutable companion through the native callback", async () => {
   const sequence = {

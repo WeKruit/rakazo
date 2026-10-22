@@ -45,6 +45,428 @@ const actor: Actor = {
   isDeploymentOwner: false,
 };
 
+describe("saved recruiting correspondence", () => {
+  const target = {
+    kind: "group" as const,
+    groupId: "role-group",
+    threadId: "role-thread",
+    groupName: "Role",
+    memberBotIds: ["main"],
+    members: [],
+  };
+  const email = {
+    id: "d1495a46-b3f5-4afe-8e0f-8886bedb6932",
+    timestamp_created: "2026-10-22T01:00:00Z",
+    timestamp_email: "2026-10-22T00:59:00Z",
+    message_id: "<original@example.test>",
+    subject: "Original subject",
+    from_address_email: "person@example.test",
+    to_address_email_list: "team@example.test",
+    body: { text: "Original provider body" },
+    organization_id: "58713398-41d5-40cb-a2d2-0b2ecd1af269",
+    eaccount: "team@example.test",
+  };
+  function fixture({
+    result = {
+      isError: false,
+      structuredContent: { items: [email], next_starting_after: null },
+    } as unknown,
+    enabled = true,
+    permission = true,
+    current = true,
+  } = {}) {
+    const request = [
+      "__rakazoCatalogTool",
+      "direct",
+      {
+        route: {
+          connectorId: "mcp",
+          resourceId: "mail",
+          resourceRevision: 1,
+          toolName: "list_emails",
+        },
+        args: {
+          campaign_id: "saved-campaign",
+          email_type: "received",
+          limit: 2,
+          privateKey: "never-return-arguments",
+        },
+      },
+    ];
+    const retained = {
+      id: "effect",
+      request,
+      status: "completed",
+      updatedAt: new Date("2026-10-22T01:00:00Z"),
+      run: { botId: "main" },
+    };
+    const client = {
+      mcpServer: {
+        findMany: vi.fn().mockResolvedValue([
+          {
+            id: "mail",
+            name: "Instantly",
+            endpoint: "https://mcp.instantly.ai/mcp",
+            secretId: "encrypted-reference",
+            revision: 1,
+            enabled,
+            assignments: permission
+              ? [{ botId: "main", allowAllTools: false, allowedTools: ["list_emails"] }]
+              : [],
+          },
+        ]),
+      },
+      externalEffect: {
+        findMany: vi
+          .fn()
+          .mockResolvedValueOnce([retained])
+          .mockResolvedValueOnce([{ id: "effect", result }]),
+      },
+      thread: { findFirst: vi.fn().mockResolvedValue(current ? { id: "role-thread" } : null) },
+    };
+    vi.mocked(db.getRecruitingWorkspace).mockResolvedValue({ role: { id: "role" } } as never);
+    return { client, prisma: client as unknown as PrismaClient, retained };
+  }
+  it("projects the real native read envelope and allowlisted mail fields under current actor/thread/role permissions", async () => {
+    const { client, prisma } = fixture();
+    const result = await api.getRecruitingCorrespondence(prisma, actor, target, "inbox");
+    expect(result).toMatchObject({
+      status: "ready",
+      partial: false,
+      emails: [
+        {
+          sender: email.from_address_email,
+          subject: email.subject,
+          body: email.body.text,
+          snippet: true,
+        },
+      ],
+    });
+    expect(JSON.stringify(result)).not.toMatch(
+      /privateKey|never-return-arguments|encrypted-reference|saved-campaign/,
+    );
+    expect(client.externalEffect.findMany.mock.calls[0]![0].where).toMatchObject({
+      spaceId: "space",
+      run: {
+        spaceId: "space",
+        userId: "owner",
+        threadId: "role-thread",
+        botId: { in: ["main"] },
+        OR: [
+          { initialRecruitingRoleRevisionId: null },
+          { initialRecruitingRoleRevision: { roleId: "role" } },
+        ],
+      },
+    });
+    expect(client.thread.findFirst).toHaveBeenCalledWith({
+      where: {
+        id: "role-thread",
+        spaceId: "space",
+        userId: "owner",
+        activeRecruitingRoleId: "role",
+      },
+      select: { id: true },
+    });
+  });
+  it.each([{ enabled: false }, { permission: false }])(
+    "does not fetch provider payloads after native permission is unavailable: %j",
+    async (options) => {
+      const { client, prisma } = fixture(options);
+      const result = await api.getRecruitingCorrespondence(prisma, actor, target, "inbox");
+      expect(result.status).toBe("not_checked");
+      expect(result.emails).toEqual([]);
+      expect(client.externalEffect.findMany).not.toHaveBeenCalled();
+    },
+  );
+  it("does not advertise a configured mailbox when only unrelated tools are assigned", async () => {
+    const { client, prisma } = fixture();
+    client.mcpServer.findMany.mockResolvedValueOnce([
+      {
+        id: "mail",
+        name: "Instantly",
+        endpoint: "https://mcp.instantly.ai/mcp",
+        secretId: "encrypted-reference",
+        revision: 1,
+        enabled: true,
+        assignments: [{ botId: "main", allowAllTools: false, allowedTools: ["list_campaigns"] }],
+      },
+    ]);
+    const result = await api.getRecruitingCorrespondence(prisma, actor, target, "inbox");
+    expect(result.connections).toEqual([{ name: "Instantly", status: "needs_access" }]);
+    expect(result.emails).toEqual([]);
+    expect(client.externalEffect.findMany).not.toHaveBeenCalled();
+  });
+  it.each([
+    [{ isError: false, structuredContent: { items: [] } }, "empty"],
+    [{ isError: true, structuredContent: { items: [email] } }, "failed"],
+    [
+      { isError: false, structuredContent: { narrative: "an interview was booked" } },
+      "unsupported",
+    ],
+  ])(
+    "distinguishes checked-empty, provider failure and unsupported output",
+    async (result, expected) => {
+      const { prisma } = fixture({ result });
+      const output = await api.getRecruitingCorrespondence(prisma, actor, target, "inbox");
+      expect(output.status).toBe(expected);
+      expect(output.emails).toEqual([]);
+    },
+  );
+  it("does not reuse a prior query result when the most recent identical read returned empty", async () => {
+    const { client, prisma, retained } = fixture({
+      result: { isError: false, structuredContent: { items: [] } },
+    });
+    client.externalEffect.findMany
+      .mockReset()
+      .mockResolvedValueOnce([retained, { ...retained, id: "older" }])
+      .mockResolvedValueOnce([
+        { id: "effect", result: { isError: false, structuredContent: { items: [] } } },
+        { id: "older", result: { isError: false, structuredContent: { items: [email] } } },
+      ]);
+    const output = await api.getRecruitingCorrespondence(prisma, actor, target, "inbox");
+    expect(output.status).toBe("empty");
+    expect(client.externalEffect.findMany.mock.calls[1]![0].where.id).toEqual({ in: ["effect"] });
+  });
+  it("rejects a role switch while the saved receipts are being read", async () => {
+    const { prisma } = fixture({ current: false });
+    await expect(
+      api.getRecruitingCorrespondence(prisma, actor, target, "inbox"),
+    ).rejects.toMatchObject({ code: "NOT_FOUND" });
+  });
+  it.each([false, true, undefined])(
+    "projects the observed Cal text-only empty result without assuming pagination: %s",
+    async (hasNextPage) => {
+      const { client, prisma, retained } = fixture();
+      client.mcpServer.findMany.mockResolvedValueOnce([
+        {
+          id: "mail",
+          name: "Cal.com",
+          endpoint: "https://mcp.cal.com/mcp",
+          secretId: "encrypted-reference",
+          revision: 2,
+          enabled: true,
+          assignments: [{ botId: "main", allowAllTools: false, allowedTools: ["get_bookings"] }],
+        },
+      ]);
+      const request = [
+        "__rakazoCatalogTool",
+        "direct",
+        {
+          route: {
+            connectorId: "mcp",
+            resourceId: "mail",
+            resourceRevision: 2,
+            toolName: "get_bookings",
+          },
+          args: { status: "upcoming", take: 10 },
+        },
+      ];
+      client.externalEffect.findMany
+        .mockReset()
+        .mockResolvedValueOnce([{ ...retained, request }])
+        .mockResolvedValueOnce([
+          {
+            id: "effect",
+            result: {
+              content: [
+                {
+                  type: "text",
+                  text: JSON.stringify({
+                    status: "success",
+                    data: [],
+                    pagination: { hasNextPage },
+                  }),
+                },
+              ],
+            },
+          },
+        ]);
+      const result = await api.getRecruitingCorrespondence(prisma, actor, target, "interview");
+      expect(result).toMatchObject({
+        status: "empty",
+        checkedAt: retained.updatedAt.toISOString(),
+        events: [],
+        partial: hasNextPage !== false,
+        connections: [{ name: "Cal.com", status: "configured" }],
+      });
+    },
+  );
+  it.each(["https://mcp.instantly.ai/mcp", "https://custom.example.test/mcp"])(
+    "does not reinterpret an earlier connection receipt after configuration changes: %s",
+    async (endpoint) => {
+      const { client, prisma } = fixture();
+      client.mcpServer.findMany.mockResolvedValueOnce([
+        {
+          id: "mail",
+          name: "Changed connection",
+          endpoint,
+          secretId: "encrypted-reference",
+          revision: 2,
+          enabled: true,
+          assignments: [{ botId: "main", allowAllTools: false, allowedTools: ["list_emails"] }],
+        },
+      ]);
+      expect(await api.getRecruitingCorrespondence(prisma, actor, target, "inbox")).toMatchObject({
+        status: "unsupported",
+        connectionChanged: true,
+        emails: [],
+      });
+      expect(client.externalEffect.findMany).toHaveBeenCalledTimes(1);
+      expect(client.externalEffect.findMany.mock.calls[0]![0].where.OR).toContainEqual({
+        AND: [
+          { request: { path: ["2", "route", "resourceId"], equals: "mail" } },
+          { request: { path: ["2", "route", "toolName"], equals: "list_emails" } },
+        ],
+      });
+    },
+  );
+  function contactFixture(body: unknown) {
+    const state = fixture();
+    const request = [
+      "__rakazoCatalogTool",
+      "direct",
+      {
+        route: {
+          connectorId: "mcp",
+          resourceId: "mail",
+          resourceRevision: 1,
+          toolName: "get_enrichment_results",
+        },
+        args: { enrichment_id: "saved-job" },
+      },
+    ];
+    const client = Object.assign(state.client, {
+      recruitingCandidate: {
+        findMany: vi.fn().mockResolvedValue([{ candidateKey: "linkedin:/in/saved-person" }]),
+      },
+    });
+    client.mcpServer.findMany.mockResolvedValueOnce([
+      {
+        id: "mail",
+        name: "FullEnrich",
+        endpoint: "https://mcp.fullenrich.com/mcp",
+        secretId: "encrypted-reference",
+        revision: 1,
+        enabled: true,
+        assignments: [
+          { botId: "main", allowAllTools: false, allowedTools: ["get_enrichment_results"] },
+        ],
+      },
+    ]);
+    const retained = { ...state.retained, request };
+    const result = { content: [{ type: "text", text: JSON.stringify(body) }] };
+    client.externalEffect.findMany
+      .mockReset()
+      .mockResolvedValueOnce([retained])
+      .mockResolvedValueOnce([{ id: "effect", result }]);
+    return { ...state, client, retained, result };
+  }
+  const contactRow = {
+    input: { professional_network_url: "https://www.linkedin.com/in/saved-person/" },
+    profile: {
+      full_name: "Never join by this name",
+      description: "private profile payload",
+      social_profiles: { professional_network: { url: "https://linkedin.com/in/Saved-Person" } },
+    },
+    contact_info: {
+      most_probable_work_email: { email: "person@example.test", status: "HIGH_PROBABILITY" },
+      most_probable_phone: null,
+      work_emails: [{ email: "person@example.test", status: "HIGH_PROBABILITY" }],
+    },
+  };
+  it("projects the actual FullEnrich text result only for the canonical current-role identity, preserving provider uncertainty", async () => {
+    const { client, prisma } = contactFixture({ status: "FINISHED", results: [contactRow] });
+    const result = await api.getRecruitingCorrespondence(prisma, actor, target, "contacts");
+    expect(result).toMatchObject({
+      status: "ready",
+      contacts: [
+        {
+          candidateKey: "linkedin:/in/saved-person",
+          emails: [{ address: "person@example.test", status: "HIGH_PROBABILITY" }],
+          phones: [],
+          source: "FullEnrich",
+          checkedAt: "2026-10-22T01:00:00.000Z",
+        },
+      ],
+    });
+    expect(JSON.stringify(result)).not.toMatch(/saved-job|private profile|Never join|VERIFIED/);
+    expect(client.recruitingCandidate.findMany).toHaveBeenCalledWith({
+      where: { roleId: "role", role: { spaceId: "space", userId: "owner" } },
+      select: { candidateKey: true },
+    });
+  });
+  it("does not join a provider contact to another role or match by name", async () => {
+    const { client, prisma } = contactFixture({ status: "FINISHED", results: [contactRow] });
+    client.recruitingCandidate.findMany.mockResolvedValueOnce([
+      { candidateKey: "linkedin:/in/another-person" },
+    ]);
+    expect(await api.getRecruitingCorrespondence(prisma, actor, target, "contacts")).toMatchObject({
+      status: "empty",
+      contacts: [],
+    });
+  });
+  it("rejects conflicting provider input and returned profile identities", async () => {
+    const { prisma } = contactFixture({
+      status: "FINISHED",
+      results: [
+        {
+          ...contactRow,
+          profile: {
+            social_profiles: {
+              professional_network: { url: "https://www.linkedin.com/in/another-person" },
+            },
+          },
+        },
+      ],
+    });
+    expect(await api.getRecruitingCorrespondence(prisma, actor, target, "contacts")).toMatchObject({
+      status: "unsupported",
+      partial: true,
+      contacts: [],
+    });
+  });
+  it.each([
+    [{ status: "in_progress", progress: { total: 1 } }, "not_checked"],
+    [{ status: "FINISHED", results: "malformed" }, "unsupported"],
+    [{ status: "FINISHED", results: [] }, "empty"],
+  ])(
+    "does not revive an older completed same-job contact after a newer observation: %j",
+    async (body, status) => {
+      const { client, prisma, retained, result } = contactFixture(body);
+      client.externalEffect.findMany
+        .mockReset()
+        .mockResolvedValueOnce([retained, { ...retained, id: "older" }])
+        .mockResolvedValueOnce([{ id: "effect", result }]);
+      expect(
+        await api.getRecruitingCorrespondence(prisma, actor, target, "contacts"),
+      ).toMatchObject({
+        status,
+        contacts: [],
+      });
+      expect(client.externalEffect.findMany.mock.calls[1]![0].where.id).toEqual({ in: ["effect"] });
+    },
+  );
+  it("rejects malformed returned email addresses without exposing the raw result", async () => {
+    const { prisma } = contactFixture({
+      status: "FINISHED",
+      results: [
+        {
+          ...contactRow,
+          contact_info: {
+            most_probable_work_email: null,
+            work_emails: [{ email: "not-an-address", status: "HIGH_PROBABILITY" }],
+          },
+        },
+      ],
+    });
+    expect(await api.getRecruitingCorrespondence(prisma, actor, target, "contacts")).toMatchObject({
+      status: "unsupported",
+      partial: true,
+      contacts: [],
+    });
+  });
+});
+
 it("reads feedback through the owned role boundary and rejects unauthenticated requests", async () => {
   const client = createRouterClient(createRouter({ prisma } as RouterDeps), { context: { actor } });
   vi.mocked(db.listRecruitingFeedback).mockResolvedValueOnce({ feedback: [], nextCursor: null });

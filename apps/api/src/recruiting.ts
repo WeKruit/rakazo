@@ -5,20 +5,27 @@ import {
   createRecruitingCandidateReportReader,
   isRecruitingCandidateReportField,
   readActorArtifact,
+  readInstantlyEmail,
 } from "@rakazo/adapters";
 import type {
   Actor,
   ReadRecruitingSourceInput,
   RecruitingAssessmentSourceRef,
   RecruitingCandidateSource,
+  RecruitingCorrespondence,
   RecruitingSourceRef,
   RecruitingSourceSelection,
 } from "@rakazo/contracts";
+import { RecruitingCorrespondenceSchema } from "@rakazo/contracts";
 import {
+  boundDirectApprovalDetails,
+  catalogApprovalDetails,
   RecruitingPlaybookValidationError,
   readRecruitingJsonString,
+  recruitingCalibrationIdentity,
   validateRecruitingTextSelection,
 } from "@rakazo/core";
+import { mcpObject, stableJsonValue } from "@rakazo/core/node/approval-effect-key";
 import { extractPdfText } from "@rakazo/core/node/pdf-text";
 import type { PrismaClient, RecruitingRoleMaterialContext } from "@rakazo/db";
 import * as recruiting from "@rakazo/db";
@@ -29,6 +36,7 @@ import {
 } from "@rakazo/db";
 import type { ParseError } from "jsonc-parser";
 import { findNodeAtLocation, parseTree } from "jsonc-parser";
+import type { ThreadTarget } from "./thread-target.js";
 
 async function authenticated<T>(operation: () => Promise<T>): Promise<T> {
   try {
@@ -49,6 +57,404 @@ async function authenticated<T>(operation: () => Promise<T>): Promise<T> {
 }
 
 type RecruitingReadDeps = { prisma: PrismaClient; artifacts: ArtifactStore };
+
+function correspondenceProvider(endpoint: string | null, view: "inbox" | "interview" | "contacts") {
+  if (!endpoint) return null;
+  let address: string;
+  try {
+    const url = new URL(endpoint);
+    address = `${url.origin}${url.pathname.replace(/\/$/, "")}`;
+  } catch {
+    return null;
+  }
+  if (view === "inbox") {
+    if (address === "https://mcp.instantly.ai/mcp")
+      return { kind: "instantly", tools: ["list_emails", "get_email"] };
+    if (address === "https://gmailmcp.googleapis.com/mcp/v1")
+      return { kind: "gmail", tools: ["get_message", "get_thread", "search_threads"] };
+  } else if (view === "interview") {
+    if (address === "https://calendarmcp.googleapis.com/mcp/v1")
+      return {
+        kind: "calendar",
+        tools: ["list_events", "get_event", "search_events", "suggest_time"],
+      };
+    if (address === "https://mcp.cal.com/mcp")
+      return { kind: "cal", tools: ["get_bookings", "get_booking", "get_availability"] };
+  } else if (address === "https://mcp.fullenrich.com/mcp") {
+    return { kind: "fullenrich", tools: ["get_enrichment_results"] };
+  }
+  return null;
+}
+
+function correspondenceCall(request: unknown) {
+  const direct = boundDirectApprovalDetails(request, "__rakazoCatalogTool");
+  if (direct) return direct;
+  const catalog = catalogApprovalDetails(request, "__rakazoCatalogTool");
+  if (
+    !catalog?.route ||
+    catalog.args.id !== `${catalog.route.resourceId}:${encodeURIComponent(catalog.route.toolName)}`
+  )
+    return null;
+  const args = catalog.args.arguments;
+  return args && typeof args === "object" && !Array.isArray(args)
+    ? { route: catalog.route, args: args as Record<string, unknown> }
+    : null;
+}
+
+function correspondenceAllows(
+  assignment: { allowAllTools: boolean; allowedTools: unknown },
+  tool: string,
+) {
+  return (
+    assignment.allowAllTools ||
+    (Array.isArray(assignment.allowedTools) && assignment.allowedTools.includes(tool))
+  );
+}
+
+function correspondenceRecord(value: unknown): Record<string, unknown> | undefined {
+  return value && typeof value === "object" && !Array.isArray(value)
+    ? (value as Record<string, unknown>)
+    : undefined;
+}
+
+/** Project saved native reads only. Opening a dashboard never invokes a provider. */
+export async function getRecruitingCorrespondence(
+  prisma: PrismaClient,
+  actor: Actor,
+  target: ThreadTarget,
+  view: "inbox" | "interview" | "contacts",
+): Promise<RecruitingCorrespondence> {
+  return authenticated(async () => {
+    const workspace = await recruiting.getRecruitingWorkspace(prisma, actor, {
+      threadId: target.threadId,
+    });
+    const botIds = target.kind === "group" ? target.memberBotIds : [target.botId];
+    const servers = await prisma.mcpServer.findMany({
+      where: { userId: actor.userId, spaceId: actor.spaceId },
+      select: {
+        id: true,
+        name: true,
+        endpoint: true,
+        secretId: true,
+        enabled: true,
+        revision: true,
+        assignments: {
+          where: { userId: actor.userId, spaceId: actor.spaceId, botId: { in: botIds } },
+          select: { botId: true, allowAllTools: true, allowedTools: true },
+        },
+      },
+    });
+    const sourceRows = servers.map((server) => ({
+      ...server,
+      provider: correspondenceProvider(server.endpoint, view),
+    }));
+    const sources = sourceRows.filter((source) => source.provider !== null);
+    const output: RecruitingCorrespondence = {
+      status: "not_checked",
+      checkedAt: null,
+      connectionChanged: false,
+      emails: [],
+      events: [],
+      contacts: [],
+      partial: false,
+      connections: sources.map((source) => ({
+        name: source.name,
+        status: !source.enabled
+          ? "disabled"
+          : !source.secretId
+            ? "needs_connection"
+            : !source.assignments.some((assignment) =>
+                  source.provider?.tools.some((tool) => correspondenceAllows(assignment, tool)),
+                )
+              ? "needs_access"
+              : "configured",
+      })),
+    };
+    if (!workspace) return output;
+    const readTools =
+      view === "inbox"
+        ? ["list_emails", "get_email", "get_message", "get_thread", "search_threads"]
+        : view === "interview"
+          ? [
+              "get_bookings",
+              "get_booking",
+              "get_availability",
+              "list_events",
+              "get_event",
+              "search_events",
+              "suggest_time",
+            ]
+          : ["get_enrichment_results"];
+    const querySources = sourceRows.filter(
+      (source) =>
+        source.enabled &&
+        source.assignments.some((assignment) =>
+          readTools.some((tool) => correspondenceAllows(assignment, tool)),
+        ),
+    );
+    if (!querySources.length) return output;
+    // Keep historical reads of the same role, including native legacy runs without an initial revision.
+    const scope = {
+      spaceId: actor.spaceId,
+      run: {
+        spaceId: actor.spaceId,
+        userId: actor.userId,
+        threadId: target.threadId,
+        botId: { in: botIds },
+        OR: [
+          { initialRecruitingRoleRevisionId: null },
+          { initialRecruitingRoleRevision: { roleId: workspace.role.id } },
+        ],
+      },
+      status: { in: ["completed", "failed"] },
+    };
+    const retained = await prisma.externalEffect.findMany({
+      where: {
+        ...scope,
+        OR: querySources.flatMap((source) =>
+          (source.provider?.tools ?? readTools).flatMap((tool) => [
+            {
+              AND: [
+                { request: { path: ["2", "route", "resourceId"], equals: source.id } },
+                { request: { path: ["2", "route", "toolName"], equals: tool } },
+              ],
+            },
+            {
+              AND: [
+                { request: { path: ["3", "resourceId"], equals: source.id } },
+                { request: { path: ["3", "toolName"], equals: tool } },
+              ],
+            },
+          ]),
+        ),
+      },
+      orderBy: [{ updatedAt: "desc" }, { id: "desc" }],
+      take: 201,
+      select: {
+        id: true,
+        request: true,
+        status: true,
+        updatedAt: true,
+        run: { select: { botId: true } },
+      },
+    });
+    // ponytail: bound saved display history to 200 matching reads; a native fresh check refreshes older coverage.
+    output.partial = retained.length > 200;
+    const seen = new Set<string>();
+    let unsupported = false;
+    const reads = retained.slice(0, 200).flatMap((effect) => {
+      const call = correspondenceCall(effect.request);
+      const source = sourceRows.find(
+        (source) => source.id === call?.route.resourceId && source.enabled,
+      );
+      if (
+        call?.route.connectorId !== "mcp" ||
+        !source ||
+        !(source.provider?.tools ?? readTools).includes(call.route.toolName)
+      )
+        return [];
+      const permission = source.assignments.find(
+        (assignment) => assignment.botId === effect.run.botId,
+      );
+      if (!permission || !correspondenceAllows(permission, call.route.toolName)) return [];
+      const query = Object.fromEntries(
+        Object.entries(call.args).filter(([key]) => key !== "limit"),
+      );
+      const key = stableJsonValue([source.id, call.route.toolName, query]);
+      // A new check replaces the prior observation for the same provider query, including empty/error.
+      if (seen.has(key)) return [];
+      seen.add(key);
+      if (call.route.resourceRevision !== source.revision || !source.provider) {
+        unsupported = true;
+        output.checkedAt ??= effect.updatedAt.toISOString();
+        output.connectionChanged ||= call.route.resourceRevision !== source.revision;
+        return [];
+      }
+      return [{ effect, call, source, provider: source.provider }];
+    });
+    if (!reads.length) {
+      if (unsupported) output.status = "unsupported";
+      return output;
+    }
+    const results = await prisma.externalEffect.findMany({
+      where: { ...scope, id: { in: reads.map((read) => read.effect.id) } },
+      select: { id: true, result: true },
+    });
+    const byId = new Map(results.map((result) => [result.id, result.result]));
+    const candidateKeys = new Set(
+      view === "contacts"
+        ? (
+            await prisma.recruitingCandidate.findMany({
+              where: {
+                roleId: workspace.role.id,
+                role: { spaceId: actor.spaceId, userId: actor.userId },
+              },
+              select: { candidateKey: true },
+            })
+          ).map((candidate) => candidate.candidateKey)
+        : [],
+    );
+    const contactKeys = new Set<string>();
+    let parsed = false;
+    let failed = false;
+    const emails = new Map<string, RecruitingCorrespondence["emails"][number]>();
+    for (const { effect, call, source, provider } of reads) {
+      const result = byId.get(effect.id);
+      if (result === undefined) continue;
+      output.checkedAt ??= effect.updatedAt.toISOString();
+      if (
+        effect.status === "failed" ||
+        (result &&
+          typeof result === "object" &&
+          !Array.isArray(result) &&
+          ("error" in result ||
+            ("isError" in result && result.isError !== false && result.isError !== undefined)))
+      ) {
+        failed = true;
+        continue;
+      }
+      const body = mcpObject(result);
+      if (provider.kind === "fullenrich" && body) {
+        if (typeof call.args.enrichment_id !== "string" || !call.args.enrichment_id.trim()) {
+          unsupported = true;
+          continue;
+        }
+        if (body.status === "in_progress") {
+          output.partial = true;
+          continue;
+        }
+        if (body.status !== "FINISHED" || !Array.isArray(body.results)) {
+          unsupported = true;
+          continue;
+        }
+        parsed = true;
+        for (const row of body.results) {
+          const entry = correspondenceRecord(row);
+          const input = correspondenceRecord(entry?.input);
+          const profile = correspondenceRecord(entry?.profile);
+          const network = correspondenceRecord(
+            correspondenceRecord(profile?.social_profiles)?.professional_network,
+          );
+          const linkedinUrl = input?.professional_network_url;
+          const identity =
+            typeof linkedinUrl === "string" ? recruitingCalibrationIdentity(linkedinUrl) : null;
+          const profileIdentity =
+            typeof network?.url === "string" ? recruitingCalibrationIdentity(network.url) : null;
+          if (!identity || identity !== profileIdentity) {
+            unsupported = true;
+            continue;
+          }
+          const candidateKey = `linkedin:${identity}`;
+          if (!candidateKeys.has(candidateKey) || contactKeys.has(candidateKey)) continue;
+          contactKeys.add(candidateKey);
+          const info = correspondenceRecord(entry?.contact_info);
+          if (!info || !Array.isArray(info.work_emails)) {
+            unsupported = true;
+            continue;
+          }
+          const addresses = [info.most_probable_work_email, ...info.work_emails]
+            .filter((email) => email !== null && email !== undefined)
+            .map((email) => {
+              const value = correspondenceRecord(email);
+              return { address: value?.email, status: value?.status };
+            });
+          const contact = RecruitingCorrespondenceSchema.shape.contacts.element.safeParse({
+            candidateKey,
+            linkedinUrl,
+            emails: addresses,
+            // ponytail: the observed provider phone is null; do not infer an unverified phone schema.
+            phones: [],
+            source: source.name,
+            checkedAt: effect.updatedAt.toISOString(),
+          });
+          if (!contact.success) {
+            unsupported = true;
+            continue;
+          }
+          contact.data.emails = [
+            ...new Map(contact.data.emails.map((email) => [email.address, email])).values(),
+          ];
+          output.contacts.push(contact.data);
+        }
+        continue;
+      }
+      if (provider.kind === "cal" && call.route.toolName === "get_bookings" && body) {
+        // ponytail: only the verified empty Cal frame; extend with actual nonempty provider rows when available.
+        if (body.status === "success" && Array.isArray(body.data) && body.data.length === 0) {
+          parsed = true;
+          const pagination = body.pagination;
+          output.partial ||=
+            !pagination ||
+            typeof pagination !== "object" ||
+            Array.isArray(pagination) ||
+            !("hasNextPage" in pagination) ||
+            pagination.hasNextPage !== false;
+        } else unsupported = true;
+        continue;
+      }
+      if (provider.kind !== "instantly" || !body) {
+        unsupported = true;
+        continue;
+      }
+      const rows = call.route.toolName === "list_emails" ? body.items : [body];
+      if (!Array.isArray(rows)) {
+        unsupported = true;
+        continue;
+      }
+      parsed = true;
+      output.partial ||=
+        body.next_starting_after !== undefined &&
+        body.next_starting_after !== null &&
+        body.next_starting_after !== "";
+      for (const row of rows) {
+        const email = readInstantlyEmail(row);
+        if (!email) {
+          unsupported = true;
+          output.partial = true;
+          continue;
+        }
+        const id = `${source.id}:${email.id}`;
+        if (emails.has(id)) continue;
+        const text = email.body.text || email.content_preview || "";
+        emails.set(id, {
+          id,
+          sender: email.from_address_email ?? null,
+          recipients: email.to_address_email_list ? [email.to_address_email_list] : [],
+          subject: email.subject,
+          body: text.slice(0, 50_000),
+          snippet:
+            call.route.toolName === "list_emails" || !email.body.text || text.length > 50_000,
+          date: email.timestamp_email,
+          url: null,
+        });
+      }
+    }
+    output.emails = [...emails.values()].slice(0, 50);
+    output.partial ||= emails.size > 50 || unsupported || failed;
+    output.status =
+      output.emails.length || output.events.length || output.contacts.length
+        ? "ready"
+        : failed
+          ? "failed"
+          : unsupported
+            ? "unsupported"
+            : parsed
+              ? "empty"
+              : "not_checked";
+    // A late role switch cannot carry a previous role's saved mail into the new workspace.
+    const current = await prisma.thread.findFirst({
+      where: {
+        id: target.threadId,
+        spaceId: actor.spaceId,
+        userId: actor.userId,
+        activeRecruitingRoleId: workspace.role.id,
+      },
+      select: { id: true },
+    });
+    if (!current) throw new IsolationError();
+    return output;
+  });
+}
 
 /** Bind exact UTF-16 quotes in MCP array text to one canonical saved person. */
 function selectedProviderRow(

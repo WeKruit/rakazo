@@ -28,6 +28,7 @@ import {
 const api = vi.hoisted(() => ({
   session: { data: { user: { id: "actor-1" } } },
   getWorkspace: vi.fn(),
+  correspondence: vi.fn(),
   readSource: vi.fn(),
   listAssessments: vi.fn(),
   listCandidates: vi.fn(),
@@ -383,6 +384,15 @@ beforeEach(() => {
   vi.stubGlobal("IS_REACT_ACT_ENVIRONMENT", true);
   vi.stubGlobal("crypto", webcrypto);
   api.getWorkspace.mockResolvedValue({ role, revision });
+  api.correspondence.mockResolvedValue({
+    status: "not_checked",
+    checkedAt: null,
+    connections: [],
+    emails: [],
+    events: [],
+    contacts: [],
+    partial: false,
+  });
   api.listFeedback.mockResolvedValue({ feedback: [], nextCursor: null });
   api.readSource.mockRejectedValue(new Error("Source unavailable"));
   api.listAssessments.mockResolvedValue([assessment]);
@@ -492,7 +502,7 @@ async function mounted(
   recipients?: ComponentProps<typeof RecruitingPanel>["candidateFeedbackRecipients"],
   navigation: Pick<
     ComponentProps<typeof RecruitingPanel>,
-    "tab" | "onTabChange" | "presentation" | "view" | "summary"
+    "tab" | "onTabChange" | "presentation" | "view" | "summary" | "onBrowseCandidates" | "groupId"
   > = {},
 ) {
   const container = document.createElement("div");
@@ -557,14 +567,112 @@ async function mounted(
 it.each(["results", "shortlist", "contacts"] as const)(
   "loads %s candidates without unrelated assessment, question or memory history and keeps native evidence and feedback",
   async (viewName) => {
-    api.listCandidates.mockResolvedValue(
-      candidatePage([{ ...candidateFixture(), shortlisted: viewName === "shortlist" }]),
-    );
+    const candidate = { ...candidateFixture(), shortlisted: viewName === "shortlist" };
+    if (viewName === "contacts") {
+      candidate.name = "Saved candidate";
+      api.correspondence.mockResolvedValue({
+        status: "ready",
+        checkedAt: "2026-01-02T00:00:00Z",
+        connections: [],
+        emails: [],
+        events: [],
+        partial: false,
+        contacts: [
+          {
+            candidateKey: candidate.candidateKey,
+            linkedinUrl: "https://linkedin.com/in/saved-candidate",
+            emails: [{ address: "enriched@example.test", status: "HIGH_PROBABILITY" }],
+            phones: [{ number: "+15550001000", type: "work" }],
+            source: "Connected contact service",
+            checkedAt: "2026-01-02T00:00:00Z",
+          },
+          {
+            candidateKey: "different-person",
+            linkedinUrl: "https://linkedin.com/in/different",
+            emails: [{ address: "other@example.test", status: null }],
+            phones: [],
+            source: "Connected contact service",
+            checkedAt: "2026-01-02T00:00:00Z",
+          },
+        ],
+      });
+      candidate.latestSource = {
+        taskId: null,
+        actionId: null,
+        roleRevisionId: revision.id,
+        effectId: "source-effect",
+        providerTaskId: "provider-task",
+        rowIndex: 0,
+        artifactRef: { artifactId: "source-artifact", sha256: "a".repeat(64) },
+        requestCursor: null,
+        outputId: null,
+        observedAt: "2026-01-01T00:00:00Z",
+        report: {
+          fields: [
+            {
+              label: "Work email",
+              value: "saved@example.test",
+              sourceUrls: ["https://evidence.example.test/contact"],
+            },
+            { label: "Email status", value: "Not verified", sourceUrls: [] },
+          ],
+          sourceUrls: [],
+        },
+      };
+    }
+    api.listCandidates.mockResolvedValue(candidatePage([candidate]));
     const view = await mounted("thread-1", undefined, false, undefined, {
       presentation: "workspace",
+      groupId: "group-1",
       view: viewName,
       tab: "evidence",
     });
+    if (viewName !== "results")
+      expect(view.container.querySelector("h1")?.textContent).toBe(
+        viewName === "shortlist" ? "Shortlist" : "Contacts",
+      );
+    if (viewName === "contacts") {
+      expect(
+        [...view.container.querySelectorAll("thead th")].map((cell) => cell.textContent),
+      ).toContain("Email");
+      expect(api.correspondence).toHaveBeenCalledExactlyOnceWith({
+        groupId: "group-1",
+        view: "contacts",
+      });
+      expect(view.container.querySelector("tbody")?.textContent).toContain("enriched@example.test");
+      expect(view.container.querySelector("tbody")?.textContent).toContain("+15550001000");
+      expect(view.container.querySelector("tbody")?.textContent).toContain("High probability");
+      expect((await api.correspondence.mock.results[0]!.value).contacts[0].emails[0].status).toBe(
+        "HIGH_PROBABILITY",
+      );
+      expect(
+        [...view.container.querySelectorAll("thead th")].map((cell) => cell.textContent),
+      ).toContain("Provider status");
+      expect(view.container.querySelector("tbody")?.textContent).not.toContain(
+        "Verified by provider",
+      );
+      expect(view.container.querySelector("tbody")?.textContent).toContain(
+        "Connected contact service",
+      );
+      expect(view.container.querySelector("tbody")?.textContent).not.toContain(
+        "other@example.test",
+      );
+      expect(view.container.querySelector("tbody")?.textContent).toContain("saved@example.test");
+      expect(view.container.querySelector("tbody")?.textContent).toContain("Not verified");
+      expect(
+        view.container.querySelector('tbody a[href="https://evidence.example.test/contact"]'),
+      ).not.toBeNull();
+      await view.click("Find email");
+      expect(view.discuss).toHaveBeenCalledWith(
+        expect.objectContaining({
+          threadId: "thread-1",
+          roleId: role.id,
+          candidateKey: candidate.candidateKey,
+          intent: "contact_lookup",
+        }),
+      );
+    }
+    if (viewName !== "contacts") expect(api.correspondence).not.toHaveBeenCalled();
     expect(api.listAssessments).not.toHaveBeenCalled();
     expect(api.listQuestions).not.toHaveBeenCalled();
     expect(api.list).not.toHaveBeenCalled();
@@ -634,6 +742,101 @@ it("preserves an explicit workspace assessment filter when a refreshed pool has 
     expect.objectContaining({ roleId: role.id, assessmentState: "current" }),
   );
   expect(api.listAssessments).not.toHaveBeenCalled();
+});
+
+it("refreshes contacts from native receipts and ignores a late response from another role", async () => {
+  const empty = {
+    status: "not_checked",
+    checkedAt: null,
+    connections: [],
+    emails: [],
+    events: [],
+    contacts: [],
+    partial: false,
+  };
+  const saved = {
+    ...empty,
+    status: "ready",
+    contacts: [
+      {
+        candidateKey: "candidate-1",
+        linkedinUrl: "https://linkedin.com/in/saved",
+        emails: [{ address: "current@example.test", status: null }],
+        phones: [],
+        source: "Connected service",
+        checkedAt: "2026-01-02T00:00:00Z",
+      },
+    ],
+  };
+  let finish!: (value: unknown) => void;
+  api.correspondence
+    .mockReturnValueOnce(
+      new Promise((resolve) => {
+        finish = resolve;
+      }),
+    )
+    .mockResolvedValueOnce(empty);
+  api.listCandidates.mockResolvedValue(candidatePage([candidateFixture()]));
+  const view = await mounted("thread-1", undefined, false, undefined, {
+    presentation: "workspace",
+    view: "contacts",
+    groupId: "group-1",
+  });
+  expect(view.container.textContent).toContain("Loading contact details…");
+  const nextRole = {
+    ...role,
+    id: "role-2",
+    sourceThreadId: "thread-2",
+    title: "Simulation engineer",
+  };
+  api.getWorkspace.mockResolvedValue({
+    role: nextRole,
+    revision: { ...revision, roleId: nextRole.id },
+  });
+  api.listCandidates.mockResolvedValue({
+    ...candidatePage([{ ...candidateFixture(), roleId: nextRole.id }]),
+    roleId: nextRole.id,
+  });
+  await view.render("thread-2", 0, false, undefined, {
+    presentation: "workspace",
+    view: "contacts",
+    groupId: "group-2",
+  });
+  expect(api.correspondence).toHaveBeenLastCalledWith({ groupId: "group-2", view: "contacts" });
+  await act(async () => finish(saved));
+  expect(view.container.textContent).not.toContain("current@example.test");
+  expect(view.container.textContent).toContain("Contact details have not been checked yet.");
+  api.correspondence.mockResolvedValueOnce(saved);
+  await view.render("thread-2", 1, false, undefined, {
+    presentation: "workspace",
+    view: "contacts",
+    groupId: "group-2",
+  });
+  expect(view.container.querySelector("tbody")?.textContent).toContain("current@example.test");
+  expect(api.correspondence).toHaveBeenCalledTimes(3);
+  api.correspondence.mockResolvedValueOnce({
+    ...saved,
+    contacts: saved.contacts.map((contact) => ({ ...contact, emails: [] })),
+  });
+  await view.render("thread-2", 2, false, undefined, {
+    presentation: "workspace",
+    view: "contacts",
+    groupId: "group-2",
+  });
+  expect(view.container.querySelector("tbody")?.textContent).not.toContain("current@example.test");
+  expect(view.container.querySelector("tbody")?.textContent).toContain("Not returned");
+  api.correspondence.mockRejectedValueOnce(new Error("Read unavailable"));
+  await view.render("thread-2", 3, false, undefined, {
+    presentation: "workspace",
+    view: "contacts",
+    groupId: "group-2",
+  });
+  expect(view.container.textContent).toContain(
+    "Could not load contact details. Refresh to try again.",
+  );
+  expect(view.container.querySelector("tbody")?.textContent).not.toContain("current@example.test");
+  expect(api.setCandidateShortlist).not.toHaveBeenCalled();
+  expect(api.answer).not.toHaveBeenCalled();
 });
 
 it("shows actual saved brief criteria without exposing internal field keys or fetching unrelated views", async () => {
@@ -717,6 +920,13 @@ it("keeps feedback summaries scoped to the current role and ignores a late previ
     summary: "feedback",
   });
   expect(api.listFeedback).toHaveBeenCalledExactlyOnceWith({ roleId: role.id, limit: 20 });
+  const history = view.container.querySelector(".hire-live-criteria section")!;
+  const criteria = view.container.querySelector<HTMLDetailsElement>(
+    ".hire-live-criteria > details",
+  )!;
+  expect(criteria).not.toBeNull();
+  expect(criteria.open).toBe(false);
+  expect(history.compareDocumentPosition(criteria) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
   const nextRole = {
     ...role,
     id: "other-role",
@@ -5726,6 +5936,26 @@ it("keeps answered native questions visible and leaves stale cancelled cards ina
   expect(api.answer).not.toHaveBeenCalled();
 });
 
+it("distinguishes an empty shortlist from the saved pool and browses all candidates without selecting anyone", async () => {
+  const page = candidatePage([]);
+  page.counts.shortlisted = 0;
+  api.listCandidates.mockResolvedValue(page);
+  const browse = vi.fn();
+  const view = await mounted("thread-1", undefined, false, undefined, {
+    presentation: "workspace",
+    view: "shortlist",
+    tab: "evidence",
+    onBrowseCandidates: browse,
+  });
+  expect(view.container.textContent).toContain("No shortlisted candidates yet.");
+  expect(view.container.textContent).not.toContain("No saved candidates");
+  expect(view.container.textContent).toContain("12");
+  await view.click("Browse all candidates");
+  expect(browse).toHaveBeenCalledOnce();
+  expect(api.setCandidateShortlist).not.toHaveBeenCalled();
+  expect(api.answer).not.toHaveBeenCalled();
+});
+
 it("shows native answer failures without marking a question answered", async () => {
   api.listQuestions.mockResolvedValue({ questions: [nativeQuestion] });
   api.answer.mockRejectedValueOnce(new Error("This prompt is no longer awaiting an answer"));
@@ -6796,8 +7026,11 @@ it("keeps workspace shortlist and contacts navigation out of saved filters and c
     "Current role",
     "Company",
     "Location",
-    "Research match",
+    "Email",
+    "Phone",
+    "Provider status",
     "Shortlist",
+    "Actions",
   ]);
   expect(api.setCandidateShortlist).not.toHaveBeenCalled();
   await view.render("thread-1", 0, false, undefined, {

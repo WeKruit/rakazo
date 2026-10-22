@@ -57,6 +57,7 @@ const shellApi = vi.hoisted(() => ({
   updateBot: vi.fn(),
   reorderBots: vi.fn(),
   recruiting: {
+    correspondence: vi.fn(),
     getWorkspace: vi.fn(),
     listAssessments: vi.fn(),
     listCandidates: vi.fn(),
@@ -432,6 +433,15 @@ async function renderFeedbackShell(
   });
   shellApi.recruiting.listAssessments.mockResolvedValue([]);
   shellApi.recruiting.listFeedback.mockResolvedValue({ feedback: [], nextCursor: null });
+  shellApi.recruiting.correspondence.mockResolvedValue({
+    status: "not_checked",
+    checkedAt: null,
+    connections: [],
+    emails: [],
+    events: [],
+    contacts: [],
+    partial: false,
+  });
   shellApi.recruiting.listCandidates.mockResolvedValue({
     sortAvailability: { rank: true, tier: true, score: true },
     roleId: "internal-role",
@@ -1464,6 +1474,58 @@ it("opens a normal recruiting role on native candidate results and restores coll
   expect(document.body.querySelector('[data-message-id="pending-main"]')).toBe(card);
   expect(shellApi.answer).not.toHaveBeenCalled();
   expect(shellApi.send).not.toHaveBeenCalled();
+  const page = {
+    roleId: "internal-role",
+    roleRevisionId: "internal-revision",
+    sortAvailability: { rank: true, tier: true, score: true },
+    items: [view.candidate],
+    crmTarget: null,
+    nextCursor: null,
+    total: 1,
+    counts: {
+      sourceRows: 1,
+      candidates: 1,
+      identifiedCandidates: 1,
+      unassessed: 1,
+      assessed: 0,
+      shortlisted: 0,
+    },
+  };
+  shellApi.recruiting.listCandidates.mockImplementation(async ({ shortlisted }) => ({
+    ...page,
+    items: shortlisted ? [] : page.items,
+    total: shortlisted ? 0 : 1,
+  }));
+  await view.click("Shortlist");
+  expect(container?.querySelector("h1")?.textContent).toBe("Shortlist");
+  expect(container?.textContent).toContain("No shortlisted candidates yet.");
+  expect(container?.textContent).not.toContain("No saved candidates");
+  await view.click("Browse all candidates");
+  expect(view.getProps().view).toBe("results");
+  expect(container?.querySelector(".hire-card-grid")?.textContent).toContain(view.candidate.name);
+  expect(shellApi.recruiting.correspondence).not.toHaveBeenCalled();
+  await view.click("Contacts");
+  expect(container?.querySelector("h1")?.textContent).toBe("Contacts");
+  expect(shellApi.recruiting.correspondence).toHaveBeenCalledExactlyOnceWith({
+    groupId: "group-1",
+    view: "contacts",
+  });
+  expect(container?.querySelector("tbody")?.textContent).toContain("Not returned");
+  await view.click("Find email");
+  const contactDraft = container!.querySelector<HTMLTextAreaElement>(
+    'textarea[name="chat-message"]',
+  )!;
+  expect(contactDraft.closest<HTMLElement>('section[aria-label="Role conversation"]')?.hidden).toBe(
+    false,
+  );
+  for (const line of view.candidate.name.split("\n")) expect(contactDraft.value).toContain(line);
+  expect(contactDraft.value).toContain("Find this person's work email from saved evidence");
+  expect(contactDraft.value).toContain("do not send a message");
+  expect(document.body.querySelector('[data-message-id="pending-main"]')).toBe(card);
+  expect(shellApi.recruiting.setCandidateShortlist).not.toHaveBeenCalled();
+  expect(shellApi.answer).not.toHaveBeenCalled();
+  expect(shellApi.send).not.toHaveBeenCalled();
+  expect(shellApi.followUp).not.toHaveBeenCalled();
 });
 
 it("sends candidate feedback from the default results workspace to Main without answering another native card", async () => {

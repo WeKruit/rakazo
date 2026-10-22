@@ -1,5 +1,9 @@
 import { Trans, useLingui } from "@lingui/react/macro";
-import type { RecruitingOutreachSequence, ThreadMessage } from "@rakazo/contracts";
+import type {
+  RecruitingOutreachSequence,
+  RecruitingCorrespondence as SavedCorrespondence,
+  ThreadMessage,
+} from "@rakazo/contracts";
 import { RecruitingOutreachSequenceSchema } from "@rakazo/contracts";
 import { NativeSelect, NativeSelectOption } from "@rakazo/ui-web";
 import { ArrowRight, CalendarDays, ChevronRight, Inbox, Mail, Settings2 } from "lucide-react";
@@ -7,6 +11,7 @@ import { useEffect, useRef, useState } from "react";
 import { ArtifactFileCard } from "../components/ArtifactFileCard";
 import type { ArtifactTarget } from "../lib/artifact-open";
 import { fetchArtifactBytes } from "../lib/artifact-open";
+import { rpc } from "../lib/rpc";
 
 export type RecruitingSequenceSaveInput = {
   sourceArtifactId: string;
@@ -23,6 +28,7 @@ type Props = {
   onConversation: (text?: string) => void;
   onOpenConnections: () => void;
   onSaveDraft?: (input: RecruitingSequenceSaveInput) => Promise<void>;
+  refreshSignal?: number;
 };
 
 function SequenceEditor({
@@ -254,6 +260,270 @@ function SequenceEditor({
   );
 }
 
+function SavedCorrespondenceView({
+  view,
+  artifactTarget,
+  onConversation,
+  onOpenConnections,
+  refreshSignal = 0,
+}: Pick<Props, "artifactTarget" | "onConversation" | "onOpenConnections" | "refreshSignal"> & {
+  view: "inbox" | "interview";
+}) {
+  const { t } = useLingui();
+  const [refresh, setRefresh] = useState(0);
+  const [selectedId, setSelectedId] = useState<string>();
+  const key = JSON.stringify([artifactTarget, view, refreshSignal, refresh]);
+  const [read, setRead] = useState<{ key: string; data?: SavedCorrespondence; failed?: boolean }>();
+  useEffect(() => {
+    let cancelled = false;
+    setRead({ key });
+    void rpc.recruiting
+      .correspondence({ ...artifactTarget, view })
+      .then((data) => {
+        if (!cancelled) setRead({ key, data });
+      })
+      .catch(() => {
+        if (!cancelled) setRead({ key, failed: true });
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [key]);
+  const current = read?.key === key ? read : undefined;
+  const data = current?.data;
+  const selected = data?.emails.find((email) => email.id === selectedId) ?? data?.emails[0];
+  const interview = view === "interview";
+  const check = () =>
+    onConversation(
+      interview
+        ? t`Check the connected calendar for interview availability for this role. Show the actual available times, time zone and any missing scheduling details. Don't send invitations, create events or contact candidates.`
+        : t`Read the latest candidate email replies for this role using the connected mailbox. Show the sender, subject, date and original reply. Don't send, label, archive or modify any messages.`,
+    );
+  return (
+    <div className="hire-standard-view">
+      <header className="hire-section-header">
+        <span className="hire-eyebrow">
+          {interview ? <Trans>Scheduling</Trans> : <Trans>Conversations</Trans>}
+        </span>
+        <h1>{interview ? <Trans>Interview</Trans> : <Trans>Inbox</Trans>}</h1>
+        <p>
+          {interview ? (
+            <Trans>Saved calendar checks in this conversation.</Trans>
+          ) : (
+            <Trans>Original email results saved in this role conversation.</Trans>
+          )}
+        </p>
+      </header>
+      <div className="mb-5 flex flex-wrap items-center gap-3">
+        <button type="button" className="hire-black-button" onClick={check}>
+          {interview ? <Trans>Check availability</Trans> : <Trans>Check inbox</Trans>}
+          <ArrowRight size={15} aria-hidden />
+        </button>
+        <button
+          type="button"
+          className="hire-outline-button"
+          onClick={() => setRefresh((value) => value + 1)}
+        >
+          <Trans>Refresh saved results</Trans>
+        </button>
+        <button type="button" className="hire-outline-button" onClick={() => onOpenConnections()}>
+          <Settings2 size={15} aria-hidden />
+          <Trans>Manage connections</Trans>
+        </button>
+        {data?.checkedAt ? (
+          <time className="text-xs text-muted-foreground" dateTime={data.checkedAt}>
+            <Trans>Last checked</Trans>
+            {" · "}
+            {new Date(data.checkedAt).toLocaleString()}
+          </time>
+        ) : null}
+      </div>
+      {data ? (
+        <ul className="mb-5 flex flex-wrap gap-2 text-sm" aria-label={t`Service connections`}>
+          {data.connections.map((connection, index) => (
+            <li key={index} className="rounded-lg border border-border px-3 py-2">
+              {connection.name}
+              {" · "}
+              {connection.status === "configured" ? (
+                <Trans>Configured</Trans>
+              ) : connection.status === "needs_access" ? (
+                <Trans>Enable for this role</Trans>
+              ) : connection.status === "disabled" ? (
+                <Trans>Disabled</Trans>
+              ) : (
+                <Trans>Connect account</Trans>
+              )}
+            </li>
+          ))}
+          {!data.connections.length ? (
+            <li>
+              <Trans>No service configured for this role.</Trans>
+            </li>
+          ) : null}
+        </ul>
+      ) : null}
+      {!current || (!data && !current.failed) ? (
+        <p role="status">
+          <Trans>Loading saved results…</Trans>
+        </p>
+      ) : null}
+      {current?.failed ? (
+        <p role="alert" className="text-destructive">
+          <Trans>Could not load saved results. Try refreshing.</Trans>
+        </p>
+      ) : null}
+      {data?.connectionChanged ? (
+        <p className="mb-4 text-sm text-muted-foreground">
+          <Trans>
+            Some saved results use an earlier connection setup. Check again to load results from the
+            current connection.
+          </Trans>
+        </p>
+      ) : null}
+      {data?.partial ? (
+        <p className="mb-4 text-sm text-muted-foreground">
+          <Trans>
+            More results may be available. This is not the complete mailbox or calendar.
+          </Trans>
+        </p>
+      ) : null}
+      {data && data.status !== "ready" ? (
+        <section className="hire-empty">
+          {interview ? <CalendarDays size={34} aria-hidden /> : <Inbox size={34} aria-hidden />}
+          <h2>
+            {data.status === "not_checked" ? (
+              <Trans>Not checked yet</Trans>
+            ) : data.status === "empty" ? (
+              <Trans>No saved results</Trans>
+            ) : data.status === "failed" ? (
+              <Trans>The last check failed</Trans>
+            ) : (
+              <Trans>This result cannot be displayed yet</Trans>
+            )}
+          </h2>
+          <p>
+            {data.status === "empty" ? (
+              <Trans>
+                The saved check returned no matching records. It does not confirm the entire account
+                is empty.
+              </Trans>
+            ) : (
+              <Trans>
+                Use the connected service to check this role. Saved results will appear here when
+                the agent finishes.
+              </Trans>
+            )}
+          </p>
+        </section>
+      ) : null}
+      {data?.status === "ready" && !interview ? (
+        <div className="hire-inbox-layout">
+          <aside className="hire-inbox-list" aria-label={t`Saved emails`}>
+            <div className="hire-inbox-filter">
+              <strong>
+                <Trans>Emails</Trans>
+              </strong>
+              <span>{data.emails.length}</span>
+            </div>
+            {data.emails.map((email) => (
+              <button
+                key={email.id}
+                type="button"
+                aria-label={email.subject || t`No subject`}
+                aria-pressed={selected?.id === email.id}
+                className="block w-full border-b border-border p-4 text-start hover:bg-muted aria-pressed:bg-muted"
+                onClick={() => setSelectedId(email.id)}
+              >
+                <strong className="block truncate">{email.sender ?? t`Sender unavailable`}</strong>
+                <span className="block truncate text-sm">{email.subject || t`No subject`}</span>
+                {email.date ? (
+                  <time className="text-xs text-muted-foreground" dateTime={email.date}>
+                    {new Date(email.date).toLocaleString()}
+                  </time>
+                ) : null}
+              </button>
+            ))}
+          </aside>
+          <section className="hire-inbox-thread" aria-label={t`Email content`}>
+            {selected ? (
+              <>
+                <div className="hire-subheading">
+                  <strong>{selected.subject || t`No subject`}</strong>
+                </div>
+                <div className="space-y-4 p-5">
+                  <p className="break-words text-sm">
+                    {selected.sender ?? t`Sender unavailable`}
+                    {selected.recipients.length ? <> → {selected.recipients.join(", ")}</> : null}
+                  </p>
+                  {selected.snippet ? (
+                    <p className="text-xs text-muted-foreground">
+                      <Trans>
+                        Preview only. Ask for the complete message to read the full body.
+                      </Trans>
+                    </p>
+                  ) : null}
+                  <p className="whitespace-pre-wrap break-words">
+                    {selected.body || t`Message body unavailable`}
+                  </p>
+                  {selected.url ? (
+                    <a href={selected.url} target="_blank" rel="noreferrer" className="underline">
+                      <Trans>Open original email</Trans>
+                    </a>
+                  ) : null}
+                </div>
+              </>
+            ) : null}
+          </section>
+        </div>
+      ) : null}
+      {data?.status === "ready" && interview ? (
+        <div className="space-y-4">
+          <p className="text-sm text-muted-foreground">
+            <Trans>
+              No invitation is created by this view. Availability is the saved observation, not a
+              reservation. Calendar records may include other roles; their role association has not
+              been verified.
+            </Trans>
+          </p>
+          {data.events.map((event) => (
+            <article key={event.id} className="rounded-xl border border-border p-5">
+              <div className="mb-3 flex flex-wrap justify-between gap-2">
+                <h2 className="font-semibold">
+                  {event.kind === "availability"
+                    ? t`Available time`
+                    : event.title || t`Calendar event`}
+                </h2>
+                {event.status ? (
+                  <span className="text-sm text-muted-foreground">{event.status}</span>
+                ) : null}
+              </div>
+              <p>
+                <time dateTime={event.start}>{event.start}</time> –{" "}
+                <time dateTime={event.end}>{event.end}</time>
+                {event.timeZone ? ` · ${event.timeZone}` : ""}
+              </p>
+              {event.attendees.length ? (
+                <p className="mt-2 break-words text-sm">{event.attendees.join(", ")}</p>
+              ) : null}
+              {event.location ? <p className="mt-2 text-sm">{event.location}</p> : null}
+              {event.url ? (
+                <a
+                  href={event.url}
+                  target="_blank"
+                  rel="noreferrer"
+                  className="mt-3 inline-block underline"
+                >
+                  <Trans>Open calendar event</Trans>
+                </a>
+              ) : null}
+            </article>
+          ))}
+        </div>
+      ) : null}
+    </div>
+  );
+}
+
 export function RecruitingCorrespondence({
   view,
   messages,
@@ -262,6 +532,7 @@ export function RecruitingCorrespondence({
   onConversation,
   onOpenConnections,
   onSaveDraft,
+  refreshSignal,
 }: Props) {
   const { t } = useLingui();
   const [selectedArtifactId, setSelectedArtifactId] = useState<string | null>(null);
@@ -471,84 +742,13 @@ export function RecruitingCorrespondence({
     );
   }
 
-  const interview = view === "interview";
-  const check = () =>
-    onConversation(
-      interview
-        ? t`Check the connected calendar for interview availability for this role. Show the actual available times, time zone and any missing scheduling details. Don't send invitations, create events or contact candidates.`
-        : t`Read the latest candidate email replies for this role using the connected mailbox. Show the sender, subject, date and original reply. Don't send, label, archive or modify any messages.`,
-    );
   return (
-    <div className="hire-standard-view">
-      <header className="hire-section-header">
-        <span className="hire-eyebrow">
-          {interview ? <Trans>Scheduling</Trans> : <Trans>Conversations</Trans>}
-        </span>
-        <h1>{interview ? <Trans>Interview</Trans> : <Trans>Inbox</Trans>}</h1>
-        <p>
-          {interview ? (
-            <Trans>Check real availability before preparing an invitation.</Trans>
-          ) : (
-            <Trans>Read candidate replies from your connected email account.</Trans>
-          )}
-        </p>
-      </header>
-      <div className={interview ? "hire-calendar-top" : "hire-inbox-layout"}>
-        {!interview ? (
-          <aside className="hire-inbox-list">
-            <div className="hire-inbox-filter">
-              <strong>
-                <Trans>Mailbox</Trans>
-              </strong>
-              <span>
-                <Trans>Not loaded</Trans>
-              </span>
-            </div>
-          </aside>
-        ) : null}
-        <section className={interview ? "hire-empty w-full" : "hire-inbox-thread"}>
-          {!interview ? (
-            <div className="hire-subheading">
-              <strong>
-                <Trans>Candidate replies</Trans>
-              </strong>
-            </div>
-          ) : null}
-          <div className={interview ? "space-y-4" : "hire-empty"}>
-            {interview ? <CalendarDays size={34} aria-hidden /> : <Inbox size={34} aria-hidden />}
-            <h2>
-              {interview ? <Trans>Availability not loaded</Trans> : <Trans>Inbox not loaded</Trans>}
-            </h2>
-            <p>
-              {interview ? (
-                <Trans>
-                  Ask WeKruit to read the connected calendar. No available times or bookings have
-                  been loaded into this view.
-                </Trans>
-              ) : (
-                <Trans>
-                  Ask WeKruit to read the connected mailbox. Replies have not been loaded into this
-                  view.
-                </Trans>
-              )}
-            </p>
-            <div className="flex flex-wrap justify-center gap-3">
-              <button type="button" className="hire-black-button" onClick={check}>
-                {interview ? <Trans>Check availability</Trans> : <Trans>Check inbox</Trans>}
-                <ArrowRight size={15} aria-hidden />
-              </button>
-              <button
-                type="button"
-                className="hire-outline-button"
-                onClick={() => onOpenConnections()}
-              >
-                <Settings2 size={15} aria-hidden />
-                <Trans>Manage connections</Trans>
-              </button>
-            </div>
-          </div>
-        </section>
-      </div>
-    </div>
+    <SavedCorrespondenceView
+      view={view}
+      artifactTarget={artifactTarget}
+      onConversation={onConversation}
+      onOpenConnections={onOpenConnections}
+      refreshSignal={refreshSignal}
+    />
   );
 }

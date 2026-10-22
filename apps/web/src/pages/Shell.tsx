@@ -2185,7 +2185,9 @@ export function ShellPage() {
       text:
         candidate.intent === "email_draft"
           ? `${candidateReferenceText(candidate)}${t`Prepare a personalized first email and follow-ups for this person using our saved evidence and playbook. Keep unknown facts marked, do not invent an email address, and save the drafts here without sending.`}`
-          : candidateReferenceText(candidate),
+          : candidate.intent === "contact_lookup"
+            ? `${candidateReferenceText(candidate)}${t`Find this person's work email from saved evidence or available connected services. If a connection is missing, explain what needs connecting. Save the returned source and provider status, do not invent contact details, and do not send a message.`}`
+            : candidateReferenceText(candidate),
     });
     if (!showToolActivity) openRecruitingView("conversation");
   }
@@ -4281,6 +4283,7 @@ export function ShellPage() {
               }}
               onOpenConnections={() => setPluginsOpen(true)}
               onSaveDraft={saveSequenceDraft}
+              refreshSignal={recruitingRefresh}
             />
           </div>
         ) : null}
@@ -4293,10 +4296,12 @@ export function ShellPage() {
                 view={recruitingWorkspaceView === "shortlist" ? "shortlist" : recruitingWorkspaceView === "contacts" ? "contacts" : "results"}
                 threadId={activeSnapshot.threadId}
                 botId={inGroup ? undefined : active?.id}
+                groupId={inGroup ? groupId : undefined}
                 refreshSignal={recruitingRefresh}
                 tab={recruitingWorkspaceView === "workflow" ? "dashboard" : "evidence"}
                 showDiagnostics={false}
                 onClose={() => openRecruitingView("conversation")}
+                onBrowseCandidates={() => openRecruitingView("results")}
                 onDiscussCandidate={discussCandidate}
                 onCandidateFeedback={feedbackCandidate}
                 candidateFeedbackRecipients={candidateFeedbackRecipients}
