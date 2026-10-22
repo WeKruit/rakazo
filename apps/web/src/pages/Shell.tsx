@@ -1348,7 +1348,29 @@ export function ShellPage() {
 
   useEffect(() => {
     let cancelled = false;
-    botsRefreshUser.current = { id: userId };
+    const user = { id: userId };
+    botsRefreshUser.current = user;
+    let bootstrapReady = false;
+    let refreshTimer: number | undefined;
+    const canRefresh = () =>
+      !cancelled &&
+      bootstrapReady &&
+      botsRefreshUser.current === user &&
+      document.visibilityState === "visible" &&
+      document.hasFocus();
+    const scheduleRefresh = (delay = 15_000) => {
+      window.clearTimeout(refreshTimer);
+      if (!canRefresh()) return;
+      // ponytail: active-thread events miss other clients' roles; reconcile only while focused.
+      refreshTimer = window.setTimeout(() => {
+        refreshTimer = undefined;
+        if (!canRefresh()) return;
+        void (botsRefreshInFlight.current ?? refreshBots())
+          .catch(() => undefined)
+          .finally(() => scheduleRefresh());
+      }, delay);
+    };
+    const refreshVisibleBots = () => scheduleRefresh(50);
     const providerConfigRevision = memoryProviderConfigRevision.current;
     void rpc.memory
       .providerConfig()
@@ -1414,21 +1436,15 @@ export function ShellPage() {
       .catch(() => {
         if (cancelled) return;
         setBootstrapMe(null);
-        void refreshBots(true);
+        return refreshBots(true).catch(() => undefined);
+      })
+      .finally(() => {
+        bootstrapReady = true;
+        scheduleRefresh();
       });
-    let refreshTimer: number | undefined;
-    const refreshVisibleBots = () => {
-      if (document.visibilityState !== "visible") return;
-      window.clearTimeout(refreshTimer);
-      refreshTimer = window.setTimeout(() => void refreshBots().catch(() => undefined), 50);
-    };
     window.addEventListener("focus", refreshVisibleBots);
+    window.addEventListener("blur", refreshVisibleBots);
     document.addEventListener("visibilitychange", refreshVisibleBots);
-    // Poll never queues more work while event/focus refreshes are draining.
-    const poll = window.setInterval(() => {
-      if (botsRefreshInFlight.current) return;
-      refreshVisibleBots();
-    }, 3_000);
     return () => {
       cancelled = true;
       botsRefreshUser.current = { id: undefined };
@@ -1436,8 +1452,8 @@ export function ShellPage() {
       botsRefreshEpoch.current++;
       archivedBotsRefreshEpoch.current++;
       window.clearTimeout(refreshTimer);
-      window.clearInterval(poll);
       window.removeEventListener("focus", refreshVisibleBots);
+      window.removeEventListener("blur", refreshVisibleBots);
       document.removeEventListener("visibilitychange", refreshVisibleBots);
     };
   }, []);

@@ -231,6 +231,7 @@ async function renderFeedbackShell(
     isDeploymentOwner?: boolean;
     routines?: Routine[];
     openFeedback?: boolean;
+    bootstrapReady?: Promise<void>;
     threadReady?: Promise<void>;
     allGroupsArchived?: boolean;
     initialPath?: string;
@@ -355,7 +356,7 @@ async function renderFeedbackShell(
     data: { user: { id: "user-1", name: "Synthetic recruiter", email: "user@example.test" } },
   };
   shellApi.listRoutines.mockResolvedValue(options.routines ?? []);
-  shellApi.bootstrap.mockResolvedValue({
+  const bootstrap = {
     me: { spaceId: "space-1", isDeploymentOwner: options.isDeploymentOwner ?? true },
     bots,
     botSections: [],
@@ -365,6 +366,10 @@ async function renderFeedbackShell(
     archivedGroups,
     thread: kind === "group" ? null : thread,
     routines: options.routines ?? [],
+  };
+  shellApi.bootstrap.mockImplementation(async () => {
+    if (options.bootstrapReady) await options.bootstrapReady;
+    return bootstrap;
   });
   shellApi.get.mockImplementation(async ({ botId }: { botId?: string }) => {
     if (options.threadReady) await options.threadReady;
@@ -518,11 +523,136 @@ it("loads a cold group from its own snapshot when bootstrap has no DM snapshot",
   expect(shellApi.recruiting.getWorkspace).toHaveBeenCalledWith({ threadId: "thread-1" });
 });
 
+it("waits for bootstrap before reconciling another client's navigation every fifteen active seconds", async () => {
+  vi.useFakeTimers();
+  vi.spyOn(document, "visibilityState", "get").mockReturnValue("visible");
+  vi.spyOn(document, "hasFocus").mockReturnValue(true);
+  let finishBootstrap!: () => void;
+  const bootstrapReady = new Promise<void>((resolve) => {
+    finishBootstrap = resolve;
+  });
+  const view = await renderFeedbackShell("bot", undefined, {
+    openFeedback: false,
+    bootstrapReady,
+  });
+  shellApi.listSpaces.mockReturnValue(new Promise(() => {}));
+  await act(async () => {
+    window.dispatchEvent(new Event("focus"));
+    await vi.advanceTimersByTimeAsync(60_000);
+  });
+  expect(shellApi.listSpaces).not.toHaveBeenCalled();
+  await act(async () => finishBootstrap());
+  await act(async () => vi.advanceTimersByTimeAsync(14_999));
+  expect(shellApi.listSpaces).not.toHaveBeenCalled();
+  const updated = structuredClone(view.navigation);
+  updated.current.groups[0]!.name = "Role renamed in another window";
+  shellApi.listSpaces.mockResolvedValue(updated);
+  await act(async () => vi.advanceTimersByTimeAsync(1));
+  expect(shellApi.listSpaces).toHaveBeenCalledTimes(1);
+  expect(container?.textContent).toContain("Role renamed in another window");
+  await act(async () => vi.advanceTimersByTimeAsync(15_000));
+  expect(shellApi.listSpaces).toHaveBeenCalledTimes(2);
+  act(() => root!.unmount());
+  root = null;
+  await act(async () => vi.advanceTimersByTimeAsync(60_000));
+  expect(shellApi.listSpaces).toHaveBeenCalledTimes(2);
+});
+
+it.each(["success", "error"] as const)(
+  "waits fifteen seconds after a slow navigation %s instead of queueing timer work",
+  async (outcome) => {
+    vi.useFakeTimers();
+    vi.spyOn(document, "visibilityState", "get").mockReturnValue("visible");
+    vi.spyOn(document, "hasFocus").mockReturnValue(true);
+    const view = await renderFeedbackShell("bot", undefined, { openFeedback: false });
+    let finish!: (value: typeof view.navigation) => void;
+    let fail!: (error: Error) => void;
+    shellApi.listSpaces.mockReturnValueOnce(
+      new Promise((resolve, reject) => {
+        finish = resolve;
+        fail = reject;
+      }),
+    );
+    await act(async () => vi.advanceTimersByTimeAsync(15_000));
+    expect(shellApi.listSpaces).toHaveBeenCalledTimes(1);
+    await act(async () => {
+      window.dispatchEvent(new Event("focus"));
+      document.dispatchEvent(new Event("visibilitychange"));
+      await vi.advanceTimersByTimeAsync(60_000);
+    });
+    expect(shellApi.listSpaces).toHaveBeenCalledTimes(1);
+    await act(async () => {
+      if (outcome === "success") finish(view.navigation);
+      else fail(new Error("Navigation unavailable"));
+    });
+    expect(shellApi.listSpaces).toHaveBeenCalledTimes(1);
+    await act(async () => vi.advanceTimersByTimeAsync(14_999));
+    expect(shellApi.listSpaces).toHaveBeenCalledTimes(1);
+    await act(async () => vi.advanceTimersByTimeAsync(1));
+    expect(shellApi.listSpaces).toHaveBeenCalledTimes(2);
+  },
+);
+
+it("pauses hidden or unfocused navigation and coalesces active transitions without reviving disposed work", async () => {
+  vi.useFakeTimers();
+  const visibility = vi.spyOn(document, "visibilityState", "get").mockReturnValue("visible");
+  const focus = vi.spyOn(document, "hasFocus").mockReturnValue(true);
+  const view = await renderFeedbackShell("bot", undefined, { openFeedback: false });
+  visibility.mockReturnValue("hidden");
+  await act(async () => {
+    document.dispatchEvent(new Event("visibilitychange"));
+    await vi.advanceTimersByTimeAsync(60_000);
+  });
+  expect(shellApi.listSpaces).not.toHaveBeenCalled();
+  visibility.mockReturnValue("visible");
+  focus.mockReturnValue(false);
+  await act(async () => {
+    document.dispatchEvent(new Event("visibilitychange"));
+    await vi.advanceTimersByTimeAsync(60_000);
+  });
+  expect(shellApi.listSpaces).not.toHaveBeenCalled();
+  let finish!: (value: typeof view.navigation) => void;
+  shellApi.listSpaces.mockReturnValueOnce(
+    new Promise((resolve) => {
+      finish = resolve;
+    }),
+  );
+  focus.mockReturnValue(true);
+  await act(async () => {
+    window.dispatchEvent(new Event("focus"));
+    document.dispatchEvent(new Event("visibilitychange"));
+    await vi.advanceTimersByTimeAsync(50);
+  });
+  expect(shellApi.listSpaces).toHaveBeenCalledTimes(1);
+  focus.mockReturnValue(false);
+  await act(async () => {
+    window.dispatchEvent(new Event("blur"));
+    finish(view.navigation);
+    await vi.advanceTimersByTimeAsync(60_000);
+  });
+  expect(shellApi.listSpaces).toHaveBeenCalledTimes(1);
+  focus.mockReturnValue(true);
+  await act(async () => {
+    window.dispatchEvent(new Event("focus"));
+    document.dispatchEvent(new Event("visibilitychange"));
+    await vi.advanceTimersByTimeAsync(50);
+  });
+  expect(shellApi.listSpaces).toHaveBeenCalledTimes(2);
+  act(() => root!.unmount());
+  root = null;
+  await act(async () => {
+    window.dispatchEvent(new Event("focus"));
+    await vi.advanceTimersByTimeAsync(60_000);
+  });
+  expect(shellApi.listSpaces).toHaveBeenCalledTimes(2);
+});
+
 it.each(["success", "error"] as const)(
   "coalesces navigation refreshes through %s while retaining events, archive reads and a newly created role",
   async (firstOutcome) => {
     vi.useFakeTimers();
     vi.spyOn(document, "visibilityState", "get").mockReturnValue("visible");
+    vi.spyOn(document, "hasFocus").mockReturnValue(true);
     const streams: Array<{
       options: Parameters<typeof CoreModule.runThreadSubscription>[0];
       head: { threadId: string; cursor: number };
@@ -630,7 +760,7 @@ it.each(["success", "error"] as const)(
     expect(container?.querySelector('textarea[name="chat-message"]')).not.toBeNull();
     expect(shellApi.send).not.toHaveBeenCalled();
     expect(shellApi.answer).not.toHaveBeenCalled();
-    await act(async () => vi.advanceTimersByTimeAsync(3_000));
+    await act(async () => vi.advanceTimersByTimeAsync(15_000));
     expect(shellApi.listSpaces).toHaveBeenCalledTimes(3);
     expect(shellApi.listArchivedGroups).toHaveBeenCalledOnce();
   },
@@ -641,6 +771,15 @@ it.each(["archive", "order"] as const)(
   async (operation) => {
     vi.useFakeTimers();
     vi.spyOn(document, "visibilityState", "get").mockReturnValue("visible");
+    vi.spyOn(document, "hasFocus").mockReturnValue(true);
+    let stream!: {
+      options: Parameters<typeof CoreModule.runThreadSubscription>[0];
+      head: { threadId: string; cursor: number };
+    };
+    vi.spyOn(CoreModule, "runThreadSubscription").mockImplementation(async (options) => {
+      const head = await options.loadInitial();
+      if (head) stream = { options, head };
+    });
     setToolActivityPreference(operation === "order" ? "on" : "off");
     const view = await renderFeedbackShell("bot", undefined, {
       openFeedback: false,
@@ -684,6 +823,20 @@ it.each(["archive", "order"] as const)(
     }
     expect(shellApi.listSpaces).toHaveBeenCalledTimes(1);
     await act(async () => {
+      stream.options.onEvent(
+        {
+          id: "navigation-completed",
+          type: "run.completed",
+          threadId: stream.head.threadId,
+          botId: "bot-1",
+          spaceId: "space-1",
+          runId: "run-main",
+          seq: 2,
+          payload: {},
+          createdAt: "2026-01-01T00:00:00Z",
+        },
+        stream.head,
+      );
       window.dispatchEvent(new Event("focus"));
       await vi.advanceTimersByTimeAsync(51);
     });
@@ -716,6 +869,7 @@ it.each(["unmount", "user"] as const)(
   async (change) => {
     vi.useFakeTimers();
     vi.spyOn(document, "visibilityState", "get").mockReturnValue("visible");
+    vi.spyOn(document, "hasFocus").mockReturnValue(true);
     const view = await renderFeedbackShell("bot", undefined, { openFeedback: false });
     let resolve!: (value: typeof view.navigation) => void;
     shellApi.listSpaces.mockReturnValueOnce(
@@ -746,6 +900,10 @@ it.each(["unmount", "user"] as const)(
     const stale = structuredClone(view.navigation);
     stale.current.bots[0]!.name = "Old private navigation";
     await act(async () => resolve(stale));
+    await act(async () => {
+      window.dispatchEvent(new Event("focus"));
+      await vi.advanceTimersByTimeAsync(60_000);
+    });
     expect(shellApi.listSpaces).toHaveBeenCalledTimes(1);
     expect(container?.textContent).not.toContain("Old private navigation");
   },
