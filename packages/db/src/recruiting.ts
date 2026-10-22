@@ -526,6 +526,18 @@ async function bindRoleInTransaction(
   return role ? roleSnapshot(tx, actor, role) : null;
 }
 
+/**
+ * The authorized thread's current role id, without building the role snapshot.
+ * Callers that read role data still authorize the role in their own transaction.
+ */
+export async function getRecruitingWorkspaceRoleId(
+  prisma: PrismaClient,
+  actor: Actor,
+  input: { threadId: string },
+): Promise<string | null> {
+  return (await requireThread(prisma, actor, input.threadId)).activeRecruitingRoleId;
+}
+
 export async function getRecruitingWorkspace(
   prisma: PrismaClient,
   actor: Actor,

@@ -18,6 +18,7 @@ import {
   getRecruitingAssessment,
   getRecruitingQuestion,
   getRecruitingWorkspace,
+  getRecruitingWorkspaceRoleId,
   IsolationError,
   listRecruitingCandidateSources,
   listRecruitingCandidates,
@@ -82,19 +83,19 @@ export async function executeRecruitingCandidatesTool(
   let itemCount: number | null = null;
   try {
     await requireRecruitingRun(deps.prisma, trusted, context);
-    const workspace = await getRecruitingWorkspace(deps.prisma, trusted.actor, {
+    const roleId = await getRecruitingWorkspaceRoleId(deps.prisma, trusted.actor, {
       threadId: trusted.threadId,
     });
     authorizeMs = Math.round(performance.now() - started);
     const queryStarted = performance.now();
-    if (!workspace) {
+    if (!roleId) {
       succeeded = true;
       return { status: "no_current_role" as const };
     }
     if (input.operation === "list") {
       const { operation: _operation, ...query } = input;
       const result = await listRecruitingCandidates(deps.prisma, trusted.actor, {
-        roleId: workspace.role.id,
+        roleId,
         ...query,
       });
       queryMs = Math.round(performance.now() - queryStarted);
@@ -105,23 +106,30 @@ export async function executeRecruitingCandidatesTool(
     const { operation: _operation, ...query } = input;
     if (!deps.artifacts) throw new IsolationError();
     const result = await listRecruitingCandidateSources(deps.prisma, trusted.actor, {
-      roleId: workspace.role.id,
+      roleId,
       ...query,
     });
     queryMs = Math.round(performance.now() - queryStarted);
     itemCount = result.items.length;
     const reportsStarted = performance.now();
-    const readReport = createRecruitingCandidateReportReader(
-      deps,
-      trusted.actor,
-      workspace.role.id,
-      {
-        fromTool: true,
-      },
+    const readReport = createRecruitingCandidateReportReader(deps, trusted.actor, roleId, {
+      fromTool: true,
+    });
+    // Read distinct saved pages together; sources sharing a page stay sequential so the
+    // reader's per-request cache verifies and decodes that page once.
+    const byArtifact = new Map<string, number[]>();
+    result.items.forEach((source, index) => {
+      const key = source.artifactRef.artifactId;
+      byArtifact.set(key, [...(byArtifact.get(key) ?? []), index]);
+    });
+    const reports: Awaited<ReturnType<typeof readReport>>["report"][] = [];
+    await Promise.all(
+      [...byArtifact.values()].map(async (indexes) => {
+        for (const index of indexes)
+          reports[index] = (await readReport(result.items[index]!)).report;
+      }),
     );
-    const items = [];
-    for (const source of result.items)
-      items.push({ ...source, report: (await readReport(source)).report });
+    const items = result.items.map((source, index) => ({ ...source, report: reports[index] }));
     reportReadMs = Math.round(performance.now() - reportsStarted);
     succeeded = true;
     return { ...result, items };
