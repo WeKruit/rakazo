@@ -212,13 +212,26 @@ describe("E2B computer backend", () => {
         true,
       );
       expect(shouldSkipPortableWorkspaceFile(`${profile}/BrowserMetrics-spare.pma`)).toBe(true);
+      for (const downloaded of [
+        "optimization_guide_model_store/43/model.tflite",
+        "WasmTtsEngine/component",
+        "WidevineCdm/component",
+        "OnDeviceHeadSuggestModel/component",
+        "OptimizationHints/component",
+        "hyphen-data/component",
+        "ZxcvbnData/component",
+        "Dictionaries/en-US.bdic",
+        "GraphiteDawnCache/data",
+        "extensions_crx_cache/package.crx",
+      ]) {
+        expect(shouldSkipPortableWorkspaceFile(`${profile}/${downloaded}`)).toBe(true);
+      }
       for (const retained of [
         "component_crx_cache-notes/package.crx",
         "BrowserMetrics-spare.pma.notes",
         "Safe Browsing/data",
-        "WidevineCdm/component",
-        "WasmTtsEngine/component",
-        "OnDeviceHeadSuggestModel/component",
+        "CertificateRevocation/component",
+        "Extensions/extension/manifest.json",
         "Cookies",
         "Local Storage/data",
         "IndexedDB/data",
@@ -229,6 +242,7 @@ describe("E2B computer backend", () => {
       }
     }
     expect(shouldSkipPortableWorkspaceFile("project/component_crx_cache/package.crx")).toBe(false);
+    expect(shouldSkipPortableWorkspaceFile("project/WidevineCdm/notes.md")).toBe(false);
     expect(shouldSkipPortableWorkspaceFile("shared/BrowserMetrics-spare.pma")).toBe(false);
   });
 
