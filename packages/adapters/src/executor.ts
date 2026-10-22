@@ -388,6 +388,7 @@ import {
 import type { RemoteTransportDependencies } from "./remote-mcp.js";
 import { assertSafeRemoteUrl } from "./remote-mcp.js";
 import { loadReplyContext, messageToAgentHistoryText } from "./reply-context.js";
+import { lazyRunComputer } from "./run-computer.js";
 import {
   commitConsumedRunSecret,
   normalizeSecretAskPurpose,
@@ -3378,27 +3379,27 @@ export function createRunExecutor(deps: ExecutorDeps) {
       ) {
         assertTransition(current.status as RunStatus, "running");
       }
-      const leaseTarget = await deps.prisma.bot.findUniqueOrThrow({
-        where: { id: run.botId },
-        select: { computerId: true, computerSwitching: true },
-      });
-      if (!leaseTarget.computerId) throw new Error("Bot has no computer");
-      if (leaseTarget.computerSwitching) {
-        await requeueComputerRun(deps, run, workerId, fence, resumeCheckpoint, heldForTakeover);
-        return;
-      }
       let computerLease: ComputerExecutionLease | null = null;
-      try {
-        computerLease = await acquireComputerExecutionLease(deps.prisma, {
-          computerId: leaseTarget.computerId,
-          runId,
-          botId: run.botId,
-          resumeHeldLease,
+      // Retained takeover ownership must be reclaimed even when this continuation only chats.
+      if (resumeHeldLease) {
+        const leaseTarget = await deps.prisma.bot.findUniqueOrThrow({
+          where: { id: run.botId },
+          select: { computerId: true, computerSwitching: true },
         });
-      } catch (error) {
-        if (!(error instanceof ComputerBusyError)) throw error;
-        await requeueComputerRun(deps, run, workerId, fence, resumeCheckpoint, heldForTakeover);
-        return;
+        if (!leaseTarget.computerId) throw new Error("Bot has no computer");
+        try {
+          if (leaseTarget.computerSwitching) throw new ComputerBusyError();
+          computerLease = await acquireComputerExecutionLease(deps.prisma, {
+            computerId: leaseTarget.computerId,
+            runId,
+            botId: run.botId,
+            resumeHeldLease: true,
+          });
+        } catch (error) {
+          if (!(error instanceof ComputerBusyError)) throw error;
+          await requeueComputerRun(deps, run, workerId, fence, resumeCheckpoint, heldForTakeover);
+          return;
+        }
       }
       const started = await deps.prisma.run
         .updateMany({
@@ -4022,14 +4023,48 @@ export function createRunExecutor(deps: ExecutorDeps) {
         if (!bot.computer) throw new Error("Bot has no computer");
         const storedComputer = bot.computer;
         const computerMode = parseComputerMode(storedComputer.scope);
-        const computer = await provisionComputer(deps, storedComputer.id, context, "bot");
-        screenRelease = { computer, context };
-        scheduleComputerSleep(deps.jobs, storedComputer.id);
-        const workspaceCheckpoint = createRunWorkspaceCheckpoint(() =>
-          checkpointRunComputerWorkspace(deps, storedComputer, computer, context),
+        const computerAdmissionRetained = resumeHeldLease;
+        const runComputer = lazyRunComputer(
+          async () => {
+            context.signal.throwIfAborted();
+            if (!(await renewRunLease(deps, runId, workerId, fence))) {
+              leaseValid = false;
+              throw new Error("Run lease was lost before computer use");
+            }
+            if (!computerAdmissionRetained) {
+              const target = await deps.prisma.bot.findUniqueOrThrow({
+                where: { id: bot.id },
+                select: { computerId: true, computerSwitching: true },
+              });
+              if (target.computerSwitching || target.computerId !== storedComputer.id)
+                throw new ComputerBusyError();
+              computerLease = await acquireComputerExecutionLease(deps.prisma, {
+                computerId: storedComputer.id,
+                runId,
+                botId: bot.id,
+              });
+              context.screenLeaseId = screenLeaseIdForRun(computerLease, runId, fence);
+            }
+            if (!(await renewRunLease(deps, runId, workerId, fence))) {
+              leaseValid = false;
+              throw new Error("Run lease was lost during computer admission");
+            }
+            context.signal.throwIfAborted();
+            const computer = await provisionComputer(deps, storedComputer.id, context, "bot");
+            screenRelease = { computer, context };
+            scheduleComputerSleep(deps.jobs, storedComputer.id);
+            context.signal.throwIfAborted();
+            return computer;
+          },
+          () => runAbortController?.abort(),
         );
+        const computerKind = storedComputer.kind;
+        const workspaceCheckpoint = createRunWorkspaceCheckpoint(async () => {
+          if (runComputer.ready)
+            await checkpointRunComputerWorkspace(deps, storedComputer, runComputer.ready, context);
+        });
         const graphical =
-          computer.kind !== "desktop" && deps.sandbox.describe().capabilities.graphical;
+          computerKind !== "desktop" && deps.sandbox.describe().capabilities.graphical;
         // Gate on the model this run will actually call — the pair written to the run row
         // above. Deriving it a second time here dropped the deployment fallback, so a
         // vision-capable default was gated as "scripted" and lost its screenshot tools.
@@ -4175,7 +4210,7 @@ export function createRunExecutor(deps: ExecutorDeps) {
           disabled: disabledBuiltinTools,
         });
         const dockerToolInstruction = dockerComputerToolInstruction(
-          computer.kind,
+          computerKind,
           disabledBuiltinTools,
         );
         const computerInstruction = dockerToolInstruction
@@ -5852,6 +5887,18 @@ export function createRunExecutor(deps: ExecutorDeps) {
             } catch (error) {
               return replyProofError(error);
             }
+            // Admission precedes the executing receipt: a busy computer has performed no effect.
+            if (
+              (FILE_TOOL_NAMES as readonly string[]).includes(name) ||
+              IMAGE_RETURNING_COMPUTER_TOOLS.has(name) ||
+              PAGE_BROWSER_TOOL_NAMES.has(name) ||
+              name === "shell" ||
+              (name === "render_plot" &&
+                args.charts === undefined &&
+                args.help !== true &&
+                args.spec)
+            )
+              await runComputer.get();
             const claim = from === "approved" ? claimApprovedEffect : claimIntendedEffect;
             let claimed: boolean;
             try {
@@ -6331,7 +6378,7 @@ export function createRunExecutor(deps: ExecutorDeps) {
               };
             }
             return computerScreenToolResult(async () =>
-              formatObservation(await deps.sandbox.observe(computer, context)),
+              formatObservation(await deps.sandbox.observe(await runComputer.get(), context)),
             );
           }
           if (name === "computer_act") {
@@ -6351,7 +6398,7 @@ export function createRunExecutor(deps: ExecutorDeps) {
             workspaceCheckpoint.markDirty();
             return computerScreenToolResult(async () => {
               const result = await deps.sandbox.act(
-                computer,
+                await runComputer.get(),
                 {
                   actions,
                   observe: args.observe !== false,
@@ -6371,7 +6418,7 @@ export function createRunExecutor(deps: ExecutorDeps) {
           if (name === "list_files") {
             const requestedPath = String(args.path ?? "");
             const entries = await deps.sandbox.listFiles(
-              computer,
+              await runComputer.get(),
               resolveBotWorkspacePath(computerMode, bot.id, requestedPath),
               context,
             );
@@ -6388,7 +6435,7 @@ export function createRunExecutor(deps: ExecutorDeps) {
             const storedPath = resolveBotWorkspacePath(computerMode, bot.id, filePath);
             let bytes: Uint8Array;
             try {
-              bytes = await deps.sandbox.readFile(computer, storedPath, context, {
+              bytes = await deps.sandbox.readFile(await runComputer.get(), storedPath, context, {
                 maxBytes: MAX_MODEL_FILE_BYTES,
               });
             } catch (error) {
@@ -6460,7 +6507,7 @@ export function createRunExecutor(deps: ExecutorDeps) {
             workspaceCheckpoint.markDirty();
             try {
               await deps.sandbox.writeFile(
-                computer,
+                await runComputer.get(),
                 { path: resolveBotWorkspacePath(computerMode, bot.id, filePath), content },
                 context,
               );
@@ -6500,7 +6547,7 @@ export function createRunExecutor(deps: ExecutorDeps) {
                 typeof args.data_path === "string" && args.data_path ? args.data_path : undefined;
               if (!rows && dataPath) {
                 const bytes = await deps.sandbox.readFile(
-                  computer,
+                  await runComputer.get(),
                   resolveBotWorkspacePath(computerMode, bot.id, dataPath),
                   context,
                   { maxBytes: ATTACHMENT_MAX_BYTES },
@@ -6522,7 +6569,7 @@ export function createRunExecutor(deps: ExecutorDeps) {
                   : `charts/plot-${Date.now()}.png`;
               workspaceCheckpoint.markDirty();
               await deps.sandbox.writeFile(
-                computer,
+                await runComputer.get(),
                 {
                   path: resolveBotWorkspacePath(computerMode, bot.id, outPath),
                   content: png,
@@ -6585,7 +6632,7 @@ export function createRunExecutor(deps: ExecutorDeps) {
             const storedPath = resolveBotWorkspacePath(computerMode, bot.id, filePath);
             let bytes: Uint8Array;
             try {
-              bytes = await deps.sandbox.readFile(computer, storedPath, context, {
+              bytes = await deps.sandbox.readFile(await runComputer.get(), storedPath, context, {
                 maxBytes: ATTACHMENT_MAX_BYTES,
               });
             } catch {
@@ -6684,7 +6731,7 @@ export function createRunExecutor(deps: ExecutorDeps) {
               };
               const observed = await observeShellCommand(
                 deps.sandbox.execute(
-                  computer,
+                  await runComputer.get(),
                   {
                     argv: [
                       "bash",
@@ -6770,7 +6817,7 @@ export function createRunExecutor(deps: ExecutorDeps) {
             return computerScreenToolResult(async () => {
               try {
                 const result = await deps.sandbox.act(
-                  computer,
+                  await runComputer.get(),
                   {
                     actions: [
                       {
@@ -6806,7 +6853,7 @@ export function createRunExecutor(deps: ExecutorDeps) {
             return computerScreenToolResult(async () => {
               try {
                 const result = await deps.sandbox.act(
-                  computer,
+                  await runComputer.get(),
                   {
                     actions: [
                       {
@@ -7229,8 +7276,11 @@ export function createRunExecutor(deps: ExecutorDeps) {
                   : null;
             return computerScreenToolResult(async () => {
               const result = tool
-                ? redactConnectorPayload(await tool(browser, computer, context, args), redactions())
-                : await browserActFromTool(browser, computer, context, args, {
+                ? redactConnectorPayload(
+                    await tool(browser, await runComputer.get(), context, args),
+                    redactions(),
+                  )
+                : await browserActFromTool(browser, await runComputer.get(), context, args, {
                     redactions,
                     resolveSecretFill: async (step) => {
                       const resolved = await resolveLoginFill({
@@ -8968,6 +9018,7 @@ export function createRunExecutor(deps: ExecutorDeps) {
               return;
             } else if (event.type === "takeover") {
               if (!(await renewRunLease(deps, runId, workerId, fence))) return;
+              await runComputer.get();
               const safeReason = redactSecrets(event.reason, runSecrets);
               // Publish pending narration as tagged mid-turn progress so reconciliation
               // does not treat pre-takeover text as the delegated final result.
@@ -9206,6 +9257,7 @@ export function createRunExecutor(deps: ExecutorDeps) {
             }
           }
 
+          runComputer.throwIfFailed();
           if (approvalPausePending || !leaseValid) return;
           approvedEffectReplays.assertDrained();
           pendingProgress += progressRedactor.finish();
@@ -9215,7 +9267,7 @@ export function createRunExecutor(deps: ExecutorDeps) {
             for (const file of turn.files ?? []) {
               workspaceCheckpoint.markDirty();
               await deps.sandbox.writeFile(
-                computer,
+                await runComputer.get(),
                 {
                   path: resolveBotWorkspacePath(computerMode, bot.id, file.path),
                   content: new TextEncoder().encode(file.content),
@@ -9375,10 +9427,19 @@ export function createRunExecutor(deps: ExecutorDeps) {
             getLogger().error("history.compact enqueue failed", error);
           }
         } catch (error) {
+          let runtimeError = error;
+          try {
+            runComputer.throwIfFailed();
+          } catch (startupError) {
+            if (!deps.shutdownSignal?.aborted || startupError !== deps.shutdownSignal.reason)
+              throw startupError;
+            // Pi may wrap a tool exception; preserve the original shutdown identity for recovery.
+            runtimeError = startupError;
+          }
           const interruptedByShutdown =
             deps.shutdownSignal?.aborted &&
             runAbortController?.signal.aborted &&
-            error === deps.shutdownSignal.reason &&
+            runtimeError === deps.shutdownSignal.reason &&
             runAbortController.signal.reason === deps.shutdownSignal.reason;
           if (!terminalCheckpointComplete) {
             await workspaceCheckpoint.flush().catch(() => undefined);

@@ -34,7 +34,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import type * as AutoReviewModule from "./auto-review.js";
 import { runAutoReviewJudge } from "./auto-review.js";
 import type * as ComputerLifecycleModule from "./computer-lifecycle.js";
-import { acquireComputerExecutionLease } from "./computer-lifecycle.js";
+import { acquireComputerExecutionLease, ComputerBusyError } from "./computer-lifecycle.js";
 import type * as ComputerWorkspaceModule from "./computer-workspace.js";
 import { createRunExecutor, selectBuiltinToolsForRun } from "./executor.js";
 import {
@@ -596,6 +596,7 @@ describe("worker shutdown recovery", () => {
     }));
     const lease = { computerId: "computer-1", botId: "bot-1", runId: f.runData.id, fence: 1 };
     vi.mocked(acquireComputerExecutionLease).mockResolvedValueOnce(lease);
+    Object.assign(f.sandbox, { listFiles: vi.fn(async () => []) });
     const leaseUpdate = vi.fn(async () => ({ count: 1 }));
     Object.assign(f.prisma, {
       $transaction: vi.fn(async (work: (tx: unknown) => Promise<unknown>) => work(f.prisma)),
@@ -621,7 +622,8 @@ describe("worker shutdown recovery", () => {
     const draining = new Promise<void>((resolve) => {
       drain = resolve;
     });
-    f.runtimeRun.mockImplementationOnce(async function* (_request, context) {
+    f.runtimeRun.mockImplementationOnce(async function* (request, context) {
+      await request.executeTool!("list_files", {}, "touch-computer-before-interruption");
       yield { type: "progress", text: "Working" };
       try {
         if (interruption === "runtime-error-then-shutdown") {
@@ -701,6 +703,75 @@ describe("worker shutdown recovery", () => {
     expect(f.results).toEqual([{ uncertain: true }]);
     expect(f.memoryCommit).not.toHaveBeenCalled();
     expect(f.effects).toEqual(before);
+  });
+});
+
+describe("native computer contention effect replay", () => {
+  it("requeues before claiming an approved file effect and replays earlier completed work once", async () => {
+    const f = fixture("busy-effect-replay");
+    const write = { path: "notes.txt", content: "Saved once" };
+    const memory = { path: "MEMORY.md", content: "Durable note", expectedRevision: 0 };
+    f.effects.push({
+      id: "approved-write",
+      runId: f.runData.id,
+      spaceId: f.runData.spaceId,
+      kind: "write_file",
+      idempotencyKey: toolEffectIdempotencyKey(f.runData.id, "write_file", write),
+      status: "approved",
+      request: write,
+    });
+    Object.assign(f.prisma, {
+      $transaction: vi.fn(async (work: (tx: unknown) => Promise<unknown>) => work(f.prisma)),
+    });
+    Object.assign(f.prisma.thread, { update: vi.fn(async () => ({ nextEventSeq: 2 })) });
+    Object.assign(f.prisma.event, {
+      create: vi.fn(async ({ data }: { data: object }) => ({ ...data, seq: 1 })),
+    });
+    f.prisma.run.updateMany.mockImplementation(async ({ where, data }) => {
+      if (
+        (where.checkpoint === null && f.runData.checkpoint !== null) ||
+        (typeof where.checkpoint === "object" &&
+          where.checkpoint?.in &&
+          !where.checkpoint.in.includes(f.runData.checkpoint)) ||
+        (where.leaseOwner !== undefined && where.leaseOwner !== f.runData.leaseOwner) ||
+        (where.leaseFence !== undefined && where.leaseFence !== f.runData.leaseFence)
+      )
+        return { count: 0 };
+      Object.assign(f.runData, data);
+      return { count: 1 };
+    });
+    // The approved operation must be replayed before fresh work, so retain an earlier receipt.
+    f.effects.push({
+      id: "completed-memory",
+      runId: f.runData.id,
+      spaceId: f.runData.spaceId,
+      kind: "remember",
+      idempotencyKey: toolEffectIdempotencyKey(f.runData.id, "remember", memory),
+      status: "completed",
+      request: memory,
+      result: { ok: true, path: "MEMORY.md", revision: 1 },
+    });
+    f.setCalls([{ name: "write_file", args: write, executionId: "first-attempt" }]);
+    vi.mocked(acquireComputerExecutionLease).mockRejectedValueOnce(new ComputerBusyError());
+    await f.executor.continueRun(f.runData.id, "worker-1");
+    expect(f.runData.status).toBe("queued");
+    expect(f.effects[0]?.status).toBe("approved");
+    expect(f.effects[1]?.status).toBe("completed");
+    expect(f.sandbox.writeFile).not.toHaveBeenCalled();
+    expect(f.finalizeRun).not.toHaveBeenCalled();
+    expect(f.executorDeps.jobs.enqueue).toHaveBeenCalledWith(
+      expect.objectContaining({ name: "run.continue" }),
+    );
+    f.setCalls([
+      { name: "write_file", args: write, executionId: "second-attempt" },
+      { name: "remember", args: memory, executionId: "prior-completed-memory" },
+    ]);
+    await f.executor.continueRun(f.runData.id, "worker-1");
+    expect(f.effects).toHaveLength(2);
+    expect(f.effects.every((effect) => effect.status === "completed")).toBe(true);
+    expect(f.sandbox.writeFile).toHaveBeenCalledOnce();
+    expect(f.memoryCommit).not.toHaveBeenCalled();
+    expect(f.finalizeRun).toHaveBeenCalledWith(expect.objectContaining({ outcome: "completed" }));
   });
 });
 
