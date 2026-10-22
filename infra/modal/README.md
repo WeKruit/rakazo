@@ -113,3 +113,62 @@ rounds, and persistence after reload and a controlled restart. Check that a publ
 test workspace file survives sandbox pause/replacement and container replacement.
 Record the deployed revision, HTTPS URL, screenshots, pass/fail results, and usage.
 Do not connect business integrations or claim this baseline proves their behavior.
+
+## Shutdown check
+
+All three services receive SIGTERM before sharing one eight-second exit deadline.
+Remaining services are killed together and reaped before `Volume.commit()` runs;
+commit and process-wait errors propagate. `exit_grace_period=10` is HTTP request
+draining, followed by Modal's separate 30-second termination/exit-hook window
+([native lifecycle](https://modal.com/docs/guide/servers#container-lifecycle)).
+This preserves more of that window for the native commit; it does not guarantee
+commit completion after a hard kill or make per-checkpoint persistence atomic.
+
+Run this offline standard-library check from the repository root. It executes the
+actual shutdown method with three simulated lagging processes, never a real
+process or Volume:
+
+```sh
+python3 - <<'PY'
+import ast, contextlib, signal, subprocess
+from pathlib import Path
+from types import SimpleNamespace
+
+module = ast.parse(Path("infra/modal/app.py").read_text())
+server = next(n for n in module.body if isinstance(n, ast.ClassDef) and n.name == "Recruiting")
+stop = next(n for n in server.body if isinstance(n, ast.FunctionDef) and n.name == "stop")
+stop.decorator_list = []
+for failure in (None, "reap", "commit"):
+    elapsed, events = [0.0], []
+    class Process:
+        def __init__(self, pid): self.pid, self.dead = pid, False
+        def poll(self): return 0 if self.dead else None
+        def wait(self, timeout=None):
+            if not self.dead:
+                elapsed[0] += timeout
+                raise subprocess.TimeoutExpired("simulated", timeout)
+            if failure == "reap": raise RuntimeError("reap")
+            events.append(("reaped", self.pid))
+    processes = [Process(pid) for pid in (1, 2, 3)]
+    def kill(pid, sig):
+        events.append((sig, pid))
+        if sig == signal.SIGKILL: processes[pid - 1].dead = True
+    def commit():
+        assert all(("reaped", p.pid) in events for p in processes)
+        events.append(("commit",))
+        if failure == "commit": raise RuntimeError("commit")
+    scope = dict(contextlib=contextlib, signal=signal, subprocess=subprocess,
+                 time=SimpleNamespace(monotonic=lambda: elapsed[0]),
+                 os=SimpleNamespace(killpg=kill), files=SimpleNamespace(commit=commit))
+    exec(compile(ast.Module(body=[stop], type_ignores=[]), "shutdown-check", "exec"), scope)
+    try:
+        scope["stop"](SimpleNamespace(processes=processes, stopping=SimpleNamespace(set=lambda: None)))
+        assert failure is None
+    except RuntimeError as error:
+        assert str(error) == failure
+    assert elapsed[0] <= 8, elapsed
+    assert [sig for sig, *_ in events[:3]] == [signal.SIGTERM] * 3
+    if failure == "reap": assert ("commit",) not in events
+print("shutdown shared deadline, stopped-before-commit and error propagation: passed")
+PY
+```
