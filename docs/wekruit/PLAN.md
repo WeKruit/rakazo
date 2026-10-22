@@ -32,6 +32,12 @@
 
 **Goal:** 在现有 Rakazo 网页交付 Main/Sourcer 原生协作、可恢复交互与记忆，迁入现有招聘工作，完成 [GOAL.md](GOAL.md) 的 P0–P6 基础闭环与 [PRODUCT-SCOPE.md](PRODUCT-SCOPE.md) 的 Juicebox / Metix / Grok Bot 完整产品范围。
 
+### 2026-10-22：平台开箱范围与原生连接窗口修复
+
+用户进一步明确：仅个人邮箱/日历按需连接，其他招聘服务与 Codex OAuth 均应由平台提供；已同步 GOAL 和 PRODUCT-SCOPE，不把新人改成逐服务配置。当前部署模型仅支持平台 API key/原生 host 凭据；现有 Codex OAuth 仍绑定个人，旧闲置部署密文字段不参与执行。已核对官方远程托管申请及工作区 WIF beta 文档，尚无适用接入已获准证据；此项仍是产品缺口，不复制个人 grant、不借管理员 actor，也不以 API key 验收替代它。
+
+连接窗口的实际根因已定位：普通页面只列托管 connector catalog，未读取已有 native MCP 服务，因而平台服务已配置仍显示空目录。正在复用原生 servers/assignments/OAuth 与已有公共搜索，补普通产品服务卡和只含 Boolean 的平台配置状态；不创建新 endpoint、目录、broker 或 harness，不赋予/恢复工具权限。相关源码及检查仍在集成，不能称已发布。
+
 ### 2026-10-22：新人注册与可替换底座边界核对
 
 新人差距与现有接口统一记录在 [PRODUCT-SCOPE.md — 新人开箱与底座接口](PRODUCT-SCOPE.md#新人开箱与底座接口)，不新增另一份框架或追踪表。线上公开 `/api/auth/capabilities` 实际200：密码登录开启、SSO为空、密码找回不可用。现有容器的物理 READ ONLY / RepeatableRead 元数据核对进一步确认：注册开启且策略已初始化，一条白名单、一位现有 human 与 owner；SMTP、发件地址、OIDC 及环境级模型供给均未配置。按既有原生规则，后续白名单新人会被验证邮件服务缺失阻塞；未创建测试账号或发送邮件，不把路径推导称实际注册验收。不能复制管理员账号或关闭身份验证使其通过。普通网页的 Integrations 窗口实际显示尚未配置服务目录，这与当前账号已有部分 MCP 连接并不矛盾，不能据后者宣布新人连接入口完成。

@@ -406,6 +406,7 @@ msgstr "Treg hinzufügen"
 msgid "Add trigger"
 msgstr ""
 
+#: src/components/integrations/IntegrationSetup.tsx
 #: src/pages/PluginsOverlay.tsx
 msgid "Added"
 msgstr ""
@@ -1356,6 +1357,7 @@ msgstr "Computer sind aus. Setze SANDBOX_PROVIDER=docker mit SANDBOX_SUPERVISOR_
 msgid "Configure a plugin catalog on the server to connect apps."
 msgstr ""
 
+#: src/pages/PluginsOverlay.tsx
 #: src/pages/RecruitingCorrespondence.tsx
 msgid "Configured"
 msgstr ""
@@ -1393,6 +1395,7 @@ msgstr ""
 #: src/components/integrations/IntegrationSetup.tsx
 #: src/pages/memory-providers/SerenitySettingsForm.tsx
 #: src/pages/memory-providers/SupermemorySettingsForm.tsx
+#: src/pages/PluginsOverlay.tsx
 #: src/pages/VoiceSettingsOverlay.tsx
 msgid "Connect"
 msgstr "Verbinden"
@@ -1407,6 +1410,11 @@ msgstr "Verbinde einen Anbieter, um Backups hinzuzufügen."
 
 #: src/pages/RecruitingCorrespondence.tsx
 msgid "Connect account"
+msgstr ""
+
+#: src/components/integrations/IntegrationSetup.tsx
+#: src/pages/PluginsOverlay.tsx
+msgid "Connect an app"
 msgstr ""
 
 #: src/pages/ModelSettingsOverlay.tsx
@@ -1466,6 +1474,7 @@ msgstr "Verbunden. Die Tools sind ab deiner nächsten Nachricht verfügbar."
 #: src/pages/McpServersOverlay.tsx
 #: src/pages/memory-providers/SerenitySettingsForm.tsx
 #: src/pages/memory-providers/SupermemorySettingsForm.tsx
+#: src/pages/PluginsOverlay.tsx
 #: src/pages/shell/message-cards.tsx
 #: src/pages/VoiceSettingsOverlay.tsx
 msgid "Connecting…"
@@ -1479,6 +1488,10 @@ msgstr "Verbindungstest fehlgeschlagen."
 #: src/pages/PluginsOverlay.tsx
 msgid "Connection to {0} is still pending. You can close this and check again."
 msgstr "Die Verbindung zu {0} steht noch aus. Du kannst dieses Fenster schließen und später erneut nachsehen."
+
+#: src/pages/PluginsOverlay.tsx
+msgid "Connection was not confirmed. Try again or check your account settings."
+msgstr ""
 
 #: src/pages/RecruitingPanel.tsx
 msgid "Consideration resumed"
@@ -1611,6 +1624,11 @@ msgstr "Verbindung fehlgeschlagen"
 msgid "Could not connect {0}"
 msgstr "Verbindung mit {0} fehlgeschlagen"
 
+#: src/components/integrations/IntegrationSetup.tsx
+#: src/pages/PluginsOverlay.tsx
+msgid "Could not connect this app. Check your account settings and try again."
+msgstr ""
+
 #: src/pages/ModelSettingsOverlay.tsx
 msgid "Could not connect this provider"
 msgstr "Anbieter konnte nicht verbunden werden"
@@ -1653,8 +1671,8 @@ msgid "Could not create space"
 msgstr ""
 
 #: src/pages/Onboarding.tsx
-msgid "Could not create your bot"
-msgstr "Dein Bot konnte nicht erstellt werden"
+#~ msgid "Could not create your bot"
+#~ msgstr "Dein Bot konnte nicht erstellt werden"
 
 #: src/pages/shell/dialogs.tsx
 msgid "Could not delete bot"
@@ -1876,6 +1894,10 @@ msgstr "Terminal konnte nicht geöffnet werden"
 #: src/pages/VoiceSettingsOverlay.tsx
 msgid "Could not play a test clip"
 msgstr "Testclip konnte nicht abgespielt werden"
+
+#: src/pages/Onboarding.tsx
+msgid "Could not prepare your workspace"
+msgstr ""
 
 #: src/lib/model-connection-preflight.ts
 msgid "Could not reach the model server."
@@ -3713,6 +3735,10 @@ msgstr ""
 msgid "Needs an answer"
 msgstr ""
 
+#: src/pages/PluginsOverlay.tsx
+msgid "Needs connection"
+msgstr ""
+
 #: src/pages/ActivityList.tsx
 msgid "Needs input"
 msgstr "Eingabe erforderlich"
@@ -3779,6 +3805,10 @@ msgstr ""
 
 #: src/pages/MessagingSettingsOverlay.tsx
 msgid "No agent connections yet."
+msgstr ""
+
+#: src/components/integrations/IntegrationSetup.tsx
+msgid "No apps found"
 msgstr ""
 
 #: src/pages/PluginsOverlay.tsx
@@ -3997,6 +4027,10 @@ msgstr ""
 
 #: src/pages/RecruitingPanel.tsx
 msgid "Not accepted"
+msgstr ""
+
+#: src/pages/PluginsOverlay.tsx
+msgid "Not available to this assistant"
 msgstr ""
 
 #: src/pages/RecruitingPanel.tsx
@@ -4522,6 +4556,10 @@ msgstr ""
 msgid "Recipients"
 msgstr ""
 
+#: src/pages/PluginsOverlay.tsx
+msgid "Reconnect"
+msgstr ""
+
 #: src/pages/McpServersOverlay.tsx
 msgid "Reconnect OAuth"
 msgstr "OAuth erneut verbinden"
@@ -4882,6 +4920,7 @@ msgstr ""
 #: src/components/AccountAccess.tsx
 #: src/pages/Auth.tsx
 #: src/pages/ModelBackupsSettings.tsx
+#: src/pages/PluginsOverlay.tsx
 #: src/pages/RecruitingPanel.tsx
 msgid "Retry"
 msgstr "Erneut versuchen"
@@ -5200,6 +5239,7 @@ msgstr ""
 msgid "Score / tier not returned"
 msgstr ""
 
+#: src/components/integrations/IntegrationSetup.tsx
 #: src/pages/ModelSettingsOverlay.tsx
 #: src/pages/PluginsOverlay.tsx
 #: src/pages/Shell.tsx
