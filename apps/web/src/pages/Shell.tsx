@@ -4570,6 +4570,7 @@ export function ShellPage() {
         ) : (
           <Transcript
             key={activeSnapshot?.threadId}
+            visible={!workspaceFull || (roleChatWorkspace && roleChatOpen)}
             scrollRef={messageScroll}
             scrollRequest={scrollRequest}
             onScrollRequestHandled={clearScrollRequest}
@@ -5796,6 +5797,7 @@ export function ShellPage() {
 }
 
 const Transcript = memo(function Transcript({
+  visible,
   scrollRef,
   scrollRequest,
   onScrollRequestHandled,
@@ -5825,6 +5827,7 @@ const Transcript = memo(function Transcript({
   onSpeak,
   onOpenComputer,
 }: {
+  visible: boolean;
   scrollRef: RefObject<HTMLDivElement | null>;
   scrollRequest: { messageId: string; nonce: number } | null;
   onScrollRequestHandled: () => void;
@@ -6021,7 +6024,7 @@ const Transcript = memo(function Transcript({
   // (or user input interrupting it, which also fires scrollend) ends the
   // suppression, with the timeout as fallback when no scroll happens.
   useLayoutEffect(() => {
-    if (!scrollRequest || scrolledJump.current === scrollRequest.nonce) return;
+    if (!visible || !scrollRequest || scrolledJump.current === scrollRequest.nonce) return;
     const element = scrollRef.current;
     const row = element?.querySelector(
       `[data-message-id="${CSS.escape(scrollRequest.messageId)}"]`,
@@ -6047,11 +6050,11 @@ const Transcript = memo(function Transcript({
       { duration: 1200 },
     );
     onScrollRequestHandled();
-  }, [messages, scrollRequest, scrollRef, endJumpScroll, onScrollRequestHandled]);
+  }, [visible, messages, scrollRequest, scrollRef, endJumpScroll, onScrollRequestHandled]);
 
   useLayoutEffect(() => {
-    if (following.current) snapToEnd();
-  }, [messages, running, snapToEnd]);
+    if (visible && following.current) snapToEnd();
+  }, [visible, messages, running, snapToEnd]);
 
   useLayoutEffect(() => {
     const button = jumpButtonRef.current;
@@ -6108,6 +6111,7 @@ const Transcript = memo(function Transcript({
           }
         }}
         onScroll={(event) => {
+          if (!visible) return;
           const scrolledDown = transcriptMovedDown(
             lastScrollTop.current,
             event.currentTarget.scrollTop,

@@ -1406,6 +1406,77 @@ it("keeps the same role chat widget, draft and native card across workspace menu
   expect(shellApi.answer).not.toHaveBeenCalled();
 });
 
+it("follows the latest messages on role chat reveal while preserving a manually chosen scroll position", async () => {
+  const view = await renderFeedbackShell("group", undefined, {
+    isDeploymentOwner: false,
+    openFeedback: false,
+    initialPath: "/app/g/group-1?view=results",
+  });
+  const transcript = container!.querySelector<HTMLDivElement>('[data-testid="transcript"]')!;
+  const card = transcript.querySelector('[data-message-id="pending-main"]');
+  Object.defineProperties(transcript, {
+    scrollHeight: { configurable: true, value: 2_000 },
+    clientHeight: { configurable: true, value: 200 },
+  });
+  const scroll = vi
+    .spyOn(transcript, "scrollTo")
+    .mockImplementation((options?: ScrollToOptions | number) => {
+      if (typeof options === "object") transcript.scrollTop = options.top ?? 0;
+    });
+  await view.click("Open role chat");
+  expect(scroll).toHaveBeenCalledExactlyOnceWith({ top: 2_000, behavior: "auto" });
+  scroll.mockClear();
+  await view.click("Collapse role chat");
+  act(() => {
+    transcript.scrollTop = 0;
+    transcript.dispatchEvent(new Event("scroll", { bubbles: true }));
+  });
+  expect(scroll).not.toHaveBeenCalled();
+  await view.click("Open role chat");
+  expect(scroll).toHaveBeenCalledExactlyOnceWith({ top: 2_000, behavior: "auto" });
+  scroll.mockClear();
+  await view.click("Contacts");
+  expect(scroll).not.toHaveBeenCalled();
+  act(() => {
+    transcript.dispatchEvent(new WheelEvent("wheel", { deltaY: -1, bubbles: true }));
+    transcript.scrollTop = 350;
+    transcript.dispatchEvent(new Event("scroll", { bubbles: true }));
+  });
+  await view.click("Collapse role chat");
+  await view.click("Open role chat");
+  await view.click("Job Brief");
+  await view.click("Client feedback");
+  expect(scroll).not.toHaveBeenCalled();
+  expect(transcript.scrollTop).toBe(350);
+  expect(container!.querySelector('[data-testid="transcript"]')).toBe(transcript);
+  expect(transcript.querySelector('[data-message-id="pending-main"]')).toBe(card);
+});
+
+it("waits until role chat is visible before handling an exact native message jump", async () => {
+  Element.prototype.scrollIntoView ??= () => {};
+  const jump = vi.spyOn(Element.prototype, "scrollIntoView").mockImplementation(() => {});
+  const view = await renderFeedbackShell("group", undefined, {
+    isDeploymentOwner: false,
+    openFeedback: false,
+    initialPath: "/app/g/group-1?view=results&m=pending-main",
+  });
+  expect(shellApi.messages).toHaveBeenCalledWith({
+    groupId: "group-1",
+    around: { messageId: "pending-main" },
+  });
+  expect(jump).not.toHaveBeenCalled();
+  const transcript = container!.querySelector<HTMLDivElement>('[data-testid="transcript"]')!;
+  const scroll = vi.spyOn(transcript, "scrollTo");
+  await view.click("Open role chat");
+  expect(jump).toHaveBeenCalledExactlyOnceWith({ behavior: "auto", block: "center" });
+  expect(jump.mock.contexts[0]).toBe(transcript.querySelector('[data-message-id="pending-main"]'));
+  expect(scroll).not.toHaveBeenCalled();
+  await view.click("Collapse role chat");
+  await view.click("Open role chat");
+  expect(jump).toHaveBeenCalledOnce();
+  expect(scroll).not.toHaveBeenCalled();
+});
+
 it("enables Job Brief only after a cold native thread snapshot is available", async () => {
   setToolActivityPreference("off");
   let finishThread!: () => void;
