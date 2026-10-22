@@ -8026,28 +8026,6 @@ export async function listRecruitingCandidates(
         clauses.push(Prisma.sql`b."shortlisted" = ${input.shortlisted}`);
       if (explicitSource) clauses.push(Prisma.sql`b."sourcePageId" IS NOT NULL`);
       const filtered = Prisma.sql`${candidateIndexQuery(role.id, sort, rankDomainPageId ?? input.sourceEffectId, input)}, filtered AS (SELECT b.* FROM base b WHERE ${Prisma.join(clauses, " AND ")})`;
-      const totals = await tx.$queryRaw<
-        Array<{
-          total: bigint;
-          sourceRows: bigint;
-          candidates: bigint;
-          identifiedCandidates: bigint;
-          unassessed: bigint;
-          assessed: bigint;
-          shortlisted: bigint;
-          rankAvailable: boolean;
-          tierAvailable: boolean;
-          scoreAvailable: boolean;
-        }>
-      >(Prisma.sql`${filtered} SELECT (SELECT count(*) FROM filtered) AS "total",
-      (SELECT COALESCE(bool_or("rankValue" IS NOT NULL), false) FROM filtered) AS "rankAvailable",
-      (SELECT COALESCE(bool_or("tierValue" IS NOT NULL), false) FROM filtered) AS "tierAvailable",
-      (SELECT COALESCE(bool_or("scoreValue" IS NOT NULL), false) FROM filtered) AS "scoreAvailable",
-      COALESCE(sum("discoveryCount"), 0)::bigint AS "sourceRows", count(*) AS "candidates",
-      count(*) FILTER (WHERE "countIdentified") AS "identifiedCandidates",
-      count(*) FILTER (WHERE "assessmentVersion" IS NULL) AS "unassessed",
-      count(*) FILTER (WHERE "assessmentVersion" IS NOT NULL) AS "assessed",
-      count(*) FILTER (WHERE "shortlisted") AS "shortlisted" FROM base`);
       const sortValue = matchSort
         ? Prisma.sql`COALESCE("matchValue"::text, '')`
         : sort === "name"
@@ -8063,14 +8041,77 @@ export async function listRecruitingCandidates(
             ? Prisma.sql`("sortValue" > ${cursor.value} COLLATE "C" OR ("sortValue" = ${cursor.value} COLLATE "C" AND "candidateKey" > ${cursor.key} COLLATE "C"))`
             : Prisma.sql`("sortValue" < ${cursor.value} COLLATE "C" OR ("sortValue" = ${cursor.value} COLLATE "C" AND "candidateKey" > ${cursor.key} COLLATE "C"))`
         : Prisma.sql`true`;
-      const rows = await tx.$queryRaw<CandidateQueryRow[]>(Prisma.sql`${filtered}, ordered AS (
-      SELECT *, ${sortValue} AS "sortValue" FROM filtered
-    ) SELECT * FROM ordered WHERE ${after}
-      ORDER BY ${matchSort ? Prisma.sql`"matchValue" ${sort === "score" ? Prisma.sql`DESC` : Prisma.sql`ASC`} NULLS LAST` : Prisma.sql`"sortValue" ${direction}`}, "candidateKey" COLLATE "C" ASC LIMIT ${limit + 1}`);
+      const order = Prisma.sql`${matchSort ? Prisma.sql`"matchValue" ${sort === "score" ? Prisma.sql`DESC` : Prisma.sql`ASC`} NULLS LAST` : Prisma.sql`"sortValue" ${direction}`}, "candidateKey" COLLATE "C" ASC`;
+      // ponytail: totals and the bounded page share one provider/profile projection and snapshot.
+      const result = await tx.$queryRaw<
+        Array<
+          {
+            total: bigint;
+            sourceRows: bigint;
+            candidates: bigint;
+            identifiedCandidates: bigint;
+            unassessed: bigint;
+            assessed: bigint;
+            shortlistedCount: bigint;
+            rankAvailable: boolean;
+            tierAvailable: boolean;
+            scoreAvailable: boolean;
+          } & (CandidateQueryRow | { [Key in keyof CandidateQueryRow]: null })
+        >
+      >(Prisma.sql`${filtered}, ordered AS (
+        SELECT *, ${sortValue} AS "sortValue" FROM filtered
+      ), candidate_page AS (
+        SELECT * FROM ordered WHERE ${after} ORDER BY ${order} LIMIT ${limit + 1}
+      ), totals AS (
+        SELECT (SELECT count(*) FROM filtered) AS "total",
+          (SELECT COALESCE(bool_or("rankValue" IS NOT NULL), false) FROM filtered) AS "rankAvailable",
+          (SELECT COALESCE(bool_or("tierValue" IS NOT NULL), false) FROM filtered) AS "tierAvailable",
+          (SELECT COALESCE(bool_or("scoreValue" IS NOT NULL), false) FROM filtered) AS "scoreAvailable",
+          COALESCE(sum("discoveryCount"), 0)::bigint AS "sourceRows", count(*) AS "candidates",
+          count(*) FILTER (WHERE "countIdentified") AS "identifiedCandidates",
+          count(*) FILTER (WHERE "assessmentVersion" IS NULL) AS "unassessed",
+          count(*) FILTER (WHERE "assessmentVersion" IS NOT NULL) AS "assessed",
+          count(*) FILTER (WHERE "shortlisted") AS "shortlistedCount" FROM base
+      ) SELECT totals.*, candidate_page.* FROM totals LEFT JOIN candidate_page ON true
+        ORDER BY ${order}`);
+      const rows = result.flatMap(
+        ({
+          total: _total,
+          sourceRows: _sourceRows,
+          candidates: _candidates,
+          identifiedCandidates: _identifiedCandidates,
+          unassessed: _unassessed,
+          assessed: _assessed,
+          shortlistedCount: _shortlisted,
+          rankAvailable: _rankAvailable,
+          tierAvailable: _tierAvailable,
+          scoreAvailable: _scoreAvailable,
+          ...row
+        }) => (row.candidateKey === null ? [] : [row]),
+      );
       const selected = rows.slice(0, limit);
       const pages = await candidateProfilePages(tx, actor, role.id, selected);
       const last = selected.at(-1);
-      const { total, rankAvailable, tierAvailable, scoreAvailable, ...counts } = totals[0]!;
+      const {
+        total,
+        rankAvailable,
+        tierAvailable,
+        scoreAvailable,
+        sourceRows,
+        candidates,
+        identifiedCandidates,
+        unassessed,
+        assessed,
+        shortlistedCount,
+      } = result[0]!;
+      const counts = {
+        sourceRows,
+        candidates,
+        identifiedCandidates,
+        unassessed,
+        assessed,
+        shortlisted: shortlistedCount,
+      };
       const bound = role.crmBindingEffectId
         ? await crmBindingReceipt(tx, actor, role.id, role.crmBindingEffectId)
         : null;

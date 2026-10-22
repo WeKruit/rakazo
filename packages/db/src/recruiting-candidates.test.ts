@@ -69,8 +69,53 @@ function fixture() {
   return { prisma, tx, role, candidate };
 }
 
+function candidateProjectionRows(
+  counts: Record<string, unknown>[],
+  rows: Record<string, unknown>[] = [],
+) {
+  const { shortlisted, ...summary } = counts[0]!;
+  const totals = { ...summary, shortlistedCount: shortlisted };
+  return rows.length
+    ? rows.map((row) => ({ ...totals, ...row }))
+    : [{ ...totals, candidateKey: null }];
+}
+
 describe("candidate listing and shortlist boundaries", () => {
   beforeEach(() => vi.clearAllMocks());
+  it("reads an empty filtered page with global counts in one candidate projection", async () => {
+    const f = fixture();
+    f.tx.$queryRaw.mockResolvedValueOnce(
+      candidateProjectionRows([
+        {
+          total: 0n,
+          rankAvailable: false,
+          tierAvailable: false,
+          scoreAvailable: false,
+          sourceRows: 500n,
+          candidates: 200n,
+          identifiedCandidates: 190n,
+          unassessed: 180n,
+          assessed: 20n,
+          shortlisted: 10n,
+        },
+      ]),
+    );
+    const page = await recruiting.listRecruitingCandidates(f.prisma, actor, {
+      roleId: "role",
+      query: "No matching candidate",
+      sort: "name",
+    });
+    expect(page).toMatchObject({
+      total: 0,
+      items: [],
+      nextCursor: null,
+      counts: { sourceRows: 500, candidates: 200, identifiedCandidates: 190, shortlisted: 10 },
+    });
+    expect(f.tx.$queryRaw).toHaveBeenCalledOnce();
+    const statement = f.tx.$queryRaw.mock.calls[0]![0] as { sql: string };
+    expect(statement.sql.match(/match_rows AS MATERIALIZED/g)).toHaveLength(1);
+    expect(statement.sql).toContain("totals LEFT JOIN candidate_page ON true");
+  });
   it.each(["rank", "score"] as const)(
     "authorizes before querying candidate %s data",
     async (sort) => {
@@ -121,21 +166,25 @@ describe("candidate listing and shortlist boundaries", () => {
         hardGate: null,
         sortValue: key,
       });
-      f.tx.$queryRaw.mockResolvedValueOnce([
-        {
-          total: 19n,
-          rankAvailable: false,
-          tierAvailable: false,
-          scoreAvailable: false,
-          sourceRows: 30n,
-          candidates: 20n,
-          identifiedCandidates: 4n,
-          unassessed: 19n,
-          assessed: 1n,
-          shortlisted: 2n,
-        },
-      ]);
-      f.tx.$queryRaw.mockResolvedValueOnce([row("a"), row("b")]);
+      f.tx.$queryRaw.mockResolvedValueOnce(
+        candidateProjectionRows(
+          [
+            {
+              total: 19n,
+              rankAvailable: false,
+              tierAvailable: false,
+              scoreAvailable: false,
+              sourceRows: 30n,
+              candidates: 20n,
+              identifiedCandidates: 4n,
+              unassessed: 19n,
+              assessed: 1n,
+              shortlisted: 2n,
+            },
+          ],
+          [row("a"), row("b")],
+        ),
+      );
       const page = await recruiting.listRecruitingCandidates(f.prisma, actor, {
         roleId: "role",
         limit: 1,
@@ -151,7 +200,7 @@ describe("candidate listing and shortlist boundaries", () => {
       };
       expect(totalsQuery.sql).toContain('bool_or("rankValue" IS NOT NULL), false) FROM filtered');
       expect(totalsQuery.sql).toContain('bool_or("tierValue" IS NOT NULL), false) FROM filtered');
-      expect(totalsQuery.values).not.toContain(2);
+      expect(totalsQuery.values).toContain(2);
       expect(page.counts).toEqual({
         sourceRows: 30,
         candidates: 20,
@@ -161,6 +210,7 @@ describe("candidate listing and shortlist boundaries", () => {
         shortlisted: 2,
       });
       expect(page.items.map((item) => item.candidateKey)).toEqual(["a"]);
+      expect(page.items[0]?.shortlisted).toBe(false);
       expect(page.crmTarget).toBeNull();
       expect(page.items[0]?.crm).toBeNull();
       expect(page.items[0]).not.toHaveProperty("countIdentified");
@@ -185,7 +235,7 @@ describe("candidate listing and shortlist boundaries", () => {
       }
       const totals = f.tx.$queryRaw.mock.calls[0]![0] as { sql: string };
       expect(totals.sql).toContain('(SELECT count(*) FROM filtered) AS "total"');
-      expect(totals.sql).toContain('AS "shortlisted" FROM base');
+      expect(totals.sql).toContain('AS "shortlistedCount" FROM base');
       const legacyScope = createHash("sha256")
         .update(
           stableJsonValue({
@@ -232,27 +282,30 @@ describe("candidate listing and shortlist boundaries", () => {
             ...changed,
           }),
         ).rejects.toThrow(recruiting.RecruitingConflictError);
-      expect(f.tx.$queryRaw).toHaveBeenCalledTimes(2);
+      expect(f.tx.$queryRaw).toHaveBeenCalledOnce();
     },
   );
   it("uses original ranks inside an explicitly selected immutable result page", async () => {
     const f = fixture();
-    f.tx.$queryRaw
-      .mockResolvedValueOnce([
-        {
-          total: 0n,
-          rankAvailable: false,
-          tierAvailable: false,
-          scoreAvailable: false,
-          sourceRows: 0n,
-          candidates: 0n,
-          identifiedCandidates: 0n,
-          unassessed: 0n,
-          assessed: 0n,
-          shortlisted: 0n,
-        },
-      ])
-      .mockResolvedValueOnce([]);
+    f.tx.$queryRaw.mockResolvedValueOnce(
+      candidateProjectionRows(
+        [
+          {
+            total: 0n,
+            rankAvailable: false,
+            tierAvailable: false,
+            scoreAvailable: false,
+            sourceRows: 0n,
+            candidates: 0n,
+            identifiedCandidates: 0n,
+            unassessed: 0n,
+            assessed: 0n,
+            shortlisted: 0n,
+          },
+        ],
+        [],
+      ) as never,
+    );
     await recruiting.listRecruitingCandidates(f.prisma, actor, {
       roleId: "role",
       sort: "rank",
@@ -282,22 +335,25 @@ describe("candidate listing and shortlist boundaries", () => {
     "uses one explicit observation scope for profile, primary source and matches: %j",
     async (filters) => {
       const f = fixture();
-      f.tx.$queryRaw
-        .mockResolvedValueOnce([
-          {
-            total: 0n,
-            rankAvailable: false,
-            tierAvailable: false,
-            scoreAvailable: false,
-            sourceRows: 3n,
-            candidates: 2n,
-            identifiedCandidates: 2n,
-            unassessed: 2n,
-            assessed: 0n,
-            shortlisted: 1n,
-          },
-        ])
-        .mockResolvedValueOnce([]);
+      f.tx.$queryRaw.mockResolvedValueOnce(
+        candidateProjectionRows(
+          [
+            {
+              total: 0n,
+              rankAvailable: false,
+              tierAvailable: false,
+              scoreAvailable: false,
+              sourceRows: 3n,
+              candidates: 2n,
+              identifiedCandidates: 2n,
+              unassessed: 2n,
+              assessed: 0n,
+              shortlisted: 1n,
+            },
+          ],
+          [],
+        ) as never,
+      );
       const page = await recruiting.listRecruitingCandidates(f.prisma, actor, {
         roleId: "role",
         sort: "name",
@@ -340,22 +396,25 @@ describe("candidate listing and shortlist boundaries", () => {
   it("binds original-rank comparability to the selected action's saved pages", async () => {
     const f = fixture();
     f.tx.recruitingCandidatePage.findMany.mockResolvedValue([{ effectId: "action-only-page" }]);
-    f.tx.$queryRaw
-      .mockResolvedValueOnce([
-        {
-          total: 0n,
-          rankAvailable: false,
-          tierAvailable: false,
-          scoreAvailable: false,
-          sourceRows: 0n,
-          candidates: 0n,
-          identifiedCandidates: 0n,
-          unassessed: 0n,
-          assessed: 0n,
-          shortlisted: 0n,
-        },
-      ])
-      .mockResolvedValueOnce([]);
+    f.tx.$queryRaw.mockResolvedValueOnce(
+      candidateProjectionRows(
+        [
+          {
+            total: 0n,
+            rankAvailable: false,
+            tierAvailable: false,
+            scoreAvailable: false,
+            sourceRows: 0n,
+            candidates: 0n,
+            identifiedCandidates: 0n,
+            unassessed: 0n,
+            assessed: 0n,
+            shortlisted: 0n,
+          },
+        ],
+        [],
+      ) as never,
+    );
     await recruiting.listRecruitingCandidates(f.prisma, actor, {
       roleId: "role",
       actionId: "action",
@@ -391,22 +450,25 @@ describe("candidate listing and shortlist boundaries", () => {
           }),
         )
         .digest("hex");
-      f.tx.$queryRaw
-        .mockResolvedValueOnce([
-          {
-            total: 0n,
-            rankAvailable: false,
-            tierAvailable: false,
-            scoreAvailable: false,
-            sourceRows: 0n,
-            candidates: 0n,
-            identifiedCandidates: 0n,
-            unassessed: 0n,
-            assessed: 0n,
-            shortlisted: 0n,
-          },
-        ])
-        .mockResolvedValueOnce([]);
+      f.tx.$queryRaw.mockResolvedValueOnce(
+        candidateProjectionRows(
+          [
+            {
+              total: 0n,
+              rankAvailable: false,
+              tierAvailable: false,
+              scoreAvailable: false,
+              sourceRows: 0n,
+              candidates: 0n,
+              identifiedCandidates: 0n,
+              unassessed: 0n,
+              assessed: 0n,
+              shortlisted: 0n,
+            },
+          ],
+          [],
+        ) as never,
+      );
       await expect(
         recruiting.listRecruitingCandidates(f.prisma, actor, {
           roleId: "role",
@@ -456,22 +518,25 @@ describe("candidate listing and shortlist boundaries", () => {
       const cursor = Buffer.from(
         JSON.stringify({ version: 1, scope, value: "1", key: "previous-candidate" }),
       ).toString("base64url");
-      f.tx.$queryRaw
-        .mockResolvedValueOnce([
-          {
-            total: 0n,
-            rankAvailable: false,
-            tierAvailable: false,
-            scoreAvailable: false,
-            sourceRows: 0n,
-            candidates: 0n,
-            identifiedCandidates: 0n,
-            unassessed: 0n,
-            assessed: 0n,
-            shortlisted: 0n,
-          },
-        ])
-        .mockResolvedValueOnce([]);
+      f.tx.$queryRaw.mockResolvedValueOnce(
+        candidateProjectionRows(
+          [
+            {
+              total: 0n,
+              rankAvailable: false,
+              tierAvailable: false,
+              scoreAvailable: false,
+              sourceRows: 0n,
+              candidates: 0n,
+              identifiedCandidates: 0n,
+              unassessed: 0n,
+              assessed: 0n,
+              shortlisted: 0n,
+            },
+          ],
+          [],
+        ) as never,
+      );
       await expect(
         recruiting.listRecruitingCandidates(f.prisma, actor, {
           roleId: "role",
@@ -480,7 +545,7 @@ describe("candidate listing and shortlist boundaries", () => {
           cursor,
         }),
       ).resolves.toMatchObject({ items: [], nextCursor: null });
-      expect(f.tx.$queryRaw).toHaveBeenCalledTimes(2);
+      expect(f.tx.$queryRaw).toHaveBeenCalledOnce();
     },
   );
   it.each(["rank", "score"] as const)(
@@ -562,9 +627,12 @@ describe("candidate listing and shortlist boundaries", () => {
           shortlisted: 0n,
         },
       ];
-      f.tx.$queryRaw
-        .mockResolvedValueOnce(counts)
-        .mockResolvedValueOnce([row("a", sort === "score" ? "72.5" : "2"), row("b", "10")]);
+      f.tx.$queryRaw.mockResolvedValueOnce(
+        candidateProjectionRows(counts, [
+          row("a", sort === "score" ? "72.5" : "2"),
+          row("b", "10"),
+        ]),
+      );
       const first = await recruiting.listRecruitingCandidates(f.prisma, actor, {
         roleId: "role",
         sort,
@@ -628,7 +696,7 @@ describe("candidate listing and shortlist boundaries", () => {
           }),
         ).rejects.toThrow(recruiting.RecruitingConflictError);
       }
-      expect(f.tx.$queryRaw).toHaveBeenCalledTimes(2);
+      expect(f.tx.$queryRaw).toHaveBeenCalledOnce();
       if (sort === "score")
         for (const sourceEffectId of ["only-page", "other-page"])
           await expect(
@@ -641,7 +709,7 @@ describe("candidate listing and shortlist boundaries", () => {
           ).rejects.toThrow(recruiting.RecruitingConflictError);
       if (sort === "score")
         for (const value of ["0", "-1.25", "72.5"]) {
-          f.tx.$queryRaw.mockResolvedValueOnce(counts).mockResolvedValueOnce([]);
+          f.tx.$queryRaw.mockResolvedValueOnce(candidateProjectionRows(counts, []));
           await expect(
             recruiting.listRecruitingCandidates(f.prisma, actor, {
               roleId: "role",
@@ -650,9 +718,9 @@ describe("candidate listing and shortlist boundaries", () => {
             }),
           ).resolves.toMatchObject({ items: [] });
         }
-      f.tx.$queryRaw
-        .mockResolvedValueOnce(counts)
-        .mockResolvedValueOnce([row("b", ""), row("c", "")]);
+      f.tx.$queryRaw.mockResolvedValueOnce(
+        candidateProjectionRows(counts, [row("b", ""), row("c", "")]),
+      );
       const unknown = await recruiting.listRecruitingCandidates(f.prisma, actor, {
         roleId: "role",
         sort,
@@ -664,15 +732,32 @@ describe("candidate listing and shortlist boundaries", () => {
       expect(nextQuery.sql).toContain('"matchValue" IS NULL OR');
       expect(nextQuery.sql).toContain("::numeric");
       expect(nextQuery.sql).toContain(`"matchValue" ${sort === "score" ? "<" : ">"} ?::numeric`);
-      f.tx.$queryRaw.mockResolvedValueOnce(counts).mockResolvedValueOnce([row("c", "")]);
-      await recruiting.listRecruitingCandidates(f.prisma, actor, {
+      f.tx.$queryRaw.mockResolvedValueOnce(candidateProjectionRows(counts, [row("c", "")]));
+      const last = await recruiting.listRecruitingCandidates(f.prisma, actor, {
         roleId: "role",
         sort,
         limit: 1,
         cursor: unknown.nextCursor!,
       });
+      expect(last.nextCursor).toBeNull();
       const lastQuery = f.tx.$queryRaw.mock.lastCall![0] as { sql: string; values: unknown[] };
       expect(lastQuery.sql).toContain('"matchValue" IS NULL AND "candidateKey" >');
+      f.tx.$queryRaw.mockResolvedValueOnce(candidateProjectionRows(counts));
+      await expect(
+        recruiting.listRecruitingCandidates(f.prisma, actor, {
+          roleId: "role",
+          sort,
+          limit: 1,
+          cursor: Buffer.from(JSON.stringify({ ...decoded, value: "", key: "c" })).toString(
+            "base64url",
+          ),
+        }),
+      ).resolves.toMatchObject({
+        total: 3,
+        items: [],
+        nextCursor: null,
+        counts: { candidates: 3, sourceRows: 3 },
+      });
       await expect(
         recruiting.listRecruitingCandidates(f.prisma, actor, {
           roleId: "role",
@@ -694,7 +779,7 @@ describe("candidate listing and shortlist boundaries", () => {
           }),
         ).rejects.toThrow(recruiting.RecruitingConflictError);
         expect(f.tx.$queryRaw).toHaveBeenCalledTimes(calls);
-        f.tx.$queryRaw.mockResolvedValueOnce(counts).mockResolvedValueOnce([]);
+        f.tx.$queryRaw.mockResolvedValueOnce(candidateProjectionRows(counts, []));
         await recruiting.listRecruitingCandidates(f.prisma, actor, { roleId: "role", sort });
         const multiplePages = f.tx.$queryRaw.mock.lastCall![0] as {
           sql: string;
@@ -3046,37 +3131,40 @@ describe("native CRM binding and source import", () => {
       },
     );
     const { page: _page, pageId: _pageId, rowIndex: _rowIndex, ...profile } = f.occurrence;
-    f.tx.$queryRaw
-      .mockResolvedValueOnce([
-        {
-          total: 1n,
-          rankAvailable: false,
-          tierAvailable: false,
-          scoreAvailable: false,
-          sourceRows: 1n,
-          candidates: 1n,
-          identifiedCandidates: 1n,
-          unassessed: 1n,
-          assessed: 0n,
-          shortlisted: 0n,
-        },
-      ] as never)
-      .mockResolvedValueOnce([
-        {
-          ...profile,
-          shortlisted: false,
-          revision: 0,
-          discoveryCount: 1,
-          profileSourcePageIds: [],
-          firstDiscoveredAt: "2026-10-16T00:00:00.000Z",
-          lastDiscoveredAt: "2026-10-16T00:00:00.000Z",
-          assessmentVersion: null,
-          assessmentRoleRevisionId: null,
-          assessmentCreatedAt: null,
-          hardGate: null,
-          sortValue: "example",
-        },
-      ] as never);
+    f.tx.$queryRaw.mockResolvedValueOnce(
+      candidateProjectionRows(
+        [
+          {
+            total: 1n,
+            rankAvailable: false,
+            tierAvailable: false,
+            scoreAvailable: false,
+            sourceRows: 1n,
+            candidates: 1n,
+            identifiedCandidates: 1n,
+            unassessed: 1n,
+            assessed: 0n,
+            shortlisted: 0n,
+          },
+        ],
+        [
+          {
+            ...profile,
+            shortlisted: false,
+            revision: 0,
+            discoveryCount: 1,
+            profileSourcePageIds: [],
+            firstDiscoveredAt: "2026-10-16T00:00:00.000Z",
+            lastDiscoveredAt: "2026-10-16T00:00:00.000Z",
+            assessmentVersion: null,
+            assessmentRoleRevisionId: null,
+            assessmentCreatedAt: null,
+            hardGate: null,
+            sortValue: "example",
+          },
+        ],
+      ) as never,
+    );
     const listed = await recruiting.listRecruitingCandidates(f.prisma, actor, {
       roleId: f.input.roleId,
     });
@@ -3943,39 +4031,42 @@ describe("native candidate source provenance", () => {
   }
   function nativeCandidateListRead(f: Awaited<ReturnType<typeof nativeImportReadFixture>>) {
     const { page: _page, pageId, rowIndex, ...profile } = f.occurrence;
-    f.tx.$queryRaw
-      .mockResolvedValueOnce([
-        {
-          total: 1n,
-          rankAvailable: false,
-          tierAvailable: false,
-          scoreAvailable: false,
-          sourceRows: 1n,
-          candidates: 1n,
-          identifiedCandidates: 1n,
-          unassessed: 1n,
-          assessed: 0n,
-          shortlisted: 0n,
-        },
-      ] as never)
-      .mockResolvedValueOnce([
-        {
-          ...profile,
-          sourcePageId: pageId,
-          sourceRowIndex: rowIndex,
-          profileSourcePageIds: [pageId],
-          shortlisted: false,
-          revision: 0,
-          discoveryCount: 1,
-          firstDiscoveredAt: f.page.observedAt.toISOString(),
-          lastDiscoveredAt: f.page.observedAt.toISOString(),
-          assessmentVersion: null,
-          assessmentRoleRevisionId: null,
-          assessmentCreatedAt: null,
-          hardGate: null,
-          sortValue: "example",
-        },
-      ] as never);
+    f.tx.$queryRaw.mockResolvedValueOnce(
+      candidateProjectionRows(
+        [
+          {
+            total: 1n,
+            rankAvailable: false,
+            tierAvailable: false,
+            scoreAvailable: false,
+            sourceRows: 1n,
+            candidates: 1n,
+            identifiedCandidates: 1n,
+            unassessed: 1n,
+            assessed: 0n,
+            shortlisted: 0n,
+          },
+        ],
+        [
+          {
+            ...profile,
+            sourcePageId: pageId,
+            sourceRowIndex: rowIndex,
+            profileSourcePageIds: [pageId],
+            shortlisted: false,
+            revision: 0,
+            discoveryCount: 1,
+            firstDiscoveredAt: f.page.observedAt.toISOString(),
+            lastDiscoveredAt: f.page.observedAt.toISOString(),
+            assessmentVersion: null,
+            assessmentRoleRevisionId: null,
+            assessmentCreatedAt: null,
+            hardGate: null,
+            sortValue: "example",
+          },
+        ],
+      ) as never,
+    );
     f.tx.recruitingCandidatePage.findMany.mockResolvedValue([
       { ...f.page, effect: f.read },
     ] as never);
@@ -4167,20 +4258,25 @@ describe("native candidate source provenance", () => {
           : ([row] as never),
       );
       if (operation === "list")
-        f.tx.$queryRaw.mockResolvedValueOnce([
-          {
-            total: 1n,
-            rankAvailable: false,
-            tierAvailable: false,
-            scoreAvailable: false,
-            sourceRows: 2n,
-            candidates: 1n,
-            identifiedCandidates: 1n,
-            unassessed: 1n,
-            assessed: 0n,
-            shortlisted: 0n,
-          },
-        ] as never);
+        f.tx.$queryRaw.mockResolvedValueOnce(
+          candidateProjectionRows(
+            [
+              {
+                total: 1n,
+                rankAvailable: false,
+                tierAvailable: false,
+                scoreAvailable: false,
+                sourceRows: 2n,
+                candidates: 1n,
+                identifiedCandidates: 1n,
+                unassessed: 1n,
+                assessed: 0n,
+                shortlisted: 0n,
+              },
+            ],
+            [row],
+          ) as never,
+        );
       const findMany = vi.fn(async () => [page, { ...f.page, effect: f.read }]);
       const tx = {
         ...f.tx,
@@ -4617,22 +4713,25 @@ describe("native candidate source provenance", () => {
         hardGate: null,
         sortValue: "example",
       };
-      f.tx.$queryRaw
-        .mockResolvedValueOnce([
-          {
-            total: 1n,
-            rankAvailable: false,
-            tierAvailable: false,
-            scoreAvailable: false,
-            sourceRows: 1n,
-            candidates: 1n,
-            identifiedCandidates: 1n,
-            unassessed: 1n,
-            assessed: 0n,
-            shortlisted: 0n,
-          },
-        ] as never)
-        .mockResolvedValueOnce([row] as never);
+      f.tx.$queryRaw.mockResolvedValueOnce(
+        candidateProjectionRows(
+          [
+            {
+              total: 1n,
+              rankAvailable: false,
+              tierAvailable: false,
+              scoreAvailable: false,
+              sourceRows: 1n,
+              candidates: 1n,
+              identifiedCandidates: 1n,
+              unassessed: 1n,
+              assessed: 0n,
+              shortlisted: 0n,
+            },
+          ],
+          [row],
+        ) as never,
+      );
       const findMany = vi.fn(async () => [{ ...f.page, effect: f.read }]);
       const tx = {
         ...f.tx,
@@ -4663,7 +4762,7 @@ describe("native candidate source provenance", () => {
         include: { effect: { select: { request: true } } },
       });
       expect(findMany).toHaveBeenCalledTimes(sort === "rank" || sort === "score" ? 2 : 1);
-      const [statement] = f.tx.$queryRaw.mock.calls[1] as unknown as [{ sql: string }];
+      const [statement] = f.tx.$queryRaw.mock.calls[0] as unknown as [{ sql: string }];
       expect(statement.sql).toContain(
         'p."pageId" AS "sourcePageId", p."rowIndex" AS "sourceRowIndex"',
       );
