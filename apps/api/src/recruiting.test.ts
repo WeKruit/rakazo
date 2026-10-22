@@ -256,6 +256,60 @@ describe("saved recruiting correspondence", () => {
     });
     expect(client.externalEffect.findMany).toHaveBeenCalledTimes(1);
   });
+  it.each([false, true])(
+    "keeps the latest cursor page partial when its output cursor is empty, including an empty last page: %s",
+    async (empty) => {
+      const { client, prisma, retained } = fixture();
+      const lastEmail = {
+        ...email,
+        id: "11b17967-b2b4-432d-95ef-990d05596c03",
+        subject: "Last page",
+      };
+      const lastRequest = [
+        "__rakazoCatalogTool",
+        "direct",
+        {
+          ...(retained.request[2] as object),
+          args: {
+            campaign_id: email.campaign_id,
+            email_type: "received",
+            limit: 2,
+            starting_after: "next-page",
+          },
+        },
+      ];
+      const saved = [
+        {
+          id: "first-page",
+          result: { structuredContent: { items: [email], next_starting_after: "next-page" } },
+        },
+        {
+          id: retained.id,
+          result: {
+            structuredContent: { items: empty ? [] : [lastEmail], next_starting_after: null },
+          },
+        },
+      ];
+      client.externalEffect.findMany
+        .mockReset()
+        .mockResolvedValueOnce([
+          { ...retained, request: lastRequest },
+          { ...retained, id: "first-page", updatedAt: new Date("2026-10-22T00:59:00Z") },
+        ])
+        .mockImplementationOnce(async ({ where }) =>
+          saved.filter((row) => where.id.in.includes(row.id)),
+        );
+      const result = await api.getRecruitingCorrespondence(prisma, actor, target, "inbox");
+      expect(result).toMatchObject({
+        status: empty ? "empty" : "ready",
+        partial: true,
+        emails: empty ? [] : [expect.objectContaining({ subject: lastEmail.subject })],
+      });
+      expect(client.externalEffect.findMany.mock.calls[1]![0].where.id).toEqual({
+        in: [retained.id],
+      });
+    },
+  );
   it.each([
     [{ items: [] }, "empty"],
     [{ items: "malformed" }, "unsupported"],
@@ -603,6 +657,203 @@ describe("saved recruiting correspondence", () => {
       });
     },
   );
+  async function calObservation(
+    tool: string,
+    args: Record<string, unknown>,
+    body: unknown,
+    previous?: { args: Record<string, unknown>; body: unknown },
+  ) {
+    const { client, prisma, retained } = fixture();
+    client.mcpServer.findMany.mockResolvedValueOnce([
+      {
+        id: "calendar",
+        name: "Cal.com",
+        endpoint: "https://mcp.cal.com/mcp",
+        secretId: "encrypted-reference",
+        revision: 2,
+        enabled: true,
+        assignments: [{ botId: "main", allowAllTools: false, allowedTools: [tool] }],
+      },
+    ]);
+    const request = (args: Record<string, unknown>) => [
+      "__rakazoCatalogTool",
+      "direct",
+      {
+        route: { connectorId: "mcp", resourceId: "calendar", resourceRevision: 2, toolName: tool },
+        args,
+      },
+    ];
+    const retainedRows = [{ ...retained, request: request(args) }];
+    const resultRows = [
+      { id: "effect", result: { content: [{ type: "text", text: JSON.stringify(body) }] } },
+    ];
+    if (previous) {
+      retainedRows.push({
+        ...retained,
+        id: "older",
+        updatedAt: new Date("2026-10-21T00:00:00Z"),
+        request: request(previous.args),
+      });
+      resultRows.push({
+        id: "older",
+        result: { content: [{ type: "text", text: JSON.stringify(previous.body) }] },
+      });
+    }
+    client.externalEffect.findMany
+      .mockReset()
+      .mockResolvedValueOnce(retainedRows)
+      .mockResolvedValueOnce(resultRows);
+    return api.getRecruitingCorrespondence(prisma, actor, target, "interview");
+  }
+  it("replaces an earlier availability window with the latest empty observation for that event type", async () => {
+    const result = await calObservation(
+      "get_availability",
+      { eventTypeId: 42, start: "2026-10-23", timeZone: "UTC" },
+      { status: "success", data: {} },
+      {
+        args: {
+          eventTypeId: 42,
+          start: "2026-10-22",
+          timeZone: "America/Los_Angeles",
+          format: "range",
+        },
+        body: {
+          status: "success",
+          data: { "2026-10-23": [{ start: "2026-10-23T13:00:00Z", end: "2026-10-23T13:30:00Z" }] },
+        },
+      },
+    );
+    expect(result).toMatchObject({ status: "empty", events: [], partial: false });
+  });
+  it("keeps distinct rescheduling subjects separate", async () => {
+    const result = await calObservation(
+      "get_availability",
+      { eventTypeId: 42, bookingUidToReschedule: "one" },
+      { status: "success", data: {} },
+      {
+        args: { eventTypeId: 42, bookingUidToReschedule: "two" },
+        body: {
+          status: "success",
+          data: { "2026-10-23": [{ start: "2026-10-23T13:00:00Z", end: "2026-10-23T13:30:00Z" }] },
+        },
+      },
+    );
+    expect(result.events).toHaveLength(1);
+  });
+  it("projects native Cal range availability without implying reservations or inventing participants", async () => {
+    const result = await calObservation(
+      "get_availability",
+      { timeZone: "America/Los_Angeles", eventTypeId: 42, format: "range" },
+      {
+        status: "success",
+        data: {
+          "2026-10-23": [
+            { start: "2026-10-23T06:00:00.000-07:00", end: "2026-10-23T06:30:00.000-07:00" },
+            { start: "2026-10-23T06:00:00.000-07:00", end: "2026-10-23T06:30:00.000-07:00" },
+          ],
+        },
+      },
+    );
+    expect(result).toMatchObject({
+      status: "ready",
+      partial: false,
+      events: [
+        {
+          kind: "availability",
+          start: "2026-10-23T06:00:00.000-07:00",
+          end: "2026-10-23T06:30:00.000-07:00",
+          timeZone: "America/Los_Angeles",
+          status: null,
+          attendees: [],
+          location: null,
+          url: null,
+        },
+      ],
+    });
+    expect(result.events).toHaveLength(1);
+  });
+  it("preserves native start-only Cal slots without inventing an end time", async () => {
+    const result = await calObservation(
+      "get_availability",
+      {},
+      {
+        status: "success",
+        data: { "2026-10-23": ["2026-10-23T13:00:00Z", { start: "2026-10-23T14:00:00Z" }] },
+      },
+    );
+    expect(result).toMatchObject({
+      status: "ready",
+      partial: false,
+      events: [
+        { kind: "availability", start: "2026-10-23T13:00:00Z", end: null, timeZone: "UTC" },
+        { kind: "availability", start: "2026-10-23T14:00:00Z", end: null, timeZone: "UTC" },
+      ],
+    });
+  });
+  it("retains valid slots and marks malformed Cal rows incomplete", async () => {
+    const result = await calObservation(
+      "get_availability",
+      { timeZone: "UTC" },
+      {
+        status: "success",
+        data: {
+          "2026-10-23": [
+            { start: "2026-10-23T13:00:00Z", end: "2026-10-23T13:30:00Z" },
+            { start: "tomorrow", end: "later" },
+            { start: "2026-10-23T14:00:00Z", end: "2026-10-23T13:00:00Z" },
+          ],
+          "2026-10-24": { unexpected: true },
+        },
+      },
+    );
+    expect(result.status).toBe("ready");
+    expect(result.partial).toBe(true);
+    expect(result.events).toHaveLength(1);
+  });
+  it("projects a native Cal booking without inventing its role association", async () => {
+    const result = await calObservation(
+      "get_booking",
+      { bookingUid: "booking-one" },
+      {
+        status: "success",
+        data: {
+          uid: "booking-one",
+          title: "Recruiting interview",
+          status: "accepted",
+          start: "2026-10-23T13:00:00Z",
+          end: "2026-10-23T13:30:00Z",
+          attendees: [{ email: "person@example.test" }],
+          location: "https://meet.example.test/interview",
+          privateNotes: "never displayed",
+        },
+      },
+    );
+    expect(result).toMatchObject({
+      status: "ready",
+      partial: false,
+      events: [
+        {
+          kind: "event",
+          title: "Recruiting interview",
+          start: "2026-10-23T13:00:00Z",
+          end: "2026-10-23T13:30:00Z",
+          attendees: ["person@example.test"],
+          status: "accepted",
+          location: "https://meet.example.test/interview",
+          url: "https://meet.example.test/interview",
+        },
+      ],
+    });
+    expect(JSON.stringify(result)).not.toContain("never displayed");
+  });
+  it("does not claim a complete Cal booking page when earlier pages were skipped", async () => {
+    const result = await calObservation(
+      "get_bookings",
+      { skip: 10 },
+      { status: "success", data: [], pagination: { hasNextPage: false } },
+    );
+    expect(result).toMatchObject({ status: "empty", partial: true, events: [] });
+  });
   it.each(["https://mcp.instantly.ai/mcp", "https://custom.example.test/mcp"])(
     "does not reinterpret an earlier connection receipt after configuration changes: %s",
     async (endpoint) => {

@@ -458,3 +458,31 @@ it("reuses the save nonce after an uncertain result and renews it only after an 
   await view.click("Save draft");
   expect(save.mock.calls[2]?.[0].clientNonce).not.toBe(save.mock.calls[0]?.[0].clientNonce);
 });
+
+it("renders a provider start-only slot without a fabricated end or dangling separator", async () => {
+  readCorrespondence.mockResolvedValue({
+    status: "ready",
+    checkedAt: null,
+    connections: [],
+    emails: [],
+    partial: false,
+    events: [
+      {
+        id: "start-only-slot",
+        kind: "availability",
+        title: null,
+        start: "2026-10-23T13:00:00Z",
+        end: null,
+        timeZone: "UTC",
+        attendees: [],
+        status: null,
+        location: null,
+        url: null,
+      },
+    ],
+  });
+  const view = await mount({ view: "interview" });
+  const card = view.container.querySelector("article")!;
+  expect(card.querySelectorAll("time")).toHaveLength(1);
+  expect(card.textContent).not.toContain("–");
+});

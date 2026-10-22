@@ -118,6 +118,18 @@ function correspondenceRecord(value: unknown): Record<string, unknown> | undefin
     : undefined;
 }
 
+function calAvailabilitySubject(args: Record<string, unknown>) {
+  return [
+    "eventTypeId",
+    "eventTypeSlug",
+    "username",
+    "teamSlug",
+    "organizationSlug",
+    "usernames",
+    "bookingUidToReschedule",
+  ].map((key) => args[key] ?? null);
+}
+
 /** Project saved native reads only. Opening a dashboard never invokes a provider. */
 export async function getRecruitingCorrespondence(
   prisma: PrismaClient,
@@ -272,7 +284,11 @@ export async function getRecruitingCorrespondence(
       const key = stableJsonValue([
         source.id,
         call.route.toolName,
-        call.route.toolName === "list_emails" ? { campaign_id: campaignId } : query,
+        call.route.toolName === "list_emails"
+          ? { campaign_id: campaignId }
+          : source.provider?.kind === "cal" && call.route.toolName === "get_availability"
+            ? calAvailabilitySubject(call.args)
+            : query,
       ]);
       // ponytail: Inbox shows the latest campaign check, not accumulated mailbox history; native cursor coverage stays explicit.
       // A new check replaces the prior observation, including empty/error.
@@ -321,6 +337,7 @@ export async function getRecruitingCorrespondence(
     let failed = false;
     const emails = new Map<string, RecruitingCorrespondence["emails"][number]>();
     const mailMembership = new Set<string>();
+    const events = new Map<string, RecruitingCorrespondence["events"][number]>();
     // Details may supplement only messages present in the latest selected campaign snapshot.
     const projections = [
       ...reads.filter((read) => read.call.route.toolName !== "get_email"),
@@ -412,18 +429,91 @@ export async function getRecruitingCorrespondence(
         }
         continue;
       }
-      if (provider.kind === "cal" && call.route.toolName === "get_bookings" && body) {
-        // ponytail: only the verified empty Cal frame; extend with actual nonempty provider rows when available.
-        if (body.status === "success" && Array.isArray(body.data) && body.data.length === 0) {
-          parsed = true;
-          const pagination = body.pagination;
-          output.partial ||=
-            !pagination ||
-            typeof pagination !== "object" ||
-            Array.isArray(pagination) ||
-            !("hasNextPage" in pagination) ||
-            pagination.hasNextPage !== false;
-        } else unsupported = true;
+      if (provider.kind === "cal" && body) {
+        if (body.status !== "success") {
+          unsupported = true;
+          continue;
+        }
+        const availability = call.route.toolName === "get_availability";
+        let rows: unknown[];
+        if (availability) {
+          const days = correspondenceRecord(body.data);
+          if (!days) {
+            unsupported = true;
+            continue;
+          }
+          rows = Object.values(days).flatMap((slots) => {
+            if (Array.isArray(slots)) return slots;
+            unsupported = true;
+            return [];
+          });
+        } else {
+          rows = call.route.toolName === "get_booking" ? [body.data] : (body.data as unknown[]);
+          if (!Array.isArray(rows)) {
+            unsupported = true;
+            continue;
+          }
+          if (call.route.toolName === "get_bookings") {
+            const pagination = correspondenceRecord(body.pagination);
+            output.partial ||=
+              pagination?.hasNextPage !== false ||
+              pagination.hasPreviousPage === true ||
+              (typeof call.args.skip === "number" && call.args.skip > 0);
+          }
+        }
+        parsed = true;
+        for (const value of rows) {
+          const row = correspondenceRecord(value);
+          const start = availability && typeof value === "string" ? value : row?.start;
+          const end = row?.end ?? null;
+          if (
+            !availability &&
+            (typeof row?.uid !== "string" ||
+              !row.uid.trim() ||
+              (call.route.toolName === "get_booking" && row.uid !== call.args.bookingUid))
+          ) {
+            unsupported = true;
+            continue;
+          }
+          const id = availability
+            ? stableJsonValue([
+                source.id,
+                "slot",
+                ...calAvailabilitySubject(call.args),
+                start ?? null,
+                end,
+              ])
+            : `${source.id}:booking:${row!.uid}`;
+          const location = availability ? null : (row?.location ?? null);
+          const event = RecruitingCorrespondenceSchema.shape.events.element.safeParse({
+            id,
+            kind: availability ? "availability" : "event",
+            title: availability ? null : (row?.title ?? null),
+            start,
+            end,
+            timeZone: availability ? (call.args.timeZone ?? "UTC") : null,
+            attendees: availability
+              ? []
+              : Array.isArray(row?.attendees)
+                ? row.attendees.map(
+                    (attendee) =>
+                      correspondenceRecord(attendee)?.email ?? correspondenceRecord(attendee)?.name,
+                  )
+                : [],
+            status: availability ? null : (row?.status ?? null),
+            location,
+            url: typeof location === "string" && /^https?:\/\//u.test(location) ? location : null,
+          });
+          if (
+            !event.success ||
+            (!availability && !event.data.end) ||
+            (event.data.end && Date.parse(event.data.end) <= Date.parse(event.data.start))
+          ) {
+            unsupported = true;
+            continue;
+          }
+          if (!events.has(id)) events.set(id, event.data);
+        }
         continue;
       }
       if (provider.kind !== "instantly" || !body) {
@@ -435,7 +525,13 @@ export async function getRecruitingCorrespondence(
         unsupported = true;
         continue;
       }
-      if (call.route.toolName === "list_emails") parsed = true;
+      if (call.route.toolName === "list_emails") {
+        parsed = true;
+        output.partial ||=
+          call.args.starting_after !== undefined &&
+          call.args.starting_after !== null &&
+          call.args.starting_after !== "";
+      }
       output.partial ||=
         body.next_starting_after !== undefined &&
         body.next_starting_after !== null &&
@@ -488,7 +584,9 @@ export async function getRecruitingCorrespondence(
       }
     }
     output.emails = [...emails.values()].slice(0, 50);
-    output.partial ||= emails.size > 50 || unsupported || failed;
+    // ponytail: bound retained calendar display to 200 entries; full receipts remain in native history.
+    output.events = [...events.values()].slice(0, 200);
+    output.partial ||= emails.size > 50 || events.size > 200 || unsupported || failed;
     output.status =
       output.emails.length || output.events.length || output.contacts.length
         ? "ready"
