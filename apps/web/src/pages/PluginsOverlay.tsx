@@ -72,6 +72,16 @@ function activeAccounts(
 function nextAccountLabel(itemName: string, existingCount: number) {
   return existingCount <= 0 ? itemName : `${itemName} ${existingCount + 1}`;
 }
+
+function nativeServerConfigured(server: McpServer) {
+  return (
+    server.enabled &&
+    (server.platformCredentialConfigured ||
+      server.oauthStatus === "connected" ||
+      (server.hasSecret && server.oauthStatus === "none"))
+  );
+}
+
 export function PluginsOverlay({
   onClose,
   onOpenMcp,
@@ -168,7 +178,7 @@ export function PluginsOverlay({
       ),
     );
     setCatalogFeedEnabled(catalogFeed.enabled);
-    return nativeServers;
+    return { servers: nativeServers, assignments: nativeAssignments };
   }
 
   useEffect(() => {
@@ -196,20 +206,22 @@ export function PluginsOverlay({
     };
   }, [developerView, connectionScope]);
 
+  const appliesToCurrentAssistant = (assignment: BotMcpServer) =>
+    activeBotId !== undefined
+      ? assignment.botId === activeBotId
+      : memberBotIds
+        ? memberBotIds.includes(assignment.botId)
+        : true;
   const nativeServices = servers.flatMap((server) => {
     const access = assignments.filter(
-      (assignment) =>
-        assignment.serverId === server.id &&
-        (activeBotId !== undefined
-          ? assignment.botId === activeBotId
-          : memberBotIds
-            ? memberBotIds.includes(assignment.botId)
-            : true),
+      (assignment) => assignment.serverId === server.id && appliesToCurrentAssistant(assignment),
     );
-    return access.length
+    const unassigned = !assignments.some((assignment) => assignment.serverId === server.id);
+    return access.length || (!developerView && unassigned)
       ? [
           {
             server,
+            unassigned,
             allowed: access.some(
               (assignment) => assignment.allowAllTools || assignment.allowedTools.length > 0,
             ),
@@ -236,9 +248,11 @@ export function PluginsOverlay({
   }
 
   async function connectNative(server: McpServer) {
+    const service = nativeServices.find((item) => item.server.id === server.id);
     if (
       !server.enabled ||
-      !nativeServices.some((item) => item.server.id === server.id && item.allowed)
+      !service ||
+      (!service.allowed && !(service.unassigned && coordinatorBotId))
     )
       return;
     connectionAttempt.current?.abort();
@@ -252,9 +266,37 @@ export function PluginsOverlay({
     try {
       const result = await connectMcpOauth(server.id);
       if (!current() || result === "cancelled") return;
+      if (service.unassigned) {
+        const latest = await rpc.mcp.assignments.all();
+        if (!current()) return;
+        if (latest.some((assignment) => assignment.serverId === server.id)) {
+          if (
+            !latest.some(
+              (assignment) =>
+                assignment.serverId === server.id &&
+                appliesToCurrentAssistant(assignment) &&
+                (assignment.allowAllTools || assignment.allowedTools.length > 0),
+            )
+          )
+            throw new Error(t`Could not connect`);
+        } else {
+          await connectProductServer(server.id);
+          if (!current()) return;
+        }
+      }
       const fresh = await refresh();
       if (!current()) return;
-      if (fresh?.find((item) => item.id === server.id)?.oauthStatus !== "connected")
+      const freshServer = fresh?.servers.find((item) => item.id === server.id);
+      if (
+        !freshServer ||
+        !nativeServerConfigured(freshServer) ||
+        !fresh?.assignments.some(
+          (assignment) =>
+            assignment.serverId === server.id &&
+            appliesToCurrentAssistant(assignment) &&
+            (assignment.allowAllTools || assignment.allowedTools.length > 0),
+        )
+      )
         setCatalogError(t`Connection was not confirmed. Try again or check your account settings.`);
     } catch (error) {
       if (current())
@@ -934,13 +976,10 @@ export function PluginsOverlay({
 
           {!detailItem && !loading && nativeServices.length > 0 ? (
             <div className="mb-6 grid grid-cols-2 gap-2">
-              {nativeServices.map(({ server, allowed }) => {
-                const accessible = server.enabled && allowed;
-                const configured =
-                  accessible &&
-                  (server.platformCredentialConfigured ||
-                    server.oauthStatus === "connected" ||
-                    (server.hasSecret && server.oauthStatus === "none"));
+              {nativeServices.map(({ server, allowed, unassigned }) => {
+                const accessible =
+                  server.enabled && (allowed || (unassigned && !!coordinatorBotId));
+                const configured = allowed && nativeServerConfigured(server);
                 return (
                   <div
                     key={server.id}
