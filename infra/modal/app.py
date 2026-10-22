@@ -137,11 +137,16 @@ class Recruiting:
             if process.poll() is None:
                 with contextlib.suppress(ProcessLookupError):
                     os.killpg(process.pid, signal.SIGTERM)
+        deadline = time.monotonic() + 8
         for process in self.processes:
             try:
-                process.wait(timeout=8)
+                process.wait(timeout=max(0, deadline - time.monotonic()))
             except subprocess.TimeoutExpired:
+                pass
+        for process in self.processes:
+            if process.poll() is None:
                 with contextlib.suppress(ProcessLookupError):
                     os.killpg(process.pid, signal.SIGKILL)
-                process.wait()
+        for process in self.processes:
+            process.wait()
         files.commit()
