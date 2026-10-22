@@ -406,6 +406,7 @@ msgstr "Ajouter Treg"
 msgid "Add trigger"
 msgstr "Ajouter un déclencheur"
 
+#: src/components/integrations/IntegrationSetup.tsx
 #: src/pages/PluginsOverlay.tsx
 msgid "Added"
 msgstr "Ajouté"
@@ -1356,6 +1357,7 @@ msgstr "Les ordinateurs sont désactivés. Définissez SANDBOX_PROVIDER=docker a
 msgid "Configure a plugin catalog on the server to connect apps."
 msgstr "Configurez un catalogue de plugins sur le serveur pour connecter des applications."
 
+#: src/pages/PluginsOverlay.tsx
 #: src/pages/RecruitingCorrespondence.tsx
 msgid "Configured"
 msgstr ""
@@ -1393,6 +1395,7 @@ msgstr ""
 #: src/components/integrations/IntegrationSetup.tsx
 #: src/pages/memory-providers/SerenitySettingsForm.tsx
 #: src/pages/memory-providers/SupermemorySettingsForm.tsx
+#: src/pages/PluginsOverlay.tsx
 #: src/pages/VoiceSettingsOverlay.tsx
 msgid "Connect"
 msgstr "Connecter"
@@ -1407,6 +1410,11 @@ msgstr "Connectez un fournisseur pour ajouter des modèles de secours."
 
 #: src/pages/RecruitingCorrespondence.tsx
 msgid "Connect account"
+msgstr ""
+
+#: src/components/integrations/IntegrationSetup.tsx
+#: src/pages/PluginsOverlay.tsx
+msgid "Connect an app"
 msgstr ""
 
 #: src/pages/ModelSettingsOverlay.tsx
@@ -1466,6 +1474,7 @@ msgstr "Connecté. Ses outils sont disponibles dès votre prochain message."
 #: src/pages/McpServersOverlay.tsx
 #: src/pages/memory-providers/SerenitySettingsForm.tsx
 #: src/pages/memory-providers/SupermemorySettingsForm.tsx
+#: src/pages/PluginsOverlay.tsx
 #: src/pages/shell/message-cards.tsx
 #: src/pages/VoiceSettingsOverlay.tsx
 msgid "Connecting…"
@@ -1479,6 +1488,10 @@ msgstr "Le test de connexion a échoué."
 #: src/pages/PluginsOverlay.tsx
 msgid "Connection to {0} is still pending. You can close this and check again."
 msgstr "La connexion à {0} est toujours en attente. Vous pouvez fermer cette fenêtre et réessayer."
+
+#: src/pages/PluginsOverlay.tsx
+msgid "Connection was not confirmed. Try again or check your account settings."
+msgstr ""
 
 #: src/pages/RecruitingPanel.tsx
 msgid "Contact details have not been checked yet."
@@ -1607,6 +1620,11 @@ msgstr "Impossible de se connecter"
 msgid "Could not connect {0}"
 msgstr "Impossible de se connecter à {0}"
 
+#: src/components/integrations/IntegrationSetup.tsx
+#: src/pages/PluginsOverlay.tsx
+msgid "Could not connect this app. Check your account settings and try again."
+msgstr ""
+
 #: src/pages/ModelSettingsOverlay.tsx
 msgid "Could not connect this provider"
 msgstr "Impossible de se connecter à ce fournisseur"
@@ -1649,8 +1667,8 @@ msgid "Could not create space"
 msgstr "Impossible de créer l'espace"
 
 #: src/pages/Onboarding.tsx
-msgid "Could not create your bot"
-msgstr "Impossible de créer votre bot"
+#~ msgid "Could not create your bot"
+#~ msgstr "Impossible de créer votre bot"
 
 #: src/pages/shell/dialogs.tsx
 msgid "Could not delete bot"
@@ -1872,6 +1890,10 @@ msgstr "Impossible d'ouvrir le terminal"
 #: src/pages/VoiceSettingsOverlay.tsx
 msgid "Could not play a test clip"
 msgstr "Impossible de lire un extrait de test"
+
+#: src/pages/Onboarding.tsx
+msgid "Could not prepare your workspace"
+msgstr ""
 
 #: src/lib/model-connection-preflight.ts
 msgid "Could not reach the model server."
@@ -3709,6 +3731,10 @@ msgstr ""
 msgid "Needs an answer"
 msgstr ""
 
+#: src/pages/PluginsOverlay.tsx
+msgid "Needs connection"
+msgstr ""
+
 #: src/pages/ActivityList.tsx
 msgid "Needs input"
 msgstr "Nécessite une saisie"
@@ -3776,6 +3802,10 @@ msgstr ""
 #: src/pages/MessagingSettingsOverlay.tsx
 msgid "No agent connections yet."
 msgstr "Aucune connexion d'agent pour le moment."
+
+#: src/components/integrations/IntegrationSetup.tsx
+msgid "No apps found"
+msgstr ""
 
 #: src/pages/PluginsOverlay.tsx
 msgid "No apps match your search."
@@ -3993,6 +4023,10 @@ msgstr ""
 
 #: src/pages/RecruitingPanel.tsx
 msgid "Not accepted"
+msgstr ""
+
+#: src/pages/PluginsOverlay.tsx
+msgid "Not available to this assistant"
 msgstr ""
 
 #: src/pages/RecruitingPanel.tsx
@@ -4505,6 +4539,10 @@ msgstr ""
 msgid "Recipients"
 msgstr ""
 
+#: src/pages/PluginsOverlay.tsx
+msgid "Reconnect"
+msgstr ""
+
 #: src/pages/McpServersOverlay.tsx
 msgid "Reconnect OAuth"
 msgstr "Reconnecter OAuth"
@@ -4860,6 +4898,7 @@ msgstr ""
 #: src/components/AccountAccess.tsx
 #: src/pages/Auth.tsx
 #: src/pages/ModelBackupsSettings.tsx
+#: src/pages/PluginsOverlay.tsx
 #: src/pages/RecruitingPanel.tsx
 msgid "Retry"
 msgstr "Réessayer"
@@ -5178,6 +5217,7 @@ msgstr ""
 msgid "Score / tier not returned"
 msgstr ""
 
+#: src/components/integrations/IntegrationSetup.tsx
 #: src/pages/ModelSettingsOverlay.tsx
 #: src/pages/PluginsOverlay.tsx
 #: src/pages/Shell.tsx

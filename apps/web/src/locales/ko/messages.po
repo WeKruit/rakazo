@@ -406,6 +406,7 @@ msgstr "Treg 추가"
 msgid "Add trigger"
 msgstr "트리거 추가"
 
+#: src/components/integrations/IntegrationSetup.tsx
 #: src/pages/PluginsOverlay.tsx
 msgid "Added"
 msgstr ""
@@ -1356,6 +1357,7 @@ msgstr "컴퓨터가 꺼져 있습니다. SANDBOX_PROVIDER=docker와 SANDBOX_SUP
 msgid "Configure a plugin catalog on the server to connect apps."
 msgstr ""
 
+#: src/pages/PluginsOverlay.tsx
 #: src/pages/RecruitingCorrespondence.tsx
 msgid "Configured"
 msgstr ""
@@ -1393,6 +1395,7 @@ msgstr ""
 #: src/components/integrations/IntegrationSetup.tsx
 #: src/pages/memory-providers/SerenitySettingsForm.tsx
 #: src/pages/memory-providers/SupermemorySettingsForm.tsx
+#: src/pages/PluginsOverlay.tsx
 #: src/pages/VoiceSettingsOverlay.tsx
 msgid "Connect"
 msgstr "연결"
@@ -1407,6 +1410,11 @@ msgstr "백업을 추가하려면 제공업체를 연결하세요."
 
 #: src/pages/RecruitingCorrespondence.tsx
 msgid "Connect account"
+msgstr ""
+
+#: src/components/integrations/IntegrationSetup.tsx
+#: src/pages/PluginsOverlay.tsx
+msgid "Connect an app"
 msgstr ""
 
 #: src/pages/ModelSettingsOverlay.tsx
@@ -1466,6 +1474,7 @@ msgstr "연결되었습니다. 다음 메시지부터 이 도구를 사용할 �
 #: src/pages/McpServersOverlay.tsx
 #: src/pages/memory-providers/SerenitySettingsForm.tsx
 #: src/pages/memory-providers/SupermemorySettingsForm.tsx
+#: src/pages/PluginsOverlay.tsx
 #: src/pages/shell/message-cards.tsx
 #: src/pages/VoiceSettingsOverlay.tsx
 msgid "Connecting…"
@@ -1479,6 +1488,10 @@ msgstr "연결 테스트에 실패했습니다."
 #: src/pages/PluginsOverlay.tsx
 msgid "Connection to {0} is still pending. You can close this and check again."
 msgstr "{0} 연결이 아직 진행 중입니다. 이 창을 닫고 나중에 다시 확인할 수 있습니다."
+
+#: src/pages/PluginsOverlay.tsx
+msgid "Connection was not confirmed. Try again or check your account settings."
+msgstr ""
 
 #: src/pages/RecruitingPanel.tsx
 msgid "Contact details have not been checked yet."
@@ -1607,6 +1620,11 @@ msgstr "연결하지 못했습니다."
 msgid "Could not connect {0}"
 msgstr "{0}에 연결하지 못했습니다."
 
+#: src/components/integrations/IntegrationSetup.tsx
+#: src/pages/PluginsOverlay.tsx
+msgid "Could not connect this app. Check your account settings and try again."
+msgstr ""
+
 #: src/pages/ModelSettingsOverlay.tsx
 msgid "Could not connect this provider"
 msgstr "AI 서비스에 연결하지 못했습니다."
@@ -1649,8 +1667,8 @@ msgid "Could not create space"
 msgstr "스페이스를 만들 수 없습니다"
 
 #: src/pages/Onboarding.tsx
-msgid "Could not create your bot"
-msgstr "Bot을 만들지 못했습니다."
+#~ msgid "Could not create your bot"
+#~ msgstr "Bot을 만들지 못했습니다."
 
 #: src/pages/shell/dialogs.tsx
 msgid "Could not delete bot"
@@ -1872,6 +1890,10 @@ msgstr "터미널을 열 수 없습니다"
 #: src/pages/VoiceSettingsOverlay.tsx
 msgid "Could not play a test clip"
 msgstr "샘플 음성을 재생하지 못했습니다."
+
+#: src/pages/Onboarding.tsx
+msgid "Could not prepare your workspace"
+msgstr ""
 
 #: src/lib/model-connection-preflight.ts
 msgid "Could not reach the model server."
@@ -3709,6 +3731,10 @@ msgstr ""
 msgid "Needs an answer"
 msgstr ""
 
+#: src/pages/PluginsOverlay.tsx
+msgid "Needs connection"
+msgstr ""
+
 #: src/pages/ActivityList.tsx
 msgid "Needs input"
 msgstr "입력 필요"
@@ -3776,6 +3802,10 @@ msgstr ""
 #: src/pages/MessagingSettingsOverlay.tsx
 msgid "No agent connections yet."
 msgstr "아직 Agent 연결이 없습니다."
+
+#: src/components/integrations/IntegrationSetup.tsx
+msgid "No apps found"
+msgstr ""
 
 #: src/pages/PluginsOverlay.tsx
 msgid "No apps match your search."
@@ -3993,6 +4023,10 @@ msgstr ""
 
 #: src/pages/RecruitingPanel.tsx
 msgid "Not accepted"
+msgstr ""
+
+#: src/pages/PluginsOverlay.tsx
+msgid "Not available to this assistant"
 msgstr ""
 
 #: src/pages/RecruitingPanel.tsx
@@ -4505,6 +4539,10 @@ msgstr ""
 msgid "Recipients"
 msgstr ""
 
+#: src/pages/PluginsOverlay.tsx
+msgid "Reconnect"
+msgstr ""
+
 #: src/pages/McpServersOverlay.tsx
 msgid "Reconnect OAuth"
 msgstr "OAuth 다시 연결"
@@ -4860,6 +4898,7 @@ msgstr ""
 #: src/components/AccountAccess.tsx
 #: src/pages/Auth.tsx
 #: src/pages/ModelBackupsSettings.tsx
+#: src/pages/PluginsOverlay.tsx
 #: src/pages/RecruitingPanel.tsx
 msgid "Retry"
 msgstr "다시 시도"
@@ -5178,6 +5217,7 @@ msgstr ""
 msgid "Score / tier not returned"
 msgstr ""
 
+#: src/components/integrations/IntegrationSetup.tsx
 #: src/pages/ModelSettingsOverlay.tsx
 #: src/pages/PluginsOverlay.tsx
 #: src/pages/Shell.tsx
