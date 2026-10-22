@@ -5397,6 +5397,34 @@ describe("threads.followUp", () => {
     expect(enqueue).not.toHaveBeenCalled();
   });
 
+  it.each([
+    ["bot_message", null],
+    ["routine", null],
+    ["webhook", null],
+    ["created", null],
+    ["tickets", null],
+    ["user", "run-1"],
+    ["follow_up", "run-1"],
+    ["messaging", "run-1"],
+  ] as const)(
+    "routes a human group follow-up during a %s turn to its own recipient",
+    async (trigger, runId) => {
+      const { call, tx, waitingRun, enqueue } = fixture({ active: true });
+      Object.assign(waitingRun, { status: "running", trigger });
+
+      const { response } = await call();
+
+      expect(response.status).toBe(200);
+      expect(tx.steeringMessage.create).toHaveBeenCalledExactlyOnceWith({
+        data: { messageId: "message-1", botId: "bot-1", userId: "user-1", runId },
+      });
+      expect(tx.task.create).not.toHaveBeenCalled();
+      expect(tx.run.create).not.toHaveBeenCalled();
+      expect(tx.run.update).not.toHaveBeenCalled();
+      expect(enqueue).not.toHaveBeenCalled();
+    },
+  );
+
   it("does not interpret candidate text as a recipient mention", async () => {
     const { call, tx } = fixture();
     const { response } = await call({

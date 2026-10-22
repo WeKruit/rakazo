@@ -166,6 +166,7 @@ import {
   containsSecret,
   expandSkillReferencesInPrompt,
   hasMixedOneShotSchedule,
+  isConversationalRun,
   isOneShotRoutineCrons,
   promptTextForAttachments,
   resolveGroupTargetBotIds,
@@ -2555,7 +2556,7 @@ export function createRouter(deps: RouterDeps) {
                 botId,
                 status: { in: [...ACTIVE_RUN_STATUSES] },
               },
-              select: { id: true },
+              select: { id: true, trigger: true },
             });
             if (active) {
               await tx.steeringMessage.create({
@@ -2563,7 +2564,7 @@ export function createRouter(deps: RouterDeps) {
                   messageId: message.id,
                   botId,
                   userId: context.actor.userId,
-                  runId: active.id,
+                  runId: isConversationalRun(active.trigger) ? active.id : null,
                 },
               });
               runIds.push(active.id);
