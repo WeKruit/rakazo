@@ -2635,13 +2635,14 @@ function RecruitingWorkspace({
     loadingMore.current = false;
     setCandidateLoading(!!roleId && validatedWorkspaceRead === workspaceReadKey);
     setCandidateFailed(false);
+    const retainCandidatePage = displayedCandidateQuery.current === candidateQueryKey;
     setCandidatePage(
       (current) =>
         (candidatesCacheKey
           ? (readCache?.entries.get(candidatesCacheKey) as
               | ListRecruitingCandidatesOutput
               | undefined)
-          : undefined) ?? (displayedCandidateQuery.current === candidateQueryKey ? current : null),
+          : undefined) ?? (retainCandidatePage ? current : null),
     );
     displayedCandidateQuery.current = candidateQueryKey;
     if (!roleId || summary || validatedWorkspaceRead !== workspaceReadKey) return;

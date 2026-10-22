@@ -7206,3 +7206,42 @@ it("keeps workspace shortlist and contacts navigation out of saved filters and c
   expect(view.container.querySelector(".hire-card-grid")).not.toBeNull();
   expect(view.container.querySelector('input[aria-label="Search candidates"]')).not.toBeNull();
 });
+
+it("does not display the Contacts pool as a pending Shortlist query and retains only an identical warm query", async () => {
+  const candidate = { ...candidateFixture("contact-person", false), name: "Saved contact person" };
+  const page = candidatePage([candidate]);
+  api.listCandidates.mockResolvedValue(page);
+  const navigation = {
+    presentation: "workspace" as const,
+    groupId: "group-1",
+    readCache: { entries: new Map<string, unknown>(), epoch: 0 },
+    readCacheScope: JSON.stringify(["actor-1", role.spaceId, "thread-1"]),
+  };
+  const view = await mounted("thread-1", undefined, false, undefined, {
+    ...navigation,
+    view: "contacts",
+  });
+  expect(view.container.querySelector("tbody")?.textContent).toContain(candidate.name);
+  let finishShortlist!: (value: ReturnType<typeof candidatePage>) => void;
+  api.listCandidates.mockReturnValueOnce(
+    new Promise((resolve) => {
+      finishShortlist = resolve;
+    }),
+  );
+  await view.render("thread-1", 0, false, undefined, { ...navigation, view: "shortlist" });
+  expect(api.listCandidates).toHaveBeenLastCalledWith(
+    expect.objectContaining({ roleId: role.id, shortlisted: true }),
+  );
+  expect(view.container.querySelector(".hire-card-grid")?.textContent ?? "").not.toContain(
+    candidate.name,
+  );
+  expect(view.container.textContent).not.toContain(candidate.name);
+  await act(async () => finishShortlist(candidatePage([])));
+  api.listCandidates.mockReturnValueOnce(new Promise(() => {}));
+  await view.render("thread-1", 0, false, undefined, { ...navigation, view: "contacts" });
+  expect(view.container.querySelector("tbody")?.textContent).toContain(candidate.name);
+  api.listCandidates.mockReturnValueOnce(new Promise(() => {}));
+  await view.render("thread-1", 1, false, undefined, { ...navigation, view: "contacts" });
+  expect(view.container.querySelector("tbody")?.textContent).toContain(candidate.name);
+  expect(api.setCandidateShortlist).not.toHaveBeenCalled();
+});
