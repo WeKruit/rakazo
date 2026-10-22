@@ -4,6 +4,7 @@ import type { ArtifactStore } from "@rakazo/adapter-kit";
 import {
   createRecruitingCandidateReportReader,
   hasPlatformMcpCredential,
+  htmlToPlainText,
   isRecruitingCandidateReportField,
   readActorArtifact,
   readInstantlyEmail,
@@ -687,7 +688,9 @@ export async function getRecruitingCorrespondence(
         parsed = true;
         if (emails.has(id) && call.route.toolName !== "get_email") continue;
         if (call.route.toolName === "list_emails") mailMembership.add(membership);
-        const text = email.body.text || email.content_preview || "";
+        const fullText =
+          email.body.text || (email.body.html ? htmlToPlainText(email.body.html) : "");
+        const text = fullText || email.content_preview || "";
         const displayText =
           call.route.toolName === "list_emails"
             ? text.replace(/\[truncated — use get_email for full content\](\s*)$/u, "$1")
@@ -698,8 +701,7 @@ export async function getRecruitingCorrespondence(
           recipients: email.to_address_email_list ? [email.to_address_email_list] : [],
           subject: email.subject,
           body: displayText.slice(0, 50_000),
-          snippet:
-            call.route.toolName === "list_emails" || !email.body.text || text.length > 50_000,
+          snippet: call.route.toolName === "list_emails" || !fullText || text.length > 50_000,
           date: email.timestamp_email,
           url: null,
         });

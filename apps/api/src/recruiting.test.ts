@@ -252,6 +252,83 @@ describe("saved recruiting correspondence", () => {
     });
     expect(JSON.stringify(result)).not.toContain(row.thread_id);
   });
+  it.each(["list_emails", "get_email"])(
+    "projects an HTML-only %s body as safe readable text with honest preview status",
+    async (toolName) => {
+      const html =
+        '<p>Hello &amp; welcome, Avery &#128075;</p><p>Can we speak Thursday? <a href="https://cal.com/example/intro">Book time</a> or <a href="mailto:avery@example.test">email me</a>.</p><p><a href="https://example.test/job">https://example.test/job</a> <a href="javascript:unsafeLink()">Original label</a> <a href="data:text/html,unsafeData">Data label</a></p><div>Regards,<br>Avery</div><script>unsafeScript()</script><style>unsafeStyle{}</style>';
+      const row = { ...email, body: { html }, content_preview: "Short provider preview" };
+      const { client, prisma, retained } = fixture({
+        result: { structuredContent: { items: [row] } },
+      });
+      if (toolName === "get_email") {
+        client.mcpServer.findMany.mockResolvedValueOnce([
+          {
+            id: "mail",
+            name: "Instantly",
+            endpoint: "https://mcp.instantly.ai/mcp",
+            secretId: "encrypted-reference",
+            revision: 1,
+            enabled: true,
+            assignments: [
+              { botId: "main", allowAllTools: false, allowedTools: ["list_emails", "get_email"] },
+            ],
+          },
+        ]);
+        const detail = {
+          ...retained,
+          id: "detail",
+          request: [
+            "__rakazoCatalogTool",
+            "direct",
+            {
+              route: { connectorId: "mcp", resourceId: "mail", resourceRevision: 1, toolName },
+              args: { id: email.id },
+            },
+          ],
+        };
+        client.externalEffect.findMany
+          .mockReset()
+          .mockResolvedValueOnce([detail, retained])
+          .mockResolvedValueOnce([
+            { id: retained.id, result: { structuredContent: { items: [email] } } },
+            { id: detail.id, result: { structuredContent: row } },
+          ]);
+      }
+      const result = await api.getRecruitingCorrespondence(prisma, actor, target, "inbox");
+      expect(result.emails).toHaveLength(1);
+      expect(result.emails[0]!.body).toContain("Hello & welcome, Avery 👋");
+      expect(result.emails[0]!.body).toContain("Can we speak Thursday?");
+      expect(result.emails[0]!.body).toContain("Book time (https://cal.com/example/intro)");
+      expect(result.emails[0]!.body).toContain("email me (mailto:avery@example.test)");
+      expect(result.emails[0]!.body.match(/https:\/\/example\.test\/job/g)).toHaveLength(1);
+      expect(result.emails[0]!.body).not.toMatch(/javascript:|data:text|unsafeLink|unsafeData/);
+      expect(result.emails[0]!.body).toContain("Regards,\nAvery");
+      expect(result.emails[0]!.body).not.toMatch(
+        /unsafeScript|unsafeStyle|<\/?(?:p|a|script|style)\b/,
+      );
+      expect(result.emails[0]!.snippet).toBe(toolName === "list_emails");
+      expect(row.body.html).toBe(html);
+    },
+  );
+  it("prefers the original plain-text body over HTML and provider previews", async () => {
+    const { prisma } = fixture({
+      result: {
+        structuredContent: {
+          items: [
+            {
+              ...email,
+              body: { ...email.body, html: "<p>Other HTML</p>" },
+              content_preview: "Short preview",
+            },
+          ],
+        },
+      },
+    });
+    expect(await api.getRecruitingCorrespondence(prisma, actor, target, "inbox")).toMatchObject({
+      emails: [{ body: email.body.text, snippet: true }],
+    });
+  });
   it("removes only the terminal provider truncation annotation from an Inbox preview", async () => {
     const annotation = "[truncated — use get_email for full content]";
     const candidateText = `Original candidate text, including ${annotation} in a quoted sentence.`;
