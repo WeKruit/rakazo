@@ -187,6 +187,7 @@ import {
   deleteEmptySpaceForMember,
   deleteUnreferencedCredentialSecret,
   ensureBoard,
+  ensureRecruitingWorkspace,
   findDefaultModelCredential,
   findDefaultVoiceCredential,
   findModelCredential,
@@ -629,6 +630,7 @@ export interface RouterDeps {
     defaultModel: string;
     deploymentModelConfigured?: boolean;
     deploymentModelHostCredentials?: boolean;
+    autumnServiceConfigured?: boolean;
     webOrigin: string;
     privacyPolicyUrl?: string;
     screenProxySecret: string;
@@ -4622,6 +4624,12 @@ export function createRouter(deps: RouterDeps) {
       },
     },
     onboarding: {
+      ensureRecruiting: authed.onboarding.ensureRecruiting.handler(({ context }) =>
+        ensureRecruitingWorkspace(deps.prisma, context.actor, {
+          hasAutumnService: Boolean(deps.env.autumnServiceConfigured),
+          sandboxKind: deps.env.sandboxProvider,
+        }),
+      ),
       start: authed.onboarding.start.handler(async ({ context, input }) => {
         await startOnboarding(onboardingDeps, context.actor, input.botId);
         return { ok: true as const };

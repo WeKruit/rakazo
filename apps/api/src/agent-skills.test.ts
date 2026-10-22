@@ -1,6 +1,6 @@
 import { readFileSync } from "node:fs";
 import type { Actor } from "@rakazo/contracts";
-import { buildSkillMd } from "@rakazo/core";
+import { buildSkillMd, RECRUITING_DEFAULT_SKILLS } from "@rakazo/core";
 import type { PrismaClient } from "@rakazo/db";
 import { describe, expect, it, vi } from "vitest";
 import { createAgentSkillsService, resolveSkillContent } from "./agent-skills.js";
@@ -11,6 +11,9 @@ const actor: Actor = {
   email: "user@rakazo.test",
   isDeploymentOwner: true,
 };
+const recruitingBuiltins = RECRUITING_DEFAULT_SKILLS.map(({ name }) =>
+  expect.objectContaining({ id: `builtin:${name}`, source: "builtin", readOnly: true }),
+);
 
 function savedSkill(name: string, source = "user") {
   return {
@@ -57,14 +60,31 @@ function setup(rows: ReturnType<typeof savedSkill>[] = []) {
 }
 
 describe("built-in skill precedence in the API", () => {
+  it.each(RECRUITING_DEFAULT_SKILLS)(
+    "preserves private changes to the default $name skill",
+    async ({ name }) => {
+      const { service } = setup([savedSkill(name)]);
+      const catalog = await service.list(actor);
+      expect(catalog.filter((skill) => skill.name === name)).toEqual([
+        expect.objectContaining({ id: "saved-1", source: "user", readOnly: false }),
+      ]);
+      expect(catalog.some((skill) => skill.id === `builtin:${name}`)).toBe(false);
+      await expect(service.get(actor, { name })).resolves.toMatchObject({
+        id: "saved-1",
+        content: expect.stringContaining("Saved steps"),
+      });
+    },
+  );
   it.each(["interrogate", " Interrogate "])(
     "keeps %j listed, readable and mutable",
     async (name) => {
       const { service } = setup([savedSkill(name)]);
       await expect(service.list(actor)).resolves.toEqual([
+        ...recruitingBuiltins,
         expect.objectContaining({ id: "saved-1", name, readOnly: false }),
       ]);
       await expect(service.listWithContent(actor)).resolves.toEqual([
+        ...recruitingBuiltins,
         expect.objectContaining({ id: "saved-1", content: expect.stringContaining("Saved steps") }),
       ]);
       await expect(service.get(actor, { name: " INTERROGATE " })).resolves.toMatchObject({
@@ -107,6 +127,7 @@ describe("built-in skill precedence in the API", () => {
         readOnly: true,
       });
       await expect(service.list(actor)).resolves.toEqual([
+        ...recruitingBuiltins,
         expect.objectContaining({ id: "builtin:Interrogate" }),
       ]);
       await expect(service.get(actor, { skillId: "saved-1" })).rejects.toThrow();

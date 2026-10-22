@@ -531,6 +531,7 @@ describe("createGroup", () => {
       isDeploymentOwner: false,
     };
 
+    Object.assign(tx, { bot: prisma.bot });
     const group = await createGroupRepos(prisma).createGroup(actor, {
       name: "Support crew",
       botIds: ["lead", "build"],

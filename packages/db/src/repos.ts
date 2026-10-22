@@ -1,7 +1,7 @@
 import type { Actor, Bot, BotSection, MessageBlock, SpaceBot } from "@rakazo/contracts";
 import { BOT_COLORS } from "@rakazo/contracts";
 import { BACKGROUND_RUN_TRIGGERS, isBackgroundRunTrigger, userVisibleMessages } from "@rakazo/core";
-import type { PrismaClient } from "./client.js";
+import type { Prisma, PrismaClient } from "./client.js";
 import type { ComputerMode } from "./computers.js";
 import { ensureComputerRecord, parseComputerMode } from "./computers.js";
 import { createThreadMessageInTransaction } from "./messages.js";
@@ -109,6 +109,107 @@ function mapBot(
     webhookConfigured: Boolean(bot.webhookSecretId),
     spawnKey: bot.spawnKey ?? null,
   };
+}
+
+export async function createBotInTransaction(
+  tx: Prisma.TransactionClient,
+  actor: Actor,
+  input: {
+    name: string;
+    title: string;
+    description: string;
+    instructions: string;
+    notifyOnFinish: boolean;
+    color: string;
+    parentBotId?: string | null;
+    computerMode?: ComputerMode;
+    spawnKey?: string;
+    modelProvider?: string | null;
+    modelId?: string | null;
+    thinkingLevel?: string | null;
+    disabledBuiltinTools?: string[];
+    initialMessage?: { role: "user" | "bot" | "system"; blocks: MessageBlock[]; runId?: string };
+  },
+  kind: string,
+) {
+  await lockSpaceForContentCreation(tx, {
+    spaceId: actor.spaceId,
+    userId: actor.userId,
+  });
+  const positions = await tx.bot.aggregate({
+    where: { spaceId: actor.spaceId, userId: actor.userId },
+    _max: { position: true },
+  });
+  const teamComputer = await ensureComputerRecord(tx, {
+    mode: "team",
+    spaceId: actor.spaceId,
+    userId: actor.userId,
+    kind,
+  });
+  const created = await tx.bot.create({
+    data: {
+      spaceId: actor.spaceId,
+      userId: actor.userId,
+      name: input.name,
+      title: input.title,
+      description: input.description,
+      instructions: input.instructions,
+      notifyOnFinish: input.notifyOnFinish,
+      color: input.color,
+      position: (positions._max.position ?? -1) + 1,
+      parentBotId: input.parentBotId ?? null,
+      computerId: teamComputer.id,
+      spawnKey: input.spawnKey,
+      modelProvider: input.modelProvider ?? null,
+      modelId: input.modelId ?? null,
+      thinkingLevel: input.thinkingLevel ?? null,
+      disabledBuiltinTools: input.disabledBuiltinTools ?? [],
+    },
+  });
+  const thread = await tx.thread.create({
+    data: {
+      spaceId: actor.spaceId,
+      botId: created.id,
+      userId: actor.userId,
+    },
+  });
+  if (input.initialMessage) {
+    await createThreadMessageInTransaction(tx, {
+      threadId: thread.id,
+      ...input.initialMessage,
+    });
+  }
+  if (input.computerMode === "dedicated") {
+    const dedicated = await ensureComputerRecord(tx, {
+      mode: "dedicated",
+      spaceId: actor.spaceId,
+      userId: actor.userId,
+      botId: created.id,
+      kind,
+    });
+    await tx.bot.update({ where: { id: created.id }, data: { computerId: dedicated.id } });
+  }
+  await tx.browserProfile.create({
+    data: {
+      spaceId: actor.spaceId,
+      botId: created.id,
+      userId: actor.userId,
+    },
+  });
+  await tx.memoryDocument.create({
+    data: {
+      spaceId: actor.spaceId,
+      userId: actor.userId,
+      botId: created.id,
+      scope: "bot",
+      path: "MEMORY.md",
+      content: `# ${input.name}\n\n`,
+    },
+  });
+  return tx.bot.findFirstOrThrow({
+    where: { id: created.id },
+    include: { thread: true, computer: true },
+  });
 }
 
 export function createRepos(prisma: PrismaClient) {
@@ -461,86 +562,21 @@ export function createRepos(prisma: PrismaClient) {
       const kind =
         envKind === "docker" && settings?.computerHost === "this-mac" ? "desktop" : envKind;
       const insertBot = () =>
-        prisma.$transaction(async (tx) => {
-          await lockSpaceForContentCreation(tx, {
-            spaceId: actor.spaceId,
-            userId: actor.userId,
-          });
-          const positions = await tx.bot.aggregate({
-            where: { spaceId: actor.spaceId, userId: actor.userId },
-            _max: { position: true },
-          });
-          const teamComputer = await ensureComputerRecord(tx, {
-            mode: "team",
-            spaceId: actor.spaceId,
-            userId: actor.userId,
-            kind,
-          });
-          const created = await tx.bot.create({
-            data: {
-              spaceId: actor.spaceId,
-              userId: actor.userId,
-              name: input.name,
-              title: input.title,
-              description: input.description,
-              instructions: input.instructions,
-              notifyOnFinish: input.notifyOnFinish,
+        prisma.$transaction((tx) =>
+          createBotInTransaction(
+            tx,
+            actor,
+            {
+              ...input,
               color,
-              position: (positions._max.position ?? -1) + 1,
-              parentBotId: input.parentBotId ?? null,
-              computerId: teamComputer.id,
-              spawnKey: input.spawnKey,
               modelProvider,
               modelId,
               thinkingLevel,
               disabledBuiltinTools,
             },
-          });
-          const thread = await tx.thread.create({
-            data: {
-              spaceId: actor.spaceId,
-              botId: created.id,
-              userId: actor.userId,
-            },
-          });
-          if (input.initialMessage) {
-            await createThreadMessageInTransaction(tx, {
-              threadId: thread.id,
-              ...input.initialMessage,
-            });
-          }
-          if (input.computerMode === "dedicated") {
-            const dedicated = await ensureComputerRecord(tx, {
-              mode: "dedicated",
-              spaceId: actor.spaceId,
-              userId: actor.userId,
-              botId: created.id,
-              kind,
-            });
-            await tx.bot.update({ where: { id: created.id }, data: { computerId: dedicated.id } });
-          }
-          await tx.browserProfile.create({
-            data: {
-              spaceId: actor.spaceId,
-              botId: created.id,
-              userId: actor.userId,
-            },
-          });
-          await tx.memoryDocument.create({
-            data: {
-              spaceId: actor.spaceId,
-              userId: actor.userId,
-              botId: created.id,
-              scope: "bot",
-              path: "MEMORY.md",
-              content: `# ${input.name}\n\n`,
-            },
-          });
-          return tx.bot.findFirstOrThrow({
-            where: { id: created.id },
-            include: { thread: true, computer: true },
-          });
-        });
+            kind,
+          ),
+        );
 
       const findBySpawnKey = async () => {
         if (!input.spawnKey) return null;

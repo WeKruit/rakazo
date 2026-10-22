@@ -857,6 +857,7 @@ export const appContract = {
     },
   },
   onboarding: {
+    ensureRecruiting: oc.input(z.object({})).output(z.object({ botId: Id, groupId: Id })),
     /** Seed the first-run greeting into the bot's thread (focus card is separate). */
     start: oc.input(z.object({ botId: Id })).output(z.object({ ok: z.literal(true) })),
     /** Post the focus choice card when the thread is still idle. */
