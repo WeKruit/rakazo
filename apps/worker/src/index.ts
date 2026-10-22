@@ -7,8 +7,10 @@ loadRootEnv();
 
 import {
   AutumnFileConnector,
+  artifactStorageOptionsFromEnv,
   ChatSdkMessagingSurface,
   CodexCatalogCache,
+  createArtifactStore,
   createBackgroundJobHandlers,
   createCloudAgentConnection,
   createConnectorStack,
@@ -30,7 +32,6 @@ import {
   isMessagingSurfaceEnabled,
   isPipedreamEnabled,
   LocalAgentHomeStore,
-  LocalArtifactStore,
   McpConnector,
   McpOAuthBroker,
   messagingEnvFromProcess,
@@ -65,6 +66,7 @@ import { MarkdownMemoryStore } from "@rakazo/memory";
 const logger = createRootLogger(SERVICE_NAMES.worker);
 
 async function main() {
+  const artifactStorage = artifactStorageOptionsFromEnv(process.env);
   const databaseUrl = process.env.DATABASE_URL;
   if (!databaseUrl) throw new Error("DATABASE_URL is required");
   const shutdown = new AbortController();
@@ -156,7 +158,7 @@ async function main() {
       pipedream,
     },
   );
-  const artifacts = new LocalArtifactStore(dataDir);
+  const artifacts = createArtifactStore(dataDir, artifactStorage);
   const stack = createConnectorStack(false, undefined, [
     new InstalledConnectorProvider(prisma, secrets, {}, allowPrivateEndpoint),
     ...integrationSettings.providers(),
