@@ -164,6 +164,7 @@ it("shows assigned native services without a managed catalog or internal configu
     server("No access", { platformCredentialConfigured: true }),
     server("Other specialist", { platformCredentialConfigured: true }),
     server("Unassigned", { platformCredentialConfigured: true }),
+    server("Disabled", { enabled: false }),
   ]);
   api.assignments.mockResolvedValue([
     assignment("Research"),
@@ -179,7 +180,12 @@ it("shows assigned native services without a managed catalog or internal configu
     "Configured",
   );
   expect(host.textContent).not.toContain("Other specialist");
-  expect(host.textContent).not.toContain("Unassigned");
+  expect(host.querySelector('[data-service-id="Unassigned"]')?.textContent).toContain(
+    "Not available to this assistant",
+  );
+  expect(host.querySelector('[data-service-id="Unassigned"] button')).toBeNull();
+  expect(host.querySelector('[data-service-id="No access"] button')).toBeNull();
+  expect(host.querySelector('[data-service-id="Disabled"] button')).toBeNull();
   expect(host.textContent).not.toMatch(
     /plugin catalog|MCP|private-service|read_saved|Tool sources/,
   );
@@ -189,6 +195,87 @@ it("shows assigned native services without a managed catalog or internal configu
     "true",
   );
   expect(host.querySelector('[data-testid="app-search"]')?.hasAttribute("data-bot-id")).toBe(false);
+});
+
+it("shows and explicitly connects an existing unassigned personal service without a public catalog entry", async () => {
+  let authorized = false;
+  let granted = false;
+  api.servers.mockImplementation(async () => [
+    server("Mailbox", {
+      endpoint: "https://gmailmcp.googleapis.com/mcp/v1",
+      oauthStatus: authorized ? "connected" : "none",
+      hasSecret: authorized,
+    }),
+  ]);
+  api.assignments.mockImplementation(async () =>
+    granted ? [assignment("Mailbox", "main", ["get_thread"])] : [],
+  );
+  api.connect.mockImplementation(async () => {
+    authorized = true;
+    return "connected";
+  });
+  api.approve.mockImplementation(async (input) => {
+    granted = true;
+    return { ...input, allowAllTools: false };
+  });
+  const host = await open("main", false, { coordinatorBotId: "main" });
+  const tile = host.querySelector('[data-service-id="Mailbox"]');
+  expect(tile).not.toBeNull();
+  expect(tile?.textContent).toContain("Needs connection");
+  await act(async () => button(host, "Connect").click());
+  expect(api.connect).toHaveBeenCalledExactlyOnceWith("Mailbox");
+  expect(api.approve).toHaveBeenCalledExactlyOnceWith({
+    botId: "main",
+    serverId: "Mailbox",
+    allowedTools: ["get_message", "get_thread", "search_threads"],
+  });
+  expect(host.querySelector('[data-service-id="Mailbox"]')?.textContent).toContain("Configured");
+  expect(api.search).not.toHaveBeenCalled();
+});
+
+it.each(["platform", "static"])(
+  "connects an unassigned service using its existing %s credential without claiming OAuth completed",
+  async (kind) => {
+    let granted = false;
+    api.servers.mockResolvedValue([
+      server("App", {
+        platformCredentialConfigured: kind === "platform",
+        hasSecret: kind === "static",
+      }),
+    ]);
+    api.assignments.mockImplementation(async () => (granted ? [assignment("App")] : []));
+    api.connect.mockResolvedValue("authorization_not_requested");
+    api.approve.mockImplementation(async (input) => {
+      granted = true;
+      return { ...input, allowAllTools: true, allowedTools: [] };
+    });
+    const host = await open("main", false, { coordinatorBotId: "main" });
+    expect(host.querySelector('[data-service-id="App"]')?.textContent).toContain(
+      "Needs connection",
+    );
+    await act(async () => button(host, "Connect").click());
+    expect(api.approve).toHaveBeenCalledExactlyOnceWith({ botId: "main", serverId: "App" });
+    expect(host.querySelector('[data-service-id="App"]')?.textContent).toContain("Configured");
+    expect(host.querySelector('[role="alert"]')).toBeNull();
+  },
+);
+
+it("does not report a service connected when its assignment was revoked before the final read", async () => {
+  let revoked = false;
+  api.servers.mockResolvedValue([server("App", { oauthStatus: "connected" })]);
+  api.assignments.mockImplementation(async () => (revoked ? [assignment("App", "main", [])] : []));
+  api.connect.mockResolvedValue("already_connected");
+  api.approve.mockImplementation(async (input) => {
+    revoked = true;
+    return { ...input, allowAllTools: true, allowedTools: [] };
+  });
+  const host = await open("main", false, { coordinatorBotId: "main" });
+  await act(async () => button(host, "Connect").click());
+  expect(api.approve).toHaveBeenCalledTimes(1);
+  expect(host.querySelector('[data-service-id="App"]')?.textContent).toContain(
+    "Not available to this assistant",
+  );
+  expect(host.querySelector('[role="alert"]')).not.toBeNull();
 });
 
 it("checks fresh native state after OAuth rather than treating its completion signal as success", async () => {
@@ -207,7 +294,82 @@ it("checks fresh native state after OAuth rather than treating its completion si
   await act(async () => button(host, "Reconnect").click());
   expect(host.querySelector('[data-service-id="Mailbox"]')?.textContent).toContain("Configured");
   expect(host.querySelector('[role="alert"]')).toBeNull();
+  expect(api.approve).not.toHaveBeenCalled();
 });
+
+it("keeps an unassigned service unconfigured when its account authorization fails", async () => {
+  api.servers.mockResolvedValue([
+    server("Mailbox", { endpoint: "https://gmailmcp.googleapis.com/mcp/v1" }),
+  ]);
+  api.connect.mockRejectedValue(new Error("Missing client configuration"));
+  const host = await open("main", false, { coordinatorBotId: "main" });
+  await act(async () => button(host, "Connect").click());
+  expect(api.approve).not.toHaveBeenCalled();
+  expect(host.querySelector('[data-service-id="Mailbox"]')?.textContent).toContain(
+    "Needs connection",
+  );
+  expect(host.querySelector('[role="alert"]')).not.toBeNull();
+});
+
+it.each(["revoked", "other-assistant", "narrow"])(
+  "does not grant over a %s assignment that appeared during account authorization",
+  async (state) => {
+    let authorized = false;
+    api.servers.mockImplementation(async () => [
+      server("Mailbox", { oauthStatus: authorized ? "connected" : "none" }),
+    ]);
+    api.assignments.mockImplementation(async () =>
+      authorized
+        ? [
+            assignment(
+              "Mailbox",
+              state === "other-assistant" ? "other" : "main",
+              state === "revoked" ? [] : ["get_thread"],
+            ),
+          ]
+        : [],
+    );
+    api.connect.mockImplementation(async () => {
+      authorized = true;
+      return "connected";
+    });
+    const host = await open("main", false, { coordinatorBotId: "main" });
+    await act(async () => button(host, "Connect").click());
+    expect(api.approve).not.toHaveBeenCalled();
+    if (state === "narrow") {
+      expect(host.querySelector('[data-service-id="Mailbox"]')?.textContent).toContain(
+        "Configured",
+      );
+      expect(host.querySelector('[role="alert"]')).toBeNull();
+    } else {
+      expect(host.querySelector('[data-service-id="Mailbox"]')?.textContent).not.toContain(
+        "Configured",
+      );
+      expect(host.querySelector('[role="alert"]')).not.toBeNull();
+    }
+  },
+);
+
+it.each(["close", "switch"])(
+  "does not assign an unassigned service after its authorization finishes following %s",
+  async (change) => {
+    api.servers.mockResolvedValue([server("Mailbox")]);
+    let finish!: (result: string) => void;
+    api.connect.mockReturnValue(
+      new Promise((resolve) => {
+        finish = resolve;
+      }),
+    );
+    const host = await open("main", false, { coordinatorBotId: "main" });
+    await act(async () => button(host, "Connect").click());
+    if (change === "close") {
+      await close?.();
+      close = undefined;
+    } else await rerender?.("other");
+    await act(async () => finish("connected"));
+    expect(api.approve).not.toHaveBeenCalled();
+  },
+);
 
 it("keeps failed loads retryable and ignores a native OAuth completion after closing", async () => {
   api.servers.mockRejectedValueOnce(new Error("Services unavailable"));
