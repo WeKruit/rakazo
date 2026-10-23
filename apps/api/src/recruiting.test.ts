@@ -3807,16 +3807,15 @@ describe("live CRM browser reads", () => {
       next_offset: 2,
     },
   });
-  it("preserves organization Important candidate-role rows and the true row total", async () => {
+  it("reads actual Important rows with labels only at the candidate-role row and preserves the true total", async () => {
     const f = browserFixture();
     const row = RecruitingCrmCandidatesReadSchema.parse(f.results.list_crm_candidates).rows[0]!;
     f.results.list_crm_candidates = {
       total: 5,
-      rows: ["role-a", "role-b"].map((roleKey) => ({
-        ...row,
-        role_label: roleKey,
-        role_tracking: [tracking(roleKey)],
-      })),
+      rows: ["role-a", "role-b"].map((roleKey) => {
+        const { client_label: _client, role_label: _role, ...nativeTracking } = tracking(roleKey);
+        return { ...row, role_label: roleKey, role_tracking: [nativeTracking] };
+      }),
     };
     const result = await api.getRecruitingCrmData(f.deps, actor, target, {
       operation: "important",
@@ -3830,8 +3829,8 @@ describe("live CRM browser reads", () => {
       total: 5,
       nextOffset: 2,
       items: [
-        { candidateId, roleKey: "role-a" },
-        { candidateId, roleKey: "role-b" },
+        { candidateId, roleKey: "role-a", clientLabel: "Actual client", roleLabel: "role-a" },
+        { candidateId, roleKey: "role-b", clientLabel: "Actual client", roleLabel: "role-b" },
       ],
     });
     expect(f.execute.mock.calls.at(-1)?.[0].args).toEqual({
@@ -3845,12 +3844,28 @@ describe("live CRM browser reads", () => {
   it("rejects duplicate Important candidate-role keys while permitting one candidate in different roles", async () => {
     const f = browserFixture();
     const row = RecruitingCrmCandidatesReadSchema.parse(f.results.list_crm_candidates).rows[0]!;
-    const duplicate = { ...row, role_label: "role-a", role_tracking: [tracking("role-a")] };
+    const { client_label: _client, role_label: _role, ...nativeTracking } = tracking("role-a");
+    const duplicate = { ...row, role_label: "role-a", role_tracking: [nativeTracking] };
     f.results.list_crm_candidates = { total: 2, rows: [duplicate, duplicate] };
     await expect(
       api.getRecruitingCrmData(f.deps, actor, target, { operation: "important", ...pinned }),
     ).rejects.toMatchObject({ code: "SERVICE_UNAVAILABLE" });
   });
+  it.each(["client_label", "role_label"])(
+    "requires the actual Important row's top-level %s",
+    async (field) => {
+      const f = browserFixture();
+      const row = RecruitingCrmCandidatesReadSchema.parse(f.results.list_crm_candidates).rows[0]!;
+      const { client_label: _client, role_label: _role, ...nativeTracking } = tracking("role-a");
+      f.results.list_crm_candidates = {
+        total: 1,
+        rows: [{ ...row, [field]: undefined, role_tracking: [nativeTracking] }],
+      };
+      await expect(
+        api.getRecruitingCrmData(f.deps, actor, target, { operation: "important", ...pinned }),
+      ).rejects.toMatchObject({ code: "SERVICE_UNAVAILABLE" });
+    },
+  );
   it("reads source-labeled candidate details without fabricating a missing pipeline or campaign", async () => {
     const f = browserFixture("personal-oauth-reference");
     f.results.get_crm_candidate_review = details();
