@@ -5,6 +5,7 @@ import {
   CrmGate,
   crmRoleKey,
   formatDate,
+  statusText,
   TabHeader,
   TabLoading,
   TabNotice,
@@ -14,15 +15,25 @@ import {
 } from "./shared";
 
 type Tracked = Extract<RecruitingCrmDataOutput, { operation: "important" }>["items"][number];
+type Row = Extract<RecruitingCrmDataOutput, { operation: "candidates" }>["items"][number] &
+  Partial<Pick<Tracked, "statusChangedAt" | "updatedAt">>;
 
 /** Interview negotiation and booking state for the role as stored in the CRM and calendar reads. */
 export function InterviewTab(props: RecruitingTabProps) {
   const { t } = useLingui();
   const crm = useRoleCrm(props);
   const ready = crm.status === "ready" ? crm.target : null;
-  // The CRM filters interview workflow statuses organization-wide; rows are matched to this role below.
+  // The CRM's own Interview stage for this role; CRMs without the stage filter fall back to the
+  // organization-wide interview workflow statuses, matched to this role below.
+  const staged = useCrmData(
+    crm,
+    "candidates",
+    ready ? { crmRoleId: ready.crmRoleId, stage: "Interview", limit: 50 } : null,
+    props,
+  );
+  const fallback = staged.failed;
   const page = (status: "needs_scheduling" | "scheduled" | "awaiting_feedback") =>
-    ready ? { status, limit: 50 } : null;
+    ready && fallback ? { status, limit: 50 } : null;
   const reads = [
     {
       status: t`Needs scheduling`,
@@ -37,13 +48,17 @@ export function InterviewTab(props: RecruitingTabProps) {
   const calendar = useSavedCorrespondence(props, "interview");
   const roleKey = ready ? crmRoleKey(ready) : null;
   const forRole = (items: readonly Tracked[]) => items.filter((item) => item.roleKey === roleKey);
-  const loading = reads.some(({ read }) => read.loading);
-  const failed = reads.some(({ read }) => read.failed);
-  const loaded = reads.every(({ read }) => read.data);
-  const truncated = reads.some(({ read }) => read.data?.nextOffset != null);
-  const rows = reads.flatMap(({ status, read }) =>
-    forRole(read.data?.items ?? []).map((item) => ({ status, item })),
-  );
+  const loading = staged.loading || (fallback && reads.some(({ read }) => read.loading));
+  const failed = fallback && reads.some(({ read }) => read.failed);
+  const loaded = fallback ? reads.every(({ read }) => read.data) : Boolean(staged.data);
+  const truncated = fallback
+    ? reads.some(({ read }) => read.data?.nextOffset != null)
+    : staged.data?.nextOffset != null;
+  const rows: { status: string; item: Row }[] = fallback
+    ? reads.flatMap(({ status, read }) =>
+        forRole(read.data?.items ?? []).map((item) => ({ status, item })),
+      )
+    : (staged.data?.items ?? []).map((item) => ({ status: statusText(item.stage), item }));
   const events = calendar.data?.status === "ready" ? calendar.data.events : [];
   return (
     <section aria-label={t`Interview`}>

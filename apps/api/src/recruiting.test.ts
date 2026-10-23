@@ -4271,6 +4271,148 @@ describe("live CRM browser reads", () => {
       next_offset: 2,
     },
   });
+  const roleMailInput = {
+    operation: "roleMail" as const,
+    serverId: "crm",
+    serverRevision: 3,
+    organizationId: org,
+    crmRoleId: roleId,
+    limit: 2,
+  };
+  function roleMail(f: ReturnType<typeof browserFixture>) {
+    f.assignment.allowedTools.push("list_crm_role_correspondence");
+    f.results.list_crm_role_correspondence = {
+      organization_id: org,
+      role_id: roleId,
+      pagination: "offset",
+      next_offset: 2,
+      messages: [
+        {
+          id: "role-mail",
+          organization_id: org,
+          candidate_id: candidateId,
+          lead_email: null,
+          thread_id: "thread-1",
+          direction: "received",
+          timestamp_email: "2026-10-22T00:00:00Z",
+          campaign_id: null,
+          from_address: "person@example.com",
+          to_address: "recruiter@example.com",
+          subject: "Re: role",
+          body_text: "Stored full reply",
+        },
+      ],
+    };
+  }
+  it("reads every stored email for the exact CRM role in one scoped read", async () => {
+    const f = browserFixture();
+    roleMail(f);
+    const result = await api.getRecruitingCrmData(f.deps, actor, target, roleMailInput);
+    expect(result).toMatchObject({
+      operation: "roleMail",
+      supported: true,
+      crmRoleId: roleId,
+      nextOffset: 2,
+      items: [
+        {
+          candidateId,
+          providerMessageId: "role-mail",
+          direction: "received",
+          sender: "person@example.com",
+          recipients: ["recruiter@example.com"],
+          body: "Stored full reply",
+          partial: false,
+        },
+      ],
+    });
+    expect(f.execute.mock.calls.at(-1)?.[0].args).toEqual({
+      p_org: org,
+      p_role: roleId,
+      p_limit: 2,
+      p_offset: 0,
+    });
+  });
+  it("reports role-wide mail as unsupported when the tool is not assigned or not on the CRM", async () => {
+    const unassigned = browserFixture();
+    expect(
+      await api.getRecruitingCrmData(unassigned.deps, actor, target, roleMailInput),
+    ).toMatchObject({ operation: "roleMail", supported: false, items: [] });
+    expect(
+      unassigned.execute.mock.calls.some(
+        ([call]) => call.route?.toolName === "list_crm_role_correspondence",
+      ),
+    ).toBe(false);
+
+    const missing = browserFixture();
+    missing.assignment.allowAllTools = true;
+    missing.execute.mockImplementation(async function* (call: ConnectorCall) {
+      if (call.route!.toolName === "list_crm_role_correspondence")
+        yield {
+          type: "error" as const,
+          message: "MCP error -32602: Tool list_crm_role_correspondence not found",
+        };
+      else
+        yield {
+          type: "result" as const,
+          data: { structuredContent: { data: missing.results[call.route!.toolName] } },
+        };
+    });
+    expect(
+      await api.getRecruitingCrmData(missing.deps, actor, target, roleMailInput),
+    ).toMatchObject({ supported: false });
+  });
+  it("fails a role-wide mail read the CRM rejects for another reason or another scope", async () => {
+    const f = browserFixture();
+    roleMail(f);
+    f.execute.mockImplementation(async function* (call: ConnectorCall) {
+      if (call.route!.toolName === "list_crm_role_correspondence")
+        yield {
+          type: "error" as const,
+          message: "Role has too many candidates for one correspondence read.",
+        };
+      else
+        yield {
+          type: "result" as const,
+          data: { structuredContent: { data: f.results[call.route!.toolName] } },
+        };
+    });
+    await expect(
+      api.getRecruitingCrmData(f.deps, actor, target, roleMailInput),
+    ).rejects.toMatchObject({
+      code: "SERVICE_UNAVAILABLE",
+    });
+    const other = browserFixture();
+    roleMail(other);
+    (other.results.list_crm_role_correspondence as { role_id: string }).role_id = clientId;
+    await expect(
+      api.getRecruitingCrmData(other.deps, actor, target, roleMailInput),
+    ).rejects.toMatchObject({ code: "SERVICE_UNAVAILABLE" });
+  });
+  it("filters role candidates by the exact stored pipeline stage", async () => {
+    const f = browserFixture();
+    const page = f.results.list_crm_candidates as { rows: { stage: string | null }[] };
+    page.rows[0]!.stage = "Interview";
+    const input = {
+      operation: "candidates" as const,
+      serverId: "crm",
+      serverRevision: 3,
+      organizationId: org,
+      crmRoleId: roleId,
+      stage: "Interview",
+      limit: 1,
+    };
+    expect(await api.getRecruitingCrmData(f.deps, actor, target, input)).toMatchObject({
+      items: [{ candidateId, stage: "Interview" }],
+    });
+    expect(
+      f.execute.mock.calls.find(([call]) => call.route?.toolName === "list_crm_candidates")?.[0]
+        .args,
+    ).toMatchObject({ p_stage: "Interview", p_role: "Actual role", p_client: "Actual client" });
+    page.rows[0]!.stage = "Screening";
+    await expect(api.getRecruitingCrmData(f.deps, actor, target, input)).rejects.toMatchObject({
+      code: "SERVICE_UNAVAILABLE",
+    });
+  });
   it("reads actual Important rows with labels only at the candidate-role row and preserves the true total", async () => {
     const f = browserFixture();
     const row = RecruitingCrmCandidatesReadSchema.parse(f.results.list_crm_candidates).rows[0]!;

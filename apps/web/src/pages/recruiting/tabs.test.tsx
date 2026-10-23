@@ -205,7 +205,8 @@ it("shows campaign state and stored messages without any send control", async ()
   );
   const view = await mount(<SequenceTab {...props} />);
   expect(view.textContent).toContain("Staff outreach");
-  expect(view.textContent).toContain("Active");
+  expect(view.querySelector("tbody td")?.textContent).toBe("1");
+  expect(view.textContent).not.toContain("Active");
   expect(view.textContent).toContain("Replied · 1");
   const ada = [...view.querySelectorAll("button")].find((button) =>
     button.textContent?.includes("Ada"),
@@ -219,50 +220,126 @@ it("shows campaign state and stored messages without any send control", async ()
   );
 });
 
-it("reads full stored email bodies and exposes the selected email to chat", async () => {
-  crmData.mockImplementation(async (input: { operation: string; candidateId?: string }) =>
+const roleMailPage = (supported: boolean, items: unknown[] = []) => ({
+  operation: "roleMail",
+  source,
+  checkedAt,
+  scope: "stored_role_correspondence",
+  crmRoleId: ROLE,
+  supported,
+  items,
+  offset: 0,
+  nextOffset: null,
+});
+const stored = (id: string, candidateId: string, subject: string, body: string, date: string) => ({
+  id,
+  providerMessageId: id,
+  threadId: null,
+  direction: "received",
+  sender: "someone@example.com",
+  recipients: ["recruiter@example.com"],
+  subject,
+  body,
+  date,
+  partial: false,
+  candidateId,
+});
+
+it("shows every candidate's stored mail for the role by default in one read", async () => {
+  crmData.mockImplementation(async (input: { operation: string }) =>
     input.operation === "candidates"
       ? candidatesPage
-      : {
-          operation: "mail",
-          source,
-          checkedAt,
-          scope: "stored_candidate_correspondence",
-          outbox: [],
-          candidateId: input.candidateId,
-          nativeCorrespondence: [],
-          items: [
-            {
-              id: "m1",
-              providerMessageId: "p1",
-              threadId: null,
-              direction: "sent",
-              sender: "recruiter@example.com",
-              recipients: ["ada@example.com"],
-              subject: "Staff role",
-              body: "Would you like to talk?",
-              date: "2026-10-20T10:00:00Z",
-              partial: false,
-            },
-            {
-              id: "m2",
-              providerMessageId: "p2",
-              threadId: null,
-              direction: "received",
-              sender: "ada@example.com",
-              recipients: ["recruiter@example.com"],
-              subject: "Re: Staff role",
-              body: "Yes, next week works.\nThanks",
-              date: "2026-10-21T10:00:00Z",
-              partial: false,
-            },
-          ],
-          nextCursor: null,
-        },
+      : input.operation === "roleMail"
+        ? roleMailPage(true, [
+            stored("b1", BEN, "From Ben", "Ben body", "2026-10-22T10:00:00Z"),
+            stored("a1", ADA, "From Ada", "Ada body", "2026-10-21T10:00:00Z"),
+          ])
+        : Promise.reject(new Error("unexpected read")),
   );
   const onSelectEmail = vi.fn();
   const view = await mount(<InboxTab {...props} onSelectEmail={onSelectEmail} />);
   await settle();
+  expect(crmData).toHaveBeenCalledWith(
+    expect.objectContaining({ operation: "roleMail", crmRoleId: ROLE, organizationId: ORG }),
+  );
+  expect(crmData.mock.calls.some(([input]) => input.operation === "mail")).toBe(false);
+  expect(view.textContent).toContain("All candidates");
+  expect(view.textContent).toContain("From Ada");
+  expect(view.textContent).toContain("Ben body");
+  expect(onSelectEmail).toHaveBeenLastCalledWith(
+    expect.objectContaining({
+      candidateId: BEN,
+      candidateName: "Ben",
+      crmRoleId: ROLE,
+      email: expect.objectContaining({ subject: "From Ben" }),
+    }),
+  );
+  const ada = view.querySelector('[aria-label="From Ada"]') as HTMLButtonElement;
+  await act(async () => ada.click());
+  expect(view.textContent).toContain("Ada body");
+  expect(onSelectEmail).toHaveBeenLastCalledWith(
+    expect.objectContaining({ candidateId: ADA, candidateName: "Ada" }),
+  );
+});
+
+it("shows an error instead of falling back when the role-wide mail read fails", async () => {
+  crmData.mockImplementation(async (input: { operation: string }) =>
+    input.operation === "candidates" ? candidatesPage : Promise.reject(new Error("denied")),
+  );
+  const view = await mount(<InboxTab {...props} />);
+  await settle();
+  expect(view.querySelector('[role="alert"]')?.textContent).toContain("Could not load CRM records");
+  expect(crmData.mock.calls.some(([input]) => input.operation === "mail")).toBe(false);
+});
+
+it("reads full stored email bodies and exposes the selected email to chat", async () => {
+  // A CRM without the role-wide read falls back to one candidate's thread.
+  crmData.mockImplementation(async (input: { operation: string; candidateId?: string }) =>
+    input.operation === "candidates"
+      ? candidatesPage
+      : input.operation === "roleMail"
+        ? roleMailPage(false)
+        : {
+            operation: "mail",
+            source,
+            checkedAt,
+            scope: "stored_candidate_correspondence",
+            outbox: [],
+            candidateId: input.candidateId,
+            nativeCorrespondence: [],
+            items: [
+              {
+                id: "m1",
+                providerMessageId: "p1",
+                threadId: null,
+                direction: "sent",
+                sender: "recruiter@example.com",
+                recipients: ["ada@example.com"],
+                subject: "Staff role",
+                body: "Would you like to talk?",
+                date: "2026-10-20T10:00:00Z",
+                partial: false,
+              },
+              {
+                id: "m2",
+                providerMessageId: "p2",
+                threadId: null,
+                direction: "received",
+                sender: "ada@example.com",
+                recipients: ["recruiter@example.com"],
+                subject: "Re: Staff role",
+                body: "Yes, next week works.\nThanks",
+                date: "2026-10-21T10:00:00Z",
+                partial: false,
+              },
+            ],
+            nextCursor: null,
+          },
+  );
+  const onSelectEmail = vi.fn();
+  const view = await mount(<InboxTab {...props} onSelectEmail={onSelectEmail} />);
+  await settle();
+  expect(view.textContent).not.toContain("All candidates");
   expect(view.textContent).toContain("Replied");
   expect(view.textContent).toContain("Yes, next week works.");
   expect(onSelectEmail).toHaveBeenLastCalledWith(
@@ -302,44 +379,66 @@ it("derives reply status only from stored message directions", () => {
   ).toBe("awaiting");
 });
 
-it("shows only this role's interview workflow rows", async () => {
-  crmData.mockImplementation(async (input: { status: string }) => ({
-    operation: "important",
-    source,
-    checkedAt,
-    scope: "organization_candidate_roles",
-    items:
-      input.status === "scheduled"
-        ? [
-            {
-              ...person(ADA, "Ada"),
-              roleKey: "Staff Engineer (Acme)",
-              clientLabel: "Acme",
-              roleLabel: "Staff Engineer",
-              highSignal: false,
-              workflowStatus: "scheduled",
-              highSignalAt: null,
-              statusChangedAt: checkedAt,
-              updatedAt: checkedAt,
-            },
-            {
-              ...person(BEN, "Ben"),
-              roleKey: "Designer (Other)",
-              clientLabel: "Other",
-              roleLabel: "Designer",
-              highSignal: false,
-              workflowStatus: "scheduled",
-              highSignalAt: null,
-              statusChangedAt: checkedAt,
-              updatedAt: checkedAt,
-            },
-          ]
-        : [],
-    total: 0,
-    offset: 0,
-    nextOffset: null,
-  }));
+it("reads the role's Interview stage from the CRM", async () => {
+  crmData.mockImplementation(async (input: { operation: string }) =>
+    input.operation === "candidates"
+      ? { ...candidatesPage, items: [person(ADA, "Ada", { stage: "Interview" })], total: 1 }
+      : Promise.reject(new Error("unexpected read")),
+  );
   const view = await mount(<InterviewTab {...props} />);
+  await settle();
+  expect(crmData).toHaveBeenCalledWith(
+    expect.objectContaining({ operation: "candidates", crmRoleId: ROLE, stage: "Interview" }),
+  );
+  expect(crmData.mock.calls.some(([input]) => input.operation === "important")).toBe(false);
+  expect(view.textContent).toContain("Ada");
+  expect(view.textContent).toContain("Interview");
+  expect(view.querySelector('[role="alert"]')).toBeNull();
+});
+
+it("falls back to this role's interview workflow rows without the stage filter", async () => {
+  crmData.mockImplementation(async (input: { operation: string; status: string }) =>
+    input.operation === "candidates"
+      ? Promise.reject(new Error("unsupported"))
+      : {
+          operation: "important",
+          source,
+          checkedAt,
+          scope: "organization_candidate_roles",
+          items:
+            input.status === "scheduled"
+              ? [
+                  {
+                    ...person(ADA, "Ada"),
+                    roleKey: "Staff Engineer (Acme)",
+                    clientLabel: "Acme",
+                    roleLabel: "Staff Engineer",
+                    highSignal: false,
+                    workflowStatus: "scheduled",
+                    highSignalAt: null,
+                    statusChangedAt: checkedAt,
+                    updatedAt: checkedAt,
+                  },
+                  {
+                    ...person(BEN, "Ben"),
+                    roleKey: "Designer (Other)",
+                    clientLabel: "Other",
+                    roleLabel: "Designer",
+                    highSignal: false,
+                    workflowStatus: "scheduled",
+                    highSignalAt: null,
+                    statusChangedAt: checkedAt,
+                    updatedAt: checkedAt,
+                  },
+                ]
+              : [],
+          total: 0,
+          offset: 0,
+          nextOffset: null,
+        },
+  );
+  const view = await mount(<InterviewTab {...props} />);
+  await settle();
   expect(view.textContent).toContain("Ada");
   expect(view.textContent).toContain("Scheduled");
   expect(view.textContent).not.toContain("Ben");

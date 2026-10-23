@@ -303,7 +303,6 @@ msgid "Actions for space"
 msgstr "Actions for space"
 
 #: src/pages/BillingSettingsPanel.tsx
-#: src/pages/recruiting/SequenceTab.tsx
 #: src/pages/RoutineEditor.tsx
 msgid "Active"
 msgstr "Active"
@@ -477,6 +476,10 @@ msgstr "AI interpretation"
 #: src/pages/Artifacts.tsx
 msgid "All bots"
 msgstr "All bots"
+
+#: src/pages/recruiting/InboxTab.tsx
+msgid "All candidates"
+msgstr "All candidates"
 
 #: src/pages/RecruitingPanel.tsx
 msgid "All Important records"
@@ -1420,10 +1423,6 @@ msgstr "Company: {0}"
 #: src/pages/ScratchpadSection.tsx
 msgid "Complete"
 msgstr "Complete"
-
-#: src/pages/recruiting/SequenceTab.tsx
-msgid "Completed"
-msgstr "Completed"
 
 #: src/pages/SettingsOverlay.tsx
 #: src/pages/Shell.tsx
@@ -2665,7 +2664,6 @@ msgstr "Download Executor"
 msgid "Downloading…"
 msgstr "Downloading…"
 
-#: src/pages/recruiting/SequenceTab.tsx
 #: src/pages/RecruitingCorrespondence.tsx
 msgid "Draft"
 msgstr "Draft"
@@ -4325,6 +4323,10 @@ msgstr "No stored campaign associations were returned for this role."
 msgid "No stored emails for this candidate."
 msgstr "No stored emails for this candidate."
 
+#: src/pages/recruiting/InboxTab.tsx
+msgid "No stored emails for this role."
+msgstr "No stored emails for this role."
+
 #: src/pages/recruiting/SequenceTab.tsx
 msgid "No stored messages for this candidate."
 msgstr "No stored messages for this candidate."
@@ -4734,7 +4736,6 @@ msgstr "Paste your API key, then test again."
 msgid "Pause consideration"
 msgstr "Pause consideration"
 
-#: src/pages/recruiting/SequenceTab.tsx
 #: src/pages/RoutineEditor.tsx
 msgid "Paused"
 msgstr "Paused"
@@ -4922,6 +4923,7 @@ msgstr "Provider"
 msgid "Provider status"
 msgstr "Provider status"
 
+#: src/pages/recruiting/SequenceTab.tsx
 #: src/pages/RecruitingPanel.tsx
 msgid "Provider status code"
 msgstr "Provider status code"
@@ -5579,10 +5581,6 @@ msgstr "Running"
 msgid "Running · Stop"
 msgstr "Running · Stop"
 
-#: src/pages/recruiting/SequenceTab.tsx
-msgid "Running subsequences"
-msgstr "Running subsequences"
-
 #: src/pages/RoutineEditor.tsx
 msgid "Running…"
 msgstr "Running…"
@@ -6122,6 +6120,7 @@ msgstr "Show settings"
 msgid "Show transcript"
 msgstr "Show transcript"
 
+#: src/pages/recruiting/InboxTab.tsx
 #: src/pages/recruiting/InterviewTab.tsx
 msgid "Showing the most recent CRM records."
 msgstr "Showing the most recent CRM records."
@@ -6320,7 +6319,6 @@ msgstr "Statement"
 #: src/pages/ActivityList.tsx
 #: src/pages/Board.tsx
 #: src/pages/recruiting/InterviewTab.tsx
-#: src/pages/recruiting/SequenceTab.tsx
 msgid "Status"
 msgstr "Status"
 
