@@ -1,11 +1,15 @@
 # Legacy role correspondence source prerequisite
 
-This is an unpublished development patch, not a deployed source capability.
+This is an unpublished development patch, not a deployed source capability. Final read-only handoff audit: product `486a16bb26fa57916aae71d0d823fcc3ca531e98`. No live revision, schema ledger, MCP deployment or caller grant was verified by this audit.
 
 - Source base: `11ca9c2df226782eee241fc5b36ba15600f4efcb`.
 - Final local source head: `34eca76027a932f5fb8ffac5f961a9debb291011`.
 - Patch: [legacy-crm-role-mail-v2.patch](../handoff/2026-10-23/legacy-crm-role-mail-v2.patch).
 - Local commits, in order: `d447bfb4fee7f735e007123a35ce76116c8de660`, `5fe805ff2443e52afdd0e0dc3af7b6c2b5da5775`, `34eca76027a932f5fb8ffac5f961a9debb291011`.
+
+The handoff audit applied all three patch messages in order in an isolated source checkout at the exact base. The resulting full tree is `7f42b244a66851a8e76403c8381899f65fa61a07`, identical to the final local source head. Applying the patch locally for this comparison did not publish or deploy it. This role-mail patch is distinct from `docs/development/patches/crm-presence-v2.patch`: the latter is an archival recovery patch whose correction is already contained in the pinned `11ca9c2d` source base.
+
+The product's `RecruitingCrmRoleMailReadSchema` requires `version: 2`, exact organization/role scope and offset pagination; selected-candidate reads additionally verify the candidate echo and each returned row. The separate presence schema also requires version 2. Neither protocol requirement is satisfied by a successful Vercel status. Required role-mail failures retain the sync slice's existing cursor/offset rather than silently skipping the phase. See [required mail and pending exact grant](crm-required-mail-2026-10-23.md).
 
 The existing role-mail tool uses bounded SQL pages rather than collecting a role's candidate IDs into a capped HTTP filter. It preserves exact organization and role membership, excludes explicitly other-role campaign mail, and retains stored message/thread/mailbox identity and full body. Optional `p_candidate` filters before pagination and requires an exact candidate echo and matching rows. Candidate-only unscoped mail is not a substitute for role-scoped history. Source-email aliases do not establish identity. A pending outbox without role provenance is unavailable for a role, not an empty or sent mailbox.
 
