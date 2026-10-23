@@ -36,6 +36,7 @@ vi.mock("@rakazo/db", async (importOriginal) => {
     createRecruitingRole: vi.fn(),
     bindRecruitingRole: vi.fn(),
     getRecruitingWorkspace: vi.fn(),
+    getRecruitingWorkspaceCrmTarget: vi.fn(),
     getRecruitingWorkspaceRoleId: vi.fn(),
     listRecruitingCandidateLinkedinUrls: vi.fn(),
     listSyncedRecruitingCrmRoleContacts: vi.fn(),
@@ -4909,6 +4910,7 @@ describe("live CRM browser reads", () => {
   function roleMail(f: ReturnType<typeof browserFixture>) {
     f.assignment.allowedTools.push("list_crm_role_correspondence");
     f.results.list_crm_role_correspondence = {
+      version: 2,
       organization_id: org,
       role_id: roleId,
       pagination: "offset",
@@ -4931,6 +4933,196 @@ describe("live CRM browser reads", () => {
       ],
     };
   }
+  function inboxBridgeFixture() {
+    const f = browserFixture();
+    roleMail(f);
+    (f.results.list_crm_role_correspondence as { next_offset: number | null }).next_offset = null;
+    const workspace = { role: { id: "local-role" } };
+    vi.mocked(db.getRecruitingWorkspace).mockResolvedValue(workspace as never);
+    vi.mocked(db.readRecruitingNativeCorrespondence).mockResolvedValue(null);
+    const attached = {
+      mcpServerId: "crm",
+      serverRevision: 3,
+      organizationId: org,
+      crmRoleId: roleId,
+      clientId,
+      clientLabel: "Actual client",
+      roleLabel: "Actual role",
+    };
+    vi.mocked(db.getRecruitingWorkspaceCrmTarget).mockReset().mockResolvedValue(attached);
+    const prisma = {
+      ...f.mockPrisma,
+      externalEffect: { findMany: vi.fn(async () => []) },
+    } as unknown as PrismaClient;
+    return {
+      ...f,
+      attached,
+      read: (page = {}) =>
+        api.getRecruitingCorrespondence(
+          prisma,
+          actor,
+          target,
+          "inbox",
+          { endpoint: f.server.endpoint, connected: true },
+          undefined,
+          page,
+          { ...f.deps },
+        ),
+    };
+  }
+  it("bridges exact attached CRM history into the canonical Inbox without fabricating receipts", async () => {
+    const f = inboxBridgeFixture();
+    const result = await f.read();
+    expect(result).toMatchObject({
+      status: "ready",
+      connections: [{ name: "CRM", status: "configured" }],
+      emails: [
+        {
+          sourceId: "crm",
+          providerMessageId: "role-mail",
+          savedRead: null,
+          body: "Stored full reply",
+          crm: { organizationId: org, crmRoleId: roleId, candidateId, threadId: "thread-1" },
+        },
+      ],
+    });
+    expect(f.execute.mock.calls.at(-1)?.[0].args).toMatchObject({ p_org: org, p_role: roleId });
+  });
+  it("does not guess a CRM role for an unbound legacy workspace", async () => {
+    const f = inboxBridgeFixture();
+    vi.mocked(db.getRecruitingWorkspaceCrmTarget).mockResolvedValue(null);
+    expect((await f.read()).emails).toEqual([]);
+    expect(f.execute).not.toHaveBeenCalled();
+  });
+  it("propagates CRM mail read failure rather than returning a successful empty Inbox", async () => {
+    const f = inboxBridgeFixture();
+    f.execute.mockImplementation(async function* (call) {
+      if (call.route!.toolName === "list_crm_role_correspondence")
+        yield {
+          type: "error" as const,
+          message: "Role has too many candidates for one correspondence read.",
+        };
+      else
+        yield {
+          type: "result" as const,
+          data: { structuredContent: { data: f.results[call.route!.toolName] } },
+        };
+    });
+    await expect(f.read()).rejects.toMatchObject({ code: "SERVICE_UNAVAILABLE" });
+  });
+  it("rejects lost organization access and wrong-role CRM results", async () => {
+    const f = inboxBridgeFixture();
+    f.results.list_crm_memberships = [];
+    await expect(f.read()).rejects.toMatchObject({ code: "NOT_FOUND" });
+    const other = inboxBridgeFixture();
+    (other.results.list_crm_role_correspondence as { role_id: string }).role_id = clientId;
+    await expect(other.read()).rejects.toMatchObject({ code: "SERVICE_UNAVAILABLE" });
+  });
+  it("does not mix history after attachment changes during the read", async () => {
+    const f = inboxBridgeFixture();
+    vi.mocked(db.getRecruitingWorkspaceCrmTarget)
+      .mockResolvedValueOnce(f.attached)
+      .mockResolvedValue({ ...f.attached, crmRoleId: clientId });
+    await expect(f.read()).rejects.toMatchObject({ code: "NOT_FOUND" });
+  });
+  it("shows unsupported CRM role mail explicitly and preserves missing capability", async () => {
+    const f = inboxBridgeFixture();
+    f.assignment.allowedTools = f.assignment.allowedTools.filter(
+      (tool) => tool !== "list_crm_role_correspondence",
+    );
+    expect(await f.read()).toMatchObject({ status: "unsupported", partial: true, emails: [] });
+  });
+  it("retains stored mailbox identity without inferring it from recipients", async () => {
+    const f = inboxBridgeFixture();
+    const message = (
+      f.results.list_crm_role_correspondence as { messages: Record<string, unknown>[] }
+    ).messages[0]!;
+    message.eaccount = "stored-mailbox@example.test";
+    expect((await f.read()).emails[0]?.crm?.eaccount).toBe("stored-mailbox@example.test");
+    delete message.eaccount;
+    expect((await f.read()).emails[0]?.crm).not.toHaveProperty("eaccount");
+  });
+  it("pages a role with more than 200 stored messages without skipping or truncating", async () => {
+    const f = inboxBridgeFixture();
+    const template = (
+      f.results.list_crm_role_correspondence as { messages: Record<string, unknown>[] }
+    ).messages[0]!;
+    const messages = Array.from({ length: 205 }, (_, index) => ({
+      ...template,
+      id: `mail-${String(300 - index).padStart(3, "0")}`,
+      candidate_id: index % 2 ? roleId : candidateId,
+    }));
+    f.execute.mockImplementation(async function* (call) {
+      const name = call.route!.toolName;
+      const args = call.args as { p_offset: number; p_limit: number };
+      const end = args.p_offset + args.p_limit;
+      yield {
+        type: "result" as const,
+        data: {
+          structuredContent: {
+            data:
+              name === "list_crm_role_correspondence"
+                ? {
+                    version: 2,
+                    organization_id: org,
+                    role_id: roleId,
+                    pagination: "offset",
+                    messages: messages.slice(args.p_offset, end),
+                    next_offset: end < messages.length ? end : null,
+                  }
+                : f.results[name],
+          },
+        },
+      };
+    });
+    const first = await f.read({ cursor: "200", limit: 3 });
+    expect(first.emails.map((email) => email.providerMessageId)).toEqual([
+      "mail-100",
+      "mail-099",
+      "mail-098",
+    ]);
+    expect(first.nextCursor).toBe("203");
+    const last = await f.read({ cursor: first.nextCursor!, limit: 3 });
+    expect(last.emails.map((email) => email.providerMessageId)).toEqual(["mail-097", "mail-096"]);
+    expect(last.nextCursor).toBeNull();
+  });
+  it("fails closed when multiple attachments cannot resolve to one exact CRM target", async () => {
+    const f = inboxBridgeFixture();
+    vi.mocked(db.getRecruitingWorkspaceCrmTarget).mockRejectedValue(new IsolationError());
+    await expect(f.read()).rejects.toMatchObject({ code: "NOT_FOUND" });
+    expect(f.execute).not.toHaveBeenCalled();
+  });
+  it("rejects invalid page continuation rather than silently skipping history", async () => {
+    const f = inboxBridgeFixture();
+    (f.results.list_crm_role_correspondence as { next_offset: number | null }).next_offset = 20;
+    await expect(f.read()).rejects.toMatchObject({ code: "SERVICE_UNAVAILABLE" });
+  });
+  it("rechecks the actor before reading attached history", async () => {
+    const f = inboxBridgeFixture();
+    f.deps.reauthorize.mockResolvedValue({ ...target, threadId: "other-thread" });
+    await expect(f.read()).rejects.toMatchObject({ code: "NOT_FOUND" });
+    expect(f.execute).not.toHaveBeenCalled();
+  });
+  it("rejects repeated mail across source pages instead of skipping it silently", async () => {
+    const f = inboxBridgeFixture();
+    f.execute.mockImplementation(async function* (call) {
+      const name = call.route!.toolName;
+      const data =
+        name === "list_crm_role_correspondence"
+          ? {
+              ...(f.results[name] as object),
+              next_offset: (call.args as { p_offset: number }).p_offset + 1,
+            }
+          : f.results[name];
+      yield { type: "result" as const, data: { structuredContent: { data } } };
+    });
+    await expect(f.read()).rejects.toMatchObject({ code: "SERVICE_UNAVAILABLE" });
+  });
+  it("rejects legacy role mail semantics until the source protocol migration is deployed", async () => {
+    const f = inboxBridgeFixture();
+    delete (f.results.list_crm_role_correspondence as { version?: number }).version;
+    await expect(f.read()).rejects.toMatchObject({ code: "SERVICE_UNAVAILABLE" });
+  });
   it("reads every stored email for the exact CRM role in one scoped read", async () => {
     const f = browserFixture();
     roleMail(f);

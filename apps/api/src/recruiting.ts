@@ -148,7 +148,11 @@ function correspondenceProvider(
     if (endpoint === firstPartyEndpoint)
       return {
         kind: "crm",
-        tools: ["list_crm_candidate_correspondence", "list_crm_candidate_roles"],
+        tools: [
+          "list_crm_candidate_correspondence",
+          "list_crm_role_correspondence",
+          "list_crm_candidate_roles",
+        ],
       };
     if (address === "https://mcp.instantly.ai/mcp")
       return { kind: "instantly", tools: ["list_emails", "get_email", ...NATIVE_INSTANTLY_READS] };
@@ -752,6 +756,7 @@ export async function getRecruitingCorrespondence(
   productIdentity?: { endpoint: string; connected: boolean },
   oauth?: Pick<McpOAuthBroker, "statusFor">,
   page: { limit?: number; cursor?: string } = {},
+  crmReads?: Omit<RecruitingCrmReadDeps, "prisma">,
 ): Promise<RecruitingCorrespondence> {
   return authenticated(async () => {
     const workspace = await recruiting.getRecruitingWorkspace(prisma, actor, {
@@ -829,6 +834,7 @@ export async function getRecruitingCorrespondence(
       ),
     };
     const finish = async () => {
+      let assertNativeCurrent: (() => Promise<void>) | null = null;
       if (workspace && view === "inbox") {
         const native = await nativeRecruitingCorrespondence(prisma, actor, target.threadId, {
           roleId: workspace.role.id,
@@ -849,11 +855,111 @@ export async function getRecruitingCorrespondence(
         output.partial ||= native.partial || native.items.some((item) => item.status === "unknown");
         output.emails = [...emails.values()];
         if (output.emails.length) output.status = "ready";
-        await native.assertCurrent?.();
+        assertNativeCurrent = native.assertCurrent;
       }
-      // ponytail: offset over the merged inbox order (all reads are already bounded); refresh from page one after new mail.
+      // Read the same authorized CRM role used by the workspace, without inventing a saved tool receipt.
       const start = Number(page.cursor ?? 0);
       const end = start + (page.limit ?? 50);
+      if (workspace && view === "inbox" && crmReads) {
+        const attached = await recruiting.getRecruitingWorkspaceCrmTarget(prisma, actor, {
+          threadId: target.threadId,
+        });
+        if (attached) {
+          // Current role mail supersedes historical CRM reads; keep other provider receipts.
+          const emails = new Map(
+            output.emails
+              .filter((email) => email.sourceId !== attached.mcpServerId)
+              .map((email) => [email.id, email]),
+          );
+          let offset = 0;
+          let fetched = 0;
+          const seen = new Set<string>();
+          while (fetched <= end) {
+            const history = await getRecruitingCrmData({ ...crmReads, prisma }, actor, target, {
+              operation: "roleMail",
+              serverId: attached.mcpServerId,
+              serverRevision: attached.serverRevision,
+              organizationId: attached.organizationId,
+              crmRoleId: attached.crmRoleId,
+              limit: Math.min(50, end + 1 - fetched),
+              offset,
+            });
+            if (history.operation !== "roleMail") throw new ORPCError("SERVICE_UNAVAILABLE");
+            if (!history.supported) {
+              output.partial = true;
+              if (!emails.size) output.status = "unsupported";
+              break;
+            }
+            const connection = output.connections.find(
+              (_, index) => sources[index]?.id === attached.mcpServerId,
+            );
+            if (connection) {
+              connection.status = "configured";
+              connection.checkIssue = null;
+            }
+            output.checkedAt = history.checkedAt;
+            for (const email of history.items) {
+              if (seen.has(email.providerMessageId)) throw new ORPCError("SERVICE_UNAVAILABLE");
+              seen.add(email.providerMessageId);
+              const id = stableJsonValue([
+                attached.mcpServerId,
+                attached.organizationId,
+                email.candidateId,
+                email.providerMessageId,
+              ]);
+              emails.set(id, {
+                id,
+                sourceName: history.source.name,
+                sourceId: attached.mcpServerId,
+                crm: {
+                  serverRevision: attached.serverRevision,
+                  organizationId: attached.organizationId,
+                  crmRoleId: attached.crmRoleId,
+                  candidateId: email.candidateId,
+                  threadId: email.threadId,
+                  direction: email.direction,
+                  ...(email.eaccount !== undefined ? { eaccount: email.eaccount } : {}),
+                },
+                providerMessageId: email.providerMessageId,
+                savedRead: null,
+                sender: email.sender,
+                recipients: email.recipients,
+                subject: email.subject ?? "",
+                body: email.body ?? "",
+                snippet: email.partial,
+                date: email.date,
+                url: null,
+              });
+            }
+            fetched += history.items.length;
+            if (history.nextOffset === null) break;
+            if (!history.items.length || history.nextOffset !== offset + history.items.length)
+              throw new ORPCError("SERVICE_UNAVAILABLE");
+            offset = history.nextOffset;
+          }
+          const current = await recruiting.getRecruitingWorkspaceCrmTarget(prisma, actor, {
+            threadId: target.threadId,
+          });
+          if (stableJsonValue(current) !== stableJsonValue(attached)) throw new IsolationError();
+          // Preserve the CRM's global timestamp/message-id order across candidates and time zones.
+          const timestamp = (value: string | null) =>
+            value === null
+              ? ""
+              : new Date(value).toISOString().slice(0, 19) +
+                "." +
+                (value.match(/\.(\d+)/)?.[1] ?? "").padEnd(9, "0");
+          output.emails = [...emails.values()].sort(
+            (left, right) =>
+              timestamp(right.date).localeCompare(timestamp(left.date)) ||
+              right.providerMessageId.localeCompare(left.providerMessageId) ||
+              right.id.localeCompare(left.id),
+          );
+          if (output.emails.length) output.status = "ready";
+          else if (output.status !== "unsupported") output.status = "empty";
+        }
+      }
+      await assertNativeCurrent?.();
+      // Offset over the merged inbox order; refresh from page one after new mail.
       output.nextCursor = output.emails.length > end ? String(end) : null;
       // Unpaged callers keep the old "more than one screen of mail" signal.
       output.partial ||= output.nextCursor !== null;
@@ -2687,7 +2793,11 @@ export async function getRecruitingCrmData(
       await sourceFence(server, "list_crm_role_correspondence");
       return done(
         true,
-        page.messages.map((row) => ({ ...mailItem(row), candidateId: row.candidate_id })),
+        page.messages.map((row) => ({
+          ...mailItem(row),
+          candidateId: row.candidate_id,
+          ...(row.eaccount !== undefined ? { eaccount: row.eaccount } : {}),
+        })),
         page.next_offset,
       );
     }

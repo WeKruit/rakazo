@@ -3668,6 +3668,13 @@ export function createRouter(deps: RouterDeps) {
             : undefined,
           mcpOAuth,
           { limit: input.limit, cursor: input.cursor },
+          {
+            connectors: deps.connectors,
+            firstPartyMcpUrl: deps.env.firstPartyMcpUrl,
+            signal: context.signal,
+            stillAuthorized: context.stillAuthorized,
+            reauthorize: () => resolveThreadTarget(deps.prisma, context.actor, input),
+          },
         ),
       ),
       roleCampaign: authed.recruiting.roleCampaign.handler(async ({ context, input }) =>

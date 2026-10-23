@@ -1520,9 +1520,21 @@ const CorrespondenceOriginFields = {
     .strictObject({ messageId: Id.max(200), linkedRunId: Id.max(200), effectId: Id.max(200) })
     .nullable(),
 };
+const CorrespondenceCrmContext = z
+  .strictObject({
+    serverRevision: Revision,
+    organizationId: z.uuid(),
+    crmRoleId: z.uuid(),
+    candidateId: z.uuid(),
+    threadId: z.string().nullable(),
+    direction: z.enum(["sent", "received", "manual"]).nullable(),
+    eaccount: z.string().nullable().optional(),
+  })
+  .optional();
 export const RecruitingCorrespondenceReferenceSchema = z
   .strictObject({
     ...CorrespondenceOriginFields,
+    crm: CorrespondenceCrmContext,
     threadId: Id.max(200),
     roleId: RecruitingId.max(200),
     emailId: Id.max(1600),
@@ -1661,6 +1673,7 @@ export const RecruitingCorrespondenceSchema = z.strictObject({
       id: Id,
       sourceName: z.string(),
       ...CorrespondenceOriginFields,
+      crm: CorrespondenceCrmContext,
       sender: z.string().nullable(),
       recipients: z.array(z.string()),
       subject: z.string(),
@@ -1808,6 +1821,7 @@ const CrmBrowseOutbox = z.array(
   }),
 );
 const CrmMailItem = z.strictObject({
+  eaccount: z.string().nullable().optional(),
   id: Id,
   providerMessageId: Id,
   threadId: z.string().nullable(),
@@ -2108,10 +2122,13 @@ const CrmStoredEmail = z.object({
   body_text: z.string().nullable(),
 });
 export const RecruitingCrmRoleMailReadSchema = z.object({
+  version: z.literal(2),
   organization_id: z.uuid(),
   role_id: z.uuid(),
   pagination: z.literal("offset"),
-  messages: z.array(CrmStoredEmail.extend({ candidate_id: z.uuid() })),
+  messages: z.array(
+    CrmStoredEmail.extend({ candidate_id: z.uuid(), eaccount: z.string().nullable().optional() }),
+  ),
   next_offset: z.number().int().nonnegative().nullable(),
 });
 export const RecruitingCrmMailReadSchema = z.object({
