@@ -10276,14 +10276,22 @@ export async function stoppedPreviousRunNotice(
   previous: { id: string; status: string } | undefined,
 ): Promise<string | undefined> {
   if (previous?.status !== "cancelled") return undefined;
+  // Only a real completed step names the stop point. Discovery audits and failed calls are
+  // not work the model did, and naming them made a resumed run try to "finish" them.
   const lastTool = await prisma.event.findFirst({
-    where: { runId: previous.id, type: "agent.tool.completed" },
+    where: {
+      runId: previous.id,
+      type: "agent.tool.completed",
+      payload: { path: ["outcome"], equals: "succeeded" },
+    },
     orderBy: { seq: "desc" },
     select: { payload: true },
   });
   const name = (lastTool?.payload as { name?: unknown } | null)?.name;
   const after =
-    typeof name === "string" && name ? ` after the step "${humanizeToolName(name)}"` : "";
+    typeof name === "string" && name && !/__discovery$/.test(name)
+      ? ` after the step "${humanizeToolName(name)}"`
+      : " before it completed any step";
   return `The previous run in this conversation was stopped by the user${after}; do not assume its work completed; do not repeat completed, irreversible actions.`;
 }
 
