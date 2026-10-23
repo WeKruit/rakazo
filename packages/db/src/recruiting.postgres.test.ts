@@ -8110,6 +8110,40 @@ describePostgres("recruiting domain (PostgreSQL)", () => {
     // Unbatched this listing ran ~60 queries per referenced page.
     expect(eight.queries.length).toBeLessThan(150);
   });
+  it("lists research-action pages without re-validating the action's own artifacts", async () => {
+    const { f, prepared } = await mappedResearchFixture();
+    for (let page = 0; page < 2; page++)
+      await recordCandidatePage(
+        f,
+        prepared,
+        `light-${page}`,
+        [canonicalCandidateRow(`Light ${page}`, `https://www.linkedin.com/in/light-${page}`)],
+        { observedAt: new Date(Date.UTC(2026, 9, 18, page)) },
+      );
+    sourceQueries = [];
+    const listed = await recruiting.listRecruitingCandidates(prisma, actor, {
+      roleId: f.role.role.id,
+      sort: "name",
+    });
+    const queries = sourceQueries;
+    sourceQueries = undefined;
+    expect(listed.items.map((item) => item.candidateKey)).toEqual([
+      "linkedin:/in/light-0",
+      "linkedin:/in/light-1",
+    ]);
+    expect(listed.items.every((item) => item.latestSource?.effectId)).toBe(true);
+    // Page artifacts are still proven (by clientNonce + id/hash); the action's request/context/
+    // output artifacts are not fetched one by id per action (7 owner-scoped id lookups before,
+    // the 2 left are the recorded page read's own proof).
+    expect(queries.some((q) => /FROM "public"\."artifacts" WHERE .*"clientNonce"/.test(q))).toBe(
+      true,
+    );
+    expect(
+      queries.filter((q) =>
+        /"artifacts"\."id" = \$1 AND "public"\."artifacts"\."spaceId" = \$2/.test(q),
+      ).length,
+    ).toBeLessThanOrEqual(2);
+  });
   it("filters saved native pages with overlapping identities without narrowing role counts", async () => {
     const { f, prepared } = await mappedResearchFixture();
     const pages = [];

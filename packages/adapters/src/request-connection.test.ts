@@ -9,8 +9,9 @@ function fixture({
   secretId = null as string | null,
   assigned = true,
   pendingRun = undefined as string | undefined,
+  rows = [] as Array<{ id: string; slug: string; name: string; endpoint: string | null }>,
 } = {}) {
-  const prisma = {
+  const prisma: Record<string, any> = {
     mcpServer: {
       findFirst: vi.fn(async () => ({
         id: "server-1",
@@ -18,8 +19,13 @@ function fixture({
         secretId,
         transport: "streamable_http",
       })),
+      findMany: vi.fn(async () => rows),
+      create: vi.fn(async () => ({ id: "server-new" })),
     },
-    botMcpServer: { findFirst: vi.fn(async () => (assigned ? { id: "assignment" } : null)) },
+    botMcpServer: {
+      findFirst: vi.fn(async () => (assigned ? { id: "assignment" } : null)),
+      create: vi.fn(async () => ({ id: "assignment" })),
+    },
     message: {
       findMany: vi.fn(async () =>
         pendingRun
@@ -42,6 +48,7 @@ function fixture({
     },
     run: { findMany: vi.fn(async () => (pendingRun ? [{ id: pendingRun }] : [])) },
   };
+  prisma.$transaction = vi.fn(async (fn: (tx: unknown) => unknown) => fn(prisma));
   return { prisma, db: prisma as unknown as PrismaClient, pause: vi.fn(async () => {}) };
 }
 
@@ -88,5 +95,77 @@ describe("request_connection", () => {
     ).toHaveProperty("error");
     expect(unassigned.pause).not.toHaveBeenCalled();
     expect(noReason.pause).not.toHaveBeenCalled();
+  });
+
+  it("resolves a catalog provider with no server row into a new row and a connect card", async () => {
+    const f = fixture();
+    f.prisma.mcpServer.findFirst.mockResolvedValue({
+      id: "server-new",
+      name: "HubSpot",
+      secretId: null,
+      transport: "streamable_http",
+    });
+    const reason = "To read HubSpot company records.";
+    expect(await requestConnection(f.db, scope, { provider: "HubSpot", reason }, f.pause)).toBe(
+      undefined,
+    );
+    expect(f.prisma.mcpServer.create).toHaveBeenCalledWith({
+      data: expect.objectContaining({
+        spaceId: "space-1",
+        userId: "user-1",
+        slug: "hubspot",
+        name: "HubSpot",
+        transport: "streamable_http",
+        endpoint: "https://mcp.hubspot.com",
+        enabled: true,
+      }),
+      select: { id: true },
+    });
+    expect(f.prisma.botMcpServer.create).toHaveBeenCalledWith({
+      data: { spaceId: "space-1", userId: "user-1", botId: "bot-1", serverId: "server-new" },
+    });
+    expect(f.pause).toHaveBeenCalledWith(
+      expect.objectContaining({
+        connection: { serverId: "server-new", name: "HubSpot", reason },
+      }),
+    );
+  });
+
+  it("resolves a provider to the user's existing connected server", async () => {
+    const f = fixture({
+      secretId: "secret-1",
+      rows: [
+        {
+          id: "server-1",
+          slug: "integration-1",
+          name: "Instantly",
+          endpoint: "https://mcp.instantly.ai/mcp/",
+        },
+      ],
+    });
+    expect(
+      await requestConnection(
+        f.db,
+        scope,
+        { provider: "instantly", reason: "Read replies." },
+        f.pause,
+      ),
+    ).toEqual({ status: "connected" });
+    expect(f.prisma.mcpServer.create).not.toHaveBeenCalled();
+    expect(f.pause).not.toHaveBeenCalled();
+  });
+
+  it("rejects an unknown provider with the catalog names", async () => {
+    const f = fixture();
+    const result = await requestConnection(
+      f.db,
+      scope,
+      { provider: "salesforce", reason: "Read accounts." },
+      f.pause,
+    );
+    expect(result).toHaveProperty("error", expect.stringContaining("HubSpot"));
+    expect((result as { error: string }).error).toContain("Gmail");
+    expect(f.prisma.mcpServer.create).not.toHaveBeenCalled();
+    expect(f.pause).not.toHaveBeenCalled();
   });
 });
