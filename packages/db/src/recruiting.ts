@@ -6258,6 +6258,8 @@ export async function listRecruitingResearch(
       await candidatePageArtifacts(tx, actor, pages, false, afterRead);
       const observations = [];
       for (const page of pages) {
+        // CSV imports are recruiter lists, not provider observations.
+        if (csvImportRequest(page.effect.request)) continue;
         const call = researchReadRequest(page.effect.request, undefined, "get_rows");
         observations.push(
           RecruitingResearchSavedObservationSchema.parse({
@@ -6680,6 +6682,197 @@ export async function saveNativeRecruitingCandidatePage(
   });
 }
 
+type CsvImportInput = Extract<RecruitingResearchToolInput, { operation: "import_csv" }>;
+
+/** Non-null only for a recruiter CSV import effect; such pages have no provider task. */
+function csvImportRequest(request: unknown): CsvImportInput | null {
+  const parsed = RecruitingResearchToolInputSchema.safeParse(request);
+  return parsed.success && parsed.data.operation === "import_csv" ? parsed.data : null;
+}
+
+/** Canonical receipt bytes for one CSV import; recomputed here, never trusted from the caller. */
+export function recruitingCsvImportReceipt(
+  input: CsvImportInput,
+  captured: {
+    artifactSha256: string;
+    header: readonly string[];
+    /** rowIndex is the dense page row; csvRowIndex is the 0-based CSV data row (header excluded). */
+    rows: ReadonlyArray<{ rowIndex: number; csvRowIndex: number; row: Record<string, string> }>;
+    skipped: ReadonlyArray<{ csvRowIndex: number; reason: string }>;
+    truncated: boolean;
+  },
+) {
+  return {
+    version: 1,
+    kind: "csv_import",
+    request: input,
+    source: { artifactId: input.artifactId, artifactSha256: captured.artifactSha256 },
+    header: captured.header,
+    rows: captured.rows,
+    skipped: captured.skipped,
+    truncated: captured.truncated,
+  };
+}
+
+/**
+ * Save a recruiter-supplied CSV as one candidate page on the current role. Rows go through the
+ * same identity normalization as provider pages; nothing is scored or rejected.
+ */
+export async function saveRecruitingCandidateCsvImport(
+  prisma: PrismaClient,
+  actor: Actor,
+  trusted: ResearchLease & { effectId: string; effectRequest: unknown },
+  raw: CsvImportInput,
+  captured: Parameters<typeof recruitingCsvImportReceipt>[1] & {
+    outputArtifact: RecruitingResearchArtifactInput;
+  },
+) {
+  const input = RecruitingResearchToolInputSchema.parse(raw);
+  if (
+    input.operation !== "import_csv" ||
+    stableJsonValue(input) !==
+      stableJsonValue(RecruitingResearchToolInputSchema.parse(trusted.effectRequest))
+  )
+    throw new IsolationError();
+  return prisma.$transaction(async (tx) => {
+    const { run, thread } = await lockLiveRecruitingRun(tx, actor, trusted.runId, false);
+    await tx.$queryRaw(
+      Prisma.sql`SELECT "id" FROM "external_effects" WHERE "id" = ${trusted.effectId} FOR UPDATE`,
+    );
+    const saving = await tx.externalEffect.findFirst({
+      where: {
+        id: trusted.effectId,
+        spaceId: actor.spaceId,
+        runId: run.id,
+        kind: "recruiting_research",
+      },
+    });
+    if (
+      saving?.kind !== "recruiting_research" ||
+      saving.runId !== run.id ||
+      stableJsonValue(RecruitingResearchToolInputSchema.parse(saving.request)) !==
+        stableJsonValue(input)
+    )
+      throw new IsolationError();
+    if (saving.status === "completed") return saving.result;
+    requireResearchLease(run, trusted);
+    if (saving.status !== "executing") throw new IsolationError();
+    if (thread.activeRecruitingRoleId !== input.roleId) throw new IsolationError();
+    const role = await requireRole(tx, actor, input.roleId, true, thread);
+    if (!role.currentRevisionId || role.revision !== input.expectedRoleRevision)
+      throw new RecruitingConflictError();
+    // Same owner check as artifact_read; the adapter verified the stored bytes against this hash.
+    const csv = await tx.artifact.findFirst({
+      where: { id: input.artifactId, spaceId: actor.spaceId, userId: actor.userId },
+    });
+    if (!csv || csv.hash !== captured.artifactSha256) throw new IsolationError();
+    const bytes = Buffer.from(stableJsonValue(recruitingCsvImportReceipt(input, captured)));
+    const file = captured.outputArtifact;
+    if (
+      file.hash !== createHash("sha256").update(bytes).digest("hex") ||
+      file.size !== bytes.length ||
+      file.clientNonce !== `recruiting-csv-import:${saving.id}`
+    )
+      throw new IsolationError();
+    const artifact = await createResearchArtifact(tx, actor, run, thread, file);
+    if (captured.rows.some((row, index) => row.rowIndex !== index)) throw new IsolationError();
+    const rows = captured.rows.map(({ rowIndex, row }) => {
+      // Unmapped or blank columns stay absent (missing_field), so they never mask older values.
+      const { candidateKey, ...profile } = normalizeRecruitingCandidateRow(row, {
+        schemaKnown: true,
+      });
+      return {
+        pageId: saving.id,
+        rowIndex,
+        roleId: role.id,
+        candidateKey: candidateKey ?? `source-row:${saving.id}:${rowIndex}`,
+        ...profile,
+        evidenceUrls: Prisma.DbNull,
+        issues: [...profile.issues],
+      };
+    });
+    const observedAt = new Date();
+    await tx.recruitingCandidatePage.create({
+      data: {
+        effectId: saving.id,
+        roleId: role.id,
+        taskId: null,
+        actionId: null,
+        roleRevisionId: role.currentRevisionId,
+        artifactId: artifact.id,
+        artifactHash: artifact.hash,
+        requestCursor: null,
+        outputId: null,
+        observedAt,
+        rowCount: rows.length,
+      },
+    });
+    const keys = [...new Set(rows.map((row) => row.candidateKey))];
+    const existing = new Set(
+      (
+        await tx.recruitingCandidate.findMany({
+          where: { roleId: role.id, candidateKey: { in: keys } },
+          select: { candidateKey: true },
+        })
+      ).map((candidate) => candidate.candidateKey),
+    );
+    if (rows.length) {
+      await tx.recruitingCandidate.createMany({
+        data: keys.map((candidateKey) => ({ roleId: role.id, candidateKey })),
+        skipDuplicates: true,
+      });
+      await tx.recruitingCandidateOccurrence.createMany({ data: rows });
+    }
+    const result = {
+      status: "saved",
+      roleId: role.id,
+      roleRevisionId: role.currentRevisionId,
+      sourceEffectId: saving.id,
+      source: {
+        kind: "csv_import",
+        artifactId: csv.id,
+        artifactSha256: csv.hash,
+        importedBy: { userId: actor.userId, runId: run.id },
+        observedAt: observedAt.toISOString(),
+      },
+      outputArtifact: { artifactId: artifact.id, sha256: artifact.hash },
+      candidateRows: rows.map(({ rowIndex, candidateKey }) => ({
+        rowIndex,
+        csvRowIndex: captured.rows[rowIndex]!.csvRowIndex,
+        candidateKey,
+        alreadyInPool: existing.has(candidateKey),
+      })),
+      skipped: captured.skipped,
+      truncated: captured.truncated,
+    };
+    const completed = await tx.externalEffect.updateMany({
+      where: {
+        id: saving.id,
+        spaceId: actor.spaceId,
+        runId: run.id,
+        status: "executing",
+        run: {
+          status: "running",
+          leaseOwner: trusted.leaseOwner,
+          leaseFence: trusted.leaseFence,
+          leaseExpiresAt: { gt: new Date() },
+        },
+      },
+      data: { status: "completed", result },
+    });
+    if (completed.count !== 1) throw new IsolationError();
+    await appendEventInTransaction(tx, {
+      spaceId: actor.spaceId,
+      threadId: run.threadId,
+      botId: run.botId,
+      runId: run.id,
+      type: "effect.recorded",
+      payload: { effectId: saving.id, tool: "recruiting_research", ...result },
+    });
+    return result;
+  });
+}
+
 /** One provenance check for both historical action pages and native candidate saves. */
 async function candidatePageArtifact(
   tx: Tx,
@@ -6845,6 +7038,30 @@ async function candidatePageArtifacts(
       parent.userId !== actor.userId
     )
       throw new IsolationError();
+    const imported = csvImportRequest(effect.request);
+    if (imported) {
+      // ponytail: metadata proof only; the receipt bytes stay in ArtifactStore (adapter-verified
+      // at import). Re-read them here only if a reader needs the raw CSV rows.
+      const artifact = effect.recruitingCandidatePage?.artifact;
+      const result = effect.resultJson === null ? null : JSON.parse(effect.resultJson);
+      if (
+        !artifact ||
+        artifact.id !== page.artifactId ||
+        artifact.spaceId !== actor.spaceId ||
+        artifact.userId !== actor.userId ||
+        artifact.runId !== run.id ||
+        artifact.botId !== run.botId ||
+        artifact.clientNonce !== `recruiting-csv-import:${effect.id}` ||
+        artifact.hash !== page.artifactHash ||
+        imported.roleId !== page.roleId ||
+        result?.roleRevisionId !== page.roleRevisionId ||
+        result?.outputArtifact?.artifactId !== artifact.id ||
+        result?.outputArtifact?.sha256 !== artifact.hash
+      )
+        throw new IsolationError();
+      artifacts.set(page.effectId, artifact);
+      continue;
+    }
     const call = researchReadRequest(effect.request, undefined, "get_rows");
     const saved = byEvent.get(effect.id) ?? [];
     if (saved.length !== 1) throw new IsolationError();
@@ -9305,7 +9522,9 @@ function candidateSourceReference(
   rowIndex: number,
 ) {
   return {
-    providerTaskId: researchReadRequest(page.effect.request, undefined, "get_rows").args.task_id,
+    providerTaskId: csvImportRequest(page.effect.request)
+      ? null
+      : researchReadRequest(page.effect.request, undefined, "get_rows").args.task_id,
     taskId: page.taskId,
     actionId: page.actionId,
     roleRevisionId: page.roleRevisionId,

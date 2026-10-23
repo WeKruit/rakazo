@@ -18,6 +18,7 @@ import {
   recruitingResearchSnapshot,
   saveNativeRecruitingCandidatePage,
   saveRecruitingAssessment,
+  saveRecruitingCandidateCsvImport,
 } from "@rakazo/db";
 import { createLogger, createTestSink, getLogger, installLogger } from "@rakazo/logging";
 import { beforeEach, describe, expect, it, vi } from "vitest";
@@ -45,6 +46,7 @@ vi.mock("@rakazo/db", async (importOriginal) => ({
   saveRecruitingAssessment: vi.fn(),
   readNativeRecruitingCandidatePage: vi.fn(),
   saveNativeRecruitingCandidatePage: vi.fn(),
+  saveRecruitingCandidateCsvImport: vi.fn(),
 }));
 
 const actor: Actor = {
@@ -232,6 +234,148 @@ describe("optional native candidate output saving", () => {
       ),
     ).rejects.toThrow(IsolationError);
     expect(readNativeRecruitingCandidatePage).not.toHaveBeenCalled();
+  });
+});
+
+describe("recruiter CSV import", () => {
+  beforeEach(() => vi.clearAllMocks());
+  const input = {
+    operation: "import_csv" as const,
+    roleId: "role",
+    expectedRoleRevision: 1,
+    artifactId: "csv",
+    mapping: { name: "Name", linkedinUrl: "LinkedIn", company: "Company" },
+  };
+  const adapterContext = {
+    spaceId: actor.spaceId,
+    userId: actor.userId,
+    runId: "run",
+    operationId: "import",
+    traceId: "import",
+    signal: new AbortController().signal,
+  };
+  const trusted = {
+    ...context,
+    leaseOwner: "worker",
+    leaseFence: 1,
+    effectId: "import",
+    effectRequest: input,
+  };
+  function deps(text: string, row: Record<string, unknown> | null = {}) {
+    const bytes = Buffer.from(text);
+    const artifact = row && {
+      ...actor,
+      id: "csv",
+      botId: "bot",
+      groupId: null,
+      rootArtifactId: null,
+      storageKey: "csv-blob",
+      mimeType: "text/csv",
+      size: bytes.length,
+      hash: createHash("sha256").update(bytes).digest("hex"),
+      ...row,
+    };
+    const prisma = {
+      artifact: { findFirst: vi.fn(async () => artifact) },
+      $queryRaw: vi.fn(async () => []),
+    };
+    const put = vi.fn(async (_file: { bytes: Uint8Array }) => ({ id: "receipt-blob" }));
+    const get = vi.fn(async () => bytes);
+    return { prisma, artifacts: { put, get }, artifact, put, get };
+  }
+  const run = (d: ReturnType<typeof deps>, ctx = adapterContext) =>
+    tools.importRecruitingCandidateCsv(d as never, trusted, input, ctx);
+
+  it("maps columns, skips rows with no name and no LinkedIn, and binds the receipt", async () => {
+    vi.mocked(saveRecruitingCandidateCsvImport).mockResolvedValue({ status: "saved" } as never);
+    const d = deps(
+      "Name,LinkedIn,Company,Notes\r\n" +
+        "Ada Example,https://www.linkedin.com/in/example,Example Co,x\r\n" +
+        ",,Orphan Co,y\r\n" +
+        "No Profile,, ,z\r\n",
+    );
+    expect(await run(d)).toEqual({ status: "saved" });
+    const [, who, lease, saved, captured] = vi.mocked(saveRecruitingCandidateCsvImport).mock
+      .calls[0]!;
+    expect(who).toBe(actor);
+    expect(lease).toBe(trusted);
+    expect(saved).toBe(input);
+    expect(captured).toMatchObject({
+      artifactSha256: d.artifact!.hash,
+      header: ["Name", "LinkedIn", "Company", "Notes"],
+      rows: [
+        {
+          rowIndex: 0,
+          csvRowIndex: 0,
+          row: {
+            name: "Ada Example",
+            linkedin_url: "https://www.linkedin.com/in/example",
+            current_company: "Example Co",
+          },
+        },
+        { rowIndex: 1, csvRowIndex: 2, row: { name: "No Profile" } },
+      ],
+      skipped: [{ csvRowIndex: 1, reason: "missing_name_and_linkedin_url" }],
+      truncated: false,
+      outputArtifact: { clientNonce: "recruiting-csv-import:import", storageKey: "receipt-blob" },
+    });
+    const uploaded = JSON.parse(Buffer.from(d.put.mock.calls[0]![0].bytes).toString());
+    expect(uploaded).toMatchObject({
+      kind: "csv_import",
+      source: { artifactId: "csv", artifactSha256: d.artifact!.hash },
+    });
+    expect(captured.outputArtifact.hash).toBe(
+      createHash("sha256").update(d.put.mock.calls[0]![0].bytes).digest("hex"),
+    );
+  });
+
+  it("reports a truncated CSV", async () => {
+    vi.mocked(saveRecruitingCandidateCsvImport).mockResolvedValue({ status: "saved" } as never);
+    const lines = Array.from({ length: 5001 }, (_, i) => `Person ${i},,`);
+    await run(deps(["Name,LinkedIn,Company", ...lines].join("\n")));
+    const captured = vi.mocked(saveRecruitingCandidateCsvImport).mock.calls[0]![4];
+    expect(captured.truncated).toBe(true);
+    expect(captured.rows.length).toBeLessThan(5001);
+  });
+
+  it("refuses a foreign artifact before storage access", async () => {
+    const d = deps("Name\nA\n", null);
+    await expect(run(d)).rejects.toThrow(IsolationError);
+    expect(d.get).not.toHaveBeenCalled();
+    expect(d.put).not.toHaveBeenCalled();
+    expect(saveRecruitingCandidateCsvImport).not.toHaveBeenCalled();
+  });
+
+  it("refuses a foreign adapter context before any read", async () => {
+    const d = deps("Name\nA\n");
+    await expect(run(d, { ...adapterContext, userId: "other" })).rejects.toThrow(IsolationError);
+    expect(d.prisma.artifact.findFirst).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    ["tampered bytes", { hash: "f".repeat(64) }, /could not be read or verified/],
+    ["non-CSV artifact", { mimeType: "application/json" }, /text\/csv/],
+  ])("rejects a %s", async (_label, row, message) => {
+    const d = deps("Name\nA\n", row);
+    await expect(run(d)).rejects.toThrow(message);
+    expect(saveRecruitingCandidateCsvImport).not.toHaveBeenCalled();
+  });
+
+  it("names a mapped column missing from the header", async () => {
+    await expect(run(deps("Full name,LinkedIn,Company\nA,,\n"))).rejects.toThrow(
+      /Column "Name" is not in the CSV header/,
+    );
+    expect(saveRecruitingCandidateCsvImport).not.toHaveBeenCalled();
+  });
+
+  it("is a valid recruiting_research tool call", () => {
+    const tool = builtinAgentTools.find((candidate) => candidate.name === "recruiting_research")!;
+    expect(() =>
+      validateToolArguments(
+        { name: tool.name, description: "", parameters: parametersFor(tool) } as never,
+        { type: "toolCall", id: "call", name: tool.name, arguments: input } as never,
+      ),
+    ).not.toThrow();
   });
 });
 

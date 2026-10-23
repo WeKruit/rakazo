@@ -385,8 +385,10 @@ import {
   bindRecruitingResearchReadCall,
   completeRecruitingResearchCall,
   executeRecruitingRoleTool,
+  importRecruitingCandidateCsv,
   prepareRecruitingResearchTool,
   RecruitingCandidateOutputError,
+  RecruitingCsvImportError,
   resolveRecruitingResearchTool,
   saveNativeRecruitingCandidateResults,
 } from "./recruiting-tools.js";
@@ -4519,7 +4521,9 @@ export function createRunExecutor(deps: ExecutorDeps) {
           const atomicRecruitingMutation =
             Boolean(candidateDecision) ||
             name === "recruiting_shortlist" ||
-            (researchInput?.success === true && researchInput.data.operation === "save_results");
+            (researchInput?.success === true &&
+              (researchInput.data.operation === "save_results" ||
+                researchInput.data.operation === "import_csv"));
           const researchActor = {
             actor: {
               spaceId: run.spaceId,
@@ -4712,7 +4716,9 @@ export function createRunExecutor(deps: ExecutorDeps) {
           }
           if (
             researchInput?.success &&
-            !["prepare", "continue", "save_results"].includes(researchInput.data.operation)
+            !["prepare", "continue", "save_results", "import_csv"].includes(
+              researchInput.data.operation,
+            )
           ) {
             if (!deps.artifacts) return { error: "Recruiting research requires artifact storage" };
             try {
@@ -4720,7 +4726,8 @@ export function createRunExecutor(deps: ExecutorDeps) {
               if (
                 input.operation === "prepare" ||
                 input.operation === "continue" ||
-                input.operation === "save_results"
+                input.operation === "save_results" ||
+                input.operation === "import_csv"
               )
                 throw new IsolationError();
               researchSelection = await resolveRecruitingResearchTool(
@@ -7106,7 +7113,8 @@ export function createRunExecutor(deps: ExecutorDeps) {
               !researchInput?.success ||
               (researchInput.data.operation !== "prepare" &&
                 researchInput.data.operation !== "continue" &&
-                researchInput.data.operation !== "save_results")
+                researchInput.data.operation !== "save_results" &&
+                researchInput.data.operation !== "import_csv")
             )
               return finish({
                 error: "Recruiting research requires a valid preparation and artifact storage",
@@ -7116,6 +7124,22 @@ export function createRunExecutor(deps: ExecutorDeps) {
               if (early !== undefined) return early;
             }
             try {
+              if (researchInput.data.operation === "import_csv") {
+                if (!applied || !claimedEffect) throw new IsolationError();
+                // Internal record keeping like save_results: page, rows and effect commit together.
+                return await importRecruitingCandidateCsv(
+                  { prisma: deps.prisma, artifacts: deps.artifacts },
+                  {
+                    ...researchActor,
+                    leaseOwner: workerId,
+                    leaseFence: fence,
+                    effectId: applied.effect.id,
+                    effectRequest: applied.effect.request,
+                  },
+                  researchInput.data,
+                  context,
+                );
+              }
               if (researchInput.data.operation === "save_results") {
                 if (!applied || !claimedEffect) throw new IsolationError();
                 // The local projection and this native effect complete in one transaction.
@@ -7144,7 +7168,8 @@ export function createRunExecutor(deps: ExecutorDeps) {
               return finish(redactConnectorPayload(result, runSecrets));
             } catch (error) {
               if (
-                researchInput.data.operation === "save_results" &&
+                (researchInput.data.operation === "save_results" ||
+                  researchInput.data.operation === "import_csv") &&
                 applied &&
                 claimedEffect &&
                 error instanceof Prisma.PrismaClientKnownRequestError &&
@@ -7166,7 +7191,10 @@ export function createRunExecutor(deps: ExecutorDeps) {
                 }
                 return uncertainEffectResult(name);
               }
-              if (error instanceof RecruitingCandidateOutputError)
+              if (
+                error instanceof RecruitingCandidateOutputError ||
+                error instanceof RecruitingCsvImportError
+              )
                 return finish({ error: error.message });
               if (error instanceof IsolationError)
                 return finish({ error: "Recruiting research or source is unavailable" });

@@ -1051,6 +1051,21 @@ export const RecruitingResearchToolInputSchema = z.discriminatedUnion("operation
     providerTaskId: RecruitingId,
     cursor: z.string().min(1).nullable().default(null),
   }),
+  // Recruiter-supplied text/csv artifact saved as one unassessed candidate page; values are column names.
+  z.strictObject({
+    operation: z.literal("import_csv"),
+    roleId: RecruitingId,
+    expectedRoleRevision: Revision,
+    artifactId: RecruitingId,
+    mapping: z.strictObject({
+      name: ResearchText,
+      linkedinUrl: ResearchText.optional(),
+      company: ResearchText.optional(),
+      title: ResearchText.optional(),
+      location: ResearchText.optional(),
+      resumeUrl: ResearchText.optional(),
+    }),
+  }),
   z.strictObject({
     ...ResearchRoundInput,
     operation: z.literal("prepare"),
@@ -1215,6 +1230,8 @@ const RecruitingCandidateSourceReferenceSchema = z
   .strictObject({
     report: RecruitingCandidateReportSchema.optional(),
     ...RecruitingCandidateEvidenceReference,
+    // Null for a recruiter-imported CSV page, which has no provider task.
+    providerTaskId: RecruitingId.nullable(),
     taskId: RecruitingId.nullable(),
     actionId: RecruitingId.nullable(),
     requestCursor: z.string().nullable(),
