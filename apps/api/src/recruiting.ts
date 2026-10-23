@@ -1660,9 +1660,10 @@ export async function getRecruitingCrmData(
       legacyRoleLabel: row.role_label,
     });
     const tracking = (
-      row: ReturnType<
-        typeof RecruitingCrmImportantReadSchema.parse
-      >["rows"][number]["role_tracking"][number],
+      row: Omit<
+        ReturnType<typeof RecruitingCrmDetailsReadSchema.parse>["role_tracking"][number],
+        "candidate_id"
+      >,
     ) => ({
       roleKey: row.role_key,
       clientLabel: row.client_label,
@@ -1695,16 +1696,21 @@ export async function getRecruitingCrmData(
         new Set(keys).size !== keys.length ||
         page.rows.some(
           (row) =>
-            row.client_label !== row.role_tracking[0].client_label ||
-            row.role_label !== row.role_tracking[0].role_label ||
-            (!row.role_tracking[0].high_signal && row.role_tracking[0].workflow_status === null),
+            !row.role_tracking[0].high_signal && row.role_tracking[0].workflow_status === null,
         )
       )
         throw unavailable();
       return finish({
         operation: input.operation,
         scope: "organization_candidate_roles",
-        items: page.rows.map((row) => ({ ...candidate(row), ...tracking(row.role_tracking[0]) })),
+        items: page.rows.map((row) => ({
+          ...candidate(row),
+          ...tracking({
+            ...row.role_tracking[0],
+            client_label: row.client_label,
+            role_label: row.role_label,
+          }),
+        })),
         total: page.total,
         offset,
         nextOffset:

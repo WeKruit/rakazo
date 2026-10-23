@@ -1759,7 +1759,7 @@ export const RecruitingCrmImportantReadSchema = z.object({
   total: z.number().int().nonnegative(),
   rows: z.array(
     RecruitingCrmCandidatesReadSchema.shape.rows.element.extend({
-      role_tracking: z.tuple([CrmNativeTracking]),
+      role_tracking: z.tuple([CrmNativeTracking.omit({ client_label: true, role_label: true })]),
     }),
   ),
 });
