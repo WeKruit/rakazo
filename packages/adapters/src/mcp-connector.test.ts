@@ -3151,6 +3151,20 @@ describe("local native Instantly campaign and lead tools", () => {
     expect(JSON.stringify(events)).not.toContain(f.state.key);
   });
 
+  it("get_campaign reads status and stop on reply with one GET", async () => {
+    const f = fixture();
+    const events = await f.run("get_campaign", { campaign_id: CAMPAIGN });
+    expect(events[0]).toMatchObject({
+      type: "result",
+      data: {
+        structuredContent: {
+          result: { id: CAMPAIGN, status: 0, stop_on_reply: true },
+        },
+      },
+    });
+    expect(f.state.requests).toEqual([{ method: "GET", path: `/api/v2/campaigns/${CAMPAIGN}` }]);
+  });
+
   it("refuses a foreign sending mailbox without creating anything", async () => {
     const f = fixture();
     const events = await f.run("create_campaign", {

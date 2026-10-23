@@ -23,6 +23,7 @@ import type {
   RecruitingCrmDataOutput,
   RecruitingCrmRoleReference,
   RecruitingCrmTarget,
+  RecruitingRoleCampaign,
   RecruitingSourceRef,
   RecruitingSourceSelection,
 } from "@rakazo/contracts";
@@ -422,6 +423,139 @@ async function nativeRecruitingCorrespondence(
 }
 
 /** Project saved native reads only. Opening a dashboard never invokes a provider. */
+/**
+ * The role's bound Instantly campaign (the `ensure_role_campaign` binding) with its live status and
+ * lead statuses, read only through the read-only native tools of the conversation's own assigned
+ * Instantly connection. The connector re-checks assignment and credential on every call.
+ */
+export async function getRecruitingRoleCampaign(
+  deps: {
+    prisma: PrismaClient;
+    connectors: Pick<ConnectorProvider, "execute">;
+    signal?: AbortSignal;
+  },
+  actor: Actor,
+  target: ThreadTarget,
+): Promise<RecruitingRoleCampaign> {
+  return authenticated(async () => {
+    const none: RecruitingRoleCampaign = { status: "none", campaign: null, leads: [] };
+    const workspace = await recruiting.getRecruitingWorkspace(deps.prisma, actor, {
+      threadId: target.threadId,
+    });
+    if (!workspace) return none;
+    const botIds = target.kind === "group" ? target.memberBotIds : [target.botId];
+    const assignment = await deps.prisma.botMcpServer.findFirst({
+      where: {
+        userId: actor.userId,
+        spaceId: actor.spaceId,
+        botId: { in: botIds },
+        server: {
+          userId: actor.userId,
+          spaceId: actor.spaceId,
+          enabled: true,
+          endpoint: "https://mcp.instantly.ai/mcp",
+          transport: "streamable_http",
+        },
+      },
+      orderBy: { botId: "asc" },
+      select: {
+        botId: true,
+        allowAllTools: true,
+        allowedTools: true,
+        server: { select: { id: true, revision: true } },
+      },
+    });
+    if (
+      !assignment ||
+      !["get_email", "list_emails"].every((tool) => correspondenceAllows(assignment, tool))
+    )
+      return none;
+    const effect = await deps.prisma.externalEffect.findUnique({
+      where: {
+        idempotencyKey: `instantly-role-campaign:${assignment.server.id}:${workspace.role.id}`,
+      },
+      select: { spaceId: true, status: true, result: true },
+    });
+    const binding = correspondenceRecord(effect?.result);
+    if (
+      !effect ||
+      effect.spaceId !== actor.spaceId ||
+      effect.status !== "completed" ||
+      typeof binding?.campaignId !== "string" ||
+      typeof binding.campaignName !== "string"
+    )
+      return none;
+    const campaignId = binding.campaignId;
+    const context: AdapterContext = {
+      operationId: randomUUID(),
+      traceId: randomUUID(),
+      userId: actor.userId,
+      spaceId: actor.spaceId,
+      botId: assignment.botId,
+      signal: deps.signal ?? AbortSignal.timeout(30_000),
+    };
+    const read = async (tool: "get_campaign" | "list_leads", args: Record<string, unknown>) => {
+      for await (const event of deps.connectors.execute(
+        {
+          tool: `native_instantly_${tool}`,
+          route: {
+            connectorId: "mcp",
+            resourceId: assignment.server.id,
+            resourceRevision: assignment.server.revision,
+            toolName: `native_instantly_${tool}`,
+          },
+          args,
+          executionId: randomUUID(),
+        },
+        context,
+      )) {
+        if (event.type === "result")
+          return correspondenceRecord(
+            correspondenceRecord(correspondenceRecord(event.data)?.structuredContent)?.result,
+          );
+        if (event.type === "error") return undefined;
+      }
+      return undefined;
+    };
+    const [campaign, leads] = await Promise.all([
+      read("get_campaign", { campaign_id: campaignId }).catch(() => undefined),
+      read("list_leads", { campaign_id: campaignId, limit: 100 }).catch(() => undefined),
+    ]);
+    if (!campaign || campaign.id !== campaignId)
+      return {
+        status: "unavailable",
+        campaign: { name: binding.campaignName, status: null, stopOnReply: null },
+        leads: [],
+      };
+    const keyByEmail = new Map<string, string>();
+    for (const [candidateKey, lead] of Object.entries(correspondenceRecord(binding.leads) ?? {})) {
+      const email = correspondenceRecord(lead)?.email;
+      if (typeof email === "string") keyByEmail.set(email.toLowerCase(), candidateKey);
+    }
+    const integer = (value: unknown) => (Number.isInteger(value) ? (value as number) : null);
+    return {
+      status: "ready",
+      campaign: {
+        name: typeof campaign.name === "string" ? campaign.name : binding.campaignName,
+        status: integer(campaign.status),
+        stopOnReply: typeof campaign.stop_on_reply === "boolean" ? campaign.stop_on_reply : null,
+      },
+      leads: (Array.isArray(leads?.items) ? leads.items : []).flatMap((value) => {
+        const lead = correspondenceRecord(value);
+        if (typeof lead?.email !== "string") return [];
+        return [
+          {
+            candidateKey: keyByEmail.get(lead.email.toLowerCase()) ?? null,
+            email: lead.email,
+            status: integer(lead.status),
+            interestStatus: integer(lead.lt_interest_status),
+          },
+        ];
+      }),
+    };
+  });
+}
+
 export async function getRecruitingCorrespondence(
   prisma: PrismaClient,
   actor: Actor,

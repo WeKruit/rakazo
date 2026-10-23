@@ -112,6 +112,12 @@ export const nativeInstantlyWrites = [
     "Lists leads of a campaign and/or one exact email, with lead id, status and interest.",
   ),
   tool(
+    "get_campaign",
+    CampaignIdInput,
+    true,
+    "Reads one campaign's name, status (0 draft, 1 active, 2 paused, 3 completed) and stop_on_reply.",
+  ),
+  tool(
     "update_lead_interest",
     UpdateLeadInterestInput,
     false,
@@ -435,6 +441,15 @@ export async function runInstantlyWrite(
         limit: input.limit,
         ...(input.starting_after ? { starting_after: input.starting_after } : {}),
       });
+    }
+    case "native_instantly_get_campaign": {
+      const campaign = await rest("GET", `/campaigns/${CampaignIdInput.parse(args).campaign_id}`);
+      return {
+        id: campaign.id,
+        name: campaign.name,
+        status: campaign.status,
+        stop_on_reply: campaign.stop_on_reply,
+      };
     }
     case "native_instantly_update_lead_interest":
       return rest("POST", "/leads/update-interest-status", UpdateLeadInterestInput.parse(args));
