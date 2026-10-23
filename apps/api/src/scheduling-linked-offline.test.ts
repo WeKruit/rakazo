@@ -602,6 +602,13 @@ describe("linked offline scheduling receipts", () => {
       throw new Error(`Unexpected synthetic provider request: ${method} ${path}`);
     });
     const timeZone = "America/New_York";
+    const interviewerTimeZone = "Asia/Tokyo";
+    const participantTime = (instant: string, zone: string) =>
+      new Intl.DateTimeFormat("en-US", {
+        timeZone: zone,
+        dateStyle: "full",
+        timeStyle: "long",
+      }).format(new Date(instant));
     const slots = ["2026-10-26T14:00:00Z", "2026-10-26T15:00:00Z", "2026-10-27T14:00:00Z"];
     // Scripted candidate reply selects the second offered slot. No mail ingestion or
     // model comprehension is claimed by this deterministic implementation check.
@@ -622,6 +629,9 @@ describe("linked offline scheduling receipts", () => {
       }).format(new Date(selected));
       expect(local).toContain("01:30");
       expect(local).toContain(scenario === "dst_first_0130" ? "GMT-4" : "GMT-5");
+      const hostLocal = participantTime(selected, interviewerTimeZone);
+      expect(hostLocal).toContain(scenario === "dst_first_0130" ? "2:30:00 PM" : "3:30:00 PM");
+      expect(hostLocal).toContain("GMT+9");
     }
     let providerBooking: Record<string, unknown> | undefined;
     f.connector.execute.mockImplementation(async function* (call) {
@@ -653,7 +663,7 @@ describe("linked offline scheduling receipts", () => {
         providerBooking = {
           uid: "synthetic-booking-42",
           eventTypeId: 42,
-          hosts: [{ email: "interviewer@example.test", timeZone: "America/New_York" }],
+          hosts: [{ email: "interviewer@example.test", timeZone: interviewerTimeZone }],
           title: "Candidate interview",
           status: "accepted",
           start: call.args.start,
@@ -810,7 +820,9 @@ describe("linked offline scheduling receipts", () => {
         reply_to_uuid: originalEmail.id,
         eaccount: originalEmail.eaccount,
         subject: "Interview options",
-        body: { text: `Choose one (${timeZone}): ${slots.join(", ")}` },
+        body: {
+          text: `Choose one: ${slots.map((slot) => `${participantTime(slot, timeZone)} (${timeZone}); ${participantTime(slot, interviewerTimeZone)} (${interviewerTimeZone})`).join("; ")}`,
+        },
       },
       1,
     );
@@ -932,7 +944,7 @@ describe("linked offline scheduling receipts", () => {
         eaccount: originalEmail.eaccount,
         subject: "Interview confirmed",
         body: {
-          text: `Confirmed ${projected.events[0]!.start} (${timeZone}); ${projected.events[0]!.url}`,
+          text: `Confirmed ${participantTime(projected.events[0]!.start!, timeZone)} (${timeZone}); ${participantTime(projected.events[0]!.start!, interviewerTimeZone)} (${interviewerTimeZone}); ${projected.events[0]!.url}`,
         },
       },
       3,
