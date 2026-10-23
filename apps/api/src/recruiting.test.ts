@@ -5148,12 +5148,13 @@ describe("live CRM browser reads", () => {
       .mockResolvedValue({ ...f.attached, crmRoleId: clientId });
     await expect(f.read()).rejects.toMatchObject({ code: "NOT_FOUND" });
   });
-  it("shows unsupported CRM role mail explicitly and preserves missing capability", async () => {
+  it("rejects denied CRM role mail before calling the provider", async () => {
     const f = inboxBridgeFixture();
     f.assignment.allowedTools = f.assignment.allowedTools.filter(
       (tool) => tool !== "list_crm_role_correspondence",
     );
-    expect(await f.read()).toMatchObject({ status: "unsupported", partial: true, emails: [] });
+    await expect(f.read()).rejects.toMatchObject({ code: "NOT_FOUND" });
+    expect(f.execute).not.toHaveBeenCalled();
   });
   it("retains stored mailbox identity without inferring it from recipients", async () => {
     const f = inboxBridgeFixture();
@@ -5351,16 +5352,12 @@ describe("live CRM browser reads", () => {
       p_offset: 0,
     });
   });
-  it("reports role-wide mail as unsupported when the tool is not assigned or not on the CRM", async () => {
+  it("distinguishes denied role mail from a missing required source tool without returning empty success", async () => {
     const unassigned = browserFixture();
-    expect(
-      await api.getRecruitingCrmData(unassigned.deps, actor, target, roleMailInput),
-    ).toMatchObject({ operation: "roleMail", supported: false, items: [] });
-    expect(
-      unassigned.execute.mock.calls.some(
-        ([call]) => call.route?.toolName === "list_crm_role_correspondence",
-      ),
-    ).toBe(false);
+    await expect(
+      api.getRecruitingCrmData(unassigned.deps, actor, target, roleMailInput),
+    ).rejects.toMatchObject({ code: "NOT_FOUND" });
+    expect(unassigned.execute).not.toHaveBeenCalled();
 
     const missing = browserFixture();
     missing.assignment.allowAllTools = true;
@@ -5376,9 +5373,40 @@ describe("live CRM browser reads", () => {
           data: { structuredContent: { data: missing.results[call.route!.toolName] } },
         };
     });
-    expect(
-      await api.getRecruitingCrmData(missing.deps, actor, target, roleMailInput),
-    ).toMatchObject({ supported: false });
+    await expect(
+      api.getRecruitingCrmData(missing.deps, actor, target, roleMailInput),
+    ).rejects.toMatchObject({ code: "SERVICE_UNAVAILABLE" });
+  });
+  it("rejects a missing required mail tool reported as an MCP error result", async () => {
+    const f = browserFixture();
+    roleMail(f);
+    f.execute.mockImplementation(async function* (call) {
+      yield {
+        type: "result" as const,
+        data:
+          call.route!.toolName === "list_crm_role_correspondence"
+            ? {
+                isError: true,
+                content: [{ type: "text", text: "Unknown tool list_crm_role_correspondence" }],
+              }
+            : { structuredContent: { data: f.results[call.route!.toolName] } },
+      };
+    });
+    await expect(
+      api.getRecruitingCrmData(f.deps, actor, target, roleMailInput),
+    ).rejects.toMatchObject({ code: "SERVICE_UNAVAILABLE" });
+  });
+  it("checks required role mail assignment before any candidate-mail provider read", async () => {
+    const f = browserFixture();
+    await expect(
+      api.getRecruitingCrmData(f.deps, actor, target, {
+        operation: "mail",
+        ...pinned,
+        candidateId,
+        crmRoleId: roleId,
+      }),
+    ).rejects.toMatchObject({ code: "NOT_FOUND" });
+    expect(f.execute).not.toHaveBeenCalled();
   });
   it("fails a role-wide mail read the CRM rejects for another reason or another scope", async () => {
     const f = browserFixture();

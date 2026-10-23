@@ -1003,11 +1003,7 @@ export async function getRecruitingCorrespondence(
               offset,
             });
             if (history.operation !== "roleMail") throw new ORPCError("SERVICE_UNAVAILABLE");
-            if (!history.supported) {
-              output.partial = true;
-              if (!emails.size) output.status = "unsupported";
-              break;
-            }
+            if (!history.supported) throw new ORPCError("SERVICE_UNAVAILABLE");
             const connection = output.connections.find(
               (_, index) => sources[index]?.id === attached.mcpServerId,
             );
@@ -2414,35 +2410,9 @@ export async function getRecruitingCrmData(
       if (!result.success) throw unavailable();
       return result.data;
     };
-    const missingTool = Symbol("missing tool");
-    // MCP servers report an unknown tool name as a call error; only that case is "not supported".
-    const unknownTool = (tool: string, text: string) =>
-      text.includes(tool) && /\b(not found|unknown tool)\b/i.test(text);
-    async function read(
-      server: Server,
-      tool: string,
-      args: Record<string, unknown>,
-    ): Promise<unknown>;
-    async function read(
-      server: Server,
-      tool: string,
-      args: Record<string, unknown>,
-      options: { allowMissing: true },
-    ): Promise<unknown | typeof missingTool>;
-    async function read(
-      server: Server,
-      tool: string,
-      args: Record<string, unknown>,
-      options?: { allowMissing: true },
-    ) {
-      if (options?.allowMissing) {
-        await actorFence();
-        const [, assignment] = await serverGrant(server.id);
-        if (assignment && !allowed(assignment, tool)) return missingTool;
-      }
+    async function read(server: Server, tool: string, args: Record<string, unknown>) {
       await sourceFence(server, tool);
       const results: unknown[] = [];
-      const errors: string[] = [];
       let failed = false;
       try {
         for await (const event of deps.connectors.execute(
@@ -2462,7 +2432,6 @@ export async function getRecruitingCrmData(
           if (event.type === "result") results.push(event.data);
           if (event.type === "error") {
             failed = true;
-            errors.push(event.message);
           }
         }
       } catch {
@@ -2472,20 +2441,6 @@ export async function getRecruitingCrmData(
       await sourceFence(server, tool);
       const result = correspondenceRecord(results[0]);
       const payload = mcpObject(result);
-      if (options?.allowMissing) {
-        const content = result && Array.isArray(result.content) ? result.content : [];
-        const texts = [
-          ...errors,
-          ...(result?.isError === true
-            ? content.flatMap((part) =>
-                part && typeof part === "object" && "text" in part && typeof part.text === "string"
-                  ? [part.text]
-                  : [],
-              )
-            : []),
-        ];
-        if (texts.some((text) => unknownTool(tool, text))) return missingTool;
-      }
       if (
         failed ||
         results.length !== 1 ||
@@ -2595,6 +2550,9 @@ export async function getRecruitingCrmData(
     )
       throw new IsolationError();
     const server = { ...selectedServer };
+    // Required mail access must fail before even the organization-membership provider read.
+    if (input.operation === "roleMail" || (input.operation === "mail" && input.crmRoleId))
+      await sourceFence(server, "list_crm_role_correspondence");
     if (!(await membershipRows(server)).some((row) => row.organization_id === input.organizationId))
       throw new IsolationError();
     const source = {
@@ -2881,23 +2839,22 @@ export async function getRecruitingCrmData(
     if (input.operation === "roleMail") {
       const offset = pageOffset(input);
       const limit = input.limit ?? 25;
-      const done = (supported: boolean, items: unknown[], nextOffset: number | null) =>
+      const done = (items: unknown[], nextOffset: number | null) =>
         finish({
           operation: input.operation,
           scope: "stored_role_correspondence",
           crmRoleId: input.crmRoleId,
-          supported,
+          supported: true,
           items,
           offset,
           nextOffset,
         });
-      const value = await read(
-        server,
-        "list_crm_role_correspondence",
-        { p_org: input.organizationId, p_role: input.crmRoleId, p_limit: limit, p_offset: offset },
-        { allowMissing: true },
-      );
-      if (value === missingTool) return done(false, [], null);
+      const value = await read(server, "list_crm_role_correspondence", {
+        p_org: input.organizationId,
+        p_role: input.crmRoleId,
+        p_limit: limit,
+        p_offset: offset,
+      });
       const page = parse(RecruitingCrmRoleMailReadSchema, value);
       if (
         page.organization_id !== input.organizationId ||
@@ -2911,7 +2868,6 @@ export async function getRecruitingCrmData(
         throw unavailable();
       await sourceFence(server, "list_crm_role_correspondence");
       return done(
-        true,
         page.messages.map((row) => ({
           ...mailItem(row),
           candidateId: row.candidate_id,
