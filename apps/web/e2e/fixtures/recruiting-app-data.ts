@@ -365,7 +365,7 @@ const bootstrap: AppBootstrap = {
 
 export async function mockRecruitingApp(
   page: Page,
-  options: { emptyCalendar?: boolean; emptyMail?: boolean } = {},
+  options: { emptyCalendar?: boolean; emptyMail?: boolean; multipleCampaigns?: boolean } = {},
 ) {
   const unknown: string[] = [];
   const calls: { method: string; input: Record<string, unknown> }[] = [];
@@ -548,20 +548,31 @@ export async function mockRecruitingApp(
         roleTitle: entry.roleTitle,
       };
     } else if (method === "recruiting/roleCampaign")
-      value = {
-        status: "ready",
-        serverId: "fixture-campaign-source",
-        campaign: {
-          id: "fixture-campaign",
-          name: "Platform outreach",
-          eaccount: "recruiter@example.test",
-          status: 1,
-          stopOnReply: true,
-        },
-        leads: [
-          { email: people[0]!.email, candidateKey: "fixture-0", status: 1, interestStatus: 1 },
-        ],
-      };
+      value =
+        options.multipleCampaigns && !input.campaignId
+          ? { status: "unavailable", campaign: null, selectionRequired: true }
+          : {
+              status: "ready",
+              serverId: "fixture-campaign-source",
+              campaign: {
+                id: input.campaignId ?? "fixture-campaign",
+                name:
+                  input.campaignId === "fixture-second-campaign"
+                    ? "Platform follow-up"
+                    : "Platform outreach",
+                eaccount: "recruiter@example.test",
+                status: 1,
+                stopOnReply: true,
+              },
+              leads: [
+                {
+                  email: people[0]!.email,
+                  candidateKey: "fixture-0",
+                  status: 1,
+                  interestStatus: 1,
+                },
+              ],
+            };
     else if (method === "recruiting/correspondence")
       value = {
         roleId: role.id,
@@ -641,8 +652,22 @@ export async function mockRecruitingApp(
           ...base,
           scope: "stored_role_campaigns",
           crmRoleId: crmTarget.crmRoleId,
+          offset: Number(input.offset ?? 0),
+          nextOffset: options.multipleCampaigns && !input.offset ? 25 : null,
           items: [
-            { id: "fixture-campaign", name: "Platform outreach", status: 1, syncedAt: checkedAt },
+            options.multipleCampaigns && input.offset === 25
+              ? {
+                  id: "fixture-second-campaign",
+                  name: "Platform follow-up",
+                  status: 1,
+                  syncedAt: checkedAt,
+                }
+              : {
+                  id: "fixture-campaign",
+                  name: "Platform outreach",
+                  status: 1,
+                  syncedAt: checkedAt,
+                },
           ],
         };
       else if (input.operation === "roleMail")

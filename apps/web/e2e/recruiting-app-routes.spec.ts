@@ -195,8 +195,12 @@ for (const width of [1440, 390]) {
         await expect(page).toHaveURL(/view=sequence/);
       } else await openRoute(page, "sequence");
       await expect(page.getByRole("region", { name: "Sequence", exact: true })).toBeVisible();
-      await expect(page.getByText("Platform outreach", { exact: true }).first()).toBeVisible();
-      await expect(page.getByText("Recruiter messages are unavailable for this role.")).toBeVisible();
+      await expect(
+        page.getByRole("rowheader", { name: "Platform outreach", exact: true }).first(),
+      ).toBeVisible();
+      await expect(
+        page.getByText("Recruiter messages are unavailable for this role."),
+      ).toBeVisible();
       await capture(page, testInfo, `app-sequence-entry-${width}`);
       const roleHeading = page
         .getByRole("heading", { name: "Staff Platform Engineer", exact: true })
@@ -382,3 +386,40 @@ test("changing workspace tabs resets the primary scroll", async ({ page }) => {
     page.getByRole("heading", { name: "Staff Platform Engineer", exact: true }).first(),
   ).toBeInViewport({ ratio: 1 });
 });
+
+for (const width of [1440, 390]) {
+  test(`actual Sequence selects a campaign from its authorized page at ${width}px`, async ({
+    page,
+  }, testInfo) => {
+    await page.setViewportSize({ width, height: width === 390 ? 844 : 900 });
+    const fixture = await mockRecruitingApp(page, { multipleCampaigns: true });
+    await openRoute(page, "sequence");
+    const sequence = page.getByRole("region", { name: "Sequence", exact: true });
+    const selector = sequence.getByRole("combobox", { name: "Campaign", exact: true });
+    const roleHeading = page
+      .getByRole("heading", { name: "Staff Platform Engineer", exact: true })
+      .first();
+    await expect(roleHeading).toBeInViewport({ ratio: 1 });
+    await expect(selector).toHaveValue("");
+    await sequence.getByRole("button", { name: "Load more", exact: true }).click();
+    await expect(selector.locator('option[value="fixture-second-campaign"]')).toHaveText(
+      "Platform follow-up",
+    );
+    await selector.selectOption("fixture-second-campaign");
+    await expect
+      .poll(
+        () =>
+          fixture.calls.filter((call) => call.method === "recruiting/roleCampaign").at(-1)?.input,
+      )
+      .toMatchObject({
+        campaignId: "fixture-second-campaign",
+        campaignOffset: 25,
+      });
+    await expect(selector).toHaveValue("fixture-second-campaign");
+    // Loading later pages scrolls on mobile; return to the role heading for this interaction capture.
+    await roleHeading.scrollIntoViewIfNeeded();
+    await expect(roleHeading).toBeInViewport({ ratio: 1 });
+    await capture(page, testInfo, `app-sequence-campaign-selection-${width}`);
+    expect(fixture.unknown).toEqual([]);
+  });
+}
