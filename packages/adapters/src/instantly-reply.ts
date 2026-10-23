@@ -81,7 +81,7 @@ const Email = z.strictObject({
   ai_assisted: z.number().nullish(),
   is_focused: z.number().nullish(),
   i_status: z.number().nullish(),
-  thread_id: z.uuid().nullish(),
+  thread_id: Nonblank.nullish(),
   content_preview: z.string().nullish(),
   attachment_json: z
     .strictObject({

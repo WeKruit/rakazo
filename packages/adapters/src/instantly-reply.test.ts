@@ -9,7 +9,7 @@ import {
 
 const incomingId = "11111111-1111-4111-8111-111111111111";
 const outgoingId = "22222222-2222-4222-8222-222222222222";
-const threadId = "33333333-3333-4333-8333-333333333333";
+const threadId = "provider:opaque/thread-123";
 const workspaceId = "44444444-4444-4444-8444-444444444444";
 const request = {
   reply_to_uuid: incomingId,
@@ -117,6 +117,15 @@ describe("Instantly reply payload contract", () => {
     expect(readInstantlyEmailPage({ items: [] })).toEqual({ items: [] });
   });
 
+  it.each([threadId, "33333333-3333-4333-8333-333333333333", " opaque thread ID "])(
+    "preserves the nonblank provider thread ID %j in emails and pages",
+    (thread_id) => {
+      const email = { ...anchor, thread_id };
+      expect(readInstantlyEmail(email)).toEqual(email);
+      expect(readInstantlyEmailPage({ items: [email] })).toEqual({ items: [email] });
+    },
+  );
+
   it.each([
     { success: true },
     { id: outgoingId },
@@ -127,6 +136,7 @@ describe("Instantly reply payload contract", () => {
     { ...anchor, body: { text: false } },
     { ...anchor, ue_type: "2" },
     { ...anchor, from_address_email: false },
+    ...["", " \t\n ", false, 42, {}, []].map((thread_id) => ({ ...anchor, thread_id })),
     { ...anchor, error: "Sending failed" },
     { data: anchor },
     { result: anchor },
@@ -164,6 +174,7 @@ describe("Instantly existing-thread reply proof", () => {
     { ue_type: 4 },
     { ue_type: null },
     { thread_id: null },
+    { thread_id: undefined },
     { organization_id: "" },
     { eaccount: "other@example.com" },
     { to_address_email_list: "other@example.com" },

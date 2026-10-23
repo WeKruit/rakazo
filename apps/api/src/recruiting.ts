@@ -18,7 +18,10 @@ import type {
   RecruitingSourceRef,
   RecruitingSourceSelection,
 } from "@rakazo/contracts";
-import { RecruitingCorrespondenceSchema } from "@rakazo/contracts";
+import {
+  RecruitingCorrespondenceSchema,
+  RecruitingCrmImportReceiptSchema,
+} from "@rakazo/contracts";
 import {
   boundDirectApprovalDetails,
   catalogApprovalDetails,
@@ -100,7 +103,10 @@ function correspondenceProvider(
   }
   if (view === "inbox") {
     if (endpoint === firstPartyEndpoint)
-      return { kind: "crm", tools: ["list_crm_candidate_correspondence"] };
+      return {
+        kind: "crm",
+        tools: ["list_crm_candidate_correspondence", "list_crm_candidate_roles"],
+      };
     if (address === "https://mcp.instantly.ai/mcp")
       return { kind: "instantly", tools: ["list_emails", "get_email"] };
     if (address === "https://gmailmcp.googleapis.com/mcp/v1")
@@ -222,7 +228,10 @@ export async function getRecruitingCorrespondence(
               )
             ? "needs_connection"
             : !source.assignments.some((assignment) =>
-                  source.provider?.tools.some((tool) => correspondenceAllows(assignment, tool)),
+                  source.provider?.tools.some(
+                    (tool) =>
+                      tool !== "list_crm_candidate_roles" && correspondenceAllows(assignment, tool),
+                  ),
                 )
               ? "needs_access"
               : "configured",
@@ -238,6 +247,7 @@ export async function getRecruitingCorrespondence(
             "get_thread",
             "search_threads",
             "list_crm_candidate_correspondence",
+            "list_crm_candidate_roles",
           ]
         : view === "interview"
           ? [
@@ -306,6 +316,10 @@ export async function getRecruitingCorrespondence(
     // ponytail: bound saved display history to 200 matching reads; a native fresh check refreshes older coverage.
     output.partial = retained.length > 200;
     const seen = new Set<string>();
+    const crmMemberships = new Map<
+      string,
+      { effectId: string; status: string; updatedAt: Date; readable: boolean }
+    >();
     let unsupported = false;
     let failed = false;
     const connections = new Map(
@@ -337,6 +351,26 @@ export async function getRecruitingCorrespondence(
       const permission = source.assignments.find(
         (assignment) => assignment.botId === effect.run.botId,
       );
+      if (
+        source.provider?.kind === "crm" &&
+        call.route.toolName === "list_crm_candidate_roles" &&
+        [call.args.p_org, call.args.p_candidate].every(
+          (value) => typeof value === "string" && value.trim(),
+        )
+      ) {
+        const key = stableJsonValue([source.id, call.args.p_org, call.args.p_candidate]);
+        if (!crmMemberships.has(key))
+          crmMemberships.set(key, {
+            effectId: effect.id,
+            status: effect.status,
+            updatedAt: effect.updatedAt,
+            readable: Boolean(
+              permission &&
+                correspondenceAllows(permission, call.route.toolName) &&
+                call.route.resourceRevision === source.revision,
+            ),
+          });
+      }
       if (!permission || !correspondenceAllows(permission, call.route.toolName)) return [];
       const query = Object.fromEntries(
         Object.entries(call.args).filter(([key]) => key !== "limit"),
@@ -354,6 +388,7 @@ export async function getRecruitingCorrespondence(
           (value) => typeof value !== "string" || !value.trim(),
         )
       ) {
+        if (call.route.toolName === "list_crm_candidate_roles") return [];
         checkIssue(source.id, effect.updatedAt);
         output.checkedAt ??= effect.updatedAt.toISOString();
         return [];
@@ -378,6 +413,7 @@ export async function getRecruitingCorrespondence(
       if (seen.has(key)) return [];
       seen.add(key);
       if (call.route.resourceRevision !== source.revision || !source.provider) {
+        if (call.route.toolName === "list_crm_candidate_roles") return [];
         checkIssue(source.id, effect.updatedAt);
         output.checkedAt ??= effect.updatedAt.toISOString();
         output.connectionChanged ||= call.route.resourceRevision !== source.revision;
@@ -432,7 +468,9 @@ export async function getRecruitingCorrespondence(
     }> = [];
     // Details may supplement only messages present in the latest selected campaign snapshot.
     const projections = [
-      ...reads.filter((read) => read.call.route.toolName !== "get_email"),
+      ...reads.filter(
+        (read) => !["get_email", "list_crm_candidate_roles"].includes(read.call.route.toolName),
+      ),
       ...reads.filter((read) => read.call.route.toolName === "get_email"),
     ];
     for (const { effect, call, source, provider } of projections) {
@@ -549,6 +587,54 @@ export async function getRecruitingCorrespondence(
         if (!messages.length) {
           parsed = true;
           continue;
+        }
+        const membership = crmMemberships.get(
+          stableJsonValue([source.id, call.args.p_org, call.args.p_candidate]),
+        );
+        if (membership) {
+          // A newer explicit membership observation supersedes past imports, including empty/error.
+          const result = byId.get(membership.effectId);
+          const envelope = correspondenceRecord(result);
+          const failed =
+            membership.status === "failed" ||
+            Boolean(
+              envelope &&
+                ("error" in envelope ||
+                  ("isError" in envelope &&
+                    envelope.isError !== false &&
+                    envelope.isError !== undefined)),
+            );
+          const rows = mcpObject(result)?.data;
+          if (
+            !membership.readable ||
+            failed ||
+            !Array.isArray(rows) ||
+            !rows.every((value) => {
+              const row = correspondenceRecord(value);
+              return (
+                row?.organization_id === bound.organizationId &&
+                row.candidate_id === call.args.p_candidate &&
+                RecruitingCrmImportReceiptSchema.shape.membership_id.safeParse(row.membership_id)
+                  .success &&
+                typeof row.role_spec_id === "string" &&
+                typeof row.client_id === "string"
+              );
+            }) ||
+            !rows.some(
+              (row) => row.role_spec_id === bound.crmRoleId && row.client_id === bound.crmClientId,
+            )
+          ) {
+            checkIssue(source.id, membership.updatedAt, failed ? "failed" : "unsupported");
+            continue;
+          }
+          parsed = true;
+          for (const message of messages)
+            if (message && !emails.has(message.id)) emails.set(message.id, message);
+          continue;
+        }
+        if (retained.length > 200) {
+          checkIssue(source.id, effect.updatedAt);
+          continue; // Truncated history cannot establish absence of a membership observation.
         }
         // Only locate an exact import here; the single native batch below owns source verification.
         const link = await prisma.recruitingCrmImport.findFirst({
@@ -827,9 +913,7 @@ export async function getRecruitingCorrespondence(
         body.next_starting_after !== null &&
         body.next_starting_after !== "";
       for (const row of rows) {
-        // Display does not use provider thread IDs; outbound anchors retain their strict UUID check.
-        const { thread_id: _threadId, ...display } = correspondenceRecord(row) ?? {};
-        const email = readInstantlyEmail(display);
+        const email = readInstantlyEmail(row);
         if (!email) {
           checkIssue(source.id, effect.updatedAt);
           output.partial = true;
