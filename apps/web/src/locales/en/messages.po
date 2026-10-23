@@ -737,9 +737,21 @@ msgstr "at {0}"
 msgid "at {timeSelect}"
 msgstr "at {timeSelect}"
 
+#: src/pages/GroupPanel.tsx
+msgid "Attach"
+msgstr "Attach"
+
 #: src/pages/Shell.tsx
 msgid "Attach file"
 msgstr "Attach file"
+
+#: src/pages/GroupPanel.tsx
+msgid "Attach file or screenshot"
+msgstr "Attach file or screenshot"
+
+#: src/pages/GroupPanel.tsx
+msgid "Attach role files"
+msgstr "Attach role files"
 
 #: src/components/computer/TerminalApp.tsx
 msgid "Attached {path}"
@@ -3332,6 +3344,10 @@ msgstr "Job Brief"
 msgid "Job description"
 msgstr "Job description"
 
+#: src/pages/GroupPanel.tsx
+msgid "Job description and files"
+msgstr "Job description and files"
+
 #: src/pages/Shell.tsx
 msgid "Jump to latest"
 msgstr "Jump to latest"
@@ -5037,6 +5053,7 @@ msgid "Remove"
 msgstr "Remove"
 
 #. placeholder {0}: attachment.file.name
+#: src/pages/GroupPanel.tsx
 #: src/pages/Shell.tsx
 msgid "Remove {0}"
 msgstr "Remove {0}"
@@ -6366,6 +6383,10 @@ msgstr "The saved check returned no matching records. It does not confirm the en
 msgid "The selected memory provider is not available in this build."
 msgstr "The selected memory provider is not available in this build."
 
+#: src/pages/Shell.tsx
+msgid "The workspace changed. Open the role again."
+msgstr "The workspace changed. Open the role again."
+
 #: src/pages/RecruitingPanel.tsx
 msgid "There was a problem sending this message."
 msgstr "There was a problem sending this message."
@@ -6720,6 +6741,10 @@ msgstr "Use default guidance"
 #: src/components/teach/TeachRecordingChrome.tsx
 msgid "Use Protected input for passwords."
 msgstr "Use Protected input for passwords."
+
+#: src/pages/Shell.tsx
+msgid "Use the attached files to define this role and start the search."
+msgstr "Use the attached files to define this role and start the search."
 
 #: src/pages/RecruitingCorrespondence.tsx
 msgid "Use the connected service to check this role. Saved results will appear here when the agent finishes."

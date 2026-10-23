@@ -737,9 +737,21 @@ msgstr "um {0}"
 msgid "at {timeSelect}"
 msgstr "um {timeSelect}"
 
+#: src/pages/GroupPanel.tsx
+msgid "Attach"
+msgstr ""
+
 #: src/pages/Shell.tsx
 msgid "Attach file"
 msgstr "Datei anhängen"
+
+#: src/pages/GroupPanel.tsx
+msgid "Attach file or screenshot"
+msgstr ""
+
+#: src/pages/GroupPanel.tsx
+msgid "Attach role files"
+msgstr ""
 
 #: src/components/computer/TerminalApp.tsx
 msgid "Attached {path}"
@@ -3332,6 +3344,10 @@ msgstr ""
 msgid "Job description"
 msgstr ""
 
+#: src/pages/GroupPanel.tsx
+msgid "Job description and files"
+msgstr ""
+
 #: src/pages/Shell.tsx
 msgid "Jump to latest"
 msgstr "Zur neuesten Nachricht springen"
@@ -5037,6 +5053,7 @@ msgid "Remove"
 msgstr "Entfernen"
 
 #. placeholder {0}: attachment.file.name
+#: src/pages/GroupPanel.tsx
 #: src/pages/Shell.tsx
 msgid "Remove {0}"
 msgstr "{0} entfernen"
@@ -6366,6 +6383,10 @@ msgstr ""
 msgid "The selected memory provider is not available in this build."
 msgstr "Der ausgewählte Erinnerungsanbieter ist in diesem Build nicht verfügbar."
 
+#: src/pages/Shell.tsx
+msgid "The workspace changed. Open the role again."
+msgstr ""
+
 #: src/pages/RecruitingPanel.tsx
 msgid "There was a problem sending this message."
 msgstr ""
@@ -6719,6 +6740,10 @@ msgstr ""
 
 #: src/components/teach/TeachRecordingChrome.tsx
 msgid "Use Protected input for passwords."
+msgstr ""
+
+#: src/pages/Shell.tsx
+msgid "Use the attached files to define this role and start the search."
 msgstr ""
 
 #: src/pages/RecruitingCorrespondence.tsx
