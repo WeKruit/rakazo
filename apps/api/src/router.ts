@@ -296,6 +296,7 @@ import {
   getRecruitingCorrespondence,
   getRecruitingCrmData,
   getRecruitingRoleCampaign,
+  getRecruitingRoleCandidates,
   getRecruitingWorkspace,
   listRecruitingAssessments,
   listRecruitingCandidateSources,
@@ -2360,19 +2361,32 @@ export function createRouter(deps: RouterDeps) {
         return threadHead(deps.prisma, target);
       }),
       get: authed.threads.get.handler(async ({ context, input }) => {
+        // Chat shell only: routines, skills, workspace and binding load via their own RPCs.
+        const startedAt = performance.now();
         const target = await resolveThreadTarget(deps.prisma, context.actor, input, {
           includeArchived: true,
         });
+        const resolvedAt = performance.now();
         const snapshot = await threadSnapshot(deps, target);
-        return {
-          ...snapshot,
-          messages: await projectRecruitingApprovalFiles(
-            deps.prisma,
-            context.actor,
-            target.threadId,
-            snapshot.messages,
-          ),
-        };
+        const snapshotAt = performance.now();
+        const messages = await projectRecruitingApprovalFiles(
+          deps.prisma,
+          context.actor,
+          target.threadId,
+          snapshot.messages,
+        );
+        const finishedAt = performance.now();
+        getLogger().info("thread.get.timing", {
+          threadId: target.threadId,
+          kind: target.kind,
+          messageCount: messages.length,
+          hasOlder: snapshot.hasOlder,
+          resolveMs: Math.round(resolvedAt - startedAt),
+          snapshotMs: Math.round(snapshotAt - resolvedAt),
+          projectMs: Math.round(finishedAt - snapshotAt),
+          totalMs: Math.round(finishedAt - startedAt),
+        });
+        return { ...snapshot, messages };
       }),
       messages: authed.threads.messages.handler(async ({ context, input }) => {
         const target = await resolveThreadTarget(deps.prisma, context.actor, input, {
@@ -3639,6 +3653,22 @@ export function createRouter(deps: RouterDeps) {
       ),
       listCandidates: authed.recruiting.listCandidates.handler(({ context, input }) =>
         listRecruitingCandidates(deps, context.actor, input),
+      ),
+      roleCandidates: authed.recruiting.roleCandidates.handler(async ({ context, input }) =>
+        getRecruitingRoleCandidates(
+          {
+            prisma: deps.prisma,
+            artifacts: deps.artifacts,
+            connectors: deps.connectors,
+            firstPartyMcpUrl: deps.env.firstPartyMcpUrl,
+            signal: context.signal,
+            stillAuthorized: context.stillAuthorized,
+            reauthorize: () => resolveThreadTarget(deps.prisma, context.actor, input),
+          },
+          context.actor,
+          await resolveThreadTarget(deps.prisma, context.actor, input),
+          input,
+        ),
       ),
       listCandidateSources: authed.recruiting.listCandidateSources.handler(({ context, input }) =>
         listRecruitingCandidateSources(deps, context.actor, input),
