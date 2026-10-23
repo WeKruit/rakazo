@@ -5798,20 +5798,29 @@ export function createRunExecutor(deps: ExecutorDeps) {
           const readRoute = connectorCall.route;
           if (
             readRoute?.connectorId === "mcp" &&
-            readRoute.toolName === "get_booking" &&
-            typeof args.bookingUid === "string"
+            (readRoute.toolName === "get_bookings" ||
+              (readRoute.toolName === "get_booking" && typeof args.bookingUid === "string"))
           ) {
             const { server } = await requireMcpToolAssignment(
               deps.prisma,
               context,
               readRoute,
-              "get_booking",
+              readRoute.toolName,
             );
             const url = server.endpoint ? URL.parse(server.endpoint) : null;
             if (
               url &&
               `${url.origin}${url.pathname.replace(/\/$/, "")}` === "https://mcp.cal.com/mcp"
             ) {
+              const listRead = readRoute.toolName === "get_bookings";
+              const bookingUid = typeof args.bookingUid === "string" ? args.bookingUid : undefined;
+              const mutationTools = [
+                "reschedule_booking",
+                "cancel_booking",
+                "confirm_booking",
+                "add_booking_attendee",
+                ...(listRead ? ["create_booking"] : []),
+              ];
               const writes = await deps.prisma.externalEffect.findMany({
                 where: {
                   spaceId: run.spaceId,
@@ -5833,14 +5842,18 @@ export function createRunExecutor(deps: ExecutorDeps) {
                             equals: readRoute.resourceRevision,
                           },
                         },
-                        { request: { path: ["2", "args", "bookingUid"], equals: args.bookingUid } },
+                        ...(listRead
+                          ? []
+                          : [
+                              {
+                                request: {
+                                  path: ["2", "args", "bookingUid"],
+                                  equals: bookingUid,
+                                },
+                              },
+                            ]),
                         {
-                          OR: [
-                            "reschedule_booking",
-                            "cancel_booking",
-                            "confirm_booking",
-                            "add_booking_attendee",
-                          ].map((toolName) => ({
+                          OR: mutationTools.map((toolName) => ({
                             request: { path: ["2", "route", "toolName"], equals: toolName },
                           })),
                         },
@@ -5856,19 +5869,18 @@ export function createRunExecutor(deps: ExecutorDeps) {
                             equals: readRoute.resourceRevision,
                           },
                         },
+                        ...(listRead
+                          ? []
+                          : [
+                              {
+                                request: {
+                                  path: ["2", "arguments", "bookingUid"],
+                                  equals: bookingUid,
+                                },
+                              },
+                            ]),
                         {
-                          request: {
-                            path: ["2", "arguments", "bookingUid"],
-                            equals: args.bookingUid,
-                          },
-                        },
-                        {
-                          OR: [
-                            "reschedule_booking",
-                            "cancel_booking",
-                            "confirm_booking",
-                            "add_booking_attendee",
-                          ].map((toolName) => ({
+                          OR: mutationTools.map((toolName) => ({
                             request: { path: ["3", "toolName"], equals: toolName },
                           })),
                         },
@@ -5892,13 +5904,8 @@ export function createRunExecutor(deps: ExecutorDeps) {
                   route?.connectorId === "mcp" &&
                   route.resourceId === readRoute.resourceId &&
                   route.resourceRevision === readRoute.resourceRevision &&
-                  [
-                    "reschedule_booking",
-                    "cancel_booking",
-                    "confirm_booking",
-                    "add_booking_attendee",
-                  ].includes(route.toolName) &&
-                  requestArgs?.bookingUid === args.bookingUid &&
+                  mutationTools.includes(route.toolName) &&
+                  (listRead || requestArgs?.bookingUid === args.bookingUid) &&
                   (write.status === "executing" ||
                     write.status === "uncertain" ||
                     (mcpObject(write.result)?.status === "success" &&
