@@ -154,12 +154,14 @@ function fixture(
       }: {
         orderBy?: unknown;
         where?: {
-          id?: string;
+          id?: string | { not: string };
+          OR?: Array<{ AND: Array<{ request: { path: string[]; equals: unknown } }> }>;
+          updatedAt?: { gte: Date };
           spaceId?: string;
           runId?: string;
           status?: string | { in: string[] };
           kind?: string;
-          createdAt?: { gte: Date };
+          createdAt?: { gte?: Date; gt?: Date };
         };
       } = {}) =>
         (orderBy ? [...effects].reverse() : effects)
@@ -174,8 +176,36 @@ function fixture(
             if (where?.kind && effect.kind !== where.kind) return false;
             if (where?.spaceId && effect.spaceId !== where.spaceId) return false;
             if (where?.runId && effect.runId && effect.runId !== where.runId) return false;
-            if (where?.id && effect.id !== where.id) return false;
-            if (where?.createdAt && (!effect.createdAt || effect.createdAt < where.createdAt.gte))
+            if (typeof where?.id === "string" && effect.id !== where.id) return false;
+            if (typeof where?.id === "object" && effect.id === where.id.not) return false;
+            if (
+              where?.createdAt?.gte &&
+              (!effect.createdAt || effect.createdAt < where.createdAt.gte)
+            )
+              return false;
+            if (
+              where?.createdAt?.gt &&
+              (!effect.createdAt || effect.createdAt <= where.createdAt.gt)
+            )
+              return false;
+            if (where?.updatedAt && (!effect.updatedAt || effect.updatedAt < where.updatedAt.gte))
+              return false;
+            if (
+              typeof where?.id === "object" &&
+              where.OR &&
+              !where.OR.some(({ AND }) =>
+                AND.every(({ request }) => {
+                  const value = request.path.reduce<unknown>(
+                    (value, key) =>
+                      value && typeof value === "object"
+                        ? (value as Record<string, unknown>)[key]
+                        : undefined,
+                    effect.request,
+                  );
+                  return value === request.equals;
+                }),
+              )
+            )
               return false;
             return true;
           })
@@ -443,6 +473,9 @@ function fixture(
 describe("linked offline scheduling receipts", () => {
   it.each([
     "success",
+    "stale_confirmation_cancel",
+    "stale_confirmation_reschedule",
+    "stale_confirmation_timeout",
     "booking_conflict",
     "confirmation_uncertain",
     "confirmation_rejected",
@@ -459,6 +492,9 @@ describe("linked offline scheduling receipts", () => {
     const f = fixture("linked-scheduling");
     const usesPlan = [
       "success",
+      "stale_confirmation_cancel",
+      "stale_confirmation_reschedule",
+      "stale_confirmation_timeout",
       "dst_first_0130",
       "dst_second_0130",
       "confirmation_uncertain",
@@ -518,7 +554,9 @@ describe("linked offline scheduling receipts", () => {
     }));
     f.prisma.event.findMany.mockImplementation(async ({ where }) =>
       where?.type === "effect.approval.answered"
-        ? (events.filter((event) => event.type === where.type) as never)
+        ? (events.filter(
+            (event) => event.type === where.type && (!where.runId || event.runId === where.runId),
+          ) as never)
         : [],
     );
     f.prisma.event.create.mockImplementation(async ({ data }) => {
@@ -962,6 +1000,42 @@ describe("linked offline scheduling receipts", () => {
           }),
         }),
       );
+      const staleConfirmation = index === 3 && scenario.startsWith("stale_confirmation_");
+      if (staleConfirmation) {
+        // The confirmation is approved but has not dispatched. A separately
+        // approved native calendar change invalidates its earlier accepted read.
+        const originalRunId = f.runData.id;
+        f.runData.id = `${originalRunId}-concurrent-calendar`;
+        const mutation =
+          scenario === "stale_confirmation_reschedule" ? rescheduleBooking : cancelBooking;
+        const changeArgs = {
+          bookingUid: "synthetic-booking-42",
+          ...(mutation === rescheduleBooking
+            ? { start: "2026-10-28T15:00:00Z", lengthInMinutes: 30 }
+            : { cancellationReason: "Candidate unavailable" }),
+        };
+        f.setCalls([
+          { name: mutation.name, args: changeArgs, executionId: "pause-change-request" },
+        ]);
+        await f.run();
+        const changeCard = messages.at(-1)!;
+        expect(changeCard.id).not.toBe(card.id);
+        expect(
+          await answerRunInput(db, { ...input, runId: f.runData.id, messageId: changeCard.id }),
+        ).toBe(true);
+        f.setCalls([{ name: mutation.name, args: changeArgs, executionId: "pause-change-resume" }]);
+        await f.run();
+        expect(f.effects.at(-1)?.status).toBe(
+          scenario === "stale_confirmation_timeout" ? "uncertain" : "completed",
+        );
+        expect(
+          f.connector.execute.mock.calls.some(
+            ([call]) => call.route?.toolName === mutation.route.toolName,
+          ),
+        ).toBe(true);
+        f.runData.id = originalRunId;
+        count = f.connector.execute.mock.calls.length;
+      }
       // A runtime revision cannot replace the exact approved recipient/time/content.
       f.setCalls([
         {
@@ -984,6 +1058,17 @@ describe("linked offline scheduling receipts", () => {
         },
       ]);
       await f.run();
+      if (staleConfirmation) {
+        expect(f.connector.execute).toHaveBeenCalledTimes(count);
+        expect(f.results.at(-1)).toMatchObject({ dispatched: false });
+        expect(
+          f.connector.execute.mock.calls.filter(
+            ([call]) => call.args.subject === "Interview confirmed",
+          ),
+        ).toHaveLength(0);
+        expect(effect.status).toBe("approved");
+        return effect;
+      }
       const isBooking = name === createBooking.name;
       const blockedBooking = isBooking && scenario === "booking_conflict";
       const dispatchCount = isBooking && !blockedBooking ? 2 : 1;
@@ -1283,6 +1368,10 @@ describe("linked offline scheduling receipts", () => {
       3,
       scenario === "confirmation_uncertain" ? "uncertain" : "completed",
     );
+    if (scenario.startsWith("stale_confirmation_")) {
+      expect(replyRest.mock.calls.filter(([method]) => method === "POST")).toHaveLength(1);
+      return;
+    }
     const confirmationEffect = f.effects.at(-1)!;
     if (planId && scenario !== "confirmation_uncertain") {
       const beforeReadback = await loadVerifiedRecruitingSchedulingPlan(db, planActor, {
