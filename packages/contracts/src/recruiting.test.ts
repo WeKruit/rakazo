@@ -1,4 +1,5 @@
 import { describe, expect, it } from "vitest";
+import { z } from "zod";
 import * as contracts from "./index.js";
 
 const now = "2026-01-01T00:00:00.000Z";
@@ -1769,4 +1770,27 @@ describe("candidate index contracts", () => {
       }).success,
     ).toBe(false);
   });
+});
+it("bounds page sizes and accepts only canonical offset cursors", () => {
+  const ok = (schema: { safeParse(value: unknown): { success: boolean } }, value: unknown) =>
+    schema.safeParse(value).success;
+  const candidates = contracts.ListRecruitingCandidatesInput;
+  expect(ok(candidates, { roleId: "role", limit: 200 })).toBe(true);
+  expect(ok(candidates, { roleId: "role", limit: 201 })).toBe(false);
+  expect(ok(candidates, { roleId: "role", limit: 0 })).toBe(false);
+  const crm = {
+    operation: "candidates",
+    serverId: "crm",
+    serverRevision: 1,
+    organizationId: "10000000-0000-4000-8000-000000000001",
+  };
+  expect(ok(contracts.RecruitingCrmDataInputSchema, { ...crm, limit: 50, cursor: "50" })).toBe(
+    true,
+  );
+  for (const bad of [{ limit: 51 }, { cursor: "01" }, { cursor: "-1" }, { cursor: "1000001" }])
+    expect(ok(contracts.RecruitingCrmDataInputSchema, { ...crm, ...bad })).toBe(false);
+  const inbox = z.strictObject(contracts.RecruitingCorrespondenceInputPage);
+  expect(ok(inbox, { limit: 200, cursor: "0" })).toBe(true);
+  for (const bad of [{ limit: 0 }, { limit: 201 }, { cursor: "x" }, { cursor: "" }])
+    expect(ok(inbox, bad)).toBe(false);
 });

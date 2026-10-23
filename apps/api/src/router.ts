@@ -3622,6 +3622,7 @@ export function createRouter(deps: RouterDeps) {
               }
             : undefined,
           mcpOAuth,
+          { limit: input.limit, cursor: input.cursor },
         ),
       ),
       readSource: authed.recruiting.readSource.handler(({ context, input }) =>
