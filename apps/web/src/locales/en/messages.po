@@ -1216,8 +1216,8 @@ msgid "Choose file"
 msgstr "Choose file"
 
 #: src/pages/ModelSettingsOverlay.tsx
-msgid "Choose which connected model Rakazo uses."
-msgstr "Choose which connected model Rakazo uses."
+msgid "Choose which connected model WeKruit Headhunter uses."
+msgstr "Choose which connected model WeKruit Headhunter uses."
 
 #: src/pages/shell/dialogs.tsx
 msgid "Clear"
@@ -4652,8 +4652,8 @@ msgid "Paste a replacement key"
 msgstr "Paste a replacement key"
 
 #: src/pages/ModelSettingsOverlay.tsx
-msgid "Paste the OpenAI-compatible address from your server. Rakazo adds /v1 if needed."
-msgstr "Paste the OpenAI-compatible address from your server. Rakazo adds /v1 if needed."
+msgid "Paste the OpenAI-compatible address from your server. WeKruit Headhunter adds /v1 if needed."
+msgstr "Paste the OpenAI-compatible address from your server. WeKruit Headhunter adds /v1 if needed."
 
 #: src/pages/VoiceSettingsOverlay.tsx
 msgid "Paste your API key"
@@ -5343,8 +5343,8 @@ msgid "Retry screen"
 msgstr "Retry screen"
 
 #: src/pages/McpOAuthCallback.tsx
-msgid "Return to Rakazo"
-msgstr "Return to Rakazo"
+msgid "Return to WeKruit Headhunter"
+msgstr "Return to WeKruit Headhunter"
 
 #: src/pages/Shell.tsx
 msgid "Return to the original role before saving this draft."
@@ -6548,8 +6548,8 @@ msgid "This server is already connected. Disconnect it first to authorize again.
 msgstr "This server is already connected. Disconnect it first to authorize again."
 
 #: src/pages/ModelSettingsOverlay.tsx
-msgid "This subscription sign-in is not available in Rakazo yet. Use a deployment credential or choose another provider."
-msgstr "This subscription sign-in is not available in Rakazo yet. Use a deployment credential or choose another provider."
+msgid "This subscription sign-in is not available in WeKruit Headhunter yet. Use a deployment credential or choose another provider."
+msgstr "This subscription sign-in is not available in WeKruit Headhunter yet. Use a deployment credential or choose another provider."
 
 #: src/pages/Artifacts.tsx
 msgid "This week"

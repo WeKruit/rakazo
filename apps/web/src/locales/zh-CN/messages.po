@@ -1216,8 +1216,8 @@ msgid "Choose file"
 msgstr "选择文件"
 
 #: src/pages/ModelSettingsOverlay.tsx
-msgid "Choose which connected model Rakazo uses."
-msgstr "选择 Rakazo 使用的已连接模型。"
+msgid "Choose which connected model WeKruit Headhunter uses."
+msgstr "选择 WeKruit Headhunter 使用的已连接模型。"
 
 #: src/pages/shell/dialogs.tsx
 msgid "Clear"
@@ -4652,8 +4652,8 @@ msgid "Paste a replacement key"
 msgstr "粘贴替换密钥"
 
 #: src/pages/ModelSettingsOverlay.tsx
-msgid "Paste the OpenAI-compatible address from your server. Rakazo adds /v1 if needed."
-msgstr "粘贴服务器的 OpenAI 兼容地址。需要时 Rakazo 会补上 /v1。"
+msgid "Paste the OpenAI-compatible address from your server. WeKruit Headhunter adds /v1 if needed."
+msgstr "粘贴服务器的 OpenAI 兼容地址。需要时 WeKruit Headhunter 会补上 /v1。"
 
 #: src/pages/VoiceSettingsOverlay.tsx
 msgid "Paste your API key"
@@ -5343,8 +5343,8 @@ msgid "Retry screen"
 msgstr ""
 
 #: src/pages/McpOAuthCallback.tsx
-msgid "Return to Rakazo"
-msgstr "返回 Rakazo"
+msgid "Return to WeKruit Headhunter"
+msgstr "返回 WeKruit Headhunter"
 
 #: src/pages/Shell.tsx
 msgid "Return to the original role before saving this draft."
@@ -6548,8 +6548,8 @@ msgid "This server is already connected. Disconnect it first to authorize again.
 msgstr "此服务器已连接。请先断开再重新授权。"
 
 #: src/pages/ModelSettingsOverlay.tsx
-msgid "This subscription sign-in is not available in Rakazo yet. Use a deployment credential or choose another provider."
-msgstr "此订阅登录在 Rakazo 中尚不可用。请使用部署凭据或选择其他提供方。"
+msgid "This subscription sign-in is not available in WeKruit Headhunter yet. Use a deployment credential or choose another provider."
+msgstr "此订阅登录在 WeKruit Headhunter 中尚不可用。请使用部署凭据或选择其他提供方。"
 
 #: src/pages/Artifacts.tsx
 msgid "This week"

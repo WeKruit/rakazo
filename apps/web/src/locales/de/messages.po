@@ -1216,8 +1216,8 @@ msgid "Choose file"
 msgstr "Datei wählen"
 
 #: src/pages/ModelSettingsOverlay.tsx
-msgid "Choose which connected model Rakazo uses."
-msgstr "Wähle das verbundene Modell aus, das Rakazo verwendet."
+msgid "Choose which connected model WeKruit Headhunter uses."
+msgstr "Wähle das verbundene Modell aus, das WeKruit Headhunter verwendet."
 
 #: src/pages/shell/dialogs.tsx
 msgid "Clear"
@@ -4652,8 +4652,8 @@ msgid "Paste a replacement key"
 msgstr "Ersatzschlüssel einfügen"
 
 #: src/pages/ModelSettingsOverlay.tsx
-msgid "Paste the OpenAI-compatible address from your server. Rakazo adds /v1 if needed."
-msgstr "Füge die OpenAI-kompatible Adresse deines Servers ein. Rakazo ergänzt /v1 bei Bedarf."
+msgid "Paste the OpenAI-compatible address from your server. WeKruit Headhunter adds /v1 if needed."
+msgstr "Füge die OpenAI-kompatible Adresse deines Servers ein. WeKruit Headhunter ergänzt /v1 bei Bedarf."
 
 #: src/pages/VoiceSettingsOverlay.tsx
 msgid "Paste your API key"
@@ -5343,8 +5343,8 @@ msgid "Retry screen"
 msgstr ""
 
 #: src/pages/McpOAuthCallback.tsx
-msgid "Return to Rakazo"
-msgstr "Zurück zu Rakazo"
+msgid "Return to WeKruit Headhunter"
+msgstr "Zurück zu WeKruit Headhunter"
 
 #: src/pages/Shell.tsx
 msgid "Return to the original role before saving this draft."
@@ -6548,8 +6548,8 @@ msgid "This server is already connected. Disconnect it first to authorize again.
 msgstr "Dieser Server ist bereits verbunden. Trenne zuerst die Verbindung, um ihn erneut zu autorisieren."
 
 #: src/pages/ModelSettingsOverlay.tsx
-msgid "This subscription sign-in is not available in Rakazo yet. Use a deployment credential or choose another provider."
-msgstr "Diese Abonnementanmeldung ist in Rakazo noch nicht verfügbar. Verwende Zugangsdaten der Bereitstellung oder wähle einen anderen Anbieter."
+msgid "This subscription sign-in is not available in WeKruit Headhunter yet. Use a deployment credential or choose another provider."
+msgstr "Diese Abonnementanmeldung ist in WeKruit Headhunter noch nicht verfügbar. Verwende Zugangsdaten der Bereitstellung oder wähle einen anderen Anbieter."
 
 #: src/pages/Artifacts.tsx
 msgid "This week"
