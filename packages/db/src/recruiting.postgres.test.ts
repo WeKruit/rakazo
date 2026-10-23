@@ -7604,6 +7604,42 @@ describePostgres("recruiting domain (PostgreSQL)", () => {
     expect(unresolved.every((item) => item.name === null && item.issues.length > 0)).toBe(true);
   });
 
+  it("score-sorts a role whose several saved results carry provider cell objects", async () => {
+    const { f, prepared } = await mappedResearchFixture();
+    const cell = (value: number) => ({ value, source_id: "91872", source_ids: ["d7203"] });
+    const rows = (scores: [string, number, number][]) =>
+      scores.map(([key, rank, score]) => ({
+        ...canonicalCandidateRow(`Cell ${key}`, `https://www.linkedin.com/in/cell-${key}`),
+        rank: cell(rank),
+        match_score: cell(score),
+      }));
+    for (const [label, day, scores] of [
+      ["cells-1", "17", [["a", 1, 90], ["b", 2, 80], ["c", 3, 70]]],
+      ["cells-2", "18", [["a", 3, 40], ["b", 2, 50], ["c", 1, 60]]],
+      ["cells-3", "19", [["a", 2, 62], ["b", 3, 45], ["c", 1, 82]]],
+    ] as const)
+      await recordCandidatePage(f, prepared, label, rows(scores as never), {
+        observedAt: new Date(`2026-10-${day}T00:00:00Z`),
+        cursor: label,
+      });
+    const page = await recruiting.listRecruitingCandidates(prisma, actor, {
+      roleId: f.role.role.id,
+      sort: "score",
+    });
+    expect(page.sortAvailability.score).toBe(true);
+    expect(page.items.map((item) => [item.candidateKey, item.match.score])).toEqual([
+      ["linkedin:/in/cell-c", 82],
+      ["linkedin:/in/cell-a", 62],
+      ["linkedin:/in/cell-b", 45],
+    ]);
+    // A list already sorted by name still offers the score sort.
+    const byName = await recruiting.listRecruitingCandidates(prisma, actor, {
+      roleId: f.role.role.id,
+      sort: "name",
+    });
+    expect(byName.sortAvailability).toMatchObject({ rank: true, score: true });
+  });
+
   it("orders native ranks, tiers and scores across numeric, tie and unknown cursor boundaries with source proof", async () => {
     const { f, prepared } = await mappedResearchFixture();
     const row = (key: string, match: Prisma.InputJsonObject) => ({
