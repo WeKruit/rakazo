@@ -816,7 +816,10 @@ it("maps the current role Contacts to its bound CRM while preserving search resu
     initialPath: "/app/g/group-1?view=contacts",
     crmTarget: boundCrmTarget,
   });
-  expect(document.body.textContent).toContain("610");
+  // One list: the role's search result plus its 610 CRM contacts, no source toggle.
+  expect(document.body.textContent).toContain("611 candidates");
+  expect(document.body.textContent).not.toContain("Current search");
+  expect(container?.textContent).toContain(view.candidate.name);
   expect(shellApi.recruiting.crmData).toHaveBeenCalledWith(
     expect.objectContaining({
       operation: "candidates",
@@ -830,11 +833,7 @@ it("maps the current role Contacts to its bound CRM while preserving search resu
   expect(view.getPath()).not.toContain("crmServer");
   await view.click("Chat with WeKruit");
   expect(document.querySelector('textarea[name="chat-message"]')?.closest("[hidden]")).toBeNull();
-  await view.click("Search results");
-  expect(container?.textContent).toContain(view.candidate.name);
-  expect(view.getPath()).not.toContain("crmServer");
   await view.navigate("/app/g/group-1?view=shortlist");
-  await view.click("Current search");
   expect(shellApi.recruiting.listCandidates).toHaveBeenCalledWith(
     expect.objectContaining({ shortlisted: true }),
     expect.anything(),
@@ -1001,13 +1000,10 @@ it.each(["inbox", "feedback", "sequence"])(
           )
         : Boolean(container?.textContent?.includes("Stored CRM history"));
     expect(crmHistoryShown()).toBe(true);
-    await view.click("Current search");
-    expect(container?.textContent).not.toContain("Stored CRM history");
-    if (tabLabel) expect(container?.querySelector(`section[aria-label="${tabLabel}"]`)).toBeNull();
+    // The role's own view and its CRM history share one page; there is no source toggle.
+    expect(container?.textContent).not.toContain("Current search");
     expect(view.getPath()).toContain(`/app/g/group-1?view=${section}`);
     expect(view.getPath()).not.toContain("crmServer");
-    await view.click("CRM history");
-    expect(crmHistoryShown()).toBe(true);
     expect(shellApi.followUp).not.toHaveBeenCalled();
   },
 );
@@ -1078,10 +1074,12 @@ it("refreshes a failed current-role CRM connection before reading its history", 
     nextOffset: null,
   });
   const priorReads = shellApi.recruiting.getWorkspace.mock.calls.length;
-  await view.click("Refresh");
+  await view.click("Retry");
   expect(shellApi.recruiting.getWorkspace.mock.calls.length).toBeGreaterThan(priorReads);
   expect(container?.textContent).not.toContain("Could not load this role’s CRM connection.");
-  expect(container?.querySelector('section[aria-label="Contacts"]')?.textContent).toContain("610");
+  expect(container?.querySelector('section[aria-label="Contacts"]')?.textContent).toMatch(
+    /61\d candidates/,
+  );
   expect(shellApi.recruiting.crmData).toHaveBeenCalledWith(
     expect.objectContaining({
       operation: "candidates",
@@ -1615,7 +1613,8 @@ it.each(["bot", "group"] as const)(
     expect(container?.textContent).toContain(
       kind === "group" ? "Could not load this role’s CRM connection." : "Could not load recruiting",
     );
-    expect(container?.textContent).not.toContain(view.candidate.name);
+    // A failed CRM binding keeps the role's own results visible beside its retry.
+    if (kind === "bot") expect(container?.textContent).not.toContain(view.candidate.name);
     shellApi.recruiting.getWorkspace.mockClear();
     shellApi.get.mockRejectedValueOnce(new Error("Still reconnecting"));
     await act(async () => {
@@ -3102,7 +3101,7 @@ it("opens a normal recruiting role on native candidate results and restores coll
     groupId: "group-1",
     view: "contacts",
   });
-  expect(container?.querySelector("tbody")?.textContent).toContain("Not returned");
+  await view.click(view.candidate.name ?? "");
   await view.click("Find email");
   const contactDraft = container!.querySelector<HTMLTextAreaElement>(
     'textarea[name="chat-message"]',
@@ -3172,6 +3171,7 @@ it.each(["user", "space", "thread", "role", "unmount"] as const)(
         finish = resolve;
       }),
     );
+    await view.click(view.candidate.name ?? "");
     await view.click("Find email");
     if (change === "user") {
       shellApi.session = {
@@ -3210,10 +3210,13 @@ it("deduplicates a pending contact lookup and retries an uncertain native follow
       reject = fail;
     }),
   );
+  await view.click(view.candidate.name ?? "");
   await view.click("Find email");
+  await view.click(view.candidate.name ?? "");
   await view.click("Find email");
   expect(shellApi.followUp).toHaveBeenCalledTimes(1);
   await act(async () => reject(new Error("Receipt lost")));
+  await view.click(view.candidate.name ?? "");
   await view.click("Find email");
   expect(shellApi.followUp).toHaveBeenCalledTimes(2);
   expect(shellApi.followUp.mock.calls[1]).toEqual(shellApi.followUp.mock.calls[0]);
@@ -3228,8 +3231,10 @@ it("keeps an uncertain contact lookup nonce across another successful candidate 
     initialPath: "/app/g/group-1?view=contacts",
   });
   shellApi.followUp.mockRejectedValueOnce(new Error("Receipt lost"));
+  await view.click(view.candidate.name ?? "");
   await view.click("Find email");
   await view.click("Email draft");
+  await view.click(view.candidate.name ?? "");
   await view.click("Find email");
   expect(shellApi.followUp).toHaveBeenCalledTimes(3);
   expect(shellApi.followUp.mock.calls[2]).toEqual(shellApi.followUp.mock.calls[0]);

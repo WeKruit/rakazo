@@ -13,6 +13,7 @@ vi.mock("../../lib/rpc", () => ({
 }));
 vi.mock("@lingui/react/macro", () => ({
   Trans: ({ children }: { children: ReactNode }) => children,
+  Plural: ({ value }: { value: number }) => `${value} candidates`,
   useLingui: () => ({
     t: (parts: TemplateStringsArray, ...values: unknown[]) =>
       parts.reduce((text, part, index) => text + part + (values[index] ?? ""), ""),
@@ -154,8 +155,8 @@ it("lists the role's CRM contacts with stage and saved email status", async () =
     row.textContent?.includes("Ada"),
   );
   expect(ada?.textContent).toContain("Screening");
-  expect(ada?.textContent).toContain("Email found");
-  expect(ada?.textContent).toContain("ada@work.example.com · Valid");
+  // Contact fields and lookups belong to the person's panel, not the row.
+  expect(ada?.textContent).not.toContain("ada@example.com");
   expect(view.textContent).not.toContain("crm-source");
   expect(view.textContent).not.toContain(ADA);
 });
@@ -569,4 +570,91 @@ it("keeps Sequence status chips from the loaded rows when totalling fails", asyn
   expect(view.textContent).toContain("Not contacted · 1");
   expect(view.textContent).toContain("Staff Engineer outreach");
   expect(view.textContent).not.toContain("[role");
+});
+
+function autumnRead(overrides: Record<string, unknown> = {}) {
+  return {
+    items: [] as never[],
+    loading: false,
+    failed: false,
+    retry: vi.fn(),
+    total: null,
+    hasMore: false,
+    loadMore: vi.fn(),
+    sortByScore: true,
+    includeCrm: true,
+    ready: true,
+    shortlistFailedKey: null,
+    setShortlist: vi.fn(),
+    openEvidence: vi.fn(),
+    ...overrides,
+  };
+}
+const autumnAda = {
+  candidateKey: "autumn-ada",
+  name: "Ada",
+  title: "Staff Engineer",
+  company: "Acme",
+  location: "Remote",
+  linkedinUrl: "https://linkedin.com/in/ada",
+  shortlisted: false,
+  latestSource: {
+    report: {
+      fields: [
+        { label: "Match score", value: "92", sourceUrls: [] },
+        { label: "Rust", value: "match", providerStatus: "match", sourceUrls: [] },
+      ],
+      sourceUrls: [],
+    },
+  },
+};
+
+it("renders each source as it loads, with skeleton rows only while one is still loading", async () => {
+  let finishCrm!: (value: unknown) => void;
+  crmData.mockReturnValue(new Promise((resolve) => (finishCrm = resolve)));
+  const view = await mount(
+    <ContactsTab
+      {...props}
+      crmTarget={target}
+      autumn={autumnRead({ items: [autumnAda], total: 1 })}
+    />,
+  );
+  // Autumn's row is already on screen while the CRM read is still pending.
+  expect(view.querySelector("tbody")?.textContent).toContain("Ada");
+  expect(view.querySelector("tbody")?.textContent).toContain("92");
+  expect(view.querySelector('[role="status"]')).not.toBeNull();
+  expect(view.querySelector('[role="alert"]')).toBeNull();
+  await act(async () => finishCrm(candidatesPage));
+  // Ada is one person in both sources; Ben is a CRM-only row below her.
+  const rows = [...view.querySelectorAll("tbody tr")].map((row) => row.textContent);
+  expect(rows).toHaveLength(2);
+  expect(rows[0]).toContain("Ada");
+  expect(rows[0]).toContain("Screening");
+  expect(rows[1]).toContain("Ben");
+  expect(view.querySelector('[role="status"]')).toBeNull();
+  expect(view.textContent).toContain("2 candidates");
+});
+
+it("shows a failed source as a compact Retry that re-reads only that source", async () => {
+  crmData.mockRejectedValueOnce(new Error("CRM unavailable")).mockResolvedValue(candidatesPage);
+  const view = await mount(
+    <ContactsTab
+      {...props}
+      crmTarget={target}
+      autumn={autumnRead({ items: [autumnAda], total: 1 })}
+    />,
+  );
+  const alert = view.querySelector('[role="alert"]');
+  expect(alert?.textContent).toContain("Could not load CRM records");
+  // Never an error and a loading state at once.
+  expect(view.querySelector('[role="status"]')).toBeNull();
+  expect(view.querySelector("tbody")?.textContent).toContain("Ada");
+  const retry = [...alert!.querySelectorAll("button")].find((b) => b.textContent === "Retry")!;
+  const reads = correspondence.mock.calls.length;
+  await act(async () => retry.click());
+  await settle();
+  expect(view.querySelector('[role="alert"]')).toBeNull();
+  expect(view.querySelector("tbody")?.textContent).toContain("Ben");
+  expect(crmData).toHaveBeenCalledTimes(2);
+  expect(correspondence.mock.calls.length).toBe(reads);
 });

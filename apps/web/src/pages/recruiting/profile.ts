@@ -18,7 +18,8 @@ const FIT_LABELS = new Set([
 const SUMMARY_LABELS = ["Fit reasons", "Recommendation", "Match judgment"];
 const EMAIL = /^(?:(?:work|professional|business|personal) )?emails?(?: address(?:es)?)?$/i;
 const PHONE = /^(?:(?:work|business|mobile) )?(?:phone|mobile)(?: numbers?| phone)?$/i;
-const CONTACT_STATUS = /^(?:email (?:status|verification(?: status)?)|contact status|verification status)$/i;
+const CONTACT_STATUS =
+  /^(?:email (?:status|verification(?: status)?)|contact status|verification status)$/i;
 const EXPERIENCE = /experience|employment|work history|career|tenure/i;
 const EDUCATION = /educat|school|degree|universit|college/i;
 const SKILLS = /skill/i;

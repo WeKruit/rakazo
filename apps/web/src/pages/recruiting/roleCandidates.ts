@@ -30,7 +30,9 @@ export function linkedinIdentity(url: string | null | undefined): string | null 
   if (!url?.trim()) return null;
   try {
     const parsed = new URL(/^[a-z][a-z0-9+.-]*:\/\//i.test(url) ? url : `https://${url.trim()}`);
-    const host = parsed.hostname.toLowerCase().replace(/^(?:[a-z]{2,3}\.|www\.)?linkedin\.com$/, "linkedin.com");
+    const host = parsed.hostname
+      .toLowerCase()
+      .replace(/^(?:[a-z]{2,3}\.|www\.)?linkedin\.com$/, "linkedin.com");
     const path = decodeURIComponent(parsed.pathname).replace(/\/+$/, "").toLowerCase();
     return path ? `${host}${path}` : null;
   } catch {
@@ -80,7 +82,11 @@ export function mergeRoleCandidates<A, C>({
   fit?: (value: A) => RoleCandidateFit | null;
   sortByScore?: boolean;
 }): RoleCandidateRow<A, C>[] {
-  const ordered = autumn.map((entry, index) => ({ entry, index, score: scoreOf(fit?.(entry.value)) }));
+  const ordered = autumn.map((entry, index) => ({
+    entry,
+    index,
+    score: scoreOf(fit?.(entry.value)),
+  }));
   if (sortByScore)
     ordered.sort((a, b) =>
       a.score === null || b.score === null

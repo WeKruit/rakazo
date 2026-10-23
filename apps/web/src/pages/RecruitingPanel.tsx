@@ -90,7 +90,8 @@ import {
 import { rpc } from "../lib/rpc";
 import { CorrespondenceEmails } from "./RecruitingCorrespondence";
 import type { RecruitingInboxEmail, RecruitingTabProps } from "./recruiting";
-import { ContactsTab, InboxWithReply, InterviewTab, SequenceTab } from "./recruiting";
+import { InboxWithReply, InterviewTab, SequenceTab } from "./recruiting";
+import { ContactsTab } from "./recruiting/ContactsTab";
 import type { RecruitingDetailPerson } from "./recruiting/detail";
 import { useRecruitingDetail } from "./recruiting/detail";
 import { TabLoading, tabCacheSlot, useKeyedRead } from "./recruiting/shared";
@@ -2314,8 +2315,7 @@ function RoleAgentSection({ crmBrowse, roleConversation: _, correspondence, ...p
   const view = crmBrowse?.view;
   if (view === "brief" || view === "feedback")
     return <NativeRecruitingPanel {...props} presentation="workspace" summary={view} />;
-  if (view === "sequence" || view === "inbox" || view === "interview")
-    return <>{correspondence}</>;
+  if (view === "sequence" || view === "inbox" || view === "interview") return <>{correspondence}</>;
   if (view === "conversation") return null;
   return (
     <NativeRecruitingPanel
@@ -3583,27 +3583,27 @@ function CrmRecruitingPanel({
         <>
           {agent}
           <CorrespondenceTabMount
-          view={browse.view}
-          role={boundRole}
-          loading={!bound.done}
-          conversation={target}
-          refreshSignal={refreshSignal + refresh}
-          onDraftReply={
-            browse.onDraftReply
-              ? ({ email, ...context }) =>
-                  browse.onDraftReply?.({
-                    ...context,
-                    threadId,
-                    email: {
-                      sender: email.sender,
-                      recipients: email.recipients,
-                      subject: email.subject,
-                      date: email.date,
-                    },
-                  })
-              : undefined
-          }
-          fallback={agent ? crmHistory : body}
+            view={browse.view}
+            role={boundRole}
+            loading={!bound.done}
+            conversation={target}
+            refreshSignal={refreshSignal + refresh}
+            onDraftReply={
+              browse.onDraftReply
+                ? ({ email, ...context }) =>
+                    browse.onDraftReply?.({
+                      ...context,
+                      threadId,
+                      email: {
+                        sender: email.sender,
+                        recipients: email.recipients,
+                        subject: email.subject,
+                        date: email.date,
+                      },
+                    })
+                : undefined
+            }
+            fallback={agent ? crmHistory : body}
           />
         </>
       ) : (
@@ -4714,7 +4714,8 @@ function RecruitingWorkspace({
           <Trans>Could not load recruiting</Trans>
         </RetryNotice>
       ) : loading &&
-        (!workspaceSnapshot || ["dashboard", "missing", "memory", "activity"].includes(activeTab)) ? (
+        (!workspaceSnapshot ||
+          ["dashboard", "missing", "memory", "activity"].includes(activeTab)) ? (
         <TabLoading />
       ) : null}
       {workspaceSnapshot ? (

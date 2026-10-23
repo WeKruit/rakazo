@@ -68,7 +68,6 @@ vi.mock("./recruiting", () => {
     <span data-role-tab={name}>{JSON.stringify(props)}</span>
   );
   return {
-    ContactsTab: tab("contacts"),
     SequenceTab: tab("sequence"),
     InboxWithReply: ({ onDraftReply: _, ...props }: { onDraftReply?: unknown }) =>
       tab("inbox")(props),
@@ -1763,45 +1762,18 @@ it.each(["results", "shortlist", "contacts"] as const)(
         viewName === "shortlist" ? "Shortlist" : "Contacts",
       );
     if (viewName === "contacts") {
+      // One unified table: contact details live in the person's panel, not in table cells.
       expect(
         [...view.container.querySelectorAll("thead th")].map((cell) => cell.textContent),
-      ).toContain("Email");
+      ).toEqual(["Name", "Current role", "Location", "Activity", "Fit", "Actions"]);
       expect(api.correspondence).toHaveBeenCalledExactlyOnceWith({
         groupId: "group-1",
         view: "contacts",
       });
-      expect(view.container.querySelector("tbody")?.textContent).toContain("enriched@example.test");
-      expect(view.container.querySelector("tbody")?.textContent).toContain("+15550001000");
-      expect(view.container.querySelector("tbody")?.textContent).toContain("High probability");
-      expect((await api.correspondence.mock.results[0]!.value).contacts[0].emails[0].status).toBe(
-        "HIGH_PROBABILITY",
-      );
-      expect(
-        [...view.container.querySelectorAll("thead th")].map((cell) => cell.textContent),
-      ).toContain("Provider status");
       expect(view.container.querySelector("tbody")?.textContent).not.toContain(
-        "Verified by provider",
+        "enriched@example.test",
       );
-      expect(view.container.querySelector("tbody")?.textContent).toContain(
-        "Connected contact service",
-      );
-      expect(view.container.querySelector("tbody")?.textContent).not.toContain(
-        "other@example.test",
-      );
-      expect(view.container.querySelector("tbody")?.textContent).toContain("saved@example.test");
-      expect(view.container.querySelector("tbody")?.textContent).toContain("Not verified");
-      expect(
-        view.container.querySelector('tbody a[href="https://evidence.example.test/contact"]'),
-      ).not.toBeNull();
-      await view.click("Find email");
-      expect(view.discuss).toHaveBeenCalledWith(
-        expect.objectContaining({
-          threadId: "thread-1",
-          roleId: role.id,
-          candidateKey: candidate.candidateKey,
-          intent: "contact_lookup",
-        }),
-      );
+      expect(view.container.querySelector("tbody")?.textContent).toContain("Email draft");
     }
     if (viewName !== "contacts") expect(api.correspondence).not.toHaveBeenCalled();
     expect(api.listAssessments).not.toHaveBeenCalled();
@@ -1822,7 +1794,7 @@ it.each(["results", "shortlist", "contacts"] as const)(
     await act(async () =>
       view.container
         .querySelector<HTMLButtonElement>(
-          ".hire-candidate-identity, .hire-table button[aria-haspopup='dialog']",
+          ".hire-candidate-identity, .hire-table button[aria-haspopup='dialog'], section[aria-label='Contacts'] tbody button[aria-haspopup='dialog']",
         )!
         .click(),
     );
@@ -1965,7 +1937,7 @@ it("refreshes contacts from native receipts and ignores a late response from ano
     view: "contacts",
     groupId: "group-1",
   });
-  expect(view.container.textContent).toContain("Loading contact details…");
+  expect(view.container.textContent).not.toContain("Could not load contact details");
   const nextRole = {
     ...role,
     id: "role-2",
@@ -1988,14 +1960,12 @@ it("refreshes contacts from native receipts and ignores a late response from ano
   expect(api.correspondence).toHaveBeenLastCalledWith({ groupId: "group-2", view: "contacts" });
   await act(async () => finish(saved));
   expect(view.container.textContent).not.toContain("current@example.test");
-  expect(view.container.textContent).toContain("Contact details have not been checked yet.");
   api.correspondence.mockResolvedValueOnce(saved);
   await view.render("thread-2", 1, false, undefined, {
     presentation: "workspace",
     view: "contacts",
     groupId: "group-2",
   });
-  expect(view.container.querySelector("tbody")?.textContent).toContain("current@example.test");
   expect(api.correspondence).toHaveBeenCalledTimes(3);
   api.correspondence.mockResolvedValueOnce({
     ...saved,
@@ -2006,17 +1976,16 @@ it("refreshes contacts from native receipts and ignores a late response from ano
     view: "contacts",
     groupId: "group-2",
   });
-  expect(view.container.querySelector("tbody")?.textContent).not.toContain("current@example.test");
-  expect(view.container.querySelector("tbody")?.textContent).toContain("Not returned");
   api.correspondence.mockRejectedValueOnce(new Error("Read unavailable"));
   await view.render("thread-2", 3, false, undefined, {
     presentation: "workspace",
     view: "contacts",
     groupId: "group-2",
   });
-  expect(view.container.textContent).toContain(
-    "Could not load contact details. Refresh to try again.",
+  expect(view.container.querySelector('[role="alert"]')?.textContent).toContain(
+    "Could not load contact details",
   );
+  expect(view.container.textContent).toContain("Retry");
   expect(view.container.querySelector("tbody")?.textContent).not.toContain("current@example.test");
   expect(api.setCandidateShortlist).not.toHaveBeenCalled();
   expect(api.answer).not.toHaveBeenCalled();
@@ -8673,14 +8642,11 @@ it("keeps workspace shortlist and contacts navigation out of saved filters and c
   );
   expect(view.container.querySelector("tbody")?.textContent).toContain("Nav Person");
   expect([...view.container.querySelectorAll("thead th")].map((cell) => cell.textContent)).toEqual([
-    "Candidate",
+    "Name",
     "Current role",
-    "Company",
     "Location",
-    "Email",
-    "Phone",
-    "Provider status",
-    "Shortlist",
+    "Activity",
+    "Fit",
     "Actions",
   ]);
   expect(api.setCandidateShortlist).not.toHaveBeenCalled();
@@ -8842,7 +8808,8 @@ it("mounts the role tabs for a CRM-bound conversation and keeps stored CRM views
   expect(view.container.textContent).toContain("Stored CRM person");
   api.getWorkspace.mockResolvedValue({ role, revision, crmTarget });
   api.crmData.mockClear();
-  for (const tab of ["contacts", "sequence", "inbox", "interview"] as const) {
+  // Contacts is the role's unified candidate list, so only the mail views mount a role tab.
+  for (const tab of ["sequence", "inbox", "interview"] as const) {
     await view.render("thread-1", 1, false, undefined, {
       groupId: "group-1",
       crmBrowse: { ...browse, view: tab },

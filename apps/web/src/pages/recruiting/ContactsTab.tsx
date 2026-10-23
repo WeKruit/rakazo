@@ -236,6 +236,11 @@ export function ContactsTab(
           <Trans>Some saved contact details could not be displayed.</Trans>
         </p>
       ) : null}
+      {autumn && saved.data?.status === "not_checked" ? (
+        <p className="text-muted-foreground">
+          <Trans>Contact details have not been checked yet.</Trans>
+        </p>
+      ) : null}
       {rows.length ? (
         <div className="max-h-[70vh] overflow-auto rounded-xl border border-border">
           <table className="w-full min-w-[960px] table-fixed border-collapse text-left text-sm">
