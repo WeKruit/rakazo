@@ -649,6 +649,16 @@ export const appContract = {
           .nullable(),
       ),
     reviseRole: oc.input(ReviseRecruitingRoleInput).output(recruitingWorkspace),
+    archiveRole: oc
+      .input(
+        z.strictObject({
+          roleId: RecruitingId,
+          expectedRevision: z.number().int().min(1),
+          archived: z.boolean(),
+          force: z.boolean().optional(),
+        }),
+      )
+      .output(recruitingWorkspace),
     confirmBrief: oc.input(ConfirmRecruitingBriefInput).output(recruitingWorkspace),
     editCriteria: oc.input(EditRecruitingCriteriaInput).output(recruitingWorkspace),
     listAssessments: oc

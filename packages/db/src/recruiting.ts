@@ -477,8 +477,13 @@ async function roleSnapshot(
   });
   await validateDefinition(tx, actor, revision, authorizedThread, authorizedRun);
   if (revision.brief) validateRecruitingBrief(revision.brief, revision);
-  const { crmBindingEffectId: _crm, ...publicRole } = role as RecruitingRole & {
+  const {
+    crmBindingEffectId: _crm,
+    archivedAt: _archived,
+    ...publicRole
+  } = role as RecruitingRole & {
     crmBindingEffectId?: string | null;
+    archivedAt?: Date | null;
   };
   return { role: RecruitingRoleSchema.parse(publicRole), revision };
 }
@@ -1126,7 +1131,64 @@ export async function editRecruitingCriteria(
 }
 
 export type RecruitingRoleMutationInput = Exclude<RecruitingRoleToolInput, { operation: "read" }>;
-type RecruitingRoleDefinitionInput = Exclude<RecruitingRoleMutationInput, { operation: "update" }>;
+type RoleArchiveInput = Extract<
+  RecruitingRoleMutationInput,
+  { operation: "archive" | "unarchive" }
+>;
+type RecruitingRoleDefinitionInput = Exclude<
+  RecruitingRoleMutationInput,
+  { operation: "update" | "archive" | "unarchive" }
+>;
+
+/** Reversible hide: CAS on revision, no new revision. A role with candidates or research needs force. */
+async function archiveRoleInTransaction(
+  tx: Tx,
+  actor: Actor,
+  input: RoleArchiveInput,
+): Promise<RoleSnapshot> {
+  const role = await requireRole(tx, actor, input.roleId, true);
+  if (role.revision !== input.expectedRevision) throw new RecruitingConflictError();
+  const archiving = input.operation === "archive";
+  if (archiving && !input.force) {
+    const [candidates, tasks] = await Promise.all([
+      tx.recruitingCandidate.count({ where: { roleId: role.id } }),
+      tx.recruitingResearchTask.count({ where: { roleId: role.id } }),
+    ]);
+    if (candidates > 0 || tasks > 0)
+      throw new RecruitingConflictError("Role has candidates or research; pass force to archive");
+  }
+  const changed = await tx.recruitingRole.updateMany({
+    where: {
+      id: role.id,
+      spaceId: actor.spaceId,
+      userId: actor.userId,
+      revision: input.expectedRevision,
+    },
+    data: { archivedAt: archiving ? new Date() : null },
+  });
+  if (changed.count !== 1) throw new RecruitingConflictError();
+  return roleSnapshot(tx, actor, await requireRole(tx, actor, role.id));
+}
+
+export async function setRecruitingRoleArchived(
+  prisma: PrismaClient,
+  actor: Actor,
+  untrusted: Omit<RoleArchiveInput, "intent"> & { intent?: RoleArchiveInput["intent"] },
+): Promise<RoleSnapshot> {
+  const input = RecruitingRoleToolInputSchema.parse({
+    intent: { basis: "direct", quote: "archive" },
+    ...untrusted,
+  }) as RoleArchiveInput;
+  return prisma.$transaction((tx) => archiveRoleInTransaction(tx, actor, input));
+}
+
+/** Roles the UI/agent may list; archived roles stay readable by id (requireRole). */
+export function listRecruitingRoles(prisma: PrismaClient, actor: Actor) {
+  return prisma.recruitingRole.findMany({
+    where: { spaceId: actor.spaceId, userId: actor.userId, archivedAt: null },
+    orderBy: { id: "asc" },
+  });
+}
 
 /** Full revise input: the expected revision with only the supplied fields changed. */
 export function mergeRecruitingRoleUpdate(
@@ -2188,10 +2250,19 @@ export async function executeRecruitingRoleMutation(
     throw new IsolationError();
   // A partial update is merged onto its expected revision before materials load; the locked
   // transaction below still rejects it if that revision is no longer current.
+  const archiveInput =
+    input.operation === "archive" || input.operation === "unarchive" ? input : undefined;
   let definitionInput: RecruitingRoleDefinitionInput | undefined =
-    input.operation === "update" ? undefined : input;
+    input.operation === "update" || input.operation === "archive" || input.operation === "unarchive"
+      ? undefined
+      : input;
   let materialSource: Pick<RecruitingRoleRevision, "sourceRefs" | "criteria"> | undefined =
-    input.operation === "bind" || input.operation === "update" ? undefined : input;
+    input.operation === "bind" ||
+    input.operation === "update" ||
+    input.operation === "archive" ||
+    input.operation === "unarchive"
+      ? undefined
+      : input;
   if (input.operation === "update") {
     const current = await prisma.$transaction((tx) =>
       requireRole(tx, actor, input.roleId).then((role) => roleSnapshot(tx, actor, role)),
@@ -2270,7 +2341,7 @@ export async function executeRecruitingRoleMutation(
             )
         )
           throw new IsolationError();
-        if (saved.status === "saved" && input.operation !== "bind")
+        if (saved.status === "saved" && input.operation !== "bind" && !archiveInput)
           await validateReadSources(tx, actor, definitionSources(workspace.revision), artifacts);
         else await validateDefinition(tx, actor, workspace.revision);
       }
@@ -2282,14 +2353,14 @@ export async function executeRecruitingRoleMutation(
             (input.operation === "create"
               ? workspace.role.revision !== 1 || workspace.role.sourceThreadId !== thread.id
               : workspace.role.id !== input.roleId ||
-                workspace.role.revision !== input.expectedRevision + 1))
+                workspace.role.revision !== input.expectedRevision + (archiveInput ? 0 : 1)))
       )
         throw new IsolationError();
       return { status: saved.status, workspace, source, changed: saved.changed };
     }
     requireResearchLease(run, context);
     if (effect.status !== "executing") throw new IsolationError();
-    if (!definitionInput) throw new RecruitingConflictError();
+    if (!definitionInput && !archiveInput) throw new RecruitingConflictError();
     const { source: humanSource, message: source } = await requireCurrentHumanSource(
       tx,
       actor,
@@ -2302,7 +2373,7 @@ export async function executeRecruitingRoleMutation(
       ? await requireRole(tx, actor, thread.activeRecruitingRoleId, true, thread)
       : null;
     const current = currentRole ? await roleSnapshot(tx, actor, currentRole, thread) : null;
-    if (definitionInput.operation === "revise") {
+    if (definitionInput?.operation === "revise") {
       if (current?.role.id !== definitionInput.roleId) throw new IsolationError();
       if (current.role.revision !== definitionInput.expectedRevision)
         throw new RecruitingConflictError();
@@ -2330,7 +2401,11 @@ export async function executeRecruitingRoleMutation(
       };
     else {
       let workspace: RoleSnapshot | null;
-      if (definitionInput.operation === "bind") {
+      if (archiveInput) {
+        workspace = await archiveRoleInTransaction(tx, actor, archiveInput);
+      } else if (!definitionInput) {
+        throw new RecruitingConflictError();
+      } else if (definitionInput.operation === "bind") {
         workspace = await bindRoleInTransaction(tx, actor, {
           threadId: run.threadId,
           roleId: definitionInput.roleId,
