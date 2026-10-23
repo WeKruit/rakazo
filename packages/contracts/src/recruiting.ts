@@ -338,7 +338,7 @@ export const RecruitingRoleSchema = z.strictObject({
   revision: Revision,
   currentRevisionId: RecruitingId,
   /** Playbook stage (intake | calibration_10 | feedback | scale | enrichment | outreach | replies | screening | submission | interview | closed). */
-  playbookStage: z.string().default("intake"),
+  playbookStage: z.string().optional(),
 });
 export type RecruitingRole = z.infer<typeof RecruitingRoleSchema>;
 
