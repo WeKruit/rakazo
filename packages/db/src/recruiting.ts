@@ -9803,7 +9803,10 @@ export async function listRecruitingCandidates(
             ...(input.actionId !== undefined ? { actionId: input.actionId } : {}),
           },
           select: { effectId: true },
-          take: 2,
+          // Ranks and scores compare only within one saved result; with several results the
+          // newest one is the role's current ordering (older pages sort after it, unscored).
+          orderBy: [{ observedAt: "desc" }, { effectId: "desc" }],
+          take: 1,
         });
         if (pages.length === 1) rankDomainPageId = pages[0]!.effectId;
       }
