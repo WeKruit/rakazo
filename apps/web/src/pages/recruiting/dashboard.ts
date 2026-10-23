@@ -16,11 +16,8 @@ export type RoleSummary = {
   roleId: string;
   /** Autumn shortlist size for the role (`listCandidates({ shortlisted: true }).total`). */
   shortlisted: number;
-  /**
-   * When each loaded shortlisted candidate was first discovered. There is no shortlist timestamp,
-   * so the weekly chart buckets shortlisted people by the week they were first found.
-   */
-  shortlistedDiscoveredAt: readonly (string | null)[];
+  /** When each loaded shortlisted candidate was shortlisted (first found, for rows without a time). */
+  shortlistedDates: readonly (string | null)[];
   /** People in the role's launched outreach campaign; null without a readable campaign. */
   contacted: number | null;
   /** CRM contacts whose outreach status is `replied`; null without a readable CRM binding. */
@@ -121,9 +118,9 @@ export function roleSummary(
     groupId,
     roleId,
     shortlisted: shortlist.total,
-    shortlistedDiscoveredAt: shortlist.items
+    shortlistedDates: shortlist.items
       .filter((item) => item.shortlisted)
-      .map((item) => item.firstDiscoveredAt),
+      .map((item) => item.shortlistedAt ?? item.firstDiscoveredAt),
     replied: crmReplied(candidates),
     ...campaignStages(campaign),
   };

@@ -1641,6 +1641,7 @@ model RecruitingCandidate {
   role RecruitingRole @relation(fields: [roleId], references: [id], onDelete: Cascade)
   candidateKey String
   shortlisted Boolean @default(false)
+  shortlistedAt DateTime?
   consideration Json?
   revision Int @default(0)
   shortlistMessageId String?

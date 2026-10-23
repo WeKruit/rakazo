@@ -24,7 +24,7 @@ import { InterviewTab } from "./InterviewTab";
 import { EducationTimeline, ExperienceTimeline } from "./ProfileTimeline";
 import { candidateSections, initials, linkedinHandle, sourceLabel } from "./profile";
 import { statusText } from "./shared";
-import { reminderCandidateKey, TasksTab } from "./TasksTab";
+import { reminderCandidateKeys, TasksTab } from "./TasksTab";
 
 const SKILLS_SHOWN = 12;
 
@@ -104,10 +104,11 @@ export function RecruitingDetailPanel({
 
   if (!current || !person) return null;
   const crm = current.crm !== false;
-  const reminderKey = reminderCandidateKey(
+  const reminderKeys = reminderCandidateKeys(
     current.candidate?.candidateKey,
     crm && person.candidateId,
   );
+  const reminderKey = reminderKeys[0] ?? null;
   const views: { view: RecruitingDetailView; label: string }[] = [
     { view: "contact", label: t`Profile` },
     { view: "activity", label: t`Activity` },
@@ -363,7 +364,12 @@ export function RecruitingDetailPanel({
               candidateKey={current.candidate?.candidateKey}
             />
           ) : view === "tasks" && reminderKey ? (
-            <TasksTab key={reminderKey} roleId={current.role.roleId} candidateKey={reminderKey} />
+            <TasksTab
+              key={reminderKey}
+              roleId={current.role.roleId}
+              candidateKey={reminderKey}
+              candidateKeys={reminderKeys}
+            />
           ) : view === "thread" ? (
             <InboxWithReply
               key={person.candidateId}

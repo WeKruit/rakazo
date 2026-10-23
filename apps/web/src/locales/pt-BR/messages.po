@@ -1035,10 +1035,6 @@ msgstr ""
 msgid "Built-in"
 msgstr "Integrado"
 
-#: src/pages/recruiting/HomeDashboard.tsx
-msgid "By week found"
-msgstr ""
-
 #: src/pages/recruiting/InterviewTab.tsx
 msgid "Calendar"
 msgstr ""

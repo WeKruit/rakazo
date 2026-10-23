@@ -1280,6 +1280,7 @@ export const RecruitingCandidateSchema = z.strictObject({
   candidateKey: RecruitingId,
   ...RecruitingCandidateProfileSchema.shape,
   shortlisted: z.boolean(),
+  shortlistedAt: IsoDate.nullable(),
   /** Provider match cells; rank/score are comparable only within one saved result. */
   match: z
     .strictObject({
@@ -1369,6 +1370,7 @@ export const RecruitingRoleCandidateSchema = z.strictObject({
     })
     .nullable(),
   shortlisted: z.boolean(),
+  shortlistedAt: IsoDate.nullable(),
 });
 export type RecruitingRoleCandidate = z.infer<typeof RecruitingRoleCandidateSchema>;
 export const RecruitingRoleCandidatesOutputSchema = z.strictObject({
@@ -2149,6 +2151,8 @@ export const RecruitingReminderSchema = z.strictObject({
 export type RecruitingReminder = z.infer<typeof RecruitingReminderSchema>;
 export const ListRecruitingRemindersInput = z.strictObject({
   candidateKey: ReminderCandidateKey.optional(),
+  /** Match any of these keys (OR with `candidateKey`), e.g. a person's search-result and CRM keys. */
+  candidateKeys: z.array(ReminderCandidateKey).max(10).optional(),
   roleId: RecruitingId.optional(),
   status: RecruitingReminderStatusSchema.optional(),
   dueBefore: IsoDate.optional(),

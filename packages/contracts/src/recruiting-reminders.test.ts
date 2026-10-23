@@ -17,6 +17,19 @@ describe("recruiting reminder contracts", () => {
       UpdateRecruitingReminderInput.parse({ id: "r1", status: "done", note: null }),
     ).toBeTruthy();
   });
+  it("lists by several candidate keys, at most ten, in the tool input too", () => {
+    const keys = ["autumn:k1", "crm:2"];
+    expect(ListRecruitingRemindersInput.parse({ candidateKeys: keys }).candidateKeys).toEqual(keys);
+    expect(
+      RecruitingRemindersToolInputSchema.parse({ operation: "list", candidateKey: "crm:2" }),
+    ).toBeTruthy();
+    expect(
+      ListRecruitingRemindersInput.safeParse({
+        candidateKeys: Array.from({ length: 11 }, (_, i) => `crm:${i}`),
+      }).success,
+    ).toBe(false);
+    expect(ListRecruitingRemindersInput.safeParse({ candidateKeys: ["bad"] }).success).toBe(false);
+  });
   it("rejects bad shapes", () => {
     expect(() => CreateRecruitingReminderInput.parse({ title: "x".repeat(201), dueAt })).toThrow();
     expect(() => CreateRecruitingReminderInput.parse({ title: "x", dueAt: "tomorrow" })).toThrow();

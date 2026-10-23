@@ -10,6 +10,7 @@ import {
   openTasks,
   outreachFunnel,
   recentRoles,
+  roleSummary,
   weekStart,
 } from "./dashboard";
 
@@ -17,7 +18,7 @@ const role = (patch: Partial<RoleSummary> = {}): RoleSummary => ({
   groupId: "g",
   roleId: "r",
   shortlisted: 0,
-  shortlistedDiscoveredAt: [],
+  shortlistedDates: [],
   contacted: null,
   replied: null,
   interested: null,

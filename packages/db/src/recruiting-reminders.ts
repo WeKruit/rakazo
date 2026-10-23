@@ -52,9 +52,12 @@ export async function listRecruitingReminders(
   input: ListRecruitingRemindersInput,
   now = new Date(),
 ) {
+  const keys = [...new Set([input.candidateKey, ...(input.candidateKeys ?? [])])].filter(
+    (key): key is string => !!key,
+  );
   const where = {
     ...owned(actor),
-    ...(input.candidateKey ? { candidateKey: input.candidateKey } : {}),
+    ...(keys.length ? { candidateKey: { in: keys } } : {}),
     ...(input.roleId ? { roleId: input.roleId } : {}),
     ...(input.status ? { status: input.status } : {}),
     ...(input.dueBefore ? { dueAt: { lt: new Date(input.dueBefore) } } : {}),

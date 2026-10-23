@@ -2948,6 +2948,7 @@ export async function mergeRoleCandidates(
         },
         crm: crmSide(contact),
         shortlisted: candidate.shortlisted,
+        shortlistedAt: candidate.shortlistedAt,
       });
     }
   if (autumnPhase && autumn.nextCursor)
@@ -2966,6 +2967,7 @@ export async function mergeRoleCandidates(
         autumn: null,
         crm: crmSide(row),
         shortlisted: false,
+        shortlistedAt: null,
       });
     if (offset + page.length < visibleCrmOnly.length)
       nextCursor = roleCandidatesCursor.write(scope, { o: offset + page.length });

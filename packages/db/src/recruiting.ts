@@ -7475,7 +7475,9 @@ function candidateIndexQuery(
   ),`
       : Prisma.empty
   } base AS (
-    SELECT c."roleId", c."candidateKey", c."shortlisted", c."revision", c."consideration",
+    SELECT c."roleId", c."candidateKey", c."shortlisted",
+      to_char(c."shortlistedAt", 'YYYY-MM-DD"T"HH24:MI:SS.MS"Z"') AS "shortlistedAt",
+      c."revision", c."consideration",
       ${includeMatches ? Prisma.sql`match."rankValue", match."tierValue", match."scoreValue",` : Prisma.empty}
       ${matchSort ? Prisma.sql`match.${Prisma.raw(`"${sort}Value"`)} AS "matchValue",` : Prisma.empty}
       p."pageId" AS "sourcePageId", p."rowIndex" AS "sourceRowIndex",
@@ -7609,6 +7611,7 @@ type CandidateQueryRow = {
   evidenceUrls: unknown;
   issues: unknown;
   shortlisted: boolean;
+  shortlistedAt: string | null;
   revision: number;
   discoveryCount: number;
   firstDiscoveredAt: string | null;
@@ -10273,6 +10276,7 @@ async function setCandidateShortlistInTransaction(
     },
     data: {
       shortlisted: input.shortlisted,
+      shortlistedAt: input.shortlisted ? (candidate.shortlistedAt ?? new Date()) : null,
       revision: candidate.revision + 1,
       shortlistMessageId: message.id,
     },
