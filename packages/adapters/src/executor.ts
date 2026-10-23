@@ -174,6 +174,7 @@ import {
   readNativeReplyEmailProof,
   recordUsage,
   recruitingResearchSnapshot,
+  resolveRecruitingCampaignLead,
   resolveRecruitingCrmImport,
   resolveRecruitingReply,
   SpaceLimitError,
@@ -5008,8 +5009,13 @@ export function createRunExecutor(deps: ExecutorDeps) {
               error: "This reply connection does not support the required provider contract.",
               dispatched: false,
             };
+          // A recipient who is a lead of the role's campaign but has no CRM record: the reply
+          // takes the plain native path (original-email proof + confirmation card).
+          let campaignLeadReply:
+            | NonNullable<Awaited<ReturnType<typeof resolveRecruitingCampaignLead>>>
+            | undefined;
           const unlinkedReplyError = async (bind = false) => {
-            if (!replyRoute || replySelection) return;
+            if (!replyRoute || replySelection || campaignLeadReply) return;
             const current = await deps.prisma.thread.findUniqueOrThrow({
               where: { id: thread.id },
               select: { activeRecruitingRoleId: true },
@@ -5022,23 +5028,44 @@ export function createRunExecutor(deps: ExecutorDeps) {
                 replyRoute.resourceId &&
                 typeof replyRoute.resourceRevision === "number"
               ) {
+                const target = {
+                  mcpServerId: replyRoute.resourceId,
+                  serverRevision: replyRoute.resourceRevision,
+                };
+                let crmFailure: unknown;
                 try {
                   replySelection =
                     (await resolveRecruitingReply(deps.prisma, researchActor.actor, crmContext, {
-                      mcpServerId: replyRoute.resourceId,
-                      serverRevision: replyRoute.resourceRevision,
+                      ...target,
                       replyToEmailId: request.reply_to_uuid,
                       recipient: request.to,
                     })) ?? undefined;
                   if (replySelection) return;
                 } catch (error) {
+                  crmFailure = error;
+                }
+                try {
+                  campaignLeadReply =
+                    (await resolveRecruitingCampaignLead(
+                      deps.prisma,
+                      researchActor.actor,
+                      crmContext,
+                      { ...target, recipient: request.to },
+                    )) ?? undefined;
+                  if (campaignLeadReply) return;
+                } catch (error) {
                   return { error: sanitizeConnectorError(error, runSecrets), dispatched: false };
                 }
+                if (crmFailure && !(crmFailure instanceof IsolationError))
+                  return {
+                    error: sanitizeConnectorError(crmFailure, runSecrets),
+                    dispatched: false,
+                  };
               }
             }
             return {
               error:
-                "Read this candidate's current CRM context and canonical role membership before proposing this reply.",
+                "This address is not a candidate or lead of this role. Read the role's campaign leads, or the person's CRM record and role membership, in this task before proposing the reply.",
               dispatched: false,
             };
           };

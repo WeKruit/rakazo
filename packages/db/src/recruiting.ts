@@ -9375,6 +9375,88 @@ export async function resolveRecruitingReply(
   });
 }
 
+/**
+ * A reply recipient who is a lead of the role's own outreach campaign. Roles without a CRM
+ * record for the person (or with no CRM role linked at all) still get the native reply path:
+ * the proof is the role's campaign binding plus either this run's list_leads read naming the
+ * address or the binding's own recorded leads. Returns null when the address is neither.
+ */
+export async function resolveRecruitingCampaignLead(
+  prisma: PrismaClient,
+  actor: Actor,
+  trusted: ResearchLease,
+  input: { mcpServerId: string; serverRevision: number; recipient: string },
+) {
+  return prisma.$transaction(async (tx) => {
+    const { run, thread } = await lockLiveRecruitingRun(tx, actor, trusted.runId, false);
+    requireResearchLease(run, trusted);
+    if (!thread.activeRecruitingRoleId) return null;
+    const role = await requireRole(tx, actor, thread.activeRecruitingRoleId, true, thread);
+    const binding = await tx.externalEffect.findUnique({
+      where: { idempotencyKey: `instantly-role-campaign:${input.mcpServerId}:${role.id}` },
+    });
+    if (
+      !binding ||
+      binding.spaceId !== actor.spaceId ||
+      binding.kind !== "instantly_role_campaign" ||
+      binding.status !== "completed"
+    )
+      return null;
+    const bound = binding.result as {
+      campaignId?: unknown;
+      eaccount?: unknown;
+      leads?: Record<string, { leadId?: unknown; email?: unknown }>;
+    } | null;
+    const campaignId = bound?.campaignId;
+    if (typeof campaignId !== "string" || !campaignId) return null;
+    const email = input.recipient.trim().toLowerCase();
+    if (!email) return null;
+    const same = (value: unknown) =>
+      typeof value === "string" && value.trim().toLowerCase() === email;
+    const leadOf = (lead: unknown) => {
+      const row = lead as { email?: unknown; campaign?: unknown; id?: unknown } | null;
+      return Boolean(
+        row &&
+          typeof row === "object" &&
+          same(row.email) &&
+          (row.campaign === undefined || row.campaign === null || row.campaign === campaignId),
+      );
+    };
+    let leadId: string | null = null;
+    const proof = await nativeMcpReadProof(
+      tx,
+      actor,
+      run.id,
+      {
+        connectorId: "mcp",
+        resourceId: input.mcpServerId,
+        resourceRevision: input.serverRevision,
+        toolName: "native_instantly_list_leads",
+      },
+      (args, result) => {
+        if (args.campaign_id !== campaignId && !same(args.email)) return false;
+        const items = (mcpObject(result)?.result as { items?: unknown } | undefined)?.items;
+        const lead = Array.isArray(items) ? items.find(leadOf) : undefined;
+        if (!lead) return false;
+        leadId = typeof lead.id === "string" ? lead.id : null;
+        return true;
+      },
+    );
+    const recorded = Object.values(bound?.leads ?? {}).find((lead) => same(lead?.email));
+    if (!proof && !recorded) return null;
+    return {
+      roleId: role.id,
+      campaignId,
+      eaccount: typeof bound?.eaccount === "string" ? bound.eaccount : null,
+      email,
+      leadId: leadId ?? (typeof recorded?.leadId === "string" ? recorded.leadId : null),
+      // Stable surrogate for a person who has no CRM candidate id.
+      identity: `lead:${campaignId}:${email}`,
+      leadReadEffectId: proof?.effectId ?? binding.id,
+    };
+  });
+}
+
 export type RecruitingReplyNative = {
   effectKind: string;
   effectRequest: unknown;

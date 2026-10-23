@@ -39,7 +39,12 @@ vi.mock("./schedule-tools.js", async (original) => ({
   prepareScheduleUpdateFromTool: schedulePrepare,
   updateScheduleFromTool: scheduleUpdate,
 }));
-const recruitingReply = vi.hoisted(() => ({ resolve: vi.fn(), admit: vi.fn(), claim: vi.fn() }));
+const recruitingReply = vi.hoisted(() => ({
+  resolve: vi.fn(),
+  lead: vi.fn(),
+  admit: vi.fn(),
+  claim: vi.fn(),
+}));
 const recruitingCrm = vi.hoisted(() => ({
   read: vi.fn(),
   prepare: vi.fn(),
@@ -76,6 +81,7 @@ vi.mock("@rakazo/db", async (importOriginal) => ({
   prepareNativeRecruitingShortlist: nativeShortlist.prepare,
   executeNativeRecruitingShortlist: nativeShortlist.execute,
   resolveRecruitingReply: recruitingReply.resolve,
+  resolveRecruitingCampaignLead: recruitingReply.lead,
   admitRecruitingReply: recruitingReply.admit,
   claimRecruitingReply: recruitingReply.claim,
 }));
@@ -1776,11 +1782,42 @@ describe.each([false, true])("native outbound draft approval, catalog=%s", (cata
       } as never);
     await f.run();
     expect(f.results.at(-1)).toMatchObject({
-      error: expect.stringContaining("canonical role membership"),
+      error: expect.stringContaining("not a candidate or lead of this role"),
       dispatched: false,
     });
     expect(f.pauseRunForInput).not.toHaveBeenCalled();
     expect(f.execute).not.toHaveBeenCalled();
+  });
+
+  it("shows the confirmation card for a campaign lead who has no CRM record", async () => {
+    const f = replyFixture();
+    f.prisma.thread.findUniqueOrThrow
+      .mockResolvedValueOnce({ id: "thread-1", groupId: null })
+      .mockResolvedValue({
+        id: "thread-1",
+        groupId: null,
+        activeRecruitingRoleId: "selected-role",
+      } as never);
+    recruitingReply.resolve.mockResolvedValue(null);
+    recruitingReply.lead.mockResolvedValue({
+      roleId: "selected-role",
+      campaignId: "c-1",
+      eaccount: replyArgs.eaccount,
+      email: replyArgs.to,
+      leadId: "lead-1",
+      identity: `lead:c-1:${replyArgs.to}`,
+      leadReadEffectId: "lead-read",
+    });
+    await f.run();
+    expect(recruitingReply.lead).toHaveBeenCalledWith(
+      expect.anything(),
+      expect.anything(),
+      expect.anything(),
+      { mcpServerId: "resource-1", serverRevision: 1, recipient: replyArgs.to },
+    );
+    expect(f.pauseRunForInput).toHaveBeenCalledOnce();
+    expect(f.execute).not.toHaveBeenCalled();
+    expect(JSON.stringify(f.pauseRunForInput.mock.calls[0]![0])).not.toContain("Instantly");
   });
 
   it("rechecks a newly selected recruiting role at the final raw-reply claim", async () => {
@@ -1797,7 +1834,7 @@ describe.each([false, true])("native outbound draft approval, catalog=%s", (cata
     });
     await f.run();
     expect(f.results.at(-1)).toMatchObject({
-      error: expect.stringContaining("canonical role membership"),
+      error: expect.stringContaining("not a candidate or lead of this role"),
       dispatched: false,
     });
     expect(f.execute).not.toHaveBeenCalled();
