@@ -1708,7 +1708,9 @@ describe("MCP connector session cache", () => {
         },
         context,
       ),
-    ).rejects.toThrow("unknown or not authorized");
+    ).rejects.toThrow(
+      /Unknown tool ID or name in this bot's current catalog\..*Search again with group and query/,
+    );
     await expect(
       connector.resolveCall(
         {
