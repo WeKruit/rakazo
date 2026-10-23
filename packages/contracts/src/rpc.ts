@@ -232,6 +232,8 @@ const threadSendInput = threadTarget
     replyToMessageId: Id.optional(),
     replyQuote: z.string().trim().min(1).max(REPLY_QUOTE_MAX_LENGTH).optional(),
     clientNonce: z.string().min(1).max(200).optional(),
+    /** Interject: interrupt the bot's live reply with this message instead of waiting for it. */
+    interrupt: z.boolean().optional(),
   })
   .superRefine((input, ctx) => {
     if (input.addressing && !input.groupId) {
