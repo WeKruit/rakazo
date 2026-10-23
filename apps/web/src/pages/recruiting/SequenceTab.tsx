@@ -1,8 +1,9 @@
 import { Trans, useLingui } from "@lingui/react/macro";
 import type { RecruitingRoleCampaign } from "@rakazo/contracts";
-import { Badge } from "@rakazo/ui-web";
+import { Badge, Button } from "@rakazo/ui-web";
 import { useState } from "react";
 import { rpc } from "../../lib/rpc";
+import { useRecruitingDetail } from "./detail";
 import type { RecruitingTabProps } from "./shared";
 import {
   CrmGate,
@@ -13,6 +14,7 @@ import {
   TabLoading,
   TabNotice,
   tabCacheSlot,
+  useCrmCandidateCounts,
   useCrmData,
   useCrmPages,
   useKeyedRead,
@@ -96,6 +98,7 @@ function RoleCampaign({ read }: { read: ReturnType<typeof useRoleCampaign> }) {
 /** Stored outreach state for the role: campaigns, per-candidate status and queued/sent messages. */
 export function SequenceTab(props: RecruitingTabProps) {
   const { t } = useLingui();
+  const detail = useRecruitingDetail();
   const crm = useRoleCrm(props);
   const roleCampaign = useRoleCampaign(props);
   const instantly = useInstantlyStatus();
@@ -121,9 +124,13 @@ export function SequenceTab(props: RecruitingTabProps) {
     props,
   );
   const details = useCrmData(crm, "candidateDetails", candidateId ? { candidateId } : null, props);
-  const counts = new Map<string, number>();
-  for (const person of people.data?.items ?? [])
-    counts.set(person.outreachStatus, (counts.get(person.outreachStatus) ?? 0) + 1);
+  const totals = useCrmCandidateCounts(
+    crm,
+    ready ? { crmRoleId: ready.crmRoleId } : null,
+    props,
+    (person) => person.outreachStatus,
+  );
+  const counts = totals.data?.counts ?? new Map<string, number>();
   const selected = people.data?.items.find((person) => person.candidateId === candidateId);
   return (
     <section aria-label={t`Sequence`}>
@@ -164,7 +171,7 @@ export function SequenceTab(props: RecruitingTabProps) {
                 </tbody>
               </table>
             </div>
-          ) : (
+          ) : roleCampaign.data?.campaign ? null : (
             <TabNotice>
               <Trans>No stored campaign associations were returned for this role.</Trans>
             </TabNotice>
@@ -187,7 +194,7 @@ export function SequenceTab(props: RecruitingTabProps) {
                 </li>
               ))}
             </ul>
-          ) : (
+          ) : people.data.items.length ? null : (
             <TabNotice>
               <Trans>No CRM contacts for this role yet.</Trans>
             </TabNotice>
@@ -222,7 +229,29 @@ export function SequenceTab(props: RecruitingTabProps) {
             </ul>
             {selected ? (
               <section aria-label={t`Messages`} className="space-y-3">
-                <h4 className="font-semibold">{selected.name}</h4>
+                <h4 className="font-semibold">
+                  {detail ? (
+                    <Button
+                      variant="link"
+                      className="h-auto p-0 font-semibold"
+                      onClick={() =>
+                        detail.open({
+                          view: "thread",
+                          person: selected,
+                          role: {
+                            roleId: props.roleId,
+                            spaceId: props.spaceId,
+                            conversation: props.conversation,
+                          },
+                        })
+                      }
+                    >
+                      {selected.name}
+                    </Button>
+                  ) : (
+                    selected.name
+                  )}
+                </h4>
                 {details.loading ? <TabLoading /> : null}
                 {details.failed ? (
                   <TabNotice alert>

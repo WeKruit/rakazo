@@ -4087,10 +4087,13 @@ function RecruitingWorkspace({
         (sort === "rank" || sort === "tier" || sort === "score") &&
         !page.sortAvailability[sort]
       ) {
+        // Keep the provider's ordering when one exists: score, then rank, then tier, then name.
+        const fallback =
+          (["score", "rank", "tier"] as const).find((key) => page.sortAvailability[key]) ?? "name";
         setCandidatePage(null);
         setCandidateList((current) => ({
           ...current,
-          filters: { ...current.filters, sort: "name" },
+          filters: { ...current.filters, sort: fallback },
           pageCount: 1,
         }));
         return true;

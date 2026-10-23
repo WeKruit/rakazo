@@ -8,8 +8,9 @@ import { afterEach, beforeEach, expect, it, vi } from "vitest";
 const listCandidates = vi.hoisted(() => vi.fn());
 const crmData = vi.hoisted(() => vi.fn());
 const correspondence = vi.hoisted(() => vi.fn());
+const roleCampaign = vi.hoisted(() => vi.fn());
 vi.mock("../../lib/rpc", () => ({
-  rpc: { recruiting: { listCandidates, crmData, correspondence } },
+  rpc: { recruiting: { listCandidates, crmData, correspondence, roleCampaign } },
 }));
 vi.mock("@lingui/react/macro", () => ({
   Trans: ({ children }: { children: ReactNode }) => children,
@@ -24,6 +25,7 @@ import {
   ContactsTab,
   RecruitingDetailPanel,
   RecruitingDetailProvider,
+  SequenceTab,
   useRecruitingDetailController,
 } from "./index";
 
@@ -73,6 +75,7 @@ let goBack: () => void = () => undefined;
 const setSelectedContact = vi.fn();
 beforeEach(() => {
   vi.stubGlobal("IS_REACT_ACT_ENVIRONMENT", true);
+  roleCampaign.mockResolvedValue({ status: "none" });
   listCandidates.mockResolvedValue({ crmTarget: { bindingEffectId: "binding", target } });
   correspondence.mockResolvedValue({
     roleId: "role-1",
@@ -125,7 +128,13 @@ function Probe() {
   return null;
 }
 
-function Workbench({ onAskChat }: { onAskChat?: (text: string) => void }) {
+function Workbench({
+  onAskChat,
+  tab = "contacts",
+}: {
+  onAskChat?: (text: string) => void;
+  tab?: "contacts" | "sequence";
+}) {
   const detail = useRecruitingDetailController("thread-1");
   return (
     <RecruitingChatContextProvider
@@ -133,7 +142,11 @@ function Workbench({ onAskChat }: { onAskChat?: (text: string) => void }) {
     >
       <RecruitingDetailProvider value={detail}>
         <main>
-          <ContactsTab roleId="role-1" spaceId="space-1" conversation={{ groupId: "group-1" }} />
+          {tab === "sequence" ? (
+            <SequenceTab roleId="role-1" spaceId="space-1" conversation={{ groupId: "group-1" }} />
+          ) : (
+            <ContactsTab roleId="role-1" spaceId="space-1" conversation={{ groupId: "group-1" }} />
+          )}
         </main>
         <aside>
           <RecruitingDetailPanel controller={detail} onAskChat={onAskChat} />
@@ -186,6 +199,27 @@ it("opens a person beside the current view and tells the chat who is open", asyn
   expect(view.querySelector('section[aria-label="Contacts"]')).not.toBeNull();
   expect(location).toBe(`/app/g/group-1?view=contacts&detail=contact.${ADA}`);
   expect(setSelectedContact).toHaveBeenLastCalledWith({ name: "Ada", reference: ADA });
+});
+
+it("opens a Sequence person's emails beside the tab", async () => {
+  const base = crmData.getMockImplementation()!;
+  crmData.mockImplementation(async (input: { operation: string }) =>
+    input.operation === "candidateDetails"
+      ? { ...page("candidateDetails", []), campaignAssociations: { leadCampaigns: [] }, outbox: [] }
+      : base(input),
+  );
+  const view = await mount(<Workbench tab="sequence" />);
+  const row = [...view.querySelectorAll("button[aria-pressed]")].find((item) =>
+    item.textContent?.startsWith("Ada"),
+  ) as HTMLButtonElement;
+  await act(async () => row.click());
+  await settle();
+  const heading = view.querySelector('section[aria-label="Messages"] h4 button') as HTMLElement;
+  await act(async () => heading.click());
+  await settle();
+  await settle();
+  expect(panel(view)?.querySelector("h2")?.textContent).toBe("Ada");
+  expect(location).toContain(`detail=thread.${ADA}`);
 });
 
 it("keeps a back stack and returns focus to the opener on Escape", async () => {

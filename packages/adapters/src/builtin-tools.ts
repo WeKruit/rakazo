@@ -378,6 +378,20 @@ export const builtinAgentTools: ConnectorTool[] = [
     inputSchema: AskUserInputJsonSchema,
   },
   {
+    name: "request_connection",
+    description:
+      "When a task needs one of the user's MCP integrations that is not connected to you, show a Connect card and wait; the task resumes after the user connects. Use instead of asking the user to open settings.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        serverId: { type: "string", minLength: 1 },
+        reason: { type: "string", minLength: 1, maxLength: 240 },
+      },
+      required: ["serverId", "reason"],
+      additionalProperties: false,
+    },
+  },
+  {
     name: "message_user",
     description:
       "Post a short progress update to the user in this chat immediately. Does not end your turn. Use sparingly during long work for high-signal beats (what you are checking, then a result). Do not dump tool logs, thinking, or a play-by-play of every call. HARD LIMIT: cut off silently at 500 characters, so never put your final answer, a report, or any long-form content here \u2014 it will arrive mangled and the user will never see the rest. Always write your complete final answer in your normal reply, not here.",

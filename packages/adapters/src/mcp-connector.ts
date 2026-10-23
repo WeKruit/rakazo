@@ -671,7 +671,10 @@ export class McpConnector implements ConnectorProvider {
       server,
       context,
     );
-    if (!secret || !plaintext) throw new Error("An existing API-key credential is required");
+    if (!secret || !plaintext)
+      throw new Error(
+        `${server.name} is not connected; call request_connection with serverId "${server.id}".`,
+      );
     const material = JSON.parse(plaintext) as OAuthMaterial;
     redactions.push(...oauthMaterialSecrets(material));
     if (material.oauth) throw new Error("An existing API-key credential is required");
