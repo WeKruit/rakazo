@@ -1567,6 +1567,10 @@ msgstr ""
 msgid "Contact details have not been checked yet."
 msgstr ""
 
+#: src/pages/Shell.tsx
+msgid "Contact source"
+msgstr ""
+
 #: src/pages/RecruitingPanel.tsx
 msgid "Contact status"
 msgstr ""
@@ -1941,6 +1945,10 @@ msgstr "Não foi possível carregar este chat."
 msgid "Could not load this file."
 msgstr "Não foi possível carregar este arquivo."
 
+#: src/pages/Shell.tsx
+msgid "Could not load this role’s CRM connection."
+msgstr ""
+
 #: src/components/SoftwareUpdateSection.tsx
 msgid "Could not load update status"
 msgstr ""
@@ -2262,7 +2270,12 @@ msgid "CRM"
 msgstr ""
 
 #: src/pages/RecruitingPanel.tsx
+#: src/pages/Shell.tsx
 msgid "CRM contacts"
+msgstr ""
+
+#: src/pages/Shell.tsx
+msgid "CRM history"
 msgstr ""
 
 #: src/pages/RecruitingPanel.tsx
@@ -2296,6 +2309,10 @@ msgstr ""
 
 #: src/pages/RecruitingPanel.tsx
 msgid "Current role not returned"
+msgstr ""
+
+#: src/pages/Shell.tsx
+msgid "Current search"
 msgstr ""
 
 #: src/pages/shell/bot-credentials.tsx
@@ -4910,6 +4927,7 @@ msgstr ""
 #: src/components/ErrorBoundary.tsx
 #: src/pages/RecruitingPanel.tsx
 #: src/pages/RoutineRunHistory.tsx
+#: src/pages/Shell.tsx
 msgid "Refresh"
 msgstr "Atualizar"
 
@@ -5598,6 +5616,10 @@ msgstr "Pesquisar provedores"
 
 #: src/pages/Shell.tsx
 msgid "Search refinement"
+msgstr ""
+
+#: src/pages/Shell.tsx
+msgid "Search results"
 msgstr ""
 
 #: src/pages/shell/RecruitingNavigation.tsx
@@ -6344,10 +6366,6 @@ msgstr ""
 #: src/pages/Shell.tsx
 msgid "This role changed. Select the candidate again."
 msgstr ""
-
-#: src/pages/RecruitingPanel.tsx
-#~ msgid "This section has not loaded corresponding CRM records. Start a recruiting conversation to continue this work."
-#~ msgstr ""
 
 #: src/pages/shell/message-cards.tsx
 msgid "This server cannot be assigned without a bot."
