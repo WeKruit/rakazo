@@ -53,6 +53,16 @@ const api = vi.hoisted(() => ({
   getById: vi.fn(),
   search: vi.fn(),
 }));
+// A failure here stands for exhausted retries unless a test turns real retries on.
+const readRetries = vi.hoisted(() => ({ real: false }));
+vi.mock("../lib/read-retry", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("../lib/read-retry")>();
+  return {
+    ...actual,
+    retryTransientRead: async <T,>(read: () => Promise<T>, signal?: AbortSignal) =>
+      readRetries.real ? actual.retryTransientRead(read, signal) : read(),
+  };
+});
 vi.mock("../lib/auth", () => ({ authClient: { useSession: () => api.session } }));
 vi.mock("../lib/rpc", () => ({
   rpc: {
@@ -8802,7 +8812,8 @@ it("shows a linked role's agent results and its stored CRM records in one workbe
     crmBrowse: browse,
     roleConversation: true,
   });
-  expect(view.container.querySelector("h1")?.textContent).toBe("Stored role");
+  // The role conversation has a native role, so its title names the workbench.
+  expect(view.container.querySelector("h1")?.textContent).toBe("Systems engineer");
   expect(view.container.textContent).toContain("Agent candidate");
   expect(view.container.textContent).toContain("Stored CRM history");
   await view.render("thread-1", 0, false, undefined, {
