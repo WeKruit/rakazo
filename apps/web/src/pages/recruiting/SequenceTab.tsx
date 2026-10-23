@@ -57,21 +57,33 @@ function useInstantlyStatus() {
 const statusLabel = (labels: Record<number, string>, status: number | null) =>
   status === null ? null : (labels[status] ?? String(status));
 
+type CampaignScope = Pick<
+  RecruitingTabProps,
+  "conversation" | "refreshSignal" | "readCache" | "readCacheScope"
+>;
+
 /** The role's bound Instantly campaign, read live through the conversation's connection. */
-function useRoleCampaign(props: RecruitingTabProps) {
-  const { conversation, spaceId, roleId, refreshSignal } = props;
+function useRoleCampaign({ conversation, refreshSignal, ...cache }: CampaignScope) {
+  const target = conversation
+    ? "groupId" in conversation
+      ? { groupId: conversation.groupId }
+      : { botId: conversation.botId }
+    : null;
   return useKeyedRead<RecruitingRoleCampaign>(
-    conversation ? JSON.stringify([spaceId, roleId, conversation, refreshSignal]) : null,
-    async () => rpc.recruiting.roleCampaign(conversation!),
-    tabCacheSlot(props, ["roleCampaign", spaceId, roleId, conversation]),
+    target ? JSON.stringify([target, refreshSignal]) : null,
+    async () => rpc.recruiting.roleCampaign(target!),
+    target ? tabCacheSlot(cache, ["roleCampaign", target]) : {},
   );
 }
 
-function RoleCampaign({ read }: { read: ReturnType<typeof useRoleCampaign> }) {
+/** The role's Instantly campaign and its leads; nothing when the role has none. */
+export function RoleCampaignCard(props: CampaignScope) {
   const status = useInstantlyStatus();
+  const read = useRoleCampaign(props);
   const campaign = read.data?.campaign;
   if (!campaign) return null;
   const label = statusLabel(status.campaign, campaign.status);
+  const leads = read.data?.leads ?? [];
   return (
     <section className="mb-6 rounded-lg border border-border p-3 text-sm">
       <div className="flex flex-wrap items-center justify-between gap-2">
@@ -93,6 +105,16 @@ function RoleCampaign({ read }: { read: ReturnType<typeof useRoleCampaign> }) {
             Stop on reply is off, so Instantly keeps sending follow-ups after a candidate replies.
           </Trans>
         </p>
+      ) : null}
+      {leads.length ? (
+        <ul className="mt-2 space-y-1 text-xs text-muted-foreground">
+          {leads.map((lead) => (
+            <li key={lead.email} className="flex justify-between gap-2">
+              <span className="truncate">{lead.email}</span>
+              <span className="shrink-0">{statusLabel(status.lead, lead.status) ?? "—"}</span>
+            </li>
+          ))}
+        </ul>
       ) : null}
     </section>
   );
@@ -142,7 +164,6 @@ export function SequenceTab(props: RecruitingTabProps) {
   return (
     <section aria-label={t`Sequence`}>
       <TabHeader title={<Trans>Sequence</Trans>} />
-      <RoleCampaign read={roleCampaign} />
       <CrmGate crm={crm} />
       {campaigns.loading || people.loading ? <TabLoading /> : null}
       {campaigns.failed || people.failed ? (

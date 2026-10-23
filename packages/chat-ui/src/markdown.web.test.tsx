@@ -626,3 +626,13 @@ describe("web external link confirmation", () => {
     await view.cleanup();
   });
 });
+
+describe("web markdown CJK emphasis", () => {
+  it("bolds Chinese text that ends in punctuation", () => {
+    const html = renderToStaticMarkup(
+      <ChatMarkdown>{"请回复**发第一封。**然后等待"}</ChatMarkdown>,
+    );
+    expect(html).toContain("<strong>发第一封。</strong>");
+    expect(html).not.toContain("**");
+  });
+});
