@@ -63,6 +63,17 @@ vi.mock("../lib/rpc", () => ({
     search: { query: api.search },
   },
 }));
+vi.mock("./recruiting", () => {
+  const tab = (name: string) => (props: object) => (
+    <span data-role-tab={name}>{JSON.stringify(props)}</span>
+  );
+  return {
+    ContactsTab: tab("contacts"),
+    SequenceTab: tab("sequence"),
+    InboxTab: ({ onSelectEmail: _, ...props }: { onSelectEmail?: unknown }) => tab("inbox")(props),
+    InterviewTab: tab("interview"),
+  };
+});
 vi.mock("@lingui/react/macro", () => ({
   Trans: ({ children }: { children: ReactNode }) => children,
   Plural: ({ _1, other, value }: { _1: string; other: string; value: number }) =>
@@ -1567,6 +1578,7 @@ async function mounted(
     | "readCache"
     | "readCacheScope"
     | "crmBrowse"
+    | "roleConversation"
   > = {},
 ) {
   const container = document.createElement("div");
@@ -8701,4 +8713,204 @@ it("does not display the Contacts pool as a pending Shortlist query and retains 
   await view.render("thread-1", 1, false, undefined, { ...navigation, view: "contacts" });
   expect(view.container.querySelector("tbody")?.textContent).toContain(candidate.name);
   expect(api.setCandidateShortlist).not.toHaveBeenCalled();
+});
+
+const linkedSelection = {
+  serverId: "crm-source",
+  serverRevision: 2,
+  organizationId: "org-1",
+  crmRoleId: "crm-role",
+};
+function mockLinkedCrmRole() {
+  api.crmData.mockImplementation(async (input) => ({
+    operation: input.operation,
+    source: { ...linkedSelection, name: "CRM" },
+    checkedAt: "2026-10-22T00:00:00Z",
+    scope: input.operation === "important" ? "organization_candidate_roles" : "legacy_role_labels",
+    selectedRole: {
+      crmRoleId: "crm-role",
+      clientId: "client",
+      clientLabel: "Client",
+      roleLabel: "Stored role",
+      summary: null,
+      description: null,
+      jdText: "Stored CRM job description",
+      jdUrl: null,
+    },
+    items:
+      input.operation === "candidates"
+        ? [
+            {
+              candidateId: "crm-person",
+              name: "Stored CRM person",
+              email: null,
+              phone: null,
+              linkedinUrl: null,
+              location: null,
+              title: null,
+              stage: null,
+              contactStatus: "",
+              outreachStatus: "",
+              roleSpecId: null,
+              legacyClientLabel: "Client",
+              legacyRoleLabel: "Stored role",
+            },
+          ]
+        : [],
+    total: input.operation === "candidates" ? 1 : 0,
+    offset: 0,
+    nextOffset: null,
+  }));
+}
+
+it("shows a linked role's agent results and its stored CRM records in one workbench", async () => {
+  mockLinkedCrmRole();
+  api.listCandidates.mockResolvedValue(
+    candidatePage([{ ...candidateFixture("agent-person", false), name: "Agent candidate" }]),
+  );
+  const browse = {
+    selection: linkedSelection,
+    view: "results" as const,
+    onSelectCandidate: vi.fn(),
+  };
+  const view = await mounted("thread-1", undefined, false, undefined, {
+    groupId: "group-1",
+    crmBrowse: browse,
+  });
+  // A CRM role without its own conversation keeps reading only the CRM.
+  expect(api.getWorkspace).not.toHaveBeenCalled();
+  expect(view.container.textContent).not.toContain("Agent candidate");
+  await view.render("thread-1", 0, false, undefined, {
+    groupId: "group-1",
+    crmBrowse: browse,
+    roleConversation: true,
+  });
+  expect(view.container.querySelector("h1")?.textContent).toBe("Stored role");
+  expect(view.container.textContent).toContain("Agent candidate");
+  expect(view.container.textContent).toContain("Stored CRM history");
+  await view.render("thread-1", 0, false, undefined, {
+    groupId: "group-1",
+    crmBrowse: { ...browse, view: "brief" },
+    roleConversation: true,
+  });
+  expect(view.container.textContent).toContain("Build systems");
+  expect(view.container.textContent).toContain("Stored CRM job description");
+  expect(api.setCandidateShortlist).not.toHaveBeenCalled();
+});
+
+it("mounts the role tabs for a CRM-bound conversation and keeps stored CRM views otherwise", async () => {
+  mockLinkedCrmRole();
+  const crmTarget = {
+    bindingEffectId: "binding",
+    target: {
+      mcpServerId: "crm-source",
+      serverRevision: 2,
+      organizationId: "org-1",
+      crmRoleId: "crm-role",
+      clientLabel: "Client",
+      roleLabel: "Stored role",
+    },
+  };
+  const browse = {
+    selection: linkedSelection,
+    view: "contacts" as const,
+    onSelectCandidate: vi.fn(),
+  };
+  const view = await mounted("thread-1", undefined, false, undefined, {
+    groupId: "group-1",
+    crmBrowse: browse,
+    roleConversation: true,
+  });
+  expect(view.container.querySelector("[data-role-tab]")).toBeNull();
+  expect(view.container.textContent).toContain("Stored CRM person");
+  api.getWorkspace.mockResolvedValue({ role, revision, crmTarget });
+  for (const tab of ["contacts", "sequence", "inbox", "interview"] as const) {
+    await view.render("thread-1", 1, false, undefined, {
+      groupId: "group-1",
+      crmBrowse: { ...browse, view: tab },
+      roleConversation: true,
+    });
+    const roleTab = view.container.querySelector("[data-role-tab]");
+    expect(roleTab?.getAttribute("data-role-tab")).toBe(tab);
+    expect(JSON.parse(roleTab!.textContent!)).toEqual({
+      roleId: role.id,
+      spaceId: role.spaceId,
+      conversation: { groupId: "group-1" },
+      refreshSignal: 1,
+    });
+  }
+});
+
+it("shows Autumn's criterion states, evidence, source round and saved decision for every returned candidate", async () => {
+  api.listAssessments.mockResolvedValue([]);
+  api.listCandidates.mockResolvedValue(
+    candidatePage(
+      Array.from({ length: 12 }, (_, index) => ({
+        ...candidateFixture(`person-${index}`, false),
+        name: `Person ${index}`,
+        decision: index === 0 ? ("hold" as const) : null,
+        decisionReason: index === 0 ? "Wait for the client" : null,
+        latestSource: {
+          providerTaskId: "provider-task-1",
+          taskId: "task-1",
+          actionId: "action-1",
+          roleRevisionId: revision.id,
+          effectId: "source-1",
+          rowIndex: index,
+          artifactRef: { artifactId: "source-artifact", sha256: "a".repeat(64) },
+          requestCursor: null,
+          outputId: null,
+          observedAt: "2026-01-01T00:00:00Z",
+          report: {
+            fields: [
+              { label: "Rank", value: String(index + 1), sourceUrls: [] },
+              {
+                label: "Compiler depth",
+                value: index === 1 ? "miss" : "match",
+                providerStatus: index === 1 ? ("miss" as const) : ("match" as const),
+                evidence: `Evidence ${index}`,
+                sourceUrls: ["https://evidence.example.test/profile"],
+              },
+              { label: "Email status", value: "verified", sourceUrls: [] },
+            ],
+            sourceUrls: [],
+          },
+        },
+      })),
+    ),
+  );
+  const page = await api.listCandidates();
+  page.counts.assessed = 0;
+  api.listCandidates.mockResolvedValue(page);
+  const view = await mounted("thread-1", undefined, false, undefined, {
+    presentation: "workspace",
+    view: "results",
+  });
+  expect([...view.container.querySelectorAll("thead th")].map((cell) => cell.textContent)).toEqual([
+    "Candidate",
+    "Current role",
+    "Company",
+    "Location",
+    "Research match",
+    "Criteria",
+    "Research round",
+    "Feedback",
+    "Provider status",
+    "Shortlist",
+  ]);
+  const rows = [...view.container.querySelectorAll("tbody tr")];
+  expect(rows).toHaveLength(12);
+  expect(rows.map((row) => row.querySelector("th button")?.textContent)).toEqual(
+    Array.from({ length: 12 }, (_, index) => `Person ${index}`),
+  );
+  expect(rows[0]!.textContent).toContain("Compiler depth");
+  expect(rows[0]!.textContent).toContain("Match");
+  expect(rows[0]!.textContent).toContain("Evidence 0");
+  expect(rows[0]!.textContent).toContain("evidence.example.test");
+  expect(rows[0]!.textContent).toContain("Search update 1");
+  expect(rows[0]!.textContent).toContain("On hold");
+  expect(rows[0]!.textContent).toContain("Wait for the client");
+  expect(rows[0]!.textContent).toContain("verified");
+  expect(rows[1]!.textContent).toContain("Does not match");
+  expect(api.correspondence).not.toHaveBeenCalled();
 });

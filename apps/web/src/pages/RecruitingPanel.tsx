@@ -72,7 +72,7 @@ import {
   Sparkles,
   X,
 } from "lucide-react";
-import type { Ref } from "react";
+import type { ReactNode, Ref } from "react";
 import { useCallback, useEffect, useId, useMemo, useRef, useState } from "react";
 import { ArtifactFileCard, SourceText } from "../components/ArtifactFileCard";
 import { AskCard } from "../components/AskCard";
@@ -89,6 +89,8 @@ import {
 } from "../lib/right-panel-state";
 import { rpc } from "../lib/rpc";
 import { CorrespondenceEmails } from "./RecruitingCorrespondence";
+import type { RecruitingInboxEmail } from "./recruiting";
+import { ContactsTab, InboxTab, InterviewTab, SequenceTab } from "./recruiting";
 import type { RecruitingWorkspaceView } from "./shell/RecruitingNavigation";
 
 export type CrmBrowseSelection = Pick<
@@ -132,6 +134,8 @@ export type CandidateFeedback = {
 };
 
 type Props = {
+  /** The thread is this CRM role's own conversation, so its agent results share the workbench. */
+  roleConversation?: boolean;
   crmBrowse?: {
     selection: CrmBrowseSelection;
     view: RecruitingWorkspaceView;
@@ -1142,6 +1146,54 @@ function CandidateReport({
           </a>
         ))}
     </div>
+  );
+}
+
+const CONTACT_STATUS_LABELS = [
+  "email status",
+  "email verification",
+  "email verification status",
+  "contact status",
+  "verification status",
+];
+
+/** Autumn's own per-criterion states with their raw evidence and sources, never re-judged. */
+function CandidateCriteria({ candidate }: { candidate: RecruitingCandidate }) {
+  const fields = candidate.latestSource?.report?.fields.filter((field) => field.providerStatus);
+  return fields?.length ? (
+    <CandidateReport condensed report={{ fields, sourceUrls: [] }} />
+  ) : (
+    <span className="text-muted-foreground">
+      <Trans>Not returned</Trans>
+    </span>
+  );
+}
+
+/** The saved search round that last returned this person, named like the round filter. */
+function CandidateSourceRound({
+  candidate,
+  research,
+}: {
+  candidate: RecruitingCandidate;
+  research?: Snapshot["research"];
+}) {
+  const source = candidate.latestSource;
+  const index = source?.actionId
+    ? (research?.actions.findIndex((action) => action.id === source.actionId) ?? -1)
+    : -1;
+  if (index >= 0) return <Trans>Search update {index + 1}</Trans>;
+  const observation = research?.observations.find((item) => item.effectId === source?.effectId);
+  return observation ? (
+    <>
+      <Trans>Saved results</Trans>
+      {" · "}
+      {new Date(observation.observedAt).toLocaleString(undefined, {
+        timeZone: "America/Los_Angeles",
+        timeZoneName: "short",
+      })}
+    </>
+  ) : (
+    "—"
   );
 }
 
@@ -2233,14 +2285,98 @@ export function RecruitingPanel(props: Props) {
       key={JSON.stringify([props.readCacheScope, props.threadId, props.crmBrowse.selection])}
       {...props}
       browse={props.crmBrowse}
+      agent={props.roleConversation ? <RoleAgentSection {...props} /> : undefined}
     />
   ) : (
     <NativeRecruitingPanel {...props} />
   );
 }
 
+/**
+ * The role conversation's own saved results for the current workbench tab. A CRM role and an
+ * agent-created role share one workbench: CRM records render below this section when linked.
+ */
+function RoleAgentSection({ crmBrowse, roleConversation: _, ...props }: Props) {
+  const view = crmBrowse?.view;
+  if (view === "brief" || view === "feedback")
+    return <NativeRecruitingPanel {...props} presentation="workspace" summary={view} />;
+  if (view === "sequence" || view === "inbox" || view === "interview" || view === "conversation")
+    return null;
+  return (
+    <NativeRecruitingPanel
+      {...props}
+      presentation="workspace"
+      view={view === "shortlist" || view === "contacts" ? view : "results"}
+      tab={view === "workflow" ? "dashboard" : "evidence"}
+    />
+  );
+}
+
+/**
+ * Single mount point for the Contacts, Sequence, Inbox and Interview tabs. The role tabs need the
+ * conversation's native role bound to CRM; a CRM role without one keeps its stored CRM views.
+ */
+function CorrespondenceTabMount({
+  view,
+  role,
+  conversation,
+  refreshSignal,
+  onDraftReply,
+  fallback,
+}: {
+  view: RecruitingWorkspaceView;
+  role?: { roleId: string; spaceId: string };
+  conversation: { groupId: string } | { botId: string };
+  refreshSignal: number;
+  onDraftReply?: (email: RecruitingInboxEmail) => void;
+  fallback: ReactNode;
+}) {
+  const [email, setEmail] = useState<RecruitingInboxEmail>();
+  if (!role) return <>{fallback}</>;
+  const props = { ...role, conversation, refreshSignal };
+  if (view === "contacts") return <ContactsTab {...props} />;
+  if (view === "sequence") return <SequenceTab {...props} />;
+  if (view === "interview") return <InterviewTab {...props} />;
+  return (
+    <>
+      {onDraftReply && email ? (
+        <Button variant="outline" onClick={() => onDraftReply(email)}>
+          <Trans>Draft reply</Trans>
+        </Button>
+      ) : null}
+      <InboxTab {...props} onSelectEmail={setEmail} />
+    </>
+  );
+}
+
+/** The role conversation's native role when it is bound to a CRM role. */
+function useBoundRole(
+  threadId: string,
+  enabled: boolean,
+  refreshSignal: number,
+): { roleId: string; spaceId: string } | undefined {
+  const key = enabled ? JSON.stringify([threadId, refreshSignal]) : null;
+  const [read, setRead] = useState<{ key: string; role?: { roleId: string; spaceId: string } }>();
+  useEffect(() => {
+    if (!key) return;
+    let cancelled = false;
+    void rpc.recruiting
+      .getWorkspace({ threadId })
+      .then((workspace) => {
+        if (!cancelled && workspace?.crmTarget)
+          setRead({ key, role: { roleId: workspace.role.id, spaceId: workspace.role.spaceId } });
+      })
+      .catch(() => undefined);
+    return () => {
+      cancelled = true;
+    };
+  }, [key, threadId]);
+  return read?.key === key ? read.role : undefined;
+}
+
 function CrmRecruitingPanel({
   browse,
+  agent,
   threadId,
   botId,
   groupId,
@@ -2248,12 +2384,13 @@ function CrmRecruitingPanel({
   readCacheScope,
   showDiagnostics = false,
   refreshSignal = 0,
-}: Props & { browse: NonNullable<Props["crmBrowse"]> }) {
+}: Props & { browse: NonNullable<Props["crmBrowse"]>; agent?: ReactNode }) {
   const { t } = useLingui();
   const [queryDraft, setQueryDraft] = useState("");
   const [query, setQuery] = useState("");
   const [offset, setOffset] = useState(0);
   const [refresh, setRefresh] = useState(0);
+  const boundRole = useBoundRole(threadId, Boolean(agent), refreshSignal + refresh);
   const [mailPageSelection, setMailPageSelection] = useState<{
     candidateId: string;
     cursor: Extract<RecruitingCrmDataInput, { operation: "mail" }>["cursor"];
@@ -2703,15 +2840,17 @@ function CrmRecruitingPanel({
         .filter(Boolean)
         .join("\n\n")
     : "";
-  return (
-    <div className="hire-standard-view">
-      <header className="hire-section-header">
+  const crmHistory = (
+    <>
+      {agent ? (
+        <h2 className="mt-8 mb-3 font-semibold">
+          <Trans>Stored CRM history</Trans>
+        </h2>
+      ) : (
         <span className="hire-eyebrow">
           <Trans>Stored CRM history</Trans>
         </span>
-        <h1>{page?.selectedRole?.roleLabel ?? t`CRM contacts`}</h1>
-        {page?.selectedRole ? <p>{page.selectedRole.clientLabel}</p> : null}
-      </header>
+      )}
       <div className="mb-5 flex flex-wrap gap-3">
         <Button variant="outline" onClick={() => setRefresh((value) => value + 1)}>
           <Trans>Refresh</Trans>
@@ -3364,6 +3503,46 @@ function CrmRecruitingPanel({
           ) : null}
         </>
       )}
+    </>
+  );
+  const body = (
+    <>
+      {agent}
+      {crmHistory}
+    </>
+  );
+  return (
+    <div className="hire-standard-view">
+      <header className="hire-section-header">
+        <h1>{page?.selectedRole?.roleLabel ?? t`CRM contacts`}</h1>
+        {page?.selectedRole ? <p>{page.selectedRole.clientLabel}</p> : null}
+      </header>
+      {["contacts", "sequence", "inbox", "interview"].includes(browse.view) ? (
+        <CorrespondenceTabMount
+          view={browse.view}
+          role={boundRole}
+          conversation={target}
+          refreshSignal={refreshSignal + refresh}
+          onDraftReply={
+            browse.onDraftReply
+              ? ({ email, ...context }) =>
+                  browse.onDraftReply?.({
+                    ...context,
+                    threadId,
+                    email: {
+                      sender: email.sender,
+                      recipients: email.recipients,
+                      subject: email.subject,
+                      date: email.date,
+                    },
+                  })
+              : undefined
+          }
+          fallback={body}
+        />
+      ) : (
+        body
+      )}
     </div>
   );
 }
@@ -3454,6 +3633,8 @@ function RecruitingWorkspace({
         : storedCandidateFilters,
     [presentation, view, storedCandidateFilters],
   );
+  // Every returned candidate keeps Autumn's own result fields in the workspace table.
+  const candidateTableDetails = presentation === "workspace" && !contactsView;
   const [selection, setSelection] = useState<RecruitingCandidate | null>(null);
   const candidateTrigger = useRef<HTMLButtonElement>(null);
   const candidateClose = useRef<HTMLButtonElement>(null);
@@ -5437,7 +5618,7 @@ function RecruitingWorkspace({
                     </label>
                   ) : null}
                 </div>
-                {!(presentation === "workspace" && view === "contacts") ? (
+                {!contactsView ? (
                   <fieldset
                     className={
                       presentation === "workspace" ? "hire-view-toggle flex gap-1" : "flex gap-1"
@@ -5660,10 +5841,13 @@ function RecruitingWorkspace({
                                 ...(contactsView
                                   ? [t`Email`, t`Phone`, t`Provider status`]
                                   : [t`Research match`]),
+                                ...(candidateTableDetails ? [t`Criteria`] : []),
                                 ...(!contactsView && showInternalAssessments
                                   ? [t`Internal assessment`]
                                   : []),
+                                ...(candidateTableDetails ? [t`Research round`, t`Feedback`] : []),
                                 ...(showCrm ? [t`CRM`] : []),
+                                ...(candidateTableDetails ? [t`Provider status`] : []),
                                 ...(presentation !== "workspace" ? [t`Discoveries`] : []),
                                 t`Shortlist`,
                                 ...(contactsView && onDiscussCandidate ? [t`Actions`] : []),
@@ -5761,13 +5945,7 @@ function RecruitingWorkspace({
                                         candidate={candidate}
                                         contacts={contacts}
                                         kind="status"
-                                        labels={[
-                                          "email status",
-                                          "email verification",
-                                          "email verification status",
-                                          "contact status",
-                                          "verification status",
-                                        ]}
+                                        labels={CONTACT_STATUS_LABELS}
                                       />
                                     </td>
                                   </>
@@ -5781,14 +5959,53 @@ function RecruitingWorkspace({
                                     />
                                   </td>
                                 )}
+                                {candidateTableDetails ? (
+                                  <td className="min-w-48 py-2 pe-3 text-xs">
+                                    <CandidateCriteria candidate={candidate} />
+                                  </td>
+                                ) : null}
                                 {!contactsView && showInternalAssessments ? (
                                   <td className="py-2 pe-3">
                                     <CandidateAssessment candidate={candidate} />
                                   </td>
                                 ) : null}
+                                {candidateTableDetails ? (
+                                  <>
+                                    <td className="py-2 pe-3 text-xs">
+                                      <CandidateSourceRound
+                                        candidate={candidate}
+                                        research={snapshot?.research}
+                                      />
+                                    </td>
+                                    <td className="py-2 pe-3 text-xs">
+                                      {candidate.decision ? (
+                                        <>
+                                          <CandidateDecision decision={candidate.decision} />
+                                          {candidate.decisionReason ? (
+                                            <p className="whitespace-pre-wrap">
+                                              {candidate.decisionReason}
+                                            </p>
+                                          ) : null}
+                                        </>
+                                      ) : (
+                                        "—"
+                                      )}
+                                    </td>
+                                  </>
+                                ) : null}
                                 {showCrm ? (
                                   <td className="py-2 pe-3 text-xs">
                                     <CrmStatus sync={candidate.crm} />
+                                  </td>
+                                ) : null}
+                                {candidateTableDetails ? (
+                                  <td className="py-2 pe-3 text-xs">
+                                    <CandidateContactFields
+                                      candidate={candidate}
+                                      contacts={contacts}
+                                      kind="status"
+                                      labels={CONTACT_STATUS_LABELS}
+                                    />
                                   </td>
                                 ) : null}
                                 {presentation !== "workspace" ? (
