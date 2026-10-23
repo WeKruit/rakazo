@@ -858,7 +858,12 @@ export async function bindRecruitingSchedulingOperation(
           parsed.route.resourceId !== plan.calendar.sourceId ||
           parsed.route.resourceRevision !== plan.calendar.sourceRevision ||
           parsed.args.bookingUid !== booked.uid ||
-          !["cancel_booking", "reschedule_booking"].includes(parsed.route.toolName)
+          ![
+            "cancel_booking",
+            "reschedule_booking",
+            "confirm_booking",
+            "add_booking_attendee",
+          ].includes(parsed.route.toolName)
         )
           continue;
         const envelope = obj(mutation.result);
