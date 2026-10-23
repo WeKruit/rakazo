@@ -9,6 +9,7 @@ const getWorkspace = vi.hoisted(() => vi.fn());
 const listCandidates = vi.hoisted(() => vi.fn());
 const roleCandidates = vi.hoisted(() => vi.fn());
 const roleCampaign = vi.hoisted(() => vi.fn());
+const correspondence = vi.hoisted(() => vi.fn());
 const listReminders = vi.hoisted(() => vi.fn());
 const updateReminder = vi.hoisted(() => vi.fn());
 vi.mock("../../lib/rpc", () => ({
@@ -18,6 +19,7 @@ vi.mock("../../lib/rpc", () => ({
       listCandidates,
       roleCandidates,
       roleCampaign,
+      correspondence,
       reminders: { list: listReminders, update: updateReminder },
     },
   },
@@ -61,6 +63,7 @@ beforeEach(() => {
   getWorkspace.mockImplementation(async ({ threadId }: { threadId: string }) => ({
     role: { id: `role-${threadId}` },
   }));
+  correspondence.mockResolvedValue({ status: "not_checked", events: [], partial: false });
   listCandidates.mockResolvedValue({
     items: [
       { shortlisted: true, shortlistedAt: new Date().toISOString(), firstDiscoveredAt: null },
@@ -455,4 +458,73 @@ it.each([
   expect(funnel.textContent).toContain(
     "The destination is not filtered to this metric’s exact candidates.",
   );
+});
+
+it.each(["confirmed", "accepted"])(
+  "shows future %s recorded bookings and opens their exact role Interview",
+  async (bookingStatus) => {
+    const future = new Date(Date.now() + 86_400_000).toISOString();
+    correspondence.mockImplementation(async ({ groupId }: { groupId: string }) => ({
+      roleId: `role-thread-${groupId}`,
+      status: "ready",
+      partial: groupId === "g2",
+      events: [
+        {
+          id: "confirmed",
+          kind: "event",
+          status: bookingStatus,
+          start: future,
+          title: `Confirmed ${groupId}`,
+        },
+        { id: "cancelled", kind: "event", status: "cancelled", start: future, title: "Cancelled" },
+        { id: "pending", kind: "event", status: "pending", start: future, title: "Pending" },
+        {
+          id: "availability",
+          kind: "availability",
+          status: "confirmed",
+          start: future,
+          title: "Free slot",
+        },
+        { id: "unknown", kind: "event", status: null, start: future, title: "Unknown status" },
+        {
+          id: "past",
+          kind: "event",
+          status: "confirmed",
+          start: "2000-01-01T00:00:00Z",
+          title: "Past",
+        },
+      ],
+    }));
+    await render();
+    const list = container.querySelector('[aria-label="Upcoming recorded bookings"]')!;
+    expect(list.querySelectorAll("li")).toHaveLength(2);
+    expect(list.textContent).not.toMatch(/Cancelled|Pending|Free slot|Unknown status|Past/);
+    await act(async () => list.querySelectorAll<HTMLButtonElement>("button")[1]!.click());
+    expect(onOpenRole).toHaveBeenLastCalledWith("g2", "interview");
+    expect(text()).toContain("Some role calendar records are unavailable or partial.");
+    await select("Project", "g1");
+    expect(list.querySelectorAll("li")).toHaveLength(1);
+    expect(text()).not.toContain("Some role calendar records are unavailable or partial.");
+  },
+);
+it("does not present another role's retained calendar events as this role's bookings", async () => {
+  correspondence.mockResolvedValue({
+    roleId: "other-role",
+    status: "ready",
+    partial: false,
+    events: [
+      {
+        id: "wrong",
+        kind: "event",
+        status: "confirmed",
+        title: "Wrong role",
+        start: new Date(Date.now() + 86_400_000).toISOString(),
+      },
+    ],
+  });
+  await render();
+  expect(
+    container.querySelector('[aria-label="Upcoming recorded bookings"]')!.textContent,
+  ).not.toContain("Wrong role");
+  expect(text()).toContain("Some role calendar records are unavailable or partial.");
 });

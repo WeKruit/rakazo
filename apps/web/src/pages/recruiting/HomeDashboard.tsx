@@ -1,5 +1,5 @@
 import { Trans, useLingui } from "@lingui/react/macro";
-import type { Group } from "@rakazo/contracts";
+import type { Group, RecruitingCorrespondence } from "@rakazo/contracts";
 import {
   Badge,
   Button,
@@ -32,7 +32,14 @@ import {
 import { RetryNotice } from "./RetryNotice";
 import { useKeyedRead } from "./shared";
 
-type Overview = { roles: RoleSummary[]; incompleteGroups: string[]; missingGroups: string[] };
+type ObservedBooking = { groupId: string; event: RecruitingCorrespondence["events"][number] };
+type Overview = {
+  roles: RoleSummary[];
+  incompleteGroups: string[];
+  missingGroups: string[];
+  bookings: ObservedBooking[];
+  bookingUnknownGroups: string[];
+};
 type OverviewRead = { key: string; data?: Overview; failed?: boolean };
 
 /** Every role's numbers, four roles at a time; cached in the Shell's display cache. */
@@ -63,7 +70,7 @@ function useOverview(
         );
         if (!workspace) return { groupId: group.id, summary: null, incomplete: false };
         const conversation = { groupId: group.id };
-        const [shortlist, candidates, campaign] = await Promise.all([
+        const [shortlist, candidates, campaign, calendar] = await Promise.all([
           readShortlistPages((cursor) =>
             retryTransientRead(
               () =>
@@ -87,6 +94,9 @@ function useOverview(
             ),
           ),
           optional(() => rpc.recruiting.roleCampaign(conversation, { signal })),
+          optional(() =>
+            rpc.recruiting.correspondence({ ...conversation, view: "interview" }, { signal }),
+          ),
         ]);
         return {
           groupId: group.id,
@@ -98,6 +108,22 @@ function useOverview(
             campaign ?? null,
           ),
           incomplete: !candidates || !campaign,
+          bookings:
+            calendar?.roleId === workspace.role.id && ["ready", "empty"].includes(calendar.status)
+              ? calendar.events
+                  .filter(
+                    (event) =>
+                      event.kind === "event" &&
+                      (event.status === "confirmed" || event.status === "accepted") &&
+                      Date.parse(event.start) > Date.now(),
+                  )
+                  .map((event) => ({ groupId: group.id, event }))
+              : [],
+          bookingUnknown:
+            !calendar ||
+            calendar.roleId !== workspace.role.id ||
+            !["ready", "empty"].includes(calendar.status) ||
+            calendar.partial,
         };
       } catch {
         return { groupId: group.id, summary: null, incomplete: true, failed: true };
@@ -109,6 +135,10 @@ function useOverview(
         return setRead({ key, failed: true });
       const data: Overview = {
         roles: results.flatMap((result) => (result.summary ? [result.summary] : [])),
+        bookings: results.flatMap((result) => ("bookings" in result ? result.bookings ?? [] : [])),
+        bookingUnknownGroups: results
+          .filter((result) => !("bookingUnknown" in result) || result.bookingUnknown)
+          .map((result) => result.groupId),
         incompleteGroups: results
           .filter((result) => result.incomplete)
           .map((result) => result.groupId),
@@ -654,6 +684,69 @@ export function HomeDashboard({
             )}
           </CardContent>
         </Card>
+        {overview.data ? (
+          <Card>
+            <CardHeader>
+              <CardTitle>
+                <h2>
+                  <Trans>Upcoming recorded bookings</Trans>
+                </h2>
+              </CardTitle>
+            </CardHeader>
+            <CardContent>
+              <p className="mb-3 text-xs text-muted-foreground">
+                <Trans>
+                  Future confirmed events from saved calendar checks, shown in your local time. This
+                  is a recorded subset, not all bookings or availability.
+                </Trans>
+              </p>
+              <ul className="space-y-2" aria-label={t`Upcoming recorded bookings`}>
+                {overview.data.bookings
+                  .filter((booking) => !project || booking.groupId === project)
+                  .sort(
+                    (left, right) => Date.parse(left.event.start) - Date.parse(right.event.start),
+                  )
+                  .slice(0, 6)
+                  .map((booking) => {
+                    const group = groups.find((group) => group.id === booking.groupId);
+                    return group ? (
+                      <li key={JSON.stringify([booking.groupId, booking.event.id])}>
+                        <Button
+                          variant="ghost"
+                          className="h-auto w-full justify-between gap-3 whitespace-normal text-start"
+                          onClick={() => onOpenRole(booking.groupId, "interview")}
+                        >
+                          <span>
+                            <span className="block">
+                              {booking.event.title || t`Recorded event`}
+                            </span>
+                            <span className="block text-xs text-muted-foreground">
+                              {group.name}
+                            </span>
+                          </span>
+                          <time dateTime={booking.event.start} className="text-xs">
+                            {new Date(booking.event.start).toLocaleString()}
+                          </time>
+                        </Button>
+                      </li>
+                    ) : null;
+                  })}
+              </ul>
+              {!overview.data.bookings.some(
+                (booking) => !project || booking.groupId === project,
+              ) ? (
+                <p className="text-sm text-muted-foreground">
+                  <Trans>No future confirmed event appears in these saved checks.</Trans>
+                </p>
+              ) : null}
+              {overview.data.bookingUnknownGroups.some((id) => !project || id === project) ? (
+                <p className="mt-2 text-xs text-muted-foreground">
+                  <Trans>Some role calendar records are unavailable or partial.</Trans>
+                </p>
+              ) : null}
+            </CardContent>
+          </Card>
+        ) : null}
         <div className="grid gap-6 md:grid-cols-2">
           <Card>
             <CardHeader>
