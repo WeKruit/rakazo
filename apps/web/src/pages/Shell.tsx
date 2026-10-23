@@ -325,6 +325,7 @@ import {
   RecruitingDetailProvider,
   useRecruitingDetailController,
 } from "./recruiting";
+import { HomeDashboard } from "./recruiting/HomeDashboard";
 import { RetryNotice } from "./recruiting/RetryNotice";
 import { RoleSetupCard } from "./recruiting/RoleSetup";
 import { TabLoading } from "./recruiting/shared";
@@ -2368,6 +2369,7 @@ export function ShellPage() {
     threadSnapshotCache.current.get(inGroup ? `group:${groupId}` : `bot:${active?.id}`) ??
     null;
   const workspaceViews: readonly RecruitingWorkspaceView[] = [
+    "home",
     "conversation",
     "results",
     "brief",
@@ -2388,6 +2390,7 @@ export function ShellPage() {
         : "conversation";
   const workspaceNewRole = !showToolActivity && panel === "create-group";
   const crmMode = !showToolActivity && !workspaceNewRole && searchParams.has("crmServer");
+  const homeView = !showToolActivity && !workspaceNewRole && !crmMode && recruitingWorkspaceView === "home" && groups.length > 0;
   const crmRevision = Number(searchParams.get("crmRevision"));
   const crmSelection: CrmBrowseSelection | undefined =
     crmMode &&
@@ -5288,11 +5291,13 @@ export function ShellPage() {
         />
       )}
 
+      {homeView ? <HomeDashboard userName={session.data?.user.name} groups={groups} readCache={recruitingReadCache.current} readCacheScope={userId && bootstrapMe?.spaceId ? JSON.stringify([userId, bootstrapMe.spaceId]) : undefined} refreshSignal={recruitingRefresh}
+        onOpenRole={(id) => navigate(`/app/g/${id}?view=results`)} navigationCollapsed={botsSidebarCollapsed} onOpenNavigation={() => { setBotsSidebarCollapsedPref(false); setMobileSidebarOpen(true); }} /> : null}
       {/* Keep the composer's z-index inside the chat so phone overlays like the side panel cover it. */}
       <main
         aria-hidden={mobileSidebarOpen || undefined}
         inert={mobileSidebarOpen}
-        className={cn("isolate flex min-w-0 flex-1 flex-col bg-background", roleChatWorkspace && "hire-role-chat-workspace", roleChatWorkspace && roleChatOpen && "hire-role-chat-open")}
+        className={cn("isolate flex min-w-0 flex-1 flex-col bg-background", homeView && "hidden", roleChatWorkspace && "hire-role-chat-workspace", roleChatWorkspace && roleChatOpen && "hire-role-chat-open")}
       >
         {workspaceFull ? (
           <div className={botsSidebarCollapsed ? "flex items-center px-4 pt-3" : "flex items-center px-4 pt-3 md:hidden"}>
@@ -8588,7 +8593,7 @@ function firstThreadRoute(
   groups: readonly Pick<Group, "id">[],
   recruiting = false,
 ): string {
-  if (recruiting && groups[0]) return `/app/g/${groups[0].id}`;
+  if (recruiting && groups[0]) return `/app/g/${groups[0].id}?view=home`;
   if (bots[0]) return `/app/${bots[0].id}`;
   if (groups[0]) return `/app/g/${groups[0].id}`;
   return "/app";

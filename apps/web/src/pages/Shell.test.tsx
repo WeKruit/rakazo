@@ -1710,8 +1710,18 @@ it("connects personal apps from New Role using only this user's installed native
 });
 
 it.each([
-  { owner: false, preference: "on", allGroupsArchived: false, expected: "/app/g/group-1" },
-  { owner: true, preference: "off", allGroupsArchived: false, expected: "/app/g/group-1" },
+  {
+    owner: false,
+    preference: "on",
+    allGroupsArchived: false,
+    expected: "/app/g/group-1?view=home",
+  },
+  {
+    owner: true,
+    preference: "off",
+    allGroupsArchived: false,
+    expected: "/app/g/group-1?view=home",
+  },
   { owner: true, preference: "on", allGroupsArchived: false, expected: "/app/bot-1" },
   { owner: false, preference: "off", allGroupsArchived: true, expected: "/app/bot-1" },
 ] as const)(
@@ -1757,7 +1767,7 @@ it("uses the authorized role navigation order after the initial bootstrap fails"
   const recent = { ...view.group, id: "recent-role", name: "Recent role" };
   view.navigation.current.groups.unshift(recent);
   await act(async () => reject(new Error("Bootstrap unavailable")));
-  expect(view.getPath()).toBe(`/app/g/${recent.id}`);
+  expect(view.getPath()).toBe(`/app/g/${recent.id}?view=home`);
   expect(shellApi.listSpaces).toHaveBeenCalledOnce();
   expect(shellApi.me).toHaveBeenCalledOnce();
 });
