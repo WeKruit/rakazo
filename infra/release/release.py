@@ -256,7 +256,8 @@ def smoke(origin, revision, staging=False):
 
 
 def staging_target(environ):
-    target = {"environment": "staging", "origin": validate_origin(environ.get("STAGING_ORIGIN", ""))}
+    target = {"environment": "staging", "server_name": "Recruiting",
+              "origin": validate_origin(environ.get("STAGING_ORIGIN", ""))}
     for key in ("app_name", "secret_name", "volume_name"):
         value = environ.get("STAGING_MODAL_" + key.upper(), "")
         require(re.fullmatch(r"rakazo-staging(?:-[a-z0-9-]+)?", value), "Staging resource names must use rakazo-staging prefix")
@@ -270,9 +271,53 @@ def staging_approval(manifest, environ):
     value = json.loads(environ.get("STAGING_RELEASE_APPROVAL", "{}"))
     require(value.get("sha") == manifest["sha"]
             and value.get("validation_run_id") == manifest["validation"]["id"]
+            and value.get("target") == staging_target(environ)
             and value.get("isolated_resources_verified") is True
             and value.get("synthetic_data_only") is True, "Isolated staging prerequisites required")
     fresh_approval(value)
+
+
+def validate_staging_identity(identity, target, revision):
+    require(isinstance(identity, dict) and set(identity) == {
+        "app_id", "server_id", "server_url", "version", "tag",
+    } and isinstance(identity.get("app_id"), str)
+            and re.fullmatch(r"ap-[A-Za-z0-9]+", identity["app_id"])
+            and isinstance(identity.get("server_id"), str)
+            and re.fullmatch(r"fu-[A-Za-z0-9]+", identity["server_id"])
+            and identity.get("server_url") == target["origin"]
+            and type(identity.get("version")) is int and identity["version"] > 0
+            and identity.get("tag") == revision, "Bound Modal staging deployment required")
+
+
+def modal_staging_identity(target, deploy_env, revision=None):
+    """Modal 1.6.2 CLI shapes; capture privately, retain no deployment attribution."""
+    info = json.loads(run("modal", "app", "info", target["app_name"], "--env", "staging", "--json", env=deploy_env))
+    require(info.get("description") == target["app_name"]
+            and info.get("lifecycle", {}).get("state") == "deployed",
+            "Existing deployed staging Modal app required")
+    server = json.loads(run("modal", "server", "info", f"{target['app_name']}/{target['server_name']}",
+                            "--env", "staging", "--json", env=deploy_env))
+    require(server.get("name") == target["server_name"] and server.get("app_id") == info.get("app_id")
+            and server.get("object_id") == info.get("servers", {}).get(target["server_name"], {}).get("id"),
+            "Modal app/server identity mismatch")
+    identity = {"app_id": info.get("app_id"), "server_id": server.get("object_id"),
+                "server_url": validate_origin(server.get("server_url", "")),
+                "version": info.get("lifecycle", {}).get("version"), "tag": None}
+    # Bind the probe destination before any deployment or HTTP request. A custom alias
+    # is insufficient: use the exact authoritative Modal server origin.
+    validate_staging_identity(identity, target, None)
+    if revision is not None:
+        history = json.loads(run("modal", "app", "history", identity["app_id"],
+                                 "--env", "staging", "--json", env=deploy_env))
+        require(isinstance(history, list), "Modal deployment history required")
+        matches = [entry for entry in history if isinstance(entry, dict)
+                   and entry.get("version") == f"v{identity['version']}"]
+        # CLI commit is truncated to seven characters. Only the full deployment tag
+        # establishes the requested source identity; missing/duplicate tags fail closed.
+        require(len(matches) == 1 and matches[0].get("tag") == sha(revision),
+                "Modal current version does not have the tested full-SHA tag")
+        identity["tag"] = revision
+    return identity
 
 
 def hosted_receipt(run_id, expected_sha):
@@ -281,16 +326,16 @@ def hosted_receipt(run_id, expected_sha):
         directory = Path(temp) / "receipt"
         download_artifact(directory, run_id, f"hosted-staging-{run_id}-{record['run_attempt']}")
         receipt = json.loads((directory / "staging.json").read_text())
-    require(receipt.get("format") == 1 and receipt.get("repository") == REPO
+    require(receipt.get("format") == 2 and receipt.get("repository") == REPO
             and receipt.get("sha") == sha(expected_sha)
             and receipt.get("run") == {"id": int(run_id), "attempt": record["run_attempt"],
                                       "workflow_sha": record["head_sha"]}
             and isinstance(receipt.get("checks"), dict)
             and set(receipt["checks"]) == {"readiness", "revision", "web_shell", "mutations_denied"}
-            and all(value is True for value in receipt["checks"].values())
-            and type(receipt.get("modal_version")) is int and receipt["modal_version"] > 0,
+            and all(value is True for value in receipt["checks"].values()),
             "Actual hosted staging acceptance receipt required")
     require(receipt["target"] == staging_target(os.environ), "Staging target changed; restage")
+    validate_staging_identity(receipt.get("deployment"), receipt["target"], expected_sha)
     return receipt
 
 
@@ -340,15 +385,13 @@ def stage(directory, expected_sha):
         deploy_env[key] = os.environ[key]
     deploy_env.update({"MODAL_ENVIRONMENT": "staging", "RAKAZO_RELEASE_PROFILE": "staging",
                        **{"MODAL_" + key.upper(): target[key] for key in ("app_name", "secret_name", "volume_name")}})
-    def app_info():
-        info = json.loads(run("modal", "app", "info", target["app_name"], "--env", "staging", "--json", env=deploy_env))
-        require(info["description"] == target["app_name"] and info["lifecycle"]["state"] == "deployed",
-                "Existing deployed staging Modal app required")
-        return info
-    app_info()
+    previous = modal_staging_identity(target, deploy_env)
     staging_approval(manifest, os.environ)
     run("modal", "deploy", "--env", "staging", "--strategy", "recreate", "--tag", manifest["sha"],
         "infra/modal/app.py", cwd=directory / "source", env=deploy_env, timeout=1200)
+    deployed = modal_staging_identity(target, deploy_env, manifest["sha"])
+    require(deployed["app_id"] == previous["app_id"] and deployed["version"] >= previous["version"],
+            "Existing staging app identity or version changed unexpectedly")
     for attempt in range(12):
         try:
             smoke(target["origin"], manifest["sha"], staging=True)
@@ -357,12 +400,12 @@ def stage(directory, expected_sha):
             if attempt == 11:
                 raise ValueError("Hosted staging smoke failed; no acceptance receipt recorded") from None
             time.sleep(5)
-    version = app_info()["lifecycle"]["version"]
-    require(type(version) is int and version > 0, "Modal deployment version required")
-    receipt = {"format": 1, "repository": REPO, "sha": manifest["sha"],
+    require(modal_staging_identity(target, deploy_env, manifest["sha"]) == deployed,
+            "Staging deployment changed during smoke; no acceptance receipt recorded")
+    receipt = {"format": 2, "repository": REPO, "sha": manifest["sha"],
                "archive_sha256": manifest["archive_sha256"], "validation": manifest["validation"],
                "run": run_identity,
-               "target": target, "modal_version": version,
+               "target": target, "deployment": deployed,
                "checks": {"readiness": True, "revision": True, "web_shell": True, "mutations_denied": True}}
     (directory / "staging.json").write_text(json.dumps(receipt, indent=2) + "\n")
     print(f"Hosted staging {manifest['sha']}: readiness, revision, web shell and mutation fence passed")

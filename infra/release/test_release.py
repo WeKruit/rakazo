@@ -27,6 +27,38 @@ DEPENDENCY = {
     "repository": "WeKruit/headhunter-agent", "sha": SOURCE_SHA,
     "migrations": ["20261023180000_crm_candidate_presence"], "presence_protocol": 2,
 }
+STAGING_TARGET = {
+    "environment": "staging", "origin": "https://staging.example.test", "server_name": "Recruiting",
+    "app_name": "rakazo-staging-app", "secret_name": "rakazo-staging-config",
+    "volume_name": "rakazo-staging-files",
+}
+
+
+def deployment_identity(version=10):
+    return {"app_id": "ap-Synthetic1", "server_id": "fu-Synthetic1",
+            "server_url": STAGING_TARGET["origin"], "version": version, "tag": SHA}
+
+
+def modal_app_info(version=10):
+    return {"description": STAGING_TARGET["app_name"], "app_id": "ap-Synthetic1",
+            "lifecycle": {"state": "deployed", "version": version},
+            "servers": {"Recruiting": {"id": "fu-Synthetic1"}}}
+
+
+def modal_server_info():
+    return {"name": "Recruiting", "object_id": "fu-Synthetic1", "app_id": "ap-Synthetic1",
+            "server_url": STAGING_TARGET["origin"]}
+
+
+def modal_history(version=10):
+    return [{"version": f"v{version}", "tag": SHA}]
+
+
+def modal_identity_results(version=10, tagged=True):
+    records = [modal_app_info(version), modal_server_info()]
+    if tagged:
+        records.append(modal_history(version))
+    return [json.dumps(record).encode() for record in records]
 
 
 def run_record(workflow="ci", event="push"):
@@ -99,7 +131,8 @@ def stage_env(now=NOW):
         "STAGING_DEPLOY_ENABLED": "true", "STAGING_DEPLOYMENT_HOLD": "clear",
         "STAGING_RELEASE_APPROVAL": json.dumps({
             "sha": SHA, "validation_run_id": 41, "isolated_resources_verified": True,
-            "synthetic_data_only": True, "expires_at": (now + dt.timedelta(minutes=10)).isoformat(),
+            "synthetic_data_only": True, "target": copy.deepcopy(STAGING_TARGET),
+            "expires_at": (now + dt.timedelta(minutes=10)).isoformat(),
         }),
         "STAGING_MODAL_APP_NAME": "rakazo-staging-app",
         "STAGING_MODAL_SECRET_NAME": "rakazo-staging-config",
@@ -113,10 +146,10 @@ def stage_env(now=NOW):
 
 def receipt(manifest):
     return {
-        "format": 1, "repository": release.REPO, "sha": SHA,
+        "format": 2, "repository": release.REPO, "sha": SHA,
         "archive_sha256": manifest["archive_sha256"], "validation": manifest["validation"],
         "run": {"id": 71, "attempt": 2, "workflow_sha": SHA},
-        "target": release.staging_target(stage_env()), "modal_version": 10,
+        "target": copy.deepcopy(STAGING_TARGET), "deployment": deployment_identity(),
         "checks": {"readiness": True, "revision": True, "web_shell": True, "mutations_denied": True},
     }
 
@@ -515,15 +548,21 @@ class HostedReceiptTests(OfflineTest):
 
     def test_synthetic_only_stale_wrong_target_or_incomplete_receipt_is_not_hosted_acceptance(self):
         changes = [
-            {"format": 2}, {"repository": "other/repo"}, {"sha": "d" * 40},
+            {"format": 1}, {"repository": "other/repo"}, {"sha": "d" * 40},
             {"run": {"id": 71, "attempt": 1, "workflow_sha": SHA}},
             {"run": {"id": 72, "attempt": 2, "workflow_sha": SHA}},
             {"run": {"id": 71, "attempt": 2, "workflow_sha": "d" * 40}},
-            {"modal_version": None}, {"modal_version": True}, {"modal_version": 0},
+            {"deployment": None}, {"deployment": {}},
             {"checks": {"readiness": True, "revision": True, "web_shell": True}},
             {"checks": {"readiness": 1, "revision": True, "web_shell": True, "mutations_denied": True}},
             {"target": {**release.staging_target(stage_env()), "origin": "https://other.example.test"}},
         ]
+        changes += [{"deployment": {**deployment_identity(), **change}} for change in (
+            {"app_id": "fu-Synthetic1"}, {"app_id": "ap-invalid/id"}, {"server_id": "ap-Synthetic1"},
+            {"server_id": "fu-invalid_id"}, {"server_url": "https://other.example.test"},
+            {"version": None}, {"version": True}, {"version": 0}, {"version": "10"},
+            {"tag": None}, {"tag": SHA[:8]}, {"tag": "d" * 40},
+        )]
         for change in changes:
             with self.subTest(change=change), tempfile.TemporaryDirectory() as name:
                 manifest, _ = bundle(Path(name))
@@ -570,7 +609,7 @@ class HostedReceiptTests(OfflineTest):
                 def fetch(fresh, run_id, revision):
                     self.assertEqual((run_id, revision), (71, SHA))
                     fresh.mkdir()
-                    data = {**original, "modal_version": 11} if altered == "receipt" else original
+                    data = {**original, "deployment": deployment_identity(11)} if altered == "receipt" else original
                     (fresh / "staging.json").write_text(json.dumps(data))
                     return {**manifest, "sha": "d" * 40} if altered == "manifest" else manifest
                 with patch.dict(os.environ, {"STAGING_RUN_ID": "71"}, clear=True), patch.object(
@@ -586,11 +625,73 @@ class HostedReceiptTests(OfflineTest):
                     self.assertEqual(retrieve.call_count, 1)
 
 
-class HostedExecutionTests(OfflineTest):
-    def info(self, version=10):
-        return json.dumps({"description": "rakazo-staging-app",
-                           "lifecycle": {"state": "deployed", "version": version}}).encode()
+class ModalIdentityTests(OfflineTest):
+    def test_authoritative_app_server_and_full_tag_use_only_explicit_staging_commands(self):
+        deploy_env = {"MODAL_ENVIRONMENT": "staging", "MODAL_TOKEN_ID": "synthetic-stage-token"}
+        for revision in (None, SHA):
+            with self.subTest(revision=revision), patch.object(
+                release, "run", side_effect=modal_identity_results(tagged=revision is not None)
+            ) as run:
+                actual = release.modal_staging_identity(STAGING_TARGET, deploy_env, revision)
+            self.assertEqual(actual, {**deployment_identity(), "tag": revision})
+            expected = [
+                ("modal", "app", "info", "rakazo-staging-app", "--env", "staging", "--json"),
+                ("modal", "server", "info", "rakazo-staging-app/Recruiting", "--env", "staging", "--json"),
+            ]
+            if revision:
+                expected.append(("modal", "app", "history", "ap-Synthetic1", "--env", "staging", "--json"))
+            self.assertEqual([command.args for command in run.call_args_list], expected)
+            self.assertTrue(all(command.kwargs == {"env": deploy_env} for command in run.call_args_list))
 
+    def test_wrong_names_ids_origin_state_or_version_reject_before_history_or_probe(self):
+        changes = [
+            ("app", {"description": "rakazo-staging-other"}),
+            ("app", {"lifecycle": {"state": "stopped", "version": 10}}),
+            ("app", {"lifecycle": {"state": "deployed", "version": True}}),
+            ("app", {"lifecycle": {"state": "deployed", "version": 0}}),
+            ("app", {"servers": {"Other": {"id": "fu-Synthetic1"}}}),
+            ("app", {"app_id": "ap-Other"}),
+            ("server", {"name": "Other"}), ("server", {"app_id": "ap-Other"}),
+            ("server", {"object_id": "fu-Other"}),
+            ("server", {"server_url": "https://other.example.test"}),
+            ("server", {"server_url": "https://staging.example.test/other"}),
+        ]
+        for field, change in changes:
+            records = {"app": modal_app_info(), "server": modal_server_info()}
+            records[field].update(change)
+            outputs = [json.dumps(records[key]).encode() for key in ("app", "server")]
+            with self.subTest(field=field, change=change), patch.object(
+                release, "run", side_effect=outputs
+            ) as run, patch.object(release, "smoke") as smoke, self.assertRaises(ValueError):
+                release.modal_staging_identity(STAGING_TARGET, {}, SHA)
+            self.assertLessEqual(run.call_count, 2)
+            self.assertTrue(all(command.args[:3] in (("modal", "app", "info"), ("modal", "server", "info"))
+                                for command in run.call_args_list))
+            smoke.assert_not_called()
+
+    def test_history_requires_one_current_version_with_the_full_tested_sha_tag(self):
+        histories = [
+            {}, [], [{"version": "v10", "commit": SHA[:7]}],
+            [{"version": "v10", "tag": None}], [{"version": "v10", "tag": SHA[:8]}],
+            [{"version": "v10", "tag": "d" * 40}], [{"version": "v9", "tag": SHA}],
+            [{"version": 10, "tag": SHA}], modal_history() * 2,
+            modal_history() + [{"version": "v10", "tag": "d" * 40}],
+        ]
+        for history in histories:
+            with self.subTest(history=history), patch.object(
+                release, "run", side_effect=modal_identity_results(tagged=False) + [json.dumps(history).encode()]
+            ) as run, self.assertRaises(ValueError):
+                release.modal_staging_identity(STAGING_TARGET, {}, SHA)
+            self.assertEqual(run.call_args.args, ("modal", "app", "history", "ap-Synthetic1", "--env", "staging", "--json"))
+
+    def test_unrelated_history_does_not_replace_the_current_version_tag(self):
+        history = [{"version": "v9", "tag": "d" * 40}, *modal_history(),
+                   {"version": "v11", "tag": "e" * 40}]
+        with patch.object(release, "run", side_effect=modal_identity_results(tagged=False) + [json.dumps(history).encode()]):
+            self.assertEqual(release.modal_staging_identity(STAGING_TARGET, {}, SHA), deployment_identity())
+
+
+class HostedExecutionTests(OfflineTest):
     def test_deploys_exact_source_with_isolated_env_and_records_actual_post_smoke_receipt(self):
         with tempfile.TemporaryDirectory() as name:
             directory = Path(name)
@@ -601,15 +702,18 @@ class HostedExecutionTests(OfflineTest):
             with patch.dict(os.environ, poisoned, clear=True), patch.object(release, "protected_environment") as policy, patch.object(
                 release, "fetch_validation", return_value=manifest
             ), patch.object(release, "verify_validation_source") as verify, patch.object(
-                release, "run", side_effect=[self.info(9), b"", self.info(10)]
+                release, "run", side_effect=modal_identity_results(9, tagged=False) + [b""]
+                + modal_identity_results() + modal_identity_results()
             ) as run, patch.object(release, "smoke") as smoke, patch("builtins.print"):
                 release.stage(directory, SHA)
             verify.assert_called_once_with(directory, manifest)
             policy.assert_called_once_with("staging", {"STAGING_MODAL_TOKEN_ID", "STAGING_MODAL_TOKEN_SECRET", "STAGING_RELEASE_APPROVAL"})
             self.assertEqual([call.args[:3] for call in run.call_args_list], [
-                ("modal", "app", "info"), ("modal", "deploy", "--env"), ("modal", "app", "info"),
+                ("modal", "app", "info"), ("modal", "server", "info"), ("modal", "deploy", "--env"),
+                ("modal", "app", "info"), ("modal", "server", "info"), ("modal", "app", "history"),
+                ("modal", "app", "info"), ("modal", "server", "info"), ("modal", "app", "history"),
             ])
-            deployment = run.call_args_list[1]
+            deployment = run.call_args_list[2]
             self.assertEqual(deployment.args, ("modal", "deploy", "--env", "staging", "--strategy", "recreate",
                                                "--tag", SHA, "infra/modal/app.py"))
             self.assertEqual(deployment.kwargs["cwd"], directory / "source")
@@ -617,6 +721,8 @@ class HostedExecutionTests(OfflineTest):
                 "MODAL_ENVIRONMENT", "RAKAZO_RELEASE_PROFILE", "MODAL_APP_NAME", "MODAL_SECRET_NAME", "MODAL_VOLUME_NAME"})
             smoke.assert_called_once_with("https://staging.example.test", SHA, staging=True)
             self.assertEqual(json.loads((directory / "staging.json").read_text()), receipt(manifest))
+            for command in run.call_args_list:
+                self.assertEqual(command.kwargs["env"], deployment.kwargs["env"])
 
     def test_invalid_staging_authority_isolation_or_target_cannot_reach_modal(self):
         base = stage_env()
@@ -627,9 +733,16 @@ class HostedExecutionTests(OfflineTest):
         ]
         for approval_change in ({"sha": "d" * 40}, {"validation_run_id": 42},
                                 {"isolated_resources_verified": False}, {"synthetic_data_only": False},
+                                {"target": None}, {"target": {}},
                                 {"expires_at": (NOW - dt.timedelta(seconds=1)).isoformat()}):
             changes.append({"STAGING_RELEASE_APPROVAL": json.dumps({
                 **json.loads(base["STAGING_RELEASE_APPROVAL"]), **approval_change})})
+        for field, value in (("app_name", "rakazo-staging-other"), ("secret_name", "rakazo-staging-other"),
+                             ("volume_name", "rakazo-staging-other"), ("server_name", "Other"),
+                             ("environment", "production"), ("origin", "https://other.example.test")):
+            changes.append({"STAGING_RELEASE_APPROVAL": json.dumps({
+                **json.loads(base["STAGING_RELEASE_APPROVAL"]), "target": {**STAGING_TARGET, field: value}})})
+        changes.append({"STAGING_ORIGIN": "https://other.example.test"})
         for change in changes:
             with self.subTest(change=change), tempfile.TemporaryDirectory() as name:
                 directory = Path(name)
@@ -645,15 +758,88 @@ class HostedExecutionTests(OfflineTest):
             with patch.dict(os.environ, stage_env(), clear=True), patch.object(release, "protected_environment"), patch.object(
                 release, "fetch_validation", return_value=manifest
             ), patch.object(release, "verify_validation_source"), patch.object(
-                release, "run", side_effect=[self.info(), b""]
+                release, "run", side_effect=modal_identity_results(9, tagged=False) + [b""]
+                + modal_identity_results()
             ) as run, patch.object(release, "smoke", side_effect=ValueError("synthetic smoke failure")) as smoke, patch.object(
                 release.time, "sleep"
             ) as sleep, self.assertRaisesRegex(ValueError, "Hosted staging smoke failed"):
                 release.stage(directory, SHA)
-            self.assertEqual(run.call_count, 2)
+            self.assertEqual(run.call_count, 6)
             self.assertEqual(smoke.call_count, 12)
             self.assertEqual(sleep.call_count, 11)
             self.assertFalse((directory / "staging.json").exists())
+
+    def test_origin_with_same_tested_sha_cannot_substitute_for_the_actual_modal_server(self):
+        with tempfile.TemporaryDirectory() as name:
+            directory = Path(name)
+            manifest, _ = bundle(directory)
+            server = {**modal_server_info(), "server_url": "https://other.example.test"}
+            outputs = [json.dumps(modal_app_info()).encode(), json.dumps(server).encode()]
+            with patch.dict(os.environ, stage_env(), clear=True), patch.object(release, "protected_environment"), patch.object(
+                release, "fetch_validation", return_value=manifest
+            ), patch.object(release, "verify_validation_source"), patch.object(
+                release, "run", side_effect=outputs
+            ) as run, patch.object(release, "smoke") as smoke, self.assertRaises(ValueError):
+                release.stage(directory, SHA)
+            self.assertEqual([command.args[:3] for command in run.call_args_list], [
+                ("modal", "app", "info"), ("modal", "server", "info"),
+            ])
+            smoke.assert_not_called()
+            self.assertFalse((directory / "staging.json").exists())
+
+    def test_post_deploy_app_replacement_version_regression_or_wrong_tag_never_reaches_smoke(self):
+        for failure in ("app_id", "version", "tag"):
+            with self.subTest(failure=failure), tempfile.TemporaryDirectory() as name:
+                directory = Path(name)
+                manifest, _ = bundle(directory)
+                app, server, history = modal_app_info(), modal_server_info(), modal_history()
+                if failure == "app_id":
+                    app["app_id"] = server["app_id"] = "ap-Replacement"
+                elif failure == "version":
+                    app["lifecycle"]["version"] = 8
+                    history = modal_history(8)
+                else:
+                    history[0]["tag"] = "d" * 40
+                outputs = modal_identity_results(9, tagged=False) + [b""] + [
+                    json.dumps(record).encode() for record in (app, server, history)]
+                with patch.dict(os.environ, stage_env(), clear=True), patch.object(release, "protected_environment"), patch.object(
+                    release, "fetch_validation", return_value=manifest
+                ), patch.object(release, "verify_validation_source"), patch.object(
+                    release, "run", side_effect=outputs
+                ) as run, patch.object(release, "smoke") as smoke, self.assertRaises(ValueError):
+                    release.stage(directory, SHA)
+                self.assertEqual(run.call_count, 6)
+                self.assertEqual(sum(command.args[:2] == ("modal", "deploy") for command in run.call_args_list), 1)
+                smoke.assert_not_called()
+                self.assertFalse((directory / "staging.json").exists())
+
+    def test_identity_drift_during_successful_smoke_records_no_receipt(self):
+        for changed in ("app_id", "server_id", "version", "origin"):
+            with self.subTest(changed=changed), tempfile.TemporaryDirectory() as name:
+                directory = Path(name)
+                manifest, _ = bundle(directory)
+                app, server, history = modal_app_info(), modal_server_info(), modal_history()
+                if changed == "app_id":
+                    app["app_id"] = server["app_id"] = "ap-Replacement"
+                elif changed == "server_id":
+                    app["servers"]["Recruiting"]["id"] = server["object_id"] = "fu-Replacement"
+                elif changed == "version":
+                    app["lifecycle"]["version"] = 11
+                    history = modal_history(11)
+                else:
+                    server["server_url"] = "https://other.example.test"
+                outputs = modal_identity_results(9, tagged=False) + [b""] + modal_identity_results() + [
+                    json.dumps(record).encode() for record in (app, server, history)]
+                with patch.dict(os.environ, stage_env(), clear=True), patch.object(release, "protected_environment"), patch.object(
+                    release, "fetch_validation", return_value=manifest
+                ), patch.object(release, "verify_validation_source"), patch.object(
+                    release, "run", side_effect=outputs
+                ) as run, patch.object(release, "smoke") as smoke, self.assertRaises(ValueError):
+                    release.stage(directory, SHA)
+                self.assertEqual(sum(command.args[:2] == ("modal", "deploy") for command in run.call_args_list), 1)
+                smoke.assert_called_once_with(STAGING_TARGET["origin"], SHA, staging=True)
+                self.assertEqual(run.call_count, 8 if changed == "origin" else 9)
+                self.assertFalse((directory / "staging.json").exists())
 
     def test_invalid_run_provenance_or_existing_receipt_is_rejected_before_modal(self):
         for change in ({"GITHUB_RUN_ID": "not-a-run"}, {"GITHUB_RUN_ATTEMPT": "0"},
@@ -676,7 +862,7 @@ class HostedExecutionTests(OfflineTest):
                 directory = Path(name)
                 manifest, _ = bundle(directory)
                 trusted = {**manifest, "sha": "d" * 40} if failure == "source" else manifest
-                info = json.dumps({"description": "wrong-app", "lifecycle": {"state": "stopped"}}).encode()
+                info = json.dumps({**modal_app_info(), "description": "wrong-app"}).encode()
                 with patch.dict(os.environ, stage_env(), clear=True), patch.object(release, "protected_environment"), patch.object(
                     release, "fetch_validation", return_value=trusted
                 ), patch.object(release, "verify_validation_source"), patch.object(release, "run", return_value=info) as run, self.assertRaises(ValueError):

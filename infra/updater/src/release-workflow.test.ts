@@ -211,7 +211,10 @@ describe("release workflow safety boundaries", () => {
           if (step.uses?.startsWith("actions/checkout@")) {
             expect(step.with?.["persist-credentials"]).toBe(false);
             if (workflow !== validation) {
-              expect(step.with).toMatchObject({ ref: "main", "fetch-depth": 0 });
+              expect(step.with).toMatchObject({
+                ref: expression("github.sha"),
+                "fetch-depth": 0,
+              });
             }
           }
         }
@@ -227,20 +230,38 @@ describe("release workflow safety boundaries", () => {
     );
   });
 
-  it("keeps the legacy Compose publisher behind the hold and disables it for Modal promotion", () => {
-    requiresAll(ci.jobs["deploy-production"].if, [
-      "github.event_name == 'push'",
-      "github.ref == 'refs/heads/main'",
-      "vars.LEGACY_COMPOSE_DEPLOY_ENABLED == 'true'",
-      "vars.PRODUCTION_DEPLOY_ENABLED == 'true'",
-      "vars.MODAL_PROMOTION_ENABLED != 'true'",
-      "vars.PRODUCTION_DEPLOYMENT_HOLD == 'clear'",
-      "vars.PRODUCTION_APPROVED_SHA == github.sha",
-    ]);
-    const commands =
-      ci.jobs["deploy-production"].steps?.map((step) => step.run ?? "").join("\n") ?? "";
-    expect(commands).toContain('deploy-main "$GITHUB_SHA"');
-    expect(ci.jobs["deploy-production"].concurrency).toEqual({
+  it.each([staging, promotion])(
+    "$name keeps the dispatch revision when main advances while waiting",
+    (workflow) => {
+      const dispatch = { sha: "a".repeat(40), ref: "refs/heads/main" };
+      const remoteRefs: Record<string, string> = { main: dispatch.sha };
+      const checkout = Object.values(workflow.jobs)
+        .flatMap((job) => job.steps ?? [])
+        .find((step) => step.uses?.startsWith("actions/checkout@"));
+      const checkoutRevision = () => {
+        const ref = String(checkout?.with?.ref).replace(expression("github.sha"), dispatch.sha);
+        return remoteRefs[ref] ?? ref;
+      };
+
+      expect(checkoutRevision()).toBe(dispatch.sha);
+      // The run's event SHA stays fixed during environment approval/concurrency waits.
+      remoteRefs.main = "b".repeat(40);
+      expect(remoteRefs.main).not.toBe(dispatch.sha);
+      expect(checkoutRevision()).toBe(dispatch.sha);
+    },
+  );
+
+  it("keeps legacy Compose disabled regardless of old opt-ins or release variables", () => {
+    const job = ci.jobs["deploy-production"];
+    expect(job.if).toBe(expression("false"));
+    expect(job.environment).toBeUndefined();
+    expect(job.env).toBeUndefined();
+    for (const step of job.steps ?? []) {
+      expect(step.env).toBeUndefined();
+      expect(step.run ?? "").not.toMatch(/\b(?:ssh|docker|deploy-main)\b/);
+    }
+    expect(job.steps?.some((step) => step.run?.includes("exit 1"))).toBe(true);
+    expect(job.concurrency).toEqual({
       group: "production",
       "cancel-in-progress": false,
     });

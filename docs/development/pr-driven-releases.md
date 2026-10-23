@@ -31,6 +31,32 @@ only after its restricted smoke succeeds. Production takes `staging_run_id` and
 `expected_sha`, verifies the hosted run and receipt against the original
 validation artifact, and repeats a live read-only staging smoke. Missing, expired,
 ambiguous or mismatched evidence fails closed. No step substitutes latest `main`.
+Both dispatch workflows check out the immutable `github.sha` recorded for that
+dispatch, so a later main advance while waiting for approval/concurrency cannot
+change the orchestration code while retaining the older workflow provenance.
+
+The staging approval binds the complete target: Modal environment `staging`,
+app/Secret/Volume names, server `Recruiting`, and canonical origin. Before deploy,
+`modal app info` and `modal server info` must agree on the existing deployed app
+ID and server ID; the server's authoritative URL must equal `STAGING_ORIGIN`.
+Custom aliases are not accepted. After deploy, the same app ID must remain and
+the current lifecycle version must have exactly one history entry tagged with
+the full candidate SHA. The CLI's shortened `commit` field is not evidence.
+The app/server IDs, URL, version and full tag are rechecked after smoke and stored
+in a format-2 receipt; format-1 receipts require restaging. These command shapes
+were inspected in the pinned Modal 1.6.2 SDK; see
+[app inspection/history](https://modal.com/docs/cli/latest/app) and
+[server inspection](https://modal.com/docs/cli/latest/server#modal-server-info).
+
+This is a bounded observation, not an atomic deployment lock against dashboard or
+other external writers. The owner must exclude concurrent external deployments
+and stop/delete operations. If the app disappears between preflight and deploy,
+the Modal CLI can create a replacement; the ID check detects that afterward and
+records no acceptance. No-op deployments may retain their version. Later
+production eligibility authenticates that receipt and repeats the HTTP smoke;
+it has no Modal credentials to perform a fresh metadata lookup. Production remains
+blocked, and an eventual promotion implementation must handle this remaining
+concurrency boundary explicitly.
 
 The manifest records the full Rakazo SHA, archive checksum, CI/validation run
 identity, pinned headhunter source and every product migration's full name and SQL
@@ -85,8 +111,9 @@ checks alone do not prove those access boundaries.
 Use an existing isolated staging app, environment, Secret, database and Volume.
 App, Secret and Volume names must each match
 `^rakazo-staging(?:-[a-z0-9-]+)?$`; the Modal environment is fixed to `staging`.
-No workflow creates the resources, copies production data or borrows the
-production Secret. Staging startup can apply product schema migrations to its
+No explicit provisioning path is supplied; activation requires existing resources
+and the concurrent-deletion limitation above still applies. No workflow copies
+production data or borrows the production Secret. Staging startup can apply product schema migrations to its
 isolated database; that future operation requires explicit staging activation.
 If any resource or credential is absent, stop for separately authorized setup.
 
@@ -143,6 +170,21 @@ Staging's approval secret contains the exact full `sha`, numeric
 `synthetic_data_only: true` and `expires_at` as a UTC ISO timestamp ending in `Z`,
 no more than 30 minutes ahead. The owner must establish those facts before setting
 the secret; the record is not itself evidence that isolation has been tested.
+It must also contain `target` with exactly these fields, using the approved
+existing resources and the authoritative Modal URL:
+
+```json
+{
+  "environment": "staging",
+  "server_name": "Recruiting",
+  "app_name": "rakazo-staging-app",
+  "secret_name": "rakazo-staging-config",
+  "volume_name": "rakazo-staging-files",
+  "origin": "https://staging.example.test"
+}
+```
+
+The URL above is a synthetic placeholder, not an operational environment.
 
 Production's approval secret records the exact `sha`, numeric `staging_run_id`,
 `previous_sha`, pinned `source_sha`, the same expiry bound, `active_runs: 0`,
@@ -158,6 +200,10 @@ readiness verification, while preserving the real Autumn pause and active state.
 It must fail safely if the drain cannot be maintained and retain one file-store
 writer. Do not remove the unconditional production stop or enable a legacy path
 to work around this blocker.
+The [maintenance proposal](release-maintenance-proposal.md) describes the
+inspected runtime entry points, smallest durable admission barrier, tests and
+owner-controlled first-bootstrap dependency. It is a design for review; no
+maintenance schema or runtime barrier has been implemented here.
 
 Modal's `recreate` strategy terminates old containers at cutover and can retry
 in-flight inputs on replacements. See the [deploy CLI](https://modal.com/docs/cli/latest/deploy)
@@ -248,21 +294,26 @@ autonomous production release system.
 
 ## Legacy and external paths
 
-Keep legacy SSH/Compose, mobile OTA and server-image publishers disabled during
-review; their opt-ins do not bypass the production drain requirement.
+Legacy SSH/Compose is blocked in both the CI job and the host-script source,
+independently of old opt-ins. Keep mobile OTA and server-image publishers disabled
+during review. Their existing opt-in gates are distribution controls, not runtime
+drain enforcement; they must not be enabled as a production workaround.
 
 | Path | Existing explicit conditions |
 | --- | --- |
-| SSH/Compose | `LEGACY_COMPOSE_DEPLOY_ENABLED=true`, `PRODUCTION_DEPLOY_ENABLED=true`, `PRODUCTION_DEPLOYMENT_HOLD=clear`, `PRODUCTION_APPROVED_SHA` equal to the tested SHA, and Modal promotion not enabled. |
+| SSH/Compose | Unconditional code block pending a reviewed maintenance barrier; old approval/hold variables cannot activate this path. |
 | Mobile OTA | `MOBILE_OTA_PUBLISH_ENABLED=true`, Modal promotion not enabled, and existing OTA compatibility checks. |
 | Server images | `SERVER_IMAGE_PUBLISH_ENABLED=true`; independent distribution that can feed an updater, requiring its own authorization. |
 
-SSH, OTA and Modal promotion share the `production` concurrency group. The legacy
-host script also requires `RAKAZO_LEGACY_COMPOSE_APPROVED_SHA` to match the full
-SHA argument and `RAKAZO_DEPLOYMENT_HOLD=clear`; it refuses moved `main`. No host
-configuration is changed. Mutable image tags do not establish Modal staging
-acceptance. Desktop/tag and manual native releases remain separate; do not create
-tags or dispatch them as part of this work.
+OTA and Modal promotion retain the `production` concurrency group. The proposed
+legacy host script exits before Git, SSH, Docker or HTTP activity, even when the
+old full-SHA approval and hold settings are supplied. An already installed older
+host script is not changed by this PR; the owner must keep it disabled and reconcile
+it separately before any activation. No host configuration or dashboard setting
+is changed. Mutable image tags do not establish Modal staging acceptance.
+Desktop/tag and manual native releases remain separate; do not create tags or
+dispatch them as part of this work. No global drain protection is claimed for
+external/manual deployment, updater or distribution paths.
 
 Head-hunter Vercel integration is unchanged. Do not push to that repository or
 assume `[skip ci]` suppresses Vercel; earlier PR-specific authorization does not
