@@ -383,7 +383,7 @@ window.fetch = async (input, init) => {
 const roleGroups: Group[] = [
   crmTarget.roleLabel,
   "Founding Infrastructure Engineer with an unusually long role title",
-  "Product Designer",
+  params.has("duplicate-roles") ? crmTarget.roleLabel : "Product Designer",
 ].map((name, i) => ({
   id: `group-${i}`,
   spaceId: "space-demo",
@@ -395,7 +395,7 @@ const roleGroups: Group[] = [
   threadId: `thread-${i}`,
   preview: "",
   unread: false,
-  createdAt: checkedAt,
+  createdAt: new Date(Date.parse(checkedAt) + i * 86400000).toISOString(),
   updatedAt: checkedAt,
 }));
 

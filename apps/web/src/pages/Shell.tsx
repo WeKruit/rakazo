@@ -238,6 +238,7 @@ import {
   revokePendingAttachmentPreviews,
 } from "../lib/pending-attachments";
 import { markAfterPaint, markOnce } from "../lib/performance";
+import { setPreloadRecoveryActiveWork } from "../lib/preload-recovery";
 import { quoteDraftForSelection } from "../lib/quote-selection";
 import { retryTransientRead } from "../lib/read-retry";
 import type { RecruitingReadCache } from "../lib/recruiting-read-cache";
@@ -2992,6 +2993,10 @@ export function ShellPage() {
   );
   const transcriptRunning = workingRuns.length > 0;
   const composerRunning = currentRuns.some((run) => isActive(run.status));
+  useEffect(() => {
+    setPreloadRecoveryActiveWork(composerRunning);
+    return () => setPreloadRecoveryActiveWork(false);
+  }, [composerRunning]);
   // Only a reply that is still working takes an interjection; one waiting on a card does not.
   const composerRunningRef = useRef(transcriptRunning);
   composerRunningRef.current = transcriptRunning;

@@ -117,7 +117,7 @@ export function RecruitingNavigation({
   onToggleArchived: () => void;
   onRestoreRole: (id: string) => void;
 }) {
-  const { t } = useLingui();
+  const { t, i18n } = useLingui();
   const [crmRetry, setCrmRetry] = useState(0);
   type CrmRole = Extract<RecruitingCrmDataOutput, { operation: "roles" }>["items"][number] & {
     selection: CrmBrowseSelection;
@@ -222,6 +222,11 @@ export function RecruitingNavigation({
   const visibleGroups = groups
     .filter((group) => group.name.toLocaleLowerCase().includes(query.trim().toLocaleLowerCase()))
     .sort((a, b) => Number(waitsOnUser(b)) - Number(waitsOnUser(a)));
+  const titleCounts = new Map<string, number>();
+  for (const group of groups) {
+    const title = group.name.trim().toLocaleLowerCase();
+    titleCounts.set(title, (titleCounts.get(title) ?? 0) + 1);
+  }
   const destinations = [
     { view: "shortlist", label: t`Shortlist`, Icon: Bookmark },
     { view: "contacts", label: t`Contacts`, Icon: Users },
@@ -369,6 +374,17 @@ export function RecruitingNavigation({
                   dir="auto"
                 >
                   {group.name}
+                  {(titleCounts.get(group.name.trim().toLocaleLowerCase()) ?? 0) > 1 ? (
+                    <time
+                      dateTime={group.createdAt}
+                      className="block truncate text-xs font-normal text-muted-foreground"
+                    >
+                      {new Date(group.createdAt).toLocaleString(i18n.locale, {
+                        dateStyle: "medium",
+                        timeStyle: "short",
+                      })}
+                    </time>
+                  ) : null}
                 </span>
                 {waitsOnUser(group) ? (
                   <Badge variant="secondary" className="shrink-0">

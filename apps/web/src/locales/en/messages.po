@@ -7631,3 +7631,15 @@ msgstr "Your recruiting workspace."
 #: src/pages/recruiting/HomeDashboard.tsx
 msgid "Your tasks"
 msgstr "Your tasks"
+
+#: src/components/AskCard.tsx
+msgid "Confirm requirements"
+msgstr "Confirm requirements"
+
+#: src/components/AskCard.tsx
+msgid "Approve documents"
+msgstr "Approve documents"
+
+#: src/components/AskCard.tsx
+msgid "Approve calibration"
+msgstr "Approve calibration"

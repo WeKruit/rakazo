@@ -103,3 +103,20 @@ test("people open in a detail panel beside the workbench", async ({ page }, test
   await page.keyboard.press("Escape");
   await expect(panel).toHaveCount(0);
 });
+
+test("duplicate role names have visible creation dates", async ({ page }, testInfo) => {
+  await page.setViewportSize({ width: 1280, height: 860 });
+  await page.goto(`${fixture}?view=results&duplicate-roles`);
+  const roles = page.getByRole("navigation", { name: "Role conversations" });
+  await expect(roles.locator("time")).toHaveCount(2);
+  await expect(roles.locator("time").first()).toHaveAttribute(
+    "datetime",
+    "2026-10-22T10:00:00.000Z",
+  );
+  await expect(roles.locator("time").last()).toHaveAttribute(
+    "datetime",
+    "2026-10-24T10:00:00.000Z",
+  );
+  await captureScreenshot(page, testInfo, "duplicate-role-dates");
+  await noHorizontalScroll(page);
+});

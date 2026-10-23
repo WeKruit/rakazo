@@ -7631,3 +7631,15 @@ msgstr ""
 #: src/pages/recruiting/HomeDashboard.tsx
 msgid "Your tasks"
 msgstr "你的任务"
+
+#: src/components/AskCard.tsx
+msgid "Confirm requirements"
+msgstr "确认岗位要求"
+
+#: src/components/AskCard.tsx
+msgid "Approve documents"
+msgstr "确认招聘材料"
+
+#: src/components/AskCard.tsx
+msgid "Approve calibration"
+msgstr "确认候选人校准"

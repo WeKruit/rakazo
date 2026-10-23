@@ -2,7 +2,8 @@ import { describe, expect, it, vi } from "vitest";
 import { installPreloadRecovery } from "./preload-recovery";
 
 describe("preload recovery", () => {
-  function createTarget(store = new Map<string, string>(), onLine = true) {
+  function createTarget(store = new Map<string, string>(), onLine = true, isWorking = () => false) {
+    const timers: (() => void)[] = [];
     let listener: EventListener | undefined;
     const reload = vi.fn();
     const target = {
@@ -18,10 +19,13 @@ describe("preload recovery", () => {
         setItem: (key: string, value: string) => store.set(key, value),
         removeItem: (key: string) => store.delete(key),
       },
-      setTimeout: vi.fn(() => 1),
+      setTimeout: vi.fn((callback: () => void) => {
+        timers.push(callback);
+        return timers.length;
+      }),
     };
-    installPreloadRecovery(target as unknown as Window);
-    return { listener: () => listener, reload };
+    const dispose = installPreloadRecovery(target as unknown as Window, isWorking);
+    return { listener: () => listener, reload, timers, dispose, target };
   }
 
   it("reloads once without suppressing another failure during navigation", () => {
@@ -34,6 +38,27 @@ describe("preload recovery", () => {
     expect(first.defaultPrevented).toBe(true);
     expect(second.defaultPrevented).toBe(false);
     expect(reload).toHaveBeenCalledOnce();
+  });
+
+  it("waits for native work to finish before reloading missing assets", () => {
+    let working = true;
+    const { listener, reload, timers } = createTarget(new Map(), true, () => working);
+    const failure = new Event("vite:preloadError", { cancelable: true });
+    listener()?.(failure);
+    expect(failure.defaultPrevented).toBe(true);
+    expect(reload).not.toHaveBeenCalled();
+    timers[1]!();
+    expect(reload).not.toHaveBeenCalled();
+    working = false;
+    timers[2]!();
+    expect(reload).toHaveBeenCalledOnce();
+  });
+
+  it("cancels deferred recovery when disposed", () => {
+    const { listener, dispose, target } = createTarget(new Map(), true, () => true);
+    listener()?.(new Event("vite:preloadError", { cancelable: true }));
+    dispose();
+    expect(target.clearTimeout).toHaveBeenCalledWith(2);
   });
 
   it("does not suppress a new failure after the recovery reload", () => {

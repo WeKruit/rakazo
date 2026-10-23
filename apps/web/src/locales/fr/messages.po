@@ -7631,3 +7631,15 @@ msgstr ""
 #: src/pages/recruiting/HomeDashboard.tsx
 msgid "Your tasks"
 msgstr ""
+
+#: src/components/AskCard.tsx
+msgid "Confirm requirements"
+msgstr ""
+
+#: src/components/AskCard.tsx
+msgid "Approve documents"
+msgstr ""
+
+#: src/components/AskCard.tsx
+msgid "Approve calibration"
+msgstr ""

@@ -66,13 +66,16 @@ function approvalActionLabel(
   return fallback;
 }
 
-/** Translates the outbound approval titles; the exact target after "→" stays as sent. */
+/** Translates recruiting approval titles; the exact target after "→" stays as sent. */
 function approvalTitle(text: string): string {
   const [action, ...rest] = text.split(" → ");
   const target = rest.length ? ` → ${rest.join(" → ")}` : "";
   const titles: Record<string, string> = {
     "Confirm sending the first email": t`Confirm sending the first email`,
     "Confirm reply": t`Confirm reply`,
+    "Confirm requirements": t`Confirm requirements`,
+    "Approve documents": t`Approve documents`,
+    "Approve calibration": t`Approve calibration`,
     "Confirm sending email": t`Confirm sending email`,
     "Confirm forwarding email": t`Confirm forwarding email`,
     "Confirm adding candidates to the campaign": t`Confirm adding candidates to the campaign`,
