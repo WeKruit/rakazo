@@ -4554,6 +4554,112 @@ it("does not fall back to raw file access when a product source cannot be verifi
   expect(evidence.querySelector("[data-artifact-id]")).toBeNull();
 });
 
+it("keeps current findings ahead of collapsed feedback and source-specific evidence in the profile drawer", async () => {
+  const candidate = {
+    ...candidateFixture("profile-overview", false),
+    name: "Profile Example",
+    title: "Software engineer",
+    company: "Example company",
+    location: "Example city",
+    linkedinUrl: "https://www.linkedin.com/in/profile-example",
+    latestSource: {
+      ...savedObservation,
+      taskId: null,
+      actionId: null,
+      rowIndex: 0,
+      outputId: null,
+      report: {
+        fields: [{ label: "Score", value: "4/6", sourceUrls: [] }],
+        sourceUrls: [],
+      },
+    },
+  };
+  const quote = "Keep this exact earlier feedback. ".repeat(30);
+  api.listCandidates.mockResolvedValue(candidatePage([candidate]));
+  api.listFeedback.mockResolvedValue({
+    feedback: [
+      {
+        id: "earlier-feedback",
+        createdAt: "2026-01-01T00:00:00Z",
+        roleRevisionId: "revision-1",
+        choice: "not_fit",
+        feedback: {
+          target: "candidate",
+          expectedRoleRevision: 1,
+          candidateKeys: [candidate.candidateKey],
+        },
+        source: { quote },
+      },
+    ],
+    nextCursor: null,
+  });
+  api.listCandidateSources.mockResolvedValue({
+    roleId: role.id,
+    candidateKey: candidate.candidateKey,
+    total: 1,
+    nextCursor: null,
+    items: [
+      {
+        ...candidate.latestSource,
+        roleRevisionId: "revision-1",
+        crmImports: [],
+        report: {
+          fields: [
+            {
+              label: "Biography",
+              value: "Original long provider profile. ".repeat(30),
+              sourceUrls: [],
+            },
+            {
+              label: "Geometry",
+              value: "miss",
+              providerStatus: "miss",
+              evidence: "Exact saved project evidence.",
+              reasoning: "Original provider explanation.",
+              sourceUrls: ["https://example.test/evidence"],
+            },
+          ],
+          sourceUrls: ["https://example.test/evidence"],
+        },
+      },
+    ],
+  });
+  const view = await mounted("thread-1", undefined, false, undefined, {
+    presentation: "workspace",
+    tab: "evidence",
+  });
+  await view.click("Table");
+  await view.click(candidate.name);
+  const dialog = view.container.querySelector('[role="dialog"]')!;
+  const match = dialog.querySelector('[aria-label="Research match"]')!;
+  const history = [...dialog.querySelectorAll("details")].find(
+    (item) => item.querySelector(":scope > summary")?.textContent === "Feedback history",
+  );
+  expect(history).toBeDefined();
+  expect(match.compareDocumentPosition(history!) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+  expect(history!.open).toBe(false);
+  expect(match.textContent).toContain("Score4/6");
+  expect(match.textContent).not.toContain("Geometry");
+  expect(dialog.textContent).toContain(candidate.location);
+  const sources = dialog.querySelector('[aria-label="Saved candidate sources"]')!;
+  const findings = [...sources.querySelectorAll("details")].filter((item) =>
+    item.querySelector(":scope > summary")?.textContent?.includes("Geometry"),
+  );
+  expect(findings).toHaveLength(1);
+  expect(findings[0]!.open).toBe(false);
+  expect(findings[0]!.querySelector("summary")?.textContent).toContain("Does not match");
+  expect(findings[0]!.textContent).toContain("Exact saved project evidence.");
+  expect(sources.textContent).toContain("Saved before latest role update");
+  await act(async () => {
+    history!.open = true;
+    findings[0]!.open = true;
+  });
+  expect(history!.textContent).toContain(quote);
+  expect(findings[0]!.querySelector('a[href="https://example.test/evidence"]')).not.toBeNull();
+  expect(view.feedback).not.toHaveBeenCalled();
+  expect(api.getById).not.toHaveBeenCalled();
+});
+
 it("shows exact Autumn rule states from the latest report before source history loads without classifying prose", async () => {
   const candidate = {
     ...candidateFixture("provider-status", false),
@@ -5057,9 +5163,13 @@ it.each(["Cards", "Table"])(
     await toggleDescription(summary, "Fit reasons", fitReasons);
     expect(summary.textContent).not.toContain("Earlier round grade");
     expect(sources.textContent).toContain("Earlier round grade");
-    const report = sources.querySelector("dl")!;
+    const report = sources.querySelector(".hire-candidate-report")!;
     expect(report).not.toBeNull();
-    expect([...report.querySelectorAll("dt")].map((item) => item.textContent)).toEqual([
+    expect(
+      [...report.querySelectorAll(".hire-candidate-finding-heading > .font-medium")].map(
+        (item) => item.textContent,
+      ),
+    ).toEqual([
       "Geometry work",
       "Full-time years",
       "Provider tier",
@@ -5069,10 +5179,15 @@ it.each(["Cards", "Table"])(
       "Match score",
       "Match tier",
     ]);
-    expect(report.querySelector("dd > p")?.textContent).toBe(
+    const findings = [...report.querySelectorAll<HTMLDetailsElement>(".hire-candidate-finding")];
+    expect(findings[0]!.open).toBe(false);
+    await act(async () => {
+      findings[0]!.open = true;
+    });
+    expect(findings[0]!.querySelector(":scope > div > p")?.textContent).toBe(
       "  Built a mesh compiler.\nMaintained geometry tools.  ",
     );
-    expect(report.querySelectorAll("dd")[1]?.querySelector("p")?.textContent).toBe("Unknown");
+    expect(findings[1]?.querySelector("p")?.textContent).toBe("Unknown");
     expect(report.textContent).toContain("Provider cites a project description.");
     expect(report.textContent).toContain(
       "Provider reports relevant geometry work; dates are unconfirmed.",
@@ -5333,7 +5448,7 @@ it("opens retained candidate report fields through the native saved assessment s
   expect(api.getById).not.toHaveBeenCalled();
 });
 
-it("opens the latest retained report first while preserving dated history and pagination", async () => {
+it("opens the newest saved source while preserving dated findings and source pagination", async () => {
   const candidate = { ...candidateFixture("repeated-person", false), name: "Synthetic Engineer" };
   api.listCandidates.mockResolvedValue(candidatePage([candidate]));
   const page = {
@@ -5368,14 +5483,17 @@ it("opens the latest retained report first while preserving dated history and pa
   await view.click("Evidence");
   await view.click(candidate.name);
   const sources = view.container.querySelector('[aria-label="Saved candidate sources"]')!;
-  let disclosures = [...sources.querySelectorAll("details")];
+  let disclosures = [...sources.querySelectorAll<HTMLDetailsElement>(":scope > div > details")];
   expect(disclosures).toHaveLength(2);
   expect(disclosures.map((item) => item.open)).toEqual([true, false]);
   expect(
     disclosures.map((item) => item.querySelector("summary time")?.getAttribute("datetime")),
   ).toEqual(["2026-01-02T00:00:00Z", "2026-01-01T00:00:00Z"]);
   expect(
-    disclosures.every((item) => item.querySelector("dl dt")?.textContent === "Geometry work"),
+    disclosures.every(
+      (item) =>
+        item.querySelector(".hire-candidate-finding summary")?.textContent === "Geometry work",
+    ),
   ).toBe(true);
   expect(sources.textContent).toContain("More sources");
   await view.click("More sources");
@@ -5385,7 +5503,7 @@ it("opens the latest retained report first while preserving dated history and pa
     limit: 20,
     cursor: "more-sources",
   });
-  disclosures = [...sources.querySelectorAll("details")];
+  disclosures = [...sources.querySelectorAll<HTMLDetailsElement>(":scope > div > details")];
   expect(disclosures.map((item) => item.open)).toEqual([true, false, false]);
   expect(
     disclosures.map((item) => item.querySelector("summary time")?.getAttribute("datetime")),

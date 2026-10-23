@@ -954,7 +954,7 @@ body,
   bottom: 0;
   left: auto;
   display: block;
-  width: min(1260px, 70vw);
+  width: min(960px, 72vw);
   max-width: none;
   height: 100dvh;
   max-height: 100dvh;
@@ -974,6 +974,67 @@ body,
   font-size: 22px;
   font-weight: 650;
   letter-spacing: -0.03em;
+}
+.hire-profile-drawer .hire-candidate-body > .hire-candidate-match,
+.hire-profile-drawer .hire-candidate-feedback-history,
+.hire-profile-drawer .hire-candidate-body > section {
+  margin-top: 24px;
+  border-top: 1px solid var(--border);
+  padding-top: 20px;
+}
+.hire-profile-drawer .hire-candidate-match > dt {
+  margin-bottom: 12px;
+  color: var(--foreground);
+  font-size: 14px;
+  font-weight: 600;
+}
+.hire-profile-drawer .hire-candidate-criterion {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 12px;
+  padding-block: 8px;
+}
+.hire-profile-drawer .hire-candidate-actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-start;
+  gap: 12px;
+  padding-block: 12px;
+}
+.hire-profile-drawer .hire-candidate-feedback {
+  display: contents;
+}
+.hire-profile-drawer .hire-candidate-feedback > form,
+.hire-profile-drawer .hire-candidate-feedback > p {
+  flex-basis: 100%;
+}
+.hire-profile-drawer .hire-candidate-report,
+.hire-profile-drawer .hire-candidate-match dd {
+  font-size: 14px;
+}
+.hire-profile-drawer .hire-candidate-report p,
+.hire-profile-drawer .hire-candidate-match p {
+  max-width: 75ch;
+}
+.hire-profile-drawer .hire-candidate-finding {
+  border-bottom: 1px solid var(--border);
+  padding-bottom: 12px;
+}
+.hire-profile-drawer .hire-candidate-finding-heading {
+  display: inline-flex;
+  width: calc(100% - 1rem);
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 12px;
+}
+.hire-profile-drawer .hire-candidate-header > :first-child,
+.hire-profile-drawer .hire-candidate-finding-heading > :first-child,
+.hire-profile-drawer .hire-candidate-criterion > dt {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+.hire-profile-drawer .hire-candidate-finding > div {
+  margin-top: 12px;
 }
 @media (max-width: 1100px) {
   .hire-profile-drawer[data-slot="dialog-content"] {
