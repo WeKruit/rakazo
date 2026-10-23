@@ -1167,14 +1167,19 @@ export async function stopThreadRuns(
       select: { id: true, botId: true },
     });
     const ids = cancelled.map((run) => run.id);
-    await tx.steeringMessage.deleteMany({
-      where: {
-        ...(runId !== undefined
-          ? { runId: { in: ids } }
-          : { botId: { in: target.kind === "bot" ? [target.botId] : target.memberBotIds } }),
-        message: { threadId: target.threadId },
-      },
-    });
+    if (ids.length) {
+      // Steering the stopped run already claimed went into its context and ends with it.
+      // Unclaimed rows (steered but not yet read, or a queued continuation's input) survive
+      // as pending input: the next run in this thread claims them. Stop cancels the run,
+      // not what the user said while it ran.
+      await tx.steeringMessage.deleteMany({
+        where: { runId: { in: ids }, claimedAt: { not: null } },
+      });
+      await tx.steeringMessage.updateMany({
+        where: { runId: { in: ids } },
+        data: { runId: null },
+      });
+    }
     // Snapshot teardown coordinates before commit. Once cancellation becomes
     // visible, a worker can release its lease / execution columns immediately; a
     // later lookup would then miss the sandbox work this request must stop.
