@@ -1880,7 +1880,9 @@ export async function appendEventsInTransaction(
     await assertEventRunWritable(tx, input);
   }
   const firstSeq = thread.nextEventSeq - inputs.length;
-  inputs.forEach((input, index) => stashSidebarSignal(input, firstSeq + index, thread.userId));
+  inputs.forEach((input, index) => {
+    stashSidebarSignal(input, firstSeq + index, thread.userId);
+  });
   const rows = inputs.map((input, index) => eventRow(input, firstSeq + index));
   await tx.event.createMany({ data: rows });
   return rows;

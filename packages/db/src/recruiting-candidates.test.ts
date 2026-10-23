@@ -2767,6 +2767,15 @@ describe("durable recruiting reply linkage", () => {
       ).toHaveLength(1);
     },
   );
+  it("resolves a CRM member already present in the deployed candidate index", async () => {
+    const f = await nativeReplyFixture();
+    const legacy = await replyFixture();
+    const candidate = await legacy.tx.recruitingCandidate.findUnique();
+    f.tx.recruitingCandidate.findUnique.mockResolvedValue(candidate as never);
+    await expect(
+      recruiting.resolveRecruitingReply(f.prisma, actor, f.trusted, f.input as never),
+    ).resolves.toMatchObject({ candidateId: f.receipt.candidate_id, crmImportReceipt: null });
+  });
   it.each(["membership", "binding", "role", "email", "lease", "membership-failed", "hold"])(
     "rejects native member %s boundary",
     async (boundary) => {
