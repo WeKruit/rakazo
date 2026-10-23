@@ -109,7 +109,7 @@ function fixture(crmBindingEffectId: string | null = null) {
       update: vi.fn(async () => ({ nextMessageSeq: 2, nextEventSeq: 1 })),
     },
     bot: { findFirst: vi.fn(async () => actor) },
-    chatGroup: { findFirst: vi.fn(async () => actor) },
+    chatGroup: { findFirst: vi.fn(async () => actor), updateMany: vi.fn(async () => ({ count: 1 })) },
     event: {
       create: vi.fn(async ({ data }) => ({ id: "changed-event", createdAt: new Date(), ...data })),
     },
@@ -985,6 +985,30 @@ it("explains mixed JD attribution without accepting it as a human instruction", 
   const saved = await recruiting.reviseRecruitingRole(f.prisma, actor, input, f.material);
   expect(saved.revision.brief?.fields[0]?.sourceRefIds).toEqual(["jd"]);
   expect(saved.role.revision).toBe(2);
+});
+
+it("renames the role's chat group only while it still carries the previous title", async () => {
+  const f = approvalFixture();
+  Object.assign(f.tx, { recruitingResearchAction: { findFirst: vi.fn(async () => null) } });
+  f.thread.botId = null;
+  f.thread.groupId = "group";
+  const original = f.revisions[0]!;
+  const { confirmation: _confirmation, ...brief } = original.brief;
+  const input = ReviseRecruitingRoleInput.parse({
+    roleId: "role",
+    expectedRevision: 1,
+    title: "Staff engineer",
+    criteria: original.criteria,
+    preferences: original.preferences,
+    definitionQuestions: original.definitionQuestions,
+    sourceRefs: original.sourceRefs,
+    brief,
+  });
+  await recruiting.reviseRecruitingRole(f.prisma, actor, input, f.material);
+  expect(f.tx.chatGroup.updateMany).toHaveBeenCalledExactlyOnceWith({
+    where: { id: "group", spaceId: actor.spaceId, userId: actor.userId, name: "Example engineer" },
+    data: { name: "Staff engineer" },
+  });
 });
 
 it("rejects bot-authored evidence mislabeled as a user instruction", async () => {
