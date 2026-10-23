@@ -303,7 +303,6 @@ msgid "Actions for space"
 msgstr "Actions for space"
 
 #: src/pages/BillingSettingsPanel.tsx
-#: src/pages/recruiting/SequenceTab.tsx
 #: src/pages/RoutineEditor.tsx
 msgid "Active"
 msgstr "Active"
@@ -1420,10 +1419,6 @@ msgstr "Company: {0}"
 #: src/pages/ScratchpadSection.tsx
 msgid "Complete"
 msgstr "Complete"
-
-#: src/pages/recruiting/SequenceTab.tsx
-msgid "Completed"
-msgstr "Completed"
 
 #: src/pages/SettingsOverlay.tsx
 #: src/pages/Shell.tsx
@@ -2665,7 +2660,6 @@ msgstr "Download Executor"
 msgid "Downloading…"
 msgstr "Downloading…"
 
-#: src/pages/recruiting/SequenceTab.tsx
 #: src/pages/RecruitingCorrespondence.tsx
 msgid "Draft"
 msgstr "Draft"
@@ -4734,7 +4728,6 @@ msgstr "Paste your API key, then test again."
 msgid "Pause consideration"
 msgstr "Pause consideration"
 
-#: src/pages/recruiting/SequenceTab.tsx
 #: src/pages/RoutineEditor.tsx
 msgid "Paused"
 msgstr "Paused"
@@ -4922,6 +4915,7 @@ msgstr "Provider"
 msgid "Provider status"
 msgstr "Provider status"
 
+#: src/pages/recruiting/SequenceTab.tsx
 #: src/pages/RecruitingPanel.tsx
 msgid "Provider status code"
 msgstr "Provider status code"
@@ -5578,10 +5572,6 @@ msgstr "Running"
 #: src/pages/RoutineEditor.tsx
 msgid "Running · Stop"
 msgstr "Running · Stop"
-
-#: src/pages/recruiting/SequenceTab.tsx
-msgid "Running subsequences"
-msgstr "Running subsequences"
 
 #: src/pages/RoutineEditor.tsx
 msgid "Running…"
@@ -6320,7 +6310,6 @@ msgstr "Statement"
 #: src/pages/ActivityList.tsx
 #: src/pages/Board.tsx
 #: src/pages/recruiting/InterviewTab.tsx
-#: src/pages/recruiting/SequenceTab.tsx
 msgid "Status"
 msgstr "Status"
 
