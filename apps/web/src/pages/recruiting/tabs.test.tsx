@@ -537,3 +537,36 @@ it("totals Sequence statuses over every CRM page, not only the loaded rows", asy
   // The list itself still shows only its first page.
   expect(view.querySelectorAll("button[aria-pressed]")).toHaveLength(25);
 });
+
+it("keeps Sequence status chips from the loaded rows when totalling fails", async () => {
+  roleCampaign.mockResolvedValue({
+    status: "ready",
+    campaign: {
+      id: "c1",
+      name: "Staff Engineer outreach [role 00000000-0000-4000-8000-000000000002]",
+      status: 0,
+      stopOnReply: true,
+    },
+    leads: [],
+  });
+  crmData.mockImplementation(async (input: { operation: string; limit?: number }) => {
+    if (input.operation === "candidates" && input.limit === 50) throw new Error("503");
+    return input.operation === "candidates"
+      ? candidatesPage
+      : {
+          operation: input.operation,
+          source,
+          checkedAt,
+          items: [],
+          total: 0,
+          offset: 0,
+          nextOffset: null,
+        };
+  });
+  const view = await mount(<SequenceTab {...props} />);
+  await settle();
+  expect(view.textContent).toContain("Replied · 1");
+  expect(view.textContent).toContain("Not contacted · 1");
+  expect(view.textContent).toContain("Staff Engineer outreach");
+  expect(view.textContent).not.toContain("[role");
+});
