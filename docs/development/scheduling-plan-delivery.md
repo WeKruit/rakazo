@@ -13,6 +13,6 @@ Local checks:
 - `vitest run packages/adapters/src/recruiting-scheduling.test.ts packages/db/src/events.test.ts packages/adapters/src/executor-effect-idempotency.test.ts`: 345 passed at the initial adapter implementation.
 - API TypeScript validation passed against the shared service draft.
 - Builtin tool tests passed. Broader `pi-runtime-tool-schema.test.ts` retains two unrelated failures concerning candidate source input and an older role-description assertion; these are outside scheduling changes.
-- Linked workflow and native PostgreSQL plan tests are owned by independent reviewers and must be integrated and run with the final service and adapter together before acceptance. No synthetic plan row, approval, send receipt or provider booking substitutes for that workflow.
+- Final integrated linked workflow: 13 passed using the actual plan services and native approval/execution paths. Targeted native PostgreSQL: 33 passed (21 plan cases and 12 calendar approval cases). Providers remain synthetic; these checks do not establish live acceptance. See [current increment](scheduling-plan-increment.md).
 
 Contracts: `03c659d3`, nullable native mail-origin correction `32526cf1`. Integrate with the shared DB/API service, native approval changes, hidden chat-context handoff and linked tests; the contract commit alone does not implement scheduling. Existing deployment pause and local-owner live acceptance restrictions remain unchanged.

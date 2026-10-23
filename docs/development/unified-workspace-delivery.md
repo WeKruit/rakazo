@@ -1,5 +1,7 @@
 # Unified recruiting workspace — development review handoff
 
+> Current continuation: [scheduling interaction and exact drilldown increment](scheduling-plan-increment.md). The sections below preserve the immutable `96a45a0a` checkpoint; its missing-plan, missing-confirmation-link and missing-week-filter statements are historical and superseded by that increment. Current per-item state is in [the 59-item matrix](unified-workspace-final-status.md).
+
 This is an independent-review handoff, **not a claim that all 59 acceptance items or live acceptance are complete**. The current production owner retains its existing hold. This development batch has not been pushed, merged, deployed, granted new access, synchronized production data, sent email or created calendar events. No Docker was used.
 
 ## Source and ownership
