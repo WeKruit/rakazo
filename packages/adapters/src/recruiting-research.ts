@@ -589,7 +589,7 @@ export function createRecruitingCandidateReportReader(
       )
         throw new IsolationError();
       const row = observation.rows[source.rowIndex];
-      return { row, report: projectRecruitingCandidateReport(row) };
+      return { row, report: projectRecruitingCandidateReport(row, observation.rows) };
     } catch {
       throw new IsolationError();
     }

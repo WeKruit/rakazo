@@ -42,6 +42,7 @@ export * from "./model-oauth.js";
 export * from "./model-probe.js";
 export * from "./model-providers.js";
 export * from "./recruiting.js";
+export * from "./match-score.js";
 export * from "./recruiting-candidates.js";
 export * from "./recruiting-crm.js";
 export * from "./recruiting-defaults.js";
