@@ -290,6 +290,176 @@ describe("local native Instantly thread history", () => {
       await f.connector.close();
     }
   });
+  it("looks up an exact contact through a separate read-only local tool with truthful page coverage", async () => {
+    const f = fixture();
+    const contactRoute = { ...route, toolName: "native_instantly_search_contact_emails" };
+    const outbound = {
+      ...anchor,
+      id: anchor.campaign_id,
+      lead: anchor.from_address_email,
+      from_address_email: anchor.eaccount,
+      to_address_email_list: `Other <other@example.test>, Person <${anchor.from_address_email}>`,
+      body_fallback_reason: "too_large",
+      ue_type: 3,
+    };
+    f.state.page = { items: [anchor, outbound], next_starting_after: "provider-next" };
+    try {
+      const tools = await f.connector.discoverTools(f.context as never);
+      const tool = tools.find((tool) => tool.route?.toolName === contactRoute.toolName);
+      expect(tool).toMatchObject({
+        name: "instantly__demo__search_contact_emails",
+        readOnly: true,
+        route: contactRoute,
+      });
+      expect(tool?.description).toMatch(/local native REST integration/i);
+      expect(toolRequiresApproval(tool!.name, true, tool!.readOnly)).toBe(false);
+      const args = {
+        email: anchor.from_address_email,
+        eaccount: anchor.eaccount,
+        limit: 5,
+        starting_after: "provider-prior",
+      };
+      const events = await f.collect(args, contactRoute);
+      expect(events).toEqual([
+        {
+          type: "result",
+          data: {
+            structuredContent: {
+              source: "local_native_instantly_rest",
+              page: f.state.page,
+              query: {
+                lead: args.email,
+                eaccount: args.eaccount,
+                mode: "emode_all",
+                latest_of_thread: "false",
+                preview_only: "false",
+                sort_order: "desc",
+                limit: "5",
+                starting_after: args.starting_after,
+              },
+              coverage: {
+                scope: "exact_contact",
+                contactEmail: args.email,
+                account: args.eaccount,
+                organizationIds: [anchor.organization_id],
+                accounts: [anchor.eaccount],
+                startingAfter: args.starting_after,
+                nextStartingAfter: "provider-next",
+                pageExhausted: false,
+                bodiesComplete: false,
+                returnedCount: 2,
+                checkedAt: expect.any(String),
+              },
+            },
+          },
+        },
+      ]);
+      expect(f.rest).toHaveBeenCalledOnce();
+      expect(f.state.calls).toEqual([]);
+      expect(JSON.stringify(events)).not.toContain(f.state.key);
+      f.state.page = { items: [] };
+      expect(await f.collect({ email: args.email }, contactRoute)).toMatchObject([
+        {
+          type: "result",
+          data: {
+            structuredContent: {
+              page: { items: [] },
+              coverage: {
+                account: null,
+                organizationIds: [],
+                accounts: [],
+                returnedCount: 0,
+                pageExhausted: true,
+              },
+            },
+          },
+        },
+      ]);
+    } finally {
+      await f.connector.close();
+    }
+  });
+  it.each(["lead", "participant", "account", "missing-body", "shape", "http", "count"])(
+    "checks exact contact %s without silently widening the search or claiming full bodies",
+    async (kind) => {
+      const f = fixture();
+      const row = { ...anchor, lead: anchor.from_address_email };
+      if (kind === "lead") row.lead = "different@example.test";
+      if (kind === "participant") row.from_address_email = "different@example.test";
+      if (kind === "account") row.eaccount = "different@example.test";
+      if (kind === "missing-body") row.body = {} as typeof row.body;
+      f.state.page = { items: [row] };
+      if (kind === "shape") f.state.page = { items: "invalid" };
+      if (kind === "http") f.state.status = 401;
+      if (kind === "count") f.state.page = { items: [row, row] };
+      try {
+        expect(
+          await f.collect(
+            { email: anchor.from_address_email, eaccount: anchor.eaccount, limit: 1 },
+            { ...route, toolName: "native_instantly_search_contact_emails" },
+          ),
+        ).toMatchObject(
+          kind === "missing-body"
+            ? [
+                {
+                  type: "result",
+                  data: { structuredContent: { coverage: { bodiesComplete: false } } },
+                },
+              ]
+            : [{ type: "error" }],
+        );
+        expect(f.rest).toHaveBeenCalledOnce();
+        expect(f.state.calls).toEqual([]);
+      } finally {
+        await f.connector.close();
+      }
+    },
+  );
+  it.each(["get_email", "list_emails", "actor", "revision", "credential", "pointer"])(
+    "fences contact lookup against changed %s",
+    async (kind) => {
+      const f = fixture();
+      const before = kind === "get_email" || kind === "list_emails" || kind === "actor";
+      if (kind === "get_email" || kind === "list_emails")
+        f.assignment.allowedTools = f.assignment.allowedTools.filter((name) => name !== kind);
+      f.state.afterRest = () => {
+        if (kind === "revision") f.server.revision++;
+        if (kind === "credential") f.state.key = "rotated-private-key";
+        if (kind === "pointer") f.server.secretId = "rotated-secret";
+      };
+      try {
+        const events = await f.collect(
+          { email: anchor.from_address_email },
+          { ...route, toolName: "native_instantly_search_contact_emails" },
+          kind === "actor" ? { ...f.context, spaceId: "foreign" } : f.context,
+        );
+        expect(events).toMatchObject([{ type: "error" }]);
+        expect(f.rest).toHaveBeenCalledTimes(before ? 0 : 1);
+        expect(JSON.stringify(events)).not.toMatch(/private-key|fixture-private-api-key/);
+      } finally {
+        await f.connector.close();
+      }
+    },
+  );
+  it.each([
+    {},
+    { email: "not-an-address" },
+    { email: anchor.from_address_email, limit: 101 },
+    { email: anchor.from_address_email, eaccount: "team@example.test,other@example.test" },
+    { email: anchor.from_address_email, starting_after: " " },
+    { email: anchor.from_address_email, search: "broad query" },
+  ])("rejects malformed contact search before provider reads: %j", async (args) => {
+    const f = fixture();
+    try {
+      expect(
+        await f.collect(args, { ...route, toolName: "native_instantly_search_contact_emails" }),
+      ).toMatchObject([{ type: "error" }]);
+      expect(f.rest).not.toHaveBeenCalled();
+      expect(f.state.calls).toEqual([]);
+    } finally {
+      await f.connector.close();
+    }
+  });
   it.each(["too_large", "unavailable", "missing-body", "cursor", "empty"])(
     "retains honest %s page coverage without claiming an entire thread",
     async (kind) => {
@@ -408,52 +578,61 @@ describe("local native Instantly thread history", () => {
       }
     },
   );
-  it.each(["get_thread_history", route.toolName])(
-    "handles offered remote %s explicitly without routing it to REST",
-    async (toolName) => {
-      const f = fixture();
-      f.state.tools.push({ name: toolName, inputSchema: { type: "object" } });
-      f.assignment.allowedTools.push(toolName);
-      try {
-        const tools = await f.connector.discoverTools(f.context as never);
-        expect(tools.some((tool) => tool.name === "instantly__demo__get_thread_history")).toBe(
-          false,
-        );
-        expect(await f.collect()).toMatchObject([{ type: "error" }]);
-        expect(f.rest).not.toHaveBeenCalled();
-        const remote = tools.find((tool) => tool.name === `mcp__demo__${toolName}`)!;
-        expect(remote.readOnly).not.toBe(true);
-        if (toolName === "get_thread_history") {
-          expect(await f.collect({}, remote.route as typeof route)).toMatchObject([
-            { type: "result" },
-          ]);
-          expect(f.state.calls).toEqual([toolName]);
-        }
-      } finally {
-        await f.connector.close();
-      }
-    },
-  );
-  it.each(["get_thread_history", route.toolName])(
-    "does not intercept a third-party remote %s",
-    async (toolName) => {
-      const f = fixture("https://unrelated.example.test/mcp");
-      f.assignment.allowedTools = [toolName];
-      f.state.tools = [{ name: toolName, inputSchema: { type: "object" } }];
-      try {
-        const tools = await f.connector.discoverTools(f.context as never);
-        expect(tools).toHaveLength(1);
-        expect(tools[0]!.readOnly).not.toBe(true);
-        expect(await f.collect({}, tools[0]!.route as typeof route)).toMatchObject([
+  it.each([
+    "get_thread_history",
+    route.toolName,
+    "search_contact_emails",
+    "native_instantly_search_contact_emails",
+  ])("handles offered remote %s explicitly without routing it to REST", async (toolName) => {
+    const f = fixture();
+    f.state.tools.push({ name: toolName, inputSchema: { type: "object" } });
+    f.assignment.allowedTools.push(toolName);
+    try {
+      const tools = await f.connector.discoverTools(f.context as never);
+      const isContact = toolName.includes("contact");
+      const localName = isContact ? "search_contact_emails" : "get_thread_history";
+      expect(tools.some((tool) => tool.name === `instantly__demo__${localName}`)).toBe(false);
+      expect(
+        await f.collect(
+          isContact ? { email: anchor.from_address_email } : undefined,
+          isContact ? { ...route, toolName: "native_instantly_search_contact_emails" } : route,
+        ),
+      ).toMatchObject([{ type: "error" }]);
+      expect(f.rest).not.toHaveBeenCalled();
+      const remote = tools.find((tool) => tool.name === `mcp__demo__${toolName}`)!;
+      expect(remote.readOnly).not.toBe(true);
+      if (toolName === localName) {
+        expect(await f.collect({}, remote.route as typeof route)).toMatchObject([
           { type: "result" },
         ]);
         expect(f.state.calls).toEqual([toolName]);
-        expect(f.rest).not.toHaveBeenCalled();
-      } finally {
-        await f.connector.close();
       }
-    },
-  );
+    } finally {
+      await f.connector.close();
+    }
+  });
+  it.each([
+    "get_thread_history",
+    route.toolName,
+    "search_contact_emails",
+    "native_instantly_search_contact_emails",
+  ])("does not intercept a third-party remote %s", async (toolName) => {
+    const f = fixture("https://unrelated.example.test/mcp");
+    f.assignment.allowedTools = [toolName];
+    f.state.tools = [{ name: toolName, inputSchema: { type: "object" } }];
+    try {
+      const tools = await f.connector.discoverTools(f.context as never);
+      expect(tools).toHaveLength(1);
+      expect(tools[0]!.readOnly).not.toBe(true);
+      expect(await f.collect({}, tools[0]!.route as typeof route)).toMatchObject([
+        { type: "result" },
+      ]);
+      expect(f.state.calls).toEqual([toolName]);
+      expect(f.rest).not.toHaveBeenCalled();
+    } finally {
+      await f.connector.close();
+    }
+  });
   it("preserves local read-only classification through the native lazy catalog without trusting remote hints", async () => {
     const f = fixture();
     const write = {
@@ -486,6 +665,11 @@ describe("local native Instantly thread history", () => {
       const local = await resolve(route.toolName, { anchor_id: anchor.id });
       expect(local!.tool.readOnly).toBe(true);
       expect(toolRequiresApproval(local!.tool.name, true, local!.tool.readOnly)).toBe(false);
+      const contact = await resolve("native_instantly_search_contact_emails", {
+        email: anchor.from_address_email,
+      });
+      expect(contact!.tool.readOnly).toBe(true);
+      expect(toolRequiresApproval(contact!.tool.name, true, contact!.tool.readOnly)).toBe(false);
       const remote = await resolve("send_email", {});
       expect(remote!.tool.readOnly).not.toBe(true);
       expect(toolRequiresApproval(remote!.tool.name, true, remote!.tool.readOnly)).toBe(true);

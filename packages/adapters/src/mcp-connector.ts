@@ -13,6 +13,7 @@ import { mcpObject } from "@rakazo/core/node/approval-effect-key";
 import type { McpServer, PrismaClient, ThreadEvents } from "@rakazo/db";
 import { IsolationError } from "@rakazo/db";
 import { getLogger } from "@rakazo/logging";
+import addressparser from "nodemailer/lib/addressparser";
 import { z } from "zod";
 import { catalogToolPrefix } from "./approval-effect.js";
 import { readBoundedText } from "./connector-http.js";
@@ -46,6 +47,7 @@ import { createSafeRemoteFetch } from "./remote-mcp.js";
 
 const INSTANTLY_MCP = "https://mcp.instantly.ai/mcp";
 const THREAD_HISTORY = "native_instantly_get_thread_history";
+const CONTACT_EMAILS = "native_instantly_search_contact_emails";
 const ThreadHistoryInput = z.strictObject({
   anchor_id: z.uuid(),
   limit: z.number().int().min(1).max(100).default(100),
@@ -55,6 +57,26 @@ const ThreadHistoryInput = z.strictObject({
     .refine((value) => value.trim().length > 0)
     .optional(),
 });
+const ContactEmailsInput = ThreadHistoryInput.omit({ anchor_id: true }).extend({
+  email: z.email().max(254),
+  eaccount: z.email().max(254).optional(),
+});
+const nativeInstantlyReads = [
+  {
+    name: "get_thread_history",
+    toolName: THREAD_HISTORY,
+    inputSchema: z.toJSONSchema(ThreadHistoryInput, { io: "input" }),
+    description:
+      "Local native REST integration for the existing authorized Instantly connection, not a remote MCP tool. Reads one exact thread page from a fresh anchor email. Returns the raw native anchor, raw REST page, exact query and honest page/body coverage. Continue only with the returned cursor; an exhausted page does not by itself prove an entire thread was read. No computer or credentials are needed in arguments. Replies still use the assigned official MCP tool.",
+  },
+  {
+    name: "search_contact_emails",
+    toolName: CONTACT_EMAILS,
+    inputSchema: z.toJSONSchema(ContactEmailsInput, { io: "input" }),
+    description:
+      "Local native REST integration for the existing authorized Instantly connection, not a remote MCP tool. Looks up one bounded page of emails sent to or received from an exact contact email, optionally within a sender account. Uses the official lead filter and verifies each returned contact address. Returns the raw REST page, exact query, provider email IDs and honest page/body coverage; continue with the returned cursor and the same email/account. An exhausted page is not a full-thread receipt; use get_email and get_thread_history for the selected provider email before replying. No computer or credentials are needed in arguments. Does not send email.",
+  },
+];
 
 type SessionEntry = {
   session: McpSession;
@@ -321,29 +343,27 @@ export class McpConnector implements ConnectorProvider {
                 (Array.isArray(assignment.allowedTools) && assignment.allowedTools.includes(name)),
             )
           ) {
-            if (
-              listed.tools.some((tool) =>
-                ["get_thread_history", THREAD_HISTORY].includes(tool.name),
-              )
-            )
-              getLogger().warn(
-                "Instantly remote thread-history tool conflicts with the local integration; local tool withheld",
-              );
-            else
+            for (const local of nativeInstantlyReads) {
+              if (listed.tools.some((tool) => [local.name, local.toolName].includes(tool.name))) {
+                getLogger().warn(
+                  `Instantly remote ${local.name} tool conflicts with the local integration; local tool withheld`,
+                );
+                continue;
+              }
               remoteTools.push({
-                name: `instantly__${assignment.server.slug}__get_thread_history`,
-                description:
-                  "Local native REST integration for the existing authorized Instantly connection, not a remote MCP tool. Reads one exact thread page from a fresh anchor email. Returns the raw native anchor, raw REST page, exact query and honest page/body coverage. Continue only with the returned cursor; an exhausted page does not by itself prove an entire thread was read. No computer or credentials are needed in arguments. Replies still use the assigned official MCP tool.",
-                inputSchema: z.toJSONSchema(ThreadHistoryInput, { io: "input" }),
+                name: `instantly__${assignment.server.slug}__${local.name}`,
+                description: local.description,
+                inputSchema: local.inputSchema,
                 readOnly: true,
                 route: {
                   connectorId: "mcp",
                   resourceId: assignment.serverId,
                   resourceRevision: assignment.server.revision,
-                  toolName: THREAD_HISTORY,
+                  toolName: local.toolName,
                   catalogGroup: assignment.server.slug,
                 },
               });
+            }
           }
           return remoteTools;
         } catch (error) {
@@ -441,21 +461,22 @@ export class McpConnector implements ConnectorProvider {
     let callStarted = false;
     let sessionKey: string | undefined;
     try {
-      const localHistoryServer =
-        call.route.toolName === THREAD_HISTORY
-          ? await this.prisma.mcpServer.findFirst({
-              where: {
-                id: call.route.resourceId,
-                userId: context.userId,
-                spaceId: context.spaceId,
-                endpoint: INSTANTLY_MCP,
-                transport: "streamable_http",
-              },
-              select: { id: true },
-            })
-          : null;
-      if (localHistoryServer) {
-        yield* this.threadHistory(call, context);
+      const localInstantlyServer = nativeInstantlyReads.some(
+        (tool) => tool.toolName === call.route!.toolName,
+      )
+        ? await this.prisma.mcpServer.findFirst({
+            where: {
+              id: call.route.resourceId,
+              userId: context.userId,
+              spaceId: context.spaceId,
+              endpoint: INSTANTLY_MCP,
+              transport: "streamable_http",
+            },
+            select: { id: true },
+          })
+        : null;
+      if (localInstantlyServer) {
+        yield* this.readInstantlyEmails(call, context);
         return;
       }
       const assignment = await requireMcpToolAssignment(
@@ -500,11 +521,13 @@ export class McpConnector implements ConnectorProvider {
     }
   }
 
-  private async *threadHistory(
+  private async *readInstantlyEmails(
     call: ConnectorCall,
     context: AdapterContext,
   ): AsyncIterable<ConnectorEvent> {
     let phase = "authorization";
+    const isHistory = call.route!.toolName === THREAD_HISTORY;
+    const operation = isHistory ? "thread history" : "contact email";
     let rejectedStatus: number | undefined;
     const redactions: string[] = [];
     const safeFetch = createSafeRemoteFetch(
@@ -512,7 +535,9 @@ export class McpConnector implements ConnectorProvider {
       this.options.network?.resolveHostname,
     );
     try {
-      const input = ThreadHistoryInput.parse(call.args);
+      const historyInput = isHistory ? ThreadHistoryInput.parse(call.args) : undefined;
+      const contactInput = isHistory ? undefined : ContactEmailsInput.parse(call.args);
+      const input = historyInput ?? contactInput!;
       const authorize = async () => {
         context.signal.throwIfAborted();
         const assignment = await requireMcpToolAssignment(
@@ -560,38 +585,48 @@ export class McpConnector implements ConnectorProvider {
         if (current.secretId !== credential.secretId || current.digest !== credential.digest)
           throw new IsolationError();
       };
-      phase = "native anchor";
+      phase = "native catalog";
       const session = await this.sessionFor(credential.server, context);
       const listed = await session.listTools({ signal: context.signal });
-      if (listed.tools.some((tool) => ["get_thread_history", THREAD_HISTORY].includes(tool.name)))
-        throw new Error(
-          "Remote thread-history tool conflicts with the local integration; rediscover tools",
-        );
-      const rawAnchor = await session.callTool(
-        "get_email",
-        { id: input.anchor_id },
-        { signal: context.signal },
-      );
+      const local = nativeInstantlyReads.find((tool) => tool.toolName === call.route!.toolName)!;
+      if (listed.tools.some((tool) => [local.name, local.toolName].includes(tool.name)))
+        throw new Error("Remote tool conflicts with the local integration; rediscover tools");
+      phase = "native anchor";
+      const rawAnchor = historyInput
+        ? await session.callTool(
+            "get_email",
+            { id: historyInput.anchor_id },
+            { signal: context.signal },
+          )
+        : undefined;
       const anchor =
-        rawAnchor.isError || "error" in rawAnchor ? null : readInstantlyEmail(mcpObject(rawAnchor));
+        !rawAnchor || rawAnchor.isError || "error" in rawAnchor
+          ? null
+          : readInstantlyEmail(mcpObject(rawAnchor));
       if (
-        !anchor ||
-        anchor.id !== input.anchor_id ||
-        !anchor.thread_id ||
-        !sameInstantlyAddresses(anchor.eaccount, anchor.eaccount)
+        historyInput &&
+        (!anchor ||
+          anchor.id !== historyInput.anchor_id ||
+          !anchor.thread_id ||
+          !sameInstantlyAddresses(anchor.eaccount, anchor.eaccount))
       )
         throw new Error("The current native email anchor is invalid");
       const url = new URL("https://api.instantly.ai/api/v2/emails");
       url.search = new URLSearchParams({
-        search: `thread:${anchor.thread_id}`,
-        eaccount: anchor.eaccount,
+        ...(anchor
+          ? { search: `thread:${anchor.thread_id}`, eaccount: anchor.eaccount }
+          : {
+              lead: contactInput!.email,
+              ...(contactInput!.eaccount ? { eaccount: contactInput!.eaccount } : {}),
+              sort_order: "desc",
+            }),
         mode: "emode_all",
         latest_of_thread: "false",
         preview_only: "false",
         limit: String(input.limit),
         ...(input.starting_after ? { starting_after: input.starting_after } : {}),
       }).toString();
-      phase = "REST thread page";
+      phase = isHistory ? "REST thread page" : "REST contact page";
       await assertAuthorized();
       const response = await safeFetch(url, {
         method: "GET",
@@ -601,22 +636,30 @@ export class McpConnector implements ConnectorProvider {
       const { text, truncated } = await readBoundedText(response, 1_000_000);
       if (!response.ok) {
         rejectedStatus = response.status;
-        throw new Error("Thread history request rejected");
+        throw new Error("Email read request rejected");
       }
-      if (truncated) throw new Error("Thread history response exceeded its bound");
+      if (truncated) throw new Error("Email read response exceeded its bound");
       const rawPage: unknown = JSON.parse(text);
       const page = readInstantlyEmailPage(rawPage);
       if (
         !page ||
         page.items.length > input.limit ||
-        page.items.some(
-          (email) =>
-            email.organization_id !== anchor.organization_id ||
-            email.thread_id !== anchor.thread_id ||
-            !sameInstantlyAddresses(email.eaccount, anchor.eaccount),
+        page.items.some((email) =>
+          anchor
+            ? email.organization_id !== anchor.organization_id ||
+              email.thread_id !== anchor.thread_id ||
+              !sameInstantlyAddresses(email.eaccount, anchor.eaccount)
+            : !sameInstantlyAddresses(email.eaccount, email.eaccount) ||
+              (contactInput!.eaccount !== undefined &&
+                !sameInstantlyAddresses(email.eaccount, contactInput!.eaccount)) ||
+              (email.lead != null && !sameInstantlyAddresses(email.lead, contactInput!.email)) ||
+              (!sameInstantlyAddresses(email.from_address_email, contactInput!.email) &&
+                !addressparser(email.to_address_email_list).some((recipient) =>
+                  sameInstantlyAddresses(recipient.address, contactInput!.email),
+                )),
         )
       )
-        throw new Error("Thread history page does not match the native anchor");
+        throw new Error("Email page does not match the requested scope");
       await assertAuthorized();
       yield {
         type: "result",
@@ -624,18 +667,30 @@ export class McpConnector implements ConnectorProvider {
           {
             structuredContent: {
               source: "local_native_instantly_rest",
-              anchor: rawAnchor,
+              ...(anchor ? { anchor: rawAnchor } : {}),
               page: rawPage,
               query: Object.fromEntries(url.searchParams),
               coverage: {
-                scope: "exact_thread",
-                anchorId: anchor.id,
-                organizationId: anchor.organization_id,
-                account: anchor.eaccount,
-                threadId: anchor.thread_id,
+                ...(anchor
+                  ? {
+                      scope: "exact_thread",
+                      anchorId: anchor.id,
+                      organizationId: anchor.organization_id,
+                      account: anchor.eaccount,
+                      threadId: anchor.thread_id,
+                      anchorPresent: page.items.some((email) => email.id === anchor.id),
+                    }
+                  : {
+                      scope: "exact_contact",
+                      contactEmail: contactInput!.email,
+                      account: contactInput!.eaccount ?? null,
+                      organizationIds: [
+                        ...new Set(page.items.map((email) => email.organization_id)),
+                      ],
+                      accounts: [...new Set(page.items.map((email) => email.eaccount))],
+                    }),
                 startingAfter: input.starting_after ?? null,
                 nextStartingAfter: page.next_starting_after ?? null,
-                anchorPresent: page.items.some((email) => email.id === anchor.id),
                 pageExhausted: !page.next_starting_after,
                 bodiesComplete: page.items.every(
                   (email) =>
@@ -653,7 +708,7 @@ export class McpConnector implements ConnectorProvider {
     } catch {
       yield {
         type: "error",
-        message: `Instantly thread history read failed during ${phase}.${rejectedStatus ? ` HTTP ${rejectedStatus}.` : " Check the current assigned connection and anchor."}`,
+        message: `Instantly ${operation} read failed during ${phase}.${rejectedStatus ? ` HTTP ${rejectedStatus}.` : " Check the current assigned connection and requested scope."}`,
       };
     } finally {
       await safeFetch.close().catch(() => undefined);
