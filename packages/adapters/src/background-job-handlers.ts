@@ -19,6 +19,7 @@ import type { createRunExecutor } from "./executor.js";
 import { compactHistory } from "./history-compaction.js";
 import type { MemoryProviderResolver } from "./memory-provider-factory.js";
 import { deliverMessagingOutbound, mirrorMessagingOutbound } from "./messaging-delivery.js";
+import { skipRoutineWithoutNewActivity } from "./routine-precondition.js";
 import { expireTaughtSkillTeaching } from "./teaching-session.js";
 
 export function createBackgroundJobHandlers(deps: {
@@ -73,6 +74,8 @@ export function createBackgroundJobHandlers(deps: {
       await deliverMessaging(payload.runId);
     },
     "routine.wakeup": async (payload) => {
+      // A routine with a `precondition:` line wakes the model only when something changed.
+      if (await skipRoutineWithoutNewActivity(deps, payload)) return;
       await deps.executor.wakeRoutine(payload.routineId, payload.scheduledFor);
     },
     "computer.update": async ({ updateId }) => {
