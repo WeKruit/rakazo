@@ -5709,6 +5709,14 @@ msgstr "Reset your password"
 msgid "Resetting…"
 msgstr "Resetting…"
 
+#: src/pages/Shell.tsx
+msgid "Resize chat"
+msgstr "Resize chat"
+
+#: src/pages/Shell.tsx
+msgid "Resize navigation"
+msgstr "Resize navigation"
+
 #: src/pages/ResizableSidePanel.tsx
 msgid "Resize panel"
 msgstr "Resize panel"
