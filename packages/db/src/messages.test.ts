@@ -4,6 +4,7 @@ import type { Prisma, PrismaClient } from "./client.js";
 import {
   createThreadMessage,
   createThreadMessageInTransaction,
+  loadRunHistoryMessages,
   loadRunHumanSources,
   RunHistoryWriteError,
   validateRunHumanSourceRows,
@@ -285,5 +286,26 @@ describe("createThreadMessage", () => {
       }),
     ).rejects.toThrow("unique constraint");
     expect(run).toHaveBeenCalledTimes(1);
+  });
+});
+
+describe("run history isolation", () => {
+  it("only reads the run's own thread, so two users' threads never merge", async () => {
+    const table = [
+      { id: "m-a", threadId: "thread-a", role: "user", seq: 1 },
+      { id: "m-b", threadId: "thread-b", role: "user", seq: 1 },
+      { id: "m-b2", threadId: "thread-b", role: "bot", seq: 2 },
+    ];
+    const findMany = vi.fn(async ({ where }: { where: { threadId: string } }) =>
+      table.filter((row) => row.threadId === where.threadId),
+    );
+    const prisma = { message: { findMany } } as unknown as PrismaClient;
+    const seenA = await loadRunHistoryMessages(prisma, { id: "run-a", threadId: "thread-a" }, 10);
+    const seenB = await loadRunHistoryMessages(prisma, { id: "run-b", threadId: "thread-b" }, 10);
+    expect(seenA.map((row) => row.id)).toEqual(["m-a"]);
+    expect(seenB.map((row) => row.id)).toEqual(["m-b", "m-b2"]);
+    for (const call of findMany.mock.calls) {
+      expect(call[0].where.threadId).toEqual(expect.any(String));
+    }
   });
 });

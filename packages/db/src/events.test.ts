@@ -10,6 +10,7 @@ import {
   answerRunInput,
   answerWaitingRunWithTextInTransaction,
   appendEvent,
+  appendEventsInTransaction,
   claimSteering,
   clearThread,
   completedRunBlocks,
@@ -4795,5 +4796,146 @@ describe("discardAnsweredSteering", () => {
         id: { in: ["answered"] },
       },
     });
+  });
+});
+
+describe("appendEventsInTransaction", () => {
+  function countingTx() {
+    const calls: string[] = [];
+    const record =
+      <T>(name: string, impl: (...args: never[]) => T) =>
+      (...args: never[]) => {
+        calls.push(name);
+        return impl(...args);
+      };
+    const createMany = vi.fn(async ({ data }: { data: unknown[] }) => ({ count: data.length }));
+    const tx = {
+      thread: {
+        update: vi.fn(
+          record(
+            "thread.update",
+            async ({ data }: { data: { nextEventSeq: { increment: number } } }) => ({
+              nextEventSeq: 5 + data.nextEventSeq.increment,
+            }),
+          ),
+        ),
+      },
+      run: {
+        findUnique: vi.fn(
+          record("run.findUnique", async () => ({ status: "running", startedAt: null })),
+        ),
+      },
+      event: {
+        create: vi.fn(record("event.create", async ({ data }: { data: { seq: number } }) => data)),
+        createMany: vi.fn(record("event.createMany", createMany)),
+      },
+    };
+    return { tx, calls, createMany };
+  }
+  const base = { spaceId: "space-1", threadId: "thread-1", botId: "bot-1", runId: "run-1" };
+
+  it("reserves the sequence range once and inserts the rows in order with sanitized payloads", async () => {
+    const { tx, calls } = countingTx();
+    const rows = await appendEventsInTransaction(tx as never, [
+      { ...base, type: "thread.message.created", payload: { messageId: "m-1", text: "a\ud83d" } },
+      { ...base, type: "thread.progress", payload: { text: "b" } },
+      { ...base, type: "run.completed", payload: {} },
+    ]);
+    expect(calls).toEqual(["thread.update", "run.findUnique", "event.createMany"]);
+    expect(tx.thread.update).toHaveBeenCalledWith({
+      where: { id: "thread-1" },
+      data: { nextEventSeq: { increment: 3 } },
+      select: { nextEventSeq: true },
+    });
+    expect(rows.map((row) => [row.seq, row.type])).toEqual([
+      [5, "thread.message.created"],
+      [6, "thread.progress"],
+      [7, "run.completed"],
+    ]);
+    expect(tx.event.createMany).toHaveBeenCalledWith({ data: rows });
+    expect(JSON.stringify(rows[0]!.payload)).not.toContain("\\ud83d");
+    expect((rows[0]!.payload as { messageId: string }).messageId).toBe("m-1");
+  });
+
+  it("takes the single-row path for one event and refuses mixed threads", async () => {
+    const { tx, calls } = countingTx();
+    const [row] = await appendEventsInTransaction(tx as never, [
+      { ...base, type: "run.failed", payload: { error: "x" } },
+    ]);
+    expect(row!.seq).toBe(5);
+    expect(calls).toEqual(["thread.update", "run.findUnique", "event.create"]);
+    await expect(
+      appendEventsInTransaction(tx as never, [
+        { ...base, type: "run.failed", payload: {} },
+        { ...base, threadId: "thread-2", type: "run.failed", payload: {} },
+      ]),
+    ).rejects.toThrow(/one thread/);
+    expect(await appendEventsInTransaction(tx as never, [])).toEqual([]);
+  });
+
+  it("finalizes a completed run with one event reservation and one insert", async () => {
+    const { tx, calls } = countingTx();
+    const full = {
+      ...tx,
+      $queryRaw: vi.fn(async () => []),
+      run: {
+        ...tx.run,
+        findUniqueOrThrow: vi.fn(async () => ({ sourceMessage: null })),
+        findFirst: vi.fn(async () => null),
+        updateMany: vi.fn(async () => ({ count: 1 })),
+      },
+      attempt: { updateMany: vi.fn(async () => ({ count: 1 })) },
+      task: { updateMany: vi.fn(async () => ({ count: 1 })) },
+      thread: {
+        update: vi.fn(async ({ data }: { data: Record<string, { increment: number }> }) => {
+          calls.push(data.nextEventSeq ? "thread.update:event" : "thread.update:message");
+          return { nextMessageSeq: 2, nextEventSeq: 5 + (data.nextEventSeq?.increment ?? 0) };
+        }),
+      },
+      event: { ...tx.event, deleteMany: vi.fn(async () => ({ count: 0 })) },
+      message: {
+        findFirst: vi.fn(async () => null),
+        create: vi.fn(async ({ data }: { data: object }) => ({ ...data, id: "message-1" })),
+      },
+      steeringMessage: {
+        findMany: vi.fn(async () => []),
+        deleteMany: vi.fn(async () => ({ count: 0 })),
+        updateMany: vi.fn(async () => ({ count: 0 })),
+      },
+      bot: { update: vi.fn(async () => ({})) },
+    };
+    const prisma = {
+      $transaction: vi.fn(async (callback: (client: typeof full) => unknown) => callback(full)),
+    } as unknown as PrismaClient;
+    const publish = vi.fn(async () => undefined);
+    await expect(
+      finalizeRun(
+        prisma,
+        {
+          spaceId: "space-1",
+          threadId: "thread-1",
+          botId: "bot-1",
+          runId: "run-1",
+          taskId: "task-1",
+          attemptId: "attempt-1",
+          leaseOwner: "worker-1",
+          leaseFence: 1,
+          outcome: "completed",
+          blocks: [{ kind: "text", text: "done" }],
+        },
+        { publish } as never,
+      ),
+    ).resolves.toEqual({ continuationRunId: null });
+    expect(calls.filter((name) => name.startsWith("thread.update:event"))).toHaveLength(1);
+    expect(calls.filter((name) => name === "event.createMany")).toHaveLength(1);
+    expect(calls.filter((name) => name === "event.create")).toHaveLength(0);
+    const inserted = full.event.createMany.mock.calls[0]?.[0] as unknown as {
+      data: Array<{ type: string }>;
+    };
+    expect(inserted.data.map((row) => row.type)).toEqual([
+      "thread.message.created",
+      "run.completed",
+    ]);
+    expect(publish).toHaveBeenCalledWith(expect.any(String), JSON.stringify({ cursor: 6 }));
   });
 });

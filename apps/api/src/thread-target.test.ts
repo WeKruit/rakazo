@@ -4324,3 +4324,74 @@ describe("stopThreadRuns", () => {
     expect(notify).not.toHaveBeenCalled();
   });
 });
+
+describe("send path round trips", () => {
+  // Every Prisma model call is one database round trip; the count is the regression check.
+  function countingPrisma() {
+    const calls: string[] = [];
+    let seq = 0;
+    const impl: Record<string, Record<string, (args: never) => unknown>> = {
+      message: {
+        findUnique: async () => null,
+        create: async ({ data }: { data: object }) => ({ ...data, id: "message-1", seq: 1 }),
+        update: async () => ({}),
+      },
+      thread: { update: async () => ({ nextMessageSeq: ++seq, nextEventSeq: seq }) },
+      run: {
+        findMany: async () => [],
+        findUnique: async () => ({ status: "queued" }),
+        create: async ({ data }: { data: object }) => ({ ...data, id: "run-1" }),
+      },
+      task: { create: async ({ data }: { data: object }) => ({ ...data, id: "task-1" }) },
+      event: { create: async ({ data }: { data: object }) => ({ ...data, seq }) },
+    };
+    const model = (name: string) =>
+      new Proxy({} as Record<string, unknown>, {
+        get: (_target, method: string) => (args: never) => {
+          calls.push(`${name}.${method}`);
+          const fn = impl[name]?.[method];
+          if (!fn) throw new Error(`unexpected ${name}.${method}`);
+          return fn(args);
+        },
+      });
+    const tx = new Proxy({} as Record<string, unknown>, { get: (_t, name: string) => model(name) });
+    const prisma = new Proxy({} as Record<string, unknown>, {
+      get: (_t, name: string) =>
+        name === "$transaction" ? async (fn: (tx: unknown) => unknown) => fn(tx) : model(name),
+    });
+    return { prisma: prisma as unknown as PrismaClient, calls };
+  }
+
+  it("acknowledges a bot send with the durable write, one wake and no extra lookups", async () => {
+    const { prisma, calls } = countingPrisma();
+    const order: string[] = [];
+    const deps = {
+      prisma,
+      events: { notify: vi.fn(async () => void order.push("notify")) } as never,
+      jobs: { enqueue: vi.fn(async () => void order.push("enqueue")) } as never,
+    };
+    const result = await sendThreadMessage(
+      deps,
+      { spaceId: "space-1", userId: "user-1" } as Actor,
+      { kind: "bot", botId: "bot-1", threadId: "thread-1" } as ThreadTarget,
+      { text: "hello", clientNonce: "nonce-1" },
+    );
+    expect(result).toMatchObject({ runId: "run-1", taskId: "task-1", runIds: ["run-1"] });
+    expect(calls).toEqual([
+      "message.findUnique",
+      "thread.update",
+      "message.create",
+      "run.findMany",
+      "task.create",
+      "run.create",
+      "message.update",
+      "thread.update",
+      "run.findUnique",
+      "event.create",
+    ]);
+    expect(order).toEqual(["notify", "enqueue"]);
+    expect(deps.jobs.enqueue).toHaveBeenCalledWith(
+      expect.objectContaining({ payload: expect.objectContaining({ runId: "run-1" }) }),
+    );
+  });
+});

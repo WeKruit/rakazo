@@ -700,6 +700,35 @@ describe("runtime context policy", () => {
     });
     expect(rotatedHeader.getDecision()!.predictedCache).toBe("likely-cold");
   });
+  it("keys advisory warmth by space, user, bot and thread under one shared platform key", () => {
+    const tracker = new ContextCacheTracker(() => 1000);
+    const { request, context } = fixture(1);
+    request.model.cacheCapabilities = { scope: "account", retentionMs: 300000, minimumTokens: 1 };
+    const owner = { spaceId: "space-1", userId: "user-a" };
+    const warm = createRuntimeContextPolicy({ ...request, contextStrategy: "current" }, owner, {
+      cacheTracker: tracker,
+      credentialScope: "shared-platform-key",
+    });
+    warm.prepareContext(context, model);
+    warm.onUsage({ inputTokens: 1, outputTokens: 1, cacheReadTokens: 1 });
+    const predict = (
+      scope: { spaceId: string; userId: string },
+      overrides: Partial<AgentRunRequest> = {},
+    ) => {
+      const policy = createRuntimeContextPolicy(
+        { ...request, ...overrides, contextStrategy: "cache-aware" },
+        scope,
+        { cacheTracker: tracker, credentialScope: "shared-platform-key" },
+      );
+      policy.prepareContext(context, model);
+      return policy.getDecision()!.predictedCache;
+    };
+    expect(predict(owner)).toBe("likely-warm");
+    expect(predict({ spaceId: "space-2", userId: "user-b" })).toBe("likely-cold");
+    expect(predict({ spaceId: "space-1", userId: "user-c" })).toBe("likely-cold");
+    expect(predict(owner, { botId: "other-bot" })).toBe("likely-cold");
+    expect(predict(owner, { threadId: "other-thread" })).toBe("likely-cold");
+  });
   it("does not refresh warmth from a failed call with no reported usage", () => {
     const tracker = new ContextCacheTracker(() => 1000);
     const { request, context } = fixture();
