@@ -64,6 +64,11 @@ msgstr "{0} (maximal {ATTACHMENT_MAX_COUNT} Anhänge)"
 msgid "{0} (over 10 MiB)"
 msgstr "{0} (über 10 MiB)"
 
+#. placeholder {0}: file.name
+#: src/pages/Shell.tsx
+msgid "{0} (XLSX is not supported yet. Save as CSV and upload again.)"
+msgstr ""
+
 #. placeholder {0}: preset.n
 #: src/pages/RoutineSchedule.tsx
 msgid "{0} {unitLabel}"
@@ -5427,13 +5432,13 @@ msgstr "Jetzt erneut versuchen"
 msgid "Retry screen"
 msgstr ""
 
-#: src/pages/McpOAuthCallback.tsx
-msgid "Return to WeKruit Headhunter"
-msgstr "Zurück zu WeKruit Headhunter"
-
 #: src/pages/Shell.tsx
 msgid "Return to the original role before saving this draft."
 msgstr ""
+
+#: src/pages/McpOAuthCallback.tsx
+msgid "Return to WeKruit Headhunter"
+msgstr "Zurück zu WeKruit Headhunter"
 
 #. placeholder {0}: doc.revision
 #: src/pages/KnowledgeSection.tsx
@@ -7137,6 +7142,10 @@ msgstr "Wird verarbeitet…"
 #: src/components/computer/TerminalApp.tsx
 msgid "Wrote {path}"
 msgstr "{path} geschrieben"
+
+#: src/pages/Shell.tsx
+msgid "XLSX is not supported yet. Save as CSV and upload again."
+msgstr ""
 
 #: src/lib/billing.ts
 msgid "year"

@@ -429,6 +429,7 @@ export async function getRecruitingCorrespondence(
   view: "inbox" | "interview" | "contacts",
   productIdentity?: { endpoint: string; connected: boolean },
   oauth?: Pick<McpOAuthBroker, "statusFor">,
+  page: { limit?: number; cursor?: string } = {},
 ): Promise<RecruitingCorrespondence> {
   return authenticated(async () => {
     const workspace = await recruiting.getRecruitingWorkspace(prisma, actor, {
@@ -469,6 +470,7 @@ export async function getRecruitingCorrespondence(
       events: [],
       contacts: [],
       partial: false,
+      nextCursor: null,
       connections: await Promise.all(
         sources.map(async (source): Promise<RecruitingCorrespondence["connections"][number]> => {
           let identityConnected = productIdentity?.connected;
@@ -522,14 +524,18 @@ export async function getRecruitingCorrespondence(
             output.checkedAt = item.checkedAt;
         }
         for (const item of latest.values()) if (item.email) emails.set(item.email.id, item.email);
-        output.partial ||=
-          native.partial ||
-          emails.size > 50 ||
-          native.items.some((item) => item.status === "unknown");
-        output.emails = [...emails.values()].slice(0, 50);
+        output.partial ||= native.partial || native.items.some((item) => item.status === "unknown");
+        output.emails = [...emails.values()];
         if (output.emails.length) output.status = "ready";
         await native.assertCurrent?.();
       }
+      // ponytail: offset over the merged inbox order (all reads are already bounded); refresh from page one after new mail.
+      const start = Number(page.cursor ?? 0);
+      const end = start + (page.limit ?? 50);
+      output.nextCursor = output.emails.length > end ? String(end) : null;
+      // Unpaged callers keep the old "more than one screen of mail" signal.
+      output.partial ||= output.nextCursor !== null;
+      output.emails = output.emails.slice(start, end);
       return output;
     };
     if (!workspace) return finish();
@@ -1302,10 +1308,10 @@ export async function getRecruitingCorrespondence(
           if (!emails.has(message.id)) emails.set(message.id, message);
       }
     }
-    output.emails = [...emails.values()].slice(0, 50);
+    output.emails = [...emails.values()];
     // ponytail: bound retained calendar display to 200 entries; full receipts remain in native history.
     output.events = [...events.values()].slice(0, 200);
-    output.partial ||= emails.size > 50 || events.size > 200 || unsupported || failed;
+    output.partial ||= events.size > 200 || unsupported || failed;
     output.status =
       output.emails.length || output.events.length || output.contacts.length
         ? "ready"
@@ -2000,9 +2006,22 @@ export async function getRecruitingCrmData(
     const finish = (value: Record<string, unknown>) =>
       RecruitingCrmDataOutputSchema.parse({
         ...value,
+        // Offset-backed pages also expose the next offset as the opaque `cursor` callers pass back.
+        ...("nextOffset" in value
+          ? { nextCursor: value.nextOffset === null ? null : String(value.nextOffset) }
+          : {}),
         source,
         checkedAt: new Date().toISOString(),
       });
+    const pageOffset = (page: { offset?: number; cursor?: string }) => {
+      if (
+        page.cursor !== undefined &&
+        page.offset !== undefined &&
+        Number(page.cursor) !== page.offset
+      )
+        throw new ORPCError("BAD_REQUEST", { message: "Pass either offset or cursor." });
+      return page.cursor !== undefined ? Number(page.cursor) : (page.offset ?? 0);
+    };
     const candidate = (
       row: ReturnType<typeof RecruitingCrmCandidatesReadSchema.parse>["rows"][number],
     ) => ({
@@ -2062,7 +2081,7 @@ export async function getRecruitingCrmData(
       }));
     };
     if (input.operation === "important") {
-      const offset = input.offset ?? 0;
+      const offset = pageOffset(input);
       const limit = input.limit ?? 25;
       const page = parse(
         RecruitingCrmImportantReadSchema,
@@ -2107,19 +2126,19 @@ export async function getRecruitingCrmData(
       });
     }
     if (input.operation === "candidateDetails") {
-      const messages = await outbox(input.candidateId);
       const offset = input.offset ?? 0;
       const limit = input.limit ?? 25;
-      const page = parse(
-        RecruitingCrmDetailsReadSchema,
-        await read(server, "get_crm_candidate_review", {
+      // Independent reads behind the same membership gate; each keeps its own fences.
+      const [messages, page] = await Promise.all([
+        outbox(input.candidateId),
+        read(server, "get_crm_candidate_review", {
           p_view: "details",
           p_org: input.organizationId,
           p_candidate: input.candidateId,
           p_campaign_limit: limit,
           p_campaign_offset: offset,
-        }),
-      );
+        }).then((value) => parse(RecruitingCrmDetailsReadSchema, value)),
+      ]);
       const associations = page.campaign_associations;
       if (
         page.organization_id !== input.organizationId ||
@@ -2190,7 +2209,7 @@ export async function getRecruitingCrmData(
       });
     }
     if (input.operation === "roleCampaigns") {
-      const offset = input.offset ?? 0;
+      const offset = pageOffset(input);
       const limit = input.limit ?? 25;
       const page = parse(
         RecruitingCrmRoleCampaignsReadSchema,
@@ -2229,7 +2248,7 @@ export async function getRecruitingCrmData(
     if (input.operation === "roles")
       return finish({ operation: input.operation, items: await roles() });
     if (input.operation === "roleMail") {
-      const offset = input.offset ?? 0;
+      const offset = pageOffset(input);
       const limit = input.limit ?? 25;
       const done = (supported: boolean, items: unknown[], nextOffset: number | null) =>
         finish({
@@ -2269,14 +2288,13 @@ export async function getRecruitingCrmData(
       const trim = (text: string) => text.replace(/^ +| +$/g, "");
       let selectedRole = null;
       if (input.crmRoleId) {
-        const choices = await roles();
-        const row = parse(
-          RecruitingCrmRoleReadSchema,
-          await read(server, "get_crm_role", {
+        const [choices, row] = await Promise.all([
+          roles(),
+          read(server, "get_crm_role", {
             p_org: input.organizationId,
             p_role: input.crmRoleId,
-          }),
-        );
+          }).then((value) => parse(RecruitingCrmRoleReadSchema, value)),
+        ]);
         const sameLabels = choices.filter(
           (role) =>
             trim(role.clientLabel) === trim(row.client_label) &&
@@ -2304,7 +2322,7 @@ export async function getRecruitingCrmData(
           jdUrl: row.jd_url,
         };
       }
-      const offset = input.offset ?? 0;
+      const offset = pageOffset(input);
       const limit = input.limit ?? 25;
       const page = parse(
         RecruitingCrmCandidatesReadSchema,
@@ -2351,16 +2369,15 @@ export async function getRecruitingCrmData(
         input.cursor.p_candidate !== input.candidateId)
     )
       throw new IsolationError();
-    const messages = await outbox(input.candidateId);
-    const page = parse(
-      RecruitingCrmMailReadSchema,
-      await read(server, "list_crm_candidate_correspondence", {
+    const [messages, page] = await Promise.all([
+      outbox(input.candidateId),
+      read(server, "list_crm_candidate_correspondence", {
         p_org: input.organizationId,
         p_candidate: input.candidateId,
         p_limit: input.limit ?? 25,
         ...(input.cursor ? { p_cursor: input.cursor } : {}),
-      }),
-    );
+      }).then((value) => parse(RecruitingCrmMailReadSchema, value)),
+    ]);
     if (
       page.messages.length > (input.limit ?? 25) ||
       page.organization_id !== input.organizationId ||

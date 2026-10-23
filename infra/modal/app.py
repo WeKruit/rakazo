@@ -21,6 +21,21 @@ SECRET_NAME = os.environ.get("MODAL_SECRET_NAME", f"{APP_NAME}-config")
 VOLUME_NAME = os.environ.get("MODAL_VOLUME_NAME", f"{APP_NAME}-files")
 
 app = modal.App(APP_NAME)
+
+
+def source_revision() -> str:
+    """The deployed source revision: the archive marker, else the local git HEAD, else unknown."""
+    marker = ROOT / ".wekruit-source-revision"
+    if marker.exists():
+        return marker.read_text().strip()
+    try:
+        import subprocess
+        return subprocess.run(["git", "rev-parse", "HEAD"], cwd=ROOT, capture_output=True, text=True, timeout=5).stdout.strip() or "unknown"
+    except Exception:
+        return "unknown"
+
+
+SOURCE_REVISION = source_revision() if modal.is_local() else "unknown"
 files = modal.Volume.from_name(VOLUME_NAME, create_if_missing=True)
 config = modal.Secret.from_name(SECRET_NAME)
 image = (
@@ -63,7 +78,7 @@ image = (
     image=image,
     secrets=[config],
     volumes={"/data": files},
-    env={"MODAL_APP_NAME": APP_NAME},
+    env={"MODAL_APP_NAME": APP_NAME, "RAKAZO_GIT_SHA": SOURCE_REVISION},
     port=8000,
     compute_region="us-west",
     unauthenticated=True,  # Native Better Auth protects application/API routes.

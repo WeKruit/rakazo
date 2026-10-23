@@ -55,6 +55,7 @@ import {
   isPendingUserMessage,
   isRunTerminalEvent,
   isToolActivityBlock,
+  isXlsxFileName,
   mentionChipKey,
   nestRosterByParent,
   pendingUserMessageId,
@@ -3112,7 +3113,12 @@ export function ShellPage() {
   const attachmentUploads = useRef(
     createAttachmentUploads(async (file, contentBase64, target) => {
       const mimeType = inferAttachmentMimeType(file.name, file.type);
-      if (!mimeType) throw new Error(t`Unsupported file type: ${file.name}`);
+      if (!mimeType)
+        throw new Error(
+          isXlsxFileName(file.name)
+            ? t`XLSX is not supported yet. Save as CSV and upload again.`
+            : t`Unsupported file type: ${file.name}`,
+        );
       const artifact = await rpc.artifacts.create({
         ...target,
         name: file.name,
@@ -3139,7 +3145,11 @@ export function ShellPage() {
         }
         const mimeType = inferAttachmentMimeType(file.name, file.type);
         if (!mimeType) {
-          skipped.push(file.name);
+          skipped.push(
+            isXlsxFileName(file.name)
+              ? t`${file.name} (XLSX is not supported yet. Save as CSV and upload again.)`
+              : file.name,
+          );
           continue;
         }
         next.push({
@@ -3463,7 +3473,12 @@ export function ShellPage() {
       );
       for (const pending of attachments.slice(attempt.artifactIds.length)) {
         const mimeType = inferAttachmentMimeType(pending.file.name, pending.file.type);
-        if (!mimeType) throw new Error(t`Unsupported file type: ${pending.file.name}`);
+        if (!mimeType)
+          throw new Error(
+            isXlsxFileName(pending.file.name)
+              ? t`XLSX is not supported yet. Save as CSV and upload again.`
+              : t`Unsupported file type: ${pending.file.name}`,
+          );
         const contentBase64 = await readFileAsBase64(pending.file);
         if (!stillCurrent()) return false;
         const artifact = await rpc.artifacts.create({
@@ -3679,7 +3694,12 @@ export function ShellPage() {
       if (input.description && attempt) {
         for (const pending of attachments.slice(attempt.artifactIds.length)) {
           const mimeType = inferAttachmentMimeType(pending.file.name, pending.file.type);
-          if (!mimeType) throw new Error(t`Unsupported file type: ${pending.file.name}`);
+          if (!mimeType)
+            throw new Error(
+              isXlsxFileName(pending.file.name)
+                ? t`XLSX is not supported yet. Save as CSV and upload again.`
+                : t`Unsupported file type: ${pending.file.name}`,
+            );
           const contentBase64 = await readFileAsBase64(pending.file);
           if (!stillCurrent()) throw new Error(t`The workspace changed. Open the role again.`);
           const artifact = await rpc.artifacts.create({

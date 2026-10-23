@@ -26,6 +26,7 @@ function fixture(options: {
   providerError?: boolean;
   wokenAlready?: boolean;
   wokenInTx?: boolean;
+  latestReply?: string | null;
 }) {
   const runs: Array<{ clientNonce: string; trigger: string }> = [];
   const runCreate = vi.fn(async ({ data }: { data: { clientNonce: string; trigger: string } }) => {
@@ -47,6 +48,9 @@ function fixture(options: {
     },
     run: {
       findFirst: vi.fn(async () => (options.wokenAlready ? { id: "wake-existing" } : null)),
+    },
+    externalEffect: {
+      findFirst: vi.fn(async () => (options.latestReply ? { id: options.latestReply } : null)),
     },
     $transaction: vi.fn(async (callback: (tx: unknown) => Promise<unknown>) => callback(tx)),
   };
@@ -132,6 +136,8 @@ describe("pollRecruitingResearch", () => {
     };
     expect(prompt.data.prompt).toContain("Research task task for recruiting role role");
     expect(prompt.data.prompt).not.toContain("provider-task");
+    expect(prompt.data.prompt).toContain("save every rows page");
+    expect(prompt.data.prompt).toContain("including unassessed people");
     expect(f.enqueue).toHaveBeenCalledExactlyOnceWith(
       expect.objectContaining({ name: "run.continue", payload: { runId: "wake-1" } }),
     );
@@ -164,6 +170,26 @@ describe("pollRecruitingResearch", () => {
     const missing = fixture({ provider: completed, task: null });
     await pollRecruitingResearch(missing.deps, { taskId: "task" });
     expect(missing.calls).toHaveLength(0);
+  });
+
+  it("wakes again when feedback continued the same provider task after an earlier wake", async () => {
+    // Round 1 woke under the base nonce; a later reply on the same task is a new round.
+    const f = fixture({ provider: completed, latestReply: "reply-effect" });
+    const roundOneWoke = async ({ where }: { where: { clientNonce: string } }) =>
+      where.clientNonce === nonce ? { id: "wake-round-1" } : null;
+    f.prisma.run.findFirst.mockImplementation(roundOneWoke as never);
+    f.tx.run.findFirst.mockImplementation(roundOneWoke as never);
+    await pollRecruitingResearch(f.deps, { taskId: "task" });
+    expect(f.runs).toEqual([
+      expect.objectContaining({
+        clientNonce: recruitingResearchWakeNonce("task", "provider-task", "reply-effect"),
+      }),
+    ]);
+    expect(recruitingResearchWakeNonce("task", "provider-task", "reply-effect")).not.toBe(nonce);
+    const where = vi.mocked(f.prisma.externalEffect.findFirst).mock.calls[0]![0 as never] as never;
+    expect(JSON.stringify(where)).toContain('"reply"');
+    expect(JSON.stringify(where)).toContain('"provider-task"');
+    expect(JSON.stringify(where)).toContain('"space"');
   });
 
   it("ignores a provider answer about a different task", async () => {

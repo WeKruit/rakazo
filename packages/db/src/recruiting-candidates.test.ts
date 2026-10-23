@@ -6546,3 +6546,208 @@ describe("native candidate results without domain actions", () => {
     expect(f.tx.recruitingCandidatePage.create).not.toHaveBeenCalled();
   });
 });
+
+describe("recruiter CSV candidate import", () => {
+  function csvImportFixture() {
+    const f = nativeCandidateFixture();
+    const input = {
+      operation: "import_csv" as const,
+      roleId: "role",
+      expectedRoleRevision: 1,
+      artifactId: "csv",
+      mapping: { name: "Name", linkedinUrl: "LinkedIn", company: "Company" },
+    };
+    Object.assign(f.saveEffect, { request: input });
+    const trusted = { ...f.trusted, effectRequest: input };
+    const csvHash = "c".repeat(64);
+    const csvArtifact = { ...actor, id: "csv", hash: csvHash, botId: "bot", runId: "upload-run" };
+    const contextFind = f.tx.artifact.findFirst.getMockImplementation()!;
+    f.tx.artifact.findFirst.mockImplementation(async (args) =>
+      args.where.id === "csv" ? (csvArtifact as never) : contextFind(args),
+    );
+    const existing: Array<{ candidateKey: string }> = [];
+    Object.assign(f.tx.recruitingCandidate, {
+      findMany: vi.fn(async () => existing),
+      createMany: vi.fn(async () => ({ count: 1 })),
+    });
+    const captured: Parameters<typeof recruiting.recruitingCsvImportReceipt>[1] = {
+      artifactSha256: csvHash,
+      header: ["Name", "LinkedIn", "Company"],
+      rows: [
+        {
+          rowIndex: 0,
+          csvRowIndex: 0,
+          row: {
+            name: "Ada Example",
+            linkedin_url: "https://www.linkedin.com/in/example",
+            current_company: "Example Co",
+          },
+        },
+        { rowIndex: 1, csvRowIndex: 2, row: { name: "No Profile" } },
+      ],
+      skipped: [{ csvRowIndex: 1, reason: "missing_name_and_linkedin_url" }],
+      truncated: false,
+    };
+    const bytes = Buffer.from(
+      stableJsonValue(recruiting.recruitingCsvImportReceipt(input, captured)),
+    );
+    const outputArtifact = {
+      name: "recruiting-csv-import.json",
+      mimeType: "application/json",
+      size: bytes.length,
+      hash: createHash("sha256").update(bytes).digest("hex"),
+      storageKey: "receipt",
+      clientNonce: "recruiting-csv-import:save",
+    };
+    const save = () =>
+      recruiting.saveRecruitingCandidateCsvImport(f.prisma, actor, trusted, input, {
+        ...captured,
+        outputArtifact,
+      });
+    return { ...f, input, trusted, captured, outputArtifact, existing, csvArtifact, save };
+  }
+
+  it("saves one unassessed page with CSV provenance and reports skipped rows", async () => {
+    const f = csvImportFixture();
+    const result = (await f.save()) as Record<string, unknown>;
+    expect(f.tx.recruitingCandidatePage.create).toHaveBeenCalledExactlyOnceWith({
+      data: expect.objectContaining({
+        effectId: "save",
+        roleId: "role",
+        taskId: null,
+        actionId: null,
+        roleRevisionId: "revision",
+        artifactId: "observation-artifact",
+        artifactHash: f.outputArtifact.hash,
+        requestCursor: null,
+        outputId: null,
+        rowCount: 2,
+      }),
+    });
+    const occurrences = (
+      f.tx.recruitingCandidateOccurrence.createMany.mock.calls[0]![0] as {
+        data: Array<Record<string, unknown>>;
+      }
+    ).data;
+    expect(occurrences.map((row) => [row.rowIndex, row.candidateKey, row.name])).toEqual([
+      [0, "linkedin:/in/example", "Ada Example"],
+      [1, "source-row:save:1", "No Profile"],
+    ]);
+    // Unmapped columns stay missing so they never mask an older provider value.
+    expect(occurrences[0]!.issues).toEqual(
+      expect.arrayContaining(["missing_field:current_title", "missing_field:location"]),
+    );
+    expect(result).toMatchObject({
+      status: "saved",
+      sourceEffectId: "save",
+      source: {
+        kind: "csv_import",
+        artifactId: "csv",
+        artifactSha256: "c".repeat(64),
+        importedBy: { userId: actor.userId, runId: "run" },
+        observedAt: expect.any(String),
+      },
+      outputArtifact: { artifactId: "observation-artifact", sha256: f.outputArtifact.hash },
+      candidateRows: [
+        { rowIndex: 0, csvRowIndex: 0, candidateKey: "linkedin:/in/example", alreadyInPool: false },
+        { rowIndex: 1, csvRowIndex: 2, candidateKey: "source-row:save:1", alreadyInPool: false },
+      ],
+      skipped: [{ csvRowIndex: 1, reason: "missing_name_and_linkedin_url" }],
+      truncated: false,
+    });
+    expect(f.saveEffect).toMatchObject({ status: "completed", result });
+  });
+
+  it("adds a discovery to an existing LinkedIn candidate instead of duplicating them", async () => {
+    const f = csvImportFixture();
+    f.existing.push({ candidateKey: "linkedin:/in/example" });
+    const result = (await f.save()) as { candidateRows: Array<Record<string, unknown>> };
+    expect(result.candidateRows[0]).toMatchObject({
+      candidateKey: "linkedin:/in/example",
+      alreadyInPool: true,
+    });
+    // discoveryCount is the occurrence count per key: one new occurrence, no new candidate row.
+    expect(f.tx.recruitingCandidate.createMany).toHaveBeenCalledWith({
+      data: [
+        { roleId: "role", candidateKey: "linkedin:/in/example" },
+        { roleId: "role", candidateKey: "source-row:save:1" },
+      ],
+      skipDuplicates: true,
+    });
+  });
+
+  it("refuses a stale role revision before writing", async () => {
+    const f = csvImportFixture();
+    f.role.revision = 2;
+    await expect(f.save()).rejects.toThrow(recruiting.RecruitingConflictError);
+    expect(f.tx.recruitingCandidatePage.create).not.toHaveBeenCalled();
+  });
+
+  it.each(["foreign-artifact", "artifact-hash", "receipt-hash", "inactive-role"])(
+    "refuses %s",
+    async (boundary) => {
+      const f = csvImportFixture();
+      if (boundary === "foreign-artifact")
+        f.tx.artifact.findFirst.mockImplementation(async () => undefined as never);
+      if (boundary === "artifact-hash") f.csvArtifact.hash = "d".repeat(64);
+      if (boundary === "receipt-hash") f.outputArtifact.hash = "e".repeat(64);
+      if (boundary === "inactive-role") f.input.roleId = "other-role";
+      if (boundary === "inactive-role") Object.assign(f.saveEffect, { request: f.input });
+      if (boundary === "inactive-role") f.trusted.effectRequest = f.input;
+      await expect(f.save()).rejects.toThrow(IsolationError);
+      expect(f.tx.recruitingCandidatePage.create).not.toHaveBeenCalled();
+    },
+  );
+});
+
+describe("recruiter CSV page provenance on read", () => {
+  async function importedSourceFixture() {
+    const f = await nativeSourceFixture();
+    const request = {
+      operation: "import_csv",
+      roleId: "role",
+      expectedRoleRevision: 1,
+      artifactId: "csv",
+      mapping: { name: "Name" },
+    };
+    Object.assign(f.read, {
+      request,
+      result: {
+        status: "saved",
+        roleRevisionId: "revision",
+        outputArtifact: { artifactId: f.artifact.id, sha256: f.artifact.hash },
+      },
+    });
+    Object.assign(f.artifact, { clientNonce: `recruiting-csv-import:${f.read.id}` });
+    f.tx.event.findMany.mockResolvedValue([] as never);
+    return f;
+  }
+  it("lists an imported row as a source with no provider task", async () => {
+    const f = await importedSourceFixture();
+    const sources = await recruiting.listRecruitingCandidateSources(f.prisma, actor, {
+      roleId: "role",
+      candidateKey: f.occurrence.candidateKey,
+    });
+    expect(sources.items).toHaveLength(1);
+    expect(sources.items[0]).toMatchObject({
+      providerTaskId: null,
+      taskId: null,
+      actionId: null,
+      effectId: f.read.id,
+      artifactRef: { artifactId: f.artifact.id, sha256: f.artifact.hash },
+    });
+  });
+  it.each(["nonce", "receipt", "role"])("rejects an imported page with a forged %s", async (b) => {
+    const f = await importedSourceFixture();
+    if (b === "nonce") Object.assign(f.artifact, { clientNonce: "recruiting-csv-import:other" });
+    if (b === "receipt")
+      Object.assign(f.read, { result: { roleRevisionId: "revision", outputArtifact: null } });
+    if (b === "role") Object.assign(f.read.request as object, { roleId: "other-role" });
+    await expect(
+      recruiting.listRecruitingCandidateSources(f.prisma, actor, {
+        roleId: "role",
+        candidateKey: f.occurrence.candidateKey,
+      }),
+    ).rejects.toThrow(IsolationError);
+  });
+});

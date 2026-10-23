@@ -64,6 +64,11 @@ msgstr "{0}（最多 {ATTACHMENT_MAX_COUNT} 个附件）"
 msgid "{0} (over 10 MiB)"
 msgstr "{0}（超过 10 MiB）"
 
+#. placeholder {0}: file.name
+#: src/pages/Shell.tsx
+msgid "{0} (XLSX is not supported yet. Save as CSV and upload again.)"
+msgstr "{0}（XLSX 暂不支持，请另存为 CSV 后上传）"
+
 #. placeholder {0}: preset.n
 #: src/pages/RoutineSchedule.tsx
 msgid "{0} {unitLabel}"
@@ -5427,13 +5432,13 @@ msgstr "立即重试"
 msgid "Retry screen"
 msgstr ""
 
-#: src/pages/McpOAuthCallback.tsx
-msgid "Return to WeKruit Headhunter"
-msgstr "返回 WeKruit Headhunter"
-
 #: src/pages/Shell.tsx
 msgid "Return to the original role before saving this draft."
 msgstr ""
+
+#: src/pages/McpOAuthCallback.tsx
+msgid "Return to WeKruit Headhunter"
+msgstr "返回 WeKruit Headhunter"
 
 #. placeholder {0}: doc.revision
 #: src/pages/KnowledgeSection.tsx
@@ -7137,6 +7142,10 @@ msgstr "处理中…"
 #: src/components/computer/TerminalApp.tsx
 msgid "Wrote {path}"
 msgstr ""
+
+#: src/pages/Shell.tsx
+msgid "XLSX is not supported yet. Save as CSV and upload again."
+msgstr "XLSX 暂不支持，请另存为 CSV 后上传"
 
 #: src/lib/billing.ts
 msgid "year"

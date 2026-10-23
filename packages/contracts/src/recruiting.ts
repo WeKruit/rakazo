@@ -1051,6 +1051,21 @@ export const RecruitingResearchToolInputSchema = z.discriminatedUnion("operation
     providerTaskId: RecruitingId,
     cursor: z.string().min(1).nullable().default(null),
   }),
+  // Recruiter-supplied text/csv artifact saved as one unassessed candidate page; values are column names.
+  z.strictObject({
+    operation: z.literal("import_csv"),
+    roleId: RecruitingId,
+    expectedRoleRevision: Revision,
+    artifactId: RecruitingId,
+    mapping: z.strictObject({
+      name: ResearchText,
+      linkedinUrl: ResearchText.optional(),
+      company: ResearchText.optional(),
+      title: ResearchText.optional(),
+      location: ResearchText.optional(),
+      resumeUrl: ResearchText.optional(),
+    }),
+  }),
   z.strictObject({
     ...ResearchRoundInput,
     operation: z.literal("prepare"),
@@ -1180,7 +1195,7 @@ export type RecruitingAssessmentToolInput = z.infer<typeof RecruitingAssessmentT
 export const ListRecruitingCandidatesInput = z.strictObject({
   roleId: RecruitingId,
   cursor: Text.optional(),
-  limit: z.number().int().min(1).max(100).optional(),
+  limit: z.number().int().min(1).max(200).optional(),
   query: z.string().max(240).optional(),
   assessmentState: z.enum(["unassessed", "current", "outdated"]).optional(),
   verdict: VerdictSchema.optional(),
@@ -1215,6 +1230,8 @@ const RecruitingCandidateSourceReferenceSchema = z
   .strictObject({
     report: RecruitingCandidateReportSchema.optional(),
     ...RecruitingCandidateEvidenceReference,
+    // Null for a recruiter-imported CSV page, which has no provider task.
+    providerTaskId: RecruitingId.nullable(),
     taskId: RecruitingId.nullable(),
     actionId: RecruitingId.nullable(),
     requestCursor: z.string().nullable(),
@@ -1409,6 +1426,16 @@ export const RecruitingChatContextSchema = z
   .refine((value) => value.roleTitle || value.contact, "Chat context is empty");
 export type RecruitingChatContext = z.infer<typeof RecruitingChatContextSchema>;
 
+/** Opaque token for offset-paged reads; callers pass back the previous page's `nextCursor` unchanged. */
+export const RecruitingOffsetCursorSchema = z
+  .string()
+  .regex(/^(0|[1-9]\d{0,6})$/)
+  .refine((value) => Number(value) <= 1_000_000);
+export const RecruitingCorrespondenceInputPage = {
+  /** Inbox emails per page (default 50); events and contacts keep their own bounds. */
+  limit: z.number().int().min(1).max(200).optional(),
+  cursor: RecruitingOffsetCursorSchema.optional(),
+};
 export const RecruitingCorrespondenceSchema = z.strictObject({
   roleId: RecruitingId.nullable(),
   status: z.enum(["not_checked", "ready", "empty", "unsupported", "failed"]),
@@ -1462,6 +1489,8 @@ export const RecruitingCorrespondenceSchema = z.strictObject({
     }),
   ),
   partial: z.boolean(),
+  /** Next inbox email page; null on the last page and for interview/contacts views. */
+  nextCursor: z.string().nullable(),
 });
 export type RecruitingCorrespondence = z.infer<typeof RecruitingCorrespondenceSchema>;
 
@@ -1579,6 +1608,12 @@ const CrmMailItem = z.strictObject({
 });
 const crmBrowsePinned = { serverId: Id, serverRevision: Revision, organizationId: z.uuid() };
 const crmBrowsePage = { limit: z.number().int().min(1).max(50).optional() };
+/** Opaque page token for offset-backed CRM reads (the CRM tools page by p_offset); pass back `nextCursor`. */
+const crmOffsetPage = {
+  offset: z.number().int().min(0).max(1_000_000).optional(),
+  cursor: RecruitingOffsetCursorSchema.optional(),
+};
+const crmNextCursor = { nextCursor: z.string().nullable() };
 /** Live authorized CRM reads; these IDs are never local role, group, run or effect IDs. */
 export const RecruitingCrmDataInputSchema = z.discriminatedUnion("operation", [
   z
@@ -1600,14 +1635,14 @@ export const RecruitingCrmDataInputSchema = z.discriminatedUnion("operation", [
     query: z.string().max(500).optional(),
     /** Exact stored CRM pipeline stage, e.g. "Interview". */
     stage: z.string().trim().min(1).max(200).optional(),
-    offset: z.number().int().min(0).max(1_000_000).optional(),
+    ...crmOffsetPage,
   }),
   z.object({
     operation: z.literal("important"),
     ...crmBrowsePinned,
     ...crmBrowsePage,
     status: CrmBrowseImportantStatus.optional(),
-    offset: z.number().int().min(0).max(1_000_000).optional(),
+    ...crmOffsetPage,
   }),
   z.object({
     operation: z.literal("candidateDetails"),
@@ -1621,7 +1656,7 @@ export const RecruitingCrmDataInputSchema = z.discriminatedUnion("operation", [
     ...crmBrowsePinned,
     ...crmBrowsePage,
     crmRoleId: z.uuid(),
-    offset: z.number().int().min(0).max(1_000_000).optional(),
+    ...crmOffsetPage,
   }),
   z.object({
     operation: z.literal("mail"),
@@ -1636,7 +1671,7 @@ export const RecruitingCrmDataInputSchema = z.discriminatedUnion("operation", [
     ...crmBrowsePinned,
     ...crmBrowsePage,
     crmRoleId: z.uuid(),
-    offset: z.number().int().min(0).max(1_000_000).optional(),
+    ...crmOffsetPage,
   }),
 ]);
 export type RecruitingCrmDataInput = z.infer<typeof RecruitingCrmDataInputSchema>;
@@ -1673,6 +1708,7 @@ export const RecruitingCrmDataOutputSchema = z.discriminatedUnion("operation", [
     total: z.number().int().nonnegative(),
     offset: z.number().int().nonnegative(),
     nextOffset: z.number().int().nonnegative().nullable(),
+    ...crmNextCursor,
   }),
   z.strictObject({
     operation: z.literal("important"),
@@ -1683,6 +1719,7 @@ export const RecruitingCrmDataOutputSchema = z.discriminatedUnion("operation", [
     total: z.number().int().nonnegative(),
     offset: z.number().int().nonnegative(),
     nextOffset: z.number().int().nonnegative().nullable(),
+    ...crmNextCursor,
   }),
   z.strictObject({
     operation: z.literal("candidateDetails"),
@@ -1736,6 +1773,7 @@ export const RecruitingCrmDataOutputSchema = z.discriminatedUnion("operation", [
     items: z.array(CrmBrowseCampaign.omit({ crmRoleId: true, clientId: true })),
     offset: z.number().int().nonnegative(),
     nextOffset: z.number().int().nonnegative().nullable(),
+    ...crmNextCursor,
   }),
   z.strictObject({
     operation: z.literal("mail"),
@@ -1759,6 +1797,7 @@ export const RecruitingCrmDataOutputSchema = z.discriminatedUnion("operation", [
     items: z.array(CrmMailItem.extend({ candidateId: z.uuid() })),
     offset: z.number().int().nonnegative(),
     nextOffset: z.number().int().nonnegative().nullable(),
+    ...crmNextCursor,
   }),
 ]);
 export type RecruitingCrmDataOutput = z.infer<typeof RecruitingCrmDataOutputSchema>;
