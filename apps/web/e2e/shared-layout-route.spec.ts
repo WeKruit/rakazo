@@ -5,7 +5,7 @@ for (const width of [1440, 390]) {
   test(`actual Contacts layout keeps chat and detail usable at ${width}px`, async ({
     page,
   }, testInfo) => {
-    await page.setViewportSize({ width, height: 900 });
+    await page.setViewportSize({ width, height: width === 390 ? 844 : 900 });
     await mockRecruitingApp(page);
     await page.goto(`/app/g/${appGroupId}?view=contacts`);
     await expect(page.locator('[data-rakazo-app-state="ready"]')).toBeVisible();
