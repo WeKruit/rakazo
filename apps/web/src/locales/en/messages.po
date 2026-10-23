@@ -22,6 +22,11 @@ msgstr " (unread)"
 msgid "{0, plural, =1 {# candidate in the pool} other {# candidates in the pool}}"
 msgstr "{0, plural, =1 {# candidate in the pool} other {# candidates in the pool}}"
 
+#. placeholder {0}: important.total
+#: src/pages/RecruitingPanel.tsx
+msgid "{0, plural, =1 {# candidate-role record} other {# candidate-role records}}"
+msgstr "{0, plural, =1 {# candidate-role record} other {# candidate-role records}}"
+
 #. placeholder {0}: candidatePage.total
 #: src/pages/RecruitingPanel.tsx
 msgid "{0, plural, =1 {# candidate} other {# candidates}}"
@@ -464,9 +469,17 @@ msgstr "Agent connections"
 msgid "Agents:"
 msgstr "Agents:"
 
+#: src/pages/RecruitingPanel.tsx
+msgid "AI interpretation"
+msgstr "AI interpretation"
+
 #: src/pages/Artifacts.tsx
 msgid "All bots"
 msgstr "All bots"
+
+#: src/pages/RecruitingPanel.tsx
+msgid "All Important records"
+msgstr "All Important records"
 
 #: src/pages/RecruitingPanel.tsx
 msgid "All internal assessments"
@@ -625,6 +638,10 @@ msgstr "Approve this server to let your agent use its tools."
 #: src/pages/RecruitingPanel.tsx
 msgid "Approved"
 msgstr "Approved"
+
+#: src/pages/RecruitingPanel.tsx
+msgid "Approved in internal review"
+msgstr "Approved in internal review"
 
 #: src/pages/BotContextMenu.tsx
 msgid "Archive"
@@ -794,6 +811,10 @@ msgstr "Avatar Studio"
 msgid "Avatars"
 msgstr "Avatars"
 
+#: src/pages/RecruitingPanel.tsx
+msgid "Awaiting feedback"
+msgstr "Awaiting feedback"
+
 #: src/components/computer/FilesApp.tsx
 #: src/pages/Board.tsx
 #: src/pages/PluginsOverlay.tsx
@@ -928,9 +949,21 @@ msgstr "Browser"
 msgid "Built-in"
 msgstr "Built-in"
 
+#: src/pages/RecruitingPanel.tsx
+msgid "Calendar booking details are not included in these manual CRM workflow records."
+msgstr "Calendar booking details are not included in these manual CRM workflow records."
+
 #: src/pages/RecruitingCorrespondence.tsx
 msgid "Calendar event"
 msgstr "Calendar event"
+
+#: src/pages/RecruitingPanel.tsx
+msgid "Campaign"
+msgstr "Campaign"
+
+#: src/pages/RecruitingPanel.tsx
+msgid "Campaign details unavailable"
+msgstr "Campaign details unavailable"
 
 #: src/App.tsx
 msgid "Can't reach the server."
@@ -992,6 +1025,10 @@ msgstr "Candidate assessment"
 #: src/pages/RecruitingPanel.tsx
 msgid "Candidate CRM"
 msgstr "Candidate CRM"
+
+#: src/pages/RecruitingPanel.tsx
+msgid "Candidate details"
+msgstr "Candidate details"
 
 #: src/pages/RecruitingPanel.tsx
 msgid "Candidate facts"
@@ -1179,6 +1216,10 @@ msgstr "Clear filter {label}"
 #: src/pages/shell/dialogs.tsx
 msgid "Clearing…"
 msgstr "Clearing…"
+
+#: src/pages/RecruitingPanel.tsx
+msgid "Client"
+msgstr "Client"
 
 #: src/pages/RecruitingPanel.tsx
 #: src/pages/Shell.tsx
@@ -1513,6 +1554,10 @@ msgstr "Connection to {0} is still pending. You can close this and check again."
 #: src/pages/PluginsOverlay.tsx
 msgid "Connection was not confirmed. Try again or check your account settings."
 msgstr "Connection was not confirmed. Try again or check your account settings."
+
+#: src/pages/RecruitingPanel.tsx
+msgid "Contact campaign associations"
+msgstr "Contact campaign associations"
 
 #: src/pages/RecruitingPanel.tsx
 msgid "Contact details have not been checked yet."
@@ -2296,6 +2341,10 @@ msgstr "days"
 msgid "Decline"
 msgstr "Decline"
 
+#: src/pages/RecruitingPanel.tsx
+msgid "Declined"
+msgstr "Declined"
+
 #: src/pages/ModelSettingsOverlay.tsx
 #: src/pages/Onboarding.tsx
 #: src/pages/shell/avatar-studio-popover.tsx
@@ -3014,6 +3063,10 @@ msgid "High probability"
 msgstr "High probability"
 
 #: src/pages/RecruitingPanel.tsx
+msgid "High signal"
+msgstr "High signal"
+
+#: src/pages/RecruitingPanel.tsx
 msgid "Hiring manager"
 msgstr "Hiring manager"
 
@@ -3042,6 +3095,10 @@ msgstr "How often"
 msgid "How to check"
 msgstr "How to check"
 
+#: src/pages/RecruitingPanel.tsx
+msgid "Human-entered"
+msgstr "Human-entered"
+
 #: src/pages/Shell.tsx
 msgid "I edited the attached email sequence. Keep this as the current unsent draft for this role. Do not send or enroll anyone."
 msgstr "I edited the attached email sequence. Keep this as the current unsent draft for this role. Do not send or enroll anyone."
@@ -3069,6 +3126,10 @@ msgstr "Image upload area"
 #: src/pages/PluginsOverlay.tsx
 msgid "Import OpenAPI JSON"
 msgstr "Import OpenAPI JSON"
+
+#: src/pages/RecruitingPanel.tsx
+msgid "Important"
+msgstr "Important"
 
 #: src/lib/ticket-status.ts
 msgid "In progress"
@@ -3133,6 +3194,14 @@ msgid "Integrations"
 msgstr "Integrations"
 
 #: src/pages/RecruitingPanel.tsx
+msgid "Interest"
+msgstr "Interest"
+
+#: src/pages/RecruitingPanel.tsx
+msgid "Interested"
+msgstr "Interested"
+
+#: src/pages/RecruitingPanel.tsx
 msgid "Internal assessment"
 msgstr "Internal assessment"
 
@@ -3143,6 +3212,10 @@ msgstr "Internal assessment: current"
 #: src/pages/RecruitingPanel.tsx
 msgid "Internal assessment: outdated"
 msgstr "Internal assessment: outdated"
+
+#: src/pages/RecruitingPanel.tsx
+msgid "Internal review"
+msgstr "Internal review"
 
 #: src/pages/RecruitingPanel.tsx
 msgid "Internal verdict"
@@ -3174,10 +3247,17 @@ msgid "Interval unit"
 msgstr "Interval unit"
 
 #: src/pages/RecruitingCorrespondence.tsx
-#: src/pages/RecruitingPanel.tsx
 #: src/pages/shell/RecruitingNavigation.tsx
 msgid "Interview"
 msgstr "Interview"
+
+#: src/pages/RecruitingPanel.tsx
+msgid "Interview workflow"
+msgstr "Interview workflow"
+
+#: src/pages/RecruitingPanel.tsx
+msgid "Introduced"
+msgstr "Introduced"
 
 #: src/pages/RecruitingPanel.tsx
 msgid "Is a company deck available?"
@@ -3241,6 +3321,10 @@ msgstr "Language"
 #: src/pages/RecruitingCorrespondence.tsx
 msgid "Last checked"
 msgstr "Last checked"
+
+#: src/pages/RecruitingPanel.tsx
+msgid "Last synced"
+msgstr "Last synced"
 
 #: src/components/DesktopUpdates.tsx
 msgid "Later"
@@ -3810,6 +3894,10 @@ msgstr "Needs connection"
 msgid "Needs input"
 msgstr "Needs input"
 
+#: src/pages/RecruitingPanel.tsx
+msgid "Needs scheduling"
+msgstr "Needs scheduling"
+
 #: src/pages/ActivityList.tsx
 msgid "Needs takeover"
 msgstr "Needs takeover"
@@ -3871,6 +3959,14 @@ msgid "Next"
 msgstr "Next"
 
 #: src/pages/RecruitingPanel.tsx
+msgid "Next campaigns"
+msgstr "Next campaigns"
+
+#: src/pages/RecruitingPanel.tsx
+msgid "Next contact campaigns"
+msgstr "Next contact campaigns"
+
+#: src/pages/RecruitingPanel.tsx
 msgid "No additional search filters"
 msgstr "No additional search filters"
 
@@ -3914,6 +4010,10 @@ msgstr "No bots match"
 msgid "No chat apps linked yet."
 msgstr "No chat apps linked yet."
 
+#: src/pages/RecruitingPanel.tsx
+msgid "No contact campaign associations were returned."
+msgstr "No contact campaign associations were returned."
+
 #: src/pages/shell/bot-credentials.tsx
 msgid "No credentials saved for this bot."
 msgstr "No credentials saved for this bot."
@@ -3931,8 +4031,16 @@ msgid "No group chats yet."
 msgstr "No group chats yet."
 
 #: src/pages/RecruitingPanel.tsx
+msgid "No Important records matched this filter."
+msgstr "No Important records matched this filter."
+
+#: src/pages/RecruitingPanel.tsx
 msgid "No internal assessment"
 msgstr "No internal assessment"
+
+#: src/pages/RecruitingPanel.tsx
+msgid "No internal review was returned."
+msgstr "No internal review was returned."
 
 #: src/pages/RecruitingCorrespondence.tsx
 msgid "No invitation is created by this view. Availability is the saved observation, not a reservation. Calendar records may include other roles; their role association has not been verified."
@@ -4068,8 +4176,16 @@ msgid "No skills yet"
 msgstr "No skills yet"
 
 #: src/pages/RecruitingPanel.tsx
+msgid "No stored campaign associations were returned for this role."
+msgstr "No stored campaign associations were returned for this role."
+
+#: src/pages/RecruitingPanel.tsx
 msgid "No stored messages were returned for this contact."
 msgstr "No stored messages were returned for this contact."
+
+#: src/pages/RecruitingPanel.tsx
+msgid "No stored role-interest records were returned."
+msgstr "No stored role-interest records were returned."
 
 #: src/pages/RecruitingCorrespondence.tsx
 #: src/pages/Shell.tsx
@@ -4330,6 +4446,10 @@ msgstr "Organic"
 msgid "Organization API key"
 msgstr "Organization API key"
 
+#: src/pages/RecruitingPanel.tsx
+msgid "Organization-wide candidate-role records."
+msgstr "Organization-wide candidate-role records."
+
 #: src/pages/RecruitingCorrespondence.tsx
 msgid "Original email results saved in this role conversation."
 msgstr "Original email results saved in this role conversation."
@@ -4466,6 +4586,10 @@ msgstr "Playing…"
 msgid "Plugin"
 msgstr "Plugin"
 
+#: src/pages/RecruitingPanel.tsx
+msgid "Pooled in internal review"
+msgstr "Pooled in internal review"
+
 #: src/pages/RoutineEditor.tsx
 msgid "POST to"
 msgstr "POST to"
@@ -4523,6 +4647,18 @@ msgstr "Preview only. Ask for the complete message to read the full body."
 msgid "Previous"
 msgstr "Previous"
 
+#: src/pages/RecruitingPanel.tsx
+msgid "Previous campaigns"
+msgstr "Previous campaigns"
+
+#: src/pages/RecruitingPanel.tsx
+msgid "Previous contact campaigns"
+msgstr "Previous contact campaigns"
+
+#: src/pages/RecruitingPanel.tsx
+msgid "Primary pipeline campaign"
+msgstr "Primary pipeline campaign"
+
 #: src/pages/Board.tsx
 #: src/pages/RecruitingPanel.tsx
 msgid "Priority"
@@ -4560,6 +4696,10 @@ msgstr "Provider"
 #: src/pages/RecruitingPanel.tsx
 msgid "Provider status"
 msgstr "Provider status"
+
+#: src/pages/RecruitingPanel.tsx
+msgid "Provider status code"
+msgstr "Provider status code"
 
 #: src/pages/RecruitingPanel.tsx
 msgid "Provider task"
@@ -4733,7 +4873,6 @@ msgstr "Recruiting assistant"
 msgid "Recruiting views"
 msgstr "Recruiting views"
 
-#: src/pages/RecruitingPanel.tsx
 #: src/pages/shell/RecruitingNavigation.tsx
 msgid "Recruiting workflow"
 msgstr "Recruiting workflow"
@@ -4772,6 +4911,10 @@ msgstr "Refreshing…"
 #: src/lib/user-error.ts
 msgid "Registration is closed"
 msgstr "Registration is closed"
+
+#: src/pages/RecruitingPanel.tsx
+msgid "Rejected in internal review"
+msgstr "Rejected in internal review"
 
 #: src/components/ComputerUpdateProgress.tsx
 msgid "Release computer"
@@ -4999,6 +5142,10 @@ msgstr "Resume"
 msgid "Resume missing"
 msgstr "Resume missing"
 
+#: src/pages/RecruitingPanel.tsx
+msgid "Resume ready"
+msgstr "Resume ready"
+
 #. placeholder {0}: candidate.resumeUrl ?? t`Resume missing`
 #: src/pages/Shell.tsx
 msgid "Resume: {0}"
@@ -5042,6 +5189,10 @@ msgstr "Review in conversation"
 msgid "Review provider settings and test again."
 msgstr "Review provider settings and test again."
 
+#: src/pages/RecruitingPanel.tsx
+msgid "Review status unknown"
+msgstr "Review status unknown"
+
 #: src/pages/RecruitingCorrespondence.tsx
 msgid "Review the outreach files saved in this conversation."
 msgstr "Review the outreach files saved in this conversation."
@@ -5072,6 +5223,10 @@ msgstr "Robot"
 msgid "Role"
 msgstr "Role"
 
+#: src/pages/RecruitingPanel.tsx
+msgid "Role campaigns"
+msgstr "Role campaigns"
+
 #: src/pages/Shell.tsx
 msgid "Role conversation"
 msgstr "Role conversation"
@@ -5088,6 +5243,10 @@ msgstr "Role definition"
 #: src/pages/RecruitingPanel.tsx
 msgid "Role details needing clarification: {0}"
 msgstr "Role details needing clarification: {0}"
+
+#: src/pages/RecruitingPanel.tsx
+msgid "Role interest"
+msgstr "Role interest"
 
 #: src/pages/RecruitingPanel.tsx
 msgid "Role revision"
@@ -5314,6 +5473,10 @@ msgstr "Saving…"
 msgid "Say yes or no, or answer in a sentence."
 msgstr "Say yes or no, or answer in a sentence."
 
+#: src/pages/RecruitingPanel.tsx
+msgid "Scheduled"
+msgstr "Scheduled"
+
 #: src/pages/RecruitingCorrespondence.tsx
 msgid "Scheduling"
 msgstr "Scheduling"
@@ -5443,8 +5606,16 @@ msgid "Select a connected model"
 msgstr "Select a connected model"
 
 #: src/pages/RecruitingPanel.tsx
+msgid "Select a contact to read their stored details."
+msgstr "Select a contact to read their stored details."
+
+#: src/pages/RecruitingPanel.tsx
 msgid "Select a contact to read their stored messages."
 msgstr "Select a contact to read their stored messages."
+
+#: src/pages/RecruitingPanel.tsx
+msgid "Select a CRM role to read its campaign associations."
+msgstr "Select a CRM role to read its campaign associations."
 
 #: src/pages/RecruitingPanel.tsx
 msgid "Selected recipient unavailable"
@@ -5500,7 +5671,6 @@ msgid "Sentry alert"
 msgstr "Sentry alert"
 
 #: src/pages/RecruitingCorrespondence.tsx
-#: src/pages/RecruitingPanel.tsx
 #: src/pages/shell/RecruitingNavigation.tsx
 msgid "Sequence"
 msgstr "Sequence"
@@ -5508,6 +5678,10 @@ msgstr "Sequence"
 #: src/pages/RecruitingCorrespondence.tsx
 msgid "Sequence steps"
 msgstr "Sequence steps"
+
+#: src/pages/RecruitingPanel.tsx
+msgid "Sequence steps and delivery status are not included in these stored campaign associations."
+msgstr "Sequence steps and delivery status are not included in these stored campaign associations."
 
 #: src/pages/memory-providers/SerenitySettingsForm.tsx
 msgid "Serenity endpoint is required."
@@ -6141,8 +6315,8 @@ msgid "This role changed. Select the candidate again."
 msgstr "This role changed. Select the candidate again."
 
 #: src/pages/RecruitingPanel.tsx
-msgid "This section has not loaded corresponding CRM records. Start a recruiting conversation to continue this work."
-msgstr "This section has not loaded corresponding CRM records. Start a recruiting conversation to continue this work."
+#~ msgid "This section has not loaded corresponding CRM records. Start a recruiting conversation to continue this work."
+#~ msgstr "This section has not loaded corresponding CRM records. Start a recruiting conversation to continue this work."
 
 #: src/pages/shell/message-cards.tsx
 msgid "This server cannot be assigned without a bot."
@@ -6349,6 +6523,7 @@ msgid "Update progress"
 msgstr "Update progress"
 
 #: src/components/SoftwareUpdateSection.tsx
+#: src/pages/RecruitingPanel.tsx
 msgid "Updated"
 msgstr "Updated"
 
@@ -6479,6 +6654,10 @@ msgid "View chat"
 msgstr "View chat"
 
 #: src/pages/RecruitingPanel.tsx
+msgid "View details"
+msgstr "View details"
+
+#: src/pages/RecruitingPanel.tsx
 msgid "View messages"
 msgstr "View messages"
 
@@ -6500,6 +6679,10 @@ msgstr "Wait a moment and test again."
 #: src/pages/Shell.tsx
 msgid "Wait for this role to finish loading before saving."
 msgstr "Wait for this role to finish loading before saving."
+
+#: src/pages/RecruitingPanel.tsx
+msgid "Waiting for resume"
+msgstr "Waiting for resume"
 
 #: src/components/SoftwareUpdateSection.tsx
 msgid "Waiting for the API to come back…"
@@ -6594,6 +6777,14 @@ msgstr "Who are you looking for?"
 #: src/lib/ticket-status.ts
 msgid "Won't do"
 msgstr "Won't do"
+
+#: src/pages/RecruitingPanel.tsx
+msgid "Workflow filter"
+msgstr "Workflow filter"
+
+#: src/pages/RecruitingPanel.tsx
+msgid "Workflow status"
+msgstr "Workflow status"
 
 #: src/lib/roster-status.ts
 #: src/pages/Auth.tsx
