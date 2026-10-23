@@ -31,6 +31,8 @@ vi.mock("@rakazo/db", async (importOriginal) => {
     createRecruitingRole: vi.fn(),
     bindRecruitingRole: vi.fn(),
     getRecruitingWorkspace: vi.fn(),
+    getRecruitingCrmTarget: vi.fn(),
+    getRecruitingCrmCandidateSyncs: vi.fn(),
     reviseRecruitingRole: vi.fn(),
     listRecruitingAssessments: vi.fn(),
     listRecruitingFeedback: vi.fn(),
@@ -134,6 +136,341 @@ describe("saved recruiting correspondence", () => {
     vi.mocked(db.getRecruitingWorkspace).mockResolvedValue({ role: { id: "role" } } as never);
     return { client, prisma: client as unknown as PrismaClient, retained };
   }
+  const crmIdentity = { endpoint: "https://crm.example.test/mcp", connected: true };
+  const crmCandidate = "9dbe8bb7-8fbc-4f73-9fef-5deae2b32dc7";
+  const crmTarget = {
+    mcpServerId: "mail",
+    serverRevision: 1,
+    organizationId: email.organization_id,
+    crmRoleId: "a33ee28b-1d32-46ba-a167-2274af9be079",
+    crmClientId: "cce1292a-de54-45a4-abd9-e3f5185f8872",
+    clientLabel: "Client",
+    roleLabel: "Role",
+  };
+  function crmFixture() {
+    const message = {
+      id: "stored-message",
+      organization_id: email.organization_id,
+      candidate_id: null,
+      lead_email: "person@example.test",
+      thread_id: "original-thread",
+      direction: "received",
+      timestamp_email: email.timestamp_email,
+      campaign_id: "original-campaign",
+      from_address: "person@example.test",
+      to_address: "team@example.test",
+      subject: "Stored original",
+      body_text: "Stored full body\n".repeat(4000),
+    };
+    const data = {
+      organization_id: email.organization_id,
+      candidate_id: crmCandidate,
+      messages: [message],
+      pagination: "offset",
+      next_cursor: null as unknown,
+    };
+    const result = { structuredContent: { data } };
+    const state = fixture({ result });
+    Object.assign(state.retained.run, { id: "historical-completed-run" });
+    const call = state.retained.request[2] as unknown as {
+      route: { toolName: string };
+      args: Record<string, unknown>;
+    };
+    call.route.toolName = "list_crm_candidate_correspondence";
+    call.args = { p_org: email.organization_id, p_candidate: crmCandidate, p_limit: 10 };
+    const server = {
+      id: "mail",
+      name: "Recruiting CRM",
+      endpoint: crmIdentity.endpoint,
+      transport: "streamable_http",
+      secretId: null as string | null,
+      enabled: true,
+      revision: 1,
+      assignments: [{ botId: "main", allowAllTools: false, allowedTools: [call.route.toolName] }],
+    };
+    state.client.mcpServer.findMany.mockResolvedValue([server] as never);
+    const binding = { roleId: "role", bindingEffectId: "binding", target: crmTarget };
+    vi.mocked(db.getRecruitingCrmTarget).mockReset().mockResolvedValue(binding);
+    const sync = {
+      effectId: "import",
+      bindingEffectId: "binding",
+      target: crmTarget,
+      status: "synced",
+      receipt: { organization_id: email.organization_id, candidate_id: crmCandidate },
+    };
+    vi.mocked(db.listRecruitingCandidateSources).mockReset();
+    vi.mocked(db.getRecruitingCrmCandidateSyncs)
+      .mockReset()
+      .mockResolvedValue([sync] as never);
+    const imports = {
+      findFirst: vi.fn().mockResolvedValue({
+        effectId: "import",
+        occurrence: { candidateKey: "linkedin:/in/person" },
+      }),
+    };
+    Object.assign(state.client, { recruitingCrmImport: imports });
+    return { ...state, call, server, binding, sync, data, message, result, imports };
+  }
+  it("projects CRM full stored bodies using the historical run's current binding and exact verified candidate import", async () => {
+    const state = crmFixture();
+    const result = await api.getRecruitingCorrespondence(
+      state.prisma,
+      actor,
+      target,
+      "inbox",
+      crmIdentity,
+    );
+    expect(result).toMatchObject({
+      status: "ready",
+      partial: false,
+      connections: [{ name: "Recruiting CRM", status: "configured" }],
+      emails: [
+        { body: state.message.body_text, snippet: false, sender: state.message.from_address },
+      ],
+    });
+    expect(result.emails[0]!.body.length).toBeGreaterThan(50_000);
+    expect(db.getRecruitingCrmTarget).toHaveBeenCalledWith(state.prisma, actor, {
+      runId: "historical-completed-run",
+      roleId: "role",
+    });
+    expect(state.imports.findFirst.mock.calls[0]![0].where).toMatchObject({
+      bindingEffectId: "binding",
+      occurrence: { roleId: "role" },
+      effect: { spaceId: actor.spaceId, run: { userId: actor.userId, spaceId: actor.spaceId } },
+    });
+    expect(state.imports.findFirst.mock.calls[0]![0].where.effect.AND).toContainEqual({
+      result: { path: ["structuredContent", "data", "candidate_id"], equals: crmCandidate },
+    });
+    expect(db.getRecruitingCrmCandidateSyncs).toHaveBeenCalledWith(state.prisma, actor, {
+      roleId: "role",
+      effectIds: ["import"],
+    });
+    expect(db.listRecruitingCandidateSources).not.toHaveBeenCalled();
+    expect(state.client.thread.findFirst.mock.calls[0]![0].where).toMatchObject({
+      activeRecruitingRole: { crmBindingEffectId: "binding" },
+    });
+    expect(JSON.stringify(result)).not.toMatch(/original-thread|original-campaign|linkedin:/);
+  });
+  it("rejects a CRM display if the role or binding changes before the final ownership fence", async () => {
+    const state = crmFixture();
+    state.client.thread.findFirst.mockResolvedValue(null);
+    await expect(
+      api.getRecruitingCorrespondence(state.prisma, actor, target, "inbox", crmIdentity),
+    ).rejects.toMatchObject({ code: "NOT_FOUND" });
+    expect(state.client.thread.findFirst).toHaveBeenCalledWith({
+      where: {
+        id: "role-thread",
+        userId: actor.userId,
+        spaceId: actor.spaceId,
+        activeRecruitingRoleId: "role",
+        activeRecruitingRole: { crmBindingEffectId: "binding" },
+      },
+      select: { id: true },
+    });
+  });
+  it("preserves the native CRM source ownership rejection without returning a saved body", async () => {
+    const state = crmFixture();
+    vi.mocked(db.getRecruitingCrmCandidateSyncs).mockRejectedValueOnce(new IsolationError());
+    await expect(
+      api.getRecruitingCorrespondence(state.prisma, actor, target, "inbox", crmIdentity),
+    ).rejects.toMatchObject({ code: "NOT_FOUND" });
+  });
+  it.each(["endpoint", "transport", "secret", "assignment", "disabled", "revision"])(
+    "does not expose CRM bodies when the current %s boundary differs",
+    async (boundary) => {
+      const state = crmFixture();
+      if (boundary === "endpoint") state.server.endpoint = "https://unrelated.example.test/mcp";
+      if (boundary === "transport") state.server.transport = "sse";
+      if (boundary === "secret") state.server.secretId = "another-identity";
+      if (boundary === "assignment") state.server.assignments = [];
+      if (boundary === "disabled") state.server.enabled = false;
+      if (boundary === "revision") state.server.revision = 2;
+      const result = await api.getRecruitingCorrespondence(
+        state.prisma,
+        actor,
+        target,
+        "inbox",
+        crmIdentity,
+      );
+      expect(result.emails).toEqual([]);
+      expect(db.listRecruitingCandidateSources).not.toHaveBeenCalled();
+      expect(db.getRecruitingCrmCandidateSyncs).not.toHaveBeenCalled();
+    },
+  );
+  it("describes reconnect honestly while retaining the caller's authorized saved CRM observation", async () => {
+    const state = crmFixture();
+    const result = await api.getRecruitingCorrespondence(state.prisma, actor, target, "inbox", {
+      ...crmIdentity,
+      connected: false,
+    });
+    expect(result.connections[0]!.status).toBe("needs_connection");
+    expect(result.emails[0]!.body).toBe(state.message.body_text);
+  });
+  it.each(["organization", "candidate", "binding", "server", "status", "missing"])(
+    "rejects a CRM import whose verified %s does not match the current binding",
+    async (mismatch) => {
+      const state = crmFixture();
+      if (mismatch === "organization") state.sync.receipt.organization_id = crmCandidate;
+      if (mismatch === "candidate") state.sync.receipt.candidate_id = email.organization_id;
+      if (mismatch === "binding") state.sync.bindingEffectId = "previous-binding";
+      if (mismatch === "server") state.sync.target = { ...crmTarget, mcpServerId: "another" };
+      if (mismatch === "status") state.sync.status = "unknown";
+      if (mismatch === "missing") state.imports.findFirst.mockResolvedValue(null);
+      const result = await api.getRecruitingCorrespondence(
+        state.prisma,
+        actor,
+        target,
+        "inbox",
+        crmIdentity,
+      );
+      expect(result).toMatchObject({ status: "unsupported", emails: [] });
+    },
+  );
+  it("checks multiple CRM candidates from one provider page in one exact-receipt batch", async () => {
+    const state = crmFixture();
+    const secondCandidate = "8c680339-a85d-4aa5-87fe-230268e079a7";
+    const second = structuredClone(state.retained);
+    second.id = "second-effect";
+    (second.request[2] as unknown as { args: Record<string, unknown> }).args.p_candidate =
+      secondCandidate;
+    const secondData = {
+      ...state.data,
+      candidate_id: secondCandidate,
+      messages: [{ ...state.message, id: "second-message", body_text: "Second original" }],
+    };
+    state.client.externalEffect.findMany
+      .mockReset()
+      .mockResolvedValueOnce([state.retained, second])
+      .mockResolvedValueOnce([
+        { id: state.retained.id, result: state.result },
+        { id: second.id, result: { structuredContent: { data: secondData } } },
+      ]);
+    state.imports.findFirst
+      .mockResolvedValueOnce({ effectId: "import", occurrence: { candidateKey: "first-person" } })
+      .mockResolvedValueOnce({
+        effectId: "second-import",
+        occurrence: { candidateKey: "second-person" },
+      });
+    vi.mocked(db.getRecruitingCrmCandidateSyncs).mockResolvedValue([
+      { ...state.sync, sourceEffectId: "shared-provider-page" },
+      {
+        ...state.sync,
+        effectId: "second-import",
+        sourceEffectId: "shared-provider-page",
+        receipt: { ...state.sync.receipt, candidate_id: secondCandidate },
+      },
+    ] as never);
+    const result = await api.getRecruitingCorrespondence(
+      state.prisma,
+      actor,
+      target,
+      "inbox",
+      crmIdentity,
+    );
+    expect(result.status).toBe("ready");
+    expect(result.emails).toHaveLength(2);
+    expect(db.getRecruitingCrmCandidateSyncs).toHaveBeenCalledExactlyOnceWith(state.prisma, actor, {
+      roleId: "role",
+      effectIds: ["import", "second-import"],
+    });
+    expect(db.listRecruitingCandidateSources).not.toHaveBeenCalled();
+    expect(db.getRecruitingCrmTarget).toHaveBeenCalledTimes(1);
+  });
+  it.each(["p_org", "p_candidate"])(
+    "fails closed on a missing CRM %s before semantic deduplication",
+    async (field) => {
+      const state = crmFixture();
+      delete state.call.args[field];
+      state.retained.status = "failed";
+      expect(
+        await api.getRecruitingCorrespondence(state.prisma, actor, target, "inbox", crmIdentity),
+      ).toMatchObject({ status: "unsupported", emails: [] });
+      expect(state.imports.findFirst).not.toHaveBeenCalled();
+      expect(db.getRecruitingCrmCandidateSyncs).not.toHaveBeenCalled();
+    },
+  );
+  it.each(["envelope-org", "envelope-candidate", "row-org", "row-candidate", "body", "cursor"])(
+    "does not project a malformed CRM %s",
+    async (mismatch) => {
+      const state = crmFixture();
+      if (mismatch === "envelope-org") state.data.organization_id = crmCandidate;
+      if (mismatch === "envelope-candidate") state.data.candidate_id = email.organization_id;
+      if (mismatch === "row-org") state.message.organization_id = crmCandidate;
+      if (mismatch === "row-candidate")
+        Object.assign(state.message, { candidate_id: email.organization_id });
+      if (mismatch === "body") Object.assign(state.message, { body_text: 7 });
+      if (mismatch === "cursor")
+        state.data.next_cursor = {
+          p_org: crmCandidate,
+          p_candidate: crmCandidate,
+          linked_offset: 1,
+          unlinked_offset: 0,
+        };
+      expect(
+        await api.getRecruitingCorrespondence(state.prisma, actor, target, "inbox", crmIdentity),
+      ).toMatchObject({ status: "unsupported", emails: [] });
+      expect(state.imports.findFirst).not.toHaveBeenCalled();
+      expect(db.getRecruitingCrmCandidateSyncs).not.toHaveBeenCalled();
+    },
+  );
+  it.each(["more", "last", "empty", "failed", "failed-effect"])(
+    "uses the newest CRM candidate page, preserving %s coverage and failure over older bodies",
+    async (page) => {
+      const state = crmFixture();
+      const cursor = {
+        p_org: email.organization_id,
+        p_candidate: crmCandidate,
+        linked_offset: 1,
+        unlinked_offset: 0,
+      };
+      if (page === "more") state.data.next_cursor = cursor;
+      else state.call.args.p_cursor = cursor;
+      if (page === "empty") state.data.messages = [];
+      if (page === "failed") Object.assign(state.result, { isError: true });
+      if (page === "failed-effect") state.retained.status = "failed";
+      const old = structuredClone(state.retained);
+      old.id = "old-effect";
+      old.updatedAt = new Date("2026-10-21T00:00:00Z");
+      (old.request[2] as unknown as { args: unknown }).args = {
+        p_org: email.organization_id,
+        p_candidate: crmCandidate,
+        p_limit: 1,
+      };
+      state.client.externalEffect.findMany
+        .mockReset()
+        .mockResolvedValueOnce([state.retained, old])
+        .mockResolvedValueOnce([
+          { id: "effect", result: state.result },
+          {
+            id: old.id,
+            result: {
+              structuredContent: {
+                data: {
+                  ...state.data,
+                  messages: [{ ...state.message, body_text: "stale original" }],
+                },
+              },
+            },
+          },
+        ]);
+      const result = await api.getRecruitingCorrespondence(
+        state.prisma,
+        actor,
+        target,
+        "inbox",
+        crmIdentity,
+      );
+      expect(result.status).toBe(
+        page.startsWith("failed") ? "failed" : page === "empty" ? "empty" : "ready",
+      );
+      expect(result.partial).toBe(true);
+      expect(JSON.stringify(result)).not.toContain("stale original");
+      if (page === "empty" || page.startsWith("failed")) {
+        expect(state.imports.findFirst).not.toHaveBeenCalled();
+        expect(db.getRecruitingCrmCandidateSyncs).not.toHaveBeenCalled();
+      }
+    },
+  );
   it("projects the real native read envelope and allowlisted mail fields under current actor/thread/role permissions", async () => {
     const { client, prisma } = fixture();
     const result = await api.getRecruitingCorrespondence(prisma, actor, target, "inbox");
