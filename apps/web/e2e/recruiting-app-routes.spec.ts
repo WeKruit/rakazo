@@ -444,3 +444,52 @@ test("Overview drilldowns preserve the exact role and evidence tab", async ({ pa
     await expect(page).toHaveURL(`/app/g/${appGroupId}?view=${destination}`);
   }
 });
+
+for (const width of [1440, 390]) {
+  test(`actual observed Inbox metadata, campaign details and booked Overview at ${width}px`, async ({
+    page,
+  }, testInfo) => {
+    await page.setViewportSize({ width, height: width === 390 ? 844 : 900 });
+    await page.clock.setFixedTime(new Date("2026-10-23T12:00:00Z"));
+    const fixture = await mockRecruitingApp(page, { calendarStatus: "accepted" });
+    await openRoute(page, "inbox");
+    const inbox = page.getByRole("region", { name: "Inbox", exact: true });
+    await expect(
+      inbox.getByText("Loaded observations: 4 emails · 1 unread · 1 read status unknown", {
+        exact: true,
+      }),
+    ).toBeVisible();
+    await inbox.getByRole("button", { name: "Unread", exact: true }).click();
+    const rail = inbox.getByRole("region", { name: "Candidate conversations", exact: true });
+    await expect(rail.getByRole("button", { name: "Blake Sample", exact: true })).toHaveCount(0);
+    await rail.getByRole("button", { name: "Avery Example", exact: true }).click();
+    const metadata = inbox.getByRole("region", { name: "Observed email metadata", exact: true });
+    await expect(metadata).toContainText("Observed unread");
+    await expect(metadata).toContainText("Step · 2");
+    await expect(metadata.locator("time")).toHaveAttribute("datetime", checkedAt);
+    await metadata.scrollIntoViewIfNeeded();
+    await capture(page, testInfo, `app-inbox-observed-unread-${width}`);
+    await openRoute(page, "sequence");
+    const schedule = page
+      .getByRole("heading", { name: "Sending schedule", exact: true })
+      .locator("..");
+    await expect(schedule).toContainText("Business hours");
+    await expect(schedule).toContainText("09:00 – 17:00 · America/New_York");
+    await expect(schedule).toContainText("Days unavailable.");
+    const steps = page.getByRole("heading", { name: "Email steps", exact: true }).locator("..");
+    await expect(steps).toContainText("Delay: 2 days");
+    await expect(steps).toContainText("Platform introduction");
+    await expect(steps).toContainText("Observed introduction copy from the selected campaign.");
+    await schedule.scrollIntoViewIfNeeded();
+    await capture(page, testInfo, `app-sequence-observed-details-${width}`);
+    await openRoute(page, "home");
+    const bookings = page.getByRole("list", { name: "Upcoming recorded bookings", exact: true });
+    await expect(bookings.getByRole("button")).toHaveCount(1);
+    await expect(bookings).toContainText("Avery · Platform interview");
+    await bookings.scrollIntoViewIfNeeded();
+    await capture(page, testInfo, `app-overview-recorded-booking-${width}`);
+    await bookings.getByRole("button").click();
+    await expect(page).toHaveURL(`/app/g/${appGroupId}?view=interview`);
+    expect(fixture.unknown).toEqual([]);
+  });
+}

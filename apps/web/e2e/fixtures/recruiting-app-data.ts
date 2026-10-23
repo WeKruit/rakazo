@@ -365,7 +365,12 @@ const bootstrap: AppBootstrap = {
 
 export async function mockRecruitingApp(
   page: Page,
-  options: { emptyCalendar?: boolean; emptyMail?: boolean; multipleCampaigns?: boolean } = {},
+  options: {
+    emptyCalendar?: boolean;
+    emptyMail?: boolean;
+    multipleCampaigns?: boolean;
+    calendarStatus?: "accepted" | "confirmed";
+  } = {},
 ) {
   const unknown: string[] = [];
   const calls: { method: string; input: Record<string, unknown> }[] = [];
@@ -563,6 +568,34 @@ export async function mockRecruitingApp(
                 eaccount: "recruiter@example.test",
                 status: 1,
                 stopOnReply: true,
+                observedDetails: {
+                  schedules: [
+                    {
+                      name: "Business hours",
+                      from: "09:00",
+                      to: "17:00",
+                      timezone: "America/New_York",
+                      days: { "1": true },
+                    },
+                  ],
+                  sequences: [
+                    {
+                      steps: [
+                        {
+                          type: "email",
+                          delay: 2,
+                          delayUnit: "days",
+                          variants: [
+                            {
+                              subject: "Platform introduction",
+                              body: "Observed introduction copy from the selected campaign.",
+                            },
+                          ],
+                        },
+                      ],
+                    },
+                  ],
+                },
               },
               leads: [
                 {
@@ -587,6 +620,9 @@ export async function mockRecruitingApp(
               sourceId: source.serverId,
               sourceName: "CRM",
               savedRead: null,
+              unread: email.id === "reply-avery" ? true : email.id === "mail-blake" ? null : false,
+              step: email.id === "reply-avery" ? "2" : null,
+              observedAt: checkedAt,
               snippet: email.partial,
               url: null,
               providerThreadId: email.threadId,
@@ -616,7 +652,7 @@ export async function mockRecruitingApp(
                 start: "2026-10-23T14:00:00Z",
                 end: "2026-10-23T14:45:00Z",
                 timeZone: "America/New_York",
-                status: "confirmed",
+                status: options.calendarStatus ?? "confirmed",
                 attendees: [people[0]!.email, "recruiter@example.test"],
                 location: "Video call",
                 url: "https://calendar.example.test/event/fixture",
