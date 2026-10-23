@@ -1,5 +1,7 @@
 # Scheduling interaction and exact drilldown increment
 
+> Required correction: [confirmation freshness](scheduling-confirmation-freshness.md). The immutable `eb216182` checkpoint could reuse an accepted booking read after a later mutation; use the corrective artifact and its exact manifest before release. Earlier test counts remain historical evidence.
+
 This increment continues the immutable `96a45a0a643b07595ff23fc5211b4016162fb201` review checkpoint. It implements the three explicitly requested code gaps for the supported existing native capabilities. It is not a claim that all 59 requirements or live acceptance are complete. No push, PR, merge, deployment, production access, permission grant, real synchronization, email or calendar action was performed.
 
 Code checkpoint: `91e85d2dc17d048e9da53f80ce5d59fa263e1495`. The later documentation-only commit is pinned separately in the transfer manifest.
