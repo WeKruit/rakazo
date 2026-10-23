@@ -1035,6 +1035,10 @@ msgstr "Browser"
 msgid "Built-in"
 msgstr "Built-in"
 
+#: src/pages/recruiting/HomeDashboard.tsx
+msgid "By week found"
+msgstr "By week found"
+
 #: src/pages/recruiting/InterviewTab.tsx
 msgid "Calendar"
 msgstr "Calendar"
@@ -1749,6 +1753,10 @@ msgstr "Contact details have not been checked yet."
 msgid "Contact status"
 msgstr "Contact status"
 
+#: src/pages/recruiting/HomeDashboard.tsx
+msgid "Contacted"
+msgstr "Contacted"
+
 #: src/pages/recruiting/ContactsTab.tsx
 #: src/pages/RecruitingPanel.tsx
 #: src/pages/shell/RecruitingNavigation.tsx
@@ -2153,9 +2161,17 @@ msgstr "Could not load update status"
 msgid "Could not load voice settings"
 msgstr "Could not load voice settings"
 
+#: src/pages/recruiting/HomeDashboard.tsx
+msgid "Could not load your overview."
+msgstr "Could not load your overview."
+
 #: src/pages/Onboarding.tsx
 msgid "Could not load your setup"
 msgstr "Could not load your setup"
+
+#: src/pages/recruiting/HomeDashboard.tsx
+msgid "Could not load your tasks."
+msgstr "Could not load your tasks."
 
 #: src/pages/BillingSettingsPanel.tsx
 #: src/pages/Paywall.tsx
@@ -2363,6 +2379,10 @@ msgstr "Could not update reaction"
 #: src/pages/MemorySettingsOverlay.tsx
 msgid "Could not update the default memory scope"
 msgstr "Could not update the default memory scope"
+
+#: src/pages/recruiting/HomeDashboard.tsx
+msgid "Could not update this task. Try again."
+msgstr "Could not update this task. Try again."
 
 #: src/components/computer/FilesApp.tsx
 msgid "Could not upload file"
@@ -2789,6 +2809,7 @@ msgstr "Don’t have an account?"
 
 #: src/lib/ticket-status.ts
 #: src/pages/ActivityList.tsx
+#: src/pages/recruiting/HomeDashboard.tsx
 #: src/pages/recruiting/TasksTab.tsx
 #: src/pages/shell/avatar-studio-popover.tsx
 msgid "Done"
@@ -3343,6 +3364,14 @@ msgstr "Header value"
 msgid "Hear a sample"
 msgstr "Hear a sample"
 
+#: src/pages/recruiting/HomeDashboard.tsx
+msgid "Hello"
+msgstr "Hello"
+
+#: src/pages/recruiting/HomeDashboard.tsx
+msgid "Hello, {name}"
+msgstr "Hello, {name}"
+
 #: src/pages/RecruitingCorrespondence.tsx
 msgid "Help me revise the saved outreach drafts for this role. Keep the changes unsent."
 msgstr "Help me revise the saved outreach drafts for this role. Keep the changes unsent."
@@ -3523,6 +3552,7 @@ msgid "Interest"
 msgstr "Interest"
 
 #: src/pages/recruiting/ActivityTab.tsx
+#: src/pages/recruiting/HomeDashboard.tsx
 #: src/pages/RecruitingPanel.tsx
 msgid "Interested"
 msgstr "Interested"
@@ -3827,6 +3857,7 @@ msgstr "Loading voice providers…"
 #: src/pages/ModelBackupsSettings.tsx
 #: src/pages/Onboarding.tsx
 #: src/pages/PeerMessagesOverlay.tsx
+#: src/pages/recruiting/HomeDashboard.tsx
 #: src/pages/recruiting/shared.tsx
 #: src/pages/RecruitingPanel.tsx
 #: src/pages/RoutineRunHistory.tsx
@@ -3910,6 +3941,11 @@ msgstr "Manual"
 #: src/pages/PluginsOverlay.tsx
 msgid "Manual setup required"
 msgstr "Manual setup required"
+
+#. placeholder {0}: reminder.title
+#: src/pages/recruiting/HomeDashboard.tsx
+msgid "Mark {0} done"
+msgstr "Mark {0} done"
 
 #: src/pages/BotContextMenu.tsx
 msgid "Mark as Read"
@@ -4470,6 +4506,10 @@ msgstr "No model catalog is available."
 msgid "No models listed."
 msgstr "No models listed."
 
+#: src/pages/recruiting/HomeDashboard.tsx
+msgid "No open tasks."
+msgstr "No open tasks."
+
 #: src/pages/RecruitingCorrespondence.tsx
 msgid "No outreach files loaded"
 msgstr "No outreach files loaded"
@@ -4502,6 +4542,10 @@ msgstr "No role linked"
 #: src/pages/RecruitingPanel.tsx
 msgid "No role linked yet. Describe the role in this conversation."
 msgstr "No role linked yet. Describe the role in this conversation."
+
+#: src/pages/recruiting/HomeDashboard.tsx
+msgid "No roles yet."
+msgstr "No roles yet."
 
 #: src/pages/ActivityList.tsx
 msgid "No runs match these filters."
@@ -4563,6 +4607,10 @@ msgstr "No shortlisted candidates match these filters."
 #: src/pages/RecruitingPanel.tsx
 msgid "No shortlisted candidates yet."
 msgstr "No shortlisted candidates yet."
+
+#: src/pages/recruiting/HomeDashboard.tsx
+msgid "No shortlisted profiles yet."
+msgstr "No shortlisted profiles yet."
 
 #: src/pages/KnowledgeSection.tsx
 msgid "No skills yet"
@@ -4785,6 +4833,7 @@ msgstr "Open external link?"
 msgid "Open in full window"
 msgstr "Open in full window"
 
+#: src/pages/recruiting/HomeDashboard.tsx
 #: src/pages/Shell.tsx
 msgid "Open navigation"
 msgstr "Open navigation"
@@ -4928,6 +4977,10 @@ msgstr "Output"
 msgid "Outreach"
 msgstr "Outreach"
 
+#: src/pages/recruiting/HomeDashboard.tsx
+msgid "Outreach conversion"
+msgstr "Outreach conversion"
+
 #: src/pages/RecruitingCorrespondence.tsx
 msgid "Outreach file review"
 msgstr "Outreach file review"
@@ -4938,10 +4991,18 @@ msgstr "Outreach file review"
 msgid "Outreach status"
 msgstr "Outreach status"
 
+#: src/pages/recruiting/HomeDashboard.tsx
+msgid "Overdue"
+msgstr "Overdue"
+
 #. placeholder {0}: overdue.length
 #: src/pages/recruiting/TasksTab.tsx
 msgid "Overdue ({0})"
 msgstr "Overdue ({0})"
+
+#: src/pages/recruiting/HomeDashboard.tsx
+msgid "Overview"
+msgstr "Overview"
 
 #: src/pages/Board.tsx
 msgid "Owner"
@@ -5288,6 +5349,10 @@ msgstr "Recent"
 msgid "Recently discovered"
 msgstr "Recently discovered"
 
+#: src/pages/recruiting/HomeDashboard.tsx
+msgid "Recents"
+msgstr "Recents"
+
 #: src/pages/RecruitingCorrespondence.tsx
 msgid "Recipients"
 msgstr "Recipients"
@@ -5551,6 +5616,7 @@ msgstr "Replace value"
 msgid "Replaced"
 msgstr "Replaced"
 
+#: src/pages/recruiting/HomeDashboard.tsx
 #: src/pages/recruiting/InboxTab.tsx
 msgid "Replied"
 msgstr "Replied"
@@ -6406,6 +6472,7 @@ msgstr "Shortlist people from search results to keep them here."
 
 #: src/pages/recruiting/ContactsTab.tsx
 #: src/pages/recruiting/DetailPanel.tsx
+#: src/pages/recruiting/HomeDashboard.tsx
 #: src/pages/RecruitingPanel.tsx
 msgid "Shortlisted"
 msgstr "Shortlisted"
@@ -6413,6 +6480,10 @@ msgstr "Shortlisted"
 #: src/pages/RecruitingPanel.tsx
 msgid "Shortlisted only"
 msgstr "Shortlisted only"
+
+#: src/pages/recruiting/HomeDashboard.tsx
+msgid "Shortlisted profiles"
+msgstr "Shortlisted profiles"
 
 #: src/pages/Shell.tsx
 msgid "Show bots"
@@ -6534,6 +6605,10 @@ msgstr "Slack not enabled"
 #: src/components/SoftwareUpdateSection.tsx
 msgid "Software update"
 msgstr "Software update"
+
+#: src/pages/recruiting/HomeDashboard.tsx
+msgid "Some roles could not be read."
+msgstr "Some roles could not be read."
 
 #: src/pages/recruiting/ContactsTab.tsx
 msgid "Some saved contact details could not be displayed."
@@ -7420,6 +7495,11 @@ msgstr "Website login"
 msgid "week"
 msgstr "week"
 
+#. placeholder {0}: week.count
+#: src/pages/recruiting/HomeDashboard.tsx
+msgid "Week of {label}: {0}"
+msgstr "Week of {label}: {0}"
+
 #: src/pages/RoutineEditor.tsx
 #: src/pages/RoutineSchedule.tsx
 msgid "Weekdays"
@@ -7555,3 +7635,7 @@ msgstr "Your name"
 #: src/pages/Welcome.tsx
 msgid "Your recruiting workspace."
 msgstr "Your recruiting workspace."
+
+#: src/pages/recruiting/HomeDashboard.tsx
+msgid "Your tasks"
+msgstr "Your tasks"

@@ -25,6 +25,7 @@ import type { ContextMenuPosition } from "../BotContextMenu";
 import type { CrmBrowseSelection } from "../RecruitingPanel";
 
 export type RecruitingWorkspaceView =
+  | "home"
   | "conversation"
   | "results"
   | "brief"
@@ -233,7 +234,8 @@ export function RecruitingNavigation({
           type="button"
           className="hire-brand"
           aria-label={t`WeKruit home`}
-          onClick={() => onView("results")}
+          aria-current={view === "home" ? "page" : undefined}
+          onClick={() => onView("home")}
         >
           <img className="hire-brand-logo" src="/wekruit-logo.png" alt="" aria-hidden="true" />
           <span className="text-start">
