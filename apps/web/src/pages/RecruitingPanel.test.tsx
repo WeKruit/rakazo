@@ -310,6 +310,279 @@ it("restarts an invalidated pending CRM read using the existing refresh signal",
   expect(view.container.textContent).toContain("No CRM records matched");
 });
 
+it("shows Important role rows, sourced interest, internal notes and stored campaigns without inventing bookings or sequence steps", async () => {
+  const selection = {
+    serverId: "crm-source",
+    serverRevision: 2,
+    organizationId: "org-1",
+    crmRoleId: "crm-role",
+  };
+  const source = { ...selection, name: "CRM" };
+  const checkedAt = "2026-10-22T00:00:00Z";
+  const person = {
+    candidateId: "crm-person",
+    name: "Existing person",
+    email: null,
+    phone: null,
+    linkedinUrl: null,
+    location: null,
+    title: "Engineer",
+    stage: "Passed",
+    contactStatus: "",
+    outreachStatus: "",
+    roleSpecId: null,
+    legacyClientLabel: "Client",
+    legacyRoleLabel: "Stored role",
+  };
+  const tracking = {
+    roleKey: "tracking-a",
+    clientLabel: "Client",
+    roleLabel: "Stored role",
+    highSignal: true,
+    workflowStatus: "needs_scheduling",
+    highSignalAt: checkedAt,
+    statusChangedAt: checkedAt,
+    updatedAt: checkedAt,
+  };
+  const campaign = {
+    id: "campaign-a",
+    name: "Stored campaign",
+    status: 2,
+    crmRoleId: "crm-role",
+    clientId: "client",
+    syncedAt: checkedAt,
+  };
+  api.crmData.mockImplementation(async (input) => {
+    const common = { operation: input.operation, source, checkedAt };
+    if (input.operation === "important")
+      return {
+        ...common,
+        scope: "organization_candidate_roles",
+        items: [
+          { ...person, ...tracking },
+          {
+            ...person,
+            ...tracking,
+            roleKey: "tracking-b",
+            roleLabel: "Another role",
+            workflowStatus: "scheduled",
+          },
+        ],
+        total: 2,
+        offset: 0,
+        nextOffset: null,
+      };
+    if (input.operation === "candidateDetails")
+      return {
+        ...common,
+        scope: "stored_candidate_details",
+        candidateId: input.candidateId,
+        review: {
+          id: "review",
+          crmRoleId: null,
+          stage: "Reviewed",
+          reviewed: true,
+          result: "approved",
+          notes: "Internal review note",
+          updatedAt: checkedAt,
+          candidateName: person.name,
+          roleTitle: "Stored role",
+        },
+        roleTracking: [tracking],
+        roleInterests: [
+          {
+            roleKey: "tracking-a",
+            clientLabel: "Client",
+            roleLabel: "Stored role",
+            interest: "declined",
+            source: "manual",
+          },
+          {
+            roleKey: "tracking-b",
+            clientLabel: "Client",
+            roleLabel: "Another role",
+            interest: "interested",
+            source: "ai",
+          },
+          {
+            roleKey: "tracking-c",
+            clientLabel: "Client",
+            roleLabel: "Third role",
+            interest: "unknown",
+            source: "instantly",
+          },
+        ],
+        campaignAssociations: {
+          leadCampaigns: [{ leadId: "private-lead", campaignId: campaign.id, campaign }],
+          pipelineCampaign: null,
+          offset: 0,
+          nextOffset: null,
+        },
+      };
+    if (input.operation === "roleCampaigns")
+      return {
+        ...common,
+        scope: "stored_role_campaigns",
+        crmRoleId: "crm-role",
+        items: [
+          {
+            id: input.offset ? "campaign-b" : campaign.id,
+            name: input.offset ? "Next stored campaign" : campaign.name,
+            status: campaign.status,
+            syncedAt: checkedAt,
+          },
+        ],
+        offset: input.offset ?? 0,
+        nextOffset: input.offset ? null : 30,
+      };
+    return {
+      ...common,
+      scope: "legacy_role_labels",
+      selectedRole: {
+        crmRoleId: "crm-role",
+        clientId: "client",
+        clientLabel: "Client",
+        roleLabel: "Stored role",
+        summary: null,
+      },
+      items: [person],
+      total: 1,
+      offset: 0,
+      nextOffset: null,
+    };
+  });
+  const onSelectCandidate = vi.fn();
+  const browse = { selection, onSelectCandidate, view: "shortlist" as const };
+  const options = { groupId: "group-1", crmBrowse: browse };
+  const view = await mounted("thread-1", undefined, false, undefined, options);
+  expect(api.crmData).toHaveBeenCalledWith(
+    expect.objectContaining({ operation: "important", status: "high_signal" }),
+  );
+  expect(view.container.querySelectorAll("tbody tr")).toHaveLength(2);
+  expect(view.container.textContent).toContain("Another role");
+  expect(view.container.textContent).not.toContain("Passed");
+  expect(view.container.textContent).toContain("2 candidate-role records");
+  await view.render("thread-1", 0, false, undefined, {
+    ...options,
+    crmBrowse: { ...browse, view: "interview" },
+  });
+  expect(api.crmData).toHaveBeenCalledWith(
+    expect.objectContaining({ operation: "important", status: "needs_scheduling" }),
+  );
+  expect(view.container.textContent).toContain("Needs scheduling");
+  expect(view.container.textContent).toContain("Scheduled");
+  expect(view.container.textContent).toContain("Calendar booking details are not included");
+  await view.render("thread-1", 0, false, undefined, {
+    ...options,
+    crmBrowse: { ...browse, view: "feedback", candidateId: "crm-person" },
+  });
+  expect(view.container.textContent).toContain("Internal review note");
+  expect(view.container.textContent).toContain("Human-entered");
+  expect(view.container.textContent).toContain("AI interpretation");
+  expect(view.container.textContent).toContain("Instantly");
+  expect(view.container.textContent).not.toContain("Client approved");
+  await view.click("View details");
+  expect(onSelectCandidate).toHaveBeenCalledWith("crm-person", "feedback");
+  await view.render("thread-1", 0, false, undefined, {
+    ...options,
+    crmBrowse: { ...browse, view: "sequence", candidateId: "crm-person" },
+  });
+  expect(view.container.textContent).toContain("Stored campaign");
+  expect(view.container.textContent).toContain(
+    "Sequence steps and delivery status are not included",
+  );
+  expect(view.container.textContent).not.toContain("private-lead");
+  await view.click("Next campaigns");
+  expect(api.crmData).toHaveBeenCalledWith(
+    expect.objectContaining({ operation: "roleCampaigns", crmRoleId: "crm-role", offset: 30 }),
+  );
+  expect(view.container.textContent).toContain("Next stored campaign");
+  expect(api.getWorkspace).not.toHaveBeenCalled();
+  expect(api.setCandidateShortlist).not.toHaveBeenCalled();
+});
+
+it("keeps CRM detail reads scoped to the selected person and rejects a mismatched detail response", async () => {
+  const selection = {
+    serverId: "crm-source",
+    serverRevision: 2,
+    organizationId: "org-1",
+    crmRoleId: "crm-role",
+  };
+  const common = { source: { ...selection, name: "CRM" }, checkedAt: "2026-10-22T00:00:00Z" };
+  const detail = (candidateId: string, notes: string) => ({
+    ...common,
+    operation: "candidateDetails",
+    scope: "stored_candidate_details",
+    candidateId,
+    review: {
+      id: "review",
+      crmRoleId: null,
+      stage: null,
+      reviewed: true,
+      result: null,
+      notes,
+      updatedAt: common.checkedAt,
+      candidateName: candidateId,
+      roleTitle: null,
+    },
+    roleInterests: [],
+    roleTracking: [],
+    campaignAssociations: {
+      leadCampaigns: [],
+      pipelineCampaign: null,
+      offset: 0,
+      nextOffset: null,
+    },
+  });
+  let finish!: (value: unknown) => void;
+  api.crmData.mockImplementation(async (input) => {
+    if (input.operation === "candidateDetails") {
+      if (input.candidateId === "old-person")
+        return new Promise((resolve) => {
+          finish = resolve;
+        });
+      return detail("current-person", "Current private review");
+    }
+    return {
+      ...common,
+      operation: "candidates",
+      scope: "legacy_role_labels",
+      selectedRole: {
+        crmRoleId: "crm-role",
+        clientId: "client",
+        clientLabel: "Client",
+        roleLabel: "Role",
+        summary: null,
+      },
+      items: [],
+      total: 0,
+      offset: 0,
+      nextOffset: null,
+    };
+  });
+  const browse = {
+    selection,
+    view: "feedback" as const,
+    candidateId: "old-person",
+    onSelectCandidate: vi.fn(),
+  };
+  const options = { groupId: "group-1", crmBrowse: browse };
+  const view = await mounted("thread-1", undefined, false, undefined, options);
+  await view.render("thread-1", 0, false, undefined, {
+    ...options,
+    crmBrowse: { ...browse, candidateId: "current-person" },
+  });
+  await act(async () => finish(detail("old-person", "Late private review")));
+  expect(view.container.textContent).toContain("Current private review");
+  expect(view.container.textContent).not.toContain("Late private review");
+  await view.render("thread-1", 0, false, undefined, {
+    ...options,
+    crmBrowse: { ...browse, candidateId: "other-person" },
+  });
+  expect(view.container.textContent).toContain("Could not load CRM records");
+  expect(view.container.textContent).not.toContain("Current private review");
+});
+
 function rawResultsFixture(actionId = "raw-action", name = "Synthetic raw candidate") {
   const rows = [{ name, label: "Strong Match", _sources: { s1: "https://example.test/profile" } }];
   const snapshot = {

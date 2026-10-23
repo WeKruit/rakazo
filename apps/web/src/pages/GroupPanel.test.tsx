@@ -195,6 +195,45 @@ it("keeps the typed recruiting request when native creation fails and retries th
   expect(onCreate.mock.calls[1]?.[0].description).toBe("Find engineers with robotics experience.");
 });
 
+it("lets the recruiter edit a supplied job description before explicitly starting the native role", async () => {
+  const onCreate = vi.fn().mockResolvedValue(undefined);
+  const bots = [
+    { id: "coordinator", name: "Main", archivedAt: null },
+    { id: "researcher", name: "Sourcer", archivedAt: null },
+  ] as Bot[];
+  const renderForm = (initialDescription: string) =>
+    act(async () =>
+      root.render(
+        <CreateGroupForm
+          bots={bots}
+          recruiting
+          initialDescription={initialDescription}
+          onCancel={() => {}}
+          onCreate={onCreate}
+        />,
+      ),
+    );
+  await renderForm("Systems engineer · Example client\nOriginal job description");
+  const input = container.querySelector("textarea")!;
+  expect(input.value).toContain("Original job description");
+  expect(onCreate).not.toHaveBeenCalled();
+  await act(async () => {
+    Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, "value")!.set!.call(
+      input,
+      "Edited recruiting request",
+    );
+    input.dispatchEvent(new Event("input", { bubbles: true }));
+  });
+  await renderForm("New server metadata must not replace a typed request");
+  expect(input.value).toBe("Edited recruiting request");
+  await click("Continue");
+  expect(onCreate).toHaveBeenCalledExactlyOnceWith({
+    name: "New role",
+    description: "Edited recruiting request",
+    botIds: ["coordinator", "researcher"],
+  });
+});
+
 it("keeps the native group name and member picker in the developer form", async () => {
   const bots = [
     { id: "coordinator", name: "Main", archivedAt: null },

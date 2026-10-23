@@ -1396,6 +1396,48 @@ const CrmBrowseCursor = z.strictObject({
     .min(0)
     .max(Number.MAX_SAFE_INTEGER - 51),
 });
+const CrmBrowseWorkflow = z.enum([
+  "waiting_resume",
+  "resume_ready",
+  "introduced",
+  "needs_scheduling",
+  "scheduled",
+  "awaiting_feedback",
+]);
+const CrmBrowseImportantStatus = z.enum(["high_signal", ...CrmBrowseWorkflow.options]);
+const CrmBrowseCandidate = z.strictObject({
+  candidateId: z.uuid(),
+  name: z.string(),
+  email: z.string().nullable(),
+  phone: z.string().nullable(),
+  linkedinUrl: z.string().nullable(),
+  location: z.string().nullable(),
+  title: z.string().nullable(),
+  stage: z.string().nullable(),
+  contactStatus: z.string(),
+  outreachStatus: z.string(),
+  roleSpecId: z.uuid().nullable(),
+  legacyClientLabel: z.string(),
+  legacyRoleLabel: z.string(),
+});
+const CrmBrowseTracking = z.strictObject({
+  roleKey: z.string().min(1),
+  clientLabel: z.string(),
+  roleLabel: z.string(),
+  highSignal: z.boolean(),
+  workflowStatus: CrmBrowseWorkflow.nullable(),
+  highSignalAt: IsoDate.nullable(),
+  statusChangedAt: IsoDate.nullable(),
+  updatedAt: IsoDate,
+});
+const CrmBrowseCampaign = z.strictObject({
+  id: Id,
+  name: z.string(),
+  status: z.number().int().nullable(),
+  crmRoleId: z.uuid().nullable(),
+  clientId: z.uuid().nullable(),
+  syncedAt: IsoDate,
+});
 const crmBrowsePinned = { serverId: Id, serverRevision: Revision, organizationId: z.uuid() };
 const crmBrowsePage = { limit: z.number().int().min(1).max(50).optional() };
 /** Live authorized CRM reads; these IDs are never local role, group, run or effect IDs. */
@@ -1417,6 +1459,27 @@ export const RecruitingCrmDataInputSchema = z.discriminatedUnion("operation", [
     ...crmBrowsePage,
     crmRoleId: z.uuid().optional(),
     query: z.string().max(500).optional(),
+    offset: z.number().int().min(0).max(1_000_000).optional(),
+  }),
+  z.object({
+    operation: z.literal("important"),
+    ...crmBrowsePinned,
+    ...crmBrowsePage,
+    status: CrmBrowseImportantStatus.optional(),
+    offset: z.number().int().min(0).max(1_000_000).optional(),
+  }),
+  z.object({
+    operation: z.literal("candidateDetails"),
+    ...crmBrowsePinned,
+    ...crmBrowsePage,
+    candidateId: z.uuid(),
+    offset: z.number().int().min(0).max(1_000_000).optional(),
+  }),
+  z.object({
+    operation: z.literal("roleCampaigns"),
+    ...crmBrowsePinned,
+    ...crmBrowsePage,
+    crmRoleId: z.uuid(),
     offset: z.number().int().min(0).max(1_000_000).optional(),
   }),
   z.object({
@@ -1457,24 +1520,70 @@ export const RecruitingCrmDataOutputSchema = z.discriminatedUnion("operation", [
     checkedAt: IsoDate,
     scope: z.enum(["organization", "legacy_role_labels"]),
     selectedRole: CrmBrowseRole.nullable(),
-    items: z.array(
-      z.strictObject({
-        candidateId: z.uuid(),
-        name: z.string(),
-        email: z.string().nullable(),
-        phone: z.string().nullable(),
-        linkedinUrl: z.string().nullable(),
-        location: z.string().nullable(),
-        title: z.string().nullable(),
+    items: z.array(CrmBrowseCandidate),
+    total: z.number().int().nonnegative(),
+    offset: z.number().int().nonnegative(),
+    nextOffset: z.number().int().nonnegative().nullable(),
+  }),
+  z.strictObject({
+    operation: z.literal("important"),
+    source: CrmBrowseSource.extend({ organizationId: z.uuid() }),
+    checkedAt: IsoDate,
+    scope: z.literal("organization_candidate_roles"),
+    items: z.array(CrmBrowseCandidate.extend(CrmBrowseTracking.shape)),
+    total: z.number().int().nonnegative(),
+    offset: z.number().int().nonnegative(),
+    nextOffset: z.number().int().nonnegative().nullable(),
+  }),
+  z.strictObject({
+    operation: z.literal("candidateDetails"),
+    source: CrmBrowseSource.extend({ organizationId: z.uuid() }),
+    checkedAt: IsoDate,
+    scope: z.literal("stored_candidate_details"),
+    candidateId: z.uuid(),
+    review: z
+      .strictObject({
+        id: z.uuid(),
+        crmRoleId: z.uuid().nullable(),
         stage: z.string().nullable(),
-        contactStatus: z.string(),
-        outreachStatus: z.string(),
-        roleSpecId: z.uuid().nullable(),
-        legacyClientLabel: z.string(),
-        legacyRoleLabel: z.string(),
+        reviewed: z.boolean().nullable(),
+        result: z.enum(["approved", "rejected", "pooled"]).nullable(),
+        notes: z.string().nullable(),
+        updatedAt: IsoDate,
+        candidateName: z.string().nullable(),
+        roleTitle: z.string().nullable(),
+      })
+      .nullable(),
+    roleTracking: z.array(CrmBrowseTracking),
+    roleInterests: z.array(
+      z.strictObject({
+        roleKey: z.string().min(1),
+        clientLabel: z.string(),
+        roleLabel: z.string(),
+        interest: z.enum(["interested", "declined", "unknown"]),
+        source: z.enum(["manual", "ai", "instantly"]).nullable(),
       }),
     ),
-    total: z.number().int().nonnegative(),
+    campaignAssociations: z.strictObject({
+      leadCampaigns: z.array(
+        z.strictObject({
+          leadId: Id,
+          campaignId: Id.nullable(),
+          campaign: CrmBrowseCampaign.nullable(),
+        }),
+      ),
+      pipelineCampaign: CrmBrowseCampaign.nullable(),
+      offset: z.number().int().nonnegative(),
+      nextOffset: z.number().int().nonnegative().nullable(),
+    }),
+  }),
+  z.strictObject({
+    operation: z.literal("roleCampaigns"),
+    source: CrmBrowseSource.extend({ organizationId: z.uuid() }),
+    checkedAt: IsoDate,
+    scope: z.literal("stored_role_campaigns"),
+    crmRoleId: z.uuid(),
+    items: z.array(CrmBrowseCampaign.omit({ crmRoleId: true, clientId: true })),
     offset: z.number().int().nonnegative(),
     nextOffset: z.number().int().nonnegative().nullable(),
   }),
@@ -1567,4 +1676,78 @@ export const RecruitingCrmMailReadSchema = z.object({
     }),
   ),
   next_cursor: CrmBrowseCursor.nullable(),
+});
+
+const CrmNativeTracking = z.object({
+  role_key: z.string().min(1),
+  client_label: z.string(),
+  role_label: z.string(),
+  high_signal: z.boolean(),
+  workflow_status: CrmBrowseWorkflow.nullable(),
+  high_signal_at: IsoDate.nullable(),
+  status_changed_at: IsoDate.nullable(),
+  updated_at: IsoDate,
+});
+const CrmNativeCampaign = z.object({
+  id: Id,
+  name: z.string(),
+  status: z.number().int().nullable(),
+  role_spec_id: z.uuid().nullable(),
+  client_id: z.uuid().nullable(),
+  synced_at: IsoDate,
+});
+export const RecruitingCrmImportantReadSchema = z.object({
+  total: z.number().int().nonnegative(),
+  rows: z.array(
+    RecruitingCrmCandidatesReadSchema.shape.rows.element.extend({
+      role_tracking: z.tuple([CrmNativeTracking]),
+    }),
+  ),
+});
+export const RecruitingCrmDetailsReadSchema = z.object({
+  organization_id: z.uuid(),
+  candidate_id: z.uuid(),
+  review: z
+    .object({
+      id: z.uuid(),
+      organization_id: z.uuid(),
+      candidate_id: z.uuid(),
+      role_spec_id: z.uuid().nullable(),
+      stage: z.string().nullable(),
+      reviewed: z.boolean().nullable(),
+      review_result: z.enum(["approved", "rejected", "pooled"]).nullable(),
+      notes: z.string().nullable(),
+      updated_at: IsoDate,
+      candidate_full_name: z.string().nullable(),
+      canonical_role_title: z.string().nullable(),
+      reviewId: z.uuid().optional(),
+    })
+    .nullable(),
+  role_tracking: z.array(CrmNativeTracking.extend({ candidate_id: z.uuid() })),
+  role_interests: z.array(
+    z.object({
+      role_key: z.string().min(1),
+      client_label: z.string(),
+      role_label: z.string(),
+      interest: z.enum(["interested", "declined", "unknown"]),
+      source: z.enum(["manual", "ai", "instantly"]).nullable(),
+    }),
+  ),
+  campaign_associations: z.object({
+    lead_campaigns: z.array(
+      z.object({ lead_id: Id, campaign_id: Id.nullable(), campaign: CrmNativeCampaign.nullable() }),
+    ),
+    pipeline_campaign: CrmNativeCampaign.nullable(),
+    pagination: z.literal("offset"),
+    offset: z.number().int().nonnegative(),
+    next_offset: z.number().int().nonnegative().nullable(),
+  }),
+});
+export const RecruitingCrmRoleCampaignsReadSchema = z.object({
+  organization_id: z.uuid(),
+  role_spec_id: z.uuid(),
+  campaigns: z.array(CrmNativeCampaign.omit({ role_spec_id: true, client_id: true })),
+  pagination: z.literal("offset"),
+  offset: z.number().int().nonnegative(),
+  next_offset: z.number().int().nonnegative().nullable(),
 });

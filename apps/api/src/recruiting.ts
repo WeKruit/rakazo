@@ -29,9 +29,12 @@ import {
   RecruitingCrmClientsReadSchema,
   RecruitingCrmDataInputSchema,
   RecruitingCrmDataOutputSchema,
+  RecruitingCrmDetailsReadSchema,
+  RecruitingCrmImportantReadSchema,
   RecruitingCrmImportReceiptSchema,
   RecruitingCrmMailReadSchema,
   RecruitingCrmMembershipRowsSchema,
+  RecruitingCrmRoleCampaignsReadSchema,
   RecruitingCrmRoleReadSchema,
 } from "@rakazo/contracts";
 import {
@@ -1639,6 +1642,194 @@ export async function getRecruitingCrmData(
         source,
         checkedAt: new Date().toISOString(),
       });
+    const candidate = (
+      row: ReturnType<typeof RecruitingCrmCandidatesReadSchema.parse>["rows"][number],
+    ) => ({
+      candidateId: row.candidate_id,
+      name: row.full_name,
+      email: row.email,
+      phone: row.phone,
+      linkedinUrl: row.linkedin_url,
+      location: row.location ?? null,
+      title: row.headline ?? null,
+      stage: row.stage,
+      contactStatus: row.contact_status,
+      outreachStatus: row.outreach_status,
+      roleSpecId: row.role_spec_id,
+      legacyClientLabel: row.client_label,
+      legacyRoleLabel: row.role_label,
+    });
+    const tracking = (
+      row: ReturnType<
+        typeof RecruitingCrmImportantReadSchema.parse
+      >["rows"][number]["role_tracking"][number],
+    ) => ({
+      roleKey: row.role_key,
+      clientLabel: row.client_label,
+      roleLabel: row.role_label,
+      highSignal: row.high_signal,
+      workflowStatus: row.workflow_status,
+      highSignalAt: row.high_signal_at,
+      statusChangedAt: row.status_changed_at,
+      updatedAt: row.updated_at,
+    });
+    if (input.operation === "important") {
+      const offset = input.offset ?? 0;
+      const limit = input.limit ?? 25;
+      const page = parse(
+        RecruitingCrmImportantReadSchema,
+        await read(server, "list_crm_candidates", {
+          p_view: "important",
+          p_org: input.organizationId,
+          p_limit: limit,
+          p_offset: offset,
+          ...(input.status ? { p_status: input.status } : {}),
+        }),
+      );
+      const keys = page.rows.map((row) =>
+        JSON.stringify([row.candidate_id, row.role_tracking[0].role_key]),
+      );
+      if (
+        page.rows.length > limit ||
+        (page.rows.length && offset + page.rows.length > page.total) ||
+        new Set(keys).size !== keys.length ||
+        page.rows.some(
+          (row) =>
+            row.client_label !== row.role_tracking[0].client_label ||
+            row.role_label !== row.role_tracking[0].role_label ||
+            (!row.role_tracking[0].high_signal && row.role_tracking[0].workflow_status === null),
+        )
+      )
+        throw unavailable();
+      return finish({
+        operation: input.operation,
+        scope: "organization_candidate_roles",
+        items: page.rows.map((row) => ({ ...candidate(row), ...tracking(row.role_tracking[0]) })),
+        total: page.total,
+        offset,
+        nextOffset:
+          page.rows.length && offset + page.rows.length < page.total
+            ? offset + page.rows.length
+            : null,
+      });
+    }
+    if (input.operation === "candidateDetails") {
+      const offset = input.offset ?? 0;
+      const limit = input.limit ?? 25;
+      const page = parse(
+        RecruitingCrmDetailsReadSchema,
+        await read(server, "get_crm_candidate_review", {
+          p_view: "details",
+          p_org: input.organizationId,
+          p_candidate: input.candidateId,
+          p_campaign_limit: limit,
+          p_campaign_offset: offset,
+        }),
+      );
+      const associations = page.campaign_associations;
+      if (
+        page.organization_id !== input.organizationId ||
+        page.candidate_id !== input.candidateId ||
+        (page.review &&
+          (page.review.organization_id !== input.organizationId ||
+            page.review.candidate_id !== input.candidateId)) ||
+        page.role_tracking.some((row) => row.candidate_id !== input.candidateId) ||
+        new Set(page.role_tracking.map((row) => row.role_key)).size !== page.role_tracking.length ||
+        new Set(page.role_interests.map((row) => row.role_key)).size !==
+          page.role_interests.length ||
+        associations.lead_campaigns.length > limit ||
+        associations.offset !== offset ||
+        new Set(associations.lead_campaigns.map((row) => row.lead_id)).size !==
+          associations.lead_campaigns.length ||
+        associations.lead_campaigns.some(
+          (row) => row.campaign && row.campaign.id !== row.campaign_id,
+        ) ||
+        (associations.next_offset !== null &&
+          (!associations.lead_campaigns.length ||
+            associations.next_offset !== offset + associations.lead_campaigns.length))
+      )
+        throw unavailable();
+      const campaign = (row: typeof associations.pipeline_campaign) =>
+        row && {
+          id: row.id,
+          name: row.name,
+          status: row.status,
+          crmRoleId: row.role_spec_id,
+          clientId: row.client_id,
+          syncedAt: row.synced_at,
+        };
+      return finish({
+        operation: input.operation,
+        scope: "stored_candidate_details",
+        candidateId: input.candidateId,
+        review: page.review && {
+          id: page.review.id,
+          crmRoleId: page.review.role_spec_id,
+          stage: page.review.stage,
+          reviewed: page.review.reviewed,
+          result: page.review.review_result,
+          notes: page.review.notes,
+          updatedAt: page.review.updated_at,
+          candidateName: page.review.candidate_full_name,
+          roleTitle: page.review.canonical_role_title,
+        },
+        roleTracking: page.role_tracking.map(tracking),
+        roleInterests: page.role_interests.map((row) => ({
+          roleKey: row.role_key,
+          clientLabel: row.client_label,
+          roleLabel: row.role_label,
+          interest: row.interest,
+          source: row.source,
+        })),
+        campaignAssociations: {
+          leadCampaigns: associations.lead_campaigns.map((row) => ({
+            leadId: row.lead_id,
+            campaignId: row.campaign_id,
+            campaign: campaign(row.campaign),
+          })),
+          pipelineCampaign: campaign(associations.pipeline_campaign),
+          offset,
+          nextOffset: associations.next_offset,
+        },
+      });
+    }
+    if (input.operation === "roleCampaigns") {
+      const offset = input.offset ?? 0;
+      const limit = input.limit ?? 25;
+      const page = parse(
+        RecruitingCrmRoleCampaignsReadSchema,
+        await read(server, "get_crm_role", {
+          p_view: "campaigns",
+          p_org: input.organizationId,
+          p_role: input.crmRoleId,
+          p_limit: limit,
+          p_offset: offset,
+        }),
+      );
+      if (
+        page.organization_id !== input.organizationId ||
+        page.role_spec_id !== input.crmRoleId ||
+        page.campaigns.length > limit ||
+        page.offset !== offset ||
+        new Set(page.campaigns.map((row) => row.id)).size !== page.campaigns.length ||
+        (page.next_offset !== null &&
+          (!page.campaigns.length || page.next_offset !== offset + page.campaigns.length))
+      )
+        throw unavailable();
+      return finish({
+        operation: input.operation,
+        scope: "stored_role_campaigns",
+        crmRoleId: input.crmRoleId,
+        items: page.campaigns.map((row) => ({
+          id: row.id,
+          name: row.name,
+          status: row.status,
+          syncedAt: row.synced_at,
+        })),
+        offset,
+        nextOffset: page.next_offset,
+      });
+    }
     if (input.operation === "roles")
       return finish({ operation: input.operation, items: await roles() });
     if (input.operation === "candidates") {
@@ -1710,21 +1901,7 @@ export async function getRecruitingCrmData(
         operation: input.operation,
         scope: selectedRole ? "legacy_role_labels" : "organization",
         selectedRole,
-        items: page.rows.map((row) => ({
-          candidateId: row.candidate_id,
-          name: row.full_name,
-          email: row.email,
-          phone: row.phone,
-          linkedinUrl: row.linkedin_url,
-          location: row.location ?? null,
-          title: row.headline ?? null,
-          stage: row.stage,
-          contactStatus: row.contact_status,
-          outreachStatus: row.outreach_status,
-          roleSpecId: row.role_spec_id,
-          legacyClientLabel: row.client_label,
-          legacyRoleLabel: row.role_label,
-        })),
+        items: page.rows.map(candidate),
         total: page.total,
         offset,
         nextOffset:
