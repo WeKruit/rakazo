@@ -637,6 +637,8 @@ export type RecruitingQuestionAskedPayload = z.infer<typeof RecruitingQuestionAs
 
 export const RecruitingProfileViewedPayloadSchema = RecruitingProfileActivityInput.extend({
   roleTitle: z.string(),
+  /** Exact imported attachment provenance; never an execution or approval receipt. */
+  crmSource: RecruitingCrmRoleReferenceSchema.optional(),
   crmBindingEffectId: Id.nullable(),
   viewId: z.uuid(),
   actorUserId: Id,

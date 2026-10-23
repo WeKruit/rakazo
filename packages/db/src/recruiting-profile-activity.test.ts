@@ -55,6 +55,7 @@ function fixture() {
     );
   return {
     $queryRaw: vi.fn(async () => [{ id: "thread" }]),
+    recruitingCrmWorkspaceAttachment: { findUnique: vi.fn(async () => null) },
     recruitingRole: {
       findFirst: vi.fn(async ({ where }: { where: Record<string, unknown> }) =>
         owned(where) && where.id === "role"

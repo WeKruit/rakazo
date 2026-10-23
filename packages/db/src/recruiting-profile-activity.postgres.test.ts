@@ -7,6 +7,7 @@ import { createDb, type Prisma } from "./client.js";
 import {
   createRecruitingRole,
   listRecruitingProfileActivity,
+  openVerifiedRecruitingCrmWorkspace,
   recordRecruitingProfileView,
 } from "./recruiting.js";
 import { IsolationError } from "./scope.js";
@@ -54,8 +55,26 @@ database("profile activity (local PostgreSQL)", () => {
     await prisma.organization.create({
       data: { id: organizationId, name: "Synthetic", slug: organizationId, createdAt: new Date() },
     });
+    await prisma.member.create({
+      data: {
+        id: randomUUID(),
+        organizationId,
+        userId: actor.userId,
+        role: "owner",
+        createdAt: new Date(),
+      },
+    });
     await prisma.space.create({
       data: { id: actor.spaceId, organizationId, name: "Synthetic space" },
+    });
+    await prisma.spaceMember.create({
+      data: {
+        id: randomUUID(),
+        organizationId,
+        spaceId: actor.spaceId,
+        userId: actor.userId,
+        createdAt: new Date(),
+      },
     });
     botId = (
       await prisma.bot.create({
@@ -227,6 +246,16 @@ database("profile activity (local PostgreSQL)", () => {
           transport: "http",
         },
       });
+      await prisma.botMcpServer.create({
+        data: {
+          spaceId: actor.spaceId,
+          userId: actor.userId,
+          botId,
+          serverId: server.id,
+          allowAllTools: false,
+          allowedTools: ["get_crm_role", "list_crm_candidates"],
+        },
+      });
       const target = {
         mcpServerId: server.id,
         serverRevision: server.revision,
@@ -320,7 +349,7 @@ database("profile activity (local PostgreSQL)", () => {
       const link = await prisma.recruitingCrmRoleContact.create({
         data: { roleId: crmRole.id, contactId: contact.id, syncedAt: new Date() },
       });
-      return { binding, link };
+      return { binding, link, server };
     }
     const chosen = { roleId, candidateKey: `crm:${crmCandidateId}` };
     const viewId = randomUUID();
@@ -332,6 +361,31 @@ database("profile activity (local PostgreSQL)", () => {
     const second = await recordRecruitingProfileView(prisma, actor, { ...chosen, viewId });
     expect(second.id).not.toBe(first.id);
     expect((await listRecruitingProfileActivity(prisma, actor, chosen)).items).toEqual([second]);
+    await prisma.botMcpServer.updateMany({
+      where: { serverId: secondSource.server.id },
+      data: { allowedTools: [] },
+    });
+    await expect(listRecruitingProfileActivity(prisma, actor, chosen)).rejects.toBeInstanceOf(
+      IsolationError,
+    );
+    await expect(
+      recordRecruitingProfileView(prisma, actor, { ...chosen, viewId }),
+    ).rejects.toBeInstanceOf(IsolationError);
+    await prisma.botMcpServer.updateMany({
+      where: { serverId: secondSource.server.id },
+      data: { allowedTools: ["get_crm_role", "list_crm_candidates"] },
+    });
+    await prisma.mcpServer.update({
+      where: { id: secondSource.server.id },
+      data: { enabled: false },
+    });
+    await expect(listRecruitingProfileActivity(prisma, actor, chosen)).rejects.toBeInstanceOf(
+      IsolationError,
+    );
+    await prisma.mcpServer.update({
+      where: { id: secondSource.server.id },
+      data: { enabled: true },
+    });
     await prisma.recruitingCrmRoleContact.update({
       where: {
         roleId_contactId: {
@@ -347,5 +401,158 @@ database("profile activity (local PostgreSQL)", () => {
     await expect(
       recordRecruitingProfileView(prisma, actor, { ...chosen, viewId }),
     ).rejects.toBeInstanceOf(IsolationError);
+  });
+  it("records canonical attachment views with exact source provenance and fresh authorization", async () => {
+    const server = await prisma.mcpServer.create({
+      data: {
+        spaceId: actor.spaceId,
+        userId: actor.userId,
+        slug: `attached-${suffix}`,
+        name: "Synthetic attached CRM",
+        transport: "http",
+      },
+    });
+    await prisma.botMcpServer.create({
+      data: {
+        spaceId: actor.spaceId,
+        userId: actor.userId,
+        botId,
+        serverId: server.id,
+        allowAllTools: false,
+        allowedTools: ["get_crm_role", "list_crm_candidates"],
+      },
+    });
+    const selected = {
+      mcpServerId: server.id,
+      serverRevision: 1,
+      organizationId: "10000000-0000-4000-8000-000000000021",
+      crmRoleId: "20000000-0000-4000-8000-000000000021",
+      crmClientId: "30000000-0000-4000-8000-000000000021",
+      clientLabel: "Client",
+      roleLabel: "Role",
+    };
+    const botIds = [
+      botId,
+      ...(
+        await prisma.bot.findMany({
+          where: { spaceId: actor.spaceId, userId: actor.userId, id: { not: botId } },
+          select: { id: true },
+        })
+      ).map((bot) => bot.id),
+    ];
+    const opened = await openVerifiedRecruitingCrmWorkspace(prisma, actor, {
+      target: selected,
+      verifiedBotId: botId,
+      botIds,
+      roleText: "Actual synthetic source description",
+    });
+    const crmCandidateId = "40000000-0000-4000-8000-000000000021";
+    const chosen = { roleId: opened.roleId, candidateKey: `crm:${crmCandidateId}` };
+    const viewId = randomUUID();
+    async function projection(org: string) {
+      const scope = {
+        userId: actor.userId,
+        spaceId: actor.spaceId,
+        mcpServerId: server.id,
+        organizationId: org,
+      };
+      const projected = await prisma.recruitingCrmRole.create({
+        data: {
+          ...scope,
+          crmRoleId: selected.crmRoleId,
+          clientId: selected.crmClientId,
+          clientLabel: selected.clientLabel,
+          roleLabel: selected.roleLabel,
+          syncedAt: new Date(),
+        },
+      });
+      const contact = await prisma.recruitingCrmContact.create({
+        data: {
+          ...scope,
+          crmCandidateId,
+          name: "Person",
+          contactStatus: "unknown",
+          outreachStatus: "unknown",
+          clientLabel: selected.clientLabel,
+          roleLabel: selected.roleLabel,
+          syncedAt: new Date(),
+        },
+      });
+      return prisma.recruitingCrmRoleContact.create({
+        data: { roleId: projected.id, contactId: contact.id, syncedAt: new Date() },
+      });
+    }
+    await expect(
+      recordRecruitingProfileView(prisma, actor, { ...chosen, viewId }),
+    ).rejects.toBeInstanceOf(IsolationError);
+    const orgB = "10000000-0000-4000-8000-000000000022";
+    await projection(orgB);
+    await expect(
+      recordRecruitingProfileView(prisma, actor, { ...chosen, viewId }),
+    ).rejects.toBeInstanceOf(IsolationError);
+    const link = await projection(selected.organizationId);
+    const beforeEffects = await prisma.externalEffect.count({ where: { spaceId: actor.spaceId } });
+    const first = await recordRecruitingProfileView(prisma, actor, { ...chosen, viewId });
+    expect(await recordRecruitingProfileView(prisma, actor, { ...chosen, viewId })).toEqual(first);
+    expect(
+      (await prisma.event.findUniqueOrThrow({ where: { id: first.id } })).payload,
+    ).toMatchObject({
+      crmBindingEffectId: null,
+      crmSource: {
+        sourceId: server.id,
+        serverRevision: 1,
+        organizationId: selected.organizationId,
+        crmRoleId: selected.crmRoleId,
+      },
+    });
+    expect(await prisma.externalEffect.count({ where: { spaceId: actor.spaceId } })).toBe(
+      beforeEffects,
+    );
+    await prisma.botMcpServer.updateMany({
+      where: { serverId: server.id },
+      data: { allowedTools: ["get_crm_role"] },
+    });
+    await expect(listRecruitingProfileActivity(prisma, actor, chosen)).rejects.toBeInstanceOf(
+      IsolationError,
+    );
+    await expect(
+      recordRecruitingProfileView(prisma, actor, { ...chosen, viewId }),
+    ).rejects.toBeInstanceOf(IsolationError);
+    await prisma.botMcpServer.updateMany({
+      where: { serverId: server.id },
+      data: { allowedTools: ["get_crm_role", "list_crm_candidates"] },
+    });
+    await prisma.mcpServer.update({ where: { id: server.id }, data: { revision: 2 } });
+    await expect(listRecruitingProfileActivity(prisma, actor, chosen)).rejects.toBeInstanceOf(
+      IsolationError,
+    );
+    await prisma.recruitingCrmWorkspaceAttachment.update({
+      where: { roleId: opened.roleId },
+      data: { serverRevision: 2, target: { ...selected, serverRevision: 2 } },
+    });
+    expect((await listRecruitingProfileActivity(prisma, actor, chosen)).items).toEqual([]);
+    const second = await recordRecruitingProfileView(prisma, actor, { ...chosen, viewId });
+    expect(second.id).not.toBe(first.id);
+    await prisma.recruitingCrmWorkspaceAttachment.update({
+      where: { roleId: opened.roleId },
+      data: {
+        organizationId: orgB,
+        target: { ...selected, organizationId: orgB, serverRevision: 2 },
+      },
+    });
+    expect((await listRecruitingProfileActivity(prisma, actor, chosen)).items).toEqual([]);
+    const third = await recordRecruitingProfileView(prisma, actor, { ...chosen, viewId });
+    expect(third.id).not.toBe(second.id);
+    await prisma.recruitingCrmWorkspaceAttachment.update({
+      where: { roleId: opened.roleId },
+      data: { organizationId: selected.organizationId, target: { ...selected, serverRevision: 2 } },
+    });
+    await prisma.recruitingCrmRoleContact.update({
+      where: { roleId_contactId: { roleId: link.roleId, contactId: link.contactId } },
+      data: { archivedAt: new Date() },
+    });
+    await expect(listRecruitingProfileActivity(prisma, actor, chosen)).rejects.toBeInstanceOf(
+      IsolationError,
+    );
   });
 });

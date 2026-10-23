@@ -11293,6 +11293,7 @@ export async function approveRecruitingCalibrationRoundFromMessage(
 /** Validate the actual saved person before reading or recording any profile history. */
 async function profileActivityTarget(tx: Tx, actor: Actor, input: ProfileActivityInput) {
   const role = await requireRole(tx, actor, input.roleId);
+  let profileCrmSource: RecruitingCrmRoleReference | undefined;
   if (input.candidateKey.startsWith("autumn:")) {
     const candidate = await tx.recruitingCandidate.findUnique({
       where: {
@@ -11302,8 +11303,64 @@ async function profileActivityTarget(tx: Tx, actor: Actor, input: ProfileActivit
     });
     if (!candidate) throw new IsolationError();
   } else {
-    if (!role.crmBindingEffectId) throw new IsolationError();
-    const { target } = await crmBindingReceipt(tx, actor, role.id, role.crmBindingEffectId);
+    const attached = await attachedCrmTarget(tx, actor, role.id, role.sourceThreadId);
+    const target =
+      attached ??
+      (role.crmBindingEffectId
+        ? (await crmBindingReceipt(tx, actor, role.id, role.crmBindingEffectId)).target
+        : null);
+    if (!target) throw new IsolationError();
+    {
+      const thread = await requireThread(tx, actor, role.sourceThreadId);
+      const botId =
+        thread.botId ??
+        (thread.groupId
+          ? (
+              await tx.chatGroupMember.findFirst({
+                where: { groupId: thread.groupId },
+                orderBy: [{ createdAt: "asc" }, { botId: "asc" }],
+                select: { botId: true },
+              })
+            )?.botId
+          : null);
+      if (!botId) throw new IsolationError();
+      const server = await tx.mcpServer.findFirst({
+        where: {
+          id: target.mcpServerId,
+          userId: actor.userId,
+          spaceId: actor.spaceId,
+          enabled: true,
+          revision: target.serverRevision,
+        },
+      });
+      if (!server) throw new IsolationError();
+      const assignment = botId
+        ? await tx.botMcpServer.findFirst({
+            where: {
+              botId,
+              serverId: target.mcpServerId,
+              userId: actor.userId,
+              spaceId: actor.spaceId,
+            },
+          })
+        : null;
+      if (
+        !assignment ||
+        (!assignment.allowAllTools &&
+          (!Array.isArray(assignment.allowedTools) ||
+            !["get_crm_role", "list_crm_candidates"].every((tool) =>
+              assignment.allowedTools.includes(tool),
+            )))
+      )
+        throw new IsolationError();
+      if (attached)
+        profileCrmSource = {
+          sourceId: target.mcpServerId,
+          serverRevision: target.serverRevision,
+          organizationId: target.organizationId,
+          crmRoleId: target.crmRoleId,
+        };
+    }
     const scope = {
       userId: actor.userId,
       spaceId: actor.spaceId,
@@ -11321,7 +11378,11 @@ async function profileActivityTarget(tx: Tx, actor: Actor, input: ProfileActivit
     });
     if (!contact) throw new IsolationError();
   }
-  return role;
+  return {
+    ...role,
+    profileCrmSource,
+    profileBindingEffectId: profileCrmSource ? null : role.crmBindingEffectId,
+  };
 }
 
 function profileEventWhere(
@@ -11330,6 +11391,7 @@ function profileEventWhere(
   candidateKey: string,
   threadId: string,
   bindingEffectId: string | null,
+  crmSource?: RecruitingCrmRoleReference,
 ) {
   return {
     spaceId: actor.spaceId,
@@ -11337,6 +11399,7 @@ function profileEventWhere(
     thread: { userId: actor.userId, spaceId: actor.spaceId },
     type: "recruiting.profile.viewed",
     AND: [
+      ...(crmSource ? [{ payload: { path: ["crmSource"], equals: crmSource } }] : []),
       { payload: { path: ["roleId"], equals: roleId } },
       { payload: { path: ["candidateKey"], equals: candidateKey } },
       { payload: { path: ["actorUserId"], equals: actor.userId } },
@@ -11377,7 +11440,8 @@ export async function listRecruitingProfileActivity(
         role.id,
         input.candidateKey,
         role.sourceThreadId,
-        role.crmBindingEffectId,
+        role.profileBindingEffectId,
+        role.profileCrmSource,
       ),
       orderBy: [{ createdAt: "desc" }, { id: "desc" }],
       take: 51,
@@ -11407,14 +11471,21 @@ export async function recordRecruitingProfileView(
       `);
       // Recheck role, candidate and source ownership after waiting for the serialization lock.
       const currentRole = await profileActivityTarget(tx, actor, input);
-      if (currentRole.sourceThreadId !== role.sourceThreadId) throw new IsolationError();
+      if (
+        currentRole.sourceThreadId !== role.sourceThreadId ||
+        currentRole.profileBindingEffectId !== role.profileBindingEffectId ||
+        stableJsonValue(currentRole.profileCrmSource ?? null) !==
+          stableJsonValue(role.profileCrmSource ?? null)
+      )
+        throw new IsolationError();
       const thread = await requireThread(tx, actor, role.sourceThreadId);
       const where = profileEventWhere(
         actor,
         role.id,
         input.candidateKey,
         thread.id,
-        currentRole.crmBindingEffectId,
+        currentRole.profileBindingEffectId,
+        currentRole.profileCrmSource,
       );
       const existing = await tx.event.findFirst({
         where: {
@@ -11439,8 +11510,9 @@ export async function recordRecruitingProfileView(
           candidateKey: input.candidateKey,
           roleTitle: currentRole.title,
           crmBindingEffectId: input.candidateKey.startsWith("crm:")
-            ? currentRole.crmBindingEffectId
+            ? currentRole.profileBindingEffectId
             : null,
+          ...(currentRole.profileCrmSource ? { crmSource: currentRole.profileCrmSource } : {}),
           viewId: input.viewId,
           actorUserId: actor.userId,
           actorName: user.name || null,
