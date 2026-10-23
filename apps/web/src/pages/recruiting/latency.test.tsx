@@ -236,6 +236,30 @@ it("discards a stale page when the role changes before it returns", async () => 
   };
 });
 
+it("prefers the API's cursor over the offset when one is returned", async () => {
+  crmData.mockImplementation((input: Input & { cursor?: string }) =>
+    delayed(() => {
+      const offset = input.cursor ? Number(input.cursor.slice(1)) : 0;
+      const page = respond({ ...input, offset });
+      return {
+        ...page,
+        offset: 0,
+        nextOffset: null,
+        nextCursor: page.nextOffset === null ? null : `c${page.nextOffset}`,
+      };
+    }),
+  );
+  const { container } = await timeToFirstRows(<ContactsTab {...props} crmTarget={target} />);
+  const more = [...container.querySelectorAll("button")].find((b) => b.textContent === "Load more");
+  await act(async () => more!.click());
+  await act(async () => {
+    await vi.advanceTimersByTimeAsync(LATENCY);
+  });
+  expect(container.querySelectorAll("tbody tr")).toHaveLength(50);
+  expect(crmData.mock.calls[1]![0]).toMatchObject({ cursor: "c25" });
+  expect(crmData.mock.calls[1]![0]).not.toHaveProperty("offset");
+});
+
 it("loads more rows with the CRM offset until every row is shown", async () => {
   const { container } = await timeToFirstRows(<ContactsTab {...props} crmTarget={target} />);
   expect(container.querySelectorAll("tbody tr")).toHaveLength(25);

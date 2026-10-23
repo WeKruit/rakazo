@@ -137,7 +137,7 @@ export function SequenceTab(props: RecruitingTabProps) {
                   </button>
                 </li>
               ))}
-              {people.data.nextOffset !== null ? (
+              {people.hasMore ? (
                 <li className="px-3 pb-3">
                   <LoadMore pages={people} />
                 </li>

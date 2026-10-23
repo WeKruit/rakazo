@@ -173,12 +173,20 @@ export function useCrmData<O extends CrmOperation>(
 export const FIRST_PAGE = 25;
 type PagedOperation = "candidates" | "important" | "roleCampaigns" | "roleMail";
 type PagedItem = { candidateId: string } | { id: string };
-type PagedPage = { items: PagedItem[]; nextOffset: number | null };
+/** A cursor is preferred when the API returns one; older APIs page by offset only. */
+type PagedPage = { items: PagedItem[]; nextOffset: number | null; nextCursor?: string | null };
+type NextPage = { cursor: string } | { offset: number } | null;
 const itemId = (item: PagedItem) => ("id" in item ? item.id : item.candidateId);
+const nextPage = (page: PagedPage): NextPage =>
+  page.nextCursor
+    ? { cursor: page.nextCursor }
+    : page.nextOffset !== null
+      ? { offset: page.nextOffset }
+      : null;
 
 /**
  * A paged CRM list: the first small page renders (from cache when revisited) and `loadMore`
- * appends the next page through the CRM's own limit/offset parameters.
+ * appends the next page through the API's cursor, or its limit/offset parameters without one.
  */
 export function useCrmPages<O extends PagedOperation>(
   crm: RoleCrm,
@@ -196,7 +204,7 @@ export function useCrmPages<O extends PagedOperation>(
   const [more, setMore] = useState<{
     identity: string;
     items: PagedItem[];
-    nextOffset: number | null;
+    next: NextPage;
     loading?: boolean;
     failed?: boolean;
   }>();
@@ -205,22 +213,22 @@ export function useCrmPages<O extends PagedOperation>(
   const extra = more && more.identity === identity ? more : undefined;
   const firstPage = first.data as PagedPage | undefined;
   const seen = new Set(firstPage?.items.map(itemId));
-  const merged: PagedPage | undefined = firstPage && {
+  const next = extra ? extra.next : firstPage ? nextPage(firstPage) : null;
+  const merged = firstPage && {
     ...firstPage,
     items: extra
       ? [...firstPage.items, ...extra.items.filter((item) => !seen.has(itemId(item)))]
       : firstPage.items,
-    nextOffset: extra ? extra.nextOffset : firstPage.nextOffset,
   };
   const loadMore = () => {
-    if (!request || !identity || !merged || merged.nextOffset === null || extra?.loading) return;
-    const base = { identity, items: extra?.items ?? [], nextOffset: merged.nextOffset };
+    if (!request || !identity || !next || extra?.loading) return;
+    const base = { identity, items: extra?.items ?? [], next };
     setMore({ ...base, loading: true });
-    readCrm({ ...request, offset: merged.nextOffset } as CrmRequest<O>)
+    readCrm({ ...request, ...next } as CrmRequest<O>)
       .then((value) => {
         if (latest.current !== identity) return;
         const page = value as unknown as PagedPage;
-        setMore({ identity, items: [...base.items, ...page.items], nextOffset: page.nextOffset });
+        setMore({ identity, items: [...base.items, ...page.items], next: nextPage(page) });
       })
       .catch(() => {
         if (latest.current === identity) setMore({ ...base, failed: true });
@@ -229,6 +237,7 @@ export function useCrmPages<O extends PagedOperation>(
   return {
     ...first,
     data: merged as unknown as Page | undefined,
+    hasMore: next !== null,
     loadMore,
     loadingMore: Boolean(extra?.loading),
     moreFailed: Boolean(extra?.failed),
@@ -240,13 +249,13 @@ export function LoadMore({
   pages,
 }: {
   pages: {
-    data?: { nextOffset: number | null };
+    hasMore: boolean;
     loadMore: () => void;
     loadingMore: boolean;
     moreFailed: boolean;
   };
 }) {
-  if (!pages.data || pages.data.nextOffset === null) return null;
+  if (!pages.hasMore) return null;
   return (
     <div className="mt-3 space-y-2">
       {pages.moreFailed ? (
@@ -270,7 +279,7 @@ export function useSavedCorrespondence(
   return useKeyedRead<RecruitingCorrespondence>(
     conversation ? JSON.stringify([spaceId, roleId, conversation, view, refreshSignal]) : null,
     async () => {
-      // ponytail: this read has no limit/cursor yet; add them here once the API accepts them.
+      // ponytail: pass `limit`/`cursor` here once the correspondence read accepts them (emails only).
       const value = await rpc.recruiting.correspondence({ ...conversation!, view });
       // A conversation bound to a different role must not leak into this role's tab.
       return value.roleId === null || value.roleId === roleId

@@ -234,7 +234,7 @@ export function InboxTab({ onSelectEmail, ...props }: InboxProps) {
                 </button>
               </li>
             ))}
-            {people.data.nextOffset !== null ? (
+            {people.hasMore ? (
               <li className="px-3 pb-3">
                 <LoadMore pages={people} />
               </li>
@@ -319,7 +319,7 @@ export function InboxTab({ onSelectEmail, ...props }: InboxProps) {
                 ) : null}
               </button>
             ))}
-            {roleWide && roleMail.data?.nextOffset != null ? (
+            {roleWide && roleMail.hasMore ? (
               <div className="px-3 pb-3">
                 <LoadMore pages={roleMail} />
               </div>
