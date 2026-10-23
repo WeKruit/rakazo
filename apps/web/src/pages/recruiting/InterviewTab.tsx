@@ -2,6 +2,7 @@ import { Trans, useLingui } from "@lingui/react/macro";
 import type { RecruitingCrmDataOutput } from "@rakazo/contracts";
 import { Button } from "@rakazo/ui-web";
 import { useRecruitingDetail } from "./detail";
+import { AvailabilityRanges } from "./AvailabilityRanges";
 import type { RecruitingTabProps } from "./shared";
 import {
   CrmGate,
@@ -154,14 +155,11 @@ export function InterviewTab({
           <h3 className="text-sm font-semibold">
             <Trans>Calendar</Trans>
           </h3>
-          {events.map((event) => (
+          <AvailabilityRanges slots={events.filter((event) => event.kind === "availability")} />
+          {events.filter((event) => event.kind !== "availability").map((event) => (
             <article key={event.id} className="rounded-lg border border-border p-3 text-sm">
               <div className="flex flex-wrap justify-between gap-2">
-                <strong>
-                  {event.kind === "availability"
-                    ? t`Available time`
-                    : event.title || t`Calendar event`}
-                </strong>
+                <strong>{event.title || t`Calendar event`}</strong>
                 {event.status ? (
                   <span className="text-muted-foreground">{event.status}</span>
                 ) : null}

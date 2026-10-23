@@ -646,7 +646,35 @@ it("renders a provider start-only slot without a fabricated end or dangling sepa
     ],
   });
   const view = await mount({ view: "interview" });
-  const card = view.container.querySelector("article")!;
+  const card = view.container.querySelector('section[aria-label="Available time"]')!;
   expect(card.querySelectorAll("time")).toHaveLength(1);
   expect(card.textContent).not.toContain("–");
+});
+
+it("shows adjacent half-hour slots as one range per day with the time zone once", async () => {
+  const slot = (id: string, start: string, end: string) => ({
+    id,
+    kind: "availability",
+    title: null,
+    start: `2026-10-23T${start}:00Z`,
+    end: `2026-10-23T${end}:00Z`,
+    timeZone: "UTC",
+    attendees: [],
+    status: null,
+    location: null,
+    url: null,
+  });
+  readCorrespondence.mockResolvedValue({
+    status: "ready",
+    checkedAt: null,
+    connections: [],
+    emails: [],
+    partial: false,
+    events: [slot("a", "08:00", "08:30"), slot("b", "08:30", "09:00"), slot("c", "09:00", "09:30")],
+  });
+  const view = await mount({ view: "interview" });
+  const section = view.container.querySelector('section[aria-label="Available time"]')!;
+  expect(section.querySelectorAll("time")).toHaveLength(2);
+  expect(section.textContent?.match(/UTC/g)).toHaveLength(1);
+  expect(view.container.querySelectorAll("article")).toHaveLength(0);
 });
