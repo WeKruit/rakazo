@@ -3,9 +3,9 @@ import type { RecruitingCandidate, RecruitingCorrespondence } from "@rakazo/cont
 import { Badge, Button } from "@rakazo/ui-web";
 import { Bookmark, Building2, Mail, Sparkles } from "lucide-react";
 import { useEffect, useState } from "react";
+import { PersonAvatar } from "./DetailPanel";
 import type { RecruitingDetailTarget } from "./detail";
 import { detailKey, useRecruitingDetail } from "./detail";
-import { PersonAvatar } from "./DetailPanel";
 import { candidateSections } from "./profile";
 import { RetryNotice } from "./RetryNotice";
 import { linkedinIdentity } from "./roleCandidates";
@@ -157,7 +157,8 @@ export function ContactsTab(
         email: crm?.email ?? rowLookups[0]?.emails[0]?.address ?? sections.email,
         phone: crm?.phone ?? rowLookups[0]?.phones[0]?.number ?? sections.phone,
         title: row.title,
-        company: candidate?.company ?? null,
+        company: crm?.company ?? candidate?.company ?? null,
+        profile: crm?.profile,
         location: row.location,
         linkedinUrl: row.linkedinUrl,
         stage: crm?.stage ?? null,
@@ -314,12 +315,12 @@ export function ContactsTab(
                           <span className={clamp1} title={row.title ?? undefined}>
                             {row.title ?? "—"}
                           </span>
-                          {candidate?.company ? (
+                          {(person?.company ?? candidate?.company) ? (
                             <span
                               className={`${clamp1} text-xs text-muted-foreground`}
-                              title={candidate.company}
+                              title={person?.company ?? candidate?.company ?? undefined}
                             >
-                              {candidate.company}
+                              {person?.company ?? candidate?.company}
                             </span>
                           ) : null}
                         </span>

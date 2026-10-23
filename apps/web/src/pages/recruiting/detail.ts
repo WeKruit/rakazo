@@ -1,4 +1,4 @@
-import type { RecruitingCandidate } from "@rakazo/contracts";
+import type { RecruitingCandidate, RecruitingRoleCandidate } from "@rakazo/contracts";
 import {
   createContext,
   useCallback,
@@ -19,6 +19,7 @@ export type RecruitingDetailPerson = {
   phone?: string | null;
   title?: string | null;
   company?: string | null;
+  profile?: NonNullable<RecruitingRoleCandidate["crm"]>["profile"];
   location?: string | null;
   linkedinUrl?: string | null;
   stage?: string | null;

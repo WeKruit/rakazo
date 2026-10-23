@@ -166,11 +166,7 @@ async function mount(node: ReactNode, path = "/app/g/group-1?view=contacts") {
   const container = document.createElement("div");
   document.body.append(container);
   const root = createRoot(container);
-  await act(async () =>
-    root.render(
-      <MemoryRouter initialEntries={[path]}>{node}</MemoryRouter>,
-    ),
-  );
+  await act(async () => root.render(<MemoryRouter initialEntries={[path]}>{node}</MemoryRouter>));
   await settle();
   await settle();
   cleanup = async () => {
@@ -208,7 +204,9 @@ it("reopens the person a shared link names once the list shows them", async () =
   );
   await settle();
   expect(panel(view)?.querySelector("h2")?.textContent).toBe("Ada");
-  expect(location).toBe(`/app/g/group-1?view=contacts&detail=${encodeURIComponent(`contact.${ADA}`)}`);
+  expect(location).toBe(
+    `/app/g/group-1?view=contacts&detail=${encodeURIComponent(`contact.${ADA}`)}`,
+  );
 });
 
 it("opens a Sequence person's emails beside the tab", async () => {
@@ -280,4 +278,41 @@ it("asks the chat to schedule without sending anything", async () => {
   await act(async () => button(panel(view)!, "Schedule interview")!.click());
   expect(onAskChat).toHaveBeenCalledWith(expect.stringContaining("do not send it yet"));
   expect(crmData).not.toHaveBeenCalledWith(expect.objectContaining({ operation: "send" }));
+});
+
+it("opens stored company and profile history without inventing education or assessment", async () => {
+  crmData.mockImplementation(async (input: { operation: string }) =>
+    page(
+      input.operation,
+      [
+        {
+          ...ada,
+          company: "Stored Company",
+          profile: {
+            history: [
+              { title: "Engineer", company: "Previous Company", start: "2020", end: "2022" },
+              "Independent consulting",
+              { unknown: "unstructured data" },
+            ],
+            summary: "Builds distributed systems",
+            skills: ["Go", "PostgreSQL"],
+            sources: [],
+          },
+        },
+      ],
+      { scope: "organization", selectedRole: null },
+    ),
+  );
+  const view = await mount(<Workbench />);
+  expect(view.textContent).toContain("Stored Company");
+  await act(async () => button(view, "Ada")!.click());
+  const panel = view.querySelector('[data-testid="recruiting-detail-panel"]')!;
+  expect(panel.textContent).toContain("Engineer at Stored Company");
+  expect(panel.textContent).toContain("Previous Company");
+  expect(panel.textContent).toContain("Independent consulting");
+  expect(panel.textContent).toContain("Builds distributed systems");
+  expect(panel.textContent).toContain("PostgreSQL");
+  expect(panel.textContent).not.toContain("Education");
+  expect(panel.textContent).not.toContain("Agent assessment");
+  expect(panel.textContent).not.toContain("unstructured data");
 });

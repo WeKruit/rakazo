@@ -23,7 +23,13 @@ import { InboxWithReply } from "./InboxTab";
 import { InterviewTab } from "./InterviewTab";
 import { NotesTab, noteCandidateKeys } from "./NotesTab";
 import { EducationTimeline, ExperienceTimeline } from "./ProfileTimeline";
-import { candidateSections, initials, linkedinHandle, sourceLabel } from "./profile";
+import {
+  candidateSections,
+  initials,
+  linkedinHandle,
+  sourceLabel,
+  storedProfileFields,
+} from "./profile";
 import { statusText } from "./shared";
 import { reminderCandidateKeys, TasksTab } from "./TasksTab";
 
@@ -124,7 +130,10 @@ export function RecruitingDetailPanel({
   ];
   const view = views.some((option) => option.view === current.view) ? current.view : "contact";
   const candidate = current.candidate;
-  const sections = candidateSections(candidate?.latestSource?.report?.fields);
+  const sections = candidateSections([
+    ...(candidate?.latestSource?.report?.fields ?? []),
+    ...storedProfileFields(person.profile),
+  ]);
   const email = person.email ?? sections.email;
   const phone = person.phone ?? sections.phone;
   const company = person.company ?? candidate?.company;
