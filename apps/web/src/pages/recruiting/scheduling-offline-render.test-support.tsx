@@ -20,6 +20,11 @@ export async function renderSchedulingProjection(projected: RecruitingCorrespond
   // Feed the actual API result across the RPC boundary into the real Interview tab.
   // CRM rows are deliberately unbound: this asserts only saved calendar projection.
   correspondenceRpc.mockResolvedValue(projected);
+  const event = projected.events[0]!;
+  // Only Date is faked: keep async React/read timers real while opening the week
+  // containing the receipt, including either side of the DST repeated hour.
+  vi.useFakeTimers({ toFake: ["Date"] });
+  vi.setSystemTime(new Date(event.start));
   const host = document.createElement("div");
   document.body.append(host);
   const root = createRoot(host);
@@ -43,12 +48,25 @@ export async function renderSchedulingProjection(projected: RecruitingCorrespond
       groupId: "synthetic-group",
       view: "interview",
     });
-    expect(host.textContent).toContain("Candidate interview");
-    expect(host.textContent).toContain("candidate@example.test");
-    expect(host.querySelector("time")?.getAttribute("datetime")).toBe(projected.events[0]!.start);
-    expect(host.querySelector(`a[href="${projected.events[0]!.url}"]`)).not.toBeNull();
+    const zone = host.querySelector<HTMLSelectElement>('select[aria-label="Display timezone"]')!;
+    await act(async () => {
+      zone.value = "UTC";
+      zone.dispatchEvent(new Event("change", { bubbles: true }));
+    });
+    const trigger = [...host.querySelectorAll<HTMLButtonElement>("button[data-event-id]")].find(
+      (button) => button.dataset.eventId === event.id,
+    )!;
+    expect(trigger).toBeDefined();
+    expect(trigger.textContent).toContain("Candidate interview");
+    await act(async () => trigger.click());
+    const details = host.querySelector<HTMLElement>('aside[aria-label="Event details"]')!;
+    expect(details.textContent).toContain("candidate@example.test");
+    expect(details.querySelector("time")?.getAttribute("datetime")).toBe(event.start);
+    expect(details.querySelector(`a[href="${event.url}"]`)).not.toBeNull();
+    expect(zone.value).toBe("UTC");
   } finally {
     await act(async () => root.unmount());
     host.remove();
+    vi.useRealTimers();
   }
 }
