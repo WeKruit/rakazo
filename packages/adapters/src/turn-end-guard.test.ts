@@ -25,6 +25,8 @@ function fixture(
     completedRoundEffect?: boolean;
     researchTasks?: { id: string; providerTaskId: string; mcpServerId: string; startedAt: Date }[];
     wokenNonces?: string[];
+    acceptedRound?: boolean;
+    brief?: unknown;
   } = {},
 ) {
   const sendUserMessage = vi.fn(async () => ({
@@ -45,7 +47,15 @@ function fixture(
       recruitingCandidatePage: {
         aggregate: vi.fn(async () => ({ _sum: { rowCount: options.savedRows ?? null } })),
       },
-      recruitingCalibrationRound: { findFirst: vi.fn(async () => options.round ?? null) },
+      recruitingCalibrationRound: {
+        findFirst: vi.fn(async (args: { where: { approvedAt?: unknown } }) =>
+          args.where.approvedAt
+            ? options.acceptedRound
+              ? { id: "round-0" }
+              : null
+            : (options.round ?? null),
+        ),
+      },
       externalEffect: {
         findFirst: vi.fn(async (args: { where: { kind?: string } }) =>
           args.where.kind === "recruiting_research" && options.completedRoundEffect
@@ -74,7 +84,7 @@ function fixture(
           archivedAt: null,
         })),
       },
-      recruitingRoleRevision: { findUnique: vi.fn(async () => ({ brief: null })) },
+      recruitingRoleRevision: { findUnique: vi.fn(async () => ({ brief: options.brief ?? null })) },
       recruitingCandidate: {
         count: vi.fn(async () => options.savedCandidates ?? options.savedRows ?? 0),
       },
@@ -235,7 +245,7 @@ describe("guardRecruitingTurnEnd", () => {
   });
 
   it("treats a save receipt of enough rows as a deliverable", async () => {
-    const f = fixture({ savedRows: 10 });
+    const f = fixture({ savedRows: 5, savedCandidates: 5 });
     const result = await guardRecruitingTurnEnd(f.deps, {
       run,
       roleId: "role-1",
@@ -349,5 +359,31 @@ describe("guardRecruitingTurnEnd", () => {
       });
       expect(result.action).toBe("continued");
     }
+  });
+
+  it("never sends a role that already has saved people back to a fresh search", async () => {
+    // Roles created before the stage column existed still read "intake".
+    const f = fixture({ stage: "intake", savedCandidates: 49 });
+    const result = await guardRecruitingTurnEnd(f.deps, {
+      run,
+      roleId: "role-1",
+      blocks: statusNote,
+      handedOff: false,
+      pendingApproval: false,
+      postAssistant: f.postAssistant,
+    });
+    expect(result).toMatchObject({ action: "continued", stage: "feedback", label: "收集校准反馈" });
+
+    const accepted = fixture({ stage: "intake", savedCandidates: 49, acceptedRound: true });
+    await expect(
+      guardRecruitingTurnEnd(accepted.deps, {
+        run,
+        roleId: "role-1",
+        blocks: statusNote,
+        handedOff: false,
+        pendingApproval: false,
+        postAssistant: accepted.postAssistant,
+      }),
+    ).resolves.toMatchObject({ stage: "scale" });
   });
 });
