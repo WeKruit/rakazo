@@ -2521,6 +2521,8 @@ export function ShellPage() {
     workspaceCandidates ||
     workspaceCorrespondence;
   const roleChatWorkspace = workspaceFull && !workspaceNewRole && Boolean(activeSnapshot?.threadId);
+  // Hidden and inert together: a closed role chat's composer must not be reachable or typed into.
+  const roleChatHidden = workspaceFull && !(roleChatWorkspace && roleChatOpen);
   useEffect(() => {
     if (roleChatWorkspace && roleChatOpen)
       roleChatSection.current
@@ -5303,7 +5305,7 @@ export function ShellPage() {
           ) : null}
           <div className={workspaceBrief ? "hire-brief-grid" : "contents"}>
         <LinkFaviconsContext.Provider value={workspaceFull && !(roleChatWorkspace && roleChatOpen) ? null : linkFavicons}>
-        <section ref={roleChatSection} id={roleChatId} hidden={workspaceFull && !(roleChatWorkspace && roleChatOpen)} aria-label={t`Role conversation`} className={roleChatWorkspace ? "hire-role-chat" : workspaceFull ? "hidden" : workspaceBrief ? "hire-chat-panel" : "flex min-h-0 flex-1 flex-col"}>
+        <section ref={roleChatSection} id={roleChatId} hidden={roleChatHidden} inert={roleChatHidden} aria-label={t`Role conversation`} className={roleChatWorkspace ? "hire-role-chat" : workspaceFull ? "hidden" : workspaceBrief ? "hire-chat-panel" : "flex min-h-0 flex-1 flex-col"}>
         {/* Inside main so the composer and its menus stay above it. */}
         {!mobileSidebarOpen ? (
           <div
