@@ -4036,6 +4036,22 @@ it.each(["rank", "tier", "score"])(
   },
 );
 
+it("falls back from an unavailable score sort to the provider rank, not Name", async () => {
+  api.listCandidates.mockResolvedValue({
+    ...candidatePage(),
+    sortAvailability: { rank: true, tier: false, score: false },
+  });
+  const view = await mounted("thread-1", undefined, false);
+  await view.click("Evidence");
+  expect(
+    view.container.querySelector<HTMLSelectElement>('select[aria-label="Candidate sort"]')?.value,
+  ).toBe("rank");
+  expect(api.listCandidates).toHaveBeenLastCalledWith(
+    expect.objectContaining({ roleId: role.id, sort: "rank" }),
+    { signal: expect.any(AbortSignal) },
+  );
+});
+
 it.each(["tier", "score"])(
   "ignores %s availability from a late previous search scope",
   async (sort) => {
