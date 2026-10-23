@@ -8018,6 +8018,48 @@ describePostgres("recruiting domain (PostgreSQL)", () => {
     ).toEqual(old);
   });
 
+  it("verifies research-action page provenance once per listing, not once per referenced page", async () => {
+    const { f, prepared } = await mappedResearchFixture();
+    const proofQueries = async (pageCount: number) => {
+      for (let page = 0; page < pageCount; page++)
+        await recordCandidatePage(
+          f,
+          prepared,
+          `proof-${pageCount}-${page}`,
+          [
+            canonicalCandidateRow(
+              `Proof ${pageCount}-${page}`,
+              `https://www.linkedin.com/in/proof-${pageCount}-${page}`,
+            ),
+          ],
+          { observedAt: new Date(Date.UTC(2026, 9, 17, pageCount, page)) },
+        );
+      sourceQueries = [];
+      const listed = await recruiting.listRecruitingCandidates(prisma, actor, {
+        roleId: f.role.role.id,
+        sort: "name",
+        limit: 100,
+      });
+      const queries = sourceQueries;
+      sourceQueries = undefined;
+      return { listed, queries };
+    };
+    const two = await proofQueries(2);
+    const eight = await proofQueries(6);
+    expect(eight.listed.items).toHaveLength(8);
+    expect(eight.listed.items.every((item) => item.latestSource?.effectId)).toBe(true);
+    const per = (queries: string[], pattern: RegExp) =>
+      queries.filter((q) => pattern.test(q)).length;
+    // The same proof lookups for 2 or 8 pages: one batched load, one shared research context.
+    for (const pattern of [
+      /FROM "public"\."external_effects" WHERE .*"status"/,
+      /FROM "public"\."recruiting_research_actions"/,
+      /FROM "public"\."recruiting_research_tasks"/,
+    ])
+      expect(per(eight.queries, pattern)).toBe(per(two.queries, pattern));
+    // Unbatched this listing ran ~60 queries per referenced page.
+    expect(eight.queries.length).toBeLessThan(150);
+  });
   it("filters saved native pages with overlapping identities without narrowing role counts", async () => {
     const { f, prepared } = await mappedResearchFixture();
     const pages = [];
