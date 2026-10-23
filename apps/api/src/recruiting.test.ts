@@ -36,6 +36,8 @@ vi.mock("@rakazo/db", async (importOriginal) => {
     createRecruitingRole: vi.fn(),
     bindRecruitingRole: vi.fn(),
     getRecruitingWorkspace: vi.fn(),
+    getRecruitingWorkspaceRoleId: vi.fn(),
+    listRecruitingCandidateLinkedinUrls: vi.fn(),
     getRecruitingCrmTarget: vi.fn(),
     getRecruitingCrmCandidateSyncs: vi.fn(),
     readRecruitingNativeCorrespondence: vi.fn(async () => null),
@@ -5093,5 +5095,300 @@ describe("role campaign read", () => {
       });
       expect(f.calls).toEqual([]);
     }
+  });
+});
+
+describe("role candidates (Autumn + CRM merged list)", () => {
+  const org = "10000000-0000-4000-8000-000000000001";
+  const uuid = (n: number) => `30000000-0000-4000-8000-${String(n).padStart(12, "0")}`;
+  const person = (key: string, linkedinUrl: string | null, extra: Record<string, unknown> = {}) =>
+    ({
+      roleId: "role",
+      candidateKey: key,
+      name: key,
+      title: "Engineer",
+      company: null,
+      location: null,
+      linkedinUrl,
+      resumeUrl: null,
+      evidenceUrls: null,
+      issues: [],
+      shortlisted: false,
+      crm: null,
+      decision: null,
+      decisionReason: null,
+      decisionAt: null,
+      revision: 0,
+      discoveryCount: 1,
+      firstDiscoveredAt: null,
+      lastDiscoveredAt: null,
+      latestAssessment: null,
+      ...extra,
+    }) as unknown as db.RecruitingCandidate;
+  const contact = (n: number, fields: Record<string, unknown>) => ({
+    candidateId: uuid(n),
+    name: `Contact ${n}`,
+    email: null,
+    phone: null,
+    linkedinUrl: null,
+    location: null,
+    title: null,
+    stage: "Sourced",
+    contactStatus: "contacted",
+    outreachStatus: "sent",
+    roleSpecId: null,
+    legacyClientLabel: "Client",
+    legacyRoleLabel: "Role",
+    serverId: "crm-server",
+    organizationId: org,
+    ...fields,
+  });
+  const crmTarget = {
+    bindingEffectId: "binding",
+    target: {
+      mcpServerId: "crm-server",
+      serverRevision: 1,
+      organizationId: org,
+      crmRoleId: uuid(900),
+      crmClientId: uuid(901),
+      clientLabel: "Client",
+      roleLabel: "Role",
+    },
+  };
+  // Autumn fake paging its list by an index cursor, like listCandidates' opaque cursor.
+  const sources = (
+    autumn: db.RecruitingCandidate[],
+    crm: ReturnType<typeof contact>[] | "unavailable" | "unbound",
+  ): api.RoleCandidatesSources => ({
+    async autumn(cursor, limit) {
+      const start = cursor ? Number(cursor) : 0;
+      const items = autumn.slice(start, start + limit);
+      return {
+        items,
+        nextCursor: start + limit < autumn.length ? String(start + limit) : null,
+        total: autumn.length,
+        counts: {
+          sourceRows: autumn.length,
+          candidates: autumn.length,
+          identifiedCandidates: autumn.length,
+          unassessed: autumn.length,
+          assessed: 0,
+          shortlisted: autumn.filter((row) => row.shortlisted).length,
+        },
+        crmTarget: crm === "unbound" ? null : crmTarget,
+      };
+    },
+    autumnLinkedinUrls: async () => autumn.flatMap((row) => row.linkedinUrl ?? []),
+    crm: async () =>
+      crm === "unavailable" || crm === "unbound"
+        ? { status: "unavailable" }
+        : { status: "ok", rows: crm },
+  });
+  const all = async (
+    input: Omit<Parameters<typeof api.mergeRoleCandidates>[0], "threadId">,
+    from: api.RoleCandidatesSources,
+  ) => {
+    const pages = [];
+    let cursor: string | undefined;
+    do {
+      const page = await api.mergeRoleCandidates(
+        { threadId: "thread", ...input, ...(cursor ? { cursor } : {}) },
+        from,
+      );
+      pages.push(page);
+      cursor = page.nextCursor ?? undefined;
+    } while (cursor && pages.length < 50);
+    return pages;
+  };
+
+  it("dedupes by normalized LinkedIn URL into one row with both sides", async () => {
+    const page = await api.mergeRoleCandidates(
+      { threadId: "thread" },
+      sources(
+        [
+          person("ada", "https://www.linkedin.com/in/Ada-L/", {
+            match: { rank: 1, tier: "Strong", score: 9 },
+          }),
+        ],
+        [contact(1, { linkedinUrl: "linkedin.com/in/ada-l?trk=x", email: "ada@x.test" })],
+      ),
+    );
+    expect(page.items).toHaveLength(1);
+    expect(page.items[0]).toMatchObject({
+      key: "autumn:ada",
+      email: "ada@x.test",
+      autumn: { candidateKey: "ada", score: 9, rank: 1, tier: "Strong" },
+      crm: { candidateId: uuid(1), serverId: "crm-server", organizationId: org },
+    });
+    expect(page.total).toBe(1);
+  });
+
+  it("dedupes by lowercased email when LinkedIn is absent (one CRM person, two records)", async () => {
+    const page = await api.mergeRoleCandidates(
+      { threadId: "thread" },
+      sources(
+        [],
+        [
+          contact(1, { email: "Grace@X.test", linkedinUrl: "https://linkedin.com/in/grace" }),
+          contact(2, { email: "grace@x.test " }),
+          contact(3, { email: "other@x.test" }),
+        ],
+      ),
+    );
+    expect(page.items.map((row) => row.key)).toEqual([`crm:${uuid(1)}`, `crm:${uuid(3)}`]);
+  });
+
+  it("puts CRM-only rows after every Autumn row, sorted by score from the Autumn read", async () => {
+    const pages = await all(
+      { limit: 2 },
+      sources(
+        [person("a", null), person("b", null), person("c", null)],
+        [contact(1, { email: "z@x.test" }), contact(2, { email: "y@x.test" })],
+      ),
+    );
+    const keys = pages.flatMap((page) => page.items.map((row) => row.key));
+    expect(keys).toEqual(["autumn:a", "autumn:b", "autumn:c", `crm:${uuid(1)}`, `crm:${uuid(2)}`]);
+    expect(pages.map((page) => page.items.length)).toEqual([2, 2, 1]);
+    expect(pages.every((page) => page.total === 5)).toBe(true);
+  });
+
+  it("pages without overlap or gaps, and a merged CRM contact never reappears as CRM-only", async () => {
+    const autumn = Array.from({ length: 7 }, (_, n) =>
+      person(`p${n}`, `https://linkedin.com/in/p${n}`),
+    );
+    const crm = [
+      contact(1, { linkedinUrl: "https://linkedin.com/in/p6" }),
+      ...Array.from({ length: 5 }, (_, n) => contact(10 + n, { email: `c${n}@x.test` })),
+    ];
+    for (const limit of [1, 3, 4, 100]) {
+      const keys = (await all({ limit }, sources(autumn, crm))).flatMap((page) =>
+        page.items.map((row) => row.key),
+      );
+      expect(new Set(keys).size).toBe(keys.length);
+      expect(keys).toHaveLength(12);
+      expect(keys).not.toContain(`crm:${uuid(1)}`);
+    }
+    await expect(
+      api.mergeRoleCandidates(
+        {
+          threadId: "thread",
+          query: "other",
+          cursor: (
+            await api.mergeRoleCandidates({ threadId: "thread", limit: 1 }, sources(autumn, crm))
+          ).nextCursor!,
+        },
+        sources(autumn, crm),
+      ),
+    ).rejects.toBeInstanceOf(RecruitingConflictError);
+  });
+
+  it("shortlistedOnly keeps shortlisted Autumn rows and drops CRM-only rows", async () => {
+    const from = sources(
+      [person("a", null), person("b", null, { shortlisted: true })],
+      [contact(1, { email: "z@x.test" })],
+    );
+    const original = from.autumn;
+    from.autumn = async (cursor, limit) => {
+      const page = await original(cursor, limit);
+      return { ...page, items: page.items.filter((row) => row.shortlisted), total: 1 };
+    };
+    const page = await api.mergeRoleCandidates({ threadId: "thread", shortlistedOnly: true }, from);
+    expect(page.items.map((row) => row.key)).toEqual(["autumn:b"]);
+    expect(page.total).toBe(1);
+  });
+
+  it("counts shortlisted, replied and each outreach status once per deduped person", async () => {
+    const page = await api.mergeRoleCandidates(
+      { threadId: "thread" },
+      sources(
+        [person("a", null, { shortlisted: true }), person("b", "https://linkedin.com/in/b")],
+        [
+          contact(1, { linkedinUrl: "https://linkedin.com/in/b", outreachStatus: "replied" }),
+          contact(2, { email: "r@x.test", outreachStatus: "replied" }),
+          contact(3, { email: "r@x.test", outreachStatus: "replied" }),
+          contact(4, { email: "s@x.test", outreachStatus: "bounced" }),
+        ],
+      ),
+    );
+    expect(page.counts).toEqual({ shortlisted: 1, replied: 2, bounced: 1 });
+    expect(page.crmStatus).toBe("ok");
+  });
+
+  it("query filters CRM-only rows on name, email and title case-insensitively", async () => {
+    const page = await api.mergeRoleCandidates(
+      { threadId: "thread", query: "ROBOT" },
+      sources(
+        [],
+        [
+          contact(1, { title: "Robotics lead" }),
+          contact(2, { email: "robot@x.test" }),
+          contact(3, { name: "Ana" }),
+        ],
+      ),
+    );
+    expect(page.items.map((row) => row.key)).toEqual([`crm:${uuid(1)}`, `crm:${uuid(2)}`]);
+  });
+
+  it("returns Autumn-only rows with crm null when the CRM is unbound or unavailable", async () => {
+    for (const [crm, status] of [
+      ["unbound", "not_bound"],
+      ["unavailable", "unavailable"],
+    ] as const) {
+      const page = await api.mergeRoleCandidates(
+        { threadId: "thread" },
+        sources([person("a", "https://linkedin.com/in/a")], crm),
+      );
+      expect(page).toMatchObject({ crmStatus: status, total: 1, nextCursor: null });
+      expect(page.items.map((row) => [row.key, row.crm])).toEqual([["autumn:a", null]]);
+    }
+  });
+
+  it("wires the existing listCandidates read and reports an unbound CRM without CRM calls", async () => {
+    vi.mocked(db.getRecruitingWorkspaceRoleId).mockResolvedValue("role");
+    vi.mocked(db.listRecruitingCandidates).mockResolvedValue({
+      ...(await sources([person("a", null)], "unbound").autumn(undefined, 25)),
+      sortAvailability: { rank: true, tier: false, score: true },
+      roleId: "role",
+      roleRevisionId: "revision",
+    });
+    const execute = vi.fn();
+    const target = {
+      kind: "bot" as const,
+      botId: "bot",
+      threadId: "thread",
+    } as unknown as Parameters<typeof api.getRecruitingRoleCandidates>[2];
+    const page = await api.getRecruitingRoleCandidates(
+      {
+        prisma,
+        artifacts: {} as ArtifactStore,
+        connectors: { execute },
+        reauthorize: async () => target,
+      },
+      actor,
+      target,
+      { threadId: "thread", query: "a", shortlistedOnly: true },
+    );
+    expect(db.listRecruitingCandidates).toHaveBeenCalledWith(prisma, actor, {
+      roleId: "role",
+      limit: 25,
+      sort: "score",
+      query: "a",
+      shortlisted: true,
+    });
+    expect(execute).not.toHaveBeenCalled();
+    expect(page).toMatchObject({ crmStatus: "not_bound", total: 1 });
+    await expect(
+      api.getRecruitingRoleCandidates(
+        {
+          prisma,
+          artifacts: {} as ArtifactStore,
+          connectors: { execute },
+          reauthorize: async () => target,
+        },
+        actor,
+        target,
+        { threadId: "other-thread" },
+      ),
+    ).rejects.toBeInstanceOf(IsolationError);
   });
 });

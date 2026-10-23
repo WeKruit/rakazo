@@ -1,6 +1,7 @@
 import { RPCHandler } from "@orpc/server/fetch";
 import type { Actor } from "@rakazo/contracts";
 import type { PrismaClient } from "@rakazo/db";
+import { createLogger, createTestSink, installLogger } from "@rakazo/logging";
 import { describe, expect, it, vi } from "vitest";
 import type { RouterDeps } from "./router.js";
 import { createRouter } from "./router.js";
@@ -89,6 +90,30 @@ describe("archived thread read authorization", () => {
       );
     },
   );
+  it("threads/get returns the window cursor and logs per-part timing", async () => {
+    const sink = createTestSink();
+    installLogger(createLogger({ service: "rakazo-api", sinks: [sink] }));
+    try {
+      const { call } = fixture();
+      const result = await call("threads/get", { botId: "bot-1" });
+      expect(result.body.json).toMatchObject({ messagesCursor: 1, hasOlder: false });
+      expect(sink.events).toContainEqual(
+        expect.objectContaining({
+          message: "thread.get.timing",
+          threadId: "thread-1",
+          kind: "bot",
+          messageCount: 1,
+          hasOlder: false,
+          resolveMs: expect.any(Number),
+          snapshotMs: expect.any(Number),
+          projectMs: expect.any(Number),
+          totalMs: expect.any(Number),
+        }),
+      );
+    } finally {
+      installLogger(createLogger({ service: "rakazo-api", level: "off", sinks: [] }));
+    }
+  });
   it.each(["threads/get", "threads/messages"])(
     "%s keeps user and space isolation",
     async (proc) => {
