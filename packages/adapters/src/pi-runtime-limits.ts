@@ -120,3 +120,51 @@ export function resolveCompletionMaxTokens(
 function nonNegativeCount(value: number | undefined): number {
   return typeof value === "number" && Number.isFinite(value) ? Math.max(0, value) : 0;
 }
+
+export type StoredToolOutput = { artifactId: string; length: number };
+export type ToolOutputStore = (text: string) => Promise<StoredToolOutput | undefined>;
+
+/** Pointer the model sees after a clipped result; the full text stays readable on demand. */
+export function fullToolOutputPointer(stored: StoredToolOutput): string {
+  return `\n[Output clipped. The complete ${stored.length}-character result is saved; read it with artifact_read artifactId "${stored.artifactId}" using offset and limit.]`;
+}
+
+/**
+ * Clip text for the context and, when a store is available, keep the complete text as an
+ * artifact and append a pointer. Without a store this is exactly the old clip.
+ */
+export async function clipWithFullOutput(
+  text: string,
+  clip: (text: string) => string,
+  store: ToolOutputStore | undefined,
+  limit: number = TOOL_RESULT_TEXT_LIMIT,
+): Promise<string> {
+  if (text.length <= limit) return text;
+  const clipped = clip(text);
+  if (!store) return clipped;
+  const stored = await store(text).catch(() => undefined);
+  return stored ? `${clipped}${fullToolOutputPointer(stored)}` : clipped;
+}
+
+/** Content-part variant: clips text parts by one shared budget and adds a pointer part. */
+export async function clipContentWithFullOutput<T>(
+  content: T[],
+  store: ToolOutputStore | undefined,
+  limit: number = TOOL_RESULT_TEXT_LIMIT,
+): Promise<T[]> {
+  const texts = content.flatMap((part) =>
+    part &&
+    typeof part === "object" &&
+    "type" in part &&
+    (part as { type?: unknown }).type === "text" &&
+    "text" in part
+      ? [String((part as { text: unknown }).text)]
+      : [],
+  );
+  const total = texts.reduce((sum, text) => sum + text.length, 0);
+  const clipped = clipToolResultContent(content, limit);
+  if (total <= limit || !store) return clipped;
+  const stored = await store(texts.join("\n")).catch(() => undefined);
+  if (!stored) return clipped;
+  return [...clipped, { type: "text", text: fullToolOutputPointer(stored) } as T];
+}

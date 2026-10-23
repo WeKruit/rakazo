@@ -71,8 +71,10 @@ import {
   registerOpenAiCompatibleRuntime,
 } from "./pi-openai-compatible-provider.js";
 import {
-  clipToolResultContent,
+  clipContentWithFullOutput,
   clipToolResultText,
+  clipWithFullOutput,
+  type ToolOutputStore,
   MODEL_STREAM_IDLE_TIMEOUT_MS,
   MODEL_STREAM_TIMEOUT_MS,
   modelStreamMaxRetries,
@@ -1591,7 +1593,15 @@ function toAgentTool(tool: ConnectorTool, host: ToolHost, exposedName: string): 
               content: [
                 {
                   type: "text",
-                  text: serializeToolResult(result, host.request.contextStrategy, tool.name, args),
+                  text: await clipWithFullOutput(
+                    toolResultJson(result),
+                    (full) =>
+                      shortenToolResultText(full, 12_000, { name: tool.name, arguments: args }),
+                    VERBATIM_TOOL_RESULTS.has(tool.name)
+                      ? undefined
+                      : toolOutputStore(host, tool.name, executionId),
+                    VERBATIM_TOOL_RESULTS.has(tool.name) ? Number.POSITIVE_INFINITY : 12_000,
+                  ),
                 },
               ],
               details: result,
@@ -1608,7 +1618,10 @@ function toAgentTool(tool: ConnectorTool, host: ToolHost, exposedName: string): 
           };
         })();
         if (VERBATIM_TOOL_RESULTS.has(tool.name)) return result as AgentToolResult<unknown>;
-        return boundAgentToolResult(result as AgentToolResult<unknown>);
+        return boundAgentToolResult(
+          result as AgentToolResult<unknown>,
+          toolOutputStore(host, tool.name, executionId),
+        );
       } catch (error) {
         failure = error;
         throw error;
@@ -2403,12 +2416,57 @@ export function serializeToolResult(
   }
 }
 
-function boundAgentToolResult<T>(result: AgentToolResult<T>): AgentToolResult<T> {
+/** The complete serialized result, before any context clipping. */
+export function toolResultJson(result: unknown): string {
+  try {
+    if (
+      result &&
+      typeof result === "object" &&
+      Object.hasOwn(result, "structuredContent") &&
+      "structuredContent" in result &&
+      "content" in result &&
+      Array.isArray(result.content) &&
+      result.content.length === 1
+    ) {
+      const part = result.content[0];
+      if (
+        part?.type === "text" &&
+        typeof part.text === "string" &&
+        Object.keys(part).length === 2 &&
+        Object.hasOwn(part, "type") &&
+        Object.hasOwn(part, "text") &&
+        part.text === JSON.stringify(result.structuredContent)
+      ) {
+        const { content: _duplicateContent, ...envelope } = result;
+        result = envelope;
+      }
+    }
+    return JSON.stringify(result) || "ok";
+  } catch {
+    return "ok";
+  }
+}
+
+async function boundAgentToolResult<T>(
+  result: AgentToolResult<T>,
+  store?: ToolOutputStore,
+): Promise<AgentToolResult<T>> {
   if (!result || !Array.isArray(result.content)) return result;
   return {
     ...result,
-    content: clipToolResultContent(result.content),
+    content: await clipContentWithFullOutput(result.content, store),
   };
+}
+
+/** Executor-backed storage for clipped results; absent for runs without an artifact store. */
+function toolOutputStore(
+  host: ToolHost,
+  name: string,
+  executionId: string,
+): ToolOutputStore | undefined {
+  const store = host.request.storeToolOutput;
+  if (!store) return undefined;
+  return (text) => store({ name, executionId, text });
 }
 
 function assistantText(message: unknown): string {

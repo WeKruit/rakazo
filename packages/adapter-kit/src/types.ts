@@ -516,6 +516,15 @@ export interface AgentRunRequest {
   ) => Promise<unknown>;
   /** Called after a tool returns; implementations must not persist raw result contents. */
   onToolCompleted?: (completion: AgentToolCompletion) => Promise<void> | void;
+  /**
+   * Keep a tool result that exceeds the context clip as a thread artifact so the model can read
+   * the rest with artifact_read. Returns undefined when storage is unavailable or refused.
+   */
+  storeToolOutput?: (output: {
+    name: string;
+    executionId: string;
+    text: string;
+  }) => Promise<{ artifactId: string; length: number } | undefined>;
   /** Atomically claim durable user steering at the runtime's next safe turn boundary. */
   claimSteering?: (seenIds: string[]) => Promise<AgentSteeringMessage[]>;
 }

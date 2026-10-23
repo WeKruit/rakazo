@@ -445,7 +445,7 @@ import {
 } from "./takeover-resume.js";
 import { TASK_CATALOG_GUIDANCE, taskCatalogFromTool } from "./task-catalog.js";
 import { getActiveTeachingSession, parsePlaybook } from "./teaching-session.js";
-import { attachWorkspaceFileToThread } from "./thread-artifacts.js";
+import { attachWorkspaceFileToThread, storeToolOutputArtifact } from "./thread-artifacts.js";
 import type { TicketChangeNotifier } from "./ticket-changes.js";
 import { loadAgentTicketContext } from "./ticket-context.js";
 import {
@@ -8855,6 +8855,33 @@ export function createRunExecutor(deps: ExecutorDeps) {
               allowSilentEmpty: allowSilentEmptyRun,
               emptyResponseText,
               executeTool: scripted ? undefined : applyTool,
+              storeToolOutput:
+                scripted || !deps.artifacts
+                  ? undefined
+                  : async (output) => {
+                      try {
+                        return await storeToolOutputArtifact(
+                          { prisma: deps.prisma, artifacts: deps.artifacts! },
+                          {
+                            spaceId: run.spaceId,
+                            userId: run.userId,
+                            botId: bot.id,
+                            groupId: thread.groupId ?? undefined,
+                            runId: run.id,
+                            toolName: output.name,
+                            executionId: output.executionId,
+                            text: redactSecrets(output.text, runSecrets),
+                          },
+                        );
+                      } catch (error) {
+                        getLogger().warn("tool output artifact not stored", {
+                          runId,
+                          tool: output.name,
+                          error: error instanceof Error ? error.message : String(error),
+                        });
+                        return undefined;
+                      }
+                    },
               resolveModel: scripted
                 ? undefined
                 : (provider, modelId) =>
