@@ -12,8 +12,8 @@ for (const width of [1440, 390]) {
     await page.getByRole("button", { name: "Avery Example", exact: true }).click();
     await page.getByRole("button", { name: "Plan interview", exact: true }).click();
     const form = page.getByRole("region", { name: "Interview plan", exact: true });
-    await form.getByLabel("Candidate IANA timezone", { exact: true }).fill("America/New_York");
-    await form.getByLabel("Interviewer IANA timezone", { exact: true }).fill("Europe/London");
+    await form.getByLabel("Candidate time zone", { exact: true }).fill("America/New_York");
+    await form.getByLabel("Interviewer time zone", { exact: true }).fill("Europe/London");
     await form.getByLabel("Requested interviewer name", { exact: true }).fill("Recruiter Example");
     await form
       .getByLabel("Requested interviewer email", { exact: true })
@@ -78,8 +78,8 @@ test("native Inbox uses an exact role candidate record for the same plan flow", 
   await form
     .getByLabel("Candidate record", { exact: true })
     .selectOption("fixture-native-candidate");
-  await form.getByLabel("Candidate IANA timezone", { exact: true }).fill("America/New_York");
-  await form.getByLabel("Interviewer IANA timezone", { exact: true }).fill("Europe/London");
+  await form.getByLabel("Candidate time zone", { exact: true }).fill("America/New_York");
+  await form.getByLabel("Interviewer time zone", { exact: true }).fill("Europe/London");
   await form.getByLabel("Requested interviewer name", { exact: true }).fill("Recruiter Example");
   await form
     .getByLabel("Requested interviewer email", { exact: true })

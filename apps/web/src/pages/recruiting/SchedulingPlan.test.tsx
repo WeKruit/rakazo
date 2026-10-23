@@ -119,8 +119,8 @@ async function fill(label: string, value: string) {
   });
 }
 async function complete() {
-  await fill("Candidate IANA timezone", "America/New_York");
-  await fill("Interviewer IANA timezone", "Europe/London");
+  await fill("Candidate time zone", "America/New_York");
+  await fill("Interviewer time zone", "Europe/London");
   await fill("Requested interviewer name", "Recruiter Example");
   await fill("Requested interviewer email", "recruiter@example.test");
   await act(async () => host.querySelector<HTMLInputElement>('input[type="radio"]')!.click());
@@ -171,10 +171,10 @@ it("reviews both explicit zones and date-specific DST offsets, saves exact proof
 it("requires both named zones and never accepts a fixed-offset guess", async () => {
   await render();
   await complete();
-  await fill("Candidate IANA timezone", "-04:00");
+  await fill("Candidate time zone", "-04:00");
   expect(button("Review plan").disabled).toBe(true);
   expect(save).not.toHaveBeenCalled();
-  await fill("Candidate IANA timezone", "America/Unknown");
+  await fill("Candidate time zone", "America/Unknown");
   expect(button("Review plan").disabled).toBe(true);
 });
 it("gates CRM-only original rows on a real native mail read without creating a plan", async () => {

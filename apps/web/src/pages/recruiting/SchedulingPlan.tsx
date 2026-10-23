@@ -29,6 +29,14 @@ function PlanTimes({ plan }: { plan: RecruitingSchedulingPlanInput }) {
   return (
     <dl className="space-y-2 text-sm">
       <div>
+        <dt className="sr-only">
+          <Trans>Duration</Trans>
+        </dt>
+        <dd>
+          <Trans>{plan.calendar.lengthInMinutes} minutes</Trans>
+        </dd>
+      </div>
+      <div>
         <dt className="font-medium">
           {plan.candidate.name} · {plan.candidate.email}
         </dt>
@@ -342,10 +350,10 @@ export function SchedulingPlanForm({
               </label>
             )}
             <label className="block text-sm" htmlFor={`${formId}-candidate-zone`}>
-              <Trans>Candidate IANA timezone</Trans>
+              <Trans>Candidate time zone</Trans>
               <Input
                 id={`${formId}-candidate-zone`}
-                aria-label={t`Candidate IANA timezone`}
+                aria-label={t`Candidate time zone`}
                 placeholder="America/New_York"
                 value={candidateZone}
                 onChange={(event) => setCandidateZone(event.target.value)}
@@ -371,10 +379,10 @@ export function SchedulingPlanForm({
               />
             </label>
             <label className="block text-sm" htmlFor={`${formId}-interviewer-zone`}>
-              <Trans>Interviewer IANA timezone</Trans>
+              <Trans>Interviewer time zone</Trans>
               <Input
                 id={`${formId}-interviewer-zone`}
-                aria-label={t`Interviewer IANA timezone`}
+                aria-label={t`Interviewer time zone`}
                 placeholder="Europe/London"
                 value={interviewerZone}
                 onChange={(event) => setInterviewerZone(event.target.value)}
