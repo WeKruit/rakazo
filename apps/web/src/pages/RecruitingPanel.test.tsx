@@ -7810,7 +7810,11 @@ it("drops cached Artifact metadata when its exact reference changes", async () =
   const view = await mounted();
   await view.click("Activity");
   await view.expand("Request");
-  expect(view.container.textContent).toContain("request.json");
+  // The native SHA-256 verification completes after the metadata RPC and toggle's act scope.
+  await vi.waitFor(async () => {
+    await act(async () => {});
+    expect(view.container.textContent).toContain("request.json");
+  });
   const research = await api.listResearch.mock.results[0]!.value;
   api.listResearch.mockResolvedValue({
     ...research,
@@ -7834,9 +7838,12 @@ it("drops cached Artifact metadata when its exact reference changes", async () =
     artifactId: "request-2",
     includeDiagnostics: true,
   });
-  expect(
-    view.container.querySelector('[data-artifact-id="request-2"]')?.getAttribute("data-group-id"),
-  ).toBe("source-group");
+  await vi.waitFor(async () => {
+    await act(async () => {});
+    expect(
+      view.container.querySelector('[data-artifact-id="request-2"]')?.getAttribute("data-group-id"),
+    ).toBe("source-group");
+  });
 });
 it("states which memory scopes a group actually queries", async () => {
   api.list.mockResolvedValue([]);
