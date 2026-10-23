@@ -12,6 +12,15 @@ concurrency:
   cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 jobs:
+  release-safeguards:
+    name: Release safeguards
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+        with:
+          persist-credentials: false
+      - run: python3 -B -m unittest discover -s infra/release -p 'test_*.py' -v
+
   lint:
     name: Lint
     runs-on: ubuntu-latest
@@ -121,12 +130,14 @@ jobs:
 
   publish-mobile-update:
     name: Publish compatible mobile update
-    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
-    needs: [lint, check, build, test, test-integration, test-e2e]
+    if: >-
+      github.event_name == 'push' && github.ref == 'refs/heads/main' &&
+      vars.MOBILE_OTA_PUBLISH_ENABLED == 'true' && vars.MODAL_PROMOTION_ENABLED != 'true'
+    needs: [lint, check, build, test, test-integration, test-e2e, release-safeguards]
     runs-on: ubuntu-latest
     timeout-minutes: 20
     concurrency:
-      group: mobile-production-update
+      group: production
       cancel-in-progress: false
     steps:
       - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
@@ -274,8 +285,12 @@ jobs:
     if: >-
       github.event_name == 'push' &&
       github.ref == 'refs/heads/main' &&
-      vars.PRODUCTION_DEPLOY_ENABLED == 'true'
-    needs: [lint, check, build, test, test-integration, test-e2e]
+      vars.PRODUCTION_DEPLOY_ENABLED == 'true' &&
+      vars.LEGACY_COMPOSE_DEPLOY_ENABLED == 'true' &&
+      vars.MODAL_PROMOTION_ENABLED != 'true' &&
+      vars.PRODUCTION_DEPLOYMENT_HOLD == 'clear' &&
+      vars.PRODUCTION_APPROVED_SHA == github.sha
+    needs: [lint, check, build, test, test-integration, test-e2e, release-safeguards]
     runs-on: ubuntu-latest
     timeout-minutes: 30
     concurrency:
@@ -312,4 +327,4 @@ jobs:
             -o IdentitiesOnly=yes \
             -o StrictHostKeyChecking=yes \
             -o UserKnownHostsFile="$HOME/.ssh/known_hosts" \
-            "$SSH_USER@$SSH_HOST" deploy-main
+            "$SSH_USER@$SSH_HOST" deploy-main "$GITHUB_SHA"

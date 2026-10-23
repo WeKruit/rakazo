@@ -1,15 +1,26 @@
 #!/usr/bin/env bash
-# Build and roll out origin/main on the single-VM production stack.
+# Legacy Compose only: build the explicitly approved, tested full source revision.
 #
 # Install as /usr/local/sbin/rakazo-deploy-main and run it as the deploy user, for example
 # from CI through an SSH forced command. The deploy user needs passwordless sudo for Docker.
 set -Eeuo pipefail
+
+# Forced-command SSH exposes the requested command through SSH_ORIGINAL_COMMAND.
+requested_revision="${1:-}"
+if [[ -n "${SSH_ORIGINAL_COMMAND:-}" ]]; then
+  [[ "$SSH_ORIGINAL_COMMAND" =~ ^deploy-main\ ([0-9a-f]{40})$ ]] || { echo "Expected deploy-main FULL_SHA" >&2; exit 1; }
+  requested_revision="${BASH_REMATCH[1]}"
+fi
+[[ "$requested_revision" =~ ^[0-9a-f]{40}$ ]] || { echo "A tested full SHA is required" >&2; exit 1; }
 
 # A forced SSH command carries no environment, so read the checkout path from a root-owned file.
 if [[ -z "${RAKAZO_DEPLOY_DIR:-}" && -r /etc/rakazo/deploy.env ]]; then
   # shellcheck disable=SC1091
   source /etc/rakazo/deploy.env
 fi
+[[ "${RAKAZO_LEGACY_COMPOSE_APPROVED_SHA:-}" == "$requested_revision" && "${RAKAZO_DEPLOYMENT_HOLD:-}" == clear ]] || {
+  echo "Legacy Compose approval or hold prerequisite is missing" >&2; exit 1;
+}
 APP_DIR="${RAKAZO_DEPLOY_DIR:-/srv/rakazo}"
 [[ "${APP_DIR}" == /* ]] || { echo "RAKAZO_DEPLOY_DIR must be an absolute path" >&2; exit 1; }
 COMPOSE_FILE="infra/compose/docker-compose.prod.yml"
@@ -44,8 +55,10 @@ if ! flock -n 9; then
 fi
 
 previous_revision="$(git rev-parse HEAD)"
+[[ -z "$(git status --porcelain)" ]] || { echo "Refusing a dirty deployment checkout" >&2; exit 1; }
 git fetch --quiet --prune origin main
-target_revision="$(git rev-parse origin/main)"
+target_revision="$requested_revision"
+[[ "$(git rev-parse origin/main)" == "$target_revision" ]] || { echo "Approved revision is no longer main; review and retry explicitly" >&2; exit 1; }
 
 # Written only after a healthy rollout. A reset can make HEAD match before containers change.
 deployed_revision=""

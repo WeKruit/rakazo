@@ -1,0 +1,64 @@
+name: promote-production
+
+on:
+  workflow_dispatch:
+    inputs:
+      staging_run_id:
+        description: Successful main staging run containing the release artifact
+        required: true
+        type: string
+      expected_sha:
+        description: Full tested product SHA approved for promotion
+        required: true
+        type: string
+
+permissions:
+  contents: read
+  actions: read
+
+concurrency:
+  group: production
+  cancel-in-progress: false
+
+jobs:
+  promote:
+    # An environment label is NOT an approval gate. Activation and per-release evidence
+    # are checked below; private-repository reviewer support must be verified by the owner.
+    if: github.repository == 'WeKruit/rakazo' && github.ref == 'refs/heads/main'
+    environment: production
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    env:
+      PYTHONDONTWRITEBYTECODE: "1"
+      EXPECTED_SHA: ${{ inputs.expected_sha }}
+      STAGING_RUN_ID: ${{ inputs.staging_run_id }}
+      MODAL_PROMOTION_ENABLED: ${{ vars.MODAL_PROMOTION_ENABLED }}
+      PRODUCTION_DEPLOYMENT_HOLD: ${{ vars.PRODUCTION_DEPLOYMENT_HOLD }}
+      PRODUCTION_RELEASE_APPROVAL: ${{ vars.PRODUCTION_RELEASE_APPROVAL }}
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Require activation and preserve the deployment hold
+        run: |
+          test "$MODAL_PROMOTION_ENABLED" = true
+          test "$PRODUCTION_DEPLOYMENT_HOLD" = clear
+          test -n "$PRODUCTION_RELEASE_APPROVAL"
+      - name: Fetch and verify exact staging candidate
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: python3 infra/release/release.py fetch --run-id "$STAGING_RUN_ID" --sha "$EXPECTED_SHA" --directory "$RUNNER_TEMP/candidate"
+      - name: Install existing Modal CLI
+        run: python3 -m pip install modal==1.6.2
+      - name: Promote approved candidate and check readiness
+        env:
+          GH_TOKEN: ${{ github.token }}
+          MODAL_TOKEN_ID: ${{ secrets.PRODUCTION_MODAL_TOKEN_ID }}
+          MODAL_TOKEN_SECRET: ${{ secrets.PRODUCTION_MODAL_TOKEN_SECRET }}
+          MODAL_APP_NAME: ${{ vars.MODAL_APP_NAME }}
+          MODAL_SECRET_NAME: ${{ vars.MODAL_SECRET_NAME }}
+          MODAL_VOLUME_NAME: ${{ vars.MODAL_VOLUME_NAME }}
+          MODAL_ENVIRONMENT: ${{ vars.MODAL_ENVIRONMENT }}
+          PRODUCTION_ORIGIN: ${{ vars.PRODUCTION_ORIGIN }}
+        run: python3 infra/release/release.py promote --sha "$EXPECTED_SHA" --directory "$RUNNER_TEMP/candidate"

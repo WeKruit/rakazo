@@ -1,5 +1,10 @@
 # Native Rakazo on Modal
 
+For the proposed PR/staging/promotion path, see
+[the release runbook](../../docs/development/pr-driven-releases.md).
+Its activation requires separate owner approval; this file is not a release authorization.
+Deployments now require the named Volume to exist; they never create it implicitly.
+
 This deployment runs the original Web preview server, API, worker and Pi runtime
 in one initial Modal container. It requires an external PostgreSQL database and a
 native sandbox provider. No Docker daemon or additional agent harness is used.

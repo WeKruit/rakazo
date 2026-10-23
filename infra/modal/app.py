@@ -37,7 +37,7 @@ def source_revision() -> str:
 
 
 SOURCE_REVISION = source_revision() if modal.is_local() else "unknown"
-files = modal.Volume.from_name(VOLUME_NAME, create_if_missing=True)
+files = modal.Volume.from_name(VOLUME_NAME, create_if_missing=False)
 config = modal.Secret.from_name(SECRET_NAME)
 image = (
     modal.Image.from_registry("node:24.22.0-bookworm-slim", add_python="3.11")

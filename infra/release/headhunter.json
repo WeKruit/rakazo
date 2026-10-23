@@ -1,0 +1,9 @@
+{
+  "repository": "WeKruit/headhunter-agent",
+  "sha": "11ca9c2df226782eee241fc5b36ba15600f4efcb",
+  "migrations": [
+    "20261023180000_crm_candidate_presence",
+    "20261023181000_crm_candidate_presence_secondary_roles"
+  ],
+  "presence_protocol": 2
+}

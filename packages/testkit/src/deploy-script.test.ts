@@ -49,6 +49,7 @@ function fixture() {
   git(upstream, "init", "-q", "-b", "main");
   const first = commit(upstream, "first");
   git(root, "clone", "-q", upstream, checkout);
+  write(path.join(checkout, ".git/info/exclude"), ".env\n.deploy.lock\n.last-deployed-revision\n");
   write(path.join(checkout, ".env"), "RAKAZO_HOST=app.example.test\n");
   const log = path.join(root, "commands.log");
   // Record every privileged or network command instead of running it.
@@ -84,10 +85,20 @@ exit 0
     upstream,
     checkout,
     first,
-    run(overrides: Record<string, string> = {}) {
-      const result = spawnSync("/bin/bash", [path.join(repoRoot, "infra/compose/deploy-main.sh")], {
+    run(
+      overrides: Record<string, string> = {},
+      revision: string | null = git(upstream, "rev-parse", "HEAD"),
+    ) {
+      const args = [path.join(repoRoot, "infra/compose/deploy-main.sh")];
+      if (revision !== null) args.push(revision);
+      const result = spawnSync("/bin/bash", args, {
         cwd: root,
-        env: { ...env, ...overrides },
+        env: {
+          ...env,
+          RAKAZO_LEGACY_COMPOSE_APPROVED_SHA: revision ?? git(upstream, "rev-parse", "HEAD"),
+          RAKAZO_DEPLOYMENT_HOLD: "clear",
+          ...overrides,
+        },
         encoding: "utf8",
         timeout: 20_000,
       });
@@ -107,6 +118,96 @@ exit 0
 }
 
 describe("production deploy script", () => {
+  it("requires an explicit full tested revision before any deployment command", () => {
+    for (const revision of [null, "", "main", "abc123", `${"a".repeat(40)}\n`]) {
+      const deploy = fixture();
+      const result = deploy.run({}, revision);
+      expect(result.status).toBe(1);
+      expect(result.stderr).toContain("full SHA");
+      expect(deploy.head()).toBe(deploy.first);
+      expect(deploy.commands()).toEqual([]);
+    }
+  });
+
+  it("rejects malformed forced SSH commands without interpreting shell syntax", () => {
+    const deploy = fixture();
+    for (const command of [
+      "deploy-main",
+      `deploy-main ${deploy.first}; echo unexpected`,
+      `deploy-main ${deploy.first} extra`,
+      `deploy-main ${deploy.first}\n`,
+    ]) {
+      const result = deploy.run({ SSH_ORIGINAL_COMMAND: command });
+      expect(result.status).toBe(1);
+      expect(result.stderr).toContain("Expected deploy-main FULL_SHA");
+      expect(deploy.head()).toBe(deploy.first);
+      expect(deploy.commands()).toEqual([]);
+    }
+  });
+
+  it("accepts the exact approved forced SSH revision", () => {
+    const deploy = fixture();
+    const result = deploy.run({ SSH_ORIGINAL_COMMAND: `deploy-main ${deploy.first}` }, null);
+    expect(result.status).toBe(0);
+    expect(deploy.deployed()).toBe(deploy.first);
+  });
+
+  it("preserves the hold and requires approval for this exact revision", () => {
+    const deploy = fixture();
+    for (const overrides of [
+      { RAKAZO_LEGACY_COMPOSE_APPROVED_SHA: "" },
+      { RAKAZO_LEGACY_COMPOSE_APPROVED_SHA: "a".repeat(40) },
+      { RAKAZO_DEPLOYMENT_HOLD: "held" },
+      { RAKAZO_DEPLOYMENT_HOLD: "" },
+    ]) {
+      const result = deploy.run(overrides);
+      expect(result.status).toBe(1);
+      expect(result.stderr).toContain("approval or hold prerequisite");
+      expect(deploy.head()).toBe(deploy.first);
+      expect(deploy.commands()).toEqual([]);
+    }
+  });
+
+  it("does not silently substitute a newer main revision for the approved source", () => {
+    const deploy = fixture();
+    const approved = commit(deploy.upstream, "approved");
+    commit(deploy.upstream, "newer unapproved");
+    const result = deploy.run({}, approved);
+    expect(result.status).toBe(1);
+    expect(result.stderr).toContain("no longer main");
+    expect(deploy.head()).toBe(deploy.first);
+    expect(deploy.commands()).toEqual([]);
+  });
+
+  it("preserves dirty tracked work before changing the checkout", () => {
+    const deploy = fixture();
+    commit(deploy.upstream, "next");
+    write(path.join(deploy.checkout, "revision.txt"), "uncommitted user work\n");
+    const result = deploy.run();
+    expect(result.status).toBe(1);
+    expect(result.stderr).toContain("dirty");
+    expect(readFileSync(path.join(deploy.checkout, "revision.txt"), "utf8")).toBe(
+      "uncommitted user work\n",
+    );
+    expect(deploy.head()).toBe(deploy.first);
+    expect(deploy.commands()).toEqual([]);
+  });
+
+  it("preserves untracked work that the target revision would overwrite", () => {
+    const deploy = fixture();
+    write(path.join(deploy.checkout, "incoming.txt"), "untracked user work\n");
+    write(path.join(deploy.upstream, "incoming.txt"), "new tracked content\n");
+    git(deploy.upstream, "add", "incoming.txt");
+    commit(deploy.upstream, "next");
+    const result = deploy.run();
+    expect(result.status).toBe(1);
+    expect(readFileSync(path.join(deploy.checkout, "incoming.txt"), "utf8")).toBe(
+      "untracked user work\n",
+    );
+    expect(deploy.head()).toBe(deploy.first);
+    expect(deploy.commands()).toEqual([]);
+  });
+
   it("fails instead of reporting success while another deploy holds the lock", () => {
     const deploy = fixture();
     const next = commit(deploy.upstream, "next");

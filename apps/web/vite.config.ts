@@ -458,6 +458,7 @@ export default defineConfig(({ mode }) => {
       strictPort: true,
       allowedHosts,
       proxy: {
+        "/ready": { target: api, changeOrigin: true, xfwd: true },
         "/api": { target: api, changeOrigin: true },
         "/rpc": { target: api, changeOrigin: true },
       },
@@ -467,6 +468,7 @@ export default defineConfig(({ mode }) => {
       port: Number(process.env.WEB_PORT ?? 5173),
       allowedHosts,
       proxy: {
+        "/ready": { target: api, changeOrigin: true, xfwd: true },
         "/api": { target: api, changeOrigin: true },
         "/rpc": { target: api, changeOrigin: true },
       },

@@ -10,6 +10,7 @@ import type {
 import { RecruitingCrmSyncCursorSchema } from "@rakazo/contracts";
 import type { CrmSyncContact, CrmSyncScope, PrismaClient } from "@rakazo/db";
 import * as recruiting from "@rakazo/db";
+import { getLogger } from "@rakazo/logging";
 import type { RecruitingCrmReadDeps } from "./recruiting.js";
 import { getRecruitingCrmData, linkedinIdentity } from "./recruiting.js";
 import type { ThreadTarget } from "./thread-target.js";
@@ -87,15 +88,43 @@ export async function syncRecruitingCrm(
   input: { dryRun?: boolean | undefined; cursor?: string | undefined },
   options: { budgetMs?: number; now?: () => Date; read?: CrmRead } = {},
 ): Promise<RecruitingCrmSyncOutput> {
+  const began = performance.now();
+  // Match the transaction wait + execution bounds; no provider payload enters telemetry.
+  const duration = () => Math.max(0, Math.min(125_000, Math.round(performance.now() - began)));
   // Serialize progress and projection writes for this owner; opaque single-use tokens never
   // let a caller choose an offset, scope or archive timestamp.
-  return deps.prisma.$transaction(
-    async (tx) => {
-      await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtextextended(${JSON.stringify([actor.userId, actor.spaceId, "crm-sync"])}, 0))`;
-      return syncSlice({ ...deps, prisma: tx as PrismaClient }, actor, target, input, options);
-    },
-    { timeout: 120_000, maxWait: 5_000 },
-  );
+  let report: RecruitingCrmSyncOutput;
+  try {
+    report = await deps.prisma.$transaction(
+      async (tx) => {
+        await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtextextended(${JSON.stringify([actor.userId, actor.spaceId, "crm-sync"])}, 0))`;
+        return syncSlice({ ...deps, prisma: tx as PrismaClient }, actor, target, input, options);
+      },
+      { timeout: 120_000, maxWait: 5_000 },
+    );
+  } catch (error) {
+    getLogger().error("crm.sync.failed", {
+      dry_run: input.dryRun === true,
+      duration_ms: duration(),
+    });
+    throw error;
+  }
+  // Emit only after commit. Counts are cumulative across slices, not per-slice deltas.
+  const summary = {
+    dry_run: report.dryRun,
+    duration_ms: duration(),
+    has_more: report.nextCursor !== null,
+    organizations: report.organizations,
+    roles_seen: report.roles.seen,
+    contacts_seen: report.contacts.seen,
+    links_seen: report.links.seen,
+    messages_seen: report.messages.seen,
+    skipped_count: report.skipped.length,
+  };
+  if (report.skipped.length) getLogger().warn("crm.sync.incomplete", summary);
+  else
+    getLogger().info(report.nextCursor === null ? "crm.sync.completed" : "crm.sync.slice", summary);
+  return report;
 }
 
 async function syncSlice(
