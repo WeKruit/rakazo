@@ -1,0 +1,694 @@
+// @vitest-environment jsdom
+import { createHash } from "node:crypto";
+import type {
+  AdapterContext,
+  AgentRunRequest,
+  AgentRuntimeEvent,
+  ConnectorProvider,
+  MemorySnapshot,
+  SemanticMemoryProvider,
+} from "@rakazo/adapter-kit";
+import type { MemoryProviderResolver } from "@rakazo/adapters";
+import { createRunExecutor } from "@rakazo/adapters";
+import type { MessageBlock } from "@rakazo/contracts";
+import type { ActionApprovalRule } from "@rakazo/core";
+import { stableJsonValue } from "@rakazo/core/node/approval-effect-key";
+import type { PrismaClient, ThreadEvents } from "@rakazo/db";
+import { answerRunInput, getRecruitingWorkspace } from "@rakazo/db";
+import { describe, expect, it, vi } from "vitest";
+import { getRecruitingCorrespondence } from "./recruiting.js";
+
+vi.mock("../../../packages/adapters/src/recruiting-context.js", async (original) => ({
+  ...(await original<Record<string, unknown>>()),
+  loadRecruitingRunContext: vi.fn(),
+}));
+vi.mock("../../../packages/adapters/src/computer-lifecycle.js", async (original) => ({
+  ...(await original<Record<string, unknown>>()),
+  acquireComputerExecutionLease: vi.fn(async () => null),
+  provisionComputer: async () => ({ id: "computer-1", kind: "desktop" }),
+}));
+vi.mock("../../../packages/adapters/src/computer-workspace.js", async (original) => ({
+  ...(await original<Record<string, unknown>>()),
+  checkpointRunComputerWorkspace: vi.fn(async () => "home-revision"),
+}));
+vi.mock("@rakazo/db", async (original) => ({
+  ...(await original<Record<string, unknown>>()),
+  getRecruitingWorkspace: vi.fn(),
+}));
+
+import { renderSchedulingProjection } from "../../web/src/pages/recruiting/scheduling-offline-render.test-support";
+
+// Isolated executor fixture adapted from executor-effect-idempotency.test.ts.
+// Provider/model responses and persistence are synthetic. Approval decisions, execution,
+// idempotency, receipt parsing and correspondence projection use production functions.
+type Effect = {
+  id: string;
+  spaceId: string;
+  runId?: string;
+  kind: string;
+  idempotencyKey: string;
+  status: string;
+  request: unknown;
+  result?: unknown;
+  reviewDecision?: string;
+};
+
+type ToolCall = {
+  name: string;
+  args: Record<string, unknown>;
+  executionId: string;
+};
+
+function fixture(
+  runId = "run-1",
+  secrets: string[] = [],
+  options: {
+    contextStrategy?: AgentRunRequest["contextStrategy"];
+    attachmentStore?: boolean;
+    shutdownSignal?: AbortSignal;
+  } = {},
+) {
+  const effects: Effect[] = [];
+  const results: unknown[] = [];
+  const sourceMessages: Array<{ id: string; seq: number }> = [];
+  const scratchpadRows: Array<{
+    id: string;
+    spaceId: string;
+    botId: string;
+    userId: string;
+    title: string;
+    status: string;
+    notes: string;
+    createdAt: Date;
+    updatedAt: Date;
+  }> = [];
+  const run = {
+    id: runId,
+    botId: "bot-1",
+    threadId: "thread-1",
+    taskId: "task-1",
+    spaceId: "space-1",
+    userId: "user-1",
+    status: "queued",
+    trigger: "user",
+    leaseFence: 0,
+    leaseOwner: null as string | null,
+    leaseExpiresAt: null as Date | null,
+    checkpoint: null as string | null,
+    sourceMessageId: null as string | null,
+  };
+  const thread = {
+    id: run.threadId,
+    spaceId: run.spaceId,
+    userId: run.userId,
+    groupId: null,
+    activeRecruitingRoleId: null as string | null,
+  };
+  const memoryCommit = vi.fn(async () => ({ path: "MEMORY.md", revision: 1 }));
+  const memoryRead = vi.fn(
+    async (_request: { scope: "bot" | "user" }): Promise<MemorySnapshot> => ({ documents: [] }),
+  );
+  const semanticSave = vi.fn<SemanticMemoryProvider["save"]>(async () => ({
+    ok: true,
+    value: undefined,
+  }));
+  const semanticMemory: SemanticMemoryProvider = {
+    describe: () => ({
+      id: "test-memory",
+      contractVersion: "1",
+      adapterVersion: "1",
+      capabilities: { recall: true, save: true, purgeHistory: true, sharedScope: true },
+    }),
+    recall: async () => ({ ok: true, value: [] }),
+    save: semanticSave,
+    purgeHistory: async () => ({ ok: true, value: undefined }),
+  };
+  const memoryProviderResolve = vi.fn<MemoryProviderResolver["resolve"]>(async () => null);
+  const disabledBuiltinTools: string[] = [];
+  const artifacts = {
+    describe: () => ({ capabilities: { stream: false } }),
+    put: vi.fn(async () => ({ id: "stored-context", hash: "a".repeat(64) })),
+    get: vi.fn(async () => new Uint8Array()),
+    remove: vi.fn(async () => undefined),
+  };
+  const externalEffect = {
+    findMany: vi.fn(
+      async ({
+        where,
+      }: {
+        where?: { id?: string; spaceId?: string; runId?: string; status?: string; kind?: string };
+      } = {}) =>
+        effects.filter((effect) => {
+          if (where?.status && effect.status !== where.status) return false;
+          if (where?.kind && effect.kind !== where.kind) return false;
+          if (where?.spaceId && effect.spaceId !== where.spaceId) return false;
+          if (where?.runId && effect.runId && effect.runId !== where.runId) return false;
+          if (where?.id && effect.id !== where.id) return false;
+          return true;
+        }),
+    ),
+    findUnique: vi.fn(
+      async ({ where }: { where: { id?: string; idempotencyKey?: string } }) =>
+        effects.find((effect) =>
+          where.id ? effect.id === where.id : effect.idempotencyKey === where.idempotencyKey,
+        ) ?? null,
+    ),
+    create: vi.fn(async ({ data }: { data: Omit<Effect, "id"> }) => {
+      const effect = { ...data, id: `effect-${effects.length + 1}` };
+      effects.push(effect);
+      return { ...effect };
+    }),
+    update: vi.fn(async ({ where, data }: { where: { id: string }; data: Partial<Effect> }) => {
+      Object.assign(effects.find((effect) => effect.id === where.id)!, data);
+    }),
+    updateMany: vi.fn(
+      async ({ where, data }: { where: { id: string; status: string }; data: Partial<Effect> }) => {
+        const effect = effects.find(
+          (effect) => effect.id === where.id && effect.status === where.status,
+        );
+        if (!effect) return { count: 0 };
+        Object.assign(effect, data);
+        return { count: 1 };
+      },
+    ),
+  };
+  const published: Array<{ role: string; blocks: unknown }> = [];
+  const prisma = {
+    $queryRaw: vi.fn(async () => [] as Array<Record<string, unknown>>),
+    // Durable mid-turn and early-final messages go through one transaction on these rows.
+    $transaction: vi.fn(async (work: (tx: unknown) => Promise<unknown>) => work(prisma)),
+    event: {
+      findMany: vi.fn(async () => [] as Array<{ seq: number; type: string; payload: unknown }>),
+      create: vi.fn(async ({ data }: { data: object }) => ({ ...data, seq: 1 })),
+    },
+    run: {
+      findMany: vi.fn(async () => []),
+      findUnique: vi.fn(async () => run),
+      findUniqueOrThrow: vi.fn(async () => run),
+      updateMany: vi.fn(
+        async ({
+          data,
+        }: {
+          where: {
+            status?: string | { in?: string[] };
+            leaseOwner?: string | null;
+            leaseFence?: number;
+            checkpoint?: string | null | { in?: (string | null)[] };
+          };
+          data: Record<string, unknown>;
+        }) => {
+          Object.assign(run, data);
+          return { count: 1 };
+        },
+      ),
+    },
+    bot: {
+      findUniqueOrThrow: vi.fn(async () => ({
+        id: run.botId,
+        spaceId: run.spaceId,
+        userId: run.userId,
+        name: "Assistant",
+        title: "Assistant",
+        description: "Test assistant",
+        disabledBuiltinTools,
+        computerId: "computer-1",
+        computer: { id: "computer-1", scope: "dedicated" },
+      })),
+      findMany: vi.fn(async () => []),
+    },
+    attempt: {
+      create: vi.fn(async () => ({ id: "attempt-1" })),
+      update: vi.fn(),
+      updateMany: vi.fn(async () => ({ count: 1 })),
+    },
+    thread: {
+      findUniqueOrThrow: vi.fn(async () => thread),
+      update: vi.fn(async () => ({ nextMessageSeq: 2, nextEventSeq: 2 })),
+    },
+    message: {
+      findMany: vi.fn(async ({ select }: { select?: Record<string, boolean> } = {}) =>
+        select?.id && select.seq && Object.keys(select).length === 2 ? sourceMessages : [],
+      ),
+      findFirst: vi.fn(async () => null),
+      findUnique: vi.fn(async () => null),
+      create: vi.fn(async ({ data }: { data: { role: string; blocks: unknown } }) => {
+        published.push({ role: data.role, blocks: data.blocks });
+        return { id: `message-${published.length}`, ...data };
+      }),
+    },
+    task: {
+      findUniqueOrThrow: vi.fn(async () => ({ id: run.taskId, prompt: "Update shared state" })),
+    },
+    connection: { findMany: vi.fn(async () => []) },
+    spaceModelPreference: { findFirst: vi.fn(async () => null) },
+    userModelCredential: { findFirst: vi.fn(async () => null) },
+    deploymentSettings: {
+      findUnique: vi.fn(async () => ({
+        defaultModelProvider: "scripted",
+        defaultModelId: "scripted",
+      })),
+    },
+    taughtSkill: { findMany: vi.fn(async () => []) },
+    agentSecret: { findMany: vi.fn(async () => []) },
+    botSecret: { findMany: vi.fn(async () => []) },
+    agentSkill: { findMany: vi.fn(async () => []) },
+    scratchpadItem: {
+      findMany: vi.fn(async () => scratchpadRows),
+      create: vi.fn(
+        async ({
+          data,
+        }: {
+          data: {
+            spaceId: string;
+            botId: string;
+            userId: string;
+            title: string;
+            status: string;
+            notes: string;
+          };
+        }) => {
+          const now = new Date("2026-09-14T00:00:00.000Z");
+          const row = {
+            id: `scratch-${scratchpadRows.length + 1}`,
+            ...data,
+            createdAt: now,
+            updatedAt: now,
+          };
+          scratchpadRows.push(row);
+          return row;
+        },
+      ),
+    },
+    actionApprovalRule: { findMany: vi.fn(async (): Promise<ActionApprovalRule[]> => []) },
+    actionAutoReviewPreference: { findUnique: vi.fn(async () => ({ enabled: false })) },
+    externalEffect,
+    artifact: {
+      findFirst: vi.fn(),
+      findMany: vi.fn(async (): Promise<Array<{ id: string; name: string }>> => []),
+    },
+  };
+  const pauseRunForInput = vi.fn<ThreadEvents["pauseRunForInput"]>(async () => {
+    run.status = "waiting_input";
+    return true;
+  });
+  const finalizeRun = vi.fn<ThreadEvents["finalizeRun"]>(async () => ({ continuationRunId: null }));
+  const claimSteering = vi.fn<ThreadEvents["claimSteering"]>(async () => []);
+  let calls: ToolCall[] = [];
+  const runtimeRun = vi.fn(async function* (
+    request: AgentRunRequest,
+    _context?: Partial<AdapterContext>,
+  ): AsyncGenerator<AgentRuntimeEvent> {
+    for (const call of calls) {
+      const result = await request.executeTool!(call.name, call.args, call.executionId);
+      results.push(result);
+    }
+    yield { type: "done" as const, text: "Done" };
+  });
+  const connector = {
+    discoverTools: vi.fn<ConnectorProvider["discoverTools"]>(async () => []),
+    resolveCall: vi.fn<NonNullable<ConnectorProvider["resolveCall"]>>(async () => undefined),
+    execute: vi.fn<ConnectorProvider["execute"]>(async function* () {}),
+  };
+  const web = {
+    search: vi.fn(async () => []),
+    fetch: vi.fn(async () => ({
+      url: "https://example.org/profile",
+      title: "Public profile",
+      text: "Public evidence",
+      truncated: false,
+    })),
+  };
+  const sandbox = {
+    describe: () => ({ capabilities: { graphical: false } }),
+    writeFile: vi.fn(async () => undefined),
+  };
+  const executorDeps = {
+    contextStrategy: options.contextStrategy,
+    web,
+    prisma,
+    runtime: { describe: () => ({ capabilities: { scripted: false } }), run: runtimeRun },
+    connector,
+    sandbox,
+    memory: {
+      describe: () => ({ capabilities: {} }),
+      read: memoryRead,
+      search: async () => [],
+      commit: memoryCommit,
+      exportMarkdown: async function* () {},
+    },
+    memoryProviders: { resolve: memoryProviderResolve },
+    artifacts: options.attachmentStore === false ? undefined : artifacts,
+    events: {
+      append: vi.fn(async () => undefined),
+      publishTransient: vi.fn(async () => undefined),
+      notify: vi.fn(async () => undefined),
+      pauseRunForInput,
+      finalizeRun,
+      claimSteering,
+    },
+    jobs: { enqueue: vi.fn(async () => undefined) },
+    secrets,
+    shutdownSignal: options.shutdownSignal,
+  } as unknown as Parameters<typeof createRunExecutor>[0];
+  const executor = createRunExecutor(executorDeps);
+
+  return {
+    effects,
+    published,
+    executor,
+    executorDeps,
+    results,
+    web,
+    sandbox,
+    sourceMessages,
+    scratchpadRows,
+    memoryCommit,
+    memoryRead,
+    memoryProviderResolve,
+    semanticMemory,
+    semanticSave,
+    artifacts,
+    prisma,
+    runData: run,
+    thread,
+    runtimeRun,
+    claimSteering,
+    pauseRunForInput,
+    finalizeRun,
+    disabledBuiltinTools,
+    connector,
+    setCalls(next: ToolCall[]) {
+      calls = next;
+    },
+    async run(expectedError?: string) {
+      run.status = "queued";
+      finalizeRun.mockClear();
+      await executor.continueRun(run.id, "worker-1");
+      expect(runtimeRun).toHaveBeenCalled();
+      expect(prisma.attempt.update).not.toHaveBeenCalled();
+      if (expectedError) {
+        expect(finalizeRun).toHaveBeenCalledWith(
+          expect.objectContaining({ outcome: "failed", error: expectedError }),
+        );
+      } else {
+        expect(finalizeRun).not.toHaveBeenCalledWith(
+          expect.objectContaining({ outcome: "failed" }),
+        );
+      }
+    },
+  };
+}
+
+describe("linked offline scheduling receipts", () => {
+  it("answers native cards, books once, reads the returned UID, and projects that exact saved read", async () => {
+    const f = fixture("linked-scheduling");
+    const db = f.prisma as unknown as PrismaClient;
+    const messages: Array<{
+      id: string;
+      threadId: string;
+      runId: string;
+      role: string;
+      blocks: MessageBlock[];
+    }> = [];
+    const events: Array<Record<string, unknown>> = [];
+    let sequence = 10;
+    // Persist the exact native cards emitted by the executor. Approval answers below
+    // use answerRunInput; no test assignment changes an effect to approved.
+    f.pauseRunForInput.mockImplementation(async (input) => {
+      f.runData.status = "waiting_input";
+      messages.push({
+        id: `card-${messages.length}`,
+        threadId: f.runData.threadId,
+        runId: f.runData.id,
+        role: "bot",
+        blocks: input.blocks,
+      });
+      return true;
+    });
+    Object.assign(f.prisma.run, {
+      findFirst: vi.fn(async () => (f.runData.status === "waiting_input" ? f.runData : null)),
+    });
+    Object.assign(f.prisma.message, {
+      findFirst: vi.fn(
+        async ({ where }: { where: Record<string, unknown> }) =>
+          messages.find((message) =>
+            Object.entries(where).every(
+              ([key, value]) => message[key as keyof typeof message] === value,
+            ),
+          ) ?? null,
+      ),
+      update: vi.fn(
+        async ({ where, data }: { where: { id: string }; data: { blocks: MessageBlock[] } }) =>
+          Object.assign(messages.find((message) => message.id === where.id)!, data),
+      ),
+    });
+    Object.assign(f.prisma.externalEffect, {
+      findFirst: vi.fn(
+        async ({ where }: { where: Record<string, unknown> }) =>
+          f.effects.find((effect) =>
+            Object.entries(where).every(([key, value]) => effect[key as keyof Effect] === value),
+          ) ?? null,
+      ),
+    });
+    f.prisma.thread.update.mockImplementation(async () => ({
+      nextMessageSeq: ++sequence,
+      nextEventSeq: ++sequence,
+    }));
+    f.prisma.event.create.mockImplementation(async ({ data }) => {
+      const row = { ...data, seq: sequence };
+      events.push(row);
+      return row;
+    });
+    const server = {
+      id: "cal-1",
+      revision: 3,
+      name: "Cal.com",
+      enabled: true,
+      endpoint: "https://mcp.cal.com/mcp?toolsets=bookings,availability",
+      secretId: "synthetic-reference",
+      assignments: [
+        {
+          botId: f.runData.botId,
+          allowAllTools: false,
+          allowedTools: ["create_booking", "get_booking"],
+        },
+      ],
+    };
+    Object.assign(f.prisma, {
+      botMcpServer: { findFirst: vi.fn(async () => ({ ...server.assignments[0], server })) },
+      mcpServer: { findMany: vi.fn(async () => [server]) },
+    });
+    Object.assign(f.prisma.thread, { findFirst: vi.fn(async () => f.thread) });
+    const mail = {
+      name: "gmail_send_email",
+      description: "Send email",
+      readOnly: false,
+      inputSchema: { type: "object" },
+      route: { connectorId: "composio", toolName: "GMAIL_SEND_EMAIL" },
+    };
+    const cal = (toolName: string) => ({
+      name: `mcp__cal__${toolName}`,
+      description: toolName,
+      readOnly: true,
+      inputSchema: { type: "object" },
+      route: {
+        connectorId: "mcp",
+        resourceId: server.id,
+        resourceRevision: server.revision,
+        toolName,
+      },
+    });
+    const createBooking = cal("create_booking");
+    const getBooking = cal("get_booking");
+    f.connector.discoverTools.mockResolvedValue([mail, createBooking, getBooking]);
+    f.prisma.actionApprovalRule.findMany.mockResolvedValue([
+      { effect: "require_approval", matchKind: "tool", matchValue: mail.name },
+    ]);
+    const recipient = "candidate@example.test";
+    const timeZone = "America/New_York";
+    const slots = ["2026-10-26T14:00:00Z", "2026-10-26T15:00:00Z", "2026-10-27T14:00:00Z"];
+    // Scripted candidate reply selects the second offered slot. No mail ingestion or
+    // model comprehension is claimed by this deterministic implementation check.
+    const selected = slots[1]!;
+    let providerBooking: Record<string, unknown> | undefined;
+    f.connector.execute.mockImplementation(async function* (call) {
+      let data: unknown;
+      if (call.route?.toolName === "create_booking") {
+        providerBooking = {
+          uid: "synthetic-booking-42",
+          title: "Candidate interview",
+          status: "accepted",
+          start: call.args.start,
+          end: "2026-10-26T15:30:00Z",
+          attendees: [call.args.attendee],
+          location: "https://meeting.example.test/synthetic-42",
+        };
+        data = { status: "success", data: providerBooking };
+      } else if (call.route?.toolName === "get_booking") {
+        expect(call.args).toEqual({ bookingUid: providerBooking!.uid });
+        data = { status: "success", data: providerBooking };
+      } else data = { messageId: `synthetic-mail-${f.connector.execute.mock.calls.length}` };
+      yield { type: "result", data: { content: [{ type: "text", text: JSON.stringify(data) }] } };
+    });
+    async function approveAndExecute(name: string, args: Record<string, unknown>, index: number) {
+      f.setCalls([{ name, args, executionId: `request-${index}` }]);
+      const count = f.connector.execute.mock.calls.length;
+      await f.run();
+      expect(f.connector.execute).toHaveBeenCalledTimes(count);
+      const card = messages.at(-1)!;
+      const effect = f.effects.at(-1)!;
+      const request = structuredClone(effect.request);
+      const input = {
+        spaceId: f.runData.spaceId,
+        threadId: f.runData.threadId,
+        runId: f.runData.id,
+        messageId: card.id,
+        answeredByUserId: f.runData.userId,
+        answer: "allow",
+      };
+      expect(await answerRunInput(db, input)).toBe(true);
+      expect(await answerRunInput(db, input)).toBe(false);
+      expect(effect.status).toBe("approved");
+      expect(events).toContainEqual(
+        expect.objectContaining({
+          type: "effect.approval.answered",
+          payload: expect.objectContaining({
+            effectId: effect.id,
+            answeredByUserId: f.runData.userId,
+            requestHash: createHash("sha256").update(stableJsonValue(request)).digest("hex"),
+          }),
+        }),
+      );
+      // A runtime revision cannot replace the exact approved recipient/time/content.
+      f.setCalls([
+        {
+          name,
+          args: { ...args, to: "wrong@example.test", start: slots[2] },
+          executionId: `resume-${index}`,
+        },
+      ]);
+      await f.run();
+      expect(f.connector.execute).toHaveBeenCalledTimes(count + 1);
+      expect(f.connector.execute).toHaveBeenLastCalledWith(
+        expect.objectContaining({ args }),
+        expect.anything(),
+      );
+      expect(effect).toMatchObject({ status: "completed", request });
+      f.setCalls([{ name, args, executionId: `retry-${index}` }]);
+      await f.run();
+      expect(f.connector.execute).toHaveBeenCalledTimes(count + 1);
+      return effect;
+    }
+    await approveAndExecute(
+      mail.name,
+      {
+        to: recipient,
+        subject: "Interview options",
+        body: `Choose one (${timeZone}): ${slots.join(", ")}`,
+      },
+      1,
+    );
+    const booked = await approveAndExecute(
+      createBooking.name,
+      {
+        eventTypeId: 42,
+        start: selected,
+        attendee: { name: "Synthetic candidate", email: recipient, timeZone },
+      },
+      2,
+    );
+    // Read the UID from the actual persisted executor receipt, not from a separately
+    // hard-coded projection fixture or the requested booking arguments.
+    const receipt = booked.result as { content: Array<{ text: string }> };
+    const returned = JSON.parse(receipt.content[0]!.text).data as { uid: string };
+    vi.mocked(getRecruitingWorkspace).mockResolvedValue({ role: { id: "role-1" } } as never);
+    const actor = {
+      spaceId: f.runData.spaceId,
+      userId: f.runData.userId,
+      email: "owner@example.test",
+      isDeploymentOwner: false,
+    };
+    const target = {
+      kind: "group" as const,
+      groupId: "synthetic-group",
+      groupName: "Synthetic role",
+      members: [],
+      memberBotIds: [f.runData.botId],
+      threadId: f.runData.threadId,
+    };
+    // The projection's persistence adapter returns only this store's completed native
+    // reads; the production parser still checks tool, assignment, revision and result.
+    const originalFindMany = f.prisma.externalEffect.findMany.getMockImplementation()!;
+    let projecting = false;
+    f.prisma.externalEffect.findMany.mockImplementation(async (query) => {
+      if (!projecting) return originalFindMany(query);
+      const request = query as unknown as {
+        where: { id?: { in: string[] }; run: { threadId: string }; spaceId: string };
+        select: { result?: boolean };
+      };
+      expect(request.where.spaceId).toBe(actor.spaceId);
+      expect(request.where.run.threadId).toBe(target.threadId);
+      return f.effects
+        .filter((effect) => {
+          const call = (effect.request as unknown[])[2] as { route?: { toolName?: string } };
+          return (
+            effect.status === "completed" &&
+            call?.route?.toolName === "get_booking" &&
+            (!request.where.id || request.where.id.in.includes(effect.id))
+          );
+        })
+        .map((effect) => ({
+          ...effect,
+          updatedAt: new Date("2026-10-23T18:00:00Z"),
+          run: { id: f.runData.id, botId: f.runData.botId },
+        }));
+    });
+    const project = async () => {
+      projecting = true;
+      try {
+        return await getRecruitingCorrespondence(db, actor, target, "interview");
+      } finally {
+        projecting = false;
+      }
+    };
+    expect((await project()).events).toEqual([]);
+    f.setCalls([
+      { name: getBooking.name, args: { bookingUid: returned.uid }, executionId: "readback" },
+    ]);
+    await f.run();
+    expect(messages).toHaveLength(2); // A read is not another outbound grant.
+    const projected = await project();
+    expect(projected).toMatchObject({
+      roleId: "role-1",
+      status: "ready",
+      events: [
+        {
+          id: `cal-1:booking:${returned.uid}`,
+          kind: "event",
+          title: "Candidate interview",
+          start: selected,
+          end: "2026-10-26T15:30:00Z",
+          attendees: [recipient],
+          status: "accepted",
+          url: "https://meeting.example.test/synthetic-42",
+        },
+      ],
+    });
+    await approveAndExecute(
+      mail.name,
+      {
+        to: recipient,
+        subject: "Interview confirmed",
+        body: `Confirmed ${projected.events[0]!.start} (${timeZone}); ${projected.events[0]!.url}`,
+      },
+      3,
+    );
+    expect(messages).toHaveLength(3);
+    expect(events.filter((event) => event.type === "effect.approval.answered")).toHaveLength(3);
+    expect(
+      f.connector.execute.mock.calls.filter(([call]) => call.route?.toolName === "create_booking"),
+    ).toHaveLength(1);
+    expect((await project()).events).toEqual(projected.events);
+    await renderSchedulingProjection(projected);
+  });
+});
