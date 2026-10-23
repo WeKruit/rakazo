@@ -170,8 +170,13 @@ export function buildApprovalAskBlock(
         ? truncate(safeDetail, MAX_APPROVAL_DETAIL_LENGTH)
         : safeDetail,
     status: "pending",
-    actions:
-      !crmOperation && toolName === "create_space"
+    // A real send is confirmed each time; it is never "always allowed".
+    actions: options?.instantlyActivation
+      ? [
+          { id: "allow", label: "Confirm and send" },
+          { id: "deny", label: "Cancel" },
+        ]
+      : !crmOperation && toolName === "create_space"
         ? [
             { id: "allow", label: "Create space", outcome: "created" },
             { id: "deny", label: "Cancel", outcome: "cancelled" },

@@ -830,8 +830,7 @@ msgstr ""
 msgid "Available after the routine is saved"
 msgstr ""
 
-#: src/pages/recruiting/InterviewTab.tsx
-#: src/pages/RecruitingCorrespondence.tsx
+#: src/pages/recruiting/AvailabilityRanges.tsx
 msgid "Available time"
 msgstr ""
 
@@ -1518,6 +1517,10 @@ msgstr "Dağıtım tarafından yapılandırıldı"
 #: src/pages/McpServersOverlay.tsx
 msgid "Configured servers"
 msgstr "Yapılandırılmış sunucular"
+
+#: src/components/AskCard.tsx
+msgid "Confirm and send"
+msgstr ""
 
 #: src/pages/RecruitingPanel.tsx
 msgid "Confirm brief"
@@ -5523,6 +5526,10 @@ msgstr "WeKruit Headhunter'ya dön"
 #: src/pages/KnowledgeSection.tsx
 msgid "rev {0}"
 msgstr "rev {0}"
+
+#: src/components/AskCard.tsx
+msgid "Review before sending the first campaign email"
+msgstr ""
 
 #: src/pages/RecruitingCorrespondence.tsx
 msgid "Review in conversation"

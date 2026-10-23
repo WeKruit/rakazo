@@ -830,8 +830,7 @@ msgstr ""
 msgid "Available after the routine is saved"
 msgstr "保存例行任务后可用"
 
-#: src/pages/recruiting/InterviewTab.tsx
-#: src/pages/RecruitingCorrespondence.tsx
+#: src/pages/recruiting/AvailabilityRanges.tsx
 msgid "Available time"
 msgstr ""
 
@@ -1518,6 +1517,10 @@ msgstr "由部署配置"
 #: src/pages/McpServersOverlay.tsx
 msgid "Configured servers"
 msgstr "已配置的服务器"
+
+#: src/components/AskCard.tsx
+msgid "Confirm and send"
+msgstr "确认发送"
 
 #: src/pages/RecruitingPanel.tsx
 msgid "Confirm brief"
@@ -5523,6 +5526,10 @@ msgstr "返回 WeKruit Headhunter"
 #: src/pages/KnowledgeSection.tsx
 msgid "rev {0}"
 msgstr "版本 {0}"
+
+#: src/components/AskCard.tsx
+msgid "Review before sending the first campaign email"
+msgstr "发送第一封活动邮件前请确认"
 
 #: src/pages/RecruitingCorrespondence.tsx
 msgid "Review in conversation"

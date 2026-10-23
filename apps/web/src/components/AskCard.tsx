@@ -285,8 +285,8 @@ function QuestionAskCard({
     >
       <div className="text-base leading-relaxed text-foreground">
         <ChatMarkdown>
-          {block.approvalEffectId && block.text === "Start this Instantly campaign"
-            ? t`Start this Instantly campaign`
+          {block.approvalEffectId && block.text === "Review before sending the first campaign email"
+            ? t`Review before sending the first campaign email`
             : block.text}
         </ChatMarkdown>
       </div>
