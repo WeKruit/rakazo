@@ -2270,17 +2270,37 @@ describe("candidate-linked native reply", () => {
             toolName: "list_crm_candidate_roles",
           },
         },
+        ...(fullHistory
+          ? [
+              {
+                name: "instantly__mail__get_thread_history",
+                description: "Read exact thread history",
+                readOnly: true,
+                inputSchema: {
+                  type: "object",
+                  properties: {
+                    anchor_id: { type: "string" },
+                    limit: { type: "number" },
+                    starting_after: { type: "string" },
+                  },
+                  required: ["anchor_id"],
+                  additionalProperties: false,
+                },
+                route: { ...route, toolName: "native_instantly_get_thread_history" },
+              },
+            ]
+          : []),
         ...["get_email", "list_emails"].map((toolName) => ({
           name: `mcp__mail__${toolName}`,
           description: "Read",
           inputSchema: {
             type: "object",
-            ...(toolName === "list_emails" && fullHistory
+            ...(toolName === "list_emails"
               ? {
                   properties: {
-                    mode: { type: "string", enum: ["emode_all"] },
-                    latest_of_thread: { type: "boolean" },
-                    preview_only: { type: "boolean" },
+                    campaign_id: { type: "string" },
+                    email_type: { type: "string", enum: ["received", "sent", "manual"] },
+                    is_unread: { type: "boolean" },
                     eaccount: { type: "string" },
                     limit: { type: "number" },
                     starting_after: { type: "string" },
@@ -2309,6 +2329,35 @@ describe("candidate-linked native reply", () => {
         },
         get_email: { structuredContent: replyAnchor },
         list_emails: { structuredContent: { items: [replyAnchor] } },
+        native_instantly_get_thread_history: {
+          structuredContent: {
+            source: "local_native_instantly_rest",
+            anchor: { structuredContent: replyAnchor },
+            page: { items: [replyAnchor] },
+            query: {
+              search: `thread:${replyAnchor.thread_id}`,
+              eaccount: replyArgs.eaccount,
+              mode: "emode_all",
+              latest_of_thread: "false",
+              preview_only: "false",
+              limit: "100",
+            },
+            coverage: {
+              scope: "exact_thread",
+              anchorId: replyAnchor.id,
+              organizationId: replyAnchor.organization_id,
+              account: replyArgs.eaccount,
+              threadId: replyAnchor.thread_id,
+              startingAfter: null,
+              nextStartingAfter: null,
+              anchorPresent: true,
+              pageExhausted: true,
+              bodiesComplete: true,
+              returnedCount: 1,
+              checkedAt: "2026-10-22T20:00:00Z",
+            },
+          },
+        },
         reply_to_email: {
           structuredContent: {
             ...replyAnchor,
@@ -2430,7 +2479,7 @@ describe("candidate-linked native reply", () => {
       "get_crm_candidate_outreach_context",
       "list_crm_candidate_roles",
       "get_email",
-      "list_emails",
+      "native_instantly_get_thread_history",
       "reply_to_email",
     ]);
     expect(f.execute.mock.calls.at(-1)?.[0].args).toEqual(replyArgs);
@@ -2492,7 +2541,7 @@ describe("candidate-linked native reply", () => {
     expect(f.execute.mock.calls.map(([call]) => call.route?.toolName)).toEqual([
       "get_crm_candidate_outreach_context",
       "get_email",
-      "list_emails",
+      "native_instantly_get_thread_history",
       "reply_to_email",
     ]);
     expect(recruitingReply.claim).toHaveBeenCalledOnce();
@@ -2555,7 +2604,7 @@ describe("candidate-linked native reply", () => {
     expect(recruitingReply.admit).not.toHaveBeenCalled();
     expect(f.pauseRunForInput).not.toHaveBeenCalled();
   });
-  it("rejects incomplete provider history capabilities before dispatching unsupported list arguments", async () => {
+  it("rejects unavailable local history instead of sending guessed REST arguments through the remote tool", async () => {
     const f = linkedFixture(false);
     await f.run();
     f.effects[0]!.status = "approved";
@@ -2566,7 +2615,7 @@ describe("candidate-linked native reply", () => {
     ]);
     expect(f.results.at(-1)).toMatchObject({
       status: "incomplete",
-      reasons: ["provider_history_scope_unknown"],
+      reasons: ["read_failed"],
       dispatched: false,
     });
     expect(recruitingReply.claim).not.toHaveBeenCalled();

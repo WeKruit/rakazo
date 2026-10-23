@@ -1,4 +1,9 @@
-import type { AdapterContext, ConnectorProvider } from "@rakazo/adapter-kit";
+import type {
+  AdapterContext,
+  ConnectorCall,
+  ConnectorEvent,
+  ConnectorProvider,
+} from "@rakazo/adapter-kit";
 import { describe, expect, it, vi } from "vitest";
 import { prepareRecruitingReply, runRecruitingReplyPreflight } from "./recruiting-reply.js";
 
@@ -74,7 +79,7 @@ const crm = {
   canWrite: true,
   suppressed: false,
 };
-const envelope = (data: unknown) => ({ structuredContent: data });
+const envelope = <T>(data: T) => ({ structuredContent: data });
 const crmEnvelope = (data: unknown) => envelope({ data });
 const selection = { target, receipt, emailProof: envelope(anchor), crmProof: crmEnvelope(crm) };
 const content = { subject: "Re: A synthetic role", body: { text: "Here are the details. " } };
@@ -99,6 +104,46 @@ const context: AdapterContext = {
   runId: "run",
   signal: new AbortController().signal,
 };
+
+function historyEnvelope(
+  page: { items?: (typeof anchor)[]; next_starting_after?: string },
+  args: Record<string, unknown>,
+) {
+  const items = page.items ?? [];
+  return envelope({
+    source: "local_native_instantly_rest",
+    anchor: envelope(anchor),
+    page,
+    query: {
+      search: `thread:${threadId}`,
+      eaccount: anchor.eaccount,
+      mode: "emode_all",
+      latest_of_thread: "false",
+      preview_only: "false",
+      limit: String(args.limit),
+      ...(args.starting_after ? { starting_after: args.starting_after } : {}),
+    },
+    coverage: {
+      scope: "exact_thread",
+      anchorId,
+      organizationId: workspaceId,
+      account: anchor.eaccount,
+      threadId,
+      startingAfter: args.starting_after ?? null,
+      nextStartingAfter: page.next_starting_after ?? null,
+      anchorPresent: items.some((email) => email.id === anchorId),
+      pageExhausted: !page.next_starting_after,
+      bodiesComplete: items.every(
+        (email) =>
+          !(email as typeof anchor & { body_fallback_reason?: string }).body_fallback_reason &&
+          (typeof email.body?.text === "string" ||
+            typeof (email.body as { html?: string })?.html === "string"),
+      ),
+      returnedCount: items.length,
+      checkedAt: "2026-10-22T20:00:00Z",
+    },
+  });
+}
 
 function fixture(pages: unknown[] = [{ items: [anchor] }]) {
   const outputs: unknown[] = [crmEnvelope(crm), envelope(anchor), ...pages.map(envelope)];
@@ -136,8 +181,17 @@ function fixture(pages: unknown[] = [{ items: [anchor] }]) {
       },
     };
   });
-  const execute = vi.fn(async function* () {
-    yield { type: "result" as const, data: outputs.shift() };
+  const execute = vi.fn(async function* (call: ConnectorCall): AsyncGenerator<ConnectorEvent> {
+    const raw = outputs.shift() as { structuredContent?: Record<string, unknown> } | undefined;
+    yield {
+      type: "result" as const,
+      data:
+        call.route?.toolName === "native_instantly_get_thread_history" &&
+        raw?.structuredContent &&
+        raw.structuredContent.source !== "local_native_instantly_rest"
+          ? historyEnvelope(raw.structuredContent, call.args)
+          : raw,
+    };
   });
   const connector = { resolveCall, execute } as unknown as ConnectorProvider;
   const run = (extra: Record<string, unknown> = {}) =>
@@ -388,17 +442,7 @@ describe("fresh CRM and Instantly reply preflight", () => {
     expect(f.resolveCall.mock.calls.map(([call]) => [call.args.id, call.args.arguments])).toEqual([
       ["crm:get_crm_candidate_outreach_context", { p_org: orgId, p_candidate: candidateId }],
       ["mail:get_email", { id: anchorId }],
-      ["mail:list_emails", { eaccount: anchor.eaccount, limit: 100 }],
-      [
-        "mail:list_emails",
-        {
-          eaccount: anchor.eaccount,
-          limit: 100,
-          mode: "emode_all",
-          latest_of_thread: false,
-          preview_only: false,
-        },
-      ],
+      ["mail:native_instantly_get_thread_history", { anchor_id: anchorId, limit: 100 }],
     ]);
     expect(result.reads).toHaveLength(3);
     expect(Object.isFrozen(result.reads)).toBe(true);
@@ -410,12 +454,9 @@ describe("fresh CRM and Instantly reply preflight", () => {
     const result = await f.run();
     expect(result.status).toBe("clear");
     expect(f.resolveCall.mock.calls.at(-1)?.[0].args.arguments).toEqual({
-      eaccount: anchor.eaccount,
+      anchor_id: anchorId,
       limit: 100,
       starting_after: "next",
-      mode: "emode_all",
-      latest_of_thread: false,
-      preview_only: false,
     });
   });
 
@@ -435,12 +476,9 @@ describe("fresh CRM and Instantly reply preflight", () => {
       reasons: ["provider_newer_inbound"],
     });
     expect(f.resolveCall.mock.calls.at(-1)?.[0].args.arguments).toEqual({
-      eaccount: anchor.eaccount,
+      anchor_id: anchorId,
       limit: 100,
       starting_after: "later",
-      mode: "emode_all",
-      latest_of_thread: false,
-      preview_only: false,
     });
   });
 
@@ -464,7 +502,9 @@ describe("fresh CRM and Instantly reply preflight", () => {
   ])("requires the listed anchor to match the fresh get_email source %j", async (change) => {
     expect(await fixture([{ items: [{ ...anchor, ...change }] }]).run()).toMatchObject({
       status: "incomplete",
-      reasons: ["provider_history_conflict"],
+      reasons: [
+        "thread_id" in change ? "provider_history_scope_mismatch" : "provider_history_conflict",
+      ],
     });
   });
 
@@ -659,26 +699,126 @@ describe("fresh CRM and Instantly reply preflight", () => {
     expect(f.execute).not.toHaveBeenCalled();
   });
 
-  it("keeps the current limited MCP history schema incomplete instead of assuming all folders", async () => {
+  it("does not substitute the remote list tool when the pinned local history tool is unavailable", async () => {
     const f = fixture();
     const originalResolve = f.resolveCall.getMockImplementation()!;
     f.resolveCall.mockImplementation(async (call) => {
       const resolved = await originalResolve(call);
-      if (resolved.call.route.toolName === "list_emails")
-        return {
-          ...resolved,
-          tool: { ...resolved.tool, inputSchema: { type: "object", properties: {} } },
-        };
-      return resolved;
+      return resolved.call.route?.toolName === "native_instantly_get_thread_history"
+        ? {
+            ...resolved,
+            call: { ...resolved.call, route: { ...resolved.call.route, toolName: "list_emails" } },
+          }
+        : resolved;
     });
-    expect(await f.run()).toMatchObject({
-      status: "incomplete",
-      reasons: ["provider_history_scope_unknown"],
-    });
+    expect(await f.run()).toMatchObject({ status: "incomplete", reasons: ["read_failed"] });
     expect(f.execute).toHaveBeenCalledTimes(2);
     expect(f.resolveCall.mock.calls.at(-1)?.[0].args.arguments).toEqual({
-      eaccount: anchor.eaccount,
+      anchor_id: anchorId,
       limit: 100,
+    });
+  });
+
+  it.each([
+    "query",
+    "thread",
+    "organization",
+    "account",
+    "count",
+    "cursor",
+    "exhausted",
+    "anchor",
+    "bodyCoverage",
+  ])("rejects a local history %s coverage mismatch", async (boundary) => {
+    const f = fixture();
+    const result = historyEnvelope({ items: [anchor] }, { limit: 100 });
+    const row = result.structuredContent;
+    if (boundary === "query") row.query.mode = "emode_focused";
+    if (boundary === "thread") row.coverage.threadId = "other-thread";
+    if (boundary === "organization") row.coverage.organizationId = otherId;
+    if (boundary === "account") row.coverage.account = "other@example.com";
+    if (boundary === "count") row.coverage.returnedCount += 1;
+    if (boundary === "cursor") row.coverage.startingAfter = "wrong";
+    if (boundary === "exhausted") row.coverage.pageExhausted = false;
+    if (boundary === "anchor") row.coverage.anchorPresent = false;
+    if (boundary === "bodyCoverage") row.coverage.bodiesComplete = false;
+    f.outputs[2] = result;
+    expect(await f.run()).toMatchObject({
+      status: "incomplete",
+      reasons: ["provider_history_scope_mismatch"],
+    });
+  });
+
+  it("does not accept a changed native anchor inside a history page", async () => {
+    const f = fixture();
+    const result = historyEnvelope({ items: [anchor] }, { limit: 100 });
+    result.structuredContent.anchor = envelope({
+      ...anchor,
+      body: { text: "Changed after the source read" },
+    });
+    f.outputs[2] = result;
+    expect(await f.run()).toMatchObject({
+      status: "incomplete",
+      reasons: ["provider_anchor_changed"],
+    });
+  });
+
+  it.each(["too_large", "unavailable", "missing"])(
+    "reads a full body for %s history excerpts without changing the retained raw page",
+    async (reason) => {
+      const partial = {
+        ...anchor,
+        body: reason === "missing" ? {} : { text: "Excerpt" },
+        ...(reason === "missing" ? {} : { body_fallback_reason: reason }),
+      };
+      const f = fixture([{ items: [partial] }]);
+      f.outputs.push(envelope(anchor));
+      const result = await f.run();
+      expect(result.status).toBe("clear");
+      expect(f.execute).toHaveBeenCalledTimes(4);
+      expect(f.resolveCall.mock.calls.at(-1)?.[0].args.arguments).toEqual({ id: anchorId });
+      expect(result.reads[2]?.result).toMatchObject({
+        structuredContent: { page: { items: [partial] }, coverage: { bodiesComplete: false } },
+      });
+      expect(result.reads[3]?.result).toEqual(envelope(anchor));
+    },
+  );
+
+  it("does not present a reply as source-complete when its retained anchor is only an excerpt", async () => {
+    const emailProof = envelope({ ...anchor, body_fallback_reason: "too_large" });
+    expect(prepareRecruitingReply({ ...selection, emailProof }, content)).toMatchObject({
+      status: "incomplete",
+      reasons: ["provider_anchor_body_incomplete"],
+    });
+    const f = fixture();
+    expect(await f.run({ selection: { ...selection, emailProof } })).toMatchObject({
+      status: "incomplete",
+      reasons: ["provider_anchor_body_incomplete"],
+    });
+    expect(f.execute).toHaveBeenCalledOnce();
+  });
+  it.each([
+    { id: otherId },
+    { organization_id: otherId },
+    { thread_id: "other-thread" },
+    { subject: "Changed" },
+  ])("does not attach a full body to different source metadata %j", async (change) => {
+    const partial = { ...anchor, body_fallback_reason: "too_large" };
+    const f = fixture([{ items: [partial] }]);
+    f.outputs.push(envelope({ ...anchor, ...change }));
+    expect(await f.run()).toMatchObject({
+      status: "incomplete",
+      reasons: ["provider_history_conflict"],
+    });
+  });
+
+  it("keeps an unavailable full body incomplete and never treats an excerpt as an exact duplicate receipt", async () => {
+    const partial = { ...anchor, body_fallback_reason: "unavailable" };
+    const f = fixture([{ items: [partial] }]);
+    f.outputs.push(envelope(partial));
+    expect(await f.run()).toMatchObject({
+      status: "incomplete",
+      reasons: ["provider_history_body_incomplete"],
     });
   });
 });

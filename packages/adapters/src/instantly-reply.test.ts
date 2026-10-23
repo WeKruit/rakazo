@@ -117,6 +117,26 @@ describe("Instantly reply payload contract", () => {
     expect(readInstantlyEmailPage({ items: [] })).toEqual({ items: [] });
   });
 
+  it.each(["too_large", "unavailable", null] as const)(
+    "retains the documented partial-body reason %s without inventing a full body",
+    (body_fallback_reason) => {
+      const email = { ...anchor, body: { text: "Excerpt" }, body_fallback_reason };
+      expect(readInstantlyEmail(email)).toEqual(email);
+      expect(readInstantlyEmailPage({ items: [email] })?.items[0]).toEqual(email);
+      if (body_fallback_reason)
+        expect(
+          classifyInstantlyReplyReceipt(request, anchor, { ...outgoing, body_fallback_reason })
+            .status,
+        ).toBe("unknown");
+    },
+  );
+  it.each(["truncated", false, 1, {}])(
+    "rejects an undocumented body fallback reason %j",
+    (body_fallback_reason) => {
+      expect(readInstantlyEmail({ ...anchor, body_fallback_reason })).toBeNull();
+    },
+  );
+
   it.each([threadId, "33333333-3333-4333-8333-333333333333", " opaque thread ID "])(
     "preserves the nonblank provider thread ID %j in emails and pages",
     (thread_id) => {

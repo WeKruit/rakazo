@@ -82,6 +82,32 @@ const Route = z.object({
   resourceRevision: z.number().int().positive(),
   toolName: z.string().min(1),
 });
+const ThreadHistory = z.strictObject({
+  source: z.literal("local_native_instantly_rest"),
+  anchor: z.unknown(),
+  page: z.unknown(),
+  query: z.record(z.string(), z.string()),
+  coverage: z.strictObject({
+    scope: z.literal("exact_thread"),
+    anchorId: z.uuid(),
+    organizationId: z.uuid(),
+    account: z.string().min(1),
+    threadId: z.string().min(1),
+    startingAfter: z.string().min(1).nullable(),
+    nextStartingAfter: z.string().min(1).nullable(),
+    anchorPresent: z.boolean(),
+    pageExhausted: z.boolean(),
+    bodiesComplete: z.boolean(),
+    returnedCount: z.number().int().nonnegative(),
+    checkedAt: Time,
+  }),
+});
+function completeBody(email: InstantlyEmail): boolean {
+  return (
+    email.body_fallback_reason == null &&
+    (typeof email.body.text === "string" || typeof email.body.html === "string")
+  );
+}
 type PinnedRoute = z.infer<typeof Route>;
 export type RecruitingReplyContent = z.infer<typeof Content>;
 export type RecruitingReplySelection = {
@@ -240,6 +266,8 @@ export function prepareRecruitingReply(
   const message = Content.safeParse(content);
   if (!anchor || !message.success)
     return { status: "incomplete", reasons: ["native_email_invalid"] };
+  if (!completeBody(anchor))
+    return { status: "incomplete", reasons: ["provider_anchor_body_incomplete"] };
   const body = message.data.body;
   const request = readInstantlyReplyRequest({
     reply_to_uuid: anchor.id,
@@ -278,6 +306,7 @@ function historyFingerprint(email: InstantlyEmail) {
       direction: email.ue_type ?? null,
       subject: email.subject,
       body: email.body,
+      bodyFallbackReason: email.body_fallback_reason ?? null,
     }),
     addresses: [
       email.eaccount,
@@ -427,27 +456,8 @@ export async function runRecruitingReplyPreflight(input: {
           throw new Error("read_route_changed");
         return resolved;
       };
-      let readArgs = args;
-      let resolved = await resolve(readArgs);
-      if (operation === "list_emails") {
-        const controlsDeclared = (schema: Record<string, unknown>) => {
-          const properties = schema.properties;
-          return (
-            properties !== null &&
-            typeof properties === "object" &&
-            !Array.isArray(properties) &&
-            ["mode", "latest_of_thread", "preview_only"].every((key) =>
-              Object.hasOwn(properties, key),
-            )
-          );
-        };
-        if (!controlsDeclared(resolved.tool.inputSchema))
-          throw new Error("provider_history_scope_unknown");
-        readArgs = { ...args, mode: "emode_all", latest_of_thread: false, preview_only: false };
-        resolved = await resolve(readArgs);
-        if (!controlsDeclared(resolved.tool.inputSchema))
-          throw new Error("provider_history_scope_unknown");
-      }
+      const readArgs = args;
+      const resolved = await resolve(readArgs);
       const events: ConnectorEvent[] = [];
       try {
         input.context.signal.throwIfAborted();
@@ -494,14 +504,72 @@ export async function runRecruitingReplyPreflight(input: {
     let cursor: string | undefined;
     let anchorSeen = false;
     for (let pageIndex = 0; pageIndex < maxPages; pageIndex++) {
-      const raw = await read(mailRoute.data, "list_emails", {
-        eaccount: prepared.identity.account,
+      const raw = await read(mailRoute.data, "native_instantly_get_thread_history", {
+        anchor_id: original.id,
         limit: 100,
         ...(cursor ? { starting_after: cursor } : {}),
       });
-      const page = readInstantlyEmailPage(payload(raw));
-      if (!page) return done("incomplete", ["provider_history_invalid"]);
-      for (const email of page.items) {
+      const history = ThreadHistory.safeParse(payload(raw));
+      const page = history.success ? readInstantlyEmailPage(history.data.page) : null;
+      if (!history.success || !page) return done("incomplete", ["provider_history_invalid"]);
+      const currentAnchor = readInstantlyEmail(payload(history.data.anchor));
+      if (
+        !currentAnchor ||
+        !completeBody(currentAnchor) ||
+        !sameHistoryFingerprint(historyFingerprint(anchor), historyFingerprint(currentAnchor))
+      )
+        return done("incomplete", ["provider_anchor_changed"]);
+      const { coverage, query } = history.data;
+      const expectedQuery = {
+        search: `thread:${prepared.identity.threadId}`,
+        eaccount: prepared.identity.account,
+        mode: "emode_all",
+        latest_of_thread: "false",
+        preview_only: "false",
+        limit: "100",
+        ...(cursor ? { starting_after: cursor } : {}),
+      };
+      if (
+        stableJsonValue(query) !== stableJsonValue(expectedQuery) ||
+        coverage.anchorId !== anchor.id ||
+        coverage.organizationId !== anchor.organization_id ||
+        !sameInstantlyAddresses(coverage.account, anchor.eaccount) ||
+        coverage.threadId !== anchor.thread_id ||
+        coverage.startingAfter !== (cursor ?? null) ||
+        coverage.nextStartingAfter !== (page.next_starting_after ?? null) ||
+        coverage.returnedCount !== page.items.length ||
+        coverage.pageExhausted !== !page.next_starting_after ||
+        coverage.anchorPresent !== page.items.some((email) => email.id === anchor.id) ||
+        coverage.bodiesComplete !== page.items.every(completeBody) ||
+        page.items.some(
+          (email) =>
+            email.organization_id !== anchor.organization_id ||
+            email.thread_id !== anchor.thread_id ||
+            !sameInstantlyAddresses(email.eaccount, anchor.eaccount),
+        )
+      )
+        return done("incomplete", ["provider_history_scope_mismatch"]);
+      for (const listed of page.items) {
+        let email = listed;
+        if (!completeBody(listed)) {
+          const full = readInstantlyEmail(
+            payload(await read(mailRoute.data, "get_email", { id: listed.id })),
+          );
+          if (!full || !completeBody(full))
+            return done("incomplete", ["provider_history_body_incomplete"]);
+          if (
+            !sameHistoryFingerprint(
+              historyFingerprint({
+                ...listed,
+                body: full.body,
+                body_fallback_reason: full.body_fallback_reason,
+              }),
+              historyFingerprint(full),
+            )
+          )
+            return done("incomplete", ["provider_history_conflict"]);
+          email = full;
+        }
         const fingerprint = historyFingerprint(email);
         const previous = seenEmails.get(email.id);
         if (previous && !sameHistoryFingerprint(previous, fingerprint))
@@ -521,13 +589,7 @@ export async function runRecruitingReplyPreflight(input: {
       cursor = page.next_starting_after;
     }
     return done("incomplete", ["history_page_limit"]);
-  } catch (error) {
-    return done("incomplete", [
-      input.context.signal.aborted
-        ? "read_aborted"
-        : error instanceof Error && error.message === "provider_history_scope_unknown"
-          ? error.message
-          : "read_failed",
-    ]);
+  } catch {
+    return done("incomplete", [input.context.signal.aborted ? "read_aborted" : "read_failed"]);
   }
 }

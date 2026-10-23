@@ -83,6 +83,7 @@ const Email = z.strictObject({
   i_status: z.number().nullish(),
   thread_id: Nonblank.nullish(),
   content_preview: z.string().nullish(),
+  body_fallback_reason: z.enum(["too_large", "unavailable"]).nullish(),
   attachment_json: z
     .strictObject({
       files: z.array(
@@ -177,6 +178,7 @@ export function classifyInstantlyReplyReceipt(
     !sameAddresses(email.to_address_email_list, args.to) ||
     !sameAddresses(email.cc_address_email_list, args.cc_address_email_list) ||
     !sameAddresses(email.bcc_address_email_list, args.bcc_address_email_list) ||
+    email.body_fallback_reason != null ||
     email.subject !== args.subject ||
     (args.body_text !== undefined && email.body.text !== args.body_text) ||
     (args.body_html !== undefined && email.body.html !== args.body_html) ||

@@ -973,6 +973,7 @@ export async function getRecruitingCorrespondence(
           call.route.toolName === "list_emails"
             ? text.replace(/\[truncated — use get_email for full content\](\s*)$/u, "$1")
             : text;
+        output.partial ||= email.body_fallback_reason != null;
         emails.set(id, {
           id,
           sourceName: source.name,
@@ -983,7 +984,11 @@ export async function getRecruitingCorrespondence(
           recipients: email.to_address_email_list ? [email.to_address_email_list] : [],
           subject: email.subject,
           body: displayText.slice(0, 50_000),
-          snippet: call.route.toolName === "list_emails" || !fullText || text.length > 50_000,
+          snippet:
+            call.route.toolName === "list_emails" ||
+            email.body_fallback_reason != null ||
+            !fullText ||
+            text.length > 50_000,
           date: email.timestamp_email,
           url: null,
         });
