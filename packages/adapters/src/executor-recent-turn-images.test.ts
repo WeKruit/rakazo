@@ -1,4 +1,4 @@
-import type { AgentRunRequest } from "@rakazo/adapter-kit";
+import type { AgentRunRequest, AgentRuntimeEvent } from "@rakazo/adapter-kit";
 import type { MessageBlock } from "@rakazo/contracts";
 import { createLogger, createTestSink, getLogger, installLogger } from "@rakazo/logging";
 import { beforeEach, describe, expect, it, vi } from "vitest";
@@ -62,6 +62,13 @@ async function runWithModel(
   switchModel?: { provider: string; modelId: string },
   backupReadFails = false,
   scripted = false,
+  options: {
+    /** This bot's latest finished run in the thread, as the thread load returns it. */
+    previousRun?: { id: string; status: string };
+    lastToolName?: string;
+    /** Runtime events yielded before the final done. */
+    events?: AgentRuntimeEvent[];
+  } = {},
 ) {
   const run = {
     id: "run-1",
@@ -86,12 +93,18 @@ async function runWithModel(
       ).onModelChange;
       await onModelChange?.(switchModel.provider, switchModel.modelId);
     }
+    for (const event of options.events ?? []) yield event;
     yield { type: "done" as const, text: "Done" };
   });
   const prisma = {
     // Early final replies on file-touching turns persist through one transaction on these rows.
     $transaction: vi.fn(async (work: (tx: unknown) => Promise<unknown>) => work(prisma)),
-    event: { create: vi.fn(async ({ data }: { data: object }) => ({ ...data, seq: 1 })) },
+    event: {
+      create: vi.fn(async ({ data }: { data: object }) => ({ ...data, seq: 1 })),
+      findFirst: vi.fn(async () =>
+        options.lastToolName ? { payload: { name: options.lastToolName } } : null,
+      ),
+    },
     run: {
       findUnique: vi.fn(async () => run),
       findUniqueOrThrow: vi.fn(async () => run),
@@ -128,6 +141,7 @@ async function runWithModel(
         historyCompactionSummary: null,
         historyCompactedUpToSeq: null,
         nextMessageSeq: 3,
+        runs: options.previousRun ? [options.previousRun] : [],
       })),
       update: vi.fn(async () => ({ nextMessageSeq: 4, nextEventSeq: 4 })),
     },
@@ -139,6 +153,7 @@ async function runWithModel(
       create: vi.fn(async ({ data }: { data: object }) => ({ id: "published-final", ...data })),
     },
     task: { findUniqueOrThrow: vi.fn(async () => ({ id: run.taskId, prompt: "Look again" })) },
+    usageRecord: { create: vi.fn(async () => ({})), createMany: vi.fn(async () => ({ count: 1 })) },
     computer: { updateMany: vi.fn(async () => ({ count: 1 })) },
     connection: { findMany: vi.fn(async () => []) },
     spaceModelPreference: {
@@ -208,8 +223,81 @@ async function runWithModel(
   }
   expect(finalizeRun).not.toHaveBeenCalledWith(expect.objectContaining({ outcome: "failed" }));
   if (!request) throw new Error("runtime was not called");
-  return { request, get, prisma, run };
+  return { request, get, prisma, run, finalizeRun };
 }
+
+describe("stopped previous run", () => {
+  it("tells the next run the user stopped the last one, after its last tool", async () => {
+    const { request } = await runWithModel(TEXT_ONLY_MODEL, undefined, false, false, {
+      previousRun: { id: "run-0", status: "cancelled" },
+      lastToolName: "shell_exec",
+    });
+    const last = request.history.at(-1);
+    expect(last).toMatchObject({ role: "user", requiredForRun: true });
+    expect(last?.content).toContain(
+      'The previous run in this conversation was stopped by the user after the step "Shell exec"; do not assume its work completed; do not repeat completed, irreversible actions.',
+    );
+    expect(request.instructions).not.toContain("stopped by the user");
+  });
+
+  it("says nothing when the previous run finished on its own", async () => {
+    const { request, prisma } = await runWithModel(TEXT_ONLY_MODEL, undefined, false, false, {
+      previousRun: { id: "run-0", status: "completed" },
+    });
+    expect(request.history.at(-1)?.content).not.toContain("stopped by the user");
+    expect(prisma.event.findFirst).not.toHaveBeenCalled();
+  });
+});
+
+describe("run budget guardrails", () => {
+  const usage = (costUsd: number): AgentRuntimeEvent => ({
+    type: "usage",
+    provider: "openrouter",
+    model: TEXT_ONLY_MODEL,
+    inputTokens: 10,
+    outputTokens: 10,
+    costUsd,
+  });
+  const tool = (executionId: string): AgentRuntimeEvent => ({
+    type: "tool",
+    name: "shell_exec",
+    args: { command: executionId },
+    executionId,
+  });
+
+  it("stops before the next model call once the run's cost crosses the cap", async () => {
+    const { finalizeRun, prisma } = await runWithModel(TEXT_ONLY_MODEL, undefined, false, false, {
+      events: [usage(3), tool("t1"), usage(2.5), tool("t2")],
+    });
+    expect(finalizeRun).toHaveBeenCalledExactlyOnceWith(
+      expect.objectContaining({
+        outcome: "completed",
+        blocks: [
+          {
+            kind: "text",
+            text: expect.stringMatching(
+              /^I stopped early because this run reached its cost limit \(about \$5\.50 spent\) after 1 tool call\./,
+            ),
+          },
+        ],
+      }),
+    );
+    // The run ended on the guardrail reply; the later tool call never reached the thread.
+    expect(prisma.message.create).toHaveBeenCalledTimes(1);
+  });
+
+  it("leaves a run under the cap alone", async () => {
+    const { finalizeRun } = await runWithModel(TEXT_ONLY_MODEL, undefined, false, false, {
+      events: [usage(1), tool("t1"), usage(1), tool("t2")],
+    });
+    expect(finalizeRun).toHaveBeenCalledExactlyOnceWith(
+      expect.objectContaining({
+        outcome: "completed",
+        blocks: expect.arrayContaining([{ kind: "text", text: "Done" }]),
+      }),
+    );
+  });
+});
 
 describe("recent turn images follow model vision", () => {
   it("does not send history images to a text-only model", async () => {
