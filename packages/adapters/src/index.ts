@@ -76,6 +76,7 @@ export * from "./infisical-secret-store.js";
 export * from "./installed-connectors.js";
 export {
   describeCampaignActivation,
+  EMPTY_ACTIVATION_DISPLAY,
   lastUsedMailbox,
   readRoleCampaignBinding,
 } from "./instantly-native-writes.js";

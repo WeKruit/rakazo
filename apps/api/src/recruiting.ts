@@ -593,8 +593,11 @@ export async function getRecruitingRoleSetup(
     const workspace = await recruiting.getRecruitingWorkspace(deps.prisma, actor, {
       threadId: target.threadId,
     });
-    if (!workspace) return { ready: false, items: [] };
-    const campaign = await getRecruitingRoleCampaign(deps, actor, target);
+    if (!workspace) return { ready: false, attention: null, items: [] };
+    const [campaign, attention] = await Promise.all([
+      getRecruitingRoleCampaign(deps, actor, target),
+      roleAttention(deps.prisma, actor, workspace.role.id),
+    ]);
     const items: RecruitingRoleSetup["items"] = [];
     if (!campaign.serverId) {
       const server = await deps.prisma.mcpServer.findFirst({
@@ -671,8 +674,44 @@ export async function getRecruitingRoleSetup(
           },
     );
     const ready = (key: string) => items.some((item) => item.key === key && item.state === "ready");
-    return { ready: ready("campaign") && ready("sender") && ready("leads"), items };
+    return { ready: ready("campaign") && ready("sender") && ready("leads"), attention, items };
   });
+}
+
+/** The newest run waiting for the human in a conversation linked to this role, with its ask card. */
+async function roleAttention(
+  prisma: PrismaClient,
+  actor: Actor,
+  roleId: string,
+): Promise<RecruitingRoleSetup["attention"]> {
+  const run = await prisma.run.findFirst({
+    where: {
+      spaceId: actor.spaceId,
+      userId: actor.userId,
+      status: "waiting_input",
+      thread: { activeRecruitingRoleId: roleId, userId: actor.userId, spaceId: actor.spaceId },
+    },
+    orderBy: [{ createdAt: "desc" }, { id: "desc" }],
+    select: { id: true, threadId: true, createdAt: true },
+  });
+  if (!run) return null;
+  // Same lookup shape as answerRunInput: the bot message carrying the pending ask block.
+  const card = await prisma.message.findFirst({
+    where: {
+      threadId: run.threadId,
+      runId: run.id,
+      role: "bot",
+      blocks: { array_contains: [{ kind: "ask", status: "pending" }] },
+    },
+    orderBy: { seq: "desc" },
+    select: { id: true, createdAt: true },
+  });
+  return {
+    kind: "approval",
+    threadId: run.threadId,
+    cardId: card?.id ?? null,
+    createdAt: (card?.createdAt ?? run.createdAt).toISOString(),
+  };
 }
 
 export async function getRecruitingCorrespondence(

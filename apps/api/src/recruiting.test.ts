@@ -5019,6 +5019,8 @@ describe("role campaign read", () => {
           })),
         },
         externalEffect: { findUnique },
+        run: { findFirst: vi.fn(async () => null) },
+        message: { findFirst: vi.fn(async () => null) },
       } as unknown as PrismaClient,
       connectors: {
         async *execute(call: ConnectorCall) {
@@ -5119,6 +5121,7 @@ describe("role campaign read", () => {
     const setup = await api.getRecruitingRoleSetup(f.deps, actor, target);
     expect(setup).toEqual({
       ready: true,
+      attention: null,
       items: [
         {
           key: "campaign",
@@ -5168,6 +5171,39 @@ describe("role campaign read", () => {
       detail: { orgId: "org-1", roleLabel: "Staff Engineer" },
     });
     expect(f.calls).toEqual([]);
+  });
+
+  it("role setup surfaces the waiting approval card of the role's conversation", async () => {
+    const f = fixture(null);
+    const prisma = f.deps.prisma as unknown as Record<string, Record<string, unknown>>;
+    const at = new Date("2026-10-23T10:00:00.000Z");
+    prisma.run.findFirst = vi.fn(async () => ({
+      id: "run-9",
+      threadId: "role-thread",
+      createdAt: at,
+    }));
+    prisma.message.findFirst = vi.fn(async () => ({ id: "msg-ask", createdAt: at }));
+    prisma.externalEffect.findFirst = vi.fn(async () => null);
+    const setup = await api.getRecruitingRoleSetup(f.deps, actor, target);
+    expect(setup.attention).toEqual({
+      kind: "approval",
+      threadId: "role-thread",
+      cardId: "msg-ask",
+      createdAt: at.toISOString(),
+    });
+    expect(prisma.run.findFirst).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: expect.objectContaining({
+          status: "waiting_input",
+          thread: expect.objectContaining({ activeRecruitingRoleId: "role" }),
+        }),
+      }),
+    );
+    expect(prisma.message.findFirst).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: expect.objectContaining({ runId: "run-9", role: "bot" }),
+      }),
+    );
   });
 
   it("role setup marks campaign and sender unavailable when Instantly is not assigned", async () => {

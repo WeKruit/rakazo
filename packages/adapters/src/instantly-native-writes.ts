@@ -335,12 +335,42 @@ export const INSTANTLY_CAMPAIGN_STATUS: Record<number, string> = {
   3: "Completed",
 };
 export type InstantlyActivationDisplay = {
-  campaignId: string | null;
-  name: string | null;
+  campaignName: string | null;
   status: string | null;
-  leadCount: number | null;
-  eaccount: string | null;
+  mailbox: string | null;
+  recipients: { name: string | null; email: string }[];
+  /** null when the leads could not be read; the list itself is capped at 100. */
+  recipientCount: number | null;
+  stopOnReply: boolean | null;
+  schedule: string | null;
 };
+export const EMPTY_ACTIVATION_DISPLAY: InstantlyActivationDisplay = {
+  campaignName: null,
+  status: null,
+  mailbox: null,
+  recipients: [],
+  recipientCount: null,
+  stopOnReply: null,
+  schedule: null,
+};
+/** "Weekdays 09:00-17:00 America/Chicago" from Instantly's campaign_schedule, or null. */
+function describeSchedule(campaign: Record<string, unknown> | undefined) {
+  const schedules = (campaign?.campaign_schedule as { schedules?: unknown } | undefined)?.schedules;
+  const first = Array.isArray(schedules) ? (schedules[0] as Record<string, unknown>) : undefined;
+  if (!first) return null;
+  const timing = first.timing as { from?: unknown; to?: unknown } | undefined;
+  return (
+    [
+      typeof first.name === "string" ? first.name : null,
+      typeof timing?.from === "string" && typeof timing.to === "string"
+        ? `${timing.from}-${timing.to}`
+        : null,
+      typeof first.timezone === "string" ? first.timezone : null,
+    ]
+      .filter(Boolean)
+      .join(" ") || null
+  );
+}
 /** Role-campaign binding for a role, read without a run (approval cards, API). */
 export async function readRoleCampaignBinding(
   prisma: Pick<PrismaClient, "externalEffect">,
@@ -365,7 +395,7 @@ export async function describeCampaignActivation(
     args: Record<string, unknown>,
   ) => Promise<Record<string, unknown> | undefined>,
   campaignId: string,
-  fallbackEaccount: string | null = null,
+  fallbackMailbox: string | null = null,
 ): Promise<InstantlyActivationDisplay> {
   const [campaign, leads] = await Promise.all([
     read("native_instantly_get_campaign", { campaign_id: campaignId }).catch(() => undefined),
@@ -374,15 +404,25 @@ export async function describeCampaignActivation(
     ),
   ]);
   const emails = Array.isArray(campaign?.email_list) ? campaign.email_list : [];
+  const items = Array.isArray(leads?.items) ? (leads.items as Record<string, unknown>[]) : null;
+  const recipients = (items ?? []).flatMap((lead) => {
+    if (typeof lead.email !== "string") return [];
+    const name = [lead.first_name, lead.last_name]
+      .filter((part): part is string => typeof part === "string" && part.trim() !== "")
+      .join(" ");
+    return [{ name: name || null, email: lead.email }];
+  });
   return {
-    campaignId,
-    name: typeof campaign?.name === "string" ? campaign.name : null,
+    campaignName: typeof campaign?.name === "string" ? campaign.name : null,
     status:
       typeof campaign?.status === "number"
         ? (INSTANTLY_CAMPAIGN_STATUS[campaign.status] ?? String(campaign.status))
         : null,
-    leadCount: Array.isArray(leads?.items) ? leads.items.length : null,
-    eaccount: typeof emails[0] === "string" ? emails[0] : fallbackEaccount,
+    mailbox: typeof emails[0] === "string" ? emails[0] : fallbackMailbox,
+    recipients,
+    recipientCount: items ? recipients.length : null,
+    stopOnReply: typeof campaign?.stop_on_reply === "boolean" ? campaign.stop_on_reply : null,
+    schedule: describeSchedule(campaign),
   };
 }
 
@@ -666,6 +706,7 @@ export async function runInstantlyWrite(
         status: campaign.status,
         stop_on_reply: campaign.stop_on_reply,
         email_list: campaign.email_list,
+        campaign_schedule: campaign.campaign_schedule,
       };
     }
     case "native_instantly_update_lead_interest":

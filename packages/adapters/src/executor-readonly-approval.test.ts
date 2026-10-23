@@ -1277,13 +1277,29 @@ describe("native Instantly activation card", () => {
     native_instantly_get_campaign: {
       structuredContent: {
         source: "local_native_instantly_rest",
-        result: { id: "c-1", name: "Founding Engineer", status: 0, email_list: ["me@x.test"] },
+        result: {
+          id: "c-1",
+          name: "Founding Engineer",
+          status: 0,
+          stop_on_reply: true,
+          email_list: ["me@x.test"],
+          campaign_schedule: {
+            schedules: [
+              { name: "Weekdays", timing: { from: "09:00", to: "17:00" }, timezone: "UTC" },
+            ],
+          },
+        },
       },
     },
     native_instantly_list_leads: {
       structuredContent: {
         source: "local_native_instantly_rest",
-        result: { items: [{ id: "l1" }, { id: "l2" }] },
+        result: {
+          items: [
+            { id: "l1", email: "ada@x.test", first_name: "Ada", last_name: "Lovelace" },
+            { id: "l2", email: "bob@x.test" },
+          ],
+        },
       },
     },
   };
@@ -1305,8 +1321,19 @@ describe("native Instantly activation card", () => {
     f.setCalls([{ args: { campaign_id: "c-1" }, executionId: "activate" }]);
     await f.run();
     expect(card(f).detail).toBe(
-      "Campaign: Founding Engineer\nStatus: Draft\nLeads: 2\nSender: me@x.test\n\nActivate this Instantly campaign; its leads receive the first email",
+      [
+        "Campaign: Founding Engineer",
+        "Sender: me@x.test",
+        "Recipients (2):",
+        "- Ada Lovelace <ada@x.test>",
+        "- bob@x.test",
+        "Send window: Weekdays 09:00-17:00 UTC",
+        "Stop on reply: on",
+        "",
+        "Confirm sending the first email to these recipients",
+      ].join("\n"),
     );
+    expect(card(f).detail).not.toContain("c-1");
     expect(f.execute.mock.calls.map((call) => call[0].route?.toolName)).toEqual([
       "native_instantly_get_campaign",
       "native_instantly_list_leads",
@@ -1337,7 +1364,7 @@ describe("native Instantly activation card", () => {
     f.setCalls([{ args: {}, executionId: "activate" }]);
     await f.run();
     expect(card(f).detail).toContain("Campaign: Founding Engineer");
-    expect(card(f).detail).toContain("Leads: 2");
+    expect(card(f).detail).toContain("Recipients (2):");
   });
 });
 

@@ -197,15 +197,30 @@ export function buildApprovalAskBlock(
   };
 }
 
+const MAX_RECIPIENT_LINES = 20;
+/** The 「确认发送」 card body: no ids, only what the human is approving. */
 function formatInstantlyActivation(display: InstantlyActivationDisplay) {
   const unknown = (value: string | number | null) => (value === null ? "unknown" : String(value));
+  const count =
+    display.recipientCount === null
+      ? "unknown"
+      : display.recipientCount >= 100
+        ? "100+"
+        : String(display.recipientCount);
+  const shown = display.recipients.slice(0, MAX_RECIPIENT_LINES);
   return [
-    `Campaign: ${display.name ?? (display.campaignId ? "unknown" : "created for this role on approval")}`,
-    `Status: ${unknown(display.status)}`,
-    `Leads: ${display.leadCount === null ? "unknown" : display.leadCount >= 100 ? "100+" : display.leadCount}`,
-    `Sender: ${unknown(display.eaccount)}`,
+    `Campaign: ${display.campaignName ?? "created for this role on approval"}`,
+    `Sender: ${unknown(display.mailbox)}`,
+    `Recipients (${count}):`,
+    ...shown.map((r) => `- ${r.name ? `${r.name} <${r.email}>` : r.email}`),
+    ...(display.recipients.length > shown.length
+      ? [`- and ${display.recipients.length - shown.length} more`]
+      : []),
+    `Send window: ${unknown(display.schedule)}`,
+    `Stop on reply: ${display.stopOnReply === null ? "unknown" : display.stopOnReply ? "on" : "off"}`,
+    ...(display.status && display.status !== "Draft" ? [`Status: ${display.status}`] : []),
     "",
-    "Activate this Instantly campaign; its leads receive the first email",
+    "Confirm sending the first email to these recipients",
   ].join("\n");
 }
 

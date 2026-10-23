@@ -307,7 +307,11 @@ import {
   selectCompactedHistory,
   shouldEnqueueCompaction,
 } from "./history-compaction.js";
-import { describeCampaignActivation, readRoleCampaignBinding } from "./instantly-native-writes.js";
+import {
+  describeCampaignActivation,
+  EMPTY_ACTIVATION_DISPLAY,
+  readRoleCampaignBinding,
+} from "./instantly-native-writes.js";
 import type { InstantlyEmail } from "./instantly-reply.js";
 import {
   classifyInstantlyReplyReceipt,
@@ -6311,7 +6315,7 @@ export function createRunExecutor(deps: ExecutorDeps) {
               };
               instantlyActivation = campaignId
                 ? await describeCampaignActivation(read, campaignId, eaccount)
-                : { campaignId: null, name: null, status: null, leadCount: null, eaccount };
+                : { ...EMPTY_ACTIVATION_DISPLAY, mailbox: eaccount };
             }
             if (replySelection)
               approvalArgs = {
