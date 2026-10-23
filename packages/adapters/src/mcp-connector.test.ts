@@ -6,6 +6,7 @@ import { InfisicalSecretStore } from "./infisical-secret-store.js";
 import {
   allowlistDrift,
   DISCOVERY_CACHE_TTL_MS,
+  DISCOVERY_FAILURE_TTL_MS,
   firstPartyMcpUrl,
   loadMcpCredentialRecord,
   McpConnector,
@@ -2010,9 +2011,13 @@ describe("MCP connector session cache", () => {
       signal: new AbortController().signal,
     };
 
-    // Discovery is reached again on every lazy catalog access inside the same run.
+    // Discovery is reached again on every lazy catalog access inside the same run; a
+    // failure is memoised, so only a retry after the failure TTL records another event.
+    vi.useFakeTimers({ toFake: ["Date"] });
     await connector.discoverTools(context as never);
+    vi.setSystemTime(Date.now() + DISCOVERY_FAILURE_TTL_MS);
     await connector.discoverTools(context as never);
+    vi.useRealTimers();
 
     expect(append).toHaveBeenCalledTimes(2);
     const ids = append.mock.calls.map((call) => call[0].payload.executionId);
@@ -2786,6 +2791,7 @@ describe.each([
 
   it("activates the existing service assignment after platform configuration without network or OAuth while unavailable", async () => {
     vi.stubEnv(env, " ");
+    vi.useFakeTimers({ toFake: ["Date"] });
     const state = { failNext: false, initializations: 0, headers: [] as Record<string, string>[] };
     const fetch = mcpFetch(state, official.endpoint);
     vi.stubGlobal("fetch", fetch);
@@ -2808,6 +2814,8 @@ describe.each([
       expect(fetch).not.toHaveBeenCalled();
       expect(providerFor).not.toHaveBeenCalled();
       vi.stubEnv(env, "platform-service-key");
+      // The failed discovery is memoised for DISCOVERY_FAILURE_TTL_MS.
+      vi.setSystemTime(Date.now() + DISCOVERY_FAILURE_TTL_MS);
       await expect(connector.discoverTools(scoped as never)).resolves.toEqual([
         expect.objectContaining({ name: `mcp__${name.toLowerCase()}__echo` }),
       ]);
@@ -2827,6 +2835,7 @@ describe.each([
       );
     } finally {
       await connector.close();
+      vi.useRealTimers();
     }
   });
 });
@@ -3624,6 +3633,41 @@ describe("MCP discovery tool-list cache", () => {
       expect(f.state.lists).toBe(3);
     } finally {
       await f.connector.close();
+      vi.useRealTimers();
+    }
+  });
+
+  it("skips a server that just failed discovery until the failure TTL or a version change", async () => {
+    vi.useFakeTimers();
+    const sink = createTestSink();
+    const previousLogger = getLogger();
+    installLogger(createLogger({ service: "test", sinks: [sink] }));
+    const f = fixture();
+    try {
+      f.state.failNext = true;
+      expect(await f.connector.discoverTools(f.context)).toEqual([]);
+      const attempted = f.state.initializations;
+      f.state.failNext = false;
+      // Within the window: no connect, no tools/list, and one `discovery.skipped` log.
+      expect(await f.connector.discoverTools(f.context)).toEqual([]);
+      expect(await f.connector.discoverTools(f.context)).toEqual([]);
+      expect(f.state.initializations).toBe(attempted);
+      expect(f.state.lists).toBe(0);
+      expect(sink.events.filter((event) => event.message === "discovery.skipped")).toHaveLength(1);
+      // A server/credential write changes the version and retries at once.
+      f.setAssignment({ server: { ...SERVER, revision: 2 } });
+      expect(await f.connector.discoverTools(f.context)).toHaveLength(1);
+      expect(f.state.lists).toBe(1);
+      // TTL expiry retries.
+      f.state.failNext = true;
+      await vi.advanceTimersByTimeAsync(DISCOVERY_CACHE_TTL_MS);
+      expect(await f.connector.discoverTools(f.context)).toEqual([]);
+      f.state.failNext = false;
+      await vi.advanceTimersByTimeAsync(DISCOVERY_FAILURE_TTL_MS);
+      expect(await f.connector.discoverTools(f.context)).toHaveLength(1);
+    } finally {
+      await f.connector.close();
+      installLogger(previousLogger);
       vi.useRealTimers();
     }
   });

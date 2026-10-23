@@ -7614,9 +7614,33 @@ describePostgres("recruiting domain (PostgreSQL)", () => {
         match_score: cell(score),
       }));
     for (const [label, day, scores] of [
-      ["cells-1", "17", [["a", 1, 90], ["b", 2, 80], ["c", 3, 70]]],
-      ["cells-2", "18", [["a", 3, 40], ["b", 2, 50], ["c", 1, 60]]],
-      ["cells-3", "19", [["a", 2, 62], ["b", 3, 45], ["c", 1, 82]]],
+      [
+        "cells-1",
+        "17",
+        [
+          ["a", 1, 90],
+          ["b", 2, 80],
+          ["c", 3, 70],
+        ],
+      ],
+      [
+        "cells-2",
+        "18",
+        [
+          ["a", 3, 40],
+          ["b", 2, 50],
+          ["c", 1, 60],
+        ],
+      ],
+      [
+        "cells-3",
+        "19",
+        [
+          ["a", 2, 62],
+          ["b", 3, 45],
+          ["c", 1, 82],
+        ],
+      ],
     ] as const)
       await recordCandidatePage(f, prepared, label, rows(scores as never), {
         observedAt: new Date(`2026-10-${day}T00:00:00Z`),
