@@ -594,31 +594,45 @@ export const builtinAgentTools: ConnectorTool[] = [
   {
     name: "remember",
     description:
-      'Replace this bot\'s native memory document. Read it with read_memory first and preserve other facts. Use the loaded expectedRevision, or 0 for a new document. For reusable recruiting preferences, prefer one recruiting_feedback call with target:"preference". If using recruitingFeedback here, top-level content must be the complete resulting native document; recruitingFeedback.content is the full exact text added or replacing an anchored span, never a summary. Both must match the same edit. New role requirements, round scope changes and candidate decisions belong in recruiting_feedback. An explicitly requested private working note may summarize existing saved role state without becoming a reusable preference.',
+      'Save this bot\'s native memory document. Read it with read_memory first and use the loaded expectedRevision, or 0 for a new document. For a small change, prefer edit:{find,replace}: find must match the loaded document exactly once (include surrounding lines to disambiguate) and only that span changes; do not resend the whole document. Use content only to replace the whole document, preserving other facts. For reusable recruiting preferences, prefer one recruiting_feedback call with target:"preference". If using recruitingFeedback here, top-level content must be the complete resulting native document; recruitingFeedback.content is the full exact text added or replacing an anchored span, never a summary. Both must match the same edit. New role requirements, round scope changes and candidate decisions belong in recruiting_feedback. An explicitly requested private working note may summarize existing saved role state without becoming a reusable preference.',
     inputSchema: {
       type: "object",
       properties: {
-        content: { type: "string" },
+        content: { type: "string", description: "The document's complete new content." },
         path: { type: "string" },
         expectedRevision: { type: "integer", minimum: 0 },
+        edit: {
+          type: "object",
+          description:
+            "Partial edit: replace the single exact occurrence of find with replace. Mutually exclusive with content.",
+          properties: { find: { type: "string", minLength: 1 }, replace: { type: "string" } },
+          required: ["find", "replace"],
+        },
         recruitingFeedback: z.toJSONSchema(RecruitingPreferenceFeedbackSchema, { io: "input" }),
       },
-      required: ["content", "expectedRevision"],
+      required: ["expectedRevision"],
     },
   },
   {
     name: "save_shared_memory",
     description:
-      'Replace a native memory document shared across this user\'s bots in this Space. Read it with read_memory first and preserve other facts. Use the loaded expectedRevision, or 0 for a new document. For reusable recruiting preferences, prefer one recruiting_feedback call with target:"preference". If using recruitingFeedback here, top-level content must be the complete resulting native document; recruitingFeedback.content is the full exact text added or replacing an anchored span, never a summary. Both must match the same edit. Other recruiting feedback belongs in recruiting_feedback.',
+      'Save a native memory document shared across this user\'s bots in this Space. Read it with read_memory first and use the loaded expectedRevision, or 0 for a new document. For a small change, prefer edit:{find,replace}: find must match the loaded document exactly once and only that span changes. Use content only to replace the whole document, preserving other facts. For reusable recruiting preferences, prefer one recruiting_feedback call with target:"preference". If using recruitingFeedback here, top-level content must be the complete resulting native document; recruitingFeedback.content is the full exact text added or replacing an anchored span, never a summary. Both must match the same edit. Other recruiting feedback belongs in recruiting_feedback.',
     inputSchema: {
       type: "object",
       properties: {
         path: { type: "string", description: "Document name, for example MEMORY.md." },
         content: { type: "string", description: "The document's complete new content." },
         expectedRevision: { type: "integer", minimum: 0 },
+        edit: {
+          type: "object",
+          description:
+            "Partial edit: replace the single exact occurrence of find with replace. Mutually exclusive with content.",
+          properties: { find: { type: "string", minLength: 1 }, replace: { type: "string" } },
+          required: ["find", "replace"],
+        },
         recruitingFeedback: z.toJSONSchema(RecruitingPreferenceFeedbackSchema, { io: "input" }),
       },
-      required: ["path", "content", "expectedRevision"],
+      required: ["path", "expectedRevision"],
     },
   },
   {
@@ -723,11 +737,21 @@ export const builtinAgentTools: ConnectorTool[] = [
   {
     name: "search_history",
     description:
-      "Search literal keywords in earlier messages in this chat; every query word must match the same message. For paraphrased recollection, start with one distinctive project or topic keyword. Returns at most five matches, newest first. When nextSearch is present, call search_history with those arguments to continue. Coverage applies only to the requested literal query and range; an empty narrower query does not exhaust an unfinished broader query. Use read_history to check surrounding messages and corrections.",
+      "Search literal keywords in earlier messages in this chat; every query word must match the same message. For paraphrased recollection, start with one distinctive project or topic keyword. Returns at most five matches, newest first. When nextSearch is present, call search_history with those arguments to continue. Coverage applies only to the requested literal query and range; an empty narrower query does not exhaust an unfinished broader query. Use read_history to check surrounding messages and corrections. scope:\"mine\" instead searches this user's other conversations in this Space (their other bots and group chats, never other people's), returning the conversation title, a short snippet and messageId plus threadId; follow one with read_history using both.",
     inputSchema: {
       type: "object",
       properties: {
         query: { type: "string", minLength: 1, maxLength: 500 },
+        scope: {
+          type: "string",
+          enum: ["conversation", "mine"],
+          description:
+            "conversation (default): this chat only. mine: this user's other conversations.",
+        },
+        beforeMessageId: {
+          type: "string",
+          description: 'Pagination cursor from scope:"mine" results; keep before unchanged.',
+        },
         before: {
           type: "string",
           description: "Exclusive ISO date upper bound; date-only values mean UTC midnight.",
@@ -754,6 +778,11 @@ export const builtinAgentTools: ConnectorTool[] = [
       type: "object",
       properties: {
         messageId: { type: "string" },
+        threadId: {
+          type: "string",
+          description:
+            'Only for a messageId returned by search_history scope:"mine"; reads that conversation\'s messages without runs or receipts.',
+        },
         linkedRunId: {
           type: "string",
           description:
