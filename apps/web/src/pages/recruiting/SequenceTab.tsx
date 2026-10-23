@@ -1,7 +1,7 @@
 import { Trans, useLingui } from "@lingui/react/macro";
 import type { RecruitingRoleCampaign } from "@rakazo/contracts";
 import { Badge, Button } from "@rakazo/ui-web";
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { rpc } from "../../lib/rpc";
 import { useRecruitingDetail } from "./detail";
 import { SequenceOverview } from "./SequenceOverview";
@@ -55,16 +55,20 @@ type CampaignScope = Pick<
 >;
 
 /** The role's bound Instantly campaign, read live through the conversation's connection. */
-export function useRoleCampaign({ conversation, refreshSignal, ...cache }: CampaignScope) {
+export function useRoleCampaign(
+  { conversation, refreshSignal, ...cache }: CampaignScope,
+  selection?: { campaignId: string; campaignOffset: number },
+  selectionScope?: string,
+) {
   const target = conversation
     ? "groupId" in conversation
       ? { groupId: conversation.groupId }
       : { botId: conversation.botId }
     : null;
   return useKeyedRead<RecruitingRoleCampaign>(
-    target ? JSON.stringify([target, refreshSignal]) : null,
-    async () => rpc.recruiting.roleCampaign(target!),
-    target ? tabCacheSlot(cache, ["roleCampaign", target]) : {},
+    target ? JSON.stringify([target, selectionScope, selection, refreshSignal]) : null,
+    async () => rpc.recruiting.roleCampaign({ ...target!, ...selection }),
+    target ? tabCacheSlot(cache, ["roleCampaign", target, selectionScope, selection]) : {},
   );
 }
 
@@ -115,14 +119,7 @@ export function SequenceTab(props: RecruitingTabProps) {
   const { t } = useLingui();
   const detail = useRecruitingDetail();
   const crm = useRoleCrm(props);
-  const roleCampaign = useRoleCampaign(props);
   const instantly = useInstantlyStatus();
-  const leadStatus = new Map(
-    (roleCampaign.data?.leads ?? []).map((lead) => [
-      lead.email.toLowerCase(),
-      statusLabel(instantly.lead, lead.status),
-    ]),
-  );
   const [candidateId, setCandidateId] = useState<string>();
   const ready = crm.status === "ready" ? crm.target : null;
   const campaigns = useCrmPages(
@@ -130,6 +127,24 @@ export function SequenceTab(props: RecruitingTabProps) {
     "roleCampaigns",
     ready ? { crmRoleId: ready.crmRoleId } : null,
     props,
+  );
+  const campaignScope = JSON.stringify([props.spaceId, props.roleId, props.conversation, ready]);
+  const [chosenCampaign, setChosenCampaign] = useState<{
+    scope: string;
+    campaignId: string;
+    campaignOffset: number;
+  }>();
+  useEffect(() => setChosenCampaign(undefined), [campaignScope]);
+  const selection =
+    chosenCampaign?.scope === campaignScope
+      ? { campaignId: chosenCampaign.campaignId, campaignOffset: chosenCampaign.campaignOffset }
+      : undefined;
+  const roleCampaign = useRoleCampaign(props, selection, campaignScope);
+  const leadStatus = new Map(
+    (roleCampaign.data?.leads ?? []).map((lead) => [
+      lead.email.toLowerCase(),
+      statusLabel(instantly.lead, lead.status),
+    ]),
   );
   const people = useCrmPages(
     crm,
@@ -162,6 +177,45 @@ export function SequenceTab(props: RecruitingTabProps) {
     <section aria-label={t`Sequence`}>
       <TabHeader title={<Trans>Sequence</Trans>} />
       <CrmGate crm={crm} />
+      {campaigns.data?.items.length ? (
+        <label className="mb-4 block text-sm">
+          <span className="mb-1 block">
+            <Trans>Campaign</Trans>
+          </span>
+          <select
+            aria-label={t`Campaign`}
+            className="w-full rounded-md border bg-background p-2"
+            value={selection?.campaignId ?? roleCampaign.data?.campaign?.id ?? ""}
+            onChange={(event) => {
+              const campaignId = event.target.value;
+              const campaignOffset = campaigns.itemOffsets.get(campaignId);
+              setChosenCampaign(
+                campaignId && campaignOffset !== undefined
+                  ? { scope: campaignScope, campaignId, campaignOffset }
+                  : undefined,
+              );
+            }}
+          >
+            <option value="">
+              <Trans>Select a campaign</Trans>
+            </option>
+            {campaigns.data.items.map((campaign) => (
+              <option
+                key={campaign.id}
+                value={campaign.id}
+                disabled={!campaigns.itemOffsets.has(campaign.id)}
+              >
+                {campaignName(campaign.name)}
+              </option>
+            ))}
+          </select>
+        </label>
+      ) : null}
+      {roleCampaign.data?.selectionRequired ? (
+        <TabNotice>
+          <Trans>Select a campaign</Trans>
+        </TabNotice>
+      ) : null}
       <SequenceOverview
         campaign={roleCampaign.data}
         replied={
@@ -170,7 +224,8 @@ export function SequenceTab(props: RecruitingTabProps) {
         // Candidate-wide outbox records have no role provenance.
         sendDates={null}
       />
-      {roleCampaign.failed || roleCampaign.data?.status === "unavailable" ? (
+      {roleCampaign.failed ||
+      (roleCampaign.data?.status === "unavailable" && !roleCampaign.data.selectionRequired) ? (
         <TabNotice alert>
           <Trans>Could not read this campaign.</Trans>
         </TabNotice>

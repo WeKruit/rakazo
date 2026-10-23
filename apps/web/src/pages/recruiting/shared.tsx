@@ -178,7 +178,12 @@ export const FIRST_PAGE = 25;
 type PagedOperation = "candidates" | "important" | "roleCampaigns" | "roleMail";
 type PagedItem = { candidateId: string } | { id: string };
 /** A cursor is preferred when the API returns one; older APIs page by offset only. */
-type PagedPage = { items: PagedItem[]; nextOffset: number | null; nextCursor?: string | null };
+type PagedPage = {
+  offset?: number;
+  items: PagedItem[];
+  nextOffset: number | null;
+  nextCursor?: string | null;
+};
 type NextPage = { cursor: string } | { offset: number } | null;
 const itemId = (item: PagedItem) => ("id" in item ? item.id : item.candidateId);
 const nextPage = (page: PagedPage): NextPage =>
@@ -208,6 +213,7 @@ export function useCrmPages<O extends PagedOperation>(
   const [more, setMore] = useState<{
     identity: string;
     items: PagedItem[];
+    offsets: Array<[string, number]>;
     next: NextPage;
     loading?: boolean;
     failed?: boolean;
@@ -218,6 +224,12 @@ export function useCrmPages<O extends PagedOperation>(
   const firstPage = first.data as PagedPage | undefined;
   const seen = new Set(firstPage?.items.map(itemId));
   const next = extra ? extra.next : firstPage ? nextPage(firstPage) : null;
+  const itemOffsets = new Map<string, number>([
+    ...(firstPage && typeof firstPage.offset === "number"
+      ? firstPage.items.map((item): [string, number] => [itemId(item), firstPage.offset!])
+      : []),
+    ...(extra?.offsets ?? []),
+  ]);
   const merged = firstPage && {
     ...firstPage,
     items: extra
@@ -226,13 +238,23 @@ export function useCrmPages<O extends PagedOperation>(
   };
   const loadMore = () => {
     if (!request || !identity || !next || extra?.loading) return;
-    const base = { identity, items: extra?.items ?? [], next };
+    const base = { identity, items: extra?.items ?? [], offsets: extra?.offsets ?? [], next };
     setMore({ ...base, loading: true });
     retryTransientRead(() => readCrm({ ...request, ...next } as CrmRequest<O>))
       .then((value) => {
         if (latest.current !== identity) return;
         const page = value as unknown as PagedPage;
-        setMore({ identity, items: [...base.items, ...page.items], next: nextPage(page) });
+        setMore({
+          identity,
+          items: [...base.items, ...page.items],
+          offsets: [
+            ...base.offsets,
+            ...(typeof page.offset === "number"
+              ? page.items.map((item): [string, number] => [itemId(item), page.offset!])
+              : []),
+          ],
+          next: nextPage(page),
+        });
       })
       .catch(() => {
         if (latest.current === identity) setMore({ ...base, failed: true });
@@ -241,6 +263,7 @@ export function useCrmPages<O extends PagedOperation>(
   return {
     ...first,
     data: merged as unknown as Page | undefined,
+    itemOffsets,
     hasMore: next !== null,
     loadMore,
     loadingMore: Boolean(extra?.loading),

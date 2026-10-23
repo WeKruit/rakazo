@@ -333,6 +333,109 @@ it.each([
   },
 );
 
+it("selects an exact campaign from its actual loaded page and resets on role changes", async () => {
+  const selectionRequired = {
+    status: "unavailable",
+    selectionRequired: true,
+    serverId: null,
+    campaign: null,
+    leads: [],
+  };
+  let finishOld!: (value: unknown) => void;
+  roleCampaign.mockImplementation(async (input: { campaignId?: string }) => {
+    if (input.campaignId === "first-campaign")
+      return {
+        status: "ready",
+        leadsComplete: true,
+        campaign: { id: "first-campaign", name: "First outreach", status: 1 },
+        leads: [{ email: "ada@example.test", status: 1, interestStatus: 2 }],
+      };
+    if (input.campaignId)
+      return new Promise((resolve) => {
+        finishOld = resolve;
+      });
+    return selectionRequired;
+  });
+  crmData.mockImplementation(
+    async (input: { operation: string; offset?: number; cursor?: string; crmRoleId?: string }) => {
+      if (input.operation === "candidates") return { ...candidatesPage, items: [], total: 0 };
+      const later = input.cursor === "opaque-next";
+      return {
+        operation: "roleCampaigns",
+        source,
+        checkedAt,
+        scope: "stored_role_campaigns",
+        crmRoleId: input.crmRoleId,
+        items: [
+          {
+            id: later ? "later-campaign" : "first-campaign",
+            name: later ? "Later outreach" : "First outreach",
+            status: 1,
+            syncedAt: checkedAt,
+          },
+        ],
+        offset: later ? 25 : 0,
+        nextOffset: later ? null : 25,
+        nextCursor: later ? null : "opaque-next",
+      };
+    },
+  );
+  const view = await mount(<SequenceTab {...props} crmTarget={target} />);
+  expect(roleCampaign).toHaveBeenLastCalledWith({ groupId: "group-1" });
+  expect(view.textContent).not.toContain("Could not read this campaign.");
+  const selector = () => view.querySelector<HTMLSelectElement>('select[aria-label="Campaign"]')!;
+  expect(selector().value).toBe("");
+  await act(async () => {
+    selector().value = "first-campaign";
+    selector().dispatchEvent(new Event("change", { bubbles: true }));
+  });
+  expect(roleCampaign).toHaveBeenLastCalledWith({
+    groupId: "group-1",
+    campaignId: "first-campaign",
+    campaignOffset: 0,
+  });
+  expect(
+    [...view.querySelectorAll("dl > div")].map((node) => node.textContent).join(" "),
+  ).toContain("Active1");
+  const loadMore = view.querySelector<HTMLButtonElement>('[aria-label="Role campaigns"] button')!;
+  await act(async () => loadMore.click());
+  await settle();
+  expect([...selector().options].map((option) => option.textContent)).toContain("Later outreach");
+  await act(async () => {
+    selector().value = "later-campaign";
+    selector().dispatchEvent(new Event("change", { bubbles: true }));
+  });
+  expect(roleCampaign).toHaveBeenLastCalledWith({
+    groupId: "group-1",
+    campaignId: "later-campaign",
+    campaignOffset: 25,
+  });
+  // Same conversation, different role/source scope must not retain selected provider data.
+  await view.rerender(
+    <SequenceTab {...props} roleId="role-2" crmTarget={{ ...target, crmRoleId: BEN }} />,
+  );
+  expect(selector().value).toBe("");
+  expect([...selector().options].some((option) => option.value === "later-campaign")).toBe(false);
+  expect(roleCampaign).toHaveBeenLastCalledWith({ groupId: "group-1" });
+  await act(async () =>
+    finishOld({
+      status: "ready",
+      leadsComplete: true,
+      campaign: { id: "later-campaign", name: "Old selected", status: 1 },
+      leads: [{ email: "old@example.test", status: 1, interestStatus: 2 }],
+    }),
+  );
+  const metrics = () =>
+    [...view.querySelectorAll("dl > div")].map((node) => node.textContent).join(" ");
+  expect(metrics()).toContain("Active—Not reported");
+  await view.rerender(<SequenceTab {...props} crmTarget={target} />);
+  expect(selector().value).toBe("");
+  expect(roleCampaign).toHaveBeenLastCalledWith({ groupId: "group-1" });
+  expect(
+    crmData.mock.calls.filter(([input]) => input.operation === "roleCampaigns" && input.cursor),
+  ).toHaveLength(1);
+});
+
 const roleMailPage = (supported: boolean, items: unknown[] = []) => ({
   operation: "roleMail",
   source,
