@@ -27,6 +27,11 @@ msgstr "{0, plural, =1 {# candidate in the pool} other {# candidates in the pool
 msgid "{0, plural, =1 {# candidate} other {# candidates}}"
 msgstr "{0, plural, =1 {# candidate} other {# candidates}}"
 
+#. placeholder {0}: page.total
+#: src/pages/RecruitingPanel.tsx
+msgid "{0, plural, =1 {# contact} other {# contacts}}"
+msgstr "{0, plural, =1 {# contact} other {# contacts}}"
+
 #. placeholder {0}: group.entries.length
 #: src/pages/ModelSettingsOverlay.tsx
 msgid "{0, plural, one {# model} other {# models}}"
@@ -997,6 +1002,10 @@ msgid "Candidate feedback"
 msgstr "Candidate feedback"
 
 #: src/pages/RecruitingPanel.tsx
+msgid "Candidate messages"
+msgstr "Candidate messages"
+
+#: src/pages/RecruitingPanel.tsx
 msgid "Candidate question"
 msgstr "Candidate question"
 
@@ -1128,6 +1137,10 @@ msgstr "Choose a bot shape, color, or upload an image"
 #: src/pages/MessagingSettingsOverlay.tsx
 msgid "Choose a bot…"
 msgstr "Choose a bot…"
+
+#: src/pages/Shell.tsx
+msgid "Choose a CRM role again."
+msgstr "Choose a CRM role again."
 
 #: src/pages/Auth.tsx
 msgid "Choose a new password"
@@ -1506,6 +1519,10 @@ msgid "Contact details have not been checked yet."
 msgstr "Contact details have not been checked yet."
 
 #: src/pages/RecruitingPanel.tsx
+msgid "Contact status"
+msgstr "Contact status"
+
+#: src/pages/RecruitingPanel.tsx
 #: src/pages/shell/RecruitingNavigation.tsx
 msgid "Contacts"
 msgstr "Contacts"
@@ -1806,6 +1823,10 @@ msgid "Could not load credentials."
 msgstr "Could not load credentials."
 
 #: src/pages/RecruitingPanel.tsx
+msgid "Could not load CRM records. Try refreshing."
+msgstr "Could not load CRM records. Try refreshing."
+
+#: src/pages/RecruitingPanel.tsx
 msgid "Could not load feedback"
 msgstr "Could not load feedback"
 
@@ -1854,6 +1875,10 @@ msgstr "Could not load sign-in options"
 #: src/pages/KnowledgeSection.tsx
 msgid "Could not load skill"
 msgstr "Could not load skill"
+
+#: src/pages/RecruitingPanel.tsx
+msgid "Could not load stored messages. Try refreshing."
+msgstr "Could not load stored messages. Try refreshing."
 
 #: src/pages/Artifacts.tsx
 msgid "Could not load this artifact."
@@ -1914,6 +1939,10 @@ msgstr "Could not reach the model server."
 #: src/pages/Auth.tsx
 msgid "Could not reach the server"
 msgstr "Could not reach the server"
+
+#: src/pages/shell/RecruitingNavigation.tsx
+msgid "Could not read a CRM connection."
+msgstr "Could not read a CRM connection."
 
 #: src/pages/RecruitingCorrespondence.tsx
 msgid "Could not read this sequence."
@@ -2184,8 +2213,16 @@ msgid "CRM"
 msgstr "CRM"
 
 #: src/pages/RecruitingPanel.tsx
+msgid "CRM contacts"
+msgstr "CRM contacts"
+
+#: src/pages/RecruitingPanel.tsx
 msgid "CRM receipt"
 msgstr "CRM receipt"
+
+#: src/pages/shell/RecruitingNavigation.tsx
+msgid "CRM roles"
+msgstr "CRM roles"
 
 #: src/pages/RoutineSchedule.tsx
 msgid "Cron"
@@ -2981,6 +3018,10 @@ msgid "Hiring manager"
 msgstr "Hiring manager"
 
 #: src/pages/RecruitingPanel.tsx
+msgid "Historical records matched to this client and role. These are not new search results or a verified shortlist."
+msgstr "Historical records matched to this client and role. These are not new search results or a verified shortlist."
+
+#: src/pages/RecruitingPanel.tsx
 msgid "History"
 msgstr "History"
 
@@ -3133,6 +3174,7 @@ msgid "Interval unit"
 msgstr "Interval unit"
 
 #: src/pages/RecruitingCorrespondence.tsx
+#: src/pages/RecruitingPanel.tsx
 #: src/pages/shell/RecruitingNavigation.tsx
 msgid "Interview"
 msgstr "Interview"
@@ -3203,6 +3245,10 @@ msgstr "Last checked"
 #: src/components/DesktopUpdates.tsx
 msgid "Later"
 msgstr "Later"
+
+#: src/pages/RecruitingPanel.tsx
+msgid "Latest messages"
+msgstr "Latest messages"
 
 #: src/components/computer/TerminalApp.tsx
 msgid "Launched {app}"
@@ -3293,6 +3339,14 @@ msgstr "Loading activity…"
 msgid "Loading contact details…"
 msgstr "Loading contact details…"
 
+#: src/pages/RecruitingPanel.tsx
+msgid "Loading CRM records…"
+msgstr "Loading CRM records…"
+
+#: src/pages/shell/RecruitingNavigation.tsx
+msgid "Loading CRM roles…"
+msgstr "Loading CRM roles…"
+
 #: src/pages/PluginsOverlay.tsx
 msgid "Loading integrations…"
 msgstr "Loading integrations…"
@@ -3320,6 +3374,10 @@ msgstr "Loading saved results…"
 #: src/pages/RecruitingCorrespondence.tsx
 msgid "Loading sequence…"
 msgstr "Loading sequence…"
+
+#: src/pages/RecruitingPanel.tsx
+msgid "Loading stored messages…"
+msgstr "Loading stored messages…"
 
 #: src/pages/PluginsOverlay.tsx
 msgid "Loading tools…"
@@ -3550,6 +3608,10 @@ msgstr "Message…"
 #: src/pages/Shell.tsx
 msgid "Messaged {peer}"
 msgstr "Messaged {peer}"
+
+#: src/pages/RecruitingPanel.tsx
+msgid "Messages"
+msgstr "Messages"
 
 #: src/pages/AccountSettingsOverlay.tsx
 #: src/pages/MessagingSettingsOverlay.tsx
@@ -3805,6 +3867,10 @@ msgid "New ticket"
 msgstr "New ticket"
 
 #: src/pages/RecruitingPanel.tsx
+msgid "Next"
+msgstr "Next"
+
+#: src/pages/RecruitingPanel.tsx
 msgid "No additional search filters"
 msgstr "No additional search filters"
 
@@ -3851,6 +3917,14 @@ msgstr "No chat apps linked yet."
 #: src/pages/shell/bot-credentials.tsx
 msgid "No credentials saved for this bot."
 msgstr "No credentials saved for this bot."
+
+#: src/pages/RecruitingPanel.tsx
+msgid "No CRM records matched this search."
+msgstr "No CRM records matched this search."
+
+#: src/pages/shell/RecruitingNavigation.tsx
+msgid "No CRM roles were returned."
+msgstr "No CRM roles were returned."
 
 #: src/pages/MessagingSettingsOverlay.tsx
 msgid "No group chats yet."
@@ -3993,6 +4067,10 @@ msgstr "No shortlisted candidates yet."
 msgid "No skills yet"
 msgstr "No skills yet"
 
+#: src/pages/RecruitingPanel.tsx
+msgid "No stored messages were returned for this contact."
+msgstr "No stored messages were returned for this contact."
+
 #: src/pages/RecruitingCorrespondence.tsx
 #: src/pages/Shell.tsx
 msgid "No subject"
@@ -4103,6 +4181,10 @@ msgstr "OAuth connection failed"
 #: src/pages/McpServersOverlay.tsx
 msgid "OAuth expired"
 msgstr "OAuth expired"
+
+#: src/pages/RecruitingPanel.tsx
+msgid "Older messages"
+msgstr "Older messages"
 
 #. placeholder {0}: call.botName
 #: src/components/call/CallCard.tsx
@@ -4252,6 +4334,10 @@ msgstr "Organization API key"
 msgid "Original email results saved in this role conversation."
 msgstr "Original email results saved in this role conversation."
 
+#: src/pages/RecruitingPanel.tsx
+msgid "Original job description"
+msgstr "Original job description"
+
 #: src/pages/shell/chat-context.tsx
 msgid "Original message unavailable"
 msgstr "Original message unavailable"
@@ -4284,6 +4370,10 @@ msgstr "Outreach"
 #: src/pages/RecruitingCorrespondence.tsx
 msgid "Outreach file review"
 msgstr "Outreach file review"
+
+#: src/pages/RecruitingPanel.tsx
+msgid "Outreach status"
+msgstr "Outreach status"
 
 #: src/pages/Board.tsx
 msgid "Owner"
@@ -4428,6 +4518,10 @@ msgstr "Preview only"
 #: src/pages/RecruitingCorrespondence.tsx
 msgid "Preview only. Ask for the complete message to read the full body."
 msgstr "Preview only. Ask for the complete message to read the full body."
+
+#: src/pages/RecruitingPanel.tsx
+msgid "Previous"
+msgstr "Previous"
 
 #: src/pages/Board.tsx
 #: src/pages/RecruitingPanel.tsx
@@ -4639,6 +4733,7 @@ msgstr "Recruiting assistant"
 msgid "Recruiting views"
 msgstr "Recruiting views"
 
+#: src/pages/RecruitingPanel.tsx
 #: src/pages/shell/RecruitingNavigation.tsx
 msgid "Recruiting workflow"
 msgstr "Recruiting workflow"
@@ -5234,6 +5329,7 @@ msgstr "Score / tier not returned"
 #: src/components/integrations/IntegrationSetup.tsx
 #: src/pages/ModelSettingsOverlay.tsx
 #: src/pages/PluginsOverlay.tsx
+#: src/pages/RecruitingPanel.tsx
 #: src/pages/Shell.tsx
 #: src/pages/shell/bot-picker.tsx
 #: src/pages/shell/command-palette.tsx
@@ -5273,6 +5369,10 @@ msgstr "Search candidates"
 #: src/pages/RecruitingPanel.tsx
 msgid "Search Criteria"
 msgstr "Search Criteria"
+
+#: src/pages/RecruitingPanel.tsx
+msgid "Search CRM contacts"
+msgstr "Search CRM contacts"
 
 #: src/pages/RecruitingPanel.tsx
 msgid "Search filter"
@@ -5343,6 +5443,10 @@ msgid "Select a connected model"
 msgstr "Select a connected model"
 
 #: src/pages/RecruitingPanel.tsx
+msgid "Select a contact to read their stored messages."
+msgstr "Select a contact to read their stored messages."
+
+#: src/pages/RecruitingPanel.tsx
 msgid "Selected recipient unavailable"
 msgstr "Selected recipient unavailable"
 
@@ -5396,6 +5500,7 @@ msgid "Sentry alert"
 msgstr "Sentry alert"
 
 #: src/pages/RecruitingCorrespondence.tsx
+#: src/pages/RecruitingPanel.tsx
 #: src/pages/shell/RecruitingNavigation.tsx
 msgid "Sequence"
 msgstr "Sequence"
@@ -5690,6 +5795,10 @@ msgstr "Speech model"
 msgid "SSO is temporarily unavailable. Try again."
 msgstr "SSO is temporarily unavailable. Try again."
 
+#: src/pages/RecruitingPanel.tsx
+msgid "Stage"
+msgstr "Stage"
+
 #: src/pages/Paywall.tsx
 msgid "Start {trialDays}-day free trial"
 msgstr "Start {trialDays}-day free trial"
@@ -5698,6 +5807,7 @@ msgstr "Start {trialDays}-day free trial"
 msgid "Start recording"
 msgstr "Start recording"
 
+#: src/pages/RecruitingPanel.tsx
 #: src/pages/Shell.tsx
 msgid "Start recruiting"
 msgstr "Start recruiting"
@@ -5766,6 +5876,10 @@ msgstr "Stopped"
 #: src/lib/browser-notifications.ts
 msgid "Stopped."
 msgstr "Stopped."
+
+#: src/pages/RecruitingPanel.tsx
+msgid "Stored CRM history"
+msgstr "Stored CRM history"
 
 #: src/pages/McpServersOverlay.tsx
 msgid "Stored encrypted"
@@ -6026,6 +6140,10 @@ msgstr "This result cannot be displayed yet"
 msgid "This role changed. Select the candidate again."
 msgstr "This role changed. Select the candidate again."
 
+#: src/pages/RecruitingPanel.tsx
+msgid "This section has not loaded corresponding CRM records. Start a recruiting conversation to continue this work."
+msgstr "This section has not loaded corresponding CRM records. Start a recruiting conversation to continue this work."
+
 #: src/pages/shell/message-cards.tsx
 msgid "This server cannot be assigned without a bot."
 msgstr "This server cannot be assigned without a bot."
@@ -6130,6 +6248,7 @@ msgstr "Trial ends {day}"
 #: src/pages/ActivityList.tsx
 #: src/pages/Onboarding.tsx
 #: src/pages/RecruitingCorrespondence.tsx
+#: src/pages/shell/RecruitingNavigation.tsx
 msgid "Try again"
 msgstr "Try again"
 
@@ -6358,6 +6477,10 @@ msgstr "View {name}"
 #: src/pages/RoutineRunHistory.tsx
 msgid "View chat"
 msgstr "View chat"
+
+#: src/pages/RecruitingPanel.tsx
+msgid "View messages"
+msgstr "View messages"
 
 #: src/pages/SettingsOverlay.tsx
 #: src/pages/Shell.tsx
