@@ -1,4 +1,6 @@
-import type { Actor, RecruitingCrmSyncCounts } from "@rakazo/contracts";
+import { isDeepStrictEqual } from "node:util";
+import type { Actor, RecruitingCrmDataOutput, RecruitingCrmSyncCounts } from "@rakazo/contracts";
+import { RecruitingCrmProfileSchema } from "@rakazo/contracts";
 import type { PrismaClient } from "./client.js";
 
 /** One CRM organization of one CRM connection, as the acting user sees it. */
@@ -16,6 +18,11 @@ export type CrmSyncContact = {
   crmCandidateId: string;
   name: string;
   title: string | null;
+  company?: string | null;
+  profile?: Extract<
+    RecruitingCrmDataOutput,
+    { operation: "candidates" }
+  >["items"][number]["profile"];
   location: string | null;
   email: string | null;
   phone: string | null;
@@ -69,7 +76,7 @@ const same = (left: unknown, right: unknown) =>
   left instanceof Date || right instanceof Date
     ? (left instanceof Date ? left.getTime() : left) ===
       (right instanceof Date ? right.getTime() : right)
-    : JSON.stringify(left) === JSON.stringify(right);
+    : isDeepStrictEqual(left, right);
 const changed = <T extends Record<string, unknown>>(stored: Record<string, unknown>, next: T) =>
   (Object.keys(next) as (keyof T & string)[]).some((key) => !same(stored[key], next[key]));
 const lastBy = <T>(rows: T[], key: (row: T) => string) => [
@@ -112,6 +119,14 @@ async function upsertKeyed<T extends Record<string, unknown>>(
       counts.created++;
       continue;
     }
+    // A newer read wins even if an older, paged pass finishes later.
+    if (
+      (existing.syncedAt instanceof Date && existing.syncedAt > options.now) ||
+      (existing.archivedAt instanceof Date && existing.archivedAt >= options.now)
+    ) {
+      counts.unchanged++;
+      continue;
+    }
     const restored = options.archivable && existing.archivedAt != null;
     if (!restored && !changed(existing, row)) {
       counts.unchanged++;
@@ -121,8 +136,14 @@ async function upsertKeyed<T extends Record<string, unknown>>(
     if (restored) counts.restored++;
     else counts.updated++;
     if (!options.dryRun)
-      await delegate.update({
-        where: { id: existing.id },
+      await delegate.updateMany({
+        where: {
+          id: existing.id,
+          syncedAt: { lte: options.now },
+          ...(options.archivable
+            ? { OR: [{ archivedAt: null }, { archivedAt: { lt: options.now } }] }
+            : {}),
+        },
         data: {
           ...row,
           syncedAt: options.now,
@@ -137,7 +158,10 @@ async function upsertKeyed<T extends Record<string, unknown>>(
       skipDuplicates: true,
     });
   if (touch.length)
-    await delegate.updateMany({ where: { id: { in: touch } }, data: { syncedAt: options.now } });
+    await delegate.updateMany({
+      where: { id: { in: touch }, syncedAt: { lt: options.now } },
+      data: { syncedAt: options.now },
+    });
   return counts;
 }
 
@@ -159,13 +183,14 @@ export async function syncRecruitingCrmRoles(
     ...where,
     archivedAt: null,
     crmRoleId: { notIn: roles.map((role) => role.crmRoleId) },
+    syncedAt: { lte: options.now },
   };
   counts.archived = options.dryRun
     ? await prisma.recruitingCrmRole.count({ where: gone })
     : (
         await prisma.recruitingCrmRole.updateMany({
           where: gone,
-          data: { archivedAt: options.now },
+          data: { archivedAt: options.now, syncedAt: options.now },
         })
       ).count;
   return counts;
@@ -205,7 +230,7 @@ export async function archiveUnseenRecruitingCrmContacts(
   return (
     await prisma.recruitingCrmContact.updateMany({
       where: { ...where, syncedAt: { lt: since } },
-      data: { archivedAt: options.now },
+      data: { archivedAt: options.now, syncedAt: options.now },
     })
   ).count;
 }
@@ -260,7 +285,12 @@ export async function syncRecruitingCrmRoleLinks(
     });
   if (touch.length || restore.length)
     await prisma.recruitingCrmRoleContact.updateMany({
-      where: { roleId: role.id, contactId: { in: [...touch, ...restore] } },
+      where: {
+        roleId: role.id,
+        contactId: { in: [...touch, ...restore] },
+        syncedAt: { lte: options.now },
+        OR: [{ archivedAt: null }, { archivedAt: { lt: options.now } }],
+      },
       data: { syncedAt: options.now, archivedAt: null },
     });
   return counts;
@@ -291,7 +321,7 @@ export async function archiveUnseenRecruitingCrmRoleLinks(
   return (
     await prisma.recruitingCrmRoleContact.updateMany({
       where: { ...where, syncedAt: { lt: since } },
-      data: { archivedAt: options.now },
+      data: { archivedAt: options.now, syncedAt: options.now },
     })
   ).count;
 }
@@ -307,4 +337,46 @@ export function syncRecruitingCrmMessages(
     ...options,
     archivable: false,
   });
+}
+
+/** Authorized caller must fence its live connection/revision before reading this scoped projection. */
+export async function listSyncedRecruitingCrmRoleContacts(
+  prisma: PrismaClient,
+  actor: Actor,
+  scope: CrmSyncScope,
+  crmRoleId: string,
+): Promise<Extract<RecruitingCrmDataOutput, { operation: "candidates" }>["items"]> {
+  const owner = owned(actor, scope);
+  const links = await prisma.recruitingCrmRoleContact.findMany({
+    where: {
+      archivedAt: null,
+      role: { ...owner, crmRoleId, archivedAt: null },
+      contact: { ...owner, archivedAt: null },
+    },
+    include: { contact: true },
+    orderBy: { contactId: "asc" },
+  });
+  return links.map(({ contact }) => ({
+    candidateId: contact.crmCandidateId,
+    name: contact.name,
+    email: contact.email,
+    phone: contact.phone,
+    linkedinUrl: contact.linkedinUrl,
+    location: contact.location,
+    title: contact.title,
+    company: contact.company,
+    stage: contact.stage,
+    contactStatus: contact.contactStatus,
+    outreachStatus: contact.outreachStatus,
+    roleSpecId: contact.crmRoleId,
+    legacyClientLabel: contact.clientLabel,
+    legacyRoleLabel: contact.roleLabel,
+    interest: contact.interest,
+    reviewed: contact.reviewed,
+    lastReplyAt: contact.lastReplyAt?.toISOString() ?? null,
+    resumeReceived: contact.resumeReceived,
+    ...(contact.profile === null
+      ? {}
+      : { profile: RecruitingCrmProfileSchema.parse(contact.profile) }),
+  }));
 }

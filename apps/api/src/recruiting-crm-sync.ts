@@ -1,3 +1,4 @@
+import { randomUUID } from "node:crypto";
 import { ORPCError } from "@orpc/server";
 import type {
   Actor,
@@ -24,13 +25,10 @@ type Skipped = RecruitingCrmSyncOutput["skipped"][number];
 
 type Cursor = RecruitingCrmSyncCursor;
 
-const encode = (cursor: Cursor) => Buffer.from(JSON.stringify(cursor)).toString("base64url");
-function decode(raw: string, dryRun: boolean, now: Date): Cursor {
+function decode(raw: unknown, dryRun: boolean, now: Date): Cursor {
   let cursor: Cursor;
   try {
-    cursor = RecruitingCrmSyncCursorSchema.parse(
-      JSON.parse(Buffer.from(raw, "base64url").toString("utf8")),
-    );
+    cursor = RecruitingCrmSyncCursorSchema.parse(raw);
   } catch {
     throw new ORPCError("BAD_REQUEST", { message: "Start the CRM sync again." });
   }
@@ -56,6 +54,8 @@ export function crmSyncContact(
     crmCandidateId: item.candidateId,
     name: item.name,
     title: item.title,
+    ...(item.company !== undefined ? { company: item.company } : {}),
+    ...(item.profile !== undefined ? { profile: item.profile } : {}),
     location: item.location,
     email: item.email,
     phone: item.phone,
@@ -87,6 +87,24 @@ export async function syncRecruitingCrm(
   input: { dryRun?: boolean | undefined; cursor?: string | undefined },
   options: { budgetMs?: number; now?: () => Date; read?: CrmRead } = {},
 ): Promise<RecruitingCrmSyncOutput> {
+  // Serialize progress and projection writes for this owner; opaque single-use tokens never
+  // let a caller choose an offset, scope or archive timestamp.
+  return deps.prisma.$transaction(
+    async (tx) => {
+      await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtextextended(${JSON.stringify([actor.userId, actor.spaceId, "crm-sync"])}, 0))`;
+      return syncSlice({ ...deps, prisma: tx as PrismaClient }, actor, target, input, options);
+    },
+    { timeout: 120_000, maxWait: 5_000 },
+  );
+}
+
+async function syncSlice(
+  deps: RecruitingCrmReadDeps,
+  actor: Actor,
+  target: ThreadTarget,
+  input: { dryRun?: boolean | undefined; cursor?: string | undefined },
+  options: { budgetMs?: number; now?: () => Date; read?: CrmRead },
+): Promise<RecruitingCrmSyncOutput> {
   const clock = options.now ?? (() => new Date());
   const began = clock();
   const dryRun = input.dryRun === true;
@@ -98,12 +116,21 @@ export async function syncRecruitingCrm(
   const skip = (cursor: Cursor, entry: Skipped) => {
     if (cursor.skipped.length < MAX_SKIPPED) cursor.skipped.push(entry);
   };
-  const cursor: Cursor = input.cursor
-    ? decode(input.cursor, dryRun, began)
+  const owner = { userId: actor.userId, spaceId: actor.spaceId };
+  const targetKey = JSON.stringify([target.kind, target.threadId]);
+  const saved = input.cursor
+    ? await prisma.recruitingCrmSyncProgress.findUnique({
+        where: { userId_spaceId: owner },
+      })
+    : null;
+  if (input.cursor && (!saved || saved.token !== input.cursor || saved.targetKey !== targetKey))
+    throw new ORPCError("BAD_REQUEST", { message: "Start the CRM sync again." });
+  const cursor: Cursor = saved
+    ? decode(saved.progress, dryRun, began)
     : await start(prisma, actor, read, dryRun, began, skip);
   const since = new Date(cursor.startedAt);
   const budget = options.budgetMs ?? DEFAULT_BUDGET_MS;
-  const write = { dryRun, now: since };
+  const write = { dryRun, now: began };
   /** Next unit: contacts, then links and mail for each role, then the next organization. */
   const advance = () => {
     const roles = cursor.orgs[cursor.at.g]!.roles.length;
@@ -116,7 +143,7 @@ export async function syncRecruitingCrm(
           : step === "mail" && j + 1 < roles
             ? { g: cursor.at.g, step: "links", j: j + 1 }
             : { g: cursor.at.g + 1, step: "contacts", j: 0 };
-    cursor.at = { ...next, offset: 0, matched: 0 };
+    cursor.at = { ...next, offset: 0, matched: 0, seen: [] };
   };
   // At least one read per call, so a cursor always makes progress.
   for (let first = true; cursor.at.g < cursor.orgs.length; first = false) {
@@ -137,6 +164,7 @@ export async function syncRecruitingCrm(
         });
         if (page.operation !== "candidates") throw new ORPCError("SERVICE_UNAVAILABLE");
         const contacts = page.items.map(crmSyncContact);
+        cursor.at.seen.push(...contacts.map((contact) => contact.crmCandidateId));
         if (step === "contacts") {
           const counts = await recruiting.syncRecruitingCrmContacts(
             prisma,
@@ -148,6 +176,8 @@ export async function syncRecruitingCrm(
           cursor.at.matched += counts.unchanged + counts.updated;
           recruiting.addCrmSyncCounts(cursor.totals.contacts, counts);
         } else {
+          // A contact may arrive after the organization pass. Persist it before its link.
+          await recruiting.syncRecruitingCrmContacts(prisma, actor, scope, contacts, write);
           const counts = await recruiting.syncRecruitingCrmRoleLinks(
             prisma,
             actor,
@@ -163,24 +193,72 @@ export async function syncRecruitingCrm(
           cursor.at.offset = page.nextOffset;
           continue;
         }
-        const archive = { ...write, matchedStored: cursor.at.matched };
-        if (step === "contacts")
-          cursor.totals.contacts.archived += await recruiting.archiveUnseenRecruitingCrmContacts(
-            prisma,
-            actor,
-            scope,
-            since,
-            archive,
-          );
-        else
-          cursor.totals.links.archived += await recruiting.archiveUnseenRecruitingCrmRoleLinks(
-            prisma,
-            actor,
-            scope,
-            crmRoleId!,
-            since,
-            archive,
-          );
+        // Offset pages are not snapshots. A moved row may be skipped; re-check exact
+        // identities before archiving, through the same authorized source boundary.
+        const owned = { userId: actor.userId, spaceId: actor.spaceId, ...scope };
+        const unseen =
+          step === "contacts"
+            ? await prisma.recruitingCrmContact.findMany({
+                where: {
+                  ...owned,
+                  archivedAt: null,
+                  syncedAt: { lt: since },
+                  crmCandidateId: { notIn: cursor.at.seen },
+                },
+                select: { crmCandidateId: true },
+              })
+            : (
+                await prisma.recruitingCrmRoleContact.findMany({
+                  where: {
+                    archivedAt: null,
+                    syncedAt: { lt: since },
+                    role: { ...owned, crmRoleId: crmRoleId! },
+                    contact: { crmCandidateId: { notIn: cursor.at.seen } },
+                  },
+                  select: { contact: { select: { crmCandidateId: true } } },
+                })
+              ).map((link) => link.contact);
+        const absent: string[] = [];
+        for (let offset = 0; offset < unseen.length; offset += PAGE) {
+          const ids = unseen.slice(offset, offset + PAGE).map((row) => row.crmCandidateId);
+          const presence = await read({
+            operation: "presence",
+            ...pinned,
+            candidateIds: ids,
+            ...(crmRoleId ? { crmRoleId } : {}),
+          });
+          if (presence.operation !== "presence") throw new ORPCError("SERVICE_UNAVAILABLE");
+          const present = step === "contacts" ? presence.candidateIds : presence.roleCandidateIds;
+          if (!present) throw new ORPCError("SERVICE_UNAVAILABLE");
+          absent.push(...ids.filter((id) => !present.includes(id)));
+        }
+        // Do not archive any row until every absence read for this unit succeeds.
+        const archived = dryRun
+          ? absent.length
+          : step === "contacts"
+            ? (
+                await prisma.recruitingCrmContact.updateMany({
+                  where: {
+                    ...owned,
+                    archivedAt: null,
+                    crmCandidateId: { in: absent },
+                    syncedAt: { lt: since },
+                  },
+                  data: { archivedAt: began, syncedAt: began },
+                })
+              ).count
+            : (
+                await prisma.recruitingCrmRoleContact.updateMany({
+                  where: {
+                    archivedAt: null,
+                    role: { ...owned, crmRoleId: crmRoleId! },
+                    contact: { crmCandidateId: { in: absent } },
+                    syncedAt: { lt: since },
+                  },
+                  data: { archivedAt: began, syncedAt: began },
+                })
+              ).count;
+        cursor.totals[step === "contacts" ? "contacts" : "links"].archived += archived;
         advance();
         continue;
       }
@@ -228,10 +306,18 @@ export async function syncRecruitingCrm(
     }
   }
   const done = cursor.at.g >= cursor.orgs.length;
+  const token = done ? null : randomUUID();
+  if (token)
+    await prisma.recruitingCrmSyncProgress.upsert({
+      where: { userId_spaceId: owner },
+      create: { ...owner, targetKey, token, progress: cursor },
+      update: { targetKey, token, progress: cursor },
+    });
+  else await prisma.recruitingCrmSyncProgress.deleteMany({ where: owner });
   return {
     dryRun,
     startedAt: cursor.startedAt,
-    nextCursor: done ? null : encode(cursor),
+    nextCursor: token,
     organizations: cursor.orgs.length,
     ...cursor.totals,
     skipped: cursor.skipped as Skipped[],
@@ -252,7 +338,7 @@ async function start(
     dryRun,
     startedAt: now.toISOString(),
     orgs: [],
-    at: { g: 0, step: "contacts", j: 0, offset: 0, matched: 0 },
+    at: { g: 0, step: "contacts", j: 0, offset: 0, matched: 0, seen: [] },
     totals: {
       roles: recruiting.emptyCrmSyncCounts(),
       contacts: recruiting.emptyCrmSyncCounts(),
@@ -322,11 +408,10 @@ async function start(
 
 /**
  * Incremental sync: the role list read that `roleCandidates` already made is written to the same
- * rows. Never archives contacts (one role is not the whole organization); archives this role's
- * links only when the read covered every page.
+ * rows. Offset pages cannot prove absence, so only a full sync with exact-ID checks archives.
  */
 export async function recordCrmRoleRead(
-  prisma: PrismaClient,
+  database: PrismaClient,
   actor: Actor,
   read: {
     serverId: string;
@@ -339,48 +424,44 @@ export async function recordCrmRoleRead(
   },
   now = new Date(),
 ) {
-  const scope = { mcpServerId: read.serverId, organizationId: read.organizationId };
-  const write = { dryRun: false, now };
-  await recruiting.syncRecruitingCrmRoles(
-    prisma,
-    actor,
-    scope,
-    [
-      {
-        crmRoleId: read.role.crmRoleId,
-        clientId: read.role.clientId,
-        clientLabel: read.role.clientLabel,
-        roleLabel: read.role.roleLabel,
-        summary: read.role.summary,
-      },
-    ],
-    { ...write, complete: false },
+  return database.$transaction(
+    async (tx) => {
+      await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtextextended(${JSON.stringify([actor.userId, actor.spaceId, "crm-sync"])}, 0))`;
+      const prisma = tx as PrismaClient;
+      const scope = { mcpServerId: read.serverId, organizationId: read.organizationId };
+      const write = { dryRun: false, now };
+      await recruiting.syncRecruitingCrmRoles(
+        prisma,
+        actor,
+        scope,
+        [
+          {
+            crmRoleId: read.role.crmRoleId,
+            clientId: read.role.clientId,
+            clientLabel: read.role.clientLabel,
+            roleLabel: read.role.roleLabel,
+            summary: read.role.summary,
+          },
+        ],
+        { ...write, complete: false },
+      );
+      await recruiting.syncRecruitingCrmContacts(
+        prisma,
+        actor,
+        scope,
+        read.items.map(crmSyncContact),
+        write,
+      );
+      await recruiting.syncRecruitingCrmRoleLinks(
+        prisma,
+        actor,
+        scope,
+        read.role.crmRoleId,
+        read.items.map((item) => item.candidateId),
+        write,
+      );
+      // Only the full sync performs exact-ID absence verification and archives links.
+    },
+    { timeout: 120_000, maxWait: 5_000 },
   );
-  await recruiting.syncRecruitingCrmContacts(
-    prisma,
-    actor,
-    scope,
-    read.items.map(crmSyncContact),
-    write,
-  );
-  const links = await recruiting.syncRecruitingCrmRoleLinks(
-    prisma,
-    actor,
-    scope,
-    read.role.crmRoleId,
-    read.items.map((item) => item.candidateId),
-    write,
-  );
-  if (read.complete)
-    await recruiting.archiveUnseenRecruitingCrmRoleLinks(
-      prisma,
-      actor,
-      scope,
-      read.role.crmRoleId,
-      now,
-      {
-        ...write,
-        matchedStored: links.unchanged,
-      },
-    );
 }

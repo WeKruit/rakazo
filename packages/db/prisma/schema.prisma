@@ -25,6 +25,7 @@ model User {
   aiDataConsents AiDataConsent[]
   recruitingCrmRoles RecruitingCrmRole[]
   recruitingCrmContacts RecruitingCrmContact[]
+  recruitingCrmSyncProgress RecruitingCrmSyncProgress[]
   recruitingCrmMessages RecruitingCrmMessage[]
   recruitingReminders RecruitingReminder[] @relation("RecruitingReminderOwner")
   recruitingRoles RecruitingRole[]
@@ -203,6 +204,7 @@ model Space {
   aiDataConsents AiDataConsent[]
   recruitingCrmRoles RecruitingCrmRole[]
   recruitingCrmContacts RecruitingCrmContact[]
+  recruitingCrmSyncProgress RecruitingCrmSyncProgress[]
   recruitingCrmMessages RecruitingCrmMessage[]
   recruitingReminders RecruitingReminder[]
   recruitingRoles RecruitingRole[]
@@ -1816,6 +1818,7 @@ model RecruitingCrmContact {
   name String
   title String?
   company String?
+  profile Json?
   location String?
   email String?
   phone String?
@@ -1882,4 +1885,18 @@ model RecruitingCrmMessage {
   @@unique([userId, spaceId, mcpServerId, organizationId, crmMessageId])
   @@index([userId, spaceId, crmCandidateId])
   @@map("recruiting_crm_messages")
+}
+
+/// Single-use server-owned progress; no source data or credentials.
+model RecruitingCrmSyncProgress {
+  userId String
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+  spaceId String
+  space Space @relation(fields: [spaceId], references: [id], onDelete: Cascade)
+  targetKey String
+  token String @unique
+  progress Json
+
+  @@id([userId, spaceId])
+  @@map("recruiting_crm_sync_progress")
 }

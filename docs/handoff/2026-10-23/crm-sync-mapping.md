@@ -37,3 +37,8 @@ Incremental: every live `roleCandidates` read also refreshes that role's rows, a
 2. **Correspondence outside a role.** Mail is synced per role. Mail for contacts in no role is not synced (the per-contact read is one call per person).
 3. **Outbox drafts** (`crm_candidate_messages`) and review notes are not copied; they stay live reads.
 4. The product list still shows the same fields as before (name, title, location, email, LinkedIn, stage/outreach). Showing phone, interest, last reply and company in the list/profile is a small follow-up for the profile redesign.
+
+
+## Development update (2026-10-23)
+
+See `docs/development/crm-sync-delivery-2026-10-23.md` for the completed field transport, exact-ID absence checks, migration order, local evidence and deployment-owner procedure. Company and lossless stored history/summary/skills/source evidence are now implemented through the existing candidate-list MCP adapter and typed product projection. Inspection found no CRM education field; education remains unknown. Dry run writes only transient server-owned progress metadata, never source data or projection rows. Historical statements above describe the original PR, not the corrected implementation.

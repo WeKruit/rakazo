@@ -44,6 +44,7 @@ import {
   RecruitingCrmMailReadSchema,
   RecruitingCrmMembershipRowsSchema,
   RecruitingCrmMessagesReadSchema,
+  RecruitingCrmPresenceReadSchema,
   RecruitingCrmRoleCampaignsReadSchema,
   RecruitingCrmRoleMailReadSchema,
   RecruitingCrmRoleReadSchema,
@@ -2426,6 +2427,8 @@ export async function getRecruitingCrmData(
       ...(row.reviewed !== undefined ? { reviewed: row.reviewed } : {}),
       ...(row.last_reply_at !== undefined ? { lastReplyAt: row.last_reply_at } : {}),
       ...(row.resume_received !== undefined ? { resumeReceived: row.resume_received } : {}),
+      ...(row.company !== undefined ? { company: row.company } : {}),
+      ...(row.profile !== undefined ? { profile: row.profile } : {}),
     });
     const tracking = (
       row: Omit<
@@ -2671,6 +2674,31 @@ export async function getRecruitingCrmData(
         page.messages.map((row) => ({ ...mailItem(row), candidateId: row.candidate_id })),
         page.next_offset,
       );
+    }
+    if (input.operation === "presence") {
+      const page = parse(
+        RecruitingCrmPresenceReadSchema,
+        await read(server, "list_crm_candidates", {
+          p_view: "presence",
+          p_org: input.organizationId,
+          p_candidate_ids: input.candidateIds,
+          ...(input.crmRoleId ? { p_role: input.crmRoleId } : {}),
+        }),
+      );
+      if (
+        page.candidate_ids.some((id) => !input.candidateIds.includes(id)) ||
+        page.role_candidate_ids?.some((id) => !page.candidate_ids.includes(id)) ||
+        (input.crmRoleId && !page.role_candidate_ids)
+      )
+        throw unavailable();
+      await sourceFence(server, "list_crm_candidates");
+      return {
+        operation: "presence",
+        source,
+        checkedAt: new Date().toISOString(),
+        candidateIds: page.candidate_ids,
+        ...(page.role_candidate_ids ? { roleCandidateIds: page.role_candidate_ids } : {}),
+      };
     }
     if (input.operation === "candidates") {
       const trim = (text: string) => text.replace(/^ +| +$/g, "");
@@ -2935,6 +2963,13 @@ export async function mergeRoleCandidates(
           stage: row.stage,
           contactStatus: row.contactStatus,
           outreachStatus: row.outreachStatus,
+          phone: row.phone,
+          ...(row.company !== undefined ? { company: row.company } : {}),
+          ...(row.profile !== undefined ? { profile: row.profile } : {}),
+          ...(row.interest !== undefined ? { interest: row.interest } : {}),
+          ...(row.reviewed !== undefined ? { reviewed: row.reviewed } : {}),
+          ...(row.lastReplyAt !== undefined ? { lastReplyAt: row.lastReplyAt } : {}),
+          ...(row.resumeReceived !== undefined ? { resumeReceived: row.resumeReceived } : {}),
         }
       : null;
   const items: RecruitingRoleCandidate[] = [];

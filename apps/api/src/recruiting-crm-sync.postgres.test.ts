@@ -1,7 +1,7 @@
 import { ORPCError } from "@orpc/server";
 import type { Actor, RecruitingCrmDataInput, RecruitingCrmDataOutput } from "@rakazo/contracts";
 import type { PrismaClient } from "@rakazo/db";
-import { createDb } from "@rakazo/db";
+import { createDb, listSyncedRecruitingCrmRoleContacts } from "@rakazo/db";
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
 import { recordCrmRoleRead, syncRecruitingCrm } from "./recruiting-crm-sync.js";
 import type { ThreadTarget } from "./thread-target.js";
@@ -35,6 +35,13 @@ const contact = (n: number, patch: Partial<Contact> = {}): Contact => ({
   reviewed: false,
   lastReplyAt: null,
   resumeReceived: false,
+  company: "Example Company",
+  profile: {
+    history: [{ company: "Previous Company", title: "Engineer", start: "2020" }],
+    summary: "Stored profile",
+    skills: ["TypeScript"],
+    sources: [],
+  },
   ...patch,
 });
 
@@ -113,6 +120,22 @@ function fakeCrm(serverId: string) {
       };
     const limit = 2; // Small pages exercise pagination.
     const offset = "offset" in input ? (input.offset ?? 0) : 0;
+    if (input.operation === "presence")
+      return {
+        operation: "presence",
+        source,
+        checkedAt,
+        candidateIds: input.candidateIds.filter((id) =>
+          state.contacts.some((row) => row.candidateId === id),
+        ),
+        ...(input.crmRoleId
+          ? {
+              roleCandidateIds: input.candidateIds.filter((id) =>
+                state.members[input.crmRoleId!]?.includes(id),
+              ),
+            }
+          : {}),
+      };
     if (input.operation === "candidates") {
       if (input.crmRoleId && input.crmRoleId === state.failLinks)
         throw new ORPCError("CONFLICT", { message: "Ambiguous role" });
@@ -197,6 +220,27 @@ describePostgres("CRM sync (PostgreSQL)", () => {
       cursor = result.nextCursor;
     }
   }
+  const slice = (
+    who: Actor,
+    input: { cursor?: string; dryRun?: boolean } = {},
+    read = crm.read,
+    chosenTarget = target,
+  ) =>
+    syncRecruitingCrm(
+      {
+        prisma,
+        connectors: {
+          execute: () => {
+            throw new Error("unused");
+          },
+        },
+        reauthorize: async () => chosenTarget,
+      },
+      who,
+      chosenTarget,
+      input,
+      { read, budgetMs: 0 },
+    );
   const scoped = (who: Actor) => ({ userId: who.userId, spaceId: who.spaceId });
 
   beforeAll(async () => {
@@ -260,6 +304,7 @@ describePostgres("CRM sync (PostgreSQL)", () => {
       where: scoped(actor),
       orderBy: { crmCandidateId: "asc" },
     });
+    expect(stored[0]).toMatchObject({ company: "Example Company", profile: contact(1).profile });
     expect(stored.map((row) => [row.name, row.identityKey, row.crmRoleId])).toEqual([
       ["Person 1", "li:linkedin.com/in/person-1", ROLE_A],
       ["Person 2", "li:linkedin.com/in/person-2", ROLE_A],
@@ -371,6 +416,188 @@ describePostgres("CRM sync (PostgreSQL)", () => {
     ).rejects.toThrow("Start the CRM sync again.");
   });
 
+  it("reads projection fields only through active links in the exact owner and role scope", async () => {
+    await runAll(actor, crm.read);
+    const scope = { mcpServerId: serverId, organizationId: ORG };
+    const rows = await listSyncedRecruitingCrmRoleContacts(prisma, actor, scope, ROLE_A);
+    expect(rows.map((row) => row.candidateId).sort()).toEqual([person(1), person(2)]);
+    expect(rows[0]).toMatchObject({ company: "Example Company", profile: contact(1).profile });
+    expect(await listSyncedRecruitingCrmRoleContacts(prisma, other, scope, ROLE_A)).toEqual([]);
+    expect(
+      await listSyncedRecruitingCrmRoleContacts(
+        prisma,
+        actor,
+        { ...scope, organizationId: person(99) },
+        ROLE_A,
+      ),
+    ).toEqual([]);
+    await prisma.recruitingCrmRoleContact.updateMany({
+      where: { contact: { crmCandidateId: person(1) } },
+      data: { archivedAt: new Date() },
+    });
+    expect(
+      (await listSyncedRecruitingCrmRoleContacts(prisma, actor, scope, ROLE_A)).map(
+        (row) => row.candidateId,
+      ),
+    ).toEqual([person(2)]);
+  });
+
+  it("rejects forged, cross-owner, cross-thread, superseded and replayed cursors", async () => {
+    const first = await slice(actor, { dryRun: true });
+    const token = first.nextCursor!;
+    for (const invalid of [
+      "forged",
+      Buffer.from(JSON.stringify({ offset: 9999 })).toString("base64url"),
+    ])
+      await expect(slice(actor, { dryRun: true, cursor: invalid })).rejects.toThrow(
+        "Start the CRM sync again.",
+      );
+    await expect(slice(other, { dryRun: true, cursor: token })).rejects.toThrow(
+      "Start the CRM sync again.",
+    );
+    await expect(
+      slice(actor, { dryRun: true, cursor: token }, crm.read, { ...target, threadId: "another" }),
+    ).rejects.toThrow("Start the CRM sync again.");
+    const next = await slice(actor, { dryRun: true, cursor: token });
+    await expect(slice(actor, { dryRun: true, cursor: token })).rejects.toThrow(
+      "Start the CRM sync again.",
+    );
+    await slice(actor, { dryRun: true });
+    await expect(slice(actor, { dryRun: true, cursor: next.nextCursor! })).rejects.toThrow(
+      "Start the CRM sync again.",
+    );
+    expect(await prisma.recruitingCrmContact.count({ where: scoped(actor) })).toBe(0);
+  });
+
+  it("allows exactly one concurrent consumer of a progress token", async () => {
+    const first = await slice(actor, { dryRun: true });
+    const results = await Promise.allSettled([
+      slice(actor, { dryRun: true, cursor: first.nextCursor! }),
+      slice(actor, { dryRun: true, cursor: first.nextCursor! }),
+    ]);
+    expect(results.filter((result) => result.status === "fulfilled")).toHaveLength(1);
+    expect(results.filter((result) => result.status === "rejected")).toHaveLength(1);
+  });
+
+  it("revalidates a skipped identity instead of archiving a row shifted between offset pages", async () => {
+    await runAll(actor, crm.read);
+    let moved = false;
+    const read: typeof crm.read = async (input) => {
+      if (input.operation === "candidates" && !input.crmRoleId && input.offset === 2 && !moved) {
+        moved = true;
+        // Row 3 moved before the page boundary. It remains in the CRM.
+        crm.state.contacts = [contact(3), contact(1), contact(2)];
+      }
+      return crm.read(input);
+    };
+    const result = await runAll(actor, read);
+    expect(result.contacts.archived).toBe(0);
+    expect(
+      await prisma.recruitingCrmContact.count({ where: { ...scoped(actor), archivedAt: null } }),
+    ).toBe(3);
+  });
+
+  it("creates contacts discovered after the organization pass before linking them", async () => {
+    let added = false;
+    const read: typeof crm.read = async (input) => {
+      if (input.operation === "candidates" && input.crmRoleId && !added) {
+        added = true;
+        crm.state.contacts.push(contact(4));
+        crm.state.members[ROLE_A]!.push(person(4));
+      }
+      return crm.read(input);
+    };
+    await runAll(actor, read);
+    expect(
+      await prisma.recruitingCrmRoleContact.count({
+        where: { contact: { ...scoped(actor), crmCandidateId: person(4) } },
+      }),
+    ).toBe(1);
+  });
+
+  it("leaves every row active when a later absence verification batch fails", async () => {
+    crm.state.contacts = Array.from({ length: 55 }, (_, i) => contact(i + 1));
+    crm.state.members = { [ROLE_A]: [], [ROLE_B]: [] };
+    await runAll(actor, crm.read);
+    crm.state.contacts = [];
+    let checks = 0;
+    const read: typeof crm.read = async (input) => {
+      if (input.operation === "presence" && !input.crmRoleId && ++checks === 2)
+        throw new ORPCError("SERVICE_UNAVAILABLE", { message: "Unavailable" });
+      return crm.read(input);
+    };
+    const result = await runAll(actor, read);
+    expect(result.contacts.archived).toBe(0);
+    expect(result.skipped).toContainEqual(expect.objectContaining({ step: "contacts" }));
+    expect(
+      await prisma.recruitingCrmContact.count({ where: { ...scoped(actor), archivedAt: null } }),
+    ).toBe(55);
+  });
+
+  it("does not restore an archived row from an older incremental read", async () => {
+    await runAll(actor, crm.read);
+    const delayedAt = new Date();
+    crm.state.contacts = [];
+    crm.state.members = { [ROLE_A]: [], [ROLE_B]: [] };
+    await runAll(actor, crm.read);
+    const archived = await prisma.recruitingCrmContact.findFirstOrThrow({
+      where: { ...scoped(actor), crmCandidateId: person(1) },
+    });
+    await recordCrmRoleRead(
+      prisma,
+      actor,
+      {
+        serverId,
+        organizationId: ORG,
+        role: {
+          crmRoleId: ROLE_A,
+          clientId: CLIENT,
+          clientLabel: "Client",
+          roleLabel: "Role A",
+          summary: null,
+        },
+        items: [contact(1)],
+        complete: true,
+      },
+      delayedAt,
+    );
+    expect(
+      await prisma.recruitingCrmContact.findUnique({ where: { id: archived.id } }),
+    ).toMatchObject({ archivedAt: archived.archivedAt, syncedAt: archived.syncedAt });
+    expect(
+      await prisma.recruitingCrmRoleContact.count({
+        where: { contact: { ...scoped(actor), crmCandidateId: person(1) }, archivedAt: null },
+      }),
+    ).toBe(0);
+  });
+
+  it("does not overwrite newer incremental data with an older read", async () => {
+    const read = {
+      serverId,
+      organizationId: ORG,
+      role: {
+        crmRoleId: ROLE_A,
+        clientId: CLIENT,
+        clientLabel: "Client",
+        roleLabel: "Role A",
+        summary: null,
+      },
+      items: [contact(1, { title: "New title" })],
+      complete: true,
+    };
+    await recordCrmRoleRead(prisma, actor, read, new Date("2026-10-23T12:00:00Z"));
+    await recordCrmRoleRead(
+      prisma,
+      actor,
+      { ...read, items: [contact(1, { title: "Old title" })] },
+      new Date("2026-10-23T11:00:00Z"),
+    );
+    expect(await prisma.recruitingCrmContact.findFirst({ where: scoped(actor) })).toMatchObject({
+      title: "New title",
+      syncedAt: new Date("2026-10-23T12:00:00Z"),
+    });
+  });
+
   it("records a role list read as an incremental sync", async () => {
     await recordCrmRoleRead(prisma, actor, {
       serverId,
@@ -402,7 +629,7 @@ describePostgres("CRM sync (PostgreSQL)", () => {
       items: [contact(1)],
       complete: true,
     });
-    // The contact stays (one role is not the whole CRM); only its link to this role is archived.
+    // Offset reads do not prove absence: links are archived only by full sync presence checks.
     expect(
       await prisma.recruitingCrmContact.count({ where: { ...scoped(actor), archivedAt: null } }),
     ).toBe(2);
@@ -410,6 +637,6 @@ describePostgres("CRM sync (PostgreSQL)", () => {
       await prisma.recruitingCrmRoleContact.count({
         where: { archivedAt: null, contact: scoped(actor) },
       }),
-    ).toBe(1);
+    ).toBe(2);
   });
 });

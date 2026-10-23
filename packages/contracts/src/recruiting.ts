@@ -1337,6 +1337,20 @@ export const RecruitingRoleCandidatesInputFields = {
   query: z.string().max(240).optional(),
   shortlistedOnly: z.boolean().optional(),
 };
+export const RecruitingCrmProfileSchema = z.object({
+  history: z.json(),
+  summary: z.string(),
+  skills: z.array(z.string()),
+  sources: z.array(
+    z.object({
+      id: z.uuid(),
+      company: z.string().nullable(),
+      title: z.string().nullable(),
+      location: z.string().nullable(),
+      syncedAt: z.string(),
+    }),
+  ),
+});
 export const RecruitingRoleCandidateSchema = z.strictObject({
   key: Text,
   name: z.string().nullable(),
@@ -1368,6 +1382,13 @@ export const RecruitingRoleCandidateSchema = z.strictObject({
       stage: z.string().nullable(),
       contactStatus: z.string(),
       outreachStatus: z.string(),
+      phone: z.string().nullable().optional(),
+      company: z.string().nullable().optional(),
+      profile: RecruitingCrmProfileSchema.optional(),
+      interest: z.string().nullable().optional(),
+      reviewed: z.boolean().nullable().optional(),
+      lastReplyAt: IsoDate.nullable().optional(),
+      resumeReceived: z.boolean().nullable().optional(),
     })
     .nullable(),
   shortlisted: z.boolean(),
@@ -1733,6 +1754,8 @@ const CrmBrowseCandidate = z.strictObject({
   reviewed: z.boolean().nullable().optional(),
   lastReplyAt: IsoDate.nullable().optional(),
   resumeReceived: z.boolean().nullable().optional(),
+  company: z.string().nullable().optional(),
+  profile: RecruitingCrmProfileSchema.optional(),
 });
 const CrmBrowseTracking = z.strictObject({
   roleKey: z.string().min(1),
@@ -1798,6 +1821,13 @@ export const RecruitingCrmDataInputSchema = z.discriminatedUnion("operation", [
     ),
   z.object({ operation: z.literal("roles"), ...crmBrowsePinned }),
   z.object({
+    operation: z.literal("presence"),
+    ...crmBrowsePinned,
+    ...crmBrowsePage,
+    candidateIds: z.array(z.uuid()).min(1).max(50),
+    crmRoleId: z.uuid().optional(),
+  }),
+  z.object({
     operation: z.literal("candidates"),
     ...crmBrowsePinned,
     ...crmBrowsePage,
@@ -1846,6 +1876,13 @@ export const RecruitingCrmDataInputSchema = z.discriminatedUnion("operation", [
 ]);
 export type RecruitingCrmDataInput = z.infer<typeof RecruitingCrmDataInputSchema>;
 export const RecruitingCrmDataOutputSchema = z.discriminatedUnion("operation", [
+  z.strictObject({
+    operation: z.literal("presence"),
+    source: CrmBrowseSource.extend({ organizationId: z.uuid() }),
+    checkedAt: IsoDate,
+    candidateIds: z.array(z.uuid()),
+    roleCandidateIds: z.array(z.uuid()).optional(),
+  }),
   z.strictObject({
     operation: z.literal("memberships"),
     checkedAt: IsoDate,
@@ -2031,6 +2068,8 @@ export const RecruitingCrmCandidatesReadSchema = z.object({
       reviewed: z.boolean().nullable().optional(),
       last_reply_at: IsoDate.nullable().optional().catch(null),
       resume_received: z.boolean().nullable().optional(),
+      company: z.string().nullable().optional(),
+      profile: RecruitingCrmProfileSchema.optional(),
     }),
   ),
 });
@@ -2259,6 +2298,7 @@ export const RecruitingCrmSyncCursorSchema = z.object({
     offset: z.number().int().nonnegative(),
     /** Stored active rows this pass has matched so far, for the dry-run archive count. */
     matched: z.number().int().nonnegative(),
+    seen: z.array(z.uuid()),
   }),
   totals: z.object({
     roles: CrmSyncCursorCounts,
@@ -2269,3 +2309,8 @@ export const RecruitingCrmSyncCursorSchema = z.object({
   skipped: RecruitingCrmSyncOutputSchema.shape.skipped,
 });
 export type RecruitingCrmSyncCursor = z.infer<typeof RecruitingCrmSyncCursorSchema>;
+
+export const RecruitingCrmPresenceReadSchema = z.object({
+  candidate_ids: z.array(z.uuid()).max(50),
+  role_candidate_ids: z.array(z.uuid()).max(50).nullable(),
+});
