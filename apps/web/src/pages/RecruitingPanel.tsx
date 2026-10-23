@@ -2146,7 +2146,7 @@ function VerdictLabel({ verdict }: { verdict: Verdict }) {
   const Icon = verdict === "met" ? Check : verdict === "unmet" ? X : CircleHelp;
   return (
     <span
-      className={`inline-flex items-center gap-1.5 text-xs ${verdict === "unmet" ? "text-destructive" : "text-muted-foreground"}`}
+      className={`inline-flex items-center gap-1.5 text-xs ${verdict === "met" ? "text-success" : verdict === "unmet" ? "text-destructive" : "text-warning"}`}
     >
       <Icon size={14} aria-hidden />
       {verdict === "met" ? (
@@ -3733,7 +3733,7 @@ function RecruitingWorkspace({
   };
   const resetUnavailableCandidateSort = useCallback(
     (page: ListRecruitingCandidatesOutput, filters: RecruitingPanelState["filters"]) => {
-      const sort = filters.sort ?? "rank";
+      const sort = filters.sort ?? "score";
       if (
         (sort === "rank" || sort === "tier" || sort === "score") &&
         !page.sortAvailability[sort]
@@ -5230,7 +5230,7 @@ function RecruitingWorkspace({
                   {candidatePage ? (
                     <NativeSelect
                       aria-label={t`Candidate sort`}
-                      value={candidateFilters.sort ?? "rank"}
+                      value={candidateFilters.sort ?? "score"}
                       onChange={(event) =>
                         setCandidateFilters((current) => ({
                           ...current,

@@ -84,8 +84,8 @@ export type RecruitingPanelState = {
 export function readRecruitingPanelState(key: string | null): RecruitingPanelState {
   const empty: RecruitingPanelState = {
     tab: "role",
-    candidateView: "cards",
-    filters: { sort: "rank" },
+    candidateView: "table",
+    filters: { sort: "score" },
     pageCount: 1,
     selectedCandidateKey: null,
     detailOpen: false,
@@ -110,7 +110,7 @@ export function readRecruitingPanelState(key: string | null): RecruitingPanelSta
     return {
       tab: value.tab,
       candidateView: value.candidateView,
-      filters: filters.data,
+      filters: { sort: "score", ...filters.data },
       pageCount: value.pageCount,
       selectedCandidateKey: value.selectedCandidateKey,
       detailOpen: value.detailOpen,
