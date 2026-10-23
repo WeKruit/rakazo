@@ -2,7 +2,6 @@ import { describe, expect, it } from "vitest";
 import {
   AskRequestedSchema,
   appContract,
-  SidebarBotStateSchema,
   BOT_DESCRIPTION_MAX_LENGTH,
   BOT_INSTRUCTIONS_MAX_LENGTH,
   BOT_TITLE_MAX_LENGTH,
@@ -26,6 +25,7 @@ import {
   ReorderBotsInput,
   RunActivityRowSchema,
   RunSchema,
+  SidebarBotStateSchema,
   UpdateBotInput,
   UpdateGroupInput,
   usableModelId,
