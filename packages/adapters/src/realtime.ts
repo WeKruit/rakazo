@@ -6,6 +6,14 @@ const MAX_NOTIFY_PAYLOAD_BYTES = 7_900;
 
 type Subscriber = (payload: string) => void;
 
+/** The signal does not fit one NOTIFY frame; callers fall back to the durable path. */
+export class RealtimePayloadTooLargeError extends Error {
+  constructor(bytes: number) {
+    super(`Realtime signal of ${bytes} bytes exceeds the PostgreSQL NOTIFY payload limit`);
+    this.name = "RealtimePayloadTooLargeError";
+  }
+}
+
 export interface RealtimeListenerClient {
   connect(): Promise<unknown>;
   query(sql: string): Promise<unknown>;
@@ -64,9 +72,8 @@ export class PostgresRealtimeFanout implements RealtimeFanout {
 
   async publish(topic: string, payload: string): Promise<void> {
     const envelope = JSON.stringify({ topic, payload });
-    if (Buffer.byteLength(envelope, "utf8") > MAX_NOTIFY_PAYLOAD_BYTES) {
-      throw new Error("Realtime signal exceeds the PostgreSQL NOTIFY payload limit");
-    }
+    const bytes = Buffer.byteLength(envelope, "utf8");
+    if (bytes > MAX_NOTIFY_PAYLOAD_BYTES) throw new RealtimePayloadTooLargeError(bytes);
     await this.options.publisher.query("SELECT pg_notify($1, $2)", [POSTGRES_CHANNEL, envelope]);
   }
 

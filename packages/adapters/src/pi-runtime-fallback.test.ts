@@ -67,7 +67,11 @@ import {
 import { toolCompletionAuditPayload } from "./executor.js";
 import { estimateModelContextTokens } from "./model-context.js";
 import { IMAGE_RETURNING_COMPUTER_TOOLS } from "./model-vision.js";
-import { isRetryableProviderUnavailable, PiAgentRuntime } from "./pi-runtime.js";
+import {
+  isRetryableProviderUnavailable,
+  keepInterruptedAssistantMessage,
+  PiAgentRuntime,
+} from "./pi-runtime.js";
 import { MODEL_STREAM_IDLE_TIMEOUT_MS } from "./pi-runtime-limits.js";
 import { PiJsonlSessionRecorder } from "./pi-session.js";
 import { createRuntimeContextPolicy } from "./runtime-context.js";
@@ -340,6 +344,9 @@ it.each(["current", "cache-aware"] as const)(
     const events = await run(input, [], new PiAgentRuntime({ modelCallObserver: observer }));
     const summaries = onUsage.mock.calls.filter(([event]) => event.operationKind === "compaction");
     expect(summaries).toHaveLength(2);
+    expect(
+      events.filter((event) => event.type === "progress" && event.phase === "compacting"),
+    ).toEqual([{ type: "progress", text: "", activity: true, phase: "compacting" }]);
     expect(observer.beforeCall).toHaveBeenCalledTimes(3);
     expect(observer.afterCall).toHaveBeenCalledTimes(3);
     expect(events.filter((event) => event.type === "usage")).toHaveLength(3);
@@ -3082,5 +3089,92 @@ describe("provider availability classification", () => {
     ["transient server failure", { status: 503, message: "service unavailable" }, true],
   ])("classifies %s", (_label, error, expected) => {
     expect(isRetryableProviderUnavailable(error)).toBe(expected);
+  });
+});
+
+describe("Pi runtime interject", () => {
+  it("aborts only the live model stream, steers the flagged message in, and continues the run", async () => {
+    const partial = message(primary, [{ type: "text", text: "Partial answer" }], "stop");
+    const contexts: Context[] = [];
+    providerState.stream.mockImplementation(
+      (
+        _model: Model<"openai-completions">,
+        context: Context,
+        options: { signal?: AbortSignal },
+      ) => {
+        contexts.push(context);
+        if (contexts.length === 2) {
+          return stream(primary, message(primary, [{ type: "text", text: "Switched." }], "stop"));
+        }
+        const signal = options.signal!;
+        class InterruptedStream extends AssistantMessageEventStream {
+          override async *[Symbol.asyncIterator]() {
+            yield { type: "start" as const, partial: { ...partial, content: [] } };
+            yield {
+              type: "text_delta" as const,
+              contentIndex: 0,
+              delta: "Partial answer",
+              partial,
+            };
+            await new Promise<void>((resolve) => {
+              if (signal.aborted) resolve();
+              else signal.addEventListener("abort", () => resolve(), { once: true });
+            });
+            throw new Error("Request was aborted");
+          }
+        }
+        return new InterruptedStream();
+      },
+    );
+    const input = request();
+    let claims = 0;
+    input.claimSteering = vi.fn(async (seenIds: string[]) => {
+      claims += 1;
+      if (seenIds.includes("steer-1") || claims === 1) return [];
+      return [
+        {
+          id: "steer-1",
+          messageId: "message-1",
+          text: "Stop, use the other file",
+          interrupt: true as const,
+        },
+      ];
+    });
+    const events = await run(input, [], new PiAgentRuntime({ interjectPollMs: 5 }));
+
+    expect(contexts).toHaveLength(2);
+    const continued = contexts[1]!.messages.slice(-2);
+    expect(continued[0]).toMatchObject({
+      role: "assistant",
+      content: [{ type: "text", text: "Partial answer" }],
+    });
+    expect(continued[1]).toMatchObject({ role: "user" });
+    expect(JSON.stringify(continued[1])).toContain("Stop, use the other file");
+    expect(events.map((event) => event.type)).not.toContain("error");
+    expect(events.at(-1)).toEqual({ type: "done", text: "Partial answer\n\nSwitched." });
+    expect(providerState.agent!.state.errorMessage).toBeUndefined();
+  });
+
+  it("drops an interrupted assistant message that carries no text", () => {
+    const messages = [
+      { role: "user", content: "hi", timestamp: 1 },
+      { ...message(primary, [{ type: "toolCall", id: "c", name: "t", arguments: {} }], "aborted") },
+    ] as AgentMessage[];
+    keepInterruptedAssistantMessage(messages);
+    expect(messages).toHaveLength(1);
+    const kept = [
+      {
+        ...message(
+          primary,
+          [
+            { type: "text", text: "keep" },
+            { type: "toolCall", id: "c", name: "t", arguments: {} },
+          ],
+          "aborted",
+        ),
+      },
+    ] as AgentMessage[];
+    keepInterruptedAssistantMessage(kept);
+    expect(kept[0]).toMatchObject({ content: [{ type: "text", text: "keep" }] });
   });
 });

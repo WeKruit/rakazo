@@ -15,6 +15,25 @@ describe("maintained recruiting defaults", () => {
     },
   );
 
+  it.each(RECRUITING_DEFAULT_BOTS)("$name works ahead, reports once and offers routines", (bot) => {
+    expect(bot.instructions).toContain(
+      "Never make the recruiter wait or poll: start the work and answer with where it stands.",
+    );
+    expect(bot.instructions).toContain(
+      "post one progress line in business language and nothing more until there is a result",
+    );
+    expect(bot.instructions).toContain("say what changed and stop; no filler");
+    expect(bot.instructions).toContain(
+      "If blocked, say exactly what is blocked and what would unblock it.",
+    );
+    expect(bot.instructions).toContain(
+      "create it with schedule_create only after the recruiter says yes",
+    );
+    expect(bot.instructions).toContain(
+      "keep IDs, tool names, gate codes, cursors and JSON internal",
+    );
+  });
+
   it("keeps feedback and recalibration on the same Autumn task", () => {
     const main = RECRUITING_DEFAULT_BOTS.find((bot) => bot.key === "main")!;
     expect(main.instructions).toContain("Route candidate or search-direction feedback to Sourcer");

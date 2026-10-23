@@ -259,6 +259,28 @@ describe("stopped previous run", () => {
     expect(request.instructions).not.toContain("stopped by the user");
   });
 
+  it.each([undefined, "mcp__fullenrich__discovery"])(
+    "does not name a step when the stopped run completed none (%s)",
+    async (lastToolName) => {
+      const { request, prisma } = await runWithModel(TEXT_ONLY_MODEL, undefined, false, false, {
+        previousRun: { id: "run-0", status: "cancelled" },
+        lastToolName,
+      });
+      expect(request.history.at(-1)?.content).toContain(
+        "stopped by the user before it completed any step; do not assume its work completed",
+      );
+      expect(request.history.at(-1)?.content).not.toContain("after the step");
+      // Only successful real steps are consulted; discovery audits never count.
+      expect(prisma.event.findFirst).toHaveBeenCalledWith(
+        expect.objectContaining({
+          where: expect.objectContaining({
+            payload: { path: ["outcome"], equals: "succeeded" },
+          }),
+        }),
+      );
+    },
+  );
+
   it("says nothing when the previous run finished on its own", async () => {
     const { request, prisma } = await runWithModel(TEXT_ONLY_MODEL, undefined, false, false, {
       previousRun: { id: "run-0", status: "completed" },

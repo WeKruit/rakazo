@@ -8,8 +8,24 @@ import { getLogger } from "@rakazo/logging";
 
 export const PI_SESSION_RETENTION_DAYS = 30;
 export const PI_SESSION_MAX_FILES_PER_BOT = 100;
+/** Retention is measured in days, so one walk per bot root per hour is plenty. */
+export const PI_SESSION_PRUNE_INTERVAL_MS = 60 * 60 * 1000;
 
 const PI_SESSION_RETENTION_MS = PI_SESSION_RETENTION_DAYS * 24 * 60 * 60 * 1000;
+// ponytail: process-local throttle keyed by the user/bot session root (a filesystem path,
+// never authorization); bounded so idle bots do not pin memory.
+const PRUNE_ROOTS_MAX = 1024;
+const lastPruneAt = new Map<string, number>();
+
+/** Whether this root's retention walk is due; records the walk when it is. */
+export function claimPiSessionPrune(root: string, now = Date.now()): boolean {
+  const last = lastPruneAt.get(root);
+  if (last !== undefined && now - last < PI_SESSION_PRUNE_INTERVAL_MS) return false;
+  lastPruneAt.delete(root);
+  lastPruneAt.set(root, now);
+  while (lastPruneAt.size > PRUNE_ROOTS_MAX) lastPruneAt.delete(lastPruneAt.keys().next().value!);
+  return true;
+}
 
 function sessionScopeSegment(value: string, label: string): string {
   if (!value) throw new Error(`${label} must be non-empty`);
@@ -155,10 +171,13 @@ export class PiJsonlSessionRecorder implements PiSessionRecorder {
   private readonly sessionsRoot: string;
   private readonly fs: NodeExecutionEnv;
 
-  constructor(sessionsRoot: string, cwd = process.cwd()) {
+  private readonly now: () => number;
+
+  constructor(sessionsRoot: string, cwd = process.cwd(), now: () => number = Date.now) {
     this.cwd = path.resolve(cwd);
     this.sessionsRoot = path.resolve(sessionsRoot);
     this.fs = new NodeExecutionEnv({ cwd: this.cwd });
+    this.now = now;
   }
 
   async start(input: PiSessionStart): Promise<PiSessionHandle> {
@@ -174,14 +193,17 @@ export class PiJsonlSessionRecorder implements PiSessionRecorder {
       },
       BACKGROUND_CONTEXT,
     );
-    try {
-      await prunePiSessionFiles(sessionsRoot);
-    } catch (error) {
-      getLogger().warn("Pi session retention cleanup failed", {
-        userId: input.userId,
-        botId: input.botId,
-        error,
-      });
+    // Every run used to stat every transcript of this bot; the walk is now interval-bound.
+    if (claimPiSessionPrune(sessionsRoot, this.now())) {
+      try {
+        await prunePiSessionFiles(sessionsRoot, { now: this.now() });
+      } catch (error) {
+        getLogger().warn("Pi session retention cleanup failed", {
+          userId: input.userId,
+          botId: input.botId,
+          error,
+        });
+      }
     }
     const handle = new BestEffortPiSession(
       await session.createBranch("main", null, BACKGROUND_CONTEXT),

@@ -1,4 +1,4 @@
-import { createHash } from "node:crypto";
+import { createHash, randomUUID } from "node:crypto";
 import type { RealtimeFanout } from "@rakazo/adapter-kit";
 import type {
   AskAnswer,
@@ -47,6 +47,12 @@ import { IsolationError } from "./scope.js";
 import { withTransactionRetry } from "./transaction-retry.js";
 
 const EVENT_BATCH_SIZE = 200;
+/**
+ * Interject marker stored in SteeringMessage.originTrigger (no migration). Only rows
+ * attached to a live conversational run carry it; it is cleared when a row reverts to
+ * pending so the pending filters (originTrigger null | "messaging") still match.
+ */
+const INTERRUPT_ORIGIN = "interrupt";
 const PUSH_CATCH_UP_MS = 30_000;
 const POLL_ONLY_CATCH_UP_MS = 400;
 // ponytail: process-local per-client/thread backpressure; DB row locks remain the cross-process authority.
@@ -73,6 +79,8 @@ export interface ThreadEvents {
   ): Promise<FinalizeComputerControlReleaseResult | false>;
   finalizeRun(input: FinalizeRunInput): Promise<FinalizeRunResult | false>;
   notify(threadId: string, seq: number): Promise<void>;
+  /** Fan a live-only event (streaming progress) out over realtime without storing it. */
+  publishTransient(input: AppendEventInput): Promise<void>;
   pauseRunForInput(input: PauseRunForInput): Promise<boolean>;
   pauseRunForTakeover(input: PauseRunForTakeover): Promise<boolean>;
   sendUserMessage(input: SendUserMessageInput): Promise<SendUserMessageResult>;
@@ -121,6 +129,8 @@ export interface ClaimedSteeringMessage {
   messageId: string;
   text: string;
   blocks: MessageBlock[];
+  /** Interject: the sender asked to interrupt the live reply rather than wait for it. */
+  interrupt?: true;
 }
 
 export interface FinalizeRunResult {
@@ -252,6 +262,8 @@ export interface SendUserMessageInput {
   createRun?: boolean;
   /** When true, start a new run even if the bot is already busy (team-chat delivery). */
   allowParallelRun?: boolean;
+  /** Interject: interrupt the busy run's live model stream with this message. */
+  interrupt?: boolean;
   /** Server-only: recheck and claim this saved event routine in the message transaction. */
   routineEvent?: {
     routineId: string;
@@ -307,6 +319,7 @@ export function createThreadEvents(
       finalizeComputerControlRelease(prisma, input, realtime),
     finalizeRun: (input) => finalizeRun(prisma, input, realtime),
     notify: (threadId, seq) => notifyRealtime(realtime, threadId, seq),
+    publishTransient: (input) => publishTransientThreadEvent(prisma, input, realtime),
     pauseRunForInput: (input) => pauseRunForInput(prisma, input, realtime),
     pauseRunForTakeover: (input) => pauseRunForTakeover(prisma, input, realtime),
     sendUserMessage: (input) => sendUserMessage(prisma, input, realtime),
@@ -623,7 +636,11 @@ export async function sendUserMessage(
             userId: input.userId,
             // Keep messaging on the hold so the later run is mirrored back to that app.
             runId: held ? null : busy.id,
-            ...(held && input.trigger === "messaging" ? { originTrigger: "messaging" } : {}),
+            ...(held && input.trigger === "messaging"
+              ? { originTrigger: "messaging" }
+              : !held && input.interrupt
+                ? { originTrigger: INTERRUPT_ORIGIN }
+                : {}),
             ...(input.modelPin
               ? {
                   modelProvider: input.modelPin.modelProvider,
@@ -750,6 +767,7 @@ export async function claimSteering(
       messageId: item.messageId,
       text: blocksToAgentHistoryText(item.message.blocks as MessageBlock[]),
       blocks: item.message.blocks as MessageBlock[],
+      ...(item.originTrigger === INTERRUPT_ORIGIN ? { interrupt: true as const } : {}),
     }));
   });
 }
@@ -1608,6 +1626,7 @@ async function finalizeRunOnce(
     });
     if (task.count !== 1) throw new Error("Run task was not available to finalize");
 
+    const events: AppendEventInput[] = [];
     if (input.outcome === "completed") {
       const completedBlocks = completedRunBlocks(input.blocks, writableRun?.startedAt ?? null, now);
       if (completedBlocks.length > 0) {
@@ -1619,7 +1638,7 @@ async function finalizeRunOnce(
           runId: input.runId,
           markUnread: input.markUnread,
         });
-        await appendEventInTransaction(tx, {
+        events.push({
           spaceId: input.spaceId,
           threadId: input.threadId,
           botId: input.botId,
@@ -1629,7 +1648,7 @@ async function finalizeRunOnce(
         });
       }
     }
-    const lastEvent = await appendEventInTransaction(tx, {
+    events.push({
       spaceId: input.spaceId,
       threadId: input.threadId,
       botId: input.botId,
@@ -1637,7 +1656,14 @@ async function finalizeRunOnce(
       runId: input.runId,
       payload: input.outcome === "completed" ? {} : { error: input.error },
     });
+    // The final message and the terminal event share one sequence reservation and insert.
+    const lastEvent = (await appendEventsInTransaction(tx, events)).at(-1)!;
     await tx.event.deleteMany({ where: { runId: input.runId, type: "thread.progress" } });
+    // An interject only means something to the run it targeted.
+    await tx.steeringMessage.updateMany({
+      where: { runId: input.runId, originTrigger: INTERRUPT_ORIGIN },
+      data: { originTrigger: null },
+    });
     if (input.outcome === "completed") {
       await tx.steeringMessage.deleteMany({
         where: { runId: input.runId, claimedAt: { not: null } },
@@ -1809,26 +1835,69 @@ export async function appendEventInTransaction(
     data: { nextEventSeq: { increment: 1 } },
     select: { nextEventSeq: true },
   });
-  // run.cancelled is appended after the run row already reads cancelled, so it
-  // asserts the terminal status where every other event needs a writable run.
+  await assertEventRunWritable(tx, input);
+  return tx.event.create({ data: eventRow(input, thread.nextEventSeq - 1) });
+}
+
+/**
+ * Appends several events of one thread in order: the sequence range is reserved by a
+ * single thread update, each distinct run is checked once, and the rows land in one
+ * createMany. Returns the rows in input order with their assigned seq (createMany does
+ * not return ids). A single input takes the ordinary one-row path.
+ */
+export async function appendEventsInTransaction(
+  tx: Prisma.TransactionClient,
+  inputs: readonly AppendEventInput[],
+) {
+  if (inputs.length === 0) return [];
+  if (inputs.length === 1) {
+    const event = await appendEventInTransaction(tx, inputs[0]!);
+    return [event];
+  }
+  const threadId = inputs[0]!.threadId;
+  if (inputs.some((input) => input.threadId !== threadId)) {
+    throw new IsolationError("Batched events must belong to one thread");
+  }
+  const thread = await tx.thread.update({
+    where: { id: threadId },
+    data: { nextEventSeq: { increment: inputs.length } },
+    select: { nextEventSeq: true },
+  });
+  const checked = new Set<string>();
+  for (const input of inputs) {
+    const key = `${input.type === "run.cancelled" ? "cancelled" : "writable"}:${input.runId ?? ""}:${input.allowCancelledRun ? 1 : 0}`;
+    if (checked.has(key)) continue;
+    checked.add(key);
+    await assertEventRunWritable(tx, input);
+  }
+  const firstSeq = thread.nextEventSeq - inputs.length;
+  const rows = inputs.map((input, index) => eventRow(input, firstSeq + index));
+  await tx.event.createMany({ data: rows });
+  return rows;
+}
+
+// run.cancelled is appended after the run row already reads cancelled, so it
+// asserts the terminal status where every other event needs a writable run.
+async function assertEventRunWritable(tx: Prisma.TransactionClient, input: AppendEventInput) {
   if (input.type === "run.cancelled") {
     await assertRunIsCancelled(tx, input.runId);
   } else {
     await assertRunCanWriteHistory(tx, input.runId, { allowCancelled: input.allowCancelledRun });
   }
+}
+
+function eventRow(input: AppendEventInput, seq: number) {
   // Unpaired UTF-16 surrogates (e.g. a split emoji high half) are invalid JSON for Postgres.
-  const payload = sanitizeJsonValue(input.payload);
-  return tx.event.create({
-    data: {
-      spaceId: input.spaceId,
-      threadId: input.threadId,
-      botId: input.botId,
-      seq: thread.nextEventSeq - 1,
-      type: input.type,
-      payload: payload as Prisma.InputJsonValue,
-      runId: input.runId,
-    },
-  });
+  const payload = sanitizeJsonValue(input.payload) as Prisma.InputJsonValue;
+  return {
+    spaceId: input.spaceId,
+    threadId: input.threadId,
+    botId: input.botId,
+    seq,
+    type: input.type,
+    payload,
+    runId: input.runId,
+  };
 }
 
 async function notifyRealtime(
@@ -1839,6 +1908,51 @@ async function notifyRealtime(
   await realtime?.publish(threadTopic(threadId), JSON.stringify({ cursor })).catch((error) => {
     getLogger().error("thread.realtime.publish.failed", error, { threadId, cursor });
   });
+}
+
+/**
+ * Deliver a live-only event through the realtime signal instead of the events table.
+ * The signal carries the whole event with `seq: 0`; followers re-stamp it with their
+ * current cursor so client cursors never move. Without push fanout, or when the
+ * payload cannot fit a NOTIFY frame, the event is stored durably as before.
+ */
+export async function publishTransientThreadEvent(
+  prisma: PrismaClient,
+  input: AppendEventInput,
+  realtime?: RealtimeFanout,
+): Promise<void> {
+  if (!realtime?.describe().capabilities.push) {
+    await appendEvent(prisma, input, realtime);
+    return;
+  }
+  const transient: ProductEvent = {
+    id: randomUUID(),
+    spaceId: input.spaceId,
+    threadId: input.threadId,
+    botId: input.botId,
+    seq: 0,
+    type: input.type,
+    runId: input.runId,
+    createdAt: new Date().toISOString(),
+    payload: sanitizeJsonValue(input.payload) as Record<string, unknown>,
+  };
+  try {
+    await realtime.publish(threadTopic(input.threadId), JSON.stringify({ transient }));
+  } catch {
+    // Oversized or undeliverable signal: the durable path still reaches every follower.
+    await appendEvent(prisma, input, realtime);
+  }
+}
+
+function parseTransientSignal(payload: string): ProductEvent | undefined {
+  if (!payload.includes('"transient"')) return undefined;
+  try {
+    const parsed = JSON.parse(payload) as { transient?: unknown };
+    const event = parsed.transient as ProductEvent | undefined;
+    return event && typeof event === "object" && typeof event.type === "string" ? event : undefined;
+  } catch {
+    return undefined;
+  }
 }
 
 export async function eventsAfter(
@@ -1864,9 +1978,14 @@ export async function* followThreadEvents(
 ): AsyncGenerator<ProductEvent> {
   let seq = cursor;
   const latch = new ChangeLatch();
+  const transients: ProductEvent[] = [];
   const unsubscribe = realtime
     ? await realtime
-        .subscribe(threadTopic(threadId), () => latch.notify())
+        .subscribe(threadTopic(threadId), (payload) => {
+          const transient = parseTransientSignal(payload);
+          if (transient && transient.threadId === threadId) transients.push(transient);
+          latch.notify();
+        })
         .catch(() => async () => {})
     : async () => {};
   try {
@@ -1881,6 +2000,11 @@ export async function* followThreadEvents(
           yield mapProductEvent(event);
         }
       } while (batchSize === EVENT_BATCH_SIZE && !signal?.aborted);
+      // Live-only events ride behind the durable ones they arrived with and carry the
+      // follower's cursor, so a client's cursor and durable catch-up stay unaffected.
+      while (transients.length > 0 && !signal?.aborted) {
+        yield { ...transients.shift()!, seq: Math.max(0, seq) };
+      }
       if (signal?.aborted) break;
       await latch.waitForChange(observedGeneration, catchUpMs, signal);
     }

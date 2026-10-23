@@ -117,6 +117,16 @@ export function botSecretToolView(row: { name: string; origin: string; auth: unk
 }
 
 /**
+ * Variable names a shell command text references as `$NAME` or `${NAME...}`. A credential the
+ * command never names stays encrypted and out of the sandbox environment.
+ */
+export function commandVariableReferences(command: string): Set<string> {
+  const names = new Set<string>();
+  for (const match of command.matchAll(/\$\{?([A-Za-z_][A-Za-z0-9_]*)/g)) names.add(match[1]!);
+  return names;
+}
+
+/**
  * Decrypt this bot's command variables for one shell command. Loaded per command so an added,
  * replaced, or removed value applies to the next command. The values must never be logged or
  * returned; callers register them for redaction before the command runs.
@@ -126,6 +136,8 @@ export async function loadBotCommandEnvironment(
   secretStore: Pick<SecretStore, "load">,
   scope: BotSecretScope,
   unsetVariables?: Set<string>,
+  /** When given, only variables this command text names are decrypted and exported. */
+  command?: string,
 ): Promise<Record<string, string>> {
   const rows = await prisma.botSecret.findMany({
     where: scopeFields(scope),
@@ -133,11 +145,13 @@ export async function loadBotCommandEnvironment(
     orderBy: { name: "asc" },
     take: 100,
   });
+  const referenced = command === undefined ? undefined : commandVariableReferences(command);
   const environment: Record<string, string> = {};
   for (const row of rows) {
     if (!isCommandCredential(row.auth)) continue;
     const variable = commandVariableName(row.name);
     if (commandVariableProblem(variable)) continue;
+    if (referenced && !referenced.has(variable)) continue;
     let value: string;
     try {
       value = await secretStore.load(row.ciphertext, row.id);
@@ -162,6 +176,8 @@ export async function shellCommandEnvironment(input: {
   scope: BotSecretScope;
   spaceEnvironment: Record<string, string>;
   registerRedactions: (values: string[]) => void;
+  /** The command text; when given, only the bot variables it names reach the sandbox. */
+  command?: string;
 }): Promise<{ env: Record<string, string>; unsetEnv: string[] }> {
   const unsetVariables = new Set<string>();
   const botEnvironment = await loadBotCommandEnvironment(
@@ -169,6 +185,7 @@ export async function shellCommandEnvironment(input: {
     input.secretStore,
     input.scope,
     unsetVariables,
+    input.command,
   );
   // Encoded forms too, as secret_request does, so an accidental `base64` or URL-encoding of a
   // value is still redacted from command output.

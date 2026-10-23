@@ -102,6 +102,19 @@ describe("native recruiting approval tool", () => {
     expect(feedback?.description).toContain('operation:"revoke" removes only that span');
     expect(feedback?.description).toContain("unknown write outcome");
 
+    for (const name of ["remember", "save_shared_memory"]) {
+      const tool = builtinAgentTools.find((entry) => entry.name === name)!;
+      expect(tool.description).toContain("prefer edit:{find,replace}");
+      expect(tool.inputSchema.required).not.toContain("content");
+      expect((tool.inputSchema.properties as Record<string, unknown>).edit).toMatchObject({
+        required: ["find", "replace"],
+      });
+    }
+    const search = builtinAgentTools.find((entry) => entry.name === "search_history")!;
+    expect(
+      (search.inputSchema.properties as Record<string, { enum?: string[] }>).scope?.enum,
+    ).toEqual(["conversation", "mine"]);
+    expect(search.description).toContain("never other people's");
     for (const name of ["remember", "save_shared_memory", "save_memory"]) {
       const tool = builtinAgentTools.find((entry) => entry.name === name);
       expect(tool?.description).toContain(

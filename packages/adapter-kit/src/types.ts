@@ -416,6 +416,8 @@ export interface AgentSteeringMessage {
   /** Persisted history text before attachment paths are appended. */
   historyText?: string;
   images?: AgentInputImage[];
+  /** Interject: abort the live model stream and inject now instead of at the next turn boundary. */
+  interrupt?: true;
 }
 
 /** Adapter-supplied cache policy metadata; absent fields mean unknown. */
@@ -587,6 +589,8 @@ export type AgentRuntimeEvent =
       text: string;
       /** Provider-generated tool status rather than assistant-authored narration. */
       activity?: true;
+      /** Runtime phase behind an empty activity line, e.g. native context compaction. */
+      phase?: "compacting";
     }
   | { type: "tool"; name: string; args: Record<string, unknown>; executionId: string }
   | {
@@ -681,6 +685,8 @@ export interface BackgroundJobPayloads {
   "messaging.deliver": { runId?: string };
   /** Reconcile durable remote-agent intent; scope is loaded from the database. */
   "cloud_agent.poll": { agentId: string };
+  /** Check one active recruiting research task at the provider; scope is loaded from the database. */
+  "recruiting_research.poll": { taskId: string; attempt?: number };
 }
 
 export type BackgroundJobName = keyof BackgroundJobPayloads;

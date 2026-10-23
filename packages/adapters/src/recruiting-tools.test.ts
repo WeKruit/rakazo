@@ -939,7 +939,7 @@ describe("native research preparation", () => {
       context,
     );
     expect(result.recoveredResult).toBeUndefined();
-    expect(result.args).toEqual({ task_id: "provider-original", wait_seconds: 0 });
+    expect(result.args).toEqual({ task_id: "provider-original", wait_seconds: 10 });
     expect(recordRecruitingResearchObservation).toHaveBeenCalledWith(
       f.deps.prisma,
       actor,
@@ -1671,6 +1671,73 @@ describe("native research preparation", () => {
       expect(admitRecruitingResearchAction).not.toHaveBeenCalled();
     },
   );
+
+  it("hands a still-working task to the background poll once and says so in the tool result", async () => {
+    const f = researchFixture("continue");
+    const admission = await f.admit();
+    const enqueue = vi.fn(async () => undefined);
+    const providerResult = {
+      structuredContent: { task_id: "provider-original", status: "accepted", activity: "queued" },
+    };
+    f.effect.status = "completed";
+    f.effect.result = providerResult;
+    const result = await tools.completeRecruitingResearchCall(
+      { ...f.deps, jobs: { enqueue } },
+      f.trusted,
+      admission!,
+      providerResult,
+      context,
+    );
+    expect(result).toMatchObject({
+      observation: { deliveryState: "accepted", done: false },
+      background: expect.stringContaining("delivered to this conversation automatically"),
+    });
+    expect(enqueue).toHaveBeenCalledExactlyOnceWith(
+      expect.objectContaining({
+        name: "recruiting_research.poll",
+        payload: { taskId: "task" },
+        replaceKey: "recruiting_research.poll:task",
+        availableAt: expect.any(Date),
+      }),
+    );
+    // Without a job publisher the call behaves exactly as before.
+    const plain = await tools.completeRecruitingResearchCall(
+      f.deps,
+      f.trusted,
+      admission!,
+      providerResult,
+      context,
+    );
+    expect(plain).not.toHaveProperty("background");
+  });
+
+  it("does not poll a task the provider already finished", async () => {
+    const f = researchFixture("continue");
+    const read = pendingRead(f);
+    const enqueue = vi.fn(async () => undefined);
+    const result = await tools.completeRecruitingResearchCall(
+      { ...f.deps, jobs: { enqueue } },
+      f.trusted,
+      {
+        kind: "read",
+        operation: "status",
+        saved: f.saved,
+        call: {
+          ...f.call,
+          route: { ...read.route, toolName: "get_task" },
+          args: { task_id: "provider-original", wait_seconds: 10 },
+        },
+      } as never,
+      { structuredContent: { task_id: "provider-original", state: "completed", done: true } },
+      context,
+      { effectId: read.effect.id, request: read.effect.request },
+    );
+    expect(result).toMatchObject({
+      observation: { done: true, observedProviderState: "completed" },
+    });
+    expect(result).not.toHaveProperty("background");
+    expect(enqueue).not.toHaveBeenCalled();
+  });
 
   it("persists the exact queued provider envelope as a hashed receipt without assumed completion or usage", async () => {
     const f = researchFixture("continue");
