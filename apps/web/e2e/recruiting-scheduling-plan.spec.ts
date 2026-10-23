@@ -54,13 +54,21 @@ for (const width of [1440, 390]) {
     await expect(
       page.getByRole("region", { name: "Saved interview plans", exact: true }),
     ).toContainText("not an approval");
+    await page
+      .getByRole("region", { name: "Saved interview plans", exact: true })
+      .scrollIntoViewIfNeeded();
+    await page.screenshot({
+      path: info.outputPath(`scheduling-interview-history-${width}.png`),
+      fullPage: true,
+    });
     expect(fixture.unknown).toEqual([]);
   });
 }
 
 test("native Inbox uses an exact role candidate record for the same plan flow", async ({
   page,
-}) => {
+}, info) => {
+  await page.setViewportSize({ width: 1440, height: 900 });
   await page.clock.setFixedTime(new Date("2026-10-23T12:00:00Z"));
   const fixture = await mockRecruitingApp(page, { scheduling: true, nativeScheduling: true });
   await page.goto(`/app/g/${appGroupId}?view=inbox`);
@@ -83,5 +91,10 @@ test("native Inbox uses an exact role candidate record for the same plan flow", 
   const saved = fixture.calls.find((call) => call.method === "recruiting/saveSchedulingPlan")!;
   expect(saved.input.candidate).toMatchObject({ candidateKey: "fixture-native-candidate" });
   expect(saved.input.originalEmail).not.toHaveProperty("crm");
+  await form.scrollIntoViewIfNeeded();
+  await page.screenshot({
+    path: info.outputPath("scheduling-native-saved-1440.png"),
+    fullPage: true,
+  });
   expect(fixture.unknown).toEqual([]);
 });
