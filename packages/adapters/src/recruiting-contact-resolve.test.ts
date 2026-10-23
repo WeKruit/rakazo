@@ -71,6 +71,7 @@ function fixture(
               data: {
                 organization_id: org,
                 role_id: roleId,
+                version: 2,
                 pagination: "offset",
                 messages: mail.messages,
                 next_offset: null,
@@ -208,61 +209,47 @@ describe("resolveRecruitingContact", () => {
 });
 
 describe("agent list_crm_candidates arguments", () => {
-  it("includes contacted people and translates a role id to the role's labels", async () => {
-    const readRole = vi.fn(async () => ({
-      structuredContent: {
-        data: { role_spec_id: roleId, client_label: "Dyna", role_label: "Data Infra" },
-      },
-    }));
+  const binding = {
+    mcpServerId: "crm-server",
+    serverRevision: 1,
+    organizationId: org,
+    crmRoleId: roleId,
+    crmClientId: "30000000-0000-4000-8000-000000000003",
+    clientLabel: "Example Client",
+    roleLabel: "Data Infra",
+  };
+  it("fills only missing exact-workspace filters and includes contacted people", async () => {
+    expect(await agentCrmCandidatesArgs({ p_q: "Example" }, [binding])).toEqual({
+      p_org: org,
+      p_q: "Example",
+      p_not_reviewed: false,
+      p_client: binding.clientLabel,
+      p_role: binding.roleLabel,
+    });
     expect(
-      await agentCrmCandidatesArgs({ p_org: org, p_role: roleId, p_q: "Sumeet" }, readRole),
+      await agentCrmCandidatesArgs({ p_org: org, p_role: roleId, p_not_reviewed: true }, [binding]),
     ).toEqual({
       p_org: org,
-      p_q: "Sumeet",
-      p_not_reviewed: false,
-      p_client: "Dyna",
-      p_role: "Data Infra",
+      p_not_reviewed: true,
+      p_client: binding.clientLabel,
+      p_role: binding.roleLabel,
     });
-    expect(readRole).toHaveBeenCalledWith({ p_org: org, p_role: roleId });
-    // Labels and an explicit p_not_reviewed pass through untouched.
-    expect(
-      await agentCrmCandidatesArgs(
-        { p_org: org, p_role: "Data Infra", p_not_reviewed: true },
-        readRole,
-      ),
-    ).toEqual({ p_org: org, p_role: "Data Infra", p_not_reviewed: true });
-    expect(readRole).toHaveBeenCalledTimes(1);
   });
-
-  it("replaces a whoami org and free-text labels with the bound role's CRM binding", async () => {
-    const readRole = vi.fn();
-    const binding = {
-      organizationId: "8a545110-d526-47ff-a530-648ee7be139c",
-      clientLabel: "Dyna",
-      roleLabel: "SWE Data Infra",
-    };
-    const live = {
-      p_q: "Sumeet Parekh",
-      p_org: "ae29fbad-0000-4000-8000-000000000000",
-      p_client: "Dyna Robotics",
-      p_role: "Software Engineer, Data Infra",
-      p_not_reviewed: false,
-    };
-    expect(await agentCrmCandidatesArgs(live, readRole, [binding])).toEqual({
-      p_q: "Sumeet Parekh",
-      p_org: "8a545110-d526-47ff-a530-648ee7be139c",
-      p_client: "Dyna",
-      p_role: "SWE Data Infra",
-      p_not_reviewed: false,
-    });
-    // Several bound roles and no exact label match: a name-only search across the org.
-    expect(
-      await agentCrmCandidatesArgs(live, readRole, [
-        binding,
-        { ...binding, roleLabel: "Other role" },
-      ]),
-    ).toEqual({ p_q: "Sumeet Parekh", p_org: binding.organizationId, p_not_reviewed: false });
-    expect(readRole).not.toHaveBeenCalled();
+  it.each([
+    { p_org: "other-org" },
+    { p_client: "Other client" },
+    { p_role: "Other role" },
+    { p_q: "Example", p_role: "Other role" },
+  ])("refuses mismatched explicit scope instead of rewriting or broadening: %j", async (args) => {
+    await expect(agentCrmCandidatesArgs(args, [binding])).rejects.toThrow(/current role workspace/);
+  });
+  it("refuses missing or ambiguous scope instead of selecting another owned role", async () => {
+    await expect(agentCrmCandidatesArgs({ p_org: org, p_role: roleId })).rejects.toThrow(
+      /workspace/,
+    );
+    await expect(
+      agentCrmCandidatesArgs({ p_q: "Example" }, [binding, { ...binding, roleLabel: "Other" }]),
+    ).rejects.toThrow(/workspace/);
   });
 
   it("answers latest mail from the role's stored correspondence (the Inbox source)", async () => {

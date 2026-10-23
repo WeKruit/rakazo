@@ -237,6 +237,8 @@ describe("local native Instantly thread history", () => {
         const body = state.campaigns[decodeURIComponent(campaign[1]!)];
         return new Response(JSON.stringify(body ?? {}), { status: body ? 200 : 404 });
       }
+      if (new URL(request.url).pathname === `/api/v2/emails/${anchor.id}`)
+        return Response.json(state.callResult.structuredContent);
       expect(new URL(request.url).pathname).toBe("/api/v2/emails");
       state.afterRest();
       return new Response(JSON.stringify(state.page), { status: state.status });
@@ -451,6 +453,10 @@ describe("local native Instantly thread history", () => {
   });
   it("refuses an agent contact lookup with an email not stored for that person", async () => {
     const f = fixture();
+    vi.spyOn(
+      f.connector as unknown as { instantlyCampaignScope: () => Promise<null> },
+      "instantlyCampaignScope",
+    ).mockResolvedValue(null);
     const contactRoute = { ...route, toolName: "native_instantly_search_contact_emails" };
     const run = { ...f.context, runId: "run-contact-gate" };
     f.state.page = { items: [] };
@@ -854,28 +860,95 @@ describe("local native Instantly thread history", () => {
       }
     },
   );
-  it.each(["thread_id", "organization_id", "eaccount", "id", "shape", "http", "oversize"])(
-    "rejects %s response without inventing an empty successful page",
-    async (kind) => {
+  it.each([
+    "thread_id",
+    "organization_id",
+    "campaign_id",
+    "eaccount",
+    "id",
+    "shape",
+    "http",
+    "oversize",
+  ])("rejects %s response without inventing an empty successful page", async (kind) => {
+    const f = fixture();
+    if (["thread_id", "organization_id", "campaign_id", "eaccount"].includes(kind))
+      f.state.page = {
+        items: [
+          {
+            ...anchor,
+            [kind]:
+              kind === "organization_id"
+                ? anchor.campaign_id
+                : kind === "campaign_id"
+                  ? anchor.organization_id
+                  : "foreign",
+          },
+        ],
+      };
+    if (kind === "id") f.state.callResult.structuredContent.id = anchor.campaign_id;
+    if (kind === "shape") f.state.page = { items: "invalid" };
+    if (kind === "http") f.state.status = 401;
+    if (kind === "oversize") f.state.page = { items: [anchor], extra: "x".repeat(2_000_000) };
+    try {
+      expect(await f.collect()).toMatchObject([{ type: "error" }]);
+      expect(f.rest).toHaveBeenCalledTimes(kind === "id" ? 0 : 1);
+    } finally {
+      await f.connector.close();
+    }
+  });
+  it.each(["native_instantly_get_email", "native_instantly_reply_to_email"])(
+    "rejects foreign role campaign before exposing or replying via %s",
+    async (toolName) => {
       const f = fixture();
-      if (["thread_id", "organization_id", "eaccount"].includes(kind))
-        f.state.page = {
-          items: [
-            { ...anchor, [kind]: kind === "organization_id" ? anchor.campaign_id : "foreign" },
-          ],
-        };
-      if (kind === "id") f.state.callResult.structuredContent.id = anchor.campaign_id;
-      if (kind === "shape") f.state.page = { items: "invalid" };
-      if (kind === "http") f.state.status = 401;
-      if (kind === "oversize") f.state.page = { items: [anchor], extra: "x".repeat(2_000_000) };
+      f.assignment.allowedTools.push("reply_to_email");
+      vi.spyOn(
+        f.connector as unknown as {
+          instantlyCampaignScope: () => Promise<{ campaignIds: string[] }>;
+        },
+        "instantlyCampaignScope",
+      ).mockResolvedValue({ campaignIds: [anchor.organization_id] });
       try {
-        expect(await f.collect()).toMatchObject([{ type: "error" }]);
-        expect(f.rest).toHaveBeenCalledTimes(kind === "id" ? 0 : 1);
+        const args =
+          toolName === "native_instantly_get_email"
+            ? { id: anchor.id }
+            : {
+                reply_to_uuid: anchor.id,
+                eaccount: anchor.eaccount,
+                body: { text: "Synthetic reply" },
+              };
+        expect(await f.collect(args, { ...route, toolName })).toMatchObject([{ type: "error" }]);
+        expect(f.rest).toHaveBeenCalledTimes(1);
+        expect(new Request(...f.rest.mock.calls[0]!).method).toBe("GET");
       } finally {
         await f.connector.close();
       }
     },
   );
+  it("filters existing native mailbox reads by exact current campaign", async () => {
+    const f = fixture();
+    vi.spyOn(
+      f.connector as unknown as {
+        instantlyCampaignScope: () => Promise<{ campaignIds: string[] }>;
+      },
+      "instantlyCampaignScope",
+    ).mockResolvedValue({ campaignIds: [anchor.campaign_id] });
+    try {
+      expect(
+        await f.collect(
+          { eaccount: anchor.eaccount },
+          { ...route, toolName: "native_instantly_list_mailbox_emails" },
+        ),
+      ).toMatchObject([{ type: "result" }]);
+      const emailCall = f.rest.mock.calls.find(
+        (call) => new URL(logicalHref(...call)).pathname === "/api/v2/emails",
+      )!;
+      const url = new URL(logicalHref(...emailCall));
+      expect(url.searchParams.get("campaign_id")).toBe(anchor.campaign_id);
+      expect(url.searchParams.get("eaccount")).toBe(anchor.eaccount);
+    } finally {
+      await f.connector.close();
+    }
+  });
   it.each([
     "get_thread_history",
     route.toolName,

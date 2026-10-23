@@ -8,10 +8,11 @@ import type {
   SecretStore,
 } from "@rakazo/adapter-kit";
 import { SecretStoreUnavailableError } from "@rakazo/adapter-kit";
-import { isLocalMcpHost, RecruitingCrmTargetSchema } from "@rakazo/contracts";
+import type { RecruitingCrmTarget } from "@rakazo/contracts";
+import { isLocalMcpHost, RecruitingCrmRoleCampaignsReadSchema } from "@rakazo/contracts";
 import { mcpObject } from "@rakazo/core/node/approval-effect-key";
 import type { McpServer, PrismaClient, ThreadEvents } from "@rakazo/db";
-import { IsolationError } from "@rakazo/db";
+import { getRecruitingWorkspaceCrmTarget, IsolationError } from "@rakazo/db";
 import { getLogger } from "@rakazo/logging";
 import addressparser from "nodemailer/lib/addressparser";
 import { z } from "zod";
@@ -25,6 +26,7 @@ import {
   instantlyRest,
   isNativeInstantlyWrite,
   nativeInstantlyWrites,
+  readRoleCampaignBinding,
   runInstantlyWrite,
 } from "./instantly-native-writes.js";
 import {
@@ -59,6 +61,12 @@ const CONTACT_EMAILS = "native_instantly_search_contact_emails";
 const MAILBOX_EMAILS = "native_instantly_list_mailbox_emails";
 const ThreadHistoryInput = z.strictObject({
   anchor_id: z.uuid(),
+  campaign_id: z
+    .uuid()
+    .optional()
+    .describe(
+      "Exact campaign of the current recruiting role; required when the role has multiple campaigns.",
+    ),
   limit: z.number().int().min(1).max(100).default(100),
   starting_after: z
     .string()
@@ -102,66 +110,95 @@ const MailboxEmailsInput = ThreadHistoryInput.omit({ anchor_id: true }).extend({
   max_timestamp_created: CreatedAt.describe("ISO datetime; only mail created at or before it."),
 });
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
-type CrmBinding = { organizationId: string; clientLabel: string; roleLabel: string };
-/**
- * Agent calls to list_crm_candidates get the Contacts tab's arguments: contacted people included
- * (p_not_reviewed false unless set), the CRM organization from the role's verified binding (never a
- * user id), and the binding's client/role LABELS, which is what this tool filters on. A role id is
- * translated via get_crm_role; free-text labels that are not a binding's are replaced by the one
- * binding's labels, or dropped for a name-only search when the role is ambiguous.
- */
+/** Exact active-workspace scope. Missing or conflicting arguments never broaden a query. */
 export async function agentCrmCandidatesArgs(
   args: Record<string, unknown>,
-  readRole: (args: { p_org: string; p_role: string }) => Promise<unknown>,
-  bindings: CrmBinding[] = [],
+  bindings: RecruitingCrmTarget[] = [],
 ) {
-  const next: Record<string, unknown> = { p_not_reviewed: false, ...args };
-  const orgs = [...new Set(bindings.map((binding) => binding.organizationId))];
-  if (orgs.length === 1) next.p_org = orgs[0];
-  const sameLabels = (binding: CrmBinding) =>
-    binding.clientLabel.trim() === String(next.p_client ?? "").trim() &&
-    binding.roleLabel.trim() === String(next.p_role ?? "").trim();
-  if (typeof next.p_org === "string" && typeof next.p_role === "string" && UUID.test(next.p_role)) {
-    try {
-      const result = (await readRole({ p_org: next.p_org, p_role: next.p_role })) as {
-        isError?: boolean;
-        structuredContent?: { data?: Record<string, unknown> };
-      };
-      const role = result?.isError ? undefined : result?.structuredContent?.data;
-      if (
-        role?.role_spec_id === next.p_role &&
-        typeof role.client_label === "string" &&
-        role.client_label.trim() &&
-        typeof role.role_label === "string" &&
-        role.role_label.trim()
-      )
-        return { ...next, p_client: role.client_label, p_role: role.role_label };
-    } catch {
-      // The original call still runs; its own result reports any problem.
-    }
-  } else if (
-    (next.p_client !== undefined || next.p_role !== undefined) &&
-    !bindings.some(sameLabels)
-  ) {
-    if (bindings.length === 1) {
-      next.p_client = bindings[0]!.clientLabel;
-      next.p_role = bindings[0]!.roleLabel;
-    } else if (bindings.length > 1 || next.p_q !== undefined) {
-      delete next.p_client;
-      delete next.p_role;
-    }
+  if (bindings.length !== 1)
+    throw new IsolationError("Open the CRM role workspace before reading its candidates");
+  const target = bindings[0]!;
+  if (
+    (args.p_org !== undefined && args.p_org !== target.organizationId) ||
+    (args.p_client !== undefined && args.p_client !== target.clientLabel) ||
+    (args.p_role !== undefined &&
+      args.p_role !== target.roleLabel &&
+      args.p_role !== target.crmRoleId)
+  )
+    throw new IsolationError("CRM query does not match the current role workspace");
+  return {
+    p_not_reviewed: false,
+    ...args,
+    p_org: target.organizationId,
+    p_client: target.clientLabel,
+    p_role: target.roleLabel,
+  };
+}
+
+/** Candidate mail/context tools lack a role parameter: prove exact current-role membership first. */
+export async function agentCrmScopedArgs(
+  tool: string,
+  args: Record<string, unknown>,
+  target: RecruitingCrmTarget,
+  readMembership: (args: { p_org: string; p_candidate: string }) => Promise<unknown>,
+): Promise<Record<string, unknown>> {
+  if (tool === "list_crm_candidates") return agentCrmCandidatesArgs(args, [target]);
+  if (args.p_org !== undefined && args.p_org !== target.organizationId)
+    throw new IsolationError("CRM organization does not match the current role workspace");
+  if (args.p_role !== undefined && args.p_role !== target.crmRoleId)
+    throw new IsolationError("CRM role does not match the current role workspace");
+  if (args.p_client !== undefined && args.p_client !== target.crmClientId)
+    throw new IsolationError("CRM client does not match the current role workspace");
+  const next = { ...args, p_org: target.organizationId };
+  if (["get_crm_role", "list_crm_role_correspondence", "crm_import_candidate"].includes(tool))
+    return { ...next, p_role: target.crmRoleId };
+  if (typeof args.p_candidate !== "string" || !UUID.test(args.p_candidate))
+    throw new IsolationError(
+      "Select a candidate in the current CRM role workspace before this operation",
+    );
+  if (args.p_cursor !== undefined) {
+    const cursor = args.p_cursor as Record<string, unknown> | null;
+    if (
+      !cursor ||
+      cursor.p_org !== target.organizationId ||
+      cursor.p_candidate !== args.p_candidate
+    )
+      throw new IsolationError("CRM cursor does not match the current candidate");
   }
-  if (JSON.stringify(next) !== JSON.stringify({ p_not_reviewed: false, ...args }))
-    getLogger().info("crm.list_candidates.args_rewritten", {
-      orgReplaced: next.p_org !== args.p_org,
-      labels:
-        next.p_client === args.p_client && next.p_role === args.p_role
-          ? "kept"
-          : next.p_client === undefined
-            ? "dropped"
-            : "replaced",
-    });
+  const result = await readMembership({
+    p_org: target.organizationId,
+    p_candidate: args.p_candidate,
+  });
+  const rows = (result as { isError?: boolean })?.isError ? undefined : mcpObject(result)?.data;
+  if (
+    !Array.isArray(rows) ||
+    !rows.length ||
+    rows.some(
+      (row) =>
+        !row ||
+        typeof row !== "object" ||
+        row.organization_id !== target.organizationId ||
+        row.candidate_id !== args.p_candidate ||
+        typeof row.membership_id !== "string",
+    ) ||
+    !rows.some(
+      (row) => row.role_spec_id === target.crmRoleId && row.client_id === target.crmClientId,
+    )
+  )
+    throw new IsolationError("Candidate is not a verified member of the current CRM role");
   return next;
+}
+
+export function scopedInstantlyCampaign(
+  args: Record<string, unknown>,
+  campaigns: readonly string[],
+): string {
+  const selected = args.campaign_id ?? (campaigns.length === 1 ? campaigns[0] : undefined);
+  if (typeof selected !== "string" || !campaigns.includes(selected))
+    throw new IsolationError(
+      "Select an exact campaign of the current recruiting role before reading its email",
+    );
+  return selected;
 }
 
 const EMAIL_PAGE_BOUND = 4_000_000; // 100 full bodies can pass 1 MB
@@ -690,25 +727,127 @@ export class McpConnector implements ConnectorProvider {
         call.route.toolName,
         call.args,
       );
+      const crmTarget =
+        context.runId && /(?:^crm_|_crm_)/.test(call.route.toolName)
+          ? await this.crmBinding(context, assignment.server)
+          : null;
       sessionKey = this.sessionKey(assignment.server, context);
       const session = await this.sessionFor(assignment.server, context);
       material = this.sessions.get(sessionKey)?.material;
       context.signal.throwIfAborted();
-      const args =
-        call.route.toolName === "list_crm_candidates" && context.runId
-          ? await agentCrmCandidatesArgs(
-              call.args,
-              async (roleArgs) => {
-                await requireMcpToolAssignment(this.prisma, context, call.route!, "get_crm_role");
-                return session.callTool("get_crm_role", roleArgs, { signal: context.signal });
-              },
-              await this.crmBindings(context, call.route.resourceId),
-            )
-          : call.args;
+      const emailScope =
+        assignment.server.endpoint === INSTANTLY_MCP &&
+        ["get_email", "list_emails", "reply_to_email"].includes(call.route.toolName)
+          ? await this.instantlyCampaignScope(context, assignment.server.id)
+          : null;
+      let args = call.args;
+      if (emailScope && call.route.toolName === "list_emails") {
+        const campaignId = scopedInstantlyCampaign(args, emailScope.campaignIds);
+        const catalog = await session.listTools({ signal: context.signal });
+        const schema = catalog.tools.find((tool) => tool.name === "list_emails")?.inputSchema;
+        if (!schema?.properties || !("campaign_id" in schema.properties))
+          throw new IsolationError(
+            "This email list cannot filter by role campaign; use the scoped mailbox or contact email tool",
+          );
+        args = { ...args, campaign_id: campaignId };
+      }
+
+      if (emailScope && call.route.toolName === "reply_to_email") {
+        await requireMcpToolAssignment(this.prisma, context, call.route, "get_email");
+        if (typeof args.reply_to_uuid !== "string" || !UUID.test(args.reply_to_uuid))
+          throw new IsolationError();
+        const original = await session.callTool(
+          "get_email",
+          { id: args.reply_to_uuid },
+          { signal: context.signal },
+        );
+        const email = original.isError ? null : readInstantlyEmail(mcpObject(original));
+        if (
+          !email?.campaign_id ||
+          !emailScope.campaignIds.includes(email.campaign_id) ||
+          email.id !== args.reply_to_uuid ||
+          (args.eaccount !== undefined &&
+            !sameInstantlyAddresses(email.eaccount, String(args.eaccount)))
+        )
+          throw new IsolationError(
+            "Reply anchor does not belong to the current role campaign and mailbox",
+          );
+      }
+
+      if (crmTarget) {
+        const target = crmTarget;
+        await requireMcpToolAssignment(this.prisma, context, call.route, "get_crm_role");
+        const roleResult = await session.callTool(
+          "get_crm_role",
+          {
+            p_org: target.organizationId,
+            p_role: target.crmRoleId,
+          },
+          { signal: context.signal },
+        );
+        const role = roleResult.isError
+          ? undefined
+          : (mcpObject(roleResult)?.data as Record<string, unknown> | undefined);
+        if (
+          !role ||
+          role.role_spec_id !== target.crmRoleId ||
+          (role.organization_id !== undefined && role.organization_id !== target.organizationId) ||
+          role.client_id !== target.crmClientId ||
+          role.client_label !== target.clientLabel ||
+          role.role_label !== target.roleLabel
+        )
+          throw new IsolationError("CRM role scope changed; reopen the role workspace");
+        args = await agentCrmScopedArgs(
+          call.route.toolName,
+          call.args,
+          target,
+          async (membershipArgs) => {
+            await requireMcpToolAssignment(
+              this.prisma,
+              context,
+              call.route!,
+              "list_crm_candidate_roles",
+            );
+            return session.callTool("list_crm_candidate_roles", membershipArgs, {
+              signal: context.signal,
+            });
+          },
+        );
+      }
+      if (crmTarget) {
+        await requireMcpToolAssignment(this.prisma, context, call.route, call.route.toolName);
+        const current = await this.crmBinding(context, assignment.server);
+        if (JSON.stringify(current) !== JSON.stringify(crmTarget))
+          throw new IsolationError(
+            "CRM workspace changed during the read; retry in the current workspace",
+          );
+      }
       callStarted = true;
       const result = await session.callTool(call.route.toolName, args, {
         signal: context.signal,
       });
+      if (emailScope && call.route.toolName !== "reply_to_email" && !result.isError) {
+        const body = mcpObject(result);
+        const emails =
+          call.route.toolName === "get_email"
+            ? [readInstantlyEmail(body)]
+            : readInstantlyEmailPage(body)?.items;
+        if (
+          !emails ||
+          emails.some(
+            (email) =>
+              !email?.campaign_id ||
+              !emailScope.campaignIds.includes(email.campaign_id) ||
+              (call.route!.toolName === "list_emails" && email.campaign_id !== args.campaign_id) ||
+              (args.eaccount !== undefined &&
+                !sameInstantlyAddresses(email.eaccount, String(args.eaccount))) ||
+              (call.route!.toolName === "get_email" && args.id !== email.id),
+          )
+        )
+          throw new IsolationError(
+            "Email does not belong to the requested role campaign and mailbox",
+          );
+      }
       const secrets = material ? oauthMaterialSecrets(material) : [];
       yield { type: "result", data: redactConnectorPayload(result, secrets) };
     } catch (error) {
@@ -734,6 +873,31 @@ export class McpConnector implements ConnectorProvider {
     );
     try {
       const credential = await this.authorizeInstantlyRest(call, context, redactions);
+      const emailScope = ["native_instantly_get_email", "native_instantly_reply_to_email"].includes(
+        call.route!.toolName,
+      )
+        ? await this.instantlyCampaignScope(context, credential.server.id)
+        : null;
+      if (emailScope && call.route!.toolName === "native_instantly_reply_to_email") {
+        if (typeof call.args.reply_to_uuid !== "string" || !UUID.test(call.args.reply_to_uuid))
+          throw new IsolationError();
+        const original = await instantlyRest(
+          safeFetch,
+          credential.key,
+          context.signal,
+        )("GET", `/emails/${call.args.reply_to_uuid}`);
+        const email = readInstantlyEmail(original);
+        if (
+          !email?.campaign_id ||
+          !emailScope.campaignIds.includes(email.campaign_id) ||
+          email.id !== call.args.reply_to_uuid ||
+          (call.args.eaccount !== undefined &&
+            !sameInstantlyAddresses(email.eaccount, String(call.args.eaccount)))
+        )
+          throw new IsolationError(
+            "Reply anchor does not belong to the current role campaign and mailbox",
+          );
+      }
       const result = await runInstantlyWrite(
         this.prisma,
         instantlyRest(safeFetch, credential.key, context.signal),
@@ -742,6 +906,15 @@ export class McpConnector implements ConnectorProvider {
         call.route!.toolName,
         call.args,
       );
+      if (emailScope && call.route!.toolName === "native_instantly_get_email") {
+        const email = readInstantlyEmail(result);
+        if (
+          !email?.campaign_id ||
+          !emailScope.campaignIds.includes(email.campaign_id) ||
+          email.id !== call.args.id
+        )
+          throw new IsolationError("Email does not belong to the current role campaign");
+      }
       yield {
         type: "result",
         data: redactConnectorPayload(
@@ -820,45 +993,105 @@ export class McpConnector implements ConnectorProvider {
     return { server, key, secretId: secret.id, digest: credentialDigest(plaintext) };
   }
 
-  /** Verified CRM bindings on this server: the run's active role, else all of this user's roles. */
-  private async crmBindings(context: AdapterContext, serverId: string) {
+  /** Resolve only this run's current workspace, never another role owned by the same user. */
+  private async crmBinding(context: AdapterContext, server: McpServer) {
     const run = await this.prisma.run.findFirst({
-      where: { id: context.runId, spaceId: context.spaceId, userId: context.userId },
-      select: {
-        thread: { select: { activeRecruitingRole: { select: { crmBindingEffectId: true } } } },
-      },
-    });
-    const active = run?.thread.activeRecruitingRole;
-    const effectIds = active
-      ? [active.crmBindingEffectId]
-      : (
-          await this.prisma.recruitingRole.findMany({
-            where: {
-              spaceId: context.spaceId,
-              userId: context.userId,
-              archivedAt: null,
-              crmBindingEffectId: { not: null },
-            },
-            select: { crmBindingEffectId: true },
-          })
-        ).map((role) => role.crmBindingEffectId);
-    const ids = effectIds.filter((id): id is string => Boolean(id));
-    if (!ids.length) return [];
-    const effects = await this.prisma.externalEffect.findMany({
       where: {
-        id: { in: ids },
+        id: context.runId,
         spaceId: context.spaceId,
-        status: "completed",
-        kind: "recruiting_crm_target",
+        userId: context.userId,
+        botId: context.botId,
       },
-      select: { result: true },
+      select: { threadId: true },
     });
-    return effects.flatMap((effect) => {
-      const target = RecruitingCrmTargetSchema.safeParse(
-        (effect.result as { target?: unknown } | null)?.target,
+    if (!run) throw new IsolationError();
+    const target = await getRecruitingWorkspaceCrmTarget(
+      this.prisma,
+      {
+        userId: context.userId,
+        spaceId: context.spaceId,
+        email: "",
+        isDeploymentOwner: false,
+      },
+      { threadId: run.threadId },
+    );
+    if (!target || target.mcpServerId !== server.id || target.serverRevision !== server.revision)
+      throw new IsolationError("Open the current CRM role workspace before using CRM tools");
+    return target;
+  }
+
+  /** Existing campaign identity only; reading mail must never create or infer a campaign by name. */
+  private async instantlyCampaignScope(
+    context: AdapterContext,
+    serverId: string,
+  ): Promise<{ campaignIds: string[] } | null> {
+    if (!context.runId) return null;
+    const run = await this.prisma.run.findFirst({
+      where: {
+        id: context.runId,
+        spaceId: context.spaceId,
+        userId: context.userId,
+        botId: context.botId,
+      },
+      select: {
+        threadId: true,
+        thread: { select: { groupId: true, activeRecruitingRoleId: true } },
+      },
+    });
+    if (!run) throw new IsolationError();
+    const target = await getRecruitingWorkspaceCrmTarget(
+      this.prisma,
+      {
+        userId: context.userId,
+        spaceId: context.spaceId,
+        email: "",
+        isDeploymentOwner: false,
+      },
+      { threadId: run.threadId },
+    );
+    if (target) {
+      const route = { resourceId: target.mcpServerId, resourceRevision: target.serverRevision };
+      const assigned = await requireMcpToolAssignment(this.prisma, context, route, "get_crm_role");
+      const session = await this.sessionFor(assigned.server, context);
+      const result = await session.callTool(
+        "get_crm_role",
+        {
+          p_org: target.organizationId,
+          p_role: target.crmRoleId,
+          p_view: "campaigns",
+          p_limit: 50,
+          p_offset: 0,
+        },
+        { signal: context.signal },
       );
-      return target.success && target.data.mcpServerId === serverId ? [target.data] : [];
-    });
+      const page = result.isError
+        ? null
+        : RecruitingCrmRoleCampaignsReadSchema.safeParse(mcpObject(result)?.data);
+      if (
+        !page?.success ||
+        page.data.organization_id !== target.organizationId ||
+        page.data.role_spec_id !== target.crmRoleId ||
+        page.data.offset !== 0 ||
+        page.data.next_offset !== null ||
+        !page.data.campaigns.length ||
+        page.data.campaigns.length > 50
+      )
+        throw new IsolationError("Current CRM role campaign mapping is unavailable or incomplete");
+      return { campaignIds: page.data.campaigns.map((campaign) => campaign.id) };
+    }
+    if (run.thread.activeRecruitingRoleId) {
+      const binding = await readRoleCampaignBinding(
+        this.prisma,
+        context.spaceId,
+        serverId,
+        run.thread.activeRecruitingRoleId,
+      );
+      if (!binding) throw new IsolationError("This role has no verified existing email campaign");
+      return { campaignIds: [binding.campaignId] };
+    }
+    if (run.thread.groupId?.startsWith("recruiting-crm-"))
+      throw new IsolationError("Open the CRM role workspace before reading its campaign email");
+    return null;
   }
 
   private async *readInstantlyEmails(
@@ -895,6 +1128,7 @@ export class McpConnector implements ConnectorProvider {
       const input = historyInput ?? mailboxInput ?? contactInput!;
       const authorize = () => this.authorizeInstantlyRest(call, context, redactions);
       const credential = await authorize();
+      const emailScope = await this.instantlyCampaignScope(context, credential.server.id);
       const assertAuthorized = async () => {
         const current = await authorize();
         if (current.secretId !== credential.secretId || current.digest !== credential.digest)
@@ -926,6 +1160,14 @@ export class McpConnector implements ConnectorProvider {
           !sameInstantlyAddresses(anchor.eaccount, anchor.eaccount))
       )
         throw new Error("The current native email anchor is invalid");
+      const campaignId = emailScope
+        ? scopedInstantlyCampaign(
+            { campaign_id: input.campaign_id ?? anchor?.campaign_id },
+            emailScope.campaignIds,
+          )
+        : input.campaign_id;
+      if (anchor && campaignId && anchor.campaign_id !== campaignId)
+        throw new IsolationError("Email anchor does not belong to the requested role campaign");
       if (contactInput && !contactInput.eaccount) {
         // Same rule as ensure_role_campaign: one connected mailbox is the default sending side.
         phase = "default mailbox";
@@ -965,6 +1207,7 @@ export class McpConnector implements ConnectorProvider {
                 ...(contactInput!.eaccount ? { eaccount: contactInput!.eaccount } : {}),
                 sort_order: "desc",
               }),
+        ...(campaignId ? { campaign_id: campaignId } : {}),
         mode: "emode_all",
         latest_of_thread: "false",
         preview_only: "false",
@@ -999,27 +1242,31 @@ export class McpConnector implements ConnectorProvider {
       if (
         !page ||
         page.items.length > input.limit ||
-        page.items.some((email) =>
-          anchor
-            ? email.organization_id !== anchor.organization_id ||
-              email.thread_id !== anchor.thread_id ||
-              !sameInstantlyAddresses(email.eaccount, anchor.eaccount)
-            : mailboxInput
-              ? !sameInstantlyAddresses(email.eaccount, mailboxInput.eaccount) ||
-                (mailboxInput.min_timestamp_created !== undefined &&
-                  Date.parse(email.timestamp_created) <
-                    Date.parse(mailboxInput.min_timestamp_created)) ||
-                (mailboxInput.max_timestamp_created !== undefined &&
-                  Date.parse(email.timestamp_created) >
-                    Date.parse(mailboxInput.max_timestamp_created))
-              : !sameInstantlyAddresses(email.eaccount, email.eaccount) ||
-                (contactInput!.eaccount !== undefined &&
-                  !sameInstantlyAddresses(email.eaccount, contactInput!.eaccount)) ||
-                (email.lead != null && !sameInstantlyAddresses(email.lead, contactInput!.email)) ||
-                (!sameInstantlyAddresses(email.from_address_email, contactInput!.email) &&
-                  !addressparser(email.to_address_email_list).some((recipient) =>
-                    sameInstantlyAddresses(recipient.address, contactInput!.email),
-                  )),
+        page.items.some(
+          (email) =>
+            (campaignId && email.campaign_id !== campaignId) ||
+            (anchor
+              ? email.organization_id !== anchor.organization_id ||
+                email.thread_id !== anchor.thread_id ||
+                (email.campaign_id ?? null) !== (anchor.campaign_id ?? null) ||
+                !sameInstantlyAddresses(email.eaccount, anchor.eaccount)
+              : mailboxInput
+                ? !sameInstantlyAddresses(email.eaccount, mailboxInput.eaccount) ||
+                  (mailboxInput.min_timestamp_created !== undefined &&
+                    Date.parse(email.timestamp_created) <
+                      Date.parse(mailboxInput.min_timestamp_created)) ||
+                  (mailboxInput.max_timestamp_created !== undefined &&
+                    Date.parse(email.timestamp_created) >
+                      Date.parse(mailboxInput.max_timestamp_created))
+                : !sameInstantlyAddresses(email.eaccount, email.eaccount) ||
+                  (contactInput!.eaccount !== undefined &&
+                    !sameInstantlyAddresses(email.eaccount, contactInput!.eaccount)) ||
+                  (email.lead != null &&
+                    !sameInstantlyAddresses(email.lead, contactInput!.email)) ||
+                  (!sameInstantlyAddresses(email.from_address_email, contactInput!.email) &&
+                    !addressparser(email.to_address_email_list).some((recipient) =>
+                      sameInstantlyAddresses(recipient.address, contactInput!.email),
+                    ))),
         )
       )
         throw new Error("Email page does not match the requested scope");
