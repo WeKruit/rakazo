@@ -100,6 +100,19 @@ vi.mock("./computer-lifecycle.js", async (importOriginal) => ({
   provisionComputer: async () => ({ id: "computer-1", kind: "desktop" }),
 }));
 
+/** System prompt plus the required run-context history entry; volatile context rides in history now. */
+function promptContext(request: {
+  instructions?: string;
+  history?: Array<{ content: string; requiredForRun?: true }>;
+}): string {
+  return [
+    request.instructions ?? "",
+    ...(request.history ?? [])
+      .filter((entry) => entry.requiredForRun)
+      .map((entry) => entry.content),
+  ].join("\n\n");
+}
+
 const checkpointWorkspace = vi.hoisted(() => vi.fn(async () => "home-revision"));
 vi.mock("./computer-workspace.js", async (importOriginal) => ({
   ...(await importOriginal<typeof ComputerWorkspaceModule>()),
@@ -831,7 +844,7 @@ describe("explicit artifact workspace writes", () => {
     ]);
     f.runtimeRun.mockImplementation(async function* (request) {
       expect(request.prompt).not.toContain("available on your computer");
-      expect(request.instructions).toContain(`"artifactId":"${original.id}"`);
+      expect(promptContext(request)).toContain(`"artifactId":"${original.id}"`);
       const [steering] = await request.claimSteering!([]);
       expect(steering!.text).toContain(`"artifactId":"${original.id}"`);
       expect(steering!.text).not.toContain("available on your computer");
@@ -2054,7 +2067,7 @@ describe("native recruiting role effect delivery", () => {
 
     expect(executeRecruitingRoleTool).toHaveBeenCalledOnce();
     expect(loadRecruitingRunContext).toHaveBeenCalledTimes(2);
-    expect(f.runtimeRun.mock.calls[0]![0].instructions).toContain(adopted.text);
+    expect(promptContext(f.runtimeRun.mock.calls[0]![0])).toContain(adopted.text);
     expect(vi.mocked(loadRecruitingRunContext).mock.calls[1]![4].trustedWorkspace).toBeUndefined();
     expect(f.results[0]).toEqual(
       expect.objectContaining({
@@ -2119,9 +2132,9 @@ describe("native recruiting role effect delivery", () => {
     expect(loadRecruitingRunContext).toHaveBeenCalledOnce();
     expect(executeRecruitingRoleTool).not.toHaveBeenCalled();
     const request = f.runtimeRun.mock.calls[0]![0];
-    expect(request.instructions?.split(fullContext)).toHaveLength(2);
-    expect(request.instructions?.split(fact)).toHaveLength(2);
-    expect(request.instructions).toContain("Must personally implement geometry calculations");
+    expect(promptContext(request)?.split(fullContext)).toHaveLength(2);
+    expect(promptContext(request)?.split(fact)).toHaveLength(2);
+    expect(promptContext(request)).toContain("Must personally implement geometry calculations");
     expect(request.instructions).not.toContain("[object Object]");
   });
 
@@ -2148,7 +2161,7 @@ describe("native recruiting role effect delivery", () => {
 
       await f.run();
 
-      expect(f.runtimeRun.mock.calls[0]![0].instructions?.split(adopted.text)).toHaveLength(2);
+      expect(promptContext(f.runtimeRun.mock.calls[0]![0])?.split(adopted.text)).toHaveLength(2);
       expect(f.results).toEqual([
         {
           ...receipt,
@@ -2369,7 +2382,7 @@ describe("native recruiting role effect delivery", () => {
         historyText: peer.text,
       }),
     ]);
-    expect(f.runtimeRun.mock.calls[0]![0].instructions?.split(adopted.text)).toHaveLength(2);
+    expect(promptContext(f.runtimeRun.mock.calls[0]![0])?.split(adopted.text)).toHaveLength(2);
     expect(f.results).toEqual([{ ...delivered, roleContext: unchangedContextNotice }]);
   });
 
@@ -2408,7 +2421,7 @@ describe("native recruiting role effect delivery", () => {
 
     await f.run();
 
-    expect(f.runtimeRun.mock.calls[0]![0].instructions?.split(adopted.text)).toHaveLength(2);
+    expect(promptContext(f.runtimeRun.mock.calls[0]![0])?.split(adopted.text)).toHaveLength(2);
     expect(claimed[0]?.text).toContain(changed.text);
     expect(claimed[1]?.text).toContain(unchangedContextNotice);
     expect(claimed[1]?.text).not.toContain(adopted.text);
@@ -4754,9 +4767,9 @@ describe("native recruiting assessment effect delivery", () => {
       };
       f.prisma.message.findMany.mockResolvedValue([human]);
       f.runtimeRun.mockImplementation(async function* (request) {
-        expect(request.instructions).toContain('"messageId":"human-evidence-source"');
-        expect(request.instructions).toContain('"blockIndex":0');
-        expect(request.instructions).toContain(
+        expect(promptContext(request)).toContain('"messageId":"human-evidence-source"');
+        expect(promptContext(request)).toContain('"blockIndex":0');
+        expect(promptContext(request)).toContain(
           '"selection":{"kind":"message_text","blockIndex":0,"start":0,"end":21}',
         );
         expect(request.instructions).not.toContain('"text":"Exact source material"');
@@ -4827,8 +4840,8 @@ describe("native recruiting assessment effect delivery", () => {
         },
       ]);
       f.runtimeRun.mockImplementation(async function* (request) {
-        const line = request
-          .instructions!.split("\n")
+        const line = promptContext(request)
+          .split("\n")
           .find((line) => line.startsWith("Native message source reference"))!;
         expect(JSON.parse(line.slice(line.indexOf("{")))).toMatchObject({
           messageId: human.id,
@@ -4901,8 +4914,8 @@ describe("native recruiting assessment effect delivery", () => {
     f.prisma.message.findMany.mockResolvedValue([current, original]);
     f.prisma.$queryRaw.mockResolvedValue([original]);
     f.runtimeRun.mockImplementation(async function* (request) {
-      const sourceLine = request
-        .instructions!.split("\n")
+      const sourceLine = promptContext(request)
+        .split("\n")
         .find((line) => line.startsWith("Native message source reference"))!;
       expect(JSON.parse(sourceLine.slice(sourceLine.indexOf("{")))).toMatchObject({
         messageId: current.id,
@@ -5211,8 +5224,8 @@ describe("native recruiting assessment effect delivery", () => {
             expect(request.prompt).not.toContain("private-selected-value");
             expect(request.instructions).not.toContain("private-selected-value");
           }
-          const metadata = request
-            .instructions!.split("\n")
+          const metadata = promptContext(request)
+            .split("\n")
             .filter((line) => line.startsWith("Native message source reference"))
             .map((line) => JSON.parse(line.slice(line.indexOf("{"))));
           expect(metadata.map((source) => source.messageId)).toEqual(
