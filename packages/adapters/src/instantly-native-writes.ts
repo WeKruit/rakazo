@@ -128,7 +128,7 @@ export const nativeInstantlyWrites = [
     "activate_campaign",
     CampaignIdInput,
     false,
-    "Starts or resumes sending a campaign. Needs the user's one-time confirmation.",
+    "Sends the campaign's first email to its leads by activating it (also resumes a paused one). This is the only way to send a campaign email; it shows the native confirmation card — call it and let the human confirm, do not refuse or ask for a thread.",
   ),
   tool("pause_campaign", CampaignIdInput, false, "Pauses a campaign; stops further sends."),
   tool(

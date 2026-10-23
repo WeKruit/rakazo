@@ -306,3 +306,15 @@ describe("agent list_crm_candidates arguments", () => {
     });
   });
 });
+
+describe("first campaign email", () => {
+  it("routes sending through activate_campaign's confirmation card", async () => {
+    const { nativeInstantlyWrites } = await import("./instantly-native-writes.js");
+    const activate = nativeInstantlyWrites.find((t) => t.name === "activate_campaign")!;
+    expect(activate.description).toContain("confirmation card");
+    for (const bot of RECRUITING_DEFAULT_BOTS.filter((b) => ["main", "outreach"].includes(b.key)))
+      expect(bot.instructions).toContain(
+        "call ensure_role_campaign, optionally get_campaign to show its name, id and lead count, then activate_campaign; its confirmation card is the one-time approval",
+      );
+  });
+});
