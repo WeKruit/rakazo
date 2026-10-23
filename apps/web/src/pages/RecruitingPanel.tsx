@@ -3590,9 +3590,10 @@ function CrmRecruitingPanel({
       {crmHistory}
     </>
   );
+  const nestedWorkspaceHeading = Boolean(agent && bound.role && ["contacts", "shortlist"].includes(browse.view));
   return (
-    <div className="hire-standard-view">
-      <header className="hire-section-header">
+    <div className={nestedWorkspaceHeading ? "hire-standard-view hire-standard-view-native" : "hire-standard-view"}>
+      {!nestedWorkspaceHeading ? <header className="hire-section-header">
         <h1>
           {bound.title ??
             (bound.done
@@ -3601,7 +3602,7 @@ function CrmRecruitingPanel({
               : null)}
         </h1>
         {page?.selectedRole ? <p>{page.selectedRole.clientLabel}</p> : null}
-      </header>
+      </header> : null}
       {agent && !bound.done ? (
         <TabLoading />
       ) : bound.role && !["sequence", "interview"].includes(browse.view) ? (

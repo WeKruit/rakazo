@@ -215,6 +215,13 @@ body,
   }
 }
 @media (max-width: 940px) {
+  [data-product-view="recruiting"] .hire-role-chat-trigger {
+    position: static;
+    align-self: flex-end;
+    flex-shrink: 0;
+    max-width: calc(100% - 28px);
+    margin: 8px 14px 12px;
+  }
   [data-product-view="recruiting"] .hire-role-chat-open > .recruiting-workspace-main {
     margin-inline-end: 0;
   }
@@ -497,6 +504,9 @@ body,
   width: min(1200px, calc(100% - 80px));
   margin: 0 auto;
   padding: 54px 0 70px;
+}
+[data-product-view="recruiting"] .hire-standard-view-native {
+  padding-top: 16px;
 }
 [data-product-view="recruiting"] .hire-section-header {
   padding: 20px 0 27px;

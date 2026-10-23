@@ -5500,7 +5500,7 @@ export function ShellPage() {
             </div>
           </div>
         ) : null}
-        {roleChatWorkspace && !roleChatOpen ? <Button ref={roleChatTrigger} className="absolute bottom-4 end-4 z-20" aria-label={t`Open role chat`} aria-controls={roleChatId} aria-expanded={false} onClick={() => openRoleChat()}><Sparkles size={17} aria-hidden /><Trans>Chat with WeKruit</Trans></Button> : null}
+        {roleChatWorkspace && !roleChatOpen ? <Button ref={roleChatTrigger} className="hire-role-chat-trigger absolute bottom-4 end-4 z-20" aria-label={t`Open role chat`} aria-controls={roleChatId} aria-expanded={false} onClick={() => openRoleChat()}><Sparkles size={17} aria-hidden /><Trans>Chat with WeKruit</Trans></Button> : null}
         <div className={workspaceBrief ? "hire-brief-view rk-scroll" : "contents"}>
           {workspaceBrief ? (
             <div className="hire-brief-top">

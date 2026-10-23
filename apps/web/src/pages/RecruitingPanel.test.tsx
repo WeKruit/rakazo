@@ -8934,3 +8934,42 @@ it("shows Autumn's criterion states, evidence, source round and saved decision f
   expect(rows[2]!.textContent).not.toContain("Search update");
   expect(api.correspondence).not.toHaveBeenCalled();
 });
+
+it.each(["contacts", "shortlist"] as const)(
+  "uses one native heading for bound CRM %s",
+  async (tab) => {
+    api.getWorkspace.mockResolvedValue({
+      role,
+      revision,
+      crmTarget: { bindingEffectId: "binding", target: crmTarget },
+    });
+    api.crmData.mockResolvedValue({
+      operation: "candidates",
+      items: [],
+      total: 0,
+      nextOffset: null,
+      scope: "role",
+      selectedRole: null,
+    });
+    const view = await mounted("thread-1", undefined, false, undefined, {
+      groupId: "group-1",
+      roleConversation: true,
+      crmBrowse: {
+        selection: {
+          serverId: crmTarget.mcpServerId,
+          serverRevision: crmTarget.serverRevision,
+          organizationId: crmTarget.organizationId,
+          crmRoleId: crmTarget.crmRoleId,
+        },
+        view: tab,
+        onSelectCandidate: vi.fn(),
+      },
+    });
+    expect(view.container.querySelectorAll("h1")).toHaveLength(1);
+    expect(view.container.querySelector("h1")?.textContent).toBe(
+      tab === "contacts" ? "Contacts" : "Shortlist",
+    );
+    expect(view.container.textContent).toContain(role.title);
+    expect(view.container.querySelector(".hire-standard-view > .hire-section-header")).toBeNull();
+  },
+);
