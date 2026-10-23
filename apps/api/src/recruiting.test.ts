@@ -4,6 +4,7 @@ import type { ArtifactStore } from "@rakazo/adapter-kit";
 import { readInstantlyEmail } from "@rakazo/adapters";
 import type { Actor } from "@rakazo/contracts";
 import { RecruitingAssessmentSnapshotSchema } from "@rakazo/contracts";
+import { catalogApprovalRequest } from "@rakazo/core";
 import { extractPdfText } from "@rakazo/core/node/pdf-text";
 import type * as DbExports from "@rakazo/db";
 import type { PrismaClient } from "@rakazo/db";
@@ -211,6 +212,211 @@ describe("saved recruiting correspondence", () => {
     Object.assign(state.client, { recruitingCrmImport: imports });
     return { ...state, call, server, binding, sync, data, message, result, imports };
   }
+  function crmMembershipFixture() {
+    const state = crmFixture();
+    state.message.body_text = "Original legacy candidate correspondence.";
+    const membership = structuredClone(state.retained);
+    membership.id = "role-membership-read";
+    membership.updatedAt = new Date("2026-10-22T01:01:00Z");
+    const call = membership.request[2] as unknown as {
+      route: { toolName: string; resourceRevision: number };
+      args: Record<string, unknown>;
+    };
+    call.route.toolName = "list_crm_candidate_roles";
+    call.args = { p_org: email.organization_id, p_candidate: crmCandidate };
+    const row = {
+      membership_id: "6e47e057-9093-4fb9-a2d3-1cbe21be04f4",
+      organization_id: email.organization_id,
+      candidate_id: crmCandidate,
+      role_spec_id: crmTarget.crmRoleId,
+      client_id: crmTarget.crmClientId,
+      client_label: "Client",
+      role_label: "Role",
+      created_at: "2026-10-21T00:00:00Z",
+    };
+    const membershipResult = { structuredContent: { data: [row] } };
+    state.server.assignments[0]!.allowedTools.push("list_crm_candidate_roles");
+    state.imports.findFirst.mockResolvedValue(null);
+    state.client.externalEffect.findMany
+      .mockReset()
+      .mockResolvedValueOnce([membership, state.retained])
+      .mockResolvedValueOnce([
+        { id: membership.id, result: membershipResult },
+        { id: state.retained.id, result: state.result },
+      ]);
+    return { ...state, membership, membershipCall: call, membershipResult, row };
+  }
+  it.each(["direct", "catalog", "text"])(
+    "projects a legacy CRM member's full mail from a %s receipt without an Autumn import",
+    async (format) => {
+      const state = crmMembershipFixture();
+      if (format === "catalog")
+        state.membership.request = catalogApprovalRequest(
+          "mcp_execute_tool",
+          { id: "mail:list_crm_candidate_roles", arguments: state.membershipCall.args },
+          "__rakazoCatalogTool",
+          {
+            connectorId: "mcp",
+            resourceId: "mail",
+            resourceRevision: 1,
+            toolName: "list_crm_candidate_roles",
+          },
+        ) as never;
+      if (format === "text") {
+        const result = state.membershipResult as Record<string, unknown>;
+        result.content = [{ type: "text", text: JSON.stringify(result.structuredContent) }];
+        delete result.structuredContent;
+      }
+      const result = await api.getRecruitingCorrespondence(
+        state.prisma,
+        actor,
+        target,
+        "inbox",
+        crmIdentity,
+      );
+      expect(result).toMatchObject({
+        status: "ready",
+        partial: false,
+        emails: [{ body: state.message.body_text }],
+      });
+      expect(state.imports.findFirst).not.toHaveBeenCalled();
+      expect(db.getRecruitingCrmCandidateSyncs).not.toHaveBeenCalled();
+      expect(state.client.thread.findFirst).toHaveBeenCalledWith({
+        where: {
+          id: "role-thread",
+          spaceId: actor.spaceId,
+          userId: actor.userId,
+          activeRecruitingRoleId: "role",
+          activeRecruitingRole: { crmBindingEffectId: "binding" },
+        },
+        select: { id: true },
+      });
+    },
+  );
+  it.each([
+    "failed",
+    "failed-effect",
+    "malformed",
+    "empty",
+    "organization",
+    "candidate",
+    "role",
+    "client",
+    "membership-id",
+    "permission",
+    "revision",
+  ])(
+    "does not revive older membership or import evidence after the latest CRM membership %s",
+    async (boundary) => {
+      const state = crmMembershipFixture();
+      const old = structuredClone(state.membership);
+      old.id = "older-membership";
+      old.updatedAt = new Date("2026-10-21T00:00:00Z");
+      const oldResult = structuredClone(state.membershipResult);
+      if (boundary === "failed") Object.assign(state.membershipResult, { isError: true });
+      if (boundary === "failed-effect") state.membership.status = "failed";
+      if (boundary === "malformed")
+        Object.assign(state.membershipResult, { structuredContent: { data: {} } });
+      if (boundary === "empty") state.membershipResult.structuredContent.data = [];
+      if (boundary === "organization") state.row.organization_id = crmCandidate;
+      if (boundary === "candidate") state.row.candidate_id = email.organization_id;
+      if (boundary === "role") state.row.role_spec_id = email.organization_id;
+      if (boundary === "client") state.row.client_id = email.organization_id;
+      if (boundary === "membership-id") state.row.membership_id = "not-a-membership-id";
+      if (boundary === "permission")
+        state.server.assignments[0]!.allowedTools = [state.call.route.toolName];
+      if (boundary === "revision") state.membershipCall.route.resourceRevision = 2;
+      state.imports.findFirst.mockResolvedValue({ effectId: "import" });
+      state.client.externalEffect.findMany
+        .mockReset()
+        .mockResolvedValueOnce([state.membership, state.retained, old])
+        .mockResolvedValueOnce([
+          { id: state.membership.id, result: state.membershipResult },
+          { id: state.retained.id, result: state.result },
+          { id: old.id, result: oldResult },
+        ]);
+      const result = await api.getRecruitingCorrespondence(
+        state.prisma,
+        actor,
+        target,
+        "inbox",
+        crmIdentity,
+      );
+      expect(result.emails).toEqual([]);
+      expect(JSON.stringify(result)).not.toContain(state.message.body_text);
+      expect(state.imports.findFirst).not.toHaveBeenCalled();
+      expect(db.getRecruitingCrmCandidateSyncs).not.toHaveBeenCalled();
+    },
+  );
+  it.each(["valid", "revision", "missing-subject"])(
+    "does not count a %s membership-only read as a checked Inbox or mail permission",
+    async (proof) => {
+      const state = crmMembershipFixture();
+      state.server.assignments[0]!.allowedTools = ["list_crm_candidate_roles"];
+      if (proof === "revision") state.membershipCall.route.resourceRevision = 2;
+      if (proof === "missing-subject") delete state.membershipCall.args.p_candidate;
+      state.client.externalEffect.findMany
+        .mockReset()
+        .mockResolvedValueOnce([state.membership])
+        .mockResolvedValueOnce([{ id: state.membership.id, result: state.membershipResult }]);
+      const result = await api.getRecruitingCorrespondence(
+        state.prisma,
+        actor,
+        target,
+        "inbox",
+        crmIdentity,
+      );
+      expect(result).toMatchObject({
+        status: "not_checked",
+        checkedAt: null,
+        emails: [],
+        connections: [{ status: "needs_access", checkIssue: null }],
+      });
+      expect(db.getRecruitingCrmTarget).not.toHaveBeenCalled();
+    },
+  );
+  it.each(["missing", "exact"])(
+    "keeps %s membership evidence honest when retained CRM history is truncated",
+    async (proof) => {
+      const state = crmMembershipFixture();
+      const others = Array.from({ length: proof === "exact" ? 198 : 199 }, (_, index) => {
+        const read = structuredClone(state.membership);
+        read.id = `other-membership-${index}`;
+        (read.request[2] as unknown as { args: Record<string, unknown> }).args.p_candidate =
+          `00000000-0000-4000-8000-${String(index).padStart(12, "0")}`;
+        return read;
+      });
+      const negative = structuredClone(state.membership);
+      negative.id = "last-membership-observation";
+      negative.updatedAt = new Date("2026-10-21T00:00:00Z");
+      state.imports.findFirst.mockResolvedValue({ effectId: "import" });
+      state.client.externalEffect.findMany
+        .mockReset()
+        .mockResolvedValueOnce([
+          state.retained,
+          ...(proof === "exact" ? [state.membership] : []),
+          ...others,
+          negative,
+        ])
+        .mockResolvedValueOnce([
+          { id: state.retained.id, result: state.result },
+          { id: state.membership.id, result: state.membershipResult },
+          { id: negative.id, result: { structuredContent: { data: [] } } },
+        ]);
+      const result = await api.getRecruitingCorrespondence(
+        state.prisma,
+        actor,
+        target,
+        "inbox",
+        crmIdentity,
+      );
+      expect(result.status).toBe(proof === "exact" ? "ready" : "unsupported");
+      expect(result.partial).toBe(true);
+      expect(result.emails).toHaveLength(proof === "exact" ? 1 : 0);
+      expect(state.imports.findFirst).not.toHaveBeenCalled();
+      expect(db.getRecruitingCrmCandidateSyncs).not.toHaveBeenCalled();
+    },
+  );
   it("projects CRM full stored bodies using the historical run's current binding and exact verified candidate import", async () => {
     const state = crmFixture();
     const result = await api.getRecruitingCorrespondence(
@@ -580,7 +786,7 @@ describe("saved recruiting correspondence", () => {
     const { prisma } = fixture({
       result: { structuredContent: { items: [row], next_starting_after: null } },
     });
-    expect(readInstantlyEmail(row)).toBeNull();
+    expect(readInstantlyEmail(row)).toEqual(row);
     const result = await api.getRecruitingCorrespondence(prisma, actor, target, "inbox");
     expect(result).toMatchObject({
       status: "ready",
