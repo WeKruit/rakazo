@@ -58,7 +58,7 @@ export async function pollRecruitingResearch(
       createdByRun: { select: { spaceId: true, userId: true, botId: true, threadId: true } },
     },
   });
-  if (!task || task.state !== "active" || !task.providerTaskId) return;
+  if (task?.state !== "active" || !task.providerTaskId) return;
   const { role, createdByRun: run } = task;
   // The task's role and creating run must agree on one owner; otherwise it is nobody's to wake.
   if (role.spaceId !== run.spaceId || role.userId !== run.userId) return;
