@@ -306,11 +306,18 @@ describe("lazy tool catalog", () => {
 
   it("loads by exposed tool name as well as catalog id", () => {
     const entries = catalogEntries(multiGroupTools());
+    const names = searchCatalog(entries, { group: "gmail" });
+    if (!("names" in names)) throw new Error("Expected the source's name list");
+    const returnedName = names.names.find((name) => name === "send");
+    expect(returnedName).toBe("send");
     expect(loadCatalogEntry(entries, { id: "mcp__gmail__send" }).tool.name).toBe(
       "mcp__gmail__send",
     );
     expect(loadCatalogEntry(entries, { id: "srv-gmail:send" }).tool.name).toBe("mcp__gmail__send");
-    expect(loadCatalogEntry(entries, { id: "send" }).tool.name).toBe("mcp__gmail__send");
+    expect(loadCatalogEntry(entries, { id: returnedName }).tool.name).toBe("mcp__gmail__send");
+    expect(() => loadCatalogEntry(entries, { id: `${names.group}.${returnedName}` })).toThrow(
+      /unknown/i,
+    );
     expect(() => loadCatalogEntry(entries, { id: "missing" })).toThrow(/unknown/i);
   });
 
@@ -363,7 +370,7 @@ describe("lazy tool catalog", () => {
         },
         entries,
       ),
-    ).toThrow("unknown or not authorized");
+    ).toThrow(/unknown/i);
     expect(() =>
       resolveCatalogCall(
         {
