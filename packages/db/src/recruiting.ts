@@ -7454,7 +7454,7 @@ function candidateIndexQuery(
     includeMatches
       ? Prisma.sql`rank_scope AS MATERIALIZED (
     SELECT ${
-      sort === "score" && displayScope?.sourceEffectId === undefined
+      displayScope?.sourceEffectId === undefined
         ? Prisma.sql`COALESCE((
         -- Scores compare within the newest saved result that carries them, so a later result
         -- without scores (a re-check, a contact lookup) does not hide the role's scores.
@@ -7471,7 +7471,7 @@ function candidateIndexQuery(
           SELECT "effectId" FROM "recruiting_candidate_pages" page WHERE "roleId" = ${roleId} ${sourceScope} LIMIT 2
         ) rank_pages)`
         : Prisma.sql`${rankDomainPageId}::text`
-    }${sort === "score" && displayScope?.sourceEffectId === undefined ? Prisma.sql`)` : Prisma.empty} AS "pageId"
+    }${displayScope?.sourceEffectId === undefined ? Prisma.sql`)` : Prisma.empty} AS "pageId"
   ),`
       : Prisma.empty
   } base AS (
@@ -9829,8 +9829,10 @@ export async function listRecruitingCandidates(
       const matchSort = sort === "rank" || sort === "tier" || sort === "score";
       const limit = input.limit ?? 25;
       const explicitSource = input.sourceEffectId !== undefined || input.actionId !== undefined;
-      let rankDomainPageId = sort === "rank" || sort === "score" ? input.sourceEffectId : undefined;
-      if ((sort === "rank" || sort === "score") && rankDomainPageId === undefined) {
+      // Every sort reads the same domain, so availability does not depend on the current sort
+      // (a list sorted by name still reports that scores can sort it).
+      let rankDomainPageId = input.sourceEffectId;
+      if (rankDomainPageId === undefined) {
         const pages = await tx.recruitingCandidatePage.findMany({
           where: {
             roleId: role.id,

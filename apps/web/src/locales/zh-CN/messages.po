@@ -830,8 +830,7 @@ msgstr ""
 msgid "Available after the routine is saved"
 msgstr "保存例行任务后可用"
 
-#: src/pages/recruiting/InterviewTab.tsx
-#: src/pages/RecruitingCorrespondence.tsx
+#: src/pages/recruiting/AvailabilityRanges.tsx
 msgid "Available time"
 msgstr ""
 
@@ -1519,6 +1518,10 @@ msgstr "由部署配置"
 msgid "Configured servers"
 msgstr "已配置的服务器"
 
+#: src/components/AskCard.tsx
+msgid "Confirm and send"
+msgstr "确认发送"
+
 #: src/pages/RecruitingPanel.tsx
 msgid "Confirm brief"
 msgstr ""
@@ -2111,8 +2114,8 @@ msgid "Could not read a CRM connection."
 msgstr ""
 
 #: src/pages/recruiting/SequenceTab.tsx
-msgid "Could not read this campaign from Instantly."
-msgstr ""
+msgid "Could not read this campaign."
+msgstr "无法读取这个活动。"
 
 #: src/pages/RecruitingCorrespondence.tsx
 msgid "Could not read this sequence."
@@ -2801,6 +2804,10 @@ msgstr "该邮箱不允许注册"
 #: src/pages/RecruitingCorrespondence.tsx
 msgid "Email missing"
 msgstr ""
+
+#: src/pages/RecruitingPanel.tsx
+msgid "Email reply"
+msgstr "邮件回复"
 
 #: src/lib/user-error.ts
 msgid "Email verification required"
@@ -5524,6 +5531,10 @@ msgstr "返回 WeKruit Headhunter"
 msgid "rev {0}"
 msgstr "版本 {0}"
 
+#: src/components/AskCard.tsx
+msgid "Review before sending the first campaign email"
+msgstr "发送第一封活动邮件前请确认"
+
 #: src/pages/RecruitingCorrespondence.tsx
 msgid "Review in conversation"
 msgstr ""
@@ -6473,8 +6484,8 @@ msgid "Stop considering"
 msgstr ""
 
 #: src/pages/recruiting/SequenceTab.tsx
-msgid "Stop on reply is off, so Instantly keeps sending follow-ups after a candidate replies."
-msgstr ""
+msgid "Stop on reply is off, so follow-ups keep going after a candidate replies."
+msgstr "“回复即停止”已关闭，候选人回复后仍会继续发送跟进邮件。"
 
 #: src/pages/Shell.tsx
 msgid "Stop speaking"

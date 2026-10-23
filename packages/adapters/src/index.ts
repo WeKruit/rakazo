@@ -74,7 +74,12 @@ export * from "./home.js";
 export * from "./host-aware-sandbox.js";
 export * from "./infisical-secret-store.js";
 export * from "./installed-connectors.js";
-export { lastUsedMailbox } from "./instantly-native-writes.js";
+export {
+  describeCampaignActivation,
+  EMPTY_ACTIVATION_DISPLAY,
+  lastUsedMailbox,
+  readRoleCampaignBinding,
+} from "./instantly-native-writes.js";
 export { classifyInstantlyReplyReceipt, readInstantlyEmail } from "./instantly-reply.js";
 export * from "./integration-provider-settings.js";
 export * from "./jev-auto-review.js";

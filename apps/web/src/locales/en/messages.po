@@ -830,8 +830,7 @@ msgstr "Available"
 msgid "Available after the routine is saved"
 msgstr "Available after the routine is saved"
 
-#: src/pages/recruiting/InterviewTab.tsx
-#: src/pages/RecruitingCorrespondence.tsx
+#: src/pages/recruiting/AvailabilityRanges.tsx
 msgid "Available time"
 msgstr "Available time"
 
@@ -1519,6 +1518,10 @@ msgstr "Configured by deployment"
 msgid "Configured servers"
 msgstr "Configured servers"
 
+#: src/components/AskCard.tsx
+msgid "Confirm and send"
+msgstr "Confirm and send"
+
 #: src/pages/RecruitingPanel.tsx
 msgid "Confirm brief"
 msgstr "Confirm brief"
@@ -2111,8 +2114,8 @@ msgid "Could not read a CRM connection."
 msgstr "Could not read a CRM connection."
 
 #: src/pages/recruiting/SequenceTab.tsx
-msgid "Could not read this campaign from Instantly."
-msgstr "Could not read this campaign from Instantly."
+msgid "Could not read this campaign."
+msgstr "Could not read this campaign."
 
 #: src/pages/RecruitingCorrespondence.tsx
 msgid "Could not read this sequence."
@@ -2801,6 +2804,10 @@ msgstr "Email is not allowed to register"
 #: src/pages/RecruitingCorrespondence.tsx
 msgid "Email missing"
 msgstr "Email missing"
+
+#: src/pages/RecruitingPanel.tsx
+msgid "Email reply"
+msgstr "Email reply"
 
 #: src/lib/user-error.ts
 msgid "Email verification required"
@@ -5524,6 +5531,10 @@ msgstr "Return to WeKruit Headhunter"
 msgid "rev {0}"
 msgstr "rev {0}"
 
+#: src/components/AskCard.tsx
+msgid "Review before sending the first campaign email"
+msgstr "Review before sending the first campaign email"
+
 #: src/pages/RecruitingCorrespondence.tsx
 msgid "Review in conversation"
 msgstr "Review in conversation"
@@ -6473,8 +6484,8 @@ msgid "Stop considering"
 msgstr "Stop considering"
 
 #: src/pages/recruiting/SequenceTab.tsx
-msgid "Stop on reply is off, so Instantly keeps sending follow-ups after a candidate replies."
-msgstr "Stop on reply is off, so Instantly keeps sending follow-ups after a candidate replies."
+msgid "Stop on reply is off, so follow-ups keep going after a candidate replies."
+msgstr "Stop on reply is off, so follow-ups keep going after a candidate replies."
 
 #: src/pages/Shell.tsx
 msgid "Stop speaking"

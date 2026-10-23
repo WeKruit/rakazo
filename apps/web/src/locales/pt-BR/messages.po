@@ -830,8 +830,7 @@ msgstr ""
 msgid "Available after the routine is saved"
 msgstr ""
 
-#: src/pages/recruiting/InterviewTab.tsx
-#: src/pages/RecruitingCorrespondence.tsx
+#: src/pages/recruiting/AvailabilityRanges.tsx
 msgid "Available time"
 msgstr ""
 
@@ -1519,6 +1518,10 @@ msgstr "Configurado por implantação"
 msgid "Configured servers"
 msgstr "Servidores configurados"
 
+#: src/components/AskCard.tsx
+msgid "Confirm and send"
+msgstr ""
+
 #: src/pages/RecruitingPanel.tsx
 msgid "Confirm brief"
 msgstr ""
@@ -2111,7 +2114,7 @@ msgid "Could not read a CRM connection."
 msgstr ""
 
 #: src/pages/recruiting/SequenceTab.tsx
-msgid "Could not read this campaign from Instantly."
+msgid "Could not read this campaign."
 msgstr ""
 
 #: src/pages/RecruitingCorrespondence.tsx
@@ -2800,6 +2803,10 @@ msgstr "Este e-mail não tem permissão para se cadastrar"
 
 #: src/pages/RecruitingCorrespondence.tsx
 msgid "Email missing"
+msgstr ""
+
+#: src/pages/RecruitingPanel.tsx
+msgid "Email reply"
 msgstr ""
 
 #: src/lib/user-error.ts
@@ -5524,6 +5531,10 @@ msgstr "Retorno a WeKruit Headhunter"
 msgid "rev {0}"
 msgstr "rev {0}"
 
+#: src/components/AskCard.tsx
+msgid "Review before sending the first campaign email"
+msgstr ""
+
 #: src/pages/RecruitingCorrespondence.tsx
 msgid "Review in conversation"
 msgstr ""
@@ -6473,7 +6484,7 @@ msgid "Stop considering"
 msgstr ""
 
 #: src/pages/recruiting/SequenceTab.tsx
-msgid "Stop on reply is off, so Instantly keeps sending follow-ups after a candidate replies."
+msgid "Stop on reply is off, so follow-ups keep going after a candidate replies."
 msgstr ""
 
 #: src/pages/Shell.tsx

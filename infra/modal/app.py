@@ -63,6 +63,8 @@ image = (
         "pnpm --filter @rakazo/db generate",
         "pnpm --filter @rakazo/web check",
         "RAKAZO_ALLOW_DEV_SECRETS=1 pnpm --filter @rakazo/web build",
+        # Precompiled API/worker entrypoints: cold start runs JavaScript, not tsx.
+        "node scripts/bundle-server.mjs api worker",
     )
     .run_commands(
         "python -c \"import urllib.request; urllib.request.urlretrieve("
@@ -86,7 +88,8 @@ image = (
     max_containers=1,  # ponytail: one native DATA_DIR writer; scale only with a shared store.
     max_concurrency=128,
     nonpreemptible=True,
-    cpu=(0.125, 0.5),
+    # Request is the idle reservation; the limit lets the cold start burst.
+    cpu=(0.125, 4.0),
     memory=(2048, 4096),
     startup_timeout=180,
     exit_grace_period=10,
@@ -112,12 +115,12 @@ class Recruiting:
         }
         # Same migration-before-API order as the upstream Compose entrypoint.
         subprocess.run(
-            ["pnpm", "--filter", "@rakazo/db", "exec", "prisma", "migrate", "deploy"],
-            cwd="/app", env=env, timeout=120, check=True,
+            ["node_modules/.bin/prisma", "migrate", "deploy"],
+            cwd="/app/packages/db", env=env, timeout=120, check=True,
         )
         services = [
-            ("api", ["node", "--import", "tsx", "src/index.ts"]),
-            ("worker", ["node", "--import", "tsx", "src/index.ts"]),
+            ("api", ["node", "--enable-source-maps", "dist/index.mjs"]),
+            ("worker", ["node", "--enable-source-maps", "dist/index.mjs"]),
             ("web", ["node", "node_modules/vite/bin/vite.js", "preview"]),
         ]
         for package, command in services:

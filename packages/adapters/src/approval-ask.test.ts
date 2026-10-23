@@ -463,6 +463,60 @@ describe("buildApprovalAskBlock", () => {
     expect(args.token).toBe("token-secret");
   });
 
+  it("shows live campaign facts on the Instantly activation card", () => {
+    const block = buildApprovalAskBlock(
+      "activate-effect",
+      "instantly__demo__activate_campaign",
+      { campaign_id: "c-1" },
+      [],
+      {
+        oneTimeOnly: true,
+        instantlyActivation: {
+          campaignName: "Founding Engineer",
+          status: "Draft",
+          mailbox: "team@example.test",
+          recipients: [
+            { name: "Ada Lovelace", email: "ada@example.test" },
+            { name: null, email: "bob@example.test" },
+          ],
+          recipientCount: 2,
+          stopOnReply: true,
+          schedule: "Weekdays 09:00-17:00 America/Chicago",
+        },
+      },
+    );
+    expect(block.text).toBe("Review before sending the first campaign email");
+    expect(block.detail).toBe(
+      [
+        "Campaign: Founding Engineer",
+        "Sender: team@example.test",
+        "Recipients (2):",
+        "- Ada Lovelace <ada@example.test>",
+        "- bob@example.test",
+        "Send window: Weekdays 09:00-17:00 America/Chicago",
+        "Stop on reply: on",
+        "",
+        "Confirm sending the first email to these recipients",
+      ].join("\n"),
+    );
+    expect(block.detail).not.toContain("c-1");
+    expect(block.actions?.map((action) => action.id)).toEqual(["allow", "deny"]);
+    const pending = buildApprovalAskBlock("e", "instantly__demo__activate_campaign", {}, [], {
+      oneTimeOnly: true,
+      instantlyActivation: {
+        campaignName: null,
+        status: null,
+        mailbox: "team@example.test",
+        recipients: [],
+        recipientCount: null,
+        stopOnReply: null,
+        schedule: null,
+      },
+    });
+    expect(pending.detail).toContain("Campaign: created for this role on approval");
+    expect(pending.detail).toContain("Recipients (unknown):");
+  });
+
   it("redacts known secrets before changing the tool name's case and underscores", () => {
     const block = buildApprovalAskBlock(
       "synthetic-effect",
