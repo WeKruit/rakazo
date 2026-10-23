@@ -3964,6 +3964,34 @@ describe("live CRM browser reads", () => {
       expect(overlapped).toBe(true);
     },
   );
+  it("reuses CRM authorization checks only between provider reads and reads memberships once per request", async () => {
+    const f = browserFixture();
+    f.results.get_crm_candidate_review = details();
+    const input = { operation: "candidateDetails" as const, ...pinned, candidateId };
+    const counts = () => ({
+      membership: f.mockPrisma.$queryRaw.mock.calls.length,
+      reauthorize: f.reauthorize.mock.calls.length,
+      server: f.mockPrisma.mcpServer.findFirst.mock.calls.length,
+      assignment: f.mockPrisma.botMcpServer.findFirst.mock.calls.length,
+      memberships: f.execute.mock.calls.filter(
+        ([call]) => call.route?.toolName === "list_crm_memberships",
+      ).length,
+    });
+    await api.getRecruitingCrmData(f.deps, actor, target, input);
+    // Three provider reads (memberships, outbox, review): one entry check plus one fresh check
+    // after each read; the back-to-back fences before reads and before return reuse them.
+    // Unmemoized this request ran 8 actor and 7 grant checks.
+    const once = { membership: 4, reauthorize: 4, server: 4, assignment: 3, memberships: 1 };
+    expect(counts()).toEqual(once);
+    await api.getRecruitingCrmData(f.deps, actor, target, input);
+    expect(counts()).toEqual(
+      Object.fromEntries(Object.entries(once).map(([key, value]) => [key, value * 2])),
+    );
+    f.assignment.allowedTools = [];
+    await expect(api.getRecruitingCrmData(f.deps, actor, target, input)).rejects.toMatchObject({
+      code: "NOT_FOUND",
+    });
+  });
   it("freshly reads one exact canonical role for native conversation creation without scanning candidates or the role catalog", async () => {
     const f = browserFixture("existing-personal-oauth");
     const reference = {

@@ -90,7 +90,9 @@ import {
 import { rpc } from "../lib/rpc";
 import { CorrespondenceEmails } from "./RecruitingCorrespondence";
 import type { RecruitingInboxEmail, RecruitingTabProps } from "./recruiting";
-import { ContactsTab, InboxTab, InterviewTab, SequenceTab } from "./recruiting";
+import { ContactsTab, InboxWithReply, InterviewTab, SequenceTab } from "./recruiting";
+import type { RecruitingDetailPerson } from "./recruiting/detail";
+import { useRecruitingDetail } from "./recruiting/detail";
 import { TabLoading, tabCacheSlot, useKeyedRead } from "./recruiting/shared";
 import type { RecruitingWorkspaceView } from "./shell/RecruitingNavigation";
 
@@ -2343,23 +2345,13 @@ function CorrespondenceTabMount({
   loading: boolean;
   fallback: ReactNode;
 }) {
-  const [email, setEmail] = useState<RecruitingInboxEmail>();
   if (!role && loading) return <TabLoading />;
   if (!role) return <>{fallback}</>;
   const props = { ...role, conversation, refreshSignal };
   if (view === "contacts") return <ContactsTab {...props} />;
   if (view === "sequence") return <SequenceTab {...props} />;
   if (view === "interview") return <InterviewTab {...props} />;
-  return (
-    <>
-      {onDraftReply && email ? (
-        <Button variant="outline" className="mb-4" onClick={() => onDraftReply(email)}>
-          <Trans>Draft reply</Trans>
-        </Button>
-      ) : null}
-      <InboxTab {...props} onSelectEmail={setEmail} />
-    </>
-  );
+  return <InboxWithReply {...props} onDraftReply={onDraftReply} />;
 }
 
 type BoundRole = {
@@ -2867,7 +2859,17 @@ function CrmRecruitingPanel({
     });
     return () => window.cancelAnimationFrame(frame);
   }, [browse.candidateId, browse.view, contactKey, contactReady, revealContact]);
-  function selectContact(id: string, view?: RecruitingWorkspaceView) {
+  const detail = useRecruitingDetail();
+  function selectContact(
+    id: string,
+    view?: RecruitingWorkspaceView,
+    person?: RecruitingDetailPerson,
+  ) {
+    // A role with its own workbench opens the person beside the page instead of switching tabs.
+    if (detail && boundRole && person && (!view || view === "inbox")) {
+      detail.open({ view: "thread", person, role: { ...boundRole, conversation: target } });
+      return;
+    }
     if (browse.view === (view ?? "inbox") && browse.candidateId === id && contactReady)
       revealContact();
     if (view) browse.onSelectCandidate(id, view);
@@ -3015,7 +3017,10 @@ function CrmRecruitingPanel({
                           {new Date(person.statusChangedAt ?? person.updatedAt).toLocaleString()}
                         </td>
                         <td>
-                          <Button variant="link" onClick={() => selectContact(person.candidateId)}>
+                          <Button
+                            variant="link"
+                            onClick={() => selectContact(person.candidateId, undefined, person)}
+                          >
                             <Trans>View messages</Trans>
                           </Button>
                         </td>
@@ -3248,7 +3253,7 @@ function CrmRecruitingPanel({
                           onClick={() =>
                             browse.view === "feedback" || browse.view === "sequence"
                               ? selectContact(person.candidateId, browse.view)
-                              : selectContact(person.candidateId)
+                              : selectContact(person.candidateId, undefined, person)
                           }
                         >
                           {browse.view === "feedback" || browse.view === "sequence" ? (

@@ -1024,6 +1024,20 @@ export const RecruitingRoleToolInputSchema = z.discriminatedUnion("operation", [
     preferences: RoleToolDefinition.preferences.optional(),
     definitionQuestions: RoleToolDefinition.definitionQuestions.optional(),
   }),
+  // Reversible hide: sets/clears archivedAt without a new revision. Non-empty roles need force.
+  z.strictObject({
+    operation: z.literal("archive"),
+    roleId: RecruitingId,
+    expectedRevision: Revision,
+    intent: RecruitingHumanIntentSchema,
+    force: z.boolean().optional(),
+  }),
+  z.strictObject({
+    operation: z.literal("unarchive"),
+    roleId: RecruitingId,
+    expectedRevision: Revision,
+    intent: RecruitingHumanIntentSchema,
+  }),
   z.strictObject({
     operation: z.literal("bind"),
     roleId: RecruitingId.nullable(),

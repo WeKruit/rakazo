@@ -876,38 +876,51 @@ it("opens an editable CRM reply draft without sending or crossing a changed cand
           ],
           nextCursor: null,
         }
-      : {
-          operation: "candidates",
-          source,
-          checkedAt: "2026-10-22T00:00:00Z",
-          scope: "legacy_role_labels",
-          selectedRole: {
+      : input.operation === "roleMail"
+        ? {
+            operation: "roleMail",
+            source,
+            checkedAt: "2026-10-22T00:00:00Z",
+            scope: "stored_role_correspondence",
             crmRoleId: "crm-role",
-            clientId: "client-1",
-            clientLabel: "Example client",
-            roleLabel: "Existing role",
-            summary: null,
-          },
-          items: [
-            {
-              candidateId: "crm-person",
-              name: "Synthetic Avery",
-              email: "avery@example.test",
-              phone: null,
-              linkedinUrl: null,
-              title: "Engineer",
-              location: null,
-              stage: null,
-              contactStatus: "replied",
-              outreachStatus: "replied",
+            supported: false,
+            items: [],
+            offset: 0,
+            nextOffset: null,
+          }
+        : {
+            operation: "candidates",
+            source,
+            checkedAt: "2026-10-22T00:00:00Z",
+            scope: "legacy_role_labels",
+            selectedRole: {
+              crmRoleId: "crm-role",
+              clientId: "client-1",
+              clientLabel: "Example client",
+              roleLabel: "Existing role",
+              summary: null,
             },
-          ],
-          total: 1,
-          offset: 0,
-          nextOffset: null,
-        },
+            items: [
+              {
+                candidateId: "crm-person",
+                name: "Synthetic Avery",
+                email: "avery@example.test",
+                phone: null,
+                linkedinUrl: null,
+                title: "Engineer",
+                location: null,
+                stage: null,
+                contactStatus: "replied",
+                outreachStatus: "replied",
+              },
+            ],
+            total: 1,
+            offset: 0,
+            nextOffset: null,
+          },
   );
-  const path = "/app/g/group-1?view=inbox&crmCandidate=crm-person";
+  // The Inbox tab selects the person itself; the URL carries no candidate.
+  const path = "/app/g/group-1?view=inbox";
   const view = await renderFeedbackShell("group", undefined, {
     isDeploymentOwner: false,
     openFeedback: false,
@@ -1107,6 +1120,39 @@ it("does not map a failed or late role binding into the current role", async () 
     shellApi.recruiting.crmData.mock.calls.every(([input]) => input.operation === "memberships"),
   ).toBe(true);
   expect(container?.textContent).not.toContain("Stored CRM history");
+});
+
+it("re-reads the CRM workbench once for a burst of reconnects that missed no events", async () => {
+  let stream!: Parameters<typeof CoreModule.runThreadSubscription>[0];
+  vi.spyOn(CoreModule, "runThreadSubscription").mockImplementation(async (options) => {
+    await options.loadInitial();
+    stream = options;
+  });
+  const source = { serverId: "crm-source", serverRevision: 2, name: "CRM", status: "ready" };
+  shellApi.recruiting.crmData.mockImplementation(async (input) =>
+    input.operation === "memberships"
+      ? {
+          operation: "memberships",
+          checkedAt: "2026-10-22T00:00:00Z",
+          sources: [
+            { ...source, memberships: [{ organizationId: "org-1", name: "Org", role: "member" }] },
+          ],
+        }
+      : {
+          operation: "roles",
+          source: { ...source, organizationId: "org-1" },
+          checkedAt: "2026-10-22T00:00:00Z",
+          items: [],
+        },
+  );
+  await renderFeedbackShell("group", undefined, { isDeploymentOwner: false, openFeedback: false });
+  const initialReads = shellApi.recruiting.crmData.mock.calls.length;
+  for (let reconnect = 0; reconnect < 20; reconnect++)
+    await act(async () => {
+      await stream.refresh();
+    });
+  // The first reconnect may retry once; the other 19 missed nothing and stay quiet.
+  expect(shellApi.recruiting.crmData.mock.calls.length - initialReads).toBeLessThanOrEqual(2);
 });
 
 it("keeps the role list through a thread resync and drops a response for a previous Space", async () => {

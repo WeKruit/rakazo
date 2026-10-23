@@ -70,7 +70,8 @@ vi.mock("./recruiting", () => {
   return {
     ContactsTab: tab("contacts"),
     SequenceTab: tab("sequence"),
-    InboxTab: ({ onSelectEmail: _, ...props }: { onSelectEmail?: unknown }) => tab("inbox")(props),
+    InboxWithReply: ({ onDraftReply: _, ...props }: { onDraftReply?: unknown }) =>
+      tab("inbox")(props),
     InterviewTab: tab("interview"),
   };
 });

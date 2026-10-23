@@ -10,6 +10,8 @@ import {
   connectorToolRequiresApproval,
   EXTERNAL_TEXT_TRIGGER_REFUSAL,
   externalTextTriggerToolRefusal,
+  INSTANTLY_MCP_ENDPOINT,
+  internalMcpWriteEndpoint,
   isApprovalAskBlock,
   isSecretAskBlock,
   planActionGate,
@@ -19,6 +21,27 @@ import {
   toolRequiresExplicitApproval,
   unattendedTriggerToolRequiresApproval,
 } from "./action-approval.js";
+
+describe("internalMcpWriteEndpoint", () => {
+  it("treats Instantly writes that never send as internal, and keeps activation confirmed", () => {
+    for (const name of [
+      "native_instantly_create_campaign",
+      "native_instantly_ensure_role_campaign",
+      "native_instantly_add_leads",
+      "native_instantly_add_shortlist_leads",
+      "native_instantly_update_lead_interest",
+      "native_instantly_pause_campaign",
+    ])
+      expect(internalMcpWriteEndpoint(name)).toBe(INSTANTLY_MCP_ENDPOINT);
+    expect(internalMcpWriteEndpoint("native_instantly_activate_campaign")).toBeUndefined();
+    expect(
+      toolRequiresExplicitApproval("activate", {
+        connectorId: "mcp",
+        toolName: "native_instantly_activate_campaign",
+      }),
+    ).toBe(true);
+  });
+});
 
 describe("toolRequiresApproval", () => {
   it("keeps native internal CRM storage outside mandatory human approval", () => {

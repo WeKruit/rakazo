@@ -1,5 +1,7 @@
 import { Trans, useLingui } from "@lingui/react/macro";
 import type { RecruitingCorrespondence } from "@rakazo/contracts";
+import { Button } from "@rakazo/ui-web";
+import { useRecruitingDetail } from "./detail";
 import type { RecruitingTabProps } from "./shared";
 import {
   CrmGate,
@@ -44,6 +46,7 @@ function SavedEmails({ lookups }: { lookups: readonly SavedContact[] }) {
 /** The role's CRM contacts with pipeline stage, contact fields and email status. */
 export function ContactsTab(props: RecruitingTabProps) {
   const { t } = useLingui();
+  const detail = useRecruitingDetail();
   const crm = useRoleCrm(props);
   const people = useCrmPages(
     crm,
@@ -107,7 +110,27 @@ export function ContactsTab(props: RecruitingTabProps) {
                 return (
                   <tr key={person.candidateId}>
                     <th scope="row">
-                      {person.name}
+                      {detail ? (
+                        <Button
+                          variant="link"
+                          className="h-auto p-0"
+                          onClick={() =>
+                            detail.open({
+                              view: "contact",
+                              person,
+                              role: {
+                                roleId: props.roleId,
+                                spaceId: props.spaceId,
+                                conversation: props.conversation,
+                              },
+                            })
+                          }
+                        >
+                          {person.name}
+                        </Button>
+                      ) : (
+                        person.name
+                      )}
                       {key && person.linkedinUrl ? (
                         <a
                           className="block text-xs underline"

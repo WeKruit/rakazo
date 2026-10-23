@@ -51,6 +51,7 @@ function fixture() {
   };
   const tx = {
     $queryRaw: vi.fn(async (_query: unknown) => [] as unknown[]),
+    $executeRaw: vi.fn(async (_query: unknown) => 0),
     recruitingRole: { findFirst: vi.fn(async () => role) },
     thread: {
       findFirst: vi.fn(async () => ({
@@ -69,10 +70,12 @@ function fixture() {
       findMany: vi.fn(async (_query: unknown) => [] as { effectId: string }[]),
     },
   };
+  const backfill = vi.fn(async (_query: unknown) => 0);
   const prisma = {
     $transaction: vi.fn(async (fn: (db: typeof tx) => Promise<unknown>) => fn(tx)),
+    $executeRaw: backfill,
   } as unknown as PrismaClient;
-  return { prisma, tx, role, candidate };
+  return { prisma, tx, role, candidate, backfill };
 }
 
 function candidateProjectionRows(
@@ -119,8 +122,43 @@ describe("candidate listing and shortlist boundaries", () => {
     });
     expect(f.tx.$queryRaw).toHaveBeenCalledOnce();
     const statement = f.tx.$queryRaw.mock.calls[0]![0] as { sql: string };
-    expect(statement.sql.match(/match_rows AS MATERIALIZED/g)).toHaveLength(1);
+    // Match fields come from the stored occurrence column; saved pages are not re-parsed per
+    // page request (only a not-yet-backfilled occurrence parses its own row).
+    expect(statement.sql).not.toContain("match_rows");
+    expect(statement.sql).not.toContain("WITH ORDINALITY");
+    expect(statement.sql).toContain('COALESCE(o."matchFields", (');
+    expect(statement.sql).toContain('o."matchFields" IS NULL) AS "matchBackfill"');
     expect(statement.sql).toContain("totals LEFT JOIN candidate_page ON true");
+    expect(f.backfill).not.toHaveBeenCalled();
+  });
+  it("backfills stored match fields once, after the authorized read, only when some are missing", async () => {
+    const f = fixture();
+    const totals = {
+      total: 0n,
+      rankAvailable: false,
+      tierAvailable: false,
+      scoreAvailable: false,
+      sourceRows: 0n,
+      candidates: 0n,
+      identifiedCandidates: 0n,
+      unassessed: 0n,
+      assessed: 0n,
+      shortlistedCount: 0n,
+      candidateKey: null,
+    };
+    f.tx.$queryRaw.mockResolvedValueOnce([{ ...totals, matchBackfill: true }]);
+    await recruiting.listRecruitingCandidates(f.prisma, actor, { roleId: "role" });
+    expect(f.backfill).toHaveBeenCalledOnce();
+    expect(f.backfill.mock.invocationCallOrder[0]).toBeGreaterThan(
+      f.tx.$queryRaw.mock.invocationCallOrder[0]!,
+    );
+    const update = f.backfill.mock.calls[0]![0] as { sql: string; values: unknown[] };
+    expect(update.sql).toContain('UPDATE "recruiting_candidate_occurrences" o SET "matchFields"');
+    expect(update.sql).toContain('o."matchFields" IS NULL');
+    expect(update.values).toContain("role");
+    f.tx.$queryRaw.mockResolvedValueOnce([{ ...totals, matchBackfill: false }]);
+    await recruiting.listRecruitingCandidates(f.prisma, actor, { roleId: "role" });
+    expect(f.backfill).toHaveBeenCalledOnce();
   });
   it.each(["rank", "score"] as const)(
     "authorizes before querying candidate %s data",
@@ -405,8 +443,8 @@ describe("candidate listing and shortlist boundaries", () => {
           query.sql.indexOf(") profile ON true"),
         );
         const matches = query.sql.slice(
-          query.sql.indexOf("match_rows AS"),
-          query.sql.indexOf("base AS"),
+          query.sql.indexOf('COALESCE(o."matchFields"'),
+          query.sql.indexOf(") match ON true"),
         );
         for (const field of Object.keys(filters)) {
           const column = field === "sourceEffectId" ? "effectId" : "actionId";

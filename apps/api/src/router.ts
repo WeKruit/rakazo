@@ -287,6 +287,7 @@ import {
 } from "./onboarding.js";
 import { prewarmTeamComputer } from "./prewarm.js";
 import {
+  archiveRecruitingRole,
   bindRecruitingRole,
   confirmRecruitingBrief,
   createRecruitingRole,
@@ -3688,6 +3689,15 @@ export function createRouter(deps: RouterDeps) {
         const saved = await reviseRecruitingRole(deps.prisma, context.actor, input, {
           artifacts: deps.artifacts,
           context: connectionContext(context.actor, randomUUID()),
+        });
+        await notifyRecruitingChange(deps, context.actor, saved.role.sourceThreadId);
+        return saved;
+      }),
+      archiveRole: authed.recruiting.archiveRole.handler(async ({ context, input }) => {
+        const { archived, ...rest } = input;
+        const saved = await archiveRecruitingRole(deps.prisma, context.actor, {
+          ...rest,
+          operation: archived ? "archive" : "unarchive",
         });
         await notifyRecruitingChange(deps, context.actor, saved.role.sourceThreadId);
         return saved;

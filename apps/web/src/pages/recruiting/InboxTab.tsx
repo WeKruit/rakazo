@@ -1,8 +1,10 @@
 import { Trans, useLingui } from "@lingui/react/macro";
 import type { RecruitingCrmDataOutput } from "@rakazo/contracts";
-import { Badge } from "@rakazo/ui-web";
-import { useEffect, useState } from "react";
+import { Badge, Button } from "@rakazo/ui-web";
+import { useCallback, useEffect, useState } from "react";
 import type { CrmReplyDraftContext } from "../RecruitingPanel";
+import { useRecruitingChatContext } from "../shell/recruiting-chat-context";
+import { useRecruitingDetail } from "./detail";
 import type { RecruitingTabProps } from "./shared";
 import {
   CrmGate,
@@ -38,6 +40,8 @@ export type RecruitingInboxEmail = Omit<CrmReplyDraftContext, "threadId" | "emai
 type InboxProps = RecruitingTabProps & {
   /** Called with the email the recruiter selects (undefined when none), so chat can carry it. */
   onSelectEmail?: (email: RecruitingInboxEmail | undefined) => void;
+  /** Shows only this candidate's thread (the detail panel), without the candidate list. */
+  candidateId?: string;
 };
 
 function mailItems(page: MailPage) {
@@ -110,11 +114,48 @@ export function replyStatus(items: readonly { direction: Direction; date: string
  * Stored email for the role: every candidate's mail in one read by default, or one candidate's
  * thread (with reply status) when selected. CRMs without the role-wide read fall back to per candidate.
  */
-export function InboxTab({ onSelectEmail, ...props }: InboxProps) {
+/**
+ * Inbox with the reply-draft action, shared by the Inbox tab and the detail panel. The selected
+ * email's candidate becomes the chat's selected contact, which the draft request is checked against.
+ */
+export function InboxWithReply({
+  onDraftReply,
+  ...props
+}: Omit<InboxProps, "onSelectEmail"> & {
+  onDraftReply?: (email: RecruitingInboxEmail) => void;
+}) {
+  const chatContext = useRecruitingChatContext();
+  const [email, setEmail] = useState<RecruitingInboxEmail>();
+  const select = useCallback(
+    (next: RecruitingInboxEmail | undefined) => {
+      setEmail(next);
+      if (next)
+        chatContext.setSelectedContact({
+          name: next.candidateName ?? next.candidateEmail ?? "",
+          reference: next.candidateId,
+        });
+    },
+    [chatContext],
+  );
+  return (
+    <>
+      {onDraftReply && email ? (
+        <Button variant="outline" className="mb-3" onClick={() => onDraftReply(email)}>
+          <Trans>Draft reply</Trans>
+        </Button>
+      ) : null}
+      <InboxTab {...props} onSelectEmail={select} />
+    </>
+  );
+}
+
+export function InboxTab({ onSelectEmail, candidateId: lockedId, ...props }: InboxProps) {
   const { t } = useLingui();
+  const detail = useRecruitingDetail();
   const crm = useRoleCrm(props);
   const ready = crm.status === "ready" ? crm.target : null;
-  const [candidateId, setCandidateId] = useState<string>();
+  const [chosenId, setCandidateId] = useState<string>();
+  const candidateId = lockedId ?? chosenId;
   const [emailId, setEmailId] = useState<string>();
   const people = useCrmPages(
     crm,
@@ -135,12 +176,11 @@ export function InboxTab({ onSelectEmail, ...props }: InboxProps) {
   const person = roleWide
     ? undefined
     : (findPerson(candidateId) ?? (roleWideSupported ? undefined : people.data?.items[0]));
+  const personId = lockedId ?? person?.candidateId;
   const mail = useCrmData(
     crm,
     "mail",
-    ready && person
-      ? { candidateId: person.candidateId, crmRoleId: ready.crmRoleId, limit: 50 }
-      : null,
+    ready && personId ? { candidateId: personId, crmRoleId: ready.crmRoleId, limit: 50 } : null,
     props,
   );
   const read = roleWide ? roleMail : mail;
@@ -148,12 +188,12 @@ export function InboxTab({ onSelectEmail, ...props }: InboxProps) {
     ? roleMail.data?.supported
       ? roleMailItems(roleMail.data)
       : []
-    : mail.data && mail.data.candidateId === person?.candidateId
+    : mail.data && mail.data.candidateId === personId
       ? mailItems(mail.data)
       : [];
   const selected = items.find((item) => item.id === emailId) ?? items[0];
   const selectedPerson = roleWide ? findPerson(selected?.candidateId) : person;
-  const selectedCandidateId = roleWide ? selected?.candidateId : person?.candidateId;
+  const selectedCandidateId = roleWide ? selected?.candidateId : personId;
   const status = roleWide ? null : replyStatus(items);
   const nameOf = (id: string | undefined) => findPerson(id)?.name;
   useEffect(() => {
@@ -178,7 +218,7 @@ export function InboxTab({ onSelectEmail, ...props }: InboxProps) {
   useEffect(() => () => onSelectEmail?.(undefined), []);
   return (
     <section aria-label={t`Inbox`}>
-      <TabHeader title={<Trans>Inbox</Trans>} />
+      {lockedId ? null : <TabHeader title={<Trans>Inbox</Trans>} />}
       <CrmGate crm={crm} />
       {people.loading ? <TabLoading /> : null}
       {people.failed ? (
@@ -192,8 +232,15 @@ export function InboxTab({ onSelectEmail, ...props }: InboxProps) {
         </TabNotice>
       ) : null}
       {people.data?.items.length ? (
-        <div className="grid grid-cols-1 gap-4 lg:grid-cols-[minmax(0,0.8fr)_minmax(0,1fr)_minmax(0,1.6fr)]">
+        <div
+          className={
+            lockedId
+              ? "grid grid-cols-1 gap-4"
+              : "grid grid-cols-1 gap-4 lg:grid-cols-[minmax(0,0.8fr)_minmax(0,1fr)_minmax(0,1.6fr)]"
+          }
+        >
           <ul
+            hidden={Boolean(lockedId)}
             aria-label={t`Candidates`}
             className="divide-y divide-border rounded-lg border border-border"
           >
@@ -328,6 +375,25 @@ export function InboxTab({ onSelectEmail, ...props }: InboxProps) {
           <section aria-label={t`Email content`} className="rounded-lg border border-border p-4">
             {selected ? (
               <article className="space-y-3">
+                {detail && selectedPerson && !lockedId ? (
+                  <Button
+                    variant="link"
+                    className="h-auto p-0"
+                    onClick={() =>
+                      detail.open({
+                        view: "thread",
+                        person: selectedPerson,
+                        role: {
+                          roleId: props.roleId,
+                          spaceId: props.spaceId,
+                          conversation: props.conversation,
+                        },
+                      })
+                    }
+                  >
+                    {selectedPerson.name}
+                  </Button>
+                ) : null}
                 <h3 className="font-semibold">{selected.subject || t`No subject`}</h3>
                 <p className="break-words text-sm text-muted-foreground">
                   {selected.sender ?? t`Sender unavailable`}
