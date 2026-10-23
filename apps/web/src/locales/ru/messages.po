@@ -289,6 +289,10 @@ msgstr "О группах"
 msgid "About spaces"
 msgstr "О пространствах"
 
+#: src/pages/recruiting/CalibrationRound.tsx
+msgid "Accepted. Finding more people."
+msgstr ""
+
 #: src/components/integrations/IntegrationSetup.tsx
 msgid "Access token"
 msgstr "Токен доступа"
@@ -1050,6 +1054,10 @@ msgstr ""
 #: src/pages/recruiting/InterviewTab.tsx
 #: src/pages/RecruitingCorrespondence.tsx
 msgid "Calendar event"
+msgstr ""
+
+#: src/pages/recruiting/CalibrationRound.tsx
+msgid "Calibration round"
 msgstr ""
 
 #: src/pages/recruiting/SequenceTab.tsx
@@ -1869,6 +1877,7 @@ msgstr "Не удалось завершить OAuth"
 msgid "Could not complete the update. Try again."
 msgstr "Не удалось завершить обновление. Попробуйте снова."
 
+#: src/pages/recruiting/CalibrationRound.tsx
 #: src/pages/RecruitingPanel.tsx
 msgid "Could not confirm feedback. Try again."
 msgstr ""
@@ -3149,6 +3158,7 @@ msgstr ""
 msgid "Feedback history"
 msgstr ""
 
+#: src/pages/recruiting/CalibrationRound.tsx
 #: src/pages/RecruitingPanel.tsx
 msgid "Feedback sent"
 msgstr ""
@@ -3292,6 +3302,10 @@ msgstr ""
 #: src/pages/RecruitingPanel.tsx
 #: src/pages/Shell.tsx
 msgid "Good example"
+msgstr ""
+
+#: src/pages/recruiting/CalibrationRound.tsx
+msgid "Good example: {name}"
 msgstr ""
 
 #: src/pages/MessagingSettingsOverlay.tsx
@@ -3883,6 +3897,10 @@ msgstr ""
 #: src/pages/Shell.tsx
 msgid "Log out"
 msgstr "Выйти"
+
+#: src/pages/recruiting/CalibrationRound.tsx
+msgid "Looks good, find more"
+msgstr ""
 
 #: src/lib/ticket-priority.ts
 #: src/pages/ModelSettingsOverlay.tsx
@@ -4685,6 +4703,10 @@ msgstr ""
 msgid "Not a fit"
 msgstr ""
 
+#: src/pages/recruiting/CalibrationRound.tsx
+msgid "Not a fit: {name}"
+msgstr ""
+
 #: src/pages/RecruitingPanel.tsx
 msgid "Not accepted"
 msgstr ""
@@ -4993,6 +5015,14 @@ msgstr ""
 #: src/pages/recruiting/SequenceTab.tsx
 #: src/pages/RecruitingPanel.tsx
 msgid "Outreach status"
+msgstr ""
+
+#: src/pages/recruiting/CalibrationRound.tsx
+msgid "Overall direction"
+msgstr ""
+
+#: src/pages/recruiting/CalibrationRound.tsx
+msgid "Overall: {direction}"
 msgstr ""
 
 #: src/pages/recruiting/HomeDashboard.tsx
@@ -5320,8 +5350,13 @@ msgstr ""
 msgid "Reading files"
 msgstr ""
 
+#: src/pages/recruiting/CalibrationRound.tsx
 #: src/pages/RecruitingPanel.tsx
 msgid "Reason"
+msgstr ""
+
+#: src/pages/recruiting/CalibrationRound.tsx
+msgid "Reason: {name}"
 msgstr ""
 
 #: src/pages/ModelSettingsOverlay.tsx
@@ -5913,6 +5948,22 @@ msgstr "Инструкции для комнаты"
 msgid "Rotate key"
 msgstr "Сменить ключ"
 
+#. placeholder {0}: round.round
+#. placeholder {1}: round.candidates.length
+#: src/pages/recruiting/CalibrationRound.tsx
+msgid "Round {0} · {1} people"
+msgstr ""
+
+#. placeholder {0}: round.round
+#: src/pages/recruiting/CalibrationRound.tsx
+msgid "Round {0} feedback:"
+msgstr ""
+
+#. placeholder {0}: round.round
+#: src/pages/recruiting/CalibrationRound.tsx
+msgid "Round {0} looks good. Start finding more people."
+msgstr ""
+
 #: src/pages/RoutineEditor.tsx
 #: src/pages/Shell.tsx
 msgid "Routine"
@@ -6307,6 +6358,7 @@ msgstr "Отправить код удаления"
 msgid "Send failed"
 msgstr ""
 
+#: src/pages/recruiting/CalibrationRound.tsx
 #: src/pages/RecruitingPanel.tsx
 msgid "Send feedback"
 msgstr ""
@@ -6345,6 +6397,7 @@ msgid "Sending"
 msgstr ""
 
 #: src/components/AskCard.tsx
+#: src/pages/recruiting/CalibrationRound.tsx
 #: src/pages/RecruitingPanel.tsx
 msgid "Sending…"
 msgstr "Отправка…"
@@ -7229,6 +7282,7 @@ msgstr ""
 msgid "Unmute"
 msgstr "Включить микрофон"
 
+#: src/pages/recruiting/CalibrationRound.tsx
 #: src/pages/recruiting/ContactsTab.tsx
 #: src/pages/RecruitingPanel.tsx
 msgid "Unnamed candidate"

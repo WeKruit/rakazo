@@ -475,6 +475,16 @@ describe("playbook stage machine", () => {
     expect(
       nextPlaybookStep("calibration_10", { title: "x", hasBrief: true, savedCandidates: 4 })?.label,
     ).toBe("校准搜寻（还差 6 人）");
+    const present = nextPlaybookStep("calibration_10", {
+      title: "x",
+      hasBrief: true,
+      savedCandidates: 10,
+    })?.prompt;
+    expect(present).toContain("calibration_round");
+    expect(present).toContain("不要求逐个评价");
+    expect(nextPlaybookStep("feedback", { hasBrief: true, savedCandidates: 44 })?.prompt).toContain(
+      "10 位全新的人",
+    );
     expect(nextPlaybookStep("closed", { hasBrief: true, savedCandidates: 50 })).toBeNull();
     expect(nextPlaybookStep("screening", { hasBrief: true, savedCandidates: 50 })).toBeNull();
   });

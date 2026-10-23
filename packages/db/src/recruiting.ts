@@ -12,6 +12,7 @@ import type {
   RecruitingAssessmentAskInput,
   RecruitingAssessmentSnapshot,
   RecruitingAssessmentSourceRef,
+  RecruitingCalibrationRound,
   RecruitingCandidateFeedbackSelection,
   RecruitingCriterionExpression,
   RecruitingCrmCandidateSync,
@@ -4567,6 +4568,9 @@ export async function executeRecruitingApproval(
       );
       approvedRevisionId = confirmed.revision.id;
     } else await recruitingApprovalPackage(tx, actor, input, true, bytes);
+    // An approved ten-profile calibration opens the next playbook stage.
+    if (input.stage === "calibration")
+      await advanceRecruitingPlaybookStage(tx, input.roleId, "scale");
     const result: RecruitingApprovalResult = {
       status: "approved",
       stage: input.stage,
@@ -10594,4 +10598,284 @@ export async function listRecruitingCandidateSources(
   );
   for (const verify of afterRead) verify();
   return result;
+}
+
+// ---------------------------------------------------------------------------
+// Calibration review rounds: which ten saved people each round showed the recruiter, and the
+// recruiter's decision to move on to finding more people. Autumn owns matching; this only keeps
+// identity, ordering and the human decision.
+// ---------------------------------------------------------------------------
+
+/** A round rule the agent can fix by asking Autumn again; the message is safe to show the agent. */
+export class RecruitingCalibrationRoundError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = "RecruitingCalibrationRoundError";
+  }
+}
+
+type CalibrationRoundInput = Extract<
+  RecruitingResearchToolInput,
+  { operation: "calibration_round" }
+>;
+
+/**
+ * Record the ten saved people a calibration round shows. After the first round every person must
+ * be new: returned after the previous round and never shown before (the playbook's
+ * "exclude everyone already seen").
+ */
+export async function saveRecruitingCalibrationRound(
+  prisma: PrismaClient,
+  actor: Actor,
+  trusted: ResearchLease & { effectId: string; effectRequest: unknown },
+  raw: CalibrationRoundInput,
+) {
+  const input = RecruitingResearchToolInputSchema.parse(raw);
+  if (
+    input.operation !== "calibration_round" ||
+    stableJsonValue(input) !==
+      stableJsonValue(RecruitingResearchToolInputSchema.parse(trusted.effectRequest))
+  )
+    throw new IsolationError();
+  return prisma.$transaction(async (tx) => {
+    const { run, thread } = await lockLiveRecruitingRun(tx, actor, trusted.runId, false);
+    await tx.$queryRaw(
+      Prisma.sql`SELECT "id" FROM "external_effects" WHERE "id" = ${trusted.effectId} FOR UPDATE`,
+    );
+    const saving = await tx.externalEffect.findFirst({
+      where: {
+        id: trusted.effectId,
+        spaceId: actor.spaceId,
+        runId: run.id,
+        kind: "recruiting_research",
+      },
+    });
+    if (
+      !saving ||
+      stableJsonValue(RecruitingResearchToolInputSchema.parse(saving.request)) !==
+        stableJsonValue(input)
+    )
+      throw new IsolationError();
+    if (saving.status === "completed") return saving.result;
+    requireResearchLease(run, trusted);
+    if (saving.status !== "executing" || !thread.activeRecruitingRoleId) throw new IsolationError();
+    const role = await requireRole(tx, actor, thread.activeRecruitingRoleId, true, thread);
+    if (role.revision !== input.expectedRoleRevision) throw new RecruitingConflictError();
+    const keys = input.candidateKeys;
+    const saved = await tx.recruitingCandidate.findMany({
+      where: { roleId: role.id, candidateKey: { in: [...keys] } },
+      select: { candidateKey: true },
+    });
+    if (saved.length !== keys.length)
+      throw new RecruitingCalibrationRoundError(
+        "Every person in a calibration round must be a saved candidate of this role. Save the returned results first, then use their exact candidateKeys.",
+      );
+    const previous = await tx.recruitingCalibrationRound.findFirst({
+      where: { roleId: role.id },
+      orderBy: { round: "desc" },
+    });
+    if (previous?.approvedAt)
+      throw new RecruitingCalibrationRoundError(
+        "The recruiter already approved the calibration. Continue with finding more people instead of another calibration round.",
+      );
+    if (previous) {
+      const shown = new Set(
+        (
+          await tx.recruitingCalibrationRound.findMany({
+            where: { roleId: role.id },
+            select: { candidateKeys: true },
+          })
+        ).flatMap((round) => round.candidateKeys),
+      );
+      const pages = await tx.recruitingCandidateOccurrence.findMany({
+        where: { roleId: role.id, candidateKey: { in: [...keys] } },
+        select: { candidateKey: true, page: { select: { observedAt: true } } },
+      });
+      const earliest = new Map<string, number>();
+      for (const row of pages) {
+        const at = row.page.observedAt.getTime();
+        earliest.set(row.candidateKey, Math.min(earliest.get(row.candidateKey) ?? at, at));
+      }
+      const seen = keys.filter(
+        (key) => shown.has(key) || (earliest.get(key) ?? 0) <= previous.createdAt.getTime(),
+      );
+      if (seen.length)
+        throw new RecruitingCalibrationRoundError(
+          `Round ${previous.round + 1} must show only new people, but ${seen.length} of these ten were already returned before round ${previous.round}. Reply on the same Autumn task with the round feedback and ask for ten new people, excluding everyone it already returned for this role, then save those results and record the new round.`,
+        );
+    }
+    const round = await tx.recruitingCalibrationRound.create({
+      data: {
+        roleId: role.id,
+        round: (previous?.round ?? 0) + 1,
+        candidateKeys: [...keys],
+        effectId: saving.id,
+      },
+    });
+    await advanceRecruitingPlaybookStage(tx, role.id, "feedback");
+    const result = {
+      status: "saved",
+      roleId: role.id,
+      round: round.round,
+      candidateKeys: round.candidateKeys,
+    };
+    const completed = await tx.externalEffect.updateMany({
+      where: {
+        id: saving.id,
+        spaceId: actor.spaceId,
+        runId: run.id,
+        status: "executing",
+        run: {
+          status: "running",
+          leaseOwner: trusted.leaseOwner,
+          leaseFence: trusted.leaseFence,
+          leaseExpiresAt: { gt: new Date() },
+        },
+      },
+      data: { status: "completed", result },
+    });
+    if (completed.count !== 1) throw new IsolationError();
+    await appendEventInTransaction(tx, {
+      spaceId: actor.spaceId,
+      threadId: run.threadId,
+      botId: run.botId,
+      runId: run.id,
+      type: "effect.recorded",
+      payload: { effectId: saving.id, tool: "recruiting_research", ...result },
+    });
+    return result;
+  });
+}
+
+async function calibrationRoundView(
+  tx: Pick<Tx, "recruitingCalibrationRound" | "recruitingCandidateOccurrence">,
+  roleId: string,
+): Promise<RecruitingCalibrationRound | null> {
+  const round = await tx.recruitingCalibrationRound.findFirst({
+    where: { roleId },
+    orderBy: { round: "desc" },
+  });
+  if (!round) return null;
+  // Newest saved row per person; display only.
+  const rows = await tx.recruitingCandidateOccurrence.findMany({
+    where: { roleId, candidateKey: { in: round.candidateKeys } },
+    select: {
+      candidateKey: true,
+      name: true,
+      title: true,
+      company: true,
+      location: true,
+      linkedinUrl: true,
+      page: { select: { observedAt: true } },
+    },
+    orderBy: [{ page: { observedAt: "desc" } }, { rowIndex: "asc" }],
+  });
+  const latest = new Map<string, (typeof rows)[number]>();
+  for (const row of rows) if (!latest.has(row.candidateKey)) latest.set(row.candidateKey, row);
+  return {
+    round: round.round,
+    createdAt: round.createdAt.toISOString(),
+    approvedAt: round.approvedAt?.toISOString() ?? null,
+    candidates: round.candidateKeys.map((candidateKey) => {
+      const row = latest.get(candidateKey);
+      return {
+        candidateKey,
+        name: row?.name ?? null,
+        title: row?.title ?? null,
+        company: row?.company ?? null,
+        location: row?.location ?? null,
+        linkedinUrl: row?.linkedinUrl ?? null,
+      };
+    }),
+  };
+}
+
+/** The latest calibration round of the thread's active role, for the panel and the agent. */
+export async function readRecruitingCalibrationRound(
+  prisma: PrismaClient,
+  actor: Actor,
+  input: { threadId: string },
+): Promise<{ roleId: string | null; round: RecruitingCalibrationRound | null }> {
+  return prisma.$transaction(async (tx) => {
+    const thread = await requireThread(tx, actor, input.threadId);
+    if (!thread.activeRecruitingRoleId) return { roleId: null, round: null };
+    const role = await requireRole(tx, actor, thread.activeRecruitingRoleId, false, thread);
+    return { roleId: role.id, round: await calibrationRoundView(tx, role.id) };
+  });
+}
+
+async function approveLatestCalibrationRound(
+  tx: Tx,
+  actor: Actor,
+  roleId: string,
+  round: number | null,
+  source: Prisma.InputJsonValue,
+) {
+  const latest = await tx.recruitingCalibrationRound.findFirst({
+    where: { roleId },
+    orderBy: { round: "desc" },
+  });
+  if (!latest)
+    throw new RecruitingCalibrationRoundError("No calibration round has been shown yet.");
+  if (round !== null && latest.round !== round)
+    throw new RecruitingConflictError("A newer calibration round replaced this one");
+  if (latest.approvedAt)
+    return { round: latest.round, approvedAt: latest.approvedAt.toISOString(), already: true };
+  const approvedAt = new Date();
+  const updated = await tx.recruitingCalibrationRound.updateMany({
+    where: { id: latest.id, approvedAt: null },
+    data: { approvedAt, approvedByUserId: actor.userId, approvalSource: source },
+  });
+  if (updated.count !== 1) throw new RecruitingConflictError();
+  await advanceRecruitingPlaybookStage(tx, roleId, "scale");
+  return { round: latest.round, approvedAt: approvedAt.toISOString(), already: false };
+}
+
+/** The signed-in recruiter accepts the round from the panel control. */
+export async function approveRecruitingCalibrationRound(
+  prisma: PrismaClient,
+  actor: Actor,
+  input: { threadId: string; round: number },
+) {
+  return prisma.$transaction(async (tx) => {
+    const thread = await requireThread(tx, actor, input.threadId);
+    if (!thread.activeRecruitingRoleId) throw new IsolationError();
+    const role = await requireRole(tx, actor, thread.activeRecruitingRoleId, true, thread);
+    const { round, approvedAt } = await approveLatestCalibrationRound(
+      tx,
+      actor,
+      role.id,
+      input.round,
+      { kind: "control" },
+    );
+    return { round, approvedAt };
+  });
+}
+
+/**
+ * The recruiter accepted the round in their own words; the quote must come from the run's
+ * current human message, exactly like other direct recruiting decisions.
+ */
+export async function approveRecruitingCalibrationRoundFromMessage(
+  prisma: PrismaClient,
+  actor: Actor,
+  input: {
+    runId: string;
+    sourceMessageId: string | null;
+    intent: RecruitingHumanIntent;
+    roleId: string;
+    expectedRoleRevision: number;
+  },
+) {
+  return prisma.$transaction(async (tx) => {
+    const { message } = await feedbackContextInTransaction(tx, actor, {
+      ...input,
+      sourceRefs: [],
+    });
+    await requireRole(tx, actor, input.roleId, true);
+    return approveLatestCalibrationRound(tx, actor, input.roleId, null, {
+      kind: "message",
+      messageId: message.id,
+    });
+  });
 }

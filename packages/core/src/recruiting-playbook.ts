@@ -370,14 +370,15 @@ export function nextPlaybookStep(
         label: remaining ? `校准搜寻（还差 ${remaining} 人）` : "展示 10 人校准名单",
         prompt: remaining
           ? `继续校准搜寻直到保存 ${CALIBRATION_TARGET} 人（当前 ${facts.savedCandidates}）。开始前告诉用户，完成后列出名单。`
-          : "把 10 位校准候选人以名单形式列给用户，并请用户逐个反馈（通过/不通过及原因）。",
+          : "把这 10 位校准候选人记录为本轮（recruiting_research calibration_round），以名单形式列给用户，请用户对任意几位或整体方向给一次反馈；不要求逐个评价。",
       };
     }
     case "feedback":
       return {
         stage,
         label: "收集校准反馈",
-        prompt: "向用户展示校准名单并收集反馈；有反馈后更新筛选标准，再进入规模化搜寻。",
+        prompt:
+          "本轮反馈到了就把全部意见合成一次，回复到同一个 Autumn 任务，请它找 10 位全新的人（排除它为这个岗位返回过的所有人），保存后记录为下一轮并说明变化。用户接受某一轮之后才进入规模化搜寻；没有新反馈时不要重复追问。",
       };
     case "scale":
       return {

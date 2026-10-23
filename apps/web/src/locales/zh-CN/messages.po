@@ -289,6 +289,10 @@ msgstr ""
 msgid "About spaces"
 msgstr ""
 
+#: src/pages/recruiting/CalibrationRound.tsx
+msgid "Accepted. Finding more people."
+msgstr "已确认，正在扩大搜索。"
+
 #: src/components/integrations/IntegrationSetup.tsx
 msgid "Access token"
 msgstr ""
@@ -1051,6 +1055,10 @@ msgstr ""
 #: src/pages/RecruitingCorrespondence.tsx
 msgid "Calendar event"
 msgstr ""
+
+#: src/pages/recruiting/CalibrationRound.tsx
+msgid "Calibration round"
+msgstr "校准轮次"
 
 #: src/pages/recruiting/SequenceTab.tsx
 #: src/pages/RecruitingPanel.tsx
@@ -1869,6 +1877,7 @@ msgstr "无法完成 OAuth"
 msgid "Could not complete the update. Try again."
 msgstr ""
 
+#: src/pages/recruiting/CalibrationRound.tsx
 #: src/pages/RecruitingPanel.tsx
 msgid "Could not confirm feedback. Try again."
 msgstr ""
@@ -3149,6 +3158,7 @@ msgstr ""
 msgid "Feedback history"
 msgstr ""
 
+#: src/pages/recruiting/CalibrationRound.tsx
 #: src/pages/RecruitingPanel.tsx
 msgid "Feedback sent"
 msgstr ""
@@ -3293,6 +3303,10 @@ msgstr ""
 #: src/pages/Shell.tsx
 msgid "Good example"
 msgstr ""
+
+#: src/pages/recruiting/CalibrationRound.tsx
+msgid "Good example: {name}"
+msgstr "合适：{name}"
 
 #: src/pages/MessagingSettingsOverlay.tsx
 #: src/pages/Shell.tsx
@@ -3883,6 +3897,10 @@ msgstr ""
 #: src/pages/Shell.tsx
 msgid "Log out"
 msgstr "退出登录"
+
+#: src/pages/recruiting/CalibrationRound.tsx
+msgid "Looks good, find more"
+msgstr "可以，开始扩大搜索"
 
 #: src/lib/ticket-priority.ts
 #: src/pages/ModelSettingsOverlay.tsx
@@ -4685,6 +4703,10 @@ msgstr ""
 msgid "Not a fit"
 msgstr ""
 
+#: src/pages/recruiting/CalibrationRound.tsx
+msgid "Not a fit: {name}"
+msgstr "不合适：{name}"
+
 #: src/pages/RecruitingPanel.tsx
 msgid "Not accepted"
 msgstr ""
@@ -4994,6 +5016,14 @@ msgstr ""
 #: src/pages/RecruitingPanel.tsx
 msgid "Outreach status"
 msgstr ""
+
+#: src/pages/recruiting/CalibrationRound.tsx
+msgid "Overall direction"
+msgstr "整体方向"
+
+#: src/pages/recruiting/CalibrationRound.tsx
+msgid "Overall: {direction}"
+msgstr "整体方向：{direction}"
 
 #: src/pages/recruiting/HomeDashboard.tsx
 msgid "Overdue"
@@ -5320,9 +5350,14 @@ msgstr "正在阅读网页"
 msgid "Reading files"
 msgstr "正在读取文件"
 
+#: src/pages/recruiting/CalibrationRound.tsx
 #: src/pages/RecruitingPanel.tsx
 msgid "Reason"
 msgstr ""
+
+#: src/pages/recruiting/CalibrationRound.tsx
+msgid "Reason: {name}"
+msgstr "原因：{name}"
 
 #: src/pages/ModelSettingsOverlay.tsx
 #: src/pages/Onboarding.tsx
@@ -5913,6 +5948,22 @@ msgstr ""
 msgid "Rotate key"
 msgstr "轮换密钥"
 
+#. placeholder {0}: round.round
+#. placeholder {1}: round.candidates.length
+#: src/pages/recruiting/CalibrationRound.tsx
+msgid "Round {0} · {1} people"
+msgstr "第 {0} 轮 · {1} 人"
+
+#. placeholder {0}: round.round
+#: src/pages/recruiting/CalibrationRound.tsx
+msgid "Round {0} feedback:"
+msgstr "第 {0} 轮反馈："
+
+#. placeholder {0}: round.round
+#: src/pages/recruiting/CalibrationRound.tsx
+msgid "Round {0} looks good. Start finding more people."
+msgstr "第 {0} 轮这批人可以，开始扩大搜索。"
+
 #: src/pages/RoutineEditor.tsx
 #: src/pages/Shell.tsx
 msgid "Routine"
@@ -6307,6 +6358,7 @@ msgstr "发送删除验证码"
 msgid "Send failed"
 msgstr ""
 
+#: src/pages/recruiting/CalibrationRound.tsx
 #: src/pages/RecruitingPanel.tsx
 msgid "Send feedback"
 msgstr ""
@@ -6345,6 +6397,7 @@ msgid "Sending"
 msgstr ""
 
 #: src/components/AskCard.tsx
+#: src/pages/recruiting/CalibrationRound.tsx
 #: src/pages/RecruitingPanel.tsx
 msgid "Sending…"
 msgstr "正在发送…"
@@ -7229,6 +7282,7 @@ msgstr ""
 msgid "Unmute"
 msgstr "取消静音"
 
+#: src/pages/recruiting/CalibrationRound.tsx
 #: src/pages/recruiting/ContactsTab.tsx
 #: src/pages/RecruitingPanel.tsx
 msgid "Unnamed candidate"
