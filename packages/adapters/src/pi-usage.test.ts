@@ -7,6 +7,7 @@ import type { AgentRuntimeEvent } from "@rakazo/adapter-kit";
 import { createLogger, createTestSink, getLogger, installLogger } from "@rakazo/logging";
 import { Agent } from "undici";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { supplementPiModels } from "./pi-current-models.js";
 import {
   createOpenAiCompatibleFetch,
   registerOpenAiCompatibleRuntime,
@@ -16,6 +17,7 @@ import {
   cacheHitRatio,
   normalizePiUsage,
   observedPiStream,
+  type ReportedUsageFields,
   usageReportingFetch,
 } from "./pi-usage.js";
 
@@ -956,5 +958,45 @@ describe("Pi usage accounting", () => {
     const response = await fetcher("https://model.example.test");
     expect(new Uint8Array(await response.arrayBuffer())).toEqual(bytes);
     expect(reported.has("inputTokens")).toBe(true);
+  });
+});
+
+describe("production model pricing", () => {
+  const catalog = supplementPiModels(builtinModels());
+  it.each([
+    ["openai-codex", "gpt-6.1-sol"],
+    ["openai-codex", "gpt-6-luna"],
+    ["openai", "gpt-6-luna"],
+  ])("prices %s/%s although the Responses API never reports cache writes", (provider, id) => {
+    const model = catalog.getModel(provider, id);
+    expect(model).toBeDefined();
+    // Pi's Responses parsers leave cacheWrite at its zero placeholder: OpenAI has no
+    // cache-write bucket, so the SSE observer never marks it as reported.
+    const reported: ReportedUsageFields = new Set([
+      "inputTokens",
+      "outputTokens",
+      "cacheReadTokens",
+      "totalTokens",
+    ]);
+    const usage = { input: 60, output: 30, cacheRead: 40, cacheWrite: 0, totalTokens: 130 };
+    const rates = model!.cost;
+    const total = (60 * rates.input + 30 * rates.output + 40 * rates.cacheRead) / 1_000_000;
+    const normalized = normalizePiUsage(
+      {
+        ...usage,
+        cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total },
+      },
+      model!,
+      reported,
+    );
+    expect(normalized).toMatchObject({
+      inputTokens: 60,
+      cacheReadTokens: 40,
+      cacheWriteTokens: null,
+      costUsd: total,
+      costSource: "pi-catalog-estimate",
+      pricingVersion: "pi-ai-0.87.1",
+    });
+    expect(total).toBeGreaterThan(0);
   });
 });

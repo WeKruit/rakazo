@@ -8836,6 +8836,26 @@ export function createRunExecutor(deps: ExecutorDeps) {
           const runtimeStartedAt = Date.now();
           let runCostUsd = 0;
           let runToolCalls = 0;
+          // Pi runs a tool the moment it queues the "tool" event, so a fast tool's completion
+          // audit raced ahead of the "called" audit this loop appends after flushing narration.
+          // Completions wait for the matching called append; the stream's close releases
+          // any still waiting (tools skipped or rejected before dispatch never get a called).
+          const toolCalledAudits = new Map<
+            string,
+            { settled: Promise<void>; release: () => void }
+          >();
+          const toolCalledAudit = (executionId: string) => {
+            let entry = toolCalledAudits.get(executionId);
+            if (!entry) {
+              let release!: () => void;
+              const settled = new Promise<void>((resolve) => {
+                release = resolve;
+              });
+              entry = { settled, release };
+              toolCalledAudits.set(executionId, entry);
+            }
+            return entry;
+          };
           getLogger().info("run.setup.timing", {
             runId,
             sinceRunCreatedMs: run.createdAt ? Date.now() - run.createdAt.getTime() : null,
@@ -8977,8 +8997,10 @@ export function createRunExecutor(deps: ExecutorDeps) {
                     resolveConnectedModel(run, provider, modelId, (values) =>
                       runSecrets.push(...values),
                     ),
-              onToolCompleted: (completion) =>
-                appendToolCompletionAudit(
+              onToolCompleted: async (completion) => {
+                await toolCalledAudit(completion.executionId).settled;
+                toolCalledAudits.delete(completion.executionId);
+                await appendToolCompletionAudit(
                   deps,
                   {
                     spaceId: run.spaceId,
@@ -8988,7 +9010,8 @@ export function createRunExecutor(deps: ExecutorDeps) {
                   },
                   completion,
                   runSecrets,
-                ),
+                );
+              },
               claimSteering: scripted
                 ? undefined
                 : async (seenIds) => {
@@ -9114,7 +9137,9 @@ export function createRunExecutor(deps: ExecutorDeps) {
             }
             runAbortController?.abort();
           };
-          for await (const event of withRuntimeCleanup(runtimeEvents, runAbortController)) {
+          for await (const event of withRuntimeCleanup(runtimeEvents, runAbortController, () => {
+            for (const entry of toolCalledAudits.values()) entry.release();
+          })) {
             if (approvalPausePending) return;
             if (!leaseValid) return;
             const now = Date.now();
@@ -9296,18 +9321,22 @@ export function createRunExecutor(deps: ExecutorDeps) {
               if (event.name !== "message_user") {
                 await publishMidTurnNarration();
               }
-              await deps.events.append({
-                spaceId: run.spaceId,
-                threadId: thread.id,
-                botId: bot.id,
-                type: "agent.tool.called",
-                runId,
-                payload: {
-                  name: event.name,
-                  executionId: event.executionId,
-                  argsSummary: toolArgsSummary(event.args, runSecrets),
-                },
-              });
+              try {
+                await deps.events.append({
+                  spaceId: run.spaceId,
+                  threadId: thread.id,
+                  botId: bot.id,
+                  type: "agent.tool.called",
+                  runId,
+                  payload: {
+                    name: event.name,
+                    executionId: event.executionId,
+                    argsSummary: toolArgsSummary(event.args, runSecrets),
+                  },
+                });
+              } finally {
+                toolCalledAudit(event.executionId).release();
+              }
               pendingToolNames.push(event.name);
               tryFlushPendingTools();
               // A tool call is followed by another model call: stop here when the run is
