@@ -138,10 +138,22 @@ function fixture(
       async ({
         where,
       }: {
-        where?: { id?: string; spaceId?: string; runId?: string; status?: string; kind?: string };
+        where?: {
+          id?: string;
+          spaceId?: string;
+          runId?: string;
+          status?: string | { in: string[] };
+          kind?: string;
+        };
       } = {}) =>
         effects.filter((effect) => {
-          if (where?.status && effect.status !== where.status) return false;
+          if (typeof where?.status === "string" && effect.status !== where.status) return false;
+          if (
+            where?.status &&
+            typeof where.status === "object" &&
+            !where.status.in.includes(effect.status)
+          )
+            return false;
           if (where?.kind && effect.kind !== where.kind) return false;
           if (where?.spaceId && effect.spaceId !== where.spaceId) return false;
           if (where?.runId && effect.runId && effect.runId !== where.runId) return false;
@@ -653,6 +665,16 @@ describe("linked offline scheduling receipts", () => {
       } else if (["reschedule_booking", "cancel_booking"].includes(call.route?.toolName ?? "")) {
         expect(call.args.bookingUid).toBe("synthetic-booking-42");
         if (scenario.endsWith("timeout")) {
+          // The provider applied the change before its acknowledgement was lost.
+          // A reschedule retires the original UID; its replacement is not proven by
+          // this uncertain mutation, even if a later original-booking read names it.
+          providerBooking = {
+            ...providerBooking,
+            status: "cancelled",
+            ...(scenario === "reschedule_timeout"
+              ? { rescheduledToUid: "unproven-replacement-43" }
+              : {}),
+          };
           yield {
             type: "error",
             message: "Synthetic calendar acknowledgement lost",
@@ -1061,6 +1083,46 @@ describe("linked offline scheduling receipts", () => {
       if (scenario.endsWith("timeout")) {
         expect(changeEffect).toMatchObject({ status: "uncertain", result: { uncertain: true } });
         expect((await project()).events).toEqual(projected.events);
+        const beforeReconciliation = f.connector.execute.mock.calls.length;
+        const uncertainResult = structuredClone(changeEffect.result);
+        f.setCalls([
+          {
+            name: getBooking.name,
+            args: { bookingUid: returned.uid },
+            executionId: "timeout-reconciliation",
+          },
+        ]);
+        await f.run();
+        expect(f.connector.execute).toHaveBeenCalledTimes(beforeReconciliation + 1);
+        expect(f.connector.execute).toHaveBeenLastCalledWith(
+          expect.objectContaining({
+            route: expect.objectContaining({ toolName: "get_booking" }),
+            args: { bookingUid: returned.uid },
+          }),
+          expect.anything(),
+        );
+        expect(f.results.at(-1)).toMatchObject({
+          content: [{ type: "text", text: expect.stringContaining('"status":"cancelled"') }],
+        });
+        expect(changeEffect).toMatchObject({ status: "uncertain", result: uncertainResult });
+        const reconciled = await project();
+        expect(reconciled.events).toEqual([
+          expect.objectContaining({ id: `cal-1:booking:${returned.uid}`, status: "cancelled" }),
+        ]);
+        expect(reconciled.events.some((event) => event.id.includes("unproven-replacement"))).toBe(
+          false,
+        );
+        f.setCalls([
+          { name: mutation.name, args: changeArgs, executionId: "after-reconciliation-retry" },
+        ]);
+        await f.run();
+        expect(f.connector.execute).toHaveBeenCalledTimes(beforeReconciliation + 1);
+        expect(
+          f.connector.execute.mock.calls.filter(
+            ([call]) => call.route?.toolName === mutation.route.toolName,
+          ),
+        ).toHaveLength(1);
+        expect(changeEffect).toMatchObject({ status: "uncertain", result: uncertainResult });
         return;
       }
       expect(changeEffect.status).toBe("completed");
