@@ -62,7 +62,10 @@ function successful(effect: { status: string; result: unknown }) {
     body.uncertain
   )
     throw new IsolationError();
-  return obj(body.result) ?? body;
+  const value = obj(body.result) ?? body;
+  if (value.error || value.isError || value.uncertain || value.status === "error")
+    throw new IsolationError();
+  return value;
 }
 async function scope(prisma: PrismaClient, actor: Actor, threadId: string) {
   await requireMembership(prisma, actor.userId, actor.spaceId);
@@ -368,35 +371,82 @@ async function verify(
     if (input.candidate.candidateKey !== input.candidate.email.toLowerCase()) {
       const id = await importedCandidate(tx, actor, input, workspace);
       const target = workspace.crmTarget?.target;
-      if (!id || !target)
-        throw new IsolationError("An exact saved contact/email identity is required");
-      const contact = await tx.recruitingCrmContact.findFirst({
-        where: {
-          spaceId: actor.spaceId,
-          userId: actor.userId,
-          mcpServerId: target.mcpServerId,
-          organizationId: target.organizationId,
-          crmCandidateId: id,
-          email: input.candidate.email,
-          archivedAt: null,
-          roles: {
-            some: {
-              archivedAt: null,
-              role: {
-                mcpServerId: target.mcpServerId,
-                organizationId: target.organizationId,
-                crmRoleId: target.crmRoleId,
+      if (!id || !target) {
+        // Native campaign lead persistence already records exact candidate_key -> lead/email.
+        // Reuse that identity; a free-form email or LinkedIn similarity is never a join.
+        const binding = await tx.externalEffect.findUnique({
+          where: {
+            idempotencyKey: `instantly-role-campaign:${native.route.resourceId}:${input.roleId}`,
+          },
+          include: { run: true },
+        });
+        const value = obj(binding?.result);
+        const lead = obj(obj(value?.leads)?.[input.candidate.candidateKey]);
+        if (
+          !binding ||
+          binding.spaceId !== actor.spaceId ||
+          binding.run.spaceId !== actor.spaceId ||
+          binding.run.userId !== actor.userId ||
+          binding.kind !== "instantly_role_campaign" ||
+          binding.status !== "completed" ||
+          typeof value?.campaignId !== "string" ||
+          value.campaignId !== email.campaign_id ||
+          typeof lead?.leadId !== "string" ||
+          lead.email !== input.candidate.email ||
+          (email.lead !== undefined && email.lead !== lead.leadId) ||
+          (typeof value.eaccount === "string" && value.eaccount !== email.eaccount)
+        )
+          throw new IsolationError("An exact saved campaign/contact identity is required");
+      } else {
+        const contact = await tx.recruitingCrmContact.findFirst({
+          where: {
+            spaceId: actor.spaceId,
+            userId: actor.userId,
+            mcpServerId: target.mcpServerId,
+            organizationId: target.organizationId,
+            crmCandidateId: id,
+            email: input.candidate.email,
+            archivedAt: null,
+            roles: {
+              some: {
                 archivedAt: null,
+                role: {
+                  mcpServerId: target.mcpServerId,
+                  organizationId: target.organizationId,
+                  crmRoleId: target.crmRoleId,
+                  archivedAt: null,
+                },
               },
             },
           },
-        },
-      });
-      if (!contact) throw new IsolationError();
+        });
+        if (!contact) throw new IsolationError();
+      }
     }
   }
+  const displaySource = await tx.mcpServer.findFirst({
+    where: {
+      id: input.originalEmail.sourceId,
+      spaceId: actor.spaceId,
+      userId: actor.userId,
+      enabled: true,
+    },
+  });
+  if (!displaySource) throw new IsolationError();
+  const originalEmail = {
+    ...input.originalEmail,
+    subject: typeof email.subject === "string" ? email.subject : "",
+    sender: typeof email.from_address_email === "string" ? email.from_address_email : null,
+    date:
+      typeof email.timestamp_email === "string" &&
+      Number.isFinite(Date.parse(email.timestamp_email))
+        ? new Date(email.timestamp_email).toISOString()
+        : null,
+    sourceName: displaySource.name,
+  };
   return {
     availability,
+    originalEmail,
     mailSourceRevision: native.route.resourceRevision,
     mailSourceId: native.route.resourceId,
     mailRead: { effectId: mail.id, linkedRunId: mail.runId, messageId: mail.run.sourceMessageId },
@@ -423,11 +473,16 @@ function projection(row: {
     confirmationEffectId: links?.confirmationEffectId ?? null,
   });
 }
-async function outcome(tx: Tx, actor: Actor, plan: RecruitingSchedulingPlan) {
+async function outcome(tx: Tx, actor: Actor, plan: RecruitingSchedulingPlan, links: unknown) {
   const status = async (id: string | null) => {
     if (!id) return null;
     const row = await effect(tx, actor, plan.threadId, id);
     await grant(tx, actor, row);
+    const key = id === plan.bookingEffectId ? "bookingRequestHash" : "confirmationRequestHash";
+    if (
+      obj(links)?.[key] !== createHash("sha256").update(stableJsonValue(row.request)).digest("hex")
+    )
+      throw new IsolationError("The bound operation request changed");
     if (row.status === "uncertain" || obj(row.result)?.uncertain) return "uncertain" as const;
     if (row.status === "failed") return "failed" as const;
     if (row.status !== "completed") return "pending" as const;
@@ -443,12 +498,68 @@ async function outcome(tx: Tx, actor: Actor, plan: RecruitingSchedulingPlan) {
           ? ("completed" as const)
           : ("uncertain" as const);
       }
-      return typeof body.id === "string" &&
-        body.thread_id === plan.originalEmail.providerThreadId &&
-        body.reply_to_uuid === plan.originalEmail.providerMessageId &&
-        body.eaccount === plan.originalEmail.eaccount
-        ? ("completed" as const)
-        : ("uncertain" as const);
+      const args = call(row.request).args;
+      const content = obj(args.body);
+      const recorded = (value: Record<string, unknown>) =>
+        typeof value.id === "string" &&
+        value.id !== plan.originalEmail.providerMessageId &&
+        value.thread_id === plan.originalEmail.providerThreadId &&
+        value.reply_to_uuid === plan.originalEmail.providerMessageId &&
+        value.eaccount === plan.originalEmail.eaccount &&
+        value.from_address_email === plan.originalEmail.eaccount &&
+        value.to_address_email_list === plan.candidate.email &&
+        value.ue_type === 3 &&
+        typeof value.timestamp_email === "string" &&
+        Number.isFinite(Date.parse(value.timestamp_email)) &&
+        value.subject === args.subject &&
+        value.body_fallback_reason == null &&
+        !value.cc_address_email_list &&
+        !value.bcc_address_email_list &&
+        (content?.text === undefined || obj(value.body)?.text === content.text) &&
+        (content?.html === undefined || obj(value.body)?.html === content.html);
+      if (recorded(body)) return "completed" as const;
+      if (typeof body.id !== "string") return "uncertain" as const;
+      const reads = await tx.externalEffect.findMany({
+        where: {
+          spaceId: actor.spaceId,
+          createdAt: { gte: row.updatedAt },
+          run: {
+            spaceId: actor.spaceId,
+            userId: actor.userId,
+            threadId: plan.threadId,
+            initialRecruitingRoleRevision: {
+              roleId: plan.roleId,
+              revision: plan.expectedRoleRevision,
+            },
+          },
+        },
+        include: { run: true },
+        orderBy: { createdAt: "desc" },
+        take: LIMIT + 1,
+      });
+      if (reads.length > LIMIT) return "uncertain" as const;
+      for (const read of reads) {
+        let parsed: ReturnType<typeof call>;
+        try {
+          parsed = call(read.request);
+        } catch (error) {
+          if (error instanceof IsolationError) continue;
+          throw error;
+        }
+        if (
+          !["get_email", "native_instantly_get_email"].includes(parsed.route.toolName) ||
+          parsed.route.resourceId !== plan.mailSourceId ||
+          parsed.route.resourceRevision !== plan.mailSourceRevision ||
+          parsed.args.id !== body.id
+        )
+          continue;
+        await grant(tx, actor, read);
+        const observed = successful(read);
+        return observed.id === body.id && recorded(observed)
+          ? ("completed" as const)
+          : ("uncertain" as const);
+      }
+      return "uncertain" as const;
     } catch {
       return "failed" as const;
     }
@@ -468,7 +579,8 @@ export async function createRecruitingSchedulingPlan(
   const workspace = await scope(prisma, actor, input.threadId);
   return prisma.$transaction(async (tx) => {
     const read = await verify(tx, actor, input, workspace);
-    const key = `recruiting-scheduling:${actor.spaceId}:${actor.userId}:${createHash("sha256").update(stableJsonValue(input)).digest("hex")}`;
+    const canonical = { ...input, originalEmail: read.originalEmail };
+    const key = `recruiting-scheduling:${actor.spaceId}:${actor.userId}:${createHash("sha256").update(stableJsonValue(canonical)).digest("hex")}`;
     const prior = await tx.externalEffect.findUnique({ where: { idempotencyKey: key } });
     if (prior) return projection(prior);
     return projection(
@@ -480,7 +592,7 @@ export async function createRecruitingSchedulingPlan(
           idempotencyKey: key,
           status: "draft",
           request: {
-            input,
+            input: canonical,
             roleTitle: workspace.role.title,
             mailSourceRevision: read.mailSourceRevision,
             mailSourceId: read.mailSourceId,
@@ -511,10 +623,11 @@ export async function loadVerifiedRecruitingSchedulingPlan(
     );
     if (
       verified.mailSourceRevision !== plan.mailSourceRevision ||
-      verified.mailSourceId !== plan.mailSourceId
+      verified.mailSourceId !== plan.mailSourceId ||
+      stableJsonValue(verified.originalEmail) !== stableJsonValue(plan.originalEmail)
     )
       throw new IsolationError();
-    return outcome(tx, actor, plan);
+    return outcome(tx, actor, plan, row.result);
   });
 }
 export async function listRecruitingSchedulingPlans(
@@ -587,7 +700,8 @@ export async function bindRecruitingSchedulingOperation(
     );
     if (
       verified.mailSourceRevision !== plan.mailSourceRevision ||
-      verified.mailSourceId !== plan.mailSourceId
+      verified.mailSourceId !== plan.mailSourceId ||
+      stableJsonValue(verified.originalEmail) !== stableJsonValue(plan.originalEmail)
     )
       throw new IsolationError();
     const operation = await effect(tx, actor, input.threadId, input.effectId);
@@ -688,6 +802,12 @@ export async function bindRecruitingSchedulingOperation(
     } else {
       if (!plan.bookingEffectId) throw new IsolationError();
       const booking = await effect(tx, actor, input.threadId, plan.bookingEffectId);
+      await grant(tx, actor, booking);
+      if (
+        obj(row.result)?.bookingRequestHash !==
+        createHash("sha256").update(stableJsonValue(booking.request)).digest("hex")
+      )
+        throw new IsolationError("The bound booking request changed");
       const booked = obj(successful(booking).data);
       if (!booked || typeof booked.uid !== "string") throw new IsolationError();
       const reads = await tx.externalEffect.findMany({
