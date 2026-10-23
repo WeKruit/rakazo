@@ -89,6 +89,9 @@ async function runWithModel(
     yield { type: "done" as const, text: "Done" };
   });
   const prisma = {
+    // Early final replies on file-touching turns persist through one transaction on these rows.
+    $transaction: vi.fn(async (work: (tx: unknown) => Promise<unknown>) => work(prisma)),
+    event: { create: vi.fn(async ({ data }: { data: object }) => ({ ...data, seq: 1 })) },
     run: {
       findUnique: vi.fn(async () => run),
       findUniqueOrThrow: vi.fn(async () => run),
@@ -126,12 +129,14 @@ async function runWithModel(
         historyCompactedUpToSeq: null,
         nextMessageSeq: 3,
       })),
+      update: vi.fn(async () => ({ nextMessageSeq: 4, nextEventSeq: 4 })),
     },
     message: {
       findMany: vi.fn(async (args: { where?: { threadId?: string } }) =>
         args.where?.threadId ? historyMessages() : [],
       ),
       findUnique: vi.fn(async () => null),
+      create: vi.fn(async ({ data }: { data: object }) => ({ id: "published-final", ...data })),
     },
     task: { findUniqueOrThrow: vi.fn(async () => ({ id: run.taskId, prompt: "Look again" })) },
     computer: { updateMany: vi.fn(async () => ({ count: 1 })) },
@@ -186,7 +191,11 @@ async function runWithModel(
     memory: { read: async () => ({ documents: [] }) },
     memoryProviders: { resolve: async () => null },
     artifacts: { get },
-    events: { append: vi.fn(async () => undefined), finalizeRun },
+    events: {
+      append: vi.fn(async () => undefined),
+      notify: vi.fn(async () => undefined),
+      finalizeRun,
+    },
     jobs: { enqueue: vi.fn(async () => undefined) },
     secrets: [],
   } as unknown as Parameters<typeof createRunExecutor>[0]);

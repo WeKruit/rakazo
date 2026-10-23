@@ -125,6 +125,7 @@ import {
 } from "@rakazo/core/node/approval-effect-key";
 import type { McpServer, PrismaClient, RecruitingRoleToolResult, ThreadEvents } from "@rakazo/db";
 import {
+  completedRunBlocks,
   admitRecruitingCrmImport,
   admitRecruitingReply,
   appendEventInTransaction,
@@ -514,6 +515,10 @@ const BUILTIN_AGENT_TOOL_NAMES = new Set(builtinAgentTools.map((tool) => tool.na
 export function createRunWorkspaceCheckpoint(checkpoint: () => Promise<unknown>) {
   let dirty = false;
   return {
+    /** A flush would export the workspace; the final reply should not wait behind it. */
+    get pending() {
+      return dirty;
+    },
     markDirty() {
       dirty = true;
     },
@@ -9347,9 +9352,6 @@ export function createRunExecutor(deps: ExecutorDeps) {
             }
           }
 
-          await workspaceCheckpoint.flush();
-          terminalCheckpointComplete = true;
-
           flushPendingTools();
           // Only routine runs are instructed to emit NO_RESPONSE. Other
           // allowSilentEmpty wakes (FYI, messaging) may finish truly empty.
@@ -9392,6 +9394,29 @@ export function createRunExecutor(deps: ExecutorDeps) {
           ) {
             throw new Error(TOOL_STEPS_WITHOUT_RESPONSE);
           }
+          const markUnread = completionMarksUnread(
+            run.trigger,
+            text,
+            peerMessage?.repliesToRequest === true,
+          );
+          // The workspace export can take minutes; the reply is ready now. Publish it as a
+          // durable message first, then checkpoint while the run still holds its lease, and
+          // finalize without a second copy. Failures still fail the run as before.
+          let finalBlocks = blocks;
+          if (workspaceCheckpoint.pending && blocks.length > 0) {
+            if (!(await renewRunLease(deps, runId, workerId, fence))) return;
+            await publishMessage(
+              deps,
+              run,
+              "bot",
+              completedRunBlocks(blocks, attempt.startedAt ?? null, new Date()),
+              markUnread,
+            );
+            finalBlocks = [];
+          }
+          await workspaceCheckpoint.flush();
+          terminalCheckpointComplete = true;
+
           if (!(await renewRunLease(deps, runId, workerId, fence))) return;
           const botMessageOutcome =
             run.trigger === "bot_message"
@@ -9407,12 +9432,8 @@ export function createRunExecutor(deps: ExecutorDeps) {
             leaseOwner: workerId,
             leaseFence: fence,
             outcome: "completed",
-            blocks,
-            markUnread: completionMarksUnread(
-              run.trigger,
-              text,
-              peerMessage?.repliesToRequest === true,
-            ),
+            blocks: finalBlocks,
+            markUnread,
           });
           if (!completed) return;
           if (completed.continuationRunId) {

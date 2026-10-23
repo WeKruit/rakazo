@@ -245,10 +245,14 @@ function fixture(
       },
     ),
   };
+  const published: Array<{ role: string; blocks: unknown }> = [];
   const prisma = {
     $queryRaw: vi.fn(async () => [] as Array<Record<string, unknown>>),
+    // Durable mid-turn and early-final messages go through one transaction on these rows.
+    $transaction: vi.fn(async (work: (tx: unknown) => Promise<unknown>) => work(prisma)),
     event: {
       findMany: vi.fn(async () => [] as Array<{ seq: number; type: string; payload: unknown }>),
+      create: vi.fn(async ({ data }: { data: object }) => ({ ...data, seq: 1 })),
     },
     run: {
       findMany: vi.fn(async () => []),
@@ -290,13 +294,20 @@ function fixture(
       update: vi.fn(),
       updateMany: vi.fn(async () => ({ count: 1 })),
     },
-    thread: { findUniqueOrThrow: vi.fn(async () => thread) },
+    thread: {
+      findUniqueOrThrow: vi.fn(async () => thread),
+      update: vi.fn(async () => ({ nextMessageSeq: 2, nextEventSeq: 2 })),
+    },
     message: {
       findMany: vi.fn(async ({ select }: { select?: Record<string, boolean> } = {}) =>
         select?.id && select.seq && Object.keys(select).length === 2 ? sourceMessages : [],
       ),
       findFirst: vi.fn(async () => null),
       findUnique: vi.fn(async () => null),
+      create: vi.fn(async ({ data }: { data: { role: string; blocks: unknown } }) => {
+        published.push({ role: data.role, blocks: data.blocks });
+        return { id: `message-${published.length}`, ...data };
+      }),
     },
     task: {
       findUniqueOrThrow: vi.fn(async () => ({ id: run.taskId, prompt: "Update shared state" })),
@@ -412,6 +423,7 @@ function fixture(
 
   return {
     effects,
+    published,
     executor,
     executorDeps,
     results,
@@ -5531,5 +5543,52 @@ describe("native recruiting assessment effect delivery", () => {
     expect(
       selectBuiltinToolsForRun({ ...options, messagingChannelRun: true }).map((tool) => tool.name),
     ).not.toContain("recruiting_assess");
+  });
+});
+
+describe("final reply before the terminal workspace checkpoint", () => {
+  it("publishes the reply, then checkpoints under the run lease, then finalizes without a copy", async () => {
+    const f = fixture("reply-before-checkpoint");
+    f.setCalls([
+      { name: "write_file", args: { path: "notes.txt", content: "saved" }, executionId: "w1" },
+    ]);
+    let releaseCheckpoint!: (revision: string) => void;
+    checkpointWorkspace.mockImplementationOnce(
+      () =>
+        new Promise<string>((resolve) => {
+          releaseCheckpoint = resolve;
+        }),
+    );
+    const running = f.run();
+    await vi.waitFor(() => expect(checkpointWorkspace).toHaveBeenCalledOnce());
+    // The reader already has the reply while the export is still running.
+    expect(f.published).toEqual([
+      {
+        role: "bot",
+        blocks: expect.arrayContaining([expect.objectContaining({ kind: "text", text: "Done" })]),
+      },
+    ]);
+    expect(f.runData.status).toBe("running");
+    expect(f.finalizeRun).not.toHaveBeenCalled();
+    releaseCheckpoint("home-revision");
+    await running;
+    expect(f.finalizeRun).toHaveBeenCalledWith(
+      expect.objectContaining({ outcome: "completed", blocks: [] }),
+    );
+    expect(f.published).toHaveLength(1);
+  });
+
+  it("keeps the single final message for turns that did not touch the workspace", async () => {
+    const f = fixture("reply-no-checkpoint");
+    f.setCalls([]);
+    await f.run();
+    expect(checkpointWorkspace).not.toHaveBeenCalled();
+    expect(f.published).toEqual([]);
+    expect(f.finalizeRun).toHaveBeenCalledWith(
+      expect.objectContaining({
+        outcome: "completed",
+        blocks: expect.arrayContaining([expect.objectContaining({ kind: "text", text: "Done" })]),
+      }),
+    );
   });
 });
