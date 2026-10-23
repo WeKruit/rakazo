@@ -174,7 +174,13 @@ async function advanceStageAfterSave(tx: Tx, roleId: string) {
 
 /** Stage plus the next playbook step for a role; used by snapshots and the run turn-end guard. */
 export async function readRecruitingPlaybookStep(
-  tx: Pick<Tx, "recruitingRole" | "recruitingRoleRevision" | "recruitingCandidate">,
+  tx: Pick<
+    Tx,
+    | "recruitingRole"
+    | "recruitingRoleRevision"
+    | "recruitingCandidate"
+    | "recruitingCalibrationRound"
+  >,
   roleId: string,
 ): Promise<{
   stage: RecruitingPlaybookStage;
@@ -186,15 +192,28 @@ export async function readRecruitingPlaybookStep(
     select: { title: true, playbookStage: true, currentRevisionId: true, archivedAt: true },
   });
   if (!role || role.archivedAt) return null;
-  const [revision, savedCandidates] = await Promise.all([
+  const [revision, savedCandidates, acceptedRound] = await Promise.all([
     tx.recruitingRoleRevision.findUnique({
       where: { id: role.currentRevisionId },
       select: { brief: true },
     }),
     tx.recruitingCandidate.count({ where: { roleId } }),
+    tx.recruitingCalibrationRound.findFirst({
+      where: { roleId, approvedAt: { not: null } },
+      select: { id: true },
+    }),
   ]);
-  const stage = isRecruitingPlaybookStage(role.playbookStage) ? role.playbookStage : "intake";
   const brief = revision?.brief ? RecruitingBriefDraftSchema.safeParse(revision.brief) : null;
+  // The stored stage only moves forward from writes made after it shipped. A role that already
+  // has a confirmed brief, saved people or an accepted round is at least at that stage, so it
+  // is never pushed back to a fresh calibration search.
+  let stage = isRecruitingPlaybookStage(role.playbookStage) ? role.playbookStage : "intake";
+  const confirmed = (revision?.brief as { confirmation?: unknown } | null)?.confirmation;
+  if (confirmed && typeof confirmed === "object")
+    stage = laterPlaybookStage(stage, "calibration_10");
+  if (savedCandidates >= CALIBRATION_FEEDBACK_THRESHOLD)
+    stage = laterPlaybookStage(stage, "feedback");
+  if (acceptedRound) stage = laterPlaybookStage(stage, "scale");
   const openClarifications = brief?.success ? recruitingBriefClarifications(brief.data).length : 0;
   return {
     stage,
