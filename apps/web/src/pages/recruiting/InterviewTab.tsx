@@ -145,7 +145,7 @@ export function InterviewTab({
           ) : null}
         </div>
       ) : null}
-      <details className="mt-6">
+      <details aria-label={t`Candidate interview status`} className="mt-6">
         <summary>
           <Trans>Candidate status</Trans>
         </summary>

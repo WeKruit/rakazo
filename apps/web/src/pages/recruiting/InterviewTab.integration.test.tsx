@@ -93,7 +93,7 @@ it("renders the actual calendar from the existing interview read and preserves c
   expect(element.querySelector('[data-event-id="other-event"]')).toBeNull();
   expect(element.textContent).toContain("Calendar last checked");
   const calendar = element.querySelector('[data-testid="interview-calendar"]')!;
-  const candidates = element.querySelector('section[aria-label="Candidate interview status"]')!;
+  const candidates = element.querySelector('details[aria-label="Candidate interview status"]')!;
   expect(
     calendar.compareDocumentPosition(candidates) & Node.DOCUMENT_POSITION_FOLLOWING,
   ).toBeTruthy();
