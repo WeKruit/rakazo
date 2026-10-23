@@ -477,6 +477,10 @@ msgstr ""
 msgid "All bots"
 msgstr "Tous les bots"
 
+#: src/pages/recruiting/InboxTab.tsx
+msgid "All candidates"
+msgstr ""
+
 #: src/pages/RecruitingPanel.tsx
 msgid "All Important records"
 msgstr ""
@@ -4319,6 +4323,10 @@ msgstr ""
 msgid "No stored emails for this candidate."
 msgstr ""
 
+#: src/pages/recruiting/InboxTab.tsx
+msgid "No stored emails for this role."
+msgstr ""
+
 #: src/pages/recruiting/SequenceTab.tsx
 msgid "No stored messages for this candidate."
 msgstr ""
@@ -6112,6 +6120,7 @@ msgstr "Afficher les paramètres"
 msgid "Show transcript"
 msgstr "Afficher la transcription"
 
+#: src/pages/recruiting/InboxTab.tsx
 #: src/pages/recruiting/InterviewTab.tsx
 msgid "Showing the most recent CRM records."
 msgstr ""

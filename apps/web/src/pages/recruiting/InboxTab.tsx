@@ -16,6 +16,7 @@ import {
 } from "./shared";
 
 type MailPage = Extract<RecruitingCrmDataOutput, { operation: "mail" }>;
+type RoleMailPage = Extract<RecruitingCrmDataOutput, { operation: "roleMail" }>;
 type Direction = MailPage["items"][number]["direction"];
 
 /**
@@ -73,6 +74,21 @@ function mailItems(page: MailPage) {
 }
 
 /** Received after the latest sent message means the candidate replied. */
+function roleMailItems(page: RoleMailPage) {
+  // The CRM returns the role's mail newest first; keep its order.
+  return page.items.map((item) => ({
+    id: `crm:${item.id}`,
+    candidateId: item.candidateId,
+    sender: item.sender,
+    recipients: item.recipients,
+    subject: item.subject,
+    body: item.body ?? "",
+    date: item.date,
+    direction: item.direction,
+    partial: item.partial,
+  }));
+}
+
 export function replyStatus(items: readonly { direction: Direction; date: string | null }[]) {
   const latest = (direction: Direction) =>
     Math.max(
@@ -88,7 +104,10 @@ export function replyStatus(items: readonly { direction: Direction; date: string
   return null;
 }
 
-/** Stored email threads per role candidate, with full bodies and reply status. */
+/**
+ * Stored email for the role: every candidate's mail in one read by default, or one candidate's
+ * thread (with reply status) when selected. CRMs without the role-wide read fall back to per candidate.
+ */
 export function InboxTab({ onSelectEmail, ...props }: InboxProps) {
   const { t } = useLingui();
   const crm = useRoleCrm(props);
@@ -101,8 +120,19 @@ export function InboxTab({ onSelectEmail, ...props }: InboxProps) {
     ready ? { crmRoleId: ready.crmRoleId, limit: 50 } : null,
     props,
   );
-  const person =
-    people.data?.items.find((item) => item.candidateId === candidateId) ?? people.data?.items[0];
+  const roleMail = useCrmData(
+    crm,
+    "roleMail",
+    ready ? { crmRoleId: ready.crmRoleId, limit: 50 } : null,
+    props,
+  );
+  const roleWideSupported = roleMail.data?.supported !== false;
+  const roleWide = roleWideSupported && candidateId === undefined;
+  const findPerson = (id: string | undefined) =>
+    id === undefined ? undefined : people.data?.items.find((item) => item.candidateId === id);
+  const person = roleWide
+    ? undefined
+    : (findPerson(candidateId) ?? (roleWideSupported ? undefined : people.data?.items[0]));
   const mail = useCrmData(
     crm,
     "mail",
@@ -111,18 +141,27 @@ export function InboxTab({ onSelectEmail, ...props }: InboxProps) {
       : null,
     props,
   );
-  const items =
-    mail.data && mail.data.candidateId === person?.candidateId ? mailItems(mail.data) : [];
+  const read = roleWide ? roleMail : mail;
+  const items: (RecruitingInboxEmail["email"] & { candidateId?: string })[] = roleWide
+    ? roleMail.data?.supported
+      ? roleMailItems(roleMail.data)
+      : []
+    : mail.data && mail.data.candidateId === person?.candidateId
+      ? mailItems(mail.data)
+      : [];
   const selected = items.find((item) => item.id === emailId) ?? items[0];
-  const status = replyStatus(items);
+  const selectedPerson = roleWide ? findPerson(selected?.candidateId) : person;
+  const selectedCandidateId = roleWide ? selected?.candidateId : person?.candidateId;
+  const status = roleWide ? null : replyStatus(items);
+  const nameOf = (id: string | undefined) => findPerson(id)?.name;
   useEffect(() => {
     if (!onSelectEmail) return;
     onSelectEmail(
-      selected && person && ready && crm.status === "ready"
+      selected && selectedCandidateId && ready && crm.status === "ready"
         ? {
-            candidateId: person.candidateId,
-            candidateName: person.name,
-            candidateEmail: person.email,
+            candidateId: selectedCandidateId,
+            candidateName: selectedPerson?.name,
+            candidateEmail: selectedPerson?.email,
             source: {
               serverId: ready.mcpServerId,
               serverRevision: ready.serverRevision,
@@ -133,7 +172,7 @@ export function InboxTab({ onSelectEmail, ...props }: InboxProps) {
           }
         : undefined,
     );
-  }, [selected?.id, person?.candidateId, ready?.crmRoleId]);
+  }, [selected?.id, selectedCandidateId, selectedPerson?.name, ready?.crmRoleId]);
   useEffect(() => () => onSelectEmail?.(undefined), []);
   return (
     <section aria-label={t`Inbox`}>
@@ -156,6 +195,23 @@ export function InboxTab({ onSelectEmail, ...props }: InboxProps) {
             aria-label={t`Candidates`}
             className="divide-y divide-border rounded-lg border border-border"
           >
+            {roleWideSupported ? (
+              <li>
+                <button
+                  type="button"
+                  aria-pressed={roleWide}
+                  className="block w-full p-3 text-start text-sm hover:bg-muted aria-pressed:bg-muted"
+                  onClick={() => {
+                    setCandidateId(undefined);
+                    setEmailId(undefined);
+                  }}
+                >
+                  <strong className="block truncate">
+                    <Trans>All candidates</Trans>
+                  </strong>
+                </button>
+              </li>
+            ) : null}
             {people.data.items.map((item) => (
               <li key={item.candidateId}>
                 <button
@@ -177,7 +233,9 @@ export function InboxTab({ onSelectEmail, ...props }: InboxProps) {
           </ul>
           <section aria-label={t`Emails`} className="rounded-lg border border-border">
             <div className="flex items-center justify-between gap-2 border-b border-border p-3">
-              <strong className="truncate text-sm">{person?.name}</strong>
+              <strong className="truncate text-sm">
+                {roleWide ? <Trans>All candidates</Trans> : person?.name}
+              </strong>
               {status === "replied" ? (
                 <Badge>
                   <Trans>Replied</Trans>
@@ -188,22 +246,26 @@ export function InboxTab({ onSelectEmail, ...props }: InboxProps) {
                 </Badge>
               ) : null}
             </div>
-            {mail.loading ? (
+            {read.loading ? (
               <div className="px-3">
                 <TabLoading />
               </div>
             ) : null}
-            {mail.failed ? (
+            {read.failed ? (
               <div className="px-3">
                 <TabNotice alert>
                   <Trans>Could not load CRM records. Try refreshing.</Trans>
                 </TabNotice>
               </div>
             ) : null}
-            {mail.data && !items.length ? (
+            {read.data && !items.length && !(roleWide && !roleMail.data?.supported) ? (
               <div className="px-3">
                 <TabNotice>
-                  <Trans>No stored emails for this candidate.</Trans>
+                  {roleWide ? (
+                    <Trans>No stored emails for this role.</Trans>
+                  ) : (
+                    <Trans>No stored emails for this candidate.</Trans>
+                  )}
                 </TabNotice>
               </div>
             ) : null}
@@ -228,6 +290,11 @@ export function InboxTab({ onSelectEmail, ...props }: InboxProps) {
                     </small>
                   ) : null}
                 </span>
+                {roleWide && nameOf(item.candidateId) ? (
+                  <span className="block truncate text-muted-foreground">
+                    {nameOf(item.candidateId)}
+                  </span>
+                ) : null}
                 <span className="block truncate">{item.subject || t`No subject`}</span>
                 {item.date ? (
                   <time className="text-xs text-muted-foreground" dateTime={item.date}>
@@ -236,6 +303,11 @@ export function InboxTab({ onSelectEmail, ...props }: InboxProps) {
                 ) : null}
               </button>
             ))}
+            {roleWide && roleMail.data?.nextOffset != null ? (
+              <p className="p-3 text-xs text-muted-foreground">
+                <Trans>Showing the most recent CRM records.</Trans>
+              </p>
+            ) : null}
           </section>
           <section aria-label={t`Email content`} className="rounded-lg border border-border p-4">
             {selected ? (

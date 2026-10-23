@@ -477,6 +477,10 @@ msgstr "AI interpretation"
 msgid "All bots"
 msgstr "All bots"
 
+#: src/pages/recruiting/InboxTab.tsx
+msgid "All candidates"
+msgstr "All candidates"
+
 #: src/pages/RecruitingPanel.tsx
 msgid "All Important records"
 msgstr "All Important records"
@@ -4319,6 +4323,10 @@ msgstr "No stored campaign associations were returned for this role."
 msgid "No stored emails for this candidate."
 msgstr "No stored emails for this candidate."
 
+#: src/pages/recruiting/InboxTab.tsx
+msgid "No stored emails for this role."
+msgstr "No stored emails for this role."
+
 #: src/pages/recruiting/SequenceTab.tsx
 msgid "No stored messages for this candidate."
 msgstr "No stored messages for this candidate."
@@ -6112,6 +6120,7 @@ msgstr "Show settings"
 msgid "Show transcript"
 msgstr "Show transcript"
 
+#: src/pages/recruiting/InboxTab.tsx
 #: src/pages/recruiting/InterviewTab.tsx
 msgid "Showing the most recent CRM records."
 msgstr "Showing the most recent CRM records."
