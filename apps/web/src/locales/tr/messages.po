@@ -64,6 +64,11 @@ msgstr "{0} (en fazla {ATTACHMENT_MAX_COUNT} ek)"
 msgid "{0} (over 10 MiB)"
 msgstr "{0} (10 MiB üzeri)"
 
+#. placeholder {0}: file.name
+#: src/pages/Shell.tsx
+msgid "{0} (XLSX is not supported yet. Save as CSV and upload again.)"
+msgstr ""
+
 #. placeholder {0}: preset.n
 #: src/pages/RoutineSchedule.tsx
 msgid "{0} {unitLabel}"
@@ -5427,13 +5432,13 @@ msgstr "Şimdi tekrar dene"
 msgid "Retry screen"
 msgstr ""
 
-#: src/pages/McpOAuthCallback.tsx
-msgid "Return to WeKruit Headhunter"
-msgstr "WeKruit Headhunter'ya dön"
-
 #: src/pages/Shell.tsx
 msgid "Return to the original role before saving this draft."
 msgstr ""
+
+#: src/pages/McpOAuthCallback.tsx
+msgid "Return to WeKruit Headhunter"
+msgstr "WeKruit Headhunter'ya dön"
 
 #. placeholder {0}: doc.revision
 #: src/pages/KnowledgeSection.tsx
@@ -7136,6 +7141,10 @@ msgstr "Çalışıyor…"
 
 #: src/components/computer/TerminalApp.tsx
 msgid "Wrote {path}"
+msgstr ""
+
+#: src/pages/Shell.tsx
+msgid "XLSX is not supported yet. Save as CSV and upload again."
 msgstr ""
 
 #: src/lib/billing.ts

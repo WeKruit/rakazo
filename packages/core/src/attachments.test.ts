@@ -6,6 +6,7 @@ import {
   blocksToAgentHistoryText,
   decodeAttachmentBase64,
   inferAttachmentMimeType,
+  isXlsxFileName,
   messageFileReferences,
   promptTextForAttachments,
   userTurnMessageForRun,
@@ -280,5 +281,13 @@ describe("role chat context", () => {
     expect(prompt).toContain(JSON.stringify(crmRoleReference));
     expect(prompt).toContain(JSON.stringify(recruitingContext));
     expect(promptTextForAttachments("Hi", [])).toBe("Hi");
+  });
+});
+
+describe("isXlsxFileName", () => {
+  it("detects xlsx names case-insensitively while xlsx has no allowed MIME mapping", () => {
+    expect(isXlsxFileName("List.XLSX")).toBe(true);
+    expect(isXlsxFileName("list.csv")).toBe(false);
+    expect(inferAttachmentMimeType("list.xlsx")).toBeNull();
   });
 });
