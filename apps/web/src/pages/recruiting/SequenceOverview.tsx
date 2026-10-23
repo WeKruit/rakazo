@@ -5,15 +5,19 @@ import { CalendarDays, MousePointer2, Send } from "lucide-react";
 
 /** Counts of the supplied observations only, never campaign reach or conversion rates. */
 export function sequenceObservations(campaign: RecruitingRoleCampaign | undefined) {
-  if (campaign?.status !== "ready" || !campaign.campaign || !campaign.leads.length) {
-    return { active: null, interested: null };
+  if (campaign?.status !== "ready" || !campaign.campaign) {
+    return { active: null, interested: null, partial: false };
   }
   const active = campaign.leads.filter((lead) => lead.status === 1).length;
   const interested = campaign.leads.filter(
     (lead) => lead.interestStatus !== null && [1, 2, 3, 4].includes(lead.interestStatus),
   ).length;
-  // This read is bounded and does not declare completeness. Zero observations is not zero total.
-  return { active: active || null, interested: interested || null };
+  const complete = campaign.leadsComplete === true;
+  return {
+    active: complete ? active : active || null,
+    interested: complete ? interested : interested || null,
+    partial: !complete,
+  };
 }
 
 export function datedSends(dates: readonly string[], now: Date, days = 7) {
@@ -41,15 +45,15 @@ export function datedSends(dates: readonly string[], now: Date, days = 7) {
 export function SequenceOverview({
   campaign,
   replied,
-  sendDates = [],
+  sendDates = null,
   sendContext,
   now = new Date(),
 }: {
   campaign?: RecruitingRoleCampaign;
   /** A complete authorized CRM count, or null while partial/unavailable. */
   replied: number | null;
-  /** Exact sentAt timestamps only. Never queue-created or last-synced times. */
-  sendDates?: readonly string[];
+  /** Exact role-proven sentAt timestamps only; null means role activity is unavailable. */
+  sendDates?: readonly string[] | null;
   /** Exact record scope for the supplied send dates, such as the selected contact. */
   sendContext?: string | null;
   now?: Date;
@@ -59,13 +63,13 @@ export function SequenceOverview({
   const observed = sequenceObservations(campaign);
   const metrics = [
     { label: t`Contacted`, value: null, observed: false },
-    { label: t`Active`, value: observed.active, observed: true },
+    { label: t`Active`, value: observed.active, observed: observed.partial },
     { label: t`Opened`, value: null, observed: false },
     { label: t`Clicked`, value: null, observed: false },
     { label: t`Replied`, value: replied, observed: false },
-    { label: t`Interested`, value: observed.interested, observed: true },
+    { label: t`Interested`, value: observed.interested, observed: observed.partial },
   ];
-  const days = datedSends(sendDates, now);
+  const days = datedSends(sendDates ?? [], now);
   const max = Math.max(1, ...days.map((day) => day.count));
   const hasDatedSends = days.some((day) => day.count > 0);
   return (
@@ -96,9 +100,11 @@ export function SequenceOverview({
         <span>
           <Trans>— Not reported</Trans>
         </span>
-        <span>
-          <Trans>≥ Observed in loaded records</Trans>
-        </span>
+        {metrics.some((metric) => metric.observed && metric.value !== null) ? (
+          <span>
+            <Trans>≥ Observed in loaded records</Trans>
+          </span>
+        ) : null}
       </div>
       <section aria-label={t`Recorded send activity`} className="rounded-xl border bg-card p-4">
         <div className="mb-4 flex flex-wrap items-center justify-between gap-2">
@@ -140,7 +146,11 @@ export function SequenceOverview({
           <div className="flex min-h-32 flex-col items-center justify-center gap-2 rounded-lg border border-dashed text-sm text-muted-foreground">
             <MousePointer2 size={20} aria-hidden />
             <p>
-              <Trans>No dated sends in the available records.</Trans>
+              {sendDates === null ? (
+                <Trans>Recruiter messages are unavailable for this role.</Trans>
+              ) : (
+                <Trans>No dated sends in the available records.</Trans>
+              )}
             </p>
           </div>
         )}

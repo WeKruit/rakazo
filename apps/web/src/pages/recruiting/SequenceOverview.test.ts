@@ -15,17 +15,36 @@ it("does not equate enrolled, active or completed leads with actual contact or i
       { email: "two@example.test", candidateKey: null, status: 3, interestStatus: -1 },
     ],
   };
-  expect(sequenceObservations(campaign)).toEqual({ active: 1, interested: null });
+  expect(sequenceObservations(campaign)).toEqual({ active: 1, interested: null, partial: true });
   expect(sequenceObservations({ ...campaign, leads: [] })).toEqual({
     active: null,
     interested: null,
+    partial: true,
   });
   expect(sequenceObservations({ ...campaign, status: "unavailable" })).toEqual({
     active: null,
     interested: null,
+    partial: false,
   });
   campaign.leads[1]!.interestStatus = 1;
   expect(sequenceObservations(campaign).interested).toBe(1);
+});
+
+it("uses a completeness receipt for exact positive and zero counts", () => {
+  const campaign: RecruitingRoleCampaign = {
+    status: "ready",
+    serverId: "source",
+    campaign: { id: "c", name: "Example", eaccount: null, status: 1, stopOnReply: true },
+    leadsComplete: true,
+    leads: [],
+  };
+  expect(sequenceObservations(campaign)).toEqual({ active: 0, interested: 0, partial: false });
+  campaign.leads = [
+    { email: "one@example.test", candidateKey: null, status: 1, interestStatus: 2 },
+  ];
+  expect(sequenceObservations(campaign)).toEqual({ active: 1, interested: 1, partial: false });
+  campaign.leadsComplete = false;
+  expect(sequenceObservations(campaign)).toEqual({ active: 1, interested: 1, partial: true });
 });
 
 it("buckets only valid supplied send timestamps into the visible UTC dates", () => {

@@ -25,16 +25,6 @@ import {
 // The CRM mirrors the provider's integer campaign status without defining its meaning; show it as stored.
 const campaignStatus = (status: number | null) => (status === null ? "—" : String(status));
 
-function useOutboxStatus() {
-  const { t } = useLingui();
-  return {
-    pending: t`Queued`,
-    processing: t`Sending`,
-    sent: t`Sent`,
-    failed: t`Failed`,
-  } as const;
-}
-
 /** Campaign names may carry an internal "[role <id>]" tag; it is not for people. */
 export const campaignName = (name: string) =>
   name.replace(/\s*\[role [^\]]*\]\s*/gi, " ").trim() || name;
@@ -120,7 +110,7 @@ export function RoleCampaignCard(props: CampaignScope) {
   );
 }
 
-/** Stored outreach state for the role: campaigns, per-candidate status and queued/sent messages. */
+/** Stored outreach state for the role: campaigns and per-candidate status. */
 export function SequenceTab(props: RecruitingTabProps) {
   const { t } = useLingui();
   const detail = useRecruitingDetail();
@@ -133,7 +123,6 @@ export function SequenceTab(props: RecruitingTabProps) {
       statusLabel(instantly.lead, lead.status),
     ]),
   );
-  const outboxStatus = useOutboxStatus();
   const [candidateId, setCandidateId] = useState<string>();
   const ready = crm.status === "ready" ? crm.target : null;
   const campaigns = useCrmPages(
@@ -161,6 +150,14 @@ export function SequenceTab(props: RecruitingTabProps) {
     loadedCounts.set(person.outreachStatus, (loadedCounts.get(person.outreachStatus) ?? 0) + 1);
   const counts = totals.data?.counts ?? loadedCounts;
   const selected = people.data?.items.find((person) => person.candidateId === candidateId);
+  const roleLeadCampaigns =
+    ready && details.data && details.data.candidateId === candidateId
+      ? details.data.campaignAssociations.leadCampaigns.filter(
+          ({ campaign }) =>
+            campaign?.crmRoleId === ready.crmRoleId && campaign.clientId === ready.crmClientId,
+        )
+      : [];
+
   return (
     <section aria-label={t`Sequence`}>
       <TabHeader title={<Trans>Sequence</Trans>} />
@@ -170,14 +167,8 @@ export function SequenceTab(props: RecruitingTabProps) {
         replied={
           !totals.failed && totals.data?.complete ? (totals.data.counts.get("replied") ?? 0) : null
         }
-        sendContext={selected?.name}
-        sendDates={
-          details.data && details.data.candidateId === candidateId
-            ? details.data.outbox.flatMap((entry) =>
-                entry.status === "sent" && entry.sentAt ? [entry.sentAt] : [],
-              )
-            : []
-        }
+        // Candidate-wide outbox records have no role provenance.
+        sendDates={null}
       />
       {roleCampaign.failed || roleCampaign.data?.status === "unavailable" ? (
         <TabNotice alert>
@@ -305,9 +296,9 @@ export function SequenceTab(props: RecruitingTabProps) {
                     <Trans>Could not load candidate records. Try refreshing.</Trans>
                   </TabNotice>
                 ) : null}
-                {details.data?.campaignAssociations.leadCampaigns.length ? (
+                {roleLeadCampaigns.length ? (
                   <ul className="flex flex-wrap gap-2 text-xs">
-                    {details.data.campaignAssociations.leadCampaigns.map((lead) => (
+                    {roleLeadCampaigns.map((lead) => (
                       <li key={lead.leadId}>
                         <Badge variant="secondary">
                           {lead.campaign?.name ?? t`Campaign not synced`}
@@ -317,42 +308,11 @@ export function SequenceTab(props: RecruitingTabProps) {
                     ))}
                   </ul>
                 ) : null}
-                {details.data && !details.data.outbox.length ? (
+                {details.data ? (
                   <TabNotice>
-                    <Trans>No stored messages for this candidate.</Trans>
+                    <Trans>Recruiter messages are unavailable for this role.</Trans>
                   </TabNotice>
                 ) : null}
-                {details.data?.outbox.map((entry) => (
-                  <article key={entry.id} className="rounded-lg border border-border p-3 text-sm">
-                    <div className="mb-2 flex flex-wrap items-center justify-between gap-2">
-                      <Badge variant={entry.status === "failed" ? "destructive" : "outline"}>
-                        {outboxStatus[entry.status]}
-                      </Badge>
-                      {entry.status === "sent" ? (
-                        entry.sentAt ? (
-                          <time className="text-xs text-muted-foreground" dateTime={entry.sentAt}>
-                            {formatDate(entry.sentAt)}
-                          </time>
-                        ) : (
-                          <span className="text-xs text-muted-foreground">
-                            <Trans>Time not recorded</Trans>
-                          </span>
-                        )
-                      ) : (
-                        <span className="text-xs text-muted-foreground">
-                          <Trans>Queued</Trans> ·{" "}
-                          <time dateTime={entry.createdAt}>{formatDate(entry.createdAt)}</time>
-                        </span>
-                      )}
-                    </div>
-                    <p className="whitespace-pre-wrap break-words">
-                      {entry.polishedBody ?? entry.body}
-                    </p>
-                    {entry.error ? (
-                      <p className="mt-2 text-xs text-destructive">{entry.error}</p>
-                    ) : null}
-                  </article>
-                ))}
               </section>
             ) : null}
           </div>

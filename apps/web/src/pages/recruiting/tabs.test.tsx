@@ -182,7 +182,7 @@ it("lists the role's CRM contacts with stage and saved email status", async () =
   expect(view.textContent).not.toContain(ADA);
 });
 
-it("shows campaign state and stored messages without any send control", async () => {
+it("shows only exact role campaign associations and withholds unscoped messages", async () => {
   crmData.mockImplementation(async (input: { operation: string }) =>
     input.operation === "roleCampaigns"
       ? {
@@ -207,7 +207,45 @@ it("shows campaign state and stored messages without any send control", async ()
             roleTracking: [],
             roleInterests: [],
             campaignAssociations: {
-              leadCampaigns: [],
+              leadCampaigns: [
+                {
+                  leadId: "exact",
+                  campaignId: "exact",
+                  campaign: {
+                    id: "exact",
+                    name: "Exact role association",
+                    crmRoleId: ROLE,
+                    clientId: CLIENT,
+                    status: 1,
+                    syncedAt: checkedAt,
+                  },
+                },
+                {
+                  leadId: "other-role",
+                  campaignId: "other-role",
+                  campaign: {
+                    id: "other-role",
+                    name: "Other role association",
+                    crmRoleId: BEN,
+                    clientId: CLIENT,
+                    status: 1,
+                    syncedAt: checkedAt,
+                  },
+                },
+                {
+                  leadId: "other-client",
+                  campaignId: "other-client",
+                  campaign: {
+                    id: "other-client",
+                    name: "Other client association",
+                    crmRoleId: ROLE,
+                    clientId: BEN,
+                    status: 1,
+                    syncedAt: checkedAt,
+                  },
+                },
+                { leadId: "unknown", campaignId: null, campaign: null },
+              ],
               pipelineCampaign: null,
               offset: 0,
               nextOffset: null,
@@ -238,12 +276,62 @@ it("shows campaign state and stored messages without any send control", async ()
   )!;
   await act(async () => ada.click());
   await settle();
-  expect(view.textContent).toContain("Hi Ada");
-  expect(view.textContent).toContain("Sent");
+  expect(view.textContent).toContain("Exact role association");
+  expect(view.textContent).not.toContain("Other role association");
+  expect(view.textContent).not.toContain("Other client association");
+  expect(view.textContent).not.toContain("Campaign not synced");
+  expect(view.textContent).not.toContain("Hi Ada");
+  expect(view.textContent).toContain("Recruiter messages are unavailable for this role.");
+  const sendActivity = view.querySelector('[aria-label="Recorded send activity"]')!;
+  expect(sendActivity.querySelector("ol")).toBeNull();
+  expect(sendActivity.textContent).not.toContain("No dated sends");
   expect([...view.querySelectorAll("button")].some((b) => /send/i.test(b.textContent ?? ""))).toBe(
     false,
   );
 });
+
+it.each([
+  { complete: true, leads: [], active: "0", interested: "0" },
+  {
+    complete: true,
+    leads: [{ email: "ada@example.com", status: 1, interestStatus: 2 }],
+    active: "1",
+    interested: "1",
+  },
+  {
+    complete: false,
+    leads: [{ email: "ada@example.com", status: 1, interestStatus: 2 }],
+    active: "≥ 1",
+    interested: "≥ 1",
+  },
+  { complete: false, leads: [], active: "—Not reported", interested: "—Not reported" },
+])(
+  "renders Sequence lead counts with honest coverage: $complete $active",
+  async ({ complete, leads, active, interested }) => {
+    roleCampaign.mockResolvedValue({
+      status: "ready",
+      serverId: "source",
+      leadsComplete: complete,
+      campaign: { id: "c", name: "Campaign", status: 1 },
+      leads,
+    });
+    crmData.mockImplementation(async ({ operation }: { operation: string }) =>
+      operation === "candidates"
+        ? candidatesPage
+        : { operation, source, checkedAt, items: [], offset: 0, nextOffset: null },
+    );
+    const view = await mount(<SequenceTab {...props} />);
+    const values = new Map(
+      [...view.querySelectorAll("dl > div")].map((metric) => [
+        metric.querySelector("dt")?.textContent,
+        metric.querySelector("dd")?.textContent,
+      ]),
+    );
+    expect(values.get("Active")).toBe(active);
+    expect(values.get("Interested")).toBe(interested);
+    expect(values.get("Contacted")).toBe("—Not reported");
+  },
+);
 
 const roleMailPage = (supported: boolean, items: unknown[] = []) => ({
   operation: "roleMail",
