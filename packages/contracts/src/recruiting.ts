@@ -2105,3 +2105,60 @@ export const RecruitingCrmRoleCampaignsReadSchema = z.object({
   offset: z.number().int().nonnegative(),
   next_offset: z.number().int().nonnegative().nullable(),
 });
+
+// Owner-scoped follow-up reminders (role and/or candidate), shared by RPC and the agent tool.
+export const RecruitingReminderStatusSchema = z.enum(["open", "done", "dismissed"]);
+const ReminderCandidateKey = Text.max(300).regex(
+  /^(autumn|crm):\S+$/,
+  'Use "autumn:<key>" or "crm:<id>"',
+);
+const ReminderTitle = Text.max(200);
+const ReminderNote = z.string().max(4000);
+export const RecruitingReminderSchema = z.strictObject({
+  id: RecruitingId,
+  roleId: RecruitingId.nullable(),
+  candidateKey: z.string().nullable(),
+  title: z.string(),
+  note: z.string().nullable(),
+  dueAt: IsoDate,
+  status: RecruitingReminderStatusSchema,
+  completedAt: IsoDate.nullable(),
+  createdBy: z.enum(["user", "agent"]),
+  createdAt: IsoDate,
+});
+export type RecruitingReminder = z.infer<typeof RecruitingReminderSchema>;
+export const ListRecruitingRemindersInput = z.strictObject({
+  candidateKey: ReminderCandidateKey.optional(),
+  roleId: RecruitingId.optional(),
+  status: RecruitingReminderStatusSchema.optional(),
+  dueBefore: IsoDate.optional(),
+});
+export type ListRecruitingRemindersInput = z.infer<typeof ListRecruitingRemindersInput>;
+export const ListRecruitingRemindersOutput = z.strictObject({
+  items: z.array(RecruitingReminderSchema),
+  overdueCount: z.number().int().min(0),
+});
+export const CreateRecruitingReminderInput = z.strictObject({
+  roleId: RecruitingId.optional(),
+  candidateKey: ReminderCandidateKey.optional(),
+  title: ReminderTitle,
+  note: ReminderNote.optional(),
+  dueAt: IsoDate,
+});
+export type CreateRecruitingReminderInput = z.infer<typeof CreateRecruitingReminderInput>;
+export const UpdateRecruitingReminderInput = z.strictObject({
+  id: RecruitingId,
+  title: ReminderTitle.optional(),
+  note: ReminderNote.nullable().optional(),
+  dueAt: IsoDate.optional(),
+  status: RecruitingReminderStatusSchema.optional(),
+});
+export type UpdateRecruitingReminderInput = z.infer<typeof UpdateRecruitingReminderInput>;
+export const DeleteRecruitingReminderInput = z.strictObject({ id: RecruitingId });
+export const RecruitingRemindersToolInputSchema = z.discriminatedUnion("operation", [
+  ListRecruitingRemindersInput.extend({ operation: z.literal("list") }),
+  CreateRecruitingReminderInput.extend({ operation: z.literal("create") }),
+  UpdateRecruitingReminderInput.extend({ operation: z.literal("update") }),
+  DeleteRecruitingReminderInput.extend({ operation: z.literal("delete") }),
+]);
+export type RecruitingRemindersToolInput = z.infer<typeof RecruitingRemindersToolInputSchema>;

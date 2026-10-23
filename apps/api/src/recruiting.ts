@@ -3045,3 +3045,24 @@ export async function getRecruitingRoleCandidates(
     },
   });
 }
+
+export const listRecruitingReminders = (
+  prisma: PrismaClient,
+  actor: Actor,
+  input: Parameters<typeof recruiting.listRecruitingReminders>[2],
+) => authenticated(() => recruiting.listRecruitingReminders(prisma, actor, input));
+export const createRecruitingReminder = (
+  prisma: PrismaClient,
+  actor: Actor,
+  input: Parameters<typeof recruiting.createRecruitingReminder>[2],
+) => authenticated(() => recruiting.createRecruitingReminder(prisma, actor, input));
+export const updateRecruitingReminder = (
+  prisma: PrismaClient,
+  actor: Actor,
+  input: Parameters<typeof recruiting.updateRecruitingReminder>[2],
+) => authenticated(() => recruiting.updateRecruitingReminder(prisma, actor, input));
+export const deleteRecruitingReminder = (
+  prisma: PrismaClient,
+  actor: Actor,
+  input: { id: string },
+) => authenticated(() => recruiting.deleteRecruitingReminder(prisma, actor, input.id));

@@ -116,7 +116,9 @@ import { McpOAuthConfigInput } from "./mcp.js";
 import { MessageReactionSchema } from "./reactions.js";
 import {
   ConfirmRecruitingBriefInput,
+  CreateRecruitingReminderInput,
   CreateRecruitingRoleInput,
+  DeleteRecruitingReminderInput,
   EditRecruitingCriteriaInput,
   ListRecruitingCandidateSourcesInput,
   ListRecruitingCandidateSourcesOutput,
@@ -124,6 +126,8 @@ import {
   ListRecruitingCandidatesOutput,
   ListRecruitingFeedbackInput,
   ListRecruitingFeedbackOutput,
+  ListRecruitingRemindersInput,
+  ListRecruitingRemindersOutput,
   ReadRecruitingSourceInput,
   RecruitingAssessmentAskTargetSchema,
   RecruitingAssessmentSchema,
@@ -136,6 +140,7 @@ import {
   RecruitingCrmDataInputSchema,
   RecruitingCrmDataOutputSchema,
   RecruitingId,
+  RecruitingReminderSchema,
   RecruitingResearchActionSchema,
   RecruitingResearchSavedObservationSchema,
   RecruitingResearchTaskSchema,
@@ -148,6 +153,7 @@ import {
   ReviseRecruitingRoleInput,
   SetRecruitingCandidateShortlistInput,
   SetRecruitingCandidateShortlistOutput,
+  UpdateRecruitingReminderInput,
 } from "./recruiting.js";
 import { RecruitingCrmRoleReferenceSchema } from "./recruiting-crm.js";
 import { RoutineHistorySchema, RoutineRunCursorSchema, RunsListOutputSchema } from "./runs.js";
@@ -668,6 +674,14 @@ export const appContract = {
         }),
       )
       .output(recruitingWorkspace),
+    reminders: {
+      list: oc.input(ListRecruitingRemindersInput).output(ListRecruitingRemindersOutput),
+      create: oc.input(CreateRecruitingReminderInput).output(RecruitingReminderSchema),
+      update: oc.input(UpdateRecruitingReminderInput).output(RecruitingReminderSchema),
+      delete: oc
+        .input(DeleteRecruitingReminderInput)
+        .output(z.strictObject({ ok: z.literal(true) })),
+    },
     confirmBrief: oc.input(ConfirmRecruitingBriefInput).output(recruitingWorkspace),
     editCriteria: oc.input(EditRecruitingCriteriaInput).output(recruitingWorkspace),
     listAssessments: oc

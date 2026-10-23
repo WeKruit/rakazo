@@ -125,6 +125,7 @@ const UNATTENDED_SAFE_BUILTIN_TOOLS = new Set([
   "recruiting_crm_import",
   "recruiting_role",
   "recruiting_feedback",
+  "recruiting_reminders",
   "recruiting_shortlist",
   "recruiting_research",
   "remember",

@@ -59,6 +59,7 @@ import {
   RecruitingCrmTargetToolInputSchema,
   RecruitingFeedbackInputSchema,
   RecruitingPreferenceFeedbackSchema,
+  RecruitingRemindersToolInputSchema,
   RecruitingReplyInputSchema,
   RecruitingResearchToolInputSchema,
   RecruitingShortlistToolInputSchema,
@@ -150,6 +151,7 @@ import {
   executeNativeRecruitingShortlist,
   executeRecruitingApproval,
   executeRecruitingCrmBinding,
+  executeRecruitingRemindersTool,
   findDefaultModelCredential,
   findModelCredential,
   getRecruitingCrmTarget,
@@ -7370,6 +7372,21 @@ export function createRunExecutor(deps: ExecutorDeps) {
                   effectRequest: applied.effect.request,
                 },
                 args,
+              );
+            } catch (error) {
+              return finish(roleError(error));
+            }
+          }
+          if (name === "recruiting_reminders") {
+            // Internal bookkeeping: no approval card, no external effect.
+            try {
+              return finish(
+                await executeRecruitingRemindersTool(
+                  deps.prisma,
+                  researchActor.actor,
+                  bot.id,
+                  RecruitingRemindersToolInputSchema.parse(args),
+                ),
               );
             } catch (error) {
               return finish(roleError(error));

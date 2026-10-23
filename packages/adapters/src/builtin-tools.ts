@@ -11,6 +11,7 @@ import {
   RecruitingCrmTargetToolInputSchema,
   RecruitingFeedbackInputSchema,
   RecruitingPreferenceFeedbackSchema,
+  RecruitingRemindersToolInputSchema,
   RecruitingReplyInputSchema,
   RecruitingResearchToolInputSchema,
   RecruitingRoleToolInputSchema,
@@ -604,6 +605,12 @@ export const builtinAgentTools: ConnectorTool[] = [
     description:
       'Request one-time human confirmation of the exact current package: saved role requirements, role documents or the ten-profile calibration and rule changes. For requirements use stage:"brief", roleId and expectedRoleRevision only; the server displays the saved requirements and records confirmation after the original native card is approved. Generic ask_user answers never confirm requirements. Use the current role revision, the completed document approval effect, and ten exact saved candidate sources (effectId, rowIndex, artifactRef, roleRevisionId, providerTaskId), with their observed LinkedIn and evidence URLs. Save and confirm qualification changes in the role first; documents and calibration approval record the review and do not edit the role. Never self-approve.',
     inputSchema: z.toJSONSchema(RecruitingApprovalToolInputSchema, { io: "input" }),
+  },
+  {
+    name: "recruiting_reminders",
+    description:
+      'Internal follow-up reminders for the signed-in recruiter (no approval, nothing is sent). operation list {candidateKey?, roleId?, status?, dueBefore?} returns {items, overdueCount}; create {title, dueAt (ISO-8601 with offset), note?, roleId?, candidateKey?}; update {id, title?, note?, dueAt?, status?: open|done|dismissed}; delete {id}. candidateKey is "autumn:<key>" or "crm:<id>", the same keys roleCandidates items use. Use for "remind me to follow up with X on Friday".',
+    inputSchema: z.toJSONSchema(RecruitingRemindersToolInputSchema, { io: "input" }),
   },
   {
     name: "recruiting_feedback",
