@@ -27,6 +27,11 @@ msgstr ""
 msgid "{0, plural, =1 {# candidate} other {# candidates}}"
 msgstr ""
 
+#. placeholder {0}: page.total
+#: src/pages/RecruitingPanel.tsx
+msgid "{0, plural, =1 {# contact} other {# contacts}}"
+msgstr ""
+
 #. placeholder {0}: group.entries.length
 #: src/pages/ModelSettingsOverlay.tsx
 msgid "{0, plural, one {# model} other {# models}}"
@@ -997,6 +1002,10 @@ msgid "Candidate feedback"
 msgstr ""
 
 #: src/pages/RecruitingPanel.tsx
+msgid "Candidate messages"
+msgstr ""
+
+#: src/pages/RecruitingPanel.tsx
 msgid "Candidate question"
 msgstr ""
 
@@ -1128,6 +1137,10 @@ msgstr "봇 모양과 색을 고르거나 이미지를 업로드하세요"
 #: src/pages/MessagingSettingsOverlay.tsx
 msgid "Choose a bot…"
 msgstr "Bot 선택…"
+
+#: src/pages/Shell.tsx
+msgid "Choose a CRM role again."
+msgstr ""
 
 #: src/pages/Auth.tsx
 msgid "Choose a new password"
@@ -1510,6 +1523,10 @@ msgid "Contact details have not been checked yet."
 msgstr ""
 
 #: src/pages/RecruitingPanel.tsx
+msgid "Contact status"
+msgstr ""
+
+#: src/pages/RecruitingPanel.tsx
 #: src/pages/shell/RecruitingNavigation.tsx
 msgid "Contacts"
 msgstr ""
@@ -1810,6 +1827,10 @@ msgid "Could not load credentials."
 msgstr ""
 
 #: src/pages/RecruitingPanel.tsx
+msgid "Could not load CRM records. Try refreshing."
+msgstr ""
+
+#: src/pages/RecruitingPanel.tsx
 msgid "Could not load feedback"
 msgstr ""
 
@@ -1858,6 +1879,10 @@ msgstr "로그인 옵션을 불러올 수 없습니다"
 #: src/pages/KnowledgeSection.tsx
 msgid "Could not load skill"
 msgstr "스킬을 불러오지 못했습니다"
+
+#: src/pages/RecruitingPanel.tsx
+msgid "Could not load stored messages. Try refreshing."
+msgstr ""
 
 #: src/pages/Artifacts.tsx
 msgid "Could not load this artifact."
@@ -1918,6 +1943,10 @@ msgstr "모델 서버에 연결하지 못했습니다."
 #: src/pages/Auth.tsx
 msgid "Could not reach the server"
 msgstr "서버에 연결할 수 없습니다"
+
+#: src/pages/shell/RecruitingNavigation.tsx
+msgid "Could not read a CRM connection."
+msgstr ""
 
 #: src/pages/RecruitingCorrespondence.tsx
 msgid "Could not read this sequence."
@@ -2188,7 +2217,15 @@ msgid "CRM"
 msgstr ""
 
 #: src/pages/RecruitingPanel.tsx
+msgid "CRM contacts"
+msgstr ""
+
+#: src/pages/RecruitingPanel.tsx
 msgid "CRM receipt"
+msgstr ""
+
+#: src/pages/shell/RecruitingNavigation.tsx
+msgid "CRM roles"
 msgstr ""
 
 #: src/pages/RoutineSchedule.tsx
@@ -2985,6 +3022,10 @@ msgid "Hiring manager"
 msgstr ""
 
 #: src/pages/RecruitingPanel.tsx
+msgid "Historical records matched to this client and role. These are not new search results or a verified shortlist."
+msgstr ""
+
+#: src/pages/RecruitingPanel.tsx
 msgid "History"
 msgstr ""
 
@@ -3137,6 +3178,7 @@ msgid "Interval unit"
 msgstr "간격 단위"
 
 #: src/pages/RecruitingCorrespondence.tsx
+#: src/pages/RecruitingPanel.tsx
 #: src/pages/shell/RecruitingNavigation.tsx
 msgid "Interview"
 msgstr ""
@@ -3206,6 +3248,10 @@ msgstr ""
 
 #: src/components/DesktopUpdates.tsx
 msgid "Later"
+msgstr ""
+
+#: src/pages/RecruitingPanel.tsx
+msgid "Latest messages"
 msgstr ""
 
 #: src/components/computer/TerminalApp.tsx
@@ -3297,6 +3343,14 @@ msgstr "활동을 불러오는 중…"
 msgid "Loading contact details…"
 msgstr ""
 
+#: src/pages/RecruitingPanel.tsx
+msgid "Loading CRM records…"
+msgstr ""
+
+#: src/pages/shell/RecruitingNavigation.tsx
+msgid "Loading CRM roles…"
+msgstr ""
+
 #: src/pages/PluginsOverlay.tsx
 msgid "Loading integrations…"
 msgstr "연동 목록을 불러오는 중…"
@@ -3323,6 +3377,10 @@ msgstr ""
 
 #: src/pages/RecruitingCorrespondence.tsx
 msgid "Loading sequence…"
+msgstr ""
+
+#: src/pages/RecruitingPanel.tsx
+msgid "Loading stored messages…"
 msgstr ""
 
 #: src/pages/PluginsOverlay.tsx
@@ -3554,6 +3612,10 @@ msgstr "메시지를 입력하세요"
 #: src/pages/Shell.tsx
 msgid "Messaged {peer}"
 msgstr "{peer}에게 메시지 보냄"
+
+#: src/pages/RecruitingPanel.tsx
+msgid "Messages"
+msgstr ""
 
 #: src/pages/AccountSettingsOverlay.tsx
 #: src/pages/MessagingSettingsOverlay.tsx
@@ -3809,6 +3871,10 @@ msgid "New ticket"
 msgstr ""
 
 #: src/pages/RecruitingPanel.tsx
+msgid "Next"
+msgstr ""
+
+#: src/pages/RecruitingPanel.tsx
 msgid "No additional search filters"
 msgstr ""
 
@@ -3854,6 +3920,14 @@ msgstr "아직 연결된 채팅 앱이 없습니다."
 
 #: src/pages/shell/bot-credentials.tsx
 msgid "No credentials saved for this bot."
+msgstr ""
+
+#: src/pages/RecruitingPanel.tsx
+msgid "No CRM records matched this search."
+msgstr ""
+
+#: src/pages/shell/RecruitingNavigation.tsx
+msgid "No CRM roles were returned."
 msgstr ""
 
 #: src/pages/MessagingSettingsOverlay.tsx
@@ -3997,6 +4071,10 @@ msgstr ""
 msgid "No skills yet"
 msgstr "아직 스킬이 없습니다"
 
+#: src/pages/RecruitingPanel.tsx
+msgid "No stored messages were returned for this contact."
+msgstr ""
+
 #: src/pages/RecruitingCorrespondence.tsx
 #: src/pages/Shell.tsx
 msgid "No subject"
@@ -4110,6 +4188,10 @@ msgstr "OAuth 연결 실패"
 
 #: src/pages/McpServersOverlay.tsx
 msgid "OAuth expired"
+msgstr ""
+
+#: src/pages/RecruitingPanel.tsx
+msgid "Older messages"
 msgstr ""
 
 #. placeholder {0}: call.botName
@@ -4264,6 +4346,10 @@ msgstr "조직 API 키"
 msgid "Original email results saved in this role conversation."
 msgstr ""
 
+#: src/pages/RecruitingPanel.tsx
+msgid "Original job description"
+msgstr ""
+
 #: src/pages/shell/chat-context.tsx
 msgid "Original message unavailable"
 msgstr "원본 메시지를 사용할 수 없습니다"
@@ -4295,6 +4381,10 @@ msgstr ""
 
 #: src/pages/RecruitingCorrespondence.tsx
 msgid "Outreach file review"
+msgstr ""
+
+#: src/pages/RecruitingPanel.tsx
+msgid "Outreach status"
 msgstr ""
 
 #: src/pages/Board.tsx
@@ -4444,6 +4534,10 @@ msgstr ""
 
 #: src/pages/RecruitingCorrespondence.tsx
 msgid "Preview only. Ask for the complete message to read the full body."
+msgstr ""
+
+#: src/pages/RecruitingPanel.tsx
+msgid "Previous"
 msgstr ""
 
 #: src/pages/Board.tsx
@@ -4656,6 +4750,7 @@ msgstr ""
 msgid "Recruiting views"
 msgstr ""
 
+#: src/pages/RecruitingPanel.tsx
 #: src/pages/shell/RecruitingNavigation.tsx
 msgid "Recruiting workflow"
 msgstr ""
@@ -5256,6 +5351,7 @@ msgstr ""
 #: src/components/integrations/IntegrationSetup.tsx
 #: src/pages/ModelSettingsOverlay.tsx
 #: src/pages/PluginsOverlay.tsx
+#: src/pages/RecruitingPanel.tsx
 #: src/pages/Shell.tsx
 #: src/pages/shell/bot-picker.tsx
 #: src/pages/shell/command-palette.tsx
@@ -5294,6 +5390,10 @@ msgstr ""
 
 #: src/pages/RecruitingPanel.tsx
 msgid "Search Criteria"
+msgstr ""
+
+#: src/pages/RecruitingPanel.tsx
+msgid "Search CRM contacts"
 msgstr ""
 
 #: src/pages/RecruitingPanel.tsx
@@ -5365,6 +5465,10 @@ msgid "Select a connected model"
 msgstr "연결된 모델 선택"
 
 #: src/pages/RecruitingPanel.tsx
+msgid "Select a contact to read their stored messages."
+msgstr ""
+
+#: src/pages/RecruitingPanel.tsx
 msgid "Selected recipient unavailable"
 msgstr ""
 
@@ -5418,6 +5522,7 @@ msgid "Sentry alert"
 msgstr "Sentry 알림"
 
 #: src/pages/RecruitingCorrespondence.tsx
+#: src/pages/RecruitingPanel.tsx
 #: src/pages/shell/RecruitingNavigation.tsx
 msgid "Sequence"
 msgstr ""
@@ -5712,6 +5817,10 @@ msgstr "음성 모델"
 msgid "SSO is temporarily unavailable. Try again."
 msgstr "SSO를 일시적으로 사용할 수 없습니다. 다시 시도하세요."
 
+#: src/pages/RecruitingPanel.tsx
+msgid "Stage"
+msgstr ""
+
 #: src/pages/Paywall.tsx
 msgid "Start {trialDays}-day free trial"
 msgstr ""
@@ -5720,6 +5829,7 @@ msgstr ""
 msgid "Start recording"
 msgstr "작업 녹화 시작"
 
+#: src/pages/RecruitingPanel.tsx
 #: src/pages/Shell.tsx
 msgid "Start recruiting"
 msgstr ""
@@ -5793,6 +5903,10 @@ msgstr ""
 #: src/lib/browser-notifications.ts
 msgid "Stopped."
 msgstr "중지되었습니다."
+
+#: src/pages/RecruitingPanel.tsx
+msgid "Stored CRM history"
+msgstr ""
 
 #: src/pages/McpServersOverlay.tsx
 msgid "Stored encrypted"
@@ -6053,6 +6167,10 @@ msgstr ""
 msgid "This role changed. Select the candidate again."
 msgstr ""
 
+#: src/pages/RecruitingPanel.tsx
+msgid "This section has not loaded corresponding CRM records. Start a recruiting conversation to continue this work."
+msgstr ""
+
 #: src/pages/shell/message-cards.tsx
 msgid "This server cannot be assigned without a bot."
 msgstr "연결할 Bot이 없어 이 서버를 배정할 수 없습니다."
@@ -6157,6 +6275,7 @@ msgstr ""
 #: src/pages/ActivityList.tsx
 #: src/pages/Onboarding.tsx
 #: src/pages/RecruitingCorrespondence.tsx
+#: src/pages/shell/RecruitingNavigation.tsx
 msgid "Try again"
 msgstr "다시 시도"
 
@@ -6385,6 +6504,10 @@ msgstr ""
 #: src/pages/RoutineRunHistory.tsx
 msgid "View chat"
 msgstr "채팅 보기"
+
+#: src/pages/RecruitingPanel.tsx
+msgid "View messages"
+msgstr ""
 
 #: src/pages/SettingsOverlay.tsx
 #: src/pages/Shell.tsx
