@@ -475,6 +475,7 @@ export async function getRecruitingRoleCampaign(
       threadId: target.threadId,
     });
     if (!workspace) return none;
+    let recheckImported: (() => Promise<void>) | undefined;
     let imported: { id: string; name: string } | null = null;
     if (workspace.crmTarget && workspace.crmTarget.bindingEffectId === null) {
       if (!deps.reauthorize)
@@ -507,6 +508,33 @@ export async function getRecruitingRoleCampaign(
         });
       imported = page.items[0] ?? null;
       if (!imported) return none;
+      recheckImported = async () => {
+        const current = await recruiting.getRecruitingWorkspaceCrmTarget(deps.prisma, actor, {
+          threadId: target.threadId,
+        });
+        if (stableJsonValue(current) !== stableJsonValue(selected)) throw new IsolationError();
+        const fresh = await getRecruitingCrmData(
+          { ...deps, reauthorize: deps.reauthorize! },
+          actor,
+          target,
+          {
+            operation: "roleCampaigns",
+            serverId: selected.mcpServerId,
+            serverRevision: selected.serverRevision,
+            organizationId: selected.organizationId,
+            crmRoleId: selected.crmRoleId,
+            limit: 2,
+            offset: 0,
+          },
+        );
+        if (
+          fresh.operation !== "roleCampaigns" ||
+          fresh.nextOffset !== null ||
+          fresh.items.length !== 1 ||
+          fresh.items[0]?.id !== imported?.id
+        )
+          throw new IsolationError();
+      };
     }
     const botIds = target.kind === "group" ? target.memberBotIds : [target.botId];
     const assignment = await deps.prisma.botMcpServer.findFirst({
@@ -601,6 +629,47 @@ export async function getRecruitingRoleCampaign(
       read("get_campaign", { campaign_id: campaignId }).catch(() => undefined),
       read("list_leads", { campaign_id: campaignId, limit: 100 }).catch(() => undefined),
     ]);
+    if (recheckImported) await recheckImported();
+    if (deps.stillAuthorized && !(await deps.stillAuthorized()))
+      throw new ORPCError("UNAUTHORIZED");
+    if (deps.reauthorize) {
+      const current = await deps.reauthorize();
+      const scope = (value: ThreadTarget) =>
+        value.kind === "bot"
+          ? [value.kind, value.threadId, value.botId]
+          : [value.kind, value.threadId, value.groupId, value.memberBotIds];
+      if (stableJsonValue(scope(current)) !== stableJsonValue(scope(target)))
+        throw new IsolationError();
+    }
+    const currentAssignment = await deps.prisma.botMcpServer.findFirst({
+      where: {
+        userId: actor.userId,
+        spaceId: actor.spaceId,
+        botId: assignment.botId,
+        serverId: assignment.server.id,
+        server: {
+          userId: actor.userId,
+          spaceId: actor.spaceId,
+          enabled: true,
+          revision: assignment.server.revision,
+          endpoint: "https://mcp.instantly.ai/mcp",
+          transport: "streamable_http",
+        },
+      },
+      select: {
+        botId: true,
+        allowAllTools: true,
+        allowedTools: true,
+        server: { select: { id: true, revision: true } },
+      },
+    });
+    if (
+      !currentAssignment ||
+      currentAssignment.server.id !== assignment.server.id ||
+      currentAssignment.server.revision !== assignment.server.revision ||
+      !["get_email", "list_emails"].every((tool) => correspondenceAllows(currentAssignment, tool))
+    )
+      throw new IsolationError();
     if (!campaign || campaign.id !== campaignId)
       return {
         status: "unavailable",

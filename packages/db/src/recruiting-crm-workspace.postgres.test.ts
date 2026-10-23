@@ -4,8 +4,10 @@ import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { createDb } from "./client.js";
 import {
   getRecruitingWorkspace,
+  getRecruitingWorkspaceCrmSourceMaterial,
   getRecruitingWorkspaceCrmTarget,
   openVerifiedRecruitingCrmWorkspace,
+  recordRecruitingContextAdoption,
 } from "./recruiting.js";
 
 const suite = process.env.VERIFY_DATABASE ? describe.sequential : describe.skip;
@@ -95,6 +97,93 @@ suite("verified legacy CRM workspace", () => {
         })
       ).sourceMaterial,
     ).toBe("Actual source job description");
+  });
+  it("reads only the current exact attachment source and refuses stale role scope", async () => {
+    const a = await open();
+    const material = await getRecruitingWorkspaceCrmSourceMaterial(prisma, actor, {
+      threadId: a.threadId,
+      roleId: a.roleId,
+    });
+    expect(material?.text).toBe("Actual source job description");
+    expect(material?.target).toEqual(target);
+    await expect(
+      getRecruitingWorkspaceCrmSourceMaterial(prisma, actor, {
+        threadId: a.threadId,
+        roleId: "another-role",
+      }),
+    ).rejects.toThrow();
+    await prisma.botMcpServer.updateMany({ where: { serverId }, data: { allowedTools: [] } });
+    await expect(
+      getRecruitingWorkspaceCrmSourceMaterial(prisma, actor, {
+        threadId: a.threadId,
+        roleId: a.roleId,
+      }),
+    ).rejects.toThrow();
+    await prisma.botMcpServer.updateMany({
+      where: { serverId },
+      data: { allowedTools: ["get_crm_role"] },
+    });
+  });
+  it("rechecks source material and authorization when adopting run context", async () => {
+    const a = await open();
+    const role = await prisma.recruitingRole.findUniqueOrThrow({ where: { id: a.roleId } });
+    const task = await prisma.task.create({
+      data: {
+        spaceId,
+        userId,
+        botId: bots[0]!,
+        threadId: a.threadId,
+        prompt: "Synthetic",
+        status: "running",
+      },
+    });
+    const run = await prisma.run.create({
+      data: {
+        spaceId,
+        userId,
+        botId: bots[0]!,
+        threadId: a.threadId,
+        taskId: task.id,
+        status: "running",
+        trigger: "user",
+      },
+    });
+    const source = (await getRecruitingWorkspaceCrmSourceMaterial(prisma, actor, {
+      threadId: a.threadId,
+      roleId: a.roleId,
+    }))!;
+    const input = {
+      runId: run.id,
+      threadId: a.threadId,
+      botId: bots[0]!,
+      roleId: a.roleId,
+      roleRevisionId: role.currentRevisionId,
+      crmSourceMaterial: source,
+      artifact: {
+        name: "context.json",
+        mimeType: "application/json",
+        size: 2,
+        hash: "a".repeat(64),
+        storageKey: "synthetic-context",
+        clientNonce: randomUUID(),
+      },
+    };
+    expect((await recordRecruitingContextAdoption(prisma, actor, input)).created).toBe(true);
+    await prisma.recruitingCrmWorkspaceAttachment.update({
+      where: { roleId: a.roleId },
+      data: { sourceMaterial: "Changed source" },
+    });
+    await expect(recordRecruitingContextAdoption(prisma, actor, input)).rejects.toThrow();
+    await prisma.recruitingCrmWorkspaceAttachment.update({
+      where: { roleId: a.roleId },
+      data: { sourceMaterial: source.text },
+    });
+    await prisma.botMcpServer.updateMany({ where: { serverId }, data: { allowedTools: [] } });
+    await expect(recordRecruitingContextAdoption(prisma, actor, input)).rejects.toThrow();
+    await prisma.botMcpServer.updateMany({
+      where: { serverId },
+      data: { allowedTools: ["get_crm_role"] },
+    });
   });
   it("does not guess roles from matching titles", async () => {
     const a = await open();

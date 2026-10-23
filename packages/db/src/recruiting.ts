@@ -898,6 +898,42 @@ export async function getRecruitingWorkspaceCrmTarget(
   });
 }
 
+type RecruitingCrmSourceMaterial = {
+  target: RecruitingCrmTarget;
+  observedAt: string;
+  text: string;
+};
+
+async function workspaceCrmSourceMaterial(
+  tx: Tx,
+  actor: Actor,
+  input: { threadId: string; roleId: string },
+): Promise<RecruitingCrmSourceMaterial | null> {
+  const thread = await requireThread(tx, actor, input.threadId);
+  if (thread.activeRecruitingRoleId !== input.roleId) throw new RecruitingConflictError();
+  const target = await attachedCrmTarget(tx, actor, input.roleId, input.threadId);
+  if (!target) return null;
+  const attachment = await tx.recruitingCrmWorkspaceAttachment.findUniqueOrThrow({
+    where: { roleId: input.roleId },
+  });
+  return {
+    target,
+    observedAt: attachment.observedAt.toISOString(),
+    text: attachment.sourceMaterial,
+  };
+}
+
+/** Saved provider material is reference data, never a human message or approval. */
+export async function getRecruitingWorkspaceCrmSourceMaterial(
+  prisma: PrismaClient,
+  actor: Actor,
+  input: { threadId: string; roleId: string },
+) {
+  return prisma.$transaction((tx) => workspaceCrmSourceMaterial(tx, actor, input), {
+    isolationLevel: Prisma.TransactionIsolationLevel.RepeatableRead,
+  });
+}
+
 /** Called only after the API's authenticated exact-role read, never with a client-supplied title/target. */
 export async function openVerifiedRecruitingCrmWorkspace(
   prisma: PrismaClient,
@@ -2909,6 +2945,7 @@ export async function recordRecruitingContextAdoption(
     roleId: string;
     roleRevisionId: string;
     sourceMessageId?: string | null;
+    crmSourceMaterial?: RecruitingCrmSourceMaterial;
     artifact: {
       name: string;
       mimeType: string;
@@ -2927,6 +2964,11 @@ export async function recordRecruitingContextAdoption(
     if (role.currentRevisionId !== input.roleRevisionId) throw new RecruitingConflictError();
     // Reading the snapshot validates the exact version and all enduring source ACLs.
     await roleSnapshot(tx, actor, role);
+    if (input.crmSourceMaterial) {
+      const current = await workspaceCrmSourceMaterial(tx, actor, input);
+      if (stableJsonValue(current) !== stableJsonValue(input.crmSourceMaterial))
+        throw new RecruitingConflictError();
+    }
     if (input.sourceMessageId) await requireRunSource(tx, actor, run, input.sourceMessageId);
     const existing = await tx.artifact.findUnique({
       where: {

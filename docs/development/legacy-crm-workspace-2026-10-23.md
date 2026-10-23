@@ -28,3 +28,11 @@ Local owner acceptance after review/deployment approval:
 6. CRM synchronization remains separate: use the existing delivery runbook's local-owner dryRun=true, inspect counts and field mapping, then dryRun=false and readback. No live sync was run during this development.
 
 Development tests do not establish live acceptance, source deployment, real mailbox availability, or successful production migration.
+
+## Source context and deferred read follow-up
+
+The saved CRM job description now enters the existing recruiting run context as escaped JSON explicitly marked untrusted external reference data. It is separate from native criteria, human history, and approvals. A fresh owner/thread/active-role/source-epoch/assignment check is required even when the caller already supplied a trusted native role snapshot. Locked context adoption rechecks the source material and authorization before recording the context artifact; changed or revoked source material cannot be adopted or replayed as current.
+
+Imported campaign reads now revalidate the exact CRM mapping after awaited provider responses, then recheck the session, conversation target, and provider assignment/revision before returning lead data. Both role campaign/setup router handlers pass the session reauthorization callback. Deferred-response tests revoke CRM membership, source revision, session, conversation target, or provider assignment while the provider response is paused; each fails closed.
+
+Follow-up validation: eight native PostgreSQL attachment/context tests passed. Combined API and recruiting context suites passed 324 tests. API TypeScript passed. The broad adapters TypeScript check remains blocked by existing test-only errors in executor, MCP connector/OAuth, credential, secret-persistence and wakeup fixtures; no errors reference the changed recruiting context files. No new migration or production operation is part of this follow-up.
