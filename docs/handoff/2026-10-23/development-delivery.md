@@ -2,6 +2,18 @@
 
 Development validation is not live acceptance. This task has not intentionally deployed, connected to production, migrated production, run a real CRM sync (including dry run), or sent outreach. An automatic external deployment side effect occurred; see the incident below. The deployment hold in the existing overall handoff remains in force. Only the assigned local deployment owner may verify and lift it under the user's instructions.
 
+
+## Published delivery — final record
+
+- Rakazo main code delivery: **`fa2a2a0d29c57ebff9147c3467bb0d5c3bdaaa81`**, [PR #72](https://github.com/WeKruit/rakazo/pull/72), PR head `371e94f463eaa3e45ea0da0a17b4c19ab4f2f5cb`. Tested code head `1566cb013dbbdcf9dbd5ead62fc0a7cbc8f8d4aa` has identical apps/packages trees to that merge.
+- [PR #74](https://github.com/WeKruit/rakazo/pull/74) is marked merged through included ancestry, GitHub merge reference `4308a2ebf23883a966ae5cbf47a0b6b8a81853d4`; final profile fixes are included in #72. Concurrent [PR #78](https://github.com/WeKruit/rakazo/pull/78) is preserved.
+- Source correction: **`11ca9c2df226782eee241fc5b36ba15600f4efcb`**, [PR #67](https://github.com/WeKruit/headhunter-agent/pull/67), PR head `2676b3fb058c3d3730dbc96af5fc7821197718a9`, tested source `b77f88cd51cb7760ab8fa08e987d48dfe86d9523`. Authorized Vercel reports success at deployment `GdrdVeAuUtCri6PsFS5VDBMXKS7C`; environment not verified, and this is not proof of SQL/MCP deployment.
+- Rakazo merge metadata check: zero Actions runs, zero commit statuses, zero GitHub deployment records at check time. Actions were intentionally skipped, not passed. No settings changed.
+- Required owner actions: confirm/lift the existing sourcing hold; inspect actual live revisions and full-name migration ledger; apply ordered source migrations and update existing MCP; apply product migrations including both distinct 172000 names; deploy product through the assigned local session; dryRun true then fresh-cursor false; scoped readback, repeat-pass, cross-user and UI acceptance. See the operational document below. None of those production/data actions was performed here.
+- Known limits: legacy browser signup journey and baseline adapter/DB fixture failures remain documented below. Education/periodic sync/new interview storage and deferred product decisions are not implemented. No claim of live acceptance.
+
+The 16:51 target was exceeded because concurrent calibration-round work required reconciliation and actual regression validation. Work was preserved, validated, and then merged; no force push.
+
 ## First independently validated batch
 
 Base main: `a5003a28` (handoff PR #76). GitHub confirmed #65 and #73 already merged; #72 and #74 were still draft/open at `461c496472edd53b1445ee47b2097134230cdba7` and `85ede9abb3d198ed74149632813f78a3e9a627dd`. They are not included in this first batch.
