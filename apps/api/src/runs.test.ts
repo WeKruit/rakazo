@@ -2,6 +2,26 @@ import { describe, expect, it } from "vitest";
 import { activityNotificationsEnabled, activityPromptSnippet } from "./runs.js";
 
 describe("run activity copy", () => {
+  it("keeps canonical CRM locator IDs out of ordinary activity", () => {
+    expect(
+      activityPromptSnippet({
+        trigger: "follow_up",
+        prompt: "internal CRM locator",
+        sourceBlocks: [
+          {
+            kind: "text",
+            text: "Read the existing contacts.",
+            crmRoleReference: {
+              sourceId: "crm",
+              serverRevision: 1,
+              organizationId: "10000000-0000-4000-8000-000000000001",
+              crmRoleId: "20000000-0000-4000-8000-000000000002",
+            },
+          },
+        ],
+      }),
+    ).toBe("Read the existing contacts.");
+  });
   it.each(["user", "follow_up"])(
     "shows original %s words instead of selected email metadata",
     (trigger) => {

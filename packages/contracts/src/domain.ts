@@ -10,6 +10,7 @@ import {
 import { ThreadMessageSchema } from "./events.js";
 import { Id, IsoDate, MemoryScope, RunStatus, SandboxKind } from "./ids.js";
 import { McpHeadersSchema, McpRemoteEndpointSchema, McpTransportSchema } from "./mcp.js";
+import { RecruitingCrmRoleReferenceSchema } from "./recruiting-crm.js";
 import { RunTriggerSchema } from "./runs.js";
 
 export const ComputerModeSchema = z.enum(["team", "dedicated"]);
@@ -122,6 +123,7 @@ export const GroupSchema = z.object({
   archivedAt: z.string().nullable(),
   members: z.array(GroupMemberSchema),
   threadId: Id,
+  crmRoleReference: RecruitingCrmRoleReferenceSchema.optional(),
   preview: z.string(),
   unread: z.boolean(),
   updatedAt: z.string(),
@@ -138,6 +140,7 @@ const GroupBotIds = z
 export const CreateGroupInput = z.object({
   name: z.string().trim().min(1).max(80),
   botIds: GroupBotIds,
+  crmRoleReference: RecruitingCrmRoleReferenceSchema.optional(),
 });
 export type CreateGroupInput = z.infer<typeof CreateGroupInput>;
 

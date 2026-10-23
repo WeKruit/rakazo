@@ -21,6 +21,7 @@ import type {
   RecruitingCorrespondence,
   RecruitingCrmDataInput,
   RecruitingCrmDataOutput,
+  RecruitingCrmRoleReference,
   RecruitingCrmTarget,
   RecruitingSourceRef,
   RecruitingSourceSelection,
@@ -39,6 +40,7 @@ import {
   RecruitingCrmMessagesReadSchema,
   RecruitingCrmRoleCampaignsReadSchema,
   RecruitingCrmRoleReadSchema,
+  RecruitingCrmRoleReferenceSchema,
   RecruitingNativeCorrespondenceSchema,
 } from "@rakazo/contracts";
 import {
@@ -1638,21 +1640,42 @@ export const setRecruitingCandidateShortlist = (
 ) => authenticated(() => recruiting.setRecruitingCandidateShortlist(prisma, actor, input));
 
 /** Live read-only CRM view. The CRM remains the store; browsing creates no agent work. */
-export async function getRecruitingCrmData(
-  deps: {
-    prisma: PrismaClient;
-    connectors: Pick<ConnectorProvider, "execute">;
-    firstPartyMcpUrl?: string;
-    signal?: AbortSignal;
-    stillAuthorized?: () => Promise<boolean>;
-    reauthorize: () => Promise<ThreadTarget>;
-  },
+type RecruitingCrmReadDeps = {
+  prisma: PrismaClient;
+  connectors: Pick<ConnectorProvider, "execute">;
+  firstPartyMcpUrl?: string;
+  signal?: AbortSignal;
+  stillAuthorized?: () => Promise<boolean>;
+  reauthorize: () => Promise<ThreadTarget>;
+};
+type RecruitingCrmRoleLookup = { operation: "role"; reference: RecruitingCrmRoleReference };
+export function getRecruitingCrmData(
+  deps: RecruitingCrmReadDeps,
   actor: Actor,
   target: ThreadTarget,
   raw: RecruitingCrmDataInput,
-): Promise<RecruitingCrmDataOutput> {
+): Promise<RecruitingCrmDataOutput>;
+export function getRecruitingCrmData(
+  deps: RecruitingCrmReadDeps,
+  actor: Actor,
+  target: ThreadTarget,
+  raw: RecruitingCrmRoleLookup,
+): Promise<ReturnType<typeof RecruitingCrmRoleReadSchema.parse>>;
+export async function getRecruitingCrmData(
+  deps: RecruitingCrmReadDeps,
+  actor: Actor,
+  target: ThreadTarget,
+  raw: RecruitingCrmDataInput | RecruitingCrmRoleLookup,
+): Promise<RecruitingCrmDataOutput | ReturnType<typeof RecruitingCrmRoleReadSchema.parse>> {
   return authenticated(async () => {
-    const input = RecruitingCrmDataInputSchema.parse(raw);
+    const input =
+      raw.operation === "role"
+        ? {
+            operation: "role" as const,
+            ...RecruitingCrmRoleReferenceSchema.parse(raw.reference),
+            serverId: raw.reference.sourceId,
+          }
+        : RecruitingCrmDataInputSchema.parse(raw);
     const signal = deps.signal ?? AbortSignal.timeout(30_000);
     const coordinator = (value: ThreadTarget) =>
       value.kind === "bot" ? value.botId : value.memberBotIds[0];
@@ -1887,6 +1910,18 @@ export async function getRecruitingCrmData(
       name: server.name,
       organizationId: input.organizationId,
     };
+    if (input.operation === "role") {
+      const role = parse(
+        RecruitingCrmRoleReadSchema,
+        await read(server, "get_crm_role", {
+          p_org: input.organizationId,
+          p_role: input.crmRoleId,
+        }),
+      );
+      if (role.role_spec_id !== input.crmRoleId) throw unavailable();
+      await sourceFence(server, "get_crm_role");
+      return role;
+    }
     const roles = async () =>
       parse(
         RecruitingCrmClientsReadSchema,

@@ -143,6 +143,7 @@ import {
   SetRecruitingCandidateShortlistInput,
   SetRecruitingCandidateShortlistOutput,
 } from "./recruiting.js";
+import { RecruitingCrmRoleReferenceSchema } from "./recruiting-crm.js";
 import { RoutineHistorySchema, RoutineRunCursorSchema, RunsListOutputSchema } from "./runs.js";
 import { SearchQueryOutputSchema } from "./search.js";
 
@@ -482,6 +483,7 @@ export const appContract = {
           text: z.string().min(1),
           artifactIds: z.array(Id).max(ATTACHMENT_MAX_COUNT).optional(),
           recruitingFeedback: RecruitingCandidateFeedbackSelectionSchema.optional(),
+          crmRoleReference: RecruitingCrmRoleReferenceSchema.optional(),
           mentions: z.array(Id).max(64).optional(),
           /** Carries the call id, so a turn taken mid-run stays in the call's card. */
           clientNonce: z.string().min(1).max(200).optional(),
