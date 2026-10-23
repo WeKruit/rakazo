@@ -460,6 +460,86 @@ describe("ensureRecruitingWorkspace", () => {
   });
 });
 
+describe("recruiting bootstrap idempotency and per-user identity", () => {
+  const options = { sandboxKind: "fake", firstPartyMcpUrl: "https://crm.example.test/mcp" };
+  const snapshot = (f: ReturnType<typeof fixture>) =>
+    JSON.stringify({
+      bots: f.bots,
+      servers: f.servers,
+      assignments: f.assignments,
+      presets: f.presets,
+      group: f.getGroup(),
+    });
+
+  it("creates the crew, connections and assignments once; login repeats and upgrades change nothing", async () => {
+    const f = fixture();
+    await recruiting.ensureRecruitingWorkspace(f.prisma, actor, options);
+    const counts = [f.bots.length, f.servers.length, f.assignments.length, f.presets.length];
+    expect(counts[0]).toBe(4);
+    expect(counts[3]).toBe(1);
+    const before = snapshot(f);
+    for (let login = 0; login < 3; login++) {
+      await recruiting.ensureRecruitingWorkspace(f.prisma, actor, options);
+      await recruiting.upgradeRecruitingWorkspace(f.prisma, actor, options);
+    }
+    expect([f.bots.length, f.servers.length, f.assignments.length, f.presets.length]).toEqual(
+      counts,
+    );
+    expect(snapshot(f)).toBe(before);
+    expect(native.bot).toHaveBeenCalledTimes(4);
+    expect(native.group).toHaveBeenCalledTimes(1);
+  });
+
+  it("keeps private edits and removed grants across repeated login and upgrade", async () => {
+    const f = fixture();
+    await recruiting.ensureRecruitingWorkspace(f.prisma, actor, options);
+    f.bots[1]!.instructions = "My own sourcing rules";
+    f.assignments.splice(0, 1);
+    const before = snapshot(f);
+    await recruiting.ensureRecruitingWorkspace(f.prisma, actor, options);
+    await recruiting.upgradeRecruitingWorkspace(f.prisma, actor, options);
+    expect(snapshot(f)).toBe(before);
+  });
+
+  it("derives a different group, preset and bot identity for every user and Space", async () => {
+    const other: Actor = { ...actor, userId: "person-b", spaceId: "personal-b" };
+    // fixture() binds the shared native mocks, so build and run each user in turn.
+    const a = fixture();
+    const first = await recruiting.ensureRecruitingWorkspace(a.prisma, actor, options);
+    const b = fixture();
+    const second = await recruiting.ensureRecruitingWorkspace(b.prisma, other, options);
+    expect(first.groupId).not.toBe(second.groupId);
+    expect(recruiting.recruitingPresetId(actor)).not.toBe(recruiting.recruitingPresetId(other));
+    expect(a.presets[0]!.userId).toBe(actor.userId);
+    expect(b.presets[0]!.userId).toBe(other.userId);
+    const keys = [...a.bots, ...b.bots].map((bot) => bot.spawnKey);
+    expect(new Set(keys).size).toBe(8);
+    expect(a.bots.every((bot) => bot.spawnKey.includes(actor.userId))).toBe(true);
+    expect(b.bots.every((bot) => bot.spawnKey.includes(other.userId))).toBe(true);
+    expect(JSON.stringify(a.presets)).not.toContain(other.userId);
+  });
+
+  it("copies no chat history or admin data into a new user's crew", async () => {
+    const f = fixture();
+    await recruiting.ensureRecruitingWorkspace(f.prisma, actor, options);
+    for (const [, , input] of native.bot.mock.calls)
+      expect(Object.keys(input).sort()).toEqual(
+        [
+          "color",
+          "description",
+          // PR #5 managed defaults carry the computer/login denylist; still no chat or admin data.
+          "disabledBuiltinTools",
+          "instructions",
+          "name",
+          "notifyOnFinish",
+          "spawnKey",
+          "title",
+        ].sort(),
+      );
+    expect(Object.keys(native.group.mock.calls[0]![2]).sort()).toEqual(["botIds", "id", "name"]);
+  });
+});
+
 describe("managed recruiting default upgrades", () => {
   const options = { sandboxKind: "fake" };
   async function previous() {
