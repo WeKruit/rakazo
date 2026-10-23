@@ -229,15 +229,6 @@ describe("recruiting reply draft translation", () => {
     },
     {
       ...crm,
-      pipeline: {
-        ...crm.pipeline,
-        role_spec_id: otherId,
-        stage: "Hold",
-        review_result: "rejected",
-      },
-    },
-    {
-      ...crm,
       pipeline: { ...crm.pipeline, role_spec_id: otherId, stage: "Hold" },
       roleInterests: [{ ...crm.roleInterests[0], interest: "declined" }],
     },
@@ -270,13 +261,68 @@ describe("recruiting reply draft translation", () => {
     { ...crm, candidate: { ...crm.candidate, email: null } },
     { ...crm, candidate: { ...crm.candidate, email: "someone-else@example.com" } },
     { ...crm, suppressed: null },
-    { ...crm, pipeline: null },
-    { ...crm, pipeline: { ...crm.pipeline, stage: "Unknown stage" } },
     { ...crm, pipeline: { ...crm.pipeline, candidate_id: otherId } },
   ])("does not turn missing or mismatched identity into ready %j", (state) => {
     expect(
       prepareRecruitingReply({ ...selection, crmProof: crmEnvelope(state) }, content).status,
     ).toBe("incomplete");
+  });
+
+  it.each([null, { ...crm.pipeline, stage: "Unknown stage" }])(
+    "does not require a positive pipeline stage to reply when no hold is recorded: %j",
+    (pipeline) => {
+      expect(
+        prepareRecruitingReply(
+          { ...selection, crmProof: crmEnvelope({ ...crm, pipeline }) },
+          content,
+        ).status,
+      ).toBe("ready");
+    },
+  );
+
+  it("scopes a pipeline review rejection to its recorded role", () => {
+    const pipeline = { ...crm.pipeline, review_result: "rejected", role_spec_id: otherId };
+    expect(
+      prepareRecruitingReply({ ...selection, crmProof: crmEnvelope({ ...crm, pipeline }) }, content)
+        .status,
+    ).toBe("ready");
+    expect(
+      prepareRecruitingReply(
+        {
+          ...selection,
+          crmProof: crmEnvelope({ ...crm, pipeline: { ...pipeline, role_spec_id: roleId } }),
+        },
+        content,
+      ),
+    ).toMatchObject({ status: "blocked", reasons: ["crm_review_rejected"] });
+  });
+
+  it("preflights a canonical CRM member without an Autumn import or an unrelated mailbox", async () => {
+    const membership = {
+      membership_id: otherId,
+      organization_id: orgId,
+      candidate_id: candidateId,
+      role_spec_id: roleId,
+      client_id: target.crmClientId,
+    };
+    const membershipProof = crmEnvelope([membership]);
+    const native = {
+      target,
+      candidateId,
+      membershipProof,
+      emailProof: selection.emailProof,
+      crmProof: crmEnvelope({ ...crm, pipeline: null }),
+    };
+    expect(prepareRecruitingReply(native, content).status).toBe("ready");
+    const f = fixture();
+    f.outputs[0] = native.crmProof;
+    f.outputs.splice(1, 0, membershipProof);
+    expect(await f.run({ selection: native })).toMatchObject({ status: "clear", gaps: [] });
+    expect(f.execute).toHaveBeenCalledTimes(4);
+    const wrong = crmEnvelope([{ ...membership, role_spec_id: otherId }]);
+    expect(prepareRecruitingReply({ ...native, membershipProof: wrong }, content).status).toBe(
+      "incomplete",
+    );
   });
 
   it.each(["new", "contacted", "replied"])(
@@ -297,7 +343,7 @@ describe("recruiting reply draft translation", () => {
     [null, "Interested", "ready"],
     [null, "On hold", "blocked"],
     [null, "Passed", "blocked"],
-    [null, "Unknown stage", "incomplete"],
+    [null, "Unknown stage", "ready"],
   ] as const)(
     "preserves unknown interest with primary pipeline role %s and stage %s",
     async (role_spec_id, stage, status) => {
@@ -313,7 +359,7 @@ describe("recruiting reply draft translation", () => {
       f.outputs[0] = crmEnvelope(state);
       expect(await f.run()).toMatchObject({
         status: status === "ready" ? "clear" : status,
-        gaps: ["legacy_hold_sources", "gmail_history"],
+        gaps: [],
       });
     },
   );
@@ -337,7 +383,7 @@ describe("fresh CRM and Instantly reply preflight", () => {
       status: "clear",
       scope: "crm_and_instantly",
       reasons: [],
-      gaps: ["legacy_hold_sources", "gmail_history"],
+      gaps: [],
     });
     expect(f.resolveCall.mock.calls.map(([call]) => [call.args.id, call.args.arguments])).toEqual([
       ["crm:get_crm_candidate_outreach_context", { p_org: orgId, p_candidate: candidateId }],

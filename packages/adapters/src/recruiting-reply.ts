@@ -86,7 +86,9 @@ type PinnedRoute = z.infer<typeof Route>;
 export type RecruitingReplyContent = z.infer<typeof Content>;
 export type RecruitingReplySelection = {
   target: RecruitingCrmTarget;
-  receipt: RecruitingCrmImportReceipt;
+  receipt?: RecruitingCrmImportReceipt | null;
+  candidateId?: string;
+  membershipProof?: unknown;
   emailProof: unknown;
   crmProof: unknown;
 };
@@ -110,7 +112,7 @@ export type RecruitingReplyRead = Readonly<{
 export type RecruitingReplyPreflight = {
   status: "blocked" | "incomplete" | "clear";
   scope: "crm_and_instantly";
-  gaps: readonly ["legacy_hold_sources", "gmail_history"];
+  gaps: readonly string[];
   reasons: readonly string[];
   reads: readonly RecruitingReplyRead[];
   prepared?: PreparedRecruitingReply;
@@ -134,13 +136,35 @@ function payload(raw: unknown): Record<string, unknown> | undefined {
 
 function targetAndReceipt(selection: RecruitingReplySelection) {
   const target = RecruitingCrmTargetSchema.safeParse(selection?.target);
-  const receipt = RecruitingCrmImportReceiptSchema.safeParse(selection?.receipt);
-  return target.success &&
-    receipt.success &&
-    target.data.organizationId === receipt.data.organization_id &&
-    target.data.crmRoleId === receipt.data.role_spec_id
-    ? { target: target.data, receipt: receipt.data }
-    : null;
+  if (!target.success) return null;
+  if (selection.receipt) {
+    const receipt = RecruitingCrmImportReceiptSchema.safeParse(selection.receipt);
+    return receipt.success &&
+      target.data.organizationId === receipt.data.organization_id &&
+      target.data.crmRoleId === receipt.data.role_spec_id
+      ? { target: target.data, candidateId: receipt.data.candidate_id, receipt: receipt.data }
+      : null;
+  }
+  const rows = payload(selection.membershipProof)?.data;
+  const candidateId = selection.candidateId;
+  if (
+    !z.uuid().safeParse(candidateId).success ||
+    !Array.isArray(rows) ||
+    !rows.every(
+      (row) =>
+        row &&
+        typeof row === "object" &&
+        row.organization_id === target.data.organizationId &&
+        row.candidate_id === candidateId &&
+        z.uuid().safeParse(row.membership_id).success,
+    ) ||
+    !rows.some(
+      (row) =>
+        row.role_spec_id === target.data.crmRoleId && row.client_id === target.data.crmClientId,
+    )
+  )
+    return null;
+  return { target: target.data, candidateId: candidateId!, receipt: null };
 }
 
 // Same btrim/default semantics as the existing CRM crm_role_key SQL function.
@@ -157,13 +181,13 @@ export function prepareRecruitingReply(
   const bound = targetAndReceipt(selection);
   const parsed = CrmContext.safeParse(payload(selection?.crmProof)?.data);
   if (!bound || !parsed.success) return { status: "incomplete", reasons: ["crm_context_invalid"] };
-  const { target, receipt } = bound;
+  const { target, receipt, candidateId } = bound;
   const crm = parsed.data;
   if (
-    crm.candidate.id !== receipt.candidate_id ||
+    crm.candidate.id !== candidateId ||
     crm.candidate.organization_id !== target.organizationId ||
     (crm.pipeline &&
-      (crm.pipeline.candidate_id !== receipt.candidate_id ||
+      (crm.pipeline.candidate_id !== candidateId ||
         crm.pipeline.organization_id !== target.organizationId))
   )
     return { status: "incomplete", reasons: ["crm_identity_mismatch"] };
@@ -188,25 +212,21 @@ export function prepareRecruitingReply(
               "do_not_contact",
             ].includes(crm.pipeline.stage.trim().toLowerCase())
           ? "crm_pipeline_blocked"
-          : crm.pipeline?.review_result === "rejected"
+          : crm.pipeline?.review_result === "rejected" &&
+              (crm.pipeline.role_spec_id === null || crm.pipeline.role_spec_id === target.crmRoleId)
             ? "crm_review_rejected"
             : interests.some((entry) => entry.interest === "declined")
               ? "crm_role_declined"
               : null;
   if (block) return { status: "blocked", reasons: [block] };
   if (
-    crm.candidate.linkedin_identity !== receipt.linkedin_identity ||
-    !crm.candidate.linkedin_identity
+    receipt &&
+    (crm.candidate.linkedin_identity !== receipt.linkedin_identity ||
+      !crm.candidate.linkedin_identity)
   )
     return { status: "incomplete", reasons: ["crm_identity_mismatch"] };
   if (crm.suppressed !== false || !crm.candidate.email || /[\r\n\0]/.test(crm.candidate.email))
     return { status: "incomplete", reasons: ["crm_suppression_unknown"] };
-  if (
-    !crm.pipeline ||
-    ((crm.pipeline.role_spec_id === null || crm.pipeline.role_spec_id === target.crmRoleId) &&
-      !["Interested", "Screening", "Interview", "Offer", "Hired"].includes(crm.pipeline.stage))
-  )
-    return { status: "incomplete", reasons: ["crm_pipeline_unknown"] };
   if (
     interests.length > 1 ||
     interests.some(
@@ -242,7 +262,7 @@ export function prepareRecruitingReply(
       account: request.eaccount,
       threadId: anchor.thread_id!,
       anchorId: anchor.id,
-      crmCandidateId: receipt.candidate_id,
+      crmCandidateId: candidateId,
     },
   });
 }
@@ -353,7 +373,7 @@ export async function runRecruitingReplyPreflight(input: {
       status,
       reasons,
       scope: "crm_and_instantly",
-      gaps: ["legacy_hold_sources", "gmail_history"],
+      gaps: [],
       reads,
       ...(prepared ? { prepared } : {}),
     });
@@ -447,13 +467,20 @@ export async function runRecruitingReplyPreflight(input: {
     };
     const crmProof = await read(crmRoute.data, "get_crm_candidate_outreach_context", {
       p_org: bound.target.organizationId,
-      p_candidate: bound.receipt.candidate_id,
+      p_candidate: bound.candidateId,
     });
-    const initial = prepareRecruitingReply({ ...selection, crmProof }, content);
+    const membershipProof = selection.receipt
+      ? selection.membershipProof
+      : await read(crmRoute.data, "list_crm_candidate_roles", {
+          p_org: bound.target.organizationId,
+          p_candidate: bound.candidateId,
+        });
+    const currentSelection = { ...selection, crmProof, membershipProof };
+    const initial = prepareRecruitingReply(currentSelection, content);
     if (initial.status !== "ready") return done(initial.status, initial.reasons);
     const emailProof = await read(mailRoute.data, "get_email", { id: original.id });
     const anchor = readInstantlyEmail(payload(emailProof));
-    const prepared = prepareRecruitingReply({ ...selection, crmProof, emailProof }, content);
+    const prepared = prepareRecruitingReply({ ...currentSelection, emailProof }, content);
     if (prepared.status !== "ready") return done(prepared.status, prepared.reasons);
     if (
       !anchor ||

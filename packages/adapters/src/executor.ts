@@ -4489,6 +4489,8 @@ export function createRunExecutor(deps: ExecutorDeps) {
             return {
               target: replySelection.target,
               receipt: replySelection.crmImportReceipt,
+              candidateId: replySelection.candidateId,
+              membershipProof: replySelection.membershipProof?.result,
               emailProof: replySelection.emailProof.result,
               crmProof: replySelection.crmProof.result,
             };
@@ -4843,20 +4845,41 @@ export function createRunExecutor(deps: ExecutorDeps) {
               error: "This reply connection does not support the required provider contract.",
               dispatched: false,
             };
-          const unlinkedReplyError = async () => {
+          const unlinkedReplyError = async (bind = false) => {
             if (!replyRoute || replySelection) return;
             const current = await deps.prisma.thread.findUniqueOrThrow({
               where: { id: thread.id },
               select: { activeRecruitingRoleId: true },
             });
-            if (current.activeRecruitingRoleId)
-              return {
-                error:
-                  "Use recruiting_reply to bind this reply to the saved candidate and current role.",
-                dispatched: false,
-              };
+            if (!current.activeRecruitingRoleId) return;
+            if (bind) {
+              const request = readInstantlyReplyRequest(args);
+              if (
+                request &&
+                replyRoute.resourceId &&
+                typeof replyRoute.resourceRevision === "number"
+              ) {
+                try {
+                  replySelection =
+                    (await resolveRecruitingReply(deps.prisma, researchActor.actor, crmContext, {
+                      mcpServerId: replyRoute.resourceId,
+                      serverRevision: replyRoute.resourceRevision,
+                      replyToEmailId: request.reply_to_uuid,
+                      recipient: request.to,
+                    })) ?? undefined;
+                  if (replySelection) return;
+                } catch (error) {
+                  return { error: sanitizeConnectorError(error, runSecrets), dispatched: false };
+                }
+              }
+            }
+            return {
+              error:
+                "Read this candidate's current CRM context and canonical role membership before proposing this reply.",
+              dispatched: false,
+            };
           };
-          const unlinked = await unlinkedReplyError();
+          const unlinked = await unlinkedReplyError(true);
           if (unlinked) return unlinked;
           const preparedReply = () => {
             const prepared = prepareRecruitingReply(replySelectionData(), replyContent());
@@ -4921,6 +4944,7 @@ export function createRunExecutor(deps: ExecutorDeps) {
           });
           let replyPreflight: Awaited<ReturnType<typeof runRecruitingReplyPreflight>> | undefined;
           const replyReadEffectIds: string[] = [];
+          let replyCrmPreflightReadEffectId = "";
           const preflightReply = async () => {
             if (!replySelection) return;
             if (!deps.connector) throw new IsolationError();
@@ -4965,9 +4989,11 @@ export function createRunExecutor(deps: ExecutorDeps) {
               });
               consumedEffectIds.add(recorded.id);
               replyReadEffectIds.push(recorded.id);
+              if (read.route.toolName === "get_crm_candidate_outreach_context")
+                replyCrmPreflightReadEffectId = recorded.id;
             }
             replyPreflight = check;
-            // Current connector evidence never substitutes for the remaining playbook sources.
+            // This check covers CRM and the exact provider conversation, not unrelated mailboxes.
             if (check.status !== "clear" || check.gaps.length)
               return {
                 status: check.status === "blocked" ? "blocked" : "incomplete",
@@ -5931,6 +5957,7 @@ export function createRunExecutor(deps: ExecutorDeps) {
                         identity: preparedReply().identity,
                         emailReadEffectId: replySelection.emailProof.effectId,
                         crmContextReadEffectId: replySelection.crmProof.effectId,
+                        crmPreflightReadEffectId: replyCrmPreflightReadEffectId,
                       },
                     )
                   : crmImportAdmission && crmImportSelection
@@ -6081,13 +6108,14 @@ export function createRunExecutor(deps: ExecutorDeps) {
               approvalArgs = {
                 ...args,
                 role: replySelection.role.title,
-                candidateId: replySelection.crmImportReceipt.candidate_id,
-                checksRemaining: ["Legacy hold/pass records", "Gmail history"],
+                candidateId:
+                  replySelection.candidateId ?? replySelection.crmImportReceipt?.candidate_id,
               };
             try {
               await readReplyEvidence();
             } catch (error) {
               const result = replyProofError(error);
+              if (replyAdmission) return result;
               return (await completeEffect(deps, applied!.effect.id, "intended", result))
                 ? result
                 : uncertainEffectResult(name);
@@ -6199,7 +6227,7 @@ export function createRunExecutor(deps: ExecutorDeps) {
               runSecrets,
               {
                 reviewReason: replySelection
-                  ? "Approve this draft content only. Sending still requires complete current pre-send checks."
+                  ? "Allow this exact reply once after current CRM and conversation checks."
                   : reviewReason,
                 oneTimeOnly: requiresExplicitApproval,
                 crmOperation,
