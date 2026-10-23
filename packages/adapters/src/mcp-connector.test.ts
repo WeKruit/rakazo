@@ -13,6 +13,7 @@ import {
 import type { OAuthMaterial } from "./mcp-oauth.js";
 import { type McpOAuthBroker, StoredMcpOAuthProvider } from "./mcp-oauth.js";
 import { InMemoryRealtimeFanout } from "./realtime.js";
+import { rememberResolvedContactEmails } from "./recruiting-tools.js";
 import { migrateSecrets } from "./secret-migration.js";
 import { ComposedSecretStore } from "./secret-store-factory.js";
 import { infisicalFake } from "./secret-store-fake.js";
@@ -415,6 +416,37 @@ describe("local native Instantly thread history", () => {
           },
         },
       ]);
+    } finally {
+      await f.connector.close();
+    }
+  });
+  it("refuses an agent contact lookup with an email not stored for that person", async () => {
+    const f = fixture();
+    const contactRoute = { ...route, toolName: "native_instantly_search_contact_emails" };
+    const run = { ...f.context, runId: "run-contact-gate" };
+    f.state.page = { items: [] };
+    try {
+      await f.connector.discoverTools(f.context as never);
+      expect(
+        await f.collect({ email: "sumeet.parekh@gmail.com", name: "Sumeet" }, contactRoute, run),
+      ).toEqual([
+        {
+          type: "error",
+          message: "No stored email for Sumeet; resolve the contact first, never guess an address",
+        },
+      ]);
+      expect(f.rest).not.toHaveBeenCalled();
+      rememberResolvedContactEmails(run.runId, [
+        { name: "Sumeet Parekh", email: "SumeetParekh1@gmail.com" } as never,
+      ]);
+      expect(
+        await f.collect({ email: "sumeetparekh1@gmail.com", name: "Bob" }, contactRoute, run),
+      ).toMatchObject([
+        { type: "error", message: expect.stringMatching(/No stored email for Bob/) },
+      ]);
+      expect(
+        await f.collect({ email: "sumeetparekh1@gmail.com", name: "sumeet" }, contactRoute, run),
+      ).toMatchObject([{ type: "result" }]);
     } finally {
       await f.connector.close();
     }

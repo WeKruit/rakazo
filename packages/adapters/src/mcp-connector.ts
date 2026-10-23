@@ -49,6 +49,7 @@ import {
   requireAutumnTaskOwnership,
   requireFullEnrichJobOwnership,
 } from "./recruiting-research.js";
+import { unresolvedContactEmailError } from "./recruiting-tools.js";
 import type { RemoteTransportDependencies } from "./remote-mcp.js";
 import { createSafeRemoteFetch } from "./remote-mcp.js";
 
@@ -69,7 +70,14 @@ const ContactEmailsInput = ThreadHistoryInput.omit({ anchor_id: true }).extend({
   email: z
     .email()
     .max(254)
-    .describe("The other party (candidate/contact) address. Never your own Instantly mailbox."),
+    .describe(
+      "The person's STORED address from recruiting_candidates resolve. Never a guessed address or your own Instantly mailbox.",
+    ),
+  name: z
+    .string()
+    .max(240)
+    .optional()
+    .describe("The resolved person's name, checked against the stored address."),
   eaccount: z
     .email()
     .max(254)
@@ -688,6 +696,16 @@ export class McpConnector implements ConnectorProvider {
     const isHistory = call.route!.toolName === THREAD_HISTORY;
     const isMailbox = call.route!.toolName === MAILBOX_EMAILS;
     const operation = isHistory ? "thread history" : isMailbox ? "mailbox email" : "contact email";
+    if (!isHistory && !isMailbox && context.runId) {
+      const parsed = ContactEmailsInput.safeParse(call.args);
+      const refused =
+        parsed.success &&
+        unresolvedContactEmailError(context.runId, parsed.data.email, parsed.data.name);
+      if (refused) {
+        yield { type: "error", message: refused };
+        return;
+      }
+    }
     let rejectedStatus: number | undefined;
     let hint = "";
     const redactions: string[] = [];

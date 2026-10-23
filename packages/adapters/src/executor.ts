@@ -7232,7 +7232,7 @@ export function createRunExecutor(deps: ExecutorDeps) {
               return finish(
                 redactConnectorPayload(
                   await executeRecruitingCandidatesTool(
-                    { prisma: deps.prisma, artifacts: deps.artifacts },
+                    { prisma: deps.prisma, artifacts: deps.artifacts, connector: deps.connector },
                     { actor: researchActor.actor, runId, threadId: thread.id, botId: bot.id },
                     args,
                     context,

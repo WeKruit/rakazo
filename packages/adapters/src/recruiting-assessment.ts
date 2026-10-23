@@ -1,5 +1,10 @@
 import { createHash } from "node:crypto";
-import type { AdapterContext, ArtifactStore, WebFetchResult } from "@rakazo/adapter-kit";
+import type {
+  AdapterContext,
+  ArtifactStore,
+  ConnectorProvider,
+  WebFetchResult,
+} from "@rakazo/adapter-kit";
 import type { Actor } from "@rakazo/contracts";
 import {
   RecruitingArtifactRefSchema,
@@ -29,6 +34,7 @@ import {
 import { getLogger } from "@rakazo/logging";
 import { inputPausedToolResult } from "./approval-effect.js";
 import { createRecruitingCandidateReportReader } from "./recruiting-research.js";
+import { resolveRecruitingContact } from "./recruiting-tools.js";
 
 type RecruitingRunContext = { actor: Actor; runId: string; threadId: string; botId: string };
 export type RecruitingAssessmentToolContext = RecruitingRunContext & {
@@ -68,7 +74,11 @@ async function requireRecruitingRun(
 }
 
 export async function executeRecruitingCandidatesTool(
-  deps: { prisma: PrismaClient; artifacts: ArtifactStore },
+  deps: {
+    prisma: PrismaClient;
+    artifacts: ArtifactStore;
+    connector?: Pick<ConnectorProvider, "execute">;
+  },
   trusted: RecruitingRunContext,
   untrusted: unknown,
   context: AdapterContext,
@@ -91,6 +101,17 @@ export async function executeRecruitingCandidatesTool(
     if (!roleId) {
       succeeded = true;
       return { status: "no_current_role" as const };
+    }
+    if (input.operation === "resolve") {
+      const result = await resolveRecruitingContact(
+        deps,
+        trusted.actor,
+        { roleId, nameOrEmail: input.nameOrEmail },
+        context,
+      );
+      itemCount = result.matches.length;
+      succeeded = true;
+      return result;
     }
     if (input.operation === "list") {
       const { operation: _operation, ...query } = input;
@@ -136,8 +157,8 @@ export async function executeRecruitingCandidatesTool(
   } finally {
     getLogger().info("recruiting.candidates.read.timing", {
       operation: input.operation,
-      limit: input.limit ?? null,
-      hasCursor: input.cursor !== undefined,
+      limit: "limit" in input ? (input.limit ?? null) : null,
+      hasCursor: "cursor" in input && input.cursor !== undefined,
       durationMs: Math.round(performance.now() - started),
       authorizeMs,
       queryMs,
