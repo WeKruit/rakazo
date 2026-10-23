@@ -7,6 +7,7 @@ import type {
   GroupMember,
   MessageBlock,
   MessageReaction,
+  RecruitingChatContext,
   RecruitingCorrespondenceReference,
   ReplyPreview,
   RunStatus,
@@ -632,6 +633,7 @@ export async function sendThreadMessage(
   input: {
     text?: string;
     correspondenceReference?: RecruitingCorrespondenceReference;
+    recruitingContext?: RecruitingChatContext;
     artifactIds?: string[];
     addressing?: "coordinator" | "mentions";
     mentions?: MentionTargetInput[];
@@ -741,6 +743,7 @@ export async function sendThreadMessage(
             input.text,
             attachmentBlocks,
             input.correspondenceReference,
+            input.recruitingContext,
           );
           const message = await createThreadMessageInTransaction(tx, {
             threadId: target.threadId,
@@ -856,6 +859,7 @@ export async function sendThreadMessage(
                 artifacts,
                 connectorNames,
                 input.correspondenceReference,
+                input.recruitingContext,
               ),
               status: "queued",
             },
@@ -921,6 +925,7 @@ export async function sendThreadMessage(
           input.text,
           attachmentBlocks,
           input.correspondenceReference,
+          input.recruitingContext,
         );
         const message = await createThreadMessageInTransaction(tx, {
           threadId: target.threadId,
@@ -1015,6 +1020,7 @@ export async function sendThreadMessage(
                 artifacts,
                 connectorNames,
                 input.correspondenceReference,
+                input.recruitingContext,
               ),
               status: "queued",
             },

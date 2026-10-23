@@ -129,6 +129,7 @@ import {
   RecruitingAssessmentSchema,
   RecruitingCandidateFeedbackSelectionSchema,
   RecruitingCandidateReportSchema,
+  RecruitingChatContextSchema,
   RecruitingCorrespondenceReferenceSchema,
   RecruitingCorrespondenceSchema,
   RecruitingCrmDataInputSchema,
@@ -223,6 +224,7 @@ const threadSendInput = threadTarget
   .safeExtend({
     text: z.string().optional(),
     correspondenceReference: RecruitingCorrespondenceReferenceSchema.optional(),
+    recruitingContext: RecruitingChatContextSchema.optional(),
     artifactIds: z.array(Id).max(ATTACHMENT_MAX_COUNT).optional(),
     addressing: z.enum(["coordinator", "mentions"]).optional(),
     /** Bare bot ids (legacy) or typed mention chips from the composer. */
@@ -506,6 +508,7 @@ export const appContract = {
           artifactIds: z.array(Id).max(ATTACHMENT_MAX_COUNT).optional(),
           recruitingFeedback: RecruitingCandidateFeedbackSelectionSchema.optional(),
           crmRoleReference: RecruitingCrmRoleReferenceSchema.optional(),
+          recruitingContext: RecruitingChatContextSchema.optional(),
           mentions: z.array(Id).max(64).optional(),
           /** Carries the call id, so a turn taken mid-run stays in the call's card. */
           clientNonce: z.string().min(1).max(200).optional(),

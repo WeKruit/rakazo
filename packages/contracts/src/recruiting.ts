@@ -1397,6 +1397,18 @@ export type RecruitingCorrespondenceReference = z.infer<
   typeof RecruitingCorrespondenceReferenceSchema
 >;
 
+const ChatContextText = z.string().trim().min(1).max(200);
+/** Bounded workbench selection a role chat turn carries; never evidence or authorization. */
+export const RecruitingChatContextSchema = z
+  .strictObject({
+    roleTitle: ChatContextText.optional(),
+    contact: z
+      .strictObject({ name: ChatContextText, reference: ChatContextText.optional() })
+      .optional(),
+  })
+  .refine((value) => value.roleTitle || value.contact, "Chat context is empty");
+export type RecruitingChatContext = z.infer<typeof RecruitingChatContextSchema>;
+
 export const RecruitingCorrespondenceSchema = z.strictObject({
   roleId: RecruitingId.nullable(),
   status: z.enum(["not_checked", "ready", "empty", "unsupported", "failed"]),

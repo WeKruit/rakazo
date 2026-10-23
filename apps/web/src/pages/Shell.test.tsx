@@ -19,6 +19,7 @@ import { createRoot } from "react-dom/client";
 import type { NavigateFunction } from "react-router-dom";
 import { MemoryRouter, Route, Routes, useLocation, useNavigate } from "react-router-dom";
 import { afterEach, describe, expect, it, vi } from "vitest";
+import type * as ChatContextModule from "./shell/recruiting-chat-context";
 
 vi.mock("@lingui/react/macro", () => {
   const t = (parts: TemplateStringsArray, ...values: unknown[]) =>
@@ -72,6 +73,21 @@ const shellApi = vi.hoisted(() => ({
     setCandidateShortlist: vi.fn(),
   },
 }));
+const chatContext = vi.hoisted(() => ({
+  api: undefined as ChatContextModule.RecruitingChatContextApi | undefined,
+}));
+vi.mock("./shell/recruiting-chat-context", async (importOriginal) => {
+  const actual = await importOriginal<typeof ChatContextModule>();
+  return {
+    ...actual,
+    RecruitingChatContextProvider: (
+      props: ComponentProps<typeof actual.RecruitingChatContextProvider>,
+    ) => {
+      chatContext.api = props.value;
+      return <actual.RecruitingChatContextProvider {...props} />;
+    },
+  };
+});
 vi.mock("../lib/auth", () => ({ authClient: { useSession: () => shellApi.session } }));
 vi.mock("./PluginsOverlay", () => ({
   PluginsOverlay: (props: unknown) => {
@@ -2403,6 +2419,38 @@ it("sends the currently selected saved email as separate native context and drop
   type(composer, "Find more candidates.");
   await view.click("Send");
   expect(shellApi.send.mock.calls.at(-1)![0].correspondenceReference).toBeUndefined();
+});
+
+it("sends the open role and the person selected in the workbench as bounded chat context", async () => {
+  setToolActivityPreference("off");
+  const view = await renderFeedbackShell("group", undefined, {
+    isDeploymentOwner: false,
+    openFeedback: false,
+  });
+  await view.navigate("/app/g/group-1?view=contacts");
+  await view.click("Open role chat");
+  const composer = container!.querySelector<HTMLTextAreaElement>('textarea[name="chat-message"]')!;
+  await act(async () =>
+    chatContext.api!.setSelectedContact({ name: "Avery Example", reference: "candidate-7" }),
+  );
+  type(composer, "Draft a follow-up for this person.");
+  shellApi.send.mockResolvedValue({ runId: "same-role-run" });
+  await view.click("Send");
+  expect(shellApi.send).toHaveBeenLastCalledWith(
+    expect.objectContaining({
+      text: "Draft a follow-up for this person.",
+      recruitingContext: {
+        roleTitle: view.group.name,
+        contact: { name: "Avery Example", reference: "candidate-7" },
+      },
+    }),
+  );
+  await act(async () => chatContext.api!.setSelectedContact(null));
+  type(composer, "Find more candidates.");
+  await view.click("Send");
+  expect(shellApi.send.mock.calls.at(-1)![0].recruitingContext).toEqual({
+    roleTitle: view.group.name,
+  });
 });
 
 it("renders a saved email business reference outside the original human quote without internal identifiers", async () => {

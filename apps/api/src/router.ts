@@ -2667,6 +2667,9 @@ export function createRouter(deps: RouterDeps) {
                     ? { recruitingFeedback: input.recruitingFeedback }
                     : {}),
                   ...(input.crmRoleReference ? { crmRoleReference: input.crmRoleReference } : {}),
+                  ...(input.recruitingContext
+                    ? { recruitingContext: input.recruitingContext }
+                    : {}),
                 }
               : block,
           );
@@ -2717,6 +2720,7 @@ export function createRouter(deps: RouterDeps) {
                     artifacts,
                     undefined,
                     input.crmRoleReference,
+                    input.recruitingContext,
                   ),
                   status: "queued",
                 },
