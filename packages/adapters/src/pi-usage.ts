@@ -86,9 +86,10 @@ export function normalizePiUsage(
 export function cacheHitRatio(
   usage: Pick<AgentUsage, "inputTokens" | "cacheReadTokens" | "cacheWriteTokens">,
 ): number | null {
-  if (usage.inputTokens === null || usage.cacheReadTokens === null) return null;
-  const prompt = usage.inputTokens + usage.cacheReadTokens + (usage.cacheWriteTokens ?? 0);
-  return prompt > 0 ? Math.round((usage.cacheReadTokens / prompt) * 1000) / 1000 : null;
+  const cacheRead = usage.cacheReadTokens;
+  if (usage.inputTokens == null || cacheRead == null) return null;
+  const prompt = usage.inputTokens + cacheRead + (usage.cacheWriteTokens ?? 0);
+  return prompt > 0 ? Math.round((cacheRead / prompt) * 1000) / 1000 : null;
 }
 
 /** Read only bounded SSE frames, retaining field presence, never provider text or payloads. */
