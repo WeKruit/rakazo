@@ -95,3 +95,56 @@ export const RecruitingCrmCandidateSyncSchema = z
     "Only a synced import has a verified CRM receipt",
   );
 export type RecruitingCrmCandidateSync = z.infer<typeof RecruitingCrmCandidateSyncSchema>;
+
+/** Fields a CRM contact backfill may fill; empty CRM values only, never overwrites. */
+export const RecruitingContactBackfillFieldSchema = z.enum([
+  "email",
+  "phone",
+  "location",
+  "title",
+  "company",
+]);
+export type RecruitingContactBackfillField = z.infer<typeof RecruitingContactBackfillFieldSchema>;
+
+export const RecruitingContactBackfillInputSchema = z.strictObject({
+  operation: z.literal("backfill_contacts"),
+  roleId: NativeId,
+  limit: z.number().int().min(1).max(50),
+  fields: z.array(RecruitingContactBackfillFieldSchema).min(1).optional(),
+});
+export type RecruitingContactBackfillInput = z.infer<typeof RecruitingContactBackfillInputSchema>;
+
+/**
+ * Progress/effect result. Frontend shows the counts plus, per filled contact,
+ * "<field> filled by <provider> <checkedAt date>".
+ */
+export const RecruitingContactBackfillResultSchema = z.strictObject({
+  processed: z.number().int().nonnegative(),
+  filled: z.number().int().nonnegative(),
+  cacheHits: z.number().int().nonnegative(),
+  paidCalls: z.number().int().nonnegative(),
+  fills: z.array(
+    z.strictObject({
+      candidateId: NativeId,
+      field: RecruitingContactBackfillFieldSchema,
+      value: Text,
+      provider: Text,
+      checkedAt: z.iso.datetime({ offset: true }),
+      confidence: z.string().nullable(),
+    }),
+  ),
+  skipped: z.array(
+    z.strictObject({
+      candidateId: NativeId,
+      reason: z.enum([
+        "no_linkedin",
+        "no_credits",
+        "lookup_pending",
+        "lookup_failed",
+        "not_found",
+        "note_failed",
+      ]),
+    }),
+  ),
+});
+export type RecruitingContactBackfillResult = z.infer<typeof RecruitingContactBackfillResultSchema>;
