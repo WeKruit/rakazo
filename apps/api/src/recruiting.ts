@@ -463,6 +463,7 @@ export async function getRecruitingRoleCampaign(
   },
   actor: Actor,
   target: ThreadTarget,
+  selection: { campaignId?: string; campaignOffset?: number } = {},
 ): Promise<RecruitingRoleCampaign> {
   return authenticated(async () => {
     const none: RecruitingRoleCampaign = {
@@ -496,17 +497,17 @@ export async function getRecruitingRoleCampaign(
           serverRevision: selected.serverRevision,
           organizationId: selected.organizationId,
           crmRoleId: selected.crmRoleId,
-          limit: 2,
-          offset: 0,
+          limit: selection.campaignId ? 50 : 2,
+          offset: selection.campaignOffset ?? 0,
         },
       );
       if (page.operation !== "roleCampaigns") throw new IsolationError();
-      if (page.nextOffset !== null || page.items.length > 1)
-        throw new ORPCError("CONFLICT", {
-          message:
-            "This CRM role has multiple campaigns. Select an exact campaign in CRM before using a single campaign workspace.",
-        });
-      imported = page.items[0] ?? null;
+      if (!selection.campaignId && (page.nextOffset !== null || page.items.length > 1))
+        return { ...none, status: "unavailable", selectionRequired: true };
+      imported = selection.campaignId
+        ? (page.items.find((item) => item.id === selection.campaignId) ?? null)
+        : (page.items[0] ?? null);
+      if (selection.campaignId && !imported) throw new IsolationError();
       if (!imported) return none;
       recheckImported = async () => {
         const current = await recruiting.getRecruitingWorkspaceCrmTarget(deps.prisma, actor, {
@@ -523,15 +524,17 @@ export async function getRecruitingRoleCampaign(
             serverRevision: selected.serverRevision,
             organizationId: selected.organizationId,
             crmRoleId: selected.crmRoleId,
-            limit: 2,
-            offset: 0,
+            limit: selection.campaignId ? 50 : 2,
+            offset: selection.campaignOffset ?? 0,
           },
         );
         if (
           fresh.operation !== "roleCampaigns" ||
-          fresh.nextOffset !== null ||
-          fresh.items.length !== 1 ||
-          fresh.items[0]?.id !== imported?.id
+          (selection.campaignId
+            ? !fresh.items.some((item) => item.id === imported?.id)
+            : fresh.nextOffset !== null ||
+              fresh.items.length !== 1 ||
+              fresh.items[0]?.id !== imported?.id)
         )
           throw new IsolationError();
       };
@@ -592,6 +595,7 @@ export async function getRecruitingRoleCampaign(
       binding = nativeBinding;
     }
     const campaignId = binding.campaignId as string;
+    if (selection.campaignId && selection.campaignId !== campaignId) throw new IsolationError();
     const campaignName = binding.campaignName as string;
     const eaccount = typeof binding.eaccount === "string" ? binding.eaccount : null;
     const context: AdapterContext = {

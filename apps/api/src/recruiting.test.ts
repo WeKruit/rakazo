@@ -4396,6 +4396,10 @@ describe("live CRM browser reads", () => {
   it.each([
     "ready",
     "multiple",
+    "selected",
+    "selected-page",
+    "wrong-selected",
+    "deferred-mapping",
     "revoked",
     "no-provider",
     "wrong-provider-id",
@@ -4428,9 +4432,27 @@ describe("live CRM browser reads", () => {
         { id: campaignId, name: "Existing", status: 1, synced_at: "2026-10-23T00:00:00Z" },
       ],
       pagination: "offset",
-      offset: 0,
+      offset: mode === "selected-page" ? 25 : 0,
       next_offset: mode === "multiple" ? 1 : null,
     };
+    const selection =
+      mode === "selected" ||
+      mode === "selected-page" ||
+      mode === "wrong-selected" ||
+      mode === "deferred-mapping"
+        ? {
+            campaignId: mode === "wrong-selected" ? "not-in-role" : campaignId,
+            campaignOffset: mode === "selected-page" ? 25 : 0,
+          }
+        : {};
+    if (mode === "selected") {
+      (f.results.get_crm_role as { campaigns: unknown[] }).campaigns.push({
+        id: "another-role-campaign",
+        name: "Second",
+        status: 0,
+        synced_at: "2026-10-23T00:00:00Z",
+      });
+    }
     if (mode === "revoked") f.results.list_crm_memberships = [];
     let authorized = true;
     let providerAuthorized = true;
@@ -4484,6 +4506,7 @@ describe("live CRM browser reads", () => {
         { ...f.deps, stillAuthorized: async () => authorized },
         actor,
         target,
+        selection,
       );
       await providerStarted;
       if (mode === "deferred-membership") f.results.list_crm_memberships = [];
@@ -4492,17 +4515,33 @@ describe("live CRM browser reads", () => {
       if (mode === "deferred-target")
         f.reauthorize.mockResolvedValue({ ...target, threadId: "another-thread" });
       if (mode === "deferred-provider") providerAuthorized = false;
+      if (mode === "deferred-mapping")
+        (f.results.get_crm_role as { campaigns: unknown[] }).campaigns = [];
       const rejected = expect(pending).rejects.toThrow();
       release();
       await rejected;
-    } else if (mode === "multiple" || mode === "revoked") {
-      await expect(api.getRecruitingRoleCampaign(f.deps, actor, target)).rejects.toThrow();
+    } else if (mode === "multiple") {
+      expect(await api.getRecruitingRoleCampaign(f.deps, actor, target)).toMatchObject({
+        status: "unavailable",
+        selectionRequired: true,
+        campaign: null,
+        leads: [],
+      });
+      expect(f.execute.mock.calls.some(([call]) => call.route?.resourceId === "instantly")).toBe(
+        false,
+      );
+    } else if (mode === "wrong-selected" || mode === "revoked") {
+      await expect(
+        api.getRecruitingRoleCampaign(f.deps, actor, target, selection),
+      ).rejects.toThrow();
       expect(f.execute.mock.calls.some(([call]) => call.route?.resourceId === "instantly")).toBe(
         false,
       );
     } else {
-      const output = await api.getRecruitingRoleCampaign(f.deps, actor, target);
-      expect(output.status).toBe(mode === "ready" ? "ready" : "unavailable");
+      const output = await api.getRecruitingRoleCampaign(f.deps, actor, target, selection);
+      expect(output.status).toBe(
+        ["ready", "selected", "selected-page"].includes(mode) ? "ready" : "unavailable",
+      );
       expect(output.campaign?.id).toBe(campaignId);
       expect(output.campaign?.eaccount).toBeNull();
       expect(
@@ -6147,6 +6186,22 @@ describe("role campaign read", () => {
         { candidateKey: null, email: "other@example.test", status: 1, interestStatus: null },
       ],
     });
+  });
+
+  it("rejects a selector outside the native role binding before reading the provider", async () => {
+    const f = fixture({
+      spaceId: actor.spaceId,
+      status: "completed",
+      result: {
+        campaignId: CAMPAIGN,
+        campaignName: "Existing",
+        leads: {},
+      },
+    });
+    await expect(
+      api.getRecruitingRoleCampaign(f.deps, actor, target, { campaignId: "other" }),
+    ).rejects.toThrow();
+    expect(f.calls).toEqual([]);
   });
 
   it.each(["failed", "malformed", "full-page", "cursor", "empty"])(

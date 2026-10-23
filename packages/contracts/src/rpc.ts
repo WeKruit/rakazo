@@ -642,7 +642,21 @@ export const appContract = {
         }),
       )
       .output(RecruitingCorrespondenceSchema),
-    roleCampaign: oc.input(threadTarget).output(RecruitingRoleCampaignSchema),
+    roleCampaign: oc
+      .input(
+        threadTarget.and(
+          z
+            .object({
+              campaignId: Id.optional(),
+              campaignOffset: z.number().int().min(0).max(1_000_000).optional(),
+            })
+            .refine(
+              (input) => input.campaignOffset === undefined || input.campaignId !== undefined,
+              "Campaign offset requires an exact campaign selection",
+            ),
+        ),
+      )
+      .output(RecruitingRoleCampaignSchema),
     roleSetup: oc.input(threadTarget).output(RecruitingRoleSetupSchema),
     /** The latest calibration review round of the thread's role (the ten people it showed). */
     calibrationRound: oc.input(threadTarget).output(RecruitingCalibrationRoundOutput),

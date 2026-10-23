@@ -3691,6 +3691,7 @@ export function createRouter(deps: RouterDeps) {
           },
           context.actor,
           await resolveThreadTarget(deps.prisma, context.actor, input),
+          { campaignId: input.campaignId, campaignOffset: input.campaignOffset },
         ),
       ),
       roleSetup: authed.recruiting.roleSetup.handler(async ({ context, input }) =>

@@ -1587,6 +1587,8 @@ export const RecruitingCorrespondenceInputPage = {
  * 3 completed, -1 bounced, -2 unsubscribed.
  */
 export const RecruitingRoleCampaignSchema = z.strictObject({
+  /** Multiple exact role mappings require an explicit selection from roleCampaigns. */
+  selectionRequired: z.boolean().optional(),
   status: z.enum(["none", "unavailable", "ready"]),
   /** The assigned Instantly connection; null when none is assigned to this conversation. */
   serverId: z.string().nullable(),
