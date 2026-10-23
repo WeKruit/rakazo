@@ -8056,6 +8056,68 @@ async function crmSourceSync(
   return syncs;
 }
 
+export async function getRecruitingCrmCandidateSyncs(
+  prisma: PrismaClient,
+  actor: Actor,
+  input: { roleId: string; effectIds: readonly string[] },
+): Promise<RecruitingCrmCandidateSync[]> {
+  if (
+    typeof input.roleId !== "string" ||
+    !input.roleId.trim() ||
+    !Array.isArray(input.effectIds) ||
+    input.effectIds.length > 200 ||
+    input.effectIds.some((id) => typeof id !== "string" || !id.trim())
+  )
+    throw new IsolationError();
+  const ids = new Set(input.effectIds);
+  if (!ids.size) return [];
+  const afterRead: Array<() => void> = [];
+  const result = await prisma.$transaction(
+    async (tx) => {
+      const role = await requireRole(tx, actor, input.roleId);
+      if (!role.crmBindingEffectId) throw new IsolationError();
+      const binding = await crmBindingReceipt(tx, actor, role.id, role.crmBindingEffectId);
+      const imports = await tx.recruitingCrmImport.findMany({
+        where: {
+          effectId: { in: [...ids] },
+          bindingEffectId: binding.bindingEffectId,
+          occurrence: { roleId: role.id },
+          effect: {
+            spaceId: actor.spaceId,
+            run: { spaceId: actor.spaceId, userId: actor.userId },
+          },
+        },
+        include: { effect: true, occurrence: { include: { page: true } } },
+      });
+      if (
+        imports.length !== ids.size ||
+        imports.some(
+          (link) =>
+            !ids.has(link.effectId) ||
+            link.bindingEffectId !== binding.bindingEffectId ||
+            link.effect.id !== link.effectId ||
+            link.effect.spaceId !== actor.spaceId ||
+            link.occurrence.roleId !== role.id ||
+            link.occurrence.page.roleId !== role.id ||
+            link.occurrence.page.effectId !== link.pageId,
+        )
+      )
+        throw new IsolationError();
+      const syncs = await crmSourceSync(
+        tx,
+        actor,
+        imports,
+        { pages: new Map(), sources: imports.map((link) => link.occurrence), binding },
+        afterRead,
+      );
+      return [...ids].map((id) => syncs.get(id)!);
+    },
+    { isolationLevel: Prisma.TransactionIsolationLevel.RepeatableRead },
+  );
+  for (const verify of afterRead) verify();
+  return result;
+}
+
 function candidateSourceReference(
   page: Prisma.RecruitingCandidatePageGetPayload<Record<string, never>> & {
     effect: { request: Prisma.JsonValue };

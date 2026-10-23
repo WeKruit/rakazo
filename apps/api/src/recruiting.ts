@@ -85,7 +85,11 @@ export async function notifyRecruitingChange(
   }
 }
 
-function correspondenceProvider(endpoint: string | null, view: "inbox" | "interview" | "contacts") {
+function correspondenceProvider(
+  endpoint: string | null,
+  view: "inbox" | "interview" | "contacts",
+  firstPartyEndpoint?: string,
+) {
   if (!endpoint) return null;
   let address: string;
   try {
@@ -95,6 +99,8 @@ function correspondenceProvider(endpoint: string | null, view: "inbox" | "interv
     return null;
   }
   if (view === "inbox") {
+    if (endpoint === firstPartyEndpoint)
+      return { kind: "crm", tools: ["list_crm_candidate_correspondence"] };
     if (address === "https://mcp.instantly.ai/mcp")
       return { kind: "instantly", tools: ["list_emails", "get_email"] };
     if (address === "https://gmailmcp.googleapis.com/mcp/v1")
@@ -162,6 +168,7 @@ export async function getRecruitingCorrespondence(
   actor: Actor,
   target: ThreadTarget,
   view: "inbox" | "interview" | "contacts",
+  productIdentity?: { endpoint: string; connected: boolean },
 ): Promise<RecruitingCorrespondence> {
   return authenticated(async () => {
     const workspace = await recruiting.getRecruitingWorkspace(prisma, actor, {
@@ -186,7 +193,13 @@ export async function getRecruitingCorrespondence(
     });
     const sourceRows = servers.map((server) => ({
       ...server,
-      provider: correspondenceProvider(server.endpoint, view),
+      provider: correspondenceProvider(
+        server.endpoint,
+        view,
+        server.transport === "streamable_http" && !server.secretId
+          ? productIdentity?.endpoint
+          : undefined,
+      ),
     }));
     const sources = sourceRows.filter((source) => source.provider !== null);
     const output: RecruitingCorrespondence = {
@@ -202,7 +215,11 @@ export async function getRecruitingCorrespondence(
         checkIssue: null,
         status: !source.enabled
           ? "disabled"
-          : !source.secretId && !hasPlatformMcpCredential(source)
+          : (
+                source.provider?.kind === "crm"
+                  ? !productIdentity?.connected
+                  : !source.secretId && !hasPlatformMcpCredential(source)
+              )
             ? "needs_connection"
             : !source.assignments.some((assignment) =>
                   source.provider?.tools.some((tool) => correspondenceAllows(assignment, tool)),
@@ -214,7 +231,14 @@ export async function getRecruitingCorrespondence(
     if (!workspace) return output;
     const readTools =
       view === "inbox"
-        ? ["list_emails", "get_email", "get_message", "get_thread", "search_threads"]
+        ? [
+            "list_emails",
+            "get_email",
+            "get_message",
+            "get_thread",
+            "search_threads",
+            "list_crm_candidate_correspondence",
+          ]
         : view === "interview"
           ? [
               "get_bookings",
@@ -276,7 +300,7 @@ export async function getRecruitingCorrespondence(
         request: true,
         status: true,
         updatedAt: true,
-        run: { select: { botId: true } },
+        run: { select: { id: true, botId: true } },
       },
     });
     // ponytail: bound saved display history to 200 matching reads; a native fresh check refreshes older coverage.
@@ -324,18 +348,30 @@ export async function getRecruitingCorrespondence(
         (typeof campaignId !== "string" || !campaignId.trim())
       )
         return []; // Account-wide exploration is not evidence of this role's correspondence.
+      if (
+        source.provider?.kind === "crm" &&
+        [call.args.p_org, call.args.p_candidate].some(
+          (value) => typeof value !== "string" || !value.trim(),
+        )
+      ) {
+        checkIssue(source.id, effect.updatedAt);
+        output.checkedAt ??= effect.updatedAt.toISOString();
+        return [];
+      }
       const key = stableJsonValue([
         source.id,
         call.route.toolName,
         call.route.toolName === "list_emails"
           ? { campaign_id: campaignId }
-          : source.provider?.kind === "cal" && call.route.toolName === "get_availability"
-            ? calAvailabilitySubject(call.args)
-            : source.provider?.kind === "gmail" && call.route.toolName !== "search_threads"
-              ? call.route.toolName === "get_message"
-                ? { messageId: call.args.messageId }
-                : { threadId: call.args.threadId }
-              : query,
+          : source.provider?.kind === "crm"
+            ? { p_org: call.args.p_org, p_candidate: call.args.p_candidate }
+            : source.provider?.kind === "cal" && call.route.toolName === "get_availability"
+              ? calAvailabilitySubject(call.args)
+              : source.provider?.kind === "gmail" && call.route.toolName !== "search_threads"
+                ? call.route.toolName === "get_message"
+                  ? { messageId: call.args.messageId }
+                  : { threadId: call.args.threadId }
+                : query,
       ]);
       // ponytail: Inbox shows the latest campaign check, not accumulated mailbox history; native cursor coverage stays explicit.
       // A new check replaces the prior observation, including empty/error.
@@ -386,6 +422,14 @@ export async function getRecruitingCorrespondence(
     const gmailThreads = new Map<string, string>();
     const mailMembership = new Set<string>();
     const events = new Map<string, RecruitingCorrespondence["events"][number]>();
+    let crmBinding: Awaited<ReturnType<typeof recruiting.getRecruitingCrmTarget>> | undefined;
+    const crmPages: Array<{
+      sourceId: string;
+      updatedAt: Date;
+      candidateId: string;
+      importEffectId: string;
+      messages: RecruitingCorrespondence["emails"];
+    }> = [];
     // Details may supplement only messages present in the latest selected campaign snapshot.
     const projections = [
       ...reads.filter((read) => read.call.route.toolName !== "get_email"),
@@ -424,6 +468,129 @@ export async function getRecruitingCorrespondence(
         continue;
       }
       const body = mcpObject(result);
+      if (provider.kind === "crm") {
+        const data = correspondenceRecord(body?.data);
+        const cursorMatches = (value: unknown) => {
+          const cursor = correspondenceRecord(value);
+          return (
+            cursor !== undefined &&
+            cursor.p_org === call.args.p_org &&
+            cursor.p_candidate === call.args.p_candidate &&
+            [cursor.linked_offset, cursor.unlinked_offset].every(
+              (offset) =>
+                typeof offset === "number" &&
+                Number.isSafeInteger(offset) &&
+                offset >= 0 &&
+                offset <= Number.MAX_SAFE_INTEGER - 51,
+            )
+          );
+        };
+        const limit = call.args.p_limit === undefined ? 10 : call.args.p_limit;
+        if (
+          !data ||
+          data.organization_id !== call.args.p_org ||
+          data.candidate_id !== call.args.p_candidate ||
+          data.pagination !== "offset" ||
+          !Array.isArray(data.messages) ||
+          typeof limit !== "number" ||
+          !Number.isInteger(limit) ||
+          limit < 1 ||
+          limit > 50 ||
+          data.messages.length > limit ||
+          (call.args.p_cursor !== undefined && !cursorMatches(call.args.p_cursor)) ||
+          (data.next_cursor !== null && !cursorMatches(data.next_cursor))
+        ) {
+          checkIssue(source.id, effect.updatedAt);
+          continue;
+        }
+        const messages = data.messages.map((value) => {
+          const row = correspondenceRecord(value);
+          if (
+            typeof row?.id !== "string" ||
+            !row.id.trim() ||
+            row.organization_id !== call.args.p_org ||
+            (row.candidate_id !== null && row.candidate_id !== call.args.p_candidate) ||
+            (row.body_text !== null && typeof row.body_text !== "string")
+          )
+            return null;
+          const message = RecruitingCorrespondenceSchema.shape.emails.element.safeParse({
+            id: stableJsonValue([source.id, call.args.p_org, call.args.p_candidate, row.id]),
+            sender: row.from_address,
+            recipients: row.to_address === null ? [] : [row.to_address],
+            subject: row.subject ?? "",
+            body: row.body_text ?? "",
+            snippet: row.body_text === null,
+            date: row.timestamp_email,
+            url: null,
+          });
+          return message.success ? message.data : null;
+        });
+        if (messages.some((message) => message === null)) {
+          checkIssue(source.id, effect.updatedAt);
+          continue;
+        }
+        crmBinding ??= await recruiting.getRecruitingCrmTarget(prisma, actor, {
+          runId: effect.run.id,
+          roleId: workspace.role.id,
+        });
+        const bound = crmBinding.target;
+        if (
+          !bound ||
+          !crmBinding.bindingEffectId ||
+          bound.mcpServerId !== source.id ||
+          bound.serverRevision !== source.revision ||
+          call.args.p_org !== bound.organizationId ||
+          typeof call.args.p_candidate !== "string"
+        ) {
+          checkIssue(source.id, effect.updatedAt);
+          continue;
+        }
+        output.partial ||= call.args.p_cursor !== undefined || data.next_cursor !== null;
+        if (!messages.length) {
+          parsed = true;
+          continue;
+        }
+        // Only locate an exact import here; the single native batch below owns source verification.
+        const link = await prisma.recruitingCrmImport.findFirst({
+          where: {
+            bindingEffectId: crmBinding.bindingEffectId,
+            occurrence: { roleId: workspace.role.id },
+            effect: {
+              spaceId: actor.spaceId,
+              status: "completed",
+              run: { userId: actor.userId, spaceId: actor.spaceId },
+              AND: [
+                {
+                  result: {
+                    path: ["structuredContent", "data", "organization_id"],
+                    equals: bound.organizationId,
+                  },
+                },
+                {
+                  result: {
+                    path: ["structuredContent", "data", "candidate_id"],
+                    equals: call.args.p_candidate,
+                  },
+                },
+              ],
+            },
+          },
+          orderBy: [{ effect: { createdAt: "desc" } }, { effectId: "desc" }],
+          select: { effectId: true },
+        });
+        if (!link) {
+          checkIssue(source.id, effect.updatedAt);
+          continue;
+        }
+        crmPages.push({
+          sourceId: source.id,
+          updatedAt: effect.updatedAt,
+          candidateId: call.args.p_candidate,
+          importEffectId: link.effectId,
+          messages: messages.filter((message) => message !== null),
+        });
+        continue;
+      }
       if (provider.kind === "fullenrich" && body) {
         if (typeof call.args.enrichment_id !== "string" || !call.args.enrichment_id.trim()) {
           checkIssue(source.id, effect.updatedAt);
@@ -707,6 +874,34 @@ export async function getRecruitingCorrespondence(
         });
       }
     }
+    if (crmPages.length) {
+      const bound = crmBinding?.target;
+      if (!bound) throw new IsolationError();
+      const imports = new Map(
+        (
+          await recruiting.getRecruitingCrmCandidateSyncs(prisma, actor, {
+            roleId: workspace.role.id,
+            effectIds: [...new Set(crmPages.map((page) => page.importEffectId))],
+          })
+        ).map((sync) => [sync.effectId, sync]),
+      );
+      for (const page of crmPages) {
+        const imported = imports.get(page.importEffectId);
+        if (
+          imported?.status !== "synced" ||
+          imported.bindingEffectId !== crmBinding?.bindingEffectId ||
+          stableJsonValue(imported.target) !== stableJsonValue(bound) ||
+          imported.receipt?.organization_id !== bound.organizationId ||
+          imported.receipt.candidate_id !== page.candidateId
+        ) {
+          checkIssue(page.sourceId, page.updatedAt);
+          continue;
+        }
+        parsed = true;
+        for (const message of page.messages)
+          if (!emails.has(message.id)) emails.set(message.id, message);
+      }
+    }
     output.emails = [...emails.values()].slice(0, 50);
     // ponytail: bound retained calendar display to 200 entries; full receipts remain in native history.
     output.events = [...events.values()].slice(0, 200);
@@ -728,6 +923,9 @@ export async function getRecruitingCorrespondence(
         spaceId: actor.spaceId,
         userId: actor.userId,
         activeRecruitingRoleId: workspace.role.id,
+        ...(crmBinding
+          ? { activeRecruitingRole: { crmBindingEffectId: crmBinding.bindingEffectId } }
+          : {}),
       },
       select: { id: true },
     });

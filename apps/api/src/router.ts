@@ -3453,6 +3453,12 @@ export function createRouter(deps: RouterDeps) {
           context.actor,
           await resolveThreadTarget(deps.prisma, context.actor, input),
           input.view,
+          input.view === "inbox" && deps.env.firstPartyMcpUrl
+            ? {
+                endpoint: deps.env.firstPartyMcpUrl,
+                connected: (await productIdentityStatus(context.actor)) === "connected",
+              }
+            : undefined,
         ),
       ),
       readSource: authed.recruiting.readSource.handler(({ context, input }) =>
