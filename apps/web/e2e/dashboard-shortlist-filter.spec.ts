@@ -35,6 +35,7 @@ for (const width of [1440, 390]) {
     await expect(clear).toBeVisible();
     await expect(contacts.getByText("Avery Example", { exact: true })).toBeVisible();
     await expect(contacts.getByText("Blake Sample", { exact: true })).toHaveCount(0);
+    await page.getByRole("button", { name: "Collapse role chat", exact: true }).click();
     const path = info.outputPath(`weekly-shortlist-${width}.png`);
     await page.screenshot({ path, fullPage: true });
     await info.attach(`weekly-shortlist-${width}`, { path, contentType: "image/png" });
