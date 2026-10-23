@@ -321,6 +321,8 @@ import {
   RecruitingDetailProvider,
   useRecruitingDetailController,
 } from "./recruiting";
+import { RetryNotice } from "./recruiting/RetryNotice";
+import { TabLoading } from "./recruiting/shared";
 import type { SettingsSection } from "./SettingsOverlay";
 import { SpaceSearchResults } from "./SpaceSearch";
 import { BotSettings, CreateBotForm } from "./shell/bot-panel";
@@ -2398,11 +2400,11 @@ export function ShellPage() {
   ]);
   const currentCrmComposerScope = useRef(crmComposerScope);
   currentCrmComposerScope.current = crmComposerScope;
+  // A failed binding read keeps the role's own results on screen with a retry for its CRM part.
   const boundRoleCrmMode =
     boundRoleView &&
-    searchParams.get("roleSource") !== "search" &&
+    !currentBindingRead?.failed &&
     (!currentBindingRead ||
-      currentBindingRead.failed ||
       currentBindingRead.workspace === undefined ||
       Boolean(boundCrmSelection || groupCrmSelection));
   const effectiveCrmSelection = crmMode
@@ -4227,6 +4229,25 @@ export function ShellPage() {
   );
 
   // biome-ignore format: ponytail: preserve the native console markup when sharing this shell.
+  const nativeCorrespondence =
+    activeSnapshot?.threadId && ["sequence", "inbox", "interview"].includes(recruitingWorkspaceView) ? (
+      <RecruitingCorrespondence
+        view={recruitingWorkspaceView as "sequence" | "inbox" | "interview"}
+        messages={transcriptMessages}
+        artifactTarget={transcriptArtifactTarget}
+        threadId={activeSnapshot.threadId}
+        onEmailSelection={selectCorrespondence}
+        outreachBotIds={(activeSnapshot.members ?? []).filter((member) => member.name === "Outreach").map((member) => member.botId)}
+        onConversation={(text) => {
+          openRoleChat(text);
+        }}
+        onOpenConnections={() => setPluginsOpen(true)}
+        onSaveDraft={saveSequenceDraft}
+        refreshSignal={recruitingRefresh}
+        readCache={recruitingReadCache.current}
+        readCacheScope={recruitingCacheScope}
+      />
+    ) : null;
   const shell = (
     <div
       data-testid="shell-root"
@@ -5125,26 +5146,13 @@ export function ShellPage() {
             {roleCreationForm}
           </div>
         ) : null}
-        {boundRoleView && (boundCrmSelection || currentBindingRead?.failed) ? (
-          <fieldset className="flex flex-wrap gap-2 px-6 py-3" aria-label={t`Contact source`}>
-            <Button aria-pressed={searchParams.get("roleSource") !== "search"} variant={searchParams.get("roleSource") === "search" ? "outline" : "secondary"} onClick={() => setSearchParams(current => { const next = new URLSearchParams(current); next.delete("roleSource"); next.delete("crmCandidate"); return next; })}>
-              {recruitingWorkspaceView === "contacts" ? <Trans>CRM contacts</Trans> : <Trans>CRM history</Trans>}
-            </Button>
-            <Button aria-pressed={searchParams.get("roleSource") === "search"} variant={searchParams.get("roleSource") === "search" ? "secondary" : "outline"} onClick={() => setSearchParams(current => { const next = new URLSearchParams(current); next.set("roleSource", "search"); next.delete("crmCandidate"); return next; })}>
-              {recruitingWorkspaceView === "contacts" ? <Trans>Search results</Trans> : <Trans>Current search</Trans>}
-            </Button>
-          </fieldset>
-        ) : null}
-        {boundRoleCrmMode && !effectiveCrmSelection ? <div role={currentBindingRead?.failed ? "alert" : "status"} className="p-6">
-          {currentBindingRead?.failed ? <>
-            <p><Trans>Could not load this role’s CRM connection.</Trans></p>
-            <Button variant="outline" onClick={() => setRecruitingRefresh(value => value + 1)}><Trans>Refresh</Trans></Button>
-          </> : <Trans>Loading…</Trans>}
-        </div> : null}
+        {boundRoleView && currentBindingRead?.failed ? <div className="px-6"><RetryNotice onRetry={() => setRecruitingRefresh(value => value + 1)}>
+          <Trans>Could not load this role’s CRM connection.</Trans>
+        </RetryNotice></div> : boundRoleCrmMode && !effectiveCrmSelection ? <div className="p-6"><TabLoading /></div> : null}
         {(crmMode || (boundRoleCrmMode && effectiveCrmSelection)) && activeSnapshot?.threadId ? <div className="rk-scroll recruiting-workspace-main min-h-0 flex-1 overflow-y-auto">{effectiveCrmSelection ? <RecruitingPanel
           threadId={activeSnapshot.threadId} botId={inGroup ? undefined : active?.id} groupId={inGroup ? groupId : undefined}
           readCache={recruitingReadCache.current} readCacheScope={recruitingCacheScope} refreshSignal={recruitingRefresh} onClose={() => {}}
-          roleConversation={!emptyCrmChat} onBrowseCandidates={() => openRecruitingView("results")} onDiscussCandidate={discussCandidate} onCandidateFeedback={feedbackCandidate} candidateFeedbackRecipients={candidateFeedbackRecipients}
+          roleConversation={!emptyCrmChat} correspondence={nativeCorrespondence} onBrowseCandidates={() => openRecruitingView("results")} onDiscussCandidate={discussCandidate} onCandidateFeedback={feedbackCandidate} candidateFeedbackRecipients={candidateFeedbackRecipients}
           crmBrowse={{ selection: effectiveCrmSelection, view: recruitingWorkspaceView, candidateId: searchParams.get("crmCandidate") ?? undefined,
             onSelectCandidate: (id, view = "inbox") => setSearchParams(current => { const next = new URLSearchParams(current); next.set("crmCandidate", id); next.set("view", view); return next; }),
             onDraftReply: boundRoleCrmMode && !crmMode ? draftCrmReply : undefined,
@@ -5152,22 +5160,7 @@ export function ShellPage() {
         /> : <p role="alert"><Trans>Choose a CRM role again.</Trans></p>}</div> : null}
         {workspaceCorrespondence && activeSnapshot?.threadId ? (
           <div className="rk-scroll recruiting-workspace-main min-h-0 flex-1 overflow-y-auto">
-            <RecruitingCorrespondence
-              view={recruitingWorkspaceView as "sequence" | "inbox" | "interview"}
-              messages={transcriptMessages}
-              artifactTarget={transcriptArtifactTarget}
-              threadId={activeSnapshot.threadId}
-              onEmailSelection={selectCorrespondence}
-              outreachBotIds={(activeSnapshot.members ?? []).filter((member) => member.name === "Outreach").map((member) => member.botId)}
-              onConversation={(text) => {
-                openRoleChat(text);
-              }}
-              onOpenConnections={() => setPluginsOpen(true)}
-              onSaveDraft={saveSequenceDraft}
-              refreshSignal={recruitingRefresh}
-              readCache={recruitingReadCache.current}
-              readCacheScope={recruitingCacheScope}
-            />
+            {nativeCorrespondence}
           </div>
         ) : null}
         {workspaceCandidates && activeSnapshot?.threadId ? (

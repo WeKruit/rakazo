@@ -94,6 +94,7 @@ import { ContactsTab, InboxWithReply, InterviewTab, SequenceTab } from "./recrui
 import type { RecruitingDetailPerson } from "./recruiting/detail";
 import { useRecruitingDetail } from "./recruiting/detail";
 import { TabLoading, tabCacheSlot, useKeyedRead } from "./recruiting/shared";
+import { RetryNotice } from "./recruiting/RetryNotice";
 import type { RecruitingWorkspaceView } from "./shell/RecruitingNavigation";
 
 export type CrmBrowseSelection = Pick<
@@ -139,6 +140,8 @@ export type CandidateFeedback = {
 type Props = {
   /** The thread is this CRM role's own conversation, so its agent results share the workbench. */
   roleConversation?: boolean;
+  /** The role conversation's own Sequence, Inbox or Interview view, shown above its CRM history. */
+  correspondence?: ReactNode;
   crmBrowse?: {
     selection: CrmBrowseSelection;
     view: RecruitingWorkspaceView;
@@ -2307,12 +2310,13 @@ export function RecruitingPanel(props: Props) {
  * The role conversation's own saved results for the current workbench tab. A CRM role and an
  * agent-created role share one workbench: CRM records render below this section when linked.
  */
-function RoleAgentSection({ crmBrowse, roleConversation: _, ...props }: Props) {
+function RoleAgentSection({ crmBrowse, roleConversation: _, correspondence, ...props }: Props) {
   const view = crmBrowse?.view;
   if (view === "brief" || view === "feedback")
     return <NativeRecruitingPanel {...props} presentation="workspace" summary={view} />;
-  if (view === "sequence" || view === "inbox" || view === "interview" || view === "conversation")
-    return null;
+  if (view === "sequence" || view === "inbox" || view === "interview")
+    return <>{correspondence}</>;
+  if (view === "conversation") return null;
   return (
     <NativeRecruitingPanel
       {...props}
@@ -2348,7 +2352,6 @@ function CorrespondenceTabMount({
   if (!role && loading) return <TabLoading />;
   if (!role) return <>{fallback}</>;
   const props = { ...role, conversation, refreshSignal };
-  if (view === "contacts") return <ContactsTab {...props} />;
   if (view === "sequence") return <SequenceTab {...props} />;
   if (view === "interview") return <InterviewTab {...props} />;
   return <InboxWithReply {...props} onDraftReply={onDraftReply} />;
@@ -3571,8 +3574,15 @@ function CrmRecruitingPanel({
         </h1>
         {page?.selectedRole ? <p>{page.selectedRole.clientLabel}</p> : null}
       </header>
-      {["contacts", "sequence", "inbox", "interview"].includes(browse.view) ? (
-        <CorrespondenceTabMount
+      {browse.view === "contacts" && agent ? (
+        <>
+          {agent}
+          {bound.done && !bound.role ? crmHistory : null}
+        </>
+      ) : ["sequence", "inbox", "interview"].includes(browse.view) ? (
+        <>
+          {agent}
+          <CorrespondenceTabMount
           view={browse.view}
           role={boundRole}
           loading={!bound.done}
@@ -3593,8 +3603,9 @@ function CrmRecruitingPanel({
                   })
               : undefined
           }
-          fallback={body}
-        />
+          fallback={agent ? crmHistory : body}
+          />
+        </>
       ) : (
         body
       )}
@@ -3900,65 +3911,6 @@ function RecruitingWorkspace({
     workspaceReadKey,
   ]);
   const workspace = workspaceSnapshot?.workspace;
-  const contactsCacheKey =
-    readCacheScope && workspace
-      ? `${readCacheScope}:contacts:${JSON.stringify([workspace.role.id, workspace.revision.id, botId, groupId])}`
-      : undefined;
-  const contactsKey =
-    contactsView && workspace && (botId || groupId)
-      ? JSON.stringify([
-          userId,
-          threadId,
-          workspace.role.id,
-          botId,
-          groupId,
-          refresh,
-          refreshSignal,
-        ])
-      : null;
-  const [contactsRead, setContactsRead] = useState<{
-    key: string;
-    cacheKey?: string;
-    data?: RecruitingCorrespondence;
-    failed?: boolean;
-  }>();
-  useEffect(() => {
-    if (!contactsKey) return;
-    let cancelled = false;
-    const cacheEpoch = readCache?.epoch;
-    setContactsRead((current) => ({
-      key: contactsKey,
-      cacheKey: contactsCacheKey,
-      data:
-        (contactsCacheKey
-          ? (readCache?.entries.get(contactsCacheKey) as RecruitingCorrespondence | undefined)
-          : undefined) ??
-        (readCache && current?.cacheKey === contactsCacheKey ? current?.data : undefined),
-    }));
-    void rpc.recruiting
-      .correspondence({ ...(groupId ? { groupId } : { botId: botId! }), view: "contacts" })
-      .then((data) => {
-        if (!cancelled && (!readCache || cacheEpoch === readCache.epoch)) {
-          rememberRecruitingRead(readCache, contactsCacheKey, data, cacheEpoch);
-          setContactsRead({ key: contactsKey, cacheKey: contactsCacheKey, data });
-        }
-      })
-      .catch((error) => {
-        if (!cancelled) {
-          denyAccess(error);
-          setContactsRead((current) =>
-            current?.key === contactsKey
-              ? { ...current, failed: true }
-              : { key: contactsKey, failed: true },
-          );
-        }
-      });
-    return () => {
-      cancelled = true;
-    };
-  }, [contactsKey, botId, groupId, denyAccess, readCache, contactsCacheKey]);
-  const currentContacts = contactsRead?.key === contactsKey ? contactsRead : undefined;
-  const contacts = currentContacts?.data?.contacts ?? [];
   const criteria = workspace?.revision.criteria ?? [];
   const brief = workspace?.revision.brief;
   const briefClarifications = brief ? recruitingBriefClarifications(brief) : [];
@@ -4736,25 +4688,6 @@ function RecruitingWorkspace({
           ) : null}
         </header>
       ) : null}
-      {contactsKey ? (
-        currentContacts?.failed || currentContacts?.data?.status === "failed" ? (
-          <p role="alert" className="text-destructive">
-            <Trans>Could not load contact details. Refresh to try again.</Trans>
-          </p>
-        ) : !currentContacts?.data ? (
-          <p role="status">
-            <Trans>Loading contact details…</Trans>
-          </p>
-        ) : currentContacts.data.partial || currentContacts.data.status === "unsupported" ? (
-          <p className="text-muted-foreground">
-            <Trans>Some saved contact details could not be displayed.</Trans>
-          </p>
-        ) : currentContacts.data.status === "not_checked" ? (
-          <p className="text-muted-foreground">
-            <Trans>Contact details have not been checked yet.</Trans>
-          </p>
-        ) : null
-      ) : null}
       {presentation !== "workspace" ? (
         <div className="flex items-center justify-between gap-2">
           <h2 className="text-base font-medium">
@@ -4777,17 +4710,12 @@ function RecruitingWorkspace({
         </div>
       ) : null}
       {failed ? (
-        <p role="alert" className="text-destructive">
+        <RetryNotice onRetry={() => setRefresh((value) => value + 1)}>
           <Trans>Could not load recruiting</Trans>
-        </p>
-      ) : null}
-      {loading &&
-      (!workspaceSnapshot || ["dashboard", "missing", "memory", "activity"].includes(activeTab)) ? (
-        <div role="status" className="text-muted-foreground">
-          <Shimmer>
-            <Trans>Loading…</Trans>
-          </Shimmer>
-        </div>
+        </RetryNotice>
+      ) : loading &&
+        (!workspaceSnapshot || ["dashboard", "missing", "memory", "activity"].includes(activeTab)) ? (
+        <TabLoading />
       ) : null}
       {workspaceSnapshot ? (
         <Tabs
@@ -5707,17 +5635,54 @@ function RecruitingWorkspace({
                     </Button>
                   </fieldset>
                 ) : null}
-                {candidateFailed ? (
-                  <p role="alert" className="text-destructive">
+                {contactsView ? (
+                  <ContactsTab
+                    roleId={workspace.role.id}
+                    spaceId={workspace.role.spaceId}
+                    conversation={groupId ? { groupId } : botId ? { botId } : undefined}
+                    crmTarget={workspace.crmTarget?.target ?? null}
+                    refreshSignal={(refreshSignal ?? 0) + refresh}
+                    readCache={readCache}
+                    readCacheScope={readCacheScope}
+                    autumn={{
+                      items: candidatePage?.items ?? [],
+                      loading: candidateLoading && !candidatePage,
+                      failed: candidateFailed,
+                      retry: () => setFeedbackRefresh((value) => value + 1),
+                      total: candidatePage?.total ?? null,
+                      hasMore: Boolean(candidatePage?.nextCursor),
+                      loadMore: () => void loadMoreCandidates(),
+                      sortByScore: (candidateFilters.sort ?? "score") === "score",
+                      includeCrm:
+                        !candidateFilters.shortlisted &&
+                        !candidateFilters.actionId &&
+                        !candidateFilters.sourceEffectId &&
+                        !candidateFilters.assessmentState &&
+                        !candidateFilters.verdict,
+                      query: candidateFilters.query,
+                      selectedKey: selection?.candidateKey,
+                      ready: candidateFresh && shortlistPending === null,
+                      shortlistFailedKey: shortlistFailed,
+                      setShortlist: (candidate, shortlisted) =>
+                        void setShortlist(candidate, shortlisted),
+                      sendEmail: onDiscussCandidate
+                        ? (candidate) => discussCandidate(candidate, "email_draft")
+                        : undefined,
+                      findEmail: onDiscussCandidate
+                        ? (candidate) => discussCandidate(candidate, "contact_lookup")
+                        : undefined,
+                      openEvidence: (candidate, trigger) =>
+                        selectCandidate(candidate, trigger as HTMLButtonElement),
+                    }}
+                  />
+                ) : candidateFailed ? (
+                  <RetryNotice onRetry={() => setFeedbackRefresh((value) => value + 1)}>
                     <Trans>Could not load candidates</Trans>
-                  </p>
+                  </RetryNotice>
+                ) : candidateLoading && !candidatePage ? (
+                  <TabLoading />
                 ) : null}
-                {candidateLoading ? (
-                  <p role="status">
-                    <Trans>Loading…</Trans>
-                  </p>
-                ) : null}
-                {candidatePage ? (
+                {!contactsView && candidatePage ? (
                   <>
                     <p className="text-xs text-muted-foreground">
                       <Plural value={candidatePage.total} _1="# candidate" other="# candidates" />
@@ -5896,19 +5861,14 @@ function RecruitingWorkspace({
                                 t`Company`,
                                 t`Location`,
                                 ...(presentation !== "workspace" ? [t`Profile`] : []),
-                                ...(contactsView
-                                  ? [t`Email`, t`Phone`, t`Provider status`]
-                                  : [t`Research match`]),
+                                t`Research match`,
                                 ...(candidateTableDetails ? [t`Criteria`] : []),
-                                ...(!contactsView && showInternalAssessments
-                                  ? [t`Internal assessment`]
-                                  : []),
+                                ...(showInternalAssessments ? [t`Internal assessment`] : []),
                                 ...(candidateTableDetails ? [t`Research round`, t`Feedback`] : []),
                                 ...(showCrm ? [t`CRM`] : []),
                                 ...(candidateTableDetails ? [t`Provider status`] : []),
                                 ...(presentation !== "workspace" ? [t`Discoveries`] : []),
                                 t`Shortlist`,
-                                ...(contactsView && onDiscussCandidate ? [t`Actions`] : []),
                               ].map((label) => (
                                 <th key={label} scope="col" className="py-2 pe-3 font-medium">
                                   {label}
@@ -5962,67 +5922,20 @@ function RecruitingWorkspace({
                                     />
                                   </td>
                                 ) : null}
-                                {contactsView ? (
-                                  <>
-                                    <td className="min-w-48 py-2 pe-3">
-                                      <CandidateContactFields
-                                        candidate={candidate}
-                                        contacts={contacts}
-                                        kind="email"
-                                        labels={[
-                                          "email",
-                                          "emails",
-                                          "email address",
-                                          "email addresses",
-                                          "work email",
-                                          "work email address",
-                                          "professional email",
-                                          "business email",
-                                          "personal email",
-                                        ]}
-                                      />
-                                    </td>
-                                    <td className="py-2 pe-3">
-                                      <CandidateContactFields
-                                        candidate={candidate}
-                                        contacts={contacts}
-                                        kind="phone"
-                                        labels={[
-                                          "phone",
-                                          "phone number",
-                                          "phone numbers",
-                                          "mobile",
-                                          "mobile phone",
-                                          "work phone",
-                                          "business phone",
-                                        ]}
-                                      />
-                                    </td>
-                                    <td className="py-2 pe-3">
-                                      <CandidateContactFields
-                                        candidate={candidate}
-                                        contacts={contacts}
-                                        kind="status"
-                                        labels={CONTACT_STATUS_LABELS}
-                                      />
-                                    </td>
-                                  </>
-                                ) : (
-                                  <td className="min-w-48 py-2 pe-3">
-                                    <CandidateResearchMatch
-                                      candidate={candidate}
-                                      roleRevisionId={workspace?.revision.id}
-                                      showDiagnostics={showDiagnostics}
-                                      compact
-                                    />
-                                  </td>
-                                )}
+                                <td className="min-w-48 py-2 pe-3">
+                                  <CandidateResearchMatch
+                                    candidate={candidate}
+                                    roleRevisionId={workspace?.revision.id}
+                                    showDiagnostics={showDiagnostics}
+                                    compact
+                                  />
+                                </td>
                                 {candidateTableDetails ? (
                                   <td className="min-w-48 py-2 pe-3 text-xs">
                                     <CandidateCriteria candidate={candidate} />
                                   </td>
                                 ) : null}
-                                {!contactsView && showInternalAssessments ? (
+                                {showInternalAssessments ? (
                                   <td className="py-2 pe-3">
                                     <CandidateAssessment candidate={candidate} />
                                   </td>
@@ -6060,7 +5973,7 @@ function RecruitingWorkspace({
                                   <td className="py-2 pe-3 text-xs">
                                     <CandidateContactFields
                                       candidate={candidate}
-                                      contacts={contacts}
+                                      contacts={[]}
                                       kind="status"
                                       labels={CONTACT_STATUS_LABELS}
                                     />
@@ -6086,32 +5999,6 @@ function RecruitingWorkspace({
                                     </p>
                                   ) : null}
                                 </td>
-                                {contactsView && onDiscussCandidate ? (
-                                  <td className="py-2">
-                                    <Button
-                                      variant="outline"
-                                      size="sm"
-                                      disabled={
-                                        !candidateFresh ||
-                                        (!candidate.name && !candidate.linkedinUrl)
-                                      }
-                                      onClick={() => discussCandidate(candidate, "contact_lookup")}
-                                    >
-                                      <Trans>Find email</Trans>
-                                    </Button>
-                                    <Button
-                                      variant="ghost"
-                                      size="sm"
-                                      disabled={
-                                        !candidateFresh ||
-                                        (!candidate.name && !candidate.linkedinUrl)
-                                      }
-                                      onClick={() => discussCandidate(candidate, "email_draft")}
-                                    >
-                                      <Trans>Email draft</Trans>
-                                    </Button>
-                                  </td>
-                                ) : null}
                               </tr>
                             ))}
                           </tbody>
