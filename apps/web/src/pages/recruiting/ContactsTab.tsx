@@ -75,7 +75,7 @@ export function ContactsTab(
           ?.address ?? null,
     },
   });
-  const { rows } = list;
+  const { rows, loadedCount } = list;
   const unmatched = lookups.filter(
     (contact) => !rows.some((row) => lookupsFor(row).includes(contact)),
   );
@@ -203,6 +203,11 @@ export function ContactsTab(
       {autumn && saved.data?.status === "not_checked" ? (
         <p className="text-muted-foreground">
           <Trans>Contact details have not been checked yet.</Trans>
+        </p>
+      ) : null}
+      {list.total === null && loadedCount > 0 ? (
+        <p className="mb-2 text-sm text-muted-foreground">
+          <Trans>{loadedCount} loaded</Trans>
         </p>
       ) : null}
       {rows.length ? (

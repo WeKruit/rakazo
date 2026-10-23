@@ -3631,6 +3631,14 @@ function CrmRecruitingPanel({
             }
             fallback={agent ? crmHistory : body}
           />
+          {browse.view === "sequence" && agent ? (
+            <details className="mt-6">
+              <summary>
+                <Trans>Outreach drafts</Trans>
+              </summary>
+              {agent}
+            </details>
+          ) : null}
         </>
       ) : (
         body

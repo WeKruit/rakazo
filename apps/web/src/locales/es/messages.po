@@ -8106,3 +8106,24 @@ msgstr ""
 #: src/pages/recruiting/SequenceTab.tsx
 msgid "Time not recorded"
 msgstr ""
+
+#: src/pages/Shell.tsx
+#: src/pages/RecruitingPanel.tsx
+#: src/pages/recruiting/ContactsTab.tsx
+#: src/pages/recruiting/InterviewTab.tsx
+msgid "Outreach drafts"
+msgstr "Outreach drafts"
+
+#: src/pages/Shell.tsx
+#: src/pages/RecruitingPanel.tsx
+#: src/pages/recruiting/ContactsTab.tsx
+#: src/pages/recruiting/InterviewTab.tsx
+msgid "Candidate status"
+msgstr "Candidate status"
+
+#: src/pages/Shell.tsx
+#: src/pages/RecruitingPanel.tsx
+#: src/pages/recruiting/ContactsTab.tsx
+#: src/pages/recruiting/InterviewTab.tsx
+msgid "{loadedCount} loaded"
+msgstr "{loadedCount} loaded"

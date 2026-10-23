@@ -8107,3 +8107,24 @@ msgstr "时间"
 #: src/pages/recruiting/SequenceTab.tsx
 msgid "Time not recorded"
 msgstr "未记录时间"
+
+#: src/pages/Shell.tsx
+#: src/pages/RecruitingPanel.tsx
+#: src/pages/recruiting/ContactsTab.tsx
+#: src/pages/recruiting/InterviewTab.tsx
+msgid "Outreach drafts"
+msgstr "外联草稿"
+
+#: src/pages/Shell.tsx
+#: src/pages/RecruitingPanel.tsx
+#: src/pages/recruiting/ContactsTab.tsx
+#: src/pages/recruiting/InterviewTab.tsx
+msgid "Candidate status"
+msgstr "候选人状态"
+
+#: src/pages/Shell.tsx
+#: src/pages/RecruitingPanel.tsx
+#: src/pages/recruiting/ContactsTab.tsx
+#: src/pages/recruiting/InterviewTab.tsx
+msgid "{loadedCount} loaded"
+msgstr "已加载 {loadedCount}"

@@ -90,72 +90,6 @@ export function InterviewTab({
   return (
     <section aria-label={t`Interview`}>
       {candidateId ? null : <TabHeader title={<Trans>Interview</Trans>} />}
-      <CrmGate crm={crm} />
-      {loading ? <TabLoading /> : null}
-      {failed ? (
-        <TabNotice alert>
-          <Trans>Could not load candidate records. Try refreshing.</Trans>
-        </TabNotice>
-      ) : null}
-      {loaded && !rows.length ? (
-        <TabNotice>
-          <Trans>No interviews in progress for this role.</Trans>
-        </TabNotice>
-      ) : null}
-      {rows.length ? (
-        <div className="hire-table-wrap overflow-x-auto">
-          <table className="hire-table w-full text-left text-sm">
-            <thead>
-              <tr>
-                {[t`Candidate`, t`Status`, t`Email`, t`Updated`].map((label) => (
-                  <th scope="col" key={label}>
-                    {label}
-                  </th>
-                ))}
-              </tr>
-            </thead>
-            <tbody>
-              {rows.map(({ status, item }) => (
-                <tr key={item.candidateId}>
-                  <th scope="row">
-                    {detail && !candidateId ? (
-                      <Button
-                        variant="link"
-                        className="h-auto p-0"
-                        onClick={() =>
-                          detail.open({
-                            view: "interview",
-                            person: item,
-                            role: {
-                              roleId: props.roleId,
-                              spaceId: props.spaceId,
-                              conversation: props.conversation,
-                            },
-                          })
-                        }
-                      >
-                        {item.name}
-                      </Button>
-                    ) : (
-                      item.name
-                    )}
-                    {item.title ? <small className="block">{item.title}</small> : null}
-                  </th>
-                  <td>{status}</td>
-                  <td>{item.email ?? "—"}</td>
-                  <td>{formatDate(item.statusChangedAt ?? item.updatedAt)}</td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
-      ) : null}
-      {fallback ? null : <LoadMore pages={staged} />}
-      {truncated ? (
-        <p className="mt-2 text-xs text-muted-foreground">
-          <Trans>Showing the most recent records.</Trans>
-        </p>
-      ) : null}
       {calendar.loading ? <TabLoading /> : null}
       {!props.conversation ? (
         <TabNotice>
@@ -211,6 +145,77 @@ export function InterviewTab({
           />
         </div>
       ) : null}
+      <details className="mt-6">
+        <summary>
+          <Trans>Candidate status</Trans>
+        </summary>
+        <CrmGate crm={crm} />
+        {loading ? <TabLoading /> : null}
+        {failed ? (
+          <TabNotice alert>
+            <Trans>Could not load candidate records. Try refreshing.</Trans>
+          </TabNotice>
+        ) : null}
+        {loaded && !rows.length ? (
+          <TabNotice>
+            <Trans>No interviews in progress for this role.</Trans>
+          </TabNotice>
+        ) : null}
+        {rows.length ? (
+          <div className="hire-table-wrap overflow-x-auto">
+            <table className="hire-table w-full text-left text-sm">
+              <thead>
+                <tr>
+                  {[t`Candidate`, t`Status`, t`Email`, t`Updated`].map((label) => (
+                    <th scope="col" key={label}>
+                      {label}
+                    </th>
+                  ))}
+                </tr>
+              </thead>
+              <tbody>
+                {rows.map(({ status, item }) => (
+                  <tr key={item.candidateId}>
+                    <th scope="row">
+                      {detail && !candidateId ? (
+                        <Button
+                          variant="link"
+                          className="h-auto p-0"
+                          onClick={() =>
+                            detail.open({
+                              view: "interview",
+                              person: item,
+                              role: {
+                                roleId: props.roleId,
+                                spaceId: props.spaceId,
+                                conversation: props.conversation,
+                              },
+                            })
+                          }
+                        >
+                          {item.name}
+                        </Button>
+                      ) : (
+                        item.name
+                      )}
+                      {item.title ? <small className="block">{item.title}</small> : null}
+                    </th>
+                    <td>{status}</td>
+                    <td>{item.email ?? "—"}</td>
+                    <td>{formatDate(item.statusChangedAt ?? item.updatedAt)}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        ) : null}
+        {fallback ? null : <LoadMore pages={staged} />}
+        {truncated ? (
+          <p className="mt-2 text-xs text-muted-foreground">
+            <Trans>Showing the most recent records.</Trans>
+          </p>
+        ) : null}
+      </details>
     </section>
   );
 }

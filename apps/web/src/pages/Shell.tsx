@@ -329,6 +329,8 @@ import {
   useRecruitingDetailController,
 } from "./recruiting";
 import { HomeDashboard } from "./recruiting/HomeDashboard";
+import { InterviewTab } from "./recruiting/InterviewTab";
+import { SequenceTab } from "./recruiting/SequenceTab";
 import { RetryNotice } from "./recruiting/RetryNotice";
 import { CalibrationRoundCard } from "./recruiting/CalibrationRound";
 import { RoleSetupCard } from "./recruiting/RoleSetup";
@@ -5448,7 +5450,14 @@ export function ShellPage() {
         /> : <p role="alert"><Trans>Choose the role again.</Trans></p>}</div> : null}
         {workspaceCorrespondence && activeSnapshot?.threadId ? (
           <div className="rk-scroll recruiting-workspace-main min-h-0 flex-1 overflow-y-auto">
-            {nativeCorrespondence}
+            {currentBindingRead?.workspace && recruitingWorkspaceView !== "inbox" ? (
+              <div className="recruiting-workspace-content">
+                {recruitingWorkspaceView === "sequence" ? <>
+                  <SequenceTab roleId={currentBindingRead.workspace.role.id} spaceId={currentBindingRead.workspace.role.spaceId} conversation={inGroup ? { groupId: groupId! } : { botId: active!.id }} crmTarget={currentBindingRead.workspace.crmTarget?.target ?? null} refreshSignal={recruitingRefresh} readCache={recruitingReadCache.current} readCacheScope={recruitingCacheScope} />
+                  <details className="mt-6"><summary><Trans>Outreach drafts</Trans></summary>{nativeCorrespondence}</details>
+                </> : <InterviewTab roleId={currentBindingRead.workspace.role.id} spaceId={currentBindingRead.workspace.role.spaceId} conversation={inGroup ? { groupId: groupId! } : { botId: active!.id }} crmTarget={currentBindingRead.workspace.crmTarget?.target ?? null} refreshSignal={recruitingRefresh} readCache={recruitingReadCache.current} readCacheScope={recruitingCacheScope} />}
+              </div>
+            ) : nativeCorrespondence}
           </div>
         ) : null}
         {workspaceCandidates && knownThreadId ? (
