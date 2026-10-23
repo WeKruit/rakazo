@@ -129,6 +129,7 @@ import {
   RecruitingAssessmentSchema,
   RecruitingCandidateFeedbackSelectionSchema,
   RecruitingCandidateReportSchema,
+  RecruitingChatContextSchema,
   RecruitingCorrespondenceReferenceSchema,
   RecruitingCorrespondenceSchema,
   RecruitingCrmDataInputSchema,
@@ -222,6 +223,7 @@ const threadSendInput = threadTarget
   .safeExtend({
     text: z.string().optional(),
     correspondenceReference: RecruitingCorrespondenceReferenceSchema.optional(),
+    recruitingContext: RecruitingChatContextSchema.optional(),
     artifactIds: z.array(Id).max(ATTACHMENT_MAX_COUNT).optional(),
     addressing: z.enum(["coordinator", "mentions"]).optional(),
     /** Bare bot ids (legacy) or typed mention chips from the composer. */

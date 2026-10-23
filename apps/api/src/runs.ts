@@ -20,7 +20,10 @@ export function activityPromptSnippet(
     const source = MessageBlock.array().safeParse(input.sourceBlocks);
     if (
       source.success &&
-      source.data.some((block) => block.kind === "text" && block.correspondenceReference)
+      source.data.some(
+        (block) =>
+          block.kind === "text" && (block.correspondenceReference || block.recruitingContext),
+      )
     )
       return promptSnippet(
         source.data

@@ -33,6 +33,18 @@ describe("run activity copy", () => {
       ).toBe(sourceBlocks[0]!.text);
     },
   );
+  it("shows original words instead of the workbench selection", () => {
+    const sourceBlocks = [
+      {
+        kind: "text",
+        text: "Draft a follow-up",
+        recruitingContext: { roleTitle: "Staff Engineer", contact: { name: "Avery Example" } },
+      },
+    ];
+    expect(
+      activityPromptSnippet({ trigger: "user", prompt: "internal context", sourceBlocks }),
+    ).toBe("Draft a follow-up");
+  });
   it("presents structured agent messages instead of their internal wake prompt", () => {
     expect(
       activityPromptSnippet({
