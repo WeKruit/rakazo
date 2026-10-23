@@ -1,4 +1,5 @@
 import type { AdapterContext } from "@rakazo/adapter-kit";
+import { MEMORY_REVISION_CONFLICT_ERROR } from "@rakazo/adapter-kit";
 import type { PrismaClient } from "@rakazo/db";
 import { describe, expect, it, vi } from "vitest";
 import { MarkdownMemoryStore } from "./index.js";
@@ -74,5 +75,27 @@ describe("memory import CAS", () => {
     await expect(
       store.commit({ scope: "user", path: "MEMORY.md", content: "Unsafe" } as never, context),
     ).rejects.toThrow("expectedRevision must be a nonnegative integer");
+  });
+});
+
+describe("memory commit revision check", () => {
+  it("rejects a stale expectedRevision before writing", async () => {
+    const update = vi.fn();
+    const tx = {
+      memoryDocument: {
+        findFirst: vi.fn().mockResolvedValue({ id: "doc", revision: 3, content: "Current" }),
+        update,
+      },
+    };
+    const store = new MarkdownMemoryStore({
+      $transaction: (run: (tx: unknown) => Promise<unknown>) => run(tx),
+    } as never);
+    await expect(
+      store.commit(
+        { scope: "bot", botId: "bot-1", path: "MEMORY.md", content: "Edited", expectedRevision: 2 },
+        context,
+      ),
+    ).rejects.toThrow(MEMORY_REVISION_CONFLICT_ERROR);
+    expect(update).not.toHaveBeenCalled();
   });
 });
