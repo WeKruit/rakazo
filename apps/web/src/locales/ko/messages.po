@@ -64,6 +64,11 @@ msgstr "{0} (첨부 파일 최대 {ATTACHMENT_MAX_COUNT}개)"
 msgid "{0} (over 10 MiB)"
 msgstr "{0} (10 MiB 초과)"
 
+#. placeholder {0}: file.name
+#: src/pages/Shell.tsx
+msgid "{0} (XLSX is not supported yet. Save as CSV and upload again.)"
+msgstr ""
+
 #. placeholder {0}: preset.n
 #: src/pages/RoutineSchedule.tsx
 msgid "{0} {unitLabel}"
@@ -5427,13 +5432,13 @@ msgstr "지금 다시 시도"
 msgid "Retry screen"
 msgstr ""
 
-#: src/pages/McpOAuthCallback.tsx
-msgid "Return to WeKruit Headhunter"
-msgstr "WeKruit Headhunter로 돌아가기"
-
 #: src/pages/Shell.tsx
 msgid "Return to the original role before saving this draft."
 msgstr ""
+
+#: src/pages/McpOAuthCallback.tsx
+msgid "Return to WeKruit Headhunter"
+msgstr "WeKruit Headhunter로 돌아가기"
 
 #. placeholder {0}: doc.revision
 #: src/pages/KnowledgeSection.tsx
@@ -7136,6 +7141,10 @@ msgstr "처리 중…"
 
 #: src/components/computer/TerminalApp.tsx
 msgid "Wrote {path}"
+msgstr ""
+
+#: src/pages/Shell.tsx
+msgid "XLSX is not supported yet. Save as CSV and upload again."
 msgstr ""
 
 #: src/lib/billing.ts

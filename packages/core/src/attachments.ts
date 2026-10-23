@@ -251,3 +251,8 @@ export function userTurnMessageForRun<
       (sourceMessageId ? message.id === sourceMessageId : message.runId === runId),
   );
 }
+
+/** XLSX is deliberately unsupported; callers show a specific "save as CSV" message. */
+export function isXlsxFileName(name: string): boolean {
+  return name.toLowerCase().endsWith(".xlsx");
+}

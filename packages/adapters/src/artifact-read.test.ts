@@ -142,6 +142,27 @@ describe("native saved artifact reading", () => {
     );
     expect(f.queryRaw.mock.invocationCallOrder[0]).toBeLessThan(f.get.mock.invocationCallOrder[0]!);
   });
+  it("parses a CSV artifact into header and rows when csv is requested", async () => {
+    const f = fixture('\uFEFFName,Email\r\n"Doe, Jane",j@x.com\r\n');
+    f.row.mimeType = "text/csv";
+    await expect(
+      artifactReadFromTool(f.deps, actor, { artifactId: f.row.id, csv: true }),
+    ).resolves.toMatchObject({
+      artifact: { id: f.row.id },
+      csv: {
+        header: ["Name", "Email"],
+        rows: [["Doe, Jane", "j@x.com"]],
+        rowCount: 1,
+        truncated: false,
+      },
+    });
+  });
+  it("rejects csv mode for non-CSV artifacts", async () => {
+    const f = fixture("a,b");
+    await expect(
+      artifactReadFromTool(f.deps, actor, { artifactId: f.row.id, csv: true }),
+    ).resolves.toMatchObject({ error: "csv requires a text/csv artifact." });
+  });
   it("pages extracted PDF text while retaining its original identity and checking access before extraction", async () => {
     const original = "First page: Python evidence.\nSecond page: geometry 😀.\n";
     const extract = vi.spyOn(pdfText, "extractPdfText").mockResolvedValue(original);

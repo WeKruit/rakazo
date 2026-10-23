@@ -126,5 +126,7 @@ export const ArtifactReadInputSchema = z
     jsonPath: ArtifactJsonStringPathSchema.optional(),
     offset: z.number().int().min(0).default(0),
     limit: z.number().int().min(1).max(16000).default(8000),
+    /** For a text/csv artifact: return parsed header and rows instead of text pages. */
+    csv: z.boolean().optional(),
   })
   .strict();

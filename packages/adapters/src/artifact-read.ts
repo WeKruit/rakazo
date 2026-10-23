@@ -2,7 +2,7 @@ import { createHash } from "node:crypto";
 import type { ArtifactStore } from "@rakazo/adapter-kit";
 import type { Actor } from "@rakazo/contracts";
 import { ArtifactReadInputSchema } from "@rakazo/contracts";
-import { readRecruitingJsonString } from "@rakazo/core";
+import { parseCsv, readRecruitingJsonString } from "@rakazo/core";
 import { extractPdfText } from "@rakazo/core/node/pdf-text";
 import type { PrismaClient } from "@rakazo/db";
 import { IsolationError, Prisma } from "@rakazo/db";
@@ -63,7 +63,7 @@ export async function artifactReadFromTool(
 ) {
   const parsed = ArtifactReadInputSchema.safeParse(raw);
   if (!parsed.success) return { error: "Invalid artifact_read arguments." };
-  const { artifactId, jsonPath, offset, limit } = parsed.data;
+  const { artifactId, jsonPath, offset, limit, csv } = parsed.data;
   let saved: Awaited<ReturnType<typeof readActorArtifact>>;
   try {
     saved = await readActorArtifact(deps, actor, { artifactId, fromTool: true });
@@ -97,6 +97,8 @@ export async function artifactReadFromTool(
     )
   )
     return { artifact: metadata, error: "This artifact format does not support text reading." };
+  if (csv && mime !== "text/csv")
+    return { artifact: metadata, error: "csv requires a text/csv artifact." };
   let text: string;
   if (jsonPath !== undefined) {
     if (mime !== "application/json")
@@ -119,6 +121,7 @@ export async function artifactReadFromTool(
       return { artifact: metadata, error: "This artifact is not valid UTF-8 text." };
     }
   }
+  if (csv) return { artifact: metadata, csv: parseCsv(text) };
   // Code-point offsets never split surrogate pairs; concatenated pages preserve exact text.
   const points = Array.from(text);
   if (offset > points.length) return { error: "Artifact offset is past the end of the text." };
