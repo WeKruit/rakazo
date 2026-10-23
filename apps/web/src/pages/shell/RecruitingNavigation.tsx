@@ -1,6 +1,6 @@
 import { Trans, useLingui } from "@lingui/react/macro";
 import type { Group, RecruitingCrmDataOutput } from "@rakazo/contracts";
-import { Button, Input, Skeleton } from "@rakazo/ui-web";
+import { Badge, Button, cn, Input, Skeleton } from "@rakazo/ui-web";
 import {
   Bookmark,
   CalendarDays,
@@ -212,9 +212,10 @@ export function RecruitingNavigation({
   const currentCrm = crm?.key === crmKey ? crm : undefined;
   // Routing uses only this conversation's own (or cached) roles, never a stale placeholder.
   const routableCrmRoles = currentCrm?.stale ? [] : (currentCrm?.roles ?? []);
-  const visibleGroups = groups.filter((group) =>
-    group.name.toLocaleLowerCase().includes(query.trim().toLocaleLowerCase()),
-  );
+  // Roles waiting on the recruiter come first; the rest keep their order.
+  const visibleGroups = groups
+    .filter((group) => group.name.toLocaleLowerCase().includes(query.trim().toLocaleLowerCase()))
+    .sort((a, b) => Number(Boolean(b.needsInput)) - Number(Boolean(a.needsInput)));
   const destinations = [
     { view: "shortlist", label: t`Shortlist`, Icon: Bookmark },
     { view: "contacts", label: t`Contacts`, Icon: Users },
@@ -353,12 +354,22 @@ export function RecruitingNavigation({
                 }}
               >
                 <span className="size-2 shrink-0 rounded-full bg-link" aria-hidden="true" />
-                <span className="min-w-0 flex-1 truncate" dir="auto">
+                <span
+                  className={cn(
+                    "min-w-0 flex-1 truncate",
+                    (group.needsInput || group.unread) && "font-semibold",
+                  )}
+                  dir="auto"
+                >
                   {group.name}
                 </span>
-                {group.unread ? (
+                {group.needsInput ? (
+                  <Badge variant="secondary" className="shrink-0">
+                    <Trans>Needs input</Trans>
+                  </Badge>
+                ) : group.unread ? (
                   <span
-                    className="size-1.5 rounded-full bg-link"
+                    className="size-1.5 shrink-0 rounded-full bg-link"
                     role="img"
                     aria-label={t`Unread`}
                   />

@@ -2050,12 +2050,19 @@ export function ShellPage() {
           markVisibleGroupRead();
         }
         // A new role's group is renamed when its title is saved; show the title at once.
+        const listed = groupsRef.current.find((group) => group.id === groupId);
         const placeholderName =
-          event.type === "recruiting.changed" &&
-          newRoleNames.current.includes(
-            groupsRef.current.find((group) => group.id === groupId)?.name ?? "",
-          );
-        if (event.type === "bot.updated" || isRunTerminalEvent(event) || placeholderName) {
+          event.type === "recruiting.changed" && newRoleNames.current.includes(listed?.name ?? "");
+        // The sidebar marks a role that waits on the recruiter, and clears it once answered.
+        const inputChanged =
+          event.type === "run.waiting_input" ||
+          (event.type === "run.started" && Boolean(listed?.needsInput));
+        if (
+          event.type === "bot.updated" ||
+          isRunTerminalEvent(event) ||
+          placeholderName ||
+          inputChanged
+        ) {
           void refreshBots().catch(() => undefined);
         }
         if (sync?.snapshotStale) void refreshGroupThread(groupId).catch(() => undefined);

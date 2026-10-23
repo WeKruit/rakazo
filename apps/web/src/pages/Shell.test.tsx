@@ -309,6 +309,7 @@ async function renderFeedbackShell(
     favicons?: LinkFavicons;
     crmTarget?: ListRecruitingCandidatesOutput["crmTarget"];
     groupName?: string;
+    groupNeedsInput?: boolean;
     crmRoleReference?: {
       sourceId: string;
       serverRevision: number;
@@ -369,6 +370,7 @@ async function renderFeedbackShell(
     id: "group-1",
     spaceId: "space-1",
     name: options.groupName ?? "Recruiting crew",
+    ...(options.groupNeedsInput ? { needsInput: true } : {}),
     crmRoleReference: options.crmRoleReference,
     pinned: false,
     sectionId: null,
@@ -5431,6 +5433,13 @@ it("sends a message during a working reply as an interjection and says when it i
   await emit(event(104, "run.completed"));
   expect(container!.textContent).not.toContain("Interrupted, resuming…");
   expect(container!.textContent).not.toContain("Interjection");
+});
+
+it("marks a role that waits on the recruiter in the sidebar", async () => {
+  setToolActivityPreference("off");
+  await renderFeedbackShell("group", undefined, { openFeedback: false, groupNeedsInput: true });
+  const nav = container!.querySelector('[data-testid="recruiting-navigation"]')!;
+  expect(nav.textContent).toContain("Needs input");
 });
 
 it("refreshes a new role's sidebar name when its title is saved", async () => {
