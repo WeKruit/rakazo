@@ -1281,6 +1281,26 @@ describe("saved recruiting correspondence", () => {
       });
     },
   );
+  it.each([true, false])(
+    "keeps a non-campaign Unibox email (campaign_id null=%s, else absent) in the Inbox without inventing a campaign",
+    async (nullCampaign) => {
+      const { campaign_id: _campaign, ...direct } = email;
+      const item = {
+        ...direct,
+        ...(nullCampaign ? { campaign_id: null } : {}),
+        subject: "Direct reply",
+      };
+      const { prisma } = fixture({
+        result: { structuredContent: { items: [item] } },
+      });
+      const result = await api.getRecruitingCorrespondence(prisma, actor, target, "inbox");
+      expect(result).toMatchObject({
+        status: "ready",
+        emails: [{ subject: "Direct reply", sender: email.from_address_email }],
+      });
+      expect(JSON.stringify(result)).not.toContain(email.campaign_id);
+    },
+  );
   it("does not display a returned message from a different campaign than the native scoped read", async () => {
     const { prisma } = fixture({
       result: {
