@@ -442,6 +442,10 @@ msgstr "Element hinzufügen"
 msgid "Add MCP server"
 msgstr "MCP-Server hinzufügen"
 
+#: src/pages/recruiting/NotesTab.tsx
+msgid "Add note"
+msgstr ""
+
 #: src/pages/PluginsOverlay.tsx
 msgid "Add OpenAPI"
 msgstr "OpenAPI hinzufügen"
@@ -787,6 +791,10 @@ msgstr ""
 msgid "Assessment unavailable"
 msgstr ""
 
+#: src/pages/recruiting/NotesTab.tsx
+msgid "Assistant"
+msgstr ""
+
 #: src/pages/RecruitingPanel.tsx
 msgid "Assumption"
 msgstr ""
@@ -1039,10 +1047,6 @@ msgstr "Browser"
 msgid "Built-in"
 msgstr "Integriert"
 
-#: src/pages/recruiting/HomeDashboard.tsx
-msgid "By week found"
-msgstr ""
-
 #: src/pages/recruiting/InterviewTab.tsx
 msgid "Calendar"
 msgstr ""
@@ -1087,6 +1091,7 @@ msgstr "Server nicht erreichbar."
 #: src/pages/ModelSettingsOverlay.tsx
 #: src/pages/Onboarding.tsx
 #: src/pages/PluginsOverlay.tsx
+#: src/pages/recruiting/NotesTab.tsx
 #: src/pages/recruiting/TasksTab.tsx
 #: src/pages/RecruitingPanel.tsx
 #: src/pages/shell/bot-credentials.tsx
@@ -2110,6 +2115,10 @@ msgstr "MCP-Server konnten nicht geladen werden"
 msgid "Could not load model settings"
 msgstr "Modelleinstellungen konnten nicht geladen werden"
 
+#: src/pages/recruiting/NotesTab.tsx
+msgid "Could not load notes."
+msgstr ""
+
 #: src/pages/RecruitingPanel.tsx
 msgid "Could not load recruiting"
 msgstr ""
@@ -2329,6 +2338,10 @@ msgstr "Stimme konnte nicht gespeichert werden"
 
 #: src/pages/shell/bot-credentials.tsx
 msgid "Could not save the credential"
+msgstr ""
+
+#: src/pages/recruiting/NotesTab.tsx
+msgid "Could not save the note."
 msgstr ""
 
 #: src/pages/recruiting/TasksTab.tsx
@@ -2627,6 +2640,7 @@ msgstr "Standardbereich"
 #: src/pages/BotContextMenu.tsx
 #: src/pages/KnowledgeSection.tsx
 #: src/pages/McpServersOverlay.tsx
+#: src/pages/recruiting/NotesTab.tsx
 #: src/pages/recruiting/TasksTab.tsx
 #: src/pages/RoutineEditor.tsx
 #: src/pages/Shell.tsx
@@ -2887,6 +2901,7 @@ msgstr "z. B. Hivenet Agent, Presales, Zeiterfassungs-Bot"
 msgid "Earlier history"
 msgstr ""
 
+#: src/pages/recruiting/NotesTab.tsx
 #: src/pages/recruiting/TasksTab.tsx
 msgid "Edit"
 msgstr ""
@@ -4525,6 +4540,10 @@ msgstr "Kein Modellkatalog verfügbar."
 msgid "No models listed."
 msgstr "Keine Modelle aufgelistet."
 
+#: src/pages/recruiting/NotesTab.tsx
+msgid "No notes yet."
+msgstr ""
+
 #: src/pages/recruiting/HomeDashboard.tsx
 msgid "No open tasks."
 msgstr ""
@@ -4750,6 +4769,15 @@ msgstr ""
 
 #: src/pages/RecruitingPanel.tsx
 msgid "Not reviewed"
+msgstr ""
+
+#: src/pages/recruiting/NotesTab.tsx
+msgid "Note"
+msgstr ""
+
+#: src/pages/recruiting/DetailPanel.tsx
+#: src/pages/recruiting/NotesTab.tsx
+msgid "Notes"
 msgstr ""
 
 #: src/components/ComputerUpdateProgress.tsx
@@ -6025,6 +6053,7 @@ msgstr ""
 #: src/pages/KnowledgeSection.tsx
 #: src/pages/McpServersOverlay.tsx
 #: src/pages/ModelSettingsOverlay.tsx
+#: src/pages/recruiting/NotesTab.tsx
 #: src/pages/recruiting/TasksTab.tsx
 #: src/pages/RecruitingPanel.tsx
 #: src/pages/RoutineEditor.tsx
@@ -7244,6 +7273,10 @@ msgstr ""
 msgid "Type your answer"
 msgstr "Gib deine Antwort ein"
 
+#: src/pages/recruiting/NotesTab.tsx
+msgid "Type your note here"
+msgstr ""
+
 #: src/pages/BotContextMenu.tsx
 msgid "Unassigned"
 msgstr "Nicht zugewiesen"
@@ -7654,6 +7687,7 @@ msgstr ""
 msgid "Yesterday"
 msgstr "Gestern"
 
+#: src/pages/recruiting/NotesTab.tsx
 #: src/pages/Shell.tsx
 msgid "You"
 msgstr "Du"

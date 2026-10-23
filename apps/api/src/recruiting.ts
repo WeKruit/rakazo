@@ -44,6 +44,7 @@ import {
   RecruitingCrmMailReadSchema,
   RecruitingCrmMembershipRowsSchema,
   RecruitingCrmMessagesReadSchema,
+  RecruitingCrmPresenceReadSchema,
   RecruitingCrmRoleCampaignsReadSchema,
   RecruitingCrmRoleMailReadSchema,
   RecruitingCrmRoleReadSchema,
@@ -2025,7 +2026,7 @@ function mailItem(row: ReturnType<typeof RecruitingCrmMailReadSchema.parse>["mes
 }
 
 /** Live read-only CRM view. The CRM remains the store; browsing creates no agent work. */
-type RecruitingCrmReadDeps = {
+export type RecruitingCrmReadDeps = {
   prisma: PrismaClient;
   connectors: Pick<ConnectorProvider, "execute">;
   firstPartyMcpUrl?: string;
@@ -2039,6 +2040,7 @@ export function getRecruitingCrmData(
   actor: Actor,
   target: ThreadTarget,
   raw: RecruitingCrmDataInput,
+  options?: { source: "projection" },
 ): Promise<RecruitingCrmDataOutput>;
 export function getRecruitingCrmData(
   deps: RecruitingCrmReadDeps,
@@ -2051,6 +2053,7 @@ export async function getRecruitingCrmData(
   actor: Actor,
   target: ThreadTarget,
   raw: RecruitingCrmDataInput | RecruitingCrmRoleLookup,
+  options?: { source: "projection" },
 ): Promise<RecruitingCrmDataOutput | ReturnType<typeof RecruitingCrmRoleReadSchema.parse>> {
   return authenticated(async () => {
     const input =
@@ -2436,6 +2439,12 @@ export async function getRecruitingCrmData(
       roleSpecId: row.role_spec_id,
       legacyClientLabel: row.client_label,
       legacyRoleLabel: row.role_label,
+      ...(row.interest !== undefined ? { interest: row.interest } : {}),
+      ...(row.reviewed !== undefined ? { reviewed: row.reviewed } : {}),
+      ...(row.last_reply_at !== undefined ? { lastReplyAt: row.last_reply_at } : {}),
+      ...(row.resume_received !== undefined ? { resumeReceived: row.resume_received } : {}),
+      ...(row.company !== undefined ? { company: row.company } : {}),
+      ...(row.profile !== undefined ? { profile: row.profile } : {}),
     });
     const tracking = (
       row: Omit<
@@ -2682,6 +2691,31 @@ export async function getRecruitingCrmData(
         page.next_offset,
       );
     }
+    if (input.operation === "presence") {
+      const page = parse(
+        RecruitingCrmPresenceReadSchema,
+        await read(server, "list_crm_candidates", {
+          p_view: "presence",
+          p_org: input.organizationId,
+          p_candidate_ids: input.candidateIds,
+          ...(input.crmRoleId ? { p_role: input.crmRoleId } : {}),
+        }),
+      );
+      if (
+        page.candidate_ids.some((id) => !input.candidateIds.includes(id)) ||
+        page.role_candidate_ids?.some((id) => !page.candidate_ids.includes(id)) ||
+        (input.crmRoleId && !page.role_candidate_ids)
+      )
+        throw unavailable();
+      await sourceFence(server, "list_crm_candidates");
+      return {
+        operation: "presence",
+        source,
+        checkedAt: new Date().toISOString(),
+        candidateIds: page.candidate_ids,
+        ...(page.role_candidate_ids ? { roleCandidateIds: page.role_candidate_ids } : {}),
+      };
+    }
     if (input.operation === "candidates") {
       const trim = (text: string) => text.replace(/^ +| +$/g, "");
       let selectedRole = null;
@@ -2722,6 +2756,38 @@ export async function getRecruitingCrmData(
       }
       const offset = pageOffset(input);
       const limit = input.limit ?? 25;
+      if (options?.source === "projection") {
+        if (!selectedRole) throw new IsolationError();
+        // Stored data has exactly the live candidate tool's authorization boundary.
+        await sourceFence(server, "list_crm_candidates");
+        const stored = await recruiting.listSyncedRecruitingCrmRoleContacts(
+          deps.prisma,
+          actor,
+          { mcpServerId: server.id, organizationId: input.organizationId },
+          selectedRole.crmRoleId,
+        );
+        invalidateFences();
+        await sourceFence(server, "list_crm_candidates");
+        const query = input.query?.trim().toLocaleLowerCase();
+        const matching = stored.filter(
+          (row) =>
+            (!input.stage || row.stage === input.stage) &&
+            (!query ||
+              [row.name, row.email, row.title].some((value) =>
+                value?.toLocaleLowerCase().includes(query),
+              )),
+        );
+        const items = matching.slice(offset, offset + limit);
+        return finish({
+          operation: "candidates",
+          scope: "stored_role",
+          selectedRole,
+          items,
+          total: matching.length,
+          offset,
+          nextOffset: offset + items.length < matching.length ? offset + items.length : null,
+        });
+      }
       const page = parse(
         RecruitingCrmCandidatesReadSchema,
         await read(server, "list_crm_candidates", {
@@ -2945,6 +3011,13 @@ export async function mergeRoleCandidates(
           stage: row.stage,
           contactStatus: row.contactStatus,
           outreachStatus: row.outreachStatus,
+          phone: row.phone,
+          ...(row.company !== undefined ? { company: row.company } : {}),
+          ...(row.profile !== undefined ? { profile: row.profile } : {}),
+          ...(row.interest !== undefined ? { interest: row.interest } : {}),
+          ...(row.reviewed !== undefined ? { reviewed: row.reviewed } : {}),
+          ...(row.lastReplyAt !== undefined ? { lastReplyAt: row.lastReplyAt } : {}),
+          ...(row.resumeReceived !== undefined ? { resumeReceived: row.resumeReceived } : {}),
         }
       : null;
   const items: RecruitingRoleCandidate[] = [];
@@ -2982,6 +3055,7 @@ export async function mergeRoleCandidates(
         },
         crm: crmSide(contact),
         shortlisted: candidate.shortlisted,
+        shortlistedAt: candidate.shortlistedAt,
       });
     }
   if (autumnPhase && autumn.nextCursor)
@@ -3000,6 +3074,7 @@ export async function mergeRoleCandidates(
         autumn: null,
         crm: crmSide(row),
         shortlisted: false,
+        shortlistedAt: null,
       });
     if (offset + page.length < visibleCrmOnly.length)
       nextCursor = roleCandidatesCursor.write(scope, { o: offset + page.length });
@@ -3050,17 +3125,23 @@ export async function getRecruitingRoleCandidates(
     async crm(binding) {
       const rows: RoleCandidatesCrmRow[] = [];
       try {
-        // ponytail: whole role contact list per request, capped at 10×50; page by email/URL if roles outgrow it.
-        for (let offset: number | null = 0, pages = 0; offset !== null && pages < 10; pages++) {
-          const page: RecruitingCrmDataOutput = await getRecruitingCrmData(deps, actor, target, {
-            operation: "candidates",
-            serverId: binding.mcpServerId,
-            serverRevision: binding.serverRevision,
-            organizationId: binding.organizationId,
-            crmRoleId: binding.crmRoleId,
-            limit: 50,
-            offset,
-          });
+        // The full sync owns refreshes. Browse the saved projection without live candidate scans.
+        for (let offset: number | null = 0; offset !== null; ) {
+          const page: RecruitingCrmDataOutput = await getRecruitingCrmData(
+            deps,
+            actor,
+            target,
+            {
+              operation: "candidates",
+              serverId: binding.mcpServerId,
+              serverRevision: binding.serverRevision,
+              organizationId: binding.organizationId,
+              crmRoleId: binding.crmRoleId,
+              limit: 50,
+              offset,
+            },
+            { source: "projection" },
+          );
           if (page.operation !== "candidates") throw new IsolationError();
           for (const item of page.items)
             rows.push({
@@ -3071,7 +3152,7 @@ export async function getRecruitingRoleCandidates(
           offset = page.nextOffset;
         }
       } catch (error) {
-        // The CRM side fails closed to no CRM data; Autumn rows were authorized by their own read.
+        // Never substitute stored data when current source authorization cannot be verified.
         if (!(error instanceof ORPCError) && !(error instanceof IsolationError)) throw error;
         return { status: "unavailable" };
       }
@@ -3101,6 +3182,26 @@ export const deleteRecruitingReminder = (
   input: { id: string },
 ) => authenticated(() => recruiting.deleteRecruitingReminder(prisma, actor, input.id));
 
+export const listRecruitingCandidateNotes = (
+  prisma: PrismaClient,
+  actor: Actor,
+  input: Parameters<typeof recruiting.listRecruitingCandidateNotes>[2],
+) => authenticated(() => recruiting.listRecruitingCandidateNotes(prisma, actor, input));
+export const createRecruitingCandidateNote = (
+  prisma: PrismaClient,
+  actor: Actor,
+  input: Parameters<typeof recruiting.createRecruitingCandidateNote>[2],
+) => authenticated(() => recruiting.createRecruitingCandidateNote(prisma, actor, input));
+export const updateRecruitingCandidateNote = (
+  prisma: PrismaClient,
+  actor: Actor,
+  input: Parameters<typeof recruiting.updateRecruitingCandidateNote>[2],
+) => authenticated(() => recruiting.updateRecruitingCandidateNote(prisma, actor, input));
+export const deleteRecruitingCandidateNote = (
+  prisma: PrismaClient,
+  actor: Actor,
+  input: { id: string },
+) => authenticated(() => recruiting.deleteRecruitingCandidateNote(prisma, actor, input.id));
 export const readRecruitingCalibrationRound = (
   prisma: PrismaClient,
   actor: Actor,

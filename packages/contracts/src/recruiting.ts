@@ -1297,6 +1297,7 @@ export const RecruitingCandidateSchema = z.strictObject({
   candidateKey: RecruitingId,
   ...RecruitingCandidateProfileSchema.shape,
   shortlisted: z.boolean(),
+  shortlistedAt: IsoDate.nullable(),
   /** Provider match cells; rank/score are comparable only within one saved result. */
   match: z
     .strictObject({
@@ -1352,6 +1353,20 @@ export const RecruitingRoleCandidatesInputFields = {
   query: z.string().max(240).optional(),
   shortlistedOnly: z.boolean().optional(),
 };
+export const RecruitingCrmProfileSchema = z.object({
+  history: z.json(),
+  summary: z.string(),
+  skills: z.array(z.string()),
+  sources: z.array(
+    z.object({
+      id: z.uuid(),
+      company: z.string().nullable(),
+      title: z.string().nullable(),
+      location: z.string().nullable(),
+      syncedAt: z.string(),
+    }),
+  ),
+});
 export const RecruitingRoleCandidateSchema = z.strictObject({
   key: Text,
   name: z.string().nullable(),
@@ -1383,9 +1398,17 @@ export const RecruitingRoleCandidateSchema = z.strictObject({
       stage: z.string().nullable(),
       contactStatus: z.string(),
       outreachStatus: z.string(),
+      phone: z.string().nullable().optional(),
+      company: z.string().nullable().optional(),
+      profile: RecruitingCrmProfileSchema.optional(),
+      interest: z.string().nullable().optional(),
+      reviewed: z.boolean().nullable().optional(),
+      lastReplyAt: IsoDate.nullable().optional(),
+      resumeReceived: z.boolean().nullable().optional(),
     })
     .nullable(),
   shortlisted: z.boolean(),
+  shortlistedAt: IsoDate.nullable(),
 });
 export type RecruitingRoleCandidate = z.infer<typeof RecruitingRoleCandidateSchema>;
 export const RecruitingRoleCandidatesOutputSchema = z.strictObject({
@@ -1744,6 +1767,13 @@ const CrmBrowseCandidate = z.strictObject({
   roleSpecId: z.uuid().nullable(),
   legacyClientLabel: z.string(),
   legacyRoleLabel: z.string(),
+  /** Present when the connected CRM returns them. */
+  interest: z.string().nullable().optional(),
+  reviewed: z.boolean().nullable().optional(),
+  lastReplyAt: IsoDate.nullable().optional(),
+  resumeReceived: z.boolean().nullable().optional(),
+  company: z.string().nullable().optional(),
+  profile: RecruitingCrmProfileSchema.optional(),
 });
 const CrmBrowseTracking = z.strictObject({
   roleKey: z.string().min(1),
@@ -1809,6 +1839,13 @@ export const RecruitingCrmDataInputSchema = z.discriminatedUnion("operation", [
     ),
   z.object({ operation: z.literal("roles"), ...crmBrowsePinned }),
   z.object({
+    operation: z.literal("presence"),
+    ...crmBrowsePinned,
+    ...crmBrowsePage,
+    candidateIds: z.array(z.uuid()).min(1).max(50),
+    crmRoleId: z.uuid().optional(),
+  }),
+  z.object({
     operation: z.literal("candidates"),
     ...crmBrowsePinned,
     ...crmBrowsePage,
@@ -1858,6 +1895,13 @@ export const RecruitingCrmDataInputSchema = z.discriminatedUnion("operation", [
 export type RecruitingCrmDataInput = z.infer<typeof RecruitingCrmDataInputSchema>;
 export const RecruitingCrmDataOutputSchema = z.discriminatedUnion("operation", [
   z.strictObject({
+    operation: z.literal("presence"),
+    source: CrmBrowseSource.extend({ organizationId: z.uuid() }),
+    checkedAt: IsoDate,
+    candidateIds: z.array(z.uuid()),
+    roleCandidateIds: z.array(z.uuid()).optional(),
+  }),
+  z.strictObject({
     operation: z.literal("memberships"),
     checkedAt: IsoDate,
     sources: z.array(
@@ -1883,7 +1927,7 @@ export const RecruitingCrmDataOutputSchema = z.discriminatedUnion("operation", [
     operation: z.literal("candidates"),
     source: CrmBrowseSource.extend({ organizationId: z.uuid() }),
     checkedAt: IsoDate,
-    scope: z.enum(["organization", "legacy_role_labels"]),
+    scope: z.enum(["organization", "legacy_role_labels", "stored_role"]),
     selectedRole: CrmBrowseRole.nullable(),
     items: z.array(CrmBrowseCandidate),
     total: z.number().int().nonnegative(),
@@ -2038,6 +2082,12 @@ export const RecruitingCrmCandidatesReadSchema = z.object({
       role_spec_id: z.uuid().nullable(),
       client_label: z.string(),
       role_label: z.string(),
+      interest: z.string().nullable().optional(),
+      reviewed: z.boolean().nullable().optional(),
+      last_reply_at: IsoDate.nullable().optional().catch(null),
+      resume_received: z.boolean().nullable().optional(),
+      company: z.string().nullable().optional(),
+      profile: RecruitingCrmProfileSchema.optional(),
     }),
   ),
 });
@@ -2167,6 +2217,8 @@ export const RecruitingReminderSchema = z.strictObject({
 export type RecruitingReminder = z.infer<typeof RecruitingReminderSchema>;
 export const ListRecruitingRemindersInput = z.strictObject({
   candidateKey: ReminderCandidateKey.optional(),
+  /** Match any of these keys (OR with `candidateKey`), e.g. a person's search-result and CRM keys. */
+  candidateKeys: z.array(ReminderCandidateKey).max(10).optional(),
   roleId: RecruitingId.optional(),
   status: RecruitingReminderStatusSchema.optional(),
   dueBefore: IsoDate.optional(),
@@ -2201,6 +2253,128 @@ export const RecruitingRemindersToolInputSchema = z.discriminatedUnion("operatio
 ]);
 export type RecruitingRemindersToolInput = z.infer<typeof RecruitingRemindersToolInputSchema>;
 
+/** Copies the user's CRM roles, contacts, role links and role mail into the product's own rows. */
+export const RecruitingCrmSyncInputFields = {
+  /** Reads everything and reports what would change; writes nothing. */
+  dryRun: z.boolean().optional(),
+  /** Pass back `nextCursor` until it is null; each call does a bounded slice of the reads. */
+  cursor: z.string().max(65_536).optional(),
+};
+const RecruitingCrmSyncCounts = z.strictObject({
+  seen: z.number().int().nonnegative(),
+  created: z.number().int().nonnegative(),
+  updated: z.number().int().nonnegative(),
+  unchanged: z.number().int().nonnegative(),
+  archived: z.number().int().nonnegative(),
+  restored: z.number().int().nonnegative(),
+});
+export type RecruitingCrmSyncCounts = z.infer<typeof RecruitingCrmSyncCounts>;
+export const RecruitingCrmSyncOutputSchema = z.strictObject({
+  dryRun: z.boolean(),
+  startedAt: IsoDate,
+  nextCursor: z.string().nullable(),
+  organizations: z.number().int().nonnegative(),
+  roles: RecruitingCrmSyncCounts,
+  contacts: RecruitingCrmSyncCounts,
+  links: RecruitingCrmSyncCounts,
+  messages: RecruitingCrmSyncCounts,
+  /** Reads that could not complete; their rows are left as they were (nothing archived). */
+  skipped: z.array(
+    z.strictObject({
+      organizationId: z.uuid().nullable(),
+      crmRoleId: z.uuid().nullable(),
+      step: z.enum(["organizations", "roles", "contacts", "links", "mail"]),
+      reason: z.string(),
+    }),
+  ),
+});
+export type RecruitingCrmSyncOutput = z.infer<typeof RecruitingCrmSyncOutputSchema>;
+
+/** Server-side progress of a CRM sync, carried between calls; every read it names is re-authorized. */
+const CrmSyncCursorCounts = z.object({
+  seen: z.number().int().nonnegative(),
+  created: z.number().int().nonnegative(),
+  updated: z.number().int().nonnegative(),
+  unchanged: z.number().int().nonnegative(),
+  archived: z.number().int().nonnegative(),
+  restored: z.number().int().nonnegative(),
+});
+export const RecruitingCrmSyncCursorSchema = z.object({
+  v: z.literal(1),
+  dryRun: z.boolean(),
+  startedAt: z.iso.datetime(),
+  orgs: z.array(
+    z.object({
+      s: z.string(),
+      r: z.number().int().positive(),
+      o: z.uuid(),
+      roles: z.array(z.uuid()),
+    }),
+  ),
+  at: z.object({
+    g: z.number().int().nonnegative(),
+    step: z.enum(["contacts", "links", "mail"]),
+    j: z.number().int().nonnegative(),
+    offset: z.number().int().nonnegative(),
+    /** Stored active rows this pass has matched so far, for the dry-run archive count. */
+    matched: z.number().int().nonnegative(),
+    seen: z.array(z.uuid()),
+  }),
+  totals: z.object({
+    roles: CrmSyncCursorCounts,
+    contacts: CrmSyncCursorCounts,
+    links: CrmSyncCursorCounts,
+    messages: CrmSyncCursorCounts,
+  }),
+  skipped: RecruitingCrmSyncOutputSchema.shape.skipped,
+});
+export type RecruitingCrmSyncCursor = z.infer<typeof RecruitingCrmSyncCursorSchema>;
+
+export const RecruitingCrmPresenceReadSchema = z.object({
+  version: z.literal(2),
+  candidate_ids: z.array(z.uuid()).max(50),
+  role_candidate_ids: z.array(z.uuid()).max(50).nullable(),
+});
+// Owner-scoped candidate notes, shared by RPC and the agent tool. Same candidate keys as reminders.
+const NoteBody = Text.max(8000);
+export const RecruitingCandidateNoteSchema = z.strictObject({
+  id: RecruitingId,
+  roleId: RecruitingId.nullable(),
+  candidateKey: z.string(),
+  body: z.string(),
+  createdBy: z.enum(["user", "agent"]),
+  authorName: z.string().optional(),
+  createdAt: IsoDate,
+  updatedAt: IsoDate,
+});
+export type RecruitingCandidateNote = z.infer<typeof RecruitingCandidateNoteSchema>;
+export const ListRecruitingCandidateNotesInput = z.strictObject({
+  candidateKeys: z.array(ReminderCandidateKey).min(1).max(10),
+  roleId: RecruitingId.optional(),
+});
+export type ListRecruitingCandidateNotesInput = z.infer<typeof ListRecruitingCandidateNotesInput>;
+export const ListRecruitingCandidateNotesOutput = z.strictObject({
+  items: z.array(RecruitingCandidateNoteSchema),
+});
+export const CreateRecruitingCandidateNoteInput = z.strictObject({
+  candidateKey: ReminderCandidateKey,
+  roleId: RecruitingId.optional(),
+  body: NoteBody,
+});
+export type CreateRecruitingCandidateNoteInput = z.infer<typeof CreateRecruitingCandidateNoteInput>;
+export const UpdateRecruitingCandidateNoteInput = z.strictObject({
+  id: RecruitingId,
+  body: NoteBody,
+});
+export type UpdateRecruitingCandidateNoteInput = z.infer<typeof UpdateRecruitingCandidateNoteInput>;
+export const DeleteRecruitingCandidateNoteInput = z.strictObject({ id: RecruitingId });
+export const RecruitingNotesToolInputSchema = z.discriminatedUnion("operation", [
+  ListRecruitingCandidateNotesInput.extend({ operation: z.literal("list") }),
+  CreateRecruitingCandidateNoteInput.extend({ operation: z.literal("create") }),
+  UpdateRecruitingCandidateNoteInput.extend({ operation: z.literal("update") }),
+  DeleteRecruitingCandidateNoteInput.extend({ operation: z.literal("delete") }),
+]);
+export type RecruitingNotesToolInput = z.infer<typeof RecruitingNotesToolInputSchema>;
 export const RecruitingCalibrationRoundSchema = z.strictObject({
   round: z.number().int().positive(),
   createdAt: IsoDate,

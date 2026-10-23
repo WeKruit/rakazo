@@ -1,4 +1,4 @@
-import type { RecruitingCandidateReport } from "@rakazo/contracts";
+import type { RecruitingCandidateReport, RecruitingRoleCandidate } from "@rakazo/contracts";
 import type { RoleCandidateFit } from "./roleCandidates";
 import { roleCandidateFit } from "./roleCandidates";
 
@@ -206,4 +206,32 @@ export function sourceLabel(url: string) {
   } catch {
     return url;
   }
+}
+
+/** Present stored profile facts in the existing sections, without deriving qualifications. */
+export function storedProfileFields(
+  profile: NonNullable<RecruitingRoleCandidate["crm"]>["profile"],
+): Field[] {
+  if (!profile) return [];
+  const history = Array.isArray(profile.history) ? profile.history : [profile.history];
+  const experience = history.flatMap((entry): string[] => {
+    if (typeof entry === "string") return entry.trim() ? [entry] : [];
+    if (!entry || typeof entry !== "object" || Array.isArray(entry)) return [];
+    const text = (key: string) => (typeof entry[key] === "string" ? (entry[key] as string) : "");
+    const name = [text("title"), text("company")].filter(Boolean).join(" · ");
+    if (!name) return [];
+    const dates = [text("start"), text("end")].filter(Boolean).join(" – ");
+    return [[name, dates].filter(Boolean).join(" · ")];
+  });
+  return [
+    ...(experience.length
+      ? [{ label: "Experience", value: experience.join("\n"), sourceUrls: [] }]
+      : []),
+    ...(profile.summary.trim()
+      ? [{ label: "Summary", value: profile.summary, sourceUrls: [] }]
+      : []),
+    ...(profile.skills.length
+      ? [{ label: "Skills", value: profile.skills.join(", "), sourceUrls: [] }]
+      : []),
+  ];
 }

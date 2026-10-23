@@ -442,6 +442,10 @@ msgstr "Add item"
 msgid "Add MCP server"
 msgstr "Add MCP server"
 
+#: src/pages/recruiting/NotesTab.tsx
+msgid "Add note"
+msgstr "Add note"
+
 #: src/pages/PluginsOverlay.tsx
 msgid "Add OpenAPI"
 msgstr "Add OpenAPI"
@@ -787,6 +791,10 @@ msgstr "Assessment date"
 msgid "Assessment unavailable"
 msgstr "Assessment unavailable"
 
+#: src/pages/recruiting/NotesTab.tsx
+msgid "Assistant"
+msgstr "Assistant"
+
 #: src/pages/RecruitingPanel.tsx
 msgid "Assumption"
 msgstr "Assumption"
@@ -1039,10 +1047,6 @@ msgstr "Browser"
 msgid "Built-in"
 msgstr "Built-in"
 
-#: src/pages/recruiting/HomeDashboard.tsx
-msgid "By week found"
-msgstr "By week found"
-
 #: src/pages/recruiting/InterviewTab.tsx
 msgid "Calendar"
 msgstr "Calendar"
@@ -1087,6 +1091,7 @@ msgstr "Can't reach the server."
 #: src/pages/ModelSettingsOverlay.tsx
 #: src/pages/Onboarding.tsx
 #: src/pages/PluginsOverlay.tsx
+#: src/pages/recruiting/NotesTab.tsx
 #: src/pages/recruiting/TasksTab.tsx
 #: src/pages/RecruitingPanel.tsx
 #: src/pages/shell/bot-credentials.tsx
@@ -2110,6 +2115,10 @@ msgstr "Could not load MCP servers"
 msgid "Could not load model settings"
 msgstr "Could not load model settings"
 
+#: src/pages/recruiting/NotesTab.tsx
+msgid "Could not load notes."
+msgstr "Could not load notes."
+
 #: src/pages/RecruitingPanel.tsx
 msgid "Could not load recruiting"
 msgstr "Could not load recruiting"
@@ -2330,6 +2339,10 @@ msgstr "Could not save that voice"
 #: src/pages/shell/bot-credentials.tsx
 msgid "Could not save the credential"
 msgstr "Could not save the credential"
+
+#: src/pages/recruiting/NotesTab.tsx
+msgid "Could not save the note."
+msgstr "Could not save the note."
 
 #: src/pages/recruiting/TasksTab.tsx
 msgid "Could not save the reminder."
@@ -2627,6 +2640,7 @@ msgstr "Default scope"
 #: src/pages/BotContextMenu.tsx
 #: src/pages/KnowledgeSection.tsx
 #: src/pages/McpServersOverlay.tsx
+#: src/pages/recruiting/NotesTab.tsx
 #: src/pages/recruiting/TasksTab.tsx
 #: src/pages/RoutineEditor.tsx
 #: src/pages/Shell.tsx
@@ -2887,6 +2901,7 @@ msgstr "e.g. Hivenet Agent, Presales, Timesheets bot"
 msgid "Earlier history"
 msgstr "Earlier history"
 
+#: src/pages/recruiting/NotesTab.tsx
 #: src/pages/recruiting/TasksTab.tsx
 msgid "Edit"
 msgstr "Edit"
@@ -4525,6 +4540,10 @@ msgstr "No model catalog is available."
 msgid "No models listed."
 msgstr "No models listed."
 
+#: src/pages/recruiting/NotesTab.tsx
+msgid "No notes yet."
+msgstr "No notes yet."
+
 #: src/pages/recruiting/HomeDashboard.tsx
 msgid "No open tasks."
 msgstr "No open tasks."
@@ -4751,6 +4770,15 @@ msgstr "Not returned"
 #: src/pages/RecruitingPanel.tsx
 msgid "Not reviewed"
 msgstr "Not reviewed"
+
+#: src/pages/recruiting/NotesTab.tsx
+msgid "Note"
+msgstr "Note"
+
+#: src/pages/recruiting/DetailPanel.tsx
+#: src/pages/recruiting/NotesTab.tsx
+msgid "Notes"
+msgstr "Notes"
 
 #: src/components/ComputerUpdateProgress.tsx
 msgid "Nothing is still running"
@@ -6025,6 +6053,7 @@ msgstr "Salary range"
 #: src/pages/KnowledgeSection.tsx
 #: src/pages/McpServersOverlay.tsx
 #: src/pages/ModelSettingsOverlay.tsx
+#: src/pages/recruiting/NotesTab.tsx
 #: src/pages/recruiting/TasksTab.tsx
 #: src/pages/RecruitingPanel.tsx
 #: src/pages/RoutineEditor.tsx
@@ -7244,6 +7273,10 @@ msgstr "Type without recording"
 msgid "Type your answer"
 msgstr "Type your answer"
 
+#: src/pages/recruiting/NotesTab.tsx
+msgid "Type your note here"
+msgstr "Type your note here"
+
 #: src/pages/BotContextMenu.tsx
 msgid "Unassigned"
 msgstr "Unassigned"
@@ -7654,6 +7687,7 @@ msgstr "year"
 msgid "Yesterday"
 msgstr "Yesterday"
 
+#: src/pages/recruiting/NotesTab.tsx
 #: src/pages/Shell.tsx
 msgid "You"
 msgstr "You"

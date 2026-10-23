@@ -38,6 +38,7 @@ vi.mock("@rakazo/db", async (importOriginal) => {
     getRecruitingWorkspace: vi.fn(),
     getRecruitingWorkspaceRoleId: vi.fn(),
     listRecruitingCandidateLinkedinUrls: vi.fn(),
+    listSyncedRecruitingCrmRoleContacts: vi.fn(),
     getRecruitingCrmTarget: vi.fn(),
     getRecruitingCrmCandidateSyncs: vi.fn(),
     readRecruitingNativeCorrespondence: vi.fn(async () => null),
@@ -3667,6 +3668,7 @@ describe("retained candidate report API", () => {
           evidenceUrls: null,
           issues: [],
           shortlisted: false,
+          shortlistedAt: null,
           decision: null,
           decisionReason: null,
           decisionAt: null,
@@ -4261,6 +4263,124 @@ describe("live CRM browser reads", () => {
     };
     return { server, assignment, results, execute, deps, reauthorize, mockPrisma };
   }
+  it("reads owner-scoped projected role contacts without requesting live candidate pages", async () => {
+    const f = browserFixture();
+    const stored = {
+      candidateId,
+      name: "Projected person",
+      title: "Engineer",
+      location: null,
+      email: null,
+      phone: null,
+      linkedinUrl: null,
+      stage: null,
+      contactStatus: "no contact found",
+      outreachStatus: "not contacted",
+      roleSpecId: roleId,
+      legacyClientLabel: "Actual client",
+      legacyRoleLabel: "Actual role",
+    };
+    vi.mocked(db.listSyncedRecruitingCrmRoleContacts).mockResolvedValue([stored]);
+    const result = await api.getRecruitingCrmData(
+      f.deps,
+      actor,
+      target,
+      {
+        operation: "candidates",
+        serverId: "crm",
+        serverRevision: 3,
+        organizationId: org,
+        crmRoleId: roleId,
+        limit: 25,
+      },
+      { source: "projection" },
+    );
+    expect(result).toMatchObject({
+      scope: "stored_role",
+      items: [stored],
+      total: 1,
+      nextOffset: null,
+    });
+    expect(db.listSyncedRecruitingCrmRoleContacts).toHaveBeenLastCalledWith(
+      f.deps.prisma,
+      actor,
+      { mcpServerId: "crm", organizationId: org },
+      roleId,
+    );
+    expect(f.execute.mock.calls.map(([call]) => call.route?.toolName)).not.toContain(
+      "list_crm_candidates",
+    );
+  });
+
+  it("does not substitute live candidates when the projection has not been synced", async () => {
+    const f = browserFixture();
+    vi.mocked(db.listSyncedRecruitingCrmRoleContacts).mockResolvedValue([]);
+    const result = await api.getRecruitingCrmData(
+      f.deps,
+      actor,
+      target,
+      {
+        operation: "candidates",
+        serverId: "crm",
+        serverRevision: 3,
+        organizationId: org,
+        crmRoleId: roleId,
+      },
+      { source: "projection" },
+    );
+    expect(result).toMatchObject({ scope: "stored_role", items: [], total: 0 });
+    expect(f.execute.mock.calls.map(([call]) => call.route?.toolName)).not.toContain(
+      "list_crm_candidates",
+    );
+  });
+
+  it("requires the candidate tool assignment before reading projected contacts", async () => {
+    const f = browserFixture();
+    vi.mocked(db.listSyncedRecruitingCrmRoleContacts).mockClear();
+    f.assignment.allowedTools = f.assignment.allowedTools.filter(
+      (tool) => tool !== "list_crm_candidates",
+    );
+    await expect(
+      api.getRecruitingCrmData(
+        f.deps,
+        actor,
+        target,
+        {
+          operation: "candidates",
+          serverId: "crm",
+          serverRevision: 3,
+          organizationId: org,
+          crmRoleId: roleId,
+        },
+        { source: "projection" },
+      ),
+    ).rejects.toBeDefined();
+    expect(db.listSyncedRecruitingCrmRoleContacts).not.toHaveBeenCalled();
+  });
+
+  it("rechecks the connection revision after loading projected contacts", async () => {
+    const f = browserFixture();
+    vi.mocked(db.listSyncedRecruitingCrmRoleContacts).mockImplementationOnce(async () => {
+      f.server.revision++;
+      return [];
+    });
+    await expect(
+      api.getRecruitingCrmData(
+        f.deps,
+        actor,
+        target,
+        {
+          operation: "candidates",
+          serverId: "crm",
+          serverRevision: 3,
+          organizationId: org,
+          crmRoleId: roleId,
+        },
+        { source: "projection" },
+      ),
+    ).rejects.toBeDefined();
+  });
+
   it.each([
     ["candidates", ["list_crm_roles", "get_crm_role"]],
     ["candidateDetails", ["list_crm_candidate_messages", "get_crm_candidate_review"]],
@@ -4347,6 +4467,32 @@ describe("live CRM browser reads", () => {
       api.getRecruitingCrmData(f.deps, actor, target, { operation: "role", reference }),
     ).rejects.toMatchObject({ code: "NOT_FOUND" });
   });
+  it.each([undefined, 1, 2])(
+    "requires corrected presence response version (%s)",
+    async (version) => {
+      const f = browserFixture();
+      f.results.list_crm_candidates = {
+        ...(version === undefined ? {} : { version }),
+        candidate_ids: [],
+        role_candidate_ids: [],
+      };
+      const result = api.getRecruitingCrmData(f.deps, actor, target, {
+        operation: "presence",
+        ...pinned,
+        candidateIds: [candidateId],
+        crmRoleId: roleId,
+      });
+      if (version !== 2)
+        await expect(result).rejects.toMatchObject({ code: "SERVICE_UNAVAILABLE" });
+      else
+        await expect(result).resolves.toMatchObject({
+          operation: "presence",
+          candidateIds: [],
+          roleCandidateIds: [],
+        });
+    },
+  );
+
   it.each(["mail", "candidateDetails"] as const)(
     "reads original CRM outbox records separately for %s without redispatch",
     async (operation) => {
@@ -5590,6 +5736,7 @@ describe("role candidates (Autumn + CRM merged list)", () => {
       evidenceUrls: null,
       issues: [],
       shortlisted: false,
+      shortlistedAt: null,
       crm: null,
       decision: null,
       decisionReason: null,

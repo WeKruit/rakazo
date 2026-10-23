@@ -442,6 +442,10 @@ msgstr "添加项目"
 msgid "Add MCP server"
 msgstr "添加 MCP 服务器"
 
+#: src/pages/recruiting/NotesTab.tsx
+msgid "Add note"
+msgstr "添加备注"
+
 #: src/pages/PluginsOverlay.tsx
 msgid "Add OpenAPI"
 msgstr "添加 OpenAPI"
@@ -787,6 +791,10 @@ msgstr ""
 msgid "Assessment unavailable"
 msgstr ""
 
+#: src/pages/recruiting/NotesTab.tsx
+msgid "Assistant"
+msgstr "助手"
+
 #: src/pages/RecruitingPanel.tsx
 msgid "Assumption"
 msgstr ""
@@ -1039,10 +1047,6 @@ msgstr ""
 msgid "Built-in"
 msgstr "内置"
 
-#: src/pages/recruiting/HomeDashboard.tsx
-msgid "By week found"
-msgstr "按发现周"
-
 #: src/pages/recruiting/InterviewTab.tsx
 msgid "Calendar"
 msgstr ""
@@ -1087,6 +1091,7 @@ msgstr "无法连接服务器。"
 #: src/pages/ModelSettingsOverlay.tsx
 #: src/pages/Onboarding.tsx
 #: src/pages/PluginsOverlay.tsx
+#: src/pages/recruiting/NotesTab.tsx
 #: src/pages/recruiting/TasksTab.tsx
 #: src/pages/RecruitingPanel.tsx
 #: src/pages/shell/bot-credentials.tsx
@@ -2110,6 +2115,10 @@ msgstr "无法加载 MCP 服务器"
 msgid "Could not load model settings"
 msgstr "无法加载模型设置"
 
+#: src/pages/recruiting/NotesTab.tsx
+msgid "Could not load notes."
+msgstr "无法加载备注。"
+
 #: src/pages/RecruitingPanel.tsx
 msgid "Could not load recruiting"
 msgstr ""
@@ -2330,6 +2339,10 @@ msgstr "无法保存该语音"
 #: src/pages/shell/bot-credentials.tsx
 msgid "Could not save the credential"
 msgstr ""
+
+#: src/pages/recruiting/NotesTab.tsx
+msgid "Could not save the note."
+msgstr "备注保存失败。"
 
 #: src/pages/recruiting/TasksTab.tsx
 msgid "Could not save the reminder."
@@ -2627,6 +2640,7 @@ msgstr "默认范围"
 #: src/pages/BotContextMenu.tsx
 #: src/pages/KnowledgeSection.tsx
 #: src/pages/McpServersOverlay.tsx
+#: src/pages/recruiting/NotesTab.tsx
 #: src/pages/recruiting/TasksTab.tsx
 #: src/pages/RoutineEditor.tsx
 #: src/pages/Shell.tsx
@@ -2887,6 +2901,7 @@ msgstr "例如 Hivenet Agent、Presales、工时表机器人"
 msgid "Earlier history"
 msgstr "更早的记录"
 
+#: src/pages/recruiting/NotesTab.tsx
 #: src/pages/recruiting/TasksTab.tsx
 msgid "Edit"
 msgstr "编辑"
@@ -4525,6 +4540,10 @@ msgstr "没有可用的模型目录。"
 msgid "No models listed."
 msgstr "未列出模型。"
 
+#: src/pages/recruiting/NotesTab.tsx
+msgid "No notes yet."
+msgstr "还没有备注。"
+
 #: src/pages/recruiting/HomeDashboard.tsx
 msgid "No open tasks."
 msgstr "没有待办任务。"
@@ -4751,6 +4770,15 @@ msgstr ""
 #: src/pages/RecruitingPanel.tsx
 msgid "Not reviewed"
 msgstr ""
+
+#: src/pages/recruiting/NotesTab.tsx
+msgid "Note"
+msgstr "备注"
+
+#: src/pages/recruiting/DetailPanel.tsx
+#: src/pages/recruiting/NotesTab.tsx
+msgid "Notes"
+msgstr "备注"
 
 #: src/components/ComputerUpdateProgress.tsx
 msgid "Nothing is still running"
@@ -6025,6 +6053,7 @@ msgstr ""
 #: src/pages/KnowledgeSection.tsx
 #: src/pages/McpServersOverlay.tsx
 #: src/pages/ModelSettingsOverlay.tsx
+#: src/pages/recruiting/NotesTab.tsx
 #: src/pages/recruiting/TasksTab.tsx
 #: src/pages/RecruitingPanel.tsx
 #: src/pages/RoutineEditor.tsx
@@ -7244,6 +7273,10 @@ msgstr ""
 msgid "Type your answer"
 msgstr "输入你的回答"
 
+#: src/pages/recruiting/NotesTab.tsx
+msgid "Type your note here"
+msgstr "在这里写备注"
+
 #: src/pages/BotContextMenu.tsx
 msgid "Unassigned"
 msgstr "未分配"
@@ -7654,6 +7687,7 @@ msgstr ""
 msgid "Yesterday"
 msgstr "昨天"
 
+#: src/pages/recruiting/NotesTab.tsx
 #: src/pages/Shell.tsx
 msgid "You"
 msgstr "你"

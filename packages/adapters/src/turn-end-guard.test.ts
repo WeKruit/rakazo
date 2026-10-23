@@ -21,6 +21,8 @@ function fixture(
     savedRows?: number;
     savedCandidates?: number;
     stage?: string;
+    round?: { effectId: string; candidateKeys: string[]; approvedAt: Date | null };
+    completedRoundEffect?: boolean;
   } = {},
 ) {
   const sendUserMessage = vi.fn(async () => ({
@@ -40,6 +42,10 @@ function fixture(
       message: { findMany: vi.fn(async () => recent) },
       recruitingCandidatePage: {
         aggregate: vi.fn(async () => ({ _sum: { rowCount: options.savedRows ?? null } })),
+      },
+      recruitingCalibrationRound: { findFirst: vi.fn(async () => options.round ?? null) },
+      externalEffect: {
+        findFirst: vi.fn(async () => (options.completedRoundEffect ? { id: "effect-1" } : null)),
       },
       recruitingRole: {
         findUnique: vi.fn(async () => ({
@@ -92,7 +98,7 @@ describe("guardRecruitingTurnEnd", () => {
   it.each([
     [1, 1, "continued"],
     [9, 9, "continued"],
-    [1, 10, "ended"],
+    [1, 10, "continued"],
     [10, 1, "continued"],
   ])(
     "calibration needs ten distinct cumulative candidates (%s writes, %s saved)",
@@ -111,6 +117,86 @@ describe("guardRecruitingTurnEnd", () => {
         postAssistant: f.postAssistant,
       });
       expect(result.action).toBe(action);
+    },
+  );
+
+  it("does not treat feedback-stage saves or a prose question as a delivered review", async () => {
+    const f = fixture({ stage: "feedback", savedRows: 1, savedCandidates: 10 });
+    const base = {
+      run,
+      roleId: "role-1",
+      handedOff: false,
+      pendingApproval: false,
+      postAssistant: f.postAssistant,
+    };
+    expect(await guardRecruitingTurnEnd(f.deps, { ...base, blocks: statusNote })).toMatchObject({
+      action: "continued",
+      stage: "feedback",
+    });
+    expect(
+      await guardRecruitingTurnEnd(f.deps, {
+        ...base,
+        blocks: [
+          { kind: "text", text: "- Saved ten profiles\n- Updated stage\n- Ready for feedback?" },
+        ],
+      }),
+    ).toMatchObject({ action: "continued" });
+    expect(
+      await guardRecruitingTurnEnd(f.deps, {
+        ...base,
+        blocks: [
+          {
+            kind: "ask",
+            text: "What feedback do you have on these ten profiles?",
+            status: "pending",
+          },
+        ],
+      }),
+    ).toEqual({ action: "ended", classification: "question" });
+  });
+
+  it.each([
+    [10, false, true, "ended"],
+    [9, false, true, "continued"],
+    [10, true, true, "continued"],
+    [10, false, false, "continued"],
+  ])(
+    "requires a complete unapproved current-run round (%s, %s, %s)",
+    async (count, approved, completed, action) => {
+      const f = fixture({
+        stage: "feedback",
+        round: {
+          effectId: "effect-1",
+          candidateKeys: Array.from({ length: count }, (_, i) => `person-${i}`),
+          approvedAt: approved ? new Date() : null,
+        },
+        completedRoundEffect: completed,
+      });
+      const result = await guardRecruitingTurnEnd(f.deps, {
+        run,
+        roleId: "role-1",
+        blocks: statusNote,
+        handedOff: false,
+        pendingApproval: false,
+        postAssistant: f.postAssistant,
+      });
+      expect(result.action).toBe(action);
+      expect(f.deps.prisma.recruitingCalibrationRound.findFirst).toHaveBeenCalledWith(
+        expect.objectContaining({ where: { roleId: "role-1" }, orderBy: { round: "desc" } }),
+      );
+      if (count === 10 && !approved)
+        expect(f.deps.prisma.externalEffect.findFirst).toHaveBeenCalledWith(
+          expect.objectContaining({
+            where: {
+              id: "effect-1",
+              runId: run.id,
+              spaceId: run.spaceId,
+              kind: "recruiting_research",
+              status: "completed",
+              request: { path: ["operation"], equals: "calibration_round" },
+            },
+          }),
+        );
     },
   );
 

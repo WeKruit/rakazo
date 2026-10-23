@@ -10,6 +10,7 @@ import {
   RecruitingCrmImportInputSchema,
   RecruitingCrmTargetToolInputSchema,
   RecruitingFeedbackInputSchema,
+  RecruitingNotesToolInputSchema,
   RecruitingPreferenceFeedbackSchema,
   RecruitingRemindersToolInputSchema,
   RecruitingReplyInputSchema,
@@ -612,6 +613,12 @@ export const builtinAgentTools: ConnectorTool[] = [
     description:
       'Internal follow-up reminders for the signed-in recruiter (no approval, nothing is sent). operation list {candidateKey?, roleId?, status?, dueBefore?} returns {items, overdueCount}; create {title, dueAt (ISO-8601 with offset), note?, roleId?, candidateKey?}; update {id, title?, note?, dueAt?, status?: open|done|dismissed}; delete {id}. candidateKey is "autumn:<key>" or "crm:<id>", the same keys roleCandidates items use. Use for "remind me to follow up with X on Friday".',
     inputSchema: z.toJSONSchema(RecruitingRemindersToolInputSchema, { io: "input" }),
+  },
+  {
+    name: "recruiting_notes",
+    description:
+      'Internal candidate notes for the signed-in recruiter (no approval, nothing is sent). operation list {candidateKeys (1-10), roleId?} returns {items} newest first; create {candidateKey, body (<= 8000 chars), roleId?}; update {id, body}; delete {id}. candidateKey is "autumn:<key>" or "crm:<id>", the same keys roleCandidates items and reminders use. Use for "note that X prefers remote" or to read what the recruiter wrote about a person.',
+    inputSchema: z.toJSONSchema(RecruitingNotesToolInputSchema, { io: "input" }),
   },
   {
     name: "recruiting_feedback",

@@ -30,7 +30,9 @@ function fake() {
     Object.entries(where).every(([k, v]) =>
       v && typeof v === "object" && "lt" in v
         ? (r[k] as Date) < (v as { lt: Date }).lt
-        : r[k] === v,
+        : v && typeof v === "object" && "in" in v
+          ? (v as { in: unknown[] }).in.includes(r[k])
+          : r[k] === v,
     );
   const reminder = {
     create: async ({ data }: { data: Record<string, unknown> }) => {
@@ -104,6 +106,28 @@ describe("recruiting reminders (db)", () => {
       NOW,
     );
     expect(before.items).toHaveLength(1);
+  });
+
+  it("lists by several candidate keys (OR) within the owner's scope", async () => {
+    const { prisma } = fake();
+    const due = "2026-11-01T00:00:00.000Z";
+    for (const candidateKey of ["autumn:a", "crm:1", "crm:2"])
+      await createRecruitingReminder(prisma, alice, { title: candidateKey, dueAt: due, candidateKey });
+    await createRecruitingReminder(prisma, bob, { title: "bob", dueAt: due, candidateKey: "crm:1" });
+    const both = await listRecruitingReminders(
+      prisma,
+      alice,
+      { candidateKeys: ["autumn:a", "crm:1"] },
+      NOW,
+    );
+    expect(both.items.map((i) => i.title)).toEqual(["autumn:a", "crm:1"]);
+    const merged = await listRecruitingReminders(
+      prisma,
+      alice,
+      { candidateKey: "crm:2", candidateKeys: ["crm:1"] },
+      NOW,
+    );
+    expect(merged.items.map((i) => i.title)).toEqual(["crm:1", "crm:2"]);
   });
 
   it("done sets completedAt and stops counting as overdue; reopen clears it", async () => {

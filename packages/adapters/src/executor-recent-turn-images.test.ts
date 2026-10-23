@@ -5,6 +5,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import type * as ComputerLifecycleModule from "./computer-lifecycle.js";
 import { acquireComputerExecutionLease, provisionComputer } from "./computer-lifecycle.js";
 import { createRunExecutor } from "./executor.js";
+import { RetiredModelCredentialError } from "./pi-oauth.js";
 import type * as RecruitingContextModule from "./recruiting-context.js";
 import { loadRecruitingRunContext } from "./recruiting-context.js";
 
@@ -88,6 +89,7 @@ async function runWithModel(
     onEventFindFirst?: () => void;
     /** The thread's active recruiting role; enables the run-start recruiting context. */
     recruitingRoleId?: string;
+    savedRecruitingCandidates?: number;
   } = {},
 ) {
   const run = {
@@ -185,6 +187,16 @@ async function runWithModel(
       ),
       create: vi.fn(async ({ data }: { data: object }) => ({ id: "published-final", ...data })),
     },
+    recruitingRole: {
+      findUnique: vi.fn(async () => ({
+        title: "Engineer",
+        playbookStage: "feedback",
+        currentRevisionId: "revision",
+        archivedAt: null,
+      })),
+    },
+    recruitingRoleRevision: { findUnique: vi.fn(async () => ({ brief: null })) },
+    recruitingCandidate: { count: vi.fn(async () => options.savedRecruitingCandidates ?? 0) },
     task: { findUniqueOrThrow: vi.fn(async () => ({ id: run.taskId, prompt: "Look again" })) },
     usageRecord: { create: vi.fn(async () => ({})), createMany: vi.fn(async () => ({ count: 1 })) },
     computer: { updateMany: vi.fn(async () => ({ count: 1 })) },
@@ -345,6 +357,26 @@ describe("run budget guardrails", () => {
     expect(prisma.message.create).toHaveBeenCalledTimes(1);
   });
 
+  it("includes saved recruiting results and the next step when the budget stops the executor", async () => {
+    const { finalizeRun, prisma } = await runWithModel(TEXT_ONLY_MODEL, undefined, false, false, {
+      recruitingRoleId: "role-1",
+      savedRecruitingCandidates: 10,
+      events: [usage(3), tool("t1"), usage(2.5), tool("t2")],
+    });
+    expect(finalizeRun).toHaveBeenCalledExactlyOnceWith(
+      expect.objectContaining({
+        outcome: "completed",
+        blocks: [
+          {
+            kind: "text",
+            text: expect.stringContaining("10 saved candidate profiles. Next step: 收集校准反馈."),
+          },
+        ],
+      }),
+    );
+    expect(prisma.recruitingCandidate.count).toHaveBeenCalledWith({ where: { roleId: "role-1" } });
+  });
+
   it("leaves a run under the cap alone", async () => {
     const { finalizeRun } = await runWithModel(TEXT_ONLY_MODEL, undefined, false, false, {
       events: [usage(1), tool("t1"), usage(1), tool("t2")],
@@ -500,7 +532,7 @@ describe("recent turn images follow model vision", () => {
     vi.stubEnv("OPENROUTER_API_KEY", "fake-deployment-key");
     try {
       await expect(resolve(backup.provider, backup.modelId)).rejects.toThrow(
-        "Backup model credential is no longer available",
+        RetiredModelCredentialError,
       );
       expect(prisma.spaceModelPreference.findFirst).toHaveBeenCalledWith(
         expect.objectContaining({
@@ -514,6 +546,7 @@ describe("recent turn images follow model vision", () => {
       );
       expect(prisma.secret.findFirst).toHaveBeenCalledExactlyOnceWith({
         where: { id: "missing-secret", userId: "user-1", spaceId: null },
+        select: { id: true, ciphertext: true },
       });
       await expect(resolve("openai", "gpt-4o")).rejects.toThrow("Backup model is not selected");
       expect(prisma.secret.findFirst).toHaveBeenCalledTimes(1);
@@ -629,6 +662,8 @@ describe("streaming progress is transient", () => {
           phase: "thinking",
           summary: "Reviewing candidates",
           at: "2026-10-23T00:00:00.000Z",
+          activeSince: expect.any(String),
+          resumedAt: expect.any(String),
         },
       }),
     );
@@ -653,11 +688,22 @@ describe("streaming progress is transient", () => {
     expect(transient).toEqual([
       expect.objectContaining({
         type: "thread.progress",
-        payload: { text: "Looking", streaming: true },
+        payload: {
+          text: "Looking",
+          streaming: true,
+          activeSince: expect.any(String),
+          resumedAt: expect.any(String),
+        },
       }),
       expect.objectContaining({
         type: "thread.progress",
-        payload: { text: "", activity: true, phase: "compacting" },
+        payload: {
+          text: "",
+          activity: true,
+          phase: "compacting",
+          activeSince: expect.any(String),
+          resumedAt: expect.any(String),
+        },
       }),
     ]);
     expect(events.append).not.toHaveBeenCalledWith(

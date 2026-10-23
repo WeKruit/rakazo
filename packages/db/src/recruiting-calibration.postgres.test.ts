@@ -1,5 +1,6 @@
 import type { Actor } from "@rakazo/contracts";
-import { afterAll, beforeAll, describe, expect, it } from "vitest";
+import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
+import { guardRecruitingTurnEnd } from "../../adapters/src/turn-end-guard.js";
 import type { PrismaClient } from "./client.js";
 import { createDb } from "./client.js";
 import * as recruiting from "./index.js";
@@ -202,6 +203,39 @@ describePostgres("calibration rounds (PostgreSQL)", () => {
     expect(
       (await prisma.recruitingRole.findUniqueOrThrow({ where: { id: roleId } })).playbookStage,
     ).toBe("feedback");
+
+    const sendUserMessage = vi.fn(async () => ({
+      messageId: "synthetic",
+      seq: 99,
+      taskId: "synthetic",
+      runId: null,
+    }));
+    const deps = {
+      prisma,
+      events: { sendUserMessage },
+      jobs: { enqueue: vi.fn() },
+    } as unknown as Parameters<typeof guardRecruitingTurnEnd>[0];
+    const guardInput = {
+      run: { id: runId, spaceId, threadId, botId, userId, trigger: "user" },
+      roleId,
+      blocks: [{ kind: "text" as const, text: "本轮十人已展示在校准面板。" }],
+      handedOff: false,
+      pendingApproval: false,
+      postAssistant: vi.fn(),
+    };
+    // The actual save transaction produced the feedback panel and completed native effect.
+    await expect(guardRecruitingTurnEnd(deps, guardInput)).resolves.toEqual({
+      action: "ended",
+      classification: "question",
+    });
+    expect(sendUserMessage).not.toHaveBeenCalled();
+    // A later human turn must not stop on an old panel from a different run.
+    await expect(
+      guardRecruitingTurnEnd(deps, {
+        ...guardInput,
+        run: { ...guardInput.run, id: `${runId}-later` },
+      }),
+    ).resolves.toMatchObject({ action: "continued" });
 
     // Already returned before round 1, even though never shown: refused.
     await expect(

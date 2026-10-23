@@ -481,7 +481,9 @@ describe("playbook stage machine", () => {
       savedCandidates: 10,
     })?.prompt;
     expect(present).toContain("calibration_round");
-    expect(present).toContain("不要求逐个评价");
+    expect(present).toContain("不要求逐人评分");
+    expect(present).toContain("Results 校准面板");
+    expect(present).toContain("不要重复创建问题卡");
     expect(nextPlaybookStep("feedback", { hasBrief: true, savedCandidates: 44 })?.prompt).toContain(
       "10 位全新的人",
     );

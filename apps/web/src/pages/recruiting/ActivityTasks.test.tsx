@@ -33,7 +33,7 @@ import { RecruitingChatContextProvider } from "../shell/recruiting-chat-context"
 import { ActivityTab } from "./ActivityTab";
 import { RecruitingDetailPanel } from "./DetailPanel";
 import type { RecruitingDetailController, RecruitingDetailTarget } from "./detail";
-import { reminderCandidateKey, TasksTab } from "./TasksTab";
+import { reminderCandidateKey, reminderCandidateKeys, TasksTab } from "./TasksTab";
 
 const ORG = "00000000-0000-4000-8000-000000000001";
 const ROLE = "00000000-0000-4000-8000-000000000002";
@@ -286,7 +286,27 @@ it("keys reminders by search result first, then CRM record", async () => {
   const view = await mount(panelFor({ view: "tasks", person, role }));
   expect(reminders.list).toHaveBeenCalledWith({
     roleId: "role-1",
-    candidateKey: `crm:${ADA}`,
+    candidateKeys: [`crm:${ADA}`],
+    status: "open",
+  });
+  expect(view.textContent).toContain("Create reminder");
+});
+
+it("lists reminders under both keys of a person but creates under the primary one", async () => {
+  expect(reminderCandidateKeys("k1", ADA)).toEqual(["autumn:k1", `crm:${ADA}`]);
+  expect(reminderCandidateKeys(undefined, false)).toEqual([]);
+  remindersMock([]);
+  const view = await mount(
+    panelFor({
+      view: "tasks",
+      person,
+      role,
+      candidate: { candidateKey: "k1" },
+    } as RecruitingDetailTarget),
+  );
+  expect(reminders.list).toHaveBeenCalledWith({
+    roleId: "role-1",
+    candidateKeys: ["autumn:k1", `crm:${ADA}`],
     status: "open",
   });
   expect(view.textContent).toContain("Create reminder");

@@ -116,10 +116,14 @@ import { McpOAuthConfigInput } from "./mcp.js";
 import { MessageReactionSchema } from "./reactions.js";
 import {
   ConfirmRecruitingBriefInput,
+  CreateRecruitingCandidateNoteInput,
   CreateRecruitingReminderInput,
   CreateRecruitingRoleInput,
+  DeleteRecruitingCandidateNoteInput,
   DeleteRecruitingReminderInput,
   EditRecruitingCriteriaInput,
+  ListRecruitingCandidateNotesInput,
+  ListRecruitingCandidateNotesOutput,
   ListRecruitingCandidateSourcesInput,
   ListRecruitingCandidateSourcesOutput,
   ListRecruitingCandidatesInput,
@@ -133,6 +137,7 @@ import {
   RecruitingAssessmentSchema,
   RecruitingCalibrationRoundOutput,
   RecruitingCandidateFeedbackSelectionSchema,
+  RecruitingCandidateNoteSchema,
   RecruitingCandidateReportSchema,
   RecruitingChatContextSchema,
   RecruitingCorrespondenceInputPage,
@@ -140,6 +145,8 @@ import {
   RecruitingCorrespondenceSchema,
   RecruitingCrmDataInputSchema,
   RecruitingCrmDataOutputSchema,
+  RecruitingCrmSyncInputFields,
+  RecruitingCrmSyncOutputSchema,
   RecruitingId,
   RecruitingReminderSchema,
   RecruitingResearchActionSchema,
@@ -154,6 +161,7 @@ import {
   ReviseRecruitingRoleInput,
   SetRecruitingCandidateShortlistInput,
   SetRecruitingCandidateShortlistOutput,
+  UpdateRecruitingCandidateNoteInput,
   UpdateRecruitingReminderInput,
 } from "./recruiting.js";
 import { RecruitingCrmRoleReferenceSchema } from "./recruiting-crm.js";
@@ -650,6 +658,9 @@ export const appContract = {
     roleCandidates: oc
       .input(threadTarget.safeExtend(RecruitingRoleCandidatesInputFields))
       .output(RecruitingRoleCandidatesOutputSchema),
+    crmSync: oc
+      .input(threadTarget.safeExtend(RecruitingCrmSyncInputFields))
+      .output(RecruitingCrmSyncOutputSchema),
     listCandidateSources: oc
       .input(ListRecruitingCandidateSourcesInput)
       .output(ListRecruitingCandidateSourcesOutput),
@@ -687,6 +698,14 @@ export const appContract = {
       update: oc.input(UpdateRecruitingReminderInput).output(RecruitingReminderSchema),
       delete: oc
         .input(DeleteRecruitingReminderInput)
+        .output(z.strictObject({ ok: z.literal(true) })),
+    },
+    notes: {
+      list: oc.input(ListRecruitingCandidateNotesInput).output(ListRecruitingCandidateNotesOutput),
+      create: oc.input(CreateRecruitingCandidateNoteInput).output(RecruitingCandidateNoteSchema),
+      update: oc.input(UpdateRecruitingCandidateNoteInput).output(RecruitingCandidateNoteSchema),
+      delete: oc
+        .input(DeleteRecruitingCandidateNoteInput)
         .output(z.strictObject({ ok: z.literal(true) })),
     },
     confirmBrief: oc.input(ConfirmRecruitingBriefInput).output(recruitingWorkspace),

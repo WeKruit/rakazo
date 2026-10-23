@@ -291,8 +291,10 @@ import {
   archiveRecruitingRole,
   bindRecruitingRole,
   confirmRecruitingBrief,
+  createRecruitingCandidateNote,
   createRecruitingReminder,
   createRecruitingRole,
+  deleteRecruitingCandidateNote,
   deleteRecruitingReminder,
   editRecruitingCriteria,
   getRecruitingAssessment,
@@ -303,6 +305,7 @@ import {
   getRecruitingRoleSetup,
   getRecruitingWorkspace,
   listRecruitingAssessments,
+  listRecruitingCandidateNotes,
   listRecruitingCandidateSources,
   listRecruitingCandidates,
   listRecruitingFeedback,
@@ -314,8 +317,10 @@ import {
   readRecruitingSource,
   reviseRecruitingRole,
   setRecruitingCandidateShortlist,
+  updateRecruitingCandidateNote,
   updateRecruitingReminder,
 } from "./recruiting.js";
+import { syncRecruitingCrm } from "./recruiting-crm-sync.js";
 import { listRoutineRuns } from "./routine-runs.js";
 import { listSpaceRuns } from "./runs.js";
 import { addScreenProxyCapability } from "./screen-proxy.js";
@@ -3684,6 +3689,21 @@ export function createRouter(deps: RouterDeps) {
           input,
         ),
       ),
+      crmSync: authed.recruiting.crmSync.handler(async ({ context, input }) =>
+        syncRecruitingCrm(
+          {
+            prisma: deps.prisma,
+            connectors: deps.connectors,
+            firstPartyMcpUrl: deps.env.firstPartyMcpUrl,
+            signal: context.signal,
+            stillAuthorized: context.stillAuthorized,
+            reauthorize: () => resolveThreadTarget(deps.prisma, context.actor, input),
+          },
+          context.actor,
+          await resolveThreadTarget(deps.prisma, context.actor, input),
+          input,
+        ),
+      ),
       listCandidateSources: authed.recruiting.listCandidateSources.handler(({ context, input }) =>
         listRecruitingCandidateSources(deps, context.actor, input),
       ),
@@ -3758,6 +3778,20 @@ export function createRouter(deps: RouterDeps) {
         ),
         delete: authed.recruiting.reminders.delete.handler(({ context, input }) =>
           deleteRecruitingReminder(deps.prisma, context.actor, input),
+        ),
+      },
+      notes: {
+        list: authed.recruiting.notes.list.handler(({ context, input }) =>
+          listRecruitingCandidateNotes(deps.prisma, context.actor, input),
+        ),
+        create: authed.recruiting.notes.create.handler(({ context, input }) =>
+          createRecruitingCandidateNote(deps.prisma, context.actor, input),
+        ),
+        update: authed.recruiting.notes.update.handler(({ context, input }) =>
+          updateRecruitingCandidateNote(deps.prisma, context.actor, input),
+        ),
+        delete: authed.recruiting.notes.delete.handler(({ context, input }) =>
+          deleteRecruitingCandidateNote(deps.prisma, context.actor, input),
         ),
       },
       listAssessments: authed.recruiting.listAssessments.handler(({ context, input }) =>

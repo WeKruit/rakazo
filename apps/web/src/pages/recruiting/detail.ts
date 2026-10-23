@@ -1,3 +1,4 @@
+import type { RecruitingCandidate, RecruitingRoleCandidate } from "@rakazo/contracts";
 import {
   createContext,
   useCallback,
@@ -8,7 +9,6 @@ import {
   useState,
 } from "react";
 import { useNavigate, useSearchParams } from "react-router-dom";
-import type { RecruitingCandidate } from "@rakazo/contracts";
 import type { RecruitingTabProps } from "./shared";
 
 /** The person a detail view shows, as the opening row already displayed it. */
@@ -19,6 +19,7 @@ export type RecruitingDetailPerson = {
   phone?: string | null;
   title?: string | null;
   company?: string | null;
+  profile?: NonNullable<RecruitingRoleCandidate["crm"]>["profile"];
   location?: string | null;
   linkedinUrl?: string | null;
   stage?: string | null;
@@ -26,7 +27,13 @@ export type RecruitingDetailPerson = {
   outreachStatus?: string | null;
 };
 
-export type RecruitingDetailView = "thread" | "contact" | "interview" | "activity" | "tasks";
+export type RecruitingDetailView =
+  | "thread"
+  | "contact"
+  | "interview"
+  | "activity"
+  | "tasks"
+  | "notes";
 
 export type RecruitingDetailTarget = {
   view: RecruitingDetailView;

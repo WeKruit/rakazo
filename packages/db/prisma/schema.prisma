@@ -23,7 +23,12 @@ model AiDataConsent {
 
 model User {
   aiDataConsents AiDataConsent[]
+  recruitingCrmRoles RecruitingCrmRole[]
+  recruitingCrmContacts RecruitingCrmContact[]
+  recruitingCrmSyncProgress RecruitingCrmSyncProgress[]
+  recruitingCrmMessages RecruitingCrmMessage[]
   recruitingReminders RecruitingReminder[] @relation("RecruitingReminderOwner")
+  recruitingCandidateNotes RecruitingCandidateNote[] @relation("RecruitingCandidateNoteOwner")
   recruitingRoles RecruitingRole[]
   id                          String                       @id
   name                        String
@@ -198,7 +203,12 @@ model Member {
 
 model Space {
   aiDataConsents AiDataConsent[]
+  recruitingCrmRoles RecruitingCrmRole[]
+  recruitingCrmContacts RecruitingCrmContact[]
+  recruitingCrmSyncProgress RecruitingCrmSyncProgress[]
+  recruitingCrmMessages RecruitingCrmMessage[]
   recruitingReminders RecruitingReminder[]
+  recruitingCandidateNotes RecruitingCandidateNote[]
   recruitingRoles RecruitingRole[]
   id                          String                       @id
   organizationId              String
@@ -1176,6 +1186,9 @@ model Secret {
 
 model McpServer {
   recruitingTasks RecruitingResearchTask[]
+  recruitingCrmRoles RecruitingCrmRole[]
+  recruitingCrmContacts RecruitingCrmContact[]
+  recruitingCrmMessages RecruitingCrmMessage[]
   id            String            @id @default(cuid())
   spaceId       String
   space         Space             @relation(fields: [spaceId], references: [id], onDelete: Cascade)
@@ -1528,6 +1541,7 @@ model RecruitingRole {
   researchTasks RecruitingResearchTask[]
   assessments RecruitingAssessment[]
   reminders RecruitingReminder[]
+  candidateNotes RecruitingCandidateNote[]
   calibrationRounds RecruitingCalibrationRound[]
 
   @@index([spaceId, userId])
@@ -1663,6 +1677,7 @@ model RecruitingCandidate {
   role RecruitingRole @relation(fields: [roleId], references: [id], onDelete: Cascade)
   candidateKey String
   shortlisted Boolean @default(false)
+  shortlistedAt DateTime?
   consideration Json?
   revision Int @default(0)
   shortlistMessageId String?
@@ -1786,4 +1801,149 @@ model RecruitingReminder {
   @@index([ownerUserId, status, dueAt])
   @@index([candidateKey])
   @@map("recruiting_reminders")
+}
+
+/// Owner-scoped copy of one CRM role, keyed by the CRM's own ids. Never deleted; archivedAt marks
+/// a role missing from a complete CRM pass and clears when it returns.
+model RecruitingCrmRole {
+  id String @id @default(cuid())
+  spaceId String
+  space Space @relation(fields: [spaceId], references: [id], onDelete: Cascade)
+  userId String
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+  mcpServerId String
+  mcpServer McpServer @relation(fields: [mcpServerId], references: [id], onDelete: Cascade)
+  organizationId String
+  organizationName String?
+  crmRoleId String
+  clientId String
+  clientLabel String
+  roleLabel String
+  summary String?
+  firstSyncedAt DateTime @default(now())
+  syncedAt DateTime
+  archivedAt DateTime?
+  contacts RecruitingCrmRoleContact[]
+
+  @@unique([userId, spaceId, mcpServerId, organizationId, crmRoleId])
+  @@map("recruiting_crm_roles")
+}
+
+/// Owner-scoped copy of one CRM contact in the product's candidate shape. Same archive rule as roles.
+model RecruitingCrmContact {
+  id String @id @default(cuid())
+  spaceId String
+  space Space @relation(fields: [spaceId], references: [id], onDelete: Cascade)
+  userId String
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+  mcpServerId String
+  mcpServer McpServer @relation(fields: [mcpServerId], references: [id], onDelete: Cascade)
+  organizationId String
+  crmCandidateId String
+  name String
+  title String?
+  company String?
+  profile Json?
+  location String?
+  email String?
+  phone String?
+  linkedinUrl String?
+  /// linkedin.com/in/<slug>, else lowercased email; matches Autumn rows for the same person.
+  identityKey String?
+  stage String?
+  contactStatus String
+  outreachStatus String
+  interest String?
+  reviewed Boolean?
+  lastReplyAt DateTime?
+  resumeReceived Boolean?
+  /// The contact's canonical CRM pipeline role.
+  crmRoleId String?
+  clientLabel String
+  roleLabel String
+  firstSyncedAt DateTime @default(now())
+  syncedAt DateTime
+  archivedAt DateTime?
+  roles RecruitingCrmRoleContact[]
+
+  @@unique([userId, spaceId, mcpServerId, organizationId, crmCandidateId])
+  @@index([userId, spaceId, identityKey])
+  @@map("recruiting_crm_contacts")
+}
+
+/// A contact listed under a CRM role. A contact can be linked to several roles.
+model RecruitingCrmRoleContact {
+  roleId String
+  role RecruitingCrmRole @relation(fields: [roleId], references: [id], onDelete: Cascade)
+  contactId String
+  contact RecruitingCrmContact @relation(fields: [contactId], references: [id], onDelete: Cascade)
+  syncedAt DateTime
+  archivedAt DateTime?
+
+  @@id([roleId, contactId])
+  @@index([contactId])
+  @@map("recruiting_crm_role_contacts")
+}
+
+/// One stored CRM email for a role. Mail is immutable, so rows are upserted and never archived.
+model RecruitingCrmMessage {
+  id String @id @default(cuid())
+  spaceId String
+  space Space @relation(fields: [spaceId], references: [id], onDelete: Cascade)
+  userId String
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+  mcpServerId String
+  mcpServer McpServer @relation(fields: [mcpServerId], references: [id], onDelete: Cascade)
+  organizationId String
+  crmMessageId String
+  crmCandidateId String
+  crmRoleId String
+  threadId String?
+  direction String?
+  sender String?
+  recipients Json
+  subject String?
+  body String?
+  sentAt DateTime?
+  syncedAt DateTime
+
+  @@unique([userId, spaceId, mcpServerId, organizationId, crmMessageId])
+  @@index([userId, spaceId, crmCandidateId])
+  @@map("recruiting_crm_messages")
+}
+
+/// Single-use server-owned progress; no source data or credentials.
+model RecruitingCrmSyncProgress {
+  userId String
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+  spaceId String
+  space Space @relation(fields: [spaceId], references: [id], onDelete: Cascade)
+  targetKey String
+  token String @unique
+  progress Json
+
+  @@id([userId, spaceId])
+  @@map("recruiting_crm_sync_progress")
+}
+
+/// Owner-scoped (spaceId + ownerUserId) note on a candidate; agent-written notes are owned by the
+/// user the agent ran for, with createdByBotId set. Soft-deleted via deletedAt.
+model RecruitingCandidateNote {
+  id String @id @default(cuid())
+  spaceId String
+  space Space @relation(fields: [spaceId], references: [id], onDelete: Cascade)
+  ownerUserId String
+  owner User @relation("RecruitingCandidateNoteOwner", fields: [ownerUserId], references: [id], onDelete: Cascade)
+  roleId String?
+  role RecruitingRole? @relation(fields: [roleId], references: [id], onDelete: Cascade)
+  /// "autumn:<key>" | "crm:<id>", same key space as reminders.
+  candidateKey String
+  body String
+  createdByBotId String?
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+  deletedAt DateTime?
+
+  @@index([spaceId, candidateKey, createdAt])
+  @@map("recruiting_candidate_notes")
 }

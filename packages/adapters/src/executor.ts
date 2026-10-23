@@ -58,6 +58,7 @@ import {
   RecruitingCrmImportInputSchema,
   RecruitingCrmTargetToolInputSchema,
   RecruitingFeedbackInputSchema,
+  RecruitingNotesToolInputSchema,
   RecruitingPreferenceFeedbackSchema,
   RecruitingRemindersToolInputSchema,
   RecruitingReplyInputSchema,
@@ -151,6 +152,7 @@ import {
   executeNativeRecruitingShortlist,
   executeRecruitingApproval,
   executeRecruitingCrmBinding,
+  executeRecruitingNotesTool,
   executeRecruitingRemindersTool,
   findDefaultModelCredential,
   findModelCredential,
@@ -173,6 +175,7 @@ import {
   readHistory,
   readNativeCrmWriteApproval,
   readNativeReplyEmailProof,
+  readRecruitingPlaybookStep,
   recordUsage,
   recruitingResearchSnapshot,
   resolveRecruitingCampaignLead,
@@ -7446,6 +7449,21 @@ export function createRunExecutor(deps: ExecutorDeps) {
               return finish(roleError(error));
             }
           }
+          if (name === "recruiting_notes") {
+            // Internal bookkeeping: no approval card, no external effect.
+            try {
+              return finish(
+                await executeRecruitingNotesTool(
+                  deps.prisma,
+                  researchActor.actor,
+                  bot.id,
+                  RecruitingNotesToolInputSchema.parse(args),
+                ),
+              );
+            } catch (error) {
+              return finish(roleError(error));
+            }
+          }
           if (name === "recruiting_candidates") {
             try {
               if (!deps.artifacts) throw new IsolationError();
@@ -9697,7 +9715,21 @@ export function createRunExecutor(deps: ExecutorDeps) {
               };
               const budgetLimit = runBudgetExceeded(spent);
               if (budgetLimit) {
-                await stopRunEarly(runBudgetStopText(budgetLimit, spent));
+                const savedProgress = thread.activeRecruitingRoleId
+                  ? await readRecruitingPlaybookStep(deps.prisma, thread.activeRecruitingRoleId)
+                  : null;
+                await stopRunEarly(
+                  runBudgetStopText(
+                    budgetLimit,
+                    spent,
+                    savedProgress
+                      ? {
+                          savedCandidates: savedProgress.savedCandidates,
+                          nextStep: savedProgress.step?.label ?? null,
+                        }
+                      : undefined,
+                  ),
+                );
                 return;
               }
               runToolCalls += 1;

@@ -442,6 +442,10 @@ msgstr "आइटम जोड़ें"
 msgid "Add MCP server"
 msgstr "MCP सर्वर जोड़ें"
 
+#: src/pages/recruiting/NotesTab.tsx
+msgid "Add note"
+msgstr ""
+
 #: src/pages/PluginsOverlay.tsx
 msgid "Add OpenAPI"
 msgstr "OpenAPI जोड़ें"
@@ -787,6 +791,10 @@ msgstr ""
 msgid "Assessment unavailable"
 msgstr ""
 
+#: src/pages/recruiting/NotesTab.tsx
+msgid "Assistant"
+msgstr ""
+
 #: src/pages/RecruitingPanel.tsx
 msgid "Assumption"
 msgstr ""
@@ -1039,10 +1047,6 @@ msgstr ""
 msgid "Built-in"
 msgstr "अंतर्निहित"
 
-#: src/pages/recruiting/HomeDashboard.tsx
-msgid "By week found"
-msgstr ""
-
 #: src/pages/recruiting/InterviewTab.tsx
 msgid "Calendar"
 msgstr ""
@@ -1087,6 +1091,7 @@ msgstr "सर्वर तक नहीं पहुंचा जा सका�
 #: src/pages/ModelSettingsOverlay.tsx
 #: src/pages/Onboarding.tsx
 #: src/pages/PluginsOverlay.tsx
+#: src/pages/recruiting/NotesTab.tsx
 #: src/pages/recruiting/TasksTab.tsx
 #: src/pages/RecruitingPanel.tsx
 #: src/pages/shell/bot-credentials.tsx
@@ -2110,6 +2115,10 @@ msgstr "MCP सर्वर लोड नहीं हो सके"
 msgid "Could not load model settings"
 msgstr "मॉडल सेटिंग्स लोड नहीं हो सकीं"
 
+#: src/pages/recruiting/NotesTab.tsx
+msgid "Could not load notes."
+msgstr ""
+
 #: src/pages/RecruitingPanel.tsx
 msgid "Could not load recruiting"
 msgstr ""
@@ -2329,6 +2338,10 @@ msgstr "वह आवाज़ सहेजी नहीं जा सकी"
 
 #: src/pages/shell/bot-credentials.tsx
 msgid "Could not save the credential"
+msgstr ""
+
+#: src/pages/recruiting/NotesTab.tsx
+msgid "Could not save the note."
 msgstr ""
 
 #: src/pages/recruiting/TasksTab.tsx
@@ -2627,6 +2640,7 @@ msgstr "डिफ़ॉल्ट स्कोप"
 #: src/pages/BotContextMenu.tsx
 #: src/pages/KnowledgeSection.tsx
 #: src/pages/McpServersOverlay.tsx
+#: src/pages/recruiting/NotesTab.tsx
 #: src/pages/recruiting/TasksTab.tsx
 #: src/pages/RoutineEditor.tsx
 #: src/pages/Shell.tsx
@@ -2887,6 +2901,7 @@ msgstr "उदा. Hivenet Agent, Presales, टाइमशीट बॉट"
 msgid "Earlier history"
 msgstr ""
 
+#: src/pages/recruiting/NotesTab.tsx
 #: src/pages/recruiting/TasksTab.tsx
 msgid "Edit"
 msgstr ""
@@ -4525,6 +4540,10 @@ msgstr "कोई मॉडल कैटलॉग उपलब्ध नही�
 msgid "No models listed."
 msgstr "कोई मॉडल सूचीबद्ध नहीं।"
 
+#: src/pages/recruiting/NotesTab.tsx
+msgid "No notes yet."
+msgstr ""
+
 #: src/pages/recruiting/HomeDashboard.tsx
 msgid "No open tasks."
 msgstr ""
@@ -4750,6 +4769,15 @@ msgstr ""
 
 #: src/pages/RecruitingPanel.tsx
 msgid "Not reviewed"
+msgstr ""
+
+#: src/pages/recruiting/NotesTab.tsx
+msgid "Note"
+msgstr ""
+
+#: src/pages/recruiting/DetailPanel.tsx
+#: src/pages/recruiting/NotesTab.tsx
+msgid "Notes"
 msgstr ""
 
 #: src/components/ComputerUpdateProgress.tsx
@@ -6025,6 +6053,7 @@ msgstr ""
 #: src/pages/KnowledgeSection.tsx
 #: src/pages/McpServersOverlay.tsx
 #: src/pages/ModelSettingsOverlay.tsx
+#: src/pages/recruiting/NotesTab.tsx
 #: src/pages/recruiting/TasksTab.tsx
 #: src/pages/RecruitingPanel.tsx
 #: src/pages/RoutineEditor.tsx
@@ -7244,6 +7273,10 @@ msgstr ""
 msgid "Type your answer"
 msgstr "अपना उत्तर लिखें"
 
+#: src/pages/recruiting/NotesTab.tsx
+msgid "Type your note here"
+msgstr ""
+
 #: src/pages/BotContextMenu.tsx
 msgid "Unassigned"
 msgstr "असाइन नहीं किया गया"
@@ -7654,6 +7687,7 @@ msgstr ""
 msgid "Yesterday"
 msgstr "कल"
 
+#: src/pages/recruiting/NotesTab.tsx
 #: src/pages/Shell.tsx
 msgid "You"
 msgstr "आप"

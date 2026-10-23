@@ -19,8 +19,17 @@ export function reminderCandidateKey(
   searchKey: string | null | undefined,
   crmId: string | false | null | undefined,
 ) {
-  const key = searchKey ? `autumn:${searchKey}` : crmId ? `crm:${crmId}` : null;
-  return key && /^(autumn|crm):\S+$/.test(key) && key.length <= 300 ? key : null;
+  return reminderCandidateKeys(searchKey, crmId)[0] ?? null;
+}
+
+/** Every valid reminder key for a person, the primary one first: search result, then CRM record. */
+export function reminderCandidateKeys(
+  searchKey: string | null | undefined,
+  crmId: string | false | null | undefined,
+) {
+  return [searchKey && `autumn:${searchKey}`, crmId && `crm:${crmId}`].filter(
+    (key): key is string => !!key && /^(autumn|crm):\S+$/.test(key) && key.length <= 300,
+  );
 }
 
 /** ISO time as a `datetime-local` value in the viewer's zone. */
@@ -90,10 +99,14 @@ function ReminderForm({
 export function TasksTab({
   roleId,
   candidateKey,
+  candidateKeys = [candidateKey],
   refreshSignal = 0,
 }: {
   roleId: string;
+  /** Primary key, used for new reminders. */
   candidateKey: string;
+  /** Every key whose reminders are listed; defaults to the primary key. */
+  candidateKeys?: readonly string[];
   refreshSignal?: number;
 }) {
   const { t, i18n } = useLingui();
@@ -102,8 +115,8 @@ export function TasksTab({
   const [reload, setReload] = useState(0);
   const [editing, setEditing] = useState<string>();
   const [saveFailed, setSaveFailed] = useState(false);
-  const read = useKeyedRead(JSON.stringify([roleId, candidateKey, refreshSignal, reload]), () =>
-    api.list({ roleId, candidateKey, status: "open" }),
+  const read = useKeyedRead(JSON.stringify([roleId, candidateKey, candidateKeys, refreshSignal, reload]), () =>
+    api.list({ roleId, candidateKeys: [...candidateKeys], status: "open" }),
   );
   const run = async (change: () => Promise<unknown>) => {
     setSaveFailed(false);
