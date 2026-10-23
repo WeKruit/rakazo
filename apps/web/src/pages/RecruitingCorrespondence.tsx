@@ -270,6 +270,82 @@ function SequenceEditor({
   );
 }
 
+type CorrespondenceEmail = Pick<
+  SavedCorrespondence["emails"][number],
+  "id" | "sender" | "recipients" | "subject" | "body" | "snippet" | "date" | "url"
+>;
+
+export function CorrespondenceEmails({
+  emails,
+  selectedId,
+  onSelect,
+}: {
+  emails: readonly CorrespondenceEmail[];
+  selectedId?: string;
+  onSelect: (id: string) => void;
+}) {
+  const { t } = useLingui();
+  const selected = emails.find((email) => email.id === selectedId) ?? emails[0];
+  return (
+    <div className="hire-inbox-layout">
+      <aside className="hire-inbox-list" aria-label={t`Saved emails`}>
+        <div className="hire-inbox-filter">
+          <strong>
+            <Trans>Emails</Trans>
+          </strong>
+          <span>{emails.length}</span>
+        </div>
+        {emails.map((email) => (
+          <button
+            key={email.id}
+            type="button"
+            aria-label={email.subject || t`No subject`}
+            aria-pressed={selected?.id === email.id}
+            className="block w-full border-b border-border p-4 text-start hover:bg-muted aria-pressed:bg-muted"
+            onClick={() => onSelect(email.id)}
+          >
+            <strong className="block truncate">{email.sender ?? t`Sender unavailable`}</strong>
+            <span className="block truncate text-sm">{email.subject || t`No subject`}</span>
+            {email.date ? (
+              <time className="text-xs text-muted-foreground" dateTime={email.date}>
+                {new Date(email.date).toLocaleString()}
+              </time>
+            ) : null}
+          </button>
+        ))}
+      </aside>
+      <section className="hire-inbox-thread" aria-label={t`Email content`}>
+        {selected ? (
+          <>
+            <div className="hire-subheading">
+              <strong>{selected.subject || t`No subject`}</strong>
+            </div>
+            <div className="space-y-4 p-5">
+              <p className="break-words text-sm">
+                {selected.sender ?? t`Sender unavailable`}
+                {selected.recipients.length ? <> → {selected.recipients.join(", ")}</> : null}
+              </p>
+              {selected.snippet ? (
+                <p className="text-xs text-muted-foreground">
+                  <Trans>Preview only. Ask for the complete message to read the full body.</Trans>
+                </p>
+              ) : null}
+              <p className="whitespace-pre-wrap break-words">
+                {selected.body || t`Message body unavailable`}
+              </p>
+              {selected.url ? (
+                <a href={selected.url} target="_blank" rel="noreferrer" className="underline">
+                  <Trans>Open original email</Trans>
+                </a>
+              ) : null}
+            </div>
+          </>
+        ) : null}
+      </section>
+    </div>
+  );
+}
+
 function SavedCorrespondenceView({
   view,
   artifactTarget,
@@ -515,64 +591,11 @@ function SavedCorrespondenceView({
         </section>
       ) : null}
       {data?.status === "ready" && !interview ? (
-        <div className="hire-inbox-layout">
-          <aside className="hire-inbox-list" aria-label={t`Saved emails`}>
-            <div className="hire-inbox-filter">
-              <strong>
-                <Trans>Emails</Trans>
-              </strong>
-              <span>{data.emails.length}</span>
-            </div>
-            {data.emails.map((email) => (
-              <button
-                key={email.id}
-                type="button"
-                aria-label={email.subject || t`No subject`}
-                aria-pressed={selected?.id === email.id}
-                className="block w-full border-b border-border p-4 text-start hover:bg-muted aria-pressed:bg-muted"
-                onClick={() => setSelectedId(email.id)}
-              >
-                <strong className="block truncate">{email.sender ?? t`Sender unavailable`}</strong>
-                <span className="block truncate text-sm">{email.subject || t`No subject`}</span>
-                {email.date ? (
-                  <time className="text-xs text-muted-foreground" dateTime={email.date}>
-                    {new Date(email.date).toLocaleString()}
-                  </time>
-                ) : null}
-              </button>
-            ))}
-          </aside>
-          <section className="hire-inbox-thread" aria-label={t`Email content`}>
-            {selected ? (
-              <>
-                <div className="hire-subheading">
-                  <strong>{selected.subject || t`No subject`}</strong>
-                </div>
-                <div className="space-y-4 p-5">
-                  <p className="break-words text-sm">
-                    {selected.sender ?? t`Sender unavailable`}
-                    {selected.recipients.length ? <> → {selected.recipients.join(", ")}</> : null}
-                  </p>
-                  {selected.snippet ? (
-                    <p className="text-xs text-muted-foreground">
-                      <Trans>
-                        Preview only. Ask for the complete message to read the full body.
-                      </Trans>
-                    </p>
-                  ) : null}
-                  <p className="whitespace-pre-wrap break-words">
-                    {selected.body || t`Message body unavailable`}
-                  </p>
-                  {selected.url ? (
-                    <a href={selected.url} target="_blank" rel="noreferrer" className="underline">
-                      <Trans>Open original email</Trans>
-                    </a>
-                  ) : null}
-                </div>
-              </>
-            ) : null}
-          </section>
-        </div>
+        <CorrespondenceEmails
+          emails={data.emails}
+          selectedId={selected?.id}
+          onSelect={setSelectedId}
+        />
       ) : null}
       {data?.status === "ready" && interview ? (
         <div className="space-y-4">

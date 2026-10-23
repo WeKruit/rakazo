@@ -59,6 +59,7 @@ const shellApi = vi.hoisted(() => ({
   updateBot: vi.fn(),
   reorderBots: vi.fn(),
   recruiting: {
+    crmData: vi.fn(),
     correspondence: vi.fn(),
     getWorkspace: vi.fn(),
     listAssessments: vi.fn(),
@@ -141,6 +142,7 @@ import * as RecruitingCorrespondenceModule from "./RecruitingCorrespondence";
 import * as RecruitingPanelModule from "./RecruitingPanel";
 import type { ComposerHandle } from "./Shell";
 import { Composer, candidateReferenceText, eventChangesRecruitingPanel, ShellPage } from "./Shell";
+import { RecruitingNavigation } from "./shell/RecruitingNavigation";
 
 let root: Root | null = null;
 let container: HTMLDivElement | null = null;
@@ -581,6 +583,158 @@ async function renderFeedbackShell(
     navigate: async (to: string) => act(async () => navigate(to)),
   };
 }
+
+it("restarts the CRM role catalog after native invalidation without dispatching a cancelled scope", async () => {
+  (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
+  const source = {
+    serverId: "crm",
+    serverRevision: 1,
+    name: "CRM",
+    status: "ready",
+    memberships: [{ organizationId: "org", name: "Organization", role: "member" }],
+  };
+  let finish!: (value: unknown) => void;
+  shellApi.recruiting.crmData
+    .mockReturnValueOnce(
+      new Promise((resolve) => {
+        finish = resolve;
+      }),
+    )
+    .mockImplementation(async (input) =>
+      input.operation === "memberships"
+        ? { operation: "memberships", sources: [source] }
+        : { operation: "roles", source: { ...source, organizationId: "org" }, items: [] },
+    );
+  const cache = { epoch: 0, entries: new Map<string, unknown>() };
+  container = document.createElement("div");
+  document.body.append(container);
+  root = createRoot(container);
+  const render = async (refreshSignal: number) =>
+    act(async () =>
+      root!.render(
+        <RecruitingNavigation
+          groups={[]}
+          archivedGroups={[]}
+          archivedOpen={false}
+          query=""
+          view="results"
+          canOpenDashboard
+          canCreateRole={false}
+          onQueryChange={() => {}}
+          onView={() => {}}
+          onCollapse={() => {}}
+          onOpenRole={() => {}}
+          onNewRole={() => {}}
+          canCreateRoleFrom={() => false}
+          onNewRoleFrom={() => {}}
+          onRoleMenu={() => {}}
+          onToggleArchived={() => {}}
+          onRestoreRole={() => {}}
+          crmContext={{
+            target: { groupId: "group-1" },
+            scope: "actor:space:thread",
+            cache,
+            refreshSignal,
+          }}
+        />,
+      ),
+    );
+  await render(0);
+  await act(async () =>
+    [...container!.querySelectorAll("button")]
+      .find((button) => button.textContent === "CRM roles")!
+      .click(),
+  );
+  cache.epoch++;
+  await render(1);
+  expect(
+    shellApi.recruiting.crmData.mock.calls.filter(([input]) => input.operation === "memberships"),
+  ).toHaveLength(2);
+  await act(async () =>
+    finish({
+      operation: "memberships",
+      sources: [
+        {
+          ...source,
+          memberships: [{ organizationId: "old-org", name: "Old organization", role: "member" }],
+        },
+      ],
+    }),
+  );
+  expect(
+    shellApi.recruiting.crmData.mock.calls.some(([input]) => input.organizationId === "old-org"),
+  ).toBe(false);
+  expect(container.textContent).not.toContain("Loading CRM roles");
+});
+
+it("opens existing CRM roles without creating groups or exposing an unrelated recruiting chat", async () => {
+  const source = { serverId: "crm-source", serverRevision: 2, name: "CRM" };
+  shellApi.recruiting.crmData.mockImplementation(async (input) => {
+    if (input.operation === "memberships")
+      return {
+        operation: "memberships",
+        checkedAt: "2026-10-22T00:00:00Z",
+        sources: [
+          {
+            ...source,
+            status: "ready",
+            memberships: [
+              { organizationId: "org-1", name: "Example organization", role: "member" },
+            ],
+          },
+        ],
+      };
+    if (input.operation === "roles")
+      return {
+        operation: "roles",
+        source: { ...source, organizationId: "org-1" },
+        checkedAt: "2026-10-22T00:00:00Z",
+        items: [
+          {
+            crmRoleId: "crm-role",
+            clientId: "client-1",
+            clientLabel: "Example client",
+            roleLabel: "Existing role",
+            summary: null,
+          },
+        ],
+      };
+    return {
+      operation: "candidates",
+      source: { ...source, organizationId: "org-1" },
+      checkedAt: "2026-10-22T00:00:00Z",
+      scope: "legacy_role_labels",
+      selectedRole: {
+        crmRoleId: "crm-role",
+        clientId: "client-1",
+        clientLabel: "Example client",
+        roleLabel: "Existing role",
+        summary: null,
+      },
+      items: [],
+      total: 0,
+      offset: 0,
+      nextOffset: null,
+    };
+  });
+  const view = await renderFeedbackShell("group", undefined, {
+    isDeploymentOwner: false,
+    openFeedback: false,
+  });
+  await view.click("CRM roles");
+  await view.click("Existing role · Example client");
+  expect(view.getPath()).toContain("crmRole=crm-role");
+  expect(document.body.textContent).toContain("Stored CRM history");
+  expect(
+    document.querySelector('textarea[name="chat-message"]')?.closest("[hidden]"),
+  ).not.toBeNull();
+  expect(shellApi.createGroup).not.toHaveBeenCalled();
+  expect(shellApi.followUp).not.toHaveBeenCalled();
+  await view.click("Recruiting crew");
+  expect(view.getPath()).not.toContain("crmRole");
+  await view.click("Job Brief");
+  expect(document.querySelector('textarea[name="chat-message"]')).not.toBeNull();
+});
 
 it("uses the native current coordinator and exact managed member keys for ordinary app connections", async () => {
   const view = await renderFeedbackShell("group", undefined, {

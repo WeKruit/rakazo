@@ -17,6 +17,8 @@ import type {
   RecruitingCorrespondence,
   RecruitingCriterionExpression,
   RecruitingCrmCandidateSync,
+  RecruitingCrmDataInput,
+  RecruitingCrmDataOutput,
   RecruitingCrmTarget,
   RecruitingEmploymentDay,
   RecruitingEmploymentRule,
@@ -86,6 +88,13 @@ import {
   writeRecruitingPanelState,
 } from "../lib/right-panel-state";
 import { rpc } from "../lib/rpc";
+import { CorrespondenceEmails } from "./RecruitingCorrespondence";
+import type { RecruitingWorkspaceView } from "./shell/RecruitingNavigation";
+
+export type CrmBrowseSelection = Pick<
+  Extract<RecruitingCrmDataInput, { operation: "candidates" }>,
+  "serverId" | "serverRevision" | "organizationId" | "crmRoleId"
+>;
 
 export type CandidateDiscussionContext = Pick<
   RecruitingCandidate,
@@ -108,6 +117,13 @@ export type CandidateFeedback = {
 };
 
 type Props = {
+  crmBrowse?: {
+    selection: CrmBrowseSelection;
+    view: RecruitingWorkspaceView;
+    candidateId?: string;
+    onSelectCandidate: (id: string) => void;
+    onStartRecruiting?: () => void;
+  };
   threadId: string;
   botId?: string;
   groupId?: string;
@@ -2130,6 +2146,395 @@ function VerdictLabel({ verdict }: { verdict: Verdict }) {
 
 // Reset all fetched records when navigation changes the source thread, even before its reads finish.
 export function RecruitingPanel(props: Props) {
+  return props.crmBrowse ? (
+    <CrmRecruitingPanel
+      key={JSON.stringify([props.readCacheScope, props.threadId, props.crmBrowse.selection])}
+      {...props}
+      browse={props.crmBrowse}
+    />
+  ) : (
+    <NativeRecruitingPanel {...props} />
+  );
+}
+
+function CrmRecruitingPanel({
+  browse,
+  botId,
+  groupId,
+  readCache,
+  readCacheScope,
+  refreshSignal = 0,
+}: Props & { browse: NonNullable<Props["crmBrowse"]> }) {
+  const { t } = useLingui();
+  const [queryDraft, setQueryDraft] = useState("");
+  const [query, setQuery] = useState("");
+  const [offset, setOffset] = useState(0);
+  const [refresh, setRefresh] = useState(0);
+  const [mailPageSelection, setMailPageSelection] = useState<{
+    candidateId: string;
+    cursor: Extract<RecruitingCrmDataInput, { operation: "mail" }>["cursor"];
+  }>();
+  const mailCursor =
+    mailPageSelection?.candidateId === browse.candidateId ? mailPageSelection?.cursor : undefined;
+  const setMailCursor = (
+    cursor: Extract<RecruitingCrmDataInput, { operation: "mail" }>["cursor"],
+  ) =>
+    setMailPageSelection(
+      browse.candidateId ? { candidateId: browse.candidateId, cursor } : undefined,
+    );
+  const [selectedMail, setSelectedMail] = useState<string>();
+  type CandidatePage = Extract<RecruitingCrmDataOutput, { operation: "candidates" }>;
+  type MailPage = Extract<RecruitingCrmDataOutput, { operation: "mail" }>;
+  const target = groupId ? { groupId } : { botId: botId! };
+  const input = {
+    ...target,
+    operation: "candidates" as const,
+    ...browse.selection,
+    query,
+    limit: 30,
+    offset,
+  };
+  const key = JSON.stringify([readCacheScope, input, refreshSignal, refresh]);
+  const cacheKey = readCacheScope ? `${readCacheScope}:crm:${JSON.stringify(input)}` : undefined;
+  const [read, setRead] = useState<{
+    key: string;
+    data?: CandidatePage;
+    failed?: boolean;
+    loading?: boolean;
+  }>();
+  useEffect(() => {
+    let cancelled = false;
+    const epoch = readCache?.epoch;
+    setRead({
+      key,
+      loading: true,
+      data: cacheKey ? (readCache?.entries.get(cacheKey) as CandidatePage | undefined) : undefined,
+    });
+    void rpc.recruiting
+      .crmData(input)
+      .then((value) => {
+        if (cancelled || (readCache && epoch !== readCache.epoch)) return;
+        if (
+          value.operation !== "candidates" ||
+          value.source.serverId !== browse.selection.serverId ||
+          value.source.serverRevision !== browse.selection.serverRevision ||
+          value.source.organizationId !== browse.selection.organizationId ||
+          (browse.selection.crmRoleId &&
+            value.selectedRole?.crmRoleId !== browse.selection.crmRoleId)
+        )
+          throw new Error("CRM scope changed");
+        rememberRecruitingRead(readCache, cacheKey, value, epoch);
+        setRead({ key, data: value });
+      })
+      .catch((error) => {
+        if (cancelled) return;
+        if (
+          error instanceof ORPCError &&
+          ["UNAUTHORIZED", "FORBIDDEN", "NOT_FOUND"].includes(error.code)
+        )
+          clearRecruitingReads(readCache, readCacheScope);
+        setRead({ key, failed: true });
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [key, cacheKey, readCache, readCacheScope]);
+  const page = read?.key === key ? read.data : undefined;
+  const mailInput = {
+    ...target,
+    operation: "mail" as const,
+    serverId: browse.selection.serverId,
+    serverRevision: browse.selection.serverRevision,
+    organizationId: browse.selection.organizationId,
+    candidateId: browse.candidateId ?? "",
+    limit: 30,
+    ...(mailCursor ? { cursor: mailCursor } : {}),
+  };
+  const mailKey = JSON.stringify([readCacheScope, mailInput, refreshSignal, refresh]);
+  const [mail, setMail] = useState<{ key: string; data?: MailPage; failed?: boolean }>();
+  useEffect(() => {
+    setSelectedMail(undefined);
+  }, [browse.candidateId]);
+  useEffect(() => {
+    if (browse.view !== "inbox" || !browse.candidateId) return;
+    let cancelled = false;
+    const epoch = readCache?.epoch;
+    const savedKey = readCacheScope
+      ? `${readCacheScope}:crm:${JSON.stringify(mailInput)}`
+      : undefined;
+    setMail({
+      key: mailKey,
+      data: savedKey ? (readCache?.entries.get(savedKey) as MailPage | undefined) : undefined,
+    });
+    void rpc.recruiting
+      .crmData(mailInput)
+      .then((value) => {
+        if (cancelled || (readCache && epoch !== readCache.epoch)) return;
+        if (
+          value.operation !== "mail" ||
+          value.source.serverId !== browse.selection.serverId ||
+          value.source.serverRevision !== browse.selection.serverRevision ||
+          value.source.organizationId !== browse.selection.organizationId ||
+          value.candidateId !== browse.candidateId
+        )
+          throw new Error("CRM scope changed");
+        rememberRecruitingRead(readCache, savedKey, value, epoch);
+        setMail({ key: mailKey, data: value });
+      })
+      .catch((error) => {
+        if (cancelled) return;
+        if (
+          error instanceof ORPCError &&
+          ["UNAUTHORIZED", "FORBIDDEN", "NOT_FOUND"].includes(error.code)
+        )
+          clearRecruitingReads(readCache, readCacheScope);
+        setMail({ key: mailKey, failed: true });
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [mailKey, browse.view, readCache, readCacheScope]);
+  const currentMail = mail?.key === mailKey ? mail : undefined;
+  const mailPage = currentMail?.data;
+  const people = page?.items ?? [];
+  const selectedPerson = people.find((person) => person.candidateId === browse.candidateId);
+  const supported = ["results", "contacts", "inbox", "brief"].includes(browse.view);
+  return (
+    <div className="hire-standard-view">
+      <header className="hire-section-header">
+        <span className="hire-eyebrow">
+          <Trans>Stored CRM history</Trans>
+        </span>
+        <h1>{page?.selectedRole?.roleLabel ?? t`CRM contacts`}</h1>
+        {page?.selectedRole ? <p>{page.selectedRole.clientLabel}</p> : null}
+      </header>
+      <div className="mb-5 flex flex-wrap gap-3">
+        <Button variant="outline" onClick={() => setRefresh((value) => value + 1)}>
+          <Trans>Refresh</Trans>
+        </Button>
+        {browse.onStartRecruiting ? (
+          <Button onClick={browse.onStartRecruiting}>
+            <Trans>Start recruiting</Trans>
+          </Button>
+        ) : null}
+      </div>
+      {read?.key !== key || read.loading ? (
+        <p role="status">
+          <Trans>Loading CRM records…</Trans>
+        </p>
+      ) : null}
+      {read?.key === key && read.failed ? (
+        <p role="alert">
+          <Trans>Could not load CRM records. Try refreshing.</Trans>
+        </p>
+      ) : null}
+      {page?.scope === "legacy_role_labels" ? (
+        <p className="mb-4 text-sm text-muted-foreground">
+          <Trans>
+            Historical records matched to this client and role. These are not new search results or
+            a verified shortlist.
+          </Trans>
+        </p>
+      ) : null}
+      {!supported ? (
+        <section className="hire-empty">
+          <h2>
+            {browse.view === "shortlist"
+              ? t`Shortlist`
+              : browse.view === "feedback"
+                ? t`Client feedback`
+                : browse.view === "sequence"
+                  ? t`Sequence`
+                  : browse.view === "interview"
+                    ? t`Interview`
+                    : t`Recruiting workflow`}
+          </h2>
+          <p>
+            <Trans>
+              This section has not loaded corresponding CRM records. Start a recruiting conversation
+              to continue this work.
+            </Trans>
+          </p>
+        </section>
+      ) : browse.view === "brief" ? (
+        <section className="space-y-4">
+          {page?.selectedRole?.summary ? <p>{page.selectedRole.summary}</p> : null}
+          {page?.selectedRole?.description ? (
+            <p className="whitespace-pre-wrap">{page.selectedRole.description}</p>
+          ) : null}
+          {page?.selectedRole?.jdText ? (
+            <p className="whitespace-pre-wrap">{page.selectedRole.jdText}</p>
+          ) : null}
+          {page?.selectedRole?.jdUrl && /^https?:\/\//i.test(page.selectedRole.jdUrl) ? (
+            <a
+              className="underline"
+              href={page.selectedRole.jdUrl}
+              target="_blank"
+              rel="noreferrer"
+            >
+              <Trans>Original job description</Trans>
+            </a>
+          ) : null}
+        </section>
+      ) : (
+        <>
+          <form
+            className="mb-4 flex gap-2"
+            onSubmit={(event) => {
+              event.preventDefault();
+              setOffset(0);
+              setQuery(queryDraft.trim());
+            }}
+          >
+            <Input
+              aria-label={t`Search CRM contacts`}
+              value={queryDraft}
+              onChange={(event) => setQueryDraft(event.target.value)}
+            />
+            <Button type="submit" variant="outline">
+              <Trans>Search</Trans>
+            </Button>
+          </form>
+          {page ? (
+            <p className="mb-3 text-sm">
+              <Plural value={page.total} _1="# contact" other="# contacts" />
+            </p>
+          ) : null}
+          <div className="hire-table-wrap overflow-x-auto">
+            <table className="hire-table w-full text-left text-sm">
+              <thead>
+                <tr>
+                  {[
+                    t`Candidate`,
+                    t`Current role`,
+                    t`Email`,
+                    t`Phone`,
+                    t`Stage`,
+                    t`Contact status`,
+                    t`Outreach status`,
+                    t`Messages`,
+                  ].map((label) => (
+                    <th key={label} scope="col">
+                      {label}
+                    </th>
+                  ))}
+                </tr>
+              </thead>
+              <tbody>
+                {people.map((person) => (
+                  <tr key={person.candidateId}>
+                    <th scope="row">
+                      {person.name}
+                      {person.linkedinUrl && /^https?:\/\//i.test(person.linkedinUrl) ? (
+                        <a
+                          className="block text-xs underline"
+                          href={person.linkedinUrl}
+                          target="_blank"
+                          rel="noreferrer"
+                        >
+                          <Trans>LinkedIn</Trans>
+                        </a>
+                      ) : null}
+                    </th>
+                    <td>
+                      {person.title ?? "—"}
+                      {person.location ? <small className="block">{person.location}</small> : null}
+                    </td>
+                    <td>{person.email ?? "—"}</td>
+                    <td>{person.phone ?? "—"}</td>
+                    <td>{person.stage ?? "—"}</td>
+                    <td>{person.contactStatus || "—"}</td>
+                    <td>{person.outreachStatus || "—"}</td>
+                    <td>
+                      <Button
+                        variant="link"
+                        onClick={() => browse.onSelectCandidate(person.candidateId)}
+                      >
+                        <Trans>View messages</Trans>
+                      </Button>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+          {page && !people.length ? (
+            <p>
+              <Trans>No CRM records matched this search.</Trans>
+            </p>
+          ) : null}
+          <div className="my-4 flex gap-2">
+            {offset > 0 ? (
+              <Button variant="outline" onClick={() => setOffset(Math.max(0, offset - 30))}>
+                <Trans>Previous</Trans>
+              </Button>
+            ) : null}
+            {page?.nextOffset !== null && page?.nextOffset !== undefined ? (
+              <Button variant="outline" onClick={() => setOffset(page.nextOffset!)}>
+                <Trans>Next</Trans>
+              </Button>
+            ) : null}
+          </div>
+          {browse.view === "inbox" ? (
+            <section>
+              <h2 className="mb-3 font-semibold">
+                {selectedPerson?.name ?? t`Candidate messages`}
+              </h2>
+              {!browse.candidateId ? (
+                <p>
+                  <Trans>Select a contact to read their stored messages.</Trans>
+                </p>
+              ) : !currentMail || (!currentMail.data && !currentMail.failed) ? (
+                <p role="status">
+                  <Trans>Loading stored messages…</Trans>
+                </p>
+              ) : currentMail.failed ? (
+                <p role="alert">
+                  <Trans>Could not load stored messages. Try refreshing.</Trans>
+                </p>
+              ) : mailPage ? (
+                <>
+                  {mailPage.items.length ? (
+                    <CorrespondenceEmails
+                      emails={mailPage.items.map((item) => ({
+                        id: item.id,
+                        sender: item.sender,
+                        recipients: item.recipients,
+                        subject: item.subject ?? "",
+                        body: item.body ?? "",
+                        snippet: item.partial,
+                        date: item.date,
+                        url: null,
+                      }))}
+                      selectedId={selectedMail}
+                      onSelect={setSelectedMail}
+                    />
+                  ) : (
+                    <p>
+                      <Trans>No stored messages were returned for this contact.</Trans>
+                    </p>
+                  )}
+                  {mailCursor ? (
+                    <Button variant="outline" onClick={() => setMailCursor(undefined)}>
+                      <Trans>Latest messages</Trans>
+                    </Button>
+                  ) : null}
+                  {mailPage.nextCursor ? (
+                    <Button variant="outline" onClick={() => setMailCursor(mailPage.nextCursor!)}>
+                      <Trans>Older messages</Trans>
+                    </Button>
+                  ) : null}
+                </>
+              ) : null}
+            </section>
+          ) : null}
+        </>
+      )}
+    </div>
+  );
+}
+
+function NativeRecruitingPanel(props: Props) {
   const userId = authClient.useSession().data?.user.id;
   return (
     <RecruitingWorkspace

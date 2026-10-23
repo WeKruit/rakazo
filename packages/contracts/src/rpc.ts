@@ -131,6 +131,8 @@ import {
   RecruitingCandidateReportSchema,
   RecruitingCorrespondenceReferenceSchema,
   RecruitingCorrespondenceSchema,
+  RecruitingCrmDataInputSchema,
+  RecruitingCrmDataOutputSchema,
   RecruitingId,
   RecruitingResearchActionSchema,
   RecruitingResearchSavedObservationSchema,
@@ -574,6 +576,9 @@ export const appContract = {
     heartbeat: oc.input(botId).output(z.object({ ok: z.literal(true) })),
   },
   recruiting: {
+    crmData: oc
+      .input(z.intersection(threadTarget, RecruitingCrmDataInputSchema))
+      .output(RecruitingCrmDataOutputSchema),
     correspondence: oc
       .input(threadTarget.safeExtend({ view: z.enum(["inbox", "interview", "contacts"]) }))
       .output(RecruitingCorrespondenceSchema),

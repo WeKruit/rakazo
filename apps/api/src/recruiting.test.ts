@@ -1,6 +1,6 @@
 import { createHash } from "node:crypto";
 import { createRouterClient } from "@orpc/server";
-import type { ArtifactStore } from "@rakazo/adapter-kit";
+import type { AdapterContext, ArtifactStore, ConnectorCall } from "@rakazo/adapter-kit";
 import { SecretStoreUnavailableError } from "@rakazo/adapter-kit";
 import { readInstantlyEmail } from "@rakazo/adapters";
 import type { Actor } from "@rakazo/contracts";
@@ -3559,5 +3559,388 @@ describe("retained candidate report API", () => {
         sourceRefId: "source",
       }),
     ).rejects.toMatchObject({ code: "NOT_FOUND" });
+  });
+});
+
+describe("live CRM browser reads", () => {
+  const org = "10000000-0000-4000-8000-000000000001";
+  const roleId = "20000000-0000-4000-8000-000000000002";
+  const clientId = "30000000-0000-4000-8000-000000000003";
+  const candidateId = "40000000-0000-4000-8000-000000000004";
+  const target = {
+    kind: "group" as const,
+    groupId: "group",
+    threadId: "thread",
+    groupName: "Work",
+    members: [],
+    memberBotIds: ["coordinator"],
+  };
+  function browserFixture(secretId: string | null = null) {
+    const server = {
+      id: "crm",
+      revision: 3,
+      name: "CRM",
+      endpoint: "https://crm.example.test/mcp",
+      transport: "streamable_http",
+      enabled: true,
+      secretId,
+      userId: actor.userId,
+      spaceId: actor.spaceId,
+    };
+    const assignment = {
+      allowAllTools: false,
+      allowedTools: [
+        "list_crm_memberships",
+        "list_crm_roles",
+        "get_crm_role",
+        "list_crm_candidates",
+        "list_crm_candidate_correspondence",
+      ],
+    };
+    const results: Record<string, unknown> = {
+      list_crm_memberships: [
+        { organization_id: org, role: "recruiter", organizations: { name: "Example" } },
+      ],
+      list_crm_roles: [
+        {
+          client_id: clientId,
+          client_label: "Actual client",
+          roles: [{ role_spec_id: roleId, role_label: "Actual role", summary: "Saved summary" }],
+        },
+      ],
+      get_crm_role: {
+        role_spec_id: roleId,
+        client_id: clientId,
+        client_label: "Actual client",
+        role_label: "Actual role",
+        summary: "Saved summary",
+        description: null,
+        jd_text: "Saved full JD",
+        jd_url: null,
+      },
+      list_crm_candidates: {
+        total: 2,
+        rows: [
+          {
+            candidate_id: candidateId,
+            full_name: "Stored person",
+            email: null,
+            phone: null,
+            linkedin_url: null,
+            location: null,
+            headline: null,
+            stage: null,
+            contact_status: "no contact found",
+            outreach_status: "not contacted",
+            role_spec_id: null,
+            client_label: "Actual client",
+            role_label: "Actual role",
+          },
+        ],
+      },
+      list_crm_candidate_correspondence: {
+        organization_id: org,
+        candidate_id: candidateId,
+        pagination: "offset",
+        next_cursor: null,
+        messages: [
+          {
+            id: "original-mail",
+            organization_id: org,
+            candidate_id: candidateId,
+            lead_email: null,
+            thread_id: "opaque-original-thread",
+            direction: "received",
+            timestamp_email: "2026-10-22T00:00:00Z",
+            campaign_id: null,
+            from_address: null,
+            to_address: null,
+            subject: null,
+            body_text: "Stored actual body",
+          },
+        ],
+      },
+    };
+    const execute = vi.fn(async function* (call: ConnectorCall, _context: AdapterContext) {
+      yield {
+        type: "result" as const,
+        data: { structuredContent: { data: results[call.route!.toolName] } },
+      };
+    });
+    const mockPrisma = {
+      $queryRaw: vi.fn(async () => [actor]),
+      mcpServer: {
+        findMany: vi.fn(async () => [{ ...server, assignments: [assignment] }]),
+        findFirst: vi.fn(async () => server),
+      },
+      botMcpServer: { findFirst: vi.fn(async () => assignment) },
+    };
+    const reauthorize = vi.fn(async () => target);
+    const deps = {
+      prisma: mockPrisma as unknown as PrismaClient,
+      connectors: { execute },
+      firstPartyMcpUrl: server.endpoint,
+      reauthorize,
+      signal: new AbortController().signal,
+    };
+    return { server, assignment, results, execute, deps, reauthorize, mockPrisma };
+  }
+  it("reads canonical role metadata and the unchanged legacy candidate filter without a run or copied records", async () => {
+    const f = browserFixture();
+    const response = await api.getRecruitingCrmData(f.deps, actor, target, {
+      operation: "candidates",
+      serverId: "crm",
+      serverRevision: 3,
+      organizationId: org,
+      crmRoleId: roleId,
+      limit: 1,
+      offset: 0,
+    });
+    expect(response).toMatchObject({
+      operation: "candidates",
+      scope: "legacy_role_labels",
+      total: 2,
+      nextOffset: 1,
+      selectedRole: { crmRoleId: roleId, jdText: "Saved full JD" },
+      items: [{ candidateId, roleSpecId: null, legacyRoleLabel: "Actual role" }],
+    });
+    const [call, context] = f.execute.mock.calls.find(
+      ([call]) => call.route?.toolName === "list_crm_candidates",
+    )!;
+    expect(call.args).toEqual({
+      p_org: org,
+      p_not_reviewed: false,
+      p_limit: 1,
+      p_offset: 0,
+      p_client: "Actual client",
+      p_role: "Actual role",
+    });
+    expect(context).toMatchObject({
+      userId: actor.userId,
+      spaceId: actor.spaceId,
+      botId: "coordinator",
+    });
+    expect(context).not.toHaveProperty("runId");
+    expect(
+      f.execute.mock.calls.every(
+        ([call]) => !/import|bind|send|reply|update/.test(call.route!.toolName),
+      ),
+    ).toBe(true);
+  });
+  it("discovers only assigned first-party sources and returns actual stored correspondence identities", async () => {
+    const f = browserFixture();
+    expect(
+      await api.getRecruitingCrmData(f.deps, actor, target, { operation: "memberships" }),
+    ).toMatchObject({
+      sources: [
+        {
+          serverId: "crm",
+          status: "ready",
+          memberships: [{ organizationId: org, name: "Example" }],
+        },
+      ],
+    });
+    expect(
+      await api.getRecruitingCrmData(f.deps, actor, target, {
+        operation: "mail",
+        serverId: "crm",
+        serverRevision: 3,
+        organizationId: org,
+        candidateId,
+      }),
+    ).toMatchObject({
+      scope: "stored_candidate_correspondence",
+      nextCursor: null,
+      items: [
+        {
+          providerMessageId: "original-mail",
+          threadId: "opaque-original-thread",
+          body: "Stored actual body",
+          sender: null,
+          recipients: [],
+          partial: false,
+        },
+      ],
+    });
+  });
+  it("uses the existing current-user personal OAuth source for every CRM browse operation", async () => {
+    const f = browserFixture("existing-personal-oauth-reference");
+    const membership = await api.getRecruitingCrmData(f.deps, actor, target, {
+      operation: "memberships",
+    });
+    expect(membership).toMatchObject({
+      sources: [{ serverId: "crm", serverRevision: 3, status: "ready" }],
+    });
+    const pinned = { serverId: "crm", serverRevision: 3, organizationId: org };
+    await expect(
+      api.getRecruitingCrmData(f.deps, actor, target, { operation: "roles", ...pinned }),
+    ).resolves.toMatchObject({ operation: "roles", items: [{ crmRoleId: roleId }] });
+    await expect(
+      api.getRecruitingCrmData(f.deps, actor, target, {
+        operation: "candidates",
+        ...pinned,
+        crmRoleId: roleId,
+      }),
+    ).resolves.toMatchObject({ operation: "candidates", items: [{ candidateId }] });
+    await expect(
+      api.getRecruitingCrmData(f.deps, actor, target, {
+        operation: "mail",
+        ...pinned,
+        candidateId,
+      }),
+    ).resolves.toMatchObject({
+      operation: "mail",
+      items: [{ providerMessageId: "original-mail" }],
+    });
+    expect(f.mockPrisma.mcpServer.findMany).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: {
+          userId: actor.userId,
+          spaceId: actor.spaceId,
+          endpoint: f.server.endpoint,
+          transport: "streamable_http",
+          enabled: true,
+        },
+      }),
+    );
+    expect(JSON.stringify(membership)).not.toContain("existing-personal-oauth-reference");
+  });
+  it.each([undefined, roleId])(
+    "explicitly includes reviewed candidates on later pages with role %s",
+    async (crmRoleId) => {
+      const f = browserFixture();
+      await api.getRecruitingCrmData(f.deps, actor, target, {
+        operation: "candidates",
+        serverId: "crm",
+        serverRevision: 3,
+        organizationId: org,
+        crmRoleId,
+        offset: 50,
+        limit: 50,
+      });
+      const [call] = f.execute.mock.calls.find(
+        ([call]) => call.route?.toolName === "list_crm_candidates",
+      )!;
+      expect(call.args).toMatchObject({ p_not_reviewed: false, p_offset: 50, p_limit: 50 });
+    },
+  );
+  it("reports a failed source honestly and does not expose provider error details", async () => {
+    const f = browserFixture();
+    f.execute.mockImplementation(async function* () {
+      yield {
+        type: "result",
+        data: { isError: true, structuredContent: { data: "private-provider-error" } },
+      };
+    });
+    const result = await api.getRecruitingCrmData(f.deps, actor, target, {
+      operation: "memberships",
+    });
+    expect(result).toMatchObject({ sources: [{ status: "unavailable", memberships: [] }] });
+    expect(JSON.stringify(result)).not.toContain("private-provider-error");
+  });
+  it.each([
+    "revision",
+    "credential",
+    "grant",
+    "actor",
+    "target",
+    "provider",
+    "cursor",
+    "ambiguous",
+    "blank-label",
+    "foreign-label",
+  ])("fails closed on a changed or invalid %s boundary", async (boundary) => {
+    const f = browserFixture(
+      boundary === "credential" ? "existing-personal-oauth-reference" : null,
+    );
+    const original = f.execute.getMockImplementation()!;
+    f.execute.mockImplementation(async function* (call, context) {
+      yield* original(call, context);
+      if (call.route?.toolName !== "list_crm_candidates") return;
+      if (boundary === "revision") f.server.revision++;
+      if (boundary === "credential") f.server.secretId = "replaced-personal-oauth-reference";
+      if (boundary === "grant") f.assignment.allowedTools = [];
+      if (boundary === "actor") f.mockPrisma.$queryRaw.mockResolvedValue([]);
+      if (boundary === "target")
+        f.reauthorize.mockResolvedValue({ ...target, memberBotIds: ["other"] });
+    });
+    if (boundary === "blank-label") {
+      f.results.list_crm_roles = [
+        {
+          client_id: clientId,
+          client_label: "Actual client",
+          roles: [{ role_spec_id: roleId, role_label: "   ", summary: null }],
+        },
+      ];
+      f.results.get_crm_role = {
+        role_spec_id: roleId,
+        client_id: clientId,
+        client_label: "Actual client",
+        role_label: "   ",
+        summary: null,
+        description: null,
+        jd_text: null,
+        jd_url: null,
+      };
+    }
+    if (boundary === "foreign-label")
+      f.results.list_crm_candidates = {
+        total: 1,
+        rows: [
+          {
+            candidate_id: candidateId,
+            full_name: "Foreign role",
+            email: null,
+            phone: null,
+            linkedin_url: null,
+            stage: null,
+            contact_status: "unknown",
+            outreach_status: "unknown",
+            role_spec_id: null,
+            client_label: "Other client",
+            role_label: "Other role",
+          },
+        ],
+      };
+    if (boundary === "provider") f.results.list_crm_candidates = null;
+    if (boundary === "ambiguous")
+      f.results.list_crm_roles = [
+        {
+          client_id: clientId,
+          client_label: "Actual client",
+          roles: [
+            { role_spec_id: roleId, role_label: "Actual role", summary: null },
+            { role_spec_id: candidateId, role_label: "Actual role", summary: null },
+          ],
+        },
+      ];
+    await expect(
+      api.getRecruitingCrmData(
+        f.deps,
+        actor,
+        target,
+        boundary === "cursor"
+          ? {
+              operation: "mail",
+              serverId: "crm",
+              serverRevision: 3,
+              organizationId: org,
+              candidateId,
+              cursor: {
+                p_org: candidateId,
+                p_candidate: candidateId,
+                linked_offset: 0,
+                unlinked_offset: 0,
+              },
+            }
+          : {
+              operation: "candidates",
+              serverId: "crm",
+              serverRevision: 3,
+              organizationId: org,
+              crmRoleId: roleId,
+            },
+      ),
+    ).rejects.toThrow();
   });
 });

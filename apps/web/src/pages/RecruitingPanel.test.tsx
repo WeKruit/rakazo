@@ -29,6 +29,7 @@ const api = vi.hoisted(() => ({
   session: { data: { user: { id: "actor-1" } } },
   getWorkspace: vi.fn(),
   correspondence: vi.fn(),
+  crmData: vi.fn(),
   readSource: vi.fn(),
   listAssessments: vi.fn(),
   listCandidates: vi.fn(),
@@ -88,6 +89,226 @@ vi.mock("../components/ArtifactFileCard", async (importOriginal) => ({
 }));
 
 import { RecruitingPanel } from "./RecruitingPanel";
+
+it("browses scoped CRM contacts and stored mail without inventing a native recruiting workspace", async () => {
+  const source = {
+    serverId: "crm-source",
+    serverRevision: 2,
+    organizationId: "org-1",
+    name: "CRM",
+  };
+  const selection = { ...source, crmRoleId: "crm-role" };
+  api.crmData.mockImplementation(async (input) =>
+    input.operation === "mail"
+      ? {
+          operation: "mail",
+          source,
+          checkedAt: "2026-10-22T00:00:00Z",
+          scope: "stored_candidate_correspondence",
+          candidateId: input.candidateId,
+          items: [
+            {
+              id: "stored-mail",
+              providerMessageId: "provider-mail",
+              threadId: "original-thread",
+              direction: "received",
+              sender: "person@example.test",
+              recipients: ["team@example.test"],
+              subject: "Original reply",
+              body: "Full stored reply\nSecond line",
+              date: "2026-10-21T00:00:00Z",
+              partial: false,
+            },
+          ],
+          nextCursor:
+            input.candidateId === "crm-person" && !input.cursor
+              ? { p_org: "org-1", p_candidate: "crm-person", linked_offset: 30, unlinked_offset: 0 }
+              : null,
+        }
+      : {
+          operation: "candidates",
+          source,
+          checkedAt: "2026-10-22T00:00:00Z",
+          scope: "legacy_role_labels",
+          selectedRole: {
+            crmRoleId: "crm-role",
+            clientId: "client-1",
+            clientLabel: "Example client",
+            roleLabel: "Engineering",
+            summary: "Stored role",
+            jdText: "Original job description",
+          },
+          items: [
+            {
+              candidateId: "crm-person",
+              name: "Existing CRM person",
+              email: "person@example.test",
+              phone: null,
+              linkedinUrl: "https://www.linkedin.com/in/example",
+              location: "California",
+              title: "Engineer",
+              stage: "Contacted",
+              contactStatus: "available",
+              outreachStatus: "replied",
+              roleSpecId: null,
+              legacyClientLabel: "Example client",
+              legacyRoleLabel: "Engineering",
+            },
+          ],
+          total: 1,
+          offset: 0,
+          nextOffset: null,
+        },
+  );
+  const onSelectCandidate = vi.fn();
+  const crmBrowse = { selection, view: "contacts" as const, onSelectCandidate };
+  const view = await mounted("thread-1", undefined, false, undefined, {
+    groupId: "group-1",
+    crmBrowse,
+  });
+  expect(view.container.textContent).toContain("Existing CRM person");
+  expect(view.container.textContent).toContain("person@example.test");
+  expect(api.getWorkspace).not.toHaveBeenCalled();
+  expect(api.listCandidates).not.toHaveBeenCalled();
+  expect(view.container.querySelector('[role="checkbox"]')).toBeNull();
+  await view.click("View messages");
+  expect(onSelectCandidate).toHaveBeenCalledWith("crm-person");
+  await view.render("thread-1", 0, false, undefined, {
+    groupId: "group-1",
+    crmBrowse: { ...crmBrowse, view: "inbox", candidateId: "crm-person" },
+  });
+  expect(view.container.textContent).toContain("Full stored reply");
+  expect(view.container.textContent).not.toContain("provider-mail");
+  expect(view.container.textContent).not.toContain("original-thread");
+  await view.click("Older messages");
+  await view.render("thread-1", 0, false, undefined, {
+    groupId: "group-1",
+    crmBrowse: { ...crmBrowse, view: "inbox", candidateId: "another-person" },
+  });
+  expect(
+    api.crmData.mock.calls
+      .filter(([input]) => input.operation === "mail" && input.candidateId === "another-person")
+      .every(([input]) => input.cursor === undefined),
+  ).toBe(true);
+  expect(api.setCandidateShortlist).not.toHaveBeenCalled();
+});
+
+it("discards late CRM role reads and rejects a mismatched returned organization", async () => {
+  const selection = {
+    serverId: "crm-source",
+    serverRevision: 2,
+    organizationId: "org-1",
+    crmRoleId: "first-role",
+  };
+  const result = (roleId: string, name: string, organizationId = "org-1") => ({
+    operation: "candidates",
+    source: { serverId: "crm-source", serverRevision: 2, organizationId, name: "CRM" },
+    checkedAt: "2026-10-22T00:00:00Z",
+    scope: "legacy_role_labels",
+    selectedRole: {
+      crmRoleId: roleId,
+      clientId: "client",
+      clientLabel: "Client",
+      roleLabel: roleId,
+      summary: null,
+    },
+    items: [
+      {
+        candidateId: name,
+        name,
+        email: null,
+        phone: null,
+        linkedinUrl: null,
+        location: null,
+        title: null,
+        stage: null,
+        contactStatus: "",
+        outreachStatus: "",
+        roleSpecId: null,
+        legacyClientLabel: "Client",
+        legacyRoleLabel: roleId,
+      },
+    ],
+    total: 1,
+    offset: 0,
+    nextOffset: null,
+  });
+  let finish!: (value: ReturnType<typeof result>) => void;
+  api.crmData
+    .mockReturnValueOnce(
+      new Promise((resolve) => {
+        finish = resolve;
+      }),
+    )
+    .mockResolvedValue(result("second-role", "Current person"));
+  const options = {
+    groupId: "group-1",
+    crmBrowse: { selection, view: "contacts" as const, onSelectCandidate: vi.fn() },
+  };
+  const view = await mounted("thread-1", undefined, false, undefined, options);
+  await view.render("thread-1", 0, false, undefined, {
+    ...options,
+    crmBrowse: { ...options.crmBrowse, selection: { ...selection, crmRoleId: "second-role" } },
+  });
+  await act(async () => finish(result("first-role", "Late private person")));
+  expect(view.container.textContent).toContain("Current person");
+  expect(view.container.textContent).not.toContain("Late private person");
+  api.crmData.mockResolvedValue(result("third-role", "Foreign organization person", "other-org"));
+  await view.render("thread-1", 0, false, undefined, {
+    ...options,
+    crmBrowse: { ...options.crmBrowse, selection: { ...selection, crmRoleId: "third-role" } },
+  });
+  expect(view.container.textContent).toContain("Could not load CRM records");
+  expect(view.container.textContent).not.toContain("Foreign organization person");
+});
+
+it("restarts an invalidated pending CRM read using the existing refresh signal", async () => {
+  const selection = {
+    serverId: "crm-source",
+    serverRevision: 2,
+    organizationId: "org-1",
+    crmRoleId: "crm-role",
+  };
+  const page = {
+    operation: "candidates",
+    source: { ...selection, name: "CRM" },
+    checkedAt: "2026-10-22T00:00:00Z",
+    scope: "legacy_role_labels",
+    selectedRole: {
+      crmRoleId: "crm-role",
+      clientId: "client",
+      clientLabel: "Client",
+      roleLabel: "Role",
+      summary: null,
+    },
+    items: [],
+    total: 0,
+    offset: 0,
+    nextOffset: null,
+  };
+  let finish!: (value: unknown) => void;
+  api.crmData
+    .mockReturnValueOnce(
+      new Promise((resolve) => {
+        finish = resolve;
+      }),
+    )
+    .mockResolvedValue(page);
+  const cache = { epoch: 0, entries: new Map<string, unknown>() };
+  const options = {
+    groupId: "group-1",
+    readCache: cache,
+    readCacheScope: "actor:space:thread",
+    crmBrowse: { selection, view: "contacts" as const, onSelectCandidate: vi.fn() },
+  };
+  const view = await mounted("thread-1", undefined, false, undefined, options);
+  cache.epoch++;
+  await view.render("thread-1", 1, false, undefined, options);
+  expect(api.crmData).toHaveBeenCalledTimes(2);
+  await act(async () => finish(page));
+  expect(view.container.textContent).not.toContain("Loading CRM records");
+  expect(view.container.textContent).toContain("No CRM records matched");
+});
 
 function rawResultsFixture(actionId = "raw-action", name = "Synthetic raw candidate") {
   const rows = [{ name, label: "Strong Match", _sources: { s1: "https://example.test/profile" } }];
@@ -512,6 +733,7 @@ async function mounted(
     | "groupId"
     | "readCache"
     | "readCacheScope"
+    | "crmBrowse"
   > = {},
 ) {
   const container = document.createElement("div");
