@@ -71,7 +71,6 @@ export function useRoleCandidates(props: RecruitingTabProps & { autumn?: AutumnC
     fit: (candidate) => roleCandidateFit(candidate.latestSource?.report?.fields),
     sortByScore: autumn?.sortByScore ?? true,
   });
-  const joined = rows.filter((row) => row.autumn && row.crm).length;
   const crmTotal = crmPages.data?.total ?? null;
   const crmRead = {
     loading: crm.status === "loading" || crmPages.loading,
@@ -79,16 +78,31 @@ export function useRoleCandidates(props: RecruitingTabProps & { autumn?: AutumnC
     retry: () => setReload((value) => value + 1),
   };
   const autumnMore = Boolean(autumn?.hasMore);
+  const includeCrm = (autumn?.includeCrm ?? true) && crm.status !== "unbound";
+  const autumnReady = !autumn || (!autumn.loading && !autumn.failed && autumn.total !== null);
+  const crmReady = !includeCrm || (crm.status === "ready" && !!crmPages.data && !crmRead.failed);
+  // Separate source totals cannot establish the union: unseen pages may contain overlaps.
+  // Keep the source total for a successful single-source read, and count the merged rows
+  // only after both included sources have been exhausted.
+  const total =
+    !autumnReady || !crmReady
+      ? null
+      : !includeCrm
+        ? (autumn?.total ?? null)
+        : !autumn
+          ? crmTotal
+          : !autumnMore && !crmPages.hasMore
+            ? rows.length
+            : null;
   return {
     crm,
     rows,
     autumn: autumn && { loading: autumn.loading, failed: autumn.failed, retry: autumn.retry },
     crmRead,
-    /** Known people across both sources; a person in both is counted once among loaded rows. */
-    total:
-      autumn?.total == null && crmTotal === null
-        ? null
-        : (autumn?.total ?? 0) + (crmTotal ?? 0) - joined,
+    /** Exact displayed-record total only when source and deduplication coverage permit it. */
+    total,
+    /** Already merged visible records; not an estimate of the complete population. */
+    loadedCount: rows.length,
     more: {
       hasMore: autumnMore || crmPages.hasMore,
       loadMore: autumnMore ? autumn!.loadMore : crmPages.loadMore,
