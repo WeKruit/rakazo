@@ -111,12 +111,17 @@ export function SchedulingPlanHistory({
   );
   const plans =
     read.data?.plans.filter((plan) => plan.roleId === roleId && plan.threadId === threadId) ?? [];
-  if (!read.failed && !plans.length) return null;
+  if (!read.failed && !plans.length && !read.data?.partial) return null;
   return (
     <section aria-label={t`Saved interview plans`} className="mt-6 space-y-3">
       <h3 className="font-medium">
         <Trans>Saved interview plans</Trans>
       </h3>
+      {read.data?.partial ? (
+        <p className="text-xs text-muted-foreground">
+          <Trans>Only recent saved records are shown. Earlier plans may be missing.</Trans>
+        </p>
+      ) : null}
       {read.failed ? (
         <p role="alert">
           <Trans>Could not load interview plans.</Trans>

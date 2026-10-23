@@ -261,3 +261,11 @@ it.each([
     expect(host.textContent).toContain(originalEmail.subject);
   },
 );
+
+it("does not hide incomplete history when the recent records contain no plan", async () => {
+  list.mockResolvedValue({ plans: [], slots: [], partial: true });
+  await act(async () => {
+    root.render(<SchedulingPlanHistory threadId="thread-1" roleId="role-1" />);
+  });
+  expect(host.textContent).toContain("Earlier plans may be missing");
+});
