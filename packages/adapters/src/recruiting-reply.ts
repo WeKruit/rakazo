@@ -87,6 +87,7 @@ const ThreadHistory = z.strictObject({
   anchor: z.unknown(),
   page: z.unknown(),
   query: z.record(z.string(), z.string()),
+  replyFollowUps: z.unknown().optional(),
   coverage: z.strictObject({
     scope: z.literal("exact_thread"),
     anchorId: z.uuid(),

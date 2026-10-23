@@ -449,6 +449,19 @@ describe("fresh CRM and Instantly reply preflight", () => {
     expect(Object.isFrozen(result.reads[0]?.result)).toBe(true);
   });
 
+  it("accepts a history page that reports the replied campaign's stop_on_reply", async () => {
+    const page = historyEnvelope({ items: [anchor] }, { limit: 100 }) as {
+      structuredContent: Record<string, unknown>;
+    };
+    page.structuredContent.replyFollowUps = [
+      { campaignId: "campaign", stopOnReply: false, warning: "stop_on_reply is off" },
+    ];
+    expect(await fixture([page.structuredContent]).run()).toMatchObject({
+      status: "clear",
+      reasons: [],
+    });
+  });
+
   it("walks the exact cursor through an empty tail without unread or campaign filters", async () => {
     const f = fixture([{ items: [anchor], next_starting_after: "next" }, { items: [] }]);
     const result = await f.run();

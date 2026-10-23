@@ -65,4 +65,10 @@ describe("maintained recruiting defaults", () => {
     expect(sourcer.instructions).toContain("Never loop on status");
     expect(sourcer.instructions).toContain("Missing resume is unknown, never a rejection");
   });
+
+  it("ends automated follow-ups on a candidate reply", () => {
+    const outreach = RECRUITING_DEFAULT_BOTS.find((bot) => bot.name === "Outreach")!;
+    expect(outreach.instructions).toContain("A candidate reply ends automated follow-ups");
+    expect(outreach.instructions).toContain("the next step is a human-reviewed reply");
+  });
 });
