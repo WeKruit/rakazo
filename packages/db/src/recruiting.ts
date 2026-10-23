@@ -488,6 +488,30 @@ async function roleSnapshot(
   return { role: RecruitingRoleSchema.parse(publicRole), revision };
 }
 
+/**
+ * The sidebar names a role by its chat group, which the web client creates with a placeholder
+ * ("New role"). Keep the group named after the role: always on creation, and on a title change
+ * only while the group still carries the previous title (a hand-renamed group is left alone).
+ */
+async function syncRoleGroupName(
+  tx: Tx,
+  actor: Actor,
+  thread: { groupId: string | null },
+  title: string,
+  previousTitle?: string,
+) {
+  if (!thread.groupId || !title.trim() || title === previousTitle) return;
+  await tx.chatGroup.updateMany({
+    where: {
+      id: thread.groupId,
+      spaceId: actor.spaceId,
+      userId: actor.userId,
+      ...(previousTitle === undefined ? {} : { name: previousTitle }),
+    },
+    data: { name: title },
+  });
+}
+
 export async function createRecruitingRole(
   prisma: PrismaClient,
   actor: Actor,
@@ -527,6 +551,7 @@ async function createRoleInTransaction(
     where: { id: input.sourceThreadId },
     data: { activeRecruitingRoleId: role.id },
   });
+  await syncRoleGroupName(tx, actor, thread, input.title);
   await recordRecruitingChange(tx, actor, thread, role.id);
   return roleSnapshot(tx, actor, role);
 }
@@ -797,12 +822,9 @@ async function reviseRoleInTransaction(
     data: { title: input.title, revision: revision.revision, currentRevisionId: revision.id },
   });
   if (changed.count !== 1) throw new RecruitingConflictError();
-  await recordRecruitingChange(
-    tx,
-    actor,
-    authorizedThread ?? (await requireThread(tx, actor, role.sourceThreadId)),
-    role.id,
-  );
+  const sourceThread = authorizedThread ?? (await requireThread(tx, actor, role.sourceThreadId));
+  await syncRoleGroupName(tx, actor, sourceThread, input.title, role.title);
+  await recordRecruitingChange(tx, actor, sourceThread, role.id);
   return roleSnapshot(
     tx,
     actor,
