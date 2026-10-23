@@ -65,7 +65,11 @@ export function SkillEvidence({
             {contexts.map((source) => (
               <div key={source.key} className="space-y-1 border-t pt-2">
                 <p className="flex flex-wrap items-center gap-2 text-xs text-muted-foreground">
-                  <span className="break-words">{source.label}</span>
+                  <span className="break-words">
+                    {source.label ||
+                      (source.criterionId ? <Trans>Criterion name unavailable</Trans> : null)}
+                  </span>
+                  {source.criterionId ? <span>{source.criterionId}</span> : null}
                   {source.kind === "listed" ? (
                     <Badge variant="outline">
                       <Trans>Listed skill</Trans>

@@ -98,3 +98,26 @@ Exact added English message keys for review. The controls need visible names for
 - 'Recorded send activity'
 - 'Send totals are not available from these records.'
 - 'Shortlist period'
+
+## Visual review follow-up
+
+Navigation arrows appear only when labels overflow. The mobile Inbox return control replaces stacked lists. Search names its loaded-record scope, and missing criterion/candidate/event associations are shown only when those source fields are absent. Calendar notices distinguish missing records from actual free time; source detail guidance is limited to the event rail.
+
+- 'Back to inbox'
+- 'Candidate conversations'
+- 'Candidate details unavailable'
+- 'Candidate interview status'
+- 'Candidate link'
+- 'Change the week or status to review saved records. Empty space does not confirm availability.'
+- 'Criterion name unavailable'
+- 'Email thread or message'
+- 'Last reply'
+- 'No loaded candidates match these filters.'
+- 'No saved events to show for this week and status.'
+- 'Not recorded in this source'
+- 'Saved calendar events'
+- 'Saved events'
+- 'Scroll navigation left'
+- 'Scroll navigation right'
+- 'Search loaded candidates'
+- 'Select an event to see its source details. Candidate links are not included in these calendar records.'

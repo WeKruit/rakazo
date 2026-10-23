@@ -288,7 +288,8 @@ it("shows every candidate's stored mail for the role by default in one read", as
     expect.objectContaining({ operation: "roleMail", crmRoleId: ROLE, organizationId: ORG }),
   );
   expect(crmData.mock.calls.some(([input]) => input.operation === "mail")).toBe(false);
-  expect(view.textContent).toContain("All candidates");
+  expect(view.querySelectorAll('ul[aria-label="Candidates"] > li')).toHaveLength(2);
+  expect(view.querySelector('section[aria-label="Emails"]')).toBeNull();
   expect(view.textContent).toContain("From Ada");
   expect(view.textContent).toContain("Ben body");
   expect(onSelectEmail).toHaveBeenLastCalledWith(
@@ -299,7 +300,7 @@ it("shows every candidate's stored mail for the role by default in one read", as
       email: expect.objectContaining({ subject: "From Ben" }),
     }),
   );
-  const ada = view.querySelector('[aria-label="From Ada"]') as HTMLButtonElement;
+  const ada = view.querySelector('button[aria-label="Ada"]') as HTMLButtonElement;
   await act(async () => ada.click());
   expect(view.textContent).toContain("Ada body");
   expect(onSelectEmail).toHaveBeenLastCalledWith(
@@ -353,12 +354,26 @@ it("reads full stored email bodies and exposes the selected email to chat", asyn
             scope: "stored_candidate_correspondence",
             outbox: [],
             candidateId: input.candidateId,
-            nativeCorrespondence: [],
+            nativeCorrespondence: [
+              {
+                status: "sent_recorded",
+                email: {
+                  id: "receipt-1",
+                  providerMessageId: "p1",
+                  sender: "recruiter@example.com",
+                  recipients: ["ada@example.com"],
+                  subject: "Staff role",
+                  body: "Would you like to talk?",
+                  date: "2026-10-20T10:00:00Z",
+                  snippet: false,
+                },
+              },
+            ],
             items: [
               {
                 id: "m1",
                 providerMessageId: "p1",
-                threadId: null,
+                threadId: "source-thread",
                 direction: "sent",
                 sender: "recruiter@example.com",
                 recipients: ["ada@example.com"],
@@ -370,7 +385,7 @@ it("reads full stored email bodies and exposes the selected email to chat", asyn
               {
                 id: "m2",
                 providerMessageId: "p2",
-                threadId: null,
+                threadId: "source-thread",
                 direction: "received",
                 sender: "ada@example.com",
                 recipients: ["recruiter@example.com"],
@@ -408,7 +423,13 @@ it("reads full stored email bodies and exposes the selected email to chat", asyn
   });
   expect(view.textContent).toContain("Would you like to talk?");
   expect(onSelectEmail).toHaveBeenLastCalledWith(
-    expect.objectContaining({ email: expect.objectContaining({ subject: "Staff role" }) }),
+    expect.objectContaining({
+      email: expect.objectContaining({
+        id: "native:receipt-1",
+        subject: "Staff role",
+        threadId: "source-thread",
+      }),
+    }),
   );
 });
 
@@ -417,7 +438,16 @@ it("keeps the role inbox conversation scoped to one candidate and drafts the exa
     input.operation === "candidates"
       ? candidatesPage
       : roleMailPage(true, [
-          stored("b-new", BEN, "Latest Ben message", "Ben current body", "2026-10-22T10:00:00Z"),
+          {
+            ...stored(
+              "b-new",
+              BEN,
+              "Latest Ben message",
+              "Ben current body",
+              "2026-10-22T10:00:00Z",
+            ),
+            threadId: "ben-thread",
+          },
           stored("a-new", ADA, "Latest Ada message", "Ada private body", "2026-10-21T10:00:00Z"),
           {
             ...stored(
@@ -428,6 +458,7 @@ it("keeps the role inbox conversation scoped to one candidate and drafts the exa
               "2026-10-20T10:00:00Z",
             ),
             direction: "sent",
+            threadId: "ben-thread",
           },
         ]),
   );
@@ -467,6 +498,7 @@ it("keeps the role inbox conversation scoped to one candidate and drafts the exa
         id: "crm:b-old",
         body: "Ben original body",
         direction: "sent",
+        threadId: "ben-thread",
       }),
     }),
   );
@@ -481,12 +513,104 @@ it("keeps the role inbox conversation scoped to one candidate and drafts the exa
       person: expect.objectContaining({ candidateId: BEN }),
     }),
   );
-  await act(async () =>
-    view.querySelector<HTMLButtonElement>('button[aria-label="Latest Ada message"]')!.click(),
-  );
+  await act(async () => view.querySelector<HTMLButtonElement>('button[aria-label="Ada"]')!.click());
   expect(conversation().textContent).toContain("Ada private body");
   expect(conversation().textContent).not.toContain("Ben original body");
   expect(setSelectedContact).toHaveBeenLastCalledWith({ name: "Ada", reference: ADA });
+});
+
+it("uses one rich candidate rail with local search and exact recorded-status filtering", async () => {
+  const rich = {
+    ...candidatesPage,
+    items: [
+      person(ADA, "Ada", {
+        company: "Example Labs",
+        location: "London",
+        lastReplyAt: "2026-10-22T10:00:00Z",
+        profile: {
+          history: [
+            { title: "Staff engineer", company: "Earlier Labs", start: "2019", end: "2022" },
+          ],
+          summary: "Saved summary",
+          skills: ["Go"],
+          sources: [],
+        },
+      }),
+      person(BEN, "Ben", { outreachStatus: "not_contacted", location: "Remote" }),
+    ],
+  };
+  crmData.mockImplementation(async (input: { operation: string }) =>
+    input.operation === "candidates"
+      ? rich
+      : roleMailPage(true, [
+          stored("a-1", ADA, "Latest Ada subject", "Ada body", "2026-10-22T10:00:00Z"),
+          stored("a-2", ADA, "Older Ada subject", "Ada history", "2026-10-21T10:00:00Z"),
+          stored("a-3", ADA, "Oldest Ada subject", "Ada earlier history", "2026-10-20T10:00:00Z"),
+        ]),
+  );
+  const view = await mount(<InboxTab {...props} />);
+  await settle();
+  const rail = view.querySelector('section[aria-label="Candidate conversations"]')!;
+  expect(rail.querySelectorAll('ul[aria-label="Candidates"] > li')).toHaveLength(2);
+  expect(rail.querySelectorAll('button[aria-label="Ada"]')).toHaveLength(1);
+  expect(rail.textContent).toContain("Engineer · Example Labs");
+  expect(rail.textContent).toContain("London");
+  expect(rail.textContent).toContain("Staff engineer · Earlier Labs · 2019 – 2022");
+  expect(rail.textContent).toContain("Last reply");
+  expect(rail.textContent).not.toContain("Unread");
+  expect(rail.textContent).not.toContain("Older Ada subject");
+  expect(rail.querySelectorAll("img")).toHaveLength(0);
+  const input = rail.querySelector<HTMLInputElement>(
+    'input[aria-label="Search loaded candidates"]',
+  )!;
+  await act(async () => {
+    Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, "value")!.set!.call(
+      input,
+      "Earlier Labs",
+    );
+    input.dispatchEvent(new Event("input", { bubbles: true }));
+  });
+  expect(rail.querySelectorAll('ul[aria-label="Candidates"] > li')).toHaveLength(1);
+  const filter = rail.querySelector<HTMLSelectElement>('select[aria-label="Outreach status"]')!;
+  await act(async () => {
+    filter.value = "status:not_contacted";
+    filter.dispatchEvent(new Event("change", { bubbles: true }));
+  });
+  expect(rail.textContent).toContain("No loaded candidates match these filters.");
+  await act(async () => {
+    filter.value = "all";
+    filter.dispatchEvent(new Event("change", { bubbles: true }));
+    Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, "value")!.set!.call(input, "");
+    input.dispatchEvent(new Event("input", { bubbles: true }));
+  });
+  await act(async () => rail.querySelector<HTMLButtonElement>('button[aria-label="Ada"]')!.click());
+  expect(rail.className).toContain("hidden lg:block");
+  const back = [...view.querySelectorAll("button")].find(
+    (button) => button.textContent === "Back to inbox",
+  )!;
+  await act(async () => back.click());
+  expect(rail.className).not.toContain("hidden lg:block");
+});
+
+it("does not name an unloaded candidate after the recruiter who sent their latest email", async () => {
+  crmData.mockImplementation(async (input: { operation: string }) =>
+    input.operation === "candidates"
+      ? { ...candidatesPage, items: [person(ADA, "Ada")] }
+      : roleMailPage(true, [
+          {
+            ...stored("ben-sent", BEN, "Outreach subject", "Stored body", "2026-10-22T10:00:00Z"),
+            direction: "sent",
+            sender: "recruiter@example.test",
+          },
+        ]),
+  );
+  const view = await mount(<InboxTab {...props} />);
+  await settle();
+  const rail = view.querySelector('ul[aria-label="Candidates"]')!;
+  expect(
+    rail.querySelector('button[aria-label="Candidate details unavailable"]')?.textContent,
+  ).toContain("Outreach subject");
+  expect(rail.querySelector('button[aria-label="recruiter@example.test"]')).toBeNull();
 });
 
 it("keeps a late candidate mail response out of the newly selected conversation and draft", async () => {

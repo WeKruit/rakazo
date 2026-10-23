@@ -41,6 +41,7 @@ beforeEach(() => {
 afterEach(async () => {
   await act(async () => root.unmount());
   element.remove();
+  vi.restoreAllMocks();
   vi.useRealTimers();
   vi.unstubAllGlobals();
 });
@@ -150,9 +151,35 @@ it("keeps unknown duration and invalid source times visible without inventing a 
 it("clears selected details when an asynchronous source update removes the record", async () => {
   await mount([source()]);
   await act(async () => element.querySelector<HTMLButtonElement>("[data-event-id]")!.click());
-  expect(element.querySelector("aside")).not.toBeNull();
+  expect(element.querySelector('aside[aria-label="Event details"]')).not.toBeNull();
   await mount([]);
-  expect(element.querySelector("aside")).toBeNull();
+  expect(element.querySelector('aside[aria-label="Event details"]')).toBeNull();
+  expect(element.querySelector('aside[aria-label="Saved calendar events"]')).not.toBeNull();
+});
+it("keeps a source-event rail visible and restores focus after inspecting a saved event", async () => {
+  await mount([
+    source(),
+    source({ id: "future", title: "Next week", start: "2026-10-28T10:00:00Z", end: null }),
+  ]);
+  const rail = element.querySelector('aside[aria-label="Saved calendar events"]')!;
+  expect(rail.textContent).toContain("Synthetic candidate discussion");
+  expect(rail.textContent).not.toContain("Next week");
+  expect(rail.textContent).toContain("Candidate links are not included");
+  await act(async () => rail.querySelector<HTMLButtonElement>("button")!.click());
+  expect(element.querySelector('aside[aria-label="Event details"]')?.textContent).toContain(
+    "Not recorded in this source",
+  );
+  await act(async () => button("Close event details").click());
+  expect(document.activeElement?.getAttribute("data-saved-event-id")).toBe("interview");
+});
+it("shows empty-week guidance inside the calendar before its scrolling hours", async () => {
+  await mount([]);
+  const guidance = element.querySelector('[data-testid="calendar-empty-guidance"]')!;
+  const hours = element.querySelector('[data-testid="calendar-hours"]')!;
+  expect(guidance.parentElement).toBe(hours.parentElement);
+  expect(guidance.compareDocumentPosition(hours) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+  expect(guidance.textContent).toContain("Empty space does not confirm availability.");
+  expect(element.querySelector('aside[aria-label="Saved calendar events"]')).not.toBeNull();
 });
 it("places the current-time line on the actual day and minute in the selected timezone", async () => {
   await mount([source()], { now: new Date("2026-10-21T02:30:00Z") });
@@ -185,4 +212,33 @@ it("advances the actual current-time line each minute when no fixture clock is s
   await act(async () => vi.advanceTimersByTime(60_000));
   expect(line()?.textContent).toContain("08:01");
   expect(line()?.querySelector("time")?.dateTime).toBe("2026-10-21T08:01:00.000Z");
+});
+it("keeps the selected compact day visible on open, keyboard navigation and week change without scrolling ancestors", async () => {
+  const pageScroll = vi.spyOn(window, "scrollTo");
+  vi.spyOn(HTMLElement.prototype, "getBoundingClientRect").mockImplementation(function (
+    this: HTMLElement,
+  ) {
+    if (this.getAttribute("aria-label") === "Choose day") return new DOMRect(0, 500, 340, 32);
+    if (this.parentElement?.getAttribute("aria-label") === "Choose day") {
+      const index = [...this.parentElement.children].indexOf(this);
+      return new DOMRect(index * 100 - this.parentElement.scrollLeft, 500, 80, 32);
+    }
+    return new DOMRect();
+  });
+  await mount([source()], { now: new Date("2026-10-23T12:00:00Z") });
+  const selector = element.querySelector<HTMLElement>('fieldset[aria-label="Choose day"]')!;
+  expect(selector.scrollLeft).toBe(140);
+  selector.scrollTop = 27;
+  const days = [...selector.querySelectorAll("button")];
+  const focus = vi.spyOn(days[6]!, "focus");
+  await act(async () =>
+    days[4]!.dispatchEvent(new KeyboardEvent("keydown", { key: "End", bubbles: true })),
+  );
+  expect(selector.scrollLeft).toBe(340);
+  expect(focus).toHaveBeenCalledWith({ preventScroll: true });
+  selector.scrollLeft = 0;
+  await act(async () => button("Next week").click());
+  expect(selector.scrollLeft).toBe(340);
+  expect(selector.scrollTop).toBe(27);
+  expect(pageScroll).not.toHaveBeenCalled();
 });

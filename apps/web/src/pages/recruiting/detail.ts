@@ -9,6 +9,7 @@ import {
   useState,
 } from "react";
 import { useNavigate, useSearchParams } from "react-router-dom";
+import type { ProfileCriterionRevision } from "./profile";
 import type { RecruitingTabProps } from "./shared";
 
 /** The person a detail view shows, as the opening row already displayed it. */
@@ -41,6 +42,8 @@ export type RecruitingDetailTarget = {
   role: Pick<RecruitingTabProps, "roleId" | "spaceId" | "conversation">;
   /** The person's Autumn search result, when they have one. */
   candidate?: RecruitingCandidate;
+  /** Definitions from the opening role; only used when the source revision matches exactly. */
+  criterionRevision?: ProfileCriterionRevision;
   /** False when the person has no CRM record, so `candidateId` reads no CRM mail or calendar. */
   crm?: boolean;
   /** What the opening list can do for this person; nothing here sends a message. */

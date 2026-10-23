@@ -6,6 +6,7 @@ import { useEffect, useState } from "react";
 import { CandidateDirectory } from "./CandidateDirectory";
 import type { RecruitingDetailTarget } from "./detail";
 import { pendingDetailTarget, useRecruitingDetail } from "./detail";
+import type { ProfileCriterionRevision } from "./profile";
 import { candidateSections } from "./profile";
 import { RetryNotice } from "./RetryNotice";
 import { linkedinIdentity } from "./roleCandidates";
@@ -15,7 +16,6 @@ import {
   formatDate,
   LoadMore,
   statusText,
-  TabHeader,
   TabLoading,
   TabNotice,
   useSavedCorrespondence,
@@ -47,6 +47,7 @@ export type AutumnCandidateActions = {
 export function ContactsTab(
   props: RecruitingTabProps & {
     autumn?: AutumnCandidatesRead & AutumnCandidateActions;
+    criterionRevision?: ProfileCriterionRevision;
     onRefine?: () => void;
   },
 ) {
@@ -111,6 +112,7 @@ export function ContactsTab(
     return {
       view: "contact",
       role,
+      criterionRevision: props.criterionRevision,
       crm: Boolean(crm),
       ...(candidate ? { candidate } : {}),
       person: {
@@ -162,36 +164,30 @@ export function ContactsTab(
     }
   }, [pendingDetail, rows]);
 
+  const toolbar = (
+    <div className="flex min-w-0 flex-1 flex-wrap items-center gap-x-3 gap-y-1 text-xs text-muted-foreground">
+      {list.total !== null ? (
+        <p>
+          <Plural value={list.total} _1="# candidate" other="# candidates" />
+        </p>
+      ) : null}
+      {list.total !== null && list.total > rows.length && rows.length ? (
+        <p>
+          <Trans>Showing the first {rows.length}</Trans>
+        </p>
+      ) : null}
+      {props.onRefine ? (
+        <Button size="sm" variant="outline" className="ml-auto" onClick={props.onRefine}>
+          <Sparkles size={14} aria-hidden />
+          <Trans>Refine in chat</Trans>
+        </Button>
+      ) : null}
+    </div>
+  );
+
   return (
     <section aria-label={t`Contacts`}>
-      {autumn ? (
-        <header className="mb-3 flex flex-wrap items-center justify-between gap-3">
-          <div>
-            {list.total !== null ? (
-              <p className="text-base font-semibold">
-                <Plural value={list.total} _1="# candidate" other="# candidates" />
-              </p>
-            ) : null}
-            {list.total !== null && list.total > rows.length && rows.length ? (
-              <p className="text-xs text-muted-foreground">
-                <Trans>Showing the first {rows.length}</Trans>
-              </p>
-            ) : null}
-          </div>
-          {props.onRefine ? (
-            <Button onClick={props.onRefine}>
-              <Sparkles size={15} aria-hidden />
-              <Trans>Refine in chat</Trans>
-            </Button>
-          ) : null}
-        </header>
-      ) : (
-        <TabHeader title={<Trans>Contacts</Trans>}>
-          {list.total !== null ? (
-            <span className="text-sm text-muted-foreground">{list.total}</span>
-          ) : null}
-        </TabHeader>
-      )}
+      {!rows.length && props.onRefine ? <div className="mb-2">{toolbar}</div> : null}
       {!autumn && list.crm.status !== "loading" && list.crm.status !== "failed" ? (
         <CrmGate crm={list.crm} />
       ) : null}
@@ -213,6 +209,8 @@ export function ContactsTab(
       {rows.length ? (
         <CandidateDirectory
           rows={rows}
+          criterionRevision={props.criterionRevision}
+          toolbar={toolbar}
           selectedKey={
             rows.find(
               (row) =>

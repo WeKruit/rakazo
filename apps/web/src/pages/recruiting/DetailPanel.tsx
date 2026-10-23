@@ -84,6 +84,90 @@ function Sources({ urls }: { urls: readonly string[] }) {
   );
 }
 
+/** Keep every navigation label reachable when the detail panel is narrow. */
+function NavigationRow({ children }: { children: ReactNode }) {
+  const { t } = useLingui();
+  const viewport = useRef<HTMLDivElement>(null);
+  const content = useRef<HTMLDivElement>(null);
+  const [edges, setEdges] = useState({ overflow: false, start: true, end: true });
+  const measure = () => {
+    const element = viewport.current;
+    if (!element) return;
+    const next = {
+      overflow: element.scrollWidth > element.clientWidth + 1,
+      start: element.scrollLeft <= 1,
+      end: element.scrollLeft + element.clientWidth >= element.scrollWidth - 1,
+    };
+    setEdges((previous) =>
+      previous.overflow === next.overflow &&
+      previous.start === next.start &&
+      previous.end === next.end
+        ? previous
+        : next,
+    );
+  };
+  useEffect(() => {
+    measure();
+    const observer = typeof ResizeObserver === "undefined" ? null : new ResizeObserver(measure);
+    if (viewport.current) observer?.observe(viewport.current);
+    if (content.current) observer?.observe(content.current);
+    window.addEventListener("resize", measure);
+    return () => {
+      observer?.disconnect();
+      window.removeEventListener("resize", measure);
+    };
+  }, []);
+  const scroll = (direction: -1 | 1) => {
+    const element = viewport.current;
+    if (element) element.scrollLeft += direction * element.clientWidth * 0.75;
+  };
+  return (
+    <div className="flex min-w-0 items-center gap-1" data-testid="profile-navigation-row">
+      {edges.overflow ? (
+        <Button
+          variant="ghost"
+          size="icon-sm"
+          className="shrink-0"
+          aria-label={t`Scroll navigation left`}
+          disabled={edges.start}
+          onClick={() => scroll(-1)}
+        >
+          <ChevronLeft size={16} aria-hidden />
+        </Button>
+      ) : null}
+      <div
+        ref={viewport}
+        className="min-w-0 flex-1 overflow-x-auto"
+        onScroll={measure}
+        onFocusCapture={(event) => {
+          const element = viewport.current;
+          if (!element || !(event.target instanceof HTMLElement)) return;
+          const bounds = element.getBoundingClientRect();
+          const target = event.target.getBoundingClientRect();
+          if (target.left < bounds.left) element.scrollLeft += target.left - bounds.left;
+          else if (target.right > bounds.right) element.scrollLeft += target.right - bounds.right;
+        }}
+      >
+        <div ref={content} className="flex w-max gap-1">
+          {children}
+        </div>
+      </div>
+      {edges.overflow ? (
+        <Button
+          variant="ghost"
+          size="icon-sm"
+          className="shrink-0"
+          aria-label={t`Scroll navigation right`}
+          disabled={edges.end}
+          onClick={() => scroll(1)}
+        >
+          <ChevronRight size={16} aria-hidden />
+        </Button>
+      ) : null}
+    </div>
+  );
+}
+
 /**
  * The workbench detail panel: one person's profile, email thread or interview state, opened beside
  * the page and the role chat instead of replacing them. Draft and scheduling requests go to the
@@ -156,7 +240,10 @@ export function RecruitingDetailPanel({
   ];
   const company = person.company ?? candidate?.company;
   const assets = profileAssets(fields, company);
-  const sections = candidateSections(profileContentFields(fields));
+  const sections = candidateSections(profileContentFields(fields), {
+    roleRevisionId: candidate?.latestSource?.roleRevisionId,
+    revision: current.criterionRevision,
+  });
   const email = person.email ?? sections.email;
   const phone = person.phone ?? sections.phone;
   const role =
@@ -382,7 +469,7 @@ export function RecruitingDetailPanel({
           aria-label={t`Profile navigation`}
           className="sticky top-0 z-10 flex flex-col gap-1 border-b border-sidebar-border bg-background px-3 pt-3 pb-2"
         >
-          <div className="flex gap-1 overflow-x-auto">
+          <NavigationRow>
             {views.length > 1
               ? views.map(({ view: option, label }) => (
                   <Button
@@ -396,9 +483,9 @@ export function RecruitingDetailPanel({
                   </Button>
                 ))
               : null}
-          </div>
+          </NavigationRow>
           {view === "contact" && anchors.length > 1 ? (
-            <div className="flex min-w-0 flex-1 gap-1 overflow-x-auto">
+            <NavigationRow>
               {anchors.map((anchor) => (
                 <Button
                   key={anchor.id}
@@ -413,7 +500,7 @@ export function RecruitingDetailPanel({
                   {anchor.label}
                 </Button>
               ))}
-            </div>
+            </NavigationRow>
           ) : null}
         </nav>
         <div className="px-4 py-3">

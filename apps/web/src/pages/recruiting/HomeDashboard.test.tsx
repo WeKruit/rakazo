@@ -312,6 +312,30 @@ it("shows bounded interest counts as partial and does not fabricate contacted co
   expect(funnel.textContent).toContain("Interested≥1Partial data");
   expect(funnel.textContent).not.toContain("%");
   expect(funnel.textContent).toContain("Send totals are not available from these records.");
+  // These populations are not a shared cohort: render counts without relative bar heights.
+  expect(funnel.querySelector('[style*="height"]')).toBeNull();
+  expect(funnel.querySelectorAll('button[aria-label^="Inspect "]')).toHaveLength(4);
+});
+
+it("keeps every week inspectable while sparsely labeling longer chart windows", async () => {
+  await render();
+  const chart = container.querySelector('[aria-label="Shortlisted profiles"]')!;
+  for (const count of [4, 8, 12]) {
+    await select("Shortlist period", String(count));
+    const weeks = [...chart.querySelectorAll("ol button")];
+    const labels = [...chart.querySelectorAll('[data-testid="weekly-shortlist-tick"]')];
+    expect(weeks).toHaveLength(count);
+    expect(labels).toHaveLength(4);
+    expect(weeks[0]?.contains(labels[0]!)).toBe(true);
+    expect(weeks.at(-1)?.contains(labels.at(-1)!)).toBe(true);
+    const labeledIndexes = weeks.flatMap((week, index) =>
+      week.querySelector('[data-testid="weekly-shortlist-tick"]') ? [index] : [],
+    );
+    if (count > 4)
+      expect(labeledIndexes.slice(1).every((index, i) => index - labeledIndexes[i]! >= 2)).toBe(
+        true,
+      );
+  }
 });
 
 it("keeps a missing project's metrics partial and offers retry instead of a false empty state", async () => {

@@ -88,7 +88,7 @@ export function InterviewTab({
       ),
   );
   return (
-    <section aria-label={t`Interview`}>
+    <section aria-label={t`Interview`} className="pb-24 lg:pb-0">
       {candidateId ? null : <TabHeader title={<Trans>Interview</Trans>} />}
       {calendar.loading ? <TabLoading /> : null}
       {!props.conversation ? (
@@ -128,12 +128,7 @@ export function InterviewTab({
         ))}
       {!calendar.failed &&
       (calendar.data?.status === "ready" || calendar.data?.status === "empty") ? (
-        <div className="mt-6 space-y-3">
-          {calendar.data.checkedAt ? (
-            <p className="text-xs text-muted-foreground">
-              <Trans>Calendar last checked</Trans> · {formatDate(calendar.data.checkedAt)}
-            </p>
-          ) : null}
+        <div className="space-y-3">
           {candidateId && !events.length ? (
             <p className="text-sm text-muted-foreground">
               <Trans>No saved calendar records matched this candidate.</Trans>
@@ -143,6 +138,11 @@ export function InterviewTab({
             events={events}
             contextLabel={ready ? `${ready.roleLabel} · ${ready.clientLabel}` : undefined}
           />
+          {calendar.data.checkedAt ? (
+            <p className="text-xs text-muted-foreground">
+              <Trans>Calendar last checked</Trans> · {formatDate(calendar.data.checkedAt)}
+            </p>
+          ) : null}
         </div>
       ) : null}
       <details className="mt-6">

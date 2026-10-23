@@ -89,6 +89,13 @@ export function AssessmentCard({
                   <p className="flex flex-wrap items-baseline gap-x-2">
                     {row.label ? (
                       <span className="break-words font-medium">{row.label}</span>
+                    ) : row.criterionId ? (
+                      <span className="font-medium text-muted-foreground">
+                        <Trans>Criterion name unavailable</Trans>
+                      </span>
+                    ) : null}
+                    {row.criterionId ? (
+                      <span className="text-xs text-muted-foreground">{row.criterionId}</span>
                     ) : null}
                     <span className={`text-xs ${className}`}>{label}</span>
                   </p>
@@ -96,10 +103,7 @@ export function AssessmentCard({
                     <p className="break-words whitespace-pre-wrap">
                       <HighlightText
                         text={row.text}
-                        terms={[
-                          ...keywords,
-                          ...(row.label && !/^R\d+$/i.test(row.label) ? [row.label] : []),
-                        ]}
+                        terms={[...keywords, ...(row.label ? [row.label] : [])]}
                       />
                     </p>
                   ) : (

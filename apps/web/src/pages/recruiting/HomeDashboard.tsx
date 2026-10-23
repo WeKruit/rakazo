@@ -186,8 +186,11 @@ function WeeklyShortlist({
   const recorded = weeks.reduce((sum, week) => sum + week.count, 0);
   const undated = dates.filter((date) => !date || !Number.isFinite(Date.parse(date))).length;
   const selectedWeek = weeks.find((week) => week.start.getTime() === selected);
+  const labelIndexes = new Set(
+    Array.from({ length: 4 }, (_, index) => Math.round((index * (period - 1)) / 3)),
+  );
   return (
-    <section aria-label={t`Shortlisted profiles`} className="min-w-0">
+    <section aria-label={t`Shortlisted profiles`} className="min-w-0 rounded-xl bg-muted/40 p-4">
       <div className="flex flex-wrap items-start justify-between gap-3">
         <div>
           <h3 className="text-sm font-medium">
@@ -211,7 +214,7 @@ function WeeklyShortlist({
         </NativeSelect>
       </div>
       <ol
-        className="mt-4 grid h-44 items-end gap-2"
+        className="mt-4 grid h-44 items-end gap-2 px-3"
         style={{ gridTemplateColumns: `repeat(${period}, minmax(0, 1fr))` }}
       >
         {weeks.map((week, index) => {
@@ -219,7 +222,7 @@ function WeeklyShortlist({
             month: "short",
             day: "numeric",
           });
-          const showLabel = index % Math.ceil(period / 4) === 0 || index === weeks.length - 1;
+          const showLabel = labelIndexes.has(index);
           return (
             <li
               key={week.start.toISOString()}
@@ -243,11 +246,17 @@ function WeeklyShortlist({
                   />
                 </span>
                 <span
-                  title={label}
                   aria-hidden="true"
-                  className={`w-max text-xs text-muted-foreground ${index === 0 ? "self-start" : index === weeks.length - 1 ? "self-end" : ""}`}
+                  className="relative block h-4 w-full text-xs text-muted-foreground"
                 >
-                  {showLabel ? label : " "}
+                  {showLabel ? (
+                    <span
+                      data-testid="weekly-shortlist-tick"
+                      className="absolute start-1/2 -translate-x-1/2 whitespace-nowrap"
+                    >
+                      {label}
+                    </span>
+                  ) : null}
                 </span>
               </Button>
             </li>
@@ -296,23 +305,22 @@ function OutreachFunnel({
     interested: t`Interested`,
   };
   const stages = outreachFunnel(roles);
-  const max = Math.max(1, ...stages.map((stage) => stage.count ?? 0));
   return (
-    <section aria-label={t`Outreach funnel`} className="min-w-0">
+    <section aria-label={t`Outreach funnel`} className="min-w-0 rounded-xl bg-muted/40 p-4">
       <h3 className="text-sm font-medium">
         <Trans>Outreach funnel</Trans>
       </h3>
       <p className="mt-1 text-xs text-muted-foreground">
         <Trans>Current totals · all dates</Trans>
       </p>
-      <ol className="mt-4 grid grid-cols-4 gap-2">
+      <ol className="mt-4 grid grid-cols-2 gap-2">
         {stages.map((stage) => {
           const partial = stage.count !== null && (stage.partial || incomplete);
           return (
             <li key={stage.key} className="flex min-w-0 flex-col gap-1">
               <Button
                 variant="ghost"
-                className="h-auto w-full flex-col items-stretch gap-1 rounded-md p-0 text-start whitespace-normal font-normal"
+                className="h-auto w-full flex-col items-stretch gap-1 rounded-lg bg-card/80 p-3 text-start whitespace-normal font-normal hover:bg-card"
                 aria-label={t`Inspect ${labels[stage.key]}`}
                 aria-pressed={selected === stage.key}
                 onClick={() => setSelected(selected === stage.key ? undefined : stage.key)}
@@ -331,14 +339,6 @@ function OutreachFunnel({
                   ) : (
                     " "
                   )}
-                </span>
-                <span aria-hidden="true" className="flex h-20 items-end rounded-md bg-muted">
-                  <span
-                    className="w-full rounded-md bg-primary"
-                    style={{
-                      height: `${((stage.count ?? 0) / max) * 100}%`,
-                    }}
-                  />
                 </span>
               </Button>
             </li>

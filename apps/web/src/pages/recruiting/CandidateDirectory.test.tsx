@@ -169,7 +169,7 @@ it("keeps actual supplied fit states and stored statuses separate", async () => 
       onOpen={vi.fn()}
     />,
   );
-  expect(view.textContent).toContain("R1 · Partial match");
+  expect(view.textContent).toContain("Criterion name unavailable · R1 · Partial match");
 });
 
 it("rejects unsafe source URLs and mismatched organization images and recovers on a new supplied image", async () => {
@@ -222,11 +222,52 @@ it("keeps caller actions independent of opening and uses fresh callbacks after r
   await render(<CandidateDirectory rows={[updated]} selectedKey="updated" onOpen={nextOpen} />);
   const name = button(view, updated.name);
   expect(name).toBeDefined();
-  expect(name.className).toContain("break-words");
+  expect(name.title).toBe(updated.name);
   await act(async () => name.click());
   expect(nextOpen).toHaveBeenCalledWith(updated, 0, name);
   expect(onOpen).not.toHaveBeenCalled();
   expect(view.textContent).not.toContain("Candidate original");
   await render(<CandidateDirectory rows={[]} onOpen={nextOpen} />);
   expect(view.textContent).toBe("");
+});
+
+it("uses source-revision-matched criterion definitions in table and cards, never a newer role definition", async () => {
+  const candidate = row("definition", [
+    field("Requirements assessment", "R4: Partial - Prototype only."),
+  ]);
+  candidate.autumn = {
+    ...candidate.autumn!,
+    latestSource: { ...candidate.autumn!.latestSource!, roleRevisionId: "revision-1" },
+  };
+  const criterionRevision = {
+    id: "revision-1",
+    criteria: [
+      {
+        id: "R4",
+        priority: "hard" as const,
+        sourceRefs: [],
+        definitionQuestions: [],
+        expression: { kind: "atom" as const, id: "cpp", statement: "C++ production systems" },
+      },
+    ],
+  };
+  const { view, render } = await mount(
+    <CandidateDirectory
+      rows={[candidate]}
+      criterionRevision={criterionRevision}
+      onOpen={vi.fn()}
+    />,
+  );
+  expect(view.textContent).toContain("C++ production systems · R4 · Partial match");
+  await act(async () => button(view, "Cards").click());
+  expect(view.textContent).toContain("C++ production systems · R4 · Partial match");
+  await render(
+    <CandidateDirectory
+      rows={[candidate]}
+      criterionRevision={{ ...criterionRevision, id: "revision-2" }}
+      onOpen={vi.fn()}
+    />,
+  );
+  expect(view.textContent).not.toContain("C++ production systems");
+  expect(view.textContent).toContain("Criterion name unavailable · R4 · Partial match");
 });

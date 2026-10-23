@@ -1,8 +1,19 @@
-import type { RecruitingCandidateReport, RecruitingRoleCandidate } from "@rakazo/contracts";
+import type {
+  RecruitingCandidateReport,
+  RecruitingRoleCandidate,
+  RecruitingRoleRevision,
+} from "@rakazo/contracts";
 import type { RoleCandidateFit } from "./roleCandidates";
 import { roleCandidateFit } from "./roleCandidates";
 
 type Field = RecruitingCandidateReport["fields"][number];
+
+export type ProfileCriterionRevision = Pick<RecruitingRoleRevision, "id" | "criteria">;
+export type ProfileCriterionContext = {
+  /** The revision recorded with this candidate's source, never the current revision by default. */
+  roleRevisionId: string | null | undefined;
+  revision: ProfileCriterionRevision | null | undefined;
+};
 
 const FIT_LABELS = new Set([
   "Match score",
@@ -33,7 +44,10 @@ const SKILLS =
  * Autumn's report fields sorted into the sections a recruiter reads, as returned and never
  * re-judged. Fields that fit no named section stay together as research findings.
  */
-export function candidateSections(fields: readonly Field[] | undefined) {
+export function candidateSections(
+  fields: readonly Field[] | undefined,
+  criterionContext?: ProfileCriterionContext,
+) {
   const all = (fields ?? []).filter(
     (field) =>
       field.value?.trim() ||
@@ -48,7 +62,7 @@ export function candidateSections(fields: readonly Field[] | undefined) {
     Boolean,
   );
   const assessment = take((field) => ASSESSMENT.test(field.label.trim()));
-  const assessed = assessment.map((field) => requirementRows(fieldText(field)));
+  const assessed = assessment.map((field) => requirementRows(fieldText(field), criterionContext));
   const scope = all.find((field) => SCOPE_LABELS.has(field.label.trim()));
   const resumeUrl = contact(RESUME_URL).find((field) => /^https?:\/\//i.test(field.value ?? ""));
   const resumeFields = contact(/^(?:resume|cv) (?:url|link|status)$/i);
@@ -72,7 +86,7 @@ export function candidateSections(fields: readonly Field[] | undefined) {
     ...all.filter((field) => FIT_LABELS.has(field.label)),
   ]);
   const criterionRows = criteria.map((field, index) => ({
-    ...criterionRow(field),
+    ...criterionRow(field, criterionContext),
     key: `criterion:${index}:${field.label}`,
   }));
   const assessmentRows = assessed.map((item, index) =>
@@ -91,7 +105,7 @@ export function candidateSections(fields: readonly Field[] | undefined) {
     ...assessmentRows.flatMap((rows, index) =>
       rows.map((row) => ({
         ...row,
-        label: row.label ?? assessment[index]!.label,
+        label: row.label ?? (row.criterionId ? "" : assessment[index]!.label),
         sourceUrls: [
           ...new Set([...assessed[index]!.sourceUrls, ...assessment[index]!.sourceUrls]),
         ],
@@ -156,6 +170,7 @@ export type RequirementStatus = "match" | "gap" | "partial" | "unknown";
 export type SkillEvidenceSource = {
   key: string;
   label: string;
+  criterionId?: string;
   text: string;
   sourceUrls: readonly string[];
   kind: "listed" | "profile" | "assessment";
@@ -165,8 +180,10 @@ export type SkillEvidenceSource = {
 /** One requirement line of Autumn's own assessment, its words kept verbatim. */
 export type RequirementRow = {
   key: string;
-  /** Autumn's requirement reference ("R2") or criterion name, when it gave one. */
+  /** Supplied criterion name or exact matching definition; never an inferred technical name. */
   label: string | null;
+  /** Original source reference kept separately from the readable definition. */
+  criterionId?: string;
   status: RequirementStatus;
   text: string;
   sourceUrls: readonly string[];
@@ -192,10 +209,26 @@ function statusOf(word: string): RequirementStatus | null {
   return STATUS_WORDS.find(([pattern]) => pattern.test(clean))?.[1] ?? null;
 }
 
-function criterionRow(field: Field): RequirementRow {
+function criterionName(reference: string, context?: ProfileCriterionContext) {
+  const criterion =
+    context?.roleRevisionId && context.revision?.id === context.roleRevisionId
+      ? context.revision.criteria.find((item) => item.id === reference)
+      : undefined;
+  if (criterion) {
+    // A composite has no single name. Keep it unresolved rather than dropping its operators
+    // or promoting one child statement to the whole criterion.
+    return {
+      label: criterion.expression.kind === "atom" ? criterion.expression.statement : null,
+      criterionId: reference,
+    };
+  }
+  return /^R\d+$/i.test(reference) ? { label: null, criterionId: reference } : { label: reference };
+}
+
+function criterionRow(field: Field, context?: ProfileCriterionContext): RequirementRow {
   return {
     key: `criterion:${field.label}`,
-    label: field.label,
+    ...criterionName(field.label, context),
     status:
       field.providerStatus === "match"
         ? "match"
@@ -222,7 +255,10 @@ function fieldText(field: Field, includeValue = true) {
  * requirement, keeping its status word's meaning and its evidence as written. Text it cannot
  * split stays one row with an unknown status. Cited source links are returned once.
  */
-export function requirementRows(value: string): {
+export function requirementRows(
+  value: string,
+  context?: ProfileCriterionContext,
+): {
   rows: RequirementRow[];
   sourceUrls: string[];
 } {
@@ -244,7 +280,7 @@ export function requirementRows(value: string): {
     const parsed = status ? statusOf(status[1]!) : null;
     return {
       key: match?.[1] ?? `row:${index}`,
-      label: match?.[1] ?? null,
+      ...(match ? criterionName(match[1]!, context) : { label: null }),
       status: parsed ?? "unknown",
       text: (parsed ? status![2]! : rest).trim().replace(/[;；]$/, ""),
       sourceUrls: [],

@@ -564,6 +564,7 @@ msgid "All rounds"
 msgstr ""
 
 #: src/pages/ActivityList.tsx
+#: src/pages/recruiting/InboxTab.tsx
 #: src/pages/recruiting/InterviewCalendar.tsx
 msgid "All statuses"
 msgstr ""
@@ -5051,6 +5052,7 @@ msgid "Outreach file review"
 msgstr ""
 
 #: src/pages/recruiting/DetailPanel.tsx
+#: src/pages/recruiting/InboxTab.tsx
 #: src/pages/recruiting/SequenceTab.tsx
 #: src/pages/RecruitingPanel.tsx
 msgid "Outreach status"
@@ -6134,6 +6136,7 @@ msgstr ""
 msgid "Saved email"
 msgstr ""
 
+#: src/pages/recruiting/EmailConversation.tsx
 #: src/pages/RecruitingCorrespondence.tsx
 msgid "Saved emails"
 msgstr ""
@@ -6431,7 +6434,6 @@ msgid "Send with Enter"
 msgstr "按 Enter 发送"
 
 #: src/pages/recruiting/EmailConversation.tsx
-#: src/pages/recruiting/InboxTab.tsx
 #: src/pages/RecruitingCorrespondence.tsx
 msgid "Sender unavailable"
 msgstr ""
@@ -7183,6 +7185,7 @@ msgstr "此订阅登录在 WeKruit Headhunter 中尚不可用。请使用部署�
 msgid "This week"
 msgstr ""
 
+#: src/pages/recruiting/EmailConversation.tsx
 #: src/pages/RecruitingPanel.tsx
 msgid "Thread"
 msgstr ""
@@ -8128,3 +8131,77 @@ msgstr "候选人状态"
 #: src/pages/recruiting/InterviewTab.tsx
 msgid "{loadedCount} loaded"
 msgstr "已加载 {loadedCount}"
+
+#: src/pages/recruiting/InboxTab.tsx
+msgid "Back to inbox"
+msgstr "返回收件箱"
+
+#: src/pages/recruiting/InboxTab.tsx
+msgid "Candidate conversations"
+msgstr "候选人沟通"
+
+#: src/pages/recruiting/InboxTab.tsx
+msgid "Candidate details unavailable"
+msgstr "候选人详情不可用"
+
+#: src/pages/recruiting/InterviewTab.tsx
+msgid "Candidate interview status"
+msgstr "候选人面试状态"
+
+#: src/pages/recruiting/InterviewCalendar.tsx
+msgid "Candidate link"
+msgstr "关联候选人"
+
+#: src/pages/recruiting/InterviewCalendar.tsx
+msgid "Change the week or status to review saved records. Empty space does not confirm availability."
+msgstr "切换周或状态以查看已保存的记录。空白时段不代表有空。"
+
+#: src/pages/recruiting/AssessmentCard.tsx
+#: src/pages/recruiting/CandidateDirectory.tsx
+#: src/pages/recruiting/SkillEvidence.tsx
+msgid "Criterion name unavailable"
+msgstr "标准名称不可用"
+
+#: src/pages/recruiting/EmailConversation.tsx
+msgid "Email thread or message"
+msgstr "邮件会话或单封邮件"
+
+#: src/pages/recruiting/InboxTab.tsx
+msgid "Last reply"
+msgstr "最近回复"
+
+#: src/pages/recruiting/InboxTab.tsx
+msgid "No loaded candidates match these filters."
+msgstr "已加载的候选人中没有符合这些筛选条件的结果。"
+
+#: src/pages/recruiting/InterviewCalendar.tsx
+msgid "No saved events to show for this week and status."
+msgstr "本周此状态下没有可显示的已保存日程。"
+
+#: src/pages/recruiting/InterviewCalendar.tsx
+msgid "Not recorded in this source"
+msgstr "此来源未记录"
+
+#: src/pages/recruiting/InterviewCalendar.tsx
+msgid "Saved calendar events"
+msgstr "已保存的日历日程"
+
+#: src/pages/recruiting/InterviewCalendar.tsx
+msgid "Saved events"
+msgstr "已保存的日程"
+
+#: src/pages/recruiting/DetailPanel.tsx
+msgid "Scroll navigation left"
+msgstr "向左滚动导航"
+
+#: src/pages/recruiting/DetailPanel.tsx
+msgid "Scroll navigation right"
+msgstr "向右滚动导航"
+
+#: src/pages/recruiting/InboxTab.tsx
+msgid "Search loaded candidates"
+msgstr "搜索已加载的候选人"
+
+#: src/pages/recruiting/InterviewCalendar.tsx
+msgid "Select an event to see its source details. Candidate links are not included in these calendar records."
+msgstr "选择日程查看来源详情。这些日历记录未包含候选人关联信息。"

@@ -1,5 +1,5 @@
 import { Trans, useLingui } from "@lingui/react/macro";
-import { Badge, Button } from "@rakazo/ui-web";
+import { Badge, Button, NativeSelect, NativeSelectOption } from "@rakazo/ui-web";
 import { ChevronDown, Mail, Reply, UserRound } from "lucide-react";
 import { useEffect, useId, useRef } from "react";
 import type { RecruitingInboxEmail } from "./InboxTab";
@@ -113,6 +113,17 @@ export function EmailConversation({
     ? items.filter((email) => email.candidateId === undefined || email.candidateId === candidateId)
     : items;
   const selected = messages.find((email) => email.id === selectedId) ?? messages[0];
+  // Only provider-supplied thread IDs group emails; an unthreaded message is its own choice.
+  const hasThreads = messages.some((email) => email.threadId);
+  const groupKey = (email: EmailConversationItem) =>
+    email.threadId ? `thread:${email.threadId}` : `message:${email.id}`;
+  const threads = new Map<string, EmailConversationItem>();
+  for (const email of messages)
+    if (!threads.has(groupKey(email))) threads.set(groupKey(email), email);
+  const visibleMessages =
+    hasThreads && selected
+      ? messages.filter((email) => groupKey(email) === groupKey(selected))
+      : messages;
   useEffect(() => {
     if (openedFromHistory.current !== selected?.id) return;
     openedFromHistory.current = null;
@@ -135,7 +146,7 @@ export function EmailConversation({
           />
           <div className="min-w-0">
             <h3 id={headingId} className="break-words font-semibold">
-              {candidateName || t`Email conversation`}
+              {candidateName || t`Saved emails`}
             </h3>
             {candidateTitle ? (
               <p className="mt-0.5 break-words text-sm text-muted-foreground">{candidateTitle}</p>
@@ -159,9 +170,36 @@ export function EmailConversation({
           </div>
         ) : null}
       </header>
-      {messages.length ? (
+      {hasThreads && threads.size > 1 && selected ? (
+        <div className="border-b p-3">
+          <NativeSelect
+            aria-label={t`Email thread or message`}
+            value={groupKey(selected)}
+            className="w-full"
+            onChange={(event) => {
+              const email = threads.get(event.target.value);
+              if (email) onSelect(email);
+            }}
+          >
+            {[...threads].map(([key, email]) => (
+              <NativeSelectOption key={key} value={key}>
+                {email.threadId ? t`Thread` : t`Message`} · {email.subject || t`No subject`}
+                {email.date && Number.isFinite(Date.parse(email.date))
+                  ? ` · ${formatDate(email.date)}`
+                  : ""}
+              </NativeSelectOption>
+            ))}
+          </NativeSelect>
+        </div>
+      ) : null}
+      {!hasThreads && candidateName ? (
+        <p className="border-b px-4 py-2 text-xs text-muted-foreground">
+          <Trans>Saved emails</Trans>
+        </p>
+      ) : null}
+      {visibleMessages.length ? (
         <ol aria-label={t`Emails`} className="space-y-3 p-3">
-          {messages.map((email) => (
+          {visibleMessages.map((email) => (
             <li key={email.id}>
               {email.id === selected?.id ? (
                 <article

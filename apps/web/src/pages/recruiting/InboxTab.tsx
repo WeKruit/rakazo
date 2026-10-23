@@ -1,13 +1,15 @@
 import { Trans, useLingui } from "@lingui/react/macro";
 import type { RecruitingCrmDataOutput } from "@rakazo/contracts";
-import { useCallback, useEffect, useState } from "react";
+import { Badge, Button, Input, NativeSelect, NativeSelectOption } from "@rakazo/ui-web";
+import { ArrowLeft, BriefcaseBusiness, MapPin } from "lucide-react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import type { CrmReplyDraftContext } from "../RecruitingPanel";
 import { useRecruitingChatContext } from "../shell/recruiting-chat-context";
 import { useRecruitingDetail } from "./detail";
 import type { EmailConversationItem } from "./EmailConversation";
 import { EmailConversation } from "./EmailConversation";
 import { ProfileImage } from "./ProfileImage";
-import { initials } from "./profile";
+import { initials, storedProfileFields } from "./profile";
 import type { RecruitingTabProps } from "./shared";
 import {
   CrmGate,
@@ -37,6 +39,8 @@ export type RecruitingInboxEmail = Omit<CrmReplyDraftContext, "threadId" | "emai
     body: string;
     direction: Direction;
     partial: boolean;
+    /** The provider email thread, distinct from the native chat thread. */
+    threadId?: string | null;
   };
 };
 
@@ -51,12 +55,22 @@ type InboxProps = RecruitingTabProps & {
 function mailItems(page: MailPage) {
   const seen = new Set<string>();
   const items: RecruitingInboxEmail["email"][] = [];
+  const crmThreads = new Map<string, Set<string>>();
+  for (const item of page.items) {
+    if (!item.threadId) continue;
+    const ids = crmThreads.get(item.providerMessageId) ?? new Set<string>();
+    ids.add(item.threadId);
+    crmThreads.set(item.providerMessageId, ids);
+  }
   // Native receipts carry the exact message the agent read or recorded; CRM mail fills the rest.
   for (const entry of page.nativeCorrespondence) {
     if (!entry.email || seen.has(entry.email.providerMessageId)) continue;
     seen.add(entry.email.providerMessageId);
+    const threads = crmThreads.get(entry.email.providerMessageId);
     items.push({
       id: `native:${entry.email.id}`,
+      // Exact provider-message identity may supply thread metadata missing from a native receipt.
+      threadId: threads?.size === 1 ? [...threads][0] : undefined,
       sender: entry.email.sender,
       recipients: entry.email.recipients,
       subject: entry.email.subject,
@@ -71,6 +85,7 @@ function mailItems(page: MailPage) {
     seen.add(item.providerMessageId);
     items.push({
       id: `crm:${item.id}`,
+      threadId: item.threadId,
       sender: item.sender,
       recipients: item.recipients,
       subject: item.subject,
@@ -87,6 +102,7 @@ function roleMailItems(page: RoleMailPage) {
   // The CRM returns the role's mail newest first; keep its order.
   return page.items.map((item) => ({
     id: `crm:${item.id}`,
+    threadId: item.threadId,
     candidateId: item.candidateId,
     sender: item.sender,
     recipients: item.recipients,
@@ -154,6 +170,16 @@ export function InboxTab({
   const [chosenId, setCandidateId] = useState<string>();
   const candidateId = lockedId ?? chosenId;
   const [emailId, setEmailId] = useState<string>();
+  const [query, setQuery] = useState("");
+  const [outreachFilter, setOutreachFilter] = useState("all");
+  const [mobileConversation, setMobileConversation] = useState(false);
+  const railTrigger = useRef<HTMLButtonElement | null>(null);
+  const backButton = useRef<HTMLButtonElement | null>(null);
+  useEffect(() => {
+    if (mobileConversation) {
+      if (backButton.current?.getClientRects().length) backButton.current.focus();
+    } else railTrigger.current?.focus();
+  }, [mobileConversation]);
   const people = useCrmPages(
     crm,
     "candidates",
@@ -192,7 +218,41 @@ export function InboxTab({
   const selected = items.find((item) => item.id === emailId) ?? items[0];
   const selectedPerson = roleWide ? findPerson(selected?.candidateId) : person;
   const selectedCandidateId = roleWide ? selected?.candidateId : personId;
-  const nameOf = (id: string | undefined) => findPerson(id)?.name;
+  const roleItems = roleMail.data?.supported ? roleMailItems(roleMail.data) : [];
+  const latestByCandidate = new Map<string, EmailConversationItem>();
+  for (const item of roleItems) {
+    if (!latestByCandidate.has(item.candidateId)) latestByCandidate.set(item.candidateId, item);
+  }
+  const rail = [
+    ...new Set([
+      ...roleItems.map((item) => item.candidateId),
+      ...(people.data?.items.map((item) => item.candidateId) ?? []),
+    ]),
+  ].map((id) => {
+    const contact = findPerson(id);
+    const latest = !roleWide && id === personId ? items[0] : latestByCandidate.get(id);
+    const experience = storedProfileFields(contact?.profile).find(
+      (field) => field.label === "Experience",
+    )?.value;
+    return { id, contact, latest, experience };
+  });
+  const statuses = [...new Set(rail.flatMap((row) => row.contact?.outreachStatus || []))];
+  const search = query.trim().toLocaleLowerCase();
+  const visibleRail = rail.filter(({ contact, latest, experience }) => {
+    if (outreachFilter !== "all" && contact?.outreachStatus !== outreachFilter.slice(7))
+      return false;
+    return (
+      !search ||
+      [
+        contact?.name,
+        contact?.title,
+        contact?.company,
+        contact?.location,
+        experience,
+        latest?.sender,
+      ].some((value) => value?.toLocaleLowerCase().includes(search))
+    );
+  });
   const contextFor = (item: EmailConversationItem): RecruitingInboxEmail | undefined => {
     const id = roleWide ? item.candidateId : personId;
     const contact = roleWide ? findPerson(id) : person;
@@ -231,12 +291,12 @@ export function InboxTab({
           <Trans>Could not load candidate records. Try refreshing.</Trans>
         </TabNotice>
       ) : null}
-      {people.data && !people.data.items.length ? (
+      {people.data && !people.data.items.length && !roleItems.length ? (
         <TabNotice>
           <Trans>No contacts for this role yet.</Trans>
         </TabNotice>
       ) : null}
-      {people.data?.items.length ? (
+      {rail.length || lockedId ? (
         <div
           className={
             lockedId
@@ -245,95 +305,159 @@ export function InboxTab({
           }
         >
           {!lockedId ? (
-            <div className="min-w-0 space-y-4">
-              <ul
-                aria-label={t`Candidates`}
-                className="divide-y divide-border overflow-hidden rounded-xl border bg-card"
-              >
-                {roleWideSupported ? (
-                  <li>
-                    <button
-                      type="button"
-                      aria-pressed={roleWide}
-                      className="block w-full p-3 text-start text-sm hover:bg-muted aria-pressed:bg-muted"
-                      onClick={() => {
-                        setCandidateId(undefined);
-                        setEmailId(undefined);
-                      }}
-                    >
-                      <strong>
-                        <Trans>All candidates</Trans>
-                      </strong>
-                    </button>
-                  </li>
-                ) : null}
-                {people.data.items.map((item) => (
-                  <li key={item.candidateId}>
-                    <button
-                      type="button"
-                      aria-pressed={person?.candidateId === item.candidateId}
-                      className="flex w-full items-start gap-3 p-3 text-start text-sm hover:bg-muted aria-pressed:bg-muted"
-                      onClick={() => {
-                        setCandidateId(item.candidateId);
-                        setEmailId(undefined);
-                      }}
-                    >
-                      <ProfileImage
-                        fallback={initials(item.name)}
-                        photo
-                        className="grid size-9 shrink-0 place-items-center rounded-full bg-muted text-xs text-muted-foreground"
-                      />
-                      <span className="min-w-0 space-y-1">
-                        <strong className="block break-words">{item.name}</strong>
-                        {item.title ? (
-                          <span className="block break-words text-xs">{item.title}</span>
-                        ) : null}
-                        {item.outreachStatus ? (
-                          <span className="block break-words text-xs text-muted-foreground">
-                            {statusText(item.outreachStatus)}
-                          </span>
-                        ) : null}
-                      </span>
-                    </button>
-                  </li>
-                ))}
-                {people.hasMore ? (
-                  <li className="px-3 pb-3">
-                    <LoadMore pages={people} />
-                  </li>
-                ) : null}
-              </ul>
-              {roleWide && items.length ? (
-                <section
-                  aria-label={t`Emails`}
-                  className="overflow-hidden rounded-xl border bg-card"
+            <section
+              aria-label={t`Candidate conversations`}
+              className={`${mobileConversation ? "hidden lg:block" : ""} min-w-0 overflow-hidden rounded-xl border bg-card`}
+            >
+              <div className="space-y-2 border-b p-3">
+                <Input
+                  aria-label={t`Search loaded candidates`}
+                  placeholder={t`Search loaded candidates`}
+                  value={query}
+                  onChange={(event) => setQuery(event.target.value)}
+                />
+                <NativeSelect
+                  aria-label={t`Outreach status`}
+                  value={outreachFilter}
+                  onChange={(event) => setOutreachFilter(event.target.value)}
+                  className="w-full"
                 >
-                  {items.map((item) => (
-                    <button
-                      key={item.id}
-                      type="button"
-                      aria-pressed={selected?.id === item.id}
-                      aria-label={item.subject || t`No subject`}
-                      className="block w-full border-b p-3 text-start text-sm last:border-b-0 hover:bg-muted aria-pressed:bg-muted"
-                      onClick={() => setEmailId(item.id)}
-                    >
-                      <strong className="block break-words">
-                        {nameOf(item.candidateId) ?? item.sender ?? t`Sender unavailable`}
-                      </strong>
-                      <span className="block break-words">{item.subject || t`No subject`}</span>
-                      {item.date && Number.isFinite(Date.parse(item.date)) ? (
-                        <time className="text-xs text-muted-foreground" dateTime={item.date}>
-                          {formatDate(item.date)}
-                        </time>
-                      ) : null}
-                    </button>
+                  <NativeSelectOption value="all">
+                    <Trans>All statuses</Trans>
+                  </NativeSelectOption>
+                  {statuses.map((status) => (
+                    <NativeSelectOption key={status} value={`status:${status}`}>
+                      {statusText(status)}
+                    </NativeSelectOption>
                   ))}
-                </section>
+                </NativeSelect>
+              </div>
+              <ul aria-label={t`Candidates`} className="divide-y divide-border">
+                {visibleRail.map(({ id, contact, latest, experience }) => {
+                  const name = contact?.name || contact?.email || t`Candidate details unavailable`;
+                  return (
+                    <li key={id}>
+                      <button
+                        type="button"
+                        aria-label={name}
+                        aria-pressed={selectedCandidateId === id}
+                        className="flex w-full items-start gap-3 p-4 text-start text-sm hover:bg-muted aria-pressed:bg-muted"
+                        onClick={(event) => {
+                          railTrigger.current = event.currentTarget;
+                          const loaded = latestByCandidate.get(id);
+                          setCandidateId(loaded ? undefined : id);
+                          setEmailId(loaded?.id);
+                          setMobileConversation(true);
+                        }}
+                      >
+                        <ProfileImage
+                          fallback={initials(contact?.name || "")}
+                          photo
+                          className="grid size-11 shrink-0 place-items-center rounded-full bg-muted text-sm font-medium text-muted-foreground"
+                        />
+                        <span className="min-w-0 flex-1 space-y-2">
+                          <span className="flex flex-wrap items-start justify-between gap-1.5">
+                            <strong className="break-words">{name}</strong>
+                            {contact?.outreachStatus ? (
+                              <Badge
+                                variant="outline"
+                                className="max-w-full whitespace-normal break-words"
+                              >
+                                {statusText(contact.outreachStatus)}
+                              </Badge>
+                            ) : null}
+                          </span>
+                          {contact?.title || contact?.company ? (
+                            <span className="block break-words text-sm">
+                              {[contact.title, contact.company].filter(Boolean).join(" · ")}
+                            </span>
+                          ) : null}
+                          {contact?.location ? (
+                            <span className="flex items-start gap-1.5 text-xs text-muted-foreground">
+                              <MapPin size={12} aria-hidden className="mt-0.5 shrink-0" />
+                              <span className="min-w-0 break-words">{contact.location}</span>
+                            </span>
+                          ) : null}
+                          {experience ? (
+                            <span className="flex items-start gap-1.5 text-xs text-muted-foreground">
+                              <BriefcaseBusiness
+                                size={12}
+                                aria-hidden
+                                className="mt-0.5 shrink-0"
+                              />
+                              <span className="line-clamp-2 min-w-0 break-words" title={experience}>
+                                {experience}
+                              </span>
+                            </span>
+                          ) : null}
+                          {contact?.lastReplyAt &&
+                          Number.isFinite(Date.parse(contact.lastReplyAt)) ? (
+                            <span className="block text-xs text-muted-foreground">
+                              <Trans>Last reply</Trans> ·{" "}
+                              <time dateTime={contact.lastReplyAt}>
+                                {formatDate(contact.lastReplyAt)}
+                              </time>
+                            </span>
+                          ) : null}
+                          {latest ? (
+                            <span className="block border-t pt-2">
+                              <span className="line-clamp-1 break-words text-xs">
+                                {latest.subject || t`No subject`}
+                              </span>
+                              {latest.date && Number.isFinite(Date.parse(latest.date)) ? (
+                                <time
+                                  className="text-xs text-muted-foreground"
+                                  dateTime={latest.date}
+                                >
+                                  {formatDate(latest.date)}
+                                </time>
+                              ) : null}
+                            </span>
+                          ) : null}
+                        </span>
+                      </button>
+                    </li>
+                  );
+                })}
+              </ul>
+              {!visibleRail.length ? (
+                <p className="p-4 text-sm text-muted-foreground">
+                  <Trans>No loaded candidates match these filters.</Trans>
+                </p>
               ) : null}
-              {roleWide && roleMail.hasMore ? <LoadMore pages={roleMail} /> : null}
-            </div>
+              {people.hasMore ? (
+                <div className="border-t p-3">
+                  <span className="text-xs text-muted-foreground">
+                    <Trans>Candidates</Trans>
+                  </span>
+                  <LoadMore pages={people} />
+                </div>
+              ) : null}
+              {roleMail.hasMore ? (
+                <div className="border-t p-3">
+                  <span className="text-xs text-muted-foreground">
+                    <Trans>Emails</Trans>
+                  </span>
+                  <LoadMore pages={roleMail} />
+                </div>
+              ) : null}
+            </section>
           ) : null}
-          <div className="min-w-0 space-y-3">
+          <div
+            className={`${!lockedId && !mobileConversation ? "hidden lg:block" : ""} min-w-0 space-y-3`}
+          >
+            {!lockedId ? (
+              <Button
+                variant="ghost"
+                size="sm"
+                className="lg:hidden"
+                ref={backButton}
+                onClick={() => setMobileConversation(false)}
+              >
+                <ArrowLeft size={14} aria-hidden />
+                <Trans>Back to inbox</Trans>
+              </Button>
+            ) : null}
             {read.loading ? <TabLoading /> : null}
             {read.failed ? (
               <TabNotice alert>

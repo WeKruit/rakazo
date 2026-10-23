@@ -564,6 +564,7 @@ msgid "All rounds"
 msgstr ""
 
 #: src/pages/ActivityList.tsx
+#: src/pages/recruiting/InboxTab.tsx
 #: src/pages/recruiting/InterviewCalendar.tsx
 msgid "All statuses"
 msgstr ""
@@ -5051,6 +5052,7 @@ msgid "Outreach file review"
 msgstr ""
 
 #: src/pages/recruiting/DetailPanel.tsx
+#: src/pages/recruiting/InboxTab.tsx
 #: src/pages/recruiting/SequenceTab.tsx
 #: src/pages/RecruitingPanel.tsx
 msgid "Outreach status"
@@ -6134,6 +6136,7 @@ msgstr ""
 msgid "Saved email"
 msgstr ""
 
+#: src/pages/recruiting/EmailConversation.tsx
 #: src/pages/RecruitingCorrespondence.tsx
 msgid "Saved emails"
 msgstr ""
@@ -6431,7 +6434,6 @@ msgid "Send with Enter"
 msgstr "Enter 키로 전송"
 
 #: src/pages/recruiting/EmailConversation.tsx
-#: src/pages/recruiting/InboxTab.tsx
 #: src/pages/RecruitingCorrespondence.tsx
 msgid "Sender unavailable"
 msgstr ""
@@ -7183,6 +7185,7 @@ msgstr "이 구독 로그인 방식은 아직 WeKruit Headhunter에서 지원되
 msgid "This week"
 msgstr ""
 
+#: src/pages/recruiting/EmailConversation.tsx
 #: src/pages/RecruitingPanel.tsx
 msgid "Thread"
 msgstr ""
@@ -8127,3 +8130,77 @@ msgstr "Candidate status"
 #: src/pages/recruiting/InterviewTab.tsx
 msgid "{loadedCount} loaded"
 msgstr "{loadedCount} loaded"
+
+#: src/pages/recruiting/InboxTab.tsx
+msgid "Back to inbox"
+msgstr ""
+
+#: src/pages/recruiting/InboxTab.tsx
+msgid "Candidate conversations"
+msgstr ""
+
+#: src/pages/recruiting/InboxTab.tsx
+msgid "Candidate details unavailable"
+msgstr ""
+
+#: src/pages/recruiting/InterviewTab.tsx
+msgid "Candidate interview status"
+msgstr ""
+
+#: src/pages/recruiting/InterviewCalendar.tsx
+msgid "Candidate link"
+msgstr ""
+
+#: src/pages/recruiting/InterviewCalendar.tsx
+msgid "Change the week or status to review saved records. Empty space does not confirm availability."
+msgstr ""
+
+#: src/pages/recruiting/AssessmentCard.tsx
+#: src/pages/recruiting/CandidateDirectory.tsx
+#: src/pages/recruiting/SkillEvidence.tsx
+msgid "Criterion name unavailable"
+msgstr ""
+
+#: src/pages/recruiting/EmailConversation.tsx
+msgid "Email thread or message"
+msgstr ""
+
+#: src/pages/recruiting/InboxTab.tsx
+msgid "Last reply"
+msgstr ""
+
+#: src/pages/recruiting/InboxTab.tsx
+msgid "No loaded candidates match these filters."
+msgstr ""
+
+#: src/pages/recruiting/InterviewCalendar.tsx
+msgid "No saved events to show for this week and status."
+msgstr ""
+
+#: src/pages/recruiting/InterviewCalendar.tsx
+msgid "Not recorded in this source"
+msgstr ""
+
+#: src/pages/recruiting/InterviewCalendar.tsx
+msgid "Saved calendar events"
+msgstr ""
+
+#: src/pages/recruiting/InterviewCalendar.tsx
+msgid "Saved events"
+msgstr ""
+
+#: src/pages/recruiting/DetailPanel.tsx
+msgid "Scroll navigation left"
+msgstr ""
+
+#: src/pages/recruiting/DetailPanel.tsx
+msgid "Scroll navigation right"
+msgstr ""
+
+#: src/pages/recruiting/InboxTab.tsx
+msgid "Search loaded candidates"
+msgstr ""
+
+#: src/pages/recruiting/InterviewCalendar.tsx
+msgid "Select an event to see its source details. Candidate links are not included in these calendar records."
+msgstr ""

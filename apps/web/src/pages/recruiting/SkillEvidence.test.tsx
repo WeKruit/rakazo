@@ -170,10 +170,62 @@ it("leads with the supplied criterion name, preserves all assessment states, and
   expect(rows[0]?.textContent).toBe("GoMatchGo services\n\nConcern: scale unverified.");
   expect(rows[1]?.textContent).toContain("RustUnknownNo evidence provided.");
   expect(rows[2]?.textContent).toContain("KotlinGapNo Kotlin experience.");
-  expect(rows[3]?.textContent).toContain("R1Partial matchC++ experience in a lab.");
+  expect(rows[3]?.textContent).toContain(
+    "Criterion name unavailableR1Partial matchC++ experience in a lab.",
+  );
   expect([...view.querySelectorAll("mark")].map((item) => item.textContent)).toEqual([
     "Go",
     "Kotlin",
     "C++",
   ]);
+});
+
+it("shows the exact technical definition ahead of its reference in assessment and selected skill context", async () => {
+  const sections = candidateSections(
+    [
+      { label: "Skills", value: "C++", sourceUrls: [] },
+      {
+        label: "Requirement assessment",
+        value: "R4: Partial - Prototype only. Counterevidence: no production ownership stated.",
+        sourceUrls: ["https://example.test/evidence"],
+      },
+    ],
+    {
+      roleRevisionId: "revision-1",
+      revision: {
+        id: "revision-1",
+        criteria: [
+          {
+            id: "R4",
+            priority: "hard",
+            sourceRefs: [],
+            definitionQuestions: [],
+            expression: { kind: "atom", id: "cpp", statement: "C++ production systems" },
+          },
+        ],
+      },
+    },
+  );
+  const { view } = await mount(
+    <>
+      <AssessmentCard
+        score={null}
+        rank={null}
+        summary={null}
+        scope={null}
+        rows={sections.requirements}
+        sourceUrls={[]}
+      />
+      <SkillEvidence skills={sections.skills} evidence={sections.skillEvidence} />
+    </>,
+  );
+  const row = view.querySelector("li")!;
+  expect(row.textContent).toBe(
+    "C++ production systemsR4Partial matchPrototype only. Counterevidence: no production ownership stated.",
+  );
+  expect(row.querySelector(".font-medium")?.textContent).toBe("C++ production systems");
+  await act(async () => button(view, "C++").click());
+  expect(context(view).textContent).toContain("C++ production systemsR4Partial match");
+  expect(context(view).textContent).toContain("Counterevidence: no production ownership stated.");
+  expect(context(view).querySelector('a[href="https://example.test/evidence"]')).not.toBeNull();
 });

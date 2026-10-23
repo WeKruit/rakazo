@@ -192,3 +192,58 @@ it("accepts existing candidate-scoped email records without adding a candidate I
   expect(view.querySelector("img")?.src).toBe("https://assets.example.test/photo.png");
   expect(view.querySelector("img")?.getAttribute("referrerpolicy")).toBe("no-referrer");
 });
+
+it("separates supplied provider threads and keeps unthreaded messages independent", async () => {
+  const first = { ...current, threadId: "thread-a" };
+  const history = { ...previous, threadId: "thread-a" };
+  const other = {
+    ...current,
+    id: "other",
+    threadId: "thread-b",
+    subject: "Other saved conversation",
+    body: "Other thread body",
+  };
+  const unthreaded = {
+    ...previous,
+    id: "without-thread",
+    threadId: null,
+    body: "No thread recorded",
+  };
+  const draft = vi.fn();
+  function Fixture() {
+    const [selectedId, setSelectedId] = useState(first.id);
+    return (
+      <EmailConversation
+        items={[first, history, other, unthreaded]}
+        selectedId={selectedId}
+        onSelect={(email) => setSelectedId(email.id)}
+        onDraftReply={draft}
+      />
+    );
+  }
+  const { view } = await mount(<Fixture />);
+  const select = view.querySelector<HTMLSelectElement>(
+    'select[aria-label="Email thread or message"]',
+  )!;
+  expect(select.options).toHaveLength(3);
+  expect(view.querySelector('ol[aria-label="Emails"]')?.textContent).not.toContain(
+    "Other thread body",
+  );
+  expect(view.querySelector("details")?.textContent).toContain(history.body);
+  await act(async () => {
+    select.value = "thread:thread-b";
+    select.dispatchEvent(new Event("change", { bubbles: true }));
+  });
+  expect(view.querySelector("article")?.textContent).toContain("Other thread body");
+  expect(view.querySelector("details")).toBeNull();
+  await act(async () => button(view, "Draft reply").click());
+  expect(draft.mock.calls.at(-1)?.[0]).toBe(other);
+  await act(async () => {
+    select.value = "message:without-thread";
+    select.dispatchEvent(new Event("change", { bubbles: true }));
+  });
+  expect(view.querySelector("article")?.textContent).toContain("No thread recorded");
+  expect(view.querySelector("details")).toBeNull();
+  await act(async () => button(view, "Draft reply").click());
+  expect(draft.mock.calls.at(-1)?.[0]).toBe(unthreaded);
+});

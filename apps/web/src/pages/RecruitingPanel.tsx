@@ -5691,6 +5691,7 @@ function RecruitingWorkspace({
                   <ContactsTab
                     roleId={workspace.role.id}
                     spaceId={workspace.role.spaceId}
+                    criterionRevision={workspace.revision}
                     conversation={groupId ? { groupId } : botId ? { botId } : undefined}
                     crmTarget={workspace.crmTarget?.target ?? null}
                     refreshSignal={(refreshSignal ?? 0) + refresh}

@@ -45,6 +45,8 @@ export function InterviewCalendar({
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const scroll = useRef<HTMLElement>(null);
   const opener = useRef<HTMLButtonElement | null>(null);
+  const rail = useRef<HTMLElement>(null);
+  const restoreEvent = useRef<string | null>(null);
   const dayButtons = useRef<Array<HTMLButtonElement | null>>([]);
   const today = calendarDay(currentTime, zone);
   const currentMinute = calendarMinute(currentTime, zone);
@@ -74,6 +76,9 @@ export function InterviewCalendar({
     [filtered, anchor, zone],
   );
   const selected = filtered.find((event) => event.id === selectedId);
+  const weekEvents = [
+    ...new Map(layout.segments.map(({ event }) => [event.id, event])).values(),
+  ].sort((a, b) => Date.parse(a.start) - Date.parse(b.start));
 
   useEffect(() => {
     if (now) return;
@@ -99,6 +104,29 @@ export function InterviewCalendar({
     const first = visible.length ? Math.min(...visible.map((row) => row.startMinute)) : 8 * 60;
     if (scroll.current) scroll.current.scrollTop = Math.max(0, first - 60) * MINUTE_HEIGHT;
   }, [weekKey, selectedDay, zone]);
+  useEffect(() => {
+    const button = dayButtons.current[dayIndex];
+    const selector = button?.parentElement;
+    if (!button || !selector) return;
+    const bounds = selector.getBoundingClientRect();
+    const selectedBounds = button.getBoundingClientRect();
+    // Scroll only this selector. scrollIntoView can also move the surrounding page or panel.
+    if (selectedBounds.left < bounds.left) {
+      selector.scrollLeft += selectedBounds.left - bounds.left;
+    } else if (selectedBounds.right > bounds.right) {
+      selector.scrollLeft += selectedBounds.right - bounds.right;
+    }
+  }, [dayIndex, weekKey]);
+  useEffect(() => {
+    if (selected || !restoreEvent.current) return;
+    const target = opener.current?.isConnected
+      ? opener.current
+      : [
+          ...(rail.current?.querySelectorAll<HTMLButtonElement>("[data-saved-event-id]") ?? []),
+        ].find((button) => button.dataset.savedEventId === restoreEvent.current);
+    restoreEvent.current = null;
+    target?.focus({ preventScroll: true });
+  }, [selected]);
 
   const dayLabel = (day: string, weekday: "short" | "long" = "short") =>
     new Intl.DateTimeFormat(locale, {
@@ -148,13 +176,13 @@ export function InterviewCalendar({
   };
   const moveDay = (index: number) => {
     setDayIndex(index);
-    dayButtons.current[index]?.focus();
+    dayButtons.current[index]?.focus({ preventScroll: true });
   };
 
   return (
     <section
       aria-label={t`Calendar`}
-      className="@container/interview min-w-0 space-y-3"
+      className="@container/interview min-w-0 space-y-3 rounded-xl border bg-card p-3"
       data-testid="interview-calendar"
     >
       <div className="flex flex-wrap items-center justify-between gap-3">
@@ -271,9 +299,7 @@ export function InterviewCalendar({
           </Button>
         ))}
       </fieldset>
-      <div
-        className={`grid min-w-0 gap-3 ${selected ? "@5xl/interview:grid-cols-[minmax(0,1fr)_18rem]" : ""}`}
-      >
+      <div className="grid min-w-0 gap-3 @5xl/interview:grid-cols-[minmax(0,1fr)_18.75rem]">
         <div className="min-w-0 overflow-hidden rounded-lg border">
           <div className="grid grid-cols-[3.5rem_minmax(0,1fr)] border-b bg-card @3xl/interview:grid-cols-[3.5rem_repeat(7,minmax(0,1fr))]">
             <span className="p-2 text-xs text-muted-foreground">
@@ -288,9 +314,25 @@ export function InterviewCalendar({
               </h4>
             ))}
           </div>
+          {!layout.segments.length ? (
+            <div
+              className="space-y-1 border-b bg-muted/40 px-4 py-5"
+              data-testid="calendar-empty-guidance"
+            >
+              <p className="text-sm font-medium">
+                <Trans>No timed events in this week.</Trans>
+              </p>
+              <p className="text-xs text-muted-foreground">
+                <Trans>
+                  Change the week or status to review saved records. Empty space does not confirm
+                  availability.
+                </Trans>
+              </p>
+            </div>
+          ) : null}
           <section
             ref={scroll}
-            className="rk-scroll max-h-[34rem] overflow-y-auto focus-visible:outline-2 focus-visible:outline-ring"
+            className={`rk-scroll ${layout.segments.length ? "max-h-[34rem]" : "max-h-64"} overflow-y-auto focus-visible:outline-2 focus-visible:outline-ring`}
             data-testid="calendar-hours"
             aria-label={t`Calendar hours`}
             // biome-ignore lint/a11y/noNoninteractiveTabindex: Keyboard users need to focus and scroll the calendar hours.
@@ -398,6 +440,7 @@ export function InterviewCalendar({
         </div>
         {selected ? (
           <aside
+            ref={rail}
             aria-label={t`Event details`}
             aria-live="polite"
             className="min-w-0 space-y-3 rounded-lg border bg-card p-3 text-sm"
@@ -409,8 +452,8 @@ export function InterviewCalendar({
                 variant="ghost"
                 aria-label={t`Close event details`}
                 onClick={() => {
+                  restoreEvent.current = selected.id;
                   setSelectedId(null);
-                  opener.current?.focus();
                 }}
               >
                 <X size={16} aria-hidden />
@@ -458,7 +501,24 @@ export function InterviewCalendar({
                   </dt>
                   <dd className="break-words">{selected.attendees.join(", ")}</dd>
                 </div>
-              ) : null}
+              ) : (
+                <div>
+                  <dt className="text-xs text-muted-foreground">
+                    <Trans>Attendees</Trans>
+                  </dt>
+                  <dd>
+                    <Trans>Not recorded</Trans>
+                  </dd>
+                </div>
+              )}
+              <div>
+                <dt className="text-xs text-muted-foreground">
+                  <Trans>Candidate link</Trans>
+                </dt>
+                <dd>
+                  <Trans>Not recorded in this source</Trans>
+                </dd>
+              </div>
             </dl>
             <details className="text-xs">
               <summary className="cursor-pointer text-muted-foreground">
@@ -496,13 +556,56 @@ export function InterviewCalendar({
               </a>
             ) : null}
           </aside>
-        ) : null}
+        ) : (
+          <aside
+            ref={rail}
+            aria-label={t`Saved calendar events`}
+            className="min-w-0 rounded-lg border bg-card p-3 text-sm"
+          >
+            <h4 className="font-semibold">
+              <Trans>Saved events</Trans>
+            </h4>
+            <p className="mt-1 text-xs text-muted-foreground">
+              <Trans>
+                Select an event to see its source details. Candidate links are not included in these
+                calendar records.
+              </Trans>
+            </p>
+            {weekEvents.length ? (
+              <ul className="mt-3 divide-y">
+                {weekEvents.map((event) => (
+                  <li key={event.id}>
+                    <button
+                      type="button"
+                      data-saved-event-id={event.id}
+                      className="w-full space-y-1 rounded-md py-3 text-start focus-visible:outline-2 focus-visible:outline-ring"
+                      onClick={(click) => {
+                        opener.current = click.currentTarget;
+                        setSelectedId(event.id);
+                      }}
+                    >
+                      <span className="block break-words font-medium">{title(event)}</span>
+                      <time className="block text-xs text-muted-foreground" dateTime={event.start}>
+                        {fullTime(event.start)}
+                      </time>
+                      <span className="flex flex-wrap gap-1">
+                        <Badge variant="secondary">
+                          {event.kind === "availability" ? t`Available time` : t`Calendar event`}
+                        </Badge>
+                        {event.status ? <Badge variant="outline">{event.status}</Badge> : null}
+                      </span>
+                    </button>
+                  </li>
+                ))}
+              </ul>
+            ) : (
+              <p className="mt-4 text-xs text-muted-foreground">
+                <Trans>No saved events to show for this week and status.</Trans>
+              </p>
+            )}
+          </aside>
+        )}
       </div>
-      {!layout.segments.length ? (
-        <p className="text-sm text-muted-foreground">
-          <Trans>No timed events in this week.</Trans>
-        </p>
-      ) : null}
       {layout.unplaced.length ? (
         <details className="rounded-lg border p-3 text-sm">
           <summary className="cursor-pointer font-medium">
