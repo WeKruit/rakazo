@@ -28,6 +28,8 @@ msgid "{0, plural, =1 {# candidate-role record} other {# candidate-role records}
 msgstr "{0, plural, =1 {# candidate-role record} other {# candidate-role records}}"
 
 #. placeholder {0}: candidatePage.total
+#. placeholder {0}: list.total
+#: src/pages/recruiting/ContactsTab.tsx
 #: src/pages/RecruitingPanel.tsx
 msgid "{0, plural, =1 {# candidate} other {# candidates}}"
 msgstr "{0, plural, =1 {# candidate} other {# candidates}}"
@@ -73,6 +75,11 @@ msgstr "{0} (XLSX is not supported yet. Save as CSV and upload again.)"
 #: src/pages/RoutineSchedule.tsx
 msgid "{0} {unitLabel}"
 msgstr "{0} {unitLabel}"
+
+#. placeholder {0}: person.title
+#: src/pages/recruiting/DetailPanel.tsx
+msgid "{0} at {company}"
+msgstr "{0} at {company}"
 
 #. placeholder {0}: block.name
 #: src/pages/shell/message-cards.tsx
@@ -290,7 +297,7 @@ msgstr "Accounts"
 msgid "Action confirmations"
 msgstr "Action confirmations"
 
-#: src/pages/RecruitingPanel.tsx
+#: src/pages/recruiting/ContactsTab.tsx
 msgid "Actions"
 msgstr "Actions"
 
@@ -318,6 +325,7 @@ msgid "Active model"
 msgstr "Active model"
 
 #: src/components/computer/TerminalApp.tsx
+#: src/pages/recruiting/ContactsTab.tsx
 #: src/pages/RecruitingPanel.tsx
 #: src/pages/Shell.tsx
 msgid "Activity"
@@ -329,6 +337,7 @@ msgstr "Activity"
 msgid "Add"
 msgstr "Add"
 
+#: src/pages/recruiting/ContactsTab.tsx
 #: src/pages/RecruitingPanel.tsx
 msgid "Add {name} to shortlist"
 msgstr "Add {name} to shortlist"
@@ -1061,7 +1070,6 @@ msgstr "cancelled"
 msgid "Cancelled"
 msgstr "Cancelled"
 
-#: src/pages/recruiting/ContactsTab.tsx
 #: src/pages/recruiting/InterviewTab.tsx
 #: src/pages/RecruitingPanel.tsx
 msgid "Candidate"
@@ -1649,15 +1657,14 @@ msgstr "Consideration resumed"
 msgid "Contact campaign associations"
 msgstr "Contact campaign associations"
 
-#: src/pages/RecruitingPanel.tsx
+#: src/pages/recruiting/DetailPanel.tsx
+msgid "Contact details"
+msgstr "Contact details"
+
+#: src/pages/recruiting/ContactsTab.tsx
 msgid "Contact details have not been checked yet."
 msgstr "Contact details have not been checked yet."
 
-#: src/pages/Shell.tsx
-msgid "Contact source"
-msgstr "Contact source"
-
-#: src/pages/recruiting/ContactsTab.tsx
 #: src/pages/recruiting/DetailPanel.tsx
 #: src/pages/RecruitingPanel.tsx
 msgid "Contact status"
@@ -1960,15 +1967,18 @@ msgstr "Could not load candidates"
 msgid "Could not load commands"
 msgstr "Could not load commands"
 
-#: src/pages/RecruitingPanel.tsx
-msgid "Could not load contact details. Refresh to try again."
-msgstr "Could not load contact details. Refresh to try again."
+#: src/pages/recruiting/ContactsTab.tsx
+msgid "Could not load contact details"
+msgstr "Could not load contact details"
 
 #: src/pages/shell/bot-credentials.tsx
 msgid "Could not load credentials."
 msgstr "Could not load credentials."
 
 #: src/pages/recruiting/ContactsTab.tsx
+msgid "Could not load CRM records"
+msgstr "Could not load CRM records"
+
 #: src/pages/recruiting/InboxTab.tsx
 #: src/pages/recruiting/InterviewTab.tsx
 #: src/pages/recruiting/SequenceTab.tsx
@@ -2014,6 +2024,7 @@ msgstr "Could not load run history"
 msgid "Could not load saved results. Try refreshing."
 msgstr "Could not load saved results. Try refreshing."
 
+#: src/pages/recruiting/ContactsTab.tsx
 #: src/pages/RecruitingPanel.tsx
 msgid "Could not load search results"
 msgstr "Could not load search results"
@@ -2181,6 +2192,7 @@ msgstr "Could not save routine"
 msgid "Could not save rule"
 msgstr "Could not save rule"
 
+#: src/pages/recruiting/ContactsTab.tsx
 #: src/pages/RecruitingPanel.tsx
 msgid "Could not save shortlist"
 msgstr "Could not save shortlist"
@@ -2376,13 +2388,8 @@ msgid "CRM"
 msgstr "CRM"
 
 #: src/pages/RecruitingPanel.tsx
-#: src/pages/Shell.tsx
 msgid "CRM contacts"
 msgstr "CRM contacts"
-
-#: src/pages/Shell.tsx
-msgid "CRM history"
-msgstr "CRM history"
 
 #: src/pages/RecruitingPanel.tsx
 msgid "CRM receipt"
@@ -2406,7 +2413,6 @@ msgid "Current password"
 msgstr "Current password"
 
 #: src/pages/recruiting/ContactsTab.tsx
-#: src/pages/recruiting/DetailPanel.tsx
 #: src/pages/RecruitingPanel.tsx
 msgid "Current role"
 msgstr "Current role"
@@ -2414,10 +2420,6 @@ msgstr "Current role"
 #: src/pages/RecruitingPanel.tsx
 msgid "Current role not returned"
 msgstr "Current role not returned"
-
-#: src/pages/Shell.tsx
-msgid "Current search"
-msgstr "Current search"
 
 #: src/pages/shell/bot-credentials.tsx
 msgid "Custom header"
@@ -2675,6 +2677,8 @@ msgstr "Docker is configured but computers are not responding. Confirm the sandb
 msgid "Docker limits access to your computer for added security. Using {hostLabel} lets bots work with your local files and tools."
 msgstr "Docker limits access to your computer for added security. Using {hostLabel} lets bots work with your local files and tools."
 
+#: src/pages/recruiting/ContactsTab.tsx
+#: src/pages/recruiting/DetailPanel.tsx
 #: src/pages/RecruitingPanel.tsx
 msgid "Does not match"
 msgstr "Does not match"
@@ -2763,8 +2767,12 @@ msgstr "Edit Profile"
 msgid "Edit search filters"
 msgstr "Edit search filters"
 
-#: src/pages/Auth.tsx
 #: src/pages/recruiting/ContactsTab.tsx
+#: src/pages/recruiting/DetailPanel.tsx
+msgid "Education"
+msgstr "Education"
+
+#: src/pages/Auth.tsx
 #: src/pages/recruiting/DetailPanel.tsx
 #: src/pages/recruiting/InterviewTab.tsx
 #: src/pages/RecruitingPanel.tsx
@@ -2776,6 +2784,8 @@ msgstr "Email"
 msgid "Email content"
 msgstr "Email content"
 
+#: src/pages/recruiting/ContactsTab.tsx
+#: src/pages/recruiting/DetailPanel.tsx
 #: src/pages/RecruitingPanel.tsx
 msgid "Email draft"
 msgstr "Email draft"
@@ -2896,6 +2906,7 @@ msgstr "Every month"
 msgid "Every week"
 msgstr "Every week"
 
+#: src/pages/recruiting/DetailPanel.tsx
 #: src/pages/RecruitingPanel.tsx
 msgid "Evidence"
 msgstr "Evidence"
@@ -2917,6 +2928,10 @@ msgstr "Expand"
 #: src/pages/Shell.tsx
 msgid "Expand {0}"
 msgstr "Expand {0}"
+
+#: src/pages/recruiting/DetailPanel.tsx
+msgid "Experience"
+msgstr "Experience"
 
 #: src/pages/shell/bot-panel.tsx
 msgid "Export"
@@ -3008,7 +3023,7 @@ msgstr "Filter by date"
 msgid "Filters"
 msgstr "Filters"
 
-#: src/pages/RecruitingPanel.tsx
+#: src/pages/recruiting/DetailPanel.tsx
 msgid "Find email"
 msgstr "Find email"
 
@@ -3048,6 +3063,11 @@ msgstr "Finished."
 #: src/pages/McpOAuthCallback.tsx
 msgid "Finishing MCP connection…"
 msgstr "Finishing MCP connection…"
+
+#: src/pages/recruiting/ContactsTab.tsx
+#: src/pages/recruiting/DetailPanel.tsx
+msgid "Fit"
+msgstr "Fit"
 
 #: src/pages/RecruitingPanel.tsx
 msgid "Fixed date"
@@ -3543,7 +3563,6 @@ msgid "Link SSO"
 msgstr "Link SSO"
 
 #: src/pages/recruiting/ContactsTab.tsx
-#: src/pages/recruiting/DetailPanel.tsx
 #: src/pages/RecruitingCorrespondence.tsx
 #: src/pages/RecruitingPanel.tsx
 msgid "LinkedIn"
@@ -3597,10 +3616,6 @@ msgstr "Loaded files"
 #: src/pages/ActivityList.tsx
 msgid "Loading activity…"
 msgstr "Loading activity…"
-
-#: src/pages/RecruitingPanel.tsx
-msgid "Loading contact details…"
-msgstr "Loading contact details…"
 
 #: src/pages/RecruitingPanel.tsx
 msgid "Loading CRM records…"
@@ -3677,7 +3692,7 @@ msgstr "Local access lets bots run commands without asking. Avoid it on shared o
 msgid "Local Server Settings"
 msgstr "Local Server Settings"
 
-#: src/pages/recruiting/DetailPanel.tsx
+#: src/pages/recruiting/ContactsTab.tsx
 #: src/pages/RecruitingPanel.tsx
 msgid "Location"
 msgstr "Location"
@@ -3754,6 +3769,8 @@ msgstr "Mark as Unread"
 msgid "Marked as sent"
 msgstr "Marked as sent"
 
+#: src/pages/recruiting/ContactsTab.tsx
+#: src/pages/recruiting/DetailPanel.tsx
 #: src/pages/RecruitingPanel.tsx
 msgid "Match"
 msgstr "Match"
@@ -4043,6 +4060,7 @@ msgstr "Mute"
 #: src/components/teach/SkillDraftCard.tsx
 #: src/pages/Auth.tsx
 #: src/pages/GroupPanel.tsx
+#: src/pages/recruiting/ContactsTab.tsx
 #: src/pages/RecruitingPanel.tsx
 #: src/pages/RoutineEditor.tsx
 #: src/pages/shell/bot-credentials.tsx
@@ -4147,6 +4165,7 @@ msgstr "New space"
 msgid "New ticket"
 msgstr "New ticket"
 
+#: src/pages/recruiting/DetailPanel.tsx
 #: src/pages/RecruitingPanel.tsx
 msgid "Next"
 msgstr "Next"
@@ -4330,6 +4349,7 @@ msgstr "No runs yet"
 msgid "No saved assessments"
 msgstr "No saved assessments"
 
+#: src/pages/recruiting/ContactsTab.tsx
 #: src/pages/RecruitingPanel.tsx
 msgid "No saved candidates"
 msgstr "No saved candidates"
@@ -4732,6 +4752,7 @@ msgstr "Outdated"
 msgid "Output"
 msgstr "Output"
 
+#: src/pages/recruiting/DetailPanel.tsx
 #: src/pages/RecruitingCorrespondence.tsx
 msgid "Outreach"
 msgstr "Outreach"
@@ -4740,7 +4761,6 @@ msgstr "Outreach"
 msgid "Outreach file review"
 msgstr "Outreach file review"
 
-#: src/pages/recruiting/ContactsTab.tsx
 #: src/pages/recruiting/DetailPanel.tsx
 #: src/pages/recruiting/SequenceTab.tsx
 #: src/pages/RecruitingPanel.tsx
@@ -4815,7 +4835,6 @@ msgstr "Paused"
 msgid "Pending approval"
 msgstr "Pending approval"
 
-#: src/pages/recruiting/ContactsTab.tsx
 #: src/pages/recruiting/DetailPanel.tsx
 #: src/pages/RecruitingPanel.tsx
 msgid "Phone"
@@ -4912,6 +4931,7 @@ msgstr "Preview only"
 msgid "Preview only. Ask for the complete message to read the full body."
 msgstr "Preview only. Ask for the complete message to read the full body."
 
+#: src/pages/recruiting/DetailPanel.tsx
 #: src/pages/RecruitingPanel.tsx
 msgid "Previous"
 msgstr "Previous"
@@ -5185,6 +5205,7 @@ msgstr "Recruiting workflow"
 msgid "Recruiting workspace"
 msgstr "Recruiting workspace"
 
+#: src/pages/recruiting/ContactsTab.tsx
 #: src/pages/Shell.tsx
 msgid "Refine in chat"
 msgstr "Refine in chat"
@@ -5193,7 +5214,6 @@ msgstr "Refine in chat"
 #: src/components/ErrorBoundary.tsx
 #: src/pages/RecruitingPanel.tsx
 #: src/pages/RoutineRunHistory.tsx
-#: src/pages/Shell.tsx
 msgid "Refresh"
 msgstr "Refresh"
 
@@ -5251,6 +5271,7 @@ msgstr "Remove {0}"
 msgid "Remove {full}"
 msgstr "Remove {full}"
 
+#: src/pages/recruiting/ContactsTab.tsx
 #: src/pages/RecruitingPanel.tsx
 msgid "Remove {name} from shortlist"
 msgstr "Remove {name} from shortlist"
@@ -5373,6 +5394,7 @@ msgstr "Requirements and feedback stay with this role."
 msgid "Research & writing"
 msgstr "Research & writing"
 
+#: src/pages/recruiting/DetailPanel.tsx
 #: src/pages/RecruitingPanel.tsx
 msgid "Research findings"
 msgstr "Research findings"
@@ -5447,6 +5469,7 @@ msgstr "Restoring your workspace"
 msgid "Results saved"
 msgstr "Results saved"
 
+#: src/pages/recruiting/DetailPanel.tsx
 #: src/pages/RecruitingPanel.tsx
 msgid "Resume"
 msgstr "Resume"
@@ -5474,6 +5497,7 @@ msgstr "Resume: {0}"
 #: src/pages/Auth.tsx
 #: src/pages/ModelBackupsSettings.tsx
 #: src/pages/PluginsOverlay.tsx
+#: src/pages/recruiting/RetryNotice.tsx
 #: src/pages/RecruitingPanel.tsx
 msgid "Retry"
 msgstr "Retry"
@@ -5929,10 +5953,6 @@ msgstr "Search providers"
 msgid "Search refinement"
 msgstr "Search refinement"
 
-#: src/pages/Shell.tsx
-msgid "Search results"
-msgstr "Search results"
-
 #: src/pages/shell/RecruitingNavigation.tsx
 msgid "Search roles"
 msgstr "Search roles"
@@ -6151,6 +6171,8 @@ msgstr "Shared skills"
 msgid "Shell"
 msgstr "Shell"
 
+#: src/pages/recruiting/ContactsTab.tsx
+#: src/pages/recruiting/DetailPanel.tsx
 #: src/pages/RecruitingPanel.tsx
 #: src/pages/shell/RecruitingNavigation.tsx
 msgid "Shortlist"
@@ -6169,6 +6191,8 @@ msgstr "Shortlist {name}"
 msgid "Shortlist people from search results to keep them here."
 msgstr "Shortlist people from search results to keep them here."
 
+#: src/pages/recruiting/ContactsTab.tsx
+#: src/pages/recruiting/DetailPanel.tsx
 #: src/pages/RecruitingPanel.tsx
 msgid "Shortlisted"
 msgstr "Shortlisted"
@@ -6190,6 +6214,7 @@ msgid "Show list"
 msgstr "Show list"
 
 #: src/pages/PluginsOverlay.tsx
+#: src/pages/recruiting/DetailPanel.tsx
 msgid "Show more"
 msgstr "Show more"
 
@@ -6208,6 +6233,11 @@ msgstr "Show settings"
 #: src/components/call/VoiceChatCard.tsx
 msgid "Show transcript"
 msgstr "Show transcript"
+
+#. placeholder {0}: rows.length
+#: src/pages/recruiting/ContactsTab.tsx
+msgid "Showing the first {0}"
+msgstr "Showing the first {0}"
 
 #: src/pages/recruiting/InterviewTab.tsx
 msgid "Showing the most recent CRM records."
@@ -6257,6 +6287,10 @@ msgstr "Site"
 msgid "Skill {0}"
 msgstr "Skill {0}"
 
+#: src/pages/recruiting/DetailPanel.tsx
+msgid "Skills"
+msgstr "Skills"
+
 #: src/components/integrations/IntegrationSetup.tsx
 #: src/pages/Shell.tsx
 msgid "Skip"
@@ -6288,7 +6322,7 @@ msgstr "Slack not enabled"
 msgid "Software update"
 msgstr "Software update"
 
-#: src/pages/RecruitingPanel.tsx
+#: src/pages/recruiting/ContactsTab.tsx
 msgid "Some saved contact details could not be displayed."
 msgstr "Some saved contact details could not be displayed."
 
@@ -6367,7 +6401,6 @@ msgstr "Speech model"
 msgid "SSO is temporarily unavailable. Try again."
 msgstr "SSO is temporarily unavailable. Try again."
 
-#: src/pages/recruiting/ContactsTab.tsx
 #: src/pages/recruiting/DetailPanel.tsx
 #: src/pages/RecruitingPanel.tsx
 msgid "Stage"
@@ -6873,6 +6906,8 @@ msgstr "Unassigned"
 msgid "Unavailable"
 msgstr "Unavailable"
 
+#: src/pages/recruiting/ContactsTab.tsx
+#: src/pages/recruiting/DetailPanel.tsx
 #: src/pages/RecruitingPanel.tsx
 msgid "Unclear"
 msgstr "Unclear"
@@ -6901,6 +6936,7 @@ msgstr "Unmet"
 msgid "Unmute"
 msgstr "Unmute"
 
+#: src/pages/recruiting/ContactsTab.tsx
 #: src/pages/RecruitingPanel.tsx
 msgid "Unnamed candidate"
 msgstr "Unnamed candidate"

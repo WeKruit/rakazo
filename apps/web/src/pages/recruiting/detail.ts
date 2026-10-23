@@ -8,6 +8,7 @@ import {
   useState,
 } from "react";
 import { useNavigate, useSearchParams } from "react-router-dom";
+import type { RecruitingCandidate } from "@rakazo/contracts";
 import type { RecruitingTabProps } from "./shared";
 
 /** The person a detail view shows, as the opening row already displayed it. */
@@ -17,6 +18,7 @@ export type RecruitingDetailPerson = {
   email?: string | null;
   phone?: string | null;
   title?: string | null;
+  company?: string | null;
   location?: string | null;
   linkedinUrl?: string | null;
   stage?: string | null;
@@ -30,6 +32,19 @@ export type RecruitingDetailTarget = {
   view: RecruitingDetailView;
   person: RecruitingDetailPerson;
   role: Pick<RecruitingTabProps, "roleId" | "spaceId" | "conversation">;
+  /** The person's Autumn search result, when they have one. */
+  candidate?: RecruitingCandidate;
+  /** False when the person has no CRM record, so `candidateId` reads no CRM mail or calendar. */
+  crm?: boolean;
+  /** What the opening list can do for this person; nothing here sends a message. */
+  actions?: {
+    emailDraft?: () => void;
+    findEmail?: () => void;
+    shortlist?: { shortlisted: boolean; disabled: boolean; set: (shortlisted: boolean) => void };
+    openEvidence?: (trigger: HTMLElement) => void;
+  };
+  /** The neighbouring person in the opening list, to walk it without closing the panel. */
+  walk?: (step: -1 | 1) => RecruitingDetailTarget | undefined;
 };
 
 /** Search parameter holding the open detail; history entries make browser Back close it. */
@@ -44,6 +59,8 @@ export type RecruitingDetailController = {
   current?: RecruitingDetailTarget;
   /** Opens a target on top of the stack (one history entry), keeping the page underneath. */
   open: (target: RecruitingDetailTarget) => void;
+  /** Shows another target in place of the current one, without a new history entry. */
+  replace: (target: RecruitingDetailTarget) => void;
   back: () => void;
   close: () => void;
 };
@@ -127,6 +144,24 @@ export function useRecruitingDetailController(resetKey?: string): RecruitingDeta
     },
     [setSearchParams],
   );
+  const replace = useCallback(
+    (target: RecruitingDetailTarget) => {
+      const current = stackRef.current;
+      if (!current.length) return;
+      const next = [...current.slice(0, -1), target];
+      stackRef.current = next;
+      setStack(next);
+      setSearchParams(
+        (previous) => {
+          const params = new URLSearchParams(previous);
+          params.set(DETAIL_PARAM, detailKey(target));
+          return params;
+        },
+        { replace: true },
+      );
+    },
+    [setSearchParams],
+  );
   const back = useCallback(() => navigate(-1), [navigate]);
   const close = useCallback(() => {
     const depth = stackRef.current.length;
@@ -142,7 +177,7 @@ export function useRecruitingDetailController(resetKey?: string): RecruitingDeta
   }, [empty]);
 
   return useMemo(
-    () => ({ stack, current: stack.at(-1), open, back, close }),
-    [stack, open, back, close],
+    () => ({ stack, current: stack.at(-1), open, replace, back, close }),
+    [stack, open, replace, back, close],
   );
 }
