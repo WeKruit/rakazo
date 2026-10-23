@@ -7,10 +7,20 @@ import { loadRecruitingRunContext } from "./recruiting-context.js";
 import { buildRecruitingResearchRequest } from "./recruiting-research.js";
 import { executeRecruitingRoleTool } from "./recruiting-tools.js";
 
-const db = vi.hoisted(() => ({ workspace: vi.fn(), adopt: vi.fn(), feedback: vi.fn() }));
+const db = vi.hoisted(() => ({
+  workspace: vi.fn(),
+  crmWorkspace: vi.fn(),
+  adopt: vi.fn(),
+  feedback: vi.fn(),
+}));
 vi.mock("@rakazo/db", async (original) => ({
   ...(await original<object>()),
-  getRecruitingWorkspace: db.workspace,
+  getRecruitingRoleSnapshot: db.workspace,
+  // Role tools still read the full workspace; record that path separately.
+  getRecruitingWorkspace: (...args: unknown[]) => {
+    db.crmWorkspace(...args);
+    return db.workspace(...args);
+  },
   recordRecruitingContextAdoption: db.adopt,
   listRecruitingFeedback: db.feedback,
 }));
@@ -131,6 +141,15 @@ describe("recruiting run context", () => {
     expect(initial!.manifest.roleText).toEqual(adopted!.manifest.roleText);
     expect(initial!.contextArtifact).toEqual(adopted!.contextArtifact);
     expect(saved.size).toBe(1);
+  });
+
+  it("reads only the role snapshot at run start, not the CRM binding receipt", async () => {
+    const { deps } = fixture();
+    await loadRecruitingRunContext(deps, run, { documents: [] }, context, { reason: "run" });
+    expect(db.workspace).toHaveBeenCalledExactlyOnceWith(deps.prisma, expect.anything(), {
+      threadId: run.threadId,
+    });
+    expect(db.crmWorkspace).not.toHaveBeenCalled();
   });
 
   it.each(["absent", "missing", "ready"] as const)(

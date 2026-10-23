@@ -30,6 +30,7 @@ import {
   settleUncertainRecruitingResearchAction,
 } from "@rakazo/db";
 import { beforeEach, describe, expect, it, vi } from "vitest";
+import { INTERNAL_ARTIFACT_ERROR } from "./artifact-read.js";
 
 import type * as AutoReviewModule from "./auto-review.js";
 import { runAutoReviewJudge } from "./auto-review.js";
@@ -1009,7 +1010,7 @@ describe("explicit artifact workspace writes", () => {
       });
       f.setCalls([{ name, args: { artifactId: context.id }, executionId: "private-context" }]);
       await f.run();
-      expect(f.results[0]).toEqual({ error: "Artifact is unavailable." });
+      expect(f.results[0]).toEqual({ error: INTERNAL_ARTIFACT_ERROR });
       expect(f.prisma.artifact.findFirst).toHaveBeenCalledWith({
         where: { id: context.id, spaceId: "space-1", userId: "user-1" },
       });

@@ -1,4 +1,5 @@
 // @vitest-environment jsdom
+import { ORPCError } from "@orpc/client";
 import type { ReactNode } from "react";
 import { act } from "react";
 import { createRoot } from "react-dom/client";
@@ -8,6 +9,16 @@ const listCandidates = vi.hoisted(() => vi.fn());
 const crmData = vi.hoisted(() => vi.fn());
 const correspondence = vi.hoisted(() => vi.fn());
 const roleCampaign = vi.hoisted(() => vi.fn());
+// A failure here stands for exhausted retries unless a test turns real retries on.
+const readRetries = vi.hoisted(() => ({ real: false }));
+vi.mock("../../lib/read-retry", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("../../lib/read-retry")>();
+  return {
+    ...actual,
+    retryTransientRead: async <T,>(read: () => Promise<T>, signal?: AbortSignal) =>
+      readRetries.real ? actual.retryTransientRead(read, signal) : read(),
+  };
+});
 vi.mock("../../lib/rpc", () => ({
   rpc: { recruiting: { listCandidates, crmData, correspondence, roleCampaign } },
 }));
@@ -86,6 +97,7 @@ beforeEach(() => {
   correspondence.mockResolvedValue(savedCorrespondence);
 });
 afterEach(async () => {
+  readRetries.real = false;
   await cleanup?.();
   cleanup = undefined;
   vi.resetAllMocks();
@@ -281,6 +293,26 @@ it("shows every candidate's stored mail for the role by default in one read", as
   expect(onSelectEmail).toHaveBeenLastCalledWith(
     expect.objectContaining({ candidateId: ADA, candidateName: "Ada" }),
   );
+});
+
+it("retries a transient CRM failure behind the loading state and reports a denial at once", async () => {
+  readRetries.real = true;
+  crmData.mockRejectedValueOnce(new ORPCError("SERVICE_UNAVAILABLE", { status: 503 }));
+  crmData.mockResolvedValue(candidatesPage);
+  const view = await mount(<ContactsTab {...props} />);
+  expect(view.textContent).not.toContain("Could not load CRM records");
+  await act(async () => new Promise((resolve) => setTimeout(resolve, 1_100)));
+  expect(view.textContent).toContain("Ada");
+  expect(view.textContent).not.toContain("Could not load CRM records");
+  await cleanup?.();
+  crmData.mockReset();
+  crmData.mockRejectedValue(new ORPCError("FORBIDDEN"));
+  const denied = await mount(<ContactsTab {...props} />);
+  await settle();
+  expect(denied.querySelector('[role="alert"]')?.textContent).toContain(
+    "Could not load CRM records",
+  );
+  expect(crmData).toHaveBeenCalledTimes(1);
 });
 
 it("shows an error instead of falling back when the role-wide mail read fails", async () => {
@@ -536,4 +568,37 @@ it("totals Sequence statuses over every CRM page, not only the loaded rows", asy
   expect(view.textContent).toContain("Not contacted · 9");
   // The list itself still shows only its first page.
   expect(view.querySelectorAll("button[aria-pressed]")).toHaveLength(25);
+});
+
+it("keeps Sequence status chips from the loaded rows when totalling fails", async () => {
+  roleCampaign.mockResolvedValue({
+    status: "ready",
+    campaign: {
+      id: "c1",
+      name: "Staff Engineer outreach [role 00000000-0000-4000-8000-000000000002]",
+      status: 0,
+      stopOnReply: true,
+    },
+    leads: [],
+  });
+  crmData.mockImplementation(async (input: { operation: string; limit?: number }) => {
+    if (input.operation === "candidates" && input.limit === 50) throw new Error("503");
+    return input.operation === "candidates"
+      ? candidatesPage
+      : {
+          operation: input.operation,
+          source,
+          checkedAt,
+          items: [],
+          total: 0,
+          offset: 0,
+          nextOffset: null,
+        };
+  });
+  const view = await mount(<SequenceTab {...props} />);
+  await settle();
+  expect(view.textContent).toContain("Replied · 1");
+  expect(view.textContent).toContain("Not contacted · 1");
+  expect(view.textContent).toContain("Staff Engineer outreach");
+  expect(view.textContent).not.toContain("[role");
 });

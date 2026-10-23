@@ -5,6 +5,8 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import type * as ComputerLifecycleModule from "./computer-lifecycle.js";
 import { acquireComputerExecutionLease, provisionComputer } from "./computer-lifecycle.js";
 import { createRunExecutor } from "./executor.js";
+import type * as RecruitingContextModule from "./recruiting-context.js";
+import { loadRecruitingRunContext } from "./recruiting-context.js";
 
 vi.mock("./computer-lifecycle.js", async (importOriginal) => ({
   ...(await importOriginal<typeof ComputerLifecycleModule>()),
@@ -12,7 +14,13 @@ vi.mock("./computer-lifecycle.js", async (importOriginal) => ({
   provisionComputer: vi.fn(async () => ({ id: "computer-1", kind: "desktop" })),
 }));
 
+vi.mock("./recruiting-context.js", async (importOriginal) => ({
+  ...(await importOriginal<typeof RecruitingContextModule>()),
+  loadRecruitingRunContext: vi.fn(async () => undefined),
+}));
+
 beforeEach(() => {
+  vi.mocked(loadRecruitingRunContext).mockClear();
   vi.mocked(acquireComputerExecutionLease).mockClear();
   vi.mocked(provisionComputer).mockClear();
 });
@@ -78,6 +86,8 @@ async function runWithModel(
     /** Resolves tool discovery only when called; setup steps that run alongside it are observable. */
     discoverTools?: () => Promise<[]>;
     onEventFindFirst?: () => void;
+    /** The thread's active recruiting role; enables the run-start recruiting context. */
+    recruitingRoleId?: string;
   } = {},
 ) {
   const run = {
@@ -158,6 +168,7 @@ async function runWithModel(
         historyCompactionSummary: null,
         historyCompactedUpToSeq: null,
         nextMessageSeq: 3,
+        activeRecruitingRoleId: options.recruitingRoleId ?? null,
         runs: options.previousRun ? [options.previousRun] : [],
       })),
       update: vi.fn(async () => ({ nextMessageSeq: 4, nextEventSeq: 4 })),
@@ -404,6 +415,27 @@ describe("recent turn images follow model vision", () => {
     expect(discoverTools).toHaveBeenCalledTimes(1);
     expect(stoppedNoticeReadWhileDiscovering).toBe(true);
     expect(request.history.at(-1)?.content).toContain("stopped by the user");
+  });
+
+  it("starts the run-start recruiting context while tool discovery is still pending", async () => {
+    let recruitingStartedWhileDiscovering = false;
+    const discoverTools = vi.fn(async (): Promise<[]> => {
+      await new Promise((resolve) => setTimeout(resolve, 0));
+      recruitingStartedWhileDiscovering = vi.mocked(loadRecruitingRunContext).mock.calls.length > 0;
+      return [];
+    });
+    await runWithModel(TEXT_ONLY_MODEL, undefined, false, false, {
+      discoverTools,
+      recruitingRoleId: "role-1",
+    });
+    expect(loadRecruitingRunContext).toHaveBeenCalledExactlyOnceWith(
+      expect.anything(),
+      expect.objectContaining({ id: "run-1" }),
+      expect.anything(),
+      expect.objectContaining({ runId: "run-1" }),
+      expect.objectContaining({ reason: "run", placement: "instructions" }),
+    );
+    expect(recruitingStartedWhileDiscovering).toBe(true);
   });
 
   it("carries the volatile run context as the last required history entry, not in the system prompt", async () => {

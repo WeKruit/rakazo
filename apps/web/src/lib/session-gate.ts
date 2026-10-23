@@ -40,8 +40,8 @@ export function showSessionUnavailable(gate: SessionGate, holding: boolean): boo
 const RETRY_BASE_MS = 1_000;
 const RETRY_MAX_MS = 15_000;
 
-/** Exponential backoff for retrying an unreachable session lookup. */
-export function sessionRetryDelayMs(attempt: number): number {
+/** Exponential backoff for retrying an unreachable session lookup or other read. */
+export function sessionRetryDelayMs(attempt: number, maxMs = RETRY_MAX_MS): number {
   const exponent = Math.max(0, attempt);
-  return Math.min(RETRY_MAX_MS, RETRY_BASE_MS * 2 ** exponent);
+  return Math.min(maxMs, RETRY_BASE_MS * 2 ** exponent);
 }
