@@ -7747,3 +7747,7 @@ msgstr "无法打开此岗位。"
 #: src/pages/RecruitingCorrespondence.tsx
 msgid "Draft a reply to the selected email for me to review. Read the original conversation and verify the candidate and role. Do not send."
 msgstr "请为选中的邮件起草回复供我审阅。阅读原始对话并核实候选人和岗位。不要发送。"
+
+#: src/pages/RecruitingPanel.tsx
+msgid "Recruiter messages are unavailable for this role."
+msgstr "此岗位的招聘人员消息暂不可用。"

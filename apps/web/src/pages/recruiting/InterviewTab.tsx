@@ -74,11 +74,18 @@ export function InterviewTab({
   const rows = candidateId
     ? allRows.filter(({ item }) => item.candidateId === candidateId)
     : allRows;
-  const email = candidateEmail?.toLowerCase();
+  const email = candidateEmail?.trim().toLowerCase();
   const events = (calendar.data?.status === "ready" ? calendar.data.events : []).filter(
     (event) =>
       !candidateId ||
-      Boolean(email && event.attendees.some((attendee) => attendee.toLowerCase().includes(email))),
+      Boolean(
+        email &&
+          event.attendees.some((attendee) => {
+            // Calendar attendees are bare addresses or display-name <address> values.
+            const address = attendee.trim().match(/^[^<>]*<([^<>]+)>$/)?.[1] ?? attendee;
+            return address.trim().toLowerCase() === email;
+          }),
+      ),
   );
   return (
     <section aria-label={t`Interview`}>

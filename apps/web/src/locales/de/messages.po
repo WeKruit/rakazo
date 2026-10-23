@@ -7747,3 +7747,7 @@ msgstr ""
 #: src/pages/RecruitingCorrespondence.tsx
 msgid "Draft a reply to the selected email for me to review. Read the original conversation and verify the candidate and role. Do not send."
 msgstr ""
+
+#: src/pages/RecruitingPanel.tsx
+msgid "Recruiter messages are unavailable for this role."
+msgstr ""

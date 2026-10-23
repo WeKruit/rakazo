@@ -2807,7 +2807,13 @@ function CrmRecruitingPanel({
       <h3 className="font-semibold">
         <Trans>Recruiter messages</Trans>
       </h3>
-      {outbox.length ? (
+      {contactRead?.data &&
+      "outboxScope" in contactRead.data &&
+      contactRead.data.outboxScope === "unavailable_for_role" ? (
+        <p>
+          <Trans>Recruiter messages are unavailable for this role.</Trans>
+        </p>
+      ) : outbox.length ? (
         outbox.map((message) => (
           <article key={message.id} className="space-y-2 border-t pt-3">
             <p>

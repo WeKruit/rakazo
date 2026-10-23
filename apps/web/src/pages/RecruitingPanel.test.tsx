@@ -321,6 +321,7 @@ it("shows exact candidate native correspondence with CRM history without treatin
           candidateId: input.candidateId,
           outbox: [],
           nativeCorrespondence: native,
+          outboxScope: "unavailable_for_role",
           items: [
             {
               id: "instantly-source:read",
@@ -367,6 +368,8 @@ it("shows exact candidate native correspondence with CRM history without treatin
     groupId: "group-1",
     crmBrowse: browse,
   });
+  expect(view.container.textContent).toContain("Recruiter messages are unavailable for this role.");
+  expect(view.container.textContent).not.toContain("No recruiter messages were found.");
   expect(view.container.textContent).toContain("read full body");
   expect(view.container.textContent).toContain("Instantly account");
   expect(view.container.textContent).toContain("Send outcome unknown");

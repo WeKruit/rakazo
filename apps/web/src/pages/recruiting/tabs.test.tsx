@@ -701,3 +701,38 @@ it("shows a failed source as a compact Retry that re-reads only that source", as
   expect(crmData).toHaveBeenCalledTimes(2);
   expect(correspondence.mock.calls.length).toBe(reads);
 });
+
+it.each([
+  ["ada@example.com", true],
+  [" ADA@EXAMPLE.COM ", true],
+  ["Ada Lovelace <ADA@example.com>", true],
+  ["notada@example.com", false],
+  ["ada@example.com.attacker.test", false],
+  ["ada@example.com <other@example.com>", false],
+  ["Ada <ada@example.com>, Other <other@example.com>", false],
+  ["other@example.com", false],
+])("matches candidate calendar attendee %s by exact address", async (attendee, matches) => {
+  crmData.mockResolvedValue(candidatesPage);
+  correspondence.mockResolvedValue({
+    ...savedCorrespondence,
+    events: [
+      {
+        id: "exact-event",
+        title: "Candidate-specific appointment",
+        kind: "event",
+        status: "confirmed",
+        start: checkedAt,
+        end: null,
+        timeZone: "UTC",
+        attendees: [attendee],
+        location: null,
+        url: null,
+      },
+    ],
+  });
+  const view = await mount(
+    <InterviewTab {...props} candidateId={ADA} candidateEmail="ada@example.com" />,
+  );
+  await settle();
+  expect(view.textContent?.includes("Candidate-specific appointment")).toBe(matches);
+});
