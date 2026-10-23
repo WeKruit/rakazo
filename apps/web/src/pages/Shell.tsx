@@ -611,6 +611,23 @@ export function ShellPage() {
   const [recruitingRefresh, setRecruitingRefresh] = useState(0);
   // The role chat starts open: answers and confirmation cards must be visible without a click.
   const [roleChatOpen, setRoleChatOpen] = useState(true);
+  // A message sent during a reply interjects; it is queued until the reply takes it in.
+  const [steer, setSteer] = useState<{ threadId: string; state: "queued" | "applied" } | null>(
+    null,
+  );
+  const [requeuedRunIds, setRequeuedRunIds] = useState<string[]>([]);
+  const observeRunSignal = useCallback((event: { type: string; runId?: string | null; threadId?: string | null }) => {
+    if (event.type === "run.steering.claimed")
+      setSteer((current) =>
+        current && current.threadId === event.threadId && current.state === "queued"
+          ? { ...current, state: "applied" }
+          : current,
+      );
+    if (event.type === "run.requeued" && event.runId) {
+      const runId = event.runId;
+      setRequeuedRunIds((current) => (current.includes(runId) ? current : [...current.slice(-9), runId]));
+    }
+  }, []);
   const roleChatId = useId();
   const roleChatTrigger = useRef<HTMLButtonElement>(null);
   const roleChatSection = useRef<HTMLElement>(null);
@@ -1866,6 +1883,7 @@ export function ShellPage() {
         applyThreadEvent(event, commitSnapshot, commitComputer, snapshotRef, computerRef),
       onEvent: (event, initial, sync) => {
         observeThreadEvent(event, initial.cursor);
+        observeRunSignal(event);
         applyRunStatus(event);
         invalidateRecruiting(event);
         const currentBot = botsRef.current.find((bot) => bot.id === active.id);
@@ -2009,6 +2027,7 @@ export function ShellPage() {
         ),
       onEvent: (event, initial, sync) => {
         observeThreadEvent(event, initial.cursor);
+        observeRunSignal(event);
         applyRunStatus(event);
         invalidateRecruiting(event);
         const eventBot = botsRef.current.find((bot) => bot.id === event.botId);
@@ -2930,6 +2949,15 @@ export function ShellPage() {
   );
   const transcriptRunning = workingRuns.length > 0;
   const composerRunning = currentRuns.some((run) => isActive(run.status));
+  // Only a reply that is still working takes an interjection; one waiting on a card does not.
+  const composerRunningRef = useRef(transcriptRunning);
+  composerRunningRef.current = transcriptRunning;
+  const runningThreadId = transcriptRunning ? activeSnapshot?.threadId : undefined;
+  const shownSteer = steer && steer.threadId === runningThreadId ? steer.state : null;
+  // A reply whose worker stopped is queued again and resumes on its own; say so until it does.
+  const resuming = currentRuns.some(
+    (run) => requeuedRunIds.includes(run.id) && ["queued", "waiting_takeover"].includes(run.status),
+  );
   const runError = threadRunError(activeSnapshot, dismissedRunErrorIds);
   const displayedRunError =
     !sendError && runError
@@ -3443,6 +3471,10 @@ export function ShellPage() {
           withdrawEcho();
           return false;
         }
+        const interjectThreadId = composerRunningRef.current
+          ? snapshotRef.current?.threadId
+          : undefined;
+        const interject = Boolean(interjectThreadId && !reroutedToGroup);
         if (groupTarget) {
           const sent = await rpc.threads.send({
             groupId: groupTarget,
@@ -3455,6 +3487,7 @@ export function ShellPage() {
             artifactIds: artifactIds.length ? artifactIds : undefined,
             replyToMessageId: reroutedToGroup ? undefined : activeReplyTarget?.id,
             replyQuote: reroutedToGroup ? undefined : (activeReplyQuote ?? undefined),
+            ...(interject ? { interrupt: true } : {}),
           });
           accepted = true;
           if (echoed) turnTimer.accepted(clientNonce, sent.runId);
@@ -3469,6 +3502,7 @@ export function ShellPage() {
             artifactIds: artifactIds.length ? artifactIds : undefined,
             replyToMessageId: activeReplyTarget?.id,
             replyQuote: activeReplyQuote ?? undefined,
+            ...(interject ? { interrupt: true } : {}),
           });
           accepted = true;
           if (echoed) turnTimer.accepted(clientNonce, sent.runId);
@@ -3486,6 +3520,8 @@ export function ShellPage() {
             );
           }
         }
+        if (interject && interjectThreadId)
+          setSteer({ threadId: interjectThreadId, state: "queued" });
         dropDelayedSetup();
         clearReply();
         revokePendingAttachmentPreviews(attachments);
@@ -5552,6 +5588,17 @@ export function ShellPage() {
                   </Button>
                 );
               })}
+          </div>
+        ) : null}
+        {resuming || shownSteer ? (
+          <div role="status" className="px-6 pb-2 text-center text-[13px] text-muted-foreground">
+            {resuming ? (
+              <Trans>Interrupted, resuming…</Trans>
+            ) : shownSteer === "applied" ? (
+              <Trans>Interjection applied</Trans>
+            ) : (
+              <Trans>Interjection queued</Trans>
+            )}
           </div>
         ) : null}
         {recordingSkill ? (
