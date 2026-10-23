@@ -77,6 +77,12 @@ describe.skipIf(!databaseAvailable)("offline Pi product journey", () => {
         encryptionKey: "offline-model-fixture-encryption-key",
       });
       stop = handles.stop;
+      const ready = await handles.app.request("/ready");
+      expect(ready.status).toBe(200);
+      expect(await ready.json()).toEqual({ ok: true, degraded: false });
+      // Staging supplies its full tested SHA; broad CI may omit release identity.
+      if (process.env.RAKAZO_GIT_SHA)
+        expect(ready.headers.get("x-rakazo-revision")).toBe(process.env.RAKAZO_GIT_SHA);
       const signup = await handles.app.request("/api/auth/sign-up/email", {
         method: "POST",
         headers: { "content-type": "application/json", origin: fixtureOrigin },

@@ -54,6 +54,11 @@ python3 infra/release/staging.py --sha "$(git rev-parse HEAD)"
 # If native PostgreSQL binaries are outside PATH, add --pg-bin <binary-directory>.
 ```
 
+Production's supported entrypoint is the dispatch workflow. Its trusted `fetch`
+step authenticates the staging artifact before `promote` rechecks the source and
+prerequisites. `promote` is an internal second step, not an independent way to
+authenticate an arbitrary locally assembled release directory.
+
 The release candidate is pinned source plus lockfile and migration evidence. It
 is not a previously built Modal image, and rebuilding it is not a claim of
 byte-for-byte image reproducibility. Record the resulting platform deployment

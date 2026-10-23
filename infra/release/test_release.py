@@ -402,6 +402,63 @@ class PromotionSourceTests(OfflineTest):
                 run.assert_not_called()
 
 
+class PromotionExecutionTests(OfflineTest):
+    def test_promotes_only_the_verified_source_to_the_existing_app_and_checks_exact_revision(self):
+        with tempfile.TemporaryDirectory() as name:
+            directory = Path(name)
+            manifest, _archive = bundle(directory)
+            info = {"description": "synthetic-app", "lifecycle": {"state": "deployed"}}
+            with patch.dict(os.environ, approval_env(), clear=True), patch.object(
+                release, "verify_promotion_source"
+            ) as verify, patch.object(release, "run", side_effect=[json.dumps(info).encode(), b""]) as run, patch.object(
+                release, "smoke"
+            ) as smoke, patch("builtins.print"):
+                release.promote(directory, SHA)
+            verify.assert_called_once_with(directory, manifest)
+            self.assertEqual([call.args for call in run.call_args_list], [
+                ("modal", "app", "info", "synthetic-app", "--env", "production", "--json"),
+                ("modal", "deploy", "--env", "production", "--strategy", "recreate", "--tag", SHA, "infra/modal/app.py"),
+            ])
+            self.assertEqual(run.call_args_list[1].kwargs, {"cwd": directory / "source", "timeout": 1200})
+            smoke.assert_called_once_with("https://example.test", SHA)
+
+    def test_wrong_or_stopped_app_never_reaches_deploy(self):
+        for info in ({"description": "different-app", "lifecycle": {"state": "deployed"}},
+                     {"description": "synthetic-app", "lifecycle": {"state": "stopped"}}):
+            with self.subTest(info=info), tempfile.TemporaryDirectory() as name:
+                directory = Path(name)
+                bundle(directory)
+                with patch.dict(os.environ, approval_env(), clear=True), patch.object(
+                    release, "verify_promotion_source"
+                ), patch.object(release, "run", return_value=json.dumps(info).encode()) as run, patch.object(
+                    release, "smoke"
+                ) as smoke, self.assertRaisesRegex(ValueError, "Existing deployed Modal app"):
+                    release.promote(directory, SHA)
+                self.assertEqual(run.call_count, 1)
+                self.assertEqual(run.call_args.args[:3], ("modal", "app", "info"))
+                smoke.assert_not_called()
+
+    def test_failed_smoke_reports_failure_without_rollback_sync_or_other_commands(self):
+        with tempfile.TemporaryDirectory() as name:
+            directory = Path(name)
+            bundle(directory)
+            info = {"description": "synthetic-app", "lifecycle": {"state": "deployed"}}
+            with patch.dict(os.environ, approval_env(), clear=True), patch.object(
+                release, "verify_promotion_source"
+            ), patch.object(release, "run", side_effect=[json.dumps(info).encode(), b""]) as run, patch.object(
+                release, "smoke", side_effect=ValueError("synthetic readiness failure")
+            ) as smoke, patch.object(release.time, "sleep") as sleep, self.assertRaisesRegex(
+                ValueError, "Post-deploy smoke failed; preserve holds"
+            ):
+                release.promote(directory, SHA)
+            self.assertEqual([call.args[:3] for call in run.call_args_list], [
+                ("modal", "app", "info"), ("modal", "deploy", "--env"),
+            ])
+            self.assertEqual(smoke.call_count, 12)
+            self.assertTrue(all(call.args == ("https://example.test", SHA) for call in smoke.call_args_list))
+            self.assertEqual([call.args for call in sleep.call_args_list], [(5,)] * 11)
+
+
 class Response:
     def __init__(self, status=200, headers=None, body=b""):
         self.status, self.headers, self.body = status, headers or {}, body
