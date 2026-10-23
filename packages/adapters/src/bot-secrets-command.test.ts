@@ -315,6 +315,50 @@ describe("shell command environment", () => {
     expect(`${output.stdout}${output.stderr}`).not.toContain("fake-space-only");
   });
 
+  it("exports only the bot variables the command text names, and still redacts them", async () => {
+    const db = fakeDatabase();
+    await save(db, "cli-token", "fake-cli-token");
+    await save(db, "deploy-key", "fake-deploy-key");
+    await save(db, "unused-token", "fake-unused-token");
+    const load = vi.fn((ciphertext: string, recordId: string) =>
+      secretStore.load(ciphertext, recordId),
+    );
+    const registerRedactions = vi.fn();
+    const { env } = await shellCommandEnvironment({
+      prisma: db.prisma,
+      secretStore: { load },
+      scope,
+      spaceEnvironment: { SPACE_ONLY: "fake-space-only" },
+      registerRedactions,
+      command: 'curl -H "Authorization: $CLI_TOKEN" "${DEPLOY_KEY:-none}" && echo $PATH',
+    });
+    expect(env).toEqual({
+      SPACE_ONLY: "fake-space-only",
+      CLI_TOKEN: "fake-cli-token",
+      DEPLOY_KEY: "fake-deploy-key",
+    });
+    expect(Object.hasOwn(env, "UNUSED_TOKEN")).toBe(false);
+    // The unreferenced credential is never decrypted for this command.
+    expect(load).toHaveBeenCalledTimes(2);
+    expect(registerRedactions).toHaveBeenCalledExactlyOnceWith(
+      commandCredentialRedactions({ CLI_TOKEN: "fake-cli-token", DEPLOY_KEY: "fake-deploy-key" }),
+    );
+  });
+
+  it("exports no bot variable when the command names none", async () => {
+    const db = fakeDatabase();
+    await save(db, "cli-token", "fake-cli-token");
+    const { env } = await shellCommandEnvironment({
+      prisma: db.prisma,
+      secretStore,
+      scope,
+      spaceEnvironment: { SPACE_ONLY: "fake-space-only" },
+      registerRedactions: vi.fn(),
+      command: "ls -la",
+    });
+    expect(env).toEqual({ SPACE_ONLY: "fake-space-only" });
+  });
+
   it("does not let one unencodable stored value abort the shell environment", async () => {
     const db = fakeDatabase();
     await save(db, "good-token", "fake-good-token");

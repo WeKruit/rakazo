@@ -240,6 +240,41 @@ export function unattendedTriggerToolRequiresApproval(
     : !UNATTENDED_SAFE_BUILTIN_TOOLS.has(toolName);
 }
 
+/** Runs opened by external text: a messaging channel or inbound conversation, not a person here. */
+const EXTERNAL_TEXT_TRIGGERS = new Set(["messaging"]);
+// Outbound sends and record mutations with no undo. Reads and drafts stay available.
+const IRREVERSIBLE_CONNECTOR_PATTERN =
+  /(^|_)(send|reply|forward|post|publish|delete|cancel|pay|charge|purchase|buy|invite|submit|activate|enroll|unsubscribe)(_|$)|send.*mail|gmail_send|outlook_send/i;
+
+export const EXTERNAL_TEXT_TRIGGER_REFUSAL =
+  "This conversation was opened by an external message, so sending or changing records is not allowed from it. The draft was prepared; a human must review and send it from an attended conversation.";
+
+/**
+ * A run triggered by external text (a messaging channel, an inbound email) may read and draft, but
+ * must not send or irreversibly change records, even through an approval card: the only person who
+ * could answer that card is not the one who wrote the triggering text. Returns the refusal to show
+ * the model, or undefined when the tool stays available (possibly behind the usual approval).
+ */
+export function externalTextTriggerToolRefusal(
+  trigger: string,
+  toolName: string,
+  viaConnector: boolean,
+  route?: { connectorId: string; toolName: string },
+  args?: Record<string, unknown>,
+  serverEndpoint?: string | null,
+  readOnly?: boolean,
+): string | undefined {
+  if (!EXTERNAL_TEXT_TRIGGERS.has(trigger)) return undefined;
+  if (toolRequiresExplicitApproval(toolName, route, args, serverEndpoint))
+    return EXTERNAL_TEXT_TRIGGER_REFUSAL;
+  if (!viaConnector || readOnly === true) return undefined;
+  const operation = route?.toolName ?? toolName;
+  return IRREVERSIBLE_CONNECTOR_PATTERN.test(operation) ||
+    IRREVERSIBLE_CONNECTOR_PATTERN.test(toolName)
+    ? EXTERNAL_TEXT_TRIGGER_REFUSAL
+    : undefined;
+}
+
 function categoryMatches(
   category: string,
   toolName: string,
