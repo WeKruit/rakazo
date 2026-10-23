@@ -2431,13 +2431,45 @@ function CrmRecruitingPanel({
   }, [detailsKey, readCache, readCacheScope]);
   const currentDetails = detailsRead?.key === detailsKey ? detailsRead : undefined;
   const details = currentDetails?.data;
+  const contactRegion = useRef<HTMLElement>(null);
+  const contactHeadingId = useId();
+  const revealedContact = useRef<string | null>(null);
+  const contactRead = browse.view === "inbox" ? currentMail : currentDetails;
+  const contactReady = Boolean(contactRead?.data || contactRead?.failed);
+  const contactKey = JSON.stringify([
+    readCacheScope,
+    browse.view,
+    browse.view === "inbox" ? mailInput : detailsInput,
+    browse.view === "inbox" ? selectedMail : undefined,
+  ]);
+  const revealContact = useCallback(() => {
+    contactRegion.current?.scrollIntoView({ block: "start" });
+    contactRegion.current?.focus({ preventScroll: true });
+  }, []);
+  useEffect(() => {
+    if (!browse.candidateId || !["inbox", "feedback", "sequence"].includes(browse.view)) {
+      revealedContact.current = null;
+      return;
+    }
+    if (!contactReady || revealedContact.current === contactKey) return;
+    const frame = window.requestAnimationFrame(() => {
+      if (!contactRegion.current) return;
+      revealContact();
+      revealedContact.current = contactKey;
+    });
+    return () => window.cancelAnimationFrame(frame);
+  }, [browse.candidateId, browse.view, contactKey, contactReady, revealContact]);
+  function selectContact(id: string, view?: RecruitingWorkspaceView) {
+    if (browse.view === (view ?? "inbox") && browse.candidateId === id && contactReady)
+      revealContact();
+    if (view) browse.onSelectCandidate(id, view);
+    else browse.onSelectCandidate(id);
+  }
   const selectedRole = page?.selectedRole;
+  const roleJdUrl =
+    selectedRole?.jdUrl && /^https?:\/\//i.test(selectedRole.jdUrl) ? selectedRole.jdUrl : null;
   const initialDescription = selectedRole
-    ? [
-        `${selectedRole.roleLabel} · ${selectedRole.clientLabel}`,
-        selectedRole.jdText,
-        selectedRole.jdUrl && /^https?:\/\//i.test(selectedRole.jdUrl) ? selectedRole.jdUrl : null,
-      ]
+    ? [`${selectedRole.roleLabel} · ${selectedRole.clientLabel}`, selectedRole.jdText, roleJdUrl]
         .filter(Boolean)
         .join("\n\n")
     : "";
@@ -2573,10 +2605,7 @@ function CrmRecruitingPanel({
                           {new Date(person.statusChangedAt ?? person.updatedAt).toLocaleString()}
                         </td>
                         <td>
-                          <Button
-                            variant="link"
-                            onClick={() => browse.onSelectCandidate(person.candidateId)}
-                          >
+                          <Button variant="link" onClick={() => selectContact(person.candidateId)}>
                             <Trans>View messages</Trans>
                           </Button>
                         </td>
@@ -2622,6 +2651,17 @@ function CrmRecruitingPanel({
         </section>
       ) : browse.view === "brief" ? (
         <section className="space-y-4">
+          {selectedRole &&
+          ![selectedRole.summary, selectedRole.description, selectedRole.jdText, roleJdUrl].some(
+            (value) => value?.trim(),
+          ) ? (
+            <p>
+              <Trans>
+                No job description is saved for this role. Add a JD or link when starting
+                recruiting.
+              </Trans>
+            </p>
+          ) : null}
           {page?.selectedRole?.summary ? <p>{page.selectedRole.summary}</p> : null}
           {page?.selectedRole?.description ? (
             <p className="whitespace-pre-wrap">{page.selectedRole.description}</p>
@@ -2629,13 +2669,8 @@ function CrmRecruitingPanel({
           {page?.selectedRole?.jdText ? (
             <p className="whitespace-pre-wrap">{page.selectedRole.jdText}</p>
           ) : null}
-          {page?.selectedRole?.jdUrl && /^https?:\/\//i.test(page.selectedRole.jdUrl) ? (
-            <a
-              className="underline"
-              href={page.selectedRole.jdUrl}
-              target="_blank"
-              rel="noreferrer"
-            >
+          {roleJdUrl ? (
+            <a className="underline" href={roleJdUrl} target="_blank" rel="noreferrer">
               <Trans>Original job description</Trans>
             </a>
           ) : null}
@@ -2799,8 +2834,8 @@ function CrmRecruitingPanel({
                         variant="link"
                         onClick={() =>
                           browse.view === "feedback" || browse.view === "sequence"
-                            ? browse.onSelectCandidate(person.candidateId, browse.view)
-                            : browse.onSelectCandidate(person.candidateId)
+                            ? selectContact(person.candidateId, browse.view)
+                            : selectContact(person.candidateId)
                         }
                       >
                         {browse.view === "feedback" || browse.view === "sequence" ? (
@@ -2833,8 +2868,13 @@ function CrmRecruitingPanel({
             ) : null}
           </div>
           {browse.view === "feedback" || browse.view === "sequence" ? (
-            <section className="my-6 space-y-4">
-              <h2 className="font-semibold">
+            <section
+              ref={contactRegion}
+              aria-labelledby={contactHeadingId}
+              tabIndex={-1}
+              className="my-6 space-y-4"
+            >
+              <h2 id={contactHeadingId} className="font-semibold">
                 {selectedPerson?.name ?? details?.review?.candidateName ?? t`Candidate details`}
               </h2>
               {!browse.candidateId ? (
@@ -2995,8 +3035,8 @@ function CrmRecruitingPanel({
             </section>
           ) : null}
           {browse.view === "inbox" ? (
-            <section>
-              <h2 className="mb-3 font-semibold">
+            <section ref={contactRegion} aria-labelledby={contactHeadingId} tabIndex={-1}>
+              <h2 id={contactHeadingId} className="mb-3 font-semibold">
                 {selectedPerson?.name ?? t`Candidate messages`}
               </h2>
               {!browse.candidateId ? (
