@@ -15,6 +15,7 @@ const publicActivities = [
   ["mcp_execute_tool", "connected_action"],
   ["connectors_execute_tool", "connected_action"],
   ["native_instantly_search_contact_emails", "emails"],
+  ["native_instantly_list_mailbox_emails", "emails"],
 ] as const;
 export type PublicToolActivity =
   | (typeof publicActivities)[number][1]
@@ -49,12 +50,12 @@ export function latestNativeToolActivity(
   const operation = name?.includes("__")
     ? name
         ?.match(
-          /^(?:mcp|instantly|cal)__.+__(get_email|list_emails|get_thread_history|search_contact_emails|get_availability)$/,
+          /^(?:mcp|instantly|cal)__.+__(get_email|list_emails|get_thread_history|search_contact_emails|list_mailbox_emails|get_availability)$/,
         )?.[1]
         ?.replaceAll("_", " ")
     : name
       ? humanizeToolName(name).match(
-          /^(?:Mcp|Instantly|Cal) .+ (get email|list emails|get thread history|search contact emails|get availability)$/,
+          /^(?:Mcp|Instantly|Cal) .+ (get email|list emails|get thread history|search contact emails|list mailbox emails|get availability)$/,
         )?.[1]
       : undefined;
   if (operation === "get availability") return "availability";

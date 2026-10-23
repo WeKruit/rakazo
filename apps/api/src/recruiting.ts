@@ -1225,7 +1225,7 @@ export async function getRecruitingCorrespondence(
           continue;
         }
         const id = `${source.id}:${email.id}`;
-        const membership = stableJsonValue([source.id, email.campaign_id, email.id]);
+        const membership = stableJsonValue([source.id, email.campaign_id ?? null, email.id]);
         if (
           call.route.toolName === "get_email" &&
           (email.id !== call.args.id || !mailMembership.has(membership))
@@ -1233,10 +1233,11 @@ export async function getRecruitingCorrespondence(
           checkIssue(source.id, effect.updatedAt);
           continue;
         }
+        // Non-campaign Unibox mail (direct replies, off-sequence mail) has no campaign to verify; keep it.
         if (
-          !email.campaign_id ||
-          !mailCampaigns.has(stableJsonValue([source.id, email.campaign_id])) ||
-          (call.route.toolName === "list_emails" && email.campaign_id !== call.args.campaign_id)
+          email.campaign_id &&
+          (!mailCampaigns.has(stableJsonValue([source.id, email.campaign_id])) ||
+            (call.route.toolName === "list_emails" && email.campaign_id !== call.args.campaign_id))
         ) {
           checkIssue(source.id, effect.updatedAt);
           continue;
