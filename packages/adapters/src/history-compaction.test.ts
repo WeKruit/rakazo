@@ -653,6 +653,16 @@ describe("compactHistory", () => {
     expect(harness.runtime.run).toHaveBeenCalledOnce();
     const [request] = harness.runtime.run.mock.calls[0]!;
     expect(request.instructions).toContain("Current date and time");
+    for (const section of [
+      "## Goal",
+      "## Requirements and preferences",
+      "## Candidates and decisions",
+      "## Open questions and next steps",
+      "## Critical references",
+      "## Mistakes to avoid",
+    ])
+      expect(request.instructions).toContain(section);
+    expect(request.instructions).toContain("never paraphrase a constraint");
     expect(request.tools).toEqual([]);
     expect(request.model).toEqual({
       provider: "openrouter",
