@@ -913,11 +913,6 @@ function SavedCorrespondenceView({
                       <Trans>Step</Trans> · {selected.step}
                     </p>
                   ) : null}
-                  {selected.leadId ? (
-                    <p className="break-all">
-                      <Trans>Lead ID</Trans> · {selected.leadId}
-                    </p>
-                  ) : null}
                   {selected.observedAt ? (
                     <p>
                       <Trans>Observed at</Trans> ·{" "}

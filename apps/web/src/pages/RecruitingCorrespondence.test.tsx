@@ -932,7 +932,7 @@ it("filters only observed unread mail without treating unknown status as read or
     "Loaded observations: 4 emails · 1 unread · 2 read status unknown",
   );
   expect(view.container.textContent).toContain("Observed unread");
-  expect(view.container.textContent).toContain("11111111-1111-4111-8111-111111111111");
+  expect(view.container.textContent).not.toContain("11111111-1111-4111-8111-111111111111");
   await view.click("Unread");
   expect(view.container.querySelectorAll('[aria-label="Candidate conversations"] li')).toHaveLength(
     1,
