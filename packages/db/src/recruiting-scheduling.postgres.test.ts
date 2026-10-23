@@ -871,4 +871,235 @@ database("scheduling plan persistence (local PostgreSQL)", () => {
     });
     await expect(createRecruitingSchedulingPlan(prisma, actor, linked)).rejects.toThrow();
   });
+  let staleCase = 0;
+  async function staleBookingFixture() {
+    const start = `2026-12-${String(++staleCase).padStart(2, "0")}T06:30:00Z`;
+    const end = start.replace("06:30", "07:00");
+    const availability = await effect(
+      calendarId,
+      "get_availability",
+      { eventTypeId: 42, start, end, duration: 30, format: "range" },
+      { status: "success", data: { day: [{ start, end }] } },
+    );
+    const selected = {
+      ...input,
+      calendar: { ...input.calendar, start, end, availabilityEffectId: availability.id },
+    };
+    const plan = await createRecruitingSchedulingPlan(prisma, actor, selected);
+    const booking = await effect(calendarId, "create_booking", {
+      eventTypeId: 42,
+      start,
+      lengthInMinutes: 30,
+      attendee: input.candidate,
+    });
+    await bindRecruitingSchedulingOperation(prisma, actor, {
+      threadId: input.threadId,
+      planId: plan.id,
+      operation: "book",
+      effectId: booking.id,
+    });
+    const booked = {
+      uid: randomUUID(),
+      status: "accepted",
+      start,
+      end,
+      attendees: [input.candidate],
+      hosts: [input.interviewer],
+    };
+    await prisma.externalEffect.update({
+      where: { id: booking.id },
+      data: {
+        status: "completed",
+        result: { structuredContent: { status: "success", data: booked } },
+      },
+    });
+    const read = await effect(
+      calendarId,
+      "get_booking",
+      { bookingUid: booked.uid },
+      { status: "success", data: booked },
+    );
+    const reply = await effect(mailId, "native_instantly_reply_to_email", {
+      reply_to_uuid: "original-email",
+      eaccount: "recruiter@example.test",
+      body: { text: "Confirmed" },
+    });
+    const bind = () =>
+      bindRecruitingSchedulingOperation(prisma, actor, {
+        threadId: input.threadId,
+        planId: plan.id,
+        operation: "confirm",
+        effectId: reply.id,
+      });
+    return { plan, booked, read, reply, bind };
+  }
+  it.each(
+    ["cancel_booking", "reschedule_booking"].flatMap((tool) =>
+      ["completed", "executing", "uncertain"].map((status) => [tool, status]),
+    ),
+  )("invalidates earlier accepted read after %s becomes %s", async (tool, status) => {
+    const f = await staleBookingFixture();
+    const changed = await effect(calendarId, tool!, {
+      bookingUid: f.booked.uid,
+      ...(tool === "reschedule_booking"
+        ? { start: "2027-01-01T06:30:00Z", lengthInMinutes: 30 }
+        : {}),
+    });
+    await prisma.externalEffect.update({
+      where: { id: changed.id },
+      data: {
+        status: status!,
+        result: {
+          structuredContent: {
+            status: "success",
+            data: {
+              ...f.booked,
+              uid: tool === "reschedule_booking" ? "replacement-B" : f.booked.uid,
+              ...(tool === "reschedule_booking" ? { rescheduledFromUid: f.booked.uid } : {}),
+              status: tool === "cancel_booking" ? "cancelled" : "accepted",
+            },
+          },
+        },
+      },
+    });
+    await expect(f.bind()).rejects.toThrow();
+    expect(
+      (await prisma.externalEffect.findUniqueOrThrow({ where: { id: f.reply.id } })).status,
+    ).toBe("intended");
+    // A returned replacement UID never authorizes confirmation of the original plan.
+    await effect(
+      calendarId,
+      "get_booking",
+      { bookingUid: "replacement-B" },
+      { status: "success", data: { ...f.booked, uid: "replacement-B" } },
+    );
+    await expect(f.bind()).rejects.toThrow();
+    await effect(
+      calendarId,
+      "get_booking",
+      { bookingUid: f.booked.uid },
+      { status: "success", data: { ...f.booked, status: "cancelled" } },
+    );
+    await expect(f.bind()).rejects.toThrow();
+    await effect(
+      calendarId,
+      "get_booking",
+      { bookingUid: f.booked.uid },
+      { status: "success", data: f.booked },
+    );
+    await expect(f.bind()).rejects.toThrow();
+  });
+  it.each(["source", "revision", "uid"])(
+    "does not invalidate an accepted read for unrelated mutation %s",
+    async (dimension) => {
+      const f = await staleBookingFixture();
+      const changed = await effect(dimension === "source" ? mailId : calendarId, "cancel_booking", {
+        bookingUid: dimension === "uid" ? "unrelated-booking" : f.booked.uid,
+      });
+      const changeRequest = structuredClone(changed.request) as unknown as [
+        string,
+        string,
+        { route: { resourceRevision: number } },
+      ];
+      if (dimension === "revision") changeRequest[2].route.resourceRevision = 2;
+      await prisma.externalEffect.update({
+        where: { id: changed.id },
+        data: {
+          request: changeRequest as Prisma.InputJsonValue,
+          status: "completed",
+          result: {
+            structuredContent: {
+              status: "success",
+              data: { uid: f.booked.uid, status: "cancelled" },
+            },
+          },
+        },
+      });
+      expect((await f.bind()).confirmationEffectId).toBe(f.reply.id);
+    },
+  );
+  it.each(["cancel_booking", "reschedule_booking"])(
+    "requires fresh read after inconclusive completed %s",
+    async (tool) => {
+      const f = await staleBookingFixture();
+      const mutation = await effect(
+        calendarId,
+        tool,
+        { bookingUid: f.booked.uid },
+        { status: "error", message: "Provider rejected change" },
+      );
+      await expect(f.bind()).rejects.toThrow();
+      const fresh = await effect(
+        calendarId,
+        "get_booking",
+        { bookingUid: f.booked.uid },
+        { status: "success", data: f.booked },
+      );
+      const observed = await prisma.externalEffect.findUniqueOrThrow({
+        where: { id: mutation.id },
+      });
+      await prisma.externalEffect.update({
+        where: { id: fresh.id },
+        data: { createdAt: observed.updatedAt },
+      });
+      await expect(f.bind()).rejects.toThrow();
+      await prisma.externalEffect.update({
+        where: { id: fresh.id },
+        data: { createdAt: new Date(observed.updatedAt.getTime() + 1) },
+      });
+      expect((await f.bind()).confirmationEffectId).toBe(f.reply.id);
+    },
+  );
+  it("invalidates old plan after the same owner's mutation from another thread", async () => {
+    const f = await staleBookingFixture();
+    const bot = await prisma.bot.create({
+      data: {
+        spaceId: actor.spaceId,
+        userId: actor.userId,
+        name: "Other calendar assistant",
+        color: "blue",
+      },
+    });
+    await prisma.botMcpServer.create({
+      data: {
+        spaceId: actor.spaceId,
+        userId: actor.userId,
+        botId: bot.id,
+        serverId: calendarId,
+        allowAllTools: true,
+      },
+    });
+    const thread = await prisma.thread.create({
+      data: { spaceId: actor.spaceId, userId: actor.userId, botId: bot.id },
+    });
+    const task = await prisma.task.create({
+      data: {
+        spaceId: actor.spaceId,
+        userId: actor.userId,
+        threadId: thread.id,
+        botId: bot.id,
+        prompt: "Separate calendar change",
+        status: "running",
+      },
+    });
+    const other = await prisma.run.create({
+      data: {
+        spaceId: actor.spaceId,
+        userId: actor.userId,
+        threadId: thread.id,
+        botId: bot.id,
+        taskId: task.id,
+        status: "running",
+        trigger: "user",
+      },
+    });
+    await effect(
+      calendarId,
+      "cancel_booking",
+      { bookingUid: f.booked.uid },
+      { status: "success", data: { uid: f.booked.uid, status: "cancelled" } },
+      other.id,
+    );
+    await expect(f.bind()).rejects.toThrow();
+  });
 });
