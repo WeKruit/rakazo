@@ -20,6 +20,7 @@ import type { RecruitingReadCache } from "../lib/recruiting-read-cache";
 import { clearRecruitingReads, rememberRecruitingRead } from "../lib/recruiting-read-cache";
 import { rpc } from "../lib/rpc";
 import { AvailabilityRanges } from "./recruiting/AvailabilityRanges";
+import { RoleCampaignCard } from "./recruiting/SequenceTab";
 
 export type RecruitingSequenceSaveInput = {
   sourceArtifactId: string;
@@ -617,40 +618,42 @@ function SavedCorrespondenceView({
           <AvailabilityRanges
             slots={data.events.filter((event) => event.kind === "availability")}
           />
-          {data.events.filter((event) => event.kind !== "availability").map((event) => (
-            <article key={event.id} className="rounded-xl border border-border p-5">
-              <div className="mb-3 flex flex-wrap justify-between gap-2">
-                <h2 className="font-semibold">{event.title || t`Calendar event`}</h2>
-                {event.status ? (
-                  <span className="text-sm text-muted-foreground">{event.status}</span>
+          {data.events
+            .filter((event) => event.kind !== "availability")
+            .map((event) => (
+              <article key={event.id} className="rounded-xl border border-border p-5">
+                <div className="mb-3 flex flex-wrap justify-between gap-2">
+                  <h2 className="font-semibold">{event.title || t`Calendar event`}</h2>
+                  {event.status ? (
+                    <span className="text-sm text-muted-foreground">{event.status}</span>
+                  ) : null}
+                </div>
+                <p>
+                  <time dateTime={event.start}>{event.start}</time>
+                  {event.end ? (
+                    <>
+                      {" "}
+                      – <time dateTime={event.end}>{event.end}</time>
+                    </>
+                  ) : null}
+                  {event.timeZone ? ` · ${event.timeZone}` : ""}
+                </p>
+                {event.attendees.length ? (
+                  <p className="mt-2 break-words text-sm">{event.attendees.join(", ")}</p>
                 ) : null}
-              </div>
-              <p>
-                <time dateTime={event.start}>{event.start}</time>
-                {event.end ? (
-                  <>
-                    {" "}
-                    – <time dateTime={event.end}>{event.end}</time>
-                  </>
+                {event.location ? <p className="mt-2 text-sm">{event.location}</p> : null}
+                {event.url ? (
+                  <a
+                    href={event.url}
+                    target="_blank"
+                    rel="noreferrer"
+                    className="mt-3 inline-block underline"
+                  >
+                    <Trans>Open calendar event</Trans>
+                  </a>
                 ) : null}
-                {event.timeZone ? ` · ${event.timeZone}` : ""}
-              </p>
-              {event.attendees.length ? (
-                <p className="mt-2 break-words text-sm">{event.attendees.join(", ")}</p>
-              ) : null}
-              {event.location ? <p className="mt-2 text-sm">{event.location}</p> : null}
-              {event.url ? (
-                <a
-                  href={event.url}
-                  target="_blank"
-                  rel="noreferrer"
-                  className="mt-3 inline-block underline"
-                >
-                  <Trans>Open calendar event</Trans>
-                </a>
-              ) : null}
-            </article>
-          ))}
+              </article>
+            ))}
         </div>
       ) : null}
     </div>
@@ -749,6 +752,16 @@ export function RecruitingCorrespondence({
             <Trans>Review the outreach files saved in this conversation.</Trans>
           </p>
         </header>
+        <RoleCampaignCard
+          conversation={
+            "groupId" in artifactTarget
+              ? { groupId: artifactTarget.groupId }
+              : { botId: artifactTarget.botId }
+          }
+          refreshSignal={refreshSignal}
+          readCache={readCache}
+          readCacheScope={readCacheScope}
+        />
         {files.length > 1 ? (
           <NativeSelect
             aria-label={t`Saved sequence file`}

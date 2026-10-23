@@ -1,6 +1,7 @@
 import type { MouseEvent, ReactNode } from "react";
 import { createContext, memo, useCallback, useContext, useRef, useState } from "react";
 import ReactMarkdown, { type Components } from "react-markdown";
+import remarkCjkFriendly from "remark-cjk-friendly";
 import remarkGfm from "remark-gfm";
 import type { HastNode } from "./table-utils";
 import "./markdown.web.css";
@@ -36,6 +37,9 @@ import {
 } from "./markdown";
 import { useMarkdownLinkCopy } from "./markdown-link-prompt";
 import { MarkdownTable, MarkdownTableSourceContext } from "./markdown-table";
+
+// CJK-friendly emphasis: "**发第一封。**然后" bolds instead of showing the asterisks.
+const markdownPlugins = [remarkGfm, remarkCjkFriendly];
 
 function preserveSkippedTableText() {
   return (tree: HastNode) => {
@@ -444,7 +448,7 @@ export function LinkifiedText({ children }: { children: string }) {
 export function ChatMarkdownDocument({ children }: ChatMarkdownProps) {
   return (
     <ReactMarkdown
-      remarkPlugins={[remarkGfm]}
+      remarkPlugins={markdownPlugins}
       rehypePlugins={[preserveSkippedTableText]}
       skipHtml
       urlTransform={(url) => sanitizeMarkdownUrl(url) ?? ""}
@@ -471,7 +475,7 @@ export const ChatMarkdown = memo(function ChatMarkdown({
           <MarkdownTableSourceContext.Provider value={source}>
             <ReactMarkdown
               components={components}
-              remarkPlugins={[remarkGfm]}
+              remarkPlugins={markdownPlugins}
               rehypePlugins={[preserveSkippedTableText]}
               skipHtml
               // MarkdownImage decides what an image source may do, so it receives the source as written.

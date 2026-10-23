@@ -33,6 +33,7 @@ vi.mock("@lingui/react/macro", () => ({
 
 import { replyStatus } from "./InboxTab";
 import { ContactsTab, InboxTab, InterviewTab, SequenceTab } from "./index";
+import { RoleCampaignCard } from "./SequenceTab";
 
 const ORG = "00000000-0000-4000-8000-000000000001";
 const ROLE = "00000000-0000-4000-8000-000000000002";
@@ -419,7 +420,12 @@ it("shows the role's Instantly campaign, its stop-on-reply risk and each lead's 
       { candidateKey: "ada-key", email: "ADA@example.com", status: -1, interestStatus: null },
     ],
   });
-  const view = await mount(<SequenceTab {...props} />);
+  const view = await mount(
+    <>
+      <RoleCampaignCard {...props} />
+      <SequenceTab {...props} />
+    </>,
+  );
   await settle();
   expect(roleCampaign).toHaveBeenCalledWith({ groupId: "group-1" });
   expect(view.textContent).toContain("Staff Engineer outreach");
@@ -596,7 +602,12 @@ it("keeps Sequence status chips from the loaded rows when totalling fails", asyn
           nextOffset: null,
         };
   });
-  const view = await mount(<SequenceTab {...props} />);
+  const view = await mount(
+    <>
+      <RoleCampaignCard {...props} />
+      <SequenceTab {...props} />
+    </>,
+  );
   await settle();
   expect(view.textContent).toContain("Replied · 1");
   expect(view.textContent).toContain("Not contacted · 1");
