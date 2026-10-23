@@ -737,9 +737,21 @@ msgstr "saat {0}"
 msgid "at {timeSelect}"
 msgstr "saat {timeSelect}"
 
+#: src/pages/GroupPanel.tsx
+msgid "Attach"
+msgstr ""
+
 #: src/pages/Shell.tsx
 msgid "Attach file"
 msgstr "Dosya ekle"
+
+#: src/pages/GroupPanel.tsx
+msgid "Attach file or screenshot"
+msgstr ""
+
+#: src/pages/GroupPanel.tsx
+msgid "Attach role files"
+msgstr ""
 
 #: src/components/computer/TerminalApp.tsx
 msgid "Attached {path}"
@@ -3328,6 +3340,10 @@ msgstr ""
 msgid "Job description"
 msgstr ""
 
+#: src/pages/GroupPanel.tsx
+msgid "Job description and files"
+msgstr ""
+
 #: src/pages/Shell.tsx
 msgid "Jump to latest"
 msgstr "En son mesaja git"
@@ -5020,6 +5036,7 @@ msgid "Remove"
 msgstr "Kaldır"
 
 #. placeholder {0}: attachment.file.name
+#: src/pages/GroupPanel.tsx
 #: src/pages/Shell.tsx
 msgid "Remove {0}"
 msgstr "{0} kaldır"
@@ -6339,6 +6356,10 @@ msgstr ""
 msgid "The selected memory provider is not available in this build."
 msgstr "Seçilen hafıza sağlayıcısı bu sürümde kullanılamıyor."
 
+#: src/pages/Shell.tsx
+msgid "The workspace changed. Open the role again."
+msgstr ""
+
 #: src/pages/RecruitingPanel.tsx
 msgid "There was a problem sending this message."
 msgstr ""
@@ -6692,6 +6713,10 @@ msgstr ""
 
 #: src/components/teach/TeachRecordingChrome.tsx
 msgid "Use Protected input for passwords."
+msgstr ""
+
+#: src/pages/Shell.tsx
+msgid "Use the attached files to define this role and start the search."
 msgstr ""
 
 #: src/pages/RecruitingCorrespondence.tsx
