@@ -1666,6 +1666,20 @@ export const RecruitingRoleSetupSchema = z.strictObject({
 export type RecruitingRoleSetup = z.infer<typeof RecruitingRoleSetupSchema>;
 
 export const RecruitingCorrespondenceSchema = z.strictObject({
+  /** Actual reply failures/uncertainty, not a confirmation-to-booking association. */
+  operations: z
+    .array(
+      z.strictObject({
+        id: Id,
+        kind: z.literal("reply"),
+        outcome: z.enum(["failed", "uncertain"]),
+        checkedAt: IsoDate,
+        sourceName: z.string(),
+        sourceId: Id,
+        providerMessageId: Id,
+      }),
+    )
+    .optional(),
   roleId: RecruitingId.nullable(),
   status: z.enum(["not_checked", "ready", "empty", "unsupported", "failed"]),
   checkedAt: IsoDate.nullable(),

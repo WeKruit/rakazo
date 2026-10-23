@@ -110,7 +110,7 @@ export function InterviewTab({
       ) : null}
       {calendar.data?.partial ? (
         <TabNotice>
-          <Trans>Some saved calendar records could not be displayed.</Trans>
+          <Trans>Some saved records could not be displayed.</Trans>
         </TabNotice>
       ) : null}
       {calendar.data?.connectionChanged ? (
@@ -144,6 +144,33 @@ export function InterviewTab({
             </p>
           ) : null}
         </div>
+      ) : null}
+      {!candidateId && !calendar.failed && calendar.data?.operations?.length ? (
+        <section aria-label={t`Reply outcomes`} className="mt-6 space-y-2">
+          <h3 className="text-sm font-medium">
+            <Trans>Reply outcomes</Trans>
+          </h3>
+          <p className="text-xs text-muted-foreground">
+            <Trans>These replies are not linked to a specific calendar event.</Trans>
+          </p>
+          <ul className="space-y-2">
+            {calendar.data.operations.map((operation) => (
+              <li key={operation.id} className="text-sm">
+                <span>
+                  {operation.outcome === "failed" ? (
+                    <Trans>Reply failed</Trans>
+                  ) : (
+                    <Trans>Reply outcome unknown</Trans>
+                  )}
+                </span>
+                <span className="text-muted-foreground">
+                  {" "}
+                  · {operation.sourceName} · {formatDate(operation.checkedAt)}
+                </span>
+              </li>
+            ))}
+          </ul>
+        </section>
       ) : null}
       <details aria-label={t`Candidate interview status`} className="mt-6">
         <summary>

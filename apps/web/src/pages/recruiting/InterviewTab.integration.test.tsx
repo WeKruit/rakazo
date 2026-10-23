@@ -133,7 +133,7 @@ it("preserves partial, changed-connection and access status with saved records",
     ],
   });
   await render();
-  expect(element.textContent).toContain("Some saved calendar records could not be displayed.");
+  expect(element.textContent).toContain("Some saved records could not be displayed.");
   expect(element.textContent).toContain("These saved records may be out of date.");
   expect(element.textContent).toContain("Synthetic calendar · Needs access · Failed");
   expect(element.querySelector('[data-event-id="candidate-event"]')).not.toBeNull();
@@ -153,4 +153,38 @@ it("shows a read failure and ignores a late response for a previous role", async
   await act(async () => oldResponse(saved));
   expect(element.textContent).toContain("Could not load saved calendar records. Try refreshing.");
   expect(element.querySelector('[data-event-id="candidate-event"]')).toBeNull();
+});
+
+it("shows failed and uncertain replies separately while the booked event stays confirmed", async () => {
+  const operations: NonNullable<RecruitingCorrespondence["operations"]> = [
+    {
+      id: "failed-reply",
+      kind: "reply",
+      outcome: "failed",
+      checkedAt: "2026-10-21T08:00:00Z",
+      sourceName: "Existing mail",
+      sourceId: "mail",
+      providerMessageId: "original",
+    },
+    {
+      id: "uncertain-reply",
+      kind: "reply",
+      outcome: "uncertain",
+      checkedAt: "2026-10-21T08:01:00Z",
+      sourceName: "Existing mail",
+      sourceId: "mail",
+      providerMessageId: "another-original",
+    },
+  ];
+  correspondence.mockResolvedValue({ ...saved, operations });
+  await render();
+  const outcomes = element.querySelector('[aria-label="Reply outcomes"]');
+  expect(outcomes?.textContent).toContain("Reply failed");
+  expect(outcomes?.textContent).toContain("Reply outcome unknown");
+  expect(outcomes?.textContent).toContain("not linked to a specific calendar event");
+  expect(outcomes?.textContent).not.toMatch(/original|failed-reply|delivered/i);
+  expect(element.querySelector('[data-event-id="candidate-event"]')).not.toBeNull();
+  expect(saved.events[0]!.status).toBe("confirmed");
+  await render({ candidateId: "candidate", candidateEmail: "candidate@example.test" });
+  expect(element.querySelector('[aria-label="Reply outcomes"]')).toBeNull();
 });

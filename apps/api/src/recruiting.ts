@@ -880,6 +880,164 @@ async function roleAttention(
   };
 }
 
+/** Scoped operation outcomes remain separate from calendar events: no receipt joins them. */
+async function recruitingReplyOutcomes(
+  prisma: PrismaClient,
+  actor: Actor,
+  target: ThreadTarget,
+  roleId: string,
+  sources: {
+    id: string;
+    name: string;
+    endpoint: string | null;
+    transport: string;
+    enabled: boolean;
+    revision: number;
+    assignments: { botId: string; allowAllTools: boolean; allowedTools: unknown }[];
+  }[],
+) {
+  const tool = "native_instantly_reply_to_email";
+  const grants = (source: (typeof sources)[number], botId: string) =>
+    source.enabled &&
+    source.endpoint === INSTANTLY_MCP_ENDPOINT &&
+    source.transport === "streamable_http" &&
+    source.assignments.some((assignment) => {
+      const allowed = assignment.allowedTools;
+      return (
+        assignment.botId === botId &&
+        (assignment.allowAllTools ||
+          (Array.isArray(allowed) &&
+            ["get_email", "list_emails"].every((name) => allowed.includes(name))))
+      );
+    });
+  const botIds = target.kind === "group" ? target.memberBotIds : [target.botId];
+  const eligible = sources.filter((source) => botIds.some((botId) => grants(source, botId)));
+  if (!eligible.length) return { operations: [], partial: false };
+  const effects = await prisma.externalEffect.findMany({
+    where: {
+      spaceId: actor.spaceId,
+      status: { in: ["completed", "failed", "uncertain"] },
+      run: {
+        userId: actor.userId,
+        spaceId: actor.spaceId,
+        threadId: target.threadId,
+        botId: { in: botIds },
+        initialRecruitingRoleRevision: { roleId },
+      },
+      OR: eligible.flatMap((source) => [
+        {
+          AND: [
+            { request: { path: ["2", "route", "resourceId"], equals: source.id } },
+            { request: { path: ["2", "route", "toolName"], equals: tool } },
+          ],
+        },
+        {
+          AND: [
+            { request: { path: ["3", "resourceId"], equals: source.id } },
+            { request: { path: ["3", "toolName"], equals: tool } },
+          ],
+        },
+      ]),
+    },
+    orderBy: [{ updatedAt: "desc" }, { id: "desc" }],
+    take: 101,
+    select: {
+      id: true,
+      spaceId: true,
+      status: true,
+      request: true,
+      result: true,
+      updatedAt: true,
+      run: {
+        select: {
+          userId: true,
+          spaceId: true,
+          threadId: true,
+          botId: true,
+          initialRecruitingRoleRevision: { select: { roleId: true } },
+        },
+      },
+    },
+  });
+  const operations: NonNullable<RecruitingCorrespondence["operations"]> = [];
+  const exposed: { sourceId: string; revision: number; botId: string }[] = [];
+  for (const effect of effects.slice(0, 100)) {
+    const run = effect.run;
+    if (
+      effect.spaceId !== actor.spaceId ||
+      run.userId !== actor.userId ||
+      run.spaceId !== actor.spaceId ||
+      run.threadId !== target.threadId ||
+      !botIds.includes(run.botId) ||
+      run.initialRecruitingRoleRevision?.roleId !== roleId
+    )
+      continue;
+    const call = correspondenceCall(effect.request);
+    const source = eligible.find((item) => item.id === call?.route.resourceId);
+    if (
+      call?.route.connectorId !== "mcp" ||
+      call.route.toolName !== tool ||
+      !source ||
+      call.route.resourceRevision !== source.revision ||
+      !grants(source, run.botId) ||
+      typeof call.args.reply_to_uuid !== "string" ||
+      !/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(
+        call.args.reply_to_uuid,
+      )
+    )
+      continue;
+    const result = correspondenceRecord(effect.result);
+    const outcome =
+      effect.status === "uncertain" || result?.uncertain === true
+        ? "uncertain"
+        : effect.status === "failed" ||
+            typeof result?.error === "string" ||
+            result?.isError === true
+          ? "failed"
+          : null;
+    if (!outcome) continue;
+    operations.push({
+      id: effect.id,
+      kind: "reply",
+      outcome,
+      checkedAt: effect.updatedAt.toISOString(),
+      sourceName: source.name,
+      sourceId: source.id,
+      providerMessageId: call.args.reply_to_uuid,
+    });
+    exposed.push({ sourceId: source.id, revision: source.revision, botId: run.botId });
+  }
+  const currentSources = await prisma.mcpServer.findMany({
+    where: {
+      userId: actor.userId,
+      spaceId: actor.spaceId,
+      id: { in: eligible.map((source) => source.id) },
+    },
+    select: {
+      id: true,
+      name: true,
+      endpoint: true,
+      transport: true,
+      enabled: true,
+      revision: true,
+      assignments: {
+        where: { userId: actor.userId, spaceId: actor.spaceId, botId: { in: botIds } },
+        select: { botId: true, allowAllTools: true, allowedTools: true },
+      },
+    },
+  });
+  for (const operation of exposed) {
+    const current = currentSources.find((source) => source.id === operation.sourceId);
+    if (!current || current.revision !== operation.revision || !grants(current, operation.botId))
+      throw new IsolationError();
+  }
+  const current = await recruiting.getRecruitingWorkspace(prisma, actor, {
+    threadId: target.threadId,
+  });
+  if (current?.role.id !== roleId) throw new IsolationError();
+  return { operations, partial: effects.length > 100 };
+}
+
 export async function getRecruitingCorrespondence(
   prisma: PrismaClient,
   actor: Actor,
@@ -1091,6 +1249,17 @@ export async function getRecruitingCorrespondence(
         }
       }
       await assertNativeCurrent?.();
+      if (workspace && view === "interview") {
+        const outcomes = await recruitingReplyOutcomes(
+          prisma,
+          actor,
+          target,
+          workspace.role.id,
+          sourceRows,
+        );
+        output.operations = outcomes.operations;
+        output.partial ||= outcomes.partial;
+      }
       // Offset over the merged inbox order; refresh from page one after new mail.
       output.nextCursor = output.emails.length > end ? String(end) : null;
       // Unpaged callers keep the old "more than one screen of mail" signal.
