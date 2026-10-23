@@ -608,7 +608,8 @@ export function ShellPage() {
   const fileInputRef = useRef<HTMLInputElement>(null);
   const [panel, setPanelState] = useState<Panel>(null);
   const [recruitingRefresh, setRecruitingRefresh] = useState(0);
-  const [roleChatOpen, setRoleChatOpen] = useState(false);
+  // The role chat starts open: answers and confirmation cards must be visible without a click.
+  const [roleChatOpen, setRoleChatOpen] = useState(true);
   const roleChatId = useId();
   const roleChatTrigger = useRef<HTMLButtonElement>(null);
   const roleChatSection = useRef<HTMLElement>(null);
@@ -2918,6 +2919,11 @@ export function ShellPage() {
       ? snapshotRef.current
       : null,
   );
+  // A waiting question or confirmation reopens a collapsed role chat once per new card.
+  const pendingAskKey = answerableAskIds.join(",");
+  useEffect(() => {
+    if (pendingAskKey && roleChatWorkspace) setRoleChatOpen(true);
+  }, [pendingAskKey, roleChatWorkspace]);
   const workingRuns = currentRuns.filter((run) =>
     ["running", "queued", "leased"].includes(run.status),
   );
@@ -4432,7 +4438,7 @@ export function ShellPage() {
               crmContext={recruitingCacheScope ? { target: transcriptArtifactTarget, scope: recruitingCacheScope, cache: recruitingReadCache.current, refreshSignal: recruitingRefresh } : undefined}
               crmSelection={effectiveCrmSelection}
               onOpenCrmRole={(selection, linkedGroupId) => {
-                setPanel(null); setMobileSidebarOpen(false); setRoleChatOpen(false);
+                setPanel(null); setMobileSidebarOpen(false); setRoleChatOpen(true);
                 const search = new URLSearchParams({ view: "contacts", crmServer: selection.serverId, crmRevision: String(selection.serverRevision), crmOrganization: selection.organizationId, ...(selection.crmRoleId ? { crmRole: selection.crmRoleId } : {}) });
                 if (linkedGroupId) navigate(`/app/g/${linkedGroupId}?view=contacts`);
                 else setSearchParams(search);

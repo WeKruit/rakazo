@@ -61,6 +61,8 @@ function approvalActionLabel(
   if (id === "always" && (fallback === "Always allow this tool" || fallback === "Always allow"))
     return t`Always allow this tool`;
   if (id === "deny" && fallback === "Deny") return t`Deny`;
+  if (id === "allow" && fallback === "Confirm and send") return t`Confirm and send`;
+  if (id === "deny" && fallback === "Cancel") return t`Cancel`;
   return fallback;
 }
 
@@ -282,7 +284,11 @@ function QuestionAskCard({
       className="min-w-0 w-full max-w-2xl rounded-2xl border border-border bg-card px-5 py-4"
     >
       <div className="text-base leading-relaxed text-foreground">
-        <ChatMarkdown>{block.text}</ChatMarkdown>
+        <ChatMarkdown>
+          {block.approvalEffectId && block.text === "Start this Instantly campaign"
+            ? t`Start this Instantly campaign`
+            : block.text}
+        </ChatMarkdown>
       </div>
       {secretInput && block.credential ? (
         <div
