@@ -116,7 +116,18 @@ export function EmailConversation({
   // Only provider-supplied thread IDs group emails; an unthreaded message is its own choice.
   const hasThreads = messages.some((email) => email.threadId);
   const groupKey = (email: EmailConversationItem) =>
-    email.threadId ? `thread:${email.threadId}` : `message:${email.id}`;
+    email.threadId && email.sourceId && email.eaccount && email.campaignId !== undefined
+      ? JSON.stringify([
+          "thread",
+          email.sourceId,
+          email.organizationId,
+          email.crmRoleId,
+          email.candidateId,
+          email.eaccount,
+          email.campaignId,
+          email.threadId,
+        ])
+      : `message:${email.id}`;
   const threads = new Map<string, EmailConversationItem>();
   for (const email of messages)
     if (!threads.has(groupKey(email))) threads.set(groupKey(email), email);

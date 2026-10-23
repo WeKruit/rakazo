@@ -260,6 +260,8 @@ const stored = (id: string, candidateId: string, subject: string, body: string, 
   id,
   providerMessageId: id,
   threadId: null,
+  eaccount: "recruiter@example.com",
+  campaignId: null,
   direction: "received",
   sender: "someone@example.com",
   recipients: ["recruiter@example.com"],
@@ -359,6 +361,9 @@ it("reads full stored email bodies and exposes the selected email to chat", asyn
                 status: "sent_recorded",
                 email: {
                   id: "receipt-1",
+                  sourceId: "native-source",
+                  eaccount: "other@example.com",
+                  campaignId: null,
                   providerMessageId: "p1",
                   sender: "recruiter@example.com",
                   recipients: ["ada@example.com"],
@@ -374,6 +379,8 @@ it("reads full stored email bodies and exposes the selected email to chat", asyn
                 id: "m1",
                 providerMessageId: "p1",
                 threadId: "source-thread",
+                eaccount: "recruiter@example.com",
+                campaignId: null,
                 direction: "sent",
                 sender: "recruiter@example.com",
                 recipients: ["ada@example.com"],
@@ -386,6 +393,8 @@ it("reads full stored email bodies and exposes the selected email to chat", asyn
                 id: "m2",
                 providerMessageId: "p2",
                 threadId: "source-thread",
+                eaccount: "recruiter@example.com",
+                campaignId: null,
                 direction: "received",
                 sender: "ada@example.com",
                 recipients: ["recruiter@example.com"],
@@ -416,6 +425,10 @@ it("reads full stored email bodies and exposes the selected email to chat", asyn
       }),
     }),
   );
+  // Equal provider IDs across sources are distinct; no thread is borrowed from CRM.
+  expect(
+    view.querySelector<HTMLSelectElement>('select[aria-label="Email thread or message"]')?.options,
+  ).toHaveLength(2);
   const first = view.querySelector("details")!;
   await act(async () => {
     first.open = true;
@@ -425,9 +438,35 @@ it("reads full stored email bodies and exposes the selected email to chat", asyn
   expect(onSelectEmail).toHaveBeenLastCalledWith(
     expect.objectContaining({
       email: expect.objectContaining({
-        id: "native:receipt-1",
+        id: "crm:m1",
         subject: "Staff role",
         threadId: "source-thread",
+        eaccount: "recruiter@example.com",
+        campaignId: null,
+      }),
+    }),
+  );
+  const selector = view.querySelector<HTMLSelectElement>(
+    'select[aria-label="Email thread or message"]',
+  )!;
+  await act(async () => {
+    selector.value = selector.options[1]!.value;
+    selector.dispatchEvent(new Event("change", { bubbles: true }));
+  });
+  expect(onSelectEmail).toHaveBeenLastCalledWith(
+    expect.objectContaining({
+      email: expect.objectContaining({
+        id: JSON.stringify([
+          "native",
+          "receipt-1",
+          "native-source",
+          "other@example.com",
+          null,
+          null,
+        ]),
+        sourceId: "native-source",
+        eaccount: "other@example.com",
+        threadId: undefined,
       }),
     }),
   );

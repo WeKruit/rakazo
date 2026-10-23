@@ -41,6 +41,12 @@ export type RecruitingInboxEmail = Omit<CrmReplyDraftContext, "threadId" | "emai
     partial: boolean;
     /** The provider email thread, distinct from the native chat thread. */
     threadId?: string | null;
+    sourceId?: string;
+    organizationId?: string;
+    crmRoleId?: string;
+    providerMessageId?: string;
+    campaignId?: string | null;
+    eaccount?: string | null;
   };
 };
 
@@ -52,25 +58,46 @@ type InboxProps = RecruitingTabProps & {
   onDraftReply?: (email: RecruitingInboxEmail) => void;
 };
 
-function mailItems(page: MailPage) {
-  const seen = new Set<string>();
+function mailItems(page: MailPage, crmRoleId: string | undefined) {
   const items: RecruitingInboxEmail["email"][] = [];
-  const crmThreads = new Map<string, Set<string>>();
-  for (const item of page.items) {
-    if (!item.threadId) continue;
-    const ids = crmThreads.get(item.providerMessageId) ?? new Set<string>();
-    ids.add(item.threadId);
-    crmThreads.set(item.providerMessageId, ids);
-  }
-  // Native receipts carry the exact message the agent read or recorded; CRM mail fills the rest.
+  const seen = new Set<string>();
+  const append = (email: RecruitingInboxEmail["email"]) => {
+    // Unknown provenance does not establish that two receipts describe the same message.
+    const key =
+      email.sourceId && email.eaccount && email.providerMessageId
+        ? JSON.stringify([
+            email.sourceId,
+            email.organizationId,
+            email.crmRoleId,
+            page.candidateId,
+            email.eaccount,
+            email.campaignId,
+            email.threadId,
+            email.providerMessageId,
+          ])
+        : email.id;
+    if (seen.has(key)) return;
+    seen.add(key);
+    items.push(email);
+  };
   for (const entry of page.nativeCorrespondence) {
-    if (!entry.email || seen.has(entry.email.providerMessageId)) continue;
-    seen.add(entry.email.providerMessageId);
-    const threads = crmThreads.get(entry.email.providerMessageId);
-    items.push({
-      id: `native:${entry.email.id}`,
-      // Exact provider-message identity may supply thread metadata missing from a native receipt.
-      threadId: threads?.size === 1 ? [...threads][0] : undefined,
+    if (!entry.email) continue;
+    append({
+      id: JSON.stringify([
+        "native",
+        entry.email.id,
+        entry.email.sourceId,
+        entry.email.eaccount,
+        entry.email.campaignId,
+        entry.email.providerThreadId,
+      ]),
+      sourceId: entry.email.sourceId,
+      organizationId: page.source.organizationId,
+      crmRoleId: entry.crmRoleId,
+      providerMessageId: entry.email.providerMessageId,
+      threadId: entry.email.providerThreadId,
+      eaccount: entry.email.eaccount,
+      campaignId: entry.email.campaignId,
       sender: entry.email.sender,
       recipients: entry.email.recipients,
       subject: entry.email.subject,
@@ -80,21 +107,15 @@ function mailItems(page: MailPage) {
       partial: entry.email.snippet,
     });
   }
-  for (const item of page.items) {
-    if (seen.has(item.providerMessageId)) continue;
-    seen.add(item.providerMessageId);
-    items.push({
+  for (const item of page.items)
+    append({
+      ...item,
       id: `crm:${item.id}`,
-      threadId: item.threadId,
-      sender: item.sender,
-      recipients: item.recipients,
-      subject: item.subject,
+      sourceId: page.source.serverId,
+      organizationId: page.source.organizationId,
+      crmRoleId,
       body: item.body ?? "",
-      date: item.date,
-      direction: item.direction,
-      partial: item.partial,
     });
-  }
   return items.sort((a, b) => Date.parse(b.date ?? "") - Date.parse(a.date ?? "") || 0);
 }
 
@@ -102,6 +123,12 @@ function roleMailItems(page: RoleMailPage) {
   // The CRM returns the role's mail newest first; keep its order.
   return page.items.map((item) => ({
     id: `crm:${item.id}`,
+    sourceId: page.source.serverId,
+    organizationId: page.source.organizationId,
+    crmRoleId: page.crmRoleId,
+    providerMessageId: item.providerMessageId,
+    eaccount: item.eaccount,
+    campaignId: item.campaignId,
     threadId: item.threadId,
     candidateId: item.candidateId,
     sender: item.sender,
@@ -213,7 +240,7 @@ export function InboxTab({
       ? roleMailItems(roleMail.data)
       : []
     : mail.data && mail.data.candidateId === personId
-      ? mailItems(mail.data)
+      ? mailItems(mail.data, ready?.crmRoleId)
       : [];
   const selected = items.find((item) => item.id === emailId) ?? items[0];
   const selectedPerson = roleWide ? findPerson(selected?.candidateId) : person;

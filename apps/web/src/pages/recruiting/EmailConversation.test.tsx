@@ -194,10 +194,18 @@ it("accepts existing candidate-scoped email records without adding a candidate I
 });
 
 it("separates supplied provider threads and keeps unthreaded messages independent", async () => {
-  const first = { ...current, threadId: "thread-a" };
-  const history = { ...previous, threadId: "thread-a" };
+  const provenance = {
+    sourceId: "mail",
+    organizationId: "org",
+    crmRoleId: "role",
+    eaccount: "team@example.test",
+    campaignId: "campaign",
+  };
+  const first = { ...current, ...provenance, threadId: "thread-a" };
+  const history = { ...previous, ...provenance, threadId: "thread-a" };
   const other = {
     ...current,
+    ...provenance,
     id: "other",
     threadId: "thread-b",
     subject: "Other saved conversation",
@@ -231,7 +239,7 @@ it("separates supplied provider threads and keeps unthreaded messages independen
   );
   expect(view.querySelector("details")?.textContent).toContain(history.body);
   await act(async () => {
-    select.value = "thread:thread-b";
+    select.value = select.options[1]!.value;
     select.dispatchEvent(new Event("change", { bubbles: true }));
   });
   expect(view.querySelector("article")?.textContent).toContain("Other thread body");
@@ -246,4 +254,40 @@ it("separates supplied provider threads and keeps unthreaded messages independen
   expect(view.querySelector("details")).toBeNull();
   await act(async () => button(view, "Draft reply").click());
   expect(draft.mock.calls.at(-1)?.[0]).toBe(unthreaded);
+});
+
+it.each([
+  "sourceId",
+  "eaccount",
+  "campaignId",
+  "organizationId",
+  "crmRoleId",
+  "candidateId",
+] as const)("keeps identical provider thread IDs separate across %s", async (field) => {
+  const first = {
+    ...current,
+    sourceId: "source",
+    organizationId: "org",
+    crmRoleId: "role",
+    eaccount: "mailbox",
+    campaignId: "campaign",
+    threadId: "shared-thread",
+  };
+  const second = {
+    ...first,
+    id: "other-message",
+    body: "Different scope body",
+    [field]: "other-scope",
+  };
+  const { view } = await mount(
+    <EmailConversation items={[first, second]} selectedId={first.id} onSelect={vi.fn()} />,
+  );
+  expect(view.querySelector("select")?.options).toHaveLength(2);
+  expect(view.querySelector("ol")?.textContent).not.toContain(second.body);
+});
+it("does not infer a shared conversation when mailbox provenance is unknown", async () => {
+  const first = { ...current, sourceId: "source", threadId: "same-thread" };
+  const second = { ...previous, sourceId: "source", threadId: "same-thread" };
+  const { view } = await mount(<EmailConversation items={[first, second]} onSelect={vi.fn()} />);
+  expect(view.querySelector("select")?.options).toHaveLength(2);
 });
