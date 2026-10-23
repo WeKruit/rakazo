@@ -200,6 +200,10 @@ msgstr "{name} 실패"
 msgid "{name} finished"
 msgstr "{name} 완료"
 
+#: src/pages/recruiting/ActivityTab.tsx
+msgid "{name} replied"
+msgstr ""
+
 #. js-lingui-explicit-id
 #: src/lib/browser-notifications.ts
 msgid "{name} stopped"
@@ -346,7 +350,9 @@ msgid "Active model"
 msgstr "현재 모델"
 
 #: src/components/computer/TerminalApp.tsx
+#: src/pages/recruiting/ActivityTab.tsx
 #: src/pages/recruiting/ContactsTab.tsx
+#: src/pages/recruiting/DetailPanel.tsx
 #: src/pages/RecruitingPanel.tsx
 #: src/pages/Shell.tsx
 msgid "Activity"
@@ -683,6 +689,7 @@ msgstr "이 서버를 승인하면 Bot이 제공되는 도구를 사용할 수 �
 msgid "Approved"
 msgstr ""
 
+#: src/pages/recruiting/ActivityTab.tsx
 #: src/pages/RecruitingPanel.tsx
 msgid "Approved in internal review"
 msgstr ""
@@ -879,6 +886,7 @@ msgstr "아바타"
 msgid "Avg tenure"
 msgstr ""
 
+#: src/pages/recruiting/ActivityTab.tsx
 #: src/pages/recruiting/InterviewTab.tsx
 #: src/pages/RecruitingPanel.tsx
 msgid "Awaiting feedback"
@@ -1068,6 +1076,7 @@ msgstr "서버에 연결할 수 없습니다."
 #: src/pages/ModelSettingsOverlay.tsx
 #: src/pages/Onboarding.tsx
 #: src/pages/PluginsOverlay.tsx
+#: src/pages/recruiting/TasksTab.tsx
 #: src/pages/RecruitingPanel.tsx
 #: src/pages/shell/bot-credentials.tsx
 #: src/pages/shell/dialogs.tsx
@@ -2001,6 +2010,10 @@ msgstr "불러올 수 없음"
 msgid "Could not load activity"
 msgstr ""
 
+#: src/pages/recruiting/ActivityTab.tsx
+msgid "Could not load all activity."
+msgstr ""
+
 #: src/components/ApprovalRulesSettings.tsx
 msgid "Could not load approval rules"
 msgstr "확인 규칙을 불러오지 못했습니다."
@@ -2084,6 +2097,10 @@ msgstr ""
 
 #: src/pages/RecruitingPanel.tsx
 msgid "Could not load recruiting. Refresh to try again."
+msgstr ""
+
+#: src/pages/recruiting/TasksTab.tsx
+msgid "Could not load reminders."
 msgstr ""
 
 #: src/pages/RoutineRunHistory.tsx
@@ -2287,6 +2304,10 @@ msgstr "목소리를 저장하지 못했습니다."
 msgid "Could not save the credential"
 msgstr ""
 
+#: src/pages/recruiting/TasksTab.tsx
+msgid "Could not save the reminder."
+msgstr ""
+
 #: src/pages/shell/message-cards.tsx
 msgid "Could not save this choice"
 msgstr "선택 내용을 저장하지 못했습니다."
@@ -2399,6 +2420,10 @@ msgstr "새 그룹 만들기"
 #: src/pages/shell/bot-picker.tsx
 msgid "Create new Space"
 msgstr "새 스페이스 만들기"
+
+#: src/pages/recruiting/TasksTab.tsx
+msgid "Create reminder"
+msgstr ""
 
 #: src/pages/RoutineEditor.tsx
 msgid "Create Routine"
@@ -2580,6 +2605,7 @@ msgstr "기본 기억 범위"
 #: src/pages/BotContextMenu.tsx
 #: src/pages/KnowledgeSection.tsx
 #: src/pages/McpServersOverlay.tsx
+#: src/pages/recruiting/TasksTab.tsx
 #: src/pages/RoutineEditor.tsx
 #: src/pages/Shell.tsx
 #: src/pages/shell/dialogs.tsx
@@ -2763,6 +2789,7 @@ msgstr "계정이 없나요?"
 
 #: src/lib/ticket-status.ts
 #: src/pages/ActivityList.tsx
+#: src/pages/recruiting/TasksTab.tsx
 #: src/pages/shell/avatar-studio-popover.tsx
 msgid "Done"
 msgstr "완료"
@@ -2821,6 +2848,10 @@ msgstr ""
 msgid "Drag, drop, or paste an image"
 msgstr "이미지를 끌어다 놓거나 붙여넣으세요"
 
+#: src/pages/recruiting/TasksTab.tsx
+msgid "Due"
+msgstr ""
+
 #: src/pages/BotContextMenu.tsx
 msgid "Duplicate"
 msgstr "복제"
@@ -2828,6 +2859,10 @@ msgstr "복제"
 #: src/pages/shell/bot-panel.tsx
 msgid "e.g. Hivenet Agent, Presales, Timesheets bot"
 msgstr "예: Hivenet Agent, Presales, 근무표 봇"
+
+#: src/pages/recruiting/TasksTab.tsx
+msgid "Edit"
+msgstr ""
 
 #: src/pages/RecruitingPanel.tsx
 msgid "Edit criteria"
@@ -2868,6 +2903,10 @@ msgstr ""
 msgid "Email draft editor"
 msgstr ""
 
+#: src/pages/recruiting/ActivityTab.tsx
+msgid "Email failed to send"
+msgstr ""
+
 #: src/lib/user-error.ts
 msgid "Email is not allowed to register"
 msgstr "이 이메일은 가입이 허용되지 않습니다"
@@ -2876,8 +2915,24 @@ msgstr "이 이메일은 가입이 허용되지 않습니다"
 msgid "Email missing"
 msgstr ""
 
+#: src/pages/recruiting/ActivityTab.tsx
+msgid "Email queued"
+msgstr ""
+
+#: src/pages/recruiting/ActivityTab.tsx
+msgid "Email recorded"
+msgstr ""
+
 #: src/pages/RecruitingPanel.tsx
 msgid "Email reply"
+msgstr ""
+
+#: src/pages/recruiting/ActivityTab.tsx
+msgid "Email scheduled"
+msgstr ""
+
+#: src/pages/recruiting/ActivityTab.tsx
+msgid "Email sent"
 msgstr ""
 
 #: src/lib/user-error.ts
@@ -3467,6 +3522,7 @@ msgstr "앱·도구 연동"
 msgid "Interest"
 msgstr ""
 
+#: src/pages/recruiting/ActivityTab.tsx
 #: src/pages/RecruitingPanel.tsx
 msgid "Interested"
 msgstr ""
@@ -3539,6 +3595,7 @@ msgstr ""
 msgid "Interview workflow"
 msgstr ""
 
+#: src/pages/recruiting/ActivityTab.tsx
 #: src/pages/RecruitingPanel.tsx
 msgid "Introduced"
 msgstr ""
@@ -3864,6 +3921,10 @@ msgstr "읽지 않음으로 표시"
 
 #: src/pages/RecruitingPanel.tsx
 msgid "Marked as sent"
+msgstr ""
+
+#: src/pages/recruiting/ActivityTab.tsx
+msgid "Marked high signal"
 msgstr ""
 
 #: src/pages/recruiting/AssessmentCard.tsx
@@ -4207,6 +4268,7 @@ msgstr ""
 msgid "Needs input"
 msgstr "입력 필요"
 
+#: src/pages/recruiting/ActivityTab.tsx
 #: src/pages/recruiting/InterviewTab.tsx
 #: src/pages/RecruitingPanel.tsx
 msgid "Needs scheduling"
@@ -4285,6 +4347,10 @@ msgstr ""
 #. placeholder {0}: stage.nextStep
 #: src/pages/recruiting/RoleSetup.tsx
 msgid "Next: {0}"
+msgstr ""
+
+#: src/pages/recruiting/ActivityTab.tsx
+msgid "No activity yet."
 msgstr ""
 
 #: src/pages/RecruitingPanel.tsx
@@ -4600,6 +4666,10 @@ msgstr "연결되지 않음"
 msgid "Not in the plugin catalog"
 msgstr "플러그인 카탈로그에 없음"
 
+#: src/pages/recruiting/ActivityTab.tsx
+msgid "Not interested"
+msgstr ""
+
 #: src/components/AskCard.tsx
 #: src/pages/shell/message-cards.tsx
 msgid "Not now"
@@ -4877,6 +4947,11 @@ msgstr ""
 msgid "Outreach status"
 msgstr ""
 
+#. placeholder {0}: overdue.length
+#: src/pages/recruiting/TasksTab.tsx
+msgid "Overdue ({0})"
+msgstr ""
+
 #: src/pages/Board.tsx
 msgid "Owner"
 msgstr ""
@@ -4983,6 +5058,7 @@ msgstr "플러그인"
 msgid "Polished message"
 msgstr ""
 
+#: src/pages/recruiting/ActivityTab.tsx
 #: src/pages/RecruitingPanel.tsx
 msgid "Pooled in internal review"
 msgstr ""
@@ -5359,6 +5435,7 @@ msgstr "새로고침 중…"
 msgid "Registration is closed"
 msgstr "가입이 마감되었습니다"
 
+#: src/pages/recruiting/ActivityTab.tsx
 #: src/pages/RecruitingPanel.tsx
 msgid "Rejected in internal review"
 msgstr ""
@@ -5373,6 +5450,10 @@ msgstr "제어권 넘기기"
 
 #: src/components/ComputerUpdateProgress.tsx
 msgid "Release interrupted computer?"
+msgstr ""
+
+#: src/pages/recruiting/TasksTab.tsx
+msgid "Reminder"
 msgstr ""
 
 #: src/components/ApprovalRulesSettings.tsx
@@ -5606,6 +5687,7 @@ msgstr ""
 msgid "Resume missing"
 msgstr ""
 
+#: src/pages/recruiting/ActivityTab.tsx
 #: src/pages/RecruitingPanel.tsx
 msgid "Resume ready"
 msgstr ""
@@ -5648,6 +5730,10 @@ msgstr "리비전 {0}"
 
 #: src/pages/RecruitingCorrespondence.tsx
 msgid "Review in conversation"
+msgstr ""
+
+#: src/pages/recruiting/ActivityTab.tsx
+msgid "Review note"
 msgstr ""
 
 #: src/lib/model-connection-preflight.ts
@@ -5819,6 +5905,7 @@ msgstr ""
 #: src/pages/KnowledgeSection.tsx
 #: src/pages/McpServersOverlay.tsx
 #: src/pages/ModelSettingsOverlay.tsx
+#: src/pages/recruiting/TasksTab.tsx
 #: src/pages/RecruitingPanel.tsx
 #: src/pages/RoutineEditor.tsx
 #: src/pages/shell/bot-panel.tsx
@@ -5977,6 +6064,7 @@ msgstr ""
 msgid "Schedule interview"
 msgstr ""
 
+#: src/pages/recruiting/ActivityTab.tsx
 #: src/pages/recruiting/InterviewTab.tsx
 #: src/pages/RecruitingPanel.tsx
 msgid "Scheduled"
@@ -6579,6 +6667,10 @@ msgstr ""
 msgid "Status"
 msgstr ""
 
+#: src/pages/recruiting/ActivityTab.tsx
+msgid "Status changed to “{label}”"
+msgstr ""
+
 #. placeholder {0}: index + 1
 #: src/pages/RecruitingCorrespondence.tsx
 msgid "Step {0}"
@@ -6719,6 +6811,11 @@ msgstr "표"
 #: src/pages/Shell.tsx
 msgid "Take control"
 msgstr "제어권 가져오기"
+
+#: src/pages/recruiting/DetailPanel.tsx
+#: src/pages/recruiting/TasksTab.tsx
+msgid "Tasks"
+msgstr ""
 
 #: src/components/teach/TeachComputerOverlay.tsx
 msgid "Teach a task"
@@ -7102,6 +7199,11 @@ msgstr "지원하지 않는 파일 형식: {0}"
 msgid "Up to date"
 msgstr "최신 상태"
 
+#. placeholder {0}: upcoming.length
+#: src/pages/recruiting/TasksTab.tsx
+msgid "Upcoming ({0})"
+msgstr ""
+
 #: src/components/SoftwareUpdateSection.tsx
 msgid "Update"
 msgstr "업데이트"
@@ -7294,6 +7396,7 @@ msgstr "잠시 기다린 뒤 다시 테스트하세요."
 msgid "Wait for this role to finish loading before saving."
 msgstr ""
 
+#: src/pages/recruiting/ActivityTab.tsx
 #: src/pages/RecruitingPanel.tsx
 msgid "Waiting for resume"
 msgstr ""

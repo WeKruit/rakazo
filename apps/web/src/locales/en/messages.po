@@ -200,6 +200,10 @@ msgstr "{name} failed"
 msgid "{name} finished"
 msgstr "{name} finished"
 
+#: src/pages/recruiting/ActivityTab.tsx
+msgid "{name} replied"
+msgstr "{name} replied"
+
 #. js-lingui-explicit-id
 #: src/lib/browser-notifications.ts
 msgid "{name} stopped"
@@ -346,7 +350,9 @@ msgid "Active model"
 msgstr "Active model"
 
 #: src/components/computer/TerminalApp.tsx
+#: src/pages/recruiting/ActivityTab.tsx
 #: src/pages/recruiting/ContactsTab.tsx
+#: src/pages/recruiting/DetailPanel.tsx
 #: src/pages/RecruitingPanel.tsx
 #: src/pages/Shell.tsx
 msgid "Activity"
@@ -683,6 +689,7 @@ msgstr "Approve this server to let your agent use its tools."
 msgid "Approved"
 msgstr "Approved"
 
+#: src/pages/recruiting/ActivityTab.tsx
 #: src/pages/RecruitingPanel.tsx
 msgid "Approved in internal review"
 msgstr "Approved in internal review"
@@ -879,6 +886,7 @@ msgstr "Avatars"
 msgid "Avg tenure"
 msgstr "Avg tenure"
 
+#: src/pages/recruiting/ActivityTab.tsx
 #: src/pages/recruiting/InterviewTab.tsx
 #: src/pages/RecruitingPanel.tsx
 msgid "Awaiting feedback"
@@ -1068,6 +1076,7 @@ msgstr "Can't reach the server."
 #: src/pages/ModelSettingsOverlay.tsx
 #: src/pages/Onboarding.tsx
 #: src/pages/PluginsOverlay.tsx
+#: src/pages/recruiting/TasksTab.tsx
 #: src/pages/RecruitingPanel.tsx
 #: src/pages/shell/bot-credentials.tsx
 #: src/pages/shell/dialogs.tsx
@@ -2001,6 +2010,10 @@ msgstr "Could not load"
 msgid "Could not load activity"
 msgstr "Could not load activity"
 
+#: src/pages/recruiting/ActivityTab.tsx
+msgid "Could not load all activity."
+msgstr "Could not load all activity."
+
 #: src/components/ApprovalRulesSettings.tsx
 msgid "Could not load approval rules"
 msgstr "Could not load approval rules"
@@ -2085,6 +2098,10 @@ msgstr "Could not load recruiting"
 #: src/pages/RecruitingPanel.tsx
 msgid "Could not load recruiting. Refresh to try again."
 msgstr "Could not load recruiting. Refresh to try again."
+
+#: src/pages/recruiting/TasksTab.tsx
+msgid "Could not load reminders."
+msgstr "Could not load reminders."
 
 #: src/pages/RoutineRunHistory.tsx
 msgid "Could not load run history"
@@ -2287,6 +2304,10 @@ msgstr "Could not save that voice"
 msgid "Could not save the credential"
 msgstr "Could not save the credential"
 
+#: src/pages/recruiting/TasksTab.tsx
+msgid "Could not save the reminder."
+msgstr "Could not save the reminder."
+
 #: src/pages/shell/message-cards.tsx
 msgid "Could not save this choice"
 msgstr "Could not save this choice"
@@ -2399,6 +2420,10 @@ msgstr "Create new Group"
 #: src/pages/shell/bot-picker.tsx
 msgid "Create new Space"
 msgstr "Create new Space"
+
+#: src/pages/recruiting/TasksTab.tsx
+msgid "Create reminder"
+msgstr "Create reminder"
 
 #: src/pages/RoutineEditor.tsx
 msgid "Create Routine"
@@ -2580,6 +2605,7 @@ msgstr "Default scope"
 #: src/pages/BotContextMenu.tsx
 #: src/pages/KnowledgeSection.tsx
 #: src/pages/McpServersOverlay.tsx
+#: src/pages/recruiting/TasksTab.tsx
 #: src/pages/RoutineEditor.tsx
 #: src/pages/Shell.tsx
 #: src/pages/shell/dialogs.tsx
@@ -2763,6 +2789,7 @@ msgstr "Don’t have an account?"
 
 #: src/lib/ticket-status.ts
 #: src/pages/ActivityList.tsx
+#: src/pages/recruiting/TasksTab.tsx
 #: src/pages/shell/avatar-studio-popover.tsx
 msgid "Done"
 msgstr "Done"
@@ -2821,6 +2848,10 @@ msgstr "Drafting email"
 msgid "Drag, drop, or paste an image"
 msgstr "Drag, drop, or paste an image"
 
+#: src/pages/recruiting/TasksTab.tsx
+msgid "Due"
+msgstr "Due"
+
 #: src/pages/BotContextMenu.tsx
 msgid "Duplicate"
 msgstr "Duplicate"
@@ -2828,6 +2859,10 @@ msgstr "Duplicate"
 #: src/pages/shell/bot-panel.tsx
 msgid "e.g. Hivenet Agent, Presales, Timesheets bot"
 msgstr "e.g. Hivenet Agent, Presales, Timesheets bot"
+
+#: src/pages/recruiting/TasksTab.tsx
+msgid "Edit"
+msgstr "Edit"
 
 #: src/pages/RecruitingPanel.tsx
 msgid "Edit criteria"
@@ -2868,6 +2903,10 @@ msgstr "Email draft"
 msgid "Email draft editor"
 msgstr "Email draft editor"
 
+#: src/pages/recruiting/ActivityTab.tsx
+msgid "Email failed to send"
+msgstr "Email failed to send"
+
 #: src/lib/user-error.ts
 msgid "Email is not allowed to register"
 msgstr "Email is not allowed to register"
@@ -2876,9 +2915,25 @@ msgstr "Email is not allowed to register"
 msgid "Email missing"
 msgstr "Email missing"
 
+#: src/pages/recruiting/ActivityTab.tsx
+msgid "Email queued"
+msgstr "Email queued"
+
+#: src/pages/recruiting/ActivityTab.tsx
+msgid "Email recorded"
+msgstr "Email recorded"
+
 #: src/pages/RecruitingPanel.tsx
 msgid "Email reply"
 msgstr "Email reply"
+
+#: src/pages/recruiting/ActivityTab.tsx
+msgid "Email scheduled"
+msgstr "Email scheduled"
+
+#: src/pages/recruiting/ActivityTab.tsx
+msgid "Email sent"
+msgstr "Email sent"
 
 #: src/lib/user-error.ts
 msgid "Email verification required"
@@ -3467,6 +3522,7 @@ msgstr "Integrations"
 msgid "Interest"
 msgstr "Interest"
 
+#: src/pages/recruiting/ActivityTab.tsx
 #: src/pages/RecruitingPanel.tsx
 msgid "Interested"
 msgstr "Interested"
@@ -3539,6 +3595,7 @@ msgstr "Interview"
 msgid "Interview workflow"
 msgstr "Interview workflow"
 
+#: src/pages/recruiting/ActivityTab.tsx
 #: src/pages/RecruitingPanel.tsx
 msgid "Introduced"
 msgstr "Introduced"
@@ -3865,6 +3922,10 @@ msgstr "Mark as Unread"
 #: src/pages/RecruitingPanel.tsx
 msgid "Marked as sent"
 msgstr "Marked as sent"
+
+#: src/pages/recruiting/ActivityTab.tsx
+msgid "Marked high signal"
+msgstr "Marked high signal"
 
 #: src/pages/recruiting/AssessmentCard.tsx
 #: src/pages/recruiting/ContactsTab.tsx
@@ -4207,6 +4268,7 @@ msgstr "Needs connection"
 msgid "Needs input"
 msgstr "Needs input"
 
+#: src/pages/recruiting/ActivityTab.tsx
 #: src/pages/recruiting/InterviewTab.tsx
 #: src/pages/RecruitingPanel.tsx
 msgid "Needs scheduling"
@@ -4286,6 +4348,10 @@ msgstr "Next contact campaigns"
 #: src/pages/recruiting/RoleSetup.tsx
 msgid "Next: {0}"
 msgstr "Next: {0}"
+
+#: src/pages/recruiting/ActivityTab.tsx
+msgid "No activity yet."
+msgstr "No activity yet."
 
 #: src/pages/RecruitingPanel.tsx
 msgid "No additional search filters"
@@ -4600,6 +4666,10 @@ msgstr "Not connected"
 msgid "Not in the plugin catalog"
 msgstr "Not in the plugin catalog"
 
+#: src/pages/recruiting/ActivityTab.tsx
+msgid "Not interested"
+msgstr "Not interested"
+
 #: src/components/AskCard.tsx
 #: src/pages/shell/message-cards.tsx
 msgid "Not now"
@@ -4877,6 +4947,11 @@ msgstr "Outreach file review"
 msgid "Outreach status"
 msgstr "Outreach status"
 
+#. placeholder {0}: overdue.length
+#: src/pages/recruiting/TasksTab.tsx
+msgid "Overdue ({0})"
+msgstr "Overdue ({0})"
+
 #: src/pages/Board.tsx
 msgid "Owner"
 msgstr "Owner"
@@ -4983,6 +5058,7 @@ msgstr "Plugin"
 msgid "Polished message"
 msgstr "Polished message"
 
+#: src/pages/recruiting/ActivityTab.tsx
 #: src/pages/RecruitingPanel.tsx
 msgid "Pooled in internal review"
 msgstr "Pooled in internal review"
@@ -5359,6 +5435,7 @@ msgstr "Refreshing…"
 msgid "Registration is closed"
 msgstr "Registration is closed"
 
+#: src/pages/recruiting/ActivityTab.tsx
 #: src/pages/RecruitingPanel.tsx
 msgid "Rejected in internal review"
 msgstr "Rejected in internal review"
@@ -5374,6 +5451,10 @@ msgstr "Release control"
 #: src/components/ComputerUpdateProgress.tsx
 msgid "Release interrupted computer?"
 msgstr "Release interrupted computer?"
+
+#: src/pages/recruiting/TasksTab.tsx
+msgid "Reminder"
+msgstr "Reminder"
 
 #: src/components/ApprovalRulesSettings.tsx
 #: src/pages/ModelBackupsSettings.tsx
@@ -5606,6 +5687,7 @@ msgstr "Resume consideration"
 msgid "Resume missing"
 msgstr "Resume missing"
 
+#: src/pages/recruiting/ActivityTab.tsx
 #: src/pages/RecruitingPanel.tsx
 msgid "Resume ready"
 msgstr "Resume ready"
@@ -5649,6 +5731,10 @@ msgstr "rev {0}"
 #: src/pages/RecruitingCorrespondence.tsx
 msgid "Review in conversation"
 msgstr "Review in conversation"
+
+#: src/pages/recruiting/ActivityTab.tsx
+msgid "Review note"
+msgstr "Review note"
 
 #: src/lib/model-connection-preflight.ts
 msgid "Review provider settings and test again."
@@ -5819,6 +5905,7 @@ msgstr "Salary range"
 #: src/pages/KnowledgeSection.tsx
 #: src/pages/McpServersOverlay.tsx
 #: src/pages/ModelSettingsOverlay.tsx
+#: src/pages/recruiting/TasksTab.tsx
 #: src/pages/RecruitingPanel.tsx
 #: src/pages/RoutineEditor.tsx
 #: src/pages/shell/bot-panel.tsx
@@ -5977,6 +6064,7 @@ msgstr "Schedule an interview with {0}. Check availability and prepare the invit
 msgid "Schedule interview"
 msgstr "Schedule interview"
 
+#: src/pages/recruiting/ActivityTab.tsx
 #: src/pages/recruiting/InterviewTab.tsx
 #: src/pages/RecruitingPanel.tsx
 msgid "Scheduled"
@@ -6579,6 +6667,10 @@ msgstr "Statement"
 msgid "Status"
 msgstr "Status"
 
+#: src/pages/recruiting/ActivityTab.tsx
+msgid "Status changed to “{label}”"
+msgstr "Status changed to “{label}”"
+
 #. placeholder {0}: index + 1
 #: src/pages/RecruitingCorrespondence.tsx
 msgid "Step {0}"
@@ -6719,6 +6811,11 @@ msgstr "Table"
 #: src/pages/Shell.tsx
 msgid "Take control"
 msgstr "Take control"
+
+#: src/pages/recruiting/DetailPanel.tsx
+#: src/pages/recruiting/TasksTab.tsx
+msgid "Tasks"
+msgstr "Tasks"
 
 #: src/components/teach/TeachComputerOverlay.tsx
 msgid "Teach a task"
@@ -7102,6 +7199,11 @@ msgstr "Unsupported file type: {0}"
 msgid "Up to date"
 msgstr "Up to date"
 
+#. placeholder {0}: upcoming.length
+#: src/pages/recruiting/TasksTab.tsx
+msgid "Upcoming ({0})"
+msgstr "Upcoming ({0})"
+
 #: src/components/SoftwareUpdateSection.tsx
 msgid "Update"
 msgstr "Update"
@@ -7294,6 +7396,7 @@ msgstr "Wait a moment and test again."
 msgid "Wait for this role to finish loading before saving."
 msgstr "Wait for this role to finish loading before saving."
 
+#: src/pages/recruiting/ActivityTab.tsx
 #: src/pages/RecruitingPanel.tsx
 msgid "Waiting for resume"
 msgstr "Waiting for resume"

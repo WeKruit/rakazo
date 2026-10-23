@@ -200,6 +200,10 @@ msgstr "{name} 失败"
 msgid "{name} finished"
 msgstr "{name} 已完成"
 
+#: src/pages/recruiting/ActivityTab.tsx
+msgid "{name} replied"
+msgstr "{name} 已回复"
+
 #. js-lingui-explicit-id
 #: src/lib/browser-notifications.ts
 msgid "{name} stopped"
@@ -346,7 +350,9 @@ msgid "Active model"
 msgstr "当前模型"
 
 #: src/components/computer/TerminalApp.tsx
+#: src/pages/recruiting/ActivityTab.tsx
 #: src/pages/recruiting/ContactsTab.tsx
+#: src/pages/recruiting/DetailPanel.tsx
 #: src/pages/RecruitingPanel.tsx
 #: src/pages/Shell.tsx
 msgid "Activity"
@@ -683,9 +689,10 @@ msgstr "批准此服务器后，Agent 才能使用它的工具。"
 msgid "Approved"
 msgstr ""
 
+#: src/pages/recruiting/ActivityTab.tsx
 #: src/pages/RecruitingPanel.tsx
 msgid "Approved in internal review"
-msgstr ""
+msgstr "内部审核已通过"
 
 #: src/pages/BotContextMenu.tsx
 msgid "Archive"
@@ -879,10 +886,11 @@ msgstr "头像"
 msgid "Avg tenure"
 msgstr "平均任期"
 
+#: src/pages/recruiting/ActivityTab.tsx
 #: src/pages/recruiting/InterviewTab.tsx
 #: src/pages/RecruitingPanel.tsx
 msgid "Awaiting feedback"
-msgstr ""
+msgstr "等待反馈"
 
 #: src/pages/recruiting/InboxTab.tsx
 msgid "Awaiting reply"
@@ -1068,6 +1076,7 @@ msgstr "无法连接服务器。"
 #: src/pages/ModelSettingsOverlay.tsx
 #: src/pages/Onboarding.tsx
 #: src/pages/PluginsOverlay.tsx
+#: src/pages/recruiting/TasksTab.tsx
 #: src/pages/RecruitingPanel.tsx
 #: src/pages/shell/bot-credentials.tsx
 #: src/pages/shell/dialogs.tsx
@@ -2001,6 +2010,10 @@ msgstr "无法加载"
 msgid "Could not load activity"
 msgstr ""
 
+#: src/pages/recruiting/ActivityTab.tsx
+msgid "Could not load all activity."
+msgstr "部分动态未能加载。"
+
 #: src/components/ApprovalRulesSettings.tsx
 msgid "Could not load approval rules"
 msgstr "无法加载审批规则"
@@ -2085,6 +2098,10 @@ msgstr ""
 #: src/pages/RecruitingPanel.tsx
 msgid "Could not load recruiting. Refresh to try again."
 msgstr ""
+
+#: src/pages/recruiting/TasksTab.tsx
+msgid "Could not load reminders."
+msgstr "无法加载提醒。"
 
 #: src/pages/RoutineRunHistory.tsx
 msgid "Could not load run history"
@@ -2287,6 +2304,10 @@ msgstr "无法保存该语音"
 msgid "Could not save the credential"
 msgstr ""
 
+#: src/pages/recruiting/TasksTab.tsx
+msgid "Could not save the reminder."
+msgstr "无法保存提醒。"
+
 #: src/pages/shell/message-cards.tsx
 msgid "Could not save this choice"
 msgstr "无法保存此选择"
@@ -2399,6 +2420,10 @@ msgstr "新建群组"
 #: src/pages/shell/bot-picker.tsx
 msgid "Create new Space"
 msgstr "新建工作区"
+
+#: src/pages/recruiting/TasksTab.tsx
+msgid "Create reminder"
+msgstr "创建提醒"
 
 #: src/pages/RoutineEditor.tsx
 msgid "Create Routine"
@@ -2562,7 +2587,7 @@ msgstr "默认"
 #. placeholder {0}: thinkingLevelLabel("medium")
 #: src/pages/ModelSettingsOverlay.tsx
 msgid "Default ({0})"
-msgstr ""
+msgstr "默认（{0}）"
 
 #. placeholder {0}: thinkingLevelLabel("medium")
 #. placeholder {0}: thinkingLevelLabel(defaultThinkingLevel)
@@ -2580,6 +2605,7 @@ msgstr "默认范围"
 #: src/pages/BotContextMenu.tsx
 #: src/pages/KnowledgeSection.tsx
 #: src/pages/McpServersOverlay.tsx
+#: src/pages/recruiting/TasksTab.tsx
 #: src/pages/RoutineEditor.tsx
 #: src/pages/Shell.tsx
 #: src/pages/shell/dialogs.tsx
@@ -2763,6 +2789,7 @@ msgstr "还没有账户？"
 
 #: src/lib/ticket-status.ts
 #: src/pages/ActivityList.tsx
+#: src/pages/recruiting/TasksTab.tsx
 #: src/pages/shell/avatar-studio-popover.tsx
 msgid "Done"
 msgstr "完成"
@@ -2821,6 +2848,10 @@ msgstr "正在起草邮件"
 msgid "Drag, drop, or paste an image"
 msgstr "拖放或粘贴图片"
 
+#: src/pages/recruiting/TasksTab.tsx
+msgid "Due"
+msgstr "截止时间"
+
 #: src/pages/BotContextMenu.tsx
 msgid "Duplicate"
 msgstr "复制"
@@ -2828,6 +2859,10 @@ msgstr "复制"
 #: src/pages/shell/bot-panel.tsx
 msgid "e.g. Hivenet Agent, Presales, Timesheets bot"
 msgstr "例如 Hivenet Agent、Presales、工时表机器人"
+
+#: src/pages/recruiting/TasksTab.tsx
+msgid "Edit"
+msgstr "编辑"
 
 #: src/pages/RecruitingPanel.tsx
 msgid "Edit criteria"
@@ -2868,6 +2903,10 @@ msgstr ""
 msgid "Email draft editor"
 msgstr ""
 
+#: src/pages/recruiting/ActivityTab.tsx
+msgid "Email failed to send"
+msgstr "邮件发送失败"
+
 #: src/lib/user-error.ts
 msgid "Email is not allowed to register"
 msgstr "该邮箱不允许注册"
@@ -2876,9 +2915,25 @@ msgstr "该邮箱不允许注册"
 msgid "Email missing"
 msgstr ""
 
+#: src/pages/recruiting/ActivityTab.tsx
+msgid "Email queued"
+msgstr "邮件已排队"
+
+#: src/pages/recruiting/ActivityTab.tsx
+msgid "Email recorded"
+msgstr "已记录邮件"
+
 #: src/pages/RecruitingPanel.tsx
 msgid "Email reply"
 msgstr "邮件回复"
+
+#: src/pages/recruiting/ActivityTab.tsx
+msgid "Email scheduled"
+msgstr "邮件已定时"
+
+#: src/pages/recruiting/ActivityTab.tsx
+msgid "Email sent"
+msgstr "邮件已发送"
 
 #: src/lib/user-error.ts
 msgid "Email verification required"
@@ -3467,9 +3522,10 @@ msgstr "集成"
 msgid "Interest"
 msgstr ""
 
+#: src/pages/recruiting/ActivityTab.tsx
 #: src/pages/RecruitingPanel.tsx
 msgid "Interested"
-msgstr ""
+msgstr "感兴趣"
 
 #: src/pages/Shell.tsx
 msgid "Interjection applied"
@@ -3539,9 +3595,10 @@ msgstr ""
 msgid "Interview workflow"
 msgstr ""
 
+#: src/pages/recruiting/ActivityTab.tsx
 #: src/pages/RecruitingPanel.tsx
 msgid "Introduced"
-msgstr ""
+msgstr "已引荐"
 
 #: src/pages/RecruitingPanel.tsx
 msgid "Is a company deck available?"
@@ -3865,6 +3922,10 @@ msgstr "标为未读"
 #: src/pages/RecruitingPanel.tsx
 msgid "Marked as sent"
 msgstr ""
+
+#: src/pages/recruiting/ActivityTab.tsx
+msgid "Marked high signal"
+msgstr "已标记为高意向"
 
 #: src/pages/recruiting/AssessmentCard.tsx
 #: src/pages/recruiting/ContactsTab.tsx
@@ -4207,10 +4268,11 @@ msgstr ""
 msgid "Needs input"
 msgstr "需要输入"
 
+#: src/pages/recruiting/ActivityTab.tsx
 #: src/pages/recruiting/InterviewTab.tsx
 #: src/pages/RecruitingPanel.tsx
 msgid "Needs scheduling"
-msgstr ""
+msgstr "待安排"
 
 #: src/pages/ActivityList.tsx
 msgid "Needs takeover"
@@ -4286,6 +4348,10 @@ msgstr ""
 #: src/pages/recruiting/RoleSetup.tsx
 msgid "Next: {0}"
 msgstr "下一步：{0}"
+
+#: src/pages/recruiting/ActivityTab.tsx
+msgid "No activity yet."
+msgstr "暂无动态。"
 
 #: src/pages/RecruitingPanel.tsx
 msgid "No additional search filters"
@@ -4600,6 +4666,10 @@ msgstr "未连接"
 msgid "Not in the plugin catalog"
 msgstr "不在插件目录中"
 
+#: src/pages/recruiting/ActivityTab.tsx
+msgid "Not interested"
+msgstr "不感兴趣"
+
 #: src/components/AskCard.tsx
 #: src/pages/shell/message-cards.tsx
 msgid "Not now"
@@ -4877,6 +4947,11 @@ msgstr ""
 msgid "Outreach status"
 msgstr ""
 
+#. placeholder {0}: overdue.length
+#: src/pages/recruiting/TasksTab.tsx
+msgid "Overdue ({0})"
+msgstr "已逾期（{0}）"
+
 #: src/pages/Board.tsx
 msgid "Owner"
 msgstr ""
@@ -4983,9 +5058,10 @@ msgstr "插件"
 msgid "Polished message"
 msgstr ""
 
+#: src/pages/recruiting/ActivityTab.tsx
 #: src/pages/RecruitingPanel.tsx
 msgid "Pooled in internal review"
-msgstr ""
+msgstr "内部审核已放入人才库"
 
 #: src/pages/RoutineEditor.tsx
 msgid "POST to"
@@ -5359,9 +5435,10 @@ msgstr ""
 msgid "Registration is closed"
 msgstr "注册已关闭"
 
+#: src/pages/recruiting/ActivityTab.tsx
 #: src/pages/RecruitingPanel.tsx
 msgid "Rejected in internal review"
-msgstr ""
+msgstr "内部审核未通过"
 
 #: src/components/ComputerUpdateProgress.tsx
 msgid "Release computer"
@@ -5374,6 +5451,10 @@ msgstr "交还控制权"
 #: src/components/ComputerUpdateProgress.tsx
 msgid "Release interrupted computer?"
 msgstr ""
+
+#: src/pages/recruiting/TasksTab.tsx
+msgid "Reminder"
+msgstr "提醒"
 
 #: src/components/ApprovalRulesSettings.tsx
 #: src/pages/ModelBackupsSettings.tsx
@@ -5606,9 +5687,10 @@ msgstr ""
 msgid "Resume missing"
 msgstr ""
 
+#: src/pages/recruiting/ActivityTab.tsx
 #: src/pages/RecruitingPanel.tsx
 msgid "Resume ready"
-msgstr ""
+msgstr "简历已就绪"
 
 #. placeholder {0}: candidate.resumeUrl ?? t`Resume missing`
 #: src/pages/Shell.tsx
@@ -5649,6 +5731,10 @@ msgstr "版本 {0}"
 #: src/pages/RecruitingCorrespondence.tsx
 msgid "Review in conversation"
 msgstr ""
+
+#: src/pages/recruiting/ActivityTab.tsx
+msgid "Review note"
+msgstr "审核备注"
 
 #: src/lib/model-connection-preflight.ts
 msgid "Review provider settings and test again."
@@ -5819,6 +5905,7 @@ msgstr ""
 #: src/pages/KnowledgeSection.tsx
 #: src/pages/McpServersOverlay.tsx
 #: src/pages/ModelSettingsOverlay.tsx
+#: src/pages/recruiting/TasksTab.tsx
 #: src/pages/RecruitingPanel.tsx
 #: src/pages/RoutineEditor.tsx
 #: src/pages/shell/bot-panel.tsx
@@ -5977,10 +6064,11 @@ msgstr "为 {0} 安排面试。请查看可用时间，并在这里准备邀请�
 msgid "Schedule interview"
 msgstr "约面试"
 
+#: src/pages/recruiting/ActivityTab.tsx
 #: src/pages/recruiting/InterviewTab.tsx
 #: src/pages/RecruitingPanel.tsx
 msgid "Scheduled"
-msgstr ""
+msgstr "已安排"
 
 #: src/pages/RecruitingCorrespondence.tsx
 msgid "Scheduling"
@@ -6579,6 +6667,10 @@ msgstr ""
 msgid "Status"
 msgstr ""
 
+#: src/pages/recruiting/ActivityTab.tsx
+msgid "Status changed to “{label}”"
+msgstr "状态变更为“{label}”"
+
 #. placeholder {0}: index + 1
 #: src/pages/RecruitingCorrespondence.tsx
 msgid "Step {0}"
@@ -6719,6 +6811,11 @@ msgstr "表格"
 #: src/pages/Shell.tsx
 msgid "Take control"
 msgstr "接管控制权"
+
+#: src/pages/recruiting/DetailPanel.tsx
+#: src/pages/recruiting/TasksTab.tsx
+msgid "Tasks"
+msgstr "任务"
 
 #: src/components/teach/TeachComputerOverlay.tsx
 msgid "Teach a task"
@@ -7102,6 +7199,11 @@ msgstr "不支持的文件类型：{0}"
 msgid "Up to date"
 msgstr "已是最新"
 
+#. placeholder {0}: upcoming.length
+#: src/pages/recruiting/TasksTab.tsx
+msgid "Upcoming ({0})"
+msgstr "即将到期（{0}）"
+
 #: src/components/SoftwareUpdateSection.tsx
 msgid "Update"
 msgstr "更新"
@@ -7294,9 +7396,10 @@ msgstr "请稍候并重新测试。"
 msgid "Wait for this role to finish loading before saving."
 msgstr ""
 
+#: src/pages/recruiting/ActivityTab.tsx
 #: src/pages/RecruitingPanel.tsx
 msgid "Waiting for resume"
-msgstr ""
+msgstr "等待简历"
 
 #: src/components/SoftwareUpdateSection.tsx
 msgid "Waiting for the API to come back…"
