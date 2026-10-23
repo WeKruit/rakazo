@@ -4467,6 +4467,32 @@ describe("live CRM browser reads", () => {
       api.getRecruitingCrmData(f.deps, actor, target, { operation: "role", reference }),
     ).rejects.toMatchObject({ code: "NOT_FOUND" });
   });
+  it.each([undefined, 1, 2])(
+    "requires corrected presence response version (%s)",
+    async (version) => {
+      const f = browserFixture();
+      f.results.list_crm_candidates = {
+        ...(version === undefined ? {} : { version }),
+        candidate_ids: [],
+        role_candidate_ids: [],
+      };
+      const result = api.getRecruitingCrmData(f.deps, actor, target, {
+        operation: "presence",
+        ...pinned,
+        candidateIds: [candidateId],
+        crmRoleId: roleId,
+      });
+      if (version !== 2)
+        await expect(result).rejects.toMatchObject({ code: "SERVICE_UNAVAILABLE" });
+      else
+        await expect(result).resolves.toMatchObject({
+          operation: "presence",
+          candidateIds: [],
+          roleCandidateIds: [],
+        });
+    },
+  );
+
   it.each(["mail", "candidateDetails"] as const)(
     "reads original CRM outbox records separately for %s without redispatch",
     async (operation) => {

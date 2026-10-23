@@ -2315,6 +2315,7 @@ export const RecruitingCrmSyncCursorSchema = z.object({
 export type RecruitingCrmSyncCursor = z.infer<typeof RecruitingCrmSyncCursorSchema>;
 
 export const RecruitingCrmPresenceReadSchema = z.object({
+  version: z.literal(2),
   candidate_ids: z.array(z.uuid()).max(50),
   role_candidate_ids: z.array(z.uuid()).max(50).nullable(),
 });
