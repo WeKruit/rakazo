@@ -1,8 +1,9 @@
 import { Trans, useLingui } from "@lingui/react/macro";
 import type { RecruitingRoleCampaign } from "@rakazo/contracts";
-import { Badge } from "@rakazo/ui-web";
+import { Badge, Button } from "@rakazo/ui-web";
 import { useState } from "react";
 import { rpc } from "../../lib/rpc";
+import { useRecruitingDetail } from "./detail";
 import type { RecruitingTabProps } from "./shared";
 import {
   CrmGate,
@@ -96,6 +97,7 @@ function RoleCampaign({ read }: { read: ReturnType<typeof useRoleCampaign> }) {
 /** Stored outreach state for the role: campaigns, per-candidate status and queued/sent messages. */
 export function SequenceTab(props: RecruitingTabProps) {
   const { t } = useLingui();
+  const detail = useRecruitingDetail();
   const crm = useRoleCrm(props);
   const roleCampaign = useRoleCampaign(props);
   const instantly = useInstantlyStatus();
@@ -222,7 +224,29 @@ export function SequenceTab(props: RecruitingTabProps) {
             </ul>
             {selected ? (
               <section aria-label={t`Messages`} className="space-y-3">
-                <h4 className="font-semibold">{selected.name}</h4>
+                <h4 className="font-semibold">
+                  {detail ? (
+                    <Button
+                      variant="link"
+                      className="h-auto p-0 font-semibold"
+                      onClick={() =>
+                        detail.open({
+                          view: "thread",
+                          person: selected,
+                          role: {
+                            roleId: props.roleId,
+                            spaceId: props.spaceId,
+                            conversation: props.conversation,
+                          },
+                        })
+                      }
+                    >
+                      {selected.name}
+                    </Button>
+                  ) : (
+                    selected.name
+                  )}
+                </h4>
                 {details.loading ? <TabLoading /> : null}
                 {details.failed ? (
                   <TabNotice alert>
