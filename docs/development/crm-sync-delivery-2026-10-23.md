@@ -4,14 +4,16 @@ This is development evidence, not live acceptance. No live CRM read/sync, produc
 
 ## Scope and dependencies
 
-Starts from PR #72 head `461c496472edd53b1445ee47b2097134230cdba7`, merged with repository main `a5003a28`. Root integration records the final delivery/merge SHA. The CRM source changes are in the separate `WeKruit/headhunter-agent` delivery and must precede product sync. Do not run sync against an older source deployment: exact-ID presence checks and stored-profile reads are required.
+Current product code is Rakazo `fa2a2a0d29c57ebff9147c3467bb0d5c3bdaaa81` (merged #72, including #74 and concurrent #78). Documentation-only main `bb2a23c66a6891ce9380827282807d4ef8c562a0` and this documentation cleanup do not change that code. Source is pinned to merged #67, `11ca9c2df226782eee241fc5b36ba15600f4efcb`. Source SQL and existing MCP updates must precede product sync; Vercel success does not establish either prerequisite. Exact-ID version-2 presence checks and stored-profile reads are required.
 
 Ordered product migrations across the coordinated delivery:
 
 1. `20261023153000_recruiting_role_playbook_stage` (already merged #65).
 2. `20261023160000_recruiting_crm_sync` (#72 projection tables).
-3. `20261023170000_recruiting_candidate_notes` and `20261023171000_recruiting_candidate_shortlisted_at` (#74, when integrated).
-4. `20261023172000_recruiting_calibration_rounds` (concurrent main PR #78), then `20261023172000_recruiting_crm_sync_progress` (opaque progress tokens and contact profile JSON).
+3. `20261023170000_recruiting_candidate_notes` (#74).
+4. `20261023171000_recruiting_candidate_shortlisted_at` (#74).
+5. `20261023172000_recruiting_calibration_rounds` (concurrent main PR #78).
+6. `20261023172000_recruiting_crm_sync_progress` (opaque progress tokens and contact profile JSON).
 
 The separate CRM source migrations are `20261023180000_crm_candidate_presence` then `20261023181000_crm_candidate_presence_secondary_roles`; its authenticated read function reproduces the CRM's role-label matching and explicitly rejects unauthorized organizations. The existing MCP edge adapter exposes it through `list_crm_candidates` with `p_view: "presence"`. There is no new MCP server, dependency, credential, or cloud resource.
 
@@ -29,7 +31,7 @@ Existing role/contact/link/mail mappings in the original handoff remain. Added m
 
 The inspected CRM schema has **no education field**. The historical handoff's claim that education was already stored was not supported by source. No education was invented or inferred. Outbox drafts, review notes and mail for contacts with no role remain outside the full-sync copy. Automated periodic sync is not implemented.
 
-`recruiting.crmData` reads remain the authorized source boundary. Projection queries are owner/space/connection/organization/role scoped and exclude archived contacts, roles and links. Integration adds the projection consumer with the existing candidate-tool permission and connection-revision checks; there is no offline/live fallback and no offline availability claim. Run the full sync before evaluating projected CRM rows.
+`recruiting.crmData` reads remain the authorized source boundary. Projection queries are owner/space/connection/organization/role scoped and exclude archived contacts, roles and links. The merged integration includes the projection consumer with the existing candidate-tool permission and connection-revision checks; there is no offline/live fallback and no offline availability claim. Run the full sync before evaluating projected CRM rows.
 
 ## Correctness changes
 
@@ -44,7 +46,7 @@ A dry run writes **no CRM source data and no projection rows**. It does write/ro
 ## Local-owner procedure (not executed here)
 
 1. Preserve the deployment hold. Verify the active sourcing run has ended, outreach is stopped, and no active run would be interrupted. Record actual live source revision and migration ledger; historical handoff revisions are not current verification.
-2. Review the root's final SHAs and local test evidence. The user approved publication of this source correction with its existing Vercel automatic deployment at 16:43 UTC. This exception does not authorize manual deployments or migrations. Apply `docs/development/patches/crm-presence-v2.patch` to source merge `b29368dfdfe417d9883613fa7200d59c29c54861` using `git am` on an isolated branch; the patch author is anonymized for this public artifact. It contains source commits `e07e2bd82ba72dffa1d3384736d016544104ecbe` and `08402f1b4e3324bcf930f4e7cdbf027a48596e4e`, and canonical-fallback correction `b77f88cd51cb7760ab8fa08e987d48dfe86d9523`. Apply BOTH ordered source migrations, then deploy only the existing MCP edge function using the existing owner process. Never prune functions, create resources, rotate secrets, or change permissions as a shortcut.
+2. Review the pinned revisions and validation evidence. In an isolated source checkout, use merged source **`11ca9c2df226782eee241fc5b36ba15600f4efcb`** by default (`git checkout --detach 11ca9c2df226782eee241fc5b36ba15600f4efcb`). **Do not apply the included patch to that revision: it already contains the correction.** Only if the merged revision is unavailable, the patch is an archival recovery option on exact base `b29368dfdfe417d9883613fa7200d59c29c54861`; apply it once using `git am` on an isolated branch and revalidate before release. Choose the merged revision OR recovery patch, never both. Under the assigned local-owner release authorization and after lifting the hold, apply missing source migrations `20261023180000_crm_candidate_presence` then `20261023181000_crm_candidate_presence_secondary_roles`, then update only the existing MCP edge function through the existing owner process. The cloud task's 16:43 authorization covered source publication and its Vercel integration only; it did not authorize this task to execute migrations or manual deployment. Never prune functions, create resources, rotate secrets, or change permissions as a shortcut.
 3. Apply the ordered product migrations before updating API/worker. Deploy only when the owner can lift the hold.
 4. From the authorized signed-in product tab, use the existing group and Space. Do not paste cookies, tokens or credentials. Run the following loop first with `true`; stop if `skipped` is nonempty or expected source counts differ. Review counts with the owner before starting a fresh run with `false`.
 
@@ -84,13 +86,11 @@ Focused PostgreSQL tests use a localhost-only disposable test database with synt
 Local checks do not establish live provider shape, live data acceptance, UI acceptance or an end-to-end recruiting outcome. No live acceptance is claimed. The source query returns all stored history JSON without interpreting or ranking it. Work requiring new education storage, an interview table, periodic automation, or new provider event ingestion remains outside this delivery.
 
 
-Commands and observed results before root integration:
+Historical pre-integration results (superseded by the final 357/357 combined tests and API/web typechecks in the main delivery record):
 
 - `VERIFY_DATABASE=1 DATABASE_URL='<isolated-local-test-url>' pnpm exec vitest run apps/api/src/recruiting-crm-sync.postgres.test.ts`: 14 tests passed on native localhost PostgreSQL 17.
 - `pnpm exec tsc --noEmit -p apps/api`: passed.
-- Running the PostgreSQL suite plus `apps/api/src/recruiting.test.ts`: 271 passed, 5 failed. The five match the recorded baseline: three saved-correspondence receipt fixtures and two live-CRM authorization-count/actor-boundary fixtures. Integration must record any subsequent fixes/results separately.
+- Running the PostgreSQL suite plus `apps/api/src/recruiting.test.ts`: 271 passed, 5 failed. The five match the recorded baseline: three saved-correspondence receipt fixtures and two live-CRM authorization-count/actor-boundary fixtures. These five failures were subsequently fixed; the final integration passed, as recorded in the main delivery document.
 - `pnpm exec biome check` on changed TypeScript files and `git diff --check`: passed.
 
 A Docker-local synthetic database was briefly used before the inherited no-Docker restriction was relayed. Its six original tests passed; the owned container was then stopped and its data preserved. All expanded fourteen-test evidence above is from the native PostgreSQL instance, not Docker. No production access occurred.
-
-Published source correction: PR #67 merged as `11ca9c2df226782eee241fc5b36ba15600f4efcb`; use that source revision instead of manually applying the included archival patch when available. Existing Vercel reports success, but source SQL/MCP deployment remains owner-only and unverified.
