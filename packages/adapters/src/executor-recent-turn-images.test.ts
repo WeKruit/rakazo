@@ -88,6 +88,7 @@ async function runWithModel(
     onEventFindFirst?: () => void;
     /** The thread's active recruiting role; enables the run-start recruiting context. */
     recruitingRoleId?: string;
+    savedRecruitingCandidates?: number;
   } = {},
 ) {
   const run = {
@@ -185,6 +186,16 @@ async function runWithModel(
       ),
       create: vi.fn(async ({ data }: { data: object }) => ({ id: "published-final", ...data })),
     },
+    recruitingRole: {
+      findUnique: vi.fn(async () => ({
+        title: "Engineer",
+        playbookStage: "feedback",
+        currentRevisionId: "revision",
+        archivedAt: null,
+      })),
+    },
+    recruitingRoleRevision: { findUnique: vi.fn(async () => ({ brief: null })) },
+    recruitingCandidate: { count: vi.fn(async () => options.savedRecruitingCandidates ?? 0) },
     task: { findUniqueOrThrow: vi.fn(async () => ({ id: run.taskId, prompt: "Look again" })) },
     usageRecord: { create: vi.fn(async () => ({})), createMany: vi.fn(async () => ({ count: 1 })) },
     computer: { updateMany: vi.fn(async () => ({ count: 1 })) },
@@ -343,6 +354,26 @@ describe("run budget guardrails", () => {
     );
     // The run ended on the guardrail reply; the later tool call never reached the thread.
     expect(prisma.message.create).toHaveBeenCalledTimes(1);
+  });
+
+  it("includes saved recruiting results and the next step when the budget stops the executor", async () => {
+    const { finalizeRun, prisma } = await runWithModel(TEXT_ONLY_MODEL, undefined, false, false, {
+      recruitingRoleId: "role-1",
+      savedRecruitingCandidates: 10,
+      events: [usage(3), tool("t1"), usage(2.5), tool("t2")],
+    });
+    expect(finalizeRun).toHaveBeenCalledExactlyOnceWith(
+      expect.objectContaining({
+        outcome: "completed",
+        blocks: [
+          {
+            kind: "text",
+            text: expect.stringContaining("10 saved candidate profiles. Next step: 收集校准反馈."),
+          },
+        ],
+      }),
+    );
+    expect(prisma.recruitingCandidate.count).toHaveBeenCalledWith({ where: { roleId: "role-1" } });
   });
 
   it("leaves a run under the cap alone", async () => {

@@ -81,6 +81,7 @@ export async function guardRecruitingTurnEnd(
     {
       handedOff: input.handedOff,
       pendingApproval: input.pendingApproval,
+      requireBlockingInput: playbook?.stage === "calibration_10" || playbook?.stage === "feedback",
       savedRows:
         playbook?.stage === "calibration_10"
           ? (savedRows._sum.rowCount ?? 0) > 0

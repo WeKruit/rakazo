@@ -370,14 +370,15 @@ export function nextPlaybookStep(
         label: remaining ? `校准搜寻（还差 ${remaining} 人）` : "展示 10 人校准名单",
         prompt: remaining
           ? `继续校准搜寻直到保存 ${CALIBRATION_TARGET} 人（当前 ${facts.savedCandidates}）。开始前告诉用户，完成后列出名单。`
-          : "把 10 位校准候选人以名单形式列给用户，并请用户逐个反馈（通过/不通过及原因）。",
+          : "把 10 位校准候选人以名单形式列给用户，用原生问题卡收集反馈。允许用户针对任何人、任意子集或整体方向反馈，不要求逐人评分。",
       };
     }
     case "feedback":
       return {
         stage,
         label: "收集校准反馈",
-        prompt: "向用户展示校准名单并收集反馈；有反馈后更新筛选标准，再进入规模化搜寻。",
+        prompt:
+          "向用户展示 10 人校准名单，用原生问题卡收集反馈；允许针对个人、子集或整体方向反馈。由研究代理处理反馈，不自行重评候选人；扩大搜寻前必须取得用户对校准结果和规则修改的明确批准，不能把已保存名单或普通反馈当作批准。",
       };
     case "scale":
       return {
@@ -433,14 +434,23 @@ export function classifyTurnEnd(
     savedRows?: number;
     /** Minimum saved rows that count as a deliverable (default 1). */
     deliverableRows?: number;
+    /** A saved calibration pool still needs a real native feedback/approval card. */
+    requireBlockingInput?: boolean;
   } = {},
 ): TurnEndClass {
   if (events.handedOff) return "handoff";
   if (events.pendingApproval) return "card";
   const blocks = message.blocks;
-  if (blocks.some((block) => block.kind === "ask" && block.status !== "answered"))
+  if (
+    blocks.some(
+      (block) =>
+        block.kind === "ask" &&
+        (events.requireBlockingInput ? block.status === "pending" : block.status !== "answered"),
+    )
+  )
     return "question";
   if (blocks.some((block) => CARD_BLOCKS.has(block.kind))) return "card";
+  if (events.requireBlockingInput) return "none";
   if ((events.savedRows ?? 0) >= (events.deliverableRows ?? 1)) return "deliverable";
   const requiresSavedRows = (events.deliverableRows ?? 1) > 1;
   if (!requiresSavedRows && blocks.some((block) => DELIVERABLE_BLOCKS.has(block.kind)))

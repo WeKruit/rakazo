@@ -16,6 +16,7 @@ import type {
 import { boundDirectApprovalRequest } from "@rakazo/core";
 import { stableJsonValue } from "@rakazo/core/node/approval-effect-key";
 import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
+import { guardRecruitingTurnEnd } from "../../adapters/src/turn-end-guard.js";
 import type { Prisma, PrismaClient } from "./client.js";
 import { createDb, Prisma as PrismaSql } from "./client.js";
 import * as recruiting from "./index.js";
@@ -7918,6 +7919,71 @@ describePostgres("recruiting domain (PostgreSQL)", () => {
         taskId: prepared.task.id,
       }),
     ).toEqual([]);
+  });
+
+  it("requires a feedback card after the tenth saved candidate advances the real stage", async () => {
+    const { f, prepared } = await mappedResearchFixture();
+    await prisma.recruitingRole.update({
+      where: { id: f.role.role.id },
+      data: { playbookStage: "calibration_10" },
+    });
+    const rows = Array.from({ length: 10 }, (_, index) =>
+      canonicalCandidateRow(
+        `Calibration ${index}`,
+        `https://www.linkedin.com/in/calibration-${index}`,
+      ),
+    );
+    await recordCandidatePage(f, prepared, "calibration-first-nine", rows.slice(0, 9));
+    expect(
+      (await prisma.recruitingRole.findUniqueOrThrow({ where: { id: f.role.role.id } }))
+        .playbookStage,
+    ).toBe("calibration_10");
+    await recordCandidatePage(f, prepared, "calibration-tenth", rows.slice(9));
+    expect(
+      (await prisma.recruitingRole.findUniqueOrThrow({ where: { id: f.role.role.id } }))
+        .playbookStage,
+    ).toBe("feedback");
+    const sendUserMessage = vi.fn(async () => ({
+      messageId: "wake",
+      seq: 1,
+      taskId: "task",
+      runId: "continued-run",
+    }));
+    const deps = {
+      prisma,
+      events: { sendUserMessage },
+      jobs: { enqueue: vi.fn(async () => undefined) },
+    };
+    const input = {
+      run: { id: f.run.id, spaceId, threadId: f.thread.id, botId, userId, trigger: "user" },
+      roleId: f.role.role.id,
+      handedOff: false,
+      pendingApproval: false,
+      postAssistant: vi.fn(async () => undefined),
+    };
+    expect(
+      await guardRecruitingTurnEnd(deps, {
+        ...input,
+        blocks: [{ kind: "text", text: "Saved the ten profiles." }],
+      }),
+    ).toMatchObject({ action: "continued", stage: "feedback" });
+    expect(sendUserMessage).toHaveBeenCalledWith(
+      expect.objectContaining({ internal: true, prompt: expect.stringContaining("原生问题卡") }),
+    );
+    sendUserMessage.mockClear();
+    expect(
+      await guardRecruitingTurnEnd(deps, {
+        ...input,
+        blocks: [
+          {
+            kind: "ask",
+            text: "What feedback do you have on the calibration profiles?",
+            status: "pending",
+          },
+        ],
+      }),
+    ).toEqual({ action: "ended", classification: "question" });
+    expect(sendUserMessage).not.toHaveBeenCalled();
   });
 
   it("rolls back candidate rows, page, artifact and native observation together after a write failure", async () => {

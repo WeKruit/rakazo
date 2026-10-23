@@ -92,7 +92,7 @@ describe("guardRecruitingTurnEnd", () => {
   it.each([
     [1, 1, "continued"],
     [9, 9, "continued"],
-    [1, 10, "ended"],
+    [1, 10, "continued"],
     [10, 1, "continued"],
   ])(
     "calibration needs ten distinct cumulative candidates (%s writes, %s saved)",
@@ -113,6 +113,41 @@ describe("guardRecruitingTurnEnd", () => {
       expect(result.action).toBe(action);
     },
   );
+
+  it("does not treat feedback-stage saves or a prose question as a delivered review", async () => {
+    const f = fixture({ stage: "feedback", savedRows: 1, savedCandidates: 10 });
+    const base = {
+      run,
+      roleId: "role-1",
+      handedOff: false,
+      pendingApproval: false,
+      postAssistant: f.postAssistant,
+    };
+    expect(await guardRecruitingTurnEnd(f.deps, { ...base, blocks: statusNote })).toMatchObject({
+      action: "continued",
+      stage: "feedback",
+    });
+    expect(
+      await guardRecruitingTurnEnd(f.deps, {
+        ...base,
+        blocks: [
+          { kind: "text", text: "- Saved ten profiles\n- Updated stage\n- Ready for feedback?" },
+        ],
+      }),
+    ).toMatchObject({ action: "continued" });
+    expect(
+      await guardRecruitingTurnEnd(f.deps, {
+        ...base,
+        blocks: [
+          {
+            kind: "ask",
+            text: "What feedback do you have on these ten profiles?",
+            status: "pending",
+          },
+        ],
+      }),
+    ).toEqual({ action: "ended", classification: "question" });
+  });
 
   it("lets a question end the turn", async () => {
     const f = fixture();
