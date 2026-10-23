@@ -113,6 +113,11 @@ msgstr "{0} КБ"
 msgid "{0} MB"
 msgstr "{0} МБ"
 
+#. placeholder {0}: plan.calendar.lengthInMinutes
+#: src/pages/recruiting/SchedulingPlan.tsx
+msgid "{0} minutes"
+msgstr ""
+
 #. placeholder {0}: sender.name
 #: src/pages/ExternalConversationSettings.tsx
 msgid "{0} rollup hours"
@@ -1221,10 +1226,6 @@ msgstr ""
 msgid "Candidate feedback"
 msgstr ""
 
-#: src/pages/recruiting/SchedulingPlan.tsx
-msgid "Candidate IANA timezone"
-msgstr ""
-
 #: src/pages/recruiting/InterviewTab.tsx
 msgid "Candidate interview status"
 msgstr ""
@@ -1267,6 +1268,10 @@ msgstr "Candidate status"
 
 #: src/pages/recruiting/CandidateDirectory.tsx
 msgid "Candidate table"
+msgstr ""
+
+#: src/pages/recruiting/SchedulingPlan.tsx
+msgid "Candidate time zone"
 msgstr ""
 
 #: src/pages/recruiting/InboxTab.tsx
@@ -3132,6 +3137,10 @@ msgstr ""
 msgid "Duplicate"
 msgstr "Дублировать"
 
+#: src/pages/recruiting/SchedulingPlan.tsx
+msgid "Duration"
+msgstr ""
+
 #: src/pages/shell/bot-panel.tsx
 msgid "e.g. Hivenet Agent, Presales, Timesheets bot"
 msgstr "напр. Hivenet Agent, Presales, бот табелей"
@@ -3969,7 +3978,7 @@ msgid "Interview workflow"
 msgstr ""
 
 #: src/pages/recruiting/SchedulingPlan.tsx
-msgid "Interviewer IANA timezone"
+msgid "Interviewer time zone"
 msgstr ""
 
 #: src/pages/recruiting/ActivityTab.tsx
@@ -5308,6 +5317,10 @@ msgstr ""
 
 #: src/pages/recruiting/SchedulingPlan.tsx
 msgid "Only part of the saved availability is available."
+msgstr ""
+
+#: src/pages/recruiting/SchedulingPlan.tsx
+msgid "Only recent saved records are shown. Earlier plans may be missing."
 msgstr ""
 
 #: src/components/markdown-link-prompt.tsx

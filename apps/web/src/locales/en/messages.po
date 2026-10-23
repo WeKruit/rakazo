@@ -113,6 +113,11 @@ msgstr "{0} KB"
 msgid "{0} MB"
 msgstr "{0} MB"
 
+#. placeholder {0}: plan.calendar.lengthInMinutes
+#: src/pages/recruiting/SchedulingPlan.tsx
+msgid "{0} minutes"
+msgstr "{0} minutes"
+
 #. placeholder {0}: sender.name
 #: src/pages/ExternalConversationSettings.tsx
 msgid "{0} rollup hours"
@@ -1221,10 +1226,6 @@ msgstr "Candidate facts"
 msgid "Candidate feedback"
 msgstr "Candidate feedback"
 
-#: src/pages/recruiting/SchedulingPlan.tsx
-msgid "Candidate IANA timezone"
-msgstr "Candidate IANA timezone"
-
 #: src/pages/recruiting/InterviewTab.tsx
 msgid "Candidate interview status"
 msgstr "Candidate interview status"
@@ -1268,6 +1269,10 @@ msgstr "Candidate status"
 #: src/pages/recruiting/CandidateDirectory.tsx
 msgid "Candidate table"
 msgstr "Candidate table"
+
+#: src/pages/recruiting/SchedulingPlan.tsx
+msgid "Candidate time zone"
+msgstr "Candidate time zone"
 
 #: src/pages/recruiting/InboxTab.tsx
 #: src/pages/RecruitingPanel.tsx
@@ -3132,6 +3137,10 @@ msgstr "Due"
 msgid "Duplicate"
 msgstr "Duplicate"
 
+#: src/pages/recruiting/SchedulingPlan.tsx
+msgid "Duration"
+msgstr "Duration"
+
 #: src/pages/shell/bot-panel.tsx
 msgid "e.g. Hivenet Agent, Presales, Timesheets bot"
 msgstr "e.g. Hivenet Agent, Presales, Timesheets bot"
@@ -3969,8 +3978,8 @@ msgid "Interview workflow"
 msgstr "Interview workflow"
 
 #: src/pages/recruiting/SchedulingPlan.tsx
-msgid "Interviewer IANA timezone"
-msgstr "Interviewer IANA timezone"
+msgid "Interviewer time zone"
+msgstr "Interviewer time zone"
 
 #: src/pages/recruiting/ActivityTab.tsx
 #: src/pages/RecruitingPanel.tsx
@@ -5309,6 +5318,10 @@ msgstr "Only loaded candidate records are shown."
 #: src/pages/recruiting/SchedulingPlan.tsx
 msgid "Only part of the saved availability is available."
 msgstr "Only part of the saved availability is available."
+
+#: src/pages/recruiting/SchedulingPlan.tsx
+msgid "Only recent saved records are shown. Earlier plans may be missing."
+msgstr "Only recent saved records are shown. Earlier plans may be missing."
 
 #: src/components/markdown-link-prompt.tsx
 #: src/pages/ScratchpadSection.tsx
