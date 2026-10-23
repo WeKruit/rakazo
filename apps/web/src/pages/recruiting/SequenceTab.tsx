@@ -3,6 +3,7 @@ import type { RecruitingRoleCampaign } from "@rakazo/contracts";
 import { Badge, Button } from "@rakazo/ui-web";
 import { useEffect, useState } from "react";
 import { rpc } from "../../lib/rpc";
+import { CampaignObservedDetails } from "./CampaignObservedDetails";
 import { useRecruitingDetail } from "./detail";
 import { SequenceOverview } from "./SequenceOverview";
 import type { RecruitingTabProps } from "./shared";
@@ -224,6 +225,9 @@ export function SequenceTab(props: RecruitingTabProps) {
         // Candidate-wide outbox records have no role provenance.
         sendDates={null}
       />
+      {roleCampaign.data?.status === "ready" && roleCampaign.data.campaign ? (
+        <CampaignObservedDetails details={roleCampaign.data.campaign.observedDetails} />
+      ) : null}
       {roleCampaign.failed ||
       (roleCampaign.data?.status === "unavailable" && !roleCampaign.data.selectionRequired) ? (
         <TabNotice alert>

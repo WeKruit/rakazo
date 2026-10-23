@@ -6326,7 +6326,34 @@ describe("role campaign read", () => {
                 source: "local_native_instantly_rest",
                 result:
                   call.route?.toolName === "native_instantly_get_campaign"
-                    ? { id: CAMPAIGN, name: "Staff [role]", status: 1, stop_on_reply: false }
+                    ? {
+                        id: CAMPAIGN,
+                        name: "Staff [role]",
+                        status: 1,
+                        stop_on_reply: false,
+                        campaign_schedule: {
+                          schedules: [
+                            {
+                              name: "Morning",
+                              timing: { from: "09:00", to: "11:00" },
+                              timezone: "UTC",
+                              days: { "1": true },
+                            },
+                          ],
+                        },
+                        sequences: [
+                          {
+                            steps: [
+                              {
+                                type: "email",
+                                delay: 2,
+                                delay_unit: "days",
+                                variants: [{ subject: "Hello", body: "Observed content" }],
+                              },
+                            ],
+                          },
+                        ],
+                      }
                     : {
                         items: [
                           {
@@ -6381,6 +6408,23 @@ describe("role campaign read", () => {
         eaccount: "team@example.test",
         status: 1,
         stopOnReply: false,
+        observedDetails: {
+          schedules: [
+            { name: "Morning", from: "09:00", to: "11:00", timezone: "UTC", days: { "1": true } },
+          ],
+          sequences: [
+            {
+              steps: [
+                {
+                  type: "email",
+                  delay: 2,
+                  delayUnit: "days",
+                  variants: [{ subject: "Hello", body: "Observed content" }],
+                },
+              ],
+            },
+          ],
+        },
       },
       leads: [
         { candidateKey: "ada-key", email: "Ada@Example.test", status: -1, interestStatus: 1 },

@@ -76,6 +76,7 @@ import {
 import { getLogger } from "@rakazo/logging";
 import type { ParseError } from "jsonc-parser";
 import { findNodeAtLocation, parseTree } from "jsonc-parser";
+import { campaignObservedDetails } from "./recruiting-campaign-details.js";
 import type { ThreadTarget } from "./thread-target.js";
 
 async function authenticated<T>(operation: () => Promise<T>): Promise<T> {
@@ -734,6 +735,7 @@ export async function getRecruitingRoleCampaign(
         eaccount,
         status: integer(campaign.status),
         stopOnReply: typeof campaign.stop_on_reply === "boolean" ? campaign.stop_on_reply : null,
+        observedDetails: campaignObservedDetails(campaign),
       },
       leads: (Array.isArray(leads?.items) ? leads.items : []).flatMap((value) => {
         const lead = correspondenceRecord(value);

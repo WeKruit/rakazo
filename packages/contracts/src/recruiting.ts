@@ -1586,6 +1586,53 @@ export const RecruitingCorrespondenceInputPage = {
  * provider's integers: campaign 0 draft, 1 active, 2 paused, 3 completed; lead 1 active, 2 paused,
  * 3 completed, -1 bounced, -2 unsubscribed.
  */
+/** Observed provider fields only; null entries/fields denote unavailable or malformed data. */
+export const RecruitingCampaignDetailsSchema = z.strictObject({
+  schedules: z
+    .array(
+      z
+        .strictObject({
+          name: z.string().nullable(),
+          from: z.string().nullable(),
+          to: z.string().nullable(),
+          timezone: z.string().nullable(),
+          days: z.record(z.string(), z.boolean()).nullable(),
+        })
+        .nullable(),
+    )
+    .nullable(),
+  sequences: z
+    .array(
+      z
+        .strictObject({
+          steps: z
+            .array(
+              z
+                .strictObject({
+                  type: z.string().nullable(),
+                  delay: z.number().nonnegative().nullable(),
+                  delayUnit: z.string().nullable(),
+                  variants: z
+                    .array(
+                      z
+                        .strictObject({
+                          subject: z.string().nullable(),
+                          body: z.string().nullable(),
+                        })
+                        .nullable(),
+                    )
+                    .nullable(),
+                })
+                .nullable(),
+            )
+            .nullable(),
+        })
+        .nullable(),
+    )
+    .nullable(),
+});
+export type RecruitingCampaignDetails = z.infer<typeof RecruitingCampaignDetailsSchema>;
+
 export const RecruitingRoleCampaignSchema = z.strictObject({
   /** Multiple exact role mappings require an explicit selection from roleCampaigns. */
   selectionRequired: z.boolean().optional(),
@@ -1599,6 +1646,7 @@ export const RecruitingRoleCampaignSchema = z.strictObject({
       eaccount: z.string().nullable(),
       status: z.number().int().nullable(),
       stopOnReply: z.boolean().nullable(),
+      observedDetails: RecruitingCampaignDetailsSchema.optional(),
     })
     .nullable(),
   /** Whether the lead page proves a complete, valid list; absent means unknown. */
