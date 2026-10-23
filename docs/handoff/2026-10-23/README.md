@@ -20,16 +20,21 @@ Start with `00-OVERALL-HANDOFF.md`. / 请先阅读 `00-OVERALL-HANDOFF.md`。
 - `ask-audit.md` - ask audit (partly stale) / 提问审计（部分过期）
 - `workloop-prd-zh.md` - Workloop PRD, Chinese transcription / Workloop PRD 中文转录
 
-## Open PRs / 未合并 PR
+## PR status / PR 状态
 
-- #65 turn guard + stage machine
-- #73 inbox-remote
-- #72 CRM sync (draft)
-- #74 juicebox backend (draft)
-
-Branch `claude/resizable-panels` (no PR yet / 暂无 PR).
+- Merged / 已合并: #65 turn guard + stage machine, #73 inbox-remote, #75
+- Open / 未合并:
+  - #72 CRM sync (draft; migration 20261023160000; merge before #74 / 须先于 #74 合并)
+  - #74 Juicebox WIP (do not merge until its not-done list clears / 未完成项清零前不要合并)
+- Branch `claude/resizable-panels` (no PR yet / 暂无 PR)
 
 ## Deploy state / 部署状态
 
-main at a168e5b7+ is merged but NOT deployed; live is 00abb64a.
-main a168e5b7+ 已合并但未部署；线上版本为 00abb64a。
+- main is 0aea24c2: merged but NOT deployed. / main 为 0aea24c2，已合并未部署。
+- Live is 00abb64a, ledger 114. / 线上为 00abb64a，ledger 114。
+- Next deploy target is 0aea24c2, which carries migration 20261023153000 from #65. / 下次部署目标 0aea24c2，包含 #65 的迁移 20261023153000。
+- Hold the deploy until the new role's calibration run finishes; check active runs first. / 新角色 calibration 运行结束前暂缓部署，部署前先检查活跃运行。
+
+## Correction / 更正
+
+`frontend.md` says "deployed is 162b6ea2"; this is outdated. Live is 00abb64a. / `frontend.md` 中 "deployed is 162b6ea2" 已过时，线上为 00abb64a。
