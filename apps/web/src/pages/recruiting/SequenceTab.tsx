@@ -34,6 +34,9 @@ function useOutboxStatus() {
   } as const;
 }
 
+/** Campaign names may carry an internal "[role <id>]" tag; it is not for people. */
+const campaignName = (name: string) => name.replace(/\s*\[role [^\]]*\]\s*/gi, " ").trim() || name;
+
 /** Instantly's own integer statuses for a campaign and for a lead. */
 function useInstantlyStatus() {
   const { t } = useLingui();
@@ -72,8 +75,8 @@ function RoleCampaign({ read }: { read: ReturnType<typeof useRoleCampaign> }) {
   return (
     <section className="mb-6 rounded-lg border border-border p-3 text-sm">
       <div className="flex flex-wrap items-center justify-between gap-2">
-        <strong className="truncate" title={campaign.name}>
-          {campaign.name}
+        <strong className="truncate" title={campaignName(campaign.name)}>
+          {campaignName(campaign.name)}
         </strong>
         {label ? (
           <Badge variant={campaign.status === 1 ? "default" : "outline"}>{label}</Badge>
@@ -130,7 +133,11 @@ export function SequenceTab(props: RecruitingTabProps) {
     props,
     (person) => person.outreachStatus,
   );
-  const counts = totals.data?.counts ?? new Map<string, number>();
+  // Until every page is totalled (or if that read fails), count the rows already loaded.
+  const loadedCounts = new Map<string, number>();
+  for (const person of people.data?.items ?? [])
+    loadedCounts.set(person.outreachStatus, (loadedCounts.get(person.outreachStatus) ?? 0) + 1);
+  const counts = totals.data?.counts ?? loadedCounts;
   const selected = people.data?.items.find((person) => person.candidateId === candidateId);
   return (
     <section aria-label={t`Sequence`}>
@@ -163,7 +170,7 @@ export function SequenceTab(props: RecruitingTabProps) {
                 <tbody>
                   {campaigns.data.items.map((campaign) => (
                     <tr key={campaign.id}>
-                      <th scope="row">{campaign.name}</th>
+                      <th scope="row">{campaignName(campaign.name)}</th>
                       <td>{campaignStatus(campaign.status)}</td>
                       <td>{formatDate(campaign.syncedAt)}</td>
                     </tr>
