@@ -12,6 +12,7 @@ import {
   RecruitingCorrespondenceReferenceSchema,
   RecruitingId,
 } from "./recruiting.js";
+import { RecruitingCrmRoleReferenceSchema } from "./recruiting-crm.js";
 
 export const ProductEventType = z.enum([
   "thread.message.created",
@@ -272,6 +273,7 @@ export const MessageBlock = z.discriminatedUnion("kind", [
     text: z.string(),
     recruitingFeedback: RecruitingCandidateFeedbackSelectionSchema.optional(),
     correspondenceReference: RecruitingCorrespondenceReferenceSchema.optional(),
+    crmRoleReference: RecruitingCrmRoleReferenceSchema.optional(),
   }),
   z.object({
     kind: z.literal("card"),

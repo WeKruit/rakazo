@@ -66,7 +66,7 @@ export function RecruitingNavigation({
     refreshSignal?: number;
   };
   crmSelection?: CrmBrowseSelection;
-  onOpenCrmRole?: (selection: CrmBrowseSelection) => void;
+  onOpenCrmRole?: (selection: CrmBrowseSelection, groupId?: string) => void;
   groups: Group[];
   archivedGroups: Group[];
   archivedOpen: boolean;
@@ -87,7 +87,6 @@ export function RecruitingNavigation({
   onRestoreRole: (id: string) => void;
 }) {
   const { t } = useLingui();
-  const [crmOpen, setCrmOpen] = useState(Boolean(crmSelection));
   const [crmRetry, setCrmRetry] = useState(0);
   type CrmRole = Extract<RecruitingCrmDataOutput, { operation: "roles" }>["items"][number] & {
     selection: CrmBrowseSelection;
@@ -107,7 +106,7 @@ export function RecruitingNavigation({
     unavailable?: boolean;
   }>();
   useEffect(() => {
-    if (!crmOpen || !crmContext) return;
+    if (!crmContext) return;
     let cancelled = false;
     const { cache, scope, target } = crmContext;
     const epoch = cache.epoch;
@@ -167,7 +166,7 @@ export function RecruitingNavigation({
     return () => {
       cancelled = true;
     };
-  }, [crmOpen, crmKey]);
+  }, [crmKey]);
   const currentCrm = crm?.key === crmKey ? crm : undefined;
   const visibleGroups = groups.filter((group) =>
     group.name.toLocaleLowerCase().includes(query.trim().toLocaleLowerCase()),
@@ -259,71 +258,22 @@ export function RecruitingNavigation({
         />
       </div>
       <div className="rk-scroll min-h-0 flex-1 space-y-1 overflow-y-auto">
-        {crmContext ? (
-          <section className="mb-3 border-b border-border pb-3">
-            <Button
-              variant="ghost"
-              className="w-full justify-between"
-              aria-expanded={crmOpen}
-              onClick={() => setCrmOpen((value) => !value)}
+        {currentCrm?.loading ? (
+          <p role="status" className="px-3 text-xs text-muted-foreground">
+            <Trans>Loading roles…</Trans>
+          </p>
+        ) : null}
+        {currentCrm?.failed || currentCrm?.unavailable ? (
+          <p role="alert" className="px-3 text-xs">
+            <Trans>Could not read a CRM connection.</Trans>{" "}
+            <button
+              type="button"
+              className="underline"
+              onClick={() => setCrmRetry((value) => value + 1)}
             >
-              <Trans>CRM roles</Trans>
-            </Button>
-            {crmOpen ? (
-              <>
-                {currentCrm?.loading ? (
-                  <p role="status" className="px-3 text-xs text-muted-foreground">
-                    <Trans>Loading CRM roles…</Trans>
-                  </p>
-                ) : null}
-                {currentCrm?.failed || currentCrm?.unavailable ? (
-                  <p role="alert" className="px-3 text-xs">
-                    <Trans>Could not read a CRM connection.</Trans>{" "}
-                    <button
-                      type="button"
-                      className="underline"
-                      onClick={() => setCrmRetry((value) => value + 1)}
-                    >
-                      <Trans>Try again</Trans>
-                    </button>
-                  </p>
-                ) : null}
-                {currentCrm?.roles
-                  .filter((role) =>
-                    `${role.roleLabel} ${role.clientLabel}`
-                      .toLocaleLowerCase()
-                      .includes(query.trim().toLocaleLowerCase()),
-                  )
-                  .map((role) => (
-                    <Button
-                      key={JSON.stringify(role.selection)}
-                      variant="ghost"
-                      className="hire-role-button h-auto w-full justify-start whitespace-normal text-start"
-                      disabled={currentCrm.loading}
-                      aria-current={
-                        crmSelection?.serverId === role.selection.serverId &&
-                        crmSelection.organizationId === role.selection.organizationId &&
-                        crmSelection.crmRoleId === role.crmRoleId
-                          ? "page"
-                          : undefined
-                      }
-                      onClick={() => onOpenCrmRole?.(role.selection)}
-                    >
-                      {role.roleLabel} · {role.clientLabel}
-                    </Button>
-                  ))}
-                {currentCrm &&
-                !currentCrm.loading &&
-                !currentCrm.failed &&
-                !currentCrm.unavailable &&
-                !currentCrm.roles.length ? (
-                  <p className="px-3 text-xs text-muted-foreground">
-                    <Trans>No CRM roles were returned.</Trans>
-                  </p>
-                ) : null}
-              </>
-            ) : null}
-          </section>
+              <Trans>Try again</Trans>
+            </button>
+          </p>
         ) : null}
         <nav aria-label={t`Role conversations`} className="space-y-1">
           {visibleGroups.map((group) => (
@@ -332,7 +282,16 @@ export function RecruitingNavigation({
                 variant="ghost"
                 className="hire-role-button h-auto min-h-[39px] min-w-0 flex-1 justify-start gap-3 rounded-[9px] px-2.5 py-2 text-start text-sm font-normal"
                 aria-current={group.id === groupId && view === "results" ? "page" : undefined}
-                onClick={() => onOpenRole(group.id)}
+                onClick={() => {
+                  const role = currentCrm?.roles.find(
+                    (role) =>
+                      group.crmRoleReference?.sourceId === role.selection.serverId &&
+                      group.crmRoleReference.organizationId === role.selection.organizationId &&
+                      group.crmRoleReference.crmRoleId === role.crmRoleId,
+                  );
+                  if (role) onOpenCrmRole?.(role.selection, group.id);
+                  else onOpenRole(group.id);
+                }}
                 onContextMenu={(event) => {
                   event.preventDefault();
                   onRoleMenu(group.id, event.currentTarget, { x: event.clientX, y: event.clientY });
@@ -363,6 +322,41 @@ export function RecruitingNavigation({
               </Button>
             </div>
           ))}
+          {currentCrm?.roles
+            .filter(
+              (role) =>
+                !groups.some(
+                  (group) =>
+                    group.crmRoleReference?.sourceId === role.selection.serverId &&
+                    group.crmRoleReference.organizationId === role.selection.organizationId &&
+                    group.crmRoleReference.crmRoleId === role.crmRoleId,
+                ) &&
+                `${role.roleLabel} ${role.clientLabel}`
+                  .toLocaleLowerCase()
+                  .includes(query.trim().toLocaleLowerCase()),
+            )
+            .map((role) => (
+              <div key={JSON.stringify(role.selection)} className="flex items-center gap-1">
+                <Button
+                  variant="ghost"
+                  className="hire-role-button h-auto min-h-[39px] min-w-0 flex-1 justify-start gap-3 rounded-[9px] px-2.5 py-2 text-start text-sm font-normal"
+                  disabled={currentCrm.loading}
+                  aria-current={
+                    crmSelection?.serverId === role.selection.serverId &&
+                    crmSelection.organizationId === role.selection.organizationId &&
+                    crmSelection.crmRoleId === role.crmRoleId
+                      ? "page"
+                      : undefined
+                  }
+                  onClick={() => onOpenCrmRole?.(role.selection)}
+                >
+                  <span className="size-2 shrink-0 rounded-full bg-link" aria-hidden="true" />
+                  <span className="min-w-0 flex-1 truncate" dir="auto">
+                    {role.roleLabel} · {role.clientLabel}
+                  </span>
+                </Button>
+              </div>
+            ))}
         </nav>
         {archivedGroups.length > 0 ? (
           <div className="mt-3 border-t border-border pt-2">

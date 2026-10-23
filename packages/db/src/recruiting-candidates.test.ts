@@ -1495,6 +1495,117 @@ function crmFixture(additionalRows: readonly unknown[] = []) {
   };
 }
 
+describe("canonical CRM conversation locators", () => {
+  it("projects native bindings and persisted UI locators in one scoped batch without treating either as authorization", async () => {
+    const f = crmFixture();
+    const reference = {
+      sourceId: f.target.mcpServerId,
+      serverRevision: f.target.serverRevision,
+      organizationId: f.target.organizationId,
+      crmRoleId: f.target.crmRoleId,
+    };
+    const groupId = recruiting.recruitingCrmConversationId(actor, reference);
+    const read = f.effects.get("crm-read")!;
+    const bound = {
+      groupId: "existing-group",
+      roleId: f.role.id,
+      bindingEffectId: f.binding.id,
+      bindingRequest: f.binding.request,
+      bindingResult: f.binding.result,
+      readStatus: read.status,
+      readRequest: read.request,
+      readResult: read.result,
+      ownerMatches: true,
+      reference: null,
+      sourceRevision: 3,
+    };
+    const selected = { ...bound, groupId, roleId: null, bindingEffectId: null, reference };
+    const $queryRaw = vi.fn(async (_query: unknown) => [bound, selected]);
+    const result = await recruiting.getRecruitingGroupCrmReferences({ $queryRaw } as never, actor, [
+      bound.groupId,
+      groupId,
+    ]);
+    expect([...result]).toEqual([
+      [bound.groupId, reference],
+      [groupId, { ...reference, serverRevision: 3 }],
+    ]);
+    expect($queryRaw).toHaveBeenCalledOnce();
+    const sql = $queryRaw.mock.calls[0]![0] as { sql: string; values: unknown[] };
+    expect(sql.values).toContain(actor.userId);
+    expect(sql.values).toContain(actor.spaceId);
+    expect(sql.sql).toContain("LEFT JOIN LATERAL");
+    expect(sql.sql).toContain("group.created");
+    expect(sql.sql).not.toContain("FROM messages");
+    expect(sql.sql).toContain("LEFT JOIN mcp_servers");
+    expect(
+      recruiting.recruitingCrmConversationId({ ...actor, spaceId: "foreign" }, reference),
+    ).not.toBe(groupId);
+    expect(recruiting.recruitingCrmConversationId(actor, { ...reference, serverRevision: 9 })).toBe(
+      groupId,
+    );
+  });
+  it.each(["owner", "target", "request", "status", "group"])(
+    "rejects %s identity without reviving older UI metadata",
+    async (boundary) => {
+      const f = crmFixture();
+      const reference = {
+        sourceId: f.target.mcpServerId,
+        serverRevision: 2,
+        organizationId: f.target.organizationId,
+        crmRoleId: f.target.crmRoleId,
+      };
+      const read = f.effects.get("crm-read")!;
+      const row = {
+        groupId: "existing-group",
+        roleId: f.role.id,
+        bindingEffectId: f.binding.id as string | null,
+        bindingRequest: f.binding.request,
+        bindingResult: f.binding.result,
+        readStatus: read.status,
+        readRequest: read.request,
+        readResult: read.result,
+        ownerMatches: true,
+        reference,
+      };
+      if (boundary === "owner") row.ownerMatches = false;
+      if (boundary === "target")
+        row.bindingResult = {
+          ...(f.binding.result as object),
+          target: { ...f.target, crmRoleId: reference.organizationId },
+        };
+      if (boundary === "request") row.bindingRequest = { ...f.bindingInput, roleId: "other-role" };
+      if (boundary === "status") row.readStatus = "failed";
+      if (boundary === "group") row.bindingEffectId = null;
+      const $queryRaw = vi.fn(async () => [row]);
+      expect(
+        (
+          await recruiting.getRecruitingGroupCrmReferences({ $queryRaw } as never, actor, [
+            row.groupId,
+          ])
+        ).size,
+      ).toBe(0);
+    },
+  );
+});
+
+describe("task-backed candidate page proof reads", () => {
+  it("scopes research read-binding events to the owner run, not the whole space event log", async () => {
+    const f = crmFixture();
+    f.tx.event.findMany.mockClear();
+    const sources = await recruiting.listRecruitingCandidateSources(f.prisma, actor, {
+      roleId: f.input.roleId,
+      candidateKey: f.input.candidateKey,
+    });
+    expect(sources.items).toHaveLength(1);
+    const reads = f.tx.event.findMany.mock.calls
+      .map((call) => (call as unknown as [{ where: Record<string, unknown> }])[0].where)
+      .filter((where) => where.type === "recruiting.read");
+    expect(reads.length).toBeGreaterThan(0);
+    for (const where of reads)
+      expect(where).toMatchObject({ spaceId: actor.spaceId, runId: "run" });
+  });
+});
+
 describe("native CRM write approval target", () => {
   const route = {
     connectorId: "mcp" as const,
@@ -2767,6 +2878,15 @@ describe("durable recruiting reply linkage", () => {
       ).toHaveLength(1);
     },
   );
+  it("resolves a CRM member already present in the deployed candidate index", async () => {
+    const f = await nativeReplyFixture();
+    const legacy = await replyFixture();
+    const candidate = await legacy.tx.recruitingCandidate.findUnique();
+    f.tx.recruitingCandidate.findUnique.mockResolvedValue(candidate as never);
+    await expect(
+      recruiting.resolveRecruitingReply(f.prisma, actor, f.trusted, f.input as never),
+    ).resolves.toMatchObject({ candidateId: f.receipt.candidate_id, crmImportReceipt: null });
+  });
   it.each(["membership", "binding", "role", "email", "lease", "membership-failed", "hold"])(
     "rejects native member %s boundary",
     async (boundary) => {
@@ -4771,6 +4891,18 @@ describe("native candidate source provenance", () => {
       limit: 1,
     });
   }
+  it("scopes native saved-page proof events to the proven runs, not the whole space event log", async () => {
+    // Production 2026-10-22T23:23Z: space-wide JSON-path scans of `events` held the read
+    // transaction past 15s and starved the 4-slot pool (P2028 / pool connect timeouts).
+    const f = await nativeImportReadFixture();
+    f.tx.event.findMany.mockClear();
+    await nativeCandidateListRead(f);
+    const saved = f.tx.event.findMany.mock.calls
+      .map((call) => (call as unknown as [{ where: Record<string, unknown> }])[0].where)
+      .filter((where) => where.type === "recruiting.candidates.saved");
+    expect(saved).toHaveLength(1);
+    expect(saved[0]).toMatchObject({ spaceId: actor.spaceId, runId: { in: [f.run.id] } });
+  });
   it("batches exact current-binding imports and verifies their shared native page once after the read snapshot", async () => {
     const row = {
       name: "Second Example",
@@ -5500,6 +5632,7 @@ describe("native candidate source provenance", () => {
     expect(f.tx.event.findMany).toHaveBeenCalledExactlyOnceWith({
       where: {
         spaceId: actor.spaceId,
+        runId: { in: [f.run.id] },
         type: "recruiting.candidates.saved",
         OR: pages.map((page) => ({ payload: { path: ["effectId"], equals: page.effectId } })),
       },

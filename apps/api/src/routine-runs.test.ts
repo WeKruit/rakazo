@@ -629,9 +629,12 @@ function testRunFixture(threadId: string | null, destinationExists = true) {
     }
   });
   const jobs = { enqueue: vi.fn(async () => undefined) };
-  const client = createRouterClient(createRouter({ prisma, jobs } as unknown as RouterDeps), {
-    context: { actor },
-  });
+  const client = createRouterClient(
+    createRouter({ prisma, jobs, env: {} } as unknown as RouterDeps),
+    {
+      context: { actor },
+    },
+  );
   return { client, prisma, jobs, runs, tasks };
 }
 
@@ -725,6 +728,36 @@ describe("routine test run destination", () => {
     ).rejects.toMatchObject({ code: "P2002" });
     expect(runs).toEqual([existing]);
     expect(tasks).toEqual([]);
+    expect(jobs.enqueue).not.toHaveBeenCalled();
+  });
+
+  it("cannot trigger user A's routine as user B, in the same or another Space", async () => {
+    const { prisma, jobs } = testRunFixture("bot-thread");
+    prisma.routine.findFirst.mockImplementation((async ({
+      where,
+    }: {
+      where: { id: string; spaceId: string; userId: string };
+    }) =>
+      where.id === "routine-1" && where.spaceId === actor.spaceId && where.userId === actor.userId
+        ? { id: "routine-1", botId: "bot-1", threadId: null, prompt: "Review the role" }
+        : null) as never);
+    for (const intruder of [
+      { ...actor, userId: "user-2", email: "b@rakazo.test" },
+      { ...actor, userId: "user-2", spaceId: "space-2", email: "b@rakazo.test" },
+    ]) {
+      const client = createRouterClient(
+        createRouter({ prisma, jobs, env: {} } as unknown as RouterDeps),
+        {
+          context: { actor: intruder },
+        },
+      );
+      await expect(client.routines.testRun({ routineId: "routine-1" })).rejects.toBeInstanceOf(
+        IsolationError,
+      );
+    }
+    expect(prisma.bot.findFirst).not.toHaveBeenCalled();
+    expect(prisma.task.create).not.toHaveBeenCalled();
+    expect(prisma.run.create).not.toHaveBeenCalled();
     expect(jobs.enqueue).not.toHaveBeenCalled();
   });
 });

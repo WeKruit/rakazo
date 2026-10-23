@@ -16,6 +16,7 @@ import type {
   RecruitingCriterionExpression,
   RecruitingCrmCandidateSync,
   RecruitingCrmImportInput,
+  RecruitingCrmRoleReference,
   RecruitingCrmTarget,
   RecruitingFeedbackInput,
   RecruitingFeedbackRecord,
@@ -63,6 +64,7 @@ import {
   RecruitingCrmBindingInputSchema,
   RecruitingCrmImportArgsSchema,
   RecruitingCrmImportInputSchema,
+  RecruitingCrmRoleReferenceSchema,
   RecruitingFeedbackChoiceSchema,
   RecruitingFeedbackInputSchema,
   RecruitingFeedbackRecordSchema,
@@ -559,6 +561,140 @@ export async function getRecruitingWorkspaceRoleId(
   input: { threadId: string },
 ): Promise<string | null> {
   return (await requireThread(prisma, actor, input.threadId)).activeRecruitingRoleId;
+}
+
+/** Stable native conversation identity; never a provider permission or CRM binding receipt. */
+export function recruitingCrmConversationId(
+  actor: Pick<Actor, "userId" | "spaceId">,
+  reference: RecruitingCrmRoleReference,
+): string {
+  return `recruiting-crm-${createHash("sha256")
+    .update(
+      JSON.stringify([
+        actor.userId,
+        actor.spaceId,
+        reference.sourceId,
+        reference.organizationId,
+        reference.crmRoleId,
+      ]),
+    )
+    .digest("hex")}`;
+}
+
+/** Display locators only. Actual workspace reads still validate the complete binding and current access. */
+export async function getRecruitingGroupCrmReferences(
+  prisma: Pick<PrismaClient, "$queryRaw">,
+  actor: Actor,
+  groupIds: string[],
+): Promise<Map<string, RecruitingCrmRoleReference>> {
+  if (!groupIds.length) return new Map();
+  const rows = await prisma.$queryRaw<
+    Array<{
+      groupId: string;
+      roleId: string | null;
+      bindingEffectId: string | null;
+      bindingRequest: unknown;
+      bindingResult: unknown;
+      readStatus: string | null;
+      readRequest: unknown;
+      readResult: unknown;
+      ownerMatches: boolean;
+      reference: unknown;
+      sourceRevision: number | null;
+    }>
+  >(Prisma.sql`
+    SELECT g.id AS "groupId", r.id AS "roleId", r."crmBindingEffectId" AS "bindingEffectId",
+      e.request AS "bindingRequest", e.result AS "bindingResult", re.status AS "readStatus",
+      re.request AS "readRequest", re.result AS "readResult",
+      COALESCE(e.kind='recruiting_crm_target' AND e.status='completed'
+        AND er."userId"=${actor.userId} AND er."spaceId"=${actor.spaceId}
+        AND eb."userId"=${actor.userId} AND eb."spaceId"=${actor.spaceId}
+        AND rt."userId"=${actor.userId} AND rt."spaceId"=${actor.spaceId}
+        AND rr."userId"=${actor.userId} AND rr."spaceId"=${actor.spaceId}
+        AND rr."threadId"=er."threadId" AND rr."botId"=er."botId", false) AS "ownerMatches",
+      selected.reference, s.revision AS "sourceRevision"
+    FROM chat_groups g JOIN threads t ON t."groupId"=g.id
+    LEFT JOIN recruiting_roles r ON r.id=t."activeRecruitingRoleId"
+      AND r."userId"=${actor.userId} AND r."spaceId"=${actor.spaceId}
+    LEFT JOIN external_effects e ON e.id=r."crmBindingEffectId" AND e."spaceId"=${actor.spaceId}
+    LEFT JOIN runs er ON er.id=e."runId"
+    LEFT JOIN bots eb ON eb.id=er."botId"
+    LEFT JOIN threads rt ON rt.id=er."threadId"
+    LEFT JOIN external_effects re ON re.id=e.request->>'crmRoleReadEffectId' AND re."spaceId"=${actor.spaceId}
+    LEFT JOIN runs rr ON rr.id=re."runId"
+    LEFT JOIN LATERAL (
+      SELECT ev.payload->'crmRoleReference' AS reference FROM events ev
+      WHERE ev."threadId"=t.id AND ev."spaceId"=${actor.spaceId}
+        AND ev.type='group.created' AND ev.payload->>'groupId'=g.id
+      ORDER BY ev.seq, ev.id LIMIT 1
+    ) selected ON true
+    LEFT JOIN mcp_servers s ON s.id=selected.reference->>'sourceId'
+      AND s."userId"=${actor.userId} AND s."spaceId"=${actor.spaceId}
+    WHERE g."userId"=${actor.userId} AND g."spaceId"=${actor.spaceId}
+      AND t."userId"=${actor.userId} AND t."spaceId"=${actor.spaceId}
+      AND g.id IN (${Prisma.join(groupIds)})
+  `);
+  const result = new Map<string, RecruitingCrmRoleReference>();
+  for (const row of rows) {
+    if (row.bindingEffectId) {
+      const request = RecruitingCrmBindingInputSchema.safeParse(row.bindingRequest);
+      const target = extractRecruitingCrmTarget({
+        status: row.readStatus ?? "",
+        request: row.readRequest,
+        result: row.readResult,
+      });
+      if (
+        !row.ownerMatches ||
+        !request.success ||
+        request.data.roleId !== row.roleId ||
+        !target ||
+        stableJsonValue(row.bindingResult) !==
+          stableJsonValue({
+            status: "connected",
+            roleId: row.roleId,
+            bindingEffectId: row.bindingEffectId,
+            target,
+          })
+      )
+        continue;
+      result.set(row.groupId, {
+        sourceId: target.mcpServerId,
+        serverRevision: target.serverRevision,
+        organizationId: target.organizationId,
+        crmRoleId: target.crmRoleId,
+      });
+    } else {
+      const reference = RecruitingCrmRoleReferenceSchema.safeParse(row.reference);
+      if (reference.success && recruitingCrmConversationId(actor, reference.data) === row.groupId)
+        // This UI locator follows its source epoch; actual binding proofs above remain unchanged.
+        result.set(row.groupId, {
+          ...reference.data,
+          serverRevision: row.sourceRevision ?? reference.data.serverRevision,
+        });
+    }
+  }
+  return result;
+}
+
+export async function authorizeRecruitingCrmRoleReference(
+  tx: Tx,
+  actor: Actor,
+  threadId: string,
+  reference: RecruitingCrmRoleReference,
+) {
+  const thread = await requireThread(tx, actor, threadId);
+  if (!thread.groupId) throw new IsolationError();
+  if (recruitingCrmConversationId(actor, reference) === thread.groupId) return;
+  const current = (await getRecruitingGroupCrmReferences(tx, actor, [thread.groupId])).get(
+    thread.groupId,
+  );
+  if (
+    !current ||
+    current.sourceId !== reference.sourceId ||
+    current.organizationId !== reference.organizationId ||
+    current.crmRoleId !== reference.crmRoleId
+  )
+    throw new IsolationError();
 }
 
 export async function getRecruitingWorkspace(
@@ -5692,6 +5828,8 @@ async function researchReadBinding(
   const events = await tx.event.findMany({
     where: {
       spaceId: actor.spaceId,
+      // The binding must belong to the owner run (checked below); index-scoped, not space-wide.
+      runId: owner.id,
       type: "recruiting.read",
       payload: { path: ["effectId"], equals: effect.id },
     },
@@ -6661,10 +6799,15 @@ async function candidatePageArtifacts(
     }),
   );
   const byEffect = new Map(effects.map((effect) => [effect.id, effect]));
-  const events = nativeIds.length
+  // Proof events carry the effect's run (checked below); scoping by runId hits the
+  // (runId, type, seq) index instead of JSON-scanning every event in the space while the
+  // read transaction holds one of the few pooled connections.
+  const runIds = [...new Set(effects.flatMap((effect) => (effect.run?.id ? [effect.run.id] : [])))];
+  const events = runIds.length
     ? await tx.event.findMany({
         where: {
           spaceId: actor.spaceId,
+          runId: { in: runIds },
           type: "recruiting.candidates.saved",
           OR: nativeIds.map((id) => ({ payload: { path: ["effectId"], equals: id } })),
         },

@@ -480,6 +480,100 @@ describe("removeGroup", () => {
 });
 
 describe("createGroup", () => {
+  it("reuses one fixed CRM conversation and preserves its real creation locator after a retry", async () => {
+    const actor = {
+      userId: "owner",
+      spaceId: "space",
+      email: "owner@example.test",
+      isDeploymentOwner: false,
+    };
+    const reference = {
+      sourceId: "crm",
+      serverRevision: 2,
+      organizationId: "10000000-0000-4000-8000-000000000001",
+      crmRoleId: "20000000-0000-4000-8000-000000000002",
+    };
+    let row: any = null;
+    const stamp = new Date("2026-10-22T00:00:00Z");
+    const tx = {
+      $queryRaw: vi.fn(async (): Promise<Array<{ id: string }>> => []),
+      spaceMember: {
+        findUnique: vi.fn(async () => ({ organizationId: "org", space: { deletingAt: null } })),
+      },
+      bot: {
+        findMany: vi.fn(async () => [
+          { id: "main", name: "Main", color: "ink" },
+          { id: "outreach", name: "Outreach", color: "ink" },
+        ]),
+      },
+      chatGroup: {
+        findFirst: vi.fn(async () => row),
+        create: vi.fn(
+          async ({ data }) =>
+            (row = {
+              ...data,
+              pinned: false,
+              sectionId: null,
+              archivedAt: null,
+              createdAt: stamp,
+              updatedAt: stamp,
+              thread: { id: "thread", unread: false, messages: [] },
+              members: [
+                {
+                  botId: "main",
+                  bot: { id: "main", name: "Main", color: "ink", runs: [], archivedAt: null },
+                },
+                {
+                  botId: "outreach",
+                  bot: {
+                    id: "outreach",
+                    name: "Outreach",
+                    color: "ink",
+                    runs: [],
+                    archivedAt: null,
+                  },
+                },
+              ],
+            }),
+        ),
+        findFirstOrThrow: vi.fn(async () => row),
+        update: vi.fn(async ({ data }) => Object.assign(row, data)),
+      },
+      chatGroupMember: { createMany: vi.fn() },
+      thread: {
+        create: vi.fn(async () => ({ id: "thread" })),
+        update: vi.fn(async () => ({ nextEventSeq: 1 })),
+      },
+      event: { create: vi.fn(async ({ data }) => data) },
+    };
+    const readLocator = vi.fn(async () => [{ groupId: row.id, bindingEffectId: null, reference }]);
+    const prisma = {
+      $transaction: vi.fn(async (fn) => fn(tx)),
+      $queryRaw: readLocator,
+    } as unknown as PrismaClient;
+    const input = { name: "Exact role", botIds: ["main", "outreach"], crmRoleReference: reference };
+    const repo = createGroupRepos(prisma);
+    const first = await repo.createGroup(actor, input);
+    expect(await repo.createGroup(actor, input)).toEqual(first);
+    expect(tx.chatGroup.create).toHaveBeenCalledOnce();
+    expect(tx.thread.create).toHaveBeenCalledOnce();
+    expect(tx.event.create).toHaveBeenCalledExactlyOnceWith({
+      data: expect.objectContaining({
+        spaceId: actor.spaceId,
+        threadId: "thread",
+        botId: "main",
+        type: "group.created",
+        payload: { groupId: first.id, crmRoleReference: reference },
+      }),
+    });
+    expect(first.crmRoleReference).toEqual(reference);
+    expect(tx.$queryRaw.mock.calls).toHaveLength(2);
+    tx.$queryRaw.mockResolvedValueOnce([{ id: first.id }]);
+    const updated = await repo.updateGroup(actor, { groupId: first.id, name: "Renamed role" });
+    expect(updated.group).toMatchObject({ name: "Renamed role", crmRoleReference: reference });
+    expect(await repo.mapGroup(actor, row)).toMatchObject({ crmRoleReference: reference });
+    expect(readLocator).toHaveBeenCalledTimes(2);
+  });
   it("keeps the caller's member order instead of the insert order", async () => {
     const createMany = vi.fn();
     const groupRow = {

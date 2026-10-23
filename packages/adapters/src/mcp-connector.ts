@@ -48,6 +48,7 @@ import { createSafeRemoteFetch } from "./remote-mcp.js";
 const INSTANTLY_MCP = "https://mcp.instantly.ai/mcp";
 const THREAD_HISTORY = "native_instantly_get_thread_history";
 const CONTACT_EMAILS = "native_instantly_search_contact_emails";
+const MAILBOX_EMAILS = "native_instantly_list_mailbox_emails";
 const ThreadHistoryInput = z.strictObject({
   anchor_id: z.uuid(),
   limit: z.number().int().min(1).max(100).default(100),
@@ -58,8 +59,32 @@ const ThreadHistoryInput = z.strictObject({
     .optional(),
 });
 const ContactEmailsInput = ThreadHistoryInput.omit({ anchor_id: true }).extend({
-  email: z.email().max(254),
-  eaccount: z.email().max(254).optional(),
+  email: z
+    .email()
+    .max(254)
+    .describe("The other party (candidate/contact) address. Never your own Instantly mailbox."),
+  eaccount: z
+    .email()
+    .max(254)
+    .optional()
+    .describe(
+      "Your connected Instantly mailbox that sent or received the mail (e.g. the address the contact wrote to). Never the contact.",
+    ),
+});
+const CreatedAt = z.iso.datetime({ offset: true }).optional();
+const MailboxEmailsInput = ThreadHistoryInput.omit({ anchor_id: true }).extend({
+  eaccount: z
+    .email()
+    .max(254)
+    .describe("Your connected Instantly mailbox to list. Never a contact address."),
+  search: z
+    .string()
+    .max(500)
+    .refine((value) => value.trim().length > 0)
+    .optional()
+    .describe("Provider-side text search, e.g. part of a subject."),
+  min_timestamp_created: CreatedAt.describe("ISO datetime; only mail created at or after it."),
+  max_timestamp_created: CreatedAt.describe("ISO datetime; only mail created at or before it."),
 });
 const nativeInstantlyReads = [
   {
@@ -74,7 +99,14 @@ const nativeInstantlyReads = [
     toolName: CONTACT_EMAILS,
     inputSchema: z.toJSONSchema(ContactEmailsInput, { io: "input" }),
     description:
-      "Local native REST integration for the existing authorized Instantly connection, not a remote MCP tool. Looks up one bounded page of emails sent to or received from an exact contact email, optionally within a sender account. Uses the official lead filter and verifies each returned contact address. Returns the raw REST page, exact query, provider email IDs and honest page/body coverage; continue with the returned cursor and the same email/account. An exhausted page is not a full-thread receipt; use get_email and get_thread_history for the selected provider email before replying. No computer or credentials are needed in arguments. Does not send email.",
+      "Local native REST integration for the existing authorized Instantly connection, not a remote MCP tool. Looks up one bounded page of emails sent to or received from an exact contact email, optionally within one of your connected Instantly mailboxes (eaccount), whichever side sent the mail. Uses the official lead filter and verifies each returned contact address. Returns the raw REST page, exact query, provider email IDs and honest page/body coverage; continue with the returned cursor and the same email/account. An exhausted page is not a full-thread receipt; use get_email and get_thread_history for the selected provider email before replying. No computer or credentials are needed in arguments. Does not send email.",
+  },
+  {
+    name: "list_mailbox_emails",
+    toolName: MAILBOX_EMAILS,
+    inputSchema: z.toJSONSchema(MailboxEmailsInput, { io: "input" }),
+    description:
+      "Local native REST integration for the existing authorized Instantly connection, not a remote MCP tool. Lists one bounded page (newest first) of all mail in one of your connected Instantly mailboxes (eaccount), sent and received, inside or outside campaigns, optionally narrowed by provider-side text search (e.g. subject) and an ISO created-time window. Use when you do not know the contact address; otherwise prefer search_contact_emails. Verifies each returned mailbox and created time. Returns the raw REST page, exact query and honest page/body coverage; continue with the returned cursor and the same filters. No computer or credentials are needed in arguments. Does not send email.",
   },
 ];
 
@@ -527,8 +559,10 @@ export class McpConnector implements ConnectorProvider {
   ): AsyncIterable<ConnectorEvent> {
     let phase = "authorization";
     const isHistory = call.route!.toolName === THREAD_HISTORY;
-    const operation = isHistory ? "thread history" : "contact email";
+    const isMailbox = call.route!.toolName === MAILBOX_EMAILS;
+    const operation = isHistory ? "thread history" : isMailbox ? "mailbox email" : "contact email";
     let rejectedStatus: number | undefined;
+    let hint = "";
     const redactions: string[] = [];
     const safeFetch = createSafeRemoteFetch(
       this.options.network?.fetch,
@@ -536,8 +570,9 @@ export class McpConnector implements ConnectorProvider {
     );
     try {
       const historyInput = isHistory ? ThreadHistoryInput.parse(call.args) : undefined;
-      const contactInput = isHistory ? undefined : ContactEmailsInput.parse(call.args);
-      const input = historyInput ?? contactInput!;
+      const mailboxInput = isMailbox ? MailboxEmailsInput.parse(call.args) : undefined;
+      const contactInput = isHistory || isMailbox ? undefined : ContactEmailsInput.parse(call.args);
+      const input = historyInput ?? mailboxInput ?? contactInput!;
       const authorize = async () => {
         context.signal.throwIfAborted();
         const assignment = await requireMcpToolAssignment(
@@ -615,18 +650,34 @@ export class McpConnector implements ConnectorProvider {
       url.search = new URLSearchParams({
         ...(anchor
           ? { search: `thread:${anchor.thread_id}`, eaccount: anchor.eaccount }
-          : {
-              lead: contactInput!.email,
-              ...(contactInput!.eaccount ? { eaccount: contactInput!.eaccount } : {}),
-              sort_order: "desc",
-            }),
+          : mailboxInput
+            ? {
+                eaccount: mailboxInput.eaccount,
+                ...(mailboxInput.search ? { search: mailboxInput.search } : {}),
+                ...(mailboxInput.min_timestamp_created
+                  ? { min_timestamp_created: mailboxInput.min_timestamp_created }
+                  : {}),
+                ...(mailboxInput.max_timestamp_created
+                  ? { max_timestamp_created: mailboxInput.max_timestamp_created }
+                  : {}),
+                sort_order: "desc",
+              }
+            : {
+                lead: contactInput!.email,
+                ...(contactInput!.eaccount ? { eaccount: contactInput!.eaccount } : {}),
+                sort_order: "desc",
+              }),
         mode: "emode_all",
         latest_of_thread: "false",
         preview_only: "false",
         limit: String(input.limit),
         ...(input.starting_after ? { starting_after: input.starting_after } : {}),
       }).toString();
-      phase = isHistory ? "REST thread page" : "REST contact page";
+      phase = isHistory
+        ? "REST thread page"
+        : isMailbox
+          ? "REST mailbox page"
+          : "REST contact page";
       await assertAuthorized();
       const response = await safeFetch(url, {
         method: "GET",
@@ -649,17 +700,45 @@ export class McpConnector implements ConnectorProvider {
             ? email.organization_id !== anchor.organization_id ||
               email.thread_id !== anchor.thread_id ||
               !sameInstantlyAddresses(email.eaccount, anchor.eaccount)
-            : !sameInstantlyAddresses(email.eaccount, email.eaccount) ||
-              (contactInput!.eaccount !== undefined &&
-                !sameInstantlyAddresses(email.eaccount, contactInput!.eaccount)) ||
-              (email.lead != null && !sameInstantlyAddresses(email.lead, contactInput!.email)) ||
-              (!sameInstantlyAddresses(email.from_address_email, contactInput!.email) &&
-                !addressparser(email.to_address_email_list).some((recipient) =>
-                  sameInstantlyAddresses(recipient.address, contactInput!.email),
-                )),
+            : mailboxInput
+              ? !sameInstantlyAddresses(email.eaccount, mailboxInput.eaccount) ||
+                (mailboxInput.min_timestamp_created !== undefined &&
+                  Date.parse(email.timestamp_created) <
+                    Date.parse(mailboxInput.min_timestamp_created)) ||
+                (mailboxInput.max_timestamp_created !== undefined &&
+                  Date.parse(email.timestamp_created) >
+                    Date.parse(mailboxInput.max_timestamp_created))
+              : !sameInstantlyAddresses(email.eaccount, email.eaccount) ||
+                (contactInput!.eaccount !== undefined &&
+                  !sameInstantlyAddresses(email.eaccount, contactInput!.eaccount)) ||
+                (email.lead != null && !sameInstantlyAddresses(email.lead, contactInput!.email)) ||
+                (!sameInstantlyAddresses(email.from_address_email, contactInput!.email) &&
+                  !addressparser(email.to_address_email_list).some((recipient) =>
+                    sameInstantlyAddresses(recipient.address, contactInput!.email),
+                  )),
         )
       )
         throw new Error("Email page does not match the requested scope");
+      if (contactInput && page.items.length === 0) {
+        // An empty page is the symptom of contact/mailbox arguments passed the wrong way round.
+        phase = "argument check";
+        const account = await safeFetch(
+          new URL(
+            `https://api.instantly.ai/api/v2/accounts/${encodeURIComponent(contactInput.email)}`,
+          ),
+          {
+            method: "GET",
+            headers: { authorization: `Bearer ${credential.key}` },
+            signal: context.signal,
+          },
+        );
+        await account.body?.cancel();
+        if (account.ok) {
+          hint =
+            " The email argument is one of your connected Instantly mailboxes; pass the contact as email and the mailbox as eaccount.";
+          throw new Error("Contact lookup arguments are swapped");
+        }
+      }
       await assertAuthorized();
       yield {
         type: "result",
@@ -680,15 +759,23 @@ export class McpConnector implements ConnectorProvider {
                       threadId: anchor.thread_id,
                       anchorPresent: page.items.some((email) => email.id === anchor.id),
                     }
-                  : {
-                      scope: "exact_contact",
-                      contactEmail: contactInput!.email,
-                      account: contactInput!.eaccount ?? null,
-                      organizationIds: [
-                        ...new Set(page.items.map((email) => email.organization_id)),
-                      ],
-                      accounts: [...new Set(page.items.map((email) => email.eaccount))],
-                    }),
+                  : mailboxInput
+                    ? {
+                        scope: "mailbox",
+                        account: mailboxInput.eaccount,
+                        organizationIds: [
+                          ...new Set(page.items.map((email) => email.organization_id)),
+                        ],
+                      }
+                    : {
+                        scope: "exact_contact",
+                        contactEmail: contactInput!.email,
+                        account: contactInput!.eaccount ?? null,
+                        organizationIds: [
+                          ...new Set(page.items.map((email) => email.organization_id)),
+                        ],
+                        accounts: [...new Set(page.items.map((email) => email.eaccount))],
+                      }),
                 startingAfter: input.starting_after ?? null,
                 nextStartingAfter: page.next_starting_after ?? null,
                 pageExhausted: !page.next_starting_after,
@@ -708,7 +795,7 @@ export class McpConnector implements ConnectorProvider {
     } catch {
       yield {
         type: "error",
-        message: `Instantly ${operation} read failed during ${phase}.${rejectedStatus ? ` HTTP ${rejectedStatus}.` : " Check the current assigned connection and requested scope."}`,
+        message: `Instantly ${operation} read failed during ${phase}.${rejectedStatus ? ` HTTP ${rejectedStatus}.` : " Check the current assigned connection and requested scope."}${hint}`,
       };
     } finally {
       await safeFetch.close().catch(() => undefined);

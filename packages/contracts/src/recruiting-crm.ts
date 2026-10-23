@@ -6,6 +6,15 @@ const Text = z.string().refine((value) => value.trim().length > 0, "Text must no
 const ProfessionalText = Text.max(1000);
 const Revision = z.number().int().positive();
 
+/** UI selection only. Current provider access and native business receipts remain authoritative. */
+export const RecruitingCrmRoleReferenceSchema = z.strictObject({
+  sourceId: NativeId,
+  serverRevision: Revision,
+  organizationId: z.uuid(),
+  crmRoleId: z.uuid(),
+});
+export type RecruitingCrmRoleReference = z.infer<typeof RecruitingCrmRoleReferenceSchema>;
+
 export const RecruitingCrmTargetSchema = z.strictObject({
   mcpServerId: NativeId,
   serverRevision: Revision,

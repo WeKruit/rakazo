@@ -21,6 +21,7 @@ type BotRow = {
   title: string;
   description: string;
   instructions: string;
+  disabledBuiltinTools: string[];
   archivedAt: Date | null;
   modelId?: string;
 };
@@ -94,14 +95,16 @@ function fixture() {
     space: { findFirst: vi.fn(async () => ({ id: actor.spaceId })) },
     run: { count: vi.fn(async () => (busy ? 1 : 0)) },
     bot: {
-      findMany: vi.fn(async () => bots),
+      findMany: vi.fn(async () => [...bots]),
       count: vi.fn(async () => bots.length),
       updateMany: vi.fn(async ({ where, data }) => {
         const bot = bots.find((row) => row.id === where.id && !row.archivedAt);
         if (
           !bot ||
-          Object.keys(data).some(
-            (key) => (bot as unknown as Record<string, unknown>)[key] !== where[key],
+          Object.keys(data).some((key) =>
+            key === "disabledBuiltinTools"
+              ? JSON.stringify(bot.disabledBuiltinTools) !== JSON.stringify(where[key]?.equals)
+              : (bot as unknown as Record<string, unknown>)[key] !== where[key],
           )
         )
           return { count: 0 };
@@ -109,7 +112,12 @@ function fixture() {
         return { count: 1 };
       }),
     },
-    chatGroup: { findFirst: vi.fn(async () => group), count: vi.fn(async () => (group ? 1 : 0)) },
+    chatGroup: {
+      findFirst: vi.fn(async () =>
+        group ? { ...group, members: group.members.map((member) => ({ ...member })) } : null,
+      ),
+      count: vi.fn(async () => (group ? 1 : 0)),
+    },
     chatGroupMember: {
       createMany: vi.fn(async ({ data }) => {
         group!.members.push(...data.map((row: { botId: string }) => ({ botId: row.botId })));
@@ -185,7 +193,12 @@ function fixture() {
     },
   };
   native.bot.mockImplementation(async (_tx, _actor, input) => {
-    const bot = { id: `bot-${botSequence++}`, ...input, archivedAt: null };
+    const bot = {
+      id: `bot-${botSequence++}`,
+      disabledBuiltinTools: [],
+      ...input,
+      archivedAt: null,
+    };
     bots.push(bot);
     return bot;
   });
@@ -360,6 +373,7 @@ describe("ensureRecruitingWorkspace", () => {
       description: "",
       spawnKey: "private",
       instructions: "Keep",
+      disabledBuiltinTools: [],
       archivedAt: null,
     });
     await expect(
@@ -443,6 +457,86 @@ describe("ensureRecruitingWorkspace", () => {
     expect(f.prisma.$transaction).toHaveBeenCalledTimes(1);
     expect(native.bot.mock.calls.every(([tx]) => tx === f.tx)).toBe(true);
     expect(f.tx.mcpServer.create).not.toHaveBeenCalled();
+  });
+});
+
+describe("recruiting bootstrap idempotency and per-user identity", () => {
+  const options = { sandboxKind: "fake", firstPartyMcpUrl: "https://crm.example.test/mcp" };
+  const snapshot = (f: ReturnType<typeof fixture>) =>
+    JSON.stringify({
+      bots: f.bots,
+      servers: f.servers,
+      assignments: f.assignments,
+      presets: f.presets,
+      group: f.getGroup(),
+    });
+
+  it("creates the crew, connections and assignments once; login repeats and upgrades change nothing", async () => {
+    const f = fixture();
+    await recruiting.ensureRecruitingWorkspace(f.prisma, actor, options);
+    const counts = [f.bots.length, f.servers.length, f.assignments.length, f.presets.length];
+    expect(counts[0]).toBe(4);
+    expect(counts[3]).toBe(1);
+    const before = snapshot(f);
+    for (let login = 0; login < 3; login++) {
+      await recruiting.ensureRecruitingWorkspace(f.prisma, actor, options);
+      await recruiting.upgradeRecruitingWorkspace(f.prisma, actor, options);
+    }
+    expect([f.bots.length, f.servers.length, f.assignments.length, f.presets.length]).toEqual(
+      counts,
+    );
+    expect(snapshot(f)).toBe(before);
+    expect(native.bot).toHaveBeenCalledTimes(4);
+    expect(native.group).toHaveBeenCalledTimes(1);
+  });
+
+  it("keeps private edits and removed grants across repeated login and upgrade", async () => {
+    const f = fixture();
+    await recruiting.ensureRecruitingWorkspace(f.prisma, actor, options);
+    f.bots[1]!.instructions = "My own sourcing rules";
+    f.assignments.splice(0, 1);
+    const before = snapshot(f);
+    await recruiting.ensureRecruitingWorkspace(f.prisma, actor, options);
+    await recruiting.upgradeRecruitingWorkspace(f.prisma, actor, options);
+    expect(snapshot(f)).toBe(before);
+  });
+
+  it("derives a different group, preset and bot identity for every user and Space", async () => {
+    const other: Actor = { ...actor, userId: "person-b", spaceId: "personal-b" };
+    // fixture() binds the shared native mocks, so build and run each user in turn.
+    const a = fixture();
+    const first = await recruiting.ensureRecruitingWorkspace(a.prisma, actor, options);
+    const b = fixture();
+    const second = await recruiting.ensureRecruitingWorkspace(b.prisma, other, options);
+    expect(first.groupId).not.toBe(second.groupId);
+    expect(recruiting.recruitingPresetId(actor)).not.toBe(recruiting.recruitingPresetId(other));
+    expect(a.presets[0]!.userId).toBe(actor.userId);
+    expect(b.presets[0]!.userId).toBe(other.userId);
+    const keys = [...a.bots, ...b.bots].map((bot) => bot.spawnKey);
+    expect(new Set(keys).size).toBe(8);
+    expect(a.bots.every((bot) => bot.spawnKey.includes(actor.userId))).toBe(true);
+    expect(b.bots.every((bot) => bot.spawnKey.includes(other.userId))).toBe(true);
+    expect(JSON.stringify(a.presets)).not.toContain(other.userId);
+  });
+
+  it("copies no chat history or admin data into a new user's crew", async () => {
+    const f = fixture();
+    await recruiting.ensureRecruitingWorkspace(f.prisma, actor, options);
+    for (const [, , input] of native.bot.mock.calls)
+      expect(Object.keys(input).sort()).toEqual(
+        [
+          "color",
+          "description",
+          // PR #5 managed defaults carry the computer/login denylist; still no chat or admin data.
+          "disabledBuiltinTools",
+          "instructions",
+          "name",
+          "notifyOnFinish",
+          "spawnKey",
+          "title",
+        ].sort(),
+      );
+    expect(Object.keys(native.group.mock.calls[0]![2]).sort()).toEqual(["botIds", "id", "name"]);
   });
 });
 
@@ -546,6 +640,75 @@ describe("managed recruiting default upgrades", () => {
     await recruiting.upgradeRecruitingWorkspace(f.prisma, actor, options);
     expect(f.servers.some((s) => s.slug === "fullenrich")).toBe(true);
     expect(f.assignments.filter((a) => a.serverId === "fullenrich-a")).toHaveLength(2);
+  });
+});
+
+describe("managed recruiting computer policy", () => {
+  const disabled = [
+    "computer_observe",
+    "computer_act",
+    "browser_navigate",
+    "browser_snapshot",
+    "browser_act",
+    "open_path",
+    "launch_app",
+    "request_takeover",
+    "request_secret",
+  ];
+  const options = { sandboxKind: "fake" };
+  it.each(["fresh", "new-role"])(
+    "disables computer and website login tools on %s managed roles",
+    async (stage) => {
+      const f = fixture();
+      await recruiting.ensureRecruitingWorkspace(f.prisma, actor, options);
+      if (stage === "new-role") {
+        const removed = f.bots.pop()!;
+        const baseline = f.presets[0]!.config as ManagedState;
+        delete baseline.bots.scheduling;
+        f.getGroup()!.members = f
+          .getGroup()!
+          .members.filter((member) => member.botId !== removed.id);
+        baseline.members = f.getGroup()!.members.map((member) => member.botId);
+        f.presets[0]!.digest = "before-new-role";
+        await recruiting.upgradeRecruitingWorkspace(f.prisma, actor, options);
+      }
+      expect(f.bots).toHaveLength(4);
+      for (const bot of f.bots) expect(bot.disabledBuiltinTools).toEqual(disabled);
+    },
+  );
+  it("unions the policy into all four managed roles without overwriting private fields or rebuilding on repeat", async () => {
+    const f = fixture();
+    await recruiting.ensureRecruitingWorkspace(f.prisma, actor, options);
+    for (const bot of f.bots) {
+      bot.disabledBuiltinTools = ["save_shared_memory"];
+      bot.instructions = `Private instructions for ${bot.id}`;
+      bot.modelId = "private-model";
+    }
+    const unrelated = {
+      ...f.bots[0]!,
+      id: "unmanaged",
+      spawnKey: "private",
+      disabledBuiltinTools: [],
+    };
+    f.bots.push(unrelated);
+    f.presets[0]!.digest = "before-computer-policy";
+    const assignments = JSON.stringify(f.assignments);
+    f.tx.bot.updateMany.mockClear();
+    await recruiting.upgradeRecruitingWorkspace(f.prisma, actor, options);
+    for (const bot of f.bots.slice(0, 4)) {
+      expect(bot.disabledBuiltinTools).toEqual(["save_shared_memory", ...disabled]);
+      expect(bot.instructions).toBe(`Private instructions for ${bot.id}`);
+      expect(bot.modelId).toBe("private-model");
+    }
+    expect(unrelated.disabledBuiltinTools).toEqual([]);
+    expect(f.tx.bot.updateMany).toHaveBeenCalledTimes(4);
+    f.tx.bot.updateMany.mockClear();
+    await recruiting.ensureRecruitingWorkspace(f.prisma, actor, options);
+    await recruiting.upgradeRecruitingWorkspace(f.prisma, actor, options);
+    expect(f.tx.bot.updateMany).not.toHaveBeenCalled();
+    expect(native.bot).toHaveBeenCalledTimes(4);
+    expect(native.group).toHaveBeenCalledOnce();
+    expect(JSON.stringify(f.assignments)).toBe(assignments);
   });
 });
 

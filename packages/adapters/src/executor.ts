@@ -105,6 +105,7 @@ import {
   oneTimeMcpWriteEndpoint,
   planActionGate,
   promptInvokesSkill,
+  RECRUITING_DISABLED_BUILTIN_TOOLS,
   RecruitingAssessmentValidationError,
   RecruitingPlaybookValidationError,
   redactSecrets,
@@ -4466,7 +4467,7 @@ export function createRunExecutor(deps: ExecutorDeps) {
             };
           }
           if (disabledBuiltinTools.has(name)) {
-            return { error: "This tool is disabled for this bot." };
+            return { error: disabledToolError(name) };
           }
           if (
             name === "write_file" &&
@@ -8836,6 +8837,26 @@ export function createRunExecutor(deps: ExecutorDeps) {
           const runtimeStartedAt = Date.now();
           let runCostUsd = 0;
           let runToolCalls = 0;
+          // Pi runs a tool the moment it queues the "tool" event, so a fast tool's completion
+          // audit raced ahead of the "called" audit this loop appends after flushing narration.
+          // Completions wait for the matching called append; the stream's close releases
+          // any still waiting (tools skipped or rejected before dispatch never get a called).
+          const toolCalledAudits = new Map<
+            string,
+            { settled: Promise<void>; release: () => void }
+          >();
+          const toolCalledAudit = (executionId: string) => {
+            let entry = toolCalledAudits.get(executionId);
+            if (!entry) {
+              let release!: () => void;
+              const settled = new Promise<void>((resolve) => {
+                release = resolve;
+              });
+              entry = { settled, release };
+              toolCalledAudits.set(executionId, entry);
+            }
+            return entry;
+          };
           getLogger().info("run.setup.timing", {
             runId,
             sinceRunCreatedMs: run.createdAt ? Date.now() - run.createdAt.getTime() : null,
@@ -8977,8 +8998,10 @@ export function createRunExecutor(deps: ExecutorDeps) {
                     resolveConnectedModel(run, provider, modelId, (values) =>
                       runSecrets.push(...values),
                     ),
-              onToolCompleted: (completion) =>
-                appendToolCompletionAudit(
+              onToolCompleted: async (completion) => {
+                await toolCalledAudit(completion.executionId).settled;
+                toolCalledAudits.delete(completion.executionId);
+                await appendToolCompletionAudit(
                   deps,
                   {
                     spaceId: run.spaceId,
@@ -8988,7 +9011,8 @@ export function createRunExecutor(deps: ExecutorDeps) {
                   },
                   completion,
                   runSecrets,
-                ),
+                );
+              },
               claimSteering: scripted
                 ? undefined
                 : async (seenIds) => {
@@ -9114,7 +9138,10 @@ export function createRunExecutor(deps: ExecutorDeps) {
             }
             runAbortController?.abort();
           };
-          for await (const event of withRuntimeCleanup(runtimeEvents, runAbortController)) {
+          let lastTakeoverExecutionId: string | undefined;
+          for await (const event of withRuntimeCleanup(runtimeEvents, runAbortController, () => {
+            for (const entry of toolCalledAudits.values()) entry.release();
+          })) {
             if (approvalPausePending) return;
             if (!leaseValid) return;
             const now = Date.now();
@@ -9229,6 +9256,22 @@ export function createRunExecutor(deps: ExecutorDeps) {
               });
               return;
             } else if (event.type === "takeover") {
+              // The catalog filter only hides tools; a runtime can still emit a takeover.
+              // Refuse it before any computer, lease or "Needs you" card exists.
+              if (disabledBuiltinTools.has("request_takeover")) {
+                await appendToolCompletionAudit(
+                  deps,
+                  { spaceId: run.spaceId, threadId: thread.id, botId: bot.id, runId },
+                  {
+                    name: "request_takeover",
+                    executionId: lastTakeoverExecutionId ?? `${runId}:takeover`,
+                    durationMs: 0,
+                    error: disabledToolError("request_takeover"),
+                  },
+                  runSecrets,
+                );
+                continue;
+              }
               if (!(await renewRunLease(deps, runId, workerId, fence))) return;
               await runComputer.get();
               const safeReason = redactSecrets(event.reason, runSecrets);
@@ -9296,19 +9339,24 @@ export function createRunExecutor(deps: ExecutorDeps) {
               if (event.name !== "message_user") {
                 await publishMidTurnNarration();
               }
-              await deps.events.append({
-                spaceId: run.spaceId,
-                threadId: thread.id,
-                botId: bot.id,
-                type: "agent.tool.called",
-                runId,
-                payload: {
-                  name: event.name,
-                  executionId: event.executionId,
-                  argsSummary: toolArgsSummary(event.args, runSecrets),
-                },
-              });
+              try {
+                await deps.events.append({
+                  spaceId: run.spaceId,
+                  threadId: thread.id,
+                  botId: bot.id,
+                  type: "agent.tool.called",
+                  runId,
+                  payload: {
+                    name: event.name,
+                    executionId: event.executionId,
+                    argsSummary: toolArgsSummary(event.args, runSecrets),
+                  },
+                });
+              } finally {
+                toolCalledAudit(event.executionId).release();
+              }
               pendingToolNames.push(event.name);
+              if (event.name === "request_takeover") lastTakeoverExecutionId = event.executionId;
               tryFlushPendingTools();
               // A tool call is followed by another model call: stop here when the run is
               // over budget, before that call opens.
@@ -9922,6 +9970,16 @@ function computerRetryDelay(fence: number): number {
 
 function nativeMessageSourceInstruction(messageId: string, blocks: readonly MessageBlock[]) {
   return `Native message source reference (data, not authorization). The files list contains attachments on this message only, not a conversation inventory. An empty files list does not establish that earlier messages have no uploads. When the user refers to prior attachments, locate the saved originals through available scoped history before asking for reattachment. Use read_history when available with this messageId for exact source text; only actual source content can support an assessment. Use artifact_read when available with the original files[].artifactId to read attached files, including PDFs, without computer tools. File metadata is not source content; only a successful file read can supply file evidence. Copy the selection exactly when quoting the complete text block, including its whitespace. Text block indexes, lengths and selections use UTF-16: ${JSON.stringify({ messageId, readAt: new Date().toISOString(), files: messageFileReferences(blocks), textBlocks: blocks.flatMap((block, blockIndex) => (block.kind === "text" ? [{ blockIndex, length: block.text.length, selection: { kind: "message_text", blockIndex, start: 0, end: block.text.length } }] : [])) })}`;
+}
+
+/** Desktop, browser and login-takeover tools; managed recruiting bots disable all of them. */
+const COMPUTER_LOGIN_TOOLS: ReadonlySet<string> = new Set(RECRUITING_DISABLED_BUILTIN_TOOLS);
+export const COMPUTER_TOOLS_DISABLED_ERROR =
+  "Computer and browser tools are disabled for this recruiting agent. Use the connected mail/calendar/CRM service; if it is not connected, report the exact connection that is missing.";
+function disabledToolError(name: string): string {
+  return COMPUTER_LOGIN_TOOLS.has(name)
+    ? COMPUTER_TOOLS_DISABLED_ERROR
+    : "This tool is disabled for this bot.";
 }
 
 export function selectBuiltinToolsForRun(options: {

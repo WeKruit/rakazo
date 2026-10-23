@@ -144,6 +144,7 @@ describe("local native Instantly thread history", () => {
       callResult: { content: [], structuredContent: structuredClone(anchor) },
       page: { items: [structuredClone(anchor)] } as Record<string, unknown>,
       status: 200,
+      accounts: [] as string[],
       afterAnchor: () => {},
       afterRest: () => {},
     };
@@ -190,8 +191,13 @@ describe("local native Instantly thread history", () => {
       const request = new Request(input, init);
       expect(request.method).toBe("GET");
       expect(new URL(request.url).origin).toBe("https://api.instantly.ai");
-      expect(new URL(request.url).pathname).toBe("/api/v2/emails");
       expect(request.headers.get("authorization")).toBe(`Bearer ${state.key}`);
+      const account = new URL(request.url).pathname.match(/^\/api\/v2\/accounts\/(.+)$/);
+      if (account)
+        return new Response("{}", {
+          status: state.accounts.includes(decodeURIComponent(account[1]!)) ? 200 : 404,
+        });
+      expect(new URL(request.url).pathname).toBe("/api/v2/emails");
       state.afterRest();
       return new Response(JSON.stringify(state.page), { status: state.status });
     });
@@ -375,6 +381,114 @@ describe("local native Instantly thread history", () => {
           },
         },
       ]);
+    } finally {
+      await f.connector.close();
+    }
+  });
+  it("lists one mailbox page, including non-campaign mail, scoped by eaccount, subject search and created window", async () => {
+    const f = fixture();
+    const mailboxRoute = { ...route, toolName: "native_instantly_list_mailbox_emails" };
+    const direct = { ...anchor, campaign_id: null, subject: "Direct note" };
+    f.state.page = { items: [direct] };
+    try {
+      const tools = await f.connector.discoverTools(f.context as never);
+      const tool = tools.find((tool) => tool.route?.toolName === mailboxRoute.toolName);
+      expect(tool).toMatchObject({
+        name: "instantly__demo__list_mailbox_emails",
+        readOnly: true,
+        route: mailboxRoute,
+      });
+      expect(toolRequiresApproval(tool!.name, true, tool!.readOnly)).toBe(false);
+      const args = {
+        eaccount: anchor.eaccount,
+        search: "Direct note",
+        min_timestamp_created: "2026-10-22T00:00:00Z",
+        max_timestamp_created: "2026-10-23T00:00:00Z",
+        limit: 5,
+      };
+      const events = await f.collect(args, mailboxRoute);
+      const query = {
+        eaccount: args.eaccount,
+        search: args.search,
+        min_timestamp_created: args.min_timestamp_created,
+        max_timestamp_created: args.max_timestamp_created,
+        sort_order: "desc",
+        mode: "emode_all",
+        latest_of_thread: "false",
+        preview_only: "false",
+        limit: "5",
+      };
+      expect(events).toMatchObject([
+        {
+          type: "result",
+          data: {
+            structuredContent: {
+              source: "local_native_instantly_rest",
+              page: f.state.page,
+              query,
+              coverage: {
+                scope: "mailbox",
+                account: args.eaccount,
+                pageExhausted: true,
+                returnedCount: 1,
+              },
+            },
+          },
+        },
+      ]);
+      expect(f.rest).toHaveBeenCalledOnce();
+      const url = new URL(logicalHref(...f.rest.mock.calls[0]!));
+      expect(`${url.origin}${url.pathname}`).toBe("https://api.instantly.ai/api/v2/emails");
+      expect(Object.fromEntries(url.searchParams)).toEqual(query);
+      expect(f.state.calls).toEqual([]);
+      expect(JSON.stringify(events)).not.toContain(f.state.key);
+    } finally {
+      await f.connector.close();
+    }
+  });
+  it.each([
+    [{}, false],
+    [{ eaccount: "not-an-address" }, false],
+    [{ eaccount: anchor.eaccount, lead: anchor.from_address_email }, false],
+    [{ eaccount: anchor.eaccount, min_timestamp_created: "yesterday" }, false],
+    [{ eaccount: anchor.eaccount, limit: 101 }, false],
+    [{ eaccount: "other@example.test" }, true],
+    [{ eaccount: anchor.eaccount, max_timestamp_created: "2026-10-22T09:00:00Z" }, true],
+  ])("rejects malformed or out-of-scope mailbox listing: %j", async (args, reads) => {
+    const f = fixture();
+    f.state.page = { items: [anchor] };
+    try {
+      expect(
+        await f.collect(args, { ...route, toolName: "native_instantly_list_mailbox_emails" }),
+      ).toMatchObject([{ type: "error" }]);
+      expect(f.rest).toHaveBeenCalledTimes(reads ? 1 : 0);
+    } finally {
+      await f.connector.close();
+    }
+  });
+  it("explains an empty contact lookup whose contact and mailbox arguments are swapped", async () => {
+    const f = fixture();
+    const contactRoute = { ...route, toolName: "native_instantly_search_contact_emails" };
+    f.state.page = { items: [] };
+    f.state.accounts = [anchor.eaccount];
+    try {
+      const swapped = await f.collect(
+        { email: anchor.eaccount, eaccount: anchor.from_address_email },
+        contactRoute,
+      );
+      expect(swapped).toEqual([
+        {
+          type: "error",
+          message: expect.stringContaining("pass the contact as email and the mailbox as eaccount"),
+        },
+      ]);
+      expect(JSON.stringify(swapped)).not.toContain(f.state.key);
+      expect(
+        await f.collect(
+          { email: anchor.from_address_email, eaccount: anchor.eaccount },
+          contactRoute,
+        ),
+      ).toMatchObject([{ type: "result" }]);
     } finally {
       await f.connector.close();
     }

@@ -4,6 +4,8 @@ import type { AgentRuntimeEvent } from "@rakazo/adapter-kit";
 export async function* withRuntimeCleanup(
   events: AsyncIterable<AgentRuntimeEvent>,
   controller: AbortController,
+  /** Runs once the consumer stops reading, whether the stream completed, threw or was abandoned. */
+  onClose?: () => void,
 ): AsyncIterable<AgentRuntimeEvent> {
   const iterator = events[Symbol.asyncIterator]();
   let complete = false;
@@ -17,6 +19,7 @@ export async function* withRuntimeCleanup(
       yield next.value;
     }
   } finally {
+    onClose?.();
     if (!complete) {
       // for-await's implicit return() would otherwise run before the executor's
       // finally, potentially waiting on a tool whose signal is still live.
