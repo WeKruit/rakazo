@@ -5704,6 +5704,14 @@ msgstr "अपना पासवर्ड रीसेट करें"
 msgid "Resetting…"
 msgstr "रीसेट हो रहा है…"
 
+#: src/pages/Shell.tsx
+msgid "Resize chat"
+msgstr ""
+
+#: src/pages/Shell.tsx
+msgid "Resize navigation"
+msgstr ""
+
 #: src/pages/ResizableSidePanel.tsx
 msgid "Resize panel"
 msgstr "पैनल का आकार बदलें"

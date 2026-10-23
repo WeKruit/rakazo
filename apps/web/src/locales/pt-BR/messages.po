@@ -5704,6 +5704,14 @@ msgstr "Redefina sua senha"
 msgid "Resetting…"
 msgstr "Redefinindo…"
 
+#: src/pages/Shell.tsx
+msgid "Resize chat"
+msgstr ""
+
+#: src/pages/Shell.tsx
+msgid "Resize navigation"
+msgstr ""
+
 #: src/pages/ResizableSidePanel.tsx
 msgid "Resize panel"
 msgstr "Redimensionar painel"
