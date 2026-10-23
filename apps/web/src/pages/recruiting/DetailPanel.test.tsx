@@ -162,13 +162,13 @@ const settle = () =>
     await new Promise((resolve) => setTimeout(resolve, 0));
   });
 
-async function mount(node: ReactNode) {
+async function mount(node: ReactNode, path = "/app/g/group-1?view=contacts") {
   const container = document.createElement("div");
   document.body.append(container);
   const root = createRoot(container);
   await act(async () =>
     root.render(
-      <MemoryRouter initialEntries={["/app/g/group-1?view=contacts"]}>{node}</MemoryRouter>,
+      <MemoryRouter initialEntries={[path]}>{node}</MemoryRouter>,
     ),
   );
   await settle();
@@ -199,6 +199,16 @@ it("opens a person beside the current view and tells the chat who is open", asyn
   expect(view.querySelector('section[aria-label="Contacts"]')).not.toBeNull();
   expect(location).toBe(`/app/g/group-1?view=contacts&detail=contact.${ADA}`);
   expect(setSelectedContact).toHaveBeenLastCalledWith({ name: "Ada", reference: ADA });
+});
+
+it("reopens the person a shared link names once the list shows them", async () => {
+  const view = await mount(
+    <Workbench />,
+    `/app/g/group-1?view=contacts&detail=${encodeURIComponent(`contact.${ADA}`)}`,
+  );
+  await settle();
+  expect(panel(view)?.querySelector("h2")?.textContent).toBe("Ada");
+  expect(location).toBe(`/app/g/group-1?view=contacts&detail=${encodeURIComponent(`contact.${ADA}`)}`);
 });
 
 it("opens a Sequence person's emails beside the tab", async () => {

@@ -135,7 +135,7 @@ it("shows a loading indicator while the role binding is read", async () => {
 it("says the role is not linked instead of inventing CRM contacts", async () => {
   listCandidates.mockResolvedValue({ crmTarget: null });
   const view = await mount(<ContactsTab {...props} />);
-  expect(view.textContent).toContain("This role is not linked to a CRM role yet.");
+  expect(view.textContent).toContain("No candidate records for this role yet.");
   expect(crmData).not.toHaveBeenCalled();
 });
 
@@ -302,17 +302,17 @@ it("retries a transient CRM failure behind the loading state and reports a denia
   crmData.mockRejectedValueOnce(new ORPCError("SERVICE_UNAVAILABLE", { status: 503 }));
   crmData.mockResolvedValue(candidatesPage);
   const view = await mount(<ContactsTab {...props} />);
-  expect(view.textContent).not.toContain("Could not load CRM records");
+  expect(view.textContent).not.toContain("Could not load candidate records");
   await act(async () => new Promise((resolve) => setTimeout(resolve, 1_100)));
   expect(view.textContent).toContain("Ada");
-  expect(view.textContent).not.toContain("Could not load CRM records");
+  expect(view.textContent).not.toContain("Could not load candidate records");
   await cleanup?.();
   crmData.mockReset();
   crmData.mockRejectedValue(new ORPCError("FORBIDDEN"));
   const denied = await mount(<ContactsTab {...props} />);
   await settle();
   expect(denied.querySelector('[role="alert"]')?.textContent).toContain(
-    "Could not load CRM records",
+    "Could not load candidate records",
   );
   expect(crmData).toHaveBeenCalledTimes(1);
 });
@@ -323,7 +323,7 @@ it("shows an error instead of falling back when the role-wide mail read fails", 
   );
   const view = await mount(<InboxTab {...props} />);
   await settle();
-  expect(view.querySelector('[role="alert"]')?.textContent).toContain("Could not load CRM records");
+  expect(view.querySelector('[role="alert"]')?.textContent).toContain("Could not load candidate records");
   expect(crmData.mock.calls.some(([input]) => input.operation === "mail")).toBe(false);
 });
 
@@ -688,7 +688,7 @@ it("shows a failed source as a compact Retry that re-reads only that source", as
     />,
   );
   const alert = view.querySelector('[role="alert"]');
-  expect(alert?.textContent).toContain("Could not load CRM records");
+  expect(alert?.textContent).toContain("Could not load candidate records");
   // Never an error and a loading state at once.
   expect(view.querySelector('[role="status"]')).toBeNull();
   expect(view.querySelector("tbody")?.textContent).toContain("Ada");

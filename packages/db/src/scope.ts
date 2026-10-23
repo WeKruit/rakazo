@@ -18,12 +18,41 @@ export class BotSectionNameConflictError extends Error {
   }
 }
 
+const MEMBERSHIP_CACHE_TTL_MS = 60_000;
+// ponytail: in-process only; a membership written by another process is seen within the TTL.
+const membershipCache = new Map<string, { actor: Actor; expiresAt: number }>();
+
+function membershipCacheKey(userId: string, requestedSpaceId?: string | null): string {
+  return `${userId}\0${requestedSpaceId ?? ""}`;
+}
+
+/** Drop cached lookups after a membership write; no argument clears every user. */
+export function invalidateMembershipCache(userId?: string): void {
+  if (userId === undefined) {
+    membershipCache.clear();
+    return;
+  }
+  for (const key of membershipCache.keys()) {
+    if (key.startsWith(`${userId}\0`)) membershipCache.delete(key);
+  }
+}
+
 export async function requireMembership(
   prisma: Pick<PrismaClient, "$queryRaw">,
   userId: string,
   requestedSpaceId?: string | null,
 ): Promise<Actor> {
   const started = performance.now();
+  const cacheKey = membershipCacheKey(userId, requestedSpaceId);
+  const cached = membershipCache.get(cacheKey);
+  if (cached && cached.expiresAt > Date.now()) {
+    getLogger().info("membership.lookup.timing", {
+      cache: "hit",
+      totalMs: Math.round(performance.now() - started),
+      outcome: "ok",
+    });
+    return cached.actor;
+  }
   let queryMs: number | undefined;
   let outcome = "error";
   try {
@@ -49,9 +78,11 @@ export async function requireMembership(
       throw new IsolationError("No personal space");
     }
     outcome = "ok";
+    membershipCache.set(cacheKey, { actor, expiresAt: Date.now() + MEMBERSHIP_CACHE_TTL_MS });
     return actor;
   } finally {
     getLogger().info("membership.lookup.timing", {
+      cache: "miss",
       queryMs,
       totalMs: Math.round(performance.now() - started),
       outcome,

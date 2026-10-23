@@ -2,9 +2,9 @@ import { Plural, Trans, useLingui } from "@lingui/react/macro";
 import type { RecruitingCandidate, RecruitingCorrespondence } from "@rakazo/contracts";
 import { Badge, Button } from "@rakazo/ui-web";
 import { Bookmark, Building2, Mail, Sparkles } from "lucide-react";
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import type { RecruitingDetailTarget } from "./detail";
-import { useRecruitingDetail } from "./detail";
+import { detailKey, useRecruitingDetail } from "./detail";
 import { PersonAvatar } from "./DetailPanel";
 import { candidateSections } from "./profile";
 import { RetryNotice } from "./RetryNotice";
@@ -122,7 +122,7 @@ export function ContactsTab(
     ) : null,
     list.crmRead.failed ? (
       <RetryNotice key="crm" onRetry={list.crmRead.retry}>
-        <Trans>Could not load CRM records</Trans>
+        <Trans>Could not load candidate records</Trans>
       </RetryNotice>
     ) : null,
     saved.failed || saved.data?.status === "failed" ? (
@@ -188,6 +188,15 @@ export function ContactsTab(
     else if (row.autumn) autumn?.openEvidence(row.autumn, trigger);
   };
   const openId = detail?.current?.person.candidateId;
+  // A shared or reloaded link reopens its person once the list shows them.
+  const pendingDetail = detail?.pending;
+  useEffect(() => {
+    if (!pendingDetail || !detail) return;
+    for (let index = 0; index < rows.length; index += 1) {
+      const candidate = target(index);
+      if (candidate && detailKey(candidate) === pendingDetail) return detail.restore(candidate);
+    }
+  }, [pendingDetail, rows]);
 
   const columns = [
     { label: t`Name`, width: "w-52" },
@@ -409,7 +418,7 @@ export function ContactsTab(
           {autumn ? (
             <Trans>No saved candidates</Trans>
           ) : (
-            <Trans>No CRM contacts for this role yet.</Trans>
+            <Trans>No contacts for this role yet.</Trans>
           )}
         </TabNotice>
       ) : null}

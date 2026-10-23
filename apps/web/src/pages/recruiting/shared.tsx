@@ -307,7 +307,7 @@ export function LoadMore({
     <div className="mt-3 space-y-2">
       {pages.moreFailed ? (
         <TabNotice alert>
-          <Trans>Could not load CRM records. Try refreshing.</Trans>
+          <Trans>Could not load candidate records. Try refreshing.</Trans>
         </TabNotice>
       ) : null}
       <Button variant="outline" size="sm" disabled={pages.loadingMore} onClick={pages.loadMore}>
@@ -387,19 +387,19 @@ export function CrmGate({ crm }: { crm: RoleCrm }) {
   if (crm.status === "failed")
     return (
       <TabNotice alert>
-        <Trans>Could not load CRM records. Try refreshing.</Trans>
+        <Trans>Could not load candidate records. Try refreshing.</Trans>
       </TabNotice>
     );
   if (crm.status === "unavailable")
     return (
       <TabNotice>
-        <Trans>Open the role conversation to read its CRM records.</Trans>
+        <Trans>Open the role conversation to see its candidates.</Trans>
       </TabNotice>
     );
   if (crm.status === "unbound")
     return (
       <TabNotice>
-        <Trans>This role is not linked to a CRM role yet.</Trans>
+        <Trans>No candidate records for this role yet.</Trans>
       </TabNotice>
     );
   return null;

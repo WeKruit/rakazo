@@ -325,6 +325,7 @@ import {
   RecruitingDetailProvider,
   useRecruitingDetailController,
 } from "./recruiting";
+import { HomeDashboard } from "./recruiting/HomeDashboard";
 import { RetryNotice } from "./recruiting/RetryNotice";
 import { RoleSetupCard } from "./recruiting/RoleSetup";
 import { TabLoading } from "./recruiting/shared";
@@ -2368,6 +2369,7 @@ export function ShellPage() {
     threadSnapshotCache.current.get(inGroup ? `group:${groupId}` : `bot:${active?.id}`) ??
     null;
   const workspaceViews: readonly RecruitingWorkspaceView[] = [
+    "home",
     "conversation",
     "results",
     "brief",
@@ -2388,6 +2390,7 @@ export function ShellPage() {
         : "conversation";
   const workspaceNewRole = !showToolActivity && panel === "create-group";
   const crmMode = !showToolActivity && !workspaceNewRole && searchParams.has("crmServer");
+  const homeView = !showToolActivity && !workspaceNewRole && !crmMode && recruitingWorkspaceView === "home" && groups.length > 0;
   const crmRevision = Number(searchParams.get("crmRevision"));
   const crmSelection: CrmBrowseSelection | undefined =
     crmMode &&
@@ -2767,7 +2770,7 @@ export function ShellPage() {
         ...(draft.email.date ? [t`Date: ${draft.email.date}`] : []),
       ].join("\n");
       openRoleChat(
-        `${t`Reply to the selected email`}\n${reference.replace(/(^|\r\n|[\r\n\u2028\u2029])/g, "$1> ")}\n\n${t`Read this person's original email and complete conversation using the connected CRM and mailbox. Verify the person and current role, then prepare a reply here for me to edit. Only draft it; do not send.`}`,
+        `${t`Reply to the selected email`}\n${reference.replace(/(^|\r\n|[\r\n\u2028\u2029])/g, "$1> ")}\n\n${t`Read this person's original email and complete conversation using the saved records and mailbox. Verify the person and current role, then prepare a reply here for me to edit. Only draft it; do not send.`}`,
       );
     } catch (error) {
       if (isCurrent()) setSendError(errorText(error, t`Failed to load recruiting data`));
@@ -5288,11 +5291,13 @@ export function ShellPage() {
         />
       )}
 
+      {homeView ? <HomeDashboard userName={session.data?.user.name} groups={groups} readCache={recruitingReadCache.current} readCacheScope={userId && bootstrapMe?.spaceId ? JSON.stringify([userId, bootstrapMe.spaceId]) : undefined} refreshSignal={recruitingRefresh}
+        onOpenRole={(id) => navigate(`/app/g/${id}?view=results`)} navigationCollapsed={botsSidebarCollapsed} onOpenNavigation={() => { setBotsSidebarCollapsedPref(false); setMobileSidebarOpen(true); }} /> : null}
       {/* Keep the composer's z-index inside the chat so phone overlays like the side panel cover it. */}
       <main
         aria-hidden={mobileSidebarOpen || undefined}
         inert={mobileSidebarOpen}
-        className={cn("isolate flex min-w-0 flex-1 flex-col bg-background", roleChatWorkspace && "hire-role-chat-workspace", roleChatWorkspace && roleChatOpen && "hire-role-chat-open")}
+        className={cn("isolate flex min-w-0 flex-1 flex-col bg-background", homeView && "hidden", roleChatWorkspace && "hire-role-chat-workspace", roleChatWorkspace && roleChatOpen && "hire-role-chat-open")}
       >
         {workspaceFull ? (
           <div className={botsSidebarCollapsed ? "flex items-center px-4 pt-3" : "flex items-center px-4 pt-3 md:hidden"}>
@@ -5327,8 +5332,6 @@ export function ShellPage() {
             refreshSignal={recruitingRefresh}
             readCache={recruitingReadCache.current}
             readCacheScope={recruitingCacheScope}
-            onAsk={(prompt) => void sendFromComposer(prompt, [], newClientNonce())}
-            onConnect={() => setPluginsOpen(true)}
           />
         ) : null}
         {workspaceNewRole ? (
@@ -5337,7 +5340,7 @@ export function ShellPage() {
           </div>
         ) : null}
         {boundRoleView && currentBindingRead?.failed ? <div className="px-6"><RetryNotice onRetry={() => setRecruitingRefresh(value => value + 1)}>
-          <Trans>Could not load this role’s CRM connection.</Trans>
+          <Trans>Could not load this role’s candidate records.</Trans>
         </RetryNotice></div> : boundRoleCrmMode && !effectiveCrmSelection ? <div className="p-6"><TabLoading /></div> : null}
         {(crmMode || (boundRoleCrmMode && effectiveCrmSelection)) && activeSnapshot?.threadId ? <div className="rk-scroll recruiting-workspace-main min-h-0 flex-1 overflow-y-auto">{effectiveCrmSelection ? <RecruitingPanel
           threadId={activeSnapshot.threadId} botId={inGroup ? undefined : active?.id} groupId={inGroup ? groupId : undefined}
@@ -5347,7 +5350,7 @@ export function ShellPage() {
             onSelectCandidate: (id, view = "inbox") => setSearchParams(current => { const next = new URLSearchParams(current); next.set("crmCandidate", id); next.set("view", view); return next; }),
             onDraftReply: boundRoleCrmMode && !crmMode ? draftCrmReply : undefined,
           }}
-        /> : <p role="alert"><Trans>Choose a CRM role again.</Trans></p>}</div> : null}
+        /> : <p role="alert"><Trans>Choose the role again.</Trans></p>}</div> : null}
         {workspaceCorrespondence && activeSnapshot?.threadId ? (
           <div className="rk-scroll recruiting-workspace-main min-h-0 flex-1 overflow-y-auto">
             {nativeCorrespondence}
@@ -8588,7 +8591,7 @@ function firstThreadRoute(
   groups: readonly Pick<Group, "id">[],
   recruiting = false,
 ): string {
-  if (recruiting && groups[0]) return `/app/g/${groups[0].id}`;
+  if (recruiting && groups[0]) return `/app/g/${groups[0].id}?view=home`;
   if (bots[0]) return `/app/${bots[0].id}`;
   if (groups[0]) return `/app/g/${groups[0].id}`;
   return "/app";

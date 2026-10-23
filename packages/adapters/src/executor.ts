@@ -174,6 +174,7 @@ import {
   readNativeReplyEmailProof,
   recordUsage,
   recruitingResearchSnapshot,
+  resolveRecruitingCampaignLead,
   resolveRecruitingCrmImport,
   resolveRecruitingReply,
   SpaceLimitError,
@@ -363,6 +364,7 @@ import {
 } from "./model-vision.js";
 import type { CodexLiveCatalog } from "./pi-codex-catalog.js";
 import { codexLiveListsModel } from "./pi-codex-catalog.js";
+import { listPiCatalog } from "./pi-models.js";
 import {
   isRetiredModelCredentialError,
   parseModelSecret,
@@ -485,6 +487,8 @@ import {
 } from "./ticket-tools.js";
 import { advanceToolCallLoopGuard, loopGuardStopText } from "./tool-loop.js";
 import { textContentArg } from "./tool-text.js";
+import { guardRecruitingTurnEnd } from "./turn-end-guard.js";
+import { chooseTurnModel } from "./turn-model.js";
 import {
   botMessageOutcomeFromMidTurn,
   clampUserProgressMessage,
@@ -5006,8 +5010,13 @@ export function createRunExecutor(deps: ExecutorDeps) {
               error: "This reply connection does not support the required provider contract.",
               dispatched: false,
             };
+          // A recipient who is a lead of the role's campaign but has no CRM record: the reply
+          // takes the plain native path (original-email proof + confirmation card).
+          let campaignLeadReply:
+            | NonNullable<Awaited<ReturnType<typeof resolveRecruitingCampaignLead>>>
+            | undefined;
           const unlinkedReplyError = async (bind = false) => {
-            if (!replyRoute || replySelection) return;
+            if (!replyRoute || replySelection || campaignLeadReply) return;
             const current = await deps.prisma.thread.findUniqueOrThrow({
               where: { id: thread.id },
               select: { activeRecruitingRoleId: true },
@@ -5020,23 +5029,44 @@ export function createRunExecutor(deps: ExecutorDeps) {
                 replyRoute.resourceId &&
                 typeof replyRoute.resourceRevision === "number"
               ) {
+                const target = {
+                  mcpServerId: replyRoute.resourceId,
+                  serverRevision: replyRoute.resourceRevision,
+                };
+                let crmFailure: unknown;
                 try {
                   replySelection =
                     (await resolveRecruitingReply(deps.prisma, researchActor.actor, crmContext, {
-                      mcpServerId: replyRoute.resourceId,
-                      serverRevision: replyRoute.resourceRevision,
+                      ...target,
                       replyToEmailId: request.reply_to_uuid,
                       recipient: request.to,
                     })) ?? undefined;
                   if (replySelection) return;
                 } catch (error) {
+                  crmFailure = error;
+                }
+                try {
+                  campaignLeadReply =
+                    (await resolveRecruitingCampaignLead(
+                      deps.prisma,
+                      researchActor.actor,
+                      crmContext,
+                      { ...target, recipient: request.to },
+                    )) ?? undefined;
+                  if (campaignLeadReply) return;
+                } catch (error) {
                   return { error: sanitizeConnectorError(error, runSecrets), dispatched: false };
                 }
+                if (crmFailure && !(crmFailure instanceof IsolationError))
+                  return {
+                    error: sanitizeConnectorError(crmFailure, runSecrets),
+                    dispatched: false,
+                  };
               }
             }
             return {
               error:
-                "Read this candidate's current CRM context and canonical role membership before proposing this reply.",
+                "This address is not a candidate or lead of this role. Read the role's campaign leads, or the person's CRM record and role membership, in this task before proposing the reply.",
               dispatched: false,
             };
           };
@@ -9038,6 +9068,87 @@ export function createRunExecutor(deps: ExecutorDeps) {
             )
             .map((candidate) => JSON.stringify([candidate.provider, candidate.modelId])),
         );
+        const configuredRunModel: AgentRunRequest["model"] = {
+          provider: runModelProvider,
+          id: runModelId,
+          apiKey: resolved.oauth ? undefined : resolved.apiKey,
+          ...cloudflareRunFields(resolved),
+          baseUrl: resolved.baseUrl,
+          cacheCapabilities: resolved.cacheCapabilities,
+          contextWindow: resolved.contextWindow,
+          reasoning: resolved.reasoning,
+          maxTokens: resolved.maxTokens,
+          acceptsImages: resolved.acceptsImages,
+          maxImagesPerPrompt: resolved.maxImagesPerPrompt,
+          thinkingLevel: thinkingLevel ?? resolved.thinkingLevel ?? null,
+          oauth: resolved.oauth
+            ? {
+                credential: resolved.oauth,
+                modify: resolved.modifyOAuth,
+              }
+            : undefined,
+        };
+        // Light turns run on the fast model; the configured model becomes the first backup.
+        let turnModel = scripted
+          ? {
+              model: { provider: runModelProvider, id: runModelId },
+              routed: "configured" as const,
+              reason: "scripted",
+            }
+          : chooseTurnModel({
+              configured: { provider: runModelProvider, id: runModelId },
+              trigger: run.trigger,
+              answersQuestion: Boolean(nativeSources?.currentAnswer),
+              peerIntent: peerMessage?.intent,
+              userText: turnBlocks
+                ? turnBlocks
+                    .filter((block) => block.kind === "text")
+                    .map((block) => block.text)
+                    .join("\n")
+                : taskPrompt,
+              hasAttachments:
+                (turnBlocks?.some((block) => block.kind !== "text") ?? false) ||
+                (currentTurnImages?.length ?? 0) > 0,
+              pendingToolLoop: Boolean(approvalContinuation) || Boolean(takeoverResume?.checkpoint),
+            });
+        let runModel = configuredRunModel;
+        let runFallbackModels = fallbackModels.map(({ provider, modelId }) => ({
+          provider,
+          id: modelId,
+        }));
+        const configuredModelKey = JSON.stringify([runModelProvider, runModelId]);
+        if (turnModel.routed === "fast") {
+          try {
+            const fast: AgentRunRequest["model"] =
+              turnModel.model.provider === runModelProvider
+                ? { ...configuredRunModel, id: turnModel.model.id }
+                : await resolveConnectedModel(
+                    { userId: run.userId, spaceId: run.spaceId },
+                    turnModel.model.provider,
+                    turnModel.model.id,
+                    (values) => runSecrets.push(...values),
+                    true,
+                  );
+            if (
+              !listPiCatalog().some(
+                (entry) => entry.provider === fast.provider && entry.id === fast.id,
+              )
+            )
+              throw new Error(`Fast model ${fast.provider}/${fast.id} is not in the catalog`);
+            runModel = { ...fast, routed: "fast", routeReason: turnModel.reason };
+            runFallbackModels = [
+              { provider: runModelProvider, id: runModelId },
+              ...runFallbackModels,
+            ];
+            fallbackModelKeys.add(configuredModelKey);
+          } catch (error) {
+            getLogger().warn("Fast model unavailable; using configured model", { runId, error });
+            turnModel = { ...turnModel, routed: "configured", reason: "fast_model_unavailable" };
+          }
+        }
+        if (runModel === configuredRunModel) {
+          runModel = { ...configuredRunModel, routed: "configured", routeReason: turnModel.reason };
+        }
 
         try {
           setupMark("runtimeStart");
@@ -9068,6 +9179,10 @@ export function createRunExecutor(deps: ExecutorDeps) {
           getLogger().info("run.setup.timing", {
             runId,
             sinceRunCreatedMs: run.createdAt ? Date.now() - run.createdAt.getTime() : null,
+            modelId: runModel.id,
+            provider: runModel.provider,
+            routed: turnModel.routed,
+            routeReason: turnModel.reason,
             ...setupMarks,
           });
           const runtimeEvents = deps.runtime.run(
@@ -9112,36 +9227,14 @@ export function createRunExecutor(deps: ExecutorDeps) {
               history: runtimeHistory,
               currentTurnImages,
               tools,
-              model: {
-                provider: runModelProvider,
-                id: runModelId,
-                apiKey: resolved.oauth ? undefined : resolved.apiKey,
-                ...cloudflareRunFields(resolved),
-                baseUrl: resolved.baseUrl,
-                cacheCapabilities: resolved.cacheCapabilities,
-                contextWindow: resolved.contextWindow,
-
-                reasoning: resolved.reasoning,
-                maxTokens: resolved.maxTokens,
-                acceptsImages: resolved.acceptsImages,
-                maxImagesPerPrompt: resolved.maxImagesPerPrompt,
-                thinkingLevel: thinkingLevel ?? resolved.thinkingLevel ?? null,
-                oauth: resolved.oauth
-                  ? {
-                      credential: resolved.oauth,
-                      modify: resolved.modifyOAuth,
-                    }
-                  : undefined,
-              },
-              fallbackModels: fallbackModels.map(({ provider, modelId }) => ({
-                provider,
-                id: modelId,
-              })),
+              model: runModel,
+              fallbackModels: runFallbackModels,
               resolveFallbackModel: fallbackModelKeys.size
                 ? async (provider, modelId) => {
                     const key = JSON.stringify([provider, modelId]);
                     if (!fallbackModelKeys.has(key))
                       throw new Error("Backup model is not selected");
+                    if (key === configuredModelKey) return configuredRunModel;
                     return resolveConnectedModel(
                       { userId: run.userId, spaceId: run.spaceId },
                       provider,
@@ -9416,6 +9509,7 @@ export function createRunExecutor(deps: ExecutorDeps) {
                   ...(event.activity ? { activity: true } : {}),
                   ...(event.phase ? { phase: event.phase } : {}),
                   ...(event.summary ? { summary: event.summary } : {}),
+                  ...(event.thought ? { thought: event.thought } : {}),
                   ...(event.at ? { at: event.at } : {}),
                 },
               });
@@ -9840,6 +9934,18 @@ export function createRunExecutor(deps: ExecutorDeps) {
             await deps.jobs
               .enqueue(runContinueJob(completed.continuationRunId))
               .catch((error) => getLogger().error("steering continuation enqueue", error));
+          } else if (thread.activeRecruitingRoleId && !messagingChannelRun) {
+            // Turn-end guard: a recruiting turn must end with a deliverable, a question, a card
+            // or a handoff; otherwise push the next playbook step instead of going quiet.
+            await guardRecruitingTurnEnd(deps, {
+              run: { ...run, threadId: thread.id, userId: run.userId },
+              roleId: thread.activeRecruitingRoleId,
+              blocks: finalBlocks.length ? finalBlocks : blocks,
+              handedOff,
+              pendingApproval: approvalPausePending,
+              postAssistant: (text) =>
+                publishMessage(deps, run, "bot", [{ kind: "text", text }], markUnread),
+            }).catch((error) => getLogger().error("run.autocontinue guard", error));
           }
           if (botMessageOutcome) {
             // Prefer the final reply. If the turn only posted mid-turn progress, return that

@@ -6,6 +6,9 @@ import {
 } from "@rakazo/contracts";
 import { describe, expect, it } from "vitest";
 import {
+  classifyTurnEnd,
+  laterPlaybookStage,
+  nextPlaybookStep,
   recruitingBriefClarifications,
   recruitingCalibrationIdentity,
   recruitingDiscoveryAnswer,
@@ -441,4 +444,57 @@ it("does not let a model mark a location conflict inconsequential or invent infe
       criteria: [{ ...criteria[0]!, priority: "preferred" }],
     }),
   ).toThrow(/source/);
+});
+
+describe("playbook stage machine", () => {
+  it("never regresses a stage", () => {
+    expect(laterPlaybookStage("feedback", "calibration_10")).toBe("feedback");
+    expect(laterPlaybookStage("intake", "calibration_10")).toBe("calibration_10");
+  });
+
+  it("pushes open clarifications before anything else", () => {
+    const step = nextPlaybookStep("intake", {
+      title: "后端",
+      hasBrief: true,
+      openClarifications: 2,
+      savedCandidates: 0,
+    });
+    expect(step?.label).toBe("还有 2 个待确认问题");
+  });
+
+  it("starts calibration once title and brief exist", () => {
+    expect(
+      nextPlaybookStep("intake", { title: "后端", hasBrief: true, savedCandidates: 0 })?.label,
+    ).toBe("开始校准搜寻");
+    expect(
+      nextPlaybookStep("intake", { title: "后端", hasBrief: false, savedCandidates: 0 })?.label,
+    ).toBe("完成岗位信息");
+  });
+
+  it("counts remaining calibration profiles and stops at human-owned stages", () => {
+    expect(
+      nextPlaybookStep("calibration_10", { title: "x", hasBrief: true, savedCandidates: 4 })?.label,
+    ).toBe("校准搜寻（还差 6 人）");
+    expect(nextPlaybookStep("closed", { hasBrief: true, savedCandidates: 50 })).toBeNull();
+    expect(nextPlaybookStep("screening", { hasBrief: true, savedCandidates: 50 })).toBeNull();
+  });
+});
+
+describe("classifyTurnEnd", () => {
+  const text = (t: string) => ({ blocks: [{ kind: "text", text: t }] });
+  it("treats a saved-and-stopped status note as none", () => {
+    expect(classifyTurnEnd(text("已将公司暂用名保存为 X。尚未启动搜寻。"))).toBe("none");
+    expect(classifyTurnEnd({ blocks: [] })).toBe("none");
+  });
+  it("detects questions, cards, handoffs and deliverables", () => {
+    expect(classifyTurnEnd(text("薪资范围是多少？"))).toBe("question");
+    expect(classifyTurnEnd({ blocks: [{ kind: "ask", text: "x" }] })).toBe("question");
+    expect(classifyTurnEnd({ blocks: [{ kind: "approval", text: "x" }] })).toBe("card");
+    expect(classifyTurnEnd(text("ok"), { pendingApproval: true })).toBe("card");
+    expect(classifyTurnEnd(text("ok"), { handedOff: true })).toBe("handoff");
+    expect(classifyTurnEnd(text("saved"), { savedRows: 10 })).toBe("deliverable");
+    expect(classifyTurnEnd(text("saved"), { savedRows: 3, deliverableRows: 10 })).toBe("none");
+    expect(classifyTurnEnd({ blocks: [{ kind: "candidate" }] })).toBe("deliverable");
+    expect(classifyTurnEnd(text("名单：\n1. 张三\n2. 李四\n3. 王五"))).toBe("deliverable");
+  });
 });

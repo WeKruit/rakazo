@@ -52,7 +52,10 @@ function fixture() {
   const tx = {
     $queryRaw: vi.fn(async (_query: unknown) => [] as unknown[]),
     $executeRaw: vi.fn(async (_query: unknown) => 0),
-    recruitingRole: { findFirst: vi.fn(async () => role) },
+    recruitingRole: {
+      findFirst: vi.fn(async () => role),
+      updateMany: vi.fn(async () => ({ count: 0 })),
+    },
     thread: {
       findFirst: vi.fn(async () => ({
         ...actor,
@@ -65,6 +68,7 @@ function fixture() {
     recruitingCandidate: {
       findUnique: vi.fn(async () => candidate),
       updateMany: vi.fn(async () => ({ count: 1 })),
+      count: vi.fn(async () => 0),
     },
     recruitingCandidatePage: {
       findMany: vi.fn(async (_query: unknown) => [] as { effectId: string }[]),
@@ -1075,7 +1079,10 @@ function observationFixture(rows: readonly unknown[] | undefined) {
   );
   const tx = {
     ...f.tx,
-    recruitingRole: { findFirst: vi.fn(async () => ({ ...f.role, title: "Example engineer" })) },
+    recruitingRole: {
+      findFirst: vi.fn(async () => ({ ...f.role, title: "Example engineer" })),
+      updateMany: vi.fn(async () => ({ count: 0 })),
+    },
     run: { findFirst: vi.fn(async () => run), findUniqueOrThrow: vi.fn(async () => run) },
     recruitingRoleRevision: { findFirst: vi.fn(async () => revision) },
     recruitingResearchAction: {
@@ -2080,6 +2087,92 @@ describe("native CRM write approval target", () => {
         { route, args },
       ),
     ).rejects.toThrow(IsolationError);
+  });
+});
+
+describe("campaign-lead reply identity (no CRM record)", () => {
+  const marker = "__rakazoCatalogTool";
+  const route = {
+    connectorId: "mcp" as const,
+    resourceId: "server",
+    resourceRevision: 1,
+    toolName: "native_instantly_list_leads",
+  };
+  const input = { mcpServerId: "server", serverRevision: 1, recipient: "Admin1@wekruit.com" };
+  function leadFixture({ binding = true, read = true, recorded = false } = {}) {
+    const f = crmFixture();
+    f.role.crmBindingEffectId = null; // "No CRM role linked"
+    if (binding)
+      f.effects.set("campaign-binding", {
+        id: "campaign-binding",
+        spaceId: actor.spaceId,
+        runId: "older-run",
+        kind: "instantly_role_campaign",
+        status: "completed",
+        idempotencyKey: "instantly-role-campaign:server:role",
+        request: { serverId: "server", roleId: "role" },
+        result: {
+          campaignId: "c-1",
+          campaignName: "Native role",
+          eaccount: "team@example.test",
+          leads: recorded
+            ? { "linkedin:/in/admin": { leadId: "lead-recorded", email: "admin1@wekruit.com" } }
+            : {},
+        },
+        createdAt: new Date(),
+      } as never);
+    if (read)
+      f.effects.set("lead-read", {
+        id: "lead-read",
+        spaceId: actor.spaceId,
+        runId: "run",
+        kind: "mcp__server__native_instantly_list_leads",
+        status: "completed",
+        request: boundDirectApprovalRequest(route, { campaign_id: "c-1", limit: 50 }, marker),
+        result: {
+          structuredContent: {
+            source: "local_native_instantly_rest",
+            result: { items: [{ id: "lead-1", email: "admin1@wekruit.com", campaign: "c-1" }] },
+          },
+        },
+        createdAt: new Date(),
+      } as never);
+    return f;
+  }
+  it("resolves a campaign lead from this run's list_leads read with a stable surrogate identity", async () => {
+    const f = leadFixture();
+    await expect(
+      recruiting.resolveRecruitingCampaignLead(f.prisma, actor, f.trusted, input),
+    ).resolves.toEqual({
+      roleId: "role",
+      campaignId: "c-1",
+      eaccount: "team@example.test",
+      email: "admin1@wekruit.com",
+      leadId: "lead-1",
+      identity: "lead:c-1:admin1@wekruit.com",
+      leadReadEffectId: "lead-read",
+    });
+  });
+  it("accepts a lead the role's own campaign binding recorded when no read exists", async () => {
+    const f = leadFixture({ read: false, recorded: true });
+    await expect(
+      recruiting.resolveRecruitingCampaignLead(f.prisma, actor, f.trusted, input),
+    ).resolves.toMatchObject({ leadId: "lead-recorded", leadReadEffectId: "campaign-binding" });
+  });
+  it("returns null for an address that is neither a lead nor recorded, or without a campaign", async () => {
+    const stranger = { ...input, recipient: "stranger@example.test" };
+    await expect(
+      recruiting.resolveRecruitingCampaignLead(
+        leadFixture().prisma,
+        actor,
+        leadFixture().trusted,
+        stranger,
+      ),
+    ).resolves.toBeNull();
+    const f = leadFixture({ binding: false });
+    await expect(
+      recruiting.resolveRecruitingCampaignLead(f.prisma, actor, f.trusted, input),
+    ).resolves.toBeNull();
   });
 });
 

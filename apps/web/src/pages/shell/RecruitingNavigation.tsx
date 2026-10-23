@@ -25,6 +25,7 @@ import type { ContextMenuPosition } from "../BotContextMenu";
 import type { CrmBrowseSelection } from "../RecruitingPanel";
 
 export type RecruitingWorkspaceView =
+  | "home"
   | "conversation"
   | "results"
   | "brief"
@@ -55,6 +56,11 @@ function sameAccount(previousKey: string, nextKey: string) {
 }
 
 /** The supplied WeKruit /hire navigation over native recruiting conversations. */
+/** The role waits on the recruiter: a confirmation, an answer, or a paused reply. */
+function waitsOnUser(group: Group) {
+  return Boolean(group.attention ?? group.needsInput);
+}
+
 export function RecruitingNavigation({
   groups,
   archivedGroups,
@@ -215,7 +221,7 @@ export function RecruitingNavigation({
   // Roles waiting on the recruiter come first; the rest keep their order.
   const visibleGroups = groups
     .filter((group) => group.name.toLocaleLowerCase().includes(query.trim().toLocaleLowerCase()))
-    .sort((a, b) => Number(Boolean(b.needsInput)) - Number(Boolean(a.needsInput)));
+    .sort((a, b) => Number(waitsOnUser(b)) - Number(waitsOnUser(a)));
   const destinations = [
     { view: "shortlist", label: t`Shortlist`, Icon: Bookmark },
     { view: "contacts", label: t`Contacts`, Icon: Users },
@@ -233,7 +239,8 @@ export function RecruitingNavigation({
           type="button"
           className="hire-brand"
           aria-label={t`WeKruit home`}
-          onClick={() => onView("results")}
+          aria-current={view === "home" ? "page" : undefined}
+          onClick={() => onView("home")}
         >
           <img className="hire-brand-logo" src="/wekruit-logo.png" alt="" aria-hidden="true" />
           <span className="text-start">
@@ -319,7 +326,7 @@ export function RecruitingNavigation({
         ) : null}
         {currentCrm?.failed || currentCrm?.unavailable ? (
           <p role="alert" className="px-3 text-xs">
-            <Trans>Could not read a CRM connection.</Trans>{" "}
+            <Trans>Could not read candidate records.</Trans>{" "}
             <button
               type="button"
               className="underline"
@@ -357,15 +364,19 @@ export function RecruitingNavigation({
                 <span
                   className={cn(
                     "min-w-0 flex-1 truncate",
-                    (group.needsInput || group.unread) && "font-semibold",
+                    (waitsOnUser(group) || group.unread) && "font-semibold",
                   )}
                   dir="auto"
                 >
                   {group.name}
                 </span>
-                {group.needsInput ? (
+                {waitsOnUser(group) ? (
                   <Badge variant="secondary" className="shrink-0">
-                    <Trans>Needs input</Trans>
+                    {group.attention === "approval" ? (
+                      <Trans>Needs confirmation</Trans>
+                    ) : (
+                      <Trans>Needs input</Trans>
+                    )}
                   </Badge>
                 ) : group.unread ? (
                   <span

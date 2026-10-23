@@ -87,6 +87,13 @@ export const RunTimingSchema = z.object({
 });
 export type RunTiming = z.infer<typeof RunTimingSchema>;
 
+export const THREAD_PROGRESS_THOUGHT_MAX_CHARS = 200;
+/** thread.progress payload: run timing plus one user-safe thinking line on phase "thinking". */
+export const ThreadProgressPayloadSchema = RunTimingSchema.extend({
+  thought: z.string().max(THREAD_PROGRESS_THOUGHT_MAX_CHARS).optional(),
+});
+export type ThreadProgressPayload = z.infer<typeof ThreadProgressPayloadSchema>;
+
 export const RunCompletedPayloadSchema = RunTimingSchema.extend({
   startedAt: IsoDate.optional(),
   activeMs: z.number().int().nonnegative().optional(),
@@ -690,7 +697,7 @@ export const ProductEventSchema = z
                             : event.type === "run.completed"
                               ? RunCompletedPayloadSchema
                               : event.type === "thread.progress"
-                                ? RunTimingSchema
+                                ? ThreadProgressPayloadSchema
                                 : null;
     if (!schema) return;
     const parsed = schema.safeParse(event.payload);

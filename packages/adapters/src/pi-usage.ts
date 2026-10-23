@@ -228,9 +228,12 @@ export function observedPiStream(
   options: SimpleStreamOptions | undefined,
   push: (event: AgentRuntimeEvent) => void,
   observer?: ModelCallObserver,
-  attribution: { operationKind: UsageOperationKind; agentId?: string } = {
-    operationKind: "answer",
-  },
+  attribution: {
+    operationKind: UsageOperationKind;
+    agentId?: string;
+    routed?: "fast" | "configured";
+    routeReason?: string;
+  } = { operationKind: "answer" },
   hooks?: {
     prepareContext?: (context: Context, model: Model<Api>) => Context;
     imageTokens?: ContextBudget["imageTokens"];
@@ -251,8 +254,8 @@ export function observedPiStream(
       provider: model.provider,
       model: model.id,
       callId,
-      ...attribution,
       operationKind,
+      ...(attribution.agentId ? { agentId: attribution.agentId } : {}),
     };
     try {
       const accountingStartedAt = hooks?.recordUsage ? performance.now() : undefined;
@@ -448,6 +451,8 @@ export function observedPiStream(
           provider: model.provider,
           model: model.id,
           operationKind: attribution.operationKind,
+          routed: attribution.routed ?? "configured",
+          routeReason: attribution.routeReason ?? null,
           outcome,
           streamOutcome,
           firstStreamEventMs,

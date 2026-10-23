@@ -226,15 +226,14 @@ function formatInstantlyActivation(display: InstantlyActivationDisplay) {
         : String(display.recipientCount);
   const shown = display.recipients.slice(0, MAX_RECIPIENT_LINES);
   return [
-    `Campaign: ${display.campaignName ?? "created for this role on approval"}`,
-    `Sender: ${unknown(display.mailbox)}`,
-    `Recipients (${count}):`,
+    `岗位: ${display.campaignName ?? "this role"}`,
+    `发件人: ${unknown(display.mailbox)}`,
+    `收件人 (${count}):`,
     ...shown.map((r) => `- ${r.name ? `${r.name} <${r.email}>` : r.email}`),
     ...(display.recipients.length > shown.length
       ? [`- and ${display.recipients.length - shown.length} more`]
       : []),
-    `Send window: ${unknown(display.schedule)}`,
-    `Stop on reply: ${display.stopOnReply === null ? "unknown" : display.stopOnReply ? "on" : "off"}`,
+    `发送时间: ${unknown(display.schedule)}`,
     ...(display.status && display.status !== "Draft" ? [`Status: ${display.status}`] : []),
     "",
     "Confirm sending the first email to these recipients",

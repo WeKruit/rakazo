@@ -87,7 +87,7 @@ export function InterviewTab({
       {loading ? <TabLoading /> : null}
       {failed ? (
         <TabNotice alert>
-          <Trans>Could not load CRM records. Try refreshing.</Trans>
+          <Trans>Could not load candidate records. Try refreshing.</Trans>
         </TabNotice>
       ) : null}
       {loaded && !rows.length ? (
@@ -146,7 +146,7 @@ export function InterviewTab({
       {fallback ? null : <LoadMore pages={staged} />}
       {truncated ? (
         <p className="mt-2 text-xs text-muted-foreground">
-          <Trans>Showing the most recent CRM records.</Trans>
+          <Trans>Showing the most recent records.</Trans>
         </p>
       ) : null}
       {calendar.loading ? <TabLoading /> : null}

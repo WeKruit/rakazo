@@ -532,6 +532,31 @@ describe("contracts", () => {
     expect(ProductEventType.options).toContain("bot.spawned");
   });
 
+  it("accepts one user-safe thought (≤200 chars) on thread.progress", () => {
+    const event = {
+      id: "event-1",
+      spaceId: "space-1",
+      threadId: "thread-1",
+      botId: "bot-1",
+      runId: "run-1",
+      type: "thread.progress",
+      seq: 1,
+      createdAt: "2026-01-01T00:00:00Z",
+    };
+    const payload = { text: "", activity: true, phase: "thinking", summary: "Reviewing the role" };
+    expect(ProductEventSchema.safeParse({ ...event, payload }).success).toBe(true);
+    expect(
+      ProductEventSchema.safeParse({
+        ...event,
+        payload: { ...payload, thought: "Reviewing the role" },
+      }).success,
+    ).toBe(true);
+    expect(
+      ProductEventSchema.safeParse({ ...event, payload: { ...payload, thought: "x".repeat(201) } })
+        .success,
+    ).toBe(false);
+  });
+
   it("limits native requeue events to their actual queued or held state", () => {
     const event = {
       id: "event-1",
