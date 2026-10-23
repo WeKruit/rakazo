@@ -2608,7 +2608,16 @@ describe("durable recruiting reply linkage", () => {
       ).toHaveLength(1);
     },
   );
-  it.each(["membership", "binding", "role", "email", "lease", "membership-failed", "hold"])(
+  it("resolves a CRM member already present in the deployed candidate index", async () => {
+    const f = await nativeReplyFixture();
+    const legacy = await replyFixture();
+    const candidate = await legacy.tx.recruitingCandidate.findUnique();
+    f.tx.recruitingCandidate.findUnique.mockResolvedValue(candidate as never);
+    await expect(
+      recruiting.resolveRecruitingReply(f.prisma, actor, f.trusted, f.input as never),
+    ).resolves.toMatchObject({ candidateId: f.receipt.candidate_id, crmImportReceipt: null });
+  });
+  it.each(["membership", "binding", "role", "email", "lease", "membership-failed"])(
     "rejects native member %s boundary",
     async (boundary) => {
       const f = await nativeReplyFixture();
@@ -2625,24 +2634,6 @@ describe("durable recruiting reply linkage", () => {
       if (boundary === "email") f.input.recipient = "other@example.test";
       if (boundary === "lease") f.trusted.leaseFence += 1;
       if (boundary === "membership-failed") f.membership.status = "uncertain";
-      if (boundary === "hold") {
-        const legacy = await replyFixture();
-        const candidate = await legacy.tx.recruitingCandidate.findUnique();
-        f.tx.recruitingCandidate.findUnique.mockResolvedValue({
-          ...candidate,
-          consideration: {
-            operation: "hold",
-            source: {
-              messageId: "human",
-              threadId: "thread",
-              seq: 1,
-              createdAt: "2026-10-19T00:00:00.000Z",
-              quote: "Pause",
-              actor: { userId: actor.userId, spaceId: actor.spaceId },
-            },
-          },
-        } as never);
-      }
       await expect(
         recruiting.resolveRecruitingReply(f.prisma, actor, f.trusted, f.input as never),
       ).rejects.toThrow();

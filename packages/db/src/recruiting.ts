@@ -7794,17 +7794,6 @@ async function nativeReplyContext(
         { id: raw.replyToEmailId },
       );
   if (!emailProof || !membershipProof) throw new IsolationError();
-  // A native CRM member need not have an Autumn occurrence; existing local hold/pass still applies.
-  if (
-    typeof candidate.linkedin_identity === "string" &&
-    /^\/in\/[^/]+$/.test(candidate.linkedin_identity)
-  ) {
-    const key = `linkedin:${candidate.linkedin_identity}`;
-    const local = await tx.recruitingCandidate.findUnique({
-      where: { roleId_candidateKey: { roleId: role.id, candidateKey: key } },
-    });
-    if (local) await requireCandidateConsideration(tx, actor, role.id, key);
-  }
   const nativeScope: NativeReplyScope = {
     roleId: role.id,
     roleRevisionId: roleRevision.id,
@@ -8199,7 +8188,7 @@ export async function claimRecruitingReply(
       { p_org: resolved.target.organizationId, p_candidate: resolved.candidateId },
     );
     if (!currentCrm || currentCrm.effectId !== native.crmPreflightReadEffectId)
-      throw new RecruitingConflictError("CRM context changed after this reply's preflight");
+      throw new RecruitingConflictError();
     const changed = await tx.externalEffect.updateMany({
       where: {
         id: effect.id,
