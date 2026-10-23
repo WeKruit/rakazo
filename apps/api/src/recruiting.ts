@@ -1534,6 +1534,11 @@ export const reviseRecruitingRole = (
   input: Parameters<typeof recruiting.reviseRecruitingRole>[2],
   material?: RecruitingRoleMaterialContext,
 ) => authenticated(() => recruiting.reviseRecruitingRole(prisma, actor, input, material));
+export const archiveRecruitingRole = (
+  prisma: PrismaClient,
+  actor: Actor,
+  input: Parameters<typeof recruiting.setRecruitingRoleArchived>[2],
+) => authenticated(() => recruiting.setRecruitingRoleArchived(prisma, actor, input));
 export const listRecruitingAssessments = (
   prisma: PrismaClient,
   actor: Actor,
