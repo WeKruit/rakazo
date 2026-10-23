@@ -924,6 +924,47 @@ describe("local native Instantly thread history", () => {
       }
     },
   );
+  it.each([
+    "native_instantly_get_email",
+    "native_instantly_list_mailbox_emails",
+    "native_instantly_reply_to_email",
+  ])("fences a role switch across native awaits for %s", async (toolName) => {
+    const f = fixture();
+    f.assignment.allowedTools.push("reply_to_email");
+    f.state.accounts = [anchor.eaccount];
+    const stable = { campaignIds: [anchor.campaign_id], workspaceKey: "role-a" };
+    const scope = vi
+      .spyOn(
+        f.connector as unknown as { instantlyCampaignScope: () => Promise<unknown> },
+        "instantlyCampaignScope",
+      )
+      .mockResolvedValueOnce(stable)
+      .mockResolvedValueOnce(stable)
+      .mockResolvedValue({ ...stable, workspaceKey: "role-b" });
+    try {
+      const args =
+        toolName === "native_instantly_get_email"
+          ? { id: anchor.id }
+          : toolName === "native_instantly_list_mailbox_emails"
+            ? { eaccount: anchor.eaccount }
+            : {
+                reply_to_uuid: anchor.id,
+                eaccount: anchor.eaccount,
+                body: { text: "Synthetic reply" },
+              };
+      expect(await f.collect(args, { ...route, toolName })).toMatchObject([{ type: "error" }]);
+      expect(scope).toHaveBeenCalledTimes(3);
+      expect(f.rest.mock.calls.every((call) => new Request(...call).method === "GET")).toBe(true);
+      if (toolName === "native_instantly_reply_to_email")
+        expect(
+          f.rest.mock.calls.some((call) =>
+            new URL(logicalHref(...call)).pathname.endsWith("/emails/reply"),
+          ),
+        ).toBe(false);
+    } finally {
+      await f.connector.close();
+    }
+  });
   it("filters existing native mailbox reads by exact current campaign", async () => {
     const f = fixture();
     vi.spyOn(

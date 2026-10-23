@@ -9,7 +9,12 @@ import type {
 } from "@rakazo/adapter-kit";
 import { SecretStoreUnavailableError } from "@rakazo/adapter-kit";
 import type { RecruitingCrmTarget } from "@rakazo/contracts";
-import { isLocalMcpHost, RecruitingCrmRoleCampaignsReadSchema } from "@rakazo/contracts";
+import {
+  isLocalMcpHost,
+  RecruitingCrmPresenceReadSchema,
+  RecruitingCrmRoleCampaignsReadSchema,
+  RecruitingCrmRoleMailReadSchema,
+} from "@rakazo/contracts";
 import { mcpObject } from "@rakazo/core/node/approval-effect-key";
 import type { McpServer, PrismaClient, ThreadEvents } from "@rakazo/db";
 import { getRecruitingWorkspaceCrmTarget, IsolationError } from "@rakazo/db";
@@ -140,9 +145,19 @@ export async function agentCrmScopedArgs(
   tool: string,
   args: Record<string, unknown>,
   target: RecruitingCrmTarget,
-  readMembership: (args: { p_org: string; p_candidate: string }) => Promise<unknown>,
+  readMembership: (args: {
+    p_org: string;
+    p_role: string;
+    p_view: "presence";
+    p_candidate_ids: string[];
+  }) => Promise<unknown>,
 ): Promise<Record<string, unknown>> {
-  if (tool === "list_crm_candidates") return agentCrmCandidatesArgs(args, [target]);
+  if (tool === "list_crm_candidate_correspondence")
+    throw new IsolationError(
+      "Use list_crm_role_correspondence with p_candidate for this candidate's current-role email; the candidate-only tool cannot isolate role campaigns",
+    );
+  if (tool === "list_crm_candidates" && args.p_view !== "presence")
+    return agentCrmCandidatesArgs(args, [target]);
   if (args.p_org !== undefined && args.p_org !== target.organizationId)
     throw new IsolationError("CRM organization does not match the current role workspace");
   if (args.p_role !== undefined && args.p_role !== target.crmRoleId)
@@ -150,8 +165,25 @@ export async function agentCrmScopedArgs(
   if (args.p_client !== undefined && args.p_client !== target.crmClientId)
     throw new IsolationError("CRM client does not match the current role workspace");
   const next = { ...args, p_org: target.organizationId };
-  if (["get_crm_role", "list_crm_role_correspondence", "crm_import_candidate"].includes(tool))
+  if (tool === "list_crm_candidates" && args.p_view === "presence") {
+    if (
+      !Array.isArray(args.p_candidate_ids) ||
+      !args.p_candidate_ids.length ||
+      args.p_candidate_ids.length > 50 ||
+      args.p_candidate_ids.some((id) => typeof id !== "string" || !UUID.test(id))
+    )
+      throw new IsolationError();
     return { ...next, p_role: target.crmRoleId };
+  }
+  if (["get_crm_role", "list_crm_role_correspondence", "crm_import_candidate"].includes(tool)) {
+    if (
+      tool === "list_crm_role_correspondence" &&
+      args.p_candidate !== undefined &&
+      (typeof args.p_candidate !== "string" || !UUID.test(args.p_candidate))
+    )
+      throw new IsolationError();
+    return { ...next, p_role: target.crmRoleId };
+  }
   if (typeof args.p_candidate !== "string" || !UUID.test(args.p_candidate))
     throw new IsolationError(
       "Select a candidate in the current CRM role workspace before this operation",
@@ -167,23 +199,19 @@ export async function agentCrmScopedArgs(
   }
   const result = await readMembership({
     p_org: target.organizationId,
-    p_candidate: args.p_candidate,
+    p_role: target.crmRoleId,
+    p_view: "presence",
+    p_candidate_ids: [args.p_candidate],
   });
-  const rows = (result as { isError?: boolean })?.isError ? undefined : mcpObject(result)?.data;
+  const proof = (result as { isError?: boolean })?.isError
+    ? null
+    : RecruitingCrmPresenceReadSchema.safeParse(mcpObject(result)?.data);
   if (
-    !Array.isArray(rows) ||
-    !rows.length ||
-    rows.some(
-      (row) =>
-        !row ||
-        typeof row !== "object" ||
-        row.organization_id !== target.organizationId ||
-        row.candidate_id !== args.p_candidate ||
-        typeof row.membership_id !== "string",
-    ) ||
-    !rows.some(
-      (row) => row.role_spec_id === target.crmRoleId && row.client_id === target.crmClientId,
-    )
+    !proof?.success ||
+    proof.data.candidate_ids.length !== 1 ||
+    proof.data.candidate_ids[0] !== args.p_candidate ||
+    proof.data.role_candidate_ids?.length !== 1 ||
+    proof.data.role_candidate_ids[0] !== args.p_candidate
   )
     throw new IsolationError("Candidate is not a verified member of the current CRM role");
   return next;
@@ -808,7 +836,7 @@ export class McpConnector implements ConnectorProvider {
               call.route!,
               "list_crm_candidate_roles",
             );
-            return session.callTool("list_crm_candidate_roles", membershipArgs, {
+            return session.callTool("list_crm_candidates", membershipArgs, {
               signal: context.signal,
             });
           },
@@ -822,10 +850,49 @@ export class McpConnector implements ConnectorProvider {
             "CRM workspace changed during the read; retry in the current workspace",
           );
       }
+      if (
+        assignment.server.endpoint === INSTANTLY_MCP &&
+        ["get_email", "list_emails", "reply_to_email"].includes(call.route.toolName)
+      ) {
+        await this.assertInstantlyScope(context, assignment.server.id, emailScope);
+        await requireMcpToolAssignment(this.prisma, context, call.route, call.route.toolName);
+      }
       callStarted = true;
       const result = await session.callTool(call.route.toolName, args, {
         signal: context.signal,
       });
+      if (crmTarget) {
+        await requireMcpToolAssignment(this.prisma, context, call.route, call.route.toolName);
+        if (
+          JSON.stringify(await this.crmBinding(context, assignment.server)) !==
+          JSON.stringify(crmTarget)
+        )
+          throw new IsolationError("CRM workspace changed during the read");
+      }
+      if (
+        assignment.server.endpoint === INSTANTLY_MCP &&
+        ["get_email", "list_emails"].includes(call.route.toolName)
+      )
+        await this.assertInstantlyScope(context, assignment.server.id, emailScope);
+      if (crmTarget && call.route.toolName === "list_crm_role_correspondence" && !result.isError) {
+        const data = mcpObject(result)?.data as Record<string, unknown> | undefined;
+        const page = RecruitingCrmRoleMailReadSchema.safeParse(data);
+        if (
+          !page.success ||
+          data?.version !== 2 ||
+          page.data.organization_id !== crmTarget.organizationId ||
+          page.data.role_id !== crmTarget.crmRoleId ||
+          (args.p_candidate !== undefined && data.candidate_id !== args.p_candidate) ||
+          page.data.messages.some(
+            (message) =>
+              message.organization_id !== crmTarget.organizationId ||
+              (args.p_candidate !== undefined && message.candidate_id !== args.p_candidate),
+          )
+        )
+          throw new IsolationError(
+            "CRM email page does not prove the requested role and candidate scope",
+          );
+      }
       if (emailScope && call.route.toolName !== "reply_to_email" && !result.isError) {
         const body = mcpObject(result);
         const emails =
@@ -898,14 +965,31 @@ export class McpConnector implements ConnectorProvider {
             "Reply anchor does not belong to the current role campaign and mailbox",
           );
       }
+      const scopedEmailOperation = [
+        "native_instantly_get_email",
+        "native_instantly_reply_to_email",
+      ].includes(call.route!.toolName);
+      const rest = instantlyRest(safeFetch, credential.key, context.signal);
+      const assertScope = async () => {
+        if (scopedEmailOperation)
+          await this.assertInstantlyScope(context, credential.server.id, emailScope);
+        const current = await this.authorizeInstantlyRest(call, context, redactions);
+        if (current.secretId !== credential.secretId || current.digest !== credential.digest)
+          throw new IsolationError();
+      };
+      if (scopedEmailOperation) await assertScope();
       const result = await runInstantlyWrite(
         this.prisma,
-        instantlyRest(safeFetch, credential.key, context.signal),
+        async (method, path, body) => {
+          if (scopedEmailOperation && method !== "GET") await assertScope();
+          return rest(method, path, body);
+        },
         context,
         credential.server.id,
         call.route!.toolName,
         call.args,
       );
+      if (call.route!.toolName === "native_instantly_get_email") await assertScope();
       if (emailScope && call.route!.toolName === "native_instantly_get_email") {
         const email = readInstantlyEmail(result);
         if (
@@ -1024,7 +1108,7 @@ export class McpConnector implements ConnectorProvider {
   private async instantlyCampaignScope(
     context: AdapterContext,
     serverId: string,
-  ): Promise<{ campaignIds: string[] } | null> {
+  ): Promise<{ campaignIds: string[]; workspaceKey: string } | null> {
     if (!context.runId) return null;
     const run = await this.prisma.run.findFirst({
       where: {
@@ -1077,7 +1161,10 @@ export class McpConnector implements ConnectorProvider {
         page.data.campaigns.length > 50
       )
         throw new IsolationError("Current CRM role campaign mapping is unavailable or incomplete");
-      return { campaignIds: page.data.campaigns.map((campaign) => campaign.id) };
+      return {
+        campaignIds: page.data.campaigns.map((campaign) => campaign.id).sort(),
+        workspaceKey: JSON.stringify([run.threadId, target]),
+      };
     }
     if (run.thread.activeRecruitingRoleId) {
       const binding = await readRoleCampaignBinding(
@@ -1087,11 +1174,24 @@ export class McpConnector implements ConnectorProvider {
         run.thread.activeRecruitingRoleId,
       );
       if (!binding) throw new IsolationError("This role has no verified existing email campaign");
-      return { campaignIds: [binding.campaignId] };
+      return {
+        campaignIds: [binding.campaignId],
+        workspaceKey: JSON.stringify([run.threadId, run.thread.activeRecruitingRoleId, serverId]),
+      };
     }
     if (run.thread.groupId?.startsWith("recruiting-crm-"))
       throw new IsolationError("Open the CRM role workspace before reading its campaign email");
     return null;
+  }
+
+  private async assertInstantlyScope(
+    context: AdapterContext,
+    serverId: string,
+    expected: Awaited<ReturnType<McpConnector["instantlyCampaignScope"]>>,
+  ) {
+    const current = await this.instantlyCampaignScope(context, serverId);
+    if (JSON.stringify(current) !== JSON.stringify(expected))
+      throw new IsolationError("The current role or campaign mapping changed during the operation");
   }
 
   private async *readInstantlyEmails(
@@ -1130,6 +1230,7 @@ export class McpConnector implements ConnectorProvider {
       const credential = await authorize();
       const emailScope = await this.instantlyCampaignScope(context, credential.server.id);
       const assertAuthorized = async () => {
+        await this.assertInstantlyScope(context, credential.server.id, emailScope);
         const current = await authorize();
         if (current.secretId !== credential.secretId || current.digest !== credential.digest)
           throw new IsolationError();

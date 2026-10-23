@@ -17,25 +17,18 @@ const target = {
   roleLabel: "Engineer",
 };
 const candidate = "40000000-0000-4000-8000-000000000004";
-const membership = {
-  organization_id: target.organizationId,
-  candidate_id: candidate,
-  role_spec_id: target.crmRoleId,
-  client_id: target.crmClientId,
-  membership_id: "membership-1",
-};
+const membership = { version: 2, candidate_ids: [candidate], role_candidate_ids: [candidate] };
 const receipt = (data: unknown) => ({ structuredContent: { data } });
 
 beforeEach(() => vi.mocked(getRecruitingWorkspaceCrmTarget).mockReset());
 
 describe("agent CRM candidate and correspondence scope", () => {
   it.each([
-    "list_crm_candidate_correspondence",
     "list_crm_candidate_messages",
     "get_crm_candidate_outreach_context",
     "list_crm_candidate_roles",
   ])("requires current-role membership for %s and preserves exact query", async (tool) => {
-    const read = vi.fn(async () => receipt([membership]));
+    const read = vi.fn(async () => receipt(membership));
     const args = {
       p_org: target.organizationId,
       p_candidate: candidate,
@@ -50,13 +43,15 @@ describe("agent CRM candidate and correspondence scope", () => {
     expect(await agentCrmScopedArgs(tool, args, target, read)).toEqual(args);
     expect(read).toHaveBeenCalledExactlyOnceWith({
       p_org: target.organizationId,
-      p_candidate: candidate,
+      p_role: target.crmRoleId,
+      p_view: "presence",
+      p_candidate_ids: [candidate],
     });
   });
-  it.each(["organization_id", "candidate_id", "role_spec_id", "client_id"])(
+  it.each(["version", "candidate_ids", "role_candidate_ids"])(
     "rejects wrong membership %s",
     async (field) => {
-      const read = vi.fn(async () => receipt([{ ...membership, [field]: "other" }]));
+      const read = vi.fn(async () => receipt({ ...membership, [field]: "other" }));
       await expect(
         agentCrmScopedArgs(
           "get_crm_candidate_outreach_context",
@@ -67,7 +62,7 @@ describe("agent CRM candidate and correspondence scope", () => {
       ).rejects.toThrow(/verified member/);
     },
   );
-  it.each([{}, { isError: true, ...receipt([membership]) }, receipt([])])(
+  it.each([{}, { isError: true, ...receipt(membership) }, receipt([])])(
     "rejects absent or failed membership proof",
     async (value) => {
       await expect(
@@ -88,14 +83,65 @@ describe("agent CRM candidate and correspondence scope", () => {
   ])("rejects mismatched query before membership dispatch: %j", async (args) => {
     const read = vi.fn();
     await expect(
-      agentCrmScopedArgs(
-        "list_crm_candidate_correspondence",
-        { p_candidate: candidate, ...args },
-        target,
-        read,
-      ),
+      agentCrmScopedArgs({ p_candidate: candidate, ...args }, target, read),
     ).rejects.toThrow();
     expect(read).not.toHaveBeenCalled();
+  });
+  it.each(["campaign-only", "pipeline-only"])(
+    "accepts authoritative presence v2 for %s without formal membership rows",
+    async () => {
+      const read = vi.fn(async () => receipt(membership));
+      await expect(
+        agentCrmScopedArgs(
+          "get_crm_candidate_outreach_context",
+          { p_candidate: candidate },
+          target,
+          read,
+        ),
+      ).resolves.toMatchObject({ p_candidate: candidate });
+      expect(read).toHaveBeenCalledWith({
+        p_org: target.organizationId,
+        p_role: target.crmRoleId,
+        p_view: "presence",
+        p_candidate_ids: [candidate],
+      });
+    },
+  );
+  it("refuses old presence versions and unrelated candidates", async () => {
+    for (const proof of [
+      { ...membership, version: 1 },
+      { ...membership, candidate_ids: [target.crmRoleId] },
+      { ...membership, role_candidate_ids: [] },
+    ])
+      await expect(
+        agentCrmScopedArgs(
+          "get_crm_candidate_outreach_context",
+          { p_candidate: candidate },
+          target,
+          async () => receipt(proof),
+        ),
+      ).rejects.toThrow(/verified member/);
+  });
+  it("rejects unscoped candidate mail with an exact-role tool instruction", async () => {
+    await expect(
+      agentCrmScopedArgs(
+        "list_crm_candidate_correspondence",
+        { p_candidate: candidate },
+        target,
+        vi.fn(),
+      ),
+    ).rejects.toThrow(/list_crm_role_correspondence with p_candidate/);
+  });
+  it("preserves exact UUID role for presence and candidate filter for role mail", async () => {
+    for (const [tool, args] of [
+      ["list_crm_candidates", { p_view: "presence", p_candidate_ids: [candidate] }],
+      ["list_crm_role_correspondence", { p_candidate: candidate, p_offset: 0, p_limit: 25 }],
+    ] as const)
+      expect(await agentCrmScopedArgs(tool, args, target, vi.fn())).toEqual({
+        ...args,
+        p_org: target.organizationId,
+        p_role: target.crmRoleId,
+      });
   });
   it("does not use organization-wide enumeration as a role fallback", async () => {
     await expect(agentCrmScopedArgs("list_crm_roles", {}, target, vi.fn())).rejects.toThrow(
@@ -152,8 +198,8 @@ function fixture(endpoint = "https://crm.example.test/mcp") {
           client_label: target.clientLabel,
           role_label: target.roleLabel,
         })
-      : name === "list_crm_candidate_roles"
-        ? receipt([membership])
+      : name === "list_crm_candidates" && _args?.p_view === "presence"
+        ? receipt(membership)
         : receipt({ rows: [], total: 0 }),
   );
   const sessionFor = vi
@@ -250,6 +296,66 @@ describe("CRM connector dispatch", () => {
     ]);
     expect(f.callTool.mock.calls.map(([tool]) => tool)).toEqual(["get_crm_role"]);
   });
+  it("rejects a workspace switch during the actual candidate read before exposing its result", async () => {
+    const f = fixture();
+    vi.mocked(getRecruitingWorkspaceCrmTarget)
+      .mockResolvedValueOnce(target)
+      .mockResolvedValueOnce(target)
+      .mockResolvedValue({ ...target, crmRoleId: target.crmClientId });
+    expect(await f.collect()).toMatchObject([{ type: "error" }]);
+    expect(f.callTool.mock.calls.map(([tool]) => tool)).toEqual([
+      "get_crm_role",
+      "list_crm_candidates",
+    ]);
+  });
+  it.each(["valid", "missing-echo", "wrong-role", "wrong-org", "wrong-candidate"])(
+    "requires exact candidate-scoped role mail proof: %s",
+    async (kind) => {
+      const f = fixture();
+      const page = {
+        version: 2,
+        organization_id: kind === "wrong-org" ? target.crmClientId : target.organizationId,
+        role_id: kind === "wrong-role" ? target.crmClientId : target.crmRoleId,
+        candidate_id:
+          kind === "missing-echo"
+            ? undefined
+            : kind === "wrong-candidate"
+              ? target.crmClientId
+              : candidate,
+        pagination: "offset",
+        messages: [],
+        next_offset: null,
+      };
+      f.callTool.mockImplementation(async (name) =>
+        name === "get_crm_role"
+          ? receipt({
+              role_spec_id: target.crmRoleId,
+              client_id: target.crmClientId,
+              client_label: target.clientLabel,
+              role_label: target.roleLabel,
+            })
+          : receipt(page),
+      );
+      expect(
+        await f.collect("list_crm_role_correspondence", {
+          p_candidate: candidate,
+          p_offset: 0,
+          p_limit: 25,
+        }),
+      ).toMatchObject([{ type: kind === "valid" ? "result" : "error" }]);
+      expect(f.callTool).toHaveBeenLastCalledWith(
+        "list_crm_role_correspondence",
+        {
+          p_org: target.organizationId,
+          p_role: target.crmRoleId,
+          p_candidate: candidate,
+          p_offset: 0,
+          p_limit: 25,
+        },
+        expect.anything(),
+      );
+    },
+  );
   it("rejects a changed workspace during membership lookup", async () => {
     const f = fixture();
     vi.mocked(getRecruitingWorkspaceCrmTarget)
@@ -260,7 +366,7 @@ describe("CRM connector dispatch", () => {
     ).toMatchObject([{ type: "error" }]);
     expect(f.callTool.mock.calls.map(([tool]) => tool)).toEqual([
       "get_crm_role",
-      "list_crm_candidate_roles",
+      "list_crm_candidates",
     ]);
   });
 });
@@ -346,6 +452,38 @@ describe("direct Instantly MCP email reads", () => {
       await f.collect("list_emails", { campaign_id: email.campaign_id, eaccount: email.eaccount }),
     ).toMatchObject([{ type: "error" }]);
   });
+  it("rejects a changed role after direct email data returns, even if campaign ID is unchanged", async () => {
+    const f = scopedFixture();
+    const scope = vi.mocked(
+      (f.connector as unknown as { instantlyCampaignScope: () => Promise<unknown> })
+        .instantlyCampaignScope,
+    );
+    scope
+      .mockResolvedValueOnce({ campaignIds: [email.campaign_id], workspaceKey: "role-a" })
+      .mockResolvedValueOnce({ campaignIds: [email.campaign_id], workspaceKey: "role-a" })
+      .mockResolvedValue({ campaignIds: [email.campaign_id], workspaceKey: "role-b" });
+    f.callTool.mockResolvedValue({ structuredContent: email } as never);
+    expect(await f.collect("get_email", { id: email.id })).toMatchObject([{ type: "error" }]);
+  });
+  it("rechecks scope after reply anchor returns and refuses before dispatching send", async () => {
+    const f = scopedFixture();
+    const scope = vi.mocked(
+      (f.connector as unknown as { instantlyCampaignScope: () => Promise<unknown> })
+        .instantlyCampaignScope,
+    );
+    scope
+      .mockResolvedValueOnce({ campaignIds: [email.campaign_id], workspaceKey: "role-a" })
+      .mockResolvedValue({ campaignIds: [email.campaign_id], workspaceKey: "role-b" });
+    f.callTool.mockResolvedValue({ structuredContent: email } as never);
+    expect(
+      await f.collect("reply_to_email", {
+        reply_to_uuid: email.id,
+        eaccount: email.eaccount,
+        body: { text: "Synthetic" },
+      }),
+    ).toMatchObject([{ type: "error" }]);
+    expect(f.callTool.mock.calls.map(([tool]) => tool)).toEqual(["get_email"]);
+  });
   it("blocks a direct remote reply on another role campaign before the send call", async () => {
     const f = scopedFixture();
     f.callTool.mockResolvedValue({
@@ -396,7 +534,12 @@ describe("direct Instantly MCP email reads", () => {
       },
       expect.anything(),
     );
-    expect(f.callTool.mock.calls.map(([tool]) => tool)).toEqual(["get_crm_role", "list_emails"]);
+    expect(f.callTool.mock.calls.map(([tool]) => tool)).toEqual([
+      "get_crm_role",
+      "get_crm_role",
+      "list_emails",
+      "get_crm_role",
+    ]);
   });
   it.each([true, false])(
     "direct get_email requires exact id and current campaign (valid=%s)",
