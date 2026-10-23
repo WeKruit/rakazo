@@ -5792,8 +5792,8 @@ export function createRunExecutor(deps: ExecutorDeps) {
             name === "request_secret"
               ? 0
               : nextMutatingEffectOccurrence(replayEffectToolName, args);
-          // A retained booking read is valid only until a successful write to that
-          // exact source/booking. Keep prior receipts and derive a durable cache epoch.
+          // A retained booking read expires after a successful or possibly dispatched
+          // exact source/booking write. This cache epoch is not success/lineage proof.
           let calendarReadEpoch: string | undefined;
           const readRoute = connectorCall.route;
           if (
@@ -5815,7 +5815,7 @@ export function createRunExecutor(deps: ExecutorDeps) {
               const writes = await deps.prisma.externalEffect.findMany({
                 where: {
                   spaceId: run.spaceId,
-                  status: "completed",
+                  status: { in: ["completed", "executing", "uncertain"] },
                   run: { threadId: run.threadId, userId: run.userId },
                   OR: [
                     {
@@ -5877,9 +5877,9 @@ export function createRunExecutor(deps: ExecutorDeps) {
                   ],
                 },
                 orderBy: [{ updatedAt: "desc" }, { id: "desc" }],
-                select: { id: true, request: true, result: true },
+                select: { id: true, status: true, request: true, result: true },
               });
-              calendarReadEpoch = writes.find((write) => {
+              const relevantWrite = writes.find((write) => {
                 const details =
                   boundDirectApprovalDetails(write.request, CATALOG_APPROVAL_TOOL) ??
                   catalogApprovalDetails(write.request, CATALOG_APPROVAL_TOOL);
@@ -5899,18 +5899,21 @@ export function createRunExecutor(deps: ExecutorDeps) {
                     "add_booking_attendee",
                   ].includes(route.toolName) &&
                   requestArgs?.bookingUid === args.bookingUid &&
-                  mcpObject(write.result)?.status === "success" &&
-                  !(
-                    write.result &&
-                    typeof write.result === "object" &&
-                    !Array.isArray(write.result) &&
-                    (write.result.isError === true ||
-                      "error" in write.result ||
-                      write.result.uncertain === true)
-                  ) &&
-                  !(mcpObject(write.result)?.error || mcpObject(write.result)?.uncertain)
+                  (write.status === "executing" ||
+                    write.status === "uncertain" ||
+                    (mcpObject(write.result)?.status === "success" &&
+                      !(
+                        write.result &&
+                        typeof write.result === "object" &&
+                        !Array.isArray(write.result) &&
+                        (write.result.isError === true ||
+                          "error" in write.result ||
+                          write.result.uncertain === true)
+                      ) &&
+                      !(mcpObject(write.result)?.error || mcpObject(write.result)?.uncertain)))
                 );
-              })?.id;
+              });
+              if (relevantWrite) calendarReadEpoch = `${relevantWrite.id}:${relevantWrite.status}`;
             }
           }
           const effectKey =
