@@ -4,6 +4,7 @@ import type {
   AdapterContext,
   AgentRunRequest,
   AgentRuntimeEvent,
+  ConnectorCall,
   ConnectorProvider,
   MemorySnapshot,
   SemanticMemoryProvider,
@@ -17,7 +18,17 @@ import type { PrismaClient, ThreadEvents } from "@rakazo/db";
 import { answerRunInput, getRecruitingWorkspace } from "@rakazo/db";
 import { describe, expect, it, vi } from "vitest";
 import { runInstantlyWrite } from "../../../packages/adapters/src/instantly-native-writes.js";
+import { getRecruitingWorkspace as getPlanWorkspace } from "../../../packages/db/src/recruiting.js";
+import {
+  createRecruitingSchedulingPlan,
+  loadVerifiedRecruitingSchedulingPlan,
+} from "../../../packages/db/src/recruiting-scheduling.js";
 import { getRecruitingCorrespondence } from "./recruiting.js";
+
+vi.mock("../../../packages/db/src/recruiting.js", async (original) => ({
+  ...(await original<Record<string, unknown>>()),
+  getRecruitingWorkspace: vi.fn(),
+}));
 
 vi.mock("../../../packages/adapters/src/recruiting-context.js", async (original) => ({
   ...(await original<Record<string, unknown>>()),
@@ -51,6 +62,8 @@ type Effect = {
   status: string;
   request: unknown;
   result?: unknown;
+  createdAt?: Date;
+  updatedAt?: Date;
   reviewDecision?: string;
 };
 
@@ -146,22 +159,27 @@ function fixture(
           runId?: string;
           status?: string | { in: string[] };
           kind?: string;
+          createdAt?: { gte: Date };
         };
       } = {}) =>
-        (orderBy ? [...effects].reverse() : effects).filter((effect) => {
-          if (typeof where?.status === "string" && effect.status !== where.status) return false;
-          if (
-            where?.status &&
-            typeof where.status === "object" &&
-            !where.status.in.includes(effect.status)
-          )
-            return false;
-          if (where?.kind && effect.kind !== where.kind) return false;
-          if (where?.spaceId && effect.spaceId !== where.spaceId) return false;
-          if (where?.runId && effect.runId && effect.runId !== where.runId) return false;
-          if (where?.id && effect.id !== where.id) return false;
-          return true;
-        }),
+        (orderBy ? [...effects].reverse() : effects)
+          .filter((effect) => {
+            if (typeof where?.status === "string" && effect.status !== where.status) return false;
+            if (
+              where?.status &&
+              typeof where.status === "object" &&
+              !where.status.in.includes(effect.status)
+            )
+              return false;
+            if (where?.kind && effect.kind !== where.kind) return false;
+            if (where?.spaceId && effect.spaceId !== where.spaceId) return false;
+            if (where?.runId && effect.runId && effect.runId !== where.runId) return false;
+            if (where?.id && effect.id !== where.id) return false;
+            if (where?.createdAt && (!effect.createdAt || effect.createdAt < where.createdAt.gte))
+              return false;
+            return true;
+          })
+          .map((effect) => ({ ...effect, run: { ...run } })),
     ),
     findUnique: vi.fn(
       async ({ where }: { where: { id?: string; idempotencyKey?: string } }) =>
@@ -170,12 +188,19 @@ function fixture(
         ) ?? null,
     ),
     create: vi.fn(async ({ data }: { data: Omit<Effect, "id"> }) => {
-      const effect = { ...data, id: `effect-${effects.length + 1}` };
+      const effect = {
+        ...data,
+        id: `effect-${effects.length + 1}`,
+        createdAt: new Date(),
+        updatedAt: new Date(),
+      };
       effects.push(effect);
       return { ...effect };
     }),
     update: vi.fn(async ({ where, data }: { where: { id: string }; data: Partial<Effect> }) => {
-      Object.assign(effects.find((effect) => effect.id === where.id)!, data);
+      return Object.assign(effects.find((effect) => effect.id === where.id)!, data, {
+        updatedAt: new Date(),
+      });
     }),
     updateMany: vi.fn(
       async ({ where, data }: { where: { id: string; status: string }; data: Partial<Effect> }) => {
@@ -183,7 +208,7 @@ function fixture(
           (effect) => effect.id === where.id && effect.status === where.status,
         );
         if (!effect) return { count: 0 };
-        Object.assign(effect, data);
+        Object.assign(effect, data, { updatedAt: new Date() });
         return { count: 1 };
       },
     ),
@@ -407,7 +432,7 @@ function fixture(
           expect.objectContaining({ outcome: "failed", error: expectedError }),
         );
       } else {
-        expect(finalizeRun).not.toHaveBeenCalledWith(
+        expect(finalizeRun, JSON.stringify(results)).not.toHaveBeenCalledWith(
           expect.objectContaining({ outcome: "failed" }),
         );
       }
@@ -432,6 +457,13 @@ describe("linked offline scheduling receipts", () => {
     "reschedule_confirmation_rejected",
   ] as const)("links native approvals, receipts and Interview for %s", async (scenario) => {
     const f = fixture("linked-scheduling");
+    const usesPlan = [
+      "success",
+      "dst_first_0130",
+      "dst_second_0130",
+      "confirmation_uncertain",
+    ].includes(scenario);
+    let planId: string | undefined;
     const db = f.prisma as unknown as PrismaClient;
     const messages: Array<{
       id: string;
@@ -472,7 +504,7 @@ describe("linked offline scheduling receipts", () => {
           Object.assign(messages.find((message) => message.id === where.id)!, data),
       ),
     });
-    Object.assign(f.prisma.externalEffect, {
+    const effectReads = Object.assign(f.prisma.externalEffect, {
       findFirst: vi.fn(
         async ({ where }: { where: Record<string, unknown> }) =>
           f.effects.find((effect) =>
@@ -516,10 +548,16 @@ describe("linked offline scheduling receipts", () => {
         },
       ],
     };
-    Object.assign(f.prisma, {
-      botMcpServer: { findFirst: vi.fn(async () => ({ ...server.assignments[0], server })) },
+    const sourceStore = {
+      botMcpServer: {
+        findFirst: vi.fn(async (_input: { where: { serverId?: string } }) => ({
+          ...server.assignments[0]!,
+          server,
+        })),
+      },
       mcpServer: { findMany: vi.fn(async () => [server]) },
-    });
+    };
+    Object.assign(f.prisma, sourceStore);
     Object.assign(f.prisma.thread, { findFirst: vi.fn(async () => f.thread) });
     const mail = {
       name: "native_instantly_reply_to_email",
@@ -585,7 +623,102 @@ describe("linked offline scheduling receipts", () => {
     };
     // Exercise the real reply adapter against a synthetic provider, not a fictional
     // Gmail schema or a claim about live delivery.
+    const planActor = {
+      userId: f.runData.userId,
+      spaceId: f.runData.spaceId,
+      email: "owner@example.test",
+      isDeploymentOwner: false,
+    };
+    const originalRead = {
+      name: "original_email_read",
+      description: "Read exact original",
+      readOnly: true,
+      inputSchema: { type: "object", properties: { id: { type: "string" } } },
+      route: {
+        connectorId: "mcp",
+        resourceId: "mail-source",
+        resourceRevision: 2,
+        toolName: "get_email",
+      },
+    };
+    if (usesPlan) {
+      Object.assign(f.runData, {
+        initialRecruitingRoleRevisionId: "role-revision",
+        sourceMessageId: "source-message",
+      });
+      const mailSource = {
+        ...server,
+        id: "mail-source",
+        revision: 2,
+        endpoint: "https://mcp.instantly.ai/mcp",
+        transport: "streamable_http",
+        assignments: [{ botId: f.runData.botId, allowAllTools: true, allowedTools: [] }],
+      };
+      Object.assign(sourceStore.mcpServer, {
+        findFirst: vi.fn(async ({ where }: { where: { id: string } }) =>
+          where.id === server.id ? server : where.id === mailSource.id ? mailSource : null,
+        ),
+      });
+      sourceStore.botMcpServer.findFirst.mockImplementation(async ({ where }) => {
+        const chosen = where.serverId === mailSource.id ? mailSource : server;
+        return { ...chosen.assignments[0]!, server: chosen };
+      });
+      f.prisma.$queryRaw.mockResolvedValue([planActor]);
+      Object.assign(f.prisma, {
+        recruitingRole: { findFirst: vi.fn(async () => ({ id: "role-1", revision: 1 })) },
+        recruitingCandidate: { findUnique: vi.fn(async () => ({ candidateKey: recipient })) },
+      });
+      vi.mocked(getPlanWorkspace).mockResolvedValue({
+        role: {
+          id: "role-1",
+          revision: 1,
+          currentRevisionId: "role-revision",
+          title: "Synthetic role",
+        },
+        crmTarget: null,
+      } as never);
+      effectReads.findFirst.mockImplementation(async ({ where }) => {
+        const match = f.effects.find((effect) =>
+          Object.entries(where).every(
+            ([key, value]) => key === "run" || effect[key as keyof Effect] === value,
+          ),
+        );
+        return match ? { ...match, run: { ...f.runData } } : null;
+      });
+      f.connector.discoverTools.mockResolvedValue([
+        mail,
+        createBooking,
+        getBooking,
+        listBookings,
+        availability,
+        rescheduleBooking,
+        cancelBooking,
+        originalRead,
+      ]);
+      Object.assign(f.connector, {
+        resolveCall: vi.fn(async (call: ConnectorCall) => {
+          if (!call.args.arguments) return undefined;
+          const id = String(call.args.id);
+          const tool = id.endsWith(":create_booking")
+            ? createBooking
+            : {
+                ...mail,
+                route: {
+                  connectorId: "mcp",
+                  resourceId: mailSource.id,
+                  resourceRevision: mailSource.revision,
+                  toolName: "native_instantly_reply_to_email",
+                },
+              };
+          return {
+            tool,
+            call: { ...call, tool: tool.name, route: tool.route, args: call.args.arguments },
+          };
+        }),
+      });
+    }
     const confirmationId = "8a0a8e6e-4c2a-4d5f-9d4e-2d1f3c4b5a69";
+    let sentBody: Record<string, unknown> | undefined;
     const replyRest = vi.fn(async (method: string, path: string, body?: unknown) => {
       if (method === "GET" && path === `/emails/${originalEmail.id}`) return originalEmail;
       if (method === "GET" && path === `/emails/${confirmationId}`)
@@ -594,6 +727,12 @@ describe("linked offline scheduling receipts", () => {
           thread_id: originalEmail.thread_id,
           eaccount: originalEmail.eaccount,
           reply_to_uuid: originalEmail.id,
+          from_address_email: originalEmail.eaccount,
+          to_address_email_list: recipient,
+          ue_type: 3,
+          timestamp_email: new Date().toISOString(),
+          subject: sentBody?.subject,
+          body: sentBody?.body,
         };
       if (method === "GET" && path === "/accounts/recruiter%40example.test")
         return { email: originalEmail.eaccount };
@@ -602,6 +741,7 @@ describe("linked offline scheduling receipts", () => {
           reply_to_uuid: originalEmail.id,
           eaccount: originalEmail.eaccount,
         });
+        sentBody = body as Record<string, unknown>;
         return { id: confirmationId, thread_id: originalEmail.thread_id };
       }
       throw new Error(`Unexpected synthetic provider request: ${method} ${path}`);
@@ -641,7 +781,16 @@ describe("linked offline scheduling receipts", () => {
     let providerBooking: Record<string, unknown> | undefined;
     f.connector.execute.mockImplementation(async function* (call) {
       let data: unknown;
-      if (call.route?.toolName === "get_availability") {
+      if (["get_email", "native_instantly_get_email"].includes(call.route?.toolName ?? "")) {
+        data = await runInstantlyWrite(
+          {} as never,
+          replyRest as never,
+          {} as never,
+          "synthetic-mail-server",
+          "native_instantly_get_email",
+          call.args,
+        );
+      } else if (call.route?.toolName === "get_availability") {
         const changing = call.args.bookingUidToReschedule !== undefined;
         const slot = changing ? "2026-10-28T15:00:00Z" : selected;
         const slotEnd = new Date(Date.parse(slot) + 30 * 60_000).toISOString();
@@ -748,12 +897,49 @@ describe("linked offline scheduling receipts", () => {
       index: number,
       outcome: "completed" | "uncertain" = "completed",
     ) {
-      f.setCalls([{ name, args, executionId: `request-${index}` }]);
-      const count = f.connector.execute.mock.calls.length;
+      const wrapper =
+        planId && (name === createBooking.name || (name === mail.name && index === 3))
+          ? {
+              name: "recruiting_scheduling",
+              args:
+                name === createBooking.name
+                  ? { operation: "book", planId, arguments: args }
+                  : { operation: "confirm", planId, subject: args.subject, body: args.body },
+            }
+          : { name, args };
+      f.setCalls([{ ...wrapper, executionId: `request-${index}` }]);
+      let count = f.connector.execute.mock.calls.length;
       await f.run();
-      expect(f.connector.execute).toHaveBeenCalledTimes(count);
+      if (planId && name === mail.name && index === 3) {
+        expect(
+          f.connector.execute.mock.calls
+            .slice(count)
+            .every(([call]) =>
+              ["get_email", "native_instantly_get_email"].includes(call.route?.toolName ?? ""),
+            ),
+        ).toBe(true);
+        count = f.connector.execute.mock.calls.length;
+      } else expect(f.connector.execute).toHaveBeenCalledTimes(count);
       const card = messages.at(-1)!;
+      expect(
+        card.blocks.some((block) => block.kind === "ask" && block.status !== "answered"),
+        JSON.stringify(f.results.at(-1)),
+      ).toBe(true);
       const effect = f.effects.at(-1)!;
+      if (wrapper.name === "recruiting_scheduling") {
+        const ask = card.blocks.find((block) => block.kind === "ask");
+        expect(ask).toMatchObject({
+          approvalEffectId: effect.id,
+          approvalEvidenceHash: expect.stringMatching(/^[a-f0-9]{64}$/),
+        });
+        expect(ask?.kind === "ask" && ask.detail).toEqual(expect.stringContaining(timeZone));
+        expect(ask?.kind === "ask" && ask.detail).toEqual(
+          expect.stringContaining(interviewerTimeZone),
+        );
+        expect(ask?.kind === "ask" && ask.detail).toEqual(
+          expect.stringContaining(originalEmail.eaccount),
+        );
+      }
       const request = structuredClone(effect.request);
       const input = {
         spaceId: f.runData.spaceId,
@@ -779,18 +965,21 @@ describe("linked offline scheduling receipts", () => {
       // A runtime revision cannot replace the exact approved recipient/time/content.
       f.setCalls([
         {
-          name,
-          args: {
-            ...args,
-            to: "wrong@example.test",
-            start: slots[2],
-            ...(name === mail.name
-              ? {
-                  reply_to_uuid: "9a0a8e6e-4c2a-4d5f-9d4e-2d1f3c4b5a69",
-                  eaccount: "wrong@example.test",
-                }
-              : {}),
-          },
+          name: wrapper.name,
+          args:
+            wrapper.name === "recruiting_scheduling"
+              ? wrapper.args
+              : {
+                  ...args,
+                  to: "wrong@example.test",
+                  start: slots[2],
+                  ...(name === mail.name
+                    ? {
+                        reply_to_uuid: "9a0a8e6e-4c2a-4d5f-9d4e-2d1f3c4b5a69",
+                        eaccount: "wrong@example.test",
+                      }
+                    : {}),
+                },
           executionId: `resume-${index}`,
         },
       ]);
@@ -820,7 +1009,7 @@ describe("linked offline scheduling receipts", () => {
         return effect;
       }
       expect(effect).toMatchObject({ status: outcome, request });
-      f.setCalls([{ name, args, executionId: `retry-${index}` }]);
+      f.setCalls([{ ...wrapper, executionId: `retry-${index}` }]);
       await f.run();
       expect(f.connector.execute).toHaveBeenCalledTimes(count + dispatchCount);
       return effect;
@@ -830,7 +1019,7 @@ describe("linked offline scheduling receipts", () => {
       const count = f.connector.execute.mock.calls.length;
       f.setCalls([{ name: listBookings.name, args: listArgs, executionId: "same-list-read" }]);
       await f.run();
-      expect(f.connector.execute).toHaveBeenCalledTimes(count + 1);
+      expect(f.connector.execute, JSON.stringify(f.results)).toHaveBeenCalledTimes(count + 1);
       expect(f.connector.execute).toHaveBeenLastCalledWith(
         expect.objectContaining({
           route: expect.objectContaining({ toolName: "get_bookings" }),
@@ -864,6 +1053,111 @@ describe("linked offline scheduling receipts", () => {
       },
       1,
     );
+    if (usesPlan) {
+      f.setCalls([
+        {
+          name: originalRead.name,
+          args: { id: originalEmail.id },
+          executionId: "plan-original-read",
+        },
+      ]);
+      await f.run();
+      const mailRead = f.effects.at(-1)!;
+      f.setCalls([
+        {
+          name: availability.name,
+          args: {
+            eventTypeId: 42,
+            start: selected,
+            end,
+            timeZone: "UTC",
+            duration: 30,
+            format: "range",
+          },
+          executionId: "plan-availability",
+        },
+      ]);
+      await f.run();
+      const availabilityRead = f.effects.at(-1)!;
+      const input = {
+        threadId: f.runData.threadId,
+        roleId: "role-1",
+        expectedRoleRevision: 1,
+        originalEmail: {
+          threadId: f.runData.threadId,
+          roleId: "role-1",
+          emailId: "original",
+          sourceId: "mail-source",
+          providerMessageId: originalEmail.id,
+          providerThreadId: originalEmail.thread_id,
+          eaccount: originalEmail.eaccount,
+          savedRead: {
+            effectId: mailRead.id,
+            linkedRunId: f.runData.id,
+            messageId: "source-message",
+          },
+          sourceName: "Mailbox",
+          sender: recipient,
+          subject: originalEmail.subject,
+          date: null,
+          snippet: false,
+        },
+        candidate: {
+          candidateKey: recipient,
+          name: "Synthetic candidate",
+          email: recipient,
+          timeZone,
+        },
+        interviewer: {
+          name: "Synthetic interviewer",
+          email: "interviewer@example.test",
+          timeZone: interviewerTimeZone,
+        },
+        calendar: {
+          sourceId: server.id,
+          sourceRevision: server.revision,
+          eventTypeId: 42,
+          availabilityEffectId: availabilityRead.id,
+          start: selected,
+          end,
+          lengthInMinutes: 30,
+        },
+      };
+      await expect(
+        createRecruitingSchedulingPlan(db, planActor, {
+          ...input,
+          originalEmail: { ...input.originalEmail, eaccount: "wrong@example.test" },
+        }),
+      ).rejects.toThrow();
+      const plan = await createRecruitingSchedulingPlan(db, planActor, input);
+      planId = plan.id;
+      expect(plan.candidate.timeZone).not.toBe(plan.interviewer.timeZone);
+      const callsBefore = f.connector.execute.mock.calls.length;
+      const effectsBefore = f.effects.length;
+      f.setCalls([
+        {
+          name: "recruiting_scheduling",
+          args: {
+            operation: "book",
+            planId: "foreign-plan",
+            arguments: {
+              eventTypeId: 42,
+              start: selected,
+              lengthInMinutes: 30,
+              attendee: input.candidate,
+            },
+          },
+          executionId: "wrong-plan",
+        },
+      ]);
+      await f.run();
+      expect(f.results.at(-1)).toMatchObject({
+        code: "SCHEDULING_PLAN_UNAVAILABLE",
+        dispatched: false,
+      });
+      expect(f.connector.execute).toHaveBeenCalledTimes(callsBefore);
+      expect(f.effects).toHaveLength(effectsBefore);
+    }
     const booked = await approveAndExecute(
       createBooking.name,
       {
@@ -989,8 +1283,42 @@ describe("linked offline scheduling receipts", () => {
       3,
       scenario === "confirmation_uncertain" ? "uncertain" : "completed",
     );
+    const confirmationEffect = f.effects.at(-1)!;
+    if (planId && scenario !== "confirmation_uncertain") {
+      const beforeReadback = await loadVerifiedRecruitingSchedulingPlan(db, planActor, {
+        threadId: f.runData.threadId,
+        planId,
+      });
+      expect(beforeReadback.confirmationStatus).toBe("uncertain");
+      f.setCalls([
+        {
+          name: originalRead.name,
+          args: { id: confirmationId },
+          executionId: "confirmation-readback",
+        },
+      ]);
+      await f.run();
+    }
+    if (planId) {
+      const persisted = await loadVerifiedRecruitingSchedulingPlan(db, planActor, {
+        threadId: f.runData.threadId,
+        planId,
+      });
+      expect(persisted).toMatchObject({
+        id: planId,
+        bookingEffectId: booked.id,
+        confirmationEffectId: confirmationEffect.id,
+        bookingStatus: "completed",
+        confirmationStatus: scenario === "confirmation_uncertain" ? "uncertain" : "completed",
+      });
+      expect(persisted.originalEmail).toMatchObject({
+        providerMessageId: originalEmail.id,
+        providerThreadId: originalEmail.thread_id,
+        eaccount: originalEmail.eaccount,
+      });
+    }
     if (scenario !== "confirmation_uncertain" && scenario !== "confirmation_rejected") {
-      const sendReceipt = f.effects.at(-1)!.result as { content: Array<{ text: string }> };
+      const sendReceipt = confirmationEffect.result as { content: Array<{ text: string }> };
       const sent = JSON.parse(sendReceipt.content[0]!.text) as { id: string };
       const readback = await runInstantlyWrite(
         {} as never,
