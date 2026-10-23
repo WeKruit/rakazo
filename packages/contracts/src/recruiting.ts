@@ -1553,6 +1553,18 @@ const CrmBrowseOutbox = z.array(
     sentAt: IsoDate.nullable(),
   }),
 );
+const CrmMailItem = z.strictObject({
+  id: Id,
+  providerMessageId: Id,
+  threadId: z.string().nullable(),
+  direction: z.enum(["sent", "received", "manual"]).nullable(),
+  sender: z.string().nullable(),
+  recipients: z.array(z.string()),
+  subject: z.string().nullable(),
+  body: z.string().nullable(),
+  date: IsoDate.nullable(),
+  partial: z.boolean(),
+});
 const crmBrowsePinned = { serverId: Id, serverRevision: Revision, organizationId: z.uuid() };
 const crmBrowsePage = { limit: z.number().int().min(1).max(50).optional() };
 /** Live authorized CRM reads; these IDs are never local role, group, run or effect IDs. */
@@ -1574,6 +1586,8 @@ export const RecruitingCrmDataInputSchema = z.discriminatedUnion("operation", [
     ...crmBrowsePage,
     crmRoleId: z.uuid().optional(),
     query: z.string().max(500).optional(),
+    /** Exact stored CRM pipeline stage, e.g. "Interview". */
+    stage: z.string().trim().min(1).max(200).optional(),
     offset: z.number().int().min(0).max(1_000_000).optional(),
   }),
   z.object({
@@ -1604,6 +1618,13 @@ export const RecruitingCrmDataInputSchema = z.discriminatedUnion("operation", [
     candidateId: z.uuid(),
     crmRoleId: z.uuid().optional(),
     cursor: CrmBrowseCursor.optional(),
+  }),
+  z.object({
+    operation: z.literal("roleMail"),
+    ...crmBrowsePinned,
+    ...crmBrowsePage,
+    crmRoleId: z.uuid(),
+    offset: z.number().int().min(0).max(1_000_000).optional(),
   }),
 ]);
 export type RecruitingCrmDataInput = z.infer<typeof RecruitingCrmDataInputSchema>;
@@ -1712,21 +1733,20 @@ export const RecruitingCrmDataOutputSchema = z.discriminatedUnion("operation", [
     outbox: CrmBrowseOutbox,
     candidateId: z.uuid(),
     nativeCorrespondence: z.array(RecruitingNativeCorrespondenceSchema),
-    items: z.array(
-      z.strictObject({
-        id: Id,
-        providerMessageId: Id,
-        threadId: z.string().nullable(),
-        direction: z.enum(["sent", "received", "manual"]).nullable(),
-        sender: z.string().nullable(),
-        recipients: z.array(z.string()),
-        subject: z.string().nullable(),
-        body: z.string().nullable(),
-        date: IsoDate.nullable(),
-        partial: z.boolean(),
-      }),
-    ),
+    items: z.array(CrmMailItem),
     nextCursor: CrmBrowseCursor.nullable(),
+  }),
+  z.strictObject({
+    operation: z.literal("roleMail"),
+    source: CrmBrowseSource.extend({ organizationId: z.uuid() }),
+    checkedAt: IsoDate,
+    scope: z.literal("stored_role_correspondence"),
+    crmRoleId: z.uuid(),
+    /** False when the connected CRM has no role-wide mail read; callers read per candidate instead. */
+    supported: z.boolean(),
+    items: z.array(CrmMailItem.extend({ candidateId: z.uuid() })),
+    offset: z.number().int().nonnegative(),
+    nextOffset: z.number().int().nonnegative().nullable(),
   }),
 ]);
 export type RecruitingCrmDataOutput = z.infer<typeof RecruitingCrmDataOutputSchema>;
@@ -1789,26 +1809,32 @@ export const RecruitingCrmCandidatesReadSchema = z.object({
     }),
   ),
 });
+const CrmStoredEmail = z.object({
+  id: z.string().min(1),
+  organization_id: z.uuid(),
+  candidate_id: z.uuid().nullable(),
+  lead_email: z.string().nullable(),
+  thread_id: z.string().nullable(),
+  direction: z.enum(["sent", "received", "manual"]).nullable(),
+  timestamp_email: IsoDate.nullable(),
+  campaign_id: z.string().nullable(),
+  from_address: z.string().nullable(),
+  to_address: z.string().nullable(),
+  subject: z.string().nullable(),
+  body_text: z.string().nullable(),
+});
+export const RecruitingCrmRoleMailReadSchema = z.object({
+  organization_id: z.uuid(),
+  role_id: z.uuid(),
+  pagination: z.literal("offset"),
+  messages: z.array(CrmStoredEmail.extend({ candidate_id: z.uuid() })),
+  next_offset: z.number().int().nonnegative().nullable(),
+});
 export const RecruitingCrmMailReadSchema = z.object({
   organization_id: z.uuid(),
   candidate_id: z.uuid(),
   pagination: z.literal("offset"),
-  messages: z.array(
-    z.object({
-      id: z.string().min(1),
-      organization_id: z.uuid(),
-      candidate_id: z.uuid().nullable(),
-      lead_email: z.string().nullable(),
-      thread_id: z.string().nullable(),
-      direction: z.enum(["sent", "received", "manual"]).nullable(),
-      timestamp_email: IsoDate.nullable(),
-      campaign_id: z.string().nullable(),
-      from_address: z.string().nullable(),
-      to_address: z.string().nullable(),
-      subject: z.string().nullable(),
-      body_text: z.string().nullable(),
-    }),
-  ),
+  messages: z.array(CrmStoredEmail),
   next_cursor: CrmBrowseCursor.nullable(),
 });
 

@@ -39,6 +39,7 @@ import {
   RecruitingCrmMembershipRowsSchema,
   RecruitingCrmMessagesReadSchema,
   RecruitingCrmRoleCampaignsReadSchema,
+  RecruitingCrmRoleMailReadSchema,
   RecruitingCrmRoleReadSchema,
   RecruitingCrmRoleReferenceSchema,
   RecruitingNativeCorrespondenceSchema,
@@ -1640,6 +1641,21 @@ export const setRecruitingCandidateShortlist = (
   input: Parameters<typeof recruiting.setRecruitingCandidateShortlist>[2],
 ) => authenticated(() => recruiting.setRecruitingCandidateShortlist(prisma, actor, input));
 
+function mailItem(row: ReturnType<typeof RecruitingCrmMailReadSchema.parse>["messages"][number]) {
+  return {
+    id: row.id,
+    providerMessageId: row.id,
+    threadId: row.thread_id,
+    direction: row.direction,
+    sender: row.from_address,
+    recipients: row.to_address === null ? [] : [row.to_address],
+    subject: row.subject,
+    body: row.body_text,
+    date: row.timestamp_email,
+    partial: row.body_text === null,
+  };
+}
+
 /** Live read-only CRM view. The CRM remains the store; browsing creates no agent work. */
 type RecruitingCrmReadDeps = {
   prisma: PrismaClient;
@@ -1778,9 +1794,37 @@ export async function getRecruitingCrmData(
       if (!result.success) throw unavailable();
       return result.data;
     };
-    const read = async (server: Server, tool: string, args: Record<string, unknown>) => {
+    const missingTool = Symbol("missing tool");
+    // MCP servers report an unknown tool name as a call error; only that case is "not supported".
+    const unknownTool = (tool: string, text: string) =>
+      text.includes(tool) && /\b(not found|unknown tool)\b/i.test(text);
+    async function read(
+      server: Server,
+      tool: string,
+      args: Record<string, unknown>,
+    ): Promise<unknown>;
+    async function read(
+      server: Server,
+      tool: string,
+      args: Record<string, unknown>,
+      options: { allowMissing: true },
+    ): Promise<unknown | typeof missingTool>;
+    async function read(
+      server: Server,
+      tool: string,
+      args: Record<string, unknown>,
+      options?: { allowMissing: true },
+    ) {
+      if (options?.allowMissing) {
+        await actorFence();
+        const assignment = await deps.prisma.botMcpServer.findFirst({
+          where: { serverId: server.id, botId, userId: actor.userId, spaceId: actor.spaceId },
+        });
+        if (assignment && !allowed(assignment, tool)) return missingTool;
+      }
       await sourceFence(server, tool);
       const results: unknown[] = [];
+      const errors: string[] = [];
       let failed = false;
       try {
         for await (const event of deps.connectors.execute(
@@ -1798,7 +1842,10 @@ export async function getRecruitingCrmData(
           context,
         )) {
           if (event.type === "result") results.push(event.data);
-          if (event.type === "error") failed = true;
+          if (event.type === "error") {
+            failed = true;
+            errors.push(event.message);
+          }
         }
       } catch {
         failed = true;
@@ -1806,6 +1853,20 @@ export async function getRecruitingCrmData(
       await sourceFence(server, tool);
       const result = correspondenceRecord(results[0]);
       const payload = mcpObject(result);
+      if (options?.allowMissing) {
+        const content = result && Array.isArray(result.content) ? result.content : [];
+        const texts = [
+          ...errors,
+          ...(result?.isError === true
+            ? content.flatMap((part) =>
+                part && typeof part === "object" && "text" in part && typeof part.text === "string"
+                  ? [part.text]
+                  : [],
+              )
+            : []),
+        ];
+        if (texts.some((text) => unknownTool(tool, text))) return missingTool;
+      }
       if (
         failed ||
         results.length !== 1 ||
@@ -1817,7 +1878,7 @@ export async function getRecruitingCrmData(
       )
         throw unavailable();
       return payload.data;
-    };
+    }
     const membershipRows = async (server: Server) =>
       parse(RecruitingCrmMembershipRowsSchema, await read(server, "list_crm_memberships", {}));
     const where = {
@@ -2167,6 +2228,43 @@ export async function getRecruitingCrmData(
     }
     if (input.operation === "roles")
       return finish({ operation: input.operation, items: await roles() });
+    if (input.operation === "roleMail") {
+      const offset = input.offset ?? 0;
+      const limit = input.limit ?? 25;
+      const done = (supported: boolean, items: unknown[], nextOffset: number | null) =>
+        finish({
+          operation: input.operation,
+          scope: "stored_role_correspondence",
+          crmRoleId: input.crmRoleId,
+          supported,
+          items,
+          offset,
+          nextOffset,
+        });
+      const value = await read(
+        server,
+        "list_crm_role_correspondence",
+        { p_org: input.organizationId, p_role: input.crmRoleId, p_limit: limit, p_offset: offset },
+        { allowMissing: true },
+      );
+      if (value === missingTool) return done(false, [], null);
+      const page = parse(RecruitingCrmRoleMailReadSchema, value);
+      if (
+        page.organization_id !== input.organizationId ||
+        page.role_id !== input.crmRoleId ||
+        page.messages.length > limit ||
+        page.messages.some((row) => row.organization_id !== input.organizationId) ||
+        new Set(page.messages.map((row) => row.id)).size !== page.messages.length ||
+        (page.next_offset !== null && page.next_offset <= offset)
+      )
+        throw unavailable();
+      await sourceFence(server, "list_crm_role_correspondence");
+      return done(
+        true,
+        page.messages.map((row) => ({ ...mailItem(row), candidateId: row.candidate_id })),
+        page.next_offset,
+      );
+    }
     if (input.operation === "candidates") {
       const trim = (text: string) => text.replace(/^ +| +$/g, "");
       let selectedRole = null;
@@ -2216,6 +2314,7 @@ export async function getRecruitingCrmData(
           p_limit: limit,
           p_offset: offset,
           ...(input.query ? { p_q: input.query } : {}),
+          ...(input.stage ? { p_stage: input.stage } : {}),
           ...(selectedRole
             ? { p_client: selectedRole.clientLabel, p_role: selectedRole.roleLabel }
             : {}),
@@ -2223,6 +2322,7 @@ export async function getRecruitingCrmData(
       );
       if (
         page.rows.length > limit ||
+        (input.stage && page.rows.some((row) => row.stage !== input.stage)) ||
         (selectedRole &&
           page.rows.some(
             (row) =>
@@ -2301,18 +2401,7 @@ export async function getRecruitingCrmData(
       outbox: messages,
       candidateId: input.candidateId,
       nativeCorrespondence: native.items,
-      items: page.messages.map((row) => ({
-        id: row.id,
-        providerMessageId: row.id,
-        threadId: row.thread_id,
-        direction: row.direction,
-        sender: row.from_address,
-        recipients: row.to_address === null ? [] : [row.to_address],
-        subject: row.subject,
-        body: row.body_text,
-        date: row.timestamp_email,
-        partial: row.body_text === null,
-      })),
+      items: page.messages.map(mailItem),
       nextCursor: page.next_cursor,
     });
   });
