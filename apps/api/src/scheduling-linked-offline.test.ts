@@ -137,7 +137,9 @@ function fixture(
     findMany: vi.fn(
       async ({
         where,
+        orderBy,
       }: {
+        orderBy?: unknown;
         where?: {
           id?: string;
           spaceId?: string;
@@ -146,7 +148,7 @@ function fixture(
           kind?: string;
         };
       } = {}) =>
-        effects.filter((effect) => {
+        (orderBy ? [...effects].reverse() : effects).filter((effect) => {
           if (typeof where?.status === "string" && effect.status !== where.status) return false;
           if (
             where?.status &&
@@ -506,6 +508,7 @@ describe("linked offline scheduling receipts", () => {
           allowedTools: [
             "create_booking",
             "get_booking",
+            "get_bookings",
             "get_availability",
             "reschedule_booking",
             "cancel_booking",
@@ -538,6 +541,7 @@ describe("linked offline scheduling receipts", () => {
       },
     });
     const createBooking = cal("create_booking");
+    const listBookings = cal("get_bookings");
     const getBooking = {
       ...cal("get_booking"),
       inputSchema: { type: "object", properties: { bookingUid: { type: "string" } } },
@@ -563,6 +567,7 @@ describe("linked offline scheduling receipts", () => {
       mail,
       createBooking,
       getBooking,
+      listBookings,
       availability,
       rescheduleBooking,
       cancelBooking,
@@ -702,6 +707,12 @@ describe("linked offline scheduling receipts", () => {
           };
         } else providerBooking = { ...providerBooking, status: "cancelled" };
         data = { status: "success", data: providerBooking };
+      } else if (call.route?.toolName === "get_bookings") {
+        data = {
+          status: "success",
+          data: providerBooking ? [providerBooking] : [],
+          pagination: { hasNextPage: false, hasPreviousPage: false },
+        };
       } else if (call.route?.toolName === "get_booking") {
         expect(call.args).toEqual({ bookingUid: providerBooking!.uid });
         data = { status: "success", data: providerBooking };
@@ -814,6 +825,33 @@ describe("linked offline scheduling receipts", () => {
       expect(f.connector.execute).toHaveBeenCalledTimes(count + dispatchCount);
       return effect;
     }
+    const listArgs = {};
+    const readBookingList = async (expectedUid: string | null, expectedStatus?: string) => {
+      const count = f.connector.execute.mock.calls.length;
+      f.setCalls([{ name: listBookings.name, args: listArgs, executionId: "same-list-read" }]);
+      await f.run();
+      expect(f.connector.execute).toHaveBeenCalledTimes(count + 1);
+      expect(f.connector.execute).toHaveBeenLastCalledWith(
+        expect.objectContaining({
+          route: expect.objectContaining({ toolName: "get_bookings" }),
+          args: listArgs,
+        }),
+        expect.anything(),
+      );
+      const result = f.results.at(-1) as { content: Array<{ text: string }> };
+      const body = JSON.parse(result.content[0]!.text);
+      expect(body.data).toEqual(
+        expectedUid
+          ? [
+              expect.objectContaining({
+                uid: expectedUid,
+                ...(expectedStatus ? { status: expectedStatus } : {}),
+              }),
+            ]
+          : [],
+      );
+    };
+    await readBookingList(null);
     await approveAndExecute(
       mail.name,
       {
@@ -836,6 +874,7 @@ describe("linked offline scheduling receipts", () => {
       },
       2,
     );
+    if (scenario !== "booking_conflict") await readBookingList("synthetic-booking-42", "accepted");
     // Read the UID from the actual persisted executor receipt, not from a separately
     // hard-coded projection fixture or the requested booking arguments.
     vi.mocked(getRecruitingWorkspace).mockResolvedValue({ role: { id: "role-1" } } as never);
@@ -1093,6 +1132,7 @@ describe("linked offline scheduling receipts", () => {
         ),
       ).toHaveLength(1);
       if (scenario.endsWith("timeout")) {
+        await readBookingList(returned.uid, "cancelled");
         expect(changeEffect).toMatchObject({ status: "uncertain", result: { uncertain: true } });
         expect((await project()).events).toEqual(projected.events);
         const beforeReconciliation = f.connector.execute.mock.calls.length;
@@ -1160,6 +1200,7 @@ describe("linked offline scheduling receipts", () => {
           },
         ],
       });
+      await readBookingList(changedUid, cancelling ? "cancelled" : "accepted");
       const changedProjection = await project();
       expect(changedProjection.events).toContainEqual(
         expect.objectContaining({
