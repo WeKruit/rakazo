@@ -70,18 +70,20 @@ function MemberPicker({
 export function CreateGroupForm({
   bots,
   recruiting = false,
+  initialDescription = "",
   onCancel,
   onCreate,
 }: {
   bots: Bot[];
   recruiting?: boolean;
+  initialDescription?: string;
   onCancel: () => void;
   onCreate: (input: { name: string; botIds: string[]; description?: string }) => Promise<void>;
 }) {
   const { t } = useLingui();
   const nameId = useId();
   const [name, setName] = useState("");
-  const [description, setDescription] = useState("");
+  const [description, setDescription] = useState(initialDescription);
   const [selection, setSelected] = useState<string[]>([]);
   const selected = recruiting
     ? bots.filter((bot) => !bot.archivedAt).map((bot) => bot.id)

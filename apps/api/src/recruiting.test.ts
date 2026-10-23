@@ -4,7 +4,10 @@ import type { AdapterContext, ArtifactStore, ConnectorCall } from "@rakazo/adapt
 import { SecretStoreUnavailableError } from "@rakazo/adapter-kit";
 import { readInstantlyEmail } from "@rakazo/adapters";
 import type { Actor } from "@rakazo/contracts";
-import { RecruitingAssessmentSnapshotSchema } from "@rakazo/contracts";
+import {
+  RecruitingAssessmentSnapshotSchema,
+  RecruitingCrmCandidatesReadSchema,
+} from "@rakazo/contracts";
 import { catalogApprovalRequest } from "@rakazo/core";
 import { extractPdfText } from "@rakazo/core/node/pdf-text";
 import type * as DbExports from "@rakazo/db";
@@ -3593,6 +3596,7 @@ describe("live CRM browser reads", () => {
         "list_crm_memberships",
         "list_crm_roles",
         "get_crm_role",
+        "get_crm_candidate_review",
         "list_crm_candidates",
         "list_crm_candidate_correspondence",
       ],
@@ -3762,6 +3766,245 @@ describe("live CRM browser reads", () => {
         },
       ],
     });
+  });
+  const timestamp = "2026-10-22T00:00:00Z";
+  const tracking = (roleKey: string) => ({
+    role_key: roleKey,
+    client_label: "Actual client",
+    role_label: roleKey,
+    high_signal: true,
+    workflow_status: null,
+    high_signal_at: timestamp,
+    status_changed_at: null,
+    updated_at: timestamp,
+  });
+  const campaign = {
+    id: "original-campaign",
+    name: "Saved campaign",
+    status: 2,
+    role_spec_id: roleId,
+    client_id: clientId,
+    synced_at: timestamp,
+  };
+  const pinned = { serverId: "crm", serverRevision: 3, organizationId: org };
+  const details = () => ({
+    organization_id: org,
+    candidate_id: candidateId,
+    review: null,
+    role_tracking: [{ candidate_id: candidateId, ...tracking("role-a") }],
+    role_interests: ["manual", "ai", "instantly"].map((source) => ({
+      role_key: source,
+      client_label: "Actual client",
+      role_label: source,
+      interest: "interested",
+      source,
+    })),
+    campaign_associations: {
+      lead_campaigns: [
+        { lead_id: "original-lead", campaign_id: campaign.id, campaign },
+        { lead_id: "no-campaign-lead", campaign_id: null, campaign: null },
+      ],
+      pipeline_campaign: null,
+      pagination: "offset",
+      offset: 0,
+      next_offset: 2,
+    },
+  });
+  it("preserves organization Important candidate-role rows and the true row total", async () => {
+    const f = browserFixture();
+    const row = RecruitingCrmCandidatesReadSchema.parse(f.results.list_crm_candidates).rows[0]!;
+    f.results.list_crm_candidates = {
+      total: 5,
+      rows: ["role-a", "role-b"].map((roleKey) => ({
+        ...row,
+        role_label: roleKey,
+        role_tracking: [tracking(roleKey)],
+      })),
+    };
+    const result = await api.getRecruitingCrmData(f.deps, actor, target, {
+      operation: "important",
+      ...pinned,
+      limit: 2,
+      status: "high_signal",
+    });
+    expect(result).toMatchObject({
+      operation: "important",
+      scope: "organization_candidate_roles",
+      total: 5,
+      nextOffset: 2,
+      items: [
+        { candidateId, roleKey: "role-a" },
+        { candidateId, roleKey: "role-b" },
+      ],
+    });
+    expect(f.execute.mock.calls.at(-1)?.[0].args).toEqual({
+      p_view: "important",
+      p_org: org,
+      p_status: "high_signal",
+      p_limit: 2,
+      p_offset: 0,
+    });
+  });
+  it("rejects duplicate Important candidate-role keys while permitting one candidate in different roles", async () => {
+    const f = browserFixture();
+    const row = RecruitingCrmCandidatesReadSchema.parse(f.results.list_crm_candidates).rows[0]!;
+    const duplicate = { ...row, role_label: "role-a", role_tracking: [tracking("role-a")] };
+    f.results.list_crm_candidates = { total: 2, rows: [duplicate, duplicate] };
+    await expect(
+      api.getRecruitingCrmData(f.deps, actor, target, { operation: "important", ...pinned }),
+    ).rejects.toMatchObject({ code: "SERVICE_UNAVAILABLE" });
+  });
+  it("reads source-labeled candidate details without fabricating a missing pipeline or campaign", async () => {
+    const f = browserFixture("personal-oauth-reference");
+    f.results.get_crm_candidate_review = details();
+    const result = await api.getRecruitingCrmData(f.deps, actor, target, {
+      operation: "candidateDetails",
+      ...pinned,
+      candidateId,
+      limit: 2,
+    });
+    expect(result).toMatchObject({
+      operation: "candidateDetails",
+      candidateId,
+      review: null,
+      roleInterests: [{ source: "manual" }, { source: "ai" }, { source: "instantly" }],
+      campaignAssociations: {
+        leadCampaigns: [
+          { campaignId: campaign.id, campaign: { status: 2 } },
+          { campaignId: null, campaign: null },
+        ],
+        pipelineCampaign: null,
+        nextOffset: 2,
+      },
+    });
+    expect(f.execute.mock.calls.at(-1)?.[0].args).toEqual({
+      p_view: "details",
+      p_org: org,
+      p_candidate: candidateId,
+      p_campaign_limit: 2,
+      p_campaign_offset: 0,
+    });
+  });
+  it("preserves actual internal review notes and pipeline campaign metadata", async () => {
+    const f = browserFixture();
+    f.results.get_crm_candidate_review = {
+      ...details(),
+      review: {
+        id: clientId,
+        organization_id: org,
+        candidate_id: candidateId,
+        role_spec_id: roleId,
+        stage: "Interview",
+        reviewed: true,
+        review_result: "approved",
+        notes: "Stored internal note\nOriginal second line",
+        updated_at: timestamp,
+        candidate_full_name: "Stored person",
+        canonical_role_title: "Actual role",
+      },
+      campaign_associations: { ...details().campaign_associations, pipeline_campaign: campaign },
+    };
+    await expect(
+      api.getRecruitingCrmData(f.deps, actor, target, {
+        operation: "candidateDetails",
+        ...pinned,
+        candidateId,
+        limit: 2,
+      }),
+    ).resolves.toMatchObject({
+      review: {
+        result: "approved",
+        notes: "Stored internal note\nOriginal second line",
+        candidateName: "Stored person",
+        roleTitle: "Actual role",
+        crmRoleId: roleId,
+      },
+      campaignAssociations: {
+        pipelineCampaign: { id: campaign.id, status: 2, crmRoleId: roleId, clientId },
+      },
+    });
+  });
+  it("reads the exact role's stored campaign associations and raw status without sequence steps", async () => {
+    const f = browserFixture();
+    f.results.get_crm_role = {
+      organization_id: org,
+      role_spec_id: roleId,
+      campaigns: [{ id: campaign.id, name: campaign.name, status: null, synced_at: timestamp }],
+      pagination: "offset",
+      offset: 30,
+      next_offset: null,
+    };
+    const result = await api.getRecruitingCrmData(f.deps, actor, target, {
+      operation: "roleCampaigns",
+      ...pinned,
+      crmRoleId: roleId,
+      offset: 30,
+    });
+    expect(result).toMatchObject({
+      operation: "roleCampaigns",
+      scope: "stored_role_campaigns",
+      crmRoleId: roleId,
+      offset: 30,
+      nextOffset: null,
+      items: [{ id: campaign.id, status: null }],
+    });
+    expect(result).not.toHaveProperty("steps");
+    expect(f.execute.mock.calls.at(-1)?.[0].args).toEqual({
+      p_view: "campaigns",
+      p_org: org,
+      p_role: roleId,
+      p_limit: 25,
+      p_offset: 30,
+    });
+  });
+  it.each([
+    "review-candidate",
+    "tracking-candidate",
+    "campaign-identity",
+    "campaign-cursor",
+    "role-identity",
+  ])("rejects incorrect details or campaign %s", async (boundary) => {
+    const f = browserFixture();
+    const data = details();
+    if (boundary === "review-candidate")
+      Object.assign(data, {
+        review: {
+          id: clientId,
+          organization_id: org,
+          candidate_id: roleId,
+          role_spec_id: roleId,
+          stage: "Interview",
+          reviewed: true,
+          review_result: "approved",
+          notes: "Stored note",
+          updated_at: timestamp,
+          candidate_full_name: "Stored person",
+          canonical_role_title: "Actual role",
+        },
+      });
+    if (boundary === "tracking-candidate") data.role_tracking[0]!.candidate_id = roleId;
+    if (boundary === "campaign-identity")
+      data.campaign_associations.lead_campaigns[0]!.campaign_id = "other-campaign";
+    if (boundary === "campaign-cursor") data.campaign_associations.next_offset = 0;
+    f.results.get_crm_candidate_review = data;
+    f.results.get_crm_role = {
+      organization_id: org,
+      role_spec_id: candidateId,
+      campaigns: [],
+      pagination: "offset",
+      offset: 0,
+      next_offset: null,
+    };
+    await expect(
+      api.getRecruitingCrmData(
+        f.deps,
+        actor,
+        target,
+        boundary === "role-identity"
+          ? { operation: "roleCampaigns", ...pinned, crmRoleId: roleId }
+          : { operation: "candidateDetails", ...pinned, candidateId, limit: 2 },
+      ),
+    ).rejects.toThrow();
   });
   it("uses the existing current-user personal OAuth source for every CRM browse operation", async () => {
     const f = browserFixture("existing-personal-oauth-reference");

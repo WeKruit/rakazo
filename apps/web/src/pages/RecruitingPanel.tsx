@@ -121,8 +121,8 @@ type Props = {
     selection: CrmBrowseSelection;
     view: RecruitingWorkspaceView;
     candidateId?: string;
-    onSelectCandidate: (id: string) => void;
-    onStartRecruiting?: () => void;
+    onSelectCandidate: (id: string, view?: RecruitingWorkspaceView) => void;
+    onStartRecruiting?: (description: string) => void;
   };
   threadId: string;
   botId?: string;
@@ -2298,7 +2298,183 @@ function CrmRecruitingPanel({
   const mailPage = currentMail?.data;
   const people = page?.items ?? [];
   const selectedPerson = people.find((person) => person.candidateId === browse.candidateId);
-  const supported = ["results", "contacts", "inbox", "brief"].includes(browse.view);
+  const importantView = ["shortlist", "interview", "workflow"].includes(browse.view);
+  type ImportantStatus = NonNullable<
+    Extract<RecruitingCrmDataInput, { operation: "important" }>["status"]
+  >;
+  const workflowLabels = {
+    waiting_resume: t`Waiting for resume`,
+    resume_ready: t`Resume ready`,
+    introduced: t`Introduced`,
+    needs_scheduling: t`Needs scheduling`,
+    scheduled: t`Scheduled`,
+    awaiting_feedback: t`Awaiting feedback`,
+  };
+  const [statusSelection, setStatusSelection] = useState<{
+    view: RecruitingWorkspaceView;
+    status: ImportantStatus | "";
+  }>();
+  const importantStatus =
+    statusSelection?.view === browse.view
+      ? statusSelection.status
+      : browse.view === "shortlist"
+        ? "high_signal"
+        : browse.view === "interview"
+          ? "needs_scheduling"
+          : "";
+  const [sectionPage, setSectionPage] = useState<{ key: string; offset: number }>();
+  const sectionScope = JSON.stringify([browse.view, importantStatus]);
+  const sectionOffset = sectionPage?.key === sectionScope ? sectionPage.offset : 0;
+  const pinned = {
+    serverId: browse.selection.serverId,
+    serverRevision: browse.selection.serverRevision,
+    organizationId: browse.selection.organizationId,
+  };
+  const sectionInput = importantView
+    ? {
+        ...target,
+        ...pinned,
+        operation: "important" as const,
+        ...(importantStatus ? { status: importantStatus } : {}),
+        limit: 30,
+        offset: sectionOffset,
+      }
+    : browse.view === "sequence" && browse.selection.crmRoleId
+      ? {
+          ...target,
+          ...pinned,
+          operation: "roleCampaigns" as const,
+          crmRoleId: browse.selection.crmRoleId,
+          limit: 30,
+          offset: sectionOffset,
+        }
+      : undefined;
+  const sectionKey = JSON.stringify([readCacheScope, sectionInput, refreshSignal, refresh]);
+  type SectionPage = Extract<RecruitingCrmDataOutput, { operation: "important" | "roleCampaigns" }>;
+  const [sectionRead, setSectionRead] = useState<{
+    key: string;
+    data?: SectionPage;
+    loading?: boolean;
+    failed?: boolean;
+  }>();
+  useEffect(() => {
+    if (!sectionInput) return;
+    let cancelled = false;
+    const epoch = readCache?.epoch;
+    const savedKey = readCacheScope
+      ? `${readCacheScope}:crm:${JSON.stringify(sectionInput)}`
+      : undefined;
+    setSectionRead({
+      key: sectionKey,
+      loading: true,
+      data: savedKey ? (readCache?.entries.get(savedKey) as SectionPage | undefined) : undefined,
+    });
+    void rpc.recruiting
+      .crmData(sectionInput)
+      .then((value) => {
+        if (cancelled || (readCache && epoch !== readCache.epoch)) return;
+        if (
+          (value.operation !== "important" && value.operation !== "roleCampaigns") ||
+          value.operation !== sectionInput.operation ||
+          value.source.serverId !== pinned.serverId ||
+          value.source.serverRevision !== pinned.serverRevision ||
+          value.source.organizationId !== pinned.organizationId ||
+          (value.operation === "roleCampaigns" && value.crmRoleId !== browse.selection.crmRoleId)
+        )
+          throw new Error("CRM scope changed");
+        rememberRecruitingRead(readCache, savedKey, value, epoch);
+        setSectionRead({ key: sectionKey, data: value });
+      })
+      .catch((error) => {
+        if (cancelled) return;
+        if (
+          error instanceof ORPCError &&
+          ["UNAUTHORIZED", "FORBIDDEN", "NOT_FOUND"].includes(error.code)
+        )
+          clearRecruitingReads(readCache, readCacheScope);
+        setSectionRead({ key: sectionKey, failed: true });
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [sectionKey, readCache, readCacheScope]);
+  const section = sectionRead?.key === sectionKey ? sectionRead : undefined;
+  const important = section?.data?.operation === "important" ? section.data : undefined;
+  const campaigns = section?.data?.operation === "roleCampaigns" ? section.data : undefined;
+  const [detailsPage, setDetailsPage] = useState<{ candidateId: string; offset: number }>();
+  const detailsOffset =
+    detailsPage?.candidateId === browse.candidateId ? (detailsPage?.offset ?? 0) : 0;
+  const detailsInput =
+    browse.candidateId && ["feedback", "sequence"].includes(browse.view)
+      ? {
+          ...target,
+          ...pinned,
+          operation: "candidateDetails" as const,
+          candidateId: browse.candidateId,
+          limit: 30,
+          offset: detailsOffset,
+        }
+      : undefined;
+  const detailsKey = JSON.stringify([readCacheScope, detailsInput, refreshSignal, refresh]);
+  type DetailsPage = Extract<RecruitingCrmDataOutput, { operation: "candidateDetails" }>;
+  const [detailsRead, setDetailsRead] = useState<{
+    key: string;
+    data?: DetailsPage;
+    loading?: boolean;
+    failed?: boolean;
+  }>();
+  useEffect(() => {
+    if (!detailsInput) return;
+    let cancelled = false;
+    const epoch = readCache?.epoch;
+    const savedKey = readCacheScope
+      ? `${readCacheScope}:crm:${JSON.stringify(detailsInput)}`
+      : undefined;
+    setDetailsRead({
+      key: detailsKey,
+      loading: true,
+      data: savedKey ? (readCache?.entries.get(savedKey) as DetailsPage | undefined) : undefined,
+    });
+    void rpc.recruiting
+      .crmData(detailsInput)
+      .then((value) => {
+        if (cancelled || (readCache && epoch !== readCache.epoch)) return;
+        if (
+          value.operation !== "candidateDetails" ||
+          value.source.serverId !== pinned.serverId ||
+          value.source.serverRevision !== pinned.serverRevision ||
+          value.source.organizationId !== pinned.organizationId ||
+          value.candidateId !== browse.candidateId
+        )
+          throw new Error("CRM scope changed");
+        rememberRecruitingRead(readCache, savedKey, value, epoch);
+        setDetailsRead({ key: detailsKey, data: value });
+      })
+      .catch((error) => {
+        if (cancelled) return;
+        if (
+          error instanceof ORPCError &&
+          ["UNAUTHORIZED", "FORBIDDEN", "NOT_FOUND"].includes(error.code)
+        )
+          clearRecruitingReads(readCache, readCacheScope);
+        setDetailsRead({ key: detailsKey, failed: true });
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [detailsKey, readCache, readCacheScope]);
+  const currentDetails = detailsRead?.key === detailsKey ? detailsRead : undefined;
+  const details = currentDetails?.data;
+  const selectedRole = page?.selectedRole;
+  const initialDescription = selectedRole
+    ? [
+        `${selectedRole.roleLabel} · ${selectedRole.clientLabel}`,
+        selectedRole.jdText,
+        selectedRole.jdUrl && /^https?:\/\//i.test(selectedRole.jdUrl) ? selectedRole.jdUrl : null,
+      ]
+        .filter(Boolean)
+        .join("\n\n")
+    : "";
   return (
     <div className="hire-standard-view">
       <header className="hire-section-header">
@@ -2313,7 +2489,10 @@ function CrmRecruitingPanel({
           <Trans>Refresh</Trans>
         </Button>
         {browse.onStartRecruiting ? (
-          <Button onClick={browse.onStartRecruiting}>
+          <Button
+            disabled={!initialDescription || read?.loading || read?.failed}
+            onClick={() => browse.onStartRecruiting?.(initialDescription)}
+          >
             <Trans>Start recruiting</Trans>
           </Button>
         ) : null}
@@ -2328,7 +2507,7 @@ function CrmRecruitingPanel({
           <Trans>Could not load CRM records. Try refreshing.</Trans>
         </p>
       ) : null}
-      {page?.scope === "legacy_role_labels" ? (
+      {page?.scope === "legacy_role_labels" && !importantView && browse.view !== "sequence" ? (
         <p className="mb-4 text-sm text-muted-foreground">
           <Trans>
             Historical records matched to this client and role. These are not new search results or
@@ -2336,25 +2515,144 @@ function CrmRecruitingPanel({
           </Trans>
         </p>
       ) : null}
-      {!supported ? (
-        <section className="hire-empty">
-          <h2>
-            {browse.view === "shortlist"
-              ? t`Shortlist`
-              : browse.view === "feedback"
-                ? t`Client feedback`
-                : browse.view === "sequence"
-                  ? t`Sequence`
-                  : browse.view === "interview"
-                    ? t`Interview`
-                    : t`Recruiting workflow`}
+      {importantView ? (
+        <section className="space-y-4">
+          <h2 className="font-semibold">
+            {browse.view === "interview" ? t`Interview workflow` : t`Important`}
           </h2>
-          <p>
-            <Trans>
-              This section has not loaded corresponding CRM records. Start a recruiting conversation
-              to continue this work.
-            </Trans>
+          <p className="text-sm text-muted-foreground">
+            <Trans>Organization-wide candidate-role records.</Trans>
           </p>
+          <NativeSelect
+            aria-label={t`Workflow filter`}
+            value={importantStatus}
+            onChange={(event) => {
+              setStatusSelection({
+                view: browse.view,
+                status: event.target.value as ImportantStatus | "",
+              });
+            }}
+          >
+            {browse.view !== "interview" ? (
+              <NativeSelectOption value="">
+                <Trans>All Important records</Trans>
+              </NativeSelectOption>
+            ) : null}
+            {browse.view !== "interview" ? (
+              <NativeSelectOption value="high_signal">
+                <Trans>High signal</Trans>
+              </NativeSelectOption>
+            ) : null}
+            {Object.entries(workflowLabels)
+              .filter(
+                ([status]) =>
+                  browse.view !== "interview" ||
+                  ["needs_scheduling", "scheduled", "awaiting_feedback"].includes(status),
+              )
+              .map(([status, label]) => (
+                <NativeSelectOption key={status} value={status}>
+                  {label}
+                </NativeSelectOption>
+              ))}
+          </NativeSelect>
+          {!section || section.loading ? (
+            <p role="status">
+              <Trans>Loading CRM records…</Trans>
+            </p>
+          ) : null}
+          {section?.failed ? (
+            <p role="alert">
+              <Trans>Could not load CRM records. Try refreshing.</Trans>
+            </p>
+          ) : null}
+          {important ? (
+            <>
+              <p>
+                <Plural
+                  value={important.total}
+                  _1="# candidate-role record"
+                  other="# candidate-role records"
+                />
+              </p>
+              <div className="hire-table-wrap overflow-x-auto">
+                <table className="hire-table w-full text-left text-sm">
+                  <thead>
+                    <tr>
+                      {[
+                        t`Candidate`,
+                        t`Client`,
+                        t`Role`,
+                        t`High signal`,
+                        t`Workflow status`,
+                        t`Updated`,
+                        t`Messages`,
+                      ].map((label) => (
+                        <th key={label} scope="col">
+                          {label}
+                        </th>
+                      ))}
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {important.items.map((person) => (
+                      <tr key={JSON.stringify([person.candidateId, person.roleKey])}>
+                        <th scope="row">{person.name}</th>
+                        <td>{person.clientLabel}</td>
+                        <td>{person.roleLabel}</td>
+                        <td>{person.highSignal ? t`High signal` : "—"}</td>
+                        <td>
+                          {person.workflowStatus ? workflowLabels[person.workflowStatus] : "—"}
+                        </td>
+                        <td>
+                          {new Date(person.statusChangedAt ?? person.updatedAt).toLocaleString()}
+                        </td>
+                        <td>
+                          <Button
+                            variant="link"
+                            onClick={() => browse.onSelectCandidate(person.candidateId)}
+                          >
+                            <Trans>View messages</Trans>
+                          </Button>
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+              {!important.items.length ? (
+                <p>
+                  <Trans>No Important records matched this filter.</Trans>
+                </p>
+              ) : null}
+            </>
+          ) : null}
+          <div className="flex gap-2">
+            {sectionOffset > 0 ? (
+              <Button
+                variant="outline"
+                onClick={() =>
+                  setSectionPage({ key: sectionScope, offset: Math.max(0, sectionOffset - 30) })
+                }
+              >
+                <Trans>Previous</Trans>
+              </Button>
+            ) : null}
+            {important?.nextOffset != null ? (
+              <Button
+                variant="outline"
+                onClick={() => setSectionPage({ key: sectionScope, offset: important.nextOffset! })}
+              >
+                <Trans>Next</Trans>
+              </Button>
+            ) : null}
+          </div>
+          {browse.view === "interview" ? (
+            <p className="text-sm text-muted-foreground">
+              <Trans>
+                Calendar booking details are not included in these manual CRM workflow records.
+              </Trans>
+            </p>
+          ) : null}
         </section>
       ) : browse.view === "brief" ? (
         <section className="space-y-4">
@@ -2378,6 +2676,89 @@ function CrmRecruitingPanel({
         </section>
       ) : (
         <>
+          {browse.view === "sequence" ? (
+            <section className="mb-6 space-y-4">
+              <h2 className="font-semibold">
+                <Trans>Role campaigns</Trans>
+              </h2>
+              {!browse.selection.crmRoleId ? (
+                <p>
+                  <Trans>Select a CRM role to read its campaign associations.</Trans>
+                </p>
+              ) : !section || section.loading ? (
+                <p role="status">
+                  <Trans>Loading CRM records…</Trans>
+                </p>
+              ) : null}
+              {section?.failed ? (
+                <p role="alert">
+                  <Trans>Could not load CRM records. Try refreshing.</Trans>
+                </p>
+              ) : null}
+              {campaigns ? (
+                <>
+                  <div className="hire-table-wrap overflow-x-auto">
+                    <table className="hire-table w-full text-left text-sm">
+                      <thead>
+                        <tr>
+                          {[t`Campaign`, t`Provider status code`, t`Last synced`].map((label) => (
+                            <th scope="col" key={label}>
+                              {label}
+                            </th>
+                          ))}
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {campaigns.items.map((campaign) => (
+                          <tr key={campaign.id}>
+                            <th scope="row">{campaign.name}</th>
+                            <td>{campaign.status ?? "—"}</td>
+                            <td>{new Date(campaign.syncedAt).toLocaleString()}</td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                  {!campaigns.items.length ? (
+                    <p>
+                      <Trans>No stored campaign associations were returned for this role.</Trans>
+                    </p>
+                  ) : null}
+                  <div className="flex gap-2">
+                    {sectionOffset > 0 ? (
+                      <Button
+                        variant="outline"
+                        onClick={() =>
+                          setSectionPage({
+                            key: sectionScope,
+                            offset: Math.max(0, sectionOffset - 30),
+                          })
+                        }
+                      >
+                        <Trans>Previous campaigns</Trans>
+                      </Button>
+                    ) : null}
+                    {campaigns.nextOffset != null ? (
+                      <Button
+                        variant="outline"
+                        onClick={() =>
+                          setSectionPage({ key: sectionScope, offset: campaigns.nextOffset! })
+                        }
+                      >
+                        <Trans>Next campaigns</Trans>
+                      </Button>
+                    ) : null}
+                  </div>
+                </>
+              ) : null}
+              <p className="text-sm text-muted-foreground">
+                <Trans>
+                  Sequence steps and delivery status are not included in these stored campaign
+                  associations.
+                </Trans>
+              </p>
+            </section>
+          ) : null}
           <form
             className="mb-4 flex gap-2"
             onSubmit={(event) => {
@@ -2412,7 +2793,9 @@ function CrmRecruitingPanel({
                     t`Stage`,
                     t`Contact status`,
                     t`Outreach status`,
-                    t`Messages`,
+                    browse.view === "feedback" || browse.view === "sequence"
+                      ? t`Details`
+                      : t`Messages`,
                   ].map((label) => (
                     <th key={label} scope="col">
                       {label}
@@ -2448,9 +2831,17 @@ function CrmRecruitingPanel({
                     <td>
                       <Button
                         variant="link"
-                        onClick={() => browse.onSelectCandidate(person.candidateId)}
+                        onClick={() =>
+                          browse.view === "feedback" || browse.view === "sequence"
+                            ? browse.onSelectCandidate(person.candidateId, browse.view)
+                            : browse.onSelectCandidate(person.candidateId)
+                        }
                       >
-                        <Trans>View messages</Trans>
+                        {browse.view === "feedback" || browse.view === "sequence" ? (
+                          <Trans>View details</Trans>
+                        ) : (
+                          <Trans>View messages</Trans>
+                        )}
                       </Button>
                     </td>
                   </tr>
@@ -2475,6 +2866,168 @@ function CrmRecruitingPanel({
               </Button>
             ) : null}
           </div>
+          {browse.view === "feedback" || browse.view === "sequence" ? (
+            <section className="my-6 space-y-4">
+              <h2 className="font-semibold">
+                {selectedPerson?.name ?? details?.review?.candidateName ?? t`Candidate details`}
+              </h2>
+              {!browse.candidateId ? (
+                <p>
+                  <Trans>Select a contact to read their stored details.</Trans>
+                </p>
+              ) : !currentDetails || currentDetails.loading ? (
+                <p role="status">
+                  <Trans>Loading CRM records…</Trans>
+                </p>
+              ) : null}
+              {currentDetails?.failed ? (
+                <p role="alert">
+                  <Trans>Could not load CRM records. Try refreshing.</Trans>
+                </p>
+              ) : null}
+              {details && browse.view === "feedback" ? (
+                <>
+                  <h3 className="font-semibold">
+                    <Trans>Role interest</Trans>
+                  </h3>
+                  {details.roleInterests.length ? (
+                    <div className="hire-table-wrap overflow-x-auto">
+                      <table className="hire-table w-full text-left text-sm">
+                        <thead>
+                          <tr>
+                            {[t`Client`, t`Role`, t`Interest`, t`Source`].map((label) => (
+                              <th scope="col" key={label}>
+                                {label}
+                              </th>
+                            ))}
+                          </tr>
+                        </thead>
+                        <tbody>
+                          {details.roleInterests.map((interest) => (
+                            <tr key={interest.roleKey}>
+                              <th scope="row">{interest.clientLabel}</th>
+                              <td>{interest.roleLabel}</td>
+                              <td>
+                                {interest.interest === "interested"
+                                  ? t`Interested`
+                                  : interest.interest === "declined"
+                                    ? t`Declined`
+                                    : t`Unknown`}
+                              </td>
+                              <td>
+                                {interest.source === "manual"
+                                  ? t`Human-entered`
+                                  : interest.source === "ai"
+                                    ? t`AI interpretation`
+                                    : interest.source === "instantly"
+                                      ? "Instantly"
+                                      : t`Unknown`}
+                              </td>
+                            </tr>
+                          ))}
+                        </tbody>
+                      </table>
+                    </div>
+                  ) : (
+                    <p>
+                      <Trans>No stored role-interest records were returned.</Trans>
+                    </p>
+                  )}
+                  <h3 className="font-semibold">
+                    <Trans>Internal review</Trans>
+                  </h3>
+                  {details.review ? (
+                    <div className="space-y-2">
+                      {details.review.roleTitle ? <p>{details.review.roleTitle}</p> : null}
+                      <p>
+                        {details.review.stage ?? "—"} ·{" "}
+                        {details.review.reviewed === true
+                          ? t`Reviewed`
+                          : details.review.reviewed === false
+                            ? t`Not reviewed`
+                            : t`Review status unknown`}
+                      </p>
+                      {details.review.result ? (
+                        <p>
+                          {details.review.result === "approved"
+                            ? t`Approved in internal review`
+                            : details.review.result === "rejected"
+                              ? t`Rejected in internal review`
+                              : t`Pooled in internal review`}
+                        </p>
+                      ) : null}
+                      {details.review.notes ? (
+                        <p className="whitespace-pre-wrap">{details.review.notes}</p>
+                      ) : null}
+                    </div>
+                  ) : (
+                    <p>
+                      <Trans>No internal review was returned.</Trans>
+                    </p>
+                  )}
+                </>
+              ) : null}
+              {details && browse.view === "sequence" ? (
+                <>
+                  <h3 className="font-semibold">
+                    <Trans>Contact campaign associations</Trans>
+                  </h3>
+                  {details.campaignAssociations.pipelineCampaign ? (
+                    <p>
+                      {details.campaignAssociations.pipelineCampaign.name} ·{" "}
+                      <Trans>Primary pipeline campaign</Trans>
+                    </p>
+                  ) : null}
+                  {details.campaignAssociations.leadCampaigns.map((association) => (
+                    <p key={association.leadId}>
+                      {association.campaign?.name ?? t`Campaign details unavailable`}
+                      {association.campaign ? (
+                        <>
+                          {" "}
+                          · <Trans>Provider status code</Trans>:{" "}
+                          {association.campaign.status ?? "—"}
+                        </>
+                      ) : null}
+                    </p>
+                  ))}
+                  {!details.campaignAssociations.pipelineCampaign &&
+                  !details.campaignAssociations.leadCampaigns.length ? (
+                    <p>
+                      <Trans>No contact campaign associations were returned.</Trans>
+                    </p>
+                  ) : null}
+                  <div className="flex gap-2">
+                    {detailsOffset > 0 ? (
+                      <Button
+                        variant="outline"
+                        onClick={() =>
+                          setDetailsPage({
+                            candidateId: details.candidateId,
+                            offset: Math.max(0, detailsOffset - 30),
+                          })
+                        }
+                      >
+                        <Trans>Previous contact campaigns</Trans>
+                      </Button>
+                    ) : null}
+                    {details.campaignAssociations.nextOffset != null ? (
+                      <Button
+                        variant="outline"
+                        onClick={() =>
+                          setDetailsPage({
+                            candidateId: details.candidateId,
+                            offset: details.campaignAssociations.nextOffset!,
+                          })
+                        }
+                      >
+                        <Trans>Next contact campaigns</Trans>
+                      </Button>
+                    ) : null}
+                  </div>
+                </>
+              ) : null}
+            </section>
+          ) : null}
           {browse.view === "inbox" ? (
             <section>
               <h2 className="mb-3 font-semibold">

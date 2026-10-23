@@ -526,6 +526,7 @@ export function ShellPage() {
   const [archivedGroups, setArchivedGroups] = useState<Group[]>([]);
   const [archivedOpen, setArchivedOpen] = useState(false);
   const [newRoleSourceId, setNewRoleSourceId] = useState<string | null>(null);
+  const [newRoleDescription, setNewRoleDescription] = useState("");
   const [creatingGroup, setCreatingGroup] = useState(false);
   const [collapsedSidebarSections, setCollapsedSidebarSections] = useState(() => new Set<string>());
   const [collapsedRosterParents, setCollapsedRosterParents] = useState(() => new Set<string>());
@@ -3232,15 +3233,17 @@ export function ShellPage() {
       navigate(`/app/g/${group.id}${input.description ? "?view=brief" : ""}`);
       setPanel(null);
       setNewRoleSourceId(null);
+      setNewRoleDescription("");
       await refreshBots().catch(() => undefined);
     } finally {
       setCreatingGroup(false);
     }
   }
 
-  function startNewRole(sourceId: string) {
+  function startNewRole(sourceId: string, description = "") {
     if (!canCreateRoleFrom(sourceId)) return;
     setNewRoleSourceId(sourceId);
+    setNewRoleDescription(description);
     setPanel("create-group");
     setMobileSidebarOpen(false);
   }
@@ -3649,12 +3652,14 @@ export function ShellPage() {
 
   const roleCreationForm = (
     <CreateGroupForm
-      key={showToolActivity ? "group" : `role:${roleSourceGroup?.id}`}
+      key={showToolActivity ? "group" : JSON.stringify([roleSourceGroup?.id, newRoleDescription])}
       bots={showToolActivity ? bots : roleCrewBots}
       recruiting={!showToolActivity}
+      initialDescription={newRoleDescription}
       onCancel={() => {
         setPanel(null);
         setNewRoleSourceId(null);
+        setNewRoleDescription("");
       }}
       onCreate={(input) => {
         if (
@@ -4573,8 +4578,8 @@ export function ShellPage() {
           threadId={activeSnapshot.threadId} botId={inGroup ? undefined : active?.id} groupId={inGroup ? groupId : undefined}
           readCache={recruitingReadCache.current} readCacheScope={recruitingCacheScope} refreshSignal={recruitingRefresh} onClose={() => {}}
           crmBrowse={{ selection: crmSelection, view: recruitingWorkspaceView, candidateId: searchParams.get("crmCandidate") ?? undefined,
-            onSelectCandidate: id => setSearchParams(current => { const next = new URLSearchParams(current); next.set("crmCandidate", id); next.set("view", "inbox"); return next; }),
-            onStartRecruiting: activeGroup && canCreateRoleFrom(activeGroup.id) ? () => startNewRole(activeGroup.id) : undefined,
+            onSelectCandidate: (id, view = "inbox") => setSearchParams(current => { const next = new URLSearchParams(current); next.set("crmCandidate", id); next.set("view", view); return next; }),
+            onStartRecruiting: activeGroup && canCreateRoleFrom(activeGroup.id) ? (description) => startNewRole(activeGroup.id, description) : undefined,
           }}
         /> : <p role="alert"><Trans>Choose a CRM role again.</Trans></p>}</div> : null}
         {workspaceCorrespondence && activeSnapshot?.threadId ? (

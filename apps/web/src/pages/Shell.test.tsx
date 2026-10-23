@@ -710,6 +710,7 @@ it("opens existing CRM roles without creating groups or exposing an unrelated re
         clientLabel: "Example client",
         roleLabel: "Existing role",
         summary: null,
+        jdText: "Original stored job description",
       },
       items: [],
       total: 0,
@@ -730,6 +731,16 @@ it("opens existing CRM roles without creating groups or exposing an unrelated re
   ).not.toBeNull();
   expect(shellApi.createGroup).not.toHaveBeenCalled();
   expect(shellApi.followUp).not.toHaveBeenCalled();
+  await view.click("Start recruiting");
+  const jobDescription = document.querySelector<HTMLTextAreaElement>(
+    'textarea[aria-label="Job description"]',
+  );
+  expect(jobDescription?.value).toBe(
+    "Existing role · Example client\n\nOriginal stored job description",
+  );
+  expect(shellApi.createGroup).not.toHaveBeenCalled();
+  expect(shellApi.followUp).not.toHaveBeenCalled();
+  await view.click("Cancel new role");
   await view.click("Recruiting crew");
   expect(view.getPath()).not.toContain("crmRole");
   await view.click("Job Brief");
