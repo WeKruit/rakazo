@@ -990,6 +990,44 @@ export async function editRecruitingCriteria(
 }
 
 export type RecruitingRoleMutationInput = Exclude<RecruitingRoleToolInput, { operation: "read" }>;
+type RecruitingRoleDefinitionInput = Exclude<RecruitingRoleMutationInput, { operation: "update" }>;
+
+/** Full revise input: the expected revision with only the supplied fields changed. */
+export function mergeRecruitingRoleUpdate(
+  current: RoleSnapshot,
+  update: Extract<RecruitingRoleMutationInput, { operation: "update" }>,
+): Extract<RecruitingRoleDefinitionInput, { operation: "revise" }> {
+  const saved = current.revision;
+  const removed = new Set(update.criteria?.remove ?? []);
+  const upserts = new Map((update.criteria?.upsert ?? []).map((item) => [item.id, item]));
+  const criteria = saved.criteria
+    .filter((item) => !removed.has(item.id))
+    .map((item) => upserts.get(item.id) ?? item);
+  for (const item of upserts.values())
+    if (!saved.criteria.some((existing) => existing.id === item.id)) criteria.push(item);
+  const replaced = new Set((update.sourceRefs ?? []).map((ref) => ref.id));
+  // A new revision starts unconfirmed, exactly as a full revise resubmits the draft.
+  const savedBrief = saved.brief
+    ? (({ confirmation: _, ...draft }) => draft)(saved.brief)
+    : saved.brief;
+  const merged = RecruitingRoleToolInputSchema.parse({
+    operation: "revise",
+    roleId: update.roleId,
+    expectedRevision: update.expectedRevision,
+    title: update.title ?? current.role.title,
+    brief: update.brief === undefined ? savedBrief : update.brief,
+    sourceRefs: [
+      ...saved.sourceRefs.filter((ref) => !replaced.has(ref.id)),
+      ...(update.sourceRefs ?? []),
+    ],
+    criteria,
+    preferences: update.preferences ?? saved.preferences,
+    definitionQuestions: update.definitionQuestions ?? saved.definitionQuestions,
+    intent: update.intent,
+  });
+  if (merged.operation !== "revise") throw new IsolationError();
+  return merged;
+}
 export type RecruitingRoleToolResult = {
   status: "current" | "saved" | "needs_clarification";
   workspace: RoleSnapshot | null;
@@ -2012,10 +2050,23 @@ export async function executeRecruitingRoleMutation(
       stableJsonValue(RecruitingRoleToolInputSchema.parse(context.effectRequest))
   )
     throw new IsolationError();
-  const artifacts =
-    input.operation === "bind"
-      ? new Map<string, Uint8Array>()
-      : await loadRoleMaterials(prisma, actor, input, material);
+  // A partial update is merged onto its expected revision before materials load; the locked
+  // transaction below still rejects it if that revision is no longer current.
+  let definitionInput: RecruitingRoleDefinitionInput | undefined =
+    input.operation === "update" ? undefined : input;
+  let materialSource: Pick<RecruitingRoleRevision, "sourceRefs" | "criteria"> | undefined =
+    input.operation === "bind" || input.operation === "update" ? undefined : input;
+  if (input.operation === "update") {
+    const current = await prisma.$transaction((tx) =>
+      requireRole(tx, actor, input.roleId).then((role) => roleSnapshot(tx, actor, role)),
+    );
+    if (current.role.revision === input.expectedRevision)
+      definitionInput = mergeRecruitingRoleUpdate(current, input);
+    materialSource = definitionInput?.operation === "revise" ? definitionInput : current.revision;
+  }
+  const artifacts = materialSource
+    ? await loadRoleMaterials(prisma, actor, materialSource, material)
+    : new Map<string, Uint8Array>();
   return prisma.$transaction(async (tx) => {
     const { run, thread } = await lockLiveRecruitingRun(tx, actor, context.runId, false);
     if (run.threadId !== context.threadId || run.botId !== context.botId)
@@ -2102,6 +2153,7 @@ export async function executeRecruitingRoleMutation(
     }
     requireResearchLease(run, context);
     if (effect.status !== "executing") throw new IsolationError();
+    if (!definitionInput) throw new RecruitingConflictError();
     const { source: humanSource, message: source } = await requireCurrentHumanSource(
       tx,
       actor,
@@ -2114,9 +2166,10 @@ export async function executeRecruitingRoleMutation(
       ? await requireRole(tx, actor, thread.activeRecruitingRoleId, true, thread)
       : null;
     const current = currentRole ? await roleSnapshot(tx, actor, currentRole, thread) : null;
-    if (input.operation === "revise") {
-      if (current?.role.id !== input.roleId) throw new IsolationError();
-      if (current.role.revision !== input.expectedRevision) throw new RecruitingConflictError();
+    if (definitionInput.operation === "revise") {
+      if (current?.role.id !== definitionInput.roleId) throw new IsolationError();
+      if (current.role.revision !== definitionInput.expectedRevision)
+        throw new RecruitingConflictError();
       const sourceIds = current.revision.sourceRefs.flatMap((ref) =>
         ref.anchor.kind === "message" ? [ref.anchor.messageId] : [],
       );
@@ -2141,22 +2194,25 @@ export async function executeRecruitingRoleMutation(
       };
     else {
       let workspace: RoleSnapshot | null;
-      if (input.operation === "bind") {
+      if (definitionInput.operation === "bind") {
         workspace = await bindRoleInTransaction(tx, actor, {
           threadId: run.threadId,
-          roleId: input.roleId,
+          roleId: definitionInput.roleId,
         });
       } else {
         const definition = {
-          title: input.title,
-          brief: input.brief,
-          sourceRefs: [...input.sourceRefs.filter((ref) => ref.id !== humanSource.id), humanSource],
-          criteria: input.criteria,
-          preferences: input.preferences,
-          definitionQuestions: input.definitionQuestions,
+          title: definitionInput.title,
+          brief: definitionInput.brief,
+          sourceRefs: [
+            ...definitionInput.sourceRefs.filter((ref) => ref.id !== humanSource.id),
+            humanSource,
+          ],
+          criteria: definitionInput.criteria,
+          preferences: definitionInput.preferences,
+          definitionQuestions: definitionInput.definitionQuestions,
         };
         workspace =
-          input.operation === "create"
+          definitionInput.operation === "create"
             ? await createRoleInTransaction(
                 tx,
                 actor,
@@ -2172,8 +2228,8 @@ export async function executeRecruitingRoleMutation(
                 actor,
                 ReviseRecruitingRoleInput.parse({
                   ...definition,
-                  roleId: input.roleId,
-                  expectedRevision: input.expectedRevision,
+                  roleId: definitionInput.roleId,
+                  expectedRevision: definitionInput.expectedRevision,
                 }),
                 artifacts,
                 currentRole!,

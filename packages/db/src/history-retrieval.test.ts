@@ -619,6 +619,103 @@ describe("local history retrieval", () => {
       ]),
     ).toBe("visible");
   });
+  it("searches the user's other conversations under the same user and Space boundary", async () => {
+    const { mock, prisma } = db();
+    mock.$queryRaw.mockResolvedValue([
+      {
+        ...row(7, "Berlin shortlist: exports agreed with the client"),
+        id: "other-message",
+        threadId: "other-thread",
+        botName: "Sourcer",
+        groupName: null,
+      },
+      {
+        ...row(3, "Older exports note"),
+        id: "older",
+        threadId: "group-thread",
+        botName: null,
+        groupName: "Hiring",
+      },
+      {
+        ...row(2, "exports"),
+        id: "oldest",
+        threadId: "group-thread",
+        botName: null,
+        groupName: "Hiring",
+      },
+    ]);
+    const result = await searchHistory(prisma, scope, {
+      query: "exports",
+      scope: "mine",
+      limit: 2,
+    });
+    const statement = sql(mock);
+    expect(statement.sql).toContain("t.id <>");
+    expect(statement.sql).toContain('owner."userId" =');
+    expect(statement.sql).not.toContain("m.seq <");
+    expect(statement.values).toEqual(
+      expect.arrayContaining(["space", "user", "bot", "thread", "exports", 3]),
+    );
+    expect(result.messages).toEqual([
+      {
+        threadId: "other-thread",
+        threadTitle: "Sourcer",
+        messageId: "other-message",
+        role: "user",
+        createdAt: "2026-01-01T00:00:00.000Z",
+        snippet: "Berlin shortlist: exports agreed with the client",
+      },
+      expect.objectContaining({
+        threadId: "group-thread",
+        threadTitle: "Hiring",
+        messageId: "older",
+      }),
+    ]);
+    expect(result.messages[0]).not.toHaveProperty("text");
+    expect(result.nextSearch).toEqual({
+      query: "exports",
+      scope: "mine",
+      before: "2026-01-01T00:00:00.000Z",
+      beforeMessageId: "older",
+      limit: 2,
+    });
+    expect(result.coverage.status).toBe("partial");
+    mock.$queryRaw.mockClear();
+    await searchHistory(prisma, scope, result.nextSearch!);
+    expect(sql(mock).sql).toContain('(m."createdAt", m.id) <');
+    expect(sql(mock).values).toEqual(
+      expect.arrayContaining([new Date("2026-01-01T00:00:00.000Z"), "older"]),
+    );
+  });
+  it("reads another conversation of the same user as messages only", async () => {
+    const { mock, prisma } = db();
+    mock.$queryRaw
+      .mockResolvedValueOnce([{ ...row(7), id: "other-message", runId: "foreign-run" }])
+      .mockResolvedValueOnce([{ ...row(7), id: "other-message", runId: "foreign-run" }]);
+    const result = await readHistory(prisma, scope, {
+      messageId: "other-message",
+      threadId: "other-thread",
+    });
+    for (const call of [0, 1]) {
+      expect(sql(mock, call).sql).toContain("t.id =");
+      expect(sql(mock, call).sql).toContain('owner."userId" =');
+      expect(sql(mock, call).values).toEqual(
+        expect.arrayContaining(["other-thread", "space", "user", "bot"]),
+      );
+    }
+    expect(mock.run.findMany).not.toHaveBeenCalled();
+    expect(mock.artifact.findMany).not.toHaveBeenCalled();
+    expect(result.messages.map((message) => message.messageId)).toEqual(["other-message"]);
+    expect(result.runs).toEqual([]);
+    expect(result.snapshots[0]!.openRunIds).toEqual([]);
+  });
+  it("keeps the current-thread predicate when threadId names this conversation", async () => {
+    const { mock, prisma } = db();
+    mock.$queryRaw.mockResolvedValue([row(4)]);
+    await readHistory(prisma, scope, { messageId: "message-4", threadId: scope.threadId });
+    expect(sql(mock).sql).not.toContain('owner."userId"');
+    expect(mock.run.findMany).toHaveBeenCalled();
+  });
   it("validates dates, query size and pagination before accessing the database", async () => {
     const { mock, prisma } = db();
     await expect(searchHistory(prisma, scope, { query: "x", before: "invalid" })).rejects.toThrow(

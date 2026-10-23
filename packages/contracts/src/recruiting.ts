@@ -1003,6 +1003,27 @@ export const RecruitingRoleToolInputSchema = z.discriminatedUnion("operation", [
     title: Text,
     ...RoleToolDefinition,
   }),
+  // Partial revise: send only what changes; the server merges it onto expectedRevision.
+  z.strictObject({
+    operation: z.literal("update"),
+    roleId: RecruitingId,
+    expectedRevision: Revision,
+    intent: RecruitingHumanIntentSchema,
+    title: Text.optional(),
+    brief: RoleToolDefinition.brief,
+    sourceRefs: SourceRefs.optional(),
+    criteria: z
+      .strictObject({
+        upsert: z
+          .array(RecruitingCriterionSchema.unwrap().extend({ sourceRefs: SourceRefs }))
+          .readonly()
+          .optional(),
+        remove: z.array(RecruitingId).readonly().optional(),
+      })
+      .optional(),
+    preferences: RoleToolDefinition.preferences.optional(),
+    definitionQuestions: RoleToolDefinition.definitionQuestions.optional(),
+  }),
   z.strictObject({
     operation: z.literal("bind"),
     roleId: RecruitingId.nullable(),

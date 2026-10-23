@@ -144,6 +144,7 @@ import type {
   Me,
   ProductEvent,
   Routine,
+  SidebarBotState,
   SpaceNavigation,
 } from "@rakazo/contracts";
 import {
@@ -155,6 +156,7 @@ import {
   IntegrationProviderIdSchema,
   OPENAI_COMPATIBLE_PROVIDER_ID,
   parseTicketRef,
+  SIDEBAR_PREVIEW_MAX_LENGTH,
   usableModelId,
 } from "@rakazo/contracts";
 import {
@@ -970,6 +972,56 @@ export function createRouter(deps: RouterDeps) {
       list: authed.spaces.list.handler(async ({ context }) =>
         spaceNavigationDto(deps, context.actor, repos, groupRepos),
       ),
+      subscribe: authed.spaces.subscribe.handler(async function* ({ context }) {
+        // Signals are hints only: every wake re-reads the actor-scoped roster (bots + latest run +
+        // unread + preview) and yields just the bots whose sidebar state changed. The first wake
+        // replays every bot, which is the durable catch-up a reconnecting client needs.
+        // ponytail: `since` is accepted for the client contract but not used to trim that replay;
+        // a roster is tens of rows, and bot.updatedAt does not move on run or unread changes.
+        const follow = deps.events.followSidebar(context.actor, context.signal);
+        const known = new Map<string, string>();
+        const changed = async (): Promise<SidebarBotState[]> => {
+          const frames: SidebarBotState[] = [];
+          const updatedAt = new Date().toISOString();
+          for (const bot of await repos.listBots(context.actor)) {
+            const frame = sidebarBotState(bot, updatedAt);
+            const fingerprint = `${frame.status}|${frame.unread}|${frame.preview}`;
+            if (known.get(bot.id) === fingerprint) continue;
+            known.set(bot.id, fingerprint);
+            frames.push(frame);
+          }
+          return frames;
+        };
+        let pending: Promise<IteratorResult<unknown>> | undefined;
+        let authorizedAt = Date.now();
+        const assertStillAuthorized = async () => {
+          if (!context.stillAuthorized || Date.now() - authorizedAt < SESSION_RECHECK_MS) return;
+          if (!(await context.stillAuthorized())) throw new ORPCError("UNAUTHORIZED");
+          authorizedAt = Date.now();
+        };
+        try {
+          while (!context.signal?.aborted) {
+            pending ??= follow.next();
+            let timer: ReturnType<typeof setTimeout> | undefined;
+            const next = await Promise.race([
+              pending,
+              new Promise<"silent">((resolve) => {
+                timer = setTimeout(() => resolve("silent"), HEARTBEAT_MS);
+              }),
+            ]).finally(() => clearTimeout(timer));
+            await assertStillAuthorized();
+            if (next === "silent") {
+              yield { updatedAt: new Date().toISOString() };
+              continue;
+            }
+            pending = undefined;
+            if (next.done) return;
+            for (const frame of await changed()) yield frame;
+          }
+        } finally {
+          void follow.return(undefined).catch(() => {});
+        }
+      }),
       create: authed.spaces.create.handler(async ({ context, input }) => {
         let space: { id: string; name: string };
         try {
@@ -2363,14 +2415,30 @@ export function createRouter(deps: RouterDeps) {
         }
       }),
       send: authed.threads.send.handler(async ({ context, input }) => {
-        if ((await modelSetup(deps, context.actor)).needsModel) {
+        const startedAt = performance.now();
+        // The three admission reads are independent and all complete before any write.
+        // Outcomes are reported in the original order (model gate, ownership, teaching) so an
+        // unowned bot still answers with the isolation error rather than its teaching state.
+        const settled = <T>(promise: Promise<T>) =>
+          promise.then(
+            (value) => ({ value }),
+            (error: unknown) => ({ error }),
+          );
+        const [needsModel, resolvedTarget, teaching] = await Promise.all([
+          sendNeedsModel(deps, context.actor),
+          settled(resolveThreadTarget(deps.prisma, context.actor, input)),
+          input.botId
+            ? settled(assertTeachingSendAllowed(deps.prisma, context.actor.spaceId, input.botId))
+            : { value: undefined },
+        ]);
+        if (needsModel) {
           throw new ORPCError("BAD_REQUEST", { message: "Connect a model to start a run." });
         }
-        const target = await resolveThreadTarget(deps.prisma, context.actor, input);
-        if (target.kind === "bot") {
-          await assertTeachingSendAllowed(deps.prisma, context.actor.spaceId, target.botId);
-        }
-        return sendThreadMessage(
+        if ("error" in resolvedTarget) throw resolvedTarget.error;
+        if ("error" in teaching) throw teaching.error;
+        const target = resolvedTarget.value;
+        const authorizedAt = performance.now();
+        const result = await sendThreadMessage(
           deps,
           context.actor,
           target,
@@ -2379,6 +2447,15 @@ export function createRouter(deps: RouterDeps) {
             ? (runId) => releaseComputerControl(deps, context.actor, target.botId, "done", runId)
             : undefined,
         );
+        const finishedAt = performance.now();
+        getLogger().info("thread.send.timing", {
+          threadId: target.threadId,
+          kind: target.kind,
+          authorizeMs: Math.round(authorizedAt - startedAt),
+          sendMs: Math.round(finishedAt - authorizedAt),
+          totalMs: Math.round(finishedAt - startedAt),
+        });
+        return result;
       }),
       react: authed.threads.react.handler(async ({ context, input }) => {
         const target = await resolveThreadTarget(deps.prisma, context.actor, input);
@@ -6384,6 +6461,25 @@ function mapUpdaterError(error: unknown): never {
   });
 }
 
+function sidebarBotState(bot: Bot, updatedAt: string): SidebarBotState {
+  const status =
+    bot.status === "running"
+      ? "running"
+      : bot.status === "queued" || bot.status === "leased"
+        ? "queued"
+        : bot.status === "waiting_input" || bot.status === "waiting_takeover"
+          ? "waiting"
+          : "idle";
+  return {
+    botId: bot.id,
+    status,
+    unread: bot.unread,
+    // listBots already redacts previews (plain text, peer/background runs skipped); only cap it.
+    preview: bot.preview.slice(0, SIDEBAR_PREVIEW_MAX_LENGTH),
+    updatedAt,
+  };
+}
+
 async function spaceNavigationDto(
   deps: RouterDeps,
   actor: Actor,
@@ -6591,6 +6687,12 @@ async function meDto(deps: RouterDeps, actor: Actor): Promise<Me> {
 function requireBilling(deps: RouterDeps): BillingService {
   if (!deps.billing) throw new ORPCError("NOT_FOUND", { message: "Billing is not enabled" });
   return deps.billing;
+}
+
+/** The send gate only needs to know whether a model exists; skip the lookups when the deployment provides one. */
+async function sendNeedsModel(deps: RouterDeps, actor: Actor): Promise<boolean> {
+  if (deps.env.agentRuntime === "scripted" || deps.env.deploymentModelConfigured) return false;
+  return !(await findDefaultModelCredential(deps.prisma, actor));
 }
 
 async function modelSetup(deps: RouterDeps, actor: Actor) {

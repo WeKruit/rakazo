@@ -80,17 +80,35 @@ function bounded<
 const searchableText = Prisma.sql`jsonb_path_query_array(m.blocks,
   '$[*] ? (@.kind == "text" || @.kind == "channel_message" || @.kind == "bot_message_received" || @.kind == "bot_message_sent" || @.kind == "handoff").text')::text || jsonb_path_query_array(m.blocks, '$[*] ? (@.kind == "subagent").task')::text || jsonb_path_query_array(m.blocks, '$[*] ? (@.kind == "subagent").result')::text`;
 const columns = Prisma.sql`m.id, m.seq, m.role, m."runId", m."replyToMessageId", m."createdAt", m.blocks, t."groupId" AS "groupId"`;
+const MINE_SNIPPET_LENGTH = 200;
 
-function visible(scope: HistoryScope): Prisma.Sql {
+/**
+ * Messages visible to this run. `thread` "conversation" is the current thread through this
+ * bot's own authorization; "mine" is every other conversation owned by the same user in the
+ * same Space (their bots' threads and their group chats), optionally one given thread. Other
+ * users' threads in the Space are never visible under either mode.
+ */
+function visible(
+  scope: HistoryScope,
+  thread: "conversation" | { mine: string | null } = "conversation",
+): Prisma.Sql {
   const channel = scope.channelId;
-  return Prisma.sql`
-    t.id = ${scope.threadId} AND t."spaceId" = ${scope.spaceId}
-    AND t."userId" = ${scope.userId}
+  const owned =
+    thread === "conversation"
+      ? Prisma.sql`t.id = ${scope.threadId}
     AND (t."botId" = ${scope.botId} OR (t."botId" IS NULL AND EXISTS (
       SELECT 1 FROM chat_groups g JOIN chat_group_members member ON member."groupId" = g.id
       WHERE g.id = t."groupId" AND g."spaceId" = ${scope.spaceId} AND g."userId" = ${scope.userId}
         AND g."archivedAt" IS NULL AND member."botId" = ${scope.botId}
-    )))
+    )))`
+      : Prisma.sql`${thread.mine ? Prisma.sql`t.id = ${thread.mine}` : Prisma.sql`t.id <> ${scope.threadId}`}
+    AND ((t."botId" IS NOT NULL AND EXISTS (SELECT 1 FROM bots owner WHERE owner.id = t."botId"
+      AND owner."spaceId" = ${scope.spaceId} AND owner."userId" = ${scope.userId} AND owner."archivedAt" IS NULL))
+      OR (t."groupId" IS NOT NULL AND EXISTS (SELECT 1 FROM chat_groups g WHERE g.id = t."groupId"
+      AND g."spaceId" = ${scope.spaceId} AND g."userId" = ${scope.userId} AND g."archivedAt" IS NULL)))`;
+  return Prisma.sql`
+    ${owned} AND t."spaceId" = ${scope.spaceId}
+    AND t."userId" = ${scope.userId}
     AND EXISTS (SELECT 1 FROM bots b WHERE b.id = ${scope.botId}
       AND b."spaceId" = ${scope.spaceId} AND b."userId" = ${scope.userId}
       AND b."archivedAt" IS NULL)
@@ -167,16 +185,107 @@ function reference(row: HistoryRow, query = "", maxLength = 800, textOffset = 0)
   };
 }
 
+/** Other conversations of the same user: title, short snippet and a read_history reference. */
+async function searchMine(
+  prisma: PrismaClient,
+  scope: HistoryScope,
+  input: HistorySearchInput,
+  query: string,
+  limit: number,
+) {
+  const before = date(input.before);
+  const after = date(input.after);
+  // ponytail: (createdAt, id) is the cursor because seq is per thread; the row tuple order is exact.
+  const cursor =
+    before && input.beforeMessageId
+      ? Prisma.sql`AND (m."createdAt", m.id) < (${before}, ${input.beforeMessageId})`
+      : before
+        ? Prisma.sql`AND m."createdAt" < ${before}`
+        : Prisma.empty;
+  const rows = await prisma.$queryRaw<
+    Array<HistoryRow & { threadId: string; botName: string | null; groupName: string | null }>
+  >(Prisma.sql`
+    SELECT ${columns}, m."threadId" AS "threadId",
+      (SELECT owner.name FROM bots owner WHERE owner.id = t."botId") AS "botName",
+      (SELECT g.name FROM chat_groups g WHERE g.id = t."groupId") AS "groupName"
+    FROM messages m JOIN threads t ON t.id = m."threadId"
+    WHERE ${visible(scope, { mine: null })}
+      ${after ? Prisma.sql`AND m."createdAt" >= ${after}` : Prisma.empty}
+      ${cursor}
+      AND to_tsvector('simple', ${searchableText}) @@ plainto_tsquery('simple', ${query})
+    ORDER BY m."createdAt" DESC, m.id DESC LIMIT ${limit + 1}
+  `);
+  const page = rows.slice(0, limit);
+  const last = rows.length > limit ? page.at(-1)! : undefined;
+  return {
+    untrusted: true as const,
+    query,
+    scope: "mine" as const,
+    coverage: {
+      scope: "requested_query_and_range" as const,
+      status: last ? ("partial" as const) : ("exhausted" as const),
+    },
+    messages: page.map((row) => ({
+      threadId: row.threadId,
+      threadTitle: row.botName ?? row.groupName ?? "",
+      messageId: row.id,
+      role: row.role,
+      createdAt: row.createdAt.toISOString(),
+      snippet: reference(row, query, MINE_SNIPPET_LENGTH).text,
+    })),
+    nextSearch: last
+      ? {
+          query,
+          scope: "mine" as const,
+          before: last.createdAt.toISOString(),
+          beforeMessageId: last.id,
+          limit,
+          ...(input.after !== undefined ? { after: input.after } : {}),
+        }
+      : null,
+  };
+}
+
+type MineSearchResult = Awaited<ReturnType<typeof searchMine>>;
+type ConversationSearchResult = Awaited<ReturnType<typeof searchConversation>>;
+
 /** PostgreSQL full text search, descending sequence cursor, at most five excerpts. */
+export function searchHistory(
+  prisma: PrismaClient,
+  scope: HistoryScope,
+  input: HistorySearchInput & { scope: "mine" },
+): Promise<MineSearchResult>;
+export function searchHistory(
+  prisma: PrismaClient,
+  scope: HistoryScope,
+  input: HistorySearchInput & { scope?: "conversation" },
+): Promise<ConversationSearchResult>;
+export function searchHistory(
+  prisma: PrismaClient,
+  scope: HistoryScope,
+  input: HistorySearchInput,
+): Promise<MineSearchResult | ConversationSearchResult>;
 export async function searchHistory(
   prisma: PrismaClient,
   scope: HistoryScope,
   input: HistorySearchInput,
-) {
+): Promise<MineSearchResult | ConversationSearchResult> {
   const query = input.query.trim();
   if (!query || query.length > 500)
     throw new Error("History query must contain 1 to 500 characters");
   const limit = Math.min(pageSize(input.limit), 5);
+  return input.scope === "mine"
+    ? searchMine(prisma, scope, input, query, limit)
+    : searchConversation(prisma, scope, input, query, limit);
+}
+
+async function searchConversation(
+  prisma: PrismaClient,
+  scope: HistoryScope,
+  input: HistorySearchInput,
+  query: string,
+  limit: number,
+) {
   const before = date(input.before);
   const after = date(input.after);
   if (
@@ -256,9 +365,13 @@ export async function readHistory(
     throw new Error("Invalid history text offset");
   if (!["around", "older", "newer"].includes(direction))
     throw new Error("Invalid history direction");
+  // Another conversation of the same user reads messages only: runs, artifacts and receipts
+  // stay bound to the current thread's authorization.
+  const crossThread = Boolean(input.threadId && input.threadId !== scope.threadId);
+  const where = crossThread ? visible(scope, { mine: input.threadId! }) : visible(scope);
   const anchors = await prisma.$queryRaw<HistoryRow[]>(Prisma.sql`
     SELECT ${columns} FROM messages m JOIN threads t ON t.id = m."threadId"
-    WHERE ${visible(scope)} AND m.id = ${input.messageId} LIMIT 1
+    WHERE ${where} AND m.id = ${input.messageId} LIMIT 1
   `);
   const anchor = anchors[0];
   if (!anchor)
@@ -286,7 +399,7 @@ export async function readHistory(
       ? [anchor]
       : await prisma.$queryRaw<HistoryRow[]>(Prisma.sql`
     SELECT ${columns} FROM messages m JOIN threads t ON t.id = m."threadId"
-    WHERE ${visible(scope)} AND ${bound}
+    WHERE ${where} AND ${bound}
     ORDER BY m.seq ${direction === "older" ? Prisma.sql`DESC` : Prisma.sql`ASC`} LIMIT ${limit}
   `);
   rows.sort((a, b) => a.seq - b.seq);
@@ -294,50 +407,55 @@ export async function readHistory(
     row.role === "bot" && row.runId ? [row.runId] : [],
   );
   // Source-less background runs require an authorized surviving output anchor.
-  const runRows = await prisma.run.findMany({
-    where: {
-      spaceId: scope.spaceId,
-      userId: scope.userId,
-      threadId: scope.threadId,
-      ...(anchor.groupId ? {} : { botId: scope.botId }),
-      ...(input.linkedRunId
-        ? { id: input.linkedRunId }
-        : input.runAfterId
-          ? { id: { gt: input.runAfterId } }
-          : {}),
-      ...(scope.channelId
-        ? {
-            sourceMessage: {
-              threadId: scope.threadId,
-              role: "user",
-              blocks: {
-                array_contains: [{ kind: "channel_message", channelId: scope.channelId }],
-              },
-            },
-          }
-        : {
-            AND: [
-              {
-                OR: [
-                  { sourceMessage: { threadId: scope.threadId } },
-                  { sourceMessageId: null, id: { in: anchoredRunIds } },
+  const runRows = crossThread
+    ? []
+    : await prisma.run.findMany({
+        where: {
+          spaceId: scope.spaceId,
+          userId: scope.userId,
+          threadId: scope.threadId,
+          ...(anchor.groupId ? {} : { botId: scope.botId }),
+          ...(input.linkedRunId
+            ? { id: input.linkedRunId }
+            : input.runAfterId
+              ? { id: { gt: input.runAfterId } }
+              : {}),
+          ...(scope.channelId
+            ? {
+                sourceMessage: {
+                  threadId: scope.threadId,
+                  role: "user",
+                  blocks: {
+                    array_contains: [{ kind: "channel_message", channelId: scope.channelId }],
+                  },
+                },
+              }
+            : {
+                AND: [
+                  {
+                    OR: [
+                      { sourceMessage: { threadId: scope.threadId } },
+                      { sourceMessageId: null, id: { in: anchoredRunIds } },
+                    ],
+                  },
                 ],
-              },
-            ],
-          }),
-      OR: [{ sourceMessageId: { in: rows.map((row) => row.id) } }, { id: { in: anchoredRunIds } }],
-    },
-    select: {
-      id: true,
-      botId: true,
-      sourceMessageId: true,
-      status: true,
-      createdAt: true,
-      completedAt: true,
-    },
-    orderBy: { id: "asc" },
-    take: LINK_PAGE_SIZE + 1,
-  });
+              }),
+          OR: [
+            { sourceMessageId: { in: rows.map((row) => row.id) } },
+            { id: { in: anchoredRunIds } },
+          ],
+        },
+        select: {
+          id: true,
+          botId: true,
+          sourceMessageId: true,
+          status: true,
+          createdAt: true,
+          completedAt: true,
+        },
+        orderBy: { id: "asc" },
+        take: LINK_PAGE_SIZE + 1,
+      });
   const runs = runRows.slice(0, LINK_PAGE_SIZE);
   const [outcomeRows, artifactRows] = await Promise.all([
     runs.length

@@ -6,6 +6,7 @@ import type { ArtifactStore } from "@rakazo/adapter-kit";
 import { toolRequiresApproval, unattendedTriggerToolRequiresApproval } from "@rakazo/core";
 import * as pdfText from "@rakazo/core/node/pdf-text";
 import type { PrismaClient } from "@rakazo/db";
+import { IsolationError } from "@rakazo/db";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { artifactReadFromTool, readActorArtifact } from "./artifact-read.js";
 import { LocalArtifactStore } from "./artifacts.js";
@@ -67,6 +68,23 @@ describe("native saved artifact reading", () => {
       expect(f.queryRaw).toHaveBeenCalledOnce();
     },
   );
+  it.each([
+    ["another space", { spaceId: "other-space", userId: "owner" }],
+    ["the same space", { spaceId: "space", userId: "other-user" }],
+  ])("refuses another actor in %s before any storage read", async (_label, other) => {
+    const f = fixture("owner only");
+    await expect(readActorArtifact(f.deps, other, { artifactId: f.row.id })).rejects.toBeInstanceOf(
+      IsolationError,
+    );
+    expect(await artifactReadFromTool(f.deps, other, { artifactId: f.row.id })).toEqual({
+      error: "Artifact is unavailable.",
+    });
+    expect(f.get).not.toHaveBeenCalled();
+    expect(f.queryRaw).not.toHaveBeenCalled();
+    expect(
+      (await readActorArtifact(f.deps, actor, { artifactId: f.row.id })).bytes.toString(),
+    ).toBe("owner only");
+  });
   it("denies a renamed version in an adopted context family", async () => {
     const f = fixture("private snapshot version");
     f.row.name = "renamed.txt";

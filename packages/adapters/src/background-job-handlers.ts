@@ -2,6 +2,7 @@ import type {
   AgentHomeStore,
   AgentRuntime,
   BackgroundJobHandlers,
+  ConnectorProvider,
   JobPublisher,
   MessagingSurface,
   SandboxProvider,
@@ -15,10 +16,15 @@ import { pollCloudAgent } from "./cloud-agent-poll.js";
 import { expireComputerControl } from "./computer-control.js";
 import { scheduleComputerSleep, sleepComputerIfIdle } from "./computer-idle.js";
 import { performComputerUpdate } from "./computer-update.js";
+import { pollRecruitingResearch } from "./recruiting-research-poll.js";
 import type { createRunExecutor } from "./executor.js";
 import { compactHistory } from "./history-compaction.js";
 import type { MemoryProviderResolver } from "./memory-provider-factory.js";
 import { deliverMessagingOutbound, mirrorMessagingOutbound } from "./messaging-delivery.js";
+import {
+  pauseRoutineAfterRepeatedFailures,
+  skipRoutineWithoutNewActivity,
+} from "./routine-precondition.js";
 import { expireTaughtSkillTeaching } from "./teaching-session.js";
 
 export function createBackgroundJobHandlers(deps: {
@@ -37,6 +43,8 @@ export function createBackgroundJobHandlers(deps: {
   deploymentModelConfigured?: boolean;
   messaging?: MessagingSurface;
   cloudAgent?: CloudAgentConnection | null;
+  /** The native MCP connector; without it research tasks are not polled in the background. */
+  connector?: ConnectorProvider;
 }): BackgroundJobHandlers {
   const deliverMessaging = async (runId?: string) => {
     if (!deps.messaging) return;
@@ -56,6 +64,10 @@ export function createBackgroundJobHandlers(deps: {
   return {
     "run.continue": async (payload) => {
       await deps.executor.continueRun(payload.runId, deps.workerId);
+      // A routine whose last five runs all failed stops firing; never let this fail the run.
+      await pauseRoutineAfterRepeatedFailures(deps, payload.runId).catch((error) => {
+        getLogger().error("routine failure pause error", error);
+      });
       // Automatic messaging mirror: once the run's bot messages are durable,
       // copy them into the outbox. Never let mirror failures fail the run.
       if (deps.messaging) {
@@ -73,6 +85,8 @@ export function createBackgroundJobHandlers(deps: {
       await deliverMessaging(payload.runId);
     },
     "routine.wakeup": async (payload) => {
+      // A routine with a `precondition:` line wakes the model only when something changed.
+      if (await skipRoutineWithoutNewActivity(deps, payload)) return;
       await deps.executor.wakeRoutine(payload.routineId, payload.scheduledFor);
     },
     "computer.update": async ({ updateId }) => {
@@ -97,6 +111,12 @@ export function createBackgroundJobHandlers(deps: {
           events: deps.events,
           cloudAgent: deps.cloudAgent,
         },
+        payload,
+      );
+    },
+    "recruiting_research.poll": async (payload) => {
+      await pollRecruitingResearch(
+        { prisma: deps.prisma, jobs: deps.jobs, connector: deps.connector },
         payload,
       );
     },

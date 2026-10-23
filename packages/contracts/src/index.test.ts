@@ -25,6 +25,7 @@ import {
   ReorderBotsInput,
   RunActivityRowSchema,
   RunSchema,
+  SidebarBotStateSchema,
   UpdateBotInput,
   UpdateGroupInput,
   usableModelId,
@@ -49,6 +50,13 @@ describe("contracts", () => {
     expect(schema.safeParse({ groupId: "group-1", text: "Hello", addressing: "all" }).success).toBe(
       false,
     );
+  });
+
+  it("accepts an optional interject flag on threads.send", () => {
+    const schema = appContract.threads.send["~orpc"].inputSchema!;
+    const input = { botId: "bot-1", text: "Stop, use the other file", interrupt: true };
+    expect(schema.parse(input)).toEqual(input);
+    expect(schema.safeParse({ botId: "bot-1", text: "Hi", interrupt: "yes" }).success).toBe(false);
   });
 
   it("accepts one optional bootstrap target without dropping group identity", () => {
@@ -467,6 +475,7 @@ describe("contracts", () => {
     expect(appContract.bots.remove).toBeTruthy();
     expect(appContract.spaces.rename).toBeTruthy();
     expect(appContract.spaces.remove).toBeTruthy();
+    expect(appContract.spaces.subscribe).toBeTruthy();
     expect(appContract.botSections.list).toBeTruthy();
     expect(appContract.botSections.create).toBeTruthy();
     expect(appContract.botSections.update).toBeTruthy();
@@ -664,6 +673,39 @@ describe("contracts", () => {
         spec: { marks: [{ data: rows.slice(0, 2_500) }] },
         data: rows.slice(0, 2_501),
       }).success,
+    ).toBe(false);
+  });
+});
+
+describe("SidebarBotStateSchema", () => {
+  const updatedAt = "2026-08-15T12:00:00.000Z";
+
+  it("accepts a bot frame and a heartbeat frame", () => {
+    expect(
+      SidebarBotStateSchema.parse({
+        botId: "bot-1",
+        status: "running",
+        unread: true,
+        preview: "Working on it",
+        updatedAt,
+      }),
+    ).toEqual({
+      botId: "bot-1",
+      status: "running",
+      unread: true,
+      preview: "Working on it",
+      updatedAt,
+    });
+    expect(SidebarBotStateSchema.parse({ updatedAt })).toEqual({ updatedAt });
+  });
+
+  it("rejects unknown statuses and oversized previews", () => {
+    expect(
+      SidebarBotStateSchema.safeParse({ botId: "bot-1", status: "leased", updatedAt }).success,
+    ).toBe(false);
+    expect(
+      SidebarBotStateSchema.safeParse({ botId: "bot-1", preview: "x".repeat(121), updatedAt })
+        .success,
     ).toBe(false);
   });
 });

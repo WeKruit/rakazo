@@ -71,13 +71,15 @@ import {
   registerOpenAiCompatibleRuntime,
 } from "./pi-openai-compatible-provider.js";
 import {
-  clipToolResultContent,
+  clipContentWithFullOutput,
   clipToolResultText,
+  clipWithFullOutput,
   MODEL_STREAM_IDLE_TIMEOUT_MS,
   MODEL_STREAM_TIMEOUT_MS,
   modelStreamMaxRetries,
   REASONING_MODEL_MAX_TOKENS,
   resolveCompletionMaxTokens,
+  type ToolOutputStore,
 } from "./pi-runtime-limits.js";
 import type { PiSessionHandle, PiSessionRecorder } from "./pi-session.js";
 import { PiJsonlSessionRecorder } from "./pi-session.js";
@@ -156,6 +158,8 @@ export interface PiAgentRuntimeOptions {
   /** Directory where Pi JSONL sessions are written. Omit to disable recording. */
   sessionRoot?: string;
   modelCallObserver?: ModelCallObserver;
+  /** How often a live model stream checks for an interjecting user message. */
+  interjectPollMs?: number;
   /** Sanitized per-call selection telemetry; never includes prompt or credentials. */
   onContextDecision?: (
     decision: RuntimeContextDecision & {
@@ -170,10 +174,12 @@ export class PiAgentRuntime implements AgentRuntime {
   private readonly sessionRecorder?: PiSessionRecorder;
   private readonly modelCallObserver?: ModelCallObserver;
   private readonly onContextDecision?: PiAgentRuntimeOptions["onContextDecision"];
+  private readonly interjectPollMs: number;
 
   constructor(options: PiAgentRuntimeOptions = {}) {
     this.modelCallObserver = options.modelCallObserver;
     this.onContextDecision = options.onContextDecision;
+    this.interjectPollMs = options.interjectPollMs ?? INTERJECT_POLL_MS;
     this.sessionRecorder = options.sessionRoot
       ? new PiJsonlSessionRecorder(options.sessionRoot)
       : undefined;
@@ -445,17 +451,13 @@ export class PiAgentRuntime implements AgentRuntime {
           },
           prepareNextTurnWithContext: async () => {
             if (!request.claimSteering) return undefined;
+            // A mid-stream claim still in flight already owns its ids; wait so neither
+            // path claims the same row twice.
+            await interjectClaim;
             const steering = await request.claimSteering([...seenSteeringIds]);
             if (steering.length === 0) return undefined;
             seenSteeringIds.push(...steering.map((item) => item.id));
-            for (const item of steering) {
-              const images = toPiImages(item.images);
-              agent.steer({
-                role: "user",
-                content: images.length ? [{ type: "text", text: item.text }, ...images] : item.text,
-                timestamp: Date.now(),
-              });
-            }
+            for (const item of steering) steerIn(item);
             return undefined;
           },
           initialState: {
@@ -466,6 +468,42 @@ export class PiAgentRuntime implements AgentRuntime {
             messages: history,
           },
         });
+
+        const steerIn = (item: AgentSteeringMessage) => {
+          const images = toPiImages(item.images);
+          agent.steer({
+            role: "user",
+            content: images.length ? [{ type: "text", text: item.text }, ...images] : item.text,
+            timestamp: Date.now(),
+          });
+        };
+        // Interject: while the model is streaming, a flagged steering message aborts only
+        // that stream (tools in flight are untouched), is steered in, and the same run
+        // continues from the partial assistant message.
+        let modelStreaming = false;
+        let interjected = false;
+        let interjectClaim: Promise<void> | undefined;
+        const pollInterject = () => {
+          if (!modelStreaming || interjectClaim || !request.claimSteering || signal.aborted) return;
+          interjectClaim = request
+            .claimSteering([...seenSteeringIds])
+            .then((steering) => {
+              seenSteeringIds.push(...steering.map((item) => item.id));
+              for (const item of steering) steerIn(item);
+              if (modelStreaming && steering.some((item) => item.interrupt)) {
+                interjected = true;
+                agent.abort();
+              }
+            })
+            .catch(() => undefined)
+            .finally(() => {
+              interjectClaim = undefined;
+            });
+        };
+        const interjectTimer = request.claimSteering
+          ? setInterval(pollInterject, this.interjectPollMs)
+          : undefined;
+        interjectTimer?.unref?.();
 
         const onAbort = () => {
           agent.abort();
@@ -506,6 +544,10 @@ export class PiAgentRuntime implements AgentRuntime {
           }
           if (event.type === "message_start" && event.message.role === "assistant") {
             currentMessageStreamed = "";
+            modelStreaming = true;
+          }
+          if (event.type === "message_end" && event.message.role === "assistant") {
+            modelStreaming = false;
           }
           if (
             event.type === "message_update" &&
@@ -523,7 +565,10 @@ export class PiAgentRuntime implements AgentRuntime {
               queue.push({ type: "text", text: delta });
             }
           }
-          if (event.type === "turn_end") {
+          if (event.type === "turn_end" && interjected) {
+            // The interrupted turn is neither a final reply nor a silent tool turn; the
+            // continuation below answers the interjection.
+          } else if (event.type === "turn_end") {
             const messageText =
               event.message.role === "assistant" ? assistantText(event.message) : "";
             const hasToolCalls = messageHasToolCall(event.message);
@@ -593,7 +638,18 @@ export class PiAgentRuntime implements AgentRuntime {
         ]);
         try {
           await agent.prompt(initialPrompt, images?.length ? images : undefined);
+          while (interjected && !signal.aborted && !host.pausePending) {
+            interjected = false;
+            await interjectClaim;
+            keepInterruptedAssistantMessage(agent.state.messages);
+            if (streamed.trim() && !streamed.endsWith("\n")) {
+              queue.push({ type: "text", text: "\n\n" });
+              streamed += "\n\n";
+            }
+            await agent.continue();
+          }
         } finally {
+          if (interjectTimer) clearInterval(interjectTimer);
           try {
             await agent.waitForIdle();
           } finally {
@@ -1141,6 +1197,7 @@ function activeCompaction(
       return;
     }
     lastAttempt = fingerprint;
+    host.queue.push({ type: "progress", text: "", activity: true, phase: "compacting" });
     const summaryModels: Models = {
       ...target.models,
       completeSimple: async (_model, summaryContext, options) => {
@@ -1591,7 +1648,15 @@ function toAgentTool(tool: ConnectorTool, host: ToolHost, exposedName: string): 
               content: [
                 {
                   type: "text",
-                  text: serializeToolResult(result, host.request.contextStrategy, tool.name, args),
+                  text: await clipWithFullOutput(
+                    toolResultJson(result),
+                    (full) =>
+                      shortenToolResultText(full, 12_000, { name: tool.name, arguments: args }),
+                    VERBATIM_TOOL_RESULTS.has(tool.name)
+                      ? undefined
+                      : toolOutputStore(host, tool.name, executionId),
+                    VERBATIM_TOOL_RESULTS.has(tool.name) ? Number.POSITIVE_INFINITY : 12_000,
+                  ),
                 },
               ],
               details: result,
@@ -1608,7 +1673,10 @@ function toAgentTool(tool: ConnectorTool, host: ToolHost, exposedName: string): 
           };
         })();
         if (VERBATIM_TOOL_RESULTS.has(tool.name)) return result as AgentToolResult<unknown>;
-        return boundAgentToolResult(result as AgentToolResult<unknown>);
+        return boundAgentToolResult(
+          result as AgentToolResult<unknown>,
+          toolOutputStore(host, tool.name, executionId),
+        );
       } catch (error) {
         failure = error;
         throw error;
@@ -2013,19 +2081,8 @@ function builtinParameters(tool: ConnectorTool) {
     return Type.Unsafe(tool.inputSchema) as unknown as ReturnType<typeof Type.Object>;
   }
   if (tool.name === "remember") {
-    return Type.Object({
-      content: Type.String(),
-      path: Type.Optional(Type.String()),
-      expectedRevision: Type.Integer({ minimum: 0 }),
-      recruitingFeedback: Type.Optional(
-        Type.Unsafe(
-          (tool.inputSchema.properties as Record<string, unknown>).recruitingFeedback as Record<
-            string,
-            unknown
-          >,
-        ),
-      ),
-    });
+    // The built-in schema carries the edit:{find,replace} mode and its descriptions.
+    return Type.Unsafe(tool.inputSchema) as unknown as ReturnType<typeof Type.Object>;
   }
   if (tool.name === "shell") {
     return Type.Object({
@@ -2403,12 +2460,65 @@ export function serializeToolResult(
   }
 }
 
-function boundAgentToolResult<T>(result: AgentToolResult<T>): AgentToolResult<T> {
+/** The complete serialized result, before any context clipping. */
+export function toolResultJson(result: unknown): string {
+  try {
+    if (
+      result &&
+      typeof result === "object" &&
+      Object.hasOwn(result, "structuredContent") &&
+      "structuredContent" in result &&
+      "content" in result &&
+      Array.isArray(result.content) &&
+      result.content.length === 1
+    ) {
+      const part = result.content[0];
+      if (
+        part?.type === "text" &&
+        typeof part.text === "string" &&
+        Object.keys(part).length === 2 &&
+        Object.hasOwn(part, "type") &&
+        Object.hasOwn(part, "text") &&
+        part.text === JSON.stringify(result.structuredContent)
+      ) {
+        const { content: _duplicateContent, ...envelope } = result;
+        result = envelope;
+      }
+    }
+    return JSON.stringify(result) || "ok";
+  } catch {
+    return "ok";
+  }
+}
+
+async function boundAgentToolResult<T>(
+  result: AgentToolResult<T>,
+  store?: ToolOutputStore,
+): Promise<AgentToolResult<T>> {
   if (!result || !Array.isArray(result.content)) return result;
   return {
     ...result,
-    content: clipToolResultContent(result.content),
+    content: await clipContentWithFullOutput(result.content, store),
   };
+}
+
+/** Executor-backed storage for clipped results; absent for runs without an artifact store. */
+/** Tools that already read durable stored data; re-saving their pages would only duplicate it. */
+const STORED_DATA_READ_TOOLS: ReadonlySet<string> = new Set([
+  "artifact_read",
+  "read_history",
+  "search_history",
+  "skill_read",
+]);
+
+function toolOutputStore(
+  host: ToolHost,
+  name: string,
+  executionId: string,
+): ToolOutputStore | undefined {
+  const store = host.request.storeToolOutput;
+  if (!store || STORED_DATA_READ_TOOLS.has(name)) return undefined;
+  return (text) => store({ name, executionId, text });
 }
 
 function assistantText(message: unknown): string {
@@ -2432,6 +2542,24 @@ function messageHasToolCall(message: unknown): boolean {
   return content.some(
     (part) => !!part && typeof part === "object" && "type" in part && part.type === "toolCall",
   );
+}
+
+const INTERJECT_POLL_MS = 2_000;
+
+/**
+ * Keep the partial text of an interrupted assistant message in context and drop
+ * what the next request cannot carry: an unfinished tool call has no result, and an
+ * empty assistant message is rejected by some providers.
+ */
+export function keepInterruptedAssistantMessage(messages: AgentMessage[]): void {
+  const last = messages.at(-1);
+  if (last?.role !== "assistant" || last.stopReason !== "aborted") return;
+  const content = last.content.filter((part) => part.type !== "toolCall");
+  if (content.some((part) => part.type === "text" && part.text.trim())) {
+    messages[messages.length - 1] = { ...last, content };
+  } else {
+    messages.pop();
+  }
 }
 
 /** Provider failure. Aborts stay on the existing cancel path. */

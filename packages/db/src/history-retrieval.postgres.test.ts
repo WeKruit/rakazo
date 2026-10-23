@@ -1,4 +1,5 @@
 import { PrismaPg } from "@prisma/adapter-pg";
+import type { HistorySearchInput } from "@rakazo/contracts";
 import { HistorySearchInputSchema } from "@rakazo/contracts";
 import { Pool } from "pg";
 import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
@@ -9,6 +10,7 @@ import { readHistory, searchHistory } from "./history-retrieval.js";
 // Temporary synthetic tables shadow product tables. Never inspect existing chat content.
 const enabled = process.env.VERIFY_DATABASE && process.env.DATABASE_URL;
 const postgres = enabled ? describe.sequential : describe.skip;
+type ConversationSearch = HistorySearchInput & { scope?: "conversation" };
 postgres("history retrieval (PostgreSQL)", () => {
   let pool: Pool;
   let prisma: PrismaClient;
@@ -24,9 +26,9 @@ postgres("history retrieval (PostgreSQL)", () => {
     // Match native TIMESTAMP(3) storage while exercising a non-UTC session.
     await pool.query("SET TIME ZONE 'America/Los_Angeles'");
     await pool.query(`
-      CREATE TEMP TABLE bots (id text PRIMARY KEY, "spaceId" text, "userId" text, "archivedAt" timestamp(3));
+      CREATE TEMP TABLE bots (id text PRIMARY KEY, "spaceId" text, "userId" text, "archivedAt" timestamp(3), name text);
       CREATE TEMP TABLE threads (id text PRIMARY KEY, "spaceId" text, "userId" text, "botId" text, "groupId" text);
-      CREATE TEMP TABLE chat_groups (id text PRIMARY KEY, "spaceId" text, "userId" text, "archivedAt" timestamp(3));
+      CREATE TEMP TABLE chat_groups (id text PRIMARY KEY, "spaceId" text, "userId" text, "archivedAt" timestamp(3), name text);
       CREATE TEMP TABLE chat_group_members ("groupId" text, "botId" text);
       CREATE TEMP TABLE messages (id text PRIMARY KEY, "threadId" text, seq integer, role text, "runId" text,
         "replyToMessageId" text, "createdAt" timestamp(3), blocks jsonb);
@@ -182,7 +184,7 @@ postgres("history retrieval (PostgreSQL)", () => {
         after: "2026-01-01",
         before: "2026-01-02",
         limit: 3,
-      }),
+      }) as ConversationSearch,
     );
     expect(day.messages.map((message) => message.seq)).toEqual([1439, 1438, 1437]);
     expect(day.nextSearch).toMatchObject({
@@ -197,7 +199,7 @@ postgres("history retrieval (PostgreSQL)", () => {
         after: "2026-01-02T02:00:00+02:00",
         before: "2026-01-02T02:03:00+02:00",
         limit: 5,
-      }),
+      }) as ConversationSearch,
     );
     expect(offset.messages.map((message) => message.seq)).toEqual([1442, 1441, 1440]);
     expect(offset.nextSearch).toBeNull();
@@ -464,6 +466,71 @@ postgres("history retrieval (PostgreSQL)", () => {
     expect((await searchHistory(prisma, channelScope, { query: "exports" })).messages).toEqual([]);
     expect(
       (await readHistory(prisma, channelScope, { messageId: "channel-result" })).messages,
+    ).toEqual([]);
+  });
+  it("searches only this user's other conversations under scope mine, never another user's", async () => {
+    await pool.query(`
+      INSERT INTO bots VALUES
+        ('own-other-bot','synthetic-space','synthetic-user',NULL,'Sourcer'),
+        ('archived-bot','synthetic-space','synthetic-user',now(),'Old'),
+        ('other-user-bot','synthetic-space','other-user',NULL,'Their bot');
+      INSERT INTO chat_groups VALUES ('own-group','synthetic-space','synthetic-user',NULL,'Hiring');
+      INSERT INTO threads VALUES
+        ('own-other-thread','synthetic-space','synthetic-user','own-other-bot',NULL),
+        ('archived-thread','synthetic-space','synthetic-user','archived-bot',NULL),
+        ('own-group-thread','synthetic-space','synthetic-user',NULL,'own-group'),
+        ('other-user-thread','synthetic-space','other-user','other-user-bot',NULL);
+      INSERT INTO messages VALUES
+        ('own-other-message','own-other-thread',1,'user',NULL,NULL,'2026-03-01T00:00:00Z','[{"kind":"text","text":"ORBIT-990 shortlist agreed"}]'),
+        ('archived-message','archived-thread',1,'user',NULL,NULL,'2026-03-01T00:01:00Z','[{"kind":"text","text":"ORBIT-990 archived note"}]'),
+        ('own-group-message','own-group-thread',1,'user',NULL,NULL,'2026-03-01T00:02:00Z','[{"kind":"text","text":"ORBIT-990 group discussion"}]'),
+        ('current-thread-message','synthetic-thread',12500,'user',NULL,NULL,'2026-03-01T00:03:00Z','[{"kind":"text","text":"ORBIT-990 in this chat"}]'),
+        ('other-user-message','other-user-thread',1,'user',NULL,NULL,'2026-03-01T00:04:00Z','[{"kind":"text","text":"ORBIT-990 private to another user"}]');
+    `);
+    const mine = await searchHistory(prisma, scope, { query: "ORBIT-990", scope: "mine" });
+    expect(
+      mine.messages.map((message) => [message.threadId, message.threadTitle, message.messageId]),
+    ).toEqual([
+      ["own-group-thread", "Hiring", "own-group-message"],
+      ["own-other-thread", "Sourcer", "own-other-message"],
+    ]);
+    expect(mine.messages[0]!.snippet).toContain("ORBIT-990");
+    expect(mine.messages[0]).not.toHaveProperty("text");
+    expect(
+      (await searchHistory(prisma, scope, { query: "ORBIT-990" })).messages.map(
+        (message) => message.messageId,
+      ),
+    ).toEqual(["current-thread-message"]);
+    const read = await readHistory(prisma, scope, {
+      messageId: "own-other-message",
+      threadId: "own-other-thread",
+    });
+    expect(read.messages.map((message) => message.messageId)).toEqual(["own-other-message"]);
+    expect(read.runs).toEqual([]);
+    expect(
+      (
+        await readHistory(prisma, scope, {
+          messageId: "other-user-message",
+          threadId: "other-user-thread",
+        })
+      ).messages,
+    ).toEqual([]);
+    expect(
+      (
+        await readHistory(prisma, scope, {
+          messageId: "other-user-message",
+          threadId: "own-other-thread",
+        })
+      ).messages,
+    ).toEqual([]);
+    expect(
+      (
+        await searchHistory(
+          prisma,
+          { ...scope, userId: "other-user" },
+          { query: "ORBIT-990", scope: "mine" },
+        )
+      ).messages,
     ).toEqual([]);
   });
 });

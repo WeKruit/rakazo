@@ -5,6 +5,10 @@ import {
   canTransition,
   isBackgroundRunTrigger,
   isConversationalRun,
+  RUN_COST_LIMIT_USD,
+  RUN_WALL_CLOCK_LIMIT_MS,
+  runBudgetExceeded,
+  runBudgetStopText,
 } from "./run-state.js";
 
 describe("run state machine", () => {
@@ -51,5 +55,25 @@ describe("run state machine", () => {
         },
       ),
     );
+  });
+});
+
+describe("run budget guardrails", () => {
+  it("names the first limit crossed and stays quiet under both", () => {
+    expect(runBudgetExceeded({ costUsd: RUN_COST_LIMIT_USD - 0.01, elapsedMs: 0 })).toBeNull();
+    expect(runBudgetExceeded({ costUsd: RUN_COST_LIMIT_USD, elapsedMs: 0 })).toBe("cost");
+    expect(runBudgetExceeded({ costUsd: 0, elapsedMs: RUN_WALL_CLOCK_LIMIT_MS })).toBe("time");
+    expect(runBudgetExceeded({ costUsd: 1, elapsedMs: 1 }, { costUsd: 1, wallClockMs: 1 })).toBe(
+      "cost",
+    );
+  });
+
+  it("tells the user which limit stopped the run and what was done", () => {
+    expect(runBudgetStopText("cost", { costUsd: 5.5, elapsedMs: 0, toolCalls: 1 })).toContain(
+      "cost limit (about $5.50 spent) after 1 tool call.",
+    );
+    expect(
+      runBudgetStopText("time", { costUsd: 0, elapsedMs: 7_200_000, toolCalls: 12 }),
+    ).toContain("time limit (120 minutes) after 12 tool calls.");
   });
 });

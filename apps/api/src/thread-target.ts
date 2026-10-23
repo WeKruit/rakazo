@@ -638,6 +638,8 @@ export async function sendThreadMessage(
     replyToMessageId?: string;
     replyQuote?: string;
     clientNonce?: string;
+    /** Interject: interrupt the bot's live reply with this message. */
+    interrupt?: boolean;
   },
   releaseTakeover?: (runId: string) => Promise<void>,
 ) {
@@ -814,12 +816,14 @@ export async function sendThreadMessage(
           }
           const active = activeRuns.find(steersUserMessage) ?? activeRuns[0];
           if (active) {
+            const steers = steersUserMessage(active);
             await tx.steeringMessage.create({
               data: {
                 messageId: message.id,
                 botId: target.botId,
                 userId: actor.userId,
-                runId: steersUserMessage(active) ? active.id : null,
+                runId: steers ? active.id : null,
+                ...(steers && input.interrupt ? { originTrigger: "interrupt" } : {}),
               },
             });
             await tx.message.update({ where: { id: message.id }, data: { runId: active.id } });
@@ -870,11 +874,7 @@ export async function sendThreadMessage(
             },
           });
           await tx.message.update({ where: { id: message.id }, data: { runId: run.id } });
-          await cancelSupersededQueuedRuns(tx, {
-            threadId: target.threadId,
-            botIds: [target.botId],
-            keepRunIds: [run.id],
-          });
+          // No queued run can exist here: activeRuns (which include queued) was empty.
           const event = await appendEventInTransaction(tx, {
             spaceId: actor.spaceId,
             threadId: target.threadId,
@@ -991,12 +991,14 @@ export async function sendThreadMessage(
           }
           const active = activeByBotId.get(botId);
           if (active) {
+            const steers = steersUserMessage(active);
             await tx.steeringMessage.create({
               data: {
                 messageId: message.id,
                 botId,
                 userId: actor.userId,
-                runId: steersUserMessage(active) ? active.id : null,
+                runId: steers ? active.id : null,
+                ...(steers && input.interrupt ? { originTrigger: "interrupt" } : {}),
               },
             });
             runs.push(active);
@@ -1035,18 +1037,9 @@ export async function sendThreadMessage(
         const firstRun = runs[0];
         const eventBotId = firstRun?.botId ?? targetBotIds[0];
         if (!eventBotId) throw new IsolationError("Group send did not resolve a target");
+        // Bots that received a new run had no active (hence no queued) run to supersede.
         if (firstRun) {
           await tx.message.update({ where: { id: message.id }, data: { runId: firstRun.id } });
-          const createdRuns = runs.filter(
-            (run) => !activeByBotId.has(run.botId) && !answeredByBotId.has(run.botId),
-          );
-          if (createdRuns.length) {
-            await cancelSupersededQueuedRuns(tx, {
-              threadId: target.threadId,
-              botIds: createdRuns.map((run) => run.botId),
-              keepRunIds: createdRuns.map((run) => run.id),
-            });
-          }
         }
         await touchGroupUpdatedAt(tx, target.groupId);
         const event = await appendEventInTransaction(tx, {
@@ -1082,16 +1075,19 @@ export async function sendThreadMessage(
     throw error;
   });
   if ("replay" in committed) return committed.replay;
-  await deps.events.notify(target.threadId, committed.eventSeq).catch((error) => {
-    // Subscribers catch up from the durable event cursor after a missed realtime wake.
-    getLogger().error("thread send realtime notification", error);
-  });
+  // The run row is already durable; the realtime wake and the worker wake are independent.
+  await Promise.all([
+    deps.events.notify(target.threadId, committed.eventSeq).catch((error) => {
+      // Subscribers catch up from the durable event cursor after a missed realtime wake.
+      getLogger().error("thread send realtime notification", error);
+    }),
+    enqueueRunsNeedingContinue(deps.jobs, committed.runs),
+  ]);
   if (releaseTakeover) {
     for (const run of committed.runs) {
       if (steersUserMessage(run)) await releaseTakeover(run.id);
     }
   }
-  await enqueueRunsNeedingContinue(deps.jobs, committed.runs);
   return sendResult(committed.message, committed.runs);
 }
 
@@ -1167,14 +1163,19 @@ export async function stopThreadRuns(
       select: { id: true, botId: true },
     });
     const ids = cancelled.map((run) => run.id);
-    await tx.steeringMessage.deleteMany({
-      where: {
-        ...(runId !== undefined
-          ? { runId: { in: ids } }
-          : { botId: { in: target.kind === "bot" ? [target.botId] : target.memberBotIds } }),
-        message: { threadId: target.threadId },
-      },
-    });
+    if (ids.length) {
+      // Steering the stopped run already claimed went into its context and ends with it.
+      // Unclaimed rows (steered but not yet read, or a queued continuation's input) survive
+      // as pending input: the next run in this thread claims them. Stop cancels the run,
+      // not what the user said while it ran.
+      await tx.steeringMessage.deleteMany({
+        where: { runId: { in: ids }, claimedAt: { not: null } },
+      });
+      await tx.steeringMessage.updateMany({
+        where: { runId: { in: ids } },
+        data: { runId: null },
+      });
+    }
     // Snapshot teardown coordinates before commit. Once cancellation becomes
     // visible, a worker can release its lease / execution columns immediately; a
     // later lookup would then miss the sandbox work this request must stop.

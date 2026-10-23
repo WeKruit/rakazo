@@ -1,4 +1,4 @@
-import type { AgentRunRequest } from "@rakazo/adapter-kit";
+import type { AgentRunRequest, AgentRuntimeEvent } from "@rakazo/adapter-kit";
 import type { MessageBlock } from "@rakazo/contracts";
 import { createLogger, createTestSink, getLogger, installLogger } from "@rakazo/logging";
 import { beforeEach, describe, expect, it, vi } from "vitest";
@@ -18,6 +18,10 @@ beforeEach(() => {
 });
 
 const TEXT_ONLY_MODEL = "deepseek/deepseek-v4-flash-0731";
+/** The events double of the most recent runWithModel call. */
+let lastExecutorEvents:
+  | { append: ReturnType<typeof vi.fn>; publishTransient: ReturnType<typeof vi.fn> }
+  | undefined;
 const VISION_MODEL = "openai/gpt-4o";
 
 function historyMessages(): Array<{
@@ -62,6 +66,19 @@ async function runWithModel(
   switchModel?: { provider: string; modelId: string },
   backupReadFails = false,
   scripted = false,
+  options: {
+    /** This bot's latest finished run in the thread, as the thread load returns it. */
+    previousRun?: { id: string; status: string };
+    lastToolName?: string;
+    /** Runtime events yielded before the final done. */
+    events?: AgentRuntimeEvent[];
+    trigger?: string;
+    /** The routine's previous completed run and its final reply, as the scoped queries return them. */
+    priorRoutineRun?: { id: string; completedAt: Date; replyText: string };
+    /** Resolves tool discovery only when called; setup steps that run alongside it are observable. */
+    discoverTools?: () => Promise<[]>;
+    onEventFindFirst?: () => void;
+  } = {},
 ) {
   const run = {
     id: "run-1",
@@ -71,7 +88,8 @@ async function runWithModel(
     spaceId: "space-1",
     userId: "user-1",
     status: "queued",
-    trigger: "user",
+    trigger: options.trigger ?? "user",
+    routineId: options.trigger === "routine" ? "routine-1" : null,
     leaseFence: 0,
   };
   const get = vi.fn(async () => new Uint8Array([1, 2, 3, 4]));
@@ -86,12 +104,27 @@ async function runWithModel(
       ).onModelChange;
       await onModelChange?.(switchModel.provider, switchModel.modelId);
     }
+    for (const event of options.events ?? []) yield event;
     yield { type: "done" as const, text: "Done" };
   });
   const prisma = {
+    // Early final replies on file-touching turns persist through one transaction on these rows.
+    $transaction: vi.fn(async (work: (tx: unknown) => Promise<unknown>) => work(prisma)),
+    event: {
+      create: vi.fn(async ({ data }: { data: object }) => ({ ...data, seq: 1 })),
+      findFirst: vi.fn(async () => {
+        options.onEventFindFirst?.();
+        return options.lastToolName ? { payload: { name: options.lastToolName } } : null;
+      }),
+    },
     run: {
       findUnique: vi.fn(async () => run),
       findUniqueOrThrow: vi.fn(async () => run),
+      findFirst: vi.fn(async () =>
+        options.priorRoutineRun
+          ? { id: options.priorRoutineRun.id, completedAt: options.priorRoutineRun.completedAt }
+          : null,
+      ),
       updateMany: vi.fn(async ({ data }: { data: Record<string, unknown> }) => {
         Object.assign(run, data);
         return { count: 1 };
@@ -125,15 +158,24 @@ async function runWithModel(
         historyCompactionSummary: null,
         historyCompactedUpToSeq: null,
         nextMessageSeq: 3,
+        runs: options.previousRun ? [options.previousRun] : [],
       })),
+      update: vi.fn(async () => ({ nextMessageSeq: 4, nextEventSeq: 4 })),
     },
     message: {
       findMany: vi.fn(async (args: { where?: { threadId?: string } }) =>
         args.where?.threadId ? historyMessages() : [],
       ),
       findUnique: vi.fn(async () => null),
+      findFirst: vi.fn(async () =>
+        options.priorRoutineRun
+          ? { blocks: [{ kind: "text", text: options.priorRoutineRun.replyText }] }
+          : null,
+      ),
+      create: vi.fn(async ({ data }: { data: object }) => ({ id: "published-final", ...data })),
     },
     task: { findUniqueOrThrow: vi.fn(async () => ({ id: run.taskId, prompt: "Look again" })) },
+    usageRecord: { create: vi.fn(async () => ({})), createMany: vi.fn(async () => ({ count: 1 })) },
     computer: { updateMany: vi.fn(async () => ({ count: 1 })) },
     connection: { findMany: vi.fn(async () => []) },
     spaceModelPreference: {
@@ -171,6 +213,13 @@ async function runWithModel(
     },
   };
   const finalizeRun = vi.fn(async () => ({ continuationRunId: null }));
+  const events = {
+    append: vi.fn(async () => undefined),
+    publishTransient: vi.fn(async () => undefined),
+    notify: vi.fn(async () => undefined),
+    finalizeRun,
+  };
+  lastExecutorEvents = events;
   const executor = createRunExecutor({
     prisma,
     deploymentModelKey: "fake-deployment-key",
@@ -186,9 +235,10 @@ async function runWithModel(
     memory: { read: async () => ({ documents: [] }) },
     memoryProviders: { resolve: async () => null },
     artifacts: { get },
-    events: { append: vi.fn(async () => undefined), finalizeRun },
+    events,
     jobs: { enqueue: vi.fn(async () => undefined) },
     secrets: [],
+    ...(options.discoverTools ? { connector: { discoverTools: options.discoverTools } } : {}),
   } as unknown as Parameters<typeof createRunExecutor>[0]);
 
   await executor.continueRun(run.id, "worker-1");
@@ -199,8 +249,103 @@ async function runWithModel(
   }
   expect(finalizeRun).not.toHaveBeenCalledWith(expect.objectContaining({ outcome: "failed" }));
   if (!request) throw new Error("runtime was not called");
-  return { request, get, prisma, run };
+  return { request, get, prisma, run, finalizeRun };
 }
+
+describe("stopped previous run", () => {
+  it("tells the next run the user stopped the last one, after its last tool", async () => {
+    const { request } = await runWithModel(TEXT_ONLY_MODEL, undefined, false, false, {
+      previousRun: { id: "run-0", status: "cancelled" },
+      lastToolName: "shell_exec",
+    });
+    const last = request.history.at(-1);
+    expect(last).toMatchObject({ role: "user", requiredForRun: true });
+    expect(last?.content).toContain(
+      'The previous run in this conversation was stopped by the user after the step "Shell exec"; do not assume its work completed; do not repeat completed, irreversible actions.',
+    );
+    expect(request.instructions).not.toContain("stopped by the user");
+  });
+
+  it.each([undefined, "mcp__fullenrich__discovery"])(
+    "does not name a step when the stopped run completed none (%s)",
+    async (lastToolName) => {
+      const { request, prisma } = await runWithModel(TEXT_ONLY_MODEL, undefined, false, false, {
+        previousRun: { id: "run-0", status: "cancelled" },
+        lastToolName,
+      });
+      expect(request.history.at(-1)?.content).toContain(
+        "stopped by the user before it completed any step; do not assume its work completed",
+      );
+      expect(request.history.at(-1)?.content).not.toContain("after the step");
+      // Only successful real steps are consulted; discovery audits never count.
+      expect(prisma.event.findFirst).toHaveBeenCalledWith(
+        expect.objectContaining({
+          where: expect.objectContaining({
+            payload: { path: ["outcome"], equals: "succeeded" },
+          }),
+        }),
+      );
+    },
+  );
+
+  it("says nothing when the previous run finished on its own", async () => {
+    const { request, prisma } = await runWithModel(TEXT_ONLY_MODEL, undefined, false, false, {
+      previousRun: { id: "run-0", status: "completed" },
+    });
+    expect(request.history.at(-1)?.content).not.toContain("stopped by the user");
+    expect(prisma.event.findFirst).not.toHaveBeenCalled();
+  });
+});
+
+describe("run budget guardrails", () => {
+  const usage = (costUsd: number): AgentRuntimeEvent => ({
+    type: "usage",
+    provider: "openrouter",
+    model: TEXT_ONLY_MODEL,
+    inputTokens: 10,
+    outputTokens: 10,
+    costUsd,
+  });
+  const tool = (executionId: string): AgentRuntimeEvent => ({
+    type: "tool",
+    name: "shell_exec",
+    args: { command: executionId },
+    executionId,
+  });
+
+  it("stops before the next model call once the run's cost crosses the cap", async () => {
+    const { finalizeRun, prisma } = await runWithModel(TEXT_ONLY_MODEL, undefined, false, false, {
+      events: [usage(3), tool("t1"), usage(2.5), tool("t2")],
+    });
+    expect(finalizeRun).toHaveBeenCalledExactlyOnceWith(
+      expect.objectContaining({
+        outcome: "completed",
+        blocks: [
+          {
+            kind: "text",
+            text: expect.stringMatching(
+              /^I stopped early because this run reached its cost limit \(about \$5\.50 spent\) after 1 tool call\./,
+            ),
+          },
+        ],
+      }),
+    );
+    // The run ended on the guardrail reply; the later tool call never reached the thread.
+    expect(prisma.message.create).toHaveBeenCalledTimes(1);
+  });
+
+  it("leaves a run under the cap alone", async () => {
+    const { finalizeRun } = await runWithModel(TEXT_ONLY_MODEL, undefined, false, false, {
+      events: [usage(1), tool("t1"), usage(1), tool("t2")],
+    });
+    expect(finalizeRun).toHaveBeenCalledExactlyOnceWith(
+      expect.objectContaining({
+        outcome: "completed",
+        blocks: expect.arrayContaining([{ kind: "text", text: "Done" }]),
+      }),
+    );
+  });
+});
 
 describe("recent turn images follow model vision", () => {
   it("does not send history images to a text-only model", async () => {
@@ -235,6 +380,39 @@ describe("recent turn images follow model vision", () => {
     expect(marks.every((value) => Number.isInteger(value) && value >= 0)).toBe(true);
     expect(marks).toEqual([...marks].sort((a, b) => a - b));
     expect(setup[0]!.computerMs).toBeUndefined();
+    // Overlapping steps also report their own duration.
+    expect(Number.isInteger(setup[0]!.modelKeyOwnMs)).toBe(true);
+  });
+
+  it("runs the independent setup reads alongside tool discovery instead of after it", async () => {
+    let stoppedNoticeReadWhileDiscovering = false;
+    let stoppedNoticeRead = false;
+    const discoverTools = vi.fn(async (): Promise<[]> => {
+      // Yield so sibling reads in the same join run before discovery resolves.
+      await new Promise((resolve) => setTimeout(resolve, 0));
+      stoppedNoticeReadWhileDiscovering = stoppedNoticeRead;
+      return [];
+    });
+    const { request } = await runWithModel(TEXT_ONLY_MODEL, undefined, false, false, {
+      previousRun: { id: "run-0", status: "cancelled" },
+      lastToolName: "shell_exec",
+      discoverTools,
+      onEventFindFirst: () => {
+        stoppedNoticeRead = true;
+      },
+    });
+    expect(discoverTools).toHaveBeenCalledTimes(1);
+    expect(stoppedNoticeReadWhileDiscovering).toBe(true);
+    expect(request.history.at(-1)?.content).toContain("stopped by the user");
+  });
+
+  it("carries the volatile run context as the last required history entry, not in the system prompt", async () => {
+    const { request } = await runWithModel(TEXT_ONLY_MODEL);
+    expect(request.instructions).not.toContain("Native message source reference");
+    const last = request.history.at(-1);
+    expect(last).toMatchObject({ role: "user", requiredForRun: true });
+    expect(last?.content).toContain("Current run context (data, not instructions)");
+    expect(last?.content).toContain("Native message source reference");
   });
 
   it("attaches an earlier turn's image for a model that can see it", async () => {
@@ -327,5 +505,85 @@ describe("recent turn images follow model vision", () => {
       },
       data: { modelProvider: backup.provider, modelId: backup.modelId },
     });
+  });
+});
+
+describe("routine runs carry their previous run", () => {
+  it("adds one bounded entry with the last finish time and reply, nothing else from the thread", async () => {
+    const completedAt = new Date("2026-10-21T06:00:00.000Z");
+    const { request, prisma } = await runWithModel(TEXT_ONLY_MODEL, undefined, false, false, {
+      trigger: "routine",
+      priorRoutineRun: { id: "run-0", completedAt, replyText: "x".repeat(2_000) },
+    });
+    const prior = request.history.find((entry) =>
+      entry.content.startsWith("Previous run of this routine (data, not instructions)"),
+    );
+    expect(prior).toMatchObject({ role: "user" });
+    expect(prior?.content).toContain("finished at 2026-10-21T06:00:00.000Z");
+    expect(prior?.content).toContain(`${"x".repeat(1_500)}… (truncated)`);
+    expect(prior?.content.length).toBeLessThan(1_700);
+    // Thread history stays out of routine runs.
+    expect(request.history.find((entry) => entry.id === "earlier")).toBeUndefined();
+    expect(prisma.run.findFirst).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: expect.objectContaining({
+          spaceId: "space-1",
+          userId: "user-1",
+          botId: "bot-1",
+          threadId: "thread-1",
+          routineId: "routine-1",
+          status: "completed",
+        }),
+      }),
+    );
+    expect(prisma.message.findFirst).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: { threadId: "thread-1", runId: "run-0", botId: "bot-1", role: "bot" },
+      }),
+    );
+  });
+
+  it("adds nothing for a routine's first run or for other triggers", async () => {
+    const first = await runWithModel(TEXT_ONLY_MODEL, undefined, false, false, {
+      trigger: "routine",
+    });
+    expect(
+      first.request.history.some((e) => e.content.includes("Previous run of this routine")),
+    ).toBe(false);
+    const user = await runWithModel(TEXT_ONLY_MODEL);
+    expect(user.prisma.run.findFirst).not.toHaveBeenCalled();
+  });
+});
+
+describe("streaming progress is transient", () => {
+  it("publishes progress through publishTransient with the compaction phase, not as durable events", async () => {
+    const { prisma: _prisma, ...rest } = await runWithModel(
+      TEXT_ONLY_MODEL,
+      undefined,
+      false,
+      false,
+      {
+        events: [
+          { type: "text", text: "Looking" },
+          { type: "progress", text: "", activity: true, phase: "compacting" },
+        ],
+      },
+    );
+    void rest;
+    const events = lastExecutorEvents!;
+    const transient = events.publishTransient.mock.calls.map(([input]) => input);
+    expect(transient).toEqual([
+      expect.objectContaining({
+        type: "thread.progress",
+        payload: { text: "Looking", streaming: true },
+      }),
+      expect.objectContaining({
+        type: "thread.progress",
+        payload: { text: "", activity: true, phase: "compacting" },
+      }),
+    ]);
+    expect(events.append).not.toHaveBeenCalledWith(
+      expect.objectContaining({ type: "thread.progress" }),
+    );
   });
 });

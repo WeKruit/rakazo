@@ -531,7 +531,7 @@ export const builtinAgentTools: ConnectorTool[] = [
   {
     name: "recruiting_role",
     description:
-      'Read, create, revise or select the current recruiting role in this thread. A new JD, description or document creates an independent role; never merge roles by company or title. Create shape: {operation:"create",title,sourceRefs:[],criteria:[],preferences:[],definitionQuestions:[],intent:{basis:"direct",quote:"exact current human wording"}}. All arrays are required; use [] only when empty. Each criterion needs id, priority (hard/preferred), expression, non-empty sourceRefs citing the relevant JD or actual human requirement, and definitionQuestions. Assign stable local criterion, atom and source IDs; use tool-returned real message/artifact IDs. Atom expression:{kind:"atom",id:<stable local atom ID>,statement:<requirement>}; all/any use items and not uses item. For JD URLs, call web_fetch before creating the role. Reuse its sourceMaterial artifact/hash, URL and readAt before role creation. Artifact sourceRef shape: {id:<stable local source ID>,kind:"original_material",anchor:{kind:"artifact",artifact:sourceMaterial.artifact,locator:"text"},readState:"read",readAt:sourceMaterial.readAt,url:sourceMaterial.url,quote:<one exact contiguous excerpt of returned text>}. Role and criterion sourceRefs contain full objects, never ID strings. One source ID identifies the same full unchanged object across the entire definition. Different quotes require different source IDs, even from one artifact. Never omit words or join separate passages within a quote; cite separate excerpts with separate sourceRefs. A receipt proves returned text, not complete JD coverage; retain unread sections in definitionQuestions. Do not create an empty placeholder role. For a pasted description, role-level sourceRefs:[] is valid; the runtime adds the verified human instruction only as role authorization. Each criterion must explicitly cite the relevant original requirement, using the actual message anchor and exact quote; a general instruction to read a JD is not criterion evidence. Known user_instruction brief fields still need a full human-message sourceRef and its local ID in sourceRefIds: use the native current-turn receipt\'s messageId, readAt and textBlocks blockIndex for anchor:{kind:"message",messageId,locator:"blocks[N].text"}, with the exact human quote. Never invent message IDs, artifact IDs or read timestamps. Read attachments before citing their real references. Create saves and binds the role; do not bind again after a saved workspace. Read uses {operation:"read"}. Revise requires roleId, loaded expectedRevision and the complete definition; copy unchanged criteria, IDs, sourceRefs, preferences and definitionQuestions, changing only the current human request. Bind uses {operation:"bind",roleId:<returned ID or null>,intent}. The optional top-level brief is an unconfirmed draft, not G0 approval. Its known facts need exact read sourceRefIds; every criterion needs a brief.rules entry with criterionId, origin, effect and sourceRefIds. Use salary_range for compensation. Carry already-read published compensation into the draft with its exact saved source; do not ask the human to supply that known value again. Published compensation is a fact, not permission to disclose it in outreach or send a message. Filters guide finding people and never replace qualification criteria. Inferred search filters use prefer; inferred rules use flag and preferred criteria. Keep location scope separate from candidate willingness. Reuse known answers; ask only material missing or conflicting information. Before saved-workspace research, save the draft and request recruiting_request_approval stage:"brief" for its exact current revision in this conversation; never supply confirmation. Direct current human wording authorizes changes; agent messages are context. Before a role exists use ask_user; for an existing role use recruiting_assess operation:"ask" with its current role/revision and target kind:"role". Correct deterministic schema rejections using the actual validator error and read receipt, then resubmit corrected arguments. Inspect an unknown external result\'s original receipt before retrying. Current role results replace earlier snapshots; reading or selecting a role never starts a search.',
+      'Read, create, revise or select the current recruiting role in this thread. A new JD, description or document creates an independent role; never merge roles by company or title. Create shape: {operation:"create",title,sourceRefs:[],criteria:[],preferences:[],definitionQuestions:[],intent:{basis:"direct",quote:"exact current human wording"}}. All arrays are required; use [] only when empty. Each criterion needs id, priority (hard/preferred), expression, non-empty sourceRefs citing the relevant JD or actual human requirement, and definitionQuestions. Assign stable local criterion, atom and source IDs; use tool-returned real message/artifact IDs. Atom expression:{kind:"atom",id:<stable local atom ID>,statement:<requirement>}; all/any use items and not uses item. For JD URLs, call web_fetch before creating the role. Reuse its sourceMaterial artifact/hash, URL and readAt before role creation. Artifact sourceRef shape: {id:<stable local source ID>,kind:"original_material",anchor:{kind:"artifact",artifact:sourceMaterial.artifact,locator:"text"},readState:"read",readAt:sourceMaterial.readAt,url:sourceMaterial.url,quote:<one exact contiguous excerpt of returned text>}. Role and criterion sourceRefs contain full objects, never ID strings. One source ID identifies the same full unchanged object across the entire definition. Different quotes require different source IDs, even from one artifact. Never omit words or join separate passages within a quote; cite separate excerpts with separate sourceRefs. A receipt proves returned text, not complete JD coverage; retain unread sections in definitionQuestions. Do not create an empty placeholder role. For a pasted description, role-level sourceRefs:[] is valid; the runtime adds the verified human instruction only as role authorization. Each criterion must explicitly cite the relevant original requirement, using the actual message anchor and exact quote; a general instruction to read a JD is not criterion evidence. Known user_instruction brief fields still need a full human-message sourceRef and its local ID in sourceRefIds: use the native current-turn receipt\'s messageId, readAt and textBlocks blockIndex for anchor:{kind:"message",messageId,locator:"blocks[N].text"}, with the exact human quote. Never invent message IDs, artifact IDs or read timestamps. Read attachments before citing their real references. Create saves and binds the role; do not bind again after a saved workspace. Read uses {operation:"read"}. To change an existing role, use update with only what changes: {operation:"update",roleId,expectedRevision:<loaded revision>,intent,...changed fields}. criteria:{upsert:[complete changed or new criteria],remove:[criterion IDs]}; title, brief, preferences and definitionQuestions replace the saved value only when supplied, and omitted fields keep the saved values. sourceRefs adds or replaces role sources by ID. Revise with the complete definition remains available for a full rewrite. Bind uses {operation:"bind",roleId:<returned ID or null>,intent}. The optional top-level brief is an unconfirmed draft, not G0 approval. Its known facts need exact read sourceRefIds; every criterion needs a brief.rules entry with criterionId, origin, effect and sourceRefIds. Use salary_range for compensation. Carry already-read published compensation into the draft with its exact saved source; do not ask the human to supply that known value again. Published compensation is a fact, not permission to disclose it in outreach or send a message. Filters guide finding people and never replace qualification criteria. Inferred search filters use prefer; inferred rules use flag and preferred criteria. Keep location scope separate from candidate willingness. Reuse known answers; ask only material missing or conflicting information. Before saved-workspace research, save the draft and request recruiting_request_approval stage:"brief" for its exact current revision in this conversation; never supply confirmation. Direct current human wording authorizes changes; agent messages are context. Before a role exists use ask_user; for an existing role use recruiting_assess operation:"ask" with its current role/revision and target kind:"role". Correct deterministic schema rejections using the actual validator error and read receipt, then resubmit corrected arguments. Inspect an unknown external result\'s original receipt before retrying. Current role results replace earlier snapshots; reading or selecting a role never starts a search.',
     inputSchema: z.toJSONSchema(RecruitingRoleToolInputSchema, { io: "input" }),
   },
   {
@@ -594,31 +594,45 @@ export const builtinAgentTools: ConnectorTool[] = [
   {
     name: "remember",
     description:
-      'Replace this bot\'s native memory document. Read it with read_memory first and preserve other facts. Use the loaded expectedRevision, or 0 for a new document. For reusable recruiting preferences, prefer one recruiting_feedback call with target:"preference". If using recruitingFeedback here, top-level content must be the complete resulting native document; recruitingFeedback.content is the full exact text added or replacing an anchored span, never a summary. Both must match the same edit. New role requirements, round scope changes and candidate decisions belong in recruiting_feedback. An explicitly requested private working note may summarize existing saved role state without becoming a reusable preference.',
+      'Save this bot\'s native memory document. Read it with read_memory first and use the loaded expectedRevision, or 0 for a new document. For a small change, prefer edit:{find,replace}: find must match the loaded document exactly once (include surrounding lines to disambiguate) and only that span changes; do not resend the whole document. Use content only to replace the whole document, preserving other facts. For reusable recruiting preferences, prefer one recruiting_feedback call with target:"preference". If using recruitingFeedback here, top-level content must be the complete resulting native document; recruitingFeedback.content is the full exact text added or replacing an anchored span, never a summary. Both must match the same edit. New role requirements, round scope changes and candidate decisions belong in recruiting_feedback. An explicitly requested private working note may summarize existing saved role state without becoming a reusable preference.',
     inputSchema: {
       type: "object",
       properties: {
-        content: { type: "string" },
+        content: { type: "string", description: "The document's complete new content." },
         path: { type: "string" },
         expectedRevision: { type: "integer", minimum: 0 },
+        edit: {
+          type: "object",
+          description:
+            "Partial edit: replace the single exact occurrence of find with replace. Mutually exclusive with content.",
+          properties: { find: { type: "string", minLength: 1 }, replace: { type: "string" } },
+          required: ["find", "replace"],
+        },
         recruitingFeedback: z.toJSONSchema(RecruitingPreferenceFeedbackSchema, { io: "input" }),
       },
-      required: ["content", "expectedRevision"],
+      required: ["expectedRevision"],
     },
   },
   {
     name: "save_shared_memory",
     description:
-      'Replace a native memory document shared across this user\'s bots in this Space. Read it with read_memory first and preserve other facts. Use the loaded expectedRevision, or 0 for a new document. For reusable recruiting preferences, prefer one recruiting_feedback call with target:"preference". If using recruitingFeedback here, top-level content must be the complete resulting native document; recruitingFeedback.content is the full exact text added or replacing an anchored span, never a summary. Both must match the same edit. Other recruiting feedback belongs in recruiting_feedback.',
+      'Save a native memory document shared across this user\'s bots in this Space. Read it with read_memory first and use the loaded expectedRevision, or 0 for a new document. For a small change, prefer edit:{find,replace}: find must match the loaded document exactly once and only that span changes. Use content only to replace the whole document, preserving other facts. For reusable recruiting preferences, prefer one recruiting_feedback call with target:"preference". If using recruitingFeedback here, top-level content must be the complete resulting native document; recruitingFeedback.content is the full exact text added or replacing an anchored span, never a summary. Both must match the same edit. Other recruiting feedback belongs in recruiting_feedback.',
     inputSchema: {
       type: "object",
       properties: {
         path: { type: "string", description: "Document name, for example MEMORY.md." },
         content: { type: "string", description: "The document's complete new content." },
         expectedRevision: { type: "integer", minimum: 0 },
+        edit: {
+          type: "object",
+          description:
+            "Partial edit: replace the single exact occurrence of find with replace. Mutually exclusive with content.",
+          properties: { find: { type: "string", minLength: 1 }, replace: { type: "string" } },
+          required: ["find", "replace"],
+        },
         recruitingFeedback: z.toJSONSchema(RecruitingPreferenceFeedbackSchema, { io: "input" }),
       },
-      required: ["path", "content", "expectedRevision"],
+      required: ["path", "expectedRevision"],
     },
   },
   {
@@ -723,11 +737,21 @@ export const builtinAgentTools: ConnectorTool[] = [
   {
     name: "search_history",
     description:
-      "Search literal keywords in earlier messages in this chat; every query word must match the same message. For paraphrased recollection, start with one distinctive project or topic keyword. Returns at most five matches, newest first. When nextSearch is present, call search_history with those arguments to continue. Coverage applies only to the requested literal query and range; an empty narrower query does not exhaust an unfinished broader query. Use read_history to check surrounding messages and corrections.",
+      "Search literal keywords in earlier messages in this chat; every query word must match the same message. For paraphrased recollection, start with one distinctive project or topic keyword. Returns at most five matches, newest first. When nextSearch is present, call search_history with those arguments to continue. Coverage applies only to the requested literal query and range; an empty narrower query does not exhaust an unfinished broader query. Use read_history to check surrounding messages and corrections. scope:\"mine\" instead searches this user's other conversations in this Space (their other bots and group chats, never other people's), returning the conversation title, a short snippet and messageId plus threadId; follow one with read_history using both.",
     inputSchema: {
       type: "object",
       properties: {
         query: { type: "string", minLength: 1, maxLength: 500 },
+        scope: {
+          type: "string",
+          enum: ["conversation", "mine"],
+          description:
+            "conversation (default): this chat only. mine: this user's other conversations.",
+        },
+        beforeMessageId: {
+          type: "string",
+          description: 'Pagination cursor from scope:"mine" results; keep before unchanged.',
+        },
         before: {
           type: "string",
           description: "Exclusive ISO date upper bound; date-only values mean UTC midnight.",
@@ -754,6 +778,11 @@ export const builtinAgentTools: ConnectorTool[] = [
       type: "object",
       properties: {
         messageId: { type: "string" },
+        threadId: {
+          type: "string",
+          description:
+            'Only for a messageId returned by search_history scope:"mine"; reads that conversation\'s messages without runs or receipts.',
+        },
         linkedRunId: {
           type: "string",
           description:

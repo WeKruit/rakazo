@@ -10,15 +10,18 @@ import {
   answerRunInput,
   answerWaitingRunWithTextInTransaction,
   appendEvent,
+  appendEventsInTransaction,
   claimSteering,
   clearThread,
   completedRunBlocks,
   discardAnsweredSteering,
   finalizeComputerControlRelease,
   finalizeRun,
+  followSidebar,
   followThreadEvents,
   pauseRunForInput,
   pauseRunForTakeover,
+  publishTransientThreadEvent,
   sendUserMessage,
 } from "./events.js";
 import { RunHistoryWriteError } from "./messages.js";
@@ -1058,6 +1061,131 @@ describe("followThreadEvents", () => {
     await expect(stream.next()).resolves.toMatchObject({ value: { seq: 0 }, done: false });
     abort.abort();
     await stream.return(undefined);
+  });
+
+  it("yields transient events after the durable ones they arrived with, stamped with the cursor", async () => {
+    const fanout = new TestFanout();
+    const findMany = vi
+      .fn()
+      .mockImplementationOnce(async () => {
+        await publishTransientThreadEvent(
+          { $transaction: vi.fn() } as unknown as PrismaClient,
+          {
+            spaceId: "workspace-1",
+            threadId: "thread-1",
+            botId: "bot-1",
+            runId: "run-1",
+            type: "thread.progress",
+            payload: { delta: "hel", streaming: true },
+          },
+          fanout,
+        );
+        await fanout.publish(
+          "thread:other",
+          JSON.stringify({ transient: { ...event(9), threadId: "other" } }),
+        );
+        return [event(3)];
+      })
+      .mockResolvedValueOnce([event(4)])
+      .mockResolvedValue([]);
+    const prisma = { event: { findMany } } as unknown as PrismaClient;
+    const abort = new AbortController();
+    const stream = followThreadEvents(prisma, "thread-1", 2, fanout, abort.signal, 10_000);
+
+    await expect(stream.next()).resolves.toMatchObject({ value: { seq: 3 } });
+    const transient = (await stream.next()).value;
+    expect(transient).toMatchObject({
+      type: "thread.progress",
+      threadId: "thread-1",
+      runId: "run-1",
+      seq: 3,
+      payload: { delta: "hel", streaming: true },
+    });
+    expect(ProductEventSchema.safeParse(transient).success).toBe(true);
+    await expect(stream.next()).resolves.toMatchObject({ value: { seq: 4 } });
+    expect(findMany).toHaveBeenCalledTimes(2);
+    abort.abort();
+    await stream.return(undefined);
+  });
+});
+
+describe("publishTransientThreadEvent", () => {
+  const progress = {
+    spaceId: "workspace-1",
+    threadId: "thread-1",
+    botId: "bot-1",
+    runId: "run-1",
+    type: "thread.progress" as const,
+    payload: { delta: "x", streaming: true },
+  };
+
+  it("sends the event over realtime with seq 0 and never writes it to the events table", async () => {
+    const fanout = new TestFanout();
+    const received: string[] = [];
+    await fanout.subscribe("thread:thread-1", (payload) => received.push(payload));
+    const transaction = vi.fn();
+    await publishTransientThreadEvent(
+      { $transaction: transaction } as unknown as PrismaClient,
+      progress,
+      fanout,
+    );
+    expect(transaction).not.toHaveBeenCalled();
+    expect(received).toHaveLength(1);
+    expect(JSON.parse(received[0]!)).toMatchObject({
+      transient: { ...progress, seq: 0, id: expect.any(String), createdAt: expect.any(String) },
+    });
+  });
+
+  it("falls back to the durable event when the signal is too large for NOTIFY", async () => {
+    const fanout = new TestFanout();
+    const published: string[] = [];
+    fanout.publish = async (_topic, payload) => {
+      published.push(payload);
+      if (Buffer.byteLength(payload, "utf8") > 7_900) throw new Error("payload too large");
+    };
+    let nextEventSeq = 0;
+    const tx = {
+      thread: { update: vi.fn(async () => ({ nextEventSeq: ++nextEventSeq })) },
+      run: { findUnique: vi.fn(async () => ({ status: "running", startedAt: null })) },
+      event: {
+        create: vi.fn(async ({ data }: { data: Record<string, unknown> & { seq: number } }) => ({
+          ...event(data.seq),
+          ...data,
+        })),
+      },
+    };
+    const prisma = {
+      $transaction: vi.fn(async (callback: (client: typeof tx) => Promise<unknown>) =>
+        callback(tx),
+      ),
+    } as unknown as PrismaClient;
+    const large = { ...progress, payload: { delta: "y".repeat(9_000), streaming: true } };
+    await publishTransientThreadEvent(prisma, large, fanout);
+    expect(tx.event.create).toHaveBeenCalledTimes(1);
+    expect(tx.event.create.mock.calls[0]![0].data).toMatchObject({
+      type: "thread.progress",
+      seq: 0,
+    });
+    // The failed transient signal, then the durable cursor notification.
+    expect(published).toHaveLength(2);
+    expect(JSON.parse(published[1]!)).toEqual({ cursor: 0 });
+  });
+
+  it("stores the event durably when no push fanout exists", async () => {
+    const tx = {
+      thread: { update: vi.fn(async () => ({ nextEventSeq: 1 })) },
+      run: { findUnique: vi.fn(async () => ({ status: "running", startedAt: null })) },
+      event: {
+        create: vi.fn(async ({ data }: { data: { seq: number } }) => ({ ...event(data.seq) })),
+      },
+    };
+    const prisma = {
+      $transaction: vi.fn(async (callback: (client: typeof tx) => Promise<unknown>) =>
+        callback(tx),
+      ),
+    } as unknown as PrismaClient;
+    await publishTransientThreadEvent(prisma, progress, undefined);
+    expect(tx.event.create).toHaveBeenCalledTimes(1);
   });
 });
 
@@ -4226,6 +4354,52 @@ describe("clearThread", () => {
   });
 });
 
+describe("claimSteering interject", () => {
+  it("marks a claimed steering row stored with the interrupt origin", async () => {
+    const tx = {
+      $queryRaw: vi.fn(),
+      run: {
+        findFirst: vi.fn().mockResolvedValue({ id: "run-1", spaceId: "space-1", trigger: "user" }),
+        findUnique: vi.fn().mockResolvedValue({ status: "running", startedAt: null }),
+      },
+      thread: {
+        findUniqueOrThrow: vi.fn().mockResolvedValue({ nextMessageSeq: 3 }),
+        update: vi.fn().mockResolvedValue({ nextEventSeq: 1 }),
+      },
+      event: { create: vi.fn() },
+      steeringMessage: {
+        findMany: vi.fn().mockResolvedValue([
+          {
+            id: "steer-1",
+            messageId: "message-1",
+            originTrigger: "interrupt",
+            message: { seq: 2, blocks: [{ kind: "text", text: "Stop, use the other file" }] },
+          },
+          {
+            id: "steer-2",
+            messageId: "message-2",
+            originTrigger: null,
+            message: { seq: 3, blocks: [{ kind: "text", text: "Also this" }] },
+          },
+        ]),
+        updateMany: vi.fn().mockResolvedValue({ count: 2 }),
+      },
+    };
+    const prisma = {
+      $transaction: vi.fn(async (callback: (client: typeof tx) => unknown) => callback(tx)),
+    } as unknown as PrismaClient;
+    const claimed = await claimSteering(prisma, {
+      threadId: "thread-1",
+      botId: "bot-1",
+      runId: "run-1",
+      leaseOwner: "worker-1",
+      leaseFence: 1,
+      seenIds: [],
+    });
+    expect(claimed.map((item) => item.interrupt)).toEqual([true, undefined]);
+  });
+});
+
 describe("appendEvent", () => {
   function appendFixture() {
     let nextEventSeq = 0;
@@ -4623,5 +4797,261 @@ describe("discardAnsweredSteering", () => {
         id: { in: ["answered"] },
       },
     });
+  });
+});
+
+describe("appendEventsInTransaction", () => {
+  function countingTx() {
+    const calls: string[] = [];
+    const record =
+      <T>(name: string, impl: (...args: never[]) => T) =>
+      (...args: never[]) => {
+        calls.push(name);
+        return impl(...args);
+      };
+    const createMany = vi.fn(async ({ data }: { data: unknown[] }) => ({ count: data.length }));
+    const tx = {
+      thread: {
+        update: vi.fn(
+          record(
+            "thread.update",
+            async ({ data }: { data: { nextEventSeq: { increment: number } } }) => ({
+              nextEventSeq: 5 + data.nextEventSeq.increment,
+            }),
+          ),
+        ),
+      },
+      run: {
+        findUnique: vi.fn(
+          record("run.findUnique", async () => ({ status: "running", startedAt: null })),
+        ),
+      },
+      event: {
+        create: vi.fn(record("event.create", async ({ data }: { data: { seq: number } }) => data)),
+        createMany: vi.fn(record("event.createMany", createMany)),
+      },
+    };
+    return { tx, calls, createMany };
+  }
+  const base = { spaceId: "space-1", threadId: "thread-1", botId: "bot-1", runId: "run-1" };
+
+  it("reserves the sequence range once and inserts the rows in order with sanitized payloads", async () => {
+    const { tx, calls } = countingTx();
+    const rows = await appendEventsInTransaction(tx as never, [
+      { ...base, type: "thread.message.created", payload: { messageId: "m-1", text: "a\ud83d" } },
+      { ...base, type: "thread.progress", payload: { text: "b" } },
+      { ...base, type: "run.completed", payload: {} },
+    ]);
+    expect(calls).toEqual(["thread.update", "run.findUnique", "event.createMany"]);
+    expect(tx.thread.update).toHaveBeenCalledWith({
+      where: { id: "thread-1" },
+      data: { nextEventSeq: { increment: 3 } },
+      select: { nextEventSeq: true, userId: true },
+    });
+    expect(rows.map((row) => [row.seq, row.type])).toEqual([
+      [5, "thread.message.created"],
+      [6, "thread.progress"],
+      [7, "run.completed"],
+    ]);
+    expect(tx.event.createMany).toHaveBeenCalledWith({ data: rows });
+    expect(JSON.stringify(rows[0]!.payload)).not.toContain("\\ud83d");
+    expect((rows[0]!.payload as { messageId: string }).messageId).toBe("m-1");
+  });
+
+  it("takes the single-row path for one event and refuses mixed threads", async () => {
+    const { tx, calls } = countingTx();
+    const [row] = await appendEventsInTransaction(tx as never, [
+      { ...base, type: "run.failed", payload: { error: "x" } },
+    ]);
+    expect(row!.seq).toBe(5);
+    expect(calls).toEqual(["thread.update", "run.findUnique", "event.create"]);
+    await expect(
+      appendEventsInTransaction(tx as never, [
+        { ...base, type: "run.failed", payload: {} },
+        { ...base, threadId: "thread-2", type: "run.failed", payload: {} },
+      ]),
+    ).rejects.toThrow(/one thread/);
+    expect(await appendEventsInTransaction(tx as never, [])).toEqual([]);
+  });
+
+  it("finalizes a completed run with one event reservation and one insert", async () => {
+    const { tx, calls } = countingTx();
+    const full = {
+      ...tx,
+      $queryRaw: vi.fn(async () => []),
+      run: {
+        ...tx.run,
+        findUniqueOrThrow: vi.fn(async () => ({ sourceMessage: null })),
+        findFirst: vi.fn(async () => null),
+        updateMany: vi.fn(async () => ({ count: 1 })),
+      },
+      attempt: { updateMany: vi.fn(async () => ({ count: 1 })) },
+      task: { updateMany: vi.fn(async () => ({ count: 1 })) },
+      thread: {
+        update: vi.fn(async ({ data }: { data: Record<string, { increment: number }> }) => {
+          calls.push(data.nextEventSeq ? "thread.update:event" : "thread.update:message");
+          return { nextMessageSeq: 2, nextEventSeq: 5 + (data.nextEventSeq?.increment ?? 0) };
+        }),
+      },
+      event: { ...tx.event, deleteMany: vi.fn(async () => ({ count: 0 })) },
+      message: {
+        findFirst: vi.fn(async () => null),
+        create: vi.fn(async ({ data }: { data: object }) => ({ ...data, id: "message-1" })),
+      },
+      steeringMessage: {
+        findMany: vi.fn(async () => []),
+        deleteMany: vi.fn(async () => ({ count: 0 })),
+        updateMany: vi.fn(async () => ({ count: 0 })),
+      },
+      bot: { update: vi.fn(async () => ({})) },
+    };
+    const prisma = {
+      $transaction: vi.fn(async (callback: (client: typeof full) => unknown) => callback(full)),
+    } as unknown as PrismaClient;
+    const publish = vi.fn(async () => undefined);
+    await expect(
+      finalizeRun(
+        prisma,
+        {
+          spaceId: "space-1",
+          threadId: "thread-1",
+          botId: "bot-1",
+          runId: "run-1",
+          taskId: "task-1",
+          attemptId: "attempt-1",
+          leaseOwner: "worker-1",
+          leaseFence: 1,
+          outcome: "completed",
+          blocks: [{ kind: "text", text: "done" }],
+        },
+        { publish } as never,
+      ),
+    ).resolves.toEqual({ continuationRunId: null });
+    expect(calls.filter((name) => name.startsWith("thread.update:event"))).toHaveLength(1);
+    expect(calls.filter((name) => name === "event.createMany")).toHaveLength(1);
+    expect(calls.filter((name) => name === "event.create")).toHaveLength(0);
+    const inserted = full.event.createMany.mock.calls[0]?.[0] as unknown as {
+      data: Array<{ type: string }>;
+    };
+    expect(inserted.data.map((row) => row.type)).toEqual([
+      "thread.message.created",
+      "run.completed",
+    ]);
+    expect(publish).toHaveBeenCalledWith(expect.any(String), JSON.stringify({ cursor: 6 }));
+  });
+});
+
+describe("sidebar signal", () => {
+  /** Topic-aware fanout: the shared TestFanout ignores topics. */
+  class TopicFanout implements RealtimeFanout {
+    readonly subscribers = new Map<string, Set<(payload: string) => void>>();
+    readonly published: [string, string][] = [];
+    describe() {
+      return {
+        id: "test",
+        contractVersion: "1",
+        adapterVersion: "1",
+        capabilities: { distributed: false, push: true },
+      };
+    }
+    async publish(topic: string, payload: string) {
+      this.published.push([topic, payload]);
+      for (const subscriber of this.subscribers.get(topic) ?? []) subscriber(payload);
+    }
+    async subscribe(topic: string, subscriber: (payload: string) => void) {
+      const set = this.subscribers.get(topic) ?? new Set();
+      set.add(subscriber);
+      this.subscribers.set(topic, set);
+      return async () => {
+        set.delete(subscriber);
+      };
+    }
+    async close() {}
+  }
+
+  function fixture() {
+    let nextEventSeq = 0;
+    const tx = {
+      thread: { update: vi.fn(async () => ({ nextEventSeq: ++nextEventSeq, userId: "user-1" })) },
+      event: {
+        create: vi.fn(async ({ data }: { data: Record<string, unknown> & { seq: number } }) => ({
+          ...event(data.seq),
+          ...data,
+        })),
+      },
+    };
+    const prisma = {
+      $transaction: vi.fn(async (callback: (client: typeof tx) => Promise<unknown>) =>
+        callback(tx),
+      ),
+    } as unknown as PrismaClient;
+    return { prisma, fanout: new TopicFanout() };
+  }
+
+  const started = {
+    spaceId: "workspace-1",
+    threadId: "thread-1",
+    botId: "bot-1",
+    type: "run.started" as const,
+    payload: {},
+  };
+
+  it("publishes a space+user signal after a sidebar-relevant append, and nothing for others", async () => {
+    const f = fixture();
+    await appendEvent(f.prisma, started, f.fanout);
+    expect(f.fanout.published).toEqual([
+      ["thread:thread-1", JSON.stringify({ cursor: 0 })],
+      ["space:workspace-1:user:user-1", JSON.stringify({ botId: "bot-1", type: "run.started" })],
+    ]);
+    await appendEvent(f.prisma, { ...started, type: "thread.progress" }, f.fanout);
+    expect(f.fanout.published).toHaveLength(3);
+    expect(f.fanout.published[2]?.[0]).toBe("thread:thread-1");
+  });
+
+  it("wakes the owning user's follower and never another user's in the same space", async () => {
+    const f = fixture();
+    const abort = new AbortController();
+    const mine = followSidebar(
+      { spaceId: "workspace-1", userId: "user-1" },
+      f.fanout,
+      abort.signal,
+    );
+    const theirs = followSidebar(
+      { spaceId: "workspace-1", userId: "user-2" },
+      f.fanout,
+      abort.signal,
+    );
+    await expect(mine.next()).resolves.toEqual({ value: undefined, done: false });
+    await expect(theirs.next()).resolves.toEqual({ value: undefined, done: false });
+
+    const theirsNext = theirs.next();
+    await appendEvent(f.prisma, started, f.fanout);
+    await expect(mine.next()).resolves.toEqual({
+      value: { botId: "bot-1", type: "run.started" },
+      done: false,
+    });
+    const outcome = await Promise.race([
+      theirsNext.then(() => "woke" as const),
+      new Promise<"idle">((resolve) => setTimeout(() => resolve("idle"), 20)),
+    ]);
+    expect(outcome).toBe("idle");
+    abort.abort();
+    await mine.return(undefined);
+    await theirs.return(undefined);
+    expect(f.fanout.subscribers.get("space:workspace-1:user:user-1")?.size ?? 0).toBe(0);
+  });
+
+  it("ticks on its own when no signal arrives", async () => {
+    const abort = new AbortController();
+    const stream = followSidebar(
+      { spaceId: "workspace-1", userId: "user-1" },
+      undefined,
+      abort.signal,
+      1,
+    );
+    await expect(stream.next()).resolves.toEqual({ value: undefined, done: false });
+    await expect(stream.next()).resolves.toEqual({ value: undefined, done: false });
+    abort.abort();
+    await stream.return(undefined);
   });
 });

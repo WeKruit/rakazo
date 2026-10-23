@@ -8,6 +8,8 @@ import {
   catalogApprovalRequest,
   connectorKindFromToolName,
   connectorToolRequiresApproval,
+  EXTERNAL_TEXT_TRIGGER_REFUSAL,
+  externalTextTriggerToolRefusal,
   isApprovalAskBlock,
   isSecretAskBlock,
   planActionGate,
@@ -344,6 +346,108 @@ describe("resolveActionApprovalDetail", () => {
     const base = { toolName: "gmail_read_thread", connectorKind: "gmail", rules };
     expect(resolveActionApprovalDetail(base).decision).toBe("allow");
     expect(resolveActionApprovalDetail({ ...base, readOnly: false }).decision).toBe("ask");
+  });
+});
+
+describe("externalTextTriggerToolRefusal", () => {
+  const mcp = (toolName: string) => ({ connectorId: "mcp", toolName });
+
+  it("refuses sends and outbound record changes on messaging-triggered runs", () => {
+    expect(
+      externalTextTriggerToolRefusal(
+        "messaging",
+        "mcp__mail__reply_to_email",
+        true,
+        mcp("reply_to_email"),
+      ),
+    ).toBe(EXTERNAL_TEXT_TRIGGER_REFUSAL);
+    expect(
+      externalTextTriggerToolRefusal("messaging", "composio_execute", true, {
+        connectorId: "composio",
+        toolName: "GMAIL_SEND_EMAIL",
+      }),
+    ).toBe(EXTERNAL_TEXT_TRIGGER_REFUSAL);
+    expect(
+      externalTextTriggerToolRefusal(
+        "messaging",
+        "gmail_send_email",
+        true,
+        undefined,
+        undefined,
+        null,
+        false,
+      ),
+    ).toBe(EXTERNAL_TEXT_TRIGGER_REFUSAL);
+    expect(
+      externalTextTriggerToolRefusal(
+        "messaging",
+        "mcp__crm__delete_lead",
+        true,
+        mcp("delete_lead"),
+      ),
+    ).toBe(EXTERNAL_TEXT_TRIGGER_REFUSAL);
+    expect(
+      externalTextTriggerToolRefusal(
+        "messaging",
+        "mcp__crm__add_leads_to_campaign_or_list_bulk",
+        true,
+        mcp("add_leads_to_campaign_or_list_bulk"),
+      ),
+    ).toBe(EXTERNAL_TEXT_TRIGGER_REFUSAL);
+    expect(
+      externalTextTriggerToolRefusal(
+        "messaging",
+        "mcp__calendar__create_event",
+        true,
+        mcp("create_event"),
+        {},
+        "https://calendarmcp.googleapis.com/mcp/v1",
+      ),
+    ).toBe(EXTERNAL_TEXT_TRIGGER_REFUSAL);
+  });
+
+  it("keeps reads and drafts available on messaging-triggered runs", () => {
+    for (const [name, route, readOnly] of [
+      ["mcp__mail__search_threads", mcp("search_threads"), true],
+      ["mcp__mail__create_draft", mcp("create_draft"), undefined],
+      ["mcp__crm__get_lead", mcp("get_lead"), undefined],
+      ["mcp__crm__update_lead", mcp("update_lead"), undefined],
+    ] as const) {
+      expect(
+        externalTextTriggerToolRefusal("messaging", name, true, route, undefined, null, readOnly),
+      ).toBeUndefined();
+    }
+    for (const name of [
+      "recruiting_reply",
+      "recruiting_crm_import",
+      "read_file",
+      "write_file",
+      "web_search",
+      "remember",
+    ]) {
+      expect(externalTextTriggerToolRefusal("messaging", name, false)).toBeUndefined();
+    }
+  });
+
+  it("does not apply to attended, routine or webhook triggers", () => {
+    for (const trigger of [
+      "user",
+      "follow_up",
+      "routine",
+      "webhook",
+      "bot_message",
+      "cloud_agent",
+    ]) {
+      expect(
+        externalTextTriggerToolRefusal(
+          trigger,
+          "mcp__mail__reply_to_email",
+          true,
+          mcp("reply_to_email"),
+        ),
+      ).toBeUndefined();
+      expect(externalTextTriggerToolRefusal(trigger, "gmail_send_email", true)).toBeUndefined();
+    }
   });
 });
 

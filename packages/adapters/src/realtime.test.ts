@@ -1,6 +1,10 @@
 import type { Notification } from "pg";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { PostgresRealtimeFanout, type RealtimeListenerClient } from "./realtime.js";
+import {
+  PostgresRealtimeFanout,
+  type RealtimeListenerClient,
+  RealtimePayloadTooLargeError,
+} from "./realtime.js";
 
 class FakeClient implements RealtimeListenerClient {
   readonly queries: string[] = [];
@@ -72,6 +76,25 @@ function setup(options: { reconnectBaseMs?: number } = {}) {
 
 describe("PostgresRealtimeFanout", () => {
   afterEach(() => vi.useRealTimers());
+
+  it("delivers a transient event payload inline and rejects one that cannot fit NOTIFY", async () => {
+    const { realtime, published } = setup();
+    const small = JSON.stringify({
+      transient: { type: "thread.progress", payload: { delta: "x" } },
+    });
+    await realtime.publish("thread:t", small);
+    expect(published).toHaveLength(1);
+    expect(JSON.parse(published[0]!.values[1] as string)).toEqual({
+      topic: "thread:t",
+      payload: small,
+    });
+    const large = JSON.stringify({ transient: { payload: { delta: "y".repeat(9_000) } } });
+    await expect(realtime.publish("thread:t", large)).rejects.toBeInstanceOf(
+      RealtimePayloadTooLargeError,
+    );
+    expect(published).toHaveLength(1);
+    await realtime.close();
+  });
 
   it("shares one fixed-channel listener across many logical subscribers", async () => {
     const { realtime, clients } = setup();

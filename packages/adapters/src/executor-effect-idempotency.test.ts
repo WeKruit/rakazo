@@ -33,10 +33,17 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import type * as AutoReviewModule from "./auto-review.js";
 import { runAutoReviewJudge } from "./auto-review.js";
+import type * as BotSecretsModule from "./bot-secrets.js";
+import { shellCommandEnvironment } from "./bot-secrets.js";
 import type * as ComputerLifecycleModule from "./computer-lifecycle.js";
 import { acquireComputerExecutionLease, ComputerBusyError } from "./computer-lifecycle.js";
 import type * as ComputerWorkspaceModule from "./computer-workspace.js";
-import { createRunExecutor, selectBuiltinToolsForRun } from "./executor.js";
+import {
+  createRunExecutor,
+  resumeBriefForRun,
+  selectBuiltinToolsForRun,
+  toolArgsSummary,
+} from "./executor.js";
 import {
   CATALOG_EXECUTE,
   catalogEntries,
@@ -100,12 +107,30 @@ vi.mock("./computer-lifecycle.js", async (importOriginal) => ({
   provisionComputer: async () => ({ id: "computer-1", kind: "desktop" }),
 }));
 
+/** System prompt plus the required run-context history entry; volatile context rides in history now. */
+function promptContext(request: {
+  instructions?: string;
+  history?: Array<{ content: string; requiredForRun?: true }>;
+}): string {
+  return [
+    request.instructions ?? "",
+    ...(request.history ?? [])
+      .filter((entry) => entry.requiredForRun)
+      .map((entry) => entry.content),
+  ].join("\n\n");
+}
+
 const checkpointWorkspace = vi.hoisted(() => vi.fn(async () => "home-revision"));
 vi.mock("./computer-workspace.js", async (importOriginal) => ({
   ...(await importOriginal<typeof ComputerWorkspaceModule>()),
   checkpointRunComputerWorkspace: checkpointWorkspace,
 }));
 beforeEach(() => checkpointWorkspace.mockClear());
+
+vi.mock("./bot-secrets.js", async (importOriginal) => {
+  const actual = await importOriginal<typeof BotSecretsModule>();
+  return { ...actual, shellCommandEnvironment: vi.fn(actual.shellCommandEnvironment) };
+});
 
 vi.mock("./auto-review.js", async (importOriginal) => ({
   ...(await importOriginal<typeof AutoReviewModule>()),
@@ -245,10 +270,14 @@ function fixture(
       },
     ),
   };
+  const published: Array<{ role: string; blocks: unknown }> = [];
   const prisma = {
     $queryRaw: vi.fn(async () => [] as Array<Record<string, unknown>>),
+    // Durable mid-turn and early-final messages go through one transaction on these rows.
+    $transaction: vi.fn(async (work: (tx: unknown) => Promise<unknown>) => work(prisma)),
     event: {
       findMany: vi.fn(async () => [] as Array<{ seq: number; type: string; payload: unknown }>),
+      create: vi.fn(async ({ data }: { data: object }) => ({ ...data, seq: 1 })),
     },
     run: {
       findMany: vi.fn(async () => []),
@@ -290,13 +319,20 @@ function fixture(
       update: vi.fn(),
       updateMany: vi.fn(async () => ({ count: 1 })),
     },
-    thread: { findUniqueOrThrow: vi.fn(async () => thread) },
+    thread: {
+      findUniqueOrThrow: vi.fn(async () => thread),
+      update: vi.fn(async () => ({ nextMessageSeq: 2, nextEventSeq: 2 })),
+    },
     message: {
       findMany: vi.fn(async ({ select }: { select?: Record<string, boolean> } = {}) =>
         select?.id && select.seq && Object.keys(select).length === 2 ? sourceMessages : [],
       ),
       findFirst: vi.fn(async () => null),
       findUnique: vi.fn(async () => null),
+      create: vi.fn(async ({ data }: { data: { role: string; blocks: unknown } }) => {
+        published.push({ role: data.role, blocks: data.blocks });
+        return { id: `message-${published.length}`, ...data };
+      }),
     },
     task: {
       findUniqueOrThrow: vi.fn(async () => ({ id: run.taskId, prompt: "Update shared state" })),
@@ -344,7 +380,10 @@ function fixture(
     actionApprovalRule: { findMany: vi.fn(async (): Promise<ActionApprovalRule[]> => []) },
     actionAutoReviewPreference: { findUnique: vi.fn(async () => ({ enabled: false })) },
     externalEffect,
-    artifact: { findFirst: vi.fn(), findMany: vi.fn(async () => []) },
+    artifact: {
+      findFirst: vi.fn(),
+      findMany: vi.fn(async (): Promise<Array<{ id: string; name: string }>> => []),
+    },
   };
   const pauseRunForInput = vi.fn<ThreadEvents["pauseRunForInput"]>(async () => {
     run.status = "waiting_input";
@@ -399,6 +438,7 @@ function fixture(
     artifacts: options.attachmentStore === false ? undefined : artifacts,
     events: {
       append: vi.fn(async () => undefined),
+      publishTransient: vi.fn(async () => undefined),
       notify: vi.fn(async () => undefined),
       pauseRunForInput,
       finalizeRun,
@@ -412,6 +452,7 @@ function fixture(
 
   return {
     effects,
+    published,
     executor,
     executorDeps,
     results,
@@ -694,12 +735,51 @@ describe("worker shutdown recovery", () => {
       expect.objectContaining({ data: { status: "interrupted", finishedAt: expect.any(Date) } }),
     );
     f.setCalls([{ name: "remember", args, executionId: "after-restart" }]);
+    // Durable audit of the first attempt: a paid research call whose output was stored.
+    const researchDigest = createHash("sha256").update("research-1").digest("hex").slice(0, 12);
+    // Other scoped reads share this mock; only the audit query sees the first attempt's events.
+    const auditEvents = [
+      {
+        seq: 1,
+        type: "agent.tool.called",
+        payload: {
+          name: "recruiting_research",
+          executionId: "research-1",
+          argsSummary: "query=senior backend engineer",
+        },
+      },
+      {
+        seq: 2,
+        type: "agent.tool.completed",
+        payload: { name: "recruiting_research", executionId: "research-1", outcome: "succeeded" },
+      },
+      {
+        seq: 3,
+        type: "thread.message.created",
+        payload: { role: "bot", blocks: [{ kind: "text", text: "Found 12 profiles so far." }] },
+      },
+    ];
+    f.prisma.event.findMany.mockImplementation(
+      async (query?: { where?: { type?: { in?: string[] } } }) =>
+        query?.where?.type?.in?.includes("agent.tool.completed") ? auditEvents : [],
+    );
+    f.prisma.artifact.findMany.mockResolvedValueOnce([
+      { id: "art-research", name: `recruiting_research-${researchDigest}.txt` },
+    ]);
     await createRunExecutor({
       ...f.executorDeps,
       shutdownSignal: new AbortController().signal,
     }).continueRun(f.runData.id, "worker-2");
     expect(f.runData).toMatchObject({ status: "completed", taskId, leaseFence: 2 });
     expect(f.runtimeRun).toHaveBeenCalledTimes(2);
+    const firstTurn = f.runtimeRun.mock.calls[0]![0].history.at(-1)?.content ?? "";
+    const resumedTurn = f.runtimeRun.mock.calls[1]![0].history.at(-1)?.content ?? "";
+    expect(firstTurn).not.toContain("interrupted and resumed");
+    expect(resumedTurn).toContain("This run was interrupted and resumed.");
+    expect(resumedTurn).toContain(
+      "- recruiting_research(query=senior backend engineer) completed; full output saved as artifact art-research (artifact_read)",
+    );
+    expect(resumedTurn).toContain("- Found 12 profiles so far.");
     expect(f.results).toEqual([{ uncertain: true }]);
     expect(f.memoryCommit).not.toHaveBeenCalled();
     expect(f.effects).toEqual(before);
@@ -819,7 +899,7 @@ describe("explicit artifact workspace writes", () => {
     ]);
     f.runtimeRun.mockImplementation(async function* (request) {
       expect(request.prompt).not.toContain("available on your computer");
-      expect(request.instructions).toContain(`"artifactId":"${original.id}"`);
+      expect(promptContext(request)).toContain(`"artifactId":"${original.id}"`);
       const [steering] = await request.claimSteering!([]);
       expect(steering!.text).toContain(`"artifactId":"${original.id}"`);
       expect(steering!.text).not.toContain("available on your computer");
@@ -2042,7 +2122,7 @@ describe("native recruiting role effect delivery", () => {
 
     expect(executeRecruitingRoleTool).toHaveBeenCalledOnce();
     expect(loadRecruitingRunContext).toHaveBeenCalledTimes(2);
-    expect(f.runtimeRun.mock.calls[0]![0].instructions).toContain(adopted.text);
+    expect(promptContext(f.runtimeRun.mock.calls[0]![0])).toContain(adopted.text);
     expect(vi.mocked(loadRecruitingRunContext).mock.calls[1]![4].trustedWorkspace).toBeUndefined();
     expect(f.results[0]).toEqual(
       expect.objectContaining({
@@ -2107,9 +2187,9 @@ describe("native recruiting role effect delivery", () => {
     expect(loadRecruitingRunContext).toHaveBeenCalledOnce();
     expect(executeRecruitingRoleTool).not.toHaveBeenCalled();
     const request = f.runtimeRun.mock.calls[0]![0];
-    expect(request.instructions?.split(fullContext)).toHaveLength(2);
-    expect(request.instructions?.split(fact)).toHaveLength(2);
-    expect(request.instructions).toContain("Must personally implement geometry calculations");
+    expect(promptContext(request)?.split(fullContext)).toHaveLength(2);
+    expect(promptContext(request)?.split(fact)).toHaveLength(2);
+    expect(promptContext(request)).toContain("Must personally implement geometry calculations");
     expect(request.instructions).not.toContain("[object Object]");
   });
 
@@ -2136,7 +2216,7 @@ describe("native recruiting role effect delivery", () => {
 
       await f.run();
 
-      expect(f.runtimeRun.mock.calls[0]![0].instructions?.split(adopted.text)).toHaveLength(2);
+      expect(promptContext(f.runtimeRun.mock.calls[0]![0])?.split(adopted.text)).toHaveLength(2);
       expect(f.results).toEqual([
         {
           ...receipt,
@@ -2357,7 +2437,7 @@ describe("native recruiting role effect delivery", () => {
         historyText: peer.text,
       }),
     ]);
-    expect(f.runtimeRun.mock.calls[0]![0].instructions?.split(adopted.text)).toHaveLength(2);
+    expect(promptContext(f.runtimeRun.mock.calls[0]![0])?.split(adopted.text)).toHaveLength(2);
     expect(f.results).toEqual([{ ...delivered, roleContext: unchangedContextNotice }]);
   });
 
@@ -2396,7 +2476,7 @@ describe("native recruiting role effect delivery", () => {
 
     await f.run();
 
-    expect(f.runtimeRun.mock.calls[0]![0].instructions?.split(adopted.text)).toHaveLength(2);
+    expect(promptContext(f.runtimeRun.mock.calls[0]![0])?.split(adopted.text)).toHaveLength(2);
     expect(claimed[0]?.text).toContain(changed.text);
     expect(claimed[1]?.text).toContain(unchangedContextNotice);
     expect(claimed[1]?.text).not.toContain(adopted.text);
@@ -3859,7 +3939,9 @@ describe("native recruiting research executor integration", () => {
       yield { type: "result", data: rawResult };
     });
     vi.mocked(completeRecruitingResearchCall).mockImplementation(
-      async (_deps, _trusted, _admission, result) => {
+      async (researchDeps, _trusted, _admission, result) => {
+        // Still-working research is handed to the poll job through the executor's publisher.
+        expect(researchDeps).toEqual(expect.objectContaining({ jobs: f.executorDeps.jobs }));
         expect(result).toEqual(rawResult);
         expect(effect).toEqual(expect.objectContaining({ status: "completed", result: rawResult }));
         return completed as never;
@@ -4742,9 +4824,9 @@ describe("native recruiting assessment effect delivery", () => {
       };
       f.prisma.message.findMany.mockResolvedValue([human]);
       f.runtimeRun.mockImplementation(async function* (request) {
-        expect(request.instructions).toContain('"messageId":"human-evidence-source"');
-        expect(request.instructions).toContain('"blockIndex":0');
-        expect(request.instructions).toContain(
+        expect(promptContext(request)).toContain('"messageId":"human-evidence-source"');
+        expect(promptContext(request)).toContain('"blockIndex":0');
+        expect(promptContext(request)).toContain(
           '"selection":{"kind":"message_text","blockIndex":0,"start":0,"end":21}',
         );
         expect(request.instructions).not.toContain('"text":"Exact source material"');
@@ -4815,8 +4897,8 @@ describe("native recruiting assessment effect delivery", () => {
         },
       ]);
       f.runtimeRun.mockImplementation(async function* (request) {
-        const line = request
-          .instructions!.split("\n")
+        const line = promptContext(request)
+          .split("\n")
           .find((line) => line.startsWith("Native message source reference"))!;
         expect(JSON.parse(line.slice(line.indexOf("{")))).toMatchObject({
           messageId: human.id,
@@ -4889,8 +4971,8 @@ describe("native recruiting assessment effect delivery", () => {
     f.prisma.message.findMany.mockResolvedValue([current, original]);
     f.prisma.$queryRaw.mockResolvedValue([original]);
     f.runtimeRun.mockImplementation(async function* (request) {
-      const sourceLine = request
-        .instructions!.split("\n")
+      const sourceLine = promptContext(request)
+        .split("\n")
         .find((line) => line.startsWith("Native message source reference"))!;
       expect(JSON.parse(sourceLine.slice(sourceLine.indexOf("{")))).toMatchObject({
         messageId: current.id,
@@ -5199,8 +5281,8 @@ describe("native recruiting assessment effect delivery", () => {
             expect(request.prompt).not.toContain("private-selected-value");
             expect(request.instructions).not.toContain("private-selected-value");
           }
-          const metadata = request
-            .instructions!.split("\n")
+          const metadata = promptContext(request)
+            .split("\n")
             .filter((line) => line.startsWith("Native message source reference"))
             .map((line) => JSON.parse(line.slice(line.indexOf("{"))));
           expect(metadata.map((source) => source.messageId)).toEqual(
@@ -5531,5 +5613,206 @@ describe("native recruiting assessment effect delivery", () => {
     expect(
       selectBuiltinToolsForRun({ ...options, messagingChannelRun: true }).map((tool) => tool.name),
     ).not.toContain("recruiting_assess");
+  });
+});
+
+describe("final reply before the terminal workspace checkpoint", () => {
+  it("publishes the reply, then checkpoints under the run lease, then finalizes without a copy", async () => {
+    const f = fixture("reply-before-checkpoint");
+    f.setCalls([
+      { name: "write_file", args: { path: "notes.txt", content: "saved" }, executionId: "w1" },
+    ]);
+    let releaseCheckpoint!: (revision: string) => void;
+    checkpointWorkspace.mockImplementationOnce(
+      () =>
+        new Promise<string>((resolve) => {
+          releaseCheckpoint = resolve;
+        }),
+    );
+    const running = f.run();
+    await vi.waitFor(() => expect(checkpointWorkspace).toHaveBeenCalledOnce());
+    // The reader already has the reply while the export is still running.
+    expect(f.published).toEqual([
+      {
+        role: "bot",
+        blocks: expect.arrayContaining([expect.objectContaining({ kind: "text", text: "Done" })]),
+      },
+    ]);
+    expect(f.runData.status).toBe("running");
+    expect(f.finalizeRun).not.toHaveBeenCalled();
+    releaseCheckpoint("home-revision");
+    await running;
+    expect(f.finalizeRun).toHaveBeenCalledWith(
+      expect.objectContaining({ outcome: "completed", blocks: [] }),
+    );
+    expect(f.published).toHaveLength(1);
+  });
+
+  it("keeps the single final message for turns that did not touch the workspace", async () => {
+    const f = fixture("reply-no-checkpoint");
+    f.setCalls([]);
+    await f.run();
+    expect(checkpointWorkspace).not.toHaveBeenCalled();
+    expect(f.published).toEqual([]);
+    expect(f.finalizeRun).toHaveBeenCalledWith(
+      expect.objectContaining({
+        outcome: "completed",
+        blocks: expect.arrayContaining([expect.objectContaining({ kind: "text", text: "Done" })]),
+      }),
+    );
+  });
+});
+
+describe("resume brief", () => {
+  const prismaWith = (
+    events: Array<{ type: string; payload: unknown }>,
+    artifacts: unknown[] = [],
+  ) =>
+    ({
+      event: { findMany: vi.fn(async () => events) },
+      artifact: { findMany: vi.fn(async () => artifacts) },
+    }) as never;
+  const run = { id: "run-1", spaceId: "space-1", threadId: "thread-1" };
+
+  it("keeps secrets and payloads out of the argument summary", () => {
+    expect(
+      toolArgsSummary({ query: "find x", api_key: "sk-live-123", nested: { a: 1 }, limit: 5 }, [
+        "sk-live-123",
+      ]),
+    ).toBe("query=find x, limit=5");
+    expect(toolArgsSummary({ note: "token sk-live-123 inside" }, ["sk-live-123"])).not.toContain(
+      "sk-live-123",
+    );
+    expect(toolArgsSummary("plain")).toBeUndefined();
+  });
+
+  it("is empty without durable work and bounded with a lot of it", async () => {
+    expect(await resumeBriefForRun(prismaWith([]), run)).toBeUndefined();
+    const many = Array.from({ length: 60 }, (_, i) => ({
+      type: "agent.tool.completed",
+      payload: { name: `mcp_search_${i}`, executionId: `x${i}`, outcome: "succeeded" },
+    }));
+    const brief = (await resumeBriefForRun(prismaWith(many), run))!;
+    expect(brief.length).toBeLessThanOrEqual(2_100);
+    expect(brief.split("\n- ").length - 1).toBeLessThanOrEqual(20);
+    expect(brief).toContain("(40 more entries omitted)");
+  });
+
+  it("reports failures and redacts secrets from stored error text", async () => {
+    const brief = (await resumeBriefForRun(
+      prismaWith([
+        {
+          type: "agent.tool.completed",
+          payload: {
+            name: "mcp_search",
+            executionId: "s1",
+            outcome: "error",
+            error: "401 for token sk-live-123",
+          },
+        },
+        {
+          type: "agent.tool.completed",
+          payload: { name: "ask", executionId: "p", outcome: "paused" },
+        },
+      ]),
+      run,
+      ["sk-live-123"],
+    ))!;
+    expect(brief).toContain("- mcp_search() failed: 401 for token");
+    expect(brief).not.toContain("sk-live-123");
+    expect(brief).not.toContain("ask(");
+  });
+});
+
+describe("integration hunks: shell scope, external-text refusal, interject, memory edit", () => {
+  it("scopes bot command variables to the shell command text", async () => {
+    const f = fixture("shell-scope");
+    vi.mocked(shellCommandEnvironment).mockClear();
+    f.setCalls([{ name: "shell", args: { command: "echo $CLI_TOKEN" }, executionId: "sh-1" }]);
+    // The fixture sandbox cannot execute; the environment scope is read before that step.
+    await createRunExecutor(f.executorDeps).continueRun(f.runData.id, "worker-1");
+    expect(shellCommandEnvironment).toHaveBeenCalledExactlyOnceWith(
+      expect.objectContaining({ command: "echo $CLI_TOKEN" }),
+    );
+  });
+
+  it("refuses an irreversible connector tool on a run opened by external text", async () => {
+    const f = fixture("external-text");
+    f.runData.trigger = "messaging";
+    f.connector.discoverTools.mockResolvedValue([
+      {
+        name: "gmail_send_email",
+        description: "Send mail",
+        inputSchema: { type: "object", properties: {} },
+        readOnly: false,
+        route: { connectorId: "composio", toolName: "GMAIL_SEND_EMAIL" },
+      } as never,
+    ]);
+    f.setCalls([{ name: "gmail_send_email", args: { to: "a@example.test" }, executionId: "s1" }]);
+    await f.run();
+    expect(f.results).toEqual([
+      { error: expect.stringContaining("opened by an external message") },
+    ]);
+    expect(f.connector.execute).not.toHaveBeenCalled();
+    expect(f.pauseRunForInput).not.toHaveBeenCalled();
+  });
+
+  it("forwards the interject flag of a claimed steering message to the runtime", async () => {
+    const f = fixture("interject");
+    f.claimSteering.mockResolvedValue([
+      {
+        id: "steering-1",
+        messageId: "human-2",
+        text: "Stop, use the other role.",
+        blocks: [{ kind: "text", text: "Stop, use the other role." }],
+        interrupt: true,
+      },
+      {
+        id: "steering-2",
+        messageId: "human-3",
+        text: "Also check the inbox.",
+        blocks: [{ kind: "text", text: "Also check the inbox." }],
+      },
+    ]);
+    f.runtimeRun.mockImplementation(async function* (request) {
+      const steering = await request.claimSteering!([]);
+      expect(steering.map((item) => item.interrupt)).toEqual([true, undefined]);
+      yield { type: "done" as const, text: "Done" };
+    });
+    await f.run();
+  });
+
+  it("merges a memory edit into the current document and commits it against the read revision", async () => {
+    const f = fixture("memory-edit");
+    f.memoryRead.mockResolvedValue({
+      documents: [{ path: "MEMORY.md", content: "Likes tea.\nMeets Mondays.", revision: 4 }],
+    } as never);
+    f.setCalls([
+      {
+        name: "remember",
+        args: { edit: { find: "Mondays", replace: "Tuesdays" }, expectedRevision: 4 },
+        executionId: "edit-1",
+      },
+      {
+        name: "remember",
+        args: { edit: { find: "Fridays", replace: "x" }, expectedRevision: 4 },
+        executionId: "edit-2",
+      },
+    ]);
+    await f.run();
+    expect(f.memoryCommit).toHaveBeenCalledExactlyOnceWith(
+      expect.objectContaining({
+        scope: "bot",
+        path: "MEMORY.md",
+        content: "Likes tea.\nMeets Tuesdays.",
+        expectedRevision: 4,
+      }),
+      expect.anything(),
+    );
+    expect(f.results[0]).toMatchObject({ ok: true });
+    expect(f.results[1]).toMatchObject({
+      error: expect.stringContaining("edit.find was not found"),
+      currentRevision: 4,
+    });
   });
 });

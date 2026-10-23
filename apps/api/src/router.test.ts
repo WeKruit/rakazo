@@ -6070,3 +6070,126 @@ describe("link favicons", () => {
     expect(favicon).not.toHaveBeenCalled();
   });
 });
+
+describe("spaces.subscribe", () => {
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
+  function sidebarStream() {
+    vi.useFakeTimers();
+    let queued = 0;
+    let waiting: ((result: IteratorResult<undefined>) => void) | undefined;
+    const follow = {
+      next: vi.fn(() => {
+        if (queued > 0) {
+          queued -= 1;
+          return Promise.resolve({ done: false as const, value: undefined });
+        }
+        return new Promise<IteratorResult<undefined>>((resolve) => {
+          waiting = resolve;
+        });
+      }),
+      return: vi.fn(async () => ({ done: true as const, value: undefined })),
+    };
+    const wake = () => {
+      if (!waiting) {
+        queued += 1;
+        return;
+      }
+      waiting({ done: false, value: undefined });
+      waiting = undefined;
+    };
+    const bots = [
+      { id: "bot-1", userId: "user-1", status: "idle", unread: false, text: "hello" },
+      { id: "bot-2", userId: "user-2", status: "running", unread: true, text: "theirs" },
+    ];
+    const prisma = {
+      bot: {
+        findMany: vi.fn(async ({ where }: { where: { userId: string; spaceId: string } }) =>
+          bots
+            .filter((bot) => bot.userId === where.userId)
+            .map((bot) => ({
+              id: bot.id,
+              spaceId: where.spaceId,
+              name: bot.id,
+              title: "",
+              description: "",
+              instructions: "",
+              color: "#000000",
+              notifyOnFinish: true,
+              pinned: false,
+              sectionId: null,
+              archivedAt: null,
+              parentBotId: null,
+              memoryScope: null,
+              createdAt: new Date("2026-08-15T12:00:00.000Z"),
+              updatedAt: new Date("2026-08-15T12:00:00.000Z"),
+              thread: {
+                id: `thread-${bot.id}`,
+                unread: bot.unread,
+                messages: [{ seq: 1, runId: null, blocks: [{ kind: "text", text: bot.text }] }],
+                runs: [],
+              },
+              runs: bot.status === "idle" ? [] : [{ status: bot.status }],
+              computer: null,
+            })),
+        ),
+      },
+      run: { findMany: vi.fn(async () => []) },
+    } as unknown as PrismaClient;
+    const deps = {
+      prisma,
+      events: { followSidebar: vi.fn(() => follow) },
+      env: { webOrigin: "http://127.0.0.1:5173", screenProxySecret: "fake-test-secret" },
+      dataDir: "/tmp/rakazo-router-test",
+    } as unknown as RouterDeps;
+    const actor = {
+      spaceId: "workspace-1",
+      userId: "user-1",
+      email: "user@rakazo.test",
+      isDeploymentOwner: true,
+    } satisfies Actor;
+    const client = createRouterClient(createRouter(deps), {
+      context: { actor, stillAuthorized: vi.fn().mockResolvedValue(true) },
+    });
+    return { client, wake, follow, bots, deps };
+  }
+
+  it("replays the caller's own bots on open, then pushes only changed states", async () => {
+    const { client, wake, bots, deps } = sidebarStream();
+    const stream = await client.spaces.subscribe({ since: "2026-08-15T11:00:00.000Z" });
+
+    wake();
+    await expect(stream.next()).resolves.toMatchObject({
+      value: { botId: "bot-1", status: "idle", unread: false, preview: "hello" },
+    });
+    expect(deps.events.followSidebar).toHaveBeenCalledWith(
+      expect.objectContaining({ spaceId: "workspace-1", userId: "user-1" }),
+      undefined,
+    );
+
+    bots[0]!.status = "running";
+    wake();
+    await expect(stream.next()).resolves.toMatchObject({
+      value: { botId: "bot-1", status: "running", unread: false, preview: "hello" },
+    });
+
+    // A wake with nothing changed (and user-2's bot-2 never present) yields nothing before the heartbeat.
+    wake();
+    const next = stream.next();
+    await vi.advanceTimersByTimeAsync(HEARTBEAT_MS);
+    const frame = (await next).value as { botId?: string };
+    expect(frame.botId).toBeUndefined();
+  });
+
+  it("heartbeats while idle and closes the follower on return", async () => {
+    const { client, follow } = sidebarStream();
+    const stream = await client.spaces.subscribe({});
+    const next = stream.next();
+    await vi.advanceTimersByTimeAsync(HEARTBEAT_MS);
+    await expect(next).resolves.toMatchObject({ value: { updatedAt: expect.any(String) } });
+    await stream.return(undefined);
+    expect(follow.return).toHaveBeenCalled();
+  });
+});

@@ -219,8 +219,6 @@ describe("Pi outgoing provider prefixes", () => {
               replyGuidance: "Stable reply guidance.",
               groupContext: `Group context: ${index}`,
               messagingContext: `Messaging context: ${index}`,
-              redactedMemoryContext: `Memory: ${index === 0 ? "first" : "second"}`,
-              redactedScratchpadContext: `Scratchpad: ${index}`,
               hasHistoricalContext: true,
               agentEnvironmentInstruction: undefined,
               botDirectory: undefined,
@@ -271,12 +269,9 @@ describe("Pi outgoing provider prefixes", () => {
       expect(first).toContain(cursorRule);
       expect(second).toContain(cursorRule);
       expect(first.split("\n\nGroup context:")[0]).toBe(second.split("\n\nGroup context:")[0]);
-      expect(first.indexOf("Treat connector tool descriptions")).toBeLessThan(
-        first.indexOf("Memory:"),
-      );
-      expect(second).toContain("Scratchpad: 1");
-      expect(requests[0]!.messages[0]!.content).toContain("Memory: first");
-      expect(requests[1]!.messages[0]!.content).toContain("Memory: second");
+      // Memory and scratchpad ride in history now, so the system prompt stays identical across runs.
+      expect(first).not.toContain("Memory:");
+      expect(second).not.toContain("Scratchpad:");
     } finally {
       server.close();
       server.closeAllConnections();

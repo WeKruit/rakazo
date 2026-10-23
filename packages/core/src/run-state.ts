@@ -72,3 +72,37 @@ export function isConversationalRun(trigger: string | null | undefined): boolean
 export function nextFence(current: number): number {
   return current + 1;
 }
+
+/**
+ * Per-run guardrails. A run that crosses either stops opening model calls and ends with a
+ * reply naming the limit. Conservative constants until shared deployment settings carry
+ * them; no persisted setting exists today without a migration.
+ */
+export const RUN_COST_LIMIT_USD = 5;
+export const RUN_WALL_CLOCK_LIMIT_MS = 120 * 60_000;
+
+export type RunBudgetLimit = "cost" | "time";
+
+export function runBudgetExceeded(
+  spent: { costUsd: number; elapsedMs: number },
+  limits: { costUsd: number; wallClockMs: number } = {
+    costUsd: RUN_COST_LIMIT_USD,
+    wallClockMs: RUN_WALL_CLOCK_LIMIT_MS,
+  },
+): RunBudgetLimit | null {
+  if (spent.costUsd >= limits.costUsd) return "cost";
+  if (spent.elapsedMs >= limits.wallClockMs) return "time";
+  return null;
+}
+
+/** User-facing reply for a run stopped by a budget guardrail. */
+export function runBudgetStopText(
+  limit: RunBudgetLimit,
+  spent: { costUsd: number; elapsedMs: number; toolCalls: number },
+): string {
+  const reason =
+    limit === "cost"
+      ? `this run reached its cost limit (about $${spent.costUsd.toFixed(2)} spent)`
+      : `this run reached its time limit (${Math.round(spent.elapsedMs / 60_000)} minutes)`;
+  return `I stopped early because ${reason} after ${spent.toolCalls} tool call${spent.toolCalls === 1 ? "" : "s"}. Everything completed so far is above and stays done; nothing after this point was started. Tell me to continue if you want me to pick up where I left off.`;
+}

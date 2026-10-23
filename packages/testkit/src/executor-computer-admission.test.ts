@@ -219,6 +219,7 @@ function fixture(
     events: {
       append: vi.fn(async () => undefined),
       notify: vi.fn(async () => undefined),
+      publishTransient: vi.fn(async () => undefined),
       finalizeRun,
       pauseRunForTakeover,
       claimSteering: vi.fn(async () => []),

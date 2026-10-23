@@ -326,7 +326,9 @@ function formatApprovalDetail(
     lines.push(
       `Memory note: ${typeof args.path === "string" ? args.path.trim() : "MEMORY.md"}`,
       `Applies to: ${toolName === "save_shared_memory" ? "your bots in this space" : "this bot"}`,
-      `Content:\n${args.content}`,
+      args.edit !== undefined
+        ? `Replace:\n${(args.edit as { find: string }).find}\n\nWith:\n${(args.edit as { replace: string }).replace}`
+        : `Content:\n${args.content}`,
     );
     return lines.join("\n\n");
   }

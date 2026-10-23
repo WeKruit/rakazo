@@ -2,8 +2,10 @@ import { DEFAULT_MODEL_MAX_TOKENS } from "@rakazo/contracts";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import {
   billedPromptTokens,
+  clipContentWithFullOutput,
   clipToolResultContent,
   clipToolResultText,
+  clipWithFullOutput,
   modelStreamMaxRetries,
   REASONING_MODEL_MAX_TOKENS,
   resolveCompletionMaxTokens,
@@ -156,5 +158,48 @@ describe("clipToolResultContent", () => {
       .filter((part) => part.type === "text")
       .reduce((sum, part) => sum + part.text.replace(/…$/, "").length, 0);
     expect(textChars).toBe(TOOL_RESULT_TEXT_LIMIT);
+  });
+});
+
+describe("clipped tool output keeps a readable copy", () => {
+  const long = "x".repeat(TOOL_RESULT_TEXT_LIMIT + 10);
+
+  it("appends an artifact pointer only when the text was clipped and storage accepted it", async () => {
+    const store = vi.fn(async (text: string) => ({ artifactId: "art-1", length: text.length }));
+    const clipped = await clipWithFullOutput(long, (text) => clipToolResultText(text), store);
+    expect(store).toHaveBeenCalledWith(long);
+    expect(clipped.startsWith("x".repeat(TOOL_RESULT_TEXT_LIMIT))).toBe(true);
+    expect(clipped).toContain('artifact_read artifactId "art-1"');
+    expect(clipped).toContain(`${long.length}-character`);
+    expect(await clipWithFullOutput("short", clipToolResultText, store)).toBe("short");
+    expect(store).toHaveBeenCalledOnce();
+  });
+
+  it("falls back to the plain clip without storage or when storage fails", async () => {
+    expect(await clipWithFullOutput(long, clipToolResultText, undefined)).toBe(
+      clipToolResultText(long),
+    );
+    const failing = vi.fn(async () => {
+      throw new Error("storage down");
+    });
+    expect(await clipWithFullOutput(long, clipToolResultText, failing)).toBe(
+      clipToolResultText(long),
+    );
+  });
+
+  it("adds a pointer part after clipped content parts", async () => {
+    const store = vi.fn(async (text: string) => ({ artifactId: "art-2", length: text.length }));
+    const content = [
+      { type: "text", text: long },
+      { type: "image", data: "..." },
+    ];
+    const bounded = await clipContentWithFullOutput(content, store);
+    expect(bounded).toHaveLength(3);
+    expect(bounded[1]).toEqual({ type: "image", data: "..." });
+    expect(bounded[2]).toMatchObject({ type: "text" });
+    expect((bounded[2] as { text: string }).text).toContain('artifactId "art-2"');
+    expect(await clipContentWithFullOutput([{ type: "text", text: "ok" }], store)).toEqual([
+      { type: "text", text: "ok" },
+    ]);
   });
 });

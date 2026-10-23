@@ -107,7 +107,7 @@ import {
   ComputerCommandSchema,
   ProductEventSchema,
 } from "./events.js";
-import { Id, RunStatus } from "./ids.js";
+import { Id, IsoDate, RunStatus } from "./ids.js";
 import {
   IntegrationProviderConfigSchema,
   IntegrationSetupStateSchema,
@@ -232,6 +232,8 @@ const threadSendInput = threadTarget
     replyToMessageId: Id.optional(),
     replyQuote: z.string().trim().min(1).max(REPLY_QUOTE_MAX_LENGTH).optional(),
     clientNonce: z.string().min(1).max(200).optional(),
+    /** Interject: interrupt the bot's live reply with this message instead of waiting for it. */
+    interrupt: z.boolean().optional(),
   })
   .superRefine((input, ctx) => {
     if (input.addressing && !input.groupId) {
@@ -261,6 +263,17 @@ const threadSendInput = threadTarget
 
 const spaceName = z.string().trim().min(1).max(60);
 
+export const SIDEBAR_PREVIEW_MAX_LENGTH = 120;
+/** One sidebar frame: a bot's busy state, unread flag and redacted preview as of `updatedAt`. */
+export const SidebarBotStateSchema = z.object({
+  botId: Id.optional(),
+  status: z.enum(["idle", "queued", "running", "waiting"]).optional(),
+  unread: z.boolean().optional(),
+  preview: z.string().max(SIDEBAR_PREVIEW_MAX_LENGTH).optional(),
+  updatedAt: IsoDate,
+});
+export type SidebarBotState = z.infer<typeof SidebarBotStateSchema>;
+
 export const appContract = {
   aiConsent: {
     status: oc.input(AiConsentQuerySchema).output(AiConsentStatusSchema),
@@ -287,6 +300,15 @@ export const appContract = {
   },
   spaces: {
     list: oc.output(SpaceNavigationSchema),
+    /**
+     * Sidebar live state for the caller's own bots in the current space. Opens with every bot's
+     * current state (durable rows, not replayed events), then one frame per change; a frame
+     * without `botId` is a liveness heartbeat. A `botId` the client does not know means the
+     * roster changed: refetch `spaces.list`.
+     */
+    subscribe: oc
+      .input(z.object({ since: IsoDate.optional() }))
+      .output(eventIterator(SidebarBotStateSchema)),
     create: oc.input(z.object({ name: spaceName })).output(SpaceSchema),
     rename: oc
       .input(z.object({ spaceId: Id, name: spaceName }))

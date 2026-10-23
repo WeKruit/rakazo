@@ -1,5 +1,11 @@
 import { createHash } from "node:crypto";
-import type { AdapterContext, ArtifactStore, ConnectorCall } from "@rakazo/adapter-kit";
+import type {
+  AdapterContext,
+  ArtifactStore,
+  ConnectorCall,
+  JobPublisher,
+} from "@rakazo/adapter-kit";
+import { recruitingResearchPollJob } from "@rakazo/adapter-kit";
 import type { Actor, RecruitingResearchToolInput } from "@rakazo/contracts";
 import {
   RECRUITING_CANDIDATE_OUTPUT_SCHEMA,
@@ -38,6 +44,11 @@ import { getLogger } from "@rakazo/logging";
 
 import type { LoadedRecruitingRunContext } from "./recruiting-context.js";
 import type { RecruitingResearchRequest } from "./recruiting-research.js";
+import {
+  RECRUITING_RESEARCH_BACKGROUND_NOTICE,
+  RECRUITING_RESEARCH_FOREGROUND_WAIT_SECONDS,
+  recruitingResearchPollDelay,
+} from "./recruiting-research-poll.js";
 import {
   buildRecruitingResearchRequest,
   classifyRecruitingResearchResult,
@@ -89,7 +100,12 @@ type ResearchPreparation = Extract<
   { operation: "prepare" | "continue" }
 >;
 type ResearchContext = Awaited<ReturnType<typeof readRecruitingResearchContext>>;
-type ResearchDeps = { prisma: PrismaClient; artifacts: ArtifactStore };
+type ResearchDeps = {
+  prisma: PrismaClient;
+  artifacts: ArtifactStore;
+  /** When present, a task still working after a call is polled in the background. */
+  jobs?: Pick<JobPublisher, "enqueue">;
+};
 type ResearchActor = { actor: Actor; runId: string; sourceMessageId: string | null };
 
 async function frozenResearchRequest(
@@ -301,7 +317,10 @@ export async function resolveRecruitingResearchTool(
     },
     args:
       input.operation === "status"
-        ? { task_id: saved.task.providerTaskId, wait_seconds: 0 }
+        ? {
+            task_id: saved.task.providerTaskId,
+            wait_seconds: RECRUITING_RESEARCH_FOREGROUND_WAIT_SECONDS,
+          }
         : {
             task_id: saved.task.providerTaskId,
             ...(input.limit === undefined ? {} : { limit: input.limit }),
@@ -770,6 +789,17 @@ export async function completeRecruitingResearchCall(
           ...observed,
           ...(observation.nextCursor === undefined ? {} : { cursor: observation.nextCursor }),
         });
+  // The provider is still working after the foreground wait: hand off to the poll job, which
+  // wakes this thread once, and tell the model not to spin on status.
+  const background =
+    taskState === "active" &&
+    admitted.operation !== "rows" &&
+    deps.jobs &&
+    !receiptIdentity?.historicalBackfill;
+  if (background)
+    await deps.jobs!.enqueue(
+      recruitingResearchPollJob({ taskId: task.id }, recruitingResearchPollDelay(0)),
+    );
   return {
     status: observation.deliveryState,
     ...recruitingResearchSnapshot(persisted.task, persisted.action),
@@ -778,5 +808,6 @@ export async function completeRecruitingResearchCall(
       : {}),
     observation,
     providerResult: raw,
+    ...(background ? { background: RECRUITING_RESEARCH_BACKGROUND_NOTICE } : {}),
   };
 }
