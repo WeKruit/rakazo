@@ -131,6 +131,7 @@ import {
   ReadRecruitingSourceInput,
   RecruitingAssessmentAskTargetSchema,
   RecruitingAssessmentSchema,
+  RecruitingCalibrationRoundOutput,
   RecruitingCandidateFeedbackSelectionSchema,
   RecruitingCandidateReportSchema,
   RecruitingChatContextSchema,
@@ -627,6 +628,12 @@ export const appContract = {
       .output(RecruitingCorrespondenceSchema),
     roleCampaign: oc.input(threadTarget).output(RecruitingRoleCampaignSchema),
     roleSetup: oc.input(threadTarget).output(RecruitingRoleSetupSchema),
+    /** The latest calibration review round of the thread's role (the ten people it showed). */
+    calibrationRound: oc.input(threadTarget).output(RecruitingCalibrationRoundOutput),
+    /** The recruiter accepts that round; the role moves on to finding more people. */
+    approveCalibrationRound: oc
+      .input(threadTarget.safeExtend({ round: z.number().int().positive() }))
+      .output(z.strictObject({ round: z.number().int().positive(), approvedAt: IsoDate })),
     listFeedback: oc.input(ListRecruitingFeedbackInput).output(ListRecruitingFeedbackOutput),
     readSource: oc.input(ReadRecruitingSourceInput).output(
       z.discriminatedUnion("kind", [

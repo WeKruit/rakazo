@@ -327,6 +327,7 @@ import {
 } from "./recruiting";
 import { HomeDashboard } from "./recruiting/HomeDashboard";
 import { RetryNotice } from "./recruiting/RetryNotice";
+import { CalibrationRoundCard } from "./recruiting/CalibrationRound";
 import { RoleSetupCard } from "./recruiting/RoleSetup";
 import { TabLoading } from "./recruiting/shared";
 import type { SettingsSection } from "./SettingsOverlay";
@@ -487,6 +488,15 @@ export function eventChangesRecruitingPanel(
     );
   if (event.type === "effect.recorded") {
     const result = event.payload.result;
+    // A calibration round was recorded or accepted.
+    if (
+      (event.payload.tool === "recruiting_research" && "round" in event.payload) ||
+      (event.payload.tool === "recruiting_feedback" &&
+        result &&
+        typeof result === "object" &&
+        "round" in result)
+    )
+      return true;
     if (
       event.payload.tool === "recruiting_feedback" &&
       result &&
@@ -2921,6 +2931,18 @@ export function ShellPage() {
       if (inGroup) void refreshGroupThreadRef.current(groupId!).catch(() => undefined);
       else void refreshThreadRef.current(active!.id).catch(() => undefined);
     }
+    return receipt.ok;
+  }
+  /** The recruiter's own text into the role conversation; the coordinator routes it. */
+  async function sendRoleText(text: string): Promise<boolean> {
+    if (!inGroup && !active) return false;
+    const receipt = await rpc.threads.followUp({
+      ...(inGroup ? { groupId: groupId! } : { botId: active!.id }),
+      text,
+      clientNonce: crypto.randomUUID(),
+    });
+    if (inGroup) void refreshGroupThreadRef.current(groupId!).catch(() => undefined);
+    else void refreshThreadRef.current(active!.id).catch(() => undefined);
     return receipt.ok;
   }
   // Keep the armed reply even when its parent leaves the loaded page: the
@@ -5359,6 +5381,15 @@ export function ShellPage() {
         {workspaceCandidates && knownThreadId ? (
           <div className="rk-scroll recruiting-workspace-main min-h-0 flex-1 overflow-y-auto">
             <div className="recruiting-workspace-content">
+              {recruitingWorkspaceView === "results" ? (
+                <CalibrationRoundCard
+                  conversation={inGroup ? { groupId: groupId! } : { botId: active!.id }}
+                  refreshSignal={recruitingRefresh}
+                  readCache={recruitingReadCache.current}
+                  readCacheScope={recruitingCacheScope}
+                  onSend={sendRoleText}
+                />
+              ) : null}
               <RecruitingPanel
                 key={`${userId}:${bootstrapMe?.spaceId}:${knownThreadId}:workspace`}
                 presentation="workspace"
@@ -5728,6 +5759,15 @@ export function ShellPage() {
         </LinkFaviconsContext.Provider>
           {workspaceBrief && activeSnapshot?.threadId ? (
             <aside aria-label={t`Saved role summary`}>
+              {recruitingWorkspaceView === "feedback" ? (
+                <CalibrationRoundCard
+                  conversation={inGroup ? { groupId: groupId! } : { botId: active!.id }}
+                  refreshSignal={recruitingRefresh}
+                  readCache={recruitingReadCache.current}
+                  readCacheScope={recruitingCacheScope}
+                  onSend={sendRoleText}
+                />
+              ) : null}
               <RecruitingPanel
                 key={`${userId}:${bootstrapMe?.spaceId}:${activeSnapshot.threadId}:summary`}
                 presentation="workspace"

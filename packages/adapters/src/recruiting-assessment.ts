@@ -27,6 +27,7 @@ import {
   IsolationError,
   listRecruitingCandidateSources,
   listRecruitingCandidates,
+  readRecruitingCalibrationRound,
   recordRecruitingWebMaterial,
   saveRecruitingAssessment,
   scoped,
@@ -122,6 +123,14 @@ export async function executeRecruitingCandidatesTool(
     if (!roleId) {
       succeeded = true;
       return { status: "no_current_role" as const };
+    }
+    if (input.operation === "round") {
+      const { round } = await readRecruitingCalibrationRound(deps.prisma, trusted.actor, {
+        threadId: trusted.threadId,
+      });
+      itemCount = round?.candidates.length ?? 0;
+      succeeded = true;
+      return round ? { status: "found" as const, round } : { status: "no_round" as const };
     }
     if (input.operation === "list") {
       const { operation: _operation, ...query } = input;

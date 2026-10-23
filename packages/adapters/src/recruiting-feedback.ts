@@ -12,6 +12,7 @@ import { RecruitingFeedbackInputSchema } from "@rakazo/contracts";
 import { applyRecruitingPreferenceEdit } from "@rakazo/core";
 import type { PrismaClient } from "@rakazo/db";
 import {
+  approveRecruitingCalibrationRoundFromMessage,
   executeNativeRecruitingCandidateDecision,
   readRecruitingFeedbackContext,
 } from "@rakazo/db";
@@ -36,6 +37,8 @@ export type RecruitingFeedbackResult = {
   | {
       status: "recorded" | "already_recorded";
       choice?: RecruitingCandidateFeedbackSelection["choice"];
+      /** The calibration round an approval accepted. */
+      round?: number;
     }
   | {
       status: "saved";
@@ -117,6 +120,20 @@ export async function executeRecruitingFeedback(
     throw new RecruitingFeedbackValidationError("Recruiting feedback does not belong to this run");
   const result = { feedback, source, workspace };
   if (feedback.intent.basis === "inferred") return { ...result, status: "needs_clarification" };
+  if (feedback.target === "round" && feedback.operation === "approve") {
+    const approved = await approveRecruitingCalibrationRoundFromMessage(deps.prisma, actor, {
+      runId,
+      sourceMessageId,
+      intent: feedback.intent,
+      roleId: feedback.roleId,
+      expectedRoleRevision: feedback.expectedRoleRevision,
+    });
+    return {
+      ...result,
+      status: approved.already ? "already_recorded" : "recorded",
+      round: approved.round,
+    };
+  }
   if (feedback.target === "round" || feedback.target === "candidate")
     return {
       ...result,

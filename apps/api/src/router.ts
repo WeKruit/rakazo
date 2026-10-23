@@ -287,6 +287,7 @@ import {
 } from "./onboarding.js";
 import { prewarmTeamComputer } from "./prewarm.js";
 import {
+  approveRecruitingCalibrationRound,
   archiveRecruitingRole,
   bindRecruitingRole,
   confirmRecruitingBrief,
@@ -309,6 +310,7 @@ import {
   listRecruitingReminders,
   listRecruitingResearch,
   notifyRecruitingChange,
+  readRecruitingCalibrationRound,
   readRecruitingSource,
   reviseRecruitingRole,
   setRecruitingCandidateShortlist,
@@ -3760,6 +3762,18 @@ export function createRouter(deps: RouterDeps) {
       },
       listAssessments: authed.recruiting.listAssessments.handler(({ context, input }) =>
         listRecruitingAssessments(deps.prisma, context.actor, input),
+      ),
+      calibrationRound: authed.recruiting.calibrationRound.handler(async ({ context, input }) =>
+        readRecruitingCalibrationRound(deps.prisma, context.actor, {
+          threadId: (await resolveThreadTarget(deps.prisma, context.actor, input)).threadId,
+        }),
+      ),
+      approveCalibrationRound: authed.recruiting.approveCalibrationRound.handler(
+        async ({ context, input }) =>
+          approveRecruitingCalibrationRound(deps.prisma, context.actor, {
+            threadId: (await resolveThreadTarget(deps.prisma, context.actor, input)).threadId,
+            round: input.round,
+          }),
       ),
       listFeedback: authed.recruiting.listFeedback.handler(({ context, input }) =>
         listRecruitingFeedback(deps.prisma, context.actor, input),

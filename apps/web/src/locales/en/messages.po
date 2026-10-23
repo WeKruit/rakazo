@@ -289,6 +289,10 @@ msgstr "About groups"
 msgid "About spaces"
 msgstr "About spaces"
 
+#: src/pages/recruiting/CalibrationRound.tsx
+msgid "Accepted. Finding more people."
+msgstr "Accepted. Finding more people."
+
 #: src/components/integrations/IntegrationSetup.tsx
 msgid "Access token"
 msgstr "Access token"
@@ -1051,6 +1055,10 @@ msgstr "Calendar booking details are not included in these manual CRM workflow r
 #: src/pages/RecruitingCorrespondence.tsx
 msgid "Calendar event"
 msgstr "Calendar event"
+
+#: src/pages/recruiting/CalibrationRound.tsx
+msgid "Calibration round"
+msgstr "Calibration round"
 
 #: src/pages/recruiting/SequenceTab.tsx
 #: src/pages/RecruitingPanel.tsx
@@ -1869,6 +1877,7 @@ msgstr "Could not complete OAuth"
 msgid "Could not complete the update. Try again."
 msgstr "Could not complete the update. Try again."
 
+#: src/pages/recruiting/CalibrationRound.tsx
 #: src/pages/RecruitingPanel.tsx
 msgid "Could not confirm feedback. Try again."
 msgstr "Could not confirm feedback. Try again."
@@ -3149,6 +3158,7 @@ msgstr "Feedback"
 msgid "Feedback history"
 msgstr "Feedback history"
 
+#: src/pages/recruiting/CalibrationRound.tsx
 #: src/pages/RecruitingPanel.tsx
 msgid "Feedback sent"
 msgstr "Feedback sent"
@@ -3293,6 +3303,10 @@ msgstr "Give feedback"
 #: src/pages/Shell.tsx
 msgid "Good example"
 msgstr "Good example"
+
+#: src/pages/recruiting/CalibrationRound.tsx
+msgid "Good example: {name}"
+msgstr "Good example: {name}"
 
 #: src/pages/MessagingSettingsOverlay.tsx
 #: src/pages/Shell.tsx
@@ -3883,6 +3897,10 @@ msgstr "Location not returned"
 #: src/pages/Shell.tsx
 msgid "Log out"
 msgstr "Log out"
+
+#: src/pages/recruiting/CalibrationRound.tsx
+msgid "Looks good, find more"
+msgstr "Looks good, find more"
 
 #: src/lib/ticket-priority.ts
 #: src/pages/ModelSettingsOverlay.tsx
@@ -4685,6 +4703,10 @@ msgstr "NOT"
 msgid "Not a fit"
 msgstr "Not a fit"
 
+#: src/pages/recruiting/CalibrationRound.tsx
+msgid "Not a fit: {name}"
+msgstr "Not a fit: {name}"
+
 #: src/pages/RecruitingPanel.tsx
 msgid "Not accepted"
 msgstr "Not accepted"
@@ -4994,6 +5016,14 @@ msgstr "Outreach file review"
 #: src/pages/RecruitingPanel.tsx
 msgid "Outreach status"
 msgstr "Outreach status"
+
+#: src/pages/recruiting/CalibrationRound.tsx
+msgid "Overall direction"
+msgstr "Overall direction"
+
+#: src/pages/recruiting/CalibrationRound.tsx
+msgid "Overall: {direction}"
+msgstr "Overall: {direction}"
 
 #: src/pages/recruiting/HomeDashboard.tsx
 msgid "Overdue"
@@ -5320,9 +5350,14 @@ msgstr "Reading a page"
 msgid "Reading files"
 msgstr "Reading files"
 
+#: src/pages/recruiting/CalibrationRound.tsx
 #: src/pages/RecruitingPanel.tsx
 msgid "Reason"
 msgstr "Reason"
+
+#: src/pages/recruiting/CalibrationRound.tsx
+msgid "Reason: {name}"
+msgstr "Reason: {name}"
 
 #: src/pages/ModelSettingsOverlay.tsx
 #: src/pages/Onboarding.tsx
@@ -5905,6 +5940,22 @@ msgstr "Room guidance"
 msgid "Rotate key"
 msgstr "Rotate key"
 
+#. placeholder {0}: round.round
+#. placeholder {1}: round.candidates.length
+#: src/pages/recruiting/CalibrationRound.tsx
+msgid "Round {0} · {1} people"
+msgstr "Round {0} · {1} people"
+
+#. placeholder {0}: round.round
+#: src/pages/recruiting/CalibrationRound.tsx
+msgid "Round {0} feedback:"
+msgstr "Round {0} feedback:"
+
+#. placeholder {0}: round.round
+#: src/pages/recruiting/CalibrationRound.tsx
+msgid "Round {0} looks good. Start finding more people."
+msgstr "Round {0} looks good. Start finding more people."
+
 #: src/pages/RoutineEditor.tsx
 #: src/pages/Shell.tsx
 msgid "Routine"
@@ -6299,6 +6350,7 @@ msgstr "Send deletion code"
 msgid "Send failed"
 msgstr "Send failed"
 
+#: src/pages/recruiting/CalibrationRound.tsx
 #: src/pages/RecruitingPanel.tsx
 msgid "Send feedback"
 msgstr "Send feedback"
@@ -6337,6 +6389,7 @@ msgid "Sending"
 msgstr "Sending"
 
 #: src/components/AskCard.tsx
+#: src/pages/recruiting/CalibrationRound.tsx
 #: src/pages/RecruitingPanel.tsx
 msgid "Sending…"
 msgstr "Sending…"
@@ -7221,6 +7274,7 @@ msgstr "Unmet"
 msgid "Unmute"
 msgstr "Unmute"
 
+#: src/pages/recruiting/CalibrationRound.tsx
 #: src/pages/recruiting/ContactsTab.tsx
 #: src/pages/RecruitingPanel.tsx
 msgid "Unnamed candidate"

@@ -3085,3 +3085,25 @@ export const deleteRecruitingReminder = (
   actor: Actor,
   input: { id: string },
 ) => authenticated(() => recruiting.deleteRecruitingReminder(prisma, actor, input.id));
+
+export const readRecruitingCalibrationRound = (
+  prisma: PrismaClient,
+  actor: Actor,
+  input: { threadId: string },
+) => authenticated(() => recruiting.readRecruitingCalibrationRound(prisma, actor, input));
+
+/** The panel's "start finding more" control: the signed-in recruiter accepts the latest round. */
+export const approveRecruitingCalibrationRound = (
+  prisma: PrismaClient,
+  actor: Actor,
+  input: { threadId: string; round: number },
+) =>
+  authenticated(async () => {
+    try {
+      return await recruiting.approveRecruitingCalibrationRound(prisma, actor, input);
+    } catch (error) {
+      if (error instanceof recruiting.RecruitingCalibrationRoundError)
+        throw new ORPCError("BAD_REQUEST", { message: error.message });
+      throw error;
+    }
+  });

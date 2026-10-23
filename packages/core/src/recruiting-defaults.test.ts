@@ -78,7 +78,16 @@ describe("maintained recruiting defaults", () => {
     const sourcing = RECRUITING_DEFAULT_SKILLS.find(
       (skill) => skill.name === "Recruitment sourcing continuation",
     )!;
-    expect(sourcing.body).toContain("ask Autumn on the same task for fresh calibration");
+    expect(sourcing.body).toContain("ask Autumn on the same task, in one reply per round");
+    expect(sourcing.body).toContain("excluding everyone it already returned for this role");
+  });
+
+  it("asks for one round of feedback without rating every person", () => {
+    const sourcer = RECRUITING_DEFAULT_BOTS.find((bot) => bot.key === "sourcer")!;
+    expect(sourcer.instructions).toContain("Never ask for a rating of every person");
+    expect(sourcer.instructions).toContain("recruiting_research calibration_round");
+    expect(sourcer.instructions).toContain("recruiting_feedback target round operation approve");
+    expect(sourcer.instructions).not.toContain("turn each comment into a rule");
   });
 
   it("gives Sourcer the find-people stage order and the no-polling continuation rule", () => {
