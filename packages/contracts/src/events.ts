@@ -76,6 +76,24 @@ export const ProductEventType = z.enum([
 ]);
 export type ProductEventType = z.infer<typeof ProductEventType>;
 
+/**
+ * Live working display timestamps, on thread.progress and run.completed payloads.
+ * `activeSince`: when this attempt began executing on its worker. `resumedAt`: the same
+ * instant when the run resumed after a restart or recovery, null when it never resumed.
+ */
+export const RunTimingSchema = z.object({
+  activeSince: IsoDate.optional(),
+  resumedAt: IsoDate.nullable().optional(),
+});
+export type RunTiming = z.infer<typeof RunTimingSchema>;
+
+export const RunCompletedPayloadSchema = RunTimingSchema.extend({
+  startedAt: IsoDate.optional(),
+  activeMs: z.number().int().nonnegative().optional(),
+  steps: z.array(z.object({ category: z.string(), count: z.number().int().positive() })),
+});
+export type RunCompletedPayload = z.infer<typeof RunCompletedPayloadSchema>;
+
 export const MessageRole = z.enum(["user", "bot", "system"]);
 export const BotMessageIntent = z.enum(["request", "result", "question", "status", "fyi"]);
 export type BotMessageIntent = z.infer<typeof BotMessageIntent>;
@@ -669,7 +687,11 @@ export const ProductEventSchema = z
                           ? EffectApprovalAnsweredPayloadSchema
                           : event.type === "run.requeued"
                             ? RunRequeuedPayloadSchema
-                            : null;
+                            : event.type === "run.completed"
+                              ? RunCompletedPayloadSchema
+                              : event.type === "thread.progress"
+                                ? RunTimingSchema
+                                : null;
     if (!schema) return;
     const parsed = schema.safeParse(event.payload);
     if (!parsed.success) {

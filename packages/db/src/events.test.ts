@@ -1,7 +1,12 @@
 import { createHash } from "node:crypto";
 import type { RealtimeFanout } from "@rakazo/adapter-kit";
 import type { MessageBlock } from "@rakazo/contracts";
-import { encodeLoginSecret, ProductEventSchema } from "@rakazo/contracts";
+import {
+  encodeLoginSecret,
+  ProductEventSchema,
+  RunCompletedPayloadSchema,
+  RunTimingSchema,
+} from "@rakazo/contracts";
 import { stableJsonValue } from "@rakazo/core/node/approval-effect-key";
 import { createLogger, createTestSink, installLogger } from "@rakazo/logging";
 import { afterEach, describe, expect, it, vi } from "vitest";
@@ -772,6 +777,25 @@ describe("finalizeRun", () => {
       ],
     });
     expect(completedRunSummary([], null, new Date())).toEqual({ steps: [] });
+  });
+
+  it("adds activeSince and resumedAt to the run.completed summary", () => {
+    const completedAt = new Date("2026-09-01T12:01:43.000Z");
+    const timing = {
+      activeSince: "2026-09-01T12:00:30.000Z",
+      resumedAt: "2026-09-01T12:00:30.000Z",
+    };
+    const summary = completedRunSummary(
+      [],
+      new Date("2026-09-01T12:00:00.000Z"),
+      completedAt,
+      timing,
+    );
+    expect(summary).toMatchObject(timing);
+    expect(RunCompletedPayloadSchema.safeParse(summary).success).toBe(true);
+    const fresh = { activeSince: "2026-09-01T12:00:00.000Z", resumedAt: null };
+    expect(completedRunSummary([], null, completedAt, fresh)).toEqual({ steps: [], ...fresh });
+    expect(RunTimingSchema.safeParse({ ...fresh, text: "x" }).success).toBe(true);
   });
 
   it("retries a transaction conflict without duplicating the terminal event or notification", async () => {

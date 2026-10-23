@@ -359,10 +359,17 @@ export async function loadMcpCredentialRecord(
 
 /** How long a worker reuses a server's discovered tool list before listing it again. */
 export const DISCOVERY_CACHE_TTL_MS = 10 * 60_000;
+/** How long a worker skips a server whose discovery just failed, instead of reconnecting every run. */
+export const DISCOVERY_FAILURE_TTL_MS = 2 * 60_000;
 
 export class McpConnector implements ConnectorProvider {
   private readonly sessions = new Map<string, SessionEntry>();
   private readonly connecting = new Map<string, PendingSession>();
+  /** Failed-discovery memo per sessionKey; `logged` keeps `discovery.skipped` to once per window. */
+  private readonly discoveryFailures = new Map<
+    string,
+    { version: string; until: number; logged: boolean }
+  >();
   // Discovery runs more than once per run: once up front, then again on every lazy
   // catalog access. Each attempt needs its own executionId.
   private discoverySeq = 0;
@@ -395,6 +402,7 @@ export class McpConnector implements ConnectorProvider {
       this.secrets.onChange?.((ref) => {
         // ponytail: any credential change drops every cached tool list; changes are rare.
         this.toolCatalog.clear();
+        this.discoveryFailures.clear();
         this.catalogGeneration += 1;
         for (const [key, entry] of this.sessions)
           if (entry.ref === ref) {
@@ -455,6 +463,24 @@ export class McpConnector implements ConnectorProvider {
     const groups = await Promise.all(
       assignments.map(async (assignment): Promise<ConnectorTool[]> => {
         const startedAt = Date.now();
+        const failureKey = this.sessionKey(assignment.server, context);
+        const failed = this.discoveryFailures.get(failureKey);
+        if (failed) {
+          if (
+            failed.version === this.discoveryVersion(assignment.server) &&
+            Date.now() < failed.until
+          ) {
+            if (!failed.logged) {
+              failed.logged = true;
+              getLogger().info("discovery.skipped", {
+                server: assignment.server.slug,
+                untilMs: failed.until,
+              });
+            }
+            return [];
+          }
+          this.discoveryFailures.delete(failureKey);
+        }
         try {
           const listed = await this.listServerTools(assignment.server, context);
           reportAllowlistDrift(assignment, listed.tools, context);
@@ -532,7 +558,12 @@ export class McpConnector implements ConnectorProvider {
           );
           // Capture material before eviction so the audited reason stays redacted, the
           // same reason execute() captures it before callTool.
-          const key = this.sessionKey(assignment.server, context);
+          const key = failureKey;
+          this.discoveryFailures.set(key, {
+            version: this.discoveryVersion(assignment.server),
+            until: Date.now() + DISCOVERY_FAILURE_TTL_MS,
+            logged: false,
+          });
           const material = this.sessions.get(key)?.material;
           await this.evict(key);
           await this.recordDiscoveryFailure(
@@ -1158,7 +1189,7 @@ export class McpConnector implements ConnectorProvider {
    */
   private async listServerTools(server: McpServer, context: AdapterContext) {
     const key = this.sessionKey(server, context);
-    const version = `${server.revision} ${server.secretId ?? ""} ${server.transport} ${server.endpoint}`;
+    const version = this.discoveryVersion(server);
     const startedAt = performance.now();
     const session = await this.sessionFor(server, context);
     const cached = this.toolCatalog.get(key);
@@ -1175,12 +1206,17 @@ export class McpConnector implements ConnectorProvider {
     // A credential change during the list call leaves it uncached.
     if (generation === this.catalogGeneration)
       this.toolCatalog.set(key, { version, at: Date.now(), listed });
+    this.discoveryFailures.delete(key);
     getLogger().info("discovery.cache", {
       hit: false,
       server: server.slug,
       ms: Math.round(performance.now() - startedAt),
     });
     return listed;
+  }
+
+  private discoveryVersion(server: McpServer): string {
+    return `${server.revision} ${server.secretId ?? ""} ${server.transport} ${server.endpoint}`;
   }
 
   private sessionKey(server: McpServer, context: AdapterContext): string {

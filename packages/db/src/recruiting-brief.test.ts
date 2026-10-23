@@ -109,7 +109,10 @@ function fixture(crmBindingEffectId: string | null = null) {
       update: vi.fn(async () => ({ nextMessageSeq: 2, nextEventSeq: 1 })),
     },
     bot: { findFirst: vi.fn(async () => actor) },
-    chatGroup: { findFirst: vi.fn(async () => actor), updateMany: vi.fn(async () => ({ count: 1 })) },
+    chatGroup: {
+      findFirst: vi.fn(async () => actor),
+      updateMany: vi.fn(async () => ({ count: 1 })),
+    },
     event: {
       create: vi.fn(async ({ data }) => ({ id: "changed-event", createdAt: new Date(), ...data })),
     },

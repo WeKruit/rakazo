@@ -128,7 +128,13 @@ import {
   stableJsonValue,
   toolEffectIdempotencyKey,
 } from "@rakazo/core/node/approval-effect-key";
-import type { McpServer, PrismaClient, RecruitingRoleToolResult, ThreadEvents } from "@rakazo/db";
+import type {
+  McpServer,
+  PrismaClient,
+  RecruitingRoleToolResult,
+  RunTiming,
+  ThreadEvents,
+} from "@rakazo/db";
 import {
   admitRecruitingCrmImport,
   admitRecruitingReply,
@@ -3464,6 +3470,12 @@ export function createRunExecutor(deps: ExecutorDeps) {
           throw error;
         });
 
+      // A run that already had startedAt before this attempt is resuming after a restart.
+      const attemptStartedAt = (attempt.startedAt ?? new Date()).toISOString();
+      const runTiming: RunTiming = {
+        activeSince: attemptStartedAt,
+        resumedAt: current.startedAt ? attemptStartedAt : null,
+      };
       setupMark("lease");
       let leaseValid = true;
       let lastLeaseCheckAt = 0;
@@ -4423,8 +4435,8 @@ export function createRunExecutor(deps: ExecutorDeps) {
             // The first flush replaces the "working…" placeholder outright — a delta here
             // would otherwise get appended straight onto it with no separator.
             payload: hasStreamedText
-              ? { delta: pendingProgress, streaming: true }
-              : { text: pendingProgress, streaming: true },
+              ? { delta: pendingProgress, streaming: true, ...runTiming }
+              : { text: pendingProgress, streaming: true, ...runTiming },
           });
           hasStreamedText = true;
           pendingProgress = "";
@@ -9362,7 +9374,7 @@ export function createRunExecutor(deps: ExecutorDeps) {
                   botId: bot.id,
                   type: "thread.progress",
                   runId,
-                  payload: { delta: pendingProgress, streaming: true },
+                  payload: { delta: pendingProgress, streaming: true, ...runTiming },
                 });
                 pendingProgress = "";
                 lastProgressAt = Date.now();
@@ -9374,6 +9386,7 @@ export function createRunExecutor(deps: ExecutorDeps) {
                 type: "thread.progress",
                 runId,
                 payload: {
+                  ...runTiming,
                   text: redactSecrets(event.text, runSecrets),
                   ...(event.activity ? { activity: true } : {}),
                   ...(event.phase ? { phase: event.phase } : {}),
@@ -9795,6 +9808,7 @@ export function createRunExecutor(deps: ExecutorDeps) {
             outcome: "completed",
             blocks: finalBlocks,
             markUnread,
+            timing: runTiming,
           });
           if (!completed) return;
           if (completed.continuationRunId) {

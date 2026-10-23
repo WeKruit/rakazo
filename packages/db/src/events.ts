@@ -144,6 +144,12 @@ export interface ClaimedSteeringMessage {
   interrupt?: true;
 }
 
+/** ISO timestamps of the current attempt, carried on run progress and run.completed. */
+export interface RunTiming {
+  activeSince: string;
+  resumedAt: string | null;
+}
+
 export interface FinalizeRunResult {
   continuationRunId: string | null;
 }
@@ -165,6 +171,8 @@ export type FinalizeRunInput = FinalizeRunBase &
         outcome: "completed";
         blocks: MessageBlock[];
         markUnread?: boolean;
+        /** When this attempt began executing, and when it resumed after a restart (else null). */
+        timing?: RunTiming;
       }
     | { outcome: "failed"; error: string }
   );
@@ -1602,7 +1610,12 @@ export function completedRunSummary(
   blocks: MessageBlock[],
   startedAt: Date | null,
   completedAt: Date,
-): { startedAt?: string; activeMs?: number; steps: { category: WorkActivity; count: number }[] } {
+  timing?: RunTiming,
+): {
+  startedAt?: string;
+  activeMs?: number;
+  steps: { category: WorkActivity; count: number }[];
+} & Partial<RunTiming> {
   const counts = new Map<WorkActivity, number>();
   for (const block of blocks)
     if (block.kind === "steps")
@@ -1611,10 +1624,10 @@ export function completedRunSummary(
         counts.set(category, (counts.get(category) ?? 0) + step.count);
       }
   const steps = [...counts].map(([category, count]) => ({ category, count }));
-  if (!startedAt) return { steps };
+  if (!startedAt) return { steps, ...timing };
   // ponytail: wall time since run start; pauses are counted until runs record resumedAt.
   const activeMs = Math.max(0, Math.round(completedAt.getTime() - startedAt.getTime()));
-  return { startedAt: startedAt.toISOString(), activeMs, steps };
+  return { startedAt: startedAt.toISOString(), activeMs, steps, ...timing };
 }
 
 async function finalizeRunOnce(
@@ -1708,7 +1721,7 @@ async function finalizeRunOnce(
       runId: input.runId,
       payload:
         input.outcome === "completed"
-          ? completedRunSummary(input.blocks, writableRun?.startedAt ?? null, now)
+          ? completedRunSummary(input.blocks, writableRun?.startedAt ?? null, now, input.timing)
           : { error: input.error },
     });
     // The final message and the terminal event share one sequence reservation and insert.
