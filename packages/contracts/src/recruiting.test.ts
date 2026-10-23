@@ -97,6 +97,25 @@ const action = {
 };
 
 describe("recruiting contracts", () => {
+  it("keeps an optional provider display status equal to its original supplied value", () => {
+    const report = {
+      fields: [{ label: "Requirement", value: "match", providerStatus: "match", sourceUrls: [] }],
+      sourceUrls: [],
+    };
+    expect(contracts.RecruitingCandidateReportSchema.safeParse(report).success).toBe(true);
+    expect(
+      contracts.RecruitingCandidateReportSchema.safeParse({
+        ...report,
+        fields: [{ ...report.fields[0], providerStatus: "miss" }],
+      }).success,
+    ).toBe(false);
+    expect(
+      contracts.RecruitingCandidateReportSchema.safeParse({
+        ...report,
+        fields: [{ ...report.fields[0], value: "met", providerStatus: "met" }],
+      }).success,
+    ).toBe(false);
+  });
   it("requires explicit native correspondence records in a CRM mail page", () => {
     const page = {
       operation: "mail",

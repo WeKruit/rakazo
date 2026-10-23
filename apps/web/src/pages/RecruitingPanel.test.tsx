@@ -4554,6 +4554,83 @@ it("does not fall back to raw file access when a product source cannot be verifi
   expect(evidence.querySelector("[data-artifact-id]")).toBeNull();
 });
 
+it("shows exact Autumn rule states from the latest report before source history loads without classifying prose", async () => {
+  const candidate = {
+    ...candidateFixture("provider-status", false),
+    name: "Provider-status person",
+  };
+  const report = {
+    fields: [
+      ...(["match", "miss", "unclear"] as const).map((value, index) => ({
+        label: `Requirement ${index + 1}`,
+        value,
+        providerStatus: value,
+        evidence: "Saved evidence.",
+        reasoning: "Original reasoning.",
+        sourceUrls: [],
+      })),
+      {
+        label: "Fit reasons",
+        value: "MET here and PARTIAL there remain plain provider prose.",
+        sourceUrls: [],
+      },
+    ],
+    sourceUrls: [],
+  };
+  const saved = {
+    taskId: null,
+    actionId: null,
+    providerTaskId: "provider-task",
+    roleRevisionId: revision.id,
+    effectId: "provider-read",
+    rowIndex: 0,
+    artifactRef: { artifactId: "provider-artifact", sha256: "a".repeat(64) },
+    requestCursor: null,
+    outputId: null,
+    observedAt: "2026-01-01T00:00:00Z",
+    report,
+  };
+  candidate.latestSource = saved;
+  api.listCandidates.mockResolvedValue(candidatePage([candidate]));
+  let resolveSources!: (value: Awaited<ReturnType<typeof api.listCandidateSources>>) => void;
+  api.listCandidateSources.mockImplementationOnce(
+    () =>
+      new Promise((resolve) => {
+        resolveSources = resolve;
+      }),
+  );
+  const view = await mounted("thread-1", undefined, false);
+  await view.click("Evidence");
+  await view.click(candidate.name);
+  const summary = view.container.querySelector('[role="dialog"] [aria-label="Research match"]')!;
+  const labels = ["Match", "Does not match", "Unclear"];
+  const states = [...summary.querySelectorAll("span")].filter((node) =>
+    labels.includes(node.textContent ?? ""),
+  );
+  expect(states.map((node) => node.textContent)).toEqual(labels);
+  expect(summary.textContent).not.toContain("Autumn finding:");
+  expect(states.map((node) => node.className)).toEqual([
+    expect.stringContaining("text-success"),
+    expect.stringContaining("text-destructive"),
+    expect.stringContaining("text-warning"),
+  ]);
+  expect(summary.textContent).toContain(report.fields[3]!.value);
+  await act(async () =>
+    resolveSources({
+      roleId: role.id,
+      candidateKey: candidate.candidateKey,
+      total: 1,
+      nextCursor: null,
+      items: [{ ...saved, crmImports: [] }],
+    }),
+  );
+  const history = view.container.querySelector('[aria-label="Saved candidate sources"]')!;
+  expect(
+    [...history.querySelectorAll("span")].filter((node) => labels.includes(node.textContent ?? "")),
+  ).toHaveLength(3);
+  expect(api.getById).not.toHaveBeenCalled();
+});
+
 it("shows unnamed candidates and real profile links without exposing their storage keys", async () => {
   const candidate = {
     ...candidateFixture("internal-candidate-key", false),

@@ -1172,13 +1172,19 @@ export type ListRecruitingCandidatesInput = z.infer<typeof ListRecruitingCandida
 /** Recruiter-readable projection of one exact retained provider row, never qualification. */
 export const RecruitingCandidateReportSchema = z.strictObject({
   fields: z.array(
-    z.strictObject({
-      label: Text,
-      value: z.string().nullable(),
-      evidence: z.string().optional(),
-      reasoning: z.string().optional(),
-      sourceUrls: z.array(z.httpUrl()),
-    }),
+    z
+      .strictObject({
+        label: Text,
+        value: z.string().nullable(),
+        providerStatus: z.enum(["match", "miss", "unclear"]).optional(),
+        evidence: z.string().optional(),
+        reasoning: z.string().optional(),
+        sourceUrls: z.array(z.httpUrl()),
+      })
+      .refine(
+        (field) => field.providerStatus === undefined || field.providerStatus === field.value,
+        "Provider display status must preserve the supplied value",
+      ),
   ),
   sourceUrls: z.array(z.httpUrl()),
 });

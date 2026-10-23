@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
   normalizeRecruitingCandidateRow,
+  projectRecruitingCandidateReport,
   RECRUITING_CANDIDATE_OUTPUT_INSTRUCTIONS,
 } from "./recruiting-candidates.js";
 
@@ -16,6 +17,54 @@ const candidate = {
 const normalize = (row: unknown) => normalizeRecruitingCandidateRow(row, { schemaKnown: true });
 
 describe("canonical recruiting candidate output", () => {
+  it("preserves only exact native rule statuses as display metadata without classifying prose or absence", () => {
+    const row = {
+      rule_positive: {
+        value: "match",
+        evidence: "Saved supporting evidence.",
+        reasoning: "Original provider reasoning.",
+      },
+      rule_negative: { value: "miss" },
+      rule_uncertain: { value: "unclear" },
+      rule_boolean: { value: false },
+      rule_absent: { absent: true },
+      rule_absent_value: { value: "match", absent: true },
+      rule_prose: { value: "MET in one area, PARTIAL in another." },
+      fit_reasons: { value: "match" },
+    };
+    const original = structuredClone(row);
+    const report = projectRecruitingCandidateReport(row);
+    expect(
+      report.fields
+        .filter((field) => field.providerStatus)
+        .map((field) => [field.value, field.providerStatus]),
+    ).toEqual([
+      ["match", "match"],
+      ["miss", "miss"],
+      ["unclear", "unclear"],
+    ]);
+    expect(report.fields.slice(0, 3).map((field) => field.label)).toEqual([
+      "Positive",
+      "Negative",
+      "Uncertain",
+    ]);
+    expect(report.fields[6]?.label).toBe("Rule prose");
+    expect(report.fields[0]).toMatchObject({
+      evidence: row.rule_positive.evidence,
+      reasoning: row.rule_positive.reasoning,
+    });
+    expect(report.fields.map((field) => field.value)).toEqual([
+      "match",
+      "miss",
+      "unclear",
+      "false",
+      "true",
+      "match",
+      row.rule_prose.value,
+      "match",
+    ]);
+    expect(row).toEqual(original);
+  });
   it("projects the defined columns without treating a provider report as an assessment", () => {
     expect(normalize({ ...candidate, grade: "A", arbitrary_signal: true })).toEqual({
       name: candidate.name,

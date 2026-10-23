@@ -214,8 +214,16 @@ export function projectRecruitingCandidateReport(raw: unknown): RecruitingCandid
         ),
       ]),
     ];
-    const label = key
-      .replace(/^(?:rule_[a-z]+\d+|round\d+)_/i, "")
+    const providerStatus =
+      key.startsWith("rule_") &&
+      key.length > 5 &&
+      cell &&
+      cell.absent !== true &&
+      (value === "match" || value === "miss" || value === "unclear")
+        ? value
+        : undefined;
+    const displayKey = key.replace(/^(?:rule_[a-z]+\d+|round\d+)_/i, "");
+    const label = (providerStatus ? displayKey.replace(/^rule_/, "") : displayKey)
       .replace(/([a-z])([A-Z])/g, "$1 $2")
       .replace(/[_-]+/g, " ")
       .trim();
@@ -224,6 +232,7 @@ export function projectRecruitingCandidateReport(raw: unknown): RecruitingCandid
       label: label[0]!.toUpperCase() + label.slice(1) + (absent ? " absent" : ""),
       value:
         value === null ? null : Array.isArray(value) ? value.map(String).join("\n") : String(value),
+      ...(providerStatus ? { providerStatus } : {}),
       ...(typeof cell?.evidence === "string" ? { evidence: cell.evidence } : {}),
       ...(typeof cell?.reasoning === "string" ? { reasoning: cell.reasoning } : {}),
       sourceUrls,
