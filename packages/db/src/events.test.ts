@@ -233,6 +233,63 @@ function approvalAnswerFixture(request: unknown = persistedApprovalRequest) {
 }
 
 describe("native approval answer provenance", () => {
+  it.each(["allow", "deny"])("legacy official Cal card permits only denial: %s", async (answer) => {
+    const f = approvalAnswerFixture([
+      "__rakazoCatalogTool",
+      "direct",
+      {
+        route: {
+          connectorId: "mcp",
+          resourceId: "cal",
+          resourceRevision: 1,
+          toolName: "cancel_booking",
+        },
+        args: { bookingUid: "original" },
+      },
+    ]);
+    Object.assign(f.tx, {
+      mcpServer: { findFirst: vi.fn().mockResolvedValue({ endpoint: "https://mcp.cal.com/mcp" }) },
+    });
+    const result = await answerRunInput(f.prisma, { ...f.input, answer });
+    if (answer === "allow") {
+      expect(result).toBe(false);
+      expect(f.tx.externalEffect.update).not.toHaveBeenCalled();
+    } else expect(result).toBe(true);
+  });
+
+  it.each(["valid", "changed", "missing", "wrong-request", "missing-card-hash"])(
+    "binds calendar evidence to the original approval card: %s",
+    async (mode) => {
+      const f = approvalAnswerFixture();
+      const hash = (value: unknown) =>
+        createHash("sha256").update(stableJsonValue(value)).digest("hex");
+      const evidence = {
+        kind: "cal_booking_original",
+        version: 1,
+        requestHash: hash(f.effect.request),
+        snapshot: { uid: "original", start: "2026-11-01T05:30:00Z" },
+      };
+      const ask = f.rows[0]!.blocks[1]!;
+      if (ask.kind !== "ask") throw new Error("missing ask");
+      if (mode !== "missing-card-hash") ask.approvalEvidenceHash = hash(evidence);
+      if (mode === "changed") evidence.snapshot.uid = "different";
+      if (mode === "wrong-request") evidence.requestHash = "0".repeat(64);
+      if (mode !== "missing")
+        Object.assign(f.effect, { result: { calendarApprovalEvidence: evidence } });
+      expect(await answerRunInput(f.prisma, { ...f.input, answer: "allow" })).toBe(
+        mode === "valid",
+      );
+      if (mode === "valid") {
+        expect(f.tx.event.create).toHaveBeenCalledWith({
+          data: expect.objectContaining({
+            type: "effect.approval.answered",
+            payload: expect.objectContaining({ approvalEvidenceHash: hash(evidence) }),
+          }),
+        });
+      } else expect(f.tx.externalEffect.update).not.toHaveBeenCalled();
+    },
+  );
+
   it("never stores an always-allow rule for recruiting gate approvals", async () => {
     const f = approvalAnswerFixture();
     f.effect.kind = "recruiting_request_approval";

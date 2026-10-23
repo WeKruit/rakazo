@@ -263,6 +263,11 @@ import {
   browserSnapshotFromTool,
 } from "./browser-tools.js";
 import { agentConnectionTools, builtinAgentTools, sharedMemorySaveError } from "./builtin-tools.js";
+import {
+  CalendarApprovalEvidenceSchema,
+  calendarEvidenceHash,
+  readCalBookingSnapshot,
+} from "./calendar-approval.js";
 import { preflightCalBooking } from "./calendar-preflight.js";
 import { archiveSpawnedBot, spawnBot } from "./child-bots.js";
 import type { CloudAgentConnection } from "./cloud-agent-factory.js";
@@ -5600,6 +5605,27 @@ export function createRunExecutor(deps: ExecutorDeps) {
           const nativeMcpUrl = nativeMcpWriteServer?.endpoint
             ? URL.parse(nativeMcpWriteServer.endpoint)
             : null;
+          const calChange =
+            connectorCall.route?.connectorId === "mcp" &&
+            ["reschedule_booking", "cancel_booking"].includes(connectorCall.route.toolName) &&
+            nativeMcpUrl &&
+            `${nativeMcpUrl.origin}${nativeMcpUrl.pathname.replace(/\/$/, "")}` ===
+              "https://mcp.cal.com/mcp";
+          const authorizeCalendar = async (route: NonNullable<typeof connectorCall.route>) => {
+            const { server } = await requireMcpToolAssignment(
+              deps.prisma,
+              context,
+              route,
+              route.toolName,
+            );
+            const endpoint = server.endpoint ? URL.parse(server.endpoint) : null;
+            if (
+              !endpoint ||
+              `${endpoint.origin}${endpoint.pathname.replace(/\/$/, "")}` !==
+                "https://mcp.cal.com/mcp"
+            )
+              throw new IsolationError();
+          };
           const internalMailboxWrite = Boolean(
             internalMcpEndpoint &&
               nativeMcpUrl &&
@@ -5765,7 +5791,136 @@ export function createRunExecutor(deps: ExecutorDeps) {
             name === "request_secret"
               ? 0
               : nextMutatingEffectOccurrence(replayEffectToolName, args);
+          // A retained booking read is valid only until a successful write to that
+          // exact source/booking. Keep prior receipts and derive a durable cache epoch.
+          let calendarReadEpoch: string | undefined;
+          const readRoute = connectorCall.route;
+          if (
+            readRoute?.connectorId === "mcp" &&
+            readRoute.toolName === "get_booking" &&
+            typeof args.bookingUid === "string"
+          ) {
+            const { server } = await requireMcpToolAssignment(
+              deps.prisma,
+              context,
+              readRoute,
+              "get_booking",
+            );
+            const url = server.endpoint ? URL.parse(server.endpoint) : null;
+            if (
+              url &&
+              `${url.origin}${url.pathname.replace(/\/$/, "")}` === "https://mcp.cal.com/mcp"
+            ) {
+              const writes = await deps.prisma.externalEffect.findMany({
+                where: {
+                  spaceId: run.spaceId,
+                  status: "completed",
+                  run: { threadId: run.threadId, userId: run.userId },
+                  OR: [
+                    {
+                      AND: [
+                        { request: { path: ["2", "route", "connectorId"], equals: "mcp" } },
+                        {
+                          request: {
+                            path: ["2", "route", "resourceId"],
+                            equals: readRoute.resourceId,
+                          },
+                        },
+                        {
+                          request: {
+                            path: ["2", "route", "resourceRevision"],
+                            equals: readRoute.resourceRevision,
+                          },
+                        },
+                        { request: { path: ["2", "args", "bookingUid"], equals: args.bookingUid } },
+                        {
+                          OR: [
+                            "reschedule_booking",
+                            "cancel_booking",
+                            "confirm_booking",
+                            "add_booking_attendee",
+                          ].map((toolName) => ({
+                            request: { path: ["2", "route", "toolName"], equals: toolName },
+                          })),
+                        },
+                      ],
+                    },
+                    {
+                      AND: [
+                        { request: { path: ["3", "connectorId"], equals: "mcp" } },
+                        { request: { path: ["3", "resourceId"], equals: readRoute.resourceId } },
+                        {
+                          request: {
+                            path: ["3", "resourceRevision"],
+                            equals: readRoute.resourceRevision,
+                          },
+                        },
+                        {
+                          request: {
+                            path: ["2", "arguments", "bookingUid"],
+                            equals: args.bookingUid,
+                          },
+                        },
+                        {
+                          OR: [
+                            "reschedule_booking",
+                            "cancel_booking",
+                            "confirm_booking",
+                            "add_booking_attendee",
+                          ].map((toolName) => ({
+                            request: { path: ["3", "toolName"], equals: toolName },
+                          })),
+                        },
+                      ],
+                    },
+                  ],
+                },
+                orderBy: [{ updatedAt: "desc" }, { id: "desc" }],
+                select: { id: true, request: true, result: true },
+              });
+              calendarReadEpoch = writes.find((write) => {
+                const details =
+                  boundDirectApprovalDetails(write.request, CATALOG_APPROVAL_TOOL) ??
+                  catalogApprovalDetails(write.request, CATALOG_APPROVAL_TOOL);
+                const route = details?.route;
+                const requestArgs =
+                  details && "arguments" in details.args
+                    ? (details.args.arguments as Record<string, unknown>)
+                    : details?.args;
+                return (
+                  route?.connectorId === "mcp" &&
+                  route.resourceId === readRoute.resourceId &&
+                  route.resourceRevision === readRoute.resourceRevision &&
+                  [
+                    "reschedule_booking",
+                    "cancel_booking",
+                    "confirm_booking",
+                    "add_booking_attendee",
+                  ].includes(route.toolName) &&
+                  requestArgs?.bookingUid === args.bookingUid &&
+                  mcpObject(write.result)?.status === "success" &&
+                  !(
+                    write.result &&
+                    typeof write.result === "object" &&
+                    !Array.isArray(write.result) &&
+                    (write.result.isError === true ||
+                      "error" in write.result ||
+                      write.result.uncertain === true)
+                  ) &&
+                  !(mcpObject(write.result)?.error || mcpObject(write.result)?.uncertain)
+                );
+              })?.id;
+            }
+          }
           const effectKey =
+            (calendarReadEpoch
+              ? toolEffectIdempotencyKey(
+                  runId,
+                  replayEffectToolName,
+                  { args, calendarMutationEffectId: calendarReadEpoch },
+                  occurrence,
+                )
+              : undefined) ??
             replyAdmission?.effect.idempotencyKey ??
             crmImportAdmission?.effect.idempotencyKey ??
             researchMutation?.effect?.idempotencyKey ??
@@ -5787,6 +5942,7 @@ export function createRunExecutor(deps: ExecutorDeps) {
                   effectRequest,
                   executionId,
                   consumedEffectIds,
+                  Boolean(calendarReadEpoch),
                 );
           if (researchAdmission?.kind === "read") {
             if (!applied) throw new IsolationError();
@@ -6144,11 +6300,51 @@ export function createRunExecutor(deps: ExecutorDeps) {
                 "https://mcp.cal.com/mcp"
             ) {
               if (!deps.connector) throw new IsolationError();
+              const savedResult = applied?.effect.result;
+              const evidence =
+                savedResult && typeof savedResult === "object" && !Array.isArray(savedResult)
+                  ? savedResult.calendarApprovalEvidence
+                  : undefined;
+              if (calChange) {
+                const parsed = CalendarApprovalEvidenceSchema.safeParse(evidence);
+                const proofHash = calendarEvidenceHash(evidence ?? null);
+                const proofs = await deps.prisma.event.findMany({
+                  where: {
+                    spaceId: run.spaceId,
+                    threadId: run.threadId,
+                    runId,
+                    type: "effect.approval.answered",
+                    payload: { path: ["effectId"], equals: applied!.effect.id },
+                  },
+                  select: { payload: true },
+                });
+                if (
+                  !parsed.success ||
+                  parsed.data.requestHash !== calendarEvidenceHash(applied!.effect.request) ||
+                  !proofs.some(
+                    ({ payload }) =>
+                      payload &&
+                      typeof payload === "object" &&
+                      !Array.isArray(payload) &&
+                      payload.effectId === applied!.effect.id &&
+                      payload.answer === "allow" &&
+                      payload.requestHash === parsed.data.requestHash &&
+                      payload.approvalEvidenceHash === proofHash,
+                  )
+                )
+                  return {
+                    error:
+                      "Calendar change requires its original booking snapshot and matching native approval. Request a new review; no calendar change was dispatched.",
+                    code: "CALENDAR_APPROVAL_EVIDENCE_INVALID",
+                    dispatched: false,
+                  };
+              }
               const blocked = await preflightCalBooking({
                 connector: deps.connector,
                 context,
                 route: connectorCall.route,
                 args,
+                originalEvidence: evidence,
                 authorize: async (route) => {
                   const { server } = await requireMcpToolAssignment(
                     deps.prisma,
@@ -6318,6 +6514,76 @@ export function createRunExecutor(deps: ExecutorDeps) {
             }
             let files: MessageBlock[] = [];
             let approvalArgs = args;
+            let calendarApprovalHash: string | undefined;
+            if (calChange) {
+              try {
+                if (!deps.connector || !connectorCall.route || typeof args.bookingUid !== "string")
+                  throw new Error("The exact original booking UID is required");
+                if (
+                  connectorCall.route.toolName === "reschedule_booking" &&
+                  (!Number.isSafeInteger(args.lengthInMinutes) || Number(args.lengthInMinutes) <= 0)
+                )
+                  throw new Error(
+                    "Clarify the explicit reschedule duration before requesting approval",
+                  );
+                if (args.cancelSubsequentBookings === true)
+                  throw new Error(
+                    "Recurring cancellation requires separate verified booking scope",
+                  );
+                let saved = applied!.effect.result;
+                if (saved == null) {
+                  const snapshot = await readCalBookingSnapshot({
+                    connector: deps.connector,
+                    context,
+                    route: connectorCall.route,
+                    bookingUid: args.bookingUid,
+                    authorize: authorizeCalendar,
+                  });
+                  const evidence = CalendarApprovalEvidenceSchema.parse({
+                    kind: "cal_booking_original",
+                    version: 1,
+                    route: connectorCall.route,
+                    requestHash: calendarEvidenceHash(applied!.effect.request),
+                    snapshot,
+                  });
+                  const result = { calendarApprovalEvidence: evidence } as Prisma.InputJsonValue;
+                  const written = await deps.prisma.externalEffect.updateMany({
+                    where: {
+                      id: applied!.effect.id,
+                      status: "intended",
+                      result: { equals: Prisma.DbNull },
+                    },
+                    data: { result },
+                  });
+                  if (written.count !== 1)
+                    throw new Error(
+                      "Calendar approval evidence changed; retry the original review",
+                    );
+                  applied!.effect.result = result as Prisma.JsonValue;
+                  saved = applied!.effect.result;
+                }
+                const evidence = CalendarApprovalEvidenceSchema.parse(
+                  saved && typeof saved === "object" && !Array.isArray(saved)
+                    ? saved.calendarApprovalEvidence
+                    : undefined,
+                );
+                if (
+                  evidence.requestHash !== calendarEvidenceHash(applied!.effect.request) ||
+                  stableJsonValue(evidence.route) !== stableJsonValue(connectorCall.route) ||
+                  evidence.snapshot.uid !== args.bookingUid
+                )
+                  throw new Error("Calendar approval evidence does not match this exact change");
+                calendarApprovalHash = calendarEvidenceHash(evidence);
+                approvalArgs = { ...args, originalBooking: evidence.snapshot };
+              } catch (error) {
+                return {
+                  error: sanitizeConnectorError(error, runSecrets),
+                  code: "CALENDAR_APPROVAL_EVIDENCE_UNAVAILABLE",
+                  dispatched: false,
+                };
+              }
+            }
+
             let recruitingApproval:
               | Awaited<ReturnType<typeof prepareRecruitingApproval>>
               | undefined;
@@ -6546,6 +6812,20 @@ export function createRunExecutor(deps: ExecutorDeps) {
                 instantlyReply,
               },
             );
+            if (calendarApprovalHash) {
+              const visibleSnapshot = redactSecrets(
+                JSON.stringify(approvalArgs.originalBooking, null, 2),
+                runSecrets,
+              );
+              if (!approvalBlock.detail?.includes(visibleSnapshot))
+                return {
+                  error:
+                    "The complete original booking cannot fit in this approval card. No calendar change was dispatched.",
+                  code: "CALENDAR_APPROVAL_DISPLAY_INCOMPLETE",
+                  dispatched: false,
+                };
+              approvalBlock.approvalEvidenceHash = calendarApprovalHash;
+            }
             const paused = await deps.events.pauseRunForInput({
               spaceId: run.spaceId,
               threadId: run.threadId,
@@ -11431,6 +11711,7 @@ export async function recordEffect(
   request: unknown,
   legacyIdempotencyKey?: string,
   consumedIds?: Set<string>,
+  skipLegacyReconciliation = false,
 ) {
   const existing = await deps.prisma.externalEffect.findUnique({
     where: { idempotencyKey },
@@ -11456,11 +11737,12 @@ export async function recordEffect(
   // with a new id finds the row by run, tool, and request instead.
   let expectedRequest: string | undefined;
   try {
-    expectedRequest = stableJsonValue(request);
+    expectedRequest = skipLegacyReconciliation ? undefined : stableJsonValue(request);
   } catch {
     expectedRequest = undefined;
   }
-  const rawPiId = legacyIdempotencyKey && legacyPiToolCallId(legacyIdempotencyKey);
+  const rawPiId =
+    !skipLegacyReconciliation && legacyIdempotencyKey && legacyPiToolCallId(legacyIdempotencyKey);
   if (rawPiId) {
     const oldPi = await deps.prisma.externalEffect.findUnique({
       where: { idempotencyKey: rawPiId },

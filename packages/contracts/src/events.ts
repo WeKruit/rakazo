@@ -276,6 +276,10 @@ export const AskBlockSchema = z
     kind: z.literal("ask"),
     text: z.string(),
     approvalEffectId: Id.optional(),
+    approvalEvidenceHash: z
+      .string()
+      .regex(/^[a-f0-9]{64}$/)
+      .optional(),
     detail: z.string().optional(),
     input: z.enum(["text", "secret"]).optional(),
     /** Why the secret is needed; drives field label on the masked card. */
@@ -654,6 +658,10 @@ export const NativeAskAnswerPayloadSchema = z.strictObject({
 export type NativeAskAnswerPayload = z.infer<typeof NativeAskAnswerPayloadSchema>;
 
 export const EffectApprovalAnsweredPayloadSchema = z.strictObject({
+  approvalEvidenceHash: z
+    .string()
+    .regex(/^[a-f0-9]{64}$/)
+    .optional(),
   effectId: Id,
   messageId: Id,
   askIndex: z.number().int().nonnegative(),

@@ -17,7 +17,9 @@ import {
 import {
   askFormAnswerText,
   blocksToAgentHistoryText,
+  boundDirectApprovalDetails,
   callIdFromClientNonce,
+  catalogApprovalDetails,
   isApprovalAskBlock,
   isConversationalRun,
   isSecretAskBlock,
@@ -899,11 +901,17 @@ async function commitAnswerRunInput(
     ? LoginSecretValue.safeParse({ username: input.username!.trim(), password: answerText })
     : undefined;
   if (login && !login.success) return null;
-  let approvalEffect: { id: string; kind: string; request: Prisma.JsonValue } | null = null;
+  let approvalEffect: {
+    id: string;
+    kind: string;
+    request: Prisma.JsonValue;
+    result?: Prisma.JsonValue;
+  } | null = null;
   let approvalUserId: string | null = null;
 
   if (approvalAsk) {
     if (!pendingAsk.actions?.some((action) => action.id === answerText)) return null;
+    await tx.$queryRaw`SELECT id FROM external_effects WHERE id = ${pendingAsk.approvalEffectId} FOR UPDATE`;
     approvalEffect = await tx.externalEffect.findFirst({
       where: {
         id: pendingAsk.approvalEffectId,
@@ -913,6 +921,50 @@ async function commitAnswerRunInput(
       },
     });
     if (!approvalEffect) return null;
+    const approvedRoute = (
+      boundDirectApprovalDetails(approvalEffect.request, "__rakazoCatalogTool") ??
+      catalogApprovalDetails(approvalEffect.request, "__rakazoCatalogTool")
+    )?.route;
+    if (
+      answerText !== "deny" &&
+      !pendingAsk.approvalEvidenceHash &&
+      approvedRoute?.connectorId === "mcp" &&
+      ["reschedule_booking", "cancel_booking"].includes(approvedRoute.toolName)
+    ) {
+      const source = await tx.mcpServer.findFirst({
+        where: {
+          id: approvedRoute.resourceId,
+          spaceId: input.spaceId,
+          userId: run.userId,
+        },
+        select: { endpoint: true },
+      });
+      const url = source?.endpoint ? URL.parse(source.endpoint) : null;
+      if (url && `${url.origin}${url.pathname.replace(/\/$/, "")}` === "https://mcp.cal.com/mcp")
+        return null;
+    }
+    const evidence =
+      approvalEffect.result &&
+      typeof approvalEffect.result === "object" &&
+      !Array.isArray(approvalEffect.result)
+        ? approvalEffect.result.calendarApprovalEvidence
+        : undefined;
+    if (answerText !== "deny" && (pendingAsk.approvalEvidenceHash || evidence)) {
+      if (
+        !pendingAsk.approvalEvidenceHash ||
+        !evidence ||
+        typeof evidence !== "object" ||
+        Array.isArray(evidence) ||
+        evidence.kind !== "cal_booking_original" ||
+        evidence.version !== 1 ||
+        evidence.requestHash !==
+          createHash("sha256").update(stableJsonValue(approvalEffect.request)).digest("hex") ||
+        pendingAsk.approvalEvidenceHash !==
+          createHash("sha256").update(stableJsonValue(evidence)).digest("hex")
+      )
+        return null;
+    }
+
     if (
       approvalEffect.kind === "recruiting_request_approval" &&
       (answerText === "always" ||
@@ -1130,6 +1182,9 @@ async function commitAnswerRunInput(
       type: "effect.approval.answered",
       payload: {
         effectId: approvalEffect!.id,
+        ...(pendingAsk.approvalEvidenceHash
+          ? { approvalEvidenceHash: pendingAsk.approvalEvidenceHash }
+          : {}),
         messageId: message.id,
         askIndex: parsed.data.indexOf(pendingAsk),
         answeredByUserId: input.answeredByUserId,

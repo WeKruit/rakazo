@@ -563,6 +563,17 @@ describe("native Cal.com booking approvals", () => {
       f.setCalls([call(original, "initial")]);
       await f.run();
       expect(f.connector.execute).not.toHaveBeenCalled();
+      if (["reschedule_booking", "cancel_booking"].includes(operation)) {
+        expect(f.pauseRunForInput).not.toHaveBeenCalled();
+        expect(f.results).toContainEqual(
+          expect.objectContaining({
+            code: "CALENDAR_APPROVAL_EVIDENCE_UNAVAILABLE",
+            dispatched: false,
+          }),
+        );
+        expect(f.effects[0]).toMatchObject({ status: "intended" });
+        return;
+      }
       expect(f.pauseRunForInput).toHaveBeenCalledOnce();
       const card = f.pauseRunForInput.mock.calls[0]![0].blocks.at(-1)!;
       expect(card).toMatchObject({

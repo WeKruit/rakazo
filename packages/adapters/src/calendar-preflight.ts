@@ -1,6 +1,7 @@
 import type { AdapterContext, ConnectorProvider, ConnectorRoute } from "@rakazo/adapter-kit";
 import { stableJsonValue } from "@rakazo/core/node/approval-effect-key";
 import { catalogExecuteToolName, catalogIdForRoute } from "./approval-effect.js";
+import { CalendarApprovalEvidenceSchema, readCalBookingSnapshot } from "./calendar-approval.js";
 import { assertConnectorToolArgs, CATALOG_EXECUTE } from "./lazy-tool-catalog.js";
 import { mcpObject } from "./recruiting-research.js";
 
@@ -10,6 +11,7 @@ export async function preflightCalBooking(input: {
   context: AdapterContext;
   route: ConnectorRoute;
   args: Record<string, unknown>;
+  originalEvidence?: unknown;
   authorize: (route: ConnectorRoute) => Promise<void>;
 }) {
   const unavailable = (reason: string) => ({
@@ -17,9 +19,32 @@ export async function preflightCalBooking(input: {
     code: "CALENDAR_PREFLIGHT_UNAVAILABLE",
     dispatched: false,
   });
-  if (input.route.toolName !== "create_booking")
-    return unavailable("approval recovery has no verified original-event snapshot for this change");
-  const { eventTypeId, start, lengthInMinutes } = input.args;
+  let original: ReturnType<typeof CalendarApprovalEvidenceSchema.parse> | undefined;
+  if (input.route.toolName !== "create_booking") {
+    try {
+      original = CalendarApprovalEvidenceSchema.parse(input.originalEvidence);
+      if (
+        stableJsonValue(original.route) !== stableJsonValue(input.route) ||
+        original.snapshot.uid !== input.args.bookingUid ||
+        input.args.cancelSubsequentBookings === true
+      )
+        return unavailable(
+          "the approved original booking identity or operation scope is unsupported",
+        );
+      const fresh = await readCalBookingSnapshot({ ...input, bookingUid: original.snapshot.uid });
+      if (stableJsonValue(fresh) !== stableJsonValue(original.snapshot))
+        return unavailable(
+          "the original booking changed after approval; prepare a new proposal and approval",
+        );
+      if (input.route.toolName === "cancel_booking") return undefined;
+    } catch {
+      return unavailable(
+        "the approved original booking evidence is missing, changed or unreadable",
+      );
+    }
+  }
+  const { start, lengthInMinutes } = input.args;
+  const eventTypeId = original?.snapshot.eventTypeId ?? input.args.eventTypeId;
   if (
     !Number.isSafeInteger(eventTypeId) ||
     Number(eventTypeId) <= 0 ||
@@ -49,6 +74,7 @@ export async function preflightCalBooking(input: {
     timeZone: "UTC",
     duration: lengthInMinutes,
     format: "range",
+    ...(original ? { bookingUidToReschedule: original.snapshot.uid } : {}),
   };
   if (!input.route.resourceId || typeof input.route.resourceRevision !== "number")
     return unavailable("the approved calendar source identity is incomplete");
