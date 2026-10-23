@@ -72,9 +72,9 @@ describe("bot tool permissions", () => {
       "create",
       "revise",
       "update",
-      "bind",
       "archive",
       "unarchive",
+      "bind",
     ]);
     expect(
       selectBuiltinToolsForRun({ ...options, disabledBuiltinTools: ["recruiting_role"] }).some(
