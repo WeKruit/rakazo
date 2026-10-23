@@ -1,5 +1,7 @@
 # Candidate profile and workspace presentation review
 
+> Historical producer checkpoint. Current integration, tests, 600-pixel detail width, canonical single route surfaces and native PostgreSQL results supersede the pending integration statements below. See [current delivery](unified-workspace-delivery.md) and [59-item state](unified-workspace-final-status.md). The producer-only no-migration statement does not cover the combined workspace attachment migration.
+
 This is implementation evidence for independent review, not production acceptance. The original handoff and the canonical [unified workspace acceptance checklist](unified-workspace-acceptance.md) govern the combined delivery. The CRM integration owner supplies that canonical file; this change does not maintain a competing copy.
 
 ## Change and ownership
