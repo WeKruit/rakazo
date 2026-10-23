@@ -8856,6 +8856,7 @@ it("mounts the role tabs for a CRM-bound conversation and keeps stored CRM views
     const roleTab = view.container.querySelector("[data-role-tab]");
     expect(roleTab?.getAttribute("data-role-tab")).toBe(tab);
     expect(JSON.parse(roleTab!.textContent!)).toEqual({
+      ...(tab === "interview" ? { threadId: "thread-1" } : {}),
       roleId: role.id,
       spaceId: role.spaceId,
       conversation: { groupId: "group-1" },
