@@ -216,6 +216,18 @@ describe("contracts", () => {
       { kind: "progress", text: "Using browser", activity: true },
     );
   });
+  it("accepts the thinking phase with a safe summary", () => {
+    const block = {
+      kind: "progress",
+      text: "",
+      activity: true,
+      phase: "thinking",
+      summary: "Reviewing candidates",
+      at: "2026-10-23T00:00:00.000Z",
+    };
+    expect(MessageBlock.parse(block)).toEqual(block);
+    expect(MessageBlock.safeParse({ ...block, phase: "dreaming" }).success).toBe(false);
+  });
 
   it("parses bounded model image limits", () => {
     expect(parseModelMaxImagesPerPrompt("1")).toBe(1);

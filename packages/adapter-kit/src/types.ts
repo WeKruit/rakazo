@@ -592,7 +592,11 @@ export type AgentRuntimeEvent =
       /** Provider-generated tool status rather than assistant-authored narration. */
       activity?: true;
       /** Runtime phase behind an empty activity line, e.g. native context compaction. */
-      phase?: "compacting";
+      phase?: "compacting" | "thinking";
+      /** ≤8-word user-safe label for a thinking phase; never raw reasoning. */
+      summary?: string;
+      /** ISO time the phase update was produced. */
+      at?: string;
     }
   | { type: "tool"; name: string; args: Record<string, unknown>; executionId: string }
   | {
