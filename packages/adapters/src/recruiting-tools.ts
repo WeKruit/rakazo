@@ -13,7 +13,7 @@ import {
   RecruitingResearchToolInputSchema,
   RecruitingRoleToolInputSchema,
 } from "@rakazo/contracts";
-import { boundDirectApprovalDetails, catalogApprovalDetails } from "@rakazo/core";
+import { boundDirectApprovalDetails, catalogApprovalDetails, parseCsv } from "@rakazo/core";
 import { stableJsonValue } from "@rakazo/core/node/approval-effect-key";
 import type {
   Prisma,
@@ -36,24 +36,27 @@ import {
   readRecruitingResearchContext,
   reconcileRecruitingResearchAction,
   recordRecruitingResearchObservation,
+  recruitingCsvImportReceipt,
   recruitingResearchSnapshot,
   saveNativeRecruitingCandidatePage,
+  saveRecruitingCandidateCsvImport,
   scoped,
 } from "@rakazo/db";
 import { getLogger } from "@rakazo/logging";
 
+import { readActorArtifact } from "./artifact-read.js";
 import type { LoadedRecruitingRunContext } from "./recruiting-context.js";
 import type { RecruitingResearchRequest } from "./recruiting-research.js";
-import {
-  RECRUITING_RESEARCH_BACKGROUND_NOTICE,
-  RECRUITING_RESEARCH_FOREGROUND_WAIT_SECONDS,
-  recruitingResearchPollDelay,
-} from "./recruiting-research-poll.js";
 import {
   buildRecruitingResearchRequest,
   classifyRecruitingResearchResult,
   readRecruitingResearchRequest,
 } from "./recruiting-research.js";
+import {
+  RECRUITING_RESEARCH_BACKGROUND_NOTICE,
+  RECRUITING_RESEARCH_FOREGROUND_WAIT_SECONDS,
+  recruitingResearchPollDelay,
+} from "./recruiting-research-poll.js";
 
 export async function executeRecruitingRoleTool(
   prisma: PrismaClient,
@@ -665,6 +668,101 @@ export async function saveNativeRecruitingCandidateResults(
       bytes,
     });
   }
+}
+
+export class RecruitingCsvImportError extends Error {}
+
+const CSV_IMPORT_FIELDS = {
+  name: "name",
+  linkedinUrl: "linkedin_url",
+  company: "current_company",
+  title: "current_title",
+  location: "location",
+  resumeUrl: "resume_url",
+} as const;
+
+/** Save a recruiter-supplied text/csv artifact as one unassessed candidate page on the role. */
+export async function importRecruitingCandidateCsv(
+  deps: ResearchDeps,
+  trusted: ResearchActor & {
+    leaseOwner: string;
+    leaseFence: number;
+    effectId: string;
+    effectRequest: unknown;
+  },
+  input: Extract<RecruitingResearchToolInput, { operation: "import_csv" }>,
+  context: AdapterContext,
+) {
+  if (
+    context.runId !== trusted.runId ||
+    context.spaceId !== trusted.actor.spaceId ||
+    context.userId !== trusted.actor.userId
+  )
+    throw new IsolationError();
+  // Same owner/internal-family isolation and hash verification as artifact_read.
+  let saved: Awaited<ReturnType<typeof readActorArtifact>>;
+  try {
+    saved = await readActorArtifact(deps, trusted.actor, {
+      artifactId: input.artifactId,
+      fromTool: true,
+    });
+  } catch (error) {
+    if (error instanceof IsolationError) throw error;
+    throw new RecruitingCsvImportError("Saved artifact could not be read or verified.");
+  }
+  if (saved.row.mimeType.split(";", 1)[0]?.trim().toLowerCase() !== "text/csv")
+    throw new RecruitingCsvImportError("import_csv requires a text/csv artifact.");
+  let text: string;
+  try {
+    text = new TextDecoder("utf-8", { fatal: true, ignoreBOM: true }).decode(saved.bytes);
+  } catch {
+    throw new RecruitingCsvImportError("This artifact is not valid UTF-8 text.");
+  }
+  const csv = parseCsv(text);
+  const columns: Array<[string, number]> = [];
+  for (const [field, column] of Object.entries(input.mapping)) {
+    if (column === undefined) continue;
+    const index = csv.header.indexOf(column);
+    if (index < 0)
+      throw new RecruitingCsvImportError(
+        `Column "${column}" is not in the CSV header: ${JSON.stringify(csv.header)}.`,
+      );
+    columns.push([CSV_IMPORT_FIELDS[field as keyof typeof CSV_IMPORT_FIELDS], index]);
+  }
+  const rows: Array<{ rowIndex: number; csvRowIndex: number; row: Record<string, string> }> = [];
+  const skipped: Array<{ csvRowIndex: number; reason: string }> = [];
+  for (const [csvRowIndex, cells] of csv.rows.entries()) {
+    const row: Record<string, string> = {};
+    for (const [key, index] of columns) {
+      const value = cells[index]?.trim();
+      if (value) row[key] = value;
+    }
+    if (!row.name && !row.linkedin_url)
+      skipped.push({ csvRowIndex, reason: "missing_name_and_linkedin_url" });
+    else rows.push({ rowIndex: rows.length, csvRowIndex, row });
+  }
+  const captured = {
+    artifactSha256: saved.row.hash,
+    header: csv.header,
+    rows,
+    skipped,
+    truncated: csv.truncated,
+  };
+  const bytes = Buffer.from(stableJsonValue(recruitingCsvImportReceipt(input, captured)), "utf8");
+  const hash = createHash("sha256").update(bytes).digest("hex");
+  const name = `recruiting-csv-import-${hash}.json`;
+  const stored = await deps.artifacts.put({ name, mimeType: "application/json", bytes }, context);
+  return saveRecruitingCandidateCsvImport(deps.prisma, trusted.actor, trusted, input, {
+    ...captured,
+    outputArtifact: {
+      name,
+      mimeType: "application/json",
+      size: bytes.byteLength,
+      hash,
+      storageKey: stored.id,
+      clientNonce: `recruiting-csv-import:${trusted.effectId}`,
+    },
+  });
 }
 
 export async function completeRecruitingResearchCall(

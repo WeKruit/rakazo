@@ -280,9 +280,13 @@ describe("recruiting contracts", () => {
         actionId: action.id,
       }),
     ).toEqual({ ...source, taskId: action.taskId, actionId: action.id });
+    // A recruiter CSV import page has no provider task.
+    expect(
+      contracts.RecruitingCandidateSourceSchema.safeParse({ ...source, providerTaskId: null })
+        .success,
+    ).toBe(true);
     for (const references of [
       { providerTaskId: undefined },
-      { providerTaskId: null },
       { providerTaskId: " " },
       { taskId: action.taskId, actionId: null },
       { taskId: null, actionId: action.id },
