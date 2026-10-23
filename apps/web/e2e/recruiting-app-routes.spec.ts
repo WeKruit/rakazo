@@ -196,11 +196,12 @@ for (const width of [1440, 390]) {
       } else await openRoute(page, "sequence");
       await expect(page.getByRole("region", { name: "Sequence", exact: true })).toBeVisible();
       await expect(page.getByText("Platform outreach", { exact: true }).first()).toBeVisible();
-      await expect(page.getByText("No dated sends in the available records.")).toBeVisible();
+      await expect(page.getByText("Recruiter messages are unavailable for this role.")).toBeVisible();
       await capture(page, testInfo, `app-sequence-entry-${width}`);
-      await page
-        .getByRole("region", { name: "Sequence", exact: true })
-        .evaluate((element) => element.scrollIntoView({ block: "start" }));
+      const roleHeading = page
+        .getByRole("heading", { name: "Staff Platform Engineer", exact: true })
+        .first();
+      await expect(roleHeading).toBeInViewport({ ratio: 1 });
       await capture(page, testInfo, `app-sequence-${width}`);
 
       await openRoute(page, "inbox");
@@ -361,3 +362,23 @@ for (const width of [1440, 390]) {
     expect(fixture.unknown).toEqual([]);
   });
 }
+
+test("changing workspace tabs resets the primary scroll", async ({ page }) => {
+  await page.setViewportSize({ width: 1440, height: 900 });
+  await mockRecruitingApp(page);
+  await openRoute(page, "sequence");
+  const primary = page.locator(".recruiting-workspace-main");
+  await primary.evaluate((element) => {
+    element.scrollTop = element.scrollHeight;
+  });
+  expect(await primary.evaluate((element) => element.scrollTop)).toBeGreaterThan(0);
+  await page
+    .getByRole("navigation", { name: "Recruiting workspace" })
+    .getByRole("button", { name: "Inbox", exact: true })
+    .click();
+  await expect(page).toHaveURL(/view=inbox/);
+  await expect.poll(() => primary.evaluate((element) => element.scrollTop)).toBe(0);
+  await expect(
+    page.getByRole("heading", { name: "Staff Platform Engineer", exact: true }).first(),
+  ).toBeInViewport({ ratio: 1 });
+});
