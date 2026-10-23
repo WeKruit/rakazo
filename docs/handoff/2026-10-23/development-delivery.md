@@ -1,6 +1,6 @@
 # Development delivery — 2026-10-23
 
-Development validation is not live acceptance. This task has not deployed, connected to production, migrated production, run a real CRM sync (including dry run), or sent outreach. The deployment hold in the existing overall handoff remains in force. Only the assigned local deployment owner may verify and lift it under the user's instructions.
+Development validation is not live acceptance. This task has not intentionally deployed, connected to production, migrated production, run a real CRM sync (including dry run), or sent outreach. An automatic external deployment side effect occurred; see the incident below. The deployment hold in the existing overall handoff remains in force. Only the assigned local deployment owner may verify and lift it under the user's instructions.
 
 ## First independently validated batch
 
@@ -38,3 +38,9 @@ Do not deploy this partial batch independently while CRM completion is underway.
 ## Pending final batch
 
 CRM #72 cursor/concurrency/absence safety, upstream company/history transport and source migration; profile #74 notes/reminders/shortlist completion; final combined validation; ordered migration and deployment/sync/readback instructions. No live acceptance is claimed. Product decisions deferred in the handoff (new interview table, application rename, rolling-deployment resources) remain deferred.
+
+## External deployment incident (metadata checked 16:33 UTC)
+
+The upstream CRM branch push at source commit `f4fba4964acb50e78a1811a4d293bf852384dcf5` automatically triggered a Vercel preview, reported Ready at 16:29:55 UTC in headhunter-agent PR #66 comment 6369686726. PR #66 merged at 16:30:32 UTC as `b29368dfdfe417d9883613fa7200d59c29c54861`, before the external deployment integration was reported to this task. That merge commit also has a successful Vercel status (“Deployment has completed”). Its target/environment could not be verified: the GitHub deployments API returned HTTP 403. Treat the merge deployment as potentially production until the local owner verifies it.
+
+The Actions-only audit missed the external Vercel app. `[skip ci]` does not suppress that app. All further headhunter-agent publication was stopped; no app preview was opened, settings changed, deployment deleted, production migration run, or CRM sync performed. Source publication remains paused pending an owner-approved safe route. The local owner must inspect the existing integration's deployment metadata before any additional source publication or planned release. Rakazo merge `e133c3aa3c0d74b87e38c909e700af59b73f0c66` had zero deployment records and zero Actions runs when checked.
