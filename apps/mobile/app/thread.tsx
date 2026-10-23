@@ -16,7 +16,7 @@ import {
   MESSAGE_REACTIONS,
   parseAskFormResponse,
 } from "@rakazo/contracts";
-import type { SlashActionId, ThreadItem } from "@rakazo/core";
+import type { SlashActionId, ThreadItem, WorkTracker } from "@rakazo/core";
 import {
   abortableDelay,
   answerableAskMessageIds,
@@ -27,6 +27,7 @@ import {
   attachmentsForThread,
   buildComposerMentionOptions,
   cloudAgentHttpsUrl,
+  EMPTY_WORK_TRACKER,
   eventNeedsSnapshotRead,
   formatFileSize,
   formatMessageTime,
@@ -47,6 +48,7 @@ import {
   selectedAskActionLabel,
   threadWindowMessages,
   timeSeparatorIds,
+  trackWork,
   userVisibleMessages,
   withLiveStreamingProgress,
 } from "@rakazo/core";
@@ -124,6 +126,7 @@ import type { ThreadComposerHandle } from "../components/thread-composer";
 import { ThreadComposer } from "../components/thread-composer";
 import { TimeSeparator } from "../components/time-separator";
 import { VoiceChatCard } from "../components/VoiceChatCard";
+import { WorkClock } from "../components/WorkClock";
 import { WorkingIndicator } from "../components/WorkingIndicator";
 import type {
   MobileBot,
@@ -682,6 +685,25 @@ function Thread({ sessionEpoch }: { sessionEpoch: number }) {
     });
   }, [inGroup, snap?.activeRuns, snap?.members, snap?.run]);
   const working = inGroup ? workingGroupBots.length > 0 : isWorkingStatus(currentBotStatus);
+  // The turn's clock counts executing time only, never a queue or a pause for an answer.
+  const workTracker = useRef<{ threadId?: string; tracker: WorkTracker }>({
+    tracker: EMPTY_WORK_TRACKER,
+  });
+  workTracker.current = {
+    threadId: snap?.threadId,
+    tracker: trackWork(
+      workTracker.current.threadId === snap?.threadId
+        ? workTracker.current.tracker
+        : EMPTY_WORK_TRACKER,
+      {
+        runs: snap?.activeRuns ?? (snap?.run ? [snap.run] : []),
+        messages: snap?.messages ?? [],
+      },
+      new Date(Date.now()).toISOString(),
+    ),
+  };
+  const workSession = workTracker.current.tracker.session;
+  const liveWorkSession = workSession?.endedAt ? null : workSession;
 
   const speakFinishedReply = useCallback(() => {
     if (!botId || inGroup || !currentBot) return;
@@ -2229,6 +2251,7 @@ function Thread({ sessionEpoch }: { sessionEpoch: number }) {
           status={currentBotStatus}
         />
         <WorkingIndicator />
+        {liveWorkSession ? <WorkClock session={liveWorkSession} /> : null}
       </View>
     ) : inGroup && workingGroupBots.length > 0 ? (
       <View
@@ -2259,6 +2282,7 @@ function Thread({ sessionEpoch }: { sessionEpoch: number }) {
           ))}
         </View>
         <WorkingIndicator />
+        {liveWorkSession ? <WorkClock session={liveWorkSession} /> : null}
       </View>
     ) : null;
 

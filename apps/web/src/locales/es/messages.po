@@ -725,6 +725,10 @@ msgstr ""
 msgid "Ask the server owner to configure this provider."
 msgstr ""
 
+#: src/components/LiveWork.tsx
+msgid "Asking a specialist"
+msgstr ""
+
 #: src/pages/RecruitingPanel.tsx
 msgid "Assessment date"
 msgstr ""
@@ -1193,12 +1197,28 @@ msgstr "Revisa la URL del servidor y la red y vuelve a probar."
 msgid "Check your email"
 msgstr "Revisa tu correo"
 
-#: src/pages/Shell.tsx
-msgid "Checking available connections…"
+#: src/components/LiveWork.tsx
+msgid "Checking availability"
 msgstr ""
 
 #: src/components/ComputersUnavailableHint.tsx
 msgid "Checking computer setup…"
+msgstr ""
+
+#: src/components/LiveWork.tsx
+msgid "Checking connections"
+msgstr ""
+
+#: src/components/LiveWork.tsx
+msgid "Checking email"
+msgstr ""
+
+#: src/components/LiveWork.tsx
+msgid "Checking saved context"
+msgstr ""
+
+#: src/components/LiveWork.tsx
+msgid "Checking the CRM"
 msgstr ""
 
 #: src/components/ComputersUnavailableHint.tsx
@@ -2677,7 +2697,7 @@ msgstr ""
 msgid "Draft"
 msgstr ""
 
-#: src/pages/recruiting/DetailPanel.tsx
+#: src/pages/recruiting/InboxTab.tsx
 #: src/pages/RecruitingPanel.tsx
 msgid "Draft reply"
 msgstr ""
@@ -2689,6 +2709,10 @@ msgstr ""
 #: src/components/teach/SkillDraftCard.tsx
 msgid "Draft skill"
 msgstr "Habilidad en borrador"
+
+#: src/components/LiveWork.tsx
+msgid "Drafting email"
+msgstr ""
 
 #: src/pages/shell/avatar-studio-popover.tsx
 msgid "Drag, drop, or paste an image"
@@ -4835,32 +4859,8 @@ msgstr ""
 msgid "Prepared"
 msgstr ""
 
-#: src/pages/Shell.tsx
-msgid "Preparing a search…"
-msgstr ""
-
-#: src/pages/Shell.tsx
-msgid "Preparing connected work…"
-msgstr ""
-
-#: src/pages/Shell.tsx
-msgid "Preparing to check availability…"
-msgstr ""
-
-#: src/pages/Shell.tsx
-msgid "Preparing to read a page…"
-msgstr ""
-
-#: src/pages/Shell.tsx
-msgid "Preparing to read emails…"
-msgstr ""
-
-#: src/pages/Shell.tsx
-msgid "Preparing to read files…"
-msgstr ""
-
-#: src/pages/Shell.tsx
-msgid "Preparing to read saved context…"
+#: src/components/LiveWork.tsx
+msgid "Preparing a question"
 msgstr ""
 
 #. placeholder {0}: preview?.label ?? props.name
@@ -5008,6 +5008,14 @@ msgstr ""
 msgid "Read this person's original email and complete conversation using the connected CRM and mailbox. Verify the person and current role, then prepare a reply here for me to edit. Only draft it; do not send."
 msgstr ""
 
+#: src/components/LiveWork.tsx
+msgid "Reading a page"
+msgstr ""
+
+#: src/components/LiveWork.tsx
+msgid "Reading files"
+msgstr ""
+
 #: src/pages/RecruitingPanel.tsx
 msgid "Reason"
 msgstr ""
@@ -5057,6 +5065,10 @@ msgstr "Reconectar OAuth"
 #: src/components/ComputerUpdateProgress.tsx
 msgid "Reconnecting"
 msgstr "Reconectando"
+
+#: src/components/LiveWork.tsx
+msgid "Recording feedback"
+msgstr ""
 
 #: src/components/teach/TeachComputerOverlay.tsx
 msgid "Recording may have started, but the view could not refresh"
@@ -5478,6 +5490,14 @@ msgstr ""
 msgid "Reviewed"
 msgstr ""
 
+#: src/components/LiveWork.tsx
+msgid "Reviewing candidates"
+msgstr ""
+
+#: src/components/LiveWork.tsx
+msgid "Reviewing the role"
+msgstr ""
+
 #: src/pages/RecruitingCorrespondence.tsx
 msgid "Revise in chat"
 msgstr ""
@@ -5740,6 +5760,10 @@ msgstr "Guardado."
 msgid "Saved. Rotate to reveal."
 msgstr "Guardado. Rota para revelar."
 
+#: src/components/LiveWork.tsx
+msgid "Saving notes"
+msgstr ""
+
 #: src/components/ComputerUpdateProgress.tsx
 msgid "Saving your workspace"
 msgstr ""
@@ -5895,6 +5919,14 @@ msgstr ""
 #. placeholder {0}: filters.query.trim()
 #: src/pages/ActivityList.tsx
 msgid "Search: {0}"
+msgstr ""
+
+#: src/components/LiveWork.tsx
+msgid "Searching candidates"
+msgstr ""
+
+#: src/components/LiveWork.tsx
+msgid "Searching the web"
 msgstr ""
 
 #: src/pages/PluginsOverlay.tsx
@@ -6985,6 +7017,10 @@ msgstr ""
 msgid "Uses this server's own {hostCredentialSource} credentials to access {selectedProviderName}."
 msgstr "Usa las credenciales de {hostCredentialSource} propias de este servidor para acceder a {selectedProviderName}."
 
+#: src/components/LiveWork.tsx
+msgid "Using a connected app"
+msgstr ""
+
 #: src/pages/shell/bot-credentials.tsx
 msgid "Value"
 msgstr ""
@@ -7144,6 +7180,10 @@ msgstr ""
 msgid "Won't do"
 msgstr ""
 
+#: src/components/LiveWork.tsx
+msgid "Worked for {duration}"
+msgstr ""
+
 #: src/pages/RecruitingPanel.tsx
 msgid "Workflow filter"
 msgstr ""
@@ -7155,6 +7195,10 @@ msgstr ""
 #: src/lib/roster-status.ts
 msgid "Working in background…"
 msgstr "Trabajando en segundo plano…"
+
+#: src/components/LiveWork.tsx
+msgid "Working on it"
+msgstr ""
 
 #: src/lib/roster-status.ts
 #: src/pages/Auth.tsx
