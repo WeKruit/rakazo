@@ -119,6 +119,7 @@ import {
   truncatedPlainText,
   unattendedTriggerToolRequiresApproval,
   userTurnMessageForRun,
+  workActivityForTool,
 } from "@rakazo/core";
 import {
   approvalEffectKey,
@@ -9315,6 +9316,8 @@ export function createRunExecutor(deps: ExecutorDeps) {
                   text: redactSecrets(event.text, runSecrets),
                   ...(event.activity ? { activity: true } : {}),
                   ...(event.phase ? { phase: event.phase } : {}),
+                  ...(event.summary ? { summary: event.summary } : {}),
+                  ...(event.at ? { at: event.at } : {}),
                 },
               });
             } else if (event.type === "ask") {
@@ -9458,6 +9461,7 @@ export function createRunExecutor(deps: ExecutorDeps) {
                   payload: {
                     name: event.name,
                     executionId: event.executionId,
+                    category: workActivityForTool(event.name),
                     argsSummary: toolArgsSummary(event.args, runSecrets),
                   },
                 });

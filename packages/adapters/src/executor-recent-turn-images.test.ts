@@ -587,7 +587,53 @@ describe("routine runs carry their previous run", () => {
   });
 });
 
+describe("step categories", () => {
+  it("records the frontend work category on agent.tool.called", async () => {
+    await runWithModel(TEXT_ONLY_MODEL, undefined, false, false, {
+      events: [
+        { type: "tool", name: "recruiting_candidates", args: {}, executionId: "c1" },
+        { type: "tool", name: "shell_exec", args: { command: "ls" }, executionId: "c2" },
+      ],
+    });
+    const called = lastExecutorEvents!.append.mock.calls
+      .map(([input]) => input)
+      .filter((input) => input.type === "agent.tool.called")
+      .map((input) => [input.payload.executionId, input.payload.category]);
+    expect(called).toEqual([
+      ["c1", "candidates"],
+      ["c2", "working"],
+    ]);
+  });
+});
+
 describe("streaming progress is transient", () => {
+  it("forwards the thinking phase with its safe summary and time", async () => {
+    await runWithModel(TEXT_ONLY_MODEL, undefined, false, false, {
+      events: [
+        {
+          type: "progress",
+          text: "",
+          activity: true,
+          phase: "thinking",
+          summary: "Reviewing candidates",
+          at: "2026-10-23T00:00:00.000Z",
+        },
+      ],
+    });
+    expect(lastExecutorEvents!.publishTransient).toHaveBeenCalledWith(
+      expect.objectContaining({
+        type: "thread.progress",
+        payload: {
+          text: "",
+          activity: true,
+          phase: "thinking",
+          summary: "Reviewing candidates",
+          at: "2026-10-23T00:00:00.000Z",
+        },
+      }),
+    );
+  });
+
   it("publishes progress through publishTransient with the compaction phase, not as durable events", async () => {
     const { prisma: _prisma, ...rest } = await runWithModel(
       TEXT_ONLY_MODEL,
