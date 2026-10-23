@@ -23,6 +23,8 @@ function fixture(
     stage?: string;
     round?: { effectId: string; candidateKeys: string[]; approvedAt: Date | null };
     completedRoundEffect?: boolean;
+    researchTasks?: { id: string; providerTaskId: string; mcpServerId: string; startedAt: Date }[];
+    wokenNonces?: string[];
   } = {},
 ) {
   const sendUserMessage = vi.fn(async () => ({
@@ -45,7 +47,24 @@ function fixture(
       },
       recruitingCalibrationRound: { findFirst: vi.fn(async () => options.round ?? null) },
       externalEffect: {
-        findFirst: vi.fn(async () => (options.completedRoundEffect ? { id: "effect-1" } : null)),
+        findFirst: vi.fn(async (args: { where: { kind?: string } }) =>
+          args.where.kind === "recruiting_research" && options.completedRoundEffect
+            ? { id: "effect-1" }
+            : null,
+        ),
+      },
+      recruitingResearchTask: {
+        findMany: vi.fn(async () =>
+          (options.researchTasks ?? []).map(({ startedAt, ...task }) => ({
+            ...task,
+            createdByRun: { spaceId: "ws-1", createdAt: startedAt },
+          })),
+        ),
+      },
+      run: {
+        findFirst: vi.fn(async (args: { where: { clientNonce: string } }) =>
+          options.wokenNonces?.includes(args.where.clientNonce) ? { id: "wake-1" } : null,
+        ),
       },
       recruitingRole: {
         findUnique: vi.fn(async () => ({
@@ -262,5 +281,73 @@ describe("guardRecruitingTurnEnd", () => {
     expect(
       countTrailingAutoContinues([{ clientNonce: "autocontinue:a:1" }, { clientNonce: null }]),
     ).toBe(1);
+  });
+
+  it("guards the research wake and a coordinator woken by a specialist reply", async () => {
+    for (const trigger of ["recruiting_research", "bot_message"]) {
+      const f = fixture();
+      const result = await guardRecruitingTurnEnd(f.deps, {
+        run: { ...run, trigger },
+        roleId: "role-1",
+        blocks: statusNote,
+        handedOff: false,
+        pendingApproval: false,
+        postAssistant: f.postAssistant,
+      });
+      expect(result.action).toBe("continued");
+    }
+  });
+
+  it("leaves a delegated specialist turn to the bot that asked for it", async () => {
+    const f = fixture();
+    const result = await guardRecruitingTurnEnd(f.deps, {
+      run: { ...run, trigger: "bot_message" },
+      roleId: "role-1",
+      blocks: statusNote,
+      handedOff: false,
+      pendingApproval: false,
+      returnsToRequester: true,
+      postAssistant: f.postAssistant,
+    });
+    expect(result).toEqual({ action: "ended", classification: "none" });
+    expect(f.sendUserMessage).not.toHaveBeenCalled();
+  });
+
+  it("does not push while a search round is still running", async () => {
+    const task = {
+      id: "task-1",
+      providerTaskId: "p-1",
+      mcpServerId: "mcp-1",
+      startedAt: new Date(),
+    };
+    const waiting = fixture({ researchTasks: [task] });
+    await expect(
+      guardRecruitingTurnEnd(waiting.deps, {
+        run,
+        roleId: "role-1",
+        blocks: statusNote,
+        handedOff: false,
+        pendingApproval: false,
+        postAssistant: waiting.postAssistant,
+      }),
+    ).resolves.toEqual({ action: "ended", classification: "none" });
+    expect(waiting.sendUserMessage).not.toHaveBeenCalled();
+
+    // Once the round has woken the thread, or it is older than the poll window, the guard pushes.
+    for (const options of [
+      { researchTasks: [task], wokenNonces: ["recruiting-research-wake:task-1:p-1"] },
+      { researchTasks: [{ ...task, startedAt: new Date(Date.now() - 3 * 60 * 60 * 1000) }] },
+    ]) {
+      const f = fixture(options);
+      const result = await guardRecruitingTurnEnd(f.deps, {
+        run,
+        roleId: "role-1",
+        blocks: statusNote,
+        handedOff: false,
+        pendingApproval: false,
+        postAssistant: f.postAssistant,
+      });
+      expect(result.action).toBe("continued");
+    }
   });
 });
