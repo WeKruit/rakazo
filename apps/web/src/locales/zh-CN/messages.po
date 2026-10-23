@@ -17,14 +17,6 @@ msgstr ""
 msgid " (unread)"
 msgstr "（未读）"
 
-#: src/lib/roster-status.ts
-msgid "Compacting…"
-msgstr "正在压缩上下文…"
-
-#: src/lib/roster-status.ts
-msgid "Working in background…"
-msgstr "后台任务进行中…"
-
 #. placeholder {0}: candidatePage.counts.candidates
 #: src/pages/RecruitingPanel.tsx
 msgid "{0, plural, =1 {# candidate in the pool} other {# candidates in the pool}}"
@@ -311,6 +303,7 @@ msgid "Actions for space"
 msgstr ""
 
 #: src/pages/BillingSettingsPanel.tsx
+#: src/pages/recruiting/SequenceTab.tsx
 #: src/pages/RoutineEditor.tsx
 msgid "Active"
 msgstr "启用"
@@ -815,6 +808,7 @@ msgstr ""
 msgid "Available after the routine is saved"
 msgstr "保存例行任务后可用"
 
+#: src/pages/recruiting/InterviewTab.tsx
 #: src/pages/RecruitingCorrespondence.tsx
 msgid "Available time"
 msgstr ""
@@ -831,8 +825,13 @@ msgstr "头像工作室"
 msgid "Avatars"
 msgstr "头像"
 
+#: src/pages/recruiting/InterviewTab.tsx
 #: src/pages/RecruitingPanel.tsx
 msgid "Awaiting feedback"
+msgstr ""
+
+#: src/pages/recruiting/InboxTab.tsx
+msgid "Awaiting reply"
 msgstr ""
 
 #: src/components/computer/FilesApp.tsx
@@ -969,20 +968,30 @@ msgstr ""
 msgid "Built-in"
 msgstr "内置"
 
+#: src/pages/recruiting/InterviewTab.tsx
+msgid "Calendar"
+msgstr ""
+
 #: src/pages/RecruitingPanel.tsx
 msgid "Calendar booking details are not included in these manual CRM workflow records."
 msgstr ""
 
+#: src/pages/recruiting/InterviewTab.tsx
 #: src/pages/RecruitingCorrespondence.tsx
 msgid "Calendar event"
 msgstr ""
 
+#: src/pages/recruiting/SequenceTab.tsx
 #: src/pages/RecruitingPanel.tsx
 msgid "Campaign"
 msgstr ""
 
 #: src/pages/RecruitingPanel.tsx
 msgid "Campaign details unavailable"
+msgstr ""
+
+#: src/pages/recruiting/SequenceTab.tsx
+msgid "Campaign not synced"
 msgstr ""
 
 #: src/App.tsx
@@ -1034,6 +1043,8 @@ msgstr "已取消"
 msgid "Cancelled"
 msgstr "已取消"
 
+#: src/pages/recruiting/ContactsTab.tsx
+#: src/pages/recruiting/InterviewTab.tsx
 #: src/pages/RecruitingPanel.tsx
 msgid "Candidate"
 msgstr "候选人"
@@ -1078,6 +1089,7 @@ msgstr ""
 msgid "Candidate statement"
 msgstr ""
 
+#: src/pages/recruiting/InboxTab.tsx
 #: src/pages/RecruitingPanel.tsx
 msgid "Candidates"
 msgstr ""
@@ -1388,6 +1400,10 @@ msgstr ""
 msgid "Compact"
 msgstr ""
 
+#: src/lib/roster-status.ts
+msgid "Compacting…"
+msgstr "正在压缩上下文…"
+
 #: src/pages/RecruitingPanel.tsx
 msgid "Company"
 msgstr ""
@@ -1404,6 +1420,10 @@ msgstr ""
 #: src/pages/ScratchpadSection.tsx
 msgid "Complete"
 msgstr "完成"
+
+#: src/pages/recruiting/SequenceTab.tsx
+msgid "Completed"
+msgstr ""
 
 #: src/pages/SettingsOverlay.tsx
 #: src/pages/Shell.tsx
@@ -1595,10 +1615,12 @@ msgstr ""
 msgid "Contact source"
 msgstr ""
 
+#: src/pages/recruiting/ContactsTab.tsx
 #: src/pages/RecruitingPanel.tsx
 msgid "Contact status"
 msgstr ""
 
+#: src/pages/recruiting/ContactsTab.tsx
 #: src/pages/RecruitingPanel.tsx
 #: src/pages/shell/RecruitingNavigation.tsx
 msgid "Contacts"
@@ -1899,6 +1921,11 @@ msgstr ""
 msgid "Could not load credentials."
 msgstr ""
 
+#: src/pages/recruiting/ContactsTab.tsx
+#: src/pages/recruiting/InboxTab.tsx
+#: src/pages/recruiting/InterviewTab.tsx
+#: src/pages/recruiting/SequenceTab.tsx
+#: src/pages/recruiting/shared.tsx
 #: src/pages/RecruitingPanel.tsx
 msgid "Could not load CRM records. Try refreshing."
 msgstr ""
@@ -2281,6 +2308,10 @@ msgid "Credentials are encrypted and never sent to the model."
 msgstr "凭据已加密，不会发送给模型。"
 
 #: src/pages/RecruitingPanel.tsx
+msgid "Criteria"
+msgstr ""
+
+#: src/pages/RecruitingPanel.tsx
 msgid "Criterion"
 msgstr ""
 
@@ -2306,10 +2337,6 @@ msgstr ""
 msgid "CRM receipt"
 msgstr ""
 
-#: src/pages/shell/RecruitingNavigation.tsx
-msgid "CRM roles"
-msgstr ""
-
 #: src/pages/RoutineSchedule.tsx
 msgid "Cron"
 msgstr "Cron"
@@ -2327,6 +2354,7 @@ msgstr ""
 msgid "Current password"
 msgstr "当前密码"
 
+#: src/pages/recruiting/ContactsTab.tsx
 #: src/pages/RecruitingPanel.tsx
 msgid "Current role"
 msgstr ""
@@ -2637,6 +2665,7 @@ msgstr ""
 msgid "Downloading…"
 msgstr ""
 
+#: src/pages/recruiting/SequenceTab.tsx
 #: src/pages/RecruitingCorrespondence.tsx
 msgid "Draft"
 msgstr ""
@@ -2678,10 +2707,13 @@ msgid "Edit search filters"
 msgstr ""
 
 #: src/pages/Auth.tsx
+#: src/pages/recruiting/ContactsTab.tsx
+#: src/pages/recruiting/InterviewTab.tsx
 #: src/pages/RecruitingPanel.tsx
 msgid "Email"
 msgstr "邮箱"
 
+#: src/pages/recruiting/InboxTab.tsx
 #: src/pages/RecruitingCorrespondence.tsx
 msgid "Email content"
 msgstr ""
@@ -2711,6 +2743,7 @@ msgstr "需要验证邮箱"
 msgid "Email: {0}"
 msgstr ""
 
+#: src/pages/recruiting/InboxTab.tsx
 #: src/pages/RecruitingCorrespondence.tsx
 msgid "Emails"
 msgstr ""
@@ -2858,6 +2891,7 @@ msgid "failed"
 msgstr "失败"
 
 #: src/pages/ActivityList.tsx
+#: src/pages/recruiting/SequenceTab.tsx
 msgid "Failed"
 msgstr "失败"
 
@@ -3214,6 +3248,7 @@ msgstr ""
 msgid "Inactive"
 msgstr ""
 
+#: src/pages/recruiting/InboxTab.tsx
 #: src/pages/RecruitingCorrespondence.tsx
 #: src/pages/shell/RecruitingNavigation.tsx
 msgid "Inbox"
@@ -3317,6 +3352,7 @@ msgstr "间隔数量"
 msgid "Interval unit"
 msgstr "间隔单位"
 
+#: src/pages/recruiting/InterviewTab.tsx
 #: src/pages/RecruitingCorrespondence.tsx
 #: src/pages/shell/RecruitingNavigation.tsx
 msgid "Interview"
@@ -3397,6 +3433,7 @@ msgstr "语言"
 msgid "Last checked"
 msgstr ""
 
+#: src/pages/recruiting/SequenceTab.tsx
 #: src/pages/RecruitingPanel.tsx
 msgid "Last synced"
 msgstr ""
@@ -3441,6 +3478,7 @@ msgstr "关联聊天应用"
 msgid "Link SSO"
 msgstr "关联 SSO"
 
+#: src/pages/recruiting/ContactsTab.tsx
 #: src/pages/RecruitingCorrespondence.tsx
 #: src/pages/RecruitingPanel.tsx
 msgid "LinkedIn"
@@ -3502,10 +3540,6 @@ msgstr ""
 msgid "Loading CRM records…"
 msgstr ""
 
-#: src/pages/shell/RecruitingNavigation.tsx
-msgid "Loading CRM roles…"
-msgstr ""
-
 #: src/pages/PluginsOverlay.tsx
 msgid "Loading integrations…"
 msgstr "正在加载集成…"
@@ -3521,6 +3555,10 @@ msgstr "正在加载模型目录…"
 #: src/components/ArtifactFileCard.tsx
 msgid "Loading preview…"
 msgstr "正在加载预览…"
+
+#: src/pages/shell/RecruitingNavigation.tsx
+msgid "Loading roles…"
+msgstr ""
 
 #: src/components/ApprovalRulesSettings.tsx
 msgid "Loading rules…"
@@ -3554,6 +3592,7 @@ msgstr "正在加载语音提供方…"
 #: src/pages/ModelBackupsSettings.tsx
 #: src/pages/Onboarding.tsx
 #: src/pages/PeerMessagesOverlay.tsx
+#: src/pages/recruiting/shared.tsx
 #: src/pages/RecruitingPanel.tsx
 #: src/pages/RoutineRunHistory.tsx
 #: src/pages/Shell.tsx
@@ -3752,6 +3791,7 @@ msgstr "消息"
 msgid "Message {activeName}"
 msgstr "给 {activeName} 发消息"
 
+#: src/pages/recruiting/InboxTab.tsx
 #: src/pages/RecruitingCorrespondence.tsx
 msgid "Message body unavailable"
 msgstr ""
@@ -3776,6 +3816,7 @@ msgstr "消息…"
 msgid "Messaged {peer}"
 msgstr "已发给 {peer}"
 
+#: src/pages/recruiting/SequenceTab.tsx
 #: src/pages/RecruitingPanel.tsx
 msgid "Messages"
 msgstr ""
@@ -3978,6 +4019,7 @@ msgstr ""
 msgid "Needs input"
 msgstr "需要输入"
 
+#: src/pages/recruiting/InterviewTab.tsx
 #: src/pages/RecruitingPanel.tsx
 msgid "Needs scheduling"
 msgstr ""
@@ -4038,6 +4080,7 @@ msgstr "新建工作区"
 msgid "New ticket"
 msgstr ""
 
+#: src/pages/recruiting/ContactsTab.tsx
 #: src/pages/RecruitingPanel.tsx
 msgid "Next"
 msgstr ""
@@ -4102,12 +4145,14 @@ msgstr ""
 msgid "No credentials saved for this bot."
 msgstr ""
 
-#: src/pages/RecruitingPanel.tsx
-msgid "No CRM records matched this search."
+#: src/pages/recruiting/ContactsTab.tsx
+#: src/pages/recruiting/InboxTab.tsx
+#: src/pages/recruiting/SequenceTab.tsx
+msgid "No CRM contacts for this role yet."
 msgstr ""
 
-#: src/pages/shell/RecruitingNavigation.tsx
-msgid "No CRM roles were returned."
+#: src/pages/RecruitingPanel.tsx
+msgid "No CRM records matched this search."
 msgstr ""
 
 #: src/pages/MessagingSettingsOverlay.tsx
@@ -4124,6 +4169,10 @@ msgstr ""
 
 #: src/pages/RecruitingPanel.tsx
 msgid "No internal review was returned."
+msgstr ""
+
+#: src/pages/recruiting/InterviewTab.tsx
+msgid "No interviews in progress for this role."
 msgstr ""
 
 #: src/pages/RecruitingCorrespondence.tsx
@@ -4267,8 +4316,17 @@ msgstr ""
 msgid "No skills yet"
 msgstr "暂无技能"
 
+#: src/pages/recruiting/SequenceTab.tsx
 #: src/pages/RecruitingPanel.tsx
 msgid "No stored campaign associations were returned for this role."
+msgstr ""
+
+#: src/pages/recruiting/InboxTab.tsx
+msgid "No stored emails for this candidate."
+msgstr ""
+
+#: src/pages/recruiting/SequenceTab.tsx
+msgid "No stored messages for this candidate."
 msgstr ""
 
 #: src/pages/RecruitingPanel.tsx
@@ -4279,6 +4337,7 @@ msgstr ""
 msgid "No stored role-interest records were returned."
 msgstr ""
 
+#: src/pages/recruiting/InboxTab.tsx
 #: src/pages/RecruitingCorrespondence.tsx
 #: src/pages/Shell.tsx
 msgid "No subject"
@@ -4447,6 +4506,7 @@ msgstr ""
 msgid "Open <0>{0}</0> to finish signing in."
 msgstr ""
 
+#: src/pages/recruiting/InterviewTab.tsx
 #: src/pages/RecruitingCorrespondence.tsx
 msgid "Open calendar event"
 msgstr ""
@@ -4485,6 +4545,10 @@ msgstr "打开 Shell"
 
 #: src/pages/RecruitingCorrespondence.tsx
 msgid "Open the conversation to review its history, or ask WeKruit to prepare drafts from saved candidate evidence."
+msgstr ""
+
+#: src/pages/recruiting/shared.tsx
+msgid "Open the role conversation to read its CRM records."
 msgstr ""
 
 #: src/pages/Shell.tsx
@@ -4605,6 +4669,8 @@ msgstr ""
 msgid "Outreach file review"
 msgstr ""
 
+#: src/pages/recruiting/ContactsTab.tsx
+#: src/pages/recruiting/SequenceTab.tsx
 #: src/pages/RecruitingPanel.tsx
 msgid "Outreach status"
 msgstr ""
@@ -4668,6 +4734,7 @@ msgstr "请粘贴你的 API 密钥，然后重新测试。"
 msgid "Pause consideration"
 msgstr ""
 
+#: src/pages/recruiting/SequenceTab.tsx
 #: src/pages/RoutineEditor.tsx
 msgid "Paused"
 msgstr "已暂停"
@@ -4676,6 +4743,7 @@ msgstr "已暂停"
 msgid "Pending approval"
 msgstr ""
 
+#: src/pages/recruiting/ContactsTab.tsx
 #: src/pages/RecruitingPanel.tsx
 msgid "Phone"
 msgstr ""
@@ -4790,10 +4858,12 @@ msgstr ""
 msgid "Preview only"
 msgstr ""
 
+#: src/pages/recruiting/InboxTab.tsx
 #: src/pages/RecruitingCorrespondence.tsx
 msgid "Preview only. Ask for the complete message to read the full body."
 msgstr ""
 
+#: src/pages/recruiting/ContactsTab.tsx
 #: src/pages/RecruitingPanel.tsx
 msgid "Previous"
 msgstr ""
@@ -4874,6 +4944,7 @@ msgid "Qualifying work"
 msgstr ""
 
 #: src/pages/ActivityList.tsx
+#: src/pages/recruiting/SequenceTab.tsx
 msgid "Queued"
 msgstr "排队中"
 
@@ -4905,6 +4976,10 @@ msgstr "表情回应"
 msgid "Read replies aloud"
 msgstr "朗读回复"
 
+#: src/pages/Shell.tsx
+msgid "Read the attached materials for this role."
+msgstr ""
+
 #: src/pages/RecruitingCorrespondence.tsx
 msgid "Read the latest candidate email replies for this role using the connected mailbox. Show the sender, subject, date and original reply. Don't send, label, archive or modify any messages."
 msgstr ""
@@ -4932,6 +5007,10 @@ msgstr ""
 
 #: src/pages/RecruitingPanel.tsx
 msgid "Receipt"
+msgstr ""
+
+#: src/pages/recruiting/InboxTab.tsx
+msgid "Received"
 msgstr ""
 
 #: src/pages/ActivityList.tsx
@@ -5195,6 +5274,10 @@ msgstr ""
 msgid "Replaced"
 msgstr ""
 
+#: src/pages/recruiting/InboxTab.tsx
+msgid "Replied"
+msgstr ""
+
 #: src/pages/Shell.tsx
 msgid "Reply"
 msgstr "回复"
@@ -5397,6 +5480,7 @@ msgstr "机器人"
 msgid "Role"
 msgstr ""
 
+#: src/pages/recruiting/SequenceTab.tsx
 #: src/pages/RecruitingPanel.tsx
 msgid "Role campaigns"
 msgstr ""
@@ -5495,6 +5579,10 @@ msgstr "运行中"
 msgid "Running · Stop"
 msgstr "运行中 · 停止"
 
+#: src/pages/recruiting/SequenceTab.tsx
+msgid "Running subsequences"
+msgstr ""
+
 #: src/pages/RoutineEditor.tsx
 msgid "Running…"
 msgstr "正在运行…"
@@ -5570,6 +5658,10 @@ msgstr ""
 
 #: src/pages/RecruitingPanel.tsx
 msgid "Saved candidates"
+msgstr ""
+
+#: src/pages/recruiting/ContactsTab.tsx
+msgid "Saved contact lookups"
 msgstr ""
 
 #: src/pages/RecruitingPanel.tsx
@@ -5656,6 +5748,7 @@ msgstr "正在保存…"
 msgid "Say yes or no, or answer in a sentence."
 msgstr "回答是或否，或一句话说明。"
 
+#: src/pages/recruiting/InterviewTab.tsx
 #: src/pages/RecruitingPanel.tsx
 msgid "Scheduled"
 msgstr ""
@@ -5856,14 +5949,24 @@ msgstr ""
 msgid "Send with Enter"
 msgstr "按 Enter 发送"
 
+#: src/pages/recruiting/InboxTab.tsx
 #: src/pages/RecruitingCorrespondence.tsx
 msgid "Sender unavailable"
+msgstr ""
+
+#: src/pages/recruiting/SequenceTab.tsx
+msgid "Sending"
 msgstr ""
 
 #: src/components/AskCard.tsx
 #: src/pages/RecruitingPanel.tsx
 msgid "Sending…"
 msgstr "正在发送…"
+
+#: src/pages/recruiting/InboxTab.tsx
+#: src/pages/recruiting/SequenceTab.tsx
+msgid "Sent"
+msgstr ""
 
 #: src/pages/RecruitingPanel.tsx
 msgid "Sent at"
@@ -5873,6 +5976,7 @@ msgstr ""
 msgid "Sentry alert"
 msgstr "Sentry 告警"
 
+#: src/pages/recruiting/SequenceTab.tsx
 #: src/pages/RecruitingCorrespondence.tsx
 #: src/pages/shell/RecruitingNavigation.tsx
 msgid "Sequence"
@@ -6017,6 +6121,10 @@ msgstr "显示设置"
 #: src/components/call/VoiceChatCard.tsx
 msgid "Show transcript"
 msgstr "显示文字记录"
+
+#: src/pages/recruiting/InterviewTab.tsx
+msgid "Showing the most recent CRM records."
+msgstr ""
 
 #: src/pages/AccountSettingsOverlay.tsx
 msgid "Sidebar density"
@@ -6172,6 +6280,7 @@ msgstr "语音模型"
 msgid "SSO is temporarily unavailable. Try again."
 msgstr "SSO 暂时不可用，请重试。"
 
+#: src/pages/recruiting/ContactsTab.tsx
 #: src/pages/RecruitingPanel.tsx
 msgid "Stage"
 msgstr ""
@@ -6201,7 +6310,6 @@ msgstr "正在开始"
 #: src/lib/roster-status.ts
 #: src/pages/ModelSettingsOverlay.tsx
 #: src/pages/Onboarding.tsx
-#: src/pages/Shell.tsx
 msgid "Starting…"
 msgstr "正在开始…"
 
@@ -6211,6 +6319,8 @@ msgstr ""
 
 #: src/pages/ActivityList.tsx
 #: src/pages/Board.tsx
+#: src/pages/recruiting/InterviewTab.tsx
+#: src/pages/recruiting/SequenceTab.tsx
 msgid "Status"
 msgstr ""
 
@@ -6535,6 +6645,10 @@ msgstr ""
 msgid "This role changed. Select the candidate again."
 msgstr ""
 
+#: src/pages/recruiting/shared.tsx
+msgid "This role is not linked to a CRM role yet."
+msgstr ""
+
 #: src/pages/shell/message-cards.tsx
 msgid "This server cannot be assigned without a bot."
 msgstr "没有 Bot 就无法分配此服务器。"
@@ -6708,6 +6822,7 @@ msgstr "取消置顶"
 msgid "Unread"
 msgstr ""
 
+#. placeholder {0}: file.name
 #. placeholder {0}: pending.file.name
 #: src/pages/Shell.tsx
 msgid "Unsupported file type: {0}"
@@ -6744,6 +6859,7 @@ msgid "Update progress"
 msgstr ""
 
 #: src/components/SoftwareUpdateSection.tsx
+#: src/pages/recruiting/InterviewTab.tsx
 #: src/pages/RecruitingPanel.tsx
 msgid "Updated"
 msgstr "已更新"
@@ -6914,7 +7030,6 @@ msgid "Waiting for the API to come back…"
 msgstr "正在等待 API 恢复…"
 
 #: src/lib/roster-status.ts
-#: src/pages/Shell.tsx
 msgid "Waiting in line…"
 msgstr "排队等候…"
 
@@ -7010,6 +7125,10 @@ msgstr ""
 #: src/pages/RecruitingPanel.tsx
 msgid "Workflow status"
 msgstr ""
+
+#: src/lib/roster-status.ts
+msgid "Working in background…"
+msgstr "后台任务进行中…"
 
 #: src/lib/roster-status.ts
 #: src/pages/Auth.tsx

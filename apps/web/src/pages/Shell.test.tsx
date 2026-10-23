@@ -119,7 +119,13 @@ vi.mock("../lib/rpc", async (importOriginal) => ({
       send: shellApi.send,
       answer: shellApi.answer,
       stop: shellApi.stop,
-      subscribe: vi.fn().mockRejectedValue(new Error("Offline test")),
+      // An open, quiet stream: a rejected one makes the client resync on a real-time retry timer.
+      subscribe: vi.fn(
+        (_input: unknown, options?: { signal?: AbortSignal }) =>
+          new Promise<never>((_resolve, reject) =>
+            options?.signal?.addEventListener("abort", () => reject(options.signal?.reason)),
+          ),
+      ),
       head: vi.fn().mockResolvedValue(null),
       markRead: vi.fn().mockResolvedValue({ ok: true }),
     },
@@ -520,7 +526,7 @@ async function renderFeedbackShell(
     roleId: "internal-role",
     roleRevisionId: "internal-revision",
     items: [candidate],
-    crmTarget: null,
+    crmTarget: options.crmTarget ?? null,
     nextCursor: null,
     total: 1,
     counts: {
@@ -966,13 +972,26 @@ it.each(["inbox", "feedback", "sequence"])(
       initialPath: `/app/g/group-1?view=${section}`,
       crmTarget: boundCrmTarget,
     });
-    expect(container?.textContent).toContain("Stored CRM history");
+    // Inbox and Sequence show the bound role's CRM history in the role workbench tab.
+    const tabLabel = { inbox: "Inbox", sequence: "Sequence" }[section];
+    const crmHistoryShown = () =>
+      tabLabel
+        ? Boolean(container?.querySelector(`section[aria-label="${tabLabel}"]`)) &&
+          shellApi.recruiting.crmData.mock.calls.some(
+            ([input]) =>
+              input.operation === "candidates" &&
+              input.groupId === "group-1" &&
+              input.crmRoleId === "crm-role",
+          )
+        : Boolean(container?.textContent?.includes("Stored CRM history"));
+    expect(crmHistoryShown()).toBe(true);
     await view.click("Current search");
     expect(container?.textContent).not.toContain("Stored CRM history");
+    if (tabLabel) expect(container?.querySelector(`section[aria-label="${tabLabel}"]`)).toBeNull();
     expect(view.getPath()).toContain(`/app/g/group-1?view=${section}`);
     expect(view.getPath()).not.toContain("crmServer");
     await view.click("CRM history");
-    expect(container?.textContent).toContain("Stored CRM history");
+    expect(crmHistoryShown()).toBe(true);
     expect(shellApi.followUp).not.toHaveBeenCalled();
   },
 );
@@ -1020,6 +1039,11 @@ it("refreshes a failed current-role CRM connection before reading its history", 
     },
     crmTarget: boundCrmTarget,
   });
+  const candidates = await shellApi.recruiting.listCandidates({ roleId: "internal-role" });
+  shellApi.recruiting.listCandidates.mockResolvedValue({
+    ...candidates,
+    crmTarget: boundCrmTarget,
+  });
   shellApi.recruiting.crmData.mockResolvedValue({
     operation: "candidates",
     source: { serverId: "crm-source", serverRevision: 2, organizationId: "org-1", name: "CRM" },
@@ -1041,8 +1065,7 @@ it("refreshes a failed current-role CRM connection before reading its history", 
   await view.click("Refresh");
   expect(shellApi.recruiting.getWorkspace.mock.calls.length).toBeGreaterThan(priorReads);
   expect(container?.textContent).not.toContain("Could not load this role’s CRM connection.");
-  expect(container?.textContent).toContain("Stored CRM history");
-  expect(container?.textContent).toContain("610");
+  expect(container?.querySelector('section[aria-label="Contacts"]')?.textContent).toContain("610");
   expect(shellApi.recruiting.crmData).toHaveBeenCalledWith(
     expect.objectContaining({
       operation: "candidates",
