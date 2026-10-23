@@ -315,6 +315,11 @@ import {
   RoutineListRow,
   routineNeedsOneShotArm,
 } from "./RoutineEditor";
+import {
+  RecruitingDetailPanel,
+  RecruitingDetailProvider,
+  useRecruitingDetailController,
+} from "./recruiting";
 import type { SettingsSection } from "./SettingsOverlay";
 import { SpaceSearchResults } from "./SpaceSearch";
 import { BotSettings, CreateBotForm } from "./shell/bot-panel";
@@ -2490,6 +2495,13 @@ export function ShellPage() {
     }),
     [selectCorrespondence],
   );
+  const recruitingDetail = useRecruitingDetailController(activeSnapshot?.threadId);
+  // The candidate whose email the workbench (Inbox tab or detail panel) has selected.
+  const selectedReplyCandidate = useRef<string>(undefined);
+  selectedReplyCandidate.current =
+    selectedContact && selectedContact.scope === recruitingCacheScope
+      ? selectedContact.contact.reference
+      : undefined;
   const chatRoleTitle =
     !showToolActivity && inGroup ? (activeGroup?.name ?? activeSnapshot?.groupName) : undefined;
   function openRoleChat(text?: string) {
@@ -2532,7 +2544,6 @@ export function ShellPage() {
           boundRoleCrmMode &&
           !crmMode &&
           inGroup &&
-          recruitingWorkspaceView === "inbox" &&
           role &&
           bound &&
           discussionScope.current.active &&
@@ -2543,7 +2554,9 @@ export function ShellPage() {
           activeGroupId.current === groupId &&
           snapshotRef.current?.threadId === draft.threadId &&
           draft.threadId === activeSnapshot?.threadId &&
-          draft.candidateId === searchParams.get("crmCandidate") &&
+          ((recruitingWorkspaceView === "inbox" &&
+            draft.candidateId === searchParams.get("crmCandidate")) ||
+            draft.candidateId === selectedReplyCandidate.current) &&
           draft.source.serverId === bound.target.mcpServerId &&
           draft.source.serverRevision === bound.target.serverRevision &&
           draft.source.organizationId === bound.target.organizationId &&
@@ -5519,10 +5532,25 @@ export function ShellPage() {
 
       <ResizableSidePanel
         botsSidebarCollapsed={botsSidebarCollapsed}
-        open={Boolean(!workspaceFull && !(workspaceBrief && panel === "recruiting") && panel && (active || activeGroup || panel === "create"))}
-        panel={panel ?? "closed"}
+        open={Boolean(recruitingDetail.current || (!workspaceFull && !(workspaceBrief && panel === "recruiting") && panel && (active || activeGroup || panel === "create")))}
+        panel={recruitingDetail.current ? "recruiting-detail" : (panel ?? "closed")}
       >
-        {!workspaceFull && !(workspaceBrief && panel === "recruiting") && panel && (active || activeGroup || panel === "create") ? (
+        {recruitingDetail.current && activeSnapshot?.threadId ? (
+          <RecruitingDetailPanel
+            controller={recruitingDetail}
+            onAskChat={(text) => openRoleChat(text)}
+            onDraftReply={
+              boundRoleCrmMode && !crmMode
+                ? ({ email, ...context }) =>
+                    void draftCrmReply({
+                      ...context,
+                      threadId: activeSnapshot.threadId,
+                      email: { sender: email.sender, recipients: email.recipients, subject: email.subject, date: email.date },
+                    })
+                : undefined
+            }
+          />
+        ) : !workspaceFull && !(workspaceBrief && panel === "recruiting") && panel && (active || activeGroup || panel === "create") ? (
           <div className="rk-scroll h-full w-full overflow-y-auto px-5 py-[17px]">
             {panel !== "routine" &&
             panel !== "create" &&
@@ -6590,7 +6618,9 @@ export function ShellPage() {
 
   return (
     <AvatarStyleProvider value={bootstrapMe?.avatarStyle ?? "organic"}>
-      <RecruitingChatContextProvider value={chatContextApi}>{shell}</RecruitingChatContextProvider>
+      <RecruitingChatContextProvider value={chatContextApi}>
+        <RecruitingDetailProvider value={recruitingDetail}>{shell}</RecruitingDetailProvider>
+      </RecruitingChatContextProvider>
     </AvatarStyleProvider>
   );
 }

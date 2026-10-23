@@ -1,5 +1,7 @@
 import { Trans, useLingui } from "@lingui/react/macro";
 import type { RecruitingCrmDataOutput } from "@rakazo/contracts";
+import { Button } from "@rakazo/ui-web";
+import { useRecruitingDetail } from "./detail";
 import type { RecruitingTabProps } from "./shared";
 import {
   CrmGate,
@@ -19,8 +21,17 @@ type Row = Extract<RecruitingCrmDataOutput, { operation: "candidates" }>["items"
   Partial<Pick<Tracked, "statusChangedAt" | "updatedAt">>;
 
 /** Interview negotiation and booking state for the role as stored in the CRM and calendar reads. */
-export function InterviewTab(props: RecruitingTabProps) {
+export function InterviewTab({
+  candidateId,
+  candidateEmail,
+  ...props
+}: RecruitingTabProps & {
+  /** Shows only this candidate's interview state and calendar events (the detail panel). */
+  candidateId?: string;
+  candidateEmail?: string | null;
+}) {
   const { t } = useLingui();
+  const detail = useRecruitingDetail();
   const crm = useRoleCrm(props);
   const ready = crm.status === "ready" ? crm.target : null;
   // The CRM's own Interview stage for this role; CRMs without the stage filter fall back to the
@@ -54,15 +65,23 @@ export function InterviewTab(props: RecruitingTabProps) {
   const truncated = fallback
     ? reads.some(({ read }) => read.data?.nextOffset != null)
     : staged.data?.nextOffset != null;
-  const rows: { status: string; item: Row }[] = fallback
+  const allRows: { status: string; item: Row }[] = fallback
     ? reads.flatMap(({ status, read }) =>
         forRole(read.data?.items ?? []).map((item) => ({ status, item })),
       )
     : (staged.data?.items ?? []).map((item) => ({ status: statusText(item.stage), item }));
-  const events = calendar.data?.status === "ready" ? calendar.data.events : [];
+  const rows = candidateId
+    ? allRows.filter(({ item }) => item.candidateId === candidateId)
+    : allRows;
+  const email = candidateEmail?.toLowerCase();
+  const events = (calendar.data?.status === "ready" ? calendar.data.events : []).filter(
+    (event) =>
+      !candidateId ||
+      Boolean(email && event.attendees.some((attendee) => attendee.toLowerCase().includes(email))),
+  );
   return (
     <section aria-label={t`Interview`}>
-      <TabHeader title={<Trans>Interview</Trans>} />
+      {candidateId ? null : <TabHeader title={<Trans>Interview</Trans>} />}
       <CrmGate crm={crm} />
       {loading ? <TabLoading /> : null}
       {failed ? (
@@ -91,7 +110,27 @@ export function InterviewTab(props: RecruitingTabProps) {
               {rows.map(({ status, item }) => (
                 <tr key={item.candidateId}>
                   <th scope="row">
-                    {item.name}
+                    {detail && !candidateId ? (
+                      <Button
+                        variant="link"
+                        className="h-auto p-0"
+                        onClick={() =>
+                          detail.open({
+                            view: "interview",
+                            person: item,
+                            role: {
+                              roleId: props.roleId,
+                              spaceId: props.spaceId,
+                              conversation: props.conversation,
+                            },
+                          })
+                        }
+                      >
+                        {item.name}
+                      </Button>
+                    ) : (
+                      item.name
+                    )}
                     {item.title ? <small className="block">{item.title}</small> : null}
                   </th>
                   <td>{status}</td>

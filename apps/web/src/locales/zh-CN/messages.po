@@ -845,6 +845,7 @@ msgstr ""
 #: src/components/computer/FilesApp.tsx
 #: src/pages/Board.tsx
 #: src/pages/PluginsOverlay.tsx
+#: src/pages/recruiting/DetailPanel.tsx
 #: src/pages/RoutineEditor.tsx
 msgid "Back"
 msgstr "返回"
@@ -1285,6 +1286,7 @@ msgstr ""
 #: src/pages/KnowledgeSection.tsx
 #: src/pages/MessagingSettingsOverlay.tsx
 #: src/pages/PeerMessagesOverlay.tsx
+#: src/pages/recruiting/DetailPanel.tsx
 #: src/pages/RecruitingPanel.tsx
 #: src/pages/RoutineEditor.tsx
 #: src/pages/shell/avatar-studio-popover.tsx
@@ -1620,6 +1622,7 @@ msgid "Contact source"
 msgstr ""
 
 #: src/pages/recruiting/ContactsTab.tsx
+#: src/pages/recruiting/DetailPanel.tsx
 #: src/pages/RecruitingPanel.tsx
 msgid "Contact status"
 msgstr ""
@@ -2359,6 +2362,7 @@ msgid "Current password"
 msgstr "当前密码"
 
 #: src/pages/recruiting/ContactsTab.tsx
+#: src/pages/recruiting/DetailPanel.tsx
 #: src/pages/RecruitingPanel.tsx
 msgid "Current role"
 msgstr ""
@@ -2673,6 +2677,7 @@ msgstr ""
 msgid "Draft"
 msgstr ""
 
+#: src/pages/recruiting/DetailPanel.tsx
 #: src/pages/RecruitingPanel.tsx
 msgid "Draft reply"
 msgstr ""
@@ -2711,6 +2716,7 @@ msgstr ""
 
 #: src/pages/Auth.tsx
 #: src/pages/recruiting/ContactsTab.tsx
+#: src/pages/recruiting/DetailPanel.tsx
 #: src/pages/recruiting/InterviewTab.tsx
 #: src/pages/RecruitingPanel.tsx
 msgid "Email"
@@ -2746,6 +2752,7 @@ msgstr "需要验证邮箱"
 msgid "Email: {0}"
 msgstr ""
 
+#: src/pages/recruiting/DetailPanel.tsx
 #: src/pages/recruiting/InboxTab.tsx
 #: src/pages/RecruitingCorrespondence.tsx
 msgid "Emails"
@@ -3355,6 +3362,7 @@ msgstr "间隔数量"
 msgid "Interval unit"
 msgstr "间隔单位"
 
+#: src/pages/recruiting/DetailPanel.tsx
 #: src/pages/recruiting/InterviewTab.tsx
 #: src/pages/RecruitingCorrespondence.tsx
 #: src/pages/shell/RecruitingNavigation.tsx
@@ -3482,6 +3490,7 @@ msgid "Link SSO"
 msgstr "关联 SSO"
 
 #: src/pages/recruiting/ContactsTab.tsx
+#: src/pages/recruiting/DetailPanel.tsx
 #: src/pages/RecruitingCorrespondence.tsx
 #: src/pages/RecruitingPanel.tsx
 msgid "LinkedIn"
@@ -3614,6 +3623,7 @@ msgstr "本地访问权限允许 Bot 无需询问就执行命令。请勿在共�
 msgid "Local Server Settings"
 msgstr ""
 
+#: src/pages/recruiting/DetailPanel.tsx
 #: src/pages/RecruitingPanel.tsx
 msgid "Location"
 msgstr ""
@@ -4677,6 +4687,7 @@ msgid "Outreach file review"
 msgstr ""
 
 #: src/pages/recruiting/ContactsTab.tsx
+#: src/pages/recruiting/DetailPanel.tsx
 #: src/pages/recruiting/SequenceTab.tsx
 #: src/pages/RecruitingPanel.tsx
 msgid "Outreach status"
@@ -4750,6 +4761,7 @@ msgid "Pending approval"
 msgstr ""
 
 #: src/pages/recruiting/ContactsTab.tsx
+#: src/pages/recruiting/DetailPanel.tsx
 #: src/pages/RecruitingPanel.tsx
 msgid "Phone"
 msgstr ""
@@ -4903,6 +4915,7 @@ msgstr "私有"
 msgid "Private workspace with its own bots and groups."
 msgstr ""
 
+#: src/pages/recruiting/DetailPanel.tsx
 #: src/pages/RecruitingPanel.tsx
 msgid "Profile"
 msgstr ""
@@ -5751,6 +5764,15 @@ msgstr "正在保存…"
 msgid "Say yes or no, or answer in a sentence."
 msgstr "回答是或否，或一句话说明。"
 
+#. placeholder {0}: person.name
+#: src/pages/recruiting/DetailPanel.tsx
+msgid "Schedule an interview with {0}. Check availability and prepare the invitation here for my approval; do not send it yet."
+msgstr "为 {0} 安排面试。请查看可用时间，并在这里准备邀请供我确认；先不要发送。"
+
+#: src/pages/recruiting/DetailPanel.tsx
+msgid "Schedule interview"
+msgstr "约面试"
+
 #: src/pages/recruiting/InterviewTab.tsx
 #: src/pages/RecruitingPanel.tsx
 msgid "Scheduled"
@@ -6285,6 +6307,7 @@ msgid "SSO is temporarily unavailable. Try again."
 msgstr "SSO 暂时不可用，请重试。"
 
 #: src/pages/recruiting/ContactsTab.tsx
+#: src/pages/recruiting/DetailPanel.tsx
 #: src/pages/RecruitingPanel.tsx
 msgid "Stage"
 msgstr ""

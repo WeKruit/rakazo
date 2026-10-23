@@ -876,38 +876,51 @@ it("opens an editable CRM reply draft without sending or crossing a changed cand
           ],
           nextCursor: null,
         }
-      : {
-          operation: "candidates",
-          source,
-          checkedAt: "2026-10-22T00:00:00Z",
-          scope: "legacy_role_labels",
-          selectedRole: {
+      : input.operation === "roleMail"
+        ? {
+            operation: "roleMail",
+            source,
+            checkedAt: "2026-10-22T00:00:00Z",
+            scope: "stored_role_correspondence",
             crmRoleId: "crm-role",
-            clientId: "client-1",
-            clientLabel: "Example client",
-            roleLabel: "Existing role",
-            summary: null,
-          },
-          items: [
-            {
-              candidateId: "crm-person",
-              name: "Synthetic Avery",
-              email: "avery@example.test",
-              phone: null,
-              linkedinUrl: null,
-              title: "Engineer",
-              location: null,
-              stage: null,
-              contactStatus: "replied",
-              outreachStatus: "replied",
+            supported: false,
+            items: [],
+            offset: 0,
+            nextOffset: null,
+          }
+        : {
+            operation: "candidates",
+            source,
+            checkedAt: "2026-10-22T00:00:00Z",
+            scope: "legacy_role_labels",
+            selectedRole: {
+              crmRoleId: "crm-role",
+              clientId: "client-1",
+              clientLabel: "Example client",
+              roleLabel: "Existing role",
+              summary: null,
             },
-          ],
-          total: 1,
-          offset: 0,
-          nextOffset: null,
-        },
+            items: [
+              {
+                candidateId: "crm-person",
+                name: "Synthetic Avery",
+                email: "avery@example.test",
+                phone: null,
+                linkedinUrl: null,
+                title: "Engineer",
+                location: null,
+                stage: null,
+                contactStatus: "replied",
+                outreachStatus: "replied",
+              },
+            ],
+            total: 1,
+            offset: 0,
+            nextOffset: null,
+          },
   );
-  const path = "/app/g/group-1?view=inbox&crmCandidate=crm-person";
+  // The Inbox tab selects the person itself; the URL carries no candidate.
+  const path = "/app/g/group-1?view=inbox";
   const view = await renderFeedbackShell("group", undefined, {
     isDeploymentOwner: false,
     openFeedback: false,

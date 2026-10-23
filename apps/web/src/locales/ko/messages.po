@@ -845,6 +845,7 @@ msgstr ""
 #: src/components/computer/FilesApp.tsx
 #: src/pages/Board.tsx
 #: src/pages/PluginsOverlay.tsx
+#: src/pages/recruiting/DetailPanel.tsx
 #: src/pages/RoutineEditor.tsx
 msgid "Back"
 msgstr "뒤로"
@@ -1285,6 +1286,7 @@ msgstr ""
 #: src/pages/KnowledgeSection.tsx
 #: src/pages/MessagingSettingsOverlay.tsx
 #: src/pages/PeerMessagesOverlay.tsx
+#: src/pages/recruiting/DetailPanel.tsx
 #: src/pages/RecruitingPanel.tsx
 #: src/pages/RoutineEditor.tsx
 #: src/pages/shell/avatar-studio-popover.tsx
@@ -1620,6 +1622,7 @@ msgid "Contact source"
 msgstr ""
 
 #: src/pages/recruiting/ContactsTab.tsx
+#: src/pages/recruiting/DetailPanel.tsx
 #: src/pages/RecruitingPanel.tsx
 msgid "Contact status"
 msgstr ""
@@ -2359,6 +2362,7 @@ msgid "Current password"
 msgstr "현재 비밀번호"
 
 #: src/pages/recruiting/ContactsTab.tsx
+#: src/pages/recruiting/DetailPanel.tsx
 #: src/pages/RecruitingPanel.tsx
 msgid "Current role"
 msgstr ""
@@ -2673,6 +2677,7 @@ msgstr ""
 msgid "Draft"
 msgstr ""
 
+#: src/pages/recruiting/DetailPanel.tsx
 #: src/pages/RecruitingPanel.tsx
 msgid "Draft reply"
 msgstr ""
@@ -2711,6 +2716,7 @@ msgstr ""
 
 #: src/pages/Auth.tsx
 #: src/pages/recruiting/ContactsTab.tsx
+#: src/pages/recruiting/DetailPanel.tsx
 #: src/pages/recruiting/InterviewTab.tsx
 #: src/pages/RecruitingPanel.tsx
 msgid "Email"
@@ -2746,6 +2752,7 @@ msgstr "이메일 인증이 필요합니다"
 msgid "Email: {0}"
 msgstr ""
 
+#: src/pages/recruiting/DetailPanel.tsx
 #: src/pages/recruiting/InboxTab.tsx
 #: src/pages/RecruitingCorrespondence.tsx
 msgid "Emails"
@@ -3355,6 +3362,7 @@ msgstr "간격 숫자"
 msgid "Interval unit"
 msgstr "간격 단위"
 
+#: src/pages/recruiting/DetailPanel.tsx
 #: src/pages/recruiting/InterviewTab.tsx
 #: src/pages/RecruitingCorrespondence.tsx
 #: src/pages/shell/RecruitingNavigation.tsx
@@ -3482,6 +3490,7 @@ msgid "Link SSO"
 msgstr "SSO 연결"
 
 #: src/pages/recruiting/ContactsTab.tsx
+#: src/pages/recruiting/DetailPanel.tsx
 #: src/pages/RecruitingCorrespondence.tsx
 #: src/pages/RecruitingPanel.tsx
 msgid "LinkedIn"
@@ -3614,6 +3623,7 @@ msgstr "로컬 접근을 허용하면 Bot이 묻지 않고 명령을 실행할 �
 msgid "Local Server Settings"
 msgstr ""
 
+#: src/pages/recruiting/DetailPanel.tsx
 #: src/pages/RecruitingPanel.tsx
 msgid "Location"
 msgstr ""
@@ -4677,6 +4687,7 @@ msgid "Outreach file review"
 msgstr ""
 
 #: src/pages/recruiting/ContactsTab.tsx
+#: src/pages/recruiting/DetailPanel.tsx
 #: src/pages/recruiting/SequenceTab.tsx
 #: src/pages/RecruitingPanel.tsx
 msgid "Outreach status"
@@ -4750,6 +4761,7 @@ msgid "Pending approval"
 msgstr ""
 
 #: src/pages/recruiting/ContactsTab.tsx
+#: src/pages/recruiting/DetailPanel.tsx
 #: src/pages/RecruitingPanel.tsx
 msgid "Phone"
 msgstr ""
@@ -4903,6 +4915,7 @@ msgstr "Bot 전용"
 msgid "Private workspace with its own bots and groups."
 msgstr ""
 
+#: src/pages/recruiting/DetailPanel.tsx
 #: src/pages/RecruitingPanel.tsx
 msgid "Profile"
 msgstr ""
@@ -5751,6 +5764,15 @@ msgstr "저장 중…"
 msgid "Say yes or no, or answer in a sentence."
 msgstr "예 또는 아니요로 답하거나 문장으로 답해 주세요."
 
+#. placeholder {0}: person.name
+#: src/pages/recruiting/DetailPanel.tsx
+msgid "Schedule an interview with {0}. Check availability and prepare the invitation here for my approval; do not send it yet."
+msgstr ""
+
+#: src/pages/recruiting/DetailPanel.tsx
+msgid "Schedule interview"
+msgstr ""
+
 #: src/pages/recruiting/InterviewTab.tsx
 #: src/pages/RecruitingPanel.tsx
 msgid "Scheduled"
@@ -6285,6 +6307,7 @@ msgid "SSO is temporarily unavailable. Try again."
 msgstr "SSO를 일시적으로 사용할 수 없습니다. 다시 시도하세요."
 
 #: src/pages/recruiting/ContactsTab.tsx
+#: src/pages/recruiting/DetailPanel.tsx
 #: src/pages/RecruitingPanel.tsx
 msgid "Stage"
 msgstr ""

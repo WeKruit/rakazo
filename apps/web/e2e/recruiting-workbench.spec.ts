@@ -74,3 +74,32 @@ test("role workbench shows loading and empty states", async ({ page }, testInfo)
     await captureScreenshot(page, testInfo, `workbench-empty-${view}`);
   }
 });
+
+test("people open in a detail panel beside the workbench", async ({ page }, testInfo) => {
+  await page.setViewportSize({ width: 1280, height: 860 });
+  await page.goto(`${fixture}?view=contacts`);
+  await page.getByRole("button", { name: "Avery Example" }).click();
+  const panel = page.getByTestId("recruiting-detail-panel");
+  await expect(panel.getByRole("heading", { name: "Avery Example" })).toBeVisible();
+  // The contacts table stays on screen beside the panel.
+  await expect(page.getByRole("region", { name: "Contacts" })).toBeVisible();
+  await captureScreenshot(page, testInfo, "panel-profile");
+  await panel.getByRole("button", { name: "Emails" }).click();
+  await expect(panel.getByText("free Tuesday or Wednesday").first()).toBeVisible();
+  await captureScreenshot(page, testInfo, "panel-thread");
+  await panel.getByRole("button", { name: "Back" }).click();
+  await expect(panel.getByRole("button", { name: "Profile" })).toHaveAttribute(
+    "aria-pressed",
+    "true",
+  );
+  await page.goBack();
+  await expect(panel).toHaveCount(0);
+  await expect(page.getByRole("region", { name: "Contacts" })).toBeVisible();
+
+  await page.setViewportSize({ width: 390, height: 844 });
+  await page.getByRole("button", { name: "Avery Example" }).click();
+  await expect(panel).toBeVisible();
+  await captureScreenshot(page, testInfo, "panel-narrow");
+  await page.keyboard.press("Escape");
+  await expect(panel).toHaveCount(0);
+});
