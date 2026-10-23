@@ -1,7 +1,7 @@
 import { randomUUID } from "node:crypto";
 import type { PrismaClient } from "./client.js";
 import { Prisma } from "./client.js";
-import { IsolationError } from "./scope.js";
+import { IsolationError, invalidateMembershipCache } from "./scope.js";
 import { withTransactionRetry } from "./transaction-retry.js";
 
 /** Per member, per organization: one person cannot fan out unbounded boundaries. */
@@ -113,6 +113,7 @@ async function createSpace(prisma: SpaceClient, input: CreateSpaceInput): Promis
       createdAt: input.createdAt,
     },
   });
+  invalidateMembershipCache(input.userId);
 }
 
 async function createSpaceDefaults(

@@ -363,6 +363,7 @@ import {
 } from "./model-vision.js";
 import type { CodexLiveCatalog } from "./pi-codex-catalog.js";
 import { codexLiveListsModel } from "./pi-codex-catalog.js";
+import { listPiCatalog } from "./pi-models.js";
 import {
   isRetiredModelCredentialError,
   parseModelSecret,
@@ -485,6 +486,7 @@ import {
 } from "./ticket-tools.js";
 import { advanceToolCallLoopGuard, loopGuardStopText } from "./tool-loop.js";
 import { textContentArg } from "./tool-text.js";
+import { chooseTurnModel } from "./turn-model.js";
 import {
   botMessageOutcomeFromMidTurn,
   clampUserProgressMessage,
@@ -9038,6 +9040,87 @@ export function createRunExecutor(deps: ExecutorDeps) {
             )
             .map((candidate) => JSON.stringify([candidate.provider, candidate.modelId])),
         );
+        const configuredRunModel: AgentRunRequest["model"] = {
+          provider: runModelProvider,
+          id: runModelId,
+          apiKey: resolved.oauth ? undefined : resolved.apiKey,
+          ...cloudflareRunFields(resolved),
+          baseUrl: resolved.baseUrl,
+          cacheCapabilities: resolved.cacheCapabilities,
+          contextWindow: resolved.contextWindow,
+          reasoning: resolved.reasoning,
+          maxTokens: resolved.maxTokens,
+          acceptsImages: resolved.acceptsImages,
+          maxImagesPerPrompt: resolved.maxImagesPerPrompt,
+          thinkingLevel: thinkingLevel ?? resolved.thinkingLevel ?? null,
+          oauth: resolved.oauth
+            ? {
+                credential: resolved.oauth,
+                modify: resolved.modifyOAuth,
+              }
+            : undefined,
+        };
+        // Light turns run on the fast model; the configured model becomes the first backup.
+        let turnModel = scripted
+          ? {
+              model: { provider: runModelProvider, id: runModelId },
+              routed: "configured" as const,
+              reason: "scripted",
+            }
+          : chooseTurnModel({
+              configured: { provider: runModelProvider, id: runModelId },
+              trigger: run.trigger,
+              answersQuestion: Boolean(nativeSources?.currentAnswer),
+              peerIntent: peerMessage?.intent,
+              userText: turnBlocks
+                ? turnBlocks
+                    .filter((block) => block.kind === "text")
+                    .map((block) => block.text)
+                    .join("\n")
+                : taskPrompt,
+              hasAttachments:
+                (turnBlocks?.some((block) => block.kind !== "text") ?? false) ||
+                (currentTurnImages?.length ?? 0) > 0,
+              pendingToolLoop: Boolean(approvalContinuation) || Boolean(takeoverResume?.checkpoint),
+            });
+        let runModel = configuredRunModel;
+        let runFallbackModels = fallbackModels.map(({ provider, modelId }) => ({
+          provider,
+          id: modelId,
+        }));
+        const configuredModelKey = JSON.stringify([runModelProvider, runModelId]);
+        if (turnModel.routed === "fast") {
+          try {
+            const fast: AgentRunRequest["model"] =
+              turnModel.model.provider === runModelProvider
+                ? { ...configuredRunModel, id: turnModel.model.id }
+                : await resolveConnectedModel(
+                    { userId: run.userId, spaceId: run.spaceId },
+                    turnModel.model.provider,
+                    turnModel.model.id,
+                    (values) => runSecrets.push(...values),
+                    true,
+                  );
+            if (
+              !listPiCatalog().some(
+                (entry) => entry.provider === fast.provider && entry.id === fast.id,
+              )
+            )
+              throw new Error(`Fast model ${fast.provider}/${fast.id} is not in the catalog`);
+            runModel = { ...fast, routed: "fast", routeReason: turnModel.reason };
+            runFallbackModels = [
+              { provider: runModelProvider, id: runModelId },
+              ...runFallbackModels,
+            ];
+            fallbackModelKeys.add(configuredModelKey);
+          } catch (error) {
+            getLogger().warn("Fast model unavailable; using configured model", { runId, error });
+            turnModel = { ...turnModel, routed: "configured", reason: "fast_model_unavailable" };
+          }
+        }
+        if (runModel === configuredRunModel) {
+          runModel = { ...configuredRunModel, routed: "configured", routeReason: turnModel.reason };
+        }
 
         try {
           setupMark("runtimeStart");
@@ -9068,6 +9151,10 @@ export function createRunExecutor(deps: ExecutorDeps) {
           getLogger().info("run.setup.timing", {
             runId,
             sinceRunCreatedMs: run.createdAt ? Date.now() - run.createdAt.getTime() : null,
+            modelId: runModel.id,
+            provider: runModel.provider,
+            routed: turnModel.routed,
+            routeReason: turnModel.reason,
             ...setupMarks,
           });
           const runtimeEvents = deps.runtime.run(
@@ -9112,36 +9199,14 @@ export function createRunExecutor(deps: ExecutorDeps) {
               history: runtimeHistory,
               currentTurnImages,
               tools,
-              model: {
-                provider: runModelProvider,
-                id: runModelId,
-                apiKey: resolved.oauth ? undefined : resolved.apiKey,
-                ...cloudflareRunFields(resolved),
-                baseUrl: resolved.baseUrl,
-                cacheCapabilities: resolved.cacheCapabilities,
-                contextWindow: resolved.contextWindow,
-
-                reasoning: resolved.reasoning,
-                maxTokens: resolved.maxTokens,
-                acceptsImages: resolved.acceptsImages,
-                maxImagesPerPrompt: resolved.maxImagesPerPrompt,
-                thinkingLevel: thinkingLevel ?? resolved.thinkingLevel ?? null,
-                oauth: resolved.oauth
-                  ? {
-                      credential: resolved.oauth,
-                      modify: resolved.modifyOAuth,
-                    }
-                  : undefined,
-              },
-              fallbackModels: fallbackModels.map(({ provider, modelId }) => ({
-                provider,
-                id: modelId,
-              })),
+              model: runModel,
+              fallbackModels: runFallbackModels,
               resolveFallbackModel: fallbackModelKeys.size
                 ? async (provider, modelId) => {
                     const key = JSON.stringify([provider, modelId]);
                     if (!fallbackModelKeys.has(key))
                       throw new Error("Backup model is not selected");
+                    if (key === configuredModelKey) return configuredRunModel;
                     return resolveConnectedModel(
                       { userId: run.userId, spaceId: run.spaceId },
                       provider,
@@ -9416,6 +9481,7 @@ export function createRunExecutor(deps: ExecutorDeps) {
                   ...(event.activity ? { activity: true } : {}),
                   ...(event.phase ? { phase: event.phase } : {}),
                   ...(event.summary ? { summary: event.summary } : {}),
+                  ...(event.thought ? { thought: event.thought } : {}),
                   ...(event.at ? { at: event.at } : {}),
                 },
               });
