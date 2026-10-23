@@ -2337,10 +2337,6 @@ msgstr ""
 msgid "CRM receipt"
 msgstr ""
 
-#: src/pages/shell/RecruitingNavigation.tsx
-msgid "CRM roles"
-msgstr ""
-
 #: src/pages/RoutineSchedule.tsx
 msgid "Cron"
 msgstr "Cron"
@@ -3544,10 +3540,6 @@ msgstr ""
 msgid "Loading CRM records…"
 msgstr ""
 
-#: src/pages/shell/RecruitingNavigation.tsx
-msgid "Loading CRM roles…"
-msgstr ""
-
 #: src/pages/PluginsOverlay.tsx
 msgid "Loading integrations…"
 msgstr "연동 목록을 불러오는 중…"
@@ -3563,6 +3555,10 @@ msgstr "모델 목록을 불러오는 중…"
 #: src/components/ArtifactFileCard.tsx
 msgid "Loading preview…"
 msgstr "미리보기를 불러오는 중…"
+
+#: src/pages/shell/RecruitingNavigation.tsx
+msgid "Loading roles…"
+msgstr ""
 
 #: src/components/ApprovalRulesSettings.tsx
 msgid "Loading rules…"
@@ -4157,10 +4153,6 @@ msgstr ""
 
 #: src/pages/RecruitingPanel.tsx
 msgid "No CRM records matched this search."
-msgstr ""
-
-#: src/pages/shell/RecruitingNavigation.tsx
-msgid "No CRM roles were returned."
 msgstr ""
 
 #: src/pages/MessagingSettingsOverlay.tsx
@@ -4983,6 +4975,10 @@ msgstr "반응"
 #: src/pages/shell/bot-panel.tsx
 msgid "Read replies aloud"
 msgstr "답변을 자동으로 읽기"
+
+#: src/pages/Shell.tsx
+msgid "Read the attached materials for this role."
+msgstr ""
 
 #: src/pages/RecruitingCorrespondence.tsx
 msgid "Read the latest candidate email replies for this role using the connected mailbox. Show the sender, subject, date and original reply. Don't send, label, archive or modify any messages."

@@ -2337,10 +2337,6 @@ msgstr "CRM history"
 msgid "CRM receipt"
 msgstr "CRM receipt"
 
-#: src/pages/shell/RecruitingNavigation.tsx
-msgid "CRM roles"
-msgstr "CRM roles"
-
 #: src/pages/RoutineSchedule.tsx
 msgid "Cron"
 msgstr "Cron"
@@ -3544,10 +3540,6 @@ msgstr "Loading contact details…"
 msgid "Loading CRM records…"
 msgstr "Loading CRM records…"
 
-#: src/pages/shell/RecruitingNavigation.tsx
-msgid "Loading CRM roles…"
-msgstr "Loading CRM roles…"
-
 #: src/pages/PluginsOverlay.tsx
 msgid "Loading integrations…"
 msgstr "Loading integrations…"
@@ -3563,6 +3555,10 @@ msgstr "Loading model catalog…"
 #: src/components/ArtifactFileCard.tsx
 msgid "Loading preview…"
 msgstr "Loading preview…"
+
+#: src/pages/shell/RecruitingNavigation.tsx
+msgid "Loading roles…"
+msgstr "Loading roles…"
 
 #: src/components/ApprovalRulesSettings.tsx
 msgid "Loading rules…"
@@ -4158,10 +4154,6 @@ msgstr "No CRM contacts for this role yet."
 #: src/pages/RecruitingPanel.tsx
 msgid "No CRM records matched this search."
 msgstr "No CRM records matched this search."
-
-#: src/pages/shell/RecruitingNavigation.tsx
-msgid "No CRM roles were returned."
-msgstr "No CRM roles were returned."
 
 #: src/pages/MessagingSettingsOverlay.tsx
 msgid "No group chats yet."
@@ -4983,6 +4975,10 @@ msgstr "Reactions"
 #: src/pages/shell/bot-panel.tsx
 msgid "Read replies aloud"
 msgstr "Read replies aloud"
+
+#: src/pages/Shell.tsx
+msgid "Read the attached materials for this role."
+msgstr "Read the attached materials for this role."
 
 #: src/pages/RecruitingCorrespondence.tsx
 msgid "Read the latest candidate email replies for this role using the connected mailbox. Show the sender, subject, date and original reply. Don't send, label, archive or modify any messages."

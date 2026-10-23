@@ -5037,7 +5037,7 @@ export function ShellPage() {
         {(crmMode || (boundRoleCrmMode && effectiveCrmSelection)) && activeSnapshot?.threadId ? <div className="rk-scroll recruiting-workspace-main min-h-0 flex-1 overflow-y-auto">{effectiveCrmSelection ? <RecruitingPanel
           threadId={activeSnapshot.threadId} botId={inGroup ? undefined : active?.id} groupId={inGroup ? groupId : undefined}
           readCache={recruitingReadCache.current} readCacheScope={recruitingCacheScope} refreshSignal={recruitingRefresh} onClose={() => {}}
-          roleConversation={!crmMode} onBrowseCandidates={() => openRecruitingView("results")} onDiscussCandidate={discussCandidate} onCandidateFeedback={feedbackCandidate} candidateFeedbackRecipients={candidateFeedbackRecipients}
+          roleConversation={!emptyCrmChat} onBrowseCandidates={() => openRecruitingView("results")} onDiscussCandidate={discussCandidate} onCandidateFeedback={feedbackCandidate} candidateFeedbackRecipients={candidateFeedbackRecipients}
           crmBrowse={{ selection: effectiveCrmSelection, view: recruitingWorkspaceView, candidateId: searchParams.get("crmCandidate") ?? undefined,
             onSelectCandidate: (id, view = "inbox") => setSearchParams(current => { const next = new URLSearchParams(current); next.set("crmCandidate", id); next.set("view", view); return next; }),
             onDraftReply: boundRoleCrmMode && !crmMode ? draftCrmReply : undefined,
