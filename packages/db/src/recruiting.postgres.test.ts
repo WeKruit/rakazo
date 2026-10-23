@@ -1,4 +1,5 @@
 import { createHash } from "node:crypto";
+import { readFile } from "node:fs/promises";
 import type { AdapterContext, ArtifactStore } from "@rakazo/adapter-kit";
 import type {
   Actor,
@@ -8015,6 +8016,89 @@ describePostgres("recruiting domain (PostgreSQL)", () => {
     ).toMatchObject({ rowCount: 0 });
   });
 
+  it("backfills only recorded shortlist event dates", async () => {
+    const sql = await readFile(
+      new URL(
+        "../prisma/migrations/20261023171000_recruiting_candidate_shortlisted_at/migration.sql",
+        import.meta.url,
+      ),
+      "utf8",
+    );
+    await prisma.$transaction(async (tx) => {
+      await tx.$executeRawUnsafe(
+        'CREATE TEMP TABLE "messages" ("id" TEXT PRIMARY KEY, "createdAt" TIMESTAMP(3)) ON COMMIT DROP',
+      );
+      await tx.$executeRawUnsafe(
+        'CREATE TEMP TABLE "recruiting_candidates" ("candidateKey" TEXT PRIMARY KEY, "shortlisted" BOOLEAN, "shortlistMessageId" TEXT) ON COMMIT DROP',
+      );
+      await tx.$executeRawUnsafe(`INSERT INTO "messages" VALUES ('event', '2026-10-01T12:00:00Z')`);
+      await tx.$executeRawUnsafe(
+        `INSERT INTO "recruiting_candidates" VALUES ('known', true, 'event'), ('unknown', true, null), ('removed', false, 'event')`,
+      );
+      for (const statement of sql
+        .replace(/--[^\n]*/g, "")
+        .split(";")
+        .filter((part) => part.trim()))
+        await tx.$executeRawUnsafe(statement);
+      const rows = await tx.$queryRaw<
+        { candidateKey: string; shortlistedAt: Date | null }[]
+      >`SELECT "candidateKey", "shortlistedAt" FROM "recruiting_candidates" ORDER BY "candidateKey"`;
+      expect(rows).toEqual([
+        { candidateKey: "known", shortlistedAt: new Date("2026-10-01T12:00:00Z") },
+        { candidateKey: "removed", shortlistedAt: null },
+        { candidateKey: "unknown", shortlistedAt: null },
+      ]);
+    });
+  });
+
+  it("persists private notes and reads reminders across both person keys", async () => {
+    const f = await assessmentFixture();
+    const keys = ["autumn:profile-fixture", "crm:profile-fixture"];
+    const note = await recruiting.createRecruitingCandidateNote(prisma, actor, {
+      candidateKey: keys[0]!,
+      roleId: f.role.role.id,
+      body: "Follow up next week",
+    });
+    await recruiting.createRecruitingCandidateNote(prisma, actor, {
+      candidateKey: keys[1]!,
+      body: "Second source",
+    });
+    const other = { ...actor, userId: otherUserId };
+    expect(
+      (await recruiting.listRecruitingCandidateNotes(prisma, other, { candidateKeys: keys })).items,
+    ).toEqual([]);
+    await expect(
+      recruiting.updateRecruitingCandidateNote(prisma, other, { id: note.id, body: "not allowed" }),
+    ).rejects.toThrow(IsolationError);
+    await recruiting.updateRecruitingCandidateNote(prisma, actor, {
+      id: note.id,
+      body: "Updated note",
+    });
+    expect(
+      (await recruiting.listRecruitingCandidateNotes(prisma, actor, { candidateKeys: keys })).items,
+    ).toHaveLength(2);
+    await recruiting.deleteRecruitingCandidateNote(prisma, actor, note.id);
+    expect(
+      (await prisma.recruitingCandidateNote.findUniqueOrThrow({ where: { id: note.id } }))
+        .deletedAt,
+    ).not.toBeNull();
+    expect(
+      (await recruiting.listRecruitingCandidateNotes(prisma, actor, { candidateKeys: keys })).items,
+    ).toHaveLength(1);
+    for (const candidateKey of keys)
+      await recruiting.createRecruitingReminder(prisma, actor, {
+        candidateKey,
+        title: "Call",
+        dueAt: "2026-10-23T00:00:00Z",
+      });
+    expect(
+      (await recruiting.listRecruitingReminders(prisma, actor, { candidateKeys: keys })).items,
+    ).toHaveLength(2);
+    expect(
+      (await recruiting.listRecruitingReminders(prisma, other, { candidateKeys: keys })).items,
+    ).toHaveLength(0);
+  });
+
   it("lists newly assessed candidates independently of discovery and separates shortlist CAS from qualification", async () => {
     const f = await assessmentFixture();
     await recruiting.saveRecruitingAssessment(prisma, actor, f.context, f.input, f.artifacts);
@@ -8041,6 +8125,12 @@ describePostgres("recruiting domain (PostgreSQL)", () => {
       shortlisted: true,
       revision: 1,
     });
+    const shortlisted = await recruiting.listRecruitingCandidates(prisma, actor, {
+      roleId: f.role.role.id,
+    });
+    const shortlistedAt = shortlisted.items[0]?.shortlistedAt;
+    expect(shortlistedAt).toEqual(expect.any(String));
+    expect(Number.isFinite(Date.parse(shortlistedAt!))).toBe(true);
     const receipts = await prisma.message.count({ where: { threadId: f.thread.id } });
     expect(
       await recruiting.setRecruitingCandidateShortlist(prisma, actor, {
@@ -8071,6 +8161,17 @@ describePostgres("recruiting domain (PostgreSQL)", () => {
     });
     expect(stale.items[0]?.latestAssessment?.isCurrent).toBe(false);
     expect(stale.total).toBe(1);
+    expect(stale.items[0]?.shortlistedAt).toBe(shortlistedAt);
+    await recruiting.setRecruitingCandidateShortlist(prisma, actor, {
+      ...input,
+      expectedRevision: 1,
+      shortlisted: false,
+    });
+    const removed = await recruiting.listRecruitingCandidates(prisma, actor, {
+      roleId: f.role.role.id,
+    });
+    expect(removed.items[0]?.shortlistedAt).toBeNull();
+
     expect(
       await prisma.recruitingAssessment.findFirstOrThrow({
         where: { roleId: f.role.role.id, candidateKey: f.input.candidateKey },

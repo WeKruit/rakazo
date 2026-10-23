@@ -14,6 +14,7 @@ import {
   mapWithConcurrency,
   openTasks,
   outreachFunnel,
+  readShortlistPages,
   recentRoles,
   roleSummary,
 } from "./dashboard";
@@ -52,13 +53,21 @@ function useOverview(
         if (!workspace) return { summary: null, incomplete: false };
         const conversation = { groupId: group.id };
         const [shortlist, candidates, campaign] = await Promise.all([
-          retryTransientRead(
-            () =>
-              rpc.recruiting.listCandidates(
-                { roleId: workspace.role.id, shortlisted: true, sort: "recent", limit: 200 },
-                { signal },
-              ),
-            signal,
+          readShortlistPages((cursor) =>
+            retryTransientRead(
+              () =>
+                rpc.recruiting.listCandidates(
+                  {
+                    roleId: workspace.role.id,
+                    shortlisted: true,
+                    sort: "recent",
+                    limit: 200,
+                    ...(cursor ? { cursor } : {}),
+                  },
+                  { signal },
+                ),
+              signal,
+            ),
           ),
           optional(() =>
             rpc.recruiting.roleCandidates(

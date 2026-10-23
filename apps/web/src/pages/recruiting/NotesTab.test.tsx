@@ -199,3 +199,25 @@ it("keys notes by every key the person has and mounts in the detail panel", asyn
   expect(api.list).toHaveBeenCalledWith({ candidateKeys: [`crm:${ADA}`] });
   expect(view.querySelector('section[aria-label="Notes"]')).not.toBeNull();
 });
+
+it("locks the submitted draft while saving so later typing cannot be discarded", async () => {
+  const api = notesMock([]);
+  let resolveSave!: (value: RecruitingCandidateNote) => void;
+  api.create.mockImplementationOnce(
+    () =>
+      new Promise((resolve) => {
+        resolveSave = resolve;
+      }),
+  );
+  const view = await mount(tab());
+  const box = view.querySelector<HTMLTextAreaElement>('textarea[aria-label="Note"]')!;
+  await type(box, "Submitted note");
+  await act(async () => button(view, "Add note")!.click());
+  expect(box.disabled).toBe(true);
+  expect(button(view, "Add note")!.disabled).toBe(true);
+  await act(async () => resolveSave(note("saved")));
+  await settle();
+  expect(box.disabled).toBe(false);
+  expect(box.value).toBe("");
+  expect(api.create).toHaveBeenCalledTimes(1);
+});

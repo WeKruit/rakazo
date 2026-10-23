@@ -38,7 +38,7 @@ function NoteForm({
   const ready = Boolean(body.trim());
   const submit = async (event: FormEvent) => {
     event.preventDefault();
-    if (!ready) return;
+    if (!ready || saving) return;
     setSaving(true);
     try {
       if ((await onSave(body.trim())) && !onCancel) setBody("");
@@ -52,6 +52,7 @@ function NoteForm({
         aria-label={t`Note`}
         placeholder={t`Type your note here`}
         value={body}
+        disabled={saving}
         maxLength={MAX_NOTE}
         autoFocus={Boolean(onCancel)}
         onChange={(event) => setBody(event.target.value)}

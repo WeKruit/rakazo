@@ -9,6 +9,7 @@ import {
   mapWithConcurrency,
   openTasks,
   outreachFunnel,
+  readShortlistPages,
   recentRoles,
   roleSummary,
   weekStart,
@@ -178,4 +179,30 @@ describe("helpers", () => {
     expect(firstName("  Ada Lovelace ")).toBe("Ada");
     expect(firstName(undefined)).toBe("");
   });
+});
+
+it("counts recorded shortlist dates from all pages and keeps unknown dates unknown", async () => {
+  const calls: (string | undefined)[] = [];
+  const dates = [null, "2026-10-22T12:00:00Z"];
+  const result = await readShortlistPages(async (cursor) => {
+    calls.push(cursor);
+    const index = cursor ? 1 : 0;
+    return {
+      items: [
+        {
+          shortlisted: true,
+          shortlistedAt: dates[index],
+          firstDiscoveredAt: "2026-10-01T00:00:00Z",
+        },
+      ],
+      total: 2,
+      nextCursor: cursor ? null : "next",
+    } as Awaited<ReturnType<Parameters<typeof readShortlistPages>[0]>>;
+  });
+  expect(calls).toEqual([undefined, "next"]);
+  const summary = roleSummary("g", "r", result, null, null);
+  expect(summary.shortlistedDates).toEqual(dates);
+  expect(
+    bucketByWeek(summary.shortlistedDates, new Date("2026-10-23T12:00:00Z")).at(-1)?.count,
+  ).toBe(1);
 });
