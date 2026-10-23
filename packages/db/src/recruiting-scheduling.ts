@@ -5,11 +5,16 @@ import type {
   RecruitingSchedulingPlanInput,
 } from "@rakazo/contracts";
 import {
+  RecruitingCrmImportArgsSchema,
   RecruitingSchedulingPlanInputSchema,
   RecruitingSchedulingPlanSchema,
   RecruitingSchedulingSlotSchema,
 } from "@rakazo/contracts";
-import { boundDirectApprovalDetails, catalogApprovalDetails } from "@rakazo/core";
+import {
+  boundDirectApprovalDetails,
+  catalogApprovalDetails,
+  parseRecruitingCrmImportReceipt,
+} from "@rakazo/core";
 import { mcpObject, stableJsonValue } from "@rakazo/core/node/approval-effect-key";
 import type { PrismaClient } from "./client.js";
 import { Prisma } from "./client.js";
@@ -52,6 +57,7 @@ function successful(effect: { status: string; result: unknown }) {
     envelope.uncertain ||
     !body ||
     body.error ||
+    body.status === "error" ||
     body.isError ||
     body.uncertain
   )
@@ -172,6 +178,38 @@ function slots(row: Awaited<ReturnType<typeof effect>>) {
         : [];
     });
 }
+async function importedCandidate(
+  tx: Tx,
+  actor: Actor,
+  input: RecruitingSchedulingPlanInput,
+  workspace: Awaited<ReturnType<typeof scope>>,
+) {
+  const target = workspace.crmTarget?.target;
+  if (!target) return null;
+  const imports = await tx.recruitingCrmImport.findMany({
+    where: {
+      occurrence: { roleId: input.roleId, candidateKey: input.candidate.candidateKey },
+      effect: { spaceId: actor.spaceId, run: { spaceId: actor.spaceId, userId: actor.userId } },
+    },
+    include: { effect: { include: { run: true } }, occurrence: true },
+    take: LIMIT + 1,
+  });
+  if (imports.length > LIMIT) throw new IsolationError();
+  const ids = new Set<string>();
+  for (const imported of imports) {
+    try {
+      const native = await grant(tx, actor, imported.effect);
+      const args = RecruitingCrmImportArgsSchema.parse(native.args);
+      if (args.p_linkedin_url !== imported.occurrence.linkedinUrl) continue;
+      const receipt = parseRecruitingCrmImportReceipt(imported.effect, target, args);
+      if (receipt) ids.add(receipt.candidate_id);
+    } catch (error) {
+      if (!(error instanceof IsolationError)) throw error;
+    }
+  }
+  if (ids.size !== 1) return null;
+  return [...ids][0]!;
+}
 async function verify(
   tx: Tx,
   actor: Actor,
@@ -265,7 +303,7 @@ async function verify(
     typeof email.eaccount !== "string" ||
     email.eaccount !== input.originalEmail.eaccount ||
     input.candidate.email !== email.from_address_email ||
-    (input.originalEmail.campaignId && email.campaign_id !== input.originalEmail.campaignId)
+    (email.campaign_id ?? null) !== (input.originalEmail.campaignId ?? null)
   )
     throw new IsolationError();
   const crm = input.originalEmail.crm;
@@ -273,10 +311,12 @@ async function verify(
     const target = workspace.crmTarget?.target;
     if (
       !target ||
+      input.originalEmail.sourceId !== target.mcpServerId ||
       target.organizationId !== crm.organizationId ||
       target.crmRoleId !== crm.crmRoleId ||
       target.serverRevision !== crm.serverRevision ||
-      crm.candidateId !== input.candidate.candidateKey
+      (crm.candidateId !== input.candidate.candidateKey &&
+        crm.candidateId !== (await importedCandidate(tx, actor, input, workspace)))
     )
       throw new IsolationError();
     const contact = await tx.recruitingCrmContact.findFirst({
@@ -324,8 +364,36 @@ async function verify(
         roleId_candidateKey: { roleId: input.roleId, candidateKey: input.candidate.candidateKey },
       },
     });
-    if (!candidate || input.candidate.candidateKey !== input.candidate.email.toLowerCase())
-      throw new IsolationError("An exact saved contact/email identity is required");
+    if (!candidate) throw new IsolationError();
+    if (input.candidate.candidateKey !== input.candidate.email.toLowerCase()) {
+      const id = await importedCandidate(tx, actor, input, workspace);
+      const target = workspace.crmTarget?.target;
+      if (!id || !target)
+        throw new IsolationError("An exact saved contact/email identity is required");
+      const contact = await tx.recruitingCrmContact.findFirst({
+        where: {
+          spaceId: actor.spaceId,
+          userId: actor.userId,
+          mcpServerId: target.mcpServerId,
+          organizationId: target.organizationId,
+          crmCandidateId: id,
+          email: input.candidate.email,
+          archivedAt: null,
+          roles: {
+            some: {
+              archivedAt: null,
+              role: {
+                mcpServerId: target.mcpServerId,
+                organizationId: target.organizationId,
+                crmRoleId: target.crmRoleId,
+                archivedAt: null,
+              },
+            },
+          },
+        },
+      });
+      if (!contact) throw new IsolationError();
+    }
   }
   return {
     availability,
@@ -364,8 +432,23 @@ async function outcome(tx: Tx, actor: Actor, plan: RecruitingSchedulingPlan) {
     if (row.status === "failed") return "failed" as const;
     if (row.status !== "completed") return "pending" as const;
     try {
-      successful(row);
-      return "completed" as const;
+      const body = successful(row);
+      if (id === plan.bookingEffectId) {
+        const booking = obj(body.data);
+        return body.status === "success" &&
+          typeof booking?.uid === "string" &&
+          booking.status === "accepted" &&
+          Date.parse(String(booking.start)) === Date.parse(plan.calendar.start) &&
+          Date.parse(String(booking.end)) === Date.parse(plan.calendar.end)
+          ? ("completed" as const)
+          : ("uncertain" as const);
+      }
+      return typeof body.id === "string" &&
+        body.thread_id === plan.originalEmail.providerThreadId &&
+        body.reply_to_uuid === plan.originalEmail.providerMessageId &&
+        body.eaccount === plan.originalEmail.eaccount
+        ? ("completed" as const)
+        : ("uncertain" as const);
     } catch {
       return "failed" as const;
     }
@@ -517,6 +600,72 @@ export async function bindRecruitingSchedulingOperation(
       throw new IsolationError();
     const native = await grant(tx, actor, operation);
     const key = input.operation === "book" ? "bookingEffectId" : "confirmationEffectId";
+    const fingerprint = (value: RecruitingSchedulingPlan) =>
+      stableJsonValue([
+        value.threadId,
+        value.roleId,
+        value.originalEmail.providerMessageId,
+        value.mailSourceId,
+        value.mailSourceRevision,
+        value.candidate.email.toLowerCase(),
+        value.calendar.sourceId,
+        value.calendar.sourceRevision,
+        value.calendar.eventTypeId,
+        Date.parse(value.calendar.start),
+        Date.parse(value.calendar.end),
+      ]);
+    const siblings = await tx.externalEffect.findMany({
+      where: {
+        kind: KIND,
+        spaceId: actor.spaceId,
+        run: { spaceId: actor.spaceId, userId: actor.userId, threadId: input.threadId },
+        AND: [
+          {
+            request: {
+              path: ["input", "originalEmail", "providerMessageId"],
+              equals: plan.originalEmail.providerMessageId,
+            },
+          },
+          {
+            request: {
+              path: ["input", "calendar", "eventTypeId"],
+              equals: plan.calendar.eventTypeId,
+            },
+          },
+        ],
+      },
+      take: LIMIT + 1,
+    });
+    if (siblings.length > LIMIT)
+      throw new IsolationError("Scheduling operation history is incomplete");
+    for (const sibling of siblings) {
+      const other = projection(sibling);
+      if (other.id !== plan.id && fingerprint(other) === fingerprint(plan) && other[key])
+        throw new IsolationError(
+          "This original email and interval already have an operation; reconcile its existing outcome",
+        );
+    }
+    const inverse = await tx.externalEffect.findFirst({
+      where: {
+        kind: KIND,
+        spaceId: actor.spaceId,
+        id: { not: plan.id },
+        run: { spaceId: actor.spaceId, userId: actor.userId, threadId: input.threadId },
+        OR: [
+          { result: { path: ["bookingEffectId"], equals: operation.id } },
+          { result: { path: ["confirmationEffectId"], equals: operation.id } },
+        ],
+      },
+    });
+    if (inverse)
+      throw new IsolationError("This operation already belongs to another scheduling plan");
+    const requestHash = createHash("sha256")
+      .update(stableJsonValue(operation.request))
+      .digest("hex");
+    const hashKey = input.operation === "book" ? "bookingRequestHash" : "confirmationRequestHash";
+    if (plan[key] && obj(row.result)?.[hashKey] !== requestHash)
+      throw new IsolationError("The bound operation request changed");
+
     if (!plan[key] && !["intended", "approved"].includes(operation.status))
       throw new IsolationError("Only a new reviewed operation may be linked");
     if (plan[key] && plan[key] !== operation.id)
@@ -544,39 +693,48 @@ export async function bindRecruitingSchedulingOperation(
       const reads = await tx.externalEffect.findMany({
         where: {
           spaceId: actor.spaceId,
-          status: "completed",
           createdAt: { gte: booking.updatedAt },
-          run: { spaceId: actor.spaceId, userId: actor.userId, threadId: input.threadId },
+          run: {
+            spaceId: actor.spaceId,
+            userId: actor.userId,
+            threadId: input.threadId,
+            initialRecruitingRoleRevisionId: workspace.role.currentRevisionId,
+          },
         },
         include: { run: true },
         orderBy: { createdAt: "desc" },
-        take: LIMIT,
+        take: LIMIT + 1,
       });
+      if (reads.length > LIMIT) throw new IsolationError("Booking readback history is incomplete");
       let readback = false;
       for (const read of reads) {
+        let parsed: ReturnType<typeof call>;
         try {
-          const callRead = await grant(tx, actor, read);
-          const actual = obj(successful(read).data);
-          if (
-            callRead.route.toolName === "get_booking" &&
-            callRead.route.resourceId === plan.calendar.sourceId &&
-            callRead.route.resourceRevision === plan.calendar.sourceRevision &&
-            callRead.args.bookingUid === booked.uid &&
-            actual?.uid === booked.uid &&
+          parsed = call(read.request);
+        } catch (error) {
+          if (error instanceof IsolationError) continue;
+          throw error;
+        }
+        if (
+          parsed.route.toolName !== "get_booking" ||
+          parsed.route.resourceId !== plan.calendar.sourceId ||
+          parsed.route.resourceRevision !== plan.calendar.sourceRevision ||
+          parsed.args.bookingUid !== booked.uid
+        )
+          continue;
+        await grant(tx, actor, read);
+        const actual = obj(successful(read).data);
+        readback = Boolean(
+          actual?.uid === booked.uid &&
             actual.status === "accepted" &&
             Date.parse(String(actual.start)) === Date.parse(plan.calendar.start) &&
             Date.parse(String(actual.end)) === Date.parse(plan.calendar.end) &&
             Array.isArray(actual.attendees) &&
             actual.attendees.some((value) => obj(value)?.email === plan.candidate.email) &&
             Array.isArray(actual.hosts) &&
-            actual.hosts.some((value) => obj(value)?.email === plan.interviewer.email)
-          ) {
-            readback = true;
-            break;
-          }
-        } catch (error) {
-          if (!(error instanceof IsolationError)) throw error;
-        }
+            actual.hosts.some((value) => obj(value)?.email === plan.interviewer.email),
+        );
+        break;
       }
       if (
         !readback ||
@@ -593,6 +751,15 @@ export async function bindRecruitingSchedulingOperation(
         where: { id: row.id },
         data: {
           result: {
+            bookingRequestHash:
+              typeof obj(row.result)?.bookingRequestHash === "string"
+                ? String(obj(row.result)?.bookingRequestHash)
+                : null,
+            confirmationRequestHash:
+              typeof obj(row.result)?.confirmationRequestHash === "string"
+                ? String(obj(row.result)?.confirmationRequestHash)
+                : null,
+            [hashKey]: requestHash,
             bookingEffectId: plan.bookingEffectId,
             confirmationEffectId: plan.confirmationEffectId,
             [key]: operation.id,
