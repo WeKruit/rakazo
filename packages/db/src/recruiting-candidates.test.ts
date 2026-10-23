@@ -489,7 +489,8 @@ describe("candidate listing and shortlist boundaries", () => {
     expect(f.tx.recruitingCandidatePage.findMany).toHaveBeenCalledExactlyOnceWith({
       where: { roleId: "role", actionId: "action" },
       select: { effectId: true },
-      take: 2,
+      orderBy: [{ observedAt: "desc" }, { effectId: "desc" }],
+      take: 1,
     });
     const query = f.tx.$queryRaw.mock.lastCall![0] as { sql: string; values: unknown[] };
     expect(query.values).toContain("action-only-page");
@@ -719,7 +720,8 @@ describe("candidate listing and shortlist boundaries", () => {
         expect(f.tx.recruitingCandidatePage.findMany).toHaveBeenCalledExactlyOnceWith({
           where: { roleId: "role" },
           select: { effectId: true },
-          take: 2,
+          orderBy: [{ observedAt: "desc" }, { effectId: "desc" }],
+          take: 1,
         });
         if (sort === "score") {
           expect(firstQuery.sql).toContain("WHEN source.kind = 'score' THEN");
@@ -837,10 +839,8 @@ describe("candidate listing and shortlist boundaries", () => {
         }),
       ).rejects.toThrow(recruiting.RecruitingConflictError);
       if (sort !== "tier") {
-        f.tx.recruitingCandidatePage.findMany.mockResolvedValue([
-          { effectId: "only-page" },
-          { effectId: "second-page" },
-        ]);
+        // Newest saved result first: it becomes the rank/score domain for the whole role.
+        f.tx.recruitingCandidatePage.findMany.mockResolvedValue([{ effectId: "second-page" }]);
         const calls = f.tx.$queryRaw.mock.calls.length;
         await expect(
           recruiting.listRecruitingCandidates(f.prisma, actor, {
@@ -856,7 +856,14 @@ describe("candidate listing and shortlist boundaries", () => {
           sql: string;
           values: unknown[];
         };
-        expect(multiplePages.sql).toContain('CASE WHEN count(*) = 1 THEN min("effectId") END');
+        expect(multiplePages.sql).not.toContain('CASE WHEN count(*) = 1 THEN min("effectId") END');
+        expect(multiplePages.values).toContain("second-page");
+        expect(f.tx.recruitingCandidatePage.findMany).toHaveBeenLastCalledWith(
+          expect.objectContaining({
+            orderBy: [{ observedAt: "desc" }, { effectId: "desc" }],
+            take: 1,
+          }),
+        );
         expect(multiplePages.sql).toContain('(rank_scope."pageId" IS NOT NULL AND');
         expect(multiplePages.sql).toContain(
           "(returned.value ? 'rank' OR returned.value ? 'batch_rank' OR returned.value ? 'rank_this_batch_only')",
