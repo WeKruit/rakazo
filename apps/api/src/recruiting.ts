@@ -3125,7 +3125,7 @@ export async function getRecruitingRoleCandidates(
       try {
         // The full sync owns refreshes. Browse the saved projection without live candidate scans.
         for (let offset: number | null = 0; offset !== null; ) {
-          const page = await getRecruitingCrmData(
+          const page: RecruitingCrmDataOutput = await getRecruitingCrmData(
             deps,
             actor,
             target,
