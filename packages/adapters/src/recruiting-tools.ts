@@ -1086,3 +1086,43 @@ export async function resolveRecruitingContact(
   if (context.runId) rememberResolvedContactEmails(context.runId, result.matches);
   return { ...result, crm };
 }
+
+/** A chat without a role: resolve across this user's active roles, each read with its own role checks. */
+export async function resolveRecruitingContactAcrossRoles(
+  deps: Parameters<typeof resolveRecruitingContact>[0],
+  actor: Actor,
+  nameOrEmail: string,
+  context: AdapterContext,
+) {
+  // ponytail: 50 active roles (cuid order ~ newest); add a cross-role name index if users keep more.
+  const roles = await deps.prisma.recruitingRole.findMany({
+    where: { spaceId: actor.spaceId, userId: actor.userId, archivedAt: null },
+    select: { id: true, title: true },
+    orderBy: { id: "desc" },
+    take: 50,
+  });
+  const matches: (ResolvedRecruitingContact & { roleId: string; roleTitle: string })[] = [];
+  const crm: { roleId: string; crm: "read" | "not_bound" | "unavailable" }[] = [];
+  for (const role of roles) {
+    const result = await resolveRecruitingContact(
+      deps,
+      actor,
+      { roleId: role.id, nameOrEmail },
+      context,
+    );
+    crm.push({ roleId: role.id, crm: result.crm });
+    matches.push(
+      ...result.matches.map((match) => ({ ...match, roleId: role.id, roleTitle: role.title })),
+    );
+  }
+  return {
+    scope: "all_user_roles" as const,
+    status: !matches.length
+      ? ("not_found" as const)
+      : matches.length === 1
+        ? ("resolved" as const)
+        : ("ambiguous" as const),
+    matches,
+    crm,
+  };
+}

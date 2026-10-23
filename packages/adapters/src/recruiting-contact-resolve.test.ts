@@ -3,7 +3,12 @@ import { RECRUITING_DEFAULT_BOTS } from "@rakazo/core";
 import type * as Database from "@rakazo/db";
 import { listRecruitingCandidates } from "@rakazo/db";
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import { resolveRecruitingContact, unresolvedContactEmailError } from "./recruiting-tools.js";
+import { agentCrmCandidatesArgs } from "./mcp-connector.js";
+import {
+  resolveRecruitingContact,
+  resolveRecruitingContactAcrossRoles,
+  unresolvedContactEmailError,
+} from "./recruiting-tools.js";
 
 vi.mock("@rakazo/db", async (importOriginal) => ({
   ...(await importOriginal<typeof Database>()),
@@ -67,7 +72,7 @@ function fixture(
       { roleId: "native-role", nameOrEmail },
       context as never,
     );
-  return { calls, resolve };
+  return { calls, resolve, connector };
 }
 
 describe("resolveRecruitingContact", () => {
@@ -137,5 +142,73 @@ describe("resolveRecruitingContact", () => {
         "Resolve a person named in chat through the role's contacts and saved pool first",
       );
     expect(RECRUITING_DEFAULT_BOTS[0].instructions).toContain("never invent or guess an email");
+  });
+
+  it("resolves Sumeet without a thread role through the user's Data Infra role", async () => {
+    const f = fixture([crmRow("4", "Sumeet Parekh", "sumeetparekh1@gmail.com")]);
+    vi.mocked(listRecruitingCandidates).mockImplementation(
+      async (_prisma, _actor, input) =>
+        ({
+          crmTarget: input.roleId === "data-infra" ? { bindingEffectId: "b", target } : null,
+          items: [],
+          nextCursor: null,
+        }) as never,
+    );
+    const findMany = vi.fn(async (_query: unknown) => [
+      { id: "designer", title: "Designer" },
+      { id: "data-infra", title: "Dyna Robotics — Software Engineer, Data Infra" },
+    ]);
+    const result = await resolveRecruitingContactAcrossRoles(
+      { prisma: { recruitingRole: { findMany } } as never, connector: f.connector },
+      actor,
+      "sumeet",
+      { runId: "run-roleless", operationId: "op", signal: new AbortController().signal } as never,
+    );
+    expect(findMany.mock.calls[0]![0]).toMatchObject({
+      where: { spaceId: "w1", userId: "u1", archivedAt: null },
+    });
+    expect(result).toMatchObject({
+      scope: "all_user_roles",
+      status: "resolved",
+      matches: [
+        {
+          name: "Sumeet Parekh",
+          email: "sumeetparekh1@gmail.com",
+          roleId: "data-infra",
+          roleTitle: "Dyna Robotics — Software Engineer, Data Infra",
+        },
+      ],
+    });
+    expect(unresolvedContactEmailError("run-roleless", "sumeetparekh1@gmail.com", "Sumeet")).toBe(
+      null,
+    );
+  });
+});
+
+describe("agent list_crm_candidates arguments", () => {
+  it("includes contacted people and translates a role id to the role's labels", async () => {
+    const readRole = vi.fn(async () => ({
+      structuredContent: {
+        data: { role_spec_id: roleId, client_label: "Dyna", role_label: "Data Infra" },
+      },
+    }));
+    expect(
+      await agentCrmCandidatesArgs({ p_org: org, p_role: roleId, p_q: "Sumeet" }, readRole),
+    ).toEqual({
+      p_org: org,
+      p_q: "Sumeet",
+      p_not_reviewed: false,
+      p_client: "Dyna",
+      p_role: "Data Infra",
+    });
+    expect(readRole).toHaveBeenCalledWith({ p_org: org, p_role: roleId });
+    // Labels and an explicit p_not_reviewed pass through untouched.
+    expect(
+      await agentCrmCandidatesArgs(
+        { p_org: org, p_role: "Data Infra", p_not_reviewed: true },
+        readRole,
+      ),
+    ).toEqual({ p_org: org, p_role: "Data Infra", p_not_reviewed: true });
+    expect(readRole).toHaveBeenCalledTimes(1);
   });
 });

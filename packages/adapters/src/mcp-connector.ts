@@ -101,6 +101,39 @@ const MailboxEmailsInput = ThreadHistoryInput.omit({ anchor_id: true }).extend({
   min_timestamp_created: CreatedAt.describe("ISO datetime; only mail created at or after it."),
   max_timestamp_created: CreatedAt.describe("ISO datetime; only mail created at or before it."),
 });
+const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+/**
+ * Agent calls to list_crm_candidates get the Contacts tab's arguments: contacted people included
+ * (p_not_reviewed false unless set) and a role id translated to the role's client/role LABELS,
+ * which is what this tool filters on. Untranslatable ids are left unchanged.
+ */
+export async function agentCrmCandidatesArgs(
+  args: Record<string, unknown>,
+  readRole: (args: { p_org: string; p_role: string }) => Promise<unknown>,
+) {
+  const next = { p_not_reviewed: false, ...args };
+  if (typeof args.p_org !== "string" || typeof args.p_role !== "string" || !UUID.test(args.p_role))
+    return next;
+  try {
+    const result = (await readRole({ p_org: args.p_org, p_role: args.p_role })) as {
+      isError?: boolean;
+      structuredContent?: { data?: Record<string, unknown> };
+    };
+    const role = result?.isError ? undefined : result?.structuredContent?.data;
+    if (
+      role?.role_spec_id === args.p_role &&
+      typeof role.client_label === "string" &&
+      role.client_label.trim() &&
+      typeof role.role_label === "string" &&
+      role.role_label.trim()
+    )
+      return { ...next, p_client: role.client_label, p_role: role.role_label };
+  } catch {
+    // The original call still runs; its own result reports any problem.
+  }
+  return next;
+}
+
 const nativeInstantlyReads = [
   {
     name: "get_thread_history",
@@ -586,8 +619,15 @@ export class McpConnector implements ConnectorProvider {
       const session = await this.sessionFor(assignment.server, context);
       material = this.sessions.get(sessionKey)?.material;
       context.signal.throwIfAborted();
+      const args =
+        call.route.toolName === "list_crm_candidates" && context.runId
+          ? await agentCrmCandidatesArgs(call.args, async (roleArgs) => {
+              await requireMcpToolAssignment(this.prisma, context, call.route!, "get_crm_role");
+              return session.callTool("get_crm_role", roleArgs, { signal: context.signal });
+            })
+          : call.args;
       callStarted = true;
-      const result = await session.callTool(call.route.toolName, call.args, {
+      const result = await session.callTool(call.route.toolName, args, {
         signal: context.signal,
       });
       const secrets = material ? oauthMaterialSecrets(material) : [];

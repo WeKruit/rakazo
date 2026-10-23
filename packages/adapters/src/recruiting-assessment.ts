@@ -34,7 +34,10 @@ import {
 import { getLogger } from "@rakazo/logging";
 import { inputPausedToolResult } from "./approval-effect.js";
 import { createRecruitingCandidateReportReader } from "./recruiting-research.js";
-import { resolveRecruitingContact } from "./recruiting-tools.js";
+import {
+  resolveRecruitingContact,
+  resolveRecruitingContactAcrossRoles,
+} from "./recruiting-tools.js";
 
 type RecruitingRunContext = { actor: Actor; runId: string; threadId: string; botId: string };
 export type RecruitingAssessmentToolContext = RecruitingRunContext & {
@@ -98,20 +101,27 @@ export async function executeRecruitingCandidatesTool(
     });
     authorizeMs = Math.round(performance.now() - started);
     const queryStarted = performance.now();
-    if (!roleId) {
-      succeeded = true;
-      return { status: "no_current_role" as const };
-    }
     if (input.operation === "resolve") {
-      const result = await resolveRecruitingContact(
-        deps,
-        trusted.actor,
-        { roleId, nameOrEmail: input.nameOrEmail },
-        context,
-      );
+      const result = roleId
+        ? await resolveRecruitingContact(
+            deps,
+            trusted.actor,
+            { roleId, nameOrEmail: input.nameOrEmail },
+            context,
+          )
+        : await resolveRecruitingContactAcrossRoles(
+            deps,
+            trusted.actor,
+            input.nameOrEmail,
+            context,
+          );
       itemCount = result.matches.length;
       succeeded = true;
       return result;
+    }
+    if (!roleId) {
+      succeeded = true;
+      return { status: "no_current_role" as const };
     }
     if (input.operation === "list") {
       const { operation: _operation, ...query } = input;
