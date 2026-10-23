@@ -1156,6 +1156,7 @@ export async function getRecruitingCorrespondence(
         }),
       ),
     };
+    let assertCalendarLineageCurrent: (() => Promise<void>) | undefined;
     const finish = async () => {
       let assertNativeCurrent: (() => Promise<void>) | null = null;
       if (workspace && view === "inbox") {
@@ -1282,6 +1283,7 @@ export async function getRecruitingCorrespondence(
         }
       }
       await assertNativeCurrent?.();
+      await assertCalendarLineageCurrent?.();
       if (workspace && view === "interview") {
         const outcomes = await recruitingReplyOutcomes(
           prisma,
@@ -1494,7 +1496,8 @@ export async function getRecruitingCorrespondence(
     });
     const byId = new Map(results.map((result) => [result.id, result.result]));
     // A read made in this role's run can contain the whole calendar. Only an actual
-    // completed creation in this exact role establishes ownership of a booking UID.
+    // completed creation in this exact role establishes initial ownership. A successful
+    // reschedule receipt may then prove the provider's replacement UID, never a name/time guess.
     const bookingProofs = new Set<string>();
     if (
       reads.some(
@@ -1515,20 +1518,22 @@ export async function getRecruitingCorrespondence(
           },
           OR: querySources
             .filter((source) => source.provider?.kind === "cal")
-            .flatMap((source) => [
-              {
-                AND: [
-                  { request: { path: ["2", "route", "resourceId"], equals: source.id } },
-                  { request: { path: ["2", "route", "toolName"], equals: "create_booking" } },
-                ],
-              },
-              {
-                AND: [
-                  { request: { path: ["3", "resourceId"], equals: source.id } },
-                  { request: { path: ["3", "toolName"], equals: "create_booking" } },
-                ],
-              },
-            ]),
+            .flatMap((source) =>
+              ["create_booking", "reschedule_booking"].flatMap((tool) => [
+                {
+                  AND: [
+                    { request: { path: ["2", "route", "resourceId"], equals: source.id } },
+                    { request: { path: ["2", "route", "toolName"], equals: tool } },
+                  ],
+                },
+                {
+                  AND: [
+                    { request: { path: ["3", "resourceId"], equals: source.id } },
+                    { request: { path: ["3", "toolName"], equals: tool } },
+                  ],
+                },
+              ]),
+            ),
         },
         orderBy: [{ updatedAt: "desc" }, { id: "desc" }],
         take: 201,
@@ -1548,6 +1553,13 @@ export async function getRecruitingCorrespondence(
         },
       });
       output.partial ||= receipts.length > 200;
+      const lineage: {
+        sourceId: string;
+        revision: number;
+        botId: string;
+        from: string;
+        to: string;
+      }[] = [];
       for (const receipt of receipts.slice(0, 200)) {
         const call = correspondenceCall(receipt.request);
         const source = querySources.find((source) => source.id === call?.route.resourceId);
@@ -1562,18 +1574,100 @@ export async function getRecruitingCorrespondence(
           !botIds.includes(receipt.run.botId) ||
           receipt.run.initialRecruitingRoleRevision?.roleId !== workspace.role.id ||
           call?.route.connectorId !== "mcp" ||
-          call.route.toolName !== "create_booking" ||
+          !["create_booking", "reschedule_booking"].includes(call.route.toolName) ||
           source?.provider?.kind !== "cal" ||
           call.route.resourceRevision !== source.revision ||
           result?.isError === true ||
+          result?.uncertain === true ||
           result?.error !== undefined ||
           body?.status !== "success" ||
           typeof booking?.uid !== "string" ||
           !booking.uid.trim()
         )
           continue;
-        bookingProofs.add(stableJsonValue([source.id, source.revision, booking.uid]));
+        const permission = source.assignments.find(
+          (assignment) => assignment.botId === receipt.run.botId,
+        );
+        if (
+          !permission ||
+          !["get_booking", "get_bookings"].some((tool) => correspondenceAllows(permission, tool))
+        )
+          continue;
+        if (call.route.toolName === "create_booking") {
+          bookingProofs.add(stableJsonValue([source.id, source.revision, booking.uid]));
+        } else if (
+          typeof call.args.bookingUid === "string" &&
+          call.args.bookingUid.trim() &&
+          booking.rescheduledFromUid === call.args.bookingUid &&
+          booking.uid !== call.args.bookingUid
+        ) {
+          lineage.push({
+            sourceId: source.id,
+            revision: source.revision,
+            botId: receipt.run.botId,
+            from: call.args.bookingUid,
+            to: booking.uid,
+          });
+        }
       }
+      const adopted: typeof lineage = [];
+      // Receipts arrive newest-first. Resolve only chains rooted in an owned creation.
+      let remaining = lineage;
+      while (remaining.length) {
+        const deferred: typeof lineage = [];
+        let advanced = false;
+        for (const link of remaining) {
+          if (!bookingProofs.has(stableJsonValue([link.sourceId, link.revision, link.from]))) {
+            deferred.push(link);
+            continue;
+          }
+          bookingProofs.add(stableJsonValue([link.sourceId, link.revision, link.to]));
+          adopted.push(link);
+          advanced = true;
+        }
+        if (!advanced) break;
+        remaining = deferred;
+      }
+      if (adopted.length)
+        assertCalendarLineageCurrent = async () => {
+          const currentSources = await prisma.mcpServer.findMany({
+            where: {
+              userId: actor.userId,
+              spaceId: actor.spaceId,
+              id: { in: [...new Set(adopted.map((link) => link.sourceId))] },
+            },
+            select: {
+              id: true,
+              endpoint: true,
+              enabled: true,
+              revision: true,
+              assignments: {
+                where: { userId: actor.userId, spaceId: actor.spaceId, botId: { in: botIds } },
+                select: { botId: true, allowAllTools: true, allowedTools: true },
+              },
+            },
+          });
+          for (const link of adopted) {
+            const source = currentSources.find((source) => source.id === link.sourceId);
+            const permission = source?.assignments.find(
+              (assignment) => assignment.botId === link.botId,
+            );
+            if (
+              !source?.enabled ||
+              source.revision !== link.revision ||
+              correspondenceProvider(source.endpoint, "interview")?.kind !== "cal" ||
+              !permission ||
+              !["get_booking", "get_bookings"].some((tool) =>
+                correspondenceAllows(permission, tool),
+              )
+            )
+              throw new IsolationError();
+          }
+          const current = await recruiting.getRecruitingWorkspace(prisma, actor, {
+            threadId: target.threadId,
+          });
+          if (current?.role.id !== workspace.role.id) throw new IsolationError();
+        };
     }
     const candidateKeys = new Set(
       view === "contacts"

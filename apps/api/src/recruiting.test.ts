@@ -2436,25 +2436,132 @@ describe("saved recruiting correspondence", () => {
     expect(JSON.stringify(result)).not.toContain("Private other-role meeting");
     expect(JSON.stringify(result)).not.toContain("person@example.test");
   });
+  function rescheduleProof(from = "booking-one", to = "booking-two") {
+    const proof = calBookingProof();
+    const call = proof.request[2] as { route: { toolName: string }; args: Record<string, unknown> };
+    call.route.toolName = "reschedule_booking";
+    call.args = { bookingUid: from, start: "2026-10-24T13:00:00Z", lengthInMinutes: 30 };
+    proof.result.structuredContent.data = { uid: to, rescheduledFromUid: from } as never;
+    return proof;
+  }
+  const rescheduledRead = (uid = "booking-two", status = "accepted") => ({
+    status: "success",
+    data: {
+      uid,
+      status,
+      title: "Rescheduled interview",
+      start: "2026-10-24T13:00:00Z",
+      end: "2026-10-24T13:30:00Z",
+      attendees: [{ email: "person@example.test" }],
+    },
+  });
+  it("follows actual successful replacement UID receipts across a newest-first chain", async () => {
+    const result = await calObservation(
+      "get_booking",
+      { bookingUid: "booking-three" },
+      rescheduledRead("booking-three"),
+      undefined,
+      [rescheduleProof("booking-two", "booking-three"), rescheduleProof(), calBookingProof()],
+    );
+    expect(result.events).toEqual([
+      expect.objectContaining({ id: "calendar:booking:booking-three", status: "accepted" }),
+    ]);
+  });
+  it.each([
+    "foreign-original",
+    "wrong-role",
+    "wrong-source",
+    "old-revision",
+    "failed",
+    "uncertain",
+    "uncertain-result",
+    "error",
+    "wrong-echo",
+    "missing-echo",
+  ])("does not infer replacement booking ownership from %s", async (reason) => {
+    const proof = rescheduleProof();
+    const call = proof.request[2] as {
+      route: { resourceId: string; resourceRevision: number };
+      args: Record<string, unknown>;
+    };
+    if (reason === "foreign-original") call.args.bookingUid = "foreign";
+    if (reason === "wrong-role") proof.run.initialRecruitingRoleRevision.roleId = "other";
+    if (reason === "wrong-source") call.route.resourceId = "other";
+    if (reason === "old-revision") call.route.resourceRevision++;
+    if (reason === "failed" || reason === "uncertain") proof.status = reason;
+    if (reason === "error") Object.assign(proof.result, { error: "provider error" });
+    if (reason === "uncertain-result") Object.assign(proof.result, { uncertain: true });
+    if (reason === "wrong-echo")
+      Object.assign(proof.result.structuredContent.data, { rescheduledFromUid: "foreign" });
+    if (reason === "missing-echo")
+      delete (proof.result.structuredContent.data as Record<string, unknown>).rescheduledFromUid;
+    const result = await calObservation(
+      "get_booking",
+      { bookingUid: "booking-two" },
+      rescheduledRead(),
+      undefined,
+      [proof, calBookingProof()],
+    );
+    expect(result.events).toEqual([]);
+    expect(result.partial).toBe(true);
+  });
+  it.each(["grant", "revision", "role"] as const)(
+    "rechecks current %s before returning replacement event details",
+    async (change) => {
+      await expect(
+        calObservation(
+          "get_booking",
+          { bookingUid: "booking-two" },
+          rescheduledRead(),
+          undefined,
+          [rescheduleProof(), calBookingProof()],
+          change,
+        ),
+      ).rejects.toThrow();
+    },
+  );
+  it("projects a cancelled readback only for the actually owned replacement booking", async () => {
+    const result = await calObservation(
+      "get_booking",
+      { bookingUid: "booking-two" },
+      rescheduledRead("booking-two", "cancelled"),
+      undefined,
+      [rescheduleProof(), calBookingProof()],
+    );
+    expect(result.events).toEqual([
+      expect.objectContaining({ id: "calendar:booking:booking-two", status: "cancelled" }),
+    ]);
+  });
   async function calObservation(
     tool: string,
     args: Record<string, unknown>,
     body: unknown,
     previous?: { args: Record<string, unknown>; body: unknown },
     proofs: unknown[] = [],
+    lateChange?: "grant" | "revision" | "role",
   ) {
     const { client, prisma, retained } = fixture();
-    client.mcpServer.findMany.mockResolvedValueOnce([
-      {
-        id: "calendar",
-        name: "Cal.com",
-        endpoint: "https://mcp.cal.com/mcp",
-        secretId: "encrypted-reference",
-        revision: 2,
-        enabled: true,
-        assignments: [{ botId: "main", allowAllTools: false, allowedTools: [tool] }],
-      },
-    ]);
+    const calendarSource = {
+      id: "calendar",
+      name: "Cal.com",
+      endpoint: "https://mcp.cal.com/mcp",
+      secretId: "encrypted-reference",
+      revision: 2,
+      enabled: true,
+      assignments: [{ botId: "main", allowAllTools: false, allowedTools: [tool] }],
+    };
+    client.mcpServer.findMany.mockResolvedValue([calendarSource]);
+    if (lateChange) {
+      const after = structuredClone(calendarSource);
+      if (lateChange === "grant") after.assignments = [];
+      if (lateChange === "revision") after.revision++;
+      client.mcpServer.findMany.mockResolvedValueOnce([calendarSource]).mockResolvedValue([after]);
+      if (lateChange === "role")
+        vi.mocked(db.getRecruitingWorkspace)
+          .mockResolvedValueOnce({ role: { id: "role" } } as never)
+          .mockResolvedValueOnce({ role: { id: "other-role" } } as never);
+    }
+
     const request = (args: Record<string, unknown>) => [
       "__rakazoCatalogTool",
       "direct",
