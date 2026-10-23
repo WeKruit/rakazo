@@ -201,6 +201,7 @@ import {
 } from "../lib/browser-notifications";
 import { startCall, useCallSession } from "../lib/call-session";
 import { newClientId } from "../lib/client-id";
+import { createCoalescedRefresh } from "../lib/coalesced-refresh";
 import {
   beginComposerDraftSubmission,
   readComposerDraft,
@@ -391,6 +392,7 @@ const ATTACHMENT_ACCEPT = [...ATTACHMENT_ALLOWED_MIME_TYPES, ".zip"].join(",");
 const FALLBACK_BOT_COLOR = "#85858A";
 // Allow the API's 15s transaction and 5s pool wait when Postgres is remote.
 const THREAD_SNAPSHOT_TIMEOUT_MS = 30_000;
+const RECONNECT_RECRUITING_RETRY_MS = 30_000;
 /** Bound Settings leave so a hung voice status refresh cannot block dismissal. */
 const VOICE_STATUS_REFRESH_TIMEOUT_MS = 10_000;
 const MOBILE_SIDEBAR_SWIPE_EDGE_PX = 32;
@@ -1031,6 +1033,33 @@ export function ShellPage() {
   activeBotId.current = inGroup ? undefined : active?.id;
   const activeGroupId = useRef<string | undefined>(groupId);
   activeGroupId.current = groupId;
+  // Agent events arrive in bursts and reconnects repeat; re-read the workbench at most once a
+  // second, and not at all while the page is hidden.
+  const recruitingRefreshQueue = useRef<ReturnType<typeof createCoalescedRefresh>>(undefined);
+  const lastRecruitingRefreshAt = useRef(0);
+  /** A reconnect re-reads the workbench only if it missed events, or to retry after a while. */
+  const reconnectNeedsRecruitingRead = (
+    before: { threadId: string; cursor: number } | null | undefined,
+    fresh: { threadId: string; cursor: number },
+  ) =>
+    before?.threadId !== fresh.threadId ||
+    before.cursor !== fresh.cursor ||
+    Date.now() - lastRecruitingRefreshAt.current >= RECONNECT_RECRUITING_RETRY_MS;
+  useEffect(() => {
+    const queue = createCoalescedRefresh(
+      () => {
+        lastRecruitingRefreshAt.current = Date.now();
+        revalidateRecruitingReads(recruitingReadCache.current);
+        setRecruitingRefresh((value) => value + 1);
+      },
+      { windowMs: 1_000 },
+    );
+    recruitingRefreshQueue.current = queue;
+    return () => {
+      queue.dispose();
+      recruitingRefreshQueue.current = undefined;
+    };
+  }, []);
   const refreshRecruitingReads = useCallback(
     (threadId: string, spaceId: string | undefined) => {
       const current = snapshotRef.current;
@@ -1046,8 +1075,7 @@ export function ShellPage() {
           : current?.botId !== activeBotId.current)
       )
         return;
-      revalidateRecruitingReads(recruitingReadCache.current);
-      setRecruitingRefresh((value) => value + 1);
+      recruitingRefreshQueue.current?.request();
     },
     [bootstrapMe?.spaceId, userId],
   );
@@ -1761,13 +1789,15 @@ export function ShellPage() {
       loadHead: () =>
         rpc.threads.head({ botId: active.id }, { signal: threadSnapshotSignal(abort.signal) }),
       refresh: async () => {
+        const before = snapshotRef.current;
         const fresh = await refreshThread(active.id, threadSnapshotSignal(abort.signal));
         if (
           !abort.signal.aborted &&
           epoch === historyEpoch.current &&
           activeBotId.current === active.id
         )
-          refreshRecruitingReads(fresh.threadId, bootstrapMe?.spaceId);
+          if (reconnectNeedsRecruitingRead(before, fresh))
+            refreshRecruitingReads(fresh.threadId, bootstrapMe?.spaceId);
         return fresh;
       },
       currentSnapshot: () =>
@@ -1898,13 +1928,15 @@ export function ShellPage() {
       },
       loadHead: () => rpc.threads.head({ groupId }, { signal: threadSnapshotSignal(abort.signal) }),
       refresh: async () => {
+        const before = snapshotRef.current;
         const fresh = await refreshGroupThread(groupId, threadSnapshotSignal(abort.signal));
         if (
           !abort.signal.aborted &&
           epoch === historyEpoch.current &&
           activeGroupId.current === groupId
         )
-          refreshRecruitingReads(fresh.threadId, bootstrapMe?.spaceId);
+          if (reconnectNeedsRecruitingRead(before, fresh))
+            refreshRecruitingReads(fresh.threadId, bootstrapMe?.spaceId);
         return fresh;
       },
       currentSnapshot: () =>

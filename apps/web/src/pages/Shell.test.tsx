@@ -1122,6 +1122,39 @@ it("does not map a failed or late role binding into the current role", async () 
   expect(container?.textContent).not.toContain("Stored CRM history");
 });
 
+it("re-reads the CRM workbench once for a burst of reconnects that missed no events", async () => {
+  let stream!: Parameters<typeof CoreModule.runThreadSubscription>[0];
+  vi.spyOn(CoreModule, "runThreadSubscription").mockImplementation(async (options) => {
+    await options.loadInitial();
+    stream = options;
+  });
+  const source = { serverId: "crm-source", serverRevision: 2, name: "CRM", status: "ready" };
+  shellApi.recruiting.crmData.mockImplementation(async (input) =>
+    input.operation === "memberships"
+      ? {
+          operation: "memberships",
+          checkedAt: "2026-10-22T00:00:00Z",
+          sources: [
+            { ...source, memberships: [{ organizationId: "org-1", name: "Org", role: "member" }] },
+          ],
+        }
+      : {
+          operation: "roles",
+          source: { ...source, organizationId: "org-1" },
+          checkedAt: "2026-10-22T00:00:00Z",
+          items: [],
+        },
+  );
+  await renderFeedbackShell("group", undefined, { isDeploymentOwner: false, openFeedback: false });
+  const initialReads = shellApi.recruiting.crmData.mock.calls.length;
+  for (let reconnect = 0; reconnect < 20; reconnect++)
+    await act(async () => {
+      await stream.refresh();
+    });
+  // The first reconnect may retry once; the other 19 missed nothing and stay quiet.
+  expect(shellApi.recruiting.crmData.mock.calls.length - initialReads).toBeLessThanOrEqual(2);
+});
+
 it("keeps the role list through a thread resync and drops a response for a previous Space", async () => {
   const source = { serverId: "crm-source", serverRevision: 2, name: "CRM", status: "ready" };
   const roles = (roleLabel: string) => ({
