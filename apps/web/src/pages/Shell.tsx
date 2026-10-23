@@ -5265,7 +5265,7 @@ export function ShellPage() {
               <RecruitingPanel
                 key={`${userId}:${bootstrapMe?.spaceId}:${knownThreadId}:workspace`}
                 presentation="workspace"
-                view={recruitingWorkspaceView === "shortlist" ? "shortlist" : recruitingWorkspaceView === "contacts" ? "contacts" : "results"}
+                view={recruitingWorkspaceView === "shortlist" ? "shortlist" : recruitingWorkspaceView === "workflow" ? "results" : "contacts"}
                 threadId={knownThreadId}
                 botId={inGroup ? undefined : active?.id}
                 groupId={inGroup ? groupId : undefined}

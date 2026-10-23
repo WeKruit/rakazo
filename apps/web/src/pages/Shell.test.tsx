@@ -3325,7 +3325,7 @@ it("opens a normal recruiting role on native candidate results and restores coll
   expect(view.getProps().presentation).toBe("workspace");
   expect(view.getProps().threadId).toBe(view.thread.threadId);
   expect(view.getProps().showDiagnostics).toBe(false);
-  expect(container?.querySelector(".hire-table")?.textContent).toContain(view.candidate.name);
+  expect(container?.querySelector("table")?.textContent).toContain(view.candidate.name);
   expect(shellApi.recruiting.getWorkspace).toHaveBeenCalledWith({ threadId: view.thread.threadId });
   expect(shellApi.recruiting.listCandidates).toHaveBeenCalledWith(
     expect.objectContaining({ roleId: "internal-role" }),
@@ -3389,12 +3389,11 @@ it("opens a normal recruiting role on native candidate results and restores coll
   expect(container?.textContent).toContain("No shortlisted candidates yet.");
   expect(container?.textContent).not.toContain("No saved candidates");
   await view.click("Browse all candidates");
-  expect(view.getProps().view).toBe("results");
-  expect(container?.querySelector(".hire-table")?.textContent).toContain(view.candidate.name);
-  expect(shellApi.recruiting.correspondence).not.toHaveBeenCalled();
+  expect(view.getProps().view).toBe("contacts");
+  expect(container?.querySelector("table")?.textContent).toContain(view.candidate.name);
   await view.click("Contacts");
   expect(container?.querySelector("h1")?.textContent).toBe("Contacts");
-  expect(shellApi.recruiting.correspondence).toHaveBeenCalledExactlyOnceWith({
+  expect(shellApi.recruiting.correspondence).toHaveBeenLastCalledWith({
     groupId: "group-1",
     view: "contacts",
   });
@@ -3551,6 +3550,7 @@ it("sends candidate feedback from the default results workspace to Main without 
   });
   const card = document.body.querySelector('[data-message-id="pending-main"]');
   await view.click(view.candidate.name);
+  await view.click("Evidence");
   await view.click("Give feedback");
   await view.choose("good_example");
   const reason = "This is closer. Prefer candidates from robotics companies for the next search.";

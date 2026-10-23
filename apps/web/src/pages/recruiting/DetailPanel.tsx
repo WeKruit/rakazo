@@ -262,7 +262,7 @@ export function RecruitingDetailPanel({
               <dd className="break-all">{phone || "—"}</dd>
             </dl>
           </details>
-          {emailDraft || shortlist ? (
+          {emailDraft || shortlist || actions?.openEvidence ? (
             <div className="flex flex-wrap gap-2">
               {emailDraft ? (
                 <Button size="sm" onClick={emailDraft}>
@@ -283,6 +283,16 @@ export function RecruitingDetailPanel({
                 >
                   <Bookmark size={15} aria-hidden fill={isShortlisted ? "currentColor" : "none"} />
                   {isShortlisted ? <Trans>Shortlisted</Trans> : <Trans>Shortlist</Trans>}
+                </Button>
+              ) : null}
+              {actions?.openEvidence ? (
+                <Button
+                  size="sm"
+                  variant="ghost"
+                  aria-haspopup="dialog"
+                  onClick={(event) => actions.openEvidence?.(event.currentTarget)}
+                >
+                  <Trans>Evidence</Trans>
                 </Button>
               ) : null}
             </div>
@@ -340,16 +350,6 @@ export function RecruitingDetailPanel({
                       <span className="text-xs text-muted-foreground">
                         {sections.fit.rank.label} {sections.fit.rank.value}
                       </span>
-                    ) : null}
-                    {actions?.openEvidence ? (
-                      <Button
-                        size="sm"
-                        variant="ghost"
-                        aria-haspopup="dialog"
-                        onClick={(event) => actions.openEvidence?.(event.currentTarget)}
-                      >
-                        <Trans>Evidence</Trans>
-                      </Button>
                     ) : null}
                   </div>
                   {sections.summary ? (
