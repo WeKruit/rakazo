@@ -51,7 +51,7 @@ export const RecruitingSchedulingPlanSchema = RecruitingSchedulingPlanInputSchem
   roleTitle: z.string().min(1),
   mailSourceId: Id,
   mailSourceRevision: z.number().int().positive(),
-  mailRead: z.strictObject({ effectId: Id, linkedRunId: Id, messageId: Id }),
+  mailRead: z.strictObject({ effectId: Id, linkedRunId: Id, messageId: Id.nullable() }),
   bookingStatus: z.enum(["pending", "completed", "failed", "uncertain"]).nullable(),
   confirmationStatus: z.enum(["pending", "completed", "failed", "uncertain"]).nullable(),
   bookingEffectId: Id.nullable(),
