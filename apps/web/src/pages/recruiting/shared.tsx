@@ -9,6 +9,7 @@ import { Button } from "@rakazo/ui-web";
 import type { ReactNode } from "react";
 import { useEffect, useRef, useState } from "react";
 import { Shimmer } from "../../components/ai/primitives";
+import { retryTransientRead } from "../../lib/read-retry";
 import type { RecruitingReadCache } from "../../lib/recruiting-read-cache";
 import { rememberRecruitingRead } from "../../lib/recruiting-read-cache";
 import { rpc } from "../../lib/rpc";
@@ -49,16 +50,18 @@ export function tabCacheSlot(
 /**
  * One keyed async read; stale responses never overwrite a newer key. With a cache slot, the last
  * data renders at once and the fresh response replaces it; a response issued before the cache
- * was cleared (sign-out, lost access) is discarded.
+ * was cleared (sign-out, lost access) is discarded. Transient failures retry with backoff while
+ * the cached or loading state stays on screen.
  */
 export function useKeyedRead<T>(key: string | null, load: () => Promise<T>, slot: CacheSlot = {}) {
   const [read, setRead] = useState<Read<T>>();
   useEffect(() => {
     if (key === null) return;
     let cancelled = false;
+    const abort = new AbortController();
     const epoch = slot.cache?.epoch;
     setRead({ key });
-    load()
+    retryTransientRead(load, abort.signal)
       .then((data) => {
         if (cancelled) return;
         if (slot.cache && epoch !== slot.cache.epoch) return setRead({ key, failed: true });
@@ -70,6 +73,7 @@ export function useKeyedRead<T>(key: string | null, load: () => Promise<T>, slot
       });
     return () => {
       cancelled = true;
+      abort.abort();
     };
     // `load` is derived from `key`; the key is the read's identity.
   }, [key]);
@@ -224,7 +228,7 @@ export function useCrmPages<O extends PagedOperation>(
     if (!request || !identity || !next || extra?.loading) return;
     const base = { identity, items: extra?.items ?? [], next };
     setMore({ ...base, loading: true });
-    readCrm({ ...request, ...next } as CrmRequest<O>)
+    retryTransientRead(() => readCrm({ ...request, ...next } as CrmRequest<O>))
       .then((value) => {
         if (latest.current !== identity) return;
         const page = value as unknown as PagedPage;
