@@ -149,6 +149,73 @@ describe("saved recruiting correspondence", () => {
     vi.mocked(db.getRecruitingWorkspace).mockResolvedValue({ role: { id: "role" } } as never);
     return { client, prisma: client as unknown as PrismaClient, retained };
   }
+  it.each([
+    [true, true],
+    [false, false],
+    [1, true],
+    [0, false],
+    [null, null],
+    [7, null],
+    [undefined, undefined],
+  ])(
+    "preserves observed unread metadata without guessing unsupported flags: %s",
+    async (flag, unread) => {
+      const observed = {
+        ...email,
+        ...(flag !== undefined ? { is_unread: flag } : {}),
+        step: "Follow-up 2",
+        lead_id: "90000000-0000-4000-8000-000000000009",
+      };
+      const f = fixture({
+        result: { structuredContent: { items: [observed], next_starting_after: null } },
+      });
+      const output = await api.getRecruitingCorrespondence(f.prisma, actor, target, "inbox");
+      expect(output.emails).toHaveLength(1);
+      expect(output.emails[0]).toMatchObject({
+        leadId: observed.lead_id,
+        step: observed.step,
+        observedAt: f.retained.updatedAt.toISOString(),
+        url: null,
+      });
+      if (unread === undefined) expect(output.emails[0]).not.toHaveProperty("unread");
+      else expect(output.emails[0]).toHaveProperty("unread", unread);
+    },
+  );
+  it("keeps absent provider metadata unknown instead of inferring it from message direction", async () => {
+    const f = fixture();
+    const output = await api.getRecruitingCorrespondence(f.prisma, actor, target, "inbox");
+    expect(output.emails[0]).not.toHaveProperty("unread");
+    expect(output.emails[0]).not.toHaveProperty("leadId");
+    expect(output.emails[0]).not.toHaveProperty("step");
+    expect(output.emails[0]?.observedAt).toBe(f.retained.updatedAt.toISOString());
+  });
+  it.each(["disabled", "revoked", "epoch"])(
+    "does not expose observed metadata after source %s",
+    async (state) => {
+      const f = fixture({
+        enabled: state !== "disabled",
+        permission: state !== "revoked",
+        result: {
+          structuredContent: {
+            items: [
+              {
+                ...email,
+                is_unread: true,
+                step: "private step",
+                lead_id: "90000000-0000-4000-8000-000000000009",
+              },
+            ],
+          },
+        },
+      });
+      if (state === "epoch")
+        (f.retained.request[2] as { route: { resourceRevision: number } }).route.resourceRevision =
+          99;
+      const output = await api.getRecruitingCorrespondence(f.prisma, actor, target, "inbox");
+      expect(output.emails).toEqual([]);
+      expect(JSON.stringify(output)).not.toContain("private step");
+    },
+  );
   const crmIdentity = { endpoint: "https://crm.example.test/mcp", connected: true };
   const crmCandidate = "9dbe8bb7-8fbc-4f73-9fef-5deae2b32dc7";
   it.each(["sent_recorded", "scheduled", "unknown"] as const)(
@@ -183,7 +250,14 @@ describe("saved recruiting correspondence", () => {
       });
       const membership = vi.fn(async () => [actor]);
       Object.assign(f.client, { $queryRaw: membership });
-      const anchor = { ...email, ue_type: 2, thread_id: "provider-thread" };
+      const anchor = {
+        ...email,
+        ue_type: 2,
+        thread_id: "provider-thread",
+        is_unread: 1,
+        lead_id: "90000000-0000-4000-8000-000000000009",
+        step: "Initial",
+      };
       const outbound = {
         ...anchor,
         id: "d1495a46-b3f5-4afe-8e0f-8886bedb6933",
@@ -271,7 +345,14 @@ describe("saved recruiting correspondence", () => {
       );
       expect(output.emails).toEqual(
         expect.arrayContaining([
-          expect.objectContaining({ providerMessageId: anchor.id, body: anchor.body.text }),
+          expect.objectContaining({
+            providerMessageId: anchor.id,
+            body: anchor.body.text,
+            unread: true,
+            leadId: anchor.lead_id,
+            step: "Initial",
+            observedAt: read.updatedAt.toISOString(),
+          }),
         ]),
       );
       expect(output.emails.some((row) => row.providerMessageId === outbound.id)).toBe(

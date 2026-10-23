@@ -203,6 +203,29 @@ function correspondenceRecord(value: unknown): Record<string, unknown> | undefin
     : undefined;
 }
 
+/** Preserve only metadata supplied by the parsed provider record at this retained observation. */
+function instantlyEmailObservation(
+  email: NonNullable<ReturnType<typeof readInstantlyEmail>>,
+  observedAt: Date,
+) {
+  const unread = email.is_unread;
+  return {
+    ...(unread !== undefined
+      ? {
+          unread:
+            unread === true || unread === 1
+              ? true
+              : unread === false || unread === 0
+                ? false
+                : null,
+        }
+      : {}),
+    ...(email.lead_id !== undefined ? { leadId: email.lead_id } : {}),
+    ...(email.step !== undefined ? { step: email.step } : {}),
+    observedAt: observedAt.toISOString(),
+  };
+}
+
 function calAvailabilitySubject(args: Record<string, unknown>) {
   return [
     "eventTypeId",
@@ -306,6 +329,7 @@ async function nativeRecruitingCorrespondence(
           sourceName: record.source.name,
           sourceId: record.source.id,
           providerMessageId: email.id,
+          ...instantlyEmailObservation(email, effect.updatedAt),
           savedRead: effect.run.sourceMessageId
             ? {
                 messageId: effect.run.sourceMessageId,
@@ -2138,6 +2162,7 @@ export async function getRecruitingCorrespondence(
           sourceName: source.name,
           sourceId: source.id,
           providerMessageId: email.id,
+          ...instantlyEmailObservation(email, effect.updatedAt),
           ...(email.thread_id !== undefined ? { providerThreadId: email.thread_id } : {}),
           ...(email.campaign_id !== undefined ? { campaignId: email.campaign_id } : {}),
           ...(email.eaccount !== undefined ? { eaccount: email.eaccount } : {}),

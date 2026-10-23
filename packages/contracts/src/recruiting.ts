@@ -1698,6 +1698,12 @@ export const RecruitingCorrespondenceSchema = z.strictObject({
       id: Id,
       sourceName: z.string(),
       ...CorrespondenceOriginFields,
+      /** Optional provider observations, never application viewed-by state or current totals. */
+      unread: z.boolean().nullable().optional(),
+      leadId: z.uuid().nullable().optional(),
+      /** Provider-supplied step text; not an inferred stable step ID. */
+      step: z.string().nullable().optional(),
+      observedAt: IsoDate.optional(),
       crm: CorrespondenceCrmContext,
       sender: z.string().nullable(),
       recipients: z.array(z.string()),
