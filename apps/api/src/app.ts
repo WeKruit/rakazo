@@ -529,6 +529,7 @@ export async function createApp(
     deploymentModelConfigured: env.deploymentModelConfigured,
     messaging,
     cloudAgent,
+    connector: stack.connector,
     shutdownSignal: shutdown.signal,
   });
   if (inMemoryJobs) {

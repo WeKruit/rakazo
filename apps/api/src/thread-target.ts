@@ -638,6 +638,8 @@ export async function sendThreadMessage(
     replyToMessageId?: string;
     replyQuote?: string;
     clientNonce?: string;
+    /** Interject: interrupt the bot's live reply with this message. */
+    interrupt?: boolean;
   },
   releaseTakeover?: (runId: string) => Promise<void>,
 ) {
@@ -814,12 +816,14 @@ export async function sendThreadMessage(
           }
           const active = activeRuns.find(steersUserMessage) ?? activeRuns[0];
           if (active) {
+            const steers = steersUserMessage(active);
             await tx.steeringMessage.create({
               data: {
                 messageId: message.id,
                 botId: target.botId,
                 userId: actor.userId,
-                runId: steersUserMessage(active) ? active.id : null,
+                runId: steers ? active.id : null,
+                ...(steers && input.interrupt ? { originTrigger: "interrupt" } : {}),
               },
             });
             await tx.message.update({ where: { id: message.id }, data: { runId: active.id } });
@@ -987,12 +991,14 @@ export async function sendThreadMessage(
           }
           const active = activeByBotId.get(botId);
           if (active) {
+            const steers = steersUserMessage(active);
             await tx.steeringMessage.create({
               data: {
                 messageId: message.id,
                 botId,
                 userId: actor.userId,
-                runId: steersUserMessage(active) ? active.id : null,
+                runId: steers ? active.id : null,
+                ...(steers && input.interrupt ? { originTrigger: "interrupt" } : {}),
               },
             });
             runs.push(active);

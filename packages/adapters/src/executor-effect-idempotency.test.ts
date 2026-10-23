@@ -32,6 +32,8 @@ import {
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import type * as AutoReviewModule from "./auto-review.js";
+import type * as BotSecretsModule from "./bot-secrets.js";
+import { shellCommandEnvironment } from "./bot-secrets.js";
 import { runAutoReviewJudge } from "./auto-review.js";
 import type * as ComputerLifecycleModule from "./computer-lifecycle.js";
 import { acquireComputerExecutionLease, ComputerBusyError } from "./computer-lifecycle.js";
@@ -124,6 +126,11 @@ vi.mock("./computer-workspace.js", async (importOriginal) => ({
   checkpointRunComputerWorkspace: checkpointWorkspace,
 }));
 beforeEach(() => checkpointWorkspace.mockClear());
+
+vi.mock("./bot-secrets.js", async (importOriginal) => {
+  const actual = await importOriginal<typeof BotSecretsModule>();
+  return { ...actual, shellCommandEnvironment: vi.fn(actual.shellCommandEnvironment) };
+});
 
 vi.mock("./auto-review.js", async (importOriginal) => ({
   ...(await importOriginal<typeof AutoReviewModule>()),
@@ -431,6 +438,7 @@ function fixture(
     artifacts: options.attachmentStore === false ? undefined : artifacts,
     events: {
       append: vi.fn(async () => undefined),
+      publishTransient: vi.fn(async () => undefined),
       notify: vi.fn(async () => undefined),
       pauseRunForInput,
       finalizeRun,
@@ -3931,7 +3939,9 @@ describe("native recruiting research executor integration", () => {
       yield { type: "result", data: rawResult };
     });
     vi.mocked(completeRecruitingResearchCall).mockImplementation(
-      async (_deps, _trusted, _admission, result) => {
+      async (researchDeps, _trusted, _admission, result) => {
+        // Still-working research is handed to the poll job through the executor's publisher.
+        expect(researchDeps).toEqual(expect.objectContaining({ jobs: f.executorDeps.jobs }));
         expect(result).toEqual(rawResult);
         expect(effect).toEqual(expect.objectContaining({ status: "completed", result: rawResult }));
         return completed as never;
@@ -5711,5 +5721,98 @@ describe("resume brief", () => {
     expect(brief).toContain("- mcp_search() failed: 401 for token");
     expect(brief).not.toContain("sk-live-123");
     expect(brief).not.toContain("ask(");
+  });
+});
+
+describe("integration hunks: shell scope, external-text refusal, interject, memory edit", () => {
+  it("scopes bot command variables to the shell command text", async () => {
+    const f = fixture("shell-scope");
+    vi.mocked(shellCommandEnvironment).mockClear();
+    f.setCalls([{ name: "shell", args: { command: "echo $CLI_TOKEN" }, executionId: "sh-1" }]);
+    // The fixture sandbox cannot execute; the environment scope is read before that step.
+    await createRunExecutor(f.executorDeps).continueRun(f.runData.id, "worker-1");
+    expect(shellCommandEnvironment).toHaveBeenCalledExactlyOnceWith(
+      expect.objectContaining({ command: "echo $CLI_TOKEN" }),
+    );
+  });
+
+  it("refuses an irreversible connector tool on a run opened by external text", async () => {
+    const f = fixture("external-text");
+    f.runData.trigger = "messaging";
+    f.connector.discoverTools.mockResolvedValue([
+      {
+        name: "gmail_send_email",
+        description: "Send mail",
+        inputSchema: { type: "object", properties: {} },
+        readOnly: false,
+        route: { connectorId: "composio", toolName: "GMAIL_SEND_EMAIL" },
+      } as never,
+    ]);
+    f.setCalls([{ name: "gmail_send_email", args: { to: "a@example.test" }, executionId: "s1" }]);
+    await f.run();
+    expect(f.results).toEqual([
+      { error: expect.stringContaining("opened by an external message") },
+    ]);
+    expect(f.connector.execute).not.toHaveBeenCalled();
+    expect(f.pauseRunForInput).not.toHaveBeenCalled();
+  });
+
+  it("forwards the interject flag of a claimed steering message to the runtime", async () => {
+    const f = fixture("interject");
+    f.claimSteering.mockResolvedValue([
+      {
+        id: "steering-1",
+        messageId: "human-2",
+        text: "Stop, use the other role.",
+        blocks: [{ kind: "text", text: "Stop, use the other role." }],
+        interrupt: true,
+      },
+      {
+        id: "steering-2",
+        messageId: "human-3",
+        text: "Also check the inbox.",
+        blocks: [{ kind: "text", text: "Also check the inbox." }],
+      },
+    ]);
+    f.runtimeRun.mockImplementation(async function* (request) {
+      const steering = await request.claimSteering!([]);
+      expect(steering.map((item) => item.interrupt)).toEqual([true, undefined]);
+      yield { type: "done" as const, text: "Done" };
+    });
+    await f.run();
+  });
+
+  it("merges a memory edit into the current document and commits it against the read revision", async () => {
+    const f = fixture("memory-edit");
+    f.memoryRead.mockResolvedValue({
+      documents: [{ path: "MEMORY.md", content: "Likes tea.\nMeets Mondays.", revision: 4 }],
+    } as never);
+    f.setCalls([
+      {
+        name: "remember",
+        args: { edit: { find: "Mondays", replace: "Tuesdays" }, expectedRevision: 4 },
+        executionId: "edit-1",
+      },
+      {
+        name: "remember",
+        args: { edit: { find: "Fridays", replace: "x" }, expectedRevision: 4 },
+        executionId: "edit-2",
+      },
+    ]);
+    await f.run();
+    expect(f.memoryCommit).toHaveBeenCalledExactlyOnceWith(
+      expect.objectContaining({
+        scope: "bot",
+        path: "MEMORY.md",
+        content: "Likes tea.\nMeets Tuesdays.",
+        expectedRevision: 4,
+      }),
+      expect.anything(),
+    );
+    expect(f.results[0]).toMatchObject({ ok: true });
+    expect(f.results[1]).toMatchObject({
+      error: expect.stringContaining("edit.find was not found"),
+      currentRevision: 4,
+    });
   });
 });

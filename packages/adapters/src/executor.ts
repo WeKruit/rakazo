@@ -116,6 +116,7 @@ import {
   toolRequiresExplicitApproval,
   truncatedPlainText,
   unattendedTriggerToolRequiresApproval,
+  externalTextTriggerToolRefusal,
   userTurnMessageForRun,
 } from "@rakazo/core";
 import {
@@ -319,7 +320,7 @@ import {
 } from "./mcp-server-tool.js";
 import { loadAgentMemoryContext } from "./memory-context.js";
 import type { MemoryProviderResolver } from "./memory-provider-factory.js";
-import { nativeMemorySaveError, selectMemoryTools } from "./memory-tools.js";
+import { applyMemoryEdit, nativeMemorySaveError, selectMemoryTools } from "./memory-tools.js";
 import {
   isCatalogModelChoice,
   isDeploymentModelChoice,
@@ -4371,7 +4372,7 @@ export function createRunExecutor(deps: ExecutorDeps) {
           : undefined;
         const flushProgress = async () => {
           if (scripted || !pendingProgress || isBackgroundRunTrigger(run.trigger)) return;
-          await deps.events.append({
+          await deps.events.publishTransient({
             spaceId: run.spaceId,
             threadId: thread.id,
             botId: bot.id,
@@ -5324,7 +5325,7 @@ export function createRunExecutor(deps: ExecutorDeps) {
             if (!deps.artifacts) throw new Error("Recruiting research requires artifact storage");
             return redactConnectorPayload(
               await completeRecruitingResearchCall(
-                { prisma: deps.prisma, artifacts: deps.artifacts },
+                { prisma: deps.prisma, artifacts: deps.artifacts, jobs: deps.jobs },
                 researchActor,
                 admission,
                 result,
@@ -5501,6 +5502,19 @@ export function createRunExecutor(deps: ExecutorDeps) {
               (ordinaryCrmWrite && nativeMcpWriteServer) ||
               internalMailboxWrite,
           );
+          // A run opened by external text may read and draft but never send or change records.
+          if (!verifiedInternalWrite && !researchMutation) {
+            const refusal = externalTextTriggerToolRefusal(
+              run.trigger,
+              researchAdmission?.kind === "read" ? name : policyToolName,
+              viaConnector,
+              connectorCall.route,
+              args,
+              nativeMcpWriteServer?.endpoint,
+              declaredReadOnly,
+            );
+            if (refusal) return { error: refusal };
+          }
           const requiresUnattendedApproval =
             !verifiedInternalWrite &&
             !researchMutation &&
@@ -6776,6 +6790,7 @@ export function createRunExecutor(deps: ExecutorDeps) {
               scope: run,
               spaceEnvironment: agentEnvironment,
               registerRedactions: registerRunSecrets,
+              command,
             });
             workspaceCheckpoint.markDirty();
             const commandEvent = {
@@ -7298,13 +7313,32 @@ export function createRunExecutor(deps: ExecutorDeps) {
             const path = typeof args.path === "string" ? args.path.trim() : "MEMORY.md";
             const scope = shared ? "user" : "bot";
             const botId = shared ? undefined : bot.id;
+            let content = args.content as string;
+            if (args.edit !== undefined) {
+              // Partial edit: merge into the loaded document; commit still checks expectedRevision.
+              const current = await deps.memory.read({ scope, botId, path }, context);
+              const merged = applyMemoryEdit(
+                current.documents[0]?.content ?? "",
+                args.edit as { find: string; replace: string },
+              );
+              if ("error" in merged)
+                return finish({
+                  error: merged.error,
+                  currentRevision: current.documents[0]?.revision ?? 0,
+                });
+              const tooLong = shared
+                ? sharedMemorySaveError({ path, content: merged.content })
+                : undefined;
+              if (tooLong) return finish({ error: tooLong });
+              content = merged.content;
+            }
             try {
               const saved = await deps.memory.commit(
                 {
                   scope,
                   ...(botId ? { botId } : {}),
                   path,
-                  content: args.content as string,
+                  content,
                   expectedRevision: args.expectedRevision as number,
                   sourceRunId: runId,
                   sourceThreadId: thread.id,
@@ -9015,6 +9049,7 @@ export function createRunExecutor(deps: ExecutorDeps) {
                           id: item.id,
                           messageId: item.messageId,
                           historyText: item.text,
+                          ...(item.interrupt ? { interrupt: true as const } : {}),
                           text: [
                             await loadReplyContext(deps.prisma, thread.id, item.messageId),
                             item.text,
@@ -9123,7 +9158,7 @@ export function createRunExecutor(deps: ExecutorDeps) {
               // Flush batched text deltas first so an activity line cannot land
               // ahead of text the model streamed before the tool call.
               if (pendingProgress) {
-                await deps.events.append({
+                await deps.events.publishTransient({
                   spaceId: run.spaceId,
                   threadId: thread.id,
                   botId: bot.id,
@@ -9134,7 +9169,7 @@ export function createRunExecutor(deps: ExecutorDeps) {
                 pendingProgress = "";
                 lastProgressAt = Date.now();
               }
-              await deps.events.append({
+              await deps.events.publishTransient({
                 spaceId: run.spaceId,
                 threadId: thread.id,
                 botId: bot.id,
@@ -9143,6 +9178,7 @@ export function createRunExecutor(deps: ExecutorDeps) {
                 payload: {
                   text: redactSecrets(event.text, runSecrets),
                   ...(event.activity ? { activity: true } : {}),
+                  ...(event.phase ? { phase: event.phase } : {}),
                 },
               });
             } else if (event.type === "ask") {

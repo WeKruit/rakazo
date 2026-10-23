@@ -18,6 +18,10 @@ beforeEach(() => {
 });
 
 const TEXT_ONLY_MODEL = "deepseek/deepseek-v4-flash-0731";
+/** The events double of the most recent runWithModel call. */
+let lastExecutorEvents:
+  | { append: ReturnType<typeof vi.fn>; publishTransient: ReturnType<typeof vi.fn> }
+  | undefined;
 const VISION_MODEL = "openai/gpt-4o";
 
 function historyMessages(): Array<{
@@ -209,6 +213,13 @@ async function runWithModel(
     },
   };
   const finalizeRun = vi.fn(async () => ({ continuationRunId: null }));
+  const events = {
+    append: vi.fn(async () => undefined),
+    publishTransient: vi.fn(async () => undefined),
+    notify: vi.fn(async () => undefined),
+    finalizeRun,
+  };
+  lastExecutorEvents = events;
   const executor = createRunExecutor({
     prisma,
     deploymentModelKey: "fake-deployment-key",
@@ -224,11 +235,7 @@ async function runWithModel(
     memory: { read: async () => ({ documents: [] }) },
     memoryProviders: { resolve: async () => null },
     artifacts: { get },
-    events: {
-      append: vi.fn(async () => undefined),
-      notify: vi.fn(async () => undefined),
-      finalizeRun,
-    },
+    events,
     jobs: { enqueue: vi.fn(async () => undefined) },
     secrets: [],
     ...(options.discoverTools ? { connector: { discoverTools: options.discoverTools } } : {}),
@@ -545,5 +552,38 @@ describe("routine runs carry their previous run", () => {
     ).toBe(false);
     const user = await runWithModel(TEXT_ONLY_MODEL);
     expect(user.prisma.run.findFirst).not.toHaveBeenCalled();
+  });
+});
+
+describe("streaming progress is transient", () => {
+  it("publishes progress through publishTransient with the compaction phase, not as durable events", async () => {
+    const { prisma: _prisma, ...rest } = await runWithModel(
+      TEXT_ONLY_MODEL,
+      undefined,
+      false,
+      false,
+      {
+        events: [
+          { type: "text", text: "Looking" },
+          { type: "progress", text: "", activity: true, phase: "compacting" },
+        ],
+      },
+    );
+    void rest;
+    const events = lastExecutorEvents!;
+    const transient = events.publishTransient.mock.calls.map(([input]) => input);
+    expect(transient).toEqual([
+      expect.objectContaining({
+        type: "thread.progress",
+        payload: { text: "Looking", streaming: true },
+      }),
+      expect.objectContaining({
+        type: "thread.progress",
+        payload: { text: "", activity: true, phase: "compacting" },
+      }),
+    ]);
+    expect(events.append).not.toHaveBeenCalledWith(
+      expect.objectContaining({ type: "thread.progress" }),
+    );
   });
 });

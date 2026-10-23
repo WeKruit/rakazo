@@ -581,6 +581,18 @@ describe("buildApprovalAskBlock", () => {
     },
   );
 
+  it("shows the find and replace text for a memory edit", () => {
+    const block = buildApprovalAskBlock(
+      "effect-memory",
+      "remember",
+      { edit: { find: "Mondays", replace: "Tuesdays" }, expectedRevision: 2 },
+      [],
+    );
+    expect(block.detail).toBe(
+      "Memory note: MEMORY.md\n\nApplies to: this bot\n\nReplace:\nMondays\n\nWith:\nTuesdays",
+    );
+  });
+
   it("shows the native default document for a private memory write", () => {
     const block = buildApprovalAskBlock(
       "effect-memory",
