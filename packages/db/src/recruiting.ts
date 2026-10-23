@@ -7373,15 +7373,19 @@ function candidateIndexQuery(
         WHEN returned.value ? 'rank' THEN returned.value -> 'rank'
         WHEN returned.value ? 'batch_rank' THEN returned.value -> 'batch_rank'
         ELSE returned.value -> 'rank_this_batch_only' END`;
+  // Providers send numbers either as JSON numbers or as plain numeric strings ("45"); both are
+  // the same provider value. Anything else ("Unknown", "45/100") stays NULL.
+  const numericCell = Prisma.sql`CASE WHEN jsonb_typeof(match."value") = 'number' OR
+      (jsonb_typeof(match."value") = 'string' AND
+        match."value" #>> '{}' ~ '^-?[0-9]{1,30}([.][0-9]{1,30})?$')
+      THEN (match."value" #>> '{}')::numeric END`;
   const matchValue = Prisma.sql`CASE WHEN source.kind = 'rank' THEN
-      CASE WHEN jsonb_typeof(match."value") = 'number' THEN
-        CASE WHEN (match."value" #>> '{}')::numeric BETWEEN 1 AND 9007199254740991
-          AND trunc((match."value" #>> '{}')::numeric) = (match."value" #>> '{}')::numeric
-          THEN (match."value" #>> '{}')::numeric::bigint END END
+      CASE WHEN ${numericCell} BETWEEN 1 AND 9007199254740991
+        AND trunc(${numericCell}) = ${numericCell}
+        THEN (${numericCell})::bigint END
       WHEN source.kind = 'score' THEN
-        CASE WHEN jsonb_typeof(match."value") = 'number' THEN
-          CASE WHEN abs((match."value" #>> '{}')::numeric) <= ${Number.MAX_VALUE}::numeric
-            THEN (match."value" #>> '{}')::numeric END END
+        CASE WHEN abs(${numericCell}) <= ${Number.MAX_VALUE}::numeric
+          THEN ${numericCell} END
       ELSE CASE match."value" #>> '{}'
         WHEN 'Strong' THEN 0 WHEN 'Promising' THEN 1 WHEN 'Partial' THEN 2 WHEN 'Uncertain' THEN 3 END END`;
   const fields = [

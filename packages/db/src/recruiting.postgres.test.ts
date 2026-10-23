@@ -8018,6 +8018,29 @@ describePostgres("recruiting domain (PostgreSQL)", () => {
     ).toEqual(old);
   });
 
+  it("offers score sort when provider scores are numeric strings and rank is Unknown", async () => {
+    const { f, prepared } = await mappedResearchFixture();
+    await recordCandidatePage(
+      f,
+      prepared,
+      "simulation-shape",
+      [45, 35, "Unknown"].map((score, i) => ({
+        ...canonicalCandidateRow(`Sim ${i}`, `https://www.linkedin.com/in/sim-${i}`),
+        rank: { value: "Unknown" },
+        match_score: { value: typeof score === "number" ? String(score) : score },
+      })) as never,
+    );
+    const listed = await recruiting.listRecruitingCandidates(prisma, actor, {
+      roleId: f.role.role.id,
+      sort: "score",
+    });
+    expect(listed.sortAvailability).toEqual({ rank: false, tier: false, score: true });
+    expect(listed.items.map((item) => item.candidateKey)).toEqual([
+      "linkedin:/in/sim-0",
+      "linkedin:/in/sim-1",
+      "linkedin:/in/sim-2",
+    ]);
+  });
   it("lists legacy NULL matchFields rows with provider rank/score sorts on the first read", async () => {
     const { f, prepared } = await mappedResearchFixture();
     const rows = [0, 1, 2].map((i) => ({

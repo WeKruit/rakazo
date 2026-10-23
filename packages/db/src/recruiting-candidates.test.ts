@@ -728,7 +728,11 @@ describe("candidate listing and shortlist boundaries", () => {
             firstQuery.sql.indexOf("ELSE CASE match.\"value\" #>> '{}'"),
           );
           expect(numericScore).toContain("jsonb_typeof(match.\"value\") = 'number'");
-          expect(numericScore).toContain("abs((match.\"value\" #>> '{}')::numeric) <= ?::numeric");
+          expect(numericScore).toContain(
+            "THEN (match.\"value\" #>> '{}')::numeric END) <= ?::numeric",
+          );
+          // Numeric strings ("45") count as provider numbers; "Unknown" does not.
+          expect(numericScore).toContain("~ '^-?[0-9]{1,30}([.][0-9]{1,30})?$'");
           expect(firstQuery.values).toContain(Number.MAX_VALUE);
           expect(firstQuery.sql).toContain(
             'rank_scope."pageId" IS NOT NULL AND page."effectId" = rank_scope."pageId"',
