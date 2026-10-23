@@ -9983,8 +9983,15 @@ export async function listRecruitingCandidates(
             ...profile
           }) => {
             const decision = candidateConsideration(actor, consideration);
+            const numeric = (value: unknown) =>
+              value === null || value === undefined ? null : Number(value);
             return {
               ...profile,
+              match: {
+                rank: numeric(_rank),
+                tier: ["Strong", "Promising", "Partial", "Uncertain"][numeric(_tier) ?? -1] ?? null,
+                score: numeric(_score),
+              },
               crm: syncs.get(profile.candidateKey) ?? null,
               decision: decision?.operation ?? null,
               decisionReason: decision?.source.quote ?? null,
@@ -10024,6 +10031,23 @@ export async function listRecruitingCandidates(
   );
   for (const verify of afterRead) verify();
   return result;
+}
+
+/** Every LinkedIn URL Autumn observed for a role (owner-fenced); identity only, never a profile. */
+export async function listRecruitingCandidateLinkedinUrls(
+  prisma: PrismaClient,
+  actor: Actor,
+  roleId: string,
+): Promise<string[]> {
+  return prisma.$transaction(async (tx) => {
+    const role = await requireRole(tx, actor, roleId);
+    const rows = await tx.recruitingCandidateOccurrence.findMany({
+      where: { roleId: role.id, linkedinUrl: { not: null } },
+      select: { linkedinUrl: true },
+      distinct: ["linkedinUrl"],
+    });
+    return rows.flatMap((row) => (row.linkedinUrl ? [row.linkedinUrl] : []));
+  });
 }
 
 export async function setRecruitingCandidateShortlist(

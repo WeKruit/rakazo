@@ -296,6 +296,7 @@ import {
   getRecruitingCorrespondence,
   getRecruitingCrmData,
   getRecruitingRoleCampaign,
+  getRecruitingRoleCandidates,
   getRecruitingWorkspace,
   listRecruitingAssessments,
   listRecruitingCandidateSources,
@@ -3652,6 +3653,22 @@ export function createRouter(deps: RouterDeps) {
       ),
       listCandidates: authed.recruiting.listCandidates.handler(({ context, input }) =>
         listRecruitingCandidates(deps, context.actor, input),
+      ),
+      roleCandidates: authed.recruiting.roleCandidates.handler(async ({ context, input }) =>
+        getRecruitingRoleCandidates(
+          {
+            prisma: deps.prisma,
+            artifacts: deps.artifacts,
+            connectors: deps.connectors,
+            firstPartyMcpUrl: deps.env.firstPartyMcpUrl,
+            signal: context.signal,
+            stillAuthorized: context.stillAuthorized,
+            reauthorize: () => resolveThreadTarget(deps.prisma, context.actor, input),
+          },
+          context.actor,
+          await resolveThreadTarget(deps.prisma, context.actor, input),
+          input,
+        ),
       ),
       listCandidateSources: authed.recruiting.listCandidateSources.handler(({ context, input }) =>
         listRecruitingCandidateSources(deps, context.actor, input),
