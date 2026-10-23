@@ -10,6 +10,7 @@ import {
   hasPlatformMcpCredential,
   htmlToPlainText,
   isRecruitingCandidateReportField,
+  lastUsedMailbox,
   readActorArtifact,
   readInstantlyEmail,
 } from "@rakazo/adapters";
@@ -27,6 +28,7 @@ import type {
   RecruitingRoleCampaign,
   RecruitingRoleCandidate,
   RecruitingRoleCandidatesOutput,
+  RecruitingRoleSetup,
   RecruitingSourceRef,
   RecruitingSourceSelection,
 } from "@rakazo/contracts";
@@ -51,6 +53,7 @@ import {
 import {
   boundDirectApprovalDetails,
   catalogApprovalDetails,
+  INSTANTLY_MCP_ENDPOINT,
   RecruitingPlaybookValidationError,
   readRecruitingJsonString,
   recruitingCalibrationIdentity,
@@ -441,7 +444,12 @@ export async function getRecruitingRoleCampaign(
   target: ThreadTarget,
 ): Promise<RecruitingRoleCampaign> {
   return authenticated(async () => {
-    const none: RecruitingRoleCampaign = { status: "none", campaign: null, leads: [] };
+    const none: RecruitingRoleCampaign = {
+      status: "none",
+      serverId: null,
+      campaign: null,
+      leads: [],
+    };
     const workspace = await recruiting.getRecruitingWorkspace(deps.prisma, actor, {
       threadId: target.threadId,
     });
@@ -473,6 +481,7 @@ export async function getRecruitingRoleCampaign(
       !["get_email", "list_emails"].every((tool) => correspondenceAllows(assignment, tool))
     )
       return none;
+    none.serverId = assignment.server.id;
     const effect = await deps.prisma.externalEffect.findUnique({
       where: {
         idempotencyKey: `instantly-role-campaign:${assignment.server.id}:${workspace.role.id}`,
@@ -489,6 +498,7 @@ export async function getRecruitingRoleCampaign(
     )
       return none;
     const campaignId = binding.campaignId;
+    const eaccount = typeof binding.eaccount === "string" ? binding.eaccount : null;
     const context: AdapterContext = {
       operationId: randomUUID(),
       traceId: randomUUID(),
@@ -527,7 +537,14 @@ export async function getRecruitingRoleCampaign(
     if (!campaign || campaign.id !== campaignId)
       return {
         status: "unavailable",
-        campaign: { name: binding.campaignName, status: null, stopOnReply: null },
+        serverId: assignment.server.id,
+        campaign: {
+          id: campaignId,
+          name: binding.campaignName,
+          eaccount,
+          status: null,
+          stopOnReply: null,
+        },
         leads: [],
       };
     const keyByEmail = new Map<string, string>();
@@ -538,8 +555,11 @@ export async function getRecruitingRoleCampaign(
     const integer = (value: unknown) => (Number.isInteger(value) ? (value as number) : null);
     return {
       status: "ready",
+      serverId: assignment.server.id,
       campaign: {
+        id: campaignId,
         name: typeof campaign.name === "string" ? campaign.name : binding.campaignName,
+        eaccount,
         status: integer(campaign.status),
         stopOnReply: typeof campaign.stop_on_reply === "boolean" ? campaign.stop_on_reply : null,
       },
@@ -556,6 +576,102 @@ export async function getRecruitingRoleCampaign(
         ];
       }),
     };
+  });
+}
+
+/**
+ * Role setup checklist for the frontend: campaign, sender mailbox, CRM link and leads. Reads only
+ * saved bindings plus the read-only campaign view; nothing here creates or sends. CRM linking is
+ * not required for outreach, so `ready` ignores it.
+ */
+export async function getRecruitingRoleSetup(
+  deps: Parameters<typeof getRecruitingRoleCampaign>[0],
+  actor: Actor,
+  target: ThreadTarget,
+): Promise<RecruitingRoleSetup> {
+  return authenticated(async () => {
+    const workspace = await recruiting.getRecruitingWorkspace(deps.prisma, actor, {
+      threadId: target.threadId,
+    });
+    if (!workspace) return { ready: false, items: [] };
+    const campaign = await getRecruitingRoleCampaign(deps, actor, target);
+    const items: RecruitingRoleSetup["items"] = [];
+    if (!campaign.serverId) {
+      const server = await deps.prisma.mcpServer.findFirst({
+        where: { userId: actor.userId, spaceId: actor.spaceId, endpoint: INSTANTLY_MCP_ENDPOINT },
+        select: { id: true },
+      });
+      const action = { kind: "connect" as const, ...(server ? { serverId: server.id } : {}) };
+      items.push(
+        { key: "campaign", state: "unavailable", label: "Instantly is not connected", action },
+        { key: "sender", state: "unavailable", label: "Instantly is not connected", action },
+      );
+    } else if (campaign.campaign) {
+      items.push({
+        key: "campaign",
+        state: campaign.status === "ready" ? "ready" : "unavailable",
+        label: campaign.campaign.name,
+        detail: {
+          id: campaign.campaign.id,
+          name: campaign.campaign.name,
+          status: campaign.campaign.status,
+          leadCount: campaign.leads.length,
+        },
+      });
+      const email = campaign.campaign.eaccount;
+      items.push(
+        email
+          ? { key: "sender", state: "ready", label: email, detail: { email } }
+          : { key: "sender", state: "unavailable", label: "Sender mailbox unknown" },
+      );
+    } else {
+      items.push({
+        key: "campaign",
+        state: "missing",
+        label: "No campaign yet; created automatically on first outreach",
+        action: { kind: "ask_agent", prompt: "为这个岗位准备 outreach campaign" },
+      });
+      const email = await lastUsedMailbox(deps.prisma, actor.spaceId, campaign.serverId);
+      items.push(
+        email
+          ? { key: "sender", state: "ready", label: email, detail: { email } }
+          : {
+              key: "sender",
+              state: "missing",
+              label: "Picked automatically from your connected Instantly mailboxes on first use",
+            },
+      );
+    }
+    const crm = workspace.crmTarget?.target;
+    items.push(
+      crm
+        ? {
+            key: "crm",
+            state: "ready",
+            label: `${crm.clientLabel} / ${crm.roleLabel}`,
+            detail: { orgId: crm.organizationId, roleLabel: crm.roleLabel },
+          }
+        : {
+            key: "crm",
+            state: "missing",
+            label: "No CRM role linked",
+            action: { kind: "ask_agent", prompt: "把这个岗位关联到 CRM 里的同名岗位" },
+          },
+    );
+    const count = campaign.leads.length;
+    items.push(
+      count
+        ? { key: "leads", state: "ready", label: `${count} leads`, detail: { count } }
+        : {
+            key: "leads",
+            state: "missing",
+            label: "No leads in the campaign yet",
+            detail: { count },
+            action: { kind: "ask_agent", prompt: "把入围候选人加入 campaign" },
+          },
+    );
+    const ready = (key: string) => items.some((item) => item.key === key && item.state === "ready");
+    return { ready: ready("campaign") && ready("sender") && ready("leads"), items };
   });
 }
 

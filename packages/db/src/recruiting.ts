@@ -488,6 +488,30 @@ async function roleSnapshot(
   return { role: RecruitingRoleSchema.parse(publicRole), revision };
 }
 
+/**
+ * The sidebar names a role by its chat group, which the web client creates with a placeholder
+ * ("New role"). Keep the group named after the role: always on creation, and on a title change
+ * only while the group still carries the previous title (a hand-renamed group is left alone).
+ */
+async function syncRoleGroupName(
+  tx: Tx,
+  actor: Actor,
+  thread: { groupId: string | null },
+  title: string,
+  previousTitle?: string,
+) {
+  if (!thread.groupId || !title.trim() || title === previousTitle) return;
+  await tx.chatGroup.updateMany({
+    where: {
+      id: thread.groupId,
+      spaceId: actor.spaceId,
+      userId: actor.userId,
+      ...(previousTitle === undefined ? {} : { name: previousTitle }),
+    },
+    data: { name: title },
+  });
+}
+
 export async function createRecruitingRole(
   prisma: PrismaClient,
   actor: Actor,
@@ -527,6 +551,7 @@ async function createRoleInTransaction(
     where: { id: input.sourceThreadId },
     data: { activeRecruitingRoleId: role.id },
   });
+  await syncRoleGroupName(tx, actor, thread, input.title);
   await recordRecruitingChange(tx, actor, thread, role.id);
   return roleSnapshot(tx, actor, role);
 }
@@ -797,12 +822,9 @@ async function reviseRoleInTransaction(
     data: { title: input.title, revision: revision.revision, currentRevisionId: revision.id },
   });
   if (changed.count !== 1) throw new RecruitingConflictError();
-  await recordRecruitingChange(
-    tx,
-    actor,
-    authorizedThread ?? (await requireThread(tx, actor, role.sourceThreadId)),
-    role.id,
-  );
+  const sourceThread = authorizedThread ?? (await requireThread(tx, actor, role.sourceThreadId));
+  await syncRoleGroupName(tx, actor, sourceThread, input.title, role.title);
+  await recordRecruitingChange(tx, actor, sourceThread, role.id);
   return roleSnapshot(
     tx,
     actor,
@@ -7432,12 +7454,24 @@ function candidateIndexQuery(
     includeMatches
       ? Prisma.sql`rank_scope AS MATERIALIZED (
     SELECT ${
+      sort === "score" && displayScope?.sourceEffectId === undefined
+        ? Prisma.sql`COALESCE((
+        -- Scores compare within the newest saved result that carries them, so a later result
+        -- without scores (a re-check, a contact lookup) does not hide the role's scores.
+        SELECT page."effectId" FROM "recruiting_candidate_pages" page
+        WHERE page."roleId" = ${roleId} ${sourceScope} AND EXISTS (
+          SELECT 1 FROM "recruiting_candidate_occurrences" scored
+          WHERE scored."pageId" = page."effectId"
+            AND (scored."matchFields" ? 'match_score' OR scored."matchFields" ? 'score'))
+        ORDER BY page."observedAt" DESC, page."effectId" DESC LIMIT 1), `
+        : Prisma.empty
+    }${
       rankDomainPageId === undefined
         ? Prisma.sql`(SELECT CASE WHEN count(*) = 1 THEN min("effectId") END FROM (
           SELECT "effectId" FROM "recruiting_candidate_pages" page WHERE "roleId" = ${roleId} ${sourceScope} LIMIT 2
         ) rank_pages)`
         : Prisma.sql`${rankDomainPageId}::text`
-    } AS "pageId"
+    }${sort === "score" && displayScope?.sourceEffectId === undefined ? Prisma.sql`)` : Prisma.empty} AS "pageId"
   ),`
       : Prisma.empty
   } base AS (

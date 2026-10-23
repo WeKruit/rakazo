@@ -3085,6 +3085,12 @@ describe("local native Instantly campaign and lead tools", () => {
       },
       externalEffect: {
         findUnique: vi.fn(async ({ where }) => state.effects.get(where.idempotencyKey) ?? null),
+        findFirst: vi.fn(async () => {
+          const bound = [...state.effects.values()].filter(
+            (e) => e.kind === "instantly_role_campaign",
+          );
+          return bound.at(-1) ?? null;
+        }),
         create: vi.fn(async ({ data }) => {
           const effect = { id: `effect-${state.effects.size}`, ...data };
           state.effects.set(data.idempotencyKey, effect);
@@ -3437,14 +3443,75 @@ describe("local native Instantly campaign and lead tools", () => {
     expect(f.prisma.externalEffect.update).toHaveBeenCalledTimes(1);
   });
 
-  it("add_shortlist_leads dedups, skips missing emails and records candidate -> lead ids", async () => {
+  it("add_shortlist_leads ensures the role campaign itself when the role has none", async () => {
     const f = fixture();
-    expect(
+    const out = f.result(
       await f.run("add_shortlist_leads", {
         role_id: "role-1",
         candidates: [{ candidate_key: "a", email: "a@x.test" }],
       }),
-    ).toMatchObject([{ type: "error" }]);
+    );
+    expect(out).toMatchObject({ campaignId: CAMPAIGN, added: ["a"] });
+    expect(f.state.requests.map((r) => `${r.method} ${r.path}`)).toContain(
+      "POST /api/v2/campaigns",
+    );
+    expect(f.state.effects.size).toBe(1);
+  });
+
+  it("resolves the role from the conversation when role_id is omitted", async () => {
+    const f = fixture();
+    expect((await f.run("ensure_role_campaign", {}))[0]).toMatchObject({
+      type: "error",
+      message: expect.stringMatching(/no linked recruiting role/),
+    });
+    f.state.activeRoleId = "role-1";
+    const ensured = f.result(await f.run("ensure_role_campaign", {}));
+    expect(ensured).toMatchObject({ created: true, campaignId: CAMPAIGN });
+    expect(f.state.effects.has(`instantly-role-campaign:${SERVER.id}:role-1`)).toBe(true);
+    const added = f.result(
+      await f.run("add_shortlist_leads", {
+        candidates: [{ candidate_key: "a", email: "a@x.test" }],
+      }),
+    );
+    expect(added).toMatchObject({ added: ["a"] });
+  });
+
+  it("activate_campaign without campaign_id ensures and activates the role's own campaign", async () => {
+    const f = fixture();
+    f.state.activeRoleId = "role-1";
+    const events = await f.run("activate_campaign", {});
+    expect(events[0]).toMatchObject({ type: "result" });
+    const paths = f.state.requests.map((r) => `${r.method} ${r.path}`);
+    expect(paths).toContain("POST /api/v2/campaigns");
+    expect(paths.at(-1)).toBe(`POST /api/v2/campaigns/${CAMPAIGN}/activate`);
+  });
+
+  it("picks the default mailbox: last used on this connection, else the first connected", async () => {
+    const f = fixture();
+    f.state.accounts = ["first@example.test", "second@example.test"];
+    const first = f.result(await f.run("ensure_role_campaign", { role_id: "role-1" }));
+    expect(first).toMatchObject({ eaccount: "first@example.test" });
+    // A later role reuses the mailbox the space last bound, even when it is no longer first.
+    f.state.accounts = ["other@example.test", "first@example.test"];
+    f.prisma.recruitingRole.findFirst.mockImplementationOnce(async () => ({
+      id: "role-2",
+      title: "Designer",
+    }));
+    const second = f.result(await f.run("ensure_role_campaign", { role_id: "role-2" }));
+    expect(second).toMatchObject({ eaccount: "first@example.test" });
+    f.state.accounts = [];
+    f.prisma.recruitingRole.findFirst.mockImplementationOnce(async () => ({
+      id: "role-3",
+      title: "PM",
+    }));
+    expect((await f.run("ensure_role_campaign", { role_id: "role-3" }))[0]).toMatchObject({
+      type: "error",
+      message: expect.stringMatching(/No Instantly mailbox is connected/),
+    });
+  });
+
+  it("add_shortlist_leads dedups, skips missing emails and records candidate -> lead ids", async () => {
+    const f = fixture();
     await f.run("ensure_role_campaign", { role_id: "role-1" });
     f.state.existingLeads = [{ id: "lead-existing", email: "b@x.test" }];
     f.state.requests.length = 0;

@@ -1526,9 +1526,13 @@ export const RecruitingCorrespondenceInputPage = {
  */
 export const RecruitingRoleCampaignSchema = z.strictObject({
   status: z.enum(["none", "unavailable", "ready"]),
+  /** The assigned Instantly connection; null when none is assigned to this conversation. */
+  serverId: z.string().nullable(),
   campaign: z
     .strictObject({
+      id: z.string(),
       name: z.string(),
+      eaccount: z.string().nullable(),
       status: z.number().int().nullable(),
       stopOnReply: z.boolean().nullable(),
     })
@@ -1543,6 +1547,28 @@ export const RecruitingRoleCampaignSchema = z.strictObject({
   ),
 });
 export type RecruitingRoleCampaign = z.infer<typeof RecruitingRoleCampaignSchema>;
+
+/** Role setup checklist: what a role still needs before its first outreach works out of the box. */
+export const RecruitingRoleSetupSchema = z.strictObject({
+  ready: z.boolean(),
+  items: z.array(
+    z.strictObject({
+      key: z.enum(["campaign", "sender", "crm", "leads"]),
+      state: z.enum(["ready", "missing", "unavailable"]),
+      label: z.string().optional(),
+      detail: z.record(z.string(), z.unknown()).optional(),
+      action: z
+        .strictObject({
+          kind: z.enum(["ask_agent", "connect", "bind"]),
+          prompt: z.string().optional(),
+          serverId: z.string().optional(),
+          options: z.array(z.strictObject({ orgId: z.string(), roleLabel: z.string() })).optional(),
+        })
+        .optional(),
+    }),
+  ),
+});
+export type RecruitingRoleSetup = z.infer<typeof RecruitingRoleSetupSchema>;
 
 export const RecruitingCorrespondenceSchema = z.strictObject({
   roleId: RecruitingId.nullable(),
