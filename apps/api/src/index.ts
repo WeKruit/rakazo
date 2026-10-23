@@ -10,11 +10,20 @@ import { createApp } from "./app.js";
 import { loadEnv } from "./env.js";
 
 const logger = createRootLogger(SERVICE_NAMES.api);
+// performance.now() is ms since process start, so this includes node + import time.
+logger.info("boot.phase", {
+  phase: "imports.done",
+  "boot.elapsed_ms": Math.round(performance.now()),
+});
 
 try {
   const env = loadEnv();
   const { app, stop } = await createApp({ ...env, logger });
   const server = serve({ fetch: app.fetch, port: env.port, hostname: env.apiHost }, () => {
+    logger.info("boot.phase", {
+      phase: "listening",
+      "boot.elapsed_ms": Math.round(performance.now()),
+    });
     logger.info("api listening", { "http.host": env.apiHost, "http.port": env.port });
   });
 

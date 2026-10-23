@@ -66,6 +66,11 @@ import { createRootLogger } from "@rakazo/logging/axiom";
 import { MarkdownMemoryStore } from "@rakazo/memory";
 
 const logger = createRootLogger(SERVICE_NAMES.worker);
+// performance.now() is ms since process start, so this includes node + import time.
+logger.info("boot.phase", {
+  phase: "imports.done",
+  "boot.elapsed_ms": Math.round(performance.now()),
+});
 
 async function main() {
   const artifactStorage = artifactStorageOptionsFromEnv(process.env);
@@ -347,6 +352,7 @@ async function main() {
     void stop().finally(() => process.exit(1));
   });
 
+  logger.info("boot.phase", { phase: "ready", "boot.elapsed_ms": Math.round(performance.now()) });
   logger.info("worker ready", { degraded: secrets.describe().capabilities.degraded ?? false });
 }
 
