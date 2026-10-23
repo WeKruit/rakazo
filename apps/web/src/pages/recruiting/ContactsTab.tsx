@@ -122,7 +122,7 @@ export function ContactsTab(
     ) : null,
     list.crmRead.failed ? (
       <RetryNotice key="crm" onRetry={list.crmRead.retry}>
-        <Trans>Could not load CRM records</Trans>
+        <Trans>Could not load candidate records</Trans>
       </RetryNotice>
     ) : null,
     saved.failed || saved.data?.status === "failed" ? (
@@ -418,7 +418,7 @@ export function ContactsTab(
           {autumn ? (
             <Trans>No saved candidates</Trans>
           ) : (
-            <Trans>No CRM contacts for this role yet.</Trans>
+            <Trans>No contacts for this role yet.</Trans>
           )}
         </TabNotice>
       ) : null}

@@ -1053,7 +1053,7 @@ function CrmDetails({
         {target.clientLabel} · {target.roleLabel}
       </p>
       <p>
-        <Trans>CRM</Trans> · <CrmStatus sync={sync} />
+        <Trans>Pipeline</Trans> · <CrmStatus sync={sync} />
       </p>
       {showDiagnostics && sync?.status === "synced" && sync.receipt ? (
         <details>
@@ -2913,11 +2913,11 @@ function CrmRecruitingPanel({
     <>
       {agent ? (
         <h2 className="mt-8 mb-3 font-semibold">
-          <Trans>Stored CRM history</Trans>
+          <Trans>Earlier history</Trans>
         </h2>
       ) : (
         <span className="hire-eyebrow">
-          <Trans>Stored CRM history</Trans>
+          <Trans>Earlier history</Trans>
         </span>
       )}
       <div className="mb-5 flex flex-wrap gap-3">
@@ -2935,12 +2935,12 @@ function CrmRecruitingPanel({
       </div>
       {read?.key !== key || read.loading ? (
         <p role="status" className="py-2 text-sm">
-          <Shimmer>{t`Loading CRM records…`}</Shimmer>
+          <Shimmer>{t`Loading candidate records…`}</Shimmer>
         </p>
       ) : null}
       {read?.key === key && read.failed ? (
         <p role="alert">
-          <Trans>Could not load CRM records. Try refreshing.</Trans>
+          <Trans>Could not load candidate records. Try refreshing.</Trans>
         </p>
       ) : null}
       {page?.scope === "legacy_role_labels" && !importantView && browse.view !== "sequence" ? (
@@ -2993,12 +2993,12 @@ function CrmRecruitingPanel({
           </NativeSelect>
           {!section || section.loading ? (
             <p role="status">
-              <Trans>Loading CRM records…</Trans>
+              <Trans>Loading candidate records…</Trans>
             </p>
           ) : null}
           {section?.failed ? (
             <p role="alert">
-              <Trans>Could not load CRM records. Try refreshing.</Trans>
+              <Trans>Could not load candidate records. Try refreshing.</Trans>
             </p>
           ) : null}
           {important ? (
@@ -3125,16 +3125,16 @@ function CrmRecruitingPanel({
               </h2>
               {!browse.selection.crmRoleId ? (
                 <p>
-                  <Trans>Select a CRM role to read its campaign associations.</Trans>
+                  <Trans>Choose a role to see its outreach.</Trans>
                 </p>
               ) : !section || section.loading ? (
                 <p role="status">
-                  <Trans>Loading CRM records…</Trans>
+                  <Trans>Loading candidate records…</Trans>
                 </p>
               ) : null}
               {section?.failed ? (
                 <p role="alert">
-                  <Trans>Could not load CRM records. Try refreshing.</Trans>
+                  <Trans>Could not load candidate records. Try refreshing.</Trans>
                 </p>
               ) : null}
               {campaigns ? (
@@ -3210,7 +3210,7 @@ function CrmRecruitingPanel({
             }}
           >
             <Input
-              aria-label={t`Search CRM contacts`}
+              aria-label={t`Search contacts`}
               value={queryDraft}
               onChange={(event) => setQueryDraft(event.target.value)}
             />
@@ -3297,7 +3297,7 @@ function CrmRecruitingPanel({
           ) : null}
           {page && !people.length ? (
             <p>
-              <Trans>No CRM records matched this search.</Trans>
+              <Trans>No records matched this search.</Trans>
             </p>
           ) : null}
           <div className="my-4 flex gap-2">
@@ -3328,12 +3328,12 @@ function CrmRecruitingPanel({
                 </p>
               ) : !currentDetails || currentDetails.loading ? (
                 <p role="status">
-                  <Trans>Loading CRM records…</Trans>
+                  <Trans>Loading candidate records…</Trans>
                 </p>
               ) : null}
               {currentDetails?.failed ? (
                 <p role="alert">
-                  <Trans>Could not load CRM records. Try refreshing.</Trans>
+                  <Trans>Could not load candidate records. Try refreshing.</Trans>
                 </p>
               ) : null}
               {details && browse.view === "feedback" ? (
@@ -3594,7 +3594,7 @@ function CrmRecruitingPanel({
           {bound.title ??
             (bound.done
               ? (page?.selectedRole?.roleLabel ??
-                (read?.key === key && !read.loading ? t`CRM contacts` : null))
+                (read?.key === key && !read.loading ? t`Contacts` : null))
               : null)}
         </h1>
         {page?.selectedRole ? <p>{page.selectedRole.clientLabel}</p> : null}
@@ -5732,7 +5732,7 @@ function RecruitingWorkspace({
                     </p>
                     {candidatePage.crmTarget ? (
                       <p className="text-xs text-muted-foreground">
-                        <Trans>CRM</Trans> · {candidatePage.crmTarget.target.clientLabel} ·{" "}
+                        <Trans>Pipeline</Trans> · {candidatePage.crmTarget.target.clientLabel} ·{" "}
                         {candidatePage.crmTarget.target.roleLabel}
                       </p>
                     ) : null}
@@ -5860,7 +5860,7 @@ function RecruitingWorkspace({
                                   <CandidateAssessment candidate={candidate} />
                                   {showCrm ? (
                                     <p className="text-xs text-muted-foreground">
-                                      <Trans>CRM</Trans> · <CrmStatus sync={candidate.crm} />
+                                      <Trans>Pipeline</Trans> · <CrmStatus sync={candidate.crm} />
                                     </p>
                                   ) : null}
                                   <p className="text-xs text-muted-foreground">
@@ -5908,7 +5908,7 @@ function RecruitingWorkspace({
                                 ...(candidateTableDetails ? [t`Criteria`] : []),
                                 ...(showInternalAssessments ? [t`Internal assessment`] : []),
                                 ...(candidateTableDetails ? [t`Research round`, t`Feedback`] : []),
-                                ...(showCrm ? [t`CRM`] : []),
+                                ...(showCrm ? [t`Pipeline`] : []),
                                 ...(candidateTableDetails ? [t`Provider status`] : []),
                                 ...(presentation !== "workspace" ? [t`Discoveries`] : []),
                                 t`Shortlist`,
@@ -6468,7 +6468,7 @@ function RecruitingWorkspace({
                 />
               ) : null}
               {selectedCrmTarget ? (
-                <section aria-label={t`Candidate CRM`}>
+                <section aria-label={t`Candidate pipeline`}>
                   <CrmDetails
                     sync={selectedCrm}
                     target={selectedCrmTarget}

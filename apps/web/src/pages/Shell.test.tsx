@@ -1030,7 +1030,7 @@ it.each(["inbox", "feedback", "sequence"])(
               input.groupId === "group-1" &&
               input.crmRoleId === "crm-role",
           )
-        : Boolean(container?.textContent?.includes("Stored CRM history"));
+        : Boolean(container?.textContent?.includes("Earlier history"));
     expect(crmHistoryShown()).toBe(true);
     // The role's own view and its CRM history share one page; there is no source toggle.
     expect(container?.textContent).not.toContain("Current search");
@@ -1105,7 +1105,7 @@ it("rejects a role binding that completes after the selected Space changes", asy
   expect(
     shellApi.recruiting.crmData.mock.calls.every(([input]) => input.operation === "memberships"),
   ).toBe(true);
-  expect(container?.textContent).not.toContain("Stored CRM history");
+  expect(container?.textContent).not.toContain("Earlier history");
 });
 
 it("refreshes a failed current-role CRM connection before reading its history", async () => {
@@ -1115,7 +1115,7 @@ it("refreshes a failed current-role CRM connection before reading its history", 
     initialPath: "/app/g/group-1?view=contacts",
     workspaceFailure: true,
   });
-  expect(container?.textContent).toContain("Could not load this role’s CRM connection.");
+  expect(container?.textContent).toContain("Could not load this role’s candidate records.");
   expect(
     shellApi.recruiting.crmData.mock.calls.every(([input]) => input.operation === "memberships"),
   ).toBe(true);
@@ -1156,7 +1156,7 @@ it("refreshes a failed current-role CRM connection before reading its history", 
   const priorReads = shellApi.recruiting.getWorkspace.mock.calls.length;
   await view.click("Retry");
   expect(shellApi.recruiting.getWorkspace.mock.calls.length).toBeGreaterThan(priorReads);
-  expect(container?.textContent).not.toContain("Could not load this role’s CRM connection.");
+  expect(container?.textContent).not.toContain("Could not load this role’s candidate records.");
   expect(container?.querySelector('section[aria-label="Contacts"]')?.textContent).toMatch(
     /61\d candidates/,
   );
@@ -1193,11 +1193,11 @@ it("does not map a failed or late role binding into the current role", async () 
   ).toBe(true);
   shellApi.recruiting.getWorkspace.mockRejectedValue(new Error("Revoked binding"));
   await view.navigate("/app/g/group-1?view=contacts");
-  expect(container?.textContent).toContain("Could not load this role’s CRM connection.");
+  expect(container?.textContent).toContain("Could not load this role’s candidate records.");
   expect(
     shellApi.recruiting.crmData.mock.calls.every(([input]) => input.operation === "memberships"),
   ).toBe(true);
-  expect(container?.textContent).not.toContain("Stored CRM history");
+  expect(container?.textContent).not.toContain("Earlier history");
 });
 
 it("re-reads the CRM workbench once for a burst of reconnects that missed no events", async () => {
@@ -1319,7 +1319,7 @@ it.each(["bot", "group"] as const)(
       initialPath: kind === "group" ? "/app/g/group-1?view=results" : "/app/bot-1?view=results",
     });
     const banner =
-      kind === "group" ? "Could not load this role’s CRM connection." : "Could not load recruiting";
+      kind === "group" ? "Could not load this role’s candidate records." : "Could not load recruiting";
     expect(container?.textContent).toContain(view.candidate.name);
     const workspace = shellApi.recruiting.getWorkspace.getMockImplementation()!;
     // A refusal that is not retried leaves the failure on screen until a later read.
@@ -1425,10 +1425,10 @@ it("retries the CRM role list through a deploy's unavailable window but not afte
     .mockImplementation(async (input) => (input.operation === "memberships" ? memberships : roles));
   const view = await renderRoleNavigation({ epoch: 0, entries: new Map() });
   expect(view.textContent).toContain("Loading roles…");
-  expect(view.textContent).not.toContain("Could not read a CRM connection.");
+  expect(view.textContent).not.toContain("Could not read candidate records.");
   await act(async () => new Promise((resolve) => setTimeout(resolve, 1_100)));
   expect(view.textContent).toContain("Existing role · Client");
-  expect(view.textContent).not.toContain("Could not read a CRM connection.");
+  expect(view.textContent).not.toContain("Could not read candidate records.");
   act(() => root?.unmount());
   view.remove();
   shellApi.recruiting.crmData.mockReset();
@@ -1436,7 +1436,7 @@ it("retries the CRM role list through a deploy's unavailable window but not afte
   const denied = await renderRoleNavigation({ epoch: 0, entries: new Map() });
   await act(async () => new Promise((resolve) => setTimeout(resolve, 1_100)));
   expect(shellApi.recruiting.crmData).toHaveBeenCalledTimes(1);
-  expect(denied.textContent).toContain("Could not read a CRM connection.");
+  expect(denied.textContent).toContain("Could not read candidate records.");
 });
 
 it("keeps the role list through a thread resync and drops a response for a previous Space", async () => {
@@ -1562,7 +1562,7 @@ it.each(["retry", "role-change", "space", "attachment-space"])(
     ).toBe(false);
     await view.click("Existing role · Example client");
     expect(view.getPath()).toContain("crmRole=crm-role");
-    expect(document.body.textContent).toContain("Stored CRM history");
+    expect(document.body.textContent).toContain("Earlier history");
     expect(shellApi.createGroup).not.toHaveBeenCalled();
     expect(shellApi.followUp).not.toHaveBeenCalled();
     await view.openRoleChat();
@@ -1919,7 +1919,7 @@ it.each(["bot", "group"] as const)(
       initialPath: kind === "group" ? "/app/g/group-1?view=results" : "/app/bot-1?view=results",
     });
     expect(container?.textContent).toContain(
-      kind === "group" ? "Could not load this role’s CRM connection." : "Could not load recruiting",
+      kind === "group" ? "Could not load this role’s candidate records." : "Could not load recruiting",
     );
     // A failed CRM binding keeps the role's own results visible beside its retry.
     if (kind === "bot") expect(container?.textContent).not.toContain(view.candidate.name);
@@ -2820,7 +2820,7 @@ it("does not report a missing CRM binding as a failure", async () => {
   shellApi.recruiting.getWorkspace.mockRejectedValue(new ORPCError("NOT_FOUND"));
   await view.navigate("/app/g/group-1?view=contacts");
   expect(shellApi.recruiting.getWorkspace).toHaveBeenCalled();
-  expect(container?.textContent).not.toContain("Could not load this role’s CRM connection.");
+  expect(container?.textContent).not.toContain("Could not load this role’s candidate records.");
 });
 
 it("never drops a message typed while the role chat is closed", async () => {

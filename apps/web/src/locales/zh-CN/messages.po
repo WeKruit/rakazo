@@ -1056,7 +1056,6 @@ msgstr ""
 msgid "Calendar event"
 msgstr ""
 
-#: src/pages/recruiting/RoleSetup.tsx
 #: src/pages/recruiting/SequenceTab.tsx
 #: src/pages/RecruitingPanel.tsx
 msgid "Campaign"
@@ -1131,10 +1130,6 @@ msgid "Candidate assessment"
 msgstr ""
 
 #: src/pages/RecruitingPanel.tsx
-msgid "Candidate CRM"
-msgstr ""
-
-#: src/pages/RecruitingPanel.tsx
 msgid "Candidate details"
 msgstr ""
 
@@ -1149,6 +1144,10 @@ msgstr ""
 #: src/pages/RecruitingPanel.tsx
 msgid "Candidate messages"
 msgstr ""
+
+#: src/pages/RecruitingPanel.tsx
+msgid "Candidate pipeline"
+msgstr "候选人进展"
 
 #: src/pages/RecruitingPanel.tsx
 msgid "Candidate question"
@@ -1265,6 +1264,10 @@ msgstr "请查看邮箱"
 msgid "Checking availability"
 msgstr "正在查看空闲时间"
 
+#: src/components/LiveWork.tsx
+msgid "Checking candidate records"
+msgstr "正在查看候选人记录"
+
 #: src/components/ComputersUnavailableHint.tsx
 msgid "Checking computer setup…"
 msgstr ""
@@ -1280,10 +1283,6 @@ msgstr "正在查看邮件"
 #: src/components/LiveWork.tsx
 msgid "Checking saved context"
 msgstr "正在查看已保存的上下文"
-
-#: src/components/LiveWork.tsx
-msgid "Checking the CRM"
-msgstr "正在查看 CRM"
 
 #: src/components/ComputersUnavailableHint.tsx
 #: src/components/DesktopUpdates.tsx
@@ -1304,13 +1303,13 @@ msgstr "选择机器人形状和颜色，或上传图片"
 msgid "Choose a bot…"
 msgstr "选择 Bot…"
 
-#: src/pages/Shell.tsx
-msgid "Choose a CRM role again."
-msgstr ""
-
 #: src/pages/Auth.tsx
 msgid "Choose a new password"
 msgstr "设置新密码"
+
+#: src/pages/RecruitingPanel.tsx
+msgid "Choose a role to see its outreach."
+msgstr "选择一个岗位查看外联情况。"
 
 #: src/pages/RecruitingPanel.tsx
 msgid "Choose feedback"
@@ -1319,6 +1318,10 @@ msgstr ""
 #: src/pages/shell/avatar-studio-popover.tsx
 msgid "Choose file"
 msgstr "选择文件"
+
+#: src/pages/Shell.tsx
+msgid "Choose the role again."
+msgstr "请重新选择岗位。"
 
 #: src/pages/ModelSettingsOverlay.tsx
 msgid "Choose which connected model WeKruit Headhunter uses."
@@ -1633,7 +1636,6 @@ msgstr "信息存在冲突"
 #: src/pages/memory-providers/SerenitySettingsForm.tsx
 #: src/pages/memory-providers/SupermemorySettingsForm.tsx
 #: src/pages/PluginsOverlay.tsx
-#: src/pages/recruiting/RoleSetup.tsx
 #: src/pages/VoiceSettingsOverlay.tsx
 msgid "Connect"
 msgstr "连接"
@@ -1766,7 +1768,7 @@ msgstr "已联系"
 #: src/pages/RecruitingPanel.tsx
 #: src/pages/shell/RecruitingNavigation.tsx
 msgid "Contacts"
-msgstr ""
+msgstr "联系人"
 
 #: src/pages/RecruitingPanel.tsx
 msgid "Context"
@@ -2051,6 +2053,18 @@ msgstr ""
 msgid "Could not load bots. Reload to try again."
 msgstr ""
 
+#: src/pages/recruiting/ContactsTab.tsx
+msgid "Could not load candidate records"
+msgstr "无法加载候选人记录"
+
+#: src/pages/recruiting/InboxTab.tsx
+#: src/pages/recruiting/InterviewTab.tsx
+#: src/pages/recruiting/SequenceTab.tsx
+#: src/pages/recruiting/shared.tsx
+#: src/pages/RecruitingPanel.tsx
+msgid "Could not load candidate records. Try refreshing."
+msgstr "无法加载候选人记录，请刷新重试。"
+
 #: src/pages/RecruitingPanel.tsx
 msgid "Could not load candidate sources"
 msgstr ""
@@ -2069,18 +2083,6 @@ msgstr ""
 
 #: src/pages/shell/bot-credentials.tsx
 msgid "Could not load credentials."
-msgstr ""
-
-#: src/pages/recruiting/ContactsTab.tsx
-msgid "Could not load CRM records"
-msgstr ""
-
-#: src/pages/recruiting/InboxTab.tsx
-#: src/pages/recruiting/InterviewTab.tsx
-#: src/pages/recruiting/SequenceTab.tsx
-#: src/pages/recruiting/shared.tsx
-#: src/pages/RecruitingPanel.tsx
-msgid "Could not load CRM records. Try refreshing."
 msgstr ""
 
 #: src/pages/RecruitingPanel.tsx
@@ -2159,8 +2161,8 @@ msgid "Could not load this file."
 msgstr "无法加载此文件。"
 
 #: src/pages/Shell.tsx
-msgid "Could not load this role’s CRM connection."
-msgstr ""
+msgid "Could not load this role’s candidate records."
+msgstr "无法加载这个岗位的候选人记录。"
 
 #: src/components/SoftwareUpdateSection.tsx
 msgid "Could not load update status"
@@ -2219,8 +2221,8 @@ msgid "Could not reach the server"
 msgstr "无法连接服务器"
 
 #: src/pages/shell/RecruitingNavigation.tsx
-msgid "Could not read a CRM connection."
-msgstr ""
+msgid "Could not read candidate records."
+msgstr "无法读取候选人记录。"
 
 #: src/pages/recruiting/SequenceTab.tsx
 msgid "Could not read this campaign."
@@ -2509,15 +2511,6 @@ msgstr ""
 #. placeholder {0}: index + 1
 #: src/pages/RecruitingPanel.tsx
 msgid "Criterion {0}"
-msgstr ""
-
-#: src/pages/recruiting/RoleSetup.tsx
-#: src/pages/RecruitingPanel.tsx
-msgid "CRM"
-msgstr "CRM"
-
-#: src/pages/RecruitingPanel.tsx
-msgid "CRM contacts"
 msgstr ""
 
 #: src/pages/RecruitingPanel.tsx
@@ -2895,6 +2888,10 @@ msgstr "复制"
 msgid "e.g. Hivenet Agent, Presales, Timesheets bot"
 msgstr "例如 Hivenet Agent、Presales、工时表机器人"
 
+#: src/pages/RecruitingPanel.tsx
+msgid "Earlier history"
+msgstr "更早的记录"
+
 #: src/pages/recruiting/NotesTab.tsx
 #: src/pages/recruiting/TasksTab.tsx
 msgid "Edit"
@@ -3111,8 +3108,8 @@ msgid "Export conversation"
 msgstr "导出对话"
 
 #: src/components/teach/TeachComputerOverlay.tsx
-msgid "Export this week's list from the CRM and drop it in the shared folder"
-msgstr "从 CRM 导出本周名单并放到共享文件夹"
+msgid "Export this week's candidate list and drop it in the shared folder"
+msgstr ""
 
 #: src/pages/ExternalConversationSettings.tsx
 #: src/pages/MessagingSettingsOverlay.tsx
@@ -3729,10 +3726,6 @@ msgstr ""
 msgid "Launched {app}"
 msgstr ""
 
-#: src/pages/recruiting/RoleSetup.tsx
-msgid "Leads"
-msgstr "候选人名单"
-
 #: src/pages/MessagingSettingsOverlay.tsx
 msgid "Leave"
 msgstr "退出"
@@ -3817,8 +3810,8 @@ msgid "Loading activity…"
 msgstr "正在加载动态…"
 
 #: src/pages/RecruitingPanel.tsx
-msgid "Loading CRM records…"
-msgstr ""
+msgid "Loading candidate records…"
+msgstr "正在加载候选人记录…"
 
 #: src/pages/PluginsOverlay.tsx
 msgid "Loading integrations…"
@@ -4162,7 +4155,6 @@ msgstr "分钟"
 msgid "minutes"
 msgstr "分钟"
 
-#: src/pages/recruiting/RoleSetup.tsx
 #: src/pages/RecruitingPanel.tsx
 msgid "Missing"
 msgstr "未设置"
@@ -4444,6 +4436,10 @@ msgstr ""
 msgid "No bots match"
 msgstr ""
 
+#: src/pages/recruiting/shared.tsx
+msgid "No candidate records for this role yet."
+msgstr "这个岗位还没有候选人记录。"
+
 #: src/pages/MessagingSettingsOverlay.tsx
 msgid "No chat apps linked yet."
 msgstr "还没有关联聊天应用。"
@@ -4452,18 +4448,14 @@ msgstr "还没有关联聊天应用。"
 msgid "No contact campaign associations were returned."
 msgstr ""
 
-#: src/pages/shell/bot-credentials.tsx
-msgid "No credentials saved for this bot."
-msgstr ""
-
 #: src/pages/recruiting/ContactsTab.tsx
 #: src/pages/recruiting/InboxTab.tsx
 #: src/pages/recruiting/SequenceTab.tsx
-msgid "No CRM contacts for this role yet."
-msgstr ""
+msgid "No contacts for this role yet."
+msgstr "这个岗位还没有联系人。"
 
-#: src/pages/RecruitingPanel.tsx
-msgid "No CRM records matched this search."
+#: src/pages/shell/bot-credentials.tsx
+msgid "No credentials saved for this bot."
 msgstr ""
 
 #: src/pages/MessagingSettingsOverlay.tsx
@@ -4545,6 +4537,10 @@ msgstr ""
 #: src/pages/ModelSettingsOverlay.tsx
 msgid "No providers found."
 msgstr "未找到提供方。"
+
+#: src/pages/RecruitingPanel.tsx
+msgid "No records matched this search."
+msgstr "没有匹配的记录。"
 
 #: src/pages/RecruitingPanel.tsx
 msgid "No recruiter messages were found."
@@ -4725,7 +4721,6 @@ msgid "Not checked yet"
 msgstr ""
 
 #: src/pages/ModelBackupsSettings.tsx
-#: src/pages/recruiting/RoleSetup.tsx
 msgid "Not connected"
 msgstr "未连接"
 
@@ -4896,8 +4891,8 @@ msgid "Open the conversation to review its history, or ask WeKruit to prepare dr
 msgstr ""
 
 #: src/pages/recruiting/shared.tsx
-msgid "Open the role conversation to read its CRM records."
-msgstr ""
+msgid "Open the role conversation to see its candidates."
+msgstr "打开岗位对话查看候选人。"
 
 #: src/pages/Shell.tsx
 msgid "Open the saved sequence before editing it."
@@ -5135,6 +5130,10 @@ msgstr "请从列表中选择模型，或输入此端点提供的模型 ID。"
 msgid "Pin"
 msgstr "置顶"
 
+#: src/pages/RecruitingPanel.tsx
+msgid "Pipeline"
+msgstr "进展"
+
 #: src/pages/VoiceSettingsOverlay.tsx
 msgid "Playing…"
 msgstr "播放中…"
@@ -5338,7 +5337,7 @@ msgid "Read the latest candidate email replies for this role using the connected
 msgstr ""
 
 #: src/pages/Shell.tsx
-msgid "Read this person's original email and complete conversation using the connected CRM and mailbox. Verify the person and current role, then prepare a reply here for me to edit. Only draft it; do not send."
+msgid "Read this person's original email and complete conversation using the saved records and mailbox. Verify the person and current role, then prepare a reply here for me to edit. Only draft it; do not send."
 msgstr ""
 
 #: src/components/LiveWork.tsx
@@ -5348,10 +5347,6 @@ msgstr "正在阅读网页"
 #: src/components/LiveWork.tsx
 msgid "Reading files"
 msgstr "正在读取文件"
-
-#: src/pages/recruiting/RoleSetup.tsx
-msgid "Ready"
-msgstr "已就绪"
 
 #: src/pages/RecruitingPanel.tsx
 msgid "Reason"
@@ -5906,13 +5901,13 @@ msgstr ""
 msgid "Role revision"
 msgstr ""
 
-#: src/pages/recruiting/RoleSetup.tsx
-msgid "Role setup"
-msgstr "岗位设置"
-
 #: src/pages/RecruitingPanel.tsx
 msgid "Role sources"
 msgstr ""
+
+#: src/pages/recruiting/RoleSetup.tsx
+msgid "Role stage"
+msgstr "岗位阶段"
 
 #. placeholder {0}: record.feedback.expectedRoleRevision
 #: src/pages/RecruitingPanel.tsx
@@ -6218,11 +6213,11 @@ msgid "Search candidates"
 msgstr ""
 
 #: src/pages/RecruitingPanel.tsx
-msgid "Search Criteria"
-msgstr ""
+msgid "Search contacts"
+msgstr "搜索联系人"
 
 #: src/pages/RecruitingPanel.tsx
-msgid "Search CRM contacts"
+msgid "Search Criteria"
 msgstr ""
 
 #: src/pages/RecruitingPanel.tsx
@@ -6310,10 +6305,6 @@ msgid "Select a contact to read their stored messages."
 msgstr ""
 
 #: src/pages/RecruitingPanel.tsx
-msgid "Select a CRM role to read its campaign associations."
-msgstr ""
-
-#: src/pages/RecruitingPanel.tsx
 msgid "Selected recipient unavailable"
 msgstr ""
 
@@ -6364,10 +6355,6 @@ msgstr ""
 #: src/pages/AccountSettingsOverlay.tsx
 msgid "Send with Enter"
 msgstr "按 Enter 发送"
-
-#: src/pages/recruiting/RoleSetup.tsx
-msgid "Sender mailbox"
-msgstr "发件邮箱"
 
 #: src/pages/recruiting/InboxTab.tsx
 #: src/pages/RecruitingCorrespondence.tsx
@@ -6434,10 +6421,6 @@ msgstr "服务器 URL"
 #: src/pages/RecruitingCorrespondence.tsx
 msgid "Service connections"
 msgstr ""
-
-#: src/pages/recruiting/RoleSetup.tsx
-msgid "Set up"
-msgstr "设置"
 
 #: src/components/call/CallCard.tsx
 #: src/pages/MessagingSettingsOverlay.tsx
@@ -6562,8 +6545,8 @@ msgid "Showing the first {0}"
 msgstr ""
 
 #: src/pages/recruiting/InterviewTab.tsx
-msgid "Showing the most recent CRM records."
-msgstr ""
+msgid "Showing the most recent records."
+msgstr "显示最近的记录。"
 
 #: src/pages/AccountSettingsOverlay.tsx
 msgid "Sidebar density"
@@ -6823,10 +6806,6 @@ msgstr ""
 #: src/lib/browser-notifications.ts
 msgid "Stopped."
 msgstr "已停止。"
-
-#: src/pages/RecruitingPanel.tsx
-msgid "Stored CRM history"
-msgstr ""
 
 #: src/pages/McpServersOverlay.tsx
 msgid "Stored encrypted"
@@ -7103,10 +7082,6 @@ msgstr ""
 
 #: src/pages/Shell.tsx
 msgid "This role changed. Select the candidate again."
-msgstr ""
-
-#: src/pages/recruiting/shared.tsx
-msgid "This role is not linked to a CRM role yet."
 msgstr ""
 
 #: src/pages/shell/message-cards.tsx

@@ -1179,23 +1179,133 @@ describe("saved recruiting correspondence", () => {
       partial: false,
       emails: [{ subject: email.subject }],
     });
+    // The unscoped read is this role's check too (its own query); the same-campaign variant is not.
     expect(client.externalEffect.findMany.mock.calls[1]![0].where.id).toEqual({
-      in: [retained.id],
+      in: [retained.id, "global"],
     });
   });
-  it("does not present a global mailbox read as checked role correspondence", async () => {
+  it("presents an unscoped mailbox read made in the role thread as this role's check", async () => {
     const { client, prisma, retained } = fixture();
     retained.request[2] = {
       ...(retained.request[2] as object),
       args: { email_type: "all", limit: 100 },
     } as never;
-    client.externalEffect.findMany.mockReset().mockResolvedValueOnce([retained]);
+    client.externalEffect.findMany
+      .mockReset()
+      .mockResolvedValueOnce([retained])
+      .mockResolvedValueOnce([
+        { id: retained.id, result: { structuredContent: { items: [email] } } },
+      ]);
     expect(await api.getRecruitingCorrespondence(prisma, actor, target, "inbox")).toMatchObject({
-      status: "not_checked",
-      checkedAt: null,
-      emails: [],
+      status: "ready",
+      checkedAt: retained.updatedAt.toISOString(),
+      emails: [{ subject: email.subject }],
     });
-    expect(client.externalEffect.findMany).toHaveBeenCalledTimes(1);
+  });
+  it("projects remote-MCP reads whose route sits at request[3] with a display-name catalog id", async () => {
+    // Prod 2026-10-23 15:32: list_emails ×2 + get_email through the remote Instantly MCP (catalog
+    // form, args.id = tool display name, no campaign_id) → Inbox still said "Not checked yet".
+    const { client, prisma, retained } = fixture();
+    const route = {
+      connectorId: "mcp",
+      resourceId: "mail",
+      resourceRevision: 1,
+      toolName: "list_emails",
+    };
+    const remote = (
+      id: string,
+      toolName: string,
+      args: Record<string, unknown>,
+      updatedAt: string,
+    ) => ({
+      ...retained,
+      id,
+      updatedAt: new Date(updatedAt),
+      request: [
+        "__rakazoCatalogTool",
+        "connectors_execute_tool",
+        { id: `mcp__instantly__${toolName}`, arguments: args },
+        { ...route, toolName },
+      ],
+    });
+    const reply = {
+      id: "a7f1c2d3-4e5f-4a6b-8c7d-9e0f1a2b3c4d",
+      body: { text: "收到，谢谢。周四可以聊。", html: "<p>收到，谢谢。周四可以聊。</p>" },
+      lead: "admin1@wekruit.com",
+      step: null,
+      subject: "Re: Founding Engineer",
+      ue_type: 2,
+      eaccount: "team@example.test",
+      is_unread: true,
+      thread_id: "thread-1",
+      message_id: "<reply@wekruit.com>",
+      campaign_id: email.campaign_id,
+      timestamp_email: "2026-10-23T15:31:00Z",
+      timestamp_created: "2026-10-23T15:31:05Z",
+      from_address_email: "admin1@wekruit.com",
+      to_address_email_list: "team@example.test",
+      organization_id: email.organization_id,
+    };
+    const list1 = remote(
+      "list-1",
+      "list_emails",
+      { email_type: "all", limit: 10 },
+      "2026-10-23T15:32:43Z",
+    );
+    const list2 = remote(
+      "list-2",
+      "list_emails",
+      { lead: reply.lead, limit: 10 },
+      "2026-10-23T15:32:51Z",
+    );
+    const detail = remote("detail", "get_email", { id: reply.id }, "2026-10-23T15:32:54Z");
+    client.mcpServer.findMany.mockResolvedValueOnce([
+      {
+        id: "mail",
+        name: "Instantly",
+        endpoint: "https://mcp.instantly.ai/mcp",
+        secretId: "encrypted-reference",
+        revision: 1,
+        enabled: true,
+        assignments: [
+          { botId: "main", allowAllTools: false, allowedTools: ["list_emails", "get_email"] },
+        ],
+      },
+    ]);
+    const preview = {
+      ...reply,
+      body: { text: "收到，谢谢。[truncated — use get_email for full content]" },
+    };
+    client.externalEffect.findMany
+      .mockReset()
+      .mockResolvedValueOnce([detail, list2, list1])
+      .mockResolvedValueOnce([
+        {
+          id: list1.id,
+          result: { structuredContent: { items: [preview], next_starting_after: null } },
+        },
+        {
+          id: list2.id,
+          result: { structuredContent: { items: [preview], next_starting_after: null } },
+        },
+        { id: detail.id, result: { structuredContent: reply } },
+      ]);
+    const output = await api.getRecruitingCorrespondence(prisma, actor, target, "inbox");
+    expect(output).toMatchObject({
+      status: "ready",
+      checkedAt: detail.updatedAt.toISOString(),
+      emails: [
+        {
+          providerMessageId: reply.id,
+          sender: "admin1@wekruit.com",
+          subject: "Re: Founding Engineer",
+          body: "收到，谢谢。周四可以聊。",
+          snippet: false,
+          date: reply.timestamp_email,
+        },
+      ],
+    });
+    expect(output.emails).toHaveLength(1);
   });
   it.each([false, true])(
     "keeps the latest cursor page partial when its output cursor is empty, including an empty last page: %s",
@@ -5248,6 +5358,7 @@ describe("role campaign read", () => {
     const setup = await api.getRecruitingRoleSetup(f.deps, actor, target);
     expect(setup).toEqual({
       ready: true,
+      playbookStage: { stage: "intake", label: "岗位录入", nextStep: null },
       attention: null,
       items: [
         {

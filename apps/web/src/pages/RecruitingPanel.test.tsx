@@ -112,7 +112,7 @@ vi.mock("../components/ArtifactFileCard", async (importOriginal) => ({
 
 import { RecruitingPanel } from "./RecruitingPanel";
 
-it("browses scoped CRM contacts and stored mail without inventing a native recruiting workspace", async () => {
+it("browses scoped Contacts and stored mail without inventing a native recruiting workspace", async () => {
   const source = {
     serverId: "crm-source",
     serverRevision: 2,
@@ -510,9 +510,9 @@ it("reveals selected CRM mail from contact clicks and Inbox navigation without s
       groupId: "group-1",
       crmBrowse: browse,
     });
-    await changeInput(view.container, "Search CRM contacts", "Engineer");
+    await changeInput(view.container, "Search contacts", "Engineer");
     const search = view.container.querySelector<HTMLInputElement>(
-      '[aria-label="Search CRM contacts"]',
+      '[aria-label="Search contacts"]',
     )!;
     await act(async () =>
       search
@@ -822,7 +822,7 @@ it("discards late CRM role reads and rejects a mismatched returned organization"
     ...options,
     crmBrowse: { ...options.crmBrowse, selection: { ...selection, crmRoleId: "third-role" } },
   });
-  expect(view.container.textContent).toContain("Could not load CRM records");
+  expect(view.container.textContent).toContain("Could not load candidate records");
   expect(view.container.textContent).not.toContain("Foreign organization person");
 });
 
@@ -870,8 +870,8 @@ it("restarts an invalidated pending CRM read using the existing refresh signal",
   await view.render("thread-1", 1, false, undefined, options);
   expect(api.crmData).toHaveBeenCalledTimes(2);
   await act(async () => finish(page));
-  expect(view.container.textContent).not.toContain("Loading CRM records");
-  expect(view.container.textContent).toContain("No CRM records matched");
+  expect(view.container.textContent).not.toContain("Loading candidate records");
+  expect(view.container.textContent).toContain("No records matched");
 });
 
 it("shows Important role rows, sourced interest, internal notes and stored campaigns without inventing bookings or sequence steps", async () => {
@@ -1159,7 +1159,7 @@ it("keeps CRM detail reads scoped to the selected person and rejects a mismatche
     ...options,
     crmBrowse: { ...browse, candidateId: "other-person" },
   });
-  expect(view.container.textContent).toContain("Could not load CRM records");
+  expect(view.container.textContent).toContain("Could not load candidate records");
   expect(view.container.textContent).not.toContain("Current private review");
 });
 
@@ -3203,10 +3203,10 @@ it.each([
 it("shows CRM states in Cards and Table only when a target or import exists", async () => {
   const view = await mounted();
   await view.click("Evidence");
-  expect(view.container.textContent).not.toContain("CRM");
+  expect(view.container.textContent).not.toContain("Pipeline");
   await view.click("Table");
   expect(
-    [...view.container.querySelectorAll("th")].some((item) => item.textContent === "CRM"),
+    [...view.container.querySelectorAll("th")].some((item) => item.textContent === "Pipeline"),
   ).toBe(false);
   const statuses = [
     "pending",
@@ -3227,7 +3227,7 @@ it("shows CRM states in Cards and Table only when a target or import exists", as
   await view.click("Refresh");
   expect(view.container.textContent).toContain("Example Robotics · Geometry engineer");
   expect(
-    [...view.container.querySelectorAll("th")].some((item) => item.textContent === "CRM"),
+    [...view.container.querySelectorAll("th")].some((item) => item.textContent === "Pipeline"),
   ).toBe(true);
   for (const label of [
     "Pending approval",
@@ -3279,16 +3279,16 @@ it("shows only the selected candidate's verified CRM receipt and never infers su
   const receipt = await view.expand("CRM receipt");
   expect(receipt.textContent).toContain(synced.crm.receipt!.candidate_id);
   expect(receipt.textContent).toContain(synced.crm.receipt!.source_file);
-  expect(view.container.querySelector('[aria-label="Candidate CRM"]')?.textContent).toContain(
+  expect(view.container.querySelector('[aria-label="Candidate pipeline"]')?.textContent).toContain(
     "Example Robotics · Geometry engineer",
   );
   await view.click("unknown-person");
-  expect(view.container.querySelector('[aria-label="Candidate CRM"]')?.textContent).toContain(
+  expect(view.container.querySelector('[aria-label="Candidate pipeline"]')?.textContent).toContain(
     "Outcome unknown",
   );
   expect(view.container.textContent).not.toContain(synced.crm.receipt!.candidate_id);
   await view.click("unverified-person");
-  expect(view.container.querySelector('[aria-label="Candidate CRM"]')?.textContent).not.toContain(
+  expect(view.container.querySelector('[aria-label="Candidate pipeline"]')?.textContent).not.toContain(
     "Synced",
   );
   expect(
@@ -3336,7 +3336,7 @@ it("keeps a historical CRM receipt on its exact source with its original target 
   const view = await mounted();
   await view.click("Evidence");
   await view.click("raw-person");
-  expect(view.container.querySelector('[aria-label="Candidate CRM"]')?.textContent).toContain(
+  expect(view.container.querySelector('[aria-label="Candidate pipeline"]')?.textContent).toContain(
     "Sync not confirmed",
   );
   const details = await view.expand("Discovery details");
@@ -3367,7 +3367,7 @@ it("clears the selected CRM receipt when a new binding replaces a filtered-out c
     },
   });
   await changeInput(view.container, "Search candidates", "another");
-  expect(view.container.querySelector('[aria-label="Candidate CRM"]')).toBeNull();
+  expect(view.container.querySelector('[aria-label="Candidate pipeline"]')).toBeNull();
   expect(view.container.textContent).not.toContain(synced.crm.receipt!.candidate_id);
 });
 
@@ -3483,9 +3483,9 @@ it("omits stale current CRM details for an excluded selection while refreshing i
   await view.click(pending.candidateKey);
   const details = await view.expand("Discovery details");
   await changeInput(view.container, "Search candidates", "another");
-  expect(view.container.querySelector('[aria-label="Candidate CRM"]')).toBeNull();
+  expect(view.container.querySelector('[aria-label="Candidate pipeline"]')).toBeNull();
   await view.click("Refresh");
-  expect(view.container.querySelector('[aria-label="Candidate CRM"]')).toBeNull();
+  expect(view.container.querySelector('[aria-label="Candidate pipeline"]')).toBeNull();
   expect(
     [...view.container.querySelectorAll('[data-slot="dialog-title"]')].some(
       (item) => item.textContent === pending.candidateKey,
@@ -3495,10 +3495,10 @@ it("omits stale current CRM details for an excluded selection while refreshing i
   expect(details.textContent).toContain(synced.crm.receipt!.membership_id);
   await act(async () => finishOlder(sources));
   expect(details.textContent).not.toContain("Pending approval");
-  expect(view.container.querySelector('[aria-label="Candidate CRM"]')).toBeNull();
+  expect(view.container.querySelector('[aria-label="Candidate pipeline"]')).toBeNull();
   api.listCandidates.mockResolvedValue({ ...candidatePage([synced]), crmTarget: target });
   await changeInput(view.container, "Search candidates", "");
-  const current = view.container.querySelector('[aria-label="Candidate CRM"]')!;
+  const current = view.container.querySelector('[aria-label="Candidate pipeline"]')!;
   expect(current.textContent).toContain(synced.crm.receipt!.candidate_id);
   expect(current.textContent).not.toContain("Pending approval");
   expect(api.listCandidates).not.toHaveBeenCalledWith(
@@ -5220,7 +5220,7 @@ it.each(["Cards", "Table"])(
     }
     expect(sources.querySelector("time")?.dateTime).toBe("2026-01-01T00:00:00Z");
     expect(sources.textContent).toContain("Example Robotics · Geometry engineer");
-    expect(sources.textContent).toContain("CRM · Synced");
+    expect(sources.textContent).toContain("Pipeline · Synced");
     expect(dialog.textContent).not.toContain("Unassessed");
     for (const hidden of [
       "internal-person",
@@ -8782,7 +8782,7 @@ it("shows a linked role's agent results and its stored CRM records in one workbe
   // The role conversation has a native role, so its title names the workbench.
   expect(view.container.querySelector("h1")?.textContent).toBe("Systems engineer");
   expect(view.container.textContent).toContain("Agent candidate");
-  expect(view.container.textContent).toContain("Stored CRM history");
+  expect(view.container.textContent).toContain("Earlier history");
   await view.render("thread-1", 0, false, undefined, {
     groupId: "group-1",
     crmBrowse: { ...browse, view: "brief" },

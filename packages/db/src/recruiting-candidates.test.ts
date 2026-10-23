@@ -52,7 +52,10 @@ function fixture() {
   const tx = {
     $queryRaw: vi.fn(async (_query: unknown) => [] as unknown[]),
     $executeRaw: vi.fn(async (_query: unknown) => 0),
-    recruitingRole: { findFirst: vi.fn(async () => role) },
+    recruitingRole: {
+      findFirst: vi.fn(async () => role),
+      updateMany: vi.fn(async () => ({ count: 0 })),
+    },
     thread: {
       findFirst: vi.fn(async () => ({
         ...actor,
@@ -65,6 +68,7 @@ function fixture() {
     recruitingCandidate: {
       findUnique: vi.fn(async () => candidate),
       updateMany: vi.fn(async () => ({ count: 1 })),
+      count: vi.fn(async () => 0),
     },
     recruitingCandidatePage: {
       findMany: vi.fn(async (_query: unknown) => [] as { effectId: string }[]),
@@ -1104,7 +1108,10 @@ function observationFixture(rows: readonly unknown[] | undefined) {
   );
   const tx = {
     ...f.tx,
-    recruitingRole: { findFirst: vi.fn(async () => ({ ...f.role, title: "Example engineer" })) },
+    recruitingRole: {
+      findFirst: vi.fn(async () => ({ ...f.role, title: "Example engineer" })),
+      updateMany: vi.fn(async () => ({ count: 0 })),
+    },
     run: { findFirst: vi.fn(async () => run), findUniqueOrThrow: vi.fn(async () => run) },
     recruitingRoleRevision: { findFirst: vi.fn(async () => revision) },
     recruitingResearchAction: {

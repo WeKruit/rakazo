@@ -51,9 +51,11 @@ const ReplyRequest = z
   })
   .refine((request) => !!(request.body_text?.trim() || request.body_html?.trim()));
 
-// Canonical documented API payload only. Native MCP envelope handling belongs to
-// the connector; do not guess a .data or .result wrapper or infer fields from text.
-const Email = z.strictObject({
+// Canonical documented API payload. Native MCP envelope handling belongs to the connector; do
+// not guess a .data or .result wrapper or infer fields from text. Unknown provider keys are
+// ignored (the remote MCP adds fields the REST docs do not list) and flag counters may be booleans.
+const Flag = z.union([z.number(), z.boolean()]).nullish();
+const Email = z.looseObject({
   id: z.uuid(),
   timestamp_created: Timestamp,
   timestamp_email: Timestamp,
@@ -74,12 +76,12 @@ const Email = z.strictObject({
   eaccount: Nonblank,
   ue_type: z.union([z.literal(1), z.literal(2), z.literal(3), z.literal(4)]).nullish(),
   step: z.string().nullish(),
-  is_unread: z.number().nullish(),
-  is_auto_reply: z.number().nullish(),
+  is_unread: Flag,
+  is_auto_reply: Flag,
   reminder_ts: Timestamp.nullish(),
   ai_interest_value: z.number().nullish(),
-  ai_assisted: z.number().nullish(),
-  is_focused: z.number().nullish(),
+  ai_assisted: Flag,
+  is_focused: Flag,
   i_status: z.number().nullish(),
   thread_id: Nonblank.nullish(),
   content_preview: z.string().nullish(),
@@ -101,6 +103,9 @@ const Email = z.strictObject({
   to_address_json: z.array(z.unknown()).nullish(),
   cc_address_json: z.array(z.unknown()).nullish(),
   ai_agent_id: z.uuid().nullish(),
+  // A connector error envelope is never an email.
+  error: z.never().optional(),
+  isError: z.never().optional(),
 });
 
 const EmailPage = z.strictObject({

@@ -169,7 +169,7 @@ export function SequenceTab(props: RecruitingTabProps) {
       {campaigns.loading || people.loading ? <TabLoading /> : null}
       {campaigns.failed || people.failed ? (
         <TabNotice alert>
-          <Trans>Could not load CRM records. Try refreshing.</Trans>
+          <Trans>Could not load candidate records. Try refreshing.</Trans>
         </TabNotice>
       ) : null}
       {campaigns.data ? (
@@ -225,7 +225,7 @@ export function SequenceTab(props: RecruitingTabProps) {
             </ul>
           ) : people.data.items.length ? null : (
             <TabNotice>
-              <Trans>No CRM contacts for this role yet.</Trans>
+              <Trans>No contacts for this role yet.</Trans>
             </TabNotice>
           )}
           <div className="grid grid-cols-1 gap-4 md:grid-cols-[minmax(0,1fr)_minmax(0,1.4fr)]">
@@ -284,7 +284,7 @@ export function SequenceTab(props: RecruitingTabProps) {
                 {details.loading ? <TabLoading /> : null}
                 {details.failed ? (
                   <TabNotice alert>
-                    <Trans>Could not load CRM records. Try refreshing.</Trans>
+                    <Trans>Could not load candidate records. Try refreshing.</Trans>
                   </TabNotice>
                 ) : null}
                 {details.data?.campaignAssociations.leadCampaigns.length ? (

@@ -54,9 +54,12 @@ import {
   boundDirectApprovalDetails,
   catalogApprovalDetails,
   INSTANTLY_MCP_ENDPOINT,
+  isRecruitingPlaybookStage,
+  type RecruitingPlaybookStage,
   RecruitingPlaybookValidationError,
   readRecruitingJsonString,
   recruitingCalibrationIdentity,
+  recruitingPlaybookStageLabels,
   validateRecruitingTextSelection,
 } from "@rakazo/core";
 import { mcpObject, stableJsonValue } from "@rakazo/core/node/approval-effect-key";
@@ -167,11 +170,10 @@ function correspondenceCall(request: unknown) {
   const direct = boundDirectApprovalDetails(request, "__rakazoCatalogTool");
   if (direct) return direct;
   const catalog = catalogApprovalDetails(request, "__rakazoCatalogTool");
-  if (
-    !catalog?.route ||
-    catalog.args.id !== `${catalog.route.resourceId}:${encodeURIComponent(catalog.route.toolName)}`
-  )
-    return null;
+  // The executor appends the resolved route (request[3]) only after the catalog id or tool name
+  // resolved to that exact tool, so the route is authoritative; the model-chosen `id` may be the
+  // canonical "<server>:<tool>" or the tool's display name ("mcp__instantly__list_emails").
+  if (!catalog?.route) return null;
   const args = catalog.args.arguments;
   return args && typeof args === "object" && !Array.isArray(args)
     ? { route: catalog.route, args: args as Record<string, unknown> }
@@ -684,7 +686,23 @@ export async function getRecruitingRoleSetup(
           },
     );
     const ready = (key: string) => items.some((item) => item.key === key && item.state === "ready");
-    return { ready: ready("campaign") && ready("sender") && ready("leads"), attention, items };
+    const playbook = await recruiting
+      .readRecruitingPlaybookStep(deps.prisma, workspace.role.id)
+      .catch(() => null);
+    const rawStage = playbook?.stage ?? workspace.role.playbookStage;
+    const stage: RecruitingPlaybookStage = isRecruitingPlaybookStage(rawStage)
+      ? rawStage
+      : "intake";
+    return {
+      ready: ready("campaign") && ready("sender") && ready("leads"),
+      attention,
+      items,
+      playbookStage: {
+        stage,
+        label: recruitingPlaybookStageLabels[stage],
+        nextStep: playbook?.step?.label ?? null,
+      },
+    };
   });
 }
 
@@ -980,13 +998,8 @@ export async function getRecruitingCorrespondence(
         Object.entries(call.args).filter(([key]) => key !== "limit"),
       );
       const campaignId = call.args.campaign_id;
-      if (
-        view === "inbox" &&
-        call.route.toolName === "list_emails" &&
-        (typeof campaignId !== "string" || !campaignId.trim()) &&
-        (typeof call.args.lead !== "string" || !call.args.lead.trim())
-      )
-        return []; // Account-wide exploration is not evidence of this role's correspondence; a campaign or one contact is.
+      // A list_emails read made in this role's thread is this role's mailbox check, whether it was
+      // campaign-scoped, lead-scoped or unscoped; the thread/bot scope above is the role boundary.
       if (
         source.provider?.kind === "crm" &&
         [call.args.p_org, call.args.p_candidate].some(
@@ -1002,7 +1015,10 @@ export async function getRecruitingCorrespondence(
         source.id,
         call.route.toolName,
         call.route.toolName === "list_emails"
-          ? { campaign_id: campaignId }
+          ? // One snapshot per campaign; a lead-scoped or unscoped list is its own exact query.
+            typeof campaignId === "string"
+            ? { campaign_id: campaignId }
+            : query
           : source.provider?.kind === "crm"
             ? { p_org: call.args.p_org, p_candidate: call.args.p_candidate }
             : source.provider?.kind === "cal" && call.route.toolName === "get_availability"
@@ -1123,6 +1139,9 @@ export async function getRecruitingCorrespondence(
         if (!(detailRead && campaignLists.size)) checkIssue(source.id, effect.updatedAt, "failed");
         continue;
       }
+      // The Inbox header shows the latest readable check, whichever read it was.
+      const checkedAt = effect.updatedAt.toISOString();
+      if (checkedAt > output.checkedAt) output.checkedAt = checkedAt;
       const body = mcpObject(result);
       if (provider.kind === "crm") {
         const data = correspondenceRecord(body?.data);

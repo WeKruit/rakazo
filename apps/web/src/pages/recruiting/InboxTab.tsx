@@ -223,12 +223,12 @@ export function InboxTab({ onSelectEmail, candidateId: lockedId, ...props }: Inb
       {people.loading ? <TabLoading /> : null}
       {people.failed ? (
         <TabNotice alert>
-          <Trans>Could not load CRM records. Try refreshing.</Trans>
+          <Trans>Could not load candidate records. Try refreshing.</Trans>
         </TabNotice>
       ) : null}
       {people.data && !people.data.items.length ? (
         <TabNotice>
-          <Trans>No CRM contacts for this role yet.</Trans>
+          <Trans>No contacts for this role yet.</Trans>
         </TabNotice>
       ) : null}
       {people.data?.items.length ? (
@@ -310,7 +310,7 @@ export function InboxTab({ onSelectEmail, candidateId: lockedId, ...props }: Inb
             {read.failed ? (
               <div className="px-3">
                 <TabNotice alert>
-                  <Trans>Could not load CRM records. Try refreshing.</Trans>
+                  <Trans>Could not load candidate records. Try refreshing.</Trans>
                 </TabNotice>
               </div>
             ) : null}
