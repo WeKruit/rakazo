@@ -1516,6 +1516,7 @@ model RecruitingRole {
   title String
   revision Int
   currentRevisionId String @unique
+  archivedAt DateTime?
   currentRevision RecruitingRoleRevision @relation("CurrentRecruitingRevision", fields: [currentRevisionId], references: [id], onDelete: NoAction)
   revisions RecruitingRoleRevision[] @relation("RecruitingRoleRevisions")
   activeThreads Thread[] @relation("ActiveRecruitingRole")
@@ -1691,6 +1692,8 @@ model RecruitingCandidateOccurrence {
   resumeUrl String?
   evidenceUrls Json?
   issues Json
+  /// Provider match cells (rank/tier/score keys) of this saved row; null until backfilled.
+  matchFields Json?
 
   @@id([pageId, rowIndex])
   @@index([roleId, candidateKey])
