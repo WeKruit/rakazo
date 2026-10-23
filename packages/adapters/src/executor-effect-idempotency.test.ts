@@ -577,6 +577,21 @@ describe("native Cal.com booking approvals", () => {
       f.effects[0]!.status = "approved";
       f.setCalls([call({ ...original, start: "2026-10-24T15:00:00Z" }, "approved")]);
       await f.run();
+      if (["create_booking", "reschedule_booking", "cancel_booking"].includes(operation)) {
+        expect(f.connector.execute).not.toHaveBeenCalled();
+        expect(f.effects[0]).toMatchObject({ status: "approved", request });
+        expect(f.results).toContainEqual(
+          expect.objectContaining({
+            code: "CALENDAR_PREFLIGHT_UNAVAILABLE",
+            dispatched: false,
+          }),
+        );
+        await f.run();
+        expect(f.connector.execute).not.toHaveBeenCalled();
+        expect(f.effects).toHaveLength(1);
+        expect(f.effects[0]).toMatchObject({ status: "approved", request });
+        return;
+      }
       expect(f.connector.execute).toHaveBeenCalledExactlyOnceWith(
         expect.objectContaining({ route, args: original }),
         expect.anything(),
@@ -705,6 +720,19 @@ describe("simulated scheduling approval chain", () => {
           : { ...exactArgs, to: "other@example.test", body: "Changed after approval" };
       f.setCalls([{ name: stage.tool.name, args: changed, executionId: `approved-${index}` }]);
       await f.run();
+      if (index === 1) {
+        expect(f.connector.execute).toHaveBeenCalledTimes(1);
+        expect(effect).toMatchObject({ status: "approved", request: frozenRequest });
+        expect(f.results).toContainEqual(
+          expect.objectContaining({ code: "CALENDAR_PREFLIGHT_UNAVAILABLE" }),
+        );
+        expect(
+          f.connector.execute.mock.calls.some(
+            ([call]) => call.route?.toolName === "create_booking",
+          ),
+        ).toBe(false);
+        return; // No confirmation may follow a booking that was never dispatched.
+      }
       expect(f.connector.execute).toHaveBeenCalledTimes(index + 1);
       expect(f.connector.execute).toHaveBeenLastCalledWith(
         expect.objectContaining({ route: stage.tool.route, args: exactArgs }),

@@ -263,6 +263,7 @@ import {
   browserSnapshotFromTool,
 } from "./browser-tools.js";
 import { agentConnectionTools, builtinAgentTools, sharedMemorySaveError } from "./builtin-tools.js";
+import { preflightCalBooking } from "./calendar-preflight.js";
 import { archiveSpawnedBot, spawnBot } from "./child-bots.js";
 import type { CloudAgentConnection } from "./cloud-agent-factory.js";
 import { cloudAgentsEnabled } from "./cloud-agent-factory.js";
@@ -6128,6 +6129,43 @@ export function createRunExecutor(deps: ExecutorDeps) {
               return (await completeEffect(deps, applied!.effect.id, "intended", result))
                 ? result
                 : uncertainEffectResult(name);
+            }
+            // Exact native Cal.com mutations require fresh provider-specific conflict/original
+            // event verification after approval. Preserve the frozen request when the
+            // supported interval contract cannot be verified.
+            if (
+              from === "approved" &&
+              connectorCall.route?.connectorId === "mcp" &&
+              ["create_booking", "reschedule_booking", "cancel_booking"].includes(
+                connectorCall.route.toolName,
+              ) &&
+              nativeMcpUrl &&
+              `${nativeMcpUrl.origin}${nativeMcpUrl.pathname.replace(/\/$/, "")}` ===
+                "https://mcp.cal.com/mcp"
+            ) {
+              if (!deps.connector) throw new IsolationError();
+              const blocked = await preflightCalBooking({
+                connector: deps.connector,
+                context,
+                route: connectorCall.route,
+                args,
+                authorize: async (route) => {
+                  const { server } = await requireMcpToolAssignment(
+                    deps.prisma,
+                    context,
+                    route,
+                    route.toolName,
+                  );
+                  const endpoint = URL.parse(server.endpoint);
+                  if (
+                    !endpoint ||
+                    `${endpoint.origin}${endpoint.pathname.replace(/\/$/, "")}` !==
+                      "https://mcp.cal.com/mcp"
+                  )
+                    throw new IsolationError();
+                },
+              });
+              if (blocked) return blocked;
             }
             try {
               const unlinked = await unlinkedReplyError();
