@@ -215,6 +215,14 @@ msgstr "@{0}"
 msgid "A bit of everything"
 msgstr "什么都做一点"
 
+#: src/pages/RecruitingCorrespondence.tsx
+msgid "A saved check failed."
+msgstr ""
+
+#: src/pages/RecruitingCorrespondence.tsx
+msgid "A saved result cannot be displayed."
+msgstr ""
+
 #. placeholder {0}: oauth.verificationUri.replace(/^https:\/\//, "")
 #: src/pages/ModelSettingsOverlay.tsx
 #: src/pages/Onboarding.tsx
@@ -1643,6 +1651,7 @@ msgstr ""
 
 #: src/components/AccountAccess.tsx
 #: src/lib/account-security.ts
+#: src/lib/mcp-connect.ts
 #: src/lib/sso-flow.ts
 #: src/lib/user-error.ts
 #: src/pages/Auth.tsx
@@ -3989,6 +3998,7 @@ msgid "No skills yet"
 msgstr "暂无技能"
 
 #: src/pages/RecruitingCorrespondence.tsx
+#: src/pages/Shell.tsx
 msgid "No subject"
 msgstr ""
 
@@ -4426,6 +4436,10 @@ msgstr "预览 {0}"
 
 #: src/pages/Artifacts.tsx
 msgid "Preview isn't available for this file type — download it to view it."
+msgstr ""
+
+#: src/pages/Shell.tsx
+msgid "Preview only"
 msgstr ""
 
 #: src/pages/RecruitingCorrespondence.tsx
@@ -5895,6 +5909,10 @@ msgstr ""
 msgid "Tell WeKruit what to change for a person, a few candidates, or the whole search."
 msgstr ""
 
+#: src/pages/RecruitingCorrespondence.tsx
+msgid "Temporarily unavailable"
+msgstr ""
+
 #: src/components/computer/ComputerWorkspace.tsx
 msgid "Terminal"
 msgstr ""
@@ -6029,6 +6047,10 @@ msgstr "此重置链接无效或已过期"
 
 #: src/pages/RecruitingCorrespondence.tsx
 msgid "This result cannot be displayed yet"
+msgstr ""
+
+#: src/pages/Shell.tsx
+msgid "This role changed. Select the candidate again."
 msgstr ""
 
 #: src/pages/shell/message-cards.tsx
