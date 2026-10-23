@@ -610,7 +610,11 @@ export const appContract = {
       .output(recruitingWorkspace.nullable()),
     getWorkspace: oc
       .input(z.strictObject({ threadId: RecruitingId }))
-      .output(recruitingWorkspace.nullable()),
+      .output(
+        recruitingWorkspace
+          .extend({ crmTarget: ListRecruitingCandidatesOutput.shape.crmTarget })
+          .nullable(),
+      ),
     reviseRole: oc.input(ReviseRecruitingRoleInput).output(recruitingWorkspace),
     confirmBrief: oc.input(ConfirmRecruitingBriefInput).output(recruitingWorkspace),
     editCriteria: oc.input(EditRecruitingCriteriaInput).output(recruitingWorkspace),

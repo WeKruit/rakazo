@@ -3824,6 +3824,79 @@ describe("native CRM binding and source import", () => {
 });
 
 describe("recruiting workspace authorization", () => {
+  it("returns only the current role's verified CRM binding at the workspace top level", async () => {
+    const f = crmFixture();
+    const workspace = await recruiting.getRecruitingWorkspace(f.prisma, actor, {
+      threadId: "thread",
+    });
+    expect(workspace).toMatchObject({
+      role: {
+        id: f.role.id,
+        currentRevisionId: f.role.currentRevisionId,
+        revision: f.role.revision,
+      },
+      crmTarget: { bindingEffectId: f.binding.id, target: f.target },
+    });
+    expect(workspace?.role).not.toHaveProperty("crmBindingEffectId");
+    expect(f.prisma.$transaction).toHaveBeenCalledWith(expect.any(Function), {
+      isolationLevel: Prisma.TransactionIsolationLevel.RepeatableRead,
+    });
+  });
+  it("returns an explicit null workspace CRM target when the role has no binding", async () => {
+    const f = crmFixture();
+    f.role.crmBindingEffectId = null;
+    await expect(
+      recruiting.getRecruitingWorkspace(f.prisma, actor, { threadId: "thread" }),
+    ).resolves.toMatchObject({
+      role: { id: f.role.id },
+      crmTarget: null,
+    });
+    expect(f.tx.externalEffect.findFirst).not.toHaveBeenCalled();
+  });
+  it("revalidates workspace CRM proof on every read and never revives a removed binding", async () => {
+    const f = crmFixture();
+    const read = () => recruiting.getRecruitingWorkspace(f.prisma, actor, { threadId: "thread" });
+    await expect(read()).resolves.toMatchObject({ crmTarget: { bindingEffectId: f.binding.id } });
+    f.binding.result = {
+      status: "connected",
+      roleId: f.role.id,
+      bindingEffectId: f.binding.id,
+      target: { ...f.target, serverRevision: 99 },
+    };
+    await expect(read()).rejects.toThrow(IsolationError);
+    f.role.crmBindingEffectId = null;
+    await expect(read()).resolves.toMatchObject({ crmTarget: null });
+  });
+  it.each([
+    "binding-role",
+    "binding-space",
+    "source-owner",
+    "receipt-revision",
+    "current-revision",
+  ])("rejects a workspace CRM target with an invalid %s proof", async (boundary) => {
+    const f = crmFixture();
+    if (boundary === "binding-role") f.binding.request = { ...f.bindingInput, roleId: "other" };
+    if (boundary === "binding-space") f.binding.spaceId = "other";
+    if (boundary === "source-owner") f.run.userId = "other";
+    if (boundary === "receipt-revision") {
+      const read = f.effects.get("crm-read")!;
+      read.request = boundDirectApprovalRequest(
+        {
+          connectorId: "mcp",
+          resourceId: f.target.mcpServerId,
+          resourceRevision: 99,
+          toolName: "get_crm_role",
+        },
+        { p_org: f.target.organizationId, p_role: f.target.crmRoleId },
+        "__rakazoCatalogTool",
+      );
+    }
+    if (boundary === "current-revision")
+      f.tx.recruitingRoleRevision.findFirst.mockResolvedValue(null as never);
+    await expect(
+      recruiting.getRecruitingWorkspace(f.prisma, actor, { threadId: "thread" }),
+    ).rejects.toThrow(IsolationError);
+  });
   it.each([
     "same",
     "different",

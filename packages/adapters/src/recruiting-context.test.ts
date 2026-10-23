@@ -103,6 +103,36 @@ describe("recruiting run context", () => {
     db.feedback.mockResolvedValue({ feedback: [], nextCursor: null });
   });
 
+  it("keeps UI CRM bindings out of role context and reuses the same native role fingerprint", async () => {
+    db.workspace.mockResolvedValueOnce({
+      ...workspace,
+      crmTarget: {
+        bindingEffectId: "binding-sample",
+        target: {
+          mcpServerId: "crm-sample",
+          serverRevision: 2,
+          organizationId: "10000000-0000-4000-8000-000000000001",
+          crmRoleId: "20000000-0000-4000-8000-000000000002",
+          crmClientId: "30000000-0000-4000-8000-000000000003",
+          clientLabel: "Client",
+          roleLabel: "Role",
+        },
+      },
+    });
+    const { deps, saved } = fixture();
+    const initial = await loadRecruitingRunContext(deps, run, { documents: [] }, context, {
+      reason: "run",
+    });
+    const adopted = await loadRecruitingRunContext(deps, run, { documents: [] }, context, {
+      reason: "role_tool",
+      trustedWorkspace: workspace,
+    });
+    expect(initial!.manifest.roleText).not.toContain("crmTarget");
+    expect(initial!.manifest.roleText).toEqual(adopted!.manifest.roleText);
+    expect(initial!.contextArtifact).toEqual(adopted!.contextArtifact);
+    expect(saved.size).toBe(1);
+  });
+
   it.each(["absent", "missing", "ready"] as const)(
     "projects %s salary clarifications in initial and native role-read context without changing saved questions",
     async (salary) => {

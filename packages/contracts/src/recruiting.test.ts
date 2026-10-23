@@ -97,6 +97,45 @@ const action = {
 };
 
 describe("recruiting contracts", () => {
+  it("returns the verified CRM target only in the getWorkspace RPC output", () => {
+    const snapshot = {
+      role,
+      revision: {
+        id: role.currentRevisionId,
+        roleId: role.id,
+        revision: 1,
+        createdAt: now,
+        ...definition,
+      },
+    };
+    const output = contracts.appContract.recruiting.getWorkspace["~orpc"].outputSchema!;
+    const crmTarget = {
+      bindingEffectId: "binding-sample",
+      target: {
+        mcpServerId: "crm-sample",
+        serverRevision: 2,
+        organizationId: "10000000-0000-4000-8000-000000000001",
+        crmRoleId: "20000000-0000-4000-8000-000000000002",
+        crmClientId: "30000000-0000-4000-8000-000000000003",
+        clientLabel: "Client",
+        roleLabel: "Role",
+      },
+    };
+    for (const target of [null, crmTarget])
+      expect(output.parse({ ...snapshot, crmTarget: target })?.crmTarget).toEqual(target);
+    expect(output.safeParse(snapshot).success).toBe(false);
+    expect(output.parse(null)).toBeNull();
+    expect(
+      contracts.appContract.recruiting.createRole["~orpc"].outputSchema!.safeParse(snapshot)
+        .success,
+    ).toBe(true);
+    expect(
+      contracts.appContract.recruiting.createRole["~orpc"].outputSchema!.safeParse({
+        ...snapshot,
+        crmTarget,
+      }).success,
+    ).toBe(false);
+  });
   it("accepts a post-result native candidate save without a custom research action", () => {
     const input = {
       operation: "save_results",
