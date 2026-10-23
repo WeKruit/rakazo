@@ -84,12 +84,25 @@ const CAL_MCP_BOOKING_WRITES = new Set([
 ]);
 
 /** Native non-sending mailbox writes; the executor must verify the assigned official endpoint. */
+export const INSTANTLY_MCP_ENDPOINT = "https://mcp.instantly.ai/mcp";
+
+/** Instantly writes that never send: draft campaigns, enrolling leads into draft/paused campaigns, interest, pause. */
+const INSTANTLY_NATIVE_INTERNAL_WRITES = new Set([
+  "native_instantly_create_campaign",
+  "native_instantly_ensure_role_campaign",
+  "native_instantly_add_leads",
+  "native_instantly_add_shortlist_leads",
+  "native_instantly_update_lead_interest",
+  "native_instantly_pause_campaign",
+]);
+
 export function internalMcpWriteEndpoint(toolName: string): string | undefined {
   if (
     GOOGLE_MCP_GMAIL_WRITES.has(toolName) ||
     (toolName.startsWith("gmail.") && GOOGLE_MCP_GMAIL_WRITES.has(toolName.slice(6)))
   )
     return "https://gmailmcp.googleapis.com/mcp/v1";
+  if (INSTANTLY_NATIVE_INTERNAL_WRITES.has(toolName)) return INSTANTLY_MCP_ENDPOINT;
   return undefined;
 }
 
