@@ -72,6 +72,8 @@ describe("bot tool permissions", () => {
       "create",
       "revise",
       "update",
+      "archive",
+      "unarchive",
       "bind",
     ]);
     expect(

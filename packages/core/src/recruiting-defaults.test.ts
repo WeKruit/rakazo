@@ -34,6 +34,19 @@ describe("maintained recruiting defaults", () => {
     );
   });
 
+  it.each(RECRUITING_DEFAULT_BOTS)("$name requests a missing connection in chat", (bot) => {
+    expect(bot.instructions).toContain(
+      "call request_connection instead of telling the user to open settings",
+    );
+  });
+
+  it("Main asks clarifying questions one at a time", () => {
+    const main = RECRUITING_DEFAULT_BOTS.find((bot) => bot.key === "main")!;
+    expect(main.instructions).toContain(
+      "Ask clarifying questions one at a time: the single most decision-affecting question first",
+    );
+  });
+
   it("keeps feedback and recalibration on the same Autumn task", () => {
     const main = RECRUITING_DEFAULT_BOTS.find((bot) => bot.key === "main")!;
     expect(main.instructions).toContain("Route candidate or search-direction feedback to Sourcer");
