@@ -624,13 +624,29 @@ function recruitingMatchSummaryText(value: string): string {
 function CandidateReportValue({
   label,
   value,
+  providerStatus,
   compact = false,
   showDiagnostics = false,
-}: Pick<RecruitingCandidateReport["fields"][number], "label" | "value"> & {
+}: Pick<RecruitingCandidateReport["fields"][number], "label" | "value" | "providerStatus"> & {
   compact?: boolean;
   showDiagnostics?: boolean;
 }) {
   const { t } = useLingui();
+  if (providerStatus)
+    return (
+      <VerdictLabel
+        verdict={
+          providerStatus === "match" ? "met" : providerStatus === "miss" ? "unmet" : "unknown"
+        }
+        label={
+          providerStatus === "match"
+            ? t`Match`
+            : providerStatus === "miss"
+              ? t`Does not match`
+              : t`Unclear`
+        }
+      />
+    );
   if (label === "Resume status" && value !== null && !showDiagnostics)
     return (
       <p className={compact ? "line-clamp-2" : "whitespace-pre-wrap"}>
@@ -678,7 +694,7 @@ function CandidateResearchMatch({
   );
   const fields = source?.report?.fields.filter(
     (field) =>
-      [
+      ([
         "Rank",
         "Updated rank",
         "Overall rank",
@@ -691,7 +707,8 @@ function CandidateResearchMatch({
         "Match score",
         "Match tier",
         "Grade",
-      ].includes(field.label) &&
+      ].includes(field.label) ||
+        (!compact && field.providerStatus !== undefined)) &&
       (!compact || field.label !== "Fit reasons") &&
       (field.label !== "Batch rank" || !hasHigherRank),
   );
@@ -736,7 +753,14 @@ function CandidateResearchMatch({
                           : "whitespace-pre-wrap text-base"
                       }`}
                     >
-                      {field.value === null ? (
+                      {field.providerStatus ? (
+                        <CandidateReportValue
+                          label={field.label}
+                          value={field.value}
+                          providerStatus={field.providerStatus}
+                          compact={compact}
+                        />
+                      ) : field.value === null ? (
                         <Trans>Unknown</Trans>
                       ) : showDiagnostics ||
                         !["Recommendation", "Match judgment", "Fit reasons"].includes(
@@ -1010,6 +1034,7 @@ function CandidateReport({
               <CandidateReportValue
                 label={field.label}
                 value={field.value}
+                providerStatus={field.providerStatus}
                 showDiagnostics={showDiagnostics}
               />
               {field.evidence ? (
@@ -2108,20 +2133,21 @@ function MemoryDocumentView({
   );
 }
 
-function VerdictLabel({ verdict }: { verdict: Verdict }) {
+function VerdictLabel({ verdict, label }: { verdict: Verdict; label?: string }) {
   const Icon = verdict === "met" ? Check : verdict === "unmet" ? X : CircleHelp;
   return (
     <span
       className={`inline-flex items-center gap-1.5 text-xs ${verdict === "met" ? "text-success" : verdict === "unmet" ? "text-destructive" : "text-warning"}`}
     >
       <Icon size={14} aria-hidden />
-      {verdict === "met" ? (
-        <Trans>Met</Trans>
-      ) : verdict === "unmet" ? (
-        <Trans>Unmet</Trans>
-      ) : (
-        <Trans>Unknown</Trans>
-      )}
+      {label ??
+        (verdict === "met" ? (
+          <Trans>Met</Trans>
+        ) : verdict === "unmet" ? (
+          <Trans>Unmet</Trans>
+        ) : (
+          <Trans>Unknown</Trans>
+        ))}
     </span>
   );
 }
