@@ -145,6 +145,34 @@ describe("tool completion audit", () => {
     expect(payload).not.toHaveProperty("activeWindow");
   });
 
+  it("marks only succeeded connector completions declared writable as writes", async () => {
+    const append = vi.fn().mockResolvedValue(undefined);
+    const target = { spaceId: "space-1", threadId: "thread-1", botId: "bot-1", runId: "run-1" };
+    const base = { name: "mcp__crm__update", executionId: "call-1", durationMs: 4 };
+    await appendToolCompletionAudit({ events: { append } }, target, {
+      ...base,
+      readOnly: false,
+      result: { ok: true },
+    });
+    await appendToolCompletionAudit({ events: { append } }, target, {
+      ...base,
+      readOnly: false,
+      error: "rejected",
+    });
+    await appendToolCompletionAudit({ events: { append } }, target, {
+      ...base,
+      readOnly: true,
+      result: { ok: true },
+    });
+    await appendToolCompletionAudit({ events: { append } }, target, { ...base, result: {} });
+    expect(append.mock.calls.map(([event]) => event.payload.wrote)).toEqual([
+      true,
+      undefined,
+      undefined,
+      undefined,
+    ]);
+  });
+
   it("does not fail the run when the audit append fails", async () => {
     const append = vi.fn().mockRejectedValue(new Error("database unavailable"));
 

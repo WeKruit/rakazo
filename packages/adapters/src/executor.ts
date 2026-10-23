@@ -2879,13 +2879,20 @@ export async function appendToolCompletionAudit(
   secrets: string[] = [],
 ): Promise<void> {
   try {
+    const payload = toolCompletionAuditPayload(completion, secrets);
     await deps.events.append({
       spaceId: target.spaceId,
       threadId: target.threadId,
       botId: target.botId,
       runId: target.runId,
       type: "agent.tool.completed",
-      payload: toolCompletionAuditPayload(completion, secrets),
+      payload: {
+        ...payload,
+        // Lets open workbenches refresh after a connector write instead of at run end.
+        ...(completion.readOnly === false && payload.outcome === "succeeded"
+          ? { wrote: true }
+          : {}),
+      },
     });
   } catch (error) {
     // Audit persistence must not change the tool result or strand the run.
@@ -4445,6 +4452,12 @@ export function createRunExecutor(deps: ExecutorDeps) {
         };
 
         const mutatingEffectOccurrences = new Map<string, number>();
+        // Declared read-only flag of each dispatched connector call, joined to its completion audit.
+        const connectorReadOnly = new Map<string, boolean>();
+        const withConnectorReadOnly = (completion: AgentToolCompletion): AgentToolCompletion => {
+          const readOnly = connectorReadOnly.get(completion.executionId);
+          return readOnly === undefined ? completion : { ...completion, readOnly };
+        };
         const consumedEffectIds = new Set<string>();
         const nextMutatingEffectOccurrence = (toolName: string, args: Record<string, unknown>) => {
           const fingerprint = toolEffectIdempotencyKey(runId, toolName, args);
@@ -8527,6 +8540,7 @@ export function createRunExecutor(deps: ExecutorDeps) {
               const early = await claimOrReturn("intended");
               if (early !== undefined) return early;
             }
+            if (viaConnector) connectorReadOnly.set(executionId, declaredReadOnly === true);
             let result: unknown = { error: `unknown tool ${name}` };
             for await (const event of deps.connector.execute(
               { ...connectorCall, tool: name, args, executionId: effectKey },
@@ -9009,7 +9023,7 @@ export function createRunExecutor(deps: ExecutorDeps) {
                     botId: bot.id,
                     runId,
                   },
-                  completion,
+                  withConnectorReadOnly(completion),
                   runSecrets,
                 );
               },
@@ -9391,13 +9405,15 @@ export function createRunExecutor(deps: ExecutorDeps) {
                       botId: bot.id,
                       runId,
                     },
-                    toolCompletionFromResult(
-                      {
-                        name: event.name,
-                        executionId: event.executionId,
-                        durationMs: Date.now() - startedAt,
-                      },
-                      result,
+                    withConnectorReadOnly(
+                      toolCompletionFromResult(
+                        {
+                          name: event.name,
+                          executionId: event.executionId,
+                          durationMs: Date.now() - startedAt,
+                        },
+                        result,
+                      ),
                     ),
                     runSecrets,
                   );

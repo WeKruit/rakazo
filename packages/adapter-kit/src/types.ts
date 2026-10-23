@@ -204,6 +204,8 @@ export interface AgentToolCompletion {
   result?: unknown;
   error?: unknown;
   paused?: boolean;
+  /** Declared read-only flag of a dispatched connector call; undefined for other tools. */
+  readOnly?: boolean;
 }
 
 export interface ControlLeaseRef {

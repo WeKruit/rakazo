@@ -3979,6 +3979,20 @@ it("refreshes persisted recruiting changes while ignoring ongoing catalog and so
     outcome: "succeeded",
   });
   receive("Reply outcome", "agent.tool.completed", { name: "recruiting_reply", outcome: "error" });
+  receive("Connector read", "agent.tool.completed", {
+    name: "mcp__crm__list_candidates",
+    outcome: "succeeded",
+  });
+  receive("Connector write", "agent.tool.completed", {
+    name: "mcp__crm__update_candidate",
+    outcome: "succeeded",
+    wrote: true,
+  });
+  receive("Catalog email send", "agent.tool.completed", {
+    name: "connectors_execute_tool",
+    outcome: "succeeded",
+    wrote: true,
+  });
   receive("Connector log", "effect.recorded", { tool: "mcp_execute_tool", logId: "log-1" });
   receive("Candidate feedback saved", "thread.message.created", {
     role: "user",
@@ -4005,6 +4019,8 @@ it("refreshes persisted recruiting changes while ignoring ongoing catalog and so
     "CRM import pending",
     "CRM import receipt",
     "Reply outcome",
+    "Connector write",
+    "Catalog email send",
     "Candidate feedback saved",
     "Research output recorded",
     "Saved on another page",

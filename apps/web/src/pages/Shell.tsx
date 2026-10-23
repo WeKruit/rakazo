@@ -498,11 +498,12 @@ export function eventChangesRecruitingPanel(
         result.kind === "saved")
     );
   }
-  // ponytail: arbitrary MCP aliases refresh at run termination;
-  // immediate updates need a persisted native recruiting receipt.
+  // Connector reads refresh at run termination; the executor marks successful writes.
   if (event.type === "agent.tool.completed")
     return (
-      event.payload.name === "recruiting_crm_import" || event.payload.name === "recruiting_reply"
+      event.payload.name === "recruiting_crm_import" ||
+      event.payload.name === "recruiting_reply" ||
+      (event.payload.wrote === true && event.payload.outcome === "succeeded")
     );
   return (
     (event.type.startsWith("recruiting.") &&
