@@ -109,6 +109,21 @@ export function useRecruitingDetailController(resetKey?: string): RecruitingDeta
     } else if (index < current.length - 1) setStack(current.slice(0, index + 1));
   }, [param]);
 
+  // The URL names the person on screen: a concurrent search-param write must not leave
+  // `?detail=` pointing at someone the panel no longer shows.
+  useEffect(() => {
+    const top = stack.at(-1);
+    if (!top || param === detailKey(top)) return;
+    setSearchParams(
+      (previous) => {
+        const next = new URLSearchParams(previous);
+        next.set(DETAIL_PARAM, detailKey(top));
+        return next;
+      },
+      { replace: true },
+    );
+  }, [stack]);
+
   const lastReset = useRef(resetKey);
   useEffect(() => {
     if (lastReset.current === resetKey) return;

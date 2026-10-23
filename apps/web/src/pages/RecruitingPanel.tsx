@@ -4061,9 +4061,21 @@ function RecruitingWorkspace({
     roleRevisionId,
     selection,
   };
+  const userSortRef = useRef(candidateList.userSort === true);
+  userSortRef.current = candidateList.userSort === true;
   const resetUnavailableCandidateSort = useCallback(
     (page: ListRecruitingCandidatesOutput, filters: RecruitingPanelState["filters"]) => {
       const sort = filters.sort ?? "score";
+      // A list that was sorted by a fallback returns to score order once scores exist.
+      if (!userSortRef.current && sort !== "score" && page.sortAvailability.score) {
+        setCandidatePage(null);
+        setCandidateList((current) => ({
+          ...current,
+          filters: { ...current.filters, sort: "score" },
+          pageCount: 1,
+        }));
+        return true;
+      }
       if (
         (sort === "rank" || sort === "tier" || sort === "score") &&
         !page.sortAvailability[sort]
@@ -5541,12 +5553,13 @@ function RecruitingWorkspace({
                     <NativeSelect
                       aria-label={t`Candidate sort`}
                       value={candidateFilters.sort ?? "score"}
-                      onChange={(event) =>
+                      onChange={(event) => {
                         setCandidateFilters((current) => ({
                           ...current,
                           sort: event.target.value as ListRecruitingCandidatesInput["sort"],
-                        }))
-                      }
+                        }));
+                        setCandidateList((current) => ({ ...current, userSort: true }));
+                      }}
                     >
                       {candidatePage.sortAvailability.rank ? (
                         <NativeSelectOption value="rank">
