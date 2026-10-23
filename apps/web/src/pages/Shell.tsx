@@ -548,6 +548,11 @@ export function ShellPage() {
   const session = authClient.useSession();
   const userId = session.data?.user.id;
   const [groups, setGroups] = useState<Group[]>([]);
+  const groupsRef = useRef(groups);
+  groupsRef.current = groups;
+  // The placeholder name a new role's group carries until its title is saved.
+  const newRoleNames = useRef<string[]>([]);
+  newRoleNames.current = ["New role", t`New role`];
   const [recruitingTab, setRecruitingTab] = useState<{
     threadId: string;
     tab: RecruitingPanelState["tab"];
@@ -2044,7 +2049,13 @@ export function ShellPage() {
           readVisibleGroups.current.delete(groupId);
           markVisibleGroupRead();
         }
-        if (event.type === "bot.updated" || isRunTerminalEvent(event)) {
+        // A new role's group is renamed when its title is saved; show the title at once.
+        const placeholderName =
+          event.type === "recruiting.changed" &&
+          newRoleNames.current.includes(
+            groupsRef.current.find((group) => group.id === groupId)?.name ?? "",
+          );
+        if (event.type === "bot.updated" || isRunTerminalEvent(event) || placeholderName) {
           void refreshBots().catch(() => undefined);
         }
         if (sync?.snapshotStale) void refreshGroupThread(groupId).catch(() => undefined);
