@@ -12,7 +12,10 @@ vi.mock("@lingui/react/macro", () => ({
   }),
 }));
 
-import type { RoleSetupStatus } from "./RoleSetup";
+import type { RecruitingRoleSetup as RoleSetupStatus } from "@rakazo/contracts";
+
+vi.mock("../../lib/rpc", () => ({ rpc: {} }));
+
 import { RoleSetup } from "./RoleSetup";
 
 (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
@@ -20,7 +23,7 @@ let container: HTMLDivElement | undefined;
 afterEach(() => container?.remove());
 
 async function mount(status: RoleSetupStatus | undefined, handlers = {}) {
-  const props = { onAsk: vi.fn(), onConnect: vi.fn(), onBind: vi.fn(async () => {}), ...handlers };
+  const props = { onAsk: vi.fn(), onConnect: vi.fn(), ...handlers };
   container = document.createElement("div");
   document.body.append(container);
   const root = createRoot(container);
@@ -45,19 +48,13 @@ it("offers each missing step's own fix", async () => {
         action: { kind: "ask_agent", prompt: "为这个岗位准备 outreach campaign" },
       },
       { key: "sender", state: "ready", label: "recruiter@example.com" },
-      {
-        key: "crm",
-        state: "missing",
-        action: { kind: "bind", options: [{ orgId: "org-1", roleLabel: "Data Infra" }] },
-      },
+      { key: "crm", state: "ready", label: "Data Infra" },
       { key: "leads", state: "unavailable", action: { kind: "connect", serverId: "instantly" } },
     ],
   });
   expect(container!.textContent).toContain("recruiter@example.com");
   await act(async () => button("Set up").click());
   expect(props.onAsk).toHaveBeenCalledWith("为这个岗位准备 outreach campaign");
-  await act(async () => button("Link Data Infra").click());
-  expect(props.onBind).toHaveBeenCalledWith({ orgId: "org-1", roleLabel: "Data Infra" });
   await act(async () => button("Connect").click());
   expect(props.onConnect).toHaveBeenCalledWith("instantly");
 });
