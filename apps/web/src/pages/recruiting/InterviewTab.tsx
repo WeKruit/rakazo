@@ -3,6 +3,8 @@ import type { RecruitingCrmDataOutput } from "@rakazo/contracts";
 import { Button } from "@rakazo/ui-web";
 import { useRecruitingDetail } from "./detail";
 import { InterviewCalendar } from "./InterviewCalendar";
+import type { SchedulingPlanHandoff } from "./SchedulingPlan";
+import { SchedulingPlanHistory } from "./SchedulingPlan";
 import type { RecruitingTabProps } from "./shared";
 import {
   CrmGate,
@@ -27,11 +29,15 @@ type Row = Extract<RecruitingCrmDataOutput, { operation: "candidates" }>["items"
 export function InterviewTab({
   candidateId,
   candidateEmail,
+  threadId,
+  onReviewSchedulingPlan,
   ...props
 }: RecruitingTabProps & {
   /** Shows only this candidate's interview state and calendar events (the detail panel). */
   candidateId?: string;
   candidateEmail?: string | null;
+  threadId?: string;
+  onReviewSchedulingPlan?: (handoff: SchedulingPlanHandoff) => void;
 }) {
   const { t } = useLingui();
   const detail = useRecruitingDetail();
@@ -144,6 +150,14 @@ export function InterviewTab({
             </p>
           ) : null}
         </div>
+      ) : null}
+      {!candidateId && threadId ? (
+        <SchedulingPlanHistory
+          threadId={threadId}
+          roleId={props.roleId}
+          refreshSignal={props.refreshSignal}
+          onReview={onReviewSchedulingPlan}
+        />
       ) : null}
       {!candidateId && !calendar.failed && calendar.data?.operations?.length ? (
         <section aria-label={t`Reply outcomes`} className="mt-6 space-y-2">

@@ -98,6 +98,7 @@ import type { RecruitingDetailPerson } from "./recruiting/detail";
 import { useRecruitingDetail } from "./recruiting/detail";
 import { RetryNotice } from "./recruiting/RetryNotice";
 import { TabLoading, tabCacheSlot, useKeyedRead } from "./recruiting/shared";
+import type { SchedulingPlanHandoff } from "./recruiting/SchedulingPlan";
 import type { RecruitingWorkspaceView } from "./shell/RecruitingNavigation";
 
 export type CrmBrowseSelection = Pick<
@@ -143,6 +144,7 @@ export type CandidateFeedback = {
 type Props = {
   shortlistWeekFilter?: ShortlistWeekFilter;
   onClearShortlistWeekFilter?: () => void;
+  onReviewSchedulingPlan?: (handoff: SchedulingPlanHandoff) => void;
   /** The thread is this CRM role's own conversation, so its agent results share the workbench. */
   roleConversation?: boolean;
   /** The role conversation's own Sequence, Inbox or Interview view, shown above its CRM history. */
@@ -2337,6 +2339,8 @@ function RoleAgentSection({ crmBrowse, roleConversation: _, correspondence, ...p
  * conversation's native role bound to CRM; a CRM role without one keeps its stored CRM views.
  */
 function CorrespondenceTabMount({
+  threadId,
+  onReviewSchedulingPlan,
   view,
   role,
   conversation,
@@ -2346,6 +2350,8 @@ function CorrespondenceTabMount({
   fallback,
 }: {
   view: RecruitingWorkspaceView;
+  threadId?: string;
+  onReviewSchedulingPlan?: Props["onReviewSchedulingPlan"];
   role?: Omit<RecruitingTabProps, "conversation" | "refreshSignal">;
   conversation: { groupId: string } | { botId: string };
   refreshSignal: number;
@@ -2358,7 +2364,7 @@ function CorrespondenceTabMount({
   if (!role) return <>{fallback}</>;
   const props = { ...role, conversation, refreshSignal };
   if (view === "sequence") return <SequenceTab {...props} />;
-  if (view === "interview") return <InterviewTab {...props} />;
+  if (view === "interview") return <InterviewTab {...props} threadId={threadId} onReviewSchedulingPlan={onReviewSchedulingPlan} />;
   return <InboxWithReply {...props} onDraftReply={onDraftReply} />;
 }
 
@@ -2407,6 +2413,7 @@ function useBoundRole(
 }
 
 function CrmRecruitingPanel({
+  onReviewSchedulingPlan,
   browse,
   agent,
   threadId,
@@ -3613,6 +3620,8 @@ function CrmRecruitingPanel({
       ) : ["sequence", "inbox", "interview"].includes(browse.view) ? (
         <>
           <CorrespondenceTabMount
+            threadId={threadId}
+            onReviewSchedulingPlan={onReviewSchedulingPlan}
             view={browse.view}
             role={boundRole}
             loading={!bound.done}

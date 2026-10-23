@@ -312,6 +312,7 @@ import type {
   CrmBrowseSelection,
   CrmReplyDraftContext,
 } from "./RecruitingPanel";
+import type { SchedulingPlanHandoff } from "./recruiting/SchedulingPlan";
 import { RecruitingPanel } from "./RecruitingPanel";
 import { ResizableSidePanel } from "./ResizableSidePanel";
 import type { RoutineDraftState } from "./RoutineEditor";
@@ -2655,6 +2656,12 @@ export function ShellPage() {
   );
   const currentCorrespondenceScope = useRef(correspondenceScope);
   currentCorrespondenceScope.current = correspondenceScope;
+  const [selectedSchedulingPlan, setSelectedSchedulingPlan] = useState<{
+    scope: string | undefined;
+    threadId: string;
+    emailId: string;
+    id: string;
+  } | null>(null);
   const [selectedCorrespondence, setSelectedCorrespondence] = useState<{
     scope: typeof correspondenceScope;
     reference: RecruitingCorrespondenceReference;
@@ -2666,6 +2673,11 @@ export function ShellPage() {
         !discussionScope.current.active
       )
         return;
+      setSelectedSchedulingPlan((current) =>
+        current && reference && current.threadId === reference.threadId && current.emailId === reference.emailId
+          ? current
+          : null,
+      );
       setSelectedCorrespondence(
         reference && recruitingWorkspaceView === "inbox" && !workspaceNewRole
           ? { scope: correspondenceScope, reference }
@@ -3448,6 +3460,11 @@ export function ShellPage() {
             selectedContact?.scope === currentRecruitingCacheScope.current
               ? selectedContact?.contact
               : undefined,
+            selectedSchedulingPlan &&
+            selectedSchedulingPlan.scope === currentRecruitingCacheScope.current &&
+            selectedSchedulingPlan.threadId === knownThreadId
+              ? selectedSchedulingPlan.id
+              : undefined,
           );
       const correspondenceReference =
         !reroutedToGroup &&
@@ -3649,6 +3666,8 @@ export function ShellPage() {
       pendingAttachments,
       sending,
       selectedCorrespondence,
+      selectedSchedulingPlan,
+      knownThreadId,
       selectedContact,
       chatRoleTitle,
       showToolActivity,
@@ -4501,6 +4520,17 @@ export function ShellPage() {
     />
   );
 
+  const reviewSchedulingPlan = (handoff: SchedulingPlanHandoff) => {
+    if (handoff.plan.threadId !== knownThreadId) return;
+    setSelectedSchedulingPlan({
+      scope: recruitingCacheScope,
+      threadId: handoff.plan.threadId,
+      emailId: handoff.plan.originalEmail.emailId,
+      id: handoff.plan.id,
+    });
+    openRoleChat(handoff.text);
+  };
+
   // biome-ignore format: ponytail: preserve the native console markup when sharing this shell.
   const nativeCorrespondence =
     knownThreadId && ["sequence", "inbox", "interview"].includes(recruitingWorkspaceView) ? (
@@ -4510,6 +4540,7 @@ export function ShellPage() {
         artifactTarget={transcriptArtifactTarget}
         threadId={knownThreadId}
         onEmailSelection={selectCorrespondence}
+        onReviewSchedulingPlan={reviewSchedulingPlan}
         outreachBotIds={(activeSnapshot?.members ?? []).filter((member) => member.name === "Outreach").map((member) => member.botId)}
         onConversation={(text) => {
           openRoleChat(text);
@@ -5443,8 +5474,9 @@ export function ShellPage() {
         {(crmMode || (boundRoleCrmMode && effectiveCrmSelection)) && activeSnapshot?.threadId ? <div className="rk-scroll recruiting-workspace-main min-h-0 flex-1 overflow-y-auto">{effectiveCrmSelection ? <RecruitingPanel
           threadId={activeSnapshot.threadId} botId={inGroup ? undefined : active?.id} groupId={inGroup ? groupId : undefined}
           readCache={recruitingReadCache.current} readCacheScope={recruitingCacheScope} refreshSignal={recruitingRefresh} onClose={() => {}}
-          shortlistWeekFilter={recruitingWorkspaceView === "contacts" ? readShortlistWeekFilter(searchParams) : undefined} onClearShortlistWeekFilter={() => setSearchParams(current => writeShortlistWeekFilter(current))}
-          roleConversation={!emptyCrmChat} correspondence={nativeCorrespondence} onBrowseCandidates={() => openRecruitingView("results")} onDiscussCandidate={discussCandidate} onCandidateFeedback={feedbackCandidate} candidateFeedbackRecipients={candidateFeedbackRecipients}
+          shortlistWeekFilter={recruitingWorkspaceView === "contacts" ? readShortlistWeekFilter(searchParams) : undefined}
+          onClearShortlistWeekFilter={() => setSearchParams(current => writeShortlistWeekFilter(current))}
+          onReviewSchedulingPlan={reviewSchedulingPlan} roleConversation={!emptyCrmChat} correspondence={nativeCorrespondence} onBrowseCandidates={() => openRecruitingView("results")} onDiscussCandidate={discussCandidate} onCandidateFeedback={feedbackCandidate} candidateFeedbackRecipients={candidateFeedbackRecipients}
           crmBrowse={{ selection: effectiveCrmSelection, view: recruitingWorkspaceView, candidateId: searchParams.get("crmCandidate") ?? undefined,
             onSelectCandidate: (id, view = "inbox") => setSearchParams(current => { const next = new URLSearchParams(current); next.set("crmCandidate", id); next.set("view", view); return next; }),
             onDraftReply: boundRoleCrmMode && !crmMode ? draftCrmReply : undefined,
@@ -5457,7 +5489,7 @@ export function ShellPage() {
                 {recruitingWorkspaceView === "sequence" ? <>
                   <SequenceTab roleId={currentBindingRead.workspace.role.id} spaceId={currentBindingRead.workspace.role.spaceId} conversation={inGroup ? { groupId: groupId! } : { botId: active!.id }} crmTarget={currentBindingRead.workspace.crmTarget?.target ?? null} refreshSignal={recruitingRefresh} readCache={recruitingReadCache.current} readCacheScope={recruitingCacheScope} />
                   <details className="mt-6"><summary><Trans>Outreach drafts</Trans></summary>{nativeCorrespondence}</details>
-                </> : <InterviewTab roleId={currentBindingRead.workspace.role.id} spaceId={currentBindingRead.workspace.role.spaceId} conversation={inGroup ? { groupId: groupId! } : { botId: active!.id }} crmTarget={currentBindingRead.workspace.crmTarget?.target ?? null} refreshSignal={recruitingRefresh} readCache={recruitingReadCache.current} readCacheScope={recruitingCacheScope} />}
+                </> : <InterviewTab onReviewSchedulingPlan={reviewSchedulingPlan} threadId={knownThreadId} roleId={currentBindingRead.workspace.role.id} spaceId={currentBindingRead.workspace.role.spaceId} conversation={inGroup ? { groupId: groupId! } : { botId: active!.id }} crmTarget={currentBindingRead.workspace.crmTarget?.target ?? null} refreshSignal={recruitingRefresh} readCache={recruitingReadCache.current} readCacheScope={recruitingCacheScope} />}
               </div>
             ) : nativeCorrespondence}
           </div>

@@ -11,7 +11,7 @@ import {
 } from "@rakazo/contracts";
 import { Button, Input, NativeSelect, NativeSelectOption } from "@rakazo/ui-web";
 import { ArrowRight, CalendarDays, ChevronRight, Inbox, Mail, Settings2 } from "lucide-react";
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { ArtifactFileCard } from "../components/ArtifactFileCard";
 import type { ArtifactTarget } from "../lib/artifact-open";
 import { fetchArtifactBytes } from "../lib/artifact-open";
@@ -22,6 +22,8 @@ import { rpc } from "../lib/rpc";
 import { AvailabilityRanges } from "./recruiting/AvailabilityRanges";
 import { useRecruitingDetail } from "./recruiting/detail";
 import { EmailConversation } from "./recruiting/EmailConversation";
+import type { SchedulingPlanHandoff } from "./recruiting/SchedulingPlan";
+import { SchedulingPlanForm } from "./recruiting/SchedulingPlan";
 import { RoleCampaignCard } from "./recruiting/SequenceTab";
 import { LoadMore, type RoleCrm, useCrmPages, useKeyedRead } from "./recruiting/shared";
 
@@ -40,6 +42,7 @@ type Props = {
   outreachBotIds?: readonly string[];
   onConversation: (text?: string) => void;
   onEmailSelection?: (reference: RecruitingCorrespondenceReference | undefined) => void;
+  onReviewSchedulingPlan?: (handoff: SchedulingPlanHandoff) => void;
   onOpenConnections: () => void;
   onSaveDraft?: (input: RecruitingSequenceSaveInput) => Promise<void>;
   refreshSignal?: number;
@@ -359,6 +362,7 @@ function SavedCorrespondenceView({
   onConversation,
   onOpenConnections,
   onEmailSelection,
+  onReviewSchedulingPlan,
   refreshSignal = 0,
   readCache,
   readCacheScope,
@@ -369,6 +373,7 @@ function SavedCorrespondenceView({
   | "onConversation"
   | "onOpenConnections"
   | "onEmailSelection"
+  | "onReviewSchedulingPlan"
   | "refreshSignal"
   | "readCache"
   | "readCacheScope"
@@ -378,6 +383,7 @@ function SavedCorrespondenceView({
   const { t } = useLingui();
   const [refresh, setRefresh] = useState(0);
   const [selectedId, setSelectedId] = useState<string>();
+  const [planningKey, setPlanningKey] = useState<string>();
   const [selectedSource, setSelectedSource] = useState<string>();
   const [selectedThread, setSelectedThread] = useState<string>();
   const [selectedCampaign, setSelectedCampaign] = useState<string>();
@@ -563,9 +569,9 @@ function SavedCorrespondenceView({
     selectedThread && threads.has(selectedThread) ? selectedThread : threads.keys().next().value;
   const threadEmails = campaignEmails.filter((email) => threadOf(email) === threadKey);
   const selected = threadEmails.find((email) => email.id === selectedId) ?? threadEmails[0];
-  useEffect(() => {
-    // Cached mail stays readable, but only the current authorized read supplies new message context.
-    const parsed =
+  // Cached mail stays readable; only a current authorized read can create a plan or chat context.
+  const parsed = useMemo(
+    () =>
       view === "inbox" && current?.fresh && !current.failed && data?.roleId && selected && threadId
         ? RecruitingCorrespondenceReferenceSchema.safeParse({
             threadId,
@@ -586,10 +592,14 @@ function SavedCorrespondenceView({
             date: selected.date,
             snippet: selected.snippet,
           })
-        : undefined;
+        : undefined,
+    [view, threadId, current?.fresh, current?.failed, data?.roleId, selected],
+  );
+  useEffect(() => {
     onEmailSelection?.(parsed?.success ? parsed.data : undefined);
     return () => onEmailSelection?.(undefined);
-  }, [view, threadId, current?.fresh, current?.failed, data?.roleId, selected, onEmailSelection]);
+  }, [parsed, onEmailSelection]);
+  const planKey = parsed?.success ? JSON.stringify(parsed.data) : undefined;
   const interview = view === "interview";
   const check = () =>
     onConversation(
@@ -962,6 +972,36 @@ function SavedCorrespondenceView({
                     : undefined
                 }
               />
+              {parsed?.success && workspace?.role.revision ? (
+                <>
+                  <Button variant="outline" onClick={() => setPlanningKey(planKey)}>
+                    <Trans>Plan interview</Trans>
+                  </Button>
+                  {planningKey === planKey ? (
+                    <SchedulingPlanForm
+                      key={planKey}
+                      originalEmail={parsed.data}
+                      roleRevision={workspace.role.revision}
+                      candidate={
+                        selectedPerson?.name &&
+                        selectedPerson.email &&
+                        selected?.crm &&
+                        matchesTarget(selected) &&
+                        selectedPerson.candidateId === selected.crm.candidateId
+                          ? {
+                              candidateKey: selectedPerson.candidateId,
+                              name: selectedPerson.name,
+                              email: selectedPerson.email,
+                            }
+                          : undefined
+                      }
+                      onReview={onReviewSchedulingPlan}
+                      onCheck={onConversation}
+                      onClose={() => setPlanningKey(undefined)}
+                    />
+                  ) : null}
+                </>
+              ) : null}
               {selected?.url ? (
                 <a href={selected.url} target="_blank" rel="noreferrer" className="underline">
                   <Trans>Open original email</Trans>
@@ -1034,6 +1074,7 @@ export function RecruitingCorrespondence({
   onConversation,
   onOpenConnections,
   onEmailSelection,
+  onReviewSchedulingPlan,
   onSaveDraft,
   refreshSignal,
   readCache,
@@ -1265,6 +1306,7 @@ export function RecruitingCorrespondence({
       onConversation={onConversation}
       onOpenConnections={onOpenConnections}
       onEmailSelection={onEmailSelection}
+      onReviewSchedulingPlan={onReviewSchedulingPlan}
       refreshSignal={refreshSignal}
       readCache={readCache}
       readCacheScope={readCacheScope}

@@ -4,6 +4,7 @@ import type {
   AppBootstrap,
   RecruitingCandidate,
   RecruitingRoleRevision,
+  RecruitingSchedulingPlan,
   RecruitingSourceRef,
 } from "@rakazo/contracts";
 
@@ -366,12 +367,15 @@ const bootstrap: AppBootstrap = {
 export async function mockRecruitingApp(
   page: Page,
   options: {
+    scheduling?: boolean;
+    nativeScheduling?: boolean;
     emptyCalendar?: boolean;
     emptyMail?: boolean;
     multipleCampaigns?: boolean;
     calendarStatus?: "accepted" | "confirmed";
   } = {},
 ) {
+  const plans: RecruitingSchedulingPlan[] = [];
   const unknown: string[] = [];
   const calls: { method: string; input: Record<string, unknown> }[] = [];
   const views: Record<string, unknown>[] = [];
@@ -477,7 +481,9 @@ export async function mockRecruitingApp(
       value = {
         role,
         revision,
-        crmTarget: { bindingEffectId: "fixture-binding", target: crmTarget },
+        crmTarget: options.nativeScheduling
+          ? null
+          : { bindingEffectId: "fixture-binding", target: crmTarget },
       };
     else if (method === "recruiting/roleSetup") value = { ready: true, attention: null, items: [] };
     else if (method === "recruiting/listCandidates") {
@@ -490,7 +496,9 @@ export async function mockRecruitingApp(
       value = {
         roleId: role.id,
         roleRevisionId: revision.id,
-        crmTarget: { bindingEffectId: "fixture-binding", target: crmTarget },
+        crmTarget: options.nativeScheduling
+          ? null
+          : { bindingEffectId: "fixture-binding", target: crmTarget },
         items,
         total: items.length,
         nextCursor: null,
@@ -506,7 +514,15 @@ export async function mockRecruitingApp(
       };
     } else if (method === "recruiting/roleCandidates")
       value = {
-        items: [],
+        items: options.nativeScheduling
+          ? [
+              {
+                name: "Avery Example",
+                email: "avery@example.test",
+                autumn: { candidateKey: "fixture-native-candidate" },
+              },
+            ]
+          : [],
         nextCursor: null,
         total: 3,
         counts: { shortlisted: 1, replied: 1 },
@@ -606,7 +622,46 @@ export async function mockRecruitingApp(
                 },
               ],
             };
-    else if (method === "recruiting/correspondence")
+    else if (method === "recruiting/schedulingPlans")
+      value = {
+        plans,
+        partial: false,
+        slots: options.scheduling
+          ? [
+              {
+                sourceId: "fixture-calendar",
+                sourceRevision: 1,
+                eventTypeId: 42,
+                availabilityEffectId: "fixture-availability",
+                start: "2026-11-01T05:30:00Z",
+                end: "2026-11-01T06:00:00Z",
+                lengthInMinutes: 30,
+                observedAt: checkedAt,
+              },
+            ]
+          : [],
+      };
+    else if (method === "recruiting/saveSchedulingPlan" && options.scheduling) {
+      const plan = {
+        ...input,
+        id: "fixture-saved-plan",
+        createdAt: checkedAt,
+        roleTitle: role.title,
+        mailSourceId: "fixture-native-mail",
+        mailSourceRevision: 1,
+        mailRead: {
+          effectId: "fixture-read",
+          linkedRunId: "fixture-run",
+          messageId: "fixture-message",
+        },
+        bookingStatus: null,
+        confirmationStatus: null,
+        bookingEffectId: null,
+        confirmationEffectId: null,
+      } as RecruitingSchedulingPlan;
+      plans.push(plan);
+      value = plan;
+    } else if (method === "recruiting/correspondence")
       value = {
         roleId: role.id,
         status: "ready",
@@ -619,7 +674,13 @@ export async function mockRecruitingApp(
               ...email,
               sourceId: source.serverId,
               sourceName: "CRM",
-              savedRead: null,
+              savedRead: options.nativeScheduling
+                ? {
+                    effectId: "native-read",
+                    linkedRunId: "native-run",
+                    messageId: "native-message",
+                  }
+                : null,
               unread: email.id === "reply-avery" ? true : email.id === "mail-blake" ? null : false,
               step: email.id === "reply-avery" ? "2" : null,
               observedAt: checkedAt,
@@ -628,16 +689,18 @@ export async function mockRecruitingApp(
               providerThreadId: email.threadId,
               campaignId: "fixture-campaign",
               eaccount: "recruiter@example.test",
-              crm: {
-                serverRevision: source.serverRevision,
-                organizationId: source.organizationId,
-                crmRoleId: crmTarget.crmRoleId,
-                candidateId: email.candidateId,
-                threadId: email.threadId,
-                campaignId: "fixture-campaign",
-                eaccount: "recruiter@example.test",
-                direction: email.direction,
-              },
+              crm: options.nativeScheduling
+                ? undefined
+                : {
+                    serverRevision: source.serverRevision,
+                    organizationId: source.organizationId,
+                    crmRoleId: crmTarget.crmRoleId,
+                    candidateId: email.candidateId,
+                    threadId: email.threadId,
+                    campaignId: "fixture-campaign",
+                    eaccount: "recruiter@example.test",
+                    direction: email.direction,
+                  },
             })),
         contacts: [],
         partial: false,
