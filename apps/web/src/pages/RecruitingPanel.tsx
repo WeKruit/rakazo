@@ -2349,29 +2349,45 @@ function CorrespondenceTabMount({
   );
 }
 
-/** The role conversation's native role when it is bound to a CRM role. */
+type BoundRole = { roleId: string; spaceId: string; title: string };
+
+/** The role conversation's native role when it is bound to a CRM role; `done` once known. */
 function useBoundRole(
   threadId: string,
   enabled: boolean,
   refreshSignal: number,
-): { roleId: string; spaceId: string } | undefined {
+): { done: boolean; role?: BoundRole } {
   const key = enabled ? JSON.stringify([threadId, refreshSignal]) : null;
-  const [read, setRead] = useState<{ key: string; role?: { roleId: string; spaceId: string } }>();
+  const [read, setRead] = useState<{ key: string; role?: BoundRole }>();
   useEffect(() => {
     if (!key) return;
     let cancelled = false;
     void rpc.recruiting
       .getWorkspace({ threadId })
       .then((workspace) => {
-        if (!cancelled && workspace?.crmTarget)
-          setRead({ key, role: { roleId: workspace.role.id, spaceId: workspace.role.spaceId } });
+        if (cancelled) return;
+        setRead({
+          key,
+          ...(workspace?.crmTarget
+            ? {
+                role: {
+                  roleId: workspace.role.id,
+                  spaceId: workspace.role.spaceId,
+                  title: workspace.role.title,
+                },
+              }
+            : {}),
+        });
       })
-      .catch(() => undefined);
+      .catch(() => {
+        if (!cancelled) setRead({ key });
+      });
     return () => {
       cancelled = true;
     };
   }, [key, threadId]);
-  return read?.key === key ? read.role : undefined;
+  const current = read?.key === key ? read : undefined;
+  return { done: !key || Boolean(current), role: current?.role };
 }
 
 function CrmRecruitingPanel({
@@ -2390,7 +2406,13 @@ function CrmRecruitingPanel({
   const [query, setQuery] = useState("");
   const [offset, setOffset] = useState(0);
   const [refresh, setRefresh] = useState(0);
-  const boundRole = useBoundRole(threadId, Boolean(agent), refreshSignal + refresh);
+  const bound = useBoundRole(threadId, Boolean(agent), refreshSignal + refresh);
+  const boundRole = bound.role && { roleId: bound.role.roleId, spaceId: bound.role.spaceId };
+  // The role tabs read their own CRM data; stored CRM views read only when they are shown.
+  const storedCrmReads =
+    !agent ||
+    !["contacts", "sequence", "inbox", "interview"].includes(browse.view) ||
+    (bound.done && !bound.role);
   const [mailPageSelection, setMailPageSelection] = useState<{
     candidateId: string;
     cursor: Extract<RecruitingCrmDataInput, { operation: "mail" }>["cursor"];
@@ -2424,6 +2446,7 @@ function CrmRecruitingPanel({
     loading?: boolean;
   }>();
   useEffect(() => {
+    if (!storedCrmReads) return;
     let cancelled = false;
     const epoch = readCache?.epoch;
     setRead({
@@ -2459,7 +2482,7 @@ function CrmRecruitingPanel({
     return () => {
       cancelled = true;
     };
-  }, [key, cacheKey, readCache, readCacheScope]);
+  }, [key, cacheKey, readCache, readCacheScope, storedCrmReads]);
   const page = read?.key === key ? read.data : undefined;
   const mailInput = {
     ...target,
@@ -2483,7 +2506,7 @@ function CrmRecruitingPanel({
     setSelectedMail(undefined);
   }, [browse.candidateId]);
   useEffect(() => {
-    if (browse.view !== "inbox" || !browse.candidateId) {
+    if (browse.view !== "inbox" || !browse.candidateId || !storedCrmReads) {
       setMail(undefined);
       return;
     }
@@ -2528,7 +2551,7 @@ function CrmRecruitingPanel({
     return () => {
       cancelled = true;
     };
-  }, [mailKey, browse.view, readCache, readCacheScope]);
+  }, [mailKey, browse.view, readCache, readCacheScope, storedCrmReads]);
   const currentMail = mail?.key === mailKey ? mail : undefined;
   const mailPage = currentMail?.data;
   const nativeMail = mailPage?.nativeCorrespondence ?? [];
@@ -2628,7 +2651,7 @@ function CrmRecruitingPanel({
     failed?: boolean;
   }>();
   useEffect(() => {
-    if (!sectionInput) return;
+    if (!sectionInput || !storedCrmReads) return;
     let cancelled = false;
     const epoch = readCache?.epoch;
     const savedKey = readCacheScope
@@ -2667,7 +2690,7 @@ function CrmRecruitingPanel({
     return () => {
       cancelled = true;
     };
-  }, [sectionKey, readCache, readCacheScope]);
+  }, [sectionKey, readCache, readCacheScope, storedCrmReads]);
   const section = sectionRead?.key === sectionKey ? sectionRead : undefined;
   const important = section?.data?.operation === "important" ? section.data : undefined;
   const campaigns = section?.data?.operation === "roleCampaigns" ? section.data : undefined;
@@ -2694,7 +2717,7 @@ function CrmRecruitingPanel({
     failed?: boolean;
   }>();
   useEffect(() => {
-    if (!detailsInput) return;
+    if (!detailsInput || !storedCrmReads) return;
     let cancelled = false;
     const epoch = readCache?.epoch;
     const savedKey = readCacheScope
@@ -2732,7 +2755,7 @@ function CrmRecruitingPanel({
     return () => {
       cancelled = true;
     };
-  }, [detailsKey, readCache, readCacheScope]);
+  }, [detailsKey, readCache, readCacheScope, storedCrmReads]);
   const currentDetails = detailsRead?.key === detailsKey ? detailsRead : undefined;
   const details = currentDetails?.data;
   const contactRegion = useRef<HTMLElement>(null);
@@ -3514,7 +3537,7 @@ function CrmRecruitingPanel({
   return (
     <div className="hire-standard-view">
       <header className="hire-section-header">
-        <h1>{page?.selectedRole?.roleLabel ?? t`CRM contacts`}</h1>
+        <h1>{page?.selectedRole?.roleLabel ?? bound.role?.title ?? t`CRM contacts`}</h1>
         {page?.selectedRole ? <p>{page.selectedRole.clientLabel}</p> : null}
       </header>
       {["contacts", "sequence", "inbox", "interview"].includes(browse.view) ? (
