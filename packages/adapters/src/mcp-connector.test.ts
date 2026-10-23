@@ -3025,6 +3025,8 @@ describe("local native Instantly campaign and lead tools", () => {
       accounts: ["team@example.test"],
       campaign: { id: CAMPAIGN, status: 0, stop_on_reply: true } as Record<string, unknown>,
       existingLeads: [] as { id: string; email: string }[],
+      campaigns: [] as Record<string, unknown>[],
+      activeRoleId: null as string | null,
       effects: new Map<string, Record<string, unknown>>(),
       requests: [] as { method: string; path: string; body?: unknown }[],
     };
@@ -3032,6 +3034,11 @@ describe("local native Instantly campaign and lead tools", () => {
       botMcpServer: { findFirst: vi.fn(async () => assignment) },
       secret: { findFirst: vi.fn(async () => ({ id: "key-1", ciphertext: "encrypted" })) },
       mcpServer: { findFirst: vi.fn(async () => server) },
+      run: {
+        findFirst: vi.fn(async ({ where }) =>
+          where.id === "run-1" ? { thread: { activeRecruitingRoleId: state.activeRoleId } } : null,
+        ),
+      },
       recruitingRole: {
         findFirst: vi.fn(async ({ where }) =>
           where.id === "role-1" && where.spaceId === "w1" && where.userId === "u1"
@@ -3080,7 +3087,7 @@ describe("local native Instantly campaign and lead tools", () => {
         if (url.pathname === "/api/v2/accounts")
           return Response.json({ items: state.accounts.map((email) => ({ email })) });
         if (url.pathname === "/api/v2/campaigns" && request.method === "GET")
-          return Response.json({ items: [] });
+          return Response.json({ items: state.campaigns });
         if (url.pathname === "/api/v2/campaigns") return Response.json({ id: CAMPAIGN, ...body });
         if (url.pathname === `/api/v2/campaigns/${CAMPAIGN}`) {
           if (request.method === "PATCH") Object.assign(state.campaign, body);
@@ -3088,6 +3095,8 @@ describe("local native Instantly campaign and lead tools", () => {
         }
         if (url.pathname.startsWith(`/api/v2/campaigns/${CAMPAIGN}/`))
           return Response.json(state.campaign);
+        if (url.pathname === "/api/v2/leads/list" && body.campaign && !body.contacts)
+          return Response.json({ items: body.campaign === "with-leads" ? [{ id: "l" }] : [] });
         if (url.pathname === "/api/v2/leads/list")
           return Response.json({
             items: state.existingLeads.filter((lead) =>
@@ -3301,6 +3310,45 @@ describe("local native Instantly campaign and lead tools", () => {
     expect(await f.run("ensure_role_campaign", { role_id: "other-role" })).toMatchObject([
       { type: "error" },
     ]);
+  });
+
+  it("create_campaign in a role conversation binds the role, so ensure_role_campaign reuses it", async () => {
+    const f = fixture();
+    f.state.activeRoleId = "role-1";
+    await f.run("create_campaign", {
+      name: "Dyna Data Infra — internal test",
+      eaccount: "team@example.test",
+    });
+    f.state.requests.length = 0;
+    const ensured = f.result(await f.run("ensure_role_campaign", { role_id: "role-1" }));
+    expect(ensured).toMatchObject({ created: false, campaignId: CAMPAIGN });
+    expect(f.state.requests.filter((r) => r.method === "POST")).toEqual([]);
+    expect(f.prisma.externalEffect.create).toHaveBeenCalledTimes(1);
+    // A second create never steals an existing mapping.
+    await f.run("create_campaign", { name: "Another", eaccount: "team@example.test" });
+    expect(f.prisma.externalEffect.create).toHaveBeenCalledTimes(1);
+  });
+
+  it("ensure_role_campaign adopts an unbound draft named after the role title before creating", async () => {
+    const f = fixture();
+    f.state.campaigns = [
+      { id: "active", name: "Founding Engineer old", status: 1, timestamp_created: "2026-10-23" },
+      { id: "empty", name: "founding engineer — v2", status: 0, timestamp_created: "2026-10-22" },
+      {
+        id: "with-leads",
+        name: "Founding Engineer",
+        status: 2,
+        timestamp_created: "2026-10-01",
+        stop_on_reply: true,
+      },
+      { id: "other", name: "Designer", status: 0, timestamp_created: "2026-10-23" },
+    ];
+    const ensured = f.result(await f.run("ensure_role_campaign", { role_id: "role-1" }));
+    expect(ensured).toMatchObject({ adopted: true, created: false, campaignId: "with-leads" });
+    expect(
+      f.state.requests.some((r) => r.method === "POST" && r.path === "/api/v2/campaigns"),
+    ).toBe(false);
+    expect(f.prisma.externalEffect.create).toHaveBeenCalledTimes(1);
   });
 
   it("add_shortlist_leads dedups, skips missing emails and records candidate -> lead ids", async () => {
