@@ -8839,6 +8839,8 @@ it("mounts the role tabs for a CRM-bound conversation and keeps stored CRM views
       spaceId: role.spaceId,
       conversation: { groupId: "group-1" },
       refreshSignal: 1,
+      // The panel's binding read is handed over so the tab does not read it again.
+      crmTarget: crmTarget.target,
     });
   }
   // The role tabs own their CRM reads; the hidden stored CRM views read nothing.
@@ -8855,7 +8857,8 @@ it("shows Autumn's criterion states, evidence, source round and saved decision f
         decision: index === 0 ? ("hold" as const) : null,
         decisionReason: index === 0 ? "Wait for the client" : null,
         latestSource: {
-          providerTaskId: "provider-task-1",
+          // A recruiter-imported list has no provider task.
+          providerTaskId: index === 2 ? null : "provider-task-1",
           taskId: "task-1",
           actionId: "action-1",
           roleRevisionId: revision.id,
@@ -8916,5 +8919,7 @@ it("shows Autumn's criterion states, evidence, source round and saved decision f
   expect(rows[0]!.textContent).toContain("Wait for the client");
   expect(rows[0]!.textContent).toContain("verified");
   expect(rows[1]!.textContent).toContain("Does not match");
+  expect(rows[2]!.textContent).toContain("Imported list");
+  expect(rows[2]!.textContent).not.toContain("Search update");
   expect(api.correspondence).not.toHaveBeenCalled();
 });

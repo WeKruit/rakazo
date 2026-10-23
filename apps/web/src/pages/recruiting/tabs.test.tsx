@@ -7,8 +7,9 @@ import { afterEach, beforeEach, expect, it, vi } from "vitest";
 const listCandidates = vi.hoisted(() => vi.fn());
 const crmData = vi.hoisted(() => vi.fn());
 const correspondence = vi.hoisted(() => vi.fn());
+const roleCampaign = vi.hoisted(() => vi.fn());
 vi.mock("../../lib/rpc", () => ({
-  rpc: { recruiting: { listCandidates, crmData, correspondence } },
+  rpc: { recruiting: { listCandidates, crmData, correspondence, roleCampaign } },
 }));
 vi.mock("@lingui/react/macro", () => ({
   Trans: ({ children }: { children: ReactNode }) => children,
@@ -360,6 +361,50 @@ it("reads full stored email bodies and exposes the selected email to chat", asyn
   expect(onSelectEmail).toHaveBeenLastCalledWith(
     expect.objectContaining({ email: expect.objectContaining({ subject: "Staff role" }) }),
   );
+});
+
+it("shows the role's Instantly campaign, its stop-on-reply risk and each lead's status", async () => {
+  crmData.mockImplementation(async (input: { operation: string }) =>
+    input.operation === "candidates"
+      ? candidatesPage
+      : {
+          operation: "roleCampaigns",
+          source,
+          checkedAt,
+          scope: "stored_role_campaigns",
+          crmRoleId: ROLE,
+          items: [],
+          offset: 0,
+          nextOffset: null,
+          nextCursor: null,
+        },
+  );
+  roleCampaign.mockResolvedValue({
+    status: "ready",
+    campaign: { name: "Staff Engineer outreach", status: 2, stopOnReply: false },
+    leads: [
+      { candidateKey: "ada-key", email: "ADA@example.com", status: -1, interestStatus: null },
+    ],
+  });
+  const view = await mount(<SequenceTab {...props} />);
+  await settle();
+  expect(roleCampaign).toHaveBeenCalledWith({ groupId: "group-1" });
+  expect(view.textContent).toContain("Staff Engineer outreach");
+  expect(view.textContent).toContain("Paused");
+  expect(view.querySelector('[role="alert"]')?.textContent).toContain("Stop on reply is off");
+  const ada = [...view.querySelectorAll("button")].find((b) => b.textContent?.includes("Ada"));
+  expect(ada?.textContent).toContain("Replied · Bounced");
+  const ben = [...view.querySelectorAll("button")].find((b) => b.textContent?.includes("Ben"));
+  expect(ben?.textContent).not.toContain("·");
+});
+
+it("shows no campaign section when the role has no bound campaign", async () => {
+  crmData.mockResolvedValue(candidatesPage);
+  roleCampaign.mockResolvedValue({ status: "none", campaign: null, leads: [] });
+  const view = await mount(<SequenceTab {...props} />);
+  await settle();
+  expect(view.textContent).not.toContain("Stop on reply");
+  expect(view.textContent).not.toContain("Paused");
 });
 
 it("derives reply status only from stored message directions", () => {

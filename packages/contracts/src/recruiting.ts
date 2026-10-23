@@ -1450,6 +1450,31 @@ export const RecruitingCorrespondenceInputPage = {
   limit: z.number().int().min(1).max(200).optional(),
   cursor: RecruitingOffsetCursorSchema.optional(),
 };
+/**
+ * The role's bound Instantly campaign, read live through the assigned connection. Statuses are the
+ * provider's integers: campaign 0 draft, 1 active, 2 paused, 3 completed; lead 1 active, 2 paused,
+ * 3 completed, -1 bounced, -2 unsubscribed.
+ */
+export const RecruitingRoleCampaignSchema = z.strictObject({
+  status: z.enum(["none", "unavailable", "ready"]),
+  campaign: z
+    .strictObject({
+      name: z.string(),
+      status: z.number().int().nullable(),
+      stopOnReply: z.boolean().nullable(),
+    })
+    .nullable(),
+  leads: z.array(
+    z.strictObject({
+      candidateKey: z.string().nullable(),
+      email: z.string(),
+      status: z.number().int().nullable(),
+      interestStatus: z.number().int().nullable(),
+    }),
+  ),
+});
+export type RecruitingRoleCampaign = z.infer<typeof RecruitingRoleCampaignSchema>;
+
 export const RecruitingCorrespondenceSchema = z.strictObject({
   roleId: RecruitingId.nullable(),
   status: z.enum(["not_checked", "ready", "empty", "unsupported", "failed"]),

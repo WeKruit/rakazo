@@ -308,6 +308,7 @@ msgid "Actions for space"
 msgstr ""
 
 #: src/pages/BillingSettingsPanel.tsx
+#: src/pages/recruiting/SequenceTab.tsx
 #: src/pages/RoutineEditor.tsx
 msgid "Active"
 msgstr "启用"
@@ -949,6 +950,10 @@ msgstr ""
 msgid "Bots with their own computer and browser"
 msgstr ""
 
+#: src/pages/recruiting/SequenceTab.tsx
+msgid "Bounced"
+msgstr ""
+
 #: src/pages/memory-providers/SerenitySettingsForm.tsx
 msgid "Brain label"
 msgstr ""
@@ -1430,6 +1435,10 @@ msgstr ""
 #: src/pages/ScratchpadSection.tsx
 msgid "Complete"
 msgstr "完成"
+
+#: src/pages/recruiting/SequenceTab.tsx
+msgid "Completed"
+msgstr ""
 
 #: src/pages/SettingsOverlay.tsx
 #: src/pages/Shell.tsx
@@ -2070,6 +2079,10 @@ msgstr "无法连接服务器"
 msgid "Could not read a CRM connection."
 msgstr ""
 
+#: src/pages/recruiting/SequenceTab.tsx
+msgid "Could not read this campaign from Instantly."
+msgstr ""
+
 #: src/pages/RecruitingCorrespondence.tsx
 msgid "Could not read this sequence."
 msgstr ""
@@ -2684,6 +2697,7 @@ msgstr ""
 msgid "Downloading…"
 msgstr ""
 
+#: src/pages/recruiting/SequenceTab.tsx
 #: src/pages/RecruitingCorrespondence.tsx
 msgid "Draft"
 msgstr ""
@@ -3257,6 +3271,10 @@ msgstr "导入 OpenAPI JSON"
 msgid "Important"
 msgstr ""
 
+#: src/pages/RecruitingPanel.tsx
+msgid "Imported list"
+msgstr ""
+
 #: src/lib/ticket-status.ts
 msgid "In progress"
 msgstr ""
@@ -3535,6 +3553,7 @@ msgid "Load earlier messages"
 msgstr "加载更早的消息"
 
 #: src/pages/Artifacts.tsx
+#: src/pages/recruiting/shared.tsx
 #: src/pages/RecruitingPanel.tsx
 msgid "Load more"
 msgstr ""
@@ -4104,7 +4123,6 @@ msgstr "新建工作区"
 msgid "New ticket"
 msgstr ""
 
-#: src/pages/recruiting/ContactsTab.tsx
 #: src/pages/RecruitingPanel.tsx
 msgid "Next"
 msgstr ""
@@ -4764,6 +4782,7 @@ msgstr "请粘贴你的 API 密钥，然后重新测试。"
 msgid "Pause consideration"
 msgstr ""
 
+#: src/pages/recruiting/SequenceTab.tsx
 #: src/pages/RoutineEditor.tsx
 msgid "Paused"
 msgstr "已暂停"
@@ -4893,7 +4912,6 @@ msgstr ""
 msgid "Preview only. Ask for the complete message to read the full body."
 msgstr ""
 
-#: src/pages/recruiting/ContactsTab.tsx
 #: src/pages/RecruitingPanel.tsx
 msgid "Previous"
 msgstr ""
@@ -6159,7 +6177,6 @@ msgstr "显示设置"
 msgid "Show transcript"
 msgstr "显示文字记录"
 
-#: src/pages/recruiting/InboxTab.tsx
 #: src/pages/recruiting/InterviewTab.tsx
 msgid "Showing the most recent CRM records."
 msgstr ""
@@ -6388,6 +6405,10 @@ msgstr ""
 #: src/pages/RecruitingPanel.tsx
 #: src/pages/Shell.tsx
 msgid "Stop considering"
+msgstr ""
+
+#: src/pages/recruiting/SequenceTab.tsx
+msgid "Stop on reply is off, so Instantly keeps sending follow-ups after a candidate replies."
 msgstr ""
 
 #: src/pages/Shell.tsx
@@ -6858,6 +6879,10 @@ msgstr "取消置顶"
 
 #: src/pages/shell/RecruitingNavigation.tsx
 msgid "Unread"
+msgstr ""
+
+#: src/pages/recruiting/SequenceTab.tsx
+msgid "Unsubscribed"
 msgstr ""
 
 #. placeholder {0}: file.name

@@ -1,15 +1,21 @@
 import { Trans, useLingui } from "@lingui/react/macro";
+import type { RecruitingRoleCampaign } from "@rakazo/contracts";
 import { Badge } from "@rakazo/ui-web";
 import { useState } from "react";
+import { rpc } from "../../lib/rpc";
 import type { RecruitingTabProps } from "./shared";
 import {
   CrmGate,
   formatDate,
+  LoadMore,
   statusText,
   TabHeader,
   TabLoading,
   TabNotice,
+  tabCacheSlot,
   useCrmData,
+  useCrmPages,
+  useKeyedRead,
   useRoleCrm,
 } from "./shared";
 
@@ -26,23 +32,92 @@ function useOutboxStatus() {
   } as const;
 }
 
+/** Instantly's own integer statuses for a campaign and for a lead. */
+function useInstantlyStatus() {
+  const { t } = useLingui();
+  return {
+    campaign: { 0: t`Draft`, 1: t`Active`, 2: t`Paused`, 3: t`Completed` } as Record<
+      number,
+      string
+    >,
+    lead: {
+      1: t`Active`,
+      2: t`Paused`,
+      3: t`Completed`,
+      [-1]: t`Bounced`,
+      [-2]: t`Unsubscribed`,
+    } as Record<number, string>,
+  };
+}
+const statusLabel = (labels: Record<number, string>, status: number | null) =>
+  status === null ? null : (labels[status] ?? String(status));
+
+/** The role's bound Instantly campaign, read live through the conversation's connection. */
+function useRoleCampaign(props: RecruitingTabProps) {
+  const { conversation, spaceId, roleId, refreshSignal } = props;
+  return useKeyedRead<RecruitingRoleCampaign>(
+    conversation ? JSON.stringify([spaceId, roleId, conversation, refreshSignal]) : null,
+    async () => rpc.recruiting.roleCampaign(conversation!),
+    tabCacheSlot(props, ["roleCampaign", spaceId, roleId, conversation]),
+  );
+}
+
+function RoleCampaign({ read }: { read: ReturnType<typeof useRoleCampaign> }) {
+  const status = useInstantlyStatus();
+  const campaign = read.data?.campaign;
+  if (!campaign) return null;
+  const label = statusLabel(status.campaign, campaign.status);
+  return (
+    <section className="mb-6 rounded-lg border border-border p-3 text-sm">
+      <div className="flex flex-wrap items-center justify-between gap-2">
+        <strong className="truncate" title={campaign.name}>
+          {campaign.name}
+        </strong>
+        {label ? (
+          <Badge variant={campaign.status === 1 ? "default" : "outline"}>{label}</Badge>
+        ) : null}
+      </div>
+      {read.data?.status === "unavailable" ? (
+        <p className="mt-2 text-xs text-muted-foreground">
+          <Trans>Could not read this campaign from Instantly.</Trans>
+        </p>
+      ) : null}
+      {campaign.stopOnReply === false ? (
+        <p role="alert" className="mt-2 text-xs text-destructive">
+          <Trans>
+            Stop on reply is off, so Instantly keeps sending follow-ups after a candidate replies.
+          </Trans>
+        </p>
+      ) : null}
+    </section>
+  );
+}
+
 /** Stored outreach state for the role: campaigns, per-candidate status and queued/sent messages. */
 export function SequenceTab(props: RecruitingTabProps) {
   const { t } = useLingui();
   const crm = useRoleCrm(props);
+  const roleCampaign = useRoleCampaign(props);
+  const instantly = useInstantlyStatus();
+  const leadStatus = new Map(
+    (roleCampaign.data?.leads ?? []).map((lead) => [
+      lead.email.toLowerCase(),
+      statusLabel(instantly.lead, lead.status),
+    ]),
+  );
   const outboxStatus = useOutboxStatus();
   const [candidateId, setCandidateId] = useState<string>();
   const ready = crm.status === "ready" ? crm.target : null;
-  const campaigns = useCrmData(
+  const campaigns = useCrmPages(
     crm,
     "roleCampaigns",
-    ready ? { crmRoleId: ready.crmRoleId, limit: 50 } : null,
+    ready ? { crmRoleId: ready.crmRoleId } : null,
     props,
   );
-  const people = useCrmData(
+  const people = useCrmPages(
     crm,
     "candidates",
-    ready ? { crmRoleId: ready.crmRoleId, limit: 50 } : null,
+    ready ? { crmRoleId: ready.crmRoleId } : null,
     props,
   );
   const details = useCrmData(crm, "candidateDetails", candidateId ? { candidateId } : null, props);
@@ -53,6 +128,7 @@ export function SequenceTab(props: RecruitingTabProps) {
   return (
     <section aria-label={t`Sequence`}>
       <TabHeader title={<Trans>Sequence</Trans>} />
+      <RoleCampaign read={roleCampaign} />
       <CrmGate crm={crm} />
       {campaigns.loading || people.loading ? <TabLoading /> : null}
       {campaigns.failed || people.failed ? (
@@ -93,6 +169,7 @@ export function SequenceTab(props: RecruitingTabProps) {
               <Trans>No stored campaign associations were returned for this role.</Trans>
             </TabNotice>
           )}
+          <LoadMore pages={campaigns} />
         </section>
       ) : null}
       {people.data ? (
@@ -130,10 +207,18 @@ export function SequenceTab(props: RecruitingTabProps) {
                     </span>
                     <span className="shrink-0 text-xs text-muted-foreground">
                       {statusText(person.outreachStatus)}
+                      {person.email && leadStatus.get(person.email.toLowerCase())
+                        ? ` · ${leadStatus.get(person.email.toLowerCase())}`
+                        : ""}
                     </span>
                   </button>
                 </li>
               ))}
+              {people.hasMore ? (
+                <li className="px-3 pb-3">
+                  <LoadMore pages={people} />
+                </li>
+              ) : null}
             </ul>
             {selected ? (
               <section aria-label={t`Messages`} className="space-y-3">
