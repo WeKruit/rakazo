@@ -3432,6 +3432,14 @@ msgstr ""
 msgid "Interested"
 msgstr ""
 
+#: src/pages/Shell.tsx
+msgid "Interjection applied"
+msgstr "插话已生效"
+
+#: src/pages/Shell.tsx
+msgid "Interjection queued"
+msgstr "插话已排队"
+
 #: src/pages/RecruitingPanel.tsx
 msgid "Internal assessment"
 msgstr ""
@@ -3463,6 +3471,10 @@ msgstr ""
 #: src/pages/RecruitingPanel.tsx
 msgid "Internal verdict: unmet"
 msgstr ""
+
+#: src/pages/Shell.tsx
+msgid "Interrupted, resuming…"
+msgstr "已中断，正在恢复…"
 
 #: src/pages/RoutineEditor.tsx
 #: src/pages/RoutineSchedule.tsx

@@ -3432,6 +3432,14 @@ msgstr "Interest"
 msgid "Interested"
 msgstr "Interested"
 
+#: src/pages/Shell.tsx
+msgid "Interjection applied"
+msgstr "Interjection applied"
+
+#: src/pages/Shell.tsx
+msgid "Interjection queued"
+msgstr "Interjection queued"
+
 #: src/pages/RecruitingPanel.tsx
 msgid "Internal assessment"
 msgstr "Internal assessment"
@@ -3463,6 +3471,10 @@ msgstr "Internal verdict: unknown"
 #: src/pages/RecruitingPanel.tsx
 msgid "Internal verdict: unmet"
 msgstr "Internal verdict: unmet"
+
+#: src/pages/Shell.tsx
+msgid "Interrupted, resuming…"
+msgstr "Interrupted, resuming…"
 
 #: src/pages/RoutineEditor.tsx
 #: src/pages/RoutineSchedule.tsx

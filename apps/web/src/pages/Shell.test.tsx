@@ -5383,6 +5383,55 @@ it("shows a sent message at once and finishes the turn from events without re-re
   expect(shellApi.listSpaces.mock.calls.length).toBe(navigationReads + 1);
 });
 
+it("sends a message during a working reply as an interjection and says when it is taken in", async () => {
+  const streams: Array<{
+    options: Parameters<typeof CoreModule.runThreadSubscription>[0];
+    head: { threadId: string; cursor: number };
+  }> = [];
+  vi.spyOn(CoreModule, "runThreadSubscription").mockImplementation(async (options) => {
+    const head = await options.loadInitial();
+    if (head) streams.push({ options, head });
+  });
+  setToolActivityPreference("off");
+  const view = await renderFeedbackShell("bot", undefined, {
+    isDeploymentOwner: false,
+    openFeedback: false,
+  });
+  const stream = streams.at(-1)!;
+  const event = (seq: number, type: string, payload: Record<string, unknown> = {}) => ({
+    id: `steer-${seq}`,
+    type,
+    threadId: stream.head.threadId,
+    botId: "bot-1",
+    spaceId: "space-1",
+    runId: "run-steer",
+    seq,
+    payload,
+    createdAt: "2026-01-01T00:00:00Z",
+  });
+  const emit = async (...items: ReturnType<typeof event>[]) =>
+    act(async () => {
+      for (const item of items) {
+        stream.options.applyEvent(item as never);
+        stream.options.onEvent(item as never, stream.head, { snapshotStale: false });
+      }
+    });
+  await emit(event(100, "run.started", { trigger: "user" }));
+  shellApi.send.mockResolvedValue({ runId: "run-steer", taskId: "task-steer", seq: 101 });
+  const composer = container!.querySelector<HTMLTextAreaElement>('textarea[name="chat-message"]')!;
+  type(composer, "Only senior people please");
+  await view.click("Send");
+  expect(shellApi.send).toHaveBeenLastCalledWith(expect.objectContaining({ interrupt: true }));
+  expect(container!.textContent).toContain("Interjection queued");
+  await emit(event(102, "run.steering.claimed", { steeringIds: ["s-1"], nextMessageSeq: 3 }));
+  expect(container!.textContent).toContain("Interjection applied");
+  await emit(event(103, "run.requeued", { status: "queued" }));
+  expect(container!.textContent).toContain("Interrupted, resuming…");
+  await emit(event(104, "run.completed"));
+  expect(container!.textContent).not.toContain("Interrupted, resuming…");
+  expect(container!.textContent).not.toContain("Interjection");
+});
+
 describe("chat open latency with 300 ms reads", () => {
   const LATENCY = 300;
   const STEP = 50;
