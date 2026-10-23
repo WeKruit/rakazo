@@ -17,6 +17,7 @@ import {
   discardAnsweredSteering,
   finalizeComputerControlRelease,
   finalizeRun,
+  followSidebar,
   followThreadEvents,
   pauseRunForInput,
   pauseRunForTakeover,
@@ -4845,7 +4846,7 @@ describe("appendEventsInTransaction", () => {
     expect(tx.thread.update).toHaveBeenCalledWith({
       where: { id: "thread-1" },
       data: { nextEventSeq: { increment: 3 } },
-      select: { nextEventSeq: true },
+      select: { nextEventSeq: true, userId: true },
     });
     expect(rows.map((row) => [row.seq, row.type])).toEqual([
       [5, "thread.message.created"],
@@ -4937,5 +4938,120 @@ describe("appendEventsInTransaction", () => {
       "run.completed",
     ]);
     expect(publish).toHaveBeenCalledWith(expect.any(String), JSON.stringify({ cursor: 6 }));
+  });
+});
+
+describe("sidebar signal", () => {
+  /** Topic-aware fanout: the shared TestFanout ignores topics. */
+  class TopicFanout implements RealtimeFanout {
+    readonly subscribers = new Map<string, Set<(payload: string) => void>>();
+    readonly published: [string, string][] = [];
+    describe() {
+      return {
+        id: "test",
+        contractVersion: "1",
+        adapterVersion: "1",
+        capabilities: { distributed: false, push: true },
+      };
+    }
+    async publish(topic: string, payload: string) {
+      this.published.push([topic, payload]);
+      for (const subscriber of this.subscribers.get(topic) ?? []) subscriber(payload);
+    }
+    async subscribe(topic: string, subscriber: (payload: string) => void) {
+      const set = this.subscribers.get(topic) ?? new Set();
+      set.add(subscriber);
+      this.subscribers.set(topic, set);
+      return async () => {
+        set.delete(subscriber);
+      };
+    }
+    async close() {}
+  }
+
+  function fixture() {
+    let nextEventSeq = 0;
+    const tx = {
+      thread: { update: vi.fn(async () => ({ nextEventSeq: ++nextEventSeq, userId: "user-1" })) },
+      event: {
+        create: vi.fn(async ({ data }: { data: Record<string, unknown> & { seq: number } }) => ({
+          ...event(data.seq),
+          ...data,
+        })),
+      },
+    };
+    const prisma = {
+      $transaction: vi.fn(async (callback: (client: typeof tx) => Promise<unknown>) =>
+        callback(tx),
+      ),
+    } as unknown as PrismaClient;
+    return { prisma, fanout: new TopicFanout() };
+  }
+
+  const started = {
+    spaceId: "workspace-1",
+    threadId: "thread-1",
+    botId: "bot-1",
+    type: "run.started" as const,
+    payload: {},
+  };
+
+  it("publishes a space+user signal after a sidebar-relevant append, and nothing for others", async () => {
+    const f = fixture();
+    await appendEvent(f.prisma, started, f.fanout);
+    expect(f.fanout.published).toEqual([
+      ["thread:thread-1", JSON.stringify({ cursor: 0 })],
+      ["space:workspace-1:user:user-1", JSON.stringify({ botId: "bot-1", type: "run.started" })],
+    ]);
+    await appendEvent(f.prisma, { ...started, type: "thread.progress" }, f.fanout);
+    expect(f.fanout.published).toHaveLength(3);
+    expect(f.fanout.published[2]?.[0]).toBe("thread:thread-1");
+  });
+
+  it("wakes the owning user's follower and never another user's in the same space", async () => {
+    const f = fixture();
+    const abort = new AbortController();
+    const mine = followSidebar(
+      { spaceId: "workspace-1", userId: "user-1" },
+      f.fanout,
+      abort.signal,
+    );
+    const theirs = followSidebar(
+      { spaceId: "workspace-1", userId: "user-2" },
+      f.fanout,
+      abort.signal,
+    );
+    await expect(mine.next()).resolves.toEqual({ value: undefined, done: false });
+    await expect(theirs.next()).resolves.toEqual({ value: undefined, done: false });
+
+    const theirsNext = theirs.next();
+    await appendEvent(f.prisma, started, f.fanout);
+    await expect(mine.next()).resolves.toEqual({
+      value: { botId: "bot-1", type: "run.started" },
+      done: false,
+    });
+    const outcome = await Promise.race([
+      theirsNext.then(() => "woke" as const),
+      new Promise<"idle">((resolve) => setTimeout(() => resolve("idle"), 20)),
+    ]);
+    expect(outcome).toBe("idle");
+    abort.abort();
+    await mine.return(undefined);
+    await theirs.return(undefined);
+    expect(f.fanout.subscribers.get("space:workspace-1:user:user-1")?.size ?? 0).toBe(0);
+  });
+
+  it("ticks on its own when no signal arrives", async () => {
+    const abort = new AbortController();
+    const stream = followSidebar(
+      { spaceId: "workspace-1", userId: "user-1" },
+      undefined,
+      abort.signal,
+      1,
+    );
+    await expect(stream.next()).resolves.toEqual({ value: undefined, done: false });
+    await expect(stream.next()).resolves.toEqual({ value: undefined, done: false });
+    abort.abort();
+    await stream.return(undefined);
   });
 });
