@@ -5,6 +5,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import type * as ComputerLifecycleModule from "./computer-lifecycle.js";
 import { acquireComputerExecutionLease, provisionComputer } from "./computer-lifecycle.js";
 import { createRunExecutor } from "./executor.js";
+import { RetiredModelCredentialError } from "./pi-oauth.js";
 import type * as RecruitingContextModule from "./recruiting-context.js";
 import { loadRecruitingRunContext } from "./recruiting-context.js";
 
@@ -531,7 +532,7 @@ describe("recent turn images follow model vision", () => {
     vi.stubEnv("OPENROUTER_API_KEY", "fake-deployment-key");
     try {
       await expect(resolve(backup.provider, backup.modelId)).rejects.toThrow(
-        "Backup model credential is no longer available",
+        RetiredModelCredentialError,
       );
       expect(prisma.spaceModelPreference.findFirst).toHaveBeenCalledWith(
         expect.objectContaining({
@@ -545,6 +546,7 @@ describe("recent turn images follow model vision", () => {
       );
       expect(prisma.secret.findFirst).toHaveBeenCalledExactlyOnceWith({
         where: { id: "missing-secret", userId: "user-1", spaceId: null },
+        select: { id: true, ciphertext: true },
       });
       await expect(resolve("openai", "gpt-4o")).rejects.toThrow("Backup model is not selected");
       expect(prisma.secret.findFirst).toHaveBeenCalledTimes(1);
@@ -660,6 +662,8 @@ describe("streaming progress is transient", () => {
           phase: "thinking",
           summary: "Reviewing candidates",
           at: "2026-10-23T00:00:00.000Z",
+          activeSince: expect.any(String),
+          resumedAt: expect.any(String),
         },
       }),
     );
@@ -684,11 +688,22 @@ describe("streaming progress is transient", () => {
     expect(transient).toEqual([
       expect.objectContaining({
         type: "thread.progress",
-        payload: { text: "Looking", streaming: true },
+        payload: {
+          text: "Looking",
+          streaming: true,
+          activeSince: expect.any(String),
+          resumedAt: expect.any(String),
+        },
       }),
       expect.objectContaining({
         type: "thread.progress",
-        payload: { text: "", activity: true, phase: "compacting" },
+        payload: {
+          text: "",
+          activity: true,
+          phase: "compacting",
+          activeSince: expect.any(String),
+          resumedAt: expect.any(String),
+        },
       }),
     ]);
     expect(events.append).not.toHaveBeenCalledWith(
