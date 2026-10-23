@@ -109,4 +109,31 @@ describe("maintained recruiting defaults", () => {
     expect(outreach.instructions).toContain("A candidate reply ends automated follow-ups");
     expect(outreach.instructions).toContain("the next step is a human-reviewed reply");
   });
+
+  it.each(RECRUITING_DEFAULT_BOTS)(
+    "$name acts now, continues the turn and follows the stage machine",
+    (bot) => {
+      expect(bot.instructions).not.toContain("with an honest zoned ETA for unfinished work");
+      expect(bot.instructions).toContain(
+        "Give a zoned ETA only for background work that keeps running after this turn",
+      );
+      expect(bot.instructions).toContain("you do now and never promise for a later time");
+      expect(bot.instructions).toContain(
+        "A turn never ends on a bare save or acknowledgement: after saving an answer, in the same turn ask the next single most decision-affecting question, or when none is missing present the brief for confirmation and say what happens next.",
+      );
+      expect(bot.instructions).toContain("Sourcer runs the search for exactly 10 profiles");
+      expect(bot.instructions).toContain("no process narration");
+    },
+  );
+
+  it("Main hands off to Sourcer in the same turn once the brief is confirmed", () => {
+    const main = RECRUITING_DEFAULT_BOTS.find((bot) => bot.key === "main")!;
+    expect(main.instructions).toContain(
+      "hand off to Sourcer in the same turn so the calibration search for exactly 10 profiles starts now",
+    );
+    const sourcer = RECRUITING_DEFAULT_BOTS.find((bot) => bot.key === "sourcer")!;
+    expect(sourcer.instructions).toContain(
+      "start the calibration search for exactly 10 profiles in the same turn",
+    );
+  });
 });
