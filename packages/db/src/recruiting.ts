@@ -11344,13 +11344,12 @@ async function profileActivityTarget(tx: Tx, actor: Actor, input: ProfileActivit
             },
           })
         : null;
+      const allowedTools = assignment?.allowedTools;
       if (
         !assignment ||
         (!assignment.allowAllTools &&
-          (!Array.isArray(assignment.allowedTools) ||
-            !["get_crm_role", "list_crm_candidates"].every((tool) =>
-              assignment.allowedTools.includes(tool),
-            )))
+          (!Array.isArray(allowedTools) ||
+            !["get_crm_role", "list_crm_candidates"].every((tool) => allowedTools.includes(tool))))
       )
         throw new IsolationError();
       if (attached)
