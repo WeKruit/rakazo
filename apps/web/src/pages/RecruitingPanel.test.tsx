@@ -4339,7 +4339,12 @@ it("shows a native candidate source Artifact without an empty custom-action head
     artifactId: f.reference.artifactId,
     includeDiagnostics: true,
   });
-  expect(sources.querySelector(`[data-artifact-id="${f.reference.artifactId}"]`)).not.toBeNull();
+  await vi.waitFor(async () => {
+    await act(async () => {
+      await new Promise((resolve) => setTimeout(resolve, 0));
+    });
+    expect(sources.querySelector(`[data-artifact-id="${f.reference.artifactId}"]`)).not.toBeNull();
+  });
 });
 
 it("persists shortlist with the candidate revision and leaves conflicts visibly unsaved", async () => {
