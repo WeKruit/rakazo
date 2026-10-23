@@ -19,8 +19,14 @@ export const RECRUITING_RESEARCH_POLL_MAX_ATTEMPTS = 720;
 /** A status probe is a free provider read; a short fixed interval keeps the handoff delay small. */
 export const RECRUITING_RESEARCH_POLL_INTERVAL_MS = 10_000;
 
-export function recruitingResearchWakeNonce(taskId: string, providerTaskId: string): string {
-  return `recruiting-research-wake:${taskId}:${providerTaskId}`;
+/** One wake per provider round: a reply (feedback/continuation) on the same task is a new round. */
+export function recruitingResearchWakeNonce(
+  taskId: string,
+  providerTaskId: string,
+  replyEffectId?: string | null,
+): string {
+  const base = `recruiting-research-wake:${taskId}:${providerTaskId}`;
+  return replyEffectId ? `${base}:${replyEffectId}` : base;
 }
 
 export function recruitingResearchPollDelay(_attempt: number): Date {
@@ -62,7 +68,30 @@ export async function pollRecruitingResearch(
   const { role, createdByRun: run } = task;
   // The task's role and creating run must agree on one owner; otherwise it is nobody's to wake.
   if (role.spaceId !== run.spaceId || role.userId !== run.userId) return;
-  const nonce = recruitingResearchWakeNonce(task.id, task.providerTaskId);
+  const { providerTaskId } = task;
+  // The latest accepted reply on this provider task identifies the round; none means the first.
+  const reply = await deps.prisma.externalEffect.findFirst({
+    where: {
+      spaceId: run.spaceId,
+      status: "completed",
+      request: { path: ["0"], equals: "__rakazoCatalogTool" },
+      OR: ["direct", "connectors_execute_tool", "mcp_execute_tool"].map((tool) => {
+        const route = tool === "direct" ? ["2", "route"] : ["3"];
+        const args = ["2", tool === "direct" ? "args" : "arguments"];
+        return {
+          AND: [
+            { request: { path: ["1"], equals: tool } },
+            { request: { path: [...route, "resourceId"], equals: task.mcpServerId } },
+            { request: { path: [...route, "toolName"], equals: "reply" } },
+            { request: { path: [...args, "task_id"], equals: providerTaskId } },
+          ],
+        };
+      }),
+    },
+    orderBy: [{ createdAt: "desc" }, { id: "desc" }],
+    select: { id: true },
+  });
+  const nonce = recruitingResearchWakeNonce(task.id, task.providerTaskId, reply?.id);
   const woken = await deps.prisma.run.findFirst({
     where: { spaceId: run.spaceId, clientNonce: nonce },
     select: { id: true },
@@ -137,7 +166,7 @@ export async function pollRecruitingResearch(
     ]);
     if (!bot || existing) return null;
     // Provider text is untrusted. Wake with local identity and status only.
-    const summary = `Research task ${task.id} for recruiting role ${task.roleId} is ${state}. Use recruiting_research status, then rows and save_results, to read and save its output. Do not start new research.`;
+    const summary = `Research task ${task.id} for recruiting role ${task.roleId} is ${state}. Use recruiting_research status, then read and save every rows page with save_results, following each returned cursor, so all returned people are kept, including unassessed people. Do not start new research.`;
     const wakeTask = await tx.task.create({
       data: {
         spaceId: run.spaceId,

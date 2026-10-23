@@ -42,4 +42,27 @@ describe("maintained recruiting defaults", () => {
     )!;
     expect(sourcing.body).toContain("ask Autumn on the same task for fresh calibration");
   });
+
+  it("gives Sourcer the find-people stage order and the no-polling continuation rule", () => {
+    const sourcer = RECRUITING_DEFAULT_BOTS.find((bot) => bot.key === "sourcer")!;
+    const order = [
+      "saved JD",
+      "decision-affecting gaps",
+      "confirmed brief version",
+      "Autumn research",
+      "save every returned page",
+      "ten-profile calibration",
+      "feedback of any scope",
+      "reply on the same Autumn task",
+      "save the expanded pool",
+    ].map((step) => sourcer.instructions.indexOf(step));
+    expect(order.every((index) => index >= 0)).toBe(true);
+    expect(order).toEqual([...order].sort((a, b) => a - b));
+    expect(sourcer.instructions).toContain("providerTaskId from saved candidate sources");
+    expect(sourcer.instructions).toContain(
+      "make one status read, then stop; results arrive in this conversation automatically",
+    );
+    expect(sourcer.instructions).toContain("Never loop on status");
+    expect(sourcer.instructions).toContain("Missing resume is unknown, never a rejection");
+  });
 });
