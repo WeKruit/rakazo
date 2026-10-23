@@ -1,4 +1,4 @@
-import { cn } from "@rakazo/ui-web";
+import { cn, Skeleton } from "@rakazo/ui-web";
 import { useEffect, useState } from "react";
 import "./beautiful-ui.css";
 
@@ -119,6 +119,34 @@ export function SuccessPop({ label }: { label: string }) {
         {label}
       </span>
     </span>
+  );
+}
+
+const SKELETON_MESSAGES = [
+  { mine: false, lines: ["w-3/5", "w-4/5", "w-2/5"] },
+  { mine: true, lines: ["w-1/3"] },
+  { mine: false, lines: ["w-4/5", "w-1/2"] },
+] as const;
+
+/** Message-shaped placeholders while a conversation's first read is in flight. */
+export function MessageSkeleton({ label }: { label: string }) {
+  return (
+    <div
+      role="status"
+      aria-label={label}
+      className="mx-auto flex min-h-0 w-full max-w-3xl flex-1 flex-col justify-end gap-6 overflow-hidden px-6 py-6"
+    >
+      {SKELETON_MESSAGES.map(({ mine, lines }, index) => (
+        <div key={index} className={cn("flex gap-3", mine && "justify-end")}>
+          {mine ? null : <Skeleton className="size-8 shrink-0 rounded-full" />}
+          <div className={cn("flex flex-1 flex-col gap-2", mine && "max-w-sm items-end")}>
+            {lines.map((width, line) => (
+              <Skeleton key={line} className={cn("h-3", mine ? "h-9 w-1/2 rounded-2xl" : width)} />
+            ))}
+          </div>
+        </div>
+      ))}
+    </div>
   );
 }
 

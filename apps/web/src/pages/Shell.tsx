@@ -156,7 +156,7 @@ import { useNavigate, useParams, useSearchParams } from "react-router-dom";
 import { ArtifactFileCard } from "../components/ArtifactFileCard";
 import { AskCard } from "../components/AskCard";
 import { ActiveBotGlyph, CollaborationMarker } from "../components/ai/CollaborationMarker";
-import { LoadingState, Shimmer } from "../components/ai/primitives";
+import { LoadingState, MessageSkeleton, Shimmer } from "../components/ai/primitives";
 import { CloudAgentCard } from "../components/CloudAgentCard";
 import { ComputerMaintenanceActions } from "../components/ComputerMaintenanceActions";
 import {
@@ -274,6 +274,7 @@ import {
   threadRunError,
   userHoldsComputerControl,
 } from "../lib/thread-events";
+import { createThreadPrefetch, threadPrefetchKey } from "../lib/thread-prefetch";
 import { getToolActivityEnabled, subscribeToolActivity } from "../lib/tool-activity-preference";
 import {
   isToolOnlyNarration,
@@ -654,6 +655,8 @@ export function ShellPage() {
   // ponytail: keep at most 20 threads in this authenticated shell; switching
   // account/space reloads it. Native refresh/SSE remains authoritative.
   const threadSnapshotCache = useRef(new Map<string, ThreadSnapshot>());
+  // Hover/focus reads for a conversation about to open; keyed by user and Space.
+  const threadPrefetch = useRef(createThreadPrefetch<ThreadSnapshot>());
   const validatedThreadEpoch = useRef<number | null>(null);
   const botsRefreshEpoch = useRef(0);
   const botsRefreshApplied = useRef(0);
@@ -832,7 +835,11 @@ export function ShellPage() {
   useEffect(() => {
     const cache = recruitingReadCache.current;
     // Saved reads belong to one account and Space; drop them on unmount or when either changes.
-    return () => clearRecruitingReads(cache);
+    const prefetched = threadPrefetch.current;
+    return () => {
+      clearRecruitingReads(cache);
+      prefetched.clear();
+    };
   }, [userId, bootstrapMe?.spaceId]);
   const call = useCallSession(userId, bootstrapMe?.spaceId);
   const showToolActivity = useSyncExternalStore(
@@ -1338,12 +1345,42 @@ export function ShellPage() {
     });
   }
 
+  function prefetchThread(target: { botId?: string; groupId?: string }, spaceId?: string) {
+    const currentSpaceId = bootstrapMe?.spaceId;
+    if (
+      !userId ||
+      !currentSpaceId ||
+      spaceId !== currentSpaceId ||
+      (selectedSpaceId() ?? currentSpaceId) !== currentSpaceId ||
+      (target.groupId ? target.groupId === groupId : !inGroup && target.botId === active?.id)
+    )
+      return;
+    threadPrefetch.current.prefetch(threadPrefetchKey(userId, currentSpaceId, target), () =>
+      rpc.threads.get(target),
+    );
+  }
+
+  function prefetchSidebarChat(item: { kind: string; chat: { id: string; spaceId: string } }) {
+    prefetchThread(
+      item.kind === "bot" ? { botId: item.chat.id } : { groupId: item.chat.id },
+      item.chat.spaceId,
+    );
+  }
+
   async function readThreadSnapshot(
     target: { botId?: string; groupId?: string },
     signal: AbortSignal | undefined,
     isCurrent: () => boolean,
+    opening = false,
   ) {
     try {
+      const prefetched =
+        opening && userId && bootstrapMe?.spaceId
+          ? await threadPrefetch.current
+              .take(threadPrefetchKey(userId, bootstrapMe.spaceId, target))
+              ?.catch(() => undefined)
+          : undefined;
+      if (prefetched) return prefetched;
       return await rpc.threads.get(target, signal ? { signal } : undefined);
     } catch (error) {
       if (
@@ -1362,7 +1399,7 @@ export function ShellPage() {
     }
   }
 
-  async function refreshGroupThread(id: string, signal?: AbortSignal) {
+  async function refreshGroupThread(id: string, signal?: AbortSignal, opening = false) {
     const scrollElement = messageScroll.current;
     const stickToEnd = !scrollElement || transcriptIsNearEnd(scrollElement);
     markOnce("rk:renderer:thread-request-start");
@@ -1372,7 +1409,7 @@ export function ShellPage() {
       activeGroupId.current === id &&
       epoch === historyEpoch.current &&
       request === groupRefreshEpoch.current;
-    const snap = await readThreadSnapshot({ groupId: id }, signal, isCurrent);
+    const snap = await readThreadSnapshot({ groupId: id }, signal, isCurrent, opening);
     markOnce("rk:renderer:thread-response");
     if (!isCurrent()) return snap;
     const reconciled = reconcileRefreshedThread(
@@ -1397,7 +1434,7 @@ export function ShellPage() {
     return snap;
   }
 
-  async function refreshThread(id: string, signal?: AbortSignal) {
+  async function refreshThread(id: string, signal?: AbortSignal, opening = false) {
     const scrollElement = messageScroll.current;
     const stickToEnd = !scrollElement || transcriptIsNearEnd(scrollElement);
     markOnce("rk:renderer:thread-request-start");
@@ -1409,7 +1446,7 @@ export function ShellPage() {
       activeBotId.current === id &&
       epoch === historyEpoch.current &&
       request === threadRefreshEpoch.current;
-    const snap = await readThreadSnapshot({ botId: id }, signal, isCurrent);
+    const snap = await readThreadSnapshot({ botId: id }, signal, isCurrent, opening);
     markOnce("rk:renderer:thread-response");
     if (
       activeBotId.current !== id ||
@@ -1778,7 +1815,7 @@ export function ShellPage() {
               threadSnapshotSignal(abort.signal),
               () => epoch === historyEpoch.current && activeBotId.current === active.id,
             )
-          : refreshThread(active.id, threadSnapshotSignal(abort.signal));
+          : refreshThread(active.id, threadSnapshotSignal(abort.signal), true);
       },
       loadHead: () =>
         rpc.threads.head({ botId: active.id }, { signal: threadSnapshotSignal(abort.signal) }),
@@ -1918,7 +1955,7 @@ export function ShellPage() {
               threadSnapshotSignal(abort.signal),
               () => epoch === historyEpoch.current && activeGroupId.current === groupId,
             )
-          : refreshGroupThread(groupId, threadSnapshotSignal(abort.signal));
+          : refreshGroupThread(groupId, threadSnapshotSignal(abort.signal), true);
       },
       loadHead: () => rpc.threads.head({ groupId }, { signal: threadSnapshotSignal(abort.signal) }),
       refresh: async () => {
@@ -2291,9 +2328,14 @@ export function ShellPage() {
           ...(searchParams.get("crmRole") ? { crmRoleId: searchParams.get("crmRole")! } : {}),
         }
       : undefined;
+  // The authorized navigation already names the thread, so role reads need not wait for threads.get.
+  const knownThreadId =
+    activeSnapshot?.threadId ?? (inGroup ? activeGroup?.threadId : active?.threadId);
+  const knownThreadIdRef = useRef(knownThreadId);
+  knownThreadIdRef.current = knownThreadId;
   const recruitingCacheScope =
-    userId && bootstrapMe?.spaceId && activeSnapshot?.threadId
-      ? JSON.stringify([userId, bootstrapMe.spaceId, activeSnapshot.threadId])
+    userId && bootstrapMe?.spaceId && knownThreadId
+      ? JSON.stringify([userId, bootstrapMe.spaceId, knownThreadId])
       : undefined;
   const boundRoleView =
     !showToolActivity &&
@@ -2308,20 +2350,20 @@ export function ShellPage() {
     failed?: boolean;
   }>();
   useEffect(() => {
-    if (!boundRoleView || !recruitingCacheScope || !activeSnapshot?.threadId) {
+    if (!boundRoleView || !recruitingCacheScope || !knownThreadId) {
       setBindingRead(undefined);
       return;
     }
     let cancelled = false;
     const cache = recruitingReadCache.current;
     const epoch = cache.epoch;
-    const threadId = activeSnapshot.threadId;
+    const threadId = knownThreadId;
     const isCurrent = () =>
       !cancelled &&
       epoch === cache.epoch &&
       botsRefreshUser.current.id === userId &&
       (selectedSpaceId() ?? bootstrapMe?.spaceId) === bootstrapMe?.spaceId &&
-      snapshotRef.current?.threadId === threadId &&
+      knownThreadIdRef.current === threadId &&
       activeGroupId.current === groupId;
     const cached = cache.entries.get(`${recruitingCacheScope}:workspace`) as
       | { workspace?: Awaited<ReturnType<typeof rpc.recruiting.getWorkspace>> }
@@ -2346,7 +2388,7 @@ export function ShellPage() {
     boundRoleView,
     recruitingCacheScope,
     bindingReadKey,
-    activeSnapshot?.threadId,
+    knownThreadId,
     userId,
     bootstrapMe?.spaceId,
     groupId,
@@ -4312,7 +4354,9 @@ export function ShellPage() {
           <>
             {desktopBridge() ? <div className="app-drag px-5 pt-4"><WindowChrome /></div> : null}
             <RecruitingNavigation
-              crmContext={recruitingCacheScope && activeSnapshot?.threadId ? { target: transcriptArtifactTarget, scope: recruitingCacheScope, cache: recruitingReadCache.current, refreshSignal: recruitingRefresh } : undefined}
+              loading={!initialBotsLoaded}
+              onPrefetchRole={(id) => prefetchThread({ groupId: id }, groups.find((group) => group.id === id)?.spaceId)}
+              crmContext={recruitingCacheScope ? { target: transcriptArtifactTarget, scope: recruitingCacheScope, cache: recruitingReadCache.current, refreshSignal: recruitingRefresh } : undefined}
               crmSelection={effectiveCrmSelection}
               onOpenCrmRole={(selection, linkedGroupId) => {
                 setPanel(null); setMobileSidebarOpen(false); setRoleChatOpen(false);
@@ -4720,6 +4764,8 @@ export function ShellPage() {
                                 event.preventDefault();
                                 reorderRosterBot(item.chat.id, target, groupBotIds);
                               }}
+                              onMouseEnter={() => prefetchSidebarChat(item)}
+                              onFocus={() => prefetchSidebarChat(item)}
                               onClick={() => {
                                 openSpaceChat(
                                   item.chat.spaceId,
@@ -5115,10 +5161,8 @@ export function ShellPage() {
             </Button>
           </div>
         ) : null}
-        {workspaceFull && !workspaceNewRole && !activeSnapshot ? (
-          <div role="status" className="grid min-h-0 flex-1 place-items-center text-muted-foreground">
-            <Shimmer><Trans>Loading…</Trans></Shimmer>
-          </div>
+        {workspaceFull && !workspaceNewRole && !activeSnapshot && !(workspaceCandidates && knownThreadId) ? (
+          <MessageSkeleton label={t`Loading…`} />
         ) : null}
         {workspaceNewRole ? (
           <div className="rk-scroll recruiting-workspace-main min-h-0 flex-1 overflow-y-auto">
@@ -5170,14 +5214,14 @@ export function ShellPage() {
             />
           </div>
         ) : null}
-        {workspaceCandidates && activeSnapshot?.threadId ? (
+        {workspaceCandidates && knownThreadId ? (
           <div className="rk-scroll recruiting-workspace-main min-h-0 flex-1 overflow-y-auto">
             <div className="recruiting-workspace-content">
               <RecruitingPanel
-                key={`${userId}:${bootstrapMe?.spaceId}:${activeSnapshot.threadId}:workspace`}
+                key={`${userId}:${bootstrapMe?.spaceId}:${knownThreadId}:workspace`}
                 presentation="workspace"
                 view={recruitingWorkspaceView === "shortlist" ? "shortlist" : recruitingWorkspaceView === "contacts" ? "contacts" : "results"}
-                threadId={activeSnapshot.threadId}
+                threadId={knownThreadId}
                 botId={inGroup ? undefined : active?.id}
                 groupId={inGroup ? groupId : undefined}
                 readCache={recruitingReadCache.current}
@@ -5380,11 +5424,7 @@ export function ShellPage() {
             </Button>
           </div>
         ) : !activeSnapshot ? (
-          <div role="status" className="grid flex-1 place-items-center text-muted-foreground">
-            <Shimmer>
-              <Trans>Loading…</Trans>
-            </Shimmer>
-          </div>
+          <MessageSkeleton label={t`Loading…`} />
         ) : (
           <Transcript
             key={emptyCrmChat ? composerDraftKey : activeSnapshot?.threadId}
@@ -5526,6 +5566,11 @@ export function ShellPage() {
                   }
                 : undefined
             }
+          />
+        ) : !initialBotsLoaded ? (
+          <div
+            aria-hidden="true"
+            className="mx-6 mb-6 h-[54px] rounded-3xl border border-border bg-background"
           />
         ) : null}
         </section>
