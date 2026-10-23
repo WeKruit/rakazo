@@ -93,6 +93,7 @@ import { CorrespondenceEmails } from "./RecruitingCorrespondence";
 import type { RecruitingInboxEmail, RecruitingTabProps } from "./recruiting";
 import { InboxWithReply, InterviewTab, SequenceTab } from "./recruiting";
 import { ContactsTab } from "./recruiting/ContactsTab";
+import type { ShortlistWeekFilter } from "./recruiting/dashboard-drilldown";
 import type { RecruitingDetailPerson } from "./recruiting/detail";
 import { useRecruitingDetail } from "./recruiting/detail";
 import { RetryNotice } from "./recruiting/RetryNotice";
@@ -140,6 +141,8 @@ export type CandidateFeedback = {
 };
 
 type Props = {
+  shortlistWeekFilter?: ShortlistWeekFilter;
+  onClearShortlistWeekFilter?: () => void;
   /** The thread is this CRM role's own conversation, so its agent results share the workbench. */
   roleConversation?: boolean;
   /** The role conversation's own Sequence, Inbox or Interview view, shown above its CRM history. */
@@ -3660,6 +3663,8 @@ function NativeRecruitingPanel(props: Props) {
 }
 
 function RecruitingWorkspace({
+  shortlistWeekFilter,
+  onClearShortlistWeekFilter,
   userId,
   threadId,
   botId,
@@ -3727,12 +3732,15 @@ function RecruitingWorkspace({
     detailOpen: candidateDetailOpen,
   } = candidateList;
   const candidateView = contactsView ? "table" : storedCandidateView;
+  const filteredShortlistWeek = Boolean(shortlistWeekFilter);
   const candidateFilters = useMemo(
     () =>
-      presentation === "workspace" && view === "shortlist"
-        ? { ...storedCandidateFilters, shortlisted: true as const }
-        : storedCandidateFilters,
-    [presentation, view, storedCandidateFilters],
+      filteredShortlistWeek
+        ? { shortlisted: true as const, sort: storedCandidateFilters.sort }
+        : presentation === "workspace" && view === "shortlist"
+          ? { ...storedCandidateFilters, shortlisted: true as const }
+          : storedCandidateFilters,
+    [presentation, view, storedCandidateFilters, filteredShortlistWeek],
   );
   // Every returned candidate keeps Autumn's own result fields in the workspace table.
   const candidateTableDetails = presentation === "workspace" && !contactsView;
@@ -5486,7 +5494,7 @@ function RecruitingWorkspace({
                   : null}
                 <div
                   className={
-                    presentation === "workspace"
+                    filteredShortlistWeek ? "hidden" : presentation === "workspace"
                       ? "hire-results-filters flex flex-wrap gap-2"
                       : "flex flex-wrap gap-2"
                   }
@@ -5690,6 +5698,8 @@ function RecruitingWorkspace({
                 ) : null}
                 {contactsView ? (
                   <ContactsTab
+                    shortlistWeekFilter={shortlistWeekFilter}
+                    onClearShortlistWeekFilter={onClearShortlistWeekFilter}
                     roleId={workspace.role.id}
                     spaceId={workspace.role.spaceId}
                     criterionRevision={workspace.revision}

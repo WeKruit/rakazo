@@ -399,8 +399,8 @@ it("opens the source project from selected metric and weekly-chart breakdowns", 
   );
   projects = [...funnel.querySelectorAll<HTMLButtonElement>('ul[aria-label="Projects"] button')];
   expect(projects.map((item) => item.textContent)).toEqual([
-    "Staff Engineer—",
-    "Product Designer—",
+    "Staff EngineerView role records—",
+    "Product DesignerView role records—",
   ]);
   const chart = container.querySelector<HTMLElement>('[aria-label="Shortlisted profiles"]')!;
   const weeks = [...chart.querySelectorAll<HTMLButtonElement>("ol button")];
@@ -413,7 +413,15 @@ it("opens the source project from selected metric and weekly-chart breakdowns", 
     "Product Designer1",
   ]);
   await act(async () => sourceProjects[0]!.click());
-  expect(onOpenRole).toHaveBeenLastCalledWith("g1", "shortlist");
+  expect(onOpenRole).toHaveBeenLastCalledWith(
+    "g1",
+    "contacts",
+    expect.objectContaining({ kind: "shortlisted-week", roleId: "role-thread-g1" }),
+  );
+  const filter = onOpenRole.mock.calls.at(-1)![2];
+  expect(Date.parse(filter.from)).toBeLessThanOrEqual(Date.now());
+  expect(Date.parse(filter.before)).toBeGreaterThan(Date.now());
+  expect(Date.parse(filter.observedThrough)).toBeLessThanOrEqual(Date.now());
 });
 
 it("rejects a late overview response from the previous account scope and resets its project filter", async () => {
@@ -455,9 +463,12 @@ it.each([
   const projects = funnel.querySelectorAll<HTMLButtonElement>('ul[aria-label="Projects"] button');
   await act(async () => projects[1]!.click());
   expect(onOpenRole).toHaveBeenLastCalledWith("g2", view);
-  expect(funnel.textContent).toContain(
-    "The destination is not filtered to this metric’s exact candidates.",
-  );
+  if (label !== "Shortlisted") {
+    expect(funnel.textContent).toContain("View role records");
+    expect(funnel.textContent).toContain(
+      "The destination is not filtered to this metric’s exact candidates.",
+    );
+  }
 });
 
 it.each(["confirmed", "accepted"])(

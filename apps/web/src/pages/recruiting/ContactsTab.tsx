@@ -4,6 +4,8 @@ import { Button } from "@rakazo/ui-web";
 import { Bookmark, Mail, Sparkles } from "lucide-react";
 import { useEffect, useState } from "react";
 import { CandidateDirectory } from "./CandidateDirectory";
+import type { ShortlistWeekFilter } from "./dashboard-drilldown";
+import { isInShortlistWeek } from "./dashboard-drilldown";
 import type { RecruitingDetailTarget } from "./detail";
 import { pendingDetailTarget, useRecruitingDetail } from "./detail";
 import type { ProfileCriterionRevision } from "./profile";
@@ -47,6 +49,8 @@ export type AutumnCandidateActions = {
 export function ContactsTab(
   props: RecruitingTabProps & {
     autumn?: AutumnCandidatesRead & AutumnCandidateActions;
+    shortlistWeekFilter?: ShortlistWeekFilter;
+    onClearShortlistWeekFilter?: () => void;
     criterionRevision?: ProfileCriterionRevision;
     onRefine?: () => void;
   },
@@ -71,15 +75,30 @@ export function ContactsTab(
     ...props,
     autumn: autumn && {
       ...autumn,
+      ...(props.shortlistWeekFilter ? { includeCrm: false } : {}),
       email: (candidate) =>
         lookups.find((contact) => contact.candidateKey === candidate.candidateKey)?.emails[0]
           ?.address ?? null,
     },
   });
-  const { rows, loadedCount } = list;
-  const unmatched = lookups.filter(
-    (contact) => !rows.some((row) => lookupsFor(row).includes(contact)),
-  );
+  const filter = props.shortlistWeekFilter;
+  const rows = filter
+    ? list.rows.filter(
+        (row) =>
+          props.roleId === filter.roleId &&
+          row.autumn?.roleId === filter.roleId &&
+          isInShortlistWeek(row.autumn, filter),
+      )
+    : list.rows;
+  const loadedCount = rows.length;
+  const total = filter
+    ? list.more.hasMore || list.autumn?.loading || list.autumn?.failed
+      ? null
+      : rows.length
+    : list.total;
+  const unmatched = filter
+    ? []
+    : lookups.filter((contact) => !rows.some((row) => lookupsFor(row).includes(contact)));
   const failures = [
     list.autumn?.failed ? (
       <RetryNotice key="autumn" onRetry={list.autumn.retry}>
@@ -166,12 +185,12 @@ export function ContactsTab(
 
   const toolbar = (
     <div className="flex min-w-0 flex-1 flex-wrap items-center gap-x-3 gap-y-1 text-xs text-muted-foreground">
-      {list.total !== null ? (
+      {total !== null ? (
         <p>
-          <Plural value={list.total} _1="# candidate" other="# candidates" />
+          <Plural value={total} _1="# candidate" other="# candidates" />
         </p>
       ) : null}
-      {list.total !== null && list.total > rows.length && rows.length ? (
+      {total !== null && total > rows.length && rows.length ? (
         <p>
           <Trans>Showing the first {rows.length}</Trans>
         </p>
@@ -187,6 +206,22 @@ export function ContactsTab(
 
   return (
     <section aria-label={t`Contacts`}>
+      {filter ? (
+        <div className="mb-3 flex flex-wrap items-center gap-2 text-sm">
+          <p>
+            <Trans>Shortlisted</Trans> · {new Date(filter.from).toLocaleDateString()} –{" "}
+            {new Date(Date.parse(filter.before) - 1).toLocaleDateString()}
+          </p>
+          <Button size="sm" variant="outline" onClick={props.onClearShortlistWeekFilter}>
+            <Trans>Clear date filter</Trans>
+          </Button>
+          {filter.roleId !== props.roleId ? (
+            <p role="alert">
+              <Trans>This filter belongs to another role.</Trans>
+            </p>
+          ) : null}
+        </div>
+      ) : null}
       {!rows.length && props.onRefine ? <div className="mb-2">{toolbar}</div> : null}
       {!autumn && list.crm.status !== "loading" && list.crm.status !== "failed" ? (
         <CrmGate crm={list.crm} />
@@ -201,7 +236,7 @@ export function ContactsTab(
           <Trans>Contact details have not been checked yet.</Trans>
         </p>
       ) : null}
-      {list.total === null && loadedCount > 0 ? (
+      {total === null && loadedCount > 0 ? (
         <p className="mb-2 text-sm text-muted-foreground">
           <Trans>{loadedCount} loaded</Trans>
         </p>
@@ -287,7 +322,9 @@ export function ContactsTab(
       {failures}
       {empty ? (
         <TabNotice>
-          {autumn ? (
+          {filter ? (
+            <Trans>No loaded candidates match this date filter.</Trans>
+          ) : autumn ? (
             <Trans>No saved candidates</Trans>
           ) : (
             <Trans>No contacts for this role yet.</Trans>

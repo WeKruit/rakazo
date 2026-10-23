@@ -29,6 +29,7 @@ import {
   roleSummary,
   weekStart,
 } from "./dashboard";
+import type { ShortlistWeekFilter } from "./dashboard-drilldown";
 import { RetryNotice } from "./RetryNotice";
 import { useKeyedRead } from "./shared";
 
@@ -135,7 +136,9 @@ function useOverview(
         return setRead({ key, failed: true });
       const data: Overview = {
         roles: results.flatMap((result) => (result.summary ? [result.summary] : [])),
-        bookings: results.flatMap((result) => ("bookings" in result ? result.bookings ?? [] : [])),
+        bookings: results.flatMap((result) =>
+          "bookings" in result ? (result.bookings ?? []) : [],
+        ),
         bookingUnknownGroups: results
           .filter((result) => !("bookingUnknown" in result) || result.bookingUnknown)
           .map((result) => result.groupId),
@@ -169,17 +172,21 @@ function useOverview(
 
 type DashboardDrilldown = {
   roleGroups: ReadonlyMap<string, Group>;
-  onOpenRole: (groupId: string, view?: DashboardRoleView) => void;
+  onOpenRole: (groupId: string, view?: DashboardRoleView, filter?: ShortlistWeekFilter) => void;
 };
 
 function RoleBreakdown({
   items,
   view,
+  filterForRole,
+  genericNavigation,
   roleGroups,
   onOpenRole,
 }: DashboardDrilldown & {
   items: readonly { role: RoleSummary; count: number | null; partial?: boolean }[];
   view: DashboardRoleView;
+  filterForRole?: (role: RoleSummary) => ShortlistWeekFilter;
+  genericNavigation?: boolean;
 }) {
   const { t } = useLingui();
   return (
@@ -191,9 +198,20 @@ function RoleBreakdown({
             <Button
               variant="ghost"
               className="h-auto w-full justify-between gap-3 px-2 py-2 text-start font-normal"
-              onClick={() => onOpenRole(group.id, view)}
+              onClick={() =>
+                filterForRole
+                  ? onOpenRole(group.id, view, filterForRole(role))
+                  : onOpenRole(group.id, view)
+              }
             >
-              <span className="min-w-0 truncate">{group.name}</span>
+              <span className="min-w-0 truncate">
+                {group.name}
+                {genericNavigation ? (
+                  <span className="block text-xs text-muted-foreground">
+                    <Trans>View role records</Trans>
+                  </span>
+                ) : null}
+              </span>
               <span className="shrink-0 tabular-nums">
                 {count === null ? "—" : `${partial ? "≥" : ""}${count}`}
               </span>
@@ -299,7 +317,18 @@ function WeeklyShortlist({
       {selectedWeek ? (
         <RoleBreakdown
           {...drilldown}
-          view="shortlist"
+          view="contacts"
+          filterForRole={(role) => {
+            const before = new Date(selectedWeek.start);
+            before.setDate(before.getDate() + 7);
+            return {
+              kind: "shortlisted-week",
+              roleId: role.roleId,
+              from: selectedWeek.start.toISOString(),
+              before: before.toISOString(),
+              observedThrough: new Date().toISOString(),
+            };
+          }}
           items={roles.map((role) => ({
             role,
             count: role.shortlistedDates.filter((value) => {
@@ -312,11 +341,6 @@ function WeeklyShortlist({
             }).length,
           }))}
         />
-      ) : null}
-      {selectedWeek ? (
-        <p className="mt-2 text-xs text-muted-foreground">
-          <Trans>Opens the role’s full shortlist. The selected week is not applied there.</Trans>
-        </p>
       ) : null}
       {undated ? (
         <p className="mt-3 text-xs text-muted-foreground">
@@ -388,6 +412,7 @@ function OutreachFunnel({
         <RoleBreakdown
           {...drilldown}
           view={dashboardStageView(selected)}
+          genericNavigation={selected !== "shortlisted"}
           items={roles.map((role) => ({
             role,
             count: role[selected],
@@ -395,7 +420,7 @@ function OutreachFunnel({
           }))}
         />
       ) : null}
-      {selected ? (
+      {selected && selected !== "shortlisted" ? (
         <p className="mt-2 text-xs text-muted-foreground">
           <Trans>
             Opens this role’s records. The destination is not filtered to this metric’s exact
@@ -422,7 +447,7 @@ function YourTasks({
   refreshSignal: number;
   /** Role id → its conversation and name, for reminders tied to a role. */
   roleGroups: ReadonlyMap<string, Group>;
-  onOpenRole: (groupId: string, view?: DashboardRoleView) => void;
+  onOpenRole: (groupId: string, view?: DashboardRoleView, filter?: ShortlistWeekFilter) => void;
   project: string | null;
 }) {
   const { t } = useLingui();
@@ -565,7 +590,7 @@ export function HomeDashboard({
   /** User and Space the cached overview belongs to. */
   readCacheScope?: string;
   refreshSignal?: number;
-  onOpenRole: (groupId: string, view?: DashboardRoleView) => void;
+  onOpenRole: (groupId: string, view?: DashboardRoleView, filter?: ShortlistWeekFilter) => void;
   onOpenNavigation?: () => void;
   navigationCollapsed?: boolean;
 }) {

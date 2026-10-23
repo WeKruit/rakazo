@@ -328,6 +328,7 @@ import {
   RecruitingDetailProvider,
   useRecruitingDetailController,
 } from "./recruiting";
+import { readShortlistWeekFilter, writeShortlistWeekFilter } from "./recruiting/dashboard-drilldown";
 import { HomeDashboard } from "./recruiting/HomeDashboard";
 import { InterviewTab } from "./recruiting/InterviewTab";
 import { SequenceTab } from "./recruiting/SequenceTab";
@@ -5385,7 +5386,7 @@ export function ShellPage() {
       )}
 
       {homeView ? <HomeDashboard userName={session.data?.user.name} groups={groups} readCache={recruitingReadCache.current} readCacheScope={userId && bootstrapMe?.spaceId ? JSON.stringify([userId, bootstrapMe.spaceId]) : undefined} refreshSignal={recruitingRefresh}
-        onOpenRole={(id, view = "results") => navigate(`/app/g/${id}?view=${view}`)} navigationCollapsed={botsSidebarCollapsed} onOpenNavigation={() => { setBotsSidebarCollapsedPref(false); setMobileSidebarOpen(true); }} /> : null}
+        onOpenRole={(id, view = "results", filter) => navigate(`/app/g/${id}?${writeShortlistWeekFilter(new URLSearchParams({ view }), filter)}`)} navigationCollapsed={botsSidebarCollapsed} onOpenNavigation={() => { setBotsSidebarCollapsedPref(false); setMobileSidebarOpen(true); }} /> : null}
       {/* Keep the composer's z-index inside the chat so phone overlays like the side panel cover it. */}
       <main
         aria-hidden={mobileSidebarOpen || undefined}
@@ -5442,6 +5443,7 @@ export function ShellPage() {
         {(crmMode || (boundRoleCrmMode && effectiveCrmSelection)) && activeSnapshot?.threadId ? <div className="rk-scroll recruiting-workspace-main min-h-0 flex-1 overflow-y-auto">{effectiveCrmSelection ? <RecruitingPanel
           threadId={activeSnapshot.threadId} botId={inGroup ? undefined : active?.id} groupId={inGroup ? groupId : undefined}
           readCache={recruitingReadCache.current} readCacheScope={recruitingCacheScope} refreshSignal={recruitingRefresh} onClose={() => {}}
+          shortlistWeekFilter={recruitingWorkspaceView === "contacts" ? readShortlistWeekFilter(searchParams) : undefined} onClearShortlistWeekFilter={() => setSearchParams(current => writeShortlistWeekFilter(current))}
           roleConversation={!emptyCrmChat} correspondence={nativeCorrespondence} onBrowseCandidates={() => openRecruitingView("results")} onDiscussCandidate={discussCandidate} onCandidateFeedback={feedbackCandidate} candidateFeedbackRecipients={candidateFeedbackRecipients}
           crmBrowse={{ selection: effectiveCrmSelection, view: recruitingWorkspaceView, candidateId: searchParams.get("crmCandidate") ?? undefined,
             onSelectCandidate: (id, view = "inbox") => setSearchParams(current => { const next = new URLSearchParams(current); next.set("crmCandidate", id); next.set("view", view); return next; }),
@@ -5476,6 +5478,8 @@ export function ShellPage() {
                 key={`${userId}:${bootstrapMe?.spaceId}:${knownThreadId}:workspace`}
                 presentation="workspace"
                 view={recruitingWorkspaceView === "shortlist" ? "shortlist" : recruitingWorkspaceView === "workflow" ? "results" : "contacts"}
+                shortlistWeekFilter={recruitingWorkspaceView === "contacts" ? readShortlistWeekFilter(searchParams) : undefined}
+                onClearShortlistWeekFilter={() => setSearchParams(current => writeShortlistWeekFilter(current))}
                 threadId={knownThreadId}
                 botId={inGroup ? undefined : active?.id}
                 groupId={inGroup ? groupId : undefined}
