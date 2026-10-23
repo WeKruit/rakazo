@@ -4,6 +4,7 @@ import type {
   AskAnswer,
   AskFormResponse,
   BotSecretDestination,
+  ConnectionAskAnswer,
   MessageBlock,
   ProductEvent,
 } from "@rakazo/contracts";
@@ -29,6 +30,7 @@ import { getLogger } from "@rakazo/logging";
 import { cancelRunsInTransaction } from "./cancel-runs.js";
 import type { Prisma, PrismaClient } from "./client.js";
 import { expireComputerExecutionLeases } from "./computers.js";
+import { loadConnectServer } from "./connect-asks.js";
 import {
   assertRunCanWriteHistory,
   assertRunIsCancelled,
@@ -858,6 +860,21 @@ async function commitAnswerRunInput(
   if (formResponse && (input.answerMessageId || input.username || input.clientNonce)) return null;
   const approvalAsk = isApprovalAskBlock(pendingAsk);
   const secretAsk = isSecretAskBlock(pendingAsk);
+  const connection = pendingAsk.connection;
+  // Only a verified connection for this bot answers "connected"; anything else is not_connected.
+  if (connection && (input.answerMessageId || input.username)) return null;
+  const connectAnswer: ConnectionAskAnswer | undefined = connection
+    ? answerText === "connected" &&
+      (
+        await loadConnectServer(
+          tx,
+          { spaceId: input.spaceId, userId: run.userId, botId: run.botId },
+          connection.serverId,
+        )
+      )?.connected
+      ? "connected"
+      : "not_connected"
+    : undefined;
   const choiceAsk = !approvalAsk && !secretAsk && Boolean(pendingAsk.actions?.length);
   const selectedChoice = choiceAsk ? resolveAskChoice(answerText, pendingAsk.actions) : undefined;
   if (secretAsk && !runSecretWriter) return null;
@@ -900,7 +917,7 @@ async function commitAnswerRunInput(
     }
   }
 
-  const ordinaryAsk = !approvalAsk && !secretAsk;
+  const ordinaryAsk = !approvalAsk && !secretAsk && !connection;
   if (ordinaryAsk && !answerText.trim()) return null;
   let answerMessageId = input.answerMessageId;
   if (answerMessageId !== undefined) {
@@ -950,7 +967,7 @@ async function commitAnswerRunInput(
   });
   if (queued.count !== 1) return null;
 
-  const recordedAnswer = secretAsk ? "" : (selectedChoice?.id ?? answerText);
+  const recordedAnswer = secretAsk ? "" : (connectAnswer ?? selectedChoice?.id ?? answerText);
   const callId = callIdFromClientNonce(input.clientNonce);
   const recordsCallUtterance = Boolean(callId && !secretAsk);
 
@@ -1043,9 +1060,13 @@ async function commitAnswerRunInput(
           pendingAsk.text,
           formResponse
             ? JSON.stringify(formResponse)
-            : selectedChoice
-              ? `Selected choice ${selectedChoice.id}: ${resumeLabel}`
-              : answerText,
+            : connection
+              ? connectAnswer === "connected"
+                ? `${connection.name} is connected. Continue the original task.`
+                : `${connection.name} is still not connected. Continue without it or tell the user what it blocks; do not request it again unless the user asks.`
+              : selectedChoice
+                ? `Selected choice ${selectedChoice.id}: ${resumeLabel}`
+                : answerText,
         ),
       },
     });
@@ -1148,7 +1169,8 @@ export async function answerWaitingRunWithTextInTransaction(
   if (
     isApprovalAskBlock(found.pendingAsk) ||
     isSecretAskBlock(found.pendingAsk) ||
-    found.pendingAsk.requestedSchema
+    found.pendingAsk.requestedSchema ||
+    found.pendingAsk.connection
   )
     return null;
   return commitAnswerRunInput(tx, { ...input, messageId: found.messageId });
