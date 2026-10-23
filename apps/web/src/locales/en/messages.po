@@ -4046,6 +4046,10 @@ msgstr "No internal review was returned."
 msgid "No invitation is created by this view. Availability is the saved observation, not a reservation. Calendar records may include other roles; their role association has not been verified."
 msgstr "No invitation is created by this view. Availability is the saved observation, not a reservation. Calendar records may include other roles; their role association has not been verified."
 
+#: src/pages/RecruitingPanel.tsx
+msgid "No job description is saved for this role. Add a JD or link when starting recruiting."
+msgstr "No job description is saved for this role. Add a JD or link when starting recruiting."
+
 #: src/components/AskCard.tsx
 msgid "No longer active"
 msgstr "No longer active"
