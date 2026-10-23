@@ -4147,6 +4147,32 @@ describe("live CRM browser reads", () => {
     );
     expect(JSON.stringify(membership)).not.toContain("existing-personal-oauth-reference");
   });
+  it.each(["candidates", "mail"] as const)(
+    "continues a current personal OAuth %s read after quiet token rotation",
+    async (operation) => {
+      const f = browserFixture("existing-personal-oauth-reference");
+      const original = f.execute.getMockImplementation()!;
+      f.execute.mockImplementation(async function* (call, context) {
+        yield* original(call, context);
+        if (call.route?.toolName === "list_crm_memberships")
+          f.server.secretId = "rotated-personal-oauth-reference";
+      });
+      const result = await api.getRecruitingCrmData(
+        f.deps,
+        actor,
+        target,
+        operation === "mail"
+          ? { operation, ...pinned, candidateId }
+          : { operation, ...pinned, crmRoleId: roleId },
+      );
+      expect(result).toMatchObject({
+        operation,
+        items: [operation === "mail" ? { providerMessageId: "original-mail" } : { candidateId }],
+      });
+      expect(f.server.revision).toBe(3);
+      expect(JSON.stringify(result)).not.toContain("rotated-personal-oauth-reference");
+    },
+  );
   it.each([undefined, roleId])(
     "explicitly includes reviewed candidates on later pages with role %s",
     async (crmRoleId) => {
@@ -4183,6 +4209,8 @@ describe("live CRM browser reads", () => {
   it.each([
     "revision",
     "credential",
+    "credential-mode",
+    "credential-removed",
     "grant",
     "actor",
     "target",
@@ -4193,14 +4221,21 @@ describe("live CRM browser reads", () => {
     "foreign-label",
   ])("fails closed on a changed or invalid %s boundary", async (boundary) => {
     const f = browserFixture(
-      boundary === "credential" ? "existing-personal-oauth-reference" : null,
+      boundary === "credential" || boundary === "credential-removed"
+        ? "existing-personal-oauth-reference"
+        : null,
     );
     const original = f.execute.getMockImplementation()!;
     f.execute.mockImplementation(async function* (call, context) {
       yield* original(call, context);
       if (call.route?.toolName !== "list_crm_candidates") return;
       if (boundary === "revision") f.server.revision++;
-      if (boundary === "credential") f.server.secretId = "replaced-personal-oauth-reference";
+      if (boundary === "credential") {
+        f.server.secretId = "replaced-personal-oauth-reference";
+        f.server.revision++;
+      }
+      if (boundary === "credential-mode") f.server.secretId = "new-personal-oauth-reference";
+      if (boundary === "credential-removed") f.server.secretId = null;
       if (boundary === "grant") f.assignment.allowedTools = [];
       if (boundary === "actor") f.mockPrisma.$queryRaw.mockResolvedValue([]);
       if (boundary === "target")

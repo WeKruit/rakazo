@@ -1469,8 +1469,9 @@ export async function getRecruitingCrmData(
         current.userId !== actor.userId ||
         current.spaceId !== actor.spaceId ||
         current.id !== server.id ||
+        // Native account changes advance revision; quiet refresh only rotates secret records.
         current.revision !== server.revision ||
-        current.secretId !== server.secretId ||
+        (current.secretId === null) !== (server.secretId === null) ||
         current.endpoint !== deps.firstPartyMcpUrl ||
         current.endpoint !== server.endpoint ||
         current.transport !== "streamable_http" ||
