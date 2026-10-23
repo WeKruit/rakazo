@@ -1516,6 +1516,10 @@ export type RecruitingOutreachSequence = z.infer<typeof RecruitingOutreachSequen
 
 /** Read-only presentation of retained provider receipts; never a send or booking command. */
 const CorrespondenceOriginFields = {
+  /** Provider identity evidence only; never inferred from subject or participants. */
+  providerThreadId: z.string().nullable().optional(),
+  campaignId: z.string().nullable().optional(),
+  eaccount: z.string().nullable().optional(),
   sourceId: Id.max(200),
   providerMessageId: Id.max(1600),
   savedRead: z
@@ -1529,6 +1533,7 @@ const CorrespondenceCrmContext = z
     crmRoleId: z.uuid(),
     candidateId: z.uuid(),
     threadId: z.string().nullable(),
+    campaignId: z.string().nullable().optional(),
     direction: z.enum(["sent", "received", "manual"]).nullable(),
     eaccount: z.string().nullable().optional(),
   })
@@ -1832,6 +1837,7 @@ const CrmBrowseOutbox = z.array(
   }),
 );
 const CrmMailItem = z.strictObject({
+  campaignId: z.string().nullable().optional(),
   eaccount: z.string().nullable().optional(),
   id: Id,
   providerMessageId: Id,

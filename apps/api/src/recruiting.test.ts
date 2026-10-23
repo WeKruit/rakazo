@@ -648,7 +648,11 @@ describe("saved recruiting correspondence", () => {
     expect(state.client.thread.findFirst.mock.calls[0]![0].where).toMatchObject({
       activeRecruitingRole: { crmBindingEffectId: "binding" },
     });
-    expect(JSON.stringify(result)).not.toMatch(/original-thread|original-campaign|linkedin:/);
+    expect(result.emails[0]).toMatchObject({
+      providerThreadId: "original-thread",
+      campaignId: "original-campaign",
+    });
+    expect(JSON.stringify(result)).not.toContain("linkedin:");
   });
   it("rejects a CRM display if the role or binding changes before the final ownership fence", async () => {
     const state = crmFixture();
@@ -1040,7 +1044,11 @@ describe("saved recruiting correspondence", () => {
       partial: false,
       emails: [{ sender: row.from_address_email, subject: row.subject, body: row.body.text }],
     });
-    expect(JSON.stringify(result)).not.toContain(row.thread_id);
+    expect(result.emails[0]).toMatchObject({
+      providerThreadId: row.thread_id,
+      campaignId: row.campaign_id,
+      eaccount: row.eaccount,
+    });
   });
   it.each([
     ["list_emails", null],
@@ -5104,13 +5112,44 @@ describe("live CRM browser reads", () => {
         {
           sourceId: "crm",
           providerMessageId: "role-mail",
+          providerThreadId: "thread-1",
+          campaignId: null,
           savedRead: null,
           body: "Stored full reply",
-          crm: { organizationId: org, crmRoleId: roleId, candidateId, threadId: "thread-1" },
+          crm: {
+            organizationId: org,
+            crmRoleId: roleId,
+            candidateId,
+            threadId: "thread-1",
+            campaignId: null,
+          },
         },
       ],
     });
     expect(f.execute.mock.calls.at(-1)?.[0].args).toMatchObject({ p_org: org, p_role: roleId });
+  });
+  it("preserves exact CRM campaign and mailbox metadata without deriving it from participants", async () => {
+    const f = inboxBridgeFixture();
+    const page = f.results.list_crm_role_correspondence as { messages: Record<string, unknown>[] };
+    Object.assign(page.messages[0]!, {
+      campaign_id: "campaign-original",
+      eaccount: "mailbox-original@example.test",
+    });
+    const result = await f.read();
+    expect(result.emails[0]).toMatchObject({
+      sourceId: "crm",
+      providerThreadId: "thread-1",
+      campaignId: "campaign-original",
+      eaccount: "mailbox-original@example.test",
+      crm: {
+        organizationId: org,
+        crmRoleId: roleId,
+        campaignId: "campaign-original",
+        eaccount: "mailbox-original@example.test",
+      },
+    });
+    delete page.messages[0]!.eaccount;
+    expect((await f.read()).emails[0]).not.toHaveProperty("eaccount");
   });
   it("does not guess a CRM role for an unbound legacy workspace", async () => {
     const f = inboxBridgeFixture();

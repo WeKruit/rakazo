@@ -1041,9 +1041,13 @@ export async function getRecruitingCorrespondence(
                   crmRoleId: attached.crmRoleId,
                   candidateId: email.candidateId,
                   threadId: email.threadId,
+                  campaignId: email.campaignId,
                   direction: email.direction,
                   ...(email.eaccount !== undefined ? { eaccount: email.eaccount } : {}),
                 },
+                providerThreadId: email.threadId,
+                campaignId: email.campaignId,
+                ...(email.eaccount !== undefined ? { eaccount: email.eaccount } : {}),
                 providerMessageId: email.providerMessageId,
                 savedRead: null,
                 sender: email.sender,
@@ -1434,6 +1438,15 @@ export async function getRecruitingCorrespondence(
             sourceName: source.name,
             sourceId: source.id,
             providerMessageId: row.id,
+            ...(row.thread_id === null || typeof row.thread_id === "string"
+              ? { providerThreadId: row.thread_id }
+              : {}),
+            ...(row.campaign_id === null || typeof row.campaign_id === "string"
+              ? { campaignId: row.campaign_id }
+              : {}),
+            ...(row.eaccount === null || typeof row.eaccount === "string"
+              ? { eaccount: row.eaccount }
+              : {}),
             savedRead,
             sender: row.from_address,
             recipients: row.to_address === null ? [] : [row.to_address],
@@ -1762,6 +1775,7 @@ export async function getRecruitingCorrespondence(
             sourceId: source.id,
             providerMessageId: row.id,
             savedRead,
+            ...(typeof threadId === "string" ? { providerThreadId: threadId } : {}),
             sender: row.sender ?? null,
             recipients: row.toRecipients ?? [],
             subject: row.subject ?? "",
@@ -1853,6 +1867,9 @@ export async function getRecruitingCorrespondence(
           sourceName: source.name,
           sourceId: source.id,
           providerMessageId: email.id,
+          ...(email.thread_id !== undefined ? { providerThreadId: email.thread_id } : {}),
+          ...(email.campaign_id !== undefined ? { campaignId: email.campaign_id } : {}),
+          ...(email.eaccount !== undefined ? { eaccount: email.eaccount } : {}),
           savedRead,
           sender: email.from_address_email ?? null,
           recipients: email.to_address_email_list ? [email.to_address_email_list] : [],
@@ -2245,6 +2262,7 @@ function mailItem(row: ReturnType<typeof RecruitingCrmMailReadSchema.parse>["mes
     id: row.id,
     providerMessageId: row.id,
     threadId: row.thread_id,
+    campaignId: row.campaign_id,
     direction: row.direction,
     sender: row.from_address,
     recipients: row.to_address === null ? [] : [row.to_address],
