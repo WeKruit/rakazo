@@ -17,6 +17,10 @@ msgstr ""
 msgid " (unread)"
 msgstr " (unread)"
 
+#: src/pages/recruiting/SequenceOverview.tsx
+msgid "— Not reported"
+msgstr "— Not reported"
+
 #. placeholder {0}: candidatePage.counts.candidates
 #: src/pages/RecruitingPanel.tsx
 msgid "{0, plural, =1 {# candidate in the pool} other {# candidates in the pool}}"
@@ -185,6 +189,10 @@ msgstr "{hidden, plural, one {+# earlier step} other {+# earlier steps}}"
 msgid "{hours}h ago"
 msgstr "{hours}h ago"
 
+#: src/pages/recruiting/ContactsTab.tsx
+msgid "{loadedCount} loaded"
+msgstr "{loadedCount} loaded"
+
 #: src/lib/relative-time.ts
 #: src/pages/ActivityList.tsx
 msgid "{minutes}m ago"
@@ -199,10 +207,6 @@ msgstr "{name} failed"
 #: src/lib/browser-notifications.ts
 msgid "{name} finished"
 msgstr "{name} finished"
-
-#: src/pages/recruiting/ActivityTab.tsx
-msgid "{name} replied"
-msgstr "{name} replied"
 
 #. js-lingui-explicit-id
 #: src/lib/browser-notifications.ts
@@ -245,6 +249,10 @@ msgstr "{title}, {label}"
 msgid "{toolCount, plural, one {# tool} other {# tools}}"
 msgstr "{toolCount, plural, one {# tool} other {# tools}}"
 
+#: src/pages/recruiting/HomeDashboard.tsx
+msgid "{undated} without a recorded date"
+msgstr "{undated} without a recorded date"
+
 #: src/pages/recruiting/ProfileTimeline.tsx
 msgid "{years} yr"
 msgstr "{years} yr"
@@ -257,6 +265,10 @@ msgstr "{years} yrs"
 #: src/pages/Shell.tsx
 msgid "@{0}"
 msgstr "@{0}"
+
+#: src/pages/recruiting/SequenceOverview.tsx
+msgid "≥ Observed in loaded records"
+msgstr "≥ Observed in loaded records"
 
 #: src/pages/shell/message-cards.tsx
 msgid "A bit of everything"
@@ -361,6 +373,14 @@ msgstr "Active model"
 #: src/pages/Shell.tsx
 msgid "Activity"
 msgstr "Activity"
+
+#: src/pages/recruiting/ActivityTab.tsx
+msgid "Activity history is unavailable from some sources."
+msgstr "Activity history is unavailable from some sources."
+
+#: src/pages/recruiting/ActivityTab.tsx
+msgid "Actor not recorded"
+msgstr "Actor not recorded"
 
 #: src/pages/ModelBackupsSettings.tsx
 #: src/pages/PluginsOverlay.tsx
@@ -531,10 +551,6 @@ msgstr "AI interpretation"
 msgid "All bots"
 msgstr "All bots"
 
-#: src/pages/recruiting/InboxTab.tsx
-msgid "All candidates"
-msgstr "All candidates"
-
 #: src/pages/RecruitingPanel.tsx
 msgid "All Important records"
 msgstr "All Important records"
@@ -550,6 +566,10 @@ msgstr "All internal verdicts"
 #: src/pages/RecruitingPanel.tsx
 msgid "All of"
 msgstr "All of"
+
+#: src/pages/recruiting/HomeDashboard.tsx
+msgid "All projects"
+msgstr "All projects"
 
 #: src/pages/ModelSettingsOverlay.tsx
 msgid "All providers"
@@ -690,6 +710,14 @@ msgstr "Approval boundaries"
 #: src/pages/shell/message-cards.tsx
 msgid "Approve"
 msgstr "Approve"
+
+#: src/components/AskCard.tsx
+msgid "Approve calibration"
+msgstr "Approve calibration"
+
+#: src/components/AskCard.tsx
+msgid "Approve documents"
+msgstr "Approve documents"
 
 #: src/pages/shell/message-cards.tsx
 msgid "Approve this server to let your agent use its tools."
@@ -834,6 +862,10 @@ msgstr "Attached {path}"
 msgid "Attachment"
 msgstr "Attachment"
 
+#: src/pages/recruiting/InterviewCalendar.tsx
+msgid "Attendees"
+msgstr "Attendees"
+
 #: src/lib/model-connection-preflight.ts
 msgid "Authentication failed."
 msgstr "Authentication failed."
@@ -906,10 +938,6 @@ msgstr "Avg tenure"
 msgid "Awaiting feedback"
 msgstr "Awaiting feedback"
 
-#: src/pages/recruiting/InboxTab.tsx
-msgid "Awaiting reply"
-msgstr "Awaiting reply"
-
 #: src/components/computer/FilesApp.tsx
 #: src/pages/Board.tsx
 #: src/pages/PluginsOverlay.tsx
@@ -917,6 +945,11 @@ msgstr "Awaiting reply"
 #: src/pages/RoutineEditor.tsx
 msgid "Back"
 msgstr "Back"
+
+#: src/pages/recruiting/InboxTab.tsx
+#: src/pages/RecruitingCorrespondence.tsx
+msgid "Back to inbox"
+msgstr "Back to inbox"
 
 #: src/pages/Shell.tsx
 msgid "Back to results"
@@ -1062,11 +1095,24 @@ msgstr "Calendar booking details are not included in these manual CRM workflow r
 msgid "Calendar event"
 msgstr "Calendar event"
 
+#: src/pages/recruiting/InterviewCalendar.tsx
+msgid "Calendar hours"
+msgstr "Calendar hours"
+
+#: src/pages/recruiting/InterviewTab.tsx
+msgid "Calendar last checked"
+msgstr "Calendar last checked"
+
+#: src/pages/recruiting/InterviewTab.tsx
+msgid "Calendar records have not been checked yet."
+msgstr "Calendar records have not been checked yet."
+
 #: src/pages/recruiting/CalibrationRound.tsx
 msgid "Calibration round"
 msgstr "Calibration round"
 
 #: src/pages/recruiting/SequenceTab.tsx
+#: src/pages/RecruitingCorrespondence.tsx
 #: src/pages/RecruitingPanel.tsx
 msgid "Campaign"
 msgstr "Campaign"
@@ -1139,9 +1185,23 @@ msgstr "Candidate"
 msgid "Candidate assessment"
 msgstr "Candidate assessment"
 
+#: src/pages/recruiting/CandidateDirectory.tsx
+msgid "Candidate cards"
+msgstr "Candidate cards"
+
+#: src/pages/recruiting/InboxTab.tsx
+#: src/pages/RecruitingCorrespondence.tsx
+msgid "Candidate conversations"
+msgstr "Candidate conversations"
+
 #: src/pages/RecruitingPanel.tsx
 msgid "Candidate details"
 msgstr "Candidate details"
+
+#: src/pages/recruiting/InboxTab.tsx
+#: src/pages/RecruitingCorrespondence.tsx
+msgid "Candidate details unavailable"
+msgstr "Candidate details unavailable"
 
 #: src/pages/RecruitingPanel.tsx
 msgid "Candidate facts"
@@ -1150,6 +1210,14 @@ msgstr "Candidate facts"
 #: src/pages/Shell.tsx
 msgid "Candidate feedback"
 msgstr "Candidate feedback"
+
+#: src/pages/recruiting/InterviewTab.tsx
+msgid "Candidate interview status"
+msgstr "Candidate interview status"
+
+#: src/pages/recruiting/InterviewCalendar.tsx
+msgid "Candidate link"
+msgstr "Candidate link"
 
 #: src/pages/RecruitingPanel.tsx
 msgid "Candidate messages"
@@ -1175,6 +1243,14 @@ msgstr "Candidate sort"
 msgid "Candidate statement"
 msgstr "Candidate statement"
 
+#: src/pages/recruiting/InterviewTab.tsx
+msgid "Candidate status"
+msgstr "Candidate status"
+
+#: src/pages/recruiting/CandidateDirectory.tsx
+msgid "Candidate table"
+msgstr "Candidate table"
+
 #: src/pages/recruiting/InboxTab.tsx
 #: src/pages/RecruitingPanel.tsx
 msgid "Candidates"
@@ -1192,6 +1268,10 @@ msgstr "Cards"
 #: src/pages/AccountSettingsOverlay.tsx
 msgid "Change password"
 msgstr "Change password"
+
+#: src/pages/recruiting/InterviewCalendar.tsx
+msgid "Change the week or status to review saved records. Empty space does not confirm availability."
+msgstr "Change the week or status to review saved records. Empty space does not confirm availability."
 
 #: src/pages/RecruitingPanel.tsx
 msgid "Changes could not be saved."
@@ -1322,6 +1402,10 @@ msgstr "Choose a new password"
 msgid "Choose a role to see its outreach."
 msgstr "Choose a role to see its outreach."
 
+#: src/pages/recruiting/InterviewCalendar.tsx
+msgid "Choose day"
+msgstr "Choose day"
+
 #: src/pages/RecruitingPanel.tsx
 msgid "Choose feedback"
 msgstr "Choose feedback"
@@ -1360,6 +1444,10 @@ msgstr "Clear filter {label}"
 msgid "Clearing…"
 msgstr "Clearing…"
 
+#: src/pages/recruiting/SequenceOverview.tsx
+msgid "Clicked"
+msgstr "Clicked"
+
 #: src/pages/RecruitingPanel.tsx
 msgid "Client"
 msgstr "Client"
@@ -1379,6 +1467,10 @@ msgstr "Client ID"
 #: src/pages/McpServersOverlay.tsx
 msgid "Client secret"
 msgstr "Client secret"
+
+#: src/pages/recruiting/InterviewCalendar.tsx
+msgid "Clock change; see source times"
+msgstr "Clock change; see source times"
 
 #: src/components/ErrorBoundary.tsx
 #: src/pages/KnowledgeSection.tsx
@@ -1403,6 +1495,10 @@ msgstr "Close chart"
 #: src/pages/Shell.tsx
 msgid "Close computer"
 msgstr "Close computer"
+
+#: src/pages/recruiting/InterviewCalendar.tsx
+msgid "Close event details"
+msgstr "Close event details"
 
 #: src/pages/shell/message-cards.tsx
 msgid "Close image preview"
@@ -1627,6 +1723,10 @@ msgid "Confirm reply"
 msgstr "Confirm reply"
 
 #: src/components/AskCard.tsx
+msgid "Confirm requirements"
+msgstr "Confirm requirements"
+
+#: src/components/AskCard.tsx
 msgid "Confirm sending email"
 msgstr "Confirm sending email"
 
@@ -1766,6 +1866,10 @@ msgstr "Contact details"
 msgid "Contact details have not been checked yet."
 msgstr "Contact details have not been checked yet."
 
+#: src/pages/recruiting/CandidateDirectory.tsx
+msgid "Contact layout"
+msgstr "Contact layout"
+
 #: src/pages/recruiting/DetailPanel.tsx
 #: src/pages/RecruitingPanel.tsx
 msgid "Contact status"
@@ -1810,6 +1914,7 @@ msgstr "Continue with {0}"
 msgid "Continue with email"
 msgstr "Continue with email"
 
+#: src/pages/RecruitingCorrespondence.tsx
 #: src/pages/Shell.tsx
 msgid "Conversation"
 msgstr "Conversation"
@@ -2074,6 +2179,7 @@ msgstr "Could not load candidate records"
 #: src/pages/recruiting/InterviewTab.tsx
 #: src/pages/recruiting/SequenceTab.tsx
 #: src/pages/recruiting/shared.tsx
+#: src/pages/RecruitingCorrespondence.tsx
 #: src/pages/RecruitingPanel.tsx
 msgid "Could not load candidate records. Try refreshing."
 msgstr "Could not load candidate records. Try refreshing."
@@ -2138,6 +2244,10 @@ msgstr "Could not load reminders."
 #: src/pages/RoutineRunHistory.tsx
 msgid "Could not load run history"
 msgstr "Could not load run history"
+
+#: src/pages/recruiting/InterviewTab.tsx
+msgid "Could not load saved calendar records. Try refreshing."
+msgstr "Could not load saved calendar records. Try refreshing."
 
 #: src/pages/RecruitingCorrespondence.tsx
 msgid "Could not load saved results. Try refreshing."
@@ -2214,6 +2324,10 @@ msgstr "Could not open local settings. Start the local server and create its own
 msgid "Could not open terminal"
 msgstr "Could not open terminal"
 
+#: src/pages/Shell.tsx
+msgid "Could not open this role."
+msgstr "Could not open this role."
+
 #: src/pages/VoiceSettingsOverlay.tsx
 msgid "Could not play a test clip"
 msgstr "Could not play a test clip"
@@ -2244,6 +2358,10 @@ msgstr "Could not read this campaign."
 #: src/pages/RecruitingCorrespondence.tsx
 msgid "Could not read this sequence."
 msgstr "Could not read this sequence."
+
+#: src/pages/recruiting/DetailPanel.tsx
+msgid "Could not record this profile view."
+msgstr "Could not record this profile view."
 
 #: src/pages/ScratchpadSection.tsx
 msgid "Could not remove"
@@ -2526,6 +2644,12 @@ msgstr "Criterion"
 msgid "Criterion {0}"
 msgstr "Criterion {0}"
 
+#: src/pages/recruiting/AssessmentCard.tsx
+#: src/pages/recruiting/CandidateDirectory.tsx
+#: src/pages/recruiting/SkillEvidence.tsx
+msgid "Criterion name unavailable"
+msgstr "Criterion name unavailable"
+
 #: src/pages/RecruitingPanel.tsx
 msgid "CRM receipt"
 msgstr "CRM receipt"
@@ -2547,6 +2671,18 @@ msgstr "Current"
 msgid "Current password"
 msgstr "Current password"
 
+#: src/pages/recruiting/ActivityTab.tsx
+msgid "Current result: approved"
+msgstr "Current result: approved"
+
+#: src/pages/recruiting/ActivityTab.tsx
+msgid "Current result: pooled"
+msgstr "Current result: pooled"
+
+#: src/pages/recruiting/ActivityTab.tsx
+msgid "Current result: rejected"
+msgstr "Current result: rejected"
+
 #: src/pages/recruiting/CandidateDirectory.tsx
 #: src/pages/RecruitingPanel.tsx
 msgid "Current role"
@@ -2559,6 +2695,14 @@ msgstr "Current role not returned"
 #: src/pages/recruiting/ProfileTimeline.tsx
 msgid "Current tenure"
 msgstr "Current tenure"
+
+#: src/pages/recruiting/InterviewCalendar.tsx
+msgid "Current time"
+msgstr "Current time"
+
+#: src/pages/recruiting/HomeDashboard.tsx
+msgid "Current totals · all dates"
+msgstr "Current totals · all dates"
 
 #: src/pages/shell/bot-credentials.tsx
 msgid "Custom header"
@@ -2583,6 +2727,10 @@ msgstr "Dark"
 #: src/pages/RecruitingPanel.tsx
 msgid "Dashboard"
 msgstr "Dashboard"
+
+#: src/pages/recruiting/InterviewCalendar.tsx
+msgid "Date only; time not supplied"
+msgstr "Date only; time not supplied"
 
 #. placeholder {0}: draft.email.date
 #: src/pages/Shell.tsx
@@ -2806,6 +2954,10 @@ msgstr "Dismissed. Reconnect anytime from MCP settings."
 msgid "Display name"
 msgstr "Display name"
 
+#: src/pages/recruiting/InterviewCalendar.tsx
+msgid "Display timezone"
+msgstr "Display timezone"
+
 #: src/pages/HostComputerPrompt.tsx
 msgid "Docker"
 msgstr "Docker"
@@ -2866,6 +3018,10 @@ msgstr "Downloading…"
 #: src/pages/RecruitingCorrespondence.tsx
 msgid "Draft"
 msgstr "Draft"
+
+#: src/pages/RecruitingCorrespondence.tsx
+msgid "Draft a reply to the selected email for me to review. Read the original conversation and verify the candidate and role. Do not send."
+msgstr "Draft a reply to the selected email for me to review. Read the original conversation and verify the candidate and role. Do not send."
 
 #: src/pages/recruiting/EmailConversation.tsx
 #: src/pages/RecruitingPanel.tsx
@@ -2960,8 +3116,16 @@ msgid "Email missing"
 msgstr "Email missing"
 
 #: src/pages/recruiting/ActivityTab.tsx
+msgid "Email opens are not recorded. Profile views appear only after recording starts."
+msgstr "Email opens are not recorded. Profile views appear only after recording starts."
+
+#: src/pages/recruiting/ActivityTab.tsx
 msgid "Email queued"
 msgstr "Email queued"
+
+#: src/pages/recruiting/ActivityTab.tsx
+msgid "Email received"
+msgstr "Email received"
 
 #: src/pages/recruiting/ActivityTab.tsx
 msgid "Email recorded"
@@ -2978,6 +3142,10 @@ msgstr "Email scheduled"
 #: src/pages/recruiting/ActivityTab.tsx
 msgid "Email sent"
 msgstr "Email sent"
+
+#: src/pages/recruiting/EmailConversation.tsx
+msgid "Email thread or message"
+msgstr "Email thread or message"
 
 #: src/lib/user-error.ts
 msgid "Email verification required"
@@ -3002,6 +3170,18 @@ msgstr "Employment rule"
 #: src/pages/RecruitingCorrespondence.tsx
 msgid "Enable for this role"
 msgstr "Enable for this role"
+
+#: src/pages/recruiting/InterviewCalendar.tsx
+msgid "End"
+msgstr "End"
+
+#: src/pages/recruiting/InterviewCalendar.tsx
+msgid "End not recorded"
+msgstr "End not recorded"
+
+#: src/pages/recruiting/InterviewCalendar.tsx
+msgid "End time unavailable"
+msgstr "End time unavailable"
 
 #: src/pages/BillingSettingsPanel.tsx
 msgid "Ends {day}"
@@ -3050,6 +3230,18 @@ msgstr "Error"
 #: src/pages/RecruitingPanel.tsx
 msgid "Error details"
 msgstr "Error details"
+
+#: src/pages/recruiting/InterviewCalendar.tsx
+msgid "Event details"
+msgstr "Event details"
+
+#: src/pages/recruiting/InterviewCalendar.tsx
+msgid "Event status"
+msgstr "Event status"
+
+#: src/pages/recruiting/InterviewCalendar.tsx
+msgid "Events without usable start times"
+msgstr "Events without usable start times"
 
 #: src/pages/ExternalConversationSettings.tsx
 #: src/pages/RoutineSchedule.tsx
@@ -3143,7 +3335,6 @@ msgid "failed"
 msgstr "failed"
 
 #: src/pages/ActivityList.tsx
-#: src/pages/recruiting/SequenceTab.tsx
 msgid "Failed"
 msgstr "Failed"
 
@@ -3554,6 +3745,15 @@ msgstr "Initial email"
 msgid "Inputs"
 msgstr "Inputs"
 
+#. placeholder {0}: labels[stage.key]
+#: src/pages/recruiting/HomeDashboard.tsx
+msgid "Inspect {0}"
+msgstr "Inspect {0}"
+
+#: src/pages/recruiting/HomeDashboard.tsx
+msgid "Inspect week of {label}"
+msgstr "Inspect week of {label}"
+
 #: src/pages/memory-providers/SupermemorySettingsForm.tsx
 msgid "Instance API key"
 msgstr "Instance API key"
@@ -3727,9 +3927,21 @@ msgstr "Knowledge"
 msgid "Language"
 msgstr "Language"
 
+#: src/pages/recruiting/HomeDashboard.tsx
+msgid "Last {count} weeks"
+msgstr "Last {count} weeks"
+
+#: src/pages/recruiting/SequenceOverview.tsx
+msgid "Last 7 days · UTC"
+msgstr "Last 7 days · UTC"
+
 #: src/pages/RecruitingCorrespondence.tsx
 msgid "Last checked"
 msgstr "Last checked"
+
+#: src/pages/recruiting/InboxTab.tsx
+msgid "Last reply"
+msgstr "Last reply"
 
 #: src/pages/recruiting/SequenceTab.tsx
 #: src/pages/RecruitingPanel.tsx
@@ -3796,6 +4008,10 @@ msgstr "LinkedIn: {0}"
 #: src/pages/Artifacts.tsx
 msgid "List view"
 msgstr "List view"
+
+#: src/pages/recruiting/SkillEvidence.tsx
+msgid "Listed skill"
+msgstr "Listed skill"
 
 #: src/pages/ExternalConversationSettings.tsx
 msgid "Listen"
@@ -4090,6 +4306,7 @@ msgstr "Mentions"
 msgid "Mentions only"
 msgstr "Mentions only"
 
+#: src/pages/recruiting/EmailConversation.tsx
 #: src/pages/RecruitingCorrespondence.tsx
 #: src/pages/RecruitingPanel.tsx
 #: src/pages/Shell.tsx
@@ -4415,14 +4632,18 @@ msgstr "Next campaigns"
 msgid "Next contact campaigns"
 msgstr "Next contact campaigns"
 
+#: src/pages/recruiting/InterviewCalendar.tsx
+msgid "Next week"
+msgstr "Next week"
+
 #. placeholder {0}: stage.nextStep
 #: src/pages/recruiting/RoleSetup.tsx
 msgid "Next: {0}"
 msgstr "Next: {0}"
 
 #: src/pages/recruiting/ActivityTab.tsx
-msgid "No activity yet."
-msgstr "No activity yet."
+msgid "No activity recorded in the available sources."
+msgstr "No activity recorded in the available sources."
 
 #: src/pages/RecruitingPanel.tsx
 msgid "No additional search filters"
@@ -4486,6 +4707,15 @@ msgstr "No contacts for this role yet."
 msgid "No credentials saved for this bot."
 msgstr "No credentials saved for this bot."
 
+#: src/pages/recruiting/SequenceOverview.tsx
+msgid "No dated sends in the available records."
+msgstr "No dated sends in the available records."
+
+#: src/pages/recruiting/AssessmentCard.tsx
+#: src/pages/recruiting/SkillEvidence.tsx
+msgid "No evidence provided."
+msgstr "No evidence provided."
+
 #: src/pages/MessagingSettingsOverlay.tsx
 msgid "No group chats yet."
 msgstr "No group chats yet."
@@ -4513,6 +4743,10 @@ msgstr "No invitation is created by this view. Availability is the saved observa
 #: src/pages/RecruitingPanel.tsx
 msgid "No job description is saved for this role. Add a JD or link when starting recruiting."
 msgstr "No job description is saved for this role. Add a JD or link when starting recruiting."
+
+#: src/pages/recruiting/InboxTab.tsx
+msgid "No loaded candidates match these filters."
+msgstr "No loaded candidates match these filters."
 
 #: src/components/AskCard.tsx
 msgid "No longer active"
@@ -4611,6 +4845,10 @@ msgstr "No runs yet"
 msgid "No saved assessments"
 msgstr "No saved assessments"
 
+#: src/pages/recruiting/InterviewTab.tsx
+msgid "No saved calendar records matched this candidate."
+msgstr "No saved calendar records matched this candidate."
+
 #: src/pages/recruiting/ContactsTab.tsx
 #: src/pages/RecruitingPanel.tsx
 msgid "No saved candidates"
@@ -4619,6 +4857,10 @@ msgstr "No saved candidates"
 #: src/pages/RecruitingPanel.tsx
 msgid "No saved discovery sources"
 msgstr "No saved discovery sources"
+
+#: src/pages/recruiting/InterviewCalendar.tsx
+msgid "No saved events to show for this week and status."
+msgstr "No saved events to show for this week and status."
 
 #: src/pages/RecruitingPanel.tsx
 msgid "No saved feedback yet."
@@ -4631,6 +4873,10 @@ msgstr "No saved history"
 #: src/pages/RecruitingPanel.tsx
 msgid "No saved memory in these scopes"
 msgstr "No saved memory in these scopes"
+
+#: src/pages/recruiting/HomeDashboard.tsx
+msgid "No saved overview for these projects."
+msgstr "No saved overview for these projects."
 
 #: src/pages/RecruitingPanel.tsx
 msgid "No saved questions"
@@ -4660,10 +4906,6 @@ msgstr "No shortlisted candidates match these filters."
 msgid "No shortlisted candidates yet."
 msgstr "No shortlisted candidates yet."
 
-#: src/pages/recruiting/HomeDashboard.tsx
-msgid "No shortlisted profiles yet."
-msgstr "No shortlisted profiles yet."
-
 #: src/pages/KnowledgeSection.tsx
 msgid "No skills yet"
 msgstr "No skills yet"
@@ -4679,12 +4921,9 @@ msgid "No stored emails for this candidate."
 msgstr "No stored emails for this candidate."
 
 #: src/pages/recruiting/InboxTab.tsx
+#: src/pages/RecruitingCorrespondence.tsx
 msgid "No stored emails for this role."
 msgstr "No stored emails for this role."
-
-#: src/pages/recruiting/SequenceTab.tsx
-msgid "No stored messages for this candidate."
-msgstr "No stored messages for this candidate."
 
 #: src/pages/RecruitingPanel.tsx
 msgid "No stored messages were returned for this contact."
@@ -4701,6 +4940,10 @@ msgstr "No stored role-interest records were returned."
 msgid "No subject"
 msgstr "No subject"
 
+#: src/pages/recruiting/SkillEvidence.tsx
+msgid "No supporting detail in the saved profile."
+msgstr "No supporting detail in the saved profile."
+
 #: src/pages/MessagingSettingsOverlay.tsx
 msgid "No team conversations yet."
 msgstr "No team conversations yet."
@@ -4708,6 +4951,10 @@ msgstr "No team conversations yet."
 #: src/pages/Board.tsx
 msgid "No tickets yet"
 msgstr "No tickets yet"
+
+#: src/pages/recruiting/InterviewCalendar.tsx
+msgid "No timed events in this week."
+msgstr "No timed events in this week."
 
 #: src/pages/PluginsOverlay.tsx
 msgid "No tools available."
@@ -4774,6 +5021,18 @@ msgstr "Not now"
 #: src/pages/RecruitingPanel.tsx
 msgid "Not pursuing"
 msgstr "Not pursuing"
+
+#: src/pages/recruiting/InterviewCalendar.tsx
+msgid "Not recorded"
+msgstr "Not recorded"
+
+#: src/pages/recruiting/InterviewCalendar.tsx
+msgid "Not recorded in this source"
+msgstr "Not recorded in this source"
+
+#: src/pages/recruiting/SequenceOverview.tsx
+msgid "Not reported"
+msgstr "Not reported"
 
 #: src/pages/RecruitingPanel.tsx
 msgid "Not returned"
@@ -4870,6 +5129,10 @@ msgstr "Open"
 msgid "Open {0}"
 msgstr "Open {0}"
 
+#: src/pages/recruiting/CandidateDirectory.tsx
+msgid "Open {name}'s source profile"
+msgstr "Open {name}'s source profile"
+
 #. placeholder {0}: oauth.verificationUri.replace(/^https:\/\//, "")
 #: src/pages/ModelSettingsOverlay.tsx
 #: src/pages/Onboarding.tsx
@@ -4928,6 +5191,10 @@ msgstr "Open the conversation to review its history, or ask WeKruit to prepare d
 msgid "Open the role conversation to see its candidates."
 msgstr "Open the role conversation to see its candidates."
 
+#: src/pages/recruiting/InterviewTab.tsx
+msgid "Open the role conversation to see saved calendar records."
+msgstr "Open the role conversation to see saved calendar records."
+
 #: src/pages/Shell.tsx
 msgid "Open the saved sequence before editing it."
 msgstr "Open the saved sequence before editing it."
@@ -4941,6 +5208,10 @@ msgstr "Open work"
 msgid "OpenAI-compatible server URL"
 msgstr "OpenAI-compatible server URL"
 
+#: src/pages/recruiting/SequenceOverview.tsx
+msgid "Opened"
+msgstr "Opened"
+
 #: src/components/computer/TerminalApp.tsx
 msgid "Opened {path}"
 msgstr "Opened {path}"
@@ -4952,6 +5223,10 @@ msgstr "Opened its thread."
 #: src/pages/Onboarding.tsx
 msgid "Opening chat…"
 msgstr "Opening chat…"
+
+#: src/pages/Shell.tsx
+msgid "Opening role…"
+msgstr "Opening role…"
 
 #: src/App.tsx
 msgid "Opening your Space…"
@@ -5026,6 +5301,10 @@ msgstr "Original source"
 msgid "Other model…"
 msgstr "Other model…"
 
+#: src/pages/recruiting/ActivityTab.tsx
+msgid "Outbox"
+msgstr "Outbox"
+
 #: src/pages/RecruitingPanel.tsx
 msgid "Outcome unknown"
 msgstr "Outcome unknown"
@@ -5043,13 +5322,18 @@ msgstr "Output"
 msgid "Outreach"
 msgstr "Outreach"
 
-#: src/pages/recruiting/HomeDashboard.tsx
-msgid "Outreach conversion"
-msgstr "Outreach conversion"
+#: src/pages/RecruitingPanel.tsx
+#: src/pages/Shell.tsx
+msgid "Outreach drafts"
+msgstr "Outreach drafts"
 
 #: src/pages/RecruitingCorrespondence.tsx
 msgid "Outreach file review"
 msgstr "Outreach file review"
+
+#: src/pages/recruiting/HomeDashboard.tsx
+msgid "Outreach funnel"
+msgstr "Outreach funnel"
 
 #: src/pages/recruiting/DetailPanel.tsx
 #: src/pages/recruiting/InboxTab.tsx
@@ -5090,6 +5374,10 @@ msgstr "PagerDuty incident"
 #: src/pages/ScratchpadSection.tsx
 msgid "Park"
 msgstr "Park"
+
+#: src/pages/recruiting/HomeDashboard.tsx
+msgid "Partial data"
+msgstr "Partial data"
 
 #: src/pages/recruiting/AssessmentCard.tsx
 #: src/pages/recruiting/CandidateDirectory.tsx
@@ -5270,6 +5558,10 @@ msgstr "Previous campaigns"
 msgid "Previous contact campaigns"
 msgstr "Previous contact campaigns"
 
+#: src/pages/recruiting/InterviewCalendar.tsx
+msgid "Previous week"
+msgstr "Previous week"
+
 #: src/pages/RecruitingPanel.tsx
 msgid "Previously processing"
 msgstr "Previously processing"
@@ -5303,9 +5595,25 @@ msgstr "Profile"
 msgid "Profile details"
 msgstr "Profile details"
 
+#: src/pages/recruiting/DetailPanel.tsx
+msgid "Profile navigation"
+msgstr "Profile navigation"
+
+#: src/pages/recruiting/ActivityTab.tsx
+msgid "Profile viewed"
+msgstr "Profile viewed"
+
+#: src/pages/recruiting/HomeDashboard.tsx
+msgid "Project"
+msgstr "Project"
+
 #: src/components/integrations/IntegrationSetup.tsx
 msgid "Project ID"
 msgstr "Project ID"
+
+#: src/pages/recruiting/HomeDashboard.tsx
+msgid "Projects"
+msgstr "Projects"
 
 #: src/components/teach/TeachRecordingChrome.tsx
 msgid "Protected input"
@@ -5343,7 +5651,6 @@ msgid "Qualifying work"
 msgstr "Qualifying work"
 
 #: src/pages/ActivityList.tsx
-#: src/pages/recruiting/SequenceTab.tsx
 msgid "Queued"
 msgstr "Queued"
 
@@ -5441,6 +5748,10 @@ msgstr "Recents"
 msgid "Recipients"
 msgstr "Recipients"
 
+#: src/pages/recruiting/EmailConversation.tsx
+msgid "Recipients unavailable"
+msgstr "Recipients unavailable"
+
 #: src/pages/PluginsOverlay.tsx
 msgid "Reconnect"
 msgstr "Reconnect"
@@ -5453,6 +5764,10 @@ msgstr "Reconnect OAuth"
 #: src/components/ComputerUpdateProgress.tsx
 msgid "Reconnecting"
 msgstr "Reconnecting"
+
+#: src/pages/recruiting/SequenceOverview.tsx
+msgid "Recorded send activity"
+msgstr "Recorded send activity"
 
 #: src/components/LiveWork.tsx
 msgid "Recording feedback"
@@ -5517,6 +5832,12 @@ msgstr "Recreating the computer"
 #: src/pages/RecruitingPanel.tsx
 msgid "Recruiter messages"
 msgstr "Recruiter messages"
+
+#: src/pages/recruiting/SequenceOverview.tsx
+#: src/pages/recruiting/SequenceTab.tsx
+#: src/pages/RecruitingPanel.tsx
+msgid "Recruiter messages are unavailable for this role."
+msgstr "Recruiter messages are unavailable for this role."
 
 #: src/pages/RecruitingPanel.tsx
 msgid "Recruiter verified"
@@ -5712,6 +6033,18 @@ msgstr "Reply"
 msgid "Reply cancelled"
 msgstr "Reply cancelled"
 
+#: src/pages/recruiting/InterviewTab.tsx
+msgid "Reply failed"
+msgstr "Reply failed"
+
+#: src/pages/recruiting/InterviewTab.tsx
+msgid "Reply outcome unknown"
+msgstr "Reply outcome unknown"
+
+#: src/pages/recruiting/InterviewTab.tsx
+msgid "Reply outcomes"
+msgstr "Reply outcomes"
+
 #: src/pages/Shell.tsx
 msgid "Reply to the selected email"
 msgstr "Reply to the selected email"
@@ -5880,10 +6213,6 @@ msgstr "rev {0}"
 msgid "Review in conversation"
 msgstr "Review in conversation"
 
-#: src/pages/recruiting/ActivityTab.tsx
-msgid "Review note"
-msgstr "Review note"
-
 #: src/lib/model-connection-preflight.ts
 msgid "Review provider settings and test again."
 msgstr "Review provider settings and test again."
@@ -5895,6 +6224,10 @@ msgstr "Review status unknown"
 #: src/pages/RecruitingCorrespondence.tsx
 msgid "Review the outreach files saved in this conversation."
 msgstr "Review the outreach files saved in this conversation."
+
+#: src/pages/recruiting/ActivityTab.tsx
+msgid "Review updated"
+msgstr "Review updated"
 
 #: src/pages/RecruitingPanel.tsx
 msgid "Reviewed"
@@ -5967,6 +6300,10 @@ msgstr "Role sources"
 #: src/pages/recruiting/RoleSetup.tsx
 msgid "Role stage"
 msgstr "Role stage"
+
+#: src/pages/recruiting/ActivityTab.tsx
+msgid "Role status"
+msgstr "Role status"
 
 #. placeholder {0}: record.feedback.expectedRoleRevision
 #: src/pages/RecruitingPanel.tsx
@@ -6116,6 +6453,14 @@ msgstr "Saved before latest role update"
 msgid "Saved calendar checks in this conversation."
 msgstr "Saved calendar checks in this conversation."
 
+#: src/pages/recruiting/InterviewCalendar.tsx
+msgid "Saved calendar events"
+msgstr "Saved calendar events"
+
+#: src/pages/recruiting/InterviewTab.tsx
+msgid "Saved calendar records are unavailable from this source."
+msgstr "Saved calendar records are unavailable from this source."
+
 #: src/pages/RecruitingPanel.tsx
 msgid "Saved candidate sources"
 msgstr "Saved candidate sources"
@@ -6132,6 +6477,10 @@ msgstr "Saved candidates"
 msgid "Saved contact lookups"
 msgstr "Saved contact lookups"
 
+#: src/pages/recruiting/ActivityTab.tsx
+msgid "Saved correspondence"
+msgstr "Saved correspondence"
+
 #: src/pages/RecruitingPanel.tsx
 msgid "Saved email"
 msgstr "Saved email"
@@ -6140,6 +6489,10 @@ msgstr "Saved email"
 #: src/pages/RecruitingCorrespondence.tsx
 msgid "Saved emails"
 msgstr "Saved emails"
+
+#: src/pages/recruiting/InterviewCalendar.tsx
+msgid "Saved events"
+msgstr "Saved events"
 
 #: src/pages/RecruitingPanel.tsx
 msgid "Saved facts"
@@ -6152,6 +6505,10 @@ msgstr "Saved feedback for this role"
 #: src/pages/RecruitingCorrespondence.tsx
 msgid "Saved files"
 msgstr "Saved files"
+
+#: src/pages/recruiting/ActivityTab.tsx
+msgid "Saved mailbox"
+msgstr "Saved mailbox"
 
 #: src/pages/RecruitingCorrespondence.tsx
 msgid "Saved outreach files"
@@ -6248,6 +6605,14 @@ msgstr "Scopes"
 msgid "Score / tier not returned"
 msgstr "Score / tier not returned"
 
+#: src/pages/recruiting/DetailPanel.tsx
+msgid "Scroll navigation left"
+msgstr "Scroll navigation left"
+
+#: src/pages/recruiting/DetailPanel.tsx
+msgid "Scroll navigation right"
+msgstr "Scroll navigation right"
+
 #: src/components/integrations/IntegrationSetup.tsx
 #: src/pages/ModelSettingsOverlay.tsx
 #: src/pages/PluginsOverlay.tsx
@@ -6321,6 +6686,11 @@ msgstr "Search follow-up"
 msgid "Search integrations.sh"
 msgstr "Search integrations.sh"
 
+#: src/pages/recruiting/InboxTab.tsx
+#: src/pages/RecruitingCorrespondence.tsx
+msgid "Search loaded candidates"
+msgstr "Search loaded candidates"
+
 #: src/pages/ModelSettingsOverlay.tsx
 msgid "Search models"
 msgstr "Search models"
@@ -6368,6 +6738,10 @@ msgstr "Searching…"
 msgid "Select a bot"
 msgstr "Select a bot"
 
+#: src/pages/recruiting/SequenceTab.tsx
+msgid "Select a campaign"
+msgstr "Select a campaign"
+
 #: src/pages/ModelBackupsSettings.tsx
 msgid "Select a connected model"
 msgstr "Select a connected model"
@@ -6379,6 +6753,10 @@ msgstr "Select a contact to read their stored details."
 #: src/pages/RecruitingPanel.tsx
 msgid "Select a contact to read their stored messages."
 msgstr "Select a contact to read their stored messages."
+
+#: src/pages/recruiting/InterviewCalendar.tsx
+msgid "Select an event to see its source details. Candidate links are not included in these calendar records."
+msgstr "Select an event to see its source details. Candidate links are not included in these calendar records."
 
 #: src/pages/RecruitingPanel.tsx
 msgid "Selected recipient unavailable"
@@ -6429,6 +6807,10 @@ msgstr "Send reset link"
 msgid "Send to"
 msgstr "Send to"
 
+#: src/pages/recruiting/HomeDashboard.tsx
+msgid "Send totals are not available from these records."
+msgstr "Send totals are not available from these records."
+
 #: src/pages/AccountSettingsOverlay.tsx
 msgid "Send with Enter"
 msgstr "Send with Enter"
@@ -6438,10 +6820,6 @@ msgstr "Send with Enter"
 msgid "Sender unavailable"
 msgstr "Sender unavailable"
 
-#: src/pages/recruiting/SequenceTab.tsx
-msgid "Sending"
-msgstr "Sending"
-
 #: src/components/AskCard.tsx
 #: src/pages/recruiting/CalibrationRound.tsx
 #: src/pages/RecruitingPanel.tsx
@@ -6449,7 +6827,6 @@ msgid "Sending…"
 msgstr "Sending…"
 
 #: src/pages/recruiting/EmailConversation.tsx
-#: src/pages/recruiting/SequenceTab.tsx
 msgid "Sent"
 msgstr "Sent"
 
@@ -6569,6 +6946,10 @@ msgstr "Shortlist {name}"
 msgid "Shortlist people from search results to keep them here."
 msgstr "Shortlist people from search results to keep them here."
 
+#: src/pages/recruiting/HomeDashboard.tsx
+msgid "Shortlist period"
+msgstr "Shortlist period"
+
 #: src/pages/recruiting/CandidateDirectory.tsx
 #: src/pages/recruiting/ContactsTab.tsx
 #: src/pages/recruiting/DetailPanel.tsx
@@ -6617,6 +6998,10 @@ msgstr "Show settings"
 #: src/components/call/VoiceChatCard.tsx
 msgid "Show transcript"
 msgstr "Show transcript"
+
+#: src/pages/recruiting/ActivityTab.tsx
+msgid "Showing available activity; more history may exist."
+msgstr "Showing available activity; more history may exist."
 
 #. placeholder {0}: rows.length
 #: src/pages/recruiting/ContactsTab.tsx
@@ -6671,6 +7056,10 @@ msgstr "Site"
 msgid "Skill {0}"
 msgstr "Skill {0}"
 
+#: src/pages/recruiting/SkillEvidence.tsx
+msgid "Skill evidence"
+msgstr "Skill evidence"
+
 #: src/pages/recruiting/DetailPanel.tsx
 msgid "Skills"
 msgstr "Skills"
@@ -6714,6 +7103,10 @@ msgstr "Some roles could not be read."
 msgid "Some saved contact details could not be displayed."
 msgstr "Some saved contact details could not be displayed."
 
+#: src/pages/recruiting/InterviewTab.tsx
+msgid "Some saved records could not be displayed."
+msgstr "Some saved records could not be displayed."
+
 #: src/pages/RecruitingCorrespondence.tsx
 msgid "Some saved results use an earlier connection setup. Check again to load results from the current connection."
 msgstr "Some saved results use an earlier connection setup. Check again to load results from the current connection."
@@ -6724,6 +7117,7 @@ msgstr "Some saved results use an earlier connection setup. Check again to load 
 msgid "Something went wrong. Try again."
 msgstr "Something went wrong. Try again."
 
+#: src/pages/RecruitingCorrespondence.tsx
 #: src/pages/RecruitingPanel.tsx
 msgid "Source"
 msgstr "Source"
@@ -6732,9 +7126,21 @@ msgstr "Source"
 msgid "Source Artifact"
 msgstr "Source Artifact"
 
+#: src/pages/recruiting/SkillEvidence.tsx
+msgid "Source context"
+msgstr "Source context"
+
 #: src/components/ArtifactFileCard.tsx
 msgid "Source text"
 msgstr "Source text"
+
+#: src/pages/recruiting/InterviewCalendar.tsx
+msgid "Source times"
+msgstr "Source times"
+
+#: src/pages/recruiting/InterviewCalendar.tsx
+msgid "Source timezone"
+msgstr "Source timezone"
 
 #: src/components/ArtifactFileCard.tsx
 #: src/pages/RecruitingPanel.tsx
@@ -6795,6 +7201,10 @@ msgstr "SSO is temporarily unavailable. Try again."
 msgid "Stage"
 msgstr "Stage"
 
+#: src/pages/recruiting/InterviewCalendar.tsx
+msgid "Start"
+msgstr "Start"
+
 #: src/pages/Paywall.tsx
 msgid "Start {trialDays}-day free trial"
 msgstr "Start {trialDays}-day free trial"
@@ -6807,6 +7217,10 @@ msgstr "Start recording"
 #: src/pages/Shell.tsx
 msgid "Start recruiting"
 msgstr "Start recruiting"
+
+#: src/pages/recruiting/InterviewCalendar.tsx
+msgid "Start time unavailable"
+msgstr "Start time unavailable"
 
 #: src/pages/GroupPanel.tsx
 msgid "Start with a role title or paste a job description…"
@@ -6837,6 +7251,10 @@ msgstr "Status"
 #: src/pages/recruiting/ActivityTab.tsx
 msgid "Status changed to “{label}”"
 msgstr "Status changed to “{label}”"
+
+#: src/pages/recruiting/InterviewCalendar.tsx
+msgid "Status not recorded"
+msgstr "Status not recorded"
 
 #. placeholder {0}: index + 1
 #: src/pages/RecruitingCorrespondence.tsx
@@ -7045,6 +7463,10 @@ msgstr "Testing…"
 msgid "The API did not come back. Refresh this page."
 msgstr "The API did not come back. Refresh this page."
 
+#: src/pages/recruiting/InterviewTab.tsx
+msgid "The calendar connection changed. These saved records may be out of date."
+msgstr "The calendar connection changed. These saved records may be out of date."
+
 #: src/lib/model-connection-preflight.ts
 msgid "The connection timed out."
 msgstr "The connection timed out."
@@ -7065,6 +7487,10 @@ msgstr "The provider is rate-limiting requests."
 msgid "The recruiting team changed. Open the role again."
 msgstr "The recruiting team changed. Open the role again."
 
+#: src/pages/Shell.tsx
+msgid "The recruiting team is not ready yet."
+msgstr "The recruiting team is not ready yet."
+
 #: src/pages/RecruitingCorrespondence.tsx
 msgid "The saved check returned no matching records. It does not confirm the entire account is empty."
 msgstr "The saved check returned no matching records. It does not confirm the entire account is empty."
@@ -7080,6 +7506,10 @@ msgstr "The workspace changed. Open the role again."
 #: src/pages/RecruitingPanel.tsx
 msgid "There was a problem sending this message."
 msgstr "There was a problem sending this message."
+
+#: src/pages/recruiting/InterviewTab.tsx
+msgid "These replies are not linked to a specific calendar event."
+msgstr "These replies are not linked to a specific calendar event."
 
 #: src/pages/shell/bot-credentials.tsx
 msgid "These saved settings can't be read. Remove it and add it again."
@@ -7189,6 +7619,15 @@ msgstr "This week"
 #: src/pages/RecruitingPanel.tsx
 msgid "Thread"
 msgstr "Thread"
+
+#: src/pages/recruiting/InterviewCalendar.tsx
+msgid "Time"
+msgstr "Time"
+
+#: src/pages/recruiting/ActivityTab.tsx
+#: src/pages/recruiting/EmailConversation.tsx
+msgid "Time not recorded"
+msgstr "Time not recorded"
 
 #: src/pages/RoutineSchedule.tsx
 msgid "Time of day"
@@ -7321,6 +7760,7 @@ msgstr "Uninstall"
 #: src/pages/recruiting/CandidateDirectory.tsx
 #: src/pages/recruiting/HomeDashboard.tsx
 #: src/pages/recruiting/SkillEvidence.tsx
+#: src/pages/RecruitingCorrespondence.tsx
 #: src/pages/RecruitingPanel.tsx
 msgid "Unknown"
 msgstr "Unknown"
@@ -7746,462 +8186,3 @@ msgstr "Your recruiting workspace."
 #: src/pages/recruiting/HomeDashboard.tsx
 msgid "Your tasks"
 msgstr "Your tasks"
-
-#: src/components/AskCard.tsx
-msgid "Confirm requirements"
-msgstr "Confirm requirements"
-
-#: src/components/AskCard.tsx
-msgid "Approve documents"
-msgstr "Approve documents"
-
-#: src/components/AskCard.tsx
-msgid "Approve calibration"
-msgstr "Approve calibration"
-
-#: src/pages/Shell.tsx
-msgid "Opening role…"
-msgstr "Opening role…"
-
-#: src/pages/Shell.tsx
-msgid "The recruiting team is not ready yet."
-msgstr "The recruiting team is not ready yet."
-
-#: src/pages/Shell.tsx
-msgid "Could not open this role."
-msgstr "Could not open this role."
-
-#: src/pages/RecruitingCorrespondence.tsx
-msgid "Draft a reply to the selected email for me to review. Read the original conversation and verify the candidate and role. Do not send."
-msgstr "Draft a reply to the selected email for me to review. Read the original conversation and verify the candidate and role. Do not send."
-
-#: src/pages/RecruitingPanel.tsx
-msgid "Recruiter messages are unavailable for this role."
-msgstr "Recruiter messages are unavailable for this role."
-
-#: src/pages/recruiting/SequenceOverview.tsx
-msgid "— Not reported"
-msgstr "— Not reported"
-
-#: src/pages/recruiting/HomeDashboard.tsx
-msgid "{undated} without a recorded date"
-msgstr "{undated} without a recorded date"
-
-#: src/pages/recruiting/SequenceOverview.tsx
-msgid "≥ Observed in loaded records"
-msgstr "≥ Observed in loaded records"
-
-#: src/pages/recruiting/ActivityTab.tsx
-msgid "Activity history is unavailable from some sources."
-msgstr "Activity history is unavailable from some sources."
-
-#: src/pages/recruiting/ActivityTab.tsx
-msgid "Actor not recorded"
-msgstr "Actor not recorded"
-
-#: src/pages/recruiting/HomeDashboard.tsx
-msgid "All projects"
-msgstr "All projects"
-
-#: src/pages/recruiting/InterviewCalendar.tsx
-msgid "Attendees"
-msgstr "Attendees"
-
-#: src/pages/recruiting/InterviewCalendar.tsx
-msgid "Calendar hours"
-msgstr "Calendar hours"
-
-#: src/pages/recruiting/InterviewTab.tsx
-msgid "Calendar last checked"
-msgstr "Calendar last checked"
-
-#: src/pages/recruiting/InterviewTab.tsx
-msgid "Calendar records have not been checked yet."
-msgstr "Calendar records have not been checked yet."
-
-#: src/pages/recruiting/CandidateDirectory.tsx
-msgid "Candidate cards"
-msgstr "Candidate cards"
-
-#: src/pages/recruiting/CandidateDirectory.tsx
-msgid "Candidate table"
-msgstr "Candidate table"
-
-#: src/pages/recruiting/InterviewCalendar.tsx
-msgid "Choose day"
-msgstr "Choose day"
-
-#: src/pages/recruiting/SequenceOverview.tsx
-msgid "Clicked"
-msgstr "Clicked"
-
-#: src/pages/recruiting/InterviewCalendar.tsx
-msgid "Clock change; see source times"
-msgstr "Clock change; see source times"
-
-#: src/pages/recruiting/InterviewCalendar.tsx
-msgid "Close event details"
-msgstr "Close event details"
-
-#: src/pages/recruiting/CandidateDirectory.tsx
-msgid "Contact layout"
-msgstr "Contact layout"
-
-#: src/pages/recruiting/InterviewTab.tsx
-msgid "Could not load saved calendar records. Try refreshing."
-msgstr "Could not load saved calendar records. Try refreshing."
-
-#: src/pages/recruiting/DetailPanel.tsx
-msgid "Could not record this profile view."
-msgstr "Could not record this profile view."
-
-#: src/pages/recruiting/ActivityTab.tsx
-msgid "Current result: approved"
-msgstr "Current result: approved"
-
-#: src/pages/recruiting/ActivityTab.tsx
-msgid "Current result: pooled"
-msgstr "Current result: pooled"
-
-#: src/pages/recruiting/ActivityTab.tsx
-msgid "Current result: rejected"
-msgstr "Current result: rejected"
-
-#: src/pages/recruiting/InterviewCalendar.tsx
-msgid "Current time"
-msgstr "Current time"
-
-#: src/pages/recruiting/HomeDashboard.tsx
-msgid "Current totals · all dates"
-msgstr "Current totals · all dates"
-
-#: src/pages/recruiting/InterviewCalendar.tsx
-msgid "Date only; time not supplied"
-msgstr "Date only; time not supplied"
-
-#: src/pages/recruiting/InterviewCalendar.tsx
-msgid "Display timezone"
-msgstr "Display timezone"
-
-#: src/pages/recruiting/EmailConversation.tsx
-msgid "Email conversation"
-msgstr "Email conversation"
-
-#: src/pages/recruiting/ActivityTab.tsx
-msgid "Email opens are not recorded. Profile views appear only after recording starts."
-msgstr "Email opens are not recorded. Profile views appear only after recording starts."
-
-#: src/pages/recruiting/ActivityTab.tsx
-msgid "Email received"
-msgstr "Email received"
-
-#: src/pages/recruiting/InterviewCalendar.tsx
-msgid "End"
-msgstr "End"
-
-#: src/pages/recruiting/InterviewCalendar.tsx
-msgid "End not recorded"
-msgstr "End not recorded"
-
-#: src/pages/recruiting/InterviewCalendar.tsx
-msgid "End time unavailable"
-msgstr "End time unavailable"
-
-#: src/pages/recruiting/InterviewCalendar.tsx
-msgid "Event details"
-msgstr "Event details"
-
-#: src/pages/recruiting/InterviewCalendar.tsx
-msgid "Event status"
-msgstr "Event status"
-
-#: src/pages/recruiting/InterviewCalendar.tsx
-msgid "Events without usable start times"
-msgstr "Events without usable start times"
-
-#. placeholder {0}: labels[stage.key]
-#: src/pages/recruiting/HomeDashboard.tsx
-msgid "Inspect {0}"
-msgstr "Inspect {0}"
-
-#: src/pages/recruiting/HomeDashboard.tsx
-msgid "Inspect week of {label}"
-msgstr "Inspect week of {label}"
-
-#: src/pages/recruiting/HomeDashboard.tsx
-msgid "Last {count} weeks"
-msgstr "Last {count} weeks"
-
-#: src/pages/recruiting/SequenceOverview.tsx
-msgid "Last 7 days · UTC"
-msgstr "Last 7 days · UTC"
-
-#: src/pages/recruiting/SkillEvidence.tsx
-msgid "Listed skill"
-msgstr "Listed skill"
-
-#: src/pages/recruiting/InterviewCalendar.tsx
-msgid "Next week"
-msgstr "Next week"
-
-#: src/pages/recruiting/ActivityTab.tsx
-msgid "No activity recorded in the available sources."
-msgstr "No activity recorded in the available sources."
-
-#: src/pages/recruiting/SequenceOverview.tsx
-msgid "No dated sends in the available records."
-msgstr "No dated sends in the available records."
-
-#: src/pages/recruiting/AssessmentCard.tsx
-#: src/pages/recruiting/SkillEvidence.tsx
-msgid "No evidence provided."
-msgstr "No evidence provided."
-
-#: src/pages/recruiting/InterviewTab.tsx
-msgid "No saved calendar records matched this candidate."
-msgstr "No saved calendar records matched this candidate."
-
-#: src/pages/recruiting/HomeDashboard.tsx
-msgid "No saved overview for these projects."
-msgstr "No saved overview for these projects."
-
-#: src/pages/recruiting/SkillEvidence.tsx
-msgid "No supporting detail in the saved profile."
-msgstr "No supporting detail in the saved profile."
-
-#: src/pages/recruiting/InterviewCalendar.tsx
-msgid "No timed events in this week."
-msgstr "No timed events in this week."
-
-#: src/pages/recruiting/InterviewCalendar.tsx
-msgid "Not recorded"
-msgstr "Not recorded"
-
-#: src/pages/recruiting/SequenceOverview.tsx
-msgid "Not reported"
-msgstr "Not reported"
-
-#: src/pages/recruiting/CandidateDirectory.tsx
-msgid "Open {name}'s source profile"
-msgstr "Open {name}'s source profile"
-
-#: src/pages/recruiting/InterviewTab.tsx
-msgid "Open the role conversation to see saved calendar records."
-msgstr "Open the role conversation to see saved calendar records."
-
-#: src/pages/recruiting/SequenceOverview.tsx
-msgid "Opened"
-msgstr "Opened"
-
-#: src/pages/recruiting/ActivityTab.tsx
-msgid "Outbox"
-msgstr "Outbox"
-
-#: src/pages/recruiting/HomeDashboard.tsx
-msgid "Outreach funnel"
-msgstr "Outreach funnel"
-
-#: src/pages/recruiting/HomeDashboard.tsx
-msgid "Partial data"
-msgstr "Partial data"
-
-#: src/pages/recruiting/InterviewCalendar.tsx
-msgid "Previous week"
-msgstr "Previous week"
-
-#: src/pages/recruiting/DetailPanel.tsx
-msgid "Profile navigation"
-msgstr "Profile navigation"
-
-#: src/pages/recruiting/ActivityTab.tsx
-msgid "Profile viewed"
-msgstr "Profile viewed"
-
-#: src/pages/recruiting/HomeDashboard.tsx
-msgid "Project"
-msgstr "Project"
-
-#: src/pages/recruiting/HomeDashboard.tsx
-msgid "Projects"
-msgstr "Projects"
-
-#: src/pages/recruiting/EmailConversation.tsx
-msgid "Recipients unavailable"
-msgstr "Recipients unavailable"
-
-#: src/pages/recruiting/SequenceOverview.tsx
-msgid "Recorded send activity"
-msgstr "Recorded send activity"
-
-#: src/pages/recruiting/ActivityTab.tsx
-msgid "Review updated"
-msgstr "Review updated"
-
-#: src/pages/recruiting/ActivityTab.tsx
-msgid "Role status"
-msgstr "Role status"
-
-#: src/pages/recruiting/InterviewTab.tsx
-msgid "Saved calendar records are unavailable from this source."
-msgstr "Saved calendar records are unavailable from this source."
-
-#: src/pages/recruiting/ActivityTab.tsx
-msgid "Saved correspondence"
-msgstr "Saved correspondence"
-
-#: src/pages/recruiting/ActivityTab.tsx
-msgid "Saved mailbox"
-msgstr "Saved mailbox"
-
-#: src/pages/recruiting/HomeDashboard.tsx
-msgid "Send totals are not available from these records."
-msgstr "Send totals are not available from these records."
-
-#: src/pages/recruiting/HomeDashboard.tsx
-msgid "Shortlist period"
-msgstr "Shortlist period"
-
-#: src/pages/recruiting/ActivityTab.tsx
-msgid "Showing available activity; more history may exist."
-msgstr "Showing available activity; more history may exist."
-
-#: src/pages/recruiting/SkillEvidence.tsx
-msgid "Skill evidence"
-msgstr "Skill evidence"
-
-#: src/pages/recruiting/InterviewTab.tsx
-msgid "Some saved calendar records could not be displayed."
-msgstr "Some saved calendar records could not be displayed."
-
-#: src/pages/recruiting/SkillEvidence.tsx
-msgid "Source context"
-msgstr "Source context"
-
-#: src/pages/recruiting/InterviewCalendar.tsx
-msgid "Source times"
-msgstr "Source times"
-
-#: src/pages/recruiting/InterviewCalendar.tsx
-msgid "Source timezone"
-msgstr "Source timezone"
-
-#: src/pages/recruiting/InterviewCalendar.tsx
-msgid "Start"
-msgstr "Start"
-
-#: src/pages/recruiting/InterviewCalendar.tsx
-msgid "Start time unavailable"
-msgstr "Start time unavailable"
-
-#: src/pages/recruiting/InterviewCalendar.tsx
-msgid "Status not recorded"
-msgstr "Status not recorded"
-
-#: src/pages/recruiting/InterviewTab.tsx
-msgid "The calendar connection changed. These saved records may be out of date."
-msgstr "The calendar connection changed. These saved records may be out of date."
-
-#: src/pages/recruiting/InterviewCalendar.tsx
-msgid "Time"
-msgstr "Time"
-
-#: src/pages/recruiting/ActivityTab.tsx
-#: src/pages/recruiting/EmailConversation.tsx
-#: src/pages/recruiting/SequenceTab.tsx
-msgid "Time not recorded"
-msgstr "Time not recorded"
-
-#: src/pages/Shell.tsx
-#: src/pages/RecruitingPanel.tsx
-#: src/pages/recruiting/ContactsTab.tsx
-#: src/pages/recruiting/InterviewTab.tsx
-msgid "Outreach drafts"
-msgstr "Outreach drafts"
-
-#: src/pages/Shell.tsx
-#: src/pages/RecruitingPanel.tsx
-#: src/pages/recruiting/ContactsTab.tsx
-#: src/pages/recruiting/InterviewTab.tsx
-msgid "Candidate status"
-msgstr "Candidate status"
-
-#: src/pages/Shell.tsx
-#: src/pages/RecruitingPanel.tsx
-#: src/pages/recruiting/ContactsTab.tsx
-#: src/pages/recruiting/InterviewTab.tsx
-msgid "{loadedCount} loaded"
-msgstr "{loadedCount} loaded"
-
-#: src/pages/recruiting/InboxTab.tsx
-msgid "Back to inbox"
-msgstr "Back to inbox"
-
-#: src/pages/recruiting/InboxTab.tsx
-msgid "Candidate conversations"
-msgstr "Candidate conversations"
-
-#: src/pages/recruiting/InboxTab.tsx
-msgid "Candidate details unavailable"
-msgstr "Candidate details unavailable"
-
-#: src/pages/recruiting/InterviewTab.tsx
-msgid "Candidate interview status"
-msgstr "Candidate interview status"
-
-#: src/pages/recruiting/InterviewCalendar.tsx
-msgid "Candidate link"
-msgstr "Candidate link"
-
-#: src/pages/recruiting/InterviewCalendar.tsx
-msgid "Change the week or status to review saved records. Empty space does not confirm availability."
-msgstr "Change the week or status to review saved records. Empty space does not confirm availability."
-
-#: src/pages/recruiting/AssessmentCard.tsx
-#: src/pages/recruiting/CandidateDirectory.tsx
-#: src/pages/recruiting/SkillEvidence.tsx
-msgid "Criterion name unavailable"
-msgstr "Criterion name unavailable"
-
-#: src/pages/recruiting/EmailConversation.tsx
-msgid "Email thread or message"
-msgstr "Email thread or message"
-
-#: src/pages/recruiting/InboxTab.tsx
-msgid "Last reply"
-msgstr "Last reply"
-
-#: src/pages/recruiting/InboxTab.tsx
-msgid "No loaded candidates match these filters."
-msgstr "No loaded candidates match these filters."
-
-#: src/pages/recruiting/InterviewCalendar.tsx
-msgid "No saved events to show for this week and status."
-msgstr "No saved events to show for this week and status."
-
-#: src/pages/recruiting/InterviewCalendar.tsx
-msgid "Not recorded in this source"
-msgstr "Not recorded in this source"
-
-#: src/pages/recruiting/InterviewCalendar.tsx
-msgid "Saved calendar events"
-msgstr "Saved calendar events"
-
-#: src/pages/recruiting/InterviewCalendar.tsx
-msgid "Saved events"
-msgstr "Saved events"
-
-#: src/pages/recruiting/DetailPanel.tsx
-msgid "Scroll navigation left"
-msgstr "Scroll navigation left"
-
-#: src/pages/recruiting/DetailPanel.tsx
-msgid "Scroll navigation right"
-msgstr "Scroll navigation right"
-
-#: src/pages/recruiting/InboxTab.tsx
-msgid "Search loaded candidates"
-msgstr "Search loaded candidates"
-
-#: src/pages/recruiting/InterviewCalendar.tsx
-msgid "Select an event to see its source details. Candidate links are not included in these calendar records."
-msgstr "Select an event to see its source details. Candidate links are not included in these calendar records."

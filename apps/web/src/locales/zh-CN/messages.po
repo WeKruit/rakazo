@@ -17,6 +17,10 @@ msgstr ""
 msgid " (unread)"
 msgstr "（未读）"
 
+#: src/pages/recruiting/SequenceOverview.tsx
+msgid "— Not reported"
+msgstr "— 未报告"
+
 #. placeholder {0}: candidatePage.counts.candidates
 #: src/pages/RecruitingPanel.tsx
 msgid "{0, plural, =1 {# candidate in the pool} other {# candidates in the pool}}"
@@ -185,6 +189,10 @@ msgstr ""
 msgid "{hours}h ago"
 msgstr "{hours} 小时前"
 
+#: src/pages/recruiting/ContactsTab.tsx
+msgid "{loadedCount} loaded"
+msgstr "已加载 {loadedCount}"
+
 #: src/lib/relative-time.ts
 #: src/pages/ActivityList.tsx
 msgid "{minutes}m ago"
@@ -199,10 +207,6 @@ msgstr "{name} 失败"
 #: src/lib/browser-notifications.ts
 msgid "{name} finished"
 msgstr "{name} 已完成"
-
-#: src/pages/recruiting/ActivityTab.tsx
-msgid "{name} replied"
-msgstr "{name} 已回复"
 
 #. js-lingui-explicit-id
 #: src/lib/browser-notifications.ts
@@ -245,6 +249,10 @@ msgstr "{title}，{label}"
 msgid "{toolCount, plural, one {# tool} other {# tools}}"
 msgstr ""
 
+#: src/pages/recruiting/HomeDashboard.tsx
+msgid "{undated} without a recorded date"
+msgstr "{undated} 条未记录日期"
+
 #: src/pages/recruiting/ProfileTimeline.tsx
 msgid "{years} yr"
 msgstr "{years} 年"
@@ -257,6 +265,10 @@ msgstr "{years} 年"
 #: src/pages/Shell.tsx
 msgid "@{0}"
 msgstr "@{0}"
+
+#: src/pages/recruiting/SequenceOverview.tsx
+msgid "≥ Observed in loaded records"
+msgstr "≥ 已加载记录中的数量"
 
 #: src/pages/shell/message-cards.tsx
 msgid "A bit of everything"
@@ -361,6 +373,14 @@ msgstr "当前模型"
 #: src/pages/Shell.tsx
 msgid "Activity"
 msgstr "动态"
+
+#: src/pages/recruiting/ActivityTab.tsx
+msgid "Activity history is unavailable from some sources."
+msgstr "部分来源无法提供活动记录。"
+
+#: src/pages/recruiting/ActivityTab.tsx
+msgid "Actor not recorded"
+msgstr "未记录操作人"
 
 #: src/pages/ModelBackupsSettings.tsx
 #: src/pages/PluginsOverlay.tsx
@@ -531,10 +551,6 @@ msgstr ""
 msgid "All bots"
 msgstr ""
 
-#: src/pages/recruiting/InboxTab.tsx
-msgid "All candidates"
-msgstr ""
-
 #: src/pages/RecruitingPanel.tsx
 msgid "All Important records"
 msgstr ""
@@ -550,6 +566,10 @@ msgstr ""
 #: src/pages/RecruitingPanel.tsx
 msgid "All of"
 msgstr "全部满足"
+
+#: src/pages/recruiting/HomeDashboard.tsx
+msgid "All projects"
+msgstr "所有项目"
 
 #: src/pages/ModelSettingsOverlay.tsx
 msgid "All providers"
@@ -690,6 +710,14 @@ msgstr "审批边界"
 #: src/pages/shell/message-cards.tsx
 msgid "Approve"
 msgstr "批准"
+
+#: src/components/AskCard.tsx
+msgid "Approve calibration"
+msgstr "确认候选人校准"
+
+#: src/components/AskCard.tsx
+msgid "Approve documents"
+msgstr "确认招聘材料"
 
 #: src/pages/shell/message-cards.tsx
 msgid "Approve this server to let your agent use its tools."
@@ -834,6 +862,10 @@ msgstr ""
 msgid "Attachment"
 msgstr "附件"
 
+#: src/pages/recruiting/InterviewCalendar.tsx
+msgid "Attendees"
+msgstr "参会人"
+
 #: src/lib/model-connection-preflight.ts
 msgid "Authentication failed."
 msgstr "身份验证失败。"
@@ -906,10 +938,6 @@ msgstr "平均任期"
 msgid "Awaiting feedback"
 msgstr "等待反馈"
 
-#: src/pages/recruiting/InboxTab.tsx
-msgid "Awaiting reply"
-msgstr ""
-
 #: src/components/computer/FilesApp.tsx
 #: src/pages/Board.tsx
 #: src/pages/PluginsOverlay.tsx
@@ -917,6 +945,11 @@ msgstr ""
 #: src/pages/RoutineEditor.tsx
 msgid "Back"
 msgstr "返回"
+
+#: src/pages/recruiting/InboxTab.tsx
+#: src/pages/RecruitingCorrespondence.tsx
+msgid "Back to inbox"
+msgstr "返回收件箱"
 
 #: src/pages/Shell.tsx
 msgid "Back to results"
@@ -1062,11 +1095,24 @@ msgstr ""
 msgid "Calendar event"
 msgstr ""
 
+#: src/pages/recruiting/InterviewCalendar.tsx
+msgid "Calendar hours"
+msgstr "日历时间刻度"
+
+#: src/pages/recruiting/InterviewTab.tsx
+msgid "Calendar last checked"
+msgstr "上次查看日历"
+
+#: src/pages/recruiting/InterviewTab.tsx
+msgid "Calendar records have not been checked yet."
+msgstr "尚未查看日历记录。"
+
 #: src/pages/recruiting/CalibrationRound.tsx
 msgid "Calibration round"
 msgstr "校准轮次"
 
 #: src/pages/recruiting/SequenceTab.tsx
+#: src/pages/RecruitingCorrespondence.tsx
 #: src/pages/RecruitingPanel.tsx
 msgid "Campaign"
 msgstr "邮件活动"
@@ -1139,9 +1185,23 @@ msgstr "候选人"
 msgid "Candidate assessment"
 msgstr ""
 
+#: src/pages/recruiting/CandidateDirectory.tsx
+msgid "Candidate cards"
+msgstr "候选人卡片"
+
+#: src/pages/recruiting/InboxTab.tsx
+#: src/pages/RecruitingCorrespondence.tsx
+msgid "Candidate conversations"
+msgstr "候选人沟通"
+
 #: src/pages/RecruitingPanel.tsx
 msgid "Candidate details"
 msgstr ""
+
+#: src/pages/recruiting/InboxTab.tsx
+#: src/pages/RecruitingCorrespondence.tsx
+msgid "Candidate details unavailable"
+msgstr "候选人详情不可用"
 
 #: src/pages/RecruitingPanel.tsx
 msgid "Candidate facts"
@@ -1150,6 +1210,14 @@ msgstr ""
 #: src/pages/Shell.tsx
 msgid "Candidate feedback"
 msgstr ""
+
+#: src/pages/recruiting/InterviewTab.tsx
+msgid "Candidate interview status"
+msgstr "候选人面试状态"
+
+#: src/pages/recruiting/InterviewCalendar.tsx
+msgid "Candidate link"
+msgstr "关联候选人"
 
 #: src/pages/RecruitingPanel.tsx
 msgid "Candidate messages"
@@ -1175,6 +1243,14 @@ msgstr ""
 msgid "Candidate statement"
 msgstr ""
 
+#: src/pages/recruiting/InterviewTab.tsx
+msgid "Candidate status"
+msgstr "候选人状态"
+
+#: src/pages/recruiting/CandidateDirectory.tsx
+msgid "Candidate table"
+msgstr "候选人表格"
+
 #: src/pages/recruiting/InboxTab.tsx
 #: src/pages/RecruitingPanel.tsx
 msgid "Candidates"
@@ -1192,6 +1268,10 @@ msgstr "卡片"
 #: src/pages/AccountSettingsOverlay.tsx
 msgid "Change password"
 msgstr "修改密码"
+
+#: src/pages/recruiting/InterviewCalendar.tsx
+msgid "Change the week or status to review saved records. Empty space does not confirm availability."
+msgstr "切换周或状态以查看已保存的记录。空白时段不代表有空。"
 
 #: src/pages/RecruitingPanel.tsx
 msgid "Changes could not be saved."
@@ -1322,6 +1402,10 @@ msgstr "设置新密码"
 msgid "Choose a role to see its outreach."
 msgstr "选择一个岗位查看外联情况。"
 
+#: src/pages/recruiting/InterviewCalendar.tsx
+msgid "Choose day"
+msgstr "选择日期"
+
 #: src/pages/RecruitingPanel.tsx
 msgid "Choose feedback"
 msgstr ""
@@ -1360,6 +1444,10 @@ msgstr ""
 msgid "Clearing…"
 msgstr "正在清空…"
 
+#: src/pages/recruiting/SequenceOverview.tsx
+msgid "Clicked"
+msgstr "已点击"
+
 #: src/pages/RecruitingPanel.tsx
 msgid "Client"
 msgstr ""
@@ -1379,6 +1467,10 @@ msgstr ""
 #: src/pages/McpServersOverlay.tsx
 msgid "Client secret"
 msgstr ""
+
+#: src/pages/recruiting/InterviewCalendar.tsx
+msgid "Clock change; see source times"
+msgstr "时钟切换，请查看来源时间"
 
 #: src/components/ErrorBoundary.tsx
 #: src/pages/KnowledgeSection.tsx
@@ -1403,6 +1495,10 @@ msgstr "关闭图表"
 #: src/pages/Shell.tsx
 msgid "Close computer"
 msgstr "关闭电脑"
+
+#: src/pages/recruiting/InterviewCalendar.tsx
+msgid "Close event details"
+msgstr "关闭日程详情"
 
 #: src/pages/shell/message-cards.tsx
 msgid "Close image preview"
@@ -1627,6 +1723,10 @@ msgid "Confirm reply"
 msgstr "确认回复"
 
 #: src/components/AskCard.tsx
+msgid "Confirm requirements"
+msgstr "确认岗位要求"
+
+#: src/components/AskCard.tsx
 msgid "Confirm sending email"
 msgstr "确认发送邮件"
 
@@ -1766,6 +1866,10 @@ msgstr ""
 msgid "Contact details have not been checked yet."
 msgstr ""
 
+#: src/pages/recruiting/CandidateDirectory.tsx
+msgid "Contact layout"
+msgstr "联系人布局"
+
 #: src/pages/recruiting/DetailPanel.tsx
 #: src/pages/RecruitingPanel.tsx
 msgid "Contact status"
@@ -1810,6 +1914,7 @@ msgstr "通过 {0} 继续"
 msgid "Continue with email"
 msgstr "使用邮箱继续"
 
+#: src/pages/RecruitingCorrespondence.tsx
 #: src/pages/Shell.tsx
 msgid "Conversation"
 msgstr ""
@@ -2074,6 +2179,7 @@ msgstr "无法加载候选人记录"
 #: src/pages/recruiting/InterviewTab.tsx
 #: src/pages/recruiting/SequenceTab.tsx
 #: src/pages/recruiting/shared.tsx
+#: src/pages/RecruitingCorrespondence.tsx
 #: src/pages/RecruitingPanel.tsx
 msgid "Could not load candidate records. Try refreshing."
 msgstr "无法加载候选人记录，请刷新重试。"
@@ -2138,6 +2244,10 @@ msgstr "无法加载提醒。"
 #: src/pages/RoutineRunHistory.tsx
 msgid "Could not load run history"
 msgstr "无法加载运行历史记录"
+
+#: src/pages/recruiting/InterviewTab.tsx
+msgid "Could not load saved calendar records. Try refreshing."
+msgstr "无法加载已保存的日历记录，请刷新重试。"
 
 #: src/pages/RecruitingCorrespondence.tsx
 msgid "Could not load saved results. Try refreshing."
@@ -2214,6 +2324,10 @@ msgstr ""
 msgid "Could not open terminal"
 msgstr "无法打开终端"
 
+#: src/pages/Shell.tsx
+msgid "Could not open this role."
+msgstr "无法打开此岗位。"
+
 #: src/pages/VoiceSettingsOverlay.tsx
 msgid "Could not play a test clip"
 msgstr "无法播放测试片段"
@@ -2244,6 +2358,10 @@ msgstr "无法读取这个活动。"
 #: src/pages/RecruitingCorrespondence.tsx
 msgid "Could not read this sequence."
 msgstr ""
+
+#: src/pages/recruiting/DetailPanel.tsx
+msgid "Could not record this profile view."
+msgstr "未能记录本次档案查看。"
 
 #: src/pages/ScratchpadSection.tsx
 msgid "Could not remove"
@@ -2526,6 +2644,12 @@ msgstr ""
 msgid "Criterion {0}"
 msgstr ""
 
+#: src/pages/recruiting/AssessmentCard.tsx
+#: src/pages/recruiting/CandidateDirectory.tsx
+#: src/pages/recruiting/SkillEvidence.tsx
+msgid "Criterion name unavailable"
+msgstr "标准名称不可用"
+
 #: src/pages/RecruitingPanel.tsx
 msgid "CRM receipt"
 msgstr ""
@@ -2547,6 +2671,18 @@ msgstr ""
 msgid "Current password"
 msgstr "当前密码"
 
+#: src/pages/recruiting/ActivityTab.tsx
+msgid "Current result: approved"
+msgstr "当前结果：已通过"
+
+#: src/pages/recruiting/ActivityTab.tsx
+msgid "Current result: pooled"
+msgstr "当前结果：已入库"
+
+#: src/pages/recruiting/ActivityTab.tsx
+msgid "Current result: rejected"
+msgstr "当前结果：已拒绝"
+
 #: src/pages/recruiting/CandidateDirectory.tsx
 #: src/pages/RecruitingPanel.tsx
 msgid "Current role"
@@ -2559,6 +2695,14 @@ msgstr ""
 #: src/pages/recruiting/ProfileTimeline.tsx
 msgid "Current tenure"
 msgstr "当前任期"
+
+#: src/pages/recruiting/InterviewCalendar.tsx
+msgid "Current time"
+msgstr "当前时间"
+
+#: src/pages/recruiting/HomeDashboard.tsx
+msgid "Current totals · all dates"
+msgstr "当前总计 · 所有日期"
 
 #: src/pages/shell/bot-credentials.tsx
 msgid "Custom header"
@@ -2583,6 +2727,10 @@ msgstr "深色"
 #: src/pages/RecruitingPanel.tsx
 msgid "Dashboard"
 msgstr ""
+
+#: src/pages/recruiting/InterviewCalendar.tsx
+msgid "Date only; time not supplied"
+msgstr "仅有日期，未提供时间"
 
 #. placeholder {0}: draft.email.date
 #: src/pages/Shell.tsx
@@ -2806,6 +2954,10 @@ msgstr "已关闭，可随时在 MCP 设置中重新连接。"
 msgid "Display name"
 msgstr "显示名称"
 
+#: src/pages/recruiting/InterviewCalendar.tsx
+msgid "Display timezone"
+msgstr "显示时区"
+
 #: src/pages/HostComputerPrompt.tsx
 msgid "Docker"
 msgstr "Docker"
@@ -2866,6 +3018,10 @@ msgstr ""
 #: src/pages/RecruitingCorrespondence.tsx
 msgid "Draft"
 msgstr ""
+
+#: src/pages/RecruitingCorrespondence.tsx
+msgid "Draft a reply to the selected email for me to review. Read the original conversation and verify the candidate and role. Do not send."
+msgstr "请为选中的邮件起草回复供我审阅。阅读原始对话并核实候选人和岗位。不要发送。"
 
 #: src/pages/recruiting/EmailConversation.tsx
 #: src/pages/RecruitingPanel.tsx
@@ -2960,8 +3116,16 @@ msgid "Email missing"
 msgstr ""
 
 #: src/pages/recruiting/ActivityTab.tsx
+msgid "Email opens are not recorded. Profile views appear only after recording starts."
+msgstr "暂未记录邮件打开情况。档案查看记录仅从启用记录后开始显示。"
+
+#: src/pages/recruiting/ActivityTab.tsx
 msgid "Email queued"
 msgstr "邮件已排队"
+
+#: src/pages/recruiting/ActivityTab.tsx
+msgid "Email received"
+msgstr "已收到邮件"
 
 #: src/pages/recruiting/ActivityTab.tsx
 msgid "Email recorded"
@@ -2978,6 +3142,10 @@ msgstr "邮件已定时"
 #: src/pages/recruiting/ActivityTab.tsx
 msgid "Email sent"
 msgstr "邮件已发送"
+
+#: src/pages/recruiting/EmailConversation.tsx
+msgid "Email thread or message"
+msgstr "邮件会话或单封邮件"
 
 #: src/lib/user-error.ts
 msgid "Email verification required"
@@ -3002,6 +3170,18 @@ msgstr ""
 #: src/pages/RecruitingCorrespondence.tsx
 msgid "Enable for this role"
 msgstr ""
+
+#: src/pages/recruiting/InterviewCalendar.tsx
+msgid "End"
+msgstr "结束"
+
+#: src/pages/recruiting/InterviewCalendar.tsx
+msgid "End not recorded"
+msgstr "未记录结束时间"
+
+#: src/pages/recruiting/InterviewCalendar.tsx
+msgid "End time unavailable"
+msgstr "结束时间不可用"
 
 #: src/pages/BillingSettingsPanel.tsx
 msgid "Ends {day}"
@@ -3050,6 +3230,18 @@ msgstr ""
 #: src/pages/RecruitingPanel.tsx
 msgid "Error details"
 msgstr ""
+
+#: src/pages/recruiting/InterviewCalendar.tsx
+msgid "Event details"
+msgstr "日程详情"
+
+#: src/pages/recruiting/InterviewCalendar.tsx
+msgid "Event status"
+msgstr "日程状态"
+
+#: src/pages/recruiting/InterviewCalendar.tsx
+msgid "Events without usable start times"
+msgstr "缺少有效开始时间的日程"
 
 #: src/pages/ExternalConversationSettings.tsx
 #: src/pages/RoutineSchedule.tsx
@@ -3143,7 +3335,6 @@ msgid "failed"
 msgstr "失败"
 
 #: src/pages/ActivityList.tsx
-#: src/pages/recruiting/SequenceTab.tsx
 msgid "Failed"
 msgstr "失败"
 
@@ -3554,6 +3745,15 @@ msgstr ""
 msgid "Inputs"
 msgstr "输入"
 
+#. placeholder {0}: labels[stage.key]
+#: src/pages/recruiting/HomeDashboard.tsx
+msgid "Inspect {0}"
+msgstr "查看{0}"
+
+#: src/pages/recruiting/HomeDashboard.tsx
+msgid "Inspect week of {label}"
+msgstr "查看 {label} 当周"
+
 #: src/pages/memory-providers/SupermemorySettingsForm.tsx
 msgid "Instance API key"
 msgstr "实例 API 密钥"
@@ -3727,9 +3927,21 @@ msgstr "知识"
 msgid "Language"
 msgstr "语言"
 
+#: src/pages/recruiting/HomeDashboard.tsx
+msgid "Last {count} weeks"
+msgstr "最近 {count} 周"
+
+#: src/pages/recruiting/SequenceOverview.tsx
+msgid "Last 7 days · UTC"
+msgstr "最近 7 天 · UTC"
+
 #: src/pages/RecruitingCorrespondence.tsx
 msgid "Last checked"
 msgstr ""
+
+#: src/pages/recruiting/InboxTab.tsx
+msgid "Last reply"
+msgstr "最近回复"
 
 #: src/pages/recruiting/SequenceTab.tsx
 #: src/pages/RecruitingPanel.tsx
@@ -3796,6 +4008,10 @@ msgstr ""
 #: src/pages/Artifacts.tsx
 msgid "List view"
 msgstr ""
+
+#: src/pages/recruiting/SkillEvidence.tsx
+msgid "Listed skill"
+msgstr "档案列出的技能"
 
 #: src/pages/ExternalConversationSettings.tsx
 msgid "Listen"
@@ -4090,6 +4306,7 @@ msgstr "提及"
 msgid "Mentions only"
 msgstr ""
 
+#: src/pages/recruiting/EmailConversation.tsx
 #: src/pages/RecruitingCorrespondence.tsx
 #: src/pages/RecruitingPanel.tsx
 #: src/pages/Shell.tsx
@@ -4415,14 +4632,18 @@ msgstr ""
 msgid "Next contact campaigns"
 msgstr ""
 
+#: src/pages/recruiting/InterviewCalendar.tsx
+msgid "Next week"
+msgstr "下一周"
+
 #. placeholder {0}: stage.nextStep
 #: src/pages/recruiting/RoleSetup.tsx
 msgid "Next: {0}"
 msgstr "下一步：{0}"
 
 #: src/pages/recruiting/ActivityTab.tsx
-msgid "No activity yet."
-msgstr "暂无动态。"
+msgid "No activity recorded in the available sources."
+msgstr "可用来源中没有活动记录。"
 
 #: src/pages/RecruitingPanel.tsx
 msgid "No additional search filters"
@@ -4486,6 +4707,15 @@ msgstr "这个岗位还没有联系人。"
 msgid "No credentials saved for this bot."
 msgstr ""
 
+#: src/pages/recruiting/SequenceOverview.tsx
+msgid "No dated sends in the available records."
+msgstr "可用记录中没有带时间的已发送邮件。"
+
+#: src/pages/recruiting/AssessmentCard.tsx
+#: src/pages/recruiting/SkillEvidence.tsx
+msgid "No evidence provided."
+msgstr "未提供证据。"
+
 #: src/pages/MessagingSettingsOverlay.tsx
 msgid "No group chats yet."
 msgstr "还没有群聊。"
@@ -4513,6 +4743,10 @@ msgstr ""
 #: src/pages/RecruitingPanel.tsx
 msgid "No job description is saved for this role. Add a JD or link when starting recruiting."
 msgstr ""
+
+#: src/pages/recruiting/InboxTab.tsx
+msgid "No loaded candidates match these filters."
+msgstr "已加载的候选人中没有符合这些筛选条件的结果。"
 
 #: src/components/AskCard.tsx
 msgid "No longer active"
@@ -4611,6 +4845,10 @@ msgstr "还没有运行记录"
 msgid "No saved assessments"
 msgstr ""
 
+#: src/pages/recruiting/InterviewTab.tsx
+msgid "No saved calendar records matched this candidate."
+msgstr "没有匹配此候选人的已保存日历记录。"
+
 #: src/pages/recruiting/ContactsTab.tsx
 #: src/pages/RecruitingPanel.tsx
 msgid "No saved candidates"
@@ -4619,6 +4857,10 @@ msgstr ""
 #: src/pages/RecruitingPanel.tsx
 msgid "No saved discovery sources"
 msgstr ""
+
+#: src/pages/recruiting/InterviewCalendar.tsx
+msgid "No saved events to show for this week and status."
+msgstr "本周此状态下没有可显示的已保存日程。"
 
 #: src/pages/RecruitingPanel.tsx
 msgid "No saved feedback yet."
@@ -4631,6 +4873,10 @@ msgstr ""
 #: src/pages/RecruitingPanel.tsx
 msgid "No saved memory in these scopes"
 msgstr ""
+
+#: src/pages/recruiting/HomeDashboard.tsx
+msgid "No saved overview for these projects."
+msgstr "这些项目没有已保存的总览。"
 
 #: src/pages/RecruitingPanel.tsx
 msgid "No saved questions"
@@ -4660,10 +4906,6 @@ msgstr ""
 msgid "No shortlisted candidates yet."
 msgstr ""
 
-#: src/pages/recruiting/HomeDashboard.tsx
-msgid "No shortlisted profiles yet."
-msgstr "还没有入围的候选人。"
-
 #: src/pages/KnowledgeSection.tsx
 msgid "No skills yet"
 msgstr "暂无技能"
@@ -4679,11 +4921,8 @@ msgid "No stored emails for this candidate."
 msgstr ""
 
 #: src/pages/recruiting/InboxTab.tsx
+#: src/pages/RecruitingCorrespondence.tsx
 msgid "No stored emails for this role."
-msgstr ""
-
-#: src/pages/recruiting/SequenceTab.tsx
-msgid "No stored messages for this candidate."
 msgstr ""
 
 #: src/pages/RecruitingPanel.tsx
@@ -4701,6 +4940,10 @@ msgstr ""
 msgid "No subject"
 msgstr ""
 
+#: src/pages/recruiting/SkillEvidence.tsx
+msgid "No supporting detail in the saved profile."
+msgstr "已保存的档案中没有支持该技能的详细信息。"
+
 #: src/pages/MessagingSettingsOverlay.tsx
 msgid "No team conversations yet."
 msgstr ""
@@ -4708,6 +4951,10 @@ msgstr ""
 #: src/pages/Board.tsx
 msgid "No tickets yet"
 msgstr ""
+
+#: src/pages/recruiting/InterviewCalendar.tsx
+msgid "No timed events in this week."
+msgstr "本周没有带时间的日程。"
 
 #: src/pages/PluginsOverlay.tsx
 msgid "No tools available."
@@ -4774,6 +5021,18 @@ msgstr "暂不"
 #: src/pages/RecruitingPanel.tsx
 msgid "Not pursuing"
 msgstr ""
+
+#: src/pages/recruiting/InterviewCalendar.tsx
+msgid "Not recorded"
+msgstr "未记录"
+
+#: src/pages/recruiting/InterviewCalendar.tsx
+msgid "Not recorded in this source"
+msgstr "此来源未记录"
+
+#: src/pages/recruiting/SequenceOverview.tsx
+msgid "Not reported"
+msgstr "未报告"
 
 #: src/pages/RecruitingPanel.tsx
 msgid "Not returned"
@@ -4870,6 +5129,10 @@ msgstr "打开"
 msgid "Open {0}"
 msgstr "打开 {0}"
 
+#: src/pages/recruiting/CandidateDirectory.tsx
+msgid "Open {name}'s source profile"
+msgstr "打开 {name} 的来源档案"
+
 #. placeholder {0}: oauth.verificationUri.replace(/^https:\/\//, "")
 #: src/pages/ModelSettingsOverlay.tsx
 #: src/pages/Onboarding.tsx
@@ -4928,6 +5191,10 @@ msgstr ""
 msgid "Open the role conversation to see its candidates."
 msgstr "打开岗位对话查看候选人。"
 
+#: src/pages/recruiting/InterviewTab.tsx
+msgid "Open the role conversation to see saved calendar records."
+msgstr "打开职位对话以查看已保存的日历记录。"
+
 #: src/pages/Shell.tsx
 msgid "Open the saved sequence before editing it."
 msgstr ""
@@ -4941,6 +5208,10 @@ msgstr "待办"
 msgid "OpenAI-compatible server URL"
 msgstr "OpenAI 兼容服务器 URL"
 
+#: src/pages/recruiting/SequenceOverview.tsx
+msgid "Opened"
+msgstr "已打开"
+
 #: src/components/computer/TerminalApp.tsx
 msgid "Opened {path}"
 msgstr ""
@@ -4952,6 +5223,10 @@ msgstr "已打开其对话。"
 #: src/pages/Onboarding.tsx
 msgid "Opening chat…"
 msgstr "正在打开聊天…"
+
+#: src/pages/Shell.tsx
+msgid "Opening role…"
+msgstr "正在打开岗位…"
 
 #: src/App.tsx
 msgid "Opening your Space…"
@@ -5026,6 +5301,10 @@ msgstr ""
 msgid "Other model…"
 msgstr "其他模型…"
 
+#: src/pages/recruiting/ActivityTab.tsx
+msgid "Outbox"
+msgstr "发件箱"
+
 #: src/pages/RecruitingPanel.tsx
 msgid "Outcome unknown"
 msgstr ""
@@ -5043,13 +5322,18 @@ msgstr ""
 msgid "Outreach"
 msgstr ""
 
-#: src/pages/recruiting/HomeDashboard.tsx
-msgid "Outreach conversion"
-msgstr "外联转化"
+#: src/pages/RecruitingPanel.tsx
+#: src/pages/Shell.tsx
+msgid "Outreach drafts"
+msgstr "外联草稿"
 
 #: src/pages/RecruitingCorrespondence.tsx
 msgid "Outreach file review"
 msgstr ""
+
+#: src/pages/recruiting/HomeDashboard.tsx
+msgid "Outreach funnel"
+msgstr "外联漏斗"
 
 #: src/pages/recruiting/DetailPanel.tsx
 #: src/pages/recruiting/InboxTab.tsx
@@ -5090,6 +5374,10 @@ msgstr "PagerDuty 事件"
 #: src/pages/ScratchpadSection.tsx
 msgid "Park"
 msgstr "搁置"
+
+#: src/pages/recruiting/HomeDashboard.tsx
+msgid "Partial data"
+msgstr "部分数据"
 
 #: src/pages/recruiting/AssessmentCard.tsx
 #: src/pages/recruiting/CandidateDirectory.tsx
@@ -5270,6 +5558,10 @@ msgstr ""
 msgid "Previous contact campaigns"
 msgstr ""
 
+#: src/pages/recruiting/InterviewCalendar.tsx
+msgid "Previous week"
+msgstr "上一周"
+
 #: src/pages/RecruitingPanel.tsx
 msgid "Previously processing"
 msgstr ""
@@ -5303,9 +5595,25 @@ msgstr ""
 msgid "Profile details"
 msgstr ""
 
+#: src/pages/recruiting/DetailPanel.tsx
+msgid "Profile navigation"
+msgstr "档案导航"
+
+#: src/pages/recruiting/ActivityTab.tsx
+msgid "Profile viewed"
+msgstr "查看了档案"
+
+#: src/pages/recruiting/HomeDashboard.tsx
+msgid "Project"
+msgstr "项目"
+
 #: src/components/integrations/IntegrationSetup.tsx
 msgid "Project ID"
 msgstr ""
+
+#: src/pages/recruiting/HomeDashboard.tsx
+msgid "Projects"
+msgstr "项目"
 
 #: src/components/teach/TeachRecordingChrome.tsx
 msgid "Protected input"
@@ -5343,7 +5651,6 @@ msgid "Qualifying work"
 msgstr ""
 
 #: src/pages/ActivityList.tsx
-#: src/pages/recruiting/SequenceTab.tsx
 msgid "Queued"
 msgstr "排队中"
 
@@ -5441,6 +5748,10 @@ msgstr "最近"
 msgid "Recipients"
 msgstr ""
 
+#: src/pages/recruiting/EmailConversation.tsx
+msgid "Recipients unavailable"
+msgstr "收件人不可用"
+
 #: src/pages/PluginsOverlay.tsx
 msgid "Reconnect"
 msgstr ""
@@ -5453,6 +5764,10 @@ msgstr "重新连接 OAuth"
 #: src/components/ComputerUpdateProgress.tsx
 msgid "Reconnecting"
 msgstr "正在重新连接"
+
+#: src/pages/recruiting/SequenceOverview.tsx
+msgid "Recorded send activity"
+msgstr "已记录的发送活动"
 
 #: src/components/LiveWork.tsx
 msgid "Recording feedback"
@@ -5517,6 +5832,12 @@ msgstr ""
 #: src/pages/RecruitingPanel.tsx
 msgid "Recruiter messages"
 msgstr ""
+
+#: src/pages/recruiting/SequenceOverview.tsx
+#: src/pages/recruiting/SequenceTab.tsx
+#: src/pages/RecruitingPanel.tsx
+msgid "Recruiter messages are unavailable for this role."
+msgstr "此岗位的招聘人员消息暂不可用。"
 
 #: src/pages/RecruitingPanel.tsx
 msgid "Recruiter verified"
@@ -5712,6 +6033,18 @@ msgstr "回复"
 msgid "Reply cancelled"
 msgstr ""
 
+#: src/pages/recruiting/InterviewTab.tsx
+msgid "Reply failed"
+msgstr ""
+
+#: src/pages/recruiting/InterviewTab.tsx
+msgid "Reply outcome unknown"
+msgstr ""
+
+#: src/pages/recruiting/InterviewTab.tsx
+msgid "Reply outcomes"
+msgstr ""
+
 #: src/pages/Shell.tsx
 msgid "Reply to the selected email"
 msgstr ""
@@ -5880,10 +6213,6 @@ msgstr "版本 {0}"
 msgid "Review in conversation"
 msgstr ""
 
-#: src/pages/recruiting/ActivityTab.tsx
-msgid "Review note"
-msgstr "审核备注"
-
 #: src/lib/model-connection-preflight.ts
 msgid "Review provider settings and test again."
 msgstr "请检查提供方设置并重新测试。"
@@ -5895,6 +6224,10 @@ msgstr ""
 #: src/pages/RecruitingCorrespondence.tsx
 msgid "Review the outreach files saved in this conversation."
 msgstr ""
+
+#: src/pages/recruiting/ActivityTab.tsx
+msgid "Review updated"
+msgstr "评审已更新"
 
 #: src/pages/RecruitingPanel.tsx
 msgid "Reviewed"
@@ -5967,6 +6300,10 @@ msgstr ""
 #: src/pages/recruiting/RoleSetup.tsx
 msgid "Role stage"
 msgstr "岗位阶段"
+
+#: src/pages/recruiting/ActivityTab.tsx
+msgid "Role status"
+msgstr "职位状态"
 
 #. placeholder {0}: record.feedback.expectedRoleRevision
 #: src/pages/RecruitingPanel.tsx
@@ -6116,6 +6453,14 @@ msgstr ""
 msgid "Saved calendar checks in this conversation."
 msgstr ""
 
+#: src/pages/recruiting/InterviewCalendar.tsx
+msgid "Saved calendar events"
+msgstr "已保存的日历日程"
+
+#: src/pages/recruiting/InterviewTab.tsx
+msgid "Saved calendar records are unavailable from this source."
+msgstr "此来源无法提供已保存的日历记录。"
+
 #: src/pages/RecruitingPanel.tsx
 msgid "Saved candidate sources"
 msgstr ""
@@ -6132,6 +6477,10 @@ msgstr ""
 msgid "Saved contact lookups"
 msgstr ""
 
+#: src/pages/recruiting/ActivityTab.tsx
+msgid "Saved correspondence"
+msgstr "已保存的往来邮件"
+
 #: src/pages/RecruitingPanel.tsx
 msgid "Saved email"
 msgstr ""
@@ -6140,6 +6489,10 @@ msgstr ""
 #: src/pages/RecruitingCorrespondence.tsx
 msgid "Saved emails"
 msgstr ""
+
+#: src/pages/recruiting/InterviewCalendar.tsx
+msgid "Saved events"
+msgstr "已保存的日程"
 
 #: src/pages/RecruitingPanel.tsx
 msgid "Saved facts"
@@ -6152,6 +6505,10 @@ msgstr ""
 #: src/pages/RecruitingCorrespondence.tsx
 msgid "Saved files"
 msgstr ""
+
+#: src/pages/recruiting/ActivityTab.tsx
+msgid "Saved mailbox"
+msgstr "已保存的邮箱记录"
 
 #: src/pages/RecruitingCorrespondence.tsx
 msgid "Saved outreach files"
@@ -6248,6 +6605,14 @@ msgstr ""
 msgid "Score / tier not returned"
 msgstr ""
 
+#: src/pages/recruiting/DetailPanel.tsx
+msgid "Scroll navigation left"
+msgstr "向左滚动导航"
+
+#: src/pages/recruiting/DetailPanel.tsx
+msgid "Scroll navigation right"
+msgstr "向右滚动导航"
+
 #: src/components/integrations/IntegrationSetup.tsx
 #: src/pages/ModelSettingsOverlay.tsx
 #: src/pages/PluginsOverlay.tsx
@@ -6321,6 +6686,11 @@ msgstr ""
 msgid "Search integrations.sh"
 msgstr ""
 
+#: src/pages/recruiting/InboxTab.tsx
+#: src/pages/RecruitingCorrespondence.tsx
+msgid "Search loaded candidates"
+msgstr "搜索已加载的候选人"
+
 #: src/pages/ModelSettingsOverlay.tsx
 msgid "Search models"
 msgstr "搜索模型"
@@ -6368,6 +6738,10 @@ msgstr "正在搜索…"
 msgid "Select a bot"
 msgstr "选择 Bot"
 
+#: src/pages/recruiting/SequenceTab.tsx
+msgid "Select a campaign"
+msgstr ""
+
 #: src/pages/ModelBackupsSettings.tsx
 msgid "Select a connected model"
 msgstr "选择已连接的模型"
@@ -6379,6 +6753,10 @@ msgstr ""
 #: src/pages/RecruitingPanel.tsx
 msgid "Select a contact to read their stored messages."
 msgstr ""
+
+#: src/pages/recruiting/InterviewCalendar.tsx
+msgid "Select an event to see its source details. Candidate links are not included in these calendar records."
+msgstr "选择日程查看来源详情。这些日历记录未包含候选人关联信息。"
 
 #: src/pages/RecruitingPanel.tsx
 msgid "Selected recipient unavailable"
@@ -6429,6 +6807,10 @@ msgstr "发送重置链接"
 msgid "Send to"
 msgstr ""
 
+#: src/pages/recruiting/HomeDashboard.tsx
+msgid "Send totals are not available from these records."
+msgstr "这些记录无法提供发送总数。"
+
 #: src/pages/AccountSettingsOverlay.tsx
 msgid "Send with Enter"
 msgstr "按 Enter 发送"
@@ -6438,10 +6820,6 @@ msgstr "按 Enter 发送"
 msgid "Sender unavailable"
 msgstr ""
 
-#: src/pages/recruiting/SequenceTab.tsx
-msgid "Sending"
-msgstr ""
-
 #: src/components/AskCard.tsx
 #: src/pages/recruiting/CalibrationRound.tsx
 #: src/pages/RecruitingPanel.tsx
@@ -6449,7 +6827,6 @@ msgid "Sending…"
 msgstr "正在发送…"
 
 #: src/pages/recruiting/EmailConversation.tsx
-#: src/pages/recruiting/SequenceTab.tsx
 msgid "Sent"
 msgstr ""
 
@@ -6569,6 +6946,10 @@ msgstr ""
 msgid "Shortlist people from search results to keep them here."
 msgstr ""
 
+#: src/pages/recruiting/HomeDashboard.tsx
+msgid "Shortlist period"
+msgstr "入围时间范围"
+
 #: src/pages/recruiting/CandidateDirectory.tsx
 #: src/pages/recruiting/ContactsTab.tsx
 #: src/pages/recruiting/DetailPanel.tsx
@@ -6617,6 +6998,10 @@ msgstr "显示设置"
 #: src/components/call/VoiceChatCard.tsx
 msgid "Show transcript"
 msgstr "显示文字记录"
+
+#: src/pages/recruiting/ActivityTab.tsx
+msgid "Showing available activity; more history may exist."
+msgstr "显示可用活动；可能还有其他历史记录。"
 
 #. placeholder {0}: rows.length
 #: src/pages/recruiting/ContactsTab.tsx
@@ -6671,6 +7056,10 @@ msgstr ""
 msgid "Skill {0}"
 msgstr "技能 {0}"
 
+#: src/pages/recruiting/SkillEvidence.tsx
+msgid "Skill evidence"
+msgstr "技能证据"
+
 #: src/pages/recruiting/DetailPanel.tsx
 msgid "Skills"
 msgstr ""
@@ -6714,6 +7103,10 @@ msgstr "部分职位无法读取。"
 msgid "Some saved contact details could not be displayed."
 msgstr ""
 
+#: src/pages/recruiting/InterviewTab.tsx
+msgid "Some saved records could not be displayed."
+msgstr ""
+
 #: src/pages/RecruitingCorrespondence.tsx
 msgid "Some saved results use an earlier connection setup. Check again to load results from the current connection."
 msgstr ""
@@ -6724,6 +7117,7 @@ msgstr ""
 msgid "Something went wrong. Try again."
 msgstr "出了点问题。请重试。"
 
+#: src/pages/RecruitingCorrespondence.tsx
 #: src/pages/RecruitingPanel.tsx
 msgid "Source"
 msgstr ""
@@ -6732,9 +7126,21 @@ msgstr ""
 msgid "Source Artifact"
 msgstr ""
 
+#: src/pages/recruiting/SkillEvidence.tsx
+msgid "Source context"
+msgstr "来源上下文"
+
 #: src/components/ArtifactFileCard.tsx
 msgid "Source text"
 msgstr ""
+
+#: src/pages/recruiting/InterviewCalendar.tsx
+msgid "Source times"
+msgstr "来源时间"
+
+#: src/pages/recruiting/InterviewCalendar.tsx
+msgid "Source timezone"
+msgstr "来源时区"
 
 #: src/components/ArtifactFileCard.tsx
 #: src/pages/RecruitingPanel.tsx
@@ -6795,6 +7201,10 @@ msgstr "SSO 暂时不可用，请重试。"
 msgid "Stage"
 msgstr ""
 
+#: src/pages/recruiting/InterviewCalendar.tsx
+msgid "Start"
+msgstr "开始"
+
 #: src/pages/Paywall.tsx
 msgid "Start {trialDays}-day free trial"
 msgstr ""
@@ -6807,6 +7217,10 @@ msgstr "开始录制"
 #: src/pages/Shell.tsx
 msgid "Start recruiting"
 msgstr ""
+
+#: src/pages/recruiting/InterviewCalendar.tsx
+msgid "Start time unavailable"
+msgstr "开始时间不可用"
 
 #: src/pages/GroupPanel.tsx
 msgid "Start with a role title or paste a job description…"
@@ -6837,6 +7251,10 @@ msgstr ""
 #: src/pages/recruiting/ActivityTab.tsx
 msgid "Status changed to “{label}”"
 msgstr "状态变更为“{label}”"
+
+#: src/pages/recruiting/InterviewCalendar.tsx
+msgid "Status not recorded"
+msgstr "未记录状态"
 
 #. placeholder {0}: index + 1
 #: src/pages/RecruitingCorrespondence.tsx
@@ -7045,6 +7463,10 @@ msgstr "正在测试…"
 msgid "The API did not come back. Refresh this page."
 msgstr "API 未恢复。请刷新此页面。"
 
+#: src/pages/recruiting/InterviewTab.tsx
+msgid "The calendar connection changed. These saved records may be out of date."
+msgstr "日历连接已更改，已保存的记录可能过时。"
+
 #: src/lib/model-connection-preflight.ts
 msgid "The connection timed out."
 msgstr "连接超时。"
@@ -7065,6 +7487,10 @@ msgstr "提供方正在限制请求频率。"
 msgid "The recruiting team changed. Open the role again."
 msgstr ""
 
+#: src/pages/Shell.tsx
+msgid "The recruiting team is not ready yet."
+msgstr "招聘团队尚未准备就绪。"
+
 #: src/pages/RecruitingCorrespondence.tsx
 msgid "The saved check returned no matching records. It does not confirm the entire account is empty."
 msgstr ""
@@ -7079,6 +7505,10 @@ msgstr ""
 
 #: src/pages/RecruitingPanel.tsx
 msgid "There was a problem sending this message."
+msgstr ""
+
+#: src/pages/recruiting/InterviewTab.tsx
+msgid "These replies are not linked to a specific calendar event."
 msgstr ""
 
 #: src/pages/shell/bot-credentials.tsx
@@ -7189,6 +7619,15 @@ msgstr ""
 #: src/pages/RecruitingPanel.tsx
 msgid "Thread"
 msgstr ""
+
+#: src/pages/recruiting/InterviewCalendar.tsx
+msgid "Time"
+msgstr "时间"
+
+#: src/pages/recruiting/ActivityTab.tsx
+#: src/pages/recruiting/EmailConversation.tsx
+msgid "Time not recorded"
+msgstr "未记录时间"
 
 #: src/pages/RoutineSchedule.tsx
 msgid "Time of day"
@@ -7321,6 +7760,7 @@ msgstr ""
 #: src/pages/recruiting/CandidateDirectory.tsx
 #: src/pages/recruiting/HomeDashboard.tsx
 #: src/pages/recruiting/SkillEvidence.tsx
+#: src/pages/RecruitingCorrespondence.tsx
 #: src/pages/RecruitingPanel.tsx
 msgid "Unknown"
 msgstr ""
@@ -7746,462 +8186,3 @@ msgstr ""
 #: src/pages/recruiting/HomeDashboard.tsx
 msgid "Your tasks"
 msgstr "你的任务"
-
-#: src/components/AskCard.tsx
-msgid "Confirm requirements"
-msgstr "确认岗位要求"
-
-#: src/components/AskCard.tsx
-msgid "Approve documents"
-msgstr "确认招聘材料"
-
-#: src/components/AskCard.tsx
-msgid "Approve calibration"
-msgstr "确认候选人校准"
-
-#: src/pages/Shell.tsx
-msgid "Opening role…"
-msgstr "正在打开岗位…"
-
-#: src/pages/Shell.tsx
-msgid "The recruiting team is not ready yet."
-msgstr "招聘团队尚未准备就绪。"
-
-#: src/pages/Shell.tsx
-msgid "Could not open this role."
-msgstr "无法打开此岗位。"
-
-#: src/pages/RecruitingCorrespondence.tsx
-msgid "Draft a reply to the selected email for me to review. Read the original conversation and verify the candidate and role. Do not send."
-msgstr "请为选中的邮件起草回复供我审阅。阅读原始对话并核实候选人和岗位。不要发送。"
-
-#: src/pages/RecruitingPanel.tsx
-msgid "Recruiter messages are unavailable for this role."
-msgstr "此岗位的招聘人员消息暂不可用。"
-
-#: src/pages/recruiting/SequenceOverview.tsx
-msgid "— Not reported"
-msgstr "— 未报告"
-
-#: src/pages/recruiting/HomeDashboard.tsx
-msgid "{undated} without a recorded date"
-msgstr "{undated} 条未记录日期"
-
-#: src/pages/recruiting/SequenceOverview.tsx
-msgid "≥ Observed in loaded records"
-msgstr "≥ 已加载记录中的数量"
-
-#: src/pages/recruiting/ActivityTab.tsx
-msgid "Activity history is unavailable from some sources."
-msgstr "部分来源无法提供活动记录。"
-
-#: src/pages/recruiting/ActivityTab.tsx
-msgid "Actor not recorded"
-msgstr "未记录操作人"
-
-#: src/pages/recruiting/HomeDashboard.tsx
-msgid "All projects"
-msgstr "所有项目"
-
-#: src/pages/recruiting/InterviewCalendar.tsx
-msgid "Attendees"
-msgstr "参会人"
-
-#: src/pages/recruiting/InterviewCalendar.tsx
-msgid "Calendar hours"
-msgstr "日历时间刻度"
-
-#: src/pages/recruiting/InterviewTab.tsx
-msgid "Calendar last checked"
-msgstr "上次查看日历"
-
-#: src/pages/recruiting/InterviewTab.tsx
-msgid "Calendar records have not been checked yet."
-msgstr "尚未查看日历记录。"
-
-#: src/pages/recruiting/CandidateDirectory.tsx
-msgid "Candidate cards"
-msgstr "候选人卡片"
-
-#: src/pages/recruiting/CandidateDirectory.tsx
-msgid "Candidate table"
-msgstr "候选人表格"
-
-#: src/pages/recruiting/InterviewCalendar.tsx
-msgid "Choose day"
-msgstr "选择日期"
-
-#: src/pages/recruiting/SequenceOverview.tsx
-msgid "Clicked"
-msgstr "已点击"
-
-#: src/pages/recruiting/InterviewCalendar.tsx
-msgid "Clock change; see source times"
-msgstr "时钟切换，请查看来源时间"
-
-#: src/pages/recruiting/InterviewCalendar.tsx
-msgid "Close event details"
-msgstr "关闭日程详情"
-
-#: src/pages/recruiting/CandidateDirectory.tsx
-msgid "Contact layout"
-msgstr "联系人布局"
-
-#: src/pages/recruiting/InterviewTab.tsx
-msgid "Could not load saved calendar records. Try refreshing."
-msgstr "无法加载已保存的日历记录，请刷新重试。"
-
-#: src/pages/recruiting/DetailPanel.tsx
-msgid "Could not record this profile view."
-msgstr "未能记录本次档案查看。"
-
-#: src/pages/recruiting/ActivityTab.tsx
-msgid "Current result: approved"
-msgstr "当前结果：已通过"
-
-#: src/pages/recruiting/ActivityTab.tsx
-msgid "Current result: pooled"
-msgstr "当前结果：已入库"
-
-#: src/pages/recruiting/ActivityTab.tsx
-msgid "Current result: rejected"
-msgstr "当前结果：已拒绝"
-
-#: src/pages/recruiting/InterviewCalendar.tsx
-msgid "Current time"
-msgstr "当前时间"
-
-#: src/pages/recruiting/HomeDashboard.tsx
-msgid "Current totals · all dates"
-msgstr "当前总计 · 所有日期"
-
-#: src/pages/recruiting/InterviewCalendar.tsx
-msgid "Date only; time not supplied"
-msgstr "仅有日期，未提供时间"
-
-#: src/pages/recruiting/InterviewCalendar.tsx
-msgid "Display timezone"
-msgstr "显示时区"
-
-#: src/pages/recruiting/EmailConversation.tsx
-msgid "Email conversation"
-msgstr "邮件对话"
-
-#: src/pages/recruiting/ActivityTab.tsx
-msgid "Email opens are not recorded. Profile views appear only after recording starts."
-msgstr "暂未记录邮件打开情况。档案查看记录仅从启用记录后开始显示。"
-
-#: src/pages/recruiting/ActivityTab.tsx
-msgid "Email received"
-msgstr "已收到邮件"
-
-#: src/pages/recruiting/InterviewCalendar.tsx
-msgid "End"
-msgstr "结束"
-
-#: src/pages/recruiting/InterviewCalendar.tsx
-msgid "End not recorded"
-msgstr "未记录结束时间"
-
-#: src/pages/recruiting/InterviewCalendar.tsx
-msgid "End time unavailable"
-msgstr "结束时间不可用"
-
-#: src/pages/recruiting/InterviewCalendar.tsx
-msgid "Event details"
-msgstr "日程详情"
-
-#: src/pages/recruiting/InterviewCalendar.tsx
-msgid "Event status"
-msgstr "日程状态"
-
-#: src/pages/recruiting/InterviewCalendar.tsx
-msgid "Events without usable start times"
-msgstr "缺少有效开始时间的日程"
-
-#. placeholder {0}: labels[stage.key]
-#: src/pages/recruiting/HomeDashboard.tsx
-msgid "Inspect {0}"
-msgstr "查看{0}"
-
-#: src/pages/recruiting/HomeDashboard.tsx
-msgid "Inspect week of {label}"
-msgstr "查看 {label} 当周"
-
-#: src/pages/recruiting/HomeDashboard.tsx
-msgid "Last {count} weeks"
-msgstr "最近 {count} 周"
-
-#: src/pages/recruiting/SequenceOverview.tsx
-msgid "Last 7 days · UTC"
-msgstr "最近 7 天 · UTC"
-
-#: src/pages/recruiting/SkillEvidence.tsx
-msgid "Listed skill"
-msgstr "档案列出的技能"
-
-#: src/pages/recruiting/InterviewCalendar.tsx
-msgid "Next week"
-msgstr "下一周"
-
-#: src/pages/recruiting/ActivityTab.tsx
-msgid "No activity recorded in the available sources."
-msgstr "可用来源中没有活动记录。"
-
-#: src/pages/recruiting/SequenceOverview.tsx
-msgid "No dated sends in the available records."
-msgstr "可用记录中没有带时间的已发送邮件。"
-
-#: src/pages/recruiting/AssessmentCard.tsx
-#: src/pages/recruiting/SkillEvidence.tsx
-msgid "No evidence provided."
-msgstr "未提供证据。"
-
-#: src/pages/recruiting/InterviewTab.tsx
-msgid "No saved calendar records matched this candidate."
-msgstr "没有匹配此候选人的已保存日历记录。"
-
-#: src/pages/recruiting/HomeDashboard.tsx
-msgid "No saved overview for these projects."
-msgstr "这些项目没有已保存的总览。"
-
-#: src/pages/recruiting/SkillEvidence.tsx
-msgid "No supporting detail in the saved profile."
-msgstr "已保存的档案中没有支持该技能的详细信息。"
-
-#: src/pages/recruiting/InterviewCalendar.tsx
-msgid "No timed events in this week."
-msgstr "本周没有带时间的日程。"
-
-#: src/pages/recruiting/InterviewCalendar.tsx
-msgid "Not recorded"
-msgstr "未记录"
-
-#: src/pages/recruiting/SequenceOverview.tsx
-msgid "Not reported"
-msgstr "未报告"
-
-#: src/pages/recruiting/CandidateDirectory.tsx
-msgid "Open {name}'s source profile"
-msgstr "打开 {name} 的来源档案"
-
-#: src/pages/recruiting/InterviewTab.tsx
-msgid "Open the role conversation to see saved calendar records."
-msgstr "打开职位对话以查看已保存的日历记录。"
-
-#: src/pages/recruiting/SequenceOverview.tsx
-msgid "Opened"
-msgstr "已打开"
-
-#: src/pages/recruiting/ActivityTab.tsx
-msgid "Outbox"
-msgstr "发件箱"
-
-#: src/pages/recruiting/HomeDashboard.tsx
-msgid "Outreach funnel"
-msgstr "外联漏斗"
-
-#: src/pages/recruiting/HomeDashboard.tsx
-msgid "Partial data"
-msgstr "部分数据"
-
-#: src/pages/recruiting/InterviewCalendar.tsx
-msgid "Previous week"
-msgstr "上一周"
-
-#: src/pages/recruiting/DetailPanel.tsx
-msgid "Profile navigation"
-msgstr "档案导航"
-
-#: src/pages/recruiting/ActivityTab.tsx
-msgid "Profile viewed"
-msgstr "查看了档案"
-
-#: src/pages/recruiting/HomeDashboard.tsx
-msgid "Project"
-msgstr "项目"
-
-#: src/pages/recruiting/HomeDashboard.tsx
-msgid "Projects"
-msgstr "项目"
-
-#: src/pages/recruiting/EmailConversation.tsx
-msgid "Recipients unavailable"
-msgstr "收件人不可用"
-
-#: src/pages/recruiting/SequenceOverview.tsx
-msgid "Recorded send activity"
-msgstr "已记录的发送活动"
-
-#: src/pages/recruiting/ActivityTab.tsx
-msgid "Review updated"
-msgstr "评审已更新"
-
-#: src/pages/recruiting/ActivityTab.tsx
-msgid "Role status"
-msgstr "职位状态"
-
-#: src/pages/recruiting/InterviewTab.tsx
-msgid "Saved calendar records are unavailable from this source."
-msgstr "此来源无法提供已保存的日历记录。"
-
-#: src/pages/recruiting/ActivityTab.tsx
-msgid "Saved correspondence"
-msgstr "已保存的往来邮件"
-
-#: src/pages/recruiting/ActivityTab.tsx
-msgid "Saved mailbox"
-msgstr "已保存的邮箱记录"
-
-#: src/pages/recruiting/HomeDashboard.tsx
-msgid "Send totals are not available from these records."
-msgstr "这些记录无法提供发送总数。"
-
-#: src/pages/recruiting/HomeDashboard.tsx
-msgid "Shortlist period"
-msgstr "入围时间范围"
-
-#: src/pages/recruiting/ActivityTab.tsx
-msgid "Showing available activity; more history may exist."
-msgstr "显示可用活动；可能还有其他历史记录。"
-
-#: src/pages/recruiting/SkillEvidence.tsx
-msgid "Skill evidence"
-msgstr "技能证据"
-
-#: src/pages/recruiting/InterviewTab.tsx
-msgid "Some saved calendar records could not be displayed."
-msgstr "部分已保存的日历记录无法显示。"
-
-#: src/pages/recruiting/SkillEvidence.tsx
-msgid "Source context"
-msgstr "来源上下文"
-
-#: src/pages/recruiting/InterviewCalendar.tsx
-msgid "Source times"
-msgstr "来源时间"
-
-#: src/pages/recruiting/InterviewCalendar.tsx
-msgid "Source timezone"
-msgstr "来源时区"
-
-#: src/pages/recruiting/InterviewCalendar.tsx
-msgid "Start"
-msgstr "开始"
-
-#: src/pages/recruiting/InterviewCalendar.tsx
-msgid "Start time unavailable"
-msgstr "开始时间不可用"
-
-#: src/pages/recruiting/InterviewCalendar.tsx
-msgid "Status not recorded"
-msgstr "未记录状态"
-
-#: src/pages/recruiting/InterviewTab.tsx
-msgid "The calendar connection changed. These saved records may be out of date."
-msgstr "日历连接已更改，已保存的记录可能过时。"
-
-#: src/pages/recruiting/InterviewCalendar.tsx
-msgid "Time"
-msgstr "时间"
-
-#: src/pages/recruiting/ActivityTab.tsx
-#: src/pages/recruiting/EmailConversation.tsx
-#: src/pages/recruiting/SequenceTab.tsx
-msgid "Time not recorded"
-msgstr "未记录时间"
-
-#: src/pages/Shell.tsx
-#: src/pages/RecruitingPanel.tsx
-#: src/pages/recruiting/ContactsTab.tsx
-#: src/pages/recruiting/InterviewTab.tsx
-msgid "Outreach drafts"
-msgstr "外联草稿"
-
-#: src/pages/Shell.tsx
-#: src/pages/RecruitingPanel.tsx
-#: src/pages/recruiting/ContactsTab.tsx
-#: src/pages/recruiting/InterviewTab.tsx
-msgid "Candidate status"
-msgstr "候选人状态"
-
-#: src/pages/Shell.tsx
-#: src/pages/RecruitingPanel.tsx
-#: src/pages/recruiting/ContactsTab.tsx
-#: src/pages/recruiting/InterviewTab.tsx
-msgid "{loadedCount} loaded"
-msgstr "已加载 {loadedCount}"
-
-#: src/pages/recruiting/InboxTab.tsx
-msgid "Back to inbox"
-msgstr "返回收件箱"
-
-#: src/pages/recruiting/InboxTab.tsx
-msgid "Candidate conversations"
-msgstr "候选人沟通"
-
-#: src/pages/recruiting/InboxTab.tsx
-msgid "Candidate details unavailable"
-msgstr "候选人详情不可用"
-
-#: src/pages/recruiting/InterviewTab.tsx
-msgid "Candidate interview status"
-msgstr "候选人面试状态"
-
-#: src/pages/recruiting/InterviewCalendar.tsx
-msgid "Candidate link"
-msgstr "关联候选人"
-
-#: src/pages/recruiting/InterviewCalendar.tsx
-msgid "Change the week or status to review saved records. Empty space does not confirm availability."
-msgstr "切换周或状态以查看已保存的记录。空白时段不代表有空。"
-
-#: src/pages/recruiting/AssessmentCard.tsx
-#: src/pages/recruiting/CandidateDirectory.tsx
-#: src/pages/recruiting/SkillEvidence.tsx
-msgid "Criterion name unavailable"
-msgstr "标准名称不可用"
-
-#: src/pages/recruiting/EmailConversation.tsx
-msgid "Email thread or message"
-msgstr "邮件会话或单封邮件"
-
-#: src/pages/recruiting/InboxTab.tsx
-msgid "Last reply"
-msgstr "最近回复"
-
-#: src/pages/recruiting/InboxTab.tsx
-msgid "No loaded candidates match these filters."
-msgstr "已加载的候选人中没有符合这些筛选条件的结果。"
-
-#: src/pages/recruiting/InterviewCalendar.tsx
-msgid "No saved events to show for this week and status."
-msgstr "本周此状态下没有可显示的已保存日程。"
-
-#: src/pages/recruiting/InterviewCalendar.tsx
-msgid "Not recorded in this source"
-msgstr "此来源未记录"
-
-#: src/pages/recruiting/InterviewCalendar.tsx
-msgid "Saved calendar events"
-msgstr "已保存的日历日程"
-
-#: src/pages/recruiting/InterviewCalendar.tsx
-msgid "Saved events"
-msgstr "已保存的日程"
-
-#: src/pages/recruiting/DetailPanel.tsx
-msgid "Scroll navigation left"
-msgstr "向左滚动导航"
-
-#: src/pages/recruiting/DetailPanel.tsx
-msgid "Scroll navigation right"
-msgstr "向右滚动导航"
-
-#: src/pages/recruiting/InboxTab.tsx
-msgid "Search loaded candidates"
-msgstr "搜索已加载的候选人"
-
-#: src/pages/recruiting/InterviewCalendar.tsx
-msgid "Select an event to see its source details. Candidate links are not included in these calendar records."
-msgstr "选择日程查看来源详情。这些日历记录未包含候选人关联信息。"

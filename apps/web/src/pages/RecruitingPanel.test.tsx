@@ -4292,9 +4292,14 @@ it("shows saved source rounds with their exact original revision and Artifact", 
     artifactId: f.reference.artifactId,
     includeDiagnostics: true,
   });
-  expect(
-    view.container.querySelector(`[data-artifact-id="${f.reference.artifactId}"]`),
-  ).not.toBeNull();
+  await vi.waitFor(async () => {
+    await act(async () => {
+      await new Promise((resolve) => setTimeout(resolve, 0));
+    });
+    expect(
+      view.container.querySelector(`[data-artifact-id="${f.reference.artifactId}"]`),
+    ).not.toBeNull();
+  });
 });
 
 it("shows a native candidate source Artifact without an empty custom-action heading", async () => {
