@@ -44,6 +44,7 @@ const EXPLICIT_APPROVAL_MCP_OPERATIONS = new Set([
   "create_lead",
   "add_leads_to_campaign_or_list_bulk",
   "activate_campaign",
+  "native_instantly_activate_campaign",
 ]);
 // Canonical actions in Composio's Gmail and Google Calendar toolkit catalogs.
 const EXPLICIT_APPROVAL_COMPOSIO_OPERATIONS = new Set([
