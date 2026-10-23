@@ -1,6 +1,15 @@
 import { Trans, useLingui } from "@lingui/react/macro";
 import type { Group } from "@rakazo/contracts";
-import { Badge, Button, Card, CardContent, CardHeader, CardTitle, Skeleton } from "@rakazo/ui-web";
+import {
+  Badge,
+  Button,
+  Card,
+  CardContent,
+  CardHeader,
+  CardTitle,
+  NativeSelect,
+  Skeleton,
+} from "@rakazo/ui-web";
 import { Check, ChevronRight, PanelLeftOpen } from "lucide-react";
 import { useEffect, useState } from "react";
 import { retryTransientRead } from "../../lib/read-retry";
@@ -17,11 +26,12 @@ import {
   readShortlistPages,
   recentRoles,
   roleSummary,
+  weekStart,
 } from "./dashboard";
 import { RetryNotice } from "./RetryNotice";
 import { useKeyedRead } from "./shared";
 
-type Overview = { roles: RoleSummary[]; incomplete: boolean };
+type Overview = { roles: RoleSummary[]; incompleteGroups: string[]; missingGroups: string[] };
 type OverviewRead = { key: string; data?: Overview; failed?: boolean };
 
 /** Every role's numbers, four roles at a time; cached in the Shell's display cache. */
@@ -50,7 +60,7 @@ function useOverview(
           () => rpc.recruiting.getWorkspace({ threadId: group.threadId }, { signal }),
           signal,
         );
-        if (!workspace) return { summary: null, incomplete: false };
+        if (!workspace) return { groupId: group.id, summary: null, incomplete: false };
         const conversation = { groupId: group.id };
         const [shortlist, candidates, campaign] = await Promise.all([
           readShortlistPages((cursor) =>
@@ -78,6 +88,7 @@ function useOverview(
           optional(() => rpc.recruiting.roleCampaign(conversation, { signal })),
         ]);
         return {
+          groupId: group.id,
           summary: roleSummary(
             group.id,
             workspace.role.id,
@@ -88,7 +99,7 @@ function useOverview(
           incomplete: !candidates || !campaign,
         };
       } catch {
-        return { summary: null, incomplete: true, failed: true };
+        return { groupId: group.id, summary: null, incomplete: true, failed: true };
       }
     }).then((results) => {
       if (cancelled) return;
@@ -97,7 +108,12 @@ function useOverview(
         return setRead({ key, failed: true });
       const data: Overview = {
         roles: results.flatMap((result) => (result.summary ? [result.summary] : [])),
-        incomplete: results.some((result) => result.incomplete),
+        incompleteGroups: results
+          .filter((result) => result.incomplete)
+          .map((result) => result.groupId),
+        missingGroups: results
+          .filter((result) => "failed" in result)
+          .map((result) => result.groupId),
       };
       rememberRecruitingRead(cache, slot, data, epoch);
       setRead({ key, data });
@@ -120,47 +136,159 @@ function useOverview(
   };
 }
 
-function WeeklyShortlist({ roles }: { roles: readonly RoleSummary[] }) {
+type DashboardDrilldown = {
+  roleGroups: ReadonlyMap<string, Group>;
+  onOpenRole: (groupId: string) => void;
+};
+
+function RoleBreakdown({
+  items,
+  roleGroups,
+  onOpenRole,
+}: DashboardDrilldown & {
+  items: readonly { role: RoleSummary; count: number | null; partial?: boolean }[];
+}) {
   const { t } = useLingui();
-  const weeks = bucketByWeek(
-    roles.flatMap((role) => role.shortlistedDates),
-    new Date(),
+  return (
+    <ul className="mt-3 space-y-1 border-t pt-2" aria-label={t`Projects`} aria-live="polite">
+      {items.map(({ role, count, partial }) => {
+        const group = roleGroups.get(role.roleId);
+        return group ? (
+          <li key={role.roleId}>
+            <Button
+              variant="ghost"
+              className="h-auto w-full justify-between gap-3 px-2 py-2 text-start font-normal"
+              onClick={() => onOpenRole(group.id)}
+            >
+              <span className="min-w-0 truncate">{group.name}</span>
+              <span className="shrink-0 tabular-nums">
+                {count === null ? "—" : `${partial ? "≥" : ""}${count}`}
+              </span>
+              <ChevronRight size={14} aria-hidden />
+            </Button>
+          </li>
+        ) : null;
+      })}
+    </ul>
   );
+}
+
+function WeeklyShortlist({
+  roles,
+  ...drilldown
+}: { roles: readonly RoleSummary[] } & DashboardDrilldown) {
+  const { t } = useLingui();
+  const [period, setPeriod] = useState(4);
+  const [selected, setSelected] = useState<number>();
+  const dates = roles.flatMap((role) => role.shortlistedDates);
+  const weeks = bucketByWeek(dates, new Date(), period);
   const max = Math.max(1, ...weeks.map((week) => week.count));
+  const recorded = weeks.reduce((sum, week) => sum + week.count, 0);
+  const undated = dates.filter((date) => !date || !Number.isFinite(Date.parse(date))).length;
+  const selectedWeek = weeks.find((week) => week.start.getTime() === selected);
   return (
     <section aria-label={t`Shortlisted profiles`} className="min-w-0">
-      <h3 className="text-sm font-medium">
-        <Trans>Shortlisted profiles</Trans>
-      </h3>
-      <ol className="mt-4 grid h-40 grid-cols-5 items-end gap-2">
-        {weeks.map((week) => {
+      <div className="flex flex-wrap items-start justify-between gap-3">
+        <div>
+          <h3 className="text-sm font-medium">
+            <Trans>Shortlisted profiles</Trans>
+          </h3>
+          <p
+            data-testid="weekly-shortlist-total"
+            className="mt-1 text-3xl font-semibold tabular-nums"
+          >
+            {recorded}
+          </p>
+        </div>
+        <NativeSelect
+          aria-label={t`Shortlist period`}
+          value={period}
+          onChange={(event) => setPeriod(Number(event.target.value))}
+        >
+          {[4, 8, 12].map((count) => (
+            <option key={count} value={count}>{t`Last ${count} weeks`}</option>
+          ))}
+        </NativeSelect>
+      </div>
+      <ol
+        className="mt-4 grid h-44 items-end gap-2"
+        style={{ gridTemplateColumns: `repeat(${period}, minmax(0, 1fr))` }}
+      >
+        {weeks.map((week, index) => {
           const label = week.start.toLocaleDateString(undefined, {
             month: "short",
             day: "numeric",
           });
+          const showLabel = index % Math.ceil(period / 4) === 0 || index === weeks.length - 1;
           return (
             <li
               key={week.start.toISOString()}
               aria-label={t`Week of ${label}: ${week.count}`}
               className="flex h-full min-w-0 flex-col items-center justify-end gap-1"
             >
-              <span className="text-xs tabular-nums">{week.count}</span>
-              <span
-                aria-hidden="true"
-                className="w-full max-w-12 rounded-t-md bg-primary"
-                style={{ height: `${(week.count / max) * 100}%`, minHeight: 2 }}
-              />
-              <span className="truncate text-xs text-muted-foreground">{label}</span>
+              <Button
+                variant="ghost"
+                className="flex h-full w-full flex-col items-center justify-end gap-1 rounded-md p-0 font-normal"
+                aria-label={t`Inspect week of ${label}`}
+                aria-pressed={selectedWeek === week}
+                onClick={() =>
+                  setSelected(selectedWeek === week ? undefined : week.start.getTime())
+                }
+              >
+                <span className="text-xs tabular-nums">{week.count}</span>
+                <span aria-hidden="true" className="flex h-32 w-full max-w-12 items-end">
+                  <span
+                    className="w-full rounded-t-md bg-primary"
+                    style={{ height: `${(week.count / max) * 100}%`, minHeight: 2 }}
+                  />
+                </span>
+                <span
+                  title={label}
+                  aria-hidden="true"
+                  className={`w-max text-xs text-muted-foreground ${index === 0 ? "self-start" : index === weeks.length - 1 ? "self-end" : ""}`}
+                >
+                  {showLabel ? label : " "}
+                </span>
+              </Button>
             </li>
           );
         })}
       </ol>
+      {selectedWeek ? (
+        <RoleBreakdown
+          {...drilldown}
+          items={roles.map((role) => ({
+            role,
+            count: role.shortlistedDates.filter((value) => {
+              const time = value ? Date.parse(value) : Number.NaN;
+              return (
+                Number.isFinite(time) &&
+                time <= Date.now() &&
+                weekStart(new Date(time)).getTime() === selectedWeek.start.getTime()
+              );
+            }).length,
+          }))}
+        />
+      ) : null}
+      {undated ? (
+        <p className="mt-3 text-xs text-muted-foreground">
+          <Trans>{undated} without a recorded date</Trans>
+        </p>
+      ) : null}
     </section>
   );
 }
 
-function OutreachFunnel({ roles }: { roles: readonly RoleSummary[] }) {
+function OutreachFunnel({
+  roles,
+  incomplete,
+  ...drilldown
+}: {
+  roles: readonly RoleSummary[];
+  incomplete: boolean;
+} & DashboardDrilldown) {
   const { t } = useLingui();
+  const [selected, setSelected] = useState<FunnelStageKey>();
   const labels: Record<FunnelStageKey, string> = {
     shortlisted: t`Shortlisted`,
     contacted: t`Contacted`,
@@ -168,31 +296,68 @@ function OutreachFunnel({ roles }: { roles: readonly RoleSummary[] }) {
     interested: t`Interested`,
   };
   const stages = outreachFunnel(roles);
-  const base = stages[0]?.count || 0;
+  const max = Math.max(1, ...stages.map((stage) => stage.count ?? 0));
   return (
-    <section aria-label={t`Outreach conversion`} className="min-w-0">
+    <section aria-label={t`Outreach funnel`} className="min-w-0">
       <h3 className="text-sm font-medium">
-        <Trans>Outreach conversion</Trans>
+        <Trans>Outreach funnel</Trans>
       </h3>
+      <p className="mt-1 text-xs text-muted-foreground">
+        <Trans>Current totals · all dates</Trans>
+      </p>
       <ol className="mt-4 grid grid-cols-4 gap-2">
-        {stages.map((stage) => (
-          <li key={stage.key} className="flex min-w-0 flex-col gap-1">
-            <span className="truncate text-xs text-muted-foreground">{labels[stage.key]}</span>
-            <span className="text-lg font-semibold tabular-nums">{stage.count ?? "—"}</span>
-            <span className="text-xs tabular-nums text-muted-foreground">
-              {stage.percent === null ? " " : `${stage.percent}%`}
-            </span>
-            <span aria-hidden="true" className="flex h-20 items-end rounded-md bg-muted">
-              <span
-                className="w-full rounded-md bg-primary"
-                style={{
-                  height: `${base && stage.count ? (stage.count / base) * 100 : 0}%`,
-                }}
-              />
-            </span>
-          </li>
-        ))}
+        {stages.map((stage) => {
+          const partial = stage.count !== null && (stage.partial || incomplete);
+          return (
+            <li key={stage.key} className="flex min-w-0 flex-col gap-1">
+              <Button
+                variant="ghost"
+                className="h-auto w-full flex-col items-stretch gap-1 rounded-md p-0 text-start whitespace-normal font-normal"
+                aria-label={t`Inspect ${labels[stage.key]}`}
+                aria-pressed={selected === stage.key}
+                onClick={() => setSelected(selected === stage.key ? undefined : stage.key)}
+              >
+                <span className="break-words text-xs text-muted-foreground">
+                  {labels[stage.key]}
+                </span>
+                <span className="text-lg font-semibold tabular-nums">
+                  {stage.count === null ? "—" : `${partial ? "≥" : ""}${stage.count}`}
+                </span>
+                <span className="text-xs tabular-nums text-muted-foreground">
+                  {stage.count === null ? (
+                    <Trans>Unknown</Trans>
+                  ) : partial ? (
+                    <Trans>Partial data</Trans>
+                  ) : (
+                    " "
+                  )}
+                </span>
+                <span aria-hidden="true" className="flex h-20 items-end rounded-md bg-muted">
+                  <span
+                    className="w-full rounded-md bg-primary"
+                    style={{
+                      height: `${((stage.count ?? 0) / max) * 100}%`,
+                    }}
+                  />
+                </span>
+              </Button>
+            </li>
+          );
+        })}
       </ol>
+      {selected ? (
+        <RoleBreakdown
+          {...drilldown}
+          items={roles.map((role) => ({
+            role,
+            count: role[selected],
+            partial: selected === "interested" && role.interestedPartial,
+          }))}
+        />
+      ) : null}
+      <p className="mt-3 text-xs text-muted-foreground">
+        <Trans>Send totals are not available from these records.</Trans>
+      </p>
     </section>
   );
 }
@@ -203,12 +368,14 @@ function YourTasks({
   refreshSignal,
   roleGroups,
   onOpenRole,
+  project,
 }: {
   scope: string | undefined;
   refreshSignal: number;
   /** Role id → its conversation and name, for reminders tied to a role. */
   roleGroups: ReadonlyMap<string, Group>;
   onOpenRole: (groupId: string) => void;
+  project: string | null;
 }) {
   const { t } = useLingui();
   const [reload, setReload] = useState(0);
@@ -219,7 +386,9 @@ function YourTasks({
     rpc.recruiting.reminders.list({ status: "open" }),
   );
   const tasks = openTasks(read.data?.items ?? [], new Date()).filter(
-    ({ reminder }) => !done.has(reminder.id),
+    ({ reminder }) =>
+      !done.has(reminder.id) &&
+      (!project || Boolean(reminder.roleId && roleGroups.get(reminder.roleId)?.id === project)),
   );
   async function complete(id: string) {
     setSaving(id);
@@ -237,7 +406,9 @@ function YourTasks({
     <Card>
       <CardHeader>
         <CardTitle>
-          <Trans>Your tasks</Trans>
+          <h2>
+            <Trans>Your tasks</Trans>
+          </h2>
         </CardTitle>
       </CardHeader>
       <CardContent className="px-2">
@@ -352,7 +523,25 @@ export function HomeDashboard({
 }) {
   const { t } = useLingui();
   const overview = useOverview(groups, readCache, readCacheScope, refreshSignal);
-  const recents = recentRoles(groups);
+  const [selection, setSelection] = useState<{ scope: string | undefined; id: string | null }>({
+    scope: readCacheScope,
+    id: null,
+  });
+  const activeGroups = groups.filter((group) => !group.archivedAt);
+  const project =
+    selection.scope === readCacheScope && activeGroups.some((group) => group.id === selection.id)
+      ? selection.id
+      : null;
+  const selectedGroups = project
+    ? activeGroups.filter((group) => group.id === project)
+    : activeGroups;
+  const selectedRoles = (overview.data?.roles ?? []).filter((role) =>
+    selectedGroups.some((group) => group.id === role.groupId),
+  );
+  const incomplete =
+    overview.data?.incompleteGroups.some((id) => !project || id === project) ?? false;
+  const missing = overview.data?.missingGroups.some((id) => !project || id === project) ?? false;
+  const recents = recentRoles(selectedGroups);
   const name = firstName(userName);
   const roleGroups = new Map(
     (overview.data?.roles ?? []).flatMap((role) => {
@@ -363,7 +552,7 @@ export function HomeDashboard({
   return (
     <div className="rk-scroll min-h-0 flex-1 overflow-y-auto bg-background">
       <div className="mx-auto flex w-full max-w-5xl flex-col gap-6 px-4 py-6 md:px-8 md:py-10">
-        <div className="flex items-center gap-2">
+        <div className="flex flex-wrap items-center gap-2">
           {onOpenNavigation ? (
             <Button
               variant="ghost"
@@ -378,11 +567,32 @@ export function HomeDashboard({
           <h1 className="text-2xl font-semibold tracking-tight" dir="auto">
             {name ? <Trans>Hello, {name}</Trans> : <Trans>Hello</Trans>}
           </h1>
+          <div className="ms-auto w-full min-w-0 sm:w-64">
+            <NativeSelect
+              aria-label={t`Project`}
+              className="w-full"
+              value={project ?? ""}
+              onChange={(event) =>
+                setSelection({ scope: readCacheScope, id: event.target.value || null })
+              }
+            >
+              <option value="">
+                <Trans>All projects</Trans>
+              </option>
+              {activeGroups.map((group) => (
+                <option key={group.id} value={group.id}>
+                  {group.name}
+                </option>
+              ))}
+            </NativeSelect>
+          </div>
         </div>
         <Card>
           <CardHeader>
             <CardTitle>
-              <Trans>Overview</Trans>
+              <h2>
+                <Trans>Overview</Trans>
+              </h2>
             </CardTitle>
           </CardHeader>
           <CardContent>
@@ -392,17 +602,32 @@ export function HomeDashboard({
               </RetryNotice>
             ) : !overview.data ? (
               <OverviewSkeleton />
-            ) : overview.data.roles.length === 0 ? (
-              <p className="py-6 text-sm text-muted-foreground">
-                <Trans>No shortlisted profiles yet.</Trans>
-              </p>
+            ) : selectedRoles.length === 0 ? (
+              missing ? (
+                <RetryNotice onRetry={overview.retry}>
+                  <Trans>Could not load your overview.</Trans>
+                </RetryNotice>
+              ) : (
+                <p className="py-6 text-sm text-muted-foreground">
+                  <Trans>No saved overview for these projects.</Trans>
+                </p>
+              )
             ) : (
               <>
                 <div className="grid gap-8 md:grid-cols-2">
-                  <WeeklyShortlist roles={overview.data.roles} />
-                  <OutreachFunnel roles={overview.data.roles} />
+                  <WeeklyShortlist
+                    roles={selectedRoles}
+                    roleGroups={roleGroups}
+                    onOpenRole={onOpenRole}
+                  />
+                  <OutreachFunnel
+                    roles={selectedRoles}
+                    incomplete={missing}
+                    roleGroups={roleGroups}
+                    onOpenRole={onOpenRole}
+                  />
                 </div>
-                {overview.data.incomplete ? (
+                {incomplete ? (
                   <RetryNotice onRetry={overview.retry}>
                     <Trans>Some roles could not be read.</Trans>
                   </RetryNotice>
@@ -415,7 +640,9 @@ export function HomeDashboard({
           <Card>
             <CardHeader>
               <CardTitle>
-                <Trans>Recents</Trans>
+                <h2>
+                  <Trans>Recents</Trans>
+                </h2>
               </CardTitle>
             </CardHeader>
             <CardContent className="px-2">
@@ -447,10 +674,12 @@ export function HomeDashboard({
             </CardContent>
           </Card>
           <YourTasks
+            key={readCacheScope}
             scope={readCacheScope}
             refreshSignal={refreshSignal}
             roleGroups={roleGroups}
             onOpenRole={onOpenRole}
+            project={project}
           />
         </div>
       </div>

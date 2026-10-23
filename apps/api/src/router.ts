@@ -310,12 +310,14 @@ import {
   listRecruitingCandidateSources,
   listRecruitingCandidates,
   listRecruitingFeedback,
+  listRecruitingProfileActivity,
   listRecruitingQuestions,
   listRecruitingReminders,
   listRecruitingResearch,
   notifyRecruitingChange,
   readRecruitingCalibrationRound,
   readRecruitingSource,
+  recordRecruitingProfileView,
   reviseRecruitingRole,
   setRecruitingCandidateShortlist,
   updateRecruitingCandidateNote,
@@ -3830,6 +3832,14 @@ export function createRouter(deps: RouterDeps) {
         ),
         delete: authed.recruiting.notes.delete.handler(({ context, input }) =>
           deleteRecruitingCandidateNote(deps.prisma, context.actor, input),
+        ),
+      },
+      profileActivity: {
+        list: authed.recruiting.profileActivity.list.handler(({ context, input }) =>
+          listRecruitingProfileActivity(deps.prisma, context.actor, input),
+        ),
+        recordView: authed.recruiting.profileActivity.recordView.handler(({ context, input }) =>
+          recordRecruitingProfileView(deps.prisma, context.actor, input),
         ),
       },
       listAssessments: authed.recruiting.listAssessments.handler(({ context, input }) =>

@@ -9,8 +9,17 @@ const listCandidates = vi.hoisted(() => vi.fn());
 const crmData = vi.hoisted(() => vi.fn());
 const correspondence = vi.hoisted(() => vi.fn());
 const roleCampaign = vi.hoisted(() => vi.fn());
+const recordView = vi.hoisted(() => vi.fn());
 vi.mock("../../lib/rpc", () => ({
-  rpc: { recruiting: { listCandidates, crmData, correspondence, roleCampaign } },
+  rpc: {
+    recruiting: {
+      listCandidates,
+      crmData,
+      correspondence,
+      roleCampaign,
+      profileActivity: { recordView },
+    },
+  },
 }));
 vi.mock("@lingui/react/macro", () => ({
   Trans: ({ children }: { children: ReactNode }) => children,
@@ -76,6 +85,7 @@ const setSelectedContact = vi.fn();
 beforeEach(() => {
   vi.stubGlobal("IS_REACT_ACT_ENVIRONMENT", true);
   roleCampaign.mockResolvedValue({ status: "none" });
+  recordView.mockResolvedValue({ recorded: true });
   listCandidates.mockResolvedValue({ crmTarget: { bindingEffectId: "binding", target } });
   correspondence.mockResolvedValue({
     roleId: "role-1",

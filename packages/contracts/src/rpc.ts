@@ -133,6 +133,7 @@ import {
   ListRecruitingRemindersInput,
   ListRecruitingRemindersOutput,
   ReadRecruitingSourceInput,
+  RecordRecruitingProfileViewInput,
   RecruitingAssessmentAskTargetSchema,
   RecruitingAssessmentSchema,
   RecruitingCalibrationRoundOutput,
@@ -148,6 +149,9 @@ import {
   RecruitingCrmSyncInputFields,
   RecruitingCrmSyncOutputSchema,
   RecruitingId,
+  RecruitingProfileActivityInput,
+  RecruitingProfileActivityOutput,
+  RecruitingProfileViewSchema,
   RecruitingReminderSchema,
   RecruitingResearchActionSchema,
   RecruitingResearchSavedObservationSchema,
@@ -623,6 +627,10 @@ export const appContract = {
     heartbeat: oc.input(botId).output(z.object({ ok: z.literal(true) })),
   },
   recruiting: {
+    profileActivity: {
+      list: oc.input(RecruitingProfileActivityInput).output(RecruitingProfileActivityOutput),
+      recordView: oc.input(RecordRecruitingProfileViewInput).output(RecruitingProfileViewSchema),
+    },
     crmData: oc
       .input(z.intersection(threadTarget, RecruitingCrmDataInputSchema))
       .output(RecruitingCrmDataOutputSchema),

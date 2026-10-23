@@ -3480,3 +3480,15 @@ export const approveRecruitingCalibrationRound = (
       throw error;
     }
   });
+
+export const listRecruitingProfileActivity = (
+  prisma: PrismaClient,
+  actor: Actor,
+  input: Parameters<typeof recruiting.listRecruitingProfileActivity>[2],
+) => authenticated(() => recruiting.listRecruitingProfileActivity(prisma, actor, input));
+
+export const recordRecruitingProfileView = (
+  prisma: PrismaClient,
+  actor: Actor,
+  input: Parameters<typeof recruiting.recordRecruitingProfileView>[2],
+) => authenticated(() => recruiting.recordRecruitingProfileView(prisma, actor, input));

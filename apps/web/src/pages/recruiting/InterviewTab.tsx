@@ -2,7 +2,7 @@ import { Trans, useLingui } from "@lingui/react/macro";
 import type { RecruitingCrmDataOutput } from "@rakazo/contracts";
 import { Button } from "@rakazo/ui-web";
 import { useRecruitingDetail } from "./detail";
-import { AvailabilityRanges } from "./AvailabilityRanges";
+import { InterviewCalendar } from "./InterviewCalendar";
 import type { RecruitingTabProps } from "./shared";
 import {
   CrmGate,
@@ -157,50 +157,59 @@ export function InterviewTab({
         </p>
       ) : null}
       {calendar.loading ? <TabLoading /> : null}
-      {events.length ? (
-        <section className="mt-6 space-y-3" aria-label={t`Calendar`}>
-          <h3 className="text-sm font-semibold">
-            <Trans>Calendar</Trans>
-          </h3>
-          <AvailabilityRanges slots={events.filter((event) => event.kind === "availability")} />
-          {events
-            .filter((event) => event.kind !== "availability")
-            .map((event) => (
-              <article key={event.id} className="rounded-lg border border-border p-3 text-sm">
-                <div className="flex flex-wrap justify-between gap-2">
-                  <strong>{event.title || t`Calendar event`}</strong>
-                  {event.status ? (
-                    <span className="text-muted-foreground">{event.status}</span>
-                  ) : null}
-                </div>
-                <p>
-                  <time dateTime={event.start}>{formatDate(event.start)}</time>
-                  {event.end ? (
-                    <>
-                      {" – "}
-                      <time dateTime={event.end}>{formatDate(event.end)}</time>
-                    </>
-                  ) : null}
-                  {event.timeZone ? ` · ${event.timeZone}` : ""}
-                </p>
-                {event.attendees.length ? (
-                  <p className="mt-1 break-words text-muted-foreground">
-                    {event.attendees.join(", ")}
-                  </p>
-                ) : null}
-                {event.url ? (
-                  <a
-                    href={event.url}
-                    target="_blank"
-                    rel="noreferrer"
-                    className="mt-1 inline-block underline"
-                  >
-                    <Trans>Open calendar event</Trans>
-                  </a>
-                ) : null}
-              </article>
-            ))}
-        </section>
+      {!props.conversation ? (
+        <TabNotice>
+          <Trans>Open the role conversation to see saved calendar records.</Trans>
+        </TabNotice>
+      ) : calendar.failed || calendar.data?.status === "failed" ? (
+        <TabNotice alert>
+          <Trans>Could not load saved calendar records. Try refreshing.</Trans>
+        </TabNotice>
+      ) : calendar.data?.status === "unsupported" ? (
+        <TabNotice>
+          <Trans>Saved calendar records are unavailable from this source.</Trans>
+        </TabNotice>
+      ) : calendar.data?.status === "not_checked" ? (
+        <TabNotice>
+          <Trans>Calendar records have not been checked yet.</Trans>
+        </TabNotice>
+      ) : null}
+      {calendar.data?.partial ? (
+        <TabNotice>
+          <Trans>Some saved calendar records could not be displayed.</Trans>
+        </TabNotice>
+      ) : null}
+      {calendar.data?.connectionChanged ? (
+        <TabNotice>
+          <Trans>The calendar connection changed. These saved records may be out of date.</Trans>
+        </TabNotice>
+      ) : null}
+      {calendar.data?.connections
+        .filter((connection) => connection.status !== "configured" || connection.checkIssue)
+        .map((connection, index) => (
+          <p key={`${index}:${connection.name}`} className="text-sm text-muted-foreground">
+            {connection.name} · {statusText(connection.status)}
+            {connection.checkIssue ? ` · ${statusText(connection.checkIssue.status)}` : ""}
+          </p>
+        ))}
+      {!calendar.failed &&
+      (calendar.data?.status === "ready" || calendar.data?.status === "empty") ? (
+        <div className="mt-6 space-y-3">
+          {calendar.data.checkedAt ? (
+            <p className="text-xs text-muted-foreground">
+              <Trans>Calendar last checked</Trans> · {formatDate(calendar.data.checkedAt)}
+            </p>
+          ) : null}
+          {candidateId && !events.length ? (
+            <p className="text-sm text-muted-foreground">
+              <Trans>No saved calendar records matched this candidate.</Trans>
+            </p>
+          ) : null}
+          <InterviewCalendar
+            events={events}
+            contextLabel={ready ? `${ready.roleLabel} · ${ready.clientLabel}` : undefined}
+          />
+        </div>
       ) : null}
     </section>
   );

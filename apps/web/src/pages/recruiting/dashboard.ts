@@ -24,6 +24,8 @@ export type RoleSummary = {
   replied: number | null;
   /** Campaign leads marked interested or further (meeting booked/completed, won); null without a campaign. */
   interested: number | null;
+  /** An explicitly partial observation must not be presented as a complete total. */
+  interestedPartial?: boolean;
 };
 
 export type WeekBucket = { start: Date; count: number };
@@ -31,8 +33,8 @@ export type FunnelStageKey = "shortlisted" | "contacted" | "replied" | "interest
 export type FunnelStage = {
   key: FunnelStageKey;
   count: number | null;
-  /** Share of the first stage, 0–100, rounded; null when either count is unknown or zero. */
-  percent: number | null;
+  /** The count is a lower bound from the available records, not a complete total. */
+  partial: boolean;
 };
 
 /** Local midnight of the Monday that starts `date`'s week. */
@@ -52,7 +54,7 @@ export function bucketByWeek(dates: Iterable<string | null>, now: Date, weeks = 
   });
   for (const value of dates) {
     const time = value ? Date.parse(value) : Number.NaN;
-    if (!Number.isFinite(time)) continue;
+    if (!Number.isFinite(time) || time > now.getTime()) continue;
     const start = weekStart(new Date(time)).getTime();
     const bucket = buckets.find((item) => item.start.getTime() === start);
     if (bucket) bucket.count++;
@@ -65,7 +67,7 @@ const sumKnown = (values: (number | null)[]) =>
     ? values.reduce<number>((total, value) => total + (value ?? 0), 0)
     : null;
 
-/** Shortlisted → Contacted → Replied → Interested across roles; unknown stays null. */
+/** Current stage counts across roles; unknown and partial reads remain distinct. */
 export function outreachFunnel(roles: readonly RoleSummary[]): FunnelStage[] {
   const counts: Record<FunnelStageKey, number | null> = {
     shortlisted: sumKnown(roles.map((role) => role.shortlisted)),
@@ -73,13 +75,16 @@ export function outreachFunnel(roles: readonly RoleSummary[]): FunnelStage[] {
     replied: sumKnown(roles.map((role) => role.replied)),
     interested: sumKnown(roles.map((role) => role.interested)),
   };
-  const base = counts.shortlisted;
   return (["shortlisted", "contacted", "replied", "interested"] as const).map((key) => {
     const count = counts[key];
     return {
       key,
       count,
-      percent: count === null || !base ? null : Math.round((count / base) * 100),
+      partial:
+        count !== null &&
+        roles.some(
+          (role) => role[key] === null || (key === "interested" && role.interestedPartial),
+        ),
     };
   });
 }
@@ -87,7 +92,7 @@ export function outreachFunnel(roles: readonly RoleSummary[]): FunnelStage[] {
 /** Instantly lead interest values that mean interested or further along. */
 const INTERESTED = new Set([1, 2, 3, 4]);
 
-/** Contacted and interested from the role's campaign read; unknown without a launched campaign. */
+/** Campaign membership/status is not a sent receipt. Interest uses explicit recorded values only. */
 export function campaignStages(campaign: RecruitingRoleCampaign | null) {
   if (
     campaign?.status !== "ready" ||
@@ -95,7 +100,7 @@ export function campaignStages(campaign: RecruitingRoleCampaign | null) {
     campaign.campaign.status === null ||
     campaign.leadsComplete !== true
   ) {
-    return { contacted: null, interested: null };
+    return { contacted: null, interested: null, interestedPartial: false };
   }
   // Draft campaigns have sent nothing. Enrollment/status does not prove actual sends.
   return {
@@ -103,6 +108,8 @@ export function campaignStages(campaign: RecruitingRoleCampaign | null) {
     interested: campaign.leads.filter(
       (lead) => lead.interestStatus !== null && INTERESTED.has(lead.interestStatus),
     ).length,
+    // Only a complete lead read supplies an exact interest count.
+    interestedPartial: false,
   };
 }
 

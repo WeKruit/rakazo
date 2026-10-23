@@ -31,7 +31,10 @@ vi.mock("@lingui/react/macro", () => ({
   }),
 }));
 
-import { replyStatus } from "./InboxTab";
+import { RecruitingChatContextProvider } from "../shell/recruiting-chat-context";
+import type { RecruitingDetailController } from "./detail";
+import { RecruitingDetailProvider } from "./detail";
+import { InboxWithReply, replyStatus } from "./InboxTab";
 import { ContactsTab, InboxTab, InterviewTab, SequenceTab } from "./index";
 import { RoleCampaignCard } from "./SequenceTab";
 
@@ -118,7 +121,12 @@ async function mount(node: ReactNode) {
     await act(async () => root.unmount());
     container.remove();
   };
-  return container;
+  return Object.assign(container, {
+    rerender: async (next: ReactNode) => {
+      await act(async () => root.render(next));
+      await settle();
+    },
+  });
 }
 const settle = () =>
   act(async () => {
@@ -221,7 +229,9 @@ it("shows campaign state and stored messages without any send control", async ()
   const view = await mount(<SequenceTab {...props} />);
   expect(view.textContent).toContain("Staff outreach");
   expect(view.querySelector("tbody td")?.textContent).toBe("1");
-  expect(view.textContent).not.toContain("Active");
+  expect(view.querySelector('section[aria-label="Role campaigns"]')?.textContent).not.toContain(
+    "Active",
+  );
   expect(view.textContent).toContain("Replied · 1");
   const ada = [...view.querySelectorAll("button")].find((button) =>
     button.textContent?.includes("Ada"),
@@ -323,7 +333,9 @@ it("shows an error instead of falling back when the role-wide mail read fails", 
   );
   const view = await mount(<InboxTab {...props} />);
   await settle();
-  expect(view.querySelector('[role="alert"]')?.textContent).toContain("Could not load candidate records");
+  expect(view.querySelector('[role="alert"]')?.textContent).toContain(
+    "Could not load candidate records",
+  );
   expect(crmData.mock.calls.some(([input]) => input.operation === "mail")).toBe(false);
 });
 
@@ -389,11 +401,200 @@ it("reads full stored email bodies and exposes the selected email to chat", asyn
       }),
     }),
   );
-  const first = view.querySelector('[aria-label="Staff role"]') as HTMLButtonElement;
-  await act(async () => first.click());
+  const first = view.querySelector("details")!;
+  await act(async () => {
+    first.open = true;
+    first.dispatchEvent(new Event("toggle"));
+  });
   expect(view.textContent).toContain("Would you like to talk?");
   expect(onSelectEmail).toHaveBeenLastCalledWith(
     expect.objectContaining({ email: expect.objectContaining({ subject: "Staff role" }) }),
+  );
+});
+
+it("keeps the role inbox conversation scoped to one candidate and drafts the exact older selected message", async () => {
+  crmData.mockImplementation(async (input: { operation: string }) =>
+    input.operation === "candidates"
+      ? candidatesPage
+      : roleMailPage(true, [
+          stored("b-new", BEN, "Latest Ben message", "Ben current body", "2026-10-22T10:00:00Z"),
+          stored("a-new", ADA, "Latest Ada message", "Ada private body", "2026-10-21T10:00:00Z"),
+          {
+            ...stored(
+              "b-old",
+              BEN,
+              "Original Ben message",
+              "Ben original body",
+              "2026-10-20T10:00:00Z",
+            ),
+            direction: "sent",
+          },
+        ]),
+  );
+  const open = vi.fn();
+  const onDraftReply = vi.fn();
+  const setSelectedContact = vi.fn();
+  const controller = { open } as unknown as RecruitingDetailController;
+  const view = await mount(
+    <RecruitingDetailProvider value={controller}>
+      <RecruitingChatContextProvider value={{ setSelectedContact, setSelectedEmail: vi.fn() }}>
+        <InboxWithReply {...props} onDraftReply={onDraftReply} />
+      </RecruitingChatContextProvider>
+    </RecruitingDetailProvider>,
+  );
+  await settle();
+  const conversation = () => view.querySelector('[data-testid="email-conversation"]')!;
+  expect(conversation().textContent).toContain("Ben current body");
+  expect(conversation().textContent).not.toContain("Ada private body");
+  const older = conversation().querySelector("details")!;
+  expect(older.open).toBe(false);
+  await act(async () => {
+    older.open = true;
+    older.dispatchEvent(new Event("toggle"));
+  });
+  expect(conversation().querySelector("article")?.textContent).toContain("Ben original body");
+  const draft = [...view.querySelectorAll("button")].filter(
+    (button) => button.textContent === "Draft reply",
+  );
+  expect(draft).toHaveLength(1);
+  await act(async () => draft[0]!.click());
+  expect(onDraftReply).toHaveBeenLastCalledWith(
+    expect.objectContaining({
+      candidateId: BEN,
+      crmRoleId: ROLE,
+      source: { serverId: "crm-source", serverRevision: 3, organizationId: ORG },
+      email: expect.objectContaining({
+        id: "crm:b-old",
+        body: "Ben original body",
+        direction: "sent",
+      }),
+    }),
+  );
+  await act(async () =>
+    [...conversation().querySelectorAll("button")]
+      .find((button) => button.textContent === "Profile")!
+      .click(),
+  );
+  expect(open).toHaveBeenLastCalledWith(
+    expect.objectContaining({
+      view: "contact",
+      person: expect.objectContaining({ candidateId: BEN }),
+    }),
+  );
+  await act(async () =>
+    view.querySelector<HTMLButtonElement>('button[aria-label="Latest Ada message"]')!.click(),
+  );
+  expect(conversation().textContent).toContain("Ada private body");
+  expect(conversation().textContent).not.toContain("Ben original body");
+  expect(setSelectedContact).toHaveBeenLastCalledWith({ name: "Ada", reference: ADA });
+});
+
+it("keeps a late candidate mail response out of the newly selected conversation and draft", async () => {
+  let resolveAda!: (page: unknown) => void;
+  let resolveBen!: (page: unknown) => void;
+  const mailPage = (id: string, body: string) => ({
+    operation: "mail",
+    source,
+    checkedAt,
+    scope: "stored_candidate_correspondence",
+    outbox: [],
+    candidateId: id,
+    nativeCorrespondence: [],
+    nextCursor: null,
+    items: [stored("same-message-id", id, "Stored message", body, "2026-10-22T10:00:00Z")],
+  });
+  crmData.mockImplementation((input: { operation: string; candidateId?: string }) => {
+    if (input.operation === "candidates") return Promise.resolve(candidatesPage);
+    if (input.operation === "roleMail") return Promise.resolve(roleMailPage(false));
+    return new Promise((resolve) => {
+      if (input.candidateId === ADA) resolveAda = resolve;
+      else resolveBen = resolve;
+    });
+  });
+  const onSelectEmail = vi.fn();
+  const onDraftReply = vi.fn();
+  const view = await mount(
+    <InboxTab {...props} onSelectEmail={onSelectEmail} onDraftReply={onDraftReply} />,
+  );
+  await settle();
+  const ben = [
+    ...view.querySelectorAll<HTMLButtonElement>('ul[aria-label="Candidates"] button'),
+  ].find((button) => button.querySelector("strong")?.textContent === "Ben");
+  await act(async () => ben!.click());
+  await settle();
+  await act(async () => resolveBen(mailPage(BEN, "Current Ben message")));
+  await act(async () => resolveAda(mailPage(ADA, "Late Ada message")));
+  expect(view.textContent).toContain("Current Ben message");
+  expect(view.textContent).not.toContain("Late Ada message");
+  expect(onSelectEmail).toHaveBeenLastCalledWith(
+    expect.objectContaining({
+      candidateId: BEN,
+      email: expect.objectContaining({ body: "Current Ben message" }),
+    }),
+  );
+  await act(async () =>
+    [...view.querySelectorAll("button")]
+      .find((button) => button.textContent === "Draft reply")!
+      .click(),
+  );
+  expect(onDraftReply).toHaveBeenLastCalledWith(
+    expect.objectContaining({
+      candidateId: BEN,
+      email: expect.objectContaining({ body: "Current Ben message" }),
+    }),
+  );
+});
+
+it("does not borrow the first candidate's identity for a locked candidate outside the loaded page", async () => {
+  crmData.mockImplementation(async (input: { operation: string }) => {
+    if (input.operation === "candidates") return { ...candidatesPage, items: [person(ADA, "Ada")] };
+    if (input.operation === "roleMail") return roleMailPage(false);
+    return {
+      operation: "mail",
+      source,
+      checkedAt,
+      scope: "stored_candidate_correspondence",
+      candidateId: BEN,
+      nativeCorrespondence: [],
+      outbox: [],
+      nextCursor: null,
+      items: [stored("ben-only", BEN, "Ben saved message", "Ben body", "2026-10-22T10:00:00Z")],
+    };
+  });
+  const onSelectEmail = vi.fn();
+  const view = await mount(<InboxTab {...props} candidateId={BEN} onSelectEmail={onSelectEmail} />);
+  await settle();
+  expect(view.querySelector('[data-testid="email-conversation"]')?.textContent).toContain(
+    "Ben body",
+  );
+  expect(view.textContent).not.toContain("Ada");
+  expect(onSelectEmail).toHaveBeenLastCalledWith(
+    expect.objectContaining({
+      candidateId: BEN,
+      candidateName: undefined,
+      candidateEmail: undefined,
+    }),
+  );
+});
+
+it("refreshes selected email context when the saved body changes under the same message ID", async () => {
+  let body = "Original saved body";
+  crmData.mockImplementation(async (input: { operation: string }) =>
+    input.operation === "candidates"
+      ? candidatesPage
+      : roleMailPage(true, [stored("same-id", ADA, "Same subject", body, "2026-10-22T10:00:00Z")]),
+  );
+  const onSelectEmail = vi.fn();
+  const view = await mount(<InboxTab {...props} onSelectEmail={onSelectEmail} />);
+  await settle();
+  expect(onSelectEmail).toHaveBeenLastCalledWith(
+    expect.objectContaining({ email: expect.objectContaining({ body: "Original saved body" }) }),
+  );
+  body = "Updated saved body";
+  await view.rerender(<InboxTab {...props} onSelectEmail={onSelectEmail} refreshSignal={1} />);
+  expect(view.querySelector("article")?.textContent).toContain("Updated saved body");
+  expect(onSelectEmail).toHaveBeenLastCalledWith(
+    expect.objectContaining({ email: expect.objectContaining({ body: "Updated saved body" }) }),
   );
 });
 

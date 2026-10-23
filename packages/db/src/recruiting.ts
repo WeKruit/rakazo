@@ -8,6 +8,8 @@ import type {
   ListRecruitingCandidatesOutput as CandidatesOutput,
   CreateRecruitingRoleInput as CreateRoleInput,
   MessageBlock,
+  RecruitingProfileActivityInput as ProfileActivityInput,
+  RecordRecruitingProfileViewInput as ProfileViewInput,
   RecruitingArtifactRef,
   RecruitingAssessmentAskInput,
   RecruitingAssessmentSnapshot,
@@ -56,6 +58,7 @@ import {
   ProductEventSchema,
   RECRUITING_CANDIDATE_OUTPUT_SCHEMA,
   ReassessRecruitingAssessmentInput,
+  RecordRecruitingProfileViewInput,
   RecruitingArtifactRefSchema,
   RecruitingAssessmentAskInputSchema,
   RecruitingAssessmentSchema,
@@ -74,6 +77,8 @@ import {
   RecruitingHumanIntentSchema,
   RecruitingMaterialReadPayloadSchema,
   RecruitingPreferenceFeedbackSchema,
+  RecruitingProfileActivityInput,
+  RecruitingProfileViewedPayloadSchema,
   RecruitingQuestionAskedPayloadSchema,
   RecruitingQuestionSchema,
   RecruitingReplyTargetSchema,
@@ -135,6 +140,7 @@ import {
   validateRunHumanSourceRows,
 } from "./messages.js";
 import { IsolationError, scoped } from "./scope.js";
+import { withTransactionRetry } from "./transaction-retry.js";
 
 type Tx = Prisma.TransactionClient;
 type RoleSnapshot = {
@@ -11282,4 +11288,165 @@ export async function approveRecruitingCalibrationRoundFromMessage(
       messageId: message.id,
     });
   });
+}
+
+/** Validate the actual saved person before reading or recording any profile history. */
+async function profileActivityTarget(tx: Tx, actor: Actor, input: ProfileActivityInput) {
+  const role = await requireRole(tx, actor, input.roleId);
+  if (input.candidateKey.startsWith("autumn:")) {
+    const candidate = await tx.recruitingCandidate.findUnique({
+      where: {
+        roleId_candidateKey: { roleId: role.id, candidateKey: input.candidateKey.slice(7) },
+      },
+      select: { candidateKey: true },
+    });
+    if (!candidate) throw new IsolationError();
+  } else {
+    if (!role.crmBindingEffectId) throw new IsolationError();
+    const { target } = await crmBindingReceipt(tx, actor, role.id, role.crmBindingEffectId);
+    const scope = {
+      userId: actor.userId,
+      spaceId: actor.spaceId,
+      mcpServerId: target.mcpServerId,
+      organizationId: target.organizationId,
+      archivedAt: null,
+    };
+    const contact = await tx.recruitingCrmRoleContact.findFirst({
+      where: {
+        archivedAt: null,
+        role: { ...scope, crmRoleId: target.crmRoleId },
+        contact: { ...scope, crmCandidateId: input.candidateKey.slice(4) },
+      },
+      select: { contactId: true },
+    });
+    if (!contact) throw new IsolationError();
+  }
+  return role;
+}
+
+function profileEventWhere(
+  actor: Actor,
+  roleId: string,
+  candidateKey: string,
+  threadId: string,
+  bindingEffectId: string | null,
+) {
+  return {
+    spaceId: actor.spaceId,
+    threadId,
+    thread: { userId: actor.userId, spaceId: actor.spaceId },
+    type: "recruiting.profile.viewed",
+    AND: [
+      { payload: { path: ["roleId"], equals: roleId } },
+      { payload: { path: ["candidateKey"], equals: candidateKey } },
+      { payload: { path: ["actorUserId"], equals: actor.userId } },
+      {
+        payload: {
+          path: ["crmBindingEffectId"],
+          equals: candidateKey.startsWith("crm:")
+            ? (bindingEffectId ?? Prisma.JsonNull)
+            : Prisma.JsonNull,
+        },
+      },
+    ],
+  };
+}
+
+function profileView(event: { id: string; createdAt: Date; payload: unknown }) {
+  const payload = RecruitingProfileViewedPayloadSchema.parse(event.payload);
+  return {
+    id: event.id,
+    at: event.createdAt.toISOString(),
+    actorName: payload.actorName,
+    roleTitle: payload.roleTitle,
+  };
+}
+
+/** A bounded read of actual native view events; it never synthesizes historical activity. */
+export async function listRecruitingProfileActivity(
+  prisma: PrismaClient,
+  actor: Actor,
+  raw: ProfileActivityInput,
+) {
+  const input = RecruitingProfileActivityInput.parse(raw);
+  return prisma.$transaction(async (tx) => {
+    const role = await profileActivityTarget(tx, actor, input);
+    const rows = await tx.event.findMany({
+      where: profileEventWhere(
+        actor,
+        role.id,
+        input.candidateKey,
+        role.sourceThreadId,
+        role.crmBindingEffectId,
+      ),
+      orderBy: [{ createdAt: "desc" }, { id: "desc" }],
+      take: 51,
+      select: { id: true, createdAt: true, payload: true },
+    });
+    return { items: rows.slice(0, 50).map(profileView), hasMore: rows.length > 50 };
+  });
+}
+
+/**
+ * One actual open, retried with the same viewId. The existing thread row serializes the
+ * duplicate check and append across processes; neither the actor nor time comes from the UI.
+ */
+export async function recordRecruitingProfileView(
+  prisma: PrismaClient,
+  actor: Actor,
+  raw: ProfileViewInput,
+) {
+  const input = RecordRecruitingProfileViewInput.parse(raw);
+  return withTransactionRetry(() =>
+    prisma.$transaction(async (tx) => {
+      const role = await profileActivityTarget(tx, actor, input);
+      await tx.$queryRaw(Prisma.sql`
+        SELECT "id" FROM "threads"
+        WHERE "id" = ${role.sourceThreadId} AND "spaceId" = ${actor.spaceId}
+          AND "userId" = ${actor.userId} FOR UPDATE
+      `);
+      // Recheck role, candidate and source ownership after waiting for the serialization lock.
+      const currentRole = await profileActivityTarget(tx, actor, input);
+      if (currentRole.sourceThreadId !== role.sourceThreadId) throw new IsolationError();
+      const thread = await requireThread(tx, actor, role.sourceThreadId);
+      const where = profileEventWhere(
+        actor,
+        role.id,
+        input.candidateKey,
+        thread.id,
+        currentRole.crmBindingEffectId,
+      );
+      const existing = await tx.event.findFirst({
+        where: {
+          ...where,
+          AND: [...where.AND, { payload: { path: ["viewId"], equals: input.viewId } }],
+        },
+        select: { id: true, createdAt: true, payload: true },
+      });
+      if (existing) return profileView(existing);
+      const user = await tx.user.findUnique({
+        where: { id: actor.userId },
+        select: { name: true },
+      });
+      if (!user) throw new IsolationError();
+      const event = await appendEventInTransaction(tx, {
+        spaceId: actor.spaceId,
+        threadId: thread.id,
+        botId: thread.botId ?? thread.id,
+        type: "recruiting.profile.viewed",
+        payload: {
+          roleId: role.id,
+          candidateKey: input.candidateKey,
+          roleTitle: currentRole.title,
+          crmBindingEffectId: input.candidateKey.startsWith("crm:")
+            ? currentRole.crmBindingEffectId
+            : null,
+          viewId: input.viewId,
+          actorUserId: actor.userId,
+          actorName: user.name || null,
+        },
+      });
+      return profileView(event);
+    }),
+  );
 }

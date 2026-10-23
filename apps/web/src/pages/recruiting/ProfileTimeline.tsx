@@ -1,8 +1,11 @@
 import { Trans, useLingui } from "@lingui/react/macro";
 import type { ReactNode } from "react";
-import { useMemo, useState } from "react";
+import { useMemo } from "react";
+import { ProfileImage } from "./ProfileImage";
+import type { ProfileAssets } from "./profileAssets";
+import { organizationLogo } from "./profileAssets";
 import type { TimelineEntry, TimelineKind } from "./profileTimeline";
-import { companyHost, parseTimeline, timelineStats } from "./profileTimeline";
+import { parseTimeline, timelineStats } from "./profileTimeline";
 
 type TimelineField = { label: string; value: string | null; sourceUrls: readonly string[] };
 type SourcesRenderer = (props: { urls: readonly string[] }) => ReactNode;
@@ -20,27 +23,14 @@ function logoInitials(name: string) {
   return letters.slice(0, 2).join("").toUpperCase();
 }
 
-/** Initials on a muted tile; a favicon from the field's own source host replaces them when it loads. */
-export function CompanyLogo({ name, host }: { name: string; host?: string | null }) {
-  const [failed, setFailed] = useState(false);
+/** An explicitly supplied company/school image, otherwise initials. */
+export function CompanyLogo({ name, src }: { name: string; src?: string | null }) {
   return (
-    <span
-      aria-hidden
+    <ProfileImage
+      src={src}
+      fallback={logoInitials(name)}
       className="flex size-10 shrink-0 items-center justify-center overflow-hidden rounded-md bg-muted text-xs font-medium text-muted-foreground"
-    >
-      {host && !failed ? (
-        <img
-          src={`https://${host}/favicon.ico`}
-          alt=""
-          className="size-full object-contain"
-          referrerPolicy="no-referrer"
-          loading="lazy"
-          onError={() => setFailed(true)}
-        />
-      ) : (
-        logoInitials(name)
-      )}
-    </span>
+    />
   );
 }
 
@@ -80,39 +70,55 @@ function StatTiles({ entries }: { entries: readonly TimelineEntry[] }) {
 function Row({
   entry,
   kind,
-  sourceUrls,
+  asset,
+  link,
 }: {
   entry: TimelineEntry;
   kind: TimelineKind;
-  sourceUrls: readonly string[];
+  asset?: ProfileAssets["company"];
+  link?: ProfileAssets["companyLink"];
 }) {
   const duration = useDuration();
   const { t } = useLingui();
   if (!entry.structured) {
-    return <li className="whitespace-pre-wrap text-sm">{entry.text}</li>;
+    return <li className="break-words whitespace-pre-wrap text-sm">{entry.text}</li>;
   }
   const logoName = kind === "experience" ? (entry.secondary ?? entry.primary) : entry.primary;
+  const href = organizationLogo(logoName, link ?? null);
+  const organization = (name: string) =>
+    href ? (
+      <a href={href} target="_blank" rel="noreferrer" className="underline underline-offset-2">
+        {name}
+      </a>
+    ) : (
+      name
+    );
   const dateLabel = entry.current ? `${entry.startLabel} – ${t`Present`}` : entry.dateLabel;
   return (
     <li className="flex gap-3">
-      <CompanyLogo
-        name={logoName}
-        host={kind === "experience" ? companyHost(entry.secondary, sourceUrls) : null}
-      />
+      <CompanyLogo name={logoName} src={organizationLogo(logoName, asset ?? null)} />
       <div className="min-w-0 flex-1">
-        <div className="flex items-start justify-between gap-3">
-          <div className="min-w-0">
-            <p className="text-sm font-semibold">{entry.primary}</p>
-            {entry.secondary ? <p className="text-sm">{entry.secondary}</p> : null}
+        <div className="flex flex-wrap items-start justify-between gap-x-3 gap-y-1">
+          <div className="min-w-0 break-words">
+            <p className="text-sm font-semibold">
+              {kind === "education" ? organization(entry.primary) : entry.primary}
+            </p>
+            {entry.secondary ? (
+              <p className="text-sm">
+                {kind === "experience" ? organization(entry.secondary) : entry.secondary}
+              </p>
+            ) : null}
           </div>
           {dateLabel ? (
-            <div className="shrink-0 text-right text-xs text-muted-foreground">
+            <div className="text-xs text-muted-foreground">
               <p>{dateLabel}</p>
               {entry.months ? <p>{duration(entry.months)}</p> : null}
             </div>
           ) : null}
         </div>
-        {entry.detail ? <p className="text-xs text-muted-foreground">{entry.detail}</p> : null}
+        {entry.detail ? (
+          <p className="mt-1 break-words text-xs text-muted-foreground">{entry.detail}</p>
+        ) : null}
       </div>
     </li>
   );
@@ -122,10 +128,14 @@ function Timeline({
   fields,
   kind,
   Sources,
+  asset,
+  link,
 }: {
   fields: readonly TimelineField[];
   kind: TimelineKind;
   Sources: SourcesRenderer;
+  asset?: ProfileAssets["company"];
+  link?: ProfileAssets["companyLink"];
 }) {
   const now = useMemo(() => new Date(), []);
   const parsed = useMemo(
@@ -144,7 +154,8 @@ function Timeline({
                 key={`${index}-${entry.text}`}
                 entry={entry}
                 kind={kind}
-                sourceUrls={field.sourceUrls}
+                asset={asset}
+                link={link}
               />
             ))}
           </ul>
@@ -158,6 +169,8 @@ function Timeline({
 export function ExperienceTimeline(props: {
   fields: readonly TimelineField[];
   Sources: SourcesRenderer;
+  asset?: ProfileAssets["company"];
+  link?: ProfileAssets["companyLink"];
 }) {
   return <Timeline {...props} kind="experience" />;
 }
@@ -165,6 +178,8 @@ export function ExperienceTimeline(props: {
 export function EducationTimeline(props: {
   fields: readonly TimelineField[];
   Sources: SourcesRenderer;
+  asset?: ProfileAssets["company"];
+  link?: ProfileAssets["companyLink"];
 }) {
   return <Timeline {...props} kind="education" />;
 }

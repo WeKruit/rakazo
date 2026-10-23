@@ -2232,6 +2232,27 @@ const ReminderCandidateKey = Text.max(300).regex(
   /^(autumn|crm):\S+$/,
   'Use "autumn:<key>" or "crm:<id>"',
 );
+/** Actual profile opens, retained in the existing native event history. */
+export const RecruitingProfileActivityInput = z.strictObject({
+  roleId: RecruitingId,
+  candidateKey: ReminderCandidateKey,
+});
+export const RecordRecruitingProfileViewInput = RecruitingProfileActivityInput.extend({
+  viewId: z.uuid(),
+});
+export const RecruitingProfileViewSchema = z.strictObject({
+  roleTitle: z.string(),
+  id: Id,
+  at: IsoDate,
+  actorName: z.string().nullable(),
+});
+export const RecruitingProfileActivityOutput = z.strictObject({
+  items: z.array(RecruitingProfileViewSchema),
+  hasMore: z.boolean(),
+});
+export type RecruitingProfileView = z.infer<typeof RecruitingProfileViewSchema>;
+export type RecruitingProfileActivityInput = z.infer<typeof RecruitingProfileActivityInput>;
+export type RecordRecruitingProfileViewInput = z.infer<typeof RecordRecruitingProfileViewInput>;
 const ReminderTitle = Text.max(200);
 const ReminderNote = z.string().max(4000);
 export const RecruitingReminderSchema = z.strictObject({

@@ -326,7 +326,7 @@ msgstr ""
 msgid "Action confirmations"
 msgstr "작업 실행 전 확인"
 
-#: src/pages/recruiting/ContactsTab.tsx
+#: src/pages/recruiting/CandidateDirectory.tsx
 msgid "Actions"
 msgstr ""
 
@@ -344,6 +344,7 @@ msgid "Actions for space"
 msgstr ""
 
 #: src/pages/BillingSettingsPanel.tsx
+#: src/pages/recruiting/SequenceOverview.tsx
 #: src/pages/recruiting/SequenceTab.tsx
 #: src/pages/RoutineEditor.tsx
 msgid "Active"
@@ -355,7 +356,6 @@ msgstr "현재 모델"
 
 #: src/components/computer/TerminalApp.tsx
 #: src/pages/recruiting/ActivityTab.tsx
-#: src/pages/recruiting/ContactsTab.tsx
 #: src/pages/recruiting/DetailPanel.tsx
 #: src/pages/RecruitingPanel.tsx
 #: src/pages/Shell.tsx
@@ -564,6 +564,7 @@ msgid "All rounds"
 msgstr ""
 
 #: src/pages/ActivityList.tsx
+#: src/pages/recruiting/InterviewCalendar.tsx
 msgid "All statuses"
 msgstr ""
 
@@ -697,7 +698,6 @@ msgstr "이 서버를 승인하면 Bot이 제공되는 도구를 사용할 수 �
 msgid "Approved"
 msgstr ""
 
-#: src/pages/recruiting/ActivityTab.tsx
 #: src/pages/RecruitingPanel.tsx
 msgid "Approved in internal review"
 msgstr ""
@@ -879,6 +879,7 @@ msgid "Available after the routine is saved"
 msgstr "루틴을 저장한 후 사용할 수 있습니다"
 
 #: src/pages/recruiting/AvailabilityRanges.tsx
+#: src/pages/recruiting/InterviewCalendar.tsx
 msgid "Available time"
 msgstr ""
 
@@ -1047,7 +1048,7 @@ msgstr ""
 msgid "Built-in"
 msgstr "기본 제공"
 
-#: src/pages/recruiting/InterviewTab.tsx
+#: src/pages/recruiting/InterviewCalendar.tsx
 msgid "Calendar"
 msgstr ""
 
@@ -1055,7 +1056,7 @@ msgstr ""
 msgid "Calendar booking details are not included in these manual CRM workflow records."
 msgstr ""
 
-#: src/pages/recruiting/InterviewTab.tsx
+#: src/pages/recruiting/InterviewCalendar.tsx
 #: src/pages/RecruitingCorrespondence.tsx
 msgid "Calendar event"
 msgstr ""
@@ -1182,6 +1183,7 @@ msgstr ""
 msgid "Card view"
 msgstr ""
 
+#: src/pages/recruiting/CandidateDirectory.tsx
 #: src/pages/RecruitingPanel.tsx
 msgid "Cards"
 msgstr "카드"
@@ -1769,6 +1771,7 @@ msgid "Contact status"
 msgstr ""
 
 #: src/pages/recruiting/HomeDashboard.tsx
+#: src/pages/recruiting/SequenceOverview.tsx
 msgid "Contacted"
 msgstr ""
 
@@ -2543,7 +2546,7 @@ msgstr ""
 msgid "Current password"
 msgstr "현재 비밀번호"
 
-#: src/pages/recruiting/ContactsTab.tsx
+#: src/pages/recruiting/CandidateDirectory.tsx
 #: src/pages/RecruitingPanel.tsx
 msgid "Current role"
 msgstr ""
@@ -2814,7 +2817,6 @@ msgstr ""
 msgid "Docker limits access to your computer for added security. Using {hostLabel} lets bots work with your local files and tools."
 msgstr "Docker는 보안을 위해 컴퓨터 접근을 제한합니다. {hostLabel}에서는 Bot이 로컬 파일과 도구로 작업할 수 있습니다."
 
-#: src/pages/recruiting/ContactsTab.tsx
 #: src/pages/RecruitingPanel.tsx
 msgid "Does not match"
 msgstr ""
@@ -2864,7 +2866,7 @@ msgstr ""
 msgid "Draft"
 msgstr ""
 
-#: src/pages/recruiting/InboxTab.tsx
+#: src/pages/recruiting/EmailConversation.tsx
 #: src/pages/RecruitingPanel.tsx
 msgid "Draft reply"
 msgstr ""
@@ -2918,7 +2920,7 @@ msgstr "Bot 정보 수정"
 msgid "Edit search filters"
 msgstr ""
 
-#: src/pages/recruiting/ContactsTab.tsx
+#: src/pages/recruiting/CandidateDirectory.tsx
 #: src/pages/recruiting/DetailPanel.tsx
 msgid "Education"
 msgstr ""
@@ -2930,7 +2932,6 @@ msgstr ""
 msgid "Email"
 msgstr "이메일"
 
-#: src/pages/recruiting/InboxTab.tsx
 #: src/pages/RecruitingCorrespondence.tsx
 msgid "Email content"
 msgstr ""
@@ -2987,6 +2988,7 @@ msgid "Email: {0}"
 msgstr ""
 
 #: src/pages/recruiting/DetailPanel.tsx
+#: src/pages/recruiting/EmailConversation.tsx
 #: src/pages/recruiting/InboxTab.tsx
 #: src/pages/RecruitingCorrespondence.tsx
 msgid "Emails"
@@ -3240,7 +3242,7 @@ msgstr "완료되었습니다."
 msgid "Finishing MCP connection…"
 msgstr "MCP 연결을 마무리하는 중…"
 
-#: src/pages/recruiting/ContactsTab.tsx
+#: src/pages/recruiting/CandidateDirectory.tsx
 msgid "Fit"
 msgstr ""
 
@@ -3265,6 +3267,7 @@ msgid "Free"
 msgstr "무료"
 
 #: src/pages/ActivityList.tsx
+#: src/pages/recruiting/EmailConversation.tsx
 msgid "From"
 msgstr ""
 
@@ -3282,6 +3285,8 @@ msgid "Fullscreen"
 msgstr "전체 화면"
 
 #: src/pages/recruiting/AssessmentCard.tsx
+#: src/pages/recruiting/CandidateDirectory.tsx
+#: src/pages/recruiting/SkillEvidence.tsx
 msgid "Gap"
 msgstr ""
 
@@ -3579,6 +3584,7 @@ msgstr ""
 
 #: src/pages/recruiting/ActivityTab.tsx
 #: src/pages/recruiting/HomeDashboard.tsx
+#: src/pages/recruiting/SequenceOverview.tsx
 #: src/pages/RecruitingPanel.tsx
 msgid "Interested"
 msgstr ""
@@ -3603,6 +3609,7 @@ msgstr ""
 msgid "Internal assessment: outdated"
 msgstr ""
 
+#: src/pages/recruiting/ActivityTab.tsx
 #: src/pages/RecruitingPanel.tsx
 msgid "Internal review"
 msgstr ""
@@ -3899,7 +3906,8 @@ msgstr "로컬 접근을 허용하면 Bot이 묻지 않고 명령을 실행할 �
 msgid "Local Server Settings"
 msgstr ""
 
-#: src/pages/recruiting/ContactsTab.tsx
+#: src/pages/recruiting/CandidateDirectory.tsx
+#: src/pages/recruiting/InterviewCalendar.tsx
 #: src/pages/RecruitingPanel.tsx
 msgid "Location"
 msgstr ""
@@ -3990,7 +3998,8 @@ msgid "Marked high signal"
 msgstr ""
 
 #: src/pages/recruiting/AssessmentCard.tsx
-#: src/pages/recruiting/ContactsTab.tsx
+#: src/pages/recruiting/CandidateDirectory.tsx
+#: src/pages/recruiting/SkillEvidence.tsx
 #: src/pages/RecruitingPanel.tsx
 msgid "Match"
 msgstr ""
@@ -4095,7 +4104,7 @@ msgstr "메시지"
 msgid "Message {activeName}"
 msgstr "{activeName}에게 메시지 보내기"
 
-#: src/pages/recruiting/InboxTab.tsx
+#: src/pages/recruiting/EmailConversation.tsx
 #: src/pages/RecruitingCorrespondence.tsx
 msgid "Message body unavailable"
 msgstr ""
@@ -4280,7 +4289,7 @@ msgstr "음소거"
 #: src/components/teach/SkillDraftCard.tsx
 #: src/pages/Auth.tsx
 #: src/pages/GroupPanel.tsx
-#: src/pages/recruiting/ContactsTab.tsx
+#: src/pages/recruiting/CandidateDirectory.tsx
 #: src/pages/RecruitingPanel.tsx
 #: src/pages/RoutineEditor.tsx
 #: src/pages/shell/bot-credentials.tsx
@@ -4663,6 +4672,7 @@ msgstr "아직 스킬이 없습니다"
 msgid "No stored campaign associations were returned for this role."
 msgstr ""
 
+#: src/pages/recruiting/EmailConversation.tsx
 #: src/pages/recruiting/InboxTab.tsx
 msgid "No stored emails for this candidate."
 msgstr ""
@@ -4683,6 +4693,7 @@ msgstr ""
 msgid "No stored role-interest records were returned."
 msgstr ""
 
+#: src/pages/recruiting/EmailConversation.tsx
 #: src/pages/recruiting/InboxTab.tsx
 #: src/pages/RecruitingCorrespondence.tsx
 #: src/pages/Shell.tsx
@@ -4870,7 +4881,7 @@ msgstr ""
 msgid "Open <0>{0}</0> to finish signing in."
 msgstr ""
 
-#: src/pages/recruiting/InterviewTab.tsx
+#: src/pages/recruiting/InterviewCalendar.tsx
 #: src/pages/RecruitingCorrespondence.tsx
 msgid "Open calendar event"
 msgstr ""
@@ -5079,6 +5090,8 @@ msgid "Park"
 msgstr "보류"
 
 #: src/pages/recruiting/AssessmentCard.tsx
+#: src/pages/recruiting/CandidateDirectory.tsx
+#: src/pages/recruiting/SkillEvidence.tsx
 msgid "Partial match"
 msgstr ""
 
@@ -5176,7 +5189,6 @@ msgstr "플러그인"
 msgid "Polished message"
 msgstr ""
 
-#: src/pages/recruiting/ActivityTab.tsx
 #: src/pages/RecruitingPanel.tsx
 msgid "Pooled in internal review"
 msgstr ""
@@ -5238,7 +5250,7 @@ msgstr ""
 msgid "Preview only"
 msgstr ""
 
-#: src/pages/recruiting/InboxTab.tsx
+#: src/pages/recruiting/EmailConversation.tsx
 #: src/pages/RecruitingCorrespondence.tsx
 msgid "Preview only. Ask for the complete message to read the full body."
 msgstr ""
@@ -5277,7 +5289,10 @@ msgstr "Bot 전용"
 msgid "Private workspace with its own bots and groups."
 msgstr ""
 
+#: src/pages/recruiting/ActivityTab.tsx
+#: src/pages/recruiting/CandidateDirectory.tsx
 #: src/pages/recruiting/DetailPanel.tsx
+#: src/pages/recruiting/EmailConversation.tsx
 #: src/pages/RecruitingPanel.tsx
 msgid "Profile"
 msgstr ""
@@ -5404,7 +5419,7 @@ msgstr ""
 msgid "Receipt"
 msgstr ""
 
-#: src/pages/recruiting/InboxTab.tsx
+#: src/pages/recruiting/EmailConversation.tsx
 msgid "Received"
 msgstr ""
 
@@ -5558,7 +5573,6 @@ msgstr "새로고침 중…"
 msgid "Registration is closed"
 msgstr "가입이 마감되었습니다"
 
-#: src/pages/recruiting/ActivityTab.tsx
 #: src/pages/RecruitingPanel.tsx
 msgid "Rejected in internal review"
 msgstr ""
@@ -5684,7 +5698,7 @@ msgid "Replaced"
 msgstr ""
 
 #: src/pages/recruiting/HomeDashboard.tsx
-#: src/pages/recruiting/InboxTab.tsx
+#: src/pages/recruiting/SequenceOverview.tsx
 msgid "Replied"
 msgstr ""
 
@@ -6416,6 +6430,7 @@ msgstr ""
 msgid "Send with Enter"
 msgstr "Enter 키로 전송"
 
+#: src/pages/recruiting/EmailConversation.tsx
 #: src/pages/recruiting/InboxTab.tsx
 #: src/pages/RecruitingCorrespondence.tsx
 msgid "Sender unavailable"
@@ -6431,7 +6446,7 @@ msgstr ""
 msgid "Sending…"
 msgstr "보내는 중…"
 
-#: src/pages/recruiting/InboxTab.tsx
+#: src/pages/recruiting/EmailConversation.tsx
 #: src/pages/recruiting/SequenceTab.tsx
 msgid "Sent"
 msgstr ""
@@ -6552,6 +6567,7 @@ msgstr ""
 msgid "Shortlist people from search results to keep them here."
 msgstr ""
 
+#: src/pages/recruiting/CandidateDirectory.tsx
 #: src/pages/recruiting/ContactsTab.tsx
 #: src/pages/recruiting/DetailPanel.tsx
 #: src/pages/recruiting/HomeDashboard.tsx
@@ -6580,7 +6596,7 @@ msgid "Show list"
 msgstr ""
 
 #: src/pages/PluginsOverlay.tsx
-#: src/pages/recruiting/DetailPanel.tsx
+#: src/pages/recruiting/SkillEvidence.tsx
 msgid "Show more"
 msgstr "더 보기"
 
@@ -6811,6 +6827,7 @@ msgstr ""
 
 #: src/pages/ActivityList.tsx
 #: src/pages/Board.tsx
+#: src/pages/recruiting/CandidateDirectory.tsx
 #: src/pages/recruiting/InterviewTab.tsx
 msgid "Status"
 msgstr ""
@@ -6948,6 +6965,7 @@ msgstr ""
 msgid "System"
 msgstr "시스템"
 
+#: src/pages/recruiting/CandidateDirectory.tsx
 #: src/pages/RecruitingPanel.tsx
 msgid "Table"
 msgstr "표"
@@ -7189,6 +7207,7 @@ msgid "Title: {0}"
 msgstr ""
 
 #: src/pages/ActivityList.tsx
+#: src/pages/recruiting/EmailConversation.tsx
 msgid "To"
 msgstr ""
 
@@ -7206,6 +7225,7 @@ msgid "To:"
 msgstr "받는 사람:"
 
 #: src/pages/Artifacts.tsx
+#: src/pages/recruiting/InterviewCalendar.tsx
 #: src/pages/shell/chat-context.tsx
 msgid "Today"
 msgstr "오늘"
@@ -7286,7 +7306,6 @@ msgstr "섹션 없음"
 msgid "Unavailable"
 msgstr "사용할 수 없음"
 
-#: src/pages/recruiting/ContactsTab.tsx
 #: src/pages/RecruitingPanel.tsx
 msgid "Unclear"
 msgstr ""
@@ -7295,6 +7314,10 @@ msgstr ""
 msgid "Uninstall"
 msgstr ""
 
+#: src/pages/recruiting/AssessmentCard.tsx
+#: src/pages/recruiting/CandidateDirectory.tsx
+#: src/pages/recruiting/HomeDashboard.tsx
+#: src/pages/recruiting/SkillEvidence.tsx
 #: src/pages/RecruitingPanel.tsx
 msgid "Unknown"
 msgstr ""
@@ -7316,6 +7339,7 @@ msgid "Unmute"
 msgstr "음소거 해제"
 
 #: src/pages/recruiting/CalibrationRound.tsx
+#: src/pages/recruiting/CandidateDirectory.tsx
 #: src/pages/recruiting/ContactsTab.tsx
 #: src/pages/RecruitingPanel.tsx
 msgid "Unnamed candidate"
@@ -7750,4 +7774,335 @@ msgstr ""
 
 #: src/pages/RecruitingPanel.tsx
 msgid "Recruiter messages are unavailable for this role."
+
+#: src/pages/recruiting/SequenceOverview.tsx
+msgid "— Not reported"
+msgstr ""
+
+#: src/pages/recruiting/HomeDashboard.tsx
+msgid "{undated} without a recorded date"
+msgstr ""
+
+#: src/pages/recruiting/SequenceOverview.tsx
+msgid "≥ Observed in loaded records"
+msgstr ""
+
+#: src/pages/recruiting/ActivityTab.tsx
+msgid "Activity history is unavailable from some sources."
+msgstr ""
+
+#: src/pages/recruiting/ActivityTab.tsx
+msgid "Actor not recorded"
+msgstr ""
+
+#: src/pages/recruiting/HomeDashboard.tsx
+msgid "All projects"
+msgstr ""
+
+#: src/pages/recruiting/InterviewCalendar.tsx
+msgid "Attendees"
+msgstr ""
+
+#: src/pages/recruiting/InterviewCalendar.tsx
+msgid "Calendar hours"
+msgstr ""
+
+#: src/pages/recruiting/InterviewTab.tsx
+msgid "Calendar last checked"
+msgstr ""
+
+#: src/pages/recruiting/InterviewTab.tsx
+msgid "Calendar records have not been checked yet."
+msgstr ""
+
+#: src/pages/recruiting/CandidateDirectory.tsx
+msgid "Candidate cards"
+msgstr ""
+
+#: src/pages/recruiting/CandidateDirectory.tsx
+msgid "Candidate table"
+msgstr ""
+
+#: src/pages/recruiting/InterviewCalendar.tsx
+msgid "Choose day"
+msgstr ""
+
+#: src/pages/recruiting/SequenceOverview.tsx
+msgid "Clicked"
+msgstr ""
+
+#: src/pages/recruiting/InterviewCalendar.tsx
+msgid "Clock change; see source times"
+msgstr ""
+
+#: src/pages/recruiting/InterviewCalendar.tsx
+msgid "Close event details"
+msgstr ""
+
+#: src/pages/recruiting/CandidateDirectory.tsx
+msgid "Contact layout"
+msgstr ""
+
+#: src/pages/recruiting/InterviewTab.tsx
+msgid "Could not load saved calendar records. Try refreshing."
+msgstr ""
+
+#: src/pages/recruiting/DetailPanel.tsx
+msgid "Could not record this profile view."
+msgstr ""
+
+#: src/pages/recruiting/ActivityTab.tsx
+msgid "Current result: approved"
+msgstr ""
+
+#: src/pages/recruiting/ActivityTab.tsx
+msgid "Current result: pooled"
+msgstr ""
+
+#: src/pages/recruiting/ActivityTab.tsx
+msgid "Current result: rejected"
+msgstr ""
+
+#: src/pages/recruiting/InterviewCalendar.tsx
+msgid "Current time"
+msgstr ""
+
+#: src/pages/recruiting/HomeDashboard.tsx
+msgid "Current totals · all dates"
+msgstr ""
+
+#: src/pages/recruiting/InterviewCalendar.tsx
+msgid "Date only; time not supplied"
+msgstr ""
+
+#: src/pages/recruiting/InterviewCalendar.tsx
+msgid "Display timezone"
+msgstr ""
+
+#: src/pages/recruiting/EmailConversation.tsx
+msgid "Email conversation"
+msgstr ""
+
+#: src/pages/recruiting/ActivityTab.tsx
+msgid "Email opens are not recorded. Profile views appear only after recording starts."
+msgstr ""
+
+#: src/pages/recruiting/ActivityTab.tsx
+msgid "Email received"
+msgstr ""
+
+#: src/pages/recruiting/InterviewCalendar.tsx
+msgid "End"
+msgstr ""
+
+#: src/pages/recruiting/InterviewCalendar.tsx
+msgid "End not recorded"
+msgstr ""
+
+#: src/pages/recruiting/InterviewCalendar.tsx
+msgid "End time unavailable"
+msgstr ""
+
+#: src/pages/recruiting/InterviewCalendar.tsx
+msgid "Event details"
+msgstr ""
+
+#: src/pages/recruiting/InterviewCalendar.tsx
+msgid "Event status"
+msgstr ""
+
+#: src/pages/recruiting/InterviewCalendar.tsx
+msgid "Events without usable start times"
+msgstr ""
+
+#. placeholder {0}: labels[stage.key]
+#: src/pages/recruiting/HomeDashboard.tsx
+msgid "Inspect {0}"
+msgstr ""
+
+#: src/pages/recruiting/HomeDashboard.tsx
+msgid "Inspect week of {label}"
+msgstr ""
+
+#: src/pages/recruiting/HomeDashboard.tsx
+msgid "Last {count} weeks"
+msgstr ""
+
+#: src/pages/recruiting/SequenceOverview.tsx
+msgid "Last 7 days · UTC"
+msgstr ""
+
+#: src/pages/recruiting/SkillEvidence.tsx
+msgid "Listed skill"
+msgstr ""
+
+#: src/pages/recruiting/InterviewCalendar.tsx
+msgid "Next week"
+msgstr ""
+
+#: src/pages/recruiting/ActivityTab.tsx
+msgid "No activity recorded in the available sources."
+msgstr ""
+
+#: src/pages/recruiting/SequenceOverview.tsx
+msgid "No dated sends in the available records."
+msgstr ""
+
+#: src/pages/recruiting/AssessmentCard.tsx
+#: src/pages/recruiting/SkillEvidence.tsx
+msgid "No evidence provided."
+msgstr ""
+
+#: src/pages/recruiting/InterviewTab.tsx
+msgid "No saved calendar records matched this candidate."
+msgstr ""
+
+#: src/pages/recruiting/HomeDashboard.tsx
+msgid "No saved overview for these projects."
+msgstr ""
+
+#: src/pages/recruiting/SkillEvidence.tsx
+msgid "No supporting detail in the saved profile."
+msgstr ""
+
+#: src/pages/recruiting/InterviewCalendar.tsx
+msgid "No timed events in this week."
+msgstr ""
+
+#: src/pages/recruiting/InterviewCalendar.tsx
+msgid "Not recorded"
+msgstr ""
+
+#: src/pages/recruiting/SequenceOverview.tsx
+msgid "Not reported"
+msgstr ""
+
+#: src/pages/recruiting/CandidateDirectory.tsx
+msgid "Open {name}'s source profile"
+msgstr ""
+
+#: src/pages/recruiting/InterviewTab.tsx
+msgid "Open the role conversation to see saved calendar records."
+msgstr ""
+
+#: src/pages/recruiting/SequenceOverview.tsx
+msgid "Opened"
+msgstr ""
+
+#: src/pages/recruiting/ActivityTab.tsx
+msgid "Outbox"
+msgstr ""
+
+#: src/pages/recruiting/HomeDashboard.tsx
+msgid "Outreach funnel"
+msgstr ""
+
+#: src/pages/recruiting/HomeDashboard.tsx
+msgid "Partial data"
+msgstr ""
+
+#: src/pages/recruiting/InterviewCalendar.tsx
+msgid "Previous week"
+msgstr ""
+
+#: src/pages/recruiting/DetailPanel.tsx
+msgid "Profile navigation"
+msgstr ""
+
+#: src/pages/recruiting/ActivityTab.tsx
+msgid "Profile viewed"
+msgstr ""
+
+#: src/pages/recruiting/HomeDashboard.tsx
+msgid "Project"
+msgstr ""
+
+#: src/pages/recruiting/HomeDashboard.tsx
+msgid "Projects"
+msgstr ""
+
+#: src/pages/recruiting/EmailConversation.tsx
+msgid "Recipients unavailable"
+msgstr ""
+
+#: src/pages/recruiting/SequenceOverview.tsx
+msgid "Recorded send activity"
+msgstr ""
+
+#: src/pages/recruiting/ActivityTab.tsx
+msgid "Review updated"
+msgstr ""
+
+#: src/pages/recruiting/ActivityTab.tsx
+msgid "Role status"
+msgstr ""
+
+#: src/pages/recruiting/InterviewTab.tsx
+msgid "Saved calendar records are unavailable from this source."
+msgstr ""
+
+#: src/pages/recruiting/ActivityTab.tsx
+msgid "Saved correspondence"
+msgstr ""
+
+#: src/pages/recruiting/ActivityTab.tsx
+msgid "Saved mailbox"
+msgstr ""
+
+#: src/pages/recruiting/HomeDashboard.tsx
+msgid "Send totals are not available from these records."
+msgstr ""
+
+#: src/pages/recruiting/HomeDashboard.tsx
+msgid "Shortlist period"
+msgstr ""
+
+#: src/pages/recruiting/ActivityTab.tsx
+msgid "Showing available activity; more history may exist."
+msgstr ""
+
+#: src/pages/recruiting/SkillEvidence.tsx
+msgid "Skill evidence"
+msgstr ""
+
+#: src/pages/recruiting/InterviewTab.tsx
+msgid "Some saved calendar records could not be displayed."
+msgstr ""
+
+#: src/pages/recruiting/SkillEvidence.tsx
+msgid "Source context"
+msgstr ""
+
+#: src/pages/recruiting/InterviewCalendar.tsx
+msgid "Source times"
+msgstr ""
+
+#: src/pages/recruiting/InterviewCalendar.tsx
+msgid "Source timezone"
+msgstr ""
+
+#: src/pages/recruiting/InterviewCalendar.tsx
+msgid "Start"
+msgstr ""
+
+#: src/pages/recruiting/InterviewCalendar.tsx
+msgid "Start time unavailable"
+msgstr ""
+
+#: src/pages/recruiting/InterviewCalendar.tsx
+msgid "Status not recorded"
+msgstr ""
+
+#: src/pages/recruiting/InterviewTab.tsx
+msgid "The calendar connection changed. These saved records may be out of date."
+msgstr ""
+
+#: src/pages/recruiting/InterviewCalendar.tsx
+msgid "Time"
+msgstr ""
+
+#: src/pages/recruiting/ActivityTab.tsx
+#: src/pages/recruiting/EmailConversation.tsx
+#: src/pages/recruiting/SequenceTab.tsx
+msgid "Time not recorded"
 msgstr ""

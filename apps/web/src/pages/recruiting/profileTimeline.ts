@@ -88,7 +88,7 @@ function splitParts(text: string): string[] {
       ...splitParts(text.slice(at.index + at[0].length)),
     ];
   return text
-    .split(/\s*[,，、|]\s*|\s+[-–—]\s+|\s*—\s*/)
+    .split(/\s*[,，、|·]\s*|\s+[-–—]\s+|\s*—\s*/)
     .map((part) => part.trim())
     .filter(Boolean);
 }
@@ -192,31 +192,4 @@ export function timelineStats(entries: readonly TimelineEntry[]): TimelineStats 
     current: current ? current.end - current.start : null,
     total,
   };
-}
-
-/**
- * A host from the field's own sources that plausibly belongs to the company: a non-LinkedIn
- * https page whose hostname contains the company's first word.
- */
-export function companyHost(company: string | undefined, sourceUrls: readonly string[]) {
-  const word = company
-    ?.toLowerCase()
-    .split(/[\s,.]+/)[0]
-    ?.replace(/[^a-z0-9]/g, "");
-  if (!word || word.length < 3) return null;
-  for (const url of sourceUrls) {
-    try {
-      const { protocol, hostname } = new URL(url);
-      if (
-        protocol === "https:" &&
-        !/(^|\.)linkedin\.com$/.test(hostname) &&
-        hostname.includes(word)
-      ) {
-        return hostname;
-      }
-    } catch {
-      // Not a URL; ignore.
-    }
-  }
-  return null;
 }

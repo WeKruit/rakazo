@@ -12,6 +12,7 @@ import {
   RecruitingChatContextSchema,
   RecruitingCorrespondenceReferenceSchema,
   RecruitingId,
+  RecruitingProfileActivityInput,
 } from "./recruiting.js";
 import { RecruitingCrmRoleReferenceSchema } from "./recruiting-crm.js";
 
@@ -71,6 +72,7 @@ export const ProductEventType = z.enum([
   "recruiting.material.read",
   "recruiting.assessment.saved",
   "recruiting.question.asked",
+  "recruiting.profile.viewed",
   /** Liveness only: never persisted, never applied to a snapshot, always seq 0. */
   "heartbeat",
 ]);
@@ -633,6 +635,14 @@ export const RecruitingQuestionAskedPayloadSchema = z.strictObject({
 });
 export type RecruitingQuestionAskedPayload = z.infer<typeof RecruitingQuestionAskedPayloadSchema>;
 
+export const RecruitingProfileViewedPayloadSchema = RecruitingProfileActivityInput.extend({
+  roleTitle: z.string(),
+  crmBindingEffectId: Id.nullable(),
+  viewId: z.uuid(),
+  actorUserId: Id,
+  actorName: z.string().nullable(),
+});
+
 export const NativeAskAnswerPayloadSchema = z.strictObject({
   messageId: Id,
   askIndex: z.number().int().nonnegative(),
@@ -672,33 +682,35 @@ export const ProductEventSchema = z
       ctx.addIssue({ code: "custom", path: ["runId"], message: "Requeue requires its run" });
     }
     const schema =
-      event.type === "recruiting.changed"
-        ? RecruitingChangedPayloadSchema
-        : event.type === "recruiting.context.adopted"
-          ? RecruitingContextAdoptedPayloadSchema
-          : event.type === "recruiting.action.transitioned"
-            ? RecruitingActionTransitionedPayloadSchema
-            : event.type === "recruiting.read"
-              ? RecruitingReadPayloadSchema
-              : event.type === "recruiting.candidates.saved"
-                ? RecruitingCandidatesSavedPayloadSchema
-                : event.type === "recruiting.material.read"
-                  ? RecruitingMaterialReadPayloadSchema
-                  : event.type === "recruiting.assessment.saved"
-                    ? RecruitingAssessmentSavedPayloadSchema
-                    : event.type === "recruiting.question.asked"
-                      ? RecruitingQuestionAskedPayloadSchema
-                      : event.type === "thread.choice"
-                        ? NativeAskAnswerPayloadSchema
-                        : event.type === "effect.approval.answered"
-                          ? EffectApprovalAnsweredPayloadSchema
-                          : event.type === "run.requeued"
-                            ? RunRequeuedPayloadSchema
-                            : event.type === "run.completed"
-                              ? RunCompletedPayloadSchema
-                              : event.type === "thread.progress"
-                                ? ThreadProgressPayloadSchema
-                                : null;
+      event.type === "recruiting.profile.viewed"
+        ? RecruitingProfileViewedPayloadSchema
+        : event.type === "recruiting.changed"
+          ? RecruitingChangedPayloadSchema
+          : event.type === "recruiting.context.adopted"
+            ? RecruitingContextAdoptedPayloadSchema
+            : event.type === "recruiting.action.transitioned"
+              ? RecruitingActionTransitionedPayloadSchema
+              : event.type === "recruiting.read"
+                ? RecruitingReadPayloadSchema
+                : event.type === "recruiting.candidates.saved"
+                  ? RecruitingCandidatesSavedPayloadSchema
+                  : event.type === "recruiting.material.read"
+                    ? RecruitingMaterialReadPayloadSchema
+                    : event.type === "recruiting.assessment.saved"
+                      ? RecruitingAssessmentSavedPayloadSchema
+                      : event.type === "recruiting.question.asked"
+                        ? RecruitingQuestionAskedPayloadSchema
+                        : event.type === "thread.choice"
+                          ? NativeAskAnswerPayloadSchema
+                          : event.type === "effect.approval.answered"
+                            ? EffectApprovalAnsweredPayloadSchema
+                            : event.type === "run.requeued"
+                              ? RunRequeuedPayloadSchema
+                              : event.type === "run.completed"
+                                ? RunCompletedPayloadSchema
+                                : event.type === "thread.progress"
+                                  ? ThreadProgressPayloadSchema
+                                  : null;
     if (!schema) return;
     const parsed = schema.safeParse(event.payload);
     if (!parsed.success) {

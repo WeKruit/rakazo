@@ -1,9 +1,9 @@
 import { Plural, Trans, useLingui } from "@lingui/react/macro";
 import type { RecruitingCandidate, RecruitingCorrespondence } from "@rakazo/contracts";
-import { Badge, Button } from "@rakazo/ui-web";
-import { Bookmark, Building2, Mail, Sparkles } from "lucide-react";
+import { Button } from "@rakazo/ui-web";
+import { Bookmark, Mail, Sparkles } from "lucide-react";
 import { useEffect, useState } from "react";
-import { PersonAvatar } from "./DetailPanel";
+import { CandidateDirectory } from "./CandidateDirectory";
 import type { RecruitingDetailTarget } from "./detail";
 import { detailKey, useRecruitingDetail } from "./detail";
 import { candidateSections } from "./profile";
@@ -38,41 +38,6 @@ export type AutumnCandidateActions = {
   openEvidence: (candidate: RecruitingCandidate, trigger: HTMLElement) => void;
   selectedKey?: string;
 };
-
-const clamp1 = "block truncate";
-const clamp2 = "line-clamp-2 break-words";
-
-function Fit({ candidate }: { candidate: RecruitingCandidate | null }) {
-  const { t } = useLingui();
-  const sections = candidateSections(candidate?.latestSource?.report?.fields);
-  const badge = [sections.fit?.score?.value, sections.fit?.tier?.value].filter(Boolean).join(" · ");
-  if (!badge && !sections.criteria.length) return <span className="text-muted-foreground">—</span>;
-  return (
-    <div className="flex flex-wrap items-center gap-1">
-      {badge ? (
-        <Badge variant="secondary" title={sections.fit?.score?.label ?? sections.fit?.tier?.label}>
-          {badge}
-        </Badge>
-      ) : null}
-      {sections.criteria.slice(0, 3).map((field) => (
-        <Badge
-          key={field.label}
-          variant={field.providerStatus === "miss" ? "destructive" : "outline"}
-          className="max-w-28"
-          title={`${field.label}: ${
-            field.providerStatus === "match"
-              ? t`Match`
-              : field.providerStatus === "miss"
-                ? t`Does not match`
-                : t`Unclear`
-          }`}
-        >
-          <span className="truncate">{field.label}</span>
-        </Badge>
-      ))}
-    </div>
-  );
-}
 
 /**
  * The role's one candidate list: Autumn search results and the role's CRM contacts with the same
@@ -135,9 +100,6 @@ export function ContactsTab(
   const loading = !failures.length && Boolean(list.autumn?.loading || list.crmRead.loading);
   const empty = !loading && !failures.length && !rows.length;
   const role = { roleId: props.roleId, spaceId: props.spaceId, conversation: props.conversation };
-  const education = (row: RoleCandidate) =>
-    candidateSections(row.autumn?.latestSource?.report?.fields).education[0]?.value ?? null;
-  const showEducation = rows.some((row) => education(row));
 
   function target(index: number): RecruitingDetailTarget | undefined {
     const row = rows[index];
@@ -199,15 +161,6 @@ export function ContactsTab(
     }
   }, [pendingDetail, rows]);
 
-  const columns = [
-    { label: t`Name`, width: "w-52" },
-    { label: t`Current role`, width: "w-48" },
-    ...(showEducation ? [{ label: t`Education`, width: "w-44" }] : []),
-    { label: t`Location`, width: "w-36" },
-    { label: t`Activity`, width: "w-32" },
-    { label: t`Fit`, width: "w-48" },
-    { label: t`Actions`, width: "w-60" },
-  ];
   return (
     <section aria-label={t`Contacts`}>
       {autumn ? (
@@ -252,165 +205,79 @@ export function ContactsTab(
         </p>
       ) : null}
       {rows.length ? (
-        <div className="max-h-[70vh] overflow-auto rounded-xl border border-border">
-          <table className="w-full min-w-[960px] table-fixed border-collapse text-left text-sm">
-            <colgroup>
-              {columns.map((column) => (
-                <col key={column.label} className={column.width} />
-              ))}
-            </colgroup>
-            <thead className="sticky top-0 z-10 bg-muted text-xs text-muted-foreground">
-              <tr>
-                {columns.map((column) => (
-                  <th scope="col" key={column.label} className="px-3 py-2.5 font-medium">
-                    {column.label}
-                  </th>
-                ))}
-              </tr>
-            </thead>
-            <tbody>
-              {rows.map((row, index) => {
-                const person = row.crm;
-                const candidate = row.autumn;
-                const name = row.name ?? t`Unnamed candidate`;
-                const rowId = person?.candidateId ?? candidate?.candidateKey;
-                const selected =
-                  openId === rowId ||
-                  (!detail && candidate && autumn?.selectedKey === candidate.candidateKey);
-                const activity = person?.stage || person?.outreachStatus;
-                const shortlistFailed =
-                  candidate && autumn?.shortlistFailedKey === candidate.candidateKey;
-                const school = showEducation ? education(row) : null;
-                return (
-                  <tr
-                    key={row.key}
-                    data-selected={selected || undefined}
-                    className="cursor-pointer border-t border-border align-middle hover:bg-muted/50 data-selected:bg-muted"
-                    onClick={(event) => {
-                      if ((event.target as HTMLElement).closest("button, a")) return;
-                      openRow(index, event.currentTarget);
-                    }}
-                  >
-                    <th scope="row" className="px-3 py-3 font-medium">
-                      <span className="flex min-w-0 items-center gap-2.5">
-                        <PersonAvatar name={name} size="sm" />
-                        <button
-                          type="button"
-                          className="min-w-0 truncate text-left hover:underline"
-                          aria-haspopup="dialog"
-                          onClick={(event) => openRow(index, event.currentTarget)}
-                        >
-                          {name}
-                        </button>
-                      </span>
-                    </th>
-                    <td className="px-3 py-3">
-                      <span className="flex min-w-0 items-center gap-2">
-                        <Building2
-                          size={16}
-                          aria-hidden
-                          className="shrink-0 text-muted-foreground"
-                        />
-                        <span className="min-w-0">
-                          <span className={clamp1} title={row.title ?? undefined}>
-                            {row.title ?? "—"}
-                          </span>
-                          {(person?.company ?? candidate?.company) ? (
-                            <span
-                              className={`${clamp1} text-xs text-muted-foreground`}
-                              title={person?.company ?? candidate?.company ?? undefined}
-                            >
-                              {person?.company ?? candidate?.company}
-                            </span>
-                          ) : null}
-                        </span>
-                      </span>
-                    </td>
-                    {showEducation ? (
-                      <td className="px-3 py-3">
-                        <span className={clamp2} title={school ?? undefined}>
-                          {school ?? "—"}
-                        </span>
-                      </td>
-                    ) : null}
-                    <td className="px-3 py-3">
-                      <span className={clamp2} title={row.location ?? undefined}>
-                        {row.location ?? "—"}
-                      </span>
-                    </td>
-                    <td className="px-3 py-3">
-                      {activity ? (
-                        <Badge variant="outline" className="max-w-full">
-                          <span className="truncate">{statusText(activity)}</span>
-                        </Badge>
+        <CandidateDirectory
+          rows={rows}
+          selectedKey={
+            rows.find(
+              (row) =>
+                openId === (row.crm?.candidateId ?? row.autumn?.candidateKey) ||
+                (!detail && row.autumn && autumn?.selectedKey === row.autumn.candidateKey),
+            )?.key
+          }
+          onOpen={(_row, index, trigger) => openRow(index, trigger)}
+          renderActions={(row, index) => {
+            const candidate = row.autumn;
+            const person = row.crm;
+            const name = row.name ?? t`Unnamed candidate`;
+            return (
+              <>
+                <span className="flex flex-wrap items-center gap-2">
+                  {candidate && autumn ? (
+                    <Button
+                      size="sm"
+                      variant="outline"
+                      aria-pressed={candidate.shortlisted}
+                      aria-label={
+                        candidate.shortlisted
+                          ? t`Remove ${name} from shortlist`
+                          : t`Add ${name} to shortlist`
+                      }
+                      disabled={!autumn.ready}
+                      onClick={() => autumn.setShortlist(candidate, !candidate.shortlisted)}
+                    >
+                      <Bookmark
+                        size={14}
+                        aria-hidden
+                        fill={candidate.shortlisted ? "currentColor" : "none"}
+                      />
+                      {candidate.shortlisted ? (
+                        <Trans>Shortlisted</Trans>
                       ) : (
-                        <span className="text-muted-foreground">—</span>
+                        <Trans>Shortlist</Trans>
                       )}
-                    </td>
-                    <td className="px-3 py-3">
-                      <Fit candidate={candidate} />
-                    </td>
-                    <td className="px-3 py-3">
-                      <span className="flex items-center gap-2">
-                        {candidate && autumn ? (
-                          <Button
-                            size="sm"
-                            variant="outline"
-                            aria-pressed={candidate.shortlisted}
-                            aria-label={
-                              candidate.shortlisted
-                                ? t`Remove ${name} from shortlist`
-                                : t`Add ${name} to shortlist`
-                            }
-                            disabled={!autumn.ready}
-                            onClick={() => autumn.setShortlist(candidate, !candidate.shortlisted)}
-                          >
-                            <Bookmark
-                              size={14}
-                              aria-hidden
-                              fill={candidate.shortlisted ? "currentColor" : "none"}
-                            />
-                            {candidate.shortlisted ? (
-                              <Trans>Shortlisted</Trans>
-                            ) : (
-                              <Trans>Shortlist</Trans>
-                            )}
-                          </Button>
-                        ) : null}
-                        {candidate && autumn?.sendEmail ? (
-                          <Button
-                            size="sm"
-                            disabled={!autumn.ready || (!candidate.name && !candidate.linkedinUrl)}
-                            onClick={() => autumn.sendEmail!(candidate)}
-                          >
-                            <Mail size={14} aria-hidden />
-                            <Trans>Email draft</Trans>
-                          </Button>
-                        ) : !candidate && person && detail ? (
-                          <Button
-                            size="sm"
-                            onClick={() => {
-                              const next = target(index);
-                              if (next) detail.open({ ...next, view: "thread" });
-                            }}
-                          >
-                            <Mail size={14} aria-hidden />
-                            <Trans>Email draft</Trans>
-                          </Button>
-                        ) : null}
-                      </span>
-                      {shortlistFailed ? (
-                        <p role="alert" className="mt-1 text-xs text-destructive">
-                          <Trans>Could not save shortlist</Trans>
-                        </p>
-                      ) : null}
-                    </td>
-                  </tr>
-                );
-              })}
-            </tbody>
-          </table>
-        </div>
+                    </Button>
+                  ) : null}
+                  {candidate && autumn?.sendEmail ? (
+                    <Button
+                      size="sm"
+                      disabled={!autumn.ready || (!candidate.name && !candidate.linkedinUrl)}
+                      onClick={() => autumn.sendEmail!(candidate)}
+                    >
+                      <Mail size={14} aria-hidden />
+                      <Trans>Email draft</Trans>
+                    </Button>
+                  ) : !candidate && person && detail ? (
+                    <Button
+                      size="sm"
+                      onClick={() => {
+                        const next = target(index);
+                        if (next) detail.open({ ...next, view: "thread" });
+                      }}
+                    >
+                      <Mail size={14} aria-hidden />
+                      <Trans>Email draft</Trans>
+                    </Button>
+                  ) : null}
+                </span>
+                {candidate && autumn?.shortlistFailedKey === candidate.candidateKey ? (
+                  <p role="alert" className="mt-1 text-xs text-destructive">
+                    <Trans>Could not save shortlist</Trans>
+                  </p>
+                ) : null}
+              </>
+            );
+          }}
+        />
       ) : null}
       {loading ? <TabLoading /> : null}
       {failures}

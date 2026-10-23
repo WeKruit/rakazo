@@ -1,0 +1,100 @@
+# Added interface copy
+
+Exact added English message keys for review. The controls need visible names for keyboard and assistive-technology users. Source/unknown/error notices appear only with their relevant content or condition: removing them would turn missing evidence into an apparent zero, successful source read, or real historical event. Calendar source details are progressively disclosed. No copy promises provider execution. Existing translated strings are reused where available; new strings have English and Chinese text. Other locales use existing fallback behavior.
+
+## Profile and evidence
+
+- 'Could not record this profile view.'
+- 'Listed skill'
+- 'No evidence provided.'
+- 'No supporting detail in the saved profile.'
+- 'Profile navigation'
+- 'Skill evidence'
+- 'Source context'
+
+## Activity
+
+- 'Activity history is unavailable from some sources.'
+- 'Actor not recorded'
+- 'Current result: approved'
+- 'Current result: pooled'
+- 'Current result: rejected'
+- 'Email opens are not recorded. Profile views appear only after recording starts.'
+- 'Email received'
+- 'No activity recorded in the available sources.'
+- 'Outbox'
+- 'Profile viewed'
+- 'Review updated'
+- 'Role status'
+- 'Saved correspondence'
+- 'Saved mailbox'
+- 'Showing available activity; more history may exist.'
+- 'Time not recorded'
+
+## Contacts and email
+
+- 'Candidate cards'
+- 'Candidate table'
+- 'Contact layout'
+- 'Email conversation'
+- "Open {name}'s source profile"
+- 'Recipients unavailable'
+
+## Calendar
+
+- 'Attendees'
+- 'Calendar hours'
+- 'Calendar last checked'
+- 'Calendar records have not been checked yet.'
+- 'Choose day'
+- 'Clock change; see source times'
+- 'Close event details'
+- 'Could not load saved calendar records. Try refreshing.'
+- 'Current time'
+- 'Date only; time not supplied'
+- 'Display timezone'
+- 'End'
+- 'End not recorded'
+- 'End time unavailable'
+- 'Event details'
+- 'Event status'
+- 'Events without usable start times'
+- 'Next week'
+- 'No saved calendar records matched this candidate.'
+- 'No timed events in this week.'
+- 'Not recorded'
+- 'Open the role conversation to see saved calendar records.'
+- 'Previous week'
+- 'Saved calendar records are unavailable from this source.'
+- 'Some saved calendar records could not be displayed.'
+- 'Source times'
+- 'Source timezone'
+- 'Start'
+- 'Start time unavailable'
+- 'Status not recorded'
+- 'The calendar connection changed. These saved records may be out of date.'
+- 'Time'
+
+## Sequence and overview
+
+- '— Not reported'
+- '{undated} without a recorded date'
+- '≥ Observed in loaded records'
+- 'All projects'
+- 'Clicked'
+- 'Current totals · all dates'
+- 'Inspect {0}'
+- 'Inspect week of {label}'
+- 'Last {count} weeks'
+- 'Last 7 days · UTC'
+- 'No dated sends in the available records.'
+- 'No saved overview for these projects.'
+- 'Not reported'
+- 'Opened'
+- 'Outreach funnel'
+- 'Partial data'
+- 'Project'
+- 'Projects'
+- 'Recorded send activity'
+- 'Send totals are not available from these records.'
+- 'Shortlist period'

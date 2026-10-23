@@ -4,6 +4,7 @@ import { Badge, Button } from "@rakazo/ui-web";
 import { useState } from "react";
 import { rpc } from "../../lib/rpc";
 import { useRecruitingDetail } from "./detail";
+import { SequenceOverview } from "./SequenceOverview";
 import type { RecruitingTabProps } from "./shared";
 import {
   CrmGate,
@@ -102,9 +103,7 @@ export function RoleCampaignCard(props: CampaignScope) {
       ) : null}
       {campaign.stopOnReply === false ? (
         <p role="alert" className="mt-2 text-xs text-destructive">
-          <Trans>
-            Stop on reply is off, so follow-ups keep going after a candidate replies.
-          </Trans>
+          <Trans>Stop on reply is off, so follow-ups keep going after a candidate replies.</Trans>
         </p>
       ) : null}
       {leads.length ? (
@@ -166,6 +165,25 @@ export function SequenceTab(props: RecruitingTabProps) {
     <section aria-label={t`Sequence`}>
       <TabHeader title={<Trans>Sequence</Trans>} />
       <CrmGate crm={crm} />
+      <SequenceOverview
+        campaign={roleCampaign.data}
+        replied={
+          !totals.failed && totals.data?.complete ? (totals.data.counts.get("replied") ?? 0) : null
+        }
+        sendContext={selected?.name}
+        sendDates={
+          details.data && details.data.candidateId === candidateId
+            ? details.data.outbox.flatMap((entry) =>
+                entry.status === "sent" && entry.sentAt ? [entry.sentAt] : [],
+              )
+            : []
+        }
+      />
+      {roleCampaign.failed || roleCampaign.data?.status === "unavailable" ? (
+        <TabNotice alert>
+          <Trans>Could not read this campaign.</Trans>
+        </TabNotice>
+      ) : null}
       {campaigns.loading || people.loading ? <TabLoading /> : null}
       {campaigns.failed || people.failed ? (
         <TabNotice alert>
@@ -310,12 +328,22 @@ export function SequenceTab(props: RecruitingTabProps) {
                       <Badge variant={entry.status === "failed" ? "destructive" : "outline"}>
                         {outboxStatus[entry.status]}
                       </Badge>
-                      <time
-                        className="text-xs text-muted-foreground"
-                        dateTime={entry.sentAt ?? entry.createdAt}
-                      >
-                        {formatDate(entry.sentAt ?? entry.createdAt)}
-                      </time>
+                      {entry.status === "sent" ? (
+                        entry.sentAt ? (
+                          <time className="text-xs text-muted-foreground" dateTime={entry.sentAt}>
+                            {formatDate(entry.sentAt)}
+                          </time>
+                        ) : (
+                          <span className="text-xs text-muted-foreground">
+                            <Trans>Time not recorded</Trans>
+                          </span>
+                        )
+                      ) : (
+                        <span className="text-xs text-muted-foreground">
+                          <Trans>Queued</Trans> ·{" "}
+                          <time dateTime={entry.createdAt}>{formatDate(entry.createdAt)}</time>
+                        </span>
+                      )}
                     </div>
                     <p className="whitespace-pre-wrap break-words">
                       {entry.polishedBody ?? entry.body}
