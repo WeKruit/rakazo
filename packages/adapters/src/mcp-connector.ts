@@ -192,10 +192,18 @@ export async function requireMcpToolAssignment(
     },
     include: { server: true },
   });
+  // Local Instantly writes are not remote tools: they ride the same official-server assignment
+  // (get_email + list_emails) as the local reads.
+  const local = isNativeInstantlyWrite(toolName);
+  const required = local ? ["get_email", "list_emails"] : [toolName];
   if (
     !assignment ||
+    (local &&
+      (assignment.server.endpoint !== INSTANTLY_MCP ||
+        assignment.server.transport !== "streamable_http")) ||
     (!assignment.allowAllTools &&
-      (!Array.isArray(assignment.allowedTools) || !assignment.allowedTools.includes(toolName)))
+      (!Array.isArray(assignment.allowedTools) ||
+        !required.every((name) => (assignment.allowedTools as unknown[]).includes(name))))
   )
     throw new IsolationError("MCP tool is not assigned to this bot");
   if (route.resourceRevision !== assignment.server.revision)

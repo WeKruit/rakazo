@@ -68,6 +68,34 @@ describe("MCP assignment denial identity", () => {
       });
     },
   );
+  it("maps local Instantly tools to the assigned get_email + list_emails gate on the official server", async () => {
+    const check = (allowedTools: string[], endpoint = "https://mcp.instantly.ai/mcp") =>
+      requireMcpToolAssignment(
+        {
+          botMcpServer: {
+            findFirst: vi.fn(async () => ({
+              ...ASSIGNMENT,
+              allowAllTools: false,
+              allowedTools,
+              server: { ...SERVER, endpoint },
+            })),
+          },
+        } as never,
+        { spaceId: "w1", userId: "u1", botId: "bot-1" } as never,
+        { resourceId: SERVER.id, resourceRevision: 1 },
+        "native_instantly_ensure_role_campaign",
+      );
+    await expect(check(["get_email", "list_emails"])).resolves.toMatchObject({ botId: "bot-1" });
+    for (const denied of [
+      check([]),
+      check(["get_email"]),
+      check(["get_email", "list_emails"], SERVER.endpoint),
+    ])
+      await expect(denied).rejects.toMatchObject({
+        name: "IsolationError",
+        message: "MCP tool is not assigned to this bot",
+      });
+  });
   it("preserves an unexpected lookup failure by identity", async () => {
     const error = new Error("Database unavailable");
     const failure = requireMcpToolAssignment(
