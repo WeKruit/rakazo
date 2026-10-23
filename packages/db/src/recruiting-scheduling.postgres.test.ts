@@ -1102,4 +1102,28 @@ database("scheduling plan persistence (local PostgreSQL)", () => {
     );
     await expect(f.bind()).rejects.toThrow();
   });
+  it.each(
+    ["confirm_booking", "add_booking_attendee"].flatMap((tool) =>
+      ["completed", "uncertain"].map((status) => [tool, status]),
+    ),
+  )("invalidates stale read after supported %s is %s", async (tool, status) => {
+    const f = await staleBookingFixture();
+    const mutation = await effect(calendarId, tool!, { bookingUid: f.booked.uid });
+    await prisma.externalEffect.update({
+      where: { id: mutation.id },
+      data: {
+        status: status!,
+        result: { structuredContent: { status: "success", data: f.booked } },
+      },
+    });
+    await expect(f.bind()).rejects.toThrow();
+    await effect(
+      calendarId,
+      "get_booking",
+      { bookingUid: f.booked.uid },
+      { status: "success", data: f.booked },
+    );
+    if (status === "uncertain") await expect(f.bind()).rejects.toThrow();
+    else expect((await f.bind()).confirmationEffectId).toBe(f.reply.id);
+  });
 });
