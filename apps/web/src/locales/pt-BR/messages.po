@@ -472,6 +472,10 @@ msgstr ""
 msgid "Agent"
 msgstr ""
 
+#: src/pages/recruiting/DetailPanel.tsx
+msgid "Agent assessment"
+msgstr ""
+
 #: src/pages/Shell.tsx
 msgid "Agent computer"
 msgstr "Computador do agente"
@@ -737,6 +741,10 @@ msgstr ""
 
 #: src/components/LiveWork.tsx
 msgid "Asking a specialist"
+msgstr ""
+
+#: src/pages/recruiting/DetailPanel.tsx
+msgid "Assessment"
 msgstr ""
 
 #: src/pages/RecruitingPanel.tsx
@@ -2716,7 +2724,6 @@ msgid "Docker limits access to your computer for added security. Using {hostLabe
 msgstr "O Docker limita o acesso ao seu computador para maior segurança. Usar {hostLabel} permite que os bots trabalhem com seus arquivos e ferramentas locais."
 
 #: src/pages/recruiting/ContactsTab.tsx
-#: src/pages/recruiting/DetailPanel.tsx
 #: src/pages/RecruitingPanel.tsx
 msgid "Does not match"
 msgstr ""
@@ -3107,7 +3114,6 @@ msgid "Finishing MCP connection…"
 msgstr "Finalizando conexão MCP…"
 
 #: src/pages/recruiting/ContactsTab.tsx
-#: src/pages/recruiting/DetailPanel.tsx
 msgid "Fit"
 msgstr ""
 
@@ -3147,6 +3153,10 @@ msgstr ""
 #: src/pages/WindowChrome.tsx
 msgid "Fullscreen"
 msgstr "Tela Cheia"
+
+#: src/pages/recruiting/AssessmentCard.tsx
+msgid "Gap"
+msgstr ""
 
 #: src/pages/ModelSettingsOverlay.tsx
 #: src/pages/Onboarding.tsx
@@ -3827,8 +3837,8 @@ msgstr "Marcar como Não Lida"
 msgid "Marked as sent"
 msgstr ""
 
+#: src/pages/recruiting/AssessmentCard.tsx
 #: src/pages/recruiting/ContactsTab.tsx
-#: src/pages/recruiting/DetailPanel.tsx
 #: src/pages/RecruitingPanel.tsx
 msgid "Match"
 msgstr ""
@@ -4838,6 +4848,10 @@ msgstr ""
 #: src/pages/ScratchpadSection.tsx
 msgid "Park"
 msgstr "Suspender"
+
+#: src/pages/recruiting/AssessmentCard.tsx
+msgid "Partial match"
+msgstr ""
 
 #: src/components/AskCard.tsx
 #: src/pages/AccountSettingsOverlay.tsx
@@ -6429,6 +6443,7 @@ msgstr ""
 msgid "Source unavailable"
 msgstr ""
 
+#: src/pages/recruiting/AssessmentCard.tsx
 #: src/pages/RecruitingPanel.tsx
 msgid "Sources"
 msgstr ""
@@ -6983,7 +6998,6 @@ msgid "Unavailable"
 msgstr ""
 
 #: src/pages/recruiting/ContactsTab.tsx
-#: src/pages/recruiting/DetailPanel.tsx
 #: src/pages/RecruitingPanel.tsx
 msgid "Unclear"
 msgstr ""
