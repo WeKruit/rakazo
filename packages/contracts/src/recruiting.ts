@@ -1359,6 +1359,7 @@ export const RecruitingCandidatesToolInputSchema = z.discriminatedUnion("operati
   ListRecruitingCandidateSourcesInput.omit({ roleId: true }).extend({
     operation: z.literal("sources"),
   }),
+  z.strictObject({ operation: z.literal("resolve"), nameOrEmail: Text.max(240) }),
 ]);
 export type RecruitingCandidatesToolInput = z.infer<typeof RecruitingCandidatesToolInputSchema>;
 
