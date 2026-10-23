@@ -226,7 +226,7 @@ import {
 import { markAfterPaint, markOnce } from "../lib/performance";
 import { quoteDraftForSelection } from "../lib/quote-selection";
 import type { RecruitingReadCache } from "../lib/recruiting-read-cache";
-import { clearRecruitingReads } from "../lib/recruiting-read-cache";
+import { clearRecruitingReads, rememberRecruitingRead } from "../lib/recruiting-read-cache";
 import { getResponseStreamingEnabled, subscribeResponseStreaming } from "../lib/response-streaming";
 import type { Panel, RecruitingPanelState, RightPanelState } from "../lib/right-panel-state";
 import {
@@ -2219,18 +2219,99 @@ export function ShellPage() {
           ...(searchParams.get("crmRole") ? { crmRoleId: searchParams.get("crmRole")! } : {}),
         }
       : undefined;
+  const recruitingCacheScope =
+    userId && bootstrapMe?.spaceId && activeSnapshot?.threadId
+      ? JSON.stringify([userId, bootstrapMe.spaceId, activeSnapshot.threadId])
+      : undefined;
+  const boundRoleView =
+    !showToolActivity &&
+    !crmMode &&
+    !workspaceNewRole &&
+    inGroup &&
+    ["contacts", "inbox", "feedback", "sequence"].includes(recruitingWorkspaceView);
+  const bindingReadKey = JSON.stringify([recruitingCacheScope, recruitingRefresh]);
+  const [bindingRead, setBindingRead] = useState<{
+    key: string;
+    workspace?: Awaited<ReturnType<typeof rpc.recruiting.getWorkspace>>;
+    failed?: boolean;
+  }>();
+  useEffect(() => {
+    if (!boundRoleView || !recruitingCacheScope || !activeSnapshot?.threadId) {
+      setBindingRead(undefined);
+      return;
+    }
+    let cancelled = false;
+    const cache = recruitingReadCache.current;
+    const epoch = cache.epoch;
+    const threadId = activeSnapshot.threadId;
+    const isCurrent = () =>
+      !cancelled &&
+      epoch === cache.epoch &&
+      botsRefreshUser.current.id === userId &&
+      (selectedSpaceId() ?? bootstrapMe?.spaceId) === bootstrapMe?.spaceId &&
+      snapshotRef.current?.threadId === threadId &&
+      activeGroupId.current === groupId;
+    setBindingRead({ key: bindingReadKey });
+    void rpc.recruiting
+      .getWorkspace({ threadId })
+      .then((workspace) => {
+        if (!isCurrent()) return;
+        rememberRecruitingRead(cache, `${recruitingCacheScope}:workspace`, { workspace }, epoch);
+        setBindingRead({ key: bindingReadKey, workspace });
+      })
+      .catch(() => {
+        if (!isCurrent()) return;
+        clearRecruitingReads(cache, recruitingCacheScope);
+        setBindingRead({ key: bindingReadKey, failed: true });
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [
+    boundRoleView,
+    recruitingCacheScope,
+    bindingReadKey,
+    activeSnapshot?.threadId,
+    userId,
+    bootstrapMe?.spaceId,
+    groupId,
+  ]);
+  const currentBindingRead = bindingRead?.key === bindingReadKey ? bindingRead : undefined;
+  const boundCrmTarget = currentBindingRead?.workspace?.crmTarget;
+  const boundCrmSelection: CrmBrowseSelection | undefined = boundCrmTarget
+    ? {
+        serverId: boundCrmTarget.target.mcpServerId,
+        serverRevision: boundCrmTarget.target.serverRevision,
+        organizationId: boundCrmTarget.target.organizationId,
+        crmRoleId: boundCrmTarget.target.crmRoleId,
+      }
+    : undefined;
+  const boundRoleCrmMode =
+    boundRoleView &&
+    searchParams.get("roleSource") !== "search" &&
+    (!currentBindingRead ||
+      currentBindingRead.failed ||
+      currentBindingRead.workspace === undefined ||
+      Boolean(boundCrmSelection));
+  const effectiveCrmSelection = crmMode ? crmSelection : boundCrmSelection;
   const workspaceCandidates =
     !showToolActivity &&
     !crmMode &&
+    !boundRoleCrmMode &&
     !workspaceNewRole &&
     ["results", "shortlist", "contacts", "workflow"].includes(recruitingWorkspaceView);
   const workspaceCorrespondence =
     !showToolActivity &&
     !crmMode &&
+    !boundRoleCrmMode &&
     !workspaceNewRole &&
     ["sequence", "inbox", "interview"].includes(recruitingWorkspaceView);
   const workspaceFull =
-    crmMode || workspaceNewRole || workspaceCandidates || workspaceCorrespondence;
+    crmMode ||
+    boundRoleCrmMode ||
+    workspaceNewRole ||
+    workspaceCandidates ||
+    workspaceCorrespondence;
   const roleChatWorkspace =
     workspaceFull && !crmMode && !workspaceNewRole && Boolean(activeSnapshot?.threadId);
   useEffect(() => {
@@ -2239,13 +2320,10 @@ export function ShellPage() {
         ?.querySelector<HTMLTextAreaElement>('textarea[name="chat-message"]')
         ?.focus();
   }, [roleChatWorkspace, roleChatOpen, activeSnapshot?.threadId]);
-  const recruitingCacheScope =
-    userId && bootstrapMe?.spaceId && activeSnapshot?.threadId
-      ? JSON.stringify([userId, bootstrapMe.spaceId, activeSnapshot.threadId])
-      : undefined;
   const workspaceBrief =
     !showToolActivity &&
     !crmMode &&
+    !boundRoleCrmMode &&
     !workspaceNewRole &&
     ["brief", "feedback"].includes(recruitingWorkspaceView);
   function openRecruitingView(view: RecruitingWorkspaceView) {
@@ -2278,7 +2356,14 @@ export function ShellPage() {
   );
   const correspondenceScope = useMemo(
     () => ({}),
-    [composerRef, recruitingWorkspaceView, recruitingRefresh, workspaceNewRole],
+    [
+      composerRef,
+      recruitingWorkspaceView,
+      recruitingRefresh,
+      workspaceNewRole,
+      boundRoleCrmMode,
+      boundCrmTarget?.bindingEffectId,
+    ],
   );
   const currentCorrespondenceScope = useRef(correspondenceScope);
   currentCorrespondenceScope.current = correspondenceScope;
@@ -4574,12 +4659,28 @@ export function ShellPage() {
             {roleCreationForm}
           </div>
         ) : null}
-        {crmMode && activeSnapshot?.threadId ? <div className="rk-scroll recruiting-workspace-main min-h-0 flex-1 overflow-y-auto">{crmSelection ? <RecruitingPanel
+        {boundRoleView && (boundCrmSelection || currentBindingRead?.failed) ? (
+          <fieldset className="flex flex-wrap gap-2 px-6 py-3" aria-label={t`Contact source`}>
+            <Button aria-pressed={searchParams.get("roleSource") !== "search"} variant={searchParams.get("roleSource") === "search" ? "outline" : "secondary"} onClick={() => setSearchParams(current => { const next = new URLSearchParams(current); next.delete("roleSource"); next.delete("crmCandidate"); return next; })}>
+              {recruitingWorkspaceView === "contacts" ? <Trans>CRM contacts</Trans> : <Trans>CRM history</Trans>}
+            </Button>
+            <Button aria-pressed={searchParams.get("roleSource") === "search"} variant={searchParams.get("roleSource") === "search" ? "secondary" : "outline"} onClick={() => setSearchParams(current => { const next = new URLSearchParams(current); next.set("roleSource", "search"); next.delete("crmCandidate"); return next; })}>
+              {recruitingWorkspaceView === "contacts" ? <Trans>Search results</Trans> : <Trans>Current search</Trans>}
+            </Button>
+          </fieldset>
+        ) : null}
+        {boundRoleCrmMode && !effectiveCrmSelection ? <div role={currentBindingRead?.failed ? "alert" : "status"} className="p-6">
+          {currentBindingRead?.failed ? <>
+            <p><Trans>Could not load this role’s CRM connection.</Trans></p>
+            <Button variant="outline" onClick={() => setRecruitingRefresh(value => value + 1)}><Trans>Refresh</Trans></Button>
+          </> : <Trans>Loading…</Trans>}
+        </div> : null}
+        {(crmMode || (boundRoleCrmMode && effectiveCrmSelection)) && activeSnapshot?.threadId ? <div className="rk-scroll recruiting-workspace-main min-h-0 flex-1 overflow-y-auto">{effectiveCrmSelection ? <RecruitingPanel
           threadId={activeSnapshot.threadId} botId={inGroup ? undefined : active?.id} groupId={inGroup ? groupId : undefined}
           readCache={recruitingReadCache.current} readCacheScope={recruitingCacheScope} refreshSignal={recruitingRefresh} onClose={() => {}}
-          crmBrowse={{ selection: crmSelection, view: recruitingWorkspaceView, candidateId: searchParams.get("crmCandidate") ?? undefined,
+          crmBrowse={{ selection: effectiveCrmSelection, view: recruitingWorkspaceView, candidateId: searchParams.get("crmCandidate") ?? undefined,
             onSelectCandidate: (id, view = "inbox") => setSearchParams(current => { const next = new URLSearchParams(current); next.set("crmCandidate", id); next.set("view", view); return next; }),
-            onStartRecruiting: activeGroup && canCreateRoleFrom(activeGroup.id) ? (description) => startNewRole(activeGroup.id, description) : undefined,
+            onStartRecruiting: crmMode && activeGroup && canCreateRoleFrom(activeGroup.id) ? (description) => startNewRole(activeGroup.id, description) : undefined,
           }}
         /> : <p role="alert"><Trans>Choose a CRM role again.</Trans></p>}</div> : null}
         {workspaceCorrespondence && activeSnapshot?.threadId ? (

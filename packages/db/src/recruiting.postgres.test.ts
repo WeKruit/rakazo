@@ -825,10 +825,16 @@ describePostgres("recruiting domain (PostgreSQL)", () => {
     firstRevisionId = first.revision.id;
     expect(first.role).toMatchObject({ revision: 1, currentRevisionId: first.revision.id });
     expect(first.revision.sourceRefs).toEqual([source()]);
-    expect(await recruiting.getRecruitingWorkspace(prisma, actor, { threadId })).toEqual(first);
+    expect(await recruiting.getRecruitingWorkspace(prisma, actor, { threadId })).toEqual({
+      ...first,
+      crmTarget: null,
+    });
     const second = await recruiting.createRecruitingRole(prisma, actor, roleInput());
     expect(second.role.id).not.toBe(firstRoleId);
-    expect(await recruiting.getRecruitingWorkspace(prisma, actor, { threadId })).toEqual(second);
+    expect(await recruiting.getRecruitingWorkspace(prisma, actor, { threadId })).toEqual({
+      ...second,
+      crmTarget: null,
+    });
     expect(
       await recruiting.bindRecruitingRole(prisma, actor, { threadId, roleId: firstRoleId }),
     ).toEqual(first);
@@ -3175,7 +3181,7 @@ describePostgres("recruiting domain (PostgreSQL)", () => {
     });
     expect(
       await recruiting.getRecruitingWorkspace(prisma, actor, { threadId: externalThread.id }),
-    ).toEqual(created);
+    ).toEqual({ ...created, crmTarget: null });
     const reused = await recruiting.createRecruitingRole(prisma, actor, roleInput(artifactSource));
     expect(reused.revision.sourceRefs).toEqual([artifactSource]);
     const mismatchedBucket = await prisma.artifact.create({
@@ -4397,7 +4403,7 @@ describePostgres("recruiting domain (PostgreSQL)", () => {
       ]);
       expect(
         await recruiting.getRecruitingWorkspace(second.prisma, actor, { threadId: f.thread.id }),
-      ).toEqual(saved);
+      ).toEqual({ ...saved, crmTarget: null });
     } finally {
       await second.prisma.$disconnect();
       await second.pool.end();
@@ -4709,7 +4715,7 @@ describePostgres("recruiting domain (PostgreSQL)", () => {
       const current = await recruiting.getRecruitingWorkspace(second.prisma, actor, {
         threadId: f.thread.id,
       });
-      expect(current).toEqual(revised);
+      expect(current).toEqual({ ...revised, crmTarget: null });
       expect(current?.revision.brief?.confirmation).toBeNull();
       expect(await prisma.message.count({ where: { threadId: f.thread.id } })).toBe(before);
       expect(await prisma.recruitingRoleRevision.count({ where: { roleId: f.role.role.id } })).toBe(

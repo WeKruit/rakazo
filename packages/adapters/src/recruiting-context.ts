@@ -41,7 +41,10 @@ export type RecruitingContextManifest = {
 };
 
 export type LoadedRecruitingRunContext = {
-  workspace: NonNullable<Awaited<ReturnType<typeof getRecruitingWorkspace>>>;
+  workspace: Pick<
+    NonNullable<Awaited<ReturnType<typeof getRecruitingWorkspace>>>,
+    "role" | "revision"
+  >;
   text: string;
   contextArtifact: RecruitingArtifactRef;
   manifest: RecruitingContextManifest;
@@ -89,7 +92,8 @@ export async function loadRecruitingRunContext(
     "<recruiting_role>",
     JSON.stringify(
       {
-        ...workspace,
+        role: workspace.role,
+        revision: workspace.revision,
         derivedClarifications: workspace.revision.brief
           ? recruitingBriefClarifications(workspace.revision.brief)
           : null,

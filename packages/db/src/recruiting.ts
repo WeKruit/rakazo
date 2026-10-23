@@ -565,18 +565,20 @@ export async function getRecruitingWorkspace(
   prisma: PrismaClient,
   actor: Actor,
   input: { threadId: string },
-): Promise<RoleSnapshot | null> {
+): Promise<(RoleSnapshot & Pick<CandidatesOutput, "crmTarget">) | null> {
   return prisma.$transaction(
     async (tx) => {
       const thread = await requireThread(tx, actor, input.threadId);
-      return thread.activeRecruitingRoleId
-        ? roleSnapshot(
-            tx,
-            actor,
-            await requireRole(tx, actor, thread.activeRecruitingRoleId, false, thread),
-            thread,
-          )
+      if (!thread.activeRecruitingRoleId) return null;
+      const role = await requireRole(tx, actor, thread.activeRecruitingRoleId, false, thread);
+      const snapshot = await roleSnapshot(tx, actor, role, thread);
+      const bound = role.crmBindingEffectId
+        ? await crmBindingReceipt(tx, actor, role.id, role.crmBindingEffectId)
         : null;
+      return {
+        ...snapshot,
+        crmTarget: bound ? { bindingEffectId: bound.bindingEffectId, target: bound.target } : null,
+      };
     },
     { isolationLevel: Prisma.TransactionIsolationLevel.RepeatableRead },
   );
