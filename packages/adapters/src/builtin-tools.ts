@@ -380,14 +380,19 @@ export const builtinAgentTools: ConnectorTool[] = [
   {
     name: "request_connection",
     description:
-      "When a task needs one of the user's MCP integrations that is not connected to you, show a Connect card and wait; the task resumes after the user connects. Use instead of asking the user to open settings.",
+      "When a task needs a service (e.g. HubSpot, Gmail, Instantly, Cal.com) or MCP integration that is not connected to you, show a Connect card and wait; the task resumes after the user connects. Pass serverId for a known server, or provider with the service name when there is none. Use instead of asking the user to open settings.",
     inputSchema: {
       type: "object",
       properties: {
         serverId: { type: "string", minLength: 1 },
+        provider: {
+          type: "string",
+          minLength: 1,
+          description: "Service name or slug, e.g. hubspot, gmail, instantly, cal.com.",
+        },
         reason: { type: "string", minLength: 1, maxLength: 240 },
       },
-      required: ["serverId", "reason"],
+      required: ["reason"],
       additionalProperties: false,
     },
   },

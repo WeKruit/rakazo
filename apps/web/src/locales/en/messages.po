@@ -726,6 +726,10 @@ msgstr "Ask first"
 msgid "Ask the server owner to configure this provider."
 msgstr "Ask the server owner to configure this provider."
 
+#: src/components/LiveWork.tsx
+msgid "Asking a specialist"
+msgstr "Asking a specialist"
+
 #: src/pages/RecruitingPanel.tsx
 msgid "Assessment date"
 msgstr "Assessment date"
@@ -1198,13 +1202,29 @@ msgstr "Check the server URL and network, then test again."
 msgid "Check your email"
 msgstr "Check your email"
 
-#: src/pages/Shell.tsx
-msgid "Checking available connections…"
-msgstr "Checking available connections…"
+#: src/components/LiveWork.tsx
+msgid "Checking availability"
+msgstr "Checking availability"
 
 #: src/components/ComputersUnavailableHint.tsx
 msgid "Checking computer setup…"
 msgstr "Checking computer setup…"
+
+#: src/components/LiveWork.tsx
+msgid "Checking connections"
+msgstr "Checking connections"
+
+#: src/components/LiveWork.tsx
+msgid "Checking email"
+msgstr "Checking email"
+
+#: src/components/LiveWork.tsx
+msgid "Checking saved context"
+msgstr "Checking saved context"
+
+#: src/components/LiveWork.tsx
+msgid "Checking the CRM"
+msgstr "Checking the CRM"
 
 #: src/components/ComputersUnavailableHint.tsx
 #: src/components/DesktopUpdates.tsx
@@ -2714,6 +2734,10 @@ msgstr "Draft saved"
 #: src/components/teach/SkillDraftCard.tsx
 msgid "Draft skill"
 msgstr "Draft skill"
+
+#: src/components/LiveWork.tsx
+msgid "Drafting email"
+msgstr "Drafting email"
 
 #: src/pages/shell/avatar-studio-popover.tsx
 msgid "Drag, drop, or paste an image"
@@ -4866,33 +4890,9 @@ msgstr "Prepare personalized first email drafts and follow-up sequences for the 
 msgid "Prepared"
 msgstr "Prepared"
 
-#: src/pages/Shell.tsx
-msgid "Preparing a search…"
-msgstr "Preparing a search…"
-
-#: src/pages/Shell.tsx
-msgid "Preparing connected work…"
-msgstr "Preparing connected work…"
-
-#: src/pages/Shell.tsx
-msgid "Preparing to check availability…"
-msgstr "Preparing to check availability…"
-
-#: src/pages/Shell.tsx
-msgid "Preparing to read a page…"
-msgstr "Preparing to read a page…"
-
-#: src/pages/Shell.tsx
-msgid "Preparing to read emails…"
-msgstr "Preparing to read emails…"
-
-#: src/pages/Shell.tsx
-msgid "Preparing to read files…"
-msgstr "Preparing to read files…"
-
-#: src/pages/Shell.tsx
-msgid "Preparing to read saved context…"
-msgstr "Preparing to read saved context…"
+#: src/components/LiveWork.tsx
+msgid "Preparing a question"
+msgstr "Preparing a question"
 
 #. placeholder {0}: preview?.label ?? props.name
 #: src/components/ArtifactFileCard.tsx
@@ -5038,6 +5038,14 @@ msgstr "Read the latest candidate email replies for this role using the connecte
 msgid "Read this person's original email and complete conversation using the connected CRM and mailbox. Verify the person and current role, then prepare a reply here for me to edit. Only draft it; do not send."
 msgstr "Read this person's original email and complete conversation using the connected CRM and mailbox. Verify the person and current role, then prepare a reply here for me to edit. Only draft it; do not send."
 
+#: src/components/LiveWork.tsx
+msgid "Reading a page"
+msgstr "Reading a page"
+
+#: src/components/LiveWork.tsx
+msgid "Reading files"
+msgstr "Reading files"
+
 #: src/pages/RecruitingPanel.tsx
 msgid "Reason"
 msgstr "Reason"
@@ -5087,6 +5095,10 @@ msgstr "Reconnect OAuth"
 #: src/components/ComputerUpdateProgress.tsx
 msgid "Reconnecting"
 msgstr "Reconnecting"
+
+#: src/components/LiveWork.tsx
+msgid "Recording feedback"
+msgstr "Recording feedback"
 
 #: src/components/teach/TeachComputerOverlay.tsx
 msgid "Recording may have started, but the view could not refresh"
@@ -5508,6 +5520,14 @@ msgstr "Review the outreach files saved in this conversation."
 msgid "Reviewed"
 msgstr "Reviewed"
 
+#: src/components/LiveWork.tsx
+msgid "Reviewing candidates"
+msgstr "Reviewing candidates"
+
+#: src/components/LiveWork.tsx
+msgid "Reviewing the role"
+msgstr "Reviewing the role"
+
 #: src/pages/RecruitingCorrespondence.tsx
 msgid "Revise in chat"
 msgstr "Revise in chat"
@@ -5770,6 +5790,10 @@ msgstr "Saved."
 msgid "Saved. Rotate to reveal."
 msgstr "Saved. Rotate to reveal."
 
+#: src/components/LiveWork.tsx
+msgid "Saving notes"
+msgstr "Saving notes"
+
 #: src/components/ComputerUpdateProgress.tsx
 msgid "Saving your workspace"
 msgstr "Saving your workspace"
@@ -5926,6 +5950,14 @@ msgstr "Search update {0}"
 #: src/pages/ActivityList.tsx
 msgid "Search: {0}"
 msgstr "Search: {0}"
+
+#: src/components/LiveWork.tsx
+msgid "Searching candidates"
+msgstr "Searching candidates"
+
+#: src/components/LiveWork.tsx
+msgid "Searching the web"
+msgstr "Searching the web"
 
 #: src/pages/PluginsOverlay.tsx
 #: src/pages/SpaceSearch.tsx
@@ -7022,6 +7054,10 @@ msgstr "Username"
 msgid "Uses this server's own {hostCredentialSource} credentials to access {selectedProviderName}."
 msgstr "Uses this server's own {hostCredentialSource} credentials to access {selectedProviderName}."
 
+#: src/components/LiveWork.tsx
+msgid "Using a connected app"
+msgstr "Using a connected app"
+
 #: src/pages/shell/bot-credentials.tsx
 msgid "Value"
 msgstr "Value"
@@ -7181,6 +7217,10 @@ msgstr "Who are you looking for?"
 msgid "Won't do"
 msgstr "Won't do"
 
+#: src/components/LiveWork.tsx
+msgid "Worked for {duration}"
+msgstr "Worked for {duration}"
+
 #: src/pages/RecruitingPanel.tsx
 msgid "Workflow filter"
 msgstr "Workflow filter"
@@ -7192,6 +7232,10 @@ msgstr "Workflow status"
 #: src/lib/roster-status.ts
 msgid "Working in background…"
 msgstr "Working in background…"
+
+#: src/components/LiveWork.tsx
+msgid "Working on it"
+msgstr "Working on it"
 
 #: src/lib/roster-status.ts
 #: src/pages/Auth.tsx
