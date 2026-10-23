@@ -339,18 +339,30 @@ database("scheduling plan persistence (local PostgreSQL)", () => {
     }
   });
   it("binds one exact-thread confirmation after verified booking readback and never substitutes another mailbox", async () => {
-    const plan = await createRecruitingSchedulingPlan(prisma, actor, {
+    const start = "2026-11-02T06:30:00Z",
+      end = "2026-11-02T07:00:00Z";
+    const available = await effect(
+      calendarId,
+      "get_availability",
+      { eventTypeId: 42, start, end, duration: 30, format: "range" },
+      { status: "success", data: { day: [{ start, end }] } },
+    );
+    const confirmationInput = {
       ...input,
-      interviewer: { ...input.interviewer, name: "Confirmation test" },
+      calendar: { ...input.calendar, start, end, availabilityEffectId: available.id },
+    };
+    const plan = await createRecruitingSchedulingPlan(prisma, actor, {
+      ...confirmationInput,
+      interviewer: { ...confirmationInput.interviewer, name: "Confirmation test" },
     });
     const booking = await effect(calendarId, "create_booking", {
       eventTypeId: 42,
-      start: input.calendar.start,
+      start: confirmationInput.calendar.start,
       lengthInMinutes: 30,
-      attendee: input.candidate,
+      attendee: confirmationInput.candidate,
     });
     await bindRecruitingSchedulingOperation(prisma, actor, {
-      threadId: input.threadId,
+      threadId: confirmationInput.threadId,
       planId: plan.id,
       operation: "book",
       effectId: booking.id,
@@ -358,10 +370,10 @@ database("scheduling plan persistence (local PostgreSQL)", () => {
     const booked = {
       uid: "synthetic-booking",
       status: "accepted",
-      start: input.calendar.start,
-      end: input.calendar.end,
-      attendees: [input.candidate],
-      hosts: [input.interviewer],
+      start: confirmationInput.calendar.start,
+      end: confirmationInput.calendar.end,
+      attendees: [confirmationInput.candidate],
+      hosts: [confirmationInput.interviewer],
     };
     await prisma.externalEffect.update({
       where: { id: booking.id },
@@ -385,7 +397,7 @@ database("scheduling plan persistence (local PostgreSQL)", () => {
     );
     const bind = (effectId: string) =>
       bindRecruitingSchedulingOperation(prisma, actor, {
-        threadId: input.threadId,
+        threadId: confirmationInput.threadId,
         planId: plan.id,
         operation: "confirm",
         effectId,
@@ -405,7 +417,7 @@ database("scheduling plan persistence (local PostgreSQL)", () => {
     const outcomes = await Promise.allSettled([bind(first.id), bind(second.id)]);
     expect(outcomes.filter((value) => value.status === "fulfilled")).toHaveLength(1);
     const saved = await loadVerifiedRecruitingSchedulingPlan(prisma, actor, {
-      threadId: input.threadId,
+      threadId: confirmationInput.threadId,
       planId: plan.id,
     });
     expect(saved.bookingEffectId).toBe(booking.id);
@@ -686,5 +698,64 @@ database("scheduling plan persistence (local PostgreSQL)", () => {
     });
     await effect(second.id, "get_email", { id: f.email.id }, f.email, f.execution.id);
     await expect(createRecruitingSchedulingPlan(prisma, actor, f.legacy)).rejects.toThrow();
+  });
+  it("does not bypass an uncertain booking by creating a cosmetically changed plan", async () => {
+    const plan = await createRecruitingSchedulingPlan(prisma, actor, {
+      ...input,
+      interviewer: { ...input.interviewer, name: "Renamed interviewer", timeZone: "UTC" },
+    });
+    const alternate = await effect(
+      calendarId,
+      "create_booking",
+      {
+        eventTypeId: 42,
+        start: input.calendar.start,
+        lengthInMinutes: 30,
+        attendee: input.candidate,
+      },
+      undefined,
+      (await run()).id,
+    );
+    await expect(
+      bindRecruitingSchedulingOperation(prisma, actor, {
+        threadId: input.threadId,
+        planId: plan.id,
+        operation: "book",
+        effectId: alternate.id,
+      }),
+    ).rejects.toThrow();
+    expect(
+      (await prisma.externalEffect.findUniqueOrThrow({ where: { id: alternate.id } })).status,
+    ).toBe("intended");
+  });
+  it("rejects changed request bytes on a previously bound execution", async () => {
+    const plan = await createRecruitingSchedulingPlan(prisma, actor, input);
+    const id = plan.bookingEffectId!;
+    const original = await prisma.externalEffect.findUniqueOrThrow({ where: { id } });
+    const changed = structuredClone(original.request) as unknown as [
+      string,
+      string,
+      { args: Record<string, unknown> },
+    ];
+    changed[2].args.metadata = { changedAfterBinding: true };
+    await prisma.externalEffect.update({
+      where: { id },
+      data: { request: changed as Prisma.InputJsonValue },
+    });
+    try {
+      await expect(
+        bindRecruitingSchedulingOperation(prisma, actor, {
+          threadId: input.threadId,
+          planId: plan.id,
+          operation: "book",
+          effectId: id,
+        }),
+      ).rejects.toThrow();
+    } finally {
+      await prisma.externalEffect.update({
+        where: { id },
+        data: { request: original.request as Prisma.InputJsonValue },
+      });
+    }
   });
 });
