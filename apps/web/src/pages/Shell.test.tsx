@@ -2632,7 +2632,7 @@ it("opens a normal recruiting role on native candidate results and restores coll
   expect(view.getProps().presentation).toBe("workspace");
   expect(view.getProps().threadId).toBe(view.thread.threadId);
   expect(view.getProps().showDiagnostics).toBe(false);
-  expect(container?.querySelector(".hire-card-grid")?.textContent).toContain(view.candidate.name);
+  expect(container?.querySelector(".hire-table")?.textContent).toContain(view.candidate.name);
   expect(shellApi.recruiting.getWorkspace).toHaveBeenCalledWith({ threadId: view.thread.threadId });
   expect(shellApi.recruiting.listCandidates).toHaveBeenCalledWith(
     expect.objectContaining({ roleId: "internal-role" }),
@@ -2697,7 +2697,7 @@ it("opens a normal recruiting role on native candidate results and restores coll
   expect(container?.textContent).not.toContain("No saved candidates");
   await view.click("Browse all candidates");
   expect(view.getProps().view).toBe("results");
-  expect(container?.querySelector(".hire-card-grid")?.textContent).toContain(view.candidate.name);
+  expect(container?.querySelector(".hire-table")?.textContent).toContain(view.candidate.name);
   expect(shellApi.recruiting.correspondence).not.toHaveBeenCalled();
   await view.click("Contacts");
   expect(container?.querySelector("h1")?.textContent).toBe("Contacts");
@@ -2851,9 +2851,7 @@ it("sends candidate feedback from the default results workspace to Main without 
     initialPath: "/app/g/group-1",
   });
   const card = document.body.querySelector('[data-message-id="pending-main"]');
-  await act(async () =>
-    container!.querySelector<HTMLButtonElement>(".hire-candidate-identity")!.click(),
-  );
+  await view.click(view.candidate.name);
   await view.click("Give feedback");
   await view.choose("good_example");
   const reason = "This is closer. Prefer candidates from robotics companies for the next search.";
@@ -2923,6 +2921,36 @@ it.each(["user", "thread", "view"] as const)(
   },
 );
 
+it("keeps the original chat attachment when the same file is removed with a cancelled new role", async () => {
+  setToolActivityPreference("off");
+  const view = await renderFeedbackShell("group", undefined, {
+    isDeploymentOwner: false,
+    openFeedback: false,
+  });
+  const file = new File(["same content"], "same-role.txt", {
+    type: "text/plain",
+    lastModified: 123,
+  });
+  const original = container!.querySelector<HTMLInputElement>('input[type="file"]')!;
+  Object.defineProperty(original, "files", { configurable: true, value: [file] });
+  await act(async () => original.dispatchEvent(new Event("change", { bubbles: true })));
+  expect(container?.textContent).toContain("same-role.txt");
+  await view.click("New Role");
+  const roleInput = container!.querySelector<HTMLInputElement>(
+    'input[aria-label="Attach role files"]',
+  )!;
+  Object.defineProperty(roleInput, "files", { configurable: true, value: [file] });
+  await act(async () => roleInput.dispatchEvent(new Event("change", { bubbles: true })));
+  expect(container!.querySelector(".hire-composer")?.textContent).toContain("same-role.txt");
+  await view.click("Cancel new role");
+  expect(container?.querySelector(".hire-new")).toBeNull();
+  expect(container?.textContent).toContain("same-role.txt");
+  expect(container?.querySelector('button[aria-label="Remove same-role.txt"]')).not.toBeNull();
+  expect(shellApi.createGroup).not.toHaveBeenCalled();
+  expect(shellApi.createArtifact).not.toHaveBeenCalled();
+  expect(shellApi.followUp).not.toHaveBeenCalled();
+});
+
 it("retries an exact natural role request in its confirmed native group with the same follow-up nonce", async () => {
   setToolActivityPreference("off");
   const view = await renderFeedbackShell("group", undefined, {
@@ -2959,9 +2987,23 @@ it("retries an exact natural role request in its confirmed native group with the
     'textarea[aria-label="Job description"]',
   )!;
   type(input, description);
-  await view.click("Continue");
-  expect(container?.querySelector('[role="alert"]')?.textContent).toBe(
-    "Connection lost after dispatch",
+  const file = new File(["actual JD"], "role.pdf", { type: "application/pdf" });
+  const upload = container!.querySelector<HTMLInputElement>(
+    'input[aria-label="Attach role files"]',
+  )!;
+  expect(upload).not.toBeNull();
+  Object.defineProperty(upload, "files", { configurable: true, value: [file] });
+  shellApi.createArtifact.mockResolvedValue({ id: "jd-artifact" });
+  await act(async () => upload.dispatchEvent(new Event("change", { bubbles: true })));
+  expect(container?.textContent).toContain("role.pdf");
+  await act(async () => {
+    await view.click("Continue");
+    await vi.waitFor(() => expect(shellApi.followUp).toHaveBeenCalledOnce());
+  });
+  await vi.waitFor(() =>
+    expect(container?.querySelector('[role="alert"]')?.textContent).toBe(
+      "Connection lost after dispatch",
+    ),
   );
   expect(input.value).toBe(description);
   expect(shellApi.createGroup).toHaveBeenCalledExactlyOnceWith({
@@ -2971,11 +3013,18 @@ it("retries an exact natural role request in its confirmed native group with the
   expect(shellApi.followUp).toHaveBeenCalledExactlyOnceWith({
     groupId: fresh.id,
     text: description,
+    artifactIds: ["jd-artifact"],
     mentions: ["bot-1"],
     clientNonce: expect.any(String),
   });
   await view.click("Continue");
   expect(shellApi.createGroup).toHaveBeenCalledOnce();
+  expect(shellApi.createArtifact).toHaveBeenCalledExactlyOnceWith({
+    groupId: fresh.id,
+    name: "role.pdf",
+    mimeType: "application/pdf",
+    contentBase64: expect.any(String),
+  });
   expect(shellApi.followUp).toHaveBeenCalledTimes(2);
   expect(shellApi.followUp.mock.calls[1]).toEqual(shellApi.followUp.mock.calls[0]);
   expect(shellApi.answer).not.toHaveBeenCalled();

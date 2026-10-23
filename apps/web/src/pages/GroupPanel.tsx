@@ -1,8 +1,10 @@
 import { Trans, useLingui } from "@lingui/react/macro";
 import { type Bot, GROUP_MEMBER_MAX, GROUP_MEMBER_MIN, type Group } from "@rakazo/contracts";
+import { resolveMentionPickerKey } from "@rakazo/core";
 import { BotAvatar, Button, Input, Textarea } from "@rakazo/ui-web";
-import { ArrowRight, Check, X } from "lucide-react";
+import { ArrowRight, Check, Paperclip, X } from "lucide-react";
 import { useEffect, useId, useMemo, useRef, useState } from "react";
+import { isFileDrag, isFilePaste } from "../lib/pending-attachments";
 import { errorText } from "../lib/user-error";
 import { DeleteItemDialog } from "./shell/dialogs";
 
@@ -71,17 +73,28 @@ export function CreateGroupForm({
   bots,
   recruiting = false,
   initialDescription = "",
+  attachments = [],
+  attachmentNotice,
+  attachmentAccept,
+  onAttachmentPick,
+  onRemoveAttachment,
   onCancel,
   onCreate,
 }: {
   bots: Bot[];
   recruiting?: boolean;
   initialDescription?: string;
+  attachments?: readonly { id: string; file: File; previewUrl?: string }[];
+  attachmentNotice?: string | null;
+  attachmentAccept?: string;
+  onAttachmentPick?: (files: FileList | null) => boolean;
+  onRemoveAttachment?: (id: string) => void;
   onCancel: () => void;
   onCreate: (input: { name: string; botIds: string[]; description?: string }) => Promise<void>;
 }) {
   const { t } = useLingui();
   const nameId = useId();
+  const fileInput = useRef<HTMLInputElement>(null);
   const [name, setName] = useState("");
   const [description, setDescription] = useState(initialDescription);
   const [selection, setSelected] = useState<string[]>([]);
@@ -93,7 +106,8 @@ export function CreateGroupForm({
 
   const roleName = recruiting ? t`New role` : name.trim();
   const canCreate =
-    validSelection(roleName, selected) && (!recruiting || Boolean(description.trim()));
+    validSelection(roleName, selected) &&
+    (!recruiting || Boolean(description.trim()) || attachments.length > 0);
 
   async function create() {
     if (submitting || !canCreate) return;
@@ -129,21 +143,122 @@ export function CreateGroupForm({
           <h1>
             <Trans>Who are you looking for?</Trans>
           </h1>
-          <div className="hire-composer">
+          <fieldset
+            aria-label={t`Job description and files`}
+            className="hire-composer"
+            onDragOver={(event) => {
+              if (onAttachmentPick && isFileDrag(event.dataTransfer)) event.preventDefault();
+            }}
+            onDrop={(event) => {
+              if (onAttachmentPick && isFileDrag(event.dataTransfer)) {
+                event.preventDefault();
+                if (!submitting) onAttachmentPick(event.dataTransfer.files);
+              }
+            }}
+          >
             <Textarea
               aria-label={t`Job description`}
               value={description}
               onChange={(event) => setDescription(event.target.value)}
+              onKeyDown={(event) => {
+                const action = resolveMentionPickerKey({
+                  key: event.key,
+                  shiftKey: event.shiftKey,
+                  ctrlKey: event.ctrlKey,
+                  metaKey: event.metaKey,
+                  enterToSend: true,
+                  isComposing: event.nativeEvent.isComposing || event.keyCode === 229,
+                  optionCount: 0,
+                  highlightedIndex: 0,
+                });
+                if (action.type === "send") {
+                  event.preventDefault();
+                  void create();
+                }
+              }}
+              onPaste={(event) => {
+                if (submitting || !onAttachmentPick || !isFilePaste(event.clipboardData)) return;
+                event.preventDefault();
+                onAttachmentPick(event.clipboardData.files);
+                const text = event.clipboardData.getData("text/plain");
+                if (text)
+                  setDescription(
+                    `${description.slice(0, event.currentTarget.selectionStart)}${text}${description.slice(event.currentTarget.selectionEnd)}`,
+                  );
+              }}
               placeholder={t`Start with a role title or paste a job description…`}
               disabled={submitting}
             />
+            {attachmentNotice ? (
+              <p role="status" className="px-5 text-sm">
+                {attachmentNotice}
+              </p>
+            ) : null}
+            {attachments.length ? (
+              <ul className="flex flex-wrap gap-2 px-5 pb-3">
+                {attachments.map((attachment) => (
+                  <li
+                    key={attachment.id}
+                    className="flex items-center gap-2 rounded border px-2 py-1 text-sm"
+                  >
+                    {attachment.previewUrl ? (
+                      <img
+                        src={attachment.previewUrl}
+                        alt=""
+                        className="h-8 w-8 rounded object-cover"
+                      />
+                    ) : (
+                      <Paperclip size={14} aria-hidden />
+                    )}
+                    <span>{attachment.file.name}</span>
+                    <Button
+                      type="button"
+                      variant="ghost"
+                      size="icon-sm"
+                      aria-label={t`Remove ${attachment.file.name}`}
+                      disabled={submitting}
+                      onClick={() => onRemoveAttachment?.(attachment.id)}
+                    >
+                      <X size={14} aria-hidden />
+                    </Button>
+                  </li>
+                ))}
+              </ul>
+            ) : null}
             <div className="hire-composer-actions">
+              {onAttachmentPick ? (
+                <>
+                  <input
+                    ref={fileInput}
+                    aria-label={t`Attach role files`}
+                    type="file"
+                    multiple
+                    accept={attachmentAccept}
+                    hidden
+                    disabled={submitting}
+                    onChange={(event) => {
+                      onAttachmentPick(event.target.files);
+                      event.target.value = "";
+                    }}
+                  />
+                  <Button
+                    type="button"
+                    variant="ghost"
+                    aria-label={t`Attach file or screenshot`}
+                    disabled={submitting}
+                    onClick={() => fileInput.current?.click()}
+                  >
+                    <Paperclip size={16} aria-hidden />
+                    <Trans>Attach</Trans>
+                  </Button>
+                </>
+              ) : null}
               <Button disabled={submitting || !canCreate} onClick={() => void create()}>
                 {submitting ? <Trans>Creating…</Trans> : <Trans>Continue</Trans>}
                 <ArrowRight size={15} aria-hidden="true" />
               </Button>
             </div>
-          </div>
+          </fieldset>
           {error ? (
             <p role="alert" className="mt-3 text-sm text-destructive">
               {error}

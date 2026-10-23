@@ -1713,9 +1713,11 @@ it("shows a warm scoped pool read-only until current validation and evicts it on
     }),
   );
   const view = await mounted("thread-1", undefined, false, undefined, options);
-  expect(view.container.querySelector(".hire-card-grid")?.textContent).toContain(candidate.name);
+  expect(view.container.querySelector(".hire-table-wrap")?.textContent).toContain(candidate.name);
   expect(api.listCandidates).not.toHaveBeenCalled();
-  const shortlist = view.container.querySelector<HTMLElement>('.hire-card-grid [role="checkbox"]')!;
+  const shortlist = view.container.querySelector<HTMLElement>(
+    '.hire-table-wrap [role="checkbox"]',
+  )!;
   expect(shortlist.hasAttribute("data-disabled")).toBe(true);
   await act(async () => shortlist.click());
   expect(api.setCandidateShortlist).not.toHaveBeenCalled();
@@ -1723,11 +1725,11 @@ it("shows a warm scoped pool read-only until current validation and evicts it on
   expect(api.listCandidates).toHaveBeenCalledOnce();
   api.getWorkspace.mockRejectedValueOnce(new ORPCError("FORBIDDEN"));
   await view.render("thread-1", 1);
-  expect(view.container.querySelector(".hire-card-grid")).toBeNull();
+  expect(view.container.querySelector(".hire-table-wrap")).toBeNull();
   expect([...cache.entries.keys()].some((key) => key.startsWith(`${scope}:`))).toBe(false);
   expect(cache.entries.has("another-role:workspace")).toBe(true);
   await act(async () => finishRows(page));
-  expect(view.container.querySelector(".hire-card-grid")).toBeNull();
+  expect(view.container.querySelector(".hire-table-wrap")).toBeNull();
   expect([...cache.entries.keys()].some((key) => key.startsWith(`${scope}:`))).toBe(false);
 });
 
@@ -2585,6 +2587,76 @@ it.each(["role change", "access denial"])(
   },
 );
 
+it("defaults to a table with authoritative score ordering and leaves unknown scores last", async () => {
+  const people = (
+    [
+      ["highest", "Zoe", "95"],
+      ["lower", "Avery", "72.5"],
+      ["unknown", "Unknown score", null],
+    ] as const
+  ).map(([key, name, score]) => ({
+    ...candidateFixture(key!, false),
+    name,
+    latestSource: {
+      providerTaskId: "provider-task-1",
+      taskId: "task-1",
+      actionId: "action-1",
+      roleRevisionId: revision.id,
+      effectId: "source-1",
+      rowIndex: 0,
+      artifactRef: { artifactId: "source-artifact", sha256: "a".repeat(64) },
+      requestCursor: null,
+      outputId: null,
+      observedAt: "2026-01-01T00:00:00Z",
+      report: { fields: [{ label: "Match score", value: score, sourceUrls: [] }], sourceUrls: [] },
+    },
+  }));
+  api.listCandidates.mockResolvedValue(candidatePage(people));
+  const view = await mounted("thread-1", undefined, false, undefined, {
+    presentation: "workspace",
+    view: "results",
+  });
+  expect(api.listCandidates).toHaveBeenLastCalledWith(
+    { roleId: role.id, limit: 30, sort: "score" },
+    { signal: expect.any(AbortSignal) },
+  );
+  expect(view.container.querySelector('button[aria-pressed="true"]')?.textContent).toBe("Table");
+  expect(
+    [...view.container.querySelectorAll("tbody th button")].map((item) => item.textContent),
+  ).toEqual(["Zoe", "Avery", "Unknown score"]);
+  expect(view.container.querySelector("tbody tr:last-child")?.textContent).toContain("Unknown");
+});
+
+it.each([
+  ["met", "Met", "text-success"],
+  ["unknown", "Unknown", "text-warning"],
+  ["unmet", "Unmet", "text-destructive"],
+] as const)(
+  "shows the saved %s evidence verdict in a distinct accessible status color",
+  async (verdict, label, color) => {
+    api.getAssessment.mockResolvedValue({
+      ...assessment,
+      assessment: {
+        ...assessment.assessment,
+        judgments: {
+          ...assessment.assessment.judgments,
+          hardGate: verdict,
+          criteria: assessment.assessment.judgments.criteria.map((item) => ({ ...item, verdict })),
+        },
+      },
+    });
+    const view = await mounted();
+    await view.click("Evidence");
+    await view.click("candidate-1");
+    const details = view.container.querySelector('[role="dialog"] [aria-label="candidate-1"]')!;
+    const status = [...details.querySelectorAll("span")].find((item) => item.textContent === label);
+    expect(status?.classList.contains(color)).toBe(true);
+    expect(status?.querySelector('svg[aria-hidden="true"]')).not.toBeNull();
+    expect(details.textContent).toContain("Built a compiler");
+    expect(api.reviseRole).not.toHaveBeenCalled();
+  },
+);
+
 it("shows saved unassessed profiles and authoritative totals in Cards and Table", async () => {
   api.listCandidates.mockResolvedValue(
     candidatePage([
@@ -2602,6 +2674,7 @@ it("shows saved unassessed profiles and authoritative totals in Cards and Table"
   expect(view.container.textContent).toContain("19");
   expect(view.container.textContent).toContain("12");
   await view.click("Evidence");
+  await view.click("Cards");
   expect(view.container.textContent).toContain("Synthetic Avery");
   expect(view.container.textContent).toContain("Example Tools");
   expect(view.container.textContent).toContain("Remote");
@@ -2787,7 +2860,7 @@ it("keeps the candidate page when empty auxiliary assessments finish without cha
     {
       roleId: role.id,
       limit: 30,
-      sort: "rank",
+      sort: "score",
     },
     { signal: expect.any(AbortSignal) },
   );
@@ -3197,7 +3270,7 @@ it("reloads candidate pages when the CRM binding changes during pagination", asy
   await view.expand("CRM receipt");
   await view.click("Load more");
   expect(api.listCandidates.mock.lastCall?.[0].cursor).toBeUndefined();
-  expect(view.container.querySelector("ul")?.textContent).not.toContain("synced-person");
+  expect(view.container.querySelector("tbody")?.textContent).not.toContain("synced-person");
   expect(view.container.textContent).not.toContain(synced.crm.receipt!.candidate_id);
 });
 
@@ -3393,8 +3466,8 @@ it("restores an excluded selected candidate through the existing saved-candidate
   expect(view.container.querySelector('[role="dialog"]')?.textContent).toContain(selected.name);
   await cleanup?.();
   const reopened = await mounted("thread-1", undefined, false);
-  expect(reopened.container.querySelector("ul")?.textContent).toContain(other.name);
-  expect(reopened.container.querySelector("ul")?.textContent).not.toContain(selected.name);
+  expect(reopened.container.querySelector("tbody")?.textContent).toContain(other.name);
+  expect(reopened.container.querySelector("tbody")?.textContent).not.toContain(selected.name);
   expect(reopened.container.querySelector('[role="dialog"]')?.textContent).toContain(selected.name);
   expect(api.listCandidates).toHaveBeenLastCalledWith(
     {
@@ -3503,8 +3576,8 @@ it("ignores a late restored page after filters change and keeps the new depth on
   hold = true;
   const reopened = await mounted("thread-1", undefined, false);
   expect(finish).toBeDefined();
-  expect(reopened.container.querySelector("ul")?.textContent).toContain(first.name);
-  expect(reopened.container.querySelector("ul")?.textContent).not.toContain(second.name);
+  expect(reopened.container.querySelector("tbody")?.textContent).toContain(first.name);
+  expect(reopened.container.querySelector("tbody")?.textContent).not.toContain(second.name);
   expect(
     [...reopened.container.querySelectorAll("button")].find(
       (button) => button.textContent === "Load more",
@@ -3512,12 +3585,12 @@ it("ignores a late restored page after filters change and keeps the new depth on
   ).toHaveProperty("disabled", true);
   await changeSelect(reopened.container, "Candidate sort", "recent");
   await act(async () => finish(candidatePage([second])));
-  expect(reopened.container.querySelector("ul")?.textContent).toContain(fresh.name);
+  expect(reopened.container.querySelector("tbody")?.textContent).toContain(fresh.name);
   expect(reopened.container.textContent).not.toContain(second.name);
   await cleanup?.();
   api.listCandidates.mockClear();
   const again = await mounted("thread-1", undefined, false);
-  expect(again.container.querySelector("ul")?.textContent).toContain(fresh.name);
+  expect(again.container.querySelector("tbody")?.textContent).toContain(fresh.name);
   expect(api.listCandidates).toHaveBeenCalledExactlyOnceWith(
     {
       roleId: role.id,
@@ -3552,13 +3625,13 @@ it("keeps the displayed page depth after a restored page fails and is loaded man
   rejectNextPage = true;
   const reopened = await mounted("thread-1", undefined, false);
   expect(reopened.container.textContent).toContain("Could not load candidates");
-  expect(reopened.container.querySelector("ul")?.textContent).toContain(people[0]!.name);
+  expect(reopened.container.querySelector("tbody")?.textContent).toContain(people[0]!.name);
   await reopened.click("Load more");
-  expect(reopened.container.querySelector("ul")?.textContent).toContain(people[1]!.name);
+  expect(reopened.container.querySelector("tbody")?.textContent).toContain(people[1]!.name);
   await cleanup?.();
   api.listCandidates.mockClear();
   const again = await mounted("thread-1", undefined, false);
-  expect(again.container.querySelector("ul")?.textContent).toContain(people[1]!.name);
+  expect(again.container.querySelector("tbody")?.textContent).toContain(people[1]!.name);
   expect(again.container.textContent).not.toContain(people[2]!.name);
   expect(api.listCandidates).toHaveBeenCalledTimes(2);
 });
@@ -3571,7 +3644,7 @@ it("isolates saved recruiting list preferences by actor, thread and actual role"
   };
   const view = await mounted();
   await view.click("Evidence");
-  await view.click("Table");
+  await view.click("Cards");
   await changeInput(view.container, "Search candidates", "Original scope");
   await view.click("candidate-1");
   api.getWorkspace.mockResolvedValue(other);
@@ -3585,7 +3658,7 @@ it("isolates saved recruiting list preferences by actor, thread and actual role"
   expect(view.container.querySelector('[role="dialog"]')).toBeNull();
   api.getWorkspace.mockResolvedValue(original);
   await view.render("thread-1", 2);
-  expect(view.container.querySelector("table")).not.toBeNull();
+  expect(view.container.querySelector("table")).toBeNull();
   expect(view.container.querySelector('input[aria-label="Search candidates"]')).toHaveProperty(
     "value",
     "Original scope",
@@ -3603,11 +3676,11 @@ it("isolates saved recruiting list preferences by actor, thread and actual role"
     "value",
     "",
   );
-  expect(view.container.querySelector("table")).toBeNull();
+  expect(view.container.querySelector("table")).not.toBeNull();
   expect(view.container.querySelector('[role="dialog"]')).toBeNull();
   api.session.data.user.id = "actor-1";
   await view.render("thread-1");
-  expect(view.container.querySelector("table")).not.toBeNull();
+  expect(view.container.querySelector("table")).toBeNull();
   expect(view.container.querySelector('input[aria-label="Search candidates"]')).toHaveProperty(
     "value",
     "Original scope",
@@ -3629,7 +3702,7 @@ it.each([false, true])(
       "Name",
       "Recently discovered",
     ]);
-    expect(select.value).toBe("rank");
+    expect(select.value).toBe("score");
     await changeInput(view.container, "Search candidates", "Synthetic");
     for (const sort of ["tier", "rank", "score"]) {
       await changeSelect(view.container, "Candidate sort", sort);
@@ -3876,7 +3949,7 @@ it("ignores late saved-result pages while retaining the original candidate discu
     {
       roleId: role.id,
       limit: 30,
-      sort: "rank",
+      sort: "score",
       actionId: f.action.id,
       sourceEffectId: undefined,
     },
@@ -4397,6 +4470,7 @@ it.each([
     presentation: "workspace",
     tab: "evidence",
   });
+  await view.click("Cards");
   const card = view.container.querySelector(".hire-candidate-card")!;
   expect(card.textContent).toContain(
     status === "available" ? `Resume (${label})` : `Resume: ${label}`,
@@ -5237,6 +5311,7 @@ it("retains missing identity and exposes saved profile issues without inventing 
   );
   const view = await mounted();
   await view.click("Evidence");
+  await view.click("Cards");
   const card = view.container.querySelector("li")!;
   expect(card.textContent).toContain("Name missing");
   expect(card.textContent).toContain("saved-row-4");
@@ -5490,7 +5565,7 @@ it.each(["action:action-1", "source:native-read-1"])(
     await view.render("thread-1", 1);
     expect(api.listCandidates.mock.lastCall?.[0]).toEqual({
       roleId: "role-next",
-      sort: "rank",
+      sort: "score",
       limit: 30,
     });
     expect(
@@ -7473,6 +7548,7 @@ it("switches Cards/Table with one original-revision detail, preserves a refreshe
   api.listAssessments.mockResolvedValue([original, second]);
   const view = await mounted();
   await view.click("Evidence");
+  await view.click("Cards");
   expect(view.container.querySelector("table")).toBeNull();
   await view.click("candidate-1");
   const condition = [...view.container.querySelectorAll("details")].find((element) =>
@@ -8044,6 +8120,7 @@ it("renders the sourcing workspace from saved findings and uses native draft, sh
   const view = await mounted("thread-1", undefined, false, undefined, {
     presentation: "workspace",
   });
+  await view.click("Cards");
   const card = view.container.querySelector(".hire-candidate-card");
   expect(card?.textContent).toContain("Taylor Example");
   expect(card?.textContent).toContain("Bay Area");
@@ -8121,7 +8198,7 @@ it("keeps workspace shortlist and contacts navigation out of saved filters and c
     presentation: "workspace",
     view: "results",
   });
-  expect(view.container.querySelector(".hire-card-grid")).not.toBeNull();
+  expect(view.container.querySelector(".hire-table-wrap")).not.toBeNull();
   expect(view.container.querySelector('input[aria-label="Search candidates"]')).not.toBeNull();
 });
 

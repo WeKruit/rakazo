@@ -2968,8 +2968,7 @@ export function ShellPage() {
     [t],
   );
   const onAttachmentPick = useCallback(
-    (files: FileList | null) => {
-      const threadKey = activeGroupId.current ?? activeBotId.current;
+    (files: FileList | null, threadKey = activeGroupId.current ?? activeBotId.current) => {
       if (!threadKey || !files?.length) return false;
       const existing = attachmentsForThread(pendingAttachments, threadKey);
       const next: PendingAttachment[] = [];
@@ -3004,7 +3003,11 @@ export function ShellPage() {
   );
   const removeAttachment = useCallback((attachment: PendingAttachment) => {
     revokePendingAttachmentPreviews([attachment]);
-    setPendingAttachments((current) => current.filter((item) => item.id !== attachment.id));
+    setPendingAttachments((current) =>
+      current.filter(
+        (item) => item.id !== attachment.id || item.threadKey !== attachment.threadKey,
+      ),
+    );
   }, []);
   const sendMessage = useCallback(
     async (text: string, mentions: ComposerMention[], clientNonce: string) => {
@@ -3312,13 +3315,40 @@ export function ShellPage() {
     if (text && id) void speaker.speak(text, { botId: id, messageId: message.id });
   }, []);
 
-  const pendingRoleCreation = useRef<{ key: string; group: Group; clientNonce: string } | null>(
-    null,
-  );
+  const pendingRoleCreation = useRef<{
+    key: string;
+    group: Group;
+    clientNonce: string;
+    artifactIds: string[];
+  } | null>(null);
   async function createGroup(input: { name: string; botIds: string[]; description?: string }) {
+    const attachments = showToolActivity
+      ? []
+      : attachmentsForThread(pendingAttachments, newRoleAttachmentKey);
+    if (attachments.length && !input.description)
+      input = {
+        ...input,
+        description: t`Use the attached files to define this role and start the search.`,
+      };
+    const submittedUser = botsRefreshUser.current;
+    const submittedSpace = bootstrapMe?.spaceId;
+    const submittedTarget = activeGroupId.current ?? activeBotId.current;
+    const stillCurrent = () =>
+      discussionScope.current.active &&
+      discussionScope.current.panel === "create-group" &&
+      submittedUser.id === userId &&
+      botsRefreshUser.current === submittedUser &&
+      (activeGroupId.current ?? activeBotId.current) === submittedTarget &&
+      (selectedSpaceId() ?? submittedSpace) === submittedSpace;
+
     setCreatingGroup(true);
     try {
-      const key = JSON.stringify([userId, bootstrapMe?.spaceId, input]);
+      const key = JSON.stringify([
+        userId,
+        bootstrapMe?.spaceId,
+        input,
+        attachments.map((item) => item.id),
+      ]);
       let attempt =
         input.description && pendingRoleCreation.current?.key === key
           ? pendingRoleCreation.current
@@ -3326,21 +3356,38 @@ export function ShellPage() {
       const group =
         attempt?.group ?? (await rpc.groups.create({ name: input.name, botIds: input.botIds }));
       if (input.description && !attempt) {
-        attempt = { key, group, clientNonce: crypto.randomUUID() };
+        attempt = { key, group, clientNonce: crypto.randomUUID(), artifactIds: [] };
         pendingRoleCreation.current = attempt;
       }
+      if (!stillCurrent()) throw new Error(t`The workspace changed. Open the role again.`);
       setGroups((current) =>
         current.some((item) => item.id === group.id) ? current : [group, ...current],
       );
       if (input.description && attempt) {
+        for (const pending of attachments.slice(attempt.artifactIds.length)) {
+          const mimeType = inferAttachmentMimeType(pending.file.name, pending.file.type);
+          if (!mimeType) throw new Error(t`Unsupported file type: ${pending.file.name}`);
+          const contentBase64 = await readFileAsBase64(pending.file);
+          if (!stillCurrent()) throw new Error(t`The workspace changed. Open the role again.`);
+          const artifact = await rpc.artifacts.create({
+            groupId: group.id,
+            name: pending.file.name,
+            mimeType,
+            contentBase64,
+          });
+          attempt.artifactIds.push(artifact.id);
+        }
+        if (!stillCurrent()) throw new Error(t`The workspace changed. Open the role again.`);
         await rpc.threads.followUp({
           groupId: group.id,
           text: input.description,
+          ...(attempt.artifactIds.length ? { artifactIds: attempt.artifactIds } : {}),
           mentions: [input.botIds[0]!],
           clientNonce: attempt.clientNonce,
         });
         pendingRoleCreation.current = null;
       }
+      if (!stillCurrent()) return;
       navigate(`/app/g/${group.id}${input.description ? "?view=brief" : ""}`);
       setPanel(null);
       setNewRoleSourceId(null);
@@ -3761,13 +3808,32 @@ export function ShellPage() {
     .slice(0, 2)
     .toUpperCase();
 
+  const newRoleAttachmentKey = JSON.stringify([
+    "new-role",
+    userId,
+    bootstrapMe?.spaceId,
+    roleSourceGroup?.id,
+  ]);
+  const newRoleAttachments = attachmentsForThread(pendingAttachments, newRoleAttachmentKey);
   const roleCreationForm = (
     <CreateGroupForm
       key={showToolActivity ? "group" : JSON.stringify([roleSourceGroup?.id, newRoleDescription])}
       bots={showToolActivity ? bots : roleCrewBots}
       recruiting={!showToolActivity}
       initialDescription={newRoleDescription}
+      attachments={showToolActivity ? undefined : newRoleAttachments}
+      attachmentNotice={attachmentNotice}
+      attachmentAccept={ATTACHMENT_ACCEPT}
+      onAttachmentPick={
+        showToolActivity ? undefined : (files) => onAttachmentPick(files, newRoleAttachmentKey)
+      }
+      onRemoveAttachment={(id) => {
+        const attachment = newRoleAttachments.find((item) => item.id === id);
+        if (attachment) removeAttachment(attachment);
+      }}
       onCancel={() => {
+        for (const attachment of newRoleAttachments) removeAttachment(attachment);
+        setAttachmentNotice(null);
         setPanel(null);
         setNewRoleSourceId(null);
         setNewRoleDescription("");
