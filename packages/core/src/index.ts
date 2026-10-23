@@ -62,6 +62,7 @@ export * from "./thread-message-updates.js";
 export * from "./thread-reducer.js";
 export * from "./thread-scroll.js";
 export * from "./thread-subscription.js";
+export * from "./thread-tail.js";
 export * from "./time-separators.js";
 export * from "./tool-activity.js";
 export * from "./user-error.js";

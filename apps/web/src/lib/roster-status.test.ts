@@ -49,3 +49,15 @@ describe("compactRosterStatusLabel", () => {
     expect(compactRosterStatusLabel("idle")).toBeNull();
   });
 });
+
+describe("threadTailLabel", () => {
+  it("names each phase and steps aside for streamed text only during run work", async () => {
+    const { isRunPhase, threadTailLabel } = await import("./roster-status");
+    expect(threadTailLabel("compacting")).toBe("Compacting…");
+    expect(threadTailLabel("needs_input")).toBe("Needs an answer");
+    expect(threadTailLabel("background")).toBe("Working in background…");
+    expect(threadTailLabel(null)).toBeNull();
+    expect(isRunPhase("working")).toBe(true);
+    expect(isRunPhase("compacting")).toBe(false);
+  });
+});

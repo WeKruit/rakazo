@@ -429,8 +429,12 @@ function reduce(prev: LiveThread, event: LiveThreadEvent): LiveThread {
   }
   if (event.type === "thread.message.created" || event.type === "thread.message.updated") {
     const blocks = (payload.blocks as MessageBlock[] | undefined) ?? [];
+    const base =
+      event.type === "thread.message.created" && payload.role === "user"
+        ? settlePendingUserMessage(prev, blocks)
+        : prev;
     const id = String(payload.messageId ?? event.id ?? `msg:${event.seq ?? 0}`);
-    const known = prev.messages.find((message) => message.id === id);
+    const known = base.messages.find((message) => message.id === id);
     const next = liveMessage(event, id, blocks, {
       role: (payload.role as LiveThreadMessage["role"] | undefined) ?? "bot",
       botId: event.botId ?? (typeof payload.botId === "string" ? payload.botId : undefined),
@@ -443,9 +447,75 @@ function reduce(prev: LiveThread, event: LiveThreadEvent): LiveThread {
     const replacedSubagentIds = new Set(
       blocks.filter((block) => block.kind === "subagent").map((block) => block.agentId),
     );
-    const { remaining } = takeLiveMessage(prev.messages, progressMessageId(event));
+    const { remaining } = takeLiveMessage(base.messages, progressMessageId(event));
     const without = remaining.filter((message) => !replacedSubagent(message, replacedSubagentIds));
-    return { ...prev, cursor, messages: upsertMessageById(without, next) };
+    return { ...base, cursor, messages: upsertMessageById(without, next) };
   }
   return prev;
+}
+
+/**
+ * Local echo of a message the user just sent, shown before the server confirms it.
+ * Ids use the client nonce so a failed send can take exactly that bubble back.
+ */
+export const PENDING_MESSAGE_PREFIX = "pending:";
+
+export function pendingUserMessageId(clientNonce: string): string {
+  return `${PENDING_MESSAGE_PREFIX}${clientNonce}`;
+}
+
+export function isPendingUserMessage(message: { id: string }): boolean {
+  return message.id.startsWith(PENDING_MESSAGE_PREFIX);
+}
+
+export function addPendingUserMessage<S extends LiveThread>(
+  thread: S,
+  input: {
+    clientNonce: string;
+    text: string;
+    createdAt: string;
+    replyToMessageId?: string;
+    replyQuote?: string;
+  },
+): S {
+  const id = pendingUserMessageId(input.clientNonce);
+  if (!input.text.trim() || thread.messages.some((message) => message.id === id)) return thread;
+  const message: LiveThreadMessage = {
+    id,
+    threadId: thread.threadId,
+    // Sorts with the newest durable message until the server assigns the real seq.
+    seq: thread.messages.at(-1)?.seq ?? 0,
+    role: "user",
+    blocks: [{ kind: "text", text: input.text }],
+    createdAt: input.createdAt,
+    ...(input.replyToMessageId ? { replyToMessageId: input.replyToMessageId } : {}),
+    ...(input.replyQuote ? { replyQuote: input.replyQuote } : {}),
+  };
+  return { ...thread, messages: [...thread.messages, message] };
+}
+
+export function removePendingUserMessage<S extends LiveThread>(thread: S, clientNonce: string): S {
+  const id = pendingUserMessageId(clientNonce);
+  if (!thread.messages.some((message) => message.id === id)) return thread;
+  return { ...thread, messages: thread.messages.filter((message) => message.id !== id) };
+}
+
+export function hasPendingUserMessage(thread: Pick<LiveThread, "messages"> | null): boolean {
+  return Boolean(thread?.messages.some(isPendingUserMessage));
+}
+
+function messageText(blocks: readonly MessageBlock[]): string {
+  return blocks
+    .flatMap((block) => (block.kind === "text" ? [block.text] : []))
+    .join("\n")
+    .trim();
+}
+
+/** The durable user message replaces its echo: same text first, else the oldest echo. */
+function settlePendingUserMessage(thread: LiveThread, blocks: readonly MessageBlock[]): LiveThread {
+  const pending = thread.messages.filter(isPendingUserMessage);
+  if (!pending.length) return thread;
+  const text = messageText(blocks);
+  const settled = pending.find((message) => messageText(message.blocks) === text) ?? pending[0];
+  return { ...thread, messages: thread.messages.filter((message) => message !== settled) };
 }

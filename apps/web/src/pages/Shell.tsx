@@ -39,8 +39,9 @@ import {
   normalizeCreateBotProfile,
   RecruitingOutreachSequenceSchema,
 } from "@rakazo/contracts";
-import type { ComposerMention, SlashActionId } from "@rakazo/core";
+import type { ComposerMention, SlashActionId, ThreadTailPhase } from "@rakazo/core";
 import {
+  addPendingUserMessage,
   answerableAskMessageIds,
   attachmentsForThread,
   buildComposerMentionOptions,
@@ -51,12 +52,15 @@ import {
   inferAttachmentMimeType,
   isActive,
   isPeerReceiptBlocks,
+  isPendingUserMessage,
   isRunTerminalEvent,
   isToolActivityBlock,
   mentionChipKey,
   nestRosterByParent,
+  pendingUserMessageId,
   plainTextFromMarkdown,
   projectMessageReactions,
+  removePendingUserMessage,
   reorderBotTo,
   replyAttachment,
   resolveComposerSendPlan,
@@ -66,6 +70,7 @@ import {
   searchHitThreadTarget,
   serializeComposerPrompt,
   speechFromBlocks,
+  threadTailPhase,
   timeSeparatorIds,
   truncateSlashDescription,
   userVisibleMessages,
@@ -178,6 +183,7 @@ import { readActivityMode, writeActivityMode } from "../lib/activity-mode";
 import type { ArtifactTarget } from "../lib/artifact-open";
 import { authClient } from "../lib/auth";
 import { takeInitialBootstrap } from "../lib/bootstrap";
+import { applyBotStatus, botStatusFromRunEvent, openBotStatusChannel } from "../lib/bot-run-status";
 import {
   getBotsSidebarDensity,
   subscribeBotsSidebarDensity,
@@ -218,6 +224,7 @@ import { copyableMessageText } from "../lib/message-text";
 import { messageProviderLabel } from "../lib/messaging";
 import { parseModelOptionKey } from "../lib/model-catalog";
 import {
+  createAttachmentUploads,
   isFileDrag,
   isFilePaste,
   readFileAsBase64,
@@ -236,8 +243,10 @@ import {
 } from "../lib/right-panel-state";
 import {
   compactRosterStatusLabel,
+  isRunPhase,
   rosterHasUndismissedRunError,
   rosterWorkStatusLabel,
+  threadTailLabel,
 } from "../lib/roster-status";
 import { clearSpaceSelection, rpc, selectedSpaceId, selectSpace } from "../lib/rpc";
 import { readSeenRunErrorIds, rememberSeenRunErrorId } from "../lib/run-error-storage";
@@ -274,6 +283,7 @@ import {
   transcriptMovedDown,
 } from "../lib/transcript-scroll";
 import { speaker } from "../lib/tts";
+import { observeThreadEvent, turnTimer } from "../lib/turn-timing";
 import { errorText } from "../lib/user-error";
 import { ActivityList } from "./ActivityList";
 import type { ContextMenuPosition } from "./BotContextMenu";
@@ -436,6 +446,13 @@ function readCollapsedSidebarSections(userId: string | null | undefined): Set<st
 
 function readCollapsedRosterParents(userId: string | null | undefined): Set<string> {
   return readCollapsedIdSet(collapsedRosterParentsStorageKey(userId));
+}
+
+/** How long a sent message may wait for its durable event before the thread is re-read. */
+const SEND_ECHO_GRACE_MS = 3_000;
+
+function attachmentUploadKey(attachment: Pick<PendingAttachment, "id" | "threadKey">) {
+  return `${attachment.threadKey}:${attachment.id}`;
 }
 
 export function eventChangesRecruitingPanel(
@@ -1250,6 +1267,28 @@ export function ShellPage() {
     },
     [navigate],
   );
+  // Run events update the sidebar in place and reach this user's other tabs at once.
+  const botStatusChannel = useRef<ReturnType<typeof openBotStatusChannel> | null>(null);
+  useEffect(() => {
+    const spaceId = bootstrapMe?.spaceId;
+    if (!userId || !spaceId) return;
+    const channel = openBotStatusChannel({ userId, spaceId }, ({ botId, status }) => {
+      setBots((current) => applyBotStatus(current, botId, status));
+      // The finished run's preview and error badge come from the navigation read.
+      if (status === "idle") void refreshBots().catch(() => undefined);
+    });
+    botStatusChannel.current = channel;
+    return () => {
+      channel.close();
+      botStatusChannel.current = null;
+    };
+  }, [userId, bootstrapMe?.spaceId, refreshBots]);
+  const applyRunStatus = useCallback((event: ProductEvent) => {
+    const status = botStatusFromRunEvent(event);
+    if (!status) return;
+    setBots((current) => applyBotStatus(current, event.botId, status));
+    botStatusChannel.current?.post({ botId: event.botId, status });
+  }, []);
 
   function snapTranscriptToEndAfterFrame() {
     const queuedElement = messageScroll.current;
@@ -1732,7 +1771,9 @@ export function ShellPage() {
       },
       applyEvent: (event) =>
         applyThreadEvent(event, commitSnapshot, commitComputer, snapshotRef, computerRef),
-      onEvent: (event, initial) => {
+      onEvent: (event, initial, sync) => {
+        observeThreadEvent(event, initial.cursor);
+        applyRunStatus(event);
         invalidateRecruiting(event);
         const currentBot = botsRef.current.find((bot) => bot.id === active.id);
         notifyBrowserForEvent(
@@ -1755,7 +1796,6 @@ export function ShellPage() {
           event.type === "bot.spawned" ||
           event.type === "bot.deleted" ||
           event.type === "bot.updated" ||
-          event.type === "run.started" ||
           isRunTerminalEvent(event) ||
           event.type === "thread.cleared"
         ) {
@@ -1768,12 +1808,8 @@ export function ShellPage() {
           }
           if (event.payload.role === "bot") markBotReadIfVisible(active.id);
         }
-        if (
-          isRunTerminalEvent(event) ||
-          event.type === "run.waiting_input" ||
-          event.type === "skill.teaching.stopped"
-        ) {
-          // waiting_input: reconcile ask cards if a stale post-send refresh raced SSE.
+        if (sync?.snapshotStale || event.type === "skill.teaching.stopped") {
+          // The event log already holds the run's final state unless something was not folded.
           void refreshThread(active.id).catch(() => undefined);
         } else if (isComputerStatusEvent(event)) {
           void refreshComputerScreen(active.id).catch(() => undefined);
@@ -1871,7 +1907,9 @@ export function ShellPage() {
           snapshotRef,
           computerRef,
         ),
-      onEvent: (event, initial) => {
+      onEvent: (event, initial, sync) => {
+        observeThreadEvent(event, initial.cursor);
+        applyRunStatus(event);
         invalidateRecruiting(event);
         const eventBot = botsRef.current.find((bot) => bot.id === event.botId);
         notifyBrowserForEvent(
@@ -1887,17 +1925,10 @@ export function ShellPage() {
           readVisibleGroups.current.delete(groupId);
           markVisibleGroupRead();
         }
-        if (
-          event.type === "run.started" ||
-          event.type === "bot.updated" ||
-          isRunTerminalEvent(event)
-        ) {
+        if (event.type === "bot.updated" || isRunTerminalEvent(event)) {
           void refreshBots().catch(() => undefined);
         }
-        if (isRunTerminalEvent(event) || event.type === "run.waiting_input") {
-          // waiting_input: reconcile ask cards if a stale post-send refresh raced SSE.
-          void refreshGroupThread(groupId).catch(() => undefined);
-        }
+        if (sync?.snapshotStale) void refreshGroupThread(groupId).catch(() => undefined);
       },
     });
     return () => {
@@ -3007,6 +3038,19 @@ export function ShellPage() {
     },
     [t],
   );
+  const attachmentUploads = useRef(
+    createAttachmentUploads(async (file, contentBase64, target) => {
+      const mimeType = inferAttachmentMimeType(file.name, file.type);
+      if (!mimeType) throw new Error(t`Unsupported file type: ${file.name}`);
+      const artifact = await rpc.artifacts.create({
+        ...target,
+        name: file.name,
+        mimeType,
+        contentBase64,
+      });
+      return artifact.id;
+    }),
+  );
   const onAttachmentPick = useCallback(
     (files: FileList | null, threadKey = activeGroupId.current ?? activeBotId.current) => {
       if (!threadKey || !files?.length) return false;
@@ -3035,6 +3079,8 @@ export function ShellPage() {
         });
       }
       if (next.length) setPendingAttachments((current) => [...current, ...next]);
+      for (const item of next)
+        attachmentUploads.current.start(attachmentUploadKey(item), item.file);
       setAttachmentNotice(skipped.length ? t`Skipped ${skipped.join(", ")}` : null);
       if (fileInputRef.current) fileInputRef.current.value = "";
       return next.length > 0;
@@ -3042,6 +3088,7 @@ export function ShellPage() {
     [pendingAttachments, t],
   );
   const removeAttachment = useCallback((attachment: PendingAttachment) => {
+    attachmentUploads.current.discard(attachmentUploadKey(attachment));
     revokePendingAttachmentPreviews([attachment]);
     setPendingAttachments((current) =>
       current.filter(
@@ -3087,6 +3134,28 @@ export function ShellPage() {
       sendingRef.current = true;
       setSending(true);
       setSendError(null);
+      // Echo the message right away; the durable message.created event replaces it.
+      const echoed = plan.shouldSend && !reroutedToGroup && Boolean(trimmed);
+      if (echoed) {
+        turnTimer.submit(clientNonce);
+        updateSnapshot(
+          (current) =>
+            current &&
+            addPendingUserMessage(current, {
+              clientNonce,
+              text: trimmed,
+              createdAt: new Date().toISOString(),
+              replyToMessageId: activeReplyTarget?.id,
+              replyQuote: activeReplyQuote ?? undefined,
+            }),
+        );
+        requestAnimationFrame(() => turnTimer.echoed(clientNonce));
+      }
+      const withdrawEcho = () => {
+        if (!echoed) return;
+        turnTimer.failed(clientNonce);
+        updateSnapshot((current) => current && removePendingUserMessage(current, clientNonce));
+      };
       const dropDelayedSetup = () => {
         // Only after successful engagement so a failed upload/send keeps the setup card.
         if (initialBotTarget && focusPromptBotIdRef.current === initialBotTarget) {
@@ -3128,30 +3197,23 @@ export function ShellPage() {
           }
           return true;
         }
-        const artifactIds: string[] = [];
-        for (const pending of attachments) {
-          const mimeType = inferAttachmentMimeType(pending.file.name, pending.file.type);
-          if (!mimeType) {
-            throw new Error(t`Unsupported file type: ${pending.file.name}`);
-          }
-          const contentBase64 = await readFileAsBase64(pending.file);
-          const artifact = await rpc.artifacts.create(
-            groupTarget
-              ? { groupId: groupTarget, name: pending.file.name, mimeType, contentBase64 }
-              : { botId: botTarget!, name: pending.file.name, mimeType, contentBase64 },
-          );
-          artifactIds.push(artifact.id);
-        }
+        // Files were read when picked; upload them together instead of one by one.
+        const artifactIds = await attachmentUploads.current.resolve(
+          attachments.map((pending) => ({ id: attachmentUploadKey(pending), file: pending.file })),
+          groupTarget ? { groupId: groupTarget } : { botId: botTarget! },
+        );
         if (
           !discussionScope.current.active ||
           (selectedSpaceId() ?? bootstrapMe?.spaceId) !== bootstrapMe?.spaceId ||
           botsRefreshUser.current !== submittedUser ||
           discussionScope.current.composerRef !== submittedComposer ||
           (correspondenceReference && currentCorrespondenceScope.current !== selectedEmail?.scope)
-        )
+        ) {
+          withdrawEcho();
           return false;
+        }
         if (groupTarget) {
-          await rpc.threads.send({
+          const sent = await rpc.threads.send({
             groupId: groupTarget,
             addressing: showToolActivity ? undefined : "coordinator",
             clientNonce,
@@ -3163,6 +3225,7 @@ export function ShellPage() {
             replyQuote: reroutedToGroup ? undefined : (activeReplyQuote ?? undefined),
           });
           accepted = true;
+          if (echoed) turnTimer.accepted(clientNonce, sent.runId);
         } else if (botTarget) {
           const sent = await rpc.threads.send({
             botId: botTarget,
@@ -3175,6 +3238,7 @@ export function ShellPage() {
             replyQuote: activeReplyQuote ?? undefined,
           });
           accepted = true;
+          if (echoed) turnTimer.accepted(clientNonce, sent.runId);
           if (activeBotId.current === botTarget) {
             updateSnapshot((current) =>
               applyThreadSendReceipt(
@@ -3195,18 +3259,30 @@ export function ShellPage() {
         setPendingAttachments((current) =>
           current.filter((attachment) => attachment.threadKey !== originThreadKey),
         );
-        // Refresh sidebar status even when a bot→group reroute navigates away below.
-        void refreshBots().catch(() => undefined);
         if (reroutedToGroup && groupTarget) {
+          // The group's sidebar row changes too; the open thread's events cannot say so.
+          void refreshBots().catch(() => undefined);
           navigate(`/app/g/${groupTarget}`);
           return true;
         }
         if (groupTarget && activeGroupId.current === groupTarget) setAttachmentNotice(null);
         if (botTarget && activeBotId.current === botTarget) setAttachmentNotice(null);
-        if (groupTarget) void refreshGroupThreadRef.current(groupTarget).catch(() => undefined);
-        else if (botTarget) void refreshThreadRef.current(botTarget).catch(() => undefined);
+        // The receipt and the event stream carry the rest. Read only if no event or echo
+        // arrived in time (stream down), or the message carried no text to echo.
+        window.setTimeout(() => {
+          const current = snapshotRef.current;
+          const stillEchoed = current?.messages.some(
+            (message) => message.id === pendingUserMessageId(clientNonce),
+          );
+          if (!echoed || !stillEchoed) return;
+          if (groupTarget && activeGroupId.current === groupTarget)
+            void refreshGroupThreadRef.current(groupTarget).catch(() => undefined);
+          else if (botTarget && activeBotId.current === botTarget)
+            void refreshThreadRef.current(botTarget).catch(() => undefined);
+        }, SEND_ECHO_GRACE_MS);
         return true;
       } catch (error) {
+        if (!accepted) withdrawEcho();
         if (reroutedToGroup && groupTarget) {
           setSendError(errorText(error, t`Failed to send message`));
         } else if (groupTarget && activeGroupId.current === groupTarget) {
@@ -5066,6 +5142,7 @@ export function ShellPage() {
             loadingOlder={loadingOlder}
             answerableAskMessageIds={answerableAskIds}
             running={transcriptRunning}
+            tailPhase={threadTailPhase(activeSnapshot ?? null, { sending })}
             workingBots={workingBots}
             runningRunIds={workingRuns.filter((run) => run.status === "running").map((run) => run.id)}
             onLoadOlder={loadOlder}
@@ -6308,6 +6385,7 @@ const Transcript = memo(function Transcript({
   loadingOlder,
   answerableAskMessageIds,
   running,
+  tailPhase,
   workingBots,
   runningRunIds,
   onLoadOlder,
@@ -6340,6 +6418,7 @@ const Transcript = memo(function Transcript({
   loadingOlder: boolean;
   answerableAskMessageIds: string[];
   running: boolean;
+  tailPhase: ThreadTailPhase | null;
   workingBots: GroupAvatarMember[];
   runningRunIds: string[];
   onLoadOlder: () => void | Promise<void>;
@@ -6397,19 +6476,16 @@ const Transcript = memo(function Transcript({
     availability: t`Preparing to check availability…`,
     working: t`Working…`,
   };
-  const workingLabel = showToolActivity
-    ? workingBots
-        .map(({ name, status }) =>
-          [name, status && rosterWorkStatusLabel(status)].filter(Boolean).join(" · "),
-        )
-        .join("; ")
-    : workingBots.some((bot) => bot.status === "running")
-      ? nativeActivity
+  const workingLabel =
+    showToolActivity && isRunPhase(tailPhase) && workingBots.length
+      ? workingBots
+          .map(({ name, status }) =>
+            [name, status && rosterWorkStatusLabel(status)].filter(Boolean).join(" · "),
+          )
+          .join("; ")
+      : tailPhase === "working" && nativeActivity
         ? activityLabels[nativeActivity]
-        : t`Working…`
-      : workingBots.some((bot) => bot.status === "leased")
-        ? t`Starting…`
-        : t`Waiting in line…`;
+        : threadTailLabel(tailPhase);
   const [quoteDraft, setQuoteDraft] = useState<{
     message: ThreadMessage;
     text: string;
@@ -6809,16 +6885,20 @@ const Transcript = memo(function Transcript({
             </Fragment>
           );
         })}
-        {running &&
-        !messages.some(
-          (message) =>
-            message.id.startsWith("progress:") &&
-            message.blocks.some(
-              (block) =>
-                block.kind === "progress" && !isToolActivityBlock(block) && Boolean(block.text),
-            ),
+        {workingLabel &&
+        // Streaming reply text is its own progress; the run label steps aside for it.
+        !(
+          isRunPhase(tailPhase) &&
+          messages.some(
+            (message) =>
+              message.id.startsWith("progress:") &&
+              message.blocks.some(
+                (block) =>
+                  block.kind === "progress" && !isToolActivityBlock(block) && Boolean(block.text),
+              ),
+          )
         ) ? (
-          showToolActivity ? (
+          showToolActivity && isRunPhase(tailPhase) && workingBots.length ? (
             <ActiveBotGlyph bots={workingBots} label={workingLabel} />
           ) : (
             <LoadingState
@@ -8044,8 +8124,9 @@ function MessageHoverActions({
   const [moreOpen, setMoreOpen] = useState(false);
   const [reactionsOpen, setReactionsOpen] = useState(false);
 
-  // Streaming progress bubbles keep hover free for selection / stop clicks.
-  if (message.id.startsWith("progress:")) return null;
+  // Streaming progress bubbles keep hover free for selection / stop clicks; a local echo
+  // has no server id to reply to or react to until its send is confirmed.
+  if (message.id.startsWith("progress:") || isPendingUserMessage(message)) return null;
 
   function copyMessage() {
     const text = copyableMessageText(message);
