@@ -1563,6 +1563,10 @@ msgstr "Contact campaign associations"
 msgid "Contact details have not been checked yet."
 msgstr "Contact details have not been checked yet."
 
+#: src/pages/Shell.tsx
+msgid "Contact source"
+msgstr "Contact source"
+
 #: src/pages/RecruitingPanel.tsx
 msgid "Contact status"
 msgstr "Contact status"
@@ -1937,6 +1941,10 @@ msgstr "Could not load this chat."
 msgid "Could not load this file."
 msgstr "Could not load this file."
 
+#: src/pages/Shell.tsx
+msgid "Could not load this role’s CRM connection."
+msgstr "Could not load this role’s CRM connection."
+
 #: src/components/SoftwareUpdateSection.tsx
 msgid "Could not load update status"
 msgstr "Could not load update status"
@@ -2258,8 +2266,13 @@ msgid "CRM"
 msgstr "CRM"
 
 #: src/pages/RecruitingPanel.tsx
+#: src/pages/Shell.tsx
 msgid "CRM contacts"
 msgstr "CRM contacts"
+
+#: src/pages/Shell.tsx
+msgid "CRM history"
+msgstr "CRM history"
 
 #: src/pages/RecruitingPanel.tsx
 msgid "CRM receipt"
@@ -2293,6 +2306,10 @@ msgstr "Current role"
 #: src/pages/RecruitingPanel.tsx
 msgid "Current role not returned"
 msgstr "Current role not returned"
+
+#: src/pages/Shell.tsx
+msgid "Current search"
+msgstr "Current search"
 
 #: src/pages/shell/bot-credentials.tsx
 msgid "Custom header"
@@ -4893,6 +4910,7 @@ msgstr "Refine in chat"
 #: src/components/ErrorBoundary.tsx
 #: src/pages/RecruitingPanel.tsx
 #: src/pages/RoutineRunHistory.tsx
+#: src/pages/Shell.tsx
 msgid "Refresh"
 msgstr "Refresh"
 
@@ -5577,6 +5595,10 @@ msgstr "Search providers"
 #: src/pages/Shell.tsx
 msgid "Search refinement"
 msgstr "Search refinement"
+
+#: src/pages/Shell.tsx
+msgid "Search results"
+msgstr "Search results"
 
 #: src/pages/shell/RecruitingNavigation.tsx
 msgid "Search roles"
@@ -6317,10 +6339,6 @@ msgstr "This result cannot be displayed yet"
 #: src/pages/Shell.tsx
 msgid "This role changed. Select the candidate again."
 msgstr "This role changed. Select the candidate again."
-
-#: src/pages/RecruitingPanel.tsx
-#~ msgid "This section has not loaded corresponding CRM records. Start a recruiting conversation to continue this work."
-#~ msgstr "This section has not loaded corresponding CRM records. Start a recruiting conversation to continue this work."
 
 #: src/pages/shell/message-cards.tsx
 msgid "This server cannot be assigned without a bot."

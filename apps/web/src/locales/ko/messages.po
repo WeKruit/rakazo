@@ -1563,6 +1563,10 @@ msgstr ""
 msgid "Contact details have not been checked yet."
 msgstr ""
 
+#: src/pages/Shell.tsx
+msgid "Contact source"
+msgstr ""
+
 #: src/pages/RecruitingPanel.tsx
 msgid "Contact status"
 msgstr ""
@@ -1937,6 +1941,10 @@ msgstr "이 채팅을 불러오지 못했습니다."
 msgid "Could not load this file."
 msgstr "파일을 불러오지 못했습니다."
 
+#: src/pages/Shell.tsx
+msgid "Could not load this role’s CRM connection."
+msgstr ""
+
 #: src/components/SoftwareUpdateSection.tsx
 msgid "Could not load update status"
 msgstr "업데이트 상태를 불러올 수 없습니다"
@@ -2258,7 +2266,12 @@ msgid "CRM"
 msgstr ""
 
 #: src/pages/RecruitingPanel.tsx
+#: src/pages/Shell.tsx
 msgid "CRM contacts"
+msgstr ""
+
+#: src/pages/Shell.tsx
+msgid "CRM history"
 msgstr ""
 
 #: src/pages/RecruitingPanel.tsx
@@ -2292,6 +2305,10 @@ msgstr ""
 
 #: src/pages/RecruitingPanel.tsx
 msgid "Current role not returned"
+msgstr ""
+
+#: src/pages/Shell.tsx
+msgid "Current search"
 msgstr ""
 
 #: src/pages/shell/bot-credentials.tsx
@@ -4893,6 +4910,7 @@ msgstr ""
 #: src/components/ErrorBoundary.tsx
 #: src/pages/RecruitingPanel.tsx
 #: src/pages/RoutineRunHistory.tsx
+#: src/pages/Shell.tsx
 msgid "Refresh"
 msgstr "새로고침"
 
@@ -5576,6 +5594,10 @@ msgstr "AI 서비스 검색"
 
 #: src/pages/Shell.tsx
 msgid "Search refinement"
+msgstr ""
+
+#: src/pages/Shell.tsx
+msgid "Search results"
 msgstr ""
 
 #: src/pages/shell/RecruitingNavigation.tsx
@@ -6317,10 +6339,6 @@ msgstr ""
 #: src/pages/Shell.tsx
 msgid "This role changed. Select the candidate again."
 msgstr ""
-
-#: src/pages/RecruitingPanel.tsx
-#~ msgid "This section has not loaded corresponding CRM records. Start a recruiting conversation to continue this work."
-#~ msgstr ""
 
 #: src/pages/shell/message-cards.tsx
 msgid "This server cannot be assigned without a bot."
