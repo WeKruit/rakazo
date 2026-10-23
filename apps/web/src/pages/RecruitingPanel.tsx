@@ -89,10 +89,11 @@ import {
 } from "../lib/right-panel-state";
 import { rpc } from "../lib/rpc";
 import { CorrespondenceEmails } from "./RecruitingCorrespondence";
-import type { RecruitingInboxEmail } from "./recruiting";
+import type { RecruitingInboxEmail, RecruitingTabProps } from "./recruiting";
 import { ContactsTab, InboxWithReply, InterviewTab, SequenceTab } from "./recruiting";
 import type { RecruitingDetailPerson } from "./recruiting/detail";
 import { useRecruitingDetail } from "./recruiting/detail";
+import { TabLoading, tabCacheSlot, useKeyedRead } from "./recruiting/shared";
 import type { RecruitingWorkspaceView } from "./shell/RecruitingNavigation";
 
 export type CrmBrowseSelection = Pick<
@@ -1182,6 +1183,7 @@ function CandidateSourceRound({
   research?: Snapshot["research"];
 }) {
   const source = candidate.latestSource;
+  if (source && source.providerTaskId === null) return <Trans>Imported list</Trans>;
   const index = source?.actionId
     ? (research?.actions.findIndex((action) => action.id === source.actionId) ?? -1)
     : -1;
@@ -1383,6 +1385,11 @@ function CandidateSources({
             key={`${source.artifactRef.artifactId}:${source.rowIndex}:${source.effectId}`}
             className="space-y-2 border-s border-border ps-3"
           >
+            {source.providerTaskId === null ? (
+              <p className="text-xs font-medium">
+                <Trans>Imported list</Trans>
+              </p>
+            ) : null}
             {source.roleRevisionId !== roleRevisionId ? (
               <p className="text-xs text-muted-foreground">
                 <Trans>Saved before latest role update</Trans>
@@ -2326,15 +2333,19 @@ function CorrespondenceTabMount({
   conversation,
   refreshSignal,
   onDraftReply,
+  loading,
   fallback,
 }: {
   view: RecruitingWorkspaceView;
-  role?: { roleId: string; spaceId: string };
+  role?: Omit<RecruitingTabProps, "conversation" | "refreshSignal">;
   conversation: { groupId: string } | { botId: string };
   refreshSignal: number;
   onDraftReply?: (email: RecruitingInboxEmail) => void;
+  /** The role binding is still being read. */
+  loading: boolean;
   fallback: ReactNode;
 }) {
+  if (!role && loading) return <TabLoading />;
   if (!role) return <>{fallback}</>;
   const props = { ...role, conversation, refreshSignal };
   if (view === "contacts") return <ContactsTab {...props} />;
@@ -2343,45 +2354,41 @@ function CorrespondenceTabMount({
   return <InboxWithReply {...props} onDraftReply={onDraftReply} />;
 }
 
-type BoundRole = { roleId: string; spaceId: string; title: string };
+type BoundRole = {
+  roleId: string;
+  spaceId: string;
+  title: string;
+  crmTarget: RecruitingCrmTarget;
+};
 
-/** The role conversation's native role when it is bound to a CRM role; `done` once known. */
+/**
+ * The role conversation's native role when it is bound to a CRM role; `done` once known. The
+ * binding is handed to the role tabs so they read CRM rows without re-reading it.
+ */
 function useBoundRole(
   threadId: string,
   enabled: boolean,
   refreshSignal: number,
+  cache: Pick<Props, "readCache" | "readCacheScope">,
 ): { done: boolean; role?: BoundRole } {
-  const key = enabled ? JSON.stringify([threadId, refreshSignal]) : null;
-  const [read, setRead] = useState<{ key: string; role?: BoundRole }>();
-  useEffect(() => {
-    if (!key) return;
-    let cancelled = false;
-    void rpc.recruiting
-      .getWorkspace({ threadId })
-      .then((workspace) => {
-        if (cancelled) return;
-        setRead({
-          key,
-          ...(workspace?.crmTarget
-            ? {
-                role: {
-                  roleId: workspace.role.id,
-                  spaceId: workspace.role.spaceId,
-                  title: workspace.role.title,
-                },
-              }
-            : {}),
-        });
-      })
-      .catch(() => {
-        if (!cancelled) setRead({ key });
-      });
-    return () => {
-      cancelled = true;
-    };
-  }, [key, threadId]);
-  const current = read?.key === key ? read : undefined;
-  return { done: !key || Boolean(current), role: current?.role };
+  const read = useKeyedRead(
+    enabled ? JSON.stringify([threadId, refreshSignal]) : null,
+    async (): Promise<{ role?: BoundRole }> => {
+      const workspace = await rpc.recruiting.getWorkspace({ threadId });
+      return workspace?.crmTarget
+        ? {
+            role: {
+              roleId: workspace.role.id,
+              spaceId: workspace.role.spaceId,
+              title: workspace.role.title,
+              crmTarget: workspace.crmTarget.target,
+            },
+          }
+        : {};
+    },
+    tabCacheSlot(cache, ["boundRole", threadId]),
+  );
+  return { done: !enabled || Boolean(read.data) || read.failed, role: read.data?.role };
 }
 
 function CrmRecruitingPanel({
@@ -2400,8 +2407,17 @@ function CrmRecruitingPanel({
   const [query, setQuery] = useState("");
   const [offset, setOffset] = useState(0);
   const [refresh, setRefresh] = useState(0);
-  const bound = useBoundRole(threadId, Boolean(agent), refreshSignal + refresh);
-  const boundRole = bound.role && { roleId: bound.role.roleId, spaceId: bound.role.spaceId };
+  const bound = useBoundRole(threadId, Boolean(agent), refreshSignal + refresh, {
+    readCache,
+    readCacheScope,
+  });
+  const boundRole = bound.role && {
+    roleId: bound.role.roleId,
+    spaceId: bound.role.spaceId,
+    crmTarget: bound.role.crmTarget,
+    readCache,
+    readCacheScope,
+  };
   // The role tabs read their own CRM data; stored CRM views read only when they are shown.
   const storedCrmReads =
     !agent ||
@@ -3559,6 +3575,7 @@ function CrmRecruitingPanel({
         <CorrespondenceTabMount
           view={browse.view}
           role={boundRole}
+          loading={!bound.done}
           conversation={target}
           refreshSignal={refreshSignal + refresh}
           onDraftReply={
@@ -4070,10 +4087,13 @@ function RecruitingWorkspace({
         (sort === "rank" || sort === "tier" || sort === "score") &&
         !page.sortAvailability[sort]
       ) {
+        // Keep the provider's ordering when one exists: score, then rank, then tier, then name.
+        const fallback =
+          (["score", "rank", "tier"] as const).find((key) => page.sortAvailability[key]) ?? "name";
         setCandidatePage(null);
         setCandidateList((current) => ({
           ...current,
-          filters: { ...current.filters, sort: "name" },
+          filters: { ...current.filters, sort: fallback },
           pageCount: 1,
         }));
         return true;

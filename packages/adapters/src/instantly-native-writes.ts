@@ -112,6 +112,12 @@ export const nativeInstantlyWrites = [
     "Lists leads of a campaign and/or one exact email, with lead id, status and interest.",
   ),
   tool(
+    "get_campaign",
+    CampaignIdInput,
+    true,
+    "Reads one campaign's name, status (0 draft, 1 active, 2 paused, 3 completed) and stop_on_reply.",
+  ),
+  tool(
     "update_lead_interest",
     UpdateLeadInterestInput,
     false,
@@ -295,29 +301,96 @@ async function ensureRoleCampaign(
   }
   // The role id in the name lets a retry adopt a campaign whose create outcome was lost.
   const name = `${role.title} [role ${role.id}]`;
-  const found = await rest("GET", `/campaigns?search=${encodeURIComponent(role.id)}&limit=10`);
-  const adopt = (Array.isArray(found.items) ? (found.items as Record<string, unknown>[]) : []).find(
-    (campaign) => campaign.name === name,
-  );
+  const adopt = await adoptableRoleCampaign(rest, role);
   const campaign = adopt ?? (await createCampaign(rest, { ...input, eaccount, name }));
   if (adopt && adopt.stop_on_reply !== true)
     await rest("PATCH", `/campaigns/${String(adopt.id)}`, { stop_on_reply: true });
   if (typeof campaign.id !== "string") throw new Error("Instantly returned no campaign id");
-  const binding: RoleBinding = { campaignId: campaign.id, campaignName: name, eaccount, leads: {} };
-  // ponytail: no cross-request lock; two concurrent first calls can both create (the unique key
-  // keeps one binding and the retry adopts by name). Add an advisory lock if this ever races.
+  const binding: RoleBinding = {
+    campaignId: campaign.id,
+    campaignName: typeof campaign.name === "string" ? campaign.name : name,
+    eaccount,
+    leads: {},
+  };
+  await recordBinding(prisma, context, key, role.id, serverId, binding);
+  return { created: !adopt, adopted: Boolean(adopt), ...binding };
+}
+
+// ponytail: no cross-request lock; two concurrent first calls can both create (the unique key
+// keeps one binding and the retry adopts by name). Add an advisory lock if this ever races.
+async function recordBinding(
+  prisma: PrismaClient,
+  context: AdapterContext,
+  key: string,
+  roleId: string,
+  serverId: string,
+  binding: RoleBinding,
+) {
   await prisma.externalEffect.create({
     data: {
       spaceId: context.spaceId,
-      runId: context.runId,
+      runId: context.runId!,
       kind: "instantly_role_campaign",
       idempotencyKey: key,
       status: "completed",
-      request: { roleId: role.id, serverId },
+      request: { roleId, serverId },
       result: binding as unknown as Prisma.InputJsonValue,
     },
   });
-  return { created: !adopt, adopted: Boolean(adopt), ...binding };
+}
+
+/** An unbound draft/paused campaign already made for this role: named "<title>…" or "…[role <id>]". */
+async function adoptableRoleCampaign(rest: InstantlyRest, role: { id: string; title: string }) {
+  const items = new Map<string, Record<string, unknown>>();
+  for (const search of new Set([role.id, role.title])) {
+    const found = await rest("GET", `/campaigns?search=${encodeURIComponent(search)}&limit=100`);
+    for (const item of Array.isArray(found.items) ? (found.items as Record<string, unknown>[]) : [])
+      if (typeof item.id === "string") items.set(item.id, item);
+  }
+  const title = role.title.trim().toLowerCase();
+  const matches = [...items.values()].filter(
+    (campaign) =>
+      (campaign.status === 0 || campaign.status === 2) &&
+      typeof campaign.name === "string" &&
+      (campaign.name.trim().toLowerCase().startsWith(title) ||
+        campaign.name.includes(`[role ${role.id}]`)),
+  );
+  if (matches.length < 2) return matches[0];
+  const withLeads = [];
+  for (const campaign of matches) {
+    const leads = await rest("POST", "/leads/list", { campaign: campaign.id, limit: 1 });
+    if (Array.isArray(leads.items) && leads.items.length) withLeads.push(campaign);
+  }
+  const newest = (list: Record<string, unknown>[]) =>
+    list.toSorted((a, b) =>
+      String(b.timestamp_created ?? "").localeCompare(String(a.timestamp_created ?? "")),
+    )[0];
+  return newest(withLeads.length ? withLeads : matches);
+}
+
+/** A campaign created inside a role conversation becomes that role's campaign if it has none. */
+async function bindCreatedCampaign(
+  prisma: PrismaClient,
+  context: AdapterContext,
+  serverId: string,
+  campaign: Record<string, unknown>,
+  eaccount: string,
+) {
+  if (!context.runId || typeof campaign.id !== "string") return;
+  const run = await prisma.run.findFirst({
+    where: { id: context.runId, spaceId: context.spaceId, userId: context.userId },
+    select: { thread: { select: { activeRecruitingRoleId: true } } },
+  });
+  const roleId = run?.thread.activeRecruitingRoleId;
+  if (!roleId) return;
+  const key = bindingKey(serverId, roleId);
+  if (await readBinding(prisma, context, key)) return;
+  await recordBinding(prisma, context, key, roleId, serverId, {
+    campaignId: campaign.id,
+    campaignName: String(campaign.name ?? ""),
+    eaccount,
+    leads: {},
+  });
 }
 
 async function addShortlistLeads(
@@ -419,7 +492,9 @@ export async function runInstantlyWrite(
   switch (toolName) {
     case "native_instantly_create_campaign": {
       const input = CreateCampaignInput.parse(args);
-      return createCampaign(rest, input);
+      const campaign = await createCampaign(rest, input);
+      await bindCreatedCampaign(prisma, context, serverId, campaign, input.eaccount);
+      return campaign;
     }
     case "native_instantly_add_leads": {
       const input = AddLeadsInput.parse(args);
@@ -435,6 +510,15 @@ export async function runInstantlyWrite(
         limit: input.limit,
         ...(input.starting_after ? { starting_after: input.starting_after } : {}),
       });
+    }
+    case "native_instantly_get_campaign": {
+      const campaign = await rest("GET", `/campaigns/${CampaignIdInput.parse(args).campaign_id}`);
+      return {
+        id: campaign.id,
+        name: campaign.name,
+        status: campaign.status,
+        stop_on_reply: campaign.stop_on_reply,
+      };
     }
     case "native_instantly_update_lead_interest":
       return rest("POST", "/leads/update-interest-status", UpdateLeadInterestInput.parse(args));

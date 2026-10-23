@@ -3,6 +3,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 
 const fakeAgentState = vi.hoisted(() => ({
   options: ["Berlin", "Seoul", "Toronto"],
+  question: "Which city should I use?",
   form: undefined as Record<string, unknown> | undefined,
   tools: [] as Array<{
     name: string;
@@ -27,7 +28,7 @@ vi.mock("@earendil-works/pi-agent-core", async (importOriginal) => ({
       const askUser = this.tools.find((tool) => tool.name === "ask_user");
       if (!askUser) throw new Error("ask_user tool missing");
       await askUser.execute("call-choice-1", {
-        question: "Which city should I use?",
+        question: fakeAgentState.question,
         ...(fakeAgentState.form
           ? { requestedSchema: fakeAgentState.form }
           : { options: fakeAgentState.options }),
@@ -103,6 +104,7 @@ describe("Pi choice asks", () => {
     fakeAgentState.tools = [];
     fakeAgentState.options = ["Berlin", "Seoul", "Toronto"];
     fakeAgentState.form = undefined;
+    fakeAgentState.question = "Which city should I use?";
   });
 
   it("emits the standard multi-field schema on the native ask and pauses", async () => {
@@ -152,6 +154,19 @@ describe("Pi choice asks", () => {
     await expect(async () => {
       for await (const event of runtime.run(runRequest, runContext)) events.push(event);
     }).rejects.toThrow("ask_user requires two to four unique, non-empty options");
+    expect(events.some((event) => event.type === "ask")).toBe(false);
+  });
+
+  it.each([
+    "Which city should I use? And what salary range?",
+    "Please answer:\n1. Which city\n2. Which salary range",
+  ])("refuses more than one question in one ask: %s", async (question) => {
+    fakeAgentState.question = question;
+    const runtime = new PiAgentRuntime();
+    const events: AgentRuntimeEvent[] = [];
+    await expect(async () => {
+      for await (const event of runtime.run(runRequest, runContext)) events.push(event);
+    }).rejects.toThrow("Ask one question at a time");
     expect(events.some((event) => event.type === "ask")).toBe(false);
   });
 });

@@ -308,6 +308,7 @@ msgid "Actions for space"
 msgstr ""
 
 #: src/pages/BillingSettingsPanel.tsx
+#: src/pages/recruiting/SequenceTab.tsx
 #: src/pages/RoutineEditor.tsx
 msgid "Active"
 msgstr "활성"
@@ -953,6 +954,10 @@ msgstr ""
 msgid "Bots with their own computer and browser"
 msgstr ""
 
+#: src/pages/recruiting/SequenceTab.tsx
+msgid "Bounced"
+msgstr ""
+
 #: src/pages/memory-providers/SerenitySettingsForm.tsx
 msgid "Brain label"
 msgstr ""
@@ -1451,6 +1456,10 @@ msgstr ""
 msgid "Complete"
 msgstr "완료"
 
+#: src/pages/recruiting/SequenceTab.tsx
+msgid "Completed"
+msgstr ""
+
 #: src/pages/SettingsOverlay.tsx
 #: src/pages/Shell.tsx
 #: src/pages/shell/bot-panel.tsx
@@ -1524,6 +1533,7 @@ msgstr "이 브라우저 세션에서 URL에 연결할 수 있는지 확인한 �
 msgid "Conflicting information"
 msgstr ""
 
+#: src/components/AskCard.tsx
 #: src/components/integrations/IntegrationSetup.tsx
 #: src/pages/memory-providers/SerenitySettingsForm.tsx
 #: src/pages/memory-providers/SupermemorySettingsForm.tsx
@@ -1531,6 +1541,10 @@ msgstr ""
 #: src/pages/VoiceSettingsOverlay.tsx
 msgid "Connect"
 msgstr "연결"
+
+#: src/components/AskCard.tsx
+msgid "Connect {name}"
+msgstr "{name} 연결"
 
 #: src/pages/Onboarding.tsx
 msgid "Connect a model"
@@ -1573,6 +1587,7 @@ msgstr "이 AI 서비스를 연결하면 내 기본 모델로 사용할 수 있�
 msgid "Connect Treg"
 msgstr "Treg 연결"
 
+#: src/components/AskCard.tsx
 #: src/components/integrations/IntegrationSetup.tsx
 #: src/pages/McpOAuthCallback.tsx
 #: src/pages/MemorySettingsOverlay.tsx
@@ -1602,6 +1617,7 @@ msgstr "{0}에 연결하고 기본 모델로 설정했습니다."
 msgid "Connected. Its tools are available from your next message."
 msgstr "연결되었습니다. 다음 메시지부터 이 도구를 사용할 수 있습니다."
 
+#: src/components/AskCard.tsx
 #: src/components/integrations/IntegrationSetup.tsx
 #: src/pages/McpServersOverlay.tsx
 #: src/pages/memory-providers/SerenitySettingsForm.tsx
@@ -1787,6 +1803,10 @@ msgstr "음성 서비스에 연결하지 못했습니다."
 #: src/pages/Shell.tsx
 msgid "Could not connect to the computer screen"
 msgstr ""
+
+#: src/components/AskCard.tsx
+msgid "Could not connect. Try again."
+msgstr "연결하지 못했습니다. 다시 시도하세요."
 
 #: src/components/AccountAccess.tsx
 #: src/lib/account-security.ts
@@ -2077,6 +2097,10 @@ msgstr "서버에 연결할 수 없습니다"
 
 #: src/pages/shell/RecruitingNavigation.tsx
 msgid "Could not read a CRM connection."
+msgstr ""
+
+#: src/pages/recruiting/SequenceTab.tsx
+msgid "Could not read this campaign from Instantly."
 msgstr ""
 
 #: src/pages/RecruitingCorrespondence.tsx
@@ -2693,6 +2717,7 @@ msgstr ""
 msgid "Downloading…"
 msgstr ""
 
+#: src/pages/recruiting/SequenceTab.tsx
 #: src/pages/RecruitingCorrespondence.tsx
 msgid "Draft"
 msgstr ""
@@ -3270,6 +3295,10 @@ msgstr "OpenAPI JSON 가져오기"
 msgid "Important"
 msgstr ""
 
+#: src/pages/RecruitingPanel.tsx
+msgid "Imported list"
+msgstr ""
+
 #: src/lib/ticket-status.ts
 msgid "In progress"
 msgstr ""
@@ -3548,6 +3577,7 @@ msgid "Load earlier messages"
 msgstr "이전 메시지 불러오기"
 
 #: src/pages/Artifacts.tsx
+#: src/pages/recruiting/shared.tsx
 #: src/pages/RecruitingPanel.tsx
 msgid "Load more"
 msgstr ""
@@ -4117,7 +4147,6 @@ msgstr "새 스페이스"
 msgid "New ticket"
 msgstr ""
 
-#: src/pages/recruiting/ContactsTab.tsx
 #: src/pages/RecruitingPanel.tsx
 msgid "Next"
 msgstr ""
@@ -4441,6 +4470,7 @@ msgstr "연결되지 않음"
 msgid "Not in the plugin catalog"
 msgstr "플러그인 카탈로그에 없음"
 
+#: src/components/AskCard.tsx
 #: src/pages/shell/message-cards.tsx
 msgid "Not now"
 msgstr "나중에"
@@ -4776,6 +4806,7 @@ msgstr "API 키를 붙여넣은 뒤 다시 테스트하세요."
 msgid "Pause consideration"
 msgstr ""
 
+#: src/pages/recruiting/SequenceTab.tsx
 #: src/pages/RoutineEditor.tsx
 msgid "Paused"
 msgstr "일시 중지됨"
@@ -4881,7 +4912,6 @@ msgstr ""
 msgid "Preview only. Ask for the complete message to read the full body."
 msgstr ""
 
-#: src/pages/recruiting/ContactsTab.tsx
 #: src/pages/RecruitingPanel.tsx
 msgid "Previous"
 msgstr ""
@@ -6179,7 +6209,6 @@ msgstr "설정 보기"
 msgid "Show transcript"
 msgstr "대화 기록 표시"
 
-#: src/pages/recruiting/InboxTab.tsx
 #: src/pages/recruiting/InterviewTab.tsx
 msgid "Showing the most recent CRM records."
 msgstr ""
@@ -6408,6 +6437,10 @@ msgstr ""
 #: src/pages/RecruitingPanel.tsx
 #: src/pages/Shell.tsx
 msgid "Stop considering"
+msgstr ""
+
+#: src/pages/recruiting/SequenceTab.tsx
+msgid "Stop on reply is off, so Instantly keeps sending follow-ups after a candidate replies."
 msgstr ""
 
 #: src/pages/Shell.tsx
@@ -6878,6 +6911,10 @@ msgstr "고정 해제"
 
 #: src/pages/shell/RecruitingNavigation.tsx
 msgid "Unread"
+msgstr ""
+
+#: src/pages/recruiting/SequenceTab.tsx
+msgid "Unsubscribed"
 msgstr ""
 
 #. placeholder {0}: file.name

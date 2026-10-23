@@ -399,12 +399,6 @@ const RECONNECT_RECRUITING_RETRY_MS = 30_000;
 const VOICE_STATUS_REFRESH_TIMEOUT_MS = 10_000;
 const MOBILE_SIDEBAR_SWIPE_EDGE_PX = 32;
 const MOBILE_SIDEBAR_SWIPE_DISTANCE_PX = 56;
-/** Above one line (~28px); two lines clear this. */
-const COMPOSER_SINGLE_LINE_MAX_PX = 36;
-/** One-line `gap-x-3.5`, subtracted on each side of the text. */
-const COMPOSER_ONE_LINE_GAP_PX = 14;
-/** Narrower than the expand check so a draft at the edge cannot flip. */
-const COMPOSER_COLLAPSE_SLACK_PX = 16;
 
 function threadSnapshotSignal(parent: AbortSignal): AbortSignal {
   return AbortSignal.any([parent, AbortSignal.timeout(THREAD_SNAPSHOT_TIMEOUT_MS)]);
@@ -7429,14 +7423,6 @@ export const Composer = memo(function Composer({
     }
   }, [replyId, quote]);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
-  const [composerExpanded, setComposerExpanded] = useState(false);
-  const attachButtonRef = useRef<HTMLButtonElement>(null);
-  const composerActionsRef = useRef<HTMLDivElement>(null);
-  const composerBarRef = useRef<HTMLDivElement>(null);
-  const composerFieldRef = useRef<HTMLDivElement>(null);
-  const composerLayoutRef = useRef<ComposerLayout | null>(null);
-  const previousExpandedRef = useRef(false);
-  const composerAnimationsRef = useRef<Animation[]>([]);
   const [replyAnnouncement, setReplyAnnouncement] = useState("");
   // What the live region currently holds — a send disarming the reply clears
   // "reply" text, while an explicit cancel must keep "Reply cancelled".
@@ -7494,35 +7480,7 @@ export const Composer = memo(function Composer({
     function syncHeight() {
       const textarea = textareaRef.current;
       if (!textarea) return;
-      const bar = composerBarRef.current;
-      // A chip can switch the grid in this commit; keep the previous box as the animation start.
-      if ((bar?.dataset.expanded === "true") === previousExpandedRef.current) {
-        const layout = readComposerLayout(bar, composerFieldRef.current);
-        if (layout) composerLayoutRef.current = layout;
-      }
-      const contentHeight = measureTextareaHeight(textarea);
-      textarea.style.height = `${contentHeight}px`;
-      if (draft.length === 0) {
-        setComposerExpanded(false);
-        return;
-      }
-      if (contentHeight > COMPOSER_SINGLE_LINE_MAX_PX) {
-        setComposerExpanded(true);
-        return;
-      }
-      const attach = attachButtonRef.current;
-      const actions = composerActionsRef.current;
-      if (!attach || !actions) return;
-      const besideControls =
-        actions.getBoundingClientRect().left -
-        attach.getBoundingClientRect().right -
-        2 * COMPOSER_ONE_LINE_GAP_PX;
-      const heightBeside = measureTextareaHeight(
-        textarea,
-        besideControls - COMPOSER_COLLAPSE_SLACK_PX,
-      );
-      textarea.style.height = `${contentHeight}px`;
-      if (heightBeside <= COMPOSER_SINGLE_LINE_MAX_PX) setComposerExpanded(false);
+      textarea.style.height = `${measureTextareaHeight(textarea)}px`;
     }
 
     syncHeight();
@@ -7791,60 +7749,6 @@ export const Composer = memo(function Composer({
 
   const showComposerPlaceholder =
     draft.length === 0 && selectedSkill === null && selectedMentions.length === 0;
-  const expanded = composerExpanded || selectedSkill !== null || selectedMentions.length > 0;
-
-  useLayoutEffect(() => {
-    if (previousExpandedRef.current === expanded) return;
-    previousExpandedRef.current = expanded;
-    const bar = composerBarRef.current;
-    const field = composerFieldRef.current;
-    const textarea = textareaRef.current;
-    const start = composerLayoutRef.current;
-    if (!bar || !field || !textarea) return;
-    textarea.style.height = `${measureTextareaHeight(textarea)}px`;
-    const resting = readComposerLayout(bar, field);
-    // A send or a cleared draft snaps back; nothing is left to follow.
-    if (
-      !start ||
-      textarea.value === "" ||
-      window.matchMedia("(prefers-reduced-motion: reduce)").matches
-    ) {
-      if (resting) composerLayoutRef.current = resting;
-      return;
-    }
-    if (!resting) return;
-    composerLayoutRef.current = resting;
-    // Grow from the fixed bottom edge so the controls stay put.
-    const timing = { duration: 120, easing: "cubic-bezier(0.2, 0, 0, 1)" };
-    composerAnimationsRef.current = [
-      bar.animate(
-        [
-          { height: `${start.barHeight}px`, overflow: "hidden" },
-          { height: `${resting.barHeight}px`, overflow: "hidden" },
-        ],
-        timing,
-      ),
-      field.animate(
-        [
-          {
-            transform: `translate(${start.fieldX - resting.fieldX}px, ${start.fieldY - resting.fieldY}px)`,
-          },
-          { transform: "none" },
-        ],
-        timing,
-      ),
-    ];
-    return () => {
-      const animations = composerAnimationsRef.current;
-      // A chip removed mid-transition must shrink from the box on screen, not the finished target.
-      if (animations.some((animation) => animation.playState === "running")) {
-        const onScreen = readComposerLayout(composerBarRef.current, composerFieldRef.current);
-        if (onScreen) composerLayoutRef.current = onScreen;
-      }
-      for (const animation of animations) animation.cancel();
-      composerAnimationsRef.current = [];
-    };
-  }, [expanded]);
   const replyName = replyTarget ? (replyTargetName ?? previewMessageText(replyTarget)) : "";
   const replyNameRef = useRef(replyName);
   replyNameRef.current = replyName;
@@ -8062,12 +7966,8 @@ export const Composer = memo(function Composer({
         </div>
       ) : null}
       <div
-        ref={composerBarRef}
         data-testid="composer-bar"
-        data-expanded={expanded}
-        className={`grid grid-cols-[auto_minmax(0,1fr)_auto] content-end items-center rounded-[26px] border border-border bg-background pe-2.5 ps-3 transition-colors focus-within:border-ring ${
-          expanded ? "gap-x-2 gap-y-2 pb-[9px] pt-3" : "gap-x-3.5 py-[9px]"
-        }`}
+        className="grid grid-cols-[auto_minmax(0,1fr)_auto] content-end items-center gap-x-2 gap-y-2 rounded-[26px] border border-border bg-background pb-[9px] pe-2.5 ps-3 pt-3 transition-colors focus-within:border-ring"
       >
         <input
           ref={fileInputRef}
@@ -8078,24 +7978,16 @@ export const Composer = memo(function Composer({
           onChange={(event) => pickAttachments(event.target.files)}
         />
         <Button
-          ref={attachButtonRef}
           variant="ghost"
           size="icon"
           aria-label={t`Attach file`}
           disabled={disabled}
           onClick={() => fileInputRef.current?.click()}
-          className={`col-start-1 size-8 shrink-0 rounded-full border border-border bg-muted text-muted-foreground transition-colors hover:bg-accent hover:text-foreground ${
-            expanded ? "row-start-2" : ""
-          }`}
+          className="col-start-1 row-start-2 size-8 shrink-0 rounded-full border border-border bg-muted text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
         >
           <Plus size={16} strokeWidth={2} />
         </Button>
-        <div
-          ref={composerFieldRef}
-          className={`flex min-w-0 flex-wrap items-end gap-1.5 ${
-            expanded ? "col-span-3 row-start-1 px-1.5" : "col-start-2"
-          }`}
-        >
+        <div className="col-span-3 row-start-1 flex min-w-0 flex-wrap items-end gap-1.5 px-1.5">
           {selectedSkill ? (
             <span
               data-testid="skill-chip"
@@ -8212,16 +8104,11 @@ export const Composer = memo(function Composer({
             name="chat-message"
             autoComplete="off"
             dir="auto"
-            rows={1}
-            className="rk-scroll max-h-25 min-h-[24px] min-w-[8rem] flex-1 resize-none overflow-y-auto bg-transparent py-0.5 text-base leading-6 text-foreground outline-none placeholder:text-muted-foreground disabled:opacity-40"
+            rows={2}
+            className="rk-scroll max-h-60 min-h-12 min-w-[8rem] flex-1 resize-none overflow-y-auto bg-transparent py-0.5 text-base leading-6 text-foreground outline-none placeholder:text-muted-foreground disabled:opacity-40"
           />
         </div>
-        <div
-          ref={composerActionsRef}
-          className={`col-start-3 flex shrink-0 items-center gap-2 justify-self-end ${
-            expanded ? "row-start-2" : ""
-          }`}
-        >
+        <div className="col-start-3 row-start-2 flex shrink-0 items-center gap-2 justify-self-end">
           {onVoice && draft.trim().length === 0 ? (
             <Button
               variant="outline"
@@ -8274,35 +8161,13 @@ export const Composer = memo(function Composer({
   );
 });
 
-type ComposerLayout = { barHeight: number; fieldX: number; fieldY: number };
-
-/** Screen coordinates; the bar grows upward from its bottom edge. */
-function readComposerLayout(
-  bar: HTMLElement | null,
-  field: HTMLElement | null,
-): ComposerLayout | null {
-  if (!bar || !field) return null;
-  const fieldBox = field.getBoundingClientRect();
-  return {
-    barHeight: bar.getBoundingClientRect().height,
-    fieldX: fieldBox.left,
-    fieldY: fieldBox.top,
-  };
-}
-
 /** Hides the scrollbar while measuring and leaves the height at 0. */
-function measureTextareaHeight(textarea: HTMLTextAreaElement, width?: number) {
+function measureTextareaHeight(textarea: HTMLTextAreaElement) {
   const { style } = textarea;
   style.overflowY = "hidden";
-  if (width !== undefined) {
-    style.flex = "none";
-    style.width = `${width}px`;
-  }
   style.height = "0px";
   const height = textarea.scrollHeight;
   style.overflowY = "";
-  style.flex = "";
-  style.width = "";
   return height;
 }
 

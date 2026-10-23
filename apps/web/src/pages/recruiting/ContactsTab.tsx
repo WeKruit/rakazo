@@ -1,17 +1,17 @@
 import { Trans, useLingui } from "@lingui/react/macro";
 import type { RecruitingCorrespondence } from "@rakazo/contracts";
 import { Button } from "@rakazo/ui-web";
-import { useState } from "react";
 import { useRecruitingDetail } from "./detail";
 import type { RecruitingTabProps } from "./shared";
 import {
   CrmGate,
   formatDate,
+  LoadMore,
   statusText,
   TabHeader,
   TabLoading,
   TabNotice,
-  useCrmData,
+  useCrmPages,
   useRoleCrm,
   useSavedCorrespondence,
 } from "./shared";
@@ -43,18 +43,15 @@ function SavedEmails({ lookups }: { lookups: readonly SavedContact[] }) {
   );
 }
 
-const PAGE = 50;
-
 /** The role's CRM contacts with pipeline stage, contact fields and email status. */
 export function ContactsTab(props: RecruitingTabProps) {
   const { t } = useLingui();
   const detail = useRecruitingDetail();
   const crm = useRoleCrm(props);
-  const [offset, setOffset] = useState(0);
-  const people = useCrmData(
+  const people = useCrmPages(
     crm,
     "candidates",
-    crm.status === "ready" ? { crmRoleId: crm.target.crmRoleId, limit: PAGE, offset } : null,
+    crm.status === "ready" ? { crmRoleId: crm.target.crmRoleId } : null,
     props,
   );
   const saved = useSavedCorrespondence(props, "contacts");
@@ -164,26 +161,7 @@ export function ContactsTab(props: RecruitingTabProps) {
           </table>
         </div>
       ) : null}
-      {page && (offset > 0 || page.nextOffset !== null) ? (
-        <div className="mt-3 flex gap-2">
-          <Button
-            variant="outline"
-            size="sm"
-            disabled={offset === 0}
-            onClick={() => setOffset(Math.max(0, offset - PAGE))}
-          >
-            <Trans>Previous</Trans>
-          </Button>
-          <Button
-            variant="outline"
-            size="sm"
-            disabled={page.nextOffset === null}
-            onClick={() => page.nextOffset !== null && setOffset(page.nextOffset)}
-          >
-            <Trans>Next</Trans>
-          </Button>
-        </div>
-      ) : null}
+      <LoadMore pages={people} />
       {unmatched.length ? (
         <section className="mt-6" aria-label={t`Saved contact lookups`}>
           <h3 className="mb-2 text-sm font-semibold">

@@ -378,6 +378,20 @@ export const builtinAgentTools: ConnectorTool[] = [
     inputSchema: AskUserInputJsonSchema,
   },
   {
+    name: "request_connection",
+    description:
+      "When a task needs one of the user's MCP integrations that is not connected to you, show a Connect card and wait; the task resumes after the user connects. Use instead of asking the user to open settings.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        serverId: { type: "string", minLength: 1 },
+        reason: { type: "string", minLength: 1, maxLength: 240 },
+      },
+      required: ["serverId", "reason"],
+      additionalProperties: false,
+    },
+  },
+  {
     name: "message_user",
     description:
       "Post a short progress update to the user in this chat immediately. Does not end your turn. Use sparingly during long work for high-signal beats (what you are checking, then a result). Do not dump tool logs, thinking, or a play-by-play of every call. HARD LIMIT: cut off silently at 500 characters, so never put your final answer, a report, or any long-form content here \u2014 it will arrive mangled and the user will never see the rest. Always write your complete final answer in your normal reply, not here.",
@@ -537,7 +551,7 @@ export const builtinAgentTools: ConnectorTool[] = [
   {
     name: "recruiting_candidates",
     description:
-      'Read saved candidates for the current thread role. List uses {operation:"list",query?,cursor?,limit?}; query matches saved names and profile URLs. Sources uses {operation:"sources",candidateKey,cursor?,limit?} with an exact returned candidateKey and returns verified report fields and source URLs from each selected saved row. Preserve pagination and ambiguity; never choose the first match or invent identities, sources or totals. Use returned reports to answer saved-evidence questions; they are attributed provider findings, not a new assessment. Use artifact_read with the exact artifactRef and rowIndex only for original content not covered by the report; do not reread the same evidence merely to answer. A failed source read does not establish complete evidence. This tool only reads existing saved data and never searches externally or assesses candidates. Internal keys and artifact references are for tool use; speak to the recruiter using candidate names.',
+      'Read saved candidates for the current thread role. Resolve a person named in chat FIRST with {operation:"resolve",nameOrEmail}: it matches the role\'s CRM contacts and saved pool by partial, case- and accent-insensitive name (or exact stored email) and returns each match\'s stored email, LinkedIn and source; "ambiguous" lists every match to disambiguate with the user, and crm "unavailable" means the CRM part is unknown, not empty. Look up correspondence only with a returned stored email; never guess one. List uses {operation:"list",query?,cursor?,limit?}; query matches saved names and profile URLs. Sources uses {operation:"sources",candidateKey,cursor?,limit?} with an exact returned candidateKey and returns verified report fields and source URLs from each selected saved row. Preserve pagination and ambiguity; never choose the first match or invent identities, sources or totals. Use returned reports to answer saved-evidence questions; they are attributed provider findings, not a new assessment. Use artifact_read with the exact artifactRef and rowIndex only for original content not covered by the report; do not reread the same evidence merely to answer. A failed source read does not establish complete evidence. This tool only reads existing saved data and never searches externally or assesses candidates. Internal keys and artifact references are for tool use; speak to the recruiter using candidate names.',
     inputSchema: z.toJSONSchema(RecruitingCandidatesToolInputSchema, { io: "input" }),
     readOnly: true,
   },

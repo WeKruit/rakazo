@@ -936,6 +936,16 @@ body,
   padding: 12px 13px;
   color: var(--muted-foreground);
 }
+/* Row headers (the person) read as cells: no header fill, and long names wrap. */
+[data-product-view="recruiting"] .hire-table tbody th {
+  max-width: 220px;
+  border-top: 1px solid var(--border);
+  background: transparent;
+  color: var(--foreground);
+  font-weight: 500;
+  white-space: normal;
+  overflow-wrap: anywhere;
+}
 [data-product-view="recruiting"] .hire-table td:first-child button {
   display: flex;
   align-items: center;

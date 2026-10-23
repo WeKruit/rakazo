@@ -201,6 +201,7 @@ import {
   claimIntendedEffect,
   completeExternalEffect,
   createApprovedEffectReplayQueue,
+  inputPausedToolResult,
   isToolPauseResult,
   parseCatalogApprovalTarget,
   replaceCompletedExternalEffectResult,
@@ -395,6 +396,7 @@ import {
 import type { RemoteTransportDependencies } from "./remote-mcp.js";
 import { assertSafeRemoteUrl } from "./remote-mcp.js";
 import { loadReplyContext, messageToAgentHistoryText } from "./reply-context.js";
+import { requestConnection } from "./request-connection.js";
 import { lazyRunComputer } from "./run-computer.js";
 import {
   commitConsumedRunSecret,
@@ -4453,6 +4455,44 @@ export function createRunExecutor(deps: ExecutorDeps) {
           return secretPausedToolResult();
         };
 
+        // Like request_secret: an unconnected MCP server pauses on a native connect card.
+        const requestConnectionTool = async (args: Record<string, unknown>) => {
+          let leaseLost = false;
+          const result = await requestConnection(
+            deps.prisma,
+            { spaceId: run.spaceId, userId: run.userId, botId: bot.id, threadId: thread.id },
+            args,
+            async (block) => {
+              if (!(await renewRunLease(deps, runId, workerId, fence))) {
+                leaseLost = true;
+                return;
+              }
+              await workspaceCheckpoint.flush();
+              const paused = await deps.events.pauseRunForInput({
+                spaceId: run.spaceId,
+                threadId: run.threadId,
+                botId: run.botId,
+                runId,
+                attemptId: attempt.id,
+                leaseOwner: workerId,
+                leaseFence: fence,
+                blocks: [block],
+              });
+              if (!paused) throw new Error("Could not pause this run for a connection; try again.");
+              await notifyRun(deps, run, {
+                kind: "help",
+                title: `${bot.name} needs ${block.connection.name}`,
+                body: block.connection.reason,
+                botId: bot.id,
+                threadId: thread.id,
+              });
+            },
+          );
+          if (result) return result;
+          approvalPausePending = true;
+          return leaseLost ? secretPausedToolResult() : inputPausedToolResult();
+        };
+
         const mutatingEffectOccurrences = new Map<string, number>();
         // Declared read-only flag of each dispatched connector call, joined to its completion audit.
         const connectorReadOnly = new Map<string, boolean>();
@@ -4484,6 +4524,7 @@ export function createRunExecutor(deps: ExecutorDeps) {
           if (disabledBuiltinTools.has(name)) {
             return { error: disabledToolError(name) };
           }
+          if (name === "request_connection") return requestConnectionTool(args);
           if (
             name === "write_file" &&
             (Object.hasOwn(args, "content") === Object.hasOwn(args, "artifactId") ||
@@ -7232,7 +7273,7 @@ export function createRunExecutor(deps: ExecutorDeps) {
               return finish(
                 redactConnectorPayload(
                   await executeRecruitingCandidatesTool(
-                    { prisma: deps.prisma, artifacts: deps.artifacts },
+                    { prisma: deps.prisma, artifacts: deps.artifacts, connector: deps.connector },
                     { actor: researchActor.actor, runId, threadId: thread.id, botId: bot.id },
                     args,
                     context,

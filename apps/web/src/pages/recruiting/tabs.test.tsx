@@ -7,8 +7,9 @@ import { afterEach, beforeEach, expect, it, vi } from "vitest";
 const listCandidates = vi.hoisted(() => vi.fn());
 const crmData = vi.hoisted(() => vi.fn());
 const correspondence = vi.hoisted(() => vi.fn());
+const roleCampaign = vi.hoisted(() => vi.fn());
 vi.mock("../../lib/rpc", () => ({
-  rpc: { recruiting: { listCandidates, crmData, correspondence } },
+  rpc: { recruiting: { listCandidates, crmData, correspondence, roleCampaign } },
 }));
 vi.mock("@lingui/react/macro", () => ({
   Trans: ({ children }: { children: ReactNode }) => children,
@@ -362,6 +363,50 @@ it("reads full stored email bodies and exposes the selected email to chat", asyn
   );
 });
 
+it("shows the role's Instantly campaign, its stop-on-reply risk and each lead's status", async () => {
+  crmData.mockImplementation(async (input: { operation: string }) =>
+    input.operation === "candidates"
+      ? candidatesPage
+      : {
+          operation: "roleCampaigns",
+          source,
+          checkedAt,
+          scope: "stored_role_campaigns",
+          crmRoleId: ROLE,
+          items: [],
+          offset: 0,
+          nextOffset: null,
+          nextCursor: null,
+        },
+  );
+  roleCampaign.mockResolvedValue({
+    status: "ready",
+    campaign: { name: "Staff Engineer outreach", status: 2, stopOnReply: false },
+    leads: [
+      { candidateKey: "ada-key", email: "ADA@example.com", status: -1, interestStatus: null },
+    ],
+  });
+  const view = await mount(<SequenceTab {...props} />);
+  await settle();
+  expect(roleCampaign).toHaveBeenCalledWith({ groupId: "group-1" });
+  expect(view.textContent).toContain("Staff Engineer outreach");
+  expect(view.textContent).toContain("Paused");
+  expect(view.querySelector('[role="alert"]')?.textContent).toContain("Stop on reply is off");
+  const ada = [...view.querySelectorAll("button")].find((b) => b.textContent?.includes("Ada"));
+  expect(ada?.textContent).toContain("Replied · Bounced");
+  const ben = [...view.querySelectorAll("button")].find((b) => b.textContent?.includes("Ben"));
+  expect(ben?.textContent).not.toContain("·");
+});
+
+it("shows no campaign section when the role has no bound campaign", async () => {
+  crmData.mockResolvedValue(candidatesPage);
+  roleCampaign.mockResolvedValue({ status: "none", campaign: null, leads: [] });
+  const view = await mount(<SequenceTab {...props} />);
+  await settle();
+  expect(view.textContent).not.toContain("Stop on reply");
+  expect(view.textContent).not.toContain("Paused");
+});
+
 it("derives reply status only from stored message directions", () => {
   expect(replyStatus([])).toBeNull();
   expect(replyStatus([{ direction: "sent", date: "2026-10-20T10:00:00Z" }])).toBe("awaiting");
@@ -442,4 +487,86 @@ it("falls back to this role's interview workflow rows without the stage filter",
   expect(view.textContent).toContain("Ada");
   expect(view.textContent).toContain("Scheduled");
   expect(view.textContent).not.toContain("Ben");
+});
+
+it("totals Sequence statuses over every CRM page, not only the loaded rows", async () => {
+  const people = [
+    ...Array.from({ length: 32 }, (_, i) => ["replied", i] as const),
+    ...Array.from({ length: 9 }, (_, i) => ["reached_out", i] as const),
+    ...Array.from({ length: 9 }, (_, i) => ["not_contacted", i] as const),
+  ].map(([status, i]) =>
+    person(
+      `00000000-0000-4000-8000-${status.length}${String(i).padStart(11, "0")}`,
+      `P${status}${i}`,
+      {
+        outreachStatus: status,
+      },
+    ),
+  );
+  roleCampaign.mockResolvedValue({ status: "none", campaign: null, leads: [] });
+  crmData.mockImplementation(
+    async (input: { operation: string; limit?: number; offset?: number }) => {
+      if (input.operation !== "candidates")
+        return {
+          operation: input.operation,
+          source,
+          checkedAt,
+          items: [],
+          total: 0,
+          offset: 0,
+          nextOffset: null,
+        };
+      const offset = input.offset ?? 0;
+      const items = people.slice(offset, offset + (input.limit ?? 25));
+      const end = offset + items.length;
+      return {
+        ...candidatesPage,
+        items,
+        total: people.length,
+        offset,
+        nextOffset: end < people.length ? end : null,
+      };
+    },
+  );
+  const view = await mount(<SequenceTab {...props} />);
+  await settle();
+  await settle();
+  expect(view.textContent).toContain("Replied · 32");
+  expect(view.textContent).toContain("Reached out · 9");
+  expect(view.textContent).toContain("Not contacted · 9");
+  // The list itself still shows only its first page.
+  expect(view.querySelectorAll("button[aria-pressed]")).toHaveLength(25);
+});
+
+it("keeps Sequence status chips from the loaded rows when totalling fails", async () => {
+  roleCampaign.mockResolvedValue({
+    status: "ready",
+    campaign: {
+      id: "c1",
+      name: "Staff Engineer outreach [role 00000000-0000-4000-8000-000000000002]",
+      status: 0,
+      stopOnReply: true,
+    },
+    leads: [],
+  });
+  crmData.mockImplementation(async (input: { operation: string; limit?: number }) => {
+    if (input.operation === "candidates" && input.limit === 50) throw new Error("503");
+    return input.operation === "candidates"
+      ? candidatesPage
+      : {
+          operation: input.operation,
+          source,
+          checkedAt,
+          items: [],
+          total: 0,
+          offset: 0,
+          nextOffset: null,
+        };
+  });
+  const view = await mount(<SequenceTab {...props} />);
+  await settle();
+  expect(view.textContent).toContain("Replied · 1");
+  expect(view.textContent).toContain("Not contacted · 1");
+  expect(view.textContent).toContain("Staff Engineer outreach");
+  expect(view.textContent).not.toContain("[role");
 });

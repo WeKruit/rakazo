@@ -139,6 +139,7 @@ import {
   RecruitingResearchActionSchema,
   RecruitingResearchSavedObservationSchema,
   RecruitingResearchTaskSchema,
+  RecruitingRoleCampaignSchema,
   RecruitingRoleRevisionSchema,
   RecruitingRoleSchema,
   ReviseRecruitingRoleInput,
@@ -615,6 +616,7 @@ export const appContract = {
         }),
       )
       .output(RecruitingCorrespondenceSchema),
+    roleCampaign: oc.input(threadTarget).output(RecruitingRoleCampaignSchema),
     listFeedback: oc.input(ListRecruitingFeedbackInput).output(ListRecruitingFeedbackOutput),
     readSource: oc.input(ReadRecruitingSourceInput).output(
       z.discriminatedUnion("kind", [

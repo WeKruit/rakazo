@@ -545,7 +545,12 @@ describe("native saved candidate reads", () => {
       await f.run();
       expect(candidateReads).toHaveBeenCalledTimes(3);
       expect(candidateReads).toHaveBeenCalledWith(
-        { prisma: f.prisma, artifacts: expect.objectContaining({ get: expect.any(Function) }) },
+        {
+          prisma: f.prisma,
+          artifacts: expect.objectContaining({ get: expect.any(Function) }),
+          // Only resolve uses the connector, for the role's own CRM contacts.
+          connector: expect.objectContaining({ execute: expect.any(Function) }),
+        },
         expect.objectContaining({
           actor: expect.objectContaining({ spaceId: "space-1", userId: "user-1" }),
           runId: "run-1",

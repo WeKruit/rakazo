@@ -122,16 +122,17 @@ describe("candidate listing and shortlist boundaries", () => {
     });
     expect(f.tx.$queryRaw).toHaveBeenCalledOnce();
     const statement = f.tx.$queryRaw.mock.calls[0]![0] as { sql: string };
-    // Match fields come from the stored occurrence column; saved pages are not re-parsed per
-    // page request (only a not-yet-backfilled occurrence parses its own row).
+    // Match fields come only from the stored occurrence column: no saved-page parse and no
+    // correlated external_effects subquery per row, even for legacy NULL rows (prod 500, 24 s).
     expect(statement.sql).not.toContain("match_rows");
     expect(statement.sql).not.toContain("WITH ORDINALITY");
-    expect(statement.sql).toContain('COALESCE(o."matchFields", (');
-    expect(statement.sql).toContain('o."matchFields" IS NULL) AS "matchBackfill"');
+    expect(statement.sql).toContain(`COALESCE(o."matchFields", '{}'::jsonb)`);
+    expect(statement.sql).not.toContain("external_effects");
+    expect(statement.sql).not.toContain("structuredContent");
+    expect(statement.sql).not.toContain("matchBackfill");
     expect(statement.sql).toContain("totals LEFT JOIN candidate_page ON true");
-    expect(f.backfill).not.toHaveBeenCalled();
   });
-  it("backfills stored match fields once, after the authorized read, only when some are missing", async () => {
+  it("backfills legacy NULL match fields owner-scoped, before the read snapshot", async () => {
     const f = fixture();
     const totals = {
       total: 0n,
@@ -146,19 +147,17 @@ describe("candidate listing and shortlist boundaries", () => {
       shortlistedCount: 0n,
       candidateKey: null,
     };
-    f.tx.$queryRaw.mockResolvedValueOnce([{ ...totals, matchBackfill: true }]);
+    f.tx.$queryRaw.mockResolvedValueOnce([totals]);
     await recruiting.listRecruitingCandidates(f.prisma, actor, { roleId: "role" });
     expect(f.backfill).toHaveBeenCalledOnce();
-    expect(f.backfill.mock.invocationCallOrder[0]).toBeGreaterThan(
+    expect(f.backfill.mock.invocationCallOrder[0]).toBeLessThan(
       f.tx.$queryRaw.mock.invocationCallOrder[0]!,
     );
     const update = f.backfill.mock.calls[0]![0] as { sql: string; values: unknown[] };
     expect(update.sql).toContain('UPDATE "recruiting_candidate_occurrences" o SET "matchFields"');
     expect(update.sql).toContain('o."matchFields" IS NULL');
-    expect(update.values).toContain("role");
-    f.tx.$queryRaw.mockResolvedValueOnce([{ ...totals, matchBackfill: false }]);
-    await recruiting.listRecruitingCandidates(f.prisma, actor, { roleId: "role" });
-    expect(f.backfill).toHaveBeenCalledOnce();
+    expect(update.sql).toContain('r."spaceId" = ? AND r."userId" = ?');
+    expect(update.values).toEqual(expect.arrayContaining(["role", actor.spaceId, actor.userId]));
   });
   it.each(["rank", "score"] as const)(
     "authorizes before querying candidate %s data",
@@ -1118,7 +1117,10 @@ function observationFixture(rows: readonly unknown[] | undefined) {
       ]),
     },
   };
-  const prisma = { $transaction: vi.fn(async (fn) => fn(tx)) } as unknown as PrismaClient;
+  const prisma = {
+    $executeRaw: vi.fn(async () => 0),
+    $transaction: vi.fn(async (fn) => fn(tx)),
+  } as unknown as PrismaClient;
   const input = {
     runId: "run",
     actionId: "action",
@@ -1512,7 +1514,10 @@ function crmFixture(additionalRows: readonly unknown[] = []) {
       ),
     },
   };
-  const prisma = { $transaction: vi.fn(async (fn) => fn(tx)) } as unknown as PrismaClient;
+  const prisma = {
+    $executeRaw: vi.fn(async () => 0),
+    $transaction: vi.fn(async (fn) => fn(tx)),
+  } as unknown as PrismaClient;
   return {
     prisma,
     tx,
@@ -2434,7 +2439,10 @@ async function replyFixture() {
         ? ["get_crm_candidate_outreach_context"]
         : ["get_email", "list_emails", "reply_to_email"],
   }));
-  const prisma = { $transaction: vi.fn(async (fn) => fn(tx)) } as unknown as PrismaClient;
+  const prisma = {
+    $executeRaw: vi.fn(async () => 0),
+    $transaction: vi.fn(async (fn) => fn(tx)),
+  } as unknown as PrismaClient;
   const input = {
     roleId: "role",
     expectedRoleRevision: 1,
@@ -4596,7 +4604,10 @@ function nativeCandidateFixture() {
       }),
     },
   };
-  const prisma = { $transaction: vi.fn(async (fn) => fn(tx)) } as unknown as PrismaClient;
+  const prisma = {
+    $executeRaw: vi.fn(async () => 0),
+    $transaction: vi.fn(async (fn) => fn(tx)),
+  } as unknown as PrismaClient;
   const trusted = {
     runId: "run",
     leaseOwner: "worker",
@@ -5103,6 +5114,7 @@ describe("native candidate source provenance", () => {
       const f = {
         ...base,
         prisma: {
+          $executeRaw: vi.fn(async () => 0),
           $transaction: vi.fn(async (fn: (tx: typeof base.tx) => Promise<unknown>) => {
             inTransaction = true;
             try {
@@ -5509,7 +5521,10 @@ describe("native candidate source provenance", () => {
         ...f.tx,
         recruitingCandidatePage: { ...f.tx.recruitingCandidatePage, findMany },
       };
-      const prisma = { $transaction: vi.fn(async (fn) => fn(tx)) } as unknown as PrismaClient;
+      const prisma = {
+        $executeRaw: vi.fn(async () => 0),
+        $transaction: vi.fn(async (fn) => fn(tx)),
+      } as unknown as PrismaClient;
       const result =
         operation === "list"
           ? recruiting.listRecruitingCandidates(prisma, actor, { roleId: "role" })
@@ -5557,7 +5572,10 @@ describe("native candidate source provenance", () => {
         findMany: vi.fn(async () => [{ ...f.page, effect: f.read }]),
       },
     };
-    const prisma = { $transaction: vi.fn(async (fn) => fn(tx)) } as unknown as PrismaClient;
+    const prisma = {
+      $executeRaw: vi.fn(async () => 0),
+      $transaction: vi.fn(async (fn) => fn(tx)),
+    } as unknown as PrismaClient;
     expect(
       (await recruiting.listRecruitingResearch(prisma, actor, { roleId: "role" })).observations,
     ).toHaveLength(1);
@@ -5660,7 +5678,10 @@ describe("native candidate source provenance", () => {
       recruitingResearchTask: { findMany: vi.fn(async () => []) },
       recruitingCandidatePage: { findMany: vi.fn(async () => pages) },
     };
-    const prisma = { $transaction: vi.fn(async (fn) => fn(tx)) } as unknown as PrismaClient;
+    const prisma = {
+      $executeRaw: vi.fn(async () => 0),
+      $transaction: vi.fn(async (fn) => fn(tx)),
+    } as unknown as PrismaClient;
     f.tx.thread.findFirst.mockClear();
     const result = await recruiting.listRecruitingResearch(prisma, actor, { roleId: "role" });
     expect(result.observations.map((page) => page.effectId)).toEqual(
@@ -5696,7 +5717,10 @@ describe("native candidate source provenance", () => {
         findMany: vi.fn(async () => [{ ...f.page, effect: f.read }]),
       },
     };
-    const prisma = { $transaction: vi.fn(async (fn) => fn(tx)) } as unknown as PrismaClient;
+    const prisma = {
+      $executeRaw: vi.fn(async () => 0),
+      $transaction: vi.fn(async (fn) => fn(tx)),
+    } as unknown as PrismaClient;
     const result = await recruiting.listRecruitingResearch(prisma, actor, { roleId: "role" });
     expect(result).toEqual({
       tasks: [],
@@ -5966,7 +5990,10 @@ describe("native candidate source provenance", () => {
         ...f.tx,
         recruitingCandidatePage: { ...f.tx.recruitingCandidatePage, findMany },
       };
-      const prisma = { $transaction: vi.fn(async (fn) => fn(tx)) } as unknown as PrismaClient;
+      const prisma = {
+        $executeRaw: vi.fn(async () => 0),
+        $transaction: vi.fn(async (fn) => fn(tx)),
+      } as unknown as PrismaClient;
       if (boundary === "artifact-hash") f.artifact.hash = "f".repeat(64);
       const result = recruiting.listRecruitingCandidates(
         prisma,

@@ -226,6 +226,24 @@ export const AskUserInputSchema = z.union([
 ]);
 export const AskUserInputJsonSchema = z.toJSONSchema(AskUserInputSchema);
 
+/** An integration the agent needs the user to connect, shown as a connect card. */
+export const AskConnectionSchema = z.strictObject({
+  /** The MCP server whose existing OAuth flow the card runs. */
+  serverId: Id,
+  name: z.string().trim().min(1).max(80),
+  iconUrl: z
+    .string()
+    .url()
+    .refine((value) => value.startsWith("https://"), "Expected an HTTPS icon URL")
+    .optional(),
+  /** One sentence on why the agent needs it. */
+  reason: z.string().trim().min(1).max(240),
+});
+export type AskConnection = z.infer<typeof AskConnectionSchema>;
+/** The answer a connect card sends; the runtime still verifies the connection itself. */
+export const ConnectionAskAnswer = z.enum(["connected", "not_connected"]);
+export type ConnectionAskAnswer = z.infer<typeof ConnectionAskAnswer>;
+
 export const AskBlockSchema = z
   .object({
     kind: z.literal("ask"),
@@ -243,6 +261,7 @@ export const AskBlockSchema = z
     answer: z.string().optional(),
     requestedSchema: AskRequestedSchema.optional(),
     formResponse: AskFormResponseSchema.optional(),
+    connection: AskConnectionSchema.optional(),
     actions: z
       .array(
         z.object({
@@ -262,6 +281,17 @@ export const AskBlockSchema = z
         !block.credential &&
         !block.actions?.length),
     "A form cannot be an approval, secret or choice card",
+  )
+  .refine(
+    (block) =>
+      !block.connection ||
+      (!block.requestedSchema &&
+        !block.approvalEffectId &&
+        block.input !== "secret" &&
+        !block.purpose &&
+        !block.credential &&
+        !block.actions?.length),
+    "A connect card cannot be a form, approval, secret or choice card",
   )
   .refine(
     (block) => !block.formResponse || Boolean(block.requestedSchema && block.status === "answered"),

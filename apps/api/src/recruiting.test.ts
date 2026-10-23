@@ -4992,3 +4992,106 @@ describe("live CRM browser reads", () => {
     ).rejects.toThrow();
   });
 });
+
+describe("role campaign read", () => {
+  const target = {
+    kind: "group" as const,
+    groupId: "role-group",
+    threadId: "role-thread",
+    groupName: "Role",
+    memberBotIds: ["main", "outreach"],
+    members: [],
+  };
+  const CAMPAIGN = "00000000-0000-4000-8000-0000000000c1";
+  function fixture(effect: unknown) {
+    const calls: ConnectorCall[] = [];
+    const findUnique = vi.fn(async () => effect);
+    const deps = {
+      prisma: {
+        botMcpServer: {
+          findFirst: vi.fn(async () => ({
+            botId: "outreach",
+            allowAllTools: false,
+            allowedTools: ["list_emails", "get_email"],
+            server: { id: "instantly", revision: 4 },
+          })),
+        },
+        externalEffect: { findUnique },
+      } as unknown as PrismaClient,
+      connectors: {
+        async *execute(call: ConnectorCall) {
+          calls.push(call);
+          yield {
+            type: "result" as const,
+            data: {
+              structuredContent: {
+                source: "local_native_instantly_rest",
+                result:
+                  call.route?.toolName === "native_instantly_get_campaign"
+                    ? { id: CAMPAIGN, name: "Staff [role]", status: 1, stop_on_reply: false }
+                    : {
+                        items: [
+                          {
+                            id: "l1",
+                            email: "Ada@Example.test",
+                            status: -1,
+                            lt_interest_status: 1,
+                          },
+                          { id: "l2", email: "other@example.test", status: 1 },
+                        ],
+                      },
+              },
+            },
+          };
+        },
+      },
+    };
+    return { deps, calls, findUnique };
+  }
+  beforeEach(() =>
+    vi.mocked(db.getRecruitingWorkspace).mockResolvedValue({ role: { id: "role" } } as never),
+  );
+
+  it("reads the bound campaign and its leads only through read-only native tools", async () => {
+    const f = fixture({
+      spaceId: actor.spaceId,
+      status: "completed",
+      result: {
+        campaignId: CAMPAIGN,
+        campaignName: "Staff [role]",
+        eaccount: "team@example.test",
+        leads: { "ada-key": { leadId: "l1", email: "ada@example.test" } },
+      },
+    });
+    const output = await api.getRecruitingRoleCampaign(f.deps, actor, target);
+    expect(f.findUnique).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: { idempotencyKey: "instantly-role-campaign:instantly:role" },
+      }),
+    );
+    expect(f.calls.map((call) => [call.route?.toolName, call.args])).toEqual([
+      ["native_instantly_get_campaign", { campaign_id: CAMPAIGN }],
+      ["native_instantly_list_leads", { campaign_id: CAMPAIGN, limit: 100 }],
+    ]);
+    expect(output).toEqual({
+      status: "ready",
+      campaign: { name: "Staff [role]", status: 1, stopOnReply: false },
+      leads: [
+        { candidateKey: "ada-key", email: "Ada@Example.test", status: -1, interestStatus: 1 },
+        { candidateKey: null, email: "other@example.test", status: 1, interestStatus: null },
+      ],
+    });
+  });
+
+  it("reports no campaign without a binding in the actor's space", async () => {
+    for (const effect of [null, { spaceId: "other", status: "completed", result: {} }]) {
+      const f = fixture(effect);
+      expect(await api.getRecruitingRoleCampaign(f.deps, actor, target)).toEqual({
+        status: "none",
+        campaign: null,
+        leads: [],
+      });
+      expect(f.calls).toEqual([]);
+    }
+  });
+});

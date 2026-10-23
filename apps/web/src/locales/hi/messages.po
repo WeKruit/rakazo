@@ -308,6 +308,7 @@ msgid "Actions for space"
 msgstr ""
 
 #: src/pages/BillingSettingsPanel.tsx
+#: src/pages/recruiting/SequenceTab.tsx
 #: src/pages/RoutineEditor.tsx
 msgid "Active"
 msgstr ""
@@ -953,6 +954,10 @@ msgstr ""
 msgid "Bots with their own computer and browser"
 msgstr ""
 
+#: src/pages/recruiting/SequenceTab.tsx
+msgid "Bounced"
+msgstr ""
+
 #: src/pages/memory-providers/SerenitySettingsForm.tsx
 msgid "Brain label"
 msgstr ""
@@ -1451,6 +1456,10 @@ msgstr ""
 msgid "Complete"
 msgstr "पूर्ण"
 
+#: src/pages/recruiting/SequenceTab.tsx
+msgid "Completed"
+msgstr ""
+
 #: src/pages/SettingsOverlay.tsx
 #: src/pages/Shell.tsx
 #: src/pages/shell/bot-panel.tsx
@@ -1524,6 +1533,7 @@ msgstr "पुष्टि करें कि यह URL इस ब्राउ
 msgid "Conflicting information"
 msgstr ""
 
+#: src/components/AskCard.tsx
 #: src/components/integrations/IntegrationSetup.tsx
 #: src/pages/memory-providers/SerenitySettingsForm.tsx
 #: src/pages/memory-providers/SupermemorySettingsForm.tsx
@@ -1531,6 +1541,10 @@ msgstr ""
 #: src/pages/VoiceSettingsOverlay.tsx
 msgid "Connect"
 msgstr "कनेक्ट करें"
+
+#: src/components/AskCard.tsx
+msgid "Connect {name}"
+msgstr "{name} कनेक्ट करें"
 
 #: src/pages/Onboarding.tsx
 msgid "Connect a model"
@@ -1573,6 +1587,7 @@ msgstr "इस प्रोवाइडर को अपने व्यक्�
 msgid "Connect Treg"
 msgstr "Treg कनेक्ट करें"
 
+#: src/components/AskCard.tsx
 #: src/components/integrations/IntegrationSetup.tsx
 #: src/pages/McpOAuthCallback.tsx
 #: src/pages/MemorySettingsOverlay.tsx
@@ -1602,6 +1617,7 @@ msgstr "{0} कनेक्ट किया गया और उपयोग म
 msgid "Connected. Its tools are available from your next message."
 msgstr "कनेक्टेड। इसके टूल आपके अगले संदेश से उपलब्ध हैं।"
 
+#: src/components/AskCard.tsx
 #: src/components/integrations/IntegrationSetup.tsx
 #: src/pages/McpServersOverlay.tsx
 #: src/pages/memory-providers/SerenitySettingsForm.tsx
@@ -1787,6 +1803,10 @@ msgstr "यह आवाज़ प्रोवाइडर कनेक्ट �
 #: src/pages/Shell.tsx
 msgid "Could not connect to the computer screen"
 msgstr ""
+
+#: src/components/AskCard.tsx
+msgid "Could not connect. Try again."
+msgstr "कनेक्ट नहीं हो सका। फिर से कोशिश करें।"
 
 #: src/components/AccountAccess.tsx
 #: src/lib/account-security.ts
@@ -2077,6 +2097,10 @@ msgstr "सर्वर से संपर्क नहीं हो सका"
 
 #: src/pages/shell/RecruitingNavigation.tsx
 msgid "Could not read a CRM connection."
+msgstr ""
+
+#: src/pages/recruiting/SequenceTab.tsx
+msgid "Could not read this campaign from Instantly."
 msgstr ""
 
 #: src/pages/RecruitingCorrespondence.tsx
@@ -2693,6 +2717,7 @@ msgstr ""
 msgid "Downloading…"
 msgstr ""
 
+#: src/pages/recruiting/SequenceTab.tsx
 #: src/pages/RecruitingCorrespondence.tsx
 msgid "Draft"
 msgstr ""
@@ -3270,6 +3295,10 @@ msgstr "OpenAPI JSON इम्पोर्ट करें"
 msgid "Important"
 msgstr ""
 
+#: src/pages/RecruitingPanel.tsx
+msgid "Imported list"
+msgstr ""
+
 #: src/lib/ticket-status.ts
 msgid "In progress"
 msgstr ""
@@ -3548,6 +3577,7 @@ msgid "Load earlier messages"
 msgstr "पुराने संदेश लोड करें"
 
 #: src/pages/Artifacts.tsx
+#: src/pages/recruiting/shared.tsx
 #: src/pages/RecruitingPanel.tsx
 msgid "Load more"
 msgstr ""
@@ -4117,7 +4147,6 @@ msgstr ""
 msgid "New ticket"
 msgstr ""
 
-#: src/pages/recruiting/ContactsTab.tsx
 #: src/pages/RecruitingPanel.tsx
 msgid "Next"
 msgstr ""
@@ -4441,6 +4470,7 @@ msgstr "कनेक्ट नहीं है"
 msgid "Not in the plugin catalog"
 msgstr ""
 
+#: src/components/AskCard.tsx
 #: src/pages/shell/message-cards.tsx
 msgid "Not now"
 msgstr "अभी नहीं"
@@ -4776,6 +4806,7 @@ msgstr "अपनी API कुंजी पेस्ट करें, फिर
 msgid "Pause consideration"
 msgstr ""
 
+#: src/pages/recruiting/SequenceTab.tsx
 #: src/pages/RoutineEditor.tsx
 msgid "Paused"
 msgstr ""
@@ -4881,7 +4912,6 @@ msgstr ""
 msgid "Preview only. Ask for the complete message to read the full body."
 msgstr ""
 
-#: src/pages/recruiting/ContactsTab.tsx
 #: src/pages/RecruitingPanel.tsx
 msgid "Previous"
 msgstr ""
@@ -6179,7 +6209,6 @@ msgstr "सेटिंग्स दिखाएं"
 msgid "Show transcript"
 msgstr "ट्रांसक्रिप्ट दिखाएँ"
 
-#: src/pages/recruiting/InboxTab.tsx
 #: src/pages/recruiting/InterviewTab.tsx
 msgid "Showing the most recent CRM records."
 msgstr ""
@@ -6408,6 +6437,10 @@ msgstr ""
 #: src/pages/RecruitingPanel.tsx
 #: src/pages/Shell.tsx
 msgid "Stop considering"
+msgstr ""
+
+#: src/pages/recruiting/SequenceTab.tsx
+msgid "Stop on reply is off, so Instantly keeps sending follow-ups after a candidate replies."
 msgstr ""
 
 #: src/pages/Shell.tsx
@@ -6878,6 +6911,10 @@ msgstr "पिन हटाएं"
 
 #: src/pages/shell/RecruitingNavigation.tsx
 msgid "Unread"
+msgstr ""
+
+#: src/pages/recruiting/SequenceTab.tsx
+msgid "Unsubscribed"
 msgstr ""
 
 #. placeholder {0}: file.name
