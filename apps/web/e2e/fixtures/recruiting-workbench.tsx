@@ -2,8 +2,15 @@ import { I18nProvider } from "@lingui/react";
 import type { Group, RecruitingCandidate } from "@rakazo/contracts";
 import { useState } from "react";
 import { createRoot } from "react-dom/client";
+import { BrowserRouter } from "react-router-dom";
 import { bootstrapI18n, i18n } from "../../src/lib/i18n";
 import { RecruitingPanel } from "../../src/pages/RecruitingPanel";
+import { ResizableSidePanel } from "../../src/pages/ResizableSidePanel";
+import {
+  RecruitingDetailPanel,
+  RecruitingDetailProvider,
+  useRecruitingDetailController,
+} from "../../src/pages/recruiting";
 import type { RecruitingWorkspaceView } from "../../src/pages/shell/RecruitingNavigation";
 import { RecruitingNavigation } from "../../src/pages/shell/RecruitingNavigation";
 import "../../src/styles.css";
@@ -245,6 +252,17 @@ function crmData(input: Record<string, unknown>) {
       offset: 0,
       nextOffset: null,
     };
+  if (op === "mail")
+    return {
+      operation: "mail",
+      source,
+      checkedAt,
+      scope: "stored_candidate_correspondence",
+      candidateId: input.candidateId,
+      items: page(mail.filter((item) => item.candidateId === input.candidateId)),
+      nativeCorrespondence: [],
+      nextCursor: null,
+    };
   if (op === "roleMail")
     return {
       operation: "roleMail",
@@ -384,64 +402,80 @@ const roleGroups: Group[] = [
 function Workbench() {
   const [current, setCurrent] = useState<RecruitingWorkspaceView>(view);
   const [candidateId, setCandidateId] = useState<string>();
+  const detail = useRecruitingDetailController("thread-0");
   return (
-    <main data-product-view="recruiting" className="flex h-dvh bg-background text-foreground">
-      <aside
-        data-testid="role-list"
-        className="hidden w-[248px] shrink-0 flex-col border-e border-sidebar-border bg-sidebar pt-6 md:flex"
-      >
-        <RecruitingNavigation
-          groups={roleGroups}
-          archivedGroups={[]}
-          archivedOpen={false}
-          groupId="group-0"
-          query=""
-          view={current}
-          onView={setCurrent}
-          onCollapse={() => undefined}
-          canOpenDashboard
-          canCreateRole={false}
-          onQueryChange={() => undefined}
-          onOpenRole={() => undefined}
-          onNewRole={() => undefined}
-          canCreateRoleFrom={() => false}
-          onNewRoleFrom={() => undefined}
-          onRoleMenu={() => undefined}
-          onToggleArchived={() => undefined}
-          onRestoreRole={() => undefined}
-        />
-      </aside>
-      <div className="rk-scroll recruiting-workspace-main min-h-0 min-w-0 flex-1 overflow-y-auto">
-        <RecruitingPanel
-          threadId="thread-0"
-          groupId="group-0"
-          onClose={() => undefined}
-          roleConversation
-          crmBrowse={{
-            selection: {
-              serverId: source.serverId,
-              serverRevision: source.serverRevision,
-              organizationId: ORG,
-              crmRoleId: CRM_ROLE,
-            },
-            view: current,
-            candidateId,
-            onSelectCandidate: (id, next = "inbox") => {
-              setCandidateId(id);
-              setCurrent(next);
-            },
-            onDraftReply: () => undefined,
-          }}
-        />
-      </div>
-    </main>
+    <RecruitingDetailProvider value={detail}>
+      <main data-product-view="recruiting" className="flex h-dvh bg-background text-foreground">
+        <aside
+          data-testid="role-list"
+          className="hidden w-[248px] shrink-0 flex-col border-e border-sidebar-border bg-sidebar pt-6 md:flex"
+        >
+          <RecruitingNavigation
+            groups={roleGroups}
+            archivedGroups={[]}
+            archivedOpen={false}
+            groupId="group-0"
+            query=""
+            view={current}
+            onView={setCurrent}
+            onCollapse={() => undefined}
+            canOpenDashboard
+            canCreateRole={false}
+            onQueryChange={() => undefined}
+            onOpenRole={() => undefined}
+            onNewRole={() => undefined}
+            canCreateRoleFrom={() => false}
+            onNewRoleFrom={() => undefined}
+            onRoleMenu={() => undefined}
+            onToggleArchived={() => undefined}
+            onRestoreRole={() => undefined}
+          />
+        </aside>
+        <div className="rk-scroll recruiting-workspace-main min-h-0 min-w-0 flex-1 overflow-y-auto">
+          <RecruitingPanel
+            threadId="thread-0"
+            groupId="group-0"
+            onClose={() => undefined}
+            roleConversation
+            crmBrowse={{
+              selection: {
+                serverId: source.serverId,
+                serverRevision: source.serverRevision,
+                organizationId: ORG,
+                crmRoleId: CRM_ROLE,
+              },
+              view: current,
+              candidateId,
+              onSelectCandidate: (id, next = "inbox") => {
+                setCandidateId(id);
+                setCurrent(next);
+              },
+              onDraftReply: () => undefined,
+            }}
+          />
+        </div>
+        <ResizableSidePanel
+          open={Boolean(detail.current)}
+          panel="recruiting-detail"
+          botsSidebarCollapsed
+        >
+          <RecruitingDetailPanel
+            controller={detail}
+            onAskChat={() => undefined}
+            onDraftReply={() => undefined}
+          />
+        </ResizableSidePanel>
+      </main>
+    </RecruitingDetailProvider>
   );
 }
 
 void bootstrapI18n("en").then(() => {
   createRoot(document.getElementById("root")!).render(
     <I18nProvider i18n={i18n}>
-      <Workbench />
+      <BrowserRouter>
+        <Workbench />
+      </BrowserRouter>
     </I18nProvider>,
   );
 });
