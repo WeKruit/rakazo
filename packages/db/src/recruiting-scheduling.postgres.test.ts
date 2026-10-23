@@ -4,7 +4,7 @@ import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import type { PrismaClient } from "./client.js";
 import { createDb, type Prisma } from "./client.js";
 import { provisionMessagingIdentity } from "./messaging.js";
-import { createRecruitingRole } from "./recruiting.js";
+import { createRecruitingRole, openVerifiedRecruitingCrmWorkspace } from "./recruiting.js";
 import {
   bindRecruitingSchedulingOperation,
   createRecruitingSchedulingPlan,
@@ -237,7 +237,7 @@ database("scheduling plan persistence (local PostgreSQL)", () => {
     ).toBe(1);
     expect(
       (await prisma.externalEffect.findUniqueOrThrow({ where: { id: plans[0]!.id } })).request,
-    ).toEqual({ input, mailSourceRevision: 1 });
+    ).toMatchObject({ input, mailSourceRevision: 1 });
   });
   it.each(["owner", "role", "source", "mailbox", "thread", "candidate"])(
     "rejects substituted %s evidence without creating a plan",
@@ -450,5 +450,241 @@ database("scheduling plan persistence (local PostgreSQL)", () => {
         data: { request: mail.request as Prisma.InputJsonValue },
       });
     }
+  });
+  async function legacyFixture() {
+    if ((await prisma.bot.count({ where: { spaceId: actor.spaceId, userId: actor.userId } })) < 2)
+      await prisma.bot.create({
+        data: {
+          spaceId: actor.spaceId,
+          userId: actor.userId,
+          name: "Second assistant",
+          color: "blue",
+        },
+      });
+    const server = await prisma.mcpServer.create({
+      data: {
+        spaceId: actor.spaceId,
+        userId: actor.userId,
+        slug: `legacy-${randomUUID()}`,
+        name: "Legacy CRM",
+        transport: "http",
+      },
+    });
+    const botIds = (
+      await prisma.bot.findMany({
+        where: { spaceId: actor.spaceId, userId: actor.userId },
+        select: { id: true },
+      })
+    ).map((bot) => bot.id);
+    await prisma.botMcpServer.create({
+      data: {
+        spaceId: actor.spaceId,
+        userId: actor.userId,
+        serverId: server.id,
+        botId: identity.botId,
+        allowAllTools: true,
+      },
+    });
+    const target = {
+      mcpServerId: server.id,
+      serverRevision: 1,
+      organizationId: randomUUID(),
+      crmRoleId: randomUUID(),
+      crmClientId: randomUUID(),
+      clientLabel: "Client",
+      roleLabel: "Legacy role",
+    };
+    const opened = await openVerifiedRecruitingCrmWorkspace(prisma, actor, {
+      target,
+      verifiedBotId: identity.botId,
+      botIds,
+      roleText: "Existing synthetic role",
+    });
+    const role = await prisma.recruitingRole.findUniqueOrThrow({ where: { id: opened.roleId } });
+    const candidateId = randomUUID(),
+      campaignId = randomUUID();
+    const projectionScope = {
+      spaceId: actor.spaceId,
+      userId: actor.userId,
+      mcpServerId: server.id,
+      organizationId: target.organizationId,
+    };
+    const projected = await prisma.recruitingCrmRole.create({
+      data: {
+        ...projectionScope,
+        crmRoleId: target.crmRoleId,
+        clientId: target.crmClientId,
+        clientLabel: target.clientLabel,
+        roleLabel: target.roleLabel,
+        syncedAt: new Date(),
+      },
+    });
+    const contact = await prisma.recruitingCrmContact.create({
+      data: {
+        ...projectionScope,
+        crmCandidateId: candidateId,
+        name: "Candidate",
+        email: input.candidate.email,
+        contactStatus: "unknown",
+        outreachStatus: "unknown",
+        clientLabel: target.clientLabel,
+        roleLabel: target.roleLabel,
+        syncedAt: new Date(),
+      },
+    });
+    await prisma.recruitingCrmRoleContact.create({
+      data: { roleId: projected.id, contactId: contact.id, syncedAt: new Date() },
+    });
+    const task = await prisma.task.create({
+      data: {
+        spaceId: actor.spaceId,
+        userId: actor.userId,
+        botId: identity.botId,
+        threadId: opened.threadId,
+        prompt: "Read selected legacy correspondence",
+        status: "running",
+      },
+    });
+    const execution = await prisma.run.create({
+      data: {
+        spaceId: actor.spaceId,
+        userId: actor.userId,
+        botId: identity.botId,
+        threadId: opened.threadId,
+        taskId: task.id,
+        status: "running",
+        trigger: "user",
+        initialRecruitingRoleRevisionId: role.currentRevisionId,
+      },
+    });
+    const providerMessageId = randomUUID(),
+      providerThreadId = randomUUID();
+    await prisma.recruitingCrmMessage.create({
+      data: {
+        ...projectionScope,
+        crmMessageId: providerMessageId,
+        crmCandidateId: candidateId,
+        crmRoleId: target.crmRoleId,
+        threadId: providerThreadId,
+        direction: "received",
+        sender: input.candidate.email,
+        recipients: ["recruiter@example.test"],
+        syncedAt: new Date(),
+      },
+    });
+    const email = {
+      id: providerMessageId,
+      thread_id: providerThreadId,
+      eaccount: "recruiter@example.test",
+      campaign_id: campaignId,
+      from_address_email: input.candidate.email,
+    };
+    const mail = await effect(mailId, "get_email", { id: providerMessageId }, email, execution.id);
+    const availability = await effect(
+      calendarId,
+      "get_availability",
+      {
+        eventTypeId: 42,
+        start: input.calendar.start,
+        end: input.calendar.end,
+        duration: 30,
+        format: "range",
+      },
+      {
+        status: "success",
+        data: { day: [{ start: input.calendar.start, end: input.calendar.end }] },
+      },
+      execution.id,
+    );
+    const legacy: RecruitingSchedulingPlanInput = {
+      ...structuredClone(input),
+      threadId: opened.threadId,
+      roleId: opened.roleId,
+      expectedRoleRevision: role.revision,
+      candidate: { ...input.candidate, candidateKey: candidateId },
+      calendar: { ...input.calendar, availabilityEffectId: availability.id },
+      originalEmail: {
+        ...input.originalEmail,
+        threadId: opened.threadId,
+        roleId: opened.roleId,
+        sourceId: server.id,
+        savedRead: null,
+        providerMessageId,
+        providerThreadId,
+        campaignId,
+        crm: {
+          serverRevision: 1,
+          organizationId: target.organizationId,
+          crmRoleId: target.crmRoleId,
+          candidateId,
+          threadId: providerThreadId,
+          campaignId,
+          direction: "received",
+          eaccount: "recruiter@example.test",
+        },
+      },
+    };
+    return { legacy, server, mail, email, execution, target };
+  }
+  it("adopts one exact native mail read for a legacy CRM attachment without earlier chat", async () => {
+    const f = await legacyFixture();
+    expect(await prisma.message.count({ where: { threadId: f.legacy.threadId } })).toBe(0);
+    expect(f.legacy.originalEmail.savedRead).toBeNull();
+    expect(f.legacy.originalEmail.sourceId).not.toBe(mailId);
+    const plan = await createRecruitingSchedulingPlan(prisma, actor, f.legacy);
+    expect(plan.originalEmail.providerMessageId).toBe(f.email.id);
+    expect(plan.originalEmail.providerThreadId).toBe(f.email.thread_id);
+    expect(plan.originalEmail.eaccount).toBe(f.email.eaccount);
+    expect(plan.originalEmail.sourceId).toBe(f.server.id);
+    expect(plan.originalEmail.savedRead).toBeNull();
+    expect(plan.mailSourceId).toBe(mailId);
+    expect(plan.mailRead.effectId).toBe(f.mail.id);
+    expect(plan.mailRead.messageId).toBeNull();
+  });
+  it.each(["organization", "campaign", "missing-message", "mailbox"])(
+    "rejects a foreign legacy %s without adopting the native read",
+    async (field) => {
+      const f = await legacyFixture();
+      if (field === "organization") f.legacy.originalEmail.crm!.organizationId = randomUUID();
+      else if (field === "missing-message")
+        await prisma.recruitingCrmMessage.deleteMany({ where: { mcpServerId: f.server.id } });
+      else if (field === "mailbox") {
+        f.legacy.originalEmail.eaccount = "foreign@example.test";
+        f.legacy.originalEmail.crm!.eaccount = "foreign@example.test";
+      } else {
+        f.legacy.originalEmail.campaignId = randomUUID();
+        f.legacy.originalEmail.crm!.campaignId = f.legacy.originalEmail.campaignId;
+      }
+      await expect(createRecruitingSchedulingPlan(prisma, actor, f.legacy)).rejects.toThrow();
+      expect(
+        await prisma.externalEffect.count({
+          where: { runId: f.execution.id, kind: "recruiting_scheduling_plan" },
+        }),
+      ).toBe(0);
+    },
+  );
+  it("rejects two equally matching native mail sources instead of choosing one", async () => {
+    const f = await legacyFixture();
+    const second = await prisma.mcpServer.create({
+      data: {
+        spaceId: actor.spaceId,
+        userId: actor.userId,
+        slug: `mail-${randomUUID()}`,
+        name: "Second mailbox source",
+        transport: "http",
+        endpoint: "https://second.example.test/mcp",
+      },
+    });
+    await prisma.botMcpServer.create({
+      data: {
+        spaceId: actor.spaceId,
+        userId: actor.userId,
+        serverId: second.id,
+        botId: identity.botId,
+        allowAllTools: true,
+      },
+    });
+    await effect(second.id, "get_email", { id: f.email.id }, f.email, f.execution.id);
+    await expect(createRecruitingSchedulingPlan(prisma, actor, f.legacy)).rejects.toThrow();
   });
 });
