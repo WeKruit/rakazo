@@ -497,7 +497,7 @@ export function OnboardingPage() {
   }, [step]);
 
   return (
-    <div className="min-h-full bg-background px-6 py-12">
+    <div data-product-view="recruiting" className="min-h-full bg-background px-6 py-12">
       <div className="mx-auto w-full max-w-[560px]">
         {step === "loading" ? (
           initializationError ? (

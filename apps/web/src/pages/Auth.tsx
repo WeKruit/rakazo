@@ -415,7 +415,10 @@ export function AuthFrame({
   children: React.ReactNode;
 }) {
   return (
-    <div className="flex min-h-full items-center justify-center bg-background px-6 py-16 text-foreground">
+    <div
+      data-product-view="recruiting"
+      className="flex min-h-full items-center justify-center bg-background px-6 py-16 text-foreground"
+    >
       <form onSubmit={onSubmit} className="flex w-[460px] flex-col items-center">
         <img src="/wekruit-logo.png" alt="WeKruit" className="h-[74px] w-[74px] object-contain" />
         <h1 aria-live="polite" className="mb-9 mt-7 text-4xl font-medium tracking-tight">
