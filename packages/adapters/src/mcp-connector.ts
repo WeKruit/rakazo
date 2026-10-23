@@ -739,6 +739,70 @@ export class McpConnector implements ConnectorProvider {
           throw new Error("Contact lookup arguments are swapped");
         }
       }
+      // Instantly v2 documents no per-lead stop or pause: PATCH /api/v2/leads/{id} has no
+      // sequence field and Lead.status (2 Paused, 3 Completed) is readOnly. POST
+      // /api/v2/leads/update-interest-status is documented to complete leads and trigger
+      // automations/subsequences, not to stop a sequence, so it is not used as a stop.
+      // The native stop is the campaign setting GET /api/v2/campaigns/{id} stop_on_reply
+      // ("Whether to stop the campaign on reply"); report it, never fabricate a stop.
+      // https://developer.instantly.ai/api-reference/campaign/get-campaign
+      const repliedCampaigns = [
+        ...new Set(
+          page.items
+            .filter(
+              (email) =>
+                email.ue_type === 2 &&
+                email.campaign_id &&
+                email.lead &&
+                sameInstantlyAddresses(email.from_address_email, email.lead),
+            )
+            .map((email) => email.campaign_id!),
+        ),
+      ].slice(0, 5); // ponytail: bounded per page; a later page reports the rest
+      const replyFollowUps: Array<{
+        campaignId: string;
+        stopOnReply: boolean | null;
+        warning?: string;
+      }> = [];
+      for (const campaignId of repliedCampaigns) {
+        phase = "campaign reply policy";
+        let stopOnReply: boolean | null = null;
+        try {
+          const response = await safeFetch(
+            new URL(`https://api.instantly.ai/api/v2/campaigns/${encodeURIComponent(campaignId)}`),
+            {
+              method: "GET",
+              headers: { authorization: `Bearer ${credential.key}` },
+              signal: context.signal,
+            },
+          );
+          const { text, truncated } = await readBoundedText(response, 1_000_000);
+          const campaign: unknown = response.ok && !truncated ? JSON.parse(text) : null;
+          if (
+            campaign &&
+            typeof campaign === "object" &&
+            "id" in campaign &&
+            campaign.id === campaignId &&
+            "stop_on_reply" in campaign &&
+            typeof campaign.stop_on_reply === "boolean"
+          )
+            stopOnReply = campaign.stop_on_reply;
+        } catch {
+          context.signal.throwIfAborted();
+        }
+        replyFollowUps.push({
+          campaignId,
+          stopOnReply,
+          ...(stopOnReply
+            ? {}
+            : {
+                warning:
+                  stopOnReply === false
+                    ? "The lead replied but this campaign's stop_on_reply is off, so Instantly keeps sending follow-ups. Turn on stop on reply for the campaign in Instantly."
+                    : "The lead replied but whether this campaign stops on reply could not be confirmed; check stop on reply for the campaign in Instantly.",
+              }),
+        });
+      }
       await assertAuthorized();
       yield {
         type: "result",
@@ -747,6 +811,7 @@ export class McpConnector implements ConnectorProvider {
             structuredContent: {
               source: "local_native_instantly_rest",
               ...(anchor ? { anchor: rawAnchor } : {}),
+              ...(replyFollowUps.length ? { replyFollowUps } : {}),
               page: rawPage,
               query: Object.fromEntries(url.searchParams),
               coverage: {

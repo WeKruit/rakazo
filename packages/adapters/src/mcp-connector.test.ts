@@ -145,6 +145,7 @@ describe("local native Instantly thread history", () => {
       page: { items: [structuredClone(anchor)] } as Record<string, unknown>,
       status: 200,
       accounts: [] as string[],
+      campaigns: {} as Record<string, unknown>,
       afterAnchor: () => {},
       afterRest: () => {},
     };
@@ -197,6 +198,11 @@ describe("local native Instantly thread history", () => {
         return new Response("{}", {
           status: state.accounts.includes(decodeURIComponent(account[1]!)) ? 200 : 404,
         });
+      const campaign = new URL(request.url).pathname.match(/^\/api\/v2\/campaigns\/(.+)$/);
+      if (campaign) {
+        const body = state.campaigns[decodeURIComponent(campaign[1]!)];
+        return new Response(JSON.stringify(body ?? {}), { status: body ? 200 : 404 });
+      }
       expect(new URL(request.url).pathname).toBe("/api/v2/emails");
       state.afterRest();
       return new Response(JSON.stringify(state.page), { status: state.status });
@@ -385,6 +391,93 @@ describe("local native Instantly thread history", () => {
       await f.connector.close();
     }
   });
+  it("checks campaign stop_on_reply once per replied campaign and warns when follow-ups would continue", async () => {
+    const f = fixture();
+    const contactRoute = { ...route, toolName: "native_instantly_search_contact_emails" };
+    const offCampaign = "123e4567-e89b-42d3-a456-426614174009";
+    const reply = { ...anchor, lead: anchor.from_address_email };
+    const outbound = {
+      ...anchor,
+      id: "123e4567-e89b-42d3-a456-426614174003",
+      campaign_id: offCampaign,
+      lead: anchor.from_address_email,
+      from_address_email: anchor.eaccount,
+      to_address_email_list: anchor.from_address_email,
+      ue_type: 1,
+    };
+    const nonLead = {
+      ...anchor,
+      id: "123e4567-e89b-42d3-a456-426614174004",
+      campaign_id: offCampaign,
+      lead: null,
+    };
+    const secondReply = { ...reply, id: "123e4567-e89b-42d3-a456-426614174005" };
+    f.state.page = { items: [reply, secondReply, outbound, nonLead] };
+    f.state.campaigns = {
+      [anchor.campaign_id]: { id: anchor.campaign_id, stop_on_reply: false },
+      [offCampaign]: { id: offCampaign, stop_on_reply: true },
+    };
+    try {
+      await f.connector.discoverTools(f.context as never);
+      const events = await f.collect({ email: anchor.from_address_email }, contactRoute);
+      expect(events).toMatchObject([
+        {
+          type: "result",
+          data: {
+            structuredContent: {
+              replyFollowUps: [
+                {
+                  campaignId: anchor.campaign_id,
+                  stopOnReply: false,
+                  warning: expect.stringMatching(/stop_on_reply is off/),
+                },
+              ],
+            },
+          },
+        },
+      ]);
+      const campaignCalls = f.rest.mock.calls.filter((call) =>
+        new URL(logicalHref(...call)).pathname.startsWith("/api/v2/campaigns/"),
+      );
+      expect(campaignCalls.map((call) => logicalHref(...call))).toEqual([
+        `https://api.instantly.ai/api/v2/campaigns/${anchor.campaign_id}`,
+      ]);
+      expect(new Request(...campaignCalls[0]!).method).toBe("GET");
+      f.state.campaigns[anchor.campaign_id] = { id: anchor.campaign_id, stop_on_reply: true };
+      expect(await f.collect({ email: anchor.from_address_email }, contactRoute)).toMatchObject([
+        {
+          data: {
+            structuredContent: {
+              replyFollowUps: [{ campaignId: anchor.campaign_id, stopOnReply: true }],
+            },
+          },
+        },
+      ]);
+      delete f.state.campaigns[anchor.campaign_id];
+      const unverified = await f.collect({ email: anchor.from_address_email }, contactRoute);
+      expect(unverified).toMatchObject([
+        {
+          type: "result",
+          data: {
+            structuredContent: {
+              replyFollowUps: [
+                {
+                  campaignId: anchor.campaign_id,
+                  stopOnReply: null,
+                  warning: expect.stringMatching(/could not be confirmed/),
+                },
+              ],
+            },
+          },
+        },
+      ]);
+      f.state.page = { items: [outbound, nonLead] };
+      const quiet = await f.collect({ email: anchor.from_address_email }, contactRoute);
+      expect(JSON.stringify(quiet)).not.toContain("replyFollowUps");
+    } finally {
+      await f.connector.close();
+    }
+  });
   it("lists one mailbox page, including non-campaign mail, scoped by eaccount, subject search and created window", async () => {
     const f = fixture();
     const mailboxRoute = { ...route, toolName: "native_instantly_list_mailbox_emails" };
@@ -522,7 +615,8 @@ describe("local native Instantly thread history", () => {
               ]
             : [{ type: "error" }],
         );
-        expect(f.rest).toHaveBeenCalledOnce();
+        // A returned lead reply also checks its campaign's stop_on_reply once.
+        expect(f.rest).toHaveBeenCalledTimes(kind === "missing-body" ? 2 : 1);
         expect(f.state.calls).toEqual([]);
       } finally {
         await f.connector.close();
