@@ -8824,6 +8824,7 @@ it("mounts the role tabs for a CRM-bound conversation and keeps stored CRM views
   expect(view.container.querySelector("[data-role-tab]")).toBeNull();
   expect(view.container.textContent).toContain("Stored CRM person");
   api.getWorkspace.mockResolvedValue({ role, revision, crmTarget });
+  api.crmData.mockClear();
   for (const tab of ["contacts", "sequence", "inbox", "interview"] as const) {
     await view.render("thread-1", 1, false, undefined, {
       groupId: "group-1",
@@ -8839,6 +8840,8 @@ it("mounts the role tabs for a CRM-bound conversation and keeps stored CRM views
       refreshSignal: 1,
     });
   }
+  // The role tabs own their CRM reads; the hidden stored CRM views read nothing.
+  expect(api.crmData).not.toHaveBeenCalled();
 });
 
 it("shows Autumn's criterion states, evidence, source round and saved decision for every returned candidate", async () => {

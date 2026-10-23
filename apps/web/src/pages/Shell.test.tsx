@@ -94,7 +94,13 @@ vi.mock("../lib/rpc", async (importOriginal) => ({
       send: shellApi.send,
       answer: shellApi.answer,
       stop: shellApi.stop,
-      subscribe: vi.fn().mockRejectedValue(new Error("Offline test")),
+      // An open, quiet stream: a rejected one makes the client resync on a real-time retry timer.
+      subscribe: vi.fn(
+        (_input: unknown, options?: { signal?: AbortSignal }) =>
+          new Promise<never>((_resolve, reject) =>
+            options?.signal?.addEventListener("abort", () => reject(options.signal?.reason)),
+          ),
+      ),
       head: vi.fn().mockResolvedValue(null),
       markRead: vi.fn().mockResolvedValue({ ok: true }),
     },
