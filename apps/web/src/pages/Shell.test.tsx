@@ -1261,7 +1261,8 @@ it("re-reads the role list and inbox once when the stream recovers from an outag
   await act(async () => {
     await stream.refresh();
   });
-  expect(text()).toContain("Loading roles…");
+  // The previous roles stay on screen while the list re-reads.
+  expect(text()).toContain("Existing role · Client");
   shellApi.get.mockRejectedValueOnce(new Error("Backend unavailable"));
   await act(async () => {
     await expect(stream.refresh()).rejects.toThrow("Backend unavailable");
@@ -3926,7 +3927,9 @@ it.each([
       isDeploymentOwner: owner,
       openFeedback: false,
     });
-    const reads = shellApi.get.mock.calls.length;
+    // Hover/focus prefetches pass no request options; count only conversation opens.
+    const opens = () => shellApi.get.mock.calls.filter((call) => call.length > 1).length;
+    const reads = opens();
     const shortcut = async (key: string, modifier: "metaKey" | "ctrlKey") =>
       act(async () => {
         window.dispatchEvent(
@@ -3940,7 +3943,7 @@ it.each([
       await shortcut("k", "ctrlKey");
       await shortcut("2", "metaKey");
       expect(palette()).toBeNull();
-      expect(shellApi.get).toHaveBeenCalledTimes(reads);
+      expect(opens()).toBe(reads);
       expect(document.body.querySelector('[data-message-id="pending-main"]')).not.toBeNull();
       return;
     }
@@ -3951,7 +3954,7 @@ it.each([
     await shortcut("k", "ctrlKey");
     await shortcut("2", "metaKey");
     expect(palette()).toBeNull();
-    expect(shellApi.get).toHaveBeenCalledTimes(reads);
+    expect(opens()).toBe(reads);
     await act(async () => {
       setToolActivityPreference("on");
     });
@@ -3959,7 +3962,9 @@ it.each([
     await shortcut("k", "ctrlKey");
     expect(palette()).not.toBeNull();
     await shortcut("2", "metaKey");
-    expect(shellApi.get).toHaveBeenLastCalledWith({ botId: "bot-2" }, expect.anything());
+    expect(shellApi.get.mock.calls.filter((call) => call.length > 1).at(-1)?.[0]).toEqual({
+      botId: "bot-2",
+    });
     expect(palette()).toBeNull();
   },
 );
@@ -5349,6 +5354,117 @@ it("shows a sent message at once and finishes the turn from events without re-re
   expect(shellApi.get.mock.calls.length).toBe(reads);
   // One navigation read at run end for the sidebar preview; none for send or run start.
   expect(shellApi.listSpaces.mock.calls.length).toBe(navigationReads + 1);
+});
+
+describe("chat open latency with 300 ms reads", () => {
+  const LATENCY = 300;
+  const STEP = 50;
+  const delayed = <T,>(load: () => T | Promise<T>) =>
+    new Promise<T>((resolve, reject) =>
+      setTimeout(() => {
+        Promise.resolve().then(load).then(resolve, reject);
+      }, LATENCY),
+    );
+  const sourcerReply: ThreadMessage = {
+    id: "sourcer-reply",
+    threadId: "thread-2",
+    seq: 1,
+    role: "bot",
+    botId: "bot-2",
+    createdAt: "2026-01-01T00:00:00Z",
+    blocks: [{ kind: "text", text: "Sourcer found two leads" }],
+  };
+  async function openSlowly(options: Parameters<typeof renderFeedbackShell>[2] = {}) {
+    const view = await renderFeedbackShell("bot", undefined, { openFeedback: false, ...options });
+    vi.useFakeTimers();
+    const get = shellApi.get.getMockImplementation()!;
+    shellApi.get.mockImplementation(
+      (input: { botId?: string; groupId?: string }, ...rest: unknown[]) =>
+        delayed(async () => {
+          const snapshot = await get(input, ...rest);
+          if (input.groupId)
+            return {
+              ...snapshot,
+              botId: undefined,
+              threadId: "thread-3",
+              messages: [],
+              groupId: view.group.id,
+              groupName: view.group.name,
+              members: view.members,
+            };
+          return input.botId === "bot-2" ? { ...snapshot, messages: [sourcerReply] } : snapshot;
+        }),
+    );
+    shellApi.get.mockClear();
+    return view;
+  }
+  /** Virtual ms until the text renders, advancing every pending read in small steps. */
+  async function msUntil(text: string) {
+    let elapsed = 0;
+    while (!container!.textContent?.includes(text) && elapsed < LATENCY * 10) {
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(STEP);
+      });
+      elapsed += STEP;
+    }
+    return elapsed;
+  }
+  const report = (label: string, elapsed: number) =>
+    console.info(`[latency] ${label}: ${elapsed}ms, threads.get ${shellApi.get.mock.calls.length}`);
+
+  it("opens an unvisited chat after one thread read", async () => {
+    const view = await openSlowly();
+    await view.navigate("/app/bot-2");
+    const elapsed = await msUntil("Sourcer found two leads");
+    report("unvisited chat", elapsed);
+    expect(elapsed).toBe(LATENCY);
+  });
+
+  it("opens an unvisited role's results while its thread read is in flight", async () => {
+    shellApi.recruiting.crmData.mockResolvedValue({ operation: "memberships", sources: [] });
+    const view = await openSlowly({
+      isDeploymentOwner: false,
+      initialPath: "/app/bot-1?view=results",
+    });
+    for (const read of Object.values(shellApi.recruiting)) {
+      const load = read.getMockImplementation();
+      if (load) read.mockImplementation((...args: unknown[]) => delayed(() => load(...args)));
+    }
+    // A distinct thread, so the bot's cached role reads cannot answer for this role.
+    view.group.threadId = "thread-3";
+    await view.navigate("/app/g/group-1?view=results");
+    const elapsed = await msUntil(view.candidate.name);
+    report("unvisited role results", elapsed);
+    // Before: threads.get, then the role binding, then the panel's three reads (5 hops).
+    // The navigation's thread id lets the binding start beside threads.get (4 hops).
+    expect(elapsed).toBe(4 * LATENCY);
+  });
+
+  it("shows message skeletons and the composer while an unvisited chat loads", async () => {
+    const view = await openSlowly();
+    await view.navigate("/app/bot-2");
+    expect(container!.querySelector('[role="status"][aria-label="Loading…"]')).not.toBeNull();
+    expect(container!.querySelector("textarea")).not.toBeNull();
+  });
+
+  it("opens a chat hovered for one read time without another thread read", async () => {
+    const view = await openSlowly();
+    const row = [...container!.querySelectorAll<HTMLButtonElement>("button")].find((button) =>
+      button.textContent?.includes("Sourcer"),
+    )!;
+    await act(async () => {
+      row.dispatchEvent(new MouseEvent("mouseover", { bubbles: true }));
+      row.dispatchEvent(new MouseEvent("mouseover", { bubbles: true }));
+    });
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(LATENCY);
+    });
+    await view.navigate("/app/bot-2");
+    const elapsed = await msUntil("Sourcer found two leads");
+    report("hovered chat", elapsed);
+    expect(elapsed).toBe(0);
+    expect(shellApi.get.mock.calls.filter(([input]) => input.botId === "bot-2")).toHaveLength(1);
+  });
 });
 
 it("shows ordinary users the turn's work in plain words and folds it once the reply lands", async () => {
