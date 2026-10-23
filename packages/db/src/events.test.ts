@@ -5055,3 +5055,80 @@ describe("sidebar signal", () => {
     await stream.return(undefined);
   });
 });
+
+describe("connect card answers", () => {
+  const connection = { serverId: "server-1", name: "Instantly", reason: "To read replies." };
+  function connectFixture(server: { secretId: string | null } | null, assigned: boolean) {
+    const f = ordinaryAnswerFixture([
+      { kind: "ask", text: "Connect Instantly", status: "pending", connection },
+    ]);
+    const mcpServer = {
+      findFirst: vi.fn(async () =>
+        server
+          ? { id: "server-1", name: "Instantly", transport: "streamable_http", ...server }
+          : null,
+      ),
+    };
+    const botMcpServer = { findFirst: vi.fn(async () => (assigned ? { id: "a-1" } : null)) };
+    Object.assign(f.tx, { mcpServer, botMcpServer });
+    return { ...f, mcpServer, botMcpServer };
+  }
+  const prompt = (f: ReturnType<typeof connectFixture>) =>
+    (f.tx.task.updateMany.mock.calls[0] as unknown as [{ data: { prompt: string } }])[0].data
+      .prompt;
+  const card = (f: ReturnType<typeof connectFixture>) =>
+    f.rows.find((row) => row.id === "ask-card")!.blocks[0];
+
+  it("resumes the same run as connected only when this user's server is credentialed and assigned", async () => {
+    const f = connectFixture({ secretId: "secret-1" }, true);
+    expect(await answerRunInput(f.prisma, { ...f.input, answer: "connected" })).toBe(true);
+    expect(f.mcpServer.findFirst).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: expect.objectContaining({
+          id: "server-1",
+          spaceId: "workspace-1",
+          userId: "user-1",
+        }),
+      }),
+    );
+    expect(f.botMcpServer.findFirst).toHaveBeenCalledWith(
+      expect.objectContaining({ where: expect.objectContaining({ botId: "bot-1" }) }),
+    );
+    expect(f.run.status).toBe("queued");
+    expect(card(f)).toMatchObject({ status: "answered", answer: "connected", connection });
+    expect(prompt(f)).toContain("Instantly is connected.");
+    expect(f.rows.some((row) => row.role === "user")).toBe(false);
+  });
+
+  it.each([
+    ["no credential", { secretId: null }, true, "connected"],
+    ["unassigned", { secretId: "secret-1" }, false, "connected"],
+    ["foreign or missing server", null, true, "connected"],
+    ["declined", { secretId: "secret-1" }, true, "not_connected"],
+    ["any other text", { secretId: "secret-1" }, true, "sure"],
+  ] as const)("records not_connected for %s", async (_label, server, assigned, answer) => {
+    const f = connectFixture(server, assigned);
+    expect(await answerRunInput(f.prisma, { ...f.input, answer })).toBe(true);
+    expect(card(f)).toMatchObject({ status: "answered", answer: "not_connected" });
+    expect(prompt(f)).toContain("Instantly is still not connected.");
+  });
+
+  it("is answered once; a second answer changes nothing", async () => {
+    const f = connectFixture({ secretId: "secret-1" }, true);
+    expect(await answerRunInput(f.prisma, { ...f.input, answer: "connected" })).toBe(true);
+    expect(await answerRunInput(f.prisma, { ...f.input, answer: "not_connected" })).toBe(false);
+    expect(card(f)).toMatchObject({ answer: "connected" });
+    expect(f.tx.task.updateMany).toHaveBeenCalledTimes(1);
+  });
+
+  it("is never answered by composer text", async () => {
+    const f = connectFixture({ secretId: "secret-1" }, true);
+    expect(
+      await answerWaitingRunWithTextInTransaction(f.tx as never, {
+        ...f.input,
+        answer: "connected",
+      }),
+    ).toBeNull();
+    expect(f.run.status).toBe("waiting_input");
+  });
+});
