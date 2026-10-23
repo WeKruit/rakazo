@@ -58,8 +58,17 @@ const ThreadHistoryInput = z.strictObject({
     .optional(),
 });
 const ContactEmailsInput = ThreadHistoryInput.omit({ anchor_id: true }).extend({
-  email: z.email().max(254),
-  eaccount: z.email().max(254).optional(),
+  email: z
+    .email()
+    .max(254)
+    .describe("The other party (candidate/contact) address. Never your own Instantly mailbox."),
+  eaccount: z
+    .email()
+    .max(254)
+    .optional()
+    .describe(
+      "Your connected Instantly mailbox that sent or received the mail (e.g. the address the contact wrote to). Never the contact.",
+    ),
 });
 const nativeInstantlyReads = [
   {
@@ -74,7 +83,7 @@ const nativeInstantlyReads = [
     toolName: CONTACT_EMAILS,
     inputSchema: z.toJSONSchema(ContactEmailsInput, { io: "input" }),
     description:
-      "Local native REST integration for the existing authorized Instantly connection, not a remote MCP tool. Looks up one bounded page of emails sent to or received from an exact contact email, optionally within a sender account. Uses the official lead filter and verifies each returned contact address. Returns the raw REST page, exact query, provider email IDs and honest page/body coverage; continue with the returned cursor and the same email/account. An exhausted page is not a full-thread receipt; use get_email and get_thread_history for the selected provider email before replying. No computer or credentials are needed in arguments. Does not send email.",
+      "Local native REST integration for the existing authorized Instantly connection, not a remote MCP tool. Looks up one bounded page of emails sent to or received from an exact contact email, optionally within one of your connected Instantly mailboxes (eaccount), whichever side sent the mail. Uses the official lead filter and verifies each returned contact address. Returns the raw REST page, exact query, provider email IDs and honest page/body coverage; continue with the returned cursor and the same email/account. An exhausted page is not a full-thread receipt; use get_email and get_thread_history for the selected provider email before replying. No computer or credentials are needed in arguments. Does not send email.",
   },
 ];
 
@@ -529,6 +538,7 @@ export class McpConnector implements ConnectorProvider {
     const isHistory = call.route!.toolName === THREAD_HISTORY;
     const operation = isHistory ? "thread history" : "contact email";
     let rejectedStatus: number | undefined;
+    let hint = "";
     const redactions: string[] = [];
     const safeFetch = createSafeRemoteFetch(
       this.options.network?.fetch,
@@ -660,6 +670,26 @@ export class McpConnector implements ConnectorProvider {
         )
       )
         throw new Error("Email page does not match the requested scope");
+      if (contactInput && page.items.length === 0) {
+        // An empty page is the symptom of contact/mailbox arguments passed the wrong way round.
+        phase = "argument check";
+        const account = await safeFetch(
+          new URL(
+            `https://api.instantly.ai/api/v2/accounts/${encodeURIComponent(contactInput.email)}`,
+          ),
+          {
+            method: "GET",
+            headers: { authorization: `Bearer ${credential.key}` },
+            signal: context.signal,
+          },
+        );
+        await account.body?.cancel();
+        if (account.ok) {
+          hint =
+            " The email argument is one of your connected Instantly mailboxes; pass the contact as email and the mailbox as eaccount.";
+          throw new Error("Contact lookup arguments are swapped");
+        }
+      }
       await assertAuthorized();
       yield {
         type: "result",
@@ -708,7 +738,7 @@ export class McpConnector implements ConnectorProvider {
     } catch {
       yield {
         type: "error",
-        message: `Instantly ${operation} read failed during ${phase}.${rejectedStatus ? ` HTTP ${rejectedStatus}.` : " Check the current assigned connection and requested scope."}`,
+        message: `Instantly ${operation} read failed during ${phase}.${rejectedStatus ? ` HTTP ${rejectedStatus}.` : " Check the current assigned connection and requested scope."}${hint}`,
       };
     } finally {
       await safeFetch.close().catch(() => undefined);

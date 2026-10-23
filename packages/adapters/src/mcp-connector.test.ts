@@ -144,6 +144,7 @@ describe("local native Instantly thread history", () => {
       callResult: { content: [], structuredContent: structuredClone(anchor) },
       page: { items: [structuredClone(anchor)] } as Record<string, unknown>,
       status: 200,
+      accounts: [] as string[],
       afterAnchor: () => {},
       afterRest: () => {},
     };
@@ -190,8 +191,13 @@ describe("local native Instantly thread history", () => {
       const request = new Request(input, init);
       expect(request.method).toBe("GET");
       expect(new URL(request.url).origin).toBe("https://api.instantly.ai");
-      expect(new URL(request.url).pathname).toBe("/api/v2/emails");
       expect(request.headers.get("authorization")).toBe(`Bearer ${state.key}`);
+      const account = new URL(request.url).pathname.match(/^\/api\/v2\/accounts\/(.+)$/);
+      if (account)
+        return new Response("{}", {
+          status: state.accounts.includes(decodeURIComponent(account[1]!)) ? 200 : 404,
+        });
+      expect(new URL(request.url).pathname).toBe("/api/v2/emails");
       state.afterRest();
       return new Response(JSON.stringify(state.page), { status: state.status });
     });
@@ -375,6 +381,33 @@ describe("local native Instantly thread history", () => {
           },
         },
       ]);
+    } finally {
+      await f.connector.close();
+    }
+  });
+  it("explains an empty contact lookup whose contact and mailbox arguments are swapped", async () => {
+    const f = fixture();
+    const contactRoute = { ...route, toolName: "native_instantly_search_contact_emails" };
+    f.state.page = { items: [] };
+    f.state.accounts = [anchor.eaccount];
+    try {
+      const swapped = await f.collect(
+        { email: anchor.eaccount, eaccount: anchor.from_address_email },
+        contactRoute,
+      );
+      expect(swapped).toEqual([
+        {
+          type: "error",
+          message: expect.stringContaining("pass the contact as email and the mailbox as eaccount"),
+        },
+      ]);
+      expect(JSON.stringify(swapped)).not.toContain(f.state.key);
+      expect(
+        await f.collect(
+          { email: anchor.from_address_email, eaccount: anchor.eaccount },
+          contactRoute,
+        ),
+      ).toMatchObject([{ type: "result" }]);
     } finally {
       await f.connector.close();
     }
