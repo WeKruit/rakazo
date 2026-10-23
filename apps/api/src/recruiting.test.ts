@@ -1477,6 +1477,96 @@ describe("saved recruiting correspondence", () => {
       });
     },
   );
+  it.each([
+    [{ structuredContent: { items: [] } }, "empty"],
+    [{ isError: true }, "failed"],
+    [{ structuredContent: { items: "malformed" } }, "unsupported"],
+  ])("does not revive older unscoped mail after a campaign check: %j", async (result, status) => {
+    const { client, prisma, retained } = fixture();
+    const older = {
+      ...retained,
+      id: "older-unscoped",
+      updatedAt: new Date("2026-10-21T01:00:00Z"),
+      request: [
+        "__rakazoCatalogTool",
+        "direct",
+        {
+          ...(retained.request[2] as object),
+          args: { email_type: "all", limit: 10 },
+        },
+      ],
+    };
+    client.externalEffect.findMany
+      .mockReset()
+      .mockResolvedValueOnce([retained, older])
+      .mockResolvedValueOnce([
+        { id: retained.id, result },
+        { id: older.id, result: { structuredContent: { items: [email] } } },
+      ]);
+    expect(await api.getRecruitingCorrespondence(prisma, actor, target, "inbox")).toMatchObject({
+      status,
+      emails: [],
+    });
+  });
+  it("keeps a newer unscoped observation after an older empty campaign check", async () => {
+    const { client, prisma, retained } = fixture();
+    const newer = {
+      ...retained,
+      id: "newer-unscoped",
+      updatedAt: new Date("2026-10-23T01:00:00Z"),
+      request: [
+        "__rakazoCatalogTool",
+        "direct",
+        {
+          ...(retained.request[2] as object),
+          args: { email_type: "all", limit: 10 },
+        },
+      ],
+    };
+    client.externalEffect.findMany
+      .mockReset()
+      .mockResolvedValueOnce([newer, retained])
+      .mockResolvedValueOnce([
+        { id: retained.id, result: { structuredContent: { items: [] } } },
+        { id: newer.id, result: { structuredContent: { items: [email] } } },
+      ]);
+    expect(await api.getRecruitingCorrespondence(prisma, actor, target, "inbox")).toMatchObject({
+      status: "ready",
+      emails: [{ providerMessageId: email.id }],
+    });
+  });
+  it("prefers a newer unscoped body over an older campaign snapshot of the same mail", async () => {
+    const { client, prisma, retained } = fixture();
+    const newer = {
+      ...retained,
+      id: "newer-unscoped",
+      updatedAt: new Date("2026-10-23T01:00:00Z"),
+      request: [
+        "__rakazoCatalogTool",
+        "direct",
+        {
+          ...(retained.request[2] as object),
+          args: { email_type: "all", limit: 10 },
+        },
+      ],
+    };
+    client.externalEffect.findMany
+      .mockReset()
+      .mockResolvedValueOnce([newer, retained])
+      .mockResolvedValueOnce([
+        { id: retained.id, result: { structuredContent: { items: [email] } } },
+        {
+          id: newer.id,
+          result: {
+            structuredContent: { items: [{ ...email, body: { text: "Latest preview" } }] },
+          },
+        },
+      ]);
+    expect(await api.getRecruitingCorrespondence(prisma, actor, target, "inbox")).toMatchObject({
+      status: "ready",
+      emails: [{ body: "Latest preview" }],
+    });
+  });
   it("does not let an unrelated detail failure turn a checked-empty role snapshot into a failure", async () => {
     const { client, prisma, retained } = fixture();
     client.mcpServer.findMany.mockResolvedValueOnce([

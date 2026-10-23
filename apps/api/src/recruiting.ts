@@ -1067,6 +1067,7 @@ export async function getRecruitingCorrespondence(
     const contactKeys = new Set<string>();
     let parsed = false;
     const emails = new Map<string, RecruitingCorrespondence["emails"][number]>();
+    const instantlyObservedAt = new Map<string, Date>();
     const gmailMessages = new Map<string, string>();
     const gmailThreads = new Map<string, string>();
     const events = new Map<string, RecruitingCorrespondence["events"][number]>();
@@ -1080,9 +1081,17 @@ export async function getRecruitingCorrespondence(
     }> = [];
     // Full-body reads (get_email) are projected after list snapshots so they replace previews.
     const DETAIL_READS = ["get_email", "native_instantly_get_email"];
+    const campaignRead = (read: (typeof reads)[number]) =>
+      read.provider.kind === "instantly" &&
+      read.call.route.toolName === "list_emails" &&
+      typeof read.call.args.campaign_id === "string";
     const projections = [
+      // Establish campaign snapshots before broader reads can contribute older messages.
+      ...reads.filter(campaignRead),
       ...reads.filter(
-        (read) => ![...DETAIL_READS, "list_crm_candidate_roles"].includes(read.call.route.toolName),
+        (read) =>
+          !campaignRead(read) &&
+          ![...DETAIL_READS, "list_crm_candidate_roles"].includes(read.call.route.toolName),
       ),
       ...reads.filter((read) => DETAIL_READS.includes(read.call.route.toolName)),
     ];
@@ -1575,7 +1584,10 @@ export async function getRecruitingCorrespondence(
           checkIssue(source.id, effect.updatedAt);
           continue;
         }
-        if (detailRead && revived(source.id, email.campaign_id, email.id, effect.updatedAt)) {
+        if (
+          !campaignRead({ effect, call, source, provider }) &&
+          revived(source.id, email.campaign_id, email.id, effect.updatedAt)
+        ) {
           output.partial = true;
           continue;
         }
@@ -1593,7 +1605,9 @@ export async function getRecruitingCorrespondence(
           continue;
         }
         parsed = true;
-        if (emails.has(id) && listRead) continue;
+        const observedAt = instantlyObservedAt.get(id);
+        if (listRead && observedAt && observedAt >= effect.updatedAt) continue;
+        instantlyObservedAt.set(id, effect.updatedAt);
         const fullText =
           email.body.text || (email.body.html ? htmlToPlainText(email.body.html) : "");
         const text = fullText || email.content_preview || "";
