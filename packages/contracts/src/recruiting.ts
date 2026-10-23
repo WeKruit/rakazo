@@ -1909,7 +1909,7 @@ export const RecruitingCrmDataOutputSchema = z.discriminatedUnion("operation", [
     operation: z.literal("candidates"),
     source: CrmBrowseSource.extend({ organizationId: z.uuid() }),
     checkedAt: IsoDate,
-    scope: z.enum(["organization", "legacy_role_labels"]),
+    scope: z.enum(["organization", "legacy_role_labels", "stored_role"]),
     selectedRole: CrmBrowseRole.nullable(),
     items: z.array(CrmBrowseCandidate),
     total: z.number().int().nonnegative(),

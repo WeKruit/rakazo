@@ -76,7 +76,6 @@ import {
 import { getLogger } from "@rakazo/logging";
 import type { ParseError } from "jsonc-parser";
 import { findNodeAtLocation, parseTree } from "jsonc-parser";
-import { recordCrmRoleRead } from "./recruiting-crm-sync.js";
 import type { ThreadTarget } from "./thread-target.js";
 
 async function authenticated<T>(operation: () => Promise<T>): Promise<T> {
@@ -2041,6 +2040,7 @@ export function getRecruitingCrmData(
   actor: Actor,
   target: ThreadTarget,
   raw: RecruitingCrmDataInput,
+  options?: { source: "projection" },
 ): Promise<RecruitingCrmDataOutput>;
 export function getRecruitingCrmData(
   deps: RecruitingCrmReadDeps,
@@ -2053,6 +2053,7 @@ export async function getRecruitingCrmData(
   actor: Actor,
   target: ThreadTarget,
   raw: RecruitingCrmDataInput | RecruitingCrmRoleLookup,
+  options?: { source: "projection" },
 ): Promise<RecruitingCrmDataOutput | ReturnType<typeof RecruitingCrmRoleReadSchema.parse>> {
   return authenticated(async () => {
     const input =
@@ -2755,6 +2756,38 @@ export async function getRecruitingCrmData(
       }
       const offset = pageOffset(input);
       const limit = input.limit ?? 25;
+      if (options?.source === "projection") {
+        if (!selectedRole) throw new IsolationError();
+        // Stored data has exactly the live candidate tool's authorization boundary.
+        await sourceFence(server, "list_crm_candidates");
+        const stored = await recruiting.listSyncedRecruitingCrmRoleContacts(
+          deps.prisma,
+          actor,
+          { mcpServerId: server.id, organizationId: input.organizationId },
+          selectedRole.crmRoleId,
+        );
+        invalidateFences();
+        await sourceFence(server, "list_crm_candidates");
+        const query = input.query?.trim().toLocaleLowerCase();
+        const matching = stored.filter(
+          (row) =>
+            (!input.stage || row.stage === input.stage) &&
+            (!query ||
+              [row.name, row.email, row.title].some((value) =>
+                value?.toLocaleLowerCase().includes(query),
+              )),
+        );
+        const items = matching.slice(offset, offset + limit);
+        return finish({
+          operation: "candidates",
+          scope: "stored_role",
+          selectedRole,
+          items,
+          total: matching.length,
+          offset,
+          nextOffset: offset + items.length < matching.length ? offset + items.length : null,
+        });
+      }
       const page = parse(
         RecruitingCrmCandidatesReadSchema,
         await read(server, "list_crm_candidates", {
@@ -3089,23 +3122,24 @@ export async function getRecruitingRoleCandidates(
       ),
     async crm(binding) {
       const rows: RoleCandidatesCrmRow[] = [];
-      let selectedRole: Extract<
-        RecruitingCrmDataOutput,
-        { operation: "candidates" }
-      >["selectedRole"] = null;
-      let complete = false;
       try {
-        // ponytail: whole role contact list per request, capped at 10×50; page by email/URL if roles outgrow it.
-        for (let offset: number | null = 0, pages = 0; offset !== null && pages < 10; pages++) {
-          const page: RecruitingCrmDataOutput = await getRecruitingCrmData(deps, actor, target, {
-            operation: "candidates",
-            serverId: binding.mcpServerId,
-            serverRevision: binding.serverRevision,
-            organizationId: binding.organizationId,
-            crmRoleId: binding.crmRoleId,
-            limit: 50,
-            offset,
-          });
+        // The full sync owns refreshes. Browse the saved projection without live candidate scans.
+        for (let offset: number | null = 0; offset !== null; ) {
+          const page = await getRecruitingCrmData(
+            deps,
+            actor,
+            target,
+            {
+              operation: "candidates",
+              serverId: binding.mcpServerId,
+              serverRevision: binding.serverRevision,
+              organizationId: binding.organizationId,
+              crmRoleId: binding.crmRoleId,
+              limit: 50,
+              offset,
+            },
+            { source: "projection" },
+          );
           if (page.operation !== "candidates") throw new IsolationError();
           for (const item of page.items)
             rows.push({
@@ -3113,24 +3147,13 @@ export async function getRecruitingRoleCandidates(
               serverId: page.source.serverId,
               organizationId: page.source.organizationId,
             });
-          selectedRole ??= page.selectedRole;
           offset = page.nextOffset;
-          complete = offset === null;
         }
       } catch (error) {
-        // The CRM side fails closed to no CRM data; Autumn rows were authorized by their own read.
+        // Never substitute stored data when current source authorization cannot be verified.
         if (!(error instanceof ORPCError) && !(error instanceof IsolationError)) throw error;
         return { status: "unavailable" };
       }
-      // Incremental CRM sync from the read just made; never delays or fails this list.
-      if (selectedRole)
-        void recordCrmRoleRead(deps.prisma, actor, {
-          serverId: binding.mcpServerId,
-          organizationId: binding.organizationId,
-          role: selectedRole,
-          items: rows,
-          complete,
-        }).catch((error) => getLogger().error("recruiting.crm_sync.write_failed", error));
       return { status: "ok", rows };
     },
   });
