@@ -5893,22 +5893,43 @@ function researchReadRequest(
   return { toolName: route.toolName, args, route };
 }
 
+/**
+ * Request-local memo for repeated proof lookups while verifying several saved pages in one call.
+ * Created per call and dropped with it; never shared across requests or transactions.
+ */
+type ProofMemo = <T>(key: string, load: () => Promise<T>) => Promise<T>;
+const unmemoized: ProofMemo = (_key, load) => load();
+function proofMemo(): ProofMemo {
+  const loaded = new Map<string, Promise<unknown>>();
+  return <T>(key: string, load: () => Promise<T>) => {
+    let value = loaded.get(key);
+    if (!value) {
+      value = load();
+      loaded.set(key, value);
+    }
+    return value as Promise<T>;
+  };
+}
+
 async function researchReadBinding(
   tx: Tx,
   actor: Actor,
   effect: ResearchEffectRow,
   lease?: ResearchLease,
+  memo: ProofMemo = unmemoized,
 ) {
-  const owner = await requireRun(tx, actor, effect.runId);
-  const events = await tx.event.findMany({
-    where: {
-      spaceId: actor.spaceId,
-      // The binding must belong to the owner run (checked below); index-scoped, not space-wide.
-      runId: owner.id,
-      type: "recruiting.read",
-      payload: { path: ["effectId"], equals: effect.id },
-    },
-  });
+  const owner = await memo(`run:${effect.runId}`, () => requireRun(tx, actor, effect.runId));
+  const events = await memo(`read-events:${owner.id}:${effect.id}`, () =>
+    tx.event.findMany({
+      where: {
+        spaceId: actor.spaceId,
+        // The binding must belong to the owner run (checked below); index-scoped, not space-wide.
+        runId: owner.id,
+        type: "recruiting.read",
+        payload: { path: ["effectId"], equals: effect.id },
+      },
+    }),
+  );
   if (events.length === 0) return null;
   const parsed = events.map((event) => ({ event, payload: researchReadPayload(event) }));
   const bindings = parsed.filter((item) => item.payload.phase === "bound");
@@ -5919,12 +5940,15 @@ async function researchReadBinding(
   if (lease && effect.runId !== lease.runId) throw new IsolationError();
   if (event.runId !== owner.id || event.threadId !== owner.threadId || event.botId !== owner.botId)
     throw new IsolationError();
-  const saved = await researchContextInTransaction(tx, actor, {
+  const context = {
     runId: owner.id,
     actionId: binding.actionId,
     toolName: binding.toolName,
     historical: !lease,
-  });
+  };
+  const saved = await memo(`context:${stableJsonValue(context)}`, () =>
+    researchContextInTransaction(tx, actor, context),
+  );
   if (lease) requireResearchLease(saved.run, lease);
   if (!saved.task || !saved.action || saved.task.id !== binding.taskId) throw new IsolationError();
   const call = researchReadRequest(effect.request, saved.task, binding.toolName);
@@ -5953,21 +5977,22 @@ async function recordedResearchReadArtifact(
   tx: Tx,
   actor: Actor,
   read: NonNullable<Awaited<ReturnType<typeof researchReadBinding>>>,
+  memo: ProofMemo = unmemoized,
 ) {
-  const artifact = await tx.artifact.findUnique({
-    where: {
-      spaceId_userId_clientNonce: {
-        spaceId: actor.spaceId,
-        userId: actor.userId,
-        clientNonce: `recruiting-observation:${read.effect.id}`,
+  const clientNonce = `recruiting-observation:${read.effect.id}`;
+  const artifact = await memo(`artifact:${clientNonce}`, () =>
+    tx.artifact.findUnique({
+      where: {
+        spaceId_userId_clientNonce: { spaceId: actor.spaceId, userId: actor.userId, clientNonce },
       },
-    },
-  });
+    }),
+  );
   if (!artifact && !read.recorded) return null;
   if (!artifact || !read.recorded) throw new IsolationError();
   const { event, payload } = read.recorded;
   if (!event.runId) throw new IsolationError();
-  const owner = await requireRun(tx, actor, event.runId);
+  const runId = event.runId;
+  const owner = await memo(`run:${runId}`, () => requireRun(tx, actor, runId));
   if (
     event.threadId !== owner.threadId ||
     event.botId !== owner.botId ||
@@ -5980,7 +6005,9 @@ async function recordedResearchReadArtifact(
       .some((ref) => ref.artifactId === artifact.id && ref.sha256 === artifact.hash)
   )
     throw new IsolationError();
-  await validateArtifact(tx, actor, payload.outputArtifact);
+  await memo(`valid:${payload.outputArtifact.artifactId}:${payload.outputArtifact.sha256}`, () =>
+    validateArtifact(tx, actor, payload.outputArtifact),
+  );
   return artifact;
 }
 
@@ -6526,6 +6553,7 @@ async function indexRecruitingCandidateRows(
     skipDuplicates: true,
   });
   await tx.recruitingCandidateOccurrence.createMany({ data: rows });
+  await fillCandidateMatchFields(tx, Prisma.sql`o."pageId" = ${effect.id}`);
   return rows.map(({ rowIndex, candidateKey }) => ({ rowIndex, candidateKey }));
 }
 
@@ -6897,6 +6925,7 @@ export async function saveRecruitingCandidateCsvImport(
         skipDuplicates: true,
       });
       await tx.recruitingCandidateOccurrence.createMany({ data: rows });
+      await fillCandidateMatchFields(tx, Prisma.sql`o."pageId" = ${saving.id}`);
     }
     const result = {
       status: "saved",
@@ -6949,25 +6978,79 @@ export async function saveRecruitingCandidateCsvImport(
 }
 
 /** One provenance check for both historical action pages and native candidate saves. */
+/**
+ * Loads the per-page proof rows of research-action pages in three `IN` queries and seeds a
+ * call-local memo with exactly the rows the per-page lookups would have read; every per-page
+ * check in candidatePageArtifact still runs unchanged against them.
+ */
+async function researchPageProofs(
+  tx: Tx,
+  actor: Actor,
+  pages: Prisma.RecruitingCandidatePageGetPayload<Record<string, never>>[],
+): Promise<ProofMemo> {
+  const memo = proofMemo();
+  if (pages.length < 2) return memo;
+  const ids = pages.map((page) => page.effectId);
+  const effects = await tx.externalEffect.findMany({
+    where: { id: { in: ids }, spaceId: actor.spaceId, status: "completed" },
+  });
+  const runIds = [...new Set(effects.map((effect) => effect.runId))];
+  const nonces = ids.map((id) => `recruiting-observation:${id}`);
+  const [events, artifacts] = await Promise.all([
+    tx.event.findMany({
+      where: {
+        spaceId: actor.spaceId,
+        runId: { in: runIds },
+        type: "recruiting.read",
+        OR: ids.map((id) => ({ payload: { path: ["effectId"], equals: id } })),
+      },
+    }),
+    tx.artifact.findMany({
+      where: { spaceId: actor.spaceId, userId: actor.userId, clientNonce: { in: nonces } },
+    }),
+  ]);
+  for (const id of ids) {
+    const effect = effects.find((row) => row.id === id) ?? null;
+    void memo(`effect:${id}`, async () => effect);
+    if (effect)
+      void memo(`read-events:${effect.runId}:${id}`, async () =>
+        events.filter(
+          (event) =>
+            event.runId === effect.runId &&
+            (event.payload as { effectId?: unknown } | null)?.effectId === id,
+        ),
+      );
+  }
+  for (const nonce of nonces)
+    void memo(
+      `artifact:${nonce}`,
+      async () => artifacts.find((artifact) => artifact.clientNonce === nonce) ?? null,
+    );
+  return memo;
+}
+
 async function candidatePageArtifact(
   tx: Tx,
   actor: Actor,
   page: Prisma.RecruitingCandidatePageGetPayload<Record<string, never>>,
   canonical = false,
+  memo: ProofMemo = unmemoized,
 ) {
   if (page.taskId === null && page.actionId === null) {
     const artifacts = await candidatePageArtifacts(tx, actor, [page], canonical);
     return artifacts.get(page.effectId)!;
   }
-  const effect = await tx.externalEffect.findFirst({
-    where: {
-      id: page.effectId,
-      spaceId: actor.spaceId,
-      status: "completed",
-    },
-  });
+  const effect = await memo(`effect:${page.effectId}`, () =>
+    tx.externalEffect.findFirst({
+      where: {
+        id: page.effectId,
+        spaceId: actor.spaceId,
+        status: "completed",
+      },
+    }),
+  );
   if (effect?.status !== "completed") throw new IsolationError();
-  const read = await researchReadBinding(tx, actor, effect);
+  const read = await researchReadBinding(tx, actor, effect, undefined, memo);
   if (
     read?.toolName !== "get_rows" ||
     read.binding.taskId !== page.taskId ||
@@ -6977,7 +7060,7 @@ async function candidatePageArtifact(
     (canonical && read.saved.action.candidateOutputSchema !== RECRUITING_CANDIDATE_OUTPUT_SCHEMA)
   )
     throw new IsolationError();
-  const artifact = await recordedResearchReadArtifact(tx, actor, read);
+  const artifact = await recordedResearchReadArtifact(tx, actor, read, memo);
   if (!artifact || artifact.id !== page.artifactId || artifact.hash !== page.artifactHash)
     throw new IsolationError();
   return artifact;
@@ -7089,9 +7172,14 @@ async function candidatePageArtifacts(
     byEvent.set(id, saved);
   }
   const artifacts = new Map<string, Prisma.ArtifactGetPayload<Record<string, never>>>();
+  const memo = await researchPageProofs(
+    tx,
+    actor,
+    pages.filter((page) => page.taskId !== null || page.actionId !== null),
+  );
   for (const page of pages) {
     if (page.taskId !== null || page.actionId !== null) {
-      artifacts.set(page.effectId, await candidatePageArtifact(tx, actor, page, canonical));
+      artifacts.set(page.effectId, await candidatePageArtifact(tx, actor, page, canonical, memo));
       continue;
     }
     const effect = byEffect.get(page.effectId);
@@ -7217,6 +7305,54 @@ function writeCandidateCursor(scope: string, value: string, key: string): string
   return Buffer.from(JSON.stringify({ version: 1, scope, value, key })).toString("base64url");
 }
 
+// The saved provider envelope of `effect`: structuredContent, else the first JSON text block.
+const savedProviderBody = Prisma.sql`COALESCE(effect."result"->'structuredContent', (
+  SELECT CASE WHEN block->>'text' IS JSON OBJECT THEN (block->>'text')::jsonb END
+  FROM jsonb_array_elements(CASE WHEN jsonb_typeof(effect."result"->'content') = 'array'
+    THEN effect."result"->'content' ELSE '[]'::jsonb END) block
+  WHERE block->>'type' = 'text' AND block->>'text' IS JSON OBJECT LIMIT 1
+))`;
+// Occurrence `o`'s own saved row inside `body`; {} when the row is absent or not an object.
+const savedProviderRow = (body: Prisma.Sql) =>
+  Prisma.sql`CASE WHEN jsonb_typeof(${body}->'rows'->o."rowIndex") = 'object'
+    THEN ${body}->'rows'->o."rowIndex" ELSE '{}'::jsonb END`;
+const candidateMatchKeys = [
+  "updated_rank",
+  "overall_rank",
+  "rank",
+  "batch_rank",
+  "rank_this_batch_only",
+  "match_tier",
+  "match_score",
+  "score",
+];
+/**
+ * Copies each saved provider row's match cells onto its occurrence, once. Rows without such
+ * cells get {} so NULL always means "not filled yet". Idempotent; `scope` filters alias `o`.
+ */
+async function fillCandidateMatchFields(db: Pick<Tx, "$executeRaw">, scope: Prisma.Sql) {
+  await db.$executeRaw(Prisma.sql`WITH bodies AS MATERIALIZED (
+    SELECT page."effectId", ${savedProviderBody} AS body
+    FROM "recruiting_candidate_pages" page
+    JOIN "external_effects" effect ON effect."id" = page."effectId"
+    WHERE page."effectId" IN (
+      SELECT o."pageId" FROM "recruiting_candidate_occurrences" o
+      WHERE ${scope} AND o."matchFields" IS NULL
+    )
+  ), filled AS (
+    SELECT o."pageId", o."rowIndex", COALESCE((
+      SELECT jsonb_object_agg(cell.key, cell.value)
+      FROM jsonb_each(${savedProviderRow(Prisma.sql`b.body`)}) cell
+      WHERE cell.key IN (${Prisma.join(candidateMatchKeys)})
+    ), '{}'::jsonb) AS "matchFields"
+    FROM "recruiting_candidate_occurrences" o JOIN bodies b ON b."effectId" = o."pageId"
+    WHERE ${scope} AND o."matchFields" IS NULL
+  )
+  UPDATE "recruiting_candidate_occurrences" o SET "matchFields" = filled."matchFields"
+  FROM filled
+  WHERE o."pageId" = filled."pageId" AND o."rowIndex" = filled."rowIndex" AND o."matchFields" IS NULL`);
+}
+
 /** Latest source projection is selected by native read completion, never by backfill arrival. */
 function candidateIndexQuery(
   roleId: string,
@@ -7224,7 +7360,6 @@ function candidateIndexQuery(
   rankDomainPageId?: string,
   displayScope?: Pick<CandidatesInput, "sourceEffectId" | "actionId">,
 ) {
-  // ponytail: parse each saved page once; persist match fields only if large pools outgrow this projection.
   const includeMatches = sort !== undefined;
   const matchSort = sort === "rank" || sort === "tier" || sort === "score";
   const explicitSource =
@@ -7268,39 +7403,6 @@ function candidateIndexQuery(
         ) rank_pages)`
         : Prisma.sql`${rankDomainPageId}::text`
     } AS "pageId"
-  ), match_rows AS MATERIALIZED (
-    SELECT page."effectId" AS "pageId", page."observedAt", (returned.ordinality - 1)::int AS "rowIndex",
-      source.kind, ${matchValue} AS value
-    FROM "recruiting_candidate_pages" page
-    JOIN "external_effects" effect ON effect."id" = page."effectId"
-    CROSS JOIN LATERAL (
-      SELECT COALESCE(effect."result"->'structuredContent', (
-        SELECT CASE WHEN block->>'text' IS JSON OBJECT THEN (block->>'text')::jsonb END
-        FROM jsonb_array_elements(CASE WHEN jsonb_typeof(effect."result"->'content') = 'array'
-          THEN effect."result"->'content' ELSE '[]'::jsonb END) block
-        WHERE block->>'type' = 'text' AND block->>'text' IS JSON OBJECT LIMIT 1
-      )) AS body
-    ) envelope
-    CROSS JOIN LATERAL jsonb_array_elements(CASE WHEN jsonb_typeof(envelope.body->'rows') = 'array'
-      THEN envelope.body->'rows' ELSE '[]'::jsonb END) WITH ORDINALITY returned(value, ordinality)
-    CROSS JOIN rank_scope
-    CROSS JOIN LATERAL (VALUES
-      ('rank', ${rankCell},
-        (rank_scope."pageId" IS NULL OR page."effectId" = rank_scope."pageId") AND
-        (returned.value ? 'updated_rank' OR returned.value ? 'overall_rank' OR
-          (rank_scope."pageId" IS NOT NULL AND
-            (returned.value ? 'rank' OR returned.value ? 'batch_rank' OR returned.value ? 'rank_this_batch_only')))),
-      ('tier', returned.value -> ${"match_tier"}, returned.value ? ${"match_tier"}),
-      ('score', CASE WHEN returned.value ? 'match_score' THEN returned.value -> 'match_score'
-        ELSE returned.value -> 'score' END,
-        (returned.value ? 'match_score' OR returned.value ? 'score') AND
-        rank_scope."pageId" IS NOT NULL AND page."effectId" = rank_scope."pageId")
-    ) source(kind, cell, present)
-    CROSS JOIN LATERAL (SELECT CASE WHEN jsonb_typeof(source.cell) = 'object' AND source.cell ? 'value'
-      THEN source.cell->'value' ELSE source.cell END AS "value") match
-    WHERE page."roleId" = ${roleId}
-      ${sourceScope}
-      AND source.present
   ),`
       : Prisma.empty
   } base AS (
@@ -7371,9 +7473,35 @@ function candidateIndexQuery(
           FILTER (WHERE m.kind = 'tier'))[1] AS "tierPageId",
         (array_agg(m."pageId" ORDER BY m."observedAt" DESC, m."pageId" COLLATE "C" DESC, m."rowIndex" DESC)
           FILTER (WHERE m.kind = 'score'))[1] AS "scorePageId"
-      FROM "recruiting_candidate_occurrences" o
-      JOIN match_rows m ON m."pageId" = o."pageId" AND m."rowIndex" = o."rowIndex"
-      WHERE o."roleId" = c."roleId" AND o."candidateKey" = c."candidateKey"
+      FROM (
+        -- Reads the match cells stored on each occurrence; saved page JSON is never parsed here.
+        SELECT o."pageId", page."observedAt", o."rowIndex", source.kind, ${matchValue} AS value
+        FROM "recruiting_candidate_occurrences" o
+        JOIN "recruiting_candidate_pages" page ON page."effectId" = o."pageId"
+        -- ponytail: rows saved before matchFields parse their own page once until backfilled.
+        CROSS JOIN LATERAL (SELECT COALESCE(o."matchFields", (
+          SELECT ${savedProviderRow(savedProviderBody)} FROM "external_effects" effect
+          WHERE effect."id" = o."pageId"
+        )) AS value) returned
+        CROSS JOIN rank_scope
+        CROSS JOIN LATERAL (VALUES
+          ('rank', ${rankCell},
+            (rank_scope."pageId" IS NULL OR page."effectId" = rank_scope."pageId") AND
+            (returned.value ? 'updated_rank' OR returned.value ? 'overall_rank' OR
+              (rank_scope."pageId" IS NOT NULL AND
+                (returned.value ? 'rank' OR returned.value ? 'batch_rank' OR returned.value ? 'rank_this_batch_only')))),
+          ('tier', returned.value -> ${"match_tier"}, returned.value ? ${"match_tier"}),
+          ('score', CASE WHEN returned.value ? 'match_score' THEN returned.value -> 'match_score'
+            ELSE returned.value -> 'score' END,
+            (returned.value ? 'match_score' OR returned.value ? 'score') AND
+            rank_scope."pageId" IS NOT NULL AND page."effectId" = rank_scope."pageId")
+        ) source(kind, cell, present)
+        CROSS JOIN LATERAL (SELECT CASE WHEN jsonb_typeof(source.cell) = 'object' AND source.cell ? 'value'
+          THEN source.cell->'value' ELSE source.cell END AS "value") match
+        WHERE o."roleId" = c."roleId" AND o."candidateKey" = c."candidateKey"
+          ${sourceScope}
+          AND source.present
+      ) m
     ) match ON true`
         : Prisma.empty
     }
@@ -9619,6 +9747,7 @@ export async function listRecruitingCandidates(
 ): Promise<CandidatesOutput> {
   const input = ListRecruitingCandidatesInput.parse(raw);
   const afterRead: Array<() => void> = [];
+  let backfillRoleId: string | undefined;
   const result = await prisma.$transaction(
     async (tx) => {
       const role = await requireRole(tx, actor, input.roleId);
@@ -9716,6 +9845,7 @@ export async function listRecruitingCandidates(
             rankAvailable: boolean;
             tierAvailable: boolean;
             scoreAvailable: boolean;
+            matchBackfill?: boolean;
           } & (CandidateQueryRow | { [Key in keyof CandidateQueryRow]: null })
         >
       >(Prisma.sql`${filtered}, ordered AS (
@@ -9731,6 +9861,8 @@ export async function listRecruitingCandidates(
           count(*) FILTER (WHERE "countIdentified") AS "identifiedCandidates",
           count(*) FILTER (WHERE "assessmentVersion" IS NULL) AS "unassessed",
           count(*) FILTER (WHERE "assessmentVersion" IS NOT NULL) AS "assessed",
+          EXISTS (SELECT 1 FROM "recruiting_candidate_occurrences" o
+            WHERE o."roleId" = ${role.id} AND o."matchFields" IS NULL) AS "matchBackfill",
           count(*) FILTER (WHERE "shortlisted") AS "shortlistedCount" FROM base
       ) SELECT totals.*, candidate_page.* FROM totals LEFT JOIN candidate_page ON true
         ORDER BY ${order}`);
@@ -9746,6 +9878,7 @@ export async function listRecruitingCandidates(
           rankAvailable: _rankAvailable,
           tierAvailable: _tierAvailable,
           scoreAvailable: _scoreAvailable,
+          matchBackfill: _matchBackfill,
           ...row
         }) => (row.candidateKey === null ? [] : [row]),
       );
@@ -9764,7 +9897,9 @@ export async function listRecruitingCandidates(
         unassessed,
         assessed,
         shortlistedCount,
+        matchBackfill,
       } = result[0]!;
+      if (matchBackfill) backfillRoleId = role.id;
       const counts = {
         sourceRows,
         candidates,
@@ -9866,6 +10001,10 @@ export async function listRecruitingCandidates(
     { isolationLevel: Prisma.TransactionIsolationLevel.RepeatableRead },
   );
   for (const verify of afterRead) verify();
+  // One-time lazy backfill, after authorization and outside the RepeatableRead snapshot so it
+  // can never conflict with it; idempotent, so concurrent first reads simply both no-op/fill.
+  if (backfillRoleId)
+    await fillCandidateMatchFields(prisma, Prisma.sql`o."roleId" = ${backfillRoleId}`);
   return result;
 }
 

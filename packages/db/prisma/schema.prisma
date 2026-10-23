@@ -1692,6 +1692,8 @@ model RecruitingCandidateOccurrence {
   resumeUrl String?
   evidenceUrls Json?
   issues Json
+  /// Provider match cells (rank/tier/score keys) of this saved row; null until backfilled.
+  matchFields Json?
 
   @@id([pageId, rowIndex])
   @@index([roleId, candidateKey])
