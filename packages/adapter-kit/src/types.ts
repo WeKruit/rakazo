@@ -681,6 +681,8 @@ export interface BackgroundJobPayloads {
   "messaging.deliver": { runId?: string };
   /** Reconcile durable remote-agent intent; scope is loaded from the database. */
   "cloud_agent.poll": { agentId: string };
+  /** Check one active recruiting research task at the provider; scope is loaded from the database. */
+  "recruiting_research.poll": { taskId: string; attempt?: number };
 }
 
 export type BackgroundJobName = keyof BackgroundJobPayloads;

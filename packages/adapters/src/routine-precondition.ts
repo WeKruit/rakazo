@@ -103,7 +103,7 @@ export async function skipRoutineWithoutNewActivity(
         },
       });
     } catch (error) {
-      getLogger().warn("routine skip event not recorded", error);
+      getLogger().warn("routine skip event not recorded", { error: String(error) });
     }
   }
   if (nextRunAt) await deps.jobs.enqueue(routineWakeupJob(routine.id, nextRunAt));

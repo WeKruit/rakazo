@@ -2,6 +2,7 @@ import type {
   AgentHomeStore,
   AgentRuntime,
   BackgroundJobHandlers,
+  ConnectorProvider,
   JobPublisher,
   MessagingSurface,
   SandboxProvider,
@@ -15,6 +16,7 @@ import { pollCloudAgent } from "./cloud-agent-poll.js";
 import { expireComputerControl } from "./computer-control.js";
 import { scheduleComputerSleep, sleepComputerIfIdle } from "./computer-idle.js";
 import { performComputerUpdate } from "./computer-update.js";
+import { pollRecruitingResearch } from "./recruiting-research-poll.js";
 import type { createRunExecutor } from "./executor.js";
 import { compactHistory } from "./history-compaction.js";
 import type { MemoryProviderResolver } from "./memory-provider-factory.js";
@@ -41,6 +43,8 @@ export function createBackgroundJobHandlers(deps: {
   deploymentModelConfigured?: boolean;
   messaging?: MessagingSurface;
   cloudAgent?: CloudAgentConnection | null;
+  /** The native MCP connector; without it research tasks are not polled in the background. */
+  connector?: ConnectorProvider;
 }): BackgroundJobHandlers {
   const deliverMessaging = async (runId?: string) => {
     if (!deps.messaging) return;
@@ -107,6 +111,12 @@ export function createBackgroundJobHandlers(deps: {
           events: deps.events,
           cloudAgent: deps.cloudAgent,
         },
+        payload,
+      );
+    },
+    "recruiting_research.poll": async (payload) => {
+      await pollRecruitingResearch(
+        { prisma: deps.prisma, jobs: deps.jobs, connector: deps.connector },
         payload,
       );
     },
