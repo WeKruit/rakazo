@@ -53,7 +53,12 @@ function recruitingServices(
           bots: ["main", "sourcer"],
           tools: CRM_READ_TOOLS,
           toolsByBot: {
-            main: [...CRM_READ_TOOLS, "crm_import_candidate", "list_crm_candidate_roles"],
+            main: [
+              ...CRM_READ_TOOLS,
+              "crm_import_candidate",
+              "list_crm_candidate_roles",
+              "list_crm_candidate_correspondence",
+            ],
           },
         },
       ]

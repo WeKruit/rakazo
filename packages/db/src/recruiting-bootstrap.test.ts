@@ -705,7 +705,7 @@ it("defers before writes when native computer quota maintenance already holds it
 describe("managed first-party recruiting CRM installation", () => {
   const endpoint = "https://crm.example.test/mcp";
   const options = { sandboxKind: "fake", firstPartyMcpUrl: endpoint };
-  it("installs Main ten tools and Sourcer eight reads without copying credentials or changing the four native agents", async () => {
+  it("installs Main eleven tools and Sourcer eight reads without copying credentials or changing the four native agents", async () => {
     const f = fixture();
     await recruiting.ensureRecruitingWorkspace(f.prisma, actor, options);
     const server = f.servers.find((row) => row.slug === "recruiting-crm");
@@ -727,10 +727,48 @@ describe("managed first-party recruiting CRM installation", () => {
       "list_crm_roles",
       "crm_import_candidate",
       "list_crm_candidate_roles",
+      "list_crm_candidate_correspondence",
     ]);
     expect(sourcer.allowedTools).toEqual(main.allowedTools.slice(0, 8));
     expect(assignments.every((row) => row.allowAllTools === false)).toBe(true);
   });
+  it.each(["managed", "restricted", "removed"] as const)(
+    "upgrades the CRM correspondence read only for an unchanged managed assignment: %s",
+    async (state) => {
+      const f = fixture();
+      await recruiting.ensureRecruitingWorkspace(f.prisma, actor, options);
+      const baseline = f.presets[0]!.config as ManagedState;
+      const server = f.servers.find((row) => row.slug === "recruiting-crm")!;
+      const assignments = f.assignments.filter((row) => row.serverId === server.id);
+      const main = assignments.find((row) => row.botId === f.bots[0]!.id)!;
+      const sourcer = assignments.find((row) => row.botId === f.bots[1]!.id)!;
+      for (const [key, assignment] of [
+        ["main", main],
+        ["sourcer", sourcer],
+      ] as const) {
+        assignment.allowedTools = assignment.allowedTools.filter(
+          (tool) => tool !== "list_crm_candidate_correspondence",
+        );
+        baseline.services["recruiting-crm"]!.assignments[key]!.signature = hash([
+          false,
+          assignment.allowedTools,
+        ]);
+      }
+      if (state === "restricted") main.allowedTools = [];
+      if (state === "removed") f.assignments.splice(f.assignments.indexOf(main), 1);
+      f.presets[0]!.digest = "previous-correspondence-defaults";
+      await recruiting.upgradeRecruitingWorkspace(f.prisma, actor, options);
+      expect(sourcer.allowedTools).toHaveLength(8);
+      expect(sourcer.allowedTools).not.toContain("list_crm_candidate_correspondence");
+      if (state === "managed")
+        expect(main.allowedTools).toContain("list_crm_candidate_correspondence");
+      else if (state === "restricted") expect(main.allowedTools).toEqual([]);
+      else
+        expect(
+          f.assignments.some((row) => row.botId === main.botId && row.serverId === server.id),
+        ).toBe(false);
+    },
+  );
   it("adds the newly configured native service to an unchanged managed crew, preserving revocations on subsequent upgrades", async () => {
     const f = fixture();
     await recruiting.ensureRecruitingWorkspace(f.prisma, actor, { sandboxKind: "fake" });
@@ -740,7 +778,7 @@ describe("managed first-party recruiting CRM installation", () => {
     const main = f.assignments.find(
       (row) => row.serverId === server.id && row.botId === f.bots[0]!.id,
     )!;
-    expect(main.allowedTools).toHaveLength(10);
+    expect(main.allowedTools).toHaveLength(11);
     main.allowedTools = [];
     const installed = f.presets[0]!;
     installed.digest = "changed-catalog";
