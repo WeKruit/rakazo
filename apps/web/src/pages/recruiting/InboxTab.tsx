@@ -190,7 +190,7 @@ export function InboxTab({ onSelectEmail, ...props }: InboxProps) {
         </TabNotice>
       ) : null}
       {people.data?.items.length ? (
-        <div className="grid gap-4 lg:grid-cols-[minmax(0,0.8fr)_minmax(0,1fr)_minmax(0,1.6fr)]">
+        <div className="grid grid-cols-1 gap-4 lg:grid-cols-[minmax(0,0.8fr)_minmax(0,1fr)_minmax(0,1.6fr)]">
           <ul
             aria-label={t`Candidates`}
             className="divide-y divide-border rounded-lg border border-border"
@@ -223,7 +223,9 @@ export function InboxTab({ onSelectEmail, ...props }: InboxProps) {
                     setEmailId(undefined);
                   }}
                 >
-                  <strong className="block truncate">{item.name}</strong>
+                  <strong className="block truncate" title={item.name}>
+                    {item.name}
+                  </strong>
                   <small className="block truncate text-muted-foreground">
                     {statusText(item.outreachStatus)}
                   </small>
@@ -233,7 +235,7 @@ export function InboxTab({ onSelectEmail, ...props }: InboxProps) {
           </ul>
           <section aria-label={t`Emails`} className="rounded-lg border border-border">
             <div className="flex items-center justify-between gap-2 border-b border-border p-3">
-              <strong className="truncate text-sm">
+              <strong className="truncate text-sm" title={roleWide ? undefined : person?.name}>
                 {roleWide ? <Trans>All candidates</Trans> : person?.name}
               </strong>
               {status === "replied" ? (
@@ -279,7 +281,9 @@ export function InboxTab({ onSelectEmail, ...props }: InboxProps) {
                 onClick={() => setEmailId(item.id)}
               >
                 <span className="flex items-center justify-between gap-2">
-                  <strong className="truncate">{item.sender ?? t`Sender unavailable`}</strong>
+                  <strong className="truncate" title={item.sender ?? undefined}>
+                    {item.sender ?? t`Sender unavailable`}
+                  </strong>
                   {item.direction === "received" ? (
                     <small className="shrink-0">
                       <Trans>Received</Trans>
@@ -291,11 +295,16 @@ export function InboxTab({ onSelectEmail, ...props }: InboxProps) {
                   ) : null}
                 </span>
                 {roleWide && nameOf(item.candidateId) ? (
-                  <span className="block truncate text-muted-foreground">
+                  <span
+                    className="block truncate text-muted-foreground"
+                    title={nameOf(item.candidateId)}
+                  >
                     {nameOf(item.candidateId)}
                   </span>
                 ) : null}
-                <span className="block truncate">{item.subject || t`No subject`}</span>
+                <span className="block truncate" title={item.subject || undefined}>
+                  {item.subject || t`No subject`}
+                </span>
                 {item.date ? (
                   <time className="text-xs text-muted-foreground" dateTime={item.date}>
                     {formatDate(item.date)}

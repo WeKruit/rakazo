@@ -115,7 +115,7 @@ export function SequenceTab(props: RecruitingTabProps) {
               <Trans>No CRM contacts for this role yet.</Trans>
             </TabNotice>
           )}
-          <div className="grid gap-4 md:grid-cols-[minmax(0,1fr)_minmax(0,1.4fr)]">
+          <div className="grid grid-cols-1 gap-4 md:grid-cols-[minmax(0,1fr)_minmax(0,1.4fr)]">
             <ul className="divide-y divide-border rounded-lg border border-border">
               {people.data.items.map((person) => (
                 <li key={person.candidateId}>
@@ -125,7 +125,9 @@ export function SequenceTab(props: RecruitingTabProps) {
                     className="flex w-full items-center justify-between gap-2 p-3 text-start text-sm hover:bg-muted aria-pressed:bg-muted"
                     onClick={() => setCandidateId(person.candidateId)}
                   >
-                    <span className="truncate font-medium">{person.name}</span>
+                    <span className="truncate font-medium" title={person.name}>
+                      {person.name}
+                    </span>
                     <span className="shrink-0 text-xs text-muted-foreground">
                       {statusText(person.outreachStatus)}
                     </span>

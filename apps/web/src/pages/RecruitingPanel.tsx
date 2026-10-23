@@ -1076,7 +1076,9 @@ function CandidateReport({
     : report.fields;
   const FieldList = condensed ? "div" : "dl";
   return (
-    <div className="hire-candidate-report space-y-3 break-words font-sans text-base leading-relaxed">
+    <div
+      className={`hire-candidate-report space-y-3 break-words font-sans ${condensed ? "text-xs leading-normal" : "text-base leading-relaxed"}`}
+    >
       <FieldList className="space-y-3">
         {fields.map((field, index) => {
           const content = (
@@ -2340,7 +2342,7 @@ function CorrespondenceTabMount({
   return (
     <>
       {onDraftReply && email ? (
-        <Button variant="outline" onClick={() => onDraftReply(email)}>
+        <Button variant="outline" className="mb-4" onClick={() => onDraftReply(email)}>
           <Trans>Draft reply</Trans>
         </Button>
       ) : null}
@@ -2888,8 +2890,8 @@ function CrmRecruitingPanel({
         ) : null}
       </div>
       {read?.key !== key || read.loading ? (
-        <p role="status">
-          <Trans>Loading CRM records…</Trans>
+        <p role="status" className="py-2 text-sm">
+          <Shimmer>{t`Loading CRM records…`}</Shimmer>
         </p>
       ) : null}
       {read?.key === key && read.failed ? (
@@ -3174,74 +3176,78 @@ function CrmRecruitingPanel({
               <Plural value={page.total} _1="# contact" other="# contacts" />
             </p>
           ) : null}
-          <div className="hire-table-wrap overflow-x-auto">
-            <table className="hire-table w-full text-left text-sm">
-              <thead>
-                <tr>
-                  {[
-                    t`Candidate`,
-                    t`Current role`,
-                    t`Email`,
-                    t`Phone`,
-                    t`Stage`,
-                    t`Contact status`,
-                    t`Outreach status`,
-                    browse.view === "feedback" || browse.view === "sequence"
-                      ? t`Details`
-                      : t`Messages`,
-                  ].map((label) => (
-                    <th key={label} scope="col">
-                      {label}
-                    </th>
-                  ))}
-                </tr>
-              </thead>
-              <tbody>
-                {people.map((person) => (
-                  <tr key={person.candidateId}>
-                    <th scope="row">
-                      {person.name}
-                      {person.linkedinUrl && /^https?:\/\//i.test(person.linkedinUrl) ? (
-                        <a
-                          className="block text-xs underline"
-                          href={person.linkedinUrl}
-                          target="_blank"
-                          rel="noreferrer"
-                        >
-                          <Trans>LinkedIn</Trans>
-                        </a>
-                      ) : null}
-                    </th>
-                    <td>
-                      {person.title ?? "—"}
-                      {person.location ? <small className="block">{person.location}</small> : null}
-                    </td>
-                    <td>{person.email ?? "—"}</td>
-                    <td>{person.phone ?? "—"}</td>
-                    <td>{person.stage ?? "—"}</td>
-                    <td>{person.contactStatus || "—"}</td>
-                    <td>{person.outreachStatus || "—"}</td>
-                    <td>
-                      <Button
-                        variant="link"
-                        onClick={() =>
-                          browse.view === "feedback" || browse.view === "sequence"
-                            ? selectContact(person.candidateId, browse.view)
-                            : selectContact(person.candidateId)
-                        }
-                      >
-                        {browse.view === "feedback" || browse.view === "sequence" ? (
-                          <Trans>View details</Trans>
-                        ) : (
-                          <Trans>View messages</Trans>
-                        )}
-                      </Button>
-                    </td>
+          {page ? (
+            <div className="hire-table-wrap overflow-x-auto">
+              <table className="hire-table w-full text-left text-sm">
+                <thead>
+                  <tr>
+                    {[
+                      t`Candidate`,
+                      t`Current role`,
+                      t`Email`,
+                      t`Phone`,
+                      t`Stage`,
+                      t`Contact status`,
+                      t`Outreach status`,
+                      browse.view === "feedback" || browse.view === "sequence"
+                        ? t`Details`
+                        : t`Messages`,
+                    ].map((label) => (
+                      <th key={label} scope="col">
+                        {label}
+                      </th>
+                    ))}
                   </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
+                </thead>
+                <tbody>
+                  {people.map((person) => (
+                    <tr key={person.candidateId}>
+                      <th scope="row">
+                        {person.name}
+                        {person.linkedinUrl && /^https?:\/\//i.test(person.linkedinUrl) ? (
+                          <a
+                            className="block text-xs underline"
+                            href={person.linkedinUrl}
+                            target="_blank"
+                            rel="noreferrer"
+                          >
+                            <Trans>LinkedIn</Trans>
+                          </a>
+                        ) : null}
+                      </th>
+                      <td>
+                        {person.title ?? "—"}
+                        {person.location ? (
+                          <small className="block">{person.location}</small>
+                        ) : null}
+                      </td>
+                      <td>{person.email ?? "—"}</td>
+                      <td>{person.phone ?? "—"}</td>
+                      <td>{person.stage ?? "—"}</td>
+                      <td>{person.contactStatus || "—"}</td>
+                      <td>{person.outreachStatus || "—"}</td>
+                      <td>
+                        <Button
+                          variant="link"
+                          onClick={() =>
+                            browse.view === "feedback" || browse.view === "sequence"
+                              ? selectContact(person.candidateId, browse.view)
+                              : selectContact(person.candidateId)
+                          }
+                        >
+                          {browse.view === "feedback" || browse.view === "sequence" ? (
+                            <Trans>View details</Trans>
+                          ) : (
+                            <Trans>View messages</Trans>
+                          )}
+                        </Button>
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          ) : null}
           {page && !people.length ? (
             <p>
               <Trans>No CRM records matched this search.</Trans>
@@ -3537,7 +3543,11 @@ function CrmRecruitingPanel({
   return (
     <div className="hire-standard-view">
       <header className="hire-section-header">
-        <h1>{page?.selectedRole?.roleLabel ?? bound.role?.title ?? t`CRM contacts`}</h1>
+        <h1>
+          {page?.selectedRole?.roleLabel ??
+            bound.role?.title ??
+            (bound.done && read?.key === key && !read.loading ? t`CRM contacts` : null)}
+        </h1>
         {page?.selectedRole ? <p>{page.selectedRole.clientLabel}</p> : null}
       </header>
       {["contacts", "sequence", "inbox", "interview"].includes(browse.view) ? (
