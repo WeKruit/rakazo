@@ -19,7 +19,10 @@ import type { createRunExecutor } from "./executor.js";
 import { compactHistory } from "./history-compaction.js";
 import type { MemoryProviderResolver } from "./memory-provider-factory.js";
 import { deliverMessagingOutbound, mirrorMessagingOutbound } from "./messaging-delivery.js";
-import { skipRoutineWithoutNewActivity } from "./routine-precondition.js";
+import {
+  pauseRoutineAfterRepeatedFailures,
+  skipRoutineWithoutNewActivity,
+} from "./routine-precondition.js";
 import { expireTaughtSkillTeaching } from "./teaching-session.js";
 
 export function createBackgroundJobHandlers(deps: {
@@ -57,6 +60,10 @@ export function createBackgroundJobHandlers(deps: {
   return {
     "run.continue": async (payload) => {
       await deps.executor.continueRun(payload.runId, deps.workerId);
+      // A routine whose last five runs all failed stops firing; never let this fail the run.
+      await pauseRoutineAfterRepeatedFailures(deps, payload.runId).catch((error) => {
+        getLogger().error("routine failure pause error", error);
+      });
       // Automatic messaging mirror: once the run's bot messages are durable,
       // copy them into the outbox. Never let mirror failures fail the run.
       if (deps.messaging) {

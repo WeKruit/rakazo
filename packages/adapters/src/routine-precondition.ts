@@ -2,6 +2,7 @@ import type { JobPublisher } from "@rakazo/adapter-kit";
 import { routineJobKey, routineWakeupJob } from "@rakazo/adapter-kit";
 import { isOneShotRoutineCrons, nextCronDateAcross } from "@rakazo/core";
 import type { PrismaClient, Routine, ThreadEvents } from "@rakazo/db";
+import { createThreadMessage } from "@rakazo/db";
 import { getLogger } from "@rakazo/logging";
 
 /**
@@ -107,5 +108,57 @@ export async function skipRoutineWithoutNewActivity(
   }
   if (nextRunAt) await deps.jobs.enqueue(routineWakeupJob(routine.id, nextRunAt));
   else await deps.jobs.cancel(routineJobKey(routine.id)).catch(() => undefined);
+  return true;
+}
+
+export const ROUTINE_FAILURE_PAUSE_THRESHOLD = 5;
+
+/**
+ * After a routine run fails: when its last five runs all failed, pause the routine and say so
+ * once in the thread the run used. The streak is read from the routine's own runs, so a success
+ * resets it without any counter column. Returns true when this call paused the routine.
+ */
+export async function pauseRoutineAfterRepeatedFailures(
+  deps: { prisma: PrismaClient; jobs: JobPublisher; events: Pick<ThreadEvents, "notify"> },
+  runId: string,
+): Promise<boolean> {
+  const run = await deps.prisma.run.findUnique({
+    where: { id: runId },
+    select: { routineId: true, status: true, threadId: true },
+  });
+  if (!run?.routineId || run.status !== "failed") return false;
+  const recent = await deps.prisma.run.findMany({
+    where: { routineId: run.routineId },
+    orderBy: [{ createdAt: "desc" }, { id: "desc" }],
+    take: ROUTINE_FAILURE_PAUSE_THRESHOLD,
+    select: { status: true },
+  });
+  if (
+    recent.length < ROUTINE_FAILURE_PAUSE_THRESHOLD ||
+    recent.some((entry) => entry.status !== "failed")
+  )
+    return false;
+  const routine = await deps.prisma.routine.findUnique({
+    where: { id: run.routineId },
+    select: { name: true },
+  });
+  const paused = await deps.prisma.routine.updateMany({
+    where: { id: run.routineId, active: true },
+    data: { active: false, nextRunAt: null },
+  });
+  // Only the call that flipped it posts the notice, so a replayed job never repeats it.
+  if (paused.count !== 1) return false;
+  await deps.jobs.cancel(routineJobKey(run.routineId)).catch(() => undefined);
+  const note = await createThreadMessage(deps.prisma, {
+    threadId: run.threadId,
+    role: "system",
+    blocks: [
+      {
+        kind: "meta",
+        text: `Routine "${routine?.name ?? run.routineId}" was paused after ${ROUTINE_FAILURE_PAUSE_THRESHOLD} consecutive failed runs. Fix the cause, then resume it.`,
+      },
+    ],
+  });
+  await deps.events.notify(run.threadId, note.seq).catch(() => undefined);
   return true;
 }

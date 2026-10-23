@@ -1,11 +1,18 @@
+import type * as Database from "@rakazo/db";
 import type { PrismaClient } from "@rakazo/db";
-import { describe, expect, it, vi } from "vitest";
+import { createThreadMessage } from "@rakazo/db";
+import { beforeEach, describe, expect, it, vi } from "vitest";
 import { createBackgroundJobHandlers } from "./background-job-handlers.js";
 import {
   parseRoutinePrecondition,
   routinePreconditionMet,
   skipRoutineWithoutNewActivity,
 } from "./routine-precondition.js";
+
+vi.mock("@rakazo/db", async (importOriginal) => ({
+  ...(await importOriginal<typeof Database>()),
+  createThreadMessage: vi.fn(async () => ({ id: "note", seq: 7 })),
+}));
 
 const scheduledAt = new Date(Date.now() - 5_000);
 const lastRunAt = new Date(Date.now() - 3_600_000);
@@ -179,5 +186,110 @@ describe("routine.wakeup precondition", () => {
     expect(await skipRoutineWithoutNewActivity(deps as never, payload)).toBe(true);
     expect(enqueue).not.toHaveBeenCalled();
     expect(append).not.toHaveBeenCalled();
+  });
+});
+
+describe("run.continue routine failure pause", () => {
+  beforeEach(() => vi.mocked(createThreadMessage).mockClear());
+
+  function failurePrisma(statuses: string[], options: { active?: boolean } = {}) {
+    const updateMany = vi.fn(async () => ({ count: options.active === false ? 0 : 1 }));
+    const prisma = {
+      run: {
+        findUnique: vi.fn(async () => ({
+          routineId: "routine-1",
+          status: statuses[0],
+          threadId: "thread-1",
+        })),
+        findMany: vi.fn(async () => statuses.map((status) => ({ status }))),
+      },
+      routine: {
+        findUnique: vi.fn(async () => ({ name: "Inbox triage" })),
+        updateMany,
+      },
+    };
+    return { prisma: prisma as unknown as PrismaClient, updateMany, raw: prisma };
+  }
+
+  function continueDeps(prisma: PrismaClient) {
+    const continueRun = vi.fn(async () => undefined);
+    const cancel = vi.fn(async () => undefined);
+    const notify = vi.fn(async () => undefined);
+    const deps = {
+      executor: { continueRun },
+      prisma,
+      jobs: { enqueue: vi.fn(async () => undefined), cancel, close: vi.fn() },
+      events: { notify },
+      workerId: "w",
+    } as unknown as Parameters<typeof createBackgroundJobHandlers>[0];
+    return { deps, continueRun, cancel, notify };
+  }
+
+  it("pauses the routine and posts one notice after five consecutive failed runs", async () => {
+    const { prisma, updateMany, raw } = failurePrisma([
+      "failed",
+      "failed",
+      "failed",
+      "failed",
+      "failed",
+    ]);
+    const { deps, continueRun, cancel, notify } = continueDeps(prisma);
+    await createBackgroundJobHandlers(deps)["run.continue"]({ runId: "run-5" });
+    expect(continueRun).toHaveBeenCalledExactlyOnceWith("run-5", "w");
+    expect(raw.run.findMany).toHaveBeenCalledWith(
+      expect.objectContaining({ where: { routineId: "routine-1" }, take: 5 }),
+    );
+    expect(updateMany).toHaveBeenCalledExactlyOnceWith({
+      where: { id: "routine-1", active: true },
+      data: { active: false, nextRunAt: null },
+    });
+    expect(cancel).toHaveBeenCalledWith("routine:routine-1");
+    expect(createThreadMessage).toHaveBeenCalledExactlyOnceWith(prisma, {
+      threadId: "thread-1",
+      role: "system",
+      blocks: [
+        {
+          kind: "meta",
+          text: 'Routine "Inbox triage" was paused after 5 consecutive failed runs. Fix the cause, then resume it.',
+        },
+      ],
+    });
+    expect(notify).toHaveBeenCalledWith("thread-1", 7);
+  });
+
+  it("does not post the notice again for a routine that is already paused", async () => {
+    const { prisma } = failurePrisma(["failed", "failed", "failed", "failed", "failed"], {
+      active: false,
+    });
+    const { deps, notify } = continueDeps(prisma);
+    await createBackgroundJobHandlers(deps)["run.continue"]({ runId: "run-6" });
+    expect(createThreadMessage).not.toHaveBeenCalled();
+    expect(notify).not.toHaveBeenCalled();
+  });
+
+  it("keeps running when a success broke the streak or fewer than five runs failed", async () => {
+    for (const statuses of [
+      ["failed", "failed", "completed", "failed", "failed"],
+      ["failed", "failed", "failed", "failed"],
+      ["completed", "failed", "failed", "failed", "failed"],
+    ]) {
+      const { prisma, updateMany } = failurePrisma(statuses);
+      const { deps } = continueDeps(prisma);
+      await createBackgroundJobHandlers(deps)["run.continue"]({ runId: "run-x" });
+      expect(updateMany).not.toHaveBeenCalled();
+    }
+    expect(createThreadMessage).not.toHaveBeenCalled();
+  });
+
+  it("ignores runs that are not routine runs", async () => {
+    const { prisma, raw } = failurePrisma(["failed"]);
+    vi.mocked(raw.run.findUnique).mockResolvedValueOnce({
+      routineId: null,
+      status: "failed",
+      threadId: "thread-1",
+    } as never);
+    const { deps } = continueDeps(prisma);
+    await createBackgroundJobHandlers(deps)["run.continue"]({ runId: "run-user" });
+    expect(raw.run.findMany).not.toHaveBeenCalled();
   });
 });
