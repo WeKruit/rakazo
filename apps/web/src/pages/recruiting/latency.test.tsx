@@ -172,7 +172,9 @@ for (const [name, Tab] of Object.entries(tabs)) {
     report(`${name} with binding`, elapsed);
     expect(elapsed).toBe(LATENCY);
     expect(listCandidates).not.toHaveBeenCalled();
-    for (const [input] of crmData.mock.calls) expect((input as Input).limit).toBe(25);
+    // List pages are 25 rows; Sequence also totals statuses in 50-row reads.
+    for (const [input] of crmData.mock.calls)
+      expect([25, ...(name === "SequenceTab" ? [50] : [])]).toContain((input as Input).limit);
   });
 
   it(`${name}: a revisited tab renders cached rows at once and refreshes in the background`, async () => {
