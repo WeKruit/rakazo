@@ -79,6 +79,8 @@ export type RecruitingPanelState = {
   pageCount: number;
   selectedCandidateKey: string | null;
   detailOpen: boolean;
+  /** The recruiter picked the sort; otherwise it follows the best one the list offers. */
+  userSort?: boolean;
 };
 
 export function readRecruitingPanelState(key: string | null): RecruitingPanelState {
@@ -110,10 +112,15 @@ export function readRecruitingPanelState(key: string | null): RecruitingPanelSta
     return {
       tab: value.tab,
       candidateView: value.candidateView,
-      filters: { sort: "score", ...filters.data },
+      // An automatic fallback sort is not kept, so a list that gains scores sorts by them.
+      filters:
+        value.userSort === true
+          ? { sort: "score", ...filters.data }
+          : { ...filters.data, sort: "score" },
       pageCount: value.pageCount,
       selectedCandidateKey: value.selectedCandidateKey,
       detailOpen: value.detailOpen,
+      ...(value.userSort === true ? { userSort: true } : {}),
     };
   } catch {
     return empty;

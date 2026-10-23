@@ -3597,6 +3597,7 @@ it("keeps an explicit Dashboard selection through delayed native hydration and p
     filters: { sort: "recent", query: "Synthetic" },
     selectedCandidateKey: selected.candidateKey,
     detailOpen: true,
+    userSort: true,
   };
   localStorage.setItem(storageKey, JSON.stringify(saved));
   api.listCandidates.mockResolvedValue(candidatePage([selected]));

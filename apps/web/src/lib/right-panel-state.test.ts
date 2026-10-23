@@ -91,6 +91,7 @@ it("round trips only recruiting list settings and ignores malformed browser stat
     pageCount: 2,
     selectedCandidateKey: "candidate-a",
     detailOpen: true,
+    userSort: true,
   };
   writeRecruitingPanelState("list", state);
   expect(readRecruitingPanelState("list")).toEqual(state);
@@ -129,7 +130,12 @@ it("starts candidate lists as a table ordered by the provider's original score",
   expect(state.filters.sort).toBe("score");
   vi.stubGlobal("localStorage", {
     getItem: () =>
-      JSON.stringify({ ...state, candidateView: "cards", filters: { sort: "recent" } }),
+      JSON.stringify({
+        ...state,
+        candidateView: "cards",
+        filters: { sort: "recent" },
+        userSort: true,
+      }),
   });
   expect(readRecruitingPanelState("new-role")).toMatchObject({
     candidateView: "cards",
@@ -137,10 +143,18 @@ it("starts candidate lists as a table ordered by the provider's original score",
   });
 });
 
+it("does not keep an automatic fallback sort, so a role that gains scores sorts by them", () => {
+  vi.stubGlobal("localStorage", {
+    getItem: () =>
+      JSON.stringify({ ...readRecruitingPanelState(null), filters: { sort: "name", query: "a" } }),
+  });
+  expect(readRecruitingPanelState("role").filters).toEqual({ sort: "score", query: "a" });
+});
+
 it.each(["rank", "tier", "score"] as const)(
   "restores the explicit provider %s ordering",
   (sort) => {
-    const state = { ...readRecruitingPanelState(null), filters: { sort } };
+    const state = { ...readRecruitingPanelState(null), filters: { sort }, userSort: true };
     vi.stubGlobal("localStorage", { getItem: () => JSON.stringify(state) });
     expect(readRecruitingPanelState("list")).toEqual(state);
   },
