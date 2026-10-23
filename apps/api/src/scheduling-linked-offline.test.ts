@@ -400,7 +400,14 @@ function fixture(
 }
 
 describe("linked offline scheduling receipts", () => {
-  it("answers native cards, books once, reads the returned UID, and projects that exact saved read", async () => {
+  it.each([
+    "success",
+    "booking_conflict",
+    "confirmation_uncertain",
+    "confirmation_rejected",
+    "dst_first_0130",
+    "dst_second_0130",
+  ] as const)("links native approvals, receipts and Interview for %s", async (scenario) => {
     const f = fixture("linked-scheduling");
     const db = f.prisma as unknown as PrismaClient;
     const messages: Array<{
@@ -509,17 +516,38 @@ describe("linked offline scheduling receipts", () => {
     const slots = ["2026-10-26T14:00:00Z", "2026-10-26T15:00:00Z", "2026-10-27T14:00:00Z"];
     // Scripted candidate reply selects the second offered slot. No mail ingestion or
     // model comprehension is claimed by this deterministic implementation check.
-    const selected = slots[1]!;
+    const selected =
+      scenario === "dst_first_0130"
+        ? "2026-11-01T05:30:00Z"
+        : scenario === "dst_second_0130"
+          ? "2026-11-01T06:30:00Z"
+          : slots[1]!;
+    slots[1] = selected;
+    const end = new Date(Date.parse(selected) + 30 * 60 * 1000).toISOString();
+    if (scenario.startsWith("dst_")) {
+      const local = new Intl.DateTimeFormat("en-US", {
+        timeZone,
+        hour: "2-digit",
+        minute: "2-digit",
+        timeZoneName: "shortOffset",
+      }).format(new Date(selected));
+      expect(local).toContain("01:30");
+      expect(local).toContain(scenario === "dst_first_0130" ? "GMT-4" : "GMT-5");
+    }
     let providerBooking: Record<string, unknown> | undefined;
     f.connector.execute.mockImplementation(async function* (call) {
       let data: unknown;
       if (call.route?.toolName === "create_booking") {
+        if (scenario === "booking_conflict") {
+          yield { type: "error", message: "Synthetic provider rejected slot: already occupied" };
+          return;
+        }
         providerBooking = {
           uid: "synthetic-booking-42",
           title: "Candidate interview",
           status: "accepted",
           start: call.args.start,
-          end: "2026-10-26T15:30:00Z",
+          end,
           attendees: [call.args.attendee],
           location: "https://meeting.example.test/synthetic-42",
         };
@@ -527,10 +555,28 @@ describe("linked offline scheduling receipts", () => {
       } else if (call.route?.toolName === "get_booking") {
         expect(call.args).toEqual({ bookingUid: providerBooking!.uid });
         data = { status: "success", data: providerBooking };
+      } else if (
+        (scenario === "confirmation_uncertain" || scenario === "confirmation_rejected") &&
+        call.args.subject === "Interview confirmed"
+      ) {
+        yield {
+          type: "error",
+          message:
+            scenario === "confirmation_uncertain"
+              ? "Synthetic confirmation acknowledgement lost"
+              : "Synthetic provider rejected confirmation",
+          ...(scenario === "confirmation_uncertain" ? { outcome: "uncertain" as const } : {}),
+        };
+        return;
       } else data = { messageId: `synthetic-mail-${f.connector.execute.mock.calls.length}` };
       yield { type: "result", data: { content: [{ type: "text", text: JSON.stringify(data) }] } };
     });
-    async function approveAndExecute(name: string, args: Record<string, unknown>, index: number) {
+    async function approveAndExecute(
+      name: string,
+      args: Record<string, unknown>,
+      index: number,
+      outcome: "completed" | "uncertain" = "completed",
+    ) {
       f.setCalls([{ name, args, executionId: `request-${index}` }]);
       const count = f.connector.execute.mock.calls.length;
       await f.run();
@@ -573,7 +619,7 @@ describe("linked offline scheduling receipts", () => {
         expect.objectContaining({ args }),
         expect.anything(),
       );
-      expect(effect).toMatchObject({ status: "completed", request });
+      expect(effect).toMatchObject({ status: outcome, request });
       f.setCalls([{ name, args, executionId: `retry-${index}` }]);
       await f.run();
       expect(f.connector.execute).toHaveBeenCalledTimes(count + 1);
@@ -599,8 +645,6 @@ describe("linked offline scheduling receipts", () => {
     );
     // Read the UID from the actual persisted executor receipt, not from a separately
     // hard-coded projection fixture or the requested booking arguments.
-    const receipt = booked.result as { content: Array<{ text: string }> };
-    const returned = JSON.parse(receipt.content[0]!.text).data as { uid: string };
     vi.mocked(getRecruitingWorkspace).mockResolvedValue({ role: { id: "role-1" } } as never);
     const actor = {
       spaceId: f.runData.spaceId,
@@ -652,6 +696,27 @@ describe("linked offline scheduling receipts", () => {
       }
     };
     expect((await project()).events).toEqual([]);
+    if (scenario === "booking_conflict") {
+      expect(booked.result).toEqual({
+        error: "Synthetic provider rejected slot: already occupied",
+      });
+      expect(providerBooking).toBeUndefined();
+      expect(
+        f.connector.execute.mock.calls.filter(
+          ([call]) => call.route?.toolName === "create_booking",
+        ),
+      ).toHaveLength(1);
+      expect(
+        f.connector.execute.mock.calls.some(
+          ([call]) => call.args.subject === "Interview confirmed",
+        ),
+      ).toBe(false);
+      expect(messages).toHaveLength(2);
+      // This is provider rejection, not an executor availability preflight guarantee.
+      return;
+    }
+    const receipt = booked.result as { content: Array<{ text: string }> };
+    const returned = JSON.parse(receipt.content[0]!.text).data as { uid: string };
     f.setCalls([
       { name: getBooking.name, args: { bookingUid: returned.uid }, executionId: "readback" },
     ]);
@@ -667,7 +732,7 @@ describe("linked offline scheduling receipts", () => {
           kind: "event",
           title: "Candidate interview",
           start: selected,
-          end: "2026-10-26T15:30:00Z",
+          end,
           attendees: [recipient],
           status: "accepted",
           url: "https://meeting.example.test/synthetic-42",
@@ -682,7 +747,33 @@ describe("linked offline scheduling receipts", () => {
         body: `Confirmed ${projected.events[0]!.start} (${timeZone}); ${projected.events[0]!.url}`,
       },
       3,
+      scenario === "confirmation_uncertain" ? "uncertain" : "completed",
     );
+    if (scenario === "confirmation_uncertain") {
+      expect(booked.status).toBe("completed");
+      expect(f.effects.at(-1)).toMatchObject({ status: "uncertain", result: { uncertain: true } });
+      // The native retry preserves the completed booking and does not resend an
+      // acknowledgement-lost confirmation. Reconciliation remains required.
+      expect(
+        f.connector.execute.mock.calls.filter(
+          ([call]) => call.args.subject === "Interview confirmed",
+        ),
+      ).toHaveLength(1);
+    }
+    if (scenario === "confirmation_rejected") {
+      expect(booked.status).toBe("completed");
+      expect(f.effects.at(-1)).toMatchObject({
+        status: "completed",
+        result: { error: "Synthetic provider rejected confirmation" },
+      });
+      // A definitive error is retained distinctly from a successful send; replaying
+      // the same exact effect returns its error rather than silently resending.
+      expect(
+        f.connector.execute.mock.calls.filter(
+          ([call]) => call.args.subject === "Interview confirmed",
+        ),
+      ).toHaveLength(1);
+    }
     expect(messages).toHaveLength(3);
     expect(events.filter((event) => event.type === "effect.approval.answered")).toHaveLength(3);
     expect(

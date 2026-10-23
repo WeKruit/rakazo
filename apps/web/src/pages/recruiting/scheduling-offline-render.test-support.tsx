@@ -14,6 +14,8 @@ vi.mock("@lingui/react/macro", () => ({
   }),
 }));
 
+let refreshSignal = 0;
+
 export async function renderSchedulingProjection(projected: RecruitingCorrespondence) {
   // Feed the actual API result across the RPC boundary into the real Interview tab.
   // CRM rows are deliberately unbound: this asserts only saved calendar projection.
@@ -30,6 +32,7 @@ export async function renderSchedulingProjection(projected: RecruitingCorrespond
           roleId: "role-1",
           conversation: { groupId: "synthetic-group" },
           crmTarget: null,
+          refreshSignal: ++refreshSignal,
         }),
       ),
     );
