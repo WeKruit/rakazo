@@ -500,6 +500,57 @@ describe("buildApprovalAskBlock", () => {
       ].join("\n"),
     );
     expect(block.detail).not.toContain("c-1");
+    expect(`${block.text}\n${block.detail}`).not.toContain("Instantly");
+  });
+
+  it("shows a vendor-free reply card that sends only on confirmation", () => {
+    const block = buildApprovalAskBlock(
+      "reply-effect",
+      "instantly__demo__reply_to_email",
+      { reply_to_uuid: "7a0a8e6e-4c2a-4d5f-9d4e-2d1f3c4b5a69", body: { text: "收到，谢谢" } },
+      [],
+      {
+        oneTimeOnly: true,
+        instantlyReply: {
+          to: "ada@example.test",
+          from: "team@example.test",
+          subject: "Re: Founding Engineer",
+          inReplyTo: "Founding Engineer, 2026-10-22T00:59:00Z",
+          body: "收到，谢谢",
+        },
+      },
+    );
+    expect(block.text).toBe("Confirm reply");
+    expect(block.detail).toBe(
+      [
+        "To: ada@example.test",
+        "From: team@example.test",
+        "Subject: Re: Founding Engineer",
+        "In reply to: Founding Engineer, 2026-10-22T00:59:00Z",
+        "Body:",
+        "收到，谢谢",
+        "",
+        "Confirm sending this reply",
+      ].join("\n"),
+    );
+    expect(`${block.text}\n${block.detail}`).not.toContain("Instantly");
+    expect(block.detail).not.toContain("7a0a8e6e");
+    expect(block.actions).toEqual([
+      { id: "allow", label: "Confirm and send" },
+      { id: "deny", label: "Cancel" },
+    ]);
+  });
+
+  it("never names the mail server on a remote reply_to_email card", () => {
+    const block = buildApprovalAskBlock(
+      "reply-effect",
+      "mcp__Instantly__reply_to_email",
+      { reply_to_uuid: "7a0a8e6e-4c2a-4d5f-9d4e-2d1f3c4b5a69", body: { text: "ok" } },
+      [],
+      { oneTimeOnly: true },
+    );
+    expect(block.text).toBe("Confirm reply");
+    expect(block.text).not.toContain("Instantly");
     expect(block.actions?.map((action) => action.id)).toEqual(["allow", "deny"]);
     const pending = buildApprovalAskBlock("e", "instantly__demo__activate_campaign", {}, [], {
       oneTimeOnly: true,

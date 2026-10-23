@@ -117,6 +117,15 @@ export async function notifyRecruitingChange(
   }
 }
 
+// Local REST reads ride the official server's list_emails/get_email assignment (see mcp-connector).
+const NATIVE_INSTANTLY_READS = [
+  "native_instantly_get_thread_history",
+  "native_instantly_search_contact_emails",
+  "native_instantly_list_mailbox_emails",
+  "native_instantly_get_email",
+];
+const isNativeInstantlyRead = (tool: string) => NATIVE_INSTANTLY_READS.includes(tool);
+
 function correspondenceProvider(
   endpoint: string | null,
   view: "inbox" | "interview" | "contacts",
@@ -137,7 +146,7 @@ function correspondenceProvider(
         tools: ["list_crm_candidate_correspondence", "list_crm_candidate_roles"],
       };
     if (address === "https://mcp.instantly.ai/mcp")
-      return { kind: "instantly", tools: ["list_emails", "get_email"] };
+      return { kind: "instantly", tools: ["list_emails", "get_email", ...NATIVE_INSTANTLY_READS] };
     if (address === "https://gmailmcp.googleapis.com/mcp/v1")
       return { kind: "gmail", tools: ["get_message", "get_thread", "search_threads"] };
   } else if (view === "interview") {
@@ -173,9 +182,10 @@ function correspondenceAllows(
   assignment: { allowAllTools: boolean; allowedTools: unknown },
   tool: string,
 ) {
+  const assigned = isNativeInstantlyRead(tool) ? "list_emails" : tool;
   return (
     assignment.allowAllTools ||
-    (Array.isArray(assignment.allowedTools) && assignment.allowedTools.includes(tool))
+    (Array.isArray(assignment.allowedTools) && assignment.allowedTools.includes(assigned))
   );
 }
 
@@ -836,6 +846,7 @@ export async function getRecruitingCorrespondence(
         ? [
             "list_emails",
             "get_email",
+            ...NATIVE_INSTANTLY_READS,
             "get_message",
             "get_thread",
             "search_threads",
@@ -972,9 +983,10 @@ export async function getRecruitingCorrespondence(
       if (
         view === "inbox" &&
         call.route.toolName === "list_emails" &&
-        (typeof campaignId !== "string" || !campaignId.trim())
+        (typeof campaignId !== "string" || !campaignId.trim()) &&
+        (typeof call.args.lead !== "string" || !call.args.lead.trim())
       )
-        return []; // Account-wide exploration is not evidence of this role's correspondence.
+        return []; // Account-wide exploration is not evidence of this role's correspondence; a campaign or one contact is.
       if (
         source.provider?.kind === "crm" &&
         [call.args.p_org, call.args.p_candidate].some(
@@ -1018,14 +1030,6 @@ export async function getRecruitingCorrespondence(
       if (unsupported) output.status = "unsupported";
       return finish();
     }
-    const mailCampaigns = new Set(
-      reads
-        .filter(
-          (read) =>
-            read.provider.kind === "instantly" && read.call.route.toolName === "list_emails",
-        )
-        .map((read) => stableJsonValue([read.source.id, read.call.args.campaign_id])),
-    );
     const results = await prisma.externalEffect.findMany({
       where: { ...scope, id: { in: reads.map((read) => read.effect.id) } },
       select: { id: true, result: true },
@@ -1049,7 +1053,6 @@ export async function getRecruitingCorrespondence(
     const emails = new Map<string, RecruitingCorrespondence["emails"][number]>();
     const gmailMessages = new Map<string, string>();
     const gmailThreads = new Map<string, string>();
-    const mailMembership = new Set<string>();
     const events = new Map<string, RecruitingCorrespondence["events"][number]>();
     let crmBinding: Awaited<ReturnType<typeof recruiting.getRecruitingCrmTarget>> | undefined;
     const crmPages: Array<{
@@ -1059,23 +1062,41 @@ export async function getRecruitingCorrespondence(
       importEffectId: string;
       messages: RecruitingCorrespondence["emails"];
     }> = [];
-    // Details may supplement only messages present in the latest selected campaign snapshot.
+    // Full-body reads (get_email) are projected after list snapshots so they replace previews.
+    const DETAIL_READS = ["get_email", "native_instantly_get_email"];
     const projections = [
       ...reads.filter(
-        (read) => !["get_email", "list_crm_candidate_roles"].includes(read.call.route.toolName),
+        (read) => ![...DETAIL_READS, "list_crm_candidate_roles"].includes(read.call.route.toolName),
       ),
-      ...reads.filter((read) => read.call.route.toolName === "get_email"),
+      ...reads.filter((read) => DETAIL_READS.includes(read.call.route.toolName)),
     ];
+    // Latest campaign list snapshots: a detail read of a campaign email that a not-older list of
+    // the same campaign no longer shows is stale history, never revived.
+    const campaignLists = new Map<string, { updatedAt: Date; ids: Set<string> }>();
+    const revived = (
+      sourceId: string,
+      campaignId: string | null | undefined,
+      id: string,
+      at: Date,
+    ) => {
+      const list = campaignId ? campaignLists.get(`${sourceId}:${campaignId}`) : undefined;
+      return Boolean(list && list.updatedAt >= at && !list.ids.has(id));
+    };
     for (const { effect, call, source, provider } of projections) {
+      const detailRead =
+        provider.kind === "instantly" && DETAIL_READS.includes(call.route.toolName);
+      if (
+        provider.kind === "instantly" &&
+        call.route.toolName === "list_emails" &&
+        typeof call.args.campaign_id === "string"
+      )
+        campaignLists.set(`${source.id}:${call.args.campaign_id}`, {
+          updatedAt: effect.updatedAt,
+          ids: new Set(),
+        });
       const savedRead = effect.run.sourceMessageId
         ? { messageId: effect.run.sourceMessageId, linkedRunId: effect.run.id, effectId: effect.id }
         : null;
-      if (
-        provider.kind === "instantly" &&
-        call.route.toolName === "get_email" &&
-        (typeof call.args.id !== "string" || !emails.has(`${source.id}:${call.args.id}`))
-      )
-        continue;
       if (provider.kind === "gmail" && call.route.toolName !== "search_threads") {
         const thread = call.route.toolName === "get_thread";
         const selectedId = thread ? call.args.threadId : call.args.messageId;
@@ -1098,7 +1119,8 @@ export async function getRecruitingCorrespondence(
           ("error" in result ||
             ("isError" in result && result.isError !== false && result.isError !== undefined)))
       ) {
-        checkIssue(source.id, effect.updatedAt, "failed");
+        // A failed detail read beside a campaign snapshot adds nothing to that mailbox check.
+        if (!(detailRead && campaignLists.size)) checkIssue(source.id, effect.updatedAt, "failed");
         continue;
       }
       const body = mcpObject(result);
@@ -1500,12 +1522,18 @@ export async function getRecruitingCorrespondence(
         checkIssue(source.id, effect.updatedAt);
         continue;
       }
-      const rows = call.route.toolName === "list_emails" ? body.items : [body];
+      // Native reads (thread history, contact and mailbox pages) return the raw REST page, which the
+      // connector already verified against the requested thread/contact/mailbox scope.
+      const native = isNativeInstantlyRead(call.route.toolName);
+      const page = native ? correspondenceRecord(body.page) : body;
+      const listRead =
+        call.route.toolName === "list_emails" || (native && page?.items !== undefined);
+      const rows = listRead ? page?.items : native ? [correspondenceRecord(body.result)] : [body];
       if (!Array.isArray(rows)) {
         checkIssue(source.id, effect.updatedAt);
         continue;
       }
-      if (call.route.toolName === "list_emails") {
+      if (listRead) {
         parsed = true;
         output.partial ||=
           call.args.starting_after !== undefined &&
@@ -1513,9 +1541,9 @@ export async function getRecruitingCorrespondence(
           call.args.starting_after !== "";
       }
       output.partial ||=
-        body.next_starting_after !== undefined &&
-        body.next_starting_after !== null &&
-        body.next_starting_after !== "";
+        page?.next_starting_after !== undefined &&
+        page?.next_starting_after !== null &&
+        page?.next_starting_after !== "";
       for (const row of rows) {
         const email = readInstantlyEmail(row);
         if (!email) {
@@ -1524,26 +1552,29 @@ export async function getRecruitingCorrespondence(
           continue;
         }
         const id = `${source.id}:${email.id}`;
-        const membership = stableJsonValue([source.id, email.campaign_id ?? null, email.id]);
-        if (
-          call.route.toolName === "get_email" &&
-          (email.id !== call.args.id || !mailMembership.has(membership))
-        ) {
+        if (!listRead && email.id !== call.args.id) {
           checkIssue(source.id, effect.updatedAt);
           continue;
         }
-        // Non-campaign Unibox mail (direct replies, off-sequence mail) has no campaign to verify; keep it.
+        if (detailRead && revived(source.id, email.campaign_id, email.id, effect.updatedAt)) {
+          output.partial = true;
+          continue;
+        }
+        if (call.route.toolName === "list_emails" && typeof call.args.campaign_id === "string")
+          campaignLists.get(`${source.id}:${call.args.campaign_id}`)?.ids.add(email.id);
+        // A campaign-scoped list must only return that campaign; contact/thread reads and
+        // non-campaign Unibox mail (direct replies, off-sequence mail) have no campaign to verify.
         if (
+          call.route.toolName === "list_emails" &&
+          typeof call.args.campaign_id === "string" &&
           email.campaign_id &&
-          (!mailCampaigns.has(stableJsonValue([source.id, email.campaign_id])) ||
-            (call.route.toolName === "list_emails" && email.campaign_id !== call.args.campaign_id))
+          email.campaign_id !== call.args.campaign_id
         ) {
           checkIssue(source.id, effect.updatedAt);
           continue;
         }
         parsed = true;
-        if (emails.has(id) && call.route.toolName !== "get_email") continue;
-        if (call.route.toolName === "list_emails") mailMembership.add(membership);
+        if (emails.has(id) && listRead) continue;
         const fullText =
           email.body.text || (email.body.html ? htmlToPlainText(email.body.html) : "");
         const text = fullText || email.content_preview || "";
@@ -1563,7 +1594,7 @@ export async function getRecruitingCorrespondence(
           subject: email.subject,
           body: displayText.slice(0, 50_000),
           snippet:
-            call.route.toolName === "list_emails" ||
+            (listRead && !native) ||
             email.body_fallback_reason != null ||
             !fullText ||
             text.length > 50_000,

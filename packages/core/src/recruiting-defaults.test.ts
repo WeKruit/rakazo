@@ -34,6 +34,28 @@ describe("maintained recruiting defaults", () => {
     );
   });
 
+  it.each(RECRUITING_DEFAULT_BOTS)("$name never names a vendor to the recruiter", (bot) => {
+    expect(bot.instructions).toContain(
+      "Never name a vendor or tool (Instantly, Cal.com, Gmail, Google Calendar, HubSpot, MCP, API, REST) in chat replies, cards or emails",
+    );
+    expect(bot.instructions).toContain(
+      "the only exception is a connect-request card, which names the provider to connect",
+    );
+  });
+
+  it.each(["main", "outreach"])(
+    "%s replies through the confirmation card, never refusing",
+    (key) => {
+      const bot = RECRUITING_DEFAULT_BOTS.find((entry) => entry.key === key)!;
+      expect(bot.instructions).toContain(
+        "call reply_to_email (or native_instantly_reply_to_email) with the original email id and the full reply text: like every send or create-event tool it shows the native confirmation card and nothing is sent until the human confirms",
+      );
+      expect(bot.instructions).toContain(
+        "never refuse it, never send the text in chat instead, and never say there is no approval flow",
+      );
+    },
+  );
+
   it.each(RECRUITING_DEFAULT_BOTS)("$name requests a missing connection in chat", (bot) => {
     expect(bot.instructions).toContain(
       "When the user names a service that is not connected, call request_connection with that provider before answering",

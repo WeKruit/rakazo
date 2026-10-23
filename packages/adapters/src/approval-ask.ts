@@ -12,7 +12,10 @@ import {
 import { formatCron, humanizeToolName, redactSecrets } from "@rakazo/core";
 import { redactToolArgsForReview } from "./auto-review.js";
 import { sharedMemorySaveError } from "./builtin-tools.js";
-import type { InstantlyActivationDisplay } from "./instantly-native-writes.js";
+import type {
+  InstantlyActivationDisplay,
+  InstantlyReplyDisplay,
+} from "./instantly-native-writes.js";
 import { nativeMemorySaveError } from "./memory-tools.js";
 
 const MAX_APPROVAL_SUMMARY_LENGTH = 500;
@@ -40,6 +43,7 @@ export function buildApprovalAskBlock(
     recruiting?: RecruitingApprovalDisplay;
     crmImportTarget?: RecruitingCrmTarget;
     instantlyActivation?: InstantlyActivationDisplay;
+    instantlyReply?: InstantlyReplyDisplay;
   },
 ): Extract<MessageBlock, { kind: "ask" }> {
   const scheduleUpdate = toolName === "schedule_update";
@@ -115,17 +119,19 @@ export function buildApprovalAskBlock(
       : describeApprovalAction(toolName, args, redactSecrets(toolName, secrets));
   const detail = options?.instantlyActivation
     ? formatInstantlyActivation(options.instantlyActivation)
-    : formatApprovalDetail(
-        toolName,
-        redactToolArgsForReview(args, secrets),
-        options?.reviewReason,
-        preference,
-        nativeMemory,
-        crmOperation,
-        considerationOperation,
-        options?.recruiting,
-        options?.crmImportTarget,
-      );
+    : options?.instantlyReply
+      ? formatInstantlyReply(options.instantlyReply)
+      : formatApprovalDetail(
+          toolName,
+          redactToolArgsForReview(args, secrets),
+          options?.reviewReason,
+          preference,
+          nativeMemory,
+          crmOperation,
+          considerationOperation,
+          options?.recruiting,
+          options?.crmImportTarget,
+        );
   const safeDetail = detail ? redactSecrets(detail, secrets) : undefined;
   const outboundAction = outboundTitle(toolName);
   const outboundTarget = outboundAction && pickScopeLabel(args);
@@ -142,24 +148,24 @@ export function buildApprovalAskBlock(
             : outbound
               ? outbound
               : crmTarget
-              ? "Review CRM role connection"
-              : crmImport
-                ? "Review CRM import"
-                : shortlist
-                  ? "Review shortlist change"
-                  : considerationOperation
-                    ? "Review consideration change"
-                    : crmOperation === "crm_bind_candidate_role"
-                      ? "Review CRM role binding"
-                      : crmOperation === "crm_update_candidate_stage"
-                        ? "Review CRM stage change"
-                        : crmOperation === "crm_append_candidate_note"
-                          ? "Review CRM note"
-                          : toolName === "create_space" || recruitingApproval
-                            ? args.stage === "brief" && recruitingApproval
-                              ? summary
-                              : `${summary}?`
-                            : `Review before ${summary}`,
+                ? "Review CRM role connection"
+                : crmImport
+                  ? "Review CRM import"
+                  : shortlist
+                    ? "Review shortlist change"
+                    : considerationOperation
+                      ? "Review consideration change"
+                      : crmOperation === "crm_bind_candidate_role"
+                        ? "Review CRM role binding"
+                        : crmOperation === "crm_update_candidate_stage"
+                          ? "Review CRM stage change"
+                          : crmOperation === "crm_append_candidate_note"
+                            ? "Review CRM note"
+                            : toolName === "create_space" || recruitingApproval
+                              ? args.stage === "brief" && recruitingApproval
+                                ? summary
+                                : `${summary}?`
+                              : `Review before ${summary}`,
         secrets,
       ),
       MAX_APPROVAL_SUMMARY_LENGTH,
@@ -176,34 +182,35 @@ export function buildApprovalAskBlock(
         : safeDetail,
     status: "pending",
     // A real send is confirmed each time; it is never "always allowed".
-    actions: options?.instantlyActivation
-      ? [
-          { id: "allow", label: "Confirm and send" },
-          { id: "deny", label: "Cancel" },
-        ]
-      : !crmOperation && toolName === "create_space"
+    actions:
+      options?.instantlyActivation || options?.instantlyReply
         ? [
-            { id: "allow", label: "Create space", outcome: "created" },
-            { id: "deny", label: "Cancel", outcome: "cancelled" },
+            { id: "allow", label: "Confirm and send" },
+            { id: "deny", label: "Cancel" },
           ]
-        : recruitingApproval
+        : !crmOperation && toolName === "create_space"
           ? [
-              {
-                id: "allow",
-                label:
-                  args.stage === "brief"
-                    ? "Confirm requirements"
-                    : args.stage === "documents"
-                      ? "Approve documents"
-                      : "Approve calibration",
-              },
-              { id: "deny", label: "Deny" },
+              { id: "allow", label: "Create space", outcome: "created" },
+              { id: "deny", label: "Cancel", outcome: "cancelled" },
             ]
-          : [
-              { id: "allow", label: "Allow once" },
-              ...(oneTimeOnly ? [] : [{ id: "always", label: "Always allow this tool" }]),
-              { id: "deny", label: "Deny" },
-            ],
+          : recruitingApproval
+            ? [
+                {
+                  id: "allow",
+                  label:
+                    args.stage === "brief"
+                      ? "Confirm requirements"
+                      : args.stage === "documents"
+                        ? "Approve documents"
+                        : "Approve calibration",
+                },
+                { id: "deny", label: "Deny" },
+              ]
+            : [
+                { id: "allow", label: "Allow once" },
+                ...(oneTimeOnly ? [] : [{ id: "always", label: "Always allow this tool" }]),
+                { id: "deny", label: "Deny" },
+              ],
   };
 }
 
@@ -260,6 +267,20 @@ function outboundTitle(toolName: string): string | undefined {
     .toLowerCase()
     .replace(/^(native_)?(instantly_)*/, "");
   return OUTBOUND_TITLES[operation];
+}
+
+/** The reply confirmation card body: recipient, sender mailbox, subject, original and full text; no vendor, no ids. */
+function formatInstantlyReply(display: InstantlyReplyDisplay) {
+  return [
+    `To: ${display.to ?? "unknown"}`,
+    `From: ${display.from ?? "unknown"}`,
+    `Subject: ${display.subject}`,
+    `In reply to: ${display.inReplyTo ?? "unknown"}`,
+    "Body:",
+    display.body,
+    "",
+    "Confirm sending this reply",
+  ].join("\n");
 }
 
 function describeApprovalAction(

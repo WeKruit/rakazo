@@ -315,7 +315,9 @@ import {
 } from "./history-compaction.js";
 import {
   describeCampaignActivation,
+  describeReplyToEmail,
   EMPTY_ACTIVATION_DISPLAY,
+  type InstantlyReplyDisplay,
   readRoleCampaignBinding,
 } from "./instantly-native-writes.js";
 import type { InstantlyEmail } from "./instantly-reply.js";
@@ -6277,9 +6279,11 @@ export function createRunExecutor(deps: ExecutorDeps) {
             let instantlyActivation:
               | Awaited<ReturnType<typeof describeCampaignActivation>>
               | undefined;
+            let instantlyReply: InstantlyReplyDisplay | undefined;
             if (
               approvalRoute?.connectorId === "mcp" &&
-              approvalRoute.toolName === "native_instantly_activate_campaign" &&
+              (approvalRoute.toolName === "native_instantly_activate_campaign" ||
+                approvalRoute.toolName === "native_instantly_reply_to_email") &&
               approvalRoute.resourceId &&
               deps.connector
             ) {
@@ -6287,7 +6291,7 @@ export function createRunExecutor(deps: ExecutorDeps) {
               let campaignId =
                 typeof args.campaign_id === "string" ? (args.campaign_id as string) : null;
               let eaccount: string | null = null;
-              if (!campaignId) {
+              if (!campaignId && approvalRoute.toolName === "native_instantly_activate_campaign") {
                 const current = await deps.prisma.thread.findUnique({
                   where: { id: thread.id },
                   select: { activeRecruitingRoleId: true },
@@ -6325,9 +6329,12 @@ export function createRunExecutor(deps: ExecutorDeps) {
                 }
                 return undefined;
               };
-              instantlyActivation = campaignId
-                ? await describeCampaignActivation(read, campaignId, eaccount)
-                : { ...EMPTY_ACTIVATION_DISPLAY, mailbox: eaccount };
+              if (approvalRoute.toolName === "native_instantly_reply_to_email")
+                instantlyReply = await describeReplyToEmail(read, args);
+              else
+                instantlyActivation = campaignId
+                  ? await describeCampaignActivation(read, campaignId, eaccount)
+                  : { ...EMPTY_ACTIVATION_DISPLAY, mailbox: eaccount };
             }
             if (replySelection)
               approvalArgs = {
@@ -6459,6 +6466,7 @@ export function createRunExecutor(deps: ExecutorDeps) {
                 recruiting: recruitingApproval,
                 crmImportTarget: crmImportSelection?.target,
                 instantlyActivation,
+                instantlyReply,
               },
             );
             const paused = await deps.events.pauseRunForInput({
