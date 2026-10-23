@@ -136,4 +136,15 @@ describe("maintained recruiting defaults", () => {
       "start the calibration search for exactly 10 profiles in the same turn",
     );
   });
+
+  it.each(RECRUITING_DEFAULT_BOTS)("$name never exposes CRM, campaign or lead setup", (bot) => {
+    expect(bot.instructions).toContain(
+      'never say CRM, campaign, leads, lead list, mailbox or sending-account binding, mapping or "setup" to the recruiter',
+    );
+    expect(bot.instructions).toContain(
+      "do that setup silently and speak only in recruiter language",
+    );
+    expect(bot.instructions).not.toContain("no CRM role is linked");
+    expect(bot.instructions).not.toContain("set up a campaign, pick a mailbox");
+  });
 });

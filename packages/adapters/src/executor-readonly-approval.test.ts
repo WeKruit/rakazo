@@ -1328,13 +1328,12 @@ describe("native Instantly activation card", () => {
     await f.run();
     expect(card(f).detail).toBe(
       [
-        "Campaign: Founding Engineer",
-        "Sender: me@x.test",
-        "Recipients (2):",
+        "岗位: Founding Engineer",
+        "发件人: me@x.test",
+        "收件人 (2):",
         "- Ada Lovelace <ada@x.test>",
         "- bob@x.test",
-        "Send window: Weekdays 09:00-17:00 UTC",
-        "Stop on reply: on",
+        "发送时间: Weekdays 09:00-17:00 UTC",
         "",
         "Confirm sending the first email to these recipients",
       ].join("\n"),
@@ -1369,8 +1368,8 @@ describe("native Instantly activation card", () => {
     } as never);
     f.setCalls([{ args: {}, executionId: "activate" }]);
     await f.run();
-    expect(card(f).detail).toContain("Campaign: Founding Engineer");
-    expect(card(f).detail).toContain("Recipients (2):");
+    expect(card(f).detail).toContain("岗位: Founding Engineer");
+    expect(card(f).detail).toContain("收件人 (2):");
   });
 });
 

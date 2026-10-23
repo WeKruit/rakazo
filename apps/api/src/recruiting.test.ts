@@ -5265,12 +5265,16 @@ describe("role campaign read", () => {
         {
           key: "crm",
           state: "missing",
-          label: "No CRM role linked",
+          label: "Role record not linked yet",
           action: { kind: "ask_agent", prompt: expect.any(String) },
         },
-        { key: "leads", state: "ready", label: "2 leads", detail: { count: 2 } },
+        { key: "leads", state: "ready", label: "2 recipients", detail: { count: 2 } },
       ],
     });
+    for (const item of setup.items)
+      expect(
+        `${item.label} ${item.action?.kind === "ask_agent" ? item.action.prompt : ""}`,
+      ).not.toMatch(/crm|campaign|lead/i);
   });
 
   it("role setup without a campaign is not ready and points each gap at the agent", async () => {
@@ -5293,6 +5297,10 @@ describe("role campaign read", () => {
       ["crm", "ready", undefined],
       ["leads", "missing", "ask_agent"],
     ]);
+    for (const item of setup.items)
+      expect(
+        `${item.label} ${item.action?.kind === "ask_agent" ? item.action.prompt : ""}`,
+      ).not.toMatch(/crm|campaign|lead/i);
     expect(setup.items[1]).toMatchObject({ detail: { email: "last@example.test" } });
     expect(setup.items[2]).toMatchObject({
       detail: { orgId: "org-1", roleLabel: "Staff Engineer" },
