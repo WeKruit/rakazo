@@ -265,6 +265,7 @@ import {
 import { agentConnectionTools, builtinAgentTools, sharedMemorySaveError } from "./builtin-tools.js";
 import {
   CalendarApprovalEvidenceSchema,
+  calendarApprovalRoute,
   calendarEvidenceHash,
   readCalBookingSnapshot,
 } from "./calendar-approval.js";
@@ -6542,7 +6543,7 @@ export function createRunExecutor(deps: ExecutorDeps) {
                   const evidence = CalendarApprovalEvidenceSchema.parse({
                     kind: "cal_booking_original",
                     version: 1,
-                    route: connectorCall.route,
+                    route: calendarApprovalRoute(connectorCall.route),
                     requestHash: calendarEvidenceHash(applied!.effect.request),
                     snapshot,
                   });
@@ -6569,7 +6570,8 @@ export function createRunExecutor(deps: ExecutorDeps) {
                 );
                 if (
                   evidence.requestHash !== calendarEvidenceHash(applied!.effect.request) ||
-                  stableJsonValue(evidence.route) !== stableJsonValue(connectorCall.route) ||
+                  stableJsonValue(evidence.route) !==
+                    stableJsonValue(calendarApprovalRoute(connectorCall.route)) ||
                   evidence.snapshot.uid !== args.bookingUid
                 )
                   throw new Error("Calendar approval evidence does not match this exact change");

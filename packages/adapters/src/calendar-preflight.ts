@@ -1,7 +1,11 @@
 import type { AdapterContext, ConnectorProvider, ConnectorRoute } from "@rakazo/adapter-kit";
 import { stableJsonValue } from "@rakazo/core/node/approval-effect-key";
 import { catalogExecuteToolName, catalogIdForRoute } from "./approval-effect.js";
-import { CalendarApprovalEvidenceSchema, readCalBookingSnapshot } from "./calendar-approval.js";
+import {
+  CalendarApprovalEvidenceSchema,
+  calendarApprovalRoute,
+  readCalBookingSnapshot,
+} from "./calendar-approval.js";
 import { assertConnectorToolArgs, CATALOG_EXECUTE } from "./lazy-tool-catalog.js";
 import { mcpObject } from "./recruiting-research.js";
 
@@ -24,7 +28,7 @@ export async function preflightCalBooking(input: {
     try {
       original = CalendarApprovalEvidenceSchema.parse(input.originalEvidence);
       if (
-        stableJsonValue(original.route) !== stableJsonValue(input.route) ||
+        stableJsonValue(original.route) !== stableJsonValue(calendarApprovalRoute(input.route)) ||
         original.snapshot.uid !== input.args.bookingUid ||
         input.args.cancelSubsequentBookings === true
       )

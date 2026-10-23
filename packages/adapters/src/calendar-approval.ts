@@ -36,6 +36,13 @@ export const CalendarApprovalEvidenceSchema = z.strictObject({
   requestHash: z.string().regex(/^[a-f0-9]{64}$/),
   snapshot: Snapshot,
 });
+/** Presentation-only catalog labels are not provider source identity. */
+export const calendarApprovalRoute = (route: ConnectorRoute) => ({
+  connectorId: route.connectorId,
+  resourceId: route.resourceId,
+  resourceRevision: route.resourceRevision,
+  toolName: route.toolName,
+});
 export type CalendarApprovalEvidence = z.infer<typeof CalendarApprovalEvidenceSchema>;
 export const calendarEvidenceHash = (value: unknown) =>
   createHash("sha256").update(stableJsonValue(value)).digest("hex");

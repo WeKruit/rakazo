@@ -152,3 +152,10 @@ it("rejects an unreadable original without creating a new approval", async () =>
   });
   expect(await f.check()).toMatchObject({ dispatched: false });
 });
+
+it("preserves exact authorization identity when a catalog presentation label is present", async () => {
+  const f = fixture("cancel_booking");
+  expect(
+    await f.check({ route: { ...f.evidence.route, catalogGroup: "Calendar" } }),
+  ).toBeUndefined();
+});
