@@ -868,7 +868,7 @@ it("defers before writes when native computer quota maintenance already holds it
 describe("managed first-party recruiting CRM installation", () => {
   const endpoint = "https://crm.example.test/mcp";
   const options = { sandboxKind: "fake", firstPartyMcpUrl: endpoint };
-  it("installs Main eleven tools and Sourcer eight reads without copying credentials or changing the four native agents", async () => {
+  it("installs Main twelve tools and Sourcer eight reads without copying credentials or changing the four native agents", async () => {
     const f = fixture();
     await recruiting.ensureRecruitingWorkspace(f.prisma, actor, options);
     const server = f.servers.find((row) => row.slug === "recruiting-crm");
@@ -891,10 +891,43 @@ describe("managed first-party recruiting CRM installation", () => {
       "crm_import_candidate",
       "list_crm_candidate_roles",
       "list_crm_candidate_correspondence",
+      "list_crm_role_correspondence",
     ]);
     expect(sourcer.allowedTools).toEqual(main.allowedTools.slice(0, 8));
     expect(assignments.every((row) => row.allowAllTools === false)).toBe(true);
   });
+  it.each(["managed", "restricted", "customized", "removed"] as const)(
+    "adds required role mail only to unchanged managed Main: %s",
+    async (state) => {
+      const f = fixture();
+      await recruiting.ensureRecruitingWorkspace(f.prisma, actor, options);
+      const baseline = f.presets[0]!.config as ManagedState;
+      const server = f.servers.find((row) => row.slug === "recruiting-crm")!;
+      const main = f.assignments.find(
+        (row) => row.serverId === server.id && row.botId === f.bots[0]!.id,
+      )!;
+      const sourcer = f.assignments.find(
+        (row) => row.serverId === server.id && row.botId === f.bots[1]!.id,
+      )!;
+      main.allowedTools = main.allowedTools.filter(
+        (tool) => tool !== "list_crm_role_correspondence",
+      );
+      baseline.services["recruiting-crm"]!.assignments.main!.signature = hash([
+        false,
+        main.allowedTools,
+      ]);
+      if (state === "restricted") main.allowedTools = [];
+      if (state === "customized") main.allowedTools = ["get_crm_role"];
+      if (state === "removed") f.assignments.splice(f.assignments.indexOf(main), 1);
+      const before = [...main.allowedTools];
+      f.presets[0]!.digest = "previous-role-mail-defaults";
+      await recruiting.upgradeRecruitingWorkspace(f.prisma, actor, options);
+      expect(sourcer.allowedTools).not.toContain("list_crm_role_correspondence");
+      if (state === "managed") expect(main.allowedTools).toContain("list_crm_role_correspondence");
+      else if (state === "removed") expect(f.assignments).not.toContain(main);
+      else expect(main.allowedTools).toEqual(before);
+    },
+  );
   it.each(["managed", "restricted", "removed"] as const)(
     "upgrades the CRM correspondence read only for an unchanged managed assignment: %s",
     async (state) => {
@@ -941,7 +974,7 @@ describe("managed first-party recruiting CRM installation", () => {
     const main = f.assignments.find(
       (row) => row.serverId === server.id && row.botId === f.bots[0]!.id,
     )!;
-    expect(main.allowedTools).toHaveLength(11);
+    expect(main.allowedTools).toHaveLength(12);
     main.allowedTools = [];
     const installed = f.presets[0]!;
     installed.digest = "changed-catalog";

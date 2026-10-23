@@ -282,6 +282,46 @@ describePostgres("CRM sync (PostgreSQL)", () => {
     await close?.();
   });
 
+  it.each(["unsupported", "missing", "denied", "read-failure"])(
+    "keeps the required mail phase retryable after %s",
+    async (failure) => {
+      let result = await slice(actor);
+      for (let pages = 0; pages < 20; pages++) {
+        const progress = await prisma.recruitingCrmSyncProgress.findUniqueOrThrow({
+          where: { userId_spaceId: scoped(actor) },
+        });
+        if ((progress.progress as { at: { step: string } }).at.step === "mail") break;
+        result = await slice(actor, { cursor: result.nextCursor! });
+      }
+      const before = await prisma.recruitingCrmSyncProgress.findUniqueOrThrow({
+        where: { userId_spaceId: scoped(actor) },
+      });
+      expect((before.progress as { at: { step: string } }).at.step).toBe("mail");
+      const read: typeof crm.read = async (input) => {
+        if (input.operation !== "roleMail") return crm.read(input);
+        if (failure === "unsupported")
+          return {
+            ...(await crm.read(input)),
+            supported: false,
+            items: [],
+          } as RecruitingCrmDataOutput;
+        throw new ORPCError(failure === "denied" ? "FORBIDDEN" : "SERVICE_UNAVAILABLE", {
+          message: failure === "missing" ? "Required source tool missing" : "Read refused",
+        });
+      };
+      await expect(slice(actor, { cursor: before.token }, read)).rejects.toMatchObject({
+        code: failure === "denied" ? "FORBIDDEN" : "SERVICE_UNAVAILABLE",
+      });
+      expect(
+        await prisma.recruitingCrmSyncProgress.findUniqueOrThrow({
+          where: { userId_spaceId: scoped(actor) },
+        }),
+      ).toEqual(before);
+      expect(await prisma.recruitingCrmMessage.count({ where: scoped(actor) })).toBe(0);
+      const retry = await slice(actor, { cursor: before.token });
+      expect(retry.messages.created).toBeGreaterThan(0);
+    },
+  );
   it("dry run reports what a real run then writes, and a re-run changes nothing", async () => {
     const dry = await runAll(actor, crm.read, true);
     expect(dry).toMatchObject({
