@@ -18,7 +18,7 @@ export type RoleSummary = {
   shortlisted: number;
   /** Recorded shortlist dates; unknown historic dates remain null. */
   shortlistedDates: readonly (string | null)[];
-  /** People in the role's launched outreach campaign; null without a readable campaign. */
+  /** Confirmed sent-contact count; campaign enrollment alone cannot establish it. */
   contacted: number | null;
   /** CRM contacts whose outreach status is `replied`; null without a readable CRM binding. */
   replied: number | null;
@@ -61,7 +61,7 @@ export function bucketByWeek(dates: Iterable<string | null>, now: Date, weeks = 
 }
 
 const sumKnown = (values: (number | null)[]) =>
-  values.some((value) => value !== null)
+  values.length > 0 && values.every((value) => value !== null)
     ? values.reduce<number>((total, value) => total + (value ?? 0), 0)
     : null;
 
@@ -89,13 +89,17 @@ const INTERESTED = new Set([1, 2, 3, 4]);
 
 /** Contacted and interested from the role's campaign read; unknown without a launched campaign. */
 export function campaignStages(campaign: RecruitingRoleCampaign | null) {
-  if (campaign?.status !== "ready" || !campaign.campaign) {
+  if (
+    campaign?.status !== "ready" ||
+    !campaign.campaign ||
+    campaign.campaign.status === null ||
+    campaign.leadsComplete !== true
+  ) {
     return { contacted: null, interested: null };
   }
-  // A draft (0) campaign has sent nothing yet.
-  const launched = campaign.campaign.status !== 0;
+  // Draft campaigns have sent nothing. Enrollment/status does not prove actual sends.
   return {
-    contacted: launched ? campaign.leads.length : 0,
+    contacted: campaign.campaign.status === 0 ? 0 : null,
     interested: campaign.leads.filter(
       (lead) => lead.interestStatus !== null && INTERESTED.has(lead.interestStatus),
     ).length,

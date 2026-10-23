@@ -70,13 +70,13 @@ describe("outreachFunnel", () => {
     ]);
   });
 
-  it("keeps a stage no role reports unknown instead of zero, and sums the roles that do", () => {
+  it("keeps an aggregate unknown when any role has no reported count", () => {
     const stages = outreachFunnel([
       role({ shortlisted: 5, replied: 1 }),
       role({ shortlisted: 5, replied: null }),
     ]);
-    expect(stages.map((stage) => stage.count)).toEqual([10, null, 1, null]);
-    expect(stages.map((stage) => stage.percent)).toEqual([100, null, 10, null]);
+    expect(stages.map((stage) => stage.count)).toEqual([10, null, null, null]);
+    expect(stages.map((stage) => stage.percent)).toEqual([100, null, null, null]);
   });
 
   it("has no percentages without shortlisted people or roles", () => {
@@ -95,12 +95,13 @@ describe("source mapping", () => {
     leads: { status: number | null; interestStatus: number | null }[],
   ): RecruitingRoleCampaign => ({
     status: "ready",
+    leadsComplete: true,
     serverId: "s",
     campaign: { id: "c", name: "Role", eaccount: null, status, stopOnReply: true },
     leads: leads.map((lead, index) => ({ candidateKey: null, email: `${index}@x.test`, ...lead })),
   });
 
-  it("counts launched campaign leads as contacted and interested-or-further as interested", () => {
+  it("does not count enrolled leads as contacted, while preserving reported interest", () => {
     expect(
       campaignStages(
         campaign(1, [
@@ -110,11 +111,21 @@ describe("source mapping", () => {
           { status: -1, interestStatus: -1 },
         ]),
       ),
-    ).toEqual({ contacted: 4, interested: 2 });
+    ).toEqual({ contacted: null, interested: 2 });
     expect(campaignStages(campaign(0, [{ status: 1, interestStatus: null }]))).toEqual({
       contacted: 0,
       interested: 0,
     });
+  });
+
+  it("keeps failed, partial or unproven campaign lead totals unknown", () => {
+    for (const leadsComplete of [false, undefined])
+      expect(campaignStages({ ...campaign(1, []), leadsComplete })).toEqual({
+        contacted: null,
+        interested: null,
+      });
+    expect(campaignStages(campaign(null, []))).toEqual({ contacted: null, interested: null });
+    expect(campaignStages(campaign(1, []))).toEqual({ contacted: null, interested: 0 });
   });
 
   it("reports unknown without a readable campaign or CRM", () => {

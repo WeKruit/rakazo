@@ -1592,6 +1592,8 @@ export const RecruitingRoleCampaignSchema = z.strictObject({
       stopOnReply: z.boolean().nullable(),
     })
     .nullable(),
+  /** Whether the lead page proves a complete, valid list; absent means unknown. */
+  leadsComplete: z.boolean().optional(),
   leads: z.array(
     z.strictObject({
       candidateKey: z.string().nullable(),

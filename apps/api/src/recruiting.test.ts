@@ -4432,21 +4432,22 @@ describe("live CRM browser reads", () => {
 
   it("does not substitute live candidates when the projection has not been synced", async () => {
     const f = browserFixture();
-    vi.mocked(db.listSyncedRecruitingCrmRoleContacts).mockResolvedValue([]);
-    const result = await api.getRecruitingCrmData(
-      f.deps,
-      actor,
-      target,
-      {
-        operation: "candidates",
-        serverId: "crm",
-        serverRevision: 3,
-        organizationId: org,
-        crmRoleId: roleId,
-      },
-      { source: "projection" },
-    );
-    expect(result).toMatchObject({ scope: "stored_role", items: [], total: 0 });
+    vi.mocked(db.listSyncedRecruitingCrmRoleContacts).mockResolvedValue(null);
+    await expect(
+      api.getRecruitingCrmData(
+        f.deps,
+        actor,
+        target,
+        {
+          operation: "candidates",
+          serverId: "crm",
+          serverRevision: 3,
+          organizationId: org,
+          crmRoleId: roleId,
+        },
+        { source: "projection" },
+      ),
+    ).rejects.toMatchObject({ code: "SERVICE_UNAVAILABLE" });
     expect(f.execute.mock.calls.map(([call]) => call.route?.toolName)).not.toContain(
       "list_crm_candidates",
     );
@@ -5972,6 +5973,7 @@ describe("role campaign read", () => {
     ]);
     expect(output).toEqual({
       status: "ready",
+      leadsComplete: true,
       serverId: "instantly",
       campaign: {
         id: CAMPAIGN,
@@ -5986,6 +5988,63 @@ describe("role campaign read", () => {
       ],
     });
   });
+
+  it.each(["failed", "malformed", "full-page", "cursor", "empty"])(
+    "keeps campaign identity but reports honest %s lead coverage",
+    async (kind) => {
+      const f = fixture({
+        spaceId: actor.spaceId,
+        status: "completed",
+        result: {
+          campaignId: CAMPAIGN,
+          campaignName: "Example",
+          eaccount: "team@example.test",
+          leads: {},
+        },
+      });
+      const execute = f.deps.connectors.execute;
+      f.deps.connectors.execute = async function* (call: ConnectorCall) {
+        if (call.route?.toolName !== "native_instantly_list_leads") {
+          yield* execute(call);
+          return;
+        }
+        if (kind === "failed") {
+          yield { type: "error" as const, message: "Synthetic read failure" };
+          return;
+        }
+        const items =
+          kind === "malformed"
+            ? [{ id: "bad" }]
+            : kind === "full-page"
+              ? Array.from({ length: 100 }, (_, i) => ({ email: `person-${i}@example.test` }))
+              : [];
+        yield {
+          type: "result" as const,
+          data: {
+            structuredContent: {
+              source: "local_native_instantly_rest",
+              result: { items, ...(kind === "cursor" ? { next_starting_after: "next-page" } : {}) },
+            },
+          },
+        };
+      };
+      const output = await api.getRecruitingRoleCampaign(f.deps, actor, target);
+      expect(output.status).toBe("ready");
+      expect(output.campaign?.id).toBe(CAMPAIGN);
+      expect(output.leadsComplete).toBe(kind === "empty");
+      if (kind !== "empty") {
+        const setup = await api.getRecruitingRoleSetup(f.deps, actor, target);
+        expect(setup.items.find((item) => item.key === "leads")).toEqual({
+          key: "leads",
+          state: "unavailable",
+          label: "Recipient count unavailable",
+        });
+        expect(setup.items.find((item) => item.key === "campaign")?.detail).not.toHaveProperty(
+          "leadCount",
+        );
+      }
+    },
+  );
 
   it("reports no campaign without a binding in the actor's space", async () => {
     for (const effect of [null, { spaceId: "other", status: "completed", result: {} }]) {

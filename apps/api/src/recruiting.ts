@@ -689,8 +689,16 @@ export async function getRecruitingRoleCampaign(
       if (typeof email === "string") keyByEmail.set(email.toLowerCase(), candidateKey);
     }
     const integer = (value: unknown) => (Number.isInteger(value) ? (value as number) : null);
+    const rawLeads = Array.isArray(leads?.items) ? leads.items : null;
+    // A full bounded page without a terminal receipt does not prove a complete campaign.
+    const leadsComplete =
+      rawLeads !== null &&
+      rawLeads.length < 100 &&
+      (leads?.next_starting_after === undefined || leads.next_starting_after === null) &&
+      rawLeads.every((value) => typeof correspondenceRecord(value)?.email === "string");
     return {
       status: "ready",
+      leadsComplete,
       serverId: assignment.server.id,
       campaign: {
         id: campaignId,
@@ -744,7 +752,7 @@ export async function getRecruitingRoleSetup(
           id: campaign.campaign.id,
           name: campaign.campaign.name,
           status: campaign.campaign.status,
-          leadCount: campaign.leads.length,
+          ...(campaign.leadsComplete === true ? { leadCount: campaign.leads.length } : {}),
         },
       });
       const email = campaign.campaign.eaccount;
@@ -799,15 +807,17 @@ export async function getRecruitingRoleSetup(
     );
     const count = campaign.leads.length;
     items.push(
-      count
-        ? { key: "leads", state: "ready", label: `${count} recipients`, detail: { count } }
-        : {
-            key: "leads",
-            state: "missing",
-            label: "No recipients for the first email yet",
-            detail: { count },
-            action: { kind: "ask_agent", prompt: "把入围候选人加入第一封邮件的收件人" },
-          },
+      campaign.status !== "none" && campaign.leadsComplete !== true
+        ? { key: "leads", state: "unavailable", label: "Recipient count unavailable" }
+        : count
+          ? { key: "leads", state: "ready", label: `${count} recipients`, detail: { count } }
+          : {
+              key: "leads",
+              state: "missing",
+              label: "No recipients for the first email yet",
+              detail: { count },
+              action: { kind: "ask_agent", prompt: "把入围候选人加入第一封邮件的收件人" },
+            },
     );
     const ready = (key: string) => items.some((item) => item.key === key && item.state === "ready");
     const playbook = await recruiting
@@ -2951,6 +2961,7 @@ export async function getRecruitingCrmData(
           { mcpServerId: server.id, organizationId: input.organizationId },
           selectedRole.crmRoleId,
         );
+        if (stored === null) throw unavailable();
         invalidateFences();
         await sourceFence(server, "list_crm_candidates");
         const query = input.query?.trim().toLocaleLowerCase();
