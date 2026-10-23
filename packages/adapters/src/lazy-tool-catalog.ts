@@ -78,14 +78,15 @@ export function lazyCatalogTools(
     },
     {
       name: `${prefix}_load_tool`,
-      description: `Load one ${label} tool's parameters by id.`,
+      description: `Load one ${label} tool's parameters using an exact ID or name returned by search. Copy it unchanged; never construct group.name. If a name is ambiguous, search with group and query to obtain its exact ID.`,
       inputSchema: {
         type: "object",
         properties: {
           id: {
             type: "string",
             maxLength: MAX_TOOL_ID_LENGTH,
-            description: "Exact tool ID returned by search",
+            description:
+              "Exact ID or unambiguous name returned by search, copied unchanged. Do not prefix it with the group.",
           },
         },
         required: ["id"],
@@ -95,14 +96,15 @@ export function lazyCatalogTools(
     },
     {
       name: `${prefix}_execute_tool`,
-      description: `Run an ${label} tool by id.`,
+      description: `Run one ${label} tool using an exact ID or name returned by search or load. Copy it unchanged; never construct group.name.`,
       inputSchema: {
         type: "object",
         properties: {
           id: {
             type: "string",
             maxLength: MAX_TOOL_ID_LENGTH,
-            description: "Exact tool ID returned by search",
+            description:
+              "Exact ID or unambiguous name returned by search or load, copied unchanged. Do not prefix it with the group.",
           },
           arguments: { type: "object", description: "Arguments matching the loaded schema" },
         },
@@ -232,7 +234,9 @@ export function loadCatalogEntry(
     assertSchemaSize(byShort[0]!);
     return byShort[0]!;
   }
-  throw new Error("Tool is unknown or not authorized for this bot");
+  throw new Error(
+    "Unknown tool ID or name in this bot's current catalog. A lookup miss is not evidence that the account is unauthorized. Search again with group and query, then copy a returned ID or name unchanged; do not construct group.name.",
+  );
 }
 
 function assertSchemaSize(entry: CatalogEntry): void {
