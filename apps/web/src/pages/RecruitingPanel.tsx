@@ -4570,6 +4570,7 @@ function RecruitingWorkspace({
     return (
       <section
         className="hire-live-criteria"
+        data-summary={summary}
         aria-label={summary === "brief" ? t`Search Criteria` : t`Client feedback`}
       >
         <div className="hire-panel-heading">
@@ -4583,7 +4584,7 @@ function RecruitingWorkspace({
               {summary === "brief" ? (
                 <Trans>Search Criteria</Trans>
               ) : (
-                <Trans>Client feedback</Trans>
+                <Trans>Saved role summary</Trans>
               )}
             </strong>
             <span>
@@ -4597,7 +4598,7 @@ function RecruitingWorkspace({
           <Button
             variant="ghost"
             size="icon-sm"
-            aria-label={t`Refresh criteria`}
+            aria-label={summary === "brief" ? t`Refresh criteria` : t`Refresh`}
             disabled={loading}
             onClick={() => setRefresh((value) => value + 1)}
           >
@@ -4614,9 +4615,11 @@ function RecruitingWorkspace({
           </p>
         ) : workspace ? (
           <>
-            <div className="hire-jd-summary">
-              <strong>{workspace.role.title}</strong>
-            </div>
+            {summary === "brief" ? (
+              <div className="hire-jd-summary">
+                <strong>{workspace.role.title}</strong>
+              </div>
+            ) : null}
             {summary === "feedback" ? (
               <FeedbackHistory
                 key={workspace.role.id}
@@ -4630,9 +4633,14 @@ function RecruitingWorkspace({
             ) : null}
             <CriteriaBody className={summary === "feedback" ? "hire-criterion-row" : "contents"}>
               {summary === "feedback" ? (
-                <summary>
-                  <Trans>Search Criteria</Trans>
-                </summary>
+                <>
+                  <summary>
+                    <Trans>Search Criteria</Trans>
+                  </summary>
+                  <div className="hire-criterion-row">
+                    <strong>{workspace.role.title}</strong>
+                  </div>
+                </>
               ) : null}
               {brief?.fields
                 .filter((field) => field.value !== null)

@@ -3108,9 +3108,9 @@ it("uses the narrow role column without the desktop metadata gutter and preserve
   type(composer, "Keep this unsent role note.");
   await view.navigate("/app/g/group-1?view=conversation");
   expect(container!.querySelector('[data-message-id="saved-role-reply"]')).toBe(message);
-  expect(frame.className).toContain("8rem");
+  expect(frame.className).not.toContain("8rem");
   expect(message.querySelector('[data-testid="message-hover-rail"]')?.className).toContain(
-    "start-full",
+    "static",
   );
   expect(container!.querySelector('textarea[name="chat-message"]')).toBe(composer);
   expect(composer.value).toBe("Keep this unsent role note.");

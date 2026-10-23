@@ -5541,10 +5541,8 @@ export function ShellPage() {
           {workspaceBrief ? (
             <div className="hire-brief-top">
               <div>
-                <span className="hire-eyebrow">{recruitingWorkspaceView === "brief" ? <Trans>Job Brief</Trans> : <Trans>Client feedback</Trans>}</span>
-                <h1>{recruitingWorkspaceView === "brief" ? <Trans>Let’s define the search.</Trans> : <Trans>Let’s sharpen the search.</Trans>}</h1>
+                <h1>{recruitingWorkspaceView === "brief" ? <Trans>Job Brief</Trans> : <Trans>Client feedback</Trans>}</h1>
                 <p className="hire-brief-role" dir="auto">{inGroup ? (activeGroup?.name ?? activeSnapshot?.groupName) : active?.name}</p>
-                <p>{recruitingWorkspaceView === "brief" ? <Trans>Describe the role and clarify what matters in the conversation.</Trans> : <Trans>Tell WeKruit what to change for a person, a few candidates, or the whole search.</Trans>}</p>
               </div>
               <Button variant="outline" className="hire-outline-button" onClick={() => openRecruitingView("results")}><Trans>Back to results</Trans></Button>
             </div>
@@ -5720,7 +5718,7 @@ export function ShellPage() {
         ) : (
           <Transcript
             key={emptyCrmChat ? composerDraftKey : activeSnapshot?.threadId}
-            narrow={roleChatWorkspace}
+            narrow={roleChatWorkspace || !showToolActivity}
             visible={!workspaceFull || (roleChatWorkspace && roleChatOpen)}
             scrollRef={messageScroll}
             scrollRequest={scrollRequest}
@@ -5807,6 +5805,7 @@ export function ShellPage() {
             draftKey={composerDraftKey}
             contextKey={selectedCorrespondence?.scope === correspondenceScope ? JSON.stringify([userId, bootstrapMe?.spaceId, selectedCorrespondence.reference.threadId, selectedCorrespondence.reference.roleId, selectedCorrespondence.reference.sourceId, selectedCorrespondence.reference.providerMessageId, selectedCorrespondence.reference.emailId]) : undefined}
             enterToSend={enterToSend}
+            compact={!showToolActivity}
             activeName={emptyCrmChat ? t`Role conversation` : inGroup ? (activeGroup?.name ?? activeSnapshot?.groupName) : active?.name}
             running={!emptyCrmChat && composerRunning}
             disabled={Boolean(recordingSkill) || Boolean(openingCrmRole && !openingCrmRole.error) || (emptyCrmChat && !crmSelection?.crmRoleId)}
@@ -7369,7 +7368,7 @@ const Transcript = memo(function Transcript({
             following.current = false;
           }
         }}
-        className="rk-scroll flex min-h-0 flex-1 flex-col gap-2 overflow-y-auto px-4 py-5 md:px-7 md:py-6"
+        className="chat-transcript rk-scroll flex min-h-0 flex-1 flex-col gap-2 overflow-y-auto px-4 py-5 md:px-7 md:py-6"
       >
         {olderCursor != null ? (
           <button
@@ -7406,6 +7405,7 @@ const Transcript = memo(function Transcript({
               ) : null}
               <div
                 data-message-id={message.id}
+                data-message-role={message.role}
                 className={peerReceipt ? "relative py-0.5" : "group/message relative hover:z-20"}
               >
                 <div
@@ -7693,6 +7693,7 @@ export const Composer = memo(function Composer({
   ref,
   artifactTarget,
   activeName,
+  compact = false,
   running,
   disabled,
   pendingAttachments,
@@ -7723,6 +7724,7 @@ export const Composer = memo(function Composer({
 }: {
   ref?: Ref<ComposerHandle>;
   activeName?: string;
+  compact?: boolean;
   running: boolean;
   disabled?: boolean;
   pendingAttachments: PendingAttachment[];
@@ -8161,7 +8163,7 @@ export const Composer = memo(function Composer({
       onDragOver={handleDragOver}
       onDragLeave={handleDragLeave}
       onDrop={handleDrop}
-      className={`relative z-30 m-0 min-w-0 border-0 px-3 pb-4 pt-3 md:px-6 md:pb-6 ${
+      className={`chat-composer relative z-30 m-0 min-w-0 border-0 px-3 pb-4 pt-3 md:px-6 md:pb-6 ${
         draggingFiles ? "rounded-[14px] ring-2 ring-inset ring-ring" : ""
       }`}
     >
@@ -8347,11 +8349,11 @@ export const Composer = memo(function Composer({
           aria-label={t`Attach file`}
           disabled={disabled}
           onClick={() => fileInputRef.current?.click()}
-          className="col-start-1 row-start-2 size-8 shrink-0 rounded-full border border-border bg-muted text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
+          className="composer-attach col-start-1 row-start-2 size-8 shrink-0 rounded-full border border-border bg-muted text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
         >
           <Plus size={16} strokeWidth={2} />
         </Button>
-        <div className="col-span-3 row-start-1 flex min-w-0 flex-wrap items-end gap-1.5 px-1.5">
+        <div className="composer-input col-span-3 row-start-1 flex min-w-0 flex-wrap items-end gap-1.5 px-1.5">
           {selectedSkill ? (
             <span
               data-testid="skill-chip"
@@ -8453,7 +8455,7 @@ export const Composer = memo(function Composer({
             disabled={disabled}
             placeholder={
               showComposerPlaceholder
-                ? activeName
+                ? activeName && !compact
                   ? t`Message ${activeName}`
                   : t`Message…`
                 : undefined
@@ -8468,11 +8470,11 @@ export const Composer = memo(function Composer({
             name="chat-message"
             autoComplete="off"
             dir="auto"
-            rows={2}
-            className="rk-scroll max-h-60 min-h-12 min-w-[8rem] flex-1 resize-none overflow-y-auto bg-transparent py-0.5 text-base leading-6 text-foreground outline-none placeholder:text-muted-foreground disabled:opacity-40"
+            rows={compact ? 1 : 2}
+            className={`rk-scroll max-h-60 ${compact ? "min-h-7" : "min-h-12"} min-w-[8rem] flex-1 resize-none overflow-y-auto bg-transparent py-0.5 text-base leading-6 text-foreground outline-none placeholder:text-muted-foreground disabled:opacity-40`}
           />
         </div>
-        <div className="col-start-3 row-start-2 flex shrink-0 items-center gap-2 justify-self-end">
+        <div className="composer-actions col-start-3 row-start-2 flex shrink-0 items-center gap-2 justify-self-end">
           {onVoice && draft.trim().length === 0 ? (
             <Button
               variant="outline"
@@ -8481,7 +8483,7 @@ export const Composer = memo(function Composer({
               title={t`Voice`}
               disabled={disabled}
               onClick={onVoice}
-              className="size-8 shrink-0 rounded-full text-foreground/75"
+              className="composer-secondary size-8 shrink-0 rounded-full text-foreground/75"
             >
               <Mic size={16} strokeWidth={1.8} />
             </Button>
@@ -8503,7 +8505,7 @@ export const Composer = memo(function Composer({
                 aria-label={t`Stop`}
                 disabled={sending}
                 onClick={() => void onStop()}
-                className="size-8 rounded-full border border-border bg-muted text-foreground/80 shadow-sm transition-colors hover:bg-accent hover:text-foreground"
+                className="composer-secondary size-8 rounded-full border border-border bg-muted text-foreground/80 shadow-sm transition-colors hover:bg-accent hover:text-foreground"
               >
                 <Square size={11} strokeWidth={0} fill="currentColor" />
               </Button>
