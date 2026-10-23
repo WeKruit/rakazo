@@ -91,6 +91,8 @@ import { rpc } from "../lib/rpc";
 import { CorrespondenceEmails } from "./RecruitingCorrespondence";
 import type { RecruitingInboxEmail } from "./recruiting";
 import { ContactsTab, InboxTab, InterviewTab, SequenceTab } from "./recruiting";
+import type { RecruitingDetailPerson } from "./recruiting/detail";
+import { useRecruitingDetail } from "./recruiting/detail";
 import type { RecruitingWorkspaceView } from "./shell/RecruitingNavigation";
 
 export type CrmBrowseSelection = Pick<
@@ -2851,7 +2853,17 @@ function CrmRecruitingPanel({
     });
     return () => window.cancelAnimationFrame(frame);
   }, [browse.candidateId, browse.view, contactKey, contactReady, revealContact]);
-  function selectContact(id: string, view?: RecruitingWorkspaceView) {
+  const detail = useRecruitingDetail();
+  function selectContact(
+    id: string,
+    view?: RecruitingWorkspaceView,
+    person?: RecruitingDetailPerson,
+  ) {
+    // A role with its own workbench opens the person beside the page instead of switching tabs.
+    if (detail && boundRole && person && (!view || view === "inbox")) {
+      detail.open({ view: "thread", person, role: { ...boundRole, conversation: target } });
+      return;
+    }
     if (browse.view === (view ?? "inbox") && browse.candidateId === id && contactReady)
       revealContact();
     if (view) browse.onSelectCandidate(id, view);
@@ -2999,7 +3011,10 @@ function CrmRecruitingPanel({
                           {new Date(person.statusChangedAt ?? person.updatedAt).toLocaleString()}
                         </td>
                         <td>
-                          <Button variant="link" onClick={() => selectContact(person.candidateId)}>
+                          <Button
+                            variant="link"
+                            onClick={() => selectContact(person.candidateId, undefined, person)}
+                          >
                             <Trans>View messages</Trans>
                           </Button>
                         </td>
@@ -3232,7 +3247,7 @@ function CrmRecruitingPanel({
                           onClick={() =>
                             browse.view === "feedback" || browse.view === "sequence"
                               ? selectContact(person.candidateId, browse.view)
-                              : selectContact(person.candidateId)
+                              : selectContact(person.candidateId, undefined, person)
                           }
                         >
                           {browse.view === "feedback" || browse.view === "sequence" ? (
