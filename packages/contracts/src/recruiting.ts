@@ -1280,6 +1280,14 @@ export const RecruitingCandidateSchema = z.strictObject({
   candidateKey: RecruitingId,
   ...RecruitingCandidateProfileSchema.shape,
   shortlisted: z.boolean(),
+  /** Provider match cells; rank/score are comparable only within one saved result. */
+  match: z
+    .strictObject({
+      rank: z.number().nullable(),
+      tier: z.string().nullable(),
+      score: z.number().nullable(),
+    })
+    .optional(),
   decision: z.enum(["hold", "pass", "resume"]).nullable(),
   decisionReason: RecruitingCandidateConsiderationSchema.shape.source.shape.quote.nullable(),
   decisionAt: RecruitingCandidateConsiderationSchema.shape.source.shape.createdAt.nullable(),
@@ -1318,6 +1326,66 @@ export const ListRecruitingCandidatesOutput = z.strictObject({
   }),
 });
 export type ListRecruitingCandidatesOutput = z.infer<typeof ListRecruitingCandidatesOutput>;
+/** One merged person per row: Autumn search result and/or the role's CRM contact. */
+export const RecruitingRoleCandidatesInputFields = {
+  threadId: RecruitingId,
+  limit: z.number().int().min(1).max(100).optional(),
+  cursor: Text.optional(),
+  sort: z.enum(["score", "rank", "name", "recent"]).optional(),
+  query: z.string().max(240).optional(),
+  shortlistedOnly: z.boolean().optional(),
+};
+export const RecruitingRoleCandidateSchema = z.strictObject({
+  key: Text,
+  name: z.string().nullable(),
+  title: z.string().nullable(),
+  location: z.string().nullable(),
+  email: z.string().nullable(),
+  linkedinUrl: z.string().nullable(),
+  autumn: z
+    .strictObject({
+      candidateKey: RecruitingId,
+      score: z.number().nullable(),
+      rank: z.number().nullable(),
+      tier: z.string().nullable(),
+      matchSummary: z.string().nullable(),
+      criteria: z.array(
+        z.strictObject({
+          label: Text,
+          status: z.enum(["match", "miss", "unclear"]),
+          evidence: z.string().nullable(),
+        }),
+      ),
+    })
+    .nullable(),
+  crm: z
+    .strictObject({
+      serverId: RecruitingId,
+      organizationId: z.uuid(),
+      candidateId: z.uuid(),
+      stage: z.string().nullable(),
+      contactStatus: z.string(),
+      outreachStatus: z.string(),
+    })
+    .nullable(),
+  shortlisted: z.boolean(),
+});
+export type RecruitingRoleCandidate = z.infer<typeof RecruitingRoleCandidateSchema>;
+export const RecruitingRoleCandidatesOutputSchema = z.strictObject({
+  items: z.array(RecruitingRoleCandidateSchema),
+  nextCursor: Text.nullable(),
+  total: z.number().int().nonnegative(),
+  /** `shortlisted` (Autumn) and `replied` always; plus one count per CRM outreachStatus. */
+  counts: z
+    .object({
+      shortlisted: z.number().int().nonnegative(),
+      replied: z.number().int().nonnegative(),
+    })
+    .catchall(z.number().int().nonnegative()),
+  crmStatus: z.enum(["ok", "not_bound", "unavailable"]),
+});
+export type RecruitingRoleCandidatesOutput = z.infer<typeof RecruitingRoleCandidatesOutputSchema>;
+
 export const SetRecruitingCandidateShortlistInput = z.strictObject({
   threadId: RecruitingId,
   roleId: RecruitingId,

@@ -702,6 +702,26 @@ export async function authorizeRecruitingCrmRoleReference(
     throw new IsolationError();
 }
 
+/**
+ * The role snapshot alone, without the CRM binding receipt reads. Run-start context
+ * needs only the role and revision; CRM tools verify their binding at the point of use.
+ */
+export async function getRecruitingRoleSnapshot(
+  prisma: PrismaClient,
+  actor: Actor,
+  input: { threadId: string },
+): Promise<RoleSnapshot | null> {
+  return prisma.$transaction(
+    async (tx) => {
+      const thread = await requireThread(tx, actor, input.threadId);
+      if (!thread.activeRecruitingRoleId) return null;
+      const role = await requireRole(tx, actor, thread.activeRecruitingRoleId, false, thread);
+      return roleSnapshot(tx, actor, role, thread);
+    },
+    { isolationLevel: Prisma.TransactionIsolationLevel.RepeatableRead },
+  );
+}
+
 export async function getRecruitingWorkspace(
   prisma: PrismaClient,
   actor: Actor,
@@ -7373,15 +7393,19 @@ function candidateIndexQuery(
         WHEN returned.value ? 'rank' THEN returned.value -> 'rank'
         WHEN returned.value ? 'batch_rank' THEN returned.value -> 'batch_rank'
         ELSE returned.value -> 'rank_this_batch_only' END`;
+  // Providers send numbers either as JSON numbers or as plain numeric strings ("45"); both are
+  // the same provider value. Anything else ("Unknown", "45/100") stays NULL.
+  const numericCell = Prisma.sql`CASE WHEN jsonb_typeof(match."value") = 'number' OR
+      (jsonb_typeof(match."value") = 'string' AND
+        match."value" #>> '{}' ~ '^-?[0-9]{1,30}([.][0-9]{1,30})?$')
+      THEN (match."value" #>> '{}')::numeric END`;
   const matchValue = Prisma.sql`CASE WHEN source.kind = 'rank' THEN
-      CASE WHEN jsonb_typeof(match."value") = 'number' THEN
-        CASE WHEN (match."value" #>> '{}')::numeric BETWEEN 1 AND 9007199254740991
-          AND trunc((match."value" #>> '{}')::numeric) = (match."value" #>> '{}')::numeric
-          THEN (match."value" #>> '{}')::numeric::bigint END END
+      CASE WHEN ${numericCell} BETWEEN 1 AND 9007199254740991
+        AND trunc(${numericCell}) = ${numericCell}
+        THEN (${numericCell})::bigint END
       WHEN source.kind = 'score' THEN
-        CASE WHEN jsonb_typeof(match."value") = 'number' THEN
-          CASE WHEN abs((match."value" #>> '{}')::numeric) <= ${Number.MAX_VALUE}::numeric
-            THEN (match."value" #>> '{}')::numeric END END
+        CASE WHEN abs(${numericCell}) <= ${Number.MAX_VALUE}::numeric
+          THEN ${numericCell} END
       ELSE CASE match."value" #>> '{}'
         WHEN 'Strong' THEN 0 WHEN 'Promising' THEN 1 WHEN 'Partial' THEN 2 WHEN 'Uncertain' THEN 3 END END`;
   const fields = [
@@ -9959,8 +9983,15 @@ export async function listRecruitingCandidates(
             ...profile
           }) => {
             const decision = candidateConsideration(actor, consideration);
+            const numeric = (value: unknown) =>
+              value === null || value === undefined ? null : Number(value);
             return {
               ...profile,
+              match: {
+                rank: numeric(_rank),
+                tier: ["Strong", "Promising", "Partial", "Uncertain"][numeric(_tier) ?? -1] ?? null,
+                score: numeric(_score),
+              },
               crm: syncs.get(profile.candidateKey) ?? null,
               decision: decision?.operation ?? null,
               decisionReason: decision?.source.quote ?? null,
@@ -10000,6 +10031,23 @@ export async function listRecruitingCandidates(
   );
   for (const verify of afterRead) verify();
   return result;
+}
+
+/** Every LinkedIn URL Autumn observed for a role (owner-fenced); identity only, never a profile. */
+export async function listRecruitingCandidateLinkedinUrls(
+  prisma: PrismaClient,
+  actor: Actor,
+  roleId: string,
+): Promise<string[]> {
+  return prisma.$transaction(async (tx) => {
+    const role = await requireRole(tx, actor, roleId);
+    const rows = await tx.recruitingCandidateOccurrence.findMany({
+      where: { roleId: role.id, linkedinUrl: { not: null } },
+      select: { linkedinUrl: true },
+      distinct: ["linkedinUrl"],
+    });
+    return rows.flatMap((row) => (row.linkedinUrl ? [row.linkedinUrl] : []));
+  });
 }
 
 export async function setRecruitingCandidateShortlist(

@@ -270,9 +270,12 @@ describe("threadSnapshot", () => {
             } as ThreadTarget);
       const snapshot = await threadSnapshot({ prisma }, target);
 
-      expect(snapshot.olderCursor).toBe(101);
+      // Only the newest 30 rows (seq 171..200) form the window; the cards are older.
+      expect(snapshot.olderCursor).toBe(171);
+      expect(snapshot.messagesCursor).toBe(171);
+      expect(snapshot.hasOlder).toBe(true);
       expect(snapshot.cursor).toBe(300);
-      expect(snapshot.messages).toHaveLength(100 + cards.length);
+      expect(snapshot.messages).toHaveLength(30 + cards.length);
       expect(new Set(snapshot.messages.map((item) => item.id)).size).toBe(snapshot.messages.length);
       expect(snapshot.messages.slice(0, cards.length)).toEqual(
         cards.map((card) =>
@@ -304,6 +307,95 @@ describe("threadSnapshot", () => {
         );
     },
   );
+
+  it.each([
+    { total: 45, length: 30, messagesCursor: 16, hasOlder: true },
+    { total: 12, length: 12, messagesCursor: 1, hasOlder: false },
+    { total: 0, length: 0, messagesCursor: null, hasOlder: false },
+  ])(
+    "returns the newest window of $total messages with cursor and hasOlder",
+    async ({ total, length, messagesCursor, hasOlder }) => {
+      const rows = Array.from({ length: total }, (_, index) => ({
+        id: `m-${index + 1}`,
+        seq: index + 1,
+        threadId: "thread-1",
+        runId: null,
+        role: "user",
+        botId: null,
+        blocks: [{ kind: "text", text: "hi" }],
+        replyToMessageId: null,
+        replyQuote: null,
+        createdAt: new Date((index + 1) * 1000),
+      }));
+      const findMany = vi.fn(async ({ take }: { take: number }) =>
+        [...rows].sort((left, right) => right.seq - left.seq).slice(0, take),
+      );
+      const tx = {
+        $queryRaw: vi.fn().mockResolvedValue([{ id: "thread-1" }]),
+        message: { findMany },
+        event: { findFirst: vi.fn().mockResolvedValue(null), findMany: vi.fn() },
+        run: { findFirst: vi.fn().mockResolvedValue(null) },
+      };
+      // Any read outside thread/messages/events/runs (routines, skills, workspace…) throws.
+      const strictTx = new Proxy(tx, {
+        get: (object, key) => {
+          if (key in object || typeof key === "symbol" || key === "then")
+            return object[key as keyof typeof object];
+          throw new Error(`threads.get must not read ${String(key)}`);
+        },
+      });
+      const prisma = {
+        $transaction: vi.fn(async (callback: (client: typeof tx) => unknown) => callback(strictTx)),
+      } as unknown as PrismaClient;
+      const snapshot = await threadSnapshot({ prisma }, {
+        kind: "bot",
+        botId: "bot-1",
+        threadId: "thread-1",
+        bot: { computer: null },
+      } as ThreadTarget);
+
+      expect(findMany).toHaveBeenCalledWith(
+        expect.objectContaining({ orderBy: { seq: "desc" }, take: 31 }),
+      );
+      expect(snapshot.messages.map((message) => message.seq)).toEqual(
+        rows.slice(-length).map((row) => row.seq),
+      );
+      expect(snapshot.messagesCursor).toBe(messagesCursor);
+      expect(snapshot.hasOlder).toBe(hasOlder);
+      expect(snapshot.olderCursor).toBe(hasOlder ? messagesCursor : null);
+      expect(tx.event.findMany).not.toHaveBeenCalled();
+    },
+  );
+
+  it("starts the window, cursor and run reads concurrently", async () => {
+    const started: string[] = [];
+    const gates: Array<() => void> = [];
+    const gated = <T>(name: string, value: T) =>
+      vi.fn(() => {
+        started.push(name);
+        return new Promise<T>((resolve) => gates.push(() => resolve(value)));
+      });
+    const tx = {
+      $queryRaw: vi.fn().mockResolvedValue([{ id: "thread-1" }]),
+      message: { findMany: gated("messages", [] as unknown[]) },
+      event: { findFirst: gated("cursor", { seq: 7 }), findMany: vi.fn() },
+      run: { findFirst: gated("run", null) },
+    };
+    const prisma = {
+      $transaction: vi.fn(async (callback: (client: typeof tx) => unknown) => callback(tx)),
+    } as unknown as PrismaClient;
+    const pending = threadSnapshot({ prisma }, {
+      kind: "bot",
+      botId: "bot-1",
+      threadId: "thread-1",
+      bot: { computer: null },
+    } as ThreadTarget);
+    await vi.waitFor(() => expect(started).toHaveLength(4));
+    // All four reads were issued before any of them resolved.
+    expect([...started].sort()).toEqual(["cursor", "messages", "run", "run"]);
+    for (const open of gates) open();
+    await expect(pending).resolves.toMatchObject({ cursor: 7, messagesCursor: null });
+  });
 
   it("reloads tool-only live messages for an active run", async () => {
     const run = {
