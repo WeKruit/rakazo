@@ -74,6 +74,27 @@ it("reports a pending write completion after switching to Activity", async () =>
   await render();
   expect(recordView).toHaveBeenCalledTimes(1);
 });
+it("retries a late failure on Activity with the original visit ID", async () => {
+  let reject!: () => void;
+  recordView.mockImplementationOnce(
+    () =>
+      new Promise((_, fail) => {
+        reject = () => fail(new Error("temporary"));
+      }),
+  );
+  await render();
+  const visit = recordView.mock.calls[0]![0];
+  await render({ visible: false });
+  expect(element.textContent).toBe("recording");
+  await act(async () => reject());
+  expect(element.textContent).toBe("failed");
+  await act(async () => element.querySelector("button")!.click());
+  expect(recordView).toHaveBeenCalledTimes(2);
+  expect(recordView.mock.calls[1]![0]).toEqual(visit);
+  expect(element.textContent).toBe("recorded");
+  await render({ visible: false, refresh: 1 });
+  expect(recordView).toHaveBeenCalledTimes(2);
+});
 it("ignores an old person's delayed write result", async () => {
   let reject!: () => void;
   recordView.mockImplementationOnce(
@@ -90,6 +111,8 @@ it("ignores an old person's delayed write result", async () => {
 });
 it("does not record a profile that has not actually been opened", async () => {
   await render({ visible: false });
+  expect(recordView).not.toHaveBeenCalled();
+  await act(async () => element.querySelector("button")!.click());
   expect(recordView).not.toHaveBeenCalled();
   await render();
   expect(recordView).toHaveBeenCalledTimes(1);

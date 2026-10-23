@@ -31,7 +31,9 @@ export function useProfileView({
 
   useEffect(() => {
     if (visit.current?.key !== key) visit.current = null;
-    if (!key || !roleId || !candidateKey || !visible) return;
+    if (!key || !roleId || !candidateKey) return;
+    // A failed visit can be retried from Activity, but a hidden profile cannot start a visit.
+    if (!visible && !visit.current) return;
     if (visit.current?.recorded || visit.current?.pending) return;
     const current = visit.current ?? {
       key,
