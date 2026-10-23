@@ -49,6 +49,53 @@ describe("memory store contract shape", () => {
   });
 });
 
+describe("memory actor isolation", () => {
+  const table = [
+    { id: "a", spaceId: "space-1", userId: "user-a", scope: "user", botId: null, path: "a.md" },
+    { id: "b", spaceId: "space-2", userId: "user-b", scope: "user", botId: null, path: "b.md" },
+    { id: "c", spaceId: "space-1", userId: "user-c", scope: "user", botId: null, path: "c.md" },
+    { id: "ab", spaceId: "space-1", userId: "user-a", scope: "bot", botId: "bot-1", path: "m.md" },
+    { id: "cb", spaceId: "space-1", userId: "user-c", scope: "bot", botId: "bot-1", path: "m.md" },
+  ].map((row) => ({ ...row, content: `private ${row.id}`, revision: 1, updatedAt: new Date(0) }));
+  // Applies the where clause like Postgres would so a missing scope column shows up as a leak.
+  const findMany = vi.fn(async ({ where }: { where: Record<string, unknown> }) =>
+    table.filter((row) =>
+      Object.entries(where).every(([key, value]) => row[key as keyof typeof row] === value),
+    ),
+  );
+  const store = new MarkdownMemoryStore({ memoryDocument: { findMany } } as never);
+  const actor = (spaceId: string, userId: string): AdapterContext => ({
+    ...context,
+    spaceId,
+    userId,
+  });
+
+  it.each([
+    ["different spaces", actor("space-1", "user-a"), actor("space-2", "user-b"), "a", "b"],
+    ["the same space", actor("space-1", "user-a"), actor("space-1", "user-c"), "a", "c"],
+  ])("keeps user documents apart across %s", async (_label, first, second, ownA, ownB) => {
+    const seenByA = (await store.read({ scope: "user" }, first)).documents.map((doc) => doc.id);
+    const seenByB = (await store.read({ scope: "user" }, second)).documents.map((doc) => doc.id);
+    expect(seenByA).toEqual([ownA]);
+    expect(seenByB).toEqual([ownB]);
+  });
+
+  it("keeps a shared bot's memory per user and never searches without the actor scope", async () => {
+    const byA = await store.read({ scope: "bot", botId: "bot-1" }, actor("space-1", "user-a"));
+    const byC = await store.read({ scope: "bot", botId: "bot-1" }, actor("space-1", "user-c"));
+    expect(byA.documents.map((doc) => doc.id)).toEqual(["ab"]);
+    expect(byC.documents.map((doc) => doc.id)).toEqual(["cb"]);
+    const hits = await store.search({ scope: "all", query: "private" }, actor("space-1", "user-a"));
+    expect(hits.map((hit) => hit.snippet)).toEqual(["private a", "private ab"]);
+    for (const call of findMany.mock.calls) {
+      expect(call[0].where).toMatchObject({
+        spaceId: expect.any(String),
+        userId: expect.any(String),
+      });
+    }
+  });
+});
+
 describe("memory import CAS", () => {
   it("carries the prepared target revision into the native commit", async () => {
     const store = new MarkdownMemoryStore({} as PrismaClient);

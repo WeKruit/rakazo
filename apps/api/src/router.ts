@@ -2363,14 +2363,30 @@ export function createRouter(deps: RouterDeps) {
         }
       }),
       send: authed.threads.send.handler(async ({ context, input }) => {
-        if ((await modelSetup(deps, context.actor)).needsModel) {
+        const startedAt = performance.now();
+        // The three admission reads are independent and all complete before any write.
+        // Outcomes are reported in the original order (model gate, ownership, teaching) so an
+        // unowned bot still answers with the isolation error rather than its teaching state.
+        const settled = <T>(promise: Promise<T>) =>
+          promise.then(
+            (value) => ({ value }),
+            (error: unknown) => ({ error }),
+          );
+        const [needsModel, resolvedTarget, teaching] = await Promise.all([
+          sendNeedsModel(deps, context.actor),
+          settled(resolveThreadTarget(deps.prisma, context.actor, input)),
+          input.botId
+            ? settled(assertTeachingSendAllowed(deps.prisma, context.actor.spaceId, input.botId))
+            : { value: undefined },
+        ]);
+        if (needsModel) {
           throw new ORPCError("BAD_REQUEST", { message: "Connect a model to start a run." });
         }
-        const target = await resolveThreadTarget(deps.prisma, context.actor, input);
-        if (target.kind === "bot") {
-          await assertTeachingSendAllowed(deps.prisma, context.actor.spaceId, target.botId);
-        }
-        return sendThreadMessage(
+        if ("error" in resolvedTarget) throw resolvedTarget.error;
+        if ("error" in teaching) throw teaching.error;
+        const target = resolvedTarget.value;
+        const authorizedAt = performance.now();
+        const result = await sendThreadMessage(
           deps,
           context.actor,
           target,
@@ -2379,6 +2395,15 @@ export function createRouter(deps: RouterDeps) {
             ? (runId) => releaseComputerControl(deps, context.actor, target.botId, "done", runId)
             : undefined,
         );
+        const finishedAt = performance.now();
+        getLogger().info("thread.send.timing", {
+          threadId: target.threadId,
+          kind: target.kind,
+          authorizeMs: Math.round(authorizedAt - startedAt),
+          sendMs: Math.round(finishedAt - authorizedAt),
+          totalMs: Math.round(finishedAt - startedAt),
+        });
+        return result;
       }),
       react: authed.threads.react.handler(async ({ context, input }) => {
         const target = await resolveThreadTarget(deps.prisma, context.actor, input);
@@ -6591,6 +6616,12 @@ async function meDto(deps: RouterDeps, actor: Actor): Promise<Me> {
 function requireBilling(deps: RouterDeps): BillingService {
   if (!deps.billing) throw new ORPCError("NOT_FOUND", { message: "Billing is not enabled" });
   return deps.billing;
+}
+
+/** The send gate only needs to know whether a model exists; skip the lookups when the deployment provides one. */
+async function sendNeedsModel(deps: RouterDeps, actor: Actor): Promise<boolean> {
+  if (deps.env.agentRuntime === "scripted" || deps.env.deploymentModelConfigured) return false;
+  return !(await findDefaultModelCredential(deps.prisma, actor));
 }
 
 async function modelSetup(deps: RouterDeps, actor: Actor) {

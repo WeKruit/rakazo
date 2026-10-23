@@ -4,8 +4,10 @@ import path from "node:path";
 import type { AgentMessage } from "@earendil-works/pi-agent-core";
 import { describe, expect, it } from "vitest";
 import {
+  claimPiSessionPrune,
   isPiSessionRecordingEnabled,
   PI_SESSION_MAX_FILES_PER_BOT,
+  PI_SESSION_PRUNE_INTERVAL_MS,
   PI_SESSION_RETENTION_DAYS,
   PiJsonlSessionRecorder,
   piSessionBotRoot,
@@ -140,6 +142,59 @@ describe("Pi JSONL sessions", () => {
       expect(await readdir(piSessionUserRoot(sessionsRoot, "user-1"))).toHaveLength(2);
       expect(PI_SESSION_RETENTION_DAYS).toBe(30);
       expect(PI_SESSION_MAX_FILES_PER_BOT).toBe(100);
+    } finally {
+      await rm(root, { recursive: true, force: true });
+    }
+  });
+
+  it("walks a bot's transcripts once per interval instead of on every run", async () => {
+    const root = await mkdtemp(path.join(os.tmpdir(), "rakazo-pi-prune-interval-"));
+    try {
+      const sessionsRoot = path.join(root, "sessions");
+      const botRoot = piSessionBotRoot(sessionsRoot, "user-1", "bot-1");
+      const otherBotRoot = piSessionBotRoot(sessionsRoot, "user-2", "bot-1");
+      await mkdir(botRoot, { recursive: true });
+      await mkdir(otherBotRoot, { recursive: true });
+      let now = Date.now();
+      const expired = new Date(now - PI_SESSION_RETENTION_DAYS * 2 * 24 * 60 * 60 * 1000);
+      const stale = async (filePath: string) => {
+        await writeFile(filePath, "{}\n");
+        await utimes(filePath, expired, expired);
+      };
+      const first = path.join(botRoot, "first.jsonl");
+      const second = path.join(botRoot, "second.jsonl");
+      const otherUser = path.join(otherBotRoot, "other.jsonl");
+      await stale(first);
+      await stale(otherUser);
+      const recorder = new PiJsonlSessionRecorder(sessionsRoot, root, () => now);
+      const start = (runId: string) =>
+        recorder.start({
+          runId,
+          threadId: "thread-1",
+          botId: "bot-1",
+          userId: "user-1",
+          provider: "openai-compatible",
+          model: "qwen-test",
+          thinkingLevel: "off",
+          systemPrompt: "Be concise.",
+          initialMessages: [],
+        });
+
+      await start("run-1");
+      await expect(readFile(first)).rejects.toMatchObject({ code: "ENOENT" });
+      // Another user's root is never touched by this bot's retention walk.
+      await expect(readFile(otherUser, "utf8")).resolves.toBe("{}\n");
+
+      await stale(second);
+      now += PI_SESSION_PRUNE_INTERVAL_MS - 1;
+      await start("run-2");
+      await expect(readFile(second, "utf8")).resolves.toBe("{}\n");
+
+      now += 1;
+      await start("run-3");
+      await expect(readFile(second)).rejects.toMatchObject({ code: "ENOENT" });
+      expect(claimPiSessionPrune(botRoot, now)).toBe(false);
+      expect(claimPiSessionPrune(botRoot, now + PI_SESSION_PRUNE_INTERVAL_MS)).toBe(true);
     } finally {
       await rm(root, { recursive: true, force: true });
     }

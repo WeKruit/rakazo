@@ -870,11 +870,7 @@ export async function sendThreadMessage(
             },
           });
           await tx.message.update({ where: { id: message.id }, data: { runId: run.id } });
-          await cancelSupersededQueuedRuns(tx, {
-            threadId: target.threadId,
-            botIds: [target.botId],
-            keepRunIds: [run.id],
-          });
+          // No queued run can exist here: activeRuns (which include queued) was empty.
           const event = await appendEventInTransaction(tx, {
             spaceId: actor.spaceId,
             threadId: target.threadId,
@@ -1035,18 +1031,9 @@ export async function sendThreadMessage(
         const firstRun = runs[0];
         const eventBotId = firstRun?.botId ?? targetBotIds[0];
         if (!eventBotId) throw new IsolationError("Group send did not resolve a target");
+        // Bots that received a new run had no active (hence no queued) run to supersede.
         if (firstRun) {
           await tx.message.update({ where: { id: message.id }, data: { runId: firstRun.id } });
-          const createdRuns = runs.filter(
-            (run) => !activeByBotId.has(run.botId) && !answeredByBotId.has(run.botId),
-          );
-          if (createdRuns.length) {
-            await cancelSupersededQueuedRuns(tx, {
-              threadId: target.threadId,
-              botIds: createdRuns.map((run) => run.botId),
-              keepRunIds: createdRuns.map((run) => run.id),
-            });
-          }
         }
         await touchGroupUpdatedAt(tx, target.groupId);
         const event = await appendEventInTransaction(tx, {
@@ -1082,16 +1069,19 @@ export async function sendThreadMessage(
     throw error;
   });
   if ("replay" in committed) return committed.replay;
-  await deps.events.notify(target.threadId, committed.eventSeq).catch((error) => {
-    // Subscribers catch up from the durable event cursor after a missed realtime wake.
-    getLogger().error("thread send realtime notification", error);
-  });
+  // The run row is already durable; the realtime wake and the worker wake are independent.
+  await Promise.all([
+    deps.events.notify(target.threadId, committed.eventSeq).catch((error) => {
+      // Subscribers catch up from the durable event cursor after a missed realtime wake.
+      getLogger().error("thread send realtime notification", error);
+    }),
+    enqueueRunsNeedingContinue(deps.jobs, committed.runs),
+  ]);
   if (releaseTakeover) {
     for (const run of committed.runs) {
       if (steersUserMessage(run)) await releaseTakeover(run.id);
     }
   }
-  await enqueueRunsNeedingContinue(deps.jobs, committed.runs);
   return sendResult(committed.message, committed.runs);
 }
 

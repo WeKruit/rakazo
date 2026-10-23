@@ -1608,6 +1608,7 @@ async function finalizeRunOnce(
     });
     if (task.count !== 1) throw new Error("Run task was not available to finalize");
 
+    const events: AppendEventInput[] = [];
     if (input.outcome === "completed") {
       const completedBlocks = completedRunBlocks(input.blocks, writableRun?.startedAt ?? null, now);
       if (completedBlocks.length > 0) {
@@ -1619,7 +1620,7 @@ async function finalizeRunOnce(
           runId: input.runId,
           markUnread: input.markUnread,
         });
-        await appendEventInTransaction(tx, {
+        events.push({
           spaceId: input.spaceId,
           threadId: input.threadId,
           botId: input.botId,
@@ -1629,7 +1630,7 @@ async function finalizeRunOnce(
         });
       }
     }
-    const lastEvent = await appendEventInTransaction(tx, {
+    events.push({
       spaceId: input.spaceId,
       threadId: input.threadId,
       botId: input.botId,
@@ -1637,6 +1638,8 @@ async function finalizeRunOnce(
       runId: input.runId,
       payload: input.outcome === "completed" ? {} : { error: input.error },
     });
+    // The final message and the terminal event share one sequence reservation and insert.
+    const lastEvent = (await appendEventsInTransaction(tx, events)).at(-1)!;
     await tx.event.deleteMany({ where: { runId: input.runId, type: "thread.progress" } });
     if (input.outcome === "completed") {
       await tx.steeringMessage.deleteMany({
@@ -1809,26 +1812,69 @@ export async function appendEventInTransaction(
     data: { nextEventSeq: { increment: 1 } },
     select: { nextEventSeq: true },
   });
-  // run.cancelled is appended after the run row already reads cancelled, so it
-  // asserts the terminal status where every other event needs a writable run.
+  await assertEventRunWritable(tx, input);
+  return tx.event.create({ data: eventRow(input, thread.nextEventSeq - 1) });
+}
+
+/**
+ * Appends several events of one thread in order: the sequence range is reserved by a
+ * single thread update, each distinct run is checked once, and the rows land in one
+ * createMany. Returns the rows in input order with their assigned seq (createMany does
+ * not return ids). A single input takes the ordinary one-row path.
+ */
+export async function appendEventsInTransaction(
+  tx: Prisma.TransactionClient,
+  inputs: readonly AppendEventInput[],
+) {
+  if (inputs.length === 0) return [];
+  if (inputs.length === 1) {
+    const event = await appendEventInTransaction(tx, inputs[0]!);
+    return [event];
+  }
+  const threadId = inputs[0]!.threadId;
+  if (inputs.some((input) => input.threadId !== threadId)) {
+    throw new IsolationError("Batched events must belong to one thread");
+  }
+  const thread = await tx.thread.update({
+    where: { id: threadId },
+    data: { nextEventSeq: { increment: inputs.length } },
+    select: { nextEventSeq: true },
+  });
+  const checked = new Set<string>();
+  for (const input of inputs) {
+    const key = `${input.type === "run.cancelled" ? "cancelled" : "writable"}:${input.runId ?? ""}:${input.allowCancelledRun ? 1 : 0}`;
+    if (checked.has(key)) continue;
+    checked.add(key);
+    await assertEventRunWritable(tx, input);
+  }
+  const firstSeq = thread.nextEventSeq - inputs.length;
+  const rows = inputs.map((input, index) => eventRow(input, firstSeq + index));
+  await tx.event.createMany({ data: rows });
+  return rows;
+}
+
+// run.cancelled is appended after the run row already reads cancelled, so it
+// asserts the terminal status where every other event needs a writable run.
+async function assertEventRunWritable(tx: Prisma.TransactionClient, input: AppendEventInput) {
   if (input.type === "run.cancelled") {
     await assertRunIsCancelled(tx, input.runId);
   } else {
     await assertRunCanWriteHistory(tx, input.runId, { allowCancelled: input.allowCancelledRun });
   }
+}
+
+function eventRow(input: AppendEventInput, seq: number) {
   // Unpaired UTF-16 surrogates (e.g. a split emoji high half) are invalid JSON for Postgres.
-  const payload = sanitizeJsonValue(input.payload);
-  return tx.event.create({
-    data: {
-      spaceId: input.spaceId,
-      threadId: input.threadId,
-      botId: input.botId,
-      seq: thread.nextEventSeq - 1,
-      type: input.type,
-      payload: payload as Prisma.InputJsonValue,
-      runId: input.runId,
-    },
-  });
+  const payload = sanitizeJsonValue(input.payload) as Prisma.InputJsonValue;
+  return {
+    spaceId: input.spaceId,
+    threadId: input.threadId,
+    botId: input.botId,
+    seq,
+    type: input.type,
+    payload,
+    runId: input.runId,
+  };
 }
 
 async function notifyRealtime(
