@@ -192,7 +192,9 @@ export function RecruitingNavigation({
           onClick={() => onView("results")}
         >
           <img className="hire-brand-logo" src="/wekruit-logo.png" alt="" aria-hidden="true" />
-          <span>WeKruit</span>
+          <span className="text-start">
+            WeKruit<span className="block text-xs font-normal tracking-normal">Headhunter</span>
+          </span>
         </button>
         <button
           type="button"
