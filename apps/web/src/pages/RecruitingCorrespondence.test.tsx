@@ -219,7 +219,11 @@ it("renders only retained email fields, supports selection and never treats assi
   expect(view.container.textContent).toContain("Can we speak Thursday?");
   expect(view.container.querySelector("script")).toBeNull();
   expect(view.container.textContent).toContain("More results may be available");
-  await view.click("Another reply");
+  const source = view.container.querySelector<HTMLSelectElement>('select[aria-label="Source"]')!;
+  await act(async () => {
+    source.value = source.options[1]!.value;
+    source.dispatchEvent(new Event("change", { bubbles: true }));
+  });
   expect(selection).toHaveBeenLastCalledWith(
     expect.objectContaining({ emailId: "email-2", sourceName: "Other mailbox", snippet: true }),
   );
@@ -688,4 +692,86 @@ it("shows adjacent half-hour slots as one range per day with the time zone once"
   expect(section.querySelectorAll("time")).toHaveLength(2);
   expect(section.textContent?.match(/UTC/g)).toHaveLength(1);
   expect(view.container.querySelectorAll("article")).toHaveLength(0);
+});
+
+it("keeps canonical mailbox, campaign and recorded thread selections exact in the shared conversation", async () => {
+  const selection = vi.fn();
+  const email = (id: string, changes: Record<string, unknown> = {}) => ({
+    id,
+    sourceId: "source",
+    sourceName: "Connected mail",
+    providerMessageId: `provider-${id}`,
+    savedRead: null,
+    sender: "person@example.test",
+    recipients: ["recruiter@example.test"],
+    subject: "Same subject",
+    body: `Body ${id}`,
+    snippet: false,
+    date: "2026-10-22T00:00:00Z",
+    url: null,
+    eaccount: "first@example.test",
+    campaignId: "campaign-one",
+    providerThreadId: "recorded-thread",
+    ...changes,
+  });
+  readCorrespondence.mockResolvedValue({
+    roleId: "role-1",
+    status: "ready",
+    checkedAt: null,
+    connections: [],
+    events: [],
+    partial: false,
+    emails: [
+      email("first"),
+      email("second"),
+      email("other-mailbox", { eaccount: "other@example.test" }),
+      email("other-campaign", { campaignId: "campaign-two" }),
+      email("unknown-thread-one", { providerThreadId: null }),
+      email("unknown-thread-two", { providerThreadId: null }),
+    ],
+  });
+  const view = await mount({ view: "inbox", threadId: "role-thread", onEmailSelection: selection });
+  const conversation = () => view.container.querySelector('[data-testid="email-conversation"]')!;
+  expect(conversation()).not.toBeNull();
+  expect(conversation().textContent).toContain("Body first");
+  expect(conversation().textContent).toContain("Body second");
+  expect(conversation().textContent).not.toContain("Body other-mailbox");
+  expect(conversation().textContent).not.toContain("Body other-campaign");
+  expect(conversation().textContent).not.toContain("Body unknown-thread");
+  const details = conversation().querySelector("details")!;
+  await act(async () => {
+    details.open = true;
+    details.dispatchEvent(new Event("toggle"));
+  });
+  expect(selection).toHaveBeenLastCalledWith(
+    expect.objectContaining({
+      emailId: "second",
+      providerThreadId: "recorded-thread",
+      campaignId: "campaign-one",
+      eaccount: "first@example.test",
+    }),
+  );
+  await view.click("Draft reply");
+  expect(view.conversation).toHaveBeenLastCalledWith(expect.stringContaining("Do not send"));
+  const choose = async (label: string, index: number) => {
+    const select = view.container.querySelector<HTMLSelectElement>(
+      `select[aria-label="${label}"]`,
+    )!;
+    await act(async () => {
+      select.value = select.options[index]!.value;
+      select.dispatchEvent(new Event("change", { bubbles: true }));
+    });
+  };
+  await choose("Conversation", 1);
+  expect(conversation().textContent).toContain("Body unknown-thread-one");
+  expect(conversation().textContent).not.toContain("Body unknown-thread-two");
+  await choose("Campaign", 1);
+  expect(selection).toHaveBeenLastCalledWith(
+    expect.objectContaining({ emailId: "other-campaign", campaignId: "campaign-two" }),
+  );
+  await choose("Source", 1);
+  expect(selection).toHaveBeenLastCalledWith(
+    expect.objectContaining({ emailId: "other-mailbox", eaccount: "other@example.test" }),
+  );
+  expect(conversation().textContent).not.toContain("Body second");
 });

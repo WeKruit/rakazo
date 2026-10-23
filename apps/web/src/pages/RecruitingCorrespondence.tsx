@@ -19,6 +19,7 @@ import { retryTransientRead } from "../lib/read-retry";
 import type { RecruitingReadCache } from "../lib/recruiting-read-cache";
 import { clearRecruitingReads, rememberRecruitingRead } from "../lib/recruiting-read-cache";
 import { rpc } from "../lib/rpc";
+import { EmailConversation } from "./recruiting/EmailConversation";
 import { AvailabilityRanges } from "./recruiting/AvailabilityRanges";
 import { RoleCampaignCard } from "./recruiting/SequenceTab";
 
@@ -375,6 +376,9 @@ function SavedCorrespondenceView({
   const { t } = useLingui();
   const [refresh, setRefresh] = useState(0);
   const [selectedId, setSelectedId] = useState<string>();
+  const [selectedSource, setSelectedSource] = useState<string>();
+  const [selectedThread, setSelectedThread] = useState<string>();
+  const [selectedCampaign, setSelectedCampaign] = useState<string>();
   const key = JSON.stringify([artifactTarget, view, refreshSignal, refresh]);
   const scopeKey = JSON.stringify([readCacheScope, artifactTarget, view]);
   const savedWorkspace = readCacheScope
@@ -442,7 +446,35 @@ function SavedCorrespondenceView({
   }, [key, cacheKey, readCache, readCacheScope, scopeKey]);
   const current = read?.key === key && read.scopeKey === scopeKey ? read : undefined;
   const data = current?.data;
-  const selected = data?.emails.find((email) => email.id === selectedId) ?? data?.emails[0];
+  const sourceOf = (email: SavedCorrespondence["emails"][number]) =>
+    JSON.stringify([email.sourceId, email.eaccount ?? null]);
+  // Only recorded source/thread/candidate identity can combine messages. Unknown threads stay separate.
+  const threadOf = (email: SavedCorrespondence["emails"][number]) =>
+    JSON.stringify([
+      sourceOf(email),
+      email.crm?.organizationId,
+      email.crm?.crmRoleId,
+      email.crm?.candidateId,
+      email.campaignId ?? null,
+      email.providerThreadId ? ["thread", email.providerThreadId] : ["message", email.id],
+    ]);
+  const sources = new Map((data?.emails ?? []).map((email) => [sourceOf(email), email]));
+  const sourceKey =
+    selectedSource && sources.has(selectedSource) ? selectedSource : sources.keys().next().value;
+  const sourceEmails = (data?.emails ?? []).filter((email) => sourceOf(email) === sourceKey);
+  const campaignOf = (email: SavedCorrespondence["emails"][number]) =>
+    JSON.stringify(email.campaignId ?? null);
+  const campaigns = new Map(sourceEmails.map((email) => [campaignOf(email), email]));
+  const campaignKey =
+    selectedCampaign && campaigns.has(selectedCampaign)
+      ? selectedCampaign
+      : campaigns.keys().next().value;
+  const campaignEmails = sourceEmails.filter((email) => campaignOf(email) === campaignKey);
+  const threads = new Map(campaignEmails.map((email) => [threadOf(email), email]));
+  const threadKey =
+    selectedThread && threads.has(selectedThread) ? selectedThread : threads.keys().next().value;
+  const threadEmails = campaignEmails.filter((email) => threadOf(email) === threadKey);
+  const selected = threadEmails.find((email) => email.id === selectedId) ?? threadEmails[0];
   useEffect(() => {
     // Cached mail stays readable, but only the current authorized read supplies new message context.
     const parsed =
@@ -454,6 +486,11 @@ function SavedCorrespondenceView({
             sourceId: selected.sourceId,
             providerMessageId: selected.providerMessageId,
             savedRead: selected.savedRead,
+            ...(selected.providerThreadId !== undefined
+              ? { providerThreadId: selected.providerThreadId }
+              : {}),
+            ...(selected.campaignId !== undefined ? { campaignId: selected.campaignId } : {}),
+            ...(selected.eaccount !== undefined ? { eaccount: selected.eaccount } : {}),
             ...(selected.crm ? { crm: selected.crm } : {}),
             sourceName: selected.sourceName.slice(0, 160),
             sender: selected.sender?.slice(0, 320) ?? null,
@@ -602,23 +639,84 @@ function SavedCorrespondenceView({
       ) : null}
       {data?.status === "ready" && !interview ? (
         <>
-          <CorrespondenceEmails
-            emails={data.emails}
-            selectedId={selected?.id}
-            onSelect={setSelectedId}
-          />
-          {selected && current?.fresh && !current.failed ? (
-            <button
-              type="button"
-              className="hire-outline-button mt-4"
-              onClick={() =>
-                onConversation(
-                  t`Draft a reply to the selected email for me to review. Read the original conversation and verify the candidate and role. Do not send.`,
-                )
-              }
+          {sources.size > 1 ? (
+            <NativeSelect
+              aria-label={t`Source`}
+              value={sourceKey}
+              onChange={(event) => {
+                setSelectedSource(event.target.value);
+                setSelectedCampaign(undefined);
+                setSelectedThread(undefined);
+                setSelectedId(undefined);
+              }}
             >
-              <Trans>Draft reply</Trans>
-            </button>
+              {[...sources].map(([key, email]) => (
+                <NativeSelectOption key={key} value={key}>
+                  {email.sourceName}
+                  {email.eaccount ? ` · ${email.eaccount}` : ""}
+                </NativeSelectOption>
+              ))}
+            </NativeSelect>
+          ) : null}
+          {campaigns.size > 1 ? (
+            <NativeSelect
+              aria-label={t`Campaign`}
+              value={campaignKey}
+              onChange={(event) => {
+                setSelectedCampaign(event.target.value);
+                setSelectedThread(undefined);
+                setSelectedId(undefined);
+              }}
+            >
+              {[...campaigns].map(([key, email], index) => (
+                <NativeSelectOption key={key} value={key}>
+                  {email.campaignId ? `${t`Campaign`} ${index + 1}` : t`Unknown`}
+                  {` · ${email.sender ?? t`Sender unavailable`} · ${email.subject || t`No subject`}`}
+                </NativeSelectOption>
+              ))}
+            </NativeSelect>
+          ) : null}
+          {threads.size > 1 ? (
+            <NativeSelect
+              aria-label={t`Conversation`}
+              value={threadKey}
+              onChange={(event) => {
+                setSelectedThread(event.target.value);
+                setSelectedId(undefined);
+              }}
+            >
+              {[...threads].map(([key, email], index) => (
+                <NativeSelectOption key={key} value={key}>
+                  {`${index + 1}. ${email.sender ?? t`Sender unavailable`} · ${email.subject || t`No subject`}`}
+                  {email.date ? ` · ${new Date(email.date).toLocaleString()}` : ""}
+                </NativeSelectOption>
+              ))}
+            </NativeSelect>
+          ) : null}
+          <EmailConversation
+            items={threadEmails.map((email) => ({
+              ...email,
+              direction: email.crm?.direction ?? null,
+              partial: email.snippet,
+              candidateId: email.crm?.candidateId,
+            }))}
+            selectedId={selected?.id}
+            onSelect={(email) => setSelectedId(email.id)}
+            onDraftReply={
+              selected && current?.fresh && !current.failed
+                ? (email) => {
+                    if (email.id !== selected.id) return;
+                    onConversation(
+                      t`Draft a reply to the selected email for me to review. Read the original conversation and verify the candidate and role. Do not send.`,
+                    );
+                  }
+                : undefined
+            }
+          />
+          {selected?.url ? (
+            <a href={selected.url} target="_blank" rel="noreferrer" className="underline">
+              <Trans>Open original email</Trans>
+            </a>
           ) : null}
         </>
       ) : null}
