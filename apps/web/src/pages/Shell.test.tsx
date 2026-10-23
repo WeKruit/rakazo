@@ -1731,6 +1731,232 @@ it("keeps the same role chat widget, draft and native card across workspace menu
   expect(shellApi.answer).not.toHaveBeenCalled();
 });
 
+it("sends the currently selected saved email as separate native context and drops it on view changes", async () => {
+  setToolActivityPreference("off");
+  const view = await renderFeedbackShell("group", undefined, {
+    isDeploymentOwner: false,
+    openFeedback: false,
+  });
+  const email = {
+    id: "opaque-selected-email",
+    sourceName: "Actual saved mailbox",
+    sourceId: "mailbox-1",
+    providerMessageId: "exact-provider-message",
+    savedRead: { messageId: "saved-source", linkedRunId: "saved-run", effectId: "saved-effect" },
+    sender: "person@example.test",
+    recipients: [],
+    subject: "Available Thursday",
+    body: "Private original body",
+    snippet: true,
+    date: "2026-10-22T01:00:00Z",
+    url: null,
+  };
+  shellApi.recruiting.correspondence.mockResolvedValue({
+    roleId: "internal-role",
+    status: "ready",
+    checkedAt: null,
+    connections: [{ name: "Unrelated account", status: "configured" }],
+    emails: [email],
+    events: [],
+    contacts: [],
+    partial: false,
+  });
+  await view.navigate("/app/g/group-1?view=inbox");
+  await view.click("Open role chat");
+  const composer = container!.querySelector<HTMLTextAreaElement>('textarea[name="chat-message"]')!;
+  type(composer, "Read this reply; don't send anything.");
+  shellApi.send.mockResolvedValue({ runId: "same-role-run" });
+  await view.click("Send");
+  expect(shellApi.send).toHaveBeenLastCalledWith(
+    expect.objectContaining({
+      text: "Read this reply; don't send anything.",
+      correspondenceReference: {
+        threadId: "thread-1",
+        roleId: "internal-role",
+        emailId: email.id,
+        sourceName: email.sourceName,
+        sourceId: email.sourceId,
+        providerMessageId: email.providerMessageId,
+        savedRead: email.savedRead,
+        sender: email.sender,
+        subject: email.subject,
+        date: email.date,
+        snippet: true,
+      },
+    }),
+  );
+  expect(JSON.stringify(shellApi.send.mock.calls[0])).not.toContain(email.body);
+  await view.navigate("/app/g/group-1?view=results");
+  type(composer, "Find more candidates.");
+  await view.click("Send");
+  expect(shellApi.send.mock.calls.at(-1)![0].correspondenceReference).toBeUndefined();
+});
+
+it("renders a saved email business reference outside the original human quote without internal identifiers", async () => {
+  const reference = {
+    threadId: "thread-1",
+    roleId: "internal-role",
+    emailId: "hidden-display-id",
+    sourceId: "hidden-source-id",
+    providerMessageId: "hidden-provider-id",
+    savedRead: null,
+    sourceName: "Recruiting mailbox",
+    sender: "person@example.test",
+    subject: "Thursday reply",
+    date: null,
+    snippet: true,
+  };
+  await renderFeedbackShell("group", undefined, {
+    isDeploymentOwner: false,
+    openFeedback: false,
+    messages: [
+      {
+        id: "human-with-reference",
+        threadId: "thread-1",
+        seq: 2,
+        role: "user",
+        createdAt: "2026-10-22T01:00:00Z",
+        blocks: [
+          { kind: "text", text: "Read this. Do not send.", correspondenceReference: reference },
+        ],
+      },
+    ],
+  });
+  const message = container!.querySelector('[data-message-id="human-with-reference"]')!;
+  expect(message.querySelector("[data-quote-message-id]")?.textContent).toBe(
+    "Read this. Do not send.",
+  );
+  expect(message.querySelector('[data-testid="message-email-reference"]')?.textContent).toContain(
+    reference.subject,
+  );
+  expect(message.textContent).not.toMatch(
+    /hidden-display-id|hidden-source-id|hidden-provider-id|internal-role/,
+  );
+});
+
+it("keeps an uncertain email retry nonce across metadata refresh but renews it for another selected message", async () => {
+  setToolActivityPreference("off");
+  let props!: ComponentProps<typeof RecruitingCorrespondenceModule.RecruitingCorrespondence>;
+  vi.spyOn(RecruitingCorrespondenceModule, "RecruitingCorrespondence").mockImplementation(
+    (next) => {
+      props = next;
+      return <div />;
+    },
+  );
+  const view = await renderFeedbackShell("group", undefined, {
+    isDeploymentOwner: false,
+    openFeedback: false,
+    initialPath: "/app/g/group-1?view=inbox",
+  });
+  const reference = {
+    threadId: "thread-1",
+    roleId: "internal-role",
+    emailId: "selected-email",
+    sourceId: "source",
+    providerMessageId: "exact-original",
+    savedRead: null,
+    sourceName: "Mailbox",
+    sender: null,
+    subject: "Original subject",
+    date: null,
+    snippet: true,
+  };
+  await act(async () => props.onEmailSelection?.(reference));
+  await view.click("Open role chat");
+  const composer = container!.querySelector<HTMLTextAreaElement>('textarea[name="chat-message"]')!;
+  type(composer, "Read this, don't send.");
+  shellApi.send.mockRejectedValue(new Error("Unknown acceptance"));
+  await view.click("Send");
+  await act(async () =>
+    props.onEmailSelection?.({
+      ...reference,
+      subject: "Refreshed subject",
+      snippet: false,
+      savedRead: { messageId: "new-source", linkedRunId: "new-run", effectId: "new-effect" },
+    }),
+  );
+  expect(composer.value).toBe("Read this, don't send.");
+  await view.click("Send");
+  expect(shellApi.send.mock.calls[1]![0].clientNonce).toBe(
+    shellApi.send.mock.calls[0]![0].clientNonce,
+  );
+  await act(async () =>
+    props.onEmailSelection?.({
+      ...reference,
+      emailId: "different-email",
+      providerMessageId: "different-original",
+    }),
+  );
+  await view.click("Send");
+  expect(shellApi.send.mock.calls[2]![0].clientNonce).not.toBe(
+    shellApi.send.mock.calls[1]![0].clientNonce,
+  );
+});
+
+it.each(["view", "thread", "user", "space", "unmount"] as const)(
+  "does not submit an old selected email after %s changes during upload",
+  async (change) => {
+    setToolActivityPreference("off");
+    let props!: ComponentProps<typeof RecruitingCorrespondenceModule.RecruitingCorrespondence>;
+    vi.spyOn(RecruitingCorrespondenceModule, "RecruitingCorrespondence").mockImplementation(
+      (next) => {
+        props = next;
+        return <div />;
+      },
+    );
+    const view = await renderFeedbackShell("group", undefined, {
+      isDeploymentOwner: false,
+      openFeedback: false,
+      initialPath: "/app/g/group-1?view=inbox",
+    });
+    await act(async () =>
+      props.onEmailSelection?.({
+        threadId: "thread-1",
+        roleId: "internal-role",
+        emailId: "selected-email",
+        sourceId: "source",
+        providerMessageId: "exact-original",
+        savedRead: null,
+        sourceName: "Mailbox",
+        sender: null,
+        subject: "Selected reply",
+        date: null,
+        snippet: true,
+      }),
+    );
+    await view.click("Open role chat");
+    pickAttachment();
+    type(
+      container!.querySelector<HTMLTextAreaElement>('textarea[name="chat-message"]')!,
+      "Read this, don't send.",
+    );
+    let finish!: (value: { id: string }) => void;
+    shellApi.createArtifact.mockImplementationOnce(
+      () =>
+        new Promise((resolve) => {
+          finish = resolve;
+        }),
+    );
+    await view.click("Send");
+    await vi.waitFor(() => expect(shellApi.createArtifact).toHaveBeenCalledOnce());
+    if (change === "view") await view.navigate("/app/g/group-1?view=interview");
+    else if (change === "thread") await view.navigate("/app/bot-2");
+    else if (change === "space") localStorage.setItem("rakazo:space-id", "different-space");
+    else if (change === "user") {
+      shellApi.session = {
+        data: { user: { id: "different-user", name: "Other", email: "other@example.test" } },
+      };
+      await view.render();
+    } else {
+      await act(async () => root!.unmount());
+      root = null;
+    }
+    await act(async () => finish({ id: "uploaded-original" }));
+    expect(shellApi.send).not.toHaveBeenCalled();
+    expect(shellApi.answer).not.toHaveBeenCalled();
+  },
+);
+
 it("uses the narrow role column without the desktop metadata gutter and preserves the same chat", async () => {
   setToolActivityPreference("off");
   const view = await renderFeedbackShell("group", undefined, {
@@ -3413,6 +3639,36 @@ describe("Composer", () => {
     await act(async () => {});
     expect(onSend.mock.calls[1]?.[2]).not.toBe(onSend.mock.calls[0]?.[2]);
   });
+
+  it.each([false, true])(
+    "renews only the retry nonce when email selection changes (during send: %s)",
+    async (duringSend) => {
+      let finish!: (accepted: boolean) => void;
+      const onSend = vi.fn<ComponentProps<typeof Composer>["onSend"]>().mockResolvedValue(false);
+      if (duringSend)
+        onSend.mockImplementationOnce(
+          () =>
+            new Promise((resolve) => {
+              finish = resolve;
+            }),
+        );
+      const textarea = renderComposer(onSend, { contextKey: "actor:space:role:email-a" });
+      type(textarea, "Read this; don't send.");
+      pressEnter(textarea);
+      await act(async () => {});
+      if (duringSend) {
+        rerenderComposer({ contextKey: "actor:space:role:email-b" });
+        await act(async () => finish(false));
+      } else rerenderComposer({ contextKey: "actor:space:role:email-b" });
+      expect(textarea.value).toBe("Read this; don't send.");
+      pressEnter(textarea);
+      await act(async () => {});
+      expect(onSend.mock.calls[1]?.[2]).not.toBe(onSend.mock.calls[0]?.[2]);
+      pressEnter(textarea);
+      await act(async () => {});
+      expect(onSend.mock.calls[2]?.[2]).toBe(onSend.mock.calls[1]?.[2]);
+    },
+  );
 
   it.each(replyChanges)("does not restore after a $name while sending", async ({ props }) => {
     let finishSend = (_sent: boolean) => {};

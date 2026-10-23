@@ -1,7 +1,7 @@
 import { createHash } from "node:crypto";
 import type { ArtifactStore } from "@rakazo/adapter-kit";
 import { readActorArtifact } from "@rakazo/adapters";
-import type { Actor } from "@rakazo/contracts";
+import type { Actor, RecruitingCorrespondenceReference } from "@rakazo/contracts";
 import { ATTACHMENT_MAX_COUNT } from "@rakazo/contracts";
 import {
   AttachmentValidationError,
@@ -685,10 +685,16 @@ export async function resolveGroupSendAttachments(
 export function buildUserMessageBlocks(
   text: string | undefined,
   attachmentBlocks: ReturnType<typeof messageBlockForArtifact>[],
+  correspondenceReference?: RecruitingCorrespondenceReference,
 ) {
   const blocks = [];
   const caption = text?.trim() ? text : undefined;
-  if (caption) blocks.push({ kind: "text" as const, text: caption });
+  if (caption || correspondenceReference)
+    blocks.push({
+      kind: "text" as const,
+      text: caption ?? "",
+      ...(correspondenceReference ? { correspondenceReference } : {}),
+    });
   blocks.push(...attachmentBlocks);
   return blocks;
 }
@@ -697,8 +703,9 @@ export function buildSendPrompt(
   text: string | undefined,
   artifacts: Array<{ name: string; mimeType: string; size: number }>,
   connectorNames: string[] = [],
+  correspondenceReference?: RecruitingCorrespondenceReference,
 ) {
-  const prompt = promptTextForAttachments(text, artifacts);
+  const prompt = promptTextForAttachments(text, artifacts, correspondenceReference);
   if (connectorNames.length === 0) return prompt;
   const marker = "Use these connectors if relevant:";
   const existing = new RegExp(`^${marker} (.*)\\.$`, "m").exec(prompt);

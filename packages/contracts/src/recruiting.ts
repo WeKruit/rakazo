@@ -1284,14 +1284,42 @@ export const RecruitingOutreachSequenceSchema = z.strictObject({
 export type RecruitingOutreachSequence = z.infer<typeof RecruitingOutreachSequenceSchema>;
 
 /** Read-only presentation of retained provider receipts; never a send or booking command. */
+const CorrespondenceOriginFields = {
+  sourceId: Id.max(200),
+  providerMessageId: Id.max(1600),
+  savedRead: z
+    .strictObject({ messageId: Id.max(200), linkedRunId: Id.max(200), effectId: Id.max(200) })
+    .nullable(),
+};
+export const RecruitingCorrespondenceReferenceSchema = z
+  .strictObject({
+    ...CorrespondenceOriginFields,
+    threadId: Id.max(200),
+    roleId: RecruitingId.max(200),
+    emailId: Id.max(1600),
+    sourceName: z.string().max(160),
+    sender: z.string().max(320).nullable(),
+    subject: z.string().max(1000),
+    date: IsoDate.nullable(),
+    snippet: z.boolean(),
+  })
+  .refine(
+    (value) => JSON.stringify(value).length <= 4096,
+    "Email reference exceeds 4096 characters",
+  );
+export type RecruitingCorrespondenceReference = z.infer<
+  typeof RecruitingCorrespondenceReferenceSchema
+>;
+
 export const RecruitingCorrespondenceSchema = z.strictObject({
+  roleId: RecruitingId.nullable(),
   status: z.enum(["not_checked", "ready", "empty", "unsupported", "failed"]),
   checkedAt: IsoDate.nullable(),
   connectionChanged: z.boolean(),
   connections: z.array(
     z.strictObject({
       name: z.string(),
-      status: z.enum(["configured", "needs_connection", "needs_access", "disabled"]),
+      status: z.enum(["configured", "needs_connection", "needs_access", "disabled", "unavailable"]),
       checkIssue: z
         .strictObject({ status: z.enum(["failed", "unsupported"]), checkedAt: IsoDate })
         .nullable(),
@@ -1300,6 +1328,8 @@ export const RecruitingCorrespondenceSchema = z.strictObject({
   emails: z.array(
     z.strictObject({
       id: Id,
+      sourceName: z.string(),
+      ...CorrespondenceOriginFields,
       sender: z.string().nullable(),
       recipients: z.array(z.string()),
       subject: z.string(),

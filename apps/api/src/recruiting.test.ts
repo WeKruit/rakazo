@@ -1,6 +1,7 @@
 import { createHash } from "node:crypto";
 import { createRouterClient } from "@orpc/server";
 import type { ArtifactStore } from "@rakazo/adapter-kit";
+import { SecretStoreUnavailableError } from "@rakazo/adapter-kit";
 import { readInstantlyEmail } from "@rakazo/adapters";
 import type { Actor } from "@rakazo/contracts";
 import { RecruitingAssessmentSnapshotSchema } from "@rakazo/contracts";
@@ -428,6 +429,7 @@ describe("saved recruiting correspondence", () => {
     );
     expect(result).toMatchObject({
       status: "ready",
+      roleId: "role",
       partial: false,
       connections: [{ name: "Recruiting CRM", status: "configured" }],
       emails: [
@@ -481,13 +483,12 @@ describe("saved recruiting correspondence", () => {
       api.getRecruitingCorrespondence(state.prisma, actor, target, "inbox", crmIdentity),
     ).rejects.toMatchObject({ code: "NOT_FOUND" });
   });
-  it.each(["endpoint", "transport", "secret", "assignment", "disabled", "revision"])(
+  it.each(["endpoint", "transport", "assignment", "disabled", "revision"])(
     "does not expose CRM bodies when the current %s boundary differs",
     async (boundary) => {
       const state = crmFixture();
       if (boundary === "endpoint") state.server.endpoint = "https://unrelated.example.test/mcp";
       if (boundary === "transport") state.server.transport = "sse";
-      if (boundary === "secret") state.server.secretId = "another-identity";
       if (boundary === "assignment") state.server.assignments = [];
       if (boundary === "disabled") state.server.enabled = false;
       if (boundary === "revision") state.server.revision = 2;
@@ -511,6 +512,49 @@ describe("saved recruiting correspondence", () => {
     });
     expect(result.connections[0]!.status).toBe("needs_connection");
     expect(result.emails[0]!.body).toBe(state.message.body_text);
+  });
+  it.each(["connected", "reconnect", "none"] as const)(
+    "uses the native personal CRM OAuth status %s instead of requiring product SSO",
+    async (status) => {
+      const state = crmFixture();
+      state.server.secretId = "personal-credential";
+      const oauth = { statusFor: vi.fn().mockResolvedValue(status) };
+      const result = await api.getRecruitingCorrespondence(
+        state.prisma,
+        actor,
+        target,
+        "inbox",
+        { ...crmIdentity, connected: false },
+        oauth,
+      );
+      expect(oauth.statusFor).toHaveBeenCalledWith(
+        expect.objectContaining({ id: "mail", secretId: "personal-credential" }),
+        actor,
+      );
+      expect(result.connections[0]!.status).toBe(
+        status === "connected" ? "configured" : "needs_connection",
+      );
+      expect(result.emails[0]!.body).toBe(state.message.body_text);
+      expect(JSON.stringify(result)).not.toContain("personal-credential");
+    },
+  );
+  it("keeps authorized saved mail readable during a personal CRM secret-store outage", async () => {
+    const state = crmFixture();
+    state.server.secretId = "personal-credential";
+    const oauth = {
+      statusFor: vi.fn().mockRejectedValue(new SecretStoreUnavailableError(503, "private failure")),
+    };
+    const result = await api.getRecruitingCorrespondence(
+      state.prisma,
+      actor,
+      target,
+      "inbox",
+      { ...crmIdentity, connected: false },
+      oauth,
+    );
+    expect(result.connections[0]!.status).toBe("unavailable");
+    expect(result.emails[0]!.body).toBe(state.message.body_text);
+    expect(JSON.stringify(result)).not.toMatch(/private failure|personal-credential/);
   });
   it.each(["organization", "candidate", "binding", "server", "status", "missing"])(
     "rejects a CRM import whose verified %s does not match the current binding",
@@ -678,7 +722,11 @@ describe("saved recruiting correspondence", () => {
     },
   );
   it("projects the real native read envelope and allowlisted mail fields under current actor/thread/role permissions", async () => {
-    const { client, prisma } = fixture();
+    const { client, prisma, retained } = fixture();
+    Object.assign(retained.run, {
+      id: "original-read-run",
+      sourceMessageId: "original-read-message",
+    });
     const result = await api.getRecruitingCorrespondence(prisma, actor, target, "inbox");
     expect(result).toMatchObject({
       status: "ready",
@@ -686,6 +734,14 @@ describe("saved recruiting correspondence", () => {
       emails: [
         {
           sender: email.from_address_email,
+          sourceName: "Instantly",
+          sourceId: "mail",
+          providerMessageId: email.id,
+          savedRead: {
+            messageId: "original-read-message",
+            linkedRunId: "original-read-run",
+            effectId: "effect",
+          },
           subject: email.subject,
           body: email.body.text,
           snippet: true,
@@ -1466,6 +1522,10 @@ describe("saved recruiting correspondence", () => {
     expect(metadata.emails).toEqual([
       {
         id: "gmail:gmail-message",
+        sourceName: "Gmail",
+        sourceId: "gmail",
+        providerMessageId: "gmail-message",
+        savedRead: null,
         sender: null,
         recipients: [],
         subject: "",

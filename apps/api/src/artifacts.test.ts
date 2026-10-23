@@ -5,6 +5,7 @@ import type { PrismaClient } from "@rakazo/db";
 import { describe, expect, it, vi } from "vitest";
 import {
   ArtifactListCursorError,
+  buildSendPrompt,
   buildUserMessageBlocks,
   deleteArtifactFamily,
   getOwnedArtifact,
@@ -19,6 +20,27 @@ it("retains the original nonblank message text instead of a trimmed caption", ()
   const raw = " \n  source material 😀\n  ";
   expect(buildUserMessageBlocks(raw, [])).toEqual([{ kind: "text", text: raw }]);
   expect(buildUserMessageBlocks(" \n\t ", [])).toEqual([]);
+});
+
+it("persists the selected email separately without changing the original caption", () => {
+  const reference = {
+    threadId: "thread-1",
+    roleId: "role-1",
+    emailId: "email-1",
+    sourceId: "mailbox-1",
+    providerMessageId: "provider-message-1",
+    savedRead: null,
+    sourceName: "Mailbox",
+    sender: null,
+    subject: "A reply",
+    date: null,
+    snippet: true,
+  };
+  const text = "  Read this; don't send.\n";
+  expect(buildUserMessageBlocks(text, [], reference)).toEqual([
+    { kind: "text", text, correspondenceReference: reference },
+  ]);
+  expect(buildSendPrompt(text, [], [], reference)).toContain(JSON.stringify(reference));
 });
 
 const actor: Actor = {

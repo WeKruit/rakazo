@@ -3459,6 +3459,7 @@ export function createRouter(deps: RouterDeps) {
                 connected: (await productIdentityStatus(context.actor)) === "connected",
               }
             : undefined,
+          mcpOAuth,
         ),
       ),
       readSource: authed.recruiting.readSource.handler(({ context, input }) =>
