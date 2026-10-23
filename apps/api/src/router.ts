@@ -144,6 +144,7 @@ import type {
   Me,
   ProductEvent,
   Routine,
+  SidebarBotState,
   SpaceNavigation,
 } from "@rakazo/contracts";
 import {
@@ -155,6 +156,7 @@ import {
   IntegrationProviderIdSchema,
   OPENAI_COMPATIBLE_PROVIDER_ID,
   parseTicketRef,
+  SIDEBAR_PREVIEW_MAX_LENGTH,
   usableModelId,
 } from "@rakazo/contracts";
 import {
@@ -970,6 +972,56 @@ export function createRouter(deps: RouterDeps) {
       list: authed.spaces.list.handler(async ({ context }) =>
         spaceNavigationDto(deps, context.actor, repos, groupRepos),
       ),
+      subscribe: authed.spaces.subscribe.handler(async function* ({ context }) {
+        // Signals are hints only: every wake re-reads the actor-scoped roster (bots + latest run +
+        // unread + preview) and yields just the bots whose sidebar state changed. The first wake
+        // replays every bot, which is the durable catch-up a reconnecting client needs.
+        // ponytail: `since` is accepted for the client contract but not used to trim that replay;
+        // a roster is tens of rows, and bot.updatedAt does not move on run or unread changes.
+        const follow = deps.events.followSidebar(context.actor, context.signal);
+        const known = new Map<string, string>();
+        const changed = async (): Promise<SidebarBotState[]> => {
+          const frames: SidebarBotState[] = [];
+          const updatedAt = new Date().toISOString();
+          for (const bot of await repos.listBots(context.actor)) {
+            const frame = sidebarBotState(bot, updatedAt);
+            const fingerprint = `${frame.status}|${frame.unread}|${frame.preview}`;
+            if (known.get(bot.id) === fingerprint) continue;
+            known.set(bot.id, fingerprint);
+            frames.push(frame);
+          }
+          return frames;
+        };
+        let pending: Promise<IteratorResult<unknown>> | undefined;
+        let authorizedAt = Date.now();
+        const assertStillAuthorized = async () => {
+          if (!context.stillAuthorized || Date.now() - authorizedAt < SESSION_RECHECK_MS) return;
+          if (!(await context.stillAuthorized())) throw new ORPCError("UNAUTHORIZED");
+          authorizedAt = Date.now();
+        };
+        try {
+          while (!context.signal?.aborted) {
+            pending ??= follow.next();
+            let timer: ReturnType<typeof setTimeout> | undefined;
+            const next = await Promise.race([
+              pending,
+              new Promise<"silent">((resolve) => {
+                timer = setTimeout(() => resolve("silent"), HEARTBEAT_MS);
+              }),
+            ]).finally(() => clearTimeout(timer));
+            await assertStillAuthorized();
+            if (next === "silent") {
+              yield { updatedAt: new Date().toISOString() };
+              continue;
+            }
+            pending = undefined;
+            if (next.done) return;
+            for (const frame of await changed()) yield frame;
+          }
+        } finally {
+          void follow.return(undefined).catch(() => {});
+        }
+      }),
       create: authed.spaces.create.handler(async ({ context, input }) => {
         let space: { id: string; name: string };
         try {
@@ -6382,6 +6434,25 @@ function mapUpdaterError(error: unknown): never {
   throw new ORPCError("INTERNAL_SERVER_ERROR", {
     message: error instanceof Error ? error.message : "Update failed.",
   });
+}
+
+function sidebarBotState(bot: Bot, updatedAt: string): SidebarBotState {
+  const status =
+    bot.status === "running"
+      ? "running"
+      : bot.status === "queued" || bot.status === "leased"
+        ? "queued"
+        : bot.status === "waiting_input" || bot.status === "waiting_takeover"
+          ? "waiting"
+          : "idle";
+  return {
+    botId: bot.id,
+    status,
+    unread: bot.unread,
+    // listBots already redacts previews (plain text, peer/background runs skipped); only cap it.
+    preview: bot.preview.slice(0, SIDEBAR_PREVIEW_MAX_LENGTH),
+    updatedAt,
+  };
 }
 
 async function spaceNavigationDto(

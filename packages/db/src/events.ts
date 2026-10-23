@@ -55,6 +55,8 @@ const EVENT_BATCH_SIZE = 200;
 const INTERRUPT_ORIGIN = "interrupt";
 const PUSH_CATCH_UP_MS = 30_000;
 const POLL_ONLY_CATCH_UP_MS = 400;
+/** Without push, each sidebar wake re-lists the roster, so poll no faster than the old client did. */
+const SIDEBAR_POLL_ONLY_CATCH_UP_MS = 5_000;
 // ponytail: process-local per-client/thread backpressure; DB row locks remain the cross-process authority.
 const appendTails = new WeakMap<PrismaClient, Map<string, Promise<void>>>();
 
@@ -85,6 +87,11 @@ export interface ThreadEvents {
   pauseRunForTakeover(input: PauseRunForTakeover): Promise<boolean>;
   sendUserMessage(input: SendUserMessageInput): Promise<SendUserMessageResult>;
   follow(threadId: string, cursor: number, signal?: AbortSignal): AsyncGenerator<ProductEvent>;
+  /** Wake once per sidebar-relevant change to the actor's own bots (see SIDEBAR_EVENT_TYPES). */
+  followSidebar(
+    actor: { spaceId: string; userId: string },
+    signal?: AbortSignal,
+  ): AsyncGenerator<SidebarSignal | undefined>;
 }
 
 export interface ClearThreadInput {
@@ -325,6 +332,7 @@ export function createThreadEvents(
     sendUserMessage: (input) => sendUserMessage(prisma, input, realtime),
     follow: (threadId, cursor, signal) =>
       followThreadEvents(prisma, threadId, cursor, realtime, signal, options.catchUpMs),
+    followSidebar: (actor, signal) => followSidebar(actor, realtime, signal, options.catchUpMs),
   };
 }
 
@@ -1830,8 +1838,9 @@ export async function appendEventInTransaction(
   const thread = await tx.thread.update({
     where: { id: input.threadId },
     data: { nextEventSeq: { increment: 1 } },
-    select: { nextEventSeq: true },
+    select: { nextEventSeq: true, userId: true },
   });
+  stashSidebarSignal(input, thread.nextEventSeq - 1, thread.userId);
   // run.cancelled is appended after the run row already reads cancelled, so it
   // asserts the terminal status where every other event needs a writable run.
   if (input.type === "run.cancelled") {
@@ -1862,6 +1871,126 @@ async function notifyRealtime(
   await realtime?.publish(threadTopic(threadId), JSON.stringify({ cursor })).catch((error) => {
     getLogger().error("thread.realtime.publish.failed", error, { threadId, cursor });
   });
+  await notifySidebar(realtime, threadId, cursor);
+}
+
+/** Event types that change what the sidebar shows for a bot (busy state, unread, preview, roster). */
+export const SIDEBAR_EVENT_TYPES: ReadonlySet<ProductEvent["type"]> = new Set<ProductEvent["type"]>(
+  [
+    "run.started",
+    "run.requeued",
+    "run.waiting_input",
+    "run.completed",
+    "run.failed",
+    "run.cancelled",
+    "thread.message.created",
+    "bot.spawned",
+    "bot.updated",
+    "bot.archived",
+    "bot.deleted",
+  ],
+);
+
+export interface SidebarSignal {
+  botId: string;
+  type: ProductEvent["type"];
+}
+
+export function sidebarTopic(spaceId: string, userId: string): string {
+  return `space:${spaceId}:user:${userId}`;
+}
+
+// ponytail: appendEventInTransaction knows the event but runs before commit; notifyRealtime runs
+// after commit but only knows threadId+seq. This in-process stash bridges the two so every append
+// path publishes post-commit without widening their signatures. Bounded so rolled-back rows (never
+// drained) cannot leak; a dropped entry only delays the sidebar until its catch-up tick.
+const SIDEBAR_STASH_LIMIT = 1_000;
+const pendingSidebarSignals = new Map<
+  string,
+  { spaceId: string; userId: string | undefined } & SidebarSignal
+>();
+
+function stashSidebarSignal(
+  input: AppendEventInput,
+  seq: number,
+  userId: string | undefined,
+): void {
+  if (!SIDEBAR_EVENT_TYPES.has(input.type)) return;
+  if (pendingSidebarSignals.size >= SIDEBAR_STASH_LIMIT) {
+    const oldest = pendingSidebarSignals.keys().next().value;
+    if (oldest !== undefined) pendingSidebarSignals.delete(oldest);
+  }
+  pendingSidebarSignals.set(`${input.threadId}:${seq}`, {
+    spaceId: input.spaceId,
+    userId,
+    botId: input.botId,
+    type: input.type,
+  });
+}
+
+async function notifySidebar(
+  realtime: RealtimeFanout | undefined,
+  threadId: string,
+  seq: number,
+): Promise<void> {
+  const key = `${threadId}:${seq}`;
+  const signal = pendingSidebarSignals.get(key);
+  if (!signal) return;
+  pendingSidebarSignals.delete(key);
+  if (!realtime || !signal.userId) return;
+  const payload: SidebarSignal = { botId: signal.botId, type: signal.type };
+  await realtime
+    .publish(sidebarTopic(signal.spaceId, signal.userId), JSON.stringify(payload))
+    .catch((error) => {
+      getLogger().error("sidebar.realtime.publish.failed", error, { threadId, seq });
+    });
+}
+
+/**
+ * Yield once at open, once per sidebar signal for this user+space, and once per catch-up tick
+ * when nothing arrived. Callers re-read durable bot state on every wake; the signal is only a hint.
+ */
+export async function* followSidebar(
+  actor: { spaceId: string; userId: string },
+  realtime?: RealtimeFanout,
+  signal?: AbortSignal,
+  catchUpMs = realtime ? PUSH_CATCH_UP_MS : SIDEBAR_POLL_ONLY_CATCH_UP_MS,
+): AsyncGenerator<SidebarSignal | undefined> {
+  const latch = new ChangeLatch();
+  const hints: (SidebarSignal | undefined)[] = [];
+  const unsubscribe = realtime
+    ? await realtime
+        .subscribe(sidebarTopic(actor.spaceId, actor.userId), (payload) => {
+          let hint: SidebarSignal | undefined;
+          try {
+            const parsed = JSON.parse(payload) as Partial<SidebarSignal>;
+            if (typeof parsed.botId === "string" && typeof parsed.type === "string") {
+              hint = { botId: parsed.botId, type: parsed.type };
+            }
+          } catch {
+            hint = undefined;
+          }
+          hints.push(hint);
+          latch.notify();
+        })
+        .catch(() => async () => {})
+    : async () => {};
+  try {
+    yield undefined;
+    while (!signal?.aborted) {
+      if (hints.length === 0) {
+        await latch.waitForChange(latch.generation, catchUpMs, signal);
+        if (signal?.aborted) break;
+        if (hints.length === 0) {
+          yield undefined;
+          continue;
+        }
+      }
+      while (hints.length > 0 && !signal?.aborted) yield hints.shift();
+    }
+  } finally {
+    await unsubscribe();
+  }
 }
 
 /**
