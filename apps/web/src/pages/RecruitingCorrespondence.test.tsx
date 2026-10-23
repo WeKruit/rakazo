@@ -9,9 +9,13 @@ import { afterEach, beforeEach, expect, it, vi } from "vitest";
 const preview = vi.hoisted(() => vi.fn());
 const fetchArtifactBytes = vi.hoisted(() => vi.fn());
 const readCorrespondence = vi.hoisted(() => vi.fn());
+const getWorkspace = vi.hoisted(() => vi.fn());
+const crmData = vi.hoisted(() => vi.fn());
+const openDetail = vi.hoisted(() => vi.fn());
+vi.mock("./recruiting/detail", () => ({ useRecruitingDetail: () => ({ open: openDetail }) }));
 vi.mock("../lib/artifact-open", () => ({ fetchArtifactBytes }));
 vi.mock("../lib/rpc", () => ({
-  rpc: { recruiting: { correspondence: readCorrespondence } },
+  rpc: { recruiting: { correspondence: readCorrespondence, getWorkspace, crmData } },
 }));
 vi.mock("../components/ArtifactFileCard", () => ({
   ArtifactFileCard: (props: { artifactId: string; name: string }) => {
@@ -32,6 +36,7 @@ import { RecruitingCorrespondence } from "./RecruitingCorrespondence";
 let cleanup: (() => Promise<void>) | undefined;
 beforeEach(() => {
   vi.stubGlobal("IS_REACT_ACT_ENVIRONMENT", true);
+  getWorkspace.mockResolvedValue(null);
   readCorrespondence.mockResolvedValue({
     status: "not_checked",
     checkedAt: null,
@@ -219,11 +224,10 @@ it("renders only retained email fields, supports selection and never treats assi
   expect(view.container.textContent).toContain("Can we speak Thursday?");
   expect(view.container.querySelector("script")).toBeNull();
   expect(view.container.textContent).toContain("More results may be available");
-  const source = view.container.querySelector<HTMLSelectElement>('select[aria-label="Source"]')!;
-  await act(async () => {
-    source.value = source.options[1]!.value;
-    source.dispatchEvent(new Event("change", { bubbles: true }));
-  });
+  const rails = view.container.querySelectorAll<HTMLButtonElement>(
+    'section[aria-label="Candidate conversations"] button',
+  );
+  await act(async () => rails[1]!.click());
   expect(selection).toHaveBeenLastCalledWith(
     expect.objectContaining({ emailId: "email-2", sourceName: "Other mailbox", snippet: true }),
   );
@@ -696,8 +700,28 @@ it("shows adjacent half-hour slots as one range per day with the time zone once"
 
 it("keeps canonical mailbox, campaign and recorded thread selections exact in the shared conversation", async () => {
   const selection = vi.fn();
+  const crm = {
+    serverRevision: 1,
+    organizationId: "11111111-1111-4111-8111-111111111111",
+    crmRoleId: "22222222-2222-4222-8222-222222222222",
+    candidateId: "33333333-3333-4333-8333-333333333333",
+    threadId: "recorded-thread",
+    direction: "received" as const,
+  };
+  getWorkspace.mockResolvedValue({
+    role: { id: "role-1", spaceId: "space" },
+    crmTarget: { target: { mcpServerId: "source", ...crm } },
+  });
+  crmData.mockResolvedValue({
+    operation: "candidates",
+    source: { serverId: "source", serverRevision: 1, organizationId: crm.organizationId },
+    items: [{ candidateId: crm.candidateId, name: "Verified person" }],
+    total: 1,
+    nextOffset: null,
+  });
   const email = (id: string, changes: Record<string, unknown> = {}) => ({
     id,
+    crm,
     sourceId: "source",
     sourceName: "Connected mail",
     providerMessageId: `provider-${id}`,
@@ -728,11 +752,22 @@ it("keeps canonical mailbox, campaign and recorded thread selections exact in th
       email("other-campaign", { campaignId: "campaign-two" }),
       email("unknown-thread-one", { providerThreadId: null }),
       email("unknown-thread-two", { providerThreadId: null }),
+      email("unknown-mailbox-one", { eaccount: null }),
+      email("unknown-mailbox-two", { eaccount: null }),
     ],
   });
   const view = await mount({ view: "inbox", threadId: "role-thread", onEmailSelection: selection });
   const conversation = () => view.container.querySelector('[data-testid="email-conversation"]')!;
   expect(conversation()).not.toBeNull();
+  expect(view.container.querySelector('[aria-label="Verified person"]')).not.toBeNull();
+  await view.click("Profile");
+  expect(openDetail).toHaveBeenLastCalledWith(
+    expect.objectContaining({
+      view: "contact",
+      person: expect.objectContaining({ candidateId: crm.candidateId, name: "Verified person" }),
+      role: { roleId: "role-1", spaceId: "space", conversation: { groupId: "role-group" } },
+    }),
+  );
   expect(conversation().textContent).toContain("Body first");
   expect(conversation().textContent).toContain("Body second");
   expect(conversation().textContent).not.toContain("Body other-mailbox");
@@ -774,4 +809,87 @@ it("keeps canonical mailbox, campaign and recorded thread selections exact in th
     expect.objectContaining({ emailId: "other-mailbox", eaccount: "other@example.test" }),
   );
   expect(conversation().textContent).not.toContain("Body second");
+  await choose("Source", 2);
+  expect(conversation().textContent).toContain("Body unknown-mailbox-one");
+  expect(conversation().textContent).not.toContain("Body unknown-mailbox-two");
+  await choose("Conversation", 1);
+  expect(conversation().textContent).toContain("Body unknown-mailbox-two");
+  expect(conversation().textContent).not.toContain("Body unknown-mailbox-one");
 });
+
+it.each(["source", "revision", "organization", "role"])(
+  "does not join a candidate from mismatched %s provenance",
+  async (mismatch) => {
+    const target = {
+      mcpServerId: "source",
+      serverRevision: 1,
+      organizationId: "11111111-1111-4111-8111-111111111111",
+      crmRoleId: "22222222-2222-4222-8222-222222222222",
+    };
+    const candidateId = "33333333-3333-4333-8333-333333333333";
+    getWorkspace.mockResolvedValue({
+      role: { id: "role-1", spaceId: "space" },
+      crmTarget: { target },
+    });
+    crmData.mockResolvedValue({
+      operation: "candidates",
+      source: {
+        serverId: target.mcpServerId,
+        serverRevision: 1,
+        organizationId: target.organizationId,
+      },
+      items: [{ candidateId, name: "Verified directory person" }],
+      total: 1,
+      nextOffset: null,
+    });
+    readCorrespondence.mockResolvedValue({
+      roleId: "role-1",
+      status: "ready",
+      checkedAt: null,
+      connections: [],
+      events: [],
+      partial: false,
+      emails: [
+        {
+          id: "mail",
+          sourceId: mismatch === "source" ? "other" : "source",
+          sourceName: "CRM",
+          providerMessageId: "original",
+          savedRead: null,
+          sender: "Do not infer <person@example.test>",
+          recipients: [],
+          subject: "Actual mail",
+          body: "Original body",
+          snippet: false,
+          date: null,
+          url: null,
+          crm: {
+            serverRevision: mismatch === "revision" ? 2 : 1,
+            organizationId:
+              mismatch === "organization"
+                ? "44444444-4444-4444-8444-444444444444"
+                : target.organizationId,
+            crmRoleId:
+              mismatch === "role" ? "55555555-5555-4555-8555-555555555555" : target.crmRoleId,
+            candidateId,
+            threadId: null,
+            direction: "received",
+          },
+        },
+      ],
+    });
+    const view = await mount({ view: "inbox", threadId: "role-thread" });
+    const conversation = view.container.querySelector('[data-testid="email-conversation"]')!;
+    expect(conversation.textContent).toContain("Original body");
+    expect(conversation.textContent).not.toContain("Verified directory person");
+    expect(
+      [...conversation.querySelectorAll("button")].some(
+        (button) => button.textContent === "Profile",
+      ),
+    ).toBe(false);
+    expect(
+      view.container.querySelector('[aria-label="Candidate details unavailable"]'),
+    ).not.toBeNull();
+    expect(openDetail).not.toHaveBeenCalled();
+  },
+);

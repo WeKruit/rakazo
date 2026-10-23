@@ -9,7 +9,7 @@ import {
   RecruitingCorrespondenceReferenceSchema,
   RecruitingOutreachSequenceSchema,
 } from "@rakazo/contracts";
-import { NativeSelect, NativeSelectOption } from "@rakazo/ui-web";
+import { Button, Input, NativeSelect, NativeSelectOption } from "@rakazo/ui-web";
 import { ArrowRight, CalendarDays, ChevronRight, Inbox, Mail, Settings2 } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
 import { ArtifactFileCard } from "../components/ArtifactFileCard";
@@ -19,9 +19,11 @@ import { retryTransientRead } from "../lib/read-retry";
 import type { RecruitingReadCache } from "../lib/recruiting-read-cache";
 import { clearRecruitingReads, rememberRecruitingRead } from "../lib/recruiting-read-cache";
 import { rpc } from "../lib/rpc";
-import { EmailConversation } from "./recruiting/EmailConversation";
 import { AvailabilityRanges } from "./recruiting/AvailabilityRanges";
+import { useRecruitingDetail } from "./recruiting/detail";
+import { EmailConversation } from "./recruiting/EmailConversation";
 import { RoleCampaignCard } from "./recruiting/SequenceTab";
+import { LoadMore, type RoleCrm, useCrmPages, useKeyedRead } from "./recruiting/shared";
 
 export type RecruitingSequenceSaveInput = {
   sourceArtifactId: string;
@@ -379,6 +381,17 @@ function SavedCorrespondenceView({
   const [selectedSource, setSelectedSource] = useState<string>();
   const [selectedThread, setSelectedThread] = useState<string>();
   const [selectedCampaign, setSelectedCampaign] = useState<string>();
+  const [chosenCandidate, setChosenCandidate] = useState<string>();
+  const [candidateQuery, setCandidateQuery] = useState("");
+  const [mobileConversation, setMobileConversation] = useState(false);
+  const railTrigger = useRef<HTMLButtonElement | null>(null);
+  const backButton = useRef<HTMLButtonElement | null>(null);
+  const detail = useRecruitingDetail();
+  useEffect(() => {
+    if (mobileConversation) {
+      if (backButton.current?.getClientRects().length) backButton.current.focus();
+    } else railTrigger.current?.focus();
+  }, [mobileConversation]);
   const key = JSON.stringify([artifactTarget, view, refreshSignal, refresh]);
   const scopeKey = JSON.stringify([readCacheScope, artifactTarget, view]);
   const savedWorkspace = readCacheScope
@@ -446,6 +459,73 @@ function SavedCorrespondenceView({
   }, [key, cacheKey, readCache, readCacheScope, scopeKey]);
   const current = read?.key === key && read.scopeKey === scopeKey ? read : undefined;
   const data = current?.data;
+  const workspaceRead = useKeyedRead(
+    view === "inbox" && data?.roleId && threadId
+      ? JSON.stringify([scopeKey, data.roleId, threadId, refreshSignal, refresh])
+      : null,
+    async () => {
+      const workspace = await rpc.recruiting.getWorkspace({ threadId: threadId! });
+      if (workspace?.role.id !== data?.roleId) throw new Error("Role changed");
+      return workspace;
+    },
+  );
+  const workspace = workspaceRead.data;
+  const target = workspace?.crmTarget?.target;
+  const crm: RoleCrm = workspaceRead.loading
+    ? { status: "loading" }
+    : workspaceRead.failed
+      ? { status: "failed" }
+      : target
+        ? { status: "ready", target, conversation: artifactTarget }
+        : { status: "unbound" };
+  const people = useCrmPages(crm, "candidates", target ? { crmRoleId: target.crmRoleId } : null, {
+    spaceId: workspace?.role.spaceId ?? "",
+    readCache,
+    readCacheScope,
+    refreshSignal: refreshSignal + refresh,
+  });
+  const matchesTarget = (email: SavedCorrespondence["emails"][number]) =>
+    target &&
+    email.crm &&
+    email.sourceId === target.mcpServerId &&
+    email.crm.serverRevision === target.serverRevision &&
+    email.crm.organizationId === target.organizationId &&
+    email.crm.crmRoleId === target.crmRoleId;
+  const candidateOf = (email: SavedCorrespondence["emails"][number]) =>
+    matchesTarget(email)
+      ? `candidate:${email.crm!.candidateId}`
+      : email.sourceId && email.eaccount && email.campaignId !== undefined && email.providerThreadId
+        ? JSON.stringify([
+            "unidentified-thread",
+            email.sourceId,
+            email.eaccount,
+            email.campaignId,
+            email.providerThreadId,
+            email.crm?.organizationId,
+            email.crm?.crmRoleId,
+            email.crm?.candidateId,
+          ])
+        : `message:${email.id}`;
+  const rail = new Map<
+    string,
+    {
+      person?: NonNullable<typeof people.data>["items"][number];
+      email?: SavedCorrespondence["emails"][number];
+    }
+  >();
+  for (const email of data?.emails ?? [])
+    if (!rail.has(candidateOf(email))) rail.set(candidateOf(email), { email });
+  for (const person of people.data?.items ?? [])
+    rail.set(`candidate:${person.candidateId}`, {
+      ...rail.get(`candidate:${person.candidateId}`),
+      person,
+    });
+  const candidateKey =
+    chosenCandidate && rail.has(chosenCandidate) ? chosenCandidate : rail.keys().next().value;
+  const selectedPerson = candidateKey ? rail.get(candidateKey)?.person : undefined;
+  const candidateEmails = (data?.emails ?? []).filter(
+    (email) => candidateOf(email) === candidateKey,
+  );
   const sourceOf = (email: SavedCorrespondence["emails"][number]) =>
     JSON.stringify([email.sourceId, email.eaccount ?? null]);
   // Only recorded source/thread/candidate identity can combine messages. Unknown threads stay separate.
@@ -456,12 +536,14 @@ function SavedCorrespondenceView({
       email.crm?.crmRoleId,
       email.crm?.candidateId,
       email.campaignId ?? null,
-      email.providerThreadId ? ["thread", email.providerThreadId] : ["message", email.id],
+      email.sourceId && email.eaccount && email.campaignId !== undefined && email.providerThreadId
+        ? ["thread", email.providerThreadId]
+        : ["message", email.id],
     ]);
-  const sources = new Map((data?.emails ?? []).map((email) => [sourceOf(email), email]));
+  const sources = new Map(candidateEmails.map((email) => [sourceOf(email), email]));
   const sourceKey =
     selectedSource && sources.has(selectedSource) ? selectedSource : sources.keys().next().value;
-  const sourceEmails = (data?.emails ?? []).filter((email) => sourceOf(email) === sourceKey);
+  const sourceEmails = candidateEmails.filter((email) => sourceOf(email) === sourceKey);
   const campaignOf = (email: SavedCorrespondence["emails"][number]) =>
     JSON.stringify(email.campaignId ?? null);
   const campaigns = new Map(sourceEmails.map((email) => [campaignOf(email), email]));
@@ -637,88 +719,192 @@ function SavedCorrespondenceView({
           </p>
         </section>
       ) : null}
-      {data?.status === "ready" && !interview ? (
-        <>
-          {sources.size > 1 ? (
-            <NativeSelect
-              aria-label={t`Source`}
-              value={sourceKey}
-              onChange={(event) => {
-                setSelectedSource(event.target.value);
-                setSelectedCampaign(undefined);
-                setSelectedThread(undefined);
-                setSelectedId(undefined);
-              }}
-            >
-              {[...sources].map(([key, email]) => (
-                <NativeSelectOption key={key} value={key}>
-                  {email.sourceName}
-                  {email.eaccount ? ` · ${email.eaccount}` : ""}
-                </NativeSelectOption>
-              ))}
-            </NativeSelect>
+      {data && ["ready", "empty"].includes(data.status) && !interview ? (
+        <section aria-label={t`Inbox`}>
+          {workspaceRead.failed || people.failed ? (
+            <p role="alert">
+              <Trans>Could not load candidate records. Try refreshing.</Trans>
+            </p>
           ) : null}
-          {campaigns.size > 1 ? (
-            <NativeSelect
-              aria-label={t`Campaign`}
-              value={campaignKey}
-              onChange={(event) => {
-                setSelectedCampaign(event.target.value);
-                setSelectedThread(undefined);
-                setSelectedId(undefined);
-              }}
-            >
-              {[...campaigns].map(([key, email], index) => (
-                <NativeSelectOption key={key} value={key}>
-                  {email.campaignId ? `${t`Campaign`} ${index + 1}` : t`Unknown`}
-                  {` · ${email.sender ?? t`Sender unavailable`} · ${email.subject || t`No subject`}`}
-                </NativeSelectOption>
-              ))}
-            </NativeSelect>
+          {!data.emails.length ? (
+            <p className="hidden lg:block">
+              <Trans>No stored emails for this role.</Trans>
+            </p>
           ) : null}
-          {threads.size > 1 ? (
-            <NativeSelect
-              aria-label={t`Conversation`}
-              value={threadKey}
-              onChange={(event) => {
-                setSelectedThread(event.target.value);
-                setSelectedId(undefined);
-              }}
+          <div className="grid min-w-0 grid-cols-1 gap-4 lg:grid-cols-[minmax(0,0.85fr)_minmax(0,2fr)]">
+            <section
+              aria-label={t`Candidate conversations`}
+              className={`${mobileConversation ? "hidden lg:block" : ""} min-w-0 overflow-hidden rounded-xl border bg-card`}
             >
-              {[...threads].map(([key, email], index) => (
-                <NativeSelectOption key={key} value={key}>
-                  {`${index + 1}. ${email.sender ?? t`Sender unavailable`} · ${email.subject || t`No subject`}`}
-                  {email.date ? ` · ${new Date(email.date).toLocaleString()}` : ""}
-                </NativeSelectOption>
-              ))}
-            </NativeSelect>
-          ) : null}
-          <EmailConversation
-            items={threadEmails.map((email) => ({
-              ...email,
-              direction: email.crm?.direction ?? null,
-              partial: email.snippet,
-              candidateId: email.crm?.candidateId,
-            }))}
-            selectedId={selected?.id}
-            onSelect={(email) => setSelectedId(email.id)}
-            onDraftReply={
-              selected && current?.fresh && !current.failed
-                ? (email) => {
-                    if (email.id !== selected.id) return;
-                    onConversation(
-                      t`Draft a reply to the selected email for me to review. Read the original conversation and verify the candidate and role. Do not send.`,
+              <div className="border-b p-3">
+                <Input
+                  aria-label={t`Search loaded candidates`}
+                  placeholder={t`Search loaded candidates`}
+                  value={candidateQuery}
+                  onChange={(event) => setCandidateQuery(event.target.value)}
+                />
+              </div>
+              <ul className="divide-y divide-border">
+                {[...rail]
+                  .filter(
+                    ([, row]) =>
+                      !candidateQuery.trim() ||
+                      [
+                        row.person?.name,
+                        row.person?.title,
+                        row.person?.company,
+                        row.email?.subject,
+                      ].some((value) =>
+                        value
+                          ?.toLocaleLowerCase()
+                          .includes(candidateQuery.trim().toLocaleLowerCase()),
+                      ),
+                  )
+                  .map(([id, row]) => {
+                    const name = row.person?.name || t`Candidate details unavailable`;
+                    return (
+                      <li key={id}>
+                        <button
+                          type="button"
+                          aria-label={name}
+                          aria-pressed={candidateKey === id}
+                          className="w-full space-y-2 p-4 text-start text-sm hover:bg-muted aria-pressed:bg-muted"
+                          onClick={(event) => {
+                            railTrigger.current = event.currentTarget;
+                            setChosenCandidate(id);
+                            setSelectedSource(undefined);
+                            setSelectedCampaign(undefined);
+                            setSelectedThread(undefined);
+                            setSelectedId(undefined);
+                            setMobileConversation(true);
+                          }}
+                        >
+                          <strong className="block">{name}</strong>
+                          {row.person?.title ? (
+                            <span className="block">{row.person.title}</span>
+                          ) : null}
+                          {row.email ? (
+                            <span className="block text-xs text-muted-foreground">
+                              {row.email.subject || t`No subject`}
+                            </span>
+                          ) : null}
+                        </button>
+                      </li>
                     );
-                  }
-                : undefined
-            }
-          />
-          {selected?.url ? (
-            <a href={selected.url} target="_blank" rel="noreferrer" className="underline">
-              <Trans>Open original email</Trans>
-            </a>
-          ) : null}
-        </>
+                  })}
+              </ul>
+              <LoadMore pages={people} />
+            </section>
+            <div className={`${mobileConversation ? "" : "hidden lg:block"} min-w-0 space-y-3`}>
+              <Button
+                ref={backButton}
+                variant="ghost"
+                className="lg:hidden"
+                onClick={() => setMobileConversation(false)}
+              >
+                <Trans>Back to inbox</Trans>
+              </Button>
+              {sources.size > 1 ? (
+                <NativeSelect
+                  aria-label={t`Source`}
+                  value={sourceKey}
+                  onChange={(event) => {
+                    setSelectedSource(event.target.value);
+                    setSelectedCampaign(undefined);
+                    setSelectedThread(undefined);
+                    setSelectedId(undefined);
+                  }}
+                >
+                  {[...sources].map(([key, email]) => (
+                    <NativeSelectOption key={key} value={key}>
+                      {email.sourceName}
+                      {email.eaccount ? ` · ${email.eaccount}` : ""}
+                    </NativeSelectOption>
+                  ))}
+                </NativeSelect>
+              ) : null}
+              {campaigns.size > 1 ? (
+                <NativeSelect
+                  aria-label={t`Campaign`}
+                  value={campaignKey}
+                  onChange={(event) => {
+                    setSelectedCampaign(event.target.value);
+                    setSelectedThread(undefined);
+                    setSelectedId(undefined);
+                  }}
+                >
+                  {[...campaigns].map(([key, email], index) => (
+                    <NativeSelectOption key={key} value={key}>
+                      {email.campaignId ? `${t`Campaign`} ${index + 1}` : t`Unknown`}
+                      {` · ${email.sender ?? t`Sender unavailable`} · ${email.subject || t`No subject`}`}
+                    </NativeSelectOption>
+                  ))}
+                </NativeSelect>
+              ) : null}
+              {threads.size > 1 ? (
+                <NativeSelect
+                  aria-label={t`Conversation`}
+                  value={threadKey}
+                  onChange={(event) => {
+                    setSelectedThread(event.target.value);
+                    setSelectedId(undefined);
+                  }}
+                >
+                  {[...threads].map(([key, email], index) => (
+                    <NativeSelectOption key={key} value={key}>
+                      {`${index + 1}. ${email.sender ?? t`Sender unavailable`} · ${email.subject || t`No subject`}`}
+                      {email.date ? ` · ${new Date(email.date).toLocaleString()}` : ""}
+                    </NativeSelectOption>
+                  ))}
+                </NativeSelect>
+              ) : null}
+              <EmailConversation
+                candidateName={selectedPerson?.name}
+                candidateTitle={selectedPerson?.title}
+                onOpenProfile={
+                  detail && selectedPerson && workspace
+                    ? () =>
+                        detail.open({
+                          view: "contact",
+                          person: selectedPerson,
+                          role: {
+                            roleId: workspace.role.id,
+                            spaceId: workspace.role.spaceId,
+                            conversation: artifactTarget,
+                          },
+                        })
+                    : undefined
+                }
+                items={threadEmails.map((email) => ({
+                  ...email,
+                  threadId: email.providerThreadId,
+                  organizationId: email.crm?.organizationId,
+                  crmRoleId: email.crm?.crmRoleId,
+                  direction: email.crm?.direction ?? null,
+                  partial: email.snippet,
+                  candidateId: email.crm?.candidateId,
+                }))}
+                selectedId={selected?.id}
+                onSelect={(email) => setSelectedId(email.id)}
+                onDraftReply={
+                  selected && current?.fresh && !current.failed
+                    ? (email) => {
+                        if (email.id !== selected.id) return;
+                        onConversation(
+                          t`Draft a reply to the selected email for me to review. Read the original conversation and verify the candidate and role. Do not send.`,
+                        );
+                      }
+                    : undefined
+                }
+              />
+              {selected?.url ? (
+                <a href={selected.url} target="_blank" rel="noreferrer" className="underline">
+                  <Trans>Open original email</Trans>
+                </a>
+              ) : null}
+            </div>
+          </div>
+        </section>
       ) : null}
       {data?.status === "ready" && interview ? (
         <div className="space-y-4">
