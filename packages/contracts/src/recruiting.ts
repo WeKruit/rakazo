@@ -323,7 +323,7 @@ export type EditRecruitingCriteriaInput = z.infer<typeof EditRecruitingCriteriaI
 
 const RoleDefinition = {
   brief: RecruitingBriefDraftSchema.nullable().optional(),
-  sourceRefs: z.array(RecruitingSourceRefSchema).min(1).readonly(),
+  sourceRefs: z.array(RecruitingSourceRefSchema).readonly(),
   criteria: z.array(RecruitingCriterionSchema).superRefine(validateRoleCriteria).readonly(),
   preferences: z.array(Text).readonly(),
   definitionQuestions: Questions,
@@ -820,6 +820,7 @@ export const CreateRecruitingRoleInput = z.strictObject({
   expectedRevision: z.literal(0),
   title: Text,
   ...RoleDefinition,
+  sourceRefs: z.array(RecruitingSourceRefSchema).min(1).readonly(),
 });
 export type CreateRecruitingRoleInput = z.infer<typeof CreateRecruitingRoleInput>;
 
@@ -828,6 +829,7 @@ export const ReviseRecruitingRoleInput = z.strictObject({
   expectedRevision: Revision,
   title: Text,
   ...RoleDefinition,
+  sourceRefs: z.array(RecruitingSourceRefSchema).min(1).readonly(),
 });
 export type ReviseRecruitingRoleInput = z.infer<typeof ReviseRecruitingRoleInput>;
 
@@ -1327,7 +1329,7 @@ export type RecruitingCandidate = z.infer<typeof RecruitingCandidateSchema>;
 export const ListRecruitingCandidatesOutput = z.strictObject({
   sortAvailability: z.strictObject({ rank: z.boolean(), tier: z.boolean(), score: z.boolean() }),
   crmTarget: z
-    .strictObject({ bindingEffectId: RecruitingId, target: RecruitingCrmTargetSchema })
+    .strictObject({ bindingEffectId: RecruitingId.nullable(), target: RecruitingCrmTargetSchema })
     .nullable(),
   roleId: RecruitingId,
   roleRevisionId: RecruitingId,

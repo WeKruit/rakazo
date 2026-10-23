@@ -195,6 +195,7 @@ import {
   deleteUnreferencedCredentialSecret,
   ensureBoard,
   ensureRecruitingWorkspace,
+  openVerifiedRecruitingCrmWorkspace,
   findDefaultModelCredential,
   findDefaultVoiceCredential,
   findModelCredential,
@@ -2218,17 +2219,33 @@ export function createRouter(deps: RouterDeps) {
               target,
               { operation: "role", reference },
             );
-            if (existing) return { ...existing, crmRoleReference: reference };
-            const name = `${role.role_label} · ${role.client_label}`
-              .slice(0, 80)
-              .replace(/[\uD800-\uDBFF]$/, "");
-            const group = await groupRepos.createGroup(context.actor, { ...input, name });
-            if (
-              group.members[0]?.botId !==
-              (target.kind === "bot" ? target.botId : target.memberBotIds[0])
-            )
-              throw new IsolationError();
-            return group;
+            const opened = await openVerifiedRecruitingCrmWorkspace(deps.prisma, context.actor, {
+              target: {
+                mcpServerId: reference.sourceId,
+                serverRevision: reference.serverRevision,
+                organizationId: reference.organizationId,
+                crmRoleId: role.role_spec_id,
+                crmClientId: role.client_id,
+                clientLabel: role.client_label,
+                roleLabel: role.role_label,
+              },
+              verifiedBotId: target.kind === "bot" ? target.botId : target.memberBotIds[0]!,
+              botIds: input.botIds,
+              roleText: [
+                role.role_label,
+                role.client_label,
+                role.summary,
+                role.description,
+                role.jd_text,
+                role.jd_url,
+              ]
+                .filter(Boolean)
+                .join("\n\n"),
+            });
+            return groupRepos.mapGroup(
+              context.actor,
+              await groupRepos.getGroup(context.actor, opened.groupId),
+            );
           }
           return await groupRepos.createGroup(context.actor, input);
         } catch (error) {

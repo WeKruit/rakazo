@@ -67,6 +67,7 @@ import {
   RecruitingCrmImportArgsSchema,
   RecruitingCrmImportInputSchema,
   RecruitingCrmRoleReferenceSchema,
+  RecruitingCrmTargetSchema,
   RecruitingFeedbackChoiceSchema,
   RecruitingFeedbackInputSchema,
   RecruitingFeedbackRecordSchema,
@@ -133,6 +134,7 @@ import {
   validateRunHumanSourceRows,
 } from "./messages.js";
 import { IsolationError, scoped } from "./scope.js";
+import { createGroupInTransaction } from "./groups.js";
 
 type Tx = Prisma.TransactionClient;
 type RoleSnapshot = {
@@ -806,6 +808,275 @@ export async function authorizeRecruitingCrmRoleReference(
     throw new IsolationError();
 }
 
+/** Resolve only a workspace's explicit, authenticated attachment; never a sidebar locator. */
+async function attachedCrmTarget(
+  tx: Tx,
+  actor: Actor,
+  roleId: string,
+  threadId: string,
+): Promise<RecruitingCrmTarget | null> {
+  const attachment = await tx.recruitingCrmWorkspaceAttachment.findUnique({ where: { roleId } });
+  if (!attachment) return null;
+  if (attachment.userId !== actor.userId || attachment.spaceId !== actor.spaceId)
+    throw new IsolationError();
+  const target = RecruitingCrmTargetSchema.parse(attachment.target);
+  if (
+    target.mcpServerId !== attachment.mcpServerId ||
+    target.serverRevision !== attachment.serverRevision ||
+    target.organizationId !== attachment.organizationId ||
+    target.crmRoleId !== attachment.crmRoleId
+  )
+    throw new IsolationError();
+  const role = await requireRole(tx, actor, roleId);
+  if (role.archivedAt) throw new RecruitingConflictError();
+  if (role.crmBindingEffectId) {
+    const bound = await crmBindingReceipt(tx, actor, roleId, role.crmBindingEffectId);
+    if (
+      bound.target.mcpServerId !== target.mcpServerId ||
+      bound.target.organizationId !== target.organizationId ||
+      bound.target.crmRoleId !== target.crmRoleId
+    )
+      throw new RecruitingConflictError();
+  }
+  const thread = await requireThread(tx, actor, threadId);
+  const coordinator =
+    thread.botId ??
+    (thread.groupId
+      ? (
+          await tx.chatGroupMember.findFirst({
+            where: { groupId: thread.groupId },
+            orderBy: [{ createdAt: "asc" }, { botId: "asc" }],
+            select: { botId: true },
+          })
+        )?.botId
+      : null);
+  const server = await tx.mcpServer.findFirst({
+    where: {
+      id: target.mcpServerId,
+      userId: actor.userId,
+      spaceId: actor.spaceId,
+      enabled: true,
+      revision: target.serverRevision,
+    },
+  });
+  const assignment = coordinator
+    ? await tx.botMcpServer.findFirst({
+        where: {
+          botId: coordinator,
+          serverId: target.mcpServerId,
+          userId: actor.userId,
+          spaceId: actor.spaceId,
+        },
+      })
+    : null;
+  if (
+    !server ||
+    !assignment ||
+    (!assignment.allowAllTools &&
+      (!Array.isArray(assignment.allowedTools) ||
+        !assignment.allowedTools.includes("get_crm_role")))
+  )
+    throw new IsolationError();
+  return target;
+}
+
+/** Local provenance only: provider operations must still verify current remote membership/permissions. */
+export async function getRecruitingWorkspaceCrmTarget(
+  prisma: PrismaClient,
+  actor: Actor,
+  input: { threadId: string },
+): Promise<RecruitingCrmTarget | null> {
+  return prisma.$transaction(async (tx) => {
+    const thread = await requireThread(tx, actor, input.threadId);
+    if (!thread.activeRecruitingRoleId) return null;
+    const role = await requireRole(tx, actor, thread.activeRecruitingRoleId, false, thread);
+    const attached = await attachedCrmTarget(tx, actor, role.id, thread.id);
+    if (attached) return attached;
+    return role.crmBindingEffectId
+      ? (await crmBindingReceipt(tx, actor, role.id, role.crmBindingEffectId)).target
+      : null;
+  });
+}
+
+/** Called only after the API's authenticated exact-role read, never with a client-supplied title/target. */
+export async function openVerifiedRecruitingCrmWorkspace(
+  prisma: PrismaClient,
+  actor: Actor,
+  input: {
+    target: RecruitingCrmTarget;
+    verifiedBotId: string;
+    botIds: string[];
+    roleText: string;
+  },
+): Promise<{ groupId: string; threadId: string; roleId: string }> {
+  const target = RecruitingCrmTargetSchema.parse(input.target);
+  const reference: RecruitingCrmRoleReference = {
+    sourceId: target.mcpServerId,
+    serverRevision: target.serverRevision,
+    organizationId: target.organizationId,
+    crmRoleId: target.crmRoleId,
+  };
+  const exact = {
+    userId: actor.userId,
+    spaceId: actor.spaceId,
+    mcpServerId: target.mcpServerId,
+    organizationId: target.organizationId,
+    crmRoleId: target.crmRoleId,
+  };
+  return prisma.$transaction(
+    async (tx) => {
+      await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtextextended(${JSON.stringify([actor.userId, actor.spaceId, target.mcpServerId, target.organizationId, target.crmRoleId])}, 3))`;
+      const server = await tx.mcpServer.findFirst({
+        where: {
+          id: target.mcpServerId,
+          userId: actor.userId,
+          spaceId: actor.spaceId,
+          enabled: true,
+          revision: target.serverRevision,
+        },
+      });
+      const assignment = await tx.botMcpServer.findFirst({
+        where: {
+          serverId: target.mcpServerId,
+          botId: input.verifiedBotId,
+          userId: actor.userId,
+          spaceId: actor.spaceId,
+        },
+      });
+      if (
+        !server ||
+        !assignment ||
+        (!assignment.allowAllTools &&
+          (!Array.isArray(assignment.allowedTools) ||
+            !assignment.allowedTools.includes("get_crm_role")))
+      )
+        throw new IsolationError();
+      const attachment = await tx.recruitingCrmWorkspaceAttachment.findUnique({
+        where: { userId_spaceId_mcpServerId_organizationId_crmRoleId: exact },
+      });
+      const candidates = await tx.recruitingRole.findMany({
+        where: {
+          userId: actor.userId,
+          spaceId: actor.spaceId,
+          crmBindingEffect: {
+            status: "completed",
+            kind: "recruiting_crm_target",
+            AND: [
+              { result: { path: ["target", "mcpServerId"], equals: target.mcpServerId } },
+              { result: { path: ["target", "organizationId"], equals: target.organizationId } },
+              { result: { path: ["target", "crmRoleId"], equals: target.crmRoleId } },
+            ],
+          },
+        },
+      });
+      for (const role of candidates) {
+        const proof = await crmBindingReceipt(tx, actor, role.id, role.crmBindingEffectId!);
+        if (
+          proof.target.mcpServerId !== target.mcpServerId ||
+          proof.target.organizationId !== target.organizationId ||
+          proof.target.crmRoleId !== target.crmRoleId
+        )
+          throw new IsolationError();
+      }
+      const ids = new Set([
+        ...candidates.map((role) => role.id),
+        ...(attachment ? [attachment.roleId] : []),
+      ]);
+      if (ids.size > 1) throw new RecruitingConflictError();
+      let roleId = [...ids][0];
+      let groupId: string;
+      let threadId: string;
+      if (roleId) {
+        const role = await requireRole(tx, actor, roleId);
+        if (role.archivedAt) throw new RecruitingConflictError();
+        const thread = await requireThread(tx, actor, role.sourceThreadId);
+        if (
+          !thread.groupId ||
+          (thread.activeRecruitingRoleId && thread.activeRecruitingRoleId !== role.id)
+        )
+          throw new RecruitingConflictError();
+        const group = await tx.chatGroup.findFirst({
+          where: {
+            id: thread.groupId,
+            userId: actor.userId,
+            spaceId: actor.spaceId,
+            archivedAt: null,
+          },
+        });
+        if (!group) throw new IsolationError();
+        groupId = group.id;
+        threadId = thread.id;
+      } else {
+        const group = await createGroupInTransaction(tx, actor, {
+          id: recruitingCrmConversationId(actor, reference),
+          name: `${target.roleLabel} · ${target.clientLabel}`.slice(0, 80),
+          botIds: input.botIds,
+          crmRoleReference: reference,
+        });
+        if (!group.thread) throw new IsolationError();
+        groupId = group.id;
+        threadId = group.thread.id;
+        const thread = await requireThread(tx, actor, threadId);
+        // A locator is not a binding. Never overwrite an unrelated or manually created native role.
+        if (thread.activeRecruitingRoleId) throw new RecruitingConflictError();
+        const snapshot = await createRoleInTransaction(
+          tx,
+          actor,
+          {
+            sourceThreadId: threadId,
+            expectedRevision: 0,
+            title: target.roleLabel,
+            sourceRefs: [],
+            criteria: [],
+            preferences: [],
+            definitionQuestions: [],
+          },
+          new Map(),
+        );
+        roleId = snapshot.role.id;
+      }
+      const coordinator = await tx.chatGroupMember.findFirst({
+        where: { groupId },
+        orderBy: [{ createdAt: "asc" }, { botId: "asc" }],
+        select: { botId: true },
+      });
+      if (coordinator?.botId !== input.verifiedBotId) throw new IsolationError();
+      const priorAttachment = await tx.recruitingCrmWorkspaceAttachment.findUnique({
+        where: { roleId },
+      });
+      if (
+        priorAttachment &&
+        (priorAttachment.userId !== exact.userId ||
+          priorAttachment.spaceId !== exact.spaceId ||
+          priorAttachment.mcpServerId !== exact.mcpServerId ||
+          priorAttachment.organizationId !== exact.organizationId ||
+          priorAttachment.crmRoleId !== exact.crmRoleId)
+      )
+        throw new RecruitingConflictError();
+      await tx.recruitingCrmWorkspaceAttachment.upsert({
+        where: { roleId },
+        create: {
+          ...exact,
+          roleId,
+          serverRevision: target.serverRevision,
+          target,
+          sourceMaterial: input.roleText,
+          observedAt: new Date(),
+        },
+        update: {
+          serverRevision: target.serverRevision,
+          target,
+          sourceMaterial: input.roleText,
+          observedAt: new Date(),
+        },
+      });
+      await tx.thread.update({ where: { id: threadId }, data: { activeRecruitingRoleId: roleId } });
+      return { groupId, threadId, roleId };
+    },
+    { timeout: 30_000 },
+  );
+}
+
 /**
  * The role snapshot alone, without the CRM binding receipt reads. Run-start context
  * needs only the role and revision; CRM tools verify their binding at the point of use.
@@ -840,9 +1111,12 @@ export async function getRecruitingWorkspace(
       if (!thread.activeRecruitingRoleId) return null;
       const role = await requireRole(tx, actor, thread.activeRecruitingRoleId, false, thread);
       const snapshot = await roleSnapshot(tx, actor, role, thread);
-      const bound = role.crmBindingEffectId
-        ? await crmBindingReceipt(tx, actor, role.id, role.crmBindingEffectId)
-        : null;
+      const attached = await attachedCrmTarget(tx, actor, role.id, thread.id);
+      const bound = attached
+        ? { bindingEffectId: null, target: attached }
+        : role.crmBindingEffectId
+          ? await crmBindingReceipt(tx, actor, role.id, role.crmBindingEffectId)
+          : null;
       return {
         ...snapshot,
         crmTarget: bound ? { bindingEffectId: bound.bindingEffectId, target: bound.target } : null,
@@ -10164,6 +10438,7 @@ export async function listRecruitingCandidates(
         assessed,
         shortlisted: shortlistedCount,
       };
+      const attached = await attachedCrmTarget(tx, actor, role.id, role.sourceThreadId);
       const bound = role.crmBindingEffectId
         ? await crmBindingReceipt(tx, actor, role.id, role.crmBindingEffectId)
         : null;
@@ -10195,7 +10470,11 @@ export async function listRecruitingCandidates(
       }
       return ListRecruitingCandidatesOutput.parse({
         sortAvailability: { rank: rankAvailable, tier: tierAvailable, score: scoreAvailable },
-        crmTarget: bound ? { bindingEffectId: bound.bindingEffectId, target: bound.target } : null,
+        crmTarget: attached
+          ? { bindingEffectId: null, target: attached }
+          : bound
+            ? { bindingEffectId: bound.bindingEffectId, target: bound.target }
+            : null,
         roleId: role.id,
         roleRevisionId: role.currentRevisionId,
         items: selected.map(
