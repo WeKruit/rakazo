@@ -1132,6 +1132,7 @@ describe("thread event reduction", () => {
               { label: "Slack fetch conversation history", count: 2 },
             ],
           },
+          { kind: "progress", activity: true, text: "" },
         ],
       }),
     ]);
@@ -1161,6 +1162,47 @@ describe("thread event reduction", () => {
     expect(next?.cursor).toBe(5);
     expect(next?.messages).toEqual(initial.messages);
   });
+
+  it.each(["succeeded", "error", "paused"])(
+    "clears native activity on an actual %s tool completion without claiming business success",
+    (outcome) => {
+      const initial = snapshot([
+        message(
+          "progress:run-1",
+          [
+            {
+              kind: "progress",
+              activity: true,
+              text: "Reading private/path",
+              pendingToolNames: ["read_file"],
+            },
+          ],
+          4,
+        ),
+        message(
+          "progress:other-run",
+          [{ kind: "progress", activity: true, text: "Other work" }],
+          3,
+        ),
+      ]);
+      const next = reduceThreadSnapshot(
+        initial,
+        event({
+          type: "agent.tool.completed",
+          seq: 5,
+          runId: "run-1",
+          payload: { name: "read_file", outcome },
+        }),
+      );
+      expect(next?.messages.find((item) => item.id === "progress:run-1")?.blocks).toEqual([
+        { kind: "steps", steps: [{ label: "Read file", count: 1 }] },
+      ]);
+      expect(next?.messages.find((item) => item.id === "progress:other-run")).toEqual(
+        initial.messages[1],
+      );
+      expect(JSON.stringify(next?.messages)).not.toContain("private/path");
+    },
+  );
 
   it("holds a tool call that lands mid-sentence until the sentence completes", () => {
     const initial = snapshot([]);

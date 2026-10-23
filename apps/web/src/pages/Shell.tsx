@@ -262,6 +262,7 @@ import {
 import { getToolActivityEnabled, subscribeToolActivity } from "../lib/tool-activity-preference";
 import {
   isToolOnlyNarration,
+  latestNativeToolActivity,
   messageHasVisibleBlocks,
   renderableMessageBlocks,
   shouldRenderToolCard,
@@ -5027,6 +5028,7 @@ export function ShellPage() {
             answerableAskMessageIds={answerableAskIds}
             running={transcriptRunning}
             workingBots={workingBots}
+            runningRunIds={workingRuns.filter((run) => run.status === "running").map((run) => run.id)}
             onLoadOlder={loadOlder}
             onOpenBot={openBot}
             onAnswer={answerMessage}
@@ -6268,6 +6270,7 @@ const Transcript = memo(function Transcript({
   answerableAskMessageIds,
   running,
   workingBots,
+  runningRunIds,
   onLoadOlder,
   onOpenBot,
   onAnswer,
@@ -6299,6 +6302,7 @@ const Transcript = memo(function Transcript({
   answerableAskMessageIds: string[];
   running: boolean;
   workingBots: GroupAvatarMember[];
+  runningRunIds: string[];
   onLoadOlder: () => void | Promise<void>;
   onOpenBot: (botId: string) => void;
   onAnswer: (message: ThreadMessage, text: AskAnswer, username?: string) => Promise<void>;
@@ -6342,6 +6346,18 @@ const Transcript = memo(function Transcript({
       messageHasVisibleBlocks(message.blocks, showToolActivity),
     ),
   );
+  const nativeActivity = latestNativeToolActivity(messages, runningRunIds);
+  const activityLabels = {
+    files: t`Preparing to read files…`,
+    search: t`Preparing a search…`,
+    page: t`Preparing to read a page…`,
+    context: t`Preparing to read saved context…`,
+    connections: t`Checking available connections…`,
+    connected_action: t`Preparing connected work…`,
+    emails: t`Preparing to read emails…`,
+    availability: t`Preparing to check availability…`,
+    working: t`Working…`,
+  };
   const workingLabel = showToolActivity
     ? workingBots
         .map(({ name, status }) =>
@@ -6349,7 +6365,9 @@ const Transcript = memo(function Transcript({
         )
         .join("; ")
     : workingBots.some((bot) => bot.status === "running")
-      ? t`Working…`
+      ? nativeActivity
+        ? activityLabels[nativeActivity]
+        : t`Working…`
       : workingBots.some((bot) => bot.status === "leased")
         ? t`Starting…`
         : t`Waiting in line…`;
