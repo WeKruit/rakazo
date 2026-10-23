@@ -757,7 +757,8 @@ describe("candidate listing and shortlist boundaries", () => {
         expect(firstQuery.sql).toContain(
           "(returned.value ? 'rank' OR returned.value ? 'batch_rank' OR returned.value ? 'rank_this_batch_only')",
         );
-        expect(f.tx.recruitingCandidatePage.findMany).not.toHaveBeenCalled();
+        // Tier sorting still reads the role's domain so rank and score availability stay true.
+        expect(f.tx.recruitingCandidatePage.findMany).toHaveBeenCalledOnce();
       }
       expect(firstQuery.sql).toContain(`SELECT match."${sort}PageId"`);
       const decoded = JSON.parse(Buffer.from(first.nextCursor!, "base64url").toString("utf8"));
@@ -6032,7 +6033,7 @@ describe("native candidate source provenance", () => {
         where: { roleId: "role", effectId: { in: [pageId] } },
         include: { effect: { select: { request: true } } },
       });
-      expect(findMany).toHaveBeenCalledTimes(sort === "rank" || sort === "score" ? 2 : 1);
+      expect(findMany).toHaveBeenCalledTimes(2);
       const [statement] = f.tx.$queryRaw.mock.calls[0] as unknown as [{ sql: string }];
       expect(statement.sql).toContain(
         'p."pageId" AS "sourcePageId", p."rowIndex" AS "sourceRowIndex"',
