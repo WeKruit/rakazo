@@ -15,13 +15,20 @@ import {
   RecruitingCrmRoleCampaignsReadSchema,
   RecruitingCrmRoleMailReadSchema,
 } from "@rakazo/contracts";
-import { mcpObject } from "@rakazo/core/node/approval-effect-key";
+import { boundDirectApprovalDetails, catalogApprovalDetails } from "@rakazo/core";
+import { mcpObject, stableJsonValue } from "@rakazo/core/node/approval-effect-key";
 import type { McpServer, PrismaClient, ThreadEvents } from "@rakazo/db";
-import { getRecruitingWorkspaceCrmTarget, IsolationError } from "@rakazo/db";
+import {
+  bindRecruitingSchedulingOperation,
+  getRecruitingWorkspaceCrmTarget,
+  IsolationError,
+  loadVerifiedRecruitingSchedulingPlan,
+} from "@rakazo/db";
 import { getLogger } from "@rakazo/logging";
 import addressparser from "nodemailer/lib/addressparser";
 import { z } from "zod";
 import { catalogToolPrefix } from "./approval-effect.js";
+import { calendarEvidenceHash } from "./calendar-approval.js";
 import { readBoundedText } from "./connector-http.js";
 import { redactConnectorPayload, sanitizeConnectorError } from "./connector-safety.js";
 import { credentialDigest } from "./credential-digest.js";
@@ -56,6 +63,11 @@ import {
   requireAutumnTaskOwnership,
   requireFullEnrichJobOwnership,
 } from "./recruiting-research.js";
+import {
+  assertSchedulingCall,
+  SchedulingApprovalEvidenceSchema,
+  schedulingPlanHash,
+} from "./recruiting-scheduling.js";
 import { unresolvedContactEmailError } from "./recruiting-tools.js";
 import type { RemoteTransportDependencies } from "./remote-mcp.js";
 import { createSafeRemoteFetch } from "./remote-mcp.js";
@@ -929,6 +941,69 @@ export class McpConnector implements ConnectorProvider {
     }
   }
 
+  /** Recheck scheduling proof after native anchor/account awaits, at the actual send boundary. */
+  private async assertSchedulingConfirmationDispatch(call: ConnectorCall, context: AdapterContext) {
+    if (!context.schedulingConfirmationEffectId) return;
+    if (!context.runId) throw new IsolationError();
+    const effect = await this.prisma.externalEffect.findUnique({
+      where: { id: context.schedulingConfirmationEffectId },
+      include: { run: { select: { threadId: true, userId: true, botId: true } } },
+    });
+    const result = effect?.result;
+    const raw =
+      result && typeof result === "object" && !Array.isArray(result)
+        ? result.schedulingApprovalEvidence
+        : undefined;
+    if (!raw) throw new IsolationError("Scheduling confirmation proof is unavailable");
+    if (
+      !effect ||
+      effect.runId !== context.runId ||
+      effect.spaceId !== context.spaceId ||
+      effect.run.userId !== context.userId ||
+      effect.run.botId !== context.botId ||
+      effect.status !== "executing"
+    )
+      throw new IsolationError();
+    const evidence = SchedulingApprovalEvidenceSchema.parse(raw);
+    const direct = boundDirectApprovalDetails(effect.request, "__rakazoCatalogTool");
+    const catalog = catalogApprovalDetails(effect.request, "__rakazoCatalogTool");
+    const savedRoute = direct?.route ?? catalog?.route;
+    const savedArgs = direct?.args ?? catalog?.args.arguments;
+    if (
+      evidence.operation !== "confirm" ||
+      evidence.requestHash !== calendarEvidenceHash(effect.request) ||
+      !call.route ||
+      savedRoute?.connectorId !== call.route.connectorId ||
+      savedRoute?.resourceId !== call.route.resourceId ||
+      savedRoute?.resourceRevision !== call.route.resourceRevision ||
+      savedRoute?.toolName !== call.route.toolName ||
+      stableJsonValue(savedArgs) !== stableJsonValue(call.args)
+    )
+      throw new IsolationError();
+    const actor = {
+      spaceId: context.spaceId,
+      userId: context.userId,
+      email: "",
+      isDeploymentOwner: false,
+    };
+    const plan = await loadVerifiedRecruitingSchedulingPlan(this.prisma, actor, {
+      threadId: effect.run.threadId,
+      planId: evidence.planId,
+    });
+    if (
+      schedulingPlanHash(plan) !== evidence.planHash ||
+      plan.bookingEffectId !== evidence.bookingEffectId
+    )
+      throw new IsolationError();
+    assertSchedulingCall(plan, "confirm", call.route, call.args);
+    await bindRecruitingSchedulingOperation(this.prisma, actor, {
+      threadId: effect.run.threadId,
+      planId: plan.id,
+      operation: "confirm",
+      effectId: effect.id,
+    });
+  }
+
   private async *writeInstantly(
     call: ConnectorCall,
     context: AdapterContext,
@@ -981,7 +1056,11 @@ export class McpConnector implements ConnectorProvider {
       const result = await runInstantlyWrite(
         this.prisma,
         async (method, path, body) => {
-          if (scopedEmailOperation && method !== "GET") await assertScope();
+          if (scopedEmailOperation && method !== "GET") {
+            await assertScope();
+            if (call.route!.toolName === "native_instantly_reply_to_email")
+              await this.assertSchedulingConfirmationDispatch(call, context);
+          }
           return rest(method, path, body);
         },
         context,

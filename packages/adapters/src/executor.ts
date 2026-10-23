@@ -9401,7 +9401,9 @@ export function createRunExecutor(deps: ExecutorDeps) {
             let result: unknown = { error: `unknown tool ${name}` };
             for await (const event of deps.connector.execute(
               { ...connectorCall, tool: name, args, executionId: effectKey },
-              context,
+              schedulingSelection?.operation === "confirm" && applied
+                ? { ...context, schedulingConfirmationEffectId: applied.effect.id }
+                : context,
             )) {
               if (event.type === "result") {
                 result = event.data;
