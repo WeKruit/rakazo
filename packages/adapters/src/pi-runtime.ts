@@ -74,12 +74,12 @@ import {
   clipContentWithFullOutput,
   clipToolResultText,
   clipWithFullOutput,
-  type ToolOutputStore,
   MODEL_STREAM_IDLE_TIMEOUT_MS,
   MODEL_STREAM_TIMEOUT_MS,
   modelStreamMaxRetries,
   REASONING_MODEL_MAX_TOKENS,
   resolveCompletionMaxTokens,
+  type ToolOutputStore,
 } from "./pi-runtime-limits.js";
 import type { PiSessionHandle, PiSessionRecorder } from "./pi-session.js";
 import { PiJsonlSessionRecorder } from "./pi-session.js";
@@ -158,6 +158,8 @@ export interface PiAgentRuntimeOptions {
   /** Directory where Pi JSONL sessions are written. Omit to disable recording. */
   sessionRoot?: string;
   modelCallObserver?: ModelCallObserver;
+  /** How often a live model stream checks for an interjecting user message. */
+  interjectPollMs?: number;
   /** Sanitized per-call selection telemetry; never includes prompt or credentials. */
   onContextDecision?: (
     decision: RuntimeContextDecision & {
@@ -172,10 +174,12 @@ export class PiAgentRuntime implements AgentRuntime {
   private readonly sessionRecorder?: PiSessionRecorder;
   private readonly modelCallObserver?: ModelCallObserver;
   private readonly onContextDecision?: PiAgentRuntimeOptions["onContextDecision"];
+  private readonly interjectPollMs: number;
 
   constructor(options: PiAgentRuntimeOptions = {}) {
     this.modelCallObserver = options.modelCallObserver;
     this.onContextDecision = options.onContextDecision;
+    this.interjectPollMs = options.interjectPollMs ?? INTERJECT_POLL_MS;
     this.sessionRecorder = options.sessionRoot
       ? new PiJsonlSessionRecorder(options.sessionRoot)
       : undefined;
@@ -447,17 +451,13 @@ export class PiAgentRuntime implements AgentRuntime {
           },
           prepareNextTurnWithContext: async () => {
             if (!request.claimSteering) return undefined;
+            // A mid-stream claim still in flight already owns its ids; wait so neither
+            // path claims the same row twice.
+            await interjectClaim;
             const steering = await request.claimSteering([...seenSteeringIds]);
             if (steering.length === 0) return undefined;
             seenSteeringIds.push(...steering.map((item) => item.id));
-            for (const item of steering) {
-              const images = toPiImages(item.images);
-              agent.steer({
-                role: "user",
-                content: images.length ? [{ type: "text", text: item.text }, ...images] : item.text,
-                timestamp: Date.now(),
-              });
-            }
+            for (const item of steering) steerIn(item);
             return undefined;
           },
           initialState: {
@@ -468,6 +468,42 @@ export class PiAgentRuntime implements AgentRuntime {
             messages: history,
           },
         });
+
+        const steerIn = (item: AgentSteeringMessage) => {
+          const images = toPiImages(item.images);
+          agent.steer({
+            role: "user",
+            content: images.length ? [{ type: "text", text: item.text }, ...images] : item.text,
+            timestamp: Date.now(),
+          });
+        };
+        // Interject: while the model is streaming, a flagged steering message aborts only
+        // that stream (tools in flight are untouched), is steered in, and the same run
+        // continues from the partial assistant message.
+        let modelStreaming = false;
+        let interjected = false;
+        let interjectClaim: Promise<void> | undefined;
+        const pollInterject = () => {
+          if (!modelStreaming || interjectClaim || !request.claimSteering || signal.aborted) return;
+          interjectClaim = request
+            .claimSteering([...seenSteeringIds])
+            .then((steering) => {
+              seenSteeringIds.push(...steering.map((item) => item.id));
+              for (const item of steering) steerIn(item);
+              if (modelStreaming && steering.some((item) => item.interrupt)) {
+                interjected = true;
+                agent.abort();
+              }
+            })
+            .catch(() => undefined)
+            .finally(() => {
+              interjectClaim = undefined;
+            });
+        };
+        const interjectTimer = request.claimSteering
+          ? setInterval(pollInterject, this.interjectPollMs)
+          : undefined;
+        interjectTimer?.unref?.();
 
         const onAbort = () => {
           agent.abort();
@@ -508,6 +544,10 @@ export class PiAgentRuntime implements AgentRuntime {
           }
           if (event.type === "message_start" && event.message.role === "assistant") {
             currentMessageStreamed = "";
+            modelStreaming = true;
+          }
+          if (event.type === "message_end" && event.message.role === "assistant") {
+            modelStreaming = false;
           }
           if (
             event.type === "message_update" &&
@@ -525,7 +565,10 @@ export class PiAgentRuntime implements AgentRuntime {
               queue.push({ type: "text", text: delta });
             }
           }
-          if (event.type === "turn_end") {
+          if (event.type === "turn_end" && interjected) {
+            // The interrupted turn is neither a final reply nor a silent tool turn; the
+            // continuation below answers the interjection.
+          } else if (event.type === "turn_end") {
             const messageText =
               event.message.role === "assistant" ? assistantText(event.message) : "";
             const hasToolCalls = messageHasToolCall(event.message);
@@ -595,7 +638,18 @@ export class PiAgentRuntime implements AgentRuntime {
         ]);
         try {
           await agent.prompt(initialPrompt, images?.length ? images : undefined);
+          while (interjected && !signal.aborted && !host.pausePending) {
+            interjected = false;
+            await interjectClaim;
+            keepInterruptedAssistantMessage(agent.state.messages);
+            if (streamed.trim() && !streamed.endsWith("\n")) {
+              queue.push({ type: "text", text: "\n\n" });
+              streamed += "\n\n";
+            }
+            await agent.continue();
+          }
         } finally {
+          if (interjectTimer) clearInterval(interjectTimer);
           try {
             await agent.waitForIdle();
           } finally {
@@ -1143,6 +1197,7 @@ function activeCompaction(
       return;
     }
     lastAttempt = fingerprint;
+    host.queue.push({ type: "progress", text: "", activity: true, phase: "compacting" });
     const summaryModels: Models = {
       ...target.models,
       completeSimple: async (_model, summaryContext, options) => {
@@ -2498,6 +2553,24 @@ function messageHasToolCall(message: unknown): boolean {
   return content.some(
     (part) => !!part && typeof part === "object" && "type" in part && part.type === "toolCall",
   );
+}
+
+const INTERJECT_POLL_MS = 2_000;
+
+/**
+ * Keep the partial text of an interrupted assistant message in context and drop
+ * what the next request cannot carry: an unfinished tool call has no result, and an
+ * empty assistant message is rejected by some providers.
+ */
+export function keepInterruptedAssistantMessage(messages: AgentMessage[]): void {
+  const last = messages.at(-1);
+  if (last?.role !== "assistant" || last.stopReason !== "aborted") return;
+  const content = last.content.filter((part) => part.type !== "toolCall");
+  if (content.some((part) => part.type === "text" && part.text.trim())) {
+    messages[messages.length - 1] = { ...last, content };
+  } else {
+    messages.pop();
+  }
 }
 
 /** Provider failure. Aborts stay on the existing cancel path. */

@@ -19,6 +19,7 @@ import {
   followThreadEvents,
   pauseRunForInput,
   pauseRunForTakeover,
+  publishTransientThreadEvent,
   sendUserMessage,
 } from "./events.js";
 import { RunHistoryWriteError } from "./messages.js";
@@ -1058,6 +1059,131 @@ describe("followThreadEvents", () => {
     await expect(stream.next()).resolves.toMatchObject({ value: { seq: 0 }, done: false });
     abort.abort();
     await stream.return(undefined);
+  });
+
+  it("yields transient events after the durable ones they arrived with, stamped with the cursor", async () => {
+    const fanout = new TestFanout();
+    const findMany = vi
+      .fn()
+      .mockImplementationOnce(async () => {
+        await publishTransientThreadEvent(
+          { $transaction: vi.fn() } as unknown as PrismaClient,
+          {
+            spaceId: "workspace-1",
+            threadId: "thread-1",
+            botId: "bot-1",
+            runId: "run-1",
+            type: "thread.progress",
+            payload: { delta: "hel", streaming: true },
+          },
+          fanout,
+        );
+        await fanout.publish(
+          "thread:other",
+          JSON.stringify({ transient: { ...event(9), threadId: "other" } }),
+        );
+        return [event(3)];
+      })
+      .mockResolvedValueOnce([event(4)])
+      .mockResolvedValue([]);
+    const prisma = { event: { findMany } } as unknown as PrismaClient;
+    const abort = new AbortController();
+    const stream = followThreadEvents(prisma, "thread-1", 2, fanout, abort.signal, 10_000);
+
+    await expect(stream.next()).resolves.toMatchObject({ value: { seq: 3 } });
+    const transient = (await stream.next()).value;
+    expect(transient).toMatchObject({
+      type: "thread.progress",
+      threadId: "thread-1",
+      runId: "run-1",
+      seq: 3,
+      payload: { delta: "hel", streaming: true },
+    });
+    expect(ProductEventSchema.safeParse(transient).success).toBe(true);
+    await expect(stream.next()).resolves.toMatchObject({ value: { seq: 4 } });
+    expect(findMany).toHaveBeenCalledTimes(2);
+    abort.abort();
+    await stream.return(undefined);
+  });
+});
+
+describe("publishTransientThreadEvent", () => {
+  const progress = {
+    spaceId: "workspace-1",
+    threadId: "thread-1",
+    botId: "bot-1",
+    runId: "run-1",
+    type: "thread.progress" as const,
+    payload: { delta: "x", streaming: true },
+  };
+
+  it("sends the event over realtime with seq 0 and never writes it to the events table", async () => {
+    const fanout = new TestFanout();
+    const received: string[] = [];
+    await fanout.subscribe("thread:thread-1", (payload) => received.push(payload));
+    const transaction = vi.fn();
+    await publishTransientThreadEvent(
+      { $transaction: transaction } as unknown as PrismaClient,
+      progress,
+      fanout,
+    );
+    expect(transaction).not.toHaveBeenCalled();
+    expect(received).toHaveLength(1);
+    expect(JSON.parse(received[0]!)).toMatchObject({
+      transient: { ...progress, seq: 0, id: expect.any(String), createdAt: expect.any(String) },
+    });
+  });
+
+  it("falls back to the durable event when the signal is too large for NOTIFY", async () => {
+    const fanout = new TestFanout();
+    const published: string[] = [];
+    fanout.publish = async (_topic, payload) => {
+      published.push(payload);
+      if (Buffer.byteLength(payload, "utf8") > 7_900) throw new Error("payload too large");
+    };
+    let nextEventSeq = 0;
+    const tx = {
+      thread: { update: vi.fn(async () => ({ nextEventSeq: ++nextEventSeq })) },
+      run: { findUnique: vi.fn(async () => ({ status: "running", startedAt: null })) },
+      event: {
+        create: vi.fn(async ({ data }: { data: Record<string, unknown> & { seq: number } }) => ({
+          ...event(data.seq),
+          ...data,
+        })),
+      },
+    };
+    const prisma = {
+      $transaction: vi.fn(async (callback: (client: typeof tx) => Promise<unknown>) =>
+        callback(tx),
+      ),
+    } as unknown as PrismaClient;
+    const large = { ...progress, payload: { delta: "y".repeat(9_000), streaming: true } };
+    await publishTransientThreadEvent(prisma, large, fanout);
+    expect(tx.event.create).toHaveBeenCalledTimes(1);
+    expect(tx.event.create.mock.calls[0]![0].data).toMatchObject({
+      type: "thread.progress",
+      seq: 0,
+    });
+    // The failed transient signal, then the durable cursor notification.
+    expect(published).toHaveLength(2);
+    expect(JSON.parse(published[1]!)).toEqual({ cursor: 0 });
+  });
+
+  it("stores the event durably when no push fanout exists", async () => {
+    const tx = {
+      thread: { update: vi.fn(async () => ({ nextEventSeq: 1 })) },
+      run: { findUnique: vi.fn(async () => ({ status: "running", startedAt: null })) },
+      event: {
+        create: vi.fn(async ({ data }: { data: { seq: number } }) => ({ ...event(data.seq) })),
+      },
+    };
+    const prisma = {
+      $transaction: vi.fn(async (callback: (client: typeof tx) => Promise<unknown>) =>
+        callback(tx),
+      ),
+    } as unknown as PrismaClient;
+    await publishTransientThreadEvent(prisma, progress, undefined);
+    expect(tx.event.create).toHaveBeenCalledTimes(1);
   });
 });
 
@@ -4223,6 +4349,52 @@ describe("clearThread", () => {
     expect(tx.computerExecutionLease.updateMany).not.toHaveBeenCalledWith(
       expect.objectContaining({ where: expect.objectContaining({ botId: expect.anything() }) }),
     );
+  });
+});
+
+describe("claimSteering interject", () => {
+  it("marks a claimed steering row stored with the interrupt origin", async () => {
+    const tx = {
+      $queryRaw: vi.fn(),
+      run: {
+        findFirst: vi.fn().mockResolvedValue({ id: "run-1", spaceId: "space-1", trigger: "user" }),
+        findUnique: vi.fn().mockResolvedValue({ status: "running", startedAt: null }),
+      },
+      thread: {
+        findUniqueOrThrow: vi.fn().mockResolvedValue({ nextMessageSeq: 3 }),
+        update: vi.fn().mockResolvedValue({ nextEventSeq: 1 }),
+      },
+      event: { create: vi.fn() },
+      steeringMessage: {
+        findMany: vi.fn().mockResolvedValue([
+          {
+            id: "steer-1",
+            messageId: "message-1",
+            originTrigger: "interrupt",
+            message: { seq: 2, blocks: [{ kind: "text", text: "Stop, use the other file" }] },
+          },
+          {
+            id: "steer-2",
+            messageId: "message-2",
+            originTrigger: null,
+            message: { seq: 3, blocks: [{ kind: "text", text: "Also this" }] },
+          },
+        ]),
+        updateMany: vi.fn().mockResolvedValue({ count: 2 }),
+      },
+    };
+    const prisma = {
+      $transaction: vi.fn(async (callback: (client: typeof tx) => unknown) => callback(tx)),
+    } as unknown as PrismaClient;
+    const claimed = await claimSteering(prisma, {
+      threadId: "thread-1",
+      botId: "bot-1",
+      runId: "run-1",
+      leaseOwner: "worker-1",
+      leaseFence: 1,
+      seenIds: [],
+    });
+    expect(claimed.map((item) => item.interrupt)).toEqual([true, undefined]);
   });
 });
 

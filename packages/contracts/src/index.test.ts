@@ -51,6 +51,13 @@ describe("contracts", () => {
     );
   });
 
+  it("accepts an optional interject flag on threads.send", () => {
+    const schema = appContract.threads.send["~orpc"].inputSchema!;
+    const input = { botId: "bot-1", text: "Stop, use the other file", interrupt: true };
+    expect(schema.parse(input)).toEqual(input);
+    expect(schema.safeParse({ botId: "bot-1", text: "Hi", interrupt: "yes" }).success).toBe(false);
+  });
+
   it("accepts one optional bootstrap target without dropping group identity", () => {
     const schema = appContract.bootstrap["~orpc"].inputSchema!;
     expect(schema.parse({})).toEqual({});
