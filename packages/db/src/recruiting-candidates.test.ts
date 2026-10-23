@@ -1495,6 +1495,24 @@ function crmFixture(additionalRows: readonly unknown[] = []) {
   };
 }
 
+describe("task-backed candidate page proof reads", () => {
+  it("scopes research read-binding events to the owner run, not the whole space event log", async () => {
+    const f = crmFixture();
+    f.tx.event.findMany.mockClear();
+    const sources = await recruiting.listRecruitingCandidateSources(f.prisma, actor, {
+      roleId: f.input.roleId,
+      candidateKey: f.input.candidateKey,
+    });
+    expect(sources.items).toHaveLength(1);
+    const reads = f.tx.event.findMany.mock.calls
+      .map((call) => (call as unknown as [{ where: Record<string, unknown> }])[0].where)
+      .filter((where) => where.type === "recruiting.read");
+    expect(reads.length).toBeGreaterThan(0);
+    for (const where of reads)
+      expect(where).toMatchObject({ spaceId: actor.spaceId, runId: "run" });
+  });
+});
+
 describe("native CRM write approval target", () => {
   const route = {
     connectorId: "mcp" as const,
@@ -4771,6 +4789,18 @@ describe("native candidate source provenance", () => {
       limit: 1,
     });
   }
+  it("scopes native saved-page proof events to the proven runs, not the whole space event log", async () => {
+    // Production 2026-10-22T23:23Z: space-wide JSON-path scans of `events` held the read
+    // transaction past 15s and starved the 4-slot pool (P2028 / pool connect timeouts).
+    const f = await nativeImportReadFixture();
+    f.tx.event.findMany.mockClear();
+    await nativeCandidateListRead(f);
+    const saved = f.tx.event.findMany.mock.calls
+      .map((call) => (call as unknown as [{ where: Record<string, unknown> }])[0].where)
+      .filter((where) => where.type === "recruiting.candidates.saved");
+    expect(saved).toHaveLength(1);
+    expect(saved[0]).toMatchObject({ spaceId: actor.spaceId, runId: { in: [f.run.id] } });
+  });
   it("batches exact current-binding imports and verifies their shared native page once after the read snapshot", async () => {
     const row = {
       name: "Second Example",
@@ -5500,6 +5530,7 @@ describe("native candidate source provenance", () => {
     expect(f.tx.event.findMany).toHaveBeenCalledExactlyOnceWith({
       where: {
         spaceId: actor.spaceId,
+        runId: { in: [f.run.id] },
         type: "recruiting.candidates.saved",
         OR: pages.map((page) => ({ payload: { path: ["effectId"], equals: page.effectId } })),
       },

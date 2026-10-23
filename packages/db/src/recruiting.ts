@@ -5692,6 +5692,8 @@ async function researchReadBinding(
   const events = await tx.event.findMany({
     where: {
       spaceId: actor.spaceId,
+      // The binding must belong to the owner run (checked below); index-scoped, not space-wide.
+      runId: owner.id,
       type: "recruiting.read",
       payload: { path: ["effectId"], equals: effect.id },
     },
@@ -6661,10 +6663,15 @@ async function candidatePageArtifacts(
     }),
   );
   const byEffect = new Map(effects.map((effect) => [effect.id, effect]));
-  const events = nativeIds.length
+  // Proof events carry the effect's run (checked below); scoping by runId hits the
+  // (runId, type, seq) index instead of JSON-scanning every event in the space while the
+  // read transaction holds one of the few pooled connections.
+  const runIds = [...new Set(effects.flatMap((effect) => (effect.run?.id ? [effect.run.id] : [])))];
+  const events = runIds.length
     ? await tx.event.findMany({
         where: {
           spaceId: actor.spaceId,
+          runId: { in: runIds },
           type: "recruiting.candidates.saved",
           OR: nativeIds.map((id) => ({ payload: { path: ["effectId"], equals: id } })),
         },
