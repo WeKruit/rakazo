@@ -307,6 +307,7 @@ import {
   selectCompactedHistory,
   shouldEnqueueCompaction,
 } from "./history-compaction.js";
+import { describeCampaignActivation, readRoleCampaignBinding } from "./instantly-native-writes.js";
 import type { InstantlyEmail } from "./instantly-reply.js";
 import {
   classifyInstantlyReplyReceipt,
@@ -6257,6 +6258,61 @@ export function createRunExecutor(deps: ExecutorDeps) {
                   : uncertainEffectResult(name);
               }
             }
+            let instantlyActivation:
+              | Awaited<ReturnType<typeof describeCampaignActivation>>
+              | undefined;
+            if (
+              approvalRoute?.connectorId === "mcp" &&
+              approvalRoute.toolName === "native_instantly_activate_campaign" &&
+              approvalRoute.resourceId &&
+              deps.connector
+            ) {
+              // Enrich the one-time card with live campaign facts via read-only native tools.
+              let campaignId =
+                typeof args.campaign_id === "string" ? (args.campaign_id as string) : null;
+              let eaccount: string | null = null;
+              if (!campaignId) {
+                const current = await deps.prisma.thread.findUnique({
+                  where: { id: thread.id },
+                  select: { activeRecruitingRoleId: true },
+                });
+                const binding = current?.activeRecruitingRoleId
+                  ? await readRoleCampaignBinding(
+                      deps.prisma,
+                      run.spaceId,
+                      approvalRoute.resourceId,
+                      current.activeRecruitingRoleId,
+                    )
+                  : null;
+                campaignId = binding?.campaignId ?? null;
+                eaccount = binding?.eaccount ?? null;
+              }
+              const connector = deps.connector;
+              const read = async (tool: string, readArgs: Record<string, unknown>) => {
+                for await (const event of connector.execute(
+                  {
+                    tool,
+                    route: { ...approvalRoute, toolName: tool },
+                    args: readArgs,
+                    executionId: `${executionId}:${tool}`,
+                  },
+                  context,
+                )) {
+                  if (event.type === "result") {
+                    const obj = (value: unknown) =>
+                      value && typeof value === "object" && !Array.isArray(value)
+                        ? (value as Record<string, unknown>)
+                        : undefined;
+                    return obj(obj(obj(event.data)?.structuredContent)?.result);
+                  }
+                  if (event.type === "error") return undefined;
+                }
+                return undefined;
+              };
+              instantlyActivation = campaignId
+                ? await describeCampaignActivation(read, campaignId, eaccount)
+                : { campaignId: null, name: null, status: null, leadCount: null, eaccount };
+            }
             if (replySelection)
               approvalArgs = {
                 ...args,
@@ -6386,6 +6442,7 @@ export function createRunExecutor(deps: ExecutorDeps) {
                 crmOperation,
                 recruiting: recruitingApproval,
                 crmImportTarget: crmImportSelection?.target,
+                instantlyActivation,
               },
             );
             const paused = await deps.events.pauseRunForInput({

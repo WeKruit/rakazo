@@ -461,6 +461,42 @@ describe("buildApprovalAskBlock", () => {
     expect(args.token).toBe("token-secret");
   });
 
+  it("shows live campaign facts on the Instantly activation card", () => {
+    const block = buildApprovalAskBlock(
+      "activate-effect",
+      "instantly__demo__activate_campaign",
+      { campaign_id: "c-1" },
+      [],
+      {
+        oneTimeOnly: true,
+        instantlyActivation: {
+          campaignId: "c-1",
+          name: "Founding Engineer",
+          status: "Draft",
+          leadCount: 12,
+          eaccount: "team@example.test",
+        },
+      },
+    );
+    expect(block.text).toBe("Review before sending the first campaign email");
+    expect(block.detail).toBe(
+      "Campaign: Founding Engineer\nStatus: Draft\nLeads: 12\nSender: team@example.test\n\nActivate this Instantly campaign; its leads receive the first email",
+    );
+    expect(block.actions?.map((action) => action.id)).toEqual(["allow", "deny"]);
+    const pending = buildApprovalAskBlock("e", "instantly__demo__activate_campaign", {}, [], {
+      oneTimeOnly: true,
+      instantlyActivation: {
+        campaignId: null,
+        name: null,
+        status: null,
+        leadCount: null,
+        eaccount: "team@example.test",
+      },
+    });
+    expect(pending.detail).toContain("Campaign: created for this role on approval");
+    expect(pending.detail).toContain("Leads: unknown");
+  });
+
   it("redacts known secrets before changing the tool name's case and underscores", () => {
     const block = buildApprovalAskBlock(
       "synthetic-effect",

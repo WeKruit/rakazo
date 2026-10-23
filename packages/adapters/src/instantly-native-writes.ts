@@ -328,6 +328,64 @@ async function defaultMailbox(
 }
 const sameAddress = (a: string, b: string) => a.trim().toLowerCase() === b.trim().toLowerCase();
 
+export const INSTANTLY_CAMPAIGN_STATUS: Record<number, string> = {
+  0: "Draft",
+  1: "Active",
+  2: "Paused",
+  3: "Completed",
+};
+export type InstantlyActivationDisplay = {
+  campaignId: string | null;
+  name: string | null;
+  status: string | null;
+  leadCount: number | null;
+  eaccount: string | null;
+};
+/** Role-campaign binding for a role, read without a run (approval cards, API). */
+export async function readRoleCampaignBinding(
+  prisma: Pick<PrismaClient, "externalEffect">,
+  spaceId: string,
+  serverId: string,
+  roleId: string,
+) {
+  const effect = await prisma.externalEffect.findUnique({
+    where: { idempotencyKey: bindingKey(serverId, roleId) },
+  });
+  if (!effect || effect.spaceId !== spaceId || effect.status !== "completed") return null;
+  const binding = effect.result as Partial<RoleBinding> | null;
+  return typeof binding?.campaignId === "string" ? (binding as RoleBinding) : null;
+}
+/**
+ * What the activate_campaign approval card shows: live name, status, lead count (up to 100) and
+ * sending mailbox, read through the read-only native tools. Reads that fail leave fields null.
+ */
+export async function describeCampaignActivation(
+  read: (
+    tool: "native_instantly_get_campaign" | "native_instantly_list_leads",
+    args: Record<string, unknown>,
+  ) => Promise<Record<string, unknown> | undefined>,
+  campaignId: string,
+  fallbackEaccount: string | null = null,
+): Promise<InstantlyActivationDisplay> {
+  const [campaign, leads] = await Promise.all([
+    read("native_instantly_get_campaign", { campaign_id: campaignId }).catch(() => undefined),
+    read("native_instantly_list_leads", { campaign_id: campaignId, limit: 100 }).catch(
+      () => undefined,
+    ),
+  ]);
+  const emails = Array.isArray(campaign?.email_list) ? campaign.email_list : [];
+  return {
+    campaignId,
+    name: typeof campaign?.name === "string" ? campaign.name : null,
+    status:
+      typeof campaign?.status === "number"
+        ? (INSTANTLY_CAMPAIGN_STATUS[campaign.status] ?? String(campaign.status))
+        : null,
+    leadCount: Array.isArray(leads?.items) ? leads.items.length : null,
+    eaccount: typeof emails[0] === "string" ? emails[0] : fallbackEaccount,
+  };
+}
+
 async function readBinding(prisma: PrismaClient, context: AdapterContext, key: string) {
   const effect = await prisma.externalEffect.findUnique({ where: { idempotencyKey: key } });
   if (!effect) return undefined;
@@ -607,6 +665,7 @@ export async function runInstantlyWrite(
         name: campaign.name,
         status: campaign.status,
         stop_on_reply: campaign.stop_on_reply,
+        email_list: campaign.email_list,
       };
     }
     case "native_instantly_update_lead_interest":
