@@ -90,7 +90,7 @@ import {
 import { rpc } from "../lib/rpc";
 import { CorrespondenceEmails } from "./RecruitingCorrespondence";
 import type { RecruitingInboxEmail } from "./recruiting";
-import { ContactsTab, InboxTab, InterviewTab, SequenceTab } from "./recruiting";
+import { ContactsTab, InboxWithReply, InterviewTab, SequenceTab } from "./recruiting";
 import type { RecruitingDetailPerson } from "./recruiting/detail";
 import { useRecruitingDetail } from "./recruiting/detail";
 import type { RecruitingWorkspaceView } from "./shell/RecruitingNavigation";
@@ -2335,22 +2335,12 @@ function CorrespondenceTabMount({
   onDraftReply?: (email: RecruitingInboxEmail) => void;
   fallback: ReactNode;
 }) {
-  const [email, setEmail] = useState<RecruitingInboxEmail>();
   if (!role) return <>{fallback}</>;
   const props = { ...role, conversation, refreshSignal };
   if (view === "contacts") return <ContactsTab {...props} />;
   if (view === "sequence") return <SequenceTab {...props} />;
   if (view === "interview") return <InterviewTab {...props} />;
-  return (
-    <>
-      {onDraftReply && email ? (
-        <Button variant="outline" className="mb-4" onClick={() => onDraftReply(email)}>
-          <Trans>Draft reply</Trans>
-        </Button>
-      ) : null}
-      <InboxTab {...props} onSelectEmail={setEmail} />
-    </>
-  );
+  return <InboxWithReply {...props} onDraftReply={onDraftReply} />;
 }
 
 type BoundRole = { roleId: string; spaceId: string; title: string };

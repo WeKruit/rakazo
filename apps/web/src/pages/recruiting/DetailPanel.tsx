@@ -1,11 +1,11 @@
 import { Trans, useLingui } from "@lingui/react/macro";
 import { Button } from "@rakazo/ui-web";
 import { ArrowLeft, X } from "lucide-react";
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useRef } from "react";
 import { useRecruitingChatContext } from "../shell/recruiting-chat-context";
 import type { RecruitingDetailController, RecruitingDetailView } from "./detail";
 import type { RecruitingInboxEmail } from "./InboxTab";
-import { InboxTab } from "./InboxTab";
+import { InboxWithReply } from "./InboxTab";
 import { InterviewTab } from "./InterviewTab";
 import { statusText } from "./shared";
 
@@ -27,7 +27,6 @@ export function RecruitingDetailPanel({
   const chatContext = useRecruitingChatContext();
   const current = controller.current;
   const heading = useRef<HTMLHeadingElement>(null);
-  const [email, setEmail] = useState<RecruitingInboxEmail>();
   const person = current?.person;
   const depth = controller.stack.length;
 
@@ -106,19 +105,12 @@ export function RecruitingDetailPanel({
       </nav>
       <div className="rk-scroll min-h-0 flex-1 overflow-y-auto px-4 py-3">
         {current.view === "thread" ? (
-          <>
-            {onDraftReply && email ? (
-              <Button variant="outline" className="mb-3" onClick={() => onDraftReply(email)}>
-                <Trans>Draft reply</Trans>
-              </Button>
-            ) : null}
-            <InboxTab
-              key={person.candidateId}
-              {...current.role}
-              candidateId={person.candidateId}
-              onSelectEmail={setEmail}
-            />
-          </>
+          <InboxWithReply
+            key={person.candidateId}
+            {...current.role}
+            candidateId={person.candidateId}
+            onDraftReply={onDraftReply}
+          />
         ) : current.view === "contact" ? (
           <dl className="grid grid-cols-[auto_minmax(0,1fr)] gap-x-4 gap-y-2 text-sm">
             {fields.map(({ label, value }) => (

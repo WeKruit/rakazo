@@ -2495,12 +2495,12 @@ export function ShellPage() {
     [selectCorrespondence],
   );
   const recruitingDetail = useRecruitingDetailController(activeSnapshot?.threadId);
-  const detailThread =
-    recruitingDetail.current?.view === "thread"
-      ? recruitingDetail.current.person.candidateId
+  // The candidate whose email the workbench (Inbox tab or detail panel) has selected.
+  const selectedReplyCandidate = useRef<string>(undefined);
+  selectedReplyCandidate.current =
+    selectedContact && selectedContact.scope === recruitingCacheScope
+      ? selectedContact.contact.reference
       : undefined;
-  const currentDetailThread = useRef(detailThread);
-  currentDetailThread.current = detailThread;
   const chatRoleTitle =
     !showToolActivity && inGroup ? (activeGroup?.name ?? activeSnapshot?.groupName) : undefined;
   function openRoleChat(text?: string) {
@@ -2555,7 +2555,7 @@ export function ShellPage() {
           draft.threadId === activeSnapshot?.threadId &&
           ((recruitingWorkspaceView === "inbox" &&
             draft.candidateId === searchParams.get("crmCandidate")) ||
-            draft.candidateId === currentDetailThread.current) &&
+            draft.candidateId === selectedReplyCandidate.current) &&
           draft.source.serverId === bound.target.mcpServerId &&
           draft.source.serverRevision === bound.target.serverRevision &&
           draft.source.organizationId === bound.target.organizationId &&

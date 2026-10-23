@@ -1,8 +1,9 @@
 import { Trans, useLingui } from "@lingui/react/macro";
 import type { RecruitingCrmDataOutput } from "@rakazo/contracts";
 import { Badge, Button } from "@rakazo/ui-web";
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import type { CrmReplyDraftContext } from "../RecruitingPanel";
+import { useRecruitingChatContext } from "../shell/recruiting-chat-context";
 import { useRecruitingDetail } from "./detail";
 import type { RecruitingTabProps } from "./shared";
 import {
@@ -111,6 +112,41 @@ export function replyStatus(items: readonly { direction: Direction; date: string
  * Stored email for the role: every candidate's mail in one read by default, or one candidate's
  * thread (with reply status) when selected. CRMs without the role-wide read fall back to per candidate.
  */
+/**
+ * Inbox with the reply-draft action, shared by the Inbox tab and the detail panel. The selected
+ * email's candidate becomes the chat's selected contact, which the draft request is checked against.
+ */
+export function InboxWithReply({
+  onDraftReply,
+  ...props
+}: Omit<InboxProps, "onSelectEmail"> & {
+  onDraftReply?: (email: RecruitingInboxEmail) => void;
+}) {
+  const chatContext = useRecruitingChatContext();
+  const [email, setEmail] = useState<RecruitingInboxEmail>();
+  const select = useCallback(
+    (next: RecruitingInboxEmail | undefined) => {
+      setEmail(next);
+      if (next)
+        chatContext.setSelectedContact({
+          name: next.candidateName ?? next.candidateEmail ?? "",
+          reference: next.candidateId,
+        });
+    },
+    [chatContext],
+  );
+  return (
+    <>
+      {onDraftReply && email ? (
+        <Button variant="outline" className="mb-3" onClick={() => onDraftReply(email)}>
+          <Trans>Draft reply</Trans>
+        </Button>
+      ) : null}
+      <InboxTab {...props} onSelectEmail={select} />
+    </>
+  );
+}
+
 export function InboxTab({ onSelectEmail, candidateId: lockedId, ...props }: InboxProps) {
   const { t } = useLingui();
   const detail = useRecruitingDetail();
