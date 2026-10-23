@@ -8018,6 +8018,33 @@ describePostgres("recruiting domain (PostgreSQL)", () => {
     ).toEqual(old);
   });
 
+  it("lists legacy NULL matchFields rows with provider rank/score sorts on the first read", async () => {
+    const { f, prepared } = await mappedResearchFixture();
+    const rows = [0, 1, 2].map((i) => ({
+      ...canonicalCandidateRow(`Legacy ${i}`, `https://www.linkedin.com/in/legacy-${i}`),
+      overall_rank: { value: 3 - i },
+      match_score: { value: 10 * (i + 1) },
+      notes: { value: "Long provider evidence paragraph. ".repeat(400), source_id: "person" },
+    }));
+    await recordCandidatePage(f, prepared, "legacy-null-match", rows as never);
+    // Rows saved before matchFields existed.
+    await prisma.$executeRaw`UPDATE "recruiting_candidate_occurrences" SET "matchFields" = NULL WHERE "roleId" = ${f.role.role.id}`;
+    const listed = await recruiting.listRecruitingCandidates(prisma, actor, {
+      roleId: f.role.role.id,
+      sort: "rank",
+      limit: 100,
+    });
+    expect(listed.sortAvailability).toMatchObject({ rank: true, score: true });
+    expect(listed.items.map((item) => item.candidateKey)).toEqual([
+      "linkedin:/in/legacy-2",
+      "linkedin:/in/legacy-1",
+      "linkedin:/in/legacy-0",
+    ]);
+    const missing = await prisma.$queryRaw<
+      Array<{ n: bigint }>
+    >`SELECT count(*) AS n FROM "recruiting_candidate_occurrences" WHERE "roleId" = ${f.role.role.id} AND "matchFields" IS NULL`;
+    expect(Number(missing[0]!.n)).toBe(0);
+  });
   it("verifies research-action page provenance once per listing, not once per referenced page", async () => {
     const { f, prepared } = await mappedResearchFixture();
     const proofQueries = async (pageCount: number) => {

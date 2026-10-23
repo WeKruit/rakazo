@@ -7478,11 +7478,9 @@ function candidateIndexQuery(
         SELECT o."pageId", page."observedAt", o."rowIndex", source.kind, ${matchValue} AS value
         FROM "recruiting_candidate_occurrences" o
         JOIN "recruiting_candidate_pages" page ON page."effectId" = o."pageId"
-        -- ponytail: rows saved before matchFields parse their own page once until backfilled.
-        CROSS JOIN LATERAL (SELECT COALESCE(o."matchFields", (
-          SELECT ${savedProviderRow(savedProviderBody)} FROM "external_effects" effect
-          WHERE effect."id" = o."pageId"
-        )) AS value) returned
+        -- Legacy NULL rows are backfilled before the read (listRecruitingCandidates); parsing the
+        -- saved page per row here cost ~20 s on a 134-candidate role and expired the transaction.
+        CROSS JOIN LATERAL (SELECT COALESCE(o."matchFields", '{}'::jsonb) AS value) returned
         CROSS JOIN rank_scope
         CROSS JOIN LATERAL (VALUES
           ('rank', ${rankCell},
@@ -9747,7 +9745,13 @@ export async function listRecruitingCandidates(
 ): Promise<CandidatesOutput> {
   const input = ListRecruitingCandidatesInput.parse(raw);
   const afterRead: Array<() => void> = [];
-  let backfillRoleId: string | undefined;
+  // Fill legacy NULL matchFields BEFORE the RepeatableRead snapshot, as its own autocommit
+  // statement (page bodies parsed once per page, not per row), so the read never parses saved
+  // pages. Owner-scoped; idempotent and a cheap no-op once filled. Unauthorized ids match no row.
+  await fillCandidateMatchFields(
+    prisma,
+    Prisma.sql`o."roleId" = (SELECT r."id" FROM "recruiting_roles" r WHERE r."id" = ${input.roleId} AND r."spaceId" = ${actor.spaceId} AND r."userId" = ${actor.userId})`,
+  );
   const result = await prisma.$transaction(
     async (tx) => {
       const role = await requireRole(tx, actor, input.roleId);
@@ -9845,7 +9849,6 @@ export async function listRecruitingCandidates(
             rankAvailable: boolean;
             tierAvailable: boolean;
             scoreAvailable: boolean;
-            matchBackfill?: boolean;
           } & (CandidateQueryRow | { [Key in keyof CandidateQueryRow]: null })
         >
       >(Prisma.sql`${filtered}, ordered AS (
@@ -9861,8 +9864,6 @@ export async function listRecruitingCandidates(
           count(*) FILTER (WHERE "countIdentified") AS "identifiedCandidates",
           count(*) FILTER (WHERE "assessmentVersion" IS NULL) AS "unassessed",
           count(*) FILTER (WHERE "assessmentVersion" IS NOT NULL) AS "assessed",
-          EXISTS (SELECT 1 FROM "recruiting_candidate_occurrences" o
-            WHERE o."roleId" = ${role.id} AND o."matchFields" IS NULL) AS "matchBackfill",
           count(*) FILTER (WHERE "shortlisted") AS "shortlistedCount" FROM base
       ) SELECT totals.*, candidate_page.* FROM totals LEFT JOIN candidate_page ON true
         ORDER BY ${order}`);
@@ -9878,7 +9879,6 @@ export async function listRecruitingCandidates(
           rankAvailable: _rankAvailable,
           tierAvailable: _tierAvailable,
           scoreAvailable: _scoreAvailable,
-          matchBackfill: _matchBackfill,
           ...row
         }) => (row.candidateKey === null ? [] : [row]),
       );
@@ -9897,9 +9897,7 @@ export async function listRecruitingCandidates(
         unassessed,
         assessed,
         shortlistedCount,
-        matchBackfill,
       } = result[0]!;
-      if (matchBackfill) backfillRoleId = role.id;
       const counts = {
         sourceRows,
         candidates,
@@ -10001,10 +9999,6 @@ export async function listRecruitingCandidates(
     { isolationLevel: Prisma.TransactionIsolationLevel.RepeatableRead },
   );
   for (const verify of afterRead) verify();
-  // One-time lazy backfill, after authorization and outside the RepeatableRead snapshot so it
-  // can never conflict with it; idempotent, so concurrent first reads simply both no-op/fill.
-  if (backfillRoleId)
-    await fillCandidateMatchFields(prisma, Prisma.sql`o."roleId" = ${backfillRoleId}`);
   return result;
 }
 
