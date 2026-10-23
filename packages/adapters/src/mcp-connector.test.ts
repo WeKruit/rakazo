@@ -1,4 +1,4 @@
-import { toolRequiresApproval } from "@rakazo/core";
+import { toolRequiresApproval, toolRequiresExplicitApproval } from "@rakazo/core";
 import { IsolationError } from "@rakazo/db";
 import { createLogger, createTestSink, getLogger, installLogger } from "@rakazo/logging";
 import { afterEach, describe, expect, it, vi } from "vitest";
@@ -68,6 +68,34 @@ describe("MCP assignment denial identity", () => {
       });
     },
   );
+  it("maps local Instantly tools to the assigned get_email + list_emails gate on the official server", async () => {
+    const check = (allowedTools: string[], endpoint = "https://mcp.instantly.ai/mcp") =>
+      requireMcpToolAssignment(
+        {
+          botMcpServer: {
+            findFirst: vi.fn(async () => ({
+              ...ASSIGNMENT,
+              allowAllTools: false,
+              allowedTools,
+              server: { ...SERVER, endpoint },
+            })),
+          },
+        } as never,
+        { spaceId: "w1", userId: "u1", botId: "bot-1" } as never,
+        { resourceId: SERVER.id, resourceRevision: 1 },
+        "native_instantly_ensure_role_campaign",
+      );
+    await expect(check(["get_email", "list_emails"])).resolves.toMatchObject({ botId: "bot-1" });
+    for (const denied of [
+      check([]),
+      check(["get_email"]),
+      check(["get_email", "list_emails"], SERVER.endpoint),
+    ])
+      await expect(denied).rejects.toMatchObject({
+        name: "IsolationError",
+        message: "MCP tool is not assigned to this bot",
+      });
+  });
   it("preserves an unexpected lookup failure by identity", async () => {
     const error = new Error("Database unavailable");
     const failure = requireMcpToolAssignment(
@@ -2927,5 +2955,346 @@ describe("first-party product OIDC MCP connection", () => {
     } finally {
       await connector.close();
     }
+  });
+});
+
+describe("local native Instantly campaign and lead tools", () => {
+  const CAMPAIGN = "123e4567-e89b-42d3-a456-4266141740c1";
+  const route = (name: string) => ({
+    connectorId: "mcp",
+    resourceId: SERVER.id,
+    resourceRevision: 1,
+    toolName: `native_instantly_${name}`,
+  });
+  function fixture() {
+    const context = {
+      userId: "u1",
+      spaceId: "w1",
+      botId: "bot-1",
+      runId: "run-1",
+      signal: new AbortController().signal,
+    };
+    const server = {
+      ...SERVER,
+      userId: "u1",
+      spaceId: "w1",
+      enabled: true,
+      endpoint: "https://mcp.instantly.ai/mcp",
+      secretId: "key-1",
+    };
+    const assignment = {
+      ...ASSIGNMENT,
+      server,
+      allowAllTools: false,
+      allowedTools: ["get_email", "list_emails"],
+    };
+    const state = {
+      key: "fixture-private-api-key",
+      accounts: ["team@example.test"],
+      campaign: { id: CAMPAIGN, status: 0, stop_on_reply: true } as Record<string, unknown>,
+      existingLeads: [] as { id: string; email: string }[],
+      effects: new Map<string, Record<string, unknown>>(),
+      requests: [] as { method: string; path: string; body?: unknown }[],
+    };
+    const prisma = {
+      botMcpServer: { findFirst: vi.fn(async () => assignment) },
+      secret: { findFirst: vi.fn(async () => ({ id: "key-1", ciphertext: "encrypted" })) },
+      mcpServer: { findFirst: vi.fn(async () => server) },
+      recruitingRole: {
+        findFirst: vi.fn(async ({ where }) =>
+          where.id === "role-1" && where.spaceId === "w1" && where.userId === "u1"
+            ? { id: "role-1", title: "Founding Engineer" }
+            : null,
+        ),
+      },
+      recruitingCandidate: {
+        findMany: vi.fn(async ({ where }) =>
+          (where.candidateKey.in as string[])
+            .filter((key) => key !== "not-shortlisted")
+            .map((candidateKey) => ({ candidateKey })),
+        ),
+      },
+      externalEffect: {
+        findUnique: vi.fn(async ({ where }) => state.effects.get(where.idempotencyKey) ?? null),
+        create: vi.fn(async ({ data }) => {
+          const effect = { id: `effect-${state.effects.size}`, ...data };
+          state.effects.set(data.idempotencyKey, effect);
+          return effect;
+        }),
+        update: vi.fn(async ({ where, data }) => {
+          const effect = [...state.effects.values()].find((e) => e.id === where.id)!;
+          Object.assign(effect, data);
+          return effect;
+        }),
+      },
+    };
+    const secrets = { load: vi.fn(async () => JSON.stringify({ secret: state.key })) };
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (input: string | URL | Request, init?: RequestInit) => {
+        const request = new Request(logicalHref(input, init), init);
+        const url = new URL(request.url);
+        expect(url.origin).toBe("https://api.instantly.ai");
+        expect(request.headers.get("authorization")).toBe(`Bearer ${state.key}`);
+        const text = await request.text();
+        const body = text ? JSON.parse(text) : undefined;
+        const path = `${url.pathname}${url.search}`;
+        state.requests.push({ method: request.method, path, ...(body ? { body } : {}) });
+        const account = url.pathname.match(/^\/api\/v2\/accounts\/(.+)$/);
+        if (account)
+          return new Response("{}", {
+            status: state.accounts.includes(decodeURIComponent(account[1]!)) ? 200 : 404,
+          });
+        if (url.pathname === "/api/v2/accounts")
+          return Response.json({ items: state.accounts.map((email) => ({ email })) });
+        if (url.pathname === "/api/v2/campaigns" && request.method === "GET")
+          return Response.json({ items: [] });
+        if (url.pathname === "/api/v2/campaigns") return Response.json({ id: CAMPAIGN, ...body });
+        if (url.pathname === `/api/v2/campaigns/${CAMPAIGN}`) {
+          if (request.method === "PATCH") Object.assign(state.campaign, body);
+          return Response.json(state.campaign);
+        }
+        if (url.pathname.startsWith(`/api/v2/campaigns/${CAMPAIGN}/`))
+          return Response.json(state.campaign);
+        if (url.pathname === "/api/v2/leads/list")
+          return Response.json({
+            items: state.existingLeads.filter((lead) =>
+              (body.contacts as string[] | undefined)?.some(
+                (email) => email.toLowerCase() === lead.email,
+              ),
+            ),
+          });
+        if (url.pathname === "/api/v2/leads/add")
+          return Response.json({
+            status: "success",
+            leads_uploaded: body.leads.length,
+            created_leads: body.leads.map((lead: { email: string }, index: number) => ({
+              index,
+              id: `lead-${lead.email}`,
+              email: lead.email,
+            })),
+          });
+        if (url.pathname === "/api/v2/leads/update-interest-status")
+          return Response.json({ message: "queued" }, { status: 202 });
+        return new Response("unexpected", { status: 500 });
+      }),
+    );
+    const connector = new McpConnector(prisma as never, secrets as never, {
+      network: TEST_NETWORK,
+    });
+    const run = async (name: string, args: Record<string, unknown>) => {
+      const events = [];
+      for await (const event of connector.execute(
+        { tool: `instantly__demo__${name}`, route: route(name), args, executionId: name },
+        context as never,
+      ))
+        events.push(event);
+      return events;
+    };
+    const result = (events: unknown[]) =>
+      (events[0] as { data: { structuredContent: { result: Record<string, unknown> } } }).data
+        .structuredContent.result;
+    return { state, run, result, prisma };
+  }
+
+  it("creates a draft stop-on-reply campaign from an own mailbox", async () => {
+    const f = fixture();
+    const events = await f.run("create_campaign", {
+      name: "Internal test",
+      eaccount: "team@example.test",
+      steps: [{ subject: "Hi", body: "Hello<br/>there" }],
+    });
+    expect(events[0]).toMatchObject({ type: "result" });
+    expect(f.state.requests).toEqual([
+      { method: "GET", path: "/api/v2/accounts/team%40example.test" },
+      {
+        method: "POST",
+        path: "/api/v2/campaigns",
+        body: {
+          name: "Internal test",
+          campaign_schedule: {
+            schedules: [
+              {
+                name: "Weekdays",
+                timing: { from: "09:00", to: "17:00" },
+                days: {
+                  "0": false,
+                  "1": true,
+                  "2": true,
+                  "3": true,
+                  "4": true,
+                  "5": true,
+                  "6": false,
+                },
+                timezone: "America/Chicago",
+              },
+            ],
+          },
+          sequences: [
+            {
+              steps: [
+                {
+                  type: "email",
+                  delay: 0,
+                  delay_unit: "days",
+                  variants: [{ subject: "Hi", body: "Hello<br/>there" }],
+                },
+              ],
+            },
+          ],
+          email_list: ["team@example.test"],
+          stop_on_reply: true,
+          stop_on_auto_reply: true,
+        },
+      },
+    ]);
+    expect(JSON.stringify(events)).not.toContain(f.state.key);
+  });
+
+  it("refuses a foreign sending mailbox without creating anything", async () => {
+    const f = fixture();
+    const events = await f.run("create_campaign", {
+      name: "x",
+      eaccount: "someone@else.test",
+    });
+    expect(events[0]).toMatchObject({ type: "error" });
+    expect((events[0] as { message: string }).message).toMatch(/not one of your connected/);
+    expect(f.state.requests.filter((r) => r.method !== "GET")).toEqual([]);
+  });
+
+  it("sends exact REST calls for leads, interest, pause and activate", async () => {
+    const f = fixture();
+    await f.run("add_leads", {
+      campaign_id: CAMPAIGN,
+      leads: [{ email: "admin1@wekruit.com", first_name: "Adam" }],
+    });
+    await f.run("list_leads", { campaign_id: CAMPAIGN, email: "admin1@wekruit.com" });
+    await f.run("update_lead_interest", { lead_email: "admin1@wekruit.com", interest_value: 1 });
+    await f.run("pause_campaign", { campaign_id: CAMPAIGN });
+    await f.run("activate_campaign", { campaign_id: CAMPAIGN });
+    expect(f.state.requests).toEqual([
+      { method: "GET", path: `/api/v2/campaigns/${CAMPAIGN}` },
+      {
+        method: "POST",
+        path: "/api/v2/leads/add",
+        body: {
+          campaign_id: CAMPAIGN,
+          leads: [{ email: "admin1@wekruit.com", first_name: "Adam" }],
+          skip_if_in_workspace: false,
+        },
+      },
+      {
+        method: "POST",
+        path: "/api/v2/leads/list",
+        body: { campaign: CAMPAIGN, contacts: ["admin1@wekruit.com"], limit: 50 },
+      },
+      {
+        method: "POST",
+        path: "/api/v2/leads/update-interest-status",
+        body: { lead_email: "admin1@wekruit.com", interest_value: 1 },
+      },
+      { method: "POST", path: `/api/v2/campaigns/${CAMPAIGN}/pause` },
+      { method: "POST", path: `/api/v2/campaigns/${CAMPAIGN}/activate` },
+    ]);
+  });
+
+  it("refuses to enroll leads into an active campaign", async () => {
+    const f = fixture();
+    f.state.campaign.status = 1;
+    const events = await f.run("add_leads", {
+      campaign_id: CAMPAIGN,
+      leads: [{ email: "admin1@wekruit.com" }],
+    });
+    expect(events[0]).toMatchObject({ type: "error" });
+    expect(f.state.requests.some((r) => r.path === "/api/v2/leads/add")).toBe(false);
+  });
+
+  it("gates activation behind an explicit one-time approval; lead/campaign writes are not read-only", async () => {
+    expect(
+      toolRequiresExplicitApproval("instantly__demo__activate_campaign", {
+        connectorId: "mcp",
+        toolName: "native_instantly_activate_campaign",
+      }),
+    ).toBe(true);
+    for (const name of ["create_campaign", "add_leads", "ensure_role_campaign", "pause_campaign"])
+      expect(toolRequiresApproval(`instantly__demo__${name}`, true, false)).toBe(true);
+  });
+
+  it("ensure_role_campaign is idempotent and keeps stop_on_reply on", async () => {
+    const f = fixture();
+    const first = f.result(await f.run("ensure_role_campaign", { role_id: "role-1" }));
+    expect(first).toMatchObject({
+      created: true,
+      campaignId: CAMPAIGN,
+      eaccount: "team@example.test",
+      campaignName: "Founding Engineer [role role-1]",
+    });
+    const create = f.state.requests.find((r) => r.method === "POST")!;
+    expect(create).toMatchObject({
+      path: "/api/v2/campaigns",
+      body: { stop_on_reply: true, email_list: ["team@example.test"] },
+    });
+    f.state.requests.length = 0;
+    const second = f.result(await f.run("ensure_role_campaign", { role_id: "role-1" }));
+    expect(second).toMatchObject({
+      created: false,
+      campaignId: CAMPAIGN,
+      stopOnReplyPatched: false,
+    });
+    expect(f.state.requests).toEqual([{ method: "GET", path: `/api/v2/campaigns/${CAMPAIGN}` }]);
+    expect(f.prisma.externalEffect.create).toHaveBeenCalledTimes(1);
+    f.state.campaign.stop_on_reply = false;
+    f.state.requests.length = 0;
+    const third = f.result(await f.run("ensure_role_campaign", { role_id: "role-1" }));
+    expect(third).toMatchObject({ created: false, stopOnReplyPatched: true });
+    expect(f.state.requests[1]).toEqual({
+      method: "PATCH",
+      path: `/api/v2/campaigns/${CAMPAIGN}`,
+      body: { stop_on_reply: true },
+    });
+    expect(await f.run("ensure_role_campaign", { role_id: "other-role" })).toMatchObject([
+      { type: "error" },
+    ]);
+  });
+
+  it("add_shortlist_leads dedups, skips missing emails and records candidate -> lead ids", async () => {
+    const f = fixture();
+    expect(
+      await f.run("add_shortlist_leads", {
+        role_id: "role-1",
+        candidates: [{ candidate_key: "a", email: "a@x.test" }],
+      }),
+    ).toMatchObject([{ type: "error" }]);
+    await f.run("ensure_role_campaign", { role_id: "role-1" });
+    f.state.existingLeads = [{ id: "lead-existing", email: "b@x.test" }];
+    f.state.requests.length = 0;
+    const out = f.result(
+      await f.run("add_shortlist_leads", {
+        role_id: "role-1",
+        candidates: [
+          { candidate_key: "a", email: "a@x.test", first_name: "A" },
+          { candidate_key: "b", email: "B@x.test" },
+          { candidate_key: "c", email: null },
+          { candidate_key: "not-shortlisted", email: "n@x.test" },
+        ],
+      }),
+    );
+    expect(out).toMatchObject({
+      added: ["a"],
+      alreadyInCampaign: ["b"],
+      skippedMissingEmail: ["c"],
+      notShortlisted: ["not-shortlisted"],
+      leads: {
+        a: { leadId: "lead-a@x.test", email: "a@x.test" },
+        b: { leadId: "lead-existing", email: "B@x.test" },
+      },
+    });
+    expect(f.state.requests.find((r) => r.path === "/api/v2/leads/add")?.body).toEqual({
+      campaign_id: CAMPAIGN,
+      skip_if_in_workspace: false,
+      leads: [{ email: "a@x.test", first_name: "A" }],
+    });
+    const again = f.result(await f.run("ensure_role_campaign", { role_id: "role-1" }));
+    expect(again.leads).toMatchObject({ a: { leadId: "lead-a@x.test" } });
   });
 });

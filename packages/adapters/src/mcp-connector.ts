@@ -21,6 +21,13 @@ import { redactConnectorPayload, sanitizeConnectorError } from "./connector-safe
 import { credentialDigest } from "./credential-digest.js";
 import { appendToolCompletionAudit } from "./executor.js";
 import {
+  InstantlyRestError,
+  instantlyRest,
+  isNativeInstantlyWrite,
+  nativeInstantlyWrites,
+  runInstantlyWrite,
+} from "./instantly-native-writes.js";
+import {
   readInstantlyEmail,
   readInstantlyEmailPage,
   sameInstantlyAddresses,
@@ -185,10 +192,18 @@ export async function requireMcpToolAssignment(
     },
     include: { server: true },
   });
+  // Local Instantly writes are not remote tools: they ride the same official-server assignment
+  // (get_email + list_emails) as the local reads.
+  const local = isNativeInstantlyWrite(toolName);
+  const required = local ? ["get_email", "list_emails"] : [toolName];
   if (
     !assignment ||
+    (local &&
+      (assignment.server.endpoint !== INSTANTLY_MCP ||
+        assignment.server.transport !== "streamable_http")) ||
     (!assignment.allowAllTools &&
-      (!Array.isArray(assignment.allowedTools) || !assignment.allowedTools.includes(toolName)))
+      (!Array.isArray(assignment.allowedTools) ||
+        !required.every((name) => (assignment.allowedTools as unknown[]).includes(name))))
   )
     throw new IsolationError("MCP tool is not assigned to this bot");
   if (route.resourceRevision !== assignment.server.revision)
@@ -396,6 +411,22 @@ export class McpConnector implements ConnectorProvider {
                 },
               });
             }
+            for (const local of nativeInstantlyWrites) {
+              if (listed.tools.some((tool) => tool.name === local.toolName)) continue;
+              remoteTools.push({
+                name: `instantly__${assignment.server.slug}__${local.name}`,
+                description: local.description,
+                inputSchema: local.inputSchema,
+                readOnly: local.readOnly,
+                route: {
+                  connectorId: "mcp",
+                  resourceId: assignment.serverId,
+                  resourceRevision: assignment.server.revision,
+                  toolName: local.toolName,
+                  catalogGroup: assignment.server.slug,
+                },
+              });
+            }
           }
           return remoteTools;
         } catch (error) {
@@ -493,22 +524,24 @@ export class McpConnector implements ConnectorProvider {
     let callStarted = false;
     let sessionKey: string | undefined;
     try {
-      const localInstantlyServer = nativeInstantlyReads.some(
-        (tool) => tool.toolName === call.route!.toolName,
-      )
-        ? await this.prisma.mcpServer.findFirst({
-            where: {
-              id: call.route.resourceId,
-              userId: context.userId,
-              spaceId: context.spaceId,
-              endpoint: INSTANTLY_MCP,
-              transport: "streamable_http",
-            },
-            select: { id: true },
-          })
-        : null;
+      const localInstantlyServer =
+        nativeInstantlyReads.some((tool) => tool.toolName === call.route!.toolName) ||
+        isNativeInstantlyWrite(call.route.toolName)
+          ? await this.prisma.mcpServer.findFirst({
+              where: {
+                id: call.route.resourceId,
+                userId: context.userId,
+                spaceId: context.spaceId,
+                endpoint: INSTANTLY_MCP,
+                transport: "streamable_http",
+              },
+              select: { id: true },
+            })
+          : null;
       if (localInstantlyServer) {
-        yield* this.readInstantlyEmails(call, context);
+        yield* isNativeInstantlyWrite(call.route.toolName)
+          ? this.writeInstantly(call, context)
+          : this.readInstantlyEmails(call, context);
         return;
       }
       const assignment = await requireMcpToolAssignment(
@@ -553,6 +586,100 @@ export class McpConnector implements ConnectorProvider {
     }
   }
 
+  private async *writeInstantly(
+    call: ConnectorCall,
+    context: AdapterContext,
+  ): AsyncIterable<ConnectorEvent> {
+    const redactions: string[] = [];
+    const safeFetch = createSafeRemoteFetch(
+      this.options.network?.fetch,
+      this.options.network?.resolveHostname,
+    );
+    try {
+      const credential = await this.authorizeInstantlyRest(call, context, redactions);
+      const result = await runInstantlyWrite(
+        this.prisma,
+        instantlyRest(safeFetch, credential.key, context.signal),
+        context,
+        credential.server.id,
+        call.route!.toolName,
+        call.args,
+      );
+      yield {
+        type: "result",
+        data: redactConnectorPayload(
+          { structuredContent: { source: "local_native_instantly_rest", result } },
+          redactions,
+        ),
+      };
+    } catch (error) {
+      // Zod and our own messages carry no secrets; anything else stays generic.
+      const detail =
+        error instanceof InstantlyRestError
+          ? ` HTTP ${error.status}.`
+          : error instanceof z.ZodError
+            ? ` Invalid arguments: ${z.prettifyError(error)}`
+            : error instanceof Error && !(error instanceof IsolationError)
+              ? ` ${sanitizeConnectorError(error, redactions)}`
+              : " Check the current assigned connection and requested scope.";
+      yield {
+        type: "error",
+        message: `Instantly ${call.route!.toolName} failed.${detail}`,
+        // A network failure mid-request may still have reached the provider.
+        ...(error instanceof TypeError ? { outcome: "uncertain" as const } : {}),
+      };
+    } finally {
+      await safeFetch.close().catch(() => undefined);
+    }
+  }
+
+  /** Exact assigned Instantly connection and its unambiguous API key. */
+  private async authorizeInstantlyRest(
+    call: ConnectorCall,
+    context: AdapterContext,
+    redactions: string[],
+  ) {
+    context.signal.throwIfAborted();
+    const assignment = await requireMcpToolAssignment(
+      this.prisma,
+      context,
+      call.route!,
+      "get_email",
+    );
+    const { server } = assignment;
+    if (
+      server.endpoint !== INSTANTLY_MCP ||
+      server.transport !== "streamable_http" ||
+      server.userId !== context.userId ||
+      server.spaceId !== context.spaceId ||
+      (!assignment.allowAllTools &&
+        (!Array.isArray(assignment.allowedTools) ||
+          !assignment.allowedTools.includes("list_emails")))
+    )
+      throw new IsolationError();
+    const { secret, plaintext } = await loadMcpCredentialRecord(
+      this.prisma,
+      this.secrets,
+      server,
+      context,
+    );
+    if (!secret || !plaintext) throw new Error("An existing API-key credential is required");
+    const material = JSON.parse(plaintext) as OAuthMaterial;
+    redactions.push(...oauthMaterialSecrets(material));
+    if (material.oauth) throw new Error("An existing API-key credential is required");
+    const headers = new Headers(material.headers);
+    // The official MCP also accepts the raw API key in Authorization; REST requires Bearer.
+    const keys = [material.secret, headers.get("authorization"), headers.get("x-api-key")]
+      .filter((value): value is string => typeof value === "string" && value.length > 0)
+      .map((value) => value.replace(/^Bearer /i, ""));
+    const key = keys[0];
+    if (!key || /[\r\n\0]/.test(key) || keys.some((value) => value !== key))
+      throw new Error("An unambiguous existing API key is required");
+    redactions.push(key);
+    context.signal.throwIfAborted();
+    return { server, key, secretId: secret.id, digest: credentialDigest(plaintext) };
+  }
+
   private async *readInstantlyEmails(
     call: ConnectorCall,
     context: AdapterContext,
@@ -573,47 +700,7 @@ export class McpConnector implements ConnectorProvider {
       const mailboxInput = isMailbox ? MailboxEmailsInput.parse(call.args) : undefined;
       const contactInput = isHistory || isMailbox ? undefined : ContactEmailsInput.parse(call.args);
       const input = historyInput ?? mailboxInput ?? contactInput!;
-      const authorize = async () => {
-        context.signal.throwIfAborted();
-        const assignment = await requireMcpToolAssignment(
-          this.prisma,
-          context,
-          call.route!,
-          "get_email",
-        );
-        const { server } = assignment;
-        if (
-          server.endpoint !== INSTANTLY_MCP ||
-          server.transport !== "streamable_http" ||
-          server.userId !== context.userId ||
-          server.spaceId !== context.spaceId ||
-          (!assignment.allowAllTools &&
-            (!Array.isArray(assignment.allowedTools) ||
-              !assignment.allowedTools.includes("list_emails")))
-        )
-          throw new IsolationError();
-        const { secret, plaintext } = await loadMcpCredentialRecord(
-          this.prisma,
-          this.secrets,
-          server,
-          context,
-        );
-        if (!secret || !plaintext) throw new Error("An existing API-key credential is required");
-        const material = JSON.parse(plaintext) as OAuthMaterial;
-        redactions.push(...oauthMaterialSecrets(material));
-        if (material.oauth) throw new Error("An existing API-key credential is required");
-        const headers = new Headers(material.headers);
-        // The official MCP also accepts the raw API key in Authorization; REST requires Bearer.
-        const keys = [material.secret, headers.get("authorization"), headers.get("x-api-key")]
-          .filter((value): value is string => typeof value === "string" && value.length > 0)
-          .map((value) => value.replace(/^Bearer /i, ""));
-        const key = keys[0];
-        if (!key || /[\r\n\0]/.test(key) || keys.some((value) => value !== key))
-          throw new Error("An unambiguous existing API key is required");
-        redactions.push(key);
-        context.signal.throwIfAborted();
-        return { server, key, secretId: secret.id, digest: credentialDigest(plaintext) };
-      };
+      const authorize = () => this.authorizeInstantlyRest(call, context, redactions);
       const credential = await authorize();
       const assertAuthorized = async () => {
         const current = await authorize();
