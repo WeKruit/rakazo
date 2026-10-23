@@ -226,7 +226,7 @@ export function TeachComputerOverlayControl({
               value={goal}
               onChange={(event) => setGoal(event.target.value)}
               rows={3}
-              placeholder={t`Export this week's list from the CRM and drop it in the shared folder`}
+              placeholder={t`Export this week's candidate list and drop it in the shared folder`}
             />
             {error ? (
               <div role="alert" className="text-[13px] text-destructive">

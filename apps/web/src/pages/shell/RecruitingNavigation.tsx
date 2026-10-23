@@ -326,7 +326,7 @@ export function RecruitingNavigation({
         ) : null}
         {currentCrm?.failed || currentCrm?.unavailable ? (
           <p role="alert" className="px-3 text-xs">
-            <Trans>Could not read a CRM connection.</Trans>{" "}
+            <Trans>Could not read candidate records.</Trans>{" "}
             <button
               type="button"
               className="underline"

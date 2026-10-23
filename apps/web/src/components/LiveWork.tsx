@@ -28,7 +28,7 @@ function useWorkActivityLabels(): Record<WorkActivity, string> {
     candidates: t`Reviewing candidates`,
     research: t`Searching candidates`,
     feedback: t`Recording feedback`,
-    crm: t`Checking the CRM`,
+    crm: t`Checking candidate records`,
     question: t`Preparing a question`,
     specialist: t`Asking a specialist`,
     working: t`Working on it`,

@@ -2770,7 +2770,7 @@ export function ShellPage() {
         ...(draft.email.date ? [t`Date: ${draft.email.date}`] : []),
       ].join("\n");
       openRoleChat(
-        `${t`Reply to the selected email`}\n${reference.replace(/(^|\r\n|[\r\n\u2028\u2029])/g, "$1> ")}\n\n${t`Read this person's original email and complete conversation using the connected CRM and mailbox. Verify the person and current role, then prepare a reply here for me to edit. Only draft it; do not send.`}`,
+        `${t`Reply to the selected email`}\n${reference.replace(/(^|\r\n|[\r\n\u2028\u2029])/g, "$1> ")}\n\n${t`Read this person's original email and complete conversation using the saved records and mailbox. Verify the person and current role, then prepare a reply here for me to edit. Only draft it; do not send.`}`,
       );
     } catch (error) {
       if (isCurrent()) setSendError(errorText(error, t`Failed to load recruiting data`));
@@ -5332,8 +5332,6 @@ export function ShellPage() {
             refreshSignal={recruitingRefresh}
             readCache={recruitingReadCache.current}
             readCacheScope={recruitingCacheScope}
-            onAsk={(prompt) => void sendFromComposer(prompt, [], newClientNonce())}
-            onConnect={() => setPluginsOpen(true)}
           />
         ) : null}
         {workspaceNewRole ? (
@@ -5342,7 +5340,7 @@ export function ShellPage() {
           </div>
         ) : null}
         {boundRoleView && currentBindingRead?.failed ? <div className="px-6"><RetryNotice onRetry={() => setRecruitingRefresh(value => value + 1)}>
-          <Trans>Could not load this role’s CRM connection.</Trans>
+          <Trans>Could not load this role’s candidate records.</Trans>
         </RetryNotice></div> : boundRoleCrmMode && !effectiveCrmSelection ? <div className="p-6"><TabLoading /></div> : null}
         {(crmMode || (boundRoleCrmMode && effectiveCrmSelection)) && activeSnapshot?.threadId ? <div className="rk-scroll recruiting-workspace-main min-h-0 flex-1 overflow-y-auto">{effectiveCrmSelection ? <RecruitingPanel
           threadId={activeSnapshot.threadId} botId={inGroup ? undefined : active?.id} groupId={inGroup ? groupId : undefined}
@@ -5352,7 +5350,7 @@ export function ShellPage() {
             onSelectCandidate: (id, view = "inbox") => setSearchParams(current => { const next = new URLSearchParams(current); next.set("crmCandidate", id); next.set("view", view); return next; }),
             onDraftReply: boundRoleCrmMode && !crmMode ? draftCrmReply : undefined,
           }}
-        /> : <p role="alert"><Trans>Choose a CRM role again.</Trans></p>}</div> : null}
+        /> : <p role="alert"><Trans>Choose the role again.</Trans></p>}</div> : null}
         {workspaceCorrespondence && activeSnapshot?.threadId ? (
           <div className="rk-scroll recruiting-workspace-main min-h-0 flex-1 overflow-y-auto">
             {nativeCorrespondence}
