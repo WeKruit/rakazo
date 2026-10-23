@@ -1216,8 +1216,8 @@ msgid "Choose file"
 msgstr "Elegir archivo"
 
 #: src/pages/ModelSettingsOverlay.tsx
-msgid "Choose which connected model Rakazo uses."
-msgstr "Elige qué modelo conectado usa Rakazo."
+msgid "Choose which connected model WeKruit Headhunter uses."
+msgstr "Elige qué modelo conectado usa WeKruit Headhunter."
 
 #: src/pages/shell/dialogs.tsx
 msgid "Clear"
@@ -4652,8 +4652,8 @@ msgid "Paste a replacement key"
 msgstr "Pega una clave de reemplazo"
 
 #: src/pages/ModelSettingsOverlay.tsx
-msgid "Paste the OpenAI-compatible address from your server. Rakazo adds /v1 if needed."
-msgstr "Pega la dirección compatible con OpenAI de tu servidor. Rakazo agrega /v1 si es necesario."
+msgid "Paste the OpenAI-compatible address from your server. WeKruit Headhunter adds /v1 if needed."
+msgstr "Pega la dirección compatible con OpenAI de tu servidor. WeKruit Headhunter agrega /v1 si es necesario."
 
 #: src/pages/VoiceSettingsOverlay.tsx
 msgid "Paste your API key"
@@ -5343,8 +5343,8 @@ msgid "Retry screen"
 msgstr "Reintentar pantalla"
 
 #: src/pages/McpOAuthCallback.tsx
-msgid "Return to Rakazo"
-msgstr "Volver a Rakazo"
+msgid "Return to WeKruit Headhunter"
+msgstr "Volver a WeKruit Headhunter"
 
 #: src/pages/Shell.tsx
 msgid "Return to the original role before saving this draft."
@@ -6548,8 +6548,8 @@ msgid "This server is already connected. Disconnect it first to authorize again.
 msgstr "Este servidor ya está conectado. Desconéctalo primero para autorizarlo de nuevo."
 
 #: src/pages/ModelSettingsOverlay.tsx
-msgid "This subscription sign-in is not available in Rakazo yet. Use a deployment credential or choose another provider."
-msgstr "Este inicio de sesión por suscripción aún no está disponible en Rakazo. Usa una credencial de despliegue o elige otro proveedor."
+msgid "This subscription sign-in is not available in WeKruit Headhunter yet. Use a deployment credential or choose another provider."
+msgstr "Este inicio de sesión por suscripción aún no está disponible en WeKruit Headhunter. Usa una credencial de despliegue o elige otro proveedor."
 
 #: src/pages/Artifacts.tsx
 msgid "This week"
