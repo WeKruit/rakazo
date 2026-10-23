@@ -16,6 +16,7 @@ import { stableJsonValue } from "@rakazo/core/node/approval-effect-key";
 import type { PrismaClient, ThreadEvents } from "@rakazo/db";
 import { answerRunInput, getRecruitingWorkspace } from "@rakazo/db";
 import { describe, expect, it, vi } from "vitest";
+import { runInstantlyWrite } from "../../../packages/adapters/src/instantly-native-writes.js";
 import { getRecruitingCorrespondence } from "./recruiting.js";
 
 vi.mock("../../../packages/adapters/src/recruiting-context.js", async (original) => ({
@@ -488,11 +489,11 @@ describe("linked offline scheduling receipts", () => {
     });
     Object.assign(f.prisma.thread, { findFirst: vi.fn(async () => f.thread) });
     const mail = {
-      name: "gmail_send_email",
-      description: "Send email",
+      name: "native_instantly_reply_to_email",
+      description: "Reply to the original email",
       readOnly: false,
       inputSchema: { type: "object" },
-      route: { connectorId: "composio", toolName: "GMAIL_SEND_EMAIL" },
+      route: { connectorId: "mcp", toolName: "native_instantly_reply_to_email" },
     };
     const cal = (toolName: string) => ({
       name: `mcp__cal__${toolName}`,
@@ -513,6 +514,36 @@ describe("linked offline scheduling receipts", () => {
       { effect: "require_approval", matchKind: "tool", matchValue: mail.name },
     ]);
     const recipient = "candidate@example.test";
+    const originalEmail = {
+      id: "7a0a8e6e-4c2a-4d5f-9d4e-2d1f3c4b5a69",
+      thread_id: "synthetic-original-thread",
+      eaccount: "recruiter@example.test",
+      subject: "Interview",
+      from_address_email: recipient,
+    };
+    // Exercise the real reply adapter against a synthetic provider, not a fictional
+    // Gmail schema or a claim about live delivery.
+    const confirmationId = "8a0a8e6e-4c2a-4d5f-9d4e-2d1f3c4b5a69";
+    const replyRest = vi.fn(async (method: string, path: string, body?: unknown) => {
+      if (method === "GET" && path === `/emails/${originalEmail.id}`) return originalEmail;
+      if (method === "GET" && path === `/emails/${confirmationId}`)
+        return {
+          id: confirmationId,
+          thread_id: originalEmail.thread_id,
+          eaccount: originalEmail.eaccount,
+          reply_to_uuid: originalEmail.id,
+        };
+      if (method === "GET" && path === "/accounts/recruiter%40example.test")
+        return { email: originalEmail.eaccount };
+      if (method === "POST" && path === "/emails/reply") {
+        expect(body).toMatchObject({
+          reply_to_uuid: originalEmail.id,
+          eaccount: originalEmail.eaccount,
+        });
+        return { id: confirmationId, thread_id: originalEmail.thread_id };
+      }
+      throw new Error(`Unexpected synthetic provider request: ${method} ${path}`);
+    });
     const timeZone = "America/New_York";
     const slots = ["2026-10-26T14:00:00Z", "2026-10-26T15:00:00Z", "2026-10-27T14:00:00Z"];
     // Scripted candidate reply selects the second offered slot. No mail ingestion or
@@ -569,7 +600,15 @@ describe("linked offline scheduling receipts", () => {
           ...(scenario === "confirmation_uncertain" ? { outcome: "uncertain" as const } : {}),
         };
         return;
-      } else data = { messageId: `synthetic-mail-${f.connector.execute.mock.calls.length}` };
+      } else
+        data = await runInstantlyWrite(
+          {} as never,
+          replyRest as never,
+          {} as never,
+          "synthetic-mail-server",
+          "native_instantly_reply_to_email",
+          call.args,
+        );
       yield { type: "result", data: { content: [{ type: "text", text: JSON.stringify(data) }] } };
     });
     async function approveAndExecute(
@@ -610,7 +649,17 @@ describe("linked offline scheduling receipts", () => {
       f.setCalls([
         {
           name,
-          args: { ...args, to: "wrong@example.test", start: slots[2] },
+          args: {
+            ...args,
+            to: "wrong@example.test",
+            start: slots[2],
+            ...(name === mail.name
+              ? {
+                  reply_to_uuid: "9a0a8e6e-4c2a-4d5f-9d4e-2d1f3c4b5a69",
+                  eaccount: "wrong@example.test",
+                }
+              : {}),
+          },
           executionId: `resume-${index}`,
         },
       ]);
@@ -629,9 +678,10 @@ describe("linked offline scheduling receipts", () => {
     await approveAndExecute(
       mail.name,
       {
-        to: recipient,
+        reply_to_uuid: originalEmail.id,
+        eaccount: originalEmail.eaccount,
         subject: "Interview options",
-        body: `Choose one (${timeZone}): ${slots.join(", ")}`,
+        body: { text: `Choose one (${timeZone}): ${slots.join(", ")}` },
       },
       1,
     );
@@ -750,12 +800,36 @@ describe("linked offline scheduling receipts", () => {
     await approveAndExecute(
       mail.name,
       {
-        to: recipient,
+        reply_to_uuid: originalEmail.id,
+        eaccount: originalEmail.eaccount,
         subject: "Interview confirmed",
-        body: `Confirmed ${projected.events[0]!.start} (${timeZone}); ${projected.events[0]!.url}`,
+        body: {
+          text: `Confirmed ${projected.events[0]!.start} (${timeZone}); ${projected.events[0]!.url}`,
+        },
       },
       3,
       scenario === "confirmation_uncertain" ? "uncertain" : "completed",
+    );
+    if (scenario !== "confirmation_uncertain" && scenario !== "confirmation_rejected") {
+      const sendReceipt = f.effects.at(-1)!.result as { content: Array<{ text: string }> };
+      const sent = JSON.parse(sendReceipt.content[0]!.text) as { id: string };
+      const readback = await runInstantlyWrite(
+        {} as never,
+        replyRest as never,
+        {} as never,
+        "synthetic-mail-server",
+        "native_instantly_get_email",
+        { id: sent.id },
+      );
+      expect(readback).toMatchObject({
+        id: sent.id,
+        thread_id: originalEmail.thread_id,
+        eaccount: originalEmail.eaccount,
+        reply_to_uuid: originalEmail.id,
+      });
+    }
+    expect(replyRest.mock.calls.filter(([method]) => method === "POST")).toHaveLength(
+      scenario === "confirmation_uncertain" || scenario === "confirmation_rejected" ? 1 : 2,
     );
     if (scenario === "confirmation_uncertain") {
       expect(booked.status).toBe("completed");
