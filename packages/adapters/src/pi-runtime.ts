@@ -2459,13 +2459,21 @@ async function boundAgentToolResult<T>(
 }
 
 /** Executor-backed storage for clipped results; absent for runs without an artifact store. */
+/** Tools that already read durable stored data; re-saving their pages would only duplicate it. */
+const STORED_DATA_READ_TOOLS: ReadonlySet<string> = new Set([
+  "artifact_read",
+  "read_history",
+  "search_history",
+  "skill_read",
+]);
+
 function toolOutputStore(
   host: ToolHost,
   name: string,
   executionId: string,
 ): ToolOutputStore | undefined {
   const store = host.request.storeToolOutput;
-  if (!store) return undefined;
+  if (!store || STORED_DATA_READ_TOOLS.has(name)) return undefined;
   return (text) => store({ name, executionId, text });
 }
 

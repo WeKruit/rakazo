@@ -112,7 +112,9 @@ export async function storeToolOutputArtifact(
 ): Promise<{ artifactId: string; length: number } | undefined> {
   const bytes = new TextEncoder().encode(input.text);
   if (bytes.byteLength > ATTACHMENT_MAX_BYTES) return undefined;
-  const name = `${input.toolName}-${input.executionId}.txt`.slice(0, ARTIFACT_NAME_MAX_LENGTH);
+  // Execution ids are long structured strings; a short digest keeps the file name readable.
+  const digest = createHash("sha256").update(input.executionId).digest("hex").slice(0, 12);
+  const name = `${input.toolName}-${digest}.txt`.slice(0, ARTIFACT_NAME_MAX_LENGTH);
   const context = {
     operationId: `tool-output:${input.executionId}`,
     traceId: `tool-output:${input.executionId}`,

@@ -74,7 +74,10 @@ describe("clipped tool output artifacts", () => {
     );
     expect(stored).toEqual({ artifactId: "artifact-2", length: 16 });
     expect(put).toHaveBeenCalledWith(
-      expect.objectContaining({ name: "web_fetch-exec-1.txt", mimeType: "text/plain" }),
+      expect.objectContaining({
+        name: expect.stringMatching(/^web_fetch-[0-9a-f]{12}\.txt$/),
+        mimeType: "text/plain",
+      }),
       expect.objectContaining({ spaceId: "workspace-1", botId: "bot-1" }),
     );
     expect(create).toHaveBeenCalledWith(
