@@ -349,7 +349,11 @@ export function appendToolCallSegment(
 }
 
 export function humanizeToolName(name: string): string {
-  const spaced = name.replace(/_/g, " ").trim();
+  // Provider-prefixed names ("instantly_instantly_activate_campaign") say the provider once.
+  const spaced = name
+    .replace(/_/g, " ")
+    .trim()
+    .replace(/\b(\w+)(\s+\1\b)+/gi, "$1");
   if (!spaced) return name;
   const lower = spaced.toLowerCase();
   return lower.charAt(0).toUpperCase() + lower.slice(1);

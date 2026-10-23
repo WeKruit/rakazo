@@ -436,8 +436,10 @@ describe("buildApprovalAskBlock", () => {
   );
 
   it.each([
-    ["mcp__autumn__research", "Autumn: Research"],
-    ["gmail_send_email", "Gmail send email"],
+    ["mcp__autumn__research", "Review before Autumn: Research"],
+    ["gmail_send_email", "Confirm sending email"],
+    ["instantly_instantly_activate_campaign", "Confirm sending the first email"],
+    ["mcp__instantly__instantly_activate_campaign", "Confirm sending the first email"],
   ])("names %s readably while preserving the exact consent and destination", (tool, label) => {
     const args = {
       to: "Exact Recipient <recipient+review@example.test>",
@@ -448,7 +450,7 @@ describe("buildApprovalAskBlock", () => {
     const block = buildApprovalAskBlock("original-effect", tool, args, ["token-secret"], {
       reviewReason: "Review this exact destination and content.",
     });
-    expect(block.text).toBe(`Review before ${label} → ${args.to}`);
+    expect(block.text).toBe(`${label} → ${args.to}`);
     expect(block.detail).toBe(
       `Review this exact destination and content.\nto: ${args.to}\nsubject: ${args.subject}\nbody: ${args.body}\ntoken: [redacted]`,
     );
@@ -483,7 +485,7 @@ describe("buildApprovalAskBlock", () => {
         },
       },
     );
-    expect(block.text).toBe("Review before sending the first campaign email");
+    expect(block.text).toBe("Confirm sending the first email");
     expect(block.detail).toBe(
       [
         "Campaign: Founding Engineer",
