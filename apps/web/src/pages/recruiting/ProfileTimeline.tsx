@@ -1,13 +1,24 @@
 import { Trans, useLingui } from "@lingui/react/macro";
+import { recruitingCandidateSourceText } from "@rakazo/contracts";
 import type { ReactNode } from "react";
 import { useMemo } from "react";
 import { ProfileImage } from "./ProfileImage";
 import type { ProfileAssets } from "./profileAssets";
-import { organizationLogo } from "./profileAssets";
+import { organizationLogo, profileImageUrl } from "./profileAssets";
 import type { TimelineEntry, TimelineKind } from "./profileTimeline";
-import { parseTimeline, timelineStats } from "./profileTimeline";
+import { parseTimeline, structuredProfileTimeline, timelineStats } from "./profileTimeline";
 
-type TimelineField = { label: string; value: string | null; sourceUrls: readonly string[] };
+type TimelineField = {
+  label: string;
+  value: string | null;
+  sourceUrls: readonly string[];
+  timelineEntries?: readonly TimelineEntry[];
+  sourceText?: string;
+  evidence?: string;
+  reasoning?: string;
+  structuredValue?: unknown;
+  sourceUrlsById?: Record<string, readonly string[]>;
+};
 type SourcesRenderer = (props: { urls: readonly string[] }) => ReactNode;
 
 function logoInitials(name: string) {
@@ -72,19 +83,27 @@ function Row({
   kind,
   asset,
   link,
+  Sources,
 }: {
   entry: TimelineEntry;
   kind: TimelineKind;
   asset?: ProfileAssets["company"];
   link?: ProfileAssets["companyLink"];
+  Sources: SourcesRenderer;
 }) {
   const duration = useDuration();
   const { t } = useLingui();
   if (!entry.structured) {
     return <li className="break-words whitespace-pre-wrap text-sm">{entry.text}</li>;
   }
-  const logoName = kind === "experience" ? (entry.secondary ?? entry.primary) : entry.primary;
-  const href = organizationLogo(logoName, link ?? null);
+  const logoName =
+    entry.organization !== undefined
+      ? entry.organization
+      : kind === "experience"
+        ? (entry.secondary ?? entry.primary)
+        : entry.primary;
+  const href =
+    profileImageUrl(entry.organizationUrl) ?? organizationLogo(logoName ?? undefined, link ?? null);
   const organization = (name: string) =>
     href ? (
       <a href={href} target="_blank" rel="noreferrer" className="underline underline-offset-2">
@@ -96,12 +115,21 @@ function Row({
   const dateLabel = entry.current ? `${entry.startLabel} – ${t`Present`}` : entry.dateLabel;
   return (
     <li className="flex gap-3">
-      <CompanyLogo name={logoName} src={organizationLogo(logoName, asset ?? null)} />
+      {logoName ? (
+        <CompanyLogo
+          name={logoName}
+          src={profileImageUrl(entry.logoUrl) ?? organizationLogo(logoName, asset ?? null)}
+        />
+      ) : (
+        <span aria-hidden className="size-10 shrink-0" />
+      )}
       <div className="min-w-0 flex-1">
         <div className="flex flex-wrap items-start justify-between gap-x-3 gap-y-1">
           <div className="min-w-0 break-words">
             <p className="text-sm font-semibold">
-              {kind === "education" ? organization(entry.primary) : entry.primary}
+              {kind === "education" || (entry.organization && !entry.secondary)
+                ? organization(entry.primary)
+                : entry.primary}
             </p>
             {entry.secondary ? (
               <p className="text-sm">
@@ -118,6 +146,21 @@ function Row({
         </div>
         {entry.detail ? (
           <p className="mt-1 break-words text-xs text-muted-foreground">{entry.detail}</p>
+        ) : null}
+        {entry.sourceUrls?.length ? (
+          <div className="mt-2">
+            <Sources urls={entry.sourceUrls} />
+          </div>
+        ) : null}
+        {entry.description ? (
+          <details className="mt-2 text-xs">
+            <summary className="cursor-pointer text-muted-foreground">
+              <Trans>Description</Trans>
+            </summary>
+            <p className="mt-2 break-words whitespace-pre-wrap leading-relaxed">
+              {entry.description}
+            </p>
+          </details>
         ) : null}
       </div>
     </li>
@@ -139,29 +182,79 @@ function Timeline({
 }) {
   const now = useMemo(() => new Date(), []);
   const parsed = useMemo(
-    () => fields.map((field) => ({ field, entries: parseTimeline(field.value, kind, now) })),
+    () =>
+      fields.map((field) => ({
+        field,
+        entries:
+          field.timelineEntries ??
+          (field.structuredValue !== undefined
+            ? structuredProfileTimeline(field.structuredValue, kind, now, field.sourceUrlsById)
+            : parseTimeline(field.value, kind, now)),
+      })),
     [fields, kind, now],
   );
   const all = parsed.flatMap((item) => item.entries);
+  const structured = parsed.some(
+    ({ field, entries }) =>
+      (field.timelineEntries || field.structuredValue !== undefined) &&
+      entries.some((entry) => entry.structured),
+  );
   return (
     <div className="space-y-4">
       {kind === "experience" ? <StatTiles entries={all} /> : null}
-      {parsed.map(({ field, entries }) => (
-        <div key={field.label} className="space-y-2">
-          <ul className="space-y-4">
-            {entries.map((entry, index) => (
-              <Row
-                key={`${index}-${entry.text}`}
-                entry={entry}
-                kind={kind}
-                asset={asset}
-                link={link}
-              />
-            ))}
-          </ul>
-          <Sources urls={field.sourceUrls} />
-        </div>
-      ))}
+      {parsed.map(({ field, entries }, fieldIndex) =>
+        structured &&
+        !field.timelineEntries &&
+        field.structuredValue === undefined &&
+        !entries.some((entry) => entry.structured) ? (
+          <details key={`${fieldIndex}-${field.label}`} className="text-xs text-muted-foreground">
+            <summary className="cursor-pointer">{field.label}</summary>
+            <div className="mt-2 space-y-2 break-words whitespace-pre-wrap leading-relaxed">
+              {[field.value, field.evidence, field.reasoning].filter(Boolean).map((text, index) => (
+                <p key={index}>{text}</p>
+              ))}
+              <Sources urls={field.sourceUrls} />
+            </div>
+          </details>
+        ) : (
+          <div key={`${fieldIndex}-${field.label}`} className="space-y-2">
+            <ul className="space-y-4">
+              {entries.map((entry, index) => (
+                <Row
+                  key={`${index}-${entry.text}`}
+                  entry={entry}
+                  kind={kind}
+                  asset={asset}
+                  link={link}
+                  Sources={Sources}
+                />
+              ))}
+            </ul>
+            {field.evidence ? (
+              <p className="break-words whitespace-pre-wrap text-sm">{field.evidence}</p>
+            ) : null}
+            {field.reasoning ? (
+              <p className="break-words whitespace-pre-wrap text-sm text-muted-foreground">
+                {field.reasoning}
+              </p>
+            ) : null}
+            {field.timelineEntries || field.structuredValue !== undefined ? (
+              <details className="text-xs text-muted-foreground">
+                <summary className="cursor-pointer">
+                  <Trans>Source text</Trans>
+                </summary>
+                <p className="mt-2 break-words whitespace-pre-wrap leading-relaxed">
+                  {field.sourceText ??
+                    (field.structuredValue !== undefined
+                      ? recruitingCandidateSourceText(field.structuredValue)
+                      : field.value)}
+                </p>
+              </details>
+            ) : null}
+            <Sources urls={field.sourceUrls} />
+          </div>
+        ),
+      )}
     </div>
   );
 }

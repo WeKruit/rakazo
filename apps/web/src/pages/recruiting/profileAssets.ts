@@ -1,5 +1,5 @@
 import type { RecruitingCandidateReport } from "@rakazo/contracts";
-import { parseTimeline } from "./profileTimeline";
+import { parseTimeline, structuredProfileTimeline } from "./profileTimeline";
 
 type Field = RecruitingCandidateReport["fields"][number];
 export type ProfileAssets = {
@@ -28,7 +28,13 @@ export function profileImageUrl(value: string | null | undefined): string | null
 }
 
 export function isProfileAssetField(field: Field) {
-  if (field.providerStatus !== undefined || field.evidence || field.reasoning) return false;
+  if (
+    field.structuredValue !== undefined ||
+    field.providerStatus !== undefined ||
+    field.evidence ||
+    field.reasoning
+  )
+    return false;
   return [PHOTO, COMPANY_LOGO, SCHOOL_LOGO, COMPANY_LINK, SCHOOL_LINK].some((pattern) =>
     pattern.test(field.label.trim()),
   );
@@ -42,12 +48,51 @@ export function profileAssets(fields: readonly Field[], company?: string | null)
     const url = profileImageUrl(value(pattern));
     return name && url ? { name, url } : null;
   };
+  const now = new Date();
+  const structured = (kind: "experience" | "education", labels: RegExp) =>
+    fields.flatMap((field) =>
+      field.structuredValue !== undefined && labels.test(field.label)
+        ? structuredProfileTimeline(field.structuredValue, kind, now, field.sourceUrlsById)
+        : [],
+    );
+  const work = structured(
+    "experience",
+    /experience|employment|work history|career|tenure|^employer descriptions?$/i,
+  );
+  const education = structured("education", /educat|school|degree|universit|college/i);
+  const companyName = value(/^(?:current )?company$/i) ?? company ?? null;
+  const schoolName =
+    value(/^(?:school|university)$/i) ??
+    education.find((entry) => entry.organization)?.organization ??
+    null;
+  const retainedAsset = (
+    entries: typeof work,
+    name: string | null,
+    key: "logoUrl" | "organizationUrl",
+  ) => {
+    if (!name) return null;
+    const urls = [
+      ...new Set(
+        entries.flatMap((entry) => {
+          const url = profileImageUrl(entry[key]);
+          return entry.organization &&
+            url &&
+            organizationLogo(name, { name: entry.organization, url })
+            ? [url]
+            : [];
+        }),
+      ),
+    ];
+    return urls.length === 1 ? { name, url: urls[0]! } : null;
+  };
   return {
     photo: profileImageUrl(value(PHOTO)),
-    company: asset(COMPANY_LOGO, value(/^(?:current )?company$/i) ?? company ?? null),
-    school: asset(SCHOOL_LOGO, value(/^(?:school|university)$/i)),
-    companyLink: asset(COMPANY_LINK, value(/^(?:current )?company$/i) ?? company ?? null),
-    schoolLink: asset(SCHOOL_LINK, value(/^(?:school|university)$/i)),
+    company: asset(COMPANY_LOGO, companyName) ?? retainedAsset(work, companyName, "logoUrl"),
+    school: asset(SCHOOL_LOGO, schoolName) ?? retainedAsset(education, schoolName, "logoUrl"),
+    companyLink:
+      asset(COMPANY_LINK, companyName) ?? retainedAsset(work, companyName, "organizationUrl"),
+    schoolLink:
+      asset(SCHOOL_LINK, schoolName) ?? retainedAsset(education, schoolName, "organizationUrl"),
   };
 }
 

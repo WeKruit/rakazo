@@ -3,6 +3,7 @@ import type { Page } from "@playwright/test";
 import type {
   AppBootstrap,
   RecruitingCandidate,
+  RecruitingCandidateReport,
   RecruitingRoleRevision,
   RecruitingSchedulingPlan,
   RecruitingSourceRef,
@@ -373,6 +374,7 @@ export async function mockRecruitingApp(
     emptyMail?: boolean;
     multipleCampaigns?: boolean;
     calendarStatus?: "accepted" | "confirmed";
+    candidateReport?: RecruitingCandidateReport;
   } = {},
 ) {
   const plans: RecruitingSchedulingPlan[] = [];
@@ -487,12 +489,21 @@ export async function mockRecruitingApp(
       };
     else if (method === "recruiting/roleSetup") value = { ready: true, attention: null, items: [] };
     else if (method === "recruiting/listCandidates") {
-      const items = candidates.filter(
-        (candidate) =>
-          (input.shortlisted !== true || candidate.shortlisted) &&
-          (!input.query ||
-            candidate.name?.toLowerCase().includes(String(input.query).toLowerCase())),
-      );
+      const items = candidates
+        .map((candidate, index) =>
+          index === 0 && options.candidateReport && candidate.latestSource
+            ? {
+                ...candidate,
+                latestSource: { ...candidate.latestSource, report: options.candidateReport },
+              }
+            : candidate,
+        )
+        .filter(
+          (candidate) =>
+            (input.shortlisted !== true || candidate.shortlisted) &&
+            (!input.query ||
+              candidate.name?.toLowerCase().includes(String(input.query).toLowerCase())),
+        );
       value = {
         roleId: role.id,
         roleRevisionId: revision.id,

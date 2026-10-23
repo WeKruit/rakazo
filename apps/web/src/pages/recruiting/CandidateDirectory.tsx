@@ -13,7 +13,7 @@ import {
   profileContentFields,
   profileImageUrl,
 } from "./profileAssets";
-import { parseTimeline } from "./profileTimeline";
+import { parseTimeline, structuredProfileTimeline } from "./profileTimeline";
 import { statusText } from "./shared";
 import type { RoleCandidate } from "./useRoleCandidates";
 
@@ -34,7 +34,13 @@ function directoryProfile(row: RoleCandidate, revision?: ProfileCriterionRevisio
     roleRevisionId: row.autumn?.latestSource?.roleRevisionId,
     revision,
   });
-  const school = parseTimeline(sections.education[0]?.value, "education", new Date())[0];
+  const now = new Date();
+  const school =
+    sections.education.flatMap((field) =>
+      field.structuredValue === undefined
+        ? []
+        : structuredProfileTimeline(field.structuredValue, "education", now, field.sourceUrlsById),
+    )[0] ?? parseTimeline(sections.education[0]?.value, "education", now)[0];
   return { company, assets, sections, school, profileUrl: profileImageUrl(row.linkedinUrl) };
 }
 
@@ -84,16 +90,22 @@ function Education({ profile, compact = false }: { profile: DirectoryProfile; co
   return (
     <div className={`flex min-w-0 items-center ${compact ? "gap-2" : "gap-2.5"}`}>
       <span className={compact ? "shrink-0 [&>span]:size-6 [&>span]:text-[9px]" : "shrink-0"}>
-        <CompanyLogo name={school.primary} src={organizationLogo(school.primary, assets.school)} />
+        <CompanyLogo
+          name={school.primary}
+          src={profileImageUrl(school.logoUrl) ?? organizationLogo(school.primary, assets.school)}
+        />
       </span>
       <div className="min-w-0">
         <p
           className={`${compact ? "truncate" : "line-clamp-2 break-words"} text-xs font-medium`}
-          title={school.text}
+          title={[school.primary, school.secondary, school.dateLabel].filter(Boolean).join(" · ")}
         >
           <OrganizationName
             name={school.primary}
-            href={organizationLogo(school.primary, assets.schoolLink)}
+            href={
+              profileImageUrl(school.organizationUrl) ??
+              organizationLogo(school.primary, assets.schoolLink)
+            }
           />
         </p>
         {school.secondary ? (

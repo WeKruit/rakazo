@@ -1,4 +1,5 @@
 import { Trans, useLingui } from "@lingui/react/macro";
+import { recruitingCandidateSourceText } from "@rakazo/contracts";
 import { Button, buttonVariants } from "@rakazo/ui-web";
 import {
   ArrowLeft,
@@ -637,6 +638,7 @@ function FieldList({
     value: string | null;
     evidence?: string;
     reasoning?: string;
+    structuredValue?: unknown;
     sourceUrls: readonly string[];
   }[];
   keywords: readonly string[];
@@ -658,6 +660,14 @@ function FieldList({
                 <HighlightText text={text} terms={keywords} />
               </p>
             ))}
+            {field.structuredValue !== undefined ? (
+              <details className="text-xs text-muted-foreground">
+                <summary className="cursor-pointer">
+                  <Trans>Source text</Trans>
+                </summary>
+                <p className="mt-2">{recruitingCandidateSourceText(field.structuredValue)}</p>
+              </details>
+            ) : null}
           </dd>
           <Sources urls={field.sourceUrls} />
         </div>

@@ -326,5 +326,12 @@ it("opens stored company and profile history without inventing education or asse
   expect(panel.textContent).toContain("PostgreSQL");
   expect(panel.textContent).not.toContain("Education");
   expect(panel.textContent).not.toContain("Agent assessment");
-  expect(panel.textContent).not.toContain("unstructured data");
+  expect([...panel.querySelectorAll("li")].map((row) => row.textContent).join(" ")).not.toContain(
+    "unstructured data",
+  );
+  const original = [...panel.querySelectorAll("details")].find(
+    (details) => details.querySelector("summary")?.textContent === "Source text",
+  );
+  expect(original?.open).toBe(false);
+  expect(original?.textContent).toContain("unstructured data");
 });
