@@ -1098,8 +1098,9 @@ describe("tool audit ordering", () => {
 
     await f.run();
 
-    const audits = f.executorDeps.events.append.mock.calls
-      .map(([event]) => event as { type: string; payload: { executionId?: string } })
+    const audits = vi
+      .mocked(f.executorDeps.events.append)
+      .mock.calls.map(([event]) => event as { type: string; payload: { executionId?: string } })
       .filter(
         (event) =>
           (event.type === "agent.tool.called" || event.type === "agent.tool.completed") &&
