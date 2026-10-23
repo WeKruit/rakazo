@@ -89,6 +89,8 @@ import {
 } from "../lib/right-panel-state";
 import { rpc } from "../lib/rpc";
 import { CorrespondenceEmails } from "./RecruitingCorrespondence";
+import type { RecruitingInboxEmail } from "./recruiting";
+import { ContactsTab, InboxTab, InterviewTab, SequenceTab } from "./recruiting";
 import type { RecruitingWorkspaceView } from "./shell/RecruitingNavigation";
 
 export type CrmBrowseSelection = Pick<
@@ -2311,17 +2313,65 @@ function RoleAgentSection({ crmBrowse, roleConversation: _, ...props }: Props) {
 }
 
 /**
- * Single mount point for the Contacts, Sequence, Inbox and Interview tabs.
- * Swap: render `ContactsTab`/`SequenceTab`/`InboxTab`/`InterviewTab` from `./recruiting/` here
- * with `{ roleId, spaceId }`; until they land, the existing stored CRM views are the fallback.
+ * Single mount point for the Contacts, Sequence, Inbox and Interview tabs. The role tabs need the
+ * conversation's native role bound to CRM; a CRM role without one keeps its stored CRM views.
  */
 function CorrespondenceTabMount({
+  view,
+  role,
+  conversation,
+  refreshSignal,
+  onDraftReply,
   fallback,
 }: {
   view: RecruitingWorkspaceView;
+  role?: { roleId: string; spaceId: string };
+  conversation: { groupId: string } | { botId: string };
+  refreshSignal: number;
+  onDraftReply?: (email: RecruitingInboxEmail) => void;
   fallback: ReactNode;
 }) {
-  return <>{fallback}</>;
+  const [email, setEmail] = useState<RecruitingInboxEmail>();
+  if (!role) return <>{fallback}</>;
+  const props = { ...role, conversation, refreshSignal };
+  if (view === "contacts") return <ContactsTab {...props} />;
+  if (view === "sequence") return <SequenceTab {...props} />;
+  if (view === "interview") return <InterviewTab {...props} />;
+  return (
+    <>
+      {onDraftReply && email ? (
+        <Button variant="outline" onClick={() => onDraftReply(email)}>
+          <Trans>Draft reply</Trans>
+        </Button>
+      ) : null}
+      <InboxTab {...props} onSelectEmail={setEmail} />
+    </>
+  );
+}
+
+/** The role conversation's native role when it is bound to a CRM role. */
+function useBoundRole(
+  threadId: string,
+  enabled: boolean,
+  refreshSignal: number,
+): { roleId: string; spaceId: string } | undefined {
+  const key = enabled ? JSON.stringify([threadId, refreshSignal]) : null;
+  const [read, setRead] = useState<{ key: string; role?: { roleId: string; spaceId: string } }>();
+  useEffect(() => {
+    if (!key) return;
+    let cancelled = false;
+    void rpc.recruiting
+      .getWorkspace({ threadId })
+      .then((workspace) => {
+        if (!cancelled && workspace?.crmTarget)
+          setRead({ key, role: { roleId: workspace.role.id, spaceId: workspace.role.spaceId } });
+      })
+      .catch(() => undefined);
+    return () => {
+      cancelled = true;
+    };
+  }, [key, threadId]);
+  return read?.key === key ? read.role : undefined;
 }
 
 function CrmRecruitingPanel({
@@ -2340,6 +2390,7 @@ function CrmRecruitingPanel({
   const [query, setQuery] = useState("");
   const [offset, setOffset] = useState(0);
   const [refresh, setRefresh] = useState(0);
+  const boundRole = useBoundRole(threadId, Boolean(agent), refreshSignal + refresh);
   const [mailPageSelection, setMailPageSelection] = useState<{
     candidateId: string;
     cursor: Extract<RecruitingCrmDataInput, { operation: "mail" }>["cursor"];
@@ -3467,7 +3518,28 @@ function CrmRecruitingPanel({
         {page?.selectedRole ? <p>{page.selectedRole.clientLabel}</p> : null}
       </header>
       {["contacts", "sequence", "inbox", "interview"].includes(browse.view) ? (
-        <CorrespondenceTabMount view={browse.view} fallback={body} />
+        <CorrespondenceTabMount
+          view={browse.view}
+          role={boundRole}
+          conversation={target}
+          refreshSignal={refreshSignal + refresh}
+          onDraftReply={
+            browse.onDraftReply
+              ? ({ email, ...context }) =>
+                  browse.onDraftReply?.({
+                    ...context,
+                    threadId,
+                    email: {
+                      sender: email.sender,
+                      recipients: email.recipients,
+                      subject: email.subject,
+                      date: email.date,
+                    },
+                  })
+              : undefined
+          }
+          fallback={body}
+        />
       ) : (
         body
       )}
