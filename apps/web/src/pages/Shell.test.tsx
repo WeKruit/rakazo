@@ -308,6 +308,7 @@ async function renderFeedbackShell(
     initialPath?: string;
     favicons?: LinkFavicons;
     crmTarget?: ListRecruitingCandidatesOutput["crmTarget"];
+    groupName?: string;
     crmRoleReference?: {
       sourceId: string;
       serverRevision: number;
@@ -367,7 +368,7 @@ async function renderFeedbackShell(
   const group = {
     id: "group-1",
     spaceId: "space-1",
-    name: "Recruiting crew",
+    name: options.groupName ?? "Recruiting crew",
     crmRoleReference: options.crmRoleReference,
     pinned: false,
     sectionId: null,
@@ -5430,6 +5431,36 @@ it("sends a message during a working reply as an interjection and says when it i
   await emit(event(104, "run.completed"));
   expect(container!.textContent).not.toContain("Interrupted, resuming…");
   expect(container!.textContent).not.toContain("Interjection");
+});
+
+it("refreshes a new role's sidebar name when its title is saved", async () => {
+  const streams: Array<{
+    options: Parameters<typeof CoreModule.runThreadSubscription>[0];
+    head: { threadId: string; cursor: number };
+  }> = [];
+  vi.spyOn(CoreModule, "runThreadSubscription").mockImplementation(async (options) => {
+    const head = await options.loadInitial();
+    if (head) streams.push({ options, head });
+  });
+  await renderFeedbackShell("group", undefined, { openFeedback: false, groupName: "New role" });
+  const stream = streams.at(-1)!;
+  const reads = shellApi.listSpaces.mock.calls.length;
+  await act(async () => {
+    stream.options.onEvent(
+      {
+        id: "role-saved",
+        type: "recruiting.changed",
+        threadId: stream.head.threadId,
+        spaceId: "space-1",
+        seq: 90,
+        payload: {},
+        createdAt: "2026-01-01T00:00:00Z",
+      } as never,
+      stream.head,
+      { snapshotStale: false },
+    );
+  });
+  expect(shellApi.listSpaces.mock.calls.length).toBeGreaterThan(reads);
 });
 
 describe("chat open latency with 300 ms reads", () => {
