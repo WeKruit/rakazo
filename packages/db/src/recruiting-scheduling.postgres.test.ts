@@ -237,7 +237,10 @@ database("scheduling plan persistence (local PostgreSQL)", () => {
     ).toBe(1);
     expect(
       (await prisma.externalEffect.findUniqueOrThrow({ where: { id: plans[0]!.id } })).request,
-    ).toMatchObject({ input, mailSourceRevision: 1 });
+    ).toMatchObject({
+      input: { roleId: input.roleId, calendar: input.calendar, candidate: input.candidate },
+      mailSourceRevision: 1,
+    });
   });
   it.each(["owner", "role", "source", "mailbox", "thread", "candidate"])(
     "rejects substituted %s evidence without creating a plan",
@@ -425,6 +428,53 @@ database("scheduling plan persistence (local PostgreSQL)", () => {
     expect((await bind(saved.confirmationEffectId!)).confirmationEffectId).toBe(
       saved.confirmationEffectId,
     );
+
+    const read = () =>
+      loadVerifiedRecruitingSchedulingPlan(prisma, actor, {
+        threadId: confirmationInput.threadId,
+        planId: plan.id,
+      });
+    for (const [result, expected] of [
+      [{ status: "error", message: "Synthetic failure" }, "failed"],
+      [{ status: "success", data: {} }, "uncertain"],
+    ] as const) {
+      await prisma.externalEffect.update({
+        where: { id: booking.id },
+        data: { status: "completed", result: { structuredContent: result } },
+      });
+      expect((await read()).bookingStatus).toBe(expected);
+    }
+    await prisma.externalEffect.update({
+      where: { id: booking.id },
+      data: {
+        status: "completed",
+        result: { structuredContent: { status: "success", data: booked } },
+      },
+    });
+    expect((await read()).bookingStatus).toBe("completed");
+    const sentId = randomUUID();
+    await prisma.externalEffect.update({
+      where: { id: saved.confirmationEffectId! },
+      data: { status: "completed", result: { structuredContent: { id: sentId } } },
+    });
+    expect((await read()).confirmationStatus).toBe("uncertain");
+    await effect(
+      mailId,
+      "get_email",
+      { id: sentId },
+      {
+        id: sentId,
+        thread_id: "original-thread",
+        reply_to_uuid: "original-email",
+        eaccount: "recruiter@example.test",
+        from_address_email: "recruiter@example.test",
+        to_address_email_list: input.candidate.email,
+        ue_type: 3,
+        timestamp_email: new Date().toISOString(),
+        body: { text: "Confirmed" },
+      },
+    );
+    expect((await read()).confirmationStatus).toBe("completed");
     await prisma.externalEffect.update({
       where: { id: saved.confirmationEffectId! },
       data: { status: "uncertain", result: { uncertain: true } },
@@ -757,5 +807,68 @@ database("scheduling plan persistence (local PostgreSQL)", () => {
         data: { request: original.request as Prisma.InputJsonValue },
       });
     }
+  });
+  it("resolves a native LinkedIn candidate through the existing campaign mapping without CRM import", async () => {
+    const candidateKey = "https://www.linkedin.com/in/synthetic-candidate";
+    await prisma.recruitingCandidate.create({ data: { roleId: input.roleId, candidateKey } });
+    const campaignId = randomUUID(),
+      leadId = randomUUID();
+    const mapping = await prisma.externalEffect.create({
+      data: {
+        spaceId: actor.spaceId,
+        runId,
+        kind: "instantly_role_campaign",
+        idempotencyKey: `instantly-role-campaign:${mailId}:${input.roleId}`,
+        status: "completed",
+        request: {},
+        result: {
+          campaignId,
+          eaccount: "recruiter@example.test",
+          leads: { [candidateKey]: { leadId, email: input.candidate.email } },
+        },
+      },
+    });
+    const mail = await effect(
+      mailId,
+      "get_email",
+      { id: "linkedin-email" },
+      {
+        id: "linkedin-email",
+        thread_id: "linkedin-thread",
+        eaccount: "recruiter@example.test",
+        from_address_email: input.candidate.email,
+        campaign_id: campaignId,
+        lead: leadId,
+      },
+    );
+    const linked = {
+      ...input,
+      candidate: { ...input.candidate, candidateKey },
+      originalEmail: {
+        ...input.originalEmail,
+        providerMessageId: "linkedin-email",
+        providerThreadId: "linkedin-thread",
+        campaignId,
+        savedRead: { ...input.originalEmail.savedRead!, effectId: mail.id },
+      },
+    };
+    expect(
+      (await createRecruitingSchedulingPlan(prisma, actor, linked)).candidate.candidateKey,
+    ).toBe(candidateKey);
+    await prisma.recruitingCandidate.create({
+      data: { roleId: input.roleId, candidateKey: "https://www.linkedin.com/in/unmapped" },
+    });
+    await expect(
+      createRecruitingSchedulingPlan(prisma, actor, {
+        ...linked,
+        candidate: { ...linked.candidate, candidateKey: "https://www.linkedin.com/in/unmapped" },
+      }),
+    ).rejects.toThrow();
+    const saved = await prisma.externalEffect.findUniqueOrThrow({ where: { id: mapping.id } });
+    await prisma.externalEffect.update({
+      where: { id: mapping.id },
+      data: { result: { ...(saved.result as Prisma.JsonObject), campaignId: randomUUID() } },
+    });
+    await expect(createRecruitingSchedulingPlan(prisma, actor, linked)).rejects.toThrow();
   });
 });
