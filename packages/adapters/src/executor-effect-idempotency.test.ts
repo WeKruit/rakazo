@@ -36,7 +36,12 @@ import { runAutoReviewJudge } from "./auto-review.js";
 import type * as ComputerLifecycleModule from "./computer-lifecycle.js";
 import { acquireComputerExecutionLease, ComputerBusyError } from "./computer-lifecycle.js";
 import type * as ComputerWorkspaceModule from "./computer-workspace.js";
-import { createRunExecutor, selectBuiltinToolsForRun } from "./executor.js";
+import {
+  createRunExecutor,
+  resumeBriefForRun,
+  selectBuiltinToolsForRun,
+  toolArgsSummary,
+} from "./executor.js";
 import {
   CATALOG_EXECUTE,
   catalogEntries,
@@ -368,7 +373,10 @@ function fixture(
     actionApprovalRule: { findMany: vi.fn(async (): Promise<ActionApprovalRule[]> => []) },
     actionAutoReviewPreference: { findUnique: vi.fn(async () => ({ enabled: false })) },
     externalEffect,
-    artifact: { findFirst: vi.fn(), findMany: vi.fn(async () => []) },
+    artifact: {
+      findFirst: vi.fn(),
+      findMany: vi.fn(async (): Promise<Array<{ id: string; name: string }>> => []),
+    },
   };
   const pauseRunForInput = vi.fn<ThreadEvents["pauseRunForInput"]>(async () => {
     run.status = "waiting_input";
@@ -719,12 +727,51 @@ describe("worker shutdown recovery", () => {
       expect.objectContaining({ data: { status: "interrupted", finishedAt: expect.any(Date) } }),
     );
     f.setCalls([{ name: "remember", args, executionId: "after-restart" }]);
+    // Durable audit of the first attempt: a paid research call whose output was stored.
+    const researchDigest = createHash("sha256").update("research-1").digest("hex").slice(0, 12);
+    // Other scoped reads share this mock; only the audit query sees the first attempt's events.
+    const auditEvents = [
+      {
+        seq: 1,
+        type: "agent.tool.called",
+        payload: {
+          name: "recruiting_research",
+          executionId: "research-1",
+          argsSummary: "query=senior backend engineer",
+        },
+      },
+      {
+        seq: 2,
+        type: "agent.tool.completed",
+        payload: { name: "recruiting_research", executionId: "research-1", outcome: "succeeded" },
+      },
+      {
+        seq: 3,
+        type: "thread.message.created",
+        payload: { role: "bot", blocks: [{ kind: "text", text: "Found 12 profiles so far." }] },
+      },
+    ];
+    f.prisma.event.findMany.mockImplementation(
+      async (query?: { where?: { type?: { in?: string[] } } }) =>
+        query?.where?.type?.in?.includes("agent.tool.completed") ? auditEvents : [],
+    );
+    f.prisma.artifact.findMany.mockResolvedValueOnce([
+      { id: "art-research", name: `recruiting_research-${researchDigest}.txt` },
+    ]);
     await createRunExecutor({
       ...f.executorDeps,
       shutdownSignal: new AbortController().signal,
     }).continueRun(f.runData.id, "worker-2");
     expect(f.runData).toMatchObject({ status: "completed", taskId, leaseFence: 2 });
     expect(f.runtimeRun).toHaveBeenCalledTimes(2);
+    const firstTurn = f.runtimeRun.mock.calls[0]![0].history.at(-1)?.content ?? "";
+    const resumedTurn = f.runtimeRun.mock.calls[1]![0].history.at(-1)?.content ?? "";
+    expect(firstTurn).not.toContain("interrupted and resumed");
+    expect(resumedTurn).toContain("This run was interrupted and resumed.");
+    expect(resumedTurn).toContain(
+      "- recruiting_research(query=senior backend engineer) completed; full output saved as artifact art-research (artifact_read)",
+    );
+    expect(resumedTurn).toContain("- Found 12 profiles so far.");
     expect(f.results).toEqual([{ uncertain: true }]);
     expect(f.memoryCommit).not.toHaveBeenCalled();
     expect(f.effects).toEqual(before);
@@ -5603,5 +5650,66 @@ describe("final reply before the terminal workspace checkpoint", () => {
         blocks: expect.arrayContaining([expect.objectContaining({ kind: "text", text: "Done" })]),
       }),
     );
+  });
+});
+
+describe("resume brief", () => {
+  const prismaWith = (
+    events: Array<{ type: string; payload: unknown }>,
+    artifacts: unknown[] = [],
+  ) =>
+    ({
+      event: { findMany: vi.fn(async () => events) },
+      artifact: { findMany: vi.fn(async () => artifacts) },
+    }) as never;
+  const run = { id: "run-1", spaceId: "space-1", threadId: "thread-1" };
+
+  it("keeps secrets and payloads out of the argument summary", () => {
+    expect(
+      toolArgsSummary({ query: "find x", api_key: "sk-live-123", nested: { a: 1 }, limit: 5 }, [
+        "sk-live-123",
+      ]),
+    ).toBe("query=find x, limit=5");
+    expect(toolArgsSummary({ note: "token sk-live-123 inside" }, ["sk-live-123"])).not.toContain(
+      "sk-live-123",
+    );
+    expect(toolArgsSummary("plain")).toBeUndefined();
+  });
+
+  it("is empty without durable work and bounded with a lot of it", async () => {
+    expect(await resumeBriefForRun(prismaWith([]), run)).toBeUndefined();
+    const many = Array.from({ length: 60 }, (_, i) => ({
+      type: "agent.tool.completed",
+      payload: { name: `mcp_search_${i}`, executionId: `x${i}`, outcome: "succeeded" },
+    }));
+    const brief = (await resumeBriefForRun(prismaWith(many), run))!;
+    expect(brief.length).toBeLessThanOrEqual(2_100);
+    expect(brief.split("\n- ").length - 1).toBeLessThanOrEqual(20);
+    expect(brief).toContain("(40 more entries omitted)");
+  });
+
+  it("reports failures and redacts secrets from stored error text", async () => {
+    const brief = (await resumeBriefForRun(
+      prismaWith([
+        {
+          type: "agent.tool.completed",
+          payload: {
+            name: "mcp_search",
+            executionId: "s1",
+            outcome: "error",
+            error: "401 for token sk-live-123",
+          },
+        },
+        {
+          type: "agent.tool.completed",
+          payload: { name: "ask", executionId: "p", outcome: "paused" },
+        },
+      ]),
+      run,
+      ["sk-live-123"],
+    ))!;
+    expect(brief).toContain("- mcp_search() failed: 401 for token");
+    expect(brief).not.toContain("sk-live-123");
+    expect(brief).not.toContain("ask(");
   });
 });
