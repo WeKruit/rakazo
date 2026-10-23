@@ -4,6 +4,7 @@ Requires Modal >=1.6. Secrets and files belong to this App only; no local Docker
 """
 
 import contextlib
+import datetime
 import os
 import signal
 import socket
@@ -97,6 +98,14 @@ image = (
 class Recruiting:
     @modal.enter()
     def start(self):
+        boot = time.monotonic()
+
+        def phase(name, **fields):
+            extra = "".join(f" {k}={v}" for k, v in fields.items())
+            stamp = datetime.datetime.now(datetime.timezone.utc).isoformat(timespec="milliseconds")
+            print(f"{stamp} boot.phase {name} elapsed_ms={int((time.monotonic() - boot) * 1000)}{extra}", flush=True)
+
+        phase("boot.start")
         self.stopping = threading.Event()
         self.processes = []
         origin = Recruiting.get_url().rstrip("/")
@@ -114,16 +123,22 @@ class Recruiting:
             "API_PROXY_TARGET": "http://127.0.0.1:3100",
         }
         # Same migration-before-API order as the upstream Compose entrypoint.
-        subprocess.run(
+        phase("migrate.start")
+        migrate = time.monotonic()
+        # Runs even with nothing pending; migrate.done shows what that costs.
+        result = subprocess.run(
             ["node_modules/.bin/prisma", "migrate", "deploy"],
-            cwd="/app/packages/db", env=env, timeout=120, check=True,
+            cwd="/app/packages/db", env=env, timeout=120,
         )
+        phase("migrate.done", migrate_ms=int((time.monotonic() - migrate) * 1000), exit_code=result.returncode)
+        result.check_returncode()
         services = [
             ("api", ["node", "--enable-source-maps", "dist/index.mjs"]),
             ("worker", ["node", "--enable-source-maps", "dist/index.mjs"]),
             ("web", ["node", "node_modules/vite/bin/vite.js", "preview"]),
         ]
         for package, command in services:
+            phase(f"{package}.spawn")
             self.processes.append(subprocess.Popen(
                 command, cwd=f"/app/apps/{package}", env=env, start_new_session=True,
             ))
@@ -143,6 +158,7 @@ class Recruiting:
                     raise RuntimeError("A native Rakazo service exited during startup")
                 try:
                     with socket.create_connection(("127.0.0.1", port), timeout=1):
+                        phase("ready.probe.ok", port=port)
                         break
                 except OSError:
                     if time.monotonic() >= deadline:
