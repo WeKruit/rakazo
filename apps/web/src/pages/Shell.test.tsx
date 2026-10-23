@@ -27,8 +27,17 @@ vi.mock("@lingui/react/macro", () => {
   return {
     useLingui: () => ({ t, i18n: { locale: "en" } }),
     Trans: ({ children }: { children: ReactNode }) => children,
-    Plural: ({ _1, other, value }: { _1: string; other: string; value: number }) =>
-      (value === 1 ? _1 : other).replace("#", String(value)),
+    Plural: ({
+      _1,
+      one,
+      other,
+      value,
+    }: {
+      _1?: string;
+      one?: string;
+      other: string;
+      value: number;
+    }) => (value === 1 ? (_1 ?? one ?? other) : other).replace("#", String(value)),
   };
 });
 
@@ -2316,6 +2325,76 @@ it("sends the open role and the person selected in the workbench as bounded chat
     roleTitle: view.group.name,
   });
 });
+
+it.each([
+  ["recruiting", false],
+  ["developer", true],
+] as const)(
+  "keeps crew identities, delegation and tool internals out of the %s transcript unless developer view is on",
+  async (_view, developer) => {
+    if (developer) localStorage.setItem("rakazo.showToolActivity", "on");
+    const at = "2026-10-22T01:00:00Z";
+    const message = (
+      id: string,
+      seq: number,
+      blocks: ThreadMessage["blocks"],
+      extra: Partial<ThreadMessage> = {},
+    ): ThreadMessage => ({
+      id,
+      threadId: "thread-1",
+      seq,
+      role: "bot",
+      createdAt: at,
+      blocks,
+      botId: "bot-1",
+      ...extra,
+    });
+    await renderFeedbackShell("group", undefined, {
+      isDeploymentOwner: developer,
+      openFeedback: false,
+      initialPath: "/app/g/group-1",
+      messages: [
+        message("u1", 1, [{ kind: "text", text: "Find backend engineers" }], { role: "user" }),
+        message("b1", 2, [
+          {
+            kind: "handoff",
+            fromBotId: "bot-1",
+            toBotId: "bot-2",
+            text: "Delegate task_internal_7",
+          },
+        ]),
+        message("b2", 3, [
+          { kind: "bot_message_sent", toBotId: "bot-2", toBotName: "Sourcer", text: "Search now" },
+        ]),
+        message("b3", 4, [
+          {
+            kind: "subagent",
+            agentId: "agent-9",
+            name: "Shard worker",
+            task: "Shard 3 of run-abc",
+            status: "running",
+          },
+        ]),
+        message(
+          "b4",
+          5,
+          [
+            { kind: "steps", steps: [{ label: "mcp__crm__update_candidate", count: 1 }] },
+            { kind: "text", text: "Saved 3 candidates." },
+          ],
+          { botId: "bot-2", runId: "run-abc" },
+        ),
+      ],
+    });
+    const chat = container!.querySelector('section[aria-label="Role conversation"]') ?? container!;
+    const text = chat.textContent ?? "";
+    expect(text).toContain("Saved 3 candidates.");
+    const internals = ["Sourcer", "task_internal_7", "Shard worker", "run-abc", "mcp__crm"];
+    if (developer) expect(internals.filter((value) => text.includes(value))).not.toEqual([]);
+    else expect(internals.filter((value) => text.includes(value))).toEqual([]);
+    expect(text.includes("@Main")).toBe(false);
+  },
+);
 
 it("renders a saved email business reference outside the original human quote without internal identifiers", async () => {
   const reference = {
