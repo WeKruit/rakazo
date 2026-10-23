@@ -2,7 +2,7 @@
 
 > Required correction: [confirmation freshness](scheduling-confirmation-freshness.md). The immutable `eb216182` checkpoint could reuse an accepted booking read after a later mutation; use the corrective artifact and its exact manifest before release. Earlier test counts remain historical evidence.
 
-This supersedes the producer-only status map. IDs are the ordinal items in [the canonical checklist](unified-workspace-acceptance.md). Production-code checkpoint: `861dba93ef8b5d50b46bc247e5d818bbb2241782`; the delivery manifest pins later test/document commits. **Every live state is pending; none of these rows claims live acceptance.** Tests use synthetic providers and isolated native PostgreSQL. “Partial” is not complete. Visual evidence is targeted desktop/mobile review, not full pixel equivalence.
+This supersedes the producer-only status map. IDs are the ordinal items in [the canonical checklist](unified-workspace-acceptance.md). Production-code checkpoint: `11bc10727a1b1176db1a73ebb26fd6a961bc1b32`; the delivery manifest pins later test/document commits. **Every live state is pending; none of these rows claims live acceptance.** Tests use synthetic providers and isolated native PostgreSQL. “Partial” is not complete. Visual evidence is targeted desktop/mobile review, not full pixel equivalence.
 
 | ID | Code state | Implemented boundary | Actual local test / visual evidence | Missing capability or acceptance prerequisite |
 | --- | --- | --- | --- | --- |
@@ -67,3 +67,5 @@ This supersedes the producer-only status map. IDs are the ordinal items in [the 
 | R59 | Pending enablement | Ordered prerequisites and grants documented | No activation performed | Authorized owner deployment/sync/readback |
 
 Current increment evidence: 733 web checks, 750 server checks, 33 targeted native PostgreSQL checks, 10 final plan UI checks; counts overlap. Five combined actual-route cases and three final scheduling presentation cases passed. See [increment delivery](scheduling-plan-increment.md) for commands, exact checkpoints and unsupported capabilities. No blanket completion claim is made for this matrix.
+
+Latest presentation overlays: [structured profile history](profile-history-source-review.md) (288 focused checks, two actual routes, parent targeted visual pass) and [chat/feedback](chat-ui-integration.md) (475 affected checks, eight actual routes, parent pixel review pending). These preserve the scheduling freshness correction. Counts overlap; no production acceptance is established.
