@@ -5,6 +5,7 @@ import type { AdapterContext, ArtifactStore, ConnectorProvider } from "@rakazo/a
 import { SecretStoreUnavailableError } from "@rakazo/adapter-kit";
 import type { McpOAuthBroker } from "@rakazo/adapters";
 import {
+  classifyInstantlyReplyReceipt,
   createRecruitingCandidateReportReader,
   hasPlatformMcpCredential,
   htmlToPlainText,
@@ -20,6 +21,7 @@ import type {
   RecruitingCorrespondence,
   RecruitingCrmDataInput,
   RecruitingCrmDataOutput,
+  RecruitingCrmTarget,
   RecruitingSourceRef,
   RecruitingSourceSelection,
 } from "@rakazo/contracts";
@@ -37,6 +39,7 @@ import {
   RecruitingCrmMessagesReadSchema,
   RecruitingCrmRoleCampaignsReadSchema,
   RecruitingCrmRoleReadSchema,
+  RecruitingNativeCorrespondenceSchema,
 } from "@rakazo/contracts";
 import {
   boundDirectApprovalDetails,
@@ -184,6 +187,237 @@ function calAvailabilitySubject(args: Record<string, unknown>) {
   ].map((key) => args[key] ?? null);
 }
 
+async function nativeRecruitingCorrespondence(
+  prisma: PrismaClient,
+  actor: Actor,
+  threadId: string,
+  selection: {
+    roleId?: string;
+    target?: Pick<
+      RecruitingCrmTarget,
+      "mcpServerId" | "serverRevision" | "organizationId" | "crmRoleId"
+    >;
+    candidateId?: string;
+    crmEndpoint?: string;
+  } = {},
+) {
+  const items: Array<ReturnType<typeof RecruitingNativeCorrespondenceSchema.parse>> = [];
+  if (!selection.crmEndpoint) return { items, partial: false, assertCurrent: null };
+  const captured = await recruiting.readRecruitingNativeCorrespondence(prisma, actor, {
+    threadId,
+    roleId: selection.roleId,
+    target: selection.target,
+  });
+  if (!captured) return { items, partial: false, assertCurrent: null };
+  if (
+    captured.crmSource?.endpoint !== selection.crmEndpoint ||
+    captured.crmSource.transport !== "streamable_http"
+  )
+    return { items, partial: true, assertCurrent: null };
+  const seen = new Set<string>();
+  let partial = captured.partial;
+  const readEmails = new Map(
+    [
+      ...new Map(
+        captured.records
+          .flatMap((record) => [record.emailRead, ...record.reads])
+          .map((read) => [read.id, read]),
+      ).values(),
+    ].map((read) => {
+      const result = correspondenceRecord(read.result);
+      return [
+        read.id,
+        read.status === "completed" &&
+        result &&
+        !("error" in result) &&
+        (result.isError === undefined || result.isError === false)
+          ? readInstantlyEmail(mcpObject(result))
+          : null,
+      ] as const;
+    }),
+  );
+  for (const record of captured.records) {
+    if (selection.candidateId && record.scope.candidateId !== selection.candidateId) continue;
+    if (
+      record.source.transport !== "streamable_http" ||
+      correspondenceProvider(record.source.endpoint, "inbox")?.kind !== "instantly"
+    )
+      continue;
+    const anchor = readEmails.get(record.emailRead.id);
+    if (!anchor?.thread_id || anchor.id !== record.args.reply_to_uuid) {
+      partial = true;
+      continue;
+    }
+    const base = {
+      roleId: captured.roleId,
+      bindingEffectId: captured.bindingEffectId,
+      crmRoleId: captured.target.crmRoleId,
+      candidateId: record.scope.candidateId,
+    };
+    const append = (
+      effect: typeof record.effect | typeof record.emailRead,
+      status: "read" | "sent_recorded" | "scheduled" | "unknown",
+      value: unknown,
+    ) => {
+      const key = `${effect.id}:${status}`;
+      if (seen.has(key)) return;
+      const email = value ? readInstantlyEmail(value) : null;
+      const text =
+        email &&
+        (email.body.text ||
+          (email.body.html ? htmlToPlainText(email.body.html) : "") ||
+          email.content_preview ||
+          "");
+      const item = RecruitingNativeCorrespondenceSchema.safeParse({
+        ...base,
+        id: effect.id,
+        status,
+        checkedAt: effect.updatedAt.toISOString(),
+        email: email && {
+          id: `${record.source.id}:${email.id}`,
+          sourceName: record.source.name,
+          sourceId: record.source.id,
+          providerMessageId: email.id,
+          savedRead: effect.run.sourceMessageId
+            ? {
+                messageId: effect.run.sourceMessageId,
+                linkedRunId: effect.run.id,
+                effectId: effect.id,
+              }
+            : null,
+          sender: email.from_address_email ?? null,
+          recipients: [email.to_address_email_list],
+          subject: email.subject,
+          body: text!.slice(0, 50_000),
+          snippet:
+            email.body_fallback_reason != null ||
+            !(email.body.text || email.body.html) ||
+            text!.length > 50_000,
+          date: email.timestamp_email,
+          url: null,
+        },
+      });
+      if (!item.success || (status !== "unknown" && !item.data.email)) {
+        partial = true;
+        return;
+      }
+      seen.add(key);
+      items.push(item.data);
+    };
+    for (const read of record.reads) {
+      const call = correspondenceCall(read.request);
+      const email = readEmails.get(read.id);
+      if (
+        !email ||
+        email.id !== call?.args.id ||
+        email.organization_id !== anchor.organization_id ||
+        email.eaccount !== anchor.eaccount ||
+        email.thread_id !== anchor.thread_id
+      )
+        continue;
+      append(read, "read", email);
+    }
+    const result = correspondenceRecord(record.effect.result);
+    if (record.effect.status === "uncertain") {
+      append(record.effect, "unknown", null);
+      continue;
+    }
+    if (record.effect.status !== "completed") continue;
+    const provider = correspondenceRecord(result?.providerResult);
+    const sourceRead = [record.emailRead, ...record.reads].find(
+      (read) => read.id === result?.sourceReadEffectId,
+    );
+    const outcome = classifyInstantlyReplyReceipt(
+      record.args,
+      anchor,
+      sourceRead &&
+        result &&
+        !("error" in result) &&
+        provider &&
+        !("error" in provider) &&
+        (provider.isError === undefined || provider.isError === false)
+        ? mcpObject(provider)
+        : undefined,
+    );
+    if (
+      outcome.status === "unknown" ||
+      outcome.status !== result?.status ||
+      stableJsonValue(outcome.receipt) !== stableJsonValue(result.receipt)
+    ) {
+      append(record.effect, "unknown", null);
+      partial = true;
+      continue;
+    }
+    append(record.effect, outcome.status, mcpObject(provider));
+  }
+  const assertCurrent = async () => {
+    if (!items.length) return;
+    await prisma.$transaction(
+      async (tx) => {
+        const member = await recruiting.requireMembership(tx, actor.userId, actor.spaceId);
+        if (member.userId !== actor.userId || member.spaceId !== actor.spaceId)
+          throw new IsolationError();
+        // Only current thread/role/binding can publish the captured evidence after pure parsing.
+        const current = await tx.thread.findFirst({
+          where: {
+            id: threadId,
+            userId: actor.userId,
+            spaceId: actor.spaceId,
+            activeRecruitingRoleId: captured.roleId,
+            activeRecruitingRole: { crmBindingEffectId: captured.bindingEffectId },
+          },
+          select: { id: true },
+        });
+        if (!current) throw new IsolationError();
+        const serverIds = [...new Set(captured.authorizations.map((item) => item.server.id))];
+        const servers = await tx.mcpServer.findMany({
+          where: { id: { in: serverIds }, userId: actor.userId, spaceId: actor.spaceId },
+          select: {
+            id: true,
+            userId: true,
+            spaceId: true,
+            enabled: true,
+            revision: true,
+            endpoint: true,
+            transport: true,
+            secretId: true,
+          },
+        });
+        const assignments = await tx.botMcpServer.findMany({
+          where: {
+            serverId: { in: serverIds },
+            botId: { in: [...new Set(captured.authorizations.map((item) => item.botId))] },
+            userId: actor.userId,
+            spaceId: actor.spaceId,
+          },
+        });
+        for (const item of captured.authorizations) {
+          const server = servers.find((value) => value.id === item.server.id);
+          const assignment = assignments.find(
+            (value) => value.serverId === item.server.id && value.botId === item.botId,
+          );
+          if (
+            !server?.enabled ||
+            server.userId !== actor.userId ||
+            server.spaceId !== actor.spaceId ||
+            server.revision !== item.server.revision ||
+            server.endpoint !== item.server.endpoint ||
+            server.transport !== item.server.transport ||
+            Boolean(server.secretId) !== Boolean(item.server.secretId) ||
+            !assignment ||
+            assignment.userId !== actor.userId ||
+            assignment.spaceId !== actor.spaceId ||
+            !correspondenceAllows(assignment, item.tool)
+          )
+            throw new IsolationError();
+        }
+      },
+      { isolationLevel: "RepeatableRead" },
+    );
+  };
+  return { items, partial, assertCurrent };
+}
+
 /** Project saved native reads only. Opening a dashboard never invokes a provider. */
 export async function getRecruitingCorrespondence(
   prisma: PrismaClient,
@@ -267,7 +501,35 @@ export async function getRecruitingCorrespondence(
         }),
       ),
     };
-    if (!workspace) return output;
+    const finish = async () => {
+      if (workspace && view === "inbox") {
+        const native = await nativeRecruitingCorrespondence(prisma, actor, target.threadId, {
+          roleId: workspace.role.id,
+          crmEndpoint: productIdentity?.endpoint,
+        });
+        const emails = new Map(output.emails.map((email) => [email.id, email]));
+        const latest = new Map<string, (typeof native.items)[number]>();
+        for (const item of native.items) {
+          if (
+            item.email &&
+            (!latest.has(item.email.id) || item.checkedAt > latest.get(item.email.id)!.checkedAt)
+          )
+            latest.set(item.email.id, item);
+          if (!output.checkedAt || item.checkedAt > output.checkedAt)
+            output.checkedAt = item.checkedAt;
+        }
+        for (const item of latest.values()) if (item.email) emails.set(item.email.id, item.email);
+        output.partial ||=
+          native.partial ||
+          emails.size > 50 ||
+          native.items.some((item) => item.status === "unknown");
+        output.emails = [...emails.values()].slice(0, 50);
+        if (output.emails.length) output.status = "ready";
+        await native.assertCurrent?.();
+      }
+      return output;
+    };
+    if (!workspace) return finish();
     const readTools =
       view === "inbox"
         ? [
@@ -297,7 +559,7 @@ export async function getRecruitingCorrespondence(
           readTools.some((tool) => correspondenceAllows(assignment, tool)),
         ),
     );
-    if (!querySources.length) return output;
+    if (!querySources.length) return finish();
     // Keep historical reads of the same role, including native legacy runs without an initial revision.
     const scope = {
       spaceId: actor.spaceId,
@@ -453,7 +715,7 @@ export async function getRecruitingCorrespondence(
     });
     if (!reads.length) {
       if (unsupported) output.status = "unsupported";
-      return output;
+      return finish();
     }
     const mailCampaigns = new Set(
       reads
@@ -1064,7 +1326,7 @@ export async function getRecruitingCorrespondence(
       select: { id: true },
     });
     if (!current) throw new IsolationError();
-    return output;
+    return finish();
   });
 }
 
@@ -1983,12 +2245,26 @@ export async function getRecruitingCrmData(
             (input.cursor?.linked_offset ?? 0) + (input.cursor?.unlinked_offset ?? 0)))
     )
       throw unavailable();
+    const native = input.crmRoleId
+      ? await nativeRecruitingCorrespondence(deps.prisma, actor, target.threadId, {
+          target: {
+            mcpServerId: server.id,
+            serverRevision: server.revision,
+            organizationId: input.organizationId,
+            crmRoleId: input.crmRoleId,
+          },
+          candidateId: input.candidateId,
+          crmEndpoint: deps.firstPartyMcpUrl,
+        })
+      : { items: [], partial: false, assertCurrent: null };
     await sourceFence(server, "list_crm_candidate_messages");
+    await native.assertCurrent?.();
     return finish({
       operation: input.operation,
       scope: "stored_candidate_correspondence",
       outbox: messages,
       candidateId: input.candidateId,
+      nativeCorrespondence: native.items,
       items: page.messages.map((row) => ({
         id: row.id,
         providerMessageId: row.id,

@@ -2358,6 +2358,134 @@ async function nativeReplyFixture() {
 }
 
 describe("durable recruiting reply linkage", () => {
+  it("reads native correspondence in a bounded batch without a live lease or effect replay", async () => {
+    const f = await nativeReplyFixture();
+    const admitted = await recruiting.admitRecruitingReply(
+      f.prisma,
+      actor,
+      f.trusted,
+      f.input as never,
+      f.native,
+    );
+    const saved = f.effects.get(admitted.effect.id)!;
+    saved.status = "uncertain";
+    const nativeFindMany = f.tx.externalEffect.findMany.getMockImplementation()!;
+    f.tx.externalEffect.findMany.mockImplementation(async (query) => {
+      if (query.where.runId) return nativeFindMany(query);
+      return [...f.effects.values()]
+        .filter((effect) => !query.where.id || query.where.id.in.includes(effect.id))
+        .sort(
+          (left, right) =>
+            right.createdAt.getTime() - left.createdAt.getTime() || right.id.localeCompare(left.id),
+        )
+        .map((effect) => ({
+          ...effect,
+          updatedAt: effect.createdAt,
+          run: { ...f.run, sourceMessageId: "human" },
+        }));
+    });
+    Object.assign(f.tx.mcpServer, {
+      findMany: vi.fn(async () => [
+        {
+          ...actor,
+          id: "mail-server",
+          name: "Mail",
+          revision: 1,
+          enabled: true,
+          endpoint: "https://mcp.instantly.ai/mcp",
+        },
+        { ...actor, id: "crm-server", name: "CRM", revision: 2, enabled: true },
+      ]),
+    });
+    Object.assign(f.tx.botMcpServer, {
+      findMany: vi.fn(async () => [
+        {
+          ...actor,
+          botId: "bot",
+          serverId: "mail-server",
+          allowAllTools: false,
+          allowedTools: ["get_email", "reply_to_email"],
+        },
+        {
+          ...actor,
+          botId: "bot",
+          serverId: "crm-server",
+          allowAllTools: false,
+          allowedTools: ["get_crm_candidate_outreach_context", "list_crm_candidate_roles"],
+        },
+      ]),
+    });
+    Object.assign(f.tx.recruitingRoleRevision, { findMany: vi.fn(async () => [f.revision]) });
+    let inTransaction = false;
+    Object.assign(f.prisma, {
+      $transaction: vi.fn(async (callback: (tx: typeof f.tx) => Promise<unknown>) => {
+        inTransaction = true;
+        try {
+          return await callback(f.tx);
+        } finally {
+          inTransaction = false;
+        }
+      }),
+    });
+    const contextBody = (f.crm.result as { structuredContent: unknown }).structuredContent;
+    Object.defineProperty(f.crm.result, "structuredContent", {
+      get: () => {
+        expect(inTransaction).toBe(false);
+        return contextBody;
+      },
+    });
+    const creates = f.tx.externalEffect.create.mock.calls.length;
+    const result = await recruiting.readRecruitingNativeCorrespondence(f.prisma, actor, {
+      threadId: "thread",
+      roleId: "role",
+    });
+    expect(result).toMatchObject({
+      roleId: "role",
+      bindingEffectId: "binding-effect",
+      records: [
+        {
+          effect: { id: saved.id, status: "uncertain" },
+          scope: { candidateId: f.receipt.candidate_id },
+          emailRead: { id: "email-read" },
+        },
+      ],
+    });
+    expect(f.tx.externalEffect.create).toHaveBeenCalledTimes(creates);
+    expect(f.tx.externalEffect.updateMany).not.toHaveBeenCalled();
+    expect(
+      f.tx.externalEffect.findMany.mock.calls.filter(([query]) => !query.where.runId),
+    ).toHaveLength(3);
+    f.effects.set("new-membership-failure", {
+      ...f.membership,
+      id: "new-membership-failure",
+      status: "failed",
+      result: { isError: true },
+      createdAt: new Date(saved.createdAt.getTime() + 1000),
+    } as never);
+    expect(
+      (await recruiting.readRecruitingNativeCorrespondence(f.prisma, actor, { threadId: "thread" }))
+        ?.records,
+    ).toEqual([]);
+    f.effects.delete("new-membership-failure");
+    const memberResult = f.membership.result;
+    f.membership.result = { structuredContent: { data: [] } } as never;
+    expect(
+      (await recruiting.readRecruitingNativeCorrespondence(f.prisma, actor, { threadId: "thread" }))
+        ?.records,
+    ).toEqual([]);
+    f.membership.result = memberResult;
+    f.revision.roleId = "foreign-role";
+    expect(
+      (await recruiting.readRecruitingNativeCorrespondence(f.prisma, actor, { threadId: "thread" }))
+        ?.records,
+    ).toEqual([]);
+    f.revision.roleId = "role";
+    f.email.runId = "foreign-run";
+    expect(
+      (await recruiting.readRecruitingNativeCorrespondence(f.prisma, actor, { threadId: "thread" }))
+        ?.records,
+    ).toEqual([]);
+  });
   it.each(["direct", "catalog"])(
     "admits a native canonical CRM member without an Autumn import and freezes proof in the original %s envelope",
     async (kind) => {

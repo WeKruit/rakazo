@@ -74,7 +74,7 @@ export * from "./home.js";
 export * from "./host-aware-sandbox.js";
 export * from "./infisical-secret-store.js";
 export * from "./installed-connectors.js";
-export { readInstantlyEmail } from "./instantly-reply.js";
+export { classifyInstantlyReplyReceipt, readInstantlyEmail } from "./instantly-reply.js";
 export * from "./integration-provider-settings.js";
 export * from "./jev-auto-review.js";
 export * from "./job-reconciler.js";

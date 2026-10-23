@@ -19,7 +19,7 @@ export class BotSectionNameConflictError extends Error {
 }
 
 export async function requireMembership(
-  prisma: PrismaClient,
+  prisma: Pick<PrismaClient, "$queryRaw">,
   userId: string,
   requestedSpaceId?: string | null,
 ): Promise<Actor> {
