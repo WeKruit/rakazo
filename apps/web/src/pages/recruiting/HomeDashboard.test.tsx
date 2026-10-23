@@ -73,6 +73,7 @@ beforeEach(() => {
     total: 0,
     counts: { shortlisted: 3, replied: 1 },
     crmStatus: "ok",
+    crmCountsComplete: true,
   });
   roleCampaign.mockResolvedValue({ status: "none", serverId: null, campaign: null, leads: [] });
   listReminders.mockResolvedValue({ items: [], overdueCount: 0 });
@@ -130,6 +131,24 @@ it("aggregates every role into the weekly chart and the funnel", async () => {
   expect(weeks.at(-1)!.getAttribute("aria-label")).toMatch(/: 2$/);
   expect(text()).not.toContain("could not be read");
 });
+
+it.each([false, undefined])(
+  "keeps reply aggregates unknown without complete coverage: %s",
+  async (crmCountsComplete) => {
+    roleCandidates.mockResolvedValue({
+      items: [],
+      nextCursor: null,
+      total: 0,
+      counts: { shortlisted: 3, replied: 1 },
+      crmStatus: "ok",
+      crmCountsComplete,
+    });
+    await render();
+    expect(container.querySelector('[aria-label="Outreach funnel"]')?.textContent).toContain(
+      "Replied—Unknown",
+    );
+  },
+);
 
 it("opens a recent role, newest first", async () => {
   await render();
@@ -296,7 +315,7 @@ it("filters recorded shortlist dates without relabeling all-time funnel data", a
   expect(listCandidates).toHaveBeenCalledTimes(1);
 });
 
-it("shows bounded interest counts as partial and does not fabricate contacted counts", async () => {
+it("keeps unproven interest totals unknown and does not fabricate contacted counts", async () => {
   roleCampaign.mockResolvedValue({
     status: "ready",
     serverId: "fixture",
@@ -309,7 +328,7 @@ it("shows bounded interest counts as partial and does not fabricate contacted co
   await render({ groups: [groups[0]!] });
   const funnel = container.querySelector('[aria-label="Outreach funnel"]')!;
   expect(funnel.textContent).toContain("Contacted—Unknown");
-  expect(funnel.textContent).toContain("Interested≥1Partial data");
+  expect(funnel.textContent).toContain("Interested—Unknown");
   expect(funnel.textContent).not.toContain("%");
   expect(funnel.textContent).toContain("Send totals are not available from these records.");
   // These populations are not a shared cohort: render counts without relative bar heights.

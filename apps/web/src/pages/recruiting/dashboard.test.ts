@@ -139,8 +139,16 @@ describe("source mapping", () => {
         interested: null,
         interestedPartial: false,
       });
-    expect(campaignStages(campaign(null, []))).toEqual({ contacted: null, interested: null, interestedPartial: false });
-    expect(campaignStages(campaign(1, []))).toEqual({ contacted: null, interested: 0, interestedPartial: false });
+    expect(campaignStages(campaign(null, []))).toEqual({
+      contacted: null,
+      interested: null,
+      interestedPartial: false,
+    });
+    expect(campaignStages(campaign(1, []))).toEqual({
+      contacted: null,
+      interested: 0,
+      interestedPartial: false,
+    });
   });
 
   it("reports unknown without a readable campaign or CRM", () => {
@@ -181,17 +189,22 @@ describe("source mapping", () => {
     ).toBeNull();
   });
 
-  it("does not turn campaign or lead statuses into sends, and keeps empty lead reads unknown", () => {
-    for (const status of [0, 1, 2, 3, null, 999]) {
+  it("keeps launched sends unknown and counts only complete known campaign lead reads", () => {
+    for (const status of [0, 1, 2, 3, 999]) {
       expect(campaignStages(campaign(status, [{ status: 3, interestStatus: 4 }]))).toEqual({
-        contacted: null,
+        contacted: status === 0 ? 0 : null,
         interested: 1,
-        interestedPartial: true,
+        interestedPartial: false,
       });
     }
-    expect(campaignStages(campaign(1, []))).toEqual({
+    expect(campaignStages(campaign(null, [{ status: 3, interestStatus: 4 }]))).toEqual({
       contacted: null,
       interested: null,
+      interestedPartial: false,
+    });
+    expect(campaignStages(campaign(1, []))).toEqual({
+      contacted: null,
+      interested: 0,
       interestedPartial: false,
     });
     expect(

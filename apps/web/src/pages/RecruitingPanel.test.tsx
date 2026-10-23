@@ -3291,9 +3291,9 @@ it("shows only the selected candidate's verified CRM receipt and never infers su
   );
   expect(view.container.textContent).not.toContain(synced.crm.receipt!.candidate_id);
   await view.click("unverified-person");
-  expect(view.container.querySelector('[aria-label="Candidate pipeline"]')?.textContent).not.toContain(
-    "Synced",
-  );
+  expect(
+    view.container.querySelector('[aria-label="Candidate pipeline"]')?.textContent,
+  ).not.toContain("Synced");
   expect(
     [...view.container.querySelectorAll("summary")].some(
       (item) => item.textContent === "CRM receipt",
@@ -7646,11 +7646,17 @@ it("reads the native five views and lazily resolves memory history and Artifact 
     artifactId: "artifact-request",
     includeDiagnostics: true,
   });
-  expect(
-    view.container
-      .querySelector('[data-artifact-id="artifact-request"]')
-      ?.getAttribute("data-bot-id"),
-  ).toBe("source-bot");
+  // Artifact bytes are verified by asynchronous WebCrypto before the preview mounts.
+  await vi.waitFor(async () => {
+    await act(async () => {
+      await new Promise((resolve) => setTimeout(resolve, 0));
+    });
+    expect(
+      view.container
+        .querySelector('[data-artifact-id="artifact-request"]')
+        ?.getAttribute("data-bot-id"),
+    ).toBe("source-bot");
+  });
   expect(view.container.textContent).toContain("request.json");
   for (const method of [api.createRole, api.bindRole, api.reviseRole, api.update, api.search])
     expect(method).not.toHaveBeenCalled();
