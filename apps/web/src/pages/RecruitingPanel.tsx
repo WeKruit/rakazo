@@ -1181,6 +1181,7 @@ function CandidateSourceRound({
   research?: Snapshot["research"];
 }) {
   const source = candidate.latestSource;
+  if (source && source.providerTaskId === null) return <Trans>Imported list</Trans>;
   const index = source?.actionId
     ? (research?.actions.findIndex((action) => action.id === source.actionId) ?? -1)
     : -1;
@@ -1382,6 +1383,11 @@ function CandidateSources({
             key={`${source.artifactRef.artifactId}:${source.rowIndex}:${source.effectId}`}
             className="space-y-2 border-s border-border ps-3"
           >
+            {source.providerTaskId === null ? (
+              <p className="text-xs font-medium">
+                <Trans>Imported list</Trans>
+              </p>
+            ) : null}
             {source.roleRevisionId !== roleRevisionId ? (
               <p className="text-xs text-muted-foreground">
                 <Trans>Saved before latest role update</Trans>

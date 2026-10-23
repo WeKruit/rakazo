@@ -308,6 +308,7 @@ msgid "Actions for space"
 msgstr ""
 
 #: src/pages/BillingSettingsPanel.tsx
+#: src/pages/recruiting/SequenceTab.tsx
 #: src/pages/RoutineEditor.tsx
 msgid "Active"
 msgstr ""
@@ -948,6 +949,10 @@ msgstr ""
 msgid "Bots with their own computer and browser"
 msgstr ""
 
+#: src/pages/recruiting/SequenceTab.tsx
+msgid "Bounced"
+msgstr ""
+
 #: src/pages/memory-providers/SerenitySettingsForm.tsx
 msgid "Brain label"
 msgstr ""
@@ -1428,6 +1433,10 @@ msgstr ""
 #: src/pages/ScratchpadSection.tsx
 msgid "Complete"
 msgstr "Concluir"
+
+#: src/pages/recruiting/SequenceTab.tsx
+msgid "Completed"
+msgstr ""
 
 #: src/pages/SettingsOverlay.tsx
 #: src/pages/Shell.tsx
@@ -2056,6 +2065,10 @@ msgstr "Não foi possível acessar o servidor"
 msgid "Could not read a CRM connection."
 msgstr ""
 
+#: src/pages/recruiting/SequenceTab.tsx
+msgid "Could not read this campaign from Instantly."
+msgstr ""
+
 #: src/pages/RecruitingCorrespondence.tsx
 msgid "Could not read this sequence."
 msgstr ""
@@ -2669,6 +2682,7 @@ msgstr ""
 msgid "Downloading…"
 msgstr ""
 
+#: src/pages/recruiting/SequenceTab.tsx
 #: src/pages/RecruitingCorrespondence.tsx
 msgid "Draft"
 msgstr ""
@@ -3239,6 +3253,10 @@ msgstr "Importar OpenAPI JSON"
 msgid "Important"
 msgstr ""
 
+#: src/pages/RecruitingPanel.tsx
+msgid "Imported list"
+msgstr ""
+
 #: src/lib/ticket-status.ts
 msgid "In progress"
 msgstr ""
@@ -3515,6 +3533,7 @@ msgid "Load earlier messages"
 msgstr "Carregar mensagens anteriores..."
 
 #: src/pages/Artifacts.tsx
+#: src/pages/recruiting/shared.tsx
 #: src/pages/RecruitingPanel.tsx
 msgid "Load more"
 msgstr ""
@@ -4083,7 +4102,6 @@ msgstr ""
 msgid "New ticket"
 msgstr ""
 
-#: src/pages/recruiting/ContactsTab.tsx
 #: src/pages/RecruitingPanel.tsx
 msgid "Next"
 msgstr ""
@@ -4741,6 +4759,7 @@ msgstr "Cole sua chave de API e teste novamente."
 msgid "Pause consideration"
 msgstr ""
 
+#: src/pages/recruiting/SequenceTab.tsx
 #: src/pages/RoutineEditor.tsx
 msgid "Paused"
 msgstr ""
@@ -4869,7 +4888,6 @@ msgstr ""
 msgid "Preview only. Ask for the complete message to read the full body."
 msgstr ""
 
-#: src/pages/recruiting/ContactsTab.tsx
 #: src/pages/RecruitingPanel.tsx
 msgid "Previous"
 msgstr ""
@@ -6125,7 +6143,6 @@ msgstr "Mostrar configurações"
 msgid "Show transcript"
 msgstr "Mostrar transcrição"
 
-#: src/pages/recruiting/InboxTab.tsx
 #: src/pages/recruiting/InterviewTab.tsx
 msgid "Showing the most recent CRM records."
 msgstr ""
@@ -6353,6 +6370,10 @@ msgstr ""
 #: src/pages/RecruitingPanel.tsx
 #: src/pages/Shell.tsx
 msgid "Stop considering"
+msgstr ""
+
+#: src/pages/recruiting/SequenceTab.tsx
+msgid "Stop on reply is off, so Instantly keeps sending follow-ups after a candidate replies."
 msgstr ""
 
 #: src/pages/Shell.tsx
@@ -6823,6 +6844,10 @@ msgstr "Desafixar"
 
 #: src/pages/shell/RecruitingNavigation.tsx
 msgid "Unread"
+msgstr ""
+
+#: src/pages/recruiting/SequenceTab.tsx
+msgid "Unsubscribed"
 msgstr ""
 
 #. placeholder {0}: file.name
