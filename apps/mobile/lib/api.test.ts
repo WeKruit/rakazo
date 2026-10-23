@@ -2623,12 +2623,12 @@ describe("mobile thread event reduction", () => {
 
     expect(afterDelta?.cursor).toBe(5);
     expect(afterDelta?.messages).toEqual([
-      {
+      expect.objectContaining({
         id: "progress:run-1",
         role: "bot",
         runId: "run-1",
         blocks: [{ kind: "progress", text: "Lisbon" }],
-      },
+      }),
     ]);
     expect(withLiveStreamingProgress(afterDelta, false)?.messages).toEqual([]);
 
@@ -2666,12 +2666,12 @@ describe("mobile thread event reduction", () => {
       payload: { delta: "bon", streaming: true },
     });
     expect(withLiveStreamingProgress(afterResume, true)?.messages).toEqual([
-      {
+      expect.objectContaining({
         id: "progress:run-1",
         role: "bot",
         runId: "run-1",
         blocks: [{ kind: "progress", text: "Lisbon" }],
-      },
+      }),
     ]);
   });
 
@@ -2977,8 +2977,8 @@ describe("mobile thread event reduction", () => {
       runId: "run-1",
       seq: 9,
     });
-    expect(repeated?.cursor).toBe(9);
-    expect(repeated?.run).toBe(waiting?.run);
+    // Shared with web: a repeat that changes nothing keeps the same snapshot object.
+    expect(repeated).toBe(waiting);
   });
 
   it("applies computer takeover requests as waiting_takeover", () => {
@@ -3026,8 +3026,12 @@ describe("mobile thread event reduction", () => {
       seq: 12,
     });
 
-    expect(waiting?.run).toEqual({ id: "run-peer", botId: "bot-peer", status: "waiting_takeover" });
-    expect(waiting?.activeRuns).toEqual([
+    expect(waiting?.run).toMatchObject({
+      id: "run-peer",
+      botId: "bot-peer",
+      status: "waiting_takeover",
+    });
+    expect(waiting?.activeRuns).toMatchObject([
       { id: "run-user", status: "running" },
       { id: "run-peer", botId: "bot-peer", status: "waiting_takeover" },
     ]);

@@ -4572,3 +4572,73 @@ it("clears accepted saved text when only an attachment was picked during the sen
   expect(textarea.value).toBe("");
   expect(localStorage.getItem("rakazo.composerDraft.bot:bot-1")).toBeNull();
 });
+
+it("shows a sent message at once and finishes the turn from events without re-reading", async () => {
+  const streams: Array<{
+    options: Parameters<typeof CoreModule.runThreadSubscription>[0];
+    head: { threadId: string; cursor: number };
+  }> = [];
+  vi.spyOn(CoreModule, "runThreadSubscription").mockImplementation(async (options) => {
+    const head = await options.loadInitial();
+    if (head) streams.push({ options, head });
+  });
+  setToolActivityPreference("off");
+  const view = await renderFeedbackShell("bot", undefined, {
+    isDeploymentOwner: false,
+    openFeedback: false,
+  });
+  const composer = container!.querySelector<HTMLTextAreaElement>('textarea[name="chat-message"]')!;
+  type(composer, "Find three robotics leads");
+  let accept!: (value: { runId: string; taskId: string; seq: number }) => void;
+  shellApi.send.mockReturnValue(
+    new Promise((resolve) => {
+      accept = resolve;
+    }),
+  );
+  const reads = shellApi.get.mock.calls.length;
+  const navigationReads = shellApi.listSpaces.mock.calls.length;
+  await view.click("Send");
+  // Echoed before the server answers.
+  expect(container!.textContent).toContain("Find three robotics leads");
+  expect(container!.textContent).toContain("Starting…");
+  await act(async () => {
+    accept({ runId: "run-echo", taskId: "task-echo", seq: 50 });
+  });
+  const stream = streams.at(-1)!;
+  const event = (seq: number, type: string, payload: Record<string, unknown> = {}) => ({
+    id: `echo-${seq}`,
+    type,
+    threadId: stream.head.threadId,
+    botId: "bot-1",
+    spaceId: "space-1",
+    runId: "run-echo",
+    seq,
+    payload,
+    createdAt: "2026-01-01T00:00:00Z",
+  });
+  await act(async () => {
+    for (const item of [
+      event(50, "thread.message.created", {
+        messageId: "durable-user",
+        role: "user",
+        blocks: [{ kind: "text", text: "Find three robotics leads" }],
+      }),
+      event(51, "run.started", { trigger: "user" }),
+      event(52, "thread.message.created", {
+        messageId: "durable-reply",
+        role: "bot",
+        blocks: [{ kind: "text", text: "Here are three." }],
+      }),
+      event(53, "run.completed"),
+    ]) {
+      stream.options.applyEvent(item as never);
+      stream.options.onEvent(item as never, stream.head, { snapshotStale: false });
+    }
+  });
+  expect(container!.textContent?.match(/Find three robotics leads/g)).toHaveLength(1);
+  expect(container!.textContent).toContain("Here are three.");
+  expect(container!.textContent).not.toContain("Starting…");
+  expect(shellApi.get.mock.calls.length).toBe(reads);
+  // One navigation read at run end for the sidebar preview; none for send or run start.
+  expect(shellApi.listSpaces.mock.calls.length).toBe(navigationReads + 1);
+});

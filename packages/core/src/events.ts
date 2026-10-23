@@ -270,7 +270,8 @@ export function reduceLiveMessageBlocks(
     for (const name of pendingToolNames) next = appendToolCallSegment(next, name);
     return next;
   }
-  if (!tailText) return [...segments];
+  const compacting = update.type === "progress" && update.payload?.phase === "compacting";
+  if (!tailText && !compacting) return [...segments];
   return [
     ...segments,
     {
@@ -278,6 +279,7 @@ export function reduceLiveMessageBlocks(
       text: tailText,
       ...(activity ? { activity: true as const } : {}),
       ...(pendingToolNames.length > 0 ? { pendingToolNames } : {}),
+      ...(compacting ? { phase: "compacting" as const } : {}),
     },
   ];
 }

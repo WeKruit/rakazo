@@ -324,6 +324,8 @@ export const MessageBlock = z.discriminatedUnion("kind", [
     /** Provider-generated tool status rather than assistant-authored narration. */
     activity: z.literal(true).optional(),
     pendingToolNames: z.array(z.string()).optional(),
+    /** Set while the runtime compacts context; cleared by the next progress update. */
+    phase: z.literal("compacting").optional(),
   }),
   z.object({
     kind: z.literal("steps"),
