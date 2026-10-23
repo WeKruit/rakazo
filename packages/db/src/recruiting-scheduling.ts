@@ -810,10 +810,95 @@ export async function bindRecruitingSchedulingOperation(
         throw new IsolationError("The bound booking request changed");
       const booked = obj(successful(booking).data);
       if (!booked || typeof booked.uid !== "string") throw new IsolationError();
+      // A read of A cannot authorize confirmation after A was changed elsewhere. The
+      // provider UID belongs to this owner/source, not just the plan's current thread.
+      const mutations = await tx.externalEffect.findMany({
+        where: {
+          spaceId: actor.spaceId,
+          id: { not: booking.id },
+          status: { in: ["executing", "uncertain", "completed", "failed"] },
+          updatedAt: { gte: booking.updatedAt },
+          run: { spaceId: actor.spaceId, userId: actor.userId },
+          OR: [
+            {
+              AND: [
+                { request: { path: ["2", "route", "resourceId"], equals: plan.calendar.sourceId } },
+                {
+                  request: {
+                    path: ["2", "route", "resourceRevision"],
+                    equals: plan.calendar.sourceRevision,
+                  },
+                },
+                { request: { path: ["2", "args", "bookingUid"], equals: booked.uid } },
+              ],
+            },
+            {
+              AND: [
+                { request: { path: ["3", "resourceId"], equals: plan.calendar.sourceId } },
+                {
+                  request: {
+                    path: ["3", "resourceRevision"],
+                    equals: plan.calendar.sourceRevision,
+                  },
+                },
+                { request: { path: ["2", "arguments", "bookingUid"], equals: booked.uid } },
+              ],
+            },
+          ],
+        },
+        orderBy: { updatedAt: "desc" },
+        take: LIMIT + 1,
+      });
+      if (mutations.length > LIMIT)
+        throw new IsolationError("Booking mutation history is incomplete");
+      let observedAfter = booking.updatedAt;
+      for (const mutation of mutations) {
+        const parsed = call(mutation.request);
+        if (
+          parsed.route.resourceId !== plan.calendar.sourceId ||
+          parsed.route.resourceRevision !== plan.calendar.sourceRevision ||
+          parsed.args.bookingUid !== booked.uid ||
+          !["cancel_booking", "reschedule_booking"].includes(parsed.route.toolName)
+        )
+          continue;
+        const envelope = obj(mutation.result);
+        const body = envelope && mcpObject(envelope);
+        const unresolved = [envelope, body, obj(body?.result)].some(
+          (value) => value?.uncertain === true,
+        );
+        if (mutation.status === "executing" || mutation.status === "uncertain" || unresolved)
+          throw new IsolationError(
+            "Reconcile the existing booking change before confirming this plan",
+          );
+        if (mutation.updatedAt > observedAfter) observedAfter = mutation.updatedAt;
+        let result: Record<string, unknown> | undefined;
+        try {
+          result = successful(mutation);
+        } catch (error) {
+          if (!(error instanceof IsolationError)) throw error;
+        }
+        const changed = obj(result?.data);
+        if (
+          result?.status === "success" &&
+          changed &&
+          ((parsed.route.toolName === "cancel_booking" &&
+            changed.uid === booked.uid &&
+            changed.status === "cancelled") ||
+            (parsed.route.toolName === "reschedule_booking" &&
+              typeof changed.uid === "string" &&
+              ((changed.uid !== booked.uid && changed.rescheduledFromUid === booked.uid) ||
+                (changed.uid === booked.uid &&
+                  typeof changed.start === "string" &&
+                  Date.parse(changed.start) !== Date.parse(plan.calendar.start)))))
+        )
+          throw new IsolationError(
+            "This immutable plan's original booking was cancelled or superseded",
+          );
+      }
       const reads = await tx.externalEffect.findMany({
         where: {
           spaceId: actor.spaceId,
-          createdAt: { gte: booking.updatedAt },
+          createdAt: { gt: observedAfter },
           run: {
             spaceId: actor.spaceId,
             userId: actor.userId,
