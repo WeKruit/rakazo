@@ -35,10 +35,11 @@ function useOutboxStatus() {
 }
 
 /** Campaign names may carry an internal "[role <id>]" tag; it is not for people. */
-const campaignName = (name: string) => name.replace(/\s*\[role [^\]]*\]\s*/gi, " ").trim() || name;
+export const campaignName = (name: string) =>
+  name.replace(/\s*\[role [^\]]*\]\s*/gi, " ").trim() || name;
 
 /** Instantly's own integer statuses for a campaign and for a lead. */
-function useInstantlyStatus() {
+export function useInstantlyStatus() {
   const { t } = useLingui();
   return {
     campaign: { 0: t`Draft`, 1: t`Active`, 2: t`Paused`, 3: t`Completed` } as Record<
@@ -54,7 +55,7 @@ function useInstantlyStatus() {
     } as Record<number, string>,
   };
 }
-const statusLabel = (labels: Record<number, string>, status: number | null) =>
+export const statusLabel = (labels: Record<number, string>, status: number | null) =>
   status === null ? null : (labels[status] ?? String(status));
 
 type CampaignScope = Pick<
@@ -63,7 +64,7 @@ type CampaignScope = Pick<
 >;
 
 /** The role's bound Instantly campaign, read live through the conversation's connection. */
-function useRoleCampaign({ conversation, refreshSignal, ...cache }: CampaignScope) {
+export function useRoleCampaign({ conversation, refreshSignal, ...cache }: CampaignScope) {
   const target = conversation
     ? "groupId" in conversation
       ? { groupId: conversation.groupId }

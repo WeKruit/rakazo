@@ -200,6 +200,10 @@ msgstr "{name} विफल रहा"
 msgid "{name} finished"
 msgstr "{name} पूरा हुआ"
 
+#: src/pages/recruiting/ActivityTab.tsx
+msgid "{name} replied"
+msgstr ""
+
 #. js-lingui-explicit-id
 #: src/lib/browser-notifications.ts
 msgid "{name} stopped"
@@ -346,7 +350,9 @@ msgid "Active model"
 msgstr "सक्रिय मॉडल"
 
 #: src/components/computer/TerminalApp.tsx
+#: src/pages/recruiting/ActivityTab.tsx
 #: src/pages/recruiting/ContactsTab.tsx
+#: src/pages/recruiting/DetailPanel.tsx
 #: src/pages/RecruitingPanel.tsx
 #: src/pages/Shell.tsx
 msgid "Activity"
@@ -683,6 +689,7 @@ msgstr "अपने एजेंट को इसके टूल उपयो�
 msgid "Approved"
 msgstr ""
 
+#: src/pages/recruiting/ActivityTab.tsx
 #: src/pages/RecruitingPanel.tsx
 msgid "Approved in internal review"
 msgstr ""
@@ -879,6 +886,7 @@ msgstr ""
 msgid "Avg tenure"
 msgstr ""
 
+#: src/pages/recruiting/ActivityTab.tsx
 #: src/pages/recruiting/InterviewTab.tsx
 #: src/pages/RecruitingPanel.tsx
 msgid "Awaiting feedback"
@@ -1068,6 +1076,7 @@ msgstr "सर्वर तक नहीं पहुंचा जा सका�
 #: src/pages/ModelSettingsOverlay.tsx
 #: src/pages/Onboarding.tsx
 #: src/pages/PluginsOverlay.tsx
+#: src/pages/recruiting/TasksTab.tsx
 #: src/pages/RecruitingPanel.tsx
 #: src/pages/shell/bot-credentials.tsx
 #: src/pages/shell/dialogs.tsx
@@ -2001,6 +2010,10 @@ msgstr "लोड नहीं हो सका"
 msgid "Could not load activity"
 msgstr ""
 
+#: src/pages/recruiting/ActivityTab.tsx
+msgid "Could not load all activity."
+msgstr ""
+
 #: src/components/ApprovalRulesSettings.tsx
 msgid "Could not load approval rules"
 msgstr "अनुमोदन नियम लोड नहीं हो सके"
@@ -2084,6 +2097,10 @@ msgstr ""
 
 #: src/pages/RecruitingPanel.tsx
 msgid "Could not load recruiting. Refresh to try again."
+msgstr ""
+
+#: src/pages/recruiting/TasksTab.tsx
+msgid "Could not load reminders."
 msgstr ""
 
 #: src/pages/RoutineRunHistory.tsx
@@ -2287,6 +2304,10 @@ msgstr "वह आवाज़ सहेजी नहीं जा सकी"
 msgid "Could not save the credential"
 msgstr ""
 
+#: src/pages/recruiting/TasksTab.tsx
+msgid "Could not save the reminder."
+msgstr ""
+
 #: src/pages/shell/message-cards.tsx
 msgid "Could not save this choice"
 msgstr "यह विकल्प सहेजा नहीं जा सका"
@@ -2399,6 +2420,10 @@ msgstr "नया समूह बनाएं"
 #: src/pages/shell/bot-picker.tsx
 msgid "Create new Space"
 msgstr "नया स्पेस बनाएं"
+
+#: src/pages/recruiting/TasksTab.tsx
+msgid "Create reminder"
+msgstr ""
 
 #: src/pages/RoutineEditor.tsx
 msgid "Create Routine"
@@ -2580,6 +2605,7 @@ msgstr "डिफ़ॉल्ट स्कोप"
 #: src/pages/BotContextMenu.tsx
 #: src/pages/KnowledgeSection.tsx
 #: src/pages/McpServersOverlay.tsx
+#: src/pages/recruiting/TasksTab.tsx
 #: src/pages/RoutineEditor.tsx
 #: src/pages/Shell.tsx
 #: src/pages/shell/dialogs.tsx
@@ -2763,6 +2789,7 @@ msgstr "खाता नहीं है?"
 
 #: src/lib/ticket-status.ts
 #: src/pages/ActivityList.tsx
+#: src/pages/recruiting/TasksTab.tsx
 #: src/pages/shell/avatar-studio-popover.tsx
 msgid "Done"
 msgstr "पूर्ण"
@@ -2821,6 +2848,10 @@ msgstr ""
 msgid "Drag, drop, or paste an image"
 msgstr "छवि खींचें, छोड़ें या पेस्ट करें"
 
+#: src/pages/recruiting/TasksTab.tsx
+msgid "Due"
+msgstr ""
+
 #: src/pages/BotContextMenu.tsx
 msgid "Duplicate"
 msgstr "डुप्लिकेट"
@@ -2828,6 +2859,10 @@ msgstr "डुप्लिकेट"
 #: src/pages/shell/bot-panel.tsx
 msgid "e.g. Hivenet Agent, Presales, Timesheets bot"
 msgstr "उदा. Hivenet Agent, Presales, टाइमशीट बॉट"
+
+#: src/pages/recruiting/TasksTab.tsx
+msgid "Edit"
+msgstr ""
 
 #: src/pages/RecruitingPanel.tsx
 msgid "Edit criteria"
@@ -2868,6 +2903,10 @@ msgstr ""
 msgid "Email draft editor"
 msgstr ""
 
+#: src/pages/recruiting/ActivityTab.tsx
+msgid "Email failed to send"
+msgstr ""
+
 #: src/lib/user-error.ts
 msgid "Email is not allowed to register"
 msgstr "इस ईमेल को पंजीकरण की अनुमति नहीं है"
@@ -2876,8 +2915,24 @@ msgstr "इस ईमेल को पंजीकरण की अनुमत�
 msgid "Email missing"
 msgstr ""
 
+#: src/pages/recruiting/ActivityTab.tsx
+msgid "Email queued"
+msgstr ""
+
+#: src/pages/recruiting/ActivityTab.tsx
+msgid "Email recorded"
+msgstr ""
+
 #: src/pages/RecruitingPanel.tsx
 msgid "Email reply"
+msgstr ""
+
+#: src/pages/recruiting/ActivityTab.tsx
+msgid "Email scheduled"
+msgstr ""
+
+#: src/pages/recruiting/ActivityTab.tsx
+msgid "Email sent"
 msgstr ""
 
 #: src/lib/user-error.ts
@@ -3467,6 +3522,7 @@ msgstr "इंटीग्रेशन"
 msgid "Interest"
 msgstr ""
 
+#: src/pages/recruiting/ActivityTab.tsx
 #: src/pages/RecruitingPanel.tsx
 msgid "Interested"
 msgstr ""
@@ -3539,6 +3595,7 @@ msgstr ""
 msgid "Interview workflow"
 msgstr ""
 
+#: src/pages/recruiting/ActivityTab.tsx
 #: src/pages/RecruitingPanel.tsx
 msgid "Introduced"
 msgstr ""
@@ -3864,6 +3921,10 @@ msgstr "अपठित चिह्नित करें"
 
 #: src/pages/RecruitingPanel.tsx
 msgid "Marked as sent"
+msgstr ""
+
+#: src/pages/recruiting/ActivityTab.tsx
+msgid "Marked high signal"
 msgstr ""
 
 #: src/pages/recruiting/AssessmentCard.tsx
@@ -4203,6 +4264,7 @@ msgstr ""
 msgid "Needs input"
 msgstr "इनपुट चाहिए"
 
+#: src/pages/recruiting/ActivityTab.tsx
 #: src/pages/recruiting/InterviewTab.tsx
 #: src/pages/RecruitingPanel.tsx
 msgid "Needs scheduling"
@@ -4276,6 +4338,10 @@ msgstr ""
 
 #: src/pages/RecruitingPanel.tsx
 msgid "Next contact campaigns"
+msgstr ""
+
+#: src/pages/recruiting/ActivityTab.tsx
+msgid "No activity yet."
 msgstr ""
 
 #: src/pages/RecruitingPanel.tsx
@@ -4591,6 +4657,10 @@ msgstr "कनेक्ट नहीं है"
 msgid "Not in the plugin catalog"
 msgstr ""
 
+#: src/pages/recruiting/ActivityTab.tsx
+msgid "Not interested"
+msgstr ""
+
 #: src/components/AskCard.tsx
 #: src/pages/shell/message-cards.tsx
 msgid "Not now"
@@ -4868,6 +4938,11 @@ msgstr ""
 msgid "Outreach status"
 msgstr ""
 
+#. placeholder {0}: overdue.length
+#: src/pages/recruiting/TasksTab.tsx
+msgid "Overdue ({0})"
+msgstr ""
+
 #: src/pages/Board.tsx
 msgid "Owner"
 msgstr ""
@@ -4974,6 +5049,7 @@ msgstr "प्लगइन"
 msgid "Polished message"
 msgstr ""
 
+#: src/pages/recruiting/ActivityTab.tsx
 #: src/pages/RecruitingPanel.tsx
 msgid "Pooled in internal review"
 msgstr ""
@@ -5350,6 +5426,7 @@ msgstr ""
 msgid "Registration is closed"
 msgstr "पंजीकरण बंद है"
 
+#: src/pages/recruiting/ActivityTab.tsx
 #: src/pages/RecruitingPanel.tsx
 msgid "Rejected in internal review"
 msgstr ""
@@ -5364,6 +5441,10 @@ msgstr "नियंत्रण छोड़ें"
 
 #: src/components/ComputerUpdateProgress.tsx
 msgid "Release interrupted computer?"
+msgstr ""
+
+#: src/pages/recruiting/TasksTab.tsx
+msgid "Reminder"
 msgstr ""
 
 #: src/components/ApprovalRulesSettings.tsx
@@ -5597,6 +5678,7 @@ msgstr ""
 msgid "Resume missing"
 msgstr ""
 
+#: src/pages/recruiting/ActivityTab.tsx
 #: src/pages/RecruitingPanel.tsx
 msgid "Resume ready"
 msgstr ""
@@ -5639,6 +5721,10 @@ msgstr "रिवीज़न {0}"
 
 #: src/pages/RecruitingCorrespondence.tsx
 msgid "Review in conversation"
+msgstr ""
+
+#: src/pages/recruiting/ActivityTab.tsx
+msgid "Review note"
 msgstr ""
 
 #: src/lib/model-connection-preflight.ts
@@ -5810,6 +5896,7 @@ msgstr ""
 #: src/pages/KnowledgeSection.tsx
 #: src/pages/McpServersOverlay.tsx
 #: src/pages/ModelSettingsOverlay.tsx
+#: src/pages/recruiting/TasksTab.tsx
 #: src/pages/RecruitingPanel.tsx
 #: src/pages/RoutineEditor.tsx
 #: src/pages/shell/bot-panel.tsx
@@ -5968,6 +6055,7 @@ msgstr ""
 msgid "Schedule interview"
 msgstr ""
 
+#: src/pages/recruiting/ActivityTab.tsx
 #: src/pages/recruiting/InterviewTab.tsx
 #: src/pages/RecruitingPanel.tsx
 msgid "Scheduled"
@@ -6570,6 +6658,10 @@ msgstr ""
 msgid "Status"
 msgstr ""
 
+#: src/pages/recruiting/ActivityTab.tsx
+msgid "Status changed to “{label}”"
+msgstr ""
+
 #. placeholder {0}: index + 1
 #: src/pages/RecruitingCorrespondence.tsx
 msgid "Step {0}"
@@ -6710,6 +6802,11 @@ msgstr "तालिका"
 #: src/pages/Shell.tsx
 msgid "Take control"
 msgstr "नियंत्रण लें"
+
+#: src/pages/recruiting/DetailPanel.tsx
+#: src/pages/recruiting/TasksTab.tsx
+msgid "Tasks"
+msgstr ""
 
 #: src/components/teach/TeachComputerOverlay.tsx
 msgid "Teach a task"
@@ -7093,6 +7190,11 @@ msgstr "असमर्थित फ़ाइल प्रकार: {0}"
 msgid "Up to date"
 msgstr ""
 
+#. placeholder {0}: upcoming.length
+#: src/pages/recruiting/TasksTab.tsx
+msgid "Upcoming ({0})"
+msgstr ""
+
 #: src/components/SoftwareUpdateSection.tsx
 msgid "Update"
 msgstr ""
@@ -7285,6 +7387,7 @@ msgstr "थोड़ी देर रुकें और फिर से पर
 msgid "Wait for this role to finish loading before saving."
 msgstr ""
 
+#: src/pages/recruiting/ActivityTab.tsx
 #: src/pages/RecruitingPanel.tsx
 msgid "Waiting for resume"
 msgstr ""
