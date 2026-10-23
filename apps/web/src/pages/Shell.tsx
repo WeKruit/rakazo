@@ -335,6 +335,11 @@ import {
 } from "./shell/message-cards";
 import type { RecruitingWorkspaceView } from "./shell/RecruitingNavigation";
 import { RecruitingNavigation } from "./shell/RecruitingNavigation";
+import type { RecruitingChatContact } from "./shell/recruiting-chat-context";
+import {
+  RecruitingChatContextProvider,
+  recruitingChatContext,
+} from "./shell/recruiting-chat-context";
 import { commitSpaceRename, sidebarGroupsForSpaces } from "./shell/space-sidebar";
 import { WindowChrome } from "./WindowChrome";
 
@@ -498,11 +503,12 @@ export function eventChangesRecruitingPanel(
         result.kind === "saved")
     );
   }
-  // ponytail: arbitrary MCP aliases refresh at run termination;
-  // immediate updates need a persisted native recruiting receipt.
+  // Connector reads refresh at run termination; the executor marks successful writes.
   if (event.type === "agent.tool.completed")
     return (
-      event.payload.name === "recruiting_crm_import" || event.payload.name === "recruiting_reply"
+      event.payload.name === "recruiting_crm_import" ||
+      event.payload.name === "recruiting_reply" ||
+      (event.payload.wrote === true && event.payload.outcome === "succeeded")
     );
   return (
     (event.type.startsWith("recruiting.") &&
@@ -2462,6 +2468,24 @@ export function ShellPage() {
     },
     [correspondenceScope, recruitingWorkspaceView, workspaceNewRole],
   );
+  const currentRecruitingCacheScope = useRef(recruitingCacheScope);
+  currentRecruitingCacheScope.current = recruitingCacheScope;
+  const [selectedContact, setSelectedContact] = useState<{
+    scope: string | undefined;
+    contact: RecruitingChatContact;
+  } | null>(null);
+  const chatContextApi = useMemo(
+    () => ({
+      setSelectedContact: (contact: RecruitingChatContact | null) =>
+        setSelectedContact(
+          contact ? { scope: currentRecruitingCacheScope.current, contact } : null,
+        ),
+      setSelectedEmail: selectCorrespondence,
+    }),
+    [selectCorrespondence],
+  );
+  const chatRoleTitle =
+    !showToolActivity && inGroup ? (activeGroup?.name ?? activeSnapshot?.groupName) : undefined;
   function openRoleChat(text?: string) {
     if (text) composerRef.current?.insertContext({ draftKey: composerDraftKey, text });
     if (roleChatWorkspace) setRoleChatOpen(true);
@@ -3159,6 +3183,14 @@ export function ShellPage() {
       const submittedComposer = composerRef;
       const submittedUser = botsRefreshUser.current;
       const selectedEmail = selectedCorrespondence;
+      const recruitingContext = reroutedToGroup
+        ? undefined
+        : recruitingChatContext(
+            chatRoleTitle,
+            selectedContact?.scope === currentRecruitingCacheScope.current
+              ? selectedContact?.contact
+              : undefined,
+          );
       const correspondenceReference =
         !reroutedToGroup &&
         selectedEmail?.scope === currentCorrespondenceScope.current &&
@@ -3261,6 +3293,7 @@ export function ShellPage() {
             clientNonce,
             text: trimmed || undefined,
             ...(correspondenceReference ? { correspondenceReference } : {}),
+            ...(recruitingContext ? { recruitingContext } : {}),
             mentions: plan.mentionPayload.length ? plan.mentionPayload : undefined,
             artifactIds: artifactIds.length ? artifactIds : undefined,
             replyToMessageId: reroutedToGroup ? undefined : activeReplyTarget?.id,
@@ -3274,6 +3307,7 @@ export function ShellPage() {
             clientNonce,
             text: trimmed || undefined,
             ...(correspondenceReference ? { correspondenceReference } : {}),
+            ...(recruitingContext ? { recruitingContext } : {}),
             mentions: plan.mentionPayload.length ? plan.mentionPayload : undefined,
             artifactIds: artifactIds.length ? artifactIds : undefined,
             replyToMessageId: activeReplyTarget?.id,
@@ -3349,6 +3383,8 @@ export function ShellPage() {
       pendingAttachments,
       sending,
       selectedCorrespondence,
+      selectedContact,
+      chatRoleTitle,
       showToolActivity,
       t,
     ],
@@ -3434,10 +3470,17 @@ export function ShellPage() {
         attempt.artifactIds.push(artifact.id);
       }
       if (!stillCurrent()) return false;
+      const recruitingContext = recruitingChatContext(
+        group.name,
+        selectedContact?.scope === currentRecruitingCacheScope.current
+          ? selectedContact?.contact
+          : undefined,
+      );
       await rpc.threads.followUp({
         groupId: group.id,
         text: text.trim() ? text : t`Read the attached materials for this role.`,
         crmRoleReference: reference,
+        ...(recruitingContext ? { recruitingContext } : {}),
         mentions: [group.members[0]!.botId],
         clientNonce,
         ...(attempt.artifactIds.length ? { artifactIds: attempt.artifactIds } : {}),
@@ -6520,7 +6563,9 @@ export function ShellPage() {
   );
 
   return (
-    <AvatarStyleProvider value={bootstrapMe?.avatarStyle ?? "organic"}>{shell}</AvatarStyleProvider>
+    <AvatarStyleProvider value={bootstrapMe?.avatarStyle ?? "organic"}>
+      <RecruitingChatContextProvider value={chatContextApi}>{shell}</RecruitingChatContextProvider>
+    </AvatarStyleProvider>
   );
 }
 

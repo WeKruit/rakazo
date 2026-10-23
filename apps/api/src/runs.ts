@@ -22,7 +22,8 @@ export function activityPromptSnippet(
       source.success &&
       source.data.some(
         (block) =>
-          block.kind === "text" && (block.correspondenceReference || block.crmRoleReference),
+          block.kind === "text" &&
+          (block.correspondenceReference || block.crmRoleReference || block.recruitingContext),
       )
     )
       return promptSnippet(

@@ -259,3 +259,26 @@ describe("ask history", () => {
     ).toBe("API key");
   });
 });
+
+describe("role chat context", () => {
+  it("keeps the CRM role reference and the workbench selection together", () => {
+    const crmRoleReference = {
+      sourceId: "source",
+      serverRevision: 2,
+      organizationId: "10000000-0000-4000-8000-000000000001",
+      crmRoleId: "20000000-0000-4000-8000-000000000002",
+    };
+    const recruitingContext = { roleTitle: "Staff Engineer", contact: { name: "Avery Example" } };
+    const prompt = promptTextForAttachments(
+      "Draft a follow-up",
+      [],
+      undefined,
+      crmRoleReference,
+      recruitingContext,
+    );
+    expect(prompt.startsWith("Draft a follow-up")).toBe(true);
+    expect(prompt).toContain(JSON.stringify(crmRoleReference));
+    expect(prompt).toContain(JSON.stringify(recruitingContext));
+    expect(promptTextForAttachments("Hi", [])).toBe("Hi");
+  });
+});

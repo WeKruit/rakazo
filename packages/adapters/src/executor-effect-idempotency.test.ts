@@ -1304,6 +1304,48 @@ describe("connector transport effect uncertainty", () => {
     });
   });
 
+  it.each([
+    ["direct", false, true],
+    ["catalog", undefined, true],
+    ["direct", true, false],
+    ["catalog", true, false],
+  ] as const)(
+    "marks a successful %s connector call with readOnly %s as a write: %s",
+    async (path, readOnly, wrote) => {
+      const f = fixture();
+      configure(f, path, readOnly);
+      f.connector.execute.mockImplementation(async function* () {
+        yield { type: "result", data: { ok: true } };
+      });
+      f.runtimeRun.mockImplementation(async function* (request: AgentRunRequest) {
+        const call = { name: "connector_call", executionId: "transport-call" };
+        f.results.push(
+          await request.executeTool!(
+            path === "direct" ? "mcp__synthetic__get_item" : "connectors_execute_tool",
+            path === "direct"
+              ? { id: "item-1", readOnly: true }
+              : { id: "server-1:get_item", arguments: { id: "item-1", readOnly: true } },
+            call.executionId,
+          ),
+        );
+        // The completion audit waits for the called audit, which the tool event appends.
+        const completed = Promise.resolve(
+          request.onToolCompleted?.({ ...call, durationMs: 1, result: { ok: true } }),
+        );
+        yield { type: "tool" as const, name: call.name, args: {}, executionId: call.executionId };
+        await completed;
+        yield { type: "done" as const, text: "Done" };
+      });
+      await f.run();
+      const append = f.executorDeps.events.append as unknown as ReturnType<typeof vi.fn>;
+      const audit = append.mock.calls
+        .map(([event]) => event as { type: string; payload: Record<string, unknown> })
+        .find((event) => event.type === "agent.tool.completed");
+      expect(audit?.payload.outcome).toBe("succeeded");
+      expect(audit?.payload.wrote).toBe(wrote ? true : undefined);
+    },
+  );
+
   it.each(["direct", "catalog"])("keeps pre-dispatch %s errors ordinary", async (path) => {
     const f = fixture();
     configure(f, path, false);
