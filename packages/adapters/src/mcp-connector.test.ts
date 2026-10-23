@@ -5,6 +5,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { InfisicalSecretStore } from "./infisical-secret-store.js";
 import {
   allowlistDrift,
+  DISCOVERY_CACHE_TTL_MS,
   firstPartyMcpUrl,
   loadMcpCredentialRecord,
   McpConnector,
@@ -1610,7 +1611,7 @@ describe("MCP connector session cache", () => {
       }
       expect(events).toMatchObject([{ type: "result" }]);
       expect(state.initializations).toBe(1);
-      expect(sink.events).toHaveLength(2);
+      expect(sink.events.filter((event) => event.message !== "discovery.cache")).toHaveLength(2);
       const log = JSON.stringify(sink.events);
       expect(log).toContain("MCP secret revalidation failed");
       expect(log).not.toContain("private response value");
@@ -3310,5 +3311,88 @@ describe("local native Instantly campaign and lead tools", () => {
     });
     const again = f.result(await f.run("ensure_role_campaign", { role_id: "role-1" }));
     expect(again.leads).toMatchObject({ a: { leadId: "lead-a@x.test" } });
+  });
+});
+
+describe("MCP discovery tool-list cache", () => {
+  function fixture() {
+    const state = { failNext: false, initializations: 0, lists: 0 };
+    const fetch = mcpFetch(state);
+    vi.stubGlobal("fetch", async (input: string | URL | Request, init?: RequestInit) => {
+      const request = input instanceof Request ? input : new Request(input, init);
+      if (request.method === "POST" && (await request.clone().text()).includes('"tools/list"'))
+        state.lists += 1;
+      return fetch(input, init);
+    });
+    let assignment = {
+      ...ASSIGNMENT,
+      server: { ...SERVER },
+    } as Record<string, unknown> & { server: typeof SERVER };
+    const prisma = { botMcpServer: { findMany: vi.fn(async () => [assignment]) } };
+    const connector = new McpConnector(prisma as never, {} as never, { network: TEST_NETWORK });
+    const context = {
+      spaceId: "w1",
+      userId: "u1",
+      botId: "bot-1",
+      signal: new AbortController().signal,
+    } as never;
+    return {
+      state,
+      connector,
+      context,
+      prisma,
+      setAssignment: (next: Partial<typeof assignment>) => {
+        assignment = { ...assignment, ...next };
+      },
+    };
+  }
+
+  it("serves a warm discovery from the cache without a remote tools/list", async () => {
+    const sink = createTestSink();
+    const previousLogger = getLogger();
+    installLogger(createLogger({ service: "test", sinks: [sink] }));
+    const f = fixture();
+    try {
+      const first = await f.connector.discoverTools(f.context);
+      expect(f.state.lists).toBe(1);
+      const second = await f.connector.discoverTools(f.context);
+      expect(second).toEqual(first);
+      expect(f.state.lists).toBe(1);
+      // Authorization is never cached: the assignment is read on every discovery.
+      expect(f.prisma.botMcpServer.findMany).toHaveBeenCalledTimes(2);
+      expect(
+        sink.events
+          .filter((event) => event.message === "discovery.cache")
+          .map((event) => event.hit),
+      ).toEqual([false, true]);
+    } finally {
+      await f.connector.close();
+      installLogger(previousLogger);
+    }
+  });
+
+  it("applies assignment changes at once and lists again after a server change or TTL", async () => {
+    vi.useFakeTimers();
+    const f = fixture();
+    try {
+      expect(await f.connector.discoverTools(f.context)).toHaveLength(1);
+      // Allowlist narrowed: filtered from the cached list, no remote call needed.
+      f.setAssignment({ allowAllTools: false, allowedTools: [] });
+      expect(await f.connector.discoverTools(f.context)).toEqual([]);
+      expect(f.state.lists).toBe(1);
+      // Server or credential write bumps the revision (or secretId): a miss.
+      f.setAssignment({ allowAllTools: true, server: { ...SERVER, revision: 2 } });
+      const tools = await f.connector.discoverTools(f.context);
+      expect(f.state.lists).toBe(2);
+      expect(tools[0]!.route?.resourceRevision).toBe(2);
+      await f.connector.discoverTools(f.context);
+      expect(f.state.lists).toBe(2);
+      await vi.advanceTimersByTimeAsync(DISCOVERY_CACHE_TTL_MS);
+      await f.connector.discoverTools(f.context);
+      expect(f.state.lists).toBe(3);
+    } finally {
+      await f.connector.close();
+      vi.useRealTimers();
+    }
   });
 });
