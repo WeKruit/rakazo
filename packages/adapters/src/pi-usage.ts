@@ -82,6 +82,15 @@ export function normalizePiUsage(
   };
 }
 
+/** Share of prompt tokens served from cache; null when the provider did not measure cache reads. */
+export function cacheHitRatio(
+  usage: Pick<AgentUsage, "inputTokens" | "cacheReadTokens" | "cacheWriteTokens">,
+): number | null {
+  if (usage.inputTokens === null || usage.cacheReadTokens === null) return null;
+  const prompt = usage.inputTokens + usage.cacheReadTokens + (usage.cacheWriteTokens ?? 0);
+  return prompt > 0 ? Math.round((usage.cacheReadTokens / prompt) * 1000) / 1000 : null;
+}
+
 /** Read only bounded SSE frames, retaining field presence, never provider text or payloads. */
 export function usageReportingFetch(
   fetcher: typeof fetch,
@@ -443,6 +452,14 @@ export function observedPiStream(
           streamWallMs: streamEndedAt! - streamStartedAt,
           usageAccountingWallMs,
           wrapperWallMs: performance.now() - streamStartedAt,
+          // Counts only, never content: cache reuse and spend per call for prompt-cache work.
+          // Token-named keys are redacted by the logger; these are plain counts.
+          inputCount: normalized?.inputTokens ?? null,
+          cacheReadCount: normalized?.cacheReadTokens ?? null,
+          cacheWriteCount: normalized?.cacheWriteTokens ?? null,
+          outputCount: normalized?.outputTokens ?? null,
+          costUsd: normalized?.costUsd ?? null,
+          cacheHitRatio: normalized ? cacheHitRatio(normalized) : null,
         });
       }
     }

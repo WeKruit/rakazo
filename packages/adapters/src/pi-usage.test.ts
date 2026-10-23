@@ -12,7 +12,12 @@ import {
   registerOpenAiCompatibleRuntime,
 } from "./pi-openai-compatible-provider.js";
 import { PiAgentRuntime } from "./pi-runtime.js";
-import { normalizePiUsage, observedPiStream, usageReportingFetch } from "./pi-usage.js";
+import {
+  cacheHitRatio,
+  normalizePiUsage,
+  observedPiStream,
+  usageReportingFetch,
+} from "./pi-usage.js";
 
 const model: Model<Api> = {
   provider: "openrouter",
@@ -59,6 +64,20 @@ async function run(usage?: object) {
   }
   return { events, beforeCall, afterCall, result: await stream.result() };
 }
+
+describe("prompt cache hit ratio", () => {
+  it("measures cached prompt share and stays unknown without a cache measurement", () => {
+    expect(
+      cacheHitRatio({ inputTokens: 1_000, cacheReadTokens: 19_000, cacheWriteTokens: 0 }),
+    ).toBe(0.95);
+    expect(cacheHitRatio({ inputTokens: 22_000, cacheReadTokens: 0, cacheWriteTokens: null })).toBe(
+      0,
+    );
+    expect(
+      cacheHitRatio({ inputTokens: 500, cacheReadTokens: null, cacheWriteTokens: null }),
+    ).toBeNull();
+  });
+});
 
 describe("Pi model stream timing", () => {
   const previousLogger = getLogger();
@@ -189,6 +208,12 @@ describe("Pi model stream timing", () => {
         streamWallMs: 11,
         usageAccountingWallMs: 19,
         wrapperWallMs: 50,
+        inputCount: 1,
+        cacheReadCount: null,
+        cacheWriteCount: null,
+        outputCount: 1,
+        costUsd: null,
+        cacheHitRatio: null,
       },
     ]);
   });
