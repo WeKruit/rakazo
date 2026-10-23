@@ -1798,3 +1798,46 @@ it("bounds page sizes and accepts only canonical offset cursors", () => {
   for (const bad of [{ limit: 0 }, { limit: 201 }, { cursor: "x" }, { cursor: "" }])
     expect(ok(inbox, bad)).toBe(false);
 });
+
+describe("recruiting.roleCandidates contract", () => {
+  const input = contracts.appContract.recruiting.roleCandidates["~orpc"].inputSchema!;
+  const output = contracts.RecruitingRoleCandidatesOutputSchema;
+  it("bounds limit 1–100, needs a thread target, and accepts the four sorts", () => {
+    const base = { botId: "bot", threadId: "thread" };
+    for (const sort of ["score", "rank", "name", "recent"])
+      expect(input["~standard"].validate({ ...base, sort })).not.toHaveProperty("issues");
+    for (const bad of [{ ...base, limit: 0 }, { ...base, limit: 101 }, { threadId: "thread" }])
+      expect(input["~standard"].validate(bad)).toHaveProperty("issues");
+  });
+  it("carries crmStatus and open outreach-status counts beside shortlisted/replied", () => {
+    const page = {
+      items: [
+        {
+          key: "crm:30000000-0000-4000-8000-000000000003",
+          name: "Ada",
+          title: null,
+          location: null,
+          email: "ada@example.test",
+          linkedinUrl: null,
+          autumn: null,
+          crm: {
+            serverId: "server",
+            organizationId: "10000000-0000-4000-8000-000000000001",
+            candidateId: "30000000-0000-4000-8000-000000000003",
+            stage: null,
+            contactStatus: "contacted",
+            outreachStatus: "replied",
+          },
+          shortlisted: false,
+        },
+      ],
+      nextCursor: null,
+      total: 1,
+      counts: { shortlisted: 0, replied: 1, bounced: 2 },
+      crmStatus: "ok",
+    };
+    expect(output.parse(page)).toEqual(page);
+    expect(() => output.parse({ ...page, crmStatus: "off" })).toThrow();
+    expect(() => output.parse({ ...page, counts: { replied: 1 } })).toThrow();
+  });
+});
