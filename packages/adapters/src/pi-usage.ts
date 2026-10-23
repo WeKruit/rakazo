@@ -54,13 +54,15 @@ export function normalizePiUsage(
     : derivedTotal !== null && Number.isSafeInteger(derivedTotal)
       ? derivedTotal
       : null;
+  // An unmeasured cache-write bucket does not block pricing: OpenAI's Responses and Codex
+  // APIs never report cache writes (no write surcharge exists there), and Pi already priced
+  // the absent bucket as zero in usage.cost.total. Requiring it left every OpenAI call unpriced.
   const costKnown =
     !!model.cost &&
     Object.values(model.cost).some((rate) => rate > 0) &&
     inputTokens !== null &&
     outputTokens !== null &&
-    (model.cost.cacheRead === 0 || cacheReadTokens !== null) &&
-    (model.cost.cacheWrite === 0 || cacheWriteTokens !== null);
+    (model.cost.cacheRead === 0 || cacheReadTokens !== null);
   const providerCost = reportedCosts.get(reported);
   return {
     inputTokens,
