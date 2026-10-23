@@ -71,6 +71,7 @@ const shellApi = vi.hoisted(() => ({
   reorderBots: vi.fn(),
   dropStreams: new Set<(reason: Error) => void>(),
   recruiting: {
+    profileActivity: { recordView: vi.fn() },
     crmData: vi.fn(),
     correspondence: vi.fn(),
     getWorkspace: vi.fn(),
@@ -530,6 +531,7 @@ async function renderFeedbackShell(
     if (options.workspaceFailure) throw new Error("Workspace unavailable");
     return recruitingWorkspace;
   });
+  shellApi.recruiting.profileActivity.recordView.mockResolvedValue({ ok: true });
   shellApi.recruiting.listAssessments.mockResolvedValue([]);
   shellApi.recruiting.listFeedback.mockResolvedValue({ feedback: [], nextCursor: null });
   shellApi.recruiting.correspondence.mockResolvedValue({
@@ -846,8 +848,8 @@ it("maps the current role Contacts to its bound CRM while preserving search resu
       roleLabel: "Existing role",
       summary: null,
     },
-    items: [],
-    total: 610,
+    items: [{ candidateId: "crm-only", name: "CRM-only person", email: "crm-only@example.test", title: "Engineer", location: null, linkedinUrl: null, phone: null, stage: "Contacted", contactStatus: "available", outreachStatus: "replied" }],
+    total: 1,
     offset: input.offset ?? 0,
     nextOffset: null,
   }));
@@ -857,8 +859,8 @@ it("maps the current role Contacts to its bound CRM while preserving search resu
     initialPath: "/app/g/group-1?view=contacts",
     crmTarget: boundCrmTarget,
   });
-  // One list: the role's search result plus its 610 CRM contacts, no source toggle.
-  expect(document.body.textContent).toContain("611 candidates");
+  // One list: the role's search result plus its distinct CRM contact, no source toggle.
+  expect(document.body.textContent).toContain("2 candidates");
   expect(document.body.textContent).not.toContain("Current search");
   expect(container?.textContent).toContain(view.candidate.name);
   expect(shellApi.recruiting.crmData).toHaveBeenCalledWith(
@@ -1070,8 +1072,8 @@ it("refreshes a failed current-role CRM connection before reading its history", 
       roleLabel: "Existing role",
       summary: null,
     },
-    items: [],
-    total: 610,
+    items: [{ candidateId: "crm-only", name: "CRM-only person", email: "crm-only@example.test", title: "Engineer", location: null, linkedinUrl: null, phone: null, stage: "Contacted", contactStatus: "available", outreachStatus: "replied" }],
+    total: 1,
     offset: 0,
     nextOffset: null,
   });
@@ -1080,7 +1082,7 @@ it("refreshes a failed current-role CRM connection before reading its history", 
   expect(shellApi.recruiting.getWorkspace.mock.calls.length).toBeGreaterThan(priorReads);
   expect(container?.textContent).not.toContain("Could not load this role’s candidate records.");
   expect(container?.querySelector('section[aria-label="Contacts"]')?.textContent).toMatch(
-    /61\d candidates/,
+    /2 candidates/,
   );
   expect(shellApi.recruiting.crmData).toHaveBeenCalledWith(
     expect.objectContaining({
@@ -2696,7 +2698,7 @@ it("keeps the same role chat widget, draft and native card across workspace menu
       mentions: undefined,
     }),
   );
-  expect(container?.querySelector(".hire-standard-view h1")?.textContent).toBe("Interview");
+  expect(container?.querySelector('section[aria-label="Interview"]')).not.toBeNull();
   expect(document.body.querySelector('[data-message-id="pending-main"]')).toBe(card);
   await view.click("Collapse role chat");
   expect(chat.hidden).toBe(true);
@@ -5477,6 +5479,7 @@ describe("chat open latency with 300 ms reads", () => {
       initialPath: "/app/bot-1?view=results",
     });
     for (const read of Object.values(shellApi.recruiting)) {
+      if (!vi.isMockFunction(read)) continue;
       const load = read.getMockImplementation();
       if (load) read.mockImplementation((...args: unknown[]) => delayed(() => load(...args)));
     }
