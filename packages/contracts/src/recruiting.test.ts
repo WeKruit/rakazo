@@ -97,6 +97,64 @@ const action = {
 };
 
 describe("recruiting contracts", () => {
+  it("keeps an optional provider display status equal to its original supplied value", () => {
+    const report = {
+      fields: [{ label: "Requirement", value: "match", providerStatus: "match", sourceUrls: [] }],
+      sourceUrls: [],
+    };
+    expect(contracts.RecruitingCandidateReportSchema.safeParse(report).success).toBe(true);
+    expect(
+      contracts.RecruitingCandidateReportSchema.safeParse({
+        ...report,
+        fields: [{ ...report.fields[0], providerStatus: "miss" }],
+      }).success,
+    ).toBe(false);
+    expect(
+      contracts.RecruitingCandidateReportSchema.safeParse({
+        ...report,
+        fields: [{ ...report.fields[0], value: "met", providerStatus: "met" }],
+      }).success,
+    ).toBe(false);
+  });
+  it("requires explicit native correspondence records in a CRM mail page", () => {
+    const page = {
+      operation: "mail",
+      source: {
+        serverId: "crm",
+        serverRevision: 1,
+        name: "CRM",
+        organizationId: "10000000-0000-4000-8000-000000000001",
+      },
+      checkedAt: now,
+      scope: "stored_candidate_correspondence",
+      candidateId: "20000000-0000-4000-8000-000000000002",
+      items: [],
+      outbox: [],
+      nextCursor: null,
+    };
+    expect(contracts.RecruitingCrmDataOutputSchema.safeParse(page).success).toBe(false);
+    expect(
+      contracts.RecruitingCrmDataOutputSchema.safeParse({ ...page, nativeCorrespondence: [] })
+        .success,
+    ).toBe(true);
+    const unknown = {
+      id: "effect",
+      roleId: role.id,
+      bindingEffectId: "binding",
+      crmRoleId: page.candidateId,
+      candidateId: page.candidateId,
+      checkedAt: now,
+      status: "unknown",
+      email: null,
+    };
+    expect(contracts.RecruitingNativeCorrespondenceSchema.safeParse(unknown).success).toBe(true);
+    expect(
+      contracts.RecruitingNativeCorrespondenceSchema.safeParse({
+        ...unknown,
+        status: "sent_recorded",
+      }).success,
+    ).toBe(false);
+  });
   it("returns the verified CRM target only in the getWorkspace RPC output", () => {
     const snapshot = {
       role,

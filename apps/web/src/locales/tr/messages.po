@@ -1164,6 +1164,10 @@ msgstr "Sunucu URL'sini ve ağı kontrol et, sonra yeniden test et."
 msgid "Check your email"
 msgstr "E-postanızı kontrol edin"
 
+#: src/pages/Shell.tsx
+msgid "Checking available connections…"
+msgstr ""
+
 #: src/components/ComputersUnavailableHint.tsx
 msgid "Checking computer setup…"
 msgstr ""
@@ -2238,8 +2242,8 @@ msgid "Create space"
 msgstr ""
 
 #: src/pages/Auth.tsx
-msgid "Create your Rakazo"
-msgstr "Rakazo hesabını oluştur"
+msgid "Create your WeKruit Headhunter account"
+msgstr ""
 
 #: src/components/AskCard.tsx
 msgid "Created"
@@ -2582,6 +2586,10 @@ msgstr ""
 #: src/pages/HostComputerPrompt.tsx
 msgid "Docker limits access to your computer for added security. Using {hostLabel} lets bots work with your local files and tools."
 msgstr "Docker, ek güvenlik için bilgisayarına erişimi sınırlar. {hostLabel} kullanıldığında botlar yerel dosyaların ve araçlarınla çalışabilir."
+
+#: src/pages/RecruitingPanel.tsx
+msgid "Does not match"
+msgstr ""
 
 #: src/pages/Auth.tsx
 msgid "Don’t have an account?"
@@ -3630,6 +3638,10 @@ msgstr "Okunmadı olarak işaretle"
 
 #: src/pages/RecruitingPanel.tsx
 msgid "Marked as sent"
+msgstr ""
+
+#: src/pages/RecruitingPanel.tsx
+msgid "Match"
 msgstr ""
 
 #: src/pages/RecruitingPanel.tsx
@@ -4729,6 +4741,34 @@ msgstr ""
 msgid "Prepared"
 msgstr ""
 
+#: src/pages/Shell.tsx
+msgid "Preparing a search…"
+msgstr ""
+
+#: src/pages/Shell.tsx
+msgid "Preparing connected work…"
+msgstr ""
+
+#: src/pages/Shell.tsx
+msgid "Preparing to check availability…"
+msgstr ""
+
+#: src/pages/Shell.tsx
+msgid "Preparing to read a page…"
+msgstr ""
+
+#: src/pages/Shell.tsx
+msgid "Preparing to read emails…"
+msgstr ""
+
+#: src/pages/Shell.tsx
+msgid "Preparing to read files…"
+msgstr ""
+
+#: src/pages/Shell.tsx
+msgid "Preparing to read saved context…"
+msgstr ""
+
 #. placeholder {0}: preview?.label ?? props.name
 #: src/components/ArtifactFileCard.tsx
 msgid "Preview {0}"
@@ -5524,6 +5564,10 @@ msgstr ""
 msgid "Saved candidates"
 msgstr ""
 
+#: src/pages/RecruitingPanel.tsx
+msgid "Saved email"
+msgstr ""
+
 #: src/pages/RecruitingCorrespondence.tsx
 msgid "Saved emails"
 msgstr ""
@@ -5784,6 +5828,14 @@ msgstr ""
 msgid "Send on day"
 msgstr ""
 
+#: src/pages/RecruitingPanel.tsx
+msgid "Send outcome unknown"
+msgstr ""
+
+#: src/pages/RecruitingPanel.tsx
+msgid "Send recorded"
+msgstr ""
+
 #: src/pages/Auth.tsx
 msgid "Send reset link"
 msgstr "Sıfırlama bağlantısı gönder"
@@ -5977,8 +6029,8 @@ msgid "Sign in again"
 msgstr ""
 
 #: src/pages/Auth.tsx
-msgid "Sign in to Rakazo"
-msgstr "Rakazo'da oturum aç"
+msgid "Sign in to WeKruit Headhunter"
+msgstr ""
 
 #: src/lib/user-error.ts
 msgid "Sign in to your existing account to link SSO"
@@ -6608,6 +6660,10 @@ msgstr "Atanmamış"
 msgid "Unavailable"
 msgstr ""
 
+#: src/pages/RecruitingPanel.tsx
+msgid "Unclear"
+msgstr ""
+
 #: src/pages/PluginsOverlay.tsx
 msgid "Uninstall"
 msgstr ""
@@ -6991,5 +7047,5 @@ msgid "Your name"
 msgstr "Adın"
 
 #: src/pages/Welcome.tsx
-msgid "Your team of always-on agents<0/>that you can give real work to."
-msgstr "Gerçek işler verebileceğin,<0/>her zaman açık agent takımın."
+msgid "Your recruiting workspace."
+msgstr ""

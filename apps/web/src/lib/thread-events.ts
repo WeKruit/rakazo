@@ -10,6 +10,7 @@ import type {
 } from "@rakazo/contracts";
 import { RUN_TRIGGERS } from "@rakazo/contracts";
 import {
+  appendToolCallSegment,
   isActive,
   isBackgroundRunTrigger,
   isRunTerminalEvent,
@@ -462,6 +463,9 @@ export function reduceThreadSnapshot(
       type: "tool",
       name: String(event.payload.name ?? ""),
     });
+    // The hidden marker keeps a current call distinct from historical developer steps.
+    if (blocks.at(-1)?.kind === "steps")
+      blocks.push({ kind: "progress", activity: true, text: "" });
     const next: ThreadMessage = {
       id: liveId,
       threadId: event.threadId,
@@ -475,7 +479,25 @@ export function reduceThreadSnapshot(
     return { ...prev, cursor: event.seq, messages: [...remaining, next] };
   }
   if (event.type === "agent.tool.completed") {
-    return { ...prev, cursor: event.seq };
+    return {
+      ...prev,
+      cursor: event.seq,
+      messages: prev.messages.map((message) => {
+        if (
+          message.id !== progressMessageId(event) ||
+          !message.blocks.some((block) => block.kind === "progress" && block.activity === true)
+        )
+          return message;
+        let blocks: ThreadMessage["blocks"] = [];
+        for (const block of message.blocks) {
+          if (block.kind === "progress" && block.activity === true) {
+            for (const name of block.pendingToolNames ?? [])
+              blocks = appendToolCallSegment(blocks, name);
+          } else blocks.push(block);
+        }
+        return { ...message, blocks };
+      }),
+    };
   }
   if (event.type === "thread.subagent") {
     const block = subagentBlockFromPayload(event.payload);

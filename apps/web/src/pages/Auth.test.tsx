@@ -76,6 +76,10 @@ it("shows no credential form while capabilities load", async () => {
 it.each(["in", "up"] as const)("offers SSO and hides credentials on %s", async (mode) => {
   vi.mocked(fetchAuthCapabilities).mockResolvedValue(capabilities);
   await render(mode);
+  expect(host.querySelector("h1")?.textContent).toBe(
+    mode === "in" ? "Sign in to WeKruit Headhunter" : "Create your WeKruit Headhunter account",
+  );
+  expect(host.querySelector("img")?.getAttribute("src")).toBe("/wekruit-logo.png");
   expect(host.textContent).toContain("Continue with Example");
   expect(host.querySelector("input")).toBeNull();
   const sso = host.querySelector("button")!;

@@ -658,13 +658,29 @@ function recruitingMatchSummaryText(value: string): string {
 function CandidateReportValue({
   label,
   value,
+  providerStatus,
   compact = false,
   showDiagnostics = false,
-}: Pick<RecruitingCandidateReport["fields"][number], "label" | "value"> & {
+}: Pick<RecruitingCandidateReport["fields"][number], "label" | "value" | "providerStatus"> & {
   compact?: boolean;
   showDiagnostics?: boolean;
 }) {
   const { t } = useLingui();
+  if (providerStatus)
+    return (
+      <VerdictLabel
+        verdict={
+          providerStatus === "match" ? "met" : providerStatus === "miss" ? "unmet" : "unknown"
+        }
+        label={
+          providerStatus === "match"
+            ? t`Match`
+            : providerStatus === "miss"
+              ? t`Does not match`
+              : t`Unclear`
+        }
+      />
+    );
   if (label === "Resume status" && value !== null && !showDiagnostics)
     return (
       <p className={compact ? "line-clamp-2" : "whitespace-pre-wrap"}>
@@ -712,7 +728,7 @@ function CandidateResearchMatch({
   );
   const fields = source?.report?.fields.filter(
     (field) =>
-      [
+      ([
         "Rank",
         "Updated rank",
         "Overall rank",
@@ -725,7 +741,8 @@ function CandidateResearchMatch({
         "Match score",
         "Match tier",
         "Grade",
-      ].includes(field.label) &&
+      ].includes(field.label) ||
+        (!compact && field.providerStatus !== undefined)) &&
       (!compact || field.label !== "Fit reasons") &&
       (field.label !== "Batch rank" || !hasHigherRank),
   );
@@ -770,7 +787,14 @@ function CandidateResearchMatch({
                           : "whitespace-pre-wrap text-base"
                       }`}
                     >
-                      {field.value === null ? (
+                      {field.providerStatus ? (
+                        <CandidateReportValue
+                          label={field.label}
+                          value={field.value}
+                          providerStatus={field.providerStatus}
+                          compact={compact}
+                        />
+                      ) : field.value === null ? (
                         <Trans>Unknown</Trans>
                       ) : showDiagnostics ||
                         !["Recommendation", "Match judgment", "Fit reasons"].includes(
@@ -1044,6 +1068,7 @@ function CandidateReport({
               <CandidateReportValue
                 label={field.label}
                 value={field.value}
+                providerStatus={field.providerStatus}
                 showDiagnostics={showDiagnostics}
               />
               {field.evidence ? (
@@ -2142,20 +2167,21 @@ function MemoryDocumentView({
   );
 }
 
-function VerdictLabel({ verdict }: { verdict: Verdict }) {
+function VerdictLabel({ verdict, label }: { verdict: Verdict; label?: string }) {
   const Icon = verdict === "met" ? Check : verdict === "unmet" ? X : CircleHelp;
   return (
     <span
       className={`inline-flex items-center gap-1.5 text-xs ${verdict === "met" ? "text-success" : verdict === "unmet" ? "text-destructive" : "text-warning"}`}
     >
       <Icon size={14} aria-hidden />
-      {verdict === "met" ? (
-        <Trans>Met</Trans>
-      ) : verdict === "unmet" ? (
-        <Trans>Unmet</Trans>
-      ) : (
-        <Trans>Unknown</Trans>
-      )}
+      {label ??
+        (verdict === "met" ? (
+          <Trans>Met</Trans>
+        ) : verdict === "unmet" ? (
+          <Trans>Unmet</Trans>
+        ) : (
+          <Trans>Unknown</Trans>
+        ))}
     </span>
   );
 }
@@ -2265,6 +2291,7 @@ function CrmRecruitingPanel({
     serverRevision: browse.selection.serverRevision,
     organizationId: browse.selection.organizationId,
     candidateId: browse.candidateId ?? "",
+    ...(browse.selection.crmRoleId ? { crmRoleId: browse.selection.crmRoleId } : {}),
     limit: 30,
     ...(mailCursor ? { cursor: mailCursor } : {}),
   };
@@ -2301,7 +2328,12 @@ function CrmRecruitingPanel({
           value.source.serverId !== browse.selection.serverId ||
           value.source.serverRevision !== browse.selection.serverRevision ||
           value.source.organizationId !== browse.selection.organizationId ||
-          value.candidateId !== browse.candidateId
+          value.candidateId !== browse.candidateId ||
+          value.nativeCorrespondence.some(
+            (entry) =>
+              entry.candidateId !== browse.candidateId ||
+              entry.crmRoleId !== browse.selection.crmRoleId,
+          )
         )
           throw new Error("CRM scope changed");
         rememberRecruitingRead(readCache, savedKey, value, epoch);
@@ -2322,9 +2354,41 @@ function CrmRecruitingPanel({
   }, [mailKey, browse.view, readCache, readCacheScope]);
   const currentMail = mail?.key === mailKey ? mail : undefined;
   const mailPage = currentMail?.data;
-  const draftEmail = currentMail?.validated
-    ? (mailPage?.items.find((item) => item.id === selectedMail) ?? mailPage?.items[0])
-    : undefined;
+  const nativeMail = mailPage?.nativeCorrespondence ?? [];
+  const nativeByEmail = new Map<string, (typeof nativeMail)[number]>();
+  for (const entry of nativeMail) {
+    if (!entry.email) continue;
+    const previous = nativeByEmail.get(entry.email.id);
+    if (!previous || Date.parse(entry.checkedAt) > Date.parse(previous.checkedAt))
+      nativeByEmail.set(entry.email.id, entry);
+  }
+  const nativeEmails = [...nativeByEmail.values()];
+  const inboxEmails = [
+    ...nativeEmails.flatMap((entry) =>
+      entry.email ? [{ ...entry.email, id: `native:${entry.email.id}` }] : [],
+    ),
+    ...(mailPage?.items.map((item) => ({
+      id: `crm:${item.id}`,
+      sender: item.sender,
+      recipients: item.recipients,
+      subject: item.subject ?? "",
+      body: item.body ?? "",
+      snippet: item.partial,
+      date: item.date,
+      url: null,
+    })) ?? []),
+  ];
+  const selectedInboxEmail = inboxEmails.find((item) => item.id === selectedMail) ?? inboxEmails[0];
+  const selectedNativeMail = nativeEmails.find(
+    (entry) => entry.email && `native:${entry.email.id}` === selectedInboxEmail?.id,
+  );
+  const nativeMailStatus = {
+    read: t`Saved email`,
+    sent_recorded: t`Send recorded`,
+    scheduled: t`Scheduled`,
+    unknown: t`Send outcome unknown`,
+  };
+  const draftEmail = currentMail?.validated ? selectedInboxEmail : undefined;
   const people = page?.items ?? [];
   const selectedPerson = people.find((person) => person.candidateId === browse.candidateId);
   const importantView = ["shortlist", "interview", "workflow"].includes(browse.view);
@@ -3214,26 +3278,35 @@ function CrmRecruitingPanel({
                 </p>
               ) : mailPage ? (
                 <>
-                  {mailPage.items.length ? (
-                    <CorrespondenceEmails
-                      emails={mailPage.items.map((item) => ({
-                        id: item.id,
-                        sender: item.sender,
-                        recipients: item.recipients,
-                        subject: item.subject ?? "",
-                        body: item.body ?? "",
-                        snippet: item.partial,
-                        date: item.date,
-                        url: null,
-                      }))}
-                      selectedId={selectedMail}
-                      onSelect={setSelectedMail}
-                    />
+                  {inboxEmails.length ? (
+                    <>
+                      <p className="my-3 text-sm text-muted-foreground">
+                        {selectedNativeMail?.email?.sourceName ?? mailPage.source.name}
+                        {selectedNativeMail ? (
+                          <> · {nativeMailStatus[selectedNativeMail.status]}</>
+                        ) : null}
+                      </p>
+                      <CorrespondenceEmails
+                        emails={inboxEmails}
+                        selectedId={selectedInboxEmail?.id}
+                        onSelect={setSelectedMail}
+                      />
+                    </>
                   ) : (
                     <p>
                       <Trans>No stored messages were returned for this contact.</Trans>
                     </p>
                   )}
+                  {nativeMail
+                    .filter((entry) => entry.status === "unknown")
+                    .map((entry) => (
+                      <p key={entry.id} role="status" className="my-3 text-sm">
+                        {nativeMailStatus.unknown} ·{" "}
+                        <time dateTime={entry.checkedAt}>
+                          {new Date(entry.checkedAt).toLocaleString()}
+                        </time>
+                      </p>
+                    ))}
                   {mailCursor ? (
                     <Button variant="outline" onClick={() => setMailCursor(undefined)}>
                       <Trans>Latest messages</Trans>

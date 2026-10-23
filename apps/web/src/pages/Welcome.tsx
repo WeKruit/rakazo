@@ -11,20 +11,18 @@ export function WelcomePage() {
       </div>
       <main className="flex flex-1 flex-col items-center justify-center gap-11 px-5 pb-[90px]">
         <div className="flex items-center gap-[18px] sm:gap-[26px]">
-          <div className="flex size-16 items-center justify-center gap-[9px] rounded-full bg-accent sm:size-[88px] sm:gap-[13px]">
-            <span className="h-[17px] w-2 rounded-full bg-card sm:h-6 sm:w-[11px]" />
-            <span className="h-[17px] w-2 rounded-full bg-card sm:h-6 sm:w-[11px]" />
-          </div>
-          <h1 className="text-[56px] leading-none tracking-[-0.03em] text-foreground sm:text-[76px]">
-            Rakazo
+          <img
+            src="/wekruit-logo.png"
+            alt=""
+            aria-hidden="true"
+            className="size-16 object-contain sm:size-[88px]"
+          />
+          <h1 className="min-w-0 text-[32px] leading-none tracking-[-0.03em] text-foreground sm:text-[56px]">
+            WeKruit Headhunter
           </h1>
         </div>
         <p className="max-w-[600px] text-center text-[27px] leading-[1.4] text-foreground/75">
-          <Trans>
-            Your team of always-on agents
-            <br />
-            that you can give real work to.
-          </Trans>
+          <Trans>Your recruiting workspace.</Trans>
         </p>
         <div className="flex flex-wrap items-center justify-center gap-2">
           <button
