@@ -16,9 +16,10 @@ import { retryTransientRead } from "../../lib/read-retry";
 import type { RecruitingReadCache } from "../../lib/recruiting-read-cache";
 import { rememberRecruitingRead } from "../../lib/recruiting-read-cache";
 import { rpc } from "../../lib/rpc";
-import type { FunnelStageKey, RoleSummary } from "./dashboard";
+import type { DashboardRoleView, FunnelStageKey, RoleSummary } from "./dashboard";
 import {
   bucketByWeek,
+  dashboardStageView,
   firstName,
   mapWithConcurrency,
   openTasks,
@@ -138,15 +139,17 @@ function useOverview(
 
 type DashboardDrilldown = {
   roleGroups: ReadonlyMap<string, Group>;
-  onOpenRole: (groupId: string) => void;
+  onOpenRole: (groupId: string, view?: DashboardRoleView) => void;
 };
 
 function RoleBreakdown({
   items,
+  view,
   roleGroups,
   onOpenRole,
 }: DashboardDrilldown & {
   items: readonly { role: RoleSummary; count: number | null; partial?: boolean }[];
+  view: DashboardRoleView;
 }) {
   const { t } = useLingui();
   return (
@@ -158,7 +161,7 @@ function RoleBreakdown({
             <Button
               variant="ghost"
               className="h-auto w-full justify-between gap-3 px-2 py-2 text-start font-normal"
-              onClick={() => onOpenRole(group.id)}
+              onClick={() => onOpenRole(group.id, view)}
             >
               <span className="min-w-0 truncate">{group.name}</span>
               <span className="shrink-0 tabular-nums">
@@ -266,6 +269,7 @@ function WeeklyShortlist({
       {selectedWeek ? (
         <RoleBreakdown
           {...drilldown}
+          view="shortlist"
           items={roles.map((role) => ({
             role,
             count: role.shortlistedDates.filter((value) => {
@@ -278,6 +282,11 @@ function WeeklyShortlist({
             }).length,
           }))}
         />
+      ) : null}
+      {selectedWeek ? (
+        <p className="mt-2 text-xs text-muted-foreground">
+          <Trans>Opens the role’s full shortlist. The selected week is not applied there.</Trans>
+        </p>
       ) : null}
       {undated ? (
         <p className="mt-3 text-xs text-muted-foreground">
@@ -348,12 +357,21 @@ function OutreachFunnel({
       {selected ? (
         <RoleBreakdown
           {...drilldown}
+          view={dashboardStageView(selected)}
           items={roles.map((role) => ({
             role,
             count: role[selected],
             partial: selected === "interested" && role.interestedPartial,
           }))}
         />
+      ) : null}
+      {selected ? (
+        <p className="mt-2 text-xs text-muted-foreground">
+          <Trans>
+            Opens this role’s records. The destination is not filtered to this metric’s exact
+            candidates.
+          </Trans>
+        </p>
       ) : null}
       <p className="mt-3 text-xs text-muted-foreground">
         <Trans>Send totals are not available from these records.</Trans>
@@ -374,7 +392,7 @@ function YourTasks({
   refreshSignal: number;
   /** Role id → its conversation and name, for reminders tied to a role. */
   roleGroups: ReadonlyMap<string, Group>;
-  onOpenRole: (groupId: string) => void;
+  onOpenRole: (groupId: string, view?: DashboardRoleView) => void;
   project: string | null;
 }) {
   const { t } = useLingui();
@@ -517,7 +535,7 @@ export function HomeDashboard({
   /** User and Space the cached overview belongs to. */
   readCacheScope?: string;
   refreshSignal?: number;
-  onOpenRole: (groupId: string) => void;
+  onOpenRole: (groupId: string, view?: DashboardRoleView) => void;
   onOpenNavigation?: () => void;
   navigationCollapsed?: boolean;
 }) {

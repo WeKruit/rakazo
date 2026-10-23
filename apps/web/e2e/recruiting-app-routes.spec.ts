@@ -423,3 +423,24 @@ for (const width of [1440, 390]) {
     expect(fixture.unknown).toEqual([]);
   });
 }
+
+test("Overview drilldowns preserve the exact role and evidence tab", async ({ page }) => {
+  await page.setViewportSize({ width: 1440, height: 900 });
+  await mockRecruitingApp(page);
+  for (const [label, destination] of [
+    ["Shortlisted", "shortlist"],
+    ["Contacted", "sequence"],
+    ["Replied", "inbox"],
+    ["Interested", "contacts"],
+  ]) {
+    await openRoute(page, "home");
+    const funnel = page.getByRole("region", { name: "Outreach funnel", exact: true });
+    await funnel.getByRole("button", { name: `Inspect ${label}`, exact: true }).click();
+    await funnel
+      .getByRole("list", { name: "Projects", exact: true })
+      .getByRole("button")
+      .first()
+      .click();
+    await expect(page).toHaveURL(`/app/g/${appGroupId}?view=${destination}`);
+  }
+});

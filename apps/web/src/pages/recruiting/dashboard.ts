@@ -30,6 +30,24 @@ export type RoleSummary = {
 
 export type WeekBucket = { start: Date; count: number };
 export type FunnelStageKey = "shortlisted" | "contacted" | "replied" | "interested";
+export type DashboardRoleView =
+  | "results"
+  | "shortlist"
+  | "contacts"
+  | "sequence"
+  | "inbox"
+  | "interview";
+
+/** Open the existing surface that owns this evidence; no unsupported cohort filter is invented. */
+export function dashboardStageView(stage: FunnelStageKey): DashboardRoleView {
+  return {
+    shortlisted: "shortlist",
+    contacted: "sequence",
+    replied: "inbox",
+    interested: "contacts",
+  }[stage] as DashboardRoleView;
+}
+
 export type FunnelStage = {
   key: FunnelStageKey;
   count: number | null;

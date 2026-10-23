@@ -5385,7 +5385,7 @@ export function ShellPage() {
       )}
 
       {homeView ? <HomeDashboard userName={session.data?.user.name} groups={groups} readCache={recruitingReadCache.current} readCacheScope={userId && bootstrapMe?.spaceId ? JSON.stringify([userId, bootstrapMe.spaceId]) : undefined} refreshSignal={recruitingRefresh}
-        onOpenRole={(id) => navigate(`/app/g/${id}?view=results`)} navigationCollapsed={botsSidebarCollapsed} onOpenNavigation={() => { setBotsSidebarCollapsedPref(false); setMobileSidebarOpen(true); }} /> : null}
+        onOpenRole={(id, view = "results") => navigate(`/app/g/${id}?view=${view}`)} navigationCollapsed={botsSidebarCollapsed} onOpenNavigation={() => { setBotsSidebarCollapsedPref(false); setMobileSidebarOpen(true); }} /> : null}
       {/* Keep the composer's z-index inside the chat so phone overlays like the side panel cover it. */}
       <main
         aria-hidden={mobileSidebarOpen || undefined}
