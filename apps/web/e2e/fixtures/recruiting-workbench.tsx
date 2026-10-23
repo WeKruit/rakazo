@@ -95,11 +95,11 @@ const judgment = (verdict: (typeof verdicts)[number]) => ({
   evidence: [],
   missing: [],
 });
-const assessments = people.slice(0, 4).map((person, i) => ({
+const assessments = people.slice(0, 4).map((_person, i) => ({
   assessment: {
     roleId: role.id,
     roleRevisionId: revision.id,
-    candidateKey: person.name,
+    candidateKey: `fixture-${i}`,
     version: 1,
     basedOnVersion: null,
     createdByRunId: "run-demo",
@@ -126,7 +126,7 @@ const assessments = people.slice(0, 4).map((person, i) => ({
 }));
 const candidates: RecruitingCandidate[] = people.map((person, i) => ({
   roleId: role.id,
-  candidateKey: person.name,
+  candidateKey: `fixture-${i}`,
   name: person.name,
   title: person.title,
   company: i === 1 ? "Example Autonomous Systems International Holdings" : "Example Labs",
@@ -136,6 +136,7 @@ const candidates: RecruitingCandidate[] = people.map((person, i) => ({
   evidenceUrls: ["https://example.test/profile"],
   issues: [],
   shortlisted: i < 2,
+  shortlistedAt: i < 2 ? checkedAt : null,
   decision: null,
   decisionReason: null,
   decisionAt: null,
@@ -192,7 +193,7 @@ const candidates: RecruitingCandidate[] = people.map((person, i) => ({
       : null,
   crm: null,
 }));
-const mail = people.slice(0, 4).map((person, i) => ({
+const mail = people.slice(0, 4).map((_person, i) => ({
   id: `mail-${i}`,
   providerMessageId: `mail-${i}`,
   threadId: null,
@@ -307,7 +308,34 @@ function crmData(input: Record<string, unknown>) {
   throw new Error(`unmocked ${String(op)}`);
 }
 
+const fixtureNotes: {
+  id: string;
+  roleId: string;
+  candidateKey: string;
+  body: string;
+  createdBy: "user";
+  authorName: string;
+  createdAt: string;
+  updatedAt: string;
+}[] = [];
+
 const rpc: Record<string, (input: Record<string, unknown>) => unknown> = {
+  "recruiting/notes/list": () => ({ items: fixtureNotes }),
+  "recruiting/notes/create": (input) => {
+    const note = {
+      id: `note-${fixtureNotes.length}`,
+      roleId: role.id,
+      candidateKey: String(input.candidateKey),
+      body: String(input.body),
+      createdBy: "user" as const,
+      authorName: "Example",
+      createdAt: checkedAt,
+      updatedAt: checkedAt,
+    };
+    fixtureNotes.push(note);
+    return note;
+  },
+  "recruiting/reminders/list": () => ({ items: [], overdueCount: 0 }),
   "recruiting/getWorkspace": () => ({ role, revision, crmTarget }),
   "recruiting/listCandidates": () => {
     const items = page(candidates);

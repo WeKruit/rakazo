@@ -62,7 +62,9 @@ beforeEach(() => {
     role: { id: `role-${threadId}` },
   }));
   listCandidates.mockResolvedValue({
-    items: [{ shortlisted: true, firstDiscoveredAt: new Date().toISOString() }],
+    items: [
+      { shortlisted: true, shortlistedAt: new Date().toISOString(), firstDiscoveredAt: null },
+    ],
     total: 3,
   });
   roleCandidates.mockResolvedValue({

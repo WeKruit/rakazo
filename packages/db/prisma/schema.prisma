@@ -28,6 +28,7 @@ model User {
   recruitingCrmSyncProgress RecruitingCrmSyncProgress[]
   recruitingCrmMessages RecruitingCrmMessage[]
   recruitingReminders RecruitingReminder[] @relation("RecruitingReminderOwner")
+  recruitingCandidateNotes RecruitingCandidateNote[] @relation("RecruitingCandidateNoteOwner")
   recruitingRoles RecruitingRole[]
   id                          String                       @id
   name                        String
@@ -207,6 +208,7 @@ model Space {
   recruitingCrmSyncProgress RecruitingCrmSyncProgress[]
   recruitingCrmMessages RecruitingCrmMessage[]
   recruitingReminders RecruitingReminder[]
+  recruitingCandidateNotes RecruitingCandidateNote[]
   recruitingRoles RecruitingRole[]
   id                          String                       @id
   organizationId              String
@@ -1539,6 +1541,7 @@ model RecruitingRole {
   researchTasks RecruitingResearchTask[]
   assessments RecruitingAssessment[]
   reminders RecruitingReminder[]
+  candidateNotes RecruitingCandidateNote[]
 
   @@index([spaceId, userId])
   @@map("recruiting_roles")
@@ -1653,6 +1656,7 @@ model RecruitingCandidate {
   role RecruitingRole @relation(fields: [roleId], references: [id], onDelete: Cascade)
   candidateKey String
   shortlisted Boolean @default(false)
+  shortlistedAt DateTime?
   consideration Json?
   revision Int @default(0)
   shortlistMessageId String?
@@ -1900,3 +1904,24 @@ model RecruitingCrmSyncProgress {
   @@id([userId, spaceId])
   @@map("recruiting_crm_sync_progress")
 }
+
+/// Owner-scoped (spaceId + ownerUserId) note on a candidate; agent-written notes are owned by the
+/// user the agent ran for, with createdByBotId set. Soft-deleted via deletedAt.
+model RecruitingCandidateNote {
+  id String @id @default(cuid())
+  spaceId String
+  space Space @relation(fields: [spaceId], references: [id], onDelete: Cascade)
+  ownerUserId String
+  owner User @relation("RecruitingCandidateNoteOwner", fields: [ownerUserId], references: [id], onDelete: Cascade)
+  roleId String?
+  role RecruitingRole? @relation(fields: [roleId], references: [id], onDelete: Cascade)
+  /// "autumn:<key>" | "crm:<id>", same key space as reminders.
+  candidateKey String
+  body String
+  createdByBotId String?
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+  deletedAt DateTime?
+
+  @@index([spaceId, candidateKey, createdAt])
+  @@map("recruiting_candidate_notes")

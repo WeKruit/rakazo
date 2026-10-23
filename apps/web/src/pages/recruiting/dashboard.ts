@@ -16,11 +16,8 @@ export type RoleSummary = {
   roleId: string;
   /** Autumn shortlist size for the role (`listCandidates({ shortlisted: true }).total`). */
   shortlisted: number;
-  /**
-   * When each loaded shortlisted candidate was first discovered. There is no shortlist timestamp,
-   * so the weekly chart buckets shortlisted people by the week they were first found.
-   */
-  shortlistedDiscoveredAt: readonly (string | null)[];
+  /** Recorded shortlist dates; unknown historic dates remain null. */
+  shortlistedDates: readonly (string | null)[];
   /** People in the role's launched outreach campaign; null without a readable campaign. */
   contacted: number | null;
   /** CRM contacts whose outreach status is `replied`; null without a readable CRM binding. */
@@ -121,9 +118,9 @@ export function roleSummary(
     groupId,
     roleId,
     shortlisted: shortlist.total,
-    shortlistedDiscoveredAt: shortlist.items
+    shortlistedDates: shortlist.items
       .filter((item) => item.shortlisted)
-      .map((item) => item.firstDiscoveredAt),
+      .map((item) => item.shortlistedAt),
     replied: crmReplied(candidates),
     ...campaignStages(campaign),
   };
@@ -170,4 +167,20 @@ export function openTasks(reminders: readonly RecruitingReminder[], now: Date) {
         Date.parse(left.reminder.dueAt) - Date.parse(right.reminder.dueAt) ||
         left.reminder.id.localeCompare(right.reminder.id),
     );
+}
+
+/** Read every shortlist page so older discoveries shortlisted recently count too. */
+export async function readShortlistPages(
+  load: (cursor?: string) => Promise<ListRecruitingCandidatesOutput>,
+): Promise<Pick<ListRecruitingCandidatesOutput, "items" | "total">> {
+  const items: ListRecruitingCandidatesOutput["items"] = [];
+  let cursor: string | undefined;
+  let total = 0;
+  do {
+    const page = await load(cursor);
+    items.push(...page.items);
+    total = page.total;
+    cursor = page.nextCursor ?? undefined;
+  } while (cursor);
+  return { items, total };
 }

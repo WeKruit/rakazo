@@ -201,6 +201,7 @@ describe("candidate listing and shortlist boundaries", () => {
         evidenceUrls: null,
         issues: [],
         shortlisted: false,
+        shortlistedAt: null,
         consideration: null,
         revision: 0,
         discoveryCount: 1,
@@ -672,6 +673,7 @@ describe("candidate listing and shortlist boundaries", () => {
         evidenceUrls: null,
         issues: [],
         shortlisted: false,
+        shortlistedAt: null,
         consideration: null,
         revision: 0,
         discoveryCount: 1,
@@ -924,7 +926,12 @@ describe("candidate listing and shortlist boundaries", () => {
     });
     expect(f.tx.recruitingCandidate.updateMany).toHaveBeenCalledWith({
       where: { roleId: "role", candidateKey: f.candidate.candidateKey, revision: 0 },
-      data: { shortlisted: true, revision: 1, shortlistMessageId: "human-shortlist-receipt" },
+      data: {
+        shortlisted: true,
+        shortlistedAt: expect.any(Date),
+        revision: 1,
+        shortlistMessageId: "human-shortlist-receipt",
+      },
     });
     expect(appendEventInTransaction).toHaveBeenCalledExactlyOnceWith(f.tx, {
       spaceId: actor.spaceId,
@@ -935,6 +942,28 @@ describe("candidate listing and shortlist boundaries", () => {
     });
     const profileQuery = f.tx.$queryRaw.mock.lastCall![0] as { values: unknown[] };
     expect(profileQuery.values.slice(-2)).toEqual(["role", f.candidate.candidateKey]);
+  });
+  it("clears shortlistedAt when a candidate leaves the shortlist", async () => {
+    const f = fixture();
+    Object.assign(f.candidate, { shortlisted: true, revision: 1 });
+    f.tx.$queryRaw
+      .mockResolvedValueOnce([])
+      .mockResolvedValueOnce([])
+      .mockResolvedValueOnce([
+        { name: "Synthetic Avery", linkedinUrl: null, resumeUrl: "r", sourcePageId: null, profileSourcePageIds: [] },
+      ]);
+    await recruiting.setRecruitingCandidateShortlist(f.prisma, actor, {
+      threadId: "thread",
+      roleId: "role",
+      candidateKey: "candidate",
+      expectedRevision: 1,
+      shortlisted: false,
+    });
+    expect(f.tx.recruitingCandidate.updateMany).toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: expect.objectContaining({ shortlisted: false, shortlistedAt: null }),
+      }),
+    );
   });
   it("rejects stale selection and performs no write for a no-op", async () => {
     const f = fixture();
@@ -1365,6 +1394,7 @@ function crmFixture(additionalRows: readonly unknown[] = []) {
         candidateKey: occurrence.candidateKey,
         consideration: null,
         shortlisted: false,
+        shortlistedAt: null,
         revision: 0,
       })),
     },
@@ -4047,6 +4077,7 @@ describe("native CRM binding and source import", () => {
             ...profile,
             consideration: null,
             shortlisted: false,
+            shortlistedAt: null,
             revision: 0,
             discoveryCount: 1,
             profileSourcePageIds: [],
@@ -5027,6 +5058,7 @@ describe("native candidate source provenance", () => {
             sourceRowIndex: rowIndex,
             profileSourcePageIds: [pageId],
             shortlisted: false,
+            shortlistedAt: null,
             revision: 0,
             discoveryCount: 1,
             firstDiscoveredAt: f.page.observedAt.toISOString(),
@@ -5588,6 +5620,7 @@ describe("native candidate source provenance", () => {
         sourceRowIndex: 0,
         profileSourcePageIds: [page.effectId, f.page.effectId],
         shortlisted: false,
+        shortlistedAt: null,
         consideration: null,
         revision: 0,
         discoveryCount: 2,
@@ -6064,6 +6097,7 @@ describe("native candidate source provenance", () => {
         sourceRowIndex: rowIndex,
         profileSourcePageIds: [pageId],
         shortlisted: false,
+        shortlistedAt: null,
         consideration: null,
         revision: 0,
         discoveryCount: 1,

@@ -1829,6 +1829,7 @@ describe("recruiting.roleCandidates contract", () => {
             outreachStatus: "replied",
           },
           shortlisted: false,
+          shortlistedAt: null,
         },
       ],
       nextCursor: null,
@@ -1837,6 +1838,9 @@ describe("recruiting.roleCandidates contract", () => {
       crmStatus: "ok",
     };
     expect(output.parse(page)).toEqual(page);
+    expect(() =>
+      output.parse({ ...page, items: [{ ...page.items[0], shortlistedAt: "yesterday" }] }),
+    ).toThrow();
     expect(() => output.parse({ ...page, crmStatus: "off" })).toThrow();
     expect(() => output.parse({ ...page, counts: { replied: 1 } })).toThrow();
   });

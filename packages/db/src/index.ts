@@ -20,6 +20,7 @@ export * from "./model-backups.js";
 export * from "./model-credentials.js";
 export * from "./recruiting.js";
 export * from "./recruiting-bootstrap.js";
+export * from "./recruiting-candidate-notes.js";
 export * from "./recruiting-reminders.js";
 export * from "./recruiting-crm-sync.js";
 export * from "./repos.js";

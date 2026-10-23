@@ -14,6 +14,7 @@ import {
   mapWithConcurrency,
   openTasks,
   outreachFunnel,
+  readShortlistPages,
   recentRoles,
   roleSummary,
 } from "./dashboard";
@@ -52,13 +53,21 @@ function useOverview(
         if (!workspace) return { summary: null, incomplete: false };
         const conversation = { groupId: group.id };
         const [shortlist, candidates, campaign] = await Promise.all([
-          retryTransientRead(
-            () =>
-              rpc.recruiting.listCandidates(
-                { roleId: workspace.role.id, shortlisted: true, sort: "recent", limit: 200 },
-                { signal },
-              ),
-            signal,
+          readShortlistPages((cursor) =>
+            retryTransientRead(
+              () =>
+                rpc.recruiting.listCandidates(
+                  {
+                    roleId: workspace.role.id,
+                    shortlisted: true,
+                    sort: "recent",
+                    limit: 200,
+                    ...(cursor ? { cursor } : {}),
+                  },
+                  { signal },
+                ),
+              signal,
+            ),
           ),
           optional(() =>
             rpc.recruiting.roleCandidates(
@@ -114,7 +123,7 @@ function useOverview(
 function WeeklyShortlist({ roles }: { roles: readonly RoleSummary[] }) {
   const { t } = useLingui();
   const weeks = bucketByWeek(
-    roles.flatMap((role) => role.shortlistedDiscoveredAt),
+    roles.flatMap((role) => role.shortlistedDates),
     new Date(),
   );
   const max = Math.max(1, ...weeks.map((week) => week.count));
@@ -123,9 +132,6 @@ function WeeklyShortlist({ roles }: { roles: readonly RoleSummary[] }) {
       <h3 className="text-sm font-medium">
         <Trans>Shortlisted profiles</Trans>
       </h3>
-      <p className="text-xs text-muted-foreground">
-        <Trans>By week found</Trans>
-      </p>
       <ol className="mt-4 grid h-40 grid-cols-5 items-end gap-2">
         {weeks.map((week) => {
           const label = week.start.toLocaleDateString(undefined, {

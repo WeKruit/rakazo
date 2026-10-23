@@ -3055,6 +3055,7 @@ export async function mergeRoleCandidates(
         },
         crm: crmSide(contact),
         shortlisted: candidate.shortlisted,
+        shortlistedAt: candidate.shortlistedAt,
       });
     }
   if (autumnPhase && autumn.nextCursor)
@@ -3073,6 +3074,7 @@ export async function mergeRoleCandidates(
         autumn: null,
         crm: crmSide(row),
         shortlisted: false,
+        shortlistedAt: null,
       });
     if (offset + page.length < visibleCrmOnly.length)
       nextCursor = roleCandidatesCursor.write(scope, { o: offset + page.length });
@@ -3179,3 +3181,24 @@ export const deleteRecruitingReminder = (
   actor: Actor,
   input: { id: string },
 ) => authenticated(() => recruiting.deleteRecruitingReminder(prisma, actor, input.id));
+
+export const listRecruitingCandidateNotes = (
+  prisma: PrismaClient,
+  actor: Actor,
+  input: Parameters<typeof recruiting.listRecruitingCandidateNotes>[2],
+) => authenticated(() => recruiting.listRecruitingCandidateNotes(prisma, actor, input));
+export const createRecruitingCandidateNote = (
+  prisma: PrismaClient,
+  actor: Actor,
+  input: Parameters<typeof recruiting.createRecruitingCandidateNote>[2],
+) => authenticated(() => recruiting.createRecruitingCandidateNote(prisma, actor, input));
+export const updateRecruitingCandidateNote = (
+  prisma: PrismaClient,
+  actor: Actor,
+  input: Parameters<typeof recruiting.updateRecruitingCandidateNote>[2],
+) => authenticated(() => recruiting.updateRecruitingCandidateNote(prisma, actor, input));
+export const deleteRecruitingCandidateNote = (
+  prisma: PrismaClient,
+  actor: Actor,
+  input: { id: string },
+) => authenticated(() => recruiting.deleteRecruitingCandidateNote(prisma, actor, input.id));

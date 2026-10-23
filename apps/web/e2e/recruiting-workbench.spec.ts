@@ -78,9 +78,9 @@ test("role workbench shows loading and empty states", async ({ page }, testInfo)
 test("people open in a detail panel beside the workbench", async ({ page }, testInfo) => {
   await page.setViewportSize({ width: 1280, height: 860 });
   await page.goto(`${fixture}?view=contacts`);
-  await page.getByRole("button", { name: "Avery Example" }).click();
+  await page.getByRole("button", { name: "Avery Example", exact: true }).click();
   const panel = page.getByTestId("recruiting-detail-panel");
-  await expect(panel.getByRole("heading", { name: "Avery Example" })).toBeVisible();
+  await expect(panel.getByRole("heading", { name: "Avery Example", exact: true })).toBeVisible();
   // The contacts table stays on screen beside the panel.
   await expect(page.getByRole("region", { name: "Contacts" })).toBeVisible();
   await captureScreenshot(page, testInfo, "panel-profile");
@@ -97,7 +97,7 @@ test("people open in a detail panel beside the workbench", async ({ page }, test
   await expect(page.getByRole("region", { name: "Contacts" })).toBeVisible();
 
   await page.setViewportSize({ width: 390, height: 844 });
-  await page.getByRole("button", { name: "Avery Example" }).click();
+  await page.getByRole("button", { name: "Avery Example", exact: true }).click();
   await expect(panel).toBeVisible();
   await captureScreenshot(page, testInfo, "panel-narrow");
   await page.keyboard.press("Escape");
@@ -120,3 +120,24 @@ test("duplicate role names have visible creation dates", async ({ page }, testIn
   await captureScreenshot(page, testInfo, "duplicate-role-dates");
   await noHorizontalScroll(page);
 });
+
+test("profile notes save and tasks render at desktop and phone widths", async ({
+  page,
+}, testInfo) => {
+  for (const width of [1280, 390]) {
+    await page.setViewportSize({ width, height: 860 });
+    await page.goto(`${fixture}?view=contacts`);
+    await page.getByRole("button", { name: "Avery Example", exact: true }).click();
+    const panel = page.getByTestId("recruiting-detail-panel");
+    await panel.getByRole("button", { name: "Notes", exact: true }).click();
+    await expect(panel.getByText("No notes yet.")).toBeVisible();
+    await panel.getByRole("textbox", { name: "Note", exact: true }).fill("Follow up next week");
+    await panel.getByRole("button", { name: "Add note", exact: true }).click();
+    await expect(panel.getByText("Follow up next week")).toBeVisible();
+    await expect(panel.getByRole("textbox", { name: "Note", exact: true })).toHaveValue("");
+    await captureScreenshot(page, testInfo, `profile-notes-${width}`);
+    await panel.getByRole("button", { name: "Tasks", exact: true }).click();
+    await expect(panel.getByRole("button", { name: "Create reminder", exact: true })).toBeVisible();
+    await captureScreenshot(page, testInfo, `profile-tasks-${width}`);
+    await noHorizontalScroll(page);
+  }
