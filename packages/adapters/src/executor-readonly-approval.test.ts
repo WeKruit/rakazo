@@ -1266,6 +1266,108 @@ describe("native saved-candidate CRM workflow", () => {
   });
 });
 
+describe("native Instantly activation card", () => {
+  const route = {
+    connectorId: "mcp",
+    resourceId: "instantly-1",
+    resourceRevision: 1,
+    toolName: "native_instantly_activate_campaign",
+  };
+  const connectorResults = {
+    native_instantly_get_campaign: {
+      structuredContent: {
+        source: "local_native_instantly_rest",
+        result: {
+          id: "c-1",
+          name: "Founding Engineer",
+          status: 0,
+          stop_on_reply: true,
+          email_list: ["me@x.test"],
+          campaign_schedule: {
+            schedules: [
+              { name: "Weekdays", timing: { from: "09:00", to: "17:00" }, timezone: "UTC" },
+            ],
+          },
+        },
+      },
+    },
+    native_instantly_list_leads: {
+      structuredContent: {
+        source: "local_native_instantly_rest",
+        result: {
+          items: [
+            { id: "l1", email: "ada@x.test", first_name: "Ada", last_name: "Lovelace" },
+            { id: "l2", email: "bob@x.test" },
+          ],
+        },
+      },
+    },
+  };
+  const inputSchema = {
+    type: "object",
+    properties: { campaign_id: { type: "string" } },
+    additionalProperties: false,
+  };
+  const card = (f: ReturnType<typeof fixture>) =>
+    (f.pauseRunForInput.mock.calls[0]![0] as { blocks: { detail?: string }[] }).blocks.at(-1)!;
+
+  it("shows campaign name, status, lead count and sender read before the card", async () => {
+    const f = fixture({
+      name: "instantly__demo__activate_campaign",
+      route,
+      connectorResults,
+      inputSchema,
+    });
+    f.setCalls([{ args: { campaign_id: "c-1" }, executionId: "activate" }]);
+    await f.run();
+    expect(card(f).detail).toBe(
+      [
+        "Campaign: Founding Engineer",
+        "Sender: me@x.test",
+        "Recipients (2):",
+        "- Ada Lovelace <ada@x.test>",
+        "- bob@x.test",
+        "Send window: Weekdays 09:00-17:00 UTC",
+        "Stop on reply: on",
+        "",
+        "Confirm sending the first email to these recipients",
+      ].join("\n"),
+    );
+    expect(card(f).detail).not.toContain("c-1");
+    expect(f.execute.mock.calls.map((call) => call[0].route?.toolName)).toEqual([
+      "native_instantly_get_campaign",
+      "native_instantly_list_leads",
+    ]);
+    expect(f.effects[0]?.status).toBe("intended");
+  });
+
+  it("resolves the role's bound campaign when campaign_id is omitted", async () => {
+    const f = fixture({
+      name: "instantly__demo__activate_campaign",
+      route,
+      connectorResults,
+      inputSchema,
+    });
+    Object.assign(f.prisma.thread, {
+      findUnique: vi.fn(async () => ({ activeRecruitingRoleId: "role-1" })),
+    });
+    f.effects.push({
+      id: "binding",
+      kind: "instantly_role_campaign",
+      idempotencyKey: "instantly-role-campaign:instantly-1:role-1",
+      status: "completed",
+      request: { roleId: "role-1", serverId: "instantly-1" },
+      result: { campaignId: "c-1", campaignName: "Founding Engineer", eaccount: "me@x.test" },
+      runId: "run-0",
+      spaceId: "space-1",
+    } as never);
+    f.setCalls([{ args: {}, executionId: "activate" }]);
+    await f.run();
+    expect(card(f).detail).toContain("Campaign: Founding Engineer");
+    expect(card(f).detail).toContain("Recipients (2):");
+  });
+});
+
 describe.each([
   "reply_to_email",
   "create_lead",
