@@ -1,6 +1,6 @@
 # CRM sync development delivery
 
-This is development evidence, not live acceptance. No live CRM read/sync, production migration, deployment or outbound operation was performed by this workstream.
+This is development evidence, not live acceptance. No live CRM read/sync, production migration or outbound operation was performed. Source publication triggered external Vercel deployments; see the root delivery incident, whose main environment is unverified.
 
 ## Scope and dependencies
 
@@ -13,7 +13,7 @@ Ordered product migrations across the coordinated delivery:
 3. `20261023170000_recruiting_candidate_notes` and `20261023171000_recruiting_candidate_shortlisted_at` (#74, when integrated).
 4. `20261023172000_recruiting_crm_sync_progress` (opaque progress tokens and contact profile JSON).
 
-The separate CRM source migration is `20261023180000_crm_candidate_presence`; its authenticated read function reproduces the CRM's role-label matching and explicitly rejects unauthorized organizations. The existing MCP edge adapter exposes it through `list_crm_candidates` with `p_view: "presence"`. There is no new MCP server, dependency, credential, or cloud resource.
+The separate CRM source migrations are `20261023180000_crm_candidate_presence` then `20261023181000_crm_candidate_presence_secondary_roles`; its authenticated read function reproduces the CRM's role-label matching and explicitly rejects unauthorized organizations. The existing MCP edge adapter exposes it through `list_crm_candidates` with `p_view: "presence"`. There is no new MCP server, dependency, credential, or cloud resource.
 
 ## Field mapping
 
@@ -37,14 +37,14 @@ Progress is stored server-side with random single-use tokens bound to the user, 
 
 Full-sync slices and incremental writes share the same per-owner database transaction lock. Newer observations and archive timestamps cannot be overwritten or restored by delayed older reads. Contacts appearing only after the organization scan are stored before role links are created. JSON comparison ignores object key order so a rerun stays unchanged.
 
-Offset traversal is not treated as proof of absence. All potentially missing IDs are revalidated through the authorized source, in batches of at most 50. No row in a unit is archived unless every presence batch succeeds. Failed or incomplete reads are reported under `skipped`; they do not authorize absence-based archives. Incremental reads never archive.
+Offset traversal is not treated as proof of absence. All potentially missing IDs are revalidated through the authorized source, in batches of at most 50. No row in a unit is archived unless every presence batch succeeds and declares corrected protocol version 2. Older source responses fail closed; never remove this fence to unblock deployment. Failed or incomplete reads are reported under `skipped`; they do not authorize absence-based archives. Incremental reads never archive.
 
 A dry run writes **no CRM source data and no projection rows**. It does write/rotate temporary server-owned progress metadata; completion removes that metadata. Abandoned progress is superseded by the next run. Tokens expire after 24 hours. Do not mix dry-run and real-run tokens or parallelize calls using the same token.
 
 ## Local-owner procedure (not executed here)
 
 1. Preserve the deployment hold. Verify the active sourcing run has ended, outreach is stopped, and no active run would be interrupted. Record actual live source revision and migration ledger; historical handoff revisions are not current verification.
-2. Review the root's final SHAs and local test evidence. Apply the source presence migration, then deploy only the existing MCP edge function using the existing owner process. Never prune functions, create resources, rotate secrets, or change permissions as a shortcut.
+2. Review the root's final SHAs and local test evidence. The user approved publication of this source correction with its existing Vercel automatic deployment at 16:43 UTC. This exception does not authorize manual deployments or migrations. Apply `docs/development/patches/crm-presence-v2.patch` to source merge `b29368dfdfe417d9883613fa7200d59c29c54861` using `git am` on an isolated branch; the patch author is anonymized for this public artifact. It contains source commits `e07e2bd82ba72dffa1d3384736d016544104ecbe` and `08402f1b4e3324bcf930f4e7cdbf027a48596e4e`, and canonical-fallback correction `b77f88cd51cb7760ab8fa08e987d48dfe86d9523`. Apply BOTH ordered source migrations, then deploy only the existing MCP edge function using the existing owner process. Never prune functions, create resources, rotate secrets, or change permissions as a shortcut.
 3. Apply the ordered product migrations before updating API/worker. Deploy only when the owner can lift the hold.
 4. From the authorized signed-in product tab, use the existing group and Space. Do not paste cookies, tokens or credentials. Run the following loop first with `true`; stop if `skipped` is nonempty or expected source counts differ. Review counts with the owner before starting a fresh run with `false`.
 

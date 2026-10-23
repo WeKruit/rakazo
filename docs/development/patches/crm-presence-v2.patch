@@ -1,0 +1,340 @@
+From e07e2bd82ba72dffa1d3384736d016544104ecbe Mon Sep 17 00:00:00 2001
+From: Development Delivery <development@example.invalid>
+Date: Fri, 23 Oct 2026 16:36:04 +0000
+Subject: [PATCH 1/4] fix(crm): preserve scoped secondary role presence
+
+---
+ ...crm_candidate_presence_secondary_roles.sql | 80 +++++++++++++++++++
+ supabase/tests/crm-candidate-presence.sql     | 32 ++++++--
+ 2 files changed, 107 insertions(+), 5 deletions(-)
+ create mode 100644 supabase/migrations/20261023181000_crm_candidate_presence_secondary_roles.sql
+
+diff --git a/supabase/migrations/20261023181000_crm_candidate_presence_secondary_roles.sql b/supabase/migrations/20261023181000_crm_candidate_presence_secondary_roles.sql
+new file mode 100644
+index 0000000..c3dbc94
+--- /dev/null
++++ b/supabase/migrations/20261023181000_crm_candidate_presence_secondary_roles.sql
+@@ -0,0 +1,80 @@
++-- Preserve secondary formal and campaign role associations from the current CRM listing.
++create or replace function public.crm_candidate_presence(
++  p_org uuid, p_candidate_ids uuid[], p_role uuid default null
++)
++returns jsonb
++language plpgsql
++stable
++security definer
++set search_path = ''
++as $$
++declare
++  wanted_client text;
++  wanted_role text;
++begin
++  if auth.uid() is null or p_org is null or not exists (
++    select 1 from public.memberships m
++    where m.user_id = auth.uid() and m.organization_id = p_org
++  ) then
++    raise exception 'CRM membership required' using errcode = '42501';
++  end if;
++  if p_candidate_ids is null or cardinality(p_candidate_ids) > 50
++    or array_position(p_candidate_ids, null) is not null then
++    raise exception 'Expected at most 50 candidate IDs' using errcode = '22023';
++  end if;
++  if p_role is not null then
++    select btrim(c.name), btrim(r.title) into wanted_client, wanted_role
++    from public.role_specs r
++    join public.clients c on c.id = r.client_id and c.organization_id = p_org
++    where r.id = p_role and r.organization_id = p_org and r.archived_at is null;
++    if not found or coalesce(wanted_client, '') = '' or coalesce(wanted_role, '') = '' then
++      raise exception 'CRM role unavailable' using errcode = '42501';
++    end if;
++  end if;
++  return (
++    with campaign_roles as materialized (
++      select distinct il.candidate_id,
++        coalesce(nullif(btrim(cl.name), ''), 'Unassigned') as client_label,
++        coalesce(nullif(btrim(rs.title), ''), nullif(btrim(ic.name), ''), 'Campaign') as role_label
++      from public.instantly_leads il
++      join public.instantly_campaigns ic on ic.id = il.campaign_id and ic.organization_id = il.organization_id
++      left join public.role_specs rs on rs.id = ic.role_spec_id and rs.organization_id = ic.organization_id
++      left join public.clients cl on cl.id = coalesce(rs.client_id, ic.client_id) and cl.organization_id = ic.organization_id
++      where il.organization_id = p_org and il.candidate_id = any(p_candidate_ids) and rs.archived_at is null
++      union
++      select m.candidate_id, coalesce(nullif(btrim(cl.name), ''), 'Unassigned'),
++        coalesce(nullif(btrim(rs.title), ''), 'No role')
++      from public.candidate_role_memberships m
++      join public.role_specs rs on rs.id = m.role_spec_id and rs.organization_id = m.organization_id
++      join public.clients cl on cl.id = rs.client_id and cl.organization_id = m.organization_id
++      where m.organization_id = p_org and m.candidate_id = any(p_candidate_ids) and rs.archived_at is null
++    ), primary_campaign as materialized (
++      select distinct on (candidate_id) candidate_id, client_label, role_label
++      from campaign_roles
++      order by candidate_id, (client_label <> 'Unassigned') desc, client_label, role_label
++    ), present as materialized (
++      select c.id,
++        coalesce(nullif(btrim(cl.name), ''), nullif(nullif(btrim(sg.src_client), ''), 'Unassigned'), pc.client_label, 'Unassigned') as client_label,
++        coalesce(nullif(btrim(rs.title), ''), nullif(nullif(btrim(p.tracker_role), ''), 'No role'),
++          nullif(nullif(btrim(sg.src_role), ''), 'No role'), pc.role_label, 'No role') as role_label
++      from public.candidates c
++      left join public.candidate_pipeline p on p.candidate_id = c.id and p.organization_id = c.organization_id
++      left join public.role_specs rs on rs.id = p.role_spec_id and rs.organization_id = c.organization_id
++      left join public.clients cl on cl.id = rs.client_id and cl.organization_id = c.organization_id
++      left join public.crm_candidate_signals sg on sg.candidate_id = c.id and sg.organization_id = c.organization_id
++      left join primary_campaign pc on pc.candidate_id = c.id
++      where c.organization_id = p_org and c.id = any(p_candidate_ids)
++    )
++    select jsonb_build_object(
++      'candidate_ids', coalesce((select jsonb_agg(distinct id) from present), '[]'::jsonb),
++      'role_candidate_ids', case when p_role is null then null else
++        coalesce((select jsonb_agg(distinct id) from present
++          where (client_label = wanted_client and role_label = wanted_role)
++          or exists (select 1 from campaign_roles cr where cr.candidate_id = present.id
++            and cr.client_label = wanted_client and cr.role_label = wanted_role)), '[]'::jsonb) end
++    )
++  );
++end;
++$$;
++revoke all on function public.crm_candidate_presence(uuid, uuid[], uuid) from public, anon;
++grant execute on function public.crm_candidate_presence(uuid, uuid[], uuid) to authenticated;
+diff --git a/supabase/tests/crm-candidate-presence.sql b/supabase/tests/crm-candidate-presence.sql
+index 677da81..6ab8c8e 100644
+--- a/supabase/tests/crm-candidate-presence.sql
++++ b/supabase/tests/crm-candidate-presence.sql
+@@ -12,9 +12,13 @@ create table memberships(user_id uuid, organization_id uuid);
+ create table clients(id uuid, organization_id uuid, name text);
+ create table role_specs(id uuid, organization_id uuid, client_id uuid, title text, archived_at timestamptz);
+ create table candidates(id uuid, organization_id uuid);
+-create table candidate_pipeline(candidate_id uuid, role_spec_id uuid, tracker_role text);
+-create table crm_candidate_signals(candidate_id uuid, src_client text, src_role text);
++create table candidate_pipeline(candidate_id uuid, role_spec_id uuid, tracker_role text, organization_id uuid);
++create table crm_candidate_signals(candidate_id uuid, src_client text, src_role text, organization_id uuid);
++create table candidate_role_memberships(candidate_id uuid, role_spec_id uuid, organization_id uuid);
++create table instantly_campaigns(id text, organization_id uuid, name text, role_spec_id uuid, client_id uuid);
++create table instantly_leads(candidate_id uuid, campaign_id text, organization_id uuid);
+ \ir ../migrations/20261023180000_crm_candidate_presence.sql
++\ir ../migrations/20261023181000_crm_candidate_presence_secondary_roles.sql
+ select set_config('test.user_id','00000000-0000-4000-8000-000000000001',true);
+ insert into memberships values ('00000000-0000-4000-8000-000000000001','00000000-0000-4000-8000-000000000010');
+ insert into clients values ('00000000-0000-4000-8000-000000000020','00000000-0000-4000-8000-000000000010','Example');
+@@ -24,10 +28,10 @@ insert into candidates values
+  ('00000000-0000-4000-8000-000000000042','00000000-0000-4000-8000-000000000010'),
+  ('00000000-0000-4000-8000-000000000043','00000000-0000-4000-8000-000000000010'),
+  ('00000000-0000-4000-8000-000000000044','00000000-0000-4000-8000-000000000099');
+-insert into candidate_pipeline values ('00000000-0000-4000-8000-000000000041','00000000-0000-4000-8000-000000000030',null);
++insert into candidate_pipeline values ('00000000-0000-4000-8000-000000000041','00000000-0000-4000-8000-000000000030',null,'00000000-0000-4000-8000-000000000010');
+ insert into crm_candidate_signals values
+- ('00000000-0000-4000-8000-000000000042','Example','Engineer'),
+- ('00000000-0000-4000-8000-000000000043','Example','Designer');
++ ('00000000-0000-4000-8000-000000000042','Example','Engineer','00000000-0000-4000-8000-000000000010'),
++ ('00000000-0000-4000-8000-000000000043','Example','Designer','00000000-0000-4000-8000-000000000010');
+ do $$
+ declare
+  ids uuid[] := array['00000000-0000-4000-8000-000000000041','00000000-0000-4000-8000-000000000042','00000000-0000-4000-8000-000000000043','00000000-0000-4000-8000-000000000044','00000000-0000-4000-8000-000000000045']::uuid[];
+@@ -51,6 +55,24 @@ begin
+    perform public.crm_candidate_presence('00000000-0000-4000-8000-000000000010',array_fill(ids[1],array[51]));
+    raise exception 'Unbounded IDs accepted';
+  exception when invalid_parameter_value then null; end;
++ -- SECURITY DEFINER joins must not use foreign-org rows with matching candidate IDs.
++ insert into candidate_pipeline values ('00000000-0000-4000-8000-000000000043','00000000-0000-4000-8000-000000000030',null,'00000000-0000-4000-8000-000000000099');
++ insert into crm_candidate_signals values ('00000000-0000-4000-8000-000000000043','Example','Engineer','00000000-0000-4000-8000-000000000099');
++ result := public.crm_candidate_presence('00000000-0000-4000-8000-000000000010',ids,'00000000-0000-4000-8000-000000000030');
++ if result->'role_candidate_ids' ? '00000000-0000-4000-8000-000000000043' then
++   raise exception 'Foreign organization affected role presence';
++ end if;
++ -- A second formal role must survive even when canonical/source labels differ.
++ insert into role_specs values ('00000000-0000-4000-8000-000000000031','00000000-0000-4000-8000-000000000010','00000000-0000-4000-8000-000000000020','Second',null);
++ insert into candidate_role_memberships values ('00000000-0000-4000-8000-000000000041','00000000-0000-4000-8000-000000000031','00000000-0000-4000-8000-000000000010');
++ insert into instantly_campaigns values ('campaign','00000000-0000-4000-8000-000000000010','Second','00000000-0000-4000-8000-000000000031','00000000-0000-4000-8000-000000000020');
++ insert into instantly_leads values ('00000000-0000-4000-8000-000000000043','campaign','00000000-0000-4000-8000-000000000010');
++ result := public.crm_candidate_presence('00000000-0000-4000-8000-000000000010',ids,'00000000-0000-4000-8000-000000000031');
++ if jsonb_array_length(result->'role_candidate_ids') <> 2
++   or not (result->'role_candidate_ids' ? '00000000-0000-4000-8000-000000000041')
++   or not (result->'role_candidate_ids' ? '00000000-0000-4000-8000-000000000043') then
++   raise exception 'Secondary formal/campaign role association lost: %',result;
++ end if;
+  update role_specs set archived_at=now();
+  begin
+    perform public.crm_candidate_presence('00000000-0000-4000-8000-000000000010',ids,'00000000-0000-4000-8000-000000000030');
+-- 
+2.52.0
+
+
+From 08402f1b4e3324bcf930f4e7cdbf027a48596e4e Mon Sep 17 00:00:00 2001
+From: Development Delivery <development@example.invalid>
+Date: Fri, 23 Oct 2026 16:42:39 +0000
+Subject: [PATCH 2/4] fix(crm): version corrected exact presence contract [skip
+ ci]
+
+---
+ supabase/functions/mcp/tools/crm.test.ts                 | 9 ++++++---
+ supabase/functions/mcp/tools/crm.ts                      | 1 +
+ ...1023181000_crm_candidate_presence_secondary_roles.sql | 1 +
+ supabase/tests/crm-candidate-presence.sql                | 2 +-
+ 4 files changed, 9 insertions(+), 4 deletions(-)
+
+diff --git a/supabase/functions/mcp/tools/crm.test.ts b/supabase/functions/mcp/tools/crm.test.ts
+index 3d5857c..d1e7f64 100644
+--- a/supabase/functions/mcp/tools/crm.test.ts
++++ b/supabase/functions/mcp/tools/crm.test.ts
+@@ -2658,6 +2658,7 @@ Deno.test("candidate listing preserves stored profile and company evidence withi
+ Deno.test("candidate presence uses bounded exact IDs and fails closed on foreign results", async () => {
+   const fixture = setup();
+   fixture.setRpc("crm_candidate_presence", {
++    version: 2,
+     candidate_ids: [candidate],
+     role_candidate_ids: null,
+   });
+@@ -2666,9 +2667,10 @@ Deno.test("candidate presence uses bounded exact IDs and fails closed on foreign
+   if (result.isError || fixture.calls[0]?.name !== "crm_candidate_presence")
+     throw new Error("Presence did not use the exact-ID read");
+   for (const bad of [
+-    { candidate_ids: [outsider], role_candidate_ids: null },
+-    { candidate_ids: [candidate], role_candidate_ids: [outsider] },
+-    { candidate_ids: [], role_candidate_ids: [] },
++    { version: 2, candidate_ids: [outsider], role_candidate_ids: null },
++    { version: 2, candidate_ids: [candidate], role_candidate_ids: [outsider] },
++    { version: 2, candidate_ids: [], role_candidate_ids: [] },
++    { candidate_ids: [candidate], role_candidate_ids: null },
+     {},
+   ]) {
+     fixture.setRpc("crm_candidate_presence", bad);
+@@ -2691,6 +2693,7 @@ Deno.test("candidate presence uses bounded exact IDs and fails closed on foreign
+     if (!rejected) throw new Error("Unbounded or paging input accepted");
+   }
+   fixture.setRpc("crm_candidate_presence", {
++    version: 2,
+     candidate_ids: [candidate],
+     role_candidate_ids: [candidate],
+   });
+diff --git a/supabase/functions/mcp/tools/crm.ts b/supabase/functions/mcp/tools/crm.ts
+index 8e3a9db..35a9ef3 100644
+--- a/supabase/functions/mcp/tools/crm.ts
++++ b/supabase/functions/mcp/tools/crm.ts
+@@ -97,6 +97,7 @@ export function registerCrmTools(server: McpServer, { supabase, userClaims }: To
+     .strict();
+   const presenceResult = z
+     .object({
++      version: z.literal(2),
+       candidate_ids: z.array(z.uuid()).max(50),
+       role_candidate_ids: z.array(z.uuid()).max(50).nullable(),
+     })
+diff --git a/supabase/migrations/20261023181000_crm_candidate_presence_secondary_roles.sql b/supabase/migrations/20261023181000_crm_candidate_presence_secondary_roles.sql
+index c3dbc94..2e50e76 100644
+--- a/supabase/migrations/20261023181000_crm_candidate_presence_secondary_roles.sql
++++ b/supabase/migrations/20261023181000_crm_candidate_presence_secondary_roles.sql
+@@ -66,6 +66,7 @@ begin
+       where c.organization_id = p_org and c.id = any(p_candidate_ids)
+     )
+     select jsonb_build_object(
++      'version', 2,
+       'candidate_ids', coalesce((select jsonb_agg(distinct id) from present), '[]'::jsonb),
+       'role_candidate_ids', case when p_role is null then null else
+         coalesce((select jsonb_agg(distinct id) from present
+diff --git a/supabase/tests/crm-candidate-presence.sql b/supabase/tests/crm-candidate-presence.sql
+index 6ab8c8e..fd3b806 100644
+--- a/supabase/tests/crm-candidate-presence.sql
++++ b/supabase/tests/crm-candidate-presence.sql
+@@ -38,7 +38,7 @@ declare
+  result jsonb;
+ begin
+  result := public.crm_candidate_presence('00000000-0000-4000-8000-000000000010',ids,'00000000-0000-4000-8000-000000000030');
+- if jsonb_array_length(result->'candidate_ids') <> 3 or jsonb_array_length(result->'role_candidate_ids') <> 2
++ if result->>'version' <> '2' or jsonb_array_length(result->'candidate_ids') <> 3 or jsonb_array_length(result->'role_candidate_ids') <> 2
+    or not (result->'role_candidate_ids' ? '00000000-0000-4000-8000-000000000042') then
+    raise exception 'Exact/legacy role matching or organization isolation failed: %',result;
+  end if;
+-- 
+2.52.0
+
+
+From b77f88cd51cb7760ab8fa08e987d48dfe86d9523 Mon Sep 17 00:00:00 2001
+From: Development Delivery <development@example.invalid>
+Date: Fri, 23 Oct 2026 16:45:21 +0000
+Subject: [PATCH 3/4] fix(crm): preserve canonical campaign fallback during
+ presence checks
+
+---
+ ...crm_candidate_presence_secondary_roles.sql | 22 +++++++++++--------
+ supabase/tests/crm-candidate-presence.sql     | 15 +++++++++++++
+ 2 files changed, 28 insertions(+), 9 deletions(-)
+
+diff --git a/supabase/migrations/20261023181000_crm_candidate_presence_secondary_roles.sql b/supabase/migrations/20261023181000_crm_candidate_presence_secondary_roles.sql
+index 2e50e76..8f3316d 100644
+--- a/supabase/migrations/20261023181000_crm_candidate_presence_secondary_roles.sql
++++ b/supabase/migrations/20261023181000_crm_candidate_presence_secondary_roles.sql
+@@ -33,17 +33,19 @@ begin
+   end if;
+   return (
+     with campaign_roles as materialized (
++      -- Match crm_list_candidates exactly for canonical fallback labels. Extra associations
++      -- must not change which campaign supplies an otherwise missing client or role.
+       select distinct il.candidate_id,
+-        coalesce(nullif(btrim(cl.name), ''), 'Unassigned') as client_label,
+-        coalesce(nullif(btrim(rs.title), ''), nullif(btrim(ic.name), ''), 'Campaign') as role_label
++        nullif(btrim(cl.name), '') as client_label,
++        nullif(btrim(rs.title), '') as role_label
+       from public.instantly_leads il
+       join public.instantly_campaigns ic on ic.id = il.campaign_id and ic.organization_id = il.organization_id
+-      left join public.role_specs rs on rs.id = ic.role_spec_id and rs.organization_id = ic.organization_id
+-      left join public.clients cl on cl.id = coalesce(rs.client_id, ic.client_id) and cl.organization_id = ic.organization_id
+-      where il.organization_id = p_org and il.candidate_id = any(p_candidate_ids) and rs.archived_at is null
+-      union
+-      select m.candidate_id, coalesce(nullif(btrim(cl.name), ''), 'Unassigned'),
+-        coalesce(nullif(btrim(rs.title), ''), 'No role')
++      join public.role_specs rs on rs.id = ic.role_spec_id and rs.organization_id = ic.organization_id
++      join public.clients cl on cl.id = rs.client_id and cl.organization_id = ic.organization_id
++      where il.organization_id = p_org and il.candidate_id = any(p_candidate_ids)
++    ), formal_roles as materialized (
++      select m.candidate_id, nullif(btrim(cl.name), '') as client_label,
++        nullif(btrim(rs.title), '') as role_label
+       from public.candidate_role_memberships m
+       join public.role_specs rs on rs.id = m.role_spec_id and rs.organization_id = m.organization_id
+       join public.clients cl on cl.id = rs.client_id and cl.organization_id = m.organization_id
+@@ -72,7 +74,9 @@ begin
+         coalesce((select jsonb_agg(distinct id) from present
+           where (client_label = wanted_client and role_label = wanted_role)
+           or exists (select 1 from campaign_roles cr where cr.candidate_id = present.id
+-            and cr.client_label = wanted_client and cr.role_label = wanted_role)), '[]'::jsonb) end
++            and cr.client_label = wanted_client and cr.role_label = wanted_role)
++          or exists (select 1 from formal_roles fr where fr.candidate_id = present.id
++            and fr.client_label = wanted_client and fr.role_label = wanted_role)), '[]'::jsonb) end
+     )
+   );
+ end;
+diff --git a/supabase/tests/crm-candidate-presence.sql b/supabase/tests/crm-candidate-presence.sql
+index fd3b806..60b6ec9 100644
+--- a/supabase/tests/crm-candidate-presence.sql
++++ b/supabase/tests/crm-candidate-presence.sql
+@@ -73,6 +73,21 @@ begin
+    or not (result->'role_candidate_ids' ? '00000000-0000-4000-8000-000000000043') then
+    raise exception 'Secondary formal/campaign role association lost: %',result;
+  end if;
++ -- Unbound campaigns and secondary formal roles cannot change the canonical campaign
++ -- fallback client used by crm_list_candidates when a source supplies only the role.
++ insert into clients values ('00000000-0000-4000-8000-000000000021','00000000-0000-4000-8000-000000000010','A client');
++ insert into role_specs values ('00000000-0000-4000-8000-000000000032','00000000-0000-4000-8000-000000000010','00000000-0000-4000-8000-000000000021','Other',null);
++ insert into candidates values ('00000000-0000-4000-8000-000000000047','00000000-0000-4000-8000-000000000010');
++ insert into crm_candidate_signals values ('00000000-0000-4000-8000-000000000047',null,'Engineer','00000000-0000-4000-8000-000000000010');
++ insert into instantly_campaigns values ('unbound','00000000-0000-4000-8000-000000000010','A campaign',null,'00000000-0000-4000-8000-000000000021');
++ insert into instantly_leads values
++   ('00000000-0000-4000-8000-000000000047','campaign','00000000-0000-4000-8000-000000000010'),
++   ('00000000-0000-4000-8000-000000000047','unbound','00000000-0000-4000-8000-000000000010');
++ insert into candidate_role_memberships values ('00000000-0000-4000-8000-000000000047','00000000-0000-4000-8000-000000000032','00000000-0000-4000-8000-000000000010');
++ result := public.crm_candidate_presence('00000000-0000-4000-8000-000000000010',array['00000000-0000-4000-8000-000000000047']::uuid[],'00000000-0000-4000-8000-000000000030');
++ if not (result->'role_candidate_ids' ? '00000000-0000-4000-8000-000000000047') then
++   raise exception 'Secondary associations changed the canonical listing fallback: %',result;
++ end if;
+  update role_specs set archived_at=now();
+  begin
+    perform public.crm_candidate_presence('00000000-0000-4000-8000-000000000010',ids,'00000000-0000-4000-8000-000000000030');
+-- 
+2.52.0
+
+
+From 2676b3fb058c3d3730dbc96af5fc7821197718a9 Mon Sep 17 00:00:00 2001
+From: Development Delivery <development@example.invalid>
+Date: Fri, 23 Oct 2026 16:45:59 +0000
+Subject: [PATCH 4/4] chore: publish reviewed presence correction [skip ci]
+
+-- 
+2.52.0
+

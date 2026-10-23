@@ -52,3 +52,30 @@ CRM implementation `ca264a0f7ac0a0e7c6e432fbac7a9da2970c776d` was integrated as 
 The upstream source PR #66 is merged, not merely available: source code head `f4fba4964acb50e78a1811a4d293bf852384dcf5`, merge `b29368dfdfe417d9883613fa7200d59c29c54861`. Its migration and MCP deployment were NOT executed by this task. Vercel's external deployment incident remains as disclosed above; opening its management metadata URL was unavailable through the tool, and production environment verification remains with the owner.
 
 Operational CRM instructions are in `docs/development/crm-sync-delivery-2026-10-23.md`. Product roleCandidates now reads authorized stored projections; ordinary Contacts retains its existing live-source read. There is no fallback or promise of offline access. Unsynced projections are empty, so the owner must complete dry run and real sync before evaluating stored role candidates. Dry run writes only temporary cursor metadata, no projection rows or CRM source data.
+
+## Final development integration (16:45 UTC checkpoint)
+
+The first batch is PR #77: tested code `214a7a9d`, PR head `1345896e86d3f6dfdf16018fa4c47c3180d4ab11`, merge `e133c3aa3c0d74b87e38c909e700af59b73f0c66`. These are distinct revisions.
+
+Final product code checkpoint `2098e315` includes CRM #72, the original #74 ancestry plus profile completion `32e9bfaf01c667959eea82f653cd909f833728de`, CRM profile display `7df2c565`, presence protocol fence `143f6ace`, and guard/budget correction `7503addf`. Saving ten profiles is not delivery: calibration/feedback requires an actual pending native feedback/approval or handoff. Budget exhaustion reports persisted candidate count and next playbook step. It does not restart to evade the budget. The final publication record below supersedes the earlier pending-batch section.
+
+Completed: owner-scoped CRM projections and reads, cursor/concurrency/archive safety, lossless stored company/history/summary/skills transport, recognized profile display, notes draft preservation, unknown historical shortlist dates left null, all shortlist pages included in Home, Inbox tombstones, safe frontend progress, role subtitles, responsive pane persistence, internal continuation provenance and guard terminal behavior.
+
+Validation at final integration:
+
+- Recruiting API + profile/Home/Notes UI + guard: **306 passed**.
+- CRM PostgreSQL: **14 passed** with `VERIFY_DATABASE=1 DATABASE_URL='<local fixture>' pnpm exec vitest run apps/api/src/recruiting-crm-sync.postgres.test.ts`.
+- Web and API `tsc --noEmit -p apps/{web,api}/tsconfig.json`: passed.
+- Source: `deno test --config supabase/functions/mcp/deno.json --allow-env supabase/functions/mcp/tools/crm.test.ts`: **76 passed**. Native PostgreSQL `psql -v ON_ERROR_STOP=1 -f supabase/tests/crm-candidate-presence.sql`: passed. No source data connection.
+- Profile worker: **556** focused tests; **117** migrations on fresh native PostgreSQL plus targeted domain checks; desktop/phone Chromium Notes/Tasks passed. Counts overlap other batches.
+- A broader six-case legacy CRM-import database selection passed assertions but failed teardown on `recruiting_crm_imports_bindingEffectId_fkey`; this is not reported as a passing suite. Scoped new feature suites are recorded separately. Full database/adapter typechecks retain previously identified fixture failures; two adapter schema failures were reproduced on main. Full legacy browser signup journey remains blocked as described above.
+
+Ordered deployment prerequisites remain owner-only. Inspect actual ledgers by FULL migration name, including all three `20261023000000_recruiting_occurrence_match_fields`, `20261023000000_recruiting_reminders`, `20261023000000_recruiting_role_archived_at`, then `20261023000001_recruiting_group_title_backfill`; do not infer completeness from date prefixes. Apply missing product migrations in lexical order: `20261023153000_recruiting_role_playbook_stage`, `20261023160000_recruiting_crm_sync`, `20261023170000_recruiting_candidate_notes`, `20261023171000_recruiting_candidate_shortlisted_at`, `20261023172000_recruiting_crm_sync_progress`. Source migrations `20261023180000_crm_candidate_presence` then `20261023181000_crm_candidate_presence_secondary_roles` and updated existing MCP function MUST precede CRM sync. Source protocol version 2 is mandatory; old deployments fail closed.
+
+At 16:43 UTC the user explicitly approved publishing/merging only the corrected headhunter source, accepting its existing Vercel automatic deployment. This does not authorize production migrations, CRM sync or manual deployments. The earlier unapproved Vercel side effect remains an incident, not retroactively authorized. Main deployment status timestamp was 16:31:30 UTC; its environment is unknown and requires owner verification.
+
+The source patch is also preserved at `docs/development/patches/crm-presence-v2.patch`, based on source merge `b29368dfdfe417d9883613fa7200d59c29c54861`. Patch authorship headers use a placeholder for public-repository privacy. Follow `docs/development/crm-sync-delivery-2026-10-23.md` for quiet-session dryRun true, fresh-cursor false, aggregate/readback and isolation acceptance. Temporary cursor metadata writes are intentional even during dry run; no source/projection writes are permitted by that mode. Live acceptance, actual deployment revision/ledger, provider data and the Autumn hold are unverified here.
+
+Not implemented: absent source education storage, periodic CRM sync, new interview tables, speculative latency business changes, application rename or new release infrastructure. Deferred product decisions remain with the owner. Inaccessible shared handoff files were not read. Development delivery is not a claim of production readiness or completed live acceptance.
+
+Final guard/budget/executor integration: **40/40 passed**. Actual PostgreSQL save-nine/save-ten/feedback-guard, private notes and shortlist domain regressions: **3/3 passed**. Source canonical fallback regression failed on old code and passed on corrected `b77f88cd51cb7760ab8fa08e987d48dfe86d9523`; source **76/76** and SQL suite passed again afterward.
