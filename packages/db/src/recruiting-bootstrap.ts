@@ -1,7 +1,11 @@
 import { createHash } from "node:crypto";
 import type { Actor } from "@rakazo/contracts";
 import { BOT_COLORS, GROUP_MEMBER_MAX } from "@rakazo/contracts";
-import { ACTIVE_RUN_STATUSES, RECRUITING_DEFAULT_BOTS } from "@rakazo/core";
+import {
+  ACTIVE_RUN_STATUSES,
+  RECRUITING_DEFAULT_BOTS,
+  RECRUITING_DISABLED_BUILTIN_TOOLS,
+} from "@rakazo/core";
 import type { Bot, BotMcpServer, CapabilityInstall, McpServer, PrismaClient } from "./client.js";
 import { Prisma } from "./client.js";
 import { resolveMaxComputersPerUser } from "./computers.js";
@@ -82,7 +86,11 @@ type ManagedPreset = {
 };
 const digest = (value: unknown) => createHash("sha256").update(JSON.stringify(value)).digest("hex");
 const catalogDigest = (firstPartyMcpUrl?: string) =>
-  digest([RECRUITING_DEFAULT_BOTS, recruitingServices(firstPartyMcpUrl)]);
+  digest([
+    RECRUITING_DEFAULT_BOTS,
+    recruitingServices(firstPartyMcpUrl),
+    RECRUITING_DISABLED_BUILTIN_TOOLS,
+  ]);
 export function recruitingPresetId(actor: Pick<Actor, "spaceId" | "userId">): string {
   return `recruiting-defaults-${digest([actor.spaceId, actor.userId])}`;
 }
@@ -284,6 +292,7 @@ async function upgradeInTransaction(
           color: BOT_COLORS[bots.length % BOT_COLORS.length] ?? BOT_COLORS[0],
           notifyOnFinish: true,
           spawnKey: spawnKey(role.key),
+          disabledBuiltinTools: [...RECRUITING_DISABLED_BUILTIN_TOOLS],
         },
         await recruitingComputerKind(tx, options.sandboxKind),
       );
@@ -305,6 +314,23 @@ async function upgradeInTransaction(
       !group.members.some((member) => member.botId === bot!.id)
     )
       continue;
+    const missing = RECRUITING_DISABLED_BUILTIN_TOOLS.filter(
+      (name) => !bot.disabledBuiltinTools.includes(name),
+    );
+    if (missing.length) {
+      const changed = await tx.bot.updateMany({
+        where: {
+          id: bot.id,
+          spaceId: actor.spaceId,
+          userId: actor.userId,
+          archivedAt: null,
+          disabledBuiltinTools: { equals: bot.disabledBuiltinTools },
+        },
+        data: { disabledBuiltinTools: [...bot.disabledBuiltinTools, ...missing] },
+      });
+      if (changed.count !== 1)
+        throw new IsolationError("The recruiting tool policy changed during installation");
+    }
     for (const field of BOT_FIELDS) {
       if (digest(bot[field]) !== managed.fields[field] || bot[field] === role[field]) continue;
       const changed = await tx.bot.updateMany({
@@ -549,6 +575,7 @@ export async function ensureRecruitingWorkspace(
                 color: BOT_COLORS[index % BOT_COLORS.length] ?? BOT_COLORS[0],
                 notifyOnFinish: true,
                 spawnKey: spawnKey(role.key),
+                disabledBuiltinTools: [...RECRUITING_DISABLED_BUILTIN_TOOLS],
               },
               kind,
             ),

@@ -2,6 +2,31 @@ import { describe, expect, it } from "vitest";
 import * as contracts from "./index.js";
 
 const now = "2026-01-01T00:00:00.000Z";
+it("keeps CRM role UI locators closed and separate from business binding receipts", () => {
+  const reference = {
+    sourceId: "source",
+    serverRevision: 2,
+    organizationId: "10000000-0000-4000-8000-000000000001",
+    crmRoleId: "20000000-0000-4000-8000-000000000002",
+  };
+  expect(contracts.RecruitingCrmRoleReferenceSchema.parse(reference)).toEqual(reference);
+  expect(
+    contracts.RecruitingCrmRoleReferenceSchema.safeParse({
+      ...reference,
+      crmRoleId: "Same role name",
+    }).success,
+  ).toBe(false);
+  expect(
+    contracts.RecruitingCrmRoleReferenceSchema.safeParse({
+      ...reference,
+      bindingEffectId: "fake-proof",
+    }).success,
+  ).toBe(false);
+  expect(
+    contracts.RecruitingCrmRoleReferenceSchema.safeParse({ ...reference, serverRevision: 0 })
+      .success,
+  ).toBe(false);
+});
 const artifact = { artifactId: "artifact-version-sample", sha256: "a".repeat(64) };
 const source = {
   id: "source-sample",

@@ -14,6 +14,22 @@ import {
 import { deriveMessageQuote, messageReplyPreview } from "./message-quote.js";
 
 describe("attachment helpers", () => {
+  it("keeps a canonical CRM role locator as UI context through the native prompt and history", () => {
+    const crmRoleReference = {
+      sourceId: "crm-source",
+      serverRevision: 2,
+      organizationId: "123e4567-e89b-42d3-a456-426614174000",
+      crmRoleId: "123e4567-e89b-42d3-a456-426614174001",
+    };
+    const text = "  Please read the existing contacts.\n";
+    const blocks = [{ kind: "text" as const, text, crmRoleReference }];
+    const history = blocksToAgentHistoryText(blocks);
+    expect(history.startsWith(text)).toBe(true);
+    expect(history).toContain(JSON.stringify(crmRoleReference));
+    expect(history).toContain("not evidence or authorization");
+    expect(promptTextForAttachments(text, [], undefined, crmRoleReference)).toBe(history);
+    expect(messageReplyPreview(blocks, "user").text).toBe(text.trim());
+  });
   it("keeps selected email context with the original text through initial prompts and saved history", () => {
     const reference = {
       threadId: "thread-1",

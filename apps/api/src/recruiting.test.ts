@@ -3875,6 +3875,32 @@ describe("live CRM browser reads", () => {
     };
     return { server, assignment, results, execute, deps, reauthorize, mockPrisma };
   }
+  it("freshly reads one exact canonical role for native conversation creation without scanning candidates or the role catalog", async () => {
+    const f = browserFixture("existing-personal-oauth");
+    const reference = {
+      sourceId: "crm",
+      serverRevision: 3,
+      organizationId: org,
+      crmRoleId: roleId,
+    };
+    expect(
+      await api.getRecruitingCrmData(f.deps, actor, target, { operation: "role", reference }),
+    ).toEqual(f.results.get_crm_role);
+    expect(f.execute.mock.calls.map(([call]) => call.route!.toolName)).toEqual([
+      "list_crm_memberships",
+      "get_crm_role",
+    ]);
+    expect(f.execute.mock.calls[1]![0].args).toEqual({ p_org: org, p_role: roleId });
+    expect(f.execute.mock.calls.every(([, context]) => context.runId === undefined)).toBe(true);
+    f.results.get_crm_role = { ...(f.results.get_crm_role as object), role_spec_id: candidateId };
+    await expect(
+      api.getRecruitingCrmData(f.deps, actor, target, { operation: "role", reference }),
+    ).rejects.toMatchObject({ code: "SERVICE_UNAVAILABLE" });
+    f.assignment.allowedTools = [];
+    await expect(
+      api.getRecruitingCrmData(f.deps, actor, target, { operation: "role", reference }),
+    ).rejects.toMatchObject({ code: "NOT_FOUND" });
+  });
   it.each(["mail", "candidateDetails"] as const)(
     "reads original CRM outbox records separately for %s without redispatch",
     async (operation) => {

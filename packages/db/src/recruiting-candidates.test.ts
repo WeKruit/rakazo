@@ -1495,6 +1495,99 @@ function crmFixture(additionalRows: readonly unknown[] = []) {
   };
 }
 
+describe("canonical CRM conversation locators", () => {
+  it("projects native bindings and persisted UI locators in one scoped batch without treating either as authorization", async () => {
+    const f = crmFixture();
+    const reference = {
+      sourceId: f.target.mcpServerId,
+      serverRevision: f.target.serverRevision,
+      organizationId: f.target.organizationId,
+      crmRoleId: f.target.crmRoleId,
+    };
+    const groupId = recruiting.recruitingCrmConversationId(actor, reference);
+    const read = f.effects.get("crm-read")!;
+    const bound = {
+      groupId: "existing-group",
+      roleId: f.role.id,
+      bindingEffectId: f.binding.id,
+      bindingRequest: f.binding.request,
+      bindingResult: f.binding.result,
+      readStatus: read.status,
+      readRequest: read.request,
+      readResult: read.result,
+      ownerMatches: true,
+      reference: null,
+      sourceRevision: 3,
+    };
+    const selected = { ...bound, groupId, roleId: null, bindingEffectId: null, reference };
+    const $queryRaw = vi.fn(async (_query: unknown) => [bound, selected]);
+    const result = await recruiting.getRecruitingGroupCrmReferences({ $queryRaw } as never, actor, [
+      bound.groupId,
+      groupId,
+    ]);
+    expect([...result]).toEqual([
+      [bound.groupId, reference],
+      [groupId, { ...reference, serverRevision: 3 }],
+    ]);
+    expect($queryRaw).toHaveBeenCalledOnce();
+    const sql = $queryRaw.mock.calls[0]![0] as { sql: string; values: unknown[] };
+    expect(sql.values).toContain(actor.userId);
+    expect(sql.values).toContain(actor.spaceId);
+    expect(sql.sql).toContain("LEFT JOIN LATERAL");
+    expect(sql.sql).toContain("group.created");
+    expect(sql.sql).not.toContain("FROM messages");
+    expect(sql.sql).toContain("LEFT JOIN mcp_servers");
+    expect(
+      recruiting.recruitingCrmConversationId({ ...actor, spaceId: "foreign" }, reference),
+    ).not.toBe(groupId);
+    expect(recruiting.recruitingCrmConversationId(actor, { ...reference, serverRevision: 9 })).toBe(
+      groupId,
+    );
+  });
+  it.each(["owner", "target", "request", "status", "group"])(
+    "rejects %s identity without reviving older UI metadata",
+    async (boundary) => {
+      const f = crmFixture();
+      const reference = {
+        sourceId: f.target.mcpServerId,
+        serverRevision: 2,
+        organizationId: f.target.organizationId,
+        crmRoleId: f.target.crmRoleId,
+      };
+      const read = f.effects.get("crm-read")!;
+      const row = {
+        groupId: "existing-group",
+        roleId: f.role.id,
+        bindingEffectId: f.binding.id as string | null,
+        bindingRequest: f.binding.request,
+        bindingResult: f.binding.result,
+        readStatus: read.status,
+        readRequest: read.request,
+        readResult: read.result,
+        ownerMatches: true,
+        reference,
+      };
+      if (boundary === "owner") row.ownerMatches = false;
+      if (boundary === "target")
+        row.bindingResult = {
+          ...(f.binding.result as object),
+          target: { ...f.target, crmRoleId: reference.organizationId },
+        };
+      if (boundary === "request") row.bindingRequest = { ...f.bindingInput, roleId: "other-role" };
+      if (boundary === "status") row.readStatus = "failed";
+      if (boundary === "group") row.bindingEffectId = null;
+      const $queryRaw = vi.fn(async () => [row]);
+      expect(
+        (
+          await recruiting.getRecruitingGroupCrmReferences({ $queryRaw } as never, actor, [
+            row.groupId,
+          ])
+        ).size,
+      ).toBe(0);
+    },
+  );
+});
+
 describe("native CRM write approval target", () => {
   const route = {
     connectorId: "mcp" as const,

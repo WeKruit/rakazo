@@ -4,11 +4,14 @@ import {
   GROUP_MEMBER_MIN,
   type Group,
   type GroupMember,
+  type RecruitingCrmRoleReference,
   type SpaceGroup,
 } from "@rakazo/contracts";
 import { cancelRunsInTransaction } from "./cancel-runs.js";
 import type { Prisma, PrismaClient } from "./client.js";
 import { expireComputerExecutionLeases } from "./computers.js";
+import { appendEventInTransaction } from "./events.js";
+import { getRecruitingGroupCrmReferences, recruitingCrmConversationId } from "./recruiting.js";
 import { IsolationError } from "./scope.js";
 import { lockSpaceForContentCreation } from "./spaces.js";
 import { activeRunSelection, activeRunStatuses, previewFromBlocks } from "./thread-listing.js";
@@ -262,7 +265,12 @@ async function resumeArchivedGroupTeardown(tx: Prisma.TransactionClient, threadI
 export async function createGroupInTransaction(
   tx: Prisma.TransactionClient,
   actor: Actor,
-  input: { id?: string; name: string; botIds: string[] },
+  input: {
+    id?: string;
+    name: string;
+    botIds: string[];
+    crmRoleReference?: RecruitingCrmRoleReference;
+  },
 ) {
   await lockSpaceForContentCreation(tx, actor);
   if (input.id) {
@@ -285,13 +293,27 @@ export async function createGroupInTransaction(
       members.map((member) => member.botId),
     ),
   });
-  await tx.thread.create({
+  const thread = await tx.thread.create({
     data: { spaceId: actor.spaceId, groupId: group.id, userId: actor.userId },
   });
+  if (input.crmRoleReference)
+    await appendEventInTransaction(tx, {
+      spaceId: actor.spaceId,
+      threadId: thread.id,
+      botId: members[0]!.botId,
+      type: "group.created",
+      payload: { groupId: group.id, crmRoleReference: input.crmRoleReference },
+    });
   return tx.chatGroup.findFirstOrThrow({ where: { id: group.id }, include: groupInclude });
 }
 
 export function createGroupRepos(prisma: PrismaClient) {
+  async function mapOwnedGroup(actor: Actor, group: GroupRecord): Promise<Group> {
+    const reference = (await getRecruitingGroupCrmReferences(prisma, actor, [group.id])).get(
+      group.id,
+    );
+    return { ...mapGroup(group), ...(reference ? { crmRoleReference: reference } : {}) };
+  }
   async function listSpaceGroupsForSpaces(actor: Actor, spaceIds: string[]): Promise<SpaceGroup[]> {
     if (spaceIds.length === 0) return [];
     const groups = await prisma.chatGroup.findMany({
@@ -337,9 +359,17 @@ export function createGroupRepos(prisma: PrismaClient) {
         include: groupInclude,
         orderBy: [{ pinned: "desc" }, { updatedAt: "desc" }],
       });
+      const references = await getRecruitingGroupCrmReferences(
+        prisma,
+        actor,
+        groups.map((group) => group.id),
+      );
       return groups
         .filter((group) => hasMinimumActiveMembers(group.members))
-        .map((group) => mapGroup(group as GroupRecord));
+        .map((group) => ({
+          ...mapGroup(group as GroupRecord),
+          ...(references.has(group.id) ? { crmRoleReference: references.get(group.id)! } : {}),
+        }));
     },
 
     listSpaceGroupsForSpaces,
@@ -372,9 +402,22 @@ export function createGroupRepos(prisma: PrismaClient) {
       return group;
     },
 
-    async createGroup(actor: Actor, input: { name: string; botIds: string[] }): Promise<Group> {
-      const created = await prisma.$transaction((tx) => createGroupInTransaction(tx, actor, input));
-      return mapGroup(created as GroupRecord);
+    async createGroup(
+      actor: Actor,
+      input: { name: string; botIds: string[]; crmRoleReference?: RecruitingCrmRoleReference },
+    ): Promise<Group> {
+      const created = await prisma.$transaction((tx) =>
+        createGroupInTransaction(tx, actor, {
+          ...input,
+          ...(input.crmRoleReference
+            ? { id: recruitingCrmConversationId(actor, input.crmRoleReference) }
+            : {}),
+        }),
+      );
+      return {
+        ...mapGroup(created as GroupRecord),
+        ...(input.crmRoleReference ? { crmRoleReference: input.crmRoleReference } : {}),
+      };
     },
 
     async updateGroup(
@@ -465,7 +508,7 @@ export function createGroupRepos(prisma: PrismaClient) {
       });
       if (!updated.group.thread) throw new IsolationError();
       return {
-        group: mapGroup(updated.group as GroupRecord),
+        group: await mapOwnedGroup(actor, updated.group as GroupRecord),
         cancelledRunIds: updated.cancelledRunIds,
       };
     },
@@ -558,7 +601,7 @@ export function createGroupRepos(prisma: PrismaClient) {
       });
     },
 
-    mapGroup,
+    mapGroup: mapOwnedGroup,
   };
 }
 

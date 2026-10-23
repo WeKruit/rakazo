@@ -176,6 +176,7 @@ import {
 import type { BoardEvents, Board as BoardRow, PrismaClient, ThreadEvents } from "@rakazo/db";
 import {
   appendEventInTransaction,
+  authorizeRecruitingCrmRoleReference,
   authorizeRecruitingFeedbackMessage,
   BotSectionNameConflictError,
   CannotDeleteDefaultSpaceError,
@@ -213,6 +214,7 @@ import {
   parseComputerMode,
   pushSessionExpiresAt,
   RECRUITING_PRESET_SOURCE,
+  recruitingCrmConversationId,
   recruitingPresetId,
   releaseSpaceDeletionClaim,
   renameSpaceForMember,
@@ -2173,6 +2175,46 @@ export function createRouter(deps: RouterDeps) {
     groups: {
       create: authed.groups.create.handler(async ({ context, input }) => {
         try {
+          if (input.crmRoleReference) {
+            const reference = input.crmRoleReference;
+            const sameRole = (value: typeof reference | undefined) =>
+              value &&
+              value.sourceId === reference.sourceId &&
+              value.organizationId === reference.organizationId &&
+              value.crmRoleId === reference.crmRoleId;
+            const groups = await groupRepos.listGroups(context.actor);
+            const existing =
+              groups.find((group) => sameRole(group.crmRoleReference)) ??
+              groups.find(
+                (group) => group.id === recruitingCrmConversationId(context.actor, reference),
+              );
+            const route = existing ? { groupId: existing.id } : { botId: input.botIds[0]! };
+            const target = await resolveThreadTarget(deps.prisma, context.actor, route);
+            const role = await getRecruitingCrmData(
+              {
+                prisma: deps.prisma,
+                connectors: deps.connectors,
+                firstPartyMcpUrl: deps.env.firstPartyMcpUrl,
+                signal: context.signal,
+                stillAuthorized: context.stillAuthorized,
+                reauthorize: () => resolveThreadTarget(deps.prisma, context.actor, route),
+              },
+              context.actor,
+              target,
+              { operation: "role", reference },
+            );
+            if (existing) return { ...existing, crmRoleReference: reference };
+            const name = `${role.role_label} · ${role.client_label}`
+              .slice(0, 80)
+              .replace(/[\uD800-\uDBFF]$/, "");
+            const group = await groupRepos.createGroup(context.actor, { ...input, name });
+            if (
+              group.members[0]?.botId !==
+              (target.kind === "bot" ? target.botId : target.memberBotIds[0])
+            )
+              throw new IsolationError();
+            return group;
+          }
           return await groupRepos.createGroup(context.actor, input);
         } catch (error) {
           throw mapSpaceLifecycleError(error);
@@ -2191,7 +2233,7 @@ export function createRouter(deps: RouterDeps) {
           THREAD_MESSAGE_PAGE_SIZE,
         );
         return {
-          ...groupRepos.mapGroup(group),
+          ...(await groupRepos.mapGroup(context.actor, group)),
           messages: await projectRecruitingApprovalFiles(
             deps.prisma,
             context.actor,
@@ -2527,6 +2569,7 @@ export function createRouter(deps: RouterDeps) {
       followUp: authed.threads.followUp.handler(async ({ context, input }) => {
         const target = await resolveThreadTarget(deps.prisma, context.actor, input);
         if (target.kind === "bot") {
+          if (input.crmRoleReference) throw new IsolationError();
           if (input.mentions?.length) {
             throw new ORPCError("BAD_REQUEST", { message: "Recipients require a group chat." });
           }
@@ -2561,6 +2604,13 @@ export function createRouter(deps: RouterDeps) {
         }
         const committed = await deps.prisma.$transaction(async (tx) => {
           await lockOwnedGroup(tx, context.actor, target.groupId);
+          if (input.crmRoleReference)
+            await authorizeRecruitingCrmRoleReference(
+              tx,
+              context.actor,
+              target.threadId,
+              input.crmRoleReference,
+            );
           if (input.clientNonce) {
             const existing = await tx.message.findUnique({
               where: {
@@ -2610,8 +2660,14 @@ export function createRouter(deps: RouterDeps) {
             input.artifactIds,
           );
           const blocks = buildUserMessageBlocks(input.text, attachmentBlocks).map((block) =>
-            block.kind === "text" && input.recruitingFeedback
-              ? { ...block, recruitingFeedback: input.recruitingFeedback }
+            block.kind === "text"
+              ? {
+                  ...block,
+                  ...(input.recruitingFeedback
+                    ? { recruitingFeedback: input.recruitingFeedback }
+                    : {}),
+                  ...(input.crmRoleReference ? { crmRoleReference: input.crmRoleReference } : {}),
+                }
               : block,
           );
           const message = await createThreadMessageInTransaction(tx, {
@@ -2656,7 +2712,12 @@ export function createRouter(deps: RouterDeps) {
                   botId,
                   threadId: target.threadId,
                   userId: context.actor.userId,
-                  prompt: promptTextForAttachments(input.text, artifacts),
+                  prompt: promptTextForAttachments(
+                    input.text,
+                    artifacts,
+                    undefined,
+                    input.crmRoleReference,
+                  ),
                   status: "queued",
                 },
               });
