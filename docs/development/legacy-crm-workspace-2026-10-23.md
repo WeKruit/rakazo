@@ -1,6 +1,6 @@
 # Legacy CRM workspace development
 
-Development only. No production connection, migration, CRM synchronization, provider send, deployment, or resource creation was performed. Root will publish a draft PR; deployment and live acceptance remain the local owner's work.
+Development only. No production connection, migration, CRM synchronization, provider send, deployment, or resource creation was performed. Integration remains local pending the coordinated draft review. Deployment and live acceptance remain the local owner's work.
 
 Base: `e740fa44`. Attachment implementation: `597665ae`. The follow-up commit containing this document adds the campaign read bridge and further conflict regressions.
 
@@ -8,11 +8,11 @@ Opening an exact CRM role through `groups.create` now performs the existing fres
 
 The imported campaign view reads the current exact CRM role's campaign mapping and verifies the same campaign ID through the already assigned Instantly connection. It does not require or fabricate an `ensure_role_campaign` receipt. Multiple or incomplete campaign mappings report an explicit selection conflict. A known campaign without direct provider authorization remains known but unavailable. The source does not supply a verified sender mailbox in its campaign mapping; this view leaves sender unknown. The separate correspondence bridge carries actual email account evidence from the stored message and preserves its permissions.
 
-New migration, after all existing migrations: `20261023190000_recruiting_crm_workspace`. It adds only the attachment table, exact identity unique key, and native role foreign key. No cloud resource or secret. Apply the final migration file once; the developer's isolated synthetic database was manually adjusted while the migration was being authored, and is not a deployment template.
+New migration, after all existing migrations: `20261023190000_recruiting_crm_workspace`. It adds only the attachment table, exact identity unique key, and native role foreign key. No cloud resource or secret. Apply the final migration file once. The integrator separately applied the complete migration chain to a fresh isolated database and reran attachment tests.
 
 Validation:
 
-- Native PostgreSQL, localhost 55439, isolated `rakazo_legacy_crm`: six focused attachment tests pass. They cover concurrent idempotent opens, no chat/effect fabrication, identity rather than title matching, connection/revocation fences, conflicting native binding versus attachment, archived legacy binding with no attachment, and archived canonical role refusal.
+- Native PostgreSQL, isolated synthetic database: six focused attachment tests pass. They cover concurrent idempotent opens, no chat/effect fabrication, identity rather than title matching, connection/revocation fences, conflicting native binding versus attachment, archived legacy binding with no attachment, and archived canonical role refusal.
 - API `recruiting.test.ts`: 280 tests pass, including five new imported campaign cases (ready, multiple mappings, revoked CRM membership, absent provider authorization, mismatched provider ID).
 - Existing CRM receipt PostgreSQL tests: three tests pass, together with all six attachment tests. Fixed fixture-owned teardown order (replies, imports, then organization) after its existing foreign-key cleanup failure. Final targeted run: nine tests pass, clean teardown.
 - Complete candidate domain unit suite: 417 tests pass, including duplicate native binding refusal. Test doubles explicitly model absent attachments; no runtime compatibility path was added.
